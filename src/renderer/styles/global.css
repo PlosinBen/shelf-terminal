@@ -236,6 +236,14 @@ button {
   border-left: 2px solid var(--accent);
 }
 
+.tab-badge {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
+}
+
 .tab-rename-input {
   background: var(--bg-secondary);
   border: 1px solid var(--accent);
@@ -245,6 +253,53 @@ button {
   font-size: 12px;
   width: 80px;
   outline: none;
+}
+
+/* ── Search Bar ── */
+
+.search-bar {
+  position: absolute;
+  top: 4px;
+  right: 16px;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 6px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.search-input {
+  background: transparent;
+  border: none;
+  color: var(--text);
+  font-size: 13px;
+  width: 200px;
+  outline: none;
+}
+
+.search-input::placeholder {
+  color: var(--text-muted);
+  opacity: 0.5;
+}
+
+.search-btn {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+}
+
+.search-btn:hover {
+  background: var(--surface);
+  color: var(--text);
 }
 
 /* ── Terminal ── */
@@ -522,6 +577,47 @@ button {
   border-top: 1px solid var(--border);
   font-size: 11px;
   color: var(--text-muted);
+}
+
+.settings-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 0;
+}
+
+.settings-section-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.keybinding-btn {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 12px;
+  color: var(--text);
+  font-size: 12px;
+  font-family: Menlo, Monaco, 'Courier New', monospace;
+  min-width: 100px;
+  text-align: center;
+}
+
+.keybinding-btn:hover {
+  border-color: var(--accent);
+}
+
+.keybinding-btn.recording {
+  border-color: var(--accent);
+  color: var(--accent);
+  animation: pulse 1s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
 }
 
 .settings-hint kbd {

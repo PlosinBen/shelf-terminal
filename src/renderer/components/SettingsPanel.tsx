@@ -1,14 +1,52 @@
-import React from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useStore, updateSettings, toggleSettings } from '../store';
 import { themes } from '../themes';
+import { comboToLabel, recordCombo } from '../hooks/useKeybindings';
+import type { KeybindingAction } from '../../shared/types';
+
+const ACTION_LABELS: Record<KeybindingAction, string> = {
+  toggleSidebar: 'Toggle Sidebar',
+  newProject: 'New Project',
+  closeProject: 'Close Project',
+  newTab: 'New Tab',
+  prevProject: 'Previous Project',
+  nextProject: 'Next Project',
+  prevTab: 'Previous Tab',
+  nextTab: 'Next Tab',
+  openSettings: 'Settings',
+  search: 'Search',
+};
 
 export function SettingsPanel() {
   const { settingsVisible, settings } = useStore();
+  const [recordingAction, setRecordingAction] = useState<KeybindingAction | null>(null);
+
+  const handleRecord = useCallback((e: KeyboardEvent) => {
+    if (!recordingAction) return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    const combo = recordCombo(e);
+    if (!combo) return;
+
+    const newBindings = { ...settings.keybindings, [recordingAction]: combo };
+    updateSettings({ keybindings: newBindings });
+    setRecordingAction(null);
+  }, [recordingAction, settings.keybindings]);
+
+  useEffect(() => {
+    if (!recordingAction) return;
+    window.addEventListener('keydown', handleRecord, true);
+    return () => window.removeEventListener('keydown', handleRecord, true);
+  }, [recordingAction, handleRecord]);
 
   if (!settingsVisible) return null;
 
   const handleOverlayClick = (e: React.MouseEvent) => {
-    if (e.target === e.currentTarget) toggleSettings();
+    if (e.target === e.currentTarget) {
+      setRecordingAction(null);
+      toggleSettings();
+    }
   };
 
   return (
@@ -78,9 +116,26 @@ export function SettingsPanel() {
               onChange={(e) => updateSettings({ defaultMaxTabs: Number(e.target.value) })}
             />
           </div>
+
+          <div className="settings-divider" />
+
+          <div className="settings-section-title">Keyboard Shortcuts</div>
+          {(Object.keys(ACTION_LABELS) as KeybindingAction[]).map((action) => (
+            <div className="settings-group" key={action}>
+              <label className="settings-label">{ACTION_LABELS[action]}</label>
+              <button
+                className={`keybinding-btn ${recordingAction === action ? 'recording' : ''}`}
+                onClick={() => setRecordingAction(recordingAction === action ? null : action)}
+              >
+                {recordingAction === action
+                  ? 'Press key combo...'
+                  : comboToLabel(settings.keybindings[action])}
+              </button>
+            </div>
+          ))}
         </div>
         <div className="settings-footer">
-          <span className="settings-hint">Press <kbd>⌘,</kbd> to toggle</span>
+          <span className="settings-hint">Click a shortcut to rebind</span>
         </div>
       </div>
     </div>

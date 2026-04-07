@@ -4,6 +4,7 @@ import { TabBar } from './components/TabBar';
 import { TerminalView } from './components/TerminalView';
 import { FolderPicker } from './components/FolderPicker';
 import { SettingsPanel } from './components/SettingsPanel';
+import { SearchBar } from './components/SearchBar';
 import { useKeybindings } from './hooks/useKeybindings';
 import { useStore, setProjects, setSettings, addTab } from './store';
 import { getTheme } from './themes';
@@ -52,6 +53,7 @@ export function App() {
       <main className="main-area">
         <TabBar />
         <div className="terminal-view">
+          <SearchBar />
           {activeProject && activeProject.tabs.map((tab, i) => (
             <TerminalView
               key={tab.id}

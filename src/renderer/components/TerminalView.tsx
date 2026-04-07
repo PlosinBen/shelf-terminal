@@ -1,7 +1,8 @@
 import React, { useRef, useEffect } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
-import { useStore } from '../store';
+import { SearchAddon } from '@xterm/addon-search';
+import { useStore, markUnread } from '../store';
 import { getTheme } from '../themes';
 import '@xterm/xterm/css/xterm.css';
 
@@ -16,11 +17,17 @@ interface Props {
 }
 
 // Cache xterm instances so they survive re-renders
-const terminalCache = new Map<string, { term: Terminal; fitAddon: FitAddon }>();
+const terminalCache = new Map<string, { term: Terminal; fitAddon: FitAddon; searchAddon: SearchAddon }>();
+
+export function getSearchAddon(tabId: string): SearchAddon | null {
+  return terminalCache.get(tabId)?.searchAddon ?? null;
+}
 
 export function TerminalView({ tabId, projectId, cwd, connection, visible }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const initializedRef = useRef(false);
+  const visibleRef = useRef(visible);
+  visibleRef.current = visible;
   const { settings } = useStore();
   const theme = getTheme(settings.themeName);
 
@@ -41,8 +48,10 @@ export function TerminalView({ tabId, projectId, cwd, connection, visible }: Pro
         windowsMode: navigator.platform.includes('Win'),
       });
       const fitAddon = new FitAddon();
+      const searchAddon = new SearchAddon();
       term.loadAddon(fitAddon);
-      cached = { term, fitAddon };
+      term.loadAddon(searchAddon);
+      cached = { term, fitAddon, searchAddon };
       terminalCache.set(tabId, cached);
     }
 
@@ -66,6 +75,7 @@ export function TerminalView({ tabId, projectId, cwd, connection, visible }: Pro
     const removeDataListener = window.shelfApi.pty.onData((id, data) => {
       if (id === tabId) {
         term.write(data);
+        if (!visibleRef.current) markUnread(tabId);
       }
     });
 

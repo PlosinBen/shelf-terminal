@@ -6,6 +6,7 @@ import {
   setActiveTab,
   renameTab,
   reorderTabs,
+  clearUnread,
 } from '../store';
 
 export function TabBar() {
@@ -94,7 +95,7 @@ export function TabBar() {
           <div
             key={tab.id}
             className={`tab ${i === project.activeTabIndex ? 'active' : ''} ${isDragging ? 'dragging' : ''} ${isDragOver ? 'drag-over' : ''}`}
-            onClick={() => setActiveTab(activeProjectIndex, i)}
+            onClick={() => { clearUnread(activeProjectIndex, i); setActiveTab(activeProjectIndex, i); }}
             onDoubleClick={() => handleDoubleClick(i)}
             draggable={!isEditing}
             onDragStart={(e) => handleDragStart(e, i)}
@@ -116,7 +117,10 @@ export function TabBar() {
                 onClick={(e) => e.stopPropagation()}
               />
             ) : (
-              <span className="tab-label">{tab.label}</span>
+              <>
+                <span className="tab-label">{tab.label}</span>
+                {tab.hasUnread && <span className="tab-badge" />}
+              </>
             )}
             <button
               className="tab-close"

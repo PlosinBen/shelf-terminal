@@ -57,12 +57,27 @@ export interface PtyExitPayload {
 
 // ── App settings (persisted) ──
 
+export type KeybindingAction =
+  | 'toggleSidebar'
+  | 'newProject'
+  | 'closeProject'
+  | 'newTab'
+  | 'prevProject'
+  | 'nextProject'
+  | 'prevTab'
+  | 'nextTab'
+  | 'openSettings'
+  | 'search';
+
+export type KeybindingConfig = Record<KeybindingAction, string>;
+
 export interface AppSettings {
   fontSize: number;
   fontFamily: string;
   themeName: string;
   scrollback: number;
   defaultMaxTabs: number;
+  keybindings: KeybindingConfig;
 }
 
 

@@ -2,43 +2,60 @@ import { useEffect } from 'react';
 import {
   toggleSidebar,
   toggleSettings,
+  toggleSearch,
   setActiveProject,
   setActiveTab,
   addTab,
   removeProject,
   useStore,
 } from '../store';
+import type { KeybindingAction } from '../../shared/types';
 
 const isMac = navigator.platform.toUpperCase().includes('MAC');
 
-function isModKey(e: KeyboardEvent): boolean {
-  return isMac ? e.metaKey : e.ctrlKey;
+function eventToCombo(e: KeyboardEvent): string {
+  const parts: string[] = [];
+  if (isMac ? e.metaKey : e.ctrlKey) parts.push('mod');
+  if (e.shiftKey) parts.push('shift');
+  if (e.altKey) parts.push('alt');
+
+  const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+  if (!['Meta', 'Control', 'Shift', 'Alt'].includes(e.key)) {
+    parts.push(key);
+  }
+  return parts.join('+');
 }
 
 export function useKeybindings() {
-  const { projects, activeProjectIndex } = useStore();
+  const { projects, activeProjectIndex, settings } = useStore();
+  const bindings = settings.keybindings;
 
   useEffect(() => {
+    // Build reverse map: combo → action
+    const comboToAction = new Map<string, KeybindingAction>();
+    for (const [action, combo] of Object.entries(bindings)) {
+      comboToAction.set(combo, action as KeybindingAction);
+    }
+
     const handler = (e: KeyboardEvent) => {
-      if (!isModKey(e)) return;
+      const combo = eventToCombo(e);
+      const action = comboToAction.get(combo);
+      if (!action) return;
 
       const activeProject = projects[activeProjectIndex];
 
-      switch (e.key) {
-        case 'b':
-        case 'B':
+      switch (action) {
+        case 'toggleSidebar':
           e.preventDefault();
           toggleSidebar();
           break;
 
-        case 'o':
-        case 'O':
+        case 'newProject':
           e.preventDefault();
           window.dispatchEvent(new CustomEvent('shelf:open-folder-picker'));
           break;
 
-        case 'w':
-        case 'W':
+        case 'closeProject':
           if (activeProject) {
             e.preventDefault();
             activeProject.tabs.forEach((tab) => {
@@ -48,8 +65,7 @@ export function useKeybindings() {
           }
           break;
 
-        case 't':
-        case 'T':
+        case 'newTab':
           if (activeProject) {
             e.preventDefault();
             const tab = addTab(activeProjectIndex);
@@ -59,25 +75,25 @@ export function useKeybindings() {
           }
           break;
 
-        case 'ArrowUp':
+        case 'prevProject':
           e.preventDefault();
           setActiveProject(Math.max(0, activeProjectIndex - 1));
           break;
 
-        case 'ArrowDown':
+        case 'nextProject':
           e.preventDefault();
           setActiveProject(Math.min(projects.length - 1, activeProjectIndex + 1));
           break;
 
-        case '[':
-          if (e.shiftKey && activeProject) {
+        case 'prevTab':
+          if (activeProject) {
             e.preventDefault();
             setActiveTab(activeProjectIndex, Math.max(0, activeProject.activeTabIndex - 1));
           }
           break;
 
-        case ']':
-          if (e.shiftKey && activeProject) {
+        case 'nextTab':
+          if (activeProject) {
             e.preventDefault();
             setActiveTab(
               activeProjectIndex,
@@ -86,14 +102,43 @@ export function useKeybindings() {
           }
           break;
 
-        case ',':
+        case 'openSettings':
           e.preventDefault();
           toggleSettings();
+          break;
+
+        case 'search':
+          e.preventDefault();
+          toggleSearch();
           break;
       }
     };
 
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [projects, activeProjectIndex]);
+  }, [projects, activeProjectIndex, bindings]);
+}
+
+// Utility: convert a combo string to display label
+export function comboToLabel(combo: string): string {
+  return combo
+    .split('+')
+    .map((part) => {
+      if (part === 'mod') return isMac ? '⌘' : 'Ctrl';
+      if (part === 'shift') return isMac ? '⇧' : 'Shift';
+      if (part === 'alt') return isMac ? '⌥' : 'Alt';
+      if (part === 'ArrowUp') return '↑';
+      if (part === 'ArrowDown') return '↓';
+      if (part === '[') return '[';
+      if (part === ']') return ']';
+      return part.toUpperCase();
+    })
+    .join(isMac ? '' : '+');
+}
+
+// Utility: record a key combo from a KeyboardEvent (for the settings UI)
+export function recordCombo(e: KeyboardEvent): string | null {
+  // Ignore bare modifier presses
+  if (['Meta', 'Control', 'Shift', 'Alt'].includes(e.key)) return null;
+  return eventToCombo(e);
 }

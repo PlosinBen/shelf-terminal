@@ -7,6 +7,7 @@ import { DEFAULT_SETTINGS } from '../shared/defaults';
 export interface Tab {
   id: string;
   label: string;
+  hasUnread: boolean;
 }
 
 export interface ProjectRuntime {
@@ -21,6 +22,7 @@ let projects: ProjectRuntime[] = [];
 let activeProjectIndex = 0;
 let sidebarVisible = true;
 let settingsVisible = false;
+let searchVisible = false;
 let settings: AppSettings = { ...DEFAULT_SETTINGS };
 let nextTabCounter = 0;
 
@@ -37,7 +39,7 @@ function subscribe(l: Listener) {
 }
 
 function getSnapshot() {
-  return { projects, activeProjectIndex, sidebarVisible, settingsVisible, settings };
+  return { projects, activeProjectIndex, sidebarVisible, settingsVisible, searchVisible, settings };
 }
 
 let snapshotRef = getSnapshot();
@@ -100,6 +102,7 @@ export function addTab(projectIndex: number): Tab | null {
   const tab: Tab = {
     id: `tab-${Date.now()}-${nextTabCounter}`,
     label: `Terminal ${proj.tabs.length + 1}`,
+    hasUnread: false,
   };
 
   const updated = { ...proj, tabs: [...proj.tabs, tab], activeTabIndex: proj.tabs.length };
@@ -198,4 +201,46 @@ export function toggleSettings() {
 
 export function getSettings(): AppSettings {
   return settings;
+}
+
+// ── Search actions ──
+
+export function toggleSearch() {
+  searchVisible = !searchVisible;
+  updateSnapshot();
+}
+
+export function closeSearch() {
+  searchVisible = false;
+  updateSnapshot();
+}
+
+// ── Tab badge actions ──
+
+export function markUnread(tabId: string) {
+  for (let pi = 0; pi < projects.length; pi++) {
+    const proj = projects[pi];
+    const ti = proj.tabs.findIndex((t) => t.id === tabId);
+    if (ti !== -1 && ti !== proj.activeTabIndex) {
+      if (!proj.tabs[ti].hasUnread) {
+        const tabs = proj.tabs.map((t, i) =>
+          i === ti ? { ...t, hasUnread: true } : t,
+        );
+        projects = projects.map((p, i) => (i === pi ? { ...p, tabs } : p));
+        updateSnapshot();
+      }
+      return;
+    }
+  }
+}
+
+export function clearUnread(projectIndex: number, tabIndex: number) {
+  const proj = projects[projectIndex];
+  if (!proj || !proj.tabs[tabIndex]?.hasUnread) return;
+
+  const tabs = proj.tabs.map((t, i) =>
+    i === tabIndex ? { ...t, hasUnread: false } : t,
+  );
+  projects = projects.map((p, i) => (i === projectIndex ? { ...p, tabs } : p));
+  updateSnapshot();
 }
