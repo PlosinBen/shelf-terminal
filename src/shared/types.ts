@@ -2,7 +2,8 @@
 
 export type LocalConnection = { type: 'local' };
 export type SSHConnection = { type: 'ssh'; host: string; port: number; user: string };
-export type Connection = LocalConnection | SSHConnection;
+export type WSLConnection = { type: 'wsl'; distro: string };
+export type Connection = LocalConnection | SSHConnection | WSLConnection;
 
 // ── Project config (persisted) ──
 
@@ -20,6 +21,7 @@ export interface PtySpawnPayload {
   projectId: string;
   tabId: string;
   cwd: string;
+  connection: Connection;
 }
 
 export interface PtyInputPayload {
@@ -51,6 +53,24 @@ export interface PtyDataPayload {
 export interface PtyExitPayload {
   tabId: string;
   exitCode: number;
+}
+
+// ── App settings (persisted) ──
+
+export interface AppSettings {
+  fontSize: number;
+  fontFamily: string;
+  themeName: string;
+  scrollback: number;
+  defaultMaxTabs: number;
+}
+
+
+export interface SSHListDirPayload {
+  host: string;
+  port: number;
+  user: string;
+  path: string;
 }
 
 // ── FolderPicker ──

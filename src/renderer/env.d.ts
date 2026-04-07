@@ -1,6 +1,6 @@
 interface ShelfApi {
   pty: {
-    spawn: (projectId: string, tabId: string, cwd: string) => Promise<void>;
+    spawn: (projectId: string, tabId: string, cwd: string, connection: import('../shared/types').Connection) => Promise<void>;
     input: (tabId: string, data: string) => void;
     resize: (tabId: string, cols: number, rows: number) => void;
     kill: (tabId: string) => Promise<void>;
@@ -17,6 +17,14 @@ interface ShelfApi {
   };
   clipboard: {
     saveImage: (buffer: ArrayBuffer) => Promise<string>;
+    saveImageRemote: (buffer: ArrayBuffer, host: string, port: number, user: string) => Promise<string>;
+  };
+  ssh: {
+    listDir: (host: string, port: number, user: string, dirPath: string) => Promise<import('../shared/types').FolderListResult>;
+  };
+  settings: {
+    load: () => Promise<import('../shared/types').AppSettings>;
+    save: (settings: import('../shared/types').AppSettings) => Promise<void>;
   };
 }
 

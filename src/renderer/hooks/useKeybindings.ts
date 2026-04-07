@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import {
   toggleSidebar,
+  toggleSettings,
   setActiveProject,
   setActiveTab,
   addTab,
@@ -53,7 +54,7 @@ export function useKeybindings() {
             e.preventDefault();
             const tab = addTab(activeProjectIndex);
             if (tab) {
-              window.shelfApi.pty.spawn(activeProject.config.id, tab.id, activeProject.config.cwd);
+              window.shelfApi.pty.spawn(activeProject.config.id, tab.id, activeProject.config.cwd, activeProject.config.connection);
             }
           }
           break;
@@ -83,6 +84,11 @@ export function useKeybindings() {
               Math.min(activeProject.tabs.length - 1, activeProject.activeTabIndex + 1),
             );
           }
+          break;
+
+        case ',':
+          e.preventDefault();
+          toggleSettings();
           break;
       }
     };

@@ -3,9 +3,11 @@ import path from 'path';
 import { IPC } from '../shared/ipc-channels';
 import { spawnPty, writePty, resizePty, killPty, killAllPtys } from './pty-manager';
 import { loadProjects, saveProjects } from './project-store';
+import { loadSettings, saveSettings } from './settings-store';
 import { listDirectory, getHomePath } from './folder-list';
-import { saveClipboardImage, startCleanupTimer, stopCleanupTimer, cleanupAllImages } from './clipboard-image';
-import type { ProjectConfig, PtySpawnPayload, PtyInputPayload, PtyResizePayload, PtyKillPayload, FolderListPayload } from '../shared/types';
+import { saveClipboardImage, saveClipboardImageRemote, startCleanupTimer, stopCleanupTimer, cleanupAllImages } from './clipboard-image';
+import { sshListDir } from './ssh-manager';
+import type { ProjectConfig, AppSettings, PtySpawnPayload, PtyInputPayload, PtyResizePayload, PtyKillPayload, FolderListPayload, SSHListDirPayload } from '../shared/types';
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -36,7 +38,7 @@ function createWindow() {
 // Renderer → Main (invoke, returns result)
 ipcMain.handle(IPC.PTY_SPAWN, (_event, payload: PtySpawnPayload) => {
   if (mainWindow) {
-    spawnPty(payload.tabId, payload.cwd, mainWindow);
+    spawnPty(payload.tabId, payload.cwd, payload.connection, mainWindow);
   }
 });
 
@@ -62,6 +64,22 @@ ipcMain.handle(IPC.PROJECT_SAVE, (_event, projects: ProjectConfig[]) => {
 
 ipcMain.handle(IPC.CLIPBOARD_SAVE_IMAGE, (_event, buffer: ArrayBuffer) => {
   return saveClipboardImage(Buffer.from(buffer));
+});
+
+ipcMain.handle(IPC.CLIPBOARD_SAVE_IMAGE_REMOTE, (_event, payload: { buffer: ArrayBuffer; host: string; port: number; user: string }) => {
+  return saveClipboardImageRemote(Buffer.from(payload.buffer), payload.host, payload.port, payload.user);
+});
+
+ipcMain.handle(IPC.SSH_LIST_DIR, (_event, payload: SSHListDirPayload) => {
+  return sshListDir(payload.host, payload.port, payload.user, payload.path);
+});
+
+ipcMain.handle(IPC.SETTINGS_LOAD, () => {
+  return loadSettings();
+});
+
+ipcMain.handle(IPC.SETTINGS_SAVE, (_event, settings: AppSettings) => {
+  saveSettings(settings);
 });
 
 // Renderer → Main (send, fire-and-forget)

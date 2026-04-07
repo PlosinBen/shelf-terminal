@@ -1,5 +1,6 @@
 import { useState, useCallback, useSyncExternalStore } from 'react';
-import type { ProjectConfig } from '../shared/types';
+import type { ProjectConfig, AppSettings } from '../shared/types';
+import { DEFAULT_SETTINGS } from '../shared/defaults';
 
 // ── Tab state ──
 
@@ -19,6 +20,8 @@ export interface ProjectRuntime {
 let projects: ProjectRuntime[] = [];
 let activeProjectIndex = 0;
 let sidebarVisible = true;
+let settingsVisible = false;
+let settings: AppSettings = { ...DEFAULT_SETTINGS };
 let nextTabCounter = 0;
 
 type Listener = () => void;
@@ -34,7 +37,7 @@ function subscribe(l: Listener) {
 }
 
 function getSnapshot() {
-  return { projects, activeProjectIndex, sidebarVisible };
+  return { projects, activeProjectIndex, sidebarVisible, settingsVisible, settings };
 }
 
 let snapshotRef = getSnapshot();
@@ -131,6 +134,68 @@ export function setActiveTab(projectIndex: number, tabIndex: number) {
   updateSnapshot();
 }
 
+export function renameTab(projectIndex: number, tabIndex: number, name: string) {
+  const proj = projects[projectIndex];
+  if (!proj || !proj.tabs[tabIndex]) return;
+
+  const tabs = proj.tabs.map((t, i) =>
+    i === tabIndex ? { ...t, label: name } : t,
+  );
+  projects = projects.map((p, i) =>
+    i === projectIndex ? { ...p, tabs } : p,
+  );
+  updateSnapshot();
+}
+
+export function reorderTabs(projectIndex: number, fromIndex: number, toIndex: number) {
+  const proj = projects[projectIndex];
+  if (!proj) return;
+  if (fromIndex === toIndex) return;
+  if (fromIndex < 0 || fromIndex >= proj.tabs.length) return;
+  if (toIndex < 0 || toIndex >= proj.tabs.length) return;
+
+  const tabs = [...proj.tabs];
+  const [moved] = tabs.splice(fromIndex, 1);
+  tabs.splice(toIndex, 0, moved);
+
+  // Adjust activeTabIndex to follow the active tab
+  let activeTabIndex = proj.activeTabIndex;
+  if (activeTabIndex === fromIndex) {
+    activeTabIndex = toIndex;
+  } else if (fromIndex < activeTabIndex && toIndex >= activeTabIndex) {
+    activeTabIndex--;
+  } else if (fromIndex > activeTabIndex && toIndex <= activeTabIndex) {
+    activeTabIndex++;
+  }
+
+  projects = projects.map((p, i) =>
+    i === projectIndex ? { ...p, tabs, activeTabIndex } : p,
+  );
+  updateSnapshot();
+}
+
 export function getProjectConfigs(): ProjectConfig[] {
   return projects.map((p) => p.config);
+}
+
+// ── Settings actions ──
+
+export function setSettings(s: AppSettings) {
+  settings = s;
+  updateSnapshot();
+}
+
+export function updateSettings(partial: Partial<AppSettings>) {
+  settings = { ...settings, ...partial };
+  updateSnapshot();
+  window.shelfApi.settings.save(settings);
+}
+
+export function toggleSettings() {
+  settingsVisible = !settingsVisible;
+  updateSnapshot();
+}
+
+export function getSettings(): AppSettings {
+  return settings;
 }

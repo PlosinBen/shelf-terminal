@@ -2,12 +2,13 @@ import * as pty from 'node-pty';
 import { BrowserWindow } from 'electron';
 import os from 'os';
 import fs from 'fs';
+import path from 'path';
 import { IPC } from '../shared/ipc-channels';
+import type { Connection } from '../shared/types';
 
 const ptys = new Map<string, pty.IPty>();
 
 function resolveShell(): string {
-  // Try SHELL env, then common paths
   const candidates = [
     process.env.SHELL,
     '/bin/zsh',
@@ -20,19 +21,74 @@ function resolveShell(): string {
   return '/bin/sh';
 }
 
+// SSH ControlMaster socket directory
+function getControlDir(): string {
+  const dir = path.join(os.tmpdir(), 'shelf-ssh-control');
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  }
+  return dir;
+}
+
+function getControlPath(host: string, port: number, user: string): string {
+  return path.join(getControlDir(), `${user}@${host}:${port}`);
+}
+
+function buildSSHArgs(host: string, port: number, user: string, cwd: string): string[] {
+  const controlPath = getControlPath(host, port, user);
+  return [
+    '-o', `ControlMaster=auto`,
+    '-o', `ControlPath=${controlPath}`,
+    '-o', `ControlPersist=600`,
+    '-o', 'ServerAliveInterval=30',
+    '-p', String(port),
+    `${user}@${host}`,
+    '-t',
+    `cd ${shellEscape(cwd)} && exec $SHELL -l`,
+  ];
+}
+
+function shellEscape(s: string): string {
+  return `'${s.replace(/'/g, "'\\''")}'`;
+}
+
 export function spawnPty(
   tabId: string,
   cwd: string,
+  connection: Connection,
   win: BrowserWindow,
 ): void {
-  const resolvedCwd = fs.existsSync(cwd) ? cwd : os.homedir();
-  const shell = process.platform === 'win32' ? 'powershell.exe' : resolveShell();
+  let shell: string;
+  let args: string[];
+  let spawnCwd: string;
 
-  const p = pty.spawn(shell, [], {
+  switch (connection.type) {
+    case 'ssh': {
+      shell = 'ssh';
+      args = buildSSHArgs(connection.host, connection.port, connection.user, cwd);
+      spawnCwd = os.homedir();
+      break;
+    }
+    case 'wsl': {
+      shell = 'wsl.exe';
+      args = ['-d', connection.distro, '--cd', cwd];
+      spawnCwd = os.homedir();
+      break;
+    }
+    default: {
+      const resolvedCwd = fs.existsSync(cwd) ? cwd : os.homedir();
+      shell = process.platform === 'win32' ? 'powershell.exe' : resolveShell();
+      args = [];
+      spawnCwd = resolvedCwd;
+      break;
+    }
+  }
+
+  const p = pty.spawn(shell, args, {
     name: 'xterm-256color',
     cols: 80,
     rows: 24,
-    cwd: resolvedCwd,
+    cwd: spawnCwd,
     env: process.env as Record<string, string>,
   });
 

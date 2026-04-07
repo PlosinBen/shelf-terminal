@@ -1,21 +1,28 @@
 import React, { useRef, useEffect } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
+import { useStore } from '../store';
+import { getTheme } from '../themes';
 import '@xterm/xterm/css/xterm.css';
+
+import type { Connection } from '../../shared/types';
 
 interface Props {
   tabId: string;
   projectId: string;
   cwd: string;
+  connection: Connection;
   visible: boolean;
 }
 
 // Cache xterm instances so they survive re-renders
 const terminalCache = new Map<string, { term: Terminal; fitAddon: FitAddon }>();
 
-export function TerminalView({ tabId, projectId, cwd, visible }: Props) {
+export function TerminalView({ tabId, projectId, cwd, connection, visible }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const initializedRef = useRef(false);
+  const { settings } = useStore();
+  const theme = getTheme(settings.themeName);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -26,13 +33,12 @@ export function TerminalView({ tabId, projectId, cwd, visible }: Props) {
     if (!cached) {
       const term = new Terminal({
         cursorBlink: true,
-        fontSize: 14,
-        fontFamily: 'Menlo, Monaco, "Courier New", monospace',
-        theme: {
-          background: '#1e1e2e',
-          foreground: '#cdd6f4',
-          cursor: '#f5e0dc',
-        },
+        fontSize: settings.fontSize,
+        fontFamily: settings.fontFamily,
+        scrollback: settings.scrollback,
+        theme: theme.terminal,
+        allowProposedApi: true,
+        windowsMode: navigator.platform.includes('Win'),
       });
       const fitAddon = new FitAddon();
       term.loadAddon(fitAddon);
@@ -49,7 +55,7 @@ export function TerminalView({ tabId, projectId, cwd, visible }: Props) {
     });
 
     // Spawn pty
-    window.shelfApi.pty.spawn(projectId, tabId, cwd);
+    window.shelfApi.pty.spawn(projectId, tabId, cwd, connection);
 
     // Terminal input → pty
     const onDataDispose = term.onData((data) => {
@@ -75,10 +81,14 @@ export function TerminalView({ tabId, projectId, cwd, visible }: Props) {
     });
     resizeObserver.observe(container);
 
-    // Image paste: intercept paste events on the container
+    // Image paste: intercept only when clipboard has image but no text
     const handlePaste = async (e: ClipboardEvent) => {
       const items = e.clipboardData?.items;
       if (!items) return;
+
+      // If there's text content, let xterm handle normal text paste
+      const hasText = Array.from(items).some((item) => item.type === 'text/plain');
+      if (hasText) return;
 
       for (const item of items) {
         if (item.type.startsWith('image/')) {
@@ -86,8 +96,20 @@ export function TerminalView({ tabId, projectId, cwd, visible }: Props) {
           const blob = item.getAsFile();
           if (!blob) continue;
           const buffer = await blob.arrayBuffer();
-          const filePath = await window.shelfApi.clipboard.saveImage(buffer);
-          window.shelfApi.pty.input(tabId, filePath);
+
+          if (connection.type === 'ssh') {
+            // Save locally first, then SCP to remote
+            const remotePath = await window.shelfApi.clipboard.saveImageRemote(
+              buffer,
+              connection.host,
+              connection.port,
+              connection.user,
+            );
+            window.shelfApi.pty.input(tabId, remotePath);
+          } else {
+            const filePath = await window.shelfApi.clipboard.saveImage(buffer);
+            window.shelfApi.pty.input(tabId, filePath);
+          }
           return;
         }
       }
@@ -103,6 +125,18 @@ export function TerminalView({ tabId, projectId, cwd, visible }: Props) {
       // Don't dispose term — keep it cached for tab switching
     };
   }, [tabId, projectId]);
+
+  // Apply settings changes to existing terminals
+  useEffect(() => {
+    const cached = terminalCache.get(tabId);
+    if (cached) {
+      cached.term.options.theme = theme.terminal;
+      cached.term.options.fontSize = settings.fontSize;
+      cached.term.options.fontFamily = settings.fontFamily;
+      cached.term.options.scrollback = settings.scrollback;
+      requestAnimationFrame(() => cached.fitAddon.fit());
+    }
+  }, [settings.themeName, settings.fontSize, settings.fontFamily, settings.scrollback, tabId]);
 
   // Re-fit when visibility changes
   useEffect(() => {

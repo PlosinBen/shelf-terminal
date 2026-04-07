@@ -1,10 +1,25 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { addProject, getProjectConfigs } from '../store';
+import { addProject, getProjectConfigs, useStore } from '../store';
 import { FolderBrowser } from './FolderBrowser';
-import type { ProjectConfig } from '../../shared/types';
+import type { ProjectConfig, Connection, SSHConnection } from '../../shared/types';
+
+type Step = 'connection' | 'browse';
 
 export function FolderPicker() {
+  const { settings } = useStore();
   const [open, setOpen] = useState(false);
+  const [step, setStep] = useState<Step>('connection');
+  const [connection, setConnection] = useState<Connection>({ type: 'local' });
+
+  // SSH form state
+  const [sshHost, setSshHost] = useState('');
+  const [sshPort, setSshPort] = useState('22');
+  const [sshUser, setSshUser] = useState('');
+
+  // WSL form state
+  const [wslDistro, setWslDistro] = useState('Ubuntu');
+
+  // Browse state
   const [currentPath, setCurrentPath] = useState('');
   const [entries, setEntries] = useState<string[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -18,6 +33,8 @@ export function FolderPicker() {
   selectedIndexRef.current = selectedIndex;
   const currentPathRef = useRef(currentPath);
   currentPathRef.current = currentPath;
+  const connectionRef = useRef(connection);
+  connectionRef.current = connection;
 
   // ── Filtered entries ──
   const filtered = filter
@@ -33,10 +50,18 @@ export function FolderPicker() {
     setSelectedIndex(0);
 
     try {
-      const result = await window.shelfApi.folder.list(dirPath);
-      setCurrentPath(result.path);
-      setEntries(result.entries);
-      setError(result.error ?? null);
+      const conn = connectionRef.current;
+      if (conn.type === 'ssh') {
+        const result = await window.shelfApi.ssh.listDir(conn.host, conn.port, conn.user, dirPath);
+        setCurrentPath(result.path);
+        setEntries(result.entries);
+        setError(result.error ?? null);
+      } else {
+        const result = await window.shelfApi.folder.list(dirPath);
+        setCurrentPath(result.path);
+        setEntries(result.entries);
+        setError(result.error ?? null);
+      }
     } catch {
       setError('Failed to list folders');
     } finally {
@@ -53,14 +78,18 @@ export function FolderPicker() {
 
   // ── Open handler ──
   useEffect(() => {
-    const handler = async () => {
+    const handler = () => {
       setOpen(true);
-      const home = await window.shelfApi.folder.homePath();
-      requestFolder(home);
+      setStep('connection');
+      setConnection({ type: 'local' });
+      setSshHost('');
+      setSshPort('22');
+      setSshUser('');
+      setWslDistro('Ubuntu');
     };
     window.addEventListener('shelf:open-folder-picker', handler);
     return () => window.removeEventListener('shelf:open-folder-picker', handler);
-  }, [requestFolder]);
+  }, []);
 
   // ── Reset selection when filter changes ──
   useEffect(() => {
@@ -71,10 +100,28 @@ export function FolderPicker() {
   useEffect(() => {
     const list = listRef.current;
     if (!list) return;
-    // +1 because first child is the ".." item
     const item = list.children[selectedIndex + 1] as HTMLElement | undefined;
     item?.scrollIntoView({ block: 'nearest' });
   }, [selectedIndex]);
+
+  // ── Proceed from connection step to browse ──
+  const proceedToBrowse = async (conn: Connection) => {
+    setConnection(conn);
+    connectionRef.current = conn;
+    setStep('browse');
+
+    if (conn.type === 'local') {
+      const home = await window.shelfApi.folder.homePath();
+      requestFolder(home);
+    } else if (conn.type === 'ssh') {
+      // For SSH, try to get remote home
+      setLoading(true);
+      requestFolder(`/home/${conn.user}`);
+    } else if (conn.type === 'wsl') {
+      const home = await window.shelfApi.folder.homePath();
+      requestFolder(home);
+    }
+  };
 
   // ── Select and close ──
   const handleSelect = async () => {
@@ -84,12 +131,21 @@ export function FolderPicker() {
       : currentPathRef.current;
 
     const folderName = selectedPath.split('/').filter(Boolean).pop() || 'project';
+    const conn = connectionRef.current;
+
+    let displayName = folderName;
+    if (conn.type === 'ssh') {
+      displayName = `${conn.user}@${conn.host}:${folderName}`;
+    } else if (conn.type === 'wsl') {
+      displayName = `[WSL] ${folderName}`;
+    }
+
     const config: ProjectConfig = {
       id: `proj-${Date.now()}`,
-      name: folderName,
+      name: displayName,
       cwd: selectedPath,
-      connection: { type: 'local' },
-      maxTabs: 5,
+      connection: conn,
+      maxTabs: settings.defaultMaxTabs,
     };
 
     addProject(config);
@@ -100,9 +156,9 @@ export function FolderPicker() {
 
   const handleCancel = () => setOpen(false);
 
-  // ── Keyboard navigation ──
+  // ── Keyboard navigation (browse step only) ──
   useEffect(() => {
-    if (!open) return;
+    if (!open || step !== 'browse') return;
 
     const handler = (e: KeyboardEvent) => {
       switch (e.key) {
@@ -145,7 +201,6 @@ export function FolderPicker() {
           setFilter((f) => f.slice(0, -1));
           break;
         default:
-          // Printable single characters → filter
           if (e.key.length === 1 && !e.metaKey && !e.ctrlKey && !e.altKey) {
             e.preventDefault();
             setFilter((f) => f + e.key);
@@ -156,7 +211,20 @@ export function FolderPicker() {
 
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [open, goUp, requestFolder]);
+  }, [open, step, goUp, requestFolder]);
+
+  // Escape on connection step
+  useEffect(() => {
+    if (!open || step !== 'connection') return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        handleCancel();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [open, step]);
 
   if (!open) return null;
 
@@ -165,20 +233,171 @@ export function FolderPicker() {
       if (e.target === e.currentTarget) handleCancel();
     }}>
       <div className="folder-picker">
-        <div className="fp-header">Open Project</div>
-        <FolderBrowser
-          currentPath={currentPath}
-          filtered={filtered}
-          selectedIndex={selectedIndex}
-          filter={filter}
-          loading={loading}
-          error={error}
-          listRef={listRef}
-          onSelectIndex={setSelectedIndex}
-          onNavigate={requestFolder}
-          onGoUp={goUp}
-        />
+        <div className="fp-header">
+          {step === 'connection' ? 'New Project — Connection' : 'Open Project'}
+        </div>
+
+        {step === 'connection' ? (
+          <ConnectionStep
+            sshHost={sshHost}
+            sshPort={sshPort}
+            sshUser={sshUser}
+            wslDistro={wslDistro}
+            onSshHostChange={setSshHost}
+            onSshPortChange={setSshPort}
+            onSshUserChange={setSshUser}
+            onWslDistroChange={setWslDistro}
+            onSelect={proceedToBrowse}
+            onCancel={handleCancel}
+          />
+        ) : (
+          <FolderBrowser
+            currentPath={currentPath}
+            filtered={filtered}
+            selectedIndex={selectedIndex}
+            filter={filter}
+            loading={loading}
+            error={error}
+            listRef={listRef}
+            onSelectIndex={setSelectedIndex}
+            onNavigate={requestFolder}
+            onGoUp={goUp}
+          />
+        )}
       </div>
     </div>
+  );
+}
+
+// ── Connection Step sub-component ──
+
+interface ConnectionStepProps {
+  sshHost: string;
+  sshPort: string;
+  sshUser: string;
+  wslDistro: string;
+  onSshHostChange: (v: string) => void;
+  onSshPortChange: (v: string) => void;
+  onSshUserChange: (v: string) => void;
+  onWslDistroChange: (v: string) => void;
+  onSelect: (conn: Connection) => void;
+  onCancel: () => void;
+}
+
+function ConnectionStep({
+  sshHost, sshPort, sshUser, wslDistro,
+  onSshHostChange, onSshPortChange, onSshUserChange, onWslDistroChange,
+  onSelect, onCancel,
+}: ConnectionStepProps) {
+  const [connType, setConnType] = useState<'local' | 'ssh' | 'wsl'>('local');
+  const isWindows = navigator.platform.includes('Win');
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (connType === 'local') {
+      onSelect({ type: 'local' });
+    } else if (connType === 'ssh') {
+      if (!sshHost || !sshUser) return;
+      onSelect({ type: 'ssh', host: sshHost, port: Number(sshPort) || 22, user: sshUser });
+    } else if (connType === 'wsl') {
+      onSelect({ type: 'wsl', distro: wslDistro || 'Ubuntu' });
+    }
+  };
+
+  return (
+    <form className="conn-step" onSubmit={handleSubmit}>
+      <div className="conn-type-buttons">
+        <button
+          type="button"
+          className={`conn-type-btn ${connType === 'local' ? 'active' : ''}`}
+          onClick={() => setConnType('local')}
+        >
+          Local
+        </button>
+        <button
+          type="button"
+          className={`conn-type-btn ${connType === 'ssh' ? 'active' : ''}`}
+          onClick={() => setConnType('ssh')}
+        >
+          SSH
+        </button>
+        {isWindows && (
+          <button
+            type="button"
+            className={`conn-type-btn ${connType === 'wsl' ? 'active' : ''}`}
+            onClick={() => setConnType('wsl')}
+          >
+            WSL
+          </button>
+        )}
+      </div>
+
+      <div className="conn-form-body">
+        {connType === 'ssh' && (
+          <>
+            <div className="conn-field">
+              <label className="conn-label">Host</label>
+              <input
+                className="conn-input"
+                type="text"
+                value={sshHost}
+                onChange={(e) => onSshHostChange(e.target.value)}
+                placeholder="example.com"
+                autoFocus
+              />
+            </div>
+            <div className="conn-field">
+              <label className="conn-label">Port</label>
+              <input
+                className="conn-input conn-input-short"
+                type="text"
+                value={sshPort}
+                onChange={(e) => onSshPortChange(e.target.value)}
+                placeholder="22"
+              />
+            </div>
+            <div className="conn-field">
+              <label className="conn-label">User</label>
+              <input
+                className="conn-input"
+                type="text"
+                value={sshUser}
+                onChange={(e) => onSshUserChange(e.target.value)}
+                placeholder="root"
+              />
+            </div>
+          </>
+        )}
+
+        {connType === 'wsl' && (
+          <div className="conn-field">
+            <label className="conn-label">Distro</label>
+            <input
+              className="conn-input"
+              type="text"
+              value={wslDistro}
+              onChange={(e) => onWslDistroChange(e.target.value)}
+              placeholder="Ubuntu"
+              autoFocus
+            />
+          </div>
+        )}
+
+        {connType === 'local' && (
+          <div className="conn-local-hint">
+            Browse local filesystem to select a project folder.
+          </div>
+        )}
+      </div>
+
+      <div className="conn-actions">
+        <button type="button" className="conn-btn conn-btn-cancel" onClick={onCancel}>
+          Cancel
+        </button>
+        <button type="submit" className="conn-btn conn-btn-next">
+          Next
+        </button>
+      </div>
+    </form>
   );
 }

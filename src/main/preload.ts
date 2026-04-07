@@ -3,8 +3,8 @@ import { IPC } from '../shared/ipc-channels';
 
 contextBridge.exposeInMainWorld('shelfApi', {
   pty: {
-    spawn: (projectId: string, tabId: string, cwd: string) =>
-      ipcRenderer.invoke(IPC.PTY_SPAWN, { projectId, tabId, cwd }),
+    spawn: (projectId: string, tabId: string, cwd: string, connection: unknown) =>
+      ipcRenderer.invoke(IPC.PTY_SPAWN, { projectId, tabId, cwd, connection }),
     input: (tabId: string, data: string) =>
       ipcRenderer.send(IPC.PTY_INPUT, { tabId, data }),
     resize: (tabId: string, cols: number, rows: number) =>
@@ -39,5 +39,15 @@ contextBridge.exposeInMainWorld('shelfApi', {
   clipboard: {
     saveImage: (buffer: ArrayBuffer) =>
       ipcRenderer.invoke(IPC.CLIPBOARD_SAVE_IMAGE, buffer),
+    saveImageRemote: (buffer: ArrayBuffer, host: string, port: number, user: string) =>
+      ipcRenderer.invoke(IPC.CLIPBOARD_SAVE_IMAGE_REMOTE, { buffer, host, port, user }),
+  },
+  ssh: {
+    listDir: (host: string, port: number, user: string, dirPath: string) =>
+      ipcRenderer.invoke(IPC.SSH_LIST_DIR, { host, port, user, path: dirPath }),
+  },
+  settings: {
+    load: () => ipcRenderer.invoke(IPC.SETTINGS_LOAD),
+    save: (settings: unknown) => ipcRenderer.invoke(IPC.SETTINGS_SAVE, settings),
   },
 });
