@@ -10,8 +10,7 @@ export function Sidebar() {
   const { projects, activeProjectIndex } = useStore();
 
   const handleNewProject = () => {
-    // Dispatch custom event for FolderPicker to open
-    window.dispatchEvent(new CustomEvent('shelf:open-folder-picker'));
+    emit(Events.OPEN_FOLDER_PICKER);
   };
 
   const handleRemoveProject = (index: number, e: React.MouseEvent) => {

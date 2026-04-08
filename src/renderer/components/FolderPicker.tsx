@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { addProject, getProjectConfigs, useStore } from '../store';
+import { useStore } from '../store';
 import { FolderBrowser } from './FolderBrowser';
+import { on, emit, Events } from '../events';
 import type { ProjectConfig, Connection, SSHConnection } from '../../shared/types';
 
 type Step = 'connection' | 'browse';
@@ -87,8 +88,7 @@ export function FolderPicker() {
       setSshUser('');
       setWslDistro('Ubuntu');
     };
-    window.addEventListener('shelf:open-folder-picker', handler);
-    return () => window.removeEventListener('shelf:open-folder-picker', handler);
+    return on(Events.OPEN_FOLDER_PICKER, handler);
   }, []);
 
   // ── Reset selection when filter changes ──
@@ -148,9 +148,7 @@ export function FolderPicker() {
       maxTabs: settings.defaultMaxTabs,
     };
 
-    addProject(config);
-    const configs = getProjectConfigs();
-    await window.shelfApi.project.save(configs);
+    emit(Events.ADD_PROJECT, config);
     setOpen(false);
   };
 

@@ -7,7 +7,8 @@ import { SettingsPanel } from './components/SettingsPanel';
 import { SearchBar } from './components/SearchBar';
 import { ProjectEditPanel } from './components/ProjectEditPanel';
 import { useKeybindings } from './hooks/useKeybindings';
-import { useStore, setProjects, setSettings, addTab, removeTab, removeProject, getProjectConfigs } from './store';
+import { useStore, setProjects, setSettings, addProject, addTab, removeTab, removeProject } from './store';
+import type { ProjectConfig } from '../shared/types';
 import { disposeTerminal } from './components/TerminalView';
 import { on, Events } from './events';
 import { getTheme } from './themes';
@@ -46,7 +47,23 @@ export function App() {
       window.shelfApi.project.save(configs);
     });
 
-    return () => { offCloseTab(); offCloseProject(); };
+    const offNewTab = on(Events.NEW_TAB, (projectIndex: number) => {
+      const proj = projects[projectIndex];
+      if (!proj) return;
+      const tab = addTab(projectIndex);
+      if (tab) {
+        window.shelfApi.pty.spawn(proj.config.id, tab.id, proj.config.cwd, proj.config.connection, proj.config.initScript);
+      }
+    });
+
+    const offAddProject = on(Events.ADD_PROJECT, async (config: ProjectConfig) => {
+      addProject(config);
+      // Persist after addProject updates the store
+      const configs = [...projects.map((p) => p.config), config];
+      await window.shelfApi.project.save(configs);
+    });
+
+    return () => { offCloseTab(); offCloseProject(); offNewTab(); offAddProject(); };
   }, [projects]);
 
   useEffect(() => {

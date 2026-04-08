@@ -5,7 +5,6 @@ import {
   toggleSearch,
   setActiveProject,
   setActiveTab,
-  addTab,
   useStore,
 } from '../store';
 import { emit, Events } from '../events';
@@ -52,7 +51,7 @@ export function useKeybindings() {
 
         case 'newProject':
           e.preventDefault();
-          window.dispatchEvent(new CustomEvent('shelf:open-folder-picker'));
+          emit(Events.OPEN_FOLDER_PICKER);
           break;
 
         case 'closeProject':
@@ -65,10 +64,7 @@ export function useKeybindings() {
         case 'newTab':
           if (activeProject) {
             e.preventDefault();
-            const tab = addTab(activeProjectIndex);
-            if (tab) {
-              window.shelfApi.pty.spawn(activeProject.config.id, tab.id, activeProject.config.cwd, activeProject.config.connection, activeProject.config.initScript);
-            }
+            emit(Events.NEW_TAB, activeProjectIndex);
           }
           break;
 

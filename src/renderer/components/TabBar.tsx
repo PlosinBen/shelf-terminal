@@ -1,7 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
   useStore,
-  addTab,
   setActiveTab,
   renameTab,
   reorderTabs,
@@ -31,10 +30,7 @@ export function TabBar() {
   }
 
   const handleNewTab = () => {
-    const tab = addTab(activeProjectIndex);
-    if (tab) {
-      window.shelfApi.pty.spawn(project.config.id, tab.id, project.config.cwd, project.config.connection, project.config.initScript);
-    }
+    emit(Events.NEW_TAB, activeProjectIndex);
   };
 
   const handleCloseTab = (tabIndex: number, e: React.MouseEvent) => {

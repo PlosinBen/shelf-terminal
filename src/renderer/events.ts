@@ -14,6 +14,9 @@ export function emit(event: string, ...args: any[]) {
 
 // Event names
 export const Events = {
-  CLOSE_TAB: 'close-tab',       // (projectIndex, tabIndex)
-  CLOSE_PROJECT: 'close-project', // (projectIndex)
+  CLOSE_TAB: 'close-tab',           // (projectIndex, tabIndex)
+  CLOSE_PROJECT: 'close-project',   // (projectIndex)
+  NEW_TAB: 'new-tab',               // (projectIndex)
+  OPEN_FOLDER_PICKER: 'open-folder-picker',
+  ADD_PROJECT: 'add-project',       // (ProjectConfig)
 } as const;
