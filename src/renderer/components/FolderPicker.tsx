@@ -114,9 +114,8 @@ export function FolderPicker() {
       const home = await window.shelfApi.folder.homePath();
       requestFolder(home);
     } else if (conn.type === 'ssh') {
-      // For SSH, try to get remote home
-      setLoading(true);
-      requestFolder(`/home/${conn.user}`);
+      const home = await window.shelfApi.ssh.homePath(conn.host, conn.port, conn.user);
+      requestFolder(home);
     } else if (conn.type === 'wsl') {
       const home = await window.shelfApi.wsl.homePath(conn.distro);
       requestFolder(home);

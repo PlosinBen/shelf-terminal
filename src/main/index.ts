@@ -8,7 +8,7 @@ import { listDirectory, getHomePath } from './folder-list';
 import { saveClipboardImage, saveClipboardImageRemote, startCleanupTimer, stopCleanupTimer, cleanupAllImages } from './clipboard-image';
 import { initAutoUpdater, stopAutoUpdater } from './updater';
 import { cleanupControlSockets } from './ssh-control';
-import { sshListDir } from './ssh-manager';
+import { sshListDir, sshGetHomePath } from './ssh-manager';
 import { wslListDir, wslHomePath } from './wsl-manager';
 import type { ProjectConfig, AppSettings, PtySpawnPayload, PtyInputPayload, PtyResizePayload, PtyKillPayload, FolderListPayload, SSHListDirPayload, WSLListDirPayload } from '../shared/types';
 
@@ -81,6 +81,10 @@ ipcMain.handle(IPC.CLIPBOARD_SAVE_IMAGE_REMOTE, (_event, payload: { buffer: Arra
 
 ipcMain.handle(IPC.SSH_LIST_DIR, (_event, payload: SSHListDirPayload) => {
   return sshListDir(payload.host, payload.port, payload.user, payload.path);
+});
+
+ipcMain.handle(IPC.SSH_HOME_PATH, (_event, payload: { host: string; port: number; user: string }) => {
+  return sshGetHomePath(payload.host, payload.port, payload.user);
 });
 
 ipcMain.handle(IPC.WSL_LIST_DIR, (_event, payload: WSLListDirPayload) => {

@@ -25,6 +25,7 @@ interface ShelfApi {
   };
   ssh: {
     listDir: (host: string, port: number, user: string, dirPath: string) => Promise<import('../shared/types').FolderListResult>;
+    homePath: (host: string, port: number, user: string) => Promise<string>;
   };
   settings: {
     load: () => Promise<import('../shared/types').AppSettings>;

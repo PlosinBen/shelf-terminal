@@ -51,6 +51,8 @@ contextBridge.exposeInMainWorld('shelfApi', {
   ssh: {
     listDir: (host: string, port: number, user: string, dirPath: string) =>
       ipcRenderer.invoke(IPC.SSH_LIST_DIR, { host, port, user, path: dirPath }),
+    homePath: (host: string, port: number, user: string) =>
+      ipcRenderer.invoke(IPC.SSH_HOME_PATH, { host, port, user }),
   },
   settings: {
     load: () => ipcRenderer.invoke(IPC.SETTINGS_LOAD),
