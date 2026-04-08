@@ -4,7 +4,7 @@
   "description": "Cross-platform, project-based terminal manager",
   "main": "dist/main/index.js",
   "scripts": {
-    "dev": "vite",
+    "dev": "NODE_ENV=development vite",
     "build": "vite build",
     "postinstall": "electron-rebuild",
     "test:e2e": "npm run build && npx playwright test",
