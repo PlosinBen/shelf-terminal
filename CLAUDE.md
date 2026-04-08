@@ -7,21 +7,7 @@
 | 找功能在哪個檔案 | [.agent/PROJECT_MAP.md](.agent/PROJECT_MAP.md) |
 | 理解為什麼這樣設計、什麼不該改 | [.agent/DECISIONS.md](.agent/DECISIONS.md) |
 | 遇到奇怪行為、debug 前先看 | [.agent/GOTCHAS.md](.agent/GOTCHAS.md) |
-
-## Release Flow
-
-- Push tag `v*` triggers GitHub Actions build for macOS / Windows / Linux
-- GitHub Actions creates a **draft release** with `generate_release_notes`
-- Version bump commit message should serve as release notes, listing changes:
-
-```
-v0.x.x
-
-- Feature/fix description
-- Feature/fix description
-```
-
-- After build completes, review the draft release on GitHub and publish
+| 發版流程、tag 規範 | [.agent/RELEASE_FLOW.md](.agent/RELEASE_FLOW.md) |
 
 ## Development
 
