@@ -144,7 +144,7 @@ export function App() {
         <TabBar />
         <div className="terminal-view">
           <SearchBar />
-          {activeProject && activeProject.tabs.length === 0 ? (
+          {activeProject && activeProject.tabs.length === 0 && (
             <div
               className="connect-prompt"
               onClick={() => emit(Events.CONNECT_PROJECT, activeProjectIndex)}
@@ -154,42 +154,36 @@ export function App() {
             >
               Click or press Enter to connect to <strong>{activeProject.config.name}</strong>
             </div>
-          ) : activeProject && activeProject.tabs.length > 0 && activeProject.splitTabId ? (
-            <div className="split-view">
-              {activeProject.tabs.map((tab, i) => {
-                const isActiveTab = i === activeProject.activeTabIndex;
-                const isSplitTab = tab.id === activeProject.splitTabId;
-                const visible = isActiveTab || isSplitTab;
+          )}
+          <div className={activeProject?.splitTabId ? 'split-view' : undefined}>
+            {projects.map((proj, pi) => {
+              const isActiveProject = pi === activeProjectIndex;
+              const isSplit = isActiveProject && proj.splitTabId !== null;
+
+              return proj.tabs.map((tab, ti) => {
+                const isActiveTab = ti === proj.activeTabIndex;
+                const isSplitTab = tab.id === proj.splitTabId;
+                const visible = isActiveProject && (isSplit ? (isActiveTab || isSplitTab) : isActiveTab);
 
                 return (
                   <div
                     key={tab.id}
-                    className={visible ? 'split-pane' : undefined}
+                    className={isSplit && visible ? 'split-pane' : undefined}
                     style={!visible ? { display: 'none' } : undefined}
                   >
                     <TerminalView
                       tabId={tab.id}
-                      projectId={activeProject.config.id}
-                      cwd={activeProject.config.cwd}
-                      connection={activeProject.config.connection}
-                      initScript={activeProject.config.initScript}
+                      projectId={proj.config.id}
+                      cwd={proj.config.cwd}
+                      connection={proj.config.connection}
+                      initScript={proj.config.initScript}
                       visible={visible}
                     />
                   </div>
                 );
-              })}
-            </div>
-          ) : activeProject && activeProject.tabs.map((tab, i) => (
-            <TerminalView
-              key={tab.id}
-              tabId={tab.id}
-              projectId={activeProject.config.id}
-              cwd={activeProject.config.cwd}
-              connection={activeProject.config.connection}
-              initScript={activeProject.config.initScript}
-              visible={i === activeProject.activeTabIndex}
-            />
-          ))}
+              });
+            })}
+          </div>
         </div>
       </main>
       <FolderPicker />

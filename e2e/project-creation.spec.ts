@@ -97,7 +97,7 @@ test('clicking connect prompt opens terminal', async ({ shelfApp: { page } }) =>
 
   await expect(page.locator('.tab-bar .tab')).toHaveCount(1, { timeout: 5_000 });
 
-  const xtermScreen = page.locator('.xterm-screen');
+  const xtermScreen = page.locator('.xterm-screen:visible');
   await expect(xtermScreen).toBeVisible({ timeout: 10_000 });
 });
 

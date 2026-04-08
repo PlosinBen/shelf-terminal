@@ -134,7 +134,7 @@ export function TerminalView({ tabId, projectId, cwd, connection, initScript, vi
       resizeObserver.disconnect();
       container.removeEventListener('paste', handlePaste);
     };
-  }, [tabId, projectId]);
+  }, [tabId]);
 
   // Apply settings changes to existing terminals
   useEffect(() => {
@@ -148,14 +148,17 @@ export function TerminalView({ tabId, projectId, cwd, connection, initScript, vi
     }
   }, [settings.themeName, settings.fontSize, settings.fontFamily, settings.scrollback, tabId]);
 
-  // Re-fit when visibility changes
+  // Re-fit when visibility changes (double rAF to ensure DOM layout is complete)
   useEffect(() => {
     if (visible) {
       const cached = terminalCache.get(tabId);
       if (cached) {
         requestAnimationFrame(() => {
-          cached.fitAddon.fit();
-          cached.term.focus();
+          requestAnimationFrame(() => {
+            cached.fitAddon.fit();
+            cached.term.refresh(0, cached.term.rows - 1);
+            cached.term.focus();
+          });
         });
       }
     }
