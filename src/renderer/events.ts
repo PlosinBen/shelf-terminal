@@ -20,4 +20,5 @@ export const Events = {
   CONNECT_PROJECT: 'connect-project', // (projectIndex)
   OPEN_FOLDER_PICKER: 'open-folder-picker',
   ADD_PROJECT: 'add-project',       // (ProjectConfig)
+  TOGGLE_SPLIT: 'toggle-split',     // (projectIndex)
 } as const;

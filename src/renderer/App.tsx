@@ -7,7 +7,7 @@ import { SettingsPanel } from './components/SettingsPanel';
 import { SearchBar } from './components/SearchBar';
 import { ProjectEditPanel } from './components/ProjectEditPanel';
 import { useKeybindings } from './hooks/useKeybindings';
-import { useStore, setProjects, setSettings, addProject, addTab, removeTab, removeProject } from './store';
+import { useStore, setProjects, setSettings, addProject, addTab, removeTab, removeProject, setSplitTab } from './store';
 import type { ProjectConfig } from '../shared/types';
 import { disposeTerminal } from './components/TerminalView';
 import { on, emit, Events } from './events';
@@ -71,7 +71,31 @@ export function App() {
       await window.shelfApi.project.save(configs);
     });
 
-    return () => { offCloseTab(); offCloseProject(); offNewTab(); offConnectProject(); offAddProject(); };
+    const offToggleSplit = on(Events.TOGGLE_SPLIT, (projectIndex: number) => {
+      const proj = projects[projectIndex];
+      if (!proj) return;
+
+      if (proj.splitTabId) {
+        // Close split — kill the split tab
+        const splitTab = proj.tabs.find((t) => t.id === proj.splitTabId);
+        if (splitTab) {
+          window.shelfApi.pty.kill(splitTab.id);
+          disposeTerminal(splitTab.id);
+          const tabIndex = proj.tabs.findIndex((t) => t.id === splitTab.id);
+          if (tabIndex !== -1) removeTab(projectIndex, tabIndex);
+        }
+        setSplitTab(projectIndex, null);
+      } else {
+        // Open split — spawn new tab and assign as split
+        const tab = addTab(projectIndex);
+        if (tab) {
+          window.shelfApi.pty.spawn(proj.config.id, tab.id, proj.config.cwd, proj.config.connection, proj.config.initScript);
+          setSplitTab(projectIndex, tab.id);
+        }
+      }
+    });
+
+    return () => { offCloseTab(); offCloseProject(); offNewTab(); offConnectProject(); offAddProject(); offToggleSplit(); };
   }, [projects]);
 
   useEffect(() => {
@@ -110,6 +134,31 @@ export function App() {
               ref={(el) => el?.focus()}
             >
               Click or press Enter to connect to <strong>{activeProject.config.name}</strong>
+            </div>
+          ) : activeProject && activeProject.tabs.length > 0 && activeProject.splitTabId ? (
+            <div className="split-view">
+              {activeProject.tabs.map((tab, i) => {
+                const isActiveTab = i === activeProject.activeTabIndex;
+                const isSplitTab = tab.id === activeProject.splitTabId;
+                const visible = isActiveTab || isSplitTab;
+
+                return (
+                  <div
+                    key={tab.id}
+                    className={visible ? 'split-pane' : undefined}
+                    style={!visible ? { display: 'none' } : undefined}
+                  >
+                    <TerminalView
+                      tabId={tab.id}
+                      projectId={activeProject.config.id}
+                      cwd={activeProject.config.cwd}
+                      connection={activeProject.config.connection}
+                      initScript={activeProject.config.initScript}
+                      visible={visible}
+                    />
+                  </div>
+                );
+              })}
             </div>
           ) : activeProject && activeProject.tabs.map((tab, i) => (
             <TerminalView

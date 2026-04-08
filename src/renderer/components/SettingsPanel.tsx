@@ -15,6 +15,7 @@ const ACTION_LABELS: Record<KeybindingAction, string> = {
   nextTab: 'Next Tab',
   openSettings: 'Settings',
   search: 'Search',
+  toggleSplit: 'Toggle Split',
 };
 
 export function SettingsPanel() {

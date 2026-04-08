@@ -11,6 +11,7 @@ export const DEFAULT_KEYBINDINGS: KeybindingConfig = {
   nextTab: 'mod+shift+]',
   openSettings: 'mod+,',
   search: 'mod+f',
+  toggleSplit: 'mod+\\',
 };
 
 export const DEFAULT_SETTINGS: AppSettings = {

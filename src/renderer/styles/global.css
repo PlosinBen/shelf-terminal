@@ -353,6 +353,25 @@ button {
   margin-left: 4px;
 }
 
+/* ── Split View ── */
+
+.split-view {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.split-pane {
+  flex: 1;
+  position: relative;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.split-pane + .split-pane {
+  border-left: 1px solid var(--border);
+}
+
 /* ── Terminal ── */
 
 .terminal-view {

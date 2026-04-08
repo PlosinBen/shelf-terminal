@@ -35,75 +35,45 @@ export function useKeybindings() {
     for (const [action, combo] of Object.entries(bindings)) {
       comboToAction.set(combo, action as KeybindingAction);
     }
+    // mod+1~9 → switchTab_N
+    for (let n = 1; n <= 9; n++) {
+      comboToAction.set(`mod+${n}`, `switchTab_${n}` as KeybindingAction);
+    }
 
     const handler = (e: KeyboardEvent) => {
       const combo = eventToCombo(e);
-      const action = comboToAction.get(combo);
-      if (!action) return;
+      const raw = comboToAction.get(combo);
+      if (!raw) return;
 
+      const [action, ...params] = (raw as string).split('_');
       const activeProject = projects[activeProjectIndex];
 
-      switch (action) {
-        case 'toggleSidebar':
-          e.preventDefault();
-          toggleSidebar();
-          break;
-
-        case 'newProject':
-          e.preventDefault();
-          emit(Events.OPEN_FOLDER_PICKER);
-          break;
-
-        case 'closeProject':
-          if (activeProject) {
-            e.preventDefault();
-            emit(Events.CLOSE_PROJECT, activeProjectIndex);
+      const fn = ((): (() => void) | null => {
+        switch (action) {
+          case 'toggleSidebar':  return toggleSidebar;
+          case 'openSettings':   return toggleSettings;
+          case 'search':         return toggleSearch;
+          case 'newProject':     return () => emit(Events.OPEN_FOLDER_PICKER);
+          case 'prevProject':    return () => setActiveProject(Math.max(0, activeProjectIndex - 1));
+          case 'nextProject':    return () => setActiveProject(Math.min(projects.length - 1, activeProjectIndex + 1));
+          case 'closeProject':   return activeProject ? () => emit(Events.CLOSE_PROJECT, activeProjectIndex) : null;
+          case 'newTab':         return activeProject ? () => emit(Events.NEW_TAB, activeProjectIndex) : null;
+          case 'toggleSplit':    return activeProject ? () => emit(Events.TOGGLE_SPLIT, activeProjectIndex) : null;
+          case 'prevTab':        return activeProject ? () => setActiveTab(activeProjectIndex, Math.max(0, activeProject.activeTabIndex - 1)) : null;
+          case 'nextTab':        return activeProject ? () => setActiveTab(activeProjectIndex, Math.min(activeProject.tabs.length - 1, activeProject.activeTabIndex + 1)) : null;
+          case 'switchTab': {
+            const index = parseInt(params[0], 10) - 1;
+            return activeProject && index >= 0 && index < activeProject.tabs.length
+              ? () => setActiveTab(activeProjectIndex, index)
+              : null;
           }
-          break;
+          default: return null;
+        }
+      })();
 
-        case 'newTab':
-          if (activeProject) {
-            e.preventDefault();
-            emit(Events.NEW_TAB, activeProjectIndex);
-          }
-          break;
-
-        case 'prevProject':
-          e.preventDefault();
-          setActiveProject(Math.max(0, activeProjectIndex - 1));
-          break;
-
-        case 'nextProject':
-          e.preventDefault();
-          setActiveProject(Math.min(projects.length - 1, activeProjectIndex + 1));
-          break;
-
-        case 'prevTab':
-          if (activeProject) {
-            e.preventDefault();
-            setActiveTab(activeProjectIndex, Math.max(0, activeProject.activeTabIndex - 1));
-          }
-          break;
-
-        case 'nextTab':
-          if (activeProject) {
-            e.preventDefault();
-            setActiveTab(
-              activeProjectIndex,
-              Math.min(activeProject.tabs.length - 1, activeProject.activeTabIndex + 1),
-            );
-          }
-          break;
-
-        case 'openSettings':
-          e.preventDefault();
-          toggleSettings();
-          break;
-
-        case 'search':
-          e.preventDefault();
-          toggleSearch();
-          break;
+      if (fn) {
+        e.preventDefault();
+        fn();
       }
     };
 

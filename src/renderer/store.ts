@@ -14,6 +14,7 @@ export interface ProjectRuntime {
   config: ProjectConfig;
   tabs: Tab[];
   activeTabIndex: number;
+  splitTabId: string | null; // tab ID shown in right pane, null = no split
 }
 
 // ── Global store (simple event emitter pattern) ──
@@ -60,6 +61,7 @@ export function setProjects(configs: ProjectConfig[]) {
     config,
     tabs: [],
     activeTabIndex: 0,
+    splitTabId: null,
   }));
   updateSnapshot();
 }
@@ -69,6 +71,7 @@ export function addProject(config: ProjectConfig) {
     config,
     tabs: [],
     activeTabIndex: 0,
+    splitTabId: null,
   };
   projects = [...projects, runtime];
   activeProjectIndex = projects.length - 1;
@@ -273,6 +276,17 @@ export function updateProjectConfig(index: number, partial: Partial<ProjectConfi
   projects = projects.map((p, i) => (i === index ? { ...p, config } : p));
   updateSnapshot();
   window.shelfApi.project.save(projects.map((p) => p.config));
+}
+
+// ── Split pane actions ──
+
+export function setSplitTab(projectIndex: number, tabId: string | null) {
+  const proj = projects[projectIndex];
+  if (!proj) return;
+  projects = projects.map((p, i) =>
+    i === projectIndex ? { ...p, splitTabId: tabId } : p,
+  );
+  updateSnapshot();
 }
 
 export function clearUnread(projectIndex: number, tabIndex: number) {

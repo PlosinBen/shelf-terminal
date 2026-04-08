@@ -69,7 +69,8 @@ export type KeybindingAction =
   | 'prevTab'
   | 'nextTab'
   | 'openSettings'
-  | 'search';
+  | 'search'
+  | 'toggleSplit';
 
 export type KeybindingConfig = Record<KeybindingAction, string>;
 
