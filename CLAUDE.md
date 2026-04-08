@@ -11,7 +11,7 @@
 
 ## Development
 
-- Node.js 22+ via nvm (`nvm use 22.22`)
+- Node.js 22+
 - `npm run dev` — development (NODE_ENV=development, isolated userData)
 - `npm run test:e2e` — E2E tests (NODE_ENV=test, isolated userData)
 - Production (packaged) uses default userData path
