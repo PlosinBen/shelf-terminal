@@ -184,6 +184,24 @@ button {
   -webkit-app-region: drag;
 }
 
+.tab-sidebar-btn {
+  -webkit-app-region: no-drag;
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.tab-sidebar-btn:hover {
+  background: var(--bg);
+  color: var(--text);
+}
+
 .tab {
   -webkit-app-region: no-drag;
   height: 28px;

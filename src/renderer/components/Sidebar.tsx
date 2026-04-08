@@ -4,6 +4,7 @@ import {
   setActiveProject,
   setEditingProject,
   toggleSettings,
+  toggleSidebar,
   reorderProjects,
 } from '../store';
 import { emit, Events } from '../events';
@@ -65,6 +66,7 @@ export function Sidebar() {
   return (
     <aside className="sidebar">
       <div className="sidebar-header">
+        <button className="sidebar-btn" onClick={toggleSidebar} title="Collapse sidebar">&#9776;</button>
         <span>Shelf</span>
         <span className="sidebar-header-actions">
           <button className="sidebar-btn" onClick={toggleSettings} title="Settings">&#9881;</button>

@@ -5,11 +5,12 @@ import {
   renameTab,
   reorderTabs,
   clearUnread,
+  toggleSidebar,
 } from '../store';
 import { emit, Events } from '../events';
 
 export function TabBar() {
-  const { projects, activeProjectIndex } = useStore();
+  const { projects, activeProjectIndex, sidebarVisible } = useStore();
   const project = projects[activeProjectIndex];
 
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
@@ -26,7 +27,13 @@ export function TabBar() {
   }, [editingIndex]);
 
   if (!project) {
-    return <div className="tab-bar" />;
+    return (
+      <div className="tab-bar">
+        {!sidebarVisible && (
+          <button className="tab-sidebar-btn" onClick={toggleSidebar} title="Expand sidebar">&#9776;</button>
+        )}
+      </div>
+    );
   }
 
   const handleNewTab = () => {
@@ -78,6 +85,9 @@ export function TabBar() {
 
   return (
     <div className="tab-bar">
+      {!sidebarVisible && (
+        <button className="tab-sidebar-btn" onClick={toggleSidebar} title="Expand sidebar">&#9776;</button>
+      )}
       {project.tabs.map((tab, i) => {
         const isEditing = editingIndex === i;
         const isDragging = dragIndex === i;
