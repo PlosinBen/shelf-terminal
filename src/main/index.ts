@@ -6,7 +6,7 @@ import { loadProjects, saveProjects } from './project-store';
 import { loadSettings, saveSettings } from './settings-store';
 import { listDirectory, getHomePath } from './folder-list';
 import { saveClipboardImage, saveClipboardImageRemote, startCleanupTimer, stopCleanupTimer, cleanupAllImages } from './clipboard-image';
-import { initAutoUpdater } from './updater';
+import { initAutoUpdater, stopAutoUpdater } from './updater';
 import { cleanupControlSockets } from './ssh-control';
 import { sshListDir } from './ssh-manager';
 import type { ProjectConfig, AppSettings, PtySpawnPayload, PtyInputPayload, PtyResizePayload, PtyKillPayload, FolderListPayload, SSHListDirPayload } from '../shared/types';
@@ -111,6 +111,7 @@ app.whenReady().then(() => {
 app.on('window-all-closed', () => {
   killAllPtys();
   stopCleanupTimer();
+  stopAutoUpdater();
   cleanupAllImages();
   cleanupControlSockets();
   app.quit();

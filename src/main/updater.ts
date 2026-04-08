@@ -1,6 +1,8 @@
 import { autoUpdater } from 'electron-updater';
 import { dialog, BrowserWindow } from 'electron';
 
+let updateCheckTimer: ReturnType<typeof setTimeout> | null = null;
+
 export function initAutoUpdater() {
   // Don't auto-download — let user decide
   autoUpdater.autoDownload = false;
@@ -40,12 +42,18 @@ export function initAutoUpdater() {
   });
 
   autoUpdater.on('error', (err) => {
-    // Silently ignore update errors (no network, etc.)
     console.error('Auto-updater error:', err.message);
   });
 
-  // Check for updates after a short delay
-  setTimeout(() => {
+  updateCheckTimer = setTimeout(() => {
+    updateCheckTimer = null;
     autoUpdater.checkForUpdates().catch(() => {});
   }, 5000);
+}
+
+export function stopAutoUpdater() {
+  if (updateCheckTimer) {
+    clearTimeout(updateCheckTimer);
+    updateCheckTimer = null;
+  }
 }

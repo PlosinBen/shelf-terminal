@@ -133,7 +133,6 @@ export function TerminalView({ tabId, projectId, cwd, connection, initScript, vi
       removeDataListener();
       resizeObserver.disconnect();
       container.removeEventListener('paste', handlePaste);
-      // Don't dispose term — keep it cached for tab switching
     };
   }, [tabId, projectId]);
 
@@ -175,6 +174,8 @@ export function TerminalView({ tabId, projectId, cwd, connection, initScript, vi
 export function disposeTerminal(tabId: string) {
   const cached = terminalCache.get(tabId);
   if (cached) {
+    cached.searchAddon.dispose();
+    cached.fitAddon.dispose();
     cached.term.dispose();
     terminalCache.delete(tabId);
   }
