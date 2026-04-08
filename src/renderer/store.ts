@@ -23,6 +23,7 @@ let activeProjectIndex = 0;
 let sidebarVisible = true;
 let settingsVisible = false;
 let searchVisible = false;
+let editingProjectIndex: number | null = null;
 let settings: AppSettings = { ...DEFAULT_SETTINGS };
 let nextTabCounter = 0;
 
@@ -39,7 +40,7 @@ function subscribe(l: Listener) {
 }
 
 function getSnapshot() {
-  return { projects, activeProjectIndex, sidebarVisible, settingsVisible, searchVisible, settings };
+  return { projects, activeProjectIndex, sidebarVisible, settingsVisible, searchVisible, editingProjectIndex, settings };
 }
 
 let snapshotRef = getSnapshot();
@@ -232,6 +233,23 @@ export function markUnread(tabId: string) {
       return;
     }
   }
+}
+
+// ── Project edit actions ──
+
+export function setEditingProject(index: number | null) {
+  editingProjectIndex = index;
+  updateSnapshot();
+}
+
+export function updateProjectConfig(index: number, partial: Partial<ProjectConfig>) {
+  const proj = projects[index];
+  if (!proj) return;
+
+  const config = { ...proj.config, ...partial };
+  projects = projects.map((p, i) => (i === index ? { ...p, config } : p));
+  updateSnapshot();
+  window.shelfApi.project.save(projects.map((p) => p.config));
 }
 
 export function clearUnread(projectIndex: number, tabIndex: number) {

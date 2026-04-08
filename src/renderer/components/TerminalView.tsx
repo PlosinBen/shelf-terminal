@@ -13,6 +13,7 @@ interface Props {
   projectId: string;
   cwd: string;
   connection: Connection;
+  initScript?: string;
   visible: boolean;
 }
 
@@ -23,7 +24,7 @@ export function getSearchAddon(tabId: string): SearchAddon | null {
   return terminalCache.get(tabId)?.searchAddon ?? null;
 }
 
-export function TerminalView({ tabId, projectId, cwd, connection, visible }: Props) {
+export function TerminalView({ tabId, projectId, cwd, connection, initScript, visible }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const initializedRef = useRef(false);
   const visibleRef = useRef(visible);
@@ -64,7 +65,7 @@ export function TerminalView({ tabId, projectId, cwd, connection, visible }: Pro
     });
 
     // Spawn pty
-    window.shelfApi.pty.spawn(projectId, tabId, cwd, connection);
+    window.shelfApi.pty.spawn(projectId, tabId, cwd, connection, initScript);
 
     // Terminal input → pty
     const onDataDispose = term.onData((data) => {

@@ -5,6 +5,7 @@ import { TerminalView } from './components/TerminalView';
 import { FolderPicker } from './components/FolderPicker';
 import { SettingsPanel } from './components/SettingsPanel';
 import { SearchBar } from './components/SearchBar';
+import { ProjectEditPanel } from './components/ProjectEditPanel';
 import { useKeybindings } from './hooks/useKeybindings';
 import { useStore, setProjects, setSettings, addTab } from './store';
 import { getTheme } from './themes';
@@ -26,7 +27,7 @@ export function App() {
       configs.forEach((_, i) => {
         const tab = addTab(i);
         if (tab) {
-          window.shelfApi.pty.spawn(configs[i].id, tab.id, configs[i].cwd, configs[i].connection);
+          window.shelfApi.pty.spawn(configs[i].id, tab.id, configs[i].cwd, configs[i].connection, configs[i].initScript);
         }
       });
     });
@@ -61,6 +62,7 @@ export function App() {
               projectId={activeProject.config.id}
               cwd={activeProject.config.cwd}
               connection={activeProject.config.connection}
+              initScript={activeProject.config.initScript}
               visible={i === activeProject.activeTabIndex}
             />
           ))}
@@ -68,6 +70,7 @@ export function App() {
       </main>
       <FolderPicker />
       <SettingsPanel />
+      <ProjectEditPanel />
     </div>
   );
 }

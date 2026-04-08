@@ -13,6 +13,7 @@ export interface ProjectConfig {
   cwd: string;
   connection: Connection;
   maxTabs: number;
+  initScript?: string;
 }
 
 // ── IPC payloads: Renderer → Main ──
@@ -22,6 +23,7 @@ export interface PtySpawnPayload {
   tabId: string;
   cwd: string;
   connection: Connection;
+  initScript?: string;
 }
 
 export interface PtyInputPayload {

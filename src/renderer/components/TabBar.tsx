@@ -33,7 +33,7 @@ export function TabBar() {
   const handleNewTab = () => {
     const tab = addTab(activeProjectIndex);
     if (tab) {
-      window.shelfApi.pty.spawn(project.config.id, tab.id, project.config.cwd, project.config.connection);
+      window.shelfApi.pty.spawn(project.config.id, tab.id, project.config.cwd, project.config.connection, project.config.initScript);
     }
   };
 

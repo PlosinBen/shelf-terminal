@@ -70,7 +70,7 @@ export function useKeybindings() {
             e.preventDefault();
             const tab = addTab(activeProjectIndex);
             if (tab) {
-              window.shelfApi.pty.spawn(activeProject.config.id, tab.id, activeProject.config.cwd, activeProject.config.connection);
+              window.shelfApi.pty.spawn(activeProject.config.id, tab.id, activeProject.config.cwd, activeProject.config.connection, activeProject.config.initScript);
             }
           }
           break;

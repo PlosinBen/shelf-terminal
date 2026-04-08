@@ -57,6 +57,7 @@ export function spawnPty(
   cwd: string,
   connection: Connection,
   win: BrowserWindow,
+  initScript?: string,
 ): void {
   let shell: string;
   let args: string[];
@@ -93,6 +94,13 @@ export function spawnPty(
   });
 
   ptys.set(tabId, p);
+
+  if (initScript) {
+    // Small delay to let shell initialize before sending init script
+    setTimeout(() => {
+      p.write(initScript + '\n');
+    }, 300);
+  }
 
   p.onData((data) => {
     if (!win.isDestroyed()) {

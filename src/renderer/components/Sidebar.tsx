@@ -2,12 +2,9 @@ import React from 'react';
 import {
   useStore,
   setActiveProject,
-  addProject,
   removeProject,
-  addTab,
+  setEditingProject,
 } from '../store';
-import type { ProjectConfig } from '../../shared/types';
-
 export function Sidebar() {
   const { projects, activeProjectIndex } = useStore();
 
@@ -48,6 +45,13 @@ export function Sidebar() {
             >
               <span className={`status-dot ${hasAlive ? 'alive' : 'dead'}`} />
               <span className="project-name">{proj.config.name}</span>
+              <button
+                className="sidebar-edit-btn"
+                onClick={(e) => { e.stopPropagation(); setEditingProject(i); }}
+                title="Edit project"
+              >
+                ⚙
+              </button>
               <button
                 className="sidebar-close-btn"
                 onClick={(e) => handleRemoveProject(i, e)}
