@@ -3,10 +3,15 @@ import path from 'path';
 import fs from 'fs';
 import os from 'os';
 
+function getUserDataDir() {
+  const suffix = process.env.NODE_ENV ? `-${process.env.NODE_ENV}` : '';
+  return process.platform === 'darwin'
+    ? path.join(os.homedir(), 'Library', 'Application Support', `shelf-terminal${suffix}`)
+    : path.join(os.homedir(), '.config', `shelf-terminal${suffix}`);
+}
+
 function clearProjectsData() {
-  const userDataDir = process.platform === 'darwin'
-    ? path.join(os.homedir(), 'Library', 'Application Support', 'shelf-terminal-test')
-    : path.join(os.homedir(), '.config', 'shelf-terminal-test');
+  const userDataDir = getUserDataDir();
 
   if (!fs.existsSync(userDataDir)) {
     fs.mkdirSync(userDataDir, { recursive: true });
@@ -23,7 +28,7 @@ export const test = base.extend<{}, { shelfApp: { app: ElectronApplication; page
 
     const app = await electron.launch({
       args: [path.join(__dirname, '..')],
-      env: { ...process.env, NODE_ENV: 'test' },
+      env: { ...process.env },
     });
 
     let page: Page;
