@@ -65,6 +65,20 @@ export function App() {
       }
     });
 
+    const offDisconnectProject = on(Events.DISCONNECT_PROJECT, (projectIndex: number) => {
+      const proj = projects[projectIndex];
+      if (!proj || proj.tabs.length === 0) return;
+      proj.tabs.forEach((tab) => {
+        window.shelfApi.pty.kill(tab.id);
+        disposeTerminal(tab.id);
+      });
+      // Remove all tabs but keep the project
+      for (let t = proj.tabs.length - 1; t >= 0; t--) {
+        removeTab(projectIndex, t);
+      }
+      setSplitTab(projectIndex, null);
+    });
+
     const offAddProject = on(Events.ADD_PROJECT, async (config: ProjectConfig) => {
       addProject(config);
       const configs = [...projects.map((p) => p.config), config];
@@ -95,7 +109,7 @@ export function App() {
       }
     });
 
-    return () => { offCloseTab(); offCloseProject(); offNewTab(); offConnectProject(); offAddProject(); offToggleSplit(); };
+    return () => { offCloseTab(); offCloseProject(); offNewTab(); offConnectProject(); offDisconnectProject(); offAddProject(); offToggleSplit(); };
   }, [projects]);
 
   useEffect(() => {

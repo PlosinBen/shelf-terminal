@@ -94,26 +94,45 @@ export function Sidebar() {
         })}
       </div>
 
-      {contextMenu && (
-        <div
-          ref={menuRef}
-          className="context-menu"
-          style={{ top: contextMenu.y, left: contextMenu.x }}
-        >
-          <button
-            className="context-menu-item"
-            onClick={() => { setEditingProject(contextMenu.index); setContextMenu(null); }}
+      {contextMenu && (() => {
+        const proj = projects[contextMenu.index];
+        const isConnected = proj && proj.tabs.length > 0;
+        return (
+          <div
+            ref={menuRef}
+            className="context-menu"
+            style={{ top: contextMenu.y, left: contextMenu.x }}
           >
-            Edit
-          </button>
-          <button
-            className="context-menu-item context-menu-item-danger"
-            onClick={() => { emit(Events.CLOSE_PROJECT, contextMenu.index); setContextMenu(null); }}
-          >
-            Close
-          </button>
-        </div>
-      )}
+            {isConnected ? (
+              <button
+                className="context-menu-item"
+                onClick={() => { emit(Events.DISCONNECT_PROJECT, contextMenu.index); setContextMenu(null); }}
+              >
+                Disconnect
+              </button>
+            ) : (
+              <button
+                className="context-menu-item"
+                onClick={() => { emit(Events.CONNECT_PROJECT, contextMenu.index); setContextMenu(null); }}
+              >
+                Connect
+              </button>
+            )}
+            <button
+              className="context-menu-item"
+              onClick={() => { setEditingProject(contextMenu.index); setContextMenu(null); }}
+            >
+              Edit
+            </button>
+            <button
+              className="context-menu-item context-menu-item-danger"
+              onClick={() => { emit(Events.CLOSE_PROJECT, contextMenu.index); setContextMenu(null); }}
+            >
+              Close
+            </button>
+          </div>
+        );
+      })()}
     </aside>
   );
 }

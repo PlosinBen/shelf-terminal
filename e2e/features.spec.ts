@@ -63,7 +63,7 @@ test('project edit panel opens from context menu', async ({ shelfApp: { page } }
   const menu = page.locator('.context-menu');
   await expect(menu).toBeVisible({ timeout: 3_000 });
 
-  await page.locator('.context-menu-item').first().click();
+  await page.locator('.context-menu-item', { hasText: 'Edit' }).click();
 
   const editPanel = page.locator('.project-edit-panel');
   await expect(editPanel).toBeVisible({ timeout: 3_000 });
