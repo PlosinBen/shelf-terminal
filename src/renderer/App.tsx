@@ -110,6 +110,18 @@ export function App() {
     window.shelfApi.project.load().then(setProjects);
   }, []);
 
+  // Re-focus active terminal when window regains focus
+  useEffect(() => {
+    const handleFocus = () => {
+      requestAnimationFrame(() => {
+        const textarea = document.querySelector('.terminal-container:not([style*="display: none"]) .xterm-helper-textarea') as HTMLElement;
+        textarea?.focus();
+      });
+    };
+    window.addEventListener('focus', handleFocus);
+    return () => window.removeEventListener('focus', handleFocus);
+  }, []);
+
   const theme = getTheme(settings.themeName);
 
   useEffect(() => {
