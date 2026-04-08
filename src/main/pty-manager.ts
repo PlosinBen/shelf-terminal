@@ -1,5 +1,5 @@
 import * as pty from 'node-pty';
-import { BrowserWindow } from 'electron';
+import { BrowserWindow, Notification } from 'electron';
 import os from 'os';
 import fs from 'fs';
 import path from 'path';
@@ -7,6 +7,22 @@ import { IPC } from '../shared/ipc-channels';
 import type { Connection } from '../shared/types';
 
 const ptys = new Map<string, pty.IPty>();
+
+// ── Idle detection for notifications ──
+const IDLE_THRESHOLD_MS = 3000;    // 3s no output → idle
+const MIN_ACTIVE_MS = 5000;        // must have been active for 5s+ to notify
+interface ActivityState {
+  firstDataTime: number;
+  lastDataTime: number;
+  idleTimer: ReturnType<typeof setTimeout> | null;
+}
+const activity = new Map<string, ActivityState>();
+
+function clearActivity(tabId: string) {
+  const state = activity.get(tabId);
+  if (state?.idleTimer) clearTimeout(state.idleTimer);
+  activity.delete(tabId);
+}
 
 function resolveShell(): string {
   const candidates = [
@@ -106,9 +122,33 @@ export function spawnPty(
     if (!win.isDestroyed()) {
       win.webContents.send(IPC.PTY_DATA, { tabId, data });
     }
+
+    // Track activity for idle notification
+    const now = Date.now();
+    let state = activity.get(tabId);
+    if (!state) {
+      state = { firstDataTime: now, lastDataTime: now, idleTimer: null };
+      activity.set(tabId, state);
+    }
+    state.lastDataTime = now;
+
+    if (state.idleTimer) clearTimeout(state.idleTimer);
+    state.idleTimer = setTimeout(() => {
+      const duration = state!.lastDataTime - state!.firstDataTime;
+      if (duration >= MIN_ACTIVE_MS && !win.isDestroyed() && !win.isFocused()) {
+        new Notification({
+          title: 'Shelf Terminal',
+          body: 'Command finished',
+        }).show();
+      }
+      // Reset for next command
+      state!.firstDataTime = Date.now();
+      state!.idleTimer = null;
+    }, IDLE_THRESHOLD_MS);
   });
 
   p.onExit(({ exitCode }) => {
+    clearActivity(tabId);
     ptys.delete(tabId);
     if (!win.isDestroyed()) {
       win.webContents.send(IPC.PTY_EXIT, { tabId, exitCode });
@@ -128,12 +168,14 @@ export function killPty(tabId: string) {
   const p = ptys.get(tabId);
   if (p) {
     p.kill();
+    clearActivity(tabId);
     ptys.delete(tabId);
   }
 }
 
 export function killAllPtys() {
   for (const [tabId, p] of ptys) {
+    clearActivity(tabId);
     p.kill();
     ptys.delete(tabId);
   }
