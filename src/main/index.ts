@@ -6,6 +6,7 @@ import { loadProjects, saveProjects } from './project-store';
 import { loadSettings, saveSettings } from './settings-store';
 import { listDirectory, getHomePath } from './folder-list';
 import { saveClipboardImage, saveClipboardImageRemote, startCleanupTimer, stopCleanupTimer, cleanupAllImages } from './clipboard-image';
+import { initAutoUpdater } from './updater';
 import { sshListDir } from './ssh-manager';
 import type { ProjectConfig, AppSettings, PtySpawnPayload, PtyInputPayload, PtyResizePayload, PtyKillPayload, FolderListPayload, SSHListDirPayload } from '../shared/types';
 
@@ -96,6 +97,9 @@ ipcMain.on(IPC.PTY_RESIZE, (_event, payload: PtyResizePayload) => {
 app.whenReady().then(() => {
   createWindow();
   startCleanupTimer();
+  if (process.env.NODE_ENV !== 'test' && app.isPackaged) {
+    initAutoUpdater();
+  }
 });
 
 app.on('window-all-closed', () => {
