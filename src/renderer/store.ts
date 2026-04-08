@@ -90,6 +90,29 @@ export function setActiveProject(index: number) {
   }
 }
 
+export function reorderProjects(fromIndex: number, toIndex: number) {
+  if (fromIndex === toIndex) return;
+  if (fromIndex < 0 || fromIndex >= projects.length) return;
+  if (toIndex < 0 || toIndex >= projects.length) return;
+
+  const items = [...projects];
+  const [moved] = items.splice(fromIndex, 1);
+  items.splice(toIndex, 0, moved);
+
+  // Follow the active project
+  if (activeProjectIndex === fromIndex) {
+    activeProjectIndex = toIndex;
+  } else if (fromIndex < activeProjectIndex && toIndex >= activeProjectIndex) {
+    activeProjectIndex--;
+  } else if (fromIndex > activeProjectIndex && toIndex <= activeProjectIndex) {
+    activeProjectIndex++;
+  }
+
+  projects = items;
+  updateSnapshot();
+  window.shelfApi.project.save(projects.map((p) => p.config));
+}
+
 export function toggleSidebar() {
   sidebarVisible = !sidebarVisible;
   updateSnapshot();

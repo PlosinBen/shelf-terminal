@@ -96,6 +96,14 @@ button {
   background: var(--surface);
 }
 
+.sidebar-item.dragging {
+  opacity: 0.4;
+}
+
+.sidebar-item.drag-over {
+  border-top: 2px solid var(--accent);
+}
+
 .sidebar-edit-btn {
   margin-left: auto;
   opacity: 0;
