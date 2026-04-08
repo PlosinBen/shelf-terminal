@@ -39,7 +39,7 @@
       "provider": "github"
     }
   },
-  "author": "",
+  "author": "PlosinBen <plosinben@gmail.com>",
   "license": "MIT",
   "devDependencies": {
     "@electron/rebuild": "4.0.3",
