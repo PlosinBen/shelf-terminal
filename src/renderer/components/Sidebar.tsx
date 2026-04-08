@@ -2,10 +2,9 @@ import React from 'react';
 import {
   useStore,
   setActiveProject,
-  removeProject,
   setEditingProject,
 } from '../store';
-import { disposeTerminal } from './TerminalView';
+import { emit, Events } from '../events';
 
 export function Sidebar() {
   const { projects, activeProjectIndex } = useStore();
@@ -17,16 +16,7 @@ export function Sidebar() {
 
   const handleRemoveProject = (index: number, e: React.MouseEvent) => {
     e.stopPropagation();
-    const proj = projects[index];
-    // Kill all pty processes for this project
-    proj.tabs.forEach((tab) => {
-      window.shelfApi.pty.kill(tab.id);
-      disposeTerminal(tab.id);
-    });
-    removeProject(index);
-    // Persist
-    const configs = projects.filter((_, i) => i !== index).map((p) => p.config);
-    window.shelfApi.project.save(configs);
+    emit(Events.CLOSE_PROJECT, index);
   };
 
   return (

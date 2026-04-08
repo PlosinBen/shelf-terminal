@@ -2,13 +2,12 @@ import React, { useState, useRef, useEffect } from 'react';
 import {
   useStore,
   addTab,
-  removeTab,
   setActiveTab,
   renameTab,
   reorderTabs,
   clearUnread,
 } from '../store';
-import { disposeTerminal } from './TerminalView';
+import { emit, Events } from '../events';
 
 export function TabBar() {
   const { projects, activeProjectIndex } = useStore();
@@ -40,12 +39,7 @@ export function TabBar() {
 
   const handleCloseTab = (tabIndex: number, e: React.MouseEvent) => {
     e.stopPropagation();
-    const tab = project.tabs[tabIndex];
-    if (tab) {
-      window.shelfApi.pty.kill(tab.id);
-      disposeTerminal(tab.id);
-    }
-    removeTab(activeProjectIndex, tabIndex);
+    emit(Events.CLOSE_TAB, activeProjectIndex, tabIndex);
   };
 
   const handleDoubleClick = (tabIndex: number) => {

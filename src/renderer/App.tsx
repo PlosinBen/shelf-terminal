@@ -7,7 +7,9 @@ import { SettingsPanel } from './components/SettingsPanel';
 import { SearchBar } from './components/SearchBar';
 import { ProjectEditPanel } from './components/ProjectEditPanel';
 import { useKeybindings } from './hooks/useKeybindings';
-import { useStore, setProjects, setSettings, addTab } from './store';
+import { useStore, setProjects, setSettings, addTab, removeTab, removeProject, getProjectConfigs } from './store';
+import { disposeTerminal } from './components/TerminalView';
+import { on, Events } from './events';
 import { getTheme } from './themes';
 import './styles/global.css';
 
@@ -18,6 +20,34 @@ export function App() {
   useEffect(() => {
     window.shelfApi.settings.load().then(setSettings);
   }, []);
+
+  // Centralized event handlers
+  useEffect(() => {
+    const offCloseTab = on(Events.CLOSE_TAB, (projectIndex: number, tabIndex: number) => {
+      const proj = projects[projectIndex];
+      const tab = proj?.tabs[tabIndex];
+      if (tab) {
+        window.shelfApi.pty.kill(tab.id);
+        disposeTerminal(tab.id);
+      }
+      removeTab(projectIndex, tabIndex);
+    });
+
+    const offCloseProject = on(Events.CLOSE_PROJECT, (projectIndex: number) => {
+      const proj = projects[projectIndex];
+      if (proj) {
+        proj.tabs.forEach((tab) => {
+          window.shelfApi.pty.kill(tab.id);
+          disposeTerminal(tab.id);
+        });
+      }
+      removeProject(projectIndex);
+      const configs = projects.filter((_, i) => i !== projectIndex).map((p) => p.config);
+      window.shelfApi.project.save(configs);
+    });
+
+    return () => { offCloseTab(); offCloseProject(); };
+  }, [projects]);
 
   useEffect(() => {
     // Load projects on startup and spawn one tab each

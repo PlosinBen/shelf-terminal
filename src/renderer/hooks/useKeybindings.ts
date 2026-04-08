@@ -6,10 +6,9 @@ import {
   setActiveProject,
   setActiveTab,
   addTab,
-  removeProject,
   useStore,
 } from '../store';
-import { disposeTerminal } from '../components/TerminalView';
+import { emit, Events } from '../events';
 import type { KeybindingAction } from '../../shared/types';
 
 const isMac = navigator.platform.toUpperCase().includes('MAC');
@@ -59,11 +58,7 @@ export function useKeybindings() {
         case 'closeProject':
           if (activeProject) {
             e.preventDefault();
-            activeProject.tabs.forEach((tab) => {
-              window.shelfApi.pty.kill(tab.id);
-              disposeTerminal(tab.id);
-            });
-            removeProject(activeProjectIndex);
+            emit(Events.CLOSE_PROJECT, activeProjectIndex);
           }
           break;
 
