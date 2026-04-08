@@ -127,7 +127,8 @@ ipcMain.on(IPC.PTY_RESIZE, (_event, payload: PtyResizePayload) => {
 
 app.whenReady().then(() => {
   const settings = loadSettings();
-  setLogLevel(settings.logLevel);
+  const envLogLevel = process.env.LOG_LEVEL as import('../shared/types').LogLevel | undefined;
+  setLogLevel(envLogLevel || settings.logLevel);
 
   // Write logs to date-based file: {userData}/logs/{yyyymm}/{mmdd}.log
   const logBaseDir = path.join(app.getPath('userData'), 'logs');
