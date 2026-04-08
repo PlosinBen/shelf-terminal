@@ -50,19 +50,13 @@ export function App() {
     const offNewTab = on(Events.NEW_TAB, (projectIndex: number) => {
       const proj = projects[projectIndex];
       if (!proj) return;
-      const tab = addTab(projectIndex);
-      if (tab) {
-        window.shelfApi.pty.spawn(proj.config.id, tab.id, proj.config.cwd, proj.config.connection, proj.config.initScript);
-      }
+      addTab(projectIndex);
     });
 
     const offConnectProject = on(Events.CONNECT_PROJECT, (projectIndex: number) => {
       const proj = projects[projectIndex];
       if (!proj || proj.tabs.length > 0) return;
-      const tab = addTab(projectIndex);
-      if (tab) {
-        window.shelfApi.pty.spawn(proj.config.id, tab.id, proj.config.cwd, proj.config.connection, proj.config.initScript);
-      }
+      addTab(projectIndex);
     });
 
     const offDisconnectProject = on(Events.DISCONNECT_PROJECT, (projectIndex: number) => {
@@ -103,7 +97,6 @@ export function App() {
         // Open split — spawn new tab and assign as split
         const tab = addTab(projectIndex);
         if (tab) {
-          window.shelfApi.pty.spawn(proj.config.id, tab.id, proj.config.cwd, proj.config.connection, proj.config.initScript);
           setSplitTab(projectIndex, tab.id);
         }
       }
