@@ -118,7 +118,7 @@ app.whenReady().then(() => {
   createWindow();
   startCleanupTimer();
   if (process.env.NODE_ENV !== 'test' && app.isPackaged) {
-    initAutoUpdater();
+    initAutoUpdater(mainWindow!);
   }
 });
 

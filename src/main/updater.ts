@@ -1,16 +1,23 @@
 import { autoUpdater } from 'electron-updater';
 import { dialog, BrowserWindow } from 'electron';
 
-let updateCheckTimer: ReturnType<typeof setTimeout> | null = null;
+const CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000; // 4 hours
 
-export function initAutoUpdater() {
-  // Don't auto-download — let user decide
+let updateCheckTimer: ReturnType<typeof setTimeout> | null = null;
+let lastCheckTime = 0;
+
+function checkForUpdates() {
+  lastCheckTime = Date.now();
+  autoUpdater.checkForUpdates().catch(() => {});
+}
+
+export function initAutoUpdater(win: BrowserWindow) {
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = false;
 
   autoUpdater.on('update-available', async (info) => {
-    const win = BrowserWindow.getFocusedWindow();
-    const result = await dialog.showMessageBox(win ?? ({} as any), {
+    const focusedWin = BrowserWindow.getFocusedWindow();
+    const result = await dialog.showMessageBox(focusedWin ?? ({} as any), {
       type: 'info',
       title: 'Update Available',
       message: `Shelf Terminal v${info.version} is available.`,
@@ -26,8 +33,8 @@ export function initAutoUpdater() {
   });
 
   autoUpdater.on('update-downloaded', async () => {
-    const win = BrowserWindow.getFocusedWindow();
-    const result = await dialog.showMessageBox(win ?? ({} as any), {
+    const focusedWin = BrowserWindow.getFocusedWindow();
+    const result = await dialog.showMessageBox(focusedWin ?? ({} as any), {
       type: 'info',
       title: 'Update Ready',
       message: 'Update downloaded. Restart now to apply?',
@@ -45,10 +52,15 @@ export function initAutoUpdater() {
     console.error('Auto-updater error:', err.message);
   });
 
-  updateCheckTimer = setTimeout(() => {
-    updateCheckTimer = null;
-    autoUpdater.checkForUpdates().catch(() => {});
-  }, 5000);
+  // Check on startup after short delay
+  updateCheckTimer = setTimeout(checkForUpdates, 5000);
+
+  // Check on window focus if enough time has passed
+  win.on('focus', () => {
+    if (Date.now() - lastCheckTime >= CHECK_INTERVAL_MS) {
+      checkForUpdates();
+    }
+  });
 }
 
 export function stopAutoUpdater() {
