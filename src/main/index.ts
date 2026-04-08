@@ -101,6 +101,14 @@ ipcMain.handle(IPC.SETTINGS_LOAD, () => {
   return loadSettings();
 });
 
+ipcMain.handle(IPC.LOGS_CLEAR, () => {
+  const logBaseDir = path.join(app.getPath('userData'), 'logs');
+  if (fs.existsSync(logBaseDir)) {
+    fs.rmSync(logBaseDir, { recursive: true, force: true });
+  }
+  log.info('app', 'logs cleared');
+});
+
 ipcMain.handle(IPC.SETTINGS_SAVE, (_event, settings: AppSettings) => {
   saveSettings(settings);
   setLogLevel(settings.logLevel);
@@ -121,13 +129,18 @@ app.whenReady().then(() => {
   const settings = loadSettings();
   setLogLevel(settings.logLevel);
 
-  // Write logs to file in userData
-  const logPath = path.join(app.getPath('userData'), 'shelf.log');
+  // Write logs to date-based file: {userData}/logs/{yyyymm}/{mmdd}.log
+  const logBaseDir = path.join(app.getPath('userData'), 'logs');
   setFileWriter((line) => {
-    fs.appendFileSync(logPath, line + '\n');
+    const now = new Date();
+    const yyyymm = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const mmdd = `${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
+    const dir = path.join(logBaseDir, yyyymm);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.appendFileSync(path.join(dir, `${mmdd}.log`), line + '\n');
   });
 
-  log.info('app', `starting, logLevel=${settings.logLevel}, userData=${app.getPath('userData')}, logFile=${logPath}`);
+  log.info('app', `starting, logLevel=${settings.logLevel}, userData=${app.getPath('userData')}`);
 
   createWindow();
   startCleanupTimer();

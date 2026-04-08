@@ -130,6 +130,14 @@ export function SettingsPanel() {
               <option value="info">Info</option>
               <option value="debug">Debug</option>
             </select>
+            <button
+              className="conn-btn conn-btn-cancel"
+              onClick={async () => {
+                await window.shelfApi.logs.clear();
+              }}
+            >
+              Clear Logs
+            </button>
           </div>
 
           <div className="settings-divider" />

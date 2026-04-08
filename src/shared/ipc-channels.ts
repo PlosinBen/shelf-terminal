@@ -25,6 +25,9 @@ export const IPC = {
   WSL_LIST_DIR: 'wsl:list-dir',
   WSL_HOME_PATH: 'wsl:home-path',
 
+  // Logs
+  LOGS_CLEAR: 'logs:clear',
+
   // Main → Renderer (send)
   PTY_DATA: 'pty:data',
   PTY_EXIT: 'pty:exit',

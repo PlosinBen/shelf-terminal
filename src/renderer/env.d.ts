@@ -35,6 +35,9 @@ interface ShelfApi {
     load: () => Promise<import('../shared/types').AppSettings>;
     save: (settings: import('../shared/types').AppSettings) => Promise<void>;
   };
+  logs: {
+    clear: () => Promise<void>;
+  };
 }
 
 interface Window {

@@ -78,4 +78,7 @@ contextBridge.exposeInMainWorld('shelfApi', {
     load: () => ipcRenderer.invoke(IPC.SETTINGS_LOAD),
     save: (settings: unknown) => ipcRenderer.invoke(IPC.SETTINGS_SAVE, settings),
   },
+  logs: {
+    clear: () => ipcRenderer.invoke(IPC.LOGS_CLEAR),
+  },
 });
