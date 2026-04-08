@@ -11,6 +11,10 @@ interface ShelfApi {
     list: (dirPath: string) => Promise<import('../shared/types').FolderListResult>;
     homePath: () => Promise<string>;
   };
+  connector: {
+    listDir: (connection: import('../shared/types').Connection, dirPath: string) => Promise<import('../shared/types').FolderListResult>;
+    homePath: (connection: import('../shared/types').Connection) => Promise<string>;
+  };
   project: {
     load: () => Promise<import('../shared/types').ProjectConfig[]>;
     save: (projects: import('../shared/types').ProjectConfig[]) => Promise<void>;

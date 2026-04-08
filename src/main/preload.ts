@@ -32,6 +32,26 @@ contextBridge.exposeInMainWorld('shelfApi', {
     homePath: () =>
       ipcRenderer.invoke(IPC.HOME_PATH),
   },
+  connector: {
+    listDir: (connection: any, dirPath: string) => {
+      if (connection.type === 'ssh') {
+        return ipcRenderer.invoke(IPC.SSH_LIST_DIR, { host: connection.host, port: connection.port, user: connection.user, path: dirPath });
+      }
+      if (connection.type === 'wsl') {
+        return ipcRenderer.invoke(IPC.WSL_LIST_DIR, { distro: connection.distro, path: dirPath });
+      }
+      return ipcRenderer.invoke(IPC.FOLDER_LIST, { path: dirPath });
+    },
+    homePath: (connection: any) => {
+      if (connection.type === 'ssh') {
+        return ipcRenderer.invoke(IPC.SSH_HOME_PATH, { host: connection.host, port: connection.port, user: connection.user });
+      }
+      if (connection.type === 'wsl') {
+        return ipcRenderer.invoke(IPC.WSL_HOME_PATH, connection.distro);
+      }
+      return ipcRenderer.invoke(IPC.HOME_PATH);
+    },
+  },
   project: {
     load: () => ipcRenderer.invoke(IPC.PROJECT_LOAD),
     save: (projects: unknown) => ipcRenderer.invoke(IPC.PROJECT_SAVE, projects),

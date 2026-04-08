@@ -51,15 +51,7 @@ export function FolderPicker() {
     setSelectedIndex(0);
 
     try {
-      const conn = connectionRef.current;
-      let result;
-      if (conn.type === 'ssh') {
-        result = await window.shelfApi.ssh.listDir(conn.host, conn.port, conn.user, dirPath);
-      } else if (conn.type === 'wsl') {
-        result = await window.shelfApi.wsl.listDir(conn.distro, dirPath);
-      } else {
-        result = await window.shelfApi.folder.list(dirPath);
-      }
+      const result = await window.shelfApi.connector.listDir(connectionRef.current, dirPath);
       setCurrentPath(result.path);
       setEntries(result.entries);
       setError(result.error ?? null);
@@ -110,16 +102,8 @@ export function FolderPicker() {
     connectionRef.current = conn;
     setStep('browse');
 
-    if (conn.type === 'local') {
-      const home = await window.shelfApi.folder.homePath();
-      requestFolder(home);
-    } else if (conn.type === 'ssh') {
-      const home = await window.shelfApi.ssh.homePath(conn.host, conn.port, conn.user);
-      requestFolder(home);
-    } else if (conn.type === 'wsl') {
-      const home = await window.shelfApi.wsl.homePath(conn.distro);
-      requestFolder(home);
-    }
+    const home = await window.shelfApi.connector.homePath(conn);
+    requestFolder(home);
   };
 
   // ── Select and close ──
