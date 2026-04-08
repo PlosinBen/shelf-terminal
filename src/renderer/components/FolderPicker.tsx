@@ -271,7 +271,17 @@ function ConnectionStep({
   onSelect, onCancel,
 }: ConnectionStepProps) {
   const [connType, setConnType] = useState<'local' | 'ssh' | 'wsl'>('local');
+  const [wslDistros, setWslDistros] = useState<string[]>([]);
   const isWindows = navigator.platform.includes('Win');
+
+  useEffect(() => {
+    if (connType === 'wsl' && wslDistros.length === 0) {
+      window.shelfApi.wsl.listDistros().then((list) => {
+        setWslDistros(list);
+        if (list.length > 0 && !wslDistro) onWslDistroChange(list[0]);
+      });
+    }
+  }, [connType]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -353,14 +363,20 @@ function ConnectionStep({
         {connType === 'wsl' && (
           <div className="conn-field">
             <label className="conn-label">Distro</label>
-            <input
-              className="conn-input"
-              type="text"
-              value={wslDistro}
-              onChange={(e) => onWslDistroChange(e.target.value)}
-              placeholder="Ubuntu"
-              autoFocus
-            />
+            {wslDistros.length > 0 ? (
+              <select
+                className="settings-select"
+                value={wslDistro}
+                onChange={(e) => onWslDistroChange(e.target.value)}
+                autoFocus
+              >
+                {wslDistros.map((d) => (
+                  <option key={d} value={d}>{d}</option>
+                ))}
+              </select>
+            ) : (
+              <span className="conn-local-hint">Loading distros...</span>
+            )}
           </div>
         )}
 

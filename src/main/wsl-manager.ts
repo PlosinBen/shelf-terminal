@@ -34,6 +34,30 @@ export function wslListDir(distro: string, dirPath: string): Promise<FolderListR
   });
 }
 
+export function wslListDistros(): Promise<string[]> {
+  log.debug('wsl', 'listDistros');
+  return new Promise((resolve) => {
+    execFile(
+      'wsl.exe',
+      ['-l', '-q'],
+      { timeout: 5000 },
+      (error, stdout) => {
+        if (error) {
+          resolve([]);
+          return;
+        }
+        const distros = stdout
+          .replace(/\0/g, '')
+          .trim()
+          .split('\n')
+          .map((d) => d.trim())
+          .filter((d) => d.length > 0);
+        resolve(distros);
+      },
+    );
+  });
+}
+
 export function wslHomePath(distro: string): Promise<string> {
   log.debug('wsl', `homePath: distro=${distro}`);
   return new Promise((resolve) => {

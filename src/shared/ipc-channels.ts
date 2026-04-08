@@ -24,6 +24,7 @@ export const IPC = {
   // WSL
   WSL_LIST_DIR: 'wsl:list-dir',
   WSL_HOME_PATH: 'wsl:home-path',
+  WSL_LIST_DISTROS: 'wsl:list-distros',
 
   // Logs
   LOGS_CLEAR: 'logs:clear',

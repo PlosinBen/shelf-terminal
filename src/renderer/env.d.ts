@@ -26,6 +26,7 @@ interface ShelfApi {
   wsl: {
     listDir: (distro: string, dirPath: string) => Promise<import('../shared/types').FolderListResult>;
     homePath: (distro: string) => Promise<string>;
+    listDistros: () => Promise<string[]>;
   };
   ssh: {
     listDir: (host: string, port: number, user: string, dirPath: string) => Promise<import('../shared/types').FolderListResult>;

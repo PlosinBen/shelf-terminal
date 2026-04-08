@@ -10,7 +10,7 @@ import { saveClipboardImage, saveClipboardImageRemote, startCleanupTimer, stopCl
 import { initAutoUpdater, stopAutoUpdater } from './updater';
 import { cleanupControlSockets } from './ssh-control';
 import { sshListDir, sshGetHomePath } from './ssh-manager';
-import { wslListDir, wslHomePath } from './wsl-manager';
+import { wslListDir, wslHomePath, wslListDistros } from './wsl-manager';
 import { log, setLogLevel, setFileWriter } from '../shared/logger';
 import type { ProjectConfig, AppSettings, PtySpawnPayload, PtyInputPayload, PtyResizePayload, PtyKillPayload, FolderListPayload, SSHListDirPayload, WSLListDirPayload } from '../shared/types';
 
@@ -91,6 +91,10 @@ ipcMain.handle(IPC.SSH_HOME_PATH, (_event, payload: { host: string; port: number
 
 ipcMain.handle(IPC.WSL_LIST_DIR, (_event, payload: WSLListDirPayload) => {
   return wslListDir(payload.distro, payload.path);
+});
+
+ipcMain.handle(IPC.WSL_LIST_DISTROS, () => {
+  return wslListDistros();
 });
 
 ipcMain.handle(IPC.WSL_HOME_PATH, (_event, distro: string) => {
