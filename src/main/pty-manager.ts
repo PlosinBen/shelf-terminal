@@ -76,7 +76,7 @@ export function spawnPty(
     }
     case 'wsl': {
       shell = 'wsl.exe';
-      args = ['-d', connection.distro, '--cd', cwd];
+      args = ['-d', connection.distro, '--', 'bash', '-l', '-c', `cd ${shellEscape(cwd)} && exec $SHELL -l`];
       spawnCwd = os.homedir();
       break;
     }
