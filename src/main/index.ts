@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
 import path from 'path';
+import fs from 'fs';
 import { IPC } from '../shared/ipc-channels';
 import { spawnPty, writePty, resizePty, killPty, killAllPtys } from './pty-manager';
 import { loadProjects, saveProjects } from './project-store';
@@ -10,7 +11,7 @@ import { initAutoUpdater, stopAutoUpdater } from './updater';
 import { cleanupControlSockets } from './ssh-control';
 import { sshListDir, sshGetHomePath } from './ssh-manager';
 import { wslListDir, wslHomePath } from './wsl-manager';
-import { log, setLogLevel } from '../shared/logger';
+import { log, setLogLevel, setFileWriter } from '../shared/logger';
 import type { ProjectConfig, AppSettings, PtySpawnPayload, PtyInputPayload, PtyResizePayload, PtyKillPayload, FolderListPayload, SSHListDirPayload, WSLListDirPayload } from '../shared/types';
 
 // Isolate userData per environment to avoid config conflicts
@@ -119,7 +120,14 @@ ipcMain.on(IPC.PTY_RESIZE, (_event, payload: PtyResizePayload) => {
 app.whenReady().then(() => {
   const settings = loadSettings();
   setLogLevel(settings.logLevel);
-  log.info('app', `starting, logLevel=${settings.logLevel}, userData=${app.getPath('userData')}`);
+
+  // Write logs to file in userData
+  const logPath = path.join(app.getPath('userData'), 'shelf.log');
+  setFileWriter((line) => {
+    fs.appendFileSync(logPath, line + '\n');
+  });
+
+  log.info('app', `starting, logLevel=${settings.logLevel}, userData=${app.getPath('userData')}, logFile=${logPath}`);
 
   createWindow();
   startCleanupTimer();
