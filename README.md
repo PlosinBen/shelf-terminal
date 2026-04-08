@@ -5,14 +5,21 @@ Cross-platform, project-based terminal manager built with Electron. Replaces tmu
 ## Features
 
 - **Project-based** — each project binds to a folder, with multiple terminal tabs
+- **Lazy connect** — projects load without auto-connecting; click or press Enter to open terminal
 - **Terminal tabs** — per-project tabs backed by real pty processes (node-pty + xterm.js)
+- **Split pane** — left/right split within a project (mod+\\)
 - **SSH / WSL** — connect to remote hosts via SSH (ControlMaster multiplexing) or WSL
 - **Themes** — 5 built-in themes (Catppuccin Mocha/Latte, Dracula, Nord, Tokyo Night)
-- **Settings** — font size, font family, scrollback, theme, persisted to `settings.json`
+- **Terminal search** — search scrollback buffer (mod+F)
+- **Tab management** — double-click to rename, drag to reorder, mod+1~9 to switch
+- **Tab badge** — unread indicator on background tabs with new output
+- **Project management** — drag to reorder, right-click context menu (Edit, Connect/Disconnect, Close)
+- **Init script** — per-project startup commands (e.g. `nvm use 22`, `conda activate`)
+- **Custom keybindings** — all shortcuts configurable via Settings panel
 - **Image paste** — paste screenshots into terminal as temp file paths (SCP for SSH sessions)
-- **Tab management** — double-click to rename, drag to reorder
-- **Keyboard-driven** — configurable shortcuts for all common actions
-- **App restart recovery** — projects restored on relaunch with fresh shell tabs
+- **Background notifications** — system notification when long-running commands finish
+- **Settings** — font, theme, scrollback, keybindings, persisted to `settings.json`
+- **Auto-updater** — checks GitHub Releases, user confirms before downloading
 
 ## Tech Stack
 
@@ -22,6 +29,7 @@ Cross-platform, project-based terminal manager built with Electron. Replaces tmu
 | Terminal | node-pty 1.1 + @xterm/xterm 6.0 |
 | UI | React 19 + TypeScript 5.9 |
 | Build | Vite 6.4 + vite-plugin-electron |
+| Package | electron-builder |
 | Test | Playwright (Electron) |
 
 ## Quick Start
@@ -38,20 +46,28 @@ npm run dev
 
 # Production build
 npm run build
+
+# Package for distribution
+npm run dist:mac    # macOS (.dmg, .zip)
+npm run dist:win    # Windows (.exe, .zip)
+npm run dist:linux  # Linux (.AppImage, .deb)
 ```
 
 ## Keyboard Shortcuts
 
-`mod` = Cmd (macOS) / Ctrl (Windows/Linux)
+`mod` = Cmd (macOS) / Ctrl (Windows/Linux). All shortcuts are customizable in Settings.
 
-| Action | Shortcut |
-|--------|----------|
+| Action | Default |
+|--------|---------|
 | Toggle sidebar | `mod+B` |
 | New project | `mod+O` |
 | Close project | `mod+W` |
 | New tab | `mod+T` |
+| Switch tab | `mod+1~9` |
+| Previous/Next tab | `mod+Shift+[/]` |
 | Switch project | `mod+Up/Down` |
-| Switch tab | `mod+Shift+[/]` |
+| Toggle split pane | `mod+\` |
+| Search | `mod+F` |
 | Settings | `mod+,` |
 
 ## Project Structure
@@ -59,9 +75,9 @@ npm run build
 ```
 src/
   main/           # Electron main process, pty management, IPC handlers
-  renderer/       # React UI, xterm.js, store, themes
+  renderer/       # React UI, xterm.js, store, themes, event bus
   shared/         # Type definitions, IPC channels, defaults
-e2e/              # Playwright E2E tests
+e2e/              # Playwright E2E tests (16 tests)
 ```
 
 ## Testing
@@ -69,16 +85,15 @@ e2e/              # Playwright E2E tests
 ```bash
 # Run all E2E tests (builds first)
 npm run test:e2e
-
-# Headed mode (visible Electron window)
-npm run test:e2e:headed
 ```
 
 ## Settings
 
-Stored at `~/.config/shelf-terminal/settings.json` (macOS: `~/Library/Application Support/shelf-terminal/`).
+Stored at `~/Library/Application Support/shelf-terminal/settings.json` (macOS) or `~/.config/shelf-terminal/` (Linux/Windows).
 
 Projects stored at the same location in `projects.json`.
+
+Dev and test environments use isolated paths (`shelf-terminal-development`, `shelf-terminal-test`).
 
 ## License
 
