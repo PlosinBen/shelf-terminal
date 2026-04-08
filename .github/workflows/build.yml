@@ -1,9 +1,12 @@
-name: Build & Release
+name: Release
 
 on:
   push:
     tags:
       - 'v*'
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -14,7 +17,7 @@ jobs:
             platform: mac
           - os: windows-latest
             platform: win
-          - os: ubuntu-latest
+          - os: ubuntu-22.04
             platform: linux
 
     runs-on: ${{ matrix.os }}
@@ -27,40 +30,23 @@ jobs:
           node-version: 22
           cache: npm
 
+      - name: Setup Python for node-gyp
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install setuptools (needed by node-gyp for node-pty)
+        run: pip install setuptools
+
+      - name: Install fuse (Linux AppImage)
+        if: matrix.platform == 'linux'
+        run: sudo apt-get install -y libfuse2
+
       - name: Install dependencies
         run: npm ci
 
-      - name: Build and package
-        run: npm run dist:${{ matrix.platform }}
+      - name: Build and publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: shelf-${{ matrix.platform }}
-          path: |
-            release/*.dmg
-            release/*.zip
-            release/*.exe
-            release/*.AppImage
-            release/*.deb
-          if-no-files-found: ignore
-
-  release:
-    needs: build
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-          merge-multiple: true
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: artifacts/*
-          generate_release_notes: true
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+        run: npm run dist:${{ matrix.platform }}
