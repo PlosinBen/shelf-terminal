@@ -51,14 +51,19 @@ test('settings panel opens with mod+comma', async ({ shelfApp: { page } }) => {
   await expect(panel).not.toBeVisible();
 });
 
-test('project edit panel opens from sidebar gear icon', async ({ shelfApp: { page } }) => {
+test('project edit panel opens from context menu', async ({ shelfApp: { page } }) => {
   // Ensure project exists
   if (await page.locator('.sidebar-item').count() === 0) {
     await setupProject(page);
   }
 
-  const editBtn = page.locator('.sidebar-edit-btn').first();
-  await editBtn.click({ force: true });
+  const item = page.locator('.sidebar-item').first();
+  await item.click({ button: 'right' });
+
+  const menu = page.locator('.context-menu');
+  await expect(menu).toBeVisible({ timeout: 3_000 });
+
+  await page.locator('.context-menu-item').first().click();
 
   const editPanel = page.locator('.project-edit-panel');
   await expect(editPanel).toBeVisible({ timeout: 3_000 });

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   useStore,
   setActiveProject,
@@ -11,14 +11,28 @@ export function Sidebar() {
   const { projects, activeProjectIndex } = useStore();
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ index: number; x: number; y: number } | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // Close context menu on outside click
+  useEffect(() => {
+    if (!contextMenu) return;
+    const handler = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setContextMenu(null);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [contextMenu]);
+
+  const handleContextMenu = (e: React.MouseEvent, index: number) => {
+    e.preventDefault();
+    setContextMenu({ index, x: e.clientX, y: e.clientY });
+  };
 
   const handleNewProject = () => {
     emit(Events.OPEN_FOLDER_PICKER);
-  };
-
-  const handleRemoveProject = (index: number, e: React.MouseEvent) => {
-    e.stopPropagation();
-    emit(Events.CLOSE_PROJECT, index);
   };
 
   const handleDragStart = (e: React.DragEvent, index: number) => {
@@ -66,6 +80,7 @@ export function Sidebar() {
               key={proj.config.id}
               className={`sidebar-item ${i === activeProjectIndex ? 'active' : ''} ${isDragging ? 'dragging' : ''} ${isDragOver ? 'drag-over' : ''}`}
               onClick={() => setActiveProject(i)}
+              onContextMenu={(e) => handleContextMenu(e, i)}
               draggable
               onDragStart={(e) => handleDragStart(e, i)}
               onDragOver={(e) => handleDragOver(e, i)}
@@ -74,24 +89,31 @@ export function Sidebar() {
             >
               <span className={`status-dot ${hasAlive ? 'alive' : 'dead'}`} />
               <span className="project-name">{proj.config.name}</span>
-              <button
-                className="sidebar-edit-btn"
-                onClick={(e) => { e.stopPropagation(); setEditingProject(i); }}
-                title="Edit project"
-              >
-                ⚙
-              </button>
-              <button
-                className="sidebar-close-btn"
-                onClick={(e) => handleRemoveProject(i, e)}
-                title="Close project"
-              >
-                ×
-              </button>
             </div>
           );
         })}
       </div>
+
+      {contextMenu && (
+        <div
+          ref={menuRef}
+          className="context-menu"
+          style={{ top: contextMenu.y, left: contextMenu.x }}
+        >
+          <button
+            className="context-menu-item"
+            onClick={() => { setEditingProject(contextMenu.index); setContextMenu(null); }}
+          >
+            Edit
+          </button>
+          <button
+            className="context-menu-item context-menu-item-danger"
+            onClick={() => { emit(Events.CLOSE_PROJECT, contextMenu.index); setContextMenu(null); }}
+          >
+            Close
+          </button>
+        </div>
+      )}
     </aside>
   );
 }
