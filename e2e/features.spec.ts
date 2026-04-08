@@ -2,7 +2,7 @@ import { test, expect } from './helpers';
 
 // Helper: create a project and open a tab
 async function setupProject(page: any) {
-  await page.locator('.sidebar-btn').click();
+  await page.locator('.sidebar-btn', { hasText: '+' }).click();
   await expect(page.locator('.folder-picker-overlay')).toBeVisible({ timeout: 5_000 });
   // Click Next (Local default)
   await page.locator('.conn-btn-next').click();

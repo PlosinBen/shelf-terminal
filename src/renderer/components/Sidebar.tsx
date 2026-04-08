@@ -3,6 +3,7 @@ import {
   useStore,
   setActiveProject,
   setEditingProject,
+  toggleSettings,
   reorderProjects,
 } from '../store';
 import { emit, Events } from '../events';
@@ -65,9 +66,10 @@ export function Sidebar() {
     <aside className="sidebar">
       <div className="sidebar-header">
         <span>Shelf</span>
-        <button className="sidebar-btn" onClick={handleNewProject} title="New project">
-          +
-        </button>
+        <span className="sidebar-header-actions">
+          <button className="sidebar-btn" onClick={toggleSettings} title="Settings">&#9881;</button>
+          <button className="sidebar-btn" onClick={handleNewProject} title="New project">+</button>
+        </span>
       </div>
       <div className="sidebar-list">
         {projects.map((proj, i) => {

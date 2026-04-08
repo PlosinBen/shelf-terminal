@@ -59,8 +59,13 @@ button {
   -webkit-app-region: drag;
 }
 
-.sidebar-btn {
+.sidebar-header-actions {
+  display: flex;
+  gap: 4px;
   -webkit-app-region: no-drag;
+}
+
+.sidebar-btn {
   width: 24px;
   height: 24px;
   border-radius: 4px;

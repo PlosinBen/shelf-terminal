@@ -14,10 +14,9 @@ test('app window opens with correct layout', async ({ shelfApp: { page } }) => {
   await expect(tabBar).toBeVisible();
 });
 
-test('sidebar has new project button', async ({ shelfApp: { page } }) => {
-  const addBtn = page.locator('.sidebar-btn');
-  await expect(addBtn).toBeVisible();
-  await expect(addBtn).toContainText('+');
+test('sidebar has settings and new project buttons', async ({ shelfApp: { page } }) => {
+  const actions = page.locator('.sidebar-header-actions .sidebar-btn');
+  await expect(actions).toHaveCount(2);
 });
 
 test('no projects on fresh start', async ({ shelfApp: { page } }) => {

@@ -2,7 +2,7 @@ import { test, expect } from './helpers';
 
 // Helper: open folder picker and go through connection step
 async function openFolderPicker(page: any) {
-  await page.locator('.sidebar-btn').click();
+  await page.locator('.sidebar-btn', { hasText: '+' }).click();
   const overlay = page.locator('.folder-picker-overlay');
   await expect(overlay).toBeVisible({ timeout: 5_000 });
 
@@ -17,7 +17,7 @@ async function openFolderPicker(page: any) {
 }
 
 test('open folder picker via sidebar button', async ({ shelfApp: { page } }) => {
-  const addBtn = page.locator('.sidebar-btn');
+  const addBtn = page.locator('.sidebar-btn', { hasText: '+' });
   await addBtn.click();
 
   const overlay = page.locator('.folder-picker-overlay');
@@ -29,7 +29,7 @@ test('open folder picker via sidebar button', async ({ shelfApp: { page } }) => 
 
 test('folder picker connection step shows Local by default', async ({ shelfApp: { page } }) => {
   if (!await page.locator('.folder-picker-overlay').isVisible()) {
-    await page.locator('.sidebar-btn').click();
+    await page.locator('.sidebar-btn', { hasText: '+' }).click();
     await expect(page.locator('.folder-picker-overlay')).toBeVisible({ timeout: 5_000 });
   }
 
