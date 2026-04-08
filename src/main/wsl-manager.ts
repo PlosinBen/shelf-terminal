@@ -1,7 +1,9 @@
 import { execFile } from 'child_process';
 import type { FolderListResult } from '../shared/types';
+import { log } from '../shared/logger';
 
 export function wslListDir(distro: string, dirPath: string): Promise<FolderListResult> {
+  log.debug('wsl', `listDir: distro=${distro} path=${dirPath}`);
   return new Promise((resolve) => {
     execFile(
       'wsl.exe',
@@ -33,6 +35,7 @@ export function wslListDir(distro: string, dirPath: string): Promise<FolderListR
 }
 
 export function wslHomePath(distro: string): Promise<string> {
+  log.debug('wsl', `homePath: distro=${distro}`);
   return new Promise((resolve) => {
     execFile(
       'wsl.exe',

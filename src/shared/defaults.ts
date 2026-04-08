@@ -21,4 +21,5 @@ export const DEFAULT_SETTINGS: AppSettings = {
   scrollback: 5000,
   defaultMaxTabs: 5,
   keybindings: { ...DEFAULT_KEYBINDINGS },
+  logLevel: 'error' as const,
 };

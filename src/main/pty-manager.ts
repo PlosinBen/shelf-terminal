@@ -6,6 +6,7 @@ import path from 'path';
 import { IPC } from '../shared/ipc-channels';
 import { getControlPath } from './ssh-control';
 import type { Connection } from '../shared/types';
+import { log } from '../shared/logger';
 
 const ptys = new Map<string, pty.IPty>();
 
@@ -89,6 +90,9 @@ export function spawnPty(
     }
   }
 
+  log.info('pty', `spawn: shell=${shell} args=${JSON.stringify(args)} cwd=${spawnCwd} connection=${connection.type}`);
+  if (initScript) log.debug('pty', `initScript: ${initScript}`);
+
   const p = pty.spawn(shell, args, {
     name: 'xterm-256color',
     cols: 80,
@@ -136,6 +140,7 @@ export function spawnPty(
   });
 
   p.onExit(({ exitCode }) => {
+    log.info('pty', `exit: tabId=${tabId} exitCode=${exitCode}`);
     clearActivity(tabId);
     ptys.delete(tabId);
     if (!win.isDestroyed()) {

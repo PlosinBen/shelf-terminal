@@ -1,6 +1,7 @@
 import { execFile } from 'child_process';
 import type { FolderListResult } from '../shared/types';
 import { getControlPath } from './ssh-control';
+import { log } from '../shared/logger';
 
 export function sshListDir(
   host: string,
@@ -8,6 +9,7 @@ export function sshListDir(
   user: string,
   dirPath: string,
 ): Promise<FolderListResult> {
+  log.debug('ssh', `listDir: ${user}@${host}:${port} path=${dirPath}`);
   return new Promise((resolve) => {
     const controlPath = getControlPath(host, port, user);
     const cmd = `ls -1 -p ${shellEscape(dirPath)} 2>/dev/null | grep '/$' | sed 's|/$||'`;

@@ -74,6 +74,8 @@ export type KeybindingAction =
 
 export type KeybindingConfig = Record<KeybindingAction, string>;
 
+export type LogLevel = 'off' | 'error' | 'info' | 'debug';
+
 export interface AppSettings {
   fontSize: number;
   fontFamily: string;
@@ -81,6 +83,7 @@ export interface AppSettings {
   scrollback: number;
   defaultMaxTabs: number;
   keybindings: KeybindingConfig;
+  logLevel: LogLevel;
 }
 
 

@@ -10,6 +10,7 @@ import { initAutoUpdater, stopAutoUpdater } from './updater';
 import { cleanupControlSockets } from './ssh-control';
 import { sshListDir, sshGetHomePath } from './ssh-manager';
 import { wslListDir, wslHomePath } from './wsl-manager';
+import { log, setLogLevel } from '../shared/logger';
 import type { ProjectConfig, AppSettings, PtySpawnPayload, PtyInputPayload, PtyResizePayload, PtyKillPayload, FolderListPayload, SSHListDirPayload, WSLListDirPayload } from '../shared/types';
 
 // Isolate userData per environment to avoid config conflicts
@@ -101,6 +102,7 @@ ipcMain.handle(IPC.SETTINGS_LOAD, () => {
 
 ipcMain.handle(IPC.SETTINGS_SAVE, (_event, settings: AppSettings) => {
   saveSettings(settings);
+  setLogLevel(settings.logLevel);
 });
 
 // Renderer → Main (send, fire-and-forget)
@@ -115,6 +117,10 @@ ipcMain.on(IPC.PTY_RESIZE, (_event, payload: PtyResizePayload) => {
 // ── App lifecycle ──
 
 app.whenReady().then(() => {
+  const settings = loadSettings();
+  setLogLevel(settings.logLevel);
+  log.info('app', `starting, logLevel=${settings.logLevel}, userData=${app.getPath('userData')}`);
+
   createWindow();
   startCleanupTimer();
   if (process.env.NODE_ENV !== 'test' && app.isPackaged) {

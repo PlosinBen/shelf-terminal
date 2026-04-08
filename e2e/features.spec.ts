@@ -39,7 +39,7 @@ test('settings panel opens with mod+comma', async ({ shelfApp: { page } }) => {
   await expect(panel).toBeVisible({ timeout: 3_000 });
 
   // Has theme selector
-  const themeSelect = page.locator('.settings-select');
+  const themeSelect = page.locator('.settings-select').first();
   await expect(themeSelect).toBeVisible();
 
   // Has keybinding section

@@ -118,6 +118,20 @@ export function SettingsPanel() {
             />
           </div>
 
+          <div className="settings-group">
+            <label className="settings-label">Log Level</label>
+            <select
+              className="settings-select"
+              value={settings.logLevel}
+              onChange={(e) => updateSettings({ logLevel: e.target.value as any })}
+            >
+              <option value="off">Off</option>
+              <option value="error">Error</option>
+              <option value="info">Info</option>
+              <option value="debug">Debug</option>
+            </select>
+          </div>
+
           <div className="settings-divider" />
 
           <div className="settings-section-title">Keyboard Shortcuts</div>
