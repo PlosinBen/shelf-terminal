@@ -9,6 +9,7 @@ import {
   removeProject,
   useStore,
 } from '../store';
+import { disposeTerminal } from '../components/TerminalView';
 import type { KeybindingAction } from '../../shared/types';
 
 const isMac = navigator.platform.toUpperCase().includes('MAC');
@@ -60,6 +61,7 @@ export function useKeybindings() {
             e.preventDefault();
             activeProject.tabs.forEach((tab) => {
               window.shelfApi.pty.kill(tab.id);
+              disposeTerminal(tab.id);
             });
             removeProject(activeProjectIndex);
           }

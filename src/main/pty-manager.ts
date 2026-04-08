@@ -4,6 +4,7 @@ import os from 'os';
 import fs from 'fs';
 import path from 'path';
 import { IPC } from '../shared/ipc-channels';
+import { getControlPath } from './ssh-control';
 import type { Connection } from '../shared/types';
 
 const ptys = new Map<string, pty.IPty>();
@@ -35,19 +36,6 @@ function resolveShell(): string {
     if (c && fs.existsSync(c)) return c;
   }
   return '/bin/sh';
-}
-
-// SSH ControlMaster socket directory
-function getControlDir(): string {
-  const dir = path.join(os.tmpdir(), 'shelf-ssh-control');
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-  }
-  return dir;
-}
-
-function getControlPath(host: string, port: number, user: string): string {
-  return path.join(getControlDir(), `${user}@${host}:${port}`);
 }
 
 function buildSSHArgs(host: string, port: number, user: string, cwd: string): string[] {

@@ -8,6 +8,7 @@ import {
   reorderTabs,
   clearUnread,
 } from '../store';
+import { disposeTerminal } from './TerminalView';
 
 export function TabBar() {
   const { projects, activeProjectIndex } = useStore();
@@ -42,6 +43,7 @@ export function TabBar() {
     const tab = project.tabs[tabIndex];
     if (tab) {
       window.shelfApi.pty.kill(tab.id);
+      disposeTerminal(tab.id);
     }
     removeTab(activeProjectIndex, tabIndex);
   };

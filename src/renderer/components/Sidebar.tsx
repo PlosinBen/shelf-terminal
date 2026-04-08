@@ -5,6 +5,8 @@ import {
   removeProject,
   setEditingProject,
 } from '../store';
+import { disposeTerminal } from './TerminalView';
+
 export function Sidebar() {
   const { projects, activeProjectIndex } = useStore();
 
@@ -19,6 +21,7 @@ export function Sidebar() {
     // Kill all pty processes for this project
     proj.tabs.forEach((tab) => {
       window.shelfApi.pty.kill(tab.id);
+      disposeTerminal(tab.id);
     });
     removeProject(index);
     // Persist

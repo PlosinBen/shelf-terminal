@@ -1,20 +1,6 @@
 import { execFile } from 'child_process';
-import os from 'os';
-import path from 'path';
-import fs from 'fs';
 import type { FolderListResult } from '../shared/types';
-
-function getControlDir(): string {
-  const dir = path.join(os.tmpdir(), 'shelf-ssh-control');
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-  }
-  return dir;
-}
-
-function getControlPath(host: string, port: number, user: string): string {
-  return path.join(getControlDir(), `${user}@${host}:${port}`);
-}
+import { getControlPath } from './ssh-control';
 
 export function sshListDir(
   host: string,
