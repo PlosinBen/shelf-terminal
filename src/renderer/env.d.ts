@@ -19,6 +19,10 @@ interface ShelfApi {
     saveImage: (buffer: ArrayBuffer) => Promise<string>;
     saveImageRemote: (buffer: ArrayBuffer, host: string, port: number, user: string) => Promise<string>;
   };
+  wsl: {
+    listDir: (distro: string, dirPath: string) => Promise<import('../shared/types').FolderListResult>;
+    homePath: (distro: string) => Promise<string>;
+  };
   ssh: {
     listDir: (host: string, port: number, user: string, dirPath: string) => Promise<import('../shared/types').FolderListResult>;
   };

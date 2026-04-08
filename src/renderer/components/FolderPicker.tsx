@@ -52,17 +52,17 @@ export function FolderPicker() {
 
     try {
       const conn = connectionRef.current;
+      let result;
       if (conn.type === 'ssh') {
-        const result = await window.shelfApi.ssh.listDir(conn.host, conn.port, conn.user, dirPath);
-        setCurrentPath(result.path);
-        setEntries(result.entries);
-        setError(result.error ?? null);
+        result = await window.shelfApi.ssh.listDir(conn.host, conn.port, conn.user, dirPath);
+      } else if (conn.type === 'wsl') {
+        result = await window.shelfApi.wsl.listDir(conn.distro, dirPath);
       } else {
-        const result = await window.shelfApi.folder.list(dirPath);
-        setCurrentPath(result.path);
-        setEntries(result.entries);
-        setError(result.error ?? null);
+        result = await window.shelfApi.folder.list(dirPath);
       }
+      setCurrentPath(result.path);
+      setEntries(result.entries);
+      setError(result.error ?? null);
     } catch {
       setError('Failed to list folders');
     } finally {
@@ -118,7 +118,7 @@ export function FolderPicker() {
       setLoading(true);
       requestFolder(`/home/${conn.user}`);
     } else if (conn.type === 'wsl') {
-      const home = await window.shelfApi.folder.homePath();
+      const home = await window.shelfApi.wsl.homePath(conn.distro);
       requestFolder(home);
     }
   };

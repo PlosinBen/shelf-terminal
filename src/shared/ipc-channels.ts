@@ -20,6 +20,10 @@ export const IPC = {
   // SSH
   SSH_LIST_DIR: 'ssh:list-dir',
 
+  // WSL
+  WSL_LIST_DIR: 'wsl:list-dir',
+  WSL_HOME_PATH: 'wsl:home-path',
+
   // Main → Renderer (send)
   PTY_DATA: 'pty:data',
   PTY_EXIT: 'pty:exit',

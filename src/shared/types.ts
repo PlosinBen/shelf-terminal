@@ -91,6 +91,11 @@ export interface SSHListDirPayload {
   path: string;
 }
 
+export interface WSLListDirPayload {
+  distro: string;
+  path: string;
+}
+
 // ── FolderPicker ──
 
 export interface FolderListResult {

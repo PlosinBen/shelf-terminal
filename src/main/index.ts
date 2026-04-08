@@ -9,7 +9,8 @@ import { saveClipboardImage, saveClipboardImageRemote, startCleanupTimer, stopCl
 import { initAutoUpdater, stopAutoUpdater } from './updater';
 import { cleanupControlSockets } from './ssh-control';
 import { sshListDir } from './ssh-manager';
-import type { ProjectConfig, AppSettings, PtySpawnPayload, PtyInputPayload, PtyResizePayload, PtyKillPayload, FolderListPayload, SSHListDirPayload } from '../shared/types';
+import { wslListDir, wslHomePath } from './wsl-manager';
+import type { ProjectConfig, AppSettings, PtySpawnPayload, PtyInputPayload, PtyResizePayload, PtyKillPayload, FolderListPayload, SSHListDirPayload, WSLListDirPayload } from '../shared/types';
 
 // Isolate userData per environment to avoid config conflicts
 if (process.env.NODE_ENV) {
@@ -80,6 +81,14 @@ ipcMain.handle(IPC.CLIPBOARD_SAVE_IMAGE_REMOTE, (_event, payload: { buffer: Arra
 
 ipcMain.handle(IPC.SSH_LIST_DIR, (_event, payload: SSHListDirPayload) => {
   return sshListDir(payload.host, payload.port, payload.user, payload.path);
+});
+
+ipcMain.handle(IPC.WSL_LIST_DIR, (_event, payload: WSLListDirPayload) => {
+  return wslListDir(payload.distro, payload.path);
+});
+
+ipcMain.handle(IPC.WSL_HOME_PATH, (_event, distro: string) => {
+  return wslHomePath(distro);
 });
 
 ipcMain.handle(IPC.SETTINGS_LOAD, () => {

@@ -42,6 +42,12 @@ contextBridge.exposeInMainWorld('shelfApi', {
     saveImageRemote: (buffer: ArrayBuffer, host: string, port: number, user: string) =>
       ipcRenderer.invoke(IPC.CLIPBOARD_SAVE_IMAGE_REMOTE, { buffer, host, port, user }),
   },
+  wsl: {
+    listDir: (distro: string, dirPath: string) =>
+      ipcRenderer.invoke(IPC.WSL_LIST_DIR, { distro, path: dirPath }),
+    homePath: (distro: string) =>
+      ipcRenderer.invoke(IPC.WSL_HOME_PATH, distro),
+  },
   ssh: {
     listDir: (host: string, port: number, user: string, dirPath: string) =>
       ipcRenderer.invoke(IPC.SSH_LIST_DIR, { host, port, user, path: dirPath }),
