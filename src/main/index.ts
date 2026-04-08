@@ -8,8 +8,8 @@ import { loadSettings, saveSettings } from './settings-store';
 import { listDirectory, getHomePath } from './folder-list';
 import { saveClipboardImage, saveClipboardImageRemote, startCleanupTimer, stopCleanupTimer, cleanupAllImages } from './clipboard-image';
 import { initAutoUpdater, stopAutoUpdater } from './updater';
-import { cleanupControlSockets } from './ssh-control';
-import { sshListDir, sshGetHomePath } from './ssh-manager';
+import { cleanupControlSockets, checkConnection } from './ssh-control';
+import { sshListDir, sshGetHomePath, sshEstablishConnection } from './ssh-manager';
 import { wslListDir, wslHomePath, wslListDistros } from './wsl-manager';
 import { log, setLogLevel, setFileWriter } from '../shared/logger';
 import type { ProjectConfig, AppSettings, PtySpawnPayload, PtyInputPayload, PtyResizePayload, PtyKillPayload, FolderListPayload, SSHListDirPayload, WSLListDirPayload } from '../shared/types';
@@ -83,6 +83,14 @@ ipcMain.handle(IPC.CLIPBOARD_SAVE_IMAGE_REMOTE, (_event, payload: { buffer: Arra
 
 ipcMain.handle(IPC.SSH_LIST_DIR, (_event, payload: SSHListDirPayload) => {
   return sshListDir(payload.host, payload.port, payload.user, payload.path);
+});
+
+ipcMain.handle(IPC.SSH_CHECK_CONNECTION, (_event, payload: { host: string; port: number; user: string }) => {
+  return checkConnection(payload.host, payload.port, payload.user);
+});
+
+ipcMain.handle(IPC.SSH_ESTABLISH, (_event, payload: { host: string; port: number; user: string; password: string }) => {
+  return sshEstablishConnection(payload.host, payload.port, payload.user, payload.password);
 });
 
 ipcMain.handle(IPC.SSH_HOME_PATH, (_event, payload: { host: string; port: number; user: string }) => {

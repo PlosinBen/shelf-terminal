@@ -20,6 +20,8 @@ export const IPC = {
   // SSH
   SSH_LIST_DIR: 'ssh:list-dir',
   SSH_HOME_PATH: 'ssh:home-path',
+  SSH_CHECK_CONNECTION: 'ssh:check-connection',
+  SSH_ESTABLISH: 'ssh:establish',
 
   // WSL
   WSL_LIST_DIR: 'wsl:list-dir',

@@ -16,6 +16,7 @@ export function FolderPicker() {
   const [sshHost, setSshHost] = useState('');
   const [sshPort, setSshPort] = useState('22');
   const [sshUser, setSshUser] = useState('');
+  const [sshPassword, setSshPassword] = useState('');
 
   // WSL form state
   const [wslDistro, setWslDistro] = useState('Ubuntu');
@@ -78,6 +79,7 @@ export function FolderPicker() {
       setSshHost('');
       setSshPort('22');
       setSshUser('');
+      setSshPassword('');
       setWslDistro('Ubuntu');
     };
     return on(Events.OPEN_FOLDER_PICKER, handler);
@@ -101,6 +103,17 @@ export function FolderPicker() {
     setConnection(conn);
     connectionRef.current = conn;
     setStep('browse');
+
+    // Establish SSH connection with password if needed
+    if (conn.type === 'ssh' && conn.password) {
+      try {
+        await window.shelfApi.ssh.establish(conn.host, conn.port, conn.user, conn.password);
+      } catch {
+        setError('SSH authentication failed');
+        setStep('connection');
+        return;
+      }
+    }
 
     const home = await window.shelfApi.connector.homePath(conn);
     requestFolder(home);
@@ -223,10 +236,12 @@ export function FolderPicker() {
             sshHost={sshHost}
             sshPort={sshPort}
             sshUser={sshUser}
+            sshPassword={sshPassword}
             wslDistro={wslDistro}
             onSshHostChange={setSshHost}
             onSshPortChange={setSshPort}
             onSshUserChange={setSshUser}
+            onSshPasswordChange={setSshPassword}
             onWslDistroChange={setWslDistro}
             onSelect={proceedToBrowse}
             onCancel={handleCancel}
@@ -256,22 +271,25 @@ interface ConnectionStepProps {
   sshHost: string;
   sshPort: string;
   sshUser: string;
+  sshPassword: string;
   wslDistro: string;
   onSshHostChange: (v: string) => void;
   onSshPortChange: (v: string) => void;
   onSshUserChange: (v: string) => void;
+  onSshPasswordChange: (v: string) => void;
   onWslDistroChange: (v: string) => void;
   onSelect: (conn: Connection) => void;
   onCancel: () => void;
 }
 
 function ConnectionStep({
-  sshHost, sshPort, sshUser, wslDistro,
-  onSshHostChange, onSshPortChange, onSshUserChange, onWslDistroChange,
+  sshHost, sshPort, sshUser, sshPassword, wslDistro,
+  onSshHostChange, onSshPortChange, onSshUserChange, onSshPasswordChange, onWslDistroChange,
   onSelect, onCancel,
 }: ConnectionStepProps) {
   const [connType, setConnType] = useState<'local' | 'ssh' | 'wsl'>('local');
   const [wslDistros, setWslDistros] = useState<string[]>([]);
+  const [sshConnected, setSshConnected] = useState(false);
   const isWindows = navigator.platform.includes('Win');
 
   useEffect(() => {
@@ -283,13 +301,23 @@ function ConnectionStep({
     }
   }, [connType]);
 
+  // Check if SSH connection already exists
+  useEffect(() => {
+    if (connType !== 'ssh' || !sshHost || !sshUser) {
+      setSshConnected(false);
+      return;
+    }
+    const port = Number(sshPort) || 22;
+    window.shelfApi.ssh.checkConnection(sshHost, port, sshUser).then(setSshConnected);
+  }, [connType, sshHost, sshPort, sshUser]);
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (connType === 'local') {
       onSelect({ type: 'local' });
     } else if (connType === 'ssh') {
       if (!sshHost || !sshUser) return;
-      onSelect({ type: 'ssh', host: sshHost, port: Number(sshPort) || 22, user: sshUser });
+      onSelect({ type: 'ssh', host: sshHost, port: Number(sshPort) || 22, user: sshUser, password: sshConnected ? undefined : sshPassword || undefined });
     } else if (connType === 'wsl') {
       onSelect({ type: 'wsl', distro: wslDistro || 'Ubuntu' });
     }
@@ -357,6 +385,20 @@ function ConnectionStep({
                 placeholder="root"
               />
             </div>
+            <div className="conn-field">
+              <label className="conn-label">Password</label>
+              <input
+                className="conn-input"
+                type="password"
+                value={sshPassword}
+                onChange={(e) => onSshPasswordChange(e.target.value)}
+                placeholder="optional"
+                disabled={sshConnected}
+              />
+            </div>
+            {sshConnected && (
+              <div className="conn-local-hint">Already connected, password not required.</div>
+            )}
           </>
         )}
 

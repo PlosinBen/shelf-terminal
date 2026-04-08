@@ -15,6 +15,11 @@ export function getControlPath(host: string, port: number, user: string): string
   return path.join(getControlDir(), `${user}@${host}:${port}`);
 }
 
+export function checkConnection(host: string, port: number, user: string): boolean {
+  const socketPath = getControlPath(host, port, user);
+  return fs.existsSync(socketPath);
+}
+
 export function cleanupControlSockets(): void {
   if (fs.existsSync(CONTROL_DIR)) {
     fs.rmSync(CONTROL_DIR, { recursive: true, force: true });
