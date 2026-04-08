@@ -11,10 +11,12 @@ async function setupProject(page: any) {
   await page.keyboard.press('Enter');
   await expect(page.locator('.folder-picker-overlay')).not.toBeVisible({ timeout: 3_000 });
 
-  const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
-  await page.keyboard.press(`${modifier}+t`);
+  // Connect by clicking the connect prompt
+  const prompt = page.locator('.connect-prompt');
+  if (await prompt.isVisible({ timeout: 3_000 }).catch(() => false)) {
+    await prompt.click();
+  }
   await expect(page.locator('.tab-bar .tab')).toHaveCount(1, { timeout: 5_000 });
-  // Wait for terminal to initialize
   await page.waitForTimeout(1000);
 }
 

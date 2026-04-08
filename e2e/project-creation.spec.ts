@@ -84,29 +84,36 @@ test('select folder and create project', async ({ shelfApp: { page } }) => {
   expect(count).toBeGreaterThanOrEqual(1);
 });
 
-test('project has a terminal tab after Cmd+T', async ({ shelfApp: { page } }) => {
-  // Ensure project exists
-  if (await page.locator('.sidebar-item').count() === 0) {
-    await openFolderPicker(page);
-    await page.keyboard.press('Enter');
-    await expect(page.locator('.folder-picker-overlay')).not.toBeVisible({ timeout: 3_000 });
-  }
-
-  const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
-  await page.keyboard.press(`${modifier}+t`);
-
-  await expect(page.locator('.tab-bar .tab')).toHaveCount(1, { timeout: 5_000 });
+test('project shows connect prompt before connecting', async ({ shelfApp: { page } }) => {
+  const prompt = page.locator('.connect-prompt');
+  await expect(prompt).toBeVisible({ timeout: 5_000 });
 });
 
-test('terminal spawns and shows output', async ({ shelfApp: { page } }) => {
-  const terminal = page.locator('.terminal-container');
-  await expect(terminal).toBeVisible({ timeout: 5_000 });
+test('clicking connect prompt opens terminal', async ({ shelfApp: { page } }) => {
+  const prompt = page.locator('.connect-prompt');
+  if (await prompt.isVisible()) {
+    await prompt.click();
+  }
+
+  await expect(page.locator('.tab-bar .tab')).toHaveCount(1, { timeout: 5_000 });
 
   const xtermScreen = page.locator('.xterm-screen');
   await expect(xtermScreen).toBeVisible({ timeout: 10_000 });
+});
+
+test('Cmd+T adds another tab', async ({ shelfApp: { page } }) => {
+  const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
+  await page.keyboard.press(`${modifier}+t`);
+
+  await expect(page.locator('.tab-bar .tab')).toHaveCount(2, { timeout: 5_000 });
+});
+
+test('terminal spawns and shows output', async ({ shelfApp: { page } }) => {
+  const terminal = page.locator('.terminal-container:visible');
+  await expect(terminal).toBeVisible({ timeout: 5_000 });
 
   await page.waitForTimeout(2000);
-  const xtermRows = page.locator('.xterm-rows');
+  const xtermRows = terminal.locator('.xterm-rows');
   const text = await xtermRows.textContent();
   expect(text?.length).toBeGreaterThan(0);
 });

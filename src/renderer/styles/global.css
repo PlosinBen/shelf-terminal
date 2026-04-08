@@ -322,6 +322,29 @@ button {
   color: var(--text);
 }
 
+/* ── Connect Prompt ── */
+
+.connect-prompt {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--text-muted);
+  font-size: 14px;
+  cursor: pointer;
+  outline: none;
+}
+
+.connect-prompt:hover,
+.connect-prompt:focus {
+  color: var(--text);
+}
+
+.connect-prompt strong {
+  color: var(--accent);
+  margin-left: 4px;
+}
+
 /* ── Terminal ── */
 
 .terminal-view {

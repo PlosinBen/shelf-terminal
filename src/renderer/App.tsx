@@ -10,7 +10,7 @@ import { useKeybindings } from './hooks/useKeybindings';
 import { useStore, setProjects, setSettings, addProject, addTab, removeTab, removeProject } from './store';
 import type { ProjectConfig } from '../shared/types';
 import { disposeTerminal } from './components/TerminalView';
-import { on, Events } from './events';
+import { on, emit, Events } from './events';
 import { getTheme } from './themes';
 import './styles/global.css';
 
@@ -56,28 +56,27 @@ export function App() {
       }
     });
 
+    const offConnectProject = on(Events.CONNECT_PROJECT, (projectIndex: number) => {
+      const proj = projects[projectIndex];
+      if (!proj || proj.tabs.length > 0) return;
+      const tab = addTab(projectIndex);
+      if (tab) {
+        window.shelfApi.pty.spawn(proj.config.id, tab.id, proj.config.cwd, proj.config.connection, proj.config.initScript);
+      }
+    });
+
     const offAddProject = on(Events.ADD_PROJECT, async (config: ProjectConfig) => {
       addProject(config);
-      // Persist after addProject updates the store
       const configs = [...projects.map((p) => p.config), config];
       await window.shelfApi.project.save(configs);
     });
 
-    return () => { offCloseTab(); offCloseProject(); offNewTab(); offAddProject(); };
+    return () => { offCloseTab(); offCloseProject(); offNewTab(); offConnectProject(); offAddProject(); };
   }, [projects]);
 
   useEffect(() => {
-    // Load projects on startup and spawn one tab each
-    window.shelfApi.project.load().then((configs) => {
-      setProjects(configs);
-      // Auto-open one tab per project (Task #12: App restart recovery)
-      configs.forEach((_, i) => {
-        const tab = addTab(i);
-        if (tab) {
-          window.shelfApi.pty.spawn(configs[i].id, tab.id, configs[i].cwd, configs[i].connection, configs[i].initScript);
-        }
-      });
-    });
+    // Load projects on startup (no auto-connect)
+    window.shelfApi.project.load().then(setProjects);
   }, []);
 
   const theme = getTheme(settings.themeName);
@@ -102,7 +101,17 @@ export function App() {
         <TabBar />
         <div className="terminal-view">
           <SearchBar />
-          {activeProject && activeProject.tabs.map((tab, i) => (
+          {activeProject && activeProject.tabs.length === 0 ? (
+            <div
+              className="connect-prompt"
+              onClick={() => emit(Events.CONNECT_PROJECT, activeProjectIndex)}
+              onKeyDown={(e) => { if (e.key === 'Enter') emit(Events.CONNECT_PROJECT, activeProjectIndex); }}
+              tabIndex={0}
+              ref={(el) => el?.focus()}
+            >
+              Click or press Enter to connect to <strong>{activeProject.config.name}</strong>
+            </div>
+          ) : activeProject && activeProject.tabs.map((tab, i) => (
             <TerminalView
               key={tab.id}
               tabId={tab.id}
