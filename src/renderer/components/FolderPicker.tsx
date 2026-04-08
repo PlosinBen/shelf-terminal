@@ -104,10 +104,10 @@ export function FolderPicker() {
     connectionRef.current = conn;
     setStep('browse');
 
-    // Establish SSH connection with password if needed
+    // Establish connection if needed (e.g. SSH with password)
     if (conn.type === 'ssh' && conn.password) {
       try {
-        await window.shelfApi.ssh.establish(conn.host, conn.port, conn.user, conn.password);
+        await window.shelfApi.connector.connect(conn, conn.password);
       } catch {
         setError('SSH authentication failed');
         setStep('connection');
@@ -308,7 +308,8 @@ function ConnectionStep({
       return;
     }
     const port = Number(sshPort) || 22;
-    window.shelfApi.ssh.checkConnection(sshHost, port, sshUser).then(setSshConnected);
+    const conn = { type: 'ssh' as const, host: sshHost, port, user: sshUser };
+    window.shelfApi.connector.isConnected(conn).then(setSshConnected);
   }, [connType, sshHost, sshPort, sshUser]);
 
   const handleSubmit = (e: React.FormEvent) => {

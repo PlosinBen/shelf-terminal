@@ -14,6 +14,8 @@ interface ShelfApi {
   connector: {
     listDir: (connection: import('../shared/types').Connection, dirPath: string) => Promise<import('../shared/types').FolderListResult>;
     homePath: (connection: import('../shared/types').Connection) => Promise<string>;
+    isConnected: (connection: import('../shared/types').Connection) => Promise<boolean>;
+    connect: (connection: import('../shared/types').Connection, password?: string) => Promise<void>;
   };
   project: {
     load: () => Promise<import('../shared/types').ProjectConfig[]>;
@@ -31,8 +33,6 @@ interface ShelfApi {
   ssh: {
     listDir: (host: string, port: number, user: string, dirPath: string) => Promise<import('../shared/types').FolderListResult>;
     homePath: (host: string, port: number, user: string) => Promise<string>;
-    checkConnection: (host: string, port: number, user: string) => Promise<boolean>;
-    establish: (host: string, port: number, user: string, password: string) => Promise<void>;
   };
   settings: {
     load: () => Promise<import('../shared/types').AppSettings>;
