@@ -5,13 +5,13 @@ import os from 'os';
 
 function clearProjectsData() {
   const userDataDir = process.platform === 'darwin'
-    ? path.join(os.homedir(), 'Library', 'Application Support', 'shelf-terminal')
-    : path.join(os.homedir(), '.config', 'shelf-terminal');
+    ? path.join(os.homedir(), 'Library', 'Application Support', 'shelf-terminal-test')
+    : path.join(os.homedir(), '.config', 'shelf-terminal-test');
 
-  const projectsFile = path.join(userDataDir, 'projects.json');
-  if (fs.existsSync(projectsFile)) {
-    fs.writeFileSync(projectsFile, '[]', 'utf-8');
+  if (!fs.existsSync(userDataDir)) {
+    fs.mkdirSync(userDataDir, { recursive: true });
   }
+  fs.writeFileSync(path.join(userDataDir, 'projects.json'), '[]', 'utf-8');
 }
 
 /**

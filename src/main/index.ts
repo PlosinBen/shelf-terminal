@@ -11,6 +11,11 @@ import { cleanupControlSockets } from './ssh-control';
 import { sshListDir } from './ssh-manager';
 import type { ProjectConfig, AppSettings, PtySpawnPayload, PtyInputPayload, PtyResizePayload, PtyKillPayload, FolderListPayload, SSHListDirPayload } from '../shared/types';
 
+// Isolate userData per environment to avoid config conflicts
+if (process.env.NODE_ENV) {
+  app.setPath('userData', app.getPath('userData') + '-' + process.env.NODE_ENV);
+}
+
 let mainWindow: BrowserWindow | null = null;
 
 function createWindow() {
