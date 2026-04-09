@@ -97,3 +97,33 @@
 **原因**: flex 讓兩個 pane 自動分配寬度，ResizeObserver 自動觸發 xterm fit。不需要手動計算尺寸。
 
 **不要改**: 用 absolute 定位需要手動計算寬度和 resize，增加複雜度。
+
+---
+
+## 11. ConnectionManager 抽象層
+
+**決策**: `connection-manager.ts` 封裝 `isConnected()` / `connect()` / `cleanup()`，統一 local/SSH/WSL 連線狀態管理。Preload 的 `connector` namespace 統一暴露 `listDir` / `homePath` / `isConnected` / `connect`。
+
+**原因**: FolderPicker 不需要知道 ControlMaster socket 路徑、SSH establish 方式等底層細節。統一介面後新增 connection type 只改 ConnectionManager，UI 不動。
+
+**不要改**: 如果讓 renderer 直接判斷 connection type 再呼叫不同 API，每個用到連線的地方都要重複 switch。
+
+---
+
+## 12. Terminal 持久渲染（不 unmount）
+
+**決策**: 所有 project 的所有 tab 都持久渲染，用 `display: none` 隱藏非 active 的。切換 project/tab 只改 visibility。
+
+**原因**: 如果只渲染 activeProject 的 tabs，切換 project 時 React unmount → remount → 重新 spawn pty，丟失 terminal 狀態。
+
+**不要改**: unmount/remount 會導致 pty 重複 spawn 和 terminal 內容遺失。
+
+---
+
+## 13. TerminalView 是唯一 spawn 點
+
+**決策**: 只有 `TerminalView` 的 useEffect mount 時呼叫 `pty.spawn`。Event handler（NEW_TAB、CONNECT_PROJECT）只負責 `addTab()`。
+
+**原因**: 之前 event handler 和 TerminalView 都 spawn，導致每個 tab 被 spawn 兩次。
+
+**不要改**: 如果在 event handler 也 spawn，會跟 TerminalView mount 重複。

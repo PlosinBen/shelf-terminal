@@ -13,6 +13,7 @@
 | SSH 遠端目錄列表 | `ssh-manager.ts` | `sshListDir()` + `sshGetHomePath()`，透過 SSH exec |
 | WSL 目錄列表 | `wsl-manager.ts` | `wslListDir()` + `wslHomePath()`，透過 `wsl.exe` |
 | SSH ControlMaster 管理 | `ssh-control.ts` | socket 路徑產生、app quit 時清理 |
+| 連線管理抽象層 | `connection-manager.ts` | `isConnected()` / `connect()` / `cleanup()`，統一 local/SSH/WSL |
 | 圖片貼上 / SCP | `clipboard-image.ts` | 本機存檔 + SSH SCP 到遠端、定時清理 |
 | 自動更新 | `updater.ts` | electron-updater，用戶確認後才下載安裝 |
 
@@ -31,7 +32,7 @@
 | 資料夾瀏覽器 | `components/FolderBrowser.tsx` | 純展示元件，顯示目錄清單和 keyboard hints |
 | Terminal 搜尋 | `components/SearchBar.tsx` | xterm SearchAddon 整合，Enter/Shift+Enter 搜尋 |
 | Settings 面板 | `components/SettingsPanel.tsx` | Theme/font/scrollback/keybinding 設定 + 錄製模式 |
-| Project 編輯面板 | `components/ProjectEditPanel.tsx` | 改名、init script 編輯 |
+| Project 編輯面板 | `components/ProjectEditPanel.tsx` | 改名、init script、default tabs 編輯（拖曳排序） |
 | 主題定義 | `themes.ts` | 5 個內建主題（terminal + UI 色彩） |
 | Window API 型別 | `env.d.ts` | `window.shelfApi` TypeScript 宣告 |
 | React entry | `main.tsx` | `createRoot` + `<App />` |
@@ -42,6 +43,7 @@
 |--------|------|-------------|
 | Type 定義 | `types.ts` | Connection, ProjectConfig, AppSettings, IPC payloads, KeybindingAction |
 | IPC channel 常數 | `ipc-channels.ts` | 所有 IPC channel name，避免 string typo |
+| Logger | `logger.ts` | 統一 log 模組，支援 file writer、log level、env override |
 | 預設值 | `defaults.ts` | DEFAULT_SETTINGS, DEFAULT_KEYBINDINGS |
 
 ## Config / CI

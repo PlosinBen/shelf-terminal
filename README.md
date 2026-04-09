@@ -8,17 +8,19 @@ Cross-platform, project-based terminal manager built with Electron. Replaces tmu
 - **Lazy connect** — projects load without auto-connecting; click or press Enter to open terminal
 - **Terminal tabs** — per-project tabs backed by real pty processes (node-pty + xterm.js)
 - **Split pane** — left/right split within a project (mod+\\)
-- **SSH / WSL** — connect to remote hosts via SSH (ControlMaster multiplexing) or WSL
+- **SSH / WSL** — connect to remote hosts via SSH (ControlMaster multiplexing, password auth) or WSL (distro dropdown)
 - **Themes** — 5 built-in themes (Catppuccin Mocha/Latte, Dracula, Nord, Tokyo Night)
 - **Terminal search** — search scrollback buffer (mod+F)
 - **Tab management** — double-click to rename, drag to reorder, mod+1~9 to switch
 - **Tab badge** — unread indicator on background tabs with new output
 - **Project management** — drag to reorder, right-click context menu (Edit, Connect/Disconnect, Close)
 - **Init script** — per-project startup commands (e.g. `nvm use 22`, `conda activate`)
+- **Default tabs** — per-project tab templates with individual commands, auto-opened on connect
 - **Custom keybindings** — all shortcuts configurable via Settings panel
 - **Image paste** — paste screenshots into terminal as temp file paths (SCP for SSH sessions)
 - **Background notifications** — system notification when long-running commands finish
-- **Settings** — font, theme, scrollback, keybindings, persisted to `settings.json`
+- **Settings** — font, theme, scrollback, keybindings, log level, persisted to `settings.json`
+- **Logging** — date-based log files, configurable level (off/error/info/debug), `LOG_LEVEL` env override
 - **Auto-updater** — checks GitHub Releases, user confirms before downloading
 
 ## Tech Stack
@@ -77,7 +79,7 @@ src/
   main/           # Electron main process, pty management, IPC handlers
   renderer/       # React UI, xterm.js, store, themes, event bus
   shared/         # Type definitions, IPC channels, defaults
-e2e/              # Playwright E2E tests (16 tests)
+e2e/              # Playwright E2E tests (25 tests)
 ```
 
 ## Testing
@@ -86,6 +88,13 @@ e2e/              # Playwright E2E tests (16 tests)
 # Run all E2E tests (builds first)
 npm run test:e2e
 ```
+
+## macOS — Unsigned App
+
+The app is not code-signed. On first launch macOS will block it. To open:
+
+1. Right-click `Shelf.app` → Open (or System Settings → Privacy & Security → Open Anyway)
+2. Or run: `xattr -cr /Applications/Shelf.app`
 
 ## Settings
 
