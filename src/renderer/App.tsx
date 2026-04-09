@@ -7,7 +7,7 @@ import { SettingsPanel } from './components/SettingsPanel';
 import { SearchBar } from './components/SearchBar';
 import { ProjectEditPanel } from './components/ProjectEditPanel';
 import { useKeybindings } from './hooks/useKeybindings';
-import { useStore, setProjects, setSettings, setUpdateAvailable, addProject, addTab, removeTab, removeProject, setSplitTab, toggleSidebar, clearUnread } from './store';
+import { useStore, setProjects, setSettings, setUpdateAvailable, addProject, addTab, setActiveTab, removeTab, removeProject, setSplitTab, toggleSidebar, clearUnread } from './store';
 import type { ProjectConfig } from '../shared/types';
 import { disposeTerminal } from './components/TerminalView';
 import { on, emit, Events } from './events';
@@ -66,6 +66,7 @@ export function App() {
       const templates = proj.config.defaultTabs;
       if (templates && templates.length > 0) {
         templates.forEach((t) => addTab(projectIndex, t.name, t.cmd));
+        setActiveTab(projectIndex, 0);
       } else {
         addTab(projectIndex);
       }
