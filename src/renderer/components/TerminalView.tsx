@@ -60,6 +60,15 @@ export function TerminalView({ tabId, projectId, cwd, connection, initScript, ta
     const { term, fitAddon } = cached;
     term.open(container);
 
+    // Let browser handle Ctrl+V (paste) and Ctrl+C (copy when selected) on non-Mac
+    if (!navigator.platform.toUpperCase().includes('MAC')) {
+      term.attachCustomKeyEventHandler((e) => {
+        if (e.ctrlKey && e.key === 'v' && e.type === 'keydown') return false;
+        if (e.ctrlKey && e.key === 'c' && e.type === 'keydown' && term.hasSelection()) return false;
+        return true;
+      });
+    }
+
     // Fit after open
     requestAnimationFrame(() => {
       fitAddon.fit();
