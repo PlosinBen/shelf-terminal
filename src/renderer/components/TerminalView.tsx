@@ -93,14 +93,19 @@ export function TerminalView({ tabId, projectId, cwd, connection, initScript, ta
     });
     resizeObserver.observe(container);
 
-    // Image paste: intercept only when clipboard has image but no text
+    // Image paste: intercept when clipboard has image data
     const handlePaste = async (e: ClipboardEvent) => {
       const items = e.clipboardData?.items;
       if (!items) return;
 
-      // If there's text content, let xterm handle normal text paste
-      const hasText = Array.from(items).some((item) => item.type === 'text/plain');
-      if (hasText) return;
+      const itemTypes = Array.from(items).map((item) => item.type);
+      const hasImage = itemTypes.some((t) => t.startsWith('image/'));
+      if (!hasImage) return;
+
+      // text/html means rich text copy (e.g. browser) where image is just
+      // a favicon — let xterm handle it as text paste
+      const hasHtml = itemTypes.includes('text/html');
+      if (hasHtml) return;
 
       for (const item of items) {
         if (item.type.startsWith('image/')) {
@@ -126,14 +131,15 @@ export function TerminalView({ tabId, projectId, cwd, connection, initScript, ta
         }
       }
     };
-    container.addEventListener('paste', handlePaste);
+    // Use capture phase so we intercept before xterm's own paste handler
+    container.addEventListener('paste', handlePaste, true);
 
     return () => {
       onDataDispose.dispose();
       onResizeDispose.dispose();
       removeDataListener();
       resizeObserver.disconnect();
-      container.removeEventListener('paste', handlePaste);
+      container.removeEventListener('paste', handlePaste, true);
     };
   }, [tabId]);
 
