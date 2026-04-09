@@ -105,13 +105,30 @@ export function spawnPty(
   ptys.set(tabId, p);
 
   if (initScript || tabCmd) {
+    // Wait for shell to produce first output (prompt ready) before sending
+    let sent = false;
+    const dispose = p.onData(function onFirstOutput() {
+      if (sent) return;
+      sent = true;
+      dispose.dispose();
+      // Brief delay after first output to let prompt fully render
+      setTimeout(() => {
+        if (initScript) p.write(initScript + '\n');
+        if (tabCmd) {
+          setTimeout(() => p.write(tabCmd + '\n'), initScript ? 200 : 0);
+        }
+      }, 100);
+    });
+    // Fallback in case shell produces no output (e.g. SSH key prompt)
     setTimeout(() => {
+      if (sent) return;
+      sent = true;
+      dispose.dispose();
       if (initScript) p.write(initScript + '\n');
       if (tabCmd) {
-        // Extra delay after initScript to let env settle
         setTimeout(() => p.write(tabCmd + '\n'), initScript ? 200 : 0);
       }
-    }, 300);
+    }, 5000);
   }
 
   p.onData((data) => {
