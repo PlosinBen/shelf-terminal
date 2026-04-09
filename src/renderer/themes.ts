@@ -204,5 +204,11 @@ export const themes: ShelfTheme[] = [
 ];
 
 export function getTheme(name: string): ShelfTheme {
-  return themes.find((t) => t.name === name) ?? catppuccinMocha;
+  const theme = themes.find((t) => t.name === name) ?? catppuccinMocha;
+  if (!theme.terminal.scrollbarSliderBackground) {
+    theme.terminal.scrollbarSliderBackground = theme.ui.border;
+    theme.terminal.scrollbarSliderHoverBackground = theme.ui.textMuted;
+    theme.terminal.scrollbarSliderActiveBackground = theme.ui.textMuted;
+  }
+  return theme;
 }
