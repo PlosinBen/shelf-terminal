@@ -3,8 +3,8 @@ import { IPC } from '../shared/ipc-channels';
 
 contextBridge.exposeInMainWorld('shelfApi', {
   pty: {
-    spawn: (projectId: string, tabId: string, cwd: string, connection: unknown, initScript?: string) =>
-      ipcRenderer.invoke(IPC.PTY_SPAWN, { projectId, tabId, cwd, connection, initScript }),
+    spawn: (projectId: string, tabId: string, cwd: string, connection: unknown, initScript?: string, tabCmd?: string) =>
+      ipcRenderer.invoke(IPC.PTY_SPAWN, { projectId, tabId, cwd, connection, initScript, tabCmd }),
     input: (tabId: string, data: string) =>
       ipcRenderer.send(IPC.PTY_INPUT, { tabId, data }),
     resize: (tabId: string, cols: number, rows: number) =>

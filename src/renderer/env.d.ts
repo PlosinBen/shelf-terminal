@@ -1,6 +1,6 @@
 interface ShelfApi {
   pty: {
-    spawn: (projectId: string, tabId: string, cwd: string, connection: import('../shared/types').Connection, initScript?: string) => Promise<void>;
+    spawn: (projectId: string, tabId: string, cwd: string, connection: import('../shared/types').Connection, initScript?: string, tabCmd?: string) => Promise<void>;
     input: (tabId: string, data: string) => void;
     resize: (tabId: string, cols: number, rows: number) => void;
     kill: (tabId: string) => Promise<void>;

@@ -7,6 +7,7 @@ import { DEFAULT_SETTINGS } from '../shared/defaults';
 export interface Tab {
   id: string;
   label: string;
+  cmd?: string;
   hasUnread: boolean;
 }
 
@@ -121,14 +122,15 @@ export function toggleSidebar() {
   updateSnapshot();
 }
 
-export function addTab(projectIndex: number): Tab | null {
+export function addTab(projectIndex: number, name?: string, cmd?: string): Tab | null {
   const proj = projects[projectIndex];
   if (!proj || proj.tabs.length >= proj.config.maxTabs) return null;
 
   nextTabCounter++;
   const tab: Tab = {
     id: `tab-${Date.now()}-${nextTabCounter}`,
-    label: `Terminal ${proj.tabs.length + 1}`,
+    label: name || `Terminal ${proj.tabs.length + 1}`,
+    cmd,
     hasUnread: false,
   };
 

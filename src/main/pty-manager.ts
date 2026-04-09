@@ -63,6 +63,7 @@ export function spawnPty(
   connection: Connection,
   win: BrowserWindow,
   initScript?: string,
+  tabCmd?: string,
 ): void {
   let shell: string;
   let args: string[];
@@ -103,10 +104,13 @@ export function spawnPty(
 
   ptys.set(tabId, p);
 
-  if (initScript) {
-    // Small delay to let shell initialize before sending init script
+  if (initScript || tabCmd) {
     setTimeout(() => {
-      p.write(initScript + '\n');
+      if (initScript) p.write(initScript + '\n');
+      if (tabCmd) {
+        // Extra delay after initScript to let env settle
+        setTimeout(() => p.write(tabCmd + '\n'), initScript ? 200 : 0);
+      }
     }, 300);
   }
 

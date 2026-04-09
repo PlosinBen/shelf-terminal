@@ -49,7 +49,7 @@ function createWindow() {
 // Renderer → Main (invoke, returns result)
 ipcMain.handle(IPC.PTY_SPAWN, (_event, payload: PtySpawnPayload) => {
   if (mainWindow) {
-    spawnPty(payload.tabId, payload.cwd, payload.connection, mainWindow, payload.initScript);
+    spawnPty(payload.tabId, payload.cwd, payload.connection, mainWindow, payload.initScript, payload.tabCmd);
   }
 });
 

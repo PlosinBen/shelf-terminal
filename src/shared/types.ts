@@ -7,6 +7,11 @@ export type Connection = LocalConnection | SSHConnection | WSLConnection;
 
 // ── Project config (persisted) ──
 
+export interface TabTemplate {
+  name: string;
+  cmd?: string;
+}
+
 export interface ProjectConfig {
   id: string;
   name: string;
@@ -14,6 +19,7 @@ export interface ProjectConfig {
   connection: Connection;
   maxTabs: number;
   initScript?: string;
+  defaultTabs?: TabTemplate[];
 }
 
 // ── IPC payloads: Renderer → Main ──
@@ -24,6 +30,7 @@ export interface PtySpawnPayload {
   cwd: string;
   connection: Connection;
   initScript?: string;
+  tabCmd?: string;
 }
 
 export interface PtyInputPayload {

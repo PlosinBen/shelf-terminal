@@ -15,7 +15,7 @@ import { getTheme } from './themes';
 import './styles/global.css';
 
 export function App() {
-  const { projects, activeProjectIndex, sidebarVisible, settings } = useStore();
+  const { projects, activeProjectIndex, sidebarVisible, settingsVisible, editingProjectIndex, settings } = useStore();
   useKeybindings();
 
   useEffect(() => {
@@ -56,7 +56,13 @@ export function App() {
     const offConnectProject = on(Events.CONNECT_PROJECT, (projectIndex: number) => {
       const proj = projects[projectIndex];
       if (!proj || proj.tabs.length > 0) return;
-      addTab(projectIndex);
+
+      const templates = proj.config.defaultTabs;
+      if (templates && templates.length > 0) {
+        templates.forEach((t) => addTab(projectIndex, t.name, t.cmd));
+      } else {
+        addTab(projectIndex);
+      }
     });
 
     const offDisconnectProject = on(Events.DISCONNECT_PROJECT, (projectIndex: number) => {
@@ -110,17 +116,24 @@ export function App() {
     window.shelfApi.project.load().then(setProjects);
   }, []);
 
-  // Re-focus active terminal when window regains focus
+  // Re-focus active terminal when window regains focus or panels close
+  const focusTerminal = () => {
+    requestAnimationFrame(() => {
+      const textarea = document.querySelector('.terminal-container:not([style*="display: none"]) .xterm-helper-textarea') as HTMLElement;
+      textarea?.focus();
+    });
+  };
+
   useEffect(() => {
-    const handleFocus = () => {
-      requestAnimationFrame(() => {
-        const textarea = document.querySelector('.terminal-container:not([style*="display: none"]) .xterm-helper-textarea') as HTMLElement;
-        textarea?.focus();
-      });
-    };
-    window.addEventListener('focus', handleFocus);
-    return () => window.removeEventListener('focus', handleFocus);
+    window.addEventListener('focus', focusTerminal);
+    return () => window.removeEventListener('focus', focusTerminal);
   }, []);
+
+  useEffect(() => {
+    if (!settingsVisible && editingProjectIndex === null) {
+      focusTerminal();
+    }
+  }, [settingsVisible, editingProjectIndex]);
 
   const theme = getTheme(settings.themeName);
 
@@ -177,6 +190,7 @@ export function App() {
                       cwd={proj.config.cwd}
                       connection={proj.config.connection}
                       initScript={proj.config.initScript}
+                      tabCmd={tab.cmd}
                       visible={visible}
                     />
                   </div>
