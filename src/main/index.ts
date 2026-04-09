@@ -2,7 +2,7 @@ import { app, BrowserWindow, ipcMain } from 'electron';
 import path from 'path';
 import fs from 'fs';
 import { IPC } from '../shared/ipc-channels';
-import { spawnPty, writePty, resizePty, killPty, killAllPtys } from './pty-manager';
+import { spawnPty, writePty, resizePty, killPty, killAllPtys, setMuted } from './pty-manager';
 import { loadProjects, saveProjects } from './project-store';
 import { loadSettings, saveSettings } from './settings-store';
 import { listDirectory, getHomePath } from './folder-list';
@@ -142,6 +142,10 @@ ipcMain.on(IPC.PTY_INPUT, (_event, payload: PtyInputPayload) => {
 
 ipcMain.on(IPC.PTY_RESIZE, (_event, payload: PtyResizePayload) => {
   resizePty(payload.tabId, payload.cols, payload.rows);
+});
+
+ipcMain.on(IPC.PTY_MUTE, (_event, payload: { tabId: string; muted: boolean }) => {
+  setMuted(payload.tabId, payload.muted);
 });
 
 // ── App lifecycle ──

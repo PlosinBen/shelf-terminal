@@ -338,6 +338,12 @@ button {
   border-left: 2px solid var(--accent);
 }
 
+.tab-muted {
+  font-size: 10px;
+  opacity: 0.5;
+  flex-shrink: 0;
+}
+
 .tab-badge {
   width: 6px;
   height: 6px;

@@ -6,6 +6,7 @@ interface ShelfApi {
     input: (tabId: string, data: string) => void;
     resize: (tabId: string, cols: number, rows: number) => void;
     kill: (tabId: string) => Promise<void>;
+    mute: (tabId: string, muted: boolean) => void;
     onData: (callback: (tabId: string, data: string) => void) => () => void;
     onExit: (callback: (tabId: string, exitCode: number) => void) => () => void;
   };

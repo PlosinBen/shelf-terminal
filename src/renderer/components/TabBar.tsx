@@ -6,6 +6,7 @@ import {
   reorderTabs,
   clearUnread,
   toggleSidebar,
+  toggleMuted,
 } from '../store';
 import { emit, Events } from '../events';
 
@@ -17,7 +18,9 @@ export function TabBar() {
   const [editValue, setEditValue] = useState('');
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ index: number; x: number; y: number } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (editingIndex !== null && inputRef.current) {
@@ -25,6 +28,17 @@ export function TabBar() {
       inputRef.current.select();
     }
   }, [editingIndex]);
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    const handler = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setContextMenu(null);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [contextMenu]);
 
   if (!project) {
     return (
@@ -99,6 +113,7 @@ export function TabBar() {
             className={`tab ${i === project.activeTabIndex ? 'active' : ''} ${isDragging ? 'dragging' : ''} ${isDragOver ? 'drag-over' : ''}`}
             onClick={() => { clearUnread(activeProjectIndex, i); setActiveTab(activeProjectIndex, i); }}
             onDoubleClick={() => handleDoubleClick(i)}
+            onContextMenu={(e) => { e.preventDefault(); setContextMenu({ index: i, x: e.clientX, y: e.clientY }); }}
             draggable={!isEditing}
             onDragStart={(e) => handleDragStart(e, i)}
             onDragOver={(e) => handleDragOver(e, i)}
@@ -121,6 +136,7 @@ export function TabBar() {
             ) : (
               <>
                 <span className="tab-label">{tab.label}</span>
+                {tab.muted && <span className="tab-muted" title="Notifications muted">&#x1F515;</span>}
                 {tab.hasUnread && <span className="tab-badge" />}
               </>
             )}
@@ -141,6 +157,31 @@ export function TabBar() {
       >
         +
       </button>
+
+      {contextMenu && (() => {
+        const tab = project.tabs[contextMenu.index];
+        if (!tab) return null;
+        return (
+          <div
+            ref={menuRef}
+            className="context-menu"
+            style={{ top: contextMenu.y, left: contextMenu.x }}
+          >
+            <button
+              className="context-menu-item"
+              onClick={() => { toggleMuted(activeProjectIndex, contextMenu.index); setContextMenu(null); }}
+            >
+              {tab.muted ? 'Unmute' : 'Mute'}
+            </button>
+            <button
+              className="context-menu-item context-menu-item-danger"
+              onClick={() => { emit(Events.CLOSE_TAB, activeProjectIndex, contextMenu.index); setContextMenu(null); }}
+            >
+              Close
+            </button>
+          </div>
+        );
+      })()}
     </div>
   );
 }

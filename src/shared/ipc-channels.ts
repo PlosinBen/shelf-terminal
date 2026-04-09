@@ -12,6 +12,7 @@ export const IPC = {
   // Renderer → Main (send, no response)
   PTY_INPUT: 'pty:input',
   PTY_RESIZE: 'pty:resize',
+  PTY_MUTE: 'pty:mute',
 
   // Settings
   SETTINGS_LOAD: 'settings:load',

@@ -11,6 +11,8 @@ contextBridge.exposeInMainWorld('shelfApi', {
       ipcRenderer.send(IPC.PTY_RESIZE, { tabId, cols, rows }),
     kill: (tabId: string) =>
       ipcRenderer.invoke(IPC.PTY_KILL, { tabId }),
+    mute: (tabId: string, muted: boolean) =>
+      ipcRenderer.send(IPC.PTY_MUTE, { tabId, muted }),
     onData: (callback: (tabId: string, data: string) => void) => {
       const listener = (_event: Electron.IpcRendererEvent, payload: { tabId: string; data: string }) => {
         callback(payload.tabId, payload.data);

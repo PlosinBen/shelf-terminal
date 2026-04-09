@@ -20,6 +20,7 @@ interface ActivityState {
   userInput: boolean;  // true after user types; reset after notification
 }
 const activity = new Map<string, ActivityState>();
+const mutedTabs = new Set<string>();
 
 function clearActivity(tabId: string) {
   const state = activity.get(tabId);
@@ -155,7 +156,7 @@ export function spawnPty(
     if (state.idleTimer) clearTimeout(state.idleTimer);
     state.idleTimer = setTimeout(() => {
       const duration = state!.lastDataTime - state!.firstDataTime;
-      if (duration >= MIN_ACTIVE_MS && state!.userInput && !win.isDestroyed() && !win.isFocused()) {
+      if (duration >= MIN_ACTIVE_MS && state!.userInput && !mutedTabs.has(tabId) && !win.isDestroyed() && !win.isFocused()) {
         new Notification({
           title: 'Shelf Terminal',
           body: 'Command finished',
@@ -176,6 +177,14 @@ export function spawnPty(
       win.webContents.send(IPC.PTY_EXIT, { tabId, exitCode });
     }
   });
+}
+
+export function setMuted(tabId: string, muted: boolean) {
+  if (muted) {
+    mutedTabs.add(tabId);
+  } else {
+    mutedTabs.delete(tabId);
+  }
 }
 
 export function writePty(tabId: string, data: string) {

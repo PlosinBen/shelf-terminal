@@ -9,6 +9,7 @@ export interface Tab {
   label: string;
   cmd?: string;
   hasUnread: boolean;
+  muted: boolean;
 }
 
 export interface ProjectRuntime {
@@ -133,6 +134,7 @@ export function addTab(projectIndex: number, name?: string, cmd?: string): Tab |
     label: name || `Terminal ${proj.tabs.length + 1}`,
     cmd,
     hasUnread: false,
+    muted: false,
   };
 
   const updated = { ...proj, tabs: [...proj.tabs, tab], activeTabIndex: proj.tabs.length };
@@ -294,6 +296,20 @@ export function setSplitTab(projectIndex: number, tabId: string | null) {
     i === projectIndex ? { ...p, splitTabId: tabId } : p,
   );
   updateSnapshot();
+}
+
+export function toggleMuted(projectIndex: number, tabIndex: number) {
+  const proj = projects[projectIndex];
+  if (!proj || !proj.tabs[tabIndex]) return;
+
+  const tab = proj.tabs[tabIndex];
+  const muted = !tab.muted;
+  const tabs = proj.tabs.map((t, i) =>
+    i === tabIndex ? { ...t, muted } : t,
+  );
+  projects = projects.map((p, i) => (i === projectIndex ? { ...p, tabs } : p));
+  updateSnapshot();
+  window.shelfApi.pty.mute(tab.id, muted);
 }
 
 // ── Update actions ──
