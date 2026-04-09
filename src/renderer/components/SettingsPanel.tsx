@@ -29,7 +29,7 @@ export function SettingsPanel() {
       setDraft(settings);
       setRecordingAction(null);
     }
-  }, [settingsVisible]);
+  }, [settingsVisible, settings]);
 
   const updateDraft = (partial: Partial<AppSettings>) => {
     setDraft((d) => ({ ...d, ...partial }));
