@@ -31,6 +31,11 @@ export const IPC = {
   // Logs
   LOGS_CLEAR: 'logs:clear',
 
+  // Updater
+  UPDATE_CHECK: 'update:check',
+  UPDATE_INSTALL: 'update:install',
+  UPDATE_STATUS: 'update:status',
+
   // Main → Renderer (send)
   PTY_DATA: 'pty:data',
   PTY_EXIT: 'pty:exit',

@@ -9,8 +9,10 @@ import {
 } from '../store';
 import { emit, Events } from '../events';
 
+const version = __APP_VERSION__;
+
 export function Sidebar() {
-  const { projects, activeProjectIndex } = useStore();
+  const { projects, activeProjectIndex, updateAvailable } = useStore();
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const [contextMenu, setContextMenu] = useState<{ index: number; x: number; y: number } | null>(null);
@@ -96,6 +98,19 @@ export function Sidebar() {
             </div>
           );
         })}
+      </div>
+
+      <div className="sidebar-footer">
+        <span className="sidebar-version">v{version}</span>
+        {updateAvailable && (
+          <button
+            className="sidebar-update-btn"
+            title={`Update to v${updateAvailable}`}
+            onClick={() => window.shelfApi.updater.install()}
+          >
+            &#x21BB;
+          </button>
+        )}
       </div>
 
       {contextMenu && (() => {

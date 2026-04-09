@@ -148,6 +148,27 @@ button {
   border-top: 2px solid var(--accent);
 }
 
+.sidebar-footer {
+  padding: 8px 16px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sidebar-update-btn {
+  font-size: 14px;
+  color: var(--accent);
+  cursor: pointer;
+  line-height: 1;
+}
+
+.sidebar-update-btn:hover {
+  opacity: 0.8;
+}
+
 /* ── Context Menu ── */
 
 .context-menu {

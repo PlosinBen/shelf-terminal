@@ -7,7 +7,7 @@ import { SettingsPanel } from './components/SettingsPanel';
 import { SearchBar } from './components/SearchBar';
 import { ProjectEditPanel } from './components/ProjectEditPanel';
 import { useKeybindings } from './hooks/useKeybindings';
-import { useStore, setProjects, setSettings, addProject, addTab, removeTab, removeProject, setSplitTab, toggleSidebar, clearUnread } from './store';
+import { useStore, setProjects, setSettings, setUpdateAvailable, addProject, addTab, removeTab, removeProject, setSplitTab, toggleSidebar, clearUnread } from './store';
 import type { ProjectConfig } from '../shared/types';
 import { disposeTerminal } from './components/TerminalView';
 import { on, emit, Events } from './events';
@@ -20,6 +20,12 @@ export function App() {
 
   useEffect(() => {
     window.shelfApi.settings.load().then(setSettings);
+  }, []);
+
+  useEffect(() => {
+    return window.shelfApi.updater.onStatus((status) => {
+      setUpdateAvailable(status.available ? (status.version ?? 'unknown') : null);
+    });
   }, []);
 
   // Centralized event handlers

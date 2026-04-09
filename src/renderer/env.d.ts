@@ -1,3 +1,5 @@
+declare const __APP_VERSION__: string;
+
 interface ShelfApi {
   pty: {
     spawn: (projectId: string, tabId: string, cwd: string, connection: import('../shared/types').Connection, initScript?: string, tabCmd?: string) => Promise<void>;
@@ -40,6 +42,11 @@ interface ShelfApi {
   };
   logs: {
     clear: () => Promise<void>;
+  };
+  updater: {
+    check: () => Promise<void>;
+    install: () => Promise<void>;
+    onStatus: (callback: (status: { available: boolean; version?: string }) => void) => () => void;
   };
 }
 

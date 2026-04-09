@@ -1,55 +1,49 @@
 import { autoUpdater } from 'electron-updater';
-import { dialog, BrowserWindow } from 'electron';
+import { BrowserWindow } from 'electron';
+import { IPC } from '../shared/ipc-channels';
+import { log } from '../shared/logger';
 
 const CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000; // 4 hours
 
 let updateCheckTimer: ReturnType<typeof setTimeout> | null = null;
 let lastCheckTime = 0;
+let win: BrowserWindow | null = null;
+let availableVersion: string | null = null;
+
+function sendStatus(status: { available: boolean; version?: string }) {
+  if (win && !win.isDestroyed()) {
+    win.webContents.send(IPC.UPDATE_STATUS, status);
+  }
+}
 
 function checkForUpdates() {
   lastCheckTime = Date.now();
   autoUpdater.checkForUpdates().catch(() => {});
 }
 
-export function initAutoUpdater(win: BrowserWindow) {
+export function initAutoUpdater(mainWindow: BrowserWindow) {
+  win = mainWindow;
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = false;
 
-  autoUpdater.on('update-available', async (info) => {
-    const focusedWin = BrowserWindow.getFocusedWindow();
-    const result = await dialog.showMessageBox(focusedWin ?? ({} as any), {
-      type: 'info',
-      title: 'Update Available',
-      message: `Shelf Terminal v${info.version} is available.`,
-      detail: 'Would you like to download and install it now?',
-      buttons: ['Update', 'Later'],
-      defaultId: 0,
-      cancelId: 1,
-    });
-
-    if (result.response === 0) {
-      autoUpdater.downloadUpdate();
-    }
+  autoUpdater.on('update-available', (info) => {
+    availableVersion = info.version;
+    log.info('updater', `update available: v${info.version}`);
+    sendStatus({ available: true, version: info.version });
   });
 
-  autoUpdater.on('update-downloaded', async () => {
-    const focusedWin = BrowserWindow.getFocusedWindow();
-    const result = await dialog.showMessageBox(focusedWin ?? ({} as any), {
-      type: 'info',
-      title: 'Update Ready',
-      message: 'Update downloaded. Restart now to apply?',
-      buttons: ['Restart', 'Later'],
-      defaultId: 0,
-      cancelId: 1,
-    });
+  autoUpdater.on('update-not-available', () => {
+    availableVersion = null;
+    sendStatus({ available: false });
+  });
 
-    if (result.response === 0) {
-      autoUpdater.quitAndInstall();
-    }
+  autoUpdater.on('update-downloaded', () => {
+    log.info('updater', 'update downloaded, quitting and installing');
+    autoUpdater.quitAndInstall();
   });
 
   autoUpdater.on('error', (err) => {
-    console.error('Auto-updater error:', err.message);
+    log.error('updater', `error: ${err.message}`);
   });
 
   // Check on startup after short delay
@@ -61,6 +55,16 @@ export function initAutoUpdater(win: BrowserWindow) {
       checkForUpdates();
     }
   });
+}
+
+export function manualCheckForUpdate() {
+  checkForUpdates();
+}
+
+export function downloadAndInstall() {
+  if (availableVersion) {
+    autoUpdater.downloadUpdate();
+  }
 }
 
 export function stopAutoUpdater() {

@@ -87,4 +87,15 @@ contextBridge.exposeInMainWorld('shelfApi', {
   logs: {
     clear: () => ipcRenderer.invoke(IPC.LOGS_CLEAR),
   },
+  updater: {
+    check: () => ipcRenderer.invoke(IPC.UPDATE_CHECK),
+    install: () => ipcRenderer.invoke(IPC.UPDATE_INSTALL),
+    onStatus: (callback: (status: { available: boolean; version?: string }) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, status: { available: boolean; version?: string }) => {
+        callback(status);
+      };
+      ipcRenderer.on(IPC.UPDATE_STATUS, listener);
+      return () => ipcRenderer.removeListener(IPC.UPDATE_STATUS, listener);
+    },
+  },
 });

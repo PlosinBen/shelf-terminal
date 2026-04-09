@@ -47,7 +47,7 @@ export function TerminalView({ tabId, projectId, cwd, connection, initScript, ta
         scrollback: settings.scrollback,
         theme: theme.terminal,
         allowProposedApi: true,
-        windowsMode: navigator.platform.includes('Win'),
+        ...(navigator.platform.includes('Win') ? { windowsMode: true } as any : {}),
       });
       const fitAddon = new FitAddon();
       const searchAddon = new SearchAddon();

@@ -27,6 +27,7 @@ let settingsVisible = false;
 let searchVisible = false;
 let editingProjectIndex: number | null = null;
 let settings: AppSettings = { ...DEFAULT_SETTINGS };
+let updateAvailable: string | null = null; // available version string, null = no update
 let nextTabCounter = 0;
 
 type Listener = () => void;
@@ -42,7 +43,7 @@ function subscribe(l: Listener) {
 }
 
 function getSnapshot() {
-  return { projects, activeProjectIndex, sidebarVisible, settingsVisible, searchVisible, editingProjectIndex, settings };
+  return { projects, activeProjectIndex, sidebarVisible, settingsVisible, searchVisible, editingProjectIndex, settings, updateAvailable };
 }
 
 let snapshotRef = getSnapshot();
@@ -292,6 +293,13 @@ export function setSplitTab(projectIndex: number, tabId: string | null) {
   projects = projects.map((p, i) =>
     i === projectIndex ? { ...p, splitTabId: tabId } : p,
   );
+  updateSnapshot();
+}
+
+// ── Update actions ──
+
+export function setUpdateAvailable(version: string | null) {
+  updateAvailable = version;
   updateSnapshot();
 }
 

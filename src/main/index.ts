@@ -7,7 +7,7 @@ import { loadProjects, saveProjects } from './project-store';
 import { loadSettings, saveSettings } from './settings-store';
 import { listDirectory, getHomePath } from './folder-list';
 import { saveClipboardImage, saveClipboardImageRemote, startCleanupTimer, stopCleanupTimer, cleanupAllImages } from './clipboard-image';
-import { initAutoUpdater, stopAutoUpdater } from './updater';
+import { initAutoUpdater, stopAutoUpdater, manualCheckForUpdate, downloadAndInstall } from './updater';
 import { sshListDir, sshGetHomePath } from './ssh-manager';
 import * as connectionManager from './connection-manager';
 import { wslListDir, wslHomePath, wslListDistros } from './wsl-manager';
@@ -125,6 +125,14 @@ ipcMain.handle(IPC.LOGS_CLEAR, () => {
 ipcMain.handle(IPC.SETTINGS_SAVE, (_event, settings: AppSettings) => {
   saveSettings(settings);
   setLogLevel(settings.logLevel);
+});
+
+ipcMain.handle(IPC.UPDATE_CHECK, () => {
+  manualCheckForUpdate();
+});
+
+ipcMain.handle(IPC.UPDATE_INSTALL, () => {
+  downloadAndInstall();
 });
 
 // Renderer → Main (send, fire-and-forget)

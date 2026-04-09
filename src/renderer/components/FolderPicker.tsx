@@ -82,7 +82,8 @@ export function FolderPicker() {
       setSshPassword('');
       setWslDistro('Ubuntu');
     };
-    return on(Events.OPEN_FOLDER_PICKER, handler);
+    const off = on(Events.OPEN_FOLDER_PICKER, handler);
+    return () => { off(); };
   }, []);
 
   // ── Reset selection when filter changes ──
