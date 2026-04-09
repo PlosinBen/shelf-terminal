@@ -372,10 +372,12 @@ button {
 /* ── Connect Prompt ── */
 
 .connect-prompt {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 100%;
   color: var(--text-muted);
   font-size: 14px;
   cursor: pointer;
@@ -409,6 +411,11 @@ button {
 
 .split-pane + .split-pane {
   border-left: 1px solid var(--border);
+}
+
+.terminal-fill {
+  position: absolute;
+  inset: 0;
 }
 
 /* ── Terminal ── */

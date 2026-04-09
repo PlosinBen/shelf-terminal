@@ -168,35 +168,35 @@ export function App() {
               Click or press Enter to connect to <strong>{activeProject.config.name}</strong>
             </div>
           )}
-          <div className={activeProject?.splitTabId ? 'split-view' : undefined}>
+          <div className={activeProject?.splitTabId ? 'split-view' : 'terminal-fill'}>
             {projects.map((proj, pi) => {
-              const isActiveProject = pi === activeProjectIndex;
-              const isSplit = isActiveProject && proj.splitTabId !== null;
+                const isActiveProject = pi === activeProjectIndex;
+                const isSplit = isActiveProject && proj.splitTabId !== null;
 
-              return proj.tabs.map((tab, ti) => {
-                const isActiveTab = ti === proj.activeTabIndex;
-                const isSplitTab = tab.id === proj.splitTabId;
-                const visible = isActiveProject && (isSplit ? (isActiveTab || isSplitTab) : isActiveTab);
+                return proj.tabs.map((tab, ti) => {
+                  const isActiveTab = ti === proj.activeTabIndex;
+                  const isSplitTab = tab.id === proj.splitTabId;
+                  const visible = isActiveProject && (isSplit ? (isActiveTab || isSplitTab) : isActiveTab);
 
-                return (
-                  <div
-                    key={tab.id}
-                    className={isSplit && visible ? 'split-pane' : undefined}
-                    style={!visible ? { display: 'none' } : undefined}
-                  >
-                    <TerminalView
-                      tabId={tab.id}
-                      projectId={proj.config.id}
-                      cwd={proj.config.cwd}
-                      connection={proj.config.connection}
-                      initScript={proj.config.initScript}
-                      tabCmd={tab.cmd}
-                      visible={visible}
-                    />
-                  </div>
-                );
-              });
-            })}
+                  return (
+                    <div
+                      key={tab.id}
+                      className={isSplit && visible ? 'split-pane' : undefined}
+                      style={!visible ? { display: 'none' } : undefined}
+                    >
+                      <TerminalView
+                        tabId={tab.id}
+                        projectId={proj.config.id}
+                        cwd={proj.config.cwd}
+                        connection={proj.config.connection}
+                        initScript={proj.config.initScript}
+                        tabCmd={tab.cmd}
+                        visible={visible}
+                      />
+                    </div>
+                  );
+                });
+              })}
           </div>
         </div>
       </main>

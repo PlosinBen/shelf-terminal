@@ -256,6 +256,55 @@ test('switching tabs within a project shows correct terminal', async ({ shelfApp
   await expect(visibleTerminal).toBeVisible({ timeout: 3_000 });
 });
 
+// ── Project Switch with Terminal Content ──
+
+test('terminal content preserved after project switch', async ({ shelfApp: { page } }) => {
+  // Ensure 2 projects exist
+  const items = page.locator('.sidebar-item');
+  while (await items.count() < 2) {
+    await setupProject(page);
+  }
+
+  // Select project 1, connect, run a command
+  await items.nth(0).click();
+  let prompt = page.locator('.connect-prompt');
+  if (await prompt.isVisible({ timeout: 1_000 }).catch(() => false)) {
+    await prompt.click();
+  }
+  await expect(page.locator('.tab-bar .tab')).toHaveCount(1, { timeout: 5_000 });
+  await page.waitForTimeout(1000);
+
+  // Type a command to produce identifiable output
+  let terminal = page.locator('.terminal-container:visible');
+  await terminal.locator('.xterm-helper-textarea').focus();
+  await page.keyboard.type('echo SHELF_TEST_P1\n');
+  await page.waitForTimeout(1000);
+
+  // Verify output exists
+  let xtermRows = terminal.locator('.xterm-rows');
+  let text = await xtermRows.textContent();
+  expect(text).toContain('SHELF_TEST_P1');
+
+  // Select project 2, connect
+  await items.nth(1).click();
+  prompt = page.locator('.connect-prompt');
+  if (await prompt.isVisible({ timeout: 1_000 }).catch(() => false)) {
+    await prompt.click();
+  }
+  await page.waitForTimeout(1000);
+
+  // Switch back to project 1
+  await items.nth(0).click();
+  await page.waitForTimeout(500);
+
+  // Verify terminal is visible and content is preserved
+  terminal = page.locator('.terminal-container:visible');
+  await expect(terminal).toBeVisible({ timeout: 5_000 });
+  xtermRows = terminal.locator('.xterm-rows');
+  text = await xtermRows.textContent();
+  expect(text).toContain('SHELF_TEST_P1');
+});
+
 // ── Close Project ──
 
 test('close project via context menu removes it', async ({ shelfApp: { page } }) => {
