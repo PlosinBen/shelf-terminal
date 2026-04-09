@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Read",
+      "Edit",
+      "Bash(npm:*)",
+      "Bash(npx:*)"
+    ]
+  }
+}

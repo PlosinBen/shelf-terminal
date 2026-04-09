@@ -256,6 +256,28 @@ test('switching tabs within a project shows correct terminal', async ({ shelfApp
   await expect(visibleTerminal).toBeVisible({ timeout: 3_000 });
 });
 
+// ── Project Switch via Keyboard ──
+
+test('mod+ArrowDown/ArrowUp switches active project', async ({ shelfApp: { page } }) => {
+  // Ensure 2 projects exist
+  const items = page.locator('.sidebar-item');
+  while (await items.count() < 2) {
+    await setupProject(page);
+  }
+
+  // Activate first project
+  await items.nth(0).click();
+  await expect(items.nth(0)).toHaveClass(/active/, { timeout: 3_000 });
+
+  // mod+ArrowDown → second project
+  await page.keyboard.press(`${modifier}+ArrowDown`);
+  await expect(items.nth(1)).toHaveClass(/active/, { timeout: 3_000 });
+
+  // mod+ArrowUp → back to first project
+  await page.keyboard.press(`${modifier}+ArrowUp`);
+  await expect(items.nth(0)).toHaveClass(/active/, { timeout: 3_000 });
+});
+
 // ── Project Switch with Terminal Content ──
 
 test('terminal content preserved after project switch', async ({ shelfApp: { page } }) => {

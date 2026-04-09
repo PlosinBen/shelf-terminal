@@ -8,3 +8,4 @@ refer/
 test-results/
 Optimize.md
 release/
+.claude/settings.local.json
