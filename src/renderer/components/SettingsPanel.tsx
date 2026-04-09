@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useStore, updateSettings, toggleSettings } from '../store';
 import { themes } from '../themes';
 import { comboToLabel, recordCombo } from '../hooks/useKeybindings';
-import type { KeybindingAction } from '../../shared/types';
+import type { AppSettings, KeybindingAction, KeybindingConfig, LogLevel } from '../../shared/types';
 
 const ACTION_LABELS: Record<KeybindingAction, string> = {
   toggleSidebar: 'Toggle Sidebar',
@@ -20,7 +20,20 @@ const ACTION_LABELS: Record<KeybindingAction, string> = {
 
 export function SettingsPanel() {
   const { settingsVisible, settings } = useStore();
+  const [draft, setDraft] = useState<AppSettings>(settings);
   const [recordingAction, setRecordingAction] = useState<KeybindingAction | null>(null);
+
+  // Reset draft when panel opens
+  useEffect(() => {
+    if (settingsVisible) {
+      setDraft(settings);
+      setRecordingAction(null);
+    }
+  }, [settingsVisible]);
+
+  const updateDraft = (partial: Partial<AppSettings>) => {
+    setDraft((d) => ({ ...d, ...partial }));
+  };
 
   const handleRecord = useCallback((e: KeyboardEvent) => {
     if (!recordingAction) return;
@@ -30,10 +43,12 @@ export function SettingsPanel() {
     const combo = recordCombo(e);
     if (!combo) return;
 
-    const newBindings = { ...settings.keybindings, [recordingAction]: combo };
-    updateSettings({ keybindings: newBindings });
+    setDraft((d) => ({
+      ...d,
+      keybindings: { ...d.keybindings, [recordingAction]: combo },
+    }));
     setRecordingAction(null);
-  }, [recordingAction, settings.keybindings]);
+  }, [recordingAction]);
 
   useEffect(() => {
     if (!recordingAction) return;
@@ -43,11 +58,18 @@ export function SettingsPanel() {
 
   if (!settingsVisible) return null;
 
+  const handleSave = () => {
+    updateSettings(draft);
+    toggleSettings();
+  };
+
+  const handleCancel = () => {
+    setRecordingAction(null);
+    toggleSettings();
+  };
+
   const handleOverlayClick = (e: React.MouseEvent) => {
-    if (e.target === e.currentTarget) {
-      setRecordingAction(null);
-      toggleSettings();
-    }
+    if (e.target === e.currentTarget) handleCancel();
   };
 
   return (
@@ -55,15 +77,15 @@ export function SettingsPanel() {
       <div className="settings-panel">
         <div className="settings-header">
           <span>Settings</span>
-          <button className="settings-close" onClick={toggleSettings}>×</button>
+          <button className="settings-close" onClick={handleCancel}>×</button>
         </div>
         <div className="settings-body">
           <div className="settings-group">
             <label className="settings-label">Theme</label>
             <select
               className="settings-select"
-              value={settings.themeName}
-              onChange={(e) => updateSettings({ themeName: e.target.value })}
+              value={draft.themeName}
+              onChange={(e) => updateDraft({ themeName: e.target.value })}
             >
               {themes.map((t) => (
                 <option key={t.name} value={t.name}>{t.label}</option>
@@ -78,8 +100,8 @@ export function SettingsPanel() {
               type="number"
               min={8}
               max={32}
-              value={settings.fontSize}
-              onChange={(e) => updateSettings({ fontSize: Number(e.target.value) })}
+              value={draft.fontSize}
+              onChange={(e) => updateDraft({ fontSize: Number(e.target.value) })}
             />
           </div>
 
@@ -88,8 +110,8 @@ export function SettingsPanel() {
             <input
               className="settings-input settings-input-wide"
               type="text"
-              value={settings.fontFamily}
-              onChange={(e) => updateSettings({ fontFamily: e.target.value })}
+              value={draft.fontFamily}
+              onChange={(e) => updateDraft({ fontFamily: e.target.value })}
             />
           </div>
 
@@ -101,8 +123,8 @@ export function SettingsPanel() {
               min={100}
               max={100000}
               step={500}
-              value={settings.scrollback}
-              onChange={(e) => updateSettings({ scrollback: Number(e.target.value) })}
+              value={draft.scrollback}
+              onChange={(e) => updateDraft({ scrollback: Number(e.target.value) })}
             />
           </div>
 
@@ -113,8 +135,8 @@ export function SettingsPanel() {
               type="number"
               min={1}
               max={20}
-              value={settings.defaultMaxTabs}
-              onChange={(e) => updateSettings({ defaultMaxTabs: Number(e.target.value) })}
+              value={draft.defaultMaxTabs}
+              onChange={(e) => updateDraft({ defaultMaxTabs: Number(e.target.value) })}
             />
           </div>
 
@@ -122,8 +144,8 @@ export function SettingsPanel() {
             <label className="settings-label">Log Level</label>
             <select
               className="settings-select"
-              value={settings.logLevel}
-              onChange={(e) => updateSettings({ logLevel: e.target.value as any })}
+              value={draft.logLevel}
+              onChange={(e) => updateDraft({ logLevel: e.target.value as LogLevel })}
             >
               <option value="off">Off</option>
               <option value="error">Error</option>
@@ -152,13 +174,14 @@ export function SettingsPanel() {
               >
                 {recordingAction === action
                   ? 'Press key combo...'
-                  : comboToLabel(settings.keybindings[action])}
+                  : comboToLabel(draft.keybindings[action])}
               </button>
             </div>
           ))}
         </div>
-        <div className="settings-footer">
-          <span className="settings-hint">Click a shortcut to rebind</span>
+        <div className="project-edit-footer">
+          <button className="conn-btn conn-btn-cancel" onClick={handleCancel}>Cancel</button>
+          <button className="conn-btn conn-btn-next" onClick={handleSave}>Save</button>
         </div>
       </div>
     </div>
