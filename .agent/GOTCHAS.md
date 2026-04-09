@@ -50,23 +50,23 @@
 
 ---
 
-## 6. Image Paste 只攔截純圖片剪貼簿
+## 6. Image Paste 使用 Capture Phase
 
-**現象**: 複製含文字的網頁截圖時，圖片貼上功能沒反應。
+**現象**: 圖片貼上功能沒反應。
 
-**原因**: `handlePaste` 檢查 `hasText`（clipboard 有 text/plain item），有文字就 return 讓 xterm 處理正常貼上。
+**原因**: xterm 的 `xterm-helper-textarea` 攔截 paste event 後不會冒泡到 container。必須用 capture phase（`addEventListener` 第三參數 `true`）在 xterm 之前攔截。
 
-**注意**: 這是 intentional — 避免用戶貼文字時被圖片處理攔截。只有 screenshot（純圖片）才會觸發。
+**判斷邏輯**: 有 `image/*` 就當圖片貼上，除非同時有 `text/html`（表示從瀏覽器複製富文本，image 只是 favicon）。
 
 ---
 
-## 7. Idle Notification 的 5 秒最小門檻
+## 7. Idle Notification 需要使用者輸入 + 5 秒門檻
 
-**現象**: 快速指令（如 `ls`）不會觸發通知。
+**現象**: 快速指令（如 `ls`）或 agent CLI（Claude Code、Copilot）的背景輸出不會觸發通知。
 
-**原因**: `MIN_ACTIVE_MS = 5000` — pty output 必須持續 5 秒以上才算「長時間指令」。3 秒無 output 後才檢查。
+**原因**: 兩個條件都要滿足：(1) `userInput = true` — 只有使用者透過鍵盤輸入（`writePty`）才標記，agent 自行產生的 pty output 不算。(2) `MIN_ACTIVE_MS = 5000` — output 必須持續 5 秒以上。
 
-**注意**: 這是 intentional — 避免每個 `ls`、`cd` 都跳通知。
+**注意**: 這是 intentional — 避免 agent CLI 背景輸出不斷觸發通知。
 
 ---
 

@@ -57,3 +57,4 @@
 | E2E 測試 | `e2e/app-startup.spec.ts` | App 啟動、sidebar 驗證 |
 | E2E 測試 | `e2e/project-creation.spec.ts` | 建立 project、connect、tab、terminal output |
 | E2E 測試 | `e2e/features.spec.ts` | Search、settings、project edit 面板 |
+| E2E 測試 | `e2e/init-script.spec.ts` | Init script 不重複顯示 |
