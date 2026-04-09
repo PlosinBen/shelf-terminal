@@ -1,4 +1,4 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { SearchAddon } from '@xterm/addon-search';
@@ -35,6 +35,7 @@ export function TerminalView({ tabId, projectId, cwd, connection, initScript, ta
   const initializedRef = useRef(false);
   const visibleRef = useRef(visible);
   visibleRef.current = visible;
+  const [initLoading, setInitLoading] = useState(!!(initScript || tabCmd));
   const { settings } = useStore();
   const theme = getTheme(settings.themeName);
   // Mirror current upload-size limit into a ref so the paste/drop handlers
@@ -97,6 +98,11 @@ export function TerminalView({ tabId, projectId, cwd, connection, initScript, ta
         term.write(data);
         if (!visibleRef.current) markUnread(tabId);
       }
+    });
+
+    // Init script sent → hide loading
+    const removeInitSentListener = window.shelfApi.pty.onInitSent((id) => {
+      if (id === tabId) setInitLoading(false);
     });
 
     // Resize handling
@@ -212,6 +218,7 @@ export function TerminalView({ tabId, projectId, cwd, connection, initScript, ta
       onDataDispose.dispose();
       onResizeDispose.dispose();
       removeDataListener();
+      removeInitSentListener();
       resizeObserver.disconnect();
       container.removeEventListener('paste', handlePaste, true);
       container.removeEventListener('dragover', handleDragOver);
@@ -248,11 +255,16 @@ export function TerminalView({ tabId, projectId, cwd, connection, initScript, ta
   }, [visible, tabId]);
 
   return (
-    <div
-      ref={containerRef}
-      className="terminal-container"
-      style={{ display: visible ? 'block' : 'none' }}
-    />
+    <>
+      <div
+        ref={containerRef}
+        className="terminal-container"
+        style={{ display: visible ? 'block' : 'none' }}
+      />
+      {initLoading && visible && (
+        <div className="terminal-loading">Loading...</div>
+      )}
+    </>
   );
 }
 

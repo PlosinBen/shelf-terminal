@@ -27,6 +27,13 @@ contextBridge.exposeInMainWorld('shelfApi', {
       ipcRenderer.on(IPC.PTY_EXIT, listener);
       return () => ipcRenderer.removeListener(IPC.PTY_EXIT, listener);
     },
+    onInitSent: (callback: (tabId: string) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, payload: { tabId: string }) => {
+        callback(payload.tabId);
+      };
+      ipcRenderer.on(IPC.PTY_INIT_SENT, listener);
+      return () => ipcRenderer.removeListener(IPC.PTY_INIT_SENT, listener);
+    },
   },
   folder: {
     list: (dirPath: string) =>
