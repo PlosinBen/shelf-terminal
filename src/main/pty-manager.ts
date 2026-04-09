@@ -17,6 +17,7 @@ interface ActivityState {
   firstDataTime: number;
   lastDataTime: number;
   idleTimer: ReturnType<typeof setTimeout> | null;
+  userInput: boolean;  // true after user types; reset after notification
 }
 const activity = new Map<string, ActivityState>();
 
@@ -105,30 +106,36 @@ export function spawnPty(
   ptys.set(tabId, p);
 
   if (initScript || tabCmd) {
-    // Wait for shell to produce first output (prompt ready) before sending
+    // Detect shell prompt readiness before sending initScript.
+    // Modern shells (zsh, bash 4.4+, fish) enable bracketed paste mode
+    // (\x1b[?2004h) when the line editor is ready for input — this is
+    // the shell's own "I'm ready" signal, no timing guesswork needed.
+    // Fallback: debounce on output idle for shells without bracketed paste.
     let sent = false;
-    const dispose = p.onData(function onFirstOutput() {
+    let debounce: ReturnType<typeof setTimeout> | null = null;
+    const send = () => {
       if (sent) return;
       sent = true;
       dispose.dispose();
-      // Brief delay after first output to let prompt fully render
-      setTimeout(() => {
-        if (initScript) p.write(initScript + '\n');
-        if (tabCmd) {
-          setTimeout(() => p.write(tabCmd + '\n'), initScript ? 200 : 0);
-        }
-      }, 100);
-    });
-    // Fallback in case shell produces no output (e.g. SSH key prompt)
-    setTimeout(() => {
-      if (sent) return;
-      sent = true;
-      dispose.dispose();
+      if (debounce) clearTimeout(debounce);
       if (initScript) p.write(initScript + '\n');
       if (tabCmd) {
         setTimeout(() => p.write(tabCmd + '\n'), initScript ? 200 : 0);
       }
-    }, 5000);
+    };
+    const dispose = p.onData((data) => {
+      if (sent) return;
+      // Bracketed paste enable = line editor ready
+      if (data.includes('\x1b[?2004h')) {
+        send();
+        return;
+      }
+      // Fallback: debounce for shells without bracketed paste
+      if (debounce) clearTimeout(debounce);
+      debounce = setTimeout(send, 500);
+    });
+    // Hard fallback for edge cases (e.g. SSH key prompt, no output at all)
+    setTimeout(send, 10000);
   }
 
   p.onData((data) => {
@@ -140,7 +147,7 @@ export function spawnPty(
     const now = Date.now();
     let state = activity.get(tabId);
     if (!state) {
-      state = { firstDataTime: now, lastDataTime: now, idleTimer: null };
+      state = { firstDataTime: now, lastDataTime: now, idleTimer: null, userInput: false };
       activity.set(tabId, state);
     }
     state.lastDataTime = now;
@@ -148,7 +155,7 @@ export function spawnPty(
     if (state.idleTimer) clearTimeout(state.idleTimer);
     state.idleTimer = setTimeout(() => {
       const duration = state!.lastDataTime - state!.firstDataTime;
-      if (duration >= MIN_ACTIVE_MS && !win.isDestroyed() && !win.isFocused()) {
+      if (duration >= MIN_ACTIVE_MS && state!.userInput && !win.isDestroyed() && !win.isFocused()) {
         new Notification({
           title: 'Shelf Terminal',
           body: 'Command finished',
@@ -157,6 +164,7 @@ export function spawnPty(
       // Reset for next command
       state!.firstDataTime = Date.now();
       state!.idleTimer = null;
+      state!.userInput = false;
     }, IDLE_THRESHOLD_MS);
   });
 
@@ -171,6 +179,9 @@ export function spawnPty(
 }
 
 export function writePty(tabId: string, data: string) {
+  // Mark as user-initiated so idle notification fires after this command
+  const state = activity.get(tabId);
+  if (state) state.userInput = true;
   ptys.get(tabId)?.write(data);
 }
 
