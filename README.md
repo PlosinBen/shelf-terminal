@@ -34,6 +34,10 @@ Cross-platform, project-based terminal manager built with Electron. Replaces tmu
 | Package | electron-builder |
 | Test | Playwright (Electron) |
 
+## Note
+
+Shelf Terminal is a terminal wrapper — it does not install, configure, or authenticate any CLI tools. Any tools you want to use (nvm, conda, docker, claude, gh, etc.) must be set up independently. Shelf simply provides the terminal environment to run them in.
+
 ## Quick Start
 
 ```bash
