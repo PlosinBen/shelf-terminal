@@ -19,8 +19,6 @@
 ## Rules
 
 - Bug fix 必須包含迴歸測試 — 先寫測試重現問題，再修 code
-- Connector 相關問題先在 local 用 log 驗證，不依賴特定平台測試
-- Release notes 從 `git log <last-tag>..HEAD` 取得，不靠記憶
 
 ## Conventions
 
