@@ -7,7 +7,7 @@ import { SettingsPanel } from './components/SettingsPanel';
 import { SearchBar } from './components/SearchBar';
 import { ProjectEditPanel } from './components/ProjectEditPanel';
 import { useKeybindings } from './hooks/useKeybindings';
-import { useStore, setProjects, setSettings, addProject, addTab, removeTab, removeProject, setSplitTab, toggleSidebar } from './store';
+import { useStore, setProjects, setSettings, addProject, addTab, removeTab, removeProject, setSplitTab, toggleSidebar, clearUnread } from './store';
 import type { ProjectConfig } from '../shared/types';
 import { disposeTerminal } from './components/TerminalView';
 import { on, emit, Events } from './events';
@@ -118,6 +118,10 @@ export function App() {
 
   // Re-focus active terminal when window regains focus or panels close
   const focusTerminal = () => {
+    // Clear unread badge on active tab when window regains focus
+    const proj = projects[activeProjectIndex];
+    if (proj) clearUnread(activeProjectIndex, proj.activeTabIndex);
+
     requestAnimationFrame(() => {
       const textarea = document.querySelector('.terminal-container:not([style*="display: none"]) .xterm-helper-textarea') as HTMLElement;
       textarea?.focus();

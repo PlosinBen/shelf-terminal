@@ -160,8 +160,12 @@ export function setActiveTab(projectIndex: number, tabIndex: number) {
   const proj = projects[projectIndex];
   if (!proj || tabIndex < 0 || tabIndex >= proj.tabs.length) return;
 
+  const tabs = proj.tabs[tabIndex].hasUnread
+    ? proj.tabs.map((t, i) => (i === tabIndex ? { ...t, hasUnread: false } : t))
+    : proj.tabs;
+
   projects = projects.map((p, i) =>
-    i === projectIndex ? { ...p, activeTabIndex: tabIndex } : p,
+    i === projectIndex ? { ...p, tabs, activeTabIndex: tabIndex } : p,
   );
   updateSnapshot();
 }
