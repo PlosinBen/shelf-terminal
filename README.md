@@ -38,6 +38,36 @@ Cross-platform, project-based terminal manager built with Electron. Replaces tmu
 
 Shelf Terminal is a terminal wrapper — it does not install, configure, or authenticate any CLI tools. Any tools you want to use (nvm, conda, docker, claude, gh, etc.) must be set up independently. Shelf simply provides the terminal environment to run them in.
 
+## Usage
+
+### Init Script
+
+Per-project commands that run automatically when the terminal connects. Set via right-click project → Edit.
+
+Example: `nvm use 22 && conda activate myenv`
+
+Useful for environment setup that you'd otherwise type every time you open a terminal.
+
+### Default Tabs
+
+Pre-define tabs that auto-open on connect, each with its own command. Set via right-click project → Edit.
+
+Example: a `dev` tab running `npm run dev`, a `test` tab running `npm run test:watch`, and a plain `shell` tab with no command.
+
+### SSH with Shared Connection
+
+Multiple tabs to the same SSH host share a single TCP connection (ControlMaster). Open 5 tabs — authenticate once.
+
+### Image Paste
+
+Paste a screenshot directly into the terminal. Shelf saves it to a temp file and writes the file path into the terminal input. For SSH sessions, the image is SCP'd to the remote host first.
+
+Works with any CLI that accepts file paths — particularly useful for feeding images to AI agent CLIs.
+
+### Background Notification
+
+When a command runs for more than 5 seconds and finishes while Shelf is not focused, a system notification appears. Only triggers after user keyboard input — background output from agent CLIs won't spam notifications.
+
 ## Quick Start
 
 ```bash
