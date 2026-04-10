@@ -93,10 +93,8 @@ test('project edit panel opens from context menu', async ({ shelfApp: { page } }
   const textarea = page.locator('.project-edit-textarea');
   await expect(textarea).toBeVisible();
 
-  // Has default tabs section
-  const tabRows = page.locator('.default-tab-row');
-  const count = await tabRows.count();
-  expect(count).toBeGreaterThanOrEqual(1);
+  // Has default tabs section (auto-wait for React effect to populate)
+  await expect(page.locator('.default-tab-row').first()).toBeVisible({ timeout: 3_000 });
 
   await page.locator('.settings-close').click();
   await expect(editPanel).not.toBeVisible();
@@ -110,6 +108,8 @@ test('project edit default tabs can add and remove', async ({ shelfApp: { page }
   const editPanel = page.locator('.project-edit-panel');
   await expect(editPanel).toBeVisible({ timeout: 3_000 });
 
+  // Wait for default tabs to populate (React effect race)
+  await expect(page.locator('.default-tab-row').first()).toBeVisible({ timeout: 3_000 });
   const initialCount = await page.locator('.default-tab-row').count();
 
   // Add tab

@@ -21,15 +21,10 @@ export const test = base.extend<{}, { shelfApp: { app: ElectronApplication; page
       fs.mkdirSync(userDataDir, { recursive: true });
     }
 
-    // Clean known_hosts entry to avoid host key mismatch on container rebuild
-    const knownHostsPath = path.join(os.homedir(), '.ssh', 'known_hosts');
+    // Clean Shelf's own known_hosts to avoid host key mismatch on container rebuild
+    const knownHostsPath = path.join(userDataDir, 'ssh_known_hosts');
     if (fs.existsSync(knownHostsPath)) {
-      const content = fs.readFileSync(knownHostsPath, 'utf-8');
-      const filtered = content
-        .split('\n')
-        .filter((line) => !line.includes(`[${SSH_TEST.host}]:${SSH_TEST.port}`))
-        .join('\n');
-      fs.writeFileSync(knownHostsPath, filtered, 'utf-8');
+      fs.unlinkSync(knownHostsPath);
     }
 
     const project = {

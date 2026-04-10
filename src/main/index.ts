@@ -9,6 +9,7 @@ import { listDirectory, getHomePath } from './folder-list';
 import { saveClipboardImage, saveClipboardImageRemote, saveClipboardImageDocker, startCleanupTimer, stopCleanupTimer, cleanupAllImages } from './clipboard-image';
 import { initAutoUpdater, stopAutoUpdater, manualCheckForUpdate, downloadAndInstall } from './updater';
 import { sshListDir, sshGetHomePath } from './ssh-manager';
+import { removeHostKey } from './ssh-control';
 import * as connectionManager from './connection-manager';
 import { wslListDir, wslHomePath, wslListDistros } from './wsl-manager';
 import { dockerListDir, dockerHomePath, dockerListContainers } from './docker-manager';
@@ -93,6 +94,10 @@ ipcMain.handle(IPC.CONNECTION_CHECK, (_event, connection: Connection) => {
 
 ipcMain.handle(IPC.CONNECTION_ESTABLISH, (_event, payload: { connection: Connection; password?: string }) => {
   return connectionManager.connect(payload.connection, payload.password);
+});
+
+ipcMain.handle(IPC.SSH_REMOVE_HOST_KEY, (_event, payload: { host: string; port: number }) => {
+  removeHostKey(payload.host, payload.port);
 });
 
 ipcMain.handle(IPC.SSH_HOME_PATH, (_event, payload: { host: string; port: number; user: string }) => {
@@ -192,13 +197,24 @@ app.whenReady().then(() => {
   }
 });
 
-app.on('window-all-closed', () => {
+function shutdown() {
   killAllPtys();
   stopCleanupTimer();
   stopAutoUpdater();
   cleanupAllImages();
   connectionManager.cleanup();
+}
+
+app.on('window-all-closed', () => {
+  shutdown();
   app.quit();
+});
+
+// Playwright `app.close()` may invoke `app.quit()` directly without going through
+// `window-all-closed`. Hook `before-quit` so SSH ControlMaster sockets are always
+// cleaned up — otherwise ControlPersist keeps masters alive past test teardown.
+app.on('before-quit', () => {
+  shutdown();
 });
 
 app.on('activate', () => {

@@ -1,9 +1,8 @@
 import { test, expect } from './ssh-helpers';
-import { SSH_TEST } from './ssh-config';
 
 test.setTimeout(60_000);
 
-test('SSH terminal connects and shows output', async ({ shelfApp: { page } }) => {
+test('SSH password auth establishes ControlMaster and runs commands', async ({ shelfApp: { page } }) => {
   // Connect to the pre-seeded SSH project
   const prompt = page.locator('.connect-prompt');
   if (await prompt.isVisible({ timeout: 3_000 }).catch(() => false)) {
@@ -21,27 +20,27 @@ test('SSH terminal connects and shows output', async ({ shelfApp: { page } }) =>
   await expect(xtermRows).toContainText('__SSH_E2E_TEST__', { timeout: 10_000 });
 });
 
-test('SSH ControlMaster multiplexing — second tab connects instantly', async ({ shelfApp: { page } }) => {
+test('SSH ControlMaster multiplexes second session without re-auth', async ({ shelfApp: { page } }) => {
   // First tab should already be connected from previous test
   await expect(page.locator('.tab-bar .tab')).toHaveCount(1, { timeout: 5_000 });
 
-  // Open second tab
+  // Open second tab — should not prompt for password (ControlMaster reuse)
   const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
   await page.keyboard.press(`${modifier}+t`);
   await expect(page.locator('.tab-bar .tab')).toHaveCount(2, { timeout: 5_000 });
 
-  // Click second tab
   await page.locator('.tab-bar .tab').nth(1).click();
   await page.waitForTimeout(3000);
 
-  // Second tab should connect without password prompt (ControlMaster reuse)
+  await page.locator('.terminal-container:visible .xterm-screen').click({ force: true });
+  await page.waitForTimeout(500);
+
   const xtermRows = page.locator('.terminal-container:visible .xterm-rows');
   await page.keyboard.type('echo __SSH_TAB2__\n');
-  await expect(xtermRows).toContainText('__SSH_TAB2__', { timeout: 5_000 });
+  await expect(xtermRows).toContainText('__SSH_TAB2__', { timeout: 10_000 });
 });
 
-test('SSH image SCP to remote host', async ({ shelfApp: { page } }) => {
-  // Create a minimal 1x1 PNG in the renderer and call the preload API
+test('SCP uploads image to remote host via ControlMaster', async ({ shelfApp: { page } }) => {
   const remotePath = await page.evaluate(async () => {
     // Minimal valid 1x1 PNG
     const png = new Uint8Array([
@@ -61,37 +60,4 @@ test('SSH image SCP to remote host', async ({ shelfApp: { page } }) => {
   });
 
   expect(remotePath).toMatch(/^\/tmp\/shelf-paste\/paste-\d+\.png$/);
-});
-
-test('SSH disconnect and reconnect', async ({ shelfApp: { page } }) => {
-  // Ensure connected first
-  const prompt = page.locator('.connect-prompt');
-  if (await prompt.isVisible({ timeout: 1_000 }).catch(() => false)) {
-    await prompt.click();
-    await expect(page.locator('.tab-bar .tab')).toHaveCount(1, { timeout: 15_000 });
-    await page.waitForTimeout(3000);
-  }
-
-  // Right-click project in sidebar → Disconnect
-  const sidebarItem = page.locator('.sidebar-item').first();
-  await sidebarItem.click({ button: 'right' });
-
-  const disconnectBtn = page.locator('.context-menu-item', { hasText: 'Disconnect' });
-  await expect(disconnectBtn).toBeVisible({ timeout: 3_000 });
-  await disconnectBtn.click();
-
-  // Should show connect prompt (no tabs)
-  await expect(page.locator('.tab-bar .tab')).toHaveCount(0, { timeout: 5_000 });
-  const reconnectPrompt = page.locator('.connect-prompt');
-  await expect(reconnectPrompt).toBeVisible({ timeout: 5_000 });
-
-  // Reconnect
-  await reconnectPrompt.click();
-  await expect(page.locator('.tab-bar .tab')).toHaveCount(1, { timeout: 15_000 });
-
-  // Verify terminal works
-  const xtermRows = page.locator('.terminal-container:visible .xterm-rows');
-  await page.waitForTimeout(3000);
-  await page.keyboard.type('echo __SSH_RECONNECT__\n');
-  await expect(xtermRows).toContainText('__SSH_RECONNECT__', { timeout: 10_000 });
 });

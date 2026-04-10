@@ -4,7 +4,7 @@ import os from 'os';
 import fs from 'fs';
 import path from 'path';
 import { IPC } from '../shared/ipc-channels';
-import { getControlPath } from './ssh-control';
+import { getControlPath, getKnownHostsPath } from './ssh-control';
 import type { Connection } from '../shared/types';
 import { log } from '../shared/logger';
 
@@ -48,6 +48,7 @@ function buildSSHArgs(host: string, port: number, user: string, cwd: string): st
     '-o', `ControlPath=${controlPath}`,
     '-o', `ControlPersist=600`,
     '-o', 'StrictHostKeyChecking=accept-new',
+    '-o', `UserKnownHostsFile="${getKnownHostsPath()}"`,
     '-o', 'ServerAliveInterval=30',
     '-p', String(port),
     `${user}@${host}`,

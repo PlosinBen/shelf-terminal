@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { execFile } from 'child_process';
-import { getControlPath } from './ssh-control';
+import { getControlPath, getKnownHostsPath } from './ssh-control';
 import { dockerCopyImage } from './docker-manager';
 
 const PASTE_DIR = path.join(os.tmpdir(), 'shelf-paste');
@@ -50,6 +50,7 @@ export function saveClipboardImageRemote(
         '-o', `ControlMaster=auto`,
         '-o', `ControlPath=${controlPath}`,
         '-o', `ControlPersist=600`,
+        '-o', `UserKnownHostsFile="${getKnownHostsPath()}"`,
         '-p', String(port),
         `${user}@${host}`,
         `mkdir -p ${remoteTmpDir}`,
@@ -62,6 +63,7 @@ export function saveClipboardImageRemote(
           [
             '-o', `ControlMaster=auto`,
             '-o', `ControlPath=${controlPath}`,
+            '-o', `UserKnownHostsFile="${getKnownHostsPath()}"`,
             '-P', String(port),
             localPath,
             `${user}@${host}:${remotePath}`,

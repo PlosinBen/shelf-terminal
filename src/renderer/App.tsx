@@ -68,9 +68,29 @@ export function App() {
       if (conn.type === 'ssh' && conn.password) {
         try {
           await window.shelfApi.connector.connect(conn, conn.password);
-        } catch {
-          // Auth failed — don't open tabs
-          return;
+        } catch (err: any) {
+          const msg = err?.message ?? '';
+          if (msg.includes('HOST_KEY_CHANGED')) {
+            const fingerprint = msg.match(/fingerprint:(\S+)/)?.[1] ?? 'unknown';
+            const confirmed = window.confirm(
+              `Host key for ${conn.host}:${conn.port} has changed.\n\n` +
+              `New fingerprint: ${fingerprint}\n\n` +
+              `This could indicate a server reinstall or a man-in-the-middle attack.\n` +
+              `Trust the new key and reconnect?`
+            );
+            if (confirmed) {
+              await window.shelfApi.ssh.removeHostKey(conn.host, conn.port);
+              try {
+                await window.shelfApi.connector.connect(conn, conn.password);
+              } catch {
+                return;
+              }
+            } else {
+              return;
+            }
+          } else {
+            return;
+          }
         }
       }
 

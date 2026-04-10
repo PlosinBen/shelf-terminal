@@ -21,6 +21,7 @@ export const IPC = {
   // SSH
   SSH_LIST_DIR: 'ssh:list-dir',
   SSH_HOME_PATH: 'ssh:home-path',
+  SSH_REMOVE_HOST_KEY: 'ssh:remove-host-key',
   CONNECTION_CHECK: 'connection:check',
   CONNECTION_ESTABLISH: 'connection:establish',
 

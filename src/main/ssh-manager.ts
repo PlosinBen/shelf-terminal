@@ -1,8 +1,7 @@
 import { execFile } from 'child_process';
 import * as pty from 'node-pty';
 import type { FolderListResult } from '../shared/types';
-import { getControlPath } from './ssh-control';
-import { checkConnection } from './ssh-control';
+import { getControlPath, checkConnection, getKnownHostsPath } from './ssh-control';
 import { log } from '../shared/logger';
 
 /**
@@ -22,12 +21,15 @@ export function sshEstablishConnection(
   log.info('ssh', `establishing connection: ${user}@${host}:${port}`);
   const controlPath = getControlPath(host, port, user);
 
+  const knownHostsPath = getKnownHostsPath();
+
   return new Promise((resolve, reject) => {
     const p = pty.spawn('ssh', [
       '-o', `ControlMaster=auto`,
       '-o', `ControlPath=${controlPath}`,
       '-o', `ControlPersist=600`,
       '-o', 'StrictHostKeyChecking=accept-new',
+      '-o', `UserKnownHostsFile="${knownHostsPath}"`,
       '-p', String(port),
       `${user}@${host}`,
       'echo __SHELF_AUTH_OK__',
@@ -72,7 +74,15 @@ export function sshEstablishConnection(
         resolve();
       } else {
         settled = true;
-        reject(new Error('SSH authentication failed'));
+        // Detect host key conflict
+        if (/HOST IDENTIFICATION HAS CHANGED|host key.*has changed/i.test(output)) {
+          const fingerprint = output.match(/key sent by the remote host is\s+(\S+)/)?.[1]
+            ?? output.match(/ED25519 key fingerprint is\s+(\S+)/)?.[1]
+            ?? 'unknown';
+          reject(new Error(`HOST_KEY_CHANGED fingerprint:${fingerprint}`));
+        } else {
+          reject(new Error('SSH authentication failed'));
+        }
       }
     });
   });
@@ -95,6 +105,7 @@ export function sshListDir(
         '-o', `ControlMaster=auto`,
         '-o', `ControlPath=${controlPath}`,
         '-o', `ControlPersist=600`,
+        '-o', `UserKnownHostsFile="${getKnownHostsPath()}"`,
         '-o', 'ConnectTimeout=5',
         '-p', String(port),
         `${user}@${host}`,
@@ -142,6 +153,7 @@ export function sshGetHomePath(
         '-o', `ControlMaster=auto`,
         '-o', `ControlPath=${controlPath}`,
         '-o', `ControlPersist=600`,
+        '-o', `UserKnownHostsFile="${getKnownHostsPath()}"`,
         '-o', 'ConnectTimeout=5',
         '-p', String(port),
         `${user}@${host}`,
