@@ -122,6 +122,10 @@ export type FileUploadResult =
   | { ok: true; remotePath: string }
   | { ok: false; reason: string };
 
+export type FileClearResult =
+  | { ok: true; removed: number }
+  | { ok: false; reason: string };
+
 // ── Auto-updater ──
 
 export type UpdateStatus =

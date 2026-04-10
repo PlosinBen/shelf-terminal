@@ -11,6 +11,8 @@ export function ProjectEditPanel() {
   const [defaultTabs, setDefaultTabs] = useState<TabTemplate[]>([]);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+  const [clearing, setClearing] = useState(false);
+  const [remoteConnected, setRemoteConnected] = useState(true);
 
   useEffect(() => {
     if (project) {
@@ -18,6 +20,24 @@ export function ProjectEditPanel() {
       setInitScript(project.config.initScript || '');
       setDefaultTabs(project.config.defaultTabs || [{ name: 'Terminal' }]);
     }
+  }, [editingProjectIndex]);
+
+  // Probe whether the remote is currently reachable so we can enable/disable
+  // the Clear button. Local connections are always considered reachable.
+  useEffect(() => {
+    if (!project) return;
+    const conn = project.config.connection;
+    if (conn.type === 'local') {
+      setRemoteConnected(true);
+      return;
+    }
+    let cancelled = false;
+    window.shelfApi.connector.isConnected(conn).then((ok) => {
+      if (!cancelled) setRemoteConnected(ok);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [editingProjectIndex]);
 
   if (!project || editingProjectIndex === null) return null;
@@ -81,6 +101,42 @@ export function ProjectEditPanel() {
     setDragIndex(null);
     setDragOverIndex(null);
   };
+
+  const handleClearUploads = async () => {
+    if (!project || clearing) return;
+    const ok = await window.shelfApi.dialog.confirm(
+      'Clear uploaded files',
+      `Delete every file in ${project.config.cwd}/.tmp/shelf/ ?\n\nThis cannot be undone.`,
+      'Delete',
+    );
+    if (!ok) return;
+    setClearing(true);
+    try {
+      const result = await window.shelfApi.connector.clearUploads(
+        project.config.connection,
+        project.config.cwd,
+      );
+      if (result.ok) {
+        await window.shelfApi.dialog.warn(
+          'Uploaded files cleared',
+          result.removed === 0
+            ? 'No uploaded files to remove.'
+            : `Removed ${result.removed} file(s).`,
+        );
+      } else {
+        await window.shelfApi.dialog.warn('Clear failed', result.reason);
+      }
+    } finally {
+      setClearing(false);
+    }
+  };
+
+  const isRemote = project ? project.config.connection.type !== 'local' : false;
+  const clearDisabled = clearing || (isRemote && !remoteConnected);
+  const clearTooltip =
+    isRemote && !remoteConnected
+      ? 'Will auto-clean on next connect'
+      : 'Delete every file in <cwd>/.tmp/shelf/';
 
   return (
     <div className="settings-overlay" onClick={handleOverlayClick}>
@@ -157,6 +213,23 @@ export function ProjectEditPanel() {
               ))}
             </div>
             <button className="default-tab-add" onClick={addTab}>+ Add Tab</button>
+          </div>
+
+          <div className="project-edit-field">
+            <label className="settings-label">Uploaded Files</label>
+            <div className="project-edit-hint">
+              Files dropped or pasted into the terminal land in <code>.tmp/shelf/</code>.
+              Leftovers from previous sessions are auto-cleaned a few seconds after the
+              project's first tab opens.
+            </div>
+            <button
+              className="conn-btn conn-btn-cancel"
+              onClick={handleClearUploads}
+              disabled={clearDisabled}
+              title={clearTooltip}
+            >
+              {clearing ? 'Clearing…' : 'Clear uploaded files'}
+            </button>
           </div>
         </div>
         <div className="project-edit-footer">

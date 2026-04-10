@@ -65,6 +65,8 @@ contextBridge.exposeInMainWorld('shelfApi', {
       ipcRenderer.invoke(IPC.CONNECTION_ESTABLISH, { connection, password }),
     uploadFile: (connection: any, cwd: string, filename: string, buffer: ArrayBuffer) =>
       ipcRenderer.invoke(IPC.FILE_UPLOAD, { connection, cwd, filename, buffer }),
+    clearUploads: (connection: any, cwd: string) =>
+      ipcRenderer.invoke(IPC.FILE_CLEAR_UPLOADS, { connection, cwd }),
   },
   project: {
     load: () => ipcRenderer.invoke(IPC.PROJECT_LOAD),
@@ -73,6 +75,8 @@ contextBridge.exposeInMainWorld('shelfApi', {
   dialog: {
     warn: (title: string, message: string) =>
       ipcRenderer.invoke(IPC.DIALOG_WARN, { title, message }),
+    confirm: (title: string, message: string, confirmLabel?: string): Promise<boolean> =>
+      ipcRenderer.invoke(IPC.DIALOG_CONFIRM, { title, message, confirmLabel }),
   },
   docker: {
     listContainers: () =>

@@ -8,7 +8,7 @@ import { saveSettings } from './settings-store';
 import { bootstrap } from './bootstrap';
 import { DEFAULT_SETTINGS } from '../shared/defaults';
 import { listDirectory, getHomePath } from './folder-list';
-import { uploadFile } from './file-transfer';
+import { uploadFile, clearUploads } from './file-transfer';
 import { initAutoUpdater, stopAutoUpdater, manualCheckForUpdate, startUpdateDownload, confirmAndInstallUpdate } from './updater';
 import { sshListDir, sshGetHomePath } from './ssh-manager';
 import { removeHostKey } from './ssh-control';
@@ -16,7 +16,7 @@ import * as connectionManager from './connection-manager';
 import { wslListDir, wslHomePath, wslListDistros } from './wsl-manager';
 import { dockerListDir, dockerHomePath, dockerListContainers } from './docker-manager';
 import { log, setLogLevel, setFileWriter } from '../shared/logger';
-import type { Connection, ProjectConfig, AppSettings, FileUploadResult, PtySpawnPayload, PtyInputPayload, PtyResizePayload, PtyKillPayload, FolderListPayload, SSHListDirPayload, WSLListDirPayload } from '../shared/types';
+import type { Connection, ProjectConfig, AppSettings, FileUploadResult, FileClearResult, PtySpawnPayload, PtyInputPayload, PtyResizePayload, PtyKillPayload, FolderListPayload, SSHListDirPayload, WSLListDirPayload } from '../shared/types';
 
 // Isolate userData per environment to avoid config conflicts
 if (process.env.NODE_ENV) {
@@ -56,7 +56,7 @@ function createWindow() {
 // Renderer → Main (invoke, returns result)
 ipcMain.handle(IPC.PTY_SPAWN, (_event, payload: PtySpawnPayload) => {
   if (mainWindow) {
-    spawnPty(payload.tabId, payload.cwd, payload.connection, mainWindow, payload.initScript, payload.tabCmd);
+    spawnPty(payload.projectId, payload.tabId, payload.cwd, payload.connection, mainWindow, payload.initScript, payload.tabCmd);
   }
 });
 
@@ -111,6 +111,37 @@ ipcMain.handle(IPC.DIALOG_WARN, async (_event, payload: { title: string; message
     noLink: true,
   });
 });
+
+ipcMain.handle(
+  IPC.DIALOG_CONFIRM,
+  async (_event, payload: { title: string; message: string; confirmLabel?: string }): Promise<boolean> => {
+    if (!mainWindow || mainWindow.isDestroyed()) return false;
+    const result = await dialog.showMessageBox(mainWindow, {
+      type: 'question',
+      title: payload.title,
+      message: payload.message,
+      buttons: [payload.confirmLabel ?? 'OK', 'Cancel'],
+      defaultId: 0,
+      cancelId: 1,
+      noLink: true,
+    });
+    return result.response === 0;
+  },
+);
+
+ipcMain.handle(
+  IPC.FILE_CLEAR_UPLOADS,
+  async (_event, payload: { connection: Connection; cwd: string }): Promise<FileClearResult> => {
+    try {
+      const removed = await clearUploads(payload.connection, payload.cwd);
+      return { ok: true, removed };
+    } catch (err: any) {
+      const message = err?.message ?? String(err);
+      log.error('file-transfer', `clearUploads failed: ${message}`);
+      return { ok: false, reason: message };
+    }
+  },
+);
 
 ipcMain.handle(IPC.SSH_LIST_DIR, (_event, payload: SSHListDirPayload) => {
   return sshListDir(payload.host, payload.port, payload.user, payload.path);

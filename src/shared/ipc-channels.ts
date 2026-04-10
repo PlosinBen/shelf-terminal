@@ -9,9 +9,11 @@ export const IPC = {
 
   // File upload (paste/drag) — generic across local/SSH/WSL/Docker
   FILE_UPLOAD: 'file:upload',
+  FILE_CLEAR_UPLOADS: 'file:clear-uploads',
 
   // Generic dialog from renderer
   DIALOG_WARN: 'dialog:warn',
+  DIALOG_CONFIRM: 'dialog:confirm',
 
   // Renderer → Main (send, no response)
   PTY_INPUT: 'pty:input',

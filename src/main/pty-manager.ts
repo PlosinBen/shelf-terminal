@@ -7,6 +7,7 @@ import { IPC } from '../shared/ipc-channels';
 import { getControlPath, getKnownHostsPath } from './ssh-control';
 import type { Connection } from '../shared/types';
 import { log } from '../shared/logger';
+import { maybeScheduleCleanup } from './file-transfer';
 
 const ptys = new Map<string, pty.IPty>();
 
@@ -62,6 +63,7 @@ function shellEscape(s: string): string {
 }
 
 export function spawnPty(
+  projectId: string,
   tabId: string,
   cwd: string,
   connection: Connection,
@@ -113,6 +115,11 @@ export function spawnPty(
   });
 
   ptys.set(tabId, p);
+
+  // Fire-and-forget background cleanup for stale uploads from previous Shelf
+  // sessions. Runs once per (project × process), 3s after first spawn so it
+  // doesn't compete with shell startup or first paint. Errors are swallowed.
+  maybeScheduleCleanup(projectId, connection, cwd);
 
   if (initScript || tabCmd) {
     // Detect shell prompt readiness before sending initScript.

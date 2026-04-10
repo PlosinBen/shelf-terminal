@@ -25,6 +25,10 @@ interface ShelfApi {
       filename: string,
       buffer: ArrayBuffer,
     ) => Promise<import('../shared/types').FileUploadResult>;
+    clearUploads: (
+      connection: import('../shared/types').Connection,
+      cwd: string,
+    ) => Promise<import('../shared/types').FileClearResult>;
   };
   project: {
     load: () => Promise<import('../shared/types').ProjectConfig[]>;
@@ -32,6 +36,7 @@ interface ShelfApi {
   };
   dialog: {
     warn: (title: string, message: string) => Promise<void>;
+    confirm: (title: string, message: string, confirmLabel?: string) => Promise<boolean>;
   };
   docker: {
     listContainers: () => Promise<string[]>;
