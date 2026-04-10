@@ -43,3 +43,57 @@ test('uploadFile streams a file into the container via docker exec', async ({ sh
     expect(result.remotePath).toMatch(/^\/tmp\/\.tmp\/shelf\/[a-z0-9]+-paste\.png$/);
   }
 });
+
+test('clearUploads wipes the Docker upload dir and is idempotent', async ({ shelfApp: { page } }) => {
+  const docker = { type: 'docker' as const, container: 'shelf-test-container' };
+
+  const uploads = await page.evaluate(async (conn) => {
+    const a = await window.shelfApi.connector.uploadFile(
+      conn,
+      '/tmp',
+      'cleanup-a.txt',
+      new TextEncoder().encode('alpha').buffer,
+    );
+    const b = await window.shelfApi.connector.uploadFile(
+      conn,
+      '/tmp',
+      'cleanup-b.txt',
+      new TextEncoder().encode('beta').buffer,
+    );
+    return { a, b };
+  }, docker);
+
+  expect(uploads.a.ok).toBe(true);
+  expect(uploads.b.ok).toBe(true);
+
+  const first = await page.evaluate(
+    (conn) => window.shelfApi.connector.clearUploads(conn, '/tmp'),
+    docker,
+  );
+  expect(first.ok).toBe(true);
+  if (first.ok) {
+    expect(first.removed).toBeGreaterThanOrEqual(2);
+  }
+
+  // Idempotency: directory still exists but is empty after the first clear.
+  const second = await page.evaluate(
+    (conn) => window.shelfApi.connector.clearUploads(conn, '/tmp'),
+    docker,
+  );
+  expect(second.ok).toBe(true);
+  if (second.ok) {
+    expect(second.removed).toBe(0);
+  }
+
+  // Re-upload after clear still works — the dir is intact, not deleted.
+  const reupload = await page.evaluate(
+    (conn) => window.shelfApi.connector.uploadFile(
+      conn,
+      '/tmp',
+      'after-clear.txt',
+      new TextEncoder().encode('gamma').buffer,
+    ),
+    docker,
+  );
+  expect(reupload.ok).toBe(true);
+});

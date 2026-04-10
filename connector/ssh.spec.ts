@@ -67,3 +67,62 @@ test('uploadFile streams a file to the remote host via SSH ControlMaster', async
     expect(result.remotePath).toMatch(/^\/tmp\/\.tmp\/shelf\/[a-z0-9]+-paste\.png$/);
   }
 });
+
+test('clearUploads wipes the SSH upload dir and is idempotent', async ({ shelfApp: { page } }) => {
+  const ssh = { type: 'ssh' as const, host: '127.0.0.1', port: 2222, user: 'testuser' };
+
+  // Push two distinct files so we have more than one entry to clean.
+  const uploads = await page.evaluate(async (conn) => {
+    const a = await window.shelfApi.connector.uploadFile(
+      conn,
+      '/tmp',
+      'cleanup-a.txt',
+      new TextEncoder().encode('alpha').buffer,
+    );
+    const b = await window.shelfApi.connector.uploadFile(
+      conn,
+      '/tmp',
+      'cleanup-b.txt',
+      new TextEncoder().encode('beta').buffer,
+    );
+    return { a, b };
+  }, ssh);
+
+  expect(uploads.a.ok).toBe(true);
+  expect(uploads.b.ok).toBe(true);
+
+  // First clear: should remove the freshly-uploaded files (and any leftover
+  // entries from earlier tests in the same worker).
+  const first = await page.evaluate(
+    (conn) => window.shelfApi.connector.clearUploads(conn, '/tmp'),
+    ssh,
+  );
+  expect(first.ok).toBe(true);
+  if (first.ok) {
+    expect(first.removed).toBeGreaterThanOrEqual(2);
+  }
+
+  // Second clear: directory must still exist but be empty — count is 0.
+  // This is the strongest portable proof that the prior call actually wiped
+  // the contents (without depending on listDir, which only returns dirs).
+  const second = await page.evaluate(
+    (conn) => window.shelfApi.connector.clearUploads(conn, '/tmp'),
+    ssh,
+  );
+  expect(second.ok).toBe(true);
+  if (second.ok) {
+    expect(second.removed).toBe(0);
+  }
+
+  // Re-upload after clear must still succeed — the .tmp/shelf dir is intact.
+  const reupload = await page.evaluate(
+    (conn) => window.shelfApi.connector.uploadFile(
+      conn,
+      '/tmp',
+      'after-clear.txt',
+      new TextEncoder().encode('gamma').buffer,
+    ),
+    ssh,
+  );
+  expect(reupload.ok).toBe(true);
+});

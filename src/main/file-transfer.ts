@@ -47,21 +47,32 @@ function makePrefix(): string {
 }
 
 /**
+ * Sanity window for decoded prefix timestamps. `Date.now().toString(36)` is
+ * 8 characters wide for any time between ~1972 and ~2059, so a real Shelf
+ * prefix is exactly 9 chars. We additionally require the decoded ms to fall
+ * inside [2020-01-01, 2100-01-01) — that way an arbitrary all-alphanumeric
+ * word like `manually-placed.log` does not get misclassified as one of ours.
+ */
+const MIN_PREFIX_LEN = 9;
+const TS_FLOOR_MS = 1_577_836_800_000; // 2020-01-01T00:00:00Z
+const TS_CEIL_MS = 4_102_444_800_000;  // 2100-01-01T00:00:00Z
+
+/**
  * Parse the ms timestamp out of an uploaded filename. Returns null when the
  * name does not look like one of ours — that way unknown files (e.g. user's
  * own scratch files dropped into `.tmp/shelf/`) are skipped by cleanup.
  */
 function parseUploadPrefix(name: string): number | null {
   const dashIdx = name.indexOf('-');
-  // Need at least 1 timestamp char + 1 counter char + the '-' separator.
-  if (dashIdx < 2) return null;
+  if (dashIdx < MIN_PREFIX_LEN) return null;
   const prefix = name.slice(0, dashIdx);
+  if (prefix.length < MIN_PREFIX_LEN) return null;
   if (!/^[a-z0-9]+$/.test(prefix)) return null;
   // Last char is the counter; everything before it is the base36 timestamp.
   const timestampPart = prefix.slice(0, -1);
-  if (timestampPart.length === 0) return null;
   const ms = parseInt(timestampPart, 36);
-  if (!Number.isFinite(ms) || ms <= 0) return null;
+  if (!Number.isFinite(ms)) return null;
+  if (ms < TS_FLOOR_MS || ms >= TS_CEIL_MS) return null;
   return ms;
 }
 
