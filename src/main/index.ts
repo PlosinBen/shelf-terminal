@@ -3,8 +3,10 @@ import path from 'path';
 import fs from 'fs';
 import { IPC } from '../shared/ipc-channels';
 import { spawnPty, writePty, resizePty, killPty, killAllPtys, setMuted } from './pty-manager';
-import { loadProjects, saveProjects } from './project-store';
-import { loadSettings, saveSettings } from './settings-store';
+import { saveProjects } from './project-store';
+import { saveSettings } from './settings-store';
+import { bootstrap } from './bootstrap';
+import { DEFAULT_SETTINGS } from '../shared/defaults';
 import { listDirectory, getHomePath } from './folder-list';
 import { saveClipboardImage, saveClipboardImageRemote, saveClipboardImageDocker, startCleanupTimer, stopCleanupTimer, cleanupAllImages } from './clipboard-image';
 import { initAutoUpdater, stopAutoUpdater, manualCheckForUpdate, downloadAndInstall } from './updater';
@@ -22,6 +24,8 @@ if (process.env.NODE_ENV) {
 }
 
 let mainWindow: BrowserWindow | null = null;
+let cachedProjects: ProjectConfig[] = [];
+let cachedSettings: AppSettings = { ...DEFAULT_SETTINGS };
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -69,10 +73,11 @@ ipcMain.handle(IPC.HOME_PATH, () => {
 });
 
 ipcMain.handle(IPC.PROJECT_LOAD, () => {
-  return loadProjects();
+  return cachedProjects;
 });
 
 ipcMain.handle(IPC.PROJECT_SAVE, (_event, projects: ProjectConfig[]) => {
+  cachedProjects = projects;
   saveProjects(projects);
 });
 
@@ -133,7 +138,7 @@ ipcMain.handle(IPC.CLIPBOARD_SAVE_IMAGE_DOCKER, (_event, payload: { buffer: Arra
 });
 
 ipcMain.handle(IPC.SETTINGS_LOAD, () => {
-  return loadSettings();
+  return cachedSettings;
 });
 
 ipcMain.handle(IPC.LOGS_CLEAR, () => {
@@ -145,6 +150,7 @@ ipcMain.handle(IPC.LOGS_CLEAR, () => {
 });
 
 ipcMain.handle(IPC.SETTINGS_SAVE, (_event, settings: AppSettings) => {
+  cachedSettings = settings;
   saveSettings(settings);
   setLogLevel(settings.logLevel);
 });
@@ -173,10 +179,6 @@ ipcMain.on(IPC.PTY_MUTE, (_event, payload: { tabId: string; muted: boolean }) =>
 // ── App lifecycle ──
 
 app.whenReady().then(() => {
-  const settings = loadSettings();
-  const envLogLevel = process.env.LOG_LEVEL as import('../shared/types').LogLevel | undefined;
-  setLogLevel(envLogLevel || settings.logLevel);
-
   // Write logs to date-based file: {userData}/logs/{yyyymm}/{mmdd}.log
   const logBaseDir = path.join(app.getPath('userData'), 'logs');
   setFileWriter((line) => {
@@ -187,6 +189,18 @@ app.whenReady().then(() => {
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     fs.appendFileSync(path.join(dir, `${mmdd}.log`), line + '\n');
   });
+
+  // Allow LOG_LEVEL env to capture bootstrap-time info/debug logs (default 'error').
+  const envLogLevel = process.env.LOG_LEVEL as import('../shared/types').LogLevel | undefined;
+  if (envLogLevel) setLogLevel(envLogLevel);
+
+  // Eagerly load configs before showing the window. On unrecoverable errors,
+  // bootstrap() shows a sync dialog and calls app.exit() — we never reach createWindow().
+  const { projects, settings } = bootstrap();
+  cachedProjects = projects;
+  cachedSettings = settings;
+
+  if (!envLogLevel) setLogLevel(settings.logLevel);
 
   log.info('app', `starting, logLevel=${settings.logLevel}, userData=${app.getPath('userData')}`);
 
