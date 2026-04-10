@@ -163,10 +163,32 @@ button {
   color: var(--accent);
   cursor: pointer;
   line-height: 1;
+  background: none;
+  border: none;
+  padding: 0;
 }
 
 .sidebar-update-btn:hover {
   opacity: 0.8;
+}
+
+.sidebar-update-btn.ready {
+  color: var(--success, #4caf50);
+}
+
+.sidebar-update-progress {
+  flex: 1;
+  height: 6px;
+  background: var(--border);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-left: 4px;
+}
+
+.sidebar-update-progress-bar {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.15s linear;
 }
 
 /* ── Context Menu ── */

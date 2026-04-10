@@ -1,5 +1,5 @@
 import { useState, useCallback, useSyncExternalStore } from 'react';
-import type { ProjectConfig, AppSettings } from '../shared/types';
+import type { ProjectConfig, AppSettings, UpdateStatus } from '../shared/types';
 import { DEFAULT_SETTINGS } from '../shared/defaults';
 
 // ── Tab state ──
@@ -28,7 +28,7 @@ let settingsVisible = false;
 let searchVisible = false;
 let editingProjectIndex: number | null = null;
 let settings: AppSettings = { ...DEFAULT_SETTINGS };
-let updateAvailable: string | null = null; // available version string, null = no update
+let updateStatus: UpdateStatus = { state: 'idle' };
 let nextTabCounter = 0;
 
 type Listener = () => void;
@@ -44,7 +44,7 @@ function subscribe(l: Listener) {
 }
 
 function getSnapshot() {
-  return { projects, activeProjectIndex, sidebarVisible, settingsVisible, searchVisible, editingProjectIndex, settings, updateAvailable };
+  return { projects, activeProjectIndex, sidebarVisible, settingsVisible, searchVisible, editingProjectIndex, settings, updateStatus };
 }
 
 let snapshotRef = getSnapshot();
@@ -314,8 +314,8 @@ export function toggleMuted(projectIndex: number, tabIndex: number) {
 
 // ── Update actions ──
 
-export function setUpdateAvailable(version: string | null) {
-  updateAvailable = version;
+export function setUpdateStatus(status: UpdateStatus) {
+  updateStatus = status;
   updateSnapshot();
 }
 

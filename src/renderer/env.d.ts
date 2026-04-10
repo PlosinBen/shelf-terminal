@@ -51,8 +51,9 @@ interface ShelfApi {
   };
   updater: {
     check: () => Promise<void>;
+    download: () => Promise<void>;
     install: () => Promise<void>;
-    onStatus: (callback: (status: { available: boolean; version?: string }) => void) => () => void;
+    onStatus: (callback: (status: import('../shared/types').UpdateStatus) => void) => () => void;
   };
 }
 

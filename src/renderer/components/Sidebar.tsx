@@ -12,7 +12,7 @@ import { emit, Events } from '../events';
 const version = __APP_VERSION__;
 
 export function Sidebar() {
-  const { projects, activeProjectIndex, updateAvailable } = useStore();
+  const { projects, activeProjectIndex, updateStatus } = useStore();
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const [contextMenu, setContextMenu] = useState<{ index: number; x: number; y: number } | null>(null);
@@ -102,10 +102,30 @@ export function Sidebar() {
 
       <div className="sidebar-footer">
         <span className="sidebar-version">v{version}</span>
-        {updateAvailable && (
+        {updateStatus.state === 'available' && (
           <button
             className="sidebar-update-btn"
-            title={`Update to v${updateAvailable}`}
+            title={`Download v${updateStatus.version}`}
+            onClick={() => window.shelfApi.updater.download()}
+          >
+            &#x21E9;
+          </button>
+        )}
+        {updateStatus.state === 'downloading' && (
+          <div
+            className="sidebar-update-progress"
+            title={`Downloading v${updateStatus.version} — ${Math.round(updateStatus.percent)}%`}
+          >
+            <div
+              className="sidebar-update-progress-bar"
+              style={{ width: `${Math.max(0, Math.min(100, updateStatus.percent))}%` }}
+            />
+          </div>
+        )}
+        {updateStatus.state === 'downloaded' && (
+          <button
+            className="sidebar-update-btn ready"
+            title={`Install v${updateStatus.version}`}
             onClick={() => window.shelfApi.updater.install()}
           >
             &#x21BB;

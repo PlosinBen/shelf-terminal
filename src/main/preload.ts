@@ -105,9 +105,10 @@ contextBridge.exposeInMainWorld('shelfApi', {
   },
   updater: {
     check: () => ipcRenderer.invoke(IPC.UPDATE_CHECK),
+    download: () => ipcRenderer.invoke(IPC.UPDATE_DOWNLOAD),
     install: () => ipcRenderer.invoke(IPC.UPDATE_INSTALL),
-    onStatus: (callback: (status: { available: boolean; version?: string }) => void) => {
-      const listener = (_event: Electron.IpcRendererEvent, status: { available: boolean; version?: string }) => {
+    onStatus: (callback: (status: import('../shared/types').UpdateStatus) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, status: import('../shared/types').UpdateStatus) => {
         callback(status);
       };
       ipcRenderer.on(IPC.UPDATE_STATUS, listener);

@@ -8,7 +8,8 @@
     "build": "vite build",
     "postinstall": "electron-rebuild",
     "typecheck": "tsc --noEmit",
-    "test": "npm run typecheck && npm run test:e2e && npm run test:docker && npm run test:ssh",
+    "test": "npm run typecheck && npm run test:unit && npm run test:e2e && npm run test:docker && npm run test:ssh",
+    "test:unit": "vitest run",
     "test:e2e": "NODE_ENV=test npm run build && NODE_ENV=test npx playwright test --project=e2e",
     "test:docker": "docker run -d --name shelf-test-container -p 2222:2222 -e USER_NAME=testuser -e USER_PASSWORD=testpass -e PASSWORD_ACCESS=true linuxserver/openssh-server && NODE_ENV=test npm run build && NODE_ENV=test npx playwright test --project=docker; docker rm -f shelf-test-container",
     "test:ssh": "docker run -d --name shelf-test-container -p 2222:2222 -e USER_NAME=testuser -e USER_PASSWORD=testpass -e PASSWORD_ACCESS=true linuxserver/openssh-server && NODE_ENV=test npm run build && NODE_ENV=test npx playwright test --project=ssh; docker rm -f shelf-test-container",
@@ -29,14 +30,23 @@
       "node_modules/node-pty/**/*"
     ],
     "mac": {
-      "target": ["dmg", "zip"],
+      "target": [
+        "dmg",
+        "zip"
+      ],
       "category": "public.app-category.developer-tools"
     },
     "win": {
-      "target": ["nsis", "zip"]
+      "target": [
+        "nsis",
+        "zip"
+      ]
     },
     "linux": {
-      "target": ["AppImage", "deb"],
+      "target": [
+        "AppImage",
+        "deb"
+      ],
       "category": "Development"
     },
     "publish": {
@@ -56,7 +66,8 @@
     "typescript": "5.9.3",
     "vite": "6.4.2",
     "vite-plugin-electron": "0.29.1",
-    "vite-plugin-electron-renderer": "0.14.6"
+    "vite-plugin-electron-renderer": "0.14.6",
+    "vitest": "^4.1.4"
   },
   "dependencies": {
     "@xterm/addon-fit": "0.11.0",

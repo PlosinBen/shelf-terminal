@@ -114,3 +114,11 @@ export interface FolderListResult {
   entries: string[];
   error?: string;
 }
+
+// ── Auto-updater ──
+
+export type UpdateStatus =
+  | { state: 'idle' }
+  | { state: 'available'; version: string }
+  | { state: 'downloading'; version: string; percent: number; transferred: number; total: number }
+  | { state: 'downloaded'; version: string };

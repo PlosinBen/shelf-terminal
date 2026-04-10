@@ -9,7 +9,7 @@ import { bootstrap } from './bootstrap';
 import { DEFAULT_SETTINGS } from '../shared/defaults';
 import { listDirectory, getHomePath } from './folder-list';
 import { saveClipboardImage, saveClipboardImageRemote, saveClipboardImageDocker, startCleanupTimer, stopCleanupTimer, cleanupAllImages } from './clipboard-image';
-import { initAutoUpdater, stopAutoUpdater, manualCheckForUpdate, downloadAndInstall } from './updater';
+import { initAutoUpdater, stopAutoUpdater, manualCheckForUpdate, startUpdateDownload, confirmAndInstallUpdate } from './updater';
 import { sshListDir, sshGetHomePath } from './ssh-manager';
 import { removeHostKey } from './ssh-control';
 import * as connectionManager from './connection-manager';
@@ -159,8 +159,12 @@ ipcMain.handle(IPC.UPDATE_CHECK, () => {
   manualCheckForUpdate();
 });
 
+ipcMain.handle(IPC.UPDATE_DOWNLOAD, () => {
+  startUpdateDownload();
+});
+
 ipcMain.handle(IPC.UPDATE_INSTALL, () => {
-  downloadAndInstall();
+  return confirmAndInstallUpdate();
 });
 
 // Renderer → Main (send, fire-and-forget)

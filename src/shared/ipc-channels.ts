@@ -43,6 +43,7 @@ export const IPC = {
 
   // Updater
   UPDATE_CHECK: 'update:check',
+  UPDATE_DOWNLOAD: 'update:download',
   UPDATE_INSTALL: 'update:install',
   UPDATE_STATUS: 'update:status',
 
