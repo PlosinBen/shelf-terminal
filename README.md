@@ -66,6 +66,8 @@ Paste or drag any file (image, PDF, archive, log, …) into the terminal. Shelf 
 - The destination lives inside the project directory so sandboxed agent CLIs (Claude Code, Gemini, Codex, …) that are restricted to the project can still read the file.
 - Multi-file drops are uploaded in parallel and the resulting paths are inserted on a single line, space-separated.
 - Files exceeding **Max Upload Size (MB)** in Settings (default 50) are skipped and reported via a popup; the rest still go through.
+- A `.tmp/.gitignore` (`*`) is dropped on first upload so the directory stays out of git.
+- **Auto-cleanup**: a few seconds after a project's first tab opens, leftover uploads from previous Shelf sessions are deleted in the background. Files created in the current session are never touched (the cutoff is decoded from each file's own timestamp prefix). Use **Edit Project → Clear uploaded files** for a manual purge — the button is disabled with a hint when the remote is not currently connected.
 
 ### Background Notification
 

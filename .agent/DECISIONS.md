@@ -189,3 +189,25 @@
 **原因**: `vite.config.ts` 載入 `vite-plugin-electron`，跑單元測試時會嘗試 spawn Electron，整個 vitest 就卡死。獨立 config 跑純 TypeScript 模組就好。
 
 **不要改**: 兩份 config 共用會把 electron plugin 拉進 test 環境。
+
+---
+
+## 19. 上傳清理：session-based、cutoff 從檔名解出來
+
+**決策**: `<cwd>/.tmp/shelf/` 的清理走兩條路：
+- **自動**：每個 project 在 Shelf process 內第一次 spawn pty 時，`maybeScheduleCleanup()` 排一個 3 秒後的 fire-and-forget cleanup。同一個 project 在這個 Shelf process 內只跑一次（用 `cleanedProjects: Set<string>` 去重）。Cutoff 是 `SESSION_STARTED_AT`（process 啟動時的 ms）— 比這個舊的就是上一個 session 留下來的，可以刪。
+- **手動**：ProjectEditPanel 的 Clear 按鈕呼叫 `clearUploads()`，無論時間戳直接清空 `.tmp/shelf/`（保留目錄本身）。
+
+**檔案是否「過期」是從檔名解出來的**：upload 時的 prefix 是 `Date.now().toString(36) + counter`，`parseUploadPrefix()` 從檔名拆出來反解回 ms，不依賴 mtime。
+
+**原因**:
+- **不用 mtime + `find -mmin`**：`find -mmin` 的解析度是「捨入到下一分鐘」，cutoff 跟剛上傳的檔差幾秒就會誤刪當下這次 session 的檔。Filename-encoded ts 是精確的 ms。
+- **portable**：四種 transport 只需要 `ls` 跟 `rm`，不需要 `find` 或 `stat`。
+- **只動我們自己的檔**：`parseUploadPrefix` 對非 Shelf prefix 回 `null`，使用者自己丟到 `.tmp/shelf/` 的檔不會被掃。
+- **fire-and-forget + 3 秒延遲**：讓 first paint 跟 shell startup 不被 cleanup 的 ssh exec 卡到。錯誤只 log 不 throw — cleanup 永遠不能擋 pty spawn。
+- **per-process dedupe**：同一個 Shelf process 內 cleanup 一次就夠了；本 session 之後的上傳是 fresh 的，不該被自己的 cleanup 動到。
+
+**不要改**:
+- 換回 mtime cutoff 會踩 `find -mmin` 的捨入問題，可能在使用者剛 paste 完就把同次的檔刪掉。
+- 如果讓 cleanup `await` 在 spawn 之前，遠端 `ssh exec` 的延遲會直接打到 first tab 的開啟時間。
+- 把 dedupe 拿掉會讓每次 spawn 都重跑 cleanup，浪費 SSH/docker exec。
