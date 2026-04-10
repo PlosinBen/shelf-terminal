@@ -53,4 +53,5 @@ export const IPC = {
   // Main → Renderer (send)
   PTY_DATA: 'pty:data',
   PTY_EXIT: 'pty:exit',
+  PTY_INIT_SENT: 'pty:init-sent',
 } as const;
