@@ -27,6 +27,10 @@ interface ShelfApi {
   clipboard: {
     saveImage: (buffer: ArrayBuffer) => Promise<string>;
     saveImageRemote: (buffer: ArrayBuffer, host: string, port: number, user: string) => Promise<string>;
+    saveImageDocker: (buffer: ArrayBuffer, container: string) => Promise<string>;
+  };
+  docker: {
+    listContainers: () => Promise<string[]>;
   };
   wsl: {
     listDir: (distro: string, dirPath: string) => Promise<import('../shared/types').FolderListResult>;

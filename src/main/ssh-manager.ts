@@ -39,7 +39,10 @@ export function sshEstablishConnection(
 
     let output = '';
     let passwordSent = false;
+    let settled = false;
     const timeout = setTimeout(() => {
+      if (settled) return;
+      settled = true;
       p.kill();
       reject(new Error('SSH connection timeout'));
     }, 15000);
@@ -52,7 +55,8 @@ export function sshEstablishConnection(
         p.write(password + '\n');
       }
       // Detect success
-      if (output.includes('__SHELF_AUTH_OK__')) {
+      if (!settled && output.includes('__SHELF_AUTH_OK__')) {
+        settled = true;
         clearTimeout(timeout);
         p.kill();
         resolve();
@@ -61,7 +65,13 @@ export function sshEstablishConnection(
 
     p.onExit(({ exitCode }) => {
       clearTimeout(timeout);
-      if (exitCode !== 0 && !output.includes('__SHELF_AUTH_OK__')) {
+      if (settled) return;
+      // Check output one more time — onData may have buffered the success marker
+      if (output.includes('__SHELF_AUTH_OK__')) {
+        settled = true;
+        resolve();
+      } else {
+        settled = true;
         reject(new Error('SSH authentication failed'));
       }
     });

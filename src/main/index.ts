@@ -6,11 +6,12 @@ import { spawnPty, writePty, resizePty, killPty, killAllPtys, setMuted } from '.
 import { loadProjects, saveProjects } from './project-store';
 import { loadSettings, saveSettings } from './settings-store';
 import { listDirectory, getHomePath } from './folder-list';
-import { saveClipboardImage, saveClipboardImageRemote, startCleanupTimer, stopCleanupTimer, cleanupAllImages } from './clipboard-image';
+import { saveClipboardImage, saveClipboardImageRemote, saveClipboardImageDocker, startCleanupTimer, stopCleanupTimer, cleanupAllImages } from './clipboard-image';
 import { initAutoUpdater, stopAutoUpdater, manualCheckForUpdate, downloadAndInstall } from './updater';
 import { sshListDir, sshGetHomePath } from './ssh-manager';
 import * as connectionManager from './connection-manager';
 import { wslListDir, wslHomePath, wslListDistros } from './wsl-manager';
+import { dockerListDir, dockerHomePath, dockerListContainers } from './docker-manager';
 import { log, setLogLevel, setFileWriter } from '../shared/logger';
 import type { Connection, ProjectConfig, AppSettings, PtySpawnPayload, PtyInputPayload, PtyResizePayload, PtyKillPayload, FolderListPayload, SSHListDirPayload, WSLListDirPayload } from '../shared/types';
 
@@ -108,6 +109,22 @@ ipcMain.handle(IPC.WSL_LIST_DISTROS, () => {
 
 ipcMain.handle(IPC.WSL_HOME_PATH, (_event, distro: string) => {
   return wslHomePath(distro);
+});
+
+ipcMain.handle(IPC.DOCKER_LIST_CONTAINERS, () => {
+  return dockerListContainers();
+});
+
+ipcMain.handle(IPC.DOCKER_LIST_DIR, (_event, payload: { container: string; path: string }) => {
+  return dockerListDir(payload.container, payload.path);
+});
+
+ipcMain.handle(IPC.DOCKER_HOME_PATH, (_event, container: string) => {
+  return dockerHomePath(container);
+});
+
+ipcMain.handle(IPC.CLIPBOARD_SAVE_IMAGE_DOCKER, (_event, payload: { buffer: ArrayBuffer; container: string }) => {
+  return saveClipboardImageDocker(Buffer.from(payload.buffer), payload.container);
 });
 
 ipcMain.handle(IPC.SETTINGS_LOAD, () => {

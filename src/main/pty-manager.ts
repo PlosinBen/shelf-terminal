@@ -47,6 +47,7 @@ function buildSSHArgs(host: string, port: number, user: string, cwd: string): st
     '-o', `ControlMaster=auto`,
     '-o', `ControlPath=${controlPath}`,
     '-o', `ControlPersist=600`,
+    '-o', 'StrictHostKeyChecking=accept-new',
     '-o', 'ServerAliveInterval=30',
     '-p', String(port),
     `${user}@${host}`,
@@ -81,6 +82,12 @@ export function spawnPty(
     case 'wsl': {
       shell = 'wsl.exe';
       args = ['-d', connection.distro, '--', 'sh', '-c', `cd ${shellEscape(cwd)} && exec $SHELL`];
+      spawnCwd = os.homedir();
+      break;
+    }
+    case 'docker': {
+      shell = process.env.DOCKER_PATH || '/usr/local/bin/docker';
+      args = ['exec', '-it', connection.container, 'sh', '-c', `cd ${shellEscape(cwd)} && exec \${SHELL:-sh}`];
       spawnCwd = os.homedir();
       break;
     }

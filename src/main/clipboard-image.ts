@@ -3,6 +3,7 @@ import path from 'path';
 import os from 'os';
 import { execFile } from 'child_process';
 import { getControlPath } from './ssh-control';
+import { dockerCopyImage } from './docker-manager';
 
 const PASTE_DIR = path.join(os.tmpdir(), 'shelf-paste');
 const MAX_AGE_MS = 60 * 60 * 1000; // 1 hour
@@ -77,6 +78,21 @@ export function saveClipboardImageRemote(
       },
     );
   });
+}
+
+/**
+ * Save image locally, then docker cp to container. Returns the remote path.
+ */
+export function saveClipboardImageDocker(
+  buffer: Buffer,
+  container: string,
+): Promise<string> {
+  const localPath = saveClipboardImage(buffer);
+  const remoteTmpDir = '/tmp/shelf-paste';
+  const filename = path.basename(localPath);
+  const remotePath = `${remoteTmpDir}/${filename}`;
+
+  return dockerCopyImage(localPath, container, remotePath);
 }
 
 /**

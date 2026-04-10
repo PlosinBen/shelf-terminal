@@ -29,6 +29,14 @@ export const IPC = {
   WSL_HOME_PATH: 'wsl:home-path',
   WSL_LIST_DISTROS: 'wsl:list-distros',
 
+  // Docker
+  DOCKER_LIST_DIR: 'docker:list-dir',
+  DOCKER_HOME_PATH: 'docker:home-path',
+  DOCKER_LIST_CONTAINERS: 'docker:list-containers',
+
+  // Clipboard (Docker)
+  CLIPBOARD_SAVE_IMAGE_DOCKER: 'clipboard:save-image-docker',
+
   // Logs
   LOGS_CLEAR: 'logs:clear',
 

@@ -3,7 +3,8 @@
 export type LocalConnection = { type: 'local' };
 export type SSHConnection = { type: 'ssh'; host: string; port: number; user: string; password?: string };
 export type WSLConnection = { type: 'wsl'; distro: string };
-export type Connection = LocalConnection | SSHConnection | WSLConnection;
+export type DockerConnection = { type: 'docker'; container: string };
+export type Connection = LocalConnection | SSHConnection | WSLConnection | DockerConnection;
 
 // ── Project config (persisted) ──
 

@@ -102,6 +102,23 @@ export function TerminalView({ tabId, projectId, cwd, connection, initScript, ta
     });
     resizeObserver.observe(container);
 
+    // Save image and write path to terminal input
+    const saveAndInputImage = async (buffer: ArrayBuffer) => {
+      let filePath: string;
+      if (connection.type === 'ssh') {
+        filePath = await window.shelfApi.clipboard.saveImageRemote(
+          buffer, connection.host, connection.port, connection.user,
+        );
+      } else if (connection.type === 'docker') {
+        filePath = await window.shelfApi.clipboard.saveImageDocker(
+          buffer, connection.container,
+        );
+      } else {
+        filePath = await window.shelfApi.clipboard.saveImage(buffer);
+      }
+      window.shelfApi.pty.input(tabId, filePath);
+    };
+
     // Image paste: intercept when clipboard has image data
     const handlePaste = async (e: ClipboardEvent) => {
       const items = e.clipboardData?.items;
@@ -121,21 +138,7 @@ export function TerminalView({ tabId, projectId, cwd, connection, initScript, ta
           e.preventDefault();
           const blob = item.getAsFile();
           if (!blob) continue;
-          const buffer = await blob.arrayBuffer();
-
-          if (connection.type === 'ssh') {
-            // Save locally first, then SCP to remote
-            const remotePath = await window.shelfApi.clipboard.saveImageRemote(
-              buffer,
-              connection.host,
-              connection.port,
-              connection.user,
-            );
-            window.shelfApi.pty.input(tabId, remotePath);
-          } else {
-            const filePath = await window.shelfApi.clipboard.saveImage(buffer);
-            window.shelfApi.pty.input(tabId, filePath);
-          }
+          await saveAndInputImage(await blob.arrayBuffer());
           return;
         }
       }
@@ -157,20 +160,7 @@ export function TerminalView({ tabId, projectId, cwd, connection, initScript, ta
       for (const file of files) {
         if (!file.type.startsWith('image/')) continue;
         e.preventDefault();
-        const buffer = await file.arrayBuffer();
-
-        if (connection.type === 'ssh') {
-          const remotePath = await window.shelfApi.clipboard.saveImageRemote(
-            buffer,
-            connection.host,
-            connection.port,
-            connection.user,
-          );
-          window.shelfApi.pty.input(tabId, remotePath);
-        } else {
-          const filePath = await window.shelfApi.clipboard.saveImage(buffer);
-          window.shelfApi.pty.input(tabId, filePath);
-        }
+        await saveAndInputImage(await file.arrayBuffer());
         return;
       }
     };

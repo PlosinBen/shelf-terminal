@@ -42,6 +42,9 @@ contextBridge.exposeInMainWorld('shelfApi', {
       if (connection.type === 'wsl') {
         return ipcRenderer.invoke(IPC.WSL_LIST_DIR, { distro: connection.distro, path: dirPath });
       }
+      if (connection.type === 'docker') {
+        return ipcRenderer.invoke(IPC.DOCKER_LIST_DIR, { container: connection.container, path: dirPath });
+      }
       return ipcRenderer.invoke(IPC.FOLDER_LIST, { path: dirPath });
     },
     homePath: (connection: any) => {
@@ -50,6 +53,9 @@ contextBridge.exposeInMainWorld('shelfApi', {
       }
       if (connection.type === 'wsl') {
         return ipcRenderer.invoke(IPC.WSL_HOME_PATH, connection.distro);
+      }
+      if (connection.type === 'docker') {
+        return ipcRenderer.invoke(IPC.DOCKER_HOME_PATH, connection.container);
       }
       return ipcRenderer.invoke(IPC.HOME_PATH);
     },
@@ -67,6 +73,12 @@ contextBridge.exposeInMainWorld('shelfApi', {
       ipcRenderer.invoke(IPC.CLIPBOARD_SAVE_IMAGE, buffer),
     saveImageRemote: (buffer: ArrayBuffer, host: string, port: number, user: string) =>
       ipcRenderer.invoke(IPC.CLIPBOARD_SAVE_IMAGE_REMOTE, { buffer, host, port, user }),
+    saveImageDocker: (buffer: ArrayBuffer, container: string) =>
+      ipcRenderer.invoke(IPC.CLIPBOARD_SAVE_IMAGE_DOCKER, { buffer, container }),
+  },
+  docker: {
+    listContainers: () =>
+      ipcRenderer.invoke(IPC.DOCKER_LIST_CONTAINERS),
   },
   wsl: {
     listDir: (distro: string, dirPath: string) =>

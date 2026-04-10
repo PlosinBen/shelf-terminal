@@ -59,9 +59,20 @@ export function App() {
       addTab(projectIndex);
     });
 
-    const offConnectProject = on(Events.CONNECT_PROJECT, (projectIndex: number) => {
+    const offConnectProject = on(Events.CONNECT_PROJECT, async (projectIndex: number) => {
       const proj = projects[projectIndex];
       if (!proj || proj.tabs.length > 0) return;
+
+      // Establish SSH ControlMaster before spawning tabs
+      const conn = proj.config.connection;
+      if (conn.type === 'ssh' && conn.password) {
+        try {
+          await window.shelfApi.connector.connect(conn, conn.password);
+        } catch {
+          // Auth failed — don't open tabs
+          return;
+        }
+      }
 
       const templates = proj.config.defaultTabs;
       if (templates && templates.length > 0) {

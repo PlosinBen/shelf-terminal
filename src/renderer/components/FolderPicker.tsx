@@ -21,6 +21,9 @@ export function FolderPicker() {
   // WSL form state
   const [wslDistro, setWslDistro] = useState('Ubuntu');
 
+  // Docker form state
+  const [dockerContainer, setDockerContainer] = useState('');
+
   // Browse state
   const [currentPath, setCurrentPath] = useState('');
   const [entries, setEntries] = useState<string[]>([]);
@@ -81,6 +84,7 @@ export function FolderPicker() {
       setSshUser('');
       setSshPassword('');
       setWslDistro('Ubuntu');
+      setDockerContainer('');
     };
     const off = on(Events.OPEN_FOLDER_PICKER, handler);
     return () => { off(); };
@@ -244,6 +248,8 @@ export function FolderPicker() {
             onSshUserChange={setSshUser}
             onSshPasswordChange={setSshPassword}
             onWslDistroChange={setWslDistro}
+            dockerContainer={dockerContainer}
+            onDockerContainerChange={setDockerContainer}
             onSelect={proceedToBrowse}
             onCancel={handleCancel}
           />
@@ -274,22 +280,25 @@ interface ConnectionStepProps {
   sshUser: string;
   sshPassword: string;
   wslDistro: string;
+  dockerContainer: string;
   onSshHostChange: (v: string) => void;
   onSshPortChange: (v: string) => void;
   onSshUserChange: (v: string) => void;
   onSshPasswordChange: (v: string) => void;
   onWslDistroChange: (v: string) => void;
+  onDockerContainerChange: (v: string) => void;
   onSelect: (conn: Connection) => void;
   onCancel: () => void;
 }
 
 function ConnectionStep({
-  sshHost, sshPort, sshUser, sshPassword, wslDistro,
-  onSshHostChange, onSshPortChange, onSshUserChange, onSshPasswordChange, onWslDistroChange,
+  sshHost, sshPort, sshUser, sshPassword, wslDistro, dockerContainer,
+  onSshHostChange, onSshPortChange, onSshUserChange, onSshPasswordChange, onWslDistroChange, onDockerContainerChange,
   onSelect, onCancel,
 }: ConnectionStepProps) {
-  const [connType, setConnType] = useState<'local' | 'ssh' | 'wsl'>('local');
+  const [connType, setConnType] = useState<'local' | 'ssh' | 'wsl' | 'docker'>('local');
   const [wslDistros, setWslDistros] = useState<string[]>([]);
+  const [dockerContainers, setDockerContainers] = useState<string[]>([]);
   const [sshConnected, setSshConnected] = useState(false);
   const isWindows = navigator.platform.includes('Win');
 
@@ -298,6 +307,12 @@ function ConnectionStep({
       window.shelfApi.wsl.listDistros().then((list) => {
         setWslDistros(list);
         if (list.length > 0 && !wslDistro) onWslDistroChange(list[0]);
+      });
+    }
+    if (connType === 'docker') {
+      window.shelfApi.docker.listContainers().then((list) => {
+        setDockerContainers(list);
+        if (list.length > 0 && !dockerContainer) onDockerContainerChange(list[0]);
       });
     }
   }, [connType]);
@@ -322,6 +337,9 @@ function ConnectionStep({
       onSelect({ type: 'ssh', host: sshHost, port: Number(sshPort) || 22, user: sshUser, password: sshConnected ? undefined : sshPassword || undefined });
     } else if (connType === 'wsl') {
       onSelect({ type: 'wsl', distro: wslDistro || 'Ubuntu' });
+    } else if (connType === 'docker') {
+      if (!dockerContainer) return;
+      onSelect({ type: 'docker', container: dockerContainer });
     }
   };
 
@@ -341,6 +359,13 @@ function ConnectionStep({
           onClick={() => setConnType('ssh')}
         >
           SSH
+        </button>
+        <button
+          type="button"
+          className={`conn-type-btn ${connType === 'docker' ? 'active' : ''}`}
+          onClick={() => setConnType('docker')}
+        >
+          Docker
         </button>
         {isWindows && (
           <button
@@ -420,6 +445,26 @@ function ConnectionStep({
               </select>
             ) : (
               <span className="conn-local-hint">Loading distros...</span>
+            )}
+          </div>
+        )}
+
+        {connType === 'docker' && (
+          <div className="conn-field">
+            <label className="conn-label">Container</label>
+            {dockerContainers.length > 0 ? (
+              <select
+                className="settings-select"
+                value={dockerContainer}
+                onChange={(e) => onDockerContainerChange(e.target.value)}
+                autoFocus
+              >
+                {dockerContainers.map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+            ) : (
+              <span className="conn-local-hint">No running containers found.</span>
             )}
           </div>
         )}
