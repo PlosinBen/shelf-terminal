@@ -64,6 +64,7 @@ export function SettingsPanel() {
   };
 
   const handleCancel = () => {
+    setDraft(settings);
     setRecordingAction(null);
     toggleSettings();
   };
