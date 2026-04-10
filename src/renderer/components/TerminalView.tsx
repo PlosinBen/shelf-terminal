@@ -143,12 +143,48 @@ export function TerminalView({ tabId, projectId, cwd, connection, initScript, ta
     // Use capture phase so we intercept before xterm's own paste handler
     container.addEventListener('paste', handlePaste, true);
 
+    // Image drag & drop
+    const handleDragOver = (e: DragEvent) => {
+      if (e.dataTransfer?.types.includes('Files')) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+      }
+    };
+    const handleDrop = async (e: DragEvent) => {
+      const files = e.dataTransfer?.files;
+      if (!files) return;
+
+      for (const file of files) {
+        if (!file.type.startsWith('image/')) continue;
+        e.preventDefault();
+        const buffer = await file.arrayBuffer();
+
+        if (connection.type === 'ssh') {
+          const remotePath = await window.shelfApi.clipboard.saveImageRemote(
+            buffer,
+            connection.host,
+            connection.port,
+            connection.user,
+          );
+          window.shelfApi.pty.input(tabId, remotePath);
+        } else {
+          const filePath = await window.shelfApi.clipboard.saveImage(buffer);
+          window.shelfApi.pty.input(tabId, filePath);
+        }
+        return;
+      }
+    };
+    container.addEventListener('dragover', handleDragOver);
+    container.addEventListener('drop', handleDrop);
+
     return () => {
       onDataDispose.dispose();
       onResizeDispose.dispose();
       removeDataListener();
       resizeObserver.disconnect();
       container.removeEventListener('paste', handlePaste, true);
+      container.removeEventListener('dragover', handleDragOver);
+      container.removeEventListener('drop', handleDrop);
     };
   }, [tabId]);
 
