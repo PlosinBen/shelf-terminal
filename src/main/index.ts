@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain } from 'electron';
 import path from 'path';
 import fs from 'fs';
 import { IPC } from '../shared/ipc-channels';
@@ -8,7 +8,7 @@ import { saveSettings } from './settings-store';
 import { bootstrap } from './bootstrap';
 import { DEFAULT_SETTINGS } from '../shared/defaults';
 import { listDirectory, getHomePath } from './folder-list';
-import { saveClipboardImage, saveClipboardImageRemote, saveClipboardImageDocker, startCleanupTimer, stopCleanupTimer, cleanupAllImages } from './clipboard-image';
+import { uploadFile } from './file-transfer';
 import { initAutoUpdater, stopAutoUpdater, manualCheckForUpdate, startUpdateDownload, confirmAndInstallUpdate } from './updater';
 import { sshListDir, sshGetHomePath } from './ssh-manager';
 import { removeHostKey } from './ssh-control';
@@ -16,7 +16,7 @@ import * as connectionManager from './connection-manager';
 import { wslListDir, wslHomePath, wslListDistros } from './wsl-manager';
 import { dockerListDir, dockerHomePath, dockerListContainers } from './docker-manager';
 import { log, setLogLevel, setFileWriter } from '../shared/logger';
-import type { Connection, ProjectConfig, AppSettings, PtySpawnPayload, PtyInputPayload, PtyResizePayload, PtyKillPayload, FolderListPayload, SSHListDirPayload, WSLListDirPayload } from '../shared/types';
+import type { Connection, ProjectConfig, AppSettings, FileUploadResult, PtySpawnPayload, PtyInputPayload, PtyResizePayload, PtyKillPayload, FolderListPayload, SSHListDirPayload, WSLListDirPayload } from '../shared/types';
 
 // Isolate userData per environment to avoid config conflicts
 if (process.env.NODE_ENV) {
@@ -81,12 +81,35 @@ ipcMain.handle(IPC.PROJECT_SAVE, (_event, projects: ProjectConfig[]) => {
   saveProjects(projects);
 });
 
-ipcMain.handle(IPC.CLIPBOARD_SAVE_IMAGE, (_event, buffer: ArrayBuffer) => {
-  return saveClipboardImage(Buffer.from(buffer));
-});
+ipcMain.handle(
+  IPC.FILE_UPLOAD,
+  async (_event, payload: { connection: Connection; cwd: string; filename: string; buffer: ArrayBuffer }): Promise<FileUploadResult> => {
+    try {
+      const remotePath = await uploadFile(
+        payload.connection,
+        payload.cwd,
+        payload.filename,
+        Buffer.from(payload.buffer),
+      );
+      return { ok: true, remotePath };
+    } catch (err: any) {
+      const message = err?.message ?? String(err);
+      log.error('file-transfer', `upload failed: ${message}`);
+      return { ok: false, reason: message };
+    }
+  },
+);
 
-ipcMain.handle(IPC.CLIPBOARD_SAVE_IMAGE_REMOTE, (_event, payload: { buffer: ArrayBuffer; host: string; port: number; user: string }) => {
-  return saveClipboardImageRemote(Buffer.from(payload.buffer), payload.host, payload.port, payload.user);
+ipcMain.handle(IPC.DIALOG_WARN, async (_event, payload: { title: string; message: string }) => {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  await dialog.showMessageBox(mainWindow, {
+    type: 'warning',
+    title: payload.title,
+    message: payload.message,
+    buttons: ['OK'],
+    defaultId: 0,
+    noLink: true,
+  });
 });
 
 ipcMain.handle(IPC.SSH_LIST_DIR, (_event, payload: SSHListDirPayload) => {
@@ -131,10 +154,6 @@ ipcMain.handle(IPC.DOCKER_LIST_DIR, (_event, payload: { container: string; path:
 
 ipcMain.handle(IPC.DOCKER_HOME_PATH, (_event, container: string) => {
   return dockerHomePath(container);
-});
-
-ipcMain.handle(IPC.CLIPBOARD_SAVE_IMAGE_DOCKER, (_event, payload: { buffer: ArrayBuffer; container: string }) => {
-  return saveClipboardImageDocker(Buffer.from(payload.buffer), payload.container);
 });
 
 ipcMain.handle(IPC.SETTINGS_LOAD, () => {
@@ -209,7 +228,6 @@ app.whenReady().then(() => {
   log.info('app', `starting, logLevel=${settings.logLevel}, userData=${app.getPath('userData')}`);
 
   createWindow();
-  startCleanupTimer();
   if (process.env.NODE_ENV !== 'test' && app.isPackaged) {
     initAutoUpdater(mainWindow!);
   }
@@ -217,9 +235,7 @@ app.whenReady().then(() => {
 
 function shutdown() {
   killAllPtys();
-  stopCleanupTimer();
   stopAutoUpdater();
-  cleanupAllImages();
   connectionManager.cleanup();
 }
 

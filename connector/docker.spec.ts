@@ -17,8 +17,8 @@ test('Docker exec spawns terminal and runs commands', async ({ shelfApp: { page 
   await expect(xtermRows).toContainText('__DOCKER_E2E__', { timeout: 10_000 });
 });
 
-test('docker cp uploads image to container', async ({ shelfApp: { page } }) => {
-  const remotePath = await page.evaluate(async () => {
+test('uploadFile streams a file into the container via docker exec', async ({ shelfApp: { page } }) => {
+  const result = await page.evaluate(async () => {
     const png = new Uint8Array([
       0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
       0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
@@ -30,8 +30,16 @@ test('docker cp uploads image to container', async ({ shelfApp: { page } }) => {
       0x33, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e,
       0x44, 0xae, 0x42, 0x60, 0x82,
     ]);
-    return window.shelfApi.clipboard.saveImageDocker(png.buffer, 'shelf-test-container');
+    return window.shelfApi.connector.uploadFile(
+      { type: 'docker', container: 'shelf-test-container' },
+      '/tmp',
+      'paste.png',
+      png.buffer,
+    );
   });
 
-  expect(remotePath).toMatch(/^\/tmp\/shelf-paste\/paste-\d+\.png$/);
+  expect(result.ok).toBe(true);
+  if (result.ok) {
+    expect(result.remotePath).toMatch(/^\/tmp\/\.tmp\/shelf\/[a-z0-9]+-paste\.png$/);
+  }
 });

@@ -17,7 +17,7 @@ Cross-platform, project-based terminal manager built with Electron. Replaces tmu
 - **Init script** — per-project startup commands (e.g. `nvm use 22`, `conda activate`)
 - **Default tabs** — per-project tab templates with individual commands, auto-opened on connect
 - **Custom keybindings** — all shortcuts configurable via Settings panel
-- **Image paste** — paste screenshots into terminal as temp file paths (SCP for SSH sessions)
+- **File paste / drag-drop** — drop or paste any file into the terminal; Shelf uploads it to `<projectCwd>/.tmp/shelf/` (works for local, SSH, WSL, Docker) and types the path
 - **Background notifications** — system notification when long-running commands finish
 - **Settings** — font, theme, scrollback, keybindings, log level, persisted to `settings.json`
 - **Logging** — date-based log files, configurable level (off/error/info/debug), `LOG_LEVEL` env override
@@ -58,11 +58,14 @@ Example: a `dev` tab running `npm run dev`, a `test` tab running `npm run test:w
 
 Multiple tabs to the same SSH host share a single TCP connection (ControlMaster). Open 5 tabs — authenticate once.
 
-### Image Paste
+### File Paste & Drag-Drop
 
-Paste a screenshot directly into the terminal. Shelf saves it to a temp file and writes the file path into the terminal input. For SSH sessions, the image is SCP'd to the remote host first.
+Paste or drag any file (image, PDF, archive, log, …) into the terminal. Shelf uploads it to `<projectCwd>/.tmp/shelf/<prefix>-<filename>` and types the shell-quoted path into the terminal input.
 
-Works with any CLI that accepts file paths — particularly useful for feeding images to AI agent CLIs.
+- Works for **local, SSH, Docker, and WSL** projects through one unified path. SSH/Docker/WSL streams the buffer over `sh -c "cat > …"` (no scp/docker-cp staging files).
+- The destination lives inside the project directory so sandboxed agent CLIs (Claude Code, Gemini, Codex, …) that are restricted to the project can still read the file.
+- Multi-file drops are uploaded in parallel and the resulting paths are inserted on a single line, space-separated.
+- Files exceeding **Max Upload Size (MB)** in Settings (default 50) are skipped and reported via a popup; the rest still go through.
 
 ### Background Notification
 

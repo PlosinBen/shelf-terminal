@@ -19,15 +19,19 @@ interface ShelfApi {
     homePath: (connection: import('../shared/types').Connection) => Promise<string>;
     isConnected: (connection: import('../shared/types').Connection) => Promise<boolean>;
     connect: (connection: import('../shared/types').Connection, password?: string) => Promise<void>;
+    uploadFile: (
+      connection: import('../shared/types').Connection,
+      cwd: string,
+      filename: string,
+      buffer: ArrayBuffer,
+    ) => Promise<import('../shared/types').FileUploadResult>;
   };
   project: {
     load: () => Promise<import('../shared/types').ProjectConfig[]>;
     save: (projects: import('../shared/types').ProjectConfig[]) => Promise<void>;
   };
-  clipboard: {
-    saveImage: (buffer: ArrayBuffer) => Promise<string>;
-    saveImageRemote: (buffer: ArrayBuffer, host: string, port: number, user: string) => Promise<string>;
-    saveImageDocker: (buffer: ArrayBuffer, container: string) => Promise<string>;
+  dialog: {
+    warn: (title: string, message: string) => Promise<void>;
   };
   docker: {
     listContainers: () => Promise<string[]>;

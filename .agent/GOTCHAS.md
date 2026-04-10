@@ -40,23 +40,25 @@
 
 ---
 
-## 5. SSH SCP mkdir 失敗不會中止
+## 5. 檔案上傳 mkdir + cat 串在同一個 sh -c
 
-**現象**: SCP image 到遠端時，如果 `/tmp/shelf-paste/` 不存在，`mkdir` SSH 指令可能失敗。
+**現象**: 在 `file-transfer.ts` 把 `mkdir -p` 和 `cat >` 拆成兩次 ssh / docker exec 呼叫時，有時候 race 到 cat 看不到目錄。
 
-**原因**: `clipboard-image.ts` 的 mkdir callback 不管成功失敗都繼續 SCP（因為目錄可能已存在）。
+**解法**: 一律用 `sh -c "mkdir -p '<dir>' && cat > '<path>'"`，目錄建立和寫入在同一個遠端 shell 內順序執行。`mkdir -p` 本身就 idempotent，目錄已存在不會錯。
 
-**注意**: 如果遠端禁止建立 `/tmp/shelf-paste/`，SCP 會失敗但不會有明確錯誤回饋給用戶。
+**注意**: 路徑用 `shellSingleQuote` 包起來，遠端 shell 不會二次解析任何字元；若改回呼叫 `execFile` 走 scp/docker cp，就要重新處理跨 shell 的 quoting。
 
 ---
 
-## 6. Image Paste 使用 Capture Phase
+## 6. Paste / Drop 使用 Capture Phase 攔截
 
-**現象**: 圖片貼上功能沒反應。
+**現象**: 檔案 paste / drag-drop 沒反應。
 
 **原因**: xterm 的 `xterm-helper-textarea` 攔截 paste event 後不會冒泡到 container。必須用 capture phase（`addEventListener` 第三參數 `true`）在 xterm 之前攔截。
 
-**判斷邏輯**: 有 `image/*` 就當圖片貼上，除非同時有 `text/html`（表示從瀏覽器複製富文本，image 只是 favicon）。
+**判斷邏輯**:
+- Paste：clipboard 含有 `kind === 'file'` 的 item 就走上傳；若同時帶 `text/html`（從瀏覽器複製富文本，image 只是 favicon）則放行讓 xterm 當文字貼上。
+- Drop：`dataTransfer.files` 非空就走上傳，不檢查 MIME（任何檔案都收）。
 
 ---
 
@@ -127,3 +129,28 @@
 **原因**: 三種 connector（local/SSH/WSL）走同一條 spawn 路徑，問題出在 App.tsx event handler 和 TerminalView 重複 spawn，不是 WSL 特有。
 
 **注意**: Connector 統一介面後，spawn/connect/disconnect 等行為在 local 上就能驗證。不需要等特定平台測試。修 bug 前先在 local 用 log 確認。
+
+---
+
+## 14. TerminalView 的 paste/drop handler 是 closure，settings 要走 ref
+
+**現象**: 改了 Settings 的 Max Upload Size 後，已經開著的 tab 還是用舊的上限。
+
+**原因**: paste/drop listener 在 `useEffect([tabId])` 裡綁一次就不再重綁，閉包抓的是 mount 當下的 `settings.maxUploadSizeMB`。
+
+**解法**: `TerminalView` 用 `maxUploadMBRef = useRef(settings.maxUploadSizeMB)` 並在每次 render 同步 `.current`，handler 內讀 `.current` 而非閉包變數。`connection` 與 `cwd` 不會在 tab 生命週期內變動，仍然走閉包即可。
+
+---
+
+## 15. npm sudo 會污染 ~/.npm 導致後續 install EACCES
+
+**現象**: `npm install vitest` 報 `EACCES: permission denied` 寫 `~/.npm/_cacache`，但 `~/.nvm/...` 的 node_modules 是使用者擁有的。
+
+**原因**: 過去用過 `sudo npm install -g <pkg>` → npm 在 `~/.npm/_cacache` / `~/.npm/_logs` 留下 root-owned 檔，之後非 sudo 的 npm 寫不進去。
+
+**解法**:
+1. 確認 root prefix：`npm root -g` 應該指向 nvm 路徑（使用者擁有），不要回 `/usr/local/lib/node_modules`。
+2. 把曾經 sudo 裝過的 global package 重新非 sudo 安裝：先 `sudo npm uninstall -g <pkg...>`、再 `sudo rm -rf ~/.npm/_cacache`、最後 `npm install -g <pkg...>`。
+3. AI CLI tool 的 session（Claude Code、Copilot、Gemini 等）放在 `~/.copilot/` / `~/.claude/` / `~/.gemini/` 等獨立目錄，npm uninstall 不會碰。
+
+**規則**: 即使是全域 CLI 工具也用 `npm install -g`，**永遠不要 `sudo npm`**。

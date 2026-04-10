@@ -21,6 +21,11 @@ interface Props {
 // Cache xterm instances so they survive re-renders
 const terminalCache = new Map<string, { term: Terminal; fitAddon: FitAddon; searchAddon: SearchAddon }>();
 
+// POSIX single-quote escape — works for nearly all POSIX shells.
+function shellQuote(s: string): string {
+  return `'${s.replace(/'/g, `'\\''`)}'`;
+}
+
 export function getSearchAddon(tabId: string): SearchAddon | null {
   return terminalCache.get(tabId)?.searchAddon ?? null;
 }
@@ -32,6 +37,10 @@ export function TerminalView({ tabId, projectId, cwd, connection, initScript, ta
   visibleRef.current = visible;
   const { settings } = useStore();
   const theme = getTheme(settings.themeName);
+  // Mirror current upload-size limit into a ref so the paste/drop handlers
+  // (bound once at mount via [tabId] effect) always read the latest value.
+  const maxUploadMBRef = useRef(settings.maxUploadSizeMB);
+  maxUploadMBRef.current = settings.maxUploadSizeMB;
 
   useEffect(() => {
     const container = containerRef.current;
@@ -102,51 +111,88 @@ export function TerminalView({ tabId, projectId, cwd, connection, initScript, ta
     });
     resizeObserver.observe(container);
 
-    // Save image and write path to terminal input
-    const saveAndInputImage = async (buffer: ArrayBuffer) => {
-      let filePath: string;
-      if (connection.type === 'ssh') {
-        filePath = await window.shelfApi.clipboard.saveImageRemote(
-          buffer, connection.host, connection.port, connection.user,
-        );
-      } else if (connection.type === 'docker') {
-        filePath = await window.shelfApi.clipboard.saveImageDocker(
-          buffer, connection.container,
-        );
-      } else {
-        filePath = await window.shelfApi.clipboard.saveImage(buffer);
+    // Upload pasted/dropped files into <cwd>/.tmp/shelf/ and type the resulting
+    // shell-quoted paths into the terminal. Files exceeding the configured size
+    // limit are skipped and reported via a single popup; successful files still
+    // get inserted.
+    const uploadFiles = async (files: File[]) => {
+      const limitMB = maxUploadMBRef.current || 50;
+      const maxBytes = limitMB * 1024 * 1024;
+
+      const accepted: File[] = [];
+      const oversized: File[] = [];
+      for (const f of files) {
+        if (f.size > maxBytes) oversized.push(f);
+        else accepted.push(f);
       }
-      window.shelfApi.pty.input(tabId, filePath);
+
+      if (oversized.length > 0) {
+        const list = oversized
+          .map((f) => `• ${f.name} (${(f.size / 1024 / 1024).toFixed(1)} MB)`)
+          .join('\n');
+        void window.shelfApi.dialog.warn(
+          'File too large',
+          `The following file(s) exceed the ${limitMB} MB upload limit and were skipped:\n\n${list}\n\nYou can change the limit in Settings.`,
+        );
+      }
+
+      if (accepted.length === 0) return;
+
+      const results = await Promise.all(
+        accepted.map(async (f) => {
+          try {
+            const buffer = await f.arrayBuffer();
+            const result = await window.shelfApi.connector.uploadFile(connection, cwd, f.name, buffer);
+            return { file: f, result };
+          } catch (err: any) {
+            return { file: f, result: { ok: false as const, reason: err?.message ?? String(err) } };
+          }
+        }),
+      );
+
+      const okPaths: string[] = [];
+      const failures: { name: string; reason: string }[] = [];
+      for (const { file, result } of results) {
+        if (result.ok) okPaths.push(shellQuote(result.remotePath));
+        else failures.push({ name: file.name, reason: result.reason });
+      }
+
+      if (okPaths.length > 0) {
+        window.shelfApi.pty.input(tabId, okPaths.join(' '));
+      }
+
+      if (failures.length > 0) {
+        const list = failures.map((f) => `• ${f.name}: ${f.reason}`).join('\n');
+        void window.shelfApi.dialog.warn('Upload failed', list);
+      }
     };
 
-    // Image paste: intercept when clipboard has image data
+    // Paste: intercept when clipboard contains files (any type, not just images)
     const handlePaste = async (e: ClipboardEvent) => {
       const items = e.clipboardData?.items;
       if (!items) return;
 
-      const itemTypes = Array.from(items).map((item) => item.type);
-      const hasImage = itemTypes.some((t) => t.startsWith('image/'));
-      if (!hasImage) return;
-
-      // text/html means rich text copy (e.g. browser) where image is just
+      const itemArr = Array.from(items);
+      // text/html means rich text copy (e.g. browser) where any image is just
       // a favicon — let xterm handle it as text paste
-      const hasHtml = itemTypes.includes('text/html');
-      if (hasHtml) return;
+      if (itemArr.some((it) => it.type === 'text/html')) return;
 
-      for (const item of items) {
-        if (item.type.startsWith('image/')) {
-          e.preventDefault();
-          const blob = item.getAsFile();
-          if (!blob) continue;
-          await saveAndInputImage(await blob.arrayBuffer());
-          return;
+      const files: File[] = [];
+      for (const item of itemArr) {
+        if (item.kind === 'file') {
+          const f = item.getAsFile();
+          if (f) files.push(f);
         }
       }
+      if (files.length === 0) return;
+
+      e.preventDefault();
+      await uploadFiles(files);
     };
     // Use capture phase so we intercept before xterm's own paste handler
     container.addEventListener('paste', handlePaste, true);
 
-    // Image drag & drop
+    // Drag & drop: any file type
     const handleDragOver = (e: DragEvent) => {
       if (e.dataTransfer?.types.includes('Files')) {
         e.preventDefault();
@@ -155,14 +201,9 @@ export function TerminalView({ tabId, projectId, cwd, connection, initScript, ta
     };
     const handleDrop = async (e: DragEvent) => {
       const files = e.dataTransfer?.files;
-      if (!files) return;
-
-      for (const file of files) {
-        if (!file.type.startsWith('image/')) continue;
-        e.preventDefault();
-        await saveAndInputImage(await file.arrayBuffer());
-        return;
-      }
+      if (!files || files.length === 0) return;
+      e.preventDefault();
+      await uploadFiles(Array.from(files));
     };
     container.addEventListener('dragover', handleDragOver);
     container.addEventListener('drop', handleDrop);

@@ -22,4 +22,5 @@ export const DEFAULT_SETTINGS: AppSettings = {
   defaultMaxTabs: 5,
   keybindings: { ...DEFAULT_KEYBINDINGS },
   logLevel: 'error' as const,
+  maxUploadSizeMB: 50,
 };

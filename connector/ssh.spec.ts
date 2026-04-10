@@ -40,8 +40,8 @@ test('SSH ControlMaster multiplexes second session without re-auth', async ({ sh
   await expect(xtermRows).toContainText('__SSH_TAB2__', { timeout: 10_000 });
 });
 
-test('SCP uploads image to remote host via ControlMaster', async ({ shelfApp: { page } }) => {
-  const remotePath = await page.evaluate(async () => {
+test('uploadFile streams a file to the remote host via SSH ControlMaster', async ({ shelfApp: { page } }) => {
+  const result = await page.evaluate(async () => {
     // Minimal valid 1x1 PNG
     const png = new Uint8Array([
       0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
@@ -54,10 +54,16 @@ test('SCP uploads image to remote host via ControlMaster', async ({ shelfApp: { 
       0x33, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e,
       0x44, 0xae, 0x42, 0x60, 0x82,
     ]);
-    return window.shelfApi.clipboard.saveImageRemote(
-      png.buffer, '127.0.0.1', 2222, 'testuser',
+    return window.shelfApi.connector.uploadFile(
+      { type: 'ssh', host: '127.0.0.1', port: 2222, user: 'testuser' },
+      '/tmp',
+      'paste.png',
+      png.buffer,
     );
   });
 
-  expect(remotePath).toMatch(/^\/tmp\/shelf-paste\/paste-\d+\.png$/);
+  expect(result.ok).toBe(true);
+  if (result.ok) {
+    expect(result.remotePath).toMatch(/^\/tmp\/\.tmp\/shelf\/[a-z0-9]+-paste\.png$/);
+  }
 });

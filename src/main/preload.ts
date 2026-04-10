@@ -63,18 +63,16 @@ contextBridge.exposeInMainWorld('shelfApi', {
       ipcRenderer.invoke(IPC.CONNECTION_CHECK, connection),
     connect: (connection: any, password?: string) =>
       ipcRenderer.invoke(IPC.CONNECTION_ESTABLISH, { connection, password }),
+    uploadFile: (connection: any, cwd: string, filename: string, buffer: ArrayBuffer) =>
+      ipcRenderer.invoke(IPC.FILE_UPLOAD, { connection, cwd, filename, buffer }),
   },
   project: {
     load: () => ipcRenderer.invoke(IPC.PROJECT_LOAD),
     save: (projects: unknown) => ipcRenderer.invoke(IPC.PROJECT_SAVE, projects),
   },
-  clipboard: {
-    saveImage: (buffer: ArrayBuffer) =>
-      ipcRenderer.invoke(IPC.CLIPBOARD_SAVE_IMAGE, buffer),
-    saveImageRemote: (buffer: ArrayBuffer, host: string, port: number, user: string) =>
-      ipcRenderer.invoke(IPC.CLIPBOARD_SAVE_IMAGE_REMOTE, { buffer, host, port, user }),
-    saveImageDocker: (buffer: ArrayBuffer, container: string) =>
-      ipcRenderer.invoke(IPC.CLIPBOARD_SAVE_IMAGE_DOCKER, { buffer, container }),
+  dialog: {
+    warn: (title: string, message: string) =>
+      ipcRenderer.invoke(IPC.DIALOG_WARN, { title, message }),
   },
   docker: {
     listContainers: () =>

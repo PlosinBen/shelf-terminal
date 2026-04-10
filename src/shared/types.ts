@@ -92,6 +92,7 @@ export interface AppSettings {
   defaultMaxTabs: number;
   keybindings: KeybindingConfig;
   logLevel: LogLevel;
+  maxUploadSizeMB: number;
 }
 
 
@@ -114,6 +115,12 @@ export interface FolderListResult {
   entries: string[];
   error?: string;
 }
+
+// ── File upload (paste/drag) ──
+
+export type FileUploadResult =
+  | { ok: true; remotePath: string }
+  | { ok: false; reason: string };
 
 // ── Auto-updater ──
 

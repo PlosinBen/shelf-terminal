@@ -6,8 +6,12 @@ export const IPC = {
   HOME_PATH: 'folder:home',
   PROJECT_LOAD: 'project:load',
   PROJECT_SAVE: 'project:save',
-  CLIPBOARD_SAVE_IMAGE: 'clipboard:save-image',
-  CLIPBOARD_SAVE_IMAGE_REMOTE: 'clipboard:save-image-remote',
+
+  // File upload (paste/drag) — generic across local/SSH/WSL/Docker
+  FILE_UPLOAD: 'file:upload',
+
+  // Generic dialog from renderer
+  DIALOG_WARN: 'dialog:warn',
 
   // Renderer → Main (send, no response)
   PTY_INPUT: 'pty:input',
@@ -34,9 +38,6 @@ export const IPC = {
   DOCKER_LIST_DIR: 'docker:list-dir',
   DOCKER_HOME_PATH: 'docker:home-path',
   DOCKER_LIST_CONTAINERS: 'docker:list-containers',
-
-  // Clipboard (Docker)
-  CLIPBOARD_SAVE_IMAGE_DOCKER: 'clipboard:save-image-docker',
 
   // Logs
   LOGS_CLEAR: 'logs:clear',

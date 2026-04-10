@@ -142,6 +142,18 @@ export function SettingsPanel() {
           </div>
 
           <div className="settings-group">
+            <label className="settings-label">Max Upload Size (MB)</label>
+            <input
+              className="settings-input"
+              type="number"
+              min={1}
+              max={2048}
+              value={draft.maxUploadSizeMB}
+              onChange={(e) => updateDraft({ maxUploadSizeMB: Number(e.target.value) })}
+            />
+          </div>
+
+          <div className="settings-group">
             <label className="settings-label">Log Level</label>
             <select
               className="settings-select"
