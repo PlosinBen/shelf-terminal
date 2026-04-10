@@ -87,7 +87,7 @@ export function spawnPty(
     default: {
       const resolvedCwd = fs.existsSync(cwd) ? cwd : os.homedir();
       shell = process.platform === 'win32' ? 'powershell.exe' : resolveShell();
-      args = [];
+      args = process.platform === 'win32' ? [] : ['-l'];
       spawnCwd = resolvedCwd;
       break;
     }
