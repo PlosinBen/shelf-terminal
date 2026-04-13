@@ -168,3 +168,18 @@
 2. 解出來的 ms 落在 `[2020-01-01, 2100-01-01)` 這個 sanity window。
 
 **注意**: 第二個 floor 同時擋掉「9 字元但解出來變 1995」的字（例如 `aaaaaaaaa`）。如果以後要改 prefix 格式，這兩個 guard 都要同步調整，並補上 regression test（`file-transfer.test.ts` 已經有 `manually-placed.log` 跟 `aaaaaaaaa` 兩個 case）。
+
+---
+
+## 17. macOS 自動更新需要 code signing
+
+**現象**: macOS 上 electron-updater 檢查到新版但無法安裝更新。
+
+**原因**: `.github/workflows/build.yml` 設了 `CSC_IDENTITY_AUTO_DISCOVERY: false`，CI build 出來的 macOS binary 沒有簽名。electron-updater 在 macOS 上使用 Squirrel.Mac，要求更新包必須經過 code signing 才能安裝。
+
+**解法**: 需要 Apple Developer ID certificate（Apple Developer Program, $99/年），然後：
+1. 匯出 `.p12` 憑證，base64 encode 存到 GitHub Secrets（`CSC_LINK` + `CSC_KEY_PASSWORD`）
+2. 移除或改掉 `CSC_IDENTITY_AUTO_DISCOVERY: false`
+3. 可能還需要 notarization（macOS 10.15+ 要求）
+
+**注意**: Windows 不需要 code signing 就能自動更新。在沒有 Apple 憑證之前，macOS 用戶只能手動下載新版。
