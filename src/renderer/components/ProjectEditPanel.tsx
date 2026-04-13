@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useStore, setEditingProject, updateProjectConfig } from '../store';
 import type { TabTemplate } from '../../shared/types';
+import { TAB_COLORS } from './TabBar';
 
 export function ProjectEditPanel() {
   const { editingProjectIndex, projects } = useStore();
@@ -11,6 +12,7 @@ export function ProjectEditPanel() {
   const [defaultTabs, setDefaultTabs] = useState<TabTemplate[]>([]);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+  const [colorPickerIndex, setColorPickerIndex] = useState<number | null>(null);
   const [clearing, setClearing] = useState(false);
   const [remoteConnected, setRemoteConnected] = useState(true);
 
@@ -45,7 +47,9 @@ export function ProjectEditPanel() {
   const handleClose = () => setEditingProject(null);
 
   const handleSave = () => {
-    const tabs = defaultTabs.filter((t) => t.name.trim());
+    const tabs = defaultTabs
+      .filter((t) => t.name.trim())
+      .map((t) => ({ ...t, color: t.color || undefined }));
     updateProjectConfig(editingProjectIndex, {
       name: name.trim() || project.config.name,
       initScript: initScript.trim() || undefined,
@@ -187,6 +191,32 @@ export function ProjectEditPanel() {
                   onDragEnd={handleDragEnd}
                 >
                   <span className="default-tab-drag">⠿</span>
+                  <div className="default-tab-color-wrapper">
+                    <button
+                      className="default-tab-color-btn"
+                      style={tab.color ? { backgroundColor: tab.color } : undefined}
+                      onClick={() => setColorPickerIndex(colorPickerIndex === i ? null : i)}
+                      title="Tab color"
+                    />
+                    {colorPickerIndex === i && (
+                      <div className="default-tab-color-dropdown">
+                        <button
+                          className={`color-swatch color-swatch-none ${!tab.color ? 'active' : ''}`}
+                          onClick={() => { updateTab(i, 'color', ''); setColorPickerIndex(null); }}
+                          title="No color"
+                        />
+                        {TAB_COLORS.map((c) => (
+                          <button
+                            key={c.hex}
+                            className={`color-swatch ${tab.color === c.hex ? 'active' : ''}`}
+                            style={{ backgroundColor: c.hex }}
+                            onClick={() => { updateTab(i, 'color', c.hex); setColorPickerIndex(null); }}
+                            title={c.name}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </div>
                   <input
                     className="default-tab-name"
                     type="text"

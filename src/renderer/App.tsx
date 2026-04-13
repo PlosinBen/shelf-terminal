@@ -94,7 +94,7 @@ export function App() {
 
       const templates = proj.config.defaultTabs;
       if (templates && templates.length > 0) {
-        templates.forEach((t) => addTab(projectIndex, t.name, t.cmd));
+        templates.forEach((t) => addTab(projectIndex, t.name, t.cmd, t.color));
         setActiveTab(projectIndex, 0);
       } else {
         addTab(projectIndex);

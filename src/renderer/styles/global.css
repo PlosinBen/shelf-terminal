@@ -223,6 +223,63 @@ button {
   color: #1e1e2e;
 }
 
+.context-menu-section {
+  padding: 6px 12px;
+}
+
+.context-menu-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  display: block;
+  margin-bottom: 6px;
+}
+
+.context-menu-colors {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.context-menu-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 0;
+}
+
+.color-swatch {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.color-swatch:hover {
+  border-color: var(--text-muted);
+}
+
+.color-swatch.active {
+  border-color: var(--text);
+}
+
+.color-swatch-none {
+  background: var(--surface);
+  position: relative;
+}
+
+.color-swatch-none::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 10px;
+  height: 2px;
+  background: var(--text-muted);
+  transform: translate(-50%, -50%) rotate(-45deg);
+}
+
 .status-dot {
   width: 8px;
   height: 8px;
@@ -807,7 +864,7 @@ button {
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 8px;
-  width: 480px;
+  width: 560px;
   max-height: 70vh;
   display: flex;
   flex-direction: column;
@@ -932,6 +989,42 @@ button {
 .default-tab-remove:disabled {
   opacity: 0.2;
   cursor: default;
+}
+
+.default-tab-color-wrapper {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.default-tab-color-btn {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  cursor: pointer;
+  padding: 0;
+  background: var(--surface);
+}
+
+.default-tab-color-btn:hover {
+  border-color: var(--text-muted);
+}
+
+.default-tab-color-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 10;
+  margin-top: 4px;
+  padding: 6px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  width: 140px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
 }
 
 .default-tab-add {

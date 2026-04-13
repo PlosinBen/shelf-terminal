@@ -8,6 +8,7 @@ export interface Tab {
   id: string;
   label: string;
   cmd?: string;
+  color?: string;
   hasUnread: boolean;
   muted: boolean;
 }
@@ -124,7 +125,7 @@ export function toggleSidebar() {
   updateSnapshot();
 }
 
-export function addTab(projectIndex: number, name?: string, cmd?: string): Tab | null {
+export function addTab(projectIndex: number, name?: string, cmd?: string, color?: string): Tab | null {
   const proj = projects[projectIndex];
   if (!proj || proj.tabs.length >= proj.config.maxTabs) return null;
 
@@ -133,6 +134,7 @@ export function addTab(projectIndex: number, name?: string, cmd?: string): Tab |
     id: `tab-${Date.now()}-${nextTabCounter}`,
     label: name || `Terminal ${proj.tabs.length + 1}`,
     cmd,
+    color,
     hasUnread: false,
     muted: false,
   };
@@ -310,6 +312,30 @@ export function toggleMuted(projectIndex: number, tabIndex: number) {
   projects = projects.map((p, i) => (i === projectIndex ? { ...p, tabs } : p));
   updateSnapshot();
   window.shelfApi.pty.mute(tab.id, muted);
+}
+
+export function setTabColor(projectIndex: number, tabIndex: number, color: string | undefined) {
+  const proj = projects[projectIndex];
+  if (!proj || !proj.tabs[tabIndex]) return;
+
+  const tabs = proj.tabs.map((t, i) =>
+    i === tabIndex ? { ...t, color } : t,
+  );
+  projects = projects.map((p, i) => (i === projectIndex ? { ...p, tabs } : p));
+  updateSnapshot();
+}
+
+export function appendDefaultTab(projectIndex: number, name: string, color?: string) {
+  const proj = projects[projectIndex];
+  if (!proj) return;
+
+  const existing = proj.config.defaultTabs || [];
+  const entry: { name: string; cmd?: string; color?: string } = { name };
+  if (color) entry.color = color;
+  const config = { ...proj.config, defaultTabs: [...existing, entry] };
+  projects = projects.map((p, i) => (i === projectIndex ? { ...p, config } : p));
+  updateSnapshot();
+  window.shelfApi.project.save(projects.map((p) => p.config));
 }
 
 // ── Update actions ──

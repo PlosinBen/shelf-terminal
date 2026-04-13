@@ -7,8 +7,23 @@ import {
   clearUnread,
   toggleSidebar,
   toggleMuted,
+  setTabColor,
+  appendDefaultTab,
 } from '../store';
 import { emit, Events } from '../events';
+
+const TAB_COLORS = [
+  { name: 'Red', hex: '#f38ba8' },
+  { name: 'Orange', hex: '#fab387' },
+  { name: 'Yellow', hex: '#f9e2af' },
+  { name: 'Green', hex: '#a6e3a1' },
+  { name: 'Teal', hex: '#94e2d5' },
+  { name: 'Blue', hex: '#89b4fa' },
+  { name: 'Purple', hex: '#cba6f7' },
+  { name: 'Pink', hex: '#f5c2e7' },
+];
+
+export { TAB_COLORS };
 
 export function TabBar() {
   const { projects, activeProjectIndex, sidebarVisible } = useStore();
@@ -97,6 +112,15 @@ export function TabBar() {
     setDragOverIndex(null);
   };
 
+  const tabStyle = (color: string | undefined, isActive: boolean): React.CSSProperties => {
+    if (!color) return {};
+    const base: React.CSSProperties = { borderLeft: `3px solid ${color}`, paddingLeft: 9 };
+    if (isActive) {
+      base.backgroundColor = color + '40';
+    }
+    return base;
+  };
+
   return (
     <div className="tab-bar">
       {!sidebarVisible && (
@@ -106,11 +130,13 @@ export function TabBar() {
         const isEditing = editingIndex === i;
         const isDragging = dragIndex === i;
         const isDragOver = dragOverIndex === i && dragIndex !== i;
+        const isActive = i === project.activeTabIndex;
 
         return (
           <div
             key={tab.id}
-            className={`tab ${i === project.activeTabIndex ? 'active' : ''} ${isDragging ? 'dragging' : ''} ${isDragOver ? 'drag-over' : ''}`}
+            className={`tab ${isActive ? 'active' : ''} ${isDragging ? 'dragging' : ''} ${isDragOver ? 'drag-over' : ''}`}
+            style={tabStyle(tab.color, isActive)}
             onClick={() => { clearUnread(activeProjectIndex, i); setActiveTab(activeProjectIndex, i); }}
             onDoubleClick={() => handleDoubleClick(i)}
             onContextMenu={(e) => { e.preventDefault(); setContextMenu({ index: i, x: e.clientX, y: e.clientY }); }}
@@ -167,6 +193,39 @@ export function TabBar() {
             className="context-menu"
             style={{ top: contextMenu.y, left: contextMenu.x }}
           >
+            <div className="context-menu-section">
+              <span className="context-menu-label">Color</span>
+              <div className="context-menu-colors">
+                <button
+                  className={`color-swatch color-swatch-none ${!tab.color ? 'active' : ''}`}
+                  onClick={() => { setTabColor(activeProjectIndex, contextMenu.index, undefined); setContextMenu(null); }}
+                  title="No color"
+                />
+                {TAB_COLORS.map((c) => (
+                  <button
+                    key={c.hex}
+                    className={`color-swatch ${tab.color === c.hex ? 'active' : ''}`}
+                    style={{ backgroundColor: c.hex }}
+                    onClick={() => { setTabColor(activeProjectIndex, contextMenu.index, c.hex); setContextMenu(null); }}
+                    title={c.name}
+                  />
+                ))}
+              </div>
+            </div>
+            <div className="context-menu-divider" />
+            <button
+              className="context-menu-item"
+              onClick={() => { handleDoubleClick(contextMenu.index); setContextMenu(null); }}
+            >
+              Rename
+            </button>
+            <button
+              className="context-menu-item"
+              onClick={() => { appendDefaultTab(activeProjectIndex, tab.label, tab.color); setContextMenu(null); }}
+            >
+              Save to Default
+            </button>
+            <div className="context-menu-divider" />
             <button
               className="context-menu-item"
               onClick={() => { toggleMuted(activeProjectIndex, contextMenu.index); setContextMenu(null); }}

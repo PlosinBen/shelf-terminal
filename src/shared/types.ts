@@ -11,6 +11,7 @@ export type Connection = LocalConnection | SSHConnection | WSLConnection | Docke
 export interface TabTemplate {
   name: string;
   cmd?: string;
+  color?: string;
 }
 
 export interface ProjectConfig {
