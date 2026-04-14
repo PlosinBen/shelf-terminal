@@ -114,11 +114,7 @@ export function TabBar() {
 
   const tabStyle = (color: string | undefined, isActive: boolean): React.CSSProperties => {
     if (!color) return {};
-    const base: React.CSSProperties = { borderLeft: `3px solid ${color}`, paddingLeft: 9 };
-    if (isActive) {
-      base.backgroundColor = color + '40';
-    }
-    return base;
+    return { backgroundColor: isActive ? color + 'a0' : color + '70' };
   };
 
   return (

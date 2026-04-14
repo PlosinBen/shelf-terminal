@@ -344,7 +344,7 @@ button {
 .tab {
   -webkit-app-region: no-drag;
   height: 28px;
-  padding: 0 12px;
+  padding: 0 6px 0 12px;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -368,7 +368,8 @@ button {
 }
 
 .tab-close {
-  font-size: 14px;
+  font-size: 12px;
+  line-height: 1;
   opacity: 0;
   width: 16px;
   height: 16px;
@@ -376,6 +377,7 @@ button {
   display: flex;
   align-items: center;
   justify-content: center;
+  padding-bottom: 2px;
 }
 
 .tab:hover .tab-close {
