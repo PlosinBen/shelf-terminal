@@ -2,8 +2,8 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import electron from 'vite-plugin-electron';
 import electronRenderer from 'vite-plugin-electron-renderer';
-import path from 'path';
 import pkg from './package.json';
+import { alias } from './aliases';
 
 export default defineConfig({
   define: {
@@ -26,7 +26,7 @@ export default defineConfig({
         entry: 'src/main/index.ts',
         vite: {
           resolve: {
-            alias: { '@shared': path.resolve(__dirname, 'src/shared') },
+            alias,
           },
           build: {
             outDir: 'dist/main',
@@ -43,7 +43,7 @@ export default defineConfig({
         },
         vite: {
           resolve: {
-            alias: { '@shared': path.resolve(__dirname, 'src/shared') },
+            alias,
           },
           build: {
             outDir: 'dist/preload',
@@ -53,9 +53,5 @@ export default defineConfig({
     ]),
     electronRenderer(),
   ],
-  resolve: {
-    alias: {
-      '@shared': path.resolve(__dirname, 'src/shared'),
-    },
-  },
+  resolve: { alias },
 });
