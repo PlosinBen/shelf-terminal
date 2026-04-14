@@ -19,6 +19,7 @@
 ## Rules
 
 - Bug fix 必須包含迴歸測試 — 先寫測試重現問題，再修 code
+- 不要啟動 dev server 或 Electron（`npm run dev` / `npx electron`）— AI 看不到畫面，只會干擾使用者。驗證用 `tsc --noEmit` + `vitest run`；需要驗 UI 行為就寫 E2E test
 
 ## Conventions
 
