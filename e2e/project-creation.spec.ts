@@ -74,8 +74,9 @@ test('select folder and create project', async ({ shelfApp: { page } }) => {
 
   await openFolderPicker(page);
 
-  // Press Enter to select current dir as project
-  await page.keyboard.press('Enter');
+  // Press Cmd+Enter (macOS) / Ctrl+Enter to select current dir as project
+  const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
+  await page.keyboard.press(`${modifier}+Enter`);
   await expect(page.locator('.folder-picker-overlay')).not.toBeVisible({ timeout: 3_000 });
 
   // Project should appear in sidebar (count increases by 1)

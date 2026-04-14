@@ -33,7 +33,8 @@ export function FolderPicker() {
   const [loading, setLoading] = useState(true);
 
   const listRef = useRef<HTMLDivElement>(null);
-  const filteredRef = useRef<string[]>([]);
+  const entriesRef = useRef<string[]>([]);
+  entriesRef.current = entries;
   const selectedIndexRef = useRef(selectedIndex);
   selectedIndexRef.current = selectedIndex;
   const currentPathRef = useRef(currentPath);
@@ -41,11 +42,15 @@ export function FolderPicker() {
   const connectionRef = useRef(connection);
   connectionRef.current = connection;
 
-  // ── Filtered entries ──
-  const filtered = filter
-    ? entries.filter((name) => name.toLowerCase().includes(filter.toLowerCase()))
-    : entries;
-  filteredRef.current = filtered;
+  // ── Jump-to-match on filter change ──
+  useEffect(() => {
+    if (!filter) return;
+    const lowerFilter = filter.toLowerCase();
+    const matchIndex = entries.findIndex((name) => name.toLowerCase().includes(lowerFilter));
+    if (matchIndex !== -1) {
+      setSelectedIndex(matchIndex);
+    }
+  }, [filter, entries]);
 
   // ── Folder loading ──
   const requestFolder = useCallback(async (dirPath: string) => {
@@ -90,11 +95,6 @@ export function FolderPicker() {
     return () => { off(); };
   }, []);
 
-  // ── Reset selection when filter changes ──
-  useEffect(() => {
-    setSelectedIndex(0);
-  }, [filter]);
-
   // ── Scroll selected into view ──
   useEffect(() => {
     const list = listRef.current;
@@ -126,7 +126,7 @@ export function FolderPicker() {
 
   // ── Select and close ──
   const handleSelect = async () => {
-    const entry = filteredRef.current[selectedIndexRef.current];
+    const entry = entriesRef.current[selectedIndexRef.current];
     const selectedPath = entry
       ? `${currentPathRef.current}/${entry}`
       : currentPathRef.current;
@@ -167,7 +167,7 @@ export function FolderPicker() {
           break;
         case 'ArrowDown':
           e.preventDefault();
-          setSelectedIndex((i) => Math.min(filteredRef.current.length - 1, i + 1));
+          setSelectedIndex((i) => Math.min(entriesRef.current.length - 1, i + 1));
           break;
         case 'ArrowRight': {
           e.preventDefault();
@@ -175,7 +175,7 @@ export function FolderPicker() {
             goUp();
             return;
           }
-          const entry = filteredRef.current[selectedIndexRef.current];
+          const entry = entriesRef.current[selectedIndexRef.current];
           if (entry) requestFolder(currentPathRef.current + '/' + entry);
           break;
         }
@@ -185,10 +185,15 @@ export function FolderPicker() {
           break;
         case 'Enter':
           e.preventDefault();
-          if (selectedIndexRef.current === -1) {
+          if (e.metaKey || e.ctrlKey) {
+            // Cmd+Enter (macOS) / Ctrl+Enter (Win/Linux): confirm selection
+            handleSelect();
+          } else if (selectedIndexRef.current === -1) {
             goUp();
           } else {
-            handleSelect();
+            // Enter: navigate into selected folder
+            const entry = entriesRef.current[selectedIndexRef.current];
+            if (entry) requestFolder(currentPathRef.current + '/' + entry);
           }
           break;
         case 'Escape':
@@ -256,7 +261,7 @@ export function FolderPicker() {
         ) : (
           <FolderBrowser
             currentPath={currentPath}
-            filtered={filtered}
+            entries={entries}
             selectedIndex={selectedIndex}
             filter={filter}
             loading={loading}

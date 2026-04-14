@@ -6,7 +6,8 @@ async function setupProject(page: any) {
   await expect(page.locator('.folder-picker-overlay')).toBeVisible({ timeout: 5_000 });
   await page.locator('.conn-btn-next').click();
   await expect(page.locator('.fp-header')).toContainText('Open Project', { timeout: 5_000 });
-  await page.keyboard.press('Enter');
+  const mod = process.platform === 'darwin' ? 'Meta' : 'Control';
+  await page.keyboard.press(`${mod}+Enter`);
   await expect(page.locator('.folder-picker-overlay')).not.toBeVisible({ timeout: 3_000 });
 
   const prompt = page.locator('.connect-prompt');
