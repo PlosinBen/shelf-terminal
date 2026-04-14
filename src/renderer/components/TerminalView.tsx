@@ -6,7 +6,7 @@ import { useStore, markUnread } from '../store';
 import { getTheme } from '../themes';
 import '@xterm/xterm/css/xterm.css';
 
-import type { Connection } from '../../shared/types';
+import type { Connection } from '@shared/types';
 
 interface Props {
   tabId: string;

@@ -1,6 +1,6 @@
 import { useState, useCallback, useSyncExternalStore } from 'react';
-import type { ProjectConfig, AppSettings, UpdateStatus } from '../shared/types';
-import { DEFAULT_SETTINGS } from '../shared/defaults';
+import type { ProjectConfig, AppSettings, UpdateStatus } from '@shared/types';
+import { DEFAULT_SETTINGS } from '@shared/defaults';
 
 // ── Tab state ──
 

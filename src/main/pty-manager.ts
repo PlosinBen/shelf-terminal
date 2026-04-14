@@ -1,9 +1,9 @@
 import { BrowserWindow, Notification } from 'electron';
-import { IPC } from '../shared/ipc-channels';
-import type { Connection } from '../shared/types';
+import { IPC } from '@shared/ipc-channels';
+import type { Connection } from '@shared/types';
 import type { Shell } from './connector/types';
 import { createConnector } from './connector';
-import { log } from '../shared/logger';
+import { log } from '@shared/logger';
 import { maybeScheduleCleanup } from './file-transfer';
 
 const shells = new Map<string, Shell>();

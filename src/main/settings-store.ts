@@ -1,9 +1,9 @@
 import fs from 'fs';
 import path from 'path';
 import { app } from 'electron';
-import { DEFAULT_SETTINGS } from '../shared/defaults';
-import { log } from '../shared/logger';
-import type { AppSettings } from '../shared/types';
+import { DEFAULT_SETTINGS } from '@shared/defaults';
+import { log } from '@shared/logger';
+import type { AppSettings } from '@shared/types';
 import type { LoadResult } from './project-store';
 
 function getSettingsPath(): string {

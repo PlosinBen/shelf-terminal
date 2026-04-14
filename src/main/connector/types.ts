@@ -1,4 +1,4 @@
-import type { FolderListResult } from '../../shared/types';
+import type { FolderListResult } from '@shared/types';
 
 export interface Disposable {
   dispose(): void;

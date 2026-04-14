@@ -1,8 +1,8 @@
 import fs from 'fs';
 import path from 'path';
 import { app } from 'electron';
-import { log } from '../shared/logger';
-import type { ProjectConfig } from '../shared/types';
+import { log } from '@shared/logger';
+import type { ProjectConfig } from '@shared/types';
 
 export type LoadError = 'parse' | 'permission' | 'read';
 

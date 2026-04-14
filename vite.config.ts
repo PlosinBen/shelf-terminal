@@ -25,6 +25,9 @@ export default defineConfig({
       {
         entry: 'src/main/index.ts',
         vite: {
+          resolve: {
+            alias: { '@shared': path.resolve(__dirname, 'src/shared') },
+          },
           build: {
             outDir: 'dist/main',
             rollupOptions: {
@@ -39,6 +42,9 @@ export default defineConfig({
           args.reload();
         },
         vite: {
+          resolve: {
+            alias: { '@shared': path.resolve(__dirname, 'src/shared') },
+          },
           build: {
             outDir: 'dist/preload',
           },

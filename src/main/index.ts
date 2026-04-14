@@ -1,19 +1,19 @@
 import { app, BrowserWindow, dialog, ipcMain } from 'electron';
 import path from 'path';
 import fs from 'fs';
-import { IPC } from '../shared/ipc-channels';
+import { IPC } from '@shared/ipc-channels';
 import { spawnPty, writePty, resizePty, killPty, killAllPtys, setMuted } from './pty-manager';
 import { saveProjects } from './project-store';
 import { saveSettings } from './settings-store';
 import { bootstrap } from './bootstrap';
-import { DEFAULT_SETTINGS } from '../shared/defaults';
+import { DEFAULT_SETTINGS } from '@shared/defaults';
 import { uploadFile, clearUploads } from './file-transfer';
 import { initAutoUpdater, stopAutoUpdater, manualCheckForUpdate, startUpdateDownload, confirmAndInstallUpdate } from './updater';
 import { removeHostKey } from './ssh-control';
 import { createConnector, getAvailableTypes, listDockerContainers, listWSLDistros, cleanupConnectors, setDockerPath, testDockerPath } from './connector';
 import { loadSSHServers, saveSSHServer } from './ssh-server-store';
-import { log, setLogLevel, setFileWriter } from '../shared/logger';
-import type { Connection, ProjectConfig, AppSettings, FileUploadResult, FileClearResult, PtySpawnPayload, PtyInputPayload, PtyResizePayload, PtyKillPayload } from '../shared/types';
+import { log, setLogLevel, setFileWriter } from '@shared/logger';
+import type { Connection, ProjectConfig, AppSettings, FileUploadResult, FileClearResult, PtySpawnPayload, PtyInputPayload, PtyResizePayload, PtyKillPayload } from '@shared/types';
 
 // Isolate userData per environment to avoid config conflicts
 if (process.env.NODE_ENV) {

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useStore, setEditingProject, updateProjectConfig } from '../store';
-import type { TabTemplate } from '../../shared/types';
+import type { TabTemplate } from '@shared/types';
 import { TAB_COLORS } from './TabBar';
 
 export function ProjectEditPanel() {

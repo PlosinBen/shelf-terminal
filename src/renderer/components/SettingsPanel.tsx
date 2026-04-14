@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useStore, updateSettings, toggleSettings } from '../store';
 import { themes } from '../themes';
 import { comboToLabel, recordCombo } from '../hooks/useKeybindings';
-import type { AppSettings, KeybindingAction, KeybindingConfig, LogLevel } from '../../shared/types';
+import type { AppSettings, KeybindingAction, KeybindingConfig, LogLevel } from '@shared/types';
 
 const ACTION_LABELS: Record<KeybindingAction, string> = {
   toggleSidebar: 'Toggle Sidebar',

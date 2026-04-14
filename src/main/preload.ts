@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import { IPC } from '../shared/ipc-channels';
+import { IPC } from '@shared/ipc-channels';
 
 contextBridge.exposeInMainWorld('shelfApi', {
   pty: {

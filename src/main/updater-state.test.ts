@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { reduceUpdaterStatus, type UpdaterEvent } from './updater-state';
-import type { UpdateStatus } from '../shared/types';
+import type { UpdateStatus } from '@shared/types';
 
 const idle: UpdateStatus = { state: 'idle' };
 const available = (version = '0.3.0'): UpdateStatus => ({ state: 'available', version });

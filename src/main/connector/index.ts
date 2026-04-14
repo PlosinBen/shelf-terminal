@@ -1,4 +1,4 @@
-import type { Connection } from '../../shared/types';
+import type { Connection } from '@shared/types';
 import type { Connector } from './types';
 import { LocalUnixConnector } from './local/unix';
 import { LocalWin32Connector } from './local/win32';

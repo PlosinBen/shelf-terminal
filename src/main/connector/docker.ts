@@ -1,8 +1,8 @@
 import * as pty from 'node-pty';
 import { execFile } from 'child_process';
 import os from 'os';
-import type { FolderListResult } from '../../shared/types';
-import { log } from '../../shared/logger';
+import type { FolderListResult } from '@shared/types';
+import { log } from '@shared/logger';
 import type { Connector, Shell } from './types';
 import { wrapPty } from './wrap-pty';
 import { shellEscape } from './shell-env';

@@ -1,6 +1,6 @@
-import type { Connection } from '../shared/types';
+import type { Connection } from '@shared/types';
 import { createConnector } from './connector';
-import { log } from '../shared/logger';
+import { log } from '@shared/logger';
 
 /**
  * Generic file uploader for paste/drag-drop. Routes through the appropriate

@@ -1,6 +1,6 @@
 import fs from 'fs';
 import { execFileSync } from 'child_process';
-import { log } from '../../shared/logger';
+import { log } from '@shared/logger';
 
 let resolvedEnv: Record<string, string> | null = null;
 

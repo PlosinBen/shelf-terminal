@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useStore } from '../store';
 import { FolderBrowser } from './FolderBrowser';
 import { on, emit, Events } from '../events';
-import type { ProjectConfig, Connection, SSHConnection } from '../../shared/types';
+import type { ProjectConfig, Connection, SSHConnection } from '@shared/types';
 
 type Step = 'connection' | 'browse';
 

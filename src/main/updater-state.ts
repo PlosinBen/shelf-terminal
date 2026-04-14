@@ -1,4 +1,4 @@
-import type { UpdateStatus } from '../shared/types';
+import type { UpdateStatus } from '@shared/types';
 
 /**
  * Pure state machine for the auto-updater. Decoupled from `electron-updater`

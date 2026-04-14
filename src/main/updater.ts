@@ -1,8 +1,8 @@
 import { autoUpdater, type ProgressInfo } from 'electron-updater';
 import { BrowserWindow, dialog } from 'electron';
-import { IPC } from '../shared/ipc-channels';
-import { log } from '../shared/logger';
-import type { UpdateStatus } from '../shared/types';
+import { IPC } from '@shared/ipc-channels';
+import { log } from '@shared/logger';
+import type { UpdateStatus } from '@shared/types';
 import { reduceUpdaterStatus, type UpdaterEvent } from './updater-state';
 
 const CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000; // 4 hours

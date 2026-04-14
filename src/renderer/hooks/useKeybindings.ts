@@ -8,7 +8,7 @@ import {
   useStore,
 } from '../store';
 import { emit, Events } from '../events';
-import type { KeybindingAction } from '../../shared/types';
+import type { KeybindingAction } from '@shared/types';
 
 const isMac = navigator.platform.toUpperCase().includes('MAC');
 

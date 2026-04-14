@@ -1,11 +1,11 @@
 import fs from 'fs';
 import { app, dialog } from 'electron';
-import { DEFAULT_SETTINGS } from '../shared/defaults';
-import { log } from '../shared/logger';
+import { DEFAULT_SETTINGS } from '@shared/defaults';
+import { log } from '@shared/logger';
 import { loadProjects } from './project-store';
 import { loadSettings } from './settings-store';
 import type { LoadResult } from './project-store';
-import type { AppSettings, ProjectConfig } from '../shared/types';
+import type { AppSettings, ProjectConfig } from '@shared/types';
 
 export interface BootstrapResult {
   projects: ProjectConfig[];
