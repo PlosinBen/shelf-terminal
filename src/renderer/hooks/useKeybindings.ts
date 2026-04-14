@@ -3,6 +3,7 @@ import {
   toggleSidebar,
   toggleSettings,
   toggleSearch,
+  toggleCommandPicker,
   setActiveProject,
   setActiveTab,
   useStore,
@@ -53,6 +54,7 @@ export function useKeybindings() {
           case 'toggleSidebar':  return toggleSidebar;
           case 'openSettings':   return toggleSettings;
           case 'search':         return toggleSearch;
+          case 'openCommandPicker': return activeProject ? toggleCommandPicker : null;
           case 'newProject':     return () => emit(Events.OPEN_FOLDER_PICKER);
           case 'prevProject':    return () => setActiveProject(Math.max(0, activeProjectIndex - 1));
           case 'nextProject':    return () => setActiveProject(Math.min(projects.length - 1, activeProjectIndex + 1));

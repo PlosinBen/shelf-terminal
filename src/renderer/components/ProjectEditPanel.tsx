@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useStore, setEditingProject, updateProjectConfig } from '../store';
-import type { TabTemplate } from '@shared/types';
+import type { TabTemplate, QuickCommand } from '@shared/types';
 import { TAB_COLORS } from './TabBar';
 
 export function ProjectEditPanel() {
@@ -10,6 +10,7 @@ export function ProjectEditPanel() {
   const [name, setName] = useState('');
   const [initScript, setInitScript] = useState('');
   const [defaultTabs, setDefaultTabs] = useState<TabTemplate[]>([]);
+  const [quickCommands, setQuickCommands] = useState<QuickCommand[]>([]);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const [colorPickerIndex, setColorPickerIndex] = useState<number | null>(null);
@@ -21,6 +22,7 @@ export function ProjectEditPanel() {
       setName(project.config.name);
       setInitScript(project.config.initScript || '');
       setDefaultTabs(project.config.defaultTabs || [{ name: 'Terminal' }]);
+      setQuickCommands(project.config.quickCommands || []);
     }
   }, [editingProjectIndex]);
 
@@ -50,10 +52,12 @@ export function ProjectEditPanel() {
     const tabs = defaultTabs
       .filter((t) => t.name.trim())
       .map((t) => ({ ...t, color: t.color || undefined }));
+    const cmds = quickCommands.filter((c) => c.label.trim() && c.command.trim());
     updateProjectConfig(editingProjectIndex, {
       name: name.trim() || project.config.name,
       initScript: initScript.trim() || undefined,
       defaultTabs: tabs.length > 0 ? tabs : undefined,
+      quickCommands: cmds.length > 0 ? cmds : undefined,
     });
     handleClose();
   };
@@ -243,6 +247,70 @@ export function ProjectEditPanel() {
               ))}
             </div>
             <button className="default-tab-add" onClick={addTab}>+ Add Tab</button>
+          </div>
+
+          <div className="project-edit-field">
+            <label className="settings-label">Quick Commands</label>
+            <div className="project-edit-hint">
+              Commands available via {navigator.platform.toUpperCase().includes('MAC') ? '⌘E' : 'Ctrl+E'}. Target a specific tab by name or use current tab.
+            </div>
+            <div className="quick-commands-list">
+              {quickCommands.map((cmd, i) => (
+                <div key={i} className="quick-command-row">
+                  <input
+                    className="quick-command-label"
+                    type="text"
+                    value={cmd.label}
+                    onChange={(e) =>
+                      setQuickCommands((cmds) =>
+                        cmds.map((c, j) => (j === i ? { ...c, label: e.target.value } : c)),
+                      )
+                    }
+                    placeholder="Label"
+                  />
+                  <input
+                    className="quick-command-cmd"
+                    type="text"
+                    value={cmd.command}
+                    onChange={(e) =>
+                      setQuickCommands((cmds) =>
+                        cmds.map((c, j) => (j === i ? { ...c, command: e.target.value } : c)),
+                      )
+                    }
+                    placeholder="command"
+                  />
+                  <select
+                    className="quick-command-target"
+                    value={cmd.target}
+                    onChange={(e) =>
+                      setQuickCommands((cmds) =>
+                        cmds.map((c, j) => (j === i ? { ...c, target: e.target.value } : c)),
+                      )
+                    }
+                  >
+                    <option value="current">Current tab</option>
+                    {(project.config.defaultTabs || []).map((t) => (
+                      <option key={t.name} value={t.name}>{t.name}</option>
+                    ))}
+                  </select>
+                  <button
+                    className="default-tab-remove"
+                    onClick={() => setQuickCommands((cmds) => cmds.filter((_, j) => j !== i))}
+                    title="Remove command"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+            <button
+              className="default-tab-add"
+              onClick={() =>
+                setQuickCommands((cmds) => [...cmds, { label: '', command: '', target: 'current' }])
+              }
+            >
+              + Add Command
+            </button>
           </div>
 
           <div className="project-edit-field">

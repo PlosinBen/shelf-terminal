@@ -16,6 +16,7 @@ const ACTION_LABELS: Record<KeybindingAction, string> = {
   openSettings: 'Settings',
   search: 'Search',
   toggleSplit: 'Toggle Split',
+  openCommandPicker: 'Quick Commands',
 };
 
 export function SettingsPanel() {

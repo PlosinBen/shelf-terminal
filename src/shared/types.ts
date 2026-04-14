@@ -14,6 +14,12 @@ export interface TabTemplate {
   color?: string;
 }
 
+export interface QuickCommand {
+  label: string;
+  command: string;
+  target: 'current' | string; // 'current' = active tab, or tab name
+}
+
 export interface ProjectConfig {
   id: string;
   name: string;
@@ -22,6 +28,7 @@ export interface ProjectConfig {
   maxTabs: number;
   initScript?: string;
   defaultTabs?: TabTemplate[];
+  quickCommands?: QuickCommand[];
 }
 
 // ── IPC payloads: Renderer → Main ──
@@ -75,7 +82,8 @@ export type KeybindingAction =
   | 'nextTab'
   | 'openSettings'
   | 'search'
-  | 'toggleSplit';
+  | 'toggleSplit'
+  | 'openCommandPicker';
 
 export type KeybindingConfig = Record<KeybindingAction, string>;
 

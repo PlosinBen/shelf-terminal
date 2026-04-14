@@ -27,6 +27,7 @@ let activeProjectIndex = 0;
 let sidebarVisible = true;
 let settingsVisible = false;
 let searchVisible = false;
+let commandPickerVisible = false;
 let editingProjectIndex: number | null = null;
 let settings: AppSettings = { ...DEFAULT_SETTINGS };
 let updateStatus: UpdateStatus = { state: 'idle' };
@@ -45,7 +46,7 @@ function subscribe(l: Listener) {
 }
 
 function getSnapshot() {
-  return { projects, activeProjectIndex, sidebarVisible, settingsVisible, searchVisible, editingProjectIndex, settings, updateStatus };
+  return { projects, activeProjectIndex, sidebarVisible, settingsVisible, searchVisible, commandPickerVisible, editingProjectIndex, settings, updateStatus };
 }
 
 let snapshotRef = getSnapshot();
@@ -250,6 +251,18 @@ export function toggleSearch() {
 
 export function closeSearch() {
   searchVisible = false;
+  updateSnapshot();
+}
+
+// ── Command picker actions ──
+
+export function toggleCommandPicker() {
+  commandPickerVisible = !commandPickerVisible;
+  updateSnapshot();
+}
+
+export function closeCommandPicker() {
+  commandPickerVisible = false;
   updateSnapshot();
 }
 

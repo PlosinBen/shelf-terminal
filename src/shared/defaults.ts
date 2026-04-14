@@ -12,6 +12,7 @@ export const DEFAULT_KEYBINDINGS: KeybindingConfig = {
   openSettings: 'mod+,',
   search: 'mod+f',
   toggleSplit: 'mod+\\',
+  openCommandPicker: 'mod+e',
 };
 
 export const DEFAULT_SETTINGS: AppSettings = {

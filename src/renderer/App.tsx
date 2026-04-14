@@ -6,6 +6,7 @@ import { FolderPicker } from './components/FolderPicker';
 import { SettingsPanel } from './components/SettingsPanel';
 import { SearchBar } from './components/SearchBar';
 import { ProjectEditPanel } from './components/ProjectEditPanel';
+import { CommandPicker } from './components/CommandPicker';
 import { useKeybindings } from './hooks/useKeybindings';
 import { useStore, setProjects, setSettings, setUpdateStatus, addProject, addTab, setActiveTab, removeTab, removeProject, setSplitTab, toggleSidebar, clearUnread } from './store';
 import type { ProjectConfig } from '@shared/types';
@@ -15,7 +16,7 @@ import { getTheme } from './themes';
 import './styles/global.css';
 
 export function App() {
-  const { projects, activeProjectIndex, sidebarVisible, settingsVisible, editingProjectIndex, settings } = useStore();
+  const { projects, activeProjectIndex, sidebarVisible, settingsVisible, commandPickerVisible, editingProjectIndex, settings } = useStore();
   useKeybindings();
 
   useEffect(() => {
@@ -170,10 +171,10 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    if (!settingsVisible && editingProjectIndex === null) {
+    if (!settingsVisible && !commandPickerVisible && editingProjectIndex === null) {
       focusTerminal();
     }
-  }, [settingsVisible, editingProjectIndex]);
+  }, [settingsVisible, commandPickerVisible, editingProjectIndex]);
 
   const theme = getTheme(settings.themeName);
 
@@ -243,6 +244,7 @@ export function App() {
       <FolderPicker />
       <SettingsPanel />
       <ProjectEditPanel />
+      <CommandPicker />
     </div>
   );
 }
