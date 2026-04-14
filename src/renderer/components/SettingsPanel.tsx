@@ -22,12 +22,15 @@ export function SettingsPanel() {
   const { settingsVisible, settings } = useStore();
   const [draft, setDraft] = useState<AppSettings>(settings);
   const [recordingAction, setRecordingAction] = useState<KeybindingAction | null>(null);
+  const [dockerTestResult, setDockerTestResult] = useState<{ ok: boolean; version?: string; error?: string } | null>(null);
+  const [dockerTesting, setDockerTesting] = useState(false);
 
   // Reset draft when panel opens
   useEffect(() => {
     if (settingsVisible) {
       setDraft(settings);
       setRecordingAction(null);
+      setDockerTestResult(null);
     }
   }, [settingsVisible, settings]);
 
@@ -81,6 +84,7 @@ export function SettingsPanel() {
           <button className="settings-close" onClick={handleCancel}>×</button>
         </div>
         <div className="settings-body">
+          <div className="settings-section-title">Terminal</div>
           <div className="settings-group">
             <label className="settings-label">Theme</label>
             <select
@@ -153,6 +157,8 @@ export function SettingsPanel() {
             />
           </div>
 
+          <div className="settings-divider" />
+          <div className="settings-section-title">Logs</div>
           <div className="settings-group">
             <label className="settings-label">Log Level</label>
             <select
@@ -173,6 +179,41 @@ export function SettingsPanel() {
             >
               Clear Logs
             </button>
+          </div>
+
+          <div className="settings-divider" />
+          <div className="settings-section-title">Docker</div>
+          <div className="settings-group">
+            <label className="settings-label">Docker Path</label>
+            <div className="settings-docker-row">
+              <input
+                className="settings-input settings-input-wide"
+                type="text"
+                value={draft.dockerPath || ''}
+                onChange={(e) => { updateDraft({ dockerPath: e.target.value || undefined }); setDockerTestResult(null); }}
+                placeholder="docker (uses PATH)"
+              />
+              <button
+                className="conn-btn conn-btn-cancel"
+                disabled={dockerTesting}
+                onClick={async () => {
+                  setDockerTesting(true);
+                  setDockerTestResult(null);
+                  const result = await window.shelfApi.docker.testPath(draft.dockerPath || 'docker');
+                  setDockerTestResult(result);
+                  setDockerTesting(false);
+                }}
+              >
+                {dockerTesting ? 'Testing...' : 'Test'}
+              </button>
+            </div>
+            {dockerTestResult && (
+              <div className={`settings-docker-result ${dockerTestResult.ok ? 'ok' : 'fail'}`}>
+                {dockerTestResult.ok
+                  ? `Docker ${dockerTestResult.version}`
+                  : dockerTestResult.error}
+              </div>
+            )}
           </div>
 
           <div className="settings-divider" />

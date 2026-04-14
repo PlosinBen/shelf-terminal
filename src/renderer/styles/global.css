@@ -731,7 +731,7 @@ button {
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 8px;
-  width: 480px;
+  width: 560px;
   max-height: 70vh;
   display: flex;
   flex-direction: column;
@@ -821,6 +821,29 @@ button {
   height: 1px;
   background: var(--border);
   margin: 4px 0;
+}
+
+.settings-docker-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.settings-docker-row .settings-input-wide {
+  flex: 1;
+}
+
+.settings-docker-result {
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+.settings-docker-result.ok {
+  color: var(--accent);
+}
+
+.settings-docker-result.fail {
+  color: #f38ba8;
 }
 
 .settings-section-title {
@@ -1133,6 +1156,56 @@ button {
   color: var(--text-muted);
   font-size: 13px;
   padding: 8px 0;
+}
+
+.conn-server-list {
+  margin-bottom: 8px;
+}
+
+.conn-server-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.conn-server-item {
+  font-size: 12px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.conn-server-item:hover {
+  background: var(--accent);
+  color: var(--bg);
+}
+
+.conn-docker-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.conn-docker-row .settings-select {
+  flex: 1;
+}
+
+.conn-refresh-btn {
+  font-size: 16px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  color: var(--text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.conn-refresh-btn:hover {
+  background: var(--surface);
+  color: var(--text);
 }
 
 .conn-actions {

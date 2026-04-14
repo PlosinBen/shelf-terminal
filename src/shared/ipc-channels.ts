@@ -2,8 +2,6 @@ export const IPC = {
   // Renderer → Main (invoke)
   PTY_SPAWN: 'pty:spawn',
   PTY_KILL: 'pty:kill',
-  FOLDER_LIST: 'folder:list',
-  HOME_PATH: 'folder:home',
   PROJECT_LOAD: 'project:load',
   PROJECT_SAVE: 'project:save',
 
@@ -24,22 +22,19 @@ export const IPC = {
   SETTINGS_LOAD: 'settings:load',
   SETTINGS_SAVE: 'settings:save',
 
-  // SSH
-  SSH_LIST_DIR: 'ssh:list-dir',
-  SSH_HOME_PATH: 'ssh:home-path',
+  // Connector (unified)
+  CONNECTOR_LIST_DIR: 'connector:list-dir',
+  CONNECTOR_HOME_PATH: 'connector:home-path',
+  CONNECTOR_CHECK: 'connector:check',
+  CONNECTOR_ESTABLISH: 'connector:establish',
+  CONNECTOR_AVAILABLE_TYPES: 'connector:available-types',
+
+  // Connector — type-specific operations
   SSH_REMOVE_HOST_KEY: 'ssh:remove-host-key',
-  CONNECTION_CHECK: 'connection:check',
-  CONNECTION_ESTABLISH: 'connection:establish',
-
-  // WSL
-  WSL_LIST_DIR: 'wsl:list-dir',
-  WSL_HOME_PATH: 'wsl:home-path',
+  SSH_SERVERS: 'ssh:servers',
   WSL_LIST_DISTROS: 'wsl:list-distros',
-
-  // Docker
-  DOCKER_LIST_DIR: 'docker:list-dir',
-  DOCKER_HOME_PATH: 'docker:home-path',
   DOCKER_LIST_CONTAINERS: 'docker:list-containers',
+  DOCKER_TEST_PATH: 'docker:test-path',
 
   // Logs
   LOGS_CLEAR: 'logs:clear',

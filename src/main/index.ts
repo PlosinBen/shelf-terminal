@@ -7,16 +7,13 @@ import { saveProjects } from './project-store';
 import { saveSettings } from './settings-store';
 import { bootstrap } from './bootstrap';
 import { DEFAULT_SETTINGS } from '../shared/defaults';
-import { listDirectory, getHomePath } from './folder-list';
 import { uploadFile, clearUploads } from './file-transfer';
 import { initAutoUpdater, stopAutoUpdater, manualCheckForUpdate, startUpdateDownload, confirmAndInstallUpdate } from './updater';
-import { sshListDir, sshGetHomePath } from './ssh-manager';
 import { removeHostKey } from './ssh-control';
-import * as connectionManager from './connection-manager';
-import { wslListDir, wslHomePath, wslListDistros } from './wsl-manager';
-import { dockerListDir, dockerHomePath, dockerListContainers } from './docker-manager';
+import { createConnector, getAvailableTypes, listDockerContainers, listWSLDistros, cleanupConnectors, setDockerPath, testDockerPath } from './connector';
+import { loadSSHServers, saveSSHServer } from './ssh-server-store';
 import { log, setLogLevel, setFileWriter } from '../shared/logger';
-import type { Connection, ProjectConfig, AppSettings, FileUploadResult, FileClearResult, PtySpawnPayload, PtyInputPayload, PtyResizePayload, PtyKillPayload, FolderListPayload, SSHListDirPayload, WSLListDirPayload } from '../shared/types';
+import type { Connection, ProjectConfig, AppSettings, FileUploadResult, FileClearResult, PtySpawnPayload, PtyInputPayload, PtyResizePayload, PtyKillPayload } from '../shared/types';
 
 // Isolate userData per environment to avoid config conflicts
 if (process.env.NODE_ENV) {
@@ -53,7 +50,6 @@ function createWindow() {
 
 // ── IPC Handlers ──
 
-// Renderer → Main (invoke, returns result)
 ipcMain.handle(IPC.PTY_SPAWN, (_event, payload: PtySpawnPayload) => {
   if (mainWindow) {
     spawnPty(payload.projectId, payload.tabId, payload.cwd, payload.connection, mainWindow, payload.initScript, payload.tabCmd);
@@ -64,14 +60,6 @@ ipcMain.handle(IPC.PTY_KILL, (_event, payload: PtyKillPayload) => {
   killPty(payload.tabId);
 });
 
-ipcMain.handle(IPC.FOLDER_LIST, (_event, payload: FolderListPayload) => {
-  return listDirectory(payload.path);
-});
-
-ipcMain.handle(IPC.HOME_PATH, () => {
-  return getHomePath();
-});
-
 ipcMain.handle(IPC.PROJECT_LOAD, () => {
   return cachedProjects;
 });
@@ -80,6 +68,64 @@ ipcMain.handle(IPC.PROJECT_SAVE, (_event, projects: ProjectConfig[]) => {
   cachedProjects = projects;
   saveProjects(projects);
 });
+
+// ── Connector (unified) ──
+
+ipcMain.handle(IPC.CONNECTOR_LIST_DIR, (_event, payload: { connection: Connection; path: string }) => {
+  const connector = createConnector(payload.connection);
+  return connector.listDir(payload.path);
+});
+
+ipcMain.handle(IPC.CONNECTOR_HOME_PATH, (_event, connection: Connection) => {
+  const connector = createConnector(connection);
+  return connector.homePath();
+});
+
+ipcMain.handle(IPC.CONNECTOR_CHECK, (_event, connection: Connection) => {
+  const connector = createConnector(connection);
+  return connector.isConnected();
+});
+
+ipcMain.handle(IPC.CONNECTOR_ESTABLISH, async (_event, payload: { connection: Connection; password?: string }) => {
+  const connector = createConnector(payload.connection);
+  await connector.connect(payload.password);
+  // Auto-save SSH server on successful connect
+  if (payload.connection.type === 'ssh') {
+    saveSSHServer({
+      host: payload.connection.host,
+      port: payload.connection.port,
+      user: payload.connection.user,
+    });
+  }
+});
+
+ipcMain.handle(IPC.CONNECTOR_AVAILABLE_TYPES, () => {
+  return getAvailableTypes();
+});
+
+// ── Connector — type-specific ──
+
+ipcMain.handle(IPC.SSH_REMOVE_HOST_KEY, (_event, payload: { host: string; port: number }) => {
+  removeHostKey(payload.host, payload.port);
+});
+
+ipcMain.handle(IPC.SSH_SERVERS, () => {
+  return loadSSHServers();
+});
+
+ipcMain.handle(IPC.WSL_LIST_DISTROS, () => {
+  return listWSLDistros();
+});
+
+ipcMain.handle(IPC.DOCKER_LIST_CONTAINERS, () => {
+  return listDockerContainers();
+});
+
+ipcMain.handle(IPC.DOCKER_TEST_PATH, (_event, dockerPathValue: string) => {
+  return testDockerPath(dockerPathValue);
+});
+
+// ── File transfer ──
 
 ipcMain.handle(
   IPC.FILE_UPLOAD,
@@ -99,6 +145,22 @@ ipcMain.handle(
     }
   },
 );
+
+ipcMain.handle(
+  IPC.FILE_CLEAR_UPLOADS,
+  async (_event, payload: { connection: Connection; cwd: string }): Promise<FileClearResult> => {
+    try {
+      const removed = await clearUploads(payload.connection, payload.cwd);
+      return { ok: true, removed };
+    } catch (err: any) {
+      const message = err?.message ?? String(err);
+      log.error('file-transfer', `clearUploads failed: ${message}`);
+      return { ok: false, reason: message };
+    }
+  },
+);
+
+// ── Dialogs ──
 
 ipcMain.handle(IPC.DIALOG_WARN, async (_event, payload: { title: string; message: string }) => {
   if (!mainWindow || mainWindow.isDestroyed()) return;
@@ -129,67 +191,20 @@ ipcMain.handle(
   },
 );
 
-ipcMain.handle(
-  IPC.FILE_CLEAR_UPLOADS,
-  async (_event, payload: { connection: Connection; cwd: string }): Promise<FileClearResult> => {
-    try {
-      const removed = await clearUploads(payload.connection, payload.cwd);
-      return { ok: true, removed };
-    } catch (err: any) {
-      const message = err?.message ?? String(err);
-      log.error('file-transfer', `clearUploads failed: ${message}`);
-      return { ok: false, reason: message };
-    }
-  },
-);
-
-ipcMain.handle(IPC.SSH_LIST_DIR, (_event, payload: SSHListDirPayload) => {
-  return sshListDir(payload.host, payload.port, payload.user, payload.path);
-});
-
-ipcMain.handle(IPC.CONNECTION_CHECK, (_event, connection: Connection) => {
-  return connectionManager.isConnected(connection);
-});
-
-ipcMain.handle(IPC.CONNECTION_ESTABLISH, (_event, payload: { connection: Connection; password?: string }) => {
-  return connectionManager.connect(payload.connection, payload.password);
-});
-
-ipcMain.handle(IPC.SSH_REMOVE_HOST_KEY, (_event, payload: { host: string; port: number }) => {
-  removeHostKey(payload.host, payload.port);
-});
-
-ipcMain.handle(IPC.SSH_HOME_PATH, (_event, payload: { host: string; port: number; user: string }) => {
-  return sshGetHomePath(payload.host, payload.port, payload.user);
-});
-
-ipcMain.handle(IPC.WSL_LIST_DIR, (_event, payload: WSLListDirPayload) => {
-  return wslListDir(payload.distro, payload.path);
-});
-
-ipcMain.handle(IPC.WSL_LIST_DISTROS, () => {
-  return wslListDistros();
-});
-
-ipcMain.handle(IPC.WSL_HOME_PATH, (_event, distro: string) => {
-  return wslHomePath(distro);
-});
-
-ipcMain.handle(IPC.DOCKER_LIST_CONTAINERS, () => {
-  return dockerListContainers();
-});
-
-ipcMain.handle(IPC.DOCKER_LIST_DIR, (_event, payload: { container: string; path: string }) => {
-  return dockerListDir(payload.container, payload.path);
-});
-
-ipcMain.handle(IPC.DOCKER_HOME_PATH, (_event, container: string) => {
-  return dockerHomePath(container);
-});
+// ── Settings ──
 
 ipcMain.handle(IPC.SETTINGS_LOAD, () => {
   return cachedSettings;
 });
+
+ipcMain.handle(IPC.SETTINGS_SAVE, (_event, settings: AppSettings) => {
+  cachedSettings = settings;
+  saveSettings(settings);
+  setLogLevel(settings.logLevel);
+  setDockerPath(settings.dockerPath);
+});
+
+// ── Logs ──
 
 ipcMain.handle(IPC.LOGS_CLEAR, () => {
   const logBaseDir = path.join(app.getPath('userData'), 'logs');
@@ -199,11 +214,7 @@ ipcMain.handle(IPC.LOGS_CLEAR, () => {
   log.info('app', 'logs cleared');
 });
 
-ipcMain.handle(IPC.SETTINGS_SAVE, (_event, settings: AppSettings) => {
-  cachedSettings = settings;
-  saveSettings(settings);
-  setLogLevel(settings.logLevel);
-});
+// ── Updater ──
 
 ipcMain.handle(IPC.UPDATE_CHECK, () => {
   manualCheckForUpdate();
@@ -233,7 +244,6 @@ ipcMain.on(IPC.PTY_MUTE, (_event, payload: { tabId: string; muted: boolean }) =>
 // ── App lifecycle ──
 
 app.whenReady().then(() => {
-  // Write logs to date-based file: {userData}/logs/{yyyymm}/{mmdd}.log
   const logBaseDir = path.join(app.getPath('userData'), 'logs');
   setFileWriter((line) => {
     const now = new Date();
@@ -244,17 +254,15 @@ app.whenReady().then(() => {
     fs.appendFileSync(path.join(dir, `${mmdd}.log`), line + '\n');
   });
 
-  // Allow LOG_LEVEL env to capture bootstrap-time info/debug logs (default 'error').
   const envLogLevel = process.env.LOG_LEVEL as import('../shared/types').LogLevel | undefined;
   if (envLogLevel) setLogLevel(envLogLevel);
 
-  // Eagerly load configs before showing the window. On unrecoverable errors,
-  // bootstrap() shows a sync dialog and calls app.exit() — we never reach createWindow().
   const { projects, settings } = bootstrap();
   cachedProjects = projects;
   cachedSettings = settings;
 
   if (!envLogLevel) setLogLevel(settings.logLevel);
+  setDockerPath(settings.dockerPath);
 
   log.info('app', `starting, logLevel=${settings.logLevel}, userData=${app.getPath('userData')}`);
 
@@ -267,7 +275,7 @@ app.whenReady().then(() => {
 function shutdown() {
   killAllPtys();
   stopAutoUpdater();
-  connectionManager.cleanup();
+  cleanupConnectors();
 }
 
 app.on('window-all-closed', () => {
@@ -275,9 +283,6 @@ app.on('window-all-closed', () => {
   app.quit();
 });
 
-// Playwright `app.close()` may invoke `app.quit()` directly without going through
-// `window-all-closed`. Hook `before-quit` so SSH ControlMaster sockets are always
-// cleaned up — otherwise ControlPersist keeps masters alive past test teardown.
 app.on('before-quit', () => {
   shutdown();
 });

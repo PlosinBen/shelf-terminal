@@ -50,10 +50,6 @@ export interface PtyKillPayload {
   tabId: string;
 }
 
-export interface FolderListPayload {
-  path: string;
-}
-
 // ── IPC payloads: Main → Renderer ──
 
 export interface PtyDataPayload {
@@ -94,20 +90,9 @@ export interface AppSettings {
   keybindings: KeybindingConfig;
   logLevel: LogLevel;
   maxUploadSizeMB: number;
+  dockerPath?: string;
 }
 
-
-export interface SSHListDirPayload {
-  host: string;
-  port: number;
-  user: string;
-  path: string;
-}
-
-export interface WSLListDirPayload {
-  distro: string;
-  path: string;
-}
 
 // ── FolderPicker ──
 

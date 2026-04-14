@@ -297,10 +297,23 @@ function ConnectionStep({
   onSelect, onCancel,
 }: ConnectionStepProps) {
   const [connType, setConnType] = useState<'local' | 'ssh' | 'wsl' | 'docker'>('local');
+  const [availableTypes, setAvailableTypes] = useState<string[]>(['local', 'ssh', 'docker']);
   const [wslDistros, setWslDistros] = useState<string[]>([]);
   const [dockerContainers, setDockerContainers] = useState<string[]>([]);
   const [sshConnected, setSshConnected] = useState(false);
-  const isWindows = navigator.platform.includes('Win');
+  const [sshServers, setSshServers] = useState<Array<{ host: string; port: number; user: string }>>([]);
+
+  // Fetch available connection types from main process
+  useEffect(() => {
+    window.shelfApi.connector.availableTypes().then(setAvailableTypes);
+  }, []);
+
+  // Fetch SSH server history when SSH tab is selected
+  useEffect(() => {
+    if (connType === 'ssh') {
+      window.shelfApi.ssh.servers().then(setSshServers);
+    }
+  }, [connType]);
 
   useEffect(() => {
     if (connType === 'wsl' && wslDistros.length === 0) {
@@ -310,12 +323,16 @@ function ConnectionStep({
       });
     }
     if (connType === 'docker') {
-      window.shelfApi.docker.listContainers().then((list) => {
-        setDockerContainers(list);
-        if (list.length > 0 && !dockerContainer) onDockerContainerChange(list[0]);
-      });
+      refreshDockerContainers();
     }
   }, [connType]);
+
+  const refreshDockerContainers = () => {
+    window.shelfApi.docker.listContainers().then((list) => {
+      setDockerContainers(list);
+      if (list.length > 0 && !dockerContainer) onDockerContainerChange(list[0]);
+    });
+  };
 
   // Check if SSH connection already exists
   useEffect(() => {
@@ -327,6 +344,12 @@ function ConnectionStep({
     const conn = { type: 'ssh' as const, host: sshHost, port, user: sshUser };
     window.shelfApi.connector.isConnected(conn).then(setSshConnected);
   }, [connType, sshHost, sshPort, sshUser]);
+
+  const handleSelectServer = (server: { host: string; port: number; user: string }) => {
+    onSshHostChange(server.host);
+    onSshPortChange(String(server.port));
+    onSshUserChange(server.user);
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -346,28 +369,34 @@ function ConnectionStep({
   return (
     <form className="conn-step" onSubmit={handleSubmit}>
       <div className="conn-type-buttons">
-        <button
-          type="button"
-          className={`conn-type-btn ${connType === 'local' ? 'active' : ''}`}
-          onClick={() => setConnType('local')}
-        >
-          Local
-        </button>
-        <button
-          type="button"
-          className={`conn-type-btn ${connType === 'ssh' ? 'active' : ''}`}
-          onClick={() => setConnType('ssh')}
-        >
-          SSH
-        </button>
-        <button
-          type="button"
-          className={`conn-type-btn ${connType === 'docker' ? 'active' : ''}`}
-          onClick={() => setConnType('docker')}
-        >
-          Docker
-        </button>
-        {isWindows && (
+        {availableTypes.includes('local') && (
+          <button
+            type="button"
+            className={`conn-type-btn ${connType === 'local' ? 'active' : ''}`}
+            onClick={() => setConnType('local')}
+          >
+            Local
+          </button>
+        )}
+        {availableTypes.includes('ssh') && (
+          <button
+            type="button"
+            className={`conn-type-btn ${connType === 'ssh' ? 'active' : ''}`}
+            onClick={() => setConnType('ssh')}
+          >
+            SSH
+          </button>
+        )}
+        {availableTypes.includes('docker') && (
+          <button
+            type="button"
+            className={`conn-type-btn ${connType === 'docker' ? 'active' : ''}`}
+            onClick={() => setConnType('docker')}
+          >
+            Docker
+          </button>
+        )}
+        {availableTypes.includes('wsl') && (
           <button
             type="button"
             className={`conn-type-btn ${connType === 'wsl' ? 'active' : ''}`}
@@ -381,6 +410,23 @@ function ConnectionStep({
       <div className="conn-form-body">
         {connType === 'ssh' && (
           <>
+            {sshServers.length > 0 && (
+              <div className="conn-server-list">
+                <label className="conn-label">Servers</label>
+                <div className="conn-server-items">
+                  {sshServers.map((s, i) => (
+                    <button
+                      key={i}
+                      type="button"
+                      className="conn-server-item"
+                      onClick={() => handleSelectServer(s)}
+                    >
+                      {s.user}@{s.host}{s.port !== 22 ? `:${s.port}` : ''}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             <div className="conn-field">
               <label className="conn-label">Host</label>
               <input
@@ -452,20 +498,30 @@ function ConnectionStep({
         {connType === 'docker' && (
           <div className="conn-field">
             <label className="conn-label">Container</label>
-            {dockerContainers.length > 0 ? (
-              <select
-                className="settings-select"
-                value={dockerContainer}
-                onChange={(e) => onDockerContainerChange(e.target.value)}
-                autoFocus
+            <div className="conn-docker-row">
+              {dockerContainers.length > 0 ? (
+                <select
+                  className="settings-select"
+                  value={dockerContainer}
+                  onChange={(e) => onDockerContainerChange(e.target.value)}
+                  autoFocus
+                >
+                  {dockerContainers.map((c) => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+              ) : (
+                <span className="conn-local-hint">No running containers found.</span>
+              )}
+              <button
+                type="button"
+                className="conn-refresh-btn"
+                onClick={refreshDockerContainers}
+                title="Refresh container list"
               >
-                {dockerContainers.map((c) => (
-                  <option key={c} value={c}>{c}</option>
-                ))}
-              </select>
-            ) : (
-              <span className="conn-local-hint">No running containers found.</span>
-            )}
+                &#x21bb;
+              </button>
+            </div>
           </div>
         )}
 

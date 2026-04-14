@@ -28,41 +28,17 @@ contextBridge.exposeInMainWorld('shelfApi', {
       return () => ipcRenderer.removeListener(IPC.PTY_EXIT, listener);
     },
   },
-  folder: {
-    list: (dirPath: string) =>
-      ipcRenderer.invoke(IPC.FOLDER_LIST, { path: dirPath }),
-    homePath: () =>
-      ipcRenderer.invoke(IPC.HOME_PATH),
-  },
   connector: {
-    listDir: (connection: any, dirPath: string) => {
-      if (connection.type === 'ssh') {
-        return ipcRenderer.invoke(IPC.SSH_LIST_DIR, { host: connection.host, port: connection.port, user: connection.user, path: dirPath });
-      }
-      if (connection.type === 'wsl') {
-        return ipcRenderer.invoke(IPC.WSL_LIST_DIR, { distro: connection.distro, path: dirPath });
-      }
-      if (connection.type === 'docker') {
-        return ipcRenderer.invoke(IPC.DOCKER_LIST_DIR, { container: connection.container, path: dirPath });
-      }
-      return ipcRenderer.invoke(IPC.FOLDER_LIST, { path: dirPath });
-    },
-    homePath: (connection: any) => {
-      if (connection.type === 'ssh') {
-        return ipcRenderer.invoke(IPC.SSH_HOME_PATH, { host: connection.host, port: connection.port, user: connection.user });
-      }
-      if (connection.type === 'wsl') {
-        return ipcRenderer.invoke(IPC.WSL_HOME_PATH, connection.distro);
-      }
-      if (connection.type === 'docker') {
-        return ipcRenderer.invoke(IPC.DOCKER_HOME_PATH, connection.container);
-      }
-      return ipcRenderer.invoke(IPC.HOME_PATH);
-    },
+    listDir: (connection: any, dirPath: string) =>
+      ipcRenderer.invoke(IPC.CONNECTOR_LIST_DIR, { connection, path: dirPath }),
+    homePath: (connection: any) =>
+      ipcRenderer.invoke(IPC.CONNECTOR_HOME_PATH, connection),
     isConnected: (connection: any) =>
-      ipcRenderer.invoke(IPC.CONNECTION_CHECK, connection),
+      ipcRenderer.invoke(IPC.CONNECTOR_CHECK, connection),
     connect: (connection: any, password?: string) =>
-      ipcRenderer.invoke(IPC.CONNECTION_ESTABLISH, { connection, password }),
+      ipcRenderer.invoke(IPC.CONNECTOR_ESTABLISH, { connection, password }),
+    availableTypes: () =>
+      ipcRenderer.invoke(IPC.CONNECTOR_AVAILABLE_TYPES),
     uploadFile: (connection: any, cwd: string, filename: string, buffer: ArrayBuffer) =>
       ipcRenderer.invoke(IPC.FILE_UPLOAD, { connection, cwd, filename, buffer }),
     clearUploads: (connection: any, cwd: string) =>
@@ -81,22 +57,18 @@ contextBridge.exposeInMainWorld('shelfApi', {
   docker: {
     listContainers: () =>
       ipcRenderer.invoke(IPC.DOCKER_LIST_CONTAINERS),
+    testPath: (dockerPath: string) =>
+      ipcRenderer.invoke(IPC.DOCKER_TEST_PATH, dockerPath),
   },
   wsl: {
-    listDir: (distro: string, dirPath: string) =>
-      ipcRenderer.invoke(IPC.WSL_LIST_DIR, { distro, path: dirPath }),
-    homePath: (distro: string) =>
-      ipcRenderer.invoke(IPC.WSL_HOME_PATH, distro),
     listDistros: () =>
       ipcRenderer.invoke(IPC.WSL_LIST_DISTROS),
   },
   ssh: {
-    listDir: (host: string, port: number, user: string, dirPath: string) =>
-      ipcRenderer.invoke(IPC.SSH_LIST_DIR, { host, port, user, path: dirPath }),
-    homePath: (host: string, port: number, user: string) =>
-      ipcRenderer.invoke(IPC.SSH_HOME_PATH, { host, port, user }),
     removeHostKey: (host: string, port: number) =>
       ipcRenderer.invoke(IPC.SSH_REMOVE_HOST_KEY, { host, port }),
+    servers: () =>
+      ipcRenderer.invoke(IPC.SSH_SERVERS),
   },
   settings: {
     load: () => ipcRenderer.invoke(IPC.SETTINGS_LOAD),

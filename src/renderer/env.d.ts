@@ -10,15 +10,12 @@ interface ShelfApi {
     onData: (callback: (tabId: string, data: string) => void) => () => void;
     onExit: (callback: (tabId: string, exitCode: number) => void) => () => void;
   };
-  folder: {
-    list: (dirPath: string) => Promise<import('../shared/types').FolderListResult>;
-    homePath: () => Promise<string>;
-  };
   connector: {
     listDir: (connection: import('../shared/types').Connection, dirPath: string) => Promise<import('../shared/types').FolderListResult>;
     homePath: (connection: import('../shared/types').Connection) => Promise<string>;
     isConnected: (connection: import('../shared/types').Connection) => Promise<boolean>;
     connect: (connection: import('../shared/types').Connection, password?: string) => Promise<void>;
+    availableTypes: () => Promise<import('../shared/types').Connection['type'][]>;
     uploadFile: (
       connection: import('../shared/types').Connection,
       cwd: string,
@@ -40,16 +37,14 @@ interface ShelfApi {
   };
   docker: {
     listContainers: () => Promise<string[]>;
+    testPath: (dockerPath: string) => Promise<{ ok: boolean; version?: string; error?: string }>;
   };
   wsl: {
-    listDir: (distro: string, dirPath: string) => Promise<import('../shared/types').FolderListResult>;
-    homePath: (distro: string) => Promise<string>;
     listDistros: () => Promise<string[]>;
   };
   ssh: {
-    listDir: (host: string, port: number, user: string, dirPath: string) => Promise<import('../shared/types').FolderListResult>;
-    homePath: (host: string, port: number, user: string) => Promise<string>;
     removeHostKey: (host: string, port: number) => Promise<void>;
+    servers: () => Promise<Array<{ host: string; port: number; user: string }>>;
   };
   settings: {
     load: () => Promise<import('../shared/types').AppSettings>;
