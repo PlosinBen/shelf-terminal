@@ -3,8 +3,14 @@
     "allow": [
       "Read",
       "Edit",
+      "WebFetch(domain:github.com)",
       "Bash(npm:*)",
-      "Bash(npx:*)"
+      "Bash(npx:*)",
+      "Bash(nvm:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git tag:*)",
+      "Bash(gh search:*)"
     ]
   }
 }
