@@ -183,3 +183,33 @@
 3. 可能還需要 notarization（macOS 10.15+ 要求）
 
 **注意**: Windows 不需要 code signing 就能自動更新。在沒有 Apple 憑證之前，macOS 用戶只能手動下載新版。
+
+---
+
+## 18. Keybinding 需要 Capture Phase
+
+**現象**: Windows/Linux 上 Ctrl+Up/Down 切換 project 沒反應。
+
+**原因**: xterm.js 在 bubble phase 攔截 keydown 事件（terminal scroll 功能），`window.addEventListener('keydown', handler)` 收不到。
+
+**解法**: 改用 capture phase（第三參數 `true`），讓 keybinding handler 在 xterm 之前觸發。與 Gotcha #6（image paste capture phase）是同一類問題。
+
+---
+
+## 19. Ctrl+V/C 需要 Custom Key Event Handler
+
+**現象**: Windows/Linux 上 Ctrl+V 貼上、Ctrl+C 複製無效。
+
+**原因**: xterm.js 預設把 Ctrl+V 當作 `\x16`、Ctrl+C 當作 `\x03` 送進 pty，不觸發瀏覽器的 paste/copy 行為。macOS 用 Cmd+V/C 不受影響。
+
+**解法**: 用 `term.attachCustomKeyEventHandler()` 對非 Mac 平台攔截這些組合鍵，return `false` 讓瀏覽器處理。
+
+---
+
+## 20. Tab Mute 狀態不持久化
+
+**現象**: 重啟 app 後 tab 的 mute 狀態消失。
+
+**原因**: mute 狀態只存在 main process 的 `mutedTabs` Set 中，沒有寫入 settings 或 projects.json。
+
+**注意**: 這是 v0.2.4 的設計——僅 runtime mute，重啟重置。如果未來要持久化需另外實作。

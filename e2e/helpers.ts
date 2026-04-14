@@ -17,6 +17,27 @@ function clearProjectsData() {
     fs.mkdirSync(userDataDir, { recursive: true });
   }
   fs.writeFileSync(path.join(userDataDir, 'projects.json'), '[]', 'utf-8');
+
+  // Remove saved settings so tests start with defaults
+  const settingsPath = path.join(userDataDir, 'settings.json');
+  if (fs.existsSync(settingsPath)) fs.unlinkSync(settingsPath);
+}
+
+/** Ensure home directory has enough subdirectories for folder picker tests */
+function ensureTestDirectories() {
+  const home = os.homedir();
+  for (const name of ['shelf-test-a', 'shelf-test-b', 'shelf-test-c']) {
+    const dir = path.join(home, name);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir);
+  }
+}
+
+function cleanupTestDirectories() {
+  const home = os.homedir();
+  for (const name of ['shelf-test-a', 'shelf-test-b', 'shelf-test-c']) {
+    const dir = path.join(home, name);
+    if (fs.existsSync(dir)) fs.rmdirSync(dir);
+  }
 }
 
 /**
@@ -25,6 +46,7 @@ function clearProjectsData() {
 export const test = base.extend<{}, { shelfApp: { app: ElectronApplication; page: Page } }>({
   shelfApp: [async ({}, use) => {
     clearProjectsData();
+    ensureTestDirectories();
 
     const app = await electron.launch({
       args: [path.join(__dirname, '..')],
@@ -44,6 +66,7 @@ export const test = base.extend<{}, { shelfApp: { app: ElectronApplication; page
 
     // Always runs — even after test failures
     await app.close().catch(() => {});
+    cleanupTestDirectories();
   }, { scope: 'worker' }],
 });
 

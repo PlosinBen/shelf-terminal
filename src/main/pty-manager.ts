@@ -47,26 +47,51 @@ export function spawnPty(
 
   if (initScript || tabCmd) {
     // Detect shell prompt readiness before sending initScript.
+    // Modern shells (zsh, bash 4.4+, fish) enable bracketed paste mode
+    // (\x1b[?2004h) when the line editor is ready for input — this is
+    // the shell's own "I'm ready" signal, no timing guesswork needed.
+    // After detecting readiness, wait for output idle + minimum 1s to ensure
+    // all profile scripts (e.g. nvm) have finished loading.
+    const spawnTime = Date.now();
+    const MIN_WAIT_MS = 1000;
     let sent = false;
-    let debounce: ReturnType<typeof setTimeout> | null = null;
+    let readyDetected = false;
+    let idleTimer: ReturnType<typeof setTimeout> | null = null;
     const send = () => {
       if (sent) return;
       sent = true;
       dispose.dispose();
-      if (debounce) clearTimeout(debounce);
+      if (idleTimer) clearTimeout(idleTimer);
       if (initScript) shell.write(initScript + '\n');
       if (tabCmd) {
         setTimeout(() => shell.write(tabCmd + '\n'), initScript ? 200 : 0);
       }
+      if (!win.isDestroyed()) {
+        win.webContents.send(IPC.PTY_INIT_SENT, { tabId });
+      }
+    };
+    const scheduleIdleSend = () => {
+      if (idleTimer) clearTimeout(idleTimer);
+      const elapsed = Date.now() - spawnTime;
+      const remainingWait = Math.max(0, MIN_WAIT_MS - elapsed);
+      // Wait for output idle (500ms) or remaining minimum wait, whichever is longer
+      idleTimer = setTimeout(send, Math.max(500, remainingWait));
     };
     const dispose = shell.onData((data) => {
       if (sent) return;
-      if (data.includes('\x1b[?2004h')) {
-        send();
+      if (!readyDetected && data.includes('\x1b[?2004h')) {
+        readyDetected = true;
+        scheduleIdleSend();
         return;
       }
-      if (debounce) clearTimeout(debounce);
-      debounce = setTimeout(send, 500);
+      // After ready detected, reset idle timer on each output
+      if (readyDetected) {
+        scheduleIdleSend();
+        return;
+      }
+      // Fallback: debounce for shells without bracketed paste
+      if (idleTimer) clearTimeout(idleTimer);
+      idleTimer = setTimeout(send, 1500);
     });
     setTimeout(send, 10000);
   }

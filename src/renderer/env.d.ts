@@ -9,6 +9,7 @@ interface ShelfApi {
     mute: (tabId: string, muted: boolean) => void;
     onData: (callback: (tabId: string, data: string) => void) => () => void;
     onExit: (callback: (tabId: string, exitCode: number) => void) => () => void;
+    onInitSent: (callback: (tabId: string) => void) => () => void;
   };
   connector: {
     listDir: (connection: import('../shared/types').Connection, dirPath: string) => Promise<import('../shared/types').FolderListResult>;

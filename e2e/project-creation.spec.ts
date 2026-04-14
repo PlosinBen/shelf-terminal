@@ -39,10 +39,11 @@ test('folder picker connection step shows Local by default', async ({ shelfApp: 
 
 test('folder picker shows home directory entries after Next', async ({ shelfApp: { page } }) => {
   // Close if open, then reopen with full flow
-  if (await page.locator('.folder-picker-overlay').isVisible()) {
+  const overlay = page.locator('.folder-picker-overlay');
+  if (await overlay.isVisible()) {
     await page.keyboard.press('Escape');
+    await expect(overlay).not.toBeVisible({ timeout: 3_000 });
   }
-  await expect(page.locator('.folder-picker-overlay')).not.toBeVisible();
 
   await openFolderPicker(page);
 
@@ -50,6 +51,7 @@ test('folder picker shows home directory entries after Next', async ({ shelfApp:
   await expect(list).toBeVisible();
 
   const items = page.locator('.folder-picker-item');
+  await expect(items.first()).toBeVisible({ timeout: 3_000 });
   const count = await items.count();
   expect(count).toBeGreaterThan(1);
 });
