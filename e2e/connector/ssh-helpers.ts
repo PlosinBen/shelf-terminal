@@ -47,7 +47,7 @@ export const test = base.extend<{}, { shelfApp: { app: ElectronApplication; page
     );
 
     const app = await electron.launch({
-      args: [path.join(__dirname, '..')],
+      args: [path.join(__dirname, '../..')],
       env: { ...process.env },
     });
 

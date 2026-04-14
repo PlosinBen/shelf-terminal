@@ -12,15 +12,16 @@ export default defineConfig({
     {
       name: 'e2e',
       testDir: './e2e',
+      testIgnore: '**/connector/**',
     },
     {
       name: 'docker',
-      testDir: './connector',
+      testDir: './e2e/connector',
       testMatch: 'docker.spec.ts',
     },
     {
       name: 'ssh',
-      testDir: './connector',
+      testDir: './e2e/connector',
       testMatch: 'ssh.spec.ts',
     },
   ],
