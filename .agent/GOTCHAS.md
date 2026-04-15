@@ -126,7 +126,7 @@
 
 **現象**: WSL 雙重 prompt 問題，看似只能在 Windows 測試。
 
-**原因**: 三種 connector（local/SSH/WSL）走同一條 spawn 路徑，問題出在 App.tsx event handler 和 TerminalView 重複 spawn，不是 WSL 特有。
+**原因**: 所有 connector 都透過 `createConnector()` factory 走統一的 `Connector` 介面（`createShell`、`listDir`、`uploadFile` 等），spawn 邏輯集中在 `pty-manager.ts` 的 `connector.createShell(cwd)`。問題通常不是特定 connection type 造成的。
 
 **注意**: Connector 統一介面後，spawn/connect/disconnect 等行為在 local 上就能驗證。不需要等特定平台測試。修 bug 前先在 local 用 log 確認。
 

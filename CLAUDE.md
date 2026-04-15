@@ -26,5 +26,5 @@
 - All user actions go through event bus (`src/renderer/events.ts`)
 - Trigger sites (UI components, keybindings) only `emit()` events
 - Side effects (pty kill, terminal dispose, persist) handled centrally in `App.tsx`
-- Connection-specific logic (local/SSH/WSL) abstracted behind `connector` API in preload
+- Connection-specific logic abstracted via `createConnector()` factory in `src/main/connector/`; preload is RPC bridge only
 - Keybindings are configurable via Settings; parameterized actions use `action_param` pattern (e.g. `switchTab_3`)

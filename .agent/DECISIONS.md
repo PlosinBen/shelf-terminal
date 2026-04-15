@@ -10,13 +10,13 @@
 
 ---
 
-## 2. Connector 抽象層
+## 2. Connector 抽象層（Factory Pattern）
 
-**決策**: Preload 的 `connector.listDir()` / `connector.homePath()` 根據 connection type 自動 dispatch 到對應 IPC（local / SSH / WSL）。
+**決策**: `src/main/connector/index.ts` 的 `createConnector(connection)` 根據 connection type + OS 回傳對應實作。IPC handler 呼叫 factory 取得 connector 再操作。Preload 只是 RPC bridge，不含 dispatch 邏輯。
 
-**原因**: FolderPicker 不需要 switch connection type，只管呼叫 connector。新增 connection type 時只改 preload，不動 UI。
+**原因**: 所有 connection-specific 邏輯（spawn、listDir、upload、cleanup）收在各自的 connector 實作裡，消費端（pty-manager、file-transfer、IPC handler）不需要 switch connection type。新增 connection type 只需加一個 connector 檔案 + 註冊到 factory。
 
-**不要改**: 如果讓 renderer 直接判斷 connection type 再呼叫不同 API，每個用到目錄列表的地方都要重複 switch。
+**不要改**: 如果把 connection dispatch 散回各消費端，每個用到 spawn/listDir/upload 的地方都要重複 switch。
 
 ---
 
@@ -100,17 +100,7 @@
 
 ---
 
-## 11. ConnectionManager 抽象層
-
-**決策**: `connection-manager.ts` 封裝 `isConnected()` / `connect()` / `cleanup()`，統一 local/SSH/WSL 連線狀態管理。Preload 的 `connector` namespace 統一暴露 `listDir` / `homePath` / `isConnected` / `connect`。
-
-**原因**: FolderPicker 不需要知道 ControlMaster socket 路徑、SSH establish 方式等底層細節。統一介面後新增 connection type 只改 ConnectionManager，UI 不動。
-
-**不要改**: 如果讓 renderer 直接判斷 connection type 再呼叫不同 API，每個用到連線的地方都要重複 switch。
-
----
-
-## 12. Terminal 持久渲染（不 unmount）
+## 11. Terminal 持久渲染（不 unmount）
 
 **決策**: 所有 project 的所有 tab 都持久渲染，用 `display: none` 隱藏非 active 的。切換 project/tab 只改 visibility。
 
@@ -120,7 +110,7 @@
 
 ---
 
-## 13. TerminalView 是唯一 spawn 點
+## 12. TerminalView 是唯一 spawn 點
 
 **決策**: 只有 `TerminalView` 的 useEffect mount 時呼叫 `pty.spawn`。Event handler（NEW_TAB、CONNECT_PROJECT）只負責 `addTab()`。
 
@@ -130,7 +120,7 @@
 
 ---
 
-## 14. 檔案上傳統一走 `<cwd>/.tmp/shelf/`，不用 `/tmp/shelf-paste`
+## 13. 檔案上傳統一走 `<cwd>/.tmp/shelf/`，不用 `/tmp/shelf-paste`
 
 **決策**: 所有 paste / drag-drop 上傳的目的地都是 `<projectCwd>/.tmp/shelf/<prefix>-<filename>`，而不是過去的 `/tmp/shelf-paste/`。Local / SSH / Docker / WSL 共用同一個 `connector.uploadFile` 入口。
 
@@ -143,7 +133,7 @@
 
 ---
 
-## 15. 上傳一律 cat-via-stdin，不用 scp / docker cp
+## 14. 上傳一律 cat-via-stdin，不用 scp / docker cp
 
 **決策**: SSH / Docker / WSL 三種 transport 在 `file-transfer.ts` 都用同一個 pattern：
 `spawn('<bin>', [...args, 'sh', '-c', "mkdir -p '<dir>' && cat > '<path>'"])` 然後把 buffer 灌進 stdin。
@@ -157,7 +147,7 @@
 
 ---
 
-## 16. Updater state machine 抽成純 reducer
+## 15. Updater state machine 抽成純 reducer
 
 **決策**: 自動更新的狀態轉移放在 `updater-state.ts` 的 `reduceUpdaterStatus(state, event)` 純函式裡。`updater.ts` 只負責接 electron-updater event 與 IPC，呼叫 reducer 後 broadcast。
 
@@ -169,7 +159,7 @@
 
 ---
 
-## 17. Bootstrap 在開窗前先載入 config，失敗時 blocking dialog
+## 16. Bootstrap 在開窗前先載入 config，失敗時 blocking dialog
 
 **決策**: `app.whenReady()` 裡先呼叫 `bootstrap()` 同步載入 `projects.json` 和 `settings.json`，再 `createWindow()`。`loadProjects` / `loadSettings` 回傳 `LoadResult` discriminated union（`ok | parse | permission | read`），bootstrap 根據錯誤型別跳對應的 `dialog.showMessageBoxSync`：parse 給「Quit / Backup & Continue」、permission/read 只給 Quit。
 
@@ -182,7 +172,7 @@
 
 ---
 
-## 18. Vitest config 獨立檔，不繼承 vite.config.ts
+## 17. Vitest config 獨立檔，不繼承 vite.config.ts
 
 **決策**: `vitest.config.ts` 是另一份獨立 config，不 extend `vite.config.ts`。
 
@@ -192,7 +182,7 @@
 
 ---
 
-## 19. 上傳清理：session-based、cutoff 從檔名解出來
+## 18. 上傳清理：session-based、cutoff 從檔名解出來
 
 **決策**: `<cwd>/.tmp/shelf/` 的清理走兩條路：
 - **自動**：每個 project 在 Shelf process 內第一次 spawn pty 時，`maybeScheduleCleanup()` 排一個 3 秒後的 fire-and-forget cleanup。同一個 project 在這個 Shelf process 內只跑一次（用 `cleanedProjects: Set<string>` 去重）。Cutoff 是 `SESSION_STARTED_AT`（process 啟動時的 ms）— 比這個舊的就是上一個 session 留下來的，可以刪。
