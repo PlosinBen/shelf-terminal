@@ -25,6 +25,7 @@ export function SettingsPanel() {
   const [recordingAction, setRecordingAction] = useState<KeybindingAction | null>(null);
   const [dockerTestResult, setDockerTestResult] = useState<{ ok: boolean; version?: string; error?: string } | null>(null);
   const [dockerTesting, setDockerTesting] = useState(false);
+  const [pathError, setPathError] = useState<string | null>(null);
 
   // Reset draft when panel opens
   useEffect(() => {
@@ -32,6 +33,7 @@ export function SettingsPanel() {
       setDraft(settings);
       setRecordingAction(null);
       setDockerTestResult(null);
+      setPathError(null);
     }
   }, [settingsVisible, settings]);
 
@@ -62,7 +64,14 @@ export function SettingsPanel() {
 
   if (!settingsVisible) return null;
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    if (draft.defaultLocalPath) {
+      const result = await window.shelfApi.connector.listDir({ type: 'local' }, draft.defaultLocalPath);
+      if (result.error) {
+        setPathError(`Path does not exist: ${draft.defaultLocalPath}`);
+        return;
+      }
+    }
     updateSettings(draft);
     toggleSettings();
   };
@@ -156,6 +165,18 @@ export function SettingsPanel() {
               value={draft.maxUploadSizeMB}
               onChange={(e) => updateDraft({ maxUploadSizeMB: Number(e.target.value) })}
             />
+          </div>
+
+          <div className="settings-group">
+            <label className="settings-label">Default Local Path</label>
+            <input
+              className="settings-input settings-input-wide"
+              type="text"
+              value={draft.defaultLocalPath || ''}
+              onChange={(e) => { updateDraft({ defaultLocalPath: e.target.value || undefined }); setPathError(null); }}
+              placeholder="~ (home directory)"
+            />
+            {pathError && <div className="settings-path-error">{pathError}</div>}
           </div>
 
           <div className="settings-divider" />

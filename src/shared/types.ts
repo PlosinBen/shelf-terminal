@@ -98,6 +98,7 @@ export interface AppSettings {
   keybindings: KeybindingConfig;
   logLevel: LogLevel;
   maxUploadSizeMB: number;
+  defaultLocalPath?: string;
   dockerPath?: string;
 }
 

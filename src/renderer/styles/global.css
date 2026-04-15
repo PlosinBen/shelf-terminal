@@ -858,6 +858,12 @@ button {
   color: #f38ba8;
 }
 
+.settings-path-error {
+  font-size: 12px;
+  margin-top: 4px;
+  color: #f38ba8;
+}
+
 .settings-section-title {
   font-size: 12px;
   font-weight: 600;

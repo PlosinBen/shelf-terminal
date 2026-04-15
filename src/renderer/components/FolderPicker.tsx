@@ -120,8 +120,15 @@ export function FolderPicker() {
       }
     }
 
-    const home = await window.shelfApi.connector.homePath(conn);
-    requestFolder(home);
+    let startPath: string | undefined;
+    if (conn.type === 'local' && settings.defaultLocalPath) {
+      const result = await window.shelfApi.connector.listDir(conn, settings.defaultLocalPath);
+      if (!result.error) startPath = settings.defaultLocalPath;
+    }
+    if (!startPath) {
+      startPath = await window.shelfApi.connector.homePath(conn);
+    }
+    requestFolder(startPath);
   };
 
   // ── Select and close ──
