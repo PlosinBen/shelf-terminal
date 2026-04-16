@@ -160,8 +160,16 @@ export function TerminalView({ tabId, projectId, cwd, connection, initScript, ta
       const okPaths: string[] = [];
       const failures: { name: string; reason: string }[] = [];
       for (const { file, result } of results) {
-        if (result.ok) okPaths.push(shellQuote(result.remotePath));
-        else failures.push({ name: file.name, reason: result.reason });
+        if (result.ok) {
+          // Strip cwd prefix so the path is relative to the project root
+          const cwdPrefix = cwd.replace(/\/+$/, '') + '/';
+          const displayPath = result.remotePath.startsWith(cwdPrefix)
+            ? result.remotePath.slice(cwdPrefix.length)
+            : result.remotePath;
+          okPaths.push(shellQuote(displayPath));
+        } else {
+          failures.push({ name: file.name, reason: result.reason });
+        }
       }
 
       if (okPaths.length > 0) {
