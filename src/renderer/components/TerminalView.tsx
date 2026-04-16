@@ -39,7 +39,7 @@ export function TerminalView({ tabId, projectId, cwd, connection, initScript, ta
   const visibleRef = useRef(visible);
   visibleRef.current = visible;
   const [initLoading, setInitLoading] = useState(!!(initScript || tabCmd));
-  const { settings } = useStore();
+  const { settings, layoutGeneration } = useStore();
   const theme = getTheme(settings.themeName);
   // Mirror current upload-size limit into a ref so the paste/drop handlers
   // (bound once at mount via [tabId] effect) always read the latest value.
@@ -276,7 +276,7 @@ export function TerminalView({ tabId, projectId, cwd, connection, initScript, ta
         });
       }
     }
-  }, [visible, tabId]);
+  }, [visible, tabId, layoutGeneration]);
 
   return (
     <>

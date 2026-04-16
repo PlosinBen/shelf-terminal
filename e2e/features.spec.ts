@@ -334,6 +334,70 @@ test('terminal content preserved after project switch', async ({ shelfApp: { pag
   expect(text).toContain('SHELF_TEST_P1');
 });
 
+// ── Project Reorder ──
+
+test('terminal content preserved after project reorder', async ({ shelfApp: { page } }) => {
+  // Ensure 2 connected projects
+  const items = page.locator('.sidebar-item');
+  while (await items.count() < 2) {
+    await setupProject(page);
+  }
+
+  // Connect project 1 and produce identifiable output
+  await items.nth(0).click();
+  await ensureConnected(page);
+  await page.waitForTimeout(500);
+  let terminal = page.locator('.terminal-container:visible');
+  await terminal.locator('.xterm-helper-textarea').focus();
+  await page.keyboard.type('echo REORDER_P1\n');
+  await page.waitForTimeout(1000);
+
+  // Connect project 2 and produce identifiable output
+  await items.nth(1).click();
+  await ensureConnected(page);
+  await page.waitForTimeout(500);
+  terminal = page.locator('.terminal-container:visible');
+  await terminal.locator('.xterm-helper-textarea').focus();
+  await page.keyboard.type('echo REORDER_P2\n');
+  await page.waitForTimeout(1000);
+
+  // Reorder: dispatch drag events to swap project 0 and 1
+  const srcItem = items.nth(0);
+  const dstItem = items.nth(1);
+  const srcBox = await srcItem.boundingBox();
+  const dstBox = await dstItem.boundingBox();
+  if (!srcBox || !dstBox) throw new Error('Cannot get bounding boxes for sidebar items');
+
+  await page.evaluate(({ srcSel, dstSel }) => {
+    const src = document.querySelectorAll('.sidebar-item')[srcSel];
+    const dst = document.querySelectorAll('.sidebar-item')[dstSel];
+
+    const dt = new DataTransfer();
+    dt.setData('text/plain', '0');
+
+    src.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer: dt }));
+    dst.dispatchEvent(new DragEvent('dragover', { bubbles: true, dataTransfer: dt }));
+    dst.dispatchEvent(new DragEvent('drop', { bubbles: true, dataTransfer: dt }));
+    src.dispatchEvent(new DragEvent('dragend', { bubbles: true }));
+  }, { srcSel: 0, dstSel: 1 });
+  await page.waitForTimeout(500);
+
+  // Check active project terminal is still visible and has content
+  terminal = page.locator('.terminal-container:visible');
+  await expect(terminal).toBeVisible({ timeout: 5_000 });
+  const xtermRows = terminal.locator('.xterm-rows');
+  const text = await xtermRows.textContent();
+  expect(text?.length).toBeGreaterThan(0);
+
+  // Switch to the other project and verify its terminal too
+  await items.nth(0).click();
+  await page.waitForTimeout(500);
+  terminal = page.locator('.terminal-container:visible');
+  await expect(terminal).toBeVisible({ timeout: 5_000 });
+  const otherText = await terminal.locator('.xterm-rows').textContent();
+  expect(otherText?.length).toBeGreaterThan(0);
+});
+
 // ── Dev Tools ──
 
 test('mod+D toggles dev tools panel', async ({ shelfApp: { page } }) => {

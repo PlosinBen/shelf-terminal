@@ -33,6 +33,7 @@ let editingProjectIndex: number | null = null;
 let settings: AppSettings = { ...DEFAULT_SETTINGS };
 let updateStatus: UpdateStatus = { state: 'idle' };
 let nextTabCounter = 0;
+let layoutGeneration = 0;
 
 type Listener = () => void;
 const listeners = new Set<Listener>();
@@ -47,7 +48,7 @@ function subscribe(l: Listener) {
 }
 
 function getSnapshot() {
-  return { projects, activeProjectIndex, sidebarVisible, settingsVisible, searchVisible, commandPickerVisible, devToolsVisible, editingProjectIndex, settings, updateStatus };
+  return { projects, activeProjectIndex, sidebarVisible, settingsVisible, searchVisible, commandPickerVisible, devToolsVisible, editingProjectIndex, settings, updateStatus, layoutGeneration };
 }
 
 let snapshotRef = getSnapshot();
@@ -118,6 +119,7 @@ export function reorderProjects(fromIndex: number, toIndex: number) {
   }
 
   projects = items;
+  layoutGeneration++;
   updateSnapshot();
   window.shelfApi.project.save(projects.map((p) => p.config));
 }
