@@ -2,6 +2,9 @@ import React, { useRef, useEffect, useState } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { SearchAddon } from '@xterm/addon-search';
+import { Unicode11Addon } from '@xterm/addon-unicode11';
+import { WebglAddon } from '@xterm/addon-webgl';
+import { WebLinksAddon } from '@xterm/addon-web-links';
 import { useStore, markUnread } from '../store';
 import { getTheme } from '../themes';
 import '@xterm/xterm/css/xterm.css';
@@ -61,14 +64,26 @@ export function TerminalView({ tabId, projectId, cwd, connection, initScript, ta
       });
       const fitAddon = new FitAddon();
       const searchAddon = new SearchAddon();
+      const unicode11Addon = new Unicode11Addon();
       term.loadAddon(fitAddon);
       term.loadAddon(searchAddon);
+      term.loadAddon(unicode11Addon);
+      term.unicode.activeVersion = '11';
+      term.loadAddon(new WebLinksAddon());
       cached = { term, fitAddon, searchAddon };
       terminalCache.set(tabId, cached);
     }
 
     const { term, fitAddon } = cached;
     term.open(container);
+
+    // WebGL renderer — must be loaded after term.open() since it needs a canvas.
+    // Falls back to DOM renderer silently on failure.
+    try {
+      term.loadAddon(new WebglAddon());
+    } catch {
+      // WebGL2 not available — DOM renderer is fine
+    }
 
     // Windows/Linux: let browser handle Ctrl+V (paste) and Ctrl+C (copy when selected)
     // App keybindings are already intercepted at capture phase by useKeybindings
