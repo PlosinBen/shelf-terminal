@@ -77,6 +77,7 @@ export function useKeybindings() {
 
       if (fn) {
         e.preventDefault();
+        e.stopPropagation();
         fn();
       }
     };

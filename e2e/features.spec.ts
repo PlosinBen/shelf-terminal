@@ -328,7 +328,157 @@ test('terminal content preserved after project switch', async ({ shelfApp: { pag
   expect(text).toContain('SHELF_TEST_P1');
 });
 
+// ── Dev Tools ──
+
+test('mod+D toggles dev tools panel', async ({ shelfApp: { page } }) => {
+  const panel = page.locator('.devtools-panel');
+  const collapsed = page.locator('.devtools-tab-collapsed');
+
+  // Initially collapsed tab visible, panel hidden
+  await expect(collapsed).toBeVisible({ timeout: 3_000 });
+  await expect(panel).not.toBeVisible();
+
+  // Open via keyboard
+  await page.keyboard.press(`${modifier}+d`);
+  await expect(panel).toBeVisible({ timeout: 3_000 });
+  await expect(collapsed).not.toBeVisible();
+
+  // Close via keyboard
+  await page.keyboard.press(`${modifier}+d`);
+  await expect(panel).not.toBeVisible();
+  await expect(collapsed).toBeVisible();
+});
+
+test('dev tools panel opens via collapsed tab click', async ({ shelfApp: { page } }) => {
+  const panel = page.locator('.devtools-panel');
+  const collapsed = page.locator('.devtools-tab-collapsed');
+
+  await expect(collapsed).toBeVisible({ timeout: 3_000 });
+  await collapsed.click();
+  await expect(panel).toBeVisible({ timeout: 3_000 });
+
+  // Close via × button
+  await panel.locator('.settings-close').click();
+  await expect(panel).not.toBeVisible();
+});
+
+test('dev tools accordion expands and collapses', async ({ shelfApp: { page } }) => {
+  await page.keyboard.press(`${modifier}+d`);
+  const panel = page.locator('.devtools-panel');
+  await expect(panel).toBeVisible({ timeout: 3_000 });
+
+  // Base64 should be expanded by default
+  const base64Header = panel.locator('.devtools-section-header', { hasText: 'Base64' });
+  const base64Body = base64Header.locator('..').locator('.devtools-section-body');
+  await expect(base64Body).toBeVisible();
+
+  // Collapse Base64
+  await base64Header.click();
+  await expect(base64Body).not.toBeVisible();
+
+  // Expand JSON
+  const jsonHeader = panel.locator('.devtools-section-header', { hasText: 'JSON' });
+  await jsonHeader.click();
+  const jsonBody = jsonHeader.locator('..').locator('.devtools-section-body');
+  await expect(jsonBody).toBeVisible();
+
+  // Close panel
+  await page.keyboard.press(`${modifier}+d`);
+});
+
+// ── Command Picker ──
+
+test('mod+E toggles command picker', async ({ shelfApp: { page } }) => {
+  if (await page.locator('.tab-bar .tab').count() === 0) {
+    await setupProject(page);
+  }
+
+  const picker = page.locator('.command-picker-overlay');
+  await expect(picker).not.toBeVisible();
+
+  await page.keyboard.press(`${modifier}+e`);
+  await expect(picker).toBeVisible({ timeout: 3_000 });
+
+  await page.keyboard.press('Escape');
+  await expect(picker).not.toBeVisible();
+});
+
+// ── New Project via Keyboard ──
+
+test('mod+O opens folder picker', async ({ shelfApp: { page } }) => {
+  const overlay = page.locator('.folder-picker-overlay');
+  await expect(overlay).not.toBeVisible();
+
+  await page.keyboard.press(`${modifier}+o`);
+  await expect(overlay).toBeVisible({ timeout: 3_000 });
+
+  // Close via cancel button (Escape listener is on bubble phase, can be unreliable in e2e)
+  await page.locator('.conn-btn-cancel').click();
+  await expect(overlay).not.toBeVisible({ timeout: 3_000 });
+});
+
+// ── Split View ──
+
+test('mod+backslash toggles split view', async ({ shelfApp: { page } }) => {
+  // Ensure a connected project exists
+  if (await page.locator('.tab-bar .tab').count() === 0) {
+    await setupProject(page);
+  }
+
+  const tabs = page.locator('.tab-bar .tab');
+  const before = await tabs.count();
+
+  // Open split — adds a new tab
+  await page.keyboard.press(`${modifier}+\\`);
+  await expect(tabs).toHaveCount(before + 1, { timeout: 5_000 });
+
+  // Close split — removes the split tab
+  await page.keyboard.press(`${modifier}+\\`);
+  await expect(tabs).toHaveCount(before, { timeout: 5_000 });
+});
+
+// ── Tab Switch via Keyboard ──
+
+test('mod+Shift+brackets switches tabs', async ({ shelfApp: { page } }) => {
+  // Ensure a connected project with tabs exists
+  if (await page.locator('.tab-bar .tab').count() === 0) {
+    await setupProject(page);
+  }
+
+  const tabs = page.locator('.tab-bar .tab');
+  if (await tabs.count() < 2) {
+    await page.keyboard.press(`${modifier}+t`);
+    await expect(tabs).toHaveCount(2, { timeout: 5_000 });
+    await page.waitForTimeout(500);
+  }
+
+  // Activate first tab
+  await tabs.nth(0).click();
+  await expect(tabs.nth(0)).toHaveClass(/active/, { timeout: 3_000 });
+
+  // mod+Shift+] → next tab
+  await page.keyboard.press(`${modifier}+Shift+]`);
+  await expect(tabs.nth(1)).toHaveClass(/active/, { timeout: 3_000 });
+
+  // mod+Shift+[ → prev tab
+  await page.keyboard.press(`${modifier}+Shift+[`);
+  await expect(tabs.nth(0)).toHaveClass(/active/, { timeout: 3_000 });
+});
+
 // ── Close Project ──
+
+test('mod+W closes active project', async ({ shelfApp: { page } }) => {
+  // Ensure at least 2 projects so closing one still leaves another
+  while (await page.locator('.sidebar-item').count() < 2) {
+    await setupProject(page);
+  }
+
+  const items = page.locator('.sidebar-item');
+  const before = await items.count();
+
+  await page.keyboard.press(`${modifier}+w`);
+  await expect(items).toHaveCount(before - 1, { timeout: 5_000 });
+});
 
 test('close project via context menu removes it', async ({ shelfApp: { page } }) => {
   const items = page.locator('.sidebar-item');

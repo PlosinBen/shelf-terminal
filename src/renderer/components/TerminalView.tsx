@@ -70,20 +70,15 @@ export function TerminalView({ tabId, projectId, cwd, connection, initScript, ta
     const { term, fitAddon } = cached;
     term.open(container);
 
-    // Let browser/app keybinding handler handle modifier combos that xterm
-    // would otherwise swallow:
-    // - Mac: Cmd+key → pass through so useKeybindings receives them
-    // - Windows/Linux: Ctrl+V (paste), Ctrl+C (copy when text selected)
-    const isMac = navigator.platform.toUpperCase().includes('MAC');
-    term.attachCustomKeyEventHandler((e) => {
-      if (isMac) {
-        if (e.metaKey && !e.ctrlKey) return false;
-      } else {
+    // Windows/Linux: let browser handle Ctrl+V (paste) and Ctrl+C (copy when selected)
+    // App keybindings are already intercepted at capture phase by useKeybindings
+    if (!navigator.platform.toUpperCase().includes('MAC')) {
+      term.attachCustomKeyEventHandler((e) => {
         if (e.ctrlKey && e.key === 'v') return false;
         if (e.ctrlKey && e.key === 'c' && term.hasSelection()) return false;
-      }
-      return true;
-    });
+        return true;
+      });
+    }
 
     // Fit after open
     requestAnimationFrame(() => {
