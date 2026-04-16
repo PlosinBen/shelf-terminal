@@ -1,13 +1,14 @@
 import { test, expect } from './helpers';
 
-// Helper: create a project and open a tab
+const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
+
+// Helper: create a project and connect (opens a terminal tab)
 async function setupProject(page: any) {
   await page.locator('.sidebar-btn', { hasText: '+' }).click();
   await expect(page.locator('.folder-picker-overlay')).toBeVisible({ timeout: 5_000 });
   await page.locator('.conn-btn-next').click();
   await expect(page.locator('.fp-header')).toContainText('Open Project', { timeout: 5_000 });
-  const mod = process.platform === 'darwin' ? 'Meta' : 'Control';
-  await page.keyboard.press(`${mod}+Enter`);
+  await page.keyboard.press(`${modifier}+Enter`);
   await expect(page.locator('.folder-picker-overlay')).not.toBeVisible({ timeout: 3_000 });
 
   const prompt = page.locator('.connect-prompt');
@@ -18,7 +19,22 @@ async function setupProject(page: any) {
   await page.waitForTimeout(1000);
 }
 
-const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
+// Helper: ensure active project is connected with at least 1 tab
+async function ensureConnected(page: any) {
+  if (await page.locator('.sidebar-item').count() === 0) {
+    await setupProject(page);
+    return;
+  }
+  const tabs = page.locator('.tab-bar .tab');
+  if (await tabs.count() > 0) return;
+
+  const prompt = page.locator('.connect-prompt');
+  if (await prompt.isVisible({ timeout: 1_000 }).catch(() => false)) {
+    await prompt.click();
+  }
+  await expect(tabs).toHaveCount(1, { timeout: 5_000 });
+  await page.waitForTimeout(1000);
+}
 
 // ── Search ──
 
@@ -76,9 +92,7 @@ test('settings cancel discards changes', async ({ shelfApp: { page } }) => {
 // ── Project Edit ──
 
 test('project edit panel opens from context menu', async ({ shelfApp: { page } }) => {
-  if (await page.locator('.sidebar-item').count() === 0) {
-    await setupProject(page);
-  }
+  await ensureConnected(page);
 
   const item = page.locator('.sidebar-item').first();
   await item.click({ button: 'right' });
@@ -102,6 +116,8 @@ test('project edit panel opens from context menu', async ({ shelfApp: { page } }
 });
 
 test('project edit default tabs can add and remove', async ({ shelfApp: { page } }) => {
+  await ensureConnected(page);
+
   const item = page.locator('.sidebar-item').first();
   await item.click({ button: 'right' });
   await page.locator('.context-menu-item', { hasText: 'Edit' }).click();
@@ -114,7 +130,7 @@ test('project edit default tabs can add and remove', async ({ shelfApp: { page }
   const initialCount = await page.locator('.default-tab-row').count();
 
   // Add tab
-  await page.locator('.default-tab-add').click();
+  await page.locator('.default-tab-add', { hasText: 'Add Tab' }).click();
   await expect(page.locator('.default-tab-row')).toHaveCount(initialCount + 1);
 
   // Remove last tab
@@ -147,6 +163,8 @@ test('sidebar collapse and expand', async ({ shelfApp: { page } }) => {
 // ── Tab Management ──
 
 test('tab rename via double click', async ({ shelfApp: { page } }) => {
+  await ensureConnected(page);
+
   const tab = page.locator('.tab-bar .tab').first();
   await tab.dblclick();
 
@@ -160,12 +178,13 @@ test('tab rename via double click', async ({ shelfApp: { page } }) => {
 });
 
 test('close tab removes it', async ({ shelfApp: { page } }) => {
+  await ensureConnected(page);
+
   // Ensure at least 2 tabs
   const tabs = page.locator('.tab-bar .tab');
-  const before = await tabs.count();
-  if (before < 2) {
+  if (await tabs.count() < 2) {
     await page.keyboard.press(`${modifier}+t`);
-    await expect(tabs).toHaveCount(before + 1, { timeout: 5_000 });
+    await expect(tabs).toHaveCount(2, { timeout: 5_000 });
   }
 
   const countBefore = await tabs.count();
@@ -176,16 +195,10 @@ test('close tab removes it', async ({ shelfApp: { page } }) => {
 // ── Project Disconnect / Reconnect ──
 
 test('disconnect removes tabs, reconnect restores', async ({ shelfApp: { page } }) => {
-  // Ensure project is connected
+  await ensureConnected(page);
+
   const tabs = page.locator('.tab-bar .tab');
-  if (await tabs.count() === 0) {
-    const prompt = page.locator('.connect-prompt');
-    if (await prompt.isVisible({ timeout: 1_000 }).catch(() => false)) {
-      await prompt.click();
-      await page.waitForTimeout(1000);
-    }
-  }
-  await expect(tabs).toHaveCount(1, { timeout: 5_000 });
+  await expect(tabs.first()).toBeVisible({ timeout: 3_000 });
 
   // Disconnect via context menu
   const item = page.locator('.sidebar-item').first();
@@ -204,20 +217,19 @@ test('disconnect removes tabs, reconnect restores', async ({ shelfApp: { page } 
 // ── Project Switch ──
 
 test('switching between projects preserves terminal', async ({ shelfApp: { page } }) => {
-  const projectCount = await page.locator('.sidebar-item').count();
-  if (projectCount < 2) {
+  // Ensure at least 2 projects
+  while (await page.locator('.sidebar-item').count() < 2) {
     await setupProject(page);
   }
 
   const items = page.locator('.sidebar-item');
   await expect(items).toHaveCount(2, { timeout: 5_000 });
 
+  // Ensure both projects are connected
+  await items.nth(0).click();
+  await ensureConnected(page);
   await items.nth(1).click();
-  const prompt = page.locator('.connect-prompt');
-  if (await prompt.isVisible({ timeout: 1_000 }).catch(() => false)) {
-    await prompt.click();
-    await page.waitForTimeout(1000);
-  }
+  await ensureConnected(page);
 
   let visibleTerminal = page.locator('.terminal-container:visible');
   await expect(visibleTerminal).toBeVisible({ timeout: 5_000 });
@@ -236,11 +248,12 @@ test('switching between projects preserves terminal', async ({ shelfApp: { page 
 });
 
 test('switching tabs within a project shows correct terminal', async ({ shelfApp: { page } }) => {
+  await ensureConnected(page);
+
   const tabs = page.locator('.tab-bar .tab');
-  const tabCount = await tabs.count();
-  if (tabCount < 2) {
+  if (await tabs.count() < 2) {
     await page.keyboard.press(`${modifier}+t`);
-    await expect(tabs).toHaveCount(tabCount + 1, { timeout: 5_000 });
+    await expect(tabs).toHaveCount(2, { timeout: 5_000 });
     await page.waitForTimeout(1000);
   }
 
@@ -290,12 +303,8 @@ test('terminal content preserved after project switch', async ({ shelfApp: { pag
 
   // Select project 1, connect, run a command
   await items.nth(0).click();
-  let prompt = page.locator('.connect-prompt');
-  if (await prompt.isVisible({ timeout: 1_000 }).catch(() => false)) {
-    await prompt.click();
-  }
-  await expect(page.locator('.tab-bar .tab')).toHaveCount(1, { timeout: 5_000 });
-  await page.waitForTimeout(1000);
+  await ensureConnected(page);
+  await page.waitForTimeout(500);
 
   // Type a command to produce identifiable output
   let terminal = page.locator('.terminal-container:visible');
@@ -310,11 +319,8 @@ test('terminal content preserved after project switch', async ({ shelfApp: { pag
 
   // Select project 2, connect
   await items.nth(1).click();
-  prompt = page.locator('.connect-prompt');
-  if (await prompt.isVisible({ timeout: 1_000 }).catch(() => false)) {
-    await prompt.click();
-  }
-  await page.waitForTimeout(1000);
+  await ensureConnected(page);
+  await page.waitForTimeout(500);
 
   // Switch back to project 1
   await items.nth(0).click();
@@ -389,9 +395,7 @@ test('dev tools accordion expands and collapses', async ({ shelfApp: { page } })
 // ── Command Picker ──
 
 test('mod+E toggles command picker', async ({ shelfApp: { page } }) => {
-  if (await page.locator('.tab-bar .tab').count() === 0) {
-    await setupProject(page);
-  }
+  await ensureConnected(page);
 
   const picker = page.locator('.command-picker-overlay');
   await expect(picker).not.toBeVisible();
@@ -412,7 +416,7 @@ test('mod+O opens folder picker', async ({ shelfApp: { page } }) => {
   await page.keyboard.press(`${modifier}+o`);
   await expect(overlay).toBeVisible({ timeout: 3_000 });
 
-  // Close via cancel button (Escape listener is on bubble phase, can be unreliable in e2e)
+  // Close via cancel button
   await page.locator('.conn-btn-cancel').click();
   await expect(overlay).not.toBeVisible({ timeout: 3_000 });
 });
@@ -420,10 +424,7 @@ test('mod+O opens folder picker', async ({ shelfApp: { page } }) => {
 // ── Split View ──
 
 test('mod+backslash toggles split view', async ({ shelfApp: { page } }) => {
-  // Ensure a connected project exists
-  if (await page.locator('.tab-bar .tab').count() === 0) {
-    await setupProject(page);
-  }
+  await ensureConnected(page);
 
   const tabs = page.locator('.tab-bar .tab');
   const before = await tabs.count();
@@ -440,10 +441,7 @@ test('mod+backslash toggles split view', async ({ shelfApp: { page } }) => {
 // ── Tab Switch via Keyboard ──
 
 test('mod+Shift+brackets switches tabs', async ({ shelfApp: { page } }) => {
-  // Ensure a connected project with tabs exists
-  if (await page.locator('.tab-bar .tab').count() === 0) {
-    await setupProject(page);
-  }
+  await ensureConnected(page);
 
   const tabs = page.locator('.tab-bar .tab');
   if (await tabs.count() < 2) {
@@ -481,6 +479,11 @@ test('mod+W closes active project', async ({ shelfApp: { page } }) => {
 });
 
 test('close project via context menu removes it', async ({ shelfApp: { page } }) => {
+  // Ensure at least 1 project
+  if (await page.locator('.sidebar-item').count() === 0) {
+    await setupProject(page);
+  }
+
   const items = page.locator('.sidebar-item');
   const before = await items.count();
 
