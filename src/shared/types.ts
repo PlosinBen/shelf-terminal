@@ -83,7 +83,8 @@ export type KeybindingAction =
   | 'openSettings'
   | 'search'
   | 'toggleSplit'
-  | 'openCommandPicker';
+  | 'openCommandPicker'
+  | 'toggleDevTools';
 
 export type KeybindingConfig = Record<KeybindingAction, string>;
 

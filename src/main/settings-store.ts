@@ -29,7 +29,12 @@ export function loadSettings(): LoadResult<AppSettings> {
   }
   try {
     const saved = JSON.parse(raw) as Partial<AppSettings>;
-    return { ok: true, value: { ...DEFAULT_SETTINGS, ...saved } };
+    const merged = { ...DEFAULT_SETTINGS, ...saved };
+    // Deep-merge keybindings so new defaults are preserved when user config is older
+    if (saved.keybindings) {
+      merged.keybindings = { ...DEFAULT_SETTINGS.keybindings, ...saved.keybindings };
+    }
+    return { ok: true, value: merged };
   } catch (err: any) {
     log.error('settings-store', `failed to parse ${filePath}: ${err?.message ?? err}`);
     return { ok: false, error: 'parse', path: filePath, message: err?.message ?? String(err) };

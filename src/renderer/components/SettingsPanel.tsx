@@ -17,6 +17,7 @@ const ACTION_LABELS: Record<KeybindingAction, string> = {
   search: 'Search',
   toggleSplit: 'Toggle Split',
   openCommandPicker: 'Quick Commands',
+  toggleDevTools: 'Dev Tools',
 };
 
 export function SettingsPanel() {

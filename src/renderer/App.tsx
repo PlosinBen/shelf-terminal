@@ -7,6 +7,7 @@ import { SettingsPanel } from './components/SettingsPanel';
 import { SearchBar } from './components/SearchBar';
 import { ProjectEditPanel } from './components/ProjectEditPanel';
 import { CommandPicker } from './components/CommandPicker';
+import { DevToolsPanel } from './components/DevToolsPanel';
 import { useKeybindings } from './hooks/useKeybindings';
 import { useStore, setProjects, setSettings, setUpdateStatus, addProject, addTab, setActiveTab, removeTab, removeProject, setSplitTab, toggleSidebar, clearUnread } from './store';
 import type { ProjectConfig } from '@shared/types';
@@ -16,7 +17,7 @@ import { getTheme } from './themes';
 import './styles/global.css';
 
 export function App() {
-  const { projects, activeProjectIndex, sidebarVisible, settingsVisible, commandPickerVisible, editingProjectIndex, settings } = useStore();
+  const { projects, activeProjectIndex, sidebarVisible, settingsVisible, commandPickerVisible, devToolsVisible, editingProjectIndex, settings } = useStore();
   useKeybindings();
 
   useEffect(() => {
@@ -171,10 +172,10 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    if (!settingsVisible && !commandPickerVisible && editingProjectIndex === null) {
+    if (!settingsVisible && !commandPickerVisible && !devToolsVisible && editingProjectIndex === null) {
       focusTerminal();
     }
-  }, [settingsVisible, commandPickerVisible, editingProjectIndex]);
+  }, [settingsVisible, commandPickerVisible, devToolsVisible, editingProjectIndex]);
 
   const theme = getTheme(settings.themeName);
 
@@ -195,6 +196,7 @@ export function App() {
     <div className="app">
       {sidebarVisible && <Sidebar />}
       <main className="main-area">
+        <div className="terminal-section">
         <TabBar />
         <div className="terminal-view">
           <SearchBar />
@@ -240,6 +242,8 @@ export function App() {
               })}
           </div>
         </div>
+        </div>
+        <DevToolsPanel />
       </main>
       <FolderPicker />
       <SettingsPanel />
