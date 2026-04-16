@@ -50,11 +50,11 @@
 
 ---
 
-## 6. Paste / Drop 使用 Capture Phase 攔截
+## 6. Paste 使用 Capture Phase 攔截，Drop 使用 Bubble Phase
 
-**現象**: 檔案 paste / drag-drop 沒反應。
+**現象**: 檔案 paste 沒反應。
 
-**原因**: xterm 的 `xterm-helper-textarea` 攔截 paste event 後不會冒泡到 container。必須用 capture phase（`addEventListener` 第三參數 `true`）在 xterm 之前攔截。
+**原因**: xterm 的 `xterm-helper-textarea` 攔截 paste event 後不會冒泡到 container。必須用 capture phase（`addEventListener` 第三參數 `true`）在 xterm 之前攔截。Drop 不需要 capture phase 因為 xterm 不攔截 drop 事件。
 
 **判斷邏輯**:
 - Paste：clipboard 含有 `kind === 'file'` 的 item 就走上傳；若同時帶 `text/html`（從瀏覽器複製富文本，image 只是 favicon）則放行讓 xterm 當文字貼上。
@@ -186,23 +186,23 @@
 
 ---
 
-## 18. Keybinding 需要 Capture Phase
+## 18. App 快捷鍵 Capture Phase + stopPropagation
 
-**現象**: Windows/Linux 上 Ctrl+Up/Down 切換 project 沒反應。
+**現象**: 快捷鍵（如 ⌘D、Ctrl+D）在 terminal 有 focus 時沒反應，或同時觸發 terminal 行為。
 
-**原因**: xterm.js 在 bubble phase 攔截 keydown 事件（terminal scroll 功能），`window.addEventListener('keydown', handler)` 收不到。
+**原因**: xterm.js 在自己的 keydown handler 裡處理鍵盤事件，比 bubble phase 更早。
 
-**解法**: 改用 capture phase（第三參數 `true`），讓 keybinding handler 在 xterm 之前觸發。與 Gotcha #6（image paste capture phase）是同一類問題。
+**解法**: `useKeybindings` 在 window capture phase 攔截，匹配到 app 快捷鍵後 `stopPropagation`，xterm 完全收不到。新增快捷鍵只需在 types + defaults + useKeybindings 註冊。見 Decision #18。
 
 ---
 
-## 19. Ctrl+V/C 需要 Custom Key Event Handler
+## 19. Windows Ctrl+V/C 需要 Custom Key Event Handler
 
 **現象**: Windows/Linux 上 Ctrl+V 貼上、Ctrl+C 複製無效。
 
-**原因**: xterm.js 預設把 Ctrl+V 當作 `\x16`、Ctrl+C 當作 `\x03` 送進 pty，不觸發瀏覽器的 paste/copy 行為。macOS 用 Cmd+V/C 不受影響。
+**原因**: xterm.js 預設把 Ctrl+V 當作 `\x16`、Ctrl+C 當作 `\x03` 送進 pty。這兩個不是 app 快捷鍵（不在 useKeybindings 裡），所以 capture phase 不會攔截它們。macOS 用 Cmd+V/C 不受影響。
 
-**解法**: 用 `term.attachCustomKeyEventHandler()` 對非 Mac 平台攔截這些組合鍵，return `false` 讓瀏覽器處理。
+**解法**: 在 TerminalView 用 `term.attachCustomKeyEventHandler()` 對非 Mac 平台攔截 Ctrl+V 和 Ctrl+C（有選取時），return `false` 讓瀏覽器處理。
 
 ---
 
