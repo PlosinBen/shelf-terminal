@@ -73,8 +73,8 @@ export function TerminalView({ tabId, projectId, cwd, connection, initScript, ta
     // Let browser handle Ctrl+V (paste) and Ctrl+C (copy when selected) on non-Mac
     if (!navigator.platform.toUpperCase().includes('MAC')) {
       term.attachCustomKeyEventHandler((e) => {
-        if (e.ctrlKey && e.key === 'v' && e.type === 'keydown') return false;
-        if (e.ctrlKey && e.key === 'c' && e.type === 'keydown' && term.hasSelection()) return false;
+        if (e.ctrlKey && e.key === 'v') return false;
+        if (e.ctrlKey && e.key === 'c' && term.hasSelection()) return false;
         return true;
       });
     }
