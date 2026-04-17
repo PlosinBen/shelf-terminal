@@ -22,4 +22,5 @@ export const Events = {
   OPEN_FOLDER_PICKER: 'open-folder-picker',
   ADD_PROJECT: 'add-project',       // (ProjectConfig)
   TOGGLE_SPLIT: 'toggle-split',     // (projectIndex)
+  CREATE_WORKTREE: 'create-worktree', // (projectIndex)
 } as const;

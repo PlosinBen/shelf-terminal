@@ -29,6 +29,8 @@ export interface ProjectConfig {
   initScript?: string;
   defaultTabs?: TabTemplate[];
   quickCommands?: QuickCommand[];
+  parentProjectId?: string;
+  worktreeBranch?: string;
 }
 
 // ── IPC payloads: Renderer → Main ──
@@ -121,6 +123,24 @@ export type FileUploadResult =
 export type FileClearResult =
   | { ok: true; removed: number }
   | { ok: false; reason: string };
+
+// ── Git / Worktree ──
+
+export interface GitBranchInfo {
+  name: string;
+  current: boolean;
+}
+
+export interface WorktreeAddResult {
+  ok: boolean;
+  path?: string;
+  error?: string;
+}
+
+export interface WorktreeRemoveResult {
+  ok: boolean;
+  error?: string;
+}
 
 // ── Auto-updater ──
 

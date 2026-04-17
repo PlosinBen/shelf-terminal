@@ -48,6 +48,11 @@ interface ShelfApi {
     removeHostKey: (host: string, port: number) => Promise<void>;
     servers: () => Promise<Array<{ host: string; port: number; user: string }>>;
   };
+  git: {
+    branchList: (connection: import('../shared/types').Connection, cwd: string) => Promise<import('../shared/types').GitBranchInfo[]>;
+    worktreeAdd: (connection: import('../shared/types').Connection, cwd: string, branch: string, newBranch: boolean) => Promise<import('../shared/types').WorktreeAddResult>;
+    worktreeRemove: (connection: import('../shared/types').Connection, cwd: string, worktreePath: string) => Promise<import('../shared/types').WorktreeRemoveResult>;
+  };
   settings: {
     load: () => Promise<import('../shared/types').AppSettings>;
     save: (settings: import('../shared/types').AppSettings) => Promise<void>;

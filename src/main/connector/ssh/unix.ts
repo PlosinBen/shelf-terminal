@@ -3,7 +3,7 @@ import { execFile } from 'child_process';
 import os from 'os';
 import type { FolderListResult } from '@shared/types';
 import { log } from '@shared/logger';
-import type { Connector, Shell } from '../types';
+import type { Connector, Shell, ExecResult } from '../types';
 import { wrapPty } from '../wrap-pty';
 import { getShellEnv, shellEscape } from '../shell-env';
 import { getControlPath, checkConnection, getKnownHostsPath } from '../../ssh-control';
@@ -140,6 +140,19 @@ export class SSHUnixConnector implements Connector {
             reject(new Error('SSH authentication failed'));
           }
         }
+      });
+    });
+  }
+
+  exec(cwd: string, cmd: string): Promise<ExecResult> {
+    const remoteCmd = `cd ${shellEscape(cwd)} && ${cmd}`;
+    return new Promise((resolve, reject) => {
+      execFile('ssh', this.sshExecArgs([remoteCmd]), { timeout: 15000 }, (error, stdout, stderr) => {
+        if (error) {
+          reject(new Error(stderr || error.message));
+          return;
+        }
+        resolve({ stdout, stderr });
       });
     });
   }

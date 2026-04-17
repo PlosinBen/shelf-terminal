@@ -13,6 +13,11 @@ export interface Shell {
   kill(): void;
 }
 
+export interface ExecResult {
+  stdout: string;
+  stderr: string;
+}
+
 export interface Connector {
   // ── Shell ──
   createShell(cwd: string): Shell;
@@ -20,6 +25,9 @@ export interface Connector {
   // ── Connection lifecycle ──
   isConnected(): Promise<boolean>;
   connect(password?: string): Promise<void>;
+
+  // ── Command execution ──
+  exec(cwd: string, cmd: string): Promise<ExecResult>;
 
   // ── File system ──
   listDir(dirPath: string): Promise<FolderListResult>;

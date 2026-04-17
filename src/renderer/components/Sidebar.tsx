@@ -8,6 +8,7 @@ import {
   reorderProjects,
 } from '../store';
 import { emit, Events } from '../events';
+import { CONFIRM_REMOVE_EVENT } from './RemoveConfirmDialog';
 
 const version = __APP_VERSION__;
 
@@ -94,7 +95,12 @@ export function Sidebar() {
               onDragEnd={handleDragEnd}
             >
               <span className={`status-dot ${hasAlive ? 'alive' : 'dead'}`} />
-              <span className="project-name">{proj.config.name}</span>
+              <span className="project-name-group">
+                <span className="project-name">{proj.config.name}</span>
+                {proj.config.worktreeBranch && (
+                  <span className="project-branch">{proj.config.worktreeBranch}</span>
+                )}
+              </span>
             </div>
           );
         })}
@@ -159,6 +165,15 @@ export function Sidebar() {
                 Connect
               </button>
             )}
+            {!proj?.config.parentProjectId && (
+              <button
+                className="context-menu-item"
+                disabled={isInvalid}
+                onClick={() => { emit(Events.CREATE_WORKTREE, contextMenu.index); setContextMenu(null); }}
+              >
+                New Worktree
+              </button>
+            )}
             <button
               className="context-menu-item"
               onClick={() => { setEditingProject(contextMenu.index); setContextMenu(null); }}
@@ -168,7 +183,7 @@ export function Sidebar() {
             <div className="context-menu-separator" />
             <button
               className="context-menu-item context-menu-item-danger"
-              onClick={() => { emit(Events.REMOVE_PROJECT, contextMenu.index); setContextMenu(null); }}
+              onClick={() => { emit(CONFIRM_REMOVE_EVENT, contextMenu.index); setContextMenu(null); }}
             >
               Remove
             </button>

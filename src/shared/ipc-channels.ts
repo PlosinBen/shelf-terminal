@@ -37,6 +37,11 @@ export const IPC = {
   DOCKER_LIST_CONTAINERS: 'docker:list-containers',
   DOCKER_TEST_PATH: 'docker:test-path',
 
+  // Git
+  GIT_BRANCH_LIST: 'git:branch-list',
+  GIT_WORKTREE_ADD: 'git:worktree-add',
+  GIT_WORKTREE_REMOVE: 'git:worktree-remove',
+
   // Logs
   LOGS_CLEAR: 'logs:clear',
 

@@ -7,6 +7,8 @@ import { SettingsPanel } from './components/SettingsPanel';
 import { SearchBar } from './components/SearchBar';
 import { ProjectEditPanel } from './components/ProjectEditPanel';
 import { CommandPicker } from './components/CommandPicker';
+import { WorktreeDialog } from './components/WorktreeDialog';
+import { RemoveConfirmDialog } from './components/RemoveConfirmDialog';
 import { DevToolsPanel } from './components/DevToolsPanel';
 import { useKeybindings } from './hooks/useKeybindings';
 import { useStore, setProjects, setSettings, setUpdateStatus, addProject, addTab, setActiveTab, removeTab, removeProject, setSplitTab, toggleSidebar, clearUnread, setInvalidProjects } from './store';
@@ -257,6 +259,8 @@ export function App() {
       <SettingsPanel />
       <ProjectEditPanel />
       <CommandPicker />
+      <WorktreeDialog />
+      <RemoveConfirmDialog />
     </div>
   );
 }

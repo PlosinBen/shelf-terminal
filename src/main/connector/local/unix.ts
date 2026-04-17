@@ -1,10 +1,11 @@
 import * as pty from 'node-pty';
+import { execFile } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import type { FolderListResult } from '@shared/types';
 import { log } from '@shared/logger';
-import type { Connector, Shell } from '../types';
+import type { Connector, Shell, ExecResult } from '../types';
 import { wrapPty } from '../wrap-pty';
 import { getShellEnv, resolveShell } from '../shell-env';
 import {
@@ -33,6 +34,18 @@ export class LocalUnixConnector implements Connector {
 
   connect(): Promise<void> {
     return Promise.resolve();
+  }
+
+  exec(cwd: string, cmd: string): Promise<ExecResult> {
+    return new Promise((resolve, reject) => {
+      execFile('sh', ['-c', cmd], { cwd, timeout: 15000 }, (error, stdout, stderr) => {
+        if (error) {
+          reject(new Error(stderr || error.message));
+          return;
+        }
+        resolve({ stdout, stderr });
+      });
+    });
   }
 
   listDir(dirPath: string): Promise<FolderListResult> {
