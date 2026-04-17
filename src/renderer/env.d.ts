@@ -54,6 +54,9 @@ interface ShelfApi {
   logs: {
     clear: () => Promise<void>;
   };
+  app: {
+    logsPath: () => Promise<string>;
+  };
   updater: {
     check: () => Promise<void>;
     download: () => Promise<void>;

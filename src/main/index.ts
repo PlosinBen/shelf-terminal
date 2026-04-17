@@ -14,12 +14,10 @@ import { removeHostKey } from './ssh-control';
 import { createConnector, getAvailableTypes, listDockerContainers, listWSLDistros, cleanupConnectors, setDockerPath, testDockerPath } from './connector';
 import { loadSSHServers, saveSSHServer } from './ssh-server-store';
 import { log, setLogLevel, setFileWriter } from '@shared/logger';
+import { applyUserDataIsolation } from './user-data-path';
 import type { Connection, ProjectConfig, AppSettings, FileUploadResult, FileClearResult, PtySpawnPayload, PtyInputPayload, PtyResizePayload, PtyKillPayload } from '@shared/types';
 
-// Isolate userData per environment to avoid config conflicts
-if (process.env.NODE_ENV) {
-  app.setPath('userData', app.getPath('userData') + '-' + process.env.NODE_ENV);
-}
+applyUserDataIsolation();
 
 let mainWindow: BrowserWindow | null = null;
 let cachedProjects: ProjectConfig[] = [];
@@ -206,6 +204,10 @@ ipcMain.handle(IPC.SETTINGS_SAVE, (_event, settings: AppSettings) => {
 });
 
 // ── Logs ──
+
+ipcMain.handle(IPC.APP_LOGS_PATH, () => {
+  return path.join(app.getPath('userData'), 'logs');
+});
 
 ipcMain.handle(IPC.LOGS_CLEAR, () => {
   const logBaseDir = path.join(app.getPath('userData'), 'logs');

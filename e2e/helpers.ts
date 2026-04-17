@@ -3,24 +3,12 @@ import path from 'path';
 import fs from 'fs';
 import os from 'os';
 
-function getUserDataDir() {
-  const suffix = process.env.NODE_ENV ? `-${process.env.NODE_ENV}` : '';
-  return process.platform === 'darwin'
-    ? path.join(os.homedir(), 'Library', 'Application Support', `shelf-terminal${suffix}`)
-    : path.join(os.homedir(), '.config', `shelf-terminal${suffix}`);
+function createTempUserDataDir() {
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'shelf-e2e-'));
 }
 
-function clearProjectsData() {
-  const userDataDir = getUserDataDir();
-
-  if (!fs.existsSync(userDataDir)) {
-    fs.mkdirSync(userDataDir, { recursive: true });
-  }
+function seedProjectsData(userDataDir: string) {
   fs.writeFileSync(path.join(userDataDir, 'projects.json'), '[]', 'utf-8');
-
-  // Remove saved settings so tests start with defaults
-  const settingsPath = path.join(userDataDir, 'settings.json');
-  if (fs.existsSync(settingsPath)) fs.unlinkSync(settingsPath);
 }
 
 /** Ensure home directory has enough subdirectories for folder picker tests */
@@ -45,11 +33,12 @@ function cleanupTestDirectories() {
  */
 export const test = base.extend<{}, { shelfApp: { app: ElectronApplication; page: Page } }>({
   shelfApp: [async ({}, use) => {
-    clearProjectsData();
+    const userDataDir = createTempUserDataDir();
+    seedProjectsData(userDataDir);
     ensureTestDirectories();
 
     const app = await electron.launch({
-      args: [path.join(__dirname, '..')],
+      args: [path.join(__dirname, '..'), `--user-data-dir=${userDataDir}`],
       env: { ...process.env },
     });
 
@@ -67,6 +56,7 @@ export const test = base.extend<{}, { shelfApp: { app: ElectronApplication; page
     // Always runs — even after test failures
     await app.close().catch(() => {});
     cleanupTestDirectories();
+    fs.rmSync(userDataDir, { recursive: true, force: true });
   }, { scope: 'worker' }],
 });
 

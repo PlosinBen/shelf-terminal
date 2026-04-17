@@ -39,6 +39,9 @@ export const IPC = {
   // Logs
   LOGS_CLEAR: 'logs:clear',
 
+  // App info
+  APP_LOGS_PATH: 'app:logs-path',
+
   // Updater
   UPDATE_CHECK: 'update:check',
   UPDATE_DOWNLOAD: 'update:download',

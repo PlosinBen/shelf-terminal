@@ -60,13 +60,29 @@
 
 ---
 
-## 7. NODE_ENV 隔離 userData
+## 7. userData 隔離純靠 Electron 內建訊號（`isPackaged` + `--user-data-dir`）
 
-**決策**: `app.setPath('userData', path + '-' + NODE_ENV)`，dev/test/production 各自獨立資料目錄。
+**決策**:
+- 隔離邏輯集中在 `src/main/user-data-path.ts` 的 `applyUserDataIsolation()`，`index.ts` top-level 呼叫一次。函式自帶 idempotent guard。
+- 完全不依賴任何 env var 或 build-time inline，只看兩個 Electron 自帶訊號：
+  - `app.isPackaged === true` → 真正打包的 end-user 安裝版 → 保留 OS-default userData 路徑（prod）。
+  - `app.commandLine.hasSwitch('user-data-dir')` → 呼叫端（E2E tempdir）自己負責路徑 → 不動它。
+  - 其他情況（`npm run dev`、`npx electron .`、`npm run pack` 輸出、手動跑 unpackaged build）→ 一律在 OS-default 路徑後面加 `-dev` 後綴。
+- E2E 測試在 `e2e/helpers.ts` 每個 worker 自己 `mkdtempSync` 一個 tempdir，啟動 Electron 時帶 `--user-data-dir=<tempdir>`，結束後 `rm -rf`。
+- NODE_ENV 保留它原本的角色（vite mode、E2E 視窗 gate、`test:*` script 的行為），但 **不參與** userData 決策。
 
-**原因**: 避免 E2E 測試清掉 production 的 projects.json，或 dev 的設定污染 production。
+**原因**:
+- 舊版靠「有沒有帶 `NODE_ENV`」當 gate：本地 `npx electron .` / `npm run pack` 剛好沒帶，就直接寫進正式 userData。v0.5.0 `projects.json` 遺失事件就是這個風險的具體化。
+- 曾經考慮過 `SHELF_RELEASE` / `SHELF_USERDATA_SUFFIX` 這類專屬 env var + vite `define` inline，但有兩個問題：(1) 每個開發者跑不同 script 都要手動帶對變數才不會誤寫 prod；(2) packaged `.app` 雙擊啟動沒有 runtime env，必須靠 build-time inline，多一層維護負擔。
+- `app.isPackaged` 是 Electron 原生訊號，packaged runtime 可以直接讀，不需要 inline 任何東西。Safe-by-default：任何 unpackaged 啟動（dev、ad-hoc `npx electron .`、本地 `pack` 輸出）都自動掛 `-dev`。
+- `--user-data-dir` 是 Chromium/Electron 官方開關，傳下去 Electron 自己會優先採用；我們只是判斷有沒有帶，帶了就不多事。E2E 用 tempdir 走這條路既不汙染 dev 資料、每次測試也都是 fresh state。
+- 集中到一個 module + idempotent guard：未來如果有人在別的 main-process 檔 top-level 再加一次 setPath，guard 會把它擋掉。
 
-**不要改**: 共用路徑會導致跑測試時意外刪除生產資料。
+**不要改**:
+- 把 userData gate 換回 `NODE_ENV`（或任何 vite 會自動覆寫成 `production` 的變數）→ 本地 pack 跟 CI release 再次無法區分，回到 v0.5.0 的 bug。
+- 把 fallback 拿掉變成「isPackaged 以外都寫 OS-default」→ safe-by-default 失效。
+- 把 `applyUserDataIsolation()` 從 top-level 搬進 `whenReady` → 晚於 Electron 內部初始化（Cookies、Cache），部分資料會寫錯路徑。
+- E2E 改回 `NODE_ENV=test` 推算路徑：之前的作法會刪到跟 dev 共用的 userData，且 worker 之間無法併行。必須走 tempdir。
 
 ---
 

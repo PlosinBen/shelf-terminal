@@ -871,6 +871,15 @@ button {
   color: #f38ba8;
 }
 
+.settings-config-path {
+  margin-left: 152px;
+  margin-top: -10px;
+  font-size: 11px;
+  color: var(--text-muted, #888);
+  user-select: text;
+  word-break: break-all;
+}
+
 .settings-section-title {
   font-size: 12px;
   font-weight: 600;

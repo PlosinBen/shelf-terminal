@@ -27,6 +27,7 @@ export function SettingsPanel() {
   const [dockerTestResult, setDockerTestResult] = useState<{ ok: boolean; version?: string; error?: string } | null>(null);
   const [dockerTesting, setDockerTesting] = useState(false);
   const [pathError, setPathError] = useState<string | null>(null);
+  const [logsPath, setLogsPath] = useState<string>('');
 
   // Reset draft when panel opens
   useEffect(() => {
@@ -35,6 +36,7 @@ export function SettingsPanel() {
       setRecordingAction(null);
       setDockerTestResult(null);
       setPathError(null);
+      window.shelfApi.app.logsPath().then(setLogsPath);
     }
   }, [settingsVisible, settings]);
 
@@ -203,6 +205,7 @@ export function SettingsPanel() {
               Clear Logs
             </button>
           </div>
+          <div className="settings-config-path">{logsPath}</div>
 
           <div className="settings-divider" />
           <div className="settings-section-title">Docker</div>

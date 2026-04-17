@@ -84,6 +84,9 @@ contextBridge.exposeInMainWorld('shelfApi', {
   logs: {
     clear: () => ipcRenderer.invoke(IPC.LOGS_CLEAR),
   },
+  app: {
+    logsPath: (): Promise<string> => ipcRenderer.invoke(IPC.APP_LOGS_PATH),
+  },
   updater: {
     check: () => ipcRenderer.invoke(IPC.UPDATE_CHECK),
     download: () => ipcRenderer.invoke(IPC.UPDATE_DOWNLOAD),
