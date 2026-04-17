@@ -218,9 +218,8 @@ button {
   background: var(--surface);
 }
 
-.context-menu-item-danger:hover {
-  background: #f38ba8;
-  color: #1e1e2e;
+.context-menu-item-danger {
+  color: #f38ba8;
 }
 
 .context-menu-section {
@@ -496,6 +495,27 @@ button {
 .search-btn:hover {
   background: var(--surface);
   color: var(--text);
+}
+
+/* ── Invalid Folder Overlay ── */
+
+.invalid-folder-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: rgba(0, 0, 0, 0.6);
+  color: var(--text-muted);
+  font-size: 16px;
+}
+
+.invalid-folder-path {
+  font-size: 12px;
+  opacity: 0.6;
 }
 
 /* ── Connect Prompt ── */

@@ -18,6 +18,7 @@ export interface ProjectRuntime {
   tabs: Tab[];
   activeTabIndex: number;
   splitTabId: string | null; // tab ID shown in right pane, null = no split
+  folderInvalid: boolean;
 }
 
 // ── Global store (simple event emitter pattern) ──
@@ -69,6 +70,16 @@ export function setProjects(configs: ProjectConfig[]) {
     tabs: [],
     activeTabIndex: 0,
     splitTabId: null,
+    folderInvalid: false,
+  }));
+  updateSnapshot();
+}
+
+export function setInvalidProjects(invalidIds: string[]) {
+  const idSet = new Set(invalidIds);
+  projects = projects.map((p) => ({
+    ...p,
+    folderInvalid: idSet.has(p.config.id),
   }));
   updateSnapshot();
 }
@@ -79,6 +90,7 @@ export function addProject(config: ProjectConfig) {
     tabs: [],
     activeTabIndex: 0,
     splitTabId: null,
+    folderInvalid: false,
   };
   projects = [...projects, runtime];
   activeProjectIndex = projects.length - 1;

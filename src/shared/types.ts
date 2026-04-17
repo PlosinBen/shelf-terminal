@@ -74,7 +74,7 @@ export interface PtyExitPayload {
 export type KeybindingAction =
   | 'toggleSidebar'
   | 'newProject'
-  | 'closeProject'
+  | 'removeProject'
   | 'newTab'
   | 'prevProject'
   | 'nextProject'

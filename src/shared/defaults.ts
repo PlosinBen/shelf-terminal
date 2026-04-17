@@ -3,7 +3,7 @@ import type { AppSettings, KeybindingConfig } from './types';
 export const DEFAULT_KEYBINDINGS: KeybindingConfig = {
   toggleSidebar: 'mod+b',
   newProject: 'mod+o',
-  closeProject: 'mod+w',
+  removeProject: 'mod+w',
   newTab: 'mod+t',
   prevProject: 'mod+ArrowUp',
   nextProject: 'mod+ArrowDown',

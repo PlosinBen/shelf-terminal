@@ -165,9 +165,9 @@ export function Sidebar() {
             </button>
             <button
               className="context-menu-item context-menu-item-danger"
-              onClick={() => { emit(Events.CLOSE_PROJECT, contextMenu.index); setContextMenu(null); }}
+              onClick={() => { emit(Events.REMOVE_PROJECT, contextMenu.index); setContextMenu(null); }}
             >
-              Close
+              Remove
             </button>
           </div>
         );

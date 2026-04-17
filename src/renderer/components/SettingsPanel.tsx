@@ -7,7 +7,7 @@ import type { AppSettings, KeybindingAction, KeybindingConfig, LogLevel } from '
 const ACTION_LABELS: Record<KeybindingAction, string> = {
   toggleSidebar: 'Toggle Sidebar',
   newProject: 'New Project',
-  closeProject: 'Close Project',
+  removeProject: 'Remove Project',
   newTab: 'New Tab',
   prevProject: 'Previous Project',
   nextProject: 'Next Project',

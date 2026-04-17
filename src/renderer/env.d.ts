@@ -31,6 +31,7 @@ interface ShelfApi {
   project: {
     load: () => Promise<import('../shared/types').ProjectConfig[]>;
     save: (projects: import('../shared/types').ProjectConfig[]) => Promise<void>;
+    validateDirs: (projects: import('../shared/types').ProjectConfig[]) => Promise<string[]>;
   };
   dialog: {
     warn: (title: string, message: string) => Promise<void>;

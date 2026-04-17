@@ -15,7 +15,7 @@ export function emit(event: string, ...args: any[]) {
 // Event names
 export const Events = {
   CLOSE_TAB: 'close-tab',           // (projectIndex, tabIndex)
-  CLOSE_PROJECT: 'close-project',   // (projectIndex)
+  REMOVE_PROJECT: 'remove-project',  // (projectIndex)
   NEW_TAB: 'new-tab',               // (projectIndex)
   CONNECT_PROJECT: 'connect-project',       // (projectIndex)
   DISCONNECT_PROJECT: 'disconnect-project', // (projectIndex)
