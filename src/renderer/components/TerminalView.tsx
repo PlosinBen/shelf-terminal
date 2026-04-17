@@ -33,6 +33,19 @@ export function getSearchAddon(tabId: string): SearchAddon | null {
   return terminalCache.get(tabId)?.searchAddon ?? null;
 }
 
+function loadWebgl(term: Terminal) {
+  try {
+    const webgl = new WebglAddon();
+    webgl.onContextLoss(() => {
+      webgl.dispose();
+      setTimeout(() => loadWebgl(term), 100);
+    });
+    term.loadAddon(webgl);
+  } catch {
+    // WebGL2 not available — DOM renderer is fine
+  }
+}
+
 export function TerminalView({ tabId, projectId, cwd, connection, initScript, tabCmd, visible }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const initializedRef = useRef(false);
@@ -77,15 +90,7 @@ export function TerminalView({ tabId, projectId, cwd, connection, initScript, ta
     const { term, fitAddon } = cached;
     term.open(container);
 
-    try {
-      const webgl = new WebglAddon();
-      webgl.onContextLoss(() => {
-        webgl.dispose();
-      });
-      term.loadAddon(webgl);
-    } catch {
-      // WebGL2 not available — DOM renderer is fine
-    }
+    loadWebgl(term);
 
     // Windows/Linux: let browser handle Ctrl+V (paste) and Ctrl+C (copy when selected)
     // App keybindings are already intercepted at capture phase by useKeybindings
