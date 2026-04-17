@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useStore, setEditingProject, updateProjectConfig } from '../store';
 import type { TabTemplate, QuickCommand } from '@shared/types';
 import { TAB_COLORS } from './TabBar';
@@ -13,6 +13,7 @@ export function ProjectEditPanel() {
   const [quickCommands, setQuickCommands] = useState<QuickCommand[]>([]);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+  const dragFromHandle = useRef(false);
   const [colorPickerIndex, setColorPickerIndex] = useState<number | null>(null);
   const [clearing, setClearing] = useState(false);
   const [remoteConnected, setRemoteConnected] = useState(true);
@@ -81,7 +82,16 @@ export function ProjectEditPanel() {
     setDefaultTabs((tabs) => tabs.filter((_, i) => i !== index));
   };
 
+  const handleMouseDown = (e: React.MouseEvent) => {
+    dragFromHandle.current =
+      e.target instanceof HTMLElement && !!e.target.closest('.default-tab-drag');
+  };
+
   const handleDragStart = (e: React.DragEvent, index: number) => {
+    if (!dragFromHandle.current) {
+      e.preventDefault();
+      return;
+    }
     setDragIndex(index);
     e.dataTransfer.effectAllowed = 'move';
   };
@@ -189,6 +199,7 @@ export function ProjectEditPanel() {
                   key={i}
                   className={`default-tab-row ${dragIndex === i ? 'dragging' : ''} ${dragOverIndex === i && dragIndex !== i ? 'drag-over' : ''}`}
                   draggable
+                  onMouseDown={handleMouseDown}
                   onDragStart={(e) => handleDragStart(e, i)}
                   onDragOver={(e) => handleDragOver(e, i)}
                   onDrop={(e) => handleDrop(e, i)}
