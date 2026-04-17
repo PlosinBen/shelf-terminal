@@ -46,9 +46,14 @@ export function FolderPicker() {
   useEffect(() => {
     if (!filter) return;
     const lowerFilter = filter.toLowerCase();
-    const matchIndex = entries.findIndex((name) => name.toLowerCase().includes(lowerFilter));
-    if (matchIndex !== -1) {
-      setSelectedIndex(matchIndex);
+    const prefixIndex = entries.findIndex((name) => name.toLowerCase().startsWith(lowerFilter));
+    if (prefixIndex !== -1) {
+      setSelectedIndex(prefixIndex);
+      return;
+    }
+    const substringIndex = entries.findIndex((name) => name.toLowerCase().includes(lowerFilter));
+    if (substringIndex !== -1) {
+      setSelectedIndex(substringIndex);
     }
   }, [filter, entries]);
 
