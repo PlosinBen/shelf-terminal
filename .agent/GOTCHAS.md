@@ -227,3 +227,15 @@
 2. 如果仍要保留 load/save 可觀測性，改用正常 `log.info('project-store', ...)`，尊重使用者 `logLevel` 設定
 3. `src/main/index.ts` 的 `LOGS_CLEAR` handler 移除 `clearAudit()` 呼叫
 4. 同步移除這條 gotcha
+
+---
+
+## 22. xterm.js open() 只能呼叫一次，remount 要移動 DOM
+
+**現象**: 拖曳排序 project 後 terminal 變黑屏。
+
+**原因**: React 在 `projects.map()` 順序改變時會 unmount/remount TerminalView。remount 時 `initializedRef` 重置為 false，導致 `term.open(newContainer)` 被第二次呼叫。xterm.js 不支援 `open()` 重複呼叫，terminal 進入壞狀態。
+
+**解法**: 在 `terminalCache` 加 `opened: boolean` flag。首次 mount 正常呼叫 `term.open(container)`；remount 時改用 `container.appendChild(term.element)` 把已有的 DOM 搬過去，不呼叫 `open()`。搬移後重新載入 WebglAddon（canvas 移動可能觸發 context loss）。
+
+**注意**: WebGL context loss 的 handler 也要自動 reload addon（`dispose()` + `setTimeout(() => loadWebgl(term), 100)`），否則會 fallback 到 DOM renderer 導致畫面異常。
