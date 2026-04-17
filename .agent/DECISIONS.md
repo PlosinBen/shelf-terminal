@@ -229,3 +229,26 @@
 - 換回 mtime cutoff 會踩 `find -mmin` 的捨入問題，可能在使用者剛 paste 完就把同次的檔刪掉。
 - 如果讓 cleanup `await` 在 spawn 之前，遠端 `ssh exec` 的延遲會直接打到 first tab 的開啟時間。
 - 把 dedupe 拿掉會讓每次 spawn 都重跑 cleanup，浪費 SSH/docker exec。
+
+---
+
+## 19. Worktree 是獨立 Project
+
+**決策**: Git worktree 以獨立 project 存在於 sidebar，透過 `parentProjectId` 關聯 parent project。繼承 parent 的 connection 設定。Worktree path 放在 parent cwd 的同層目錄（`<parentDir>/<projectName>-<branchName>`）。
+
+**原因**:
+- 把 worktree 當 sub-project 保持 sidebar 扁平架構，不需要巢狀 tree view 和複雜的拖曳邏輯。
+- Worktree 鎖定一個 branch，行為上就是一個獨立的工作目錄，跟 project 概念一致。
+- 放同層目錄（非 repo 內部）避免需要 `.gitignore` 排除。
+
+**不要改**: 如果把 worktree 做成 project 的子層級，sidebar 要從 flat list 變 tree，拖曳排序邏輯會複雜很多。
+
+---
+
+## 20. Connector exec() 方法
+
+**決策**: `Connector` 介面加 `exec(cwd, cmd)` 方法，用於在目標環境執行非互動式指令（如 git 操作）。各 connector 實作對應的 execFile 呼叫。Git IPC handler 透過 connector.exec() 執行，不直接暴露 exec 到 renderer。
+
+**原因**: git worktree 操作需要在遠端（SSH/Docker）執行指令，透過 connector 抽象層可以統一處理，不需要針對每種 connection type 寫不同的 git 邏輯。只暴露特定 git IPC channel 而非通用 exec，避免安全風險。
+
+**不要改**: 不要在 preload 暴露通用 exec API。

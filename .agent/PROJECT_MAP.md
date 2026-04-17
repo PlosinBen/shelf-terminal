@@ -22,7 +22,7 @@
 | Intent | File | Description |
 |--------|------|-------------|
 | Factory + 匯出 | `index.ts` | `createConnector(connection)` factory、`getAvailableTypes()`、`cleanupConnectors()` |
-| 介面定義 | `types.ts` | `Connector`、`Shell`、`Disposable` 介面 |
+| 介面定義 | `types.ts` | `Connector`（含 `exec()`）、`Shell`、`Disposable`、`ExecResult` 介面 |
 | PTY wrapper | `wrap-pty.ts` | 將 node-pty 包成 `Shell` 介面 |
 | Shell 環境解析 | `shell-env.ts` | macOS/Linux GUI app 的 login shell env 修正 |
 | 檔案操作工具 | `file-utils.ts` | 跨 connector 共用的上傳/清理/目錄操作 |
@@ -40,10 +40,10 @@
 |--------|------|-------------|
 | Root 元件 / Event handler 中樞 | `App.tsx` | 載入 projects/settings、集中處理所有 event bus 事件、split view 渲染 |
 | 全域狀態管理 | `store.ts` | `useSyncExternalStore` pattern，管理 projects/tabs/settings/UI state |
-| Event bus | `events.ts` | 簡單 pub/sub，定義所有 event name（CLOSE_TAB, NEW_TAB 等） |
+| Event bus | `events.ts` | 簡單 pub/sub，定義所有 event name（CLOSE_TAB, NEW_TAB, CREATE_WORKTREE 等） |
 | 快捷鍵系統 | `hooks/useKeybindings.ts` | combo string 對應 action，支援參數化 action（`switchTab_N`） |
 | Terminal 渲染 | `components/TerminalView.tsx` | xterm.js instance cache、PTY I/O、檔案 paste/drag-drop 上傳、unread badge |
-| Sidebar | `components/Sidebar.tsx` | Project 列表、拖曳排序、右鍵選單、收合按鈕 |
+| Sidebar | `components/Sidebar.tsx` | Project 列表、拖曳排序、右鍵選單（含 New Worktree）、worktree branch 顯示、收合按鈕 |
 | Tab bar | `components/TabBar.tsx` | Tab 列表、拖曳排序、雙擊重命名、unread badge、tab 顏色 |
 | 快速指令選擇器 | `components/CommandPicker.tsx` | ⌘E 叫出 overlay，過濾 + 執行 per-project 快速指令 |
 | 開發工具面板 | `components/DevToolsPanel.tsx` | ⌘D toggle 右側 panel，accordion 可收合，Base64/JSON/URL/UUID/Timestamp/Hash 工具，寬度可拖拉調整 |
@@ -51,6 +51,8 @@
 | 資料夾瀏覽器 | `components/FolderBrowser.tsx` | 純展示元件，顯示目錄清單和 keyboard hints |
 | Terminal 搜尋 | `components/SearchBar.tsx` | xterm SearchAddon 整合，Enter/Shift+Enter 搜尋 |
 | Settings 面板 | `components/SettingsPanel.tsx` | Theme/font/scrollback/keybinding 設定 + 錄製模式 |
+| Worktree 建立 | `components/WorktreeDialog.tsx` | 輸入新 branch name 建立 git worktree，產生 sub-project |
+| 刪除確認 | `components/RemoveConfirmDialog.tsx` | Remove project 確認 modal，worktree 可勾選是否清理 worktree files |
 | Project 編輯面板 | `components/ProjectEditPanel.tsx` | 改名、init script、default tabs、quick commands 編輯、Clear uploaded files |
 | 主題定義 | `themes.ts` | 5 個內建主題（terminal + UI 色彩） |
 | Window API 型別 | `env.d.ts` | `window.shelfApi` TypeScript 宣告 |
@@ -60,8 +62,8 @@
 
 | Intent | File | Description |
 |--------|------|-------------|
-| Type 定義 | `types.ts` | Connection, ProjectConfig, QuickCommand, AppSettings, IPC payloads, KeybindingAction |
-| IPC channel 常數 | `ipc-channels.ts` | 所有 IPC channel name，避免 string typo |
+| Type 定義 | `types.ts` | Connection, ProjectConfig（含 parentProjectId/worktreeBranch）, QuickCommand, AppSettings, IPC payloads, KeybindingAction, GitBranchInfo, WorktreeAddResult |
+| IPC channel 常數 | `ipc-channels.ts` | 所有 IPC channel name（含 git:branch-list/worktree-add/worktree-remove），避免 string typo |
 | Logger | `logger.ts` | 統一 log 模組，支援 file writer、log level、env override |
 | 預設值 | `defaults.ts` | DEFAULT_SETTINGS, DEFAULT_KEYBINDINGS |
 
