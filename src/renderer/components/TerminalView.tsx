@@ -21,8 +21,8 @@ interface Props {
   visible: boolean;
 }
 
-// Cache xterm instances so they survive re-renders
-const terminalCache = new Map<string, { term: Terminal; fitAddon: FitAddon; searchAddon: SearchAddon }>();
+// Cache xterm instances so they survive re-renders and remounts
+const terminalCache = new Map<string, { term: Terminal; fitAddon: FitAddon; searchAddon: SearchAddon; opened: boolean }>();
 
 // POSIX single-quote escape — works for nearly all POSIX shells.
 function shellQuote(s: string): string {
@@ -83,14 +83,22 @@ export function TerminalView({ tabId, projectId, cwd, connection, initScript, ta
       term.loadAddon(unicode11Addon);
       term.unicode.activeVersion = '11';
       term.loadAddon(new WebLinksAddon());
-      cached = { term, fitAddon, searchAddon };
+      cached = { term, fitAddon, searchAddon, opened: false };
       terminalCache.set(tabId, cached);
     }
 
     const { term, fitAddon } = cached;
-    term.open(container);
 
-    loadWebgl(term);
+    if (cached.opened) {
+      if (term.element) {
+        container.appendChild(term.element);
+      }
+      loadWebgl(term);
+    } else {
+      cached.opened = true;
+      term.open(container);
+      loadWebgl(term);
+    }
 
     // Windows/Linux: let browser handle Ctrl+V (paste) and Ctrl+C (copy when selected)
     // App keybindings are already intercepted at capture phase by useKeybindings
