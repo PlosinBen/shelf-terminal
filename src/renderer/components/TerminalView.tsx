@@ -77,10 +77,12 @@ export function TerminalView({ tabId, projectId, cwd, connection, initScript, ta
     const { term, fitAddon } = cached;
     term.open(container);
 
-    // WebGL renderer — must be loaded after term.open() since it needs a canvas.
-    // Falls back to DOM renderer silently on failure.
     try {
-      term.loadAddon(new WebglAddon());
+      const webgl = new WebglAddon();
+      webgl.onContextLoss(() => {
+        webgl.dispose();
+      });
+      term.loadAddon(webgl);
     } catch {
       // WebGL2 not available — DOM renderer is fine
     }
