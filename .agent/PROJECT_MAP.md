@@ -15,6 +15,7 @@
 | 自動更新 wiring | `updater.ts` | electron-updater event 接線、download/install 兩段確認 |
 | 自動更新 state machine | `updater-state.ts` | 純 reducer（idle/available/downloading/downloaded），由 vitest 單元測試 |
 | App 啟動 / config 載入 | `bootstrap.ts` | 預先載入 projects/settings，遇錯顯示 blocking dialog |
+| userData 路徑隔離 | `user-data-path.ts` | `applyUserDataIsolation()`，靠 `app.isPackaged` + `--user-data-dir` 判斷，unpackaged 且無 switch 時加 `-dev` 後綴 |
 
 ### Connector (src/main/connector/)
 
@@ -73,7 +74,7 @@
 | 單元測試設定 | `vitest.config.ts` | 獨立 vitest config（不繼承 vite.config.ts，避免載入 electron plugin） |
 | 套件 / 打包設定 | `package.json` | electron-builder config、scripts、dependencies |
 | CI/CD | `.github/workflows/build.yml` | Tag push → 三平台 build → GitHub Release |
-| E2E 測試 | `e2e/helpers.ts` | Playwright fixture、userData 隔離 |
+| E2E 測試 | `e2e/helpers.ts` | Playwright fixture、每 worker 用 tempdir + `--user-data-dir` 隔離 userData |
 | E2E 測試 | `e2e/app-startup.spec.ts` | App 啟動、sidebar 驗證 |
 | E2E 測試 | `e2e/project-creation.spec.ts` | 建立 project、connect、tab、terminal output |
 | E2E 測試 | `e2e/features.spec.ts` | Search、settings、project edit、dev tools、所有快捷鍵 |
@@ -83,3 +84,4 @@
 | Connector 測試 | `e2e/connector/docker.spec.ts` | Docker exec spawn / file upload / clearUploads（需 docker test container） |
 | 單元測試 | `src/main/updater-state.test.ts` | Updater reducer 21 個 transition 測試 |
 | 單元測試 | `src/main/file-transfer.test.ts` | 純函式（filename / prefix / quote）+ local fs 行為 |
+| 單元測試 | `src/main/user-data-path.test.ts` | `applyUserDataIsolation()` 五個分支（packaged / unpackaged / switch / idempotent） |
