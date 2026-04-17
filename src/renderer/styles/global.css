@@ -930,6 +930,7 @@ button {
 
 .project-edit-body {
   padding: 16px;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 14px;
