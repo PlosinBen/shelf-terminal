@@ -15,7 +15,7 @@ import { createConnector, getAvailableTypes, listDockerContainers, listWSLDistro
 import { loadSSHServers, saveSSHServer } from './ssh-server-store';
 import { log, setLogLevel, setFileWriter } from '@shared/logger';
 import { applyUserDataIsolation } from './user-data-path';
-import type { Connection, ProjectConfig, AppSettings, FileUploadResult, FileClearResult, PtySpawnPayload, PtyInputPayload, PtyResizePayload, PtyKillPayload } from '@shared/types';
+import type { Connection, ProjectConfig, AppSettings, FileUploadResult, FileClearResult, PtySpawnPayload, PtyInputPayload, PtyResizePayload, PtyKillPayload, GitBranchInfo, WorktreeAddResult, WorktreeRemoveResult } from '@shared/types';
 
 applyUserDataIsolation();
 
@@ -133,6 +133,58 @@ ipcMain.handle(IPC.DOCKER_LIST_CONTAINERS, () => {
 ipcMain.handle(IPC.DOCKER_TEST_PATH, (_event, dockerPathValue: string) => {
   return testDockerPath(dockerPathValue);
 });
+
+// ── Git ──
+
+ipcMain.handle(IPC.GIT_BRANCH_LIST, async (_event, payload: { connection: Connection; cwd: string }): Promise<GitBranchInfo[]> => {
+  try {
+    const connector = createConnector(payload.connection);
+    const { stdout } = await connector.exec(payload.cwd, 'git branch --no-color 2>/dev/null');
+    return stdout.trim().split('\n')
+      .filter((line) => line.length > 0)
+      .map((line) => ({
+        name: line.replace(/^\*?\s+/, ''),
+        current: line.startsWith('*'),
+      }));
+  } catch {
+    return [];
+  }
+});
+
+ipcMain.handle(
+  IPC.GIT_WORKTREE_ADD,
+  async (_event, payload: { connection: Connection; cwd: string; branch: string; newBranch: boolean }): Promise<WorktreeAddResult> => {
+    try {
+      const connector = createConnector(payload.connection);
+      const parentDir = payload.cwd.replace(/\/+$/, '').replace(/[^/]+$/, '').replace(/\/+$/, '');
+      const dirName = `${payload.cwd.replace(/\/+$/, '').split('/').pop()}-${payload.branch.replace(/\//g, '-')}`;
+      const worktreePath = `${parentDir}/${dirName}`;
+
+      const branchFlag = payload.newBranch ? '-b' : '';
+      const cmd = branchFlag
+        ? `git worktree add ${branchFlag} ${JSON.stringify(payload.branch)} ${JSON.stringify(worktreePath)}`
+        : `git worktree add ${JSON.stringify(worktreePath)} ${JSON.stringify(payload.branch)}`;
+
+      await connector.exec(payload.cwd, cmd);
+      return { ok: true, path: worktreePath };
+    } catch (err: any) {
+      return { ok: false, error: err?.message ?? String(err) };
+    }
+  },
+);
+
+ipcMain.handle(
+  IPC.GIT_WORKTREE_REMOVE,
+  async (_event, payload: { connection: Connection; cwd: string; worktreePath: string }): Promise<WorktreeRemoveResult> => {
+    try {
+      const connector = createConnector(payload.connection);
+      await connector.exec(payload.cwd, `git worktree remove ${JSON.stringify(payload.worktreePath)} --force`);
+      return { ok: true };
+    } catch (err: any) {
+      return { ok: false, error: err?.message ?? String(err) };
+    }
+  },
+);
 
 // ── File transfer ──
 

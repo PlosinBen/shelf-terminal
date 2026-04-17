@@ -9,7 +9,7 @@ import { DockerConnector, listDockerContainers as _listDockerContainers, setDock
 import { cleanupControlSockets } from '../ssh-control';
 
 // Re-export types for consumers
-export type { Connector, Shell, Disposable } from './types';
+export type { Connector, Shell, Disposable, ExecResult } from './types';
 
 export function createConnector(connection: Connection): Connector {
   switch (connection.type) {

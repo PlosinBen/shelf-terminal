@@ -3,7 +3,7 @@ import { execFile } from 'child_process';
 import os from 'os';
 import type { FolderListResult } from '@shared/types';
 import { log } from '@shared/logger';
-import type { Connector, Shell } from './types';
+import type { Connector, Shell, ExecResult } from './types';
 import { wrapPty } from './wrap-pty';
 import { shellEscape } from './shell-env';
 import {
@@ -16,6 +16,19 @@ export class WSLConnector implements Connector {
 
   private wslExecArgs(cmd: string): string[] {
     return ['-d', this.distro, '--', 'sh', '-c', cmd];
+  }
+
+  exec(cwd: string, cmd: string): Promise<ExecResult> {
+    const remoteCmd = `cd ${shellEscape(cwd)} && ${cmd}`;
+    return new Promise((resolve, reject) => {
+      execFile('wsl.exe', ['-d', this.distro, '--', 'sh', '-c', remoteCmd], { timeout: 15000 }, (error, stdout, stderr) => {
+        if (error) {
+          reject(new Error(stderr || error.message));
+          return;
+        }
+        resolve({ stdout, stderr });
+      });
+    });
   }
 
   createShell(cwd: string): Shell {

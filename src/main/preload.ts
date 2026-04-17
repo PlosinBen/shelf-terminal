@@ -78,6 +78,14 @@ contextBridge.exposeInMainWorld('shelfApi', {
     servers: () =>
       ipcRenderer.invoke(IPC.SSH_SERVERS),
   },
+  git: {
+    branchList: (connection: any, cwd: string) =>
+      ipcRenderer.invoke(IPC.GIT_BRANCH_LIST, { connection, cwd }),
+    worktreeAdd: (connection: any, cwd: string, branch: string, newBranch: boolean) =>
+      ipcRenderer.invoke(IPC.GIT_WORKTREE_ADD, { connection, cwd, branch, newBranch }),
+    worktreeRemove: (connection: any, cwd: string, worktreePath: string) =>
+      ipcRenderer.invoke(IPC.GIT_WORKTREE_REMOVE, { connection, cwd, worktreePath }),
+  },
   settings: {
     load: () => ipcRenderer.invoke(IPC.SETTINGS_LOAD),
     save: (settings: unknown) => ipcRenderer.invoke(IPC.SETTINGS_SAVE, settings),

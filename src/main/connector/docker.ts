@@ -3,7 +3,7 @@ import { execFile } from 'child_process';
 import os from 'os';
 import type { FolderListResult } from '@shared/types';
 import { log } from '@shared/logger';
-import type { Connector, Shell } from './types';
+import type { Connector, Shell, ExecResult } from './types';
 import { wrapPty } from './wrap-pty';
 import { shellEscape } from './shell-env';
 import {
@@ -55,6 +55,19 @@ export class DockerConnector implements Connector {
       env: process.env as Record<string, string>,
     });
     return wrapPty(p);
+  }
+
+  exec(cwd: string, cmd: string): Promise<ExecResult> {
+    const remoteCmd = `cd ${shellEscape(cwd)} && ${cmd}`;
+    return new Promise((resolve, reject) => {
+      execFile(dockerBin(), this.dockerExecArgs(remoteCmd), { timeout: 15000 }, (error, stdout, stderr) => {
+        if (error) {
+          reject(new Error(stderr || error.message));
+          return;
+        }
+        resolve({ stdout, stderr });
+      });
+    });
   }
 
   isConnected(): Promise<boolean> {
