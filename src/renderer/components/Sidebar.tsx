@@ -136,6 +136,7 @@ export function Sidebar() {
       {contextMenu && (() => {
         const proj = projects[contextMenu.index];
         const isConnected = proj && proj.tabs.length > 0;
+        const isInvalid = proj?.folderInvalid;
         return (
           <div
             ref={menuRef}
@@ -152,6 +153,7 @@ export function Sidebar() {
             ) : (
               <button
                 className="context-menu-item"
+                disabled={isInvalid}
                 onClick={() => { emit(Events.CONNECT_PROJECT, contextMenu.index); setContextMenu(null); }}
               >
                 Connect
@@ -163,6 +165,7 @@ export function Sidebar() {
             >
               Edit
             </button>
+            <div className="context-menu-separator" />
             <button
               className="context-menu-item context-menu-item-danger"
               onClick={() => { emit(Events.REMOVE_PROJECT, contextMenu.index); setContextMenu(null); }}
