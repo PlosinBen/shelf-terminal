@@ -87,7 +87,7 @@ export function Sidebar() {
               key={proj.config.id}
               className={`sidebar-item ${i === activeProjectIndex ? 'active' : ''} ${isDragging ? 'dragging' : ''} ${isDragOver ? 'drag-over' : ''}`}
               onClick={() => setActiveProject(i)}
-              onContextMenu={(e) => handleContextMenu(e, i)}
+              onContextMenu={(e) => { setActiveProject(i); handleContextMenu(e, i); }}
               draggable
               onDragStart={(e) => handleDragStart(e, i)}
               onDragOver={(e) => handleDragOver(e, i)}
