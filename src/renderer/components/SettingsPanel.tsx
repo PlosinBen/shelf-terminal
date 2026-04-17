@@ -85,12 +85,21 @@ export function SettingsPanel() {
     toggleSettings();
   };
 
-  const handleOverlayClick = (e: React.MouseEvent) => {
-    if (e.target === e.currentTarget) handleCancel();
-  };
+  useEffect(() => {
+    if (!settingsVisible) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !recordingAction) {
+        e.preventDefault();
+        e.stopPropagation();
+        handleCancel();
+      }
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [settingsVisible, recordingAction, settings]);
 
   return (
-    <div className="settings-overlay" onClick={handleOverlayClick}>
+    <div className="settings-overlay">
       <div className="settings-panel">
         <div className="settings-header">
           <span>Settings</span>
