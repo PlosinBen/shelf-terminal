@@ -60,7 +60,7 @@ export function useKeybindings() {
           case 'newProject':     return () => emit(Events.OPEN_FOLDER_PICKER);
           case 'prevProject':    return () => setActiveProject(Math.max(0, activeProjectIndex - 1));
           case 'nextProject':    return () => setActiveProject(Math.min(projects.length - 1, activeProjectIndex + 1));
-          case 'closeProject':   return activeProject ? () => emit(Events.CLOSE_PROJECT, activeProjectIndex) : null;
+          case 'removeProject':   return activeProject ? () => emit(Events.REMOVE_PROJECT, activeProjectIndex) : null;
           case 'newTab':         return activeProject ? () => emit(Events.NEW_TAB, activeProjectIndex) : null;
           case 'toggleSplit':    return activeProject ? () => emit(Events.TOGGLE_SPLIT, activeProjectIndex) : null;
           case 'prevTab':        return activeProject ? () => setActiveTab(activeProjectIndex, Math.max(0, activeProject.activeTabIndex - 1)) : null;

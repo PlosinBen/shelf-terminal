@@ -4,6 +4,7 @@ export const IPC = {
   PTY_KILL: 'pty:kill',
   PROJECT_LOAD: 'project:load',
   PROJECT_SAVE: 'project:save',
+  PROJECT_VALIDATE_DIRS: 'project:validate-dirs',
 
   // File upload (paste/drag) — generic across local/SSH/WSL/Docker
   FILE_UPLOAD: 'file:upload',

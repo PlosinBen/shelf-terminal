@@ -9,7 +9,7 @@ import { ProjectEditPanel } from './components/ProjectEditPanel';
 import { CommandPicker } from './components/CommandPicker';
 import { DevToolsPanel } from './components/DevToolsPanel';
 import { useKeybindings } from './hooks/useKeybindings';
-import { useStore, setProjects, setSettings, setUpdateStatus, addProject, addTab, setActiveTab, removeTab, removeProject, setSplitTab, toggleSidebar, clearUnread } from './store';
+import { useStore, setProjects, setSettings, setUpdateStatus, addProject, addTab, setActiveTab, removeTab, removeProject, setSplitTab, toggleSidebar, clearUnread, setInvalidProjects } from './store';
 import type { ProjectConfig } from '@shared/types';
 import { disposeTerminal } from './components/TerminalView';
 import { on, emit, Events } from './events';
@@ -40,7 +40,7 @@ export function App() {
       removeTab(projectIndex, tabIndex);
     });
 
-    const offCloseProject = on(Events.CLOSE_PROJECT, (projectIndex: number) => {
+    const offRemoveProject = on(Events.REMOVE_PROJECT, (projectIndex: number) => {
       const proj = projects[projectIndex];
       if (proj) {
         proj.tabs.forEach((tab) => {
@@ -146,12 +146,14 @@ export function App() {
       }
     });
 
-    return () => { offCloseTab(); offCloseProject(); offNewTab(); offConnectProject(); offDisconnectProject(); offAddProject(); offToggleSplit(); };
+    return () => { offCloseTab(); offRemoveProject(); offNewTab(); offConnectProject(); offDisconnectProject(); offAddProject(); offToggleSplit(); };
   }, [projects]);
 
   useEffect(() => {
-    // Load projects on startup (no auto-connect)
-    window.shelfApi.project.load().then(setProjects);
+    window.shelfApi.project.load().then((configs) => {
+      setProjects(configs);
+      window.shelfApi.project.validateDirs(configs).then(setInvalidProjects);
+    });
   }, []);
 
   // Re-focus active terminal when window regains focus or panels close
@@ -200,7 +202,13 @@ export function App() {
         <TabBar />
         <div className="terminal-view">
           <SearchBar />
-          {activeProject && activeProject.tabs.length === 0 && (
+          {activeProject && activeProject.folderInvalid && (
+            <div className="invalid-folder-overlay">
+              <span>Invalid folder</span>
+              <span className="invalid-folder-path">{activeProject.config.cwd}</span>
+            </div>
+          )}
+          {activeProject && !activeProject.folderInvalid && activeProject.tabs.length === 0 && (
             <div
               className="connect-prompt"
               onClick={() => emit(Events.CONNECT_PROJECT, activeProjectIndex)}

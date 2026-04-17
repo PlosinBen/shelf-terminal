@@ -68,6 +68,16 @@ ipcMain.handle(IPC.PROJECT_SAVE, (_event, projects: ProjectConfig[]) => {
   saveProjects(projects);
 });
 
+ipcMain.handle(IPC.PROJECT_VALIDATE_DIRS, (_event, projects: ProjectConfig[]): string[] => {
+  const invalid: string[] = [];
+  for (const p of projects) {
+    if (p.connection.type === 'local' && !fs.existsSync(p.cwd)) {
+      invalid.push(p.id);
+    }
+  }
+  return invalid;
+});
+
 // ── Connector (unified) ──
 
 ipcMain.handle(IPC.CONNECTOR_LIST_DIR, (_event, payload: { connection: Connection; path: string }) => {

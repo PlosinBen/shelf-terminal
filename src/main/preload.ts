@@ -54,6 +54,7 @@ contextBridge.exposeInMainWorld('shelfApi', {
   project: {
     load: () => ipcRenderer.invoke(IPC.PROJECT_LOAD),
     save: (projects: unknown) => ipcRenderer.invoke(IPC.PROJECT_SAVE, projects),
+    validateDirs: (projects: unknown) => ipcRenderer.invoke(IPC.PROJECT_VALIDATE_DIRS, projects),
   },
   dialog: {
     warn: (title: string, message: string) =>
