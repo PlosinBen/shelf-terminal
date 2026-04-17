@@ -21,6 +21,8 @@
 - Bug fix 必須包含迴歸測試 — 先寫測試重現問題，再修 code
 - 不要啟動 dev server 或 Electron（`npm run dev` / `npx electron`）— AI 看不到畫面，只會干擾使用者。驗證用 `tsc --noEmit` + `vitest run`；需要驗 UI 行為就寫 E2E test
 - Commit 前確認 `.agent/` 文件是否需要更新（PROJECT_MAP, DECISIONS, GOTCHAS）— 有新增功能、改變架構、或發現 gotcha 時一併更新
+- 安裝套件前先 `npm view <pkg> versions` 確認最新穩定版，不要假設版本號
+- 有錯就停，逐一修復再測，不要重複跑整套 build/test
 
 ## Conventions
 
