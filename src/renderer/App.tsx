@@ -276,6 +276,7 @@ export function App() {
                           tabId={tab.id}
                           projectId={proj.config.id}
                           projectIndex={pi}
+                          cwd={proj.config.cwd}
                           provider={tab.provider}
                           visible={visible}
                           onSelectProvider={setTabProvider}
