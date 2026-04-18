@@ -65,6 +65,15 @@ interface ShelfApi {
   app: {
     logsPath: () => Promise<string>;
   };
+  agent: {
+    send: (tabId: string, prompt: string, cwd: string, provider: string) => Promise<void>;
+    stop: (tabId: string) => Promise<void>;
+    destroy: (tabId: string) => Promise<void>;
+    onMessage: (callback: (payload: { tabId: string; type: string; content: string; toolName?: string; toolInput?: Record<string, unknown>; toolUseId?: string; parentToolUseId?: string; sessionId?: string; costUsd?: number; inputTokens?: number; outputTokens?: number }) => void) => () => void;
+    onStream: (callback: (payload: { tabId: string; type: string; content: string }) => void) => () => void;
+    onStatus: (callback: (payload: { tabId: string; state: string; model?: string; costUsd?: number; inputTokens?: number; outputTokens?: number; numTurns?: number; sessionId?: string }) => void) => () => void;
+    onError: (callback: (payload: { tabId: string; error: string }) => void) => () => void;
+  };
   updater: {
     check: () => Promise<void>;
     download: () => Promise<void>;

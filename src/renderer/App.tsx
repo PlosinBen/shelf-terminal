@@ -37,9 +37,13 @@ export function App() {
     const offCloseTab = on(Events.CLOSE_TAB, (projectIndex: number, tabIndex: number) => {
       const proj = projects[projectIndex];
       const tab = proj?.tabs[tabIndex];
-      if (tab && tab.type !== 'agent') {
-        window.shelfApi.pty.kill(tab.id);
-        disposeTerminal(tab.id);
+      if (tab) {
+        if (tab.type === 'agent') {
+          window.shelfApi.agent.destroy(tab.id);
+        } else {
+          window.shelfApi.pty.kill(tab.id);
+          disposeTerminal(tab.id);
+        }
       }
       removeTab(projectIndex, tabIndex);
     });

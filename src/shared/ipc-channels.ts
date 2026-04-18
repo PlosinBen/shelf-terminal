@@ -56,8 +56,19 @@ export const IPC = {
   UPDATE_INSTALL: 'update:install',
   UPDATE_STATUS: 'update:status',
 
+  // Agent (Renderer → Main)
+  AGENT_SEND: 'agent:send',
+  AGENT_STOP: 'agent:stop',
+  AGENT_DESTROY: 'agent:destroy',
+
   // Main → Renderer (send)
   PTY_DATA: 'pty:data',
   PTY_EXIT: 'pty:exit',
   PTY_INIT_SENT: 'pty:init-sent',
+
+  // Agent (Main → Renderer)
+  AGENT_MESSAGE: 'agent:message',
+  AGENT_STREAM: 'agent:stream',
+  AGENT_STATUS: 'agent:status',
+  AGENT_ERROR: 'agent:error',
 } as const;

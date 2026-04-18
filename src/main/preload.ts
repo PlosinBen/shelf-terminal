@@ -100,6 +100,34 @@ contextBridge.exposeInMainWorld('shelfApi', {
   app: {
     logsPath: (): Promise<string> => ipcRenderer.invoke(IPC.APP_LOGS_PATH),
   },
+  agent: {
+    send: (tabId: string, prompt: string, cwd: string, provider: string) =>
+      ipcRenderer.invoke(IPC.AGENT_SEND, { tabId, prompt, cwd, provider }),
+    stop: (tabId: string) =>
+      ipcRenderer.invoke(IPC.AGENT_STOP, { tabId }),
+    destroy: (tabId: string) =>
+      ipcRenderer.invoke(IPC.AGENT_DESTROY, { tabId }),
+    onMessage: (callback: (payload: any) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, payload: any) => callback(payload);
+      ipcRenderer.on(IPC.AGENT_MESSAGE, listener);
+      return () => ipcRenderer.removeListener(IPC.AGENT_MESSAGE, listener);
+    },
+    onStream: (callback: (payload: any) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, payload: any) => callback(payload);
+      ipcRenderer.on(IPC.AGENT_STREAM, listener);
+      return () => ipcRenderer.removeListener(IPC.AGENT_STREAM, listener);
+    },
+    onStatus: (callback: (payload: any) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, payload: any) => callback(payload);
+      ipcRenderer.on(IPC.AGENT_STATUS, listener);
+      return () => ipcRenderer.removeListener(IPC.AGENT_STATUS, listener);
+    },
+    onError: (callback: (payload: any) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, payload: any) => callback(payload);
+      ipcRenderer.on(IPC.AGENT_ERROR, listener);
+      return () => ipcRenderer.removeListener(IPC.AGENT_ERROR, listener);
+    },
+  },
   updater: {
     check: () => ipcRenderer.invoke(IPC.UPDATE_CHECK),
     download: () => ipcRenderer.invoke(IPC.UPDATE_DOWNLOAD),
