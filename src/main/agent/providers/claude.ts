@@ -211,10 +211,6 @@ function processMessage(msg: SDKMessage): AgentEvent[] {
     case 'system': {
       if (msg.subtype === 'init') {
         events.push({
-          type: 'message',
-          payload: { type: 'system', content: `Model: ${msg.model}`, sessionId: msg.session_id },
-        });
-        events.push({
           type: 'status',
           payload: { state: 'streaming', model: msg.model, sessionId: msg.session_id },
         });
