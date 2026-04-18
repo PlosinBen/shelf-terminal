@@ -433,6 +433,7 @@ export interface AgentTabState {
   pendingPermission: { toolUseId: string; toolName: string; input: Record<string, unknown> } | null;
   queuedMessages: { id: string; content: string }[];
   slashCommands: { name: string; description: string }[];
+  scrollTop: number | null;
 }
 
 const agentStates = new Map<string, AgentTabState>();
@@ -472,6 +473,7 @@ function getOrCreateAgentState(tabId: string): AgentTabState {
       pendingPermission: null,
       queuedMessages: [],
       slashCommands: [],
+      scrollTop: null,
     };
     agentStates.set(tabId, state);
   }

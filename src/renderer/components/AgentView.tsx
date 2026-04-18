@@ -68,39 +68,44 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
     });
   }, [provider, projectId, tabId, cwd, messages.length]);
 
-  // Focus textarea when tab becomes visible
+  // Focus textarea + restore scroll on mount
   useEffect(() => {
-    if (visible && provider) {
-      requestAnimationFrame(() => {
-        textareaRef.current?.focus();
-        const el = listRef.current;
-        if (el) {
+    if (!visible || !provider) return;
+    requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+      const el = listRef.current;
+      if (el) {
+        if (agentState.scrollTop !== null) {
+          el.scrollTop = agentState.scrollTop;
+        } else {
           el.scrollTop = el.scrollHeight;
-          isAtBottomRef.current = true;
         }
-      });
-    }
-  }, [visible, provider]);
+        isAtBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+      }
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  // Track scroll position
+  // Save scroll position to store on scroll
   useEffect(() => {
     const el = listRef.current;
     if (!el) return;
     const handleScroll = () => {
       isAtBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+      updateAgentState(tabId, { scrollTop: el.scrollTop });
     };
     el.addEventListener('scroll', handleScroll);
     return () => el.removeEventListener('scroll', handleScroll);
-  }, []);
+  }, [tabId]);
 
-  // Auto-scroll if at bottom
+  // Auto-scroll when at bottom (streaming updates)
   useEffect(() => {
-    if (isAtBottomRef.current && visible) {
+    if (isAtBottomRef.current) {
       bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
   });
 
-  // Force scroll on user message
+  // Force scroll on user message send
   useEffect(() => {
     const prev = prevMessageCount.current;
     prevMessageCount.current = messages.length;
