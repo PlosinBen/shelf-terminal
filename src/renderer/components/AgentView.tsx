@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import type { AgentProvider } from '@shared/types';
+import type { AgentProvider, Connection } from '@shared/types';
 import { AgentMessage, type AgentMsg } from './AgentMessage';
 
 const AGENT_PROVIDERS: { id: AgentProvider; label: string }[] = [
@@ -13,6 +13,8 @@ interface AgentViewProps {
   projectId: string;
   projectIndex: number;
   cwd: string;
+  connection: Connection;
+  initScript?: string;
   provider?: AgentProvider;
   visible: boolean;
   onSelectProvider: (tabId: string, provider: AgentProvider) => void;
@@ -20,7 +22,7 @@ interface AgentViewProps {
 
 let msgCounter = 0;
 
-export function AgentView({ tabId, projectId, cwd, provider, visible, onSelectProvider }: AgentViewProps) {
+export function AgentView({ tabId, projectId, cwd, connection, initScript, provider, visible, onSelectProvider }: AgentViewProps) {
   const [messages, setMessages] = useState<AgentMsg[]>([]);
   const [input, setInput] = useState('');
   const [streaming, setStreaming] = useState(false);
@@ -142,8 +144,8 @@ export function AgentView({ tabId, projectId, cwd, provider, visible, onSelectPr
     streamingIdRef.current = null;
     scrollToBottom();
 
-    window.shelfApi.agent.send(tabId, text, cwd, provider);
-  }, [input, streaming, provider, tabId, cwd, scrollToBottom]);
+    window.shelfApi.agent.send(tabId, text, cwd, provider, connection, initScript);
+  }, [input, streaming, provider, tabId, cwd, connection, initScript, scrollToBottom]);
 
   const handleStop = useCallback(() => {
     window.shelfApi.agent.stop(tabId);

@@ -277,6 +277,8 @@ export function App() {
                           projectId={proj.config.id}
                           projectIndex={pi}
                           cwd={proj.config.cwd}
+                          connection={proj.config.connection}
+                          initScript={proj.config.initScript}
                           provider={tab.provider}
                           visible={visible}
                           onSelectProvider={setTabProvider}

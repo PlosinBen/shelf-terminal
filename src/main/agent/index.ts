@@ -1,8 +1,9 @@
 import { ipcMain, BrowserWindow } from 'electron';
 import { IPC } from '@shared/ipc-channels';
 import { createClaudeBackend } from './providers/claude';
+import { createRemoteBackend } from './remote';
 import { log } from '@shared/logger';
-import type { AgentProvider } from '@shared/types';
+import type { AgentProvider, Connection } from '@shared/types';
 import type { AgentBackend, AgentSessionState } from './types';
 
 interface Session {
@@ -25,7 +26,13 @@ function broadcast(channel: string, payload: unknown) {
   getWindow()?.webContents.send(channel, payload);
 }
 
-function createBackend(provider: AgentProvider): AgentBackend {
+function createBackend(provider: AgentProvider, connection: Connection, initScript?: string): AgentBackend {
+  const isRemote = connection.type !== 'local';
+
+  if (isRemote) {
+    return createRemoteBackend(connection, initScript);
+  }
+
   switch (provider) {
     case 'claude':
       return createClaudeBackend();
@@ -38,11 +45,11 @@ function createBackend(provider: AgentProvider): AgentBackend {
 }
 
 export function registerAgentHandlers() {
-  ipcMain.handle(IPC.AGENT_SEND, async (_event, { tabId, prompt, cwd, provider }: { tabId: string; prompt: string; cwd: string; provider: AgentProvider }) => {
+  ipcMain.handle(IPC.AGENT_SEND, async (_event, { tabId, prompt, cwd, provider, connection, initScript }: { tabId: string; prompt: string; cwd: string; provider: AgentProvider; connection: Connection; initScript?: string }) => {
     let session = sessions.get(tabId);
 
     if (!session) {
-      const backend = createBackend(provider);
+      const backend = createBackend(provider, connection, initScript);
       session = { tabId, projectId: '', provider, backend, state: 'idle' };
       sessions.set(tabId, session);
     }

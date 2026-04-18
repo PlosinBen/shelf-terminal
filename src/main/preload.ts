@@ -101,8 +101,8 @@ contextBridge.exposeInMainWorld('shelfApi', {
     logsPath: (): Promise<string> => ipcRenderer.invoke(IPC.APP_LOGS_PATH),
   },
   agent: {
-    send: (tabId: string, prompt: string, cwd: string, provider: string) =>
-      ipcRenderer.invoke(IPC.AGENT_SEND, { tabId, prompt, cwd, provider }),
+    send: (tabId: string, prompt: string, cwd: string, provider: string, connection: unknown, initScript?: string) =>
+      ipcRenderer.invoke(IPC.AGENT_SEND, { tabId, prompt, cwd, provider, connection, initScript }),
     stop: (tabId: string) =>
       ipcRenderer.invoke(IPC.AGENT_STOP, { tabId }),
     destroy: (tabId: string) =>

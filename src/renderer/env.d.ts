@@ -66,7 +66,7 @@ interface ShelfApi {
     logsPath: () => Promise<string>;
   };
   agent: {
-    send: (tabId: string, prompt: string, cwd: string, provider: string) => Promise<void>;
+    send: (tabId: string, prompt: string, cwd: string, provider: string, connection: import('../shared/types').Connection, initScript?: string) => Promise<void>;
     stop: (tabId: string) => Promise<void>;
     destroy: (tabId: string) => Promise<void>;
     onMessage: (callback: (payload: { tabId: string; type: string; content: string; toolName?: string; toolInput?: Record<string, unknown>; toolUseId?: string; parentToolUseId?: string; sessionId?: string; costUsd?: number; inputTokens?: number; outputTokens?: number }) => void) => () => void;
