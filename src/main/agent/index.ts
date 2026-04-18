@@ -123,9 +123,11 @@ export function registerAgentHandlers() {
   ipcMain.handle(IPC.AGENT_STOP, async (_event, { tabId }: { tabId: string }) => {
     const session = sessions.get(tabId);
     if (session) {
+      for (const resolve of session.pendingPermissions.values()) {
+        resolve({ behavior: 'deny', message: 'Stopped by user' });
+      }
+      session.pendingPermissions.clear();
       await session.backend.stop();
-      session.state = 'idle';
-      broadcast(IPC.AGENT_STATUS, { tabId, state: 'idle' });
     }
   });
 
