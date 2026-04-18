@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useStore } from '../store';
 import { FolderBrowser } from './FolderBrowser';
 import { on, emit, Events } from '../events';
-import type { ProjectConfig, Connection, SSHConnection } from '@shared/types';
+import type { ProjectConfig, Connection, SSHConnection, AgentProvider } from '@shared/types';
 
 type Step = 'connection' | 'browse';
 
@@ -23,6 +23,9 @@ export function FolderPicker() {
 
   // Docker form state
   const [dockerContainer, setDockerContainer] = useState('');
+
+  // Agent provider state
+  const [defaultAgentProvider, setDefaultAgentProvider] = useState<AgentProvider | ''>('');
 
   // Browse state
   const [currentPath, setCurrentPath] = useState('');
@@ -95,6 +98,7 @@ export function FolderPicker() {
       setSshPassword('');
       setWslDistro('Ubuntu');
       setDockerContainer('');
+      setDefaultAgentProvider('');
     };
     const off = on(Events.OPEN_FOLDER_PICKER, handler);
     return () => { off(); };
@@ -159,6 +163,7 @@ export function FolderPicker() {
       cwd: selectedPath,
       connection: conn,
       maxTabs: settings.defaultMaxTabs,
+      defaultAgentProvider: defaultAgentProvider || undefined,
     };
 
     emit(Events.ADD_PROJECT, config);
@@ -267,6 +272,8 @@ export function FolderPicker() {
             onWslDistroChange={setWslDistro}
             dockerContainer={dockerContainer}
             onDockerContainerChange={setDockerContainer}
+            defaultAgentProvider={defaultAgentProvider}
+            onAgentProviderChange={setDefaultAgentProvider}
             onSelect={proceedToBrowse}
             onCancel={handleCancel}
           />
@@ -304,6 +311,8 @@ interface ConnectionStepProps {
   onSshPasswordChange: (v: string) => void;
   onWslDistroChange: (v: string) => void;
   onDockerContainerChange: (v: string) => void;
+  defaultAgentProvider: AgentProvider | '';
+  onAgentProviderChange: (v: AgentProvider | '') => void;
   onSelect: (conn: Connection) => void;
   onCancel: () => void;
 }
@@ -311,6 +320,7 @@ interface ConnectionStepProps {
 function ConnectionStep({
   sshHost, sshPort, sshUser, sshPassword, wslDistro, dockerContainer,
   onSshHostChange, onSshPortChange, onSshUserChange, onSshPasswordChange, onWslDistroChange, onDockerContainerChange,
+  defaultAgentProvider, onAgentProviderChange,
   onSelect, onCancel,
 }: ConnectionStepProps) {
   const [connType, setConnType] = useState<'local' | 'ssh' | 'wsl' | 'docker'>('local');
@@ -547,6 +557,20 @@ function ConnectionStep({
             Browse local filesystem to select a project folder.
           </div>
         )}
+
+        <div className="conn-field">
+          <label className="conn-label">Default Agent</label>
+          <select
+            className="settings-select"
+            value={defaultAgentProvider}
+            onChange={(e) => onAgentProviderChange(e.target.value as AgentProvider | '')}
+          >
+            <option value="">None</option>
+            <option value="claude">Claude</option>
+            <option value="copilot">Copilot</option>
+            <option value="gemini">Gemini</option>
+          </select>
+        </div>
       </div>
 
       <div className="conn-actions">

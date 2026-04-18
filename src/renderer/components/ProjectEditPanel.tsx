@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useStore, setEditingProject, updateProjectConfig } from '../store';
-import type { TabTemplate, QuickCommand } from '@shared/types';
+import type { TabTemplate, QuickCommand, AgentProvider } from '@shared/types';
 import { TAB_COLORS } from './TabBar';
 
 export function ProjectEditPanel() {
@@ -15,6 +15,7 @@ export function ProjectEditPanel() {
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const dragFromHandle = useRef(false);
   const [colorPickerIndex, setColorPickerIndex] = useState<number | null>(null);
+  const [defaultAgentProvider, setDefaultAgentProvider] = useState<AgentProvider | ''>('');
   const [clearing, setClearing] = useState(false);
   const [remoteConnected, setRemoteConnected] = useState(true);
 
@@ -24,6 +25,7 @@ export function ProjectEditPanel() {
       setInitScript(project.config.initScript || '');
       setDefaultTabs(project.config.defaultTabs || [{ name: 'Terminal' }]);
       setQuickCommands(project.config.quickCommands || []);
+      setDefaultAgentProvider(project.config.defaultAgentProvider || '');
     }
   }, [editingProjectIndex]);
 
@@ -59,6 +61,7 @@ export function ProjectEditPanel() {
       initScript: initScript.trim() || undefined,
       defaultTabs: tabs.length > 0 ? tabs : undefined,
       quickCommands: cmds.length > 0 ? cmds : undefined,
+      defaultAgentProvider: defaultAgentProvider || undefined,
     });
     handleClose();
   };
@@ -186,6 +189,20 @@ export function ProjectEditPanel() {
               placeholder="e.g. nvm use 22.22&#10;source .env"
               rows={3}
             />
+          </div>
+
+          <div className="settings-group">
+            <label className="settings-label">Default Agent</label>
+            <select
+              className="settings-select"
+              value={defaultAgentProvider}
+              onChange={(e) => setDefaultAgentProvider(e.target.value as AgentProvider | '')}
+            >
+              <option value="">None</option>
+              <option value="claude">Claude</option>
+              <option value="copilot">Copilot</option>
+              <option value="gemini">Gemini</option>
+            </select>
           </div>
 
           <div className="project-edit-field">

@@ -209,7 +209,9 @@ export function TabBar() {
             className="context-menu-item"
             onClick={() => { emit(Events.NEW_AGENT_TAB, activeProjectIndex); setAddMenu(null); }}
           >
-            Agent
+            {project.config.defaultAgentProvider
+              ? `Agent (${project.config.defaultAgentProvider.charAt(0).toUpperCase() + project.config.defaultAgentProvider.slice(1)})`
+              : 'Agent'}
           </button>
         </div>
       )}
