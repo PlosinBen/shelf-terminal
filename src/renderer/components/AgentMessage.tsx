@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
+import { marked } from 'marked';
 
 export interface AgentMsg {
   id: string;
@@ -16,6 +17,12 @@ export interface AgentMsg {
 
 interface AgentMessageProps {
   message: AgentMsg;
+}
+
+marked.setOptions({ breaks: true, gfm: true });
+
+function renderMarkdown(text: string): string {
+  return marked.parse(text, { async: false }) as string;
 }
 
 function stripCwd(filePath: string, cwd?: string): string {
@@ -218,13 +225,13 @@ export function AgentMessage({ message }: AgentMessageProps) {
     ? `${message.provider.charAt(0).toUpperCase() + message.provider.slice(1)}:`
     : 'Assistant:';
 
+  const html = useMemo(() => renderMarkdown(message.content), [message.content]);
+
   return (
     <div className="agent-msg agent-msg-assistant">
       <span className="agent-msg-label">{label}</span>
-      <div className="agent-msg-content">
-        {message.content}
-        {message.streaming && <span className="agent-cursor" />}
-      </div>
+      <div className="agent-msg-content agent-markdown" dangerouslySetInnerHTML={{ __html: html }} />
+      {message.streaming && <span className="agent-cursor" />}
     </div>
   );
 }
