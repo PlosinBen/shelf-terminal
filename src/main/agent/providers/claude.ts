@@ -209,6 +209,17 @@ function processMessage(msg: SDKMessage): AgentEvent[] {
       const cost = msg.subtype === 'success' ? msg.total_cost_usd : undefined;
       const usage = msg.subtype === 'success' ? msg.usage : undefined;
       const numTurns = msg.subtype === 'success' ? msg.num_turns : undefined;
+
+      let contextUsedTokens: number | undefined;
+      let contextWindow: number | undefined;
+      if (msg.subtype === 'success' && msg.modelUsage) {
+        const models = Object.values(msg.modelUsage);
+        if (models.length > 0) {
+          const primary = models[0];
+          contextWindow = primary.contextWindow;
+          contextUsedTokens = primary.inputTokens + primary.cacheReadInputTokens + primary.cacheCreationInputTokens;
+        }
+      }
       const payload: AgentMessagePayload = {
         type: 'result',
         content: resultText,
@@ -227,6 +238,8 @@ function processMessage(msg: SDKMessage): AgentEvent[] {
           outputTokens: usage?.output_tokens,
           numTurns,
           sessionId: msg.session_id,
+          contextUsedTokens,
+          contextWindow,
         },
       });
       break;

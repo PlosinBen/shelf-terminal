@@ -36,6 +36,8 @@ export interface AgentStatusPayload {
   numTurns?: number;
   sessionId?: string;
   rateLimit?: RateLimitInfo;
+  contextUsedTokens?: number;
+  contextWindow?: number;
 }
 
 export interface ProviderCapabilities {

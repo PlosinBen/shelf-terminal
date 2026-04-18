@@ -56,6 +56,7 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
   const [currentModel, setCurrentModel] = useState<string | undefined>();
   const [currentEffort, setCurrentEffort] = useState('high');
   const [agentStatus, setAgentStatus] = useState<'idle' | 'running'>('idle');
+  const [contextInfo, setContextInfo] = useState<{ used: number; window: number } | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -280,6 +281,9 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
           input: payload.inputTokens ?? prev.input,
           output: payload.outputTokens ?? prev.output,
         }));
+      }
+      if ((payload as any).contextUsedTokens != null && (payload as any).contextWindow) {
+        setContextInfo({ used: (payload as any).contextUsedTokens, window: (payload as any).contextWindow });
       }
       if ((payload as any).rateLimit) {
         const rl = (payload as any).rateLimit;
@@ -662,6 +666,19 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
             </span>
           </>
         )}
+
+        {contextInfo && contextInfo.window > 0 && (() => {
+          const ratio = contextInfo.used / contextInfo.window;
+          const color = ratio >= 0.8 ? '#e06c75' : ratio >= 0.5 ? '#e5c07b' : undefined;
+          return (
+            <>
+              <span className="agent-status-sep">|</span>
+              <span className="agent-status-seg" style={color ? { color } : undefined}>
+                <span className="agent-status-seg-label">ctx: </span>{Math.round(ratio * 100)}%
+              </span>
+            </>
+          );
+        })()}
 
         {(tokens.input > 0 || tokens.output > 0) && (
           <>
