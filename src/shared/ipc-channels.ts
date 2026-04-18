@@ -63,6 +63,7 @@ export const IPC = {
   AGENT_RESOLVE_PERMISSION: 'agent:resolve-permission',
   AGENT_SET_MODE: 'agent:set-mode',
   AGENT_SLASH_COMMANDS: 'agent:slash-commands',
+  AGENT_SWITCH_PROVIDER: 'agent:switch-provider',
 
   // Main → Renderer (send)
   PTY_DATA: 'pty:data',

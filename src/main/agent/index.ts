@@ -1,6 +1,8 @@
 import { ipcMain, BrowserWindow } from 'electron';
 import { IPC } from '@shared/ipc-channels';
 import { createClaudeBackend } from './providers/claude';
+import { createCopilotBackend } from './providers/copilot';
+import { createGeminiBackend } from './providers/gemini';
 import { createRemoteBackend } from './remote';
 import { log } from '@shared/logger';
 import type { AgentProvider, Connection } from '@shared/types';
@@ -15,6 +17,7 @@ interface Session {
   sdkSessionId?: string;
   permissionMode: string;
   pendingPermissions: Map<string, (result: PermissionResult) => void>;
+  providerSessionIds: Partial<Record<AgentProvider, string>>;
 }
 
 const sessions = new Map<string, Session>();
@@ -39,8 +42,9 @@ function createBackend(provider: AgentProvider, connection: Connection, initScri
     case 'claude':
       return createClaudeBackend();
     case 'copilot':
+      return createCopilotBackend();
     case 'gemini':
-      throw new Error(`Provider '${provider}' not yet implemented`);
+      return createGeminiBackend();
     default:
       throw new Error(`Unknown provider: ${provider}`);
   }
@@ -56,6 +60,7 @@ export function registerAgentHandlers() {
         tabId, projectId: '', provider, backend, state: 'idle',
         permissionMode: 'default',
         pendingPermissions: new Map(),
+        providerSessionIds: {},
       };
       sessions.set(tabId, session);
     }
@@ -88,6 +93,7 @@ export function registerAgentHandlers() {
             broadcast(IPC.AGENT_MESSAGE, { tabId, ...event.payload });
             if (event.payload.sessionId && !session.sdkSessionId) {
               session.sdkSessionId = event.payload.sessionId;
+              session.providerSessionIds[session.provider] = event.payload.sessionId;
             }
             break;
           case 'stream':
@@ -162,6 +168,22 @@ export function registerAgentHandlers() {
     if (session) {
       session.permissionMode = mode;
     }
+  });
+
+  ipcMain.handle(IPC.AGENT_SWITCH_PROVIDER, async (_event, { tabId, provider, connection, initScript }: { tabId: string; provider: AgentProvider; connection: Connection; initScript?: string }) => {
+    const session = sessions.get(tabId);
+    if (!session) return;
+
+    session.providerSessionIds[session.provider] = session.sdkSessionId;
+
+    session.backend.dispose();
+
+    session.provider = provider;
+    session.backend = createBackend(provider, connection, initScript);
+    session.state = 'idle';
+    session.sdkSessionId = session.providerSessionIds[provider];
+
+    broadcast(IPC.AGENT_STATUS, { tabId, state: 'idle', model: undefined });
   });
 
   log.info('agent', 'Agent IPC handlers registered');

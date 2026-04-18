@@ -1988,6 +1988,22 @@ button {
   color: var(--text-muted);
 }
 
+.agent-provider-switch {
+  background: none;
+  color: var(--text);
+  border: none;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+  outline: none;
+}
+
+.agent-provider-switch:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .agent-status-model {
   opacity: 0.7;
 }

@@ -72,6 +72,7 @@ interface ShelfApi {
     resolvePermission: (tabId: string, toolUseId: string, allow: boolean) => Promise<void>;
     slashCommands: (tabId: string) => Promise<{ name: string; description: string }[]>;
     setMode: (tabId: string, mode: string) => Promise<void>;
+    switchProvider: (tabId: string, provider: string, connection: import('../shared/types').Connection, initScript?: string) => Promise<void>;
     onMessage: (callback: (payload: { tabId: string; type: string; content: string; toolName?: string; toolInput?: Record<string, unknown>; toolUseId?: string; parentToolUseId?: string; sessionId?: string; costUsd?: number; inputTokens?: number; outputTokens?: number }) => void) => () => void;
     onStream: (callback: (payload: { tabId: string; type: string; content: string }) => void) => () => void;
     onStatus: (callback: (payload: { tabId: string; state: string; model?: string; costUsd?: number; inputTokens?: number; outputTokens?: number; numTurns?: number; sessionId?: string }) => void) => () => void;

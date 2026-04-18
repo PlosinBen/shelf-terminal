@@ -213,6 +213,29 @@ export function AgentView({ tabId, projectId, cwd, connection, initScript, provi
     window.shelfApi.agent.setMode(tabId, mode);
   }, [tabId]);
 
+  const handleSwitchProvider = useCallback(async (newProvider: AgentProvider) => {
+    if (newProvider === provider || streaming) return;
+    const confirmed = await window.shelfApi.dialog.confirm(
+      `Switch to ${newProvider.charAt(0).toUpperCase() + newProvider.slice(1)}`,
+      `Current session will be paused and can be resumed later.\nContext will not transfer between providers.`,
+      'Switch',
+    );
+    if (!confirmed) return;
+
+    await window.shelfApi.agent.switchProvider(tabId, newProvider, connection, initScript);
+    const id = `msg-${++msgCounter}`;
+    setMessages((prev) => [
+      ...prev.map((m) => ({ ...m, streaming: false })),
+      { id, role: 'system' as const, type: 'system' as const, content: `── Switched to ${newProvider.charAt(0).toUpperCase() + newProvider.slice(1)} ──` },
+    ]);
+    setModel(undefined);
+    setCost(undefined);
+    setTokens({ input: 0, output: 0 });
+    setRateLimit(null);
+    setSlashCommands([]);
+    onSelectProvider(tabId, newProvider);
+  }, [tabId, provider, connection, initScript, streaming, onSelectProvider]);
+
   const handleReset = useCallback(async () => {
     await window.shelfApi.agent.destroy(tabId);
     setMessages([]);
@@ -300,7 +323,16 @@ export function AgentView({ tabId, projectId, cwd, connection, initScript, provi
   return (
     <div className="agent-view agent-view-active">
       <div className="agent-status-bar">
-        <span>{provider.charAt(0).toUpperCase() + provider.slice(1)}</span>
+        <select
+          className="agent-provider-switch"
+          value={provider}
+          onChange={(e) => handleSwitchProvider(e.target.value as AgentProvider)}
+          disabled={streaming}
+        >
+          {AGENT_PROVIDERS.map((p) => (
+            <option key={p.id} value={p.id}>{p.label}</option>
+          ))}
+        </select>
         {model && <span className="agent-status-model">{model}</span>}
         {(tokens.input > 0 || tokens.output > 0) && (
           <span className="agent-status-tokens" title="Input / Output tokens">
