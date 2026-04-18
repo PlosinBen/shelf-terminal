@@ -131,19 +131,12 @@ function ToolBody({ toolName, input, cwd }: { toolName?: string; input?: Record<
       );
     }
 
-    case 'Glob': {
-      return <pre className="agent-tool-code">{String(input.pattern ?? '')}</pre>;
-    }
+    case 'Glob':
+      return null;
 
     case 'Grep': {
-      const pattern = String(input.pattern ?? '');
       const grepPath = input.path ? stripCwd(String(input.path), cwd) : null;
-      return (
-        <>
-          {grepPath && <div className="agent-tool-file-path">in {grepPath}</div>}
-          <pre className="agent-tool-code">{pattern}</pre>
-        </>
-      );
+      return grepPath ? <div className="agent-tool-file-path">in {grepPath}</div> : null;
     }
 
     default:
