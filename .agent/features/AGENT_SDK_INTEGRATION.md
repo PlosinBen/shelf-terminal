@@ -592,9 +592,7 @@ AgentView 從 placeholder 變成真正的對話介面。
 
 **目標：進階功能強化**
 
-1. Session history 持久化（跨重啟保留對話）— 待展開設計：儲存位置、儲存內容範圍、與 SDK session resume 的關係、清理策略
-2. Context compaction 偵測和通知
-3. Terminal ↔ Agent 橋接（event bus：選取文字送給 agent）
+1. Session history 持久化 ✅ — IndexedDB 存 messages、ProjectConfig 存 sdkSessionId、30 天 auto-rotate
 
 ### 已評估不做的功能
 
@@ -607,6 +605,8 @@ AgentView 從 placeholder 變成真正的對話介面。
 | i18n | 維護成本高，使用者群不大 |
 | Detachable windows / Remote access / Profile | 架構複雜度太高，與 Shelf 輕量定位衝突 |
 | Per-project 環境變數 | Init script 已能做同樣的事（`export KEY=VAL`），UI 差異不值得額外維護 |
+| Terminal ↔ Agent 橋接 | 和複製貼上無差別，不值得額外實作 |
+| Context compaction 偵測 | Claude SDK 特有功能，非通用 |
 
 ---
 
