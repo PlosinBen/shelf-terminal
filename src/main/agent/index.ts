@@ -6,7 +6,7 @@ import { createGeminiBackend } from './providers/gemini';
 import { createRemoteBackend } from './remote';
 import { log } from '@shared/logger';
 import type { AgentProvider, Connection } from '@shared/types';
-import type { AgentBackend, AgentSessionState, PermissionResult } from './types';
+import type { AgentBackend, AgentSessionState, PermissionResult, ProviderCapabilities } from './types';
 
 interface Session {
   tabId: string;
@@ -63,6 +63,13 @@ export function registerAgentHandlers() {
         providerSessionIds: {},
       };
       sessions.set(tabId, session);
+
+      if (backend.warmup) {
+        const caps = await backend.warmup(cwd);
+        if (caps) {
+          broadcast(IPC.AGENT_CAPABILITIES, { tabId, ...caps });
+        }
+      }
     }
 
     if (session.state === 'streaming') {
@@ -151,6 +158,18 @@ export function registerAgentHandlers() {
       session.pendingPermissions.delete(toolUseId);
       resolve(allow ? { behavior: 'allow' } : { behavior: 'deny', message: 'Denied by user' });
     }
+  });
+
+  ipcMain.handle(IPC.AGENT_SET_MODEL, async (_event, { tabId, model }: { tabId: string; model: string }) => {
+    // Model will be passed in next query options
+    // For now store on session for future use
+    const session = sessions.get(tabId);
+    if (session) (session as any).model = model;
+  });
+
+  ipcMain.handle(IPC.AGENT_SET_EFFORT, async (_event, { tabId, effort }: { tabId: string; effort: string }) => {
+    const session = sessions.get(tabId);
+    if (session) (session as any).effort = effort;
   });
 
   ipcMain.handle(IPC.AGENT_SLASH_COMMANDS, async (_event, { tabId }: { tabId: string }) => {

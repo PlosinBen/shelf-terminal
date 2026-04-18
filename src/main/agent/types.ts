@@ -38,10 +38,18 @@ export interface AgentStatusPayload {
   rateLimit?: RateLimitInfo;
 }
 
+export interface ProviderCapabilities {
+  models: { value: string; displayName: string }[];
+  permissionModes: string[];
+  effortLevels: string[];
+  slashCommands: { name: string; description: string }[];
+}
+
 export interface AgentBackend {
   query(prompt: string, cwd: string, opts?: AgentQueryOptions): AsyncGenerator<AgentEvent>;
   stop(): Promise<void>;
   dispose(): void;
+  warmup?(cwd: string): Promise<ProviderCapabilities | null>;
   getSlashCommands?(): Promise<{ name: string; description: string }[]>;
 }
 

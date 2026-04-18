@@ -52,6 +52,10 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
   const [slashCommands, setSlashCommands] = useState<{ name: string; description: string }[]>([]);
   const [showSlashMenu, setShowSlashMenu] = useState(false);
   const [slashFilter, setSlashFilter] = useState('');
+  const [capabilities, setCapabilities] = useState<{ models: { value: string; displayName: string }[]; permissionModes: string[]; effortLevels: string[] } | null>(null);
+  const [currentModel, setCurrentModel] = useState<string | undefined>();
+  const [currentEffort, setCurrentEffort] = useState('high');
+  const [agentStatus, setAgentStatus] = useState<'idle' | 'running'>('idle');
   const listRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -223,7 +227,10 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
 
     const offStatus = window.shelfApi.agent.onStatus((payload) => {
       if (payload.tabId !== tabId) return;
-      setStreaming(payload.state === 'streaming');
+      const isStreaming = payload.state === 'streaming';
+      setStreaming(isStreaming);
+      setAgentStatus(isStreaming ? 'running' : 'idle');
+      if (payload.model) setCurrentModel(payload.model);
       if (payload.sessionId && provider) {
         updateProjectConfig(projectIndex, {
           agentSessionIds: { ...({} as any), [provider]: payload.sessionId },
@@ -261,7 +268,13 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
       setPendingPermission({ toolUseId: payload.toolUseId, toolName: payload.toolName, input: payload.input });
     });
 
-    return () => { offMessage(); offStream(); offStatus(); offError(); offPermission(); };
+    const offCapabilities = window.shelfApi.agent.onCapabilities((payload) => {
+      if (payload.tabId !== tabId) return;
+      setCapabilities({ models: payload.models, permissionModes: payload.permissionModes, effortLevels: payload.effortLevels });
+      if (payload.slashCommands.length > 0) setSlashCommands(payload.slashCommands);
+    });
+
+    return () => { offMessage(); offStream(); offStatus(); offError(); offPermission(); offCapabilities(); };
   }, [tabId, provider, scrollToBottom]);
 
   const persistMsg = useCallback((role: 'user' | 'assistant' | 'system' | 'tool', type: string, content: string, extra?: { toolName?: string; toolUseId?: string; toolInput?: Record<string, unknown> }) => {
@@ -332,6 +345,30 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
     setPermissionMode(mode);
     window.shelfApi.agent.setMode(tabId, mode);
   }, [tabId]);
+
+  const handleCycleModel = useCallback(() => {
+    if (!capabilities || capabilities.models.length === 0) return;
+    const idx = capabilities.models.findIndex((m) => m.value === currentModel);
+    const next = capabilities.models[(idx + 1) % capabilities.models.length];
+    setCurrentModel(next.value);
+    window.shelfApi.agent.setModel(tabId, next.value);
+  }, [tabId, capabilities, currentModel]);
+
+  const handleCycleMode = useCallback(() => {
+    if (!capabilities || capabilities.permissionModes.length === 0) return;
+    const idx = capabilities.permissionModes.indexOf(permissionMode);
+    const next = capabilities.permissionModes[(idx + 1) % capabilities.permissionModes.length];
+    setPermissionMode(next);
+    window.shelfApi.agent.setMode(tabId, next);
+  }, [tabId, capabilities, permissionMode]);
+
+  const handleCycleEffort = useCallback(() => {
+    if (!capabilities || capabilities.effortLevels.length === 0) return;
+    const idx = capabilities.effortLevels.indexOf(currentEffort);
+    const next = capabilities.effortLevels[(idx + 1) % capabilities.effortLevels.length];
+    setCurrentEffort(next);
+    window.shelfApi.agent.setEffort(tabId, next);
+  }, [tabId, capabilities, currentEffort]);
 
   const handleSwitchProvider = useCallback(async (newProvider: AgentProvider) => {
     if (newProvider === provider || streaming) return;
@@ -528,16 +565,6 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
           disabled={streaming}
         />
         <div className="agent-input-actions">
-          <select
-            className="agent-mode-select"
-            value={permissionMode}
-            onChange={(e) => handleModeChange(e.target.value)}
-            title="Permission mode"
-          >
-            <option value="default">Default</option>
-            <option value="acceptEdits">Accept Edits</option>
-            <option value="bypassPermissions">Bypass</option>
-          </select>
           {streaming ? (
             <button className="agent-btn agent-btn-stop" onClick={handleStop}>Stop</button>
           ) : (
@@ -547,6 +574,11 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
       </div>
 
       <div className="agent-status-bar">
+        <span className="agent-status-dot" style={{ color: agentStatus === 'running' ? '#e5c07b' : '#98c379' }}>
+          {agentStatus === 'running' ? '\u25CF' : '\u25CF'}
+        </span>
+        <span className="agent-status-label">{agentStatus}</span>
+        <span className="agent-status-sep">|</span>
         <select
           className="agent-provider-switch"
           value={provider}
@@ -557,17 +589,63 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
             <option key={p.id} value={p.id}>{p.label}</option>
           ))}
         </select>
-        {model && <><span className="agent-status-sep">·</span><span className="agent-status-model">{model}</span></>}
+
+        {currentModel && (
+          <>
+            <span className="agent-status-sep">|</span>
+            <span className={`agent-status-seg ${capabilities ? 'agent-status-interactive' : ''}`} onClick={handleCycleModel}>
+              {currentModel}
+            </span>
+          </>
+        )}
+
+        {capabilities && capabilities.permissionModes.length > 0 && (
+          <>
+            <span className="agent-status-sep">|</span>
+            <span className="agent-status-seg agent-status-interactive" style={{ color: permissionMode === 'bypassPermissions' ? '#e06c75' : permissionMode === 'acceptEdits' ? '#e5c07b' : undefined }} onClick={handleCycleMode}>
+              {permissionMode}
+            </span>
+          </>
+        )}
+
+        {capabilities && capabilities.effortLevels.length > 0 && (
+          <>
+            <span className="agent-status-sep">|</span>
+            <span className="agent-status-seg agent-status-interactive" onClick={handleCycleEffort}>
+              <span className="agent-status-seg-label">effort: </span>{currentEffort}
+            </span>
+          </>
+        )}
+
         {(tokens.input > 0 || tokens.output > 0) && (
-          <><span className="agent-status-sep">·</span><span className="agent-status-tokens" title="Input / Output tokens">{formatTokens(tokens.input)} / {formatTokens(tokens.output)}</span></>
+          <>
+            <span className="agent-status-sep">|</span>
+            <span className="agent-status-seg">{Math.round(tokens.input / 1000)}k+{Math.round(tokens.output / 1000)}k</span>
+          </>
         )}
+
+        {cost !== undefined && (
+          <>
+            <span className="agent-status-sep">|</span>
+            <span className="agent-status-seg">${cost.toFixed(3)}</span>
+          </>
+        )}
+
         {rateLimit?.utilization !== undefined && (
-          <><span className="agent-status-sep">·</span><span className={`agent-status-rate ${rateLimit.utilization > 0.8 ? 'warning' : ''}`} title={rateLimit.type ?? 'Rate limit'}>
-            {Math.round(rateLimit.utilization * 100)}%
-            {rateLimit.resetsAt && <span className="agent-rate-reset"> resets {formatResetTime(rateLimit.resetsAt)}</span>}
-          </span></>
+          <>
+            <span className="agent-status-sep">|</span>
+            <span className="agent-status-seg" style={{ color: rateLimit.utilization > 0.8 ? '#e06c75' : rateLimit.utilization > 0.5 ? '#e5c07b' : undefined }}>
+              {rateLimit.type === 'five_hour' ? '5h' : rateLimit.type === 'seven_day' ? '7d' : rateLimit.type ?? ''}: {Math.round(rateLimit.utilization * 100)}%
+              {rateLimit.resetsAt && (() => {
+                const diff = rateLimit.resetsAt! - Date.now();
+                if (diff <= 0) return null;
+                const mins = Math.ceil(diff / 60000);
+                return <span> ↻{mins >= 60 ? `${(mins / 60).toFixed(1)}h` : `${mins}m`}</span>;
+              })()}
+            </span>
+          </>
         )}
-        {cost !== undefined && <><span className="agent-status-sep">·</span><span className="agent-status-cost">${cost.toFixed(4)}</span></>}
+
         <span style={{ marginLeft: 'auto' }} />
         <button className="agent-reset-btn" onClick={handleReset} disabled={streaming} title="Reset session">Reset</button>
       </div>

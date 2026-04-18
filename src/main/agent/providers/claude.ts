@@ -1,4 +1,4 @@
-import type { AgentBackend, AgentEvent, AgentMessagePayload, AgentQueryOptions } from '../types';
+import type { AgentBackend, AgentEvent, AgentMessagePayload, AgentQueryOptions, ProviderCapabilities } from '../types';
 import type { Query, SDKMessage, Options, CanUseTool } from '@anthropic-ai/claude-agent-sdk';
 import { log } from '@shared/logger';
 
@@ -15,8 +15,49 @@ async function loadSdk() {
 export function createClaudeBackend(): AgentBackend {
   let activeQuery: Query | null = null;
   let abortController: AbortController | null = null;
+  let cachedCapabilities: ProviderCapabilities | null = null;
 
   return {
+    async warmup(cwd: string): Promise<ProviderCapabilities | null> {
+      if (cachedCapabilities) return cachedCapabilities;
+
+      const queryFn = await loadSdk();
+      const warmupAbort = new AbortController();
+
+      const generator = queryFn({
+        prompt: ' ',
+        options: {
+          cwd,
+          permissionMode: 'plan',
+          abortController: warmupAbort,
+        },
+      });
+
+      try {
+        for await (const msg of generator) {
+          if (msg.type === 'system' && msg.subtype === 'init') {
+            const [models, commands] = await Promise.all([
+              generator.supportedModels().catch(() => []),
+              generator.supportedCommands().catch(() => []),
+            ]);
+            cachedCapabilities = {
+              models: models.map((m) => ({ value: m.value, displayName: m.displayName })),
+              permissionModes: ['default', 'acceptEdits', 'bypassPermissions', 'plan'],
+              effortLevels: ['low', 'medium', 'high', 'max'],
+              slashCommands: commands.map((c) => ({ name: c.name, description: c.description })),
+            };
+            log.info('claude-backend', `Warmup done: ${models.length} models, ${commands.length} commands`);
+            warmupAbort.abort();
+            break;
+          }
+        }
+      } catch {
+        // warmup abort throws, expected
+      }
+
+      return cachedCapabilities;
+    },
+
     async *query(prompt: string, cwd: string, opts?: AgentQueryOptions): AsyncGenerator<AgentEvent> {
       const queryFn = await loadSdk();
       abortController = new AbortController();

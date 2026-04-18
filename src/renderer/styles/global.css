@@ -1989,16 +1989,25 @@ button {
   flex-shrink: 0;
 }
 
-.agent-status-bar .agent-status-sep {
+.agent-status-dot {
+  flex-shrink: 0;
+}
+
+.agent-status-label {
+  color: var(--text-muted);
+}
+
+.agent-status-sep {
+  color: var(--text-muted);
   opacity: 0.3;
 }
 
 .agent-provider-switch {
   background: none;
-  color: var(--text);
+  color: var(--text-muted);
   border: none;
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 500;
   cursor: pointer;
   padding: 0;
   outline: none;
@@ -2009,12 +2018,23 @@ button {
   cursor: default;
 }
 
-.agent-status-model {
-  opacity: 0.7;
+.agent-status-seg {
+  color: var(--text-muted);
 }
 
-.agent-status-cost {
-  margin-left: auto;
+.agent-status-seg-label {
+  color: var(--text-muted);
+}
+
+.agent-status-interactive {
+  cursor: pointer;
+  border-radius: 3px;
+  padding: 1px 4px;
+  margin: -1px -4px;
+}
+
+.agent-status-interactive:hover {
+  background: rgba(255, 255, 255, 0.05);
 }
 
 .agent-reset-btn {
@@ -2679,36 +2699,3 @@ button {
   white-space: nowrap;
 }
 
-/* ── Agent Status Extras ── */
-
-.agent-status-tokens {
-  font-size: 11px;
-}
-
-.agent-status-rate {
-  font-size: 11px;
-}
-
-.agent-status-rate.warning {
-  color: #e5c07b;
-}
-
-.agent-rate-reset {
-  font-size: 10px;
-  opacity: 0.7;
-}
-
-.agent-mode-select {
-  background: var(--bg);
-  color: var(--text-muted);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 4px 6px;
-  font-size: 12px;
-  outline: none;
-  cursor: pointer;
-}
-
-.agent-mode-select:focus {
-  border-color: var(--accent);
-}

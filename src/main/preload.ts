@@ -111,6 +111,15 @@ contextBridge.exposeInMainWorld('shelfApi', {
       ipcRenderer.invoke(IPC.AGENT_RESOLVE_PERMISSION, { tabId, toolUseId, allow }),
     slashCommands: (tabId: string) =>
       ipcRenderer.invoke(IPC.AGENT_SLASH_COMMANDS, { tabId }),
+    setModel: (tabId: string, model: string) =>
+      ipcRenderer.invoke(IPC.AGENT_SET_MODEL, { tabId, model }),
+    setEffort: (tabId: string, effort: string) =>
+      ipcRenderer.invoke(IPC.AGENT_SET_EFFORT, { tabId, effort }),
+    onCapabilities: (callback: (payload: any) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, payload: any) => callback(payload);
+      ipcRenderer.on(IPC.AGENT_CAPABILITIES, listener);
+      return () => ipcRenderer.removeListener(IPC.AGENT_CAPABILITIES, listener);
+    },
     setMode: (tabId: string, mode: string) =>
       ipcRenderer.invoke(IPC.AGENT_SET_MODE, { tabId, mode }),
     switchProvider: (tabId: string, provider: string, connection: unknown, initScript?: string) =>
