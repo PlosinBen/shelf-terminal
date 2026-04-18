@@ -2045,7 +2045,7 @@ button {
   padding: 8px 18px;
   display: flex;
   flex-direction: column;
-  gap: 15px;
+  gap: 4px;
 }
 
 .agent-empty {
@@ -2082,16 +2082,20 @@ button {
 /* ── User message ── */
 
 .agent-msg-user {
-  padding: 6px 0;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 4px;
+  margin-top: 12px;
 }
 
-/* ── Assistant message (inside turn-agent group) ── */
+.agent-msg-user:first-child {
+  margin-top: 0;
+}
+
+/* ── Assistant message ── */
 
 .agent-msg-assistant {
-  padding: 8px 15px;
-  border-left: 2px solid var(--border);
-  background: rgba(255, 255, 255, 0.02);
-  border-radius: 0 4px 4px 0;
+  padding: 2px 0;
 }
 
 /* ── System & error ── */
