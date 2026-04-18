@@ -9,6 +9,7 @@ import { ProjectEditPanel } from './components/ProjectEditPanel';
 import { CommandPicker } from './components/CommandPicker';
 import { WorktreeDialog } from './components/WorktreeDialog';
 import { RemoveConfirmDialog } from './components/RemoveConfirmDialog';
+import { BottomBar, SWITCH_BRANCH_EVENT } from './components/BottomBar';
 import { DevToolsPanel } from './components/DevToolsPanel';
 import { useKeybindings } from './hooks/useKeybindings';
 import { useStore, setProjects, setSettings, setUpdateStatus, addProject, addTab, setActiveTab, removeTab, removeProject, setSplitTab, toggleSidebar, clearUnread, setInvalidProjects } from './store';
@@ -148,7 +149,20 @@ export function App() {
       }
     });
 
-    return () => { offCloseTab(); offRemoveProject(); offNewTab(); offConnectProject(); offDisconnectProject(); offAddProject(); offToggleSplit(); };
+    const offSwitchBranch = on(SWITCH_BRANCH_EVENT, async (projectIndex: number, branch: string, callback: (success: boolean, branch?: string) => void) => {
+      const proj = projects[projectIndex];
+      if (!proj) { callback(false); return; }
+
+      const result = await window.shelfApi.git.checkout(proj.config.connection, proj.config.cwd, branch);
+      if (result.ok) {
+        callback(true, branch);
+      } else {
+        void window.shelfApi.dialog.warn('Branch switch failed', result.error ?? 'Unknown error');
+        callback(false);
+      }
+    });
+
+    return () => { offCloseTab(); offRemoveProject(); offNewTab(); offConnectProject(); offDisconnectProject(); offAddProject(); offToggleSplit(); offSwitchBranch(); };
   }, [projects]);
 
   useEffect(() => {
@@ -252,6 +266,7 @@ export function App() {
               })}
           </div>
         </div>
+        <BottomBar />
         </div>
         <DevToolsPanel />
       </main>
