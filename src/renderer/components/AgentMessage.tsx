@@ -78,13 +78,10 @@ function ToolBody({ toolName, input, cwd }: { toolName?: string; input?: Record<
       return <pre className="agent-tool-code">{cmd}</pre>;
     }
 
-    case 'Read': {
-      const filePath = stripCwd(String(input.file_path ?? ''), cwd);
-      return <div className="agent-tool-file-path">{filePath}</div>;
-    }
+    case 'Read':
+      return null;
 
     case 'Edit': {
-      const filePath = stripCwd(String(input.file_path ?? ''), cwd);
       const oldStr = String(input.old_string ?? '');
       const newStr = String(input.new_string ?? '');
       const oldLines = oldStr.split('\n');
@@ -93,7 +90,6 @@ function ToolBody({ toolName, input, cwd }: { toolName?: string; input?: Record<
 
       return (
         <>
-          <div className="agent-tool-file-path">{filePath}</div>
           <div className="agent-diff-side">
             <div className="agent-diff-pane">
               {Array.from({ length: maxLen }, (_, i) => (
@@ -119,12 +115,10 @@ function ToolBody({ toolName, input, cwd }: { toolName?: string; input?: Record<
     }
 
     case 'Write': {
-      const filePath = stripCwd(String(input.file_path ?? input.content ? (input.file_path ?? '') : ''), cwd);
       const content = String(input.content ?? '');
       const { lines, remaining } = truncateLines(content, 20);
       return (
         <>
-          {filePath && <div className="agent-tool-file-path">{filePath}</div>}
           <div className="agent-tool-diff-inline">
             {lines.map((line, i) => (
               <div key={i} className="agent-diff-row agent-diff-add">
@@ -171,17 +165,18 @@ export function AgentMessage({ message }: AgentMessageProps) {
   if (message.type === 'tool_use') {
     const summary = getToolSummary(message.toolName, message.toolInput, message.cwd);
     const hasResult = !!message.toolResult;
+    const hasDetailBody = message.toolName === 'Edit' || message.toolName === 'Write';
     return (
       <div className="agent-msg agent-msg-tool">
         <div className="agent-tool-header" onClick={() => setExpanded(!expanded)}>
           <span className={`agent-chevron ${expanded ? 'expanded' : ''}`}>&#9654;</span>
           <span className="agent-tool-name">{message.toolName}</span>
-          {summary && !expanded && <span className="agent-tool-summary">{summary}</span>}
+          {summary && <span className={`agent-tool-summary ${expanded ? 'agent-tool-summary-full' : ''}`}>{summary}</span>}
           {message.streaming && <span className="agent-tool-badge">running</span>}
         </div>
         {expanded && (
           <>
-            <ToolBody toolName={message.toolName} input={message.toolInput} cwd={message.cwd} />
+            {hasDetailBody && <ToolBody toolName={message.toolName} input={message.toolInput} cwd={message.cwd} />}
             {hasResult && (() => {
               const { lines, remaining } = truncateLines(message.toolResult!, 30);
               return <pre className="agent-tool-code agent-tool-result-block">{lines.join('\n')}{remaining > 0 ? `\n... +${remaining} more lines` : ''}</pre>;

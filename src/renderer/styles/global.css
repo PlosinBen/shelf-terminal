@@ -2042,7 +2042,7 @@ button {
 .agent-messages {
   flex: 1;
   overflow-y: auto;
-  padding: 8px 8px;
+  padding: 8px 8px 8px 16px;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -2068,7 +2068,6 @@ button {
   margin-top: 4px;
   padding: 6px 12px;
   border-left: 2px solid var(--border);
-  background: rgba(255, 255, 255, 0.02);
   border-radius: 0 4px 4px 0;
   display: flex;
   flex-direction: column;
@@ -2100,7 +2099,7 @@ button {
 
 .agent-msg-user {
   padding: 8px 12px;
-  background: rgba(229, 192, 123, 0.08);
+  background: rgba(229, 192, 123, 0.15);
 }
 
 /* ── Assistant message ── */
@@ -2231,11 +2230,12 @@ button {
 .agent-tool-header {
   display: flex;
   gap: 8px;
-  align-items: center;
+  align-items: flex-start;
   padding: 4px;
   cursor: pointer;
   user-select: none;
   border-radius: 3px;
+  min-width: 0;
 }
 
 .agent-tool-header:hover {
@@ -2260,6 +2260,14 @@ button {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-width: 0;
+}
+
+.agent-tool-summary-full {
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow: visible;
+  text-overflow: unset;
 }
 
 .agent-tool-badge {
@@ -2400,6 +2408,8 @@ button {
   color: var(--text);
   max-height: 400px;
   overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
 }
 
 .agent-tool-truncated {
