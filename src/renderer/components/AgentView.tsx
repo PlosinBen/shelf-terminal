@@ -61,6 +61,7 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const streamingTextRef = useRef<string>('');
   const streamingIdRef = useRef<string | null>(null);
+  const pendingQueue = useRef<string[]>([]);
   const isAtBottomRef = useRef(true);
   const initialScrollDone = useRef(false);
   const prevMessageCount = useRef(0);
@@ -159,6 +160,30 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
     }
   }, [messages.length]);
 
+  const persistMsg = useCallback((role: 'user' | 'assistant' | 'system' | 'tool', type: string, content: string, extra?: { toolName?: string; toolUseId?: string; toolInput?: Record<string, unknown> }) => {
+    saveMessage({
+      projectId,
+      timestamp: Date.now(),
+      role,
+      type: type as any,
+      content,
+      provider,
+      toolName: extra?.toolName,
+      toolUseId: extra?.toolUseId,
+      toolInput: extra?.toolInput ? JSON.stringify(extra.toolInput) : undefined,
+    });
+  }, [projectId, provider]);
+
+  const sendMessage = useCallback((text: string) => {
+    const id = `msg-${++msgCounter}`;
+    setMessages((prev) => [...prev, { id, role: 'user', type: 'text', content: text }]);
+    persistMsg('user', 'text', text);
+    streamingTextRef.current = '';
+    streamingIdRef.current = null;
+    scrollToBottom(true);
+    window.shelfApi.agent.send(tabId, text, cwd, provider!, connection, initScript);
+  }, [provider, tabId, cwd, connection, initScript, scrollToBottom, persistMsg]);
+
   useEffect(() => {
     const offMessage = window.shelfApi.agent.onMessage((payload) => {
       if (payload.tabId !== tabId) return;
@@ -230,6 +255,15 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
       const isStreaming = payload.state === 'streaming';
       setStreaming(isStreaming);
       setAgentStatus(isStreaming ? 'running' : 'idle');
+
+      if (!isStreaming && pendingQueue.current.length > 0) {
+        const next = pendingQueue.current.shift()!;
+        setMessages((prev) => prev.map((m) =>
+          m.role === 'user' && m.content === next && m.streaming ? { ...m, streaming: false } : m,
+        ));
+        setTimeout(() => sendMessage(next), 100);
+      }
+
       if (payload.model) setCurrentModel(payload.model);
       if (payload.sessionId && provider) {
         updateProjectConfig(projectIndex, {
@@ -275,36 +309,24 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
     });
 
     return () => { offMessage(); offStream(); offStatus(); offError(); offPermission(); offCapabilities(); };
-  }, [tabId, provider, scrollToBottom]);
-
-  const persistMsg = useCallback((role: 'user' | 'assistant' | 'system' | 'tool', type: string, content: string, extra?: { toolName?: string; toolUseId?: string; toolInput?: Record<string, unknown> }) => {
-    saveMessage({
-      projectId,
-      timestamp: Date.now(),
-      role,
-      type: type as any,
-      content,
-      provider,
-      toolName: extra?.toolName,
-      toolUseId: extra?.toolUseId,
-      toolInput: extra?.toolInput ? JSON.stringify(extra.toolInput) : undefined,
-    });
-  }, [projectId, provider]);
+  }, [tabId, provider, scrollToBottom, sendMessage]);
 
   const handleSend = useCallback(() => {
     const text = input.trim();
-    if (!text || streaming || !provider) return;
+    if (!text || !provider) return;
 
-    const id = `msg-${++msgCounter}`;
-    setMessages((prev) => [...prev, { id, role: 'user', type: 'text', content: text }]);
-    persistMsg('user', 'text', text);
     setInput('');
-    streamingTextRef.current = '';
-    streamingIdRef.current = null;
-    scrollToBottom(true);
 
-    window.shelfApi.agent.send(tabId, text, cwd, provider, connection, initScript);
-  }, [input, streaming, provider, tabId, cwd, connection, initScript, scrollToBottom]);
+    if (streaming) {
+      pendingQueue.current.push(text);
+      const id = `msg-${++msgCounter}`;
+      setMessages((prev) => [...prev, { id, role: 'user', type: 'text', content: text, streaming: true }]);
+      scrollToBottom(true);
+      return;
+    }
+
+    sendMessage(text);
+  }, [input, streaming, provider, sendMessage, scrollToBottom]);
 
   const handleStop = useCallback(() => {
     window.shelfApi.agent.stop(tabId);
@@ -509,6 +531,15 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
             </div>
           ));
         })()}
+        {streaming && (() => {
+          const lastNonPending = [...messages].reverse().find((m) => !m.streaming);
+          return lastNonPending?.role === 'user';
+        })() && (
+          <div className="agent-loading">
+            <span className="agent-loading-spinner" />
+            <span className="agent-loading-text">Agent is running... (Esc to stop)</span>
+          </div>
+        )}
         <div ref={bottomRef} />
       </div>
 
@@ -560,9 +591,8 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
           value={input}
           onChange={handleInputChange}
           onKeyDown={handleKeyDown}
-          placeholder={streaming ? 'Agent is running... (Esc to stop)' : 'Message...'}
+          placeholder="Message..."
           rows={1}
-          disabled={streaming}
         />
         <div className="agent-input-actions">
           {streaming ? (

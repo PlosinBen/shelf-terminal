@@ -2122,6 +2122,17 @@ button {
   background: rgba(229, 192, 123, 0.15);
 }
 
+.agent-msg-pending {
+  opacity: 0.5;
+  position: relative;
+}
+
+.agent-pending-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-left: 8px;
+}
+
 /* ── Assistant message ── */
 
 .agent-msg-assistant {
@@ -2404,6 +2415,34 @@ button {
   border: none;
   border-top: 1px solid var(--border);
   margin: 8px 0;
+}
+
+/* ── Agent Loading ── */
+
+.agent-loading {
+  padding: 8px 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.agent-loading-text {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.agent-loading-spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--text-muted);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: agent-spin 0.8s linear infinite;
+}
+
+@keyframes agent-spin {
+  to { transform: rotate(360deg); }
 }
 
 .agent-tool-result-block {
