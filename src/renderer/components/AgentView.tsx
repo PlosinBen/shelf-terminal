@@ -469,6 +469,15 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.nativeEvent.isComposing) return;
+
+    if (e.key === 'Tab' && showSlashMenu) {
+      e.preventDefault();
+      const filtered = slashCommands.filter((c) => c.name.toLowerCase().includes(slashFilter));
+      if (filtered.length > 0) {
+        handleSlashSelect(filtered[0].name);
+      }
+      return;
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       if (showSlashMenu) {
