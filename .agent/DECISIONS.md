@@ -252,3 +252,19 @@
 **原因**: git worktree 操作需要在遠端（SSH/Docker）執行指令，透過 connector 抽象層可以統一處理，不需要針對每種 connection type 寫不同的 git 邏輯。只暴露特定 git IPC channel 而非通用 exec，避免安全風險。
 
 **不要改**: 不要在 preload 暴露通用 exec API。
+
+## 21. Bottom Bar 顯示 connection / path / branch
+
+**決策**: Terminal section 底部加 BottomBar 元件，左側顯示 connection type 和 cwd，右側顯示 git branch。Branch 可點擊展開 dropdown 切換。Worktree-occupied branches 標示 "worktree"，點擊後跳轉到對應 project（或自動建立）而非嘗試 checkout。
+
+**原因**: 使用者需要快速了解當前 project 的 connection 和 branch 狀態。Branch 切換用 `connector.exec()` 執行 `git checkout`，切換前用 `git status --porcelain` 檢查 dirty 狀態。Worktree branch 不能 checkout（git 限制），改為導航到對應 project 更實用。
+
+**不要改**: 不要用隱藏 tab 跑 git checkout（shell exit code 不可靠）。不要把 worktree branch 設為 disabled（使用者會困惑為什麼不能點）。
+
+## 22. Unicode11Addon 預設不啟用
+
+**決策**: xterm.js Unicode11Addon 仍然載入（註冊可用版本），但預設不啟用 `activeVersion`。使用者可在 Settings 勾選 "Unicode 11" 開啟。
+
+**原因**: Unicode11Addon 對 Ambiguous width 字元（如 oh-my-zsh prompt 中的 `→` `✗`）的寬度計算與 zsh 不一致，導致 tab completion 時字元重複顯示。這是 xterm.js 已知限制（#1453）。預設關閉避免大多數使用者踩到此問題。
+
+**不要改**: 不要完全移除 Unicode11Addon（部分使用者需要 CJK/emoji 支援）。

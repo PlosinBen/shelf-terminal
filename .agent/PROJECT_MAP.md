@@ -50,7 +50,8 @@
 | 資料夾選擇器 | `components/FolderPicker.tsx` | 兩步驟（connection type → browse），用 connector API |
 | 資料夾瀏覽器 | `components/FolderBrowser.tsx` | 純展示元件，顯示目錄清單和 keyboard hints |
 | Terminal 搜尋 | `components/SearchBar.tsx` | xterm SearchAddon 整合，Enter/Shift+Enter 搜尋 |
-| Settings 面板 | `components/SettingsPanel.tsx` | Theme/font/scrollback/keybinding 設定 + 錄製模式 |
+| Bottom bar | `components/BottomBar.tsx` | 顯示 connection type、cwd、git branch；branch dropdown 支援切換或跳轉 worktree project |
+| Settings 面板 | `components/SettingsPanel.tsx` | Theme/font/scrollback/keybinding/unicode11 設定 + 錄製模式 |
 | Worktree 建立 | `components/WorktreeDialog.tsx` | 輸入新 branch name 建立 git worktree，產生 sub-project |
 | 刪除確認 | `components/RemoveConfirmDialog.tsx` | Remove project 確認 modal，worktree 可勾選是否清理 worktree files |
 | Project 編輯面板 | `components/ProjectEditPanel.tsx` | 改名、init script、default tabs、quick commands 編輯、Clear uploaded files |

@@ -556,3 +556,27 @@ test('close project via context menu removes it', async ({ shelfApp: { page } })
 
   await expect(items).toHaveCount(before - 1, { timeout: 5_000 });
 });
+
+// ── Bottom Bar ──
+
+test('bottom bar shows connection type and path when connected', async ({ shelfApp: { page } }) => {
+  await ensureConnected(page);
+
+  const bottomBar = page.locator('.bottom-bar');
+  await expect(bottomBar).toBeVisible({ timeout: 3_000 });
+
+  const connection = bottomBar.locator('.bottom-bar-connection');
+  await expect(connection).toHaveText('local');
+
+  const pathEl = bottomBar.locator('.bottom-bar-path');
+  const pathText = await pathEl.textContent();
+  expect(pathText?.length).toBeGreaterThan(0);
+});
+
+test('bottom bar is hidden when no project is active', async ({ shelfApp: { page } }) => {
+  // If no projects exist, bottom bar should not be visible
+  const items = page.locator('.sidebar-item');
+  if (await items.count() === 0) {
+    await expect(page.locator('.bottom-bar')).not.toBeVisible();
+  }
+});
