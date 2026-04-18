@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import type { AgentProvider, Connection } from '@shared/types';
 import { AgentMessage, type AgentMsg } from './AgentMessage';
+import { saveMessage, loadMessages, clearMessages } from '../agent-history';
+import { updateProjectConfig } from '../store';
 
 const AGENT_PROVIDERS: { id: AgentProvider; label: string }[] = [
   { id: 'claude', label: 'Claude' },
@@ -37,7 +39,7 @@ function formatResetTime(epochMs: number): string {
   return `${hours}h${mins % 60}m`;
 }
 
-export function AgentView({ tabId, projectId, cwd, connection, initScript, provider, visible, onSelectProvider }: AgentViewProps) {
+export function AgentView({ tabId, projectId, projectIndex, cwd, connection, initScript, provider, visible, onSelectProvider }: AgentViewProps) {
   const [messages, setMessages] = useState<AgentMsg[]>([]);
   const [input, setInput] = useState('');
   const [streaming, setStreaming] = useState(false);
@@ -54,6 +56,26 @@ export function AgentView({ tabId, projectId, cwd, connection, initScript, provi
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const streamingTextRef = useRef<string>('');
   const streamingIdRef = useRef<string | null>(null);
+
+  // Load history on mount
+  useEffect(() => {
+    if (!provider) return;
+    loadMessages(projectId).then((persisted) => {
+      if (persisted.length > 0) {
+        const loaded: AgentMsg[] = persisted.map((m) => ({
+          id: `hist-${++msgCounter}`,
+          role: m.role,
+          type: m.type,
+          content: m.content,
+          provider: m.provider,
+          toolName: m.toolName,
+          toolUseId: m.toolUseId,
+          toolInput: m.toolInput ? JSON.parse(m.toolInput) : undefined,
+        }));
+        setMessages(loaded);
+      }
+    });
+  }, [projectId, provider]);
 
   const scrollToBottom = useCallback(() => {
     requestAnimationFrame(() => {
@@ -75,10 +97,12 @@ export function AgentView({ tabId, projectId, cwd, connection, initScript, provi
           ...prev.filter((m) => !m.streaming || m.type !== 'text'),
           { id, role: 'assistant', type: 'text', content: payload.content, provider },
         ]);
+        persistMsg('assistant', 'text', payload.content);
         scrollToBottom();
       } else if (payload.type === 'thinking') {
         const id = `msg-${++msgCounter}`;
         setMessages((prev) => [...prev, { id, role: 'assistant', type: 'thinking', content: payload.content }]);
+        persistMsg('assistant', 'thinking', payload.content);
         scrollToBottom();
       } else if (payload.type === 'tool_use') {
         const id = `msg-${++msgCounter}`;
@@ -86,6 +110,7 @@ export function AgentView({ tabId, projectId, cwd, connection, initScript, provi
           ...prev,
           { id, role: 'tool', type: 'tool_use', content: '', toolName: payload.toolName, toolInput: payload.toolInput, toolUseId: payload.toolUseId, streaming: true },
         ]);
+        persistMsg('tool', 'tool_use', '', { toolName: payload.toolName, toolUseId: payload.toolUseId, toolInput: payload.toolInput });
         scrollToBottom();
       } else if (payload.type === 'tool_result') {
         setMessages((prev) => {
@@ -97,6 +122,7 @@ export function AgentView({ tabId, projectId, cwd, connection, initScript, provi
           const id = `msg-${++msgCounter}`;
           return [...updated, { id, role: 'tool' as const, type: 'tool_result' as const, content: payload.content, toolUseId: payload.toolUseId }];
         });
+        persistMsg('tool', 'tool_result', payload.content, { toolUseId: payload.toolUseId });
         scrollToBottom();
       } else if (payload.type === 'system') {
         const id = `msg-${++msgCounter}`;
@@ -139,8 +165,12 @@ export function AgentView({ tabId, projectId, cwd, connection, initScript, provi
 
     const offStatus = window.shelfApi.agent.onStatus((payload) => {
       if (payload.tabId !== tabId) return;
-      const wasStreaming = streaming;
       setStreaming(payload.state === 'streaming');
+      if (payload.sessionId && provider) {
+        updateProjectConfig(projectIndex, {
+          agentSessionIds: { ...({} as any), [provider]: payload.sessionId },
+        });
+      }
       if (payload.state === 'idle' && slashCommands.length === 0) {
         window.shelfApi.agent.slashCommands(tabId).then((cmds) => {
           if (cmds.length > 0) setSlashCommands(cmds);
@@ -176,12 +206,27 @@ export function AgentView({ tabId, projectId, cwd, connection, initScript, provi
     return () => { offMessage(); offStream(); offStatus(); offError(); offPermission(); };
   }, [tabId, provider, scrollToBottom]);
 
+  const persistMsg = useCallback((role: 'user' | 'assistant' | 'system' | 'tool', type: string, content: string, extra?: { toolName?: string; toolUseId?: string; toolInput?: Record<string, unknown> }) => {
+    saveMessage({
+      projectId,
+      timestamp: Date.now(),
+      role,
+      type: type as any,
+      content,
+      provider,
+      toolName: extra?.toolName,
+      toolUseId: extra?.toolUseId,
+      toolInput: extra?.toolInput ? JSON.stringify(extra.toolInput) : undefined,
+    });
+  }, [projectId, provider]);
+
   const handleSend = useCallback(() => {
     const text = input.trim();
     if (!text || streaming || !provider) return;
 
     const id = `msg-${++msgCounter}`;
     setMessages((prev) => [...prev, { id, role: 'user', type: 'text', content: text }]);
+    persistMsg('user', 'text', text);
     setInput('');
     streamingTextRef.current = '';
     streamingIdRef.current = null;
@@ -238,6 +283,7 @@ export function AgentView({ tabId, projectId, cwd, connection, initScript, provi
 
   const handleReset = useCallback(async () => {
     await window.shelfApi.agent.destroy(tabId);
+    await clearMessages(projectId);
     setMessages([]);
     setStreaming(false);
     setModel(undefined);
@@ -245,7 +291,7 @@ export function AgentView({ tabId, projectId, cwd, connection, initScript, provi
     setPendingPermission(null);
     streamingTextRef.current = '';
     streamingIdRef.current = null;
-  }, [tabId]);
+  }, [tabId, projectId]);
 
   const handleInputChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const val = e.target.value;

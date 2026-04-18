@@ -18,6 +18,7 @@ import type { ProjectConfig, AgentProvider } from '@shared/types';
 import { disposeTerminal } from './components/TerminalView';
 import { on, emit, Events } from './events';
 import { getTheme } from './themes';
+import { rotateOldMessages } from './agent-history';
 import './styles/global.css';
 
 export function App() {
@@ -26,6 +27,7 @@ export function App() {
 
   useEffect(() => {
     window.shelfApi.settings.load().then(setSettings);
+    rotateOldMessages(30);
   }, []);
 
   useEffect(() => {

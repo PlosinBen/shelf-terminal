@@ -38,6 +38,7 @@ export interface ProjectConfig {
   worktreeBranch?: string;
   defaultAgentProvider?: AgentProvider;
   openAgentOnConnect?: boolean;
+  agentSessionIds?: Partial<Record<AgentProvider, string>>;
 }
 
 // ── IPC payloads: Renderer → Main ──
