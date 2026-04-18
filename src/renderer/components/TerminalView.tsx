@@ -81,7 +81,7 @@ export function TerminalView({ tabId, projectId, cwd, connection, initScript, ta
       term.loadAddon(fitAddon);
       term.loadAddon(searchAddon);
       term.loadAddon(unicode11Addon);
-      term.unicode.activeVersion = '11';
+      if (settings.unicode11) term.unicode.activeVersion = '11';
       term.loadAddon(new WebLinksAddon());
       cached = { term, fitAddon, searchAddon, opened: false };
       terminalCache.set(tabId, cached);
@@ -273,9 +273,10 @@ export function TerminalView({ tabId, projectId, cwd, connection, initScript, ta
       cached.term.options.fontSize = settings.fontSize;
       cached.term.options.fontFamily = settings.fontFamily;
       cached.term.options.scrollback = settings.scrollback;
+      cached.term.unicode.activeVersion = settings.unicode11 ? '11' : '6';
       requestAnimationFrame(() => cached.fitAddon.fit());
     }
-  }, [settings.themeName, settings.fontSize, settings.fontFamily, settings.scrollback, tabId]);
+  }, [settings.themeName, settings.fontSize, settings.fontFamily, settings.scrollback, settings.unicode11, tabId]);
 
   // Re-fit when visibility changes (double rAF to ensure DOM layout is complete)
   useEffect(() => {
