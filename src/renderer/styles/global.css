@@ -1657,6 +1657,146 @@ button {
   opacity: 1;
 }
 
+/* ── Bottom Bar ── */
+
+.bottom-bar {
+  height: 24px;
+  background: var(--bg-secondary);
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 10px;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.bottom-bar-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.bottom-bar-connection {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.bottom-bar-separator {
+  color: var(--border);
+  flex-shrink: 0;
+}
+
+.bottom-bar-path {
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: Menlo, Monaco, 'Courier New', monospace;
+  font-size: 11px;
+}
+
+.bottom-bar-right {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.bottom-bar-branch-wrapper {
+  position: relative;
+}
+
+.bottom-bar-branch {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-muted);
+  font-size: 12px;
+  padding: 0 6px;
+  border-radius: 3px;
+  height: 20px;
+  cursor: pointer;
+  background: none;
+  border: none;
+}
+
+.bottom-bar-branch:hover:not(:disabled) {
+  background: var(--surface);
+  color: var(--text);
+}
+
+.bottom-bar-branch.disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.bottom-bar-branch.switching {
+  color: var(--accent);
+}
+
+.bottom-bar-branch-icon {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.bottom-bar-branch-dropdown {
+  position: absolute;
+  bottom: 100%;
+  right: 0;
+  margin-bottom: 4px;
+  min-width: 180px;
+  max-height: 300px;
+  overflow-y: auto;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px;
+  box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.4);
+  z-index: 50;
+}
+
+.bottom-bar-branch-item {
+  display: block;
+  width: 100%;
+  padding: 6px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  text-align: left;
+  color: var(--text);
+  background: none;
+  border: none;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bottom-bar-branch-item:hover:not(:disabled) {
+  background: var(--surface);
+}
+
+.bottom-bar-branch-item.current {
+  color: var(--accent);
+  cursor: default;
+}
+
+.bottom-bar-branch-worktree-hint {
+  font-size: 10px;
+  color: var(--text-muted);
+  opacity: 0.5;
+  margin-left: auto;
+  padding-left: 8px;
+}
+
+.bottom-bar-branch-empty {
+  padding: 8px 10px;
+  color: var(--text-muted);
+  font-size: 12px;
+  text-align: center;
+}
+
 /* ── Worktree Dialog ── */
 
 .worktree-dialog {

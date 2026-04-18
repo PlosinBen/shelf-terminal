@@ -81,6 +81,10 @@ contextBridge.exposeInMainWorld('shelfApi', {
   git: {
     branchList: (connection: any, cwd: string) =>
       ipcRenderer.invoke(IPC.GIT_BRANCH_LIST, { connection, cwd }),
+    checkDirty: (connection: any, cwd: string): Promise<boolean> =>
+      ipcRenderer.invoke(IPC.GIT_CHECK_DIRTY, { connection, cwd }),
+    checkout: (connection: any, cwd: string, branch: string): Promise<void> =>
+      ipcRenderer.invoke(IPC.GIT_CHECKOUT, { connection, cwd, branch }),
     worktreeAdd: (connection: any, cwd: string, branch: string, newBranch: boolean) =>
       ipcRenderer.invoke(IPC.GIT_WORKTREE_ADD, { connection, cwd, branch, newBranch }),
     worktreeRemove: (connection: any, cwd: string, worktreePath: string) =>

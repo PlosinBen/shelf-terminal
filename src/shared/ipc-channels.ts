@@ -39,6 +39,8 @@ export const IPC = {
 
   // Git
   GIT_BRANCH_LIST: 'git:branch-list',
+  GIT_CHECK_DIRTY: 'git:check-dirty',
+  GIT_CHECKOUT: 'git:checkout',
   GIT_WORKTREE_ADD: 'git:worktree-add',
   GIT_WORKTREE_REMOVE: 'git:worktree-remove',
 
