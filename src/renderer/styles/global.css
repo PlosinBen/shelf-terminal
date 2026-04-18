@@ -1996,6 +1996,26 @@ button {
   margin-left: auto;
 }
 
+.agent-reset-btn {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  border-radius: 3px;
+  padding: 1px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.agent-reset-btn:hover {
+  color: var(--text);
+  border-color: var(--text-muted);
+}
+
+.agent-reset-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
 /* ── Agent Messages ── */
 
 .agent-messages {

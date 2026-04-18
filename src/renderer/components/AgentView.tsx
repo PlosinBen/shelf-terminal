@@ -177,6 +177,17 @@ export function AgentView({ tabId, projectId, cwd, connection, initScript, provi
     window.shelfApi.agent.setMode(tabId, mode);
   }, [tabId]);
 
+  const handleReset = useCallback(async () => {
+    await window.shelfApi.agent.destroy(tabId);
+    setMessages([]);
+    setStreaming(false);
+    setModel(undefined);
+    setCost(undefined);
+    setPendingPermission(null);
+    streamingTextRef.current = '';
+    streamingIdRef.current = null;
+  }, [tabId]);
+
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -226,6 +237,7 @@ export function AgentView({ tabId, projectId, cwd, connection, initScript, provi
         <span>{provider.charAt(0).toUpperCase() + provider.slice(1)}</span>
         {model && <span className="agent-status-model">{model}</span>}
         {cost !== undefined && <span className="agent-status-cost">${cost.toFixed(4)}</span>}
+        <button className="agent-reset-btn" onClick={handleReset} disabled={streaming} title="Reset session">Reset</button>
       </div>
 
       <div className="agent-messages" ref={listRef}>
