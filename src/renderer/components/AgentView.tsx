@@ -67,10 +67,21 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
   const initialScrollDone = useRef(false);
   const prevMessageCount = useRef(0);
 
-  // Focus textarea when tab becomes visible
+  const justBecameVisible = useRef(false);
+
+  // Focus textarea and instant-scroll when tab becomes visible
   useEffect(() => {
-    if (visible && provider && textareaRef.current) {
-      requestAnimationFrame(() => textareaRef.current?.focus());
+    if (visible && provider) {
+      justBecameVisible.current = true;
+      requestAnimationFrame(() => {
+        textareaRef.current?.focus();
+        const el = listRef.current;
+        if (el) {
+          el.scrollTop = el.scrollHeight;
+          isAtBottomRef.current = true;
+        }
+        justBecameVisible.current = false;
+      });
     }
   }, [visible, provider]);
 
@@ -134,7 +145,7 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
 
   // Auto-scroll on every render if at bottom (catches streaming updates)
   useEffect(() => {
-    if (isAtBottomRef.current) {
+    if (isAtBottomRef.current && !justBecameVisible.current) {
       bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
   });
