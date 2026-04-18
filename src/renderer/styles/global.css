@@ -2383,40 +2383,73 @@ button {
 /* ── Agent Permission ── */
 
 .agent-permission {
-  padding: 10px 16px;
-  border-top: 1px solid var(--border);
+  padding: 10px 14px;
   border-left: 3px solid #e5c07b;
-  background: color-mix(in srgb, #e5c07b 8%, var(--bg));
+  background: rgba(229, 192, 123, 0.06);
+  border-radius: 0 4px 4px 0;
+  margin: 4px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .agent-permission-header {
-  font-size: 12px;
-  font-weight: 600;
+  font-weight: bold;
+  font-size: 14px;
   color: #e5c07b;
-  margin-bottom: 6px;
 }
 
-.agent-permission-tool {
-  font-size: 13px;
-  font-weight: 600;
-  color: #c678dd;
-  margin-bottom: 4px;
-}
-
-.agent-permission-input {
-  font-size: 12px;
-  color: var(--text-muted);
-  max-height: 150px;
-  overflow-y: auto;
-  white-space: pre-wrap;
-  word-break: break-word;
-  margin-bottom: 8px;
-}
-
-.agent-permission-actions {
+.agent-perm-options {
   display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.agent-perm-option {
+  display: flex;
+  align-items: center;
   gap: 8px;
-  justify-content: flex-end;
+  padding: 4px 8px;
+  border-radius: 3px;
+  font-size: 13px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.agent-perm-option:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.agent-perm-option.selected {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.agent-perm-indicator {
+  font-size: 11px;
+  width: 14px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.agent-perm-option-allow {
+  color: #98c379;
+}
+
+.agent-perm-option-deny {
+  color: #e06c75;
+}
+
+.agent-perm-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.agent-perm-hint kbd {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 0 4px;
+  font-size: 10px;
 }
 
 /* ── Agent Input Area ── */

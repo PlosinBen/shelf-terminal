@@ -255,19 +255,36 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
     window.shelfApi.agent.stop(tabId);
   }, [tabId]);
 
-  const handlePermissionAllow = useCallback(() => {
-    if (pendingPermission) {
-      window.shelfApi.agent.resolvePermission(tabId, pendingPermission.toolUseId, true);
-      setPendingPermission(null);
-    }
+  const [permSelection, setPermSelection] = useState(0);
+
+  useEffect(() => {
+    setPermSelection(0);
+  }, [pendingPermission?.toolUseId]);
+
+  const handlePermissionRespond = useCallback((index: number) => {
+    if (!pendingPermission) return;
+    const allow = index < 2;
+    window.shelfApi.agent.resolvePermission(tabId, pendingPermission.toolUseId, allow);
+    setPendingPermission(null);
   }, [tabId, pendingPermission]);
 
-  const handlePermissionDeny = useCallback(() => {
-    if (pendingPermission) {
-      window.shelfApi.agent.resolvePermission(tabId, pendingPermission.toolUseId, false);
-      setPendingPermission(null);
-    }
-  }, [tabId, pendingPermission]);
+  useEffect(() => {
+    if (!pendingPermission) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setPermSelection((p) => (p > 0 ? p - 1 : 2));
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setPermSelection((p) => (p < 2 ? p + 1 : 0));
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        handlePermissionRespond(permSelection);
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [pendingPermission, permSelection, handlePermissionRespond]);
 
   const handleModeChange = useCallback((mode: string) => {
     setPermissionMode(mode);
@@ -396,12 +413,21 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
 
       {pendingPermission && (
         <div className="agent-permission">
-          <div className="agent-permission-header">Permission Required</div>
-          <div className="agent-permission-tool">{pendingPermission.toolName}</div>
-          <pre className="agent-permission-input">{JSON.stringify(pendingPermission.input, null, 2)}</pre>
-          <div className="agent-permission-actions">
-            <button className="agent-btn agent-btn-stop" onClick={handlePermissionDeny}>Deny</button>
-            <button className="agent-btn agent-btn-send" onClick={handlePermissionAllow}>Allow</button>
+          <div className="agent-permission-header">Allow {pendingPermission.toolName}?</div>
+          <div className="agent-perm-options">
+            {['Allow', 'Allow (this session)', 'Deny'].map((label, i) => (
+              <div
+                key={label}
+                className={`agent-perm-option agent-perm-option-${i < 2 ? 'allow' : 'deny'}${permSelection === i ? ' selected' : ''}`}
+                onClick={() => handlePermissionRespond(i)}
+              >
+                <span className="agent-perm-indicator">{permSelection === i ? '\u25b6' : ' '}</span>
+                <span>{label}</span>
+              </div>
+            ))}
+          </div>
+          <div className="agent-perm-hint">
+            <kbd>&uarr;</kbd><kbd>&darr;</kbd> select &nbsp; <kbd>Enter</kbd> confirm
           </div>
         </div>
       )}
