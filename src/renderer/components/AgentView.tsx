@@ -459,7 +459,7 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
           value={input}
           onChange={handleInputChange}
           onKeyDown={handleKeyDown}
-          placeholder="Message..."
+          placeholder={streaming ? 'Agent is running... (Esc to stop)' : 'Message...'}
           rows={1}
           disabled={streaming}
         />

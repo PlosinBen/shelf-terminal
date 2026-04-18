@@ -2045,7 +2045,7 @@ button {
   padding: 8px 8px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
 }
 
 .agent-empty {
@@ -2453,7 +2453,7 @@ button {
 }
 
 .agent-diff-del .agent-diff-sign {
-  color: #fca5a5;
+  color: #ef4444;
 }
 
 .agent-diff-add {
@@ -2462,7 +2462,7 @@ button {
 }
 
 .agent-diff-add .agent-diff-sign {
-  color: #86efac;
+  color: #22c55e;
 }
 
 .agent-diff-empty {
