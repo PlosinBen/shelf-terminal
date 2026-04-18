@@ -556,18 +556,35 @@ AgentView 從 placeholder 變成真正的對話介面。
 1. 單元測試：AgentManager session lifecycle、message protocol mapping
 2. E2E 測試：開 agent tab、送訊息、收到回應（需要 mock SDK）
 
-### Phase 2 — Session & Permission & UX
+### Phase 2 — Permission & Session & UX
 
-**目標：完整的 session 管理、權限控制、agent 對話 UX**
+**目標：完整的權限控制、session 管理、agent 對話 UX**
 
-1. Session resume / reset
-2. Permission request UI（AgentPermission.tsx）
-3. Permission mode 切換（default / acceptEdits / bypassPermissions）
-4. Subagent task tracking + stall detection
-5. AgentStatusBar（model、tokens、cost、context window %、5h/7d rate limit 用量 + 重置倒數）
-6. Thinking block 收合展開
-7. Tool call diff 預覽
-8. Slash command autocomplete（`/` 觸發選單，顯示 SDK `getSlashCommands()` 結果）
+#### Phase 2a — Permission（功能正確性）
+
+1. Permission request UI（AgentPermission.tsx）— tool call 時顯示 Allow/Deny
+2. Permission mode 切換（default / acceptEdits / bypassPermissions）— 在 input area 的 Mode 下拉選單
+3. Claude backend 接入 SDK `canUseTool` callback
+
+#### Phase 2b — Session
+
+1. Session resume（切 tab 回來、app 重啟後接續對話）
+2. Session reset（清空對話、重新開始）
+
+#### Phase 2c — UX 改善
+
+1. AgentStatusBar 完善（tokens、context window %、5h/7d rate limit 用量 + 重置倒數）
+2. Slash command autocomplete（`/` 觸發選單，顯示 SDK `getSlashCommands()` 結果）
+
+#### Phase 2d — 進階（延後）
+
+1. Subagent task tracking + stall detection
+2. Tool call diff 預覽
+
+#### Phase 2 已完成
+
+- Thinking block 收合展開 ✅（Phase 1c）
+- Tool call 展開/收合 ✅（Phase 1c）
 
 ### Phase 3 — Multi-Provider
 
