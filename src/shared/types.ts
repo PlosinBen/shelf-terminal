@@ -130,6 +130,7 @@ export type FileClearResult =
 export interface GitBranchInfo {
   name: string;
   current: boolean;
+  worktreePath?: string;
 }
 
 export interface WorktreeAddResult {
