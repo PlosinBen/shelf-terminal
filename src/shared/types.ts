@@ -103,6 +103,7 @@ export interface AppSettings {
   maxUploadSizeMB: number;
   defaultLocalPath?: string;
   dockerPath?: string;
+  unicode11?: boolean;
 }
 
 
