@@ -38,7 +38,8 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
   const listRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const isAtBottomRef = useRef(true);
+  const isAtBottomRef = useRef(false);
+  const scrollRestoredRef = useRef(false);
   const prevMessageCount = useRef(0);
 
   // Load history into store on first mount
@@ -81,6 +82,7 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
           el.scrollTop = el.scrollHeight;
         }
         isAtBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+        scrollRestoredRef.current = true;
       }
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -98,9 +100,9 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
     return () => el.removeEventListener('scroll', handleScroll);
   }, [tabId]);
 
-  // Auto-scroll when at bottom (streaming updates)
+  // Auto-scroll when at bottom (streaming updates), skip until scroll restored
   useEffect(() => {
-    if (isAtBottomRef.current) {
+    if (scrollRestoredRef.current && isAtBottomRef.current) {
       bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
   });
