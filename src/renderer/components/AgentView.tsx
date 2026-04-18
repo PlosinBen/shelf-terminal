@@ -90,17 +90,16 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
         }
         justBecameVisible.current = false;
       });
-    } else if (!visible && listRef.current) {
-      savedScrollTop.current = listRef.current.scrollTop;
     }
   }, [visible, provider]);
 
-  // Track whether user is scrolled to bottom
+  // Track scroll position and whether user is at bottom
   useEffect(() => {
     const el = listRef.current;
     if (!el) return;
     const handleScroll = () => {
       isAtBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+      savedScrollTop.current = el.scrollTop;
     };
     el.addEventListener('scroll', handleScroll);
     return () => el.removeEventListener('scroll', handleScroll);
