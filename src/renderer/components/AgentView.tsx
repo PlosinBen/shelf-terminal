@@ -61,8 +61,21 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
   useEffect(() => {
     if (!provider) return;
     loadMessages(projectId).then((persisted) => {
-      if (persisted.length > 0) {
-        const loaded: AgentMsg[] = persisted.map((m) => ({
+      if (persisted.length === 0) return;
+
+      const msgs: AgentMsg[] = [];
+      const toolUseMap = new Map<string, AgentMsg>();
+
+      for (const m of persisted) {
+        if (m.type === 'tool_result' && m.toolUseId) {
+          const toolUse = toolUseMap.get(m.toolUseId);
+          if (toolUse) {
+            toolUse.toolResult = m.content;
+          }
+          continue;
+        }
+
+        const msg: AgentMsg = {
           id: `hist-${++msgCounter}`,
           role: m.role,
           type: m.type,
@@ -71,9 +84,16 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
           toolName: m.toolName,
           toolUseId: m.toolUseId,
           toolInput: m.toolInput ? JSON.parse(m.toolInput) : undefined,
-        }));
-        setMessages(loaded);
+          cwd,
+        };
+        msgs.push(msg);
+
+        if (m.type === 'tool_use' && m.toolUseId) {
+          toolUseMap.set(m.toolUseId, msg);
+        }
       }
+
+      setMessages(msgs);
     });
   }, [projectId, provider]);
 
