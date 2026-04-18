@@ -69,34 +69,32 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
     });
   }, [provider, projectId, tabId, cwd, messages.length]);
 
-  // Focus textarea on mount
+  // Reset scroll restore flag when visibility changes
   useEffect(() => {
     if (visible && provider) {
+      scrollRestoredRef.current = false;
       requestAnimationFrame(() => textareaRef.current?.focus());
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [visible, provider]);
 
-  // Restore scroll position once messages are available
+  // Restore scroll position when becoming visible with messages
   useEffect(() => {
-    if (scrollRestoredRef.current || messages.length === 0) return;
+    if (!visible || messages.length === 0 || scrollRestoredRef.current) return;
     scrollRestoredRef.current = true;
+    const savedTop = agentState.scrollTop;
     requestAnimationFrame(() => requestAnimationFrame(() => {
       const el = listRef.current;
       if (el) {
-        if (agentState.scrollTop !== null) {
-          el.scrollTop = agentState.scrollTop;
-        } else {
-          el.scrollTop = el.scrollHeight;
-        }
+        el.scrollTop = savedTop !== null ? savedTop : el.scrollHeight;
         isAtBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
       }
     }));
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [messages.length]);
+  }, [visible, messages.length]);
 
-  // Save scroll position to store on scroll
+  // Save scroll position to store on scroll — re-bind when visible changes
   useEffect(() => {
+    if (!visible) return;
     const el = listRef.current;
     if (!el) return;
     const handleScroll = () => {
@@ -105,7 +103,7 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
     };
     el.addEventListener('scroll', handleScroll);
     return () => el.removeEventListener('scroll', handleScroll);
-  }, [tabId]);
+  }, [tabId, visible]);
 
   // Auto-scroll when at bottom (streaming updates), skip until scroll restored
   useEffect(() => {
