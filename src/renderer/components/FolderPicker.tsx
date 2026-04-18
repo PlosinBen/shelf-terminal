@@ -26,6 +26,7 @@ export function FolderPicker() {
 
   // Agent provider state
   const [defaultAgentProvider, setDefaultAgentProvider] = useState<AgentProvider | ''>('');
+  const [openAgentOnConnect, setOpenAgentOnConnect] = useState(true);
 
   // Browse state
   const [currentPath, setCurrentPath] = useState('');
@@ -99,6 +100,7 @@ export function FolderPicker() {
       setWslDistro('Ubuntu');
       setDockerContainer('');
       setDefaultAgentProvider('');
+      setOpenAgentOnConnect(true);
     };
     const off = on(Events.OPEN_FOLDER_PICKER, handler);
     return () => { off(); };
@@ -164,6 +166,7 @@ export function FolderPicker() {
       connection: conn,
       maxTabs: settings.defaultMaxTabs,
       defaultAgentProvider: defaultAgentProvider || undefined,
+      openAgentOnConnect,
     };
 
     emit(Events.ADD_PROJECT, config);
@@ -274,6 +277,8 @@ export function FolderPicker() {
             onDockerContainerChange={setDockerContainer}
             defaultAgentProvider={defaultAgentProvider}
             onAgentProviderChange={setDefaultAgentProvider}
+            openAgentOnConnect={openAgentOnConnect}
+            onOpenAgentOnConnectChange={setOpenAgentOnConnect}
             onSelect={proceedToBrowse}
             onCancel={handleCancel}
           />
@@ -313,6 +318,8 @@ interface ConnectionStepProps {
   onDockerContainerChange: (v: string) => void;
   defaultAgentProvider: AgentProvider | '';
   onAgentProviderChange: (v: AgentProvider | '') => void;
+  openAgentOnConnect: boolean;
+  onOpenAgentOnConnectChange: (v: boolean) => void;
   onSelect: (conn: Connection) => void;
   onCancel: () => void;
 }
@@ -321,6 +328,7 @@ function ConnectionStep({
   sshHost, sshPort, sshUser, sshPassword, wslDistro, dockerContainer,
   onSshHostChange, onSshPortChange, onSshUserChange, onSshPasswordChange, onWslDistroChange, onDockerContainerChange,
   defaultAgentProvider, onAgentProviderChange,
+  openAgentOnConnect, onOpenAgentOnConnectChange,
   onSelect, onCancel,
 }: ConnectionStepProps) {
   const [connType, setConnType] = useState<'local' | 'ssh' | 'wsl' | 'docker'>('local');
@@ -570,6 +578,17 @@ function ConnectionStep({
             <option value="copilot">Copilot</option>
             <option value="gemini">Gemini</option>
           </select>
+        </div>
+
+        <div className="conn-field">
+          <label className="settings-checkbox-label">
+            <input
+              type="checkbox"
+              checked={openAgentOnConnect}
+              onChange={(e) => onOpenAgentOnConnectChange(e.target.checked)}
+            />
+            Open agent tab on connect
+          </label>
         </div>
       </div>
 

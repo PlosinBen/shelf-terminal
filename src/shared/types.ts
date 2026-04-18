@@ -37,6 +37,7 @@ export interface ProjectConfig {
   parentProjectId?: string;
   worktreeBranch?: string;
   defaultAgentProvider?: AgentProvider;
+  openAgentOnConnect?: boolean;
 }
 
 // ── IPC payloads: Renderer → Main ──

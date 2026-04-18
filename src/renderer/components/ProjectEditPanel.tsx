@@ -16,6 +16,7 @@ export function ProjectEditPanel() {
   const dragFromHandle = useRef(false);
   const [colorPickerIndex, setColorPickerIndex] = useState<number | null>(null);
   const [defaultAgentProvider, setDefaultAgentProvider] = useState<AgentProvider | ''>('');
+  const [openAgentOnConnect, setOpenAgentOnConnect] = useState(false);
   const [clearing, setClearing] = useState(false);
   const [remoteConnected, setRemoteConnected] = useState(true);
 
@@ -26,6 +27,7 @@ export function ProjectEditPanel() {
       setDefaultTabs(project.config.defaultTabs || [{ name: 'Terminal' }]);
       setQuickCommands(project.config.quickCommands || []);
       setDefaultAgentProvider(project.config.defaultAgentProvider || '');
+      setOpenAgentOnConnect(project.config.openAgentOnConnect ?? true);
     }
   }, [editingProjectIndex]);
 
@@ -62,6 +64,7 @@ export function ProjectEditPanel() {
       defaultTabs: tabs.length > 0 ? tabs : undefined,
       quickCommands: cmds.length > 0 ? cmds : undefined,
       defaultAgentProvider: defaultAgentProvider || undefined,
+      openAgentOnConnect,
     });
     handleClose();
   };
@@ -203,6 +206,17 @@ export function ProjectEditPanel() {
               <option value="copilot">Copilot</option>
               <option value="gemini">Gemini</option>
             </select>
+          </div>
+
+          <div className="settings-group">
+            <label className="settings-checkbox-label">
+              <input
+                type="checkbox"
+                checked={openAgentOnConnect}
+                onChange={(e) => setOpenAgentOnConnect(e.target.checked)}
+              />
+              Open agent tab on connect
+            </label>
           </div>
 
           <div className="project-edit-field">

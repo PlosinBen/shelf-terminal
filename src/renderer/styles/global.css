@@ -1944,6 +1944,15 @@ button {
   font-size: 10px;
 }
 
+.settings-checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+}
+
 .agent-provider-picker {
   display: flex;
   flex-direction: column;
