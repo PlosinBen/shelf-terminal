@@ -158,17 +158,14 @@ Shelf 不代理、不傳遞任何 API credential。遠端的 auth（`~/.anthropi
 
 ```
 src/main/agent/
-├── index.ts              # AgentManager — session 生命週期、IPC handler 註冊
+├── index.ts              # AgentManager — session 生命週期、IPC handler、根據 connection type 決定 local/remote
 ├── types.ts              # AgentBackend interface、AgentMessage、SessionState
-├── transport/
-│   ├── types.ts           # AgentTransport interface
-│   ├── local.ts           # LocalTransport — main process 直接呼叫 SDK
-│   └── remote.ts          # RemoteTransport — stdin/stdout over connector.exec()
 ├── providers/
 │   ├── claude.ts              # Claude SDK backend（spawn CLI）
 │   ├── copilot.ts             # Copilot backend（連線設定 → openai-processor）
 │   ├── gemini.ts              # Gemini backend（連線設定 → openai-processor）
 │   └── openai-processor.ts    # 通用 OpenAI-compatible 底層（tool execution loop、streaming、permission、session）
+├── remote.ts              # Remote agent-server spawn + stdin/stdout JSON protocol 通訊
 ├── deploy.ts              # Remote bundle 版本檢查 + 上傳
 └── usage-tracker.ts       # Token/cost/rate-limit 追蹤
 
@@ -543,14 +540,14 @@ AgentView 從 placeholder 變成真正的對話介面。
 4. 串流顯示（text delta 即時更新）
 5. Auto-scroll + auto-grow textarea
 
-#### Phase 1d — Remote Transport
+#### Phase 1d — Remote 支援
 
-支援 SSH/Docker project 的 agent 功能。
+支援 SSH/Docker project 的 agent 功能。不需要 transport 抽象層 — IPC 已是分界點，AgentManager 根據 connection type 決定 local（直接呼叫 SDK）或 remote（spawn agent-server）。
 
-1. `src/main/agent/transport/types.ts` — AgentTransport interface
-2. `src/main/agent/transport/local.ts` — LocalTransport（main process 直接呼叫 SDK）
-3. `src/main/agent/transport/remote.ts` — RemoteTransport（stdin/stdout over connector.exec()）
-4. `src/main/agent/deploy.ts` — Remote bundle 版本檢查 + 上傳
+1. IPC `agent:send` 多傳 `connection` 參數
+2. AgentManager 判斷 connection type → local 直接呼叫 SDK / remote 走 agent-server
+3. `src/main/agent/deploy.ts` — Remote bundle 版本檢查 + 上傳
+4. `src/main/agent/remote.ts` — connector.exec() spawn agent-server + stdin/stdout JSON 通訊
 5. `agent-server/index.ts` — stdin/stdout JSON protocol entry
 6. `agent-server/` build script（esbuild 單檔 bundle）
 
