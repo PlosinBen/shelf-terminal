@@ -141,14 +141,6 @@ Shelf 不代理、不傳遞任何 API credential。遠端的 auth（`~/.anthropi
 
 **已確認：** SDK dependency tree 全部是純 JS，無 native module。
 
-### D8. Per-Project 環境變數
-
-`ProjectConfig` 新增 `envVars` 欄位，key-value pair，spawn terminal 時注入 `process.env`。
-
-- 強化所有 connection type 的 terminal 體驗（SSH、Docker 尤其實用）
-- 在 ProjectEditPanel 編輯
-- 不影響 agent tab（agent SDK 有自己的 env handling）
-- 此功能獨立於 agent 整合，可以先行實作
 
 ---
 
@@ -598,12 +590,11 @@ AgentView 從 placeholder 變成真正的對話介面。
 
 ### Phase 4 — Polish & Enhancement
 
-**目標：進階功能和 terminal 強化**
+**目標：進階功能強化**
 
 1. Session history 持久化（跨重啟保留對話）— 待展開設計：儲存位置、儲存內容範圍、與 SDK session resume 的關係、清理策略
 2. Context compaction 偵測和通知
-3. Per-project 環境變數（ProjectEditPanel 編輯、spawn 時注入）— 獨立於 agent，可先行
-4. Terminal ↔ Agent 橋接（event bus：選取文字送給 agent）
+3. Terminal ↔ Agent 橋接（event bus：選取文字送給 agent）
 
 ### 已評估不做的功能
 
@@ -615,6 +606,7 @@ AgentView 從 placeholder 變成真正的對話介面。
 | Snippet manager | 與現有 quick commands 定位重疊 |
 | i18n | 維護成本高，使用者群不大 |
 | Detachable windows / Remote access / Profile | 架構複雜度太高，與 Shelf 輕量定位衝突 |
+| Per-project 環境變數 | Init script 已能做同樣的事（`export KEY=VAL`），UI 差異不值得額外維護 |
 
 ---
 
