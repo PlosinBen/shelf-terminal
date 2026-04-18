@@ -149,9 +149,12 @@ export function addTab(projectIndex: number, name?: string, cmd?: string, color?
   if (!proj || proj.tabs.length >= proj.config.maxTabs) return null;
 
   nextTabCounter++;
+  const providerLabel = provider ? provider.charAt(0).toUpperCase() + provider.slice(1) : 'Agent';
+  const agentCount = proj.tabs.filter(t => t.type === 'agent').length;
+  const terminalCount = proj.tabs.filter(t => t.type === 'terminal').length;
   const defaultLabel = type === 'agent'
-    ? `${provider ? provider.charAt(0).toUpperCase() + provider.slice(1) : 'Agent'} ${proj.tabs.filter(t => t.type === 'agent').length + 1}`
-    : `Terminal ${proj.tabs.filter(t => t.type === 'terminal').length + 1}`;
+    ? agentCount > 0 ? `${providerLabel} ${agentCount + 1}` : providerLabel
+    : `Terminal ${terminalCount + 1}`;
   const tab: Tab = {
     id: `tab-${Date.now()}-${nextTabCounter}`,
     label: name || defaultLabel,
