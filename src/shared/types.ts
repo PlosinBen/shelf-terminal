@@ -36,6 +36,7 @@ export interface ProjectConfig {
   quickCommands?: QuickCommand[];
   parentProjectId?: string;
   worktreeBranch?: string;
+  defaultAgentProvider?: AgentProvider;
 }
 
 // ── IPC payloads: Renderer → Main ──

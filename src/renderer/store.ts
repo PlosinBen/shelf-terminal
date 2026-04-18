@@ -367,6 +367,23 @@ export function setTabColor(projectIndex: number, tabIndex: number, color: strin
   updateSnapshot();
 }
 
+export function setTabProvider(tabId: string, provider: AgentProvider) {
+  for (let pi = 0; pi < projects.length; pi++) {
+    const proj = projects[pi];
+    const ti = proj.tabs.findIndex((t) => t.id === tabId);
+    if (ti !== -1) {
+      const providerLabel = provider.charAt(0).toUpperCase() + provider.slice(1);
+      const agentCount = proj.tabs.filter(t => t.type === 'agent').length;
+      const tabs = proj.tabs.map((t, i) =>
+        i === ti ? { ...t, provider, label: `${providerLabel} ${agentCount}` } : t,
+      );
+      projects = projects.map((p, i) => (i === pi ? { ...p, tabs } : p));
+      updateSnapshot();
+      return;
+    }
+  }
+}
+
 export function appendDefaultTab(projectIndex: number, name: string, color?: string) {
   const proj = projects[projectIndex];
   if (!proj) return;

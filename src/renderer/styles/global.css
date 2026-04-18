@@ -1943,3 +1943,36 @@ button {
   color: var(--accent);
   font-size: 10px;
 }
+
+.agent-provider-picker {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+.agent-picker-title {
+  color: var(--text);
+  font-size: 14px;
+}
+
+.agent-picker-options {
+  display: flex;
+  gap: 8px;
+}
+
+.agent-picker-btn {
+  background: var(--bg-secondary);
+  color: var(--text);
+  border: 1px solid var(--border);
+  padding: 8px 20px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.agent-picker-btn:hover {
+  background: var(--accent);
+  color: var(--bg);
+  border-color: var(--accent);
+}

@@ -13,7 +13,7 @@ import { RemoveConfirmDialog } from './components/RemoveConfirmDialog';
 import { BottomBar, SWITCH_BRANCH_EVENT } from './components/BottomBar';
 import { DevToolsPanel } from './components/DevToolsPanel';
 import { useKeybindings } from './hooks/useKeybindings';
-import { useStore, setProjects, setSettings, setUpdateStatus, addProject, addTab, setActiveTab, removeTab, removeProject, setSplitTab, toggleSidebar, clearUnread, setInvalidProjects } from './store';
+import { useStore, setProjects, setSettings, setUpdateStatus, addProject, addTab, setActiveTab, removeTab, removeProject, setSplitTab, toggleSidebar, clearUnread, setInvalidProjects, setTabProvider } from './store';
 import type { ProjectConfig, AgentProvider } from '@shared/types';
 import { disposeTerminal } from './components/TerminalView';
 import { on, emit, Events } from './events';
@@ -65,10 +65,11 @@ export function App() {
       addTab(projectIndex);
     });
 
-    const offNewAgentTab = on(Events.NEW_AGENT_TAB, (projectIndex: number, provider: AgentProvider) => {
+    const offNewAgentTab = on(Events.NEW_AGENT_TAB, (projectIndex: number, provider?: AgentProvider) => {
       const proj = projects[projectIndex];
       if (!proj) return;
-      addTab(projectIndex, undefined, undefined, undefined, 'agent', provider);
+      const resolvedProvider = provider ?? proj.config.defaultAgentProvider;
+      addTab(projectIndex, undefined, undefined, undefined, 'agent', resolvedProvider);
     });
 
     const offConnectProject = on(Events.CONNECT_PROJECT, async (projectIndex: number) => {
@@ -266,8 +267,10 @@ export function App() {
                         <AgentView
                           tabId={tab.id}
                           projectId={proj.config.id}
-                          provider={tab.provider!}
+                          projectIndex={pi}
+                          provider={tab.provider}
                           visible={visible}
+                          onSelectProvider={setTabProvider}
                         />
                       ) : (
                         <TerminalView

@@ -11,13 +11,6 @@ import {
   appendDefaultTab,
 } from '../store';
 import { emit, Events } from '../events';
-import type { AgentProvider } from '@shared/types';
-
-const AGENT_PROVIDERS: { id: AgentProvider; label: string }[] = [
-  { id: 'claude', label: 'Claude' },
-  { id: 'copilot', label: 'Copilot' },
-  { id: 'gemini', label: 'Gemini' },
-];
 
 const TAB_COLORS = [
   { name: 'Red', hex: '#f38ba8' },
@@ -212,15 +205,12 @@ export function TabBar() {
             Terminal
           </button>
           <div className="context-menu-divider" />
-          {AGENT_PROVIDERS.map((p) => (
-            <button
-              key={p.id}
-              className="context-menu-item"
-              onClick={() => { emit(Events.NEW_AGENT_TAB, activeProjectIndex, p.id); setAddMenu(null); }}
-            >
-              Agent ({p.label})
-            </button>
-          ))}
+          <button
+            className="context-menu-item"
+            onClick={() => { emit(Events.NEW_AGENT_TAB, activeProjectIndex); setAddMenu(null); }}
+          >
+            Agent
+          </button>
         </div>
       )}
 
