@@ -113,15 +113,11 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
         persistMsg('tool', 'tool_use', '', { toolName: payload.toolName, toolUseId: payload.toolUseId, toolInput: payload.toolInput });
         scrollToBottom();
       } else if (payload.type === 'tool_result') {
-        setMessages((prev) => {
-          const updated = prev.map((m) =>
-            m.toolUseId === payload.toolUseId && m.type === 'tool_use'
-              ? { ...m, streaming: false }
-              : m,
-          );
-          const id = `msg-${++msgCounter}`;
-          return [...updated, { id, role: 'tool' as const, type: 'tool_result' as const, content: payload.content, toolUseId: payload.toolUseId }];
-        });
+        setMessages((prev) => prev.map((m) =>
+          m.toolUseId === payload.toolUseId && m.type === 'tool_use'
+            ? { ...m, streaming: false, toolResult: payload.content }
+            : m,
+        ));
         persistMsg('tool', 'tool_result', payload.content, { toolUseId: payload.toolUseId });
         scrollToBottom();
       } else if (payload.type === 'system') {

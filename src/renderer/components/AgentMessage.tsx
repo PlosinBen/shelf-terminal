@@ -9,6 +9,7 @@ export interface AgentMsg {
   toolName?: string;
   toolInput?: Record<string, unknown>;
   toolUseId?: string;
+  toolResult?: string;
   streaming?: boolean;
   cwd?: string;
 }
@@ -169,7 +170,7 @@ export function AgentMessage({ message }: AgentMessageProps) {
 
   if (message.type === 'tool_use') {
     const summary = getToolSummary(message.toolName, message.toolInput, message.cwd);
-    const hasBody = message.toolName !== 'Read' || expanded;
+    const hasResult = !!message.toolResult;
     return (
       <div className="agent-msg agent-msg-tool">
         <div className="agent-tool-header" onClick={() => setExpanded(!expanded)}>
@@ -178,29 +179,21 @@ export function AgentMessage({ message }: AgentMessageProps) {
           {summary && !expanded && <span className="agent-tool-summary">{summary}</span>}
           {message.streaming && <span className="agent-tool-badge">running</span>}
         </div>
-        {expanded && <ToolBody toolName={message.toolName} input={message.toolInput} cwd={message.cwd} />}
+        {expanded && (
+          <>
+            <ToolBody toolName={message.toolName} input={message.toolInput} cwd={message.cwd} />
+            {hasResult && (() => {
+              const { lines, remaining } = truncateLines(message.toolResult!, 30);
+              return <pre className="agent-tool-code agent-tool-result-block">{lines.join('\n')}{remaining > 0 ? `\n... +${remaining} more lines` : ''}</pre>;
+            })()}
+          </>
+        )}
       </div>
     );
   }
 
   if (message.type === 'tool_result') {
-    if (!message.content) return null;
-    const { lines, remaining } = truncateLines(message.content, 30);
-    return (
-      <div className="agent-msg agent-msg-tool-result">
-        <div className="agent-tool-header" onClick={() => setExpanded(!expanded)}>
-          <span className={`agent-chevron ${expanded ? 'expanded' : ''}`}>&#9654;</span>
-          <span className="agent-tool-result-label">Result</span>
-          {!expanded && <span className="agent-tool-summary">{message.content.slice(0, 60).replace(/\n/g, ' ')}</span>}
-        </div>
-        {expanded && (
-          <pre className="agent-tool-code">
-            {lines.join('\n')}
-            {remaining > 0 && `\n... +${remaining} more lines`}
-          </pre>
-        )}
-      </div>
-    );
+    return null;
   }
 
   if (message.role === 'user') {

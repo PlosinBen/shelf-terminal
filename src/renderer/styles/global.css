@@ -2270,6 +2270,12 @@ button {
   overflow-y: auto;
 }
 
+.agent-tool-result-block {
+  margin-top: 6px;
+  border-top: 1px solid var(--border);
+  padding-top: 6px;
+}
+
 .agent-tool-file-path {
   font-size: 12px;
   color: var(--accent);
