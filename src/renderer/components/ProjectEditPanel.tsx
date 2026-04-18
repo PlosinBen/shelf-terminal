@@ -206,16 +206,13 @@ export function ProjectEditPanel() {
               <option value="copilot">Copilot</option>
               <option value="gemini">Gemini</option>
             </select>
-          </div>
-
-          <div className="settings-group">
             <label className="settings-checkbox-label">
               <input
                 type="checkbox"
                 checked={openAgentOnConnect}
                 onChange={(e) => setOpenAgentOnConnect(e.target.checked)}
               />
-              Open agent tab on connect
+              Open on connect
             </label>
           </div>
 
