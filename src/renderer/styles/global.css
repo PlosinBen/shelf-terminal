@@ -1907,3 +1907,39 @@ button {
 .conn-btn-danger:hover {
   background: #f06c93;
 }
+
+/* ── Agent View ── */
+
+.agent-view {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+}
+
+.agent-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.agent-placeholder-icon {
+  font-size: 32px;
+  color: var(--accent);
+}
+
+.agent-placeholder-hint {
+  font-size: 12px;
+  opacity: 0.6;
+}
+
+.tab-agent-icon {
+  margin-right: 4px;
+  color: var(--accent);
+  font-size: 10px;
+}

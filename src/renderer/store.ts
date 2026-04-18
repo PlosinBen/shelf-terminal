@@ -1,5 +1,5 @@
 import { useState, useCallback, useSyncExternalStore } from 'react';
-import type { ProjectConfig, AppSettings, UpdateStatus } from '@shared/types';
+import type { ProjectConfig, AppSettings, UpdateStatus, TabType, AgentProvider } from '@shared/types';
 import { DEFAULT_SETTINGS } from '@shared/defaults';
 
 // ── Tab state ──
@@ -7,6 +7,8 @@ import { DEFAULT_SETTINGS } from '@shared/defaults';
 export interface Tab {
   id: string;
   label: string;
+  type: TabType;
+  provider?: AgentProvider;
   cmd?: string;
   color?: string;
   hasUnread: boolean;
@@ -141,14 +143,19 @@ export function toggleSidebar() {
   updateSnapshot();
 }
 
-export function addTab(projectIndex: number, name?: string, cmd?: string, color?: string): Tab | null {
+export function addTab(projectIndex: number, name?: string, cmd?: string, color?: string, type: TabType = 'terminal', provider?: AgentProvider): Tab | null {
   const proj = projects[projectIndex];
   if (!proj || proj.tabs.length >= proj.config.maxTabs) return null;
 
   nextTabCounter++;
+  const defaultLabel = type === 'agent'
+    ? `${provider ? provider.charAt(0).toUpperCase() + provider.slice(1) : 'Agent'} ${proj.tabs.filter(t => t.type === 'agent').length + 1}`
+    : `Terminal ${proj.tabs.filter(t => t.type === 'terminal').length + 1}`;
   const tab: Tab = {
     id: `tab-${Date.now()}-${nextTabCounter}`,
-    label: name || `Terminal ${proj.tabs.length + 1}`,
+    label: name || defaultLabel,
+    type,
+    provider,
     cmd,
     color,
     hasUnread: false,

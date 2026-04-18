@@ -2,6 +2,7 @@ import React, { useEffect } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { TabBar } from './components/TabBar';
 import { TerminalView } from './components/TerminalView';
+import { AgentView } from './components/AgentView';
 import { FolderPicker } from './components/FolderPicker';
 import { SettingsPanel } from './components/SettingsPanel';
 import { SearchBar } from './components/SearchBar';
@@ -13,7 +14,7 @@ import { BottomBar, SWITCH_BRANCH_EVENT } from './components/BottomBar';
 import { DevToolsPanel } from './components/DevToolsPanel';
 import { useKeybindings } from './hooks/useKeybindings';
 import { useStore, setProjects, setSettings, setUpdateStatus, addProject, addTab, setActiveTab, removeTab, removeProject, setSplitTab, toggleSidebar, clearUnread, setInvalidProjects } from './store';
-import type { ProjectConfig } from '@shared/types';
+import type { ProjectConfig, AgentProvider } from '@shared/types';
 import { disposeTerminal } from './components/TerminalView';
 import { on, emit, Events } from './events';
 import { getTheme } from './themes';
@@ -36,7 +37,7 @@ export function App() {
     const offCloseTab = on(Events.CLOSE_TAB, (projectIndex: number, tabIndex: number) => {
       const proj = projects[projectIndex];
       const tab = proj?.tabs[tabIndex];
-      if (tab) {
+      if (tab && tab.type !== 'agent') {
         window.shelfApi.pty.kill(tab.id);
         disposeTerminal(tab.id);
       }
@@ -47,8 +48,10 @@ export function App() {
       const proj = projects[projectIndex];
       if (proj) {
         proj.tabs.forEach((tab) => {
-          window.shelfApi.pty.kill(tab.id);
-          disposeTerminal(tab.id);
+          if (tab.type !== 'agent') {
+            window.shelfApi.pty.kill(tab.id);
+            disposeTerminal(tab.id);
+          }
         });
       }
       removeProject(projectIndex);
@@ -60,6 +63,12 @@ export function App() {
       const proj = projects[projectIndex];
       if (!proj) return;
       addTab(projectIndex);
+    });
+
+    const offNewAgentTab = on(Events.NEW_AGENT_TAB, (projectIndex: number, provider: AgentProvider) => {
+      const proj = projects[projectIndex];
+      if (!proj) return;
+      addTab(projectIndex, undefined, undefined, undefined, 'agent', provider);
     });
 
     const offConnectProject = on(Events.CONNECT_PROJECT, async (projectIndex: number) => {
@@ -110,8 +119,10 @@ export function App() {
       const proj = projects[projectIndex];
       if (!proj || proj.tabs.length === 0) return;
       proj.tabs.forEach((tab) => {
-        window.shelfApi.pty.kill(tab.id);
-        disposeTerminal(tab.id);
+        if (tab.type !== 'agent') {
+          window.shelfApi.pty.kill(tab.id);
+          disposeTerminal(tab.id);
+        }
       });
       // Remove all tabs but keep the project
       for (let t = proj.tabs.length - 1; t >= 0; t--) {
@@ -162,7 +173,7 @@ export function App() {
       }
     });
 
-    return () => { offCloseTab(); offRemoveProject(); offNewTab(); offConnectProject(); offDisconnectProject(); offAddProject(); offToggleSplit(); offSwitchBranch(); };
+    return () => { offCloseTab(); offRemoveProject(); offNewTab(); offNewAgentTab(); offConnectProject(); offDisconnectProject(); offAddProject(); offToggleSplit(); offSwitchBranch(); };
   }, [projects]);
 
   useEffect(() => {
@@ -251,15 +262,24 @@ export function App() {
                       className={isSplit && visible ? 'split-pane' : undefined}
                       style={!visible ? { display: 'none' } : undefined}
                     >
-                      <TerminalView
-                        tabId={tab.id}
-                        projectId={proj.config.id}
-                        cwd={proj.config.cwd}
-                        connection={proj.config.connection}
-                        initScript={proj.config.initScript}
-                        tabCmd={tab.cmd}
-                        visible={visible}
-                      />
+                      {tab.type === 'agent' ? (
+                        <AgentView
+                          tabId={tab.id}
+                          projectId={proj.config.id}
+                          provider={tab.provider!}
+                          visible={visible}
+                        />
+                      ) : (
+                        <TerminalView
+                          tabId={tab.id}
+                          projectId={proj.config.id}
+                          cwd={proj.config.cwd}
+                          connection={proj.config.connection}
+                          initScript={proj.config.initScript}
+                          tabCmd={tab.cmd}
+                          visible={visible}
+                        />
+                      )}
                     </div>
                   );
                 });

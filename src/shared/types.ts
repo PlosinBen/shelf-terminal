@@ -1,3 +1,8 @@
+// ── Agent types ──
+
+export type AgentProvider = 'claude' | 'copilot' | 'gemini';
+export type TabType = 'terminal' | 'agent';
+
 // ── Connection types ──
 
 export type LocalConnection = { type: 'local' };
