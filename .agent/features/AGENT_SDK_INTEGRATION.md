@@ -505,38 +505,59 @@ Agent view 內部的鍵盤操作直接在 AgentView 元件內處理（非 app ke
 
 **目標：Claude Code 單一 provider，Local + Remote 基本對話功能**
 
-1. 型別定義
-   - `src/shared/types.ts` 擴充 Tab type、AgentProvider
-   - `src/main/agent/types.ts` 定義 AgentBackend、AgentMessage、SessionState
-   - `src/shared/ipc-channels.ts` 新增 agent IPC channels
+#### Phase 1a — Tab 基礎（✅ 已完成）
 
-2. Main process — Agent 核心
-   - `src/main/agent/index.ts` — AgentManager（session CRUD、IPC handler）
-   - `src/main/agent/providers/claude.ts` — Claude backend（query、stop、permission）
+1. `src/shared/types.ts` — TabType、AgentProvider、ProjectConfig.defaultAgentProvider/openAgentOnConnect
+2. `src/renderer/store.ts` — Tab model 支援 type/provider、setTabProvider
+3. `src/renderer/events.ts` — NEW_AGENT_TAB event
+4. `src/renderer/components/TabBar.tsx` — 右鍵選單（Terminal/Agent）、agent tab icon
+5. `src/renderer/components/AgentView.tsx` — placeholder + provider picker
+6. `src/renderer/App.tsx` — agent tab 渲染分流、event handler、connect 時自動開 agent tab
+7. `src/renderer/components/FolderPicker.tsx` — 新增 project 時選 default agent + open on connect
+8. `src/renderer/components/ProjectEditPanel.tsx` — 修改 default agent + open on connect
+
+#### Phase 1b — Agent 核心（Local）
+
+安裝 SDK，建立 AgentManager 和 Claude provider，本機可對話。
+
+1. 安裝 `@anthropic-ai/claude-agent-sdk`
+2. 型別定義
+   - `src/main/agent/types.ts` — AgentBackend interface、AgentMessage、SessionState、ProviderSession
+   - `src/shared/ipc-channels.ts` — 新增 agent IPC channels
+3. Agent 核心
+   - `src/main/agent/index.ts` — AgentManager（session CRUD、IPC handler、message loop）
+   - `src/main/agent/providers/claude.ts` — Claude backend（query、stop、基本 permission）
    - `src/main/agent/usage-tracker.ts` — 基本 token/cost 追蹤
+4. IPC 接線
    - `src/main/index.ts` — 註冊 agent IPC handlers
-   - `src/main/preload.ts` — 暴露 agent API
+   - `src/main/preload.ts` — 暴露 agent API 到 renderer
+   - `src/renderer/env.d.ts` — window.shelfApi 型別擴充
 
-3. Main process — Transport 層
-   - `src/main/agent/transport/types.ts` — AgentTransport interface
-   - `src/main/agent/transport/local.ts` — LocalTransport（main process 直接呼叫 SDK）
-   - `src/main/agent/transport/remote.ts` — RemoteTransport（stdin/stdout over connector.exec()）
-   - `src/main/agent/deploy.ts` — Remote bundle 版本檢查 + 上傳
+#### Phase 1c — 對話 UI
 
-4. Agent Server
-   - `agent-server/index.ts` — stdin/stdout JSON protocol entry
-   - `agent-server/` build script（esbuild 單檔 bundle）
+AgentView 從 placeholder 變成真正的對話介面。
 
-5. Renderer
-   - `src/renderer/events.ts` — 新增 NEW_AGENT_TAB event
-   - `src/renderer/store.ts` — tab model 支援 agent type
-   - `src/renderer/components/AgentView.tsx` — 對話 UI（訊息列表 + 輸入）
-   - `src/renderer/components/AgentMessage.tsx` — 訊息渲染
-   - `src/renderer/App.tsx` — agent tab 的 event handler + 渲染分流
+1. `src/renderer/components/AgentView.tsx` — 訊息列表 + 輸入框 + Send/Stop 按鈕
+2. `src/renderer/components/AgentMessage.tsx` — 單一訊息渲染（user/assistant/system、provider name 前綴）
+3. `src/renderer/components/AgentToolCall.tsx` — Tool call 展開/收合
+4. 串流顯示（text delta 即時更新）
+5. Auto-scroll + auto-grow textarea
 
-6. 驗證
-   - 單元測試：AgentManager session lifecycle、message protocol mapping
-   - E2E 測試：開 agent tab、送訊息、收到回應（需要 mock SDK）
+#### Phase 1d — Remote Transport
+
+支援 SSH/Docker project 的 agent 功能。
+
+1. `src/main/agent/transport/types.ts` — AgentTransport interface
+2. `src/main/agent/transport/local.ts` — LocalTransport（main process 直接呼叫 SDK）
+3. `src/main/agent/transport/remote.ts` — RemoteTransport（stdin/stdout over connector.exec()）
+4. `src/main/agent/deploy.ts` — Remote bundle 版本檢查 + 上傳
+5. `agent-server/index.ts` — stdin/stdout JSON protocol entry
+6. `agent-server/` build script（esbuild 單檔 bundle）
+
+#### Phase 1e — 驗證
+
+1. 單元測試：AgentManager session lifecycle、message protocol mapping
+2. E2E 測試：開 agent tab、送訊息、收到回應（需要 mock SDK）
 
 ### Phase 2 — Session & Permission & UX
 
