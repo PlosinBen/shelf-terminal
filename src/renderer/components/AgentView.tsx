@@ -28,6 +28,8 @@ export function AgentView({ tabId, projectId, cwd, connection, initScript, provi
   const [streaming, setStreaming] = useState(false);
   const [model, setModel] = useState<string | undefined>();
   const [cost, setCost] = useState<number | undefined>();
+  const [permissionMode, setPermissionMode] = useState('default');
+  const [pendingPermission, setPendingPermission] = useState<{ toolUseId: string; toolName: string; input: Record<string, unknown> } | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const streamingTextRef = useRef<string>('');
@@ -130,7 +132,12 @@ export function AgentView({ tabId, projectId, cwd, connection, initScript, provi
       scrollToBottom();
     });
 
-    return () => { offMessage(); offStream(); offStatus(); offError(); };
+    const offPermission = window.shelfApi.agent.onPermissionRequest((payload) => {
+      if (payload.tabId !== tabId) return;
+      setPendingPermission({ toolUseId: payload.toolUseId, toolName: payload.toolName, input: payload.input });
+    });
+
+    return () => { offMessage(); offStream(); offStatus(); offError(); offPermission(); };
   }, [tabId, provider, scrollToBottom]);
 
   const handleSend = useCallback(() => {
@@ -149,6 +156,25 @@ export function AgentView({ tabId, projectId, cwd, connection, initScript, provi
 
   const handleStop = useCallback(() => {
     window.shelfApi.agent.stop(tabId);
+  }, [tabId]);
+
+  const handlePermissionAllow = useCallback(() => {
+    if (pendingPermission) {
+      window.shelfApi.agent.resolvePermission(tabId, pendingPermission.toolUseId, true);
+      setPendingPermission(null);
+    }
+  }, [tabId, pendingPermission]);
+
+  const handlePermissionDeny = useCallback(() => {
+    if (pendingPermission) {
+      window.shelfApi.agent.resolvePermission(tabId, pendingPermission.toolUseId, false);
+      setPendingPermission(null);
+    }
+  }, [tabId, pendingPermission]);
+
+  const handleModeChange = useCallback((mode: string) => {
+    setPermissionMode(mode);
+    window.shelfApi.agent.setMode(tabId, mode);
   }, [tabId]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -211,6 +237,18 @@ export function AgentView({ tabId, projectId, cwd, connection, initScript, provi
         ))}
       </div>
 
+      {pendingPermission && (
+        <div className="agent-permission">
+          <div className="agent-permission-header">Permission Required</div>
+          <div className="agent-permission-tool">{pendingPermission.toolName}</div>
+          <pre className="agent-permission-input">{JSON.stringify(pendingPermission.input, null, 2)}</pre>
+          <div className="agent-permission-actions">
+            <button className="agent-btn agent-btn-stop" onClick={handlePermissionDeny}>Deny</button>
+            <button className="agent-btn agent-btn-send" onClick={handlePermissionAllow}>Allow</button>
+          </div>
+        </div>
+      )}
+
       <div className="agent-input-area">
         <textarea
           ref={textareaRef}
@@ -223,6 +261,16 @@ export function AgentView({ tabId, projectId, cwd, connection, initScript, provi
           disabled={streaming}
         />
         <div className="agent-input-actions">
+          <select
+            className="agent-mode-select"
+            value={permissionMode}
+            onChange={(e) => handleModeChange(e.target.value)}
+            title="Permission mode"
+          >
+            <option value="default">Default</option>
+            <option value="acceptEdits">Accept Edits</option>
+            <option value="bypassPermissions">Bypass</option>
+          </select>
           {streaming ? (
             <button className="agent-btn agent-btn-stop" onClick={handleStop}>Stop</button>
           ) : (

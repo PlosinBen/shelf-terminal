@@ -107,6 +107,10 @@ contextBridge.exposeInMainWorld('shelfApi', {
       ipcRenderer.invoke(IPC.AGENT_STOP, { tabId }),
     destroy: (tabId: string) =>
       ipcRenderer.invoke(IPC.AGENT_DESTROY, { tabId }),
+    resolvePermission: (tabId: string, toolUseId: string, allow: boolean) =>
+      ipcRenderer.invoke(IPC.AGENT_RESOLVE_PERMISSION, { tabId, toolUseId, allow }),
+    setMode: (tabId: string, mode: string) =>
+      ipcRenderer.invoke(IPC.AGENT_SET_MODE, { tabId, mode }),
     onMessage: (callback: (payload: any) => void) => {
       const listener = (_event: Electron.IpcRendererEvent, payload: any) => callback(payload);
       ipcRenderer.on(IPC.AGENT_MESSAGE, listener);
@@ -126,6 +130,11 @@ contextBridge.exposeInMainWorld('shelfApi', {
       const listener = (_event: Electron.IpcRendererEvent, payload: any) => callback(payload);
       ipcRenderer.on(IPC.AGENT_ERROR, listener);
       return () => ipcRenderer.removeListener(IPC.AGENT_ERROR, listener);
+    },
+    onPermissionRequest: (callback: (payload: any) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, payload: any) => callback(payload);
+      ipcRenderer.on(IPC.AGENT_PERMISSION_REQUEST, listener);
+      return () => ipcRenderer.removeListener(IPC.AGENT_PERMISSION_REQUEST, listener);
     },
   },
   updater: {

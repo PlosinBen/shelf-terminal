@@ -2148,6 +2148,45 @@ button {
   overflow-y: auto;
 }
 
+/* ── Agent Permission ── */
+
+.agent-permission {
+  padding: 10px 16px;
+  border-top: 1px solid var(--border);
+  border-left: 3px solid #e5c07b;
+  background: color-mix(in srgb, #e5c07b 8%, var(--bg));
+}
+
+.agent-permission-header {
+  font-size: 12px;
+  font-weight: 600;
+  color: #e5c07b;
+  margin-bottom: 6px;
+}
+
+.agent-permission-tool {
+  font-size: 13px;
+  font-weight: 600;
+  color: #c678dd;
+  margin-bottom: 4px;
+}
+
+.agent-permission-input {
+  font-size: 12px;
+  color: var(--text-muted);
+  max-height: 150px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin-bottom: 8px;
+}
+
+.agent-permission-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
 /* ── Agent Input Area ── */
 
 .agent-input-area {
@@ -2208,4 +2247,19 @@ button {
 .agent-btn-stop {
   background: #e06c75;
   color: #fff;
+}
+
+.agent-mode-select {
+  background: var(--bg);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 6px;
+  font-size: 12px;
+  outline: none;
+  cursor: pointer;
+}
+
+.agent-mode-select:focus {
+  border-color: var(--accent);
 }

@@ -39,7 +39,11 @@ export interface AgentBackend {
 export interface AgentQueryOptions {
   resume?: string;
   permissionMode?: string;
+  canUseTool?: PermissionCallback;
 }
+
+export type PermissionResult = { behavior: 'allow' } | { behavior: 'deny'; message?: string };
+export type PermissionCallback = (toolUseId: string, toolName: string, input: Record<string, unknown>) => Promise<PermissionResult>;
 
 export type AgentEvent =
   | { type: 'message'; payload: AgentMessagePayload }

@@ -1,5 +1,5 @@
 import type { AgentBackend, AgentEvent, AgentMessagePayload, AgentQueryOptions } from '../types';
-import type { Query, SDKMessage, Options } from '@anthropic-ai/claude-agent-sdk';
+import type { Query, SDKMessage, Options, CanUseTool } from '@anthropic-ai/claude-agent-sdk';
 import { log } from '@shared/logger';
 
 let sdkQuery: typeof import('@anthropic-ai/claude-agent-sdk').query | null = null;
@@ -32,6 +32,17 @@ export function createClaudeBackend(): AgentBackend {
 
       if (opts?.resume) {
         options.resume = opts.resume;
+      }
+
+      if (opts?.canUseTool) {
+        const userCallback = opts.canUseTool;
+        options.canUseTool = (async (toolName, input, canUseOpts) => {
+          const result = await userCallback(canUseOpts.toolUseID, toolName, input);
+          if (result.behavior === 'allow') {
+            return { behavior: 'allow' as const };
+          }
+          return { behavior: 'deny' as const, message: result.message ?? 'Denied by user' };
+        }) as CanUseTool;
       }
 
       activeQuery = queryFn({ prompt, options });
