@@ -2042,7 +2042,7 @@ button {
 .agent-messages {
   flex: 1;
   overflow-y: auto;
-  padding: 8px 18px;
+  padding: 8px 12px;
   display: flex;
   flex-direction: column;
   gap: 4px;
