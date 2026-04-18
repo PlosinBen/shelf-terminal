@@ -108,7 +108,7 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
         const id = `msg-${++msgCounter}`;
         setMessages((prev) => [
           ...prev,
-          { id, role: 'tool', type: 'tool_use', content: '', toolName: payload.toolName, toolInput: payload.toolInput, toolUseId: payload.toolUseId, streaming: true },
+          { id, role: 'tool', type: 'tool_use', content: '', toolName: payload.toolName, toolInput: payload.toolInput, toolUseId: payload.toolUseId, streaming: true, cwd },
         ]);
         persistMsg('tool', 'tool_use', '', { toolName: payload.toolName, toolUseId: payload.toolUseId, toolInput: payload.toolInput });
         scrollToBottom();

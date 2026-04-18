@@ -2270,6 +2270,106 @@ button {
   overflow-y: auto;
 }
 
+.agent-tool-file-path {
+  font-size: 12px;
+  color: var(--accent);
+  margin-bottom: 4px;
+}
+
+.agent-tool-code {
+  background: var(--surface);
+  border-radius: 3px;
+  padding: 6px 10px;
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text);
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.agent-tool-truncated {
+  font-size: 11px;
+  color: var(--text-muted);
+  padding: 2px 0;
+}
+
+/* ── Diff ── */
+
+.agent-diff-side {
+  display: flex;
+  gap: 2px;
+}
+
+.agent-diff-pane {
+  flex: 1;
+  min-width: 0;
+  background: var(--surface);
+  border-radius: 3px;
+  overflow-x: auto;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.agent-diff-row {
+  display: flex;
+  padding: 0 6px;
+  min-height: 20px;
+  line-height: 20px;
+  font-size: 12px;
+}
+
+.agent-diff-num {
+  width: 28px;
+  text-align: right;
+  color: var(--text-muted);
+  opacity: 0.5;
+  flex-shrink: 0;
+  padding-right: 4px;
+  user-select: none;
+}
+
+.agent-diff-sign {
+  width: 14px;
+  font-weight: bold;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.agent-diff-text {
+  white-space: pre;
+}
+
+.agent-diff-del {
+  background: rgba(239, 68, 68, 0.1);
+  color: #fca5a5;
+}
+
+.agent-diff-del .agent-diff-sign {
+  color: #fca5a5;
+}
+
+.agent-diff-add {
+  background: rgba(34, 197, 94, 0.1);
+  color: #86efac;
+}
+
+.agent-diff-add .agent-diff-sign {
+  color: #86efac;
+}
+
+.agent-diff-empty {
+  opacity: 0;
+}
+
+.agent-tool-diff-inline {
+  background: var(--surface);
+  border-radius: 3px;
+  font-size: 12px;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
 /* ── Agent Permission ── */
 
 .agent-permission {
