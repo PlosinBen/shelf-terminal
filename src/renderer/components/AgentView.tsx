@@ -339,6 +339,8 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
   }, []);
 
   const handleStop = useCallback(() => {
+    pendingQueue.current = [];
+    setQueuedMessages([]);
     window.shelfApi.agent.stop(tabId);
   }, [tabId]);
 
