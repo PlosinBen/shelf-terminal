@@ -2269,6 +2269,66 @@ button {
   color: #fff;
 }
 
+/* ── Agent Slash Commands ── */
+
+.agent-slash-menu {
+  border-top: 1px solid var(--border);
+  background: var(--bg-secondary);
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.agent-slash-item {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  width: 100%;
+  padding: 6px 12px;
+  background: none;
+  border: none;
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.agent-slash-item:hover {
+  background: var(--bg);
+}
+
+.agent-slash-name {
+  color: var(--accent);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.agent-slash-desc {
+  color: var(--text-muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Agent Status Extras ── */
+
+.agent-status-tokens {
+  font-size: 11px;
+}
+
+.agent-status-rate {
+  font-size: 11px;
+}
+
+.agent-status-rate.warning {
+  color: #e5c07b;
+}
+
+.agent-rate-reset {
+  font-size: 10px;
+  opacity: 0.7;
+}
+
 .agent-mode-select {
   background: var(--bg);
   color: var(--text-muted);

@@ -20,6 +20,13 @@ export interface AgentStreamDelta {
   content: string;
 }
 
+export interface RateLimitInfo {
+  rateLimitType?: string;
+  status?: string;
+  utilization?: number;
+  resetsAt?: number;
+}
+
 export interface AgentStatusPayload {
   state: AgentSessionState;
   model?: string;
@@ -28,12 +35,14 @@ export interface AgentStatusPayload {
   outputTokens?: number;
   numTurns?: number;
   sessionId?: string;
+  rateLimit?: RateLimitInfo;
 }
 
 export interface AgentBackend {
   query(prompt: string, cwd: string, opts?: AgentQueryOptions): AsyncGenerator<AgentEvent>;
   stop(): Promise<void>;
   dispose(): void;
+  getSlashCommands?(): Promise<{ name: string; description: string }[]>;
 }
 
 export interface AgentQueryOptions {

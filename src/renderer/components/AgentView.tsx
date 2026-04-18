@@ -22,6 +22,21 @@ interface AgentViewProps {
 
 let msgCounter = 0;
 
+function formatTokens(n: number): string {
+  if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+  if (n >= 1000) return (n / 1000).toFixed(1) + 'k';
+  return String(n);
+}
+
+function formatResetTime(epochMs: number): string {
+  const diff = epochMs - Date.now();
+  if (diff <= 0) return 'now';
+  const mins = Math.ceil(diff / 60000);
+  if (mins < 60) return `${mins}m`;
+  const hours = Math.floor(mins / 60);
+  return `${hours}h${mins % 60}m`;
+}
+
 export function AgentView({ tabId, projectId, cwd, connection, initScript, provider, visible, onSelectProvider }: AgentViewProps) {
   const [messages, setMessages] = useState<AgentMsg[]>([]);
   const [input, setInput] = useState('');
@@ -30,6 +45,11 @@ export function AgentView({ tabId, projectId, cwd, connection, initScript, provi
   const [cost, setCost] = useState<number | undefined>();
   const [permissionMode, setPermissionMode] = useState('default');
   const [pendingPermission, setPendingPermission] = useState<{ toolUseId: string; toolName: string; input: Record<string, unknown> } | null>(null);
+  const [tokens, setTokens] = useState({ input: 0, output: 0 });
+  const [rateLimit, setRateLimit] = useState<{ type?: string; utilization?: number; resetsAt?: number } | null>(null);
+  const [slashCommands, setSlashCommands] = useState<{ name: string; description: string }[]>([]);
+  const [showSlashMenu, setShowSlashMenu] = useState(false);
+  const [slashFilter, setSlashFilter] = useState('');
   const listRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const streamingTextRef = useRef<string>('');
@@ -119,9 +139,25 @@ export function AgentView({ tabId, projectId, cwd, connection, initScript, provi
 
     const offStatus = window.shelfApi.agent.onStatus((payload) => {
       if (payload.tabId !== tabId) return;
+      const wasStreaming = streaming;
       setStreaming(payload.state === 'streaming');
+      if (payload.state === 'idle' && slashCommands.length === 0) {
+        window.shelfApi.agent.slashCommands(tabId).then((cmds) => {
+          if (cmds.length > 0) setSlashCommands(cmds);
+        });
+      }
       if (payload.model) setModel(payload.model);
       if (payload.costUsd !== undefined) setCost(payload.costUsd);
+      if (payload.inputTokens !== undefined || payload.outputTokens !== undefined) {
+        setTokens((prev) => ({
+          input: payload.inputTokens ?? prev.input,
+          output: payload.outputTokens ?? prev.output,
+        }));
+      }
+      if ((payload as any).rateLimit) {
+        const rl = (payload as any).rateLimit;
+        setRateLimit({ type: rl.rateLimitType, utilization: rl.utilization, resetsAt: rl.resetsAt });
+      }
     });
 
     const offError = window.shelfApi.agent.onError((payload) => {
@@ -188,16 +224,46 @@ export function AgentView({ tabId, projectId, cwd, connection, initScript, provi
     streamingIdRef.current = null;
   }, [tabId]);
 
+  const handleInputChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const val = e.target.value;
+    setInput(val);
+    if (val.startsWith('/') && !val.includes('\n')) {
+      setSlashFilter(val.slice(1).toLowerCase());
+      setShowSlashMenu(true);
+    } else {
+      setShowSlashMenu(false);
+    }
+  }, []);
+
+  const handleSlashSelect = useCallback((name: string) => {
+    setInput('/' + name + ' ');
+    setShowSlashMenu(false);
+    textareaRef.current?.focus();
+  }, []);
+
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
+      if (showSlashMenu) {
+        const filtered = slashCommands.filter((c) => c.name.toLowerCase().includes(slashFilter));
+        if (filtered.length > 0) {
+          handleSlashSelect(filtered[0].name);
+          return;
+        }
+      }
       handleSend();
     }
-    if (e.key === 'Escape' && streaming) {
-      e.preventDefault();
-      handleStop();
+    if (e.key === 'Escape') {
+      if (showSlashMenu) {
+        setShowSlashMenu(false);
+        return;
+      }
+      if (streaming) {
+        e.preventDefault();
+        handleStop();
+      }
     }
-  }, [handleSend, handleStop, streaming]);
+  }, [handleSend, handleStop, streaming, showSlashMenu, slashFilter, slashCommands, handleSlashSelect]);
 
   // Auto-grow textarea
   useEffect(() => {
@@ -236,6 +302,17 @@ export function AgentView({ tabId, projectId, cwd, connection, initScript, provi
       <div className="agent-status-bar">
         <span>{provider.charAt(0).toUpperCase() + provider.slice(1)}</span>
         {model && <span className="agent-status-model">{model}</span>}
+        {(tokens.input > 0 || tokens.output > 0) && (
+          <span className="agent-status-tokens" title="Input / Output tokens">
+            {formatTokens(tokens.input)} / {formatTokens(tokens.output)}
+          </span>
+        )}
+        {rateLimit?.utilization !== undefined && (
+          <span className={`agent-status-rate ${rateLimit.utilization > 0.8 ? 'warning' : ''}`} title={rateLimit.type ?? 'Rate limit'}>
+            {Math.round(rateLimit.utilization * 100)}%
+            {rateLimit.resetsAt && <span className="agent-rate-reset"> resets {formatResetTime(rateLimit.resetsAt)}</span>}
+          </span>
+        )}
         {cost !== undefined && <span className="agent-status-cost">${cost.toFixed(4)}</span>}
         <button className="agent-reset-btn" onClick={handleReset} disabled={streaming} title="Reset session">Reset</button>
       </div>
@@ -261,12 +338,31 @@ export function AgentView({ tabId, projectId, cwd, connection, initScript, provi
         </div>
       )}
 
+      {showSlashMenu && slashCommands.length > 0 && (() => {
+        const filtered = slashCommands.filter((c) => c.name.toLowerCase().includes(slashFilter));
+        if (filtered.length === 0) return null;
+        return (
+          <div className="agent-slash-menu">
+            {filtered.slice(0, 10).map((cmd) => (
+              <button
+                key={cmd.name}
+                className="agent-slash-item"
+                onMouseDown={(e) => { e.preventDefault(); handleSlashSelect(cmd.name); }}
+              >
+                <span className="agent-slash-name">/{cmd.name}</span>
+                <span className="agent-slash-desc">{cmd.description}</span>
+              </button>
+            ))}
+          </div>
+        );
+      })()}
+
       <div className="agent-input-area">
         <textarea
           ref={textareaRef}
           className="agent-textarea"
           value={input}
-          onChange={(e) => setInput(e.target.value)}
+          onChange={handleInputChange}
           onKeyDown={handleKeyDown}
           placeholder="Message..."
           rows={1}

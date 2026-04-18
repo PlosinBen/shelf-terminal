@@ -151,6 +151,12 @@ export function registerAgentHandlers() {
     }
   });
 
+  ipcMain.handle(IPC.AGENT_SLASH_COMMANDS, async (_event, { tabId }: { tabId: string }) => {
+    const session = sessions.get(tabId);
+    if (!session?.backend.getSlashCommands) return [];
+    return session.backend.getSlashCommands();
+  });
+
   ipcMain.handle(IPC.AGENT_SET_MODE, async (_event, { tabId, mode }: { tabId: string; mode: string }) => {
     const session = sessions.get(tabId);
     if (session) {

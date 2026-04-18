@@ -80,6 +80,16 @@ export function createClaudeBackend(): AgentBackend {
       activeQuery = null;
       abortController = null;
     },
+
+    async getSlashCommands() {
+      if (!activeQuery) return [];
+      try {
+        const cmds = await activeQuery.supportedCommands();
+        return cmds.map((c) => ({ name: c.name, description: c.description }));
+      } catch {
+        return [];
+      }
+    },
   };
 }
 
@@ -176,6 +186,23 @@ function processMessage(msg: SDKMessage): AgentEvent[] {
           outputTokens: usage?.output_tokens,
           numTurns,
           sessionId: msg.session_id,
+        },
+      });
+      break;
+    }
+
+    case 'rate_limit_event': {
+      events.push({
+        type: 'status',
+        payload: {
+          state: 'streaming',
+          sessionId: msg.session_id,
+          rateLimit: {
+            rateLimitType: msg.rate_limit_info.rateLimitType,
+            status: msg.rate_limit_info.status,
+            utilization: msg.rate_limit_info.utilization,
+            resetsAt: msg.rate_limit_info.resetsAt,
+          },
         },
       });
       break;

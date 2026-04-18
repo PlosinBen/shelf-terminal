@@ -62,6 +62,7 @@ export const IPC = {
   AGENT_DESTROY: 'agent:destroy',
   AGENT_RESOLVE_PERMISSION: 'agent:resolve-permission',
   AGENT_SET_MODE: 'agent:set-mode',
+  AGENT_SLASH_COMMANDS: 'agent:slash-commands',
 
   // Main → Renderer (send)
   PTY_DATA: 'pty:data',
