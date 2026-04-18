@@ -368,33 +368,6 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
 
   return (
     <div className="agent-view agent-view-active">
-      <div className="agent-status-bar">
-        <select
-          className="agent-provider-switch"
-          value={provider}
-          onChange={(e) => handleSwitchProvider(e.target.value as AgentProvider)}
-          disabled={streaming}
-        >
-          {AGENT_PROVIDERS.map((p) => (
-            <option key={p.id} value={p.id}>{p.label}</option>
-          ))}
-        </select>
-        {model && <span className="agent-status-model">{model}</span>}
-        {(tokens.input > 0 || tokens.output > 0) && (
-          <span className="agent-status-tokens" title="Input / Output tokens">
-            {formatTokens(tokens.input)} / {formatTokens(tokens.output)}
-          </span>
-        )}
-        {rateLimit?.utilization !== undefined && (
-          <span className={`agent-status-rate ${rateLimit.utilization > 0.8 ? 'warning' : ''}`} title={rateLimit.type ?? 'Rate limit'}>
-            {Math.round(rateLimit.utilization * 100)}%
-            {rateLimit.resetsAt && <span className="agent-rate-reset"> resets {formatResetTime(rateLimit.resetsAt)}</span>}
-          </span>
-        )}
-        {cost !== undefined && <span className="agent-status-cost">${cost.toFixed(4)}</span>}
-        <button className="agent-reset-btn" onClick={handleReset} disabled={streaming} title="Reset session">Reset</button>
-      </div>
-
       <div className="agent-messages" ref={listRef}>
         {messages.length === 0 && (
           <div className="agent-empty">Send a message to start</div>
@@ -436,6 +409,7 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
       })()}
 
       <div className="agent-input-area">
+        <span className="agent-prompt">❯</span>
         <textarea
           ref={textareaRef}
           className="agent-textarea"
@@ -463,6 +437,32 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
             <button className="agent-btn agent-btn-send" onClick={handleSend} disabled={!input.trim()}>Send</button>
           )}
         </div>
+      </div>
+
+      <div className="agent-status-bar">
+        <select
+          className="agent-provider-switch"
+          value={provider}
+          onChange={(e) => handleSwitchProvider(e.target.value as AgentProvider)}
+          disabled={streaming}
+        >
+          {AGENT_PROVIDERS.map((p) => (
+            <option key={p.id} value={p.id}>{p.label}</option>
+          ))}
+        </select>
+        {model && <><span className="agent-status-sep">·</span><span className="agent-status-model">{model}</span></>}
+        {(tokens.input > 0 || tokens.output > 0) && (
+          <><span className="agent-status-sep">·</span><span className="agent-status-tokens" title="Input / Output tokens">{formatTokens(tokens.input)} / {formatTokens(tokens.output)}</span></>
+        )}
+        {rateLimit?.utilization !== undefined && (
+          <><span className="agent-status-sep">·</span><span className={`agent-status-rate ${rateLimit.utilization > 0.8 ? 'warning' : ''}`} title={rateLimit.type ?? 'Rate limit'}>
+            {Math.round(rateLimit.utilization * 100)}%
+            {rateLimit.resetsAt && <span className="agent-rate-reset"> resets {formatResetTime(rateLimit.resetsAt)}</span>}
+          </span></>
+        )}
+        {cost !== undefined && <><span className="agent-status-sep">·</span><span className="agent-status-cost">${cost.toFixed(4)}</span></>}
+        <span style={{ marginLeft: 'auto' }} />
+        <button className="agent-reset-btn" onClick={handleReset} disabled={streaming} title="Reset session">Reset</button>
       </div>
     </div>
   );
