@@ -193,9 +193,8 @@ export function AgentMessage({ message }: AgentMessageProps) {
 
   if (message.role === 'user') {
     return (
-      <div className={`agent-msg agent-msg-user ${message.streaming ? 'agent-msg-pending' : ''}`}>
+      <div className="agent-msg agent-msg-user">
         <div className="agent-msg-content">{message.content}</div>
-        {message.streaming && <span className="agent-pending-label">queued</span>}
       </div>
     );
   }

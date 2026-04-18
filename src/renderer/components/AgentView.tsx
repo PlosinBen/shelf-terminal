@@ -258,9 +258,7 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
 
       if (!isStreaming && pendingQueue.current.length > 0) {
         const next = pendingQueue.current.shift()!;
-        setMessages((prev) => prev.map((m) =>
-          m.role === 'user' && m.content === next && m.streaming ? { ...m, streaming: false } : m,
-        ));
+        setQueuedMessages((prev) => prev.slice(1));
         setTimeout(() => sendMessage(next), 100);
       }
 
@@ -311,6 +309,8 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
     return () => { offMessage(); offStream(); offStatus(); offError(); offPermission(); offCapabilities(); };
   }, [tabId, provider, scrollToBottom, sendMessage]);
 
+  const [queuedMessages, setQueuedMessages] = useState<{ id: string; content: string }[]>([]);
+
   const handleSend = useCallback(() => {
     const text = input.trim();
     if (!text || !provider) return;
@@ -318,15 +318,25 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
     setInput('');
 
     if (streaming) {
+      const id = `q-${++msgCounter}`;
       pendingQueue.current.push(text);
-      const id = `msg-${++msgCounter}`;
-      setMessages((prev) => [...prev, { id, role: 'user', type: 'text', content: text, streaming: true }]);
+      setQueuedMessages((prev) => [...prev, { id, content: text }]);
       scrollToBottom(true);
       return;
     }
 
     sendMessage(text);
   }, [input, streaming, provider, sendMessage, scrollToBottom]);
+
+  const handleCancelQueued = useCallback((id: string) => {
+    setQueuedMessages((prev) => {
+      const idx = prev.findIndex((q) => q.id === id);
+      if (idx !== -1) {
+        pendingQueue.current.splice(idx, 1);
+      }
+      return prev.filter((q) => q.id !== id);
+    });
+  }, []);
 
   const handleStop = useCallback(() => {
     window.shelfApi.agent.stop(tabId);
@@ -531,15 +541,19 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
             </div>
           ));
         })()}
-        {streaming && (() => {
-          const lastNonPending = [...messages].reverse().find((m) => !m.streaming);
-          return lastNonPending?.role === 'user';
-        })() && (
+        {streaming && messages.length > 0 && messages[messages.length - 1]?.role === 'user' && (
           <div className="agent-loading">
             <span className="agent-loading-spinner" />
             <span className="agent-loading-text">Agent is running... (Esc to stop)</span>
           </div>
         )}
+        {queuedMessages.map((q) => (
+          <div key={q.id} className="agent-msg agent-msg-user agent-msg-queued">
+            <div className="agent-msg-content">{q.content}</div>
+            <span className="agent-queued-label">queued</span>
+            <button className="agent-queued-cancel" onClick={() => handleCancelQueued(q.id)} title="Cancel">×</button>
+          </div>
+        ))}
         <div ref={bottomRef} />
       </div>
 
