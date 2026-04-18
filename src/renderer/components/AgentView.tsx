@@ -53,9 +53,24 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
   const [showSlashMenu, setShowSlashMenu] = useState(false);
   const [slashFilter, setSlashFilter] = useState('');
   const listRef = useRef<HTMLDivElement>(null);
+  const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const streamingTextRef = useRef<string>('');
   const streamingIdRef = useRef<string | null>(null);
+  const isAtBottomRef = useRef(true);
+  const initialScrollDone = useRef(false);
+  const prevMessageCount = useRef(0);
+
+  // Track whether user is scrolled to bottom
+  useEffect(() => {
+    const el = listRef.current;
+    if (!el) return;
+    const handleScroll = () => {
+      isAtBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+    };
+    el.addEventListener('scroll', handleScroll);
+    return () => el.removeEventListener('scroll', handleScroll);
+  }, []);
 
   // Load history on mount
   useEffect(() => {
@@ -97,13 +112,48 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
     });
   }, [projectId, provider]);
 
-  const scrollToBottom = useCallback(() => {
+  const scrollToBottom = useCallback((force = false) => {
+    if (!force && !isAtBottomRef.current) return;
     requestAnimationFrame(() => {
-      if (listRef.current) {
-        listRef.current.scrollTop = listRef.current.scrollHeight;
-      }
+      bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
     });
   }, []);
+
+  // Auto-scroll on every render if at bottom (catches streaming updates)
+  useEffect(() => {
+    if (isAtBottomRef.current) {
+      bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  });
+
+  // Force scroll on user message send
+  useEffect(() => {
+    const prev = prevMessageCount.current;
+    prevMessageCount.current = messages.length;
+    if (messages.length > prev) {
+      const last = messages[messages.length - 1];
+      if (last?.role === 'user') {
+        requestAnimationFrame(() => {
+          bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+          isAtBottomRef.current = true;
+        });
+      }
+    }
+  }, [messages.length]);
+
+  // Force scroll on initial history load
+  useEffect(() => {
+    if (!initialScrollDone.current && messages.length > 0) {
+      initialScrollDone.current = true;
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        const el = listRef.current;
+        if (el) {
+          el.scrollTop = el.scrollHeight;
+          isAtBottomRef.current = true;
+        }
+      }));
+    }
+  }, [messages.length]);
 
   useEffect(() => {
     const offMessage = window.shelfApi.agent.onMessage((payload) => {
@@ -118,12 +168,10 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
           { id, role: 'assistant', type: 'text', content: payload.content, provider },
         ]);
         persistMsg('assistant', 'text', payload.content);
-        scrollToBottom();
       } else if (payload.type === 'thinking') {
         const id = `msg-${++msgCounter}`;
         setMessages((prev) => [...prev, { id, role: 'assistant', type: 'thinking', content: payload.content }]);
         persistMsg('assistant', 'thinking', payload.content);
-        scrollToBottom();
       } else if (payload.type === 'tool_use') {
         const id = `msg-${++msgCounter}`;
         setMessages((prev) => [
@@ -131,7 +179,6 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
           { id, role: 'tool', type: 'tool_use', content: '', toolName: payload.toolName, toolInput: payload.toolInput, toolUseId: payload.toolUseId, streaming: true, cwd },
         ]);
         persistMsg('tool', 'tool_use', '', { toolName: payload.toolName, toolUseId: payload.toolUseId, toolInput: payload.toolInput });
-        scrollToBottom();
       } else if (payload.type === 'tool_result') {
         setMessages((prev) => prev.map((m) =>
           m.toolUseId === payload.toolUseId && m.type === 'tool_use'
@@ -139,19 +186,15 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
             : m,
         ));
         persistMsg('tool', 'tool_result', payload.content, { toolUseId: payload.toolUseId });
-        scrollToBottom();
       } else if (payload.type === 'system') {
         const id = `msg-${++msgCounter}`;
         setMessages((prev) => [...prev, { id, role: 'system', type: 'system', content: payload.content }]);
-        scrollToBottom();
       } else if (payload.type === 'result') {
         streamingIdRef.current = null;
         setMessages((prev) => prev.filter((m) => !m.streaming));
-        scrollToBottom();
       } else if (payload.type === 'error') {
         const id = `msg-${++msgCounter}`;
         setMessages((prev) => [...prev, { id, role: 'system', type: 'error', content: payload.content }]);
-        scrollToBottom();
       }
     });
 
@@ -175,7 +218,6 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
           }
           return [...prev, msg];
         });
-        scrollToBottom();
       }
     });
 
@@ -246,7 +288,7 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
     setInput('');
     streamingTextRef.current = '';
     streamingIdRef.current = null;
-    scrollToBottom();
+    scrollToBottom(true);
 
     window.shelfApi.agent.send(tabId, text, cwd, provider, connection, initScript);
   }, [input, streaming, provider, tabId, cwd, connection, initScript, scrollToBottom]);
@@ -430,6 +472,7 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
             </div>
           ));
         })()}
+        <div ref={bottomRef} />
       </div>
 
       {pendingPermission && (
