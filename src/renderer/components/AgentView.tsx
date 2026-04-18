@@ -67,6 +67,13 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
   const initialScrollDone = useRef(false);
   const prevMessageCount = useRef(0);
 
+  // Focus textarea when tab becomes visible
+  useEffect(() => {
+    if (visible && provider && textareaRef.current) {
+      requestAnimationFrame(() => textareaRef.current?.focus());
+    }
+  }, [visible, provider]);
+
   // Track whether user is scrolled to bottom
   useEffect(() => {
     const el = listRef.current;
