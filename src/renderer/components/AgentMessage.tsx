@@ -19,7 +19,7 @@ interface AgentMessageProps {
   message: AgentMsg;
 }
 
-marked.setOptions({ breaks: true, gfm: true });
+marked.setOptions({ breaks: false, gfm: true });
 
 function renderMarkdown(text: string): string {
   return marked.parse(text, { async: false }) as string;

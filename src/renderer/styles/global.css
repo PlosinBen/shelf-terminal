@@ -2288,20 +2288,15 @@ button {
 /* ── Agent Markdown ── */
 
 .agent-markdown {
-  line-height: 1.5;
+  line-height: 1.4;
   word-break: break-word;
+  white-space: normal;
+  display: block;
 }
 
 .agent-markdown p {
   margin: 4px 0;
-}
-
-.agent-markdown p:first-child {
-  margin-top: 0;
-}
-
-.agent-markdown p:last-child {
-  margin-bottom: 0;
+  padding: 0;
 }
 
 .agent-markdown h1,
