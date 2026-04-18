@@ -69,11 +69,19 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
     });
   }, [provider, projectId, tabId, cwd, messages.length]);
 
-  // Focus textarea + restore scroll on mount
+  // Focus textarea on mount
   useEffect(() => {
-    if (!visible || !provider) return;
-    requestAnimationFrame(() => {
-      textareaRef.current?.focus();
+    if (visible && provider) {
+      requestAnimationFrame(() => textareaRef.current?.focus());
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Restore scroll position once messages are available
+  useEffect(() => {
+    if (scrollRestoredRef.current || messages.length === 0) return;
+    scrollRestoredRef.current = true;
+    requestAnimationFrame(() => requestAnimationFrame(() => {
       const el = listRef.current;
       if (el) {
         if (agentState.scrollTop !== null) {
@@ -82,11 +90,10 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
           el.scrollTop = el.scrollHeight;
         }
         isAtBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
-        scrollRestoredRef.current = true;
       }
-    });
+    }));
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [messages.length]);
 
   // Save scroll position to store on scroll
   useEffect(() => {
