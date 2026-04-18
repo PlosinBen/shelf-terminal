@@ -1,5 +1,6 @@
 import { useState, useCallback, useSyncExternalStore } from 'react';
 import type { ProjectConfig, AppSettings, UpdateStatus, TabType, AgentProvider } from '@shared/types';
+import type { AgentMsg } from './components/AgentMessage';
 import { DEFAULT_SETTINGS } from '@shared/defaults';
 
 // ── Tab state ──
@@ -413,4 +414,105 @@ export function clearUnread(projectIndex: number, tabIndex: number) {
   );
   projects = projects.map((p, i) => (i === projectIndex ? { ...p, tabs } : p));
   updateSnapshot();
+}
+
+// ── Agent tab state ──
+
+export interface AgentTabState {
+  messages: AgentMsg[];
+  streaming: boolean;
+  agentStatus: 'idle' | 'running';
+  model?: string;
+  cost?: number;
+  tokens: { input: number; output: number };
+  rateLimit: { type?: string; utilization?: number; resetsAt?: number } | null;
+  contextInfo: { used: number; window: number } | null;
+  capabilities: { models: { value: string; displayName: string }[]; permissionModes: string[]; effortLevels: string[] } | null;
+  permissionMode: string;
+  currentEffort: string;
+  pendingPermission: { toolUseId: string; toolName: string; input: Record<string, unknown> } | null;
+  queuedMessages: { id: string; content: string }[];
+  slashCommands: { name: string; description: string }[];
+}
+
+const agentStates = new Map<string, AgentTabState>();
+
+let agentGeneration = 0;
+const agentListeners = new Set<() => void>();
+
+function emitAgent() {
+  agentGeneration++;
+  for (const l of agentListeners) l();
+}
+
+export function useAgentState(tabId: string): AgentTabState {
+  const subscribe = useCallback((l: () => void) => {
+    agentListeners.add(l);
+    return () => agentListeners.delete(l);
+  }, []);
+  const getSnapshot = useCallback(() => {
+    return getAgentState(tabId);
+  }, [tabId]);
+  return useSyncExternalStore(subscribe, getSnapshot);
+}
+
+function getOrCreateAgentState(tabId: string): AgentTabState {
+  let state = agentStates.get(tabId);
+  if (!state) {
+    state = {
+      messages: [],
+      streaming: false,
+      agentStatus: 'idle',
+      tokens: { input: 0, output: 0 },
+      rateLimit: null,
+      contextInfo: null,
+      capabilities: null,
+      permissionMode: 'default',
+      currentEffort: 'high',
+      pendingPermission: null,
+      queuedMessages: [],
+      slashCommands: [],
+    };
+    agentStates.set(tabId, state);
+  }
+  return state;
+}
+
+export function getAgentState(tabId: string): AgentTabState {
+  return getOrCreateAgentState(tabId);
+}
+
+export function updateAgentState(tabId: string, partial: Partial<AgentTabState>) {
+  const state = getOrCreateAgentState(tabId);
+  Object.assign(state, partial);
+  emitAgent();
+}
+
+export function addAgentMessage(tabId: string, msg: AgentMsg) {
+  const state = getOrCreateAgentState(tabId);
+  state.messages = [...state.messages, msg];
+  emitAgent();
+}
+
+export function updateAgentMessage(tabId: string, predicate: (m: AgentMsg) => boolean, updater: (m: AgentMsg) => AgentMsg) {
+  const state = getOrCreateAgentState(tabId);
+  state.messages = state.messages.map((m) => predicate(m) ? updater(m) : m);
+  emitAgent();
+}
+
+export function filterAgentMessages(tabId: string, predicate: (m: AgentMsg) => boolean) {
+  const state = getOrCreateAgentState(tabId);
+  state.messages = state.messages.filter(predicate);
+  emitAgent();
+}
+
+export function setAgentMessages(tabId: string, messages: AgentMsg[]) {
+  const state = getOrCreateAgentState(tabId);
+  state.messages = messages;
+  emitAgent();
+}
+
+export function deleteAgentState(tabId: string) {
+  agentStates.delete(tabId);
+  emitAgent();
 }
