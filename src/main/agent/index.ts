@@ -104,23 +104,17 @@ export function registerAgentHandlers() {
             broadcast(IPC.AGENT_STATUS, { tabId, ...event.payload });
             break;
           case 'error':
-            session.state = 'error';
             broadcast(IPC.AGENT_ERROR, { tabId, error: event.error });
             break;
         }
       }
     } catch (err: any) {
-      session.state = 'error';
       broadcast(IPC.AGENT_ERROR, { tabId, error: err.message ?? 'Unknown error' });
-    }
-
-    // Reject any pending permissions
-    for (const resolve of session.pendingPermissions.values()) {
-      resolve({ behavior: 'deny', message: 'Session ended' });
-    }
-    session.pendingPermissions.clear();
-
-    if (session.state === 'streaming') {
+    } finally {
+      for (const resolve of session.pendingPermissions.values()) {
+        resolve({ behavior: 'deny', message: 'Session ended' });
+      }
+      session.pendingPermissions.clear();
       session.state = 'idle';
       broadcast(IPC.AGENT_STATUS, { tabId, state: 'idle' });
     }
