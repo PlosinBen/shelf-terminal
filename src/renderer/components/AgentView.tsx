@@ -406,9 +406,30 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
         {messages.length === 0 && (
           <div className="agent-empty">Send a message to start</div>
         )}
-        {messages.map((msg) => (
-          <AgentMessage key={msg.id} message={msg} />
-        ))}
+        {(() => {
+          const turns: { user?: AgentMsg; agent: AgentMsg[] }[] = [];
+          for (const msg of messages) {
+            if (msg.role === 'user') {
+              turns.push({ user: msg, agent: [] });
+            } else if (turns.length === 0) {
+              turns.push({ agent: [msg] });
+            } else {
+              turns[turns.length - 1].agent.push(msg);
+            }
+          }
+          return turns.map((turn, ti) => (
+            <div key={turn.user?.id ?? `turn-${ti}`} className="agent-turn">
+              {turn.user && <AgentMessage message={turn.user} />}
+              {turn.agent.length > 0 && (
+                <div className="agent-turn-response">
+                  {turn.agent.map((msg) => (
+                    <AgentMessage key={msg.id} message={msg} />
+                  ))}
+                </div>
+              )}
+            </div>
+          ));
+        })()}
       </div>
 
       {pendingPermission && (
