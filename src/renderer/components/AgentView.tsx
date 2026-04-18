@@ -68,8 +68,10 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
   const prevMessageCount = useRef(0);
 
   const justBecameVisible = useRef(false);
+  const savedScrollTop = useRef<number | null>(null);
+  const hasBeenVisible = useRef(false);
 
-  // Focus textarea and instant-scroll when tab becomes visible
+  // Save scroll position when hiding, restore when showing
   useEffect(() => {
     if (visible && provider) {
       justBecameVisible.current = true;
@@ -77,11 +79,19 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
         textareaRef.current?.focus();
         const el = listRef.current;
         if (el) {
-          el.scrollTop = el.scrollHeight;
-          isAtBottomRef.current = true;
+          if (!hasBeenVisible.current) {
+            el.scrollTop = el.scrollHeight;
+            isAtBottomRef.current = true;
+            hasBeenVisible.current = true;
+          } else if (savedScrollTop.current !== null) {
+            el.scrollTop = savedScrollTop.current;
+            isAtBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+          }
         }
         justBecameVisible.current = false;
       });
+    } else if (!visible && listRef.current) {
+      savedScrollTop.current = listRef.current.scrollTop;
     }
   }, [visible, provider]);
 
