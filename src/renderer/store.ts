@@ -493,34 +493,34 @@ export function getAgentState(tabId: string): AgentTabState {
   return getOrCreateAgentState(tabId);
 }
 
+function replaceAgentState(tabId: string, next: AgentTabState) {
+  agentStates.set(tabId, next);
+  emitAgent();
+}
+
 export function updateAgentState(tabId: string, partial: Partial<AgentTabState>) {
   const state = getOrCreateAgentState(tabId);
-  Object.assign(state, partial);
-  emitAgent();
+  replaceAgentState(tabId, { ...state, ...partial });
 }
 
 export function addAgentMessage(tabId: string, msg: AgentMsg) {
   const state = getOrCreateAgentState(tabId);
-  state.messages = [...state.messages, msg];
-  emitAgent();
+  replaceAgentState(tabId, { ...state, messages: [...state.messages, msg] });
 }
 
 export function updateAgentMessage(tabId: string, predicate: (m: AgentMsg) => boolean, updater: (m: AgentMsg) => AgentMsg) {
   const state = getOrCreateAgentState(tabId);
-  state.messages = state.messages.map((m) => predicate(m) ? updater(m) : m);
-  emitAgent();
+  replaceAgentState(tabId, { ...state, messages: state.messages.map((m) => predicate(m) ? updater(m) : m) });
 }
 
 export function filterAgentMessages(tabId: string, predicate: (m: AgentMsg) => boolean) {
   const state = getOrCreateAgentState(tabId);
-  state.messages = state.messages.filter(predicate);
-  emitAgent();
+  replaceAgentState(tabId, { ...state, messages: state.messages.filter(predicate) });
 }
 
 export function setAgentMessages(tabId: string, messages: AgentMsg[]) {
   const state = getOrCreateAgentState(tabId);
-  state.messages = messages;
-  emitAgent();
+  replaceAgentState(tabId, { ...state, messages });
 }
 
 export function deleteAgentState(tabId: string) {
