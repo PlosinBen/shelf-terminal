@@ -455,7 +455,7 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
         </select>
         {model && <><span className="agent-status-sep">|</span><span className={`agent-status-seg ${capabilities ? 'agent-status-interactive' : ''}`} onClick={handleCycleModel}>{model}</span></>}
         {capabilities && capabilities.permissionModes.length > 0 && (
-          <><span className="agent-status-sep">|</span><span className="agent-status-seg agent-status-interactive" style={{ color: permissionMode === 'bypassPermissions' ? '#e06c75' : permissionMode === 'acceptEdits' ? '#e5c07b' : undefined }} onClick={handleCycleMode}>{permissionMode === 'default' ? 'ask' : permissionMode}</span></>
+          <><span className="agent-status-sep">|</span><span className="agent-status-seg agent-status-interactive" style={{ color: permissionMode === 'bypassPermissions' ? '#e06c75' : permissionMode === 'acceptEdits' ? '#e5c07b' : permissionMode === 'plan' ? '#61afef' : undefined }} onClick={handleCycleMode}>{permissionMode === 'default' ? 'ask' : permissionMode}</span></>
         )}
         {capabilities && capabilities.effortLevels.length > 0 && (
           <><span className="agent-status-sep">|</span><span className="agent-status-seg agent-status-interactive" onClick={handleCycleEffort}><span className="agent-status-seg-label">effort: </span>{currentEffort}</span></>
