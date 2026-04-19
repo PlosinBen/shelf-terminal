@@ -231,9 +231,12 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
   }, [tabId, capabilities, permissionMode]);
 
   const handleCycleEffort = useCallback(() => {
-    if (!capabilities || capabilities.effortLevels.length === 0) return;
-    const idx = capabilities.effortLevels.indexOf(currentEffort);
-    const next = capabilities.effortLevels[(idx + 1) % capabilities.effortLevels.length];
+    if (!capabilities) return;
+    const modelInfo = capabilities.models.find((m) => m.value === model);
+    const levels = modelInfo?.effortLevels ?? capabilities.effortLevels;
+    if (levels.length === 0) return;
+    const idx = levels.indexOf(currentEffort);
+    const next = levels[(idx + 1) % levels.length];
     updateAgentState(tabId, { currentEffort: next });
     window.shelfApi.agent.setEffort(tabId, next);
   }, [tabId, capabilities, currentEffort]);
@@ -457,9 +460,12 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
         {capabilities && capabilities.permissionModes.length > 0 && (
           <><span className="agent-status-sep">|</span><span className="agent-status-seg agent-status-interactive" style={{ color: permissionMode === 'bypassPermissions' ? '#e06c75' : permissionMode === 'acceptEdits' ? '#e5c07b' : permissionMode === 'plan' ? '#61afef' : undefined }} onClick={handleCycleMode}>{permissionMode === 'default' ? 'ask' : permissionMode}</span></>
         )}
-        {capabilities && capabilities.effortLevels.length > 0 && (
-          <><span className="agent-status-sep">|</span><span className="agent-status-seg agent-status-interactive" onClick={handleCycleEffort}><span className="agent-status-seg-label">effort: </span>{currentEffort}</span></>
-        )}
+        {(() => {
+          const modelInfo = capabilities?.models.find((m) => m.value === model);
+          const levels = modelInfo?.effortLevels ?? capabilities?.effortLevels ?? [];
+          if (levels.length === 0) return null;
+          return <><span className="agent-status-sep">|</span><span className="agent-status-seg agent-status-interactive" onClick={handleCycleEffort}><span className="agent-status-seg-label">effort: </span>{currentEffort}</span></>;
+        })()}
         {contextInfo && contextInfo.window > 0 && (() => {
           const ratio = contextInfo.used / contextInfo.window;
           const color = ratio >= 0.8 ? '#e06c75' : ratio >= 0.5 ? '#e5c07b' : undefined;

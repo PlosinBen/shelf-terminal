@@ -3,6 +3,7 @@ import type { Connection } from '@shared/types';
 import { log } from '@shared/logger';
 import { createOpenAIProcessor } from './openai-processor';
 import { createToolExecutor } from './tool-executor';
+import { getEffortLevels } from './processor-tools';
 import { getCopilotSessionToken, isAuthenticated, COPILOT_DEFAULT_HEADERS } from '../auth/copilot-auth';
 
 interface CopilotModel {
@@ -57,7 +58,7 @@ export function createCopilotBackend(connection: Connection): AgentBackend {
       return isAuthenticated();
     },
     async warmup() {
-      let models: { value: string; displayName: string }[] = [];
+      let models: { value: string; displayName: string; effortLevels?: string[] }[] = [];
       try {
         const session = await getCopilotSessionToken();
         const raw = await fetchModels(session);
@@ -66,7 +67,11 @@ export function createCopilotBackend(connection: Connection): AgentBackend {
           const window = m.capabilities?.limits?.max_context_window_tokens;
           if (window) contextWindows.set(m.id, window);
         }
-        models = chat.map((m) => ({ value: m.id, displayName: m.name ?? m.id }));
+        models = chat.map((m) => ({
+          value: m.id,
+          displayName: m.name ?? m.id,
+          effortLevels: getEffortLevels(m.id),
+        }));
       } catch (err: any) {
         log.info('copilot', `warmup models skipped: ${err?.message}`);
       }
@@ -104,6 +109,9 @@ export function createCopilotBackend(connection: Connection): AgentBackend {
     },
     setModel(model: string) {
       processor.setModel(model);
+    },
+    setEffort(effort: string) {
+      processor.setEffort(effort);
     },
   };
 }

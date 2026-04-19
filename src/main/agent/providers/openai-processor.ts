@@ -1,7 +1,7 @@
 import OpenAI from 'openai';
 import type { AgentEvent, AgentQueryOptions } from '../types';
 import { log } from '@shared/logger';
-import { TOOLS, toolsForMode, toOpenAIFormat, shouldAllowAutomatically, shouldDenyAutomatically, buildSystemPrompt, SLASH_COMMANDS } from './processor-tools';
+import { TOOLS, toolsForMode, toOpenAIFormat, shouldAllowAutomatically, shouldDenyAutomatically, buildSystemPrompt, SLASH_COMMANDS, getEffortLevels } from './processor-tools';
 import type { ToolExecutor } from './tool-executor';
 
 export interface OpenAIProviderConfig {
@@ -35,6 +35,7 @@ export function createOpenAIProcessor(config: OpenAIProviderConfig) {
   let abortController: AbortController | null = null;
   let history: Message[] = [];
   let currentModel = config.defaultModel;
+  let currentEffort: string | null = null;
   let lastUsage: { prompt: number; completion: number } | null = null;
   let turnCount = 0;
 
@@ -83,13 +84,18 @@ export function createOpenAIProcessor(config: OpenAIProviderConfig) {
         const oai = await getClient();
 
         for (let turn = 0; turn < MAX_TURNS; turn++) {
-          const stream = await oai.chat.completions.create({
+          const supportedEfforts = getEffortLevels(currentModel);
+          const effort = (supportedEfforts.length > 0 && currentEffort && supportedEfforts.includes(currentEffort))
+            ? currentEffort : undefined;
+          const params = {
             model: currentModel,
             messages: history as any,
             tools: tools.length > 0 ? tools : undefined,
-            stream: true,
+            stream: true as const,
             stream_options: { include_usage: true },
-          }, { signal: abortController.signal });
+            ...(effort ? { reasoning_effort: effort as any } : {}),
+          };
+          const stream = await oai.chat.completions.create(params, { signal: abortController.signal });
 
           let content = '';
           const toolCalls: Record<number, { id: string; name: string; args: string }> = {};
@@ -232,6 +238,10 @@ export function createOpenAIProcessor(config: OpenAIProviderConfig) {
 
     getModel() {
       return currentModel;
+    },
+
+    setEffort(effort: string) {
+      currentEffort = effort || null;
     },
 
     getSlashCommands() {

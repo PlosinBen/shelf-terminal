@@ -214,7 +214,9 @@ export function registerAgentHandlers() {
 
   ipcMain.handle(IPC.AGENT_SET_EFFORT, async (_event, { tabId, effort }: { tabId: string; effort: string }) => {
     const session = sessions.get(tabId);
-    if (session) (session as any).effort = effort;
+    if (!session) return;
+    (session as any).effort = effort;
+    session.backend.setEffort?.(effort);
   });
 
   ipcMain.handle(IPC.AGENT_SLASH_COMMANDS, async (_event, { tabId }: { tabId: string }) => {

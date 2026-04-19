@@ -430,7 +430,7 @@ export interface AgentTabState {
   tokens: { input: number; output: number };
   rateLimit: { type?: string; utilization?: number; resetsAt?: number } | null;
   contextInfo: { used: number; window: number } | null;
-  capabilities: { models: { value: string; displayName: string }[]; permissionModes: string[]; effortLevels: string[] } | null;
+  capabilities: { models: { value: string; displayName: string; effortLevels?: string[] }[]; permissionModes: string[]; effortLevels: string[] } | null;
   permissionMode: string;
   currentEffort: string;
   pendingPermission: { toolUseId: string; toolName: string; input: Record<string, unknown> } | null;

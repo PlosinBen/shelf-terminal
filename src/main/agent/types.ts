@@ -41,7 +41,7 @@ export interface AgentStatusPayload {
 }
 
 export interface ProviderCapabilities {
-  models: { value: string; displayName: string }[];
+  models: { value: string; displayName: string; effortLevels?: string[] }[];
   permissionModes: string[];
   effortLevels: string[];
   slashCommands: { name: string; description: string }[];
@@ -55,6 +55,7 @@ export interface AgentBackend {
   checkAuth?(): Promise<boolean>;
   getSlashCommands?(): Promise<{ name: string; description: string }[]>;
   setModel?(model: string): void;
+  setEffort?(effort: string): void;
 }
 
 export interface AgentQueryOptions {

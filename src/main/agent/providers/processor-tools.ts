@@ -152,6 +152,17 @@ export const SLASH_COMMANDS: SlashCommand[] = [
   { name: 'tools',   description: 'List tools available in the current mode' },
 ];
 
+// Pattern-based detection of models that accept `reasoning_effort`.
+// Mirrors Vercel AI SDK's approach in @ai-sdk/openai — OpenAI does not expose a
+// capability flag, so we infer from the model id family.
+// IMPORTANT: verify this list against OpenAI docs + Copilot /models output
+// when OpenAI ships new model families (o4, o5, gpt-6, etc.).
+export function getEffortLevels(modelId: string): string[] {
+  if (/^gpt-5(?!-chat)/.test(modelId)) return ['minimal', 'low', 'medium', 'high'];
+  if (/^o\d/.test(modelId)) return ['low', 'medium', 'high'];
+  return [];
+}
+
 export function buildSystemPrompt(cwd: string, mode: string): string {
   const base = [
     'You are an AI coding assistant embedded in a terminal-based project manager.',
