@@ -19,6 +19,16 @@ interface Session {
   permissionMode: string;
   pendingPermissions: Map<string, (result: PermissionResult) => void>;
   providerSessionIds: Partial<Record<AgentProvider, string>>;
+  sessionAllowlist: Set<string>;
+}
+
+function allowlistKey(toolName: string, input: Record<string, unknown>): string {
+  if (toolName === 'Bash') {
+    const cmd = String(input.command ?? '').trim();
+    const firstWord = cmd.split(/\s+/)[0] ?? '';
+    return `Bash:${firstWord}`;
+  }
+  return toolName;
 }
 
 const sessions = new Map<string, Session>();
@@ -67,6 +77,7 @@ async function ensureSession(
     permissionMode: 'default',
     pendingPermissions: new Map(),
     providerSessionIds: {},
+    sessionAllowlist: new Set(),
   };
   sessions.set(tabId, session);
 
@@ -103,6 +114,10 @@ export function registerAgentHandlers() {
     broadcast(IPC.AGENT_STATUS, { tabId, state: 'streaming' });
 
     const canUseTool = async (toolUseId: string, toolName: string, input: Record<string, unknown>): Promise<PermissionResult> => {
+      const key = allowlistKey(toolName, input);
+      if (session.sessionAllowlist.has(key)) {
+        return { behavior: 'allow' };
+      }
       broadcast(IPC.AGENT_PERMISSION_REQUEST, { tabId, toolUseId, toolName, input });
 
       return new Promise<PermissionResult>((resolve) => {
@@ -175,14 +190,18 @@ export function registerAgentHandlers() {
     }
   });
 
-  ipcMain.handle(IPC.AGENT_RESOLVE_PERMISSION, async (_event, { tabId, toolUseId, allow }: { tabId: string; toolUseId: string; allow: boolean }) => {
+  ipcMain.handle(IPC.AGENT_RESOLVE_PERMISSION, async (_event, { tabId, toolUseId, scope, toolName, input }: { tabId: string; toolUseId: string; scope: 'once' | 'session' | 'deny'; toolName?: string; input?: Record<string, unknown> }) => {
     const session = sessions.get(tabId);
     if (!session) return;
+
+    if (scope === 'session' && toolName) {
+      session.sessionAllowlist.add(allowlistKey(toolName, input ?? {}));
+    }
 
     const resolve = session.pendingPermissions.get(toolUseId);
     if (resolve) {
       session.pendingPermissions.delete(toolUseId);
-      resolve(allow ? { behavior: 'allow' } : { behavior: 'deny', message: 'Denied by user' });
+      resolve(scope === 'deny' ? { behavior: 'deny', message: 'Denied by user' } : { behavior: 'allow' });
     }
   });
 

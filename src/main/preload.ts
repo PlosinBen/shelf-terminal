@@ -109,8 +109,8 @@ contextBridge.exposeInMainWorld('shelfApi', {
       ipcRenderer.invoke(IPC.AGENT_STOP, { tabId }),
     destroy: (tabId: string) =>
       ipcRenderer.invoke(IPC.AGENT_DESTROY, { tabId }),
-    resolvePermission: (tabId: string, toolUseId: string, allow: boolean) =>
-      ipcRenderer.invoke(IPC.AGENT_RESOLVE_PERMISSION, { tabId, toolUseId, allow }),
+    resolvePermission: (tabId: string, toolUseId: string, scope: 'once' | 'session' | 'deny', toolName?: string, input?: Record<string, unknown>) =>
+      ipcRenderer.invoke(IPC.AGENT_RESOLVE_PERMISSION, { tabId, toolUseId, scope, toolName, input }),
     slashCommands: (tabId: string) =>
       ipcRenderer.invoke(IPC.AGENT_SLASH_COMMANDS, { tabId }),
     setModel: (tabId: string, model: string) =>

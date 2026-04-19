@@ -176,7 +176,8 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
 
   const handlePermissionRespond = useCallback((index: number) => {
     if (!pendingPermission) return;
-    window.shelfApi.agent.resolvePermission(tabId, pendingPermission.toolUseId, index < 2);
+    const scope: 'once' | 'session' | 'deny' = index === 0 ? 'once' : index === 1 ? 'session' : 'deny';
+    window.shelfApi.agent.resolvePermission(tabId, pendingPermission.toolUseId, scope, pendingPermission.toolName, pendingPermission.input);
     updateAgentState(tabId, { pendingPermission: null });
   }, [tabId, pendingPermission]);
 
@@ -454,7 +455,7 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
         </select>
         {model && <><span className="agent-status-sep">|</span><span className={`agent-status-seg ${capabilities ? 'agent-status-interactive' : ''}`} onClick={handleCycleModel}>{model}</span></>}
         {capabilities && capabilities.permissionModes.length > 0 && (
-          <><span className="agent-status-sep">|</span><span className="agent-status-seg agent-status-interactive" style={{ color: permissionMode === 'bypassPermissions' ? '#e06c75' : permissionMode === 'acceptEdits' ? '#e5c07b' : undefined }} onClick={handleCycleMode}>{permissionMode}</span></>
+          <><span className="agent-status-sep">|</span><span className="agent-status-seg agent-status-interactive" style={{ color: permissionMode === 'bypassPermissions' ? '#e06c75' : permissionMode === 'acceptEdits' ? '#e5c07b' : undefined }} onClick={handleCycleMode}>{permissionMode === 'default' ? 'ask' : permissionMode}</span></>
         )}
         {capabilities && capabilities.effortLevels.length > 0 && (
           <><span className="agent-status-sep">|</span><span className="agent-status-seg agent-status-interactive" onClick={handleCycleEffort}><span className="agent-status-seg-label">effort: </span>{currentEffort}</span></>

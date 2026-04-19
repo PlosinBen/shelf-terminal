@@ -70,7 +70,7 @@ interface ShelfApi {
     send: (tabId: string, prompt: string, cwd: string, provider: string, connection: import('../shared/types').Connection, initScript?: string) => Promise<void>;
     stop: (tabId: string) => Promise<void>;
     destroy: (tabId: string) => Promise<void>;
-    resolvePermission: (tabId: string, toolUseId: string, allow: boolean) => Promise<void>;
+    resolvePermission: (tabId: string, toolUseId: string, scope: 'once' | 'session' | 'deny', toolName?: string, input?: Record<string, unknown>) => Promise<void>;
     slashCommands: (tabId: string) => Promise<{ name: string; description: string }[]>;
     setModel: (tabId: string, model: string) => Promise<void>;
     setEffort: (tabId: string, effort: string) => Promise<void>;
