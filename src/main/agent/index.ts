@@ -7,6 +7,7 @@ import { createRemoteBackend } from './remote';
 import { log } from '@shared/logger';
 import type { AgentProvider, Connection } from '@shared/types';
 import type { AgentBackend, AgentSessionState, PermissionResult, ProviderCapabilities } from './types';
+import { isAuthenticated } from './auth/copilot-auth';
 
 interface Session {
   tabId: string;
@@ -50,27 +51,49 @@ function createBackend(provider: AgentProvider, connection: Connection, initScri
   }
 }
 
-export function registerAgentHandlers() {
-  ipcMain.handle(IPC.AGENT_SEND, async (_event, { tabId, prompt, cwd, provider, connection, initScript }: { tabId: string; prompt: string; cwd: string; provider: AgentProvider; connection: Connection; initScript?: string }) => {
-    let session = sessions.get(tabId);
+async function ensureSession(
+  tabId: string,
+  provider: AgentProvider,
+  connection: Connection,
+  cwd: string,
+  initScript?: string,
+): Promise<Session> {
+  let session = sessions.get(tabId);
+  if (session) return session;
 
-    if (!session) {
-      const backend = createBackend(provider, connection, initScript);
-      session = {
-        tabId, projectId: '', provider, backend, state: 'idle',
-        permissionMode: 'default',
-        pendingPermissions: new Map(),
-        providerSessionIds: {},
-      };
-      sessions.set(tabId, session);
+  const backend = createBackend(provider, connection, initScript);
+  session = {
+    tabId, projectId: '', provider, backend, state: 'idle',
+    permissionMode: 'default',
+    pendingPermissions: new Map(),
+    providerSessionIds: {},
+  };
+  sessions.set(tabId, session);
 
-      if (backend.warmup) {
-        const caps = await backend.warmup(cwd);
-        if (caps) {
-          broadcast(IPC.AGENT_CAPABILITIES, { tabId, ...caps });
-        }
-      }
+  if (backend.checkAuth) {
+    const ok = await backend.checkAuth();
+    if (!ok) {
+      broadcast(IPC.AGENT_AUTH_REQUIRED, { tabId, provider });
+      return session;
     }
+  }
+
+  if (backend.warmup) {
+    const caps = await backend.warmup(cwd);
+    if (caps) {
+      broadcast(IPC.AGENT_CAPABILITIES, { tabId, ...caps });
+    }
+  }
+  return session;
+}
+
+export function registerAgentHandlers() {
+  ipcMain.handle(IPC.AGENT_INIT, async (_event, { tabId, provider, connection, cwd, initScript }: { tabId: string; provider: AgentProvider; connection: Connection; cwd: string; initScript?: string }) => {
+    await ensureSession(tabId, provider, connection, cwd, initScript);
+  });
+
+  ipcMain.handle(IPC.AGENT_SEND, async (_event, { tabId, prompt, cwd, provider, connection, initScript }: { tabId: string; prompt: string; cwd: string; provider: AgentProvider; connection: Connection; initScript?: string }) => {
+    const session = await ensureSession(tabId, provider, connection, cwd, initScript);
 
     if (session.state === 'streaming') {
       return;
@@ -112,6 +135,9 @@ export function registerAgentHandlers() {
             break;
           case 'error':
             broadcast(IPC.AGENT_ERROR, { tabId, error: event.error });
+            break;
+          case 'auth_required':
+            broadcast(IPC.AGENT_AUTH_REQUIRED, { tabId, provider: event.provider });
             break;
         }
       }
@@ -201,6 +227,9 @@ export function registerAgentHandlers() {
     broadcast(IPC.AGENT_STATUS, { tabId, state: 'idle', model: undefined });
   });
 
+  ipcMain.handle(IPC.COPILOT_AUTH_RECHECK, async () => {
+    return { authenticated: await isAuthenticated() };
+  });
   log.info('agent', 'Agent IPC handlers registered');
 }
 

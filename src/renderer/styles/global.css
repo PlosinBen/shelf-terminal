@@ -942,6 +942,107 @@ button {
   letter-spacing: 0.5px;
 }
 
+.agent-auth-pane {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 40px 24px;
+  max-width: 480px;
+  margin: 0 auto;
+}
+
+.agent-auth-title {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.agent-auth-instructions {
+  font-size: 13px;
+  text-align: center;
+}
+
+.agent-auth-instructions a {
+  color: var(--accent, #4a9eff);
+  text-decoration: underline;
+}
+
+.agent-auth-list {
+  list-style: disc;
+  padding-left: 20px;
+  font-size: 13px;
+  color: var(--text);
+  align-self: stretch;
+}
+
+.agent-auth-list code {
+  background: var(--bg);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+}
+
+.agent-auth-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.agent-auth-error {
+  color: var(--error, #e06c75);
+  font-size: 12px;
+  text-align: center;
+}
+
+.copilot-auth-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.copilot-auth-status {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.copilot-auth-status.ok {
+  color: var(--text);
+}
+
+.copilot-auth-flow {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-bg, rgba(255, 255, 255, 0.03));
+}
+
+.copilot-auth-instructions {
+  font-size: 13px;
+}
+
+.copilot-auth-instructions a {
+  color: var(--accent, #4a9eff);
+  text-decoration: underline;
+}
+
+.copilot-auth-code {
+  font-family: var(--font-mono, monospace);
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: 4px;
+  padding: 8px 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  text-align: center;
+  user-select: all;
+}
+
 .keybinding-btn {
   background: var(--bg-secondary);
   border: 1px solid var(--border);

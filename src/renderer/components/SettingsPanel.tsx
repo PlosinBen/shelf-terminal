@@ -65,8 +65,6 @@ export function SettingsPanel() {
     return () => window.removeEventListener('keydown', handleRecord, true);
   }, [recordingAction, handleRecord]);
 
-  if (!settingsVisible) return null;
-
   const handleSave = async () => {
     if (draft.defaultLocalPath) {
       const result = await window.shelfApi.connector.listDir({ type: 'local' }, draft.defaultLocalPath);
@@ -97,6 +95,8 @@ export function SettingsPanel() {
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
   }, [settingsVisible, recordingAction, settings]);
+
+  if (!settingsVisible) return null;
 
   return (
     <div className="settings-overlay">

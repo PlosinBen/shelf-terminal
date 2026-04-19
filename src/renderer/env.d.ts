@@ -66,6 +66,7 @@ interface ShelfApi {
     logsPath: () => Promise<string>;
   };
   agent: {
+    init: (tabId: string, provider: string, connection: import('../shared/types').Connection, cwd: string, initScript?: string) => Promise<void>;
     send: (tabId: string, prompt: string, cwd: string, provider: string, connection: import('../shared/types').Connection, initScript?: string) => Promise<void>;
     stop: (tabId: string) => Promise<void>;
     destroy: (tabId: string) => Promise<void>;
@@ -81,6 +82,10 @@ interface ShelfApi {
     onStatus: (callback: (payload: { tabId: string; state: string; model?: string; costUsd?: number; inputTokens?: number; outputTokens?: number; numTurns?: number; sessionId?: string }) => void) => () => void;
     onError: (callback: (payload: { tabId: string; error: string }) => void) => () => void;
     onPermissionRequest: (callback: (payload: { tabId: string; toolUseId: string; toolName: string; input: Record<string, unknown> }) => void) => () => void;
+    onAuthRequired: (callback: (payload: { tabId: string; provider: string }) => void) => () => void;
+  };
+  copilotAuth: {
+    recheck: () => Promise<{ authenticated: boolean }>;
   };
   updater: {
     check: () => Promise<void>;

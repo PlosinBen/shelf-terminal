@@ -57,6 +57,7 @@ export const IPC = {
   UPDATE_STATUS: 'update:status',
 
   // Agent (Renderer → Main)
+  AGENT_INIT: 'agent:init',
   AGENT_SEND: 'agent:send',
   AGENT_STOP: 'agent:stop',
   AGENT_DESTROY: 'agent:destroy',
@@ -66,6 +67,9 @@ export const IPC = {
   AGENT_SET_MODEL: 'agent:set-model',
   AGENT_SET_EFFORT: 'agent:set-effort',
   AGENT_SWITCH_PROVIDER: 'agent:switch-provider',
+
+  // Copilot auth
+  COPILOT_AUTH_RECHECK: 'copilot:auth-recheck',
 
   // Main → Renderer (send)
   PTY_DATA: 'pty:data',
@@ -79,4 +83,5 @@ export const IPC = {
   AGENT_ERROR: 'agent:error',
   AGENT_PERMISSION_REQUEST: 'agent:permission-request',
   AGENT_CAPABILITIES: 'agent:capabilities',
+  AGENT_AUTH_REQUIRED: 'agent:auth-required',
 } as const;

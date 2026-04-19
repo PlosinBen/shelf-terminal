@@ -8,6 +8,8 @@ export interface OpenAIProviderConfig {
   defaultModel: string;
   providerName: string;
   defaultHeaders?: Record<string, string>;
+  /** Called before each request. Returns { apiKey, baseURL? } to use for this call. */
+  tokenProvider?: () => Promise<{ apiKey: string; baseURL?: string }>;
 }
 
 interface Message {
@@ -19,19 +21,23 @@ interface Message {
 }
 
 export function createOpenAIProcessor(config: OpenAIProviderConfig) {
-  let client: OpenAI | null = null;
   let abortController: AbortController | null = null;
   let history: Message[] = [];
 
-  function getClient(): OpenAI {
-    if (!client) {
-      client = new OpenAI({
-        apiKey: config.apiKey ?? process.env.OPENAI_API_KEY ?? 'dummy',
-        baseURL: config.baseURL,
+  async function getClient(): Promise<OpenAI> {
+    if (config.tokenProvider) {
+      const { apiKey, baseURL } = await config.tokenProvider();
+      return new OpenAI({
+        apiKey,
+        baseURL: baseURL ?? config.baseURL,
         defaultHeaders: config.defaultHeaders,
       });
     }
-    return client;
+    return new OpenAI({
+      apiKey: config.apiKey ?? process.env.OPENAI_API_KEY ?? 'dummy',
+      baseURL: config.baseURL,
+      defaultHeaders: config.defaultHeaders,
+    });
   }
 
   return {
@@ -43,7 +49,8 @@ export function createOpenAIProcessor(config: OpenAIProviderConfig) {
       yield { type: 'status', payload: { state: 'streaming', model: config.defaultModel } };
 
       try {
-        const stream = await getClient().chat.completions.create({
+        const oai = await getClient();
+        const stream = await oai.chat.completions.create({
           model: config.defaultModel,
           messages: history as any,
           stream: true,
@@ -74,6 +81,7 @@ export function createOpenAIProcessor(config: OpenAIProviderConfig) {
           payload: { state: 'idle', model: config.defaultModel },
         };
       } catch (err: any) {
+        if (err?.message === 'NO_AUTH') throw err;
         if (err.name !== 'AbortError') {
           log.error('openai-processor', `Query error: ${err.message}`);
           yield { type: 'error', error: err.message ?? 'Unknown error' };
@@ -90,7 +98,6 @@ export function createOpenAIProcessor(config: OpenAIProviderConfig) {
     dispose() {
       abortController?.abort();
       abortController = null;
-      client = null;
       history = [];
     },
 

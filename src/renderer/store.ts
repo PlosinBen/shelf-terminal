@@ -437,6 +437,9 @@ export interface AgentTabState {
   queuedMessages: { id: string; content: string }[];
   slashCommands: { name: string; description: string }[];
   scrollTop: number | null;
+  authRequired: { provider: string } | null;
+  authError: string | null;
+  authBusy: boolean;
 }
 
 const agentStates = new Map<string, AgentTabState>();
@@ -477,6 +480,9 @@ function getOrCreateAgentState(tabId: string): AgentTabState {
       queuedMessages: [],
       slashCommands: [],
       scrollTop: null,
+      authRequired: null,
+      authError: null,
+      authBusy: false,
     };
     agentStates.set(tabId, state);
   }

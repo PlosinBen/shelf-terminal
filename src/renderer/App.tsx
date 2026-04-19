@@ -179,7 +179,15 @@ export function App() {
       updateAgentState(payload.tabId, updates);
     });
 
-    return () => { offMessage(); offStream(); offStatus(); offError(); offPermission(); offCapabilities(); };
+    const offAuthRequired = window.shelfApi.agent.onAuthRequired((payload) => {
+      updateAgentState(payload.tabId, {
+        authRequired: { provider: payload.provider },
+        streaming: false,
+        agentStatus: 'idle',
+      });
+    });
+
+    return () => { offMessage(); offStream(); offStatus(); offError(); offPermission(); offCapabilities(); offAuthRequired(); };
   }, [projects]);
 
   // Centralized event handlers

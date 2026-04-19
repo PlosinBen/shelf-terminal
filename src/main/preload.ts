@@ -101,6 +101,8 @@ contextBridge.exposeInMainWorld('shelfApi', {
     logsPath: (): Promise<string> => ipcRenderer.invoke(IPC.APP_LOGS_PATH),
   },
   agent: {
+    init: (tabId: string, provider: string, connection: unknown, cwd: string, initScript?: string) =>
+      ipcRenderer.invoke(IPC.AGENT_INIT, { tabId, provider, connection, cwd, initScript }),
     send: (tabId: string, prompt: string, cwd: string, provider: string, connection: unknown, initScript?: string) =>
       ipcRenderer.invoke(IPC.AGENT_SEND, { tabId, prompt, cwd, provider, connection, initScript }),
     stop: (tabId: string) =>
@@ -149,6 +151,14 @@ contextBridge.exposeInMainWorld('shelfApi', {
       ipcRenderer.on(IPC.AGENT_PERMISSION_REQUEST, listener);
       return () => ipcRenderer.removeListener(IPC.AGENT_PERMISSION_REQUEST, listener);
     },
+    onAuthRequired: (callback: (payload: any) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, payload: any) => callback(payload);
+      ipcRenderer.on(IPC.AGENT_AUTH_REQUIRED, listener);
+      return () => ipcRenderer.removeListener(IPC.AGENT_AUTH_REQUIRED, listener);
+    },
+  },
+  copilotAuth: {
+    recheck: (): Promise<{ authenticated: boolean }> => ipcRenderer.invoke(IPC.COPILOT_AUTH_RECHECK),
   },
   updater: {
     check: () => ipcRenderer.invoke(IPC.UPDATE_CHECK),

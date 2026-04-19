@@ -28,7 +28,8 @@ interface AgentViewProps {
 export function AgentView({ tabId, projectId, projectIndex, cwd, connection, initScript, provider, visible, onSelectProvider }: AgentViewProps) {
   const agentState = useAgentState(tabId);
   const { messages, streaming, agentStatus, model, cost, tokens, rateLimit, contextInfo,
-    capabilities, permissionMode, currentEffort, pendingPermission, queuedMessages, slashCommands } = agentState;
+    capabilities, permissionMode, currentEffort, pendingPermission, queuedMessages, slashCommands,
+    authRequired, authError, authBusy } = agentState;
 
   const [input, setInput] = useState('');
   const [showSlashMenu, setShowSlashMenu] = useState(false);
@@ -41,6 +42,14 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
   const isAtBottomRef = useRef(false);
   const scrollRestoredRef = useRef(false);
   const prevMessageCount = useRef(0);
+
+  // Bootstrap backend session (checkAuth + warmup) once provider is known
+  const initCalled = useRef(false);
+  useEffect(() => {
+    if (!provider || initCalled.current) return;
+    initCalled.current = true;
+    window.shelfApi.agent.init(tabId, provider, connection, cwd, initScript);
+  }, [provider, tabId, cwd, connection, initScript]);
 
   // Load history into store on first mount
   const historyLoaded = useRef(false);
@@ -274,6 +283,37 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
               <button key={p.id} className="agent-picker-btn" onClick={() => onSelectProvider(tabId, p.id)}>{p.label}</button>
             ))}
           </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (authRequired) {
+    const retry = async () => {
+      updateAgentState(tabId, { authBusy: true, authError: null });
+      const { authenticated } = await window.shelfApi.copilotAuth.recheck();
+      if (authenticated) {
+        updateAgentState(tabId, { authRequired: null, authError: null, authBusy: false });
+      } else {
+        updateAgentState(tabId, { authError: 'Still no valid Copilot credentials found.', authBusy: false });
+      }
+    };
+    return (
+      <div className="agent-view agent-view-active">
+        <div className="agent-auth-pane">
+          <div className="agent-auth-title">GitHub Copilot not authenticated</div>
+          <div className="agent-auth-instructions">
+            Run one of the following in a terminal, then click Retry:
+          </div>
+          <ul className="agent-auth-list">
+            <li><code>gh auth login -s copilot</code> — first time signing in with <code>gh</code></li>
+            <li><code>gh auth refresh -h github.com -s copilot</code> — already signed in, just add Copilot scope</li>
+            <li><code>copilot</code> — launch GitHub Copilot CLI and sign in</li>
+          </ul>
+          <button className="conn-btn conn-btn-next" disabled={authBusy} onClick={retry}>
+            {authBusy ? 'Checking…' : 'Retry'}
+          </button>
+          {authError && <div className="agent-auth-error">{authError}</div>}
         </div>
       </div>
     );

@@ -52,6 +52,7 @@ export interface AgentBackend {
   stop(): Promise<void>;
   dispose(): void;
   warmup?(cwd: string): Promise<ProviderCapabilities | null>;
+  checkAuth?(): Promise<boolean>;
   getSlashCommands?(): Promise<{ name: string; description: string }[]>;
 }
 
@@ -69,4 +70,5 @@ export type AgentEvent =
   | { type: 'stream'; payload: AgentStreamDelta }
   | { type: 'status'; payload: AgentStatusPayload }
   | { type: 'permission_request'; toolUseId: string; toolName: string; input: Record<string, unknown> }
+  | { type: 'auth_required'; provider: string }
   | { type: 'error'; error: string };
