@@ -136,3 +136,27 @@ export function shouldDenyAutomatically(mode: string, category: ToolCategory): b
   if (mode === 'plan' && category !== 'read') return true;
   return false;
 }
+
+export function buildSystemPrompt(cwd: string, mode: string): string {
+  const base = [
+    'You are an AI coding assistant embedded in a terminal-based project manager.',
+    `Working directory: ${cwd}`,
+    'Use the provided tools to read, search, and modify the project. Prefer concrete file paths over guesses.',
+    'Keep responses concise. When you finish a task, summarise what changed in one or two sentences.',
+  ];
+
+  if (mode === 'plan') {
+    base.push(
+      '',
+      'PLAN MODE: You are in plan mode. Do NOT execute shell commands or modify files.',
+      'Use Read / Grep / Glob / Ls to explore, then output a concrete plan the user can approve.',
+      'Never call Bash, Edit, or Write in this mode — those tools are not available to you.',
+    );
+  } else if (mode === 'acceptEdits') {
+    base.push('', 'Edits to files will be applied automatically without asking. Shell commands still require confirmation.');
+  } else if (mode === 'bypassPermissions') {
+    base.push('', 'All tools run without confirmation. Be conservative with destructive operations.');
+  }
+
+  return base.join('\n');
+}

@@ -1,7 +1,7 @@
 import OpenAI from 'openai';
 import type { AgentEvent, AgentQueryOptions } from '../types';
 import { log } from '@shared/logger';
-import { TOOLS, toolsForMode, toOpenAIFormat, shouldAllowAutomatically, shouldDenyAutomatically } from './processor-tools';
+import { TOOLS, toolsForMode, toOpenAIFormat, shouldAllowAutomatically, shouldDenyAutomatically, buildSystemPrompt } from './processor-tools';
 import type { ToolExecutor } from './tool-executor';
 
 export interface OpenAIProviderConfig {
@@ -48,9 +48,16 @@ export function createOpenAIProcessor(config: OpenAIProviderConfig) {
   return {
     async *query(prompt: string, cwd: string, opts?: AgentQueryOptions): AsyncGenerator<AgentEvent> {
       abortController = new AbortController();
-      history.push({ role: 'user', content: prompt });
 
       const mode = opts?.permissionMode ?? 'default';
+      const systemPrompt = buildSystemPrompt(cwd, mode);
+      if (history.length > 0 && history[0].role === 'system') {
+        history[0].content = systemPrompt;
+      } else {
+        history.unshift({ role: 'system', content: systemPrompt });
+      }
+      history.push({ role: 'user', content: prompt });
+
       const tools = toOpenAIFormat(toolsForMode(mode));
 
       yield { type: 'status', payload: { state: 'streaming', model: config.defaultModel } };
