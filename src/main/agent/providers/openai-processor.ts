@@ -1,7 +1,7 @@
 import OpenAI from 'openai';
 import type { AgentEvent, AgentQueryOptions } from '../types';
 import { log } from '@shared/logger';
-import { TOOLS, toolsForMode, toOpenAIFormat, shouldAllowAutomatically, shouldDenyAutomatically, buildSystemPrompt } from './processor-tools';
+import { TOOLS, toolsForMode, toOpenAIFormat, shouldAllowAutomatically, shouldDenyAutomatically, buildSystemPrompt, SLASH_COMMANDS } from './processor-tools';
 import type { ToolExecutor } from './tool-executor';
 
 export interface OpenAIProviderConfig {
@@ -51,6 +51,18 @@ export function createOpenAIProcessor(config: OpenAIProviderConfig) {
   return {
     async *query(prompt: string, cwd: string, opts?: AgentQueryOptions): AsyncGenerator<AgentEvent> {
       abortController = new AbortController();
+
+      const trimmed = prompt.trim();
+      if (trimmed.startsWith('/')) {
+        const [cmd, ...rest] = trimmed.slice(1).split(/\s+/);
+        const arg = rest.join(' ').trim();
+        const reply = handleSlash(cmd, arg);
+        if (reply !== null) {
+          yield { type: 'message', payload: { type: 'text', content: reply } };
+          yield { type: 'status', payload: { state: 'idle', model: currentModel } };
+          return;
+        }
+      }
 
       const mode = opts?.permissionMode ?? 'default';
       const systemPrompt = buildSystemPrompt(cwd, mode);
@@ -217,5 +229,25 @@ export function createOpenAIProcessor(config: OpenAIProviderConfig) {
     getModel() {
       return currentModel;
     },
+
+    getSlashCommands() {
+      return SLASH_COMMANDS;
+    },
   };
+
+  function handleSlash(cmd: string, arg: string): string | null {
+    switch (cmd) {
+      case 'clear':
+        history = [];
+        return 'Conversation history cleared.';
+      case 'model':
+        if (!arg) return `Current model: \`${currentModel}\`. Usage: \`/model <id>\``;
+        currentModel = arg;
+        return `Model switched to \`${arg}\`.`;
+      case 'help':
+        return ['Available slash commands:', ...SLASH_COMMANDS.map((c) => `- \`/${c.name}\` — ${c.description}`)].join('\n');
+      default:
+        return null;
+    }
+  }
 }

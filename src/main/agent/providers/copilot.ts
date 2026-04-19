@@ -75,8 +75,11 @@ export function createCopilotBackend(connection: Connection): AgentBackend {
         models,
         permissionModes: ['default', 'acceptEdits', 'bypassPermissions', 'plan'],
         effortLevels: [],
-        slashCommands: [],
+        slashCommands: processor.getSlashCommands(),
       };
+    },
+    async getSlashCommands() {
+      return processor.getSlashCommands();
     },
     async *query(prompt: string, cwd: string, opts?: AgentQueryOptions): AsyncGenerator<AgentEvent> {
       if (!(await isAuthenticated())) {

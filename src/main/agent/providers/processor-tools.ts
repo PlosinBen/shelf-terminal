@@ -137,6 +137,17 @@ export function shouldDenyAutomatically(mode: string, category: ToolCategory): b
   return false;
 }
 
+export interface SlashCommand {
+  name: string;
+  description: string;
+}
+
+export const SLASH_COMMANDS: SlashCommand[] = [
+  { name: 'clear', description: 'Reset the conversation history' },
+  { name: 'model', description: 'Show or change the current model' },
+  { name: 'help', description: 'List available slash commands' },
+];
+
 export function buildSystemPrompt(cwd: string, mode: string): string {
   const base = [
     'You are an AI coding assistant embedded in a terminal-based project manager.',
