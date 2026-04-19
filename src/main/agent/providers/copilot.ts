@@ -1,8 +1,10 @@
 import type { AgentBackend, AgentEvent, AgentQueryOptions } from '../types';
+import type { Connection } from '@shared/types';
 import { createOpenAIProcessor } from './openai-processor';
+import { createToolExecutor } from './tool-executor';
 import { getCopilotSessionToken, isAuthenticated, COPILOT_DEFAULT_HEADERS } from '../auth/copilot-auth';
 
-export function createCopilotBackend(): AgentBackend {
+export function createCopilotBackend(connection: Connection): AgentBackend {
   const processor = createOpenAIProcessor({
     baseURL: 'https://api.githubcopilot.com',
     defaultModel: 'gpt-4o',
@@ -12,6 +14,7 @@ export function createCopilotBackend(): AgentBackend {
       const session = await getCopilotSessionToken();
       return { apiKey: session.token, baseURL: session.apiEndpoint };
     },
+    toolExecutor: createToolExecutor(connection),
   });
 
   return {

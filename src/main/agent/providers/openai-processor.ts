@@ -2,6 +2,7 @@ import OpenAI from 'openai';
 import type { AgentEvent, AgentQueryOptions } from '../types';
 import { log } from '@shared/logger';
 import { toolsForMode, toOpenAIFormat } from './processor-tools';
+import type { ToolExecutor } from './tool-executor';
 
 export interface OpenAIProviderConfig {
   apiKey?: string;
@@ -11,6 +12,7 @@ export interface OpenAIProviderConfig {
   defaultHeaders?: Record<string, string>;
   /** Called before each request. Returns { apiKey, baseURL? } to use for this call. */
   tokenProvider?: () => Promise<{ apiKey: string; baseURL?: string }>;
+  toolExecutor?: ToolExecutor;
 }
 
 interface Message {
@@ -26,10 +28,6 @@ function safeParseJSON(s: string): Record<string, unknown> {
   try { return JSON.parse(s) as Record<string, unknown>; } catch { return { _raw: s }; }
 }
 
-async function executeTool(name: string): Promise<string> {
-  // Phase 3a stub — tool execution is wired up in Phase 3b.
-  throw new Error(`Tool execution not implemented yet: ${name}`);
-}
 
 export function createOpenAIProcessor(config: OpenAIProviderConfig) {
   let abortController: AbortController | null = null;
@@ -48,7 +46,7 @@ export function createOpenAIProcessor(config: OpenAIProviderConfig) {
   }
 
   return {
-    async *query(prompt: string, _cwd: string, opts?: AgentQueryOptions): AsyncGenerator<AgentEvent> {
+    async *query(prompt: string, cwd: string, opts?: AgentQueryOptions): AsyncGenerator<AgentEvent> {
       abortController = new AbortController();
       history.push({ role: 'user', content: prompt });
 
@@ -141,7 +139,8 @@ export function createOpenAIProcessor(config: OpenAIProviderConfig) {
 
             let resultText: string;
             try {
-              resultText = await executeTool(call.name);
+              if (!config.toolExecutor) throw new Error('Tool executor not configured');
+              resultText = await config.toolExecutor.execute(call.name, toolInput, cwd);
             } catch (err: any) {
               resultText = `Error: ${err.message ?? 'tool execution failed'}`;
             }

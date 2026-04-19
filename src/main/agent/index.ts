@@ -43,7 +43,7 @@ function createBackend(provider: AgentProvider, connection: Connection, initScri
     case 'claude':
       return createClaudeBackend();
     case 'copilot':
-      return createCopilotBackend();
+      return createCopilotBackend(connection);
     case 'gemini':
       return createGeminiBackend();
     default:
