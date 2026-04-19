@@ -46,7 +46,8 @@ function truncate(s: string): string {
 async function run(c: Connector, cwd: string, cmd: string): Promise<string> {
   const { stdout, stderr } = await c.exec(cwd, cmd);
   if (stderr && !stdout) throw new Error(stderr.trim());
-  return truncate(stderr ? `${stdout}\n[stderr]\n${stderr}` : stdout);
+  const out = truncate(stderr ? `${stdout}\n[stderr]\n${stderr}` : stdout);
+  return out.trim() === '' ? '(no output)' : out;
 }
 
 async function readTool(c: Connector, cwd: string, input: Record<string, unknown>): Promise<string> {
@@ -110,7 +111,7 @@ async function globTool(c: Connector, cwd: string, input: Record<string, unknown
     searchRoot = resolvePath(base, pattern.slice(0, lastSlash));
   }
 
-  const cmd = `find ${q(searchRoot)} -type f -name ${q(namePart)} 2>/dev/null | head -500`;
+  const cmd = `find ${q(searchRoot)} -type f -name ${q(namePart)} | head -500`;
   return run(c, cwd, cmd);
 }
 
