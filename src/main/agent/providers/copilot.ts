@@ -21,6 +21,14 @@ export function createCopilotBackend(connection: Connection): AgentBackend {
     async checkAuth() {
       return isAuthenticated();
     },
+    async warmup() {
+      return {
+        models: [],
+        permissionModes: ['default', 'acceptEdits', 'bypassPermissions', 'plan'],
+        effortLevels: [],
+        slashCommands: [],
+      };
+    },
     async *query(prompt: string, cwd: string, opts?: AgentQueryOptions): AsyncGenerator<AgentEvent> {
       if (!(await isAuthenticated())) {
         yield { type: 'auth_required', provider: 'copilot' };

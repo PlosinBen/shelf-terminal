@@ -124,3 +124,15 @@ export function toOpenAIFormat(tools: ToolDef[]) {
 }
 
 export const PERMISSION_MODES = ['default', 'acceptEdits', 'bypassPermissions', 'plan'] as const;
+
+export function shouldAllowAutomatically(mode: string, category: ToolCategory): boolean {
+  if (mode === 'bypassPermissions') return true;
+  if (mode === 'plan') return category === 'read';
+  if (mode === 'acceptEdits') return category !== 'exec';
+  return false;
+}
+
+export function shouldDenyAutomatically(mode: string, category: ToolCategory): boolean {
+  if (mode === 'plan' && category !== 'read') return true;
+  return false;
+}

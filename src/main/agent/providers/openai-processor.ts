@@ -1,7 +1,7 @@
 import OpenAI from 'openai';
 import type { AgentEvent, AgentQueryOptions } from '../types';
 import { log } from '@shared/logger';
-import { toolsForMode, toOpenAIFormat } from './processor-tools';
+import { TOOLS, toolsForMode, toOpenAIFormat, shouldAllowAutomatically, shouldDenyAutomatically } from './processor-tools';
 import type { ToolExecutor } from './tool-executor';
 
 export interface OpenAIProviderConfig {
@@ -129,6 +129,8 @@ export function createOpenAIProcessor(config: OpenAIProviderConfig) {
 
           for (const call of calls) {
             const toolInput = safeParseJSON(call.args);
+            const category = TOOLS[call.name]?.category ?? 'exec';
+
             yield {
               type: 'message',
               payload: {
@@ -137,12 +139,24 @@ export function createOpenAIProcessor(config: OpenAIProviderConfig) {
               },
             };
 
-            let resultText: string;
-            try {
-              if (!config.toolExecutor) throw new Error('Tool executor not configured');
-              resultText = await config.toolExecutor.execute(call.name, toolInput, cwd);
-            } catch (err: any) {
-              resultText = `Error: ${err.message ?? 'tool execution failed'}`;
+            let resultText: string | null = null;
+
+            if (shouldDenyAutomatically(mode, category)) {
+              resultText = `Denied: tool ${call.name} (${category}) is not allowed in ${mode} mode`;
+            } else if (!shouldAllowAutomatically(mode, category) && opts?.canUseTool) {
+              const decision = await opts.canUseTool(call.id, call.name, toolInput);
+              if (decision.behavior === 'deny') {
+                resultText = `Denied by user${decision.message ? `: ${decision.message}` : ''}`;
+              }
+            }
+
+            if (resultText === null) {
+              try {
+                if (!config.toolExecutor) throw new Error('Tool executor not configured');
+                resultText = await config.toolExecutor.execute(call.name, toolInput, cwd);
+              } catch (err: any) {
+                resultText = `Error: ${err.message ?? 'tool execution failed'}`;
+              }
             }
 
             history.push({ role: 'tool', tool_call_id: call.id, content: resultText });
