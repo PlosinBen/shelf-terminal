@@ -72,24 +72,46 @@ async function grepTool(c: Connector, cwd: string, input: Record<string, unknown
   const where = input.path ? resolvePath(cwd, String(input.path)) : '.';
   const mode = String(input.output_mode ?? 'files_with_matches');
   const glob = input.glob ? String(input.glob) : undefined;
-  const insensitive = input.case_insensitive ? '-i' : '';
+  const ci = input.case_insensitive ? '-i' : '';
 
-  const flags: string[] = [insensitive];
-  if (mode === 'files_with_matches') flags.push('-l');
-  else if (mode === 'count') flags.push('-c');
-  else flags.push('-n');
-  if (glob) flags.push(`--glob ${q(glob)}`);
+  const rgFlags: string[] = [ci];
+  if (mode === 'files_with_matches') rgFlags.push('-l');
+  else if (mode === 'count') rgFlags.push('-c');
+  else rgFlags.push('-n');
+  if (glob) rgFlags.push(`--glob ${q(glob)}`);
 
-  const cmd = `rg ${flags.filter(Boolean).join(' ')} ${q(pattern)} ${q(where)} 2>&1 | head -500 || true`;
+  const grepFlags: string[] = [ci, '-rE'];
+  if (mode === 'files_with_matches') grepFlags.push('-l');
+  else if (mode === 'count') grepFlags.push('-c');
+  else grepFlags.push('-n');
+  if (glob) grepFlags.push(`--include=${q(glob)}`);
+
+  const rgCmd = `rg ${rgFlags.filter(Boolean).join(' ')} ${q(pattern)} ${q(where)} 2>/dev/null | head -500`;
+  const grepCmd = `grep ${grepFlags.filter(Boolean).join(' ')} ${q(pattern)} ${q(where)} 2>/dev/null | head -500`;
+  const cmd = `if command -v rg >/dev/null 2>&1; then ${rgCmd}; else ${grepCmd}; fi || true`;
   return run(c, cwd, cmd);
 }
 
 async function globTool(c: Connector, cwd: string, input: Record<string, unknown>): Promise<string> {
   const pattern = String(input.pattern ?? '');
   const base = input.path ? resolvePath(cwd, String(input.path)) : cwd;
-  // Use bash globstar to evaluate the pattern; return paths sorted by mtime
-  const cmd = `cd ${q(base)} && shopt -s globstar nullglob && printf '%s\\n' ${pattern} 2>/dev/null | head -500`;
-  return run(c, cwd, `bash -c ${q(cmd)}`);
+
+  // Translate glob to find: handle '**/' (recursive) and plain subdir prefixes
+  let searchRoot = base;
+  let namePart = pattern;
+  const doubleIdx = pattern.indexOf('**/');
+  if (doubleIdx !== -1) {
+    const prefix = pattern.slice(0, doubleIdx).replace(/\/$/, '');
+    namePart = pattern.slice(doubleIdx + 3);
+    if (prefix) searchRoot = resolvePath(base, prefix);
+  } else if (pattern.includes('/')) {
+    const lastSlash = pattern.lastIndexOf('/');
+    namePart = pattern.slice(lastSlash + 1);
+    searchRoot = resolvePath(base, pattern.slice(0, lastSlash));
+  }
+
+  const cmd = `find ${q(searchRoot)} -type f -name ${q(namePart)} 2>/dev/null | head -500`;
+  return run(c, cwd, cmd);
 }
 
 async function lsTool(c: Connector, cwd: string, input: Record<string, unknown>): Promise<string> {
