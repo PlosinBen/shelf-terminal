@@ -54,6 +54,7 @@ export interface AgentBackend {
   warmup?(cwd: string): Promise<ProviderCapabilities | null>;
   checkAuth?(): Promise<boolean>;
   getSlashCommands?(): Promise<{ name: string; description: string }[]>;
+  setModel?(model: string): void;
 }
 
 export interface AgentQueryOptions {

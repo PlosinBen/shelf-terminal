@@ -1,10 +1,44 @@
 import type { AgentBackend, AgentEvent, AgentQueryOptions } from '../types';
 import type { Connection } from '@shared/types';
+import { log } from '@shared/logger';
 import { createOpenAIProcessor } from './openai-processor';
 import { createToolExecutor } from './tool-executor';
 import { getCopilotSessionToken, isAuthenticated, COPILOT_DEFAULT_HEADERS } from '../auth/copilot-auth';
 
+interface CopilotModel {
+  id: string;
+  name?: string;
+  capabilities?: {
+    type?: string;
+    limits?: { max_context_window_tokens?: number; max_prompt_tokens?: number };
+  };
+  model_picker_enabled?: boolean;
+}
+
+async function fetchModels(session: { token: string; apiEndpoint: string }): Promise<CopilotModel[]> {
+  try {
+    const res = await fetch(`${session.apiEndpoint}/models`, {
+      headers: {
+        'Authorization': `Bearer ${session.token}`,
+        'Accept': 'application/json',
+        ...COPILOT_DEFAULT_HEADERS,
+      },
+    });
+    if (!res.ok) {
+      log.info('copilot', `models endpoint ${res.status}`);
+      return [];
+    }
+    const body = await res.json() as { data?: CopilotModel[] };
+    return body.data ?? [];
+  } catch (err: any) {
+    log.info('copilot', `models fetch failed: ${err?.message}`);
+    return [];
+  }
+}
+
 export function createCopilotBackend(connection: Connection): AgentBackend {
+  const contextWindows = new Map<string, number>();
+
   const processor = createOpenAIProcessor({
     baseURL: 'https://api.githubcopilot.com',
     defaultModel: 'gpt-4o',
@@ -15,6 +49,7 @@ export function createCopilotBackend(connection: Connection): AgentBackend {
       return { apiKey: session.token, baseURL: session.apiEndpoint };
     },
     toolExecutor: createToolExecutor(connection),
+    getContextWindow: (model) => contextWindows.get(model),
   });
 
   return {
@@ -22,8 +57,22 @@ export function createCopilotBackend(connection: Connection): AgentBackend {
       return isAuthenticated();
     },
     async warmup() {
+      let models: { value: string; displayName: string }[] = [];
+      try {
+        const session = await getCopilotSessionToken();
+        const raw = await fetchModels(session);
+        const chat = raw.filter((m) => m.capabilities?.type !== 'embeddings' && m.model_picker_enabled !== false);
+        for (const m of chat) {
+          const window = m.capabilities?.limits?.max_context_window_tokens;
+          if (window) contextWindows.set(m.id, window);
+        }
+        models = chat.map((m) => ({ value: m.id, displayName: m.name ?? m.id }));
+      } catch (err: any) {
+        log.info('copilot', `warmup models skipped: ${err?.message}`);
+      }
+
       return {
-        models: [],
+        models,
         permissionModes: ['default', 'acceptEdits', 'bypassPermissions', 'plan'],
         effortLevels: [],
         slashCommands: [],
@@ -49,6 +98,9 @@ export function createCopilotBackend(connection: Connection): AgentBackend {
     },
     dispose() {
       processor.dispose();
+    },
+    setModel(model: string) {
+      processor.setModel(model);
     },
   };
 }

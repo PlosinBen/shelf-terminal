@@ -13,6 +13,8 @@ export interface OpenAIProviderConfig {
   /** Called before each request. Returns { apiKey, baseURL? } to use for this call. */
   tokenProvider?: () => Promise<{ apiKey: string; baseURL?: string }>;
   toolExecutor?: ToolExecutor;
+  /** Lookup context window size (tokens) for a given model id. */
+  getContextWindow?: (model: string) => number | undefined;
 }
 
 interface Message {
@@ -32,6 +34,7 @@ function safeParseJSON(s: string): Record<string, unknown> {
 export function createOpenAIProcessor(config: OpenAIProviderConfig) {
   let abortController: AbortController | null = null;
   let history: Message[] = [];
+  let currentModel = config.defaultModel;
 
   async function getClient(): Promise<OpenAI> {
     if (config.tokenProvider) {
@@ -60,14 +63,14 @@ export function createOpenAIProcessor(config: OpenAIProviderConfig) {
 
       const tools = toOpenAIFormat(toolsForMode(mode));
 
-      yield { type: 'status', payload: { state: 'streaming', model: config.defaultModel } };
+      yield { type: 'status', payload: { state: 'streaming', model: currentModel } };
 
       try {
         const oai = await getClient();
 
         for (let turn = 0; turn < MAX_TURNS; turn++) {
           const stream = await oai.chat.completions.create({
-            model: config.defaultModel,
+            model: currentModel,
             messages: history as any,
             tools: tools.length > 0 ? tools : undefined,
             stream: true,
@@ -119,13 +122,16 @@ export function createOpenAIProcessor(config: OpenAIProviderConfig) {
           }
 
           if (usage) {
+            const contextWindow = config.getContextWindow?.(currentModel);
             yield {
               type: 'status',
               payload: {
                 state: calls.length > 0 ? 'streaming' : 'idle',
-                model: config.defaultModel,
+                model: currentModel,
                 inputTokens: usage.prompt_tokens,
                 outputTokens: usage.completion_tokens,
+                contextUsedTokens: usage.prompt_tokens,
+                contextWindow,
               },
             };
           }
@@ -174,7 +180,7 @@ export function createOpenAIProcessor(config: OpenAIProviderConfig) {
           }
         }
 
-        yield { type: 'status', payload: { state: 'idle', model: config.defaultModel } };
+        yield { type: 'status', payload: { state: 'idle', model: currentModel } };
       } catch (err: any) {
         if (err?.message === 'NO_AUTH') throw err;
         if (err.name !== 'AbortError') {
@@ -202,6 +208,14 @@ export function createOpenAIProcessor(config: OpenAIProviderConfig) {
 
     clearHistory() {
       history = [];
+    },
+
+    setModel(model: string) {
+      currentModel = model;
+    },
+
+    getModel() {
+      return currentModel;
     },
   };
 }

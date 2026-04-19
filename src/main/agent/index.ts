@@ -187,10 +187,10 @@ export function registerAgentHandlers() {
   });
 
   ipcMain.handle(IPC.AGENT_SET_MODEL, async (_event, { tabId, model }: { tabId: string; model: string }) => {
-    // Model will be passed in next query options
-    // For now store on session for future use
     const session = sessions.get(tabId);
-    if (session) (session as any).model = model;
+    if (!session) return;
+    (session as any).model = model;
+    session.backend.setModel?.(model);
   });
 
   ipcMain.handle(IPC.AGENT_SET_EFFORT, async (_event, { tabId, effort }: { tabId: string; effort: string }) => {
