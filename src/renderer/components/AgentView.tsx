@@ -35,6 +35,7 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
   const [showSlashMenu, setShowSlashMenu] = useState(false);
   const [slashFilter, setSlashFilter] = useState('');
   const [permSelection, setPermSelection] = useState(0);
+  const [modelPicker, setModelPicker] = useState<{ open: boolean; selected: number }>({ open: false, selected: 0 });
 
   const listRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -138,6 +139,16 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
   const handleSend = useCallback(() => {
     const text = input.trim();
     if (!text || !provider) return;
+
+    if (text === '/model') {
+      setInput('');
+      if (capabilities && capabilities.models.length > 0) {
+        const currentIdx = capabilities.models.findIndex((m) => m.value === model);
+        setModelPicker({ open: true, selected: currentIdx >= 0 ? currentIdx : 0 });
+      }
+      return;
+    }
+
     setInput('');
 
     if (streaming) {
@@ -179,6 +190,28 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, [pendingPermission, permSelection, handlePermissionRespond]);
+
+  const handleModelPickerSelect = useCallback((idx: number) => {
+    if (!capabilities) return;
+    const picked = capabilities.models[idx];
+    if (!picked) return;
+    updateAgentState(tabId, { model: picked.value });
+    window.shelfApi.agent.setModel(tabId, picked.value);
+    setModelPicker({ open: false, selected: 0 });
+  }, [tabId, capabilities]);
+
+  useEffect(() => {
+    if (!modelPicker.open || !capabilities) return;
+    const max = capabilities.models.length - 1;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowUp') { e.preventDefault(); setModelPicker((p) => ({ ...p, selected: p.selected > 0 ? p.selected - 1 : max })); }
+      else if (e.key === 'ArrowDown') { e.preventDefault(); setModelPicker((p) => ({ ...p, selected: p.selected < max ? p.selected + 1 : 0 })); }
+      else if (e.key === 'Enter') { e.preventDefault(); handleModelPickerSelect(modelPicker.selected); }
+      else if (e.key === 'Escape') { e.preventDefault(); setModelPicker({ open: false, selected: 0 }); }
+    };
+    window.addEventListener('keydown', handler, true);
+    return () => window.removeEventListener('keydown', handler, true);
+  }, [modelPicker.open, modelPicker.selected, capabilities, handleModelPickerSelect]);
 
   const handleCycleModel = useCallback(() => {
     if (!capabilities || capabilities.models.length === 0) return;
@@ -369,6 +402,21 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
             ))}
           </div>
           <div className="agent-perm-hint"><kbd>&uarr;</kbd><kbd>&darr;</kbd> select &nbsp; <kbd>Enter</kbd> confirm</div>
+        </div>
+      )}
+
+      {modelPicker.open && capabilities && capabilities.models.length > 0 && (
+        <div className="agent-permission">
+          <div className="agent-permission-header">Select model</div>
+          <div className="agent-perm-options">
+            {capabilities.models.map((m, i) => (
+              <div key={m.value} className={`agent-perm-option agent-perm-option-allow${modelPicker.selected === i ? ' selected' : ''}`} onClick={() => handleModelPickerSelect(i)}>
+                <span className="agent-perm-indicator">{modelPicker.selected === i ? '\u25b6' : ' '}</span>
+                <span>{m.displayName}{m.value === model ? ' (current)' : ''}</span>
+              </div>
+            ))}
+          </div>
+          <div className="agent-perm-hint"><kbd>&uarr;</kbd><kbd>&darr;</kbd> select &nbsp; <kbd>Enter</kbd> confirm &nbsp; <kbd>Esc</kbd> cancel</div>
         </div>
       )}
 

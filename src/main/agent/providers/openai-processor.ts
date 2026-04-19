@@ -35,6 +35,8 @@ export function createOpenAIProcessor(config: OpenAIProviderConfig) {
   let abortController: AbortController | null = null;
   let history: Message[] = [];
   let currentModel = config.defaultModel;
+  let lastUsage: { prompt: number; completion: number } | null = null;
+  let turnCount = 0;
 
   async function getClient(): Promise<OpenAI> {
     if (config.tokenProvider) {
@@ -52,19 +54,19 @@ export function createOpenAIProcessor(config: OpenAIProviderConfig) {
     async *query(prompt: string, cwd: string, opts?: AgentQueryOptions): AsyncGenerator<AgentEvent> {
       abortController = new AbortController();
 
+      const mode = opts?.permissionMode ?? 'default';
+
       const trimmed = prompt.trim();
       if (trimmed.startsWith('/')) {
         const [cmd, ...rest] = trimmed.slice(1).split(/\s+/);
         const arg = rest.join(' ').trim();
-        const reply = handleSlash(cmd, arg);
+        const reply = handleSlash(cmd, arg, cwd, mode);
         if (reply !== null) {
           yield { type: 'message', payload: { type: 'text', content: reply } };
           yield { type: 'status', payload: { state: 'idle', model: currentModel } };
           return;
         }
       }
-
-      const mode = opts?.permissionMode ?? 'default';
       const systemPrompt = buildSystemPrompt(cwd, mode);
       if (history.length > 0 && history[0].role === 'system') {
         history[0].content = systemPrompt;
@@ -134,6 +136,8 @@ export function createOpenAIProcessor(config: OpenAIProviderConfig) {
           }
 
           if (usage) {
+            lastUsage = { prompt: usage.prompt_tokens ?? 0, completion: usage.completion_tokens ?? 0 };
+            turnCount++;
             const contextWindow = config.getContextWindow?.(currentModel);
             yield {
               type: 'status',
@@ -235,17 +239,69 @@ export function createOpenAIProcessor(config: OpenAIProviderConfig) {
     },
   };
 
-  function handleSlash(cmd: string, arg: string): string | null {
+  function handleSlash(cmd: string, arg: string, cwd: string, mode: string): string | null {
     switch (cmd) {
       case 'clear':
         history = [];
+        lastUsage = null;
+        turnCount = 0;
         return 'Conversation history cleared.';
+
       case 'model':
-        if (!arg) return `Current model: \`${currentModel}\`. Usage: \`/model <id>\``;
+        if (!arg) return null; // handled by renderer picker
         currentModel = arg;
         return `Model switched to \`${arg}\`.`;
+
+      case 'context': {
+        const window = config.getContextWindow?.(currentModel);
+        const lines = [
+          `Turns: ${turnCount}`,
+          lastUsage
+            ? `Last tokens: ${lastUsage.prompt} in / ${lastUsage.completion} out`
+            : 'Last tokens: (no turn yet)',
+        ];
+        if (window && lastUsage) {
+          const pct = Math.round((lastUsage.prompt / window) * 100);
+          lines.push(`Context: ${lastUsage.prompt} / ${window} (${pct}%)`);
+        } else if (window) {
+          lines.push(`Context window: ${window} tokens`);
+        }
+        return lines.join('\n');
+      }
+
+      case 'cwd':
+        return `Working directory: \`${cwd}\``;
+
+      case 'status': {
+        const window = config.getContextWindow?.(currentModel);
+        const ctxLine = window && lastUsage
+          ? `${lastUsage.prompt} / ${window} (${Math.round((lastUsage.prompt / window) * 100)}%)`
+          : '—';
+        return [
+          `Model: \`${currentModel}\``,
+          `Mode: \`${mode}\``,
+          `Cwd: \`${cwd}\``,
+          `Turns: ${turnCount}`,
+          `Context: ${ctxLine}`,
+        ].join('\n');
+      }
+
+      case 'tools': {
+        const lines = ['Tools available in current mode:'];
+        for (const t of Object.values(TOOLS)) {
+          const blocked = (mode === 'plan' && t.category !== 'read');
+          const marker = blocked ? '🚫' : '✅';
+          lines.push(`${marker} \`${t.name}\` (${t.category}) — ${t.description}`);
+        }
+        if (mode === 'plan') {
+          lines.push('', '_Plan mode hides exec/write tools from the model._');
+        }
+        return lines.join('\n');
+      }
+
       case 'help':
         return ['Available slash commands:', ...SLASH_COMMANDS.map((c) => `- \`/${c.name}\` — ${c.description}`)].join('\n');
+
       default:
         return null;
     }
