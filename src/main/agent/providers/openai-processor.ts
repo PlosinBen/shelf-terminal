@@ -15,6 +15,12 @@ export interface OpenAIProviderConfig {
   toolExecutor?: ToolExecutor;
   /** Lookup context window size (tokens) for a given model id. */
   getContextWindow?: (model: string) => number | undefined;
+  /** Custom fetch for the underlying OpenAI client — use this to intercept
+   * response headers (e.g. Copilot quota). */
+  fetch?: typeof fetch;
+  /** Optional callback polled after each turn to attach rate limit / quota
+   * info to the status event. */
+  getRateLimit?: () => { rateLimitType?: string; utilization?: number; resetsAt?: number } | null;
 }
 
 interface Message {
@@ -42,12 +48,13 @@ export function createOpenAIProcessor(config: OpenAIProviderConfig) {
   async function getClient(): Promise<OpenAI> {
     if (config.tokenProvider) {
       const { apiKey, baseURL } = await config.tokenProvider();
-      return new OpenAI({ apiKey, baseURL: baseURL ?? config.baseURL, defaultHeaders: config.defaultHeaders });
+      return new OpenAI({ apiKey, baseURL: baseURL ?? config.baseURL, defaultHeaders: config.defaultHeaders, fetch: config.fetch });
     }
     return new OpenAI({
       apiKey: config.apiKey ?? process.env.OPENAI_API_KEY ?? 'dummy',
       baseURL: config.baseURL,
       defaultHeaders: config.defaultHeaders,
+      fetch: config.fetch,
     });
   }
 
@@ -176,6 +183,7 @@ export function createOpenAIProcessor(config: OpenAIProviderConfig) {
             lastUsage = { prompt: usage.prompt_tokens ?? 0, completion: usage.completion_tokens ?? 0 };
             turnCount++;
             const contextWindow = config.getContextWindow?.(currentModel);
+            const rateLimit = config.getRateLimit?.() ?? undefined;
             yield {
               type: 'status',
               payload: {
@@ -185,6 +193,7 @@ export function createOpenAIProcessor(config: OpenAIProviderConfig) {
                 outputTokens: usage.completion_tokens,
                 contextUsedTokens: usage.prompt_tokens,
                 contextWindow,
+                rateLimit: rateLimit ?? undefined,
               },
             };
           }

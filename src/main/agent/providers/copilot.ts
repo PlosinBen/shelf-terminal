@@ -39,6 +39,34 @@ async function fetchModels(session: { token: string; apiEndpoint: string }): Pro
 
 export function createCopilotBackend(connection: Connection): AgentBackend {
   const contextWindows = new Map<string, number>();
+  let lastRateLimit: { rateLimitType?: string; utilization?: number; resetsAt?: number } | null = null;
+
+  // Intercept chat-completion responses to pick up Copilot's quota headers.
+  // GitHub mostly uses the standard `x-ratelimit-*` trio; we also peek at the
+  // `x-copilot-*` aliases that show up on some endpoints.
+  const interceptFetch: typeof fetch = async (input, init) => {
+    const res = await fetch(input as any, init);
+    try {
+      const h = res.headers;
+      const limit = h.get('x-ratelimit-limit') ?? h.get('x-copilot-quota-limit');
+      const remaining = h.get('x-ratelimit-remaining') ?? h.get('x-copilot-quota-remaining');
+      const reset = h.get('x-ratelimit-reset') ?? h.get('x-copilot-quota-reset');
+      if (limit && remaining) {
+        const total = Number(limit);
+        const rem = Number(remaining);
+        if (total > 0 && Number.isFinite(rem)) {
+          lastRateLimit = {
+            rateLimitType: 'copilot',
+            utilization: Math.max(0, Math.min(1, (total - rem) / total)),
+            resetsAt: reset ? Number(reset) * 1000 : undefined,
+          };
+        }
+      }
+    } catch {
+      // Header parsing should never break the stream
+    }
+    return res;
+  };
 
   const processor = createOpenAIProcessor({
     baseURL: 'https://api.githubcopilot.com',
@@ -51,6 +79,8 @@ export function createCopilotBackend(connection: Connection): AgentBackend {
     },
     toolExecutor: createToolExecutor(connection),
     getContextWindow: (model) => contextWindows.get(model),
+    fetch: interceptFetch,
+    getRateLimit: () => lastRateLimit,
   });
 
   return {
