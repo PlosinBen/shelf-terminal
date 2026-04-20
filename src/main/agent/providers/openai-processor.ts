@@ -113,6 +113,7 @@ export function createOpenAIProcessor(config: OpenAIProviderConfig) {
           const stream = await oai.chat.completions.create(params, { signal: abortController.signal });
 
           let content = '';
+          let reasoning = '';
           const toolCalls: Record<number, { id: string; name: string; args: string }> = {};
           let finishReason: string | null = null;
           let usage: { prompt_tokens?: number; completion_tokens?: number } | undefined;
@@ -121,8 +122,16 @@ export function createOpenAIProcessor(config: OpenAIProviderConfig) {
             if (chunk.usage) usage = chunk.usage as any;
             const choice = chunk.choices?.[0];
             if (choice?.finish_reason) finishReason = choice.finish_reason;
-            const delta = choice?.delta;
+            const delta = choice?.delta as any;
             if (!delta) continue;
+
+            // OpenAI reasoning models (o-series, gpt-5) stream thinking separately
+            // in delta.reasoning_content or delta.reasoning. Both aliases in the wild.
+            const reasoningDelta = delta.reasoning_content ?? delta.reasoning;
+            if (typeof reasoningDelta === 'string' && reasoningDelta.length > 0) {
+              reasoning += reasoningDelta;
+              yield { type: 'stream', payload: { type: 'thinking', content: reasoningDelta } };
+            }
 
             if (delta.content) {
               content += delta.content;
@@ -141,6 +150,13 @@ export function createOpenAIProcessor(config: OpenAIProviderConfig) {
           }
 
           const calls = Object.values(toolCalls).filter((c) => c.name);
+
+          // Emit thinking as a message (UI renders a collapsible block).
+          // Do not push reasoning back into history — OpenAI reasoning models
+          // must not receive their own prior reasoning in subsequent calls.
+          if (reasoning) {
+            yield { type: 'message', payload: { type: 'thinking', content: reasoning } };
+          }
 
           if (content || calls.length > 0) {
             history.push({
