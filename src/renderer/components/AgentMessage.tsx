@@ -13,6 +13,12 @@ export interface AgentMsg {
   toolResult?: string;
   streaming?: boolean;
   cwd?: string;
+  /** Attachments shown with user turns. Files reference uploads under cwd/.tmp/shelf;
+   * images are base64 data URLs (persisted to history for restore). */
+  attachments?: {
+    files?: Array<{ path: string; displayPath: string }>;
+    images?: string[];
+  };
 }
 
 interface AgentMessageProps {
@@ -192,9 +198,27 @@ export function AgentMessage({ message }: AgentMessageProps) {
   }
 
   if (message.role === 'user') {
+    const files = message.attachments?.files ?? [];
+    const images = message.attachments?.images ?? [];
     return (
       <div className="agent-msg agent-msg-user">
-        <div className="agent-msg-content">{message.content}</div>
+        {images.length > 0 && (
+          <div className="agent-msg-images">
+            {images.map((url, i) => (
+              <img key={i} src={url} alt="attachment" className="agent-msg-image" />
+            ))}
+          </div>
+        )}
+        {files.length > 0 && (
+          <div className="agent-msg-files">
+            {files.map((f) => (
+              <span key={f.path} className="agent-msg-file-chip" title={f.path}>
+                📎 {f.displayPath}
+              </span>
+            ))}
+          </div>
+        )}
+        {message.content && <div className="agent-msg-content">{message.content}</div>}
       </div>
     );
   }

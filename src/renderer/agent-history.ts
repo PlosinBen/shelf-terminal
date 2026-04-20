@@ -14,6 +14,11 @@ export interface PersistedAgentMessage {
   toolName?: string;
   toolUseId?: string;
   toolInput?: string;
+  /** Attachment metadata for user turns — filenames / paths / data URLs */
+  attachments?: {
+    files?: Array<{ path: string; displayPath: string }>;
+    images?: string[];  // data URLs
+  };
 }
 
 let dbPromise: Promise<IDBDatabase> | null = null;

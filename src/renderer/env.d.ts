@@ -67,7 +67,7 @@ interface ShelfApi {
   };
   agent: {
     init: (tabId: string, provider: string, connection: import('../shared/types').Connection, cwd: string, initScript?: string, prefs?: import('../shared/types').AgentPrefs) => Promise<void>;
-    send: (tabId: string, prompt: string, cwd: string, provider: string, connection: import('../shared/types').Connection, initScript?: string) => Promise<void>;
+    send: (tabId: string, prompt: string, cwd: string, provider: string, connection: import('../shared/types').Connection, initScript?: string, attachments?: { files?: string[]; images?: string[] }) => Promise<void>;
     stop: (tabId: string) => Promise<void>;
     destroy: (tabId: string) => Promise<void>;
     resolvePermission: (tabId: string, toolUseId: string, scope: 'once' | 'session' | 'deny', toolName?: string, input?: Record<string, unknown>) => Promise<void>;

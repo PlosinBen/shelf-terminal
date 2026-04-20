@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import type { AgentProvider, AgentPrefs, Connection } from '@shared/types';
 import { AgentMessage, type AgentMsg } from './AgentMessage';
 import { clearMessages, loadMessages, saveMessage } from '../agent-history';
+import { useAttachmentPaste } from '../hooks/useAttachmentPaste';
 import {
   useAgentState, updateAgentState, addAgentMessage,
   deleteAgentState, useStore, updateProjectConfig,
@@ -51,10 +52,24 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
   const [escPending, setEscPending] = useState(false);
   const escPendingRef = useRef(false);
   const escTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [pendingFiles, setPendingFiles] = useState<Array<{ path: string; displayPath: string }>>([]);
 
   const listRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useAttachmentPaste(rootRef, {
+    connection,
+    cwd,
+    maxUploadSizeMB: 50,
+    onUpload: (uploads) => {
+      setPendingFiles((prev) => [
+        ...prev,
+        ...uploads.map((u) => ({ path: u.remotePath, displayPath: u.displayPath })),
+      ]);
+    },
+  });
   const isAtBottomRef = useRef(false);
   const scrollRestoredRef = useRef(false);
   const prevMessageCount = useRef(0);
@@ -90,6 +105,7 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
           id: `hist-${Date.now()}-${msgs.length}`, role: m.role, type: m.type, content: m.content,
           provider: m.provider, toolName: m.toolName, toolUseId: m.toolUseId,
           toolInput: m.toolInput ? JSON.parse(m.toolInput) : undefined, cwd,
+          ...(m.attachments ? { attachments: m.attachments } : {}),
         };
         msgs.push(msg);
         if (m.type === 'tool_use' && m.toolUseId) toolUseMap.set(m.toolUseId, msg);
@@ -157,7 +173,7 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
 
   const handleSend = useCallback(() => {
     const text = input.trim();
-    if (!text || !provider) return;
+    if ((!text && pendingFiles.length === 0) || !provider) return;
 
     if (text === '/model') {
       setInput('');
@@ -168,7 +184,9 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
       return;
     }
 
+    const files = pendingFiles;
     setInput('');
+    setPendingFiles([]);
 
     if (streaming) {
       updateAgentState(tabId, {
@@ -177,10 +195,19 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
       return;
     }
 
-    addAgentMessage(tabId, { id: `msg-${Date.now()}`, role: 'user', type: 'text', content: text });
-    saveMessage({ projectId, timestamp: Date.now(), role: 'user', type: 'text', content: text, provider });
-    window.shelfApi.agent.send(tabId, text, cwd, provider, connection, initScript);
-  }, [input, streaming, provider, tabId, projectId, cwd, connection, initScript, agentState]);
+    const attachments = files.length > 0 ? { files } : undefined;
+    addAgentMessage(tabId, {
+      id: `msg-${Date.now()}`, role: 'user', type: 'text', content: text,
+      ...(attachments ? { attachments } : {}),
+    });
+    saveMessage({
+      projectId, timestamp: Date.now(), role: 'user', type: 'text', content: text, provider,
+      ...(attachments ? { attachments } : {}),
+    });
+    window.shelfApi.agent.send(tabId, text, cwd, provider, connection, initScript, {
+      files: files.map((f) => f.path),
+    });
+  }, [input, pendingFiles, streaming, provider, tabId, projectId, cwd, connection, initScript, agentState, capabilities, model]);
 
   const handleCancelQueued = useCallback((id: string) => {
     updateAgentState(tabId, {
@@ -415,7 +442,7 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
   }
 
   return (
-    <div className="agent-view agent-view-active">
+    <div className="agent-view agent-view-active" ref={rootRef}>
       <div className="agent-messages" ref={listRef}>
         {messages.length === 0 && <div className="agent-empty">Send a message to start</div>}
         {(() => {
@@ -498,6 +525,20 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
       })()}
 
       <div className="agent-input-area">
+        {pendingFiles.length > 0 && (
+          <div className="agent-attachment-row">
+            {pendingFiles.map((f) => (
+              <span key={f.path} className="agent-attachment-chip" title={f.path}>
+                📎 {f.displayPath}
+                <button
+                  type="button"
+                  className="agent-attachment-remove"
+                  onClick={() => setPendingFiles((prev) => prev.filter((p) => p.path !== f.path))}
+                >×</button>
+              </span>
+            ))}
+          </div>
+        )}
         <span className="agent-prompt">❯</span>
         <textarea
           ref={textareaRef}

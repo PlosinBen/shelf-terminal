@@ -8,6 +8,54 @@ import { log } from '@shared/logger';
 import type { AgentProvider, Connection } from '@shared/types';
 import type { AgentBackend, AgentSessionState, PermissionResult, ProviderCapabilities } from './types';
 import { isAuthenticated } from './auth/copilot-auth';
+import { createConnector } from '../connector';
+
+const MAX_INLINE_BYTES = 100 * 1024; // 100KB per file
+
+async function inlineFileAttachments(
+  connection: Connection,
+  cwd: string,
+  paths: string[],
+  prompt: string,
+): Promise<string> {
+  const connector = createConnector(connection);
+  const parts: string[] = [];
+
+  for (const p of paths) {
+    try {
+      // Size probe + read in one exec. wc -c prints the byte count; cat emits
+      // up to 100KB; we post-process so oversized files fall back to a pointer.
+      const { stdout: sizeOut } = await connector.exec(cwd, `wc -c < ${shellQuote(p)} 2>/dev/null || echo -1`);
+      const size = parseInt(sizeOut.trim(), 10);
+      if (!Number.isFinite(size) || size < 0) {
+        parts.push(`[Attached: ${p} — could not read]`);
+        continue;
+      }
+      if (size > MAX_INLINE_BYTES) {
+        parts.push(`[Attached: ${p} (${(size / 1024).toFixed(1)} KB, too large to inline — use Read tool)]`);
+        continue;
+      }
+
+      const { stdout } = await connector.exec(cwd, `cat ${shellQuote(p)}`);
+      // Binary heuristic: null byte in first 8KB → binary, refer only.
+      const head = stdout.slice(0, 8192);
+      if (head.includes('\u0000')) {
+        parts.push(`[Binary file attached: ${p} — use Read tool to inspect]`);
+        continue;
+      }
+      parts.push(`=== ${p} ===\n${stdout.replace(/\n*$/, '')}\n=== end ===`);
+    } catch (err: any) {
+      parts.push(`[Attached: ${p} — read failed: ${err?.message ?? 'error'}]`);
+    }
+  }
+
+  if (parts.length === 0) return prompt;
+  return parts.join('\n\n') + (prompt ? `\n\n${prompt}` : '');
+}
+
+function shellQuote(s: string): string {
+  return `'${s.replace(/'/g, `'\\''`)}'`;
+}
 
 interface Session {
   tabId: string;
@@ -121,8 +169,12 @@ export function registerAgentHandlers() {
     await ensureSession(tabId, provider, connection, cwd, initScript, prefs);
   });
 
-  ipcMain.handle(IPC.AGENT_SEND, async (_event, { tabId, prompt, cwd, provider, connection, initScript }: { tabId: string; prompt: string; cwd: string; provider: AgentProvider; connection: Connection; initScript?: string }) => {
+  ipcMain.handle(IPC.AGENT_SEND, async (_event, { tabId, prompt, cwd, provider, connection, initScript, attachments }: { tabId: string; prompt: string; cwd: string; provider: AgentProvider; connection: Connection; initScript?: string; attachments?: { files?: string[]; images?: string[] } }) => {
     const session = await ensureSession(tabId, provider, connection, cwd, initScript);
+
+    if (attachments?.files?.length) {
+      prompt = await inlineFileAttachments(connection, cwd, attachments.files, prompt);
+    }
 
     if (session.state === 'streaming') {
       return;
