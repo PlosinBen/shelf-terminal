@@ -61,7 +61,7 @@ export function createOpenAIProcessor(config: OpenAIProviderConfig) {
       if (trimmed.startsWith('/')) {
         const [cmd, ...rest] = trimmed.slice(1).split(/\s+/);
         const arg = rest.join(' ').trim();
-        const reply = handleSlash(cmd, arg, cwd, mode);
+        const reply = await handleSlash(cmd, arg, cwd, mode);
         if (reply !== null) {
           yield { type: 'message', payload: { type: 'text', content: reply } };
           yield { type: 'status', payload: { state: 'idle', model: currentModel } };
@@ -249,13 +249,54 @@ export function createOpenAIProcessor(config: OpenAIProviderConfig) {
     },
   };
 
-  function handleSlash(cmd: string, arg: string, cwd: string, mode: string): string | null {
+  async function handleSlash(cmd: string, arg: string, cwd: string, mode: string): Promise<string | null> {
     switch (cmd) {
       case 'clear':
         history = [];
         lastUsage = null;
         turnCount = 0;
         return 'Conversation history cleared.';
+
+      case 'compact': {
+        if (history.length < 4) return 'Not enough history to compact yet.';
+
+        const systemMsg = history[0]?.role === 'system' ? history[0] : null;
+        // Keep the last 2 user turns (and whatever followed) verbatim.
+        let userSeen = 0;
+        let splitIdx = history.length;
+        for (let i = history.length - 1; i >= 0; i--) {
+          if (history[i].role === 'user') {
+            userSeen++;
+            if (userSeen === 2) { splitIdx = i; break; }
+          }
+        }
+        const head = systemMsg ? 1 : 0;
+        const toCompact = history.slice(head, splitIdx);
+        const toKeep = history.slice(splitIdx);
+        if (toCompact.length === 0) return 'Nothing older than recent turns to compact.';
+
+        const oai = await getClient();
+        const result = await oai.chat.completions.create({
+          model: currentModel,
+          messages: [
+            ...(systemMsg ? [systemMsg] : []),
+            ...toCompact,
+            {
+              role: 'user',
+              content: 'Summarise the conversation above into a concise briefing I can use as context for continuing. Preserve file paths, decisions already made, open questions, and key technical details. Drop chitchat, resolved exchanges, and verbose thinking. Aim for ~200 words.',
+            },
+          ] as any,
+          stream: false,
+        });
+        const summary = result.choices[0]?.message?.content ?? '(empty summary)';
+
+        history = [
+          ...(systemMsg ? [systemMsg] : []),
+          { role: 'assistant', content: `[Compacted context from earlier turns]\n\n${summary}` },
+          ...toKeep,
+        ];
+        return `Compacted ${toCompact.length} earlier messages.\n\n${summary}`;
+      }
 
       case 'model':
         if (!arg) return null; // handled by renderer picker
