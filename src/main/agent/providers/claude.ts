@@ -12,6 +12,13 @@ async function loadSdk() {
   return sdkQuery;
 }
 
+function dataUrlToClaudeBlock(dataUrl: string): { type: 'image'; source: { type: 'base64'; media_type: string; data: string } } | null {
+  const match = dataUrl.match(/^data:(image\/[a-z+]+);base64,(.+)$/i);
+  if (!match) return null;
+  if (match[2].length > 20 * 1024 * 1024) return null;
+  return { type: 'image', source: { type: 'base64', media_type: match[1], data: match[2] } };
+}
+
 export function createClaudeBackend(): AgentBackend {
   let activeQuery: Query | null = null;
   let abortController: AbortController | null = null;
@@ -95,7 +102,25 @@ export function createClaudeBackend(): AgentBackend {
         }) as CanUseTool;
       }
 
-      activeQuery = queryFn({ prompt, options });
+      // When images accompany the turn, Claude SDK expects a user message with
+      // content blocks instead of a plain prompt string — pass an async
+      // generator yielding a single composed message.
+      let promptArg: Parameters<typeof queryFn>[0]['prompt'] = prompt;
+      const imageBlocks = (opts?.images ?? [])
+        .map(dataUrlToClaudeBlock)
+        .filter((b): b is NonNullable<typeof b> => b !== null);
+      if (imageBlocks.length > 0) {
+        const contentBlocks: any[] = [
+          ...imageBlocks,
+          ...(prompt ? [{ type: 'text', text: prompt }] : []),
+        ];
+        async function* single() {
+          yield { type: 'user' as const, message: { role: 'user' as const, content: contentBlocks } } as any;
+        }
+        promptArg = single() as any;
+      }
+
+      activeQuery = queryFn({ prompt: promptArg, options });
 
       try {
         for await (const msg of activeQuery) {
