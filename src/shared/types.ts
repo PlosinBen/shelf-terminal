@@ -1,3 +1,8 @@
+// ── Agent types ──
+
+export type AgentProvider = 'claude' | 'copilot' | 'gemini';
+export type TabType = 'terminal' | 'agent';
+
 // ── Connection types ──
 
 export type LocalConnection = { type: 'local' };
@@ -31,6 +36,16 @@ export interface ProjectConfig {
   quickCommands?: QuickCommand[];
   parentProjectId?: string;
   worktreeBranch?: string;
+  defaultAgentProvider?: AgentProvider;
+  openAgentOnConnect?: boolean;
+  agentSessionIds?: Partial<Record<AgentProvider, string>>;
+  agentPrefs?: Partial<Record<AgentProvider, AgentPrefs>>;
+}
+
+export interface AgentPrefs {
+  model?: string;
+  effort?: string;
+  permissionMode?: string;
 }
 
 // ── IPC payloads: Renderer → Main ──

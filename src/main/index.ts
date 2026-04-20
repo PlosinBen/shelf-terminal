@@ -15,6 +15,7 @@ import { createConnector, getAvailableTypes, listDockerContainers, listWSLDistro
 import { loadSSHServers, saveSSHServer } from './ssh-server-store';
 import { log, setLogLevel, setFileWriter } from '@shared/logger';
 import { applyUserDataIsolation } from './user-data-path';
+import { registerAgentHandlers, destroyAllSessions } from './agent';
 import type { Connection, ProjectConfig, AppSettings, FileUploadResult, FileClearResult, PtySpawnPayload, PtyInputPayload, PtyResizePayload, PtyKillPayload, GitBranchInfo, WorktreeAddResult, WorktreeRemoveResult } from '@shared/types';
 
 applyUserDataIsolation();
@@ -48,6 +49,8 @@ function createWindow() {
 }
 
 // ── IPC Handlers ──
+
+registerAgentHandlers();
 
 ipcMain.handle(IPC.PTY_SPAWN, (_event, payload: PtySpawnPayload) => {
   if (mainWindow) {
@@ -378,6 +381,7 @@ app.whenReady().then(() => {
 
 function shutdown() {
   killAllPtys();
+  destroyAllSessions();
   stopAutoUpdater();
   cleanupConnectors();
 }

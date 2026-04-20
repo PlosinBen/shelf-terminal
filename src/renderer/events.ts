@@ -23,4 +23,5 @@ export const Events = {
   ADD_PROJECT: 'add-project',       // (ProjectConfig)
   TOGGLE_SPLIT: 'toggle-split',     // (projectIndex)
   CREATE_WORKTREE: 'create-worktree', // (projectIndex)
+  NEW_AGENT_TAB: 'new-agent-tab',    // (projectIndex, provider)
 } as const;

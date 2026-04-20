@@ -65,6 +65,24 @@ interface ShelfApi {
   app: {
     logsPath: () => Promise<string>;
   };
+  agent: {
+    init: (tabId: string, provider: string, connection: import('../shared/types').Connection, cwd: string, initScript?: string, prefs?: import('../shared/types').AgentPrefs) => Promise<void>;
+    send: (tabId: string, prompt: string, cwd: string, provider: string, connection: import('../shared/types').Connection, initScript?: string, attachments?: { files?: string[]; images?: string[] }) => Promise<void>;
+    stop: (tabId: string) => Promise<void>;
+    destroy: (tabId: string) => Promise<void>;
+    resolvePermission: (tabId: string, toolUseId: string, scope: 'once' | 'session' | 'deny', toolName?: string, input?: Record<string, unknown>) => Promise<void>;
+    setPrefs: (tabId: string, prefs: import('../shared/types').AgentPrefs) => Promise<void>;
+    switchProvider: (tabId: string, provider: string, connection: import('../shared/types').Connection, initScript?: string) => Promise<void>;
+    onCapabilities: (callback: (payload: { tabId: string; models: { value: string; displayName: string; effortLevels?: string[]; vision?: boolean }[]; permissionModes: string[]; effortLevels: string[]; slashCommands: { name: string; description: string }[]; currentModel?: string; currentEffort?: string; currentPermissionMode?: string }) => void) => () => void;
+    onMessage: (callback: (payload: { tabId: string; type: string; content: string; toolName?: string; toolInput?: Record<string, unknown>; toolUseId?: string; parentToolUseId?: string; sessionId?: string; costUsd?: number; inputTokens?: number; outputTokens?: number }) => void) => () => void;
+    onStream: (callback: (payload: { tabId: string; type: string; content: string }) => void) => () => void;
+    onStatus: (callback: (payload: { tabId: string; state: string; model?: string; costUsd?: number; inputTokens?: number; outputTokens?: number; numTurns?: number; sessionId?: string }) => void) => () => void;
+    onPermissionRequest: (callback: (payload: { tabId: string; toolUseId: string; toolName: string; input: Record<string, unknown> }) => void) => () => void;
+    onAuthRequired: (callback: (payload: { tabId: string; provider: string }) => void) => () => void;
+  };
+  copilotAuth: {
+    recheck: () => Promise<{ authenticated: boolean }>;
+  };
   updater: {
     check: () => Promise<void>;
     download: () => Promise<void>;

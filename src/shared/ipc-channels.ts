@@ -56,8 +56,28 @@ export const IPC = {
   UPDATE_INSTALL: 'update:install',
   UPDATE_STATUS: 'update:status',
 
+  // Agent (Renderer → Main)
+  AGENT_INIT: 'agent:init',
+  AGENT_SEND: 'agent:send',
+  AGENT_STOP: 'agent:stop',
+  AGENT_DESTROY: 'agent:destroy',
+  AGENT_RESOLVE_PERMISSION: 'agent:resolve-permission',
+  AGENT_SET_PREFS: 'agent:set-prefs',
+  AGENT_SWITCH_PROVIDER: 'agent:switch-provider',
+
+  // Copilot auth
+  COPILOT_AUTH_RECHECK: 'copilot:auth-recheck',
+
   // Main → Renderer (send)
   PTY_DATA: 'pty:data',
   PTY_EXIT: 'pty:exit',
   PTY_INIT_SENT: 'pty:init-sent',
+
+  // Agent (Main → Renderer)
+  AGENT_MESSAGE: 'agent:message',
+  AGENT_STREAM: 'agent:stream',
+  AGENT_STATUS: 'agent:status',
+  AGENT_PERMISSION_REQUEST: 'agent:permission-request',
+  AGENT_CAPABILITIES: 'agent:capabilities',
+  AGENT_AUTH_REQUIRED: 'agent:auth-required',
 } as const;

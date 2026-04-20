@@ -7,6 +7,7 @@ import { WebglAddon } from '@xterm/addon-webgl';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { useStore, markUnread } from '../store';
 import { getTheme } from '../themes';
+import { useAttachmentPaste } from '../hooks/useAttachmentPaste';
 import '@xterm/xterm/css/xterm.css';
 
 import type { Connection } from '@shared/types';
@@ -54,10 +55,17 @@ export function TerminalView({ tabId, projectId, cwd, connection, initScript, ta
   const [initLoading, setInitLoading] = useState(!!(initScript || tabCmd));
   const { settings, layoutGeneration } = useStore();
   const theme = getTheme(settings.themeName);
-  // Mirror current upload-size limit into a ref so the paste/drop handlers
-  // (bound once at mount via [tabId] effect) always read the latest value.
-  const maxUploadMBRef = useRef(settings.maxUploadSizeMB);
-  maxUploadMBRef.current = settings.maxUploadSizeMB;
+
+  useAttachmentPaste(containerRef, {
+    connection,
+    cwd,
+    maxUploadSizeMB: settings.maxUploadSizeMB,
+    onUpload: (uploads) => {
+      if (uploads.length === 0) return;
+      const paths = uploads.map((u) => shellQuote(u.displayPath));
+      window.shelfApi.pty.input(tabId, paths.join(' '));
+    },
+  });
 
   useEffect(() => {
     const container = containerRef.current;
@@ -148,120 +156,12 @@ export function TerminalView({ tabId, projectId, cwd, connection, initScript, ta
     });
     resizeObserver.observe(container);
 
-    // Upload pasted/dropped files into <cwd>/.tmp/shelf/ and type the resulting
-    // shell-quoted paths into the terminal. Files exceeding the configured size
-    // limit are skipped and reported via a single popup; successful files still
-    // get inserted.
-    const uploadFiles = async (files: File[]) => {
-      const limitMB = maxUploadMBRef.current || 50;
-      const maxBytes = limitMB * 1024 * 1024;
-
-      const accepted: File[] = [];
-      const oversized: File[] = [];
-      for (const f of files) {
-        if (f.size > maxBytes) oversized.push(f);
-        else accepted.push(f);
-      }
-
-      if (oversized.length > 0) {
-        const list = oversized
-          .map((f) => `• ${f.name} (${(f.size / 1024 / 1024).toFixed(1)} MB)`)
-          .join('\n');
-        void window.shelfApi.dialog.warn(
-          'File too large',
-          `The following file(s) exceed the ${limitMB} MB upload limit and were skipped:\n\n${list}\n\nYou can change the limit in Settings.`,
-        );
-      }
-
-      if (accepted.length === 0) return;
-
-      const results = await Promise.all(
-        accepted.map(async (f) => {
-          try {
-            const buffer = await f.arrayBuffer();
-            const result = await window.shelfApi.connector.uploadFile(connection, cwd, f.name, buffer);
-            return { file: f, result };
-          } catch (err: any) {
-            return { file: f, result: { ok: false as const, reason: err?.message ?? String(err) } };
-          }
-        }),
-      );
-
-      const okPaths: string[] = [];
-      const failures: { name: string; reason: string }[] = [];
-      for (const { file, result } of results) {
-        if (result.ok) {
-          // Strip cwd prefix so the path is relative to the project root
-          const cwdPrefix = cwd.replace(/\/+$/, '') + '/';
-          const displayPath = result.remotePath.startsWith(cwdPrefix)
-            ? result.remotePath.slice(cwdPrefix.length)
-            : result.remotePath;
-          okPaths.push(shellQuote(displayPath));
-        } else {
-          failures.push({ name: file.name, reason: result.reason });
-        }
-      }
-
-      if (okPaths.length > 0) {
-        window.shelfApi.pty.input(tabId, okPaths.join(' '));
-      }
-
-      if (failures.length > 0) {
-        const list = failures.map((f) => `• ${f.name}: ${f.reason}`).join('\n');
-        void window.shelfApi.dialog.warn('Upload failed', list);
-      }
-    };
-
-    // Paste: intercept when clipboard contains files (any type, not just images)
-    const handlePaste = async (e: ClipboardEvent) => {
-      const items = e.clipboardData?.items;
-      if (!items) return;
-
-      const itemArr = Array.from(items);
-      // text/html means rich text copy (e.g. browser) where any image is just
-      // a favicon — let xterm handle it as text paste
-      if (itemArr.some((it) => it.type === 'text/html')) return;
-
-      const files: File[] = [];
-      for (const item of itemArr) {
-        if (item.kind === 'file') {
-          const f = item.getAsFile();
-          if (f) files.push(f);
-        }
-      }
-      if (files.length === 0) return;
-
-      e.preventDefault();
-      await uploadFiles(files);
-    };
-    // Use capture phase so we intercept before xterm's own paste handler
-    container.addEventListener('paste', handlePaste, true);
-
-    // Drag & drop: any file type
-    const handleDragOver = (e: DragEvent) => {
-      if (e.dataTransfer?.types.includes('Files')) {
-        e.preventDefault();
-        e.dataTransfer.dropEffect = 'copy';
-      }
-    };
-    const handleDrop = async (e: DragEvent) => {
-      const files = e.dataTransfer?.files;
-      if (!files || files.length === 0) return;
-      e.preventDefault();
-      await uploadFiles(Array.from(files));
-    };
-    container.addEventListener('dragover', handleDragOver);
-    container.addEventListener('drop', handleDrop);
-
     return () => {
       onDataDispose.dispose();
       onResizeDispose.dispose();
       removeDataListener();
       removeInitSentListener();
       resizeObserver.disconnect();
-      container.removeEventListener('paste', handlePaste, true);
-      container.removeEventListener('dragover', handleDragOver);
-      container.removeEventListener('drop', handleDrop);
     };
   }, [tabId]);
 

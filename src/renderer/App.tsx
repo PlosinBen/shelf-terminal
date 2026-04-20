@@ -2,6 +2,7 @@ import React, { useEffect } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { TabBar } from './components/TabBar';
 import { TerminalView } from './components/TerminalView';
+import { AgentView } from './components/AgentView';
 import { FolderPicker } from './components/FolderPicker';
 import { SettingsPanel } from './components/SettingsPanel';
 import { SearchBar } from './components/SearchBar';
@@ -12,11 +13,13 @@ import { RemoveConfirmDialog } from './components/RemoveConfirmDialog';
 import { BottomBar, SWITCH_BRANCH_EVENT } from './components/BottomBar';
 import { DevToolsPanel } from './components/DevToolsPanel';
 import { useKeybindings } from './hooks/useKeybindings';
-import { useStore, setProjects, setSettings, setUpdateStatus, addProject, addTab, setActiveTab, removeTab, removeProject, setSplitTab, toggleSidebar, clearUnread, setInvalidProjects } from './store';
-import type { ProjectConfig } from '@shared/types';
+import { useStore, setProjects, setSettings, setUpdateStatus, addProject, addTab, setActiveTab, removeTab, removeProject, setSplitTab, toggleSidebar, clearUnread, setInvalidProjects, setTabProvider, updateAgentState, addAgentMessage, updateAgentMessage, filterAgentMessages, deleteAgentState, getAgentState, updateProjectConfig } from './store';
+import type { ProjectConfig, AgentProvider } from '@shared/types';
 import { disposeTerminal } from './components/TerminalView';
 import { on, emit, Events } from './events';
 import { getTheme } from './themes';
+import { rotateOldMessages, loadMessages, saveMessage } from './agent-history';
+import type { AgentMsg } from './components/AgentMessage';
 import './styles/global.css';
 
 export function App() {
@@ -25,11 +28,161 @@ export function App() {
 
   useEffect(() => {
     window.shelfApi.settings.load().then(setSettings);
+    rotateOldMessages(30);
   }, []);
 
   useEffect(() => {
     return window.shelfApi.updater.onStatus(setUpdateStatus);
   }, []);
+
+  // ── Centralized agent IPC listeners ──
+  useEffect(() => {
+    let msgCounter = 0;
+    const nextId = () => `msg-${Date.now()}-${++msgCounter}`;
+
+    const persistMsg = (projectId: string, provider: string | undefined, role: string, type: string, content: string, extra?: { toolName?: string; toolUseId?: string; toolInput?: Record<string, unknown> }) => {
+      saveMessage({
+        projectId, timestamp: Date.now(), role: role as any, type: type as any, content, provider,
+        toolName: extra?.toolName, toolUseId: extra?.toolUseId,
+        toolInput: extra?.toolInput ? JSON.stringify(extra.toolInput) : undefined,
+      });
+    };
+
+    const findProjectForTab = (tabId: string) => {
+      for (const proj of projects) {
+        const tab = proj.tabs.find((t) => t.id === tabId);
+        if (tab) return { proj, tab };
+      }
+      return null;
+    };
+
+    const streamingText = new Map<string, string>();
+    const streamingIds = new Map<string, string>();
+
+    const offMessage = window.shelfApi.agent.onMessage((payload) => {
+      const info = findProjectForTab(payload.tabId);
+      if (!info) return;
+      const { tabId } = payload;
+      const provider = info.tab.provider;
+
+      if (payload.type === 'text') {
+        streamingIds.delete(tabId);
+        streamingText.delete(tabId);
+        const id = nextId();
+        filterAgentMessages(tabId, (m) => !m.streaming || m.type !== 'text');
+        addAgentMessage(tabId, { id, role: 'assistant', type: 'text', content: payload.content, provider });
+        persistMsg(info.proj.config.id, provider, 'assistant', 'text', payload.content);
+      } else if (payload.type === 'thinking') {
+        addAgentMessage(tabId, { id: nextId(), role: 'assistant', type: 'thinking', content: payload.content });
+        persistMsg(info.proj.config.id, provider, 'assistant', 'thinking', payload.content);
+      } else if (payload.type === 'tool_use') {
+        addAgentMessage(tabId, { id: nextId(), role: 'tool', type: 'tool_use', content: '', toolName: payload.toolName, toolInput: payload.toolInput, toolUseId: payload.toolUseId, streaming: true, cwd: info.proj.config.cwd });
+        persistMsg(info.proj.config.id, provider, 'tool', 'tool_use', '', { toolName: payload.toolName, toolUseId: payload.toolUseId, toolInput: payload.toolInput });
+      } else if (payload.type === 'tool_result') {
+        updateAgentMessage(tabId, (m) => m.toolUseId === payload.toolUseId && m.type === 'tool_use', (m) => ({ ...m, streaming: false, toolResult: payload.content }));
+        persistMsg(info.proj.config.id, provider, 'tool', 'tool_result', payload.content, { toolUseId: payload.toolUseId });
+      } else if (payload.type === 'system') {
+        addAgentMessage(tabId, { id: nextId(), role: 'system', type: 'system', content: payload.content });
+      } else if (payload.type === 'result') {
+        streamingIds.delete(tabId);
+        filterAgentMessages(tabId, (m) => !m.streaming);
+      } else if (payload.type === 'error') {
+        updateAgentState(tabId, { streaming: false, agentStatus: 'idle' });
+        addAgentMessage(tabId, { id: nextId(), role: 'system', type: 'error', content: payload.content });
+      }
+    });
+
+    const offStream = window.shelfApi.agent.onStream((payload) => {
+      const { tabId } = payload;
+      if (payload.type === 'text') {
+        const text = (streamingText.get(tabId) ?? '') + payload.content;
+        streamingText.set(tabId, text);
+        let id = streamingIds.get(tabId);
+        if (!id) { id = nextId(); streamingIds.set(tabId, id); }
+        const info = findProjectForTab(tabId);
+        const provider = info?.tab.provider;
+        const state = getAgentState(tabId);
+        const existing = state.messages.findIndex((m) => m.id === id);
+        const msg: AgentMsg = { id: id!, role: 'assistant', type: 'text', content: text, provider, streaming: true };
+        if (existing >= 0) {
+          updateAgentMessage(tabId, (m) => m.id === id, () => msg);
+        } else {
+          addAgentMessage(tabId, msg);
+        }
+      }
+    });
+
+    const offStatus = window.shelfApi.agent.onStatus((payload) => {
+      const { tabId } = payload;
+      const isStreaming = payload.state === 'streaming';
+      const state = getAgentState(tabId);
+
+      const updates: Partial<typeof state> = {
+        streaming: isStreaming,
+        agentStatus: isStreaming ? 'running' : 'idle',
+      };
+
+      if (payload.model) updates.model = payload.model;
+      if (payload.costUsd !== undefined) updates.cost = payload.costUsd;
+      if (payload.inputTokens !== undefined || payload.outputTokens !== undefined) {
+        updates.tokens = { input: payload.inputTokens ?? state.tokens.input, output: payload.outputTokens ?? state.tokens.output };
+      }
+      if ((payload as any).contextUsedTokens != null && (payload as any).contextWindow) {
+        updates.contextInfo = { used: (payload as any).contextUsedTokens, window: (payload as any).contextWindow };
+      }
+      if ((payload as any).rateLimit) {
+        const rl = (payload as any).rateLimit;
+        updates.rateLimit = { type: rl.rateLimitType, utilization: rl.utilization, resetsAt: rl.resetsAt };
+      }
+
+      updateAgentState(tabId, updates);
+
+      if (!isStreaming && state.queuedMessages.length > 0) {
+        const next = state.queuedMessages[0];
+        updateAgentState(tabId, { queuedMessages: state.queuedMessages.slice(1) });
+        const info = findProjectForTab(tabId);
+        if (info?.tab.provider) {
+          setTimeout(() => window.shelfApi.agent.send(tabId, next.content, info.proj.config.cwd, info.tab.provider!, info.proj.config.connection, info.proj.config.initScript), 100);
+        }
+      }
+
+      if (payload.sessionId) {
+        const info = findProjectForTab(tabId);
+        if (info?.tab.provider) {
+          const projIdx = projects.indexOf(info.proj);
+          if (projIdx >= 0) {
+            updateProjectConfig(projIdx, {
+              agentSessionIds: { ...(info.proj.config.agentSessionIds ?? {}), [info.tab.provider]: payload.sessionId },
+            });
+          }
+        }
+      }
+
+    });
+
+    const offPermission = window.shelfApi.agent.onPermissionRequest((payload) => {
+      updateAgentState(payload.tabId, { pendingPermission: { toolUseId: payload.toolUseId, toolName: payload.toolName, input: payload.input } });
+    });
+
+    const offCapabilities = window.shelfApi.agent.onCapabilities((payload) => {
+      const updates: any = { capabilities: { models: payload.models, permissionModes: payload.permissionModes, effortLevels: payload.effortLevels } };
+      if (payload.slashCommands.length > 0) updates.slashCommands = payload.slashCommands;
+      if (payload.currentModel) updates.model = payload.currentModel;
+      if (payload.currentEffort) updates.currentEffort = payload.currentEffort;
+      if (payload.currentPermissionMode) updates.permissionMode = payload.currentPermissionMode;
+      updateAgentState(payload.tabId, updates);
+    });
+
+    const offAuthRequired = window.shelfApi.agent.onAuthRequired((payload) => {
+      updateAgentState(payload.tabId, {
+        authRequired: { provider: payload.provider },
+        streaming: false,
+        agentStatus: 'idle',
+      });
+    });
+
+    return () => { offMessage(); offStream(); offStatus(); offPermission(); offCapabilities(); offAuthRequired(); };
+  }, [projects]);
 
   // Centralized event handlers
   useEffect(() => {
@@ -37,8 +190,12 @@ export function App() {
       const proj = projects[projectIndex];
       const tab = proj?.tabs[tabIndex];
       if (tab) {
-        window.shelfApi.pty.kill(tab.id);
-        disposeTerminal(tab.id);
+        if (tab.type === 'agent') {
+          window.shelfApi.agent.destroy(tab.id);
+        } else {
+          window.shelfApi.pty.kill(tab.id);
+          disposeTerminal(tab.id);
+        }
       }
       removeTab(projectIndex, tabIndex);
     });
@@ -47,8 +204,10 @@ export function App() {
       const proj = projects[projectIndex];
       if (proj) {
         proj.tabs.forEach((tab) => {
-          window.shelfApi.pty.kill(tab.id);
-          disposeTerminal(tab.id);
+          if (tab.type !== 'agent') {
+            window.shelfApi.pty.kill(tab.id);
+            disposeTerminal(tab.id);
+          }
         });
       }
       removeProject(projectIndex);
@@ -60,6 +219,13 @@ export function App() {
       const proj = projects[projectIndex];
       if (!proj) return;
       addTab(projectIndex);
+    });
+
+    const offNewAgentTab = on(Events.NEW_AGENT_TAB, (projectIndex: number, provider?: AgentProvider) => {
+      const proj = projects[projectIndex];
+      if (!proj) return;
+      const resolvedProvider = provider ?? proj.config.defaultAgentProvider;
+      addTab(projectIndex, undefined, undefined, undefined, 'agent', resolvedProvider);
     });
 
     const offConnectProject = on(Events.CONNECT_PROJECT, async (projectIndex: number) => {
@@ -97,21 +263,29 @@ export function App() {
         }
       }
 
+      // Agent tab goes first when auto-open is enabled, so the project lands
+      // on it and terminals occupy slots 1+.
+      if (proj.config.openAgentOnConnect) {
+        addTab(projectIndex, undefined, undefined, undefined, 'agent', proj.config.defaultAgentProvider);
+      }
+
       const templates = proj.config.defaultTabs;
       if (templates && templates.length > 0) {
         templates.forEach((t) => addTab(projectIndex, t.name, t.cmd, t.color));
-        setActiveTab(projectIndex, 0);
       } else {
         addTab(projectIndex);
       }
+      setActiveTab(projectIndex, 0);
     });
 
     const offDisconnectProject = on(Events.DISCONNECT_PROJECT, (projectIndex: number) => {
       const proj = projects[projectIndex];
       if (!proj || proj.tabs.length === 0) return;
       proj.tabs.forEach((tab) => {
-        window.shelfApi.pty.kill(tab.id);
-        disposeTerminal(tab.id);
+        if (tab.type !== 'agent') {
+          window.shelfApi.pty.kill(tab.id);
+          disposeTerminal(tab.id);
+        }
       });
       // Remove all tabs but keep the project
       for (let t = proj.tabs.length - 1; t >= 0; t--) {
@@ -162,7 +336,7 @@ export function App() {
       }
     });
 
-    return () => { offCloseTab(); offRemoveProject(); offNewTab(); offConnectProject(); offDisconnectProject(); offAddProject(); offToggleSplit(); offSwitchBranch(); };
+    return () => { offCloseTab(); offRemoveProject(); offNewTab(); offNewAgentTab(); offConnectProject(); offDisconnectProject(); offAddProject(); offToggleSplit(); offSwitchBranch(); };
   }, [projects]);
 
   useEffect(() => {
@@ -251,15 +425,29 @@ export function App() {
                       className={isSplit && visible ? 'split-pane' : undefined}
                       style={!visible ? { display: 'none' } : undefined}
                     >
-                      <TerminalView
-                        tabId={tab.id}
-                        projectId={proj.config.id}
-                        cwd={proj.config.cwd}
-                        connection={proj.config.connection}
-                        initScript={proj.config.initScript}
-                        tabCmd={tab.cmd}
-                        visible={visible}
-                      />
+                      {tab.type === 'agent' ? (
+                        <AgentView
+                          tabId={tab.id}
+                          projectId={proj.config.id}
+                          projectIndex={pi}
+                          cwd={proj.config.cwd}
+                          connection={proj.config.connection}
+                          initScript={proj.config.initScript}
+                          provider={tab.provider}
+                          visible={visible}
+                          onSelectProvider={setTabProvider}
+                        />
+                      ) : (
+                        <TerminalView
+                          tabId={tab.id}
+                          projectId={proj.config.id}
+                          cwd={proj.config.cwd}
+                          connection={proj.config.connection}
+                          initScript={proj.config.initScript}
+                          tabCmd={tab.cmd}
+                          visible={visible}
+                        />
+                      )}
                     </div>
                   );
                 });

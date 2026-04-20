@@ -17,6 +17,23 @@
 | App 啟動 / config 載入 | `bootstrap.ts` | 預先載入 projects/settings，遇錯顯示 blocking dialog |
 | userData 路徑隔離 | `user-data-path.ts` | `applyUserDataIsolation()`，靠 `app.isPackaged` + `--user-data-dir` 判斷，unpackaged 且無 switch 時加 `-dev` 後綴 |
 
+### Agent (src/main/agent/)
+
+| Intent | File | Description |
+|--------|------|-------------|
+| IPC + session lifecycle | `index.ts` | `ensureSession()` checkAuth → apply prefs → warmup → broadcast capabilities; handlers for INIT/SEND/STOP/DESTROY/RESOLVE_PERMISSION/SET_PREFS/SWITCH_PROVIDER; per-session allowlist for "allow (this session)" |
+| Backend interface + events | `types.ts` | `AgentBackend`, `AgentEvent` union, `AgentQueryOptions`, `ProviderCapabilities`, `AgentPrefs` |
+| Claude provider | `providers/claude.ts` | Wraps `@anthropic-ai/claude-agent-sdk`, warmup fetches models/commands in plan mode, forwards effort string to SDK's native `effort` option |
+| Copilot provider | `providers/copilot.ts` | Thin wrapper: Copilot endpoint, session-token refresh, fetches `/models`, populates per-model effortLevels + context window map |
+| Gemini provider | `providers/gemini.ts` | Placeholder — to be built on openai-processor |
+| OpenAI-compatible agent loop | `providers/openai-processor.ts` | Multi-turn chat-completions loop: tool-call delta accumulation, permission gating, plan mode tool filter, slash command dispatch (`/clear/compact/context/help/model/status/tools/ask`), reasoning_effort passthrough, token + context tracking |
+| Tool registry + pattern helpers | `providers/processor-tools.ts` | Read/Grep/Glob/Ls/Bash/Edit/Write schemas with categories, `toolsForMode()` filter, permission semantics, `getEffortLevels()` pattern detector, `buildSystemPrompt()`, `SLASH_COMMANDS` |
+| Tool execution | `providers/tool-executor.ts` | Dispatches each tool via `connector.exec` so local/SSH/Docker/WSL work uniformly; also hosts `loadProjectInstructions(cwd)` which reads AGENTS.md/CLAUDE.md from git root |
+| Copilot auth | `auth/copilot-auth.ts` | Resolves GitHub token from `~/.config/github-copilot/apps.json` → `gh auth token`; exchanges for Copilot session token (~30 min TTL, auto-refresh) |
+| Remote agent stdin/stdout | `remote.ts` | Remote backend protocol — used when agent runs on SSH/Docker host |
+| Agent-server deploy | `deploy.ts` | Version-isolated deployment of agent-server binary to remote |
+| Unit tests | `providers/processor-tools.test.ts` | Tool registry, permission semantics, effort pattern, system prompt tests |
+
 ### Connector (src/main/connector/)
 
 | Intent | File | Description |
@@ -43,6 +60,9 @@
 | Event bus | `events.ts` | 簡單 pub/sub，定義所有 event name（CLOSE_TAB, NEW_TAB, CREATE_WORKTREE 等） |
 | 快捷鍵系統 | `hooks/useKeybindings.ts` | combo string 對應 action，支援參數化 action（`switchTab_N`） |
 | Terminal 渲染 | `components/TerminalView.tsx` | xterm.js instance cache、PTY I/O、檔案 paste/drag-drop 上傳、unread badge |
+| Agent tab view | `components/AgentView.tsx` | Provider picker、message list、status bar (mode/model/effort/ctx%/tokens)、permission overlay、model picker overlay、slash menu (arrow-key nav)、auth-required screen |
+| Agent message renderer | `components/AgentMessage.tsx` | 單則訊息渲染：tool-specific display (Bash/Read/Edit diff 等)、markdown、thinking collapsed |
+| Agent history | `agent-history.ts` | IndexedDB 儲存 per-project messages、30 天自動輪替 |
 | Sidebar | `components/Sidebar.tsx` | Project 列表、拖曳排序、右鍵選單（含 New Worktree）、worktree branch 顯示、收合按鈕 |
 | Tab bar | `components/TabBar.tsx` | Tab 列表、拖曳排序、雙擊重命名、unread badge、tab 顏色 |
 | 快速指令選擇器 | `components/CommandPicker.tsx` | ⌘E 叫出 overlay，過濾 + 執行 per-project 快速指令 |

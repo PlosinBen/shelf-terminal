@@ -34,8 +34,10 @@ export function TabBar() {
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const [contextMenu, setContextMenu] = useState<{ index: number; x: number; y: number } | null>(null);
+  const [addMenu, setAddMenu] = useState<{ x: number; y: number } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const addMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (editingIndex !== null && inputRef.current) {
@@ -45,15 +47,18 @@ export function TabBar() {
   }, [editingIndex]);
 
   useEffect(() => {
-    if (!contextMenu) return;
+    if (!contextMenu && !addMenu) return;
     const handler = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+      if (contextMenu && menuRef.current && !menuRef.current.contains(e.target as Node)) {
         setContextMenu(null);
+      }
+      if (addMenu && addMenuRef.current && !addMenuRef.current.contains(e.target as Node)) {
+        setAddMenu(null);
       }
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
-  }, [contextMenu]);
+  }, [contextMenu, addMenu]);
 
   if (!project) {
     return (
@@ -157,6 +162,7 @@ export function TabBar() {
               />
             ) : (
               <>
+                {tab.type === 'agent' && <span className="tab-agent-icon" title="Agent">&#9672;</span>}
                 <span className="tab-label">{tab.label}</span>
                 {tab.muted && <span className="tab-muted" title="Notifications muted">&#x1F515;</span>}
                 {tab.hasUnread && <span className="tab-badge" />}
@@ -174,11 +180,41 @@ export function TabBar() {
       <button
         className="tab-add"
         onClick={handleNewTab}
-        title="New terminal"
+        onContextMenu={(e) => {
+          e.preventDefault();
+          if (project.tabs.length < project.config.maxTabs) {
+            setAddMenu({ x: e.clientX, y: e.clientY });
+          }
+        }}
+        title="New terminal (right-click for more)"
         disabled={project.tabs.length >= project.config.maxTabs}
       >
         +
       </button>
+
+      {addMenu && (
+        <div
+          ref={addMenuRef}
+          className="context-menu"
+          style={{ top: addMenu.y, left: addMenu.x }}
+        >
+          <button
+            className="context-menu-item"
+            onClick={() => { handleNewTab(); setAddMenu(null); }}
+          >
+            Terminal
+          </button>
+          <div className="context-menu-divider" />
+          <button
+            className="context-menu-item"
+            onClick={() => { emit(Events.NEW_AGENT_TAB, activeProjectIndex); setAddMenu(null); }}
+          >
+            {project.config.defaultAgentProvider
+              ? `Agent (${project.config.defaultAgentProvider.charAt(0).toUpperCase() + project.config.defaultAgentProvider.slice(1)})`
+              : 'Agent'}
+          </button>
+        </div>
+      )}
 
       {contextMenu && (() => {
         const tab = project.tabs[contextMenu.index];
