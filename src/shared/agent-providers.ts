@@ -11,7 +11,7 @@ export interface AgentProviderDef {
 
 export const AGENT_PROVIDERS: AgentProviderDef[] = [
   { id: 'claude', label: 'Claude' },
-  { id: 'copilot', label: 'Copilot', hidden: true },
+  { id: 'copilot', label: 'Copilot' },
   { id: 'gemini', label: 'Gemini', hidden: true },
 ];
 
