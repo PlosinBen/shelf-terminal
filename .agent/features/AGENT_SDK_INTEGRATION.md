@@ -678,6 +678,22 @@ AgentView 從 placeholder 變成真正的對話介面。
 
 **🚧 Shipped hidden in v0.7.0** — Copilot / Gemini picker entries are temporarily removed from the UI while remote support lands. Backends, tests, and infrastructure stay in the tree for v0.8.
 
+**✅ v0.7.1 (post-v0.7.0) — remote Copilot + Gemini landed**:
+
+- `tool-executor` now takes an `ExecFn` (not a `Connection`) so the same logic works local (wrapping `connector.exec`) and in `agent-server` (wrapping `child_process.exec`).
+- `agent-server` refactored into per-provider modules (`providers/claude.ts`, `providers/copilot.ts`, `providers/gemini.ts`) dispatched by `incoming.provider`.
+- Protocol extensions: `stream`, `auth_required`, `permission_request` / `resolve_permission`. Permissions flow server → main `canUseTool` → back.
+- `remote.ts` now forwards provider, model, effort, images, and hooks `onPermissionRequest` into the user's `canUseTool`.
+- `agent-server/build.mjs` uses an `@shared` alias so `openai-processor`'s logger import resolves; bundle grows ~200KB → ~720KB with OpenAI SDK.
+- Both Copilot and Gemini visible in the provider picker again.
+
+**Pending for later**:
+
+- Retry button on Gemini auth screen is hard-wired to `copilotAuth.recheck` — a generic `agent.recheck` IPC calling `backend.checkAuth()` would cover both.
+- Capabilities (model list, context windows) are fetched local-side only; on remote projects Copilot's `/models` call runs from the remote machine's token too — verify this still populates the UI model picker end-to-end.
+- Gemini auth is `GEMINI_API_KEY` env var only; a proper settings field / prompt for the key would be friendlier than asking users to export in their shell init.
+- Claude remote path doesn't currently forward `canUseTool` — only Copilot / Gemini carry permission prompts across stdin. Claude's SDK runs with whatever default the server sets.
+
 #### Phase 3a — Tool Registry + Agent Loop 骨架 ✅
 
 - `src/main/agent/providers/processor-tools.ts` — tool schemas + category（Read/Grep/Glob/Ls/Bash/Edit/Write）
