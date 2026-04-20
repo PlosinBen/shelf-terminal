@@ -3,11 +3,16 @@ import type { Connection } from '@shared/types';
 import { createConnector } from '../../connector';
 import { shellSingleQuote } from '../../connector/file-utils';
 import type { Connector } from '../../connector/types';
+import { log } from '@shared/logger';
 
 const MAX_OUTPUT = 100 * 1024; // 100KB — truncate tool output to keep tokens sane
 
 export interface ToolExecutor {
   execute(name: string, input: Record<string, unknown>, cwd: string): Promise<string>;
+  /** Read the project's AGENTS.md (or CLAUDE.md fallback) from the git repo
+   * root. Bypasses the tool permission system — instruction files are part of
+   * the system prompt, not user-visible tool calls. */
+  loadProjectInstructions(cwd: string): Promise<string | null>;
 }
 
 export function createToolExecutor(connection: Connection): ToolExecutor {
@@ -24,6 +29,22 @@ export function createToolExecutor(connection: Connection): ToolExecutor {
         case 'Edit':  return editTool(connector, cwd, input);
         case 'Write': return writeTool(connector, cwd, input);
         default:      throw new Error(`Unknown tool: ${name}`);
+      }
+    },
+    async loadProjectInstructions(cwd) {
+      const script = [
+        'root=$(git -C "$1" rev-parse --show-toplevel 2>/dev/null || echo "$1")',
+        'for f in AGENTS.md CLAUDE.md; do',
+        '  if [ -r "$root/$f" ]; then cat "$root/$f"; exit 0; fi',
+        'done',
+        'exit 0',
+      ].join('\n');
+      try {
+        const { stdout } = await connector.exec(cwd, `sh -c ${q(script)} -- ${q(cwd)}`);
+        return stdout.trim().length > 0 ? stdout : null;
+      } catch (err: any) {
+        log.info('tool-executor', `Failed to load project instructions: ${err?.message}`);
+        return null;
       }
     },
   };

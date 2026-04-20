@@ -68,7 +68,8 @@ export function createOpenAIProcessor(config: OpenAIProviderConfig) {
           return;
         }
       }
-      const systemPrompt = buildSystemPrompt(cwd, mode, opts?.projectInstructions);
+      const projectInstructions = (await config.toolExecutor?.loadProjectInstructions(cwd)) ?? undefined;
+      const systemPrompt = buildSystemPrompt(cwd, mode, projectInstructions);
       if (history.length > 0 && history[0].role === 'system') {
         history[0].content = systemPrompt;
       } else {

@@ -65,7 +65,6 @@ export interface AgentQueryOptions {
   resume?: string;
   permissionMode?: string;
   canUseTool?: PermissionCallback;
-  projectInstructions?: string;
 }
 
 export type PermissionResult = { behavior: 'allow' } | { behavior: 'deny'; message?: string };

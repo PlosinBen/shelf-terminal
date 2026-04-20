@@ -4,7 +4,6 @@ import { log } from '@shared/logger';
 import { createOpenAIProcessor } from './openai-processor';
 import { createToolExecutor } from './tool-executor';
 import { getEffortLevels } from './processor-tools';
-import { loadProjectInstructions } from './instructions';
 import { getCopilotSessionToken, isAuthenticated, COPILOT_DEFAULT_HEADERS } from '../auth/copilot-auth';
 
 interface CopilotModel {
@@ -92,9 +91,8 @@ export function createCopilotBackend(connection: Connection): AgentBackend {
         yield { type: 'auth_required', provider: 'copilot' };
         return;
       }
-      const projectInstructions = await loadProjectInstructions(cwd, connection) ?? undefined;
       try {
-        yield* processor.query(prompt, cwd, { ...opts, projectInstructions });
+        yield* processor.query(prompt, cwd, opts);
       } catch (err: any) {
         if (err?.message === 'NO_AUTH') {
           yield { type: 'auth_required', provider: 'copilot' };
