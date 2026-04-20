@@ -45,7 +45,7 @@ export function createClaudeBackend(): AgentBackend {
             cachedCapabilities = {
               models: models.map((m) => ({ value: m.value, displayName: m.displayName })),
               permissionModes: ['default', 'acceptEdits', 'bypassPermissions', 'plan'],
-              effortLevels: ['low', 'medium', 'high', 'max'],
+              effortLevels: ['low', 'medium', 'high', 'xhigh', 'max'],
               slashCommands: commands.map((c) => ({ name: c.name, description: c.description })),
             };
             log.info('claude-backend', `Warmup done: ${models.length} models, ${commands.length} commands`);
@@ -68,13 +68,16 @@ export function createClaudeBackend(): AgentBackend {
         abortController,
         cwd,
         tools: { type: 'preset', preset: 'claude_code' },
-        thinking: mapEffortToThinking(currentEffort),
+        thinking: { type: 'adaptive' },
         includePartialMessages: true,
         permissionMode: (opts?.permissionMode as Options['permissionMode']) ?? 'default',
       };
 
       if (currentModel) {
         (options as any).model = currentModel;
+      }
+      if (currentEffort) {
+        (options as any).effort = currentEffort;
       }
 
       if (opts?.resume) {
@@ -148,16 +151,6 @@ export function createClaudeBackend(): AgentBackend {
   };
 }
 
-function mapEffortToThinking(effort: string | null): Options['thinking'] {
-  // Claude SDK thinking budgets — kept aligned with UI effortLevels (low/medium/high/max).
-  switch (effort) {
-    case 'low':    return { type: 'enabled', budgetTokens: 4000 };
-    case 'medium': return { type: 'adaptive' };
-    case 'high':   return { type: 'enabled', budgetTokens: 16000 };
-    case 'max':    return { type: 'enabled', budgetTokens: 32000 };
-    default:       return { type: 'adaptive' };
-  }
-}
 
 function processMessage(msg: SDKMessage): AgentEvent[] {
   const events: AgentEvent[] = [];
