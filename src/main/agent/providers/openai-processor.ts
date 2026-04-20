@@ -58,7 +58,19 @@ export function createOpenAIProcessor(config: OpenAIProviderConfig) {
       const mode = opts?.permissionMode ?? 'default';
 
       const trimmed = prompt.trim();
-      if (trimmed.startsWith('/')) {
+      let ephemeral = false;
+      let actualPrompt = prompt;
+
+      if (trimmed.toLowerCase().startsWith('/ask ') || trimmed.toLowerCase() === '/ask') {
+        const rest = trimmed.slice(4).trim();
+        if (!rest) {
+          yield { type: 'message', payload: { type: 'text', content: 'Usage: `/ask <question>` — sends a one-off query that is not saved to history.' } };
+          yield { type: 'status', payload: { state: 'idle', model: currentModel } };
+          return;
+        }
+        actualPrompt = rest;
+        ephemeral = true;
+      } else if (trimmed.startsWith('/')) {
         const [cmd, ...rest] = trimmed.slice(1).split(/\s+/);
         const arg = rest.join(' ').trim();
         const reply = await handleSlash(cmd, arg, cwd, mode);
@@ -68,6 +80,7 @@ export function createOpenAIProcessor(config: OpenAIProviderConfig) {
           return;
         }
       }
+
       const projectInstructions = (await config.toolExecutor?.loadProjectInstructions(cwd)) ?? undefined;
       const systemPrompt = buildSystemPrompt(cwd, mode, projectInstructions);
       if (history.length > 0 && history[0].role === 'system') {
@@ -75,7 +88,8 @@ export function createOpenAIProcessor(config: OpenAIProviderConfig) {
       } else {
         history.unshift({ role: 'system', content: systemPrompt });
       }
-      history.push({ role: 'user', content: prompt });
+      const ephemeralStartLen = history.length;
+      history.push({ role: 'user', content: actualPrompt });
 
       const tools = toOpenAIFormat(toolsForMode(mode));
 
@@ -212,6 +226,11 @@ export function createOpenAIProcessor(config: OpenAIProviderConfig) {
         }
       } finally {
         abortController = null;
+        if (ephemeral) {
+          // Drop everything this /ask turn produced — user message, assistant
+          // reply, and any tool round-trips — so context stays pristine.
+          history = history.slice(0, ephemeralStartLen);
+        }
       }
     },
 

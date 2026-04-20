@@ -143,6 +143,7 @@ export interface SlashCommand {
 }
 
 export const SLASH_COMMANDS: SlashCommand[] = [
+  { name: 'ask',     description: 'Ask a one-off question without polluting history' },
   { name: 'clear',   description: 'Reset the conversation history' },
   { name: 'compact', description: 'Summarise old turns to free context window' },
   { name: 'context', description: 'Show token usage and context window' },
