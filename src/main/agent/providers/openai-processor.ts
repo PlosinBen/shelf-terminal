@@ -68,7 +68,7 @@ export function createOpenAIProcessor(config: OpenAIProviderConfig) {
           return;
         }
       }
-      const systemPrompt = buildSystemPrompt(cwd, mode);
+      const systemPrompt = buildSystemPrompt(cwd, mode, opts?.projectInstructions);
       if (history.length > 0 && history[0].role === 'system') {
         history[0].content = systemPrompt;
       } else {

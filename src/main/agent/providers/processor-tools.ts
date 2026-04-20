@@ -163,13 +163,17 @@ export function getEffortLevels(modelId: string): string[] {
   return [];
 }
 
-export function buildSystemPrompt(cwd: string, mode: string): string {
+export function buildSystemPrompt(cwd: string, mode: string, projectInstructions?: string): string {
   const base = [
     'You are an AI coding assistant embedded in a terminal-based project manager.',
     `Working directory: ${cwd}`,
     'Use the provided tools to read, search, and modify the project. Prefer concrete file paths over guesses.',
     'Keep responses concise. When you finish a task, summarise what changed in one or two sentences.',
   ];
+
+  if (projectInstructions && projectInstructions.trim().length > 0) {
+    base.push('', '### Project instructions', projectInstructions.trim());
+  }
 
   if (mode === 'plan') {
     base.push(
