@@ -263,17 +263,19 @@ export function App() {
         }
       }
 
-      const templates = proj.config.defaultTabs;
-      if (templates && templates.length > 0) {
-        templates.forEach((t) => addTab(projectIndex, t.name, t.cmd, t.color));
-        setActiveTab(projectIndex, 0);
-      } else {
-        addTab(projectIndex);
-      }
-
+      // Agent tab goes first when auto-open is enabled, so the project lands
+      // on it and terminals occupy slots 1+.
       if (proj.config.openAgentOnConnect) {
         addTab(projectIndex, undefined, undefined, undefined, 'agent', proj.config.defaultAgentProvider);
       }
+
+      const templates = proj.config.defaultTabs;
+      if (templates && templates.length > 0) {
+        templates.forEach((t) => addTab(projectIndex, t.name, t.cmd, t.color));
+      } else {
+        addTab(projectIndex);
+      }
+      setActiveTab(projectIndex, 0);
     });
 
     const offDisconnectProject = on(Events.DISCONNECT_PROJECT, (projectIndex: number) => {
