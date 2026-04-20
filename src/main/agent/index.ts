@@ -94,7 +94,7 @@ function createBackend(provider: AgentProvider, connection: Connection, initScri
   const isRemote = connection.type !== 'local';
 
   if (isRemote) {
-    return createRemoteBackend(connection, initScript);
+    return createRemoteBackend(connection, initScript, provider);
   }
 
   switch (provider) {

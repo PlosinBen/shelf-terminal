@@ -13,11 +13,13 @@ interface RemoteProcess {
   kill: () => void;
 }
 
-export function createRemoteBackend(connection: Connection, initScript?: string): AgentBackend {
+export function createRemoteBackend(connection: Connection, initScript?: string, provider: 'claude' | 'copilot' | 'gemini' = 'claude'): AgentBackend {
   let remoteProc: RemoteProcess | null = null;
   let lineCallback: ((line: string) => void) | null = null;
   let deployed = false;
   let remotePath = '';
+  let currentModel: string | null = null;
+  let currentEffort: string | null = null;
 
   return {
     async *query(prompt: string, cwd: string, opts?: AgentQueryOptions): AsyncGenerator<AgentEvent> {
@@ -50,10 +52,14 @@ export function createRemoteBackend(connection: Connection, initScript?: string)
 
       remoteProc.sendLine({
         type: 'send',
+        provider,
         prompt,
         cwd,
         resume: opts?.resume,
         permissionMode: opts?.permissionMode,
+        model: currentModel ?? undefined,
+        effort: currentEffort ?? undefined,
+        images: opts?.images,
       });
 
       yield* streamRemoteEvents(remoteProc);
@@ -70,6 +76,14 @@ export function createRemoteBackend(connection: Connection, initScript?: string)
         remoteProc.kill();
         remoteProc = null;
       }
+    },
+
+    setModel(model: string) {
+      currentModel = model || null;
+    },
+
+    setEffort(effort: string) {
+      currentEffort = effort || null;
     },
   };
 }
