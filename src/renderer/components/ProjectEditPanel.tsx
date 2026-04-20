@@ -203,8 +203,6 @@ export function ProjectEditPanel() {
             >
               <option value="">None</option>
               <option value="claude">Claude</option>
-              <option value="copilot">Copilot</option>
-              <option value="gemini">Gemini</option>
             </select>
             <label className="settings-checkbox-label">
               <input

@@ -8,10 +8,12 @@ import {
   deleteAgentState, useStore, updateProjectConfig,
 } from '../store';
 
+// Copilot and Gemini backends exist in src/main/agent/providers/ but are not
+// yet reachable for remote connections (agent-server only bundles Claude SDK).
+// Hiding them from the picker keeps the UI unambiguous until remote support
+// lands — re-enable once the agent-server is multi-provider.
 const AGENT_PROVIDERS: { id: AgentProvider; label: string }[] = [
   { id: 'claude', label: 'Claude' },
-  { id: 'copilot', label: 'Copilot' },
-  { id: 'gemini', label: 'Gemini' },
 ];
 
 interface AgentViewProps {

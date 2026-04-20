@@ -674,46 +674,53 @@ AgentView 從 placeholder 變成真正的對話介面。
 
 **目標：擴展支援 Copilot 和 Gemini，逐步補齊 agent capabilities**
 
-已完成：
-- Copilot / Gemini chat-only mode（無 tool use）
-- Copilot auth（delegated — 讀 apps.json / `gh auth token`，auth_required event + UI）
-- Tab 內 Switch Provider
+✅ Code-complete for Copilot (local only). Gemini wrapper deferred.
 
-#### Phase 3a — Tool Registry + Agent Loop 骨架
+**🚧 Shipped hidden in v0.7.0** — Copilot / Gemini picker entries are temporarily removed from the UI while remote support lands. Backends, tests, and infrastructure stay in the tree for v0.8.
 
-1. `src/main/agent/providers/processor-tools.ts` — tool schemas + category（Read/Grep/Glob/Ls/Bash/Edit/Write）
-2. `openai-processor` 改寫成 multi-turn loop：call model → accumulate `tool_calls` → execute → 塞 `tool_result` → 繼續
-3. Tool execution stub（先 throw TODO）確認 loop 正確
+#### Phase 3a — Tool Registry + Agent Loop 骨架 ✅
 
-#### Phase 3b — Tool 實作
+- `src/main/agent/providers/processor-tools.ts` — tool schemas + category（Read/Grep/Glob/Ls/Bash/Edit/Write）
+- `openai-processor` 多輪 loop：tool_call delta 累積 → execute → tool_result → 繼續
+- MAX_TURNS = 20 防跑不停
 
-走現有 connector（local / SSH / Docker / WSL）：
+#### Phase 3b — Tool 實作 ✅
 
-- Read-only 先：Read, Grep, Glob, Ls
-- Bash — 用 exec（非 PTY，避免互動問題）
-- Edit, Write — file-transfer 擴充
+走現有 connector（local / SSH / Docker / WSL）：Read / Grep (rg fallback grep) / Glob (find) / Ls / Bash / Edit / Write；100KB 輸出截斷。
 
-#### Phase 3c — Permission Gating
+#### Phase 3c — Permission Gating ✅
 
-1. 重用現成的 `AGENT_PERMISSION_REQUEST` event
-2. Mode 邏輯實作 default / acceptEdits / bypassPermissions
+- `AGENT_PERMISSION_REQUEST` event 重用
+- Mode 邏輯：default 問、acceptEdits 自動過 read/write 問 exec、bypass 全過、plan 自動拒 exec/write
+- Session allowlist（「allow this session」真的 whitelist tool；Bash 以 command 第一個字為 key）
 
-#### Phase 3d — Plan Mode
+#### Phase 3d — Plan Mode ✅
 
-1. Tool category filter（`plan` → 只露 `category: 'read'`）
-2. System prompt 注入
+- Tool schema filter（plan → 只露 read category）
+- System prompt 注入 PLAN MODE 指示
+- 兩道保險：model 看不到 exec/write tool 且 system prompt 明示
 
-#### Phase 3e — Status Bar
+#### Phase 3e — Status Bar ✅
 
-1. `/models` warmup → capabilities.models
-2. Model cycle UI
-3. `stream_options.include_usage` → token counts
-4. Context % with model→window 表
-5. Quota header 解析（Copilot）
+- `/models` warmup → `capabilities.models` + per-model `effortLevels` / `vision`
+- `AGENT_SET_PREFS` IPC 切 model/effort/mode；persisted in `ProjectConfig.agentPrefs`
+- `stream_options.include_usage` → token counts
+- Context % from model context window
+- Copilot quota via custom `fetch` response header intercept
+- Reasoning content stream (`delta.reasoning_content` / `delta.reasoning`)
 
-#### Phase 3f — Gemini
+#### Phase 3f — Gemini 🚧 (deferred)
 
-套同一套 processor，只寫 thin wrapper（endpoint + auth）
+套同一套 processor，只寫 thin wrapper。Google auth flow 未設計。
+
+### Phase 3 add-ons shipped ✅
+
+- Slash commands: `/clear /compact /context /help /model /status /tools /ask` via processor `handleSlash`; `/model` opens keyboard picker overlay
+- AGENTS.md / CLAUDE.md auto-load at git repo root, injected into system prompt each turn
+- Attachments: file upload via connector (text inlined on send, >100KB or binary falls back to path ref) and image data URLs (Copilot `image_url` content block; Claude `image` block via async-generator prompt)
+- Vision capability gating
+- AgentView keyboard-first input (no send button, double-Esc to stop)
+- Immutable store updates (useSyncExternalStore re-render fix)
 
 ### Phase 4 — Polish & Enhancement
 
