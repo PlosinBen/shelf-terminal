@@ -71,16 +71,12 @@ interface ShelfApi {
     stop: (tabId: string) => Promise<void>;
     destroy: (tabId: string) => Promise<void>;
     resolvePermission: (tabId: string, toolUseId: string, scope: 'once' | 'session' | 'deny', toolName?: string, input?: Record<string, unknown>) => Promise<void>;
-    slashCommands: (tabId: string) => Promise<{ name: string; description: string }[]>;
-    setModel: (tabId: string, model: string) => Promise<void>;
-    setEffort: (tabId: string, effort: string) => Promise<void>;
-    onCapabilities: (callback: (payload: { tabId: string; models: { value: string; displayName: string; effortLevels?: string[] }[]; permissionModes: string[]; effortLevels: string[]; slashCommands: { name: string; description: string }[]; currentModel?: string; currentEffort?: string; currentPermissionMode?: string }) => void) => () => void;
-    setMode: (tabId: string, mode: string) => Promise<void>;
+    setPrefs: (tabId: string, prefs: import('../shared/types').AgentPrefs) => Promise<void>;
     switchProvider: (tabId: string, provider: string, connection: import('../shared/types').Connection, initScript?: string) => Promise<void>;
+    onCapabilities: (callback: (payload: { tabId: string; models: { value: string; displayName: string; effortLevels?: string[] }[]; permissionModes: string[]; effortLevels: string[]; slashCommands: { name: string; description: string }[]; currentModel?: string; currentEffort?: string; currentPermissionMode?: string }) => void) => () => void;
     onMessage: (callback: (payload: { tabId: string; type: string; content: string; toolName?: string; toolInput?: Record<string, unknown>; toolUseId?: string; parentToolUseId?: string; sessionId?: string; costUsd?: number; inputTokens?: number; outputTokens?: number }) => void) => () => void;
     onStream: (callback: (payload: { tabId: string; type: string; content: string }) => void) => () => void;
     onStatus: (callback: (payload: { tabId: string; state: string; model?: string; costUsd?: number; inputTokens?: number; outputTokens?: number; numTurns?: number; sessionId?: string }) => void) => () => void;
-    onError: (callback: (payload: { tabId: string; error: string }) => void) => () => void;
     onPermissionRequest: (callback: (payload: { tabId: string; toolUseId: string; toolName: string; input: Record<string, unknown> }) => void) => () => void;
     onAuthRequired: (callback: (payload: { tabId: string; provider: string }) => void) => () => void;
   };

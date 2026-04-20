@@ -212,7 +212,7 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
     const picked = capabilities.models[idx];
     if (!picked) return;
     updateAgentState(tabId, { model: picked.value });
-    window.shelfApi.agent.setModel(tabId, picked.value);
+    window.shelfApi.agent.setPrefs(tabId, { model: picked.value });
     persistAgentPref('model', picked.value);
     setModelPicker({ open: false, selected: 0 });
   }, [tabId, capabilities, persistAgentPref]);
@@ -235,7 +235,7 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
     const idx = capabilities.models.findIndex((m) => m.value === model);
     const next = capabilities.models[(idx + 1) % capabilities.models.length];
     updateAgentState(tabId, { model: next.value });
-    window.shelfApi.agent.setModel(tabId, next.value);
+    window.shelfApi.agent.setPrefs(tabId, { model: next.value });
     persistAgentPref('model', next.value);
   }, [tabId, capabilities, model, persistAgentPref]);
 
@@ -244,7 +244,7 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
     const idx = capabilities.permissionModes.indexOf(permissionMode);
     const next = capabilities.permissionModes[(idx + 1) % capabilities.permissionModes.length];
     updateAgentState(tabId, { permissionMode: next });
-    window.shelfApi.agent.setMode(tabId, next);
+    window.shelfApi.agent.setPrefs(tabId, { permissionMode: next });
     persistAgentPref('permissionMode', next);
   }, [tabId, capabilities, permissionMode, persistAgentPref]);
 
@@ -256,7 +256,7 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
     const idx = levels.indexOf(currentEffort);
     const next = levels[(idx + 1) % levels.length];
     updateAgentState(tabId, { currentEffort: next });
-    window.shelfApi.agent.setEffort(tabId, next);
+    window.shelfApi.agent.setPrefs(tabId, { effort: next });
     persistAgentPref('effort', next);
   }, [tabId, capabilities, currentEffort, model, persistAgentPref]);
 

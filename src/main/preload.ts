@@ -111,21 +111,15 @@ contextBridge.exposeInMainWorld('shelfApi', {
       ipcRenderer.invoke(IPC.AGENT_DESTROY, { tabId }),
     resolvePermission: (tabId: string, toolUseId: string, scope: 'once' | 'session' | 'deny', toolName?: string, input?: Record<string, unknown>) =>
       ipcRenderer.invoke(IPC.AGENT_RESOLVE_PERMISSION, { tabId, toolUseId, scope, toolName, input }),
-    slashCommands: (tabId: string) =>
-      ipcRenderer.invoke(IPC.AGENT_SLASH_COMMANDS, { tabId }),
-    setModel: (tabId: string, model: string) =>
-      ipcRenderer.invoke(IPC.AGENT_SET_MODEL, { tabId, model }),
-    setEffort: (tabId: string, effort: string) =>
-      ipcRenderer.invoke(IPC.AGENT_SET_EFFORT, { tabId, effort }),
+    setPrefs: (tabId: string, prefs: { model?: string; effort?: string; permissionMode?: string }) =>
+      ipcRenderer.invoke(IPC.AGENT_SET_PREFS, { tabId, prefs }),
+    switchProvider: (tabId: string, provider: string, connection: unknown, initScript?: string) =>
+      ipcRenderer.invoke(IPC.AGENT_SWITCH_PROVIDER, { tabId, provider, connection, initScript }),
     onCapabilities: (callback: (payload: any) => void) => {
       const listener = (_event: Electron.IpcRendererEvent, payload: any) => callback(payload);
       ipcRenderer.on(IPC.AGENT_CAPABILITIES, listener);
       return () => ipcRenderer.removeListener(IPC.AGENT_CAPABILITIES, listener);
     },
-    setMode: (tabId: string, mode: string) =>
-      ipcRenderer.invoke(IPC.AGENT_SET_MODE, { tabId, mode }),
-    switchProvider: (tabId: string, provider: string, connection: unknown, initScript?: string) =>
-      ipcRenderer.invoke(IPC.AGENT_SWITCH_PROVIDER, { tabId, provider, connection, initScript }),
     onMessage: (callback: (payload: any) => void) => {
       const listener = (_event: Electron.IpcRendererEvent, payload: any) => callback(payload);
       ipcRenderer.on(IPC.AGENT_MESSAGE, listener);
@@ -140,11 +134,6 @@ contextBridge.exposeInMainWorld('shelfApi', {
       const listener = (_event: Electron.IpcRendererEvent, payload: any) => callback(payload);
       ipcRenderer.on(IPC.AGENT_STATUS, listener);
       return () => ipcRenderer.removeListener(IPC.AGENT_STATUS, listener);
-    },
-    onError: (callback: (payload: any) => void) => {
-      const listener = (_event: Electron.IpcRendererEvent, payload: any) => callback(payload);
-      ipcRenderer.on(IPC.AGENT_ERROR, listener);
-      return () => ipcRenderer.removeListener(IPC.AGENT_ERROR, listener);
     },
     onPermissionRequest: (callback: (payload: any) => void) => {
       const listener = (_event: Electron.IpcRendererEvent, payload: any) => callback(payload);

@@ -87,6 +87,7 @@ export function App() {
         streamingIds.delete(tabId);
         filterAgentMessages(tabId, (m) => !m.streaming);
       } else if (payload.type === 'error') {
+        updateAgentState(tabId, { streaming: false, agentStatus: 'idle' });
         addAgentMessage(tabId, { id: nextId(), role: 'system', type: 'error', content: payload.content });
       }
     });
@@ -157,16 +158,6 @@ export function App() {
         }
       }
 
-      if (!isStreaming && state.slashCommands.length === 0) {
-        window.shelfApi.agent.slashCommands(tabId).then((cmds) => {
-          if (cmds.length > 0) updateAgentState(tabId, { slashCommands: cmds });
-        });
-      }
-    });
-
-    const offError = window.shelfApi.agent.onError((payload) => {
-      updateAgentState(payload.tabId, { streaming: false, agentStatus: 'idle' });
-      addAgentMessage(payload.tabId, { id: nextId(), role: 'system', type: 'error', content: payload.error });
     });
 
     const offPermission = window.shelfApi.agent.onPermissionRequest((payload) => {
@@ -190,7 +181,7 @@ export function App() {
       });
     });
 
-    return () => { offMessage(); offStream(); offStatus(); offError(); offPermission(); offCapabilities(); offAuthRequired(); };
+    return () => { offMessage(); offStream(); offStatus(); offPermission(); offCapabilities(); offAuthRequired(); };
   }, [projects]);
 
   // Centralized event handlers

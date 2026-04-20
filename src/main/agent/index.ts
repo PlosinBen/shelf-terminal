@@ -167,7 +167,7 @@ export function registerAgentHandlers() {
             broadcast(IPC.AGENT_STATUS, { tabId, ...event.payload });
             break;
           case 'error':
-            broadcast(IPC.AGENT_ERROR, { tabId, error: event.error });
+            broadcast(IPC.AGENT_MESSAGE, { tabId, type: 'error', content: event.error });
             break;
           case 'auth_required':
             broadcast(IPC.AGENT_AUTH_REQUIRED, { tabId, provider: event.provider });
@@ -175,7 +175,7 @@ export function registerAgentHandlers() {
         }
       }
     } catch (err: any) {
-      broadcast(IPC.AGENT_ERROR, { tabId, error: err.message ?? 'Unknown error' });
+      broadcast(IPC.AGENT_MESSAGE, { tabId, type: 'error', content: err.message ?? 'Unknown error' });
     } finally {
       for (const resolve of session.pendingPermissions.values()) {
         resolve({ behavior: 'deny', message: 'Session ended' });
@@ -223,31 +223,12 @@ export function registerAgentHandlers() {
     }
   });
 
-  ipcMain.handle(IPC.AGENT_SET_MODEL, async (_event, { tabId, model }: { tabId: string; model: string }) => {
+  ipcMain.handle(IPC.AGENT_SET_PREFS, async (_event, { tabId, prefs }: { tabId: string; prefs: AgentInitPrefs }) => {
     const session = sessions.get(tabId);
     if (!session) return;
-    (session as any).model = model;
-    session.backend.setModel?.(model);
-  });
-
-  ipcMain.handle(IPC.AGENT_SET_EFFORT, async (_event, { tabId, effort }: { tabId: string; effort: string }) => {
-    const session = sessions.get(tabId);
-    if (!session) return;
-    (session as any).effort = effort;
-    session.backend.setEffort?.(effort);
-  });
-
-  ipcMain.handle(IPC.AGENT_SLASH_COMMANDS, async (_event, { tabId }: { tabId: string }) => {
-    const session = sessions.get(tabId);
-    if (!session?.backend.getSlashCommands) return [];
-    return session.backend.getSlashCommands();
-  });
-
-  ipcMain.handle(IPC.AGENT_SET_MODE, async (_event, { tabId, mode }: { tabId: string; mode: string }) => {
-    const session = sessions.get(tabId);
-    if (session) {
-      session.permissionMode = mode;
-    }
+    if (prefs.model !== undefined) session.backend.setModel?.(prefs.model);
+    if (prefs.effort !== undefined) session.backend.setEffort?.(prefs.effort);
+    if (prefs.permissionMode !== undefined) session.permissionMode = prefs.permissionMode;
   });
 
   ipcMain.handle(IPC.AGENT_SWITCH_PROVIDER, async (_event, { tabId, provider, connection, initScript }: { tabId: string; provider: AgentProvider; connection: Connection; initScript?: string }) => {

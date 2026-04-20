@@ -62,10 +62,7 @@ export const IPC = {
   AGENT_STOP: 'agent:stop',
   AGENT_DESTROY: 'agent:destroy',
   AGENT_RESOLVE_PERMISSION: 'agent:resolve-permission',
-  AGENT_SET_MODE: 'agent:set-mode',
-  AGENT_SLASH_COMMANDS: 'agent:slash-commands',
-  AGENT_SET_MODEL: 'agent:set-model',
-  AGENT_SET_EFFORT: 'agent:set-effort',
+  AGENT_SET_PREFS: 'agent:set-prefs',
   AGENT_SWITCH_PROVIDER: 'agent:switch-provider',
 
   // Copilot auth
@@ -80,7 +77,6 @@ export const IPC = {
   AGENT_MESSAGE: 'agent:message',
   AGENT_STREAM: 'agent:stream',
   AGENT_STATUS: 'agent:status',
-  AGENT_ERROR: 'agent:error',
   AGENT_PERMISSION_REQUEST: 'agent:permission-request',
   AGENT_CAPABILITIES: 'agent:capabilities',
   AGENT_AUTH_REQUIRED: 'agent:auth-required',
