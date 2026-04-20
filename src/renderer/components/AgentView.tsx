@@ -550,16 +550,19 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
       <div className="agent-input-area">
         {(pendingFiles.length > 0 || pendingImages.length > 0) && (
           <div className="agent-attachment-row">
-            {pendingImages.map((url, i) => (
-              <span key={`img-${i}`} className="agent-attachment-chip agent-attachment-image" title="Image attachment">
-                <img src={url} alt="" />
-                <button
-                  type="button"
-                  className="agent-attachment-remove"
-                  onClick={() => setPendingImages((prev) => prev.filter((_, j) => j !== i))}
-                >×</button>
-              </span>
-            ))}
+            {pendingImages.map((url, i) => {
+              const kb = Math.round(url.length * 3 / 4 / 1024); // rough base64 → bytes
+              return (
+                <span key={`img-${i}`} className="agent-attachment-chip" title={`Image ${i + 1}`}>
+                  🖼️ Image {i + 1} ({kb} KB)
+                  <button
+                    type="button"
+                    className="agent-attachment-remove"
+                    onClick={() => setPendingImages((prev) => prev.filter((_, j) => j !== i))}
+                  >×</button>
+                </span>
+              );
+            })}
             {pendingFiles.map((f) => (
               <span key={f.path} className="agent-attachment-chip" title={f.path}>
                 📎 {f.displayPath}
@@ -572,17 +575,19 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
             ))}
           </div>
         )}
-        <span className="agent-prompt">❯</span>
-        <textarea
-          ref={textareaRef}
-          className="agent-textarea"
-          value={input}
-          onChange={handleInputChange}
-          onKeyDown={handleKeyDown}
-          placeholder={streaming ? 'Agent is running... (Esc to stop)' : 'Ask something...'}
-          rows={1}
-        />
-        {escPending && <span className="agent-esc-hint">Press Esc again to stop</span>}
+        <div className="agent-input-row">
+          <span className="agent-prompt">❯</span>
+          <textarea
+            ref={textareaRef}
+            className="agent-textarea"
+            value={input}
+            onChange={handleInputChange}
+            onKeyDown={handleKeyDown}
+            placeholder={streaming ? 'Agent is running... (Esc to stop)' : 'Ask something...'}
+            rows={1}
+          />
+          {escPending && <span className="agent-esc-hint">Press Esc again to stop</span>}
+        </div>
       </div>
 
       <div className="agent-status-bar">
