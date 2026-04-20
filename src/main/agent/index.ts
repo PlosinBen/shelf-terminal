@@ -103,7 +103,7 @@ function createBackend(provider: AgentProvider, connection: Connection, initScri
     case 'copilot':
       return createCopilotBackend(connection);
     case 'gemini':
-      return createGeminiBackend();
+      return createGeminiBackend(connection);
     default:
       throw new Error(`Unknown provider: ${provider}`);
   }

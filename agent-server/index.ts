@@ -1,6 +1,7 @@
 import * as readline from 'readline';
 import { createClaudeBackend } from './providers/claude';
 import { createCopilotBackend } from './providers/copilot';
+import { createGeminiBackend } from './providers/gemini';
 import type { OutgoingMessage, QueryInput, ServerBackend } from './providers/types';
 
 type Provider = 'claude' | 'copilot' | 'gemini';
@@ -39,7 +40,8 @@ function getBackend(provider: Provider): ServerBackend {
       b = createCopilotBackend();
       break;
     case 'gemini':
-      throw new Error(`Provider gemini not yet implemented in agent-server`);
+      b = createGeminiBackend();
+      break;
   }
   backends.set(provider, b);
   return b;

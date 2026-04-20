@@ -438,17 +438,31 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
         updateAgentState(tabId, { authError: 'Still no valid Copilot credentials found.', authBusy: false });
       }
     };
+    const isGemini = authRequired.provider === 'gemini';
     return (
       <div className="agent-view agent-view-active">
         <div className="agent-auth-pane">
-          <div className="agent-auth-title">GitHub Copilot not authenticated</div>
+          <div className="agent-auth-title">
+            {isGemini ? 'Gemini API key missing' : 'GitHub Copilot not authenticated'}
+          </div>
           <div className="agent-auth-instructions">
-            Run one of the following in a terminal, then click Retry:
+            {isGemini
+              ? 'Gemini backend needs a GEMINI_API_KEY environment variable on the machine it runs on. Set it and relaunch, then click Retry:'
+              : 'Run one of the following in a terminal, then click Retry:'}
           </div>
           <ul className="agent-auth-list">
-            <li><code>gh auth login -s copilot</code> — first time signing in with <code>gh</code></li>
-            <li><code>gh auth refresh -h github.com -s copilot</code> — already signed in, just add Copilot scope</li>
-            <li><code>copilot</code> — launch GitHub Copilot CLI and sign in</li>
+            {isGemini ? (
+              <>
+                <li>Get an API key from <code>https://aistudio.google.com/apikey</code></li>
+                <li>Export it: <code>export GEMINI_API_KEY=...</code> (local) or add to the remote shell init script</li>
+              </>
+            ) : (
+              <>
+                <li><code>gh auth login -s copilot</code> — first time signing in with <code>gh</code></li>
+                <li><code>gh auth refresh -h github.com -s copilot</code> — already signed in, just add Copilot scope</li>
+                <li><code>copilot</code> — launch GitHub Copilot CLI and sign in</li>
+              </>
+            )}
           </ul>
           <button className="conn-btn conn-btn-next" disabled={authBusy} onClick={retry}>
             {authBusy ? 'Checking…' : 'Retry'}
