@@ -23,9 +23,13 @@ export interface OpenAIProviderConfig {
   getRateLimit?: () => { rateLimitType?: string; utilization?: number; resetsAt?: number } | null;
 }
 
+type ContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string } };
+
 interface Message {
   role: 'system' | 'user' | 'assistant' | 'tool';
-  content: string | null;
+  content: string | ContentPart[] | null;
   tool_calls?: Array<{ id: string; type: 'function'; function: { name: string; arguments: string } }>;
   tool_call_id?: string;
 }
@@ -96,7 +100,17 @@ export function createOpenAIProcessor(config: OpenAIProviderConfig) {
         history.unshift({ role: 'system', content: systemPrompt });
       }
       const ephemeralStartLen = history.length;
-      history.push({ role: 'user', content: actualPrompt });
+      // If images accompany the turn, use OpenAI's multimodal content array.
+      const images = opts?.images ?? [];
+      if (images.length > 0) {
+        const parts: ContentPart[] = images
+          .filter((u) => u.startsWith('data:image/'))
+          .map((url) => ({ type: 'image_url', image_url: { url } }));
+        if (actualPrompt) parts.push({ type: 'text', text: actualPrompt });
+        history.push({ role: 'user', content: parts });
+      } else {
+        history.push({ role: 'user', content: actualPrompt });
+      }
 
       const tools = toOpenAIFormat(toolsForMode(mode));
 

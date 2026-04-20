@@ -200,6 +200,7 @@ export function registerAgentHandlers() {
         resume: session.sdkSessionId,
         permissionMode: session.permissionMode,
         canUseTool,
+        images: attachments?.images,
       });
 
       for await (const event of generator) {

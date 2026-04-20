@@ -65,6 +65,8 @@ export interface AgentQueryOptions {
   resume?: string;
   permissionMode?: string;
   canUseTool?: PermissionCallback;
+  /** Base64 data URLs for images attached to the user turn. */
+  images?: string[];
 }
 
 export type PermissionResult = { behavior: 'allow' } | { behavior: 'deny'; message?: string };

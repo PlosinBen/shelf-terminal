@@ -53,6 +53,7 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
   const escPendingRef = useRef(false);
   const escTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [pendingFiles, setPendingFiles] = useState<Array<{ path: string; displayPath: string }>>([]);
+  const [pendingImages, setPendingImages] = useState<string[]>([]);
 
   const listRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -68,6 +69,15 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
         ...prev,
         ...uploads.map((u) => ({ path: u.remotePath, displayPath: u.displayPath })),
       ]);
+    },
+    onImages: (urls) => {
+      // Cap at 20MB base64 per Claude/OpenAI guidance; drop oversized silently
+      // rather than blowing up the send.
+      const accepted = urls.filter((u) => u.length < 20 * 1024 * 1024);
+      if (accepted.length < urls.length) {
+        void window.shelfApi.dialog.warn('Image too large', 'Images over ~20MB base64 were skipped.');
+      }
+      if (accepted.length > 0) setPendingImages((prev) => [...prev, ...accepted]);
     },
   });
   const isAtBottomRef = useRef(false);
@@ -173,7 +183,7 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
 
   const handleSend = useCallback(() => {
     const text = input.trim();
-    if ((!text && pendingFiles.length === 0) || !provider) return;
+    if ((!text && pendingFiles.length === 0 && pendingImages.length === 0) || !provider) return;
 
     if (text === '/model') {
       setInput('');
@@ -185,8 +195,10 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
     }
 
     const files = pendingFiles;
+    const images = pendingImages;
     setInput('');
     setPendingFiles([]);
+    setPendingImages([]);
 
     if (streaming) {
       updateAgentState(tabId, {
@@ -195,7 +207,9 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
       return;
     }
 
-    const attachments = files.length > 0 ? { files } : undefined;
+    const attachments = (files.length > 0 || images.length > 0)
+      ? { ...(files.length > 0 ? { files } : {}), ...(images.length > 0 ? { images } : {}) }
+      : undefined;
     addAgentMessage(tabId, {
       id: `msg-${Date.now()}`, role: 'user', type: 'text', content: text,
       ...(attachments ? { attachments } : {}),
@@ -206,8 +220,9 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
     });
     window.shelfApi.agent.send(tabId, text, cwd, provider, connection, initScript, {
       files: files.map((f) => f.path),
+      images,
     });
-  }, [input, pendingFiles, streaming, provider, tabId, projectId, cwd, connection, initScript, agentState, capabilities, model]);
+  }, [input, pendingFiles, pendingImages, streaming, provider, tabId, projectId, cwd, connection, initScript, agentState, capabilities, model]);
 
   const handleCancelQueued = useCallback((id: string) => {
     updateAgentState(tabId, {
@@ -525,8 +540,18 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
       })()}
 
       <div className="agent-input-area">
-        {pendingFiles.length > 0 && (
+        {(pendingFiles.length > 0 || pendingImages.length > 0) && (
           <div className="agent-attachment-row">
+            {pendingImages.map((url, i) => (
+              <span key={`img-${i}`} className="agent-attachment-chip agent-attachment-image" title="Image attachment">
+                <img src={url} alt="" />
+                <button
+                  type="button"
+                  className="agent-attachment-remove"
+                  onClick={() => setPendingImages((prev) => prev.filter((_, j) => j !== i))}
+                >×</button>
+              </span>
+            ))}
             {pendingFiles.map((f) => (
               <span key={f.path} className="agent-attachment-chip" title={f.path}>
                 📎 {f.displayPath}

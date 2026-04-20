@@ -2825,6 +2825,23 @@ button {
   color: var(--text);
 }
 
+.agent-attachment-image {
+  padding: 2px;
+  gap: 0;
+}
+
+.agent-attachment-image img {
+  width: 40px;
+  height: 40px;
+  border-radius: 4px;
+  object-fit: cover;
+  display: block;
+}
+
+.agent-attachment-image .agent-attachment-remove {
+  margin-left: 4px;
+}
+
 .agent-msg-files {
   display: flex;
   flex-wrap: wrap;
