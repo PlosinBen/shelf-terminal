@@ -16,6 +16,8 @@ export function createClaudeBackend(): AgentBackend {
   let activeQuery: Query | null = null;
   let abortController: AbortController | null = null;
   let cachedCapabilities: ProviderCapabilities | null = null;
+  let currentModel: string | null = null;
+  let currentEffort: string | null = null;
 
   return {
     async warmup(cwd: string): Promise<ProviderCapabilities | null> {
@@ -66,10 +68,14 @@ export function createClaudeBackend(): AgentBackend {
         abortController,
         cwd,
         tools: { type: 'preset', preset: 'claude_code' },
-        thinking: { type: 'adaptive' },
+        thinking: mapEffortToThinking(currentEffort),
         includePartialMessages: true,
         permissionMode: (opts?.permissionMode as Options['permissionMode']) ?? 'default',
       };
+
+      if (currentModel) {
+        (options as any).model = currentModel;
+      }
 
       if (opts?.resume) {
         options.resume = opts.resume;
@@ -131,7 +137,26 @@ export function createClaudeBackend(): AgentBackend {
         return [];
       }
     },
+
+    setModel(model: string) {
+      currentModel = model || null;
+    },
+
+    setEffort(effort: string) {
+      currentEffort = effort || null;
+    },
   };
+}
+
+function mapEffortToThinking(effort: string | null): Options['thinking'] {
+  // Claude SDK thinking budgets — kept aligned with UI effortLevels (low/medium/high/max).
+  switch (effort) {
+    case 'low':    return { type: 'enabled', budgetTokens: 4000 };
+    case 'medium': return { type: 'adaptive' };
+    case 'high':   return { type: 'enabled', budgetTokens: 16000 };
+    case 'max':    return { type: 'enabled', budgetTokens: 32000 };
+    default:       return { type: 'adaptive' };
+  }
 }
 
 function processMessage(msg: SDKMessage): AgentEvent[] {

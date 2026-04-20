@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import type { AgentProvider, Connection } from '@shared/types';
+import type { AgentProvider, AgentPrefs, Connection } from '@shared/types';
 import { AgentMessage, type AgentMsg } from './AgentMessage';
 import { clearMessages, loadMessages, saveMessage } from '../agent-history';
 import {
   useAgentState, updateAgentState, addAgentMessage,
-  deleteAgentState,
+  deleteAgentState, useStore, updateProjectConfig,
 } from '../store';
 
 const AGENT_PROVIDERS: { id: AgentProvider; label: string }[] = [
@@ -27,6 +27,17 @@ interface AgentViewProps {
 
 export function AgentView({ tabId, projectId, projectIndex, cwd, connection, initScript, provider, visible, onSelectProvider }: AgentViewProps) {
   const agentState = useAgentState(tabId);
+  const { projects } = useStore();
+
+  const persistAgentPref = useCallback((key: keyof AgentPrefs, value: string) => {
+    if (!provider) return;
+    const proj = projects[projectIndex];
+    if (!proj) return;
+    const existing = proj.config.agentPrefs?.[provider] ?? {};
+    updateProjectConfig(projectIndex, {
+      agentPrefs: { ...proj.config.agentPrefs, [provider]: { ...existing, [key]: value } },
+    });
+  }, [provider, projectIndex, projects]);
   const { messages, streaming, agentStatus, model, cost, tokens, rateLimit, contextInfo,
     capabilities, permissionMode, currentEffort, pendingPermission, queuedMessages, slashCommands,
     authRequired, authError, authBusy } = agentState;
@@ -44,13 +55,33 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
   const scrollRestoredRef = useRef(false);
   const prevMessageCount = useRef(0);
 
-  // Bootstrap backend session (checkAuth + warmup) once provider is known
+  // Bootstrap backend session (checkAuth + warmup) once provider is known, and
+  // apply any persisted per-provider prefs so the chip UI reflects the last
+  // chosen model/effort/mode even before the first turn.
   const initCalled = useRef(false);
   useEffect(() => {
     if (!provider || initCalled.current) return;
     initCalled.current = true;
     window.shelfApi.agent.init(tabId, provider, connection, cwd, initScript);
-  }, [provider, tabId, cwd, connection, initScript]);
+
+    const prefs = projects[projectIndex]?.config.agentPrefs?.[provider];
+    if (!prefs) return;
+    const updates: Partial<typeof agentState> = {};
+    if (prefs.model) {
+      updates.model = prefs.model;
+      window.shelfApi.agent.setModel(tabId, prefs.model);
+    }
+    if (prefs.effort) {
+      updates.currentEffort = prefs.effort;
+      window.shelfApi.agent.setEffort(tabId, prefs.effort);
+    }
+    if (prefs.permissionMode) {
+      updates.permissionMode = prefs.permissionMode;
+      window.shelfApi.agent.setMode(tabId, prefs.permissionMode);
+    }
+    if (Object.keys(updates).length > 0) updateAgentState(tabId, updates);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [provider, tabId, cwd, connection, initScript, projectIndex]);
 
   // Load history into store on first mount
   const historyLoaded = useRef(false);
@@ -198,8 +229,9 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
     if (!picked) return;
     updateAgentState(tabId, { model: picked.value });
     window.shelfApi.agent.setModel(tabId, picked.value);
+    persistAgentPref('model', picked.value);
     setModelPicker({ open: false, selected: 0 });
-  }, [tabId, capabilities]);
+  }, [tabId, capabilities, persistAgentPref]);
 
   useEffect(() => {
     if (!modelPicker.open || !capabilities) return;
@@ -220,7 +252,8 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
     const next = capabilities.models[(idx + 1) % capabilities.models.length];
     updateAgentState(tabId, { model: next.value });
     window.shelfApi.agent.setModel(tabId, next.value);
-  }, [tabId, capabilities, model]);
+    persistAgentPref('model', next.value);
+  }, [tabId, capabilities, model, persistAgentPref]);
 
   const handleCycleMode = useCallback(() => {
     if (!capabilities || capabilities.permissionModes.length === 0) return;
@@ -228,7 +261,8 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
     const next = capabilities.permissionModes[(idx + 1) % capabilities.permissionModes.length];
     updateAgentState(tabId, { permissionMode: next });
     window.shelfApi.agent.setMode(tabId, next);
-  }, [tabId, capabilities, permissionMode]);
+    persistAgentPref('permissionMode', next);
+  }, [tabId, capabilities, permissionMode, persistAgentPref]);
 
   const handleCycleEffort = useCallback(() => {
     if (!capabilities) return;
@@ -239,7 +273,8 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
     const next = levels[(idx + 1) % levels.length];
     updateAgentState(tabId, { currentEffort: next });
     window.shelfApi.agent.setEffort(tabId, next);
-  }, [tabId, capabilities, currentEffort]);
+    persistAgentPref('effort', next);
+  }, [tabId, capabilities, currentEffort, model, persistAgentPref]);
 
   const handleSwitchProvider = useCallback(async (newProvider: AgentProvider) => {
     if (newProvider === provider || streaming) return;

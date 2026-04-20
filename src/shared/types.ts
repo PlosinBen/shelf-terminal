@@ -39,6 +39,13 @@ export interface ProjectConfig {
   defaultAgentProvider?: AgentProvider;
   openAgentOnConnect?: boolean;
   agentSessionIds?: Partial<Record<AgentProvider, string>>;
+  agentPrefs?: Partial<Record<AgentProvider, AgentPrefs>>;
+}
+
+export interface AgentPrefs {
+  model?: string;
+  effort?: string;
+  permissionMode?: string;
 }
 
 // ── IPC payloads: Renderer → Main ──
