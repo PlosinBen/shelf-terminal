@@ -66,7 +66,7 @@ interface ShelfApi {
     logsPath: () => Promise<string>;
   };
   agent: {
-    init: (tabId: string, provider: string, connection: import('../shared/types').Connection, cwd: string, initScript?: string) => Promise<void>;
+    init: (tabId: string, provider: string, connection: import('../shared/types').Connection, cwd: string, initScript?: string, prefs?: import('../shared/types').AgentPrefs) => Promise<void>;
     send: (tabId: string, prompt: string, cwd: string, provider: string, connection: import('../shared/types').Connection, initScript?: string) => Promise<void>;
     stop: (tabId: string) => Promise<void>;
     destroy: (tabId: string) => Promise<void>;
@@ -74,7 +74,7 @@ interface ShelfApi {
     slashCommands: (tabId: string) => Promise<{ name: string; description: string }[]>;
     setModel: (tabId: string, model: string) => Promise<void>;
     setEffort: (tabId: string, effort: string) => Promise<void>;
-    onCapabilities: (callback: (payload: { tabId: string; models: { value: string; displayName: string; effortLevels?: string[] }[]; permissionModes: string[]; effortLevels: string[]; slashCommands: { name: string; description: string }[] }) => void) => () => void;
+    onCapabilities: (callback: (payload: { tabId: string; models: { value: string; displayName: string; effortLevels?: string[] }[]; permissionModes: string[]; effortLevels: string[]; slashCommands: { name: string; description: string }[]; currentModel?: string; currentEffort?: string; currentPermissionMode?: string }) => void) => () => void;
     setMode: (tabId: string, mode: string) => Promise<void>;
     switchProvider: (tabId: string, provider: string, connection: import('../shared/types').Connection, initScript?: string) => Promise<void>;
     onMessage: (callback: (payload: { tabId: string; type: string; content: string; toolName?: string; toolInput?: Record<string, unknown>; toolUseId?: string; parentToolUseId?: string; sessionId?: string; costUsd?: number; inputTokens?: number; outputTokens?: number }) => void) => () => void;

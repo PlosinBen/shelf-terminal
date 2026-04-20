@@ -55,31 +55,15 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
   const scrollRestoredRef = useRef(false);
   const prevMessageCount = useRef(0);
 
-  // Bootstrap backend session (checkAuth + warmup) once provider is known, and
-  // apply any persisted per-provider prefs so the chip UI reflects the last
-  // chosen model/effort/mode even before the first turn.
+  // Bootstrap backend session (checkAuth + warmup) once provider is known.
+  // Prefs ride with the init IPC so the backend applies them before warmup
+  // and the capabilities broadcast already reflects current model/effort/mode.
   const initCalled = useRef(false);
   useEffect(() => {
     if (!provider || initCalled.current) return;
     initCalled.current = true;
-    window.shelfApi.agent.init(tabId, provider, connection, cwd, initScript);
-
     const prefs = projects[projectIndex]?.config.agentPrefs?.[provider];
-    if (!prefs) return;
-    const updates: Partial<typeof agentState> = {};
-    if (prefs.model) {
-      updates.model = prefs.model;
-      window.shelfApi.agent.setModel(tabId, prefs.model);
-    }
-    if (prefs.effort) {
-      updates.currentEffort = prefs.effort;
-      window.shelfApi.agent.setEffort(tabId, prefs.effort);
-    }
-    if (prefs.permissionMode) {
-      updates.permissionMode = prefs.permissionMode;
-      window.shelfApi.agent.setMode(tabId, prefs.permissionMode);
-    }
-    if (Object.keys(updates).length > 0) updateAgentState(tabId, updates);
+    window.shelfApi.agent.init(tabId, provider, connection, cwd, initScript, prefs);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [provider, tabId, cwd, connection, initScript, projectIndex]);
 

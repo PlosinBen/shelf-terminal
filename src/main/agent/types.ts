@@ -45,6 +45,9 @@ export interface ProviderCapabilities {
   permissionModes: string[];
   effortLevels: string[];
   slashCommands: { name: string; description: string }[];
+  currentModel?: string;
+  currentEffort?: string;
+  currentPermissionMode?: string;
 }
 
 export interface AgentBackend {

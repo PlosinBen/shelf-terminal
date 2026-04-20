@@ -61,12 +61,19 @@ function createBackend(provider: AgentProvider, connection: Connection, initScri
   }
 }
 
+interface AgentInitPrefs {
+  model?: string;
+  effort?: string;
+  permissionMode?: string;
+}
+
 async function ensureSession(
   tabId: string,
   provider: AgentProvider,
   connection: Connection,
   cwd: string,
   initScript?: string,
+  prefs?: AgentInitPrefs,
 ): Promise<Session> {
   let session = sessions.get(tabId);
   if (session) return session;
@@ -74,7 +81,7 @@ async function ensureSession(
   const backend = createBackend(provider, connection, initScript);
   session = {
     tabId, projectId: '', provider, backend, state: 'idle',
-    permissionMode: 'default',
+    permissionMode: prefs?.permissionMode ?? 'default',
     pendingPermissions: new Map(),
     providerSessionIds: {},
     sessionAllowlist: new Set(),
@@ -89,18 +96,29 @@ async function ensureSession(
     }
   }
 
+  // Apply persisted prefs BEFORE warmup so the capability payload can echo
+  // the current state back to the UI in a single event.
+  if (prefs?.model) backend.setModel?.(prefs.model);
+  if (prefs?.effort) backend.setEffort?.(prefs.effort);
+
   if (backend.warmup) {
     const caps = await backend.warmup(cwd);
     if (caps) {
-      broadcast(IPC.AGENT_CAPABILITIES, { tabId, ...caps });
+      broadcast(IPC.AGENT_CAPABILITIES, {
+        tabId,
+        ...caps,
+        currentModel: prefs?.model ?? caps.currentModel ?? caps.models[0]?.value,
+        currentEffort: prefs?.effort ?? caps.currentEffort,
+        currentPermissionMode: session.permissionMode,
+      });
     }
   }
   return session;
 }
 
 export function registerAgentHandlers() {
-  ipcMain.handle(IPC.AGENT_INIT, async (_event, { tabId, provider, connection, cwd, initScript }: { tabId: string; provider: AgentProvider; connection: Connection; cwd: string; initScript?: string }) => {
-    await ensureSession(tabId, provider, connection, cwd, initScript);
+  ipcMain.handle(IPC.AGENT_INIT, async (_event, { tabId, provider, connection, cwd, initScript, prefs }: { tabId: string; provider: AgentProvider; connection: Connection; cwd: string; initScript?: string; prefs?: AgentInitPrefs }) => {
+    await ensureSession(tabId, provider, connection, cwd, initScript, prefs);
   });
 
   ipcMain.handle(IPC.AGENT_SEND, async (_event, { tabId, prompt, cwd, provider, connection, initScript }: { tabId: string; prompt: string; cwd: string; provider: AgentProvider; connection: Connection; initScript?: string }) => {
