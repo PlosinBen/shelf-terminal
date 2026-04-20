@@ -438,6 +438,24 @@ OpenAI 沒提供官方 API 查「哪個 model 吃 `reasoning_effort`」。`proce
 
 若 pattern 沒涵蓋新家族，UI 會少一個 effort chip（非破壞性），但可能錯失該 model 的 reasoning 控制力。建議每次 OpenAI 公告新 model 家族後更新。
 
+#### Warmup 回傳的 slashCommands 來源
+
+`AgentBackend.warmup()` 回傳的 `ProviderCapabilities.slashCommands` 由 provider wrapper 組裝，但**實際清單由 processor 擁有**（因為 slash 命令的執行邏輯在 `openai-processor` 的 `handleSlash`）。
+
+Copilot wrapper 的寫法：
+```ts
+return {
+  ...,
+  slashCommands: processor.getSlashCommands(),
+};
+```
+
+這造成 wrapper 「反向詢問」processor 的小耦合。替代方案是讓 `ensureSession` 組 capabilities 時由 main 直接補 processor 的 slash，但這會讓 `main/agent/index.ts` 知道「某些 backend 內部有 processor」的細節，違反封裝。
+
+**現行設計：保留 wrapper 委派給 processor 的寫法**，把耦合控制在同一個 `providers/` 目錄內，main 只關心 `AgentBackend` interface。
+
+新增 OpenAI-compatible provider 時，slashCommands 一樣從 processor 取，不用自訂。
+
 #### Provider wrapper 範例
 
 - **Copilot**：
