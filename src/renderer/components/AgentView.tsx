@@ -45,6 +45,7 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
   const [input, setInput] = useState('');
   const [showSlashMenu, setShowSlashMenu] = useState(false);
   const [slashFilter, setSlashFilter] = useState('');
+  const [slashSelection, setSlashSelection] = useState(0);
   const [permSelection, setPermSelection] = useState(0);
   const [modelPicker, setModelPicker] = useState<{ open: boolean; selected: number }>({ open: false, selected: 0 });
 
@@ -294,6 +295,8 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
     }
   }, []);
 
+  useEffect(() => { setSlashSelection(0); }, [slashFilter, showSlashMenu]);
+
   const handleSlashSelect = useCallback((name: string) => {
     setInput('/' + name + ' ');
     setShowSlashMenu(false);
@@ -302,25 +305,33 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.nativeEvent.isComposing) return;
-    if (e.key === 'Tab' && showSlashMenu) {
-      e.preventDefault();
+    if (showSlashMenu) {
       const filtered = slashCommands.filter((c) => c.name.toLowerCase().includes(slashFilter));
-      if (filtered.length > 0) handleSlashSelect(filtered[0].name);
-      return;
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setSlashSelection((i) => (i > 0 ? i - 1 : Math.max(0, filtered.length - 1)));
+        return;
+      }
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setSlashSelection((i) => (i < filtered.length - 1 ? i + 1 : 0));
+        return;
+      }
+      if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
+        e.preventDefault();
+        const picked = filtered[slashSelection] ?? filtered[0];
+        if (picked) { handleSlashSelect(picked.name); return; }
+      }
     }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      if (showSlashMenu) {
-        const filtered = slashCommands.filter((c) => c.name.toLowerCase().includes(slashFilter));
-        if (filtered.length > 0) { handleSlashSelect(filtered[0].name); return; }
-      }
       handleSend();
     }
     if (e.key === 'Escape') {
       if (showSlashMenu) { setShowSlashMenu(false); return; }
       if (streaming) { e.preventDefault(); handleStop(); }
     }
-  }, [handleSend, handleStop, streaming, showSlashMenu, slashFilter, slashCommands, handleSlashSelect]);
+  }, [handleSend, handleStop, streaming, showSlashMenu, slashFilter, slashCommands, slashSelection, handleSlashSelect]);
 
   useEffect(() => {
     const el = textareaRef.current;
@@ -448,8 +459,8 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
         if (filtered.length === 0) return null;
         return (
           <div className="agent-slash-menu">
-            {filtered.slice(0, 10).map((cmd) => (
-              <button key={cmd.name} className="agent-slash-item" onMouseDown={(e) => { e.preventDefault(); handleSlashSelect(cmd.name); }}>
+            {filtered.slice(0, 10).map((cmd, i) => (
+              <button key={cmd.name} className={`agent-slash-item${i === slashSelection ? ' selected' : ''}`} onMouseDown={(e) => { e.preventDefault(); handleSlashSelect(cmd.name); }} onMouseEnter={() => setSlashSelection(i)}>
                 <span className="agent-slash-name">/{cmd.name}</span>
                 <span className="agent-slash-desc">{cmd.description}</span>
               </button>

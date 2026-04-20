@@ -2838,7 +2838,8 @@ button {
   text-align: left;
 }
 
-.agent-slash-item:hover {
+.agent-slash-item:hover,
+.agent-slash-item.selected {
   background: var(--bg);
 }
 
