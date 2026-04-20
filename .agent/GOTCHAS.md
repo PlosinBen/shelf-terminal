@@ -251,3 +251,42 @@
 **解法**: Unicode11Addon 仍然載入（註冊可用版本），但預設不啟用（`unicode.activeVersion` 保持預設 `'6'`）。使用者可在 Settings 開啟「Unicode 11」選項，啟用後即時生效。
 
 **注意**: 啟用 Unicode 11 可改善較新 emoji 和部分 CJK 字元的寬度判定，但只要 prompt 含有 Ambiguous width 字元就可能觸發此問題。
+
+---
+
+## 24. Agent store 要 immutable update 否則 React 不 re-render
+
+**現象**: Copilot tab 送訊息後訊息進了 store 但 UI 不更新，要在 textarea 打字才跳出來。
+
+**原因**: 早期 `updateAgentState()` / `addAgentMessage()` 用 `Object.assign(state, ...)` / `state.messages = [...]` 原地改同一個 object。`useSyncExternalStore` 用 `Object.is` 比對 snapshot，同 reference → 跳過 re-render。Claude tab 不明顯因為事件密集會連帶觸發其他 state 變化；Copilot 純 chat 流沒有旁的 state 變化就露餡。
+
+**解法**: `store.ts` 的 mutator 一律 `agentStates.set(tabId, { ...state, ...partial })` — 每次 emit 都產生新 snapshot reference。
+
+**注意**: 之後新增任何 agent state field / mutator 都要守住 immutable 約定，否則會復發。
+
+---
+
+## 25. Copilot session token 的 `Editor-Plugin-Version` 白名單
+
+**現象**: 讀對 GitHub token 但 `/copilot_internal/v2/token` 回 404。
+
+**原因**: GitHub 對 `Editor-Plugin-Version` header 有白名單，自定的 `shelf-terminal/1.0` 會被拒。且 `gh auth token` 預設 scope 沒有 `copilot`，亦會 404。
+
+**解法**:
+- Header 用 `github-copilot-cli/1.0.5`（或 `copilot-chat/x.y.z`、`copilot.vim/x.y.z`）— 見 `src/main/agent/auth/copilot-auth.ts`
+- `gh` token 需使用者先跑 `gh auth refresh -h github.com -s copilot` 補 scope
+- 我們優先讀 `~/.config/github-copilot/apps.json`（neovim copilot.vim / copilot-cli 寫的 token，scope 正確）
+
+**注意**: OpenAI 或 Copilot 更新 UA 白名單時要同步更新 `EDITOR_VERSION` / `EDITOR_PLUGIN_VERSION` 常數。
+
+---
+
+## 26. `reasoning_effort` model 偵測靠 pattern match
+
+**現象**: 送 `reasoning_effort` 給不支援的 model（如 gpt-4o）API 會 400。
+
+**原因**: OpenAI 沒提供「哪個 model 吃 reasoning_effort」的 API signal。只能靠 model id 家族推論。
+
+**解法**: `processor-tools.ts` 的 `getEffortLevels(modelId)` — `^o\d` → 三檔、`^gpt-5(?!-chat)` → 加 `minimal`。Copilot warmup 時為每個 model 填 effortLevels，processor 在 request 時只對有 levels 的 model 帶參數。
+
+**注意**: OpenAI 公告新 reasoning model 家族（o5、gpt-6 等）時要手動更新 pattern，否則該 model 的 effort chip 會隱藏。詳見 `.agent/features/AGENT_SDK_INTEGRATION.md` 的 Reasoning Effort 偵測小節。
