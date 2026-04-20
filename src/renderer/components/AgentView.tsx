@@ -48,6 +48,9 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
   const [slashSelection, setSlashSelection] = useState(0);
   const [permSelection, setPermSelection] = useState(0);
   const [modelPicker, setModelPicker] = useState<{ open: boolean; selected: number }>({ open: false, selected: 0 });
+  const [escPending, setEscPending] = useState(false);
+  const escPendingRef = useRef(false);
+  const escTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const listRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -329,7 +332,23 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
     }
     if (e.key === 'Escape') {
       if (showSlashMenu) { setShowSlashMenu(false); return; }
-      if (streaming) { e.preventDefault(); handleStop(); }
+      if (streaming) {
+        e.preventDefault();
+        if (escPendingRef.current) {
+          if (escTimerRef.current) { clearTimeout(escTimerRef.current); escTimerRef.current = null; }
+          escPendingRef.current = false;
+          setEscPending(false);
+          handleStop();
+        } else {
+          escPendingRef.current = true;
+          setEscPending(true);
+          escTimerRef.current = setTimeout(() => {
+            escPendingRef.current = false;
+            setEscPending(false);
+            escTimerRef.current = null;
+          }, 1500);
+        }
+      }
     }
   }, [handleSend, handleStop, streaming, showSlashMenu, slashFilter, slashCommands, slashSelection, handleSlashSelect]);
 
@@ -337,6 +356,15 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
     const el = textareaRef.current;
     if (el) { el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 200) + 'px'; }
   }, [input]);
+
+  // Clear the pending esc state when the agent stops streaming (either by
+  // completing or by a successful stop).
+  useEffect(() => {
+    if (streaming) return;
+    escPendingRef.current = false;
+    setEscPending(false);
+    if (escTimerRef.current) { clearTimeout(escTimerRef.current); escTimerRef.current = null; }
+  }, [streaming]);
 
   if (!visible) return null;
 
@@ -471,12 +499,16 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
 
       <div className="agent-input-area">
         <span className="agent-prompt">❯</span>
-        <textarea ref={textareaRef} className="agent-textarea" value={input} onChange={handleInputChange} onKeyDown={handleKeyDown} placeholder="Message..." rows={1} />
-        <div className="agent-input-actions">
-          {streaming
-            ? <button className="agent-btn agent-btn-stop" onClick={handleStop}>Stop</button>
-            : <button className="agent-btn agent-btn-send" onClick={handleSend} disabled={!input.trim()}>Send</button>}
-        </div>
+        <textarea
+          ref={textareaRef}
+          className="agent-textarea"
+          value={input}
+          onChange={handleInputChange}
+          onKeyDown={handleKeyDown}
+          placeholder={streaming ? 'Agent is running... (Esc to stop)' : 'Ask something...'}
+          rows={1}
+        />
+        {escPending && <span className="agent-esc-hint">Press Esc again to stop</span>}
       </div>
 
       <div className="agent-status-bar">
