@@ -4,6 +4,7 @@ import { log } from '@shared/logger';
 import { createOpenAIProcessor } from './openai-processor';
 import { createToolExecutor } from './tool-executor';
 import { getEffortLevels } from './processor-tools';
+import { createConnector } from '../../connector';
 import { getCopilotSessionToken, isAuthenticated, COPILOT_DEFAULT_HEADERS } from '../auth/copilot-auth';
 
 interface CopilotModel {
@@ -82,7 +83,7 @@ export function createCopilotBackend(connection: Connection): AgentBackend {
       const session = await getCopilotSessionToken();
       return { apiKey: session.token, baseURL: session.apiEndpoint };
     },
-    toolExecutor: createToolExecutor(connection),
+    toolExecutor: createToolExecutor((cwd, cmd) => createConnector(connection).exec(cwd, cmd)),
     getContextWindow: (model) => contextWindows.get(model),
     fetch: interceptFetch,
     getRateLimit: () => lastRateLimit,

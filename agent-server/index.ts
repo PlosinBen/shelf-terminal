@@ -1,11 +1,12 @@
 import * as readline from 'readline';
 import { createClaudeBackend } from './providers/claude';
+import { createCopilotBackend } from './providers/copilot';
 import type { OutgoingMessage, QueryInput, ServerBackend } from './providers/types';
 
 type Provider = 'claude' | 'copilot' | 'gemini';
 
 interface IncomingMessage {
-  type: 'send' | 'stop' | 'ping';
+  type: 'send' | 'stop' | 'ping' | 'resolve_permission';
   provider?: Provider;
   prompt?: string;
   cwd?: string;
@@ -14,6 +15,10 @@ interface IncomingMessage {
   model?: string;
   effort?: string;
   images?: string[];
+  // resolve_permission fields
+  toolUseId?: string;
+  allow?: boolean;
+  message?: string;
 }
 
 function send(msg: OutgoingMessage) {
@@ -31,8 +36,10 @@ function getBackend(provider: Provider): ServerBackend {
       b = createClaudeBackend();
       break;
     case 'copilot':
+      b = createCopilotBackend();
+      break;
     case 'gemini':
-      throw new Error(`Provider ${provider} not yet implemented in agent-server`);
+      throw new Error(`Provider gemini not yet implemented in agent-server`);
   }
   backends.set(provider, b);
   return b;
@@ -91,6 +98,12 @@ rl.on('line', (line) => {
       break;
     case 'ping':
       send({ type: 'pong' });
+      break;
+    case 'resolve_permission':
+      if (activeBackend && msg.toolUseId !== undefined) {
+        const resolver = (activeBackend as any).resolvePermission as (id: string, allow: boolean, message?: string) => void;
+        resolver?.call(activeBackend, msg.toolUseId, msg.allow ?? false, msg.message);
+      }
       break;
   }
 });

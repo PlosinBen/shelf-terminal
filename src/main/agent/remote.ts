@@ -10,6 +10,7 @@ interface RemoteProcess {
   proc: ChildProcess;
   sendLine: (msg: object) => void;
   onLine: (callback: (line: string) => void) => void;
+  onPermissionRequest: (handler: (toolUseId: string, toolName: string, input: Record<string, unknown>) => void) => void;
   kill: () => void;
 }
 
@@ -49,6 +50,23 @@ export function createRemoteBackend(connection: Connection, initScript?: string,
           return;
         }
       }
+
+      // Hook permission requests from the remote into the local canUseTool
+      // callback, then send the decision back over stdin.
+      const userCallback = opts?.canUseTool;
+      remoteProc.onPermissionRequest(async (toolUseId, toolName, input) => {
+        if (!userCallback) {
+          remoteProc?.sendLine({ type: 'resolve_permission', toolUseId, allow: true });
+          return;
+        }
+        const result = await userCallback(toolUseId, toolName, input);
+        remoteProc?.sendLine({
+          type: 'resolve_permission',
+          toolUseId,
+          allow: result.behavior === 'allow',
+          message: result.behavior === 'deny' ? result.message : undefined,
+        });
+      });
 
       remoteProc.sendLine({
         type: 'send',
@@ -119,6 +137,7 @@ async function spawnRemoteServer(connection: Connection, cwd: string, remotePath
 
 function wrapProcess(proc: ChildProcess): RemoteProcess {
   let lineHandler: ((line: string) => void) | null = null;
+  let permissionHandler: ((toolUseId: string, toolName: string, input: Record<string, unknown>) => void) | null = null;
   let buffer = '';
 
   proc.stdout?.on('data', (chunk: Buffer) => {
@@ -126,9 +145,21 @@ function wrapProcess(proc: ChildProcess): RemoteProcess {
     const lines = buffer.split('\n');
     buffer = lines.pop() ?? '';
     for (const line of lines) {
-      if (line.trim() && lineHandler) {
-        lineHandler(line.trim());
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      // Peek for permission_request and dispatch to the permission handler
+      // before passing to the generic line handler; avoids mixing it into the
+      // AgentEvent stream the caller consumes.
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (parsed?.type === 'permission_request' && permissionHandler) {
+          permissionHandler(parsed.toolUseId, parsed.toolName, parsed.input ?? {});
+          continue;
+        }
+      } catch {
+        // fall through to lineHandler
       }
+      lineHandler?.(trimmed);
     }
   });
 
@@ -147,6 +178,9 @@ function wrapProcess(proc: ChildProcess): RemoteProcess {
     },
     onLine: (callback) => {
       lineHandler = callback;
+    },
+    onPermissionRequest: (handler) => {
+      permissionHandler = handler;
     },
     kill: () => {
       proc.stdin?.end();
@@ -235,6 +269,20 @@ function parseRemoteMessage(msg: any): AgentEvent | null {
         sessionId: msg.sessionId,
       },
     };
+  }
+
+  if (msg.type === 'stream') {
+    return {
+      type: 'stream',
+      payload: {
+        type: msg.streamType ?? 'text',
+        content: msg.content ?? '',
+      },
+    };
+  }
+
+  if (msg.type === 'auth_required') {
+    return { type: 'auth_required', provider: msg.provider ?? 'copilot' };
   }
 
   if (msg.type === 'error') {
