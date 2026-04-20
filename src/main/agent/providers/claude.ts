@@ -50,7 +50,9 @@ export function createClaudeBackend(): AgentBackend {
               generator.supportedCommands().catch(() => []),
             ]);
             cachedCapabilities = {
-              models: models.map((m) => ({ value: m.value, displayName: m.displayName })),
+              // Claude 3+ / Sonnet / Opus all accept image blocks — hard-code
+              // until the SDK exposes vision capability metadata.
+              models: models.map((m) => ({ value: m.value, displayName: m.displayName, vision: true })),
               permissionModes: ['default', 'acceptEdits', 'bypassPermissions', 'plan'],
               effortLevels: ['low', 'medium', 'high', 'xhigh', 'max'],
               slashCommands: commands.map((c) => ({ name: c.name, description: c.description })),

@@ -12,6 +12,11 @@ interface CopilotModel {
   capabilities?: {
     type?: string;
     limits?: { max_context_window_tokens?: number; max_prompt_tokens?: number };
+    supports?: {
+      vision?: boolean;
+      streaming?: boolean;
+      tool_calls?: boolean;
+    };
   };
   model_picker_enabled?: boolean;
 }
@@ -88,7 +93,7 @@ export function createCopilotBackend(connection: Connection): AgentBackend {
       return isAuthenticated();
     },
     async warmup() {
-      let models: { value: string; displayName: string; effortLevels?: string[] }[] = [];
+      let models: { value: string; displayName: string; effortLevels?: string[]; vision?: boolean }[] = [];
       try {
         const session = await getCopilotSessionToken();
         const raw = await fetchModels(session);
@@ -101,6 +106,7 @@ export function createCopilotBackend(connection: Connection): AgentBackend {
           value: m.id,
           displayName: m.name ?? m.id,
           effortLevels: getEffortLevels(m.id),
+          vision: m.capabilities?.supports?.vision ?? false,
         }));
       } catch (err: any) {
         log.info('copilot', `warmup models skipped: ${err?.message}`);

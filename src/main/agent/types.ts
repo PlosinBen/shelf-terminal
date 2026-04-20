@@ -41,7 +41,7 @@ export interface AgentStatusPayload {
 }
 
 export interface ProviderCapabilities {
-  models: { value: string; displayName: string; effortLevels?: string[] }[];
+  models: { value: string; displayName: string; effortLevels?: string[]; vision?: boolean }[];
   permissionModes: string[];
   effortLevels: string[];
   slashCommands: { name: string; description: string }[];

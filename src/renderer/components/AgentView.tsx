@@ -71,6 +71,14 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
       ]);
     },
     onImages: (urls) => {
+      const currentModel = capabilities?.models.find((m) => m.value === model);
+      if (currentModel && currentModel.vision === false) {
+        void window.shelfApi.dialog.warn(
+          'Images not supported',
+          `The current model (${currentModel.displayName}) does not accept image input. Switch to a vision-capable model before attaching images.`,
+        );
+        return;
+      }
       // Cap at 20MB base64 per Claude/OpenAI guidance; drop oversized silently
       // rather than blowing up the send.
       const accepted = urls.filter((u) => u.length < 20 * 1024 * 1024);
