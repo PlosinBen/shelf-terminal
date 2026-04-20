@@ -145,7 +145,6 @@ export interface SlashCommand {
 export const SLASH_COMMANDS: SlashCommand[] = [
   { name: 'clear',   description: 'Reset the conversation history' },
   { name: 'context', description: 'Show token usage and context window' },
-  { name: 'cwd',     description: 'Show the current working directory' },
   { name: 'help',    description: 'List available slash commands' },
   { name: 'model',   description: 'Pick or switch the current model' },
   { name: 'status',  description: 'Summarise the session state' },

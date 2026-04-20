@@ -279,9 +279,6 @@ export function createOpenAIProcessor(config: OpenAIProviderConfig) {
         return lines.join('\n');
       }
 
-      case 'cwd':
-        return `Working directory: \`${cwd}\``;
-
       case 'status': {
         const window = config.getContextWindow?.(currentModel);
         const ctxLine = window && lastUsage
