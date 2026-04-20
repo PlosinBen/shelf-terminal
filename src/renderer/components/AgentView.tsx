@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import type { AgentProvider, AgentPrefs, Connection } from '@shared/types';
+import { VISIBLE_AGENT_PROVIDERS as AGENT_PROVIDERS } from '@shared/agent-providers';
 import { AgentMessage, type AgentMsg } from './AgentMessage';
 import { clearMessages, loadMessages, saveMessage } from '../agent-history';
 import { useAttachmentPaste } from '../hooks/useAttachmentPaste';
@@ -7,14 +8,6 @@ import {
   useAgentState, updateAgentState, addAgentMessage,
   deleteAgentState, useStore, updateProjectConfig,
 } from '../store';
-
-// Copilot and Gemini backends exist in src/main/agent/providers/ but are not
-// yet reachable for remote connections (agent-server only bundles Claude SDK).
-// Hiding them from the picker keeps the UI unambiguous until remote support
-// lands — re-enable once the agent-server is multi-provider.
-const AGENT_PROVIDERS: { id: AgentProvider; label: string }[] = [
-  { id: 'claude', label: 'Claude' },
-];
 
 interface AgentViewProps {
   tabId: string;

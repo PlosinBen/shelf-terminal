@@ -3,6 +3,7 @@ import { useStore } from '../store';
 import { FolderBrowser } from './FolderBrowser';
 import { on, emit, Events } from '../events';
 import type { ProjectConfig, Connection, SSHConnection, AgentProvider } from '@shared/types';
+import { VISIBLE_AGENT_PROVIDERS } from '@shared/agent-providers';
 
 type Step = 'connection' | 'browse';
 
@@ -574,7 +575,9 @@ function ConnectionStep({
             onChange={(e) => onAgentProviderChange(e.target.value as AgentProvider | '')}
           >
             <option value="">None</option>
-            <option value="claude">Claude</option>
+            {VISIBLE_AGENT_PROVIDERS.map((p) => (
+              <option key={p.id} value={p.id}>{p.label}</option>
+            ))}
           </select>
         </div>
 

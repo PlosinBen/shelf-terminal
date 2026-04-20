@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useStore, setEditingProject, updateProjectConfig } from '../store';
 import type { TabTemplate, QuickCommand, AgentProvider } from '@shared/types';
+import { VISIBLE_AGENT_PROVIDERS } from '@shared/agent-providers';
 import { TAB_COLORS } from './TabBar';
 
 export function ProjectEditPanel() {
@@ -202,7 +203,9 @@ export function ProjectEditPanel() {
               onChange={(e) => setDefaultAgentProvider(e.target.value as AgentProvider | '')}
             >
               <option value="">None</option>
-              <option value="claude">Claude</option>
+              {VISIBLE_AGENT_PROVIDERS.map((p) => (
+                <option key={p.id} value={p.id}>{p.label}</option>
+              ))}
             </select>
             <label className="settings-checkbox-label">
               <input
