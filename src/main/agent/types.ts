@@ -1,4 +1,7 @@
 import type { AgentProvider } from '@shared/types';
+import type { AuthMethod, ModelInfo, SlashCommand } from './engine/types';
+
+export type { AuthMethod, ModelInfo, SlashCommand } from './engine/types';
 
 export type AgentSessionState = 'idle' | 'streaming' | 'waiting_permission' | 'error';
 
@@ -44,21 +47,46 @@ export interface ProviderCapabilities {
   models: { value: string; displayName: string; effortLevels?: string[]; vision?: boolean }[];
   permissionModes: string[];
   effortLevels: string[];
-  slashCommands: { name: string; description: string }[];
+  slashCommands: SlashCommand[];
+  authMethod?: AuthMethod;
   currentModel?: string;
   currentEffort?: string;
   currentPermissionMode?: string;
 }
 
+/**
+ * Backend interface. The capability getters (getModels / getSlashCommands / …)
+ * are the v0.8 method-per-capability surface; main's gatherCapabilities()
+ * composes them into a ProviderCapabilities blob. `warmup` is kept temporarily
+ * during the migration and will be removed once every provider has migrated.
+ */
 export interface AgentBackend {
+  // Lifecycle
   query(prompt: string, cwd: string, opts?: AgentQueryOptions): AsyncGenerator<AgentEvent>;
   stop(): Promise<void>;
   dispose(): void;
+
+  // Legacy — will be removed in R6 once all providers use the getters below.
   warmup?(cwd: string): Promise<ProviderCapabilities | null>;
+  getSlashCommands?(): Promise<SlashCommand[]>;
+
+  // Required capability probes
   checkAuth?(): Promise<boolean>;
-  getSlashCommands?(): Promise<{ name: string; description: string }[]>;
+
+  // v0.8 capability getters — providers should implement these and main will
+  // compose them into ProviderCapabilities. Still optional during migration so
+  // TypeScript doesn't break pre-migration providers.
+  getModels?(): Promise<ModelInfo[]>;
+  getPermissionModes?(): string[];
+  getEffortLevels?(): string[];
+  getAuthMethod?(): AuthMethod;
+
+  // Runtime setters
   setModel?(model: string): void;
   setEffort?(effort: string): void;
+
+  // API-key providers only (authMethod.kind === 'api-key')
+  storeCredential?(key: string): Promise<void>;
 }
 
 export interface AgentQueryOptions {
