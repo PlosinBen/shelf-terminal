@@ -116,9 +116,10 @@ export function createCopilotBackend(connection: Connection): AgentBackend {
     authMethod: {
       kind: 'oauth',
       instructions: [
-        { label: 'Add Copilot scope to an existing gh login', command: 'gh auth refresh -h github.com -s copilot' },
-        { label: 'First-time sign in with gh', command: 'gh auth login -s copilot' },
-        { label: 'Or install GitHub Copilot CLI', command: 'copilot' },
+        { label: 'Credentials are read from ~/.config/github-copilot/ or gh CLI on the machine running the backend.' },
+        { label: 'Install GitHub Copilot CLI and sign in', command: 'npm install -g @github/copilot && copilot' },
+        { label: 'Or use GitHub CLI with copilot scope', command: 'gh auth login -s copilot' },
+        { label: 'Already signed in with gh? Add the copilot scope', command: 'gh auth refresh -h github.com -s copilot' },
       ],
     },
 

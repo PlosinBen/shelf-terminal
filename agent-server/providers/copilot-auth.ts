@@ -101,9 +101,10 @@ async function resolveAndValidate(): Promise<SessionToken | null> {
       const session = await fetchSessionToken(token);
       memGithubToken = token;
       memSessionToken = session;
+      console.error(`[copilot-auth] Auth OK via token ${token.slice(0, 8)}…`);
       return session;
-    } catch {
-      // try next token
+    } catch (err: any) {
+      console.error(`[copilot-auth] Token ${token.slice(0, 8)}… rejected: ${err?.message}`);
     }
   }
 

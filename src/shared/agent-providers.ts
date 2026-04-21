@@ -12,7 +12,7 @@ export interface AgentProviderDef {
 export const AGENT_PROVIDERS: AgentProviderDef[] = [
   { id: 'claude', label: 'Claude' },
   { id: 'copilot', label: 'Copilot' },
-  { id: 'gemini', label: 'Gemini' },
+  { id: 'gemini', label: 'Gemini', hidden: true },
 ];
 
 export const VISIBLE_AGENT_PROVIDERS = AGENT_PROVIDERS.filter((p) => !p.hidden);

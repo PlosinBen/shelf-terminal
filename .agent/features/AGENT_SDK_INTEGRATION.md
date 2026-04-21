@@ -4,6 +4,12 @@
 
 在 Shelf Terminal 中整合 AI agent 對話功能，支援多 provider（Claude Code、Copilot、Gemini），以專屬 agent tab 呈現結構化對話 UI。
 
+> **v0.8 狀態**：Claude / Copilot 已上線，Gemini backend 保留但在 picker 中隱藏（`AGENT_PROVIDERS` 的 `hidden: true`）。原因：
+> 1. 目前只做 API key 路線（AI Studio），不吃 Gemini Advanced / Google One 訂閱 quota，使用者需要另開 billing。
+> 2. Gemini CLI 實測回應速度偏慢，UX 不理想。
+>
+> 重開條件：評估加 OAuth（`@google/gemini-cli-core`）路線吃訂閱 quota。OAuth 會是獨立的 sdk-managed adapter，不走 engine（Gemini 原生協議非 OpenAI compat）。詳見「與 Copilot 的 auth 比較」段。
+
 ### 來源
 
 功能移植自三個 refer 專案：
