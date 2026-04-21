@@ -293,7 +293,7 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
       } else {
         const available = capabilities.models.map((m) => m.value).join(', ');
         addAgentMessage(tabId, {
-          id: `msg-${Date.now()}`, role: 'system', type: 'system',
+          id: `msg-${Date.now()}`, role: 'system', type: 'error',
           content: `Unknown model: ${arg}\nAvailable: ${available}`,
         });
       }
