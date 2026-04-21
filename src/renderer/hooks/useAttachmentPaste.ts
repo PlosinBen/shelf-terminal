@@ -130,10 +130,12 @@ export function useAttachmentPaste(
       const items = e.clipboardData?.items;
       if (!items) return;
       const itemArr = Array.from(items);
-      // text/html means rich-text paste (e.g. from a browser) — let the native
-      // handler do its thing.
-      if (itemArr.some((it) => it.type === 'text/html')) return;
 
+      // Collect file items first. Many sources (browsers, chat apps, macOS
+      // screenshot utilities) place an image/<mime> *and* a text/html preview
+      // on the clipboard at the same time. Previously we bailed on any
+      // text/html → the image got silently dropped. Rule: if there's a file,
+      // we own the paste; otherwise let the native handler put the text in.
       const files: File[] = [];
       for (const item of itemArr) {
         if (item.kind === 'file') {
@@ -141,7 +143,12 @@ export function useAttachmentPaste(
           if (f) files.push(f);
         }
       }
-      if (files.length === 0) return;
+      if (files.length === 0) {
+        // Pure text/html paste — leave to the browser (xterm, textarea, ...).
+        return;
+      }
+      const summary = itemArr.map((it) => `${it.kind}/${it.type || '?'}`).join(',');
+      console.debug('[useAttachmentPaste] paste intercepted', { files: files.length, items: summary });
       e.preventDefault();
       await routeFiles(files);
     };
