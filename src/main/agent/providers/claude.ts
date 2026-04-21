@@ -1,6 +1,9 @@
 import type { AgentBackend, AgentEvent, AgentMessagePayload, AgentQueryOptions, ProviderCapabilities } from '../types';
 import type { AuthMethod, ModelInfo, SlashCommand } from '../engine/types';
 import type { Query, SDKMessage, Options, CanUseTool } from '@anthropic-ai/claude-agent-sdk';
+import { app } from 'electron';
+import path from 'path';
+import fs from 'fs';
 import { log } from '@shared/logger';
 
 let sdkQuery: typeof import('@anthropic-ai/claude-agent-sdk').query | null = null;
@@ -11,6 +14,45 @@ async function loadSdk() {
     sdkQuery = sdk.query;
   }
   return sdkQuery;
+}
+
+let cachedBinaryPath: string | null | undefined;
+
+// SDK 0.2.x ships the real Claude Code runtime as a platform-specific native
+// binary in an optionalDependency (`@anthropic-ai/claude-agent-sdk-<os>-<arch>/claude`).
+// In packaged builds node_modules lives inside `app.asar` which is a file —
+// child_process.spawn on a path containing `app.asar/...` fails with ENOTDIR.
+// We opt the binary out of the archive via `asarUnpack` in package.json and
+// resolve the unpacked path here so the SDK skips its own require.resolve.
+function resolveClaudeBinaryPath(): string | null {
+  if (cachedBinaryPath !== undefined) return cachedBinaryPath;
+
+  const binName = process.platform === 'win32' ? 'claude.exe' : 'claude';
+  const packages: string[] = process.platform === 'linux'
+    ? [
+        `@anthropic-ai/claude-agent-sdk-linux-${process.arch}-musl`,
+        `@anthropic-ai/claude-agent-sdk-linux-${process.arch}`,
+      ]
+    : [`@anthropic-ai/claude-agent-sdk-${process.platform}-${process.arch}`];
+
+  const roots: string[] = [];
+  if (app.isPackaged) {
+    roots.push(path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules'));
+  }
+  roots.push(path.join(app.getAppPath(), 'node_modules'));
+
+  for (const root of roots) {
+    for (const pkg of packages) {
+      const candidate = path.join(root, pkg, binName);
+      if (fs.existsSync(candidate)) {
+        cachedBinaryPath = candidate;
+        return candidate;
+      }
+    }
+  }
+  log.error('claude-backend', `Claude native binary not found for ${process.platform}-${process.arch}`);
+  cachedBinaryPath = null;
+  return null;
 }
 
 function dataUrlToClaudeBlock(dataUrl: string): { type: 'image'; source: { type: 'base64'; media_type: string; data: string } } | null {
@@ -45,9 +87,15 @@ export function createClaudeBackend(): AgentBackend {
     initPromise = (async () => {
       const queryFn = await loadSdk();
       const warmupAbort = new AbortController();
+      const binaryPath = resolveClaudeBinaryPath();
       const generator = queryFn({
         prompt: ' ',
-        options: { cwd, permissionMode: 'plan', abortController: warmupAbort },
+        options: {
+          cwd,
+          permissionMode: 'plan',
+          abortController: warmupAbort,
+          ...(binaryPath ? { pathToClaudeCodeExecutable: binaryPath } : {}),
+        },
       });
       try {
         for await (const msg of generator) {
@@ -68,8 +116,14 @@ export function createClaudeBackend(): AgentBackend {
             break;
           }
         }
-      } catch {
-        // abort throws — expected
+      } catch (err: any) {
+        // warmupAbort.abort() above is intentional; AbortError is expected.
+        // Anything else (e.g. spawn ENOTDIR) we want visible and retriable.
+        if (err?.name !== 'AbortError') {
+          log.error('claude-backend', 'ensureInit failed:', err?.message ?? String(err));
+          initPromise = null;
+          throw err;
+        }
       }
     })();
     return initPromise;
@@ -110,6 +164,7 @@ export function createClaudeBackend(): AgentBackend {
       const queryFn = await loadSdk();
       abortController = new AbortController();
 
+      const binaryPath = resolveClaudeBinaryPath();
       const options: Options = {
         abortController,
         cwd,
@@ -117,6 +172,7 @@ export function createClaudeBackend(): AgentBackend {
         thinking: { type: 'adaptive' },
         includePartialMessages: true,
         permissionMode: (opts?.permissionMode as Options['permissionMode']) ?? 'default',
+        ...(binaryPath ? { pathToClaudeCodeExecutable: binaryPath } : {}),
       };
 
       if (currentModel) {

@@ -325,7 +325,24 @@
 
 ---
 
-## 29. Agent-server 透過 stdin/stdout 做雙向 request，用 `oneShotRequest` 包
+## 29. Claude SDK native binary 必須 asarUnpack
+
+**現象**: Packaged `.dmg` 裡打開 Claude agent view，送訊息後 UI 跳 `Error: spawn ENOTDIR`。
+
+**原因**: SDK 0.2.x 沒有 `cli.js`，改用 platform-specific native binary（`@anthropic-ai/claude-agent-sdk-<os>-<arch>/claude`）。packaged app 的 `node_modules` 在 `app.asar` 裡，asar 是檔案不是目錄，`child_process.spawn` 走真實 FS 撞路徑上有 `.asar` 就 ENOTDIR。
+
+**解法**:
+1. `package.json` 的 `build.files` 加 `node_modules/@anthropic-ai/claude-agent-sdk-*/**/*` 把 platform 包帶進 app
+2. `build.asarUnpack` 加 `node_modules/@anthropic-ai/claude-agent-sdk-*/claude` 和 `.../claude.exe`
+3. `src/main/agent/providers/claude.ts` 的 `resolveClaudeBinaryPath()` 依 `process.platform + process.arch` 算 `app.asar.unpacked/...` 路徑，傳 `pathToClaudeCodeExecutable` 給 SDK
+
+**注意**: SDK 升版改 package 命名（例如多出 `-musl`、arm/x64 變化）時要同步 `resolveClaudeBinaryPath()` 的 candidate 清單。v0.8.1 前的 `ensureInit` 曾有 `catch {}` 把這個錯誤整個吞掉，log 完全看不到——已改成只吞 AbortError，其他往外 throw。
+
+**Remote 還沒修**: `agent-server/providers/claude.ts:44,85` 和 `deploy.ts:65-73` 的 cli.js 邏輯已過時，遠端 Claude 目前是壞的。v0.9 改走「本機從 npm registry 抓對應 platform tarball → scp binary 到遠端」的按需下載方案，細節見 `.agent/features/AGENT_SDK_INTEGRATION.md` D7。
+
+---
+
+## 30. Agent-server 透過 stdin/stdout 做雙向 request，用 `oneShotRequest` 包
 
 **現象**: 想加個遠端呼叫（如 `storeCredential`），在 `remote.ts` 要處理 request-id 配對、timeout、永遠 resolve 等細節。
 

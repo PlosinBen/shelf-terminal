@@ -25,7 +25,7 @@
 | Backend interface + events | `types.ts` | `AgentBackend` (method-per-capability), `AgentEvent` union, `AgentQueryOptions`, `ProviderCapabilities`, `AgentPrefs`, re-exports `AuthMethod` / `ModelInfo` / `SlashCommand` from engine |
 | Remote agent stdin/stdout | `remote.ts` | Backend that forwards to agent-server; bridges permission_request / get_capabilities / store_credential / clear_credential via `oneShotRequest` helper keyed by requestId |
 | Agent-server deploy | `deploy.ts` | Version-isolated deploy of agent-server binary to remote |
-| Claude provider | `providers/claude.ts` | Wraps `@anthropic-ai/claude-agent-sdk`; private `ensureInit` cache so getModels/getSlashCommands share one plan-mode SDK init; forwards effort via SDK's native `effort` option |
+| Claude provider | `providers/claude.ts` | Wraps `@anthropic-ai/claude-agent-sdk`; `resolveClaudeBinaryPath()` locates the asarUnpacked platform binary for `pathToClaudeCodeExecutable`; private `ensureInit` cache so getModels/getSlashCommands share one plan-mode SDK init; forwards effort via SDK's native `effort` option |
 | Copilot provider | `providers/copilot.ts` | ~110 lines: adapter config (endpoint / headers / dynamic token / quota interceptor / custom getModels) + `createEngine({...})` |
 | Gemini provider | `providers/gemini.ts` | ~60 lines: static model catalogue + `credential-store('gemini', 'GEMINI_API_KEY')` + `createEngine({...})`; storeCredential probes `/models` to validate key before persisting |
 
