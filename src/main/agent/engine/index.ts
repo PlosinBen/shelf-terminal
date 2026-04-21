@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import OpenAI from 'openai';
 import type { AgentEvent, AgentQueryOptions, ProviderCapabilities } from '../types';
 import type { AuthMethod, ModelInfo, SlashCommand } from './types';
@@ -98,6 +99,15 @@ export function createEngine(config: EngineConfig) {
   let currentEffort: string | null = null;
   let lastUsage: { prompt: number; completion: number } | null = null;
   let turnCount = 0;
+  // Engine-owned session identifier. Lazily initialised on the first query()
+  // that lacks an inbound `resume` id — mirrors the Claude SDK's pattern so
+  // session manager / renderer can treat both backends uniformly. Subsequent
+  // turns emit the same id in every status event, which is what the session
+  // manager captures and persists into ProjectConfig.agentSessionIds.
+  //
+  // Today the id is pure plumbing — no history load/save yet. See
+  // .agent/features/ENGINE_PERSISTENCE.md for the follow-up steps.
+  let sessionId: string | undefined;
 
   async function getClient(): Promise<OpenAI> {
     if (config.tokenProvider) {
@@ -116,6 +126,16 @@ export function createEngine(config: EngineConfig) {
     async *query(prompt: string, cwd: string, opts?: AgentQueryOptions): AsyncGenerator<AgentEvent> {
       abortController = new AbortController();
 
+      // Resolve sessionId precedence: external resume id (from caller) > already
+      // held id > freshly minted. Once set it sticks for the engine's lifetime
+      // until clearHistory() wipes it.
+      if (opts?.resume) {
+        sessionId = opts.resume;
+      } else if (!sessionId) {
+        sessionId = randomUUID();
+        log.debug('agent-engine', `session.new id=${sessionId} provider=${config.providerName}`);
+      }
+
       const mode = opts?.permissionMode ?? 'default';
 
       const trimmed = prompt.trim();
@@ -126,7 +146,7 @@ export function createEngine(config: EngineConfig) {
         const rest = trimmed.slice(4).trim();
         if (!rest) {
           yield { type: 'message', payload: { type: 'text', content: 'Usage: `/ask <question>` — sends a one-off query that is not saved to history.' } };
-          yield { type: 'status', payload: { state: 'idle', model: currentModel } };
+          yield { type: 'status', payload: { state: 'idle', model: currentModel, sessionId } };
           return;
         }
         actualPrompt = rest;
@@ -137,7 +157,7 @@ export function createEngine(config: EngineConfig) {
         const reply = await handleSlash(cmd, arg, cwd, mode);
         if (reply !== null) {
           yield { type: 'message', payload: { type: 'text', content: reply } };
-          yield { type: 'status', payload: { state: 'idle', model: currentModel } };
+          yield { type: 'status', payload: { state: 'idle', model: currentModel, sessionId } };
           return;
         }
       }
@@ -164,7 +184,7 @@ export function createEngine(config: EngineConfig) {
 
       const tools = toOpenAIFormat(toolsForMode(mode));
 
-      yield { type: 'status', payload: { state: 'streaming', model: currentModel } };
+      yield { type: 'status', payload: { state: 'streaming', model: currentModel, sessionId } };
 
       try {
         for (let turn = 0; turn < MAX_TURNS; turn++) {
@@ -264,6 +284,7 @@ export function createEngine(config: EngineConfig) {
                 contextUsedTokens: usage.prompt_tokens,
                 contextWindow,
                 rateLimit: rateLimit ?? undefined,
+                sessionId,
               },
             };
           }
@@ -316,7 +337,7 @@ export function createEngine(config: EngineConfig) {
           }
         }
 
-        yield { type: 'status', payload: { state: 'idle', model: currentModel } };
+        yield { type: 'status', payload: { state: 'idle', model: currentModel, sessionId } };
       } catch (err: any) {
         if (err?.message === 'NO_AUTH') throw err;
         if (err.name === 'AbortError') {
@@ -353,6 +374,10 @@ export function createEngine(config: EngineConfig) {
 
     clearHistory() {
       history = [];
+      // Drop the sessionId too so the next query mints a fresh one — /clear
+      // semantically starts a new conversation, so treat it as a new session
+      // for persistence purposes.
+      sessionId = undefined;
     },
 
     setModel(model: string) {

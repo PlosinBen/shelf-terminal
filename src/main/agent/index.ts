@@ -268,6 +268,15 @@ export function registerAgentHandlers() {
             break;
           case 'status':
             session.state = event.payload.state;
+            // Engine providers surface their sessionId on status events
+            // (Claude surfaces it on message events — both paths captured
+            // so session manager has a single source of truth regardless
+            // of provider).
+            if (event.payload.sessionId && !session.sdkSessionId) {
+              session.sdkSessionId = event.payload.sessionId;
+              session.providerSessionIds[session.provider] = event.payload.sessionId;
+              log.info('agent', `session.sdk_id_captured tab=${tabId} provider=${session.provider} sessionId=${event.payload.sessionId} source=status`);
+            }
             broadcast(IPC.AGENT_STATUS, { tabId, ...event.payload });
             break;
           case 'error':
