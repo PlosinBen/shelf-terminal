@@ -1,7 +1,13 @@
 # Engine Persistence — Design Plan
 
-> Status: **Draft**（尚未實作，實作前需 review）
+> Status: **Implemented**（核心功能已全數落地，僅 Auto-compact threshold 仍 deferred）
 > Scope: Copilot / Gemini 等走 `src/main/agent/engine/` 的 OpenAI-compatible provider。Claude 已透過 SDK `resume` 做到（見 AGENT_SDK_INTEGRATION.md）。
+>
+> **實作檔案**（落地後補記）:
+> - `src/main/agent/engine/history-store.ts` — `HistoryStore` 介面 + `createFileHistoryStore()` + `deleteHistoryFiles()` 批次清理
+> - `src/main/agent/engine/index.ts` — sessionId 產生/hydrate、turn 結束後 save、`clearAllState()` 處理 `/clear`、`pickCompactModel` hook
+> - `src/main/agent/providers/{copilot,gemini}.ts` — 注入 `createFileHistoryStore()` + `pickCompactModel`
+> - `src/renderer/App.tsx` REMOVE_PROJECT handler — 刪 project 時呼叫 `agent.deleteHistories()` 批次清檔 + destroy agent tabs
 
 ## Problem
 

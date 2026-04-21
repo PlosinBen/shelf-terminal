@@ -268,3 +268,40 @@
 **原因**: Unicode11Addon 對 Ambiguous width 字元（如 oh-my-zsh prompt 中的 `→` `✗`）的寬度計算與 zsh 不一致，導致 tab completion 時字元重複顯示。這是 xterm.js 已知限制（#1453）。預設關閉避免大多數使用者踩到此問題。
 
 **不要改**: 不要完全移除 Unicode11Addon（部分使用者需要 CJK/emoji 支援）。
+
+## 23. Engine History 走 File-based JSON（非 SQLite）
+
+**決策**: Copilot / Gemini engine 的對話持久化用一份 JSON 檔 per session，放在 `<userData>/agent-state/<sessionId>.json`，透過注入到 engine 的 `HistoryStore` adapter（`createFileHistoryStore()`）讀寫。Schema 帶 `version: 1`、save 用 tmp + rename atomic write、path-traversal guard 只接受 `[A-Za-z0-9_-]{1,128}` 的 id。
+
+**原因**:
+- Engine 原本就是 stateless — 每次 request 把整段 history 送過去。用場就是「整包 load / 整包 save」，query/partial update 不是需求，上 SQLite 純粹 over-engineer。
+- 業界參考（OpenAI Agents SDK Python、Continue.dev、Aider、cli-continues）主流也是 local JSON file，一個 session 一個檔，好 debug 也好手動備份。
+- Claude side 走 SDK 自帶 transcript，兩邊對稱性透過 `providerSessionIds[provider]` 同一張表達成，engine 只暴露跟 Claude 對齊的 `resume` 介面。
+
+**不要改**:
+- 不要讓 engine 直接 `import fs` — 一定透過 `HistoryStore` adapter，否則 testability 和未來換後端（SQLite / IndexedDB）會困難。
+- 不要把 system prompt 存進檔案：system prompt 每次從 cwd/mode/project instructions 重建，落盤只會 hydrate 出 stale 版本。
+
+## 24. `/compact` 的便宜 model 選擇放在 provider
+
+**決策**: `/compact` 要用什麼 model 做摘要，由 provider 透過 `EngineConfig.pickCompactModel?: (current) => string | undefined` callback 決定。Gemini 回 `gemini-2.5-flash`（已在 flash 則回 undefined）；Copilot 先檢查 `contextWindows.has('gpt-4o-mini')`（代表在使用者的 quota 裡）才推薦，否則回 undefined。Engine 的 `/compact` 只做 `config.pickCompactModel?.(currentModel) ?? currentModel`。
+
+**原因**:
+- Engine 是 provider-agnostic 的 OpenAI-compat 核心，它不該知道「哪個 provider 對應哪個便宜 model」這種業務知識。原本文件裡提案的 `COMPACT_MODEL: Record<provider, id>` 等於把 provider 清單硬塞回 engine，新增一個 provider 要改兩處。
+- Provider 已經擁有判斷 model 可用性的狀態（gemini 靜態 list、copilot 動態 `contextWindows`），callback 讓 provider 直接基於自己的狀態判斷，回 `undefined` 就等同「沿用 current」，engine 不會幫它猜。
+
+**不要改**: 不要把 provider name 或 model list 回傳 engine 讓 engine 選 — 這會反轉依賴方向。
+
+## 25. Engine History 清理：只在 Project Remove 時掃
+
+**決策**: 持久化檔案的清理有兩個觸發點 —
+1. `/clear` 或 engine 的 `clearHistory()` → 刪該 session 的單一檔（engine 內 `clearAllState()` fire-and-forget）
+2. Project 被刪除 → renderer 收集 `proj.config.agentSessionIds` 所有 id，呼叫新 IPC `agent.deleteHistories()`，main 端 `deleteHistoryFiles()` 一次性批次刪
+
+**不做 app 啟動時 sweep 孤兒檔。**
+
+**原因**:
+- 正常流程兩個觸發點就能覆蓋：`/clear` 處理用戶重開對話、project remove 處理永久清理。孤兒檔只會出現在異常崩潰 + 之後改 config 造成的情況，成本低。
+- App 啟動是 hot path，讀 `projects.json` + 掃 `agent-state/` 做 diff 會多一次 fs 掃描和潛在錯誤處理，CP 值差。
+
+**不要改**: 如果未來真的觀察到孤兒檔累積，再加「手動在 Settings 清理」按鈕比較划算，不要在啟動時 sweep。

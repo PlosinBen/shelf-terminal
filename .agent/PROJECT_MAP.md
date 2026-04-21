@@ -21,7 +21,7 @@
 
 | Intent | File | Description |
 |--------|------|-------------|
-| IPC + session lifecycle | `index.ts` | `ensureSession()` checkAuth → apply prefs → gatherCapabilities → broadcast; handlers for INIT / SEND / STOP / DESTROY / RESOLVE_PERMISSION / SET_PREFS / SWITCH_PROVIDER / STORE_CREDENTIAL / CLEAR_CREDENTIAL / CHECK_AUTH; per-session allowlist for "allow (this session)" |
+| IPC + session lifecycle | `index.ts` | `ensureSession()` checkAuth → apply prefs → gatherCapabilities → broadcast; handlers for INIT / SEND / STOP / DESTROY / DELETE_HISTORIES / RESOLVE_PERMISSION / SET_PREFS / SWITCH_PROVIDER / STORE_CREDENTIAL / CLEAR_CREDENTIAL / CHECK_AUTH; per-session allowlist for "allow (this session)" |
 | Backend interface + events | `types.ts` | `AgentBackend` (method-per-capability), `AgentEvent` union, `AgentQueryOptions`, `ProviderCapabilities`, `AgentPrefs`, re-exports `AuthMethod` / `ModelInfo` / `SlashCommand` from engine |
 | Remote agent stdin/stdout | `remote.ts` | Backend that forwards to agent-server; bridges permission_request / get_capabilities / store_credential / clear_credential via `oneShotRequest` helper keyed by requestId |
 | Agent-server deploy | `deploy.ts` | Version-isolated deploy of agent-server binary to remote |
@@ -33,9 +33,10 @@
 
 | Intent | File | Description |
 |--------|------|-------------|
-| Engine factory | `engine/index.ts` | `createEngine(config)` — agent loop + tool dispatch + permission gating + plan-mode filter + slash commands + history + /compact + streaming + reasoning_content + quota interceptor + credential hook; returns full `AgentBackend` |
+| Engine factory | `engine/index.ts` | `createEngine(config)` — agent loop + tool dispatch + permission gating + plan-mode filter + slash commands + history + /compact (透過 `pickCompactModel` 選便宜 model) + streaming + reasoning_content + quota interceptor + credential hook + sessionId 自管 + `historyStore` hydrate/save/delete; returns full `AgentBackend` |
 | Engine / adapter types | `engine/types.ts` | `OpenAIAdapter`, `ModelCatalog`, `CredentialSource`, `ModelInfo`, `SlashCommand`, re-exports `AuthMethod` from shared/types |
 | Static credential store | `engine/credential.ts` | `createStaticCredentialStore(providerId, envVar)` — reads env var first, then `~/.config/shelf/{id}.json`; writes 0600 on set; tolerates ENOENT on clear |
+| Engine 對話持久化 | `engine/history-store.ts` | `HistoryStore` 介面 + `createFileHistoryStore()` 落 `userData/agent-state/<sessionId>.json`（atomic tmp+rename、path-traversal guard、`version: 1` 前向相容）；`deleteHistoryFiles(ids)` 批次清理給 project-remove 用。See `.agent/features/ENGINE_PERSISTENCE.md` |
 
 **Agent tools (src/main/agent/tools/)**
 
@@ -56,6 +57,8 @@
 |--------|------|-------------|
 | Tool registry tests | `tools/registry.test.ts` | Tool registry, permission semantics, effort pattern, system prompt tests |
 | Credential-store tests | `engine/credential.test.ts` | Env-var precedence, file round-trip, 0600 mode, clear idempotence |
+| Engine sessionId / history tests | `engine/index.test.ts` | sessionId plumbing (mint / reuse / external resume / clearHistory)、historyStore integration (load once, save after turn, delete on clear, load failure swallowed)、/compact pickCompactModel wiring |
+| History-store tests | `engine/history-store.test.ts` | File round-trip、atomic rename、schema version ignore、path traversal guard、`deleteHistoryFiles()` batch sweep |
 
 ### Connector (src/main/connector/)
 
