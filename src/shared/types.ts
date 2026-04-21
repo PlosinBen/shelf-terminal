@@ -3,6 +3,12 @@
 export type AgentProvider = 'claude' | 'copilot' | 'gemini';
 export type TabType = 'terminal' | 'agent';
 
+export type AuthMethod =
+  | { kind: 'api-key'; envVar: string; setupUrl?: string; placeholder?: string }
+  | { kind: 'oauth'; instructions: Array<{ label: string; command?: string }> }
+  | { kind: 'sdk-managed'; instructions: Array<{ label: string; command?: string }> }
+  | { kind: 'none' };
+
 // ── Connection types ──
 
 export type LocalConnection = { type: 'local' };

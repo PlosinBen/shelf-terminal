@@ -165,7 +165,7 @@ export function App() {
     });
 
     const offCapabilities = window.shelfApi.agent.onCapabilities((payload) => {
-      const updates: any = { capabilities: { models: payload.models, permissionModes: payload.permissionModes, effortLevels: payload.effortLevels } };
+      const updates: any = { capabilities: { models: payload.models, permissionModes: payload.permissionModes, effortLevels: payload.effortLevels, authMethod: payload.authMethod } };
       if (payload.slashCommands.length > 0) updates.slashCommands = payload.slashCommands;
       if (payload.currentModel) updates.model = payload.currentModel;
       if (payload.currentEffort) updates.currentEffort = payload.currentEffort;

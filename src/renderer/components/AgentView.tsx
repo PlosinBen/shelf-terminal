@@ -435,35 +435,61 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
       if (authenticated) {
         updateAgentState(tabId, { authRequired: null, authError: null, authBusy: false });
       } else {
-        updateAgentState(tabId, { authError: 'Still no valid Copilot credentials found.', authBusy: false });
+        updateAgentState(tabId, { authError: 'Still no valid credentials found.', authBusy: false });
       }
     };
-    const isGemini = authRequired.provider === 'gemini';
+
+    const authMethod = capabilities?.authMethod;
+    const providerLabel = authRequired.provider.charAt(0).toUpperCase() + authRequired.provider.slice(1);
+
+    const renderBody = () => {
+      if (!authMethod || authMethod.kind === 'none') {
+        return <div className="agent-auth-instructions">No credentials found for {providerLabel}. Configure the provider on this machine and click Retry.</div>;
+      }
+      if (authMethod.kind === 'api-key') {
+        return (
+          <>
+            <div className="agent-auth-instructions">
+              {providerLabel} needs an API key on the machine the backend runs on.
+              {authMethod.setupUrl && (
+                <> Get one at <a href={authMethod.setupUrl} target="_blank" rel="noreferrer"><code>{authMethod.setupUrl}</code></a>.</>
+              )}
+            </div>
+            <ul className="agent-auth-list">
+              <li>Set the <code>{authMethod.envVar}</code> env var on the target machine (local shell, or remote shell init script), then click Retry.</li>
+            </ul>
+          </>
+        );
+      }
+      // oauth / sdk-managed — render instruction list
+      return (
+        <>
+          <div className="agent-auth-instructions">
+            Run one of the following on the machine the backend uses, then click Retry:
+          </div>
+          <ul className="agent-auth-list">
+            {authMethod.instructions.map((ins, i) => (
+              <li key={i}>
+                {ins.command && <code>{ins.command}</code>}
+                {ins.command && ins.label && ' — '}
+                {ins.label}
+              </li>
+            ))}
+          </ul>
+        </>
+      );
+    };
+
+    const title =
+      authMethod?.kind === 'api-key' ? `${providerLabel} API key missing` :
+      authMethod?.kind === 'sdk-managed' ? `${providerLabel} SDK not signed in` :
+      `${providerLabel} not authenticated`;
+
     return (
       <div className="agent-view agent-view-active">
         <div className="agent-auth-pane">
-          <div className="agent-auth-title">
-            {isGemini ? 'Gemini API key missing' : 'GitHub Copilot not authenticated'}
-          </div>
-          <div className="agent-auth-instructions">
-            {isGemini
-              ? 'Gemini backend needs a GEMINI_API_KEY environment variable on the machine it runs on. Set it and relaunch, then click Retry:'
-              : 'Run one of the following in a terminal, then click Retry:'}
-          </div>
-          <ul className="agent-auth-list">
-            {isGemini ? (
-              <>
-                <li>Get an API key from <code>https://aistudio.google.com/apikey</code></li>
-                <li>Export it: <code>export GEMINI_API_KEY=...</code> (local) or add to the remote shell init script</li>
-              </>
-            ) : (
-              <>
-                <li><code>gh auth login -s copilot</code> — first time signing in with <code>gh</code></li>
-                <li><code>gh auth refresh -h github.com -s copilot</code> — already signed in, just add Copilot scope</li>
-                <li><code>copilot</code> — launch GitHub Copilot CLI and sign in</li>
-              </>
-            )}
-          </ul>
+          <div className="agent-auth-title">{title}</div>
+          {renderBody()}
           <button className="conn-btn conn-btn-next" disabled={authBusy} onClick={retry}>
             {authBusy ? 'Checking…' : 'Retry'}
           </button>

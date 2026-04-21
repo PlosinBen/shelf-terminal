@@ -17,29 +17,8 @@ export interface SlashCommand {
   description: string;
 }
 
-/** How the UI should surface "this provider needs credentials" to the user.
- * Discriminated by `kind`; each branch declares what the UI should render
- * and what command/URL to link to. */
-export type AuthMethod =
-  | {
-      kind: 'api-key';
-      /** Environment variable the backend also reads as a fallback. */
-      envVar: string;
-      /** Optional link to where the user obtains the key. */
-      setupUrl?: string;
-      /** Placeholder for the input field (e.g. "sk-..." / "AIza..."). */
-      placeholder?: string;
-    }
-  | {
-      kind: 'oauth';
-      /** Ordered list of ways the user can sign in; UI renders them as bullets. */
-      instructions: Array<{ label: string; command?: string }>;
-    }
-  | {
-      kind: 'sdk-managed';
-      instructions: Array<{ label: string; command?: string }>;
-    }
-  | { kind: 'none' };
+import type { AuthMethod } from '@shared/types';
+export type { AuthMethod };
 
 /** Source of an OpenAI-compat API credential. Static = API key from file/env.
  * Dynamic = token refreshed per request (e.g. Copilot session). */
