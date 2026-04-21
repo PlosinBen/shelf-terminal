@@ -12,7 +12,7 @@ import { getCopilotSessionToken, isAuthenticated, COPILOT_DEFAULT_HEADERS } from
  * Raw shape returned by Copilot's /models endpoint — we keep the subset the
  * engine needs and translate into ModelInfo.
  */
-interface CopilotModelRaw {
+export interface CopilotModelRaw {
   id: string;
   name?: string;
   capabilities?: {
@@ -21,6 +21,29 @@ interface CopilotModelRaw {
     supports?: { vision?: boolean; streaming?: boolean; tool_calls?: boolean };
   };
   model_picker_enabled?: boolean;
+  /**
+   * Which Copilot backends this model is reachable through. Newer entries
+   * like gpt-5.x-codex are `type: chat` but only expose `/responses`, so
+   * calling `/chat/completions` 400s. Older chat models omit this field
+   * entirely — we treat absence as "serves /chat/completions".
+   */
+  supported_endpoints?: string[];
+}
+
+/**
+ * Keep only models the chat-completions API can actually serve. Copilot's
+ * /models endpoint advertises capabilities beyond chat (embeddings,
+ * completion-only codex variants, etc.) and — more subtly — some `type: chat`
+ * entries only expose `/responses`. Require `capabilities.type === 'chat'`
+ * AND that `supported_endpoints` (when present) includes `/chat/completions`.
+ */
+export function filterChatModels(raw: CopilotModelRaw[]): CopilotModelRaw[] {
+  return raw.filter((m) => {
+    if (m.capabilities?.type !== 'chat') return false;
+    if (m.model_picker_enabled === false) return false;
+    if (m.supported_endpoints && !m.supported_endpoints.includes('/chat/completions')) return false;
+    return true;
+  });
 }
 
 async function fetchCopilotModels(session: { token: string; apiEndpoint: string }): Promise<CopilotModelRaw[]> {
@@ -92,9 +115,7 @@ export function createCopilotBackend(connection: Connection): AgentBackend {
       try {
         const session = await getCopilotSessionToken();
         const raw = await fetchCopilotModels(session);
-        const chat = raw.filter(
-          (m) => m.capabilities?.type === 'chat' && m.model_picker_enabled !== false,
-        );
+        const chat = filterChatModels(raw);
         contextWindows.clear();
         for (const m of chat) {
           const window = m.capabilities?.limits?.max_context_window_tokens;
