@@ -328,7 +328,9 @@ export function createEngine(config: EngineConfig) {
     },
 
     async getSlashCommands(): Promise<SlashCommand[]> {
-      return SLASH_COMMANDS;
+      // Hide /signout when the provider has no credential to clear so the
+      // autocomplete only advertises what actually works.
+      return SLASH_COMMANDS.filter((c) => c.name !== 'signout' || !!config.clearCredential);
     },
 
     // ── Method-per-capability getters (v0.8) ───────────────────────────────
@@ -467,8 +469,20 @@ export function createEngine(config: EngineConfig) {
         return lines.join('\n');
       }
 
-      case 'help':
-        return ['Available slash commands:', ...SLASH_COMMANDS.map((c) => `- \`/${c.name}\` — ${c.description}`)].join('\n');
+      case 'help': {
+        const visible = SLASH_COMMANDS.filter((c) => c.name !== 'signout' || !!config.clearCredential);
+        return ['Available slash commands:', ...visible.map((c) => `- \`/${c.name}\` — ${c.description}`)].join('\n');
+      }
+
+      case 'signout': {
+        if (!config.clearCredential) return 'This provider does not store credentials here — sign out externally (e.g. `gh auth logout`).';
+        await config.clearCredential();
+        const method = config.authMethod;
+        if (method?.kind === 'api-key') {
+          return `Credential cleared. The next turn will prompt for the \`${method.envVar}\` key again.`;
+        }
+        return 'Credential cleared.';
+      }
 
       default:
         return null;
