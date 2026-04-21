@@ -178,7 +178,13 @@ async function ensureSession(
   if (prefs?.model) backend.setModel?.(prefs.model);
   if (prefs?.effort) backend.setEffort?.(prefs.effort);
 
-  const caps = await gatherCapabilities(backend, cwd);
+  let caps: ProviderCapabilities | null = null;
+  try {
+    caps = await gatherCapabilities(backend, cwd);
+  } catch (err: any) {
+    log.error('agent', `gatherCapabilities failed (${provider}): ${err?.message ?? err}`);
+    broadcast(IPC.AGENT_MESSAGE, { tabId, type: 'error', content: err?.message ?? 'Failed to load capabilities' });
+  }
   if (caps) {
     broadcast(IPC.AGENT_CAPABILITIES, {
       tabId,

@@ -268,6 +268,7 @@ export function createEngine(config: EngineConfig) {
                 if (!config.toolExecutor) throw new Error('Tool executor not configured');
                 resultText = await config.toolExecutor.execute(call.name, toolInput, cwd);
               } catch (err: any) {
+                log.error('agent-engine', `Tool ${call.name} failed: ${err?.message ?? err}`);
                 resultText = `Error: ${err.message ?? 'tool execution failed'}`;
               }
             }
