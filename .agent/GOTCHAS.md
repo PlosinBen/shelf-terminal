@@ -355,3 +355,15 @@
 Agent-server 端的 permission 流（`canUseTool` 把 SDK 的 permission 請求透過 `send({ type: 'permission_request', toolUseId, ... })` 發回 main，等 main 回 `resolve_permission`）同樣 pattern，不過 key 是 `toolUseId` 而非 requestId。兩個 map 不共用。
 
 **注意**: 新增跨程序的 one-shot 行為（get capabilities、store credential、clear credential、check auth...）都走 `oneShotRequest`；不要 ad-hoc 做 event listener。
+
+---
+
+## 31. Claude SDK 的 `modelUsage` 是 session 累計，不是 per-turn
+
+**現象**: Status line 顯示 context 100%+（看過 133%），但同時 Claude 內建 `/context` 只報 ~45%。
+
+**原因**: `SDKResultMessage.modelUsage[model]` 的 `inputTokens / cacheReadInputTokens / cacheCreationInputTokens` 是**整個 session 的累計**（同 struct 裡的 `costUSD` 本來就是累加的——這就是線索）。拿累計去除以 `contextWindow` 長 session 必定爆表。
+
+**解法**: 分子用 `msg.usage`（`NonNullableUsage` = Anthropic API per-turn usage）的 `input_tokens + cache_read_input_tokens + cache_creation_input_tokens`；分母仍取 `modelUsage[currentModel].contextWindow`（SDK 只在 modelUsage 暴露窗口大小）。見 `src/main/agent/providers/claude.ts` 的 `case 'result'`。
+
+**注意**: OpenAI-style engine（Copilot / Gemini）的 `usage.prompt_tokens` 本來就是 per-turn 總量（cached tokens 是它的子細項），不用拆分。

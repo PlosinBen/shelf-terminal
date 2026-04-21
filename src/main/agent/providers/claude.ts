@@ -225,7 +225,7 @@ export function createClaudeBackend(): AgentBackend {
       try {
         for await (const msg of activeQuery) {
           msgCount++;
-          const events = processMessage(msg);
+          const events = processMessage(msg, currentModel);
           for (const event of events) {
             yield event;
           }
@@ -275,7 +275,7 @@ export function createClaudeBackend(): AgentBackend {
 // long thinking/text stream produces one aggregate log instead of hundreds.
 const streamAccum = new Map<string, { type: string; chars: number }>();
 
-function processMessage(msg: SDKMessage): AgentEvent[] {
+function processMessage(msg: SDKMessage, currentModel: string | null): AgentEvent[] {
   const events: AgentEvent[] = [];
 
   // Top-level trace so every SDK message type is visible in the log, not just
@@ -400,14 +400,27 @@ function processMessage(msg: SDKMessage): AgentEvent[] {
       const usage = msg.subtype === 'success' ? msg.usage : undefined;
       const numTurns = msg.subtype === 'success' ? msg.num_turns : undefined;
 
+      // Context % shown in UI must reflect the CURRENT turn's input footprint,
+      // not the session total. `modelUsage` is cumulative (note its `costUSD`
+      // field — costs only ever grow), so summing its token counters against
+      // `contextWindow` made a long session display 130%+ while Claude's own
+      // /context correctly showed ~45%. `msg.usage` is the per-turn Anthropic
+      // API usage; that's the right numerator. We still need `modelUsage` for
+      // the `contextWindow` denominator (the only place the SDK exposes it).
       let contextUsedTokens: number | undefined;
       let contextWindow: number | undefined;
-      if (msg.subtype === 'success' && msg.modelUsage) {
-        const models = Object.values(msg.modelUsage);
-        if (models.length > 0) {
-          const primary = models[0];
-          contextWindow = primary.contextWindow;
-          contextUsedTokens = primary.inputTokens + primary.cacheReadInputTokens + primary.cacheCreationInputTokens;
+      if (msg.subtype === 'success') {
+        const u = msg.usage as any;
+        if (u) {
+          contextUsedTokens = (u.input_tokens ?? 0)
+            + (u.cache_read_input_tokens ?? 0)
+            + (u.cache_creation_input_tokens ?? 0);
+        }
+        if (msg.modelUsage) {
+          const preferred = currentModel && msg.modelUsage[currentModel]
+            ? msg.modelUsage[currentModel]
+            : Object.values(msg.modelUsage)[0];
+          contextWindow = preferred?.contextWindow;
         }
       }
       const payload: AgentMessagePayload = {
