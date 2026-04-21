@@ -276,16 +276,13 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
         setModelPicker({ open: true, selected: currentIdx >= 0 ? currentIdx : 0 });
         return;
       }
-      // Prefer exact id, fall back to a single substring match (case-
-      // insensitive). Ambiguous or unknown input shows a local system
-      // message rather than silently picking the wrong model.
-      const lower = arg.toLowerCase();
-      const exact = capabilities.models.find((m) => m.value === arg);
-      const matches = exact
-        ? [exact]
-        : capabilities.models.filter((m) => m.value.toLowerCase().includes(lower) || m.displayName.toLowerCase().includes(lower));
-      if (matches.length === 1) {
-        const picked = matches[0];
+      // Exact id match only. Fuzzy / substring matching was tempting but
+      // silently picks different models when the catalogue changes (e.g.
+      // `claude` matches every claude-* id, `4` matches whichever came
+      // first). Better to fail loudly and list the valid ids than to
+      // auto-switch to something the user didn't ask for.
+      const picked = capabilities.models.find((m) => m.value === arg);
+      if (picked) {
         updateAgentState(tabId, { model: picked.value });
         window.shelfApi.agent.setPrefs(tabId, { model: picked.value });
         persistAgentPref('model', picked.value);
@@ -295,10 +292,9 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
         });
       } else {
         const available = capabilities.models.map((m) => m.value).join(', ');
-        const reason = matches.length === 0 ? `Unknown model: ${arg}` : `Ambiguous: ${matches.map((m) => m.value).join(', ')}`;
         addAgentMessage(tabId, {
           id: `msg-${Date.now()}`, role: 'system', type: 'system',
-          content: `${reason}\nAvailable: ${available}`,
+          content: `Unknown model: ${arg}\nAvailable: ${available}`,
         });
       }
       return;
