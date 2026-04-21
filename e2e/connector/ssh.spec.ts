@@ -1,4 +1,5 @@
 import { test, expect } from './ssh-helpers';
+import { readActiveTerminalText } from '../helpers';
 
 test.setTimeout(60_000);
 
@@ -10,14 +11,14 @@ test('SSH password auth establishes ControlMaster and runs commands', async ({ s
   }
 
   await expect(page.locator('.tab-bar .tab')).toHaveCount(1, { timeout: 15_000 });
-
-  // Wait for terminal to be ready — remote shell prompt
-  const xtermRows = page.locator('.terminal-container:visible .xterm-rows');
   await page.waitForTimeout(3000);
 
-  // Type a command and verify output
+  // Type a command and verify output (xterm buffer, not DOM — WebGL renderer)
   await page.keyboard.type('echo __SSH_E2E_TEST__\n');
-  await expect(xtermRows).toContainText('__SSH_E2E_TEST__', { timeout: 10_000 });
+  await expect.poll(
+    async () => await readActiveTerminalText(page),
+    { timeout: 10_000 },
+  ).toContain('__SSH_E2E_TEST__');
 });
 
 test('SSH ControlMaster multiplexes second session without re-auth', async ({ shelfApp: { page } }) => {
@@ -35,9 +36,11 @@ test('SSH ControlMaster multiplexes second session without re-auth', async ({ sh
   await page.locator('.terminal-container:visible .xterm-screen').click({ force: true });
   await page.waitForTimeout(500);
 
-  const xtermRows = page.locator('.terminal-container:visible .xterm-rows');
   await page.keyboard.type('echo __SSH_TAB2__\n');
-  await expect(xtermRows).toContainText('__SSH_TAB2__', { timeout: 10_000 });
+  await expect.poll(
+    async () => await readActiveTerminalText(page),
+    { timeout: 10_000 },
+  ).toContain('__SSH_TAB2__');
 });
 
 test('uploadFile streams a file to the remote host via SSH ControlMaster', async ({ shelfApp: { page } }) => {
