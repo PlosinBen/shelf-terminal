@@ -312,6 +312,23 @@ function processMessage(msg: SDKMessage): AgentEvent[] {
       break;
     }
 
+    case 'stream_event': {
+      // SDK partial — used to stream text/thinking deltas as the assistant
+      // model produces them. includePartialMessages=true in query() enables
+      // these; without handling them here, replies appeared all-at-once
+      // because only the final `assistant` message was processed.
+      const event: any = (msg as any).event;
+      if (event?.type === 'content_block_delta' && event.delta) {
+        const delta = event.delta;
+        if (delta.type === 'text_delta' && typeof delta.text === 'string' && delta.text.length > 0) {
+          events.push({ type: 'stream', payload: { type: 'text', content: delta.text } });
+        } else if (delta.type === 'thinking_delta' && typeof delta.thinking === 'string' && delta.thinking.length > 0) {
+          events.push({ type: 'stream', payload: { type: 'thinking', content: delta.thinking } });
+        }
+      }
+      break;
+    }
+
     case 'user': {
       const content = msg.message.content;
       if (Array.isArray(content)) {
