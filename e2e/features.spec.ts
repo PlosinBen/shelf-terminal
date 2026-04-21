@@ -2,6 +2,32 @@ import { test, expect } from './helpers';
 
 const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
 
+// Read the xterm buffer text for the active tab of the active project via the
+// __shelfTerminalCache__ test hook. The WebGL renderer paints to canvas so
+// `.xterm-rows` has no text — DOM-based assertions against it always fail.
+async function readActiveTerminalText(page: any): Promise<string> {
+  return await page.evaluate(() => {
+    const cache = (window as any).__shelfTerminalCache__ as Map<string, any> | undefined;
+    const visibleContainer = Array.from(document.querySelectorAll('.terminal-container'))
+      .find((c) => (c as HTMLElement).offsetParent !== null) as HTMLElement | undefined;
+    if (!cache || !visibleContainer) return '';
+    // Match the active entry by element parent/ancestor chain — each cache
+    // entry's term.element lives under its own .terminal-container.
+    for (const [, cached] of cache) {
+      if (cached.term?.element && visibleContainer.contains(cached.term.element)) {
+        const buf = cached.term.buffer.active;
+        let out = '';
+        for (let y = 0; y < buf.length; y++) {
+          const line = buf.getLine(y);
+          if (line) out += line.translateToString(true) + '\n';
+        }
+        return out;
+      }
+    }
+    return '';
+  });
+}
+
 // Helper: create a project and connect (opens a terminal tab)
 async function setupProject(page: any) {
   await page.locator('.sidebar-btn', { hasText: '+' }).click();
@@ -247,9 +273,8 @@ test('switching between projects preserves terminal', async ({ shelfApp: { page 
   visibleTerminal = page.locator('.terminal-container:visible');
   await expect(visibleTerminal).toBeVisible({ timeout: 5_000 });
 
-  const xtermRows = visibleTerminal.locator('.xterm-rows');
-  const text = await xtermRows.textContent();
-  expect(text?.length).toBeGreaterThan(0);
+  const text = await readActiveTerminalText(page);
+  expect(text.length).toBeGreaterThan(0);
 });
 
 test('switching tabs within a project shows correct terminal', async ({ shelfApp: { page } }) => {
@@ -317,10 +342,8 @@ test('terminal content preserved after project switch', async ({ shelfApp: { pag
   await page.keyboard.type('echo SHELF_TEST_P1\n');
   await page.waitForTimeout(1000);
 
-  // Verify output exists
-  let xtermRows = terminal.locator('.xterm-rows');
-  let text = await xtermRows.textContent();
-  expect(text).toContain('SHELF_TEST_P1');
+  // Verify output exists (xterm buffer, not DOM — WebGL renderer paints to canvas)
+  expect(await readActiveTerminalText(page)).toContain('SHELF_TEST_P1');
 
   // Select project 2, connect
   await items.nth(1).click();
@@ -334,9 +357,7 @@ test('terminal content preserved after project switch', async ({ shelfApp: { pag
   // Verify terminal is visible and content is preserved
   terminal = page.locator('.terminal-container:visible');
   await expect(terminal).toBeVisible({ timeout: 5_000 });
-  xtermRows = terminal.locator('.xterm-rows');
-  text = await xtermRows.textContent();
-  expect(text).toContain('SHELF_TEST_P1');
+  expect(await readActiveTerminalText(page)).toContain('SHELF_TEST_P1');
 });
 
 // ── Project Reorder ──
@@ -390,17 +411,14 @@ test('terminal content preserved after project reorder', async ({ shelfApp: { pa
   // Check active project terminal is still visible and has content
   terminal = page.locator('.terminal-container:visible');
   await expect(terminal).toBeVisible({ timeout: 5_000 });
-  const xtermRows = terminal.locator('.xterm-rows');
-  const text = await xtermRows.textContent();
-  expect(text?.length).toBeGreaterThan(0);
+  expect((await readActiveTerminalText(page)).length).toBeGreaterThan(0);
 
   // Switch to the other project and verify its terminal too
   await items.nth(0).click();
   await page.waitForTimeout(500);
   terminal = page.locator('.terminal-container:visible');
   await expect(terminal).toBeVisible({ timeout: 5_000 });
-  const otherText = await terminal.locator('.xterm-rows').textContent();
-  expect(otherText?.length).toBeGreaterThan(0);
+  expect((await readActiveTerminalText(page)).length).toBeGreaterThan(0);
 });
 
 // ── Dev Tools ──
