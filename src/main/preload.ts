@@ -109,6 +109,8 @@ contextBridge.exposeInMainWorld('shelfApi', {
       ipcRenderer.invoke(IPC.AGENT_STOP, { tabId }),
     destroy: (tabId: string) =>
       ipcRenderer.invoke(IPC.AGENT_DESTROY, { tabId }),
+    deleteHistories: (sessionIds: string[]) =>
+      ipcRenderer.invoke(IPC.AGENT_DELETE_HISTORIES, { sessionIds }),
     resolvePermission: (tabId: string, toolUseId: string, scope: 'once' | 'session' | 'deny', toolName?: string, input?: Record<string, unknown>) =>
       ipcRenderer.invoke(IPC.AGENT_RESOLVE_PERMISSION, { tabId, toolUseId, scope, toolName, input }),
     setPrefs: (tabId: string, prefs: { model?: string; effort?: string; permissionMode?: string }) =>

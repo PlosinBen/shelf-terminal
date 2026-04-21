@@ -191,7 +191,10 @@ OpenAI 自己在 2025 年推了兩個 state 相關的新 API：
    - 建議先選 (a)，觀察檔案大小。
 2. **檔案格式版本化**：schema 加 `version: 1`，未來 migration 走明確 upgrade path（像 settings.json）。
 3. **併發寫入**：同一 tab 理論上不會同時兩個 turn 在跑（UI 會鎖 input），但要不要加 write lock？先不加，靠 JS 單執行緒 + turn 順序保證。
-4. **清理政策**：舊檔何時清？tab 永久刪除時 delete 對應檔。沒有 tab 關聯的「孤兒檔」要不要定期掃？放到 app 啟動時 sweep 一次，比對 `ProjectConfig.agentSessionIds` 的 id set。
+4. **清理政策**：舊檔何時清？✅ 已實作：
+   - `/clear` 刪當前 session 的檔（engine 側 `clearAllState()`）
+   - Project 被刪除時，renderer 收集 `agentSessionIds` 所有 id 呼叫 `agent.deleteHistories()` 一次性掃掉（`deleteHistoryFiles()` in history-store.ts）
+   - 沒做 app 啟動時 sweep — 選擇只在 project remove 時做，避免在啟動 hot path 再多一次 fs 掃描；正常流程下不會有孤兒檔。
 
 ## Checkpoints（實作時）
 

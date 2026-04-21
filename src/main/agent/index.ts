@@ -3,6 +3,7 @@ import { IPC } from '@shared/ipc-channels';
 import { createClaudeBackend } from './providers/claude';
 import { createCopilotBackend } from './providers/copilot';
 import { createGeminiBackend } from './providers/gemini';
+import { deleteHistoryFiles } from './engine/history-store';
 import { createRemoteBackend } from './remote';
 import { log } from '@shared/logger';
 import type { AgentProvider, Connection } from '@shared/types';
@@ -325,6 +326,15 @@ export function registerAgentHandlers() {
       session.backend.dispose();
       sessions.delete(tabId);
     }
+  });
+
+  ipcMain.handle(IPC.AGENT_DELETE_HISTORIES, async (_event, { sessionIds }: { sessionIds: string[] }) => {
+    // Fire-and-forget sweep triggered by project removal. Renderer passes
+    // every sessionId the project had cached in `agentSessionIds`, which
+    // may include Claude ids too — those never have files on disk, so the
+    // helper's ENOENT branch covers them silently.
+    log.info('agent', `histories.sweep count=${sessionIds?.length ?? 0}`);
+    await deleteHistoryFiles(sessionIds ?? []);
   });
 
   ipcMain.handle(IPC.AGENT_RESOLVE_PERMISSION, async (_event, { tabId, toolUseId, scope, toolName, input }: { tabId: string; toolUseId: string; scope: 'once' | 'session' | 'deny'; toolName?: string; input?: Record<string, unknown> }) => {

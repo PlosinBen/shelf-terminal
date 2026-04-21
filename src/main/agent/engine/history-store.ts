@@ -40,6 +40,42 @@ export interface HistoryStore {
 // but be defensive against anything pathological slipping through opts.resume.
 const SAFE_ID = /^[A-Za-z0-9_-]{1,128}$/;
 
+/**
+ * One-shot helper to wipe multiple history files, used when a project is
+ * removed and we want to sweep every session it owned. Intentionally
+ * *not* going through a `HistoryStore` instance — project removal is
+ * cross-provider (one project may have copilot + gemini tabs) and we
+ * don't want to require instantiating each provider's adapter just to
+ * delete files. The file layout is shared, so one pass deletes them all.
+ *
+ * Non-existent files are silent (ENOENT). Other errors are logged but
+ * don't throw — a partial sweep is still better than leaving everything.
+ */
+export async function deleteHistoryFiles(
+  sessionIds: string[],
+  opts?: { dir?: string },
+): Promise<void> {
+  if (sessionIds.length === 0) return;
+  const dir = opts?.dir ?? path.join(app.getPath('userData'), 'agent-state');
+  await Promise.all(
+    sessionIds.map(async (id) => {
+      if (!SAFE_ID.test(id)) {
+        log.info('engine-history', `sweep skipped unsafe id="${id}"`);
+        return;
+      }
+      const filePath = path.join(dir, `${id}.json`);
+      try {
+        await fs.unlink(filePath);
+        log.info('engine-history', `sweep.deleted id=${id}`);
+      } catch (err: any) {
+        if (err?.code !== 'ENOENT') {
+          log.info('engine-history', `sweep.failed id=${id}: ${err?.message ?? err}`);
+        }
+      }
+    }),
+  );
+}
+
 export function createFileHistoryStore(opts?: { dir?: string }): HistoryStore {
   // Lazy-resolve the default dir so tests can instantiate without an
   // Electron `app` handle available.

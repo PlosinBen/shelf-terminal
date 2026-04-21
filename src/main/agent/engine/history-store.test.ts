@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
-import { createFileHistoryStore, type EngineHistory } from './history-store';
+import { createFileHistoryStore, deleteHistoryFiles, type EngineHistory } from './history-store';
 
 function makeEntry(overrides: Partial<EngineHistory> = {}): EngineHistory {
   const now = Date.now();
@@ -108,5 +108,52 @@ describe('createFileHistoryStore', () => {
     }
     const files = await fs.readdir(dir);
     expect(files).toHaveLength(0);
+  });
+});
+
+describe('deleteHistoryFiles (project-removal sweep)', () => {
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await fs.mkdtemp(path.join(os.tmpdir(), 'shelf-sweep-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  async function seed(id: string) {
+    const store = createFileHistoryStore({ dir });
+    await store.save(makeEntry({ sessionId: id }));
+  }
+
+  it('deletes every provided sessionId in one pass', async () => {
+    await seed('id-a');
+    await seed('id-b');
+    await seed('id-c');
+
+    await deleteHistoryFiles(['id-a', 'id-b'], { dir });
+
+    const remaining = await fs.readdir(dir);
+    expect(remaining).toEqual(['id-c.json']);
+  });
+
+  it('ignores unknown sessionIds (no throw)', async () => {
+    await seed('present');
+    await expect(deleteHistoryFiles(['present', 'ghost'], { dir })).resolves.toBeUndefined();
+    const remaining = await fs.readdir(dir);
+    expect(remaining).toHaveLength(0);
+  });
+
+  it('refuses unsafe ids without touching the directory', async () => {
+    await seed('legit');
+    await deleteHistoryFiles(['../escape', 'a/b', 'legit'], { dir });
+    // `legit` goes; traversal attempts are silently skipped.
+    const remaining = await fs.readdir(dir);
+    expect(remaining).toHaveLength(0);
+  });
+
+  it('no-ops on empty input', async () => {
+    await expect(deleteHistoryFiles([], { dir })).resolves.toBeUndefined();
   });
 });

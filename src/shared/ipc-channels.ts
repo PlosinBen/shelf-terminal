@@ -61,6 +61,7 @@ export const IPC = {
   AGENT_SEND: 'agent:send',
   AGENT_STOP: 'agent:stop',
   AGENT_DESTROY: 'agent:destroy',
+  AGENT_DELETE_HISTORIES: 'agent:delete-histories',
   AGENT_RESOLVE_PERMISSION: 'agent:resolve-permission',
   AGENT_SET_PREFS: 'agent:set-prefs',
   AGENT_SWITCH_PROVIDER: 'agent:switch-provider',

@@ -230,11 +230,24 @@ export function App() {
       const proj = projects[projectIndex];
       if (proj) {
         proj.tabs.forEach((tab) => {
-          if (tab.type !== 'agent') {
+          if (tab.type === 'agent') {
+            // Tear down the live session so its in-memory history + pty
+            // are released. destroy() is a no-op if the tab was never
+            // initialised, so this is safe for unopened agent tabs.
+            window.shelfApi.agent.destroy(tab.id);
+          } else {
             window.shelfApi.pty.kill(tab.id);
             disposeTerminal(tab.id);
           }
         });
+        // Sweep persisted engine transcripts for this project. Collect
+        // every cached sessionId — Claude's id won't correspond to a
+        // file but the helper silently skips missing paths, so we don't
+        // need to filter by provider here.
+        const sessionIds = Object.values(proj.config.agentSessionIds ?? {}).filter((v): v is string => !!v);
+        if (sessionIds.length > 0) {
+          window.shelfApi.agent.deleteHistories(sessionIds);
+        }
       }
       removeProject(projectIndex);
       const configs = projects.filter((_, i) => i !== projectIndex).map((p) => p.config);

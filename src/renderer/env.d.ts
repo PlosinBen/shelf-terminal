@@ -70,6 +70,7 @@ interface ShelfApi {
     send: (tabId: string, prompt: string, cwd: string, provider: string, connection: import('../shared/types').Connection, initScript?: string, attachments?: { files?: string[]; images?: string[] }) => Promise<void>;
     stop: (tabId: string) => Promise<void>;
     destroy: (tabId: string) => Promise<void>;
+    deleteHistories: (sessionIds: string[]) => Promise<void>;
     resolvePermission: (tabId: string, toolUseId: string, scope: 'once' | 'session' | 'deny', toolName?: string, input?: Record<string, unknown>) => Promise<void>;
     setPrefs: (tabId: string, prefs: import('../shared/types').AgentPrefs) => Promise<void>;
     storeCredential: (tabId: string, key: string) => Promise<{ ok: boolean; error?: string }>;
