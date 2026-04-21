@@ -6,28 +6,19 @@ import os from 'os';
 // These tests launch their own Electron instance per test (rather than reusing
 // the worker-scoped fixture in helpers.ts) because each case needs precise
 // control over projects.json contents and bootstrap-time env vars.
+//
+// Each test uses a fresh tmpdir as userData via --user-data-dir so it's
+// isolated from the developer's real dev/prod data (commit d27fc26 dropped
+// NODE_ENV-based isolation in favor of this command-line switch).
 
-function getUserDataDir(): string {
-  const suffix = process.env.NODE_ENV ? `-${process.env.NODE_ENV}` : '';
-  return process.platform === 'darwin'
-    ? path.join(os.homedir(), 'Library', 'Application Support', `shelf-terminal${suffix}`)
-    : path.join(os.homedir(), '.config', `shelf-terminal${suffix}`);
-}
-
-async function launchApp(env: Record<string, string | undefined> = {}): Promise<ElectronApplication> {
+async function launchApp(
+  userDataDir: string,
+  env: Record<string, string | undefined> = {},
+): Promise<ElectronApplication> {
   return electron.launch({
-    args: [path.join(__dirname, '..')],
+    args: [path.join(__dirname, '..'), `--user-data-dir=${userDataDir}`],
     env: { ...process.env, ...env } as Record<string, string>,
   });
-}
-
-function cleanupCorruptBackups(dir: string) {
-  if (!fs.existsSync(dir)) return;
-  for (const f of fs.readdirSync(dir)) {
-    if (f.startsWith('projects.json.corrupt.') || f.startsWith('settings.json.corrupt.')) {
-      fs.unlinkSync(path.join(dir, f));
-    }
-  }
 }
 
 test.describe('config bootstrap', () => {
@@ -35,23 +26,17 @@ test.describe('config bootstrap', () => {
   let projectsPath: string;
 
   test.beforeEach(() => {
-    userDataDir = getUserDataDir();
+    userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'shelf-bootstrap-'));
     projectsPath = path.join(userDataDir, 'projects.json');
-    if (!fs.existsSync(userDataDir)) {
-      fs.mkdirSync(userDataDir, { recursive: true });
-    }
-    cleanupCorruptBackups(userDataDir);
   });
 
   test.afterEach(() => {
-    cleanupCorruptBackups(userDataDir);
-    // Restore baseline so unrelated tests in the worker keep a clean slate.
-    fs.writeFileSync(projectsPath, '[]', 'utf-8');
+    fs.rmSync(userDataDir, { recursive: true, force: true });
   });
 
   test('empty projects.json starts with empty sidebar', async () => {
     fs.writeFileSync(projectsPath, '[]', 'utf-8');
-    const app = await launchApp();
+    const app = await launchApp(userDataDir);
     try {
       const page = await app.firstWindow();
       await page.waitForSelector('.app', { timeout: 10_000 });
@@ -63,7 +48,7 @@ test.describe('config bootstrap', () => {
 
   test('missing projects.json (ENOENT) starts with empty sidebar', async () => {
     if (fs.existsSync(projectsPath)) fs.unlinkSync(projectsPath);
-    const app = await launchApp();
+    const app = await launchApp(userDataDir);
     try {
       const page = await app.firstWindow();
       await page.waitForSelector('.app', { timeout: 10_000 });
@@ -75,7 +60,7 @@ test.describe('config bootstrap', () => {
 
   test('corrupt projects.json with quit response exits app', async () => {
     fs.writeFileSync(projectsPath, '{garbage', 'utf-8');
-    const app = await launchApp({ SHELF_BOOTSTRAP_DIALOG_RESPONSE: 'quit' });
+    const app = await launchApp(userDataDir, { SHELF_BOOTSTRAP_DIALOG_RESPONSE: 'quit' });
     // App should exit without ever opening a window.
     await app.waitForEvent('close', { timeout: 10_000 });
     // The corrupt file should still be in place (no backup happened).
@@ -89,7 +74,7 @@ test.describe('config bootstrap', () => {
 
   test('corrupt projects.json with continue backs up and starts empty', async () => {
     fs.writeFileSync(projectsPath, '{garbage', 'utf-8');
-    const app = await launchApp({ SHELF_BOOTSTRAP_DIALOG_RESPONSE: 'continue' });
+    const app = await launchApp(userDataDir, { SHELF_BOOTSTRAP_DIALOG_RESPONSE: 'continue' });
     try {
       const page = await app.firstWindow();
       await page.waitForSelector('.app', { timeout: 10_000 });
