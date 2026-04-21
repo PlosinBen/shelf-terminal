@@ -15,8 +15,8 @@ await build({
   outfile: `dist/agent-server/${pkg.version}/index.js`,
   external: [],
   alias: {
-    // Match the @shared alias the renderer / main use so openai-processor's
-    // logger import resolves when bundled into the server.
+    // Match the @shared alias the renderer / main use so engine imports
+    // (logger, AuthMethod type) resolve when bundled into the server.
     '@shared': resolve(root, 'src/shared'),
   },
   banner: { js: `// shelf-terminal agent-server v${pkg.version}\n` },

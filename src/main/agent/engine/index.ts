@@ -280,7 +280,7 @@ export function createEngine(config: EngineConfig) {
       } catch (err: any) {
         if (err?.message === 'NO_AUTH') throw err;
         if (err.name !== 'AbortError') {
-          log.error('openai-processor', `Query error: ${err.message}`);
+          log.error('agent-engine', `Query error: ${err.message}`);
           yield { type: 'error', error: err.message ?? 'Unknown error' };
         }
       } finally {

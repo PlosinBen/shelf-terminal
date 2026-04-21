@@ -760,18 +760,24 @@ type AuthMethod =
 
 Rationale: the older `warmup()` blob hides capability differences inside each provider's warmup implementation. Promoting each capability to a polymorphic method gives the composer (`gatherCapabilities` in main) a uniform `backend.getX()` shape while the provider still encapsulates the diff (Claude from SDK, Copilot/Gemini via engine reading the adapter). Claude absorbs an internal `ensureInit()` cache so multiple getters don't each re-init the SDK.
 
-### Refactor phases (R1–R10)
+### Refactor phases (R1–R10) ✅ shipped
 
-- **R1** — introduce `engine/types.ts`, `AuthMethod`, method-per-cap `AgentBackend` (new methods alongside current `warmup` during migration)
-- **R2** — split `openai-processor.ts` into `engine/{client,loop,history,prompt,permissions,slash,credential}.ts`
-- **R3** — migrate Copilot provider to `createEngine(copilotAdapter, executor)` + getters
-- **R4** — migrate Gemini provider
-- **R5** — migrate Claude provider to method-per-cap with private cache helper
-- **R6** — main's `ensureSession` builds `ProviderCapabilities` via `gatherCapabilities()`; delete `warmup` from interface
-- **R7** — remote protocol aggregates getters server-side, still sends one capabilities message to main
-- **R8** — agent-server providers align with the new interface
-- **R9** — AgentView `auth_required` pane switches on `authMethod.kind`, removes `isGemini` / provider identity branches
-- **R10** — delete `openai-processor.ts` / `processor-tools.ts` once all call sites have moved
+- **R1** ✅ — engine/types.ts with OpenAIAdapter / AuthMethod / ModelCatalog, method-per-cap AgentBackend
+- **R2** ✅ — tool registry moved to `tools/`; openai-processor relocated to `engine/index.ts`
+- **R3** ✅ — Copilot provider is adapter + `createEngine({...})` (~110 lines, down from ~150)
+- **R4** ✅ — Gemini provider simplified to adapter + `createEngine({...})` (~40 lines)
+- **R5** ✅ — Claude provider exposes the getters with an internal `ensureInit` cache so multiple getters share one SDK plan-mode fetch
+- **R6** ✅ — `gatherCapabilities` composes capabilities from getters; `warmup` removed from AgentBackend; `checkAuth` now required
+- **R7** ✅ — new `get_capabilities` / `capabilities` protocol; remote backend rides it to populate the UI in one round-trip
+- **R8** ✅ — agent-server providers implement `gatherCapabilities` (Claude ensureInit cache; Copilot / Gemini delegate to engine getters)
+- **R9** ✅ — AgentView auth-required pane renders off `capabilities.authMethod` discriminated union; no more `isGemini` / provider identity branches
+- **R10** ✅ — legacy `openai-processor.ts` / `processor-tools.ts` fully removed (moved into `engine/` and `tools/`)
+
+### Still pending after v0.8 refactor
+
+- Engine internals still live in a single `engine/index.ts` (~420 lines). Split into `loop.ts / prompt.ts / permissions.ts / slash.ts / history.ts / credential.ts` is a nice-to-have but not critical now.
+- Credential store (`~/.config/shelf/{provider}.json`) — `authMethod: api-key` is declared but the write-through via `backend.storeCredential` / UI input form isn't implemented yet. Falls back to env var reading.
+- Generic `agent.recheck` IPC — current `copilotAuth.recheck` only works for Copilot; Gemini / future API-key providers need a provider-agnostic re-probe.
 
 ### Related v0.8 goals
 
