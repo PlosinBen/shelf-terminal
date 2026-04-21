@@ -152,17 +152,32 @@ function ToolBody({ toolName, input, cwd }: { toolName?: string; input?: Record<
   }
 }
 
+// Resolve the configured display mode for a message. Returns 'collapsed' when
+// the user has no setting for that key, matching agent-terminal's defaults.
+function resolveDisplayMode(
+  message: AgentMsg,
+  display: Partial<Record<string, 'collapsed' | 'expanded' | 'hidden'>> | undefined,
+): 'collapsed' | 'expanded' | 'hidden' {
+  if (!display) return 'collapsed';
+  if (message.type === 'thinking') return display.thinking ?? 'collapsed';
+  if (message.type === 'tool_use') {
+    if (!message.toolName) return 'collapsed';
+    return display[message.toolName] ?? display.other ?? 'collapsed';
+  }
+  return 'collapsed';
+}
+
 export function AgentMessage({ message }: AgentMessageProps) {
   const { settings } = useStore();
-  // Initial expand state follows the user's preference (defaults collapsed).
-  // Captured on first render so existing messages keep whatever the user has
-  // manually toggled; new messages pick up the latest default.
-  const initialExpanded =
-    message.type === 'thinking' ? !!settings.agentThinkingDefaultExpanded :
-    message.type === 'tool_use'
-      ? !!(message.toolName && settings.agentToolDefaultExpanded?.[message.toolName])
-      : false;
-  const [expanded, setExpanded] = useState(initialExpanded);
+  // Evaluate once per render. `hidden` drops the block completely; otherwise
+  // seed useState from the mode so the toggle button still works and users
+  // can still expand/collapse per-message after the fact.
+  const displayMode = resolveDisplayMode(message, settings.agentDisplay);
+  const [expanded, setExpanded] = useState(displayMode === 'expanded');
+
+  if (displayMode === 'hidden' && (message.type === 'thinking' || message.type === 'tool_use')) {
+    return null;
+  }
 
   if (message.type === 'thinking') {
     const preview = message.content.slice(0, 80).replace(/\n/g, ' ');

@@ -2,8 +2,8 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useStore, updateSettings, toggleSettings } from '../store';
 import { themes } from '../themes';
 import { comboToLabel, recordCombo } from '../hooks/useKeybindings';
-import type { AppSettings, KeybindingAction, KeybindingConfig, LogLevel } from '@shared/types';
-import { AGENT_TOOL_NAMES } from '@shared/types';
+import type { AppSettings, KeybindingAction, KeybindingConfig, LogLevel, AgentDisplayMode } from '@shared/types';
+import { AGENT_DISPLAY_KEYS } from '@shared/types';
 
 const ACTION_LABELS: Record<KeybindingAction, string> = {
   toggleSidebar: 'Toggle Sidebar',
@@ -206,38 +206,26 @@ export function SettingsPanel() {
           </div>
 
           <div className="settings-divider" />
-          <div className="settings-section-title">Agent</div>
-          <div className="settings-group">
-            <label className="settings-label">Thinking Blocks</label>
-            <label className="settings-checkbox-label">
-              <input
-                type="checkbox"
-                checked={draft.agentThinkingDefaultExpanded ?? false}
-                onChange={(e) => updateDraft({ agentThinkingDefaultExpanded: e.target.checked })}
-              />
-              Expand by default
-            </label>
-          </div>
-          <div className="settings-group">
-            <label className="settings-label">Tool Blocks</label>
-            <div className="settings-checkbox-column">
-              {AGENT_TOOL_NAMES.map((tool) => (
-                <label className="settings-checkbox-label" key={tool}>
-                  <input
-                    type="checkbox"
-                    checked={draft.agentToolDefaultExpanded?.[tool] ?? false}
-                    onChange={(e) => updateDraft({
-                      agentToolDefaultExpanded: {
-                        ...(draft.agentToolDefaultExpanded ?? {}),
-                        [tool]: e.target.checked,
-                      },
-                    })}
-                  />
-                  {tool}
-                </label>
-              ))}
+          <div className="settings-section-title">Agent Message Display</div>
+          {AGENT_DISPLAY_KEYS.map(({ key, label }) => (
+            <div className="settings-group" key={key}>
+              <label className="settings-label">{label}</label>
+              <select
+                className="settings-select"
+                value={draft.agentDisplay?.[key] ?? 'collapsed'}
+                onChange={(e) => updateDraft({
+                  agentDisplay: {
+                    ...(draft.agentDisplay ?? {}),
+                    [key]: e.target.value as AgentDisplayMode,
+                  },
+                })}
+              >
+                <option value="collapsed">Collapsed</option>
+                <option value="expanded">Expanded</option>
+                <option value="hidden">Hidden</option>
+              </select>
             </div>
-          </div>
+          ))}
           <div className="settings-config-path">Applies to new messages; existing ones keep their current state.</div>
 
           <div className="settings-divider" />

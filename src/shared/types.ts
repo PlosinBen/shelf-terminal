@@ -125,19 +125,31 @@ export interface AppSettings {
   defaultLocalPath?: string;
   dockerPath?: string;
   unicode11?: boolean;
-  /** Per-tool default expand state for Agent view tool_use blocks.
-   * Keyed by the tool name emitted by the provider (Read, Bash, Edit, …).
-   * Missing or false = collapsed (default), true = expanded on first render.
-   * User can still toggle per-message after render. */
-  agentToolDefaultExpanded?: Partial<Record<string, boolean>>;
-  /** Expand thinking blocks in Agent view by default. */
-  agentThinkingDefaultExpanded?: boolean;
+  /** Per-block-type display mode for the Agent view. Keyed by `thinking` or
+   * a tool name; `other` catches any tool not listed in AGENT_DISPLAY_KEYS.
+   * `collapsed` (default) — summary line only.
+   * `expanded` — body visible on first render.
+   * `hidden` — block not rendered at all. */
+  agentDisplay?: Partial<Record<string, AgentDisplayMode>>;
 }
 
-/** Tools the Agent Settings panel exposes expand toggles for. Mirrors the
- * registry in src/main/agent/tools/registry.ts — kept here to avoid dragging
- * main-process code into the renderer. */
-export const AGENT_TOOL_NAMES = ['Read', 'Grep', 'Glob', 'Ls', 'Bash', 'Edit', 'Write'] as const;
+export type AgentDisplayMode = 'collapsed' | 'expanded' | 'hidden';
+
+/** Block types the Agent Settings panel exposes a display-mode dropdown for.
+ * Mirrors the tool registry in src/main/agent/tools/registry.ts plus `thinking`
+ * (reasoning blocks) and `other` (catchall for tool names not in this list —
+ * e.g. Claude-specific tools like Task, TodoWrite, WebFetch). */
+export const AGENT_DISPLAY_KEYS: { key: string; label: string }[] = [
+  { key: 'thinking', label: 'Thinking' },
+  { key: 'Read', label: 'Read' },
+  { key: 'Grep', label: 'Grep' },
+  { key: 'Glob', label: 'Glob' },
+  { key: 'Ls', label: 'Ls' },
+  { key: 'Bash', label: 'Bash' },
+  { key: 'Edit', label: 'Edit' },
+  { key: 'Write', label: 'Write' },
+  { key: 'other', label: 'Other Tools' },
+];
 
 
 // ── FolderPicker ──
