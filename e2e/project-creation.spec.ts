@@ -1,10 +1,15 @@
-import { test, expect } from './helpers';
+import { test, expect, readActiveTerminalText } from './helpers';
 
 // Helper: open folder picker and go through connection step
 async function openFolderPicker(page: any) {
   await page.locator('.sidebar-btn', { hasText: '+' }).click();
   const overlay = page.locator('.folder-picker-overlay');
   await expect(overlay).toBeVisible({ timeout: 5_000 });
+
+  // openAgentOnConnect defaults to checked — opt out so tests expecting 1 tab
+  // after connect keep passing. Covered in features.spec.ts's dedicated test.
+  await page.locator('.settings-checkbox-label', { hasText: 'Open agent tab on connect' })
+    .locator('input[type="checkbox"]').uncheck();
 
   // Connection step: click Next (Local is default)
   const nextBtn = page.locator('.conn-btn-next');
@@ -116,9 +121,7 @@ test('terminal spawns and shows output', async ({ shelfApp: { page } }) => {
   await expect(terminal).toBeVisible({ timeout: 5_000 });
 
   await page.waitForTimeout(2000);
-  const xtermRows = terminal.locator('.xterm-rows');
-  const text = await xtermRows.textContent();
-  expect(text?.length).toBeGreaterThan(0);
+  expect((await readActiveTerminalText(page)).length).toBeGreaterThan(0);
 });
 
 test('project shows green status dot', async ({ shelfApp: { page } }) => {
