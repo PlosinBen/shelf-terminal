@@ -25,6 +25,13 @@ interface Props {
 // Cache xterm instances so they survive re-renders and remounts
 const terminalCache = new Map<string, { term: Terminal; fitAddon: FitAddon; searchAddon: SearchAddon; opened: boolean }>();
 
+// Expose the cache to E2E tests — the WebGL renderer paints to canvas so
+// `.xterm-rows` is empty in the DOM; tests read the xterm buffer directly
+// through this hook instead.
+if (typeof window !== 'undefined') {
+  (window as unknown as { __shelfTerminalCache__?: typeof terminalCache }).__shelfTerminalCache__ = terminalCache;
+}
+
 // POSIX single-quote escape — works for nearly all POSIX shells.
 function shellQuote(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`;
