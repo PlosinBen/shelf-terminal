@@ -77,6 +77,10 @@ export interface AgentBackend {
   getPermissionModes?(): string[];
   getEffortLevels?(): string[];
   getAuthMethod?(): AuthMethod;
+  /** Single-shot aggregator for remote backends that need one round-trip
+   * instead of five individual getter calls. Local backends omit this and
+   * let main's gatherCapabilities compose from the getters above. */
+  getCapabilities?(cwd: string): Promise<ProviderCapabilities>;
 
   // Runtime setters
   setModel?(model: string): void;

@@ -122,7 +122,9 @@ interface AgentInitPrefs {
  * providers whose getters share state (Claude caches SDK init across calls)
  * still only pay the upfront cost once.
  */
-async function gatherCapabilities(backend: AgentBackend, cwd: string) {
+async function gatherCapabilities(backend: AgentBackend, cwd: string): Promise<ProviderCapabilities | null> {
+  // Remote backends aggregate on the server side in a single round-trip.
+  if (backend.getCapabilities) return backend.getCapabilities(cwd);
   if (!backend.getModels || !backend.getSlashCommands) return null;
   const [models, slashCommands] = await Promise.all([
     backend.getModels(cwd),

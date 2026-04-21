@@ -7,7 +7,7 @@ import type { OutgoingMessage, QueryInput, ServerBackend } from './providers/typ
 type Provider = 'claude' | 'copilot' | 'gemini';
 
 interface IncomingMessage {
-  type: 'send' | 'stop' | 'ping' | 'resolve_permission';
+  type: 'send' | 'stop' | 'ping' | 'resolve_permission' | 'get_capabilities';
   provider?: Provider;
   prompt?: string;
   cwd?: string;
@@ -20,6 +20,8 @@ interface IncomingMessage {
   toolUseId?: string;
   allow?: boolean;
   message?: string;
+  // get_capabilities fields
+  requestId?: string;
 }
 
 function send(msg: OutgoingMessage) {
@@ -107,6 +109,19 @@ rl.on('line', (line) => {
         resolver?.call(activeBackend, msg.toolUseId, msg.allow ?? false, msg.message);
       }
       break;
+    case 'get_capabilities': {
+      const provider = msg.provider ?? 'claude';
+      (async () => {
+        try {
+          const backend = getBackend(provider);
+          const caps = await backend.gatherCapabilities?.(msg.cwd ?? process.cwd());
+          send({ type: 'capabilities', requestId: msg.requestId, ...(caps ?? {}) });
+        } catch (err: any) {
+          send({ type: 'capabilities', requestId: msg.requestId, error: err?.message ?? String(err) });
+        }
+      })();
+      break;
+    }
   }
 });
 

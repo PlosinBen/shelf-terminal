@@ -2,12 +2,63 @@ import { query as sdkQuery } from '@anthropic-ai/claude-agent-sdk';
 import type { Query, Options, SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import * as path from 'path';
 import type { QueryInput, SendFn, ServerBackend } from './types';
+import type { ProviderCapabilities } from '../../src/main/agent/types';
+
+const CLAUDE_AUTH_METHOD = {
+  kind: 'sdk-managed' as const,
+  instructions: [{ label: 'Sign in to Claude via the CLI', command: 'claude login' }],
+};
 
 export function createClaudeBackend(): ServerBackend {
   let activeQuery: Query | null = null;
   let abortController: AbortController | null = null;
+  const cache: { models?: any[]; commands?: any[] } = {};
+  let initPromise: Promise<void> | null = null;
+
+  function ensureInit(cwd: string): Promise<void> {
+    if (cache.models && cache.commands) return Promise.resolve();
+    if (initPromise) return initPromise;
+    initPromise = (async () => {
+      const warmupAbort = new AbortController();
+      const generator = sdkQuery({
+        prompt: ' ',
+        options: {
+          cwd,
+          permissionMode: 'plan',
+          abortController: warmupAbort,
+          pathToClaudeCodeExecutable: path.join(__dirname, 'cli.js'),
+        },
+      });
+      try {
+        for await (const msg of generator) {
+          if (msg.type === 'system' && msg.subtype === 'init') {
+            const [models, commands] = await Promise.all([
+              generator.supportedModels().catch(() => []),
+              generator.supportedCommands().catch(() => []),
+            ]);
+            cache.models = models;
+            cache.commands = commands;
+            warmupAbort.abort();
+            break;
+          }
+        }
+      } catch { /* abort throws, expected */ }
+    })();
+    return initPromise;
+  }
 
   return {
+    async gatherCapabilities(cwd: string): Promise<ProviderCapabilities> {
+      await ensureInit(cwd);
+      return {
+        models: (cache.models ?? []).map((m) => ({ value: m.value, displayName: m.displayName, vision: true })),
+        permissionModes: ['default', 'acceptEdits', 'bypassPermissions', 'plan'],
+        effortLevels: ['low', 'medium', 'high', 'xhigh', 'max'],
+        slashCommands: (cache.commands ?? []).map((c) => ({ name: c.name, description: c.description })),
+        authMethod: CLAUDE_AUTH_METHOD,
+      };
+    },
+
     async query(input: QueryInput, send: SendFn) {
       abortController = new AbortController();
       const cliPath = path.join(__dirname, 'cli.js');
