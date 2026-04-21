@@ -268,6 +268,8 @@ function processMessage(msg: SDKMessage): AgentEvent[] {
   switch (msg.type) {
     case 'assistant': {
       const content = msg.message.content;
+      const blockSummary = content.map((b: any) => `${b.type}${b.type === 'thinking' ? `(${(b.thinking ?? '').length}c)` : b.type === 'text' ? `(${(b.text ?? '').length}c)` : ''}`).join(',');
+      log.debug('claude-backend', `assistant blocks=[${blockSummary}] session=${msg.session_id}`);
       for (const block of content) {
         if (block.type === 'thinking') {
           events.push({
