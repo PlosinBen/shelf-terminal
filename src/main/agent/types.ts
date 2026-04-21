@@ -66,17 +66,14 @@ export interface AgentBackend {
   stop(): Promise<void>;
   dispose(): void;
 
-  // Legacy — will be removed in R6 once all providers use the getters below.
-  warmup?(cwd: string): Promise<ProviderCapabilities | null>;
-  getSlashCommands?(): Promise<SlashCommand[]>;
-
   // Required capability probes
-  checkAuth?(): Promise<boolean>;
+  checkAuth(): Promise<boolean>;
 
-  // v0.8 capability getters — providers should implement these and main will
-  // compose them into ProviderCapabilities. Still optional during migration so
-  // TypeScript doesn't break pre-migration providers.
-  getModels?(): Promise<ModelInfo[]>;
+  // Capability getters — main's gatherCapabilities composes them into
+  // ProviderCapabilities. Still optional on the interface so the remote
+  // backend (which only forwards to agent-server) can skip them.
+  getModels?(cwd?: string): Promise<ModelInfo[]>;
+  getSlashCommands?(): Promise<SlashCommand[]>;
   getPermissionModes?(): string[];
   getEffortLevels?(): string[];
   getAuthMethod?(): AuthMethod;

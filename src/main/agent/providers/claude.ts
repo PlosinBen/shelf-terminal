@@ -105,20 +105,6 @@ export function createClaudeBackend(): AgentBackend {
       return CLAUDE_AUTH;
     },
 
-    async warmup(cwd: string): Promise<ProviderCapabilities | null> {
-      await ensureInit(cwd);
-      return {
-        models: (cache.models ?? []).map((m) => ({
-          value: m.id,
-          displayName: m.displayName,
-          vision: m.vision,
-        })),
-        permissionModes: this.getPermissionModes!(),
-        effortLevels: this.getEffortLevels!(),
-        slashCommands: cache.commands ?? [],
-        authMethod: CLAUDE_AUTH,
-      };
-    },
 
     async *query(prompt: string, cwd: string, opts?: AgentQueryOptions): AsyncGenerator<AgentEvent> {
       const queryFn = await loadSdk();

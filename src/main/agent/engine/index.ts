@@ -356,26 +356,6 @@ export function createEngine(config: EngineConfig) {
       await config.storeCredential(key);
     },
 
-    /** Compose all getters into the legacy warmup blob. Kept for backward
-     * compat until main switches to gatherCapabilities (R6). */
-    async warmup(): Promise<ProviderCapabilities> {
-      const [models, slashCommands] = await Promise.all([
-        (async () => (await config.getModels?.()) ?? [])(),
-        Promise.resolve(SLASH_COMMANDS),
-      ]);
-      return {
-        models: models.map((m) => ({
-          value: m.id,
-          displayName: m.displayName,
-          effortLevels: m.effortLevels,
-          vision: m.vision,
-        })),
-        permissionModes: config.permissionModes ?? DEFAULT_PERMISSION_MODES,
-        effortLevels: config.effortLevels ?? [],
-        slashCommands,
-        authMethod: config.authMethod ?? { kind: 'none' },
-      };
-    },
   };
 
   async function handleSlash(cmd: string, arg: string, cwd: string, mode: string): Promise<string | null> {

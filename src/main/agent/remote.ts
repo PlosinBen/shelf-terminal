@@ -23,6 +23,13 @@ export function createRemoteBackend(connection: Connection, initScript?: string,
   let currentEffort: string | null = null;
 
   return {
+    async checkAuth() {
+      // Remote auth is verified lazily — the first query emits auth_required
+      // from the server if credentials are missing. We can't probe cheaply
+      // without a round trip, so assume OK until proven otherwise.
+      return true;
+    },
+
     async *query(prompt: string, cwd: string, opts?: AgentQueryOptions): AsyncGenerator<AgentEvent> {
       if (!deployed) {
         const result = await ensureRemoteDeploy(connection, cwd, initScript);

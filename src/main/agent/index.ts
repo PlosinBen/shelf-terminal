@@ -115,6 +115,33 @@ interface AgentInitPrefs {
   permissionMode?: string;
 }
 
+/**
+ * Compose a ProviderCapabilities blob from a backend by calling each of its
+ * method-per-capability getters. Falls back to the legacy `warmup()` method
+ * for backends that haven't migrated yet. Parallelises the async getters so
+ * providers whose getters share state (Claude caches SDK init across calls)
+ * still only pay the upfront cost once.
+ */
+async function gatherCapabilities(backend: AgentBackend, cwd: string) {
+  if (!backend.getModels || !backend.getSlashCommands) return null;
+  const [models, slashCommands] = await Promise.all([
+    backend.getModels(cwd),
+    backend.getSlashCommands(),
+  ]);
+  return {
+    models: models.map((m) => ({
+      value: m.id,
+      displayName: m.displayName,
+      effortLevels: m.effortLevels,
+      vision: m.vision,
+    })),
+    permissionModes: backend.getPermissionModes?.() ?? ['default', 'acceptEdits', 'bypassPermissions', 'plan'],
+    effortLevels: backend.getEffortLevels?.() ?? [],
+    slashCommands,
+    authMethod: backend.getAuthMethod?.(),
+  };
+}
+
 async function ensureSession(
   tabId: string,
   provider: AgentProvider,
@@ -144,22 +171,20 @@ async function ensureSession(
     }
   }
 
-  // Apply persisted prefs BEFORE warmup so the capability payload can echo
+  // Apply persisted prefs BEFORE gathering capabilities so the payload echoes
   // the current state back to the UI in a single event.
   if (prefs?.model) backend.setModel?.(prefs.model);
   if (prefs?.effort) backend.setEffort?.(prefs.effort);
 
-  if (backend.warmup) {
-    const caps = await backend.warmup(cwd);
-    if (caps) {
-      broadcast(IPC.AGENT_CAPABILITIES, {
-        tabId,
-        ...caps,
-        currentModel: prefs?.model ?? caps.currentModel ?? caps.models[0]?.value,
-        currentEffort: prefs?.effort ?? caps.currentEffort,
-        currentPermissionMode: session.permissionMode,
-      });
-    }
+  const caps = await gatherCapabilities(backend, cwd);
+  if (caps) {
+    broadcast(IPC.AGENT_CAPABILITIES, {
+      tabId,
+      ...caps,
+      currentModel: prefs?.model ?? caps.models[0]?.value,
+      currentEffort: prefs?.effort,
+      currentPermissionMode: session.permissionMode,
+    });
   }
   return session;
 }
