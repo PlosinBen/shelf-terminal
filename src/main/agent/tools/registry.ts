@@ -149,6 +149,7 @@ export const SLASH_COMMANDS: SlashCommand[] = [
   { name: 'context', description: 'Show token usage and context window' },
   { name: 'help',    description: 'List available slash commands' },
   { name: 'model',   description: 'Pick or switch the current model' },
+  { name: 'signout', description: 'Clear the stored API key for this provider' },
   { name: 'status',  description: 'Summarise the session state' },
   { name: 'tools',   description: 'List tools available in the current mode' },
 ];

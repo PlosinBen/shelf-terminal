@@ -1,11 +1,10 @@
 import path from 'path';
-import type { Connection } from '@shared/types';
-import { createConnector } from '../../connector';
 import { shellSingleQuote } from '../../connector/file-utils';
-import type { Connector } from '../../connector/types';
 import { log } from '@shared/logger';
 
 const MAX_OUTPUT = 100 * 1024; // 100KB — truncate tool output to keep tokens sane
+
+export type ExecFn = (cwd: string, cmd: string) => Promise<{ stdout: string; stderr: string }>;
 
 export interface ToolExecutor {
   execute(name: string, input: Record<string, unknown>, cwd: string): Promise<string>;
@@ -15,19 +14,17 @@ export interface ToolExecutor {
   loadProjectInstructions(cwd: string): Promise<string | null>;
 }
 
-export function createToolExecutor(connection: Connection): ToolExecutor {
-  const connector = createConnector(connection);
-
+export function createToolExecutor(exec: ExecFn): ToolExecutor {
   return {
     async execute(name, input, cwd) {
       switch (name) {
-        case 'Read':  return readTool(connector, cwd, input);
-        case 'Grep':  return grepTool(connector, cwd, input);
-        case 'Glob':  return globTool(connector, cwd, input);
-        case 'Ls':    return lsTool(connector, cwd, input);
-        case 'Bash':  return bashTool(connector, cwd, input);
-        case 'Edit':  return editTool(connector, cwd, input);
-        case 'Write': return writeTool(connector, cwd, input);
+        case 'Read':  return readTool(exec, cwd, input);
+        case 'Grep':  return grepTool(exec, cwd, input);
+        case 'Glob':  return globTool(exec, cwd, input);
+        case 'Ls':    return lsTool(exec, cwd, input);
+        case 'Bash':  return bashTool(exec, cwd, input);
+        case 'Edit':  return editTool(exec, cwd, input);
+        case 'Write': return writeTool(exec, cwd, input);
         default:      throw new Error(`Unknown tool: ${name}`);
       }
     },
@@ -40,7 +37,7 @@ export function createToolExecutor(connection: Connection): ToolExecutor {
         'exit 0',
       ].join('\n');
       try {
-        const { stdout } = await connector.exec(cwd, `sh -c ${q(script)} -- ${q(cwd)}`);
+        const { stdout } = await exec(cwd, `sh -c ${q(script)} -- ${q(cwd)}`);
         return stdout.trim().length > 0 ? stdout : null;
       } catch (err: any) {
         log.info('tool-executor', `Failed to load project instructions: ${err?.message}`);
@@ -64,14 +61,14 @@ function truncate(s: string): string {
   return s.slice(0, MAX_OUTPUT) + `\n\n[output truncated, ${s.length - MAX_OUTPUT} more bytes]`;
 }
 
-async function run(c: Connector, cwd: string, cmd: string): Promise<string> {
-  const { stdout, stderr } = await c.exec(cwd, cmd);
+async function run(exec: ExecFn, cwd: string, cmd: string): Promise<string> {
+  const { stdout, stderr } = await exec(cwd, cmd);
   if (stderr && !stdout) throw new Error(stderr.trim());
   const out = truncate(stderr ? `${stdout}\n[stderr]\n${stderr}` : stdout);
   return out.trim() === '' ? '(no output)' : out;
 }
 
-async function readTool(c: Connector, cwd: string, input: Record<string, unknown>): Promise<string> {
+async function readTool(exec: ExecFn, cwd: string, input: Record<string, unknown>): Promise<string> {
   const fp = resolvePath(cwd, String(input.file_path ?? ''));
   const offset = typeof input.offset === 'number' ? Math.max(1, input.offset) : undefined;
   const limit  = typeof input.limit  === 'number' ? Math.max(1, input.limit)  : undefined;
@@ -86,10 +83,10 @@ async function readTool(c: Connector, cwd: string, input: Record<string, unknown
   } else {
     cmd = `cat ${q(fp)}`;
   }
-  return run(c, cwd, cmd);
+  return run(exec, cwd, cmd);
 }
 
-async function grepTool(c: Connector, cwd: string, input: Record<string, unknown>): Promise<string> {
+async function grepTool(exec: ExecFn, cwd: string, input: Record<string, unknown>): Promise<string> {
   const pattern = String(input.pattern ?? '');
   const where = input.path ? resolvePath(cwd, String(input.path)) : '.';
   const mode = String(input.output_mode ?? 'files_with_matches');
@@ -111,10 +108,10 @@ async function grepTool(c: Connector, cwd: string, input: Record<string, unknown
   const rgCmd = `rg ${rgFlags.filter(Boolean).join(' ')} ${q(pattern)} ${q(where)} 2>/dev/null | head -500`;
   const grepCmd = `grep ${grepFlags.filter(Boolean).join(' ')} ${q(pattern)} ${q(where)} 2>/dev/null | head -500`;
   const cmd = `if command -v rg >/dev/null 2>&1; then ${rgCmd}; else ${grepCmd}; fi || true`;
-  return run(c, cwd, cmd);
+  return run(exec, cwd, cmd);
 }
 
-async function globTool(c: Connector, cwd: string, input: Record<string, unknown>): Promise<string> {
+async function globTool(exec: ExecFn, cwd: string, input: Record<string, unknown>): Promise<string> {
   const pattern = String(input.pattern ?? '');
   const base = input.path ? resolvePath(cwd, String(input.path)) : cwd;
 
@@ -133,20 +130,20 @@ async function globTool(c: Connector, cwd: string, input: Record<string, unknown
   }
 
   const cmd = `find ${q(searchRoot)} -type f -name ${q(namePart)} | head -500`;
-  return run(c, cwd, cmd);
+  return run(exec, cwd, cmd);
 }
 
-async function lsTool(c: Connector, cwd: string, input: Record<string, unknown>): Promise<string> {
+async function lsTool(exec: ExecFn, cwd: string, input: Record<string, unknown>): Promise<string> {
   const p = resolvePath(cwd, String(input.path ?? '.'));
-  return run(c, cwd, `ls -la ${q(p)}`);
+  return run(exec, cwd, `ls -la ${q(p)}`);
 }
 
-async function bashTool(c: Connector, cwd: string, input: Record<string, unknown>): Promise<string> {
+async function bashTool(exec: ExecFn, cwd: string, input: Record<string, unknown>): Promise<string> {
   const cmd = String(input.command ?? '');
-  return run(c, cwd, cmd);
+  return run(exec, cwd, cmd);
 }
 
-async function editTool(c: Connector, cwd: string, input: Record<string, unknown>): Promise<string> {
+async function editTool(exec: ExecFn, cwd: string, input: Record<string, unknown>): Promise<string> {
   const fp = resolvePath(cwd, String(input.file_path ?? ''));
   const oldStr = String(input.old_string ?? '');
   const newStr = String(input.new_string ?? '');
@@ -154,7 +151,7 @@ async function editTool(c: Connector, cwd: string, input: Record<string, unknown
 
   if (oldStr.length === 0) throw new Error('old_string must not be empty');
 
-  const { stdout } = await c.exec(cwd, `cat ${q(fp)}`);
+  const { stdout } = await exec(cwd, `cat ${q(fp)}`);
   const content = stdout;
 
   const count = countOccurrences(content, oldStr);
@@ -163,22 +160,22 @@ async function editTool(c: Connector, cwd: string, input: Record<string, unknown
 
   const updated = replaceAll ? content.split(oldStr).join(newStr) : content.replace(oldStr, newStr);
 
-  await writeFile(c, cwd, fp, updated);
+  await writeFile(exec, cwd, fp, updated);
   return `Edited ${fp} — ${count} occurrence${count === 1 ? '' : 's'} replaced`;
 }
 
-async function writeTool(c: Connector, cwd: string, input: Record<string, unknown>): Promise<string> {
+async function writeTool(exec: ExecFn, cwd: string, input: Record<string, unknown>): Promise<string> {
   const fp = resolvePath(cwd, String(input.file_path ?? ''));
   const content = String(input.content ?? '');
-  await writeFile(c, cwd, fp, content);
+  await writeFile(exec, cwd, fp, content);
   return `Wrote ${fp} (${Buffer.byteLength(content, 'utf8')} bytes)`;
 }
 
-async function writeFile(c: Connector, cwd: string, fp: string, content: string): Promise<void> {
+async function writeFile(exec: ExecFn, cwd: string, fp: string, content: string): Promise<void> {
   const b64 = Buffer.from(content, 'utf8').toString('base64');
   // base64 → file, via stdin-less echo pipeline
   const cmd = `printf %s ${q(b64)} | base64 -d > ${q(fp)}`;
-  const { stderr } = await c.exec(cwd, cmd);
+  const { stderr } = await exec(cwd, cmd);
   if (stderr) throw new Error(stderr.trim());
 }
 

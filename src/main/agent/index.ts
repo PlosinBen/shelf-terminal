@@ -94,7 +94,7 @@ function createBackend(provider: AgentProvider, connection: Connection, initScri
   const isRemote = connection.type !== 'local';
 
   if (isRemote) {
-    return createRemoteBackend(connection, initScript);
+    return createRemoteBackend(connection, initScript, provider);
   }
 
   switch (provider) {
@@ -103,7 +103,7 @@ function createBackend(provider: AgentProvider, connection: Connection, initScri
     case 'copilot':
       return createCopilotBackend(connection);
     case 'gemini':
-      return createGeminiBackend();
+      return createGeminiBackend(connection);
     default:
       throw new Error(`Unknown provider: ${provider}`);
   }
@@ -113,6 +113,35 @@ interface AgentInitPrefs {
   model?: string;
   effort?: string;
   permissionMode?: string;
+}
+
+/**
+ * Compose a ProviderCapabilities blob from a backend by calling each of its
+ * method-per-capability getters. Falls back to the legacy `warmup()` method
+ * for backends that haven't migrated yet. Parallelises the async getters so
+ * providers whose getters share state (Claude caches SDK init across calls)
+ * still only pay the upfront cost once.
+ */
+async function gatherCapabilities(backend: AgentBackend, cwd: string): Promise<ProviderCapabilities | null> {
+  // Remote backends aggregate on the server side in a single round-trip.
+  if (backend.getCapabilities) return backend.getCapabilities(cwd);
+  if (!backend.getModels || !backend.getSlashCommands) return null;
+  const [models, slashCommands] = await Promise.all([
+    backend.getModels(cwd),
+    backend.getSlashCommands(),
+  ]);
+  return {
+    models: models.map((m) => ({
+      value: m.id,
+      displayName: m.displayName,
+      effortLevels: m.effortLevels,
+      vision: m.vision,
+    })),
+    permissionModes: backend.getPermissionModes?.() ?? ['default', 'acceptEdits', 'bypassPermissions', 'plan'],
+    effortLevels: backend.getEffortLevels?.() ?? [],
+    slashCommands,
+    authMethod: backend.getAuthMethod?.(),
+  };
 }
 
 async function ensureSession(
@@ -144,22 +173,20 @@ async function ensureSession(
     }
   }
 
-  // Apply persisted prefs BEFORE warmup so the capability payload can echo
+  // Apply persisted prefs BEFORE gathering capabilities so the payload echoes
   // the current state back to the UI in a single event.
   if (prefs?.model) backend.setModel?.(prefs.model);
   if (prefs?.effort) backend.setEffort?.(prefs.effort);
 
-  if (backend.warmup) {
-    const caps = await backend.warmup(cwd);
-    if (caps) {
-      broadcast(IPC.AGENT_CAPABILITIES, {
-        tabId,
-        ...caps,
-        currentModel: prefs?.model ?? caps.currentModel ?? caps.models[0]?.value,
-        currentEffort: prefs?.effort ?? caps.currentEffort,
-        currentPermissionMode: session.permissionMode,
-      });
-    }
+  const caps = await gatherCapabilities(backend, cwd);
+  if (caps) {
+    broadcast(IPC.AGENT_CAPABILITIES, {
+      tabId,
+      ...caps,
+      currentModel: prefs?.model ?? caps.models[0]?.value,
+      currentEffort: prefs?.effort,
+      currentPermissionMode: session.permissionMode,
+    });
   }
   return session;
 }
@@ -282,6 +309,45 @@ export function registerAgentHandlers() {
     if (prefs.model !== undefined) session.backend.setModel?.(prefs.model);
     if (prefs.effort !== undefined) session.backend.setEffort?.(prefs.effort);
     if (prefs.permissionMode !== undefined) session.permissionMode = prefs.permissionMode;
+  });
+
+  ipcMain.handle(IPC.AGENT_STORE_CREDENTIAL, async (_event, { tabId, key }: { tabId: string; key: string }) => {
+    const session = sessions.get(tabId);
+    if (!session) return { ok: false, error: 'Session not found' };
+    if (!session.backend.storeCredential) {
+      return { ok: false, error: 'This provider does not accept API keys' };
+    }
+    try {
+      await session.backend.storeCredential(key);
+      return { ok: true };
+    } catch (err: any) {
+      return { ok: false, error: err?.message ?? 'Failed to store credential' };
+    }
+  });
+
+  ipcMain.handle(IPC.AGENT_CHECK_AUTH, async (_event, { tabId }: { tabId: string }) => {
+    const session = sessions.get(tabId);
+    if (!session) return { authenticated: false };
+    try {
+      const authed = await session.backend.checkAuth();
+      return { authenticated: authed };
+    } catch {
+      return { authenticated: false };
+    }
+  });
+
+  ipcMain.handle(IPC.AGENT_CLEAR_CREDENTIAL, async (_event, { tabId }: { tabId: string }) => {
+    const session = sessions.get(tabId);
+    if (!session) return { ok: false, error: 'Session not found' };
+    if (!session.backend.clearCredential) {
+      return { ok: false, error: 'This provider has no credential to clear' };
+    }
+    try {
+      await session.backend.clearCredential();
+      return { ok: true };
+    } catch (err: any) {
+      return { ok: false, error: err?.message ?? 'Failed to clear credential' };
+    }
   });
 
   ipcMain.handle(IPC.AGENT_SWITCH_PROVIDER, async (_event, { tabId, provider, connection, initScript }: { tabId: string; provider: AgentProvider; connection: Connection; initScript?: string }) => {

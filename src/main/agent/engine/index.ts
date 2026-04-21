@@ -1,10 +1,13 @@
 import OpenAI from 'openai';
-import type { AgentEvent, AgentQueryOptions } from '../types';
+import type { AgentEvent, AgentQueryOptions, ProviderCapabilities } from '../types';
+import type { AuthMethod, ModelInfo, SlashCommand } from './types';
 import { log } from '@shared/logger';
-import { TOOLS, toolsForMode, toOpenAIFormat, shouldAllowAutomatically, shouldDenyAutomatically, buildSystemPrompt, SLASH_COMMANDS, getEffortLevels } from './processor-tools';
-import type { ToolExecutor } from './tool-executor';
+import { TOOLS, toolsForMode, toOpenAIFormat, shouldAllowAutomatically, shouldDenyAutomatically, buildSystemPrompt, SLASH_COMMANDS, getEffortLevels } from '../tools/registry';
+import type { ToolExecutor } from '../tools/executor';
 
-export interface OpenAIProviderConfig {
+const DEFAULT_PERMISSION_MODES = ['default', 'acceptEdits', 'bypassPermissions', 'plan'];
+
+export interface EngineConfig {
   apiKey?: string;
   baseURL?: string;
   defaultModel: string;
@@ -21,6 +24,27 @@ export interface OpenAIProviderConfig {
   /** Optional callback polled after each turn to attach rate limit / quota
    * info to the status event. */
   getRateLimit?: () => { rateLimitType?: string; utilization?: number; resetsAt?: number } | null;
+
+  // ── Method-per-capability hooks (v0.8) ────────────────────────────────────
+  /** Returns the current list of models. Providers fetch dynamically (Copilot)
+   * or return a static list (Gemini). Defaults to []. */
+  getModels?: () => Promise<ModelInfo[]>;
+  /** Permission modes exposed in the UI. Defaults to the four standard ones. */
+  permissionModes?: string[];
+  /** Effort levels exposed in the UI (engine-wide; per-model filtering is done
+   * elsewhere via ModelInfo.effortLevels). Defaults to []. */
+  effortLevels?: string[];
+  /** How the UI should surface the authentication flow. Defaults to 'none'. */
+  authMethod?: AuthMethod;
+  /** Whether the provider has valid credentials to run right now. */
+  customCheckAuth?: () => Promise<boolean>;
+  /** Persist a static API key to the target machine. Only meaningful when
+   * authMethod.kind === 'api-key'. Adapter should validate the key (e.g.
+   * probe the provider API) before calling its store's set(). */
+  storeCredential?: (key: string) => Promise<void>;
+  /** Wipe the stored credential so the next query falls back to env var
+   * (or fails with auth_required). */
+  clearCredential?: () => Promise<void>;
 }
 
 type ContentPart =
@@ -41,7 +65,7 @@ function safeParseJSON(s: string): Record<string, unknown> {
 }
 
 
-export function createOpenAIProcessor(config: OpenAIProviderConfig) {
+export function createEngine(config: EngineConfig) {
   let abortController: AbortController | null = null;
   let history: Message[] = [];
   let currentModel = config.defaultModel;
@@ -260,7 +284,7 @@ export function createOpenAIProcessor(config: OpenAIProviderConfig) {
       } catch (err: any) {
         if (err?.message === 'NO_AUTH') throw err;
         if (err.name !== 'AbortError') {
-          log.error('openai-processor', `Query error: ${err.message}`);
+          log.error('agent-engine', `Query error: ${err.message}`);
           yield { type: 'error', error: err.message ?? 'Unknown error' };
         }
       } finally {
@@ -303,9 +327,48 @@ export function createOpenAIProcessor(config: OpenAIProviderConfig) {
       currentEffort = effort || null;
     },
 
-    getSlashCommands() {
-      return SLASH_COMMANDS;
+    async getSlashCommands(): Promise<SlashCommand[]> {
+      // Hide /signout when the provider has no credential to clear so the
+      // autocomplete only advertises what actually works.
+      return SLASH_COMMANDS.filter((c) => c.name !== 'signout' || !!config.clearCredential);
     },
+
+    // ── Method-per-capability getters (v0.8) ───────────────────────────────
+    async getModels(): Promise<ModelInfo[]> {
+      return (await config.getModels?.()) ?? [];
+    },
+
+    getPermissionModes(): string[] {
+      return config.permissionModes ?? DEFAULT_PERMISSION_MODES;
+    },
+
+    getEffortLevels(): string[] {
+      return config.effortLevels ?? [];
+    },
+
+    getAuthMethod(): AuthMethod {
+      return config.authMethod ?? { kind: 'none' };
+    },
+
+    async checkAuth(): Promise<boolean> {
+      if (config.customCheckAuth) return config.customCheckAuth();
+      return true;
+    },
+
+    async storeCredential(key: string): Promise<void> {
+      if (!config.storeCredential) {
+        throw new Error(`Provider ${config.providerName} does not support storing a credential`);
+      }
+      await config.storeCredential(key);
+    },
+
+    async clearCredential(): Promise<void> {
+      if (!config.clearCredential) {
+        throw new Error(`Provider ${config.providerName} does not support clearing a credential`);
+      }
+      await config.clearCredential();
+    },
+
   };
 
   async function handleSlash(cmd: string, arg: string, cwd: string, mode: string): Promise<string | null> {
@@ -406,8 +469,20 @@ export function createOpenAIProcessor(config: OpenAIProviderConfig) {
         return lines.join('\n');
       }
 
-      case 'help':
-        return ['Available slash commands:', ...SLASH_COMMANDS.map((c) => `- \`/${c.name}\` — ${c.description}`)].join('\n');
+      case 'help': {
+        const visible = SLASH_COMMANDS.filter((c) => c.name !== 'signout' || !!config.clearCredential);
+        return ['Available slash commands:', ...visible.map((c) => `- \`/${c.name}\` — ${c.description}`)].join('\n');
+      }
+
+      case 'signout': {
+        if (!config.clearCredential) return 'This provider does not store credentials here — sign out externally (e.g. `gh auth logout`).';
+        await config.clearCredential();
+        const method = config.authMethod;
+        if (method?.kind === 'api-key') {
+          return `Credential cleared. The next turn will prompt for the \`${method.envVar}\` key again.`;
+        }
+        return 'Credential cleared.';
+      }
 
       default:
         return null;

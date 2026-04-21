@@ -72,8 +72,11 @@ interface ShelfApi {
     destroy: (tabId: string) => Promise<void>;
     resolvePermission: (tabId: string, toolUseId: string, scope: 'once' | 'session' | 'deny', toolName?: string, input?: Record<string, unknown>) => Promise<void>;
     setPrefs: (tabId: string, prefs: import('../shared/types').AgentPrefs) => Promise<void>;
+    storeCredential: (tabId: string, key: string) => Promise<{ ok: boolean; error?: string }>;
+    clearCredential: (tabId: string) => Promise<{ ok: boolean; error?: string }>;
+    checkAuth: (tabId: string) => Promise<{ authenticated: boolean }>;
     switchProvider: (tabId: string, provider: string, connection: import('../shared/types').Connection, initScript?: string) => Promise<void>;
-    onCapabilities: (callback: (payload: { tabId: string; models: { value: string; displayName: string; effortLevels?: string[]; vision?: boolean }[]; permissionModes: string[]; effortLevels: string[]; slashCommands: { name: string; description: string }[]; currentModel?: string; currentEffort?: string; currentPermissionMode?: string }) => void) => () => void;
+    onCapabilities: (callback: (payload: { tabId: string; models: { value: string; displayName: string; effortLevels?: string[]; vision?: boolean }[]; permissionModes: string[]; effortLevels: string[]; slashCommands: { name: string; description: string }[]; currentModel?: string; currentEffort?: string; currentPermissionMode?: string; authMethod?: import('../shared/types').AuthMethod }) => void) => () => void;
     onMessage: (callback: (payload: { tabId: string; type: string; content: string; toolName?: string; toolInput?: Record<string, unknown>; toolUseId?: string; parentToolUseId?: string; sessionId?: string; costUsd?: number; inputTokens?: number; outputTokens?: number }) => void) => () => void;
     onStream: (callback: (payload: { tabId: string; type: string; content: string }) => void) => () => void;
     onStatus: (callback: (payload: { tabId: string; state: string; model?: string; costUsd?: number; inputTokens?: number; outputTokens?: number; numTurns?: number; sessionId?: string }) => void) => () => void;

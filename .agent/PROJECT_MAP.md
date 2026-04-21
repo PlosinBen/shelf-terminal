@@ -21,18 +21,41 @@
 
 | Intent | File | Description |
 |--------|------|-------------|
-| IPC + session lifecycle | `index.ts` | `ensureSession()` checkAuth → apply prefs → warmup → broadcast capabilities; handlers for INIT/SEND/STOP/DESTROY/RESOLVE_PERMISSION/SET_PREFS/SWITCH_PROVIDER; per-session allowlist for "allow (this session)" |
-| Backend interface + events | `types.ts` | `AgentBackend`, `AgentEvent` union, `AgentQueryOptions`, `ProviderCapabilities`, `AgentPrefs` |
-| Claude provider | `providers/claude.ts` | Wraps `@anthropic-ai/claude-agent-sdk`, warmup fetches models/commands in plan mode, forwards effort string to SDK's native `effort` option |
-| Copilot provider | `providers/copilot.ts` | Thin wrapper: Copilot endpoint, session-token refresh, fetches `/models`, populates per-model effortLevels + context window map |
-| Gemini provider | `providers/gemini.ts` | Placeholder — to be built on openai-processor |
-| OpenAI-compatible agent loop | `providers/openai-processor.ts` | Multi-turn chat-completions loop: tool-call delta accumulation, permission gating, plan mode tool filter, slash command dispatch (`/clear/compact/context/help/model/status/tools/ask`), reasoning_effort passthrough, token + context tracking |
-| Tool registry + pattern helpers | `providers/processor-tools.ts` | Read/Grep/Glob/Ls/Bash/Edit/Write schemas with categories, `toolsForMode()` filter, permission semantics, `getEffortLevels()` pattern detector, `buildSystemPrompt()`, `SLASH_COMMANDS` |
-| Tool execution | `providers/tool-executor.ts` | Dispatches each tool via `connector.exec` so local/SSH/Docker/WSL work uniformly; also hosts `loadProjectInstructions(cwd)` which reads AGENTS.md/CLAUDE.md from git root |
-| Copilot auth | `auth/copilot-auth.ts` | Resolves GitHub token from `~/.config/github-copilot/apps.json` → `gh auth token`; exchanges for Copilot session token (~30 min TTL, auto-refresh) |
-| Remote agent stdin/stdout | `remote.ts` | Remote backend protocol — used when agent runs on SSH/Docker host |
-| Agent-server deploy | `deploy.ts` | Version-isolated deployment of agent-server binary to remote |
-| Unit tests | `providers/processor-tools.test.ts` | Tool registry, permission semantics, effort pattern, system prompt tests |
+| IPC + session lifecycle | `index.ts` | `ensureSession()` checkAuth → apply prefs → gatherCapabilities → broadcast; handlers for INIT / SEND / STOP / DESTROY / RESOLVE_PERMISSION / SET_PREFS / SWITCH_PROVIDER / STORE_CREDENTIAL / CLEAR_CREDENTIAL / CHECK_AUTH; per-session allowlist for "allow (this session)" |
+| Backend interface + events | `types.ts` | `AgentBackend` (method-per-capability), `AgentEvent` union, `AgentQueryOptions`, `ProviderCapabilities`, `AgentPrefs`, re-exports `AuthMethod` / `ModelInfo` / `SlashCommand` from engine |
+| Remote agent stdin/stdout | `remote.ts` | Backend that forwards to agent-server; bridges permission_request / get_capabilities / store_credential / clear_credential via `oneShotRequest` helper keyed by requestId |
+| Agent-server deploy | `deploy.ts` | Version-isolated deploy of agent-server binary to remote |
+| Claude provider | `providers/claude.ts` | Wraps `@anthropic-ai/claude-agent-sdk`; private `ensureInit` cache so getModels/getSlashCommands share one plan-mode SDK init; forwards effort via SDK's native `effort` option |
+| Copilot provider | `providers/copilot.ts` | ~110 lines: adapter config (endpoint / headers / dynamic token / quota interceptor / custom getModels) + `createEngine({...})` |
+| Gemini provider | `providers/gemini.ts` | ~60 lines: static model catalogue + `credential-store('gemini', 'GEMINI_API_KEY')` + `createEngine({...})`; storeCredential probes `/models` to validate key before persisting |
+
+**Agent engine (src/main/agent/engine/) — shared by OpenAI-compat providers**
+
+| Intent | File | Description |
+|--------|------|-------------|
+| Engine factory | `engine/index.ts` | `createEngine(config)` — agent loop + tool dispatch + permission gating + plan-mode filter + slash commands + history + /compact + streaming + reasoning_content + quota interceptor + credential hook; returns full `AgentBackend` |
+| Engine / adapter types | `engine/types.ts` | `OpenAIAdapter`, `ModelCatalog`, `CredentialSource`, `ModelInfo`, `SlashCommand`, re-exports `AuthMethod` from shared/types |
+| Static credential store | `engine/credential.ts` | `createStaticCredentialStore(providerId, envVar)` — reads env var first, then `~/.config/shelf/{id}.json`; writes 0600 on set; tolerates ENOENT on clear |
+
+**Agent tools (src/main/agent/tools/)**
+
+| Intent | File | Description |
+|--------|------|-------------|
+| Tool registry | `tools/registry.ts` | Read/Grep/Glob/Ls/Bash/Edit/Write schemas with categories; `toolsForMode()` plan-mode filter; permission auto-allow/deny helpers; `getEffortLevels()` pattern detector; `buildSystemPrompt()`; `SLASH_COMMANDS` |
+| Tool execution | `tools/executor.ts` | `ExecFn`-based dispatch so local (via connector) and agent-server (via child_process) share the same implementation; `loadProjectInstructions(cwd)` reads AGENTS.md / CLAUDE.md from git root |
+
+**Auth (src/main/agent/auth/)**
+
+| Intent | File | Description |
+|--------|------|-------------|
+| Copilot OAuth resolution | `auth/copilot-auth.ts` | Resolves GitHub token from `~/.config/github-copilot/apps.json` → `gh auth token`; exchanges for Copilot session token (~30 min TTL, auto-refresh) |
+
+**Unit tests**
+
+| Intent | File | Description |
+|--------|------|-------------|
+| Tool registry tests | `tools/registry.test.ts` | Tool registry, permission semantics, effort pattern, system prompt tests |
+| Credential-store tests | `engine/credential.test.ts` | Env-var precedence, file round-trip, 0600 mode, clear idempotence |
 
 ### Connector (src/main/connector/)
 

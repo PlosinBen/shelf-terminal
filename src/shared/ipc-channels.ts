@@ -64,6 +64,9 @@ export const IPC = {
   AGENT_RESOLVE_PERMISSION: 'agent:resolve-permission',
   AGENT_SET_PREFS: 'agent:set-prefs',
   AGENT_SWITCH_PROVIDER: 'agent:switch-provider',
+  AGENT_STORE_CREDENTIAL: 'agent:store-credential',
+  AGENT_CLEAR_CREDENTIAL: 'agent:clear-credential',
+  AGENT_CHECK_AUTH: 'agent:check-auth',
 
   // Copilot auth
   COPILOT_AUTH_RECHECK: 'copilot:auth-recheck',

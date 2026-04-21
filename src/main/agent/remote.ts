@@ -10,16 +10,75 @@ interface RemoteProcess {
   proc: ChildProcess;
   sendLine: (msg: object) => void;
   onLine: (callback: (line: string) => void) => void;
+  onPermissionRequest: (handler: (toolUseId: string, toolName: string, input: Record<string, unknown>) => void) => void;
+  /** Register a one-shot handler for a reply keyed by requestId. The handler
+   * fires when a message with `{ type: expectedType, requestId }` arrives. */
+  onResponse: (requestId: string, expectedType: string, handler: (payload: any) => void) => void;
   kill: () => void;
 }
 
-export function createRemoteBackend(connection: Connection, initScript?: string): AgentBackend {
+export function createRemoteBackend(connection: Connection, initScript?: string, provider: 'claude' | 'copilot' | 'gemini' = 'claude'): AgentBackend {
   let remoteProc: RemoteProcess | null = null;
   let lineCallback: ((line: string) => void) | null = null;
   let deployed = false;
   let remotePath = '';
+  let currentModel: string | null = null;
+  let currentEffort: string | null = null;
+
+  async function oneShotRequest(reqType: string, resType: string, fields: Record<string, unknown>): Promise<any> {
+    const proc = await ensureProcReady(typeof fields.cwd === 'string' ? fields.cwd : process.cwd());
+    if (!proc) throw new Error('Remote agent-server unavailable');
+    const requestId = `${reqType}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    return new Promise<any>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error(`Remote ${reqType} timed out`)), 15000);
+      proc.onResponse(requestId, resType, (payload) => {
+        clearTimeout(timer);
+        if (payload.error) reject(new Error(payload.error));
+        else resolve(payload);
+      });
+      proc.sendLine({ type: reqType, provider, requestId, ...fields });
+    });
+  }
+
+  async function ensureProcReady(cwd: string): Promise<RemoteProcess | null> {
+    if (!deployed) {
+      const result = await ensureRemoteDeploy(connection, cwd, initScript);
+      if ('error' in result) return null;
+      remotePath = result.remotePath;
+      deployed = true;
+    }
+    if (!remoteProc) {
+      const proc = await spawnRemoteServer(connection, cwd, remotePath, initScript);
+      if (!proc) return null;
+      remoteProc = proc;
+      const ready = await waitForReady(remoteProc);
+      if (!ready) { remoteProc.kill(); remoteProc = null; return null; }
+    }
+    return remoteProc;
+  }
 
   return {
+    async checkAuth() {
+      // Remote auth is verified lazily — the first query emits auth_required
+      // from the server if credentials are missing. We can't probe cheaply
+      // without a round trip, so assume OK until proven otherwise.
+      return true;
+    },
+
+    async getCapabilities(cwd: string) {
+      return oneShotRequest('get_capabilities', 'capabilities', { cwd });
+    },
+
+    async storeCredential(key: string) {
+      const res = await oneShotRequest('store_credential', 'credential_stored', { key });
+      if (!res.ok) throw new Error(res.error ?? 'Failed to store credential on remote');
+    },
+
+    async clearCredential() {
+      const res = await oneShotRequest('clear_credential', 'credential_cleared', {});
+      if (!res.ok) throw new Error(res.error ?? 'Failed to clear credential on remote');
+    },
+
     async *query(prompt: string, cwd: string, opts?: AgentQueryOptions): AsyncGenerator<AgentEvent> {
       if (!deployed) {
         const result = await ensureRemoteDeploy(connection, cwd, initScript);
@@ -48,12 +107,33 @@ export function createRemoteBackend(connection: Connection, initScript?: string)
         }
       }
 
+      // Hook permission requests from the remote into the local canUseTool
+      // callback, then send the decision back over stdin.
+      const userCallback = opts?.canUseTool;
+      remoteProc.onPermissionRequest(async (toolUseId, toolName, input) => {
+        if (!userCallback) {
+          remoteProc?.sendLine({ type: 'resolve_permission', toolUseId, allow: true });
+          return;
+        }
+        const result = await userCallback(toolUseId, toolName, input);
+        remoteProc?.sendLine({
+          type: 'resolve_permission',
+          toolUseId,
+          allow: result.behavior === 'allow',
+          message: result.behavior === 'deny' ? result.message : undefined,
+        });
+      });
+
       remoteProc.sendLine({
         type: 'send',
+        provider,
         prompt,
         cwd,
         resume: opts?.resume,
         permissionMode: opts?.permissionMode,
+        model: currentModel ?? undefined,
+        effort: currentEffort ?? undefined,
+        images: opts?.images,
       });
 
       yield* streamRemoteEvents(remoteProc);
@@ -70,6 +150,14 @@ export function createRemoteBackend(connection: Connection, initScript?: string)
         remoteProc.kill();
         remoteProc = null;
       }
+    },
+
+    setModel(model: string) {
+      currentModel = model || null;
+    },
+
+    setEffort(effort: string) {
+      currentEffort = effort || null;
     },
   };
 }
@@ -105,6 +193,10 @@ async function spawnRemoteServer(connection: Connection, cwd: string, remotePath
 
 function wrapProcess(proc: ChildProcess): RemoteProcess {
   let lineHandler: ((line: string) => void) | null = null;
+  let permissionHandler: ((toolUseId: string, toolName: string, input: Record<string, unknown>) => void) | null = null;
+  // Keyed by `${expectedType}:${requestId}` so one inflight get_capabilities
+   // plus one inflight store_credential don't collide.
+  const responseHandlers = new Map<string, (payload: any) => void>();
   let buffer = '';
 
   proc.stdout?.on('data', (chunk: Buffer) => {
@@ -112,9 +204,30 @@ function wrapProcess(proc: ChildProcess): RemoteProcess {
     const lines = buffer.split('\n');
     buffer = lines.pop() ?? '';
     for (const line of lines) {
-      if (line.trim() && lineHandler) {
-        lineHandler(line.trim());
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      // Peek for permission_request and dispatch to the permission handler
+      // before passing to the generic line handler; avoids mixing it into the
+      // AgentEvent stream the caller consumes.
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (parsed?.type === 'permission_request' && permissionHandler) {
+          permissionHandler(parsed.toolUseId, parsed.toolName, parsed.input ?? {});
+          continue;
+        }
+        if (parsed?.type && parsed.requestId) {
+          const key = `${parsed.type}:${parsed.requestId}`;
+          const handler = responseHandlers.get(key);
+          if (handler) {
+            responseHandlers.delete(key);
+            handler(parsed);
+            continue;
+          }
+        }
+      } catch {
+        // fall through to lineHandler
       }
+      lineHandler?.(trimmed);
     }
   });
 
@@ -133,6 +246,12 @@ function wrapProcess(proc: ChildProcess): RemoteProcess {
     },
     onLine: (callback) => {
       lineHandler = callback;
+    },
+    onPermissionRequest: (handler) => {
+      permissionHandler = handler;
+    },
+    onResponse: (requestId, expectedType, handler) => {
+      responseHandlers.set(`${expectedType}:${requestId}`, handler);
     },
     kill: () => {
       proc.stdin?.end();
@@ -221,6 +340,20 @@ function parseRemoteMessage(msg: any): AgentEvent | null {
         sessionId: msg.sessionId,
       },
     };
+  }
+
+  if (msg.type === 'stream') {
+    return {
+      type: 'stream',
+      payload: {
+        type: msg.streamType ?? 'text',
+        content: msg.content ?? '',
+      },
+    };
+  }
+
+  if (msg.type === 'auth_required') {
+    return { type: 'auth_required', provider: msg.provider ?? 'copilot' };
   }
 
   if (msg.type === 'error') {

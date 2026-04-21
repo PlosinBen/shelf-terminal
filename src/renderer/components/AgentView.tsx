@@ -9,6 +9,71 @@ import {
   deleteAgentState, useStore, updateProjectConfig,
 } from '../store';
 
+function ApiKeyInput({
+  tabId,
+  envVar,
+  setupUrl,
+  placeholder,
+  providerLabel,
+}: {
+  tabId: string;
+  envVar: string;
+  setupUrl?: string;
+  placeholder?: string;
+  providerLabel: string;
+}) {
+  const [key, setKey] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const save = async () => {
+    if (!key || busy) return;
+    setBusy(true);
+    setError(null);
+    const result = await window.shelfApi.agent.storeCredential(tabId, key);
+    if (result.ok) {
+      setKey('');
+      // Dismiss auth-required so the tab returns to normal chat view; the
+      // credential is now persisted and the next query will succeed.
+      updateAgentState(tabId, { authRequired: null, authError: null, authBusy: false });
+    } else {
+      setError(result.error ?? 'Failed to save key');
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      <div className="agent-auth-instructions">
+        {providerLabel} needs an API key.
+        {setupUrl && (
+          <> Get one at <a href={setupUrl} target="_blank" rel="noreferrer"><code>{setupUrl}</code></a>.</>
+        )}
+      </div>
+      <div className="agent-auth-input-row">
+        <input
+          type="password"
+          className="agent-auth-input"
+          placeholder={placeholder ?? 'API key'}
+          value={key}
+          onChange={(e) => setKey(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') save(); }}
+          disabled={busy}
+          autoFocus
+        />
+        <button className="conn-btn conn-btn-next" disabled={!key || busy} onClick={save}>
+          {busy ? 'Saving…' : 'Save'}
+        </button>
+      </div>
+      <div className="agent-auth-hint">
+        Saved to <code>~/.config/shelf/{envVar.toLowerCase().replace(/_api_key$/i, '')}.json</code> on the backend's machine (mode 0600).
+        You can alternatively set <code>{envVar}</code> on that shell.
+      </div>
+      {error && <div className="agent-auth-error">{error}</div>}
+    </>
+  );
+}
+
 interface AgentViewProps {
   tabId: string;
   projectId: string;
@@ -431,25 +496,61 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
   if (authRequired) {
     const retry = async () => {
       updateAgentState(tabId, { authBusy: true, authError: null });
-      const { authenticated } = await window.shelfApi.copilotAuth.recheck();
+      const { authenticated } = await window.shelfApi.agent.checkAuth(tabId);
       if (authenticated) {
         updateAgentState(tabId, { authRequired: null, authError: null, authBusy: false });
       } else {
-        updateAgentState(tabId, { authError: 'Still no valid Copilot credentials found.', authBusy: false });
+        updateAgentState(tabId, { authError: 'Still no valid credentials found.', authBusy: false });
       }
     };
+
+    const authMethod = capabilities?.authMethod;
+    const providerLabel = authRequired.provider.charAt(0).toUpperCase() + authRequired.provider.slice(1);
+
+    const renderBody = () => {
+      if (!authMethod || authMethod.kind === 'none') {
+        return <div className="agent-auth-instructions">No credentials found for {providerLabel}. Configure the provider on this machine and click Retry.</div>;
+      }
+      if (authMethod.kind === 'api-key') {
+        return (
+          <ApiKeyInput
+            tabId={tabId}
+            envVar={authMethod.envVar}
+            setupUrl={authMethod.setupUrl}
+            placeholder={authMethod.placeholder}
+            providerLabel={providerLabel}
+          />
+        );
+      }
+      // oauth / sdk-managed — render instruction list
+      return (
+        <>
+          <div className="agent-auth-instructions">
+            Run one of the following on the machine the backend uses, then click Retry:
+          </div>
+          <ul className="agent-auth-list">
+            {authMethod.instructions.map((ins, i) => (
+              <li key={i}>
+                {ins.command && <code>{ins.command}</code>}
+                {ins.command && ins.label && ' — '}
+                {ins.label}
+              </li>
+            ))}
+          </ul>
+        </>
+      );
+    };
+
+    const title =
+      authMethod?.kind === 'api-key' ? `${providerLabel} API key missing` :
+      authMethod?.kind === 'sdk-managed' ? `${providerLabel} SDK not signed in` :
+      `${providerLabel} not authenticated`;
+
     return (
       <div className="agent-view agent-view-active">
         <div className="agent-auth-pane">
-          <div className="agent-auth-title">GitHub Copilot not authenticated</div>
-          <div className="agent-auth-instructions">
-            Run one of the following in a terminal, then click Retry:
-          </div>
-          <ul className="agent-auth-list">
-            <li><code>gh auth login -s copilot</code> — first time signing in with <code>gh</code></li>
-            <li><code>gh auth refresh -h github.com -s copilot</code> — already signed in, just add Copilot scope</li>
-            <li><code>copilot</code> — launch GitHub Copilot CLI and sign in</li>
-          </ul>
+          <div className="agent-auth-title">{title}</div>
+          {renderBody()}
           <button className="conn-btn conn-btn-next" disabled={authBusy} onClick={retry}>
             {authBusy ? 'Checking…' : 'Retry'}
           </button>

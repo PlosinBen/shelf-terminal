@@ -4,6 +4,12 @@
 
 在 Shelf Terminal 中整合 AI agent 對話功能，支援多 provider（Claude Code、Copilot、Gemini），以專屬 agent tab 呈現結構化對話 UI。
 
+> **v0.8 狀態**：Claude / Copilot 已上線，Gemini backend 保留但在 picker 中隱藏（`AGENT_PROVIDERS` 的 `hidden: true`）。原因：
+> 1. 目前只做 API key 路線（AI Studio），不吃 Gemini Advanced / Google One 訂閱 quota，使用者需要另開 billing。
+> 2. Gemini CLI 實測回應速度偏慢，UX 不理想。
+>
+> 重開條件：評估加 OAuth（`@google/gemini-cli-core`）路線吃訂閱 quota。OAuth 會是獨立的 sdk-managed adapter，不走 engine（Gemini 原生協議非 OpenAI compat）。詳見「與 Copilot 的 auth 比較」段。
+
 ### 來源
 
 功能移植自三個 refer 專案：
@@ -677,6 +683,114 @@ AgentView 從 placeholder 變成真正的對話介面。
 ✅ Code-complete for Copilot (local only). Gemini wrapper deferred.
 
 **🚧 Shipped hidden in v0.7.0** — Copilot / Gemini picker entries are temporarily removed from the UI while remote support lands. Backends, tests, and infrastructure stay in the tree for v0.8.
+
+**✅ v0.7.1 (post-v0.7.0) — remote Copilot + Gemini landed**:
+
+- `tool-executor` now takes an `ExecFn` (not a `Connection`) so the same logic works local (wrapping `connector.exec`) and in `agent-server` (wrapping `child_process.exec`).
+- `agent-server` refactored into per-provider modules (`providers/claude.ts`, `providers/copilot.ts`, `providers/gemini.ts`) dispatched by `incoming.provider`.
+- Protocol extensions: `stream`, `auth_required`, `permission_request` / `resolve_permission`. Permissions flow server → main `canUseTool` → back.
+- `remote.ts` now forwards provider, model, effort, images, and hooks `onPermissionRequest` into the user's `canUseTool`.
+- `agent-server/build.mjs` uses an `@shared` alias so `openai-processor`'s logger import resolves; bundle grows ~200KB → ~720KB with OpenAI SDK.
+- Both Copilot and Gemini visible in the provider picker again.
+
+**Pending for later**:
+
+- Retry button on Gemini auth screen is hard-wired to `copilotAuth.recheck` — a generic `agent.recheck` IPC calling `backend.checkAuth()` would cover both.
+- Capabilities (model list, context windows) are fetched local-side only; on remote projects Copilot's `/models` call runs from the remote machine's token too — verify this still populates the UI model picker end-to-end.
+- Gemini auth is `GEMINI_API_KEY` env var only; a proper settings field / prompt for the key would be friendlier than asking users to export in their shell init.
+- Claude remote path doesn't currently forward `canUseTool` — only Copilot / Gemini carry permission prompts across stdin. Claude's SDK runs with whatever default the server sets.
+
+**🚧 v0.8 — Adapter architecture refactor (planned)**
+
+Agreed after discussion: the `providers/openai-processor.ts` monolith is about to become the engine for Copilot / Gemini / future OpenAI / Mistral / Ollama, while each provider should only declare its differences. Instead of patching in more configuration flags we promote the architecture to a proper engine + adapter split with a method-per-capability interface.
+
+### Target layout
+
+```
+src/main/agent/
+├── engine/                   # OpenAI-compat agent engine (shared across OpenAI-family providers)
+│   ├── index.ts              # createEngine(adapter, executor) → AgentBackend
+│   ├── types.ts              # OpenAIAdapter, AuthMethod, ModelInfo, CredentialSource
+│   ├── client.ts             # OpenAI API call + stream parse + tool_call delta accumulator
+│   ├── loop.ts               # Multi-turn agent loop
+│   ├── history.ts            # Message history + /compact
+│   ├── prompt.ts             # System prompt + AGENTS.md injection + mode directives
+│   ├── permissions.ts        # Mode-based gating + canUseTool bridge
+│   ├── slash.ts              # /clear /compact /context /help /model /status /tools /ask dispatch
+│   └── credential.ts         # Static API key file store (~/.config/shelf/{id}.json)
+│
+├── tools/                    # Shell tools (engine dependency)
+│   ├── registry.ts           # TOOLS schemas + categories + toolsForMode + toOpenAIFormat
+│   └── executor.ts           # ExecFn-based dispatch + loadProjectInstructions
+│
+├── auth/
+│   └── copilot-github.ts     # GitHub OAuth token → Copilot session token (special)
+│
+└── providers/                # One file per actual provider
+    ├── claude.ts             # Claude SDK wrapper (bypasses engine, uses method-per-cap with cache helper)
+    ├── copilot.ts            # ~30 lines: adapter config + createEngine(...)
+    └── gemini.ts             # ~30 lines: adapter config + createEngine(...)
+```
+
+### New AgentBackend interface (method-per-capability)
+
+```typescript
+interface AgentBackend {
+  // Lifecycle
+  checkAuth(): Promise<boolean>;
+  stop(): Promise<void>;
+  dispose(): void;
+
+  // Polymorphic capability getters (composed by main's gatherCapabilities)
+  getModels(): Promise<ModelInfo[]>;
+  getPermissionModes(): string[];
+  getEffortLevels(): string[];
+  getSlashCommands(): Promise<SlashCommand[]>;
+  getAuthMethod(): AuthMethod;
+
+  // Runtime
+  query(prompt, cwd, opts): AsyncGenerator<AgentEvent>;
+  setModel(model: string): void;
+  setEffort(effort: string): void;
+
+  // Optional — only when authMethod.kind === 'api-key'
+  storeCredential?(key: string): Promise<void>;
+}
+
+type AuthMethod =
+  | { kind: 'api-key'; envVar: string; setupUrl?: string; placeholder?: string }
+  | { kind: 'oauth'; instructions: Array<{ label: string; command?: string }> }
+  | { kind: 'sdk-managed'; instructions: Array<{ label: string; command?: string }> }
+  | { kind: 'none' };
+```
+
+Rationale: the older `warmup()` blob hides capability differences inside each provider's warmup implementation. Promoting each capability to a polymorphic method gives the composer (`gatherCapabilities` in main) a uniform `backend.getX()` shape while the provider still encapsulates the diff (Claude from SDK, Copilot/Gemini via engine reading the adapter). Claude absorbs an internal `ensureInit()` cache so multiple getters don't each re-init the SDK.
+
+### Refactor phases (R1–R10) ✅ shipped
+
+- **R1** ✅ — engine/types.ts with OpenAIAdapter / AuthMethod / ModelCatalog, method-per-cap AgentBackend
+- **R2** ✅ — tool registry moved to `tools/`; openai-processor relocated to `engine/index.ts`
+- **R3** ✅ — Copilot provider is adapter + `createEngine({...})` (~110 lines, down from ~150)
+- **R4** ✅ — Gemini provider simplified to adapter + `createEngine({...})` (~40 lines)
+- **R5** ✅ — Claude provider exposes the getters with an internal `ensureInit` cache so multiple getters share one SDK plan-mode fetch
+- **R6** ✅ — `gatherCapabilities` composes capabilities from getters; `warmup` removed from AgentBackend; `checkAuth` now required
+- **R7** ✅ — new `get_capabilities` / `capabilities` protocol; remote backend rides it to populate the UI in one round-trip
+- **R8** ✅ — agent-server providers implement `gatherCapabilities` (Claude ensureInit cache; Copilot / Gemini delegate to engine getters)
+- **R9** ✅ — AgentView auth-required pane renders off `capabilities.authMethod` discriminated union; no more `isGemini` / provider identity branches
+- **R10** ✅ — legacy `openai-processor.ts` / `processor-tools.ts` fully removed (moved into `engine/` and `tools/`)
+
+### Still pending after v0.8 refactor
+
+- Engine internals still live in a single `engine/index.ts` (~420 lines). Split into `loop.ts / prompt.ts / permissions.ts / slash.ts / history.ts / credential.ts` is a nice-to-have but not critical now.
+- Credential store (`~/.config/shelf/{provider}.json`) — `authMethod: api-key` is declared but the write-through via `backend.storeCredential` / UI input form isn't implemented yet. Falls back to env var reading.
+- Generic `agent.recheck` IPC — current `copilotAuth.recheck` only works for Copilot; Gemini / future API-key providers need a provider-agnostic re-probe.
+
+### Related v0.8 goals
+
+- Credential store (`~/.config/shelf/{provider}.json`, mode 0600) landing through the engine, with UI input for API keys writing via `backend.storeCredential()` to the target machine (never the local userData).
+- Retry button becomes a generic `backend.checkAuth()` re-probe — no more copilot-specific `recheck` IPC.
+- Claude remote permission forwarding — Claude agent-server wires `canUseTool` through stdin same as Copilot/Gemini do today.
+- Version bump on agent-server deploy so remote caches don't serve stale pre-refactor binary.
 
 #### Phase 3a — Tool Registry + Agent Loop 骨架 ✅
 

@@ -287,6 +287,54 @@
 
 **原因**: OpenAI 沒提供「哪個 model 吃 reasoning_effort」的 API signal。只能靠 model id 家族推論。
 
-**解法**: `processor-tools.ts` 的 `getEffortLevels(modelId)` — `^o\d` → 三檔、`^gpt-5(?!-chat)` → 加 `minimal`。Copilot warmup 時為每個 model 填 effortLevels，processor 在 request 時只對有 levels 的 model 帶參數。
+**解法**: `tools/registry.ts` 的 `getEffortLevels(modelId)` — `^o\d` → 三檔、`^gpt-5(?!-chat)` → 加 `minimal`。Copilot warmup 時為每個 model 填 effortLevels，processor 在 request 時只對有 levels 的 model 帶參數。
 
 **注意**: OpenAI 公告新 reasoning model 家族（o5、gpt-6 等）時要手動更新 pattern，否則該 model 的 effort chip 會隱藏。詳見 `.agent/features/AGENT_SDK_INTEGRATION.md` 的 Reasoning Effort 偵測小節。
+
+---
+
+## 27. Credentials 存在「使用中那台機器」的 `~/.config/shelf/`，不是 userData
+
+**現象**: 在本機 app 設 Gemini API key，SSH 到遠端跑 Gemini 居然還是問要 key。
+
+**原因**: v0.8 Credential Store 設計是 **per-machine** — `createStaticCredentialStore()` 永遠解析成「當前 process 的 `~/.config/shelf/{id}.json`」。本機 backend 寫到本機家目錄；remote backend 跑在 agent-server 內，寫到遠端家目錄。credentials **不會**透過網路傳遞。
+
+**為何這樣**:
+1. 安全：API key 不會在 main process 與遠端 server 間以明文流動，也不會落地在本機 userData。
+2. 一致性：跟 aws cli / gh / npm 的行為對齊——同台機器的 shelf 跟 terminal CLI 共用同一份 key（env var 也能直接蓋過）。
+3. 邊界清楚：登出一台機器不會意外登出另一台。
+
+**讀取順序**: env var (`GEMINI_API_KEY` 等) → `~/.config/shelf/{id}.json`。env var 是 runtime override，**不會**被寫回檔案。
+
+**注意**: 未來若要做「本機一份、多台共用」的混合模式（本機 key forward 作為遠端 fallback），要明顯走 opt-in 旗標，不要預設行為。目前 `Optimize.md` 記為 v0.9 候選。
+
+---
+
+## 28. Agent backend 是 method-per-capability，不要退回 blob capabilities
+
+**現象**: 很想寫 `if (caps.slashCommands) { ... }` 來做一個 provider 獨有的分支。
+
+**原因**: 早期 `ProviderCapabilities` 是單一 blob，scheduler 要根據旗標決定打哪條路徑；v0.8 把每個能力拆成 optional method（`getModels` / `getSlashCommands` / `storeCredential` / `clearCredential` / `getAuthMethod` / `getCapabilities`...）。差異封裝在 provider 內部，外層流程統一。
+
+**規則**:
+- 外層（`src/main/agent/index.ts`）只呼叫 method，從不檢查 provider 名稱。
+- 不支援某能力的 provider 就不 expose 那個 method。scheduler 先 `typeof backend.getX === 'function'` 再呼叫。
+- Remote backend (`remote.ts`) 一律 expose 全部 method，內部靠 `oneShotRequest` 轉發到 agent-server；agent-server 端再 fall-through 到各 provider。
+
+**注意**: 加新能力時不要把它塞進既有的 `ProviderCapabilities` blob——開新 method、更新 `AgentBackend` interface、remote 端加 request/response kind、agent-server 加 handler。詳見 `.agent/features/AGENT_SDK_INTEGRATION.md` 的 Method-per-Capability 小節。
+
+---
+
+## 29. Agent-server 透過 stdin/stdout 做雙向 request，用 `oneShotRequest` 包
+
+**現象**: 想加個遠端呼叫（如 `storeCredential`），在 `remote.ts` 要處理 request-id 配對、timeout、永遠 resolve 等細節。
+
+**解法**: 用 `oneShotRequest(kind, payload)` helper — 它會：
+1. 生成唯一 requestId 塞進 outgoing message。
+2. 註冊一個 resolver 到 pending map。
+3. 等 agent-server 回對應 requestId 的 response 或 error。
+4. 超時/dispose 自動 reject 並清 map，不洩漏 handler。
+
+Agent-server 端的 permission 流（`canUseTool` 把 SDK 的 permission 請求透過 `send({ type: 'permission_request', toolUseId, ... })` 發回 main，等 main 回 `resolve_permission`）同樣 pattern，不過 key 是 `toolUseId` 而非 requestId。兩個 map 不共用。
+
+**注意**: 新增跨程序的 one-shot 行為（get capabilities、store credential、clear credential、check auth...）都走 `oneShotRequest`；不要 ad-hoc 做 event listener。
