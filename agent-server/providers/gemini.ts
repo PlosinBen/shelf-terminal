@@ -1,5 +1,6 @@
 import { createEngine } from '../../src/main/agent/engine';
 import { createToolExecutor } from '../../src/main/agent/tools/executor';
+import { createStaticCredentialStore } from '../../src/main/agent/engine/credential';
 import type { ModelInfo } from '../../src/main/agent/engine/types';
 import type { PermissionCallback, PermissionResult, AgentEvent, ProviderCapabilities } from '../../src/main/agent/types';
 import { localExec } from '../tool-exec';
@@ -11,10 +12,23 @@ const GEMINI_MODELS: ModelInfo[] = [
   { id: 'gemini-2.0-flash', displayName: 'Gemini 2.0 Flash', contextWindow: 1_048_576, vision: true },
 ];
 
+const GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/openai/';
+
+async function validateGeminiKey(apiKey: string): Promise<void> {
+  const res = await fetch(`${GEMINI_BASE_URL}models`, {
+    headers: { 'Authorization': `Bearer ${apiKey}` },
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`Gemini rejected the key (${res.status})${body ? `: ${body.slice(0, 200)}` : ''}`);
+  }
+}
+
 export function createGeminiBackend(): ServerBackend {
   const pendingPermissions = new Map<string, (result: PermissionResult) => void>();
   let currentSend: SendFn | null = null;
   const contextWindows = new Map(GEMINI_MODELS.map((m) => [m.id, m.contextWindow]));
+  const cred = createStaticCredentialStore('gemini', 'GEMINI_API_KEY');
 
   const canUseTool: PermissionCallback = async (toolUseId, toolName, input) => {
     currentSend?.({ type: 'permission_request', toolUseId, toolName, input });
@@ -24,12 +38,16 @@ export function createGeminiBackend(): ServerBackend {
   };
 
   const engine = createEngine({
-    apiKey: process.env.GEMINI_API_KEY ?? 'missing',
-    baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai/',
+    baseURL: GEMINI_BASE_URL,
     defaultModel: GEMINI_MODELS[0].id,
     providerName: 'gemini',
     toolExecutor: createToolExecutor(localExec),
     getContextWindow: (model) => contextWindows.get(model),
+    tokenProvider: async () => {
+      const apiKey = await cred.get();
+      if (!apiKey) throw new Error('NO_AUTH');
+      return { apiKey };
+    },
     getModels: async () => GEMINI_MODELS,
     authMethod: {
       kind: 'api-key',
@@ -37,7 +55,12 @@ export function createGeminiBackend(): ServerBackend {
       setupUrl: 'https://aistudio.google.com/apikey',
       placeholder: 'AIza...',
     },
-    customCheckAuth: async () => !!process.env.GEMINI_API_KEY,
+    customCheckAuth: async () => (await cred.get()) !== null,
+    storeCredential: async (key) => {
+      await validateGeminiKey(key);
+      await cred.set(key);
+    },
+    clearCredential: async () => cred.clear(),
   });
 
   return {
@@ -46,7 +69,7 @@ export function createGeminiBackend(): ServerBackend {
       if (input.model) engine.setModel(input.model);
       if (input.effort) engine.setEffort(input.effort);
 
-      if (!process.env.GEMINI_API_KEY) {
+      if (!(await cred.get())) {
         send({ type: 'auth_required', provider: 'gemini' });
         send({ type: 'status', state: 'idle' });
         return;
@@ -99,6 +122,12 @@ export function createGeminiBackend(): ServerBackend {
     },
 
     dispose() { engine.dispose(); },
+
+    storeCredential: async (key) => {
+      await validateGeminiKey(key);
+      await cred.set(key);
+    },
+    clearCredential: async () => cred.clear(),
 
     resolvePermission(toolUseId: string, allow: boolean, message?: string) {
       const resolve = pendingPermissions.get(toolUseId);

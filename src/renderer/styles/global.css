@@ -984,6 +984,30 @@ button {
   font-size: 12px;
 }
 
+.agent-auth-input-row {
+  display: flex;
+  gap: 8px;
+  align-self: stretch;
+  max-width: 420px;
+  margin: 0 auto;
+}
+
+.agent-auth-input {
+  flex: 1;
+  padding: 8px 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  font-family: var(--font-mono, monospace);
+  font-size: 13px;
+}
+
+.agent-auth-input:focus {
+  outline: none;
+  border-color: var(--accent, #4a9eff);
+}
+
 .agent-auth-hint {
   font-size: 12px;
   color: var(--text-muted);

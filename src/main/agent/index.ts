@@ -311,6 +311,34 @@ export function registerAgentHandlers() {
     if (prefs.permissionMode !== undefined) session.permissionMode = prefs.permissionMode;
   });
 
+  ipcMain.handle(IPC.AGENT_STORE_CREDENTIAL, async (_event, { tabId, key }: { tabId: string; key: string }) => {
+    const session = sessions.get(tabId);
+    if (!session) return { ok: false, error: 'Session not found' };
+    if (!session.backend.storeCredential) {
+      return { ok: false, error: 'This provider does not accept API keys' };
+    }
+    try {
+      await session.backend.storeCredential(key);
+      return { ok: true };
+    } catch (err: any) {
+      return { ok: false, error: err?.message ?? 'Failed to store credential' };
+    }
+  });
+
+  ipcMain.handle(IPC.AGENT_CLEAR_CREDENTIAL, async (_event, { tabId }: { tabId: string }) => {
+    const session = sessions.get(tabId);
+    if (!session) return { ok: false, error: 'Session not found' };
+    if (!session.backend.clearCredential) {
+      return { ok: false, error: 'This provider has no credential to clear' };
+    }
+    try {
+      await session.backend.clearCredential();
+      return { ok: true };
+    } catch (err: any) {
+      return { ok: false, error: err?.message ?? 'Failed to clear credential' };
+    }
+  });
+
   ipcMain.handle(IPC.AGENT_SWITCH_PROVIDER, async (_event, { tabId, provider, connection, initScript }: { tabId: string; provider: AgentProvider; connection: Connection; initScript?: string }) => {
     const session = sessions.get(tabId);
     if (!session) return;

@@ -88,6 +88,7 @@ export interface AgentBackend {
 
   // API-key providers only (authMethod.kind === 'api-key')
   storeCredential?(key: string): Promise<void>;
+  clearCredential?(): Promise<void>;
 }
 
 export interface AgentQueryOptions {

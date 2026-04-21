@@ -9,6 +9,71 @@ import {
   deleteAgentState, useStore, updateProjectConfig,
 } from '../store';
 
+function ApiKeyInput({
+  tabId,
+  envVar,
+  setupUrl,
+  placeholder,
+  providerLabel,
+}: {
+  tabId: string;
+  envVar: string;
+  setupUrl?: string;
+  placeholder?: string;
+  providerLabel: string;
+}) {
+  const [key, setKey] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const save = async () => {
+    if (!key || busy) return;
+    setBusy(true);
+    setError(null);
+    const result = await window.shelfApi.agent.storeCredential(tabId, key);
+    if (result.ok) {
+      setKey('');
+      // Dismiss auth-required so the tab returns to normal chat view; the
+      // credential is now persisted and the next query will succeed.
+      updateAgentState(tabId, { authRequired: null, authError: null, authBusy: false });
+    } else {
+      setError(result.error ?? 'Failed to save key');
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      <div className="agent-auth-instructions">
+        {providerLabel} needs an API key.
+        {setupUrl && (
+          <> Get one at <a href={setupUrl} target="_blank" rel="noreferrer"><code>{setupUrl}</code></a>.</>
+        )}
+      </div>
+      <div className="agent-auth-input-row">
+        <input
+          type="password"
+          className="agent-auth-input"
+          placeholder={placeholder ?? 'API key'}
+          value={key}
+          onChange={(e) => setKey(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') save(); }}
+          disabled={busy}
+          autoFocus
+        />
+        <button className="conn-btn conn-btn-next" disabled={!key || busy} onClick={save}>
+          {busy ? 'Saving…' : 'Save'}
+        </button>
+      </div>
+      <div className="agent-auth-hint">
+        Saved to <code>~/.config/shelf/{envVar.toLowerCase().replace(/_api_key$/i, '')}.json</code> on the backend's machine (mode 0600).
+        You can alternatively set <code>{envVar}</code> on that shell.
+      </div>
+      {error && <div className="agent-auth-error">{error}</div>}
+    </>
+  );
+}
+
 interface AgentViewProps {
   tabId: string;
   projectId: string;
@@ -448,17 +513,13 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
       }
       if (authMethod.kind === 'api-key') {
         return (
-          <>
-            <div className="agent-auth-instructions">
-              {providerLabel} needs an API key on the machine the backend runs on.
-              {authMethod.setupUrl && (
-                <> Get one at <a href={authMethod.setupUrl} target="_blank" rel="noreferrer"><code>{authMethod.setupUrl}</code></a>.</>
-              )}
-            </div>
-            <ul className="agent-auth-list">
-              <li>Set the <code>{authMethod.envVar}</code> env var on the target machine (local shell, or remote shell init script), then click Retry.</li>
-            </ul>
-          </>
+          <ApiKeyInput
+            tabId={tabId}
+            envVar={authMethod.envVar}
+            setupUrl={authMethod.setupUrl}
+            placeholder={authMethod.placeholder}
+            providerLabel={providerLabel}
+          />
         );
       }
       // oauth / sdk-managed — render instruction list

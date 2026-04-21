@@ -39,8 +39,12 @@ export interface EngineConfig {
   /** Whether the provider has valid credentials to run right now. */
   customCheckAuth?: () => Promise<boolean>;
   /** Persist a static API key to the target machine. Only meaningful when
-   * authMethod.kind === 'api-key'. */
+   * authMethod.kind === 'api-key'. Adapter should validate the key (e.g.
+   * probe the provider API) before calling its store's set(). */
   storeCredential?: (key: string) => Promise<void>;
+  /** Wipe the stored credential so the next query falls back to env var
+   * (or fails with auth_required). */
+  clearCredential?: () => Promise<void>;
 }
 
 type ContentPart =
@@ -354,6 +358,13 @@ export function createEngine(config: EngineConfig) {
         throw new Error(`Provider ${config.providerName} does not support storing a credential`);
       }
       await config.storeCredential(key);
+    },
+
+    async clearCredential(): Promise<void> {
+      if (!config.clearCredential) {
+        throw new Error(`Provider ${config.providerName} does not support clearing a credential`);
+      }
+      await config.clearCredential();
     },
 
   };

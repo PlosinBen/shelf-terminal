@@ -113,6 +113,10 @@ contextBridge.exposeInMainWorld('shelfApi', {
       ipcRenderer.invoke(IPC.AGENT_RESOLVE_PERMISSION, { tabId, toolUseId, scope, toolName, input }),
     setPrefs: (tabId: string, prefs: { model?: string; effort?: string; permissionMode?: string }) =>
       ipcRenderer.invoke(IPC.AGENT_SET_PREFS, { tabId, prefs }),
+    storeCredential: (tabId: string, key: string): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke(IPC.AGENT_STORE_CREDENTIAL, { tabId, key }),
+    clearCredential: (tabId: string): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke(IPC.AGENT_CLEAR_CREDENTIAL, { tabId }),
     switchProvider: (tabId: string, provider: string, connection: unknown, initScript?: string) =>
       ipcRenderer.invoke(IPC.AGENT_SWITCH_PROVIDER, { tabId, provider, connection, initScript }),
     onCapabilities: (callback: (payload: any) => void) => {

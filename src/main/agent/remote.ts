@@ -11,8 +11,9 @@ interface RemoteProcess {
   sendLine: (msg: object) => void;
   onLine: (callback: (line: string) => void) => void;
   onPermissionRequest: (handler: (toolUseId: string, toolName: string, input: Record<string, unknown>) => void) => void;
-  /** Register a one-shot handler for a capabilities reply keyed by requestId. */
-  onCapabilities: (requestId: string, handler: (payload: any) => void) => void;
+  /** Register a one-shot handler for a reply keyed by requestId. The handler
+   * fires when a message with `{ type: expectedType, requestId }` arrives. */
+  onResponse: (requestId: string, expectedType: string, handler: (payload: any) => void) => void;
   kill: () => void;
 }
 
@@ -23,6 +24,21 @@ export function createRemoteBackend(connection: Connection, initScript?: string,
   let remotePath = '';
   let currentModel: string | null = null;
   let currentEffort: string | null = null;
+
+  async function oneShotRequest(reqType: string, resType: string, fields: Record<string, unknown>): Promise<any> {
+    const proc = await ensureProcReady(typeof fields.cwd === 'string' ? fields.cwd : process.cwd());
+    if (!proc) throw new Error('Remote agent-server unavailable');
+    const requestId = `${reqType}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    return new Promise<any>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error(`Remote ${reqType} timed out`)), 15000);
+      proc.onResponse(requestId, resType, (payload) => {
+        clearTimeout(timer);
+        if (payload.error) reject(new Error(payload.error));
+        else resolve(payload);
+      });
+      proc.sendLine({ type: reqType, provider, requestId, ...fields });
+    });
+  }
 
   async function ensureProcReady(cwd: string): Promise<RemoteProcess | null> {
     if (!deployed) {
@@ -50,18 +66,17 @@ export function createRemoteBackend(connection: Connection, initScript?: string,
     },
 
     async getCapabilities(cwd: string) {
-      const proc = await ensureProcReady(cwd);
-      if (!proc) throw new Error('Remote agent-server unavailable');
-      const requestId = `caps-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      return new Promise<any>((resolve, reject) => {
-        const timer = setTimeout(() => reject(new Error('Remote capabilities timed out')), 15000);
-        proc.onCapabilities(requestId, (payload) => {
-          clearTimeout(timer);
-          if (payload.error) reject(new Error(payload.error));
-          else resolve(payload);
-        });
-        proc.sendLine({ type: 'get_capabilities', provider, cwd, requestId });
-      });
+      return oneShotRequest('get_capabilities', 'capabilities', { cwd });
+    },
+
+    async storeCredential(key: string) {
+      const res = await oneShotRequest('store_credential', 'credential_stored', { key });
+      if (!res.ok) throw new Error(res.error ?? 'Failed to store credential on remote');
+    },
+
+    async clearCredential() {
+      const res = await oneShotRequest('clear_credential', 'credential_cleared', {});
+      if (!res.ok) throw new Error(res.error ?? 'Failed to clear credential on remote');
     },
 
     async *query(prompt: string, cwd: string, opts?: AgentQueryOptions): AsyncGenerator<AgentEvent> {
@@ -179,7 +194,9 @@ async function spawnRemoteServer(connection: Connection, cwd: string, remotePath
 function wrapProcess(proc: ChildProcess): RemoteProcess {
   let lineHandler: ((line: string) => void) | null = null;
   let permissionHandler: ((toolUseId: string, toolName: string, input: Record<string, unknown>) => void) | null = null;
-  const capabilityHandlers = new Map<string, (payload: any) => void>();
+  // Keyed by `${expectedType}:${requestId}` so one inflight get_capabilities
+   // plus one inflight store_credential don't collide.
+  const responseHandlers = new Map<string, (payload: any) => void>();
   let buffer = '';
 
   proc.stdout?.on('data', (chunk: Buffer) => {
@@ -198,10 +215,11 @@ function wrapProcess(proc: ChildProcess): RemoteProcess {
           permissionHandler(parsed.toolUseId, parsed.toolName, parsed.input ?? {});
           continue;
         }
-        if (parsed?.type === 'capabilities' && parsed.requestId) {
-          const handler = capabilityHandlers.get(parsed.requestId);
+        if (parsed?.type && parsed.requestId) {
+          const key = `${parsed.type}:${parsed.requestId}`;
+          const handler = responseHandlers.get(key);
           if (handler) {
-            capabilityHandlers.delete(parsed.requestId);
+            responseHandlers.delete(key);
             handler(parsed);
             continue;
           }
@@ -232,8 +250,8 @@ function wrapProcess(proc: ChildProcess): RemoteProcess {
     onPermissionRequest: (handler) => {
       permissionHandler = handler;
     },
-    onCapabilities: (requestId, handler) => {
-      capabilityHandlers.set(requestId, handler);
+    onResponse: (requestId, expectedType, handler) => {
+      responseHandlers.set(`${expectedType}:${requestId}`, handler);
     },
     kill: () => {
       proc.stdin?.end();

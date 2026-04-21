@@ -7,7 +7,7 @@ import type { OutgoingMessage, QueryInput, ServerBackend } from './providers/typ
 type Provider = 'claude' | 'copilot' | 'gemini';
 
 interface IncomingMessage {
-  type: 'send' | 'stop' | 'ping' | 'resolve_permission' | 'get_capabilities';
+  type: 'send' | 'stop' | 'ping' | 'resolve_permission' | 'get_capabilities' | 'store_credential' | 'clear_credential';
   provider?: Provider;
   prompt?: string;
   cwd?: string;
@@ -20,8 +20,9 @@ interface IncomingMessage {
   toolUseId?: string;
   allow?: boolean;
   message?: string;
-  // get_capabilities fields
+  // get_capabilities / store_credential / clear_credential fields
   requestId?: string;
+  key?: string;
 }
 
 function send(msg: OutgoingMessage) {
@@ -118,6 +119,34 @@ rl.on('line', (line) => {
           send({ type: 'capabilities', requestId: msg.requestId, ...(caps ?? {}) });
         } catch (err: any) {
           send({ type: 'capabilities', requestId: msg.requestId, error: err?.message ?? String(err) });
+        }
+      })();
+      break;
+    }
+    case 'store_credential': {
+      const provider = msg.provider ?? 'claude';
+      (async () => {
+        try {
+          const backend = getBackend(provider);
+          if (!backend.storeCredential) throw new Error(`Provider ${provider} does not accept API keys`);
+          await backend.storeCredential(msg.key ?? '');
+          send({ type: 'credential_stored', requestId: msg.requestId, ok: true });
+        } catch (err: any) {
+          send({ type: 'credential_stored', requestId: msg.requestId, ok: false, error: err?.message ?? String(err) });
+        }
+      })();
+      break;
+    }
+    case 'clear_credential': {
+      const provider = msg.provider ?? 'claude';
+      (async () => {
+        try {
+          const backend = getBackend(provider);
+          if (!backend.clearCredential) throw new Error(`Provider ${provider} has no credential to clear`);
+          await backend.clearCredential();
+          send({ type: 'credential_cleared', requestId: msg.requestId, ok: true });
+        } catch (err: any) {
+          send({ type: 'credential_cleared', requestId: msg.requestId, ok: false, error: err?.message ?? String(err) });
         }
       })();
       break;

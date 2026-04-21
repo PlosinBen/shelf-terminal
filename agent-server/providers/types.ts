@@ -27,4 +27,8 @@ export interface ServerBackend {
   /** Called when main sends a resolve_permission message — used by backends
    * whose query pipelines emit permission_request events. */
   resolvePermission?(toolUseId: string, allow: boolean, message?: string): void;
+  /** For api-key providers: persist a credential on the target machine. */
+  storeCredential?(key: string): Promise<void>;
+  /** Wipe the stored credential on the target machine. */
+  clearCredential?(): Promise<void>;
 }
