@@ -141,9 +141,11 @@ export function createEngine(config: EngineConfig) {
       yield { type: 'status', payload: { state: 'streaming', model: currentModel } };
 
       try {
-        const oai = await getClient();
-
         for (let turn = 0; turn < MAX_TURNS; turn++) {
+          // Re-resolve per turn so long agent runs refresh tokens that expire
+          // mid-flight (Copilot session tokens are ~30min TTL); tokenProvider
+          // caches and only re-fetches when <60s of life remain.
+          const oai = await getClient();
           const supportedEfforts = getEffortLevels(currentModel);
           const effort = (supportedEfforts.length > 0 && currentEffort && supportedEfforts.includes(currentEffort))
             ? currentEffort : undefined;
