@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import OpenAI from 'openai';
 import type { AgentEvent, AgentQueryOptions, ProviderCapabilities } from '../types';
 import type { AuthMethod, ModelInfo, SlashCommand } from './types';
+import type { HistoryStore } from './history-store';
 import { log } from '@shared/logger';
 import { TOOLS, toolsForMode, toOpenAIFormat, shouldAllowAutomatically, shouldDenyAutomatically, buildSystemPrompt, SLASH_COMMANDS, getEffortLevels } from '../tools/registry';
 import type { ToolExecutor } from '../tools/executor';
@@ -46,13 +47,19 @@ export interface EngineConfig {
   /** Wipe the stored credential so the next query falls back to env var
    * (or fails with auth_required). */
   clearCredential?: () => Promise<void>;
+
+  /** Optional persistence adapter. When provided, the engine loads existing
+   * history on the first query that has a sessionId and saves after every
+   * successful turn. Missing/null means in-memory-only (pre-persistence
+   * behaviour — transcripts reset on app restart). */
+  historyStore?: HistoryStore;
 }
 
 type ContentPart =
   | { type: 'text'; text: string }
   | { type: 'image_url'; image_url: { url: string } };
 
-interface Message {
+export interface Message {
   role: 'system' | 'user' | 'assistant' | 'tool';
   content: string | ContentPart[] | null;
   tool_calls?: Array<{ id: string; type: 'function'; function: { name: string; arguments: string } }>;
@@ -104,10 +111,28 @@ export function createEngine(config: EngineConfig) {
   // session manager / renderer can treat both backends uniformly. Subsequent
   // turns emit the same id in every status event, which is what the session
   // manager captures and persists into ProjectConfig.agentSessionIds.
-  //
-  // Today the id is pure plumbing — no history load/save yet. See
-  // .agent/features/ENGINE_PERSISTENCE.md for the follow-up steps.
   let sessionId: string | undefined;
+  // One-shot guard so we don't hit the store on every turn. Reset by
+  // clearAllState() / clearHistory() when starting a new conversation.
+  let historyLoaded = false;
+  const createdAt = Date.now();
+
+  // Shared "drop everything" path used by both the /clear slash command
+  // (user typed it into the chat) and the public clearHistory() method
+  // (external callers). Keeps the disk and in-memory state in lockstep.
+  function clearAllState(): void {
+    const oldId = sessionId;
+    history = [];
+    lastUsage = null;
+    turnCount = 0;
+    sessionId = undefined;
+    historyLoaded = false;
+    if (oldId && config.historyStore) {
+      // Fire and forget — persistence cleanup shouldn't block the user's
+      // next input. Errors are logged inside the adapter.
+      config.historyStore.delete(oldId).catch(() => {});
+    }
+  }
 
   async function getClient(): Promise<OpenAI> {
     if (config.tokenProvider) {
@@ -128,12 +153,34 @@ export function createEngine(config: EngineConfig) {
 
       // Resolve sessionId precedence: external resume id (from caller) > already
       // held id > freshly minted. Once set it sticks for the engine's lifetime
-      // until clearHistory() wipes it.
+      // until clearAllState() wipes it.
       if (opts?.resume) {
         sessionId = opts.resume;
       } else if (!sessionId) {
         sessionId = randomUUID();
         log.debug('agent-engine', `session.new id=${sessionId} provider=${config.providerName}`);
+      }
+
+      // Hydrate in-memory history from disk on the first entry for this
+      // session. Done once per session (historyLoaded guard) so subsequent
+      // turns hit the in-memory array only. Failure is non-fatal: we log,
+      // continue with an empty history, and the next save() will overwrite.
+      // The defensive try/catch means even a buggy third-party adapter
+      // can't eat a user's turn.
+      if (!historyLoaded && config.historyStore && sessionId) {
+        try {
+          const restored = await config.historyStore.load(sessionId);
+          if (restored && restored.messages.length > 0) {
+            history = [...restored.messages];
+            log.info(
+              'agent-engine',
+              `history.restored id=${sessionId} provider=${config.providerName} messages=${restored.messages.length}`,
+            );
+          }
+        } catch (err: any) {
+          log.info('agent-engine', `history.load threw id=${sessionId}: ${err?.message ?? err} — continuing with empty history`);
+        }
+        historyLoaded = true;
       }
 
       const mode = opts?.permissionMode ?? 'default';
@@ -337,6 +384,25 @@ export function createEngine(config: EngineConfig) {
           }
         }
 
+        // Persist the fully-consistent history before announcing idle.
+        // Skipped for /ask turns (ephemeral === true) because those
+        // explicitly drop their contribution in the finally block.
+        // Errors in save() are logged inside the adapter and do not
+        // propagate — a disk hiccup shouldn't eat the user's reply.
+        if (!ephemeral && sessionId && config.historyStore) {
+          const head = history[0]?.role === 'system' ? 1 : 0;
+          const toPersist = history.slice(head);
+          await config.historyStore.save({
+            version: 1,
+            sessionId,
+            providerName: config.providerName,
+            messages: toPersist,
+            model: currentModel,
+            createdAt,
+            updatedAt: Date.now(),
+          });
+        }
+
         yield { type: 'status', payload: { state: 'idle', model: currentModel, sessionId } };
       } catch (err: any) {
         if (err?.message === 'NO_AUTH') throw err;
@@ -373,11 +439,7 @@ export function createEngine(config: EngineConfig) {
     },
 
     clearHistory() {
-      history = [];
-      // Drop the sessionId too so the next query mints a fresh one — /clear
-      // semantically starts a new conversation, so treat it as a new session
-      // for persistence purposes.
-      sessionId = undefined;
+      clearAllState();
     },
 
     setModel(model: string) {
@@ -439,10 +501,8 @@ export function createEngine(config: EngineConfig) {
   async function handleSlash(cmd: string, arg: string, cwd: string, mode: string): Promise<string | null> {
     switch (cmd) {
       case 'clear':
-        log.info('agent-engine', `slash.clear provider=${config.providerName} historyDropped=${history.length}`);
-        history = [];
-        lastUsage = null;
-        turnCount = 0;
+        log.info('agent-engine', `slash.clear provider=${config.providerName} historyDropped=${history.length} sessionId=${sessionId ?? '-'}`);
+        clearAllState();
         return 'Conversation history cleared.';
 
       case 'compact': {

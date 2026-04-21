@@ -2,6 +2,7 @@ import type { AgentBackend } from '../types';
 import type { Connection } from '@shared/types';
 import type { ModelInfo } from '../engine/types';
 import { createEngine } from '../engine';
+import { createFileHistoryStore } from '../engine/history-store';
 import { createToolExecutor } from '../tools/executor';
 import { createConnector } from '../../connector';
 import { createStaticCredentialStore } from '../engine/credential';
@@ -37,6 +38,7 @@ export function createGeminiBackend(connection: Connection): AgentBackend {
     baseURL: GEMINI_BASE_URL,
     defaultModel: GEMINI_MODELS[0].id,
     providerName: 'gemini',
+    historyStore: createFileHistoryStore(),
     toolExecutor: createToolExecutor((cwd, cmd) => createConnector(connection).exec(cwd, cmd)),
     getContextWindow: (model) => contextWindows.get(model),
     tokenProvider: async () => {

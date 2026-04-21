@@ -3,6 +3,7 @@ import type { Connection } from '@shared/types';
 import type { ModelInfo } from '../engine/types';
 import { log } from '@shared/logger';
 import { createEngine } from '../engine';
+import { createFileHistoryStore } from '../engine/history-store';
 import { createToolExecutor } from '../tools/executor';
 import { getEffortLevels } from '../tools/registry';
 import { createConnector } from '../../connector';
@@ -100,6 +101,7 @@ export function createCopilotBackend(connection: Connection): AgentBackend {
     baseURL: 'https://api.githubcopilot.com',
     defaultModel: 'gpt-4o',
     providerName: 'copilot',
+    historyStore: createFileHistoryStore(),
     defaultHeaders: COPILOT_DEFAULT_HEADERS,
     tokenProvider: async () => {
       const session = await getCopilotSessionToken();
