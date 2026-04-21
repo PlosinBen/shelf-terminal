@@ -324,12 +324,20 @@ function processMessage(msg: SDKMessage, currentModel: string | null): AgentEven
         // haiku/opus during a single user turn. Subagent messages always set
         // `parent_tool_use_id`; suppress the model field there so the UI
         // only tracks the top-level model the user actually picked.
+        //
+        // Built-in slash commands like `/context`, `/cost` don't call the
+        // API at all — the SDK fabricates an assistant message with
+        // `model: '<synthetic>'` (or similar `<...>` sentinel). Those
+        // aren't real model switches either, so treat them like subagent
+        // messages and leave the existing status bar model untouched.
         const isSubagent = msg.parent_tool_use_id != null;
+        const modelRaw = msg.message.model;
+        const isSynthetic = typeof modelRaw === 'string' && modelRaw.startsWith('<');
         events.push({
           type: 'status',
           payload: {
             state: 'streaming',
-            ...(isSubagent ? {} : { model: msg.message.model }),
+            ...(isSubagent || isSynthetic ? {} : { model: modelRaw }),
             inputTokens: msg.message.usage.input_tokens,
             outputTokens: msg.message.usage.output_tokens,
             sessionId: msg.session_id,
