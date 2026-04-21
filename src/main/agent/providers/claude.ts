@@ -318,11 +318,18 @@ function processMessage(msg: SDKMessage, currentModel: string | null): AgentEven
       }
 
       if (msg.message.usage) {
+        // Claude Code internally spawns Haiku subagents (tool summarisation,
+        // side tasks). Their assistant messages carry their own `model` —
+        // echoing that to the status bar made the displayed model flicker
+        // haiku/opus during a single user turn. Subagent messages always set
+        // `parent_tool_use_id`; suppress the model field there so the UI
+        // only tracks the top-level model the user actually picked.
+        const isSubagent = msg.parent_tool_use_id != null;
         events.push({
           type: 'status',
           payload: {
             state: 'streaming',
-            model: msg.message.model,
+            ...(isSubagent ? {} : { model: msg.message.model }),
             inputTokens: msg.message.usage.input_tokens,
             outputTokens: msg.message.usage.output_tokens,
             sessionId: msg.session_id,
