@@ -1,4 +1,5 @@
 import { test, expect } from './docker-helpers';
+import { readActiveTerminalText } from '../helpers';
 
 test.setTimeout(30_000);
 
@@ -9,12 +10,14 @@ test('Docker exec spawns terminal and runs commands', async ({ shelfApp: { page 
   }
 
   await expect(page.locator('.tab-bar .tab')).toHaveCount(1, { timeout: 10_000 });
-
-  const xtermRows = page.locator('.terminal-container:visible .xterm-rows');
   await page.waitForTimeout(2000);
 
   await page.keyboard.type('echo __DOCKER_E2E__\n');
-  await expect(xtermRows).toContainText('__DOCKER_E2E__', { timeout: 10_000 });
+  // WebGL renderer paints rows to canvas; read from xterm buffer instead.
+  await expect.poll(
+    async () => await readActiveTerminalText(page),
+    { timeout: 10_000 },
+  ).toContain('__DOCKER_E2E__');
 });
 
 test('uploadFile streams a file into the container via docker exec', async ({ shelfApp: { page } }) => {
