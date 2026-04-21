@@ -264,12 +264,10 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
     // otherwise forward it to the embedded Claude Code CLI which rejects
     // built-in interactive commands in non-interactive sessions with
     //   "/model isn't available in this environment."
-    // Bare `/model` opens our picker. `/model <id>` just pushes the id
-    // straight through setPrefs — don't pre-validate against
-    // `capabilities.models` because our catalogue can lag behind what
-    // the backend actually accepts (Claude aliases like `opusplan`,
-    // Copilot models added since last getModels() refresh). The backend
-    // will surface its own error on the next query if the id is bogus.
+    // Bare `/model` opens our picker. `/model <id>` asks main to
+    // validate the id against the backend's live getModels() before
+    // committing — any unknown id surfaces immediately as an error
+    // instead of silently storing then failing on the next send.
     if (text === '/model' || text.startsWith('/model ')) {
       setInput('');
       const arg = text.slice('/model'.length).trim();
@@ -280,9 +278,18 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
         }
         return;
       }
-      updateAgentState(tabId, { model: arg });
-      window.shelfApi.agent.setPrefs(tabId, { model: arg });
-      persistAgentPref('model', arg);
+      (async () => {
+        const res = await window.shelfApi.agent.setPrefs(tabId, { model: arg }, true);
+        if (!res.ok) {
+          addAgentMessage(tabId, {
+            id: `msg-${Date.now()}`, role: 'system', type: 'error',
+            content: res.error ?? `Failed to switch model: ${arg}`,
+          });
+          return;
+        }
+        updateAgentState(tabId, { model: arg });
+        persistAgentPref('model', arg);
+      })();
       return;
     }
 

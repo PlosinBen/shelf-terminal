@@ -354,18 +354,40 @@ export function registerAgentHandlers() {
     }
   });
 
-  ipcMain.handle(IPC.AGENT_SET_PREFS, async (_event, { tabId, prefs }: { tabId: string; prefs: AgentInitPrefs }) => {
+  ipcMain.handle(IPC.AGENT_SET_PREFS, async (_event, { tabId, prefs, validate }: { tabId: string; prefs: AgentInitPrefs; validate?: boolean }): Promise<{ ok: boolean; error?: string }> => {
     const session = sessions.get(tabId);
-    if (!session) return;
+    if (!session) return { ok: false, error: 'Session not found' };
     const changes = [
       prefs.model !== undefined ? `model=${prefs.model}` : null,
       prefs.effort !== undefined ? `effort=${prefs.effort}` : null,
       prefs.permissionMode !== undefined ? `permMode=${prefs.permissionMode}` : null,
     ].filter(Boolean);
-    if (changes.length > 0) log.info('agent', `session.prefs tab=${tabId} ${changes.join(' ')}`);
+    if (changes.length > 0) log.info('agent', `session.prefs tab=${tabId} ${changes.join(' ')}${validate ? ' validate=1' : ''}`);
+
+    // Only runs when the caller explicitly asks (the typed `/model <id>`
+    // path). Picker-driven changes already pick from a list, so they
+    // skip this and avoid the getModels() round-trip. On Copilot that
+    // call is cheap (cached /models), on Claude it's a plan-mode SDK
+    // init — not cheap, but only paid when the user types a raw id.
+    if (validate && prefs.model !== undefined) {
+      try {
+        const models = (await session.backend.getModels?.()) ?? [];
+        if (models.length > 0 && !models.some((m) => m.id === prefs.model)) {
+          const available = models.map((m) => m.id).join(', ');
+          return { ok: false, error: `Unknown model: ${prefs.model}\nAvailable: ${available}` };
+        }
+      } catch (err: any) {
+        // Don't block on validation failure — fall through and let the
+        // next query surface the real error. Better UX than "we can't
+        // check, so we refuse".
+        log.info('agent', `session.prefs validate.failed tab=${tabId}: ${err?.message ?? err}`);
+      }
+    }
+
     if (prefs.model !== undefined) session.backend.setModel?.(prefs.model);
     if (prefs.effort !== undefined) session.backend.setEffort?.(prefs.effort);
     if (prefs.permissionMode !== undefined) session.permissionMode = prefs.permissionMode;
+    return { ok: true };
   });
 
   ipcMain.handle(IPC.AGENT_STORE_CREDENTIAL, async (_event, { tabId, key }: { tabId: string; key: string }) => {

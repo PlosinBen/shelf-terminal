@@ -113,8 +113,8 @@ contextBridge.exposeInMainWorld('shelfApi', {
       ipcRenderer.invoke(IPC.AGENT_DELETE_HISTORIES, { sessionIds }),
     resolvePermission: (tabId: string, toolUseId: string, scope: 'once' | 'session' | 'deny', toolName?: string, input?: Record<string, unknown>) =>
       ipcRenderer.invoke(IPC.AGENT_RESOLVE_PERMISSION, { tabId, toolUseId, scope, toolName, input }),
-    setPrefs: (tabId: string, prefs: { model?: string; effort?: string; permissionMode?: string }) =>
-      ipcRenderer.invoke(IPC.AGENT_SET_PREFS, { tabId, prefs }),
+    setPrefs: (tabId: string, prefs: { model?: string; effort?: string; permissionMode?: string }, validate?: boolean) =>
+      ipcRenderer.invoke(IPC.AGENT_SET_PREFS, { tabId, prefs, validate }),
     storeCredential: (tabId: string, key: string): Promise<{ ok: boolean; error?: string }> =>
       ipcRenderer.invoke(IPC.AGENT_STORE_CREDENTIAL, { tabId, key }),
     clearCredential: (tabId: string): Promise<{ ok: boolean; error?: string }> =>
