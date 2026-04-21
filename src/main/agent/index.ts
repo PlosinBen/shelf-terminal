@@ -151,17 +151,24 @@ async function ensureSession(
   cwd: string,
   initScript?: string,
   prefs?: AgentInitPrefs,
+  sessionIds?: Partial<Record<AgentProvider, string>>,
 ): Promise<Session> {
   let session = sessions.get(tabId);
   if (session) return session;
 
-  log.info('agent', `session.create tab=${tabId} provider=${provider} connection=${connection.type} cwd=${cwd}`);
+  log.info('agent', `session.create tab=${tabId} provider=${provider} connection=${connection.type} cwd=${cwd} resume=${sessionIds?.[provider] ?? '-'}`);
   const backend = createBackend(provider, connection, initScript);
+  // Seed providerSessionIds so (a) the first send()  passes `resume` to the
+  // backend and (b) switching providers within the tab re-uses whichever
+  // session id was previously captured for that provider. Empty/missing
+  // entries just mean "start fresh" for that provider.
+  const providerSessionIds: Partial<Record<AgentProvider, string>> = { ...(sessionIds ?? {}) };
   session = {
     tabId, projectId: '', provider, backend, state: 'idle',
+    sdkSessionId: providerSessionIds[provider],
     permissionMode: prefs?.permissionMode ?? 'default',
     pendingPermissions: new Map(),
-    providerSessionIds: {},
+    providerSessionIds,
     sessionAllowlist: new Set(),
   };
   sessions.set(tabId, session);
@@ -201,8 +208,8 @@ async function ensureSession(
 }
 
 export function registerAgentHandlers() {
-  ipcMain.handle(IPC.AGENT_INIT, async (_event, { tabId, provider, connection, cwd, initScript, prefs }: { tabId: string; provider: AgentProvider; connection: Connection; cwd: string; initScript?: string; prefs?: AgentInitPrefs }) => {
-    await ensureSession(tabId, provider, connection, cwd, initScript, prefs);
+  ipcMain.handle(IPC.AGENT_INIT, async (_event, { tabId, provider, connection, cwd, initScript, prefs, sessionIds }: { tabId: string; provider: AgentProvider; connection: Connection; cwd: string; initScript?: string; prefs?: AgentInitPrefs; sessionIds?: Partial<Record<AgentProvider, string>> }) => {
+    await ensureSession(tabId, provider, connection, cwd, initScript, prefs, sessionIds);
   });
 
   ipcMain.handle(IPC.AGENT_SEND, async (_event, { tabId, prompt, cwd, provider, connection, initScript, attachments }: { tabId: string; prompt: string; cwd: string; provider: AgentProvider; connection: Connection; initScript?: string; attachments?: { files?: string[]; images?: string[] } }) => {

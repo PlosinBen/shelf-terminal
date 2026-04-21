@@ -160,7 +160,12 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
     if (!provider || initCalled.current) return;
     initCalled.current = true;
     const prefs = projects[projectIndex]?.config.agentPrefs?.[provider];
-    window.shelfApi.agent.init(tabId, provider, connection, cwd, initScript, prefs);
+    // Hand back whatever sessionIds we've stored for this project so the
+    // backend can resume (Claude) or just stash them for later provider
+    // switches. Engine-based providers ignore `resume`, so passing these
+    // through is safe even for Copilot/Gemini.
+    const sessionIds = projects[projectIndex]?.config.agentSessionIds;
+    window.shelfApi.agent.init(tabId, provider, connection, cwd, initScript, prefs, sessionIds);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [provider, tabId, cwd, connection, initScript, projectIndex]);
 

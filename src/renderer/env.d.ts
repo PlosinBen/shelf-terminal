@@ -66,7 +66,7 @@ interface ShelfApi {
     logsPath: () => Promise<string>;
   };
   agent: {
-    init: (tabId: string, provider: string, connection: import('../shared/types').Connection, cwd: string, initScript?: string, prefs?: import('../shared/types').AgentPrefs) => Promise<void>;
+    init: (tabId: string, provider: string, connection: import('../shared/types').Connection, cwd: string, initScript?: string, prefs?: import('../shared/types').AgentPrefs, sessionIds?: Partial<Record<import('../shared/types').AgentProvider, string>>) => Promise<void>;
     send: (tabId: string, prompt: string, cwd: string, provider: string, connection: import('../shared/types').Connection, initScript?: string, attachments?: { files?: string[]; images?: string[] }) => Promise<void>;
     stop: (tabId: string) => Promise<void>;
     destroy: (tabId: string) => Promise<void>;
