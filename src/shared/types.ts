@@ -125,11 +125,19 @@ export interface AppSettings {
   defaultLocalPath?: string;
   dockerPath?: string;
   unicode11?: boolean;
-  /** Expand tool_use blocks in Agent view by default (user can still toggle per-message). */
-  agentToolDefaultExpanded?: boolean;
+  /** Per-tool default expand state for Agent view tool_use blocks.
+   * Keyed by the tool name emitted by the provider (Read, Bash, Edit, …).
+   * Missing or false = collapsed (default), true = expanded on first render.
+   * User can still toggle per-message after render. */
+  agentToolDefaultExpanded?: Partial<Record<string, boolean>>;
   /** Expand thinking blocks in Agent view by default. */
   agentThinkingDefaultExpanded?: boolean;
 }
+
+/** Tools the Agent Settings panel exposes expand toggles for. Mirrors the
+ * registry in src/main/agent/tools/registry.ts — kept here to avoid dragging
+ * main-process code into the renderer. */
+export const AGENT_TOOL_NAMES = ['Read', 'Grep', 'Glob', 'Ls', 'Bash', 'Edit', 'Write'] as const;
 
 
 // ── FolderPicker ──

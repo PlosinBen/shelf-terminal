@@ -2065,6 +2065,12 @@ button {
   cursor: pointer;
 }
 
+.settings-checkbox-column {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
 /* ── Agent Provider Picker ── */
 
 .agent-provider-picker {

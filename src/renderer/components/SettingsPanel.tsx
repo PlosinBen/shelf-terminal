@@ -3,6 +3,7 @@ import { useStore, updateSettings, toggleSettings } from '../store';
 import { themes } from '../themes';
 import { comboToLabel, recordCombo } from '../hooks/useKeybindings';
 import type { AppSettings, KeybindingAction, KeybindingConfig, LogLevel } from '@shared/types';
+import { AGENT_TOOL_NAMES } from '@shared/types';
 
 const ACTION_LABELS: Record<KeybindingAction, string> = {
   toggleSidebar: 'Toggle Sidebar',
@@ -207,17 +208,6 @@ export function SettingsPanel() {
           <div className="settings-divider" />
           <div className="settings-section-title">Agent</div>
           <div className="settings-group">
-            <label className="settings-label">Tool Blocks</label>
-            <label className="settings-checkbox-label">
-              <input
-                type="checkbox"
-                checked={draft.agentToolDefaultExpanded ?? false}
-                onChange={(e) => updateDraft({ agentToolDefaultExpanded: e.target.checked })}
-              />
-              Expand by default
-            </label>
-          </div>
-          <div className="settings-group">
             <label className="settings-label">Thinking Blocks</label>
             <label className="settings-checkbox-label">
               <input
@@ -227,6 +217,26 @@ export function SettingsPanel() {
               />
               Expand by default
             </label>
+          </div>
+          <div className="settings-group">
+            <label className="settings-label">Tool Blocks</label>
+            <div className="settings-checkbox-column">
+              {AGENT_TOOL_NAMES.map((tool) => (
+                <label className="settings-checkbox-label" key={tool}>
+                  <input
+                    type="checkbox"
+                    checked={draft.agentToolDefaultExpanded?.[tool] ?? false}
+                    onChange={(e) => updateDraft({
+                      agentToolDefaultExpanded: {
+                        ...(draft.agentToolDefaultExpanded ?? {}),
+                        [tool]: e.target.checked,
+                      },
+                    })}
+                  />
+                  {tool}
+                </label>
+              ))}
+            </div>
           </div>
           <div className="settings-config-path">Applies to new messages; existing ones keep their current state.</div>
 

@@ -159,8 +159,9 @@ export function AgentMessage({ message }: AgentMessageProps) {
   // manually toggled; new messages pick up the latest default.
   const initialExpanded =
     message.type === 'thinking' ? !!settings.agentThinkingDefaultExpanded :
-    message.type === 'tool_use' ? !!settings.agentToolDefaultExpanded :
-    false;
+    message.type === 'tool_use'
+      ? !!(message.toolName && settings.agentToolDefaultExpanded?.[message.toolName])
+      : false;
   const [expanded, setExpanded] = useState(initialExpanded);
 
   if (message.type === 'thinking') {
