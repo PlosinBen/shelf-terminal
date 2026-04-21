@@ -1,8 +1,11 @@
 import OpenAI from 'openai';
-import type { AgentEvent, AgentQueryOptions } from '../types';
+import type { AgentEvent, AgentQueryOptions, ProviderCapabilities } from '../types';
+import type { AuthMethod, ModelInfo, SlashCommand } from './types';
 import { log } from '@shared/logger';
 import { TOOLS, toolsForMode, toOpenAIFormat, shouldAllowAutomatically, shouldDenyAutomatically, buildSystemPrompt, SLASH_COMMANDS, getEffortLevels } from '../tools/registry';
 import type { ToolExecutor } from '../tools/executor';
+
+const DEFAULT_PERMISSION_MODES = ['default', 'acceptEdits', 'bypassPermissions', 'plan'];
 
 export interface EngineConfig {
   apiKey?: string;
@@ -21,6 +24,23 @@ export interface EngineConfig {
   /** Optional callback polled after each turn to attach rate limit / quota
    * info to the status event. */
   getRateLimit?: () => { rateLimitType?: string; utilization?: number; resetsAt?: number } | null;
+
+  // ── Method-per-capability hooks (v0.8) ────────────────────────────────────
+  /** Returns the current list of models. Providers fetch dynamically (Copilot)
+   * or return a static list (Gemini). Defaults to []. */
+  getModels?: () => Promise<ModelInfo[]>;
+  /** Permission modes exposed in the UI. Defaults to the four standard ones. */
+  permissionModes?: string[];
+  /** Effort levels exposed in the UI (engine-wide; per-model filtering is done
+   * elsewhere via ModelInfo.effortLevels). Defaults to []. */
+  effortLevels?: string[];
+  /** How the UI should surface the authentication flow. Defaults to 'none'. */
+  authMethod?: AuthMethod;
+  /** Whether the provider has valid credentials to run right now. */
+  customCheckAuth?: () => Promise<boolean>;
+  /** Persist a static API key to the target machine. Only meaningful when
+   * authMethod.kind === 'api-key'. */
+  storeCredential?: (key: string) => Promise<void>;
 }
 
 type ContentPart =
@@ -303,8 +323,58 @@ export function createEngine(config: EngineConfig) {
       currentEffort = effort || null;
     },
 
-    getSlashCommands() {
+    async getSlashCommands(): Promise<SlashCommand[]> {
       return SLASH_COMMANDS;
+    },
+
+    // ── Method-per-capability getters (v0.8) ───────────────────────────────
+    async getModels(): Promise<ModelInfo[]> {
+      return (await config.getModels?.()) ?? [];
+    },
+
+    getPermissionModes(): string[] {
+      return config.permissionModes ?? DEFAULT_PERMISSION_MODES;
+    },
+
+    getEffortLevels(): string[] {
+      return config.effortLevels ?? [];
+    },
+
+    getAuthMethod(): AuthMethod {
+      return config.authMethod ?? { kind: 'none' };
+    },
+
+    async checkAuth(): Promise<boolean> {
+      if (config.customCheckAuth) return config.customCheckAuth();
+      return true;
+    },
+
+    async storeCredential(key: string): Promise<void> {
+      if (!config.storeCredential) {
+        throw new Error(`Provider ${config.providerName} does not support storing a credential`);
+      }
+      await config.storeCredential(key);
+    },
+
+    /** Compose all getters into the legacy warmup blob. Kept for backward
+     * compat until main switches to gatherCapabilities (R6). */
+    async warmup(): Promise<ProviderCapabilities> {
+      const [models, slashCommands] = await Promise.all([
+        (async () => (await config.getModels?.()) ?? [])(),
+        Promise.resolve(SLASH_COMMANDS),
+      ]);
+      return {
+        models: models.map((m) => ({
+          value: m.id,
+          displayName: m.displayName,
+          effortLevels: m.effortLevels,
+          vision: m.vision,
+        })),
+        permissionModes: config.permissionModes ?? DEFAULT_PERMISSION_MODES,
+        effortLevels: config.effortLevels ?? [],
+        slashCommands,
+        authMethod: config.authMethod ?? { kind: 'none' },
+      };
     },
   };
 
