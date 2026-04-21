@@ -6,6 +6,11 @@ const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
 async function setupProject(page: any) {
   await page.locator('.sidebar-btn', { hasText: '+' }).click();
   await expect(page.locator('.folder-picker-overlay')).toBeVisible({ timeout: 5_000 });
+  // FolderPicker defaults openAgentOnConnect=true so projects open with both
+  // an agent tab and a terminal tab. The rest of this file assumes 1 tab,
+  // so opt out here; a dedicated test below exercises the agent-tab path.
+  await page.locator('.settings-checkbox-label', { hasText: 'Open agent tab on connect' })
+    .locator('input[type="checkbox"]').uncheck();
   await page.locator('.conn-btn-next').click();
   await expect(page.locator('.fp-header')).toContainText('Open Project', { timeout: 5_000 });
   await page.keyboard.press(`${modifier}+Enter`);
@@ -579,4 +584,32 @@ test('bottom bar is hidden when no project is active', async ({ shelfApp: { page
   if (await items.count() === 0) {
     await expect(page.locator('.bottom-bar')).not.toBeVisible();
   }
+});
+
+// ── Agent auto-open (covers FolderPicker openAgentOnConnect default) ──
+
+test('openAgentOnConnect creates agent tab first, then terminal tab', async ({ shelfApp: { page } }) => {
+  await page.locator('.sidebar-btn', { hasText: '+' }).click();
+  await expect(page.locator('.folder-picker-overlay')).toBeVisible({ timeout: 5_000 });
+
+  // Checkbox defaults to checked; assert that to pin the default.
+  const checkbox = page.locator('.settings-checkbox-label', { hasText: 'Open agent tab on connect' })
+    .locator('input[type="checkbox"]');
+  await expect(checkbox).toBeChecked();
+
+  await page.locator('.conn-btn-next').click();
+  await expect(page.locator('.fp-header')).toContainText('Open Project', { timeout: 5_000 });
+  await page.keyboard.press(`${modifier}+Enter`);
+  await expect(page.locator('.folder-picker-overlay')).not.toBeVisible({ timeout: 3_000 });
+
+  const prompt = page.locator('.connect-prompt');
+  if (await prompt.isVisible({ timeout: 3_000 }).catch(() => false)) {
+    await prompt.click();
+  }
+
+  const tabs = page.locator('.tab-bar .tab');
+  await expect(tabs).toHaveCount(2, { timeout: 5_000 });
+  // Agent tab is expected to be the first one so the project lands on it.
+  await expect(tabs.nth(0).locator('.tab-agent-icon')).toBeVisible();
+  await expect(tabs.nth(1).locator('.tab-agent-icon')).toHaveCount(0);
 });
