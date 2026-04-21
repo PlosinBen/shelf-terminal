@@ -39,8 +39,12 @@ export class LocalUnixConnector implements Connector {
   exec(cwd: string, cmd: string): Promise<ExecResult> {
     const TIMEOUT_MS = 60_000;
     const MAX_BUFFER = 10 * 1024 * 1024;
+    // Use the resolved login-shell env so tools see the same PATH (brew,
+    // Docker Desktop, asdf, nvm shims, etc.) that an interactive terminal
+    // would. Default child env inherits the Electron GUI-launch env, which
+    // on macOS Dock/Finder launches lacks anything ~/.zshrc/.bash_profile added.
     return new Promise((resolve, reject) => {
-      execFile('sh', ['-c', cmd], { cwd, timeout: TIMEOUT_MS, maxBuffer: MAX_BUFFER }, (error: any, stdout, stderr) => {
+      execFile('sh', ['-c', cmd], { cwd, timeout: TIMEOUT_MS, maxBuffer: MAX_BUFFER, env: getShellEnv() }, (error: any, stdout, stderr) => {
         if (error) {
           // Node signals timeout via killed=true + SIGTERM; maxBuffer overflow
           // via code ERR_CHILD_PROCESS_STDIO_MAXBUFFER. The default error
