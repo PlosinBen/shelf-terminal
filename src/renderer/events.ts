@@ -24,4 +24,5 @@ export const Events = {
   TOGGLE_SPLIT: 'toggle-split',     // (projectIndex)
   CREATE_WORKTREE: 'create-worktree', // (projectIndex)
   NEW_AGENT_TAB: 'new-agent-tab',    // (projectIndex, provider)
+  AGENT_SUBMIT_MESSAGE: 'agent-submit-message', // (SubmitAgentMessagePayload) — centralised in App.tsx; both AgentView's Enter key and App's queue flush emit this so UI render + persist + IPC send stay in lockstep.
 } as const;

@@ -2,12 +2,14 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import type { AgentProvider, AgentPrefs, Connection } from '@shared/types';
 import { VISIBLE_AGENT_PROVIDERS as AGENT_PROVIDERS } from '@shared/agent-providers';
 import { AgentMessage, type AgentMsg } from './AgentMessage';
-import { clearMessages, loadMessages, saveMessage } from '../agent-history';
+import { clearMessages, loadMessages } from '../agent-history';
 import { useAttachmentPaste } from '../hooks/useAttachmentPaste';
 import {
   useAgentState, updateAgentState, addAgentMessage,
   deleteAgentState, useStore, updateProjectConfig,
 } from '../store';
+import { emit, Events } from '../events';
+import type { SubmitAgentMessagePayload } from '../agent-actions';
 
 function ApiKeyInput({
   tabId,
@@ -280,21 +282,16 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
       return;
     }
 
-    const attachments = (files.length > 0 || images.length > 0)
-      ? { ...(files.length > 0 ? { files } : {}), ...(images.length > 0 ? { images } : {}) }
-      : undefined;
-    addAgentMessage(tabId, {
-      id: `msg-${Date.now()}`, role: 'user', type: 'text', content: text,
-      ...(attachments ? { attachments } : {}),
-    });
-    saveMessage({
-      projectId, timestamp: Date.now(), role: 'user', type: 'text', content: text, provider,
-      ...(attachments ? { attachments } : {}),
-    });
-    window.shelfApi.agent.send(tabId, text, cwd, provider, connection, initScript, {
-      files: files.map((f) => f.path),
-      images,
-    });
+    // Trigger-site emits only; App.tsx owns the "add to transcript + persist
+    // + IPC send" side effects. Queue flush goes through the same event so
+    // behaviour stays in lockstep.
+    const payload: SubmitAgentMessagePayload = {
+      tabId, projectId, provider, cwd, connection, initScript,
+      text,
+      files: files.length > 0 ? files : undefined,
+      images: images.length > 0 ? images : undefined,
+    };
+    emit(Events.AGENT_SUBMIT_MESSAGE, payload);
   }, [input, pendingFiles, pendingImages, streaming, provider, tabId, projectId, cwd, connection, initScript, agentState, capabilities, model]);
 
   const handleCancelQueued = useCallback((id: string) => {

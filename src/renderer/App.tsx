@@ -19,6 +19,7 @@ import { disposeTerminal } from './components/TerminalView';
 import { on, emit, Events } from './events';
 import { getTheme } from './themes';
 import { rotateOldMessages, loadMessages, saveMessage } from './agent-history';
+import { submitAgentMessage, type SubmitAgentMessagePayload } from './agent-actions';
 import type { AgentMsg } from './components/AgentMessage';
 import './styles/global.css';
 
@@ -142,7 +143,19 @@ export function App() {
         updateAgentState(tabId, { queuedMessages: state.queuedMessages.slice(1) });
         const info = findProjectForTab(tabId);
         if (info?.tab.provider) {
-          setTimeout(() => window.shelfApi.agent.send(tabId, next.content, info.proj.config.cwd, info.tab.provider!, info.proj.config.connection, info.proj.config.initScript), 100);
+          // Re-emit the same event AgentView uses on Enter so the queued
+          // message also makes it into the transcript + history — not just
+          // the backend. The 100ms delay preserves pre-refactor timing.
+          const payload: SubmitAgentMessagePayload = {
+            tabId,
+            projectId: info.proj.config.id,
+            provider: info.tab.provider,
+            cwd: info.proj.config.cwd,
+            connection: info.proj.config.connection,
+            initScript: info.proj.config.initScript,
+            text: next.content,
+          };
+          setTimeout(() => emit(Events.AGENT_SUBMIT_MESSAGE, payload), 100);
         }
       }
 
@@ -181,7 +194,20 @@ export function App() {
       });
     });
 
-    return () => { offMessage(); offStream(); offStatus(); offPermission(); offCapabilities(); offAuthRequired(); };
+    // Single side-effect handler for "user submits a message to an agent
+    // tab". Both AgentView's Enter key and the queue-flush path above emit
+    // AGENT_SUBMIT_MESSAGE; this keeps UI render + persist + IPC send in
+    // lockstep and stops queued messages disappearing from the transcript.
+    const offSubmit = on(Events.AGENT_SUBMIT_MESSAGE, (payload: SubmitAgentMessagePayload) => {
+      submitAgentMessage(payload, {
+        addAgentMessage,
+        saveMessage,
+        send: (tabId, text, cwd, provider, connection, initScript, attachments) =>
+          window.shelfApi.agent.send(tabId, text, cwd, provider, connection, initScript, attachments),
+      });
+    });
+
+    return () => { offMessage(); offStream(); offStatus(); offPermission(); offCapabilities(); offAuthRequired(); offSubmit(); };
   }, [projects]);
 
   // Centralized event handlers
