@@ -155,6 +155,7 @@ async function ensureSession(
   let session = sessions.get(tabId);
   if (session) return session;
 
+  log.info('agent', `session.create tab=${tabId} provider=${provider} connection=${connection.type} cwd=${cwd}`);
   const backend = createBackend(provider, connection, initScript);
   session = {
     tabId, projectId: '', provider, backend, state: 'idle',
@@ -168,6 +169,7 @@ async function ensureSession(
   if (backend.checkAuth) {
     const ok = await backend.checkAuth();
     if (!ok) {
+      log.info('agent', `session.auth_required tab=${tabId} provider=${provider}`);
       broadcast(IPC.AGENT_AUTH_REQUIRED, { tabId, provider });
       return session;
     }
@@ -186,6 +188,7 @@ async function ensureSession(
     broadcast(IPC.AGENT_MESSAGE, { tabId, type: 'error', content: err?.message ?? 'Failed to load capabilities' });
   }
   if (caps) {
+    log.info('agent', `session.capabilities tab=${tabId} models=${caps.models.length} commands=${caps.slashCommands.length} model=${prefs?.model ?? caps.models[0]?.value ?? '-'} effort=${prefs?.effort ?? '-'} permMode=${session.permissionMode}`);
     broadcast(IPC.AGENT_CAPABILITIES, {
       tabId,
       ...caps,
@@ -210,17 +213,21 @@ export function registerAgentHandlers() {
     }
 
     if (session.state === 'streaming') {
+      log.debug('agent', `send.busy tab=${tabId} — ignoring (already streaming)`);
       return;
     }
 
+    log.debug('agent', `send tab=${tabId} provider=${session.provider} promptLen=${prompt.length} files=${attachments?.files?.length ?? 0} images=${attachments?.images?.length ?? 0} resume=${session.sdkSessionId ?? '-'}`);
     session.state = 'streaming';
     broadcast(IPC.AGENT_STATUS, { tabId, state: 'streaming' });
 
     const canUseTool = async (toolUseId: string, toolName: string, input: Record<string, unknown>): Promise<PermissionResult> => {
       const key = allowlistKey(toolName, input);
       if (session.sessionAllowlist.has(key)) {
+        log.debug('agent', `permission.auto_allow tab=${tabId} tool=${toolName} key=${key}`);
         return { behavior: 'allow' };
       }
+      log.debug('agent', `permission.request tab=${tabId} tool=${toolName} toolUseId=${toolUseId}`);
       broadcast(IPC.AGENT_PERMISSION_REQUEST, { tabId, toolUseId, toolName, input });
 
       return new Promise<PermissionResult>((resolve) => {
@@ -275,6 +282,7 @@ export function registerAgentHandlers() {
   ipcMain.handle(IPC.AGENT_STOP, async (_event, { tabId }: { tabId: string }) => {
     const session = sessions.get(tabId);
     if (session) {
+      log.info('agent', `session.stop tab=${tabId} provider=${session.provider}`);
       for (const resolve of session.pendingPermissions.values()) {
         resolve({ behavior: 'deny', message: 'Stopped by user' });
       }
@@ -286,6 +294,7 @@ export function registerAgentHandlers() {
   ipcMain.handle(IPC.AGENT_DESTROY, async (_event, { tabId }: { tabId: string }) => {
     const session = sessions.get(tabId);
     if (session) {
+      log.info('agent', `session.destroy tab=${tabId} provider=${session.provider}`);
       for (const resolve of session.pendingPermissions.values()) {
         resolve({ behavior: 'deny', message: 'Session destroyed' });
       }
@@ -300,8 +309,10 @@ export function registerAgentHandlers() {
 
     if (scope === 'session' && toolName) {
       session.sessionAllowlist.add(allowlistKey(toolName, input ?? {}));
+      log.info('agent', `permission.allowlist_add tab=${tabId} key=${allowlistKey(toolName, input ?? {})}`);
     }
 
+    log.debug('agent', `permission.resolve tab=${tabId} tool=${toolName ?? '-'} toolUseId=${toolUseId} scope=${scope}`);
     const resolve = session.pendingPermissions.get(toolUseId);
     if (resolve) {
       session.pendingPermissions.delete(toolUseId);
@@ -312,6 +323,12 @@ export function registerAgentHandlers() {
   ipcMain.handle(IPC.AGENT_SET_PREFS, async (_event, { tabId, prefs }: { tabId: string; prefs: AgentInitPrefs }) => {
     const session = sessions.get(tabId);
     if (!session) return;
+    const changes = [
+      prefs.model !== undefined ? `model=${prefs.model}` : null,
+      prefs.effort !== undefined ? `effort=${prefs.effort}` : null,
+      prefs.permissionMode !== undefined ? `permMode=${prefs.permissionMode}` : null,
+    ].filter(Boolean);
+    if (changes.length > 0) log.info('agent', `session.prefs tab=${tabId} ${changes.join(' ')}`);
     if (prefs.model !== undefined) session.backend.setModel?.(prefs.model);
     if (prefs.effort !== undefined) session.backend.setEffort?.(prefs.effort);
     if (prefs.permissionMode !== undefined) session.permissionMode = prefs.permissionMode;
@@ -360,6 +377,7 @@ export function registerAgentHandlers() {
     const session = sessions.get(tabId);
     if (!session) return;
 
+    log.info('agent', `session.switch_provider tab=${tabId} ${session.provider} -> ${provider}`);
     session.providerSessionIds[session.provider] = session.sdkSessionId;
 
     session.backend.dispose();

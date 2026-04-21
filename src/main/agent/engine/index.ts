@@ -64,6 +64,32 @@ function safeParseJSON(s: string): Record<string, unknown> {
   try { return JSON.parse(s) as Record<string, unknown>; } catch { return { _raw: s }; }
 }
 
+// One-line summary of a tool input for debug logs. We don't dump full content
+// (Write / Edit payloads are huge and may be sensitive) — just enough to
+// correlate a log line with what the agent tried to do.
+function summarizeToolInput(toolName: string, input: Record<string, unknown>): string {
+  const clip = (s: unknown, n = 80): string => {
+    const str = typeof s === 'string' ? s : String(s ?? '');
+    return str.length > n ? str.slice(0, n) + '…' : str;
+  };
+  switch (toolName) {
+    case 'Read':
+    case 'Edit':
+    case 'Write':
+      return `path=${clip(input.file_path, 120)}`;
+    case 'Bash':
+      return `cmd=${clip(input.command, 120)}`;
+    case 'Grep':
+      return `pattern=${clip(input.pattern)} path=${clip(input.path ?? '.', 60)}`;
+    case 'Glob':
+      return `pattern=${clip(input.pattern)} path=${clip(input.path ?? '.', 60)}`;
+    case 'Ls':
+      return `path=${clip(input.path ?? '.', 120)}`;
+    default:
+      return `keys=${Object.keys(input).join(',')}`;
+  }
+}
+
 
 export function createEngine(config: EngineConfig) {
   let abortController: AbortController | null = null;
@@ -157,6 +183,7 @@ export function createEngine(config: EngineConfig) {
             stream_options: { include_usage: true },
             ...(effort ? { reasoning_effort: effort as any } : {}),
           };
+          log.debug('agent-engine', `turn=${turn} provider=${config.providerName} model=${currentModel} effort=${effort ?? '-'} history=${history.length}`);
           const stream = await oai.chat.completions.create(params, { signal: abortController.signal });
 
           let content = '';
@@ -266,11 +293,14 @@ export function createEngine(config: EngineConfig) {
             }
 
             if (resultText === null) {
+              const toolStart = Date.now();
+              log.debug('agent-engine', `tool.start name=${call.name} category=${category} ${summarizeToolInput(call.name, toolInput)}`);
               try {
                 if (!config.toolExecutor) throw new Error('Tool executor not configured');
                 resultText = await config.toolExecutor.execute(call.name, toolInput, cwd);
+                log.debug('agent-engine', `tool.done name=${call.name} duration=${Date.now() - toolStart}ms resultLen=${resultText.length}`);
               } catch (err: any) {
-                log.error('agent-engine', `Tool ${call.name} failed: ${err?.message ?? err}`);
+                log.error('agent-engine', `Tool ${call.name} failed (${Date.now() - toolStart}ms): ${err?.message ?? err}`);
                 resultText = `Error: ${err.message ?? 'tool execution failed'}`;
               }
             }
@@ -377,12 +407,14 @@ export function createEngine(config: EngineConfig) {
   async function handleSlash(cmd: string, arg: string, cwd: string, mode: string): Promise<string | null> {
     switch (cmd) {
       case 'clear':
+        log.info('agent-engine', `slash.clear provider=${config.providerName} historyDropped=${history.length}`);
         history = [];
         lastUsage = null;
         turnCount = 0;
         return 'Conversation history cleared.';
 
       case 'compact': {
+        log.info('agent-engine', `slash.compact provider=${config.providerName} historyLen=${history.length}`);
         if (history.length < 4) return 'Not enough history to compact yet.';
 
         const systemMsg = history[0]?.role === 'system' ? history[0] : null;
