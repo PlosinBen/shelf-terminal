@@ -4,7 +4,7 @@ import { log } from '@shared/logger';
 import { TOOLS, toolsForMode, toOpenAIFormat, shouldAllowAutomatically, shouldDenyAutomatically, buildSystemPrompt, SLASH_COMMANDS, getEffortLevels } from '../tools/registry';
 import type { ToolExecutor } from '../tools/executor';
 
-export interface OpenAIProviderConfig {
+export interface EngineConfig {
   apiKey?: string;
   baseURL?: string;
   defaultModel: string;
@@ -41,7 +41,7 @@ function safeParseJSON(s: string): Record<string, unknown> {
 }
 
 
-export function createOpenAIProcessor(config: OpenAIProviderConfig) {
+export function createEngine(config: EngineConfig) {
   let abortController: AbortController | null = null;
   let history: Message[] = [];
   let currentModel = config.defaultModel;

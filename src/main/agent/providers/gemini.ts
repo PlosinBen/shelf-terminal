@@ -1,7 +1,7 @@
 import type { AgentBackend, AgentEvent, AgentQueryOptions } from '../types';
 import type { Connection } from '@shared/types';
 import { log } from '@shared/logger';
-import { createOpenAIProcessor } from './openai-processor';
+import { createEngine } from '../engine';
 import { createToolExecutor } from '../tools/executor';
 import { createConnector } from '../../connector';
 
@@ -17,7 +17,7 @@ const GEMINI_MODELS: { value: string; displayName: string; contextWindow: number
 export function createGeminiBackend(connection: Connection): AgentBackend {
   const contextWindows = new Map(GEMINI_MODELS.map((m) => [m.value, m.contextWindow]));
 
-  const processor = createOpenAIProcessor({
+  const processor = createEngine({
     apiKey: process.env.GEMINI_API_KEY ?? 'missing',
     baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai/',
     defaultModel: GEMINI_MODELS[0].value,

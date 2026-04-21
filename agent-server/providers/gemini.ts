@@ -1,4 +1,4 @@
-import { createOpenAIProcessor } from '../../src/main/agent/providers/openai-processor';
+import { createEngine } from '../../src/main/agent/engine';
 import { createToolExecutor } from '../../src/main/agent/tools/executor';
 import { localExec } from '../tool-exec';
 import type { ServerBackend, SendFn, QueryInput } from './types';
@@ -23,7 +23,7 @@ export function createGeminiBackend(): ServerBackend {
     });
   };
 
-  const processor = createOpenAIProcessor({
+  const processor = createEngine({
     apiKey: process.env.GEMINI_API_KEY ?? 'missing',
     baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai/',
     defaultModel: 'gemini-2.5-flash',

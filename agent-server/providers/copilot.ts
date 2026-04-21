@@ -1,4 +1,4 @@
-import { createOpenAIProcessor } from '../../src/main/agent/providers/openai-processor';
+import { createEngine } from '../../src/main/agent/engine';
 import { createToolExecutor } from '../../src/main/agent/tools/executor';
 import { getCopilotSessionToken, COPILOT_DEFAULT_HEADERS } from './copilot-auth';
 import { localExec } from '../tool-exec';
@@ -16,7 +16,7 @@ export function createCopilotBackend(): ServerBackend {
     });
   };
 
-  const processor = createOpenAIProcessor({
+  const processor = createEngine({
     baseURL: 'https://api.githubcopilot.com',
     defaultModel: 'gpt-4o',
     providerName: 'copilot',
