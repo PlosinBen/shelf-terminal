@@ -93,7 +93,7 @@ export function createCopilotBackend(connection: Connection): AgentBackend {
         const session = await getCopilotSessionToken();
         const raw = await fetchCopilotModels(session);
         const chat = raw.filter(
-          (m) => m.capabilities?.type !== 'embeddings' && m.model_picker_enabled !== false,
+          (m) => m.capabilities?.type === 'chat' && m.model_picker_enabled !== false,
         );
         contextWindows.clear();
         for (const m of chat) {
