@@ -81,18 +81,23 @@ export function createRemoteBackend(connection: Connection, initScript?: string,
 
     async *query(prompt: string, cwd: string, opts?: AgentQueryOptions): AsyncGenerator<AgentEvent> {
       if (!deployed) {
+        log.info('agent-remote', `deploy.start connection=${connection.type} cwd=${cwd}`);
         const result = await ensureRemoteDeploy(connection, cwd, initScript);
         if ('error' in result) {
+          log.error('agent-remote', `deploy.failed: ${result.error}`);
           yield { type: 'error', error: result.error };
           return;
         }
         remotePath = result.remotePath;
         deployed = true;
+        log.info('agent-remote', `deploy.done remotePath=${remotePath}`);
       }
 
       if (!remoteProc) {
+        log.info('agent-remote', `spawn.start connection=${connection.type} remotePath=${remotePath}`);
         const proc = await spawnRemoteServer(connection, cwd, remotePath, initScript);
         if (!proc) {
+          log.error('agent-remote', `spawn.failed connection=${connection.type}`);
           yield { type: 'error', error: 'Failed to spawn remote agent-server' };
           return;
         }
@@ -100,11 +105,13 @@ export function createRemoteBackend(connection: Connection, initScript?: string,
 
         const ready = await waitForReady(remoteProc);
         if (!ready) {
+          log.error('agent-remote', 'spawn.ready_timeout — server never sent `ready`');
           yield { type: 'error', error: 'Remote agent-server did not respond' };
           remoteProc.kill();
           remoteProc = null;
           return;
         }
+        log.debug('agent-remote', 'spawn.ready');
       }
 
       // Hook permission requests from the remote into the local canUseTool
@@ -124,6 +131,7 @@ export function createRemoteBackend(connection: Connection, initScript?: string,
         });
       });
 
+      log.debug('agent-remote', `send provider=${provider} promptLen=${prompt.length} resume=${opts?.resume ?? '-'} permMode=${opts?.permissionMode ?? '-'} model=${currentModel ?? '-'} effort=${currentEffort ?? '-'} images=${opts?.images?.length ?? 0}`);
       remoteProc.sendLine({
         type: 'send',
         provider,

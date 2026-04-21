@@ -161,6 +161,8 @@ export function createClaudeBackend(): AgentBackend {
 
 
     async *query(prompt: string, cwd: string, opts?: AgentQueryOptions): AsyncGenerator<AgentEvent> {
+      const queryStart = Date.now();
+      log.debug('claude-backend', `query.start cwd=${cwd} promptLen=${prompt.length} resume=${opts?.resume ?? '-'} permMode=${opts?.permissionMode ?? 'default'} model=${currentModel ?? '-'} effort=${currentEffort ?? '-'} images=${opts?.images?.length ?? 0}`);
       const queryFn = await loadSdk();
       abortController = new AbortController();
 
@@ -189,7 +191,9 @@ export function createClaudeBackend(): AgentBackend {
       if (opts?.canUseTool) {
         const userCallback = opts.canUseTool;
         options.canUseTool = (async (toolName, input, canUseOpts) => {
+          log.debug('claude-backend', `canUseTool.request tool=${toolName} toolUseId=${canUseOpts.toolUseID}`);
           const result = await userCallback(canUseOpts.toolUseID, toolName, input);
+          log.debug('claude-backend', `canUseTool.resolved tool=${toolName} toolUseId=${canUseOpts.toolUseID} decision=${result.behavior}`);
           if (result.behavior === 'allow') {
             return { behavior: 'allow' as const };
           }
@@ -217,17 +221,22 @@ export function createClaudeBackend(): AgentBackend {
 
       activeQuery = queryFn({ prompt: promptArg, options });
 
+      let msgCount = 0;
       try {
         for await (const msg of activeQuery) {
+          msgCount++;
           const events = processMessage(msg);
           for (const event of events) {
             yield event;
           }
         }
+        log.debug('claude-backend', `query.end duration=${Date.now() - queryStart}ms messages=${msgCount}`);
       } catch (err: any) {
         if (err.name !== 'AbortError') {
-          log.error('claude-backend', 'Query error:', err.message);
+          log.error('claude-backend', `Query error after ${Date.now() - queryStart}ms (messages=${msgCount}): ${err.message}`);
           yield { type: 'error', error: err.message ?? 'Unknown error' };
+        } else {
+          log.debug('claude-backend', `query.aborted duration=${Date.now() - queryStart}ms messages=${msgCount}`);
         }
       } finally {
         activeQuery = null;
@@ -262,8 +271,19 @@ export function createClaudeBackend(): AgentBackend {
 }
 
 
+// Per-session stream delta accumulators — flushed on content_block_stop so a
+// long thinking/text stream produces one aggregate log instead of hundreds.
+const streamAccum = new Map<string, { type: string; chars: number }>();
+
 function processMessage(msg: SDKMessage): AgentEvent[] {
   const events: AgentEvent[] = [];
+
+  // Top-level trace so every SDK message type is visible in the log, not just
+  // `assistant`. Without this, streams that never emit a full assistant block
+  // look like dead silence from claude-backend's side.
+  if (msg.type !== 'stream_event') {
+    log.debug('claude-backend', `msg.type=${msg.type}${(msg as any).subtype ? ` subtype=${(msg as any).subtype}` : ''} session=${(msg as any).session_id ?? '-'}`);
+  }
 
   switch (msg.type) {
     case 'assistant': {
@@ -318,13 +338,36 @@ function processMessage(msg: SDKMessage): AgentEvent[] {
       // these; without handling them here, replies appeared all-at-once
       // because only the final `assistant` message was processed.
       const event: any = (msg as any).event;
-      if (event?.type === 'content_block_delta' && event.delta) {
+      const sessionId: string = (msg as any).session_id ?? '-';
+      const eventType = event?.type;
+
+      if (eventType === 'content_block_start') {
+        const blockType = event.content_block?.type ?? 'unknown';
+        const key = `${sessionId}#${event.index ?? 0}`;
+        streamAccum.set(key, { type: blockType, chars: 0 });
+        log.debug('claude-backend', `stream.start idx=${event.index} type=${blockType} session=${sessionId}`);
+      } else if (eventType === 'content_block_delta' && event.delta) {
         const delta = event.delta;
+        const key = `${sessionId}#${event.index ?? 0}`;
+        const acc = streamAccum.get(key);
         if (delta.type === 'text_delta' && typeof delta.text === 'string' && delta.text.length > 0) {
+          if (acc) acc.chars += delta.text.length;
           events.push({ type: 'stream', payload: { type: 'text', content: delta.text } });
         } else if (delta.type === 'thinking_delta' && typeof delta.thinking === 'string' && delta.thinking.length > 0) {
+          if (acc) acc.chars += delta.thinking.length;
           events.push({ type: 'stream', payload: { type: 'thinking', content: delta.thinking } });
+        } else {
+          // Unknown delta — log once so we notice new SDK payloads.
+          log.debug('claude-backend', `stream.delta.unhandled type=${delta.type} session=${sessionId}`);
         }
+      } else if (eventType === 'content_block_stop') {
+        const key = `${sessionId}#${event.index ?? 0}`;
+        const acc = streamAccum.get(key);
+        log.debug('claude-backend', `stream.stop idx=${event.index} type=${acc?.type ?? '?'} chars=${acc?.chars ?? 0} session=${sessionId}`);
+        streamAccum.delete(key);
+      } else if (eventType && eventType !== 'message_start' && eventType !== 'message_delta' && eventType !== 'message_stop' && eventType !== 'ping') {
+        // Surface unexpected SDK stream event types so we know what's flowing.
+        log.debug('claude-backend', `stream.event type=${eventType} session=${sessionId}`);
       }
       break;
     }

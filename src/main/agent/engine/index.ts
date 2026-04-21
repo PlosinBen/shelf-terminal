@@ -184,6 +184,7 @@ export function createEngine(config: EngineConfig) {
             ...(effort ? { reasoning_effort: effort as any } : {}),
           };
           log.debug('agent-engine', `turn=${turn} provider=${config.providerName} model=${currentModel} effort=${effort ?? '-'} history=${history.length}`);
+          const turnStart = Date.now();
           const stream = await oai.chat.completions.create(params, { signal: abortController.signal });
 
           let content = '';
@@ -224,6 +225,8 @@ export function createEngine(config: EngineConfig) {
           }
 
           const calls = Object.values(toolCalls).filter((c) => c.name);
+
+          log.debug('agent-engine', `turn=${turn}.end duration=${Date.now() - turnStart}ms finish=${finishReason ?? '-'} contentLen=${content.length} reasoningLen=${reasoning.length} toolCalls=${calls.length}${calls.length > 0 ? ` [${calls.map(c => c.name).join(',')}]` : ''}`);
 
           // Emit thinking as a message (UI renders a collapsible block).
           // Do not push reasoning back into history — OpenAI reasoning models
@@ -316,7 +319,11 @@ export function createEngine(config: EngineConfig) {
         yield { type: 'status', payload: { state: 'idle', model: currentModel } };
       } catch (err: any) {
         if (err?.message === 'NO_AUTH') throw err;
-        if (err.name !== 'AbortError') {
+        if (err.name === 'AbortError') {
+          // Normally user-initiated stop, but can also fire from unexpected
+          // signal races. Log so silent exits aren't invisible in the trail.
+          log.info('agent-engine', `Query aborted (history=${history.length})`);
+        } else {
           log.error('agent-engine', `Query error: ${err.message}`);
           yield { type: 'error', error: err.message ?? 'Unknown error' };
         }

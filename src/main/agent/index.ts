@@ -235,6 +235,8 @@ export function registerAgentHandlers() {
       });
     };
 
+    const turnStart = Date.now();
+    const eventCounts: Record<string, number> = {};
     try {
       const generator = session.backend.query(prompt, cwd, {
         resume: session.sdkSessionId,
@@ -244,12 +246,14 @@ export function registerAgentHandlers() {
       });
 
       for await (const event of generator) {
+        eventCounts[event.type] = (eventCounts[event.type] ?? 0) + 1;
         switch (event.type) {
           case 'message':
             broadcast(IPC.AGENT_MESSAGE, { tabId, ...event.payload });
             if (event.payload.sessionId && !session.sdkSessionId) {
               session.sdkSessionId = event.payload.sessionId;
               session.providerSessionIds[session.provider] = event.payload.sessionId;
+              log.info('agent', `session.sdk_id_captured tab=${tabId} provider=${session.provider} sessionId=${event.payload.sessionId}`);
             }
             break;
           case 'stream':
@@ -260,14 +264,18 @@ export function registerAgentHandlers() {
             broadcast(IPC.AGENT_STATUS, { tabId, ...event.payload });
             break;
           case 'error':
+            log.error('agent', `event.error tab=${tabId} provider=${session.provider}: ${event.error}`);
             broadcast(IPC.AGENT_MESSAGE, { tabId, type: 'error', content: event.error });
             break;
           case 'auth_required':
+            log.info('agent', `event.auth_required tab=${tabId} provider=${event.provider}`);
             broadcast(IPC.AGENT_AUTH_REQUIRED, { tabId, provider: event.provider });
             break;
         }
       }
+      log.debug('agent', `send.done tab=${tabId} duration=${Date.now() - turnStart}ms events=${JSON.stringify(eventCounts)}`);
     } catch (err: any) {
+      log.error('agent', `send.throw tab=${tabId} provider=${session.provider} duration=${Date.now() - turnStart}ms: ${err?.message ?? err}`);
       broadcast(IPC.AGENT_MESSAGE, { tabId, type: 'error', content: err.message ?? 'Unknown error' });
     } finally {
       for (const resolve of session.pendingPermissions.values()) {
