@@ -1,4 +1,5 @@
 import type { AgentBackend, AgentEvent, AgentMessagePayload, AgentQueryOptions, ProviderCapabilities } from '../types';
+import type { AuthMethod, ModelInfo, SlashCommand } from '../engine/types';
 import type { Query, SDKMessage, Options, CanUseTool } from '@anthropic-ai/claude-agent-sdk';
 import { log } from '@shared/logger';
 
@@ -19,29 +20,35 @@ function dataUrlToClaudeBlock(dataUrl: string): { type: 'image'; source: { type:
   return { type: 'image', source: { type: 'base64', media_type: match[1], data: match[2] } };
 }
 
+const CLAUDE_AUTH: AuthMethod = {
+  kind: 'sdk-managed',
+  instructions: [
+    { label: 'Sign in to Claude via the CLI', command: 'claude login' },
+  ],
+};
+
 export function createClaudeBackend(): AgentBackend {
   let activeQuery: Query | null = null;
   let abortController: AbortController | null = null;
-  let cachedCapabilities: ProviderCapabilities | null = null;
   let currentModel: string | null = null;
   let currentEffort: string | null = null;
 
-  return {
-    async warmup(cwd: string): Promise<ProviderCapabilities | null> {
-      if (cachedCapabilities) return cachedCapabilities;
+  // Lazy cache for models + slash commands. Both come from a single Claude SDK
+  // plan-mode query so we pay the init once, then getModels / getSlashCommands
+  // just return from the cache.
+  const cache: { models?: ModelInfo[]; commands?: SlashCommand[] } = {};
+  let initPromise: Promise<void> | null = null;
 
+  function ensureInit(cwd: string): Promise<void> {
+    if (cache.models && cache.commands) return Promise.resolve();
+    if (initPromise) return initPromise;
+    initPromise = (async () => {
       const queryFn = await loadSdk();
       const warmupAbort = new AbortController();
-
       const generator = queryFn({
         prompt: ' ',
-        options: {
-          cwd,
-          permissionMode: 'plan',
-          abortController: warmupAbort,
-        },
+        options: { cwd, permissionMode: 'plan', abortController: warmupAbort },
       });
-
       try {
         for await (const msg of generator) {
           if (msg.type === 'system' && msg.subtype === 'init') {
@@ -49,24 +56,68 @@ export function createClaudeBackend(): AgentBackend {
               generator.supportedModels().catch(() => []),
               generator.supportedCommands().catch(() => []),
             ]);
-            cachedCapabilities = {
-              // Claude 3+ / Sonnet / Opus all accept image blocks — hard-code
-              // until the SDK exposes vision capability metadata.
-              models: models.map((m) => ({ value: m.value, displayName: m.displayName, vision: true })),
-              permissionModes: ['default', 'acceptEdits', 'bypassPermissions', 'plan'],
-              effortLevels: ['low', 'medium', 'high', 'xhigh', 'max'],
-              slashCommands: commands.map((c) => ({ name: c.name, description: c.description })),
-            };
-            log.info('claude-backend', `Warmup done: ${models.length} models, ${commands.length} commands`);
+            cache.models = models.map((m) => ({
+              id: m.value,
+              displayName: m.displayName,
+              contextWindow: 200_000, // SDK doesn't expose; hard-code Claude 3+ default
+              vision: true,
+            }));
+            cache.commands = commands.map((c) => ({ name: c.name, description: c.description }));
+            log.info('claude-backend', `Init done: ${models.length} models, ${commands.length} commands`);
             warmupAbort.abort();
             break;
           }
         }
       } catch {
-        // warmup abort throws, expected
+        // abort throws — expected
       }
+    })();
+    return initPromise;
+  }
 
-      return cachedCapabilities;
+  return {
+    async checkAuth() {
+      // Claude SDK manages auth. We have no good way to probe without spawning
+      // a query; assume authenticated and let the first real query surface any
+      // errors via its error stream.
+      return true;
+    },
+
+    async getModels(cwd?: string): Promise<ModelInfo[]> {
+      await ensureInit(cwd ?? process.cwd());
+      return cache.models ?? [];
+    },
+
+    async getSlashCommands(): Promise<SlashCommand[]> {
+      await ensureInit(process.cwd());
+      return cache.commands ?? [];
+    },
+
+    getPermissionModes(): string[] {
+      return ['default', 'acceptEdits', 'bypassPermissions', 'plan'];
+    },
+
+    getEffortLevels(): string[] {
+      return ['low', 'medium', 'high', 'xhigh', 'max'];
+    },
+
+    getAuthMethod(): AuthMethod {
+      return CLAUDE_AUTH;
+    },
+
+    async warmup(cwd: string): Promise<ProviderCapabilities | null> {
+      await ensureInit(cwd);
+      return {
+        models: (cache.models ?? []).map((m) => ({
+          value: m.id,
+          displayName: m.displayName,
+          vision: m.vision,
+        })),
+        permissionModes: this.getPermissionModes!(),
+        effortLevels: this.getEffortLevels!(),
+        slashCommands: cache.commands ?? [],
+        authMethod: CLAUDE_AUTH,
+      };
     },
 
     async *query(prompt: string, cwd: string, opts?: AgentQueryOptions): AsyncGenerator<AgentEvent> {
@@ -156,16 +207,6 @@ export function createClaudeBackend(): AgentBackend {
       abortController?.abort();
       activeQuery = null;
       abortController = null;
-    },
-
-    async getSlashCommands() {
-      if (!activeQuery) return [];
-      try {
-        const cmds = await activeQuery.supportedCommands();
-        return cmds.map((c) => ({ name: c.name, description: c.description }));
-      } catch {
-        return [];
-      }
     },
 
     setModel(model: string) {
