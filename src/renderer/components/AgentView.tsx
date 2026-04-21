@@ -264,39 +264,25 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
     // otherwise forward it to the embedded Claude Code CLI which rejects
     // built-in interactive commands in non-interactive sessions with
     //   "/model isn't available in this environment."
-    // Our OpenAI-compat engine handles `/model <id>` itself, but routing
-    // through the picker + setPrefs keeps both backends consistent (same
-    // persistence, same UI feedback, no split-brain state).
+    // Bare `/model` opens our picker. `/model <id>` just pushes the id
+    // straight through setPrefs — don't pre-validate against
+    // `capabilities.models` because our catalogue can lag behind what
+    // the backend actually accepts (Claude aliases like `opusplan`,
+    // Copilot models added since last getModels() refresh). The backend
+    // will surface its own error on the next query if the id is bogus.
     if (text === '/model' || text.startsWith('/model ')) {
       setInput('');
       const arg = text.slice('/model'.length).trim();
-      if (!capabilities || capabilities.models.length === 0) return;
       if (!arg) {
-        const currentIdx = capabilities.models.findIndex((m) => m.value === model);
-        setModelPicker({ open: true, selected: currentIdx >= 0 ? currentIdx : 0 });
+        if (capabilities && capabilities.models.length > 0) {
+          const currentIdx = capabilities.models.findIndex((m) => m.value === model);
+          setModelPicker({ open: true, selected: currentIdx >= 0 ? currentIdx : 0 });
+        }
         return;
       }
-      // Exact id match only. Fuzzy / substring matching was tempting but
-      // silently picks different models when the catalogue changes (e.g.
-      // `claude` matches every claude-* id, `4` matches whichever came
-      // first). Better to fail loudly and list the valid ids than to
-      // auto-switch to something the user didn't ask for.
-      const picked = capabilities.models.find((m) => m.value === arg);
-      if (picked) {
-        updateAgentState(tabId, { model: picked.value });
-        window.shelfApi.agent.setPrefs(tabId, { model: picked.value });
-        persistAgentPref('model', picked.value);
-        addAgentMessage(tabId, {
-          id: `msg-${Date.now()}`, role: 'system', type: 'system',
-          content: `── Model switched to ${picked.displayName} ──`,
-        });
-      } else {
-        const available = capabilities.models.map((m) => m.value).join(', ');
-        addAgentMessage(tabId, {
-          id: `msg-${Date.now()}`, role: 'system', type: 'error',
-          content: `Unknown model: ${arg}\nAvailable: ${available}`,
-        });
-      }
+      updateAgentState(tabId, { model: arg });
+      window.shelfApi.agent.setPrefs(tabId, { model: arg });
+      persistAgentPref('model', arg);
       return;
     }
 
