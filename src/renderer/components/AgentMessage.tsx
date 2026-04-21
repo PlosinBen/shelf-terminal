@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { marked } from 'marked';
+import { useStore } from '../store';
 
 export interface AgentMsg {
   id: string;
@@ -152,7 +153,15 @@ function ToolBody({ toolName, input, cwd }: { toolName?: string; input?: Record<
 }
 
 export function AgentMessage({ message }: AgentMessageProps) {
-  const [expanded, setExpanded] = useState(false);
+  const { settings } = useStore();
+  // Initial expand state follows the user's preference (defaults collapsed).
+  // Captured on first render so existing messages keep whatever the user has
+  // manually toggled; new messages pick up the latest default.
+  const initialExpanded =
+    message.type === 'thinking' ? !!settings.agentThinkingDefaultExpanded :
+    message.type === 'tool_use' ? !!settings.agentToolDefaultExpanded :
+    false;
+  const [expanded, setExpanded] = useState(initialExpanded);
 
   if (message.type === 'thinking') {
     const preview = message.content.slice(0, 80).replace(/\n/g, ' ');

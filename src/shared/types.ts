@@ -125,6 +125,10 @@ export interface AppSettings {
   defaultLocalPath?: string;
   dockerPath?: string;
   unicode11?: boolean;
+  /** Expand tool_use blocks in Agent view by default (user can still toggle per-message). */
+  agentToolDefaultExpanded?: boolean;
+  /** Expand thinking blocks in Agent view by default. */
+  agentThinkingDefaultExpanded?: boolean;
 }
 
 

@@ -205,6 +205,32 @@ export function SettingsPanel() {
           </div>
 
           <div className="settings-divider" />
+          <div className="settings-section-title">Agent</div>
+          <div className="settings-group">
+            <label className="settings-label">Tool Blocks</label>
+            <label className="settings-checkbox-label">
+              <input
+                type="checkbox"
+                checked={draft.agentToolDefaultExpanded ?? false}
+                onChange={(e) => updateDraft({ agentToolDefaultExpanded: e.target.checked })}
+              />
+              Expand by default
+            </label>
+          </div>
+          <div className="settings-group">
+            <label className="settings-label">Thinking Blocks</label>
+            <label className="settings-checkbox-label">
+              <input
+                type="checkbox"
+                checked={draft.agentThinkingDefaultExpanded ?? false}
+                onChange={(e) => updateDraft({ agentThinkingDefaultExpanded: e.target.checked })}
+              />
+              Expand by default
+            </label>
+          </div>
+          <div className="settings-config-path">Applies to new messages; existing ones keep their current state.</div>
+
+          <div className="settings-divider" />
           <div className="settings-section-title">Logs</div>
           <div className="settings-group">
             <label className="settings-label">Log Level</label>
