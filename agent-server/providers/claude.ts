@@ -1,8 +1,8 @@
 import { query as sdkQuery } from '@anthropic-ai/claude-agent-sdk';
-import type { Query, Options, SDKMessage } from '@anthropic-ai/claude-agent-sdk';
+import type { Query, Options, SDKMessage, CanUseTool } from '@anthropic-ai/claude-agent-sdk';
 import * as path from 'path';
 import type { QueryInput, SendFn, ServerBackend } from './types';
-import type { ProviderCapabilities } from '../../src/main/agent/types';
+import type { ProviderCapabilities, PermissionResult } from '../../src/main/agent/types';
 
 const CLAUDE_AUTH_METHOD = {
   kind: 'sdk-managed' as const,
@@ -14,6 +14,21 @@ export function createClaudeBackend(): ServerBackend {
   let abortController: AbortController | null = null;
   const cache: { models?: any[]; commands?: any[] } = {};
   let initPromise: Promise<void> | null = null;
+
+  // Bridge Claude SDK's permission flow onto our stdin/stdout protocol so
+  // SSH / Docker projects get the same AGENT_PERMISSION_REQUEST UI as local.
+  const pendingPermissions = new Map<string, (result: PermissionResult) => void>();
+  let currentSend: SendFn | null = null;
+
+  const canUseTool: CanUseTool = (async (toolName, input, canUseOpts) => {
+    const toolUseId = (canUseOpts as any)?.toolUseID ?? `sdk-${Date.now()}`;
+    currentSend?.({ type: 'permission_request', toolUseId, toolName, input });
+    const result = await new Promise<PermissionResult>((resolve) => {
+      pendingPermissions.set(toolUseId, resolve);
+    });
+    if (result.behavior === 'allow') return { behavior: 'allow' as const };
+    return { behavior: 'deny' as const, message: result.message ?? 'Denied by user' };
+  }) as CanUseTool;
 
   function ensureInit(cwd: string): Promise<void> {
     if (cache.models && cache.commands) return Promise.resolve();
@@ -60,6 +75,7 @@ export function createClaudeBackend(): ServerBackend {
     },
 
     async query(input: QueryInput, send: SendFn) {
+      currentSend = send;
       abortController = new AbortController();
       const cliPath = path.join(__dirname, 'cli.js');
 
@@ -71,6 +87,7 @@ export function createClaudeBackend(): ServerBackend {
         thinking: { type: 'adaptive' },
         includePartialMessages: true,
         permissionMode: (input.permissionMode as Options['permissionMode']) ?? 'default',
+        canUseTool,
       };
 
       if (input.resume) options.resume = input.resume;
@@ -105,6 +122,11 @@ export function createClaudeBackend(): ServerBackend {
           send({ type: 'error', error: err.message ?? 'Unknown error' });
         }
       } finally {
+        // Unblock any still-pending permission waiters so the session ends cleanly.
+        for (const resolve of pendingPermissions.values()) {
+          resolve({ behavior: 'deny', message: 'Session ended' });
+        }
+        pendingPermissions.clear();
         activeQuery = null;
         abortController = null;
         send({ type: 'status', state: 'idle' });
@@ -112,6 +134,10 @@ export function createClaudeBackend(): ServerBackend {
     },
 
     async stop() {
+      for (const resolve of pendingPermissions.values()) {
+        resolve({ behavior: 'deny', message: 'Stopped by user' });
+      }
+      pendingPermissions.clear();
       if (activeQuery) {
         try {
           await activeQuery.interrupt();
@@ -125,6 +151,14 @@ export function createClaudeBackend(): ServerBackend {
       abortController?.abort();
       activeQuery = null;
       abortController = null;
+    },
+
+    resolvePermission(toolUseId: string, allow: boolean, message?: string) {
+      const resolve = pendingPermissions.get(toolUseId);
+      if (resolve) {
+        pendingPermissions.delete(toolUseId);
+        resolve(allow ? { behavior: 'allow' } : { behavior: 'deny', message: message ?? 'Denied' });
+      }
     },
   };
 }
