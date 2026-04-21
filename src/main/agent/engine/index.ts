@@ -53,6 +53,13 @@ export interface EngineConfig {
    * successful turn. Missing/null means in-memory-only (pre-persistence
    * behaviour — transcripts reset on app restart). */
   historyStore?: HistoryStore;
+
+  /** Called when `/compact` runs — lets the provider substitute a cheaper
+   * model for the summarisation call (gpt-4o-mini, gemini flash, etc.).
+   * Return `undefined` to fall back to `currentModel`. Kept as a callback
+   * (not a static string) because provider state like "is this model in
+   * the user's Copilot quota?" needs to be checked at call time. */
+  pickCompactModel?: (currentModel: string) => string | undefined;
 }
 
 type ContentPart =
@@ -525,8 +532,17 @@ export function createEngine(config: EngineConfig) {
         if (toCompact.length === 0) return 'Nothing older than recent turns to compact.';
 
         const oai = await getClient();
+        // Providers may substitute a cheaper model for summarisation —
+        // the compact prompt is explicit about what to preserve, so
+        // smaller models typically do fine and save quota. Fall back to
+        // the user's current model if the provider declines or the pick
+        // isn't available.
+        const compactModel = config.pickCompactModel?.(currentModel) ?? currentModel;
+        if (compactModel !== currentModel) {
+          log.info('agent-engine', `slash.compact model.switch from=${currentModel} to=${compactModel}`);
+        }
         const result = await oai.chat.completions.create({
-          model: currentModel,
+          model: compactModel,
           messages: [
             ...(systemMsg ? [systemMsg] : []),
             ...toCompact,

@@ -114,37 +114,25 @@ interface EngineHistory {
 
 Session manager 兩邊都只看到同一個 `providerSessionIds[provider]` 欄位 — 這是 D1 的核心價值。
 
-## Companion：便宜 Model 做 /compact
+## Companion：便宜 Model 做 /compact ✅ Done
 
-目前 `engine/index.ts` L420-460 的 `/compact` 用的是當前 model（gpt-5 / claude-sonnet 等）。可以改用便宜的 model，因為 compact prompt 已經明確要求保留檔案路徑、決策、未解問題，細節遺失有限；且 last 2 user turns 仍以原文保留。
+實作時把邏輯放在 provider，而不是 engine — engine 暴露一個 `pickCompactModel?: (current: string) => string | undefined` callback，每個 provider 自己決定要不要推薦便宜 model、以及要不要在當前 model 就是便宜 model 時 short-circuit。好處是 engine 不需要知道 provider 清單（避免 `COMPACT_MODEL: Record<provider, id>` 那種反向耦合）。
 
-提案：
+實作位置：
+- `src/main/agent/engine/index.ts` `EngineConfig.pickCompactModel` + `/compact` case
+- `src/main/agent/providers/gemini.ts` — 非 flash 時 pick `gemini-2.5-flash`
+- `src/main/agent/providers/copilot.ts` — 有在 `contextWindows` 裡才 pick `gpt-4o-mini`（確認在 quota 內才用）
 
-```ts
-const COMPACT_MODEL: Record<string, string> = {
-  copilot: 'gpt-4o-mini',
-  gemini: 'gemini-1.5-flash',
-};
-
-function pickCompactModel(provider: string, available: ModelInfo[], current: string): string {
-  const preferred = COMPACT_MODEL[provider];
-  if (preferred && available.some(m => m.id === preferred)) return preferred;
-  return current; // fallback
-}
-```
-
-注意事項：
-- 便宜 model 通常不支援 reasoning effort → 強制 `effort: undefined`。
-- `stream: false`（compact 一次性吐文字，不需 streaming）。
-- Model 不可用時 fallback 當前 model，不要整個 compact 流程掛掉。
-
-**這個優先級低於 history truncation 和持久化**（見下方 Priority）。
+注意事項（實作時已處理）：
+- `/compact` 本來就沒帶 reasoning effort，不用額外處理。
+- `stream: false` 原本就是。
+- 回 `undefined` 代表「沿用當前 model」— provider 判斷不可用時就回 undefined，engine 不會塞假 id 上去。
 
 ## Priority（工作順序）
 
-1. 🥇 **Tool result truncation** — 最高性價比，單次 grep 回應可能幾十 KB。可以在 engine 內截斷（例如保留前 N 行 + `…[truncated]…`），每次 tool call 都省。**獨立於本計畫，先做。**
-2. 🥈 **Engine sessionId + HistoryStore**（本文件核心）
-3. 🥉 **Cheap compact model**
+1. 🥇 **Tool result truncation** — 最高性價比，單次 grep 回應可能幾十 KB。可以在 engine 內截斷（例如保留前 N 行 + `…[truncated]…`），每次 tool call 都省。**獨立於本計畫，先做。** ✅ Done (`tools/executor.ts` 100KB cap)
+2. 🥈 **Engine sessionId + HistoryStore**（本文件核心）✅ Done
+3. 🥉 **Cheap compact model** ✅ Done
 4. 🏅 **Auto-compact threshold**（deferred — 需先觀察 truncation 後的 context 成長曲線）
 
 ## Prior Art（2026/04 調研）

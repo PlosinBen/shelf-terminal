@@ -4,6 +4,22 @@ import type { AgentEvent } from '../types';
 import type { HistoryStore, EngineHistory } from './history-store';
 
 /**
+ * Shared OpenAI mock. Every `new OpenAI()` returns the same stub whose
+ * `chat.completions.create` is a vi.fn tracked on `mockCreate`. Tests that
+ * never reach the network (the sessionId / history-load tests) don't
+ * trigger this — it only matters for `/compact`, which issues one call.
+ */
+const mockCreate = vi.fn(async () => ({
+  choices: [{ message: { role: 'assistant', content: 'mock summary' } }],
+  usage: { prompt_tokens: 10, completion_tokens: 5 },
+}));
+vi.mock('openai', () => ({
+  default: class {
+    chat = { completions: { create: mockCreate } };
+  },
+}));
+
+/**
  * These tests only exercise the sessionId plumbing — the parts of query()
  * that run before the first network call. We drive the generator just far
  * enough to observe the initial status event, then close it. No OpenAI
@@ -217,5 +233,100 @@ describe('engine historyStore integration', () => {
     const hist = engine.getHistory();
     expect(hist.find((m) => m.role === 'user' && m.content === 'hello')).toBeTruthy();
     expect(hist.filter((m) => m.role === 'assistant')).toHaveLength(0);
+  });
+});
+
+describe('engine /compact pickCompactModel', () => {
+  /** Seed at least 4 messages with 2 user turns so /compact has something to
+   * summarise (it early-returns otherwise). `splitIdx` keeps the last 2 user
+   * turns + whatever follows, so we include 3 user turns total. */
+  function seedHistory(): EngineHistory {
+    const messages: Message[] = [
+      { role: 'user', content: 'old user 1' },
+      { role: 'assistant', content: 'old assistant 1' },
+      { role: 'user', content: 'recent user 1' },
+      { role: 'assistant', content: 'recent assistant 1' },
+      { role: 'user', content: 'recent user 2' },
+    ];
+    return {
+      version: 1,
+      sessionId: 'compact-seed',
+      providerName: 'test-engine',
+      messages,
+      createdAt: 1,
+      updatedAt: 2,
+    };
+  }
+
+  function makeSeededStore(): HistoryStore {
+    const seed = seedHistory();
+    const state = new Map([[seed.sessionId, seed]]);
+    return {
+      load: async (id: string) => state.get(id) ?? null,
+      save: async () => {},
+      delete: async () => {},
+    };
+  }
+
+  async function runCompact(engine: ReturnType<typeof createEngine>) {
+    const gen = engine.query('/compact', '/tmp', { resume: 'compact-seed' });
+    for await (const _ev of gen) { /* drain */ }
+    await gen.return?.(undefined);
+  }
+
+  it('passes pickCompactModel\'s return value to chat.completions.create', async () => {
+    mockCreate.mockClear();
+    const pick = vi.fn((_current: string) => 'cheap-mini');
+    const engine = createEngine({
+      apiKey: 'dummy',
+      defaultModel: 'expensive-pro',
+      providerName: 'test-engine',
+      historyStore: makeSeededStore(),
+      pickCompactModel: pick,
+    });
+
+    await runCompact(engine);
+
+    expect(pick).toHaveBeenCalledWith('expensive-pro');
+    expect(mockCreate).toHaveBeenCalledTimes(1);
+    const args = (mockCreate.mock.calls[0] as unknown as [{ model: string }])[0];
+    expect(args.model).toBe('cheap-mini');
+  });
+
+  it('falls back to currentModel when pickCompactModel returns undefined', async () => {
+    mockCreate.mockClear();
+    const pick = vi.fn((_current: string) => undefined);
+    const engine = createEngine({
+      apiKey: 'dummy',
+      defaultModel: 'expensive-pro',
+      providerName: 'test-engine',
+      historyStore: makeSeededStore(),
+      pickCompactModel: pick,
+    });
+
+    await runCompact(engine);
+
+    // Provider declined — engine must not invent a model. The summarisation
+    // call goes out on whatever the user was already using.
+    expect(mockCreate).toHaveBeenCalledTimes(1);
+    const args = (mockCreate.mock.calls[0] as unknown as [{ model: string }])[0];
+    expect(args.model).toBe('expensive-pro');
+  });
+
+  it('uses currentModel when pickCompactModel is omitted entirely', async () => {
+    mockCreate.mockClear();
+    const engine = createEngine({
+      apiKey: 'dummy',
+      defaultModel: 'expensive-pro',
+      providerName: 'test-engine',
+      historyStore: makeSeededStore(),
+      // no pickCompactModel — pre-feature behaviour
+    });
+
+    await runCompact(engine);
+
+    expect(mockCreate).toHaveBeenCalledTimes(1);
+    const args = (mockCreate.mock.calls[0] as unknown as [{ model: string }])[0];
+    expect(args.model).toBe('expensive-pro');
   });
 });

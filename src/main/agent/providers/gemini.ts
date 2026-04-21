@@ -41,6 +41,10 @@ export function createGeminiBackend(connection: Connection): AgentBackend {
     historyStore: createFileHistoryStore(),
     toolExecutor: createToolExecutor((cwd, cmd) => createConnector(connection).exec(cwd, cmd)),
     getContextWindow: (model) => contextWindows.get(model),
+    // Flash is ~15× cheaper than Pro and plenty capable for a ~200-word
+    // summary. If the user is already on flash, return undefined so the
+    // engine just keeps the current model (avoids a pointless switch).
+    pickCompactModel: (current) => (current === 'gemini-2.5-flash' ? undefined : 'gemini-2.5-flash'),
     tokenProvider: async () => {
       const apiKey = await cred.get();
       if (!apiKey) throw new Error('NO_AUTH');

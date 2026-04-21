@@ -111,6 +111,16 @@ export function createCopilotBackend(connection: Connection): AgentBackend {
     getContextWindow: (model) => contextWindows.get(model),
     fetch: interceptFetch,
     getRateLimit: () => lastRateLimit,
+    // gpt-4o-mini: ~20× cheaper than gpt-4o/gpt-5 and unmetered in most
+    // Copilot plans, so it's the obvious summariser. We only pick it when
+    // `getModels()` has already populated contextWindows (proof the model
+    // exists in the user's quota); otherwise fall through to current to
+    // avoid 4xx-ing the compact call on a phantom model id.
+    pickCompactModel: (current) => {
+      const preferred = 'gpt-4o-mini';
+      if (current === preferred) return undefined;
+      return contextWindows.has(preferred) ? preferred : undefined;
+    },
 
     // ── Method-per-capability ────────────────────────────────────────────
     async getModels(): Promise<ModelInfo[]> {
