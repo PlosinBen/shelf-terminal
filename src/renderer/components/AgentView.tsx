@@ -260,11 +260,46 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
     const text = input.trim();
     if ((!text && pendingFiles.length === 0 && pendingImages.length === 0) || !provider) return;
 
-    if (text === '/model') {
+    // Intercept `/model …` entirely in the renderer. Claude's SDK would
+    // otherwise forward it to the embedded Claude Code CLI which rejects
+    // built-in interactive commands in non-interactive sessions with
+    //   "/model isn't available in this environment."
+    // Our OpenAI-compat engine handles `/model <id>` itself, but routing
+    // through the picker + setPrefs keeps both backends consistent (same
+    // persistence, same UI feedback, no split-brain state).
+    if (text === '/model' || text.startsWith('/model ')) {
       setInput('');
-      if (capabilities && capabilities.models.length > 0) {
+      const arg = text.slice('/model'.length).trim();
+      if (!capabilities || capabilities.models.length === 0) return;
+      if (!arg) {
         const currentIdx = capabilities.models.findIndex((m) => m.value === model);
         setModelPicker({ open: true, selected: currentIdx >= 0 ? currentIdx : 0 });
+        return;
+      }
+      // Prefer exact id, fall back to a single substring match (case-
+      // insensitive). Ambiguous or unknown input shows a local system
+      // message rather than silently picking the wrong model.
+      const lower = arg.toLowerCase();
+      const exact = capabilities.models.find((m) => m.value === arg);
+      const matches = exact
+        ? [exact]
+        : capabilities.models.filter((m) => m.value.toLowerCase().includes(lower) || m.displayName.toLowerCase().includes(lower));
+      if (matches.length === 1) {
+        const picked = matches[0];
+        updateAgentState(tabId, { model: picked.value });
+        window.shelfApi.agent.setPrefs(tabId, { model: picked.value });
+        persistAgentPref('model', picked.value);
+        addAgentMessage(tabId, {
+          id: `msg-${Date.now()}`, role: 'system', type: 'system',
+          content: `── Model switched to ${picked.displayName} ──`,
+        });
+      } else {
+        const available = capabilities.models.map((m) => m.value).join(', ');
+        const reason = matches.length === 0 ? `Unknown model: ${arg}` : `Ambiguous: ${matches.map((m) => m.value).join(', ')}`;
+        addAgentMessage(tabId, {
+          id: `msg-${Date.now()}`, role: 'system', type: 'system',
+          content: `${reason}\nAvailable: ${available}`,
+        });
       }
       return;
     }
@@ -292,7 +327,7 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
       images: images.length > 0 ? images : undefined,
     };
     emit(Events.AGENT_SUBMIT_MESSAGE, payload);
-  }, [input, pendingFiles, pendingImages, streaming, provider, tabId, projectId, cwd, connection, initScript, agentState, capabilities, model]);
+  }, [input, pendingFiles, pendingImages, streaming, provider, tabId, projectId, cwd, connection, initScript, agentState, capabilities, model, persistAgentPref]);
 
   const handleCancelQueued = useCallback((id: string) => {
     updateAgentState(tabId, {
