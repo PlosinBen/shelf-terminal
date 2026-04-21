@@ -2,8 +2,8 @@ import type { AgentBackend, AgentEvent, AgentQueryOptions } from '../types';
 import type { Connection } from '@shared/types';
 import { log } from '@shared/logger';
 import { createOpenAIProcessor } from './openai-processor';
-import { createToolExecutor } from './tool-executor';
-import { getEffortLevels } from './processor-tools';
+import { createToolExecutor } from '../tools/executor';
+import { getEffortLevels } from '../tools/registry';
 import { createConnector } from '../../connector';
 import { getCopilotSessionToken, isAuthenticated, COPILOT_DEFAULT_HEADERS } from '../auth/copilot-auth';
 

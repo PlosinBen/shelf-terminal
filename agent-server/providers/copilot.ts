@@ -1,5 +1,5 @@
 import { createOpenAIProcessor } from '../../src/main/agent/providers/openai-processor';
-import { createToolExecutor } from '../../src/main/agent/providers/tool-executor';
+import { createToolExecutor } from '../../src/main/agent/tools/executor';
 import { getCopilotSessionToken, COPILOT_DEFAULT_HEADERS } from './copilot-auth';
 import { localExec } from '../tool-exec';
 import type { ServerBackend, SendFn, QueryInput } from './types';

@@ -8,7 +8,7 @@ import {
   getEffortLevels,
   buildSystemPrompt,
   SLASH_COMMANDS,
-} from './processor-tools';
+} from './registry';
 
 describe('tool registry', () => {
   it('declares every expected tool', () => {

@@ -2,7 +2,7 @@ import type { AgentBackend, AgentEvent, AgentQueryOptions } from '../types';
 import type { Connection } from '@shared/types';
 import { log } from '@shared/logger';
 import { createOpenAIProcessor } from './openai-processor';
-import { createToolExecutor } from './tool-executor';
+import { createToolExecutor } from '../tools/executor';
 import { createConnector } from '../../connector';
 
 // Gemini model catalogue. The OpenAI-compatible endpoint doesn't advertise a

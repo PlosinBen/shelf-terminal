@@ -1,8 +1,8 @@
 import OpenAI from 'openai';
 import type { AgentEvent, AgentQueryOptions } from '../types';
 import { log } from '@shared/logger';
-import { TOOLS, toolsForMode, toOpenAIFormat, shouldAllowAutomatically, shouldDenyAutomatically, buildSystemPrompt, SLASH_COMMANDS, getEffortLevels } from './processor-tools';
-import type { ToolExecutor } from './tool-executor';
+import { TOOLS, toolsForMode, toOpenAIFormat, shouldAllowAutomatically, shouldDenyAutomatically, buildSystemPrompt, SLASH_COMMANDS, getEffortLevels } from '../tools/registry';
+import type { ToolExecutor } from '../tools/executor';
 
 export interface OpenAIProviderConfig {
   apiKey?: string;
