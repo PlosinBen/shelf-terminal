@@ -562,6 +562,8 @@ test('mod+W closes active project', async ({ shelfApp: { page } }) => {
   const before = await items.count();
 
   await page.keyboard.press(`${modifier}+w`);
+  // mod+W opens a confirmation dialog (see RemoveConfirmDialog); confirm it.
+  await page.locator('.conn-btn-danger', { hasText: 'Remove' }).click();
   await expect(items).toHaveCount(before - 1, { timeout: 5_000 });
 });
 
@@ -575,7 +577,9 @@ test('close project via context menu removes it', async ({ shelfApp: { page } })
   const before = await items.count();
 
   await items.last().click({ button: 'right' });
-  await page.locator('.context-menu-item', { hasText: 'Close' }).click();
+  await page.locator('.context-menu-item', { hasText: 'Remove' }).click();
+  // "Remove" opens the confirmation dialog; click through to actually delete.
+  await page.locator('.conn-btn-danger', { hasText: 'Remove' }).click();
 
   await expect(items).toHaveCount(before - 1, { timeout: 5_000 });
 });
