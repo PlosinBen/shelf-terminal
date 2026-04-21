@@ -325,6 +325,17 @@ export function registerAgentHandlers() {
     }
   });
 
+  ipcMain.handle(IPC.AGENT_CHECK_AUTH, async (_event, { tabId }: { tabId: string }) => {
+    const session = sessions.get(tabId);
+    if (!session) return { authenticated: false };
+    try {
+      const authed = await session.backend.checkAuth();
+      return { authenticated: authed };
+    } catch {
+      return { authenticated: false };
+    }
+  });
+
   ipcMain.handle(IPC.AGENT_CLEAR_CREDENTIAL, async (_event, { tabId }: { tabId: string }) => {
     const session = sessions.get(tabId);
     if (!session) return { ok: false, error: 'Session not found' };

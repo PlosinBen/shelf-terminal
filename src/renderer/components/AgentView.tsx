@@ -496,7 +496,7 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
   if (authRequired) {
     const retry = async () => {
       updateAgentState(tabId, { authBusy: true, authError: null });
-      const { authenticated } = await window.shelfApi.copilotAuth.recheck();
+      const { authenticated } = await window.shelfApi.agent.checkAuth(tabId);
       if (authenticated) {
         updateAgentState(tabId, { authRequired: null, authError: null, authBusy: false });
       } else {

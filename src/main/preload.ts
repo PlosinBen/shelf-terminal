@@ -117,6 +117,8 @@ contextBridge.exposeInMainWorld('shelfApi', {
       ipcRenderer.invoke(IPC.AGENT_STORE_CREDENTIAL, { tabId, key }),
     clearCredential: (tabId: string): Promise<{ ok: boolean; error?: string }> =>
       ipcRenderer.invoke(IPC.AGENT_CLEAR_CREDENTIAL, { tabId }),
+    checkAuth: (tabId: string): Promise<{ authenticated: boolean }> =>
+      ipcRenderer.invoke(IPC.AGENT_CHECK_AUTH, { tabId }),
     switchProvider: (tabId: string, provider: string, connection: unknown, initScript?: string) =>
       ipcRenderer.invoke(IPC.AGENT_SWITCH_PROVIDER, { tabId, provider, connection, initScript }),
     onCapabilities: (callback: (payload: any) => void) => {
