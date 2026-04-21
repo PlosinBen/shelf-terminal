@@ -123,15 +123,33 @@ interface AgentInitPrefs {
  * providers whose getters share state (Claude caches SDK init across calls)
  * still only pay the upfront cost once.
  */
+// `/model` is renderer-owned (we intercept it in AgentView before it reaches
+// the backend, because Claude's embedded CLI rejects built-in interactive
+// commands in non-interactive mode). Advertise it in the slash menu so
+// users can discover + trigger the picker via autocomplete.
+function withBuiltInSlashCommands(caps: ProviderCapabilities): ProviderCapabilities {
+  if (caps.slashCommands.some((c) => c.name === 'model')) return caps;
+  return {
+    ...caps,
+    slashCommands: [
+      { name: 'model', description: 'Switch active model (opens picker; or `/model <id>`)' },
+      ...caps.slashCommands,
+    ],
+  };
+}
+
 async function gatherCapabilities(backend: AgentBackend, cwd: string): Promise<ProviderCapabilities | null> {
   // Remote backends aggregate on the server side in a single round-trip.
-  if (backend.getCapabilities) return backend.getCapabilities(cwd);
+  if (backend.getCapabilities) {
+    const caps = await backend.getCapabilities(cwd);
+    return caps ? withBuiltInSlashCommands(caps) : caps;
+  }
   if (!backend.getModels || !backend.getSlashCommands) return null;
   const [models, slashCommands] = await Promise.all([
     backend.getModels(cwd),
     backend.getSlashCommands(),
   ]);
-  return {
+  return withBuiltInSlashCommands({
     models: models.map((m) => ({
       value: m.id,
       displayName: m.displayName,
@@ -142,7 +160,7 @@ async function gatherCapabilities(backend: AgentBackend, cwd: string): Promise<P
     effortLevels: backend.getEffortLevels?.() ?? [],
     slashCommands,
     authMethod: backend.getAuthMethod?.(),
-  };
+  });
 }
 
 async function ensureSession(
@@ -354,40 +372,24 @@ export function registerAgentHandlers() {
     }
   });
 
-  ipcMain.handle(IPC.AGENT_SET_PREFS, async (_event, { tabId, prefs, validate }: { tabId: string; prefs: AgentInitPrefs; validate?: boolean }): Promise<{ ok: boolean; error?: string }> => {
+  ipcMain.handle(IPC.AGENT_SET_PREFS, async (_event, { tabId, prefs }: { tabId: string; prefs: AgentInitPrefs }) => {
     const session = sessions.get(tabId);
-    if (!session) return { ok: false, error: 'Session not found' };
+    if (!session) return;
     const changes = [
       prefs.model !== undefined ? `model=${prefs.model}` : null,
       prefs.effort !== undefined ? `effort=${prefs.effort}` : null,
       prefs.permissionMode !== undefined ? `permMode=${prefs.permissionMode}` : null,
     ].filter(Boolean);
-    if (changes.length > 0) log.info('agent', `session.prefs tab=${tabId} ${changes.join(' ')}${validate ? ' validate=1' : ''}`);
-
-    // Only runs when the caller explicitly asks (the typed `/model <id>`
-    // path). Picker-driven changes already pick from a list, so they
-    // skip this and avoid the getModels() round-trip. On Copilot that
-    // call is cheap (cached /models), on Claude it's a plan-mode SDK
-    // init — not cheap, but only paid when the user types a raw id.
-    if (validate && prefs.model !== undefined) {
-      try {
-        const models = (await session.backend.getModels?.()) ?? [];
-        if (models.length > 0 && !models.some((m) => m.id === prefs.model)) {
-          const available = models.map((m) => m.id).join(', ');
-          return { ok: false, error: `Unknown model: ${prefs.model}\nAvailable: ${available}` };
-        }
-      } catch (err: any) {
-        // Don't block on validation failure — fall through and let the
-        // next query surface the real error. Better UX than "we can't
-        // check, so we refuse".
-        log.info('agent', `session.prefs validate.failed tab=${tabId}: ${err?.message ?? err}`);
-      }
-    }
-
+    if (changes.length > 0) log.info('agent', `session.prefs tab=${tabId} ${changes.join(' ')}`);
+    // No pre-validation here. `supportedModels()` / `getModels()` return
+    // a known-catalogue snapshot that lags behind what the backend
+    // actually accepts — Claude SDK accepts short aliases and newly
+    // released ids that aren't in `supportedModels()` yet, Copilot's
+    // /models result can be minutes stale. If the id is truly bogus,
+    // the next query's error stream will surface it to the user.
     if (prefs.model !== undefined) session.backend.setModel?.(prefs.model);
     if (prefs.effort !== undefined) session.backend.setEffort?.(prefs.effort);
     if (prefs.permissionMode !== undefined) session.permissionMode = prefs.permissionMode;
-    return { ok: true };
   });
 
   ipcMain.handle(IPC.AGENT_STORE_CREDENTIAL, async (_event, { tabId, key }: { tabId: string; key: string }) => {

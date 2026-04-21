@@ -72,7 +72,7 @@ interface ShelfApi {
     destroy: (tabId: string) => Promise<void>;
     deleteHistories: (sessionIds: string[]) => Promise<void>;
     resolvePermission: (tabId: string, toolUseId: string, scope: 'once' | 'session' | 'deny', toolName?: string, input?: Record<string, unknown>) => Promise<void>;
-    setPrefs: (tabId: string, prefs: import('../shared/types').AgentPrefs, validate?: boolean) => Promise<{ ok: boolean; error?: string }>;
+    setPrefs: (tabId: string, prefs: import('../shared/types').AgentPrefs) => Promise<void>;
     storeCredential: (tabId: string, key: string) => Promise<{ ok: boolean; error?: string }>;
     clearCredential: (tabId: string) => Promise<{ ok: boolean; error?: string }>;
     checkAuth: (tabId: string) => Promise<{ authenticated: boolean }>;

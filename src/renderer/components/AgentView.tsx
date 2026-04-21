@@ -264,10 +264,10 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
     // otherwise forward it to the embedded Claude Code CLI which rejects
     // built-in interactive commands in non-interactive sessions with
     //   "/model isn't available in this environment."
-    // Bare `/model` opens our picker. `/model <id>` asks main to
-    // validate the id against the backend's live getModels() before
-    // committing — any unknown id surfaces immediately as an error
-    // instead of silently storing then failing on the next send.
+    // Bare `/model` opens our picker. `/model <id>` validates against
+    // our maintained `capabilities.models` catalogue (exact match) —
+    // unknown ids surface immediately as an error instead of silently
+    // storing then failing on the next send.
     if (text === '/model' || text.startsWith('/model ')) {
       setInput('');
       const arg = text.slice('/model'.length).trim();
@@ -278,18 +278,27 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
         }
         return;
       }
-      (async () => {
-        const res = await window.shelfApi.agent.setPrefs(tabId, { model: arg }, true);
-        if (!res.ok) {
-          addAgentMessage(tabId, {
-            id: `msg-${Date.now()}`, role: 'system', type: 'error',
-            content: res.error ?? `Failed to switch model: ${arg}`,
-          });
-          return;
-        }
-        updateAgentState(tabId, { model: arg });
-        persistAgentPref('model', arg);
-      })();
+      const known = capabilities?.models ?? [];
+      const match = known.find((m) => m.value === arg);
+      if (!match) {
+        const list = known.map((m) => m.value).join(', ') || '(none)';
+        addAgentMessage(tabId, {
+          id: `msg-${Date.now()}`,
+          role: 'system',
+          type: 'error',
+          content: `Unknown model: ${arg}\nAvailable: ${list}`,
+        });
+        return;
+      }
+      window.shelfApi.agent.setPrefs(tabId, { model: arg });
+      updateAgentState(tabId, { model: arg });
+      persistAgentPref('model', arg);
+      addAgentMessage(tabId, {
+        id: `msg-${Date.now()}`,
+        role: 'system',
+        type: 'system',
+        content: `── Model switched to ${match.displayName} ──`,
+      });
       return;
     }
 
@@ -354,6 +363,12 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
     updateAgentState(tabId, { model: picked.value });
     window.shelfApi.agent.setPrefs(tabId, { model: picked.value });
     persistAgentPref('model', picked.value);
+    addAgentMessage(tabId, {
+      id: `msg-${Date.now()}`,
+      role: 'system',
+      type: 'system',
+      content: `── Model switched to ${picked.displayName} ──`,
+    });
     setModelPicker({ open: false, selected: 0 });
   }, [tabId, capabilities, persistAgentPref]);
 
