@@ -37,9 +37,22 @@ export class LocalUnixConnector implements Connector {
   }
 
   exec(cwd: string, cmd: string): Promise<ExecResult> {
+    const TIMEOUT_MS = 60_000;
+    const MAX_BUFFER = 10 * 1024 * 1024;
     return new Promise((resolve, reject) => {
-      execFile('sh', ['-c', cmd], { cwd, timeout: 15000 }, (error, stdout, stderr) => {
+      execFile('sh', ['-c', cmd], { cwd, timeout: TIMEOUT_MS, maxBuffer: MAX_BUFFER }, (error: any, stdout, stderr) => {
         if (error) {
+          // Node signals timeout via killed=true + SIGTERM; maxBuffer overflow
+          // via code ERR_CHILD_PROCESS_STDIO_MAXBUFFER. The default error
+          // message ("Command failed: sh -c …") hides the reason — translate.
+          if (error.killed && error.signal === 'SIGTERM') {
+            reject(new Error(`Command timed out after ${TIMEOUT_MS / 1000}s`));
+            return;
+          }
+          if (error.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') {
+            reject(new Error(`Command output exceeded ${MAX_BUFFER / 1024 / 1024}MB — narrow the query`));
+            return;
+          }
           reject(new Error(stderr || error.message));
           return;
         }
