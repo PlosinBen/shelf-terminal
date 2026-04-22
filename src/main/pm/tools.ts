@@ -1,6 +1,6 @@
 import type { TabInferredState, TabScanResult } from '@shared/types';
 import * as scrollback from './scrollback-buffer';
-import { readNote, writeNote } from './note-store';
+import { readNote, writeNote, readGlobalNote, writeGlobalNote } from './note-store';
 import { isAwayMode } from './away-mode';
 import { checkRedline } from './redline';
 
@@ -113,6 +113,28 @@ export const toolSchemas = [
   {
     type: 'function' as const,
     function: {
+      name: 'read_global_note',
+      description: 'Read the PM global note — cross-project memory storing user preferences, work conventions, and inter-project relationships. Read this at the start of every new conversation.',
+      parameters: { type: 'object', properties: {}, required: [] },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'write_global_note',
+      description: 'Overwrite the PM global note. Write when you learn something new about user preferences, work conventions, or cross-project relationships. Keep under ~200 words.',
+      parameters: {
+        type: 'object',
+        properties: {
+          content: { type: 'string', description: 'Markdown content' },
+        },
+        required: ['content'],
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
       name: 'write_to_pty',
       description: 'Send data to a terminal tab (Away Mode only). Use for: sending prompts to CLI agents, approving/denying permission prompts (y/n), or interrupting with ESC/Ctrl+C. NEVER use on idle_shell tabs.',
       parameters: {
@@ -208,6 +230,16 @@ export function executeTool(name: string, args: Record<string, unknown>): string
     case 'write_project_note': {
       writeNote(args.projectId as string, args.content as string);
       return 'Note saved.';
+    }
+
+    case 'read_global_note': {
+      const content = readGlobalNote();
+      return content || '(empty note)';
+    }
+
+    case 'write_global_note': {
+      writeGlobalNote(args.content as string);
+      return 'Global note saved.';
     }
 
     case 'write_to_pty': {
