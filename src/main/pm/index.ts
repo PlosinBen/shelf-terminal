@@ -2,4 +2,4 @@ export { handlePmSend, handleTabEvent, getHistory, clearHistory, stopGeneration 
 export { updateSyncedState, setWritePtyFn } from './tools';
 export { isAwayMode, setAwayMode, initAwayMode } from './away-mode';
 export { setStateChangeCallback, updateKnownTabs } from './tab-watcher';
-export { startTelegram, stopTelegram, setMessageCallback, sendEscalation } from './telegram';
+export { startTelegram, stopTelegram, setMessageCallback, setCallbackQueryHandler, sendEscalation, sendAwayModePrompt } from './telegram';

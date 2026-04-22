@@ -13,10 +13,16 @@ let pollAbort: AbortController | null = null;
 let offset = 0;
 
 type MessageCallback = (text: string, chatId: string) => void;
+type CallbackQueryHandler = (action: string, payload: string) => void;
 let onMessage: MessageCallback | null = null;
+let onCallbackQuery: CallbackQueryHandler | null = null;
 
 export function setMessageCallback(cb: MessageCallback): void {
   onMessage = cb;
+}
+
+export function setCallbackQueryHandler(cb: CallbackQueryHandler): void {
+  onCallbackQuery = cb;
 }
 
 export function startTelegram(cfg: TelegramConfig): void {
@@ -62,6 +68,7 @@ export async function sendPmResponse(text: string): Promise<void> {
 }
 
 export async function sendEscalation(
+  tabId: string,
   projectName: string,
   tabName: string,
   reason: string,
@@ -78,7 +85,37 @@ export async function sendEscalation(
     '',
     `PM note: ${reason}`,
   ].join('\n');
-  await sendMessage(msg);
+  await apiCall('sendMessage', {
+    chat_id: config.chatId,
+    text: msg,
+    parse_mode: 'Markdown',
+    reply_markup: {
+      inline_keyboard: [[
+        { text: '✅ Allow', callback_data: `escalation:allow:${tabId}` },
+        { text: '❌ Deny', callback_data: `escalation:deny:${tabId}` },
+      ]],
+    },
+  });
+}
+
+export async function sendAwayModePrompt(): Promise<void> {
+  if (!config) return;
+  const current = isAwayMode();
+  const msg = current
+    ? '🔴 Away Mode is *ON* — PM is controlling terminals.\nSwitch OFF to take back control?'
+    : '🟢 Away Mode is *OFF* — you have control.\nSwitch ON to let PM manage terminals?';
+  await apiCall('sendMessage', {
+    chat_id: config.chatId,
+    text: msg,
+    parse_mode: 'Markdown',
+    reply_markup: {
+      inline_keyboard: [[
+        current
+          ? { text: '🟢 Switch OFF', callback_data: 'away:off' }
+          : { text: '🔴 Switch ON', callback_data: 'away:on' },
+      ]],
+    },
+  });
 }
 
 // ── Internal ──
@@ -97,14 +134,30 @@ async function pollLoop(): Promise<void> {
       if (Array.isArray(updates)) {
         for (const update of updates) {
           offset = update.update_id + 1;
+
+          // Handle text messages
           const msg = update.message;
-          if (!msg?.text) continue;
-          const chatId = String(msg.chat.id);
-          if (chatId !== config.chatId) {
-            log.debug('telegram', `ignored message from chat ${chatId}`);
-            continue;
+          if (msg?.text) {
+            const chatId = String(msg.chat.id);
+            if (chatId !== config.chatId) {
+              log.debug('telegram', `ignored message from chat ${chatId}`);
+              continue;
+            }
+            // Handle /away command
+            if (msg.text === '/away') {
+              sendAwayModePrompt().catch((e) => log.error('telegram', `away prompt failed: ${e.message}`));
+              continue;
+            }
+            if (onMessage) onMessage(msg.text, chatId);
           }
-          if (onMessage) onMessage(msg.text, chatId);
+
+          // Handle callback queries (inline button presses)
+          const cbq = update.callback_query;
+          if (cbq) {
+            const chatId = String(cbq.message?.chat?.id);
+            if (chatId !== config.chatId) continue;
+            await handleCallbackQuery(cbq);
+          }
         }
       }
     } catch (err: any) {
@@ -112,6 +165,52 @@ async function pollLoop(): Promise<void> {
       log.error('telegram', `poll error: ${err.message}`);
       // Back off on error
       if (polling) await sleep(5000);
+    }
+  }
+}
+
+async function handleCallbackQuery(cbq: any): Promise<void> {
+  const data = cbq.data as string;
+  const messageId = cbq.message?.message_id;
+  const now = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
+
+  // Answer the callback to dismiss the loading spinner
+  await apiCall('answerCallbackQuery', { callback_query_id: cbq.id });
+
+  if (data.startsWith('escalation:')) {
+    const [, action, tabId] = data.split(':');
+    // Edit original message to show ack
+    const ack = action === 'allow' ? `✅ Allowed by you at ${now}` : `❌ Denied by you at ${now}`;
+    if (messageId) {
+      await apiCall('editMessageReplyMarkup', {
+        chat_id: config!.chatId,
+        message_id: messageId,
+        reply_markup: { inline_keyboard: [] },
+      }).catch(() => {});
+      await apiCall('editMessageText', {
+        chat_id: config!.chatId,
+        message_id: messageId,
+        text: `${cbq.message?.text ?? ''}\n\n${ack}`,
+        parse_mode: 'Markdown',
+      }).catch(() => {});
+    }
+    if (onCallbackQuery) onCallbackQuery(action, tabId);
+  } else if (data.startsWith('away:')) {
+    const on = data === 'away:on';
+    const { setAwayMode } = await import('./away-mode');
+    setAwayMode(on);
+    const ack = on ? `🔴 Away Mode switched ON at ${now}` : `🟢 Away Mode switched OFF at ${now}`;
+    if (messageId) {
+      await apiCall('editMessageReplyMarkup', {
+        chat_id: config!.chatId,
+        message_id: messageId,
+        reply_markup: { inline_keyboard: [] },
+      }).catch(() => {});
+      await apiCall('editMessageText', {
+        chat_id: config!.chatId,
+        message_id: messageId,
+        text: ack,
+      }).catch(() => {});
     }
   }
 }

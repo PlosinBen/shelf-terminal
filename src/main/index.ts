@@ -15,7 +15,7 @@ import { createConnector, getAvailableTypes, listDockerContainers, listWSLDistro
 import { loadSSHServers, saveSSHServer } from './ssh-server-store';
 import { log, setLogLevel, setFileWriter } from '@shared/logger';
 import { applyUserDataIsolation } from './user-data-path';
-import { handlePmSend, handleTabEvent, getHistory, clearHistory, stopGeneration, updateSyncedState, setWritePtyFn, isAwayMode, setAwayMode, initAwayMode, setStateChangeCallback, updateKnownTabs, startTelegram, stopTelegram, setMessageCallback } from './pm';
+import { handlePmSend, handleTabEvent, getHistory, clearHistory, stopGeneration, updateSyncedState, setWritePtyFn, isAwayMode, setAwayMode, initAwayMode, setStateChangeCallback, updateKnownTabs, startTelegram, stopTelegram, setMessageCallback, setCallbackQueryHandler } from './pm';
 import type { Connection, ProjectConfig, AppSettings, FileUploadResult, FileClearResult, PtySpawnPayload, PtyInputPayload, PtyResizePayload, PtyKillPayload, GitBranchInfo, WorktreeAddResult, WorktreeRemoveResult } from '@shared/types';
 
 applyUserDataIsolation();
@@ -426,9 +426,17 @@ app.whenReady().then(() => {
       handleTabEvent(tabId, tabName, projectName, oldState, newState, cachedSettings.pmProvider, mainWindow);
     }
   });
-  setMessageCallback((text, _chatId) => {
+  setMessageCallback(async (text, _chatId) => {
     if (mainWindow && cachedSettings.pmProvider) {
+      // If Away Mode is OFF and user sends a command (not just a question),
+      // PM will respond read-only. The user can use /away to toggle.
       handlePmSend(`[from Telegram] ${text}`, cachedSettings.pmProvider, mainWindow);
+    }
+  });
+  setCallbackQueryHandler((action, tabId) => {
+    if (mainWindow && cachedSettings.pmProvider) {
+      const verb = action === 'allow' ? 'approved' : 'denied';
+      handlePmSend(`[from Telegram] User ${verb} the permission request for tab ${tabId}. Send the appropriate keystroke.`, cachedSettings.pmProvider, mainWindow);
     }
   });
   if (cachedSettings.telegram?.botToken && cachedSettings.telegram?.chatId) {
