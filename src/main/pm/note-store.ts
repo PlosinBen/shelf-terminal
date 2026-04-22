@@ -3,7 +3,7 @@ import fs from 'fs';
 import { app } from 'electron';
 
 function notesDir(): string {
-  return path.join(app.getPath('home'), '.config', 'shelf', 'pm', 'notes');
+  return path.join(app.getPath('userData'), 'pm-notes');
 }
 
 function notePath(projectId: string): string {

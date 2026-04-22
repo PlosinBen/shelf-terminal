@@ -11,7 +11,7 @@ interface PersistedHistory {
 }
 
 function historyPath(): string {
-  return path.join(app.getPath('home'), '.config', 'shelf', 'pm', 'history.json');
+  return path.join(app.getPath('userData'), 'pm-history.json');
 }
 
 export function loadHistory(): { chat: ChatMessage[]; display: PmMessage[] } {
