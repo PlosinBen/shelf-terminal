@@ -179,7 +179,7 @@ export interface PmToolCall {
 }
 
 export interface PmMessage {
-  role: 'user' | 'assistant';
+  role: 'user' | 'assistant' | 'error';
   content: string;
   toolCalls?: PmToolCall[];
   timestamp: number;

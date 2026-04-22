@@ -47,6 +47,9 @@ function getSystemPrompt(): string {
 }
 
 const MAX_HISTORY_TURNS = 40;
+const MAX_RETRIES = 2;
+const RETRY_DELAY_MS = 3000;
+const RETRYABLE_STATUS_RE = /\b(503|429|500|502|504)\b/;
 
 const persisted = loadHistory();
 let history: ChatMessage[] = persisted.chat;
@@ -102,14 +105,37 @@ export async function handlePmSend(
   const { signal } = abortController;
 
   try {
-    await runLoop(config, win, signal);
-  } catch (err: any) {
-    if (err.name === 'AbortError') {
-      sendChunk(win, { type: 'done' });
-      return;
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        await runLoop(config, win, signal);
+        return;
+      } catch (err: any) {
+        if (err.name === 'AbortError') {
+          sendChunk(win, { type: 'done' });
+          return;
+        }
+
+        const errMsg = err.message ?? String(err);
+        const isRetryable = RETRYABLE_STATUS_RE.test(errMsg);
+
+        if (isRetryable && attempt < MAX_RETRIES) {
+          log.info('pm', `retryable error (attempt ${attempt + 1}/${MAX_RETRIES + 1}): ${errMsg}`);
+          sendChunk(win, {
+            type: 'error',
+            error: `${errMsg}\n\nRetrying in ${RETRY_DELAY_MS / 1000}s... (${attempt + 1}/${MAX_RETRIES})`,
+          });
+          await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
+          if (signal.aborted) return;
+          continue;
+        }
+
+        log.error('pm', `agent loop error: ${errMsg}`);
+        messages.push({ role: 'error', content: errMsg, timestamp: Date.now() });
+        persist();
+        sendChunk(win, { type: 'error', error: errMsg });
+        return;
+      }
     }
-    log.error('pm', `agent loop error: ${err.message}`);
-    sendChunk(win, { type: 'error', error: err.message });
   } finally {
     abortController = null;
   }

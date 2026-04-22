@@ -55,13 +55,20 @@ export function PmView() {
           setStreamToolCalls([]);
           window.shelfApi.pm.history().then(setMessages);
           break;
-        case 'error':
-          setStreaming(false);
-          setStreamText('');
-          setStreamToolCalls([]);
-          setError(chunk.error ?? 'Unknown error');
-          window.shelfApi.pm.history().then(setMessages);
+        case 'error': {
+          const errMsg = chunk.error ?? 'Unknown error';
+          const isRetrying = errMsg.includes('Retrying in');
+          if (isRetrying) {
+            setError(errMsg);
+          } else {
+            setStreaming(false);
+            setStreamText('');
+            setStreamToolCalls([]);
+            setError(null);
+            window.shelfApi.pm.history().then(setMessages);
+          }
           break;
+        }
       }
     });
     return off;
@@ -173,6 +180,9 @@ export function PmView() {
 }
 
 function MessageBubble({ message }: { message: PmMessage }) {
+  if (message.role === 'error') {
+    return <div className="pm-error">{message.content}</div>;
+  }
   const isUser = message.role === 'user';
   return (
     <div className={`pm-msg ${isUser ? 'pm-msg-user' : 'pm-msg-assistant'}`}>
