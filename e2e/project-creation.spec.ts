@@ -1,4 +1,4 @@
-import { test, expect } from './helpers';
+import { test, expect, readActiveTerminalText } from './helpers';
 
 // Helper: open folder picker and go through connection step
 async function openFolderPicker(page: any) {
@@ -116,9 +116,7 @@ test('terminal spawns and shows output', async ({ shelfApp: { page } }) => {
   await expect(terminal).toBeVisible({ timeout: 5_000 });
 
   await page.waitForTimeout(2000);
-  const xtermRows = terminal.locator('.xterm-rows');
-  const text = await xtermRows.textContent();
-  expect(text?.length).toBeGreaterThan(0);
+  expect((await readActiveTerminalText(page)).length).toBeGreaterThan(0);
 });
 
 test('project shows green status dot', async ({ shelfApp: { page } }) => {

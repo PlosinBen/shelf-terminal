@@ -61,3 +61,24 @@ export const test = base.extend<{}, { shelfApp: { app: ElectronApplication; page
 });
 
 export { expect } from '@playwright/test';
+
+export async function readActiveTerminalText(page: Page): Promise<string> {
+  return await page.evaluate(() => {
+    const cache = (window as unknown as { __shelfTerminalCache__?: Map<string, any> }).__shelfTerminalCache__;
+    const visible = Array.from(document.querySelectorAll('.terminal-container'))
+      .find((c) => (c as HTMLElement).offsetParent !== null) as HTMLElement | undefined;
+    if (!cache || !visible) return '';
+    for (const [, cached] of cache) {
+      if (cached.term?.element && visible.contains(cached.term.element)) {
+        const buf = cached.term.buffer.active;
+        let out = '';
+        for (let y = 0; y < buf.length; y++) {
+          const line = buf.getLine(y);
+          if (line) out += line.translateToString(true) + '\n';
+        }
+        return out;
+      }
+    }
+    return '';
+  });
+}

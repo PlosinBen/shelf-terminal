@@ -1,32 +1,6 @@
-import { test, expect } from './helpers';
+import { test, expect, readActiveTerminalText } from './helpers';
 
 const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
-
-// Read the xterm buffer text for the active tab of the active project via the
-// __shelfTerminalCache__ test hook. The WebGL renderer paints to canvas so
-// `.xterm-rows` has no text — DOM-based assertions against it always fail.
-async function readActiveTerminalText(page: any): Promise<string> {
-  return await page.evaluate(() => {
-    const cache = (window as any).__shelfTerminalCache__ as Map<string, any> | undefined;
-    const visibleContainer = Array.from(document.querySelectorAll('.terminal-container'))
-      .find((c) => (c as HTMLElement).offsetParent !== null) as HTMLElement | undefined;
-    if (!cache || !visibleContainer) return '';
-    // Match the active entry by element parent/ancestor chain — each cache
-    // entry's term.element lives under its own .terminal-container.
-    for (const [, cached] of cache) {
-      if (cached.term?.element && visibleContainer.contains(cached.term.element)) {
-        const buf = cached.term.buffer.active;
-        let out = '';
-        for (let y = 0; y < buf.length; y++) {
-          const line = buf.getLine(y);
-          if (line) out += line.translateToString(true) + '\n';
-        }
-        return out;
-      }
-    }
-    return '';
-  });
-}
 
 // Helper: create a project and connect (opens a terminal tab)
 async function setupProject(page: any) {
