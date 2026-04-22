@@ -6,6 +6,7 @@ import {
   toggleSettings,
   toggleSidebar,
   reorderProjects,
+  setPmVisible,
 } from '../store';
 import { emit, Events } from '../events';
 import { CONFIRM_REMOVE_EVENT } from './RemoveConfirmDialog';
@@ -13,7 +14,7 @@ import { CONFIRM_REMOVE_EVENT } from './RemoveConfirmDialog';
 const version = __APP_VERSION__;
 
 export function Sidebar() {
-  const { projects, activeProjectIndex, updateStatus } = useStore();
+  const { projects, activeProjectIndex, updateStatus, pmVisible } = useStore();
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const [contextMenu, setContextMenu] = useState<{ index: number; x: number; y: number } | null>(null);
@@ -75,6 +76,13 @@ export function Sidebar() {
           <button className="sidebar-btn" onClick={toggleSettings} title="Settings">&#9881;</button>
           <button className="sidebar-btn" onClick={handleNewProject} title="New project">+</button>
         </span>
+      </div>
+      <div
+        className={`sidebar-item sidebar-pm-entry ${pmVisible ? 'active' : ''}`}
+        onClick={() => setPmVisible(true)}
+      >
+        <span className="status-dot pm-dot" />
+        <span className="project-name">PM</span>
       </div>
       <div className="sidebar-list">
         {projects.map((proj, i) => {

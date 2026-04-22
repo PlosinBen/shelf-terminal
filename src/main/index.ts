@@ -15,6 +15,7 @@ import { createConnector, getAvailableTypes, listDockerContainers, listWSLDistro
 import { loadSSHServers, saveSSHServer } from './ssh-server-store';
 import { log, setLogLevel, setFileWriter } from '@shared/logger';
 import { applyUserDataIsolation } from './user-data-path';
+import { handlePmSend, getHistory, clearHistory, stopGeneration, updateSyncedState } from './pm';
 import type { Connection, ProjectConfig, AppSettings, FileUploadResult, FileClearResult, PtySpawnPayload, PtyInputPayload, PtyResizePayload, PtyKillPayload, GitBranchInfo, WorktreeAddResult, WorktreeRemoveResult } from '@shared/types';
 
 applyUserDataIsolation();
@@ -343,6 +344,29 @@ ipcMain.on(IPC.PTY_RESIZE, (_event, payload: PtyResizePayload) => {
 
 ipcMain.on(IPC.PTY_MUTE, (_event, payload: { tabId: string; muted: boolean }) => {
   setMuted(payload.tabId, payload.muted);
+});
+
+// ── PM Agent ──
+
+ipcMain.handle(IPC.PM_SEND, async (_event, message: string) => {
+  if (!mainWindow || !cachedSettings.pmProvider) return;
+  await handlePmSend(message, cachedSettings.pmProvider, mainWindow);
+});
+
+ipcMain.handle(IPC.PM_STOP, () => {
+  stopGeneration();
+});
+
+ipcMain.handle(IPC.PM_HISTORY, () => {
+  return getHistory();
+});
+
+ipcMain.handle(IPC.PM_CLEAR, () => {
+  clearHistory();
+});
+
+ipcMain.on(IPC.PM_SYNC_STATE, (_event, state: any) => {
+  updateSyncedState(state);
 });
 
 // ── App lifecycle ──

@@ -104,6 +104,7 @@ export interface AppSettings {
   defaultLocalPath?: string;
   dockerPath?: string;
   unicode11?: boolean;
+  pmProvider?: PmProviderConfig;
 }
 
 
@@ -141,6 +142,52 @@ export interface WorktreeAddResult {
 
 export interface WorktreeRemoveResult {
   ok: boolean;
+  error?: string;
+}
+
+// ── PM Agent ──
+
+export interface PmProviderConfig {
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+}
+
+export type TabInferredState =
+  | 'idle_shell'
+  | 'cli_running'
+  | 'cli_waiting_input'
+  | 'cli_waiting_permission'
+  | 'cli_error'
+  | 'cli_done';
+
+export interface TabScanResult {
+  projectId: string;
+  projectName: string;
+  tabId: string;
+  tabName: string;
+  lastLines: string;
+  inferredState: TabInferredState;
+}
+
+export interface PmToolCall {
+  id: string;
+  name: string;
+  args: Record<string, unknown>;
+  result?: string;
+}
+
+export interface PmMessage {
+  role: 'user' | 'assistant';
+  content: string;
+  toolCalls?: PmToolCall[];
+  timestamp: number;
+}
+
+export interface PmStreamChunk {
+  type: 'text' | 'tool_start' | 'tool_result' | 'done' | 'error';
+  text?: string;
+  toolCall?: PmToolCall;
   error?: string;
 }
 

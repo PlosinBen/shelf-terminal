@@ -56,8 +56,16 @@ export const IPC = {
   UPDATE_INSTALL: 'update:install',
   UPDATE_STATUS: 'update:status',
 
+  // PM Agent
+  PM_SEND: 'pm:send',
+  PM_STOP: 'pm:stop',
+  PM_HISTORY: 'pm:history',
+  PM_CLEAR: 'pm:clear',
+  PM_SYNC_STATE: 'pm:sync-state',
+
   // Main → Renderer (send)
   PTY_DATA: 'pty:data',
   PTY_EXIT: 'pty:exit',
   PTY_INIT_SENT: 'pty:init-sent',
+  PM_STREAM: 'pm:stream',
 } as const;

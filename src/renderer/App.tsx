@@ -11,6 +11,7 @@ import { WorktreeDialog } from './components/WorktreeDialog';
 import { RemoveConfirmDialog } from './components/RemoveConfirmDialog';
 import { BottomBar, SWITCH_BRANCH_EVENT } from './components/BottomBar';
 import { DevToolsPanel } from './components/DevToolsPanel';
+import { PmView } from './components/PmView';
 import { useKeybindings } from './hooks/useKeybindings';
 import { useStore, setProjects, setSettings, setUpdateStatus, addProject, addTab, setActiveTab, removeTab, removeProject, setSplitTab, toggleSidebar, clearUnread, setInvalidProjects } from './store';
 import type { ProjectConfig } from '@shared/types';
@@ -20,7 +21,7 @@ import { getTheme } from './themes';
 import './styles/global.css';
 
 export function App() {
-  const { projects, activeProjectIndex, sidebarVisible, settingsVisible, commandPickerVisible, devToolsVisible, editingProjectIndex, settings } = useStore();
+  const { projects, activeProjectIndex, sidebarVisible, settingsVisible, commandPickerVisible, devToolsVisible, editingProjectIndex, settings, pmVisible } = useStore();
   useKeybindings();
 
   useEffect(() => {
@@ -214,7 +215,8 @@ export function App() {
     <div className="app">
       {sidebarVisible && <Sidebar />}
       <main className="main-area">
-        <div className="terminal-section">
+        {pmVisible && <PmView />}
+        <div className="terminal-section" style={pmVisible ? { display: 'none' } : undefined}>
         <TabBar />
         <div className="terminal-view">
           <SearchBar />

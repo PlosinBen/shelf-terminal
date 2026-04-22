@@ -23,4 +23,5 @@ export const Events = {
   ADD_PROJECT: 'add-project',       // (ProjectConfig)
   TOGGLE_SPLIT: 'toggle-split',     // (projectIndex)
   CREATE_WORKTREE: 'create-worktree', // (projectIndex)
+  OPEN_PM: 'open-pm',                 // ()
 } as const;

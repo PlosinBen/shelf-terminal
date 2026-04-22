@@ -65,6 +65,14 @@ interface ShelfApi {
   app: {
     logsPath: () => Promise<string>;
   };
+  pm: {
+    send: (message: string) => Promise<void>;
+    stop: () => Promise<void>;
+    history: () => Promise<import('../shared/types').PmMessage[]>;
+    clear: () => Promise<void>;
+    syncState: (state: any) => void;
+    onStream: (callback: (chunk: import('../shared/types').PmStreamChunk) => void) => () => void;
+  };
   updater: {
     check: () => Promise<void>;
     download: () => Promise<void>;
