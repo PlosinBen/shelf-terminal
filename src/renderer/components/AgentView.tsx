@@ -149,7 +149,7 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
       }
       if (accepted.length > 0) setPendingImages((prev) => [...prev, ...accepted]);
     },
-  });
+  }, visible);
   const isAtBottomRef = useRef(false);
   const scrollRestoredRef = useRef(false);
   const prevMessageCount = useRef(0);

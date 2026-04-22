@@ -96,11 +96,15 @@ async function uploadFiles(files: File[], opts: UseAttachmentPasteOpts): Promise
 export function useAttachmentPaste(
   ref: RefObject<HTMLElement | null>,
   opts: UseAttachmentPasteOpts,
+  /** Pass a value that changes when the ref's DOM element appears/disappears
+   * (e.g. `visible`). The effect re-runs so listeners bind to the live node. */
+  enabled: boolean = true,
 ): void {
   const optsRef = useRef(opts);
   optsRef.current = opts;
 
   useEffect(() => {
+    if (!enabled) return;
     const el = ref.current;
     if (!el) return;
 
@@ -175,5 +179,5 @@ export function useAttachmentPaste(
       el.removeEventListener('dragover', handleDragOver);
       el.removeEventListener('drop', handleDrop);
     };
-  }, [ref]);
+  }, [ref, enabled]);
 }
