@@ -1199,6 +1199,7 @@ button {
 }
 
 .settings-sub-hint {
+  margin-left: 152px;
   margin-top: -10px;
   font-size: 11px;
   color: var(--text-muted);

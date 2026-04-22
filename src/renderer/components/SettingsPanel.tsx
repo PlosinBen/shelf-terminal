@@ -239,7 +239,7 @@ export function SettingsPanel() {
                     Clear Logs
                   </button>
                 </div>
-                <div className="settings-config-path">{logsPath}</div>
+                <div className="settings-sub-hint">{logsPath}</div>
 
                 <div className="settings-divider" />
                 <div className="settings-section-title">Docker</div>
