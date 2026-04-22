@@ -74,6 +74,7 @@ export interface Message {
 }
 
 const MAX_TURNS = 20;
+const AUTO_COMPACT_THRESHOLD = 0.8;
 
 function safeParseJSON(s: string): Record<string, unknown> {
   try { return JSON.parse(s) as Record<string, unknown>; } catch { return { _raw: s }; }
@@ -152,6 +153,75 @@ export function createEngine(config: EngineConfig) {
       defaultHeaders: config.defaultHeaders,
       fetch: config.fetch,
     });
+  }
+
+  // ── Shared compact logic — used by /compact and auto-compact ──────────────
+  const COMPACT_PROMPT = [
+    'Summarise the conversation above into a structured briefing I can use as context for continuing.',
+    'Use the following sections (omit any section that has nothing to report):',
+    '',
+    '## Goal',
+    'What the user is trying to accomplish overall.',
+    '',
+    '## Completed',
+    'What has been done so far — decisions made, problems solved, commands run.',
+    '',
+    '## Relevant files',
+    'File paths that were read, created, or modified (list only, no descriptions).',
+    '',
+    '## Open questions / issues',
+    'Unresolved problems, unanswered questions, known blockers.',
+    '',
+    '## Current task / next steps',
+    'What was in progress or about to start when the conversation was compacted.',
+    '',
+    'Be concise — aim for ~250 words total. Drop chitchat, resolved exchanges, and verbose thinking.',
+  ].join('\n');
+
+  /**
+   * Compact older turns into a structured summary, keeping the last 2 user
+   * turns verbatim. Returns `{ summary, compactedCount }` on success, or
+   * `null` when there's not enough history to compact.
+   */
+  async function performCompact(): Promise<{ summary: string; compactedCount: number } | null> {
+    if (history.length < 4) return null;
+
+    const systemMsg = history[0]?.role === 'system' ? history[0] : null;
+    let userSeen = 0;
+    let splitIdx = history.length;
+    for (let i = history.length - 1; i >= 0; i--) {
+      if (history[i].role === 'user') {
+        userSeen++;
+        if (userSeen === 2) { splitIdx = i; break; }
+      }
+    }
+    const head = systemMsg ? 1 : 0;
+    const toCompact = history.slice(head, splitIdx);
+    const toKeep = history.slice(splitIdx);
+    if (toCompact.length === 0) return null;
+
+    const oai = await getClient();
+    const compactModel = config.pickCompactModel?.(currentModel) ?? currentModel;
+    if (compactModel !== currentModel) {
+      log.info('agent-engine', `compact model.switch from=${currentModel} to=${compactModel}`);
+    }
+    const result = await oai.chat.completions.create({
+      model: compactModel,
+      messages: [
+        ...(systemMsg ? [systemMsg] : []),
+        ...toCompact,
+        { role: 'user', content: COMPACT_PROMPT },
+      ] as any,
+      stream: false,
+    });
+    const summary = result.choices[0]?.message?.content ?? '(empty summary)';
+
+    history = [
+      ...(systemMsg ? [systemMsg] : []),
+      { role: 'assistant', content: `[Compacted context from earlier turns]\n\n${summary}` },
+      ...toKeep,
+    ];
+    return { summary, compactedCount: toCompact.length };
   }
 
   return {
@@ -391,6 +461,37 @@ export function createEngine(config: EngineConfig) {
           }
         }
 
+        // ── Auto-compact: if prompt_tokens exceeded 80% of context window,
+        // compact now so the *next* turn has room. Runs after the turn loop
+        // finishes (model already replied) and before persist — the persisted
+        // history will already be the compacted version.
+        if (!ephemeral && lastUsage) {
+          const contextWindow = config.getContextWindow?.(currentModel);
+          if (contextWindow && contextWindow > 0) {
+            const used = lastUsage.prompt + lastUsage.completion;
+            const ratio = used / contextWindow;
+            if (ratio >= AUTO_COMPACT_THRESHOLD) {
+              log.info('agent-engine', `auto-compact triggered ratio=${(ratio * 100).toFixed(1)}% (${used}/${contextWindow}) provider=${config.providerName}`);
+              try {
+                const compactResult = await performCompact();
+                if (compactResult) {
+                  log.info('agent-engine', `auto-compact done compacted=${compactResult.compactedCount} historyAfter=${history.length}`);
+                  yield {
+                    type: 'message',
+                    payload: {
+                      type: 'system',
+                      content: `Context reached ${(ratio * 100).toFixed(0)}% — auto-compacted ${compactResult.compactedCount} earlier messages.`,
+                    },
+                  };
+                }
+              } catch (err: any) {
+                // Auto-compact is best-effort — never block the user's reply.
+                log.error('agent-engine', `auto-compact failed: ${err?.message ?? err}`);
+              }
+            }
+          }
+        }
+
         // Persist the fully-consistent history before announcing idle.
         // Skipped for /ask turns (ephemeral === true) because those
         // explicitly drop their contribution in the finally block.
@@ -514,53 +615,11 @@ export function createEngine(config: EngineConfig) {
 
       case 'compact': {
         log.info('agent-engine', `slash.compact provider=${config.providerName} historyLen=${history.length}`);
-        if (history.length < 4) return 'Not enough history to compact yet.';
-
-        const systemMsg = history[0]?.role === 'system' ? history[0] : null;
-        // Keep the last 2 user turns (and whatever followed) verbatim.
-        let userSeen = 0;
-        let splitIdx = history.length;
-        for (let i = history.length - 1; i >= 0; i--) {
-          if (history[i].role === 'user') {
-            userSeen++;
-            if (userSeen === 2) { splitIdx = i; break; }
-          }
-        }
-        const head = systemMsg ? 1 : 0;
-        const toCompact = history.slice(head, splitIdx);
-        const toKeep = history.slice(splitIdx);
-        if (toCompact.length === 0) return 'Nothing older than recent turns to compact.';
-
-        const oai = await getClient();
-        // Providers may substitute a cheaper model for summarisation —
-        // the compact prompt is explicit about what to preserve, so
-        // smaller models typically do fine and save quota. Fall back to
-        // the user's current model if the provider declines or the pick
-        // isn't available.
-        const compactModel = config.pickCompactModel?.(currentModel) ?? currentModel;
-        if (compactModel !== currentModel) {
-          log.info('agent-engine', `slash.compact model.switch from=${currentModel} to=${compactModel}`);
-        }
-        const result = await oai.chat.completions.create({
-          model: compactModel,
-          messages: [
-            ...(systemMsg ? [systemMsg] : []),
-            ...toCompact,
-            {
-              role: 'user',
-              content: 'Summarise the conversation above into a concise briefing I can use as context for continuing. Preserve file paths, decisions already made, open questions, and key technical details. Drop chitchat, resolved exchanges, and verbose thinking. Aim for ~200 words.',
-            },
-          ] as any,
-          stream: false,
-        });
-        const summary = result.choices[0]?.message?.content ?? '(empty summary)';
-
-        history = [
-          ...(systemMsg ? [systemMsg] : []),
-          { role: 'assistant', content: `[Compacted context from earlier turns]\n\n${summary}` },
-          ...toKeep,
-        ];
-        return `Compacted ${toCompact.length} earlier messages.\n\n${summary}`;
+        const result = await performCompact();
+        if (!result) return history.length < 4
+          ? 'Not enough history to compact yet.'
+          : 'Nothing older than recent turns to compact.';
+        return `Compacted ${result.compactedCount} earlier messages.\n\n${result.summary}`;
       }
 
       case 'model':
