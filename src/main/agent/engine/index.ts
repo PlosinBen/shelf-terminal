@@ -518,6 +518,61 @@ export function createEngine(config: EngineConfig) {
           // Normally user-initiated stop, but can also fire from unexpected
           // signal races. Log so silent exits aren't invisible in the trail.
           log.info('agent-engine', `Query aborted (history=${history.length})`);
+
+          // ── Sanitize history after abort ──────────────────────────────
+          // If the abort happened mid-tool-execution, the history may
+          // contain an assistant message with tool_calls but missing some
+          // (or all) tool result messages. The API requires every tool_call
+          // to have a corresponding tool result; without it the next request
+          // will 500. Walk backward to find the last assistant msg with
+          // tool_calls, then check which results are missing.
+          let assistantIdx = -1;
+          for (let i = history.length - 1; i >= 0; i--) {
+            if (history[i].role === 'assistant' && history[i].tool_calls && history[i].tool_calls!.length > 0) {
+              assistantIdx = i;
+              break;
+            }
+            // Stop searching once we hit a user message — anything before
+            // that belongs to a prior completed turn.
+            if (history[i].role === 'user') break;
+          }
+          if (assistantIdx >= 0) {
+            const assistantMsg = history[assistantIdx];
+            const expectedIds = new Set(assistantMsg.tool_calls!.map((tc) => tc.id));
+            // Collect tool results that follow this assistant message
+            for (let i = assistantIdx + 1; i < history.length; i++) {
+              if (history[i].role === 'tool' && history[i].tool_call_id) {
+                expectedIds.delete(history[i].tool_call_id!);
+              }
+            }
+            if (expectedIds.size === assistantMsg.tool_calls!.length) {
+              // No tool results at all — remove the incomplete assistant msg
+              history.splice(assistantIdx);
+              log.info('agent-engine', `abort.cleanup removed incomplete assistant message (${expectedIds.size} pending tool_calls)`);
+            } else if (expectedIds.size > 0) {
+              // Partial results — add synthetic results for the missing ones
+              for (const id of expectedIds) {
+                history.push({ role: 'tool', tool_call_id: id, content: '[Aborted by user]' });
+              }
+              log.info('agent-engine', `abort.cleanup added ${expectedIds.size} synthetic tool results`);
+            }
+          }
+
+          // Persist the sanitized history so the next resume picks up
+          // a valid conversation state.
+          if (sessionId && config.historyStore) {
+            const head = history[0]?.role === 'system' ? 1 : 0;
+            const toPersist = history.slice(head);
+            await config.historyStore.save({
+              version: 1,
+              sessionId,
+              providerName: config.providerName,
+              messages: toPersist,
+              model: currentModel,
+              createdAt,
+              updatedAt: Date.now(),
+            });
+          }
         } else {
           log.error('agent-engine', `Query error: ${err.message}`);
           yield { type: 'error', error: err.message ?? 'Unknown error' };
