@@ -47,8 +47,8 @@ function getSystemPrompt(): string {
 }
 
 const MAX_HISTORY_TURNS = 40;
-const MAX_RETRIES = 2;
-const RETRY_DELAY_MS = 3000;
+const MAX_RETRIES = 3;
+const RETRY_BASE_MS = 5000;
 const RETRYABLE_STATUS_RE = /\b(503|429|500|502|504)\b/;
 
 const persisted = loadHistory();
@@ -119,12 +119,14 @@ export async function handlePmSend(
         const isRetryable = RETRYABLE_STATUS_RE.test(errMsg);
 
         if (isRetryable && attempt < MAX_RETRIES) {
-          log.info('pm', `retryable error (attempt ${attempt + 1}/${MAX_RETRIES + 1}): ${errMsg}`);
+          const delayMs = RETRY_BASE_MS * Math.pow(2, attempt); // 5s, 10s, 20s
+          const delaySec = Math.round(delayMs / 1000);
+          log.info('pm', `retryable error (attempt ${attempt + 1}/${MAX_RETRIES}), retry in ${delaySec}s: ${errMsg}`);
           sendChunk(win, {
             type: 'error',
-            error: `${errMsg}\n\nRetrying in ${RETRY_DELAY_MS / 1000}s... (${attempt + 1}/${MAX_RETRIES})`,
+            error: `${errMsg}\n\nRetrying in ${delaySec}s... (${attempt + 1}/${MAX_RETRIES})`,
           });
-          await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
+          await new Promise((r) => setTimeout(r, delayMs));
           if (signal.aborted) return;
           continue;
         }
