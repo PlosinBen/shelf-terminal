@@ -33,7 +33,7 @@
 
 | Intent | File | Description |
 |--------|------|-------------|
-| Engine factory | `engine/index.ts` | `createEngine(config)` — agent loop + tool dispatch + permission gating + plan-mode filter + slash commands + history + /compact (透過 `pickCompactModel` 選便宜 model) + streaming + reasoning_content + quota interceptor + credential hook + sessionId 自管 + `historyStore` hydrate/save/delete; returns full `AgentBackend` |
+| Engine factory | `engine/index.ts` | `createEngine(config)` — agent loop + tool dispatch + permission gating + plan-mode filter + slash commands + history + /compact (structured prompt, `pickCompactModel` 選便宜 model) + auto-compact (80% context threshold) + streaming + reasoning_content + quota interceptor + credential hook + sessionId 自管 + `historyStore` hydrate/save/delete; returns full `AgentBackend` |
 | Engine / adapter types | `engine/types.ts` | `OpenAIAdapter`, `ModelCatalog`, `CredentialSource`, `ModelInfo`, `SlashCommand`, re-exports `AuthMethod` from shared/types |
 | Static credential store | `engine/credential.ts` | `createStaticCredentialStore(providerId, envVar)` — reads env var first, then `~/.config/shelf/{id}.json`; writes 0600 on set; tolerates ENOENT on clear |
 | Engine 對話持久化 | `engine/history-store.ts` | `HistoryStore` 介面 + `createFileHistoryStore()` 落 `userData/agent-state/<sessionId>.json`（atomic tmp+rename、path-traversal guard、`version: 1` 前向相容）；`deleteHistoryFiles(ids)` 批次清理給 project-remove 用。See `.agent/features/ENGINE_PERSISTENCE.md` |

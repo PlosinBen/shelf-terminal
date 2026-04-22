@@ -305,3 +305,18 @@
 - App 啟動是 hot path，讀 `projects.json` + 掃 `agent-state/` 做 diff 會多一次 fs 掃描和潛在錯誤處理，CP 值差。
 
 **不要改**: 如果未來真的觀察到孤兒檔累積，再加「手動在 Settings 清理」按鈕比較划算，不要在啟動時 sweep。
+
+## 26. Auto-compact at 80% + structured summary prompt
+
+**決策**: Engine 在每次 query 結束後（turn loop 跑完、persist 之前）檢查 `(prompt_tokens + completion_tokens) / contextWindow`，超過 80% 自動觸發 `performCompact()`。Compact prompt 使用 structured sections（Goal / Completed / Relevant files / Open questions / Current task）而非 free-form。`performCompact()` 是 `/compact` 和 auto-compact 的共用函式。
+
+**原因**:
+- 使用者不一定知道 context 快滿了，沒有 auto-compact 會直接撞到 API 400 錯誤。
+- 用 `prompt + completion` 而非只用 `prompt`，因為 completion tokens 下一輪會變成 prompt 的一部分，估算更保守。
+- Structured sections 比 free-form 更穩定，便宜 model（mini / flash）也能產出一致的摘要格式。
+- 80% 門檻參考 Copilot CLI 的做法，留 20% buffer 給 tool 結果。
+
+**不要改**:
+- 門檻不要拉到 95%——tool call 回來的結果可能很大，留太少 buffer 會來不及 compact。
+- Auto-compact 必須是 best-effort（try/catch），永遠不能阻擋使用者的回覆。
+- 不要在 ephemeral `/ask` turn 觸發——一次性查詢不該改動 history。
