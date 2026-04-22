@@ -10,6 +10,7 @@ export function PmView() {
   const [streamText, setStreamText] = useState('');
   const [streamToolCalls, setStreamToolCalls] = useState<PmToolCall[]>([]);
   const [showSettings, setShowSettings] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -58,6 +59,7 @@ export function PmView() {
           setStreaming(false);
           setStreamText('');
           setStreamToolCalls([]);
+          setError(chunk.error ?? 'Unknown error');
           window.shelfApi.pm.history().then(setMessages);
           break;
       }
@@ -73,6 +75,7 @@ export function PmView() {
     setStreaming(true);
     setStreamText('');
     setStreamToolCalls([]);
+    setError(null);
     await window.shelfApi.pm.send(text);
   }, [input, streaming]);
 
@@ -140,6 +143,11 @@ export function PmView() {
         {streaming && !streamText && streamToolCalls.length === 0 && (
           <div className="pm-msg pm-msg-assistant">
             <span className="pm-thinking">Thinking...</span>
+          </div>
+        )}
+        {error && (
+          <div className="pm-error" onClick={() => setError(null)}>
+            {error}
           </div>
         )}
       </div>

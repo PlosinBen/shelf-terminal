@@ -2022,6 +2022,19 @@ button {
   font-style: italic;
 }
 
+.pm-error {
+  align-self: center;
+  background: #f38ba822;
+  border: 1px solid #f38ba8;
+  color: #f38ba8;
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
 .pm-tool-calls {
   margin-bottom: 8px;
 }
