@@ -1911,29 +1911,6 @@ button {
 
 /* ── PM Agent ── */
 
-.sidebar-pm-entry {
-  padding: 0 16px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  cursor: pointer;
-  font-size: 13px;
-  height: 44px;
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-}
-
-.sidebar-pm-entry:hover {
-  background: var(--bg);
-}
-
-.sidebar-pm-entry.active {
-  background: var(--surface);
-}
-
-.pm-label {
-  font-weight: 600;
-}
 
 .pm-dot {
   background: #a6e3a1 !important;
