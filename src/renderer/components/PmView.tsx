@@ -10,7 +10,7 @@ const MIN_WIDTH = 280;
 const MAX_WIDTH = 700;
 
 export function PmView() {
-  const { settings, awayMode, pmVisible } = useStore();
+  const { settings, awayMode } = useStore();
   const [messages, setMessages] = useState<PmMessage[]>([]);
   const [input, setInput] = useState('');
   const [streaming, setStreaming] = useState(false);
@@ -140,18 +140,8 @@ export function PmView() {
   }, [width]);
 
   useEffect(() => {
-    if (pmVisible) inputRef.current?.focus();
-  }, [pmVisible]);
-
-  // Collapsed tab
-  if (!pmVisible) {
-    return (
-      <button className="pm-tab-collapsed" onClick={() => setPmVisible(true)} title="PM Agent">
-        <span className={`pm-tab-dot ${awayMode ? 'pm-dot-away' : 'pm-dot'}`} />
-        <span>PM</span>
-      </button>
-    );
-  }
+    inputRef.current?.focus();
+  }, []);
 
   // Provider settings
   if (showSettings || !hasProvider) {

@@ -265,13 +265,7 @@ export function DevToolsPanel() {
     document.addEventListener('mouseup', onUp);
   }, [width]);
 
-  if (!devToolsVisible) {
-    return (
-      <button className="devtools-tab-collapsed" onClick={toggleDevTools} title="Dev Tools">
-        <span>Dev Tools</span>
-      </button>
-    );
-  }
+  if (!devToolsVisible) return null;
 
   return (
     <div className="devtools-panel" style={{ width }}>
