@@ -251,3 +251,53 @@
 **解法**: Unicode11Addon 仍然載入（註冊可用版本），但預設不啟用（`unicode.activeVersion` 保持預設 `'6'`）。使用者可在 Settings 開啟「Unicode 11」選項，啟用後即時生效。
 
 **注意**: 啟用 Unicode 11 可改善較新 emoji 和部分 CJK 字元的寬度判定，但只要 prompt 含有 Ambiguous width 字元就可能觸發此問題。
+
+---
+
+## 24. PM Provider 設定存在 settings.json（明文 API key）
+
+**現象**: API key 直接存在 userData 的 settings.json 裡。
+
+**原因**: PM provider config（baseUrl、apiKey、model）跟著 `AppSettings.pmProvider` 走，存在 `settings.json`。Telegram bot token 也在 `AppSettings.telegram`。
+
+**注意**: 目前是明文。Gemini 免費 key 風險低，但如果未來放付費 key，應該考慮移到 `~/.config/shelf/` 或用 OS keychain。
+
+---
+
+## 25. E2E 測試需要先 build（npm run build）
+
+**現象**: E2E 測試找不到 PM 相關的 DOM 元素。
+
+**原因**: E2E 透過 Playwright 啟動 Electron，載入的是 `dist/` 的 static build，不是 vite dev server。如果 `dist/` 裡是舊 build，看不到新加的 UI。
+
+**解法**: 跑 E2E 前一律先 `NODE_ENV=test npm run build`。`npm run test:e2e` script 已經包含 build 步驟。
+
+---
+
+## 26. PM history 不持久化，app 重啟後清空
+
+**現象**: 關閉再打開 Shelf 後 PM 對話紀錄消失。
+
+**原因**: `agent-loop.ts` 的 `history` 和 `messages` 是 in-memory array，沒有寫入 disk。
+
+**注意**: 這是 Phase 1 的設計。PM 的長期記憶靠 project notes（`~/.config/shelf/pm/notes/`），對話只是 working memory。如需持久化，可加 file-based history。
+
+---
+
+## 27. Gemini 免費 tier 容易撞 503
+
+**現象**: PM 對話回 `LLM API error 503: high demand`。
+
+**原因**: Gemini 免費 tier 有 RPM/TPD 限制，尖峰時段容易被 rate limit。
+
+**解法**: 等幾秒重試，或考慮加 auto-retry 邏輯。也可以換 model（gemini-2.0-flash 可能較寬鬆）。
+
+---
+
+## 28. Gemini OpenAI-compatible endpoint model 名稱
+
+**現象**: 填 `gemini-2.5-flash-preview-05-20` 回 404。
+
+**原因**: OpenAI-compatible endpoint 的 model ID 跟 native API 不同。正確的是 `gemini-2.5-flash`（不帶日期後綴）。
+
+**解法**: 用簡短名稱：`gemini-2.5-flash`、`gemini-2.5-pro`、`gemini-2.0-flash`。

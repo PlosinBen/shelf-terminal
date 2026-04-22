@@ -4,7 +4,7 @@
 
 新增一個跨 project 的全域 PM（Project Manager）agent，作為 Shelf 的統一入口。使用者可以透過 PM 查詢各 project 狀態、遙控指揮各 project terminal 中跑的 CLI agent（Claude Code、Copilot CLI、Gemini CLI 等）、並透過 Telegram bridge 在人不在電腦前時繼續指揮。
 
-> **狀態**：設計階段。尚未實作。
+> **狀態**：Phase 1-4 已實作。Phase 5（選配）尚未開始。
 
 ### 架構轉向：退場 AgentView，回歸 Terminal
 

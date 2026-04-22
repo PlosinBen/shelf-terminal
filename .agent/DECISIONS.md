@@ -272,3 +272,53 @@
 **原因**: Unicode11Addon 對 Ambiguous width 字元（如 oh-my-zsh prompt 中的 `→` `✗`）的寬度計算與 zsh 不一致，導致 tab completion 時字元重複顯示。這是 xterm.js 已知限制（#1453）。預設關閉避免大多數使用者踩到此問題。
 
 **不要改**: 不要完全移除 Unicode11Addon（部分使用者需要 CJK/emoji 支援）。
+
+---
+
+## 23. PM Scrollback 讀取走 Main Process Ring Buffer
+
+**決策**: pty-manager 的 `onData` callback 同步寫入 per-tab ring buffer（100KB cap），PM tools 直接從 buffer 讀取 + ANSI strip。不走 renderer IPC round-trip 取 xterm buffer。
+
+**原因**: xterm buffer 在 renderer，main→renderer 的 invoke 需要 request-response dance。Ring buffer 在 main process 直接可用，不依賴 renderer 存活，且 memory bound（50 tabs × 100KB = 5MB）。
+
+**不要改**: 不要改成 main→renderer IPC 取 xterm buffer — 會增加延遲、且 renderer 最小化時可能不回應。
+
+---
+
+## 24. PM 用 OpenAI-compatible API Format（無新 npm dependency）
+
+**決策**: `llm-client.ts` 用 Electron `net.fetch` 直接打 OpenAI-compatible chat/completions endpoint + SSE streaming，不依賴任何 SDK。使用者在 PM settings 填 baseUrl + apiKey + model。
+
+**原因**: 支援 Gemini（免費 tier）、OpenAI、Anthropic（OpenAI-compatible endpoint）等多家 provider，不需要 per-provider SDK。`net.fetch` 繞過 CORS 限制。
+
+**不要改**: 不要加 `openai` 或 `@anthropic-ai/sdk` dependency — PM 的需求（chat + tool use + streaming）用 raw fetch 足夠。
+
+---
+
+## 25. Away Mode 是全域 Toggle，非 Per-Task
+
+**決策**: Away Mode 是單一 boolean toggle，OFF = 使用者控制 terminal、PM 只讀，ON = PM 可寫、terminal 顯示 read-only overlay。重啟預設 OFF。
+
+**原因**: 單一 state 好推理、符合「我要離開電腦了」的直覺動作、避免 per-task 主導權追蹤的 edge case。
+
+**不要改**: 不要做 per-tab 或 per-project Away Mode — 狀態爆炸。
+
+---
+
+## 26. write_to_pty 的三層保護
+
+**決策**: `write_to_pty` tool 有三層保護：(1) Away Mode OFF 時整個 tool 不 expose 給 LLM，(2) idle_shell 狀態下拒絕寫入（防止 CLI crash 後寫進 raw shell），(3) 硬紅線 pattern match（rm -rf、git push --force 等）命中時拒絕並走 escalation。
+
+**原因**: PM 送的對象應該是 CLI agent，不是 raw shell。三層保護確保即使 LLM 推理出錯也不會造成破壞。
+
+**不要改**: 不要移除 idle_shell guard — 這是防止 CLI crash 後 PM 直接打 shell command 的最後防線。
+
+---
+
+## 27. PM Sidebar Entry 獨立 CSS Class，不共用 sidebar-item
+
+**決策**: PM entry 用 `.sidebar-pm-entry` 自己的 class，不加 `.sidebar-item`。樣式獨立定義（padding、height、hover、active）。
+
+**原因**: `.sidebar-item` 被 E2E 和其他邏輯用來 count projects。PM 不是 project，混用會破壞 count 斷言和拖曳排序邏輯。
+
+**不要改**: 不要在 PM entry 加 `.sidebar-item` class。
