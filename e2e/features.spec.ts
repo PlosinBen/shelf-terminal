@@ -59,6 +59,8 @@ test('settings panel opens with mod+comma', async ({ shelfApp: { page } }) => {
   const themeSelect = page.locator('.settings-select').first();
   await expect(themeSelect).toBeVisible();
 
+  // Keybindings are on Shortcuts tab
+  await page.locator('.settings-tab', { hasText: 'Shortcuts' }).click();
   const keybindingBtn = page.locator('.keybinding-btn').first();
   await expect(keybindingBtn).toBeVisible();
 
@@ -394,7 +396,7 @@ test('terminal content preserved after project reorder', async ({ shelfApp: { pa
 
 test('mod+D toggles dev tools panel', async ({ shelfApp: { page } }) => {
   const panel = page.locator('.devtools-panel');
-  const collapsed = page.locator('.devtools-tab-collapsed');
+  const collapsed = page.locator('.right-tab-btn', { hasText: 'Dev Tools' });
 
   // Initially collapsed tab visible, panel hidden
   await expect(collapsed).toBeVisible({ timeout: 3_000 });
@@ -413,7 +415,7 @@ test('mod+D toggles dev tools panel', async ({ shelfApp: { page } }) => {
 
 test('dev tools panel opens via collapsed tab click', async ({ shelfApp: { page } }) => {
   const panel = page.locator('.devtools-panel');
-  const collapsed = page.locator('.devtools-tab-collapsed');
+  const collapsed = page.locator('.right-tab-btn', { hasText: 'Dev Tools' });
 
   await expect(collapsed).toBeVisible({ timeout: 3_000 });
   await collapsed.click();

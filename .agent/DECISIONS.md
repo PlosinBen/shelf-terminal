@@ -272,3 +272,93 @@
 **原因**: Unicode11Addon 對 Ambiguous width 字元（如 oh-my-zsh prompt 中的 `→` `✗`）的寬度計算與 zsh 不一致，導致 tab completion 時字元重複顯示。這是 xterm.js 已知限制（#1453）。預設關閉避免大多數使用者踩到此問題。
 
 **不要改**: 不要完全移除 Unicode11Addon（部分使用者需要 CJK/emoji 支援）。
+
+---
+
+## 23. PM Scrollback 讀取走 Main Process Ring Buffer
+
+**決策**: pty-manager 的 `onData` callback 同步寫入 per-tab ring buffer（100KB cap），PM tools 直接從 buffer 讀取 + ANSI strip。不走 renderer IPC round-trip 取 xterm buffer。
+
+**原因**: xterm buffer 在 renderer，main→renderer 的 invoke 需要 request-response dance。Ring buffer 在 main process 直接可用，不依賴 renderer 存活，且 memory bound（50 tabs × 100KB = 5MB）。
+
+**不要改**: 不要改成 main→renderer IPC 取 xterm buffer — 會增加延遲、且 renderer 最小化時可能不回應。
+
+---
+
+## 24. PM 用 OpenAI-compatible API Format（無新 npm dependency）
+
+**決策**: `llm-client.ts` 用 Electron `net.fetch` 直接打 OpenAI-compatible chat/completions endpoint + SSE streaming，不依賴任何 SDK。使用者在 PM settings 填 baseUrl + apiKey + model。
+
+**原因**: 支援 Gemini（免費 tier）、OpenAI、Anthropic（OpenAI-compatible endpoint）等多家 provider，不需要 per-provider SDK。`net.fetch` 繞過 CORS 限制。
+
+**不要改**: 不要加 `openai` 或 `@anthropic-ai/sdk` dependency — PM 的需求（chat + tool use + streaming）用 raw fetch 足夠。
+
+---
+
+## 25. Away Mode 是全域 Toggle，非 Per-Task
+
+**決策**: Away Mode 是單一 boolean toggle，OFF = 使用者控制 terminal、PM 只讀，ON = PM 可寫、terminal 顯示 read-only overlay。重啟預設 OFF。
+
+**原因**: 單一 state 好推理、符合「我要離開電腦了」的直覺動作、避免 per-task 主導權追蹤的 edge case。
+
+**不要改**: 不要做 per-tab 或 per-project Away Mode — 狀態爆炸。
+
+---
+
+## 26. write_to_pty 的三層保護
+
+**決策**: `write_to_pty` tool 有三層保護：(1) Away Mode OFF 時整個 tool 不 expose 給 LLM，(2) idle_shell 狀態下拒絕寫入（防止 CLI crash 後寫進 raw shell），(3) 硬紅線 pattern match（rm -rf、git push --force 等）命中時拒絕並走 escalation。
+
+**原因**: PM 送的對象應該是 CLI agent，不是 raw shell。三層保護確保即使 LLM 推理出錯也不會造成破壞。
+
+**不要改**: 不要移除 idle_shell guard — 這是防止 CLI crash 後 PM 直接打 shell command 的最後防線。
+
+---
+
+## 27. PM 是右側 Panel，不是 Sidebar Entry 或全頁切換
+
+**決策**: PM 以右側可拖拉 panel 存在（類似 DevToolsPanel），收合時顯示為右側欄 tab。不在左側 Sidebar 放 PM entry，不用全頁切換取代 terminal。
+
+**原因**: PM 和 terminal 需要同時可見（邊看 terminal 邊跟 PM 對話）。放 Sidebar 會跟 project 列表 highlight 衝突，全頁切換會失去 terminal 可見性。右側 panel 跟 DevTools 同一個 layout pattern，收合時兩者共用一個 28px 欄。
+
+**不要改**: 不要把 PM 放回 Sidebar 或做成全頁切換。
+
+---
+
+## 28. PM + DevTools 收合 Tab 共用一個欄
+
+**決策**: PM 和 DevTools 收合時共用 `.right-tabs-collapsed` 容器（單一 28px 欄），各自的 label 垂直堆疊、平分高度、有分隔線。App.tsx 統一管理收合 tab 的渲染，不由各 panel 自己 render。
+
+**原因**: 兩個獨立 28px 欄太寬。統一容器讓收合狀態視覺乾淨，也方便未來加更多 panel。
+
+**不要改**: 不要讓各 panel 自己 render 收合 tab — 會回到兩欄問題。
+
+---
+
+## 29. Settings 左側 Tab 分頁
+
+**決策**: SettingsPanel 分三個 tab：Terminal / PM Agent / Shortcuts。左側固定 120px 導航欄，右側內容區 scrollable。面板固定 height: 70vh。
+
+**原因**: 加了 PM provider + Telegram 欄位後 Settings 太長，分頁讓內容分類清楚。固定高度避免切 tab 時畫面抖動。
+
+**不要改**: 不要回到單頁長列表。
+
+---
+
+## 30. PM 資料全部存 userData
+
+**決策**: PM 的所有持久化資料都存在 `app.getPath('userData')` 下：`settings.json`（provider + telegram config）、`pm-history.json`（對話）、`pm-notes/`（project notes）、`pm-global-note.md`（跨 project 記憶）。
+
+**原因**: userData 路徑跟隨 dev/test/prod 隔離（user-data-path.ts 的 `-dev` 後綴 + E2E tempdir）。之前放 `~/.config/shelf/` 會跨環境共用，dev 和 prod 打架。
+
+**不要改**: 不要把 PM 資料搬回 `~/.config/shelf/`。
+
+---
+
+## 31. PM 回覆用 marked 渲染 Markdown
+
+**決策**: Assistant 訊息用 `marked` 套件（zero-dependency, 449KB）渲染成 HTML，透過 `dangerouslySetInnerHTML` 顯示。User 訊息維持純文字。Streaming 時也即時渲染。
+
+**原因**: PM 回覆常帶 code block、list、table，純文字不可讀。Electron 本地環境無 XSS 風險（資料來源是 LLM 回覆）。marked 是 zero-dependency 且夠輕量。
+
+**不要改**: 不要自幹 regex markdown parser — edge case 太多。不要用 `react-markdown`（dependency chain 太長）。

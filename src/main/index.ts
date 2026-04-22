@@ -15,6 +15,7 @@ import { createConnector, getAvailableTypes, listDockerContainers, listWSLDistro
 import { loadSSHServers, saveSSHServer } from './ssh-server-store';
 import { log, setLogLevel, setFileWriter } from '@shared/logger';
 import { applyUserDataIsolation } from './user-data-path';
+import { handlePmSend, handleTabEvent, getHistory, clearHistory, stopGeneration, updateSyncedState, setWritePtyFn, isAwayMode, setAwayMode, initAwayMode, setStateChangeCallback, updateKnownTabs, startTelegram, stopTelegram, setMessageCallback, setCallbackQueryHandler } from './pm';
 import type { Connection, ProjectConfig, AppSettings, FileUploadResult, FileClearResult, PtySpawnPayload, PtyInputPayload, PtyResizePayload, PtyKillPayload, GitBranchInfo, WorktreeAddResult, WorktreeRemoveResult } from '@shared/types';
 
 applyUserDataIsolation();
@@ -301,6 +302,12 @@ ipcMain.handle(IPC.SETTINGS_SAVE, (_event, settings: AppSettings) => {
   saveSettings(settings);
   setLogLevel(settings.logLevel);
   setDockerPath(settings.dockerPath);
+  // Restart Telegram if config changed
+  if (settings.telegram?.botToken && settings.telegram?.chatId) {
+    startTelegram(settings.telegram);
+  } else {
+    stopTelegram();
+  }
 });
 
 // ── Logs ──
@@ -345,6 +352,45 @@ ipcMain.on(IPC.PTY_MUTE, (_event, payload: { tabId: string; muted: boolean }) =>
   setMuted(payload.tabId, payload.muted);
 });
 
+// ── PM Agent ──
+
+ipcMain.handle(IPC.PM_SEND, async (_event, message: string) => {
+  if (!mainWindow || !cachedSettings.pmProvider) return;
+  await handlePmSend(message, cachedSettings.pmProvider, mainWindow);
+});
+
+ipcMain.handle(IPC.PM_STOP, () => {
+  stopGeneration();
+});
+
+ipcMain.handle(IPC.PM_HISTORY, () => {
+  return getHistory();
+});
+
+ipcMain.handle(IPC.PM_CLEAR, () => {
+  clearHistory();
+});
+
+ipcMain.on(IPC.PM_SYNC_STATE, (_event, state: any) => {
+  updateSyncedState(state);
+  // Also update tab watcher's known tabs
+  const tabs: { tabId: string; tabName: string; projectName: string }[] = [];
+  for (const proj of state) {
+    for (const tab of proj.tabs) {
+      tabs.push({ tabId: tab.id, tabName: tab.label, projectName: proj.name });
+    }
+  }
+  updateKnownTabs(tabs);
+});
+
+ipcMain.handle(IPC.PM_AWAY_MODE, (_event, on: boolean) => {
+  setAwayMode(on);
+});
+
+ipcMain.handle(IPC.PM_AWAY_MODE_GET, () => {
+  return isAwayMode();
+});
+
 // ── App lifecycle ──
 
 app.whenReady().then(() => {
@@ -371,6 +417,32 @@ app.whenReady().then(() => {
   log.info('app', `starting, logLevel=${settings.logLevel}, userData=${app.getPath('userData')}`);
 
   createWindow();
+
+  // PM wiring
+  initAwayMode(mainWindow!);
+  setWritePtyFn(writePty);
+  setStateChangeCallback((tabId, tabName, projectName, oldState, newState) => {
+    if (mainWindow && cachedSettings.pmProvider) {
+      handleTabEvent(tabId, tabName, projectName, oldState, newState, cachedSettings.pmProvider, mainWindow);
+    }
+  });
+  setMessageCallback(async (text, _chatId) => {
+    if (mainWindow && cachedSettings.pmProvider) {
+      // If Away Mode is OFF and user sends a command (not just a question),
+      // PM will respond read-only. The user can use /away to toggle.
+      handlePmSend(`[from Telegram] ${text}`, cachedSettings.pmProvider, mainWindow);
+    }
+  });
+  setCallbackQueryHandler((action, tabId) => {
+    if (mainWindow && cachedSettings.pmProvider) {
+      const verb = action === 'allow' ? 'approved' : 'denied';
+      handlePmSend(`[from Telegram] User ${verb} the permission request for tab ${tabId}. Send the appropriate keystroke.`, cachedSettings.pmProvider, mainWindow);
+    }
+  });
+  if (cachedSettings.telegram?.botToken && cachedSettings.telegram?.chatId) {
+    startTelegram(cachedSettings.telegram);
+  }
+
   if (process.env.NODE_ENV !== 'test' && app.isPackaged) {
     initAutoUpdater(mainWindow!);
   }
@@ -379,6 +451,7 @@ app.whenReady().then(() => {
 function shutdown() {
   killAllPtys();
   stopAutoUpdater();
+  stopTelegram();
   cleanupConnectors();
 }
 

@@ -33,6 +33,8 @@ let devToolsVisible = false;
 let editingProjectIndex: number | null = null;
 let settings: AppSettings = { ...DEFAULT_SETTINGS };
 let updateStatus: UpdateStatus = { state: 'idle' };
+let pmVisible = false;
+let awayMode = false;
 let nextTabCounter = 0;
 let layoutGeneration = 0;
 
@@ -49,13 +51,14 @@ function subscribe(l: Listener) {
 }
 
 function getSnapshot() {
-  return { projects, activeProjectIndex, sidebarVisible, settingsVisible, searchVisible, commandPickerVisible, devToolsVisible, editingProjectIndex, settings, updateStatus, layoutGeneration };
+  return { projects, activeProjectIndex, sidebarVisible, settingsVisible, searchVisible, commandPickerVisible, devToolsVisible, editingProjectIndex, settings, updateStatus, pmVisible, awayMode, layoutGeneration };
 }
 
 let snapshotRef = getSnapshot();
 function updateSnapshot() {
   snapshotRef = getSnapshot();
   emit();
+  syncToMain();
 }
 
 export function useStore() {
@@ -371,6 +374,37 @@ export function appendDefaultTab(projectIndex: number, name: string, color?: str
   projects = projects.map((p, i) => (i === projectIndex ? { ...p, config } : p));
   updateSnapshot();
   window.shelfApi.project.save(projects.map((p) => p.config));
+}
+
+// ── PM actions ──
+
+export function setPmVisible(visible: boolean) {
+  pmVisible = visible;
+  updateSnapshot();
+}
+
+export function setAwayMode(on: boolean) {
+  awayMode = on;
+  updateSnapshot();
+}
+
+// ── State sync to main process (for PM tools) ──
+
+let syncTimer: ReturnType<typeof setTimeout> | null = null;
+
+function syncToMain() {
+  if (syncTimer) return;
+  syncTimer = setTimeout(() => {
+    syncTimer = null;
+    const state = projects.map((p) => ({
+      id: p.config.id,
+      name: p.config.name,
+      cwd: p.config.cwd,
+      connectionType: p.config.connection.type,
+      tabs: p.tabs.map((t) => ({ id: t.id, label: t.label })),
+    }));
+    window.shelfApi.pm.syncState(state);
+  }, 200);
 }
 
 // ── Update actions ──

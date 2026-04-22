@@ -20,9 +20,12 @@ const ACTION_LABELS: Record<KeybindingAction, string> = {
   toggleDevTools: 'Dev Tools',
 };
 
+type SettingsTab = 'terminal' | 'pm' | 'shortcuts';
+
 export function SettingsPanel() {
   const { settingsVisible, settings } = useStore();
   const [draft, setDraft] = useState<AppSettings>(settings);
+  const [activeTab, setActiveTab] = useState<SettingsTab>('terminal');
   const [recordingAction, setRecordingAction] = useState<KeybindingAction | null>(null);
   const [dockerTestResult, setDockerTestResult] = useState<{ ok: boolean; version?: string; error?: string } | null>(null);
   const [dockerTesting, setDockerTesting] = useState(false);
@@ -70,6 +73,7 @@ export function SettingsPanel() {
       const result = await window.shelfApi.connector.listDir({ type: 'local' }, draft.defaultLocalPath);
       if (result.error) {
         setPathError(`Path does not exist: ${draft.defaultLocalPath}`);
+        setActiveTab('terminal');
         return;
       }
     }
@@ -105,180 +109,263 @@ export function SettingsPanel() {
           <span>Settings</span>
           <button className="settings-close" onClick={handleCancel}>×</button>
         </div>
-        <div className="settings-body">
-          <div className="settings-section-title">Terminal</div>
-          <div className="settings-group">
-            <label className="settings-label">Theme</label>
-            <select
-              className="settings-select"
-              value={draft.themeName}
-              onChange={(e) => updateDraft({ themeName: e.target.value })}
-            >
-              {themes.map((t) => (
-                <option key={t.name} value={t.name}>{t.label}</option>
-              ))}
-            </select>
+        <div className="settings-layout">
+          <div className="settings-tabs">
+            <button className={`settings-tab ${activeTab === 'terminal' ? 'active' : ''}`} onClick={() => setActiveTab('terminal')}>Terminal</button>
+            <button className={`settings-tab ${activeTab === 'pm' ? 'active' : ''}`} onClick={() => setActiveTab('pm')}>PM Agent</button>
+            <button className={`settings-tab ${activeTab === 'shortcuts' ? 'active' : ''}`} onClick={() => setActiveTab('shortcuts')}>Shortcuts</button>
           </div>
+          <div className="settings-body">
+            {activeTab === 'terminal' && (
+              <>
+                <div className="settings-section-title">Appearance</div>
+                <div className="settings-group">
+                  <label className="settings-label">Theme</label>
+                  <select
+                    className="settings-select"
+                    value={draft.themeName}
+                    onChange={(e) => updateDraft({ themeName: e.target.value })}
+                  >
+                    {themes.map((t) => (
+                      <option key={t.name} value={t.name}>{t.label}</option>
+                    ))}
+                  </select>
+                </div>
 
-          <div className="settings-group">
-            <label className="settings-label">Font Size</label>
-            <input
-              className="settings-input"
-              type="number"
-              min={8}
-              max={32}
-              value={draft.fontSize}
-              onChange={(e) => updateDraft({ fontSize: Number(e.target.value) })}
-            />
-          </div>
+                <div className="settings-group">
+                  <label className="settings-label">Font Size</label>
+                  <input
+                    className="settings-input"
+                    type="number"
+                    min={8}
+                    max={32}
+                    value={draft.fontSize}
+                    onChange={(e) => updateDraft({ fontSize: Number(e.target.value) })}
+                  />
+                </div>
 
-          <div className="settings-group">
-            <label className="settings-label">Font Family</label>
-            <input
-              className="settings-input settings-input-wide"
-              type="text"
-              value={draft.fontFamily}
-              onChange={(e) => updateDraft({ fontFamily: e.target.value })}
-            />
-          </div>
+                <div className="settings-group">
+                  <label className="settings-label">Font Family</label>
+                  <input
+                    className="settings-input settings-input-wide"
+                    type="text"
+                    value={draft.fontFamily}
+                    onChange={(e) => updateDraft({ fontFamily: e.target.value })}
+                  />
+                </div>
 
-          <div className="settings-group">
-            <label className="settings-label">Scrollback Lines</label>
-            <input
-              className="settings-input"
-              type="number"
-              min={100}
-              max={100000}
-              step={500}
-              value={draft.scrollback}
-              onChange={(e) => updateDraft({ scrollback: Number(e.target.value) })}
-            />
-          </div>
+                <div className="settings-group">
+                  <label className="settings-label">Scrollback Lines</label>
+                  <input
+                    className="settings-input"
+                    type="number"
+                    min={100}
+                    max={100000}
+                    step={500}
+                    value={draft.scrollback}
+                    onChange={(e) => updateDraft({ scrollback: Number(e.target.value) })}
+                  />
+                </div>
 
-          <div className="settings-group">
-            <label className="settings-label">Default Max Tabs</label>
-            <input
-              className="settings-input"
-              type="number"
-              min={1}
-              max={20}
-              value={draft.defaultMaxTabs}
-              onChange={(e) => updateDraft({ defaultMaxTabs: Number(e.target.value) })}
-            />
-          </div>
+                <div className="settings-group">
+                  <label className="settings-label">Default Max Tabs</label>
+                  <input
+                    className="settings-input"
+                    type="number"
+                    min={1}
+                    max={20}
+                    value={draft.defaultMaxTabs}
+                    onChange={(e) => updateDraft({ defaultMaxTabs: Number(e.target.value) })}
+                  />
+                </div>
 
-          <div className="settings-group">
-            <label className="settings-label">Max Upload Size (MB)</label>
-            <input
-              className="settings-input"
-              type="number"
-              min={1}
-              max={2048}
-              value={draft.maxUploadSizeMB}
-              onChange={(e) => updateDraft({ maxUploadSizeMB: Number(e.target.value) })}
-            />
-          </div>
+                <div className="settings-group">
+                  <label className="settings-label">Max Upload Size (MB)</label>
+                  <input
+                    className="settings-input"
+                    type="number"
+                    min={1}
+                    max={2048}
+                    value={draft.maxUploadSizeMB}
+                    onChange={(e) => updateDraft({ maxUploadSizeMB: Number(e.target.value) })}
+                  />
+                </div>
 
-          <div className="settings-group">
-            <label className="settings-label">Unicode 11</label>
-            <label className="settings-hint">
-              <input
-                type="checkbox"
-                checked={draft.unicode11 ?? false}
-                onChange={(e) => updateDraft({ unicode11: e.target.checked })}
-              />
-              {' '}Better emoji/CJK width, may cause display issues with some prompts
-            </label>
-          </div>
+                <div className="settings-group">
+                  <label className="settings-label">Unicode 11</label>
+                  <label className="settings-checkbox">
+                    <input
+                      type="checkbox"
+                      checked={draft.unicode11 ?? false}
+                      onChange={(e) => updateDraft({ unicode11: e.target.checked })}
+                    />
+                    {' '}Enable
+                  </label>
+                </div>
+                <div className="settings-sub-hint">Better emoji/CJK width, may cause display issues with some prompts</div>
 
-          <div className="settings-group">
-            <label className="settings-label">Default Local Path</label>
-            <input
-              className="settings-input settings-input-wide"
-              type="text"
-              value={draft.defaultLocalPath || ''}
-              onChange={(e) => { updateDraft({ defaultLocalPath: e.target.value || undefined }); setPathError(null); }}
-              placeholder="~ (home directory)"
-            />
-            {pathError && <div className="settings-path-error">{pathError}</div>}
-          </div>
+                <div className="settings-group">
+                  <label className="settings-label">Default Local Path</label>
+                  <input
+                    className="settings-input settings-input-wide"
+                    type="text"
+                    value={draft.defaultLocalPath || ''}
+                    onChange={(e) => { updateDraft({ defaultLocalPath: e.target.value || undefined }); setPathError(null); }}
+                    placeholder="~ (home directory)"
+                  />
+                  {pathError && <div className="settings-path-error">{pathError}</div>}
+                </div>
 
-          <div className="settings-divider" />
-          <div className="settings-section-title">Logs</div>
-          <div className="settings-group">
-            <label className="settings-label">Log Level</label>
-            <select
-              className="settings-select"
-              value={draft.logLevel}
-              onChange={(e) => updateDraft({ logLevel: e.target.value as LogLevel })}
-            >
-              <option value="off">Off</option>
-              <option value="error">Error</option>
-              <option value="info">Info</option>
-              <option value="debug">Debug</option>
-            </select>
-            <button
-              className="conn-btn conn-btn-cancel"
-              onClick={async () => {
-                await window.shelfApi.logs.clear();
-              }}
-            >
-              Clear Logs
-            </button>
-          </div>
-          <div className="settings-config-path">{logsPath}</div>
+                <div className="settings-divider" />
+                <div className="settings-section-title">Logs</div>
+                <div className="settings-group">
+                  <label className="settings-label">Log Level</label>
+                  <select
+                    className="settings-select"
+                    value={draft.logLevel}
+                    onChange={(e) => updateDraft({ logLevel: e.target.value as LogLevel })}
+                  >
+                    <option value="off">Off</option>
+                    <option value="error">Error</option>
+                    <option value="info">Info</option>
+                    <option value="debug">Debug</option>
+                  </select>
+                  <button
+                    className="conn-btn conn-btn-cancel"
+                    onClick={async () => {
+                      await window.shelfApi.logs.clear();
+                    }}
+                  >
+                    Clear Logs
+                  </button>
+                </div>
+                <div className="settings-sub-hint">{logsPath}</div>
 
-          <div className="settings-divider" />
-          <div className="settings-section-title">Docker</div>
-          <div className="settings-group">
-            <label className="settings-label">Docker Path</label>
-            <div className="settings-docker-row">
-              <input
-                className="settings-input settings-input-wide"
-                type="text"
-                value={draft.dockerPath || ''}
-                onChange={(e) => { updateDraft({ dockerPath: e.target.value || undefined }); setDockerTestResult(null); }}
-                placeholder="docker (uses PATH)"
-              />
-              <button
-                className="conn-btn conn-btn-cancel"
-                disabled={dockerTesting}
-                onClick={async () => {
-                  setDockerTesting(true);
-                  setDockerTestResult(null);
-                  const result = await window.shelfApi.docker.testPath(draft.dockerPath || 'docker');
-                  setDockerTestResult(result);
-                  setDockerTesting(false);
-                }}
-              >
-                {dockerTesting ? 'Testing...' : 'Test'}
-              </button>
-            </div>
-            {dockerTestResult && (
-              <div className={`settings-docker-result ${dockerTestResult.ok ? 'ok' : 'fail'}`}>
-                {dockerTestResult.ok
-                  ? `Docker ${dockerTestResult.version}`
-                  : dockerTestResult.error}
-              </div>
+                <div className="settings-divider" />
+                <div className="settings-section-title">Docker</div>
+                <div className="settings-group">
+                  <label className="settings-label">Docker Path</label>
+                  <div className="settings-docker-row">
+                    <input
+                      className="settings-input settings-input-wide"
+                      type="text"
+                      value={draft.dockerPath || ''}
+                      onChange={(e) => { updateDraft({ dockerPath: e.target.value || undefined }); setDockerTestResult(null); }}
+                      placeholder="docker (uses PATH)"
+                    />
+                    <button
+                      className="conn-btn conn-btn-cancel"
+                      disabled={dockerTesting}
+                      onClick={async () => {
+                        setDockerTesting(true);
+                        setDockerTestResult(null);
+                        const result = await window.shelfApi.docker.testPath(draft.dockerPath || 'docker');
+                        setDockerTestResult(result);
+                        setDockerTesting(false);
+                      }}
+                    >
+                      {dockerTesting ? 'Testing...' : 'Test'}
+                    </button>
+                  </div>
+                  {dockerTestResult && (
+                    <div className={`settings-docker-result ${dockerTestResult.ok ? 'ok' : 'fail'}`}>
+                      {dockerTestResult.ok
+                        ? `Docker ${dockerTestResult.version}`
+                        : dockerTestResult.error}
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+
+            {activeTab === 'pm' && (
+              <>
+                <div className="settings-section-title">Provider</div>
+                <div className="settings-group">
+                  <label className="settings-label">Base URL</label>
+                  <input
+                    className="settings-input settings-input-wide"
+                    type="text"
+                    value={draft.pmProvider?.baseUrl || ''}
+                    onChange={(e) => updateDraft({
+                      pmProvider: { ...draft.pmProvider ?? { baseUrl: '', apiKey: '', model: '' }, baseUrl: e.target.value },
+                    })}
+                    placeholder="https://generativelanguage.googleapis.com/v1beta/openai"
+                  />
+                </div>
+                <div className="settings-group">
+                  <label className="settings-label">API Key</label>
+                  <input
+                    className="settings-input settings-input-wide"
+                    type="password"
+                    value={draft.pmProvider?.apiKey || ''}
+                    onChange={(e) => updateDraft({
+                      pmProvider: { ...draft.pmProvider ?? { baseUrl: '', apiKey: '', model: '' }, apiKey: e.target.value },
+                    })}
+                    placeholder="API key"
+                  />
+                </div>
+                <div className="settings-group">
+                  <label className="settings-label">Model</label>
+                  <input
+                    className="settings-input settings-input-wide"
+                    type="text"
+                    value={draft.pmProvider?.model || ''}
+                    onChange={(e) => updateDraft({
+                      pmProvider: { ...draft.pmProvider ?? { baseUrl: '', apiKey: '', model: '' }, model: e.target.value },
+                    })}
+                    placeholder="gemini-2.5-flash"
+                  />
+                </div>
+
+                <div className="settings-divider" />
+                <div className="settings-section-title">Telegram Bridge</div>
+                <div className="settings-group">
+                  <label className="settings-label">Bot Token</label>
+                  <input
+                    className="settings-input settings-input-wide"
+                    type="password"
+                    value={draft.telegram?.botToken || ''}
+                    onChange={(e) => updateDraft({
+                      telegram: { ...draft.telegram ?? { botToken: '', chatId: '' }, botToken: e.target.value },
+                    })}
+                    placeholder="123456:ABC-DEF..."
+                  />
+                </div>
+                <div className="settings-group">
+                  <label className="settings-label">Chat ID</label>
+                  <input
+                    className="settings-input"
+                    type="text"
+                    value={draft.telegram?.chatId || ''}
+                    onChange={(e) => updateDraft({
+                      telegram: { ...draft.telegram ?? { botToken: '', chatId: '' }, chatId: e.target.value },
+                    })}
+                    placeholder="123456789"
+                  />
+                </div>
+                <div className="settings-sub-hint">Send /start to your bot, then use @userinfobot to find your chat ID</div>
+              </>
+            )}
+
+            {activeTab === 'shortcuts' && (
+              <>
+                {(Object.keys(ACTION_LABELS) as KeybindingAction[]).map((action) => (
+                  <div className="settings-group" key={action}>
+                    <label className="settings-label">{ACTION_LABELS[action]}</label>
+                    <button
+                      className={`keybinding-btn ${recordingAction === action ? 'recording' : ''}`}
+                      onClick={() => setRecordingAction(recordingAction === action ? null : action)}
+                    >
+                      {recordingAction === action
+                        ? 'Press key combo...'
+                        : comboToLabel(draft.keybindings[action])}
+                    </button>
+                  </div>
+                ))}
+              </>
             )}
           </div>
-
-          <div className="settings-divider" />
-
-          <div className="settings-section-title">Keyboard Shortcuts</div>
-          {(Object.keys(ACTION_LABELS) as KeybindingAction[]).map((action) => (
-            <div className="settings-group" key={action}>
-              <label className="settings-label">{ACTION_LABELS[action]}</label>
-              <button
-                className={`keybinding-btn ${recordingAction === action ? 'recording' : ''}`}
-                onClick={() => setRecordingAction(recordingAction === action ? null : action)}
-              >
-                {recordingAction === action
-                  ? 'Press key combo...'
-                  : comboToLabel(draft.keybindings[action])}
-              </button>
-            </div>
-          ))}
         </div>
         <div className="project-edit-footer">
           <button className="conn-btn conn-btn-cancel" onClick={handleCancel}>Cancel</button>

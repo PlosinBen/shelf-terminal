@@ -251,3 +251,83 @@
 **解法**: Unicode11Addon 仍然載入（註冊可用版本），但預設不啟用（`unicode.activeVersion` 保持預設 `'6'`）。使用者可在 Settings 開啟「Unicode 11」選項，啟用後即時生效。
 
 **注意**: 啟用 Unicode 11 可改善較新 emoji 和部分 CJK 字元的寬度判定，但只要 prompt 含有 Ambiguous width 字元就可能觸發此問題。
+
+---
+
+## 24. PM Provider 設定存在 settings.json（明文 API key）
+
+**現象**: API key 直接存在 userData 的 settings.json 裡。
+
+**原因**: PM provider config（baseUrl、apiKey、model）跟著 `AppSettings.pmProvider` 走，存在 `settings.json`。Telegram bot token 也在 `AppSettings.telegram`。
+
+**注意**: 目前是明文。Gemini 免費 key 風險低，但如果未來放付費 key，應該考慮移到 `~/.config/shelf/` 或用 OS keychain。
+
+---
+
+## 25. E2E 測試需要先 build（npm run build）
+
+**現象**: E2E 測試找不到 PM 相關的 DOM 元素。
+
+**原因**: E2E 透過 Playwright 啟動 Electron，載入的是 `dist/` 的 static build，不是 vite dev server。如果 `dist/` 裡是舊 build，看不到新加的 UI。
+
+**解法**: 跑 E2E 前一律先 `NODE_ENV=test npm run build`。`npm run test:e2e` script 已經包含 build 步驟。
+
+---
+
+## 26. PM history 持久化在 userData，/clear 會刪檔
+
+**現象**: PM 對話重啟後仍在。
+
+**原因**: `history-store.ts` 每次 user message / assistant response 後寫入 `<userData>/pm-history.json`。啟動時載入。`/clear`（PmView Clear 按鈕）會刪除檔案。
+
+**注意**: 如果檔案損壞（invalid JSON），會靜默從空白開始，不會 crash。
+
+---
+
+## 27. Gemini 免費 tier 容易撞 503
+
+**現象**: PM 對話回 `LLM API error 503: high demand`。
+
+**原因**: Gemini 免費 tier 有 RPM/TPD 限制，尖峰時段容易被 rate limit。
+
+**解法**: 已有 auto-retry（見 #29）。也可以換 model（gemini-2.0-flash 可能較寬鬆）。
+
+---
+
+## 28. Gemini OpenAI-compatible endpoint model 名稱
+
+**現象**: 填 `gemini-2.5-flash-preview-05-20` 回 404。
+
+**原因**: OpenAI-compatible endpoint 的 model ID 跟 native API 不同。正確的是 `gemini-2.5-flash`（不帶日期後綴）。
+
+**解法**: 用簡短名稱：`gemini-2.5-flash`、`gemini-2.5-pro`、`gemini-2.0-flash`。
+
+---
+
+## 29. 503/429 auto-retry 用 exponential backoff
+
+**現象**: PM 對話撞 503 後自動重試。
+
+**原因**: `agent-loop.ts` 對 retryable HTTP error（503/429/500/502/504）自動重試最多 3 次，間隔 5s → 10s → 20s（exponential backoff）。重試期間 UI 顯示 "Retrying in Ns..."。
+
+**注意**: 重試期間按 Stop 可中止。全部失敗後 error 存進 history（role: 'error'），重啟後可見。
+
+---
+
+## 30. PM panel 和 DevTools 收合 tab 由 App.tsx 統一管理
+
+**現象**: 修改 PM 或 DevTools 的收合行為時，改 PmView/DevToolsPanel 沒效果。
+
+**原因**: 收合 tab 的渲染已從各自 component 移到 App.tsx 的 `.right-tabs-collapsed` 容器。DevToolsPanel 的 `if (!devToolsVisible) return null`（不再 return collapsed button）。
+
+**注意**: 新增右側 panel 時要在 App.tsx 加收合 tab，不要在 panel component 裡加。
+
+---
+
+## 31. Settings tab 切換不觸發 re-mount，state 共享
+
+**現象**: 在 Terminal tab 改了值，切到 PM Agent tab 再切回，值還在。
+
+**原因**: SettingsPanel 用一個 `draft` state 管所有 tab 的欄位，切 tab 只是 conditional render 不同區塊。Cancel 會 reset 整個 draft。
+
+**注意**: 這是正確行為。不要把 draft 拆成 per-tab state。
