@@ -343,8 +343,8 @@ export function SettingsPanel() {
                     })}
                     placeholder="123456789"
                   />
-                  <span className="settings-hint">Send /start to your bot, then use @userinfobot to find your chat ID</span>
                 </div>
+                <span className="settings-hint">Send /start to your bot, then use @userinfobot to find your chat ID</span>
               </>
             )}
 
