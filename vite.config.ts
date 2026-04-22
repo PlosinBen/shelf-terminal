@@ -18,6 +18,9 @@ export default defineConfig({
         },
       },
     },
+    // xterm.js 6.0 ships pre-minified; esbuild double-minification breaks
+    // closure variable capture in requestMode() — see xtermjs/xterm.js#5800
+    minify: 'terser',
   },
   plugins: [
     react(),
