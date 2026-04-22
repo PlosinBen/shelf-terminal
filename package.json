@@ -1,6 +1,6 @@
 {
   "name": "shelf-terminal",
-  "version": "0.5.2",
+  "version": "1.0.0",
   "description": "Cross-platform, project-based terminal manager",
   "main": "dist/main/index.js",
   "scripts": {
