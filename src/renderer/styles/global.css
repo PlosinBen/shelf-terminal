@@ -1198,6 +1198,12 @@ button {
   color: var(--text-muted);
 }
 
+.settings-sub-hint {
+  margin-top: -10px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
 .settings-checkbox {
   display: flex;
   align-items: center;
