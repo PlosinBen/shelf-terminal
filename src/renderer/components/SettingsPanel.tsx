@@ -308,7 +308,7 @@ export function SettingsPanel() {
                 <div className="settings-group">
                   <label className="settings-label">Model</label>
                   <input
-                    className="settings-input"
+                    className="settings-input settings-input-wide"
                     type="text"
                     value={draft.pmProvider?.model || ''}
                     onChange={(e) => updateDraft({
