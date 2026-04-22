@@ -315,10 +315,50 @@
 
 ---
 
-## 27. PM Sidebar Entry 獨立 CSS Class，不共用 sidebar-item
+## 27. PM 是右側 Panel，不是 Sidebar Entry 或全頁切換
 
-**決策**: PM entry 用 `.sidebar-pm-entry` 自己的 class，不加 `.sidebar-item`。樣式獨立定義（padding、height、hover、active）。
+**決策**: PM 以右側可拖拉 panel 存在（類似 DevToolsPanel），收合時顯示為右側欄 tab。不在左側 Sidebar 放 PM entry，不用全頁切換取代 terminal。
 
-**原因**: `.sidebar-item` 被 E2E 和其他邏輯用來 count projects。PM 不是 project，混用會破壞 count 斷言和拖曳排序邏輯。
+**原因**: PM 和 terminal 需要同時可見（邊看 terminal 邊跟 PM 對話）。放 Sidebar 會跟 project 列表 highlight 衝突，全頁切換會失去 terminal 可見性。右側 panel 跟 DevTools 同一個 layout pattern，收合時兩者共用一個 28px 欄。
 
-**不要改**: 不要在 PM entry 加 `.sidebar-item` class。
+**不要改**: 不要把 PM 放回 Sidebar 或做成全頁切換。
+
+---
+
+## 28. PM + DevTools 收合 Tab 共用一個欄
+
+**決策**: PM 和 DevTools 收合時共用 `.right-tabs-collapsed` 容器（單一 28px 欄），各自的 label 垂直堆疊、平分高度、有分隔線。App.tsx 統一管理收合 tab 的渲染，不由各 panel 自己 render。
+
+**原因**: 兩個獨立 28px 欄太寬。統一容器讓收合狀態視覺乾淨，也方便未來加更多 panel。
+
+**不要改**: 不要讓各 panel 自己 render 收合 tab — 會回到兩欄問題。
+
+---
+
+## 29. Settings 左側 Tab 分頁
+
+**決策**: SettingsPanel 分三個 tab：Terminal / PM Agent / Shortcuts。左側固定 120px 導航欄，右側內容區 scrollable。面板固定 height: 70vh。
+
+**原因**: 加了 PM provider + Telegram 欄位後 Settings 太長，分頁讓內容分類清楚。固定高度避免切 tab 時畫面抖動。
+
+**不要改**: 不要回到單頁長列表。
+
+---
+
+## 30. PM 資料全部存 userData
+
+**決策**: PM 的所有持久化資料都存在 `app.getPath('userData')` 下：`settings.json`（provider + telegram config）、`pm-history.json`（對話）、`pm-notes/`（project notes）、`pm-global-note.md`（跨 project 記憶）。
+
+**原因**: userData 路徑跟隨 dev/test/prod 隔離（user-data-path.ts 的 `-dev` 後綴 + E2E tempdir）。之前放 `~/.config/shelf/` 會跨環境共用，dev 和 prod 打架。
+
+**不要改**: 不要把 PM 資料搬回 `~/.config/shelf/`。
+
+---
+
+## 31. PM 回覆用 marked 渲染 Markdown
+
+**決策**: Assistant 訊息用 `marked` 套件（zero-dependency, 449KB）渲染成 HTML，透過 `dangerouslySetInnerHTML` 顯示。User 訊息維持純文字。Streaming 時也即時渲染。
+
+**原因**: PM 回覆常帶 code block、list、table，純文字不可讀。Electron 本地環境無 XSS 風險（資料來源是 LLM 回覆）。marked 是 zero-dependency 且夠輕量。
+
+**不要改**: 不要自幹 regex markdown parser — edge case 太多。不要用 `react-markdown`（dependency chain 太長）。

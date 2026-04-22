@@ -40,11 +40,12 @@
 | Intent | File | Description |
 |--------|------|-------------|
 | Barrel export | `index.ts` | 統一匯出 PM 模組所有公開 API |
-| LLM 對話循環 | `agent-loop.ts` | System prompt（動態 Away Mode）、tool use loop、streaming、sliding window（40 turns）、tab event 自動注入 |
+| LLM 對話循環 | `agent-loop.ts` | 結構化 system prompt（角色/職責/工作流程/邊界 + 動態 Away Mode）、tool use loop、streaming、sliding window（40 turns）、auto-retry（exponential backoff）、tab event 自動注入 |
 | LLM streaming client | `llm-client.ts` | OpenAI-compatible SSE streaming（用 Electron `net.fetch`），支援 tool_calls 解析 |
-| Tool 定義 + 執行 | `tools.ts` | 7+1 tool schemas、`executeTool` dispatcher、`inferTabState` heuristic、Away Mode 過濾、write_to_pty 接線 |
+| Tool 定義 + 執行 | `tools.ts` | 10 tool schemas（L0 觀察 + L0.5 note + global note + write_to_pty）、`executeTool` dispatcher、`inferTabState` heuristic、Away Mode 過濾 |
 | Scrollback ring buffer | `scrollback-buffer.ts` | Per-tab 100KB ring buffer、ANSI strip、lastNLines 讀取 |
-| Project note 儲存 | `note-store.ts` | `~/.config/shelf/pm/notes/<projectId>.md` 讀寫 |
+| Note 儲存 | `note-store.ts` | Project notes（`<userData>/pm-notes/<projectId>.md`）+ global note（`<userData>/pm-global-note.md`）|
+| 對話持久化 | `history-store.ts` | `<userData>/pm-history.json` 讀寫、app 啟動載入、每 turn 存檔 |
 | Away Mode 狀態 | `away-mode.ts` | 全域 boolean + 同步到 renderer |
 | 硬紅線檢查 | `redline.ts` | scrollback pattern match（rm -rf、git push --force、DROP TABLE 等） |
 | Tab 狀態監控 | `tab-watcher.ts` | scrollback 狀態轉換偵測（cli_running → cli_waiting_permission 等），觸發 PM 自動事件 |
@@ -64,17 +65,17 @@
 | Paste/drop 上傳 hook | `hooks/useAttachmentPaste.ts` | 從 TerminalView 抽出的 paste/drop/upload pipeline，支援 file size check |
 | Terminal 渲染 | `components/TerminalView.tsx` | xterm.js instance cache、PTY I/O、useAttachmentPaste hook、unread badge |
 | Bottom bar | `components/BottomBar.tsx` | 顯示 connection type、cwd、git branch；branch dropdown 支援切換或跳轉 worktree project |
-| Sidebar | `components/Sidebar.tsx` | PM entry（固定頂部）、Project 列表、拖曳排序、右鍵選單（含 New Worktree）、worktree branch 顯示、收合按鈕 |
+| Sidebar | `components/Sidebar.tsx` | Project 列表、拖曳排序、右鍵選單（含 New Worktree）、worktree branch 顯示、收合按鈕 |
 | Tab bar | `components/TabBar.tsx` | Tab 列表、拖曳排序、雙擊重命名、unread badge、tab 顏色 |
 | 快速指令選擇器 | `components/CommandPicker.tsx` | ⌘E 叫出 overlay，過濾 + 執行 per-project 快速指令 |
 | 開發工具面板 | `components/DevToolsPanel.tsx` | ⌘D toggle 右側 panel，accordion 可收合，Base64/JSON/URL/UUID/Timestamp/Hash 工具，寬度可拖拉調整 |
 | 資料夾選擇器 | `components/FolderPicker.tsx` | 兩步驟（connection type → browse），用 connector API |
 | 資料夾瀏覽器 | `components/FolderBrowser.tsx` | 純展示元件，顯示目錄清單和 keyboard hints |
 | Terminal 搜尋 | `components/SearchBar.tsx` | xterm SearchAddon 整合，Enter/Shift+Enter 搜尋 |
-| Settings 面板 | `components/SettingsPanel.tsx` | Theme/font/scrollback/keybinding/unicode11/Telegram bot token+chatId 設定 + 錄製模式 |
+| Settings 面板 | `components/SettingsPanel.tsx` | 左側 tab 分頁（Terminal / PM Agent / Shortcuts）；PM Agent tab 含 provider config + Telegram bridge |
 | Worktree 建立 | `components/WorktreeDialog.tsx` | 輸入新 branch name 建立 git worktree，產生 sub-project |
 | 刪除確認 | `components/RemoveConfirmDialog.tsx` | Remove project 確認 modal，worktree 可勾選是否清理 worktree files |
-| PM 聊天 UI | `components/PmView.tsx` | PM 對話介面（訊息列表 + streaming + tool call 摺疊 + provider 設定 + Away Mode toggle + error 顯示） |
+| PM 聊天面板 | `components/PmView.tsx` | 右側可拖拉 panel（訊息列表 + markdown 渲染 + streaming + tool call 摺疊 + Away Mode toggle + error 顯示）|
 | Project 編輯面板 | `components/ProjectEditPanel.tsx` | 改名、init script、default tabs、quick commands 編輯、Clear uploaded files |
 | 主題定義 | `themes.ts` | 5 個內建主題（terminal + UI 色彩） |
 | Window API 型別 | `env.d.ts` | `window.shelfApi` TypeScript 宣告 |

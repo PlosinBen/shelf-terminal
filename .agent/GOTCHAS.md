@@ -274,13 +274,13 @@
 
 ---
 
-## 26. PM history 不持久化，app 重啟後清空
+## 26. PM history 持久化在 userData，/clear 會刪檔
 
-**現象**: 關閉再打開 Shelf 後 PM 對話紀錄消失。
+**現象**: PM 對話重啟後仍在。
 
-**原因**: `agent-loop.ts` 的 `history` 和 `messages` 是 in-memory array，沒有寫入 disk。
+**原因**: `history-store.ts` 每次 user message / assistant response 後寫入 `<userData>/pm-history.json`。啟動時載入。`/clear`（PmView Clear 按鈕）會刪除檔案。
 
-**注意**: 這是 Phase 1 的設計。PM 的長期記憶靠 project notes（`~/.config/shelf/pm/notes/`），對話只是 working memory。如需持久化，可加 file-based history。
+**注意**: 如果檔案損壞（invalid JSON），會靜默從空白開始，不會 crash。
 
 ---
 
@@ -290,7 +290,7 @@
 
 **原因**: Gemini 免費 tier 有 RPM/TPD 限制，尖峰時段容易被 rate limit。
 
-**解法**: 等幾秒重試，或考慮加 auto-retry 邏輯。也可以換 model（gemini-2.0-flash 可能較寬鬆）。
+**解法**: 已有 auto-retry（見 #29）。也可以換 model（gemini-2.0-flash 可能較寬鬆）。
 
 ---
 
@@ -301,3 +301,33 @@
 **原因**: OpenAI-compatible endpoint 的 model ID 跟 native API 不同。正確的是 `gemini-2.5-flash`（不帶日期後綴）。
 
 **解法**: 用簡短名稱：`gemini-2.5-flash`、`gemini-2.5-pro`、`gemini-2.0-flash`。
+
+---
+
+## 29. 503/429 auto-retry 用 exponential backoff
+
+**現象**: PM 對話撞 503 後自動重試。
+
+**原因**: `agent-loop.ts` 對 retryable HTTP error（503/429/500/502/504）自動重試最多 3 次，間隔 5s → 10s → 20s（exponential backoff）。重試期間 UI 顯示 "Retrying in Ns..."。
+
+**注意**: 重試期間按 Stop 可中止。全部失敗後 error 存進 history（role: 'error'），重啟後可見。
+
+---
+
+## 30. PM panel 和 DevTools 收合 tab 由 App.tsx 統一管理
+
+**現象**: 修改 PM 或 DevTools 的收合行為時，改 PmView/DevToolsPanel 沒效果。
+
+**原因**: 收合 tab 的渲染已從各自 component 移到 App.tsx 的 `.right-tabs-collapsed` 容器。DevToolsPanel 的 `if (!devToolsVisible) return null`（不再 return collapsed button）。
+
+**注意**: 新增右側 panel 時要在 App.tsx 加收合 tab，不要在 panel component 裡加。
+
+---
+
+## 31. Settings tab 切換不觸發 re-mount，state 共享
+
+**現象**: 在 Terminal tab 改了值，切到 PM Agent tab 再切回，值還在。
+
+**原因**: SettingsPanel 用一個 `draft` state 管所有 tab 的欄位，切 tab 只是 conditional render 不同區塊。Cancel 會 reset 整個 draft。
+
+**注意**: 這是正確行為。不要把 draft 拆成 per-tab state。
