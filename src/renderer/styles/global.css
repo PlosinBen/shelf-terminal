@@ -1961,9 +1961,12 @@ button {
   align-items: center;
   gap: 4px;
   cursor: pointer;
-  padding: 4px 0;
-  border-radius: 4px;
-  width: 24px;
+  padding: 8px 0;
+  width: 100%;
+}
+
+.right-tab-btn + .right-tab-btn {
+  border-top: 1px solid var(--border);
 }
 
 .right-tab-btn span {
