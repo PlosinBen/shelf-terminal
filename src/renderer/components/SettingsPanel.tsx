@@ -201,7 +201,7 @@ export function SettingsPanel() {
                     />
                     {' '}Enable
                   </label>
-                  <span className="settings-hint">Better emoji/CJK width, may cause display issues with some prompts</span>
+                  <div className="settings-config-path">Better emoji/CJK width, may cause display issues with some prompts</div>
                 </div>
 
                 <div className="settings-group">
@@ -344,7 +344,7 @@ export function SettingsPanel() {
                     placeholder="123456789"
                   />
                 </div>
-                <span className="settings-hint">Send /start to your bot, then use @userinfobot to find your chat ID</span>
+                <div className="settings-config-path">Send /start to your bot, then use @userinfobot to find your chat ID</div>
               </>
             )}
 
