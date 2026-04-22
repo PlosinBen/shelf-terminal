@@ -275,6 +275,12 @@ export function createClaudeBackend(): AgentBackend {
 // long thinking/text stream produces one aggregate log instead of hundreds.
 const streamAccum = new Map<string, { type: string; chars: number }>();
 
+// Last per-turn usage from an `assistant` message — used by `result` to
+// compute context %. The `result.usage` field is cumulative across all
+// turns in the agent loop, making it unsuitable as numerator (it causes
+// 130-150%+ readings while Claude's own /context reports ~50%).
+let lastTurnUsage: { input_tokens: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number } | null = null;
+
 function processMessage(msg: SDKMessage, currentModel: string | null): AgentEvent[] {
   const events: AgentEvent[] = [];
 
@@ -333,6 +339,22 @@ function processMessage(msg: SDKMessage, currentModel: string | null): AgentEven
         const isSubagent = msg.parent_tool_use_id != null;
         const modelRaw = msg.message.model;
         const isSynthetic = typeof modelRaw === 'string' && modelRaw.startsWith('<');
+
+        // Track the latest top-level per-turn usage so `result` can use it
+        // for context % (result.usage is cumulative across the agent loop).
+        if (!isSubagent && !isSynthetic) {
+          const u = msg.message.usage as any;
+          lastTurnUsage = {
+            input_tokens: u.input_tokens ?? 0,
+            cache_read_input_tokens: u.cache_read_input_tokens,
+            cache_creation_input_tokens: u.cache_creation_input_tokens,
+          };
+          log.debug('claude-backend', `assistant.usage model=${modelRaw} input=${u.input_tokens ?? 0} cache_read=${u.cache_read_input_tokens ?? 0} cache_create=${u.cache_creation_input_tokens ?? 0} output=${u.output_tokens ?? 0}`);
+        } else {
+          const u = msg.message.usage as any;
+          log.debug('claude-backend', `assistant.usage.${isSubagent ? 'subagent' : 'synthetic'} model=${modelRaw} input=${u.input_tokens ?? 0} output=${u.output_tokens ?? 0}`);
+        }
+
         events.push({
           type: 'status',
           payload: {
@@ -425,7 +447,20 @@ function processMessage(msg: SDKMessage, currentModel: string | null): AgentEven
       let contextUsedTokens: number | undefined;
       let contextWindow: number | undefined;
       if (msg.subtype === 'success') {
-        const u = msg.usage as any;
+        // Log both result.usage (possibly cumulative) and lastTurnUsage
+        // (per-turn from last assistant message) so we can compare.
+        const ru = msg.usage as any;
+        if (ru) {
+          log.debug('claude-backend', `result.usage input=${ru.input_tokens ?? 0} cache_read=${ru.cache_read_input_tokens ?? 0} cache_create=${ru.cache_creation_input_tokens ?? 0} output=${ru.output_tokens ?? 0}`);
+        }
+        if (lastTurnUsage) {
+          log.debug('claude-backend', `result.lastTurnUsage input=${lastTurnUsage.input_tokens} cache_read=${lastTurnUsage.cache_read_input_tokens ?? 0} cache_create=${lastTurnUsage.cache_creation_input_tokens ?? 0}`);
+        }
+
+        // Use the last assistant message's per-turn usage when available;
+        // fall back to result.usage (which may be cumulative, but is better
+        // than nothing for single-turn queries).
+        const u = lastTurnUsage ?? ru;
         if (u) {
           contextUsedTokens = (u.input_tokens ?? 0)
             + (u.cache_read_input_tokens ?? 0)
@@ -437,6 +472,10 @@ function processMessage(msg: SDKMessage, currentModel: string | null): AgentEven
             : Object.values(msg.modelUsage)[0];
           contextWindow = preferred?.contextWindow;
         }
+        log.debug('claude-backend', `result.context used=${contextUsedTokens ?? '?'} window=${contextWindow ?? '?'} pct=${contextWindow ? ((contextUsedTokens ?? 0) / contextWindow * 100).toFixed(1) : '?'}%`);
+
+        // Reset for next query
+        lastTurnUsage = null;
       }
       const payload: AgentMessagePayload = {
         type: 'result',
