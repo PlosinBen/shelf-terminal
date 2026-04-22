@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { useStore, setAwayMode, updateSettings, setPmVisible } from '../store';
+import { useStore, setAwayMode, setPmVisible } from '../store';
 import { marked } from 'marked';
 import type { PmMessage, PmStreamChunk, PmToolCall } from '@shared/types';
 
@@ -16,7 +16,6 @@ export function PmView() {
   const [streaming, setStreaming] = useState(false);
   const [streamText, setStreamText] = useState('');
   const [streamToolCalls, setStreamToolCalls] = useState<PmToolCall[]>([]);
-  const [showSettings, setShowSettings] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [width, setWidth] = useState(DEFAULT_WIDTH);
   const listRef = useRef<HTMLDivElement>(null);
@@ -143,16 +142,6 @@ export function PmView() {
     inputRef.current?.focus();
   }, []);
 
-  // Provider settings
-  if (showSettings || !hasProvider) {
-    return (
-      <div className="pm-panel" style={{ width }}>
-        <div className="pm-resize-handle" onMouseDown={onDragStart} />
-        <PmProviderSettings onDone={() => setShowSettings(false)} />
-      </div>
-    );
-  }
-
   return (
     <div className="pm-panel" style={{ width }}>
       <div className="pm-resize-handle" onMouseDown={onDragStart} />
@@ -169,14 +158,16 @@ export function PmView() {
           <button className="pm-header-btn" onClick={handleClear} title="Clear conversation">
             Clear
           </button>
-          <button className="pm-header-btn" onClick={() => setShowSettings(true)} title="Provider settings">
-            &#9881;
-          </button>
           <button className="pm-header-btn" onClick={() => setPmVisible(false)} title="Close">
             ×
           </button>
         </span>
       </div>
+      {!hasProvider && (
+        <div className="pm-no-provider">
+          Configure PM provider in Settings
+        </div>
+      )}
       <div className="pm-messages" ref={listRef}>
         {messages.map((msg, i) => (
           <MessageBubble key={i} message={msg} />
@@ -273,61 +264,3 @@ function ToolCallSummary({ toolCall }: { toolCall: PmToolCall }) {
   );
 }
 
-function PmProviderSettings({ onDone }: { onDone: () => void }) {
-  const { settings } = useStore();
-  const [baseUrl, setBaseUrl] = useState(settings.pmProvider?.baseUrl ?? 'https://api.openai.com/v1');
-  const [apiKey, setApiKey] = useState(settings.pmProvider?.apiKey ?? '');
-  const [model, setModel] = useState(settings.pmProvider?.model ?? 'gpt-4o');
-
-  const handleSave = () => {
-    updateSettings({ pmProvider: { baseUrl, apiKey, model } });
-    onDone();
-  };
-
-  return (
-    <div className="pm-view">
-      <div className="pm-header">
-        <span className="pm-header-title">PM Provider Settings</span>
-        <button className="pm-header-btn" onClick={() => setPmVisible(false)} title="Close">×</button>
-      </div>
-      <div className="pm-settings-form">
-        <label className="pm-settings-label">
-          Base URL
-          <input
-            className="pm-settings-input"
-            type="text"
-            value={baseUrl}
-            onChange={(e) => setBaseUrl(e.target.value)}
-            placeholder="https://api.openai.com/v1"
-          />
-        </label>
-        <label className="pm-settings-label">
-          API Key
-          <input
-            className="pm-settings-input"
-            type="password"
-            value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
-            placeholder="sk-..."
-          />
-        </label>
-        <label className="pm-settings-label">
-          Model
-          <input
-            className="pm-settings-input"
-            type="text"
-            value={model}
-            onChange={(e) => setModel(e.target.value)}
-            placeholder="gpt-4o"
-          />
-        </label>
-        <div className="pm-settings-actions">
-          <button className="conn-btn conn-btn-cancel" onClick={onDone}>Cancel</button>
-          <button className="conn-btn conn-btn-next" onClick={handleSave} disabled={!baseUrl || !apiKey || !model}>
-            Save
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}

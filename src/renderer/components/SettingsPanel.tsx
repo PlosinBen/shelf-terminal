@@ -264,6 +264,45 @@ export function SettingsPanel() {
           </div>
 
           <div className="settings-divider" />
+          <div className="settings-section-title">PM Agent</div>
+          <div className="settings-group">
+            <label className="settings-label">Provider Base URL</label>
+            <input
+              className="settings-input settings-input-wide"
+              type="text"
+              value={draft.pmProvider?.baseUrl || ''}
+              onChange={(e) => updateDraft({
+                pmProvider: { ...draft.pmProvider ?? { baseUrl: '', apiKey: '', model: '' }, baseUrl: e.target.value },
+              })}
+              placeholder="https://generativelanguage.googleapis.com/v1beta/openai"
+            />
+          </div>
+          <div className="settings-group">
+            <label className="settings-label">API Key</label>
+            <input
+              className="settings-input settings-input-wide"
+              type="password"
+              value={draft.pmProvider?.apiKey || ''}
+              onChange={(e) => updateDraft({
+                pmProvider: { ...draft.pmProvider ?? { baseUrl: '', apiKey: '', model: '' }, apiKey: e.target.value },
+              })}
+              placeholder="API key"
+            />
+          </div>
+          <div className="settings-group">
+            <label className="settings-label">Model</label>
+            <input
+              className="settings-input"
+              type="text"
+              value={draft.pmProvider?.model || ''}
+              onChange={(e) => updateDraft({
+                pmProvider: { ...draft.pmProvider ?? { baseUrl: '', apiKey: '', model: '' }, model: e.target.value },
+              })}
+              placeholder="gemini-2.5-flash"
+            />
+          </div>
+
+          <div className="settings-divider" />
           <div className="settings-section-title">Telegram (PM Bridge)</div>
           <div className="settings-group">
             <label className="settings-label">Bot Token</label>
