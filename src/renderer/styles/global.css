@@ -805,7 +805,7 @@ button {
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 8px;
-  width: 560px;
+  width: 620px;
   max-height: 70vh;
   display: flex;
   flex-direction: column;
@@ -836,12 +836,47 @@ button {
   background: var(--surface);
 }
 
+.settings-layout {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.settings-tabs {
+  width: 120px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  padding: 8px 0;
+}
+
+.settings-tab {
+  padding: 8px 16px;
+  font-size: 13px;
+  text-align: left;
+  color: var(--text-muted);
+  border-left: 2px solid transparent;
+}
+
+.settings-tab:hover {
+  color: var(--text);
+  background: var(--surface);
+}
+
+.settings-tab.active {
+  color: var(--text);
+  border-left-color: var(--accent);
+}
+
 .settings-body {
   padding: 16px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 14px;
+  flex: 1;
+  min-height: 0;
 }
 
 .settings-group {
