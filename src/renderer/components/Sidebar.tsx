@@ -78,8 +78,8 @@ export function Sidebar() {
         </span>
       </div>
       <div
-        className={`sidebar-pm-entry ${pmVisible ? 'active' : ''}`}
-        onClick={() => setPmVisible(true)}
+        className="sidebar-pm-entry"
+        onClick={() => setPmVisible(!pmVisible)}
       >
         <span className={`status-dot ${awayMode ? 'pm-dot-away' : 'pm-dot'}`} />
         <span className="pm-label">PM</span>

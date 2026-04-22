@@ -1,12 +1,16 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { useStore, setAwayMode, updateSettings } from '../store';
+import { useStore, setAwayMode, updateSettings, setPmVisible } from '../store';
 import { marked } from 'marked';
 import type { PmMessage, PmStreamChunk, PmToolCall } from '@shared/types';
 
 marked.setOptions({ breaks: true, gfm: true });
 
+const DEFAULT_WIDTH = 380;
+const MIN_WIDTH = 280;
+const MAX_WIDTH = 700;
+
 export function PmView() {
-  const { settings, awayMode } = useStore();
+  const { settings, awayMode, pmVisible } = useStore();
   const [messages, setMessages] = useState<PmMessage[]>([]);
   const [input, setInput] = useState('');
   const [streaming, setStreaming] = useState(false);
@@ -14,8 +18,10 @@ export function PmView() {
   const [streamToolCalls, setStreamToolCalls] = useState<PmToolCall[]>([]);
   const [showSettings, setShowSettings] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [width, setWidth] = useState(DEFAULT_WIDTH);
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const dragging = useRef(false);
 
   const hasProvider = !!(settings.pmProvider?.baseUrl && settings.pmProvider?.apiKey && settings.pmProvider?.model);
 
@@ -110,18 +116,58 @@ export function PmView() {
     [handleSend],
   );
 
-  useEffect(() => {
-    inputRef.current?.focus();
-  }, []);
+  const onDragStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    dragging.current = true;
+    const startX = e.clientX;
+    const startWidth = width;
+    const onMove = (ev: MouseEvent) => {
+      if (!dragging.current) return;
+      const delta = startX - ev.clientX;
+      setWidth(Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, startWidth + delta)));
+    };
+    const onUp = () => {
+      dragging.current = false;
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  }, [width]);
 
+  useEffect(() => {
+    if (pmVisible) inputRef.current?.focus();
+  }, [pmVisible]);
+
+  // Collapsed tab
+  if (!pmVisible) {
+    return (
+      <button className="pm-tab-collapsed" onClick={() => setPmVisible(true)} title="PM Agent">
+        <span className={`pm-tab-dot ${awayMode ? 'pm-dot-away' : 'pm-dot'}`} />
+        <span>PM</span>
+      </button>
+    );
+  }
+
+  // Provider settings
   if (showSettings || !hasProvider) {
-    return <PmProviderSettings onDone={() => setShowSettings(false)} />;
+    return (
+      <div className="pm-panel" style={{ width }}>
+        <div className="pm-resize-handle" onMouseDown={onDragStart} />
+        <PmProviderSettings onDone={() => setShowSettings(false)} />
+      </div>
+    );
   }
 
   return (
-    <div className="pm-view">
+    <div className="pm-panel" style={{ width }}>
+      <div className="pm-resize-handle" onMouseDown={onDragStart} />
       <div className="pm-header">
-        <span className="pm-header-title">PM Agent</span>
+        <span className="pm-header-title">PM</span>
         <span className="pm-header-actions">
           <button
             className={`pm-away-toggle ${awayMode ? 'pm-away-on' : ''}`}
@@ -135,6 +181,9 @@ export function PmView() {
           </button>
           <button className="pm-header-btn" onClick={() => setShowSettings(true)} title="Provider settings">
             &#9881;
+          </button>
+          <button className="pm-header-btn" onClick={() => setPmVisible(false)} title="Close">
+            ×
           </button>
         </span>
       </div>
@@ -249,6 +298,7 @@ function PmProviderSettings({ onDone }: { onDone: () => void }) {
     <div className="pm-view">
       <div className="pm-header">
         <span className="pm-header-title">PM Provider Settings</span>
+        <button className="pm-header-btn" onClick={() => setPmVisible(false)} title="Close">×</button>
       </div>
       <div className="pm-settings-form">
         <label className="pm-settings-label">

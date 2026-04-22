@@ -111,7 +111,6 @@ export function removeProject(index: number) {
 export function setActiveProject(index: number) {
   if (index >= 0 && index < projects.length) {
     activeProjectIndex = index;
-    pmVisible = false;
     updateSnapshot();
   }
 }

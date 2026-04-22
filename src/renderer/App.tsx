@@ -215,8 +215,7 @@ export function App() {
     <div className="app">
       {sidebarVisible && <Sidebar />}
       <main className="main-area">
-        {pmVisible && <PmView />}
-        <div className="terminal-section" style={pmVisible ? { display: 'none' } : undefined}>
+        <div className="terminal-section">
         <TabBar />
         <div className="terminal-view">
           <SearchBar />
@@ -269,12 +268,13 @@ export function App() {
           </div>
         </div>
         <BottomBar />
-        {awayMode && !pmVisible && (
+        {awayMode && (
           <div className="away-mode-overlay">
             <span>Away Mode — PM is in control</span>
           </div>
         )}
         </div>
+        <PmView />
         <DevToolsPanel />
       </main>
       <FolderPicker />
