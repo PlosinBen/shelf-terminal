@@ -2017,6 +2017,81 @@ button {
   white-space: pre-wrap;
 }
 
+.pm-msg-md {
+  line-height: 1.6;
+}
+
+.pm-msg-md p {
+  margin: 0 0 8px;
+}
+
+.pm-msg-md p:last-child {
+  margin-bottom: 0;
+}
+
+.pm-msg-md code {
+  background: var(--bg);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 12px;
+  font-family: Menlo, Monaco, 'Courier New', monospace;
+}
+
+.pm-msg-md pre {
+  background: var(--bg);
+  border-radius: 4px;
+  padding: 8px 12px;
+  overflow-x: auto;
+  margin: 8px 0;
+}
+
+.pm-msg-md pre code {
+  background: none;
+  padding: 0;
+  font-size: 12px;
+}
+
+.pm-msg-md ul, .pm-msg-md ol {
+  margin: 4px 0;
+  padding-left: 20px;
+}
+
+.pm-msg-md li {
+  margin: 2px 0;
+}
+
+.pm-msg-md h1, .pm-msg-md h2, .pm-msg-md h3 {
+  margin: 12px 0 4px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.pm-msg-md strong {
+  font-weight: 600;
+}
+
+.pm-msg-md table {
+  border-collapse: collapse;
+  margin: 8px 0;
+  font-size: 12px;
+}
+
+.pm-msg-md th, .pm-msg-md td {
+  border: 1px solid var(--border);
+  padding: 4px 8px;
+}
+
+.pm-msg-md th {
+  background: var(--bg);
+}
+
+.pm-msg-md blockquote {
+  border-left: 3px solid var(--border);
+  margin: 8px 0;
+  padding: 4px 12px;
+  color: var(--text-muted);
+}
+
 .pm-thinking {
   color: var(--text-muted);
   font-style: italic;

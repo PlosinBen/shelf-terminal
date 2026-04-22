@@ -1,6 +1,9 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useStore, setAwayMode, updateSettings } from '../store';
+import { marked } from 'marked';
 import type { PmMessage, PmStreamChunk, PmToolCall } from '@shared/types';
+
+marked.setOptions({ breaks: true, gfm: true });
 
 export function PmView() {
   const { settings, awayMode } = useStore();
@@ -144,7 +147,7 @@ export function PmView() {
             {streamToolCalls.map((tc) => (
               <ToolCallSummary key={tc.id} toolCall={tc} />
             ))}
-            {streamText && <div className="pm-msg-text">{streamText}</div>}
+            {streamText && <div className="pm-msg-md" dangerouslySetInnerHTML={{ __html: renderMarkdown(streamText) }} />}
           </div>
         )}
         {streaming && !streamText && streamToolCalls.length === 0 && (
@@ -179,11 +182,19 @@ export function PmView() {
   );
 }
 
+function renderMarkdown(text: string): string {
+  return marked.parse(text, { async: false }) as string;
+}
+
 function MessageBubble({ message }: { message: PmMessage }) {
   if (message.role === 'error') {
     return <div className="pm-error">{message.content}</div>;
   }
   const isUser = message.role === 'user';
+  const html = useMemo(
+    () => (!isUser && message.content ? renderMarkdown(message.content) : ''),
+    [message.content, isUser],
+  );
   return (
     <div className={`pm-msg ${isUser ? 'pm-msg-user' : 'pm-msg-assistant'}`}>
       {message.toolCalls && message.toolCalls.length > 0 && (
@@ -193,7 +204,8 @@ function MessageBubble({ message }: { message: PmMessage }) {
           ))}
         </div>
       )}
-      {message.content && <div className="pm-msg-text">{message.content}</div>}
+      {isUser && message.content && <div className="pm-msg-text">{message.content}</div>}
+      {!isUser && html && <div className="pm-msg-md" dangerouslySetInnerHTML={{ __html: html }} />}
     </div>
   );
 }
