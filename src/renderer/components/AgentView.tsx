@@ -623,7 +623,7 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
             </div>
           ));
         })()}
-        {streaming && messages.length > 0 && messages[messages.length - 1]?.role === 'user' && (
+        {streaming && messages.length > 0 && !messages[messages.length - 1]?.streaming && (
           <div className="agent-loading">
             <span className="agent-loading-spinner" />
             <span className="agent-loading-text">Agent is running... (Esc to stop)</span>
@@ -720,7 +720,7 @@ export function AgentView({ tabId, projectId, projectIndex, cwd, connection, ini
             value={input}
             onChange={handleInputChange}
             onKeyDown={handleKeyDown}
-            placeholder={streaming ? 'Agent is running... (Esc to stop)' : 'Ask something...'}
+            placeholder="Ask something..."
             rows={1}
           />
           {escPending && <span className="agent-esc-hint">Press Esc again to stop</span>}
