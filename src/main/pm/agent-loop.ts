@@ -5,6 +5,7 @@ import { log } from '@shared/logger';
 import { streamChat, type ChatMessage, type ToolCall } from './llm-client';
 import { getActiveToolSchemas, executeTool } from './tools';
 import { isAwayMode } from './away-mode';
+import { sendPmResponse, isRunning as isTelegramRunning } from './telegram';
 
 const SYSTEM_PROMPT_BASE = `You are PM (Project Manager) for Shelf Terminal — a multi-project terminal management app.
 
@@ -152,6 +153,10 @@ async function runLoop(
       history.push({ role: 'assistant', content: assistantText });
       messages.push({ role: 'assistant', content: assistantText, timestamp: Date.now() });
       sendChunk(win, { type: 'done' });
+      // Mirror to Telegram
+      if (assistantText && isTelegramRunning()) {
+        sendPmResponse(assistantText).catch((e) => log.error('pm', `telegram send failed: ${e.message}`));
+      }
       return;
     }
 

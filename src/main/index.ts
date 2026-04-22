@@ -15,7 +15,7 @@ import { createConnector, getAvailableTypes, listDockerContainers, listWSLDistro
 import { loadSSHServers, saveSSHServer } from './ssh-server-store';
 import { log, setLogLevel, setFileWriter } from '@shared/logger';
 import { applyUserDataIsolation } from './user-data-path';
-import { handlePmSend, handleTabEvent, getHistory, clearHistory, stopGeneration, updateSyncedState, setWritePtyFn, isAwayMode, setAwayMode, initAwayMode, setStateChangeCallback, updateKnownTabs } from './pm';
+import { handlePmSend, handleTabEvent, getHistory, clearHistory, stopGeneration, updateSyncedState, setWritePtyFn, isAwayMode, setAwayMode, initAwayMode, setStateChangeCallback, updateKnownTabs, startTelegram, stopTelegram, setMessageCallback } from './pm';
 import type { Connection, ProjectConfig, AppSettings, FileUploadResult, FileClearResult, PtySpawnPayload, PtyInputPayload, PtyResizePayload, PtyKillPayload, GitBranchInfo, WorktreeAddResult, WorktreeRemoveResult } from '@shared/types';
 
 applyUserDataIsolation();
@@ -302,6 +302,12 @@ ipcMain.handle(IPC.SETTINGS_SAVE, (_event, settings: AppSettings) => {
   saveSettings(settings);
   setLogLevel(settings.logLevel);
   setDockerPath(settings.dockerPath);
+  // Restart Telegram if config changed
+  if (settings.telegram?.botToken && settings.telegram?.chatId) {
+    startTelegram(settings.telegram);
+  } else {
+    stopTelegram();
+  }
 });
 
 // ── Logs ──
@@ -420,6 +426,14 @@ app.whenReady().then(() => {
       handleTabEvent(tabId, tabName, projectName, oldState, newState, cachedSettings.pmProvider, mainWindow);
     }
   });
+  setMessageCallback((text, _chatId) => {
+    if (mainWindow && cachedSettings.pmProvider) {
+      handlePmSend(`[from Telegram] ${text}`, cachedSettings.pmProvider, mainWindow);
+    }
+  });
+  if (cachedSettings.telegram?.botToken && cachedSettings.telegram?.chatId) {
+    startTelegram(cachedSettings.telegram);
+  }
 
   if (process.env.NODE_ENV !== 'test' && app.isPackaged) {
     initAutoUpdater(mainWindow!);
@@ -429,6 +443,7 @@ app.whenReady().then(() => {
 function shutdown() {
   killAllPtys();
   stopAutoUpdater();
+  stopTelegram();
   cleanupConnectors();
 }
 

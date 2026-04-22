@@ -264,6 +264,34 @@ export function SettingsPanel() {
           </div>
 
           <div className="settings-divider" />
+          <div className="settings-section-title">Telegram (PM Bridge)</div>
+          <div className="settings-group">
+            <label className="settings-label">Bot Token</label>
+            <input
+              className="settings-input settings-input-wide"
+              type="password"
+              value={draft.telegram?.botToken || ''}
+              onChange={(e) => updateDraft({
+                telegram: { ...draft.telegram ?? { botToken: '', chatId: '' }, botToken: e.target.value },
+              })}
+              placeholder="123456:ABC-DEF..."
+            />
+          </div>
+          <div className="settings-group">
+            <label className="settings-label">Chat ID</label>
+            <input
+              className="settings-input"
+              type="text"
+              value={draft.telegram?.chatId || ''}
+              onChange={(e) => updateDraft({
+                telegram: { ...draft.telegram ?? { botToken: '', chatId: '' }, chatId: e.target.value },
+              })}
+              placeholder="123456789"
+            />
+            <span className="settings-hint">Send /start to your bot, then use @userinfobot to find your chat ID</span>
+          </div>
+
+          <div className="settings-divider" />
 
           <div className="settings-section-title">Keyboard Shortcuts</div>
           {(Object.keys(ACTION_LABELS) as KeybindingAction[]).map((action) => (

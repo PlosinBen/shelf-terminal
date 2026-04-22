@@ -105,6 +105,7 @@ export interface AppSettings {
   dockerPath?: string;
   unicode11?: boolean;
   pmProvider?: PmProviderConfig;
+  telegram?: TelegramConfig;
 }
 
 
@@ -199,6 +200,13 @@ export interface PmEscalation {
   reason: string;
   scrollbackSnippet: string;
   action: 'approve' | 'deny' | 'dismiss';
+}
+
+// ── Telegram ──
+
+export interface TelegramConfig {
+  botToken: string;
+  chatId: string;
 }
 
 // ── Auto-updater ──
