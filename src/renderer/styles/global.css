@@ -961,14 +961,6 @@ button {
   color: #f38ba8;
 }
 
-.settings-config-path {
-  margin-left: 152px;
-  margin-top: -10px;
-  font-size: 11px;
-  color: var(--text-muted, #888);
-  user-select: text;
-  word-break: break-all;
-}
 
 .settings-section-title {
   font-size: 12px;
@@ -1524,34 +1516,6 @@ button {
 
 /* ── Dev Tools Panel ── */
 
-.devtools-tab-collapsed {
-  position: relative;
-  width: 28px;
-  flex-shrink: 0;
-  background: var(--bg-secondary);
-  border-left: 1px solid var(--border);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.devtools-tab-collapsed span {
-  writing-mode: vertical-rl;
-  text-orientation: mixed;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text-muted);
-  letter-spacing: 1px;
-}
-
-.devtools-tab-collapsed:hover {
-  background: var(--surface);
-}
-
-.devtools-tab-collapsed:hover span {
-  color: var(--text);
-}
 
 .devtools-panel {
   flex-shrink: 0;
