@@ -1,7 +1,7 @@
 import { net } from 'electron';
 import { log } from '@shared/logger';
 import type { TelegramConfig } from '@shared/types';
-import { isAwayMode } from './away-mode';
+import { isAwayMode, setAwayMode as setAwayModeState } from './away-mode';
 
 const API = 'https://api.telegram.org/bot';
 const POLL_TIMEOUT = 30; // seconds (Telegram long poll)
@@ -197,8 +197,7 @@ async function handleCallbackQuery(cbq: any): Promise<void> {
     if (onCallbackQuery) onCallbackQuery(action, tabId);
   } else if (data.startsWith('away:')) {
     const on = data === 'away:on';
-    const { setAwayMode } = await import('./away-mode');
-    setAwayMode(on);
+    setAwayModeState(on);
     const ack = on ? `🔴 Away Mode switched ON at ${now}` : `🟢 Away Mode switched OFF at ${now}`;
     if (messageId) {
       await apiCall('editMessageReplyMarkup', {

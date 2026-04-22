@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useStore, setAwayMode } from '../store';
+import { useStore, setAwayMode, updateSettings } from '../store';
 import type { PmMessage, PmStreamChunk, PmToolCall } from '@shared/types';
 
 export function PmView() {
@@ -211,10 +211,7 @@ function PmProviderSettings({ onDone }: { onDone: () => void }) {
   const [model, setModel] = useState(settings.pmProvider?.model ?? 'gpt-4o');
 
   const handleSave = () => {
-    window.shelfApi.settings.save({
-      ...settings,
-      pmProvider: { baseUrl, apiKey, model },
-    });
+    updateSettings({ pmProvider: { baseUrl, apiKey, model } });
     onDone();
   };
 

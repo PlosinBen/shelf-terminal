@@ -78,11 +78,11 @@ export function Sidebar() {
         </span>
       </div>
       <div
-        className={`sidebar-item sidebar-pm-entry ${pmVisible ? 'active' : ''}`}
+        className={`sidebar-pm-entry ${pmVisible ? 'active' : ''}`}
         onClick={() => setPmVisible(true)}
       >
         <span className={`status-dot ${awayMode ? 'pm-dot-away' : 'pm-dot'}`} />
-        <span className="project-name">PM</span>
+        <span className="pm-label">PM</span>
       </div>
       <div className="sidebar-list">
         {projects.map((proj, i) => {
