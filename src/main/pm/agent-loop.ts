@@ -6,6 +6,7 @@ import { streamChat, type ChatMessage, type ToolCall } from './llm-client';
 import { getActiveToolSchemas, executeTool } from './tools';
 import { isAwayMode } from './away-mode';
 import { sendPmResponse, isRunning as isTelegramRunning } from './telegram';
+import { loadHistory, saveHistory, clearPersistedHistory } from './history-store';
 
 const SYSTEM_PROMPT_BASE = `You are PM (Project Manager) for Shelf Terminal — a multi-project terminal management app.
 
@@ -47,9 +48,14 @@ function getSystemPrompt(): string {
 
 const MAX_HISTORY_TURNS = 40;
 
-let history: ChatMessage[] = [];
-let messages: PmMessage[] = [];
+const persisted = loadHistory();
+let history: ChatMessage[] = persisted.chat;
+let messages: PmMessage[] = persisted.display;
 let abortController: AbortController | null = null;
+
+function persist(): void {
+  saveHistory(history, messages);
+}
 
 export function getHistory(): PmMessage[] {
   return [...messages];
@@ -58,6 +64,7 @@ export function getHistory(): PmMessage[] {
 export function clearHistory(): void {
   history = [];
   messages = [];
+  clearPersistedHistory();
 }
 
 export async function handleTabEvent(
@@ -89,6 +96,7 @@ export async function handlePmSend(
   const userMsg: PmMessage = { role: 'user', content: userMessage, timestamp: Date.now() };
   messages.push(userMsg);
   history.push({ role: 'user', content: userMessage });
+  persist();
 
   abortController = new AbortController();
   const { signal } = abortController;
@@ -152,6 +160,7 @@ async function runLoop(
       // No tool calls — final response
       history.push({ role: 'assistant', content: assistantText });
       messages.push({ role: 'assistant', content: assistantText, timestamp: Date.now() });
+      persist();
       sendChunk(win, { type: 'done' });
       // Mirror to Telegram
       if (assistantText && isTelegramRunning()) {
@@ -214,6 +223,7 @@ async function runLoop(
       toolCalls: pmToolCalls,
       timestamp: Date.now(),
     });
+    persist();
 
     // Continue loop — LLM will see tool results and respond
   }
