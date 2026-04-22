@@ -229,3 +229,46 @@
 - 換回 mtime cutoff 會踩 `find -mmin` 的捨入問題，可能在使用者剛 paste 完就把同次的檔刪掉。
 - 如果讓 cleanup `await` 在 spawn 之前，遠端 `ssh exec` 的延遲會直接打到 first tab 的開啟時間。
 - 把 dedupe 拿掉會讓每次 spawn 都重跑 cleanup，浪費 SSH/docker exec。
+
+---
+
+## 19b. Worktree 是獨立 Project
+
+**決策**: Git worktree 以獨立 project 存在於 sidebar，透過 `parentProjectId` 關聯 parent project。繼承 parent 的 connection 設定。Worktree path 放在 parent cwd 的同層目錄（`<parentDir>/<projectName>-<branchName>`）。
+
+**原因**:
+- 把 worktree 當 sub-project 保持 sidebar 扁平架構，不需要巢狀 tree view 和複雜的拖曳邏輯。
+- Worktree 鎖定一個 branch，行為上就是一個獨立的工作目錄，跟 project 概念一致。
+- 放同層目錄（非 repo 內部）避免需要 `.gitignore` 排除。
+
+**不要改**: 如果把 worktree 做成 project 的子層級，sidebar 要從 flat list 變 tree，拖曳排序邏輯會複雜很多。
+
+---
+
+## 20. Connector exec() 方法
+
+**決策**: `Connector` 介面加 `exec(cwd, cmd)` 方法，用於在目標環境執行非互動式指令（如 git 操作）。各 connector 實作對應的 execFile 呼叫。Git IPC handler 透過 connector.exec() 執行，不直接暴露 exec 到 renderer。
+
+**原因**: git worktree 操作需要在遠端（SSH/Docker）執行指令，透過 connector 抽象層可以統一處理，不需要針對每種 connection type 寫不同的 git 邏輯。只暴露特定 git IPC channel 而非通用 exec，避免安全風險。
+
+**不要改**: 不要在 preload 暴露通用 exec API。
+
+---
+
+## 21. Bottom Bar 顯示 connection / path / branch
+
+**決策**: Terminal section 底部加 BottomBar 元件，左側顯示 connection type 和 cwd，右側顯示 git branch。Branch 可點擊展開 dropdown 切換。Worktree-occupied branches 標示 "worktree"，點擊後跳轉到對應 project（或自動建立）而非嘗試 checkout。
+
+**原因**: 使用者需要快速了解當前 project 的 connection 和 branch 狀態。Branch 切換用 `connector.exec()` 執行 `git checkout`，切換前用 `git status --porcelain` 檢查 dirty 狀態。Worktree branch 不能 checkout（git 限制），改為導航到對應 project 更實用。
+
+**不要改**: 不要用隱藏 tab 跑 git checkout（shell exit code 不可靠）。不要把 worktree branch 設為 disabled（使用者會困惑為什麼不能點）。
+
+---
+
+## 22. Unicode11Addon 預設不啟用
+
+**決策**: xterm.js Unicode11Addon 仍然載入（註冊可用版本），但預設不啟用 `activeVersion`。使用者可在 Settings 勾選 "Unicode 11" 開啟。
+
+**原因**: Unicode11Addon 對 Ambiguous width 字元（如 oh-my-zsh prompt 中的 `→` `✗`）的寬度計算與 zsh 不一致，導致 tab completion 時字元重複顯示。這是 xterm.js 已知限制（#1453）。預設關閉避免大多數使用者踩到此問題。
+
+**不要改**: 不要完全移除 Unicode11Addon（部分使用者需要 CJK/emoji 支援）。
