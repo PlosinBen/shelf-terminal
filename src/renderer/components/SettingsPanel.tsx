@@ -201,8 +201,8 @@ export function SettingsPanel() {
                     />
                     {' '}Enable
                   </label>
-                  <div className="settings-sub-hint">Better emoji/CJK width, may cause display issues with some prompts</div>
                 </div>
+                <div className="settings-sub-hint">Better emoji/CJK width, may cause display issues with some prompts</div>
 
                 <div className="settings-group">
                   <label className="settings-label">Default Local Path</label>
