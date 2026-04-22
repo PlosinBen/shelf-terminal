@@ -106,6 +106,13 @@ contextBridge.exposeInMainWorld('shelfApi', {
     history: () => ipcRenderer.invoke(IPC.PM_HISTORY),
     clear: () => ipcRenderer.invoke(IPC.PM_CLEAR),
     syncState: (state: any) => ipcRenderer.send(IPC.PM_SYNC_STATE, state),
+    setAwayMode: (on: boolean) => ipcRenderer.invoke(IPC.PM_AWAY_MODE, on),
+    getAwayMode: () => ipcRenderer.invoke(IPC.PM_AWAY_MODE_GET) as Promise<boolean>,
+    onAwayMode: (callback: (on: boolean) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, on: boolean) => callback(on);
+      ipcRenderer.on(IPC.PM_AWAY_MODE, listener);
+      return () => ipcRenderer.removeListener(IPC.PM_AWAY_MODE, listener);
+    },
     onStream: (callback: (chunk: import('../shared/types').PmStreamChunk) => void) => {
       const listener = (_event: Electron.IpcRendererEvent, chunk: import('../shared/types').PmStreamChunk) => {
         callback(chunk);

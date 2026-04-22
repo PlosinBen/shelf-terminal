@@ -348,6 +348,7 @@ button {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  position: relative;
 }
 
 /* ── Tab bar ── */
@@ -1916,7 +1917,11 @@ button {
 }
 
 .pm-dot {
-  background: var(--accent) !important;
+  background: #a6e3a1 !important;
+}
+
+.pm-dot-away {
+  background: #f38ba8 !important;
 }
 
 .pm-view {
@@ -2141,4 +2146,50 @@ button {
   gap: 8px;
   justify-content: flex-end;
   margin-top: 8px;
+}
+
+/* Away Mode */
+
+.pm-away-toggle {
+  font-size: 11px;
+  padding: 2px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  color: #a6e3a1;
+}
+
+.pm-away-toggle:hover {
+  background: var(--surface);
+}
+
+.pm-away-toggle.pm-away-on {
+  background: #f38ba8;
+  color: #1e1e2e;
+  border-color: #f38ba8;
+}
+
+.pm-away-toggle.pm-away-on:hover {
+  background: #f06c93;
+}
+
+.away-mode-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(243, 139, 168, 0.08);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 40px;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.away-mode-overlay span {
+  background: #f38ba8;
+  color: #1e1e2e;
+  padding: 4px 16px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 500;
+  pointer-events: auto;
 }

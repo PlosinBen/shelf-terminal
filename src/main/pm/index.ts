@@ -1,2 +1,4 @@
-export { handlePmSend, getHistory, clearHistory, stopGeneration } from './agent-loop';
-export { updateSyncedState } from './tools';
+export { handlePmSend, handleTabEvent, getHistory, clearHistory, stopGeneration } from './agent-loop';
+export { updateSyncedState, setWritePtyFn } from './tools';
+export { isAwayMode, setAwayMode, initAwayMode } from './away-mode';
+export { setStateChangeCallback, updateKnownTabs } from './tab-watcher';

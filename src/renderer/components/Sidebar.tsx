@@ -14,7 +14,7 @@ import { CONFIRM_REMOVE_EVENT } from './RemoveConfirmDialog';
 const version = __APP_VERSION__;
 
 export function Sidebar() {
-  const { projects, activeProjectIndex, updateStatus, pmVisible } = useStore();
+  const { projects, activeProjectIndex, updateStatus, pmVisible, awayMode } = useStore();
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const [contextMenu, setContextMenu] = useState<{ index: number; x: number; y: number } | null>(null);
@@ -81,7 +81,7 @@ export function Sidebar() {
         className={`sidebar-item sidebar-pm-entry ${pmVisible ? 'active' : ''}`}
         onClick={() => setPmVisible(true)}
       >
-        <span className="status-dot pm-dot" />
+        <span className={`status-dot ${awayMode ? 'pm-dot-away' : 'pm-dot'}`} />
         <span className="project-name">PM</span>
       </div>
       <div className="sidebar-list">

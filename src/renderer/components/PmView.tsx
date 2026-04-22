@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useStore } from '../store';
+import { useStore, setAwayMode } from '../store';
 import type { PmMessage, PmStreamChunk, PmToolCall } from '@shared/types';
 
 export function PmView() {
-  const { settings } = useStore();
+  const { settings, awayMode } = useStore();
   const [messages, setMessages] = useState<PmMessage[]>([]);
   const [input, setInput] = useState('');
   const [streaming, setStreaming] = useState(false);
@@ -17,6 +17,11 @@ export function PmView() {
 
   useEffect(() => {
     window.shelfApi.pm.history().then(setMessages);
+    window.shelfApi.pm.getAwayMode().then(setAwayMode);
+  }, []);
+
+  useEffect(() => {
+    return window.shelfApi.pm.onAwayMode(setAwayMode);
   }, []);
 
   useEffect(() => {
@@ -105,6 +110,13 @@ export function PmView() {
       <div className="pm-header">
         <span className="pm-header-title">PM Agent</span>
         <span className="pm-header-actions">
+          <button
+            className={`pm-away-toggle ${awayMode ? 'pm-away-on' : ''}`}
+            onClick={() => window.shelfApi.pm.setAwayMode(!awayMode)}
+            title={awayMode ? 'Away Mode ON — PM can control terminals' : 'Away Mode OFF — read only'}
+          >
+            {awayMode ? 'Away ON' : 'Away OFF'}
+          </button>
           <button className="pm-header-btn" onClick={handleClear} title="Clear conversation">
             Clear
           </button>

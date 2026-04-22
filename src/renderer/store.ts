@@ -34,6 +34,7 @@ let editingProjectIndex: number | null = null;
 let settings: AppSettings = { ...DEFAULT_SETTINGS };
 let updateStatus: UpdateStatus = { state: 'idle' };
 let pmVisible = false;
+let awayMode = false;
 let nextTabCounter = 0;
 let layoutGeneration = 0;
 
@@ -50,7 +51,7 @@ function subscribe(l: Listener) {
 }
 
 function getSnapshot() {
-  return { projects, activeProjectIndex, sidebarVisible, settingsVisible, searchVisible, commandPickerVisible, devToolsVisible, editingProjectIndex, settings, updateStatus, pmVisible, layoutGeneration };
+  return { projects, activeProjectIndex, sidebarVisible, settingsVisible, searchVisible, commandPickerVisible, devToolsVisible, editingProjectIndex, settings, updateStatus, pmVisible, awayMode, layoutGeneration };
 }
 
 let snapshotRef = getSnapshot();
@@ -380,6 +381,11 @@ export function appendDefaultTab(projectIndex: number, name: string, color?: str
 
 export function setPmVisible(visible: boolean) {
   pmVisible = visible;
+  updateSnapshot();
+}
+
+export function setAwayMode(on: boolean) {
+  awayMode = on;
   updateSnapshot();
 }
 

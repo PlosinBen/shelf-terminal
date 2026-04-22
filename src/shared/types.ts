@@ -185,10 +185,20 @@ export interface PmMessage {
 }
 
 export interface PmStreamChunk {
-  type: 'text' | 'tool_start' | 'tool_result' | 'done' | 'error';
+  type: 'text' | 'tool_start' | 'tool_result' | 'done' | 'error' | 'escalation';
   text?: string;
   toolCall?: PmToolCall;
   error?: string;
+  escalation?: PmEscalation;
+}
+
+export interface PmEscalation {
+  tabId: string;
+  projectName: string;
+  tabName: string;
+  reason: string;
+  scrollbackSnippet: string;
+  action: 'approve' | 'deny' | 'dismiss';
 }
 
 // ── Auto-updater ──

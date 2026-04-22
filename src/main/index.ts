@@ -15,7 +15,7 @@ import { createConnector, getAvailableTypes, listDockerContainers, listWSLDistro
 import { loadSSHServers, saveSSHServer } from './ssh-server-store';
 import { log, setLogLevel, setFileWriter } from '@shared/logger';
 import { applyUserDataIsolation } from './user-data-path';
-import { handlePmSend, getHistory, clearHistory, stopGeneration, updateSyncedState } from './pm';
+import { handlePmSend, handleTabEvent, getHistory, clearHistory, stopGeneration, updateSyncedState, setWritePtyFn, isAwayMode, setAwayMode, initAwayMode, setStateChangeCallback, updateKnownTabs } from './pm';
 import type { Connection, ProjectConfig, AppSettings, FileUploadResult, FileClearResult, PtySpawnPayload, PtyInputPayload, PtyResizePayload, PtyKillPayload, GitBranchInfo, WorktreeAddResult, WorktreeRemoveResult } from '@shared/types';
 
 applyUserDataIsolation();
@@ -367,6 +367,22 @@ ipcMain.handle(IPC.PM_CLEAR, () => {
 
 ipcMain.on(IPC.PM_SYNC_STATE, (_event, state: any) => {
   updateSyncedState(state);
+  // Also update tab watcher's known tabs
+  const tabs: { tabId: string; tabName: string; projectName: string }[] = [];
+  for (const proj of state) {
+    for (const tab of proj.tabs) {
+      tabs.push({ tabId: tab.id, tabName: tab.label, projectName: proj.name });
+    }
+  }
+  updateKnownTabs(tabs);
+});
+
+ipcMain.handle(IPC.PM_AWAY_MODE, (_event, on: boolean) => {
+  setAwayMode(on);
+});
+
+ipcMain.handle(IPC.PM_AWAY_MODE_GET, () => {
+  return isAwayMode();
 });
 
 // ── App lifecycle ──
@@ -395,6 +411,16 @@ app.whenReady().then(() => {
   log.info('app', `starting, logLevel=${settings.logLevel}, userData=${app.getPath('userData')}`);
 
   createWindow();
+
+  // PM wiring
+  initAwayMode(mainWindow!);
+  setWritePtyFn(writePty);
+  setStateChangeCallback((tabId, tabName, projectName, oldState, newState) => {
+    if (mainWindow && cachedSettings.pmProvider) {
+      handleTabEvent(tabId, tabName, projectName, oldState, newState, cachedSettings.pmProvider, mainWindow);
+    }
+  });
+
   if (process.env.NODE_ENV !== 'test' && app.isPackaged) {
     initAutoUpdater(mainWindow!);
   }

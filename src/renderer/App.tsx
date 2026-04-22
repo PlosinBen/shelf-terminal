@@ -21,7 +21,7 @@ import { getTheme } from './themes';
 import './styles/global.css';
 
 export function App() {
-  const { projects, activeProjectIndex, sidebarVisible, settingsVisible, commandPickerVisible, devToolsVisible, editingProjectIndex, settings, pmVisible } = useStore();
+  const { projects, activeProjectIndex, sidebarVisible, settingsVisible, commandPickerVisible, devToolsVisible, editingProjectIndex, settings, pmVisible, awayMode } = useStore();
   useKeybindings();
 
   useEffect(() => {
@@ -269,6 +269,11 @@ export function App() {
           </div>
         </div>
         <BottomBar />
+        {awayMode && !pmVisible && (
+          <div className="away-mode-overlay">
+            <span>Away Mode — PM is in control</span>
+          </div>
+        )}
         </div>
         <DevToolsPanel />
       </main>

@@ -1,6 +1,8 @@
 import type { TabInferredState, TabScanResult } from '@shared/types';
 import * as scrollback from './scrollback-buffer';
 import { readNote, writeNote } from './note-store';
+import { isAwayMode } from './away-mode';
+import { checkRedline } from './redline';
 
 // ── Synced state from renderer ──
 
@@ -108,7 +110,37 @@ export const toolSchemas = [
       },
     },
   },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'write_to_pty',
+      description: 'Send data to a terminal tab (Away Mode only). Use for: sending prompts to CLI agents, approving/denying permission prompts (y/n), or interrupting with ESC/Ctrl+C. NEVER use on idle_shell tabs.',
+      parameters: {
+        type: 'object',
+        properties: {
+          tabId: { type: 'string', description: 'Tab ID' },
+          data: { type: 'string', description: 'Data to send (text, \\x1b for ESC, \\x03 for Ctrl+C)' },
+        },
+        required: ['tabId', 'data'],
+      },
+    },
+  },
 ];
+
+// ── write_to_pty callback (injected from main/index.ts) ──
+
+let writePtyFn: ((tabId: string, data: string) => void) | null = null;
+
+export function setWritePtyFn(fn: (tabId: string, data: string) => void): void {
+  writePtyFn = fn;
+}
+
+// ── Tool schemas filtered by Away Mode ──
+
+export function getActiveToolSchemas(): typeof toolSchemas {
+  if (isAwayMode()) return toolSchemas;
+  return toolSchemas.filter((t) => t.function.name !== 'write_to_pty');
+}
 
 // ── Tool execution ──
 
@@ -176,6 +208,39 @@ export function executeTool(name: string, args: Record<string, unknown>): string
     case 'write_project_note': {
       writeNote(args.projectId as string, args.content as string);
       return 'Note saved.';
+    }
+
+    case 'write_to_pty': {
+      if (!isAwayMode()) return JSON.stringify({ error: 'Away Mode is OFF — cannot write to terminal' });
+      const tabId = args.tabId as string;
+      if (!scrollback.has(tabId)) return JSON.stringify({ error: 'Tab not found' });
+
+      // Block writes to idle_shell tabs
+      const state = inferTabState(scrollback.read(tabId, 20));
+      if (state === 'idle_shell') {
+        return JSON.stringify({ error: 'Tab is idle_shell — refusing to write to raw shell. Only write to tabs running CLI agents.' });
+      }
+
+      // Redline check
+      const redline = checkRedline(tabId);
+      if (redline.blocked) {
+        return JSON.stringify({
+          error: 'REDLINE BLOCKED',
+          pattern: redline.pattern,
+          snippet: redline.snippet,
+          action: 'Escalate to user instead of approving.',
+        });
+      }
+
+      // Unescape control characters
+      const data = (args.data as string)
+        .replace(/\\x1b/g, '\x1b')
+        .replace(/\\x03/g, '\x03')
+        .replace(/\\n/g, '\n');
+
+      if (!writePtyFn) return JSON.stringify({ error: 'write_to_pty not wired up' });
+      writePtyFn(tabId, data);
+      return 'Sent.';
     }
 
     default:

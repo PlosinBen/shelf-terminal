@@ -62,6 +62,9 @@ export const IPC = {
   PM_HISTORY: 'pm:history',
   PM_CLEAR: 'pm:clear',
   PM_SYNC_STATE: 'pm:sync-state',
+  PM_AWAY_MODE: 'pm:away-mode',
+  PM_AWAY_MODE_GET: 'pm:away-mode-get',
+  PM_ESCALATION_RESPOND: 'pm:escalation-respond',
 
   // Main → Renderer (send)
   PTY_DATA: 'pty:data',

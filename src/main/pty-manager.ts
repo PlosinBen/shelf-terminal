@@ -6,6 +6,7 @@ import { createConnector } from './connector';
 import { log } from '@shared/logger';
 import { maybeScheduleCleanup } from './file-transfer';
 import * as scrollback from './pm/scrollback-buffer';
+import { checkTab as watcherCheckTab, removeTab as watcherRemoveTab, clearAll as watcherClearAll } from './pm/tab-watcher';
 
 const shells = new Map<string, Shell>();
 
@@ -99,6 +100,7 @@ export function spawnPty(
 
   shell.onData((data) => {
     scrollback.append(tabId, data);
+    watcherCheckTab(tabId);
 
     if (!win.isDestroyed()) {
       win.webContents.send(IPC.PTY_DATA, { tabId, data });
@@ -161,6 +163,7 @@ export function killPty(tabId: string) {
     s.kill();
     clearActivity(tabId);
     scrollback.remove(tabId);
+    watcherRemoveTab(tabId);
     shells.delete(tabId);
   }
 }
@@ -172,4 +175,5 @@ export function killAllPtys() {
     shells.delete(tabId);
   }
   scrollback.clear();
+  watcherClearAll();
 }

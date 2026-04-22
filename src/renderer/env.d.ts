@@ -71,6 +71,9 @@ interface ShelfApi {
     history: () => Promise<import('../shared/types').PmMessage[]>;
     clear: () => Promise<void>;
     syncState: (state: any) => void;
+    setAwayMode: (on: boolean) => Promise<void>;
+    getAwayMode: () => Promise<boolean>;
+    onAwayMode: (callback: (on: boolean) => void) => () => void;
     onStream: (callback: (chunk: import('../shared/types').PmStreamChunk) => void) => () => void;
   };
   updater: {

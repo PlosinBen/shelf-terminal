@@ -3,13 +3,12 @@ import { IPC } from '@shared/ipc-channels';
 import type { PmMessage, PmStreamChunk, PmProviderConfig } from '@shared/types';
 import { log } from '@shared/logger';
 import { streamChat, type ChatMessage, type ToolCall } from './llm-client';
-import { toolSchemas, executeTool } from './tools';
+import { getActiveToolSchemas, executeTool } from './tools';
+import { isAwayMode } from './away-mode';
 
-const SYSTEM_PROMPT = `You are PM (Project Manager) for Shelf Terminal — a multi-project terminal management app.
+const SYSTEM_PROMPT_BASE = `You are PM (Project Manager) for Shelf Terminal — a multi-project terminal management app.
 
 Your role: observe all projects and their terminal tabs, understand what's happening, and help the user manage their work.
-
-You have read-only access. You can see terminal output, manage per-project notes, but you CANNOT type into terminals (that requires Away Mode, which is not enabled yet).
 
 Guidelines:
 - Use scan_all_tabs() first to get a global picture before answering questions
@@ -22,6 +21,31 @@ Guidelines:
 
 You do NOT manage Shelf itself — no settings changes, no creating/removing projects, no keybindings.`;
 
+const AWAY_MODE_OFF_ADDENDUM = `
+
+Away Mode is OFF. You have read-only access. You can see terminal output and manage notes, but you CANNOT type into terminals.`;
+
+const AWAY_MODE_ON_ADDENDUM = `
+
+Away Mode is ON. You can write to terminals via write_to_pty(). Use it for:
+1. Sending natural language prompts to CLI agents
+2. Sending approve/deny keystrokes (y/n) when CLI asks for permission
+3. Sending ESC (\\x1b) or Ctrl+C (\\x03) to interrupt a stuck CLI
+
+CRITICAL RULES:
+- NEVER write to idle_shell tabs (the tool will block this, but don't try)
+- Default to APPROVE when a CLI asks permission for reasonable operations
+- ESCALATE (refuse to approve and tell the user) for dangerous operations: rm -rf, git push --force, DROP TABLE, chmod 777, etc.
+- If the tool returns REDLINE BLOCKED, do NOT retry — report to the user that the operation was blocked and why
+- When sending a prompt to a CLI agent, end with \\n (newline) so it executes
+- When approving, send just "y\\n"`;
+
+function getSystemPrompt(): string {
+  return SYSTEM_PROMPT_BASE + (isAwayMode() ? AWAY_MODE_ON_ADDENDUM : AWAY_MODE_OFF_ADDENDUM);
+}
+
+const MAX_HISTORY_TURNS = 40;
+
 let history: ChatMessage[] = [];
 let messages: PmMessage[] = [];
 let abortController: AbortController | null = null;
@@ -33,6 +57,20 @@ export function getHistory(): PmMessage[] {
 export function clearHistory(): void {
   history = [];
   messages = [];
+}
+
+export async function handleTabEvent(
+  tabId: string,
+  tabName: string,
+  projectName: string,
+  oldState: string,
+  newState: string,
+  config: PmProviderConfig,
+  win: BrowserWindow,
+): Promise<void> {
+  const eventMsg = `[System Event] Tab "${tabName}" in project "${projectName}" changed state: ${oldState} → ${newState}. Please scan this tab and take appropriate action.`;
+  log.info('pm', `auto-event: ${eventMsg}`);
+  await handlePmSend(eventMsg, config, win);
 }
 
 export function stopGeneration(): void {
@@ -76,15 +114,19 @@ async function runLoop(
   const MAX_TOOL_ROUNDS = 10;
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+    // Sliding window: keep last N turns, always include system prompt
+    const trimmed = history.length > MAX_HISTORY_TURNS
+      ? history.slice(-MAX_HISTORY_TURNS)
+      : history;
     const chatMessages: ChatMessage[] = [
-      { role: 'system', content: SYSTEM_PROMPT },
-      ...history,
+      { role: 'system', content: getSystemPrompt() },
+      ...trimmed,
     ];
 
     let assistantText = '';
     const toolCalls: Map<string, { name: string; args: string }> = new Map();
 
-    for await (const event of streamChat(config, chatMessages, toolSchemas, signal)) {
+    for await (const event of streamChat(config, chatMessages, getActiveToolSchemas(), signal)) {
       if (signal.aborted) return;
 
       switch (event.type) {
