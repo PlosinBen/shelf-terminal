@@ -193,14 +193,15 @@ export function SettingsPanel() {
 
                 <div className="settings-group">
                   <label className="settings-label">Unicode 11</label>
-                  <label className="settings-hint">
+                  <label className="settings-checkbox">
                     <input
                       type="checkbox"
                       checked={draft.unicode11 ?? false}
                       onChange={(e) => updateDraft({ unicode11: e.target.checked })}
                     />
-                    {' '}Better emoji/CJK width, may cause display issues with some prompts
+                    {' '}Enable
                   </label>
+                  <span className="settings-hint">Better emoji/CJK width, may cause display issues with some prompts</span>
                 </div>
 
                 <div className="settings-group">

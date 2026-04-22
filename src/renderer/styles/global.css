@@ -1193,6 +1193,23 @@ button {
   gap: 8px;
 }
 
+.settings-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.settings-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.settings-checkbox input[type="checkbox"] {
+  accent-color: var(--accent);
+}
+
 .settings-hint kbd {
   background: var(--surface);
   border: 1px solid var(--border);
