@@ -22,6 +22,7 @@ Cross-platform, project-based terminal manager built with Electron. Replaces tmu
 - **Settings** — font, theme, scrollback, keybindings, log level, persisted to `settings.json`
 - **Logging** — date-based log files, configurable level (off/error/info/debug), `LOG_LEVEL` env override
 - **Auto-updater** — checks GitHub Releases, user confirms before downloading
+- **PM Agent** — AI assistant that observes terminal tabs and can interact with CLI agents (Claude Code, Copilot, etc.). Supports Away Mode for autonomous operation, Telegram bridge for remote monitoring, and per-project notes
 
 ## Tech Stack
 
@@ -68,6 +69,26 @@ Paste or drag any file (image, PDF, archive, log, …) into the terminal. Shelf 
 - Files exceeding **Max Upload Size (MB)** in Settings (default 50) are skipped and reported via a popup; the rest still go through.
 - A `.tmp/.gitignore` (`*`) is dropped on first upload so the directory stays out of git.
 - **Auto-cleanup**: a few seconds after a project's first tab opens, leftover uploads from previous Shelf sessions are deleted in the background. Files created in the current session are never touched (the cutoff is decoded from each file's own timestamp prefix). Use **Edit Project → Clear uploaded files** for a manual purge — the button is disabled with a hint when the remote is not currently connected.
+
+### PM Agent
+
+An AI assistant that observes all terminal tabs and helps manage CLI agents running in them.
+
+**Setup**: Settings → PM Agent tab → choose a provider (OpenAI-compatible) and enter API key + model name.
+
+**Features**:
+- **Read-only by default** — scans terminal output, infers tab state (running, error, waiting for permission, done)
+- **Away Mode** — enables `write_to_pty` so PM can send prompts, approve permissions, or interrupt stuck processes. Toggle via the PM panel header button or Telegram `/away`
+- **Safety** — dangerous commands (`rm -rf /`, `git push --force`, etc.) are blocked by redline rules and escalated to the user
+- **Notes** — per-project rolling summaries and a global note for cross-project context
+- **Telegram bridge** — monitor and control terminals remotely (see below)
+
+#### Telegram Bot Setup
+
+1. Open Telegram, search for **@BotFather**, send `/newbot` and follow the prompts to get a **Bot Token**
+2. Send any message to your new bot, then visit `https://api.telegram.org/bot<YOUR_TOKEN>/getUpdates` — find `"chat":{"id":123456}` in the response, that number is your **Chat ID**
+3. In Shelf: Settings → PM Agent → enter Bot Token and Chat ID
+4. PM responses will be forwarded to Telegram. You can reply to PM, toggle Away Mode (`/away`), and approve/deny escalations via inline buttons
 
 ### Background Notification
 
