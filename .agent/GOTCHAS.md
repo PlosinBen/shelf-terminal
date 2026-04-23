@@ -216,17 +216,15 @@
 
 ---
 
-## 21. project-store 有臨時的 audit log（v1.0.0 前移除）
+## 21. xterm.js 6.0 pre-minified bundle 不能被 esbuild 二次 minify
 
-**現象**: `~/Library/Application Support/shelf-terminal/project-audit.log` 會持續累積 LOAD / SAVE / SAVE_BACKUP 記錄，且 **不受 `logLevel` 控制**。
+**現象**: Production build 的 terminal 執行 vim、claude 等 TUI app 時卡住無回應。DevTools 顯示 `ReferenceError: i is not defined` at `requestMode`。
 
-**原因**: v0.5.0 之後出現 `projects.json` 被寫成 `[]` 的資料遺失事件。為了未來 debug 同類事件、又不想逼使用者把 `logLevel` 調到 `info`，在 `src/main/audit-log.ts` 開了一個繞過 logger 的 append-only 檔。觸發點在 `project-store.ts` 的 `loadProjects` / `saveProjects` / `maybeBackupBeforeEmptyWrite`。
+**原因**: `@xterm/xterm@6.0.0` 出廠就是 minified 的 ESM bundle。Vite 預設用 esbuild 再次 minify 時，破壞了 `requestMode()`（DECRPM handler）裡 closure 捕獲的變數 `i`。這個 crash 發生在 write buffer 的 `_innerWrite` 裡，導致後續所有 pty 資料處理中斷。見 [xtermjs/xterm.js#5800](https://github.com/xtermjs/xterm.js/issues/5800)。
 
-**v1.0.0 時要做**:
-1. 刪除 `src/main/audit-log.ts` 與所有 `appendAudit(...)` 呼叫
-2. 如果仍要保留 load/save 可觀測性，改用正常 `log.info('project-store', ...)`，尊重使用者 `logLevel` 設定
-3. `src/main/index.ts` 的 `LOGS_CLEAR` handler 移除 `clearAudit()` 呼叫
-4. 同步移除這條 gotcha
+**解法**: `vite.config.ts` 設 `build.minify: 'terser'`。terser 不會破壞已 minified 的 closure。
+
+**注意**: `npm run dev` 不 minify 所以不會觸發此問題，只有 production build 會。如果升級 xterm.js 到修復此問題的版本，可以改回 esbuild。
 
 ---
 

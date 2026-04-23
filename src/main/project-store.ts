@@ -2,7 +2,6 @@ import fs from 'fs';
 import path from 'path';
 import { app } from 'electron';
 import { log } from '@shared/logger';
-import { appendAudit } from './audit-log';
 import type { ProjectConfig } from '@shared/types';
 
 export type LoadError = 'parse' | 'permission' | 'read';
@@ -24,25 +23,20 @@ export function loadProjects(): LoadResult<ProjectConfig[]> {
   } catch (err: any) {
     if (err?.code === 'ENOENT') {
       log.info('project-store', `no projects.json at ${filePath}, starting empty`);
-      appendAudit('LOAD_MISSING', { path: filePath });
       return { ok: true, value: [] };
     }
     if (err?.code === 'EACCES' || err?.code === 'EPERM') {
       log.error('project-store', `permission denied reading ${filePath}: ${err?.message ?? err}`);
-      appendAudit('LOAD_ERROR', { path: filePath, code: 'permission', message: err?.message ?? String(err) });
       return { ok: false, error: 'permission', path: filePath, message: err?.message ?? String(err) };
     }
     log.error('project-store', `failed to read ${filePath}: ${err?.message ?? err}`);
-    appendAudit('LOAD_ERROR', { path: filePath, code: 'read', message: err?.message ?? String(err) });
     return { ok: false, error: 'read', path: filePath, message: err?.message ?? String(err) };
   }
   try {
     const parsed = JSON.parse(raw) as ProjectConfig[];
-    appendAudit('LOAD', { path: filePath, count: Array.isArray(parsed) ? parsed.length : -1 });
     return { ok: true, value: parsed };
   } catch (err: any) {
     log.error('project-store', `failed to parse ${filePath}: ${err?.message ?? err}`);
-    appendAudit('LOAD_ERROR', { path: filePath, code: 'parse', message: err?.message ?? String(err) });
     return { ok: false, error: 'parse', path: filePath, message: err?.message ?? String(err) };
   }
 }
@@ -76,10 +70,8 @@ function maybeBackupBeforeEmptyWrite(filePath: string, nextProjects: ProjectConf
       'project-store',
       `about to overwrite ${existing.length} project(s) with []; backed up to ${backupPath}`,
     );
-    appendAudit('SAVE_BACKUP', { backup: backupPath, overwritingCount: existing.length });
   } catch (err: any) {
     log.error('project-store', `failed to back up before empty write: ${err?.message ?? err}`);
-    appendAudit('SAVE_BACKUP_FAILED', { message: err?.message ?? String(err) });
   }
 }
 
@@ -91,5 +83,4 @@ export function saveProjects(projects: ProjectConfig[]): void {
   }
   maybeBackupBeforeEmptyWrite(filePath, projects);
   fs.writeFileSync(filePath, JSON.stringify(projects, null, 2), 'utf-8');
-  appendAudit('SAVE', { path: filePath, count: projects.length });
 }

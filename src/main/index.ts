@@ -4,7 +4,6 @@ import fs from 'fs';
 import { IPC } from '@shared/ipc-channels';
 import { spawnPty, writePty, resizePty, killPty, killAllPtys, setMuted } from './pty-manager';
 import { saveProjects } from './project-store';
-import { clearAudit } from './audit-log';
 import { saveSettings } from './settings-store';
 import { bootstrap } from './bootstrap';
 import { DEFAULT_SETTINGS } from '@shared/defaults';
@@ -316,7 +315,6 @@ ipcMain.handle(IPC.LOGS_CLEAR, () => {
   if (fs.existsSync(logBaseDir)) {
     fs.rmSync(logBaseDir, { recursive: true, force: true });
   }
-  clearAudit();
   log.info('app', 'logs cleared');
 });
 

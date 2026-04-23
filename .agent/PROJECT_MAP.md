@@ -16,8 +16,6 @@
 | 自動更新 state machine | `updater-state.ts` | 純 reducer（idle/available/downloading/downloaded），由 vitest 單元測試 |
 | App 啟動 / config 載入 | `bootstrap.ts` | 預先載入 projects/settings，遇錯顯示 blocking dialog |
 | userData 路徑隔離 | `user-data-path.ts` | `applyUserDataIsolation()`，靠 `app.isPackaged` + `--user-data-dir` 判斷，unpackaged 且無 switch 時加 `-dev` 後綴 |
-| Audit log（臨時，v1.0 前移除） | `audit-log.ts` | project-store load/save 的 append-only log，繞過 logLevel |
-
 ### Connector (src/main/connector/)
 
 | Intent | File | Description |
