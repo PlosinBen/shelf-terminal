@@ -39,7 +39,6 @@ interface ShelfApi {
   };
   docker: {
     listContainers: () => Promise<string[]>;
-    testPath: (dockerPath: string) => Promise<{ ok: boolean; version?: string; error?: string }>;
   };
   wsl: {
     listDistros: () => Promise<string[]>;

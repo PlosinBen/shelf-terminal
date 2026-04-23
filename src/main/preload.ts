@@ -65,8 +65,6 @@ contextBridge.exposeInMainWorld('shelfApi', {
   docker: {
     listContainers: () =>
       ipcRenderer.invoke(IPC.DOCKER_LIST_CONTAINERS),
-    testPath: (dockerPath: string) =>
-      ipcRenderer.invoke(IPC.DOCKER_TEST_PATH, dockerPath),
   },
   wsl: {
     listDistros: () =>

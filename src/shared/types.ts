@@ -102,7 +102,6 @@ export interface AppSettings {
   logLevel: LogLevel;
   maxUploadSizeMB: number;
   defaultLocalPath?: string;
-  dockerPath?: string;
   unicode11?: boolean;
   pmProvider?: PmProviderConfig;
   telegram?: TelegramConfig;

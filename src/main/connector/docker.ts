@@ -5,36 +5,12 @@ import type { FolderListResult } from '@shared/types';
 import { log } from '@shared/logger';
 import type { Connector, Shell, ExecResult } from './types';
 import { wrapPty } from './wrap-pty';
-import { shellEscape } from './shell-env';
+import { getShellEnv, shellEscape } from './shell-env';
 import {
   assertSafeCwd, buildPaths, parseUploadPrefix, buildRemoteUploadCmd,
   spawnPipeWrite, listRemoteShelfDir, removeRemoteFiles,
 } from './file-utils';
 
-/** Settable docker binary path. Updated when settings change. */
-let configuredDockerPath: string | undefined;
-
-export function setDockerPath(p: string | undefined): void {
-  configuredDockerPath = p || undefined;
-}
-
-function dockerBin(): string {
-  return configuredDockerPath || 'docker';
-}
-
-/** Test whether a docker binary at the given path is usable. */
-export function testDockerPath(p: string): Promise<{ ok: boolean; version?: string; error?: string }> {
-  const bin = p || 'docker';
-  return new Promise((resolve) => {
-    execFile(bin, ['version', '--format', '{{.Client.Version}}'], { timeout: 5000 }, (err, stdout) => {
-      if (err) {
-        resolve({ ok: false, error: err.message });
-      } else {
-        resolve({ ok: true, version: stdout.trim() });
-      }
-    });
-  });
-}
 
 export class DockerConnector implements Connector {
   constructor(private container: string) {}
@@ -44,7 +20,7 @@ export class DockerConnector implements Connector {
   }
 
   createShell(cwd: string): Shell {
-    const bin = dockerBin();
+    const bin = 'docker';
     const args = ['exec', '-it', this.container, 'sh', '-c', `cd ${shellEscape(cwd)} && exec \${SHELL:-sh}`];
     log.info('connector', `docker spawn: container=${this.container} cwd=${cwd} bin=${bin}`);
     const p = pty.spawn(bin, args, {
@@ -52,7 +28,7 @@ export class DockerConnector implements Connector {
       cols: 80,
       rows: 24,
       cwd: os.homedir(),
-      env: process.env as Record<string, string>,
+      env: getShellEnv(),
     });
     return wrapPty(p);
   }
@@ -60,7 +36,7 @@ export class DockerConnector implements Connector {
   exec(cwd: string, cmd: string): Promise<ExecResult> {
     const remoteCmd = `cd ${shellEscape(cwd)} && ${cmd}`;
     return new Promise((resolve, reject) => {
-      execFile(dockerBin(), this.dockerExecArgs(remoteCmd), { timeout: 15000 }, (error, stdout, stderr) => {
+      execFile('docker', this.dockerExecArgs(remoteCmd), { timeout: 15000 }, (error, stdout, stderr) => {
         if (error) {
           reject(new Error(stderr || error.message));
           return;
@@ -72,7 +48,7 @@ export class DockerConnector implements Connector {
 
   isConnected(): Promise<boolean> {
     return new Promise((resolve) => {
-      execFile(dockerBin(), ['inspect', '-f', '{{.State.Running}}', this.container], { timeout: 5000 }, (err, stdout) => {
+      execFile('docker', ['inspect', '-f', '{{.State.Running}}', this.container], { timeout: 5000 }, (err, stdout) => {
         resolve(!err && stdout.trim() === 'true');
       });
     });
@@ -85,7 +61,7 @@ export class DockerConnector implements Connector {
   listDir(dirPath: string): Promise<FolderListResult> {
     return new Promise((resolve) => {
       const cmd = `ls -1 -p ${shellEscape(dirPath)} 2>/dev/null | grep '/$' | sed 's|/$||'`;
-      execFile(dockerBin(), ['exec', this.container, 'sh', '-c', cmd], { timeout: 10000 }, (err, stdout, stderr) => {
+      execFile('docker', ['exec', this.container, 'sh', '-c', cmd], { timeout: 10000 }, (err, stdout, stderr) => {
         if (err) {
           resolve({ path: dirPath, entries: [], error: stderr || err.message });
           return;
@@ -105,7 +81,7 @@ export class DockerConnector implements Connector {
 
   homePath(): Promise<string> {
     return new Promise((resolve) => {
-      execFile(dockerBin(), ['exec', this.container, 'sh', '-c', 'echo $HOME'], { timeout: 5000 }, (err, stdout) => {
+      execFile('docker', ['exec', this.container, 'sh', '-c', 'echo $HOME'], { timeout: 5000 }, (err, stdout) => {
         resolve(err ? '/' : (stdout.trim() || '/'));
       });
     });
@@ -114,7 +90,7 @@ export class DockerConnector implements Connector {
   uploadFile(cwd: string, filename: string, buffer: Buffer): Promise<string> {
     assertSafeCwd(cwd);
     const { remoteDir, remotePath } = buildPaths(cwd, filename);
-    const bin = dockerBin();
+    const bin = 'docker';
     const cmd = buildRemoteUploadCmd(cwd, remoteDir, remotePath);
     return spawnPipeWrite(
       bin, ['exec', '-i', this.container, 'sh', '-c', cmd],
@@ -124,7 +100,7 @@ export class DockerConnector implements Connector {
 
   async cleanupSession(cwd: string, cutoffMs: number): Promise<number> {
     assertSafeCwd(cwd);
-    const bin = dockerBin();
+    const bin = 'docker';
     const entries = await listRemoteShelfDir(
       bin, (cmd) => this.dockerExecArgs(cmd), cwd, 'docker',
     );
@@ -139,7 +115,7 @@ export class DockerConnector implements Connector {
 
   async clearUploads(cwd: string): Promise<number> {
     assertSafeCwd(cwd);
-    const bin = dockerBin();
+    const bin = 'docker';
     const entries = await listRemoteShelfDir(
       bin, (cmd) => this.dockerExecArgs(cmd), cwd, 'docker',
     );
@@ -152,7 +128,7 @@ export class DockerConnector implements Connector {
 /** List running Docker containers. Standalone export for FolderPicker UI. */
 export function listDockerContainers(): Promise<string[]> {
   return new Promise((resolve) => {
-    execFile(dockerBin(), ['ps', '--format', '{{.Names}}'], { timeout: 5000 }, (err, stdout) => {
+    execFile('docker', ['ps', '--format', '{{.Names}}'], { timeout: 5000 }, (err, stdout) => {
       if (err) {
         log.error('connector', `docker listContainers: ${err.message}`);
         resolve([]);

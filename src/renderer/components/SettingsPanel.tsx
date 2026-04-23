@@ -27,8 +27,6 @@ export function SettingsPanel() {
   const [draft, setDraft] = useState<AppSettings>(settings);
   const [activeTab, setActiveTab] = useState<SettingsTab>('terminal');
   const [recordingAction, setRecordingAction] = useState<KeybindingAction | null>(null);
-  const [dockerTestResult, setDockerTestResult] = useState<{ ok: boolean; version?: string; error?: string } | null>(null);
-  const [dockerTesting, setDockerTesting] = useState(false);
   const [pathError, setPathError] = useState<string | null>(null);
   const [logsPath, setLogsPath] = useState<string>('');
 
@@ -36,8 +34,8 @@ export function SettingsPanel() {
   useEffect(() => {
     if (settingsVisible) {
       setDraft(settings);
+      setActiveTab('terminal');
       setRecordingAction(null);
-      setDockerTestResult(null);
       setPathError(null);
       window.shelfApi.app.logsPath().then(setLogsPath);
     }
@@ -241,40 +239,6 @@ export function SettingsPanel() {
                 </div>
                 <div className="settings-sub-hint">{logsPath}</div>
 
-                <div className="settings-divider" />
-                <div className="settings-section-title">Docker</div>
-                <div className="settings-group">
-                  <label className="settings-label">Docker Path</label>
-                  <div className="settings-docker-row">
-                    <input
-                      className="settings-input settings-input-wide"
-                      type="text"
-                      value={draft.dockerPath || ''}
-                      onChange={(e) => { updateDraft({ dockerPath: e.target.value || undefined }); setDockerTestResult(null); }}
-                      placeholder="docker (uses PATH)"
-                    />
-                    <button
-                      className="conn-btn conn-btn-cancel"
-                      disabled={dockerTesting}
-                      onClick={async () => {
-                        setDockerTesting(true);
-                        setDockerTestResult(null);
-                        const result = await window.shelfApi.docker.testPath(draft.dockerPath || 'docker');
-                        setDockerTestResult(result);
-                        setDockerTesting(false);
-                      }}
-                    >
-                      {dockerTesting ? 'Testing...' : 'Test'}
-                    </button>
-                  </div>
-                  {dockerTestResult && (
-                    <div className={`settings-docker-result ${dockerTestResult.ok ? 'ok' : 'fail'}`}>
-                      {dockerTestResult.ok
-                        ? `Docker ${dockerTestResult.version}`
-                        : dockerTestResult.error}
-                    </div>
-                  )}
-                </div>
               </>
             )}
 

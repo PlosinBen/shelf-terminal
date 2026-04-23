@@ -35,7 +35,6 @@ export const IPC = {
   SSH_SERVERS: 'ssh:servers',
   WSL_LIST_DISTROS: 'wsl:list-distros',
   DOCKER_LIST_CONTAINERS: 'docker:list-containers',
-  DOCKER_TEST_PATH: 'docker:test-path',
 
   // Git
   GIT_BRANCH_LIST: 'git:branch-list',

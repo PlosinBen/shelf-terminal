@@ -11,7 +11,7 @@ import { DEFAULT_SETTINGS } from '@shared/defaults';
 import { uploadFile, clearUploads } from './file-transfer';
 import { initAutoUpdater, stopAutoUpdater, manualCheckForUpdate, startUpdateDownload, confirmAndInstallUpdate } from './updater';
 import { removeHostKey } from './ssh-control';
-import { createConnector, getAvailableTypes, listDockerContainers, listWSLDistros, cleanupConnectors, setDockerPath, testDockerPath } from './connector';
+import { createConnector, getAvailableTypes, listDockerContainers, listWSLDistros, cleanupConnectors } from './connector';
 import { loadSSHServers, saveSSHServer } from './ssh-server-store';
 import { log, setLogLevel, setFileWriter } from '@shared/logger';
 import { applyUserDataIsolation } from './user-data-path';
@@ -129,10 +129,6 @@ ipcMain.handle(IPC.WSL_LIST_DISTROS, () => {
 
 ipcMain.handle(IPC.DOCKER_LIST_CONTAINERS, () => {
   return listDockerContainers();
-});
-
-ipcMain.handle(IPC.DOCKER_TEST_PATH, (_event, dockerPathValue: string) => {
-  return testDockerPath(dockerPathValue);
 });
 
 // ── Git ──
@@ -301,7 +297,6 @@ ipcMain.handle(IPC.SETTINGS_SAVE, (_event, settings: AppSettings) => {
   cachedSettings = settings;
   saveSettings(settings);
   setLogLevel(settings.logLevel);
-  setDockerPath(settings.dockerPath);
   // Restart Telegram if config changed
   if (settings.telegram?.botToken && settings.telegram?.chatId) {
     startTelegram(settings.telegram);
@@ -412,7 +407,6 @@ app.whenReady().then(() => {
   cachedSettings = settings;
 
   if (!envLogLevel) setLogLevel(settings.logLevel);
-  setDockerPath(settings.dockerPath);
 
   log.info('app', `starting, logLevel=${settings.logLevel}, userData=${app.getPath('userData')}`);
 

@@ -807,6 +807,7 @@ button {
   border-radius: 8px;
   width: 720px;
   height: 70vh;
+  max-height: 600px;
   display: flex;
   flex-direction: column;
   overflow: hidden;
