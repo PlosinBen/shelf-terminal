@@ -144,12 +144,12 @@
 
 ## 15. npm sudo 會污染 ~/.npm 導致後續 install EACCES
 
-**現象**: `npm install vitest` 報 `EACCES: permission denied` 寫 `~/.npm/_cacache`，但 `~/.nvm/...` 的 node_modules 是使用者擁有的。
+**現象**: `npm install vitest` 報 `EACCES: permission denied` 寫 `~/.npm/_cacache`，但專案本身的 node_modules 是使用者擁有的。
 
 **原因**: 過去用過 `sudo npm install -g <pkg>` → npm 在 `~/.npm/_cacache` / `~/.npm/_logs` 留下 root-owned 檔，之後非 sudo 的 npm 寫不進去。
 
 **解法**:
-1. 確認 root prefix：`npm root -g` 應該指向 nvm 路徑（使用者擁有），不要回 `/usr/local/lib/node_modules`。
+1. 確認 global prefix 是使用者可寫的路徑（`npm root -g` 不應指向 `/usr/local/lib/node_modules` 等系統目錄）。具體怎麼設定是使用者自己的環境問題（版本管理工具、手動設 prefix、或其他）。
 2. 把曾經 sudo 裝過的 global package 重新非 sudo 安裝：先 `sudo npm uninstall -g <pkg...>`、再 `sudo rm -rf ~/.npm/_cacache`、最後 `npm install -g <pkg...>`。
 3. AI CLI tool 的 session（Claude Code、Copilot、Gemini 等）放在 `~/.copilot/` / `~/.claude/` / `~/.gemini/` 等獨立目錄，npm uninstall 不會碰。
 

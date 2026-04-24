@@ -14,7 +14,7 @@ Cross-platform, project-based terminal manager built with Electron. Replaces tmu
 - **Tab management** — double-click to rename, drag to reorder, mod+1~9 to switch
 - **Tab badge** — unread indicator on background tabs with new output
 - **Project management** — drag to reorder, right-click context menu (Edit, Connect/Disconnect, Close)
-- **Init script** — per-project startup commands (e.g. `nvm use 22`, `conda activate`)
+- **Init script** — per-project startup commands (e.g. `conda activate`, `source .venv/bin/activate`)
 - **Default tabs** — per-project tab templates with individual commands, auto-opened on connect
 - **Custom keybindings** — all shortcuts configurable via Settings panel
 - **File paste / drag-drop** — drop or paste any file into the terminal; Shelf uploads it to `<projectCwd>/.tmp/shelf/` (works for local, SSH, WSL, Docker) and types the path
@@ -37,7 +37,7 @@ Cross-platform, project-based terminal manager built with Electron. Replaces tmu
 
 ## Note
 
-Shelf Terminal is a terminal wrapper — it does not install, configure, or authenticate any CLI tools. Any tools you want to use (nvm, conda, docker, claude, gh, etc.) must be set up independently. Shelf simply provides the terminal environment to run them in.
+Shelf Terminal is a terminal wrapper — it does not install, configure, or authenticate any CLI tools. Any tools you want to use (conda, docker, claude, gh, etc.) must be set up independently. Shelf simply provides the terminal environment to run them in.
 
 ## Usage
 
@@ -45,7 +45,7 @@ Shelf Terminal is a terminal wrapper — it does not install, configure, or auth
 
 Per-project commands that run automatically when the terminal connects. Set via right-click project → Edit.
 
-Example: `nvm use 22 && conda activate myenv`
+Example: `conda activate myenv && export API_KEY=...`
 
 Useful for environment setup that you'd otherwise type every time you open a terminal.
 
@@ -96,10 +96,9 @@ When a command runs for more than 5 seconds and finishes while Shelf is not focu
 
 ## Quick Start
 
-```bash
-# Requires Node.js 22+
-nvm use 22
+Requires **Node.js 22+**.
 
+```bash
 # Install dependencies (includes electron-rebuild for node-pty)
 npm install
 
