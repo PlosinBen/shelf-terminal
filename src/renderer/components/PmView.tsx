@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useReducer, useRef, useCallback, useMemo } from 'react';
 import { useStore, setAwayMode, setPmVisible } from '../store';
 import { marked } from 'marked';
 import type { PmMessage, PmStreamChunk, PmToolCall } from '@shared/types';
+import { pmStreamReducer, initialPmStreamState } from './pm-view-reducer';
 
 marked.setOptions({ breaks: true, gfm: true });
 
@@ -13,10 +14,8 @@ export function PmView() {
   const { settings, awayMode } = useStore();
   const [messages, setMessages] = useState<PmMessage[]>([]);
   const [input, setInput] = useState('');
-  const [streaming, setStreaming] = useState(false);
-  const [streamText, setStreamText] = useState('');
-  const [streamToolCalls, setStreamToolCalls] = useState<PmToolCall[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  const [streamState, dispatch] = useReducer(pmStreamReducer, initialPmStreamState);
+  const { streaming, streamText, streamToolCalls, error } = streamState;
   const [width, setWidth] = useState(DEFAULT_WIDTH);
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -41,42 +40,10 @@ export function PmView() {
 
   useEffect(() => {
     const off = window.shelfApi.pm.onStream((chunk: PmStreamChunk) => {
-      switch (chunk.type) {
-        case 'text':
-          setStreamText((prev) => prev + (chunk.text ?? ''));
-          break;
-        case 'tool_start':
-          if (chunk.toolCall) {
-            setStreamToolCalls((prev) => [...prev, chunk.toolCall!]);
-          }
-          break;
-        case 'tool_result':
-          if (chunk.toolCall) {
-            setStreamToolCalls((prev) =>
-              prev.map((tc) => (tc.id === chunk.toolCall!.id ? chunk.toolCall! : tc)),
-            );
-          }
-          break;
-        case 'done':
-          setStreaming(false);
-          setStreamText('');
-          setStreamToolCalls([]);
-          window.shelfApi.pm.history().then(setMessages);
-          break;
-        case 'error': {
-          const errMsg = chunk.error ?? 'Unknown error';
-          const isRetrying = errMsg.includes('Retrying in');
-          if (isRetrying) {
-            setError(errMsg);
-          } else {
-            setStreaming(false);
-            setStreamText('');
-            setStreamToolCalls([]);
-            setError(null);
-            window.shelfApi.pm.history().then(setMessages);
-          }
-          break;
-        }
+      dispatch({ type: 'chunk', chunk });
+      const isRetry = chunk.type === 'error' && (chunk.error ?? '').includes('Retrying in');
+      if (chunk.type === 'done' || (chunk.type === 'error' && !isRetry)) {
+        window.shelfApi.pm.history().then(setMessages);
       }
     });
     return off;
@@ -87,10 +54,7 @@ export function PmView() {
     if (!text || streaming) return;
     setInput('');
     setMessages((prev) => [...prev, { role: 'user', content: text, timestamp: Date.now() }]);
-    setStreaming(true);
-    setStreamText('');
-    setStreamToolCalls([]);
-    setError(null);
+    dispatch({ type: 'send_start' });
     await window.shelfApi.pm.send(text);
   }, [input, streaming]);
 
@@ -101,8 +65,7 @@ export function PmView() {
   const handleClear = useCallback(async () => {
     await window.shelfApi.pm.clear();
     setMessages([]);
-    setStreamText('');
-    setStreamToolCalls([]);
+    dispatch({ type: 'clear_display' });
   }, []);
 
   const handleKeyDown = useCallback(
@@ -186,7 +149,7 @@ export function PmView() {
           </div>
         )}
         {error && (
-          <div className="pm-error" onClick={() => setError(null)}>
+          <div className="pm-error" onClick={() => dispatch({ type: 'dismiss_error' })}>
             {error}
           </div>
         )}

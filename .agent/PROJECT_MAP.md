@@ -73,7 +73,8 @@
 | Settings 面板 | `components/SettingsPanel.tsx` | 左側 tab 分頁（Terminal / PM Agent / Shortcuts）；PM Agent tab 含 provider config + Telegram bridge |
 | Worktree 建立 | `components/WorktreeDialog.tsx` | 輸入新 branch name 建立 git worktree，產生 sub-project |
 | 刪除確認 | `components/RemoveConfirmDialog.tsx` | Remove project 確認 modal，worktree 可勾選是否清理 worktree files |
-| PM 聊天面板 | `components/PmView.tsx` | 右側可拖拉 panel（訊息列表 + markdown 渲染 + streaming + tool call 摺疊 + Away Mode toggle + error 顯示）|
+| PM 聊天面板 | `components/PmView.tsx` | 右側可拖拉 panel（訊息列表 + markdown 渲染 + streaming + tool call 摺疊 + Away Mode toggle + error 顯示）；chunk handling 走 `pm-view-reducer.ts` 的純 reducer |
+| PM stream reducer | `components/pm-view-reducer.ts` | 純 reducer（`send_start` / `clear_display` / `dismiss_error` / `chunk`），管 streaming/streamText/streamToolCalls/error 四個 UI state；vitest 測 13 case |
 | Project 編輯面板 | `components/ProjectEditPanel.tsx` | 改名、init script、default tabs、quick commands 編輯、Clear uploaded files |
 | 主題定義 | `themes.ts` | 5 個內建主題（terminal + UI 色彩） |
 | Window API 型別 | `env.d.ts` | `window.shelfApi` TypeScript 宣告 |

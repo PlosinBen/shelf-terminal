@@ -344,3 +344,19 @@
 - 需要程式化開外部連結時，走 IPC → main process → `shell.openExternal`（目前還沒有這個 channel，需要時再加）。
 
 **不要改**: 不要拿掉 `setWindowOpenHandler` 的 scheme 白名單（只放 http/https/mailto），避免 `javascript:` / `file:` 被誤丟 `shell.openExternal`。
+
+---
+
+## 33. PmView retry banner 要靠「任何非 error chunk 都清掉」才會消失
+
+**現象**: LLM 回 429 / 503 → 自動重試 → 重試成功，assistant 正常輸出，但使用者畫面上還掛著「LLM API error 429... Retrying in 5s... (1/3)」的紅色 banner，看起來像沒重試或最後還是失敗。
+
+**原因**: agent-loop 的 retry 會送 `sendChunk({ type: 'error', error: "...Retrying in..." })` 通知 renderer「我正在重試」。retry 成功後只送 `{ type: 'done' }`，並不會送一則「error 清掉」的 chunk。PmView 的 `done` handler 原本只 reset stream 相關 state，沒碰 `error`，導致 retry banner 殘留。
+
+**解法**:
+- chunk handling 抽成純 reducer `pmStreamReducer`（`pm-view-reducer.ts`），**任何非 error chunk** 到達時（`text` / `tool_start` / `tool_result` / `done`）都 `error = null`，把 retry banner 當作 stale state 處理。
+- 單元測試放在 `pm-view-reducer.test.ts`，含三個 regression case（done / text / tool_start 各一）。
+
+**不要改**:
+- 不要把清 banner 的邏輯只放在 `done`，text chunk 先到時會讓 banner 停留到整個 turn 結束才消失，中間 UX 怪。
+- 不要改成「收到 error chunk 就覆蓋 banner」去避免這問題 — final error（非 retry）已經是獨立分支，清 banner 的正確觸發點是「成功 stream 開始恢復」。
