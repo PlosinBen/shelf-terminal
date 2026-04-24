@@ -1198,6 +1198,15 @@ button {
   color: var(--text-muted);
 }
 
+.settings-sub-hint a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.settings-sub-hint a:hover {
+  text-decoration: underline;
+}
+
 .settings-checkbox {
   display: flex;
   align-items: center;

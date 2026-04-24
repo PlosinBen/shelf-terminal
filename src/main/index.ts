@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import path from 'path';
 import fs from 'fs';
 import { IPC } from '@shared/ipc-channels';
@@ -14,7 +14,7 @@ import { createConnector, getAvailableTypes, listDockerContainers, listWSLDistro
 import { loadSSHServers, saveSSHServer } from './ssh-server-store';
 import { log, setLogLevel, setFileWriter } from '@shared/logger';
 import { applyUserDataIsolation } from './user-data-path';
-import { handlePmSend, handleTabEvent, getHistory, clearHistory, stopGeneration, updateSyncedState, setWritePtyFn, isAwayMode, setAwayMode, initAwayMode, setStateChangeCallback, updateKnownTabs, startTelegram, stopTelegram, setMessageCallback, setCallbackQueryHandler } from './pm';
+import { handlePmSend, handleTabEvent, getHistory, clearHistory, stopGeneration, updateSyncedState, setWritePtyFn, isAwayMode, setAwayMode, initAwayMode, setStateChangeCallback, updateKnownTabs, startTelegram, stopTelegram, setMessageCallback, setCallbackQueryHandler, setStopCallback } from './pm';
 import type { Connection, ProjectConfig, AppSettings, FileUploadResult, FileClearResult, PtySpawnPayload, PtyInputPayload, PtyResizePayload, PtyKillPayload, GitBranchInfo, WorktreeAddResult, WorktreeRemoveResult } from '@shared/types';
 
 applyUserDataIsolation();
@@ -34,6 +34,13 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
     },
+  });
+
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('mailto:')) {
+      shell.openExternal(url);
+    }
+    return { action: 'deny' };
   });
 
   if (process.env.VITE_DEV_SERVER_URL) {
@@ -430,6 +437,9 @@ app.whenReady().then(() => {
       const verb = action === 'allow' ? 'approved' : 'denied';
       handlePmSend(`[from Telegram] User ${verb} the permission request for tab ${tabId}. Send the appropriate keystroke.`, cachedSettings.pmProvider, mainWindow);
     }
+  });
+  setStopCallback(() => {
+    stopGeneration();
   });
   if (cachedSettings.telegram?.botToken && cachedSettings.telegram?.chatId) {
     startTelegram(cachedSettings.telegram);

@@ -281,6 +281,15 @@ export function SettingsPanel() {
                     placeholder="gemini-2.5-flash"
                   />
                 </div>
+                <div className="settings-sub-hint">
+                  OpenAI-compatible chat/completions format. Base URL and model ID depend on your provider —
+                  see{' '}
+                  <a href="https://ai.google.dev/gemini-api/docs/openai" target="_blank" rel="noopener noreferrer">Gemini</a>
+                  {' · '}
+                  <a href="https://platform.openai.com/docs/api-reference" target="_blank" rel="noopener noreferrer">OpenAI</a>
+                  {' · '}
+                  <a href="https://docs.claude.com/en/api/openai-sdk" target="_blank" rel="noopener noreferrer">Anthropic</a>.
+                </div>
 
                 <div className="settings-divider" />
                 <div className="settings-section-title">Telegram Bridge</div>

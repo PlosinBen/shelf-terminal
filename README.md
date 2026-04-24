@@ -88,7 +88,15 @@ An AI assistant that observes all terminal tabs and helps manage CLI agents runn
 1. Open Telegram, search for **@BotFather**, send `/newbot` and follow the prompts to get a **Bot Token**
 2. Send any message to your new bot, then visit `https://api.telegram.org/bot<YOUR_TOKEN>/getUpdates` — find `"chat":{"id":123456}` in the response, that number is your **Chat ID**
 3. In Shelf: Settings → PM Agent → enter Bot Token and Chat ID
-4. PM responses will be forwarded to Telegram. You can reply to PM, toggle Away Mode (`/away`), and approve/deny escalations via inline buttons
+4. PM responses will be forwarded to Telegram. You can reply to PM with plain text, approve/deny escalations via inline buttons, or use slash commands:
+   - `/help` — list commands
+   - `/away` — toggle Away Mode
+   - `/status` / `/tabs` — show project / tab states
+   - `/stop` — cancel current PM generation
+
+Shelf registers these commands with Telegram automatically, so typing `/` in chat shows autocomplete.
+
+**Multi-device note**: if you run Shelf on more than one machine (home + work), create a separate bot for each. Telegram's long-polling API only allows one active poller per bot token, so sharing a token between machines causes messages to be routed randomly.
 
 ### Background Notification
 

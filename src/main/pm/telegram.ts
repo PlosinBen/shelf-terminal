@@ -1,11 +1,20 @@
 import { net } from 'electron';
 import { log } from '@shared/logger';
-import type { TelegramConfig } from '@shared/types';
+import type { TabInferredState, TelegramConfig } from '@shared/types';
 import { isAwayMode, setAwayMode as setAwayModeState } from './away-mode';
+import { snapshotTabs } from './tab-watcher';
 
 const API = 'https://api.telegram.org/bot';
 const POLL_TIMEOUT = 30; // seconds (Telegram long poll)
 const MAX_MESSAGE_LENGTH = 4096;
+
+const COMMANDS: { command: string; description: string }[] = [
+  { command: 'help', description: 'List available commands' },
+  { command: 'away', description: 'Toggle Away Mode' },
+  { command: 'status', description: 'Show project / tab states' },
+  { command: 'tabs', description: 'Alias for /status' },
+  { command: 'stop', description: 'Cancel current PM generation' },
+];
 
 let config: TelegramConfig | null = null;
 let polling = false;
@@ -14,8 +23,10 @@ let offset = 0;
 
 type MessageCallback = (text: string, chatId: string) => void;
 type CallbackQueryHandler = (action: string, payload: string) => void;
+type StopCallback = () => void;
 let onMessage: MessageCallback | null = null;
 let onCallbackQuery: CallbackQueryHandler | null = null;
+let onStop: StopCallback | null = null;
 
 export function setMessageCallback(cb: MessageCallback): void {
   onMessage = cb;
@@ -25,13 +36,23 @@ export function setCallbackQueryHandler(cb: CallbackQueryHandler): void {
   onCallbackQuery = cb;
 }
 
+export function setStopCallback(cb: StopCallback): void {
+  onStop = cb;
+}
+
 export function startTelegram(cfg: TelegramConfig): void {
   if (polling) stopTelegram();
   config = cfg;
   if (!config.botToken || !config.chatId) return;
   polling = true;
+  registerCommands().catch((e) => log.error('telegram', `setMyCommands failed: ${e.message}`));
   pollLoop();
   log.info('telegram', 'started polling');
+}
+
+async function registerCommands(): Promise<void> {
+  await apiCall('setMyCommands', { commands: COMMANDS });
+  log.debug('telegram', `registered ${COMMANDS.length} commands`);
 }
 
 export function stopTelegram(): void {
@@ -143,9 +164,21 @@ async function pollLoop(): Promise<void> {
               log.debug('telegram', `ignored message from chat ${chatId}`);
               continue;
             }
-            // Handle /away command
-            if (msg.text === '/away') {
+            const cmd = msg.text.split(/\s+/)[0];
+            if (cmd === '/away') {
               sendAwayModePrompt().catch((e) => log.error('telegram', `away prompt failed: ${e.message}`));
+              continue;
+            }
+            if (cmd === '/help') {
+              sendHelp().catch((e) => log.error('telegram', `help failed: ${e.message}`));
+              continue;
+            }
+            if (cmd === '/status' || cmd === '/tabs') {
+              sendStatus().catch((e) => log.error('telegram', `status failed: ${e.message}`));
+              continue;
+            }
+            if (cmd === '/stop') {
+              handleStop().catch((e) => log.error('telegram', `stop failed: ${e.message}`));
               continue;
             }
             if (onMessage) onMessage(msg.text, chatId);
@@ -229,6 +262,68 @@ async function apiCall(method: string, params: Record<string, any>, signal?: Abo
   }
   const json = await resp.json();
   return json.result;
+}
+
+async function sendHelp(): Promise<void> {
+  const lines = ['*Available commands*', ''];
+  for (const c of COMMANDS) {
+    lines.push(`/${c.command} — ${c.description}`);
+  }
+  await sendMessage(lines.join('\n'));
+}
+
+async function sendStatus(): Promise<void> {
+  const snapshot = snapshotTabs();
+  if (snapshot.length === 0) {
+    await sendMessage('_No tabs are open._');
+    return;
+  }
+  const byProject = new Map<string, typeof snapshot>();
+  for (const s of snapshot) {
+    const list = byProject.get(s.projectName) ?? [];
+    list.push(s);
+    byProject.set(s.projectName, list);
+  }
+  const lines: string[] = ['*Status*', ''];
+  for (const [proj, tabs] of byProject) {
+    lines.push(`*${proj}*`);
+    for (const t of tabs) {
+      lines.push(`  ${stateIcon(t.state)} ${t.tabName} — ${stateLabel(t.state)}`);
+    }
+    lines.push('');
+  }
+  await sendMessage(lines.join('\n').trim());
+}
+
+async function handleStop(): Promise<void> {
+  if (!onStop) {
+    await sendMessage('_Stop handler not wired up._');
+    return;
+  }
+  onStop();
+  await sendMessage('🛑 Cancelled current PM generation.');
+}
+
+function stateIcon(s: TabInferredState): string {
+  switch (s) {
+    case 'idle_shell': return '○';
+    case 'cli_running': return '●';
+    case 'cli_waiting_input': return '⏳';
+    case 'cli_waiting_permission': return '⚠️';
+    case 'cli_error': return '❌';
+    case 'cli_done': return '✅';
+  }
+}
+
+function stateLabel(s: TabInferredState): string {
+  switch (s) {
+    case 'idle_shell': return 'idle';
+    case 'cli_running': return 'running';
+    case 'cli_waiting_input': return 'waiting input';
+    case 'cli_waiting_permission': return 'waiting permission';
+    case 'cli_error': return 'error';
+    case 'cli_done': return 'done';
+  }
 }
 
 function splitMessage(text: string): string[] {

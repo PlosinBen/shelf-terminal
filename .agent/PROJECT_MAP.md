@@ -4,7 +4,7 @@
 
 | Intent | File | Description |
 |--------|------|-------------|
-| App lifecycle, IPC registration | `index.ts` | BrowserWindow 建立、所有 IPC handler 註冊、app quit cleanup |
+| App lifecycle, IPC registration | `index.ts` | BrowserWindow 建立、外部連結 handler（`setWindowOpenHandler` → `shell.openExternal`）、所有 IPC handler 註冊、app quit cleanup |
 | PTY spawn/kill/resize | `pty-manager.ts` | 透過 connector.createShell() spawn、idle notification、首次 spawn per project 觸發背景上傳清理 |
 | Preload bridge | `preload.ts` | contextBridge 暴露 `window.shelfApi`，RPC bridge 到 main process |
 | Project 持久化 | `project-store.ts` | 讀寫 `projects.json`（userData 路徑） |
@@ -46,8 +46,8 @@
 | 對話持久化 | `history-store.ts` | `<userData>/pm-history.json` 讀寫、app 啟動載入、每 turn 存檔 |
 | Away Mode 狀態 | `away-mode.ts` | 全域 boolean + 同步到 renderer |
 | 硬紅線檢查 | `redline.ts` | scrollback pattern match（rm -rf、git push --force、DROP TABLE 等） |
-| Tab 狀態監控 | `tab-watcher.ts` | scrollback 狀態轉換偵測（cli_running → cli_waiting_permission 等），觸發 PM 自動事件 |
-| Telegram bridge | `telegram.ts` | Bot API long polling、sendMessage、inline button（Allow/Deny、Away toggle）、callback query 處理 |
+| Tab 狀態監控 | `tab-watcher.ts` | scrollback 狀態轉換偵測（cli_running → cli_waiting_permission 等）觸發 PM 自動事件；`snapshotTabs()` 給 `/status` 用 |
+| Telegram bridge | `telegram.ts` | Bot API long polling、sendMessage、inline button（Allow/Deny、Away toggle）、slash commands（`/help` `/away` `/status` `/tabs` `/stop`）+ `setMyCommands` 自動註冊 |
 | 單元測試 | `scrollback-buffer.test.ts` | Ring buffer + ANSI strip 測試 |
 | 單元測試 | `tools.test.ts` | inferTabState heuristic 測試 |
 | 單元測試 | `redline.test.ts` | 硬紅線 pattern match 測試 |

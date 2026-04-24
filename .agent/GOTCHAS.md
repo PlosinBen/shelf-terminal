@@ -329,3 +329,18 @@
 **原因**: SettingsPanel 用一個 `draft` state 管所有 tab 的欄位，切 tab 只是 conditional render 不同區塊。Cancel 會 reset 整個 draft。
 
 **注意**: 這是正確行為。不要把 draft 拆成 per-tab state。
+
+---
+
+## 32. 外部連結必須 `target="_blank"`，否則 Electron window 會被帶走
+
+**現象**: 在 renderer 放 `<a href="https://...">` 沒加 `target="_blank"`，點下去整個 app window 跳到那個網址，terminal state 全失。
+
+**原因**: Electron 預設沒有區分內部/外部連結。`createWindow()` 裡用 `setWindowOpenHandler` 攔 `target="_blank"`/`window.open()` 呼叫 `shell.openExternal` 丟給系統瀏覽器；但 in-window navigation（plain link click）不會經過 handler。
+
+**規則**:
+- renderer 所有 `<a href="http(s)://...">` 一律加 `target="_blank" rel="noopener noreferrer"`。
+- 不要在 renderer 用 `window.location = url` 跳外部網址。
+- 需要程式化開外部連結時，走 IPC → main process → `shell.openExternal`（目前還沒有這個 channel，需要時再加）。
+
+**不要改**: 不要拿掉 `setWindowOpenHandler` 的 scheme 白名單（只放 http/https/mailto），避免 `javascript:` / `file:` 被誤丟 `shell.openExternal`。

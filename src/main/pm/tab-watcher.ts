@@ -73,3 +73,22 @@ export function removeTab(tabId: string): void {
 export function clearAll(): void {
   tabStates.clear();
 }
+
+export interface TabSnapshot {
+  tabId: string;
+  tabName: string;
+  projectName: string;
+  state: TabInferredState;
+}
+
+export function snapshotTabs(): TabSnapshot[] {
+  return knownTabs.map((meta) => {
+    const text = scrollback.has(meta.tabId) ? scrollback.read(meta.tabId, 20) : '';
+    return {
+      tabId: meta.tabId,
+      tabName: meta.tabName,
+      projectName: meta.projectName,
+      state: inferTabState(text),
+    };
+  });
+}
