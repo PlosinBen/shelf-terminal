@@ -64,6 +64,22 @@ Rules:
 - No pleasantries, no filler, no restating what the user just said.
 - When uncertain, ask one focused question rather than guessing.
 
+# State Terminology (Critical)
+
+Tab states (cli_running, cli_done, idle_shell, etc.) are heuristic guesses from scrollback — NOT authoritative facts.
+
+- cli_done means the CLI agent is idle / waiting for input. It does NOT mean the user's task is complete.
+- When describing tab state, use the literal state name or "agent is idle". Never use "completed", "finished", or "done" for the work itself — those imply a judgment you cannot make.
+- "Task done" is the user's definition. If unsure, ask.
+
+# Notification Requests
+
+When the user asks to be notified when something finishes:
+1. Report the current state using the terminology above.
+2. If a tab is already cli_done, do NOT assume this is what the user was waiting for. Ask: "this tab just went idle — is this the checkpoint you wanted, or is more work expected?"
+3. State explicitly: "I will message you on the next cli_running → cli_done transition for that tab." (This only fires when Away Mode is ON. If OFF, say so and ask whether to enable it.)
+4. The current turn is NOT the notification — you cannot defer a reply. You only react to future state transitions or user messages.
+
 # Boundaries
 
 - You do NOT manage Shelf itself — no settings, no creating/removing projects, no keybindings.
@@ -150,6 +166,9 @@ export async function handlePmSend(
   config: PmProviderConfig,
   win: BrowserWindow,
 ): Promise<void> {
+  const turnStart = Date.now();
+  log.info('pm', `user_message: ${previewText(userMessage, 120)}`);
+
   const userMsg: PmMessage = { role: 'user', content: userMessage, timestamp: Date.now() };
   messages.push(userMsg);
   history.push({ role: 'user', content: userMessage });
@@ -194,6 +213,7 @@ export async function handlePmSend(
     }
   } finally {
     abortController = null;
+    log.info('pm', `turn_complete: elapsed=${Date.now() - turnStart}ms`);
   }
 }
 
@@ -240,6 +260,7 @@ async function runLoop(
 
     if (toolCalls.size === 0) {
       // No tool calls — final response
+      log.info('pm', `assistant_reply: len=${assistantText.length} ${previewText(assistantText, 120)}`);
       history.push({ role: 'assistant', content: assistantText });
       messages.push({ role: 'assistant', content: assistantText, timestamp: Date.now() });
       persist();
@@ -277,12 +298,16 @@ async function runLoop(
         args = {};
       }
 
+      log.info('pm', `tool_call: ${tc.function.name}(${summarizeArgs(args)})`);
+
       sendChunk(win, {
         type: 'tool_start',
         toolCall: { id: tc.id, name: tc.function.name, args },
       });
 
       const result = executeTool(tc.function.name, args);
+
+      log.info('pm', `tool_result: ${tc.function.name} → ${previewText(result, 120)}`);
 
       history.push({
         role: 'tool',
@@ -318,4 +343,20 @@ function sendChunk(win: BrowserWindow, chunk: PmStreamChunk): void {
   if (!win.isDestroyed()) {
     win.webContents.send(IPC.PM_STREAM, chunk);
   }
+}
+
+function previewText(text: string, max: number): string {
+  const flat = text.replace(/\s+/g, ' ').trim();
+  const truncated = flat.length > max ? flat.slice(0, max) + '…' : flat;
+  return `"${truncated}"`;
+}
+
+function summarizeArgs(args: Record<string, unknown>): string {
+  const entries = Object.entries(args).slice(0, 3);
+  return entries
+    .map(([k, v]) => {
+      const s = typeof v === 'string' ? v : JSON.stringify(v);
+      return `${k}=${s.length > 40 ? s.slice(0, 40) + '…' : s}`;
+    })
+    .join(' ');
 }
