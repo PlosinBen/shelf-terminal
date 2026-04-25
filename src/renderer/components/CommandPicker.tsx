@@ -21,7 +21,11 @@ export function CommandPicker() {
     if (commandPickerVisible) {
       setFilter('');
       setSelectedIndex(0);
-      requestAnimationFrame(() => inputRef.current?.focus());
+      // useEffect runs after DOM commit, so the input is already mounted.
+      // No rAF needed — and rAF created a race where a fast Escape press
+      // (e2e test or impatient user) reached the body before focus was set,
+      // leaving the picker unable to receive its own onKeyDown.
+      inputRef.current?.focus();
     }
   }, [commandPickerVisible]);
 
