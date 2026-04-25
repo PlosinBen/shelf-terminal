@@ -108,6 +108,15 @@ export function Sidebar() {
 
       <div className="sidebar-footer">
         <span className="sidebar-version">v{version}</span>
+        {updateStatus.state === 'idle' && (
+          <button
+            className="sidebar-update-btn"
+            title="Check for updates"
+            onClick={() => window.shelfApi.updater.check()}
+          >
+            &#x21BB;
+          </button>
+        )}
         {updateStatus.state === 'available' && (
           <button
             className="sidebar-update-btn"

@@ -4,7 +4,10 @@
 
 | Intent | File | Description |
 |--------|------|-------------|
-| App lifecycle, IPC registration | `index.ts` | BrowserWindow 建立、外部連結 handler（`setWindowOpenHandler` → `shell.openExternal`）、所有 IPC handler 註冊、app quit cleanup |
+| App lifecycle, IPC registration | `index.ts` | BrowserWindow 建立、外部連結 handler（`setWindowOpenHandler` → `shell.openExternal`）、Cmd/Ctrl+R / F5 reload 攔截 + 確認 dialog、所有 IPC handler 註冊、app quit cleanup |
+| 自訂 application menu (wiring) | `app-menu.ts` | `buildAppMenu({ onCheckForUpdates })` 串 electron `Menu.buildFromTemplate` + `shell.openExternal` / `openPath`，呼叫 `app-menu-template` 拿純資料 |
+| Application menu template | `app-menu-template.ts` | 純函式 `buildAppMenuTemplate(actions, platform, appName)` 回傳 `MenuItemConstructorOptions[]`；vitest 測 25 case，含 NO `reload` / `forceReload` regression guard |
+| Reload key predicate | `reload-guard.ts` | `isReloadKeyEvent(input)` 判斷 webContents `before-input-event` 是不是 Cmd/Ctrl+R / F5；vitest 測 11 case 涵蓋平台差異 |
 | PTY spawn/kill/resize | `pty-manager.ts` | 透過 connector.createShell() spawn、idle notification、首次 spawn per project 觸發背景上傳清理 |
 | Preload bridge | `preload.ts` | contextBridge 暴露 `window.shelfApi`，RPC bridge 到 main process |
 | Project 持久化 | `project-store.ts` | 讀寫 `projects.json`（userData 路徑） |

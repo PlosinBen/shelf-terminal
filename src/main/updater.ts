@@ -1,5 +1,5 @@
 import { autoUpdater, type ProgressInfo } from 'electron-updater';
-import { BrowserWindow, dialog } from 'electron';
+import { app, BrowserWindow, dialog } from 'electron';
 import { IPC } from '@shared/ipc-channels';
 import { log } from '@shared/logger';
 import type { UpdateStatus } from '@shared/types';
@@ -11,6 +11,9 @@ let updateCheckTimer: ReturnType<typeof setTimeout> | null = null;
 let lastCheckTime = 0;
 let win: BrowserWindow | null = null;
 let currentStatus: UpdateStatus = { state: 'idle' };
+// When set, the next updater event triggers a user-facing dialog (so manual
+// "Check for Updates" clicks get feedback even if there's no new version).
+let manualCheckPending = false;
 
 function dispatch(event: UpdaterEvent) {
   const next = reduceUpdaterStatus(currentStatus, event);
@@ -34,10 +37,21 @@ export function initAutoUpdater(mainWindow: BrowserWindow) {
   autoUpdater.on('update-available', (info) => {
     log.info('updater', `update available: v${info.version}`);
     dispatch({ type: 'available', version: info.version });
+    // No manual-check dialog here — the sidebar update button appearing is
+    // already enough feedback, and a dialog would force a 2-step download.
+    manualCheckPending = false;
   });
 
   autoUpdater.on('update-not-available', () => {
     dispatch({ type: 'not-available' });
+    if (manualCheckPending && win && !win.isDestroyed()) {
+      dialog.showMessageBox(win, {
+        type: 'info',
+        title: 'No updates',
+        message: `You're on the latest version (v${app.getVersion()}).`,
+      });
+    }
+    manualCheckPending = false;
   });
 
   autoUpdater.on('download-progress', (progress: ProgressInfo) => {
@@ -57,6 +71,15 @@ export function initAutoUpdater(mainWindow: BrowserWindow) {
   autoUpdater.on('error', (err) => {
     log.error('updater', `error: ${err.message}`);
     dispatch({ type: 'error' });
+    if (manualCheckPending && win && !win.isDestroyed()) {
+      dialog.showMessageBox(win, {
+        type: 'error',
+        title: 'Update check failed',
+        message: 'Could not check for updates.',
+        detail: err.message,
+      });
+    }
+    manualCheckPending = false;
   });
 
   // Check on startup after short delay
@@ -71,6 +94,7 @@ export function initAutoUpdater(mainWindow: BrowserWindow) {
 }
 
 export function manualCheckForUpdate() {
+  manualCheckPending = true;
   checkForUpdates();
 }
 

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from 'electron';
 import path from 'path';
 import fs from 'fs';
 import { IPC } from '@shared/ipc-channels';
@@ -9,6 +9,8 @@ import { bootstrap } from './bootstrap';
 import { DEFAULT_SETTINGS } from '@shared/defaults';
 import { uploadFile, clearUploads } from './file-transfer';
 import { initAutoUpdater, stopAutoUpdater, manualCheckForUpdate, startUpdateDownload, confirmAndInstallUpdate } from './updater';
+import { buildAppMenu } from './app-menu';
+import { isReloadKeyEvent } from './reload-guard';
 import { removeHostKey } from './ssh-control';
 import { createConnector, getAvailableTypes, listDockerContainers, listWSLDistros, cleanupConnectors } from './connector';
 import { loadSSHServers, saveSSHServer } from './ssh-server-store';
@@ -41,6 +43,31 @@ function createWindow() {
       shell.openExternal(url);
     }
     return { action: 'deny' };
+  });
+
+  // Intercept Cmd/Ctrl+R, Shift+Cmd/Ctrl+R, and F5 — a stray reload would clear
+  // xterm scrollback and force the renderer to reconnect. Confirm with the user
+  // first regardless of which platform-specific key they hit.
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    if (!isReloadKeyEvent(input)) return;
+    event.preventDefault();
+    if (!mainWindow) return;
+    dialog
+      .showMessageBox(mainWindow, {
+        type: 'question',
+        title: 'Reload Shelf?',
+        message: 'Reloading the window clears terminal scrollback.',
+        detail: 'Active pty processes keep running, but visible output history will be lost. Continue?',
+        buttons: ['Cancel', 'Reload'],
+        defaultId: 0,
+        cancelId: 0,
+        noLink: true,
+      })
+      .then((result) => {
+        if (result.response === 1 && mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.reload();
+        }
+      });
   });
 
   if (process.env.VITE_DEV_SERVER_URL) {
@@ -394,6 +421,8 @@ ipcMain.handle(IPC.PM_AWAY_MODE_GET, () => {
 // ── App lifecycle ──
 
 app.whenReady().then(() => {
+  Menu.setApplicationMenu(buildAppMenu({ onCheckForUpdates: manualCheckForUpdate }));
+
   const logBaseDir = path.join(app.getPath('userData'), 'logs');
   setFileWriter((line) => {
     const now = new Date();
