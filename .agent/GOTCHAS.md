@@ -360,3 +360,18 @@
 **不要改**:
 - 不要把清 banner 的邏輯只放在 `done`，text chunk 先到時會讓 banner 停留到整個 turn 結束才消失，中間 UX 怪。
 - 不要改成「收到 error chunk 就覆蓋 banner」去避免這問題 — final error（非 retry）已經是獨立分支，清 banner 的正確觸發點是「成功 stream 開始恢復」。
+
+---
+
+## 34. PM sliding window 必須回退到 user boundary，不能裸切 tool-call 序列
+
+**現象**: PM 對話累積到 40+ turn 後突然回 `LLM API error 400: Please ensure that function call turn comes immediately after a user turn or after a function response turn.` (Gemini)。OpenAI 一般不會抱怨，但 Gemini 嚴格要求結構乾淨。
+
+**原因**: agent-loop 原本用 `history.slice(-MAX_HISTORY_TURNS)` 機械式取最後 N 筆。如果切點剛好落在 `assistant content=null tool_calls=[...]` (function_call) 或 `tool` (function_response)，head 就是裸的 tool 序列開頭，違反 Gemini 規則 — 它要求 function_call 必須緊接在 user 或 tool 之後。
+
+**解法**: `trimHistoryForLLM(history, maxTurns)` (`src/main/pm/history-window.ts`) 切完之後往前回退到最近的 `user` 訊息，保證 head 永遠是 user turn。代價是訊息會略多於 maxTurns，但結構合法。
+
+**不要改**:
+- 不要把回退邏輯改成「往前找直到下一個 user」(forward search) — 會丟掉切點到下一個 user 之間的 context，最近的 tool 序列直接消失。
+- 不要在切完後手動補 placeholder user turn — Gemini 雖然會接受結構，但 LLM 看到憑空冒出來的 user 會困惑。
+- regression test 在 `history-window.test.ts`，新增 sliding window 邊界 case 時要補測。

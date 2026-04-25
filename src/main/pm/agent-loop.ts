@@ -7,6 +7,7 @@ import { getActiveToolSchemas, executeTool } from './tools';
 import { isAwayMode } from './away-mode';
 import { sendPmResponse, isRunning as isTelegramRunning } from './telegram';
 import { loadHistory, saveHistory, clearPersistedHistory } from './history-store';
+import { trimHistoryForLLM } from './history-window';
 
 const SYSTEM_PROMPT_BASE = `You are PM (Project Manager) for Shelf Terminal — a multi-project terminal management app.
 You work as a "manager" collaborating with the user. You manage work across multiple projects by observing terminal tabs running CLI agents (Claude Code, Copilot CLI, Gemini CLI, etc.) and coordinating their progress.
@@ -225,10 +226,10 @@ async function runLoop(
   const MAX_TOOL_ROUNDS = 10;
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-    // Sliding window: keep last N turns, always include system prompt
-    const trimmed = history.length > MAX_HISTORY_TURNS
-      ? history.slice(-MAX_HISTORY_TURNS)
-      : history;
+    // Sliding window: keep last N turns, always include system prompt.
+    // trimHistoryForLLM walks back to a user boundary so we never start
+    // mid-tool-sequence (Gemini rejects bare function_call heads with 400).
+    const trimmed = trimHistoryForLLM(history, MAX_HISTORY_TURNS);
     const chatMessages: ChatMessage[] = [
       { role: 'system', content: getSystemPrompt() },
       ...trimmed,

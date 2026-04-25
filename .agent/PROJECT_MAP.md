@@ -38,7 +38,8 @@
 | Intent | File | Description |
 |--------|------|-------------|
 | Barrel export | `index.ts` | 統一匯出 PM 模組所有公開 API |
-| LLM 對話循環 | `agent-loop.ts` | 結構化 system prompt（角色/職責/工作流程/邊界 + 動態 Away Mode）、tool use loop、streaming、sliding window（40 turns）、auto-retry（exponential backoff）、tab event 自動注入 |
+| LLM 對話循環 | `agent-loop.ts` | 結構化 system prompt（角色/職責/工作流程/邊界 + 動態 Away Mode）、tool use loop、streaming、sliding window（透過 `trimHistoryForLLM`）、auto-retry（exponential backoff）、tab event 自動注入 |
+| Sliding window helper | `history-window.ts` | `trimHistoryForLLM(history, maxTurns)` 切完後回退到 user boundary，避免裸切 function_call 觸發 Gemini 400 |
 | LLM streaming client | `llm-client.ts` | OpenAI-compatible SSE streaming（用 Electron `net.fetch`），支援 tool_calls 解析 |
 | Tool 定義 + 執行 | `tools.ts` | 10 tool schemas（L0 觀察 + L0.5 note + global note + write_to_pty）、`executeTool` dispatcher、`inferTabState` heuristic、Away Mode 過濾 |
 | Scrollback ring buffer | `scrollback-buffer.ts` | Per-tab 100KB ring buffer、ANSI strip、lastNLines 讀取 |
