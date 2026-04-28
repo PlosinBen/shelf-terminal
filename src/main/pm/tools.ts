@@ -312,6 +312,12 @@ export function inferTabState(text: string): TabInferredState {
     if (DONE_RE.test(line)) return 'cli_done';
   }
 
+  // TUI-based CLIs (Claude Code, etc.) render ❯ as input prompt; status
+  // bar text below it may push ❯ off the very last line, so scan lastFew.
+  for (const line of lastFew) {
+    if (/❯\s*$/.test(line)) return 'idle_shell';
+  }
+
   // Check waiting for input (ends with ? or > but not a shell prompt)
   if (/[?:>]\s*$/.test(lastLine) && !SHELL_PROMPT_RE.test(lastLine)) {
     return 'cli_waiting_input';

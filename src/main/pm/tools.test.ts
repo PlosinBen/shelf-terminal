@@ -42,4 +42,27 @@ describe('inferTabState', () => {
   it('permission takes priority over error', () => {
     expect(inferTabState('Error occurred\nAllow retry? (y/n)')).toBe('cli_waiting_permission');
   });
+
+  it('returns idle_shell for CLI agent idle prompt (❯)', () => {
+    // Claude Code uses ❯ as its input prompt character
+    expect(inferTabState('some response text\n❯ ')).toBe('idle_shell');
+    expect(inferTabState('❯')).toBe('idle_shell');
+  });
+
+  it('returns idle_shell when ❯ is not the last line (TUI status bar below)', () => {
+    // TUI-based CLIs render status bar below the prompt; after ANSI strip
+    // the status bar text ends up as the last non-empty line
+    const scrollback = [
+      '────────────────────────────',
+      '❯ ',
+      '────────────────────────────',
+      '  ⏵⏵ bypass permissions on (shift+tab to cycle)',
+    ].join('\n');
+    expect(inferTabState(scrollback)).toBe('idle_shell');
+  });
+
+  it('cli_done takes priority over ❯ prompt', () => {
+    const scrollback = 'Successfully completed\n❯ ';
+    expect(inferTabState(scrollback)).toBe('cli_done');
+  });
 });
