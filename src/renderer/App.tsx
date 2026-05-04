@@ -72,6 +72,13 @@ export function App() {
       addTab(projectIndex);
     });
 
+    const offNewAgentTab = on(Events.NEW_AGENT_TAB, (projectIndex: number, provider?: import('@shared/types').AgentProvider) => {
+      const proj = projects[projectIndex];
+      if (!proj) return;
+      const resolvedProvider = provider ?? proj.config.defaultAgentProvider ?? 'claude';
+      addTab(projectIndex, undefined, undefined, undefined, 'agent', resolvedProvider);
+    });
+
     const offConnectProject = on(Events.CONNECT_PROJECT, async (projectIndex: number) => {
       const proj = projects[projectIndex];
       if (!proj || proj.tabs.length > 0) return;
@@ -172,7 +179,7 @@ export function App() {
       }
     });
 
-    return () => { offCloseTab(); offRemoveProject(); offNewTab(); offConnectProject(); offDisconnectProject(); offAddProject(); offToggleSplit(); offSwitchBranch(); };
+    return () => { offCloseTab(); offRemoveProject(); offNewTab(); offNewAgentTab(); offConnectProject(); offDisconnectProject(); offAddProject(); offToggleSplit(); offSwitchBranch(); };
   }, [projects]);
 
   useEffect(() => {

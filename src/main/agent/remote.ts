@@ -5,6 +5,7 @@ import { ChildProcess, spawn, execSync } from 'child_process';
 import { app } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
+import { getShellEnv } from '../connector/shell-env';
 
 interface RemoteProcess {
   sendLine: (msg: object) => void;
@@ -167,6 +168,7 @@ async function spawnAgentServer(
     try {
       const proc = spawn('node', [deployedPath], {
         cwd,
+        env: getShellEnv(),
         stdio: ['pipe', 'pipe', 'pipe'],
       });
       return wrapProcess(proc);

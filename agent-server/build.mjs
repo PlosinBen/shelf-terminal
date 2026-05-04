@@ -8,7 +8,7 @@ await build({
   bundle: true,
   platform: 'node',
   target: 'node20',
-  format: 'esm',
+  format: 'cjs',
   outfile: `dist/agent-server/${pkg.version}/index.js`,
   external: [],
   banner: { js: `// shelf-terminal agent-server v${pkg.version}\n` },
