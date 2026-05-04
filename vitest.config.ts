@@ -7,6 +7,6 @@ import { alias } from './aliases';
 export default defineConfig({
   resolve: { alias },
   test: {
-    include: ['src/**/*.test.ts'],
+    include: ['src/**/*.test.ts', 'agent-server/**/*.test.ts'],
   },
 });

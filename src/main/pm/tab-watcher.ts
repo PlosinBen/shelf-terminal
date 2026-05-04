@@ -3,6 +3,8 @@ import * as scrollback from './scrollback-buffer';
 import { inferTabState } from './tools';
 import { isAwayMode } from './away-mode';
 import { log } from '@shared/logger';
+import { getAgentState, isAgentTab } from '../agent';
+import type { AgentSessionState } from '../agent/types';
 
 interface TabState {
   state: TabInferredState;
@@ -43,16 +45,34 @@ function isInteresting(from: TabInferredState, to: TabInferredState): boolean {
   return INTERESTING_TRANSITIONS.some(([f, t]) => f === from && t === to);
 }
 
+export function mapAgentState(agentState: AgentSessionState): TabInferredState {
+  switch (agentState) {
+    case 'idle': return 'idle_shell';
+    case 'streaming': return 'cli_running';
+    case 'waiting_permission': return 'cli_waiting_permission';
+    case 'error': return 'cli_error';
+    default: return 'idle_shell';
+  }
+}
+
+function resolveTabState(tabId: string): TabInferredState {
+  if (isAgentTab(tabId)) {
+    const agentState = getAgentState(tabId);
+    return agentState ? mapAgentState(agentState) : 'idle_shell';
+  }
+  const text = scrollback.has(tabId) ? scrollback.read(tabId, 20) : '';
+  return inferTabState(text);
+}
+
 export function checkTab(tabId: string): void {
   if (!isAwayMode()) return;
-  if (!scrollback.has(tabId)) return;
+  if (!isAgentTab(tabId) && !scrollback.has(tabId)) return;
 
   const now = Date.now();
   const prev = tabStates.get(tabId);
   if (prev && now - prev.lastCheck < DEBOUNCE_MS) return;
 
-  const text = scrollback.read(tabId, 20);
-  const newState = inferTabState(text);
+  const newState = resolveTabState(tabId);
   const oldState = prev?.state ?? 'idle_shell';
 
   tabStates.set(tabId, { state: newState, lastCheck: now });
@@ -82,13 +102,10 @@ export interface TabSnapshot {
 }
 
 export function snapshotTabs(): TabSnapshot[] {
-  return knownTabs.map((meta) => {
-    const text = scrollback.has(meta.tabId) ? scrollback.read(meta.tabId, 20) : '';
-    return {
-      tabId: meta.tabId,
-      tabName: meta.tabName,
-      projectName: meta.projectName,
-      state: inferTabState(text),
-    };
-  });
+  return knownTabs.map((meta) => ({
+    tabId: meta.tabId,
+    tabName: meta.tabName,
+    projectName: meta.projectName,
+    state: resolveTabState(meta.tabId),
+  }));
 }

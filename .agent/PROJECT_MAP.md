@@ -36,6 +36,29 @@
 | Docker | `docker.ts` | Docker exec connector |
 | 單元測試 | `connector.test.ts` | available()、buildSpawnConfig() 等測試 |
 
+### Agent View (src/main/agent/)
+
+| Intent | File | Description |
+|--------|------|-------------|
+| Session manager + IPC handlers | `index.ts` | `initAgentManager(windowGetter)` 註冊所有 agent IPC、管理 tab→session mapping、permission bridging、`getAgentState()` / `isAgentTab()` / `disposeAllAgents()` |
+| Remote backend | `remote.ts` | `createRemoteBackend()` 透過 stdin/stdout JSON line protocol 跟 agent-server 通訊；支援 local/SSH/Docker spawn；`deployAgentServer()` 自動 SCP/docker cp bundle 到遠端 |
+| Type 定義 | `types.ts` | `AgentBackend`、`AgentEvent`、`AgentSessionState` 等 agent 系統型別 |
+| 單元測試 | `remote.test.ts` | Remote backend 介面、lifecycle 測試 |
+
+### Agent Server (agent-server/)
+
+| Intent | File | Description |
+|--------|------|-------------|
+| Entry point | `index.ts` | stdin/stdout JSON line protocol server、dispatch to Claude/Copilot backends |
+| Claude provider | `providers/claude.ts` | `@anthropic-ai/claude-agent-sdk` wrapper、permission bridging |
+| Copilot provider | `providers/copilot.ts` | Vercel AI SDK (`ai` + `@ai-sdk/openai`)、tool definitions (read/write/edit/bash/list)、auto-compaction、cross-turn memory |
+| Copilot auth | `providers/copilot-auth.ts` | GitHub Copilot OAuth token（`~/.config/github-copilot/` + `gh auth token`）→ session token exchange |
+| Provider types | `providers/types.ts` | `ServerBackend`、`SendFn`、`QueryInput`、`ProviderCapabilities` 介面 |
+| Context compaction | `compaction.ts` | `needsCompaction()`、`splitForCompaction()`、`truncateToolOutputs()`、`buildCompactionPrompt()` |
+| Bundle build | `build.mjs` | esbuild → `dist/agent-server/<version>/index.js` 單一 ESM bundle |
+| 單元測試 | `compaction.test.ts` | Compaction 函式 14 個測試 |
+| 單元測試 | `copilot-tools.test.ts` | Tool 邏輯測試 |
+
 ### PM Agent (src/main/pm/)
 
 | Intent | File | Description |
@@ -66,6 +89,7 @@
 | 快捷鍵系統 | `hooks/useKeybindings.ts` | combo string 對應 action，支援參數化 action（`switchTab_N`） |
 | Paste/drop 上傳 hook | `hooks/useAttachmentPaste.ts` | 從 TerminalView 抽出的 paste/drop/upload pipeline，支援 file size check |
 | Terminal 渲染 | `components/TerminalView.tsx` | xterm.js instance cache、PTY I/O、useAttachmentPaste hook、unread badge |
+| Agent 對話 UI | `components/AgentView.tsx` | Agent tab 聊天介面（訊息列表 + streaming + input bar + send/stop）|
 | Bottom bar | `components/BottomBar.tsx` | 顯示 connection type、cwd、git branch；branch dropdown 支援切換或跳轉 worktree project |
 | Sidebar | `components/Sidebar.tsx` | Project 列表、拖曳排序、右鍵選單（含 New Worktree）、worktree branch 顯示、收合按鈕 |
 | Tab bar | `components/TabBar.tsx` | Tab 列表、拖曳排序、雙擊重命名、unread badge、tab 顏色 |

@@ -1,3 +1,33 @@
+// ── Agent types ──
+
+export type AgentProvider = 'claude' | 'copilot';
+export type TabType = 'terminal' | 'agent';
+
+export type AuthMethod =
+  | { kind: 'api-key'; envVar: string; setupUrl?: string; placeholder?: string }
+  | { kind: 'oauth'; instructions: Array<{ label: string; command?: string }> }
+  | { kind: 'sdk-managed'; instructions: Array<{ label: string; command?: string }> }
+  | { kind: 'none' };
+
+export interface AgentPrefs {
+  model?: string;
+  effort?: string;
+  permissionMode?: string;
+}
+
+export type AgentDisplayMode = 'collapsed' | 'expanded' | 'hidden';
+
+export const AGENT_DISPLAY_KEYS: { key: string; label: string }[] = [
+  { key: 'thinking', label: 'Thinking' },
+  { key: 'Read', label: 'Read' },
+  { key: 'Grep', label: 'Grep' },
+  { key: 'Glob', label: 'Glob' },
+  { key: 'Bash', label: 'Bash' },
+  { key: 'Edit', label: 'Edit' },
+  { key: 'Write', label: 'Write' },
+  { key: 'other', label: 'Other Tools' },
+];
+
 // ── Connection types ──
 
 export type LocalConnection = { type: 'local' };
@@ -31,6 +61,10 @@ export interface ProjectConfig {
   quickCommands?: QuickCommand[];
   parentProjectId?: string;
   worktreeBranch?: string;
+  defaultAgentProvider?: AgentProvider;
+  openAgentOnConnect?: boolean;
+  agentSessionIds?: Partial<Record<AgentProvider, string>>;
+  agentPrefs?: Partial<Record<AgentProvider, AgentPrefs>>;
 }
 
 // ── IPC payloads: Renderer → Main ──
@@ -105,6 +139,7 @@ export interface AppSettings {
   unicode11?: boolean;
   pmProvider?: PmProviderConfig;
   telegram?: TelegramConfig;
+  agentDisplay?: Partial<Record<string, AgentDisplayMode>>;
 }
 
 

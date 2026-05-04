@@ -17,6 +17,7 @@ import { loadSSHServers, saveSSHServer } from './ssh-server-store';
 import { log, setLogLevel, setFileWriter } from '@shared/logger';
 import { applyUserDataIsolation } from './user-data-path';
 import { handlePmSend, handleTabEvent, getHistory, clearHistory, stopGeneration, updateSyncedState, setWritePtyFn, isAwayMode, setAwayMode, initAwayMode, setStateChangeCallback, updateKnownTabs, startTelegram, stopTelegram, setMessageCallback, setCallbackQueryHandler, setStopCallback } from './pm';
+import { initAgentManager, disposeAllAgents } from './agent';
 import type { Connection, ProjectConfig, AppSettings, FileUploadResult, FileClearResult, PtySpawnPayload, PtyInputPayload, PtyResizePayload, PtyKillPayload, GitBranchInfo, WorktreeAddResult, WorktreeRemoveResult } from '@shared/types';
 
 applyUserDataIsolation();
@@ -446,6 +447,9 @@ app.whenReady().then(() => {
 
   createWindow();
 
+  // Agent View wiring
+  initAgentManager(() => mainWindow);
+
   // PM wiring
   initAwayMode(mainWindow!);
   setWritePtyFn(writePty);
@@ -481,6 +485,7 @@ app.whenReady().then(() => {
 
 function shutdown() {
   killAllPtys();
+  disposeAllAgents();
   stopAutoUpdater();
   stopTelegram();
   cleanupConnectors();

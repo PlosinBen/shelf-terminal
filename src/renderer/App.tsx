@@ -2,6 +2,7 @@ import React, { useEffect } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { TabBar } from './components/TabBar';
 import { TerminalView } from './components/TerminalView';
+import { AgentView } from './components/AgentView';
 import { FolderPicker } from './components/FolderPicker';
 import { SettingsPanel } from './components/SettingsPanel';
 import { SearchBar } from './components/SearchBar';
@@ -38,8 +39,12 @@ export function App() {
       const proj = projects[projectIndex];
       const tab = proj?.tabs[tabIndex];
       if (tab) {
-        window.shelfApi.pty.kill(tab.id);
-        disposeTerminal(tab.id);
+        if (tab.type === 'agent') {
+          window.shelfApi.agent.destroy(tab.id);
+        } else {
+          window.shelfApi.pty.kill(tab.id);
+          disposeTerminal(tab.id);
+        }
       }
       removeTab(projectIndex, tabIndex);
     });
@@ -48,8 +53,12 @@ export function App() {
       const proj = projects[projectIndex];
       if (proj) {
         proj.tabs.forEach((tab) => {
-          window.shelfApi.pty.kill(tab.id);
-          disposeTerminal(tab.id);
+          if (tab.type === 'agent') {
+            window.shelfApi.agent.destroy(tab.id);
+          } else {
+            window.shelfApi.pty.kill(tab.id);
+            disposeTerminal(tab.id);
+          }
         });
       }
       removeProject(projectIndex);
@@ -252,15 +261,24 @@ export function App() {
                       className={isSplit && visible ? 'split-pane' : undefined}
                       style={!visible ? { display: 'none' } : undefined}
                     >
-                      <TerminalView
-                        tabId={tab.id}
-                        projectId={proj.config.id}
-                        cwd={proj.config.cwd}
-                        connection={proj.config.connection}
-                        initScript={proj.config.initScript}
-                        tabCmd={tab.cmd}
-                        visible={visible}
-                      />
+                      {tab.type === 'agent' && tab.provider ? (
+                        <AgentView
+                          tabId={tab.id}
+                          cwd={proj.config.cwd}
+                          connection={proj.config.connection}
+                          provider={tab.provider}
+                        />
+                      ) : (
+                        <TerminalView
+                          tabId={tab.id}
+                          projectId={proj.config.id}
+                          cwd={proj.config.cwd}
+                          connection={proj.config.connection}
+                          initScript={proj.config.initScript}
+                          tabCmd={tab.cmd}
+                          visible={visible}
+                        />
+                      )}
                     </div>
                   );
                 });

@@ -119,6 +119,58 @@ contextBridge.exposeInMainWorld('shelfApi', {
       return () => ipcRenderer.removeListener(IPC.PM_STREAM, listener);
     },
   },
+  agent: {
+    init: (tabId: string, cwd: string, connection: unknown, provider: string, opts?: Record<string, unknown>) =>
+      ipcRenderer.invoke(IPC.AGENT_INIT, { tabId, cwd, connection, provider, ...opts }),
+    send: (tabId: string, prompt: string, images?: string[]) =>
+      ipcRenderer.invoke(IPC.AGENT_SEND, { tabId, prompt, images }),
+    stop: (tabId: string) =>
+      ipcRenderer.invoke(IPC.AGENT_STOP, { tabId }),
+    destroy: (tabId: string) =>
+      ipcRenderer.invoke(IPC.AGENT_DESTROY, { tabId }),
+    resolvePermission: (tabId: string, toolUseId: string, allow: boolean) =>
+      ipcRenderer.invoke(IPC.AGENT_RESOLVE_PERMISSION, { tabId, toolUseId, allow }),
+    setPrefs: (tabId: string, prefs: Record<string, unknown>) =>
+      ipcRenderer.invoke(IPC.AGENT_SET_PREFS, { tabId, ...prefs }),
+    switchProvider: (tabId: string, provider: string) =>
+      ipcRenderer.invoke(IPC.AGENT_SWITCH_PROVIDER, { tabId, provider }),
+    storeCredential: (tabId: string, key: string) =>
+      ipcRenderer.invoke(IPC.AGENT_STORE_CREDENTIAL, { tabId, key }),
+    clearCredential: (tabId: string) =>
+      ipcRenderer.invoke(IPC.AGENT_CLEAR_CREDENTIAL, { tabId }),
+    checkAuth: (tabId: string) =>
+      ipcRenderer.invoke(IPC.AGENT_CHECK_AUTH, { tabId }),
+    onMessage: (callback: (tabId: string, msg: unknown) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, tabId: string, msg: unknown) => callback(tabId, msg);
+      ipcRenderer.on(IPC.AGENT_MESSAGE, listener);
+      return () => ipcRenderer.removeListener(IPC.AGENT_MESSAGE, listener);
+    },
+    onStream: (callback: (tabId: string, chunk: unknown) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, tabId: string, chunk: unknown) => callback(tabId, chunk);
+      ipcRenderer.on(IPC.AGENT_STREAM, listener);
+      return () => ipcRenderer.removeListener(IPC.AGENT_STREAM, listener);
+    },
+    onStatus: (callback: (tabId: string, status: unknown) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, tabId: string, status: unknown) => callback(tabId, status);
+      ipcRenderer.on(IPC.AGENT_STATUS, listener);
+      return () => ipcRenderer.removeListener(IPC.AGENT_STATUS, listener);
+    },
+    onPermissionRequest: (callback: (tabId: string, req: unknown) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, tabId: string, req: unknown) => callback(tabId, req);
+      ipcRenderer.on(IPC.AGENT_PERMISSION_REQUEST, listener);
+      return () => ipcRenderer.removeListener(IPC.AGENT_PERMISSION_REQUEST, listener);
+    },
+    onCapabilities: (callback: (tabId: string, caps: unknown) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, tabId: string, caps: unknown) => callback(tabId, caps);
+      ipcRenderer.on(IPC.AGENT_CAPABILITIES, listener);
+      return () => ipcRenderer.removeListener(IPC.AGENT_CAPABILITIES, listener);
+    },
+    onAuthRequired: (callback: (tabId: string, provider: string) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, tabId: string, provider: string) => callback(tabId, provider);
+      ipcRenderer.on(IPC.AGENT_AUTH_REQUIRED, listener);
+      return () => ipcRenderer.removeListener(IPC.AGENT_AUTH_REQUIRED, listener);
+    },
+  },
   updater: {
     check: () => ipcRenderer.invoke(IPC.UPDATE_CHECK),
     download: () => ipcRenderer.invoke(IPC.UPDATE_DOWNLOAD),

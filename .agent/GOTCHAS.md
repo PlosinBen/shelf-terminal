@@ -375,3 +375,23 @@
 - 不要把回退邏輯改成「往前找直到下一個 user」(forward search) — 會丟掉切點到下一個 user 之間的 context，最近的 tool 序列直接消失。
 - 不要在切完後手動補 placeholder user turn — Gemini 雖然會接受結構，但 LLM 看到憑空冒出來的 user 會困惑。
 - regression test 在 `history-window.test.ts`，新增 sliding window 邊界 case 時要補測。
+
+---
+
+## Agent View: inferTabState 對 TUI 類 CLI 永遠回傳 cli_running
+
+**現象**: PM Agent 的 `inferTabState` 對 Claude Code、Copilot CLI 等 TUI 程式永遠回傳 `cli_running`，無法偵測 done/idle 狀態。
+
+**原因**: TUI 程式用 cursor positioning（ANSI escape codes）渲染，strip ANSI 後的 scrollback 文字跟原始 CLI output 完全不同，pattern matching 全部失效。
+
+**解法**: Agent tab 用 structured state（`getAgentState()` 從 SDK session manager 直接取），Terminal tab 繼續用 scrollback heuristic。`tab-watcher.ts` 的 `resolveTabState()` 自動派發。
+
+---
+
+## Agent Server: 遠端 Node.js 版本
+
+**現象**: agent-server bundle 在遠端 spawn 失敗，`SyntaxError: Unexpected token`。
+
+**原因**: esbuild target 是 `node20`，但遠端 Node.js 版本 < 20。
+
+**解法**: 確保遠端有 Node.js 20+。deploy 時不做版本檢查（avoid extra SSH round-trip），錯誤會在 `waitForReady` timeout 後浮現。

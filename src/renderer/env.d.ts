@@ -75,6 +75,24 @@ interface ShelfApi {
     onAwayMode: (callback: (on: boolean) => void) => () => void;
     onStream: (callback: (chunk: import('../shared/types').PmStreamChunk) => void) => () => void;
   };
+  agent: {
+    init: (tabId: string, cwd: string, connection: import('../shared/types').Connection, provider: string, opts?: Record<string, unknown>) => Promise<boolean>;
+    send: (tabId: string, prompt: string, images?: string[]) => Promise<boolean>;
+    stop: (tabId: string) => Promise<boolean>;
+    destroy: (tabId: string) => Promise<void>;
+    resolvePermission: (tabId: string, toolUseId: string, allow: boolean) => Promise<boolean>;
+    setPrefs: (tabId: string, prefs: Record<string, unknown>) => Promise<boolean>;
+    switchProvider: (tabId: string, provider: string) => Promise<boolean>;
+    storeCredential: (tabId: string, key: string) => Promise<boolean>;
+    clearCredential: (tabId: string) => Promise<boolean>;
+    checkAuth: (tabId: string) => Promise<boolean>;
+    onMessage: (callback: (tabId: string, msg: unknown) => void) => () => void;
+    onStream: (callback: (tabId: string, chunk: unknown) => void) => () => void;
+    onStatus: (callback: (tabId: string, status: unknown) => void) => () => void;
+    onPermissionRequest: (callback: (tabId: string, req: unknown) => void) => () => void;
+    onCapabilities: (callback: (tabId: string, caps: unknown) => void) => () => void;
+    onAuthRequired: (callback: (tabId: string, provider: string) => void) => () => void;
+  };
   updater: {
     check: () => Promise<void>;
     download: () => Promise<void>;

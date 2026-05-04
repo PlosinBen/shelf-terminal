@@ -63,6 +63,7 @@
     "@vitejs/plugin-react": "4.7.0",
     "electron": "41.1.1",
     "electron-builder": "26.8.1",
+    "esbuild": "^0.28.0",
     "terser": "^5.46.1",
     "typescript": "5.9.3",
     "vite": "6.4.2",
@@ -71,12 +72,15 @@
     "vitest": "^4.1.4"
   },
   "dependencies": {
+    "@ai-sdk/openai": "^3.0.58",
+    "@anthropic-ai/claude-agent-sdk": "^0.2.126",
     "@xterm/addon-fit": "0.11.0",
     "@xterm/addon-search": "^0.16.0",
     "@xterm/addon-unicode11": "^0.9.0",
     "@xterm/addon-web-links": "^0.12.0",
     "@xterm/addon-webgl": "^0.19.0",
     "@xterm/xterm": "6.0.0",
+    "ai": "^6.0.174",
     "electron-updater": "^6.8.3",
     "marked": "^18.0.2",
     "node-pty": "1.1.0",

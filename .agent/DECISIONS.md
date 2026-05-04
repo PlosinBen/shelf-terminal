@@ -355,7 +355,41 @@
 
 ---
 
-## 31. PM 回覆用 marked 渲染 Markdown
+## 31. Agent View：Claude 用原生 SDK、Copilot 用 Vercel AI SDK
+
+**決策**: Agent tab 直接呼叫 AI provider SDK（不是解析 terminal scrollback）。Claude 走 `@anthropic-ai/claude-agent-sdk`（原生 session/context/tool 管理），Copilot 走 Vercel AI SDK（`ai` + `@ai-sdk/openai`，處理 tool loop/streaming/compaction）。兩者都在 `agent-server` bundle 裡執行，透過 stdin/stdout JSON line protocol 跟 main process 通訊。
+
+**原因**:
+- 之前用 terminal scrollback parsing 偵測 agent 狀態（`inferTabState`），TUI rendering（cursor positioning）讓 stripped text 不可識別，永遠回傳 `cli_running`。
+- 直接用 SDK 拿到 structured state（idle/streaming/waiting_permission），PM Agent 也能準確監控。
+- Copilot 之前自己管 context 太複雜（`with-agent-view` branch 的痛點），Vercel AI SDK 處理 tool loop 和 streaming。
+- `agent-server` 跑在遠端（SSH/Docker），因為 auth（API key、OAuth token）都在 remote machine 上。
+
+**不要改**: 不要嘗試合併兩個 provider 到同一個 SDK — Claude SDK 的 session management（compaction、tool approval flow）跟 OpenAI-compatible API 差異太大。
+
+---
+
+## 32. Agent Server 是 esbuild 單一 Bundle
+
+**決策**: `agent-server/` 用 esbuild 打包成 `dist/agent-server/<version>/index.js` 單一 ESM bundle，deploy 到遠端（SSH: `~/.shelf/agent-server/index.js`，Docker: `/root/.shelf/agent-server/index.js`）。Main process 的 `remote.ts` 自動 SCP/docker cp。
+
+**原因**: agent-server 依賴 Vercel AI SDK + Claude SDK + zod，不能期望遠端有 node_modules。Single bundle 讓 deploy 只需要複製一個檔案 + `node index.js`。
+
+**不要改**: 不要在遠端跑 npm install — 會拖慢啟動且需要 network。
+
+---
+
+## 33. Dual-Mode Tab State Detection
+
+**決策**: Tab 狀態偵測分兩條路：Agent tab → `getAgentState()` 從 session manager 拿 structured state；Terminal tab → scrollback heuristic（既有的 `inferTabState`）。`resolveTabState()` 在 `tab-watcher.ts` 統一派發。
+
+**原因**: Agent tab 有 structured state（SDK 直接回報），比 scrollback parsing 準確。Terminal tab 沒有 SDK，只能用 heuristic。兩者不互斥。
+
+**不要改**: 不要嘗試統一成單一偵測機制 — agent tab 和 terminal tab 的資訊來源根本不同。
+
+---
+
+## 34. PM 回覆用 marked 渲染 Markdown
 
 **決策**: Assistant 訊息用 `marked` 套件（zero-dependency, 449KB）渲染成 HTML，透過 `dangerouslySetInnerHTML` 顯示。User 訊息維持純文字。Streaming 時也即時渲染。
 
