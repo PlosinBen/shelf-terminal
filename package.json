@@ -5,7 +5,7 @@
   "main": "dist/main/index.js",
   "scripts": {
     "dev": "NODE_ENV=development vite",
-    "build": "vite build",
+    "build": "vite build && node agent-server/build.mjs",
     "postinstall": "electron-rebuild",
     "typecheck": "tsc --noEmit",
     "test": "npm run typecheck && npm run test:unit && npm run test:e2e && npm run test:docker && npm run test:ssh",
@@ -27,7 +27,14 @@
     },
     "files": [
       "dist/**/*",
+      "!dist/agent-server",
       "node_modules/node-pty/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "dist/agent-server",
+        "to": "agent-server"
+      }
     ],
     "mac": {
       "target": [
