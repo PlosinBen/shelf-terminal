@@ -36,6 +36,7 @@ export function createClaudeBackend(): ServerBackend {
   let abortController: AbortController | null = null;
   const cache: { models?: any[]; commands?: any[] } = {};
   let initPromise: Promise<void> | null = null;
+  let lastSessionId: string | null = null;
 
   const pendingPermissions = new Map<string, (result: PermissionResult) => void>();
   let currentSend: SendFn | null = null;
@@ -108,7 +109,8 @@ export function createClaudeBackend(): ServerBackend {
         canUseTool,
       };
 
-      if (input.resume) options.resume = input.resume;
+      const resumeId = input.resume ?? lastSessionId;
+      if (resumeId) options.resume = resumeId;
       if (input.model) (options as any).model = input.model;
       if (input.effort) (options as any).effort = input.effort;
 
@@ -131,6 +133,9 @@ export function createClaudeBackend(): ServerBackend {
 
       try {
         for await (const sdkMsg of activeQuery) {
+          if ('session_id' in sdkMsg && sdkMsg.session_id) {
+            lastSessionId = sdkMsg.session_id as string;
+          }
           processMessage(sdkMsg, send);
         }
       } catch (err: any) {
