@@ -45,6 +45,7 @@ export function AgentView({ tabId, cwd, connection, provider, onSwitchProvider }
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamText, setStreamText] = useState('');
+  const [streamThinking, setStreamThinking] = useState('');
   const [statusModel, setStatusModel] = useState<string | null>(null);
   const [inputTokens, setInputTokens] = useState(0);
   const [outputTokens, setOutputTokens] = useState(0);
@@ -152,7 +153,7 @@ export function AgentView({ tabId, cwd, connection, provider, onSwitchProvider }
 
       const newMsg: AgentMsg = {
         id: `msg-${Date.now()}-${Math.random()}`,
-        type: msg.type === 'tool_use' ? 'tool_use' : msg.type === 'tool_result' ? 'tool_result' : msg.type === 'text' ? 'assistant' : msg.type === 'thinking' ? 'system' : 'system',
+        type: msg.type === 'tool_use' ? 'tool_use' : msg.type === 'tool_result' ? 'tool_result' : msg.type === 'text' ? 'assistant' : msg.type === 'thinking' ? 'thinking' : 'system',
         content: msg.content,
         toolName: msg.toolName,
         toolInput: msg.toolInput,
@@ -181,7 +182,11 @@ export function AgentView({ tabId, cwd, connection, provider, onSwitchProvider }
 
     const offStream = window.shelfApi.agent.onStream((id: string, chunk: any) => {
       if (id !== tabId) return;
-      setStreamText((prev) => prev + (chunk.content ?? ''));
+      if (chunk.type === 'thinking') {
+        setStreamThinking((prev) => prev + (chunk.content ?? ''));
+      } else {
+        setStreamText((prev) => prev + (chunk.content ?? ''));
+      }
     });
 
     const offStatus = window.shelfApi.agent.onStatus((id: string, status: any) => {
@@ -189,6 +194,14 @@ export function AgentView({ tabId, cwd, connection, provider, onSwitchProvider }
       const nowStreaming = status.state === 'streaming';
       setIsStreaming((wasStreaming) => {
         if (wasStreaming && !nowStreaming) {
+          setStreamThinking((prevThinking) => {
+            if (prevThinking.trim()) {
+              setMessages((msgs) => [...msgs, {
+                id: `thinking-${Date.now()}`, type: 'thinking', content: prevThinking, provider, timestamp: Date.now(),
+              }]);
+            }
+            return '';
+          });
           setStreamText((prev) => {
             if (prev.trim()) {
               setMessages((msgs) => [...msgs, {
@@ -234,7 +247,7 @@ export function AgentView({ tabId, cwd, connection, provider, onSwitchProvider }
     if (isAtBottomRef.current) {
       bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [messages, streamText]);
+  }, [messages, streamText, streamThinking]);
 
   // Force scroll on user message
   const prevCount = useRef(0);
@@ -556,6 +569,13 @@ export function AgentView({ tabId, cwd, connection, provider, onSwitchProvider }
             )}
           </div>
         ))}
+        {streamThinking && (
+          <div className="agent-msg agent-msg-thinking">
+            <div className="agent-thinking-header">
+              <span className="agent-thinking-label">Thinking...</span>
+            </div>
+          </div>
+        )}
         {streamText && (
           <div className="agent-msg agent-msg-assistant">
             <span className="agent-msg-label">{provider.charAt(0).toUpperCase() + provider.slice(1)}:</span>

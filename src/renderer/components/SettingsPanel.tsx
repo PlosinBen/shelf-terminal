@@ -2,8 +2,8 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useStore, updateSettings, toggleSettings } from '../store';
 import { themes } from '../themes';
 import { comboToLabel, recordCombo } from '../hooks/useKeybindings';
-import type { AppSettings, KeybindingAction, KeybindingConfig, LogLevel, PmProviderType, ProviderModel } from '@shared/types';
-import { PM_PROVIDERS, getModelsForProvider } from '@shared/types';
+import type { AppSettings, KeybindingAction, KeybindingConfig, LogLevel, PmProviderType, ProviderModel, AgentDisplayMode } from '@shared/types';
+import { PM_PROVIDERS, getModelsForProvider, AGENT_DISPLAY_KEYS } from '@shared/types';
 
 const ACTION_LABELS: Record<KeybindingAction, string> = {
   toggleSidebar: 'Toggle Sidebar',
@@ -220,6 +220,25 @@ export function SettingsPanel() {
                   />
                   {pathError && <div className="settings-path-error">{pathError}</div>}
                 </div>
+
+                <div className="settings-divider" />
+                <div className="settings-section-title">Agent Display</div>
+                {AGENT_DISPLAY_KEYS.map(({ key, label }) => (
+                  <div className="settings-group" key={key}>
+                    <label className="settings-label">{label}</label>
+                    <select
+                      className="settings-select"
+                      value={draft.agentDisplay?.[key] ?? 'collapsed'}
+                      onChange={(e) => updateDraft({
+                        agentDisplay: { ...draft.agentDisplay, [key]: e.target.value as AgentDisplayMode },
+                      })}
+                    >
+                      <option value="collapsed">Collapsed</option>
+                      <option value="expanded">Expanded</option>
+                      <option value="hidden">Hidden</option>
+                    </select>
+                  </div>
+                ))}
 
                 <div className="settings-divider" />
                 <div className="settings-section-title">Logs</div>

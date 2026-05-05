@@ -1,9 +1,11 @@
 import React, { useState, useMemo } from 'react';
 import { marked } from 'marked';
+import { useStore } from '../store';
+import type { AgentDisplayMode } from '@shared/types';
 
 export interface AgentMsg {
   id: string;
-  type: 'user' | 'assistant' | 'system' | 'tool_use' | 'tool_result' | 'error';
+  type: 'user' | 'assistant' | 'system' | 'thinking' | 'tool_use' | 'tool_result' | 'error';
   content: string;
   toolName?: string;
   toolInput?: Record<string, unknown>;
@@ -118,18 +120,27 @@ interface Props {
 
 export function AgentMessage({ message, cwd }: Props) {
   const [expanded, setExpanded] = useState(false);
+  const { settings } = useStore();
+
+  const resolveDisplayMode = (key: string): AgentDisplayMode => {
+    return settings.agentDisplay?.[key] ?? 'collapsed';
+  };
 
   if (message.type === 'tool_use') {
+    const toolKey = message.toolName ?? 'other';
+    const toolMode = resolveDisplayMode(toolKey) ?? resolveDisplayMode('other');
+    if (toolMode === 'hidden') return null;
+    const isExpanded = expanded || toolMode === 'expanded';
     const summary = getToolSummary(message.toolName, message.toolInput, cwd);
     return (
       <div className="agent-msg agent-msg-tool">
         <div className="agent-tool-header" onClick={() => setExpanded(!expanded)}>
-          <span className={`agent-chevron ${expanded ? 'expanded' : ''}`}>&#9654;</span>
+          <span className={`agent-chevron ${isExpanded ? 'expanded' : ''}`}>&#9654;</span>
           <span className="agent-tool-name">{message.toolName}</span>
-          {summary && <span className={`agent-tool-summary ${expanded ? 'agent-tool-summary-full' : ''}`}>{summary}</span>}
+          {summary && <span className={`agent-tool-summary ${isExpanded ? 'agent-tool-summary-full' : ''}`}>{summary}</span>}
           {message.streaming && <span className="agent-tool-badge">running</span>}
         </div>
-        {expanded && (
+        {isExpanded && (
           <>
             <ToolBody toolName={message.toolName} input={message.toolInput} cwd={cwd} />
             {message.toolResult && (() => {
@@ -144,6 +155,22 @@ export function AgentMessage({ message, cwd }: Props) {
 
   if (message.type === 'tool_result') {
     return null;
+  }
+
+  if (message.type === 'thinking') {
+    const mode = resolveDisplayMode('thinking');
+    if (mode === 'hidden') return null;
+    return (
+      <div className="agent-msg agent-msg-thinking">
+        <div className="agent-thinking-header" onClick={() => setExpanded(!expanded)}>
+          <span className={`agent-chevron ${expanded || mode === 'expanded' ? 'expanded' : ''}`}>&#9654;</span>
+          <span className="agent-thinking-label">Thinking</span>
+        </div>
+        {(expanded || mode === 'expanded') && (
+          <div className="agent-thinking-content">{message.content}</div>
+        )}
+      </div>
+    );
   }
 
   if (message.type === 'system') {

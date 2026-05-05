@@ -2682,6 +2682,33 @@ button {
   background: var(--border);
 }
 
+.agent-msg-thinking {
+  padding: 4px 0;
+}
+
+.agent-thinking-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.agent-thinking-label {
+  font-style: italic;
+}
+
+.agent-thinking-content {
+  padding: 6px 0 6px 18px;
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
 .agent-msg-error {
   padding: 4px 0;
   font-size: 12px;
