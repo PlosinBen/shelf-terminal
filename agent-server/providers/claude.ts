@@ -207,11 +207,27 @@ function processMessage(msg: SDKMessage, send: SendFn) {
         }
       }
       if (msg.message.usage) {
+        const isSubagent = msg.parent_tool_use_id != null;
+        const modelRaw = msg.message.model;
+        const isSynthetic = typeof modelRaw === 'string' && modelRaw.startsWith('<');
         send({
-          type: 'status', state: 'streaming', model: msg.message.model,
+          type: 'status', state: 'streaming',
+          ...(isSubagent || isSynthetic ? {} : { model: modelRaw }),
           inputTokens: msg.message.usage.input_tokens, outputTokens: msg.message.usage.output_tokens,
           sessionId: msg.session_id,
         });
+      }
+      break;
+    }
+    case 'stream_event': {
+      const event: any = (msg as any).event;
+      if (event?.type === 'content_block_delta' && event.delta) {
+        const delta = event.delta;
+        if (delta.type === 'text_delta' && typeof delta.text === 'string' && delta.text.length > 0) {
+          send({ type: 'stream', streamType: 'text', content: delta.text });
+        } else if (delta.type === 'thinking_delta' && typeof delta.thinking === 'string' && delta.thinking.length > 0) {
+          send({ type: 'stream', streamType: 'thinking', content: delta.thinking });
+        }
       }
       break;
     }

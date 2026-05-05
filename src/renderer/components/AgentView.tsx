@@ -573,7 +573,7 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex }: Pr
             <span className="agent-cursor" />
           </div>
         )}
-        {isStreaming && !streamText && messages.length > 0 && (
+        {isStreaming && !streamText && !streamThinking && messages.length > 0 && (
           <div className="agent-loading">
             <span className="agent-loading-spinner" />
             <span className="agent-loading-text">Agent is running... (Esc to stop)</span>
