@@ -4,11 +4,6 @@ import { AgentMessage, type AgentMsg } from './AgentMessage';
 import { useAttachmentPaste } from '../hooks/useAttachmentPaste';
 import { useStore, updateProjectConfig } from '../store';
 
-const AGENT_PROVIDERS: { id: AgentProvider; label: string }[] = [
-  { id: 'claude', label: 'Claude' },
-  { id: 'copilot', label: 'Copilot' },
-];
-
 interface SlashCommand {
   name: string;
   description: string;
@@ -39,10 +34,9 @@ interface Props {
   connection: Connection;
   provider: AgentProvider;
   projectIndex: number;
-  onSwitchProvider?: (tabId: string, provider: AgentProvider) => void;
 }
 
-export function AgentView({ tabId, cwd, connection, provider, projectIndex, onSwitchProvider }: Props) {
+export function AgentView({ tabId, cwd, connection, provider, projectIndex }: Props) {
   const { projects } = useStore();
   const savedPrefs = projects[projectIndex]?.config.agentPrefs?.[provider];
 
@@ -405,26 +399,6 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, onSw
     persistPref({ effort: next });
   }, [tabId, capabilities, currentEffort, persistPref]);
 
-  const handleSwitchProvider = useCallback(async (newProvider: AgentProvider) => {
-    if (newProvider === provider || isStreaming) return;
-    const confirmed = await window.shelfApi.dialog.confirm(
-      `Switch to ${newProvider.charAt(0).toUpperCase() + newProvider.slice(1)}`,
-      'Current session will be paused. Context will not transfer between providers.',
-      'Switch',
-    );
-    if (!confirmed) return;
-    await window.shelfApi.agent.switchProvider(tabId, newProvider);
-    setMessages((prev) => [...prev, {
-      id: `msg-${Date.now()}`, type: 'system', content: `── Switched to ${newProvider.charAt(0).toUpperCase() + newProvider.slice(1)} ──`, timestamp: Date.now(),
-    }]);
-    setStatusModel(null);
-    setCostUsd(undefined);
-    setInputTokens(0);
-    setOutputTokens(0);
-    setCapabilities(null);
-    onSwitchProvider?.(tabId, newProvider);
-  }, [tabId, provider, isStreaming, onSwitchProvider]);
-
   const handleReset = useCallback(async () => {
     await window.shelfApi.agent.destroy(tabId);
     setMessages([]);
@@ -697,9 +671,7 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, onSw
         <span className="agent-status-dot" style={{ color: isStreaming ? '#e5c07b' : '#98c379' }}>{'●'}</span>
         <span className="agent-status-label">{isStreaming ? 'running' : 'idle'}</span>
         <span className="agent-status-sep">|</span>
-        <select className="agent-provider-switch" value={provider} onChange={(e) => handleSwitchProvider(e.target.value as AgentProvider)} disabled={isStreaming}>
-          {AGENT_PROVIDERS.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
-        </select>
+        <span className="agent-status-seg">{provider.charAt(0).toUpperCase() + provider.slice(1)}</span>
         {statusModel && (
           <>
             <span className="agent-status-sep">|</span>

@@ -83,7 +83,6 @@ interface ShelfApi {
     destroy: (tabId: string) => Promise<void>;
     resolvePermission: (tabId: string, toolUseId: string, allow: boolean) => Promise<boolean>;
     setPrefs: (tabId: string, prefs: Record<string, unknown>) => Promise<boolean>;
-    switchProvider: (tabId: string, provider: string) => Promise<boolean>;
     storeCredential: (tabId: string, key: string) => Promise<boolean>;
     clearCredential: (tabId: string) => Promise<boolean>;
     checkAuth: (tabId: string) => Promise<boolean>;

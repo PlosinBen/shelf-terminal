@@ -157,6 +157,10 @@ export function addTab(
   const proj = projects[projectIndex];
   if (!proj || proj.tabs.length >= proj.config.maxTabs) return null;
 
+  if (type === 'agent' && provider && proj.tabs.some((t) => t.type === 'agent' && t.provider === provider)) {
+    return null;
+  }
+
   nextTabCounter++;
   const defaultLabel = type === 'agent'
     ? `${provider ? provider.charAt(0).toUpperCase() + provider.slice(1) : 'Agent'}`

@@ -265,12 +265,14 @@ export function TabBar() {
           <div className="context-menu-divider" />
           <button
             className="context-menu-item"
+            disabled={project?.tabs.some((t) => t.type === 'agent' && t.provider === 'claude')}
             onClick={() => { emit(Events.NEW_AGENT_TAB, activeProjectIndex, 'claude'); setAddMenu(null); }}
           >
             Agent (Claude)
           </button>
           <button
             className="context-menu-item"
+            disabled={project?.tabs.some((t) => t.type === 'agent' && t.provider === 'copilot')}
             onClick={() => { emit(Events.NEW_AGENT_TAB, activeProjectIndex, 'copilot'); setAddMenu(null); }}
           >
             Agent (Copilot)

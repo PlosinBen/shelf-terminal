@@ -2509,22 +2509,6 @@ button {
   opacity: 0.3;
 }
 
-.agent-provider-switch {
-  background: none;
-  color: var(--text-muted);
-  border: none;
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  padding: 0;
-  outline: none;
-}
-
-.agent-provider-switch:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
 .agent-status-seg {
   color: var(--text-muted);
 }

@@ -54,14 +54,6 @@ export function initAgentManager(windowGetter: () => BrowserWindow | null): void
     return true;
   });
 
-  ipcMain.handle(IPC.AGENT_SWITCH_PROVIDER, async (_e, payload) => {
-    const { tabId, provider } = payload;
-    const session = sessions.get(tabId);
-    if (!session) return false;
-    await destroySession(tabId);
-    return startSession(tabId, session.cwd, session.connection, provider);
-  });
-
   ipcMain.handle(IPC.AGENT_STORE_CREDENTIAL, async (_e, payload) => {
     const session = sessions.get(payload.tabId);
     if (!session?.backend.storeCredential) return false;
