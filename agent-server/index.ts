@@ -1,7 +1,7 @@
 import * as readline from 'readline';
 import { createClaudeBackend } from './providers/claude';
 import { createCopilotBackend } from './providers/copilot';
-import { deleteContext } from './context-store';
+import { deleteContext, cleanupOldContexts } from './context-store';
 import type { OutgoingMessage, QueryInput, ServerBackend } from './providers/types';
 
 type Provider = 'claude' | 'copilot';
@@ -159,4 +159,5 @@ rl.on('close', () => {
   process.exit(0);
 });
 
+cleanupOldContexts();
 send({ type: 'ready' });

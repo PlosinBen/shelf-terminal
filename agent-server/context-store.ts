@@ -37,3 +37,24 @@ export function saveContext(data: PersistedContext): void {
 export function deleteContext(sessionId: string): void {
   try { fs.unlinkSync(contextPath(sessionId)); } catch {}
 }
+
+export function cleanupOldContexts(maxAgeDays = 30): void {
+  try {
+    if (!fs.existsSync(CONTEXT_DIR)) return;
+    const cutoff = Date.now() - maxAgeDays * 86_400_000;
+    for (const file of fs.readdirSync(CONTEXT_DIR)) {
+      if (!file.endsWith('.json')) continue;
+      const filePath = path.join(CONTEXT_DIR, file);
+      try {
+        const raw = fs.readFileSync(filePath, 'utf-8');
+        const data = JSON.parse(raw) as { updatedAt?: number };
+        if (data.updatedAt && data.updatedAt < cutoff) {
+          fs.unlinkSync(filePath);
+        }
+      } catch {
+        // Corrupt file — remove it
+        try { fs.unlinkSync(filePath); } catch {}
+      }
+    }
+  } catch {}
+}
