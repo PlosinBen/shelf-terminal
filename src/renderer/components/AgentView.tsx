@@ -1,7 +1,8 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import type { AgentProvider, AuthMethod, Connection } from '@shared/types';
+import type { AgentProvider, AgentPrefs, AuthMethod, Connection } from '@shared/types';
 import { AgentMessage, type AgentMsg } from './AgentMessage';
 import { useAttachmentPaste } from '../hooks/useAttachmentPaste';
+import { useStore, updateProjectConfig } from '../store';
 
 const AGENT_PROVIDERS: { id: AgentProvider; label: string }[] = [
   { id: 'claude', label: 'Claude' },
@@ -37,23 +38,33 @@ interface Props {
   cwd: string;
   connection: Connection;
   provider: AgentProvider;
+  projectIndex: number;
   onSwitchProvider?: (tabId: string, provider: AgentProvider) => void;
 }
 
-export function AgentView({ tabId, cwd, connection, provider, onSwitchProvider }: Props) {
+export function AgentView({ tabId, cwd, connection, provider, projectIndex, onSwitchProvider }: Props) {
+  const { projects } = useStore();
+  const savedPrefs = projects[projectIndex]?.config.agentPrefs?.[provider];
+
   const [messages, setMessages] = useState<AgentMsg[]>([]);
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamText, setStreamText] = useState('');
   const [streamThinking, setStreamThinking] = useState('');
-  const [statusModel, setStatusModel] = useState<string | null>(null);
+  const [statusModel, setStatusModel] = useState<string | null>(savedPrefs?.model ?? null);
   const [inputTokens, setInputTokens] = useState(0);
   const [outputTokens, setOutputTokens] = useState(0);
   const [costUsd, setCostUsd] = useState<number | undefined>(undefined);
   const [numTurns, setNumTurns] = useState<number | undefined>(undefined);
   const [capabilities, setCapabilities] = useState<Capabilities | null>(null);
-  const [permissionMode, setPermissionMode] = useState<string>('default');
-  const [currentEffort, setCurrentEffort] = useState<string>('medium');
+  const [permissionMode, setPermissionMode] = useState<string>(savedPrefs?.permissionMode ?? 'default');
+  const [currentEffort, setCurrentEffort] = useState<string>(savedPrefs?.effort ?? 'medium');
+
+  const persistPref = useCallback((partial: Partial<AgentPrefs>) => {
+    const current = projects[projectIndex]?.config.agentPrefs ?? {};
+    const updated = { ...current, [provider]: { ...current[provider], ...partial } };
+    updateProjectConfig(projectIndex, { agentPrefs: updated });
+  }, [projectIndex, provider, projects]);
   const [showSlashMenu, setShowSlashMenu] = useState(false);
   const [slashFilter, setSlashFilter] = useState('');
   const [slashSelection, setSlashSelection] = useState(0);
@@ -285,6 +296,7 @@ export function AgentView({ tabId, cwd, connection, provider, onSwitchProvider }
       }
       setStatusModel(arg);
       window.shelfApi.agent.setPrefs(tabId, { model: arg });
+      persistPref({ model: arg });
       setMessages((prev) => [...prev, {
         id: `msg-${Date.now()}`, type: 'system', content: `── Model switched to ${match.displayName} ──`, timestamp: Date.now(),
       }]);
@@ -345,6 +357,7 @@ export function AgentView({ tabId, cwd, connection, provider, onSwitchProvider }
     if (!picked) return;
     setStatusModel(picked.value);
     window.shelfApi.agent.setPrefs(tabId, { model: picked.value });
+    persistPref({ model: picked.value });
     setMessages((prev) => [...prev, {
       id: `msg-${Date.now()}`, type: 'system', content: `── Model switched to ${picked.displayName} ──`, timestamp: Date.now(),
     }]);
@@ -371,7 +384,8 @@ export function AgentView({ tabId, cwd, connection, provider, onSwitchProvider }
     const next = capabilities.models[(idx + 1) % capabilities.models.length];
     setStatusModel(next.value);
     window.shelfApi.agent.setPrefs(tabId, { model: next.value });
-  }, [tabId, capabilities, statusModel]);
+    persistPref({ model: next.value });
+  }, [tabId, capabilities, statusModel, persistPref]);
 
   const handleCycleMode = useCallback(() => {
     if (!capabilities || capabilities.permissionModes.length === 0) return;
@@ -379,7 +393,8 @@ export function AgentView({ tabId, cwd, connection, provider, onSwitchProvider }
     const next = capabilities.permissionModes[(idx + 1) % capabilities.permissionModes.length];
     setPermissionMode(next);
     window.shelfApi.agent.setPrefs(tabId, { permissionMode: next });
-  }, [tabId, capabilities, permissionMode]);
+    persistPref({ permissionMode: next });
+  }, [tabId, capabilities, permissionMode, persistPref]);
 
   const handleCycleEffort = useCallback(() => {
     if (!capabilities || capabilities.effortLevels.length === 0) return;
@@ -387,7 +402,8 @@ export function AgentView({ tabId, cwd, connection, provider, onSwitchProvider }
     const next = capabilities.effortLevels[(idx + 1) % capabilities.effortLevels.length];
     setCurrentEffort(next);
     window.shelfApi.agent.setPrefs(tabId, { effort: next });
-  }, [tabId, capabilities, currentEffort]);
+    persistPref({ effort: next });
+  }, [tabId, capabilities, currentEffort, persistPref]);
 
   const handleSwitchProvider = useCallback(async (newProvider: AgentProvider) => {
     if (newProvider === provider || isStreaming) return;
