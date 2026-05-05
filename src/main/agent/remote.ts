@@ -19,6 +19,7 @@ export function createRemoteBackend(
   connection: Connection,
   initScript?: string,
   provider: AgentProvider = 'claude',
+  sessionId?: string,
 ): AgentBackend {
   let remoteProc: RemoteProcess | null = null;
   let deployed = false;
@@ -83,6 +84,7 @@ export function createRemoteBackend(
         provider,
         prompt,
         cwd,
+        sessionId,
         resume: opts?.resume,
         permissionMode: currentPermissionMode ?? opts?.permissionMode,
         model: currentModel ?? undefined,
@@ -103,6 +105,12 @@ export function createRemoteBackend(
       if (remoteProc) {
         remoteProc.kill();
         remoteProc = null;
+      }
+    },
+
+    clearContext() {
+      if (sessionId && remoteProc) {
+        remoteProc.sendLine({ type: 'clear_context', sessionId });
       }
     },
 

@@ -23,8 +23,8 @@ export function initAgentManager(windowGetter: () => BrowserWindow | null): void
   getWindow = windowGetter;
 
   ipcMain.handle(IPC.AGENT_INIT, async (_e, payload) => {
-    const { tabId, cwd, connection, provider, ...opts } = payload;
-    return startSession(tabId, cwd, connection, provider, opts);
+    const { tabId, cwd, connection, provider, sessionId, ...opts } = payload;
+    return startSession(tabId, cwd, connection, provider, { ...opts, sessionId });
   });
 
   ipcMain.handle(IPC.AGENT_SEND, async (_e, payload) => {
@@ -94,7 +94,8 @@ async function startSession(
   const tag = `[agent:${tabId.slice(0, 8)}]`;
   log.info('agent', `${tag} start provider=${provider} cwd=${cwd}`);
 
-  const backend = createRemoteBackend(connection, undefined, provider);
+  const sessionId = opts?.sessionId as string | undefined;
+  const backend = createRemoteBackend(connection, undefined, provider, sessionId);
 
   const session: SessionInstance = {
     tabId,

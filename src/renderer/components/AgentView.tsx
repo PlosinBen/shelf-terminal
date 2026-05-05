@@ -3,6 +3,7 @@ import type { AgentProvider, AgentPrefs, AuthMethod, Connection } from '@shared/
 import { AgentMessage, type AgentMsg } from './AgentMessage';
 import { useAttachmentPaste } from '../hooks/useAttachmentPaste';
 import { useStore, updateProjectConfig } from '../store';
+import { loadAgentMessages, saveAgentMessages, clearAgentSession } from '../storage/agent-history';
 
 interface SlashCommand {
   name: string;
@@ -39,6 +40,20 @@ interface Props {
 export function AgentView({ tabId, cwd, connection, provider, projectIndex }: Props) {
   const { projects } = useStore();
   const savedPrefs = projects[projectIndex]?.config.agentPrefs?.[provider];
+
+  const sessionIdRef = useRef<string | null>(null);
+  if (!sessionIdRef.current) {
+    const existing = projects[projectIndex]?.config.agentSessionIds?.[provider];
+    if (existing) {
+      sessionIdRef.current = existing;
+    } else {
+      const newId = crypto.randomUUID();
+      sessionIdRef.current = newId;
+      const ids = { ...projects[projectIndex]?.config.agentSessionIds, [provider]: newId };
+      updateProjectConfig(projectIndex, { agentSessionIds: ids });
+    }
+  }
+  const sessionId = sessionIdRef.current;
 
   const [messages, setMessages] = useState<AgentMsg[]>([]);
   const [input, setInput] = useState('');
@@ -110,8 +125,18 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex }: Pr
   useEffect(() => {
     if (initializedRef.current) return;
     initializedRef.current = true;
-    window.shelfApi.agent.init(tabId, cwd, connection, provider);
-  }, [tabId, cwd, connection, provider]);
+    window.shelfApi.agent.init(tabId, cwd, connection, provider, sessionId);
+  }, [tabId, cwd, connection, provider, sessionId]);
+
+  // Load UI messages from IndexedDB
+  useEffect(() => {
+    if (!sessionId) return;
+    let cancelled = false;
+    loadAgentMessages(sessionId).then((loaded) => {
+      if (!cancelled && loaded.length > 0) setMessages(loaded);
+    });
+    return () => { cancelled = true; };
+  }, [sessionId]);
 
   // Capabilities listener
   useEffect(() => {
@@ -224,6 +249,12 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex }: Pr
             }
             return queue;
           });
+          // Persist UI messages after state settles
+          if (sessionId) {
+            setTimeout(() => {
+              setMessages((cur) => { saveAgentMessages(sessionId, cur); return cur; });
+            }, 200);
+          }
         }
         return nowStreaming;
       });
@@ -400,6 +431,7 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex }: Pr
   }, [tabId, capabilities, currentEffort, persistPref]);
 
   const handleReset = useCallback(async () => {
+    if (sessionId) clearAgentSession(sessionId);
     await window.shelfApi.agent.destroy(tabId);
     setMessages([]);
     setStreamText('');
@@ -407,10 +439,14 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex }: Pr
     setInputTokens(0);
     setOutputTokens(0);
     setNumTurns(undefined);
+    const newSessionId = crypto.randomUUID();
+    sessionIdRef.current = newSessionId;
+    const ids = { ...projects[projectIndex]?.config.agentSessionIds, [provider]: newSessionId };
+    updateProjectConfig(projectIndex, { agentSessionIds: ids });
     initializedRef.current = false;
-    window.shelfApi.agent.init(tabId, cwd, connection, provider);
+    window.shelfApi.agent.init(tabId, cwd, connection, provider, newSessionId);
     initializedRef.current = true;
-  }, [tabId, cwd, connection, provider]);
+  }, [tabId, cwd, connection, provider, sessionId, projectIndex, projects]);
 
   // Slash menu
   const filteredCommands = useMemo(() => {

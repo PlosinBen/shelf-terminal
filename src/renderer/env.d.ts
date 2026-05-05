@@ -77,7 +77,7 @@ interface ShelfApi {
     onStream: (callback: (chunk: import('../shared/types').PmStreamChunk) => void) => () => void;
   };
   agent: {
-    init: (tabId: string, cwd: string, connection: import('../shared/types').Connection, provider: string, opts?: Record<string, unknown>) => Promise<boolean>;
+    init: (tabId: string, cwd: string, connection: import('../shared/types').Connection, provider: string, sessionId?: string, opts?: Record<string, unknown>) => Promise<boolean>;
     send: (tabId: string, prompt: string, images?: string[]) => Promise<boolean>;
     stop: (tabId: string) => Promise<boolean>;
     destroy: (tabId: string) => Promise<void>;

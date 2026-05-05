@@ -85,4 +85,5 @@ export interface AgentBackend {
   setPermissionMode?(mode: string): void;
   storeCredential?(key: string): Promise<void>;
   clearCredential?(): Promise<void>;
+  clearContext?(): void;
 }

@@ -4,6 +4,7 @@ import { execSync } from 'child_process';
 import type { QueryInput, SendFn, ServerBackend, ProviderCapabilities } from './types';
 import { getCopilotSessionToken, isAuthenticated, COPILOT_DEFAULT_HEADERS } from './copilot-auth';
 import { needsCompaction as checkCompaction, splitForCompaction, truncateToolOutputs, buildCompactionPrompt } from '../compaction';
+import { loadContext, saveContext } from '../context-store';
 import type { HistoryMessage } from '../compaction';
 
 type PermissionResult = { behavior: 'allow' } | { behavior: 'deny'; message?: string };
@@ -162,6 +163,20 @@ export function createCopilotBackend(): ServerBackend {
   let totalOutputTokens = 0;
   let isRunning = false;
   let abortController: AbortController | null = null;
+  let currentSessionId: string | null = null;
+
+  function persistContext() {
+    if (!currentSessionId) return;
+    saveContext({
+      sessionId: currentSessionId,
+      provider: 'copilot',
+      modelMessages,
+      totalInputTokens,
+      totalOutputTokens,
+      model: currentModel,
+      updatedAt: Date.now(),
+    });
+  }
 
   async function performCompaction(provider: any, model: string, systemPrompt: string) {
     const history: HistoryMessage[] = modelMessages
@@ -236,6 +251,7 @@ export function createCopilotBackend(): ServerBackend {
       currentSend = send;
       if (input.model) currentModel = input.model;
       if (input.effort) currentEffort = input.effort;
+      if (input.sessionId) currentSessionId = input.sessionId;
 
       let session;
       try {
@@ -266,7 +282,17 @@ Rules:
 - Always read a file before editing it.
 - Don't make assumptions about the codebase — inspect it.`;
 
-      // Add user message to model messages
+      // Load persisted context on first query
+      if (modelMessages.length === 0 && currentSessionId) {
+        const persisted = loadContext(currentSessionId);
+        if (persisted) {
+          modelMessages = persisted.modelMessages as ModelMessage[];
+          totalInputTokens = persisted.totalInputTokens;
+          totalOutputTokens = persisted.totalOutputTokens;
+          if (persisted.model) currentModel = persisted.model;
+        }
+      }
+
       if (modelMessages.length === 0) {
         modelMessages.push({ role: 'system', content: systemPrompt });
       }
@@ -369,6 +395,8 @@ Rules:
             console.error(`[copilot] Compaction failed: ${err.message}`);
           }
         }
+
+        persistContext();
       } catch (err: any) {
         if (!abortController.signal.aborted) {
           send({ type: 'error', error: `Copilot error: ${err.message ?? String(err)}` });

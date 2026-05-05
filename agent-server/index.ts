@@ -1,12 +1,13 @@
 import * as readline from 'readline';
 import { createClaudeBackend } from './providers/claude';
 import { createCopilotBackend } from './providers/copilot';
+import { deleteContext } from './context-store';
 import type { OutgoingMessage, QueryInput, ServerBackend } from './providers/types';
 
 type Provider = 'claude' | 'copilot';
 
 interface IncomingMessage {
-  type: 'send' | 'stop' | 'ping' | 'resolve_permission' | 'get_capabilities' | 'store_credential' | 'clear_credential';
+  type: 'send' | 'stop' | 'ping' | 'resolve_permission' | 'get_capabilities' | 'store_credential' | 'clear_credential' | 'clear_context';
   provider?: Provider;
   prompt?: string;
   cwd?: string;
@@ -15,6 +16,7 @@ interface IncomingMessage {
   model?: string;
   effort?: string;
   images?: string[];
+  sessionId?: string;
   toolUseId?: string;
   allow?: boolean;
   message?: string;
@@ -67,6 +69,7 @@ async function handleSend(msg: IncomingMessage) {
     model: msg.model,
     effort: msg.effort,
     images: msg.images,
+    sessionId: msg.sessionId,
   };
   await backend.query(input, send);
 }
@@ -142,6 +145,10 @@ rl.on('line', (line) => {
           send({ type: 'credential_cleared', requestId: msg.requestId, ok: false, error: err?.message ?? String(err) });
         }
       })();
+      break;
+    }
+    case 'clear_context': {
+      if (msg.sessionId) deleteContext(msg.sessionId);
       break;
     }
   }

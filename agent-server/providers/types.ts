@@ -14,6 +14,7 @@ export interface QueryInput {
   model?: string;
   effort?: string;
   images?: string[];
+  sessionId?: string;
 }
 
 export interface ProviderCapabilities {
