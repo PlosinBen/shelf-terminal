@@ -90,6 +90,9 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex }: Pr
   const escPendingRef = useRef(false);
   const escTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
+
   const listRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -136,6 +139,16 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex }: Pr
       if (!cancelled && loaded.length > 0) setMessages(loaded);
     });
     return () => { cancelled = true; };
+  }, [sessionId]);
+
+  // Save UI messages on unmount (tab close)
+  useEffect(() => {
+    const sid = sessionId;
+    return () => {
+      if (sid && messagesRef.current.length > 0) {
+        saveAgentMessages(sid, messagesRef.current);
+      }
+    };
   }, [sessionId]);
 
   // Capabilities listener
