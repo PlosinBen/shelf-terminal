@@ -971,6 +971,13 @@ button {
   letter-spacing: 0.5px;
 }
 
+.settings-section-subtitle {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+
 .keybinding-btn {
   background: var(--bg-secondary);
   border: 1px solid var(--border);
@@ -1225,6 +1232,61 @@ button {
   border-radius: 3px;
   padding: 1px 4px;
   font-size: 10px;
+}
+
+/* ── Custom Models Editor ── */
+
+.custom-models-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.custom-model-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 3px 0;
+  font-size: 13px;
+}
+
+.custom-model-id {
+  flex: 1;
+  color: var(--text);
+}
+
+.custom-model-ctx {
+  color: var(--text-muted);
+  font-size: 12px;
+  min-width: 40px;
+  text-align: right;
+}
+
+.custom-model-dot {
+  color: var(--accent);
+  font-size: 8px;
+}
+
+.custom-model-reasoning {
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  margin-left: 6px;
+}
+
+.custom-model-add-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.custom-model-add-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 /* ── Connection Step ── */

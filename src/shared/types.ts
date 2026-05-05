@@ -140,6 +140,7 @@ export interface AppSettings {
   pmProvider?: PmProviderConfig;
   telegram?: TelegramConfig;
   agentDisplay?: Partial<Record<string, AgentDisplayMode>>;
+  providerModels?: Partial<Record<PmProviderType, ProviderModel[]>>;
 }
 
 
@@ -184,10 +185,47 @@ export interface WorktreeRemoveResult {
 
 export type PmProviderType = 'openai' | 'gemini';
 
-export const PM_PROVIDERS: { id: PmProviderType; label: string; baseURL?: string; defaultModel: string }[] = [
-  { id: 'openai', label: 'OpenAI', defaultModel: 'gpt-4o' },
-  { id: 'gemini', label: 'Gemini', baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai', defaultModel: 'gemini-2.5-flash' },
+export interface ProviderModel {
+  id: string;
+  contextWindow: number;
+  reasoning?: boolean;
+}
+
+export const PM_PROVIDERS: { id: PmProviderType; label: string; baseURL?: string; defaultModel: string; models: ProviderModel[] }[] = [
+  {
+    id: 'openai', label: 'OpenAI', defaultModel: 'gpt-4o',
+    models: [
+      { id: 'gpt-4o', contextWindow: 128000 },
+      { id: 'gpt-4o-mini', contextWindow: 128000 },
+      { id: 'gpt-4.1', contextWindow: 1047576 },
+      { id: 'gpt-4.1-mini', contextWindow: 1047576 },
+      { id: 'gpt-4.1-nano', contextWindow: 1047576 },
+      { id: 'o3', contextWindow: 200000, reasoning: true },
+      { id: 'o4-mini', contextWindow: 200000, reasoning: true },
+    ],
+  },
+  {
+    id: 'gemini', label: 'Gemini', baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai', defaultModel: 'gemini-2.5-flash',
+    models: [
+      { id: 'gemini-2.5-flash', contextWindow: 1048576, reasoning: true },
+      { id: 'gemini-2.5-pro', contextWindow: 1048576, reasoning: true },
+      { id: 'gemini-2.0-flash', contextWindow: 1048576 },
+    ],
+  },
 ];
+
+export function getModelsForProvider(providerType: PmProviderType, custom?: Partial<Record<PmProviderType, ProviderModel[]>>): ProviderModel[] {
+  const defaults = PM_PROVIDERS.find((p) => p.id === providerType)?.models ?? [];
+  const overrides = custom?.[providerType];
+  if (!overrides || overrides.length === 0) return defaults;
+  const merged = [...defaults];
+  for (const o of overrides) {
+    const idx = merged.findIndex((m) => m.id === o.id);
+    if (idx >= 0) merged[idx] = o;
+    else merged.push(o);
+  }
+  return merged;
+}
 
 export interface PmProviderConfig {
   provider: PmProviderType;

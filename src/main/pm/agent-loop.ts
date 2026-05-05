@@ -141,6 +141,16 @@ export function clearHistory(): void {
   clearPersistedHistory();
 }
 
+export function compactHistory(): { kept: number; removed: number } {
+  const total = history.length;
+  const KEEP_TURNS = 6;
+  history = trimHistoryForLLM(history, KEEP_TURNS);
+  const displayKeep = Math.min(messages.length, KEEP_TURNS);
+  messages = messages.slice(-displayKeep);
+  persist();
+  return { kept: history.length, removed: total - history.length };
+}
+
 export async function handleTabEvent(
   tabId: string,
   tabName: string,

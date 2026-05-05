@@ -72,6 +72,7 @@ export const IPC = {
   PM_STOP: 'pm:stop',
   PM_HISTORY: 'pm:history',
   PM_CLEAR: 'pm:clear',
+  PM_COMPACT: 'pm:compact',
   PM_SYNC_STATE: 'pm:sync-state',
   PM_AWAY_MODE: 'pm:away-mode',
   PM_AWAY_MODE_GET: 'pm:away-mode-get',

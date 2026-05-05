@@ -1,14 +1,70 @@
 import React, { useState, useEffect, useReducer, useRef, useCallback, useMemo } from 'react';
-import { useStore, setAwayMode, setPmVisible } from '../store';
+import { useStore, setAwayMode, setPmVisible, updateSettings } from '../store';
 import { marked } from 'marked';
-import type { PmMessage, PmStreamChunk, PmToolCall } from '@shared/types';
-import { pmStreamReducer, initialPmStreamState } from './pm-view-reducer';
+import type { PmMessage, PmStreamChunk, PmToolCall, AppSettings } from '@shared/types';
+import { getModelsForProvider } from '@shared/types';
+import { pmStreamReducer, initialPmStreamState, type PmStreamAction } from './pm-view-reducer';
 
 marked.setOptions({ breaks: true, gfm: true });
 
 const DEFAULT_WIDTH = 380;
 const MIN_WIDTH = 280;
 const MAX_WIDTH = 700;
+
+type SetMessages = React.Dispatch<React.SetStateAction<PmMessage[]>>;
+
+async function handleSlashCommand(
+  text: string,
+  settings: AppSettings,
+  setMessages: SetMessages,
+  dispatch: React.Dispatch<PmStreamAction>,
+): Promise<boolean> {
+  const [cmd, ...rest] = text.split(/\s+/);
+  const arg = rest.join(' ').trim();
+
+  switch (cmd) {
+    case '/clear':
+      await window.shelfApi.pm.clear();
+      setMessages([]);
+      dispatch({ type: 'clear_display' });
+      return true;
+
+    case '/compact': {
+      const result = await window.shelfApi.pm.compact();
+      setMessages((prev) => {
+        const kept = prev.slice(-result.kept);
+        return [...kept, { role: 'assistant' as const, content: `Compacted: removed ${result.removed} messages, kept ${result.kept}.`, timestamp: Date.now() }];
+      });
+      return true;
+    }
+
+    case '/model': {
+      const provider = settings.pmProvider?.provider;
+      if (!provider) {
+        setMessages((prev) => [...prev, { role: 'error', content: 'No provider configured.', timestamp: Date.now() }]);
+        return true;
+      }
+      const models = getModelsForProvider(provider, settings.providerModels);
+      if (!arg) {
+        const current = settings.pmProvider?.model || '(none)';
+        const list = models.map((m) => `  ${m.id === current ? '● ' : '  '}${m.id}`).join('\n');
+        setMessages((prev) => [...prev, { role: 'assistant' as const, content: `Current model: **${current}**\n\nAvailable:\n\`\`\`\n${list}\n\`\`\``, timestamp: Date.now() }]);
+        return true;
+      }
+      const match = models.find((m) => m.id === arg);
+      if (!match) {
+        setMessages((prev) => [...prev, { role: 'error', content: `Unknown model: ${arg}\nAvailable: ${models.map((m) => m.id).join(', ')}`, timestamp: Date.now() }]);
+        return true;
+      }
+      updateSettings({ pmProvider: { ...settings.pmProvider!, model: match.id } });
+      setMessages((prev) => [...prev, { role: 'assistant' as const, content: `Model switched to **${match.id}**`, timestamp: Date.now() }]);
+      return true;
+    }
+
+    default:
+      return false;
+  }
+}
 
 export function PmView() {
   const { settings, awayMode } = useStore();
@@ -53,10 +109,16 @@ export function PmView() {
     const text = input.trim();
     if (!text || streaming) return;
     setInput('');
+
+    if (text.startsWith('/')) {
+      const handled = await handleSlashCommand(text, settings, setMessages, dispatch);
+      if (handled) return;
+    }
+
     setMessages((prev) => [...prev, { role: 'user', content: text, timestamp: Date.now() }]);
     dispatch({ type: 'send_start' });
     await window.shelfApi.pm.send(text);
-  }, [input, streaming]);
+  }, [input, streaming, settings]);
 
   const handleStop = useCallback(() => {
     window.shelfApi.pm.stop();

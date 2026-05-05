@@ -69,6 +69,7 @@ interface ShelfApi {
     stop: () => Promise<void>;
     history: () => Promise<import('../shared/types').PmMessage[]>;
     clear: () => Promise<void>;
+    compact: () => Promise<{ kept: number; removed: number }>;
     syncState: (state: any) => void;
     setAwayMode: (on: boolean) => Promise<void>;
     getAwayMode: () => Promise<boolean>;

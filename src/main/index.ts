@@ -16,7 +16,7 @@ import { createConnector, getAvailableTypes, listDockerContainers, listWSLDistro
 import { loadSSHServers, saveSSHServer } from './ssh-server-store';
 import { log, setLogLevel, setFileWriter } from '@shared/logger';
 import { applyUserDataIsolation } from './user-data-path';
-import { handlePmSend, handleTabEvent, getHistory, clearHistory, stopGeneration, updateSyncedState, setWritePtyFn, isAwayMode, setAwayMode, initAwayMode, setStateChangeCallback, updateKnownTabs, startTelegram, stopTelegram, setMessageCallback, setCallbackQueryHandler, setStopCallback } from './pm';
+import { handlePmSend, handleTabEvent, getHistory, clearHistory, compactHistory, stopGeneration, updateSyncedState, setWritePtyFn, isAwayMode, setAwayMode, initAwayMode, setStateChangeCallback, updateKnownTabs, startTelegram, stopTelegram, setMessageCallback, setCallbackQueryHandler, setStopCallback } from './pm';
 import { initAgentManager, disposeAllAgents } from './agent';
 import type { Connection, ProjectConfig, AppSettings, FileUploadResult, FileClearResult, PtySpawnPayload, PtyInputPayload, PtyResizePayload, PtyKillPayload, GitBranchInfo, WorktreeAddResult, WorktreeRemoveResult } from '@shared/types';
 
@@ -397,6 +397,10 @@ ipcMain.handle(IPC.PM_HISTORY, () => {
 
 ipcMain.handle(IPC.PM_CLEAR, () => {
   clearHistory();
+});
+
+ipcMain.handle(IPC.PM_COMPACT, () => {
+  return compactHistory();
 });
 
 ipcMain.on(IPC.PM_SYNC_STATE, (_event, state: any) => {

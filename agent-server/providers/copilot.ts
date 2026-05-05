@@ -20,6 +20,7 @@ interface CopilotModelRaw {
 }
 
 const DEFAULT_MODEL = 'gpt-4o';
+const REASONING_MODELS = new Set(['o1', 'o1-mini', 'o1-preview', 'o3', 'o3-mini', 'o4-mini']);
 
 async function fetchCopilotModels(session: { token: string; apiEndpoint: string }): Promise<CopilotModelRaw[]> {
   try {
@@ -212,6 +213,7 @@ export function createCopilotBackend(): ServerBackend {
         if (w) contextWindows.set(m.id, w);
       }
       return {
+        currentModel,
         models: chat.map((m) => ({
           value: m.id,
           displayName: m.name ?? m.id,
@@ -275,6 +277,7 @@ Rules:
       const tools = await buildTools(input.cwd);
 
       try {
+        const isReasoning = REASONING_MODELS.has(currentModel);
         const result = streamText({
           model: provider(currentModel),
           system: systemPrompt,
@@ -282,6 +285,7 @@ Rules:
           tools,
           maxSteps: 25,
           abortSignal: abortController.signal,
+          ...(isReasoning ? { reasoningEffort: currentEffort as any } : {}),
         });
 
         let assistantText = '';

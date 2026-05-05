@@ -103,6 +103,7 @@ contextBridge.exposeInMainWorld('shelfApi', {
     stop: () => ipcRenderer.invoke(IPC.PM_STOP),
     history: () => ipcRenderer.invoke(IPC.PM_HISTORY),
     clear: () => ipcRenderer.invoke(IPC.PM_CLEAR),
+    compact: () => ipcRenderer.invoke(IPC.PM_COMPACT) as Promise<{ kept: number; removed: number }>,
     syncState: (state: any) => ipcRenderer.send(IPC.PM_SYNC_STATE, state),
     setAwayMode: (on: boolean) => ipcRenderer.invoke(IPC.PM_AWAY_MODE, on),
     getAwayMode: () => ipcRenderer.invoke(IPC.PM_AWAY_MODE_GET) as Promise<boolean>,

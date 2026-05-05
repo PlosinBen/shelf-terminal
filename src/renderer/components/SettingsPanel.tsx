@@ -2,8 +2,8 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useStore, updateSettings, toggleSettings } from '../store';
 import { themes } from '../themes';
 import { comboToLabel, recordCombo } from '../hooks/useKeybindings';
-import type { AppSettings, KeybindingAction, KeybindingConfig, LogLevel, PmProviderType } from '@shared/types';
-import { PM_PROVIDERS } from '@shared/types';
+import type { AppSettings, KeybindingAction, KeybindingConfig, LogLevel, PmProviderType, ProviderModel } from '@shared/types';
+import { PM_PROVIDERS, getModelsForProvider } from '@shared/types';
 
 const ACTION_LABELS: Record<KeybindingAction, string> = {
   toggleSidebar: 'Toggle Sidebar',
@@ -21,7 +21,12 @@ const ACTION_LABELS: Record<KeybindingAction, string> = {
   toggleDevTools: 'Dev Tools',
 };
 
-type SettingsTab = 'terminal' | 'pm' | 'shortcuts';
+function formatContextWindow(tokens: number): string {
+  if (tokens >= 1000000) return `${(tokens / 1000000).toFixed(tokens % 1000000 === 0 ? 0 : 1)}M`;
+  return `${Math.round(tokens / 1000)}K`;
+}
+
+type SettingsTab = 'terminal' | 'models' | 'pm' | 'shortcuts';
 
 export function SettingsPanel() {
   const { settingsVisible, settings } = useStore();
@@ -111,6 +116,7 @@ export function SettingsPanel() {
         <div className="settings-layout">
           <div className="settings-tabs">
             <button className={`settings-tab ${activeTab === 'terminal' ? 'active' : ''}`} onClick={() => setActiveTab('terminal')}>Terminal</button>
+            <button className={`settings-tab ${activeTab === 'models' ? 'active' : ''}`} onClick={() => setActiveTab('models')}>Models</button>
             <button className={`settings-tab ${activeTab === 'pm' ? 'active' : ''}`} onClick={() => setActiveTab('pm')}>PM Agent</button>
             <button className={`settings-tab ${activeTab === 'shortcuts' ? 'active' : ''}`} onClick={() => setActiveTab('shortcuts')}>Shortcuts</button>
           </div>
@@ -243,6 +249,26 @@ export function SettingsPanel() {
               </>
             )}
 
+            {activeTab === 'models' && (
+              <>
+                <div className="settings-section-title">Models</div>
+                <div className="project-edit-hint">Available across PM Agent and OpenAI-based agent providers.</div>
+                {PM_PROVIDERS.map((p) => (
+                  <ProviderModelsSection
+                    key={p.id}
+                    provider={p}
+                    customModels={draft.providerModels?.[p.id] ?? []}
+                    onChange={(models) => {
+                      const next = { ...draft.providerModels };
+                      if (models.length > 0) next[p.id] = models;
+                      else delete next[p.id];
+                      updateDraft({ providerModels: Object.keys(next).length > 0 ? next : undefined });
+                    }}
+                  />
+                ))}
+              </>
+            )}
+
             {activeTab === 'pm' && (
               <>
                 <div className="settings-section-title">Provider</div>
@@ -278,15 +304,18 @@ export function SettingsPanel() {
                 </div>
                 <div className="settings-group">
                   <label className="settings-label">Model</label>
-                  <input
+                  <select
                     className="settings-input settings-input-wide"
-                    type="text"
                     value={draft.pmProvider?.model || ''}
                     onChange={(e) => updateDraft({
                       pmProvider: { ...draft.pmProvider ?? { provider: 'gemini', apiKey: '', model: '' }, model: e.target.value },
                     })}
-                    placeholder={draft.pmProvider?.provider === 'openai' ? 'gpt-4o' : 'gemini-2.5-flash'}
-                  />
+                  >
+                    <option value="">Select model...</option>
+                    {draft.pmProvider?.provider && getModelsForProvider(draft.pmProvider.provider, draft.providerModels).map((m) => (
+                      <option key={m.id} value={m.id}>{m.id} ({formatContextWindow(m.contextWindow)})</option>
+                    ))}
+                  </select>
                 </div>
 
                 <div className="settings-divider" />
@@ -342,6 +371,77 @@ export function SettingsPanel() {
           <button className="conn-btn conn-btn-cancel" onClick={handleCancel}>Cancel</button>
           <button className="conn-btn conn-btn-next" onClick={handleSave}>Save</button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function ProviderModelsSection({ provider, customModels, onChange }: {
+  provider: typeof PM_PROVIDERS[number];
+  customModels: ProviderModel[];
+  onChange: (models: ProviderModel[]) => void;
+}) {
+  const [adding, setAdding] = useState(false);
+  const [newId, setNewId] = useState('');
+  const [newCtx, setNewCtx] = useState('128000');
+  const [newReasoning, setNewReasoning] = useState(false);
+
+  const customIds = new Set(customModels.map((m) => m.id));
+
+  const handleAdd = () => {
+    const id = newId.trim();
+    if (!id) return;
+    const ctx = parseInt(newCtx, 10) || 128000;
+    const entry: ProviderModel = { id, contextWindow: ctx, ...(newReasoning ? { reasoning: true } : {}) };
+    const list = [...customModels];
+    const idx = list.findIndex((m) => m.id === id);
+    if (idx >= 0) list[idx] = entry;
+    else list.push(entry);
+    onChange(list);
+    setNewId('');
+    setNewCtx('128000');
+    setNewReasoning(false);
+    setAdding(false);
+  };
+
+  const handleRemove = (modelId: string) => {
+    onChange(customModels.filter((m) => m.id !== modelId));
+  };
+
+  return (
+    <div className="settings-group" style={{ alignItems: 'flex-start' }}>
+      <label className="settings-label" style={{ paddingTop: 3 }}>{provider.label}</label>
+      <div className="custom-models-list" style={{ flex: 1 }}>
+        {provider.models.map((m) => (
+          <div key={m.id} className="custom-model-row">
+            <span className="custom-model-id">{m.id}{m.reasoning && <span className="custom-model-reasoning">reasoning</span>}</span>
+            <span className="custom-model-ctx">{formatContextWindow(m.contextWindow)}</span>
+          </div>
+        ))}
+        {customModels.filter((m) => !provider.models.some((d) => d.id === m.id)).map((m) => (
+          <div key={m.id} className="custom-model-row">
+            <span className="custom-model-id">{m.id}{m.reasoning && <span className="custom-model-reasoning">reasoning</span>}</span>
+            <span className="custom-model-ctx">{formatContextWindow(m.contextWindow)}</span>
+            <button className="default-tab-remove" onClick={() => handleRemove(m.id)} title="Remove">×</button>
+          </div>
+        ))}
+        {adding ? (
+          <div className="custom-model-add-form">
+            <div className="custom-model-add-row">
+              <input className="settings-input" type="text" value={newId} onChange={(e) => setNewId(e.target.value)} placeholder="model-id" style={{ flex: 1 }} />
+              <input className="settings-input" type="number" value={newCtx} onChange={(e) => setNewCtx(e.target.value)} placeholder="context window" style={{ width: 100 }} />
+            </div>
+            <div className="custom-model-add-row">
+              <label className="settings-checkbox"><input type="checkbox" checked={newReasoning} onChange={(e) => setNewReasoning(e.target.checked)} /> Reasoning</label>
+            </div>
+            <div className="custom-model-add-row">
+              <button className="conn-btn conn-btn-next" onClick={handleAdd} disabled={!newId.trim()}>Add</button>
+              <button className="conn-btn conn-btn-cancel" onClick={() => setAdding(false)}>Cancel</button>
+            </div>
+          </div>
+        ) : (
+          <button className="default-tab-add" onClick={() => setAdding(true)}>+ Add Model</button>
+        )}
       </div>
     </div>
   );
