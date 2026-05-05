@@ -40,20 +40,21 @@
 
 | Intent | File | Description |
 |--------|------|-------------|
-| Session manager + IPC handlers | `index.ts` | `initAgentManager(windowGetter)` 註冊所有 agent IPC、管理 tab→session mapping、permission bridging、`getAgentState()` / `isAgentTab()` / `disposeAllAgents()` |
-| Remote backend | `remote.ts` | `createRemoteBackend()` 透過 stdin/stdout JSON line protocol 跟 agent-server 通訊；支援 local/SSH/Docker spawn；`deployAgentServer()` 自動 SCP/docker cp bundle 到遠端 |
-| Type 定義 | `types.ts` | `AgentBackend`、`AgentEvent`、`AgentSessionState` 等 agent 系統型別 |
+| Session manager + IPC handlers | `index.ts` | `initAgentManager(windowGetter)` 註冊所有 agent IPC、管理 tab→session mapping、permission bridging、`getAgentState()` / `isAgentTab()` / `disposeAllAgents()`、傳遞 `sessionId` 到 remote backend |
+| Remote backend | `remote.ts` | `createRemoteBackend()` 透過 stdin/stdout JSON line protocol 跟 agent-server 通訊；支援 local/SSH/Docker spawn；`deployAgentServer()` 自動 SCP/docker cp bundle 到遠端；`clearContext()` 通知 agent-server 刪除 context 檔 |
+| Type 定義 | `types.ts` | `AgentBackend`（含 `clearContext?`）、`AgentEvent`、`AgentSessionState` 等 agent 系統型別 |
 | 單元測試 | `remote.test.ts` | Remote backend 介面、lifecycle 測試 |
 
 ### Agent Server (agent-server/)
 
 | Intent | File | Description |
 |--------|------|-------------|
-| Entry point | `index.ts` | stdin/stdout JSON line protocol server、dispatch to Claude/Copilot backends |
-| Claude provider | `providers/claude.ts` | `@anthropic-ai/claude-agent-sdk` wrapper、permission bridging |
-| Copilot provider | `providers/copilot.ts` | Vercel AI SDK (`ai` + `@ai-sdk/openai`)、tool definitions (read/write/edit/bash/list)、auto-compaction、cross-turn memory |
+| Entry point | `index.ts` | stdin/stdout JSON line protocol server、dispatch to Claude/Copilot backends、啟動時呼叫 `cleanupOldContexts()` 清理 30 天以上的 context 檔 |
+| Claude provider | `providers/claude.ts` | `@anthropic-ai/claude-agent-sdk` wrapper、permission bridging、auto-resume（`lastSessionId`）、stream_event delta 處理、suppress synthetic/subagent model |
+| Copilot provider | `providers/copilot.ts` | Vercel AI SDK (`ai` + `@ai-sdk/openai`)、tool definitions (read/write/edit/bash/list)、auto-compaction、cross-turn memory、file-based context persistence（透過 `context-store`） |
 | Copilot auth | `providers/copilot-auth.ts` | GitHub Copilot OAuth token（`~/.config/github-copilot/` + `gh auth token`）→ session token exchange |
-| Provider types | `providers/types.ts` | `ServerBackend`、`SendFn`、`QueryInput`、`ProviderCapabilities` 介面 |
+| Context persistence | `context-store.ts` | `loadContext()`、`saveContext()`、`deleteContext()`、`cleanupOldContexts()`，存放在 `~/.shelf/agent-context/{sessionId}.json`，atomic write（tmp+rename） |
+| Provider types | `providers/types.ts` | `ServerBackend`、`SendFn`、`QueryInput`（含 `sessionId`）、`ProviderCapabilities` 介面 |
 | Context compaction | `compaction.ts` | `needsCompaction()`、`splitForCompaction()`、`truncateToolOutputs()`、`buildCompactionPrompt()` |
 | Bundle build | `build.mjs` | esbuild → `dist/agent-server/<version>/index.js` 單一 ESM bundle |
 | 單元測試 | `compaction.test.ts` | Compaction 函式 14 個測試 |
@@ -104,6 +105,7 @@
 | PM 聊天面板 | `components/PmView.tsx` | 右側可拖拉 panel（訊息列表 + markdown 渲染 + streaming + tool call 摺疊 + Away Mode toggle + error 顯示）；chunk handling 走 `pm-view-reducer.ts` 的純 reducer |
 | PM stream reducer | `components/pm-view-reducer.ts` | 純 reducer（`send_start` / `clear_display` / `dismiss_error` / `chunk`），管 streaming/streamText/streamToolCalls/error 四個 UI state；vitest 測 13 case |
 | Project 編輯面板 | `components/ProjectEditPanel.tsx` | 改名、init script、default tabs、quick commands 編輯、Clear uploaded files |
+| Agent UI 訊息持久化 | `storage/agent-history.ts` | IndexedDB（`idb@8.0.3`）存 UI messages keyed by sessionId；`loadAgentMessages()`、`saveAgentMessages()`、`clearAgentSession()` |
 | 主題定義 | `themes.ts` | 5 個內建主題（terminal + UI 色彩） |
 | Window API 型別 | `env.d.ts` | `window.shelfApi` TypeScript 宣告 |
 | React entry | `main.tsx` | `createRoot` + `<App />` |

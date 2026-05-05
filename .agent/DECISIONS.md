@@ -389,10 +389,54 @@
 
 ---
 
-## 34. PM 回覆用 marked 渲染 Markdown
+## 34. Agent Tab 固定 Provider，每 Project 每 Provider 至多一個
+
+**決策**: Agent tab 建立時綁定一個 provider（claude 或 copilot），不可在 tab 內切換。UI 層限制同一個 project 不能開兩個相同 provider 的 agent tab（`addTab()` 檢查 + TabBar menu disabled）。Backend 透過 tabId-based session 管理，架構上不限制數量。
+
+**原因**: Provider 切換涉及完全不同的 context/session 管理（Claude SDK session vs Copilot modelMessages），切換後前一個 provider 的對話無法保留。固定綁定讓 sessionId 跟 provider 一對一，persistence 邏輯簡單。UI 限制一個是因為同 provider 開兩個 tab 沒有實際用途，但 backend 不硬限是為未來擴展保留空間。
+
+**不要改**: 不要做 tab 內 provider 切換 — context 不相容。不要在 backend 層也限制一個 — UI 層限制已經足夠。
+
+---
+
+## 35. Agent 雙層持久化：Server-side Context File + Client-side IndexedDB
+
+**決策**: Agent 對話持久化分兩層：
+- **Server-side**（`~/.shelf/agent-context/{sessionId}.json`）：存 Copilot 的 `modelMessages`（會被 compaction 壓縮），用於 API 呼叫。Claude 由 SDK 自行管理 session（`resume` 機制）。
+- **Client-side**（IndexedDB `shelf-agent-history`）：存完整 UI messages（包括 streaming 前的所有訊息），用於重新開啟 tab 時恢復顯示。
+
+SessionId 是 UUID v4，存在 `ProjectConfig.agentSessionIds[provider]`，兩層用同一個 key。
+
+**原因**: Server-side context 會被 compaction（Copilot）或完全由 SDK 管理（Claude），不適合直接拿來恢復 UI。UI 需要完整歷史（包括 user messages、tool calls 展開等），所以需要獨立一層。IndexedDB 在 renderer 直接可用，不需要 IPC round-trip。
+
+**不要改**: 不要合併成單一 persistence — server-side 的 compacted data 無法恢復原始 UI 顯示。不要用 file 替代 IndexedDB — renderer 讀寫 file 需要 IPC。
+
+---
+
+## 36. Agent Context 檔案 30 天自動清理
+
+**決策**: `agent-server/index.ts` 啟動時呼叫 `cleanupOldContexts()`，掃描 `~/.shelf/agent-context/` 目錄，移除 `updatedAt` 超過 30 天的檔案。損壞的 JSON 檔也一併移除。IndexedDB 不做定期清理，僅在 remove project 時清理對應 session。
+
+**原因**: Context 檔案在遠端機器累積，沒有人會手動清理。30 天足夠涵蓋任何合理的 resume 需求。IndexedDB 在本機且跟 project 生命週期綁定（remove project 時清），不需要額外清理機制。
+
+**不要改**: 不要在 client 端觸發清理（agent-server 在遠端，client 端觸發要走 IPC + SSH exec，太複雜）。
+
+---
+
+## 37. PM 回覆用 marked 渲染 Markdown
 
 **決策**: Assistant 訊息用 `marked` 套件（zero-dependency, 449KB）渲染成 HTML，透過 `dangerouslySetInnerHTML` 顯示。User 訊息維持純文字。Streaming 時也即時渲染。
 
 **原因**: PM 回覆常帶 code block、list、table，純文字不可讀。Electron 本地環境無 XSS 風險（資料來源是 LLM 回覆）。marked 是 zero-dependency 且夠輕量。
 
 **不要改**: 不要自幹 regex markdown parser — edge case 太多。不要用 `react-markdown`（dependency chain 太長）。
+
+---
+
+## 38. Claude Auto-Resume 純 Server-Side
+
+**決策**: Claude session resume 完全在 `agent-server/providers/claude.ts` 處理。SDK 回傳的 `session_id` 存在 `lastSessionId` 變數，下次 query 自動帶入 `options.resume`。Client 端也可透過 `QueryInput.resume` 傳入 sessionId 觸發。不需要額外 IPC channel。
+
+**原因**: Claude SDK 的 resume 機制只需要一個 session_id string，server 端自己追蹤最簡單。不需要讓 client 端知道 SDK 內部的 session_id — client 只管自己的 sessionId（UUID），server 端自己維護 SDK session_id 的 mapping。
+
+**不要改**: 不要把 SDK session_id 暴露給 client — 增加 IPC 複雜度且沒有實際好處。
