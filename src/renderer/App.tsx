@@ -19,6 +19,7 @@ import type { ProjectConfig } from '@shared/types';
 import { disposeTerminal } from './components/TerminalView';
 import { on, emit, Events } from './events';
 import { getTheme } from './themes';
+import { clearAgentSession } from './storage/agent-history';
 import './styles/global.css';
 
 export function App() {
@@ -52,6 +53,11 @@ export function App() {
     const offRemoveProject = on(Events.REMOVE_PROJECT, (projectIndex: number) => {
       const proj = projects[projectIndex];
       if (proj) {
+        // Clean up agent session data (IndexedDB)
+        const sessionIds = proj.config.agentSessionIds;
+        if (sessionIds) {
+          Object.values(sessionIds).forEach((id) => { if (id) clearAgentSession(id); });
+        }
         proj.tabs.forEach((tab) => {
           if (tab.type === 'agent') {
             window.shelfApi.agent.destroy(tab.id);
