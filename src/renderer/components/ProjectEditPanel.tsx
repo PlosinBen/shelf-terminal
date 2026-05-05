@@ -200,7 +200,7 @@ export function ProjectEditPanel() {
               Default provider for new agent tabs in this project.
             </div>
             <select
-              className="settings-input"
+              className="settings-input settings-input-wide"
               value={defaultAgentProvider}
               onChange={(e) => setDefaultAgentProvider(e.target.value as AgentProvider | '')}
             >

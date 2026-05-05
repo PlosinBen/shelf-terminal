@@ -182,8 +182,15 @@ export interface WorktreeRemoveResult {
 
 // ── PM Agent ──
 
+export type PmProviderType = 'openai' | 'gemini';
+
+export const PM_PROVIDERS: { id: PmProviderType; label: string; baseURL?: string; defaultModel: string }[] = [
+  { id: 'openai', label: 'OpenAI', defaultModel: 'gpt-4o' },
+  { id: 'gemini', label: 'Gemini', baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai', defaultModel: 'gemini-2.5-flash' },
+];
+
 export interface PmProviderConfig {
-  baseUrl: string;
+  provider: PmProviderType;
   apiKey: string;
   model: string;
 }

@@ -2,7 +2,8 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useStore, updateSettings, toggleSettings } from '../store';
 import { themes } from '../themes';
 import { comboToLabel, recordCombo } from '../hooks/useKeybindings';
-import type { AppSettings, KeybindingAction, KeybindingConfig, LogLevel } from '@shared/types';
+import type { AppSettings, KeybindingAction, KeybindingConfig, LogLevel, PmProviderType } from '@shared/types';
+import { PM_PROVIDERS } from '@shared/types';
 
 const ACTION_LABELS: Record<KeybindingAction, string> = {
   toggleSidebar: 'Toggle Sidebar',
@@ -246,16 +247,22 @@ export function SettingsPanel() {
               <>
                 <div className="settings-section-title">Provider</div>
                 <div className="settings-group">
-                  <label className="settings-label">Base URL</label>
-                  <input
-                    className="settings-input settings-input-wide"
-                    type="text"
-                    value={draft.pmProvider?.baseUrl || ''}
-                    onChange={(e) => updateDraft({
-                      pmProvider: { ...draft.pmProvider ?? { baseUrl: '', apiKey: '', model: '' }, baseUrl: e.target.value },
-                    })}
-                    placeholder="https://generativelanguage.googleapis.com/v1beta/openai"
-                  />
+                  <label className="settings-label">Provider</label>
+                  <select
+                    className="settings-input"
+                    value={draft.pmProvider?.provider || ''}
+                    onChange={(e) => {
+                      const id = e.target.value as PmProviderType;
+                      const meta = PM_PROVIDERS.find((p) => p.id === id);
+                      updateDraft({
+                        pmProvider: { ...draft.pmProvider ?? { provider: id, apiKey: '', model: '' }, provider: id, model: meta?.defaultModel ?? '' },
+                      });
+                    }}
+                  >
+                    <option value="">Select...</option>
+                    <option value="openai">OpenAI</option>
+                    <option value="gemini">Gemini</option>
+                  </select>
                 </div>
                 <div className="settings-group">
                   <label className="settings-label">API Key</label>
@@ -264,7 +271,7 @@ export function SettingsPanel() {
                     type="password"
                     value={draft.pmProvider?.apiKey || ''}
                     onChange={(e) => updateDraft({
-                      pmProvider: { ...draft.pmProvider ?? { baseUrl: '', apiKey: '', model: '' }, apiKey: e.target.value },
+                      pmProvider: { ...draft.pmProvider ?? { provider: 'gemini', apiKey: '', model: '' }, apiKey: e.target.value },
                     })}
                     placeholder="API key"
                   />
@@ -276,19 +283,10 @@ export function SettingsPanel() {
                     type="text"
                     value={draft.pmProvider?.model || ''}
                     onChange={(e) => updateDraft({
-                      pmProvider: { ...draft.pmProvider ?? { baseUrl: '', apiKey: '', model: '' }, model: e.target.value },
+                      pmProvider: { ...draft.pmProvider ?? { provider: 'gemini', apiKey: '', model: '' }, model: e.target.value },
                     })}
-                    placeholder="gemini-2.5-flash"
+                    placeholder={draft.pmProvider?.provider === 'openai' ? 'gpt-4o' : 'gemini-2.5-flash'}
                   />
-                </div>
-                <div className="settings-sub-hint">
-                  OpenAI-compatible chat/completions format. Base URL and model ID depend on your provider —
-                  see{' '}
-                  <a href="https://ai.google.dev/gemini-api/docs/openai" target="_blank" rel="noopener noreferrer">Gemini</a>
-                  {' · '}
-                  <a href="https://platform.openai.com/docs/api-reference" target="_blank" rel="noopener noreferrer">OpenAI</a>
-                  {' · '}
-                  <a href="https://docs.claude.com/en/api/openai-sdk" target="_blank" rel="noopener noreferrer">Anthropic</a>.
                 </div>
 
                 <div className="settings-divider" />

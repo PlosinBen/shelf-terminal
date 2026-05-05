@@ -1,6 +1,8 @@
-import { net } from 'electron';
+import { createOpenAI } from '@ai-sdk/openai';
+import { streamText } from 'ai';
 import { log } from '@shared/logger';
 import type { PmProviderConfig } from '@shared/types';
+import { PM_PROVIDERS } from '@shared/types';
 
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
@@ -28,91 +30,49 @@ export interface StreamEvent {
   argsChunk?: string;
 }
 
+function buildProvider(config: PmProviderConfig) {
+  const meta = PM_PROVIDERS.find((p) => p.id === config.provider);
+  return createOpenAI({
+    apiKey: config.apiKey,
+    ...(meta?.baseURL ? { baseURL: meta.baseURL } : {}),
+  });
+}
+
 export async function* streamChat(
   config: PmProviderConfig,
   messages: ChatMessage[],
   tools: ToolSchema[],
   signal?: AbortSignal,
 ): AsyncGenerator<StreamEvent> {
-  const url = config.baseUrl.replace(/\/+$/, '') + '/chat/completions';
-
-  const body = JSON.stringify({
-    model: config.model,
-    messages,
-    tools: tools.length > 0 ? tools : undefined,
-    stream: true,
-  });
-
   log.debug('pm-llm', `request: ${messages.length} messages, ${tools.length} tools`);
 
-  const resp = await net.fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${config.apiKey}`,
-    },
-    body,
-    signal,
-  });
+  const provider = buildProvider(config);
 
-  if (!resp.ok) {
-    const text = await resp.text();
-    throw new Error(`LLM API error ${resp.status}: ${text}`);
+  const toolMap: Record<string, { description: string; parameters: Record<string, unknown> }> = {};
+  for (const t of tools) {
+    toolMap[t.function.name] = {
+      description: t.function.description,
+      parameters: t.function.parameters,
+    };
   }
 
-  if (!resp.body) throw new Error('No response body');
+  const result = streamText({
+    model: provider(config.model),
+    messages: messages as any,
+    tools: Object.keys(toolMap).length > 0 ? toolMap as any : undefined,
+    abortSignal: signal,
+  });
 
-  const reader = resp.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
-
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-
-      const lines = buffer.split('\n');
-      buffer = lines.pop()!;
-
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed || !trimmed.startsWith('data: ')) continue;
-        const data = trimmed.slice(6);
-        if (data === '[DONE]') {
-          yield { type: 'done' };
-          return;
-        }
-
-        let parsed: any;
-        try {
-          parsed = JSON.parse(data);
-        } catch {
-          continue;
-        }
-
-        const delta = parsed.choices?.[0]?.delta;
-        if (!delta) continue;
-
-        if (delta.content) {
-          yield { type: 'text', text: delta.content };
-        }
-
-        if (delta.tool_calls) {
-          for (const tc of delta.tool_calls) {
-            if (tc.id) {
-              yield { type: 'tool_call_start', toolCallId: tc.id, toolName: tc.function?.name };
-            }
-            if (tc.function?.arguments) {
-              yield { type: 'tool_call_args', toolCallId: tc.id, argsChunk: tc.function.arguments };
-            }
-          }
-        }
-      }
+  for await (const part of result.fullStream) {
+    switch (part.type) {
+      case 'text-delta':
+        yield { type: 'text', text: part.text };
+        break;
+      case 'tool-call':
+        yield { type: 'tool_call_start', toolCallId: part.toolCallId, toolName: part.toolName };
+        yield { type: 'tool_call_args', toolCallId: part.toolCallId, argsChunk: JSON.stringify(part.input) };
+        break;
     }
-  } finally {
-    reader.releaseLock();
   }
 
   yield { type: 'done' };

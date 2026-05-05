@@ -21,7 +21,7 @@ export function PmView() {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const dragging = useRef(false);
 
-  const hasProvider = !!(settings.pmProvider?.baseUrl && settings.pmProvider?.apiKey && settings.pmProvider?.model);
+  const hasProvider = !!(settings.pmProvider?.provider && settings.pmProvider?.apiKey && settings.pmProvider?.model);
 
   useEffect(() => {
     window.shelfApi.pm.history().then(setMessages);
