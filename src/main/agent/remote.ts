@@ -25,6 +25,7 @@ export function createRemoteBackend(
   let remotePath = '';
   let currentModel: string | null = null;
   let currentEffort: string | null = null;
+  let currentPermissionMode: string | null = null;
 
   async function ensureProcReady(cwd: string): Promise<RemoteProcess | null> {
     if (!deployed) {
@@ -83,7 +84,7 @@ export function createRemoteBackend(
         prompt,
         cwd,
         resume: opts?.resume,
-        permissionMode: opts?.permissionMode,
+        permissionMode: currentPermissionMode ?? opts?.permissionMode,
         model: currentModel ?? undefined,
         effort: currentEffort ?? undefined,
         images: opts?.images,
@@ -105,12 +106,41 @@ export function createRemoteBackend(
       }
     },
 
+    async getCapabilities(cwd: string) {
+      const proc = await ensureProcReady(cwd);
+      if (!proc) return { models: [], permissionModes: [], effortLevels: [], slashCommands: [] };
+      const requestId = `cap-${Date.now()}`;
+      return new Promise<import('./types').ProviderCapabilities>((resolve) => {
+        const timeout = setTimeout(() => {
+          resolve({ models: [], permissionModes: [], effortLevels: [], slashCommands: [] });
+        }, 30000);
+        proc.onResponse(requestId, 'capabilities', (payload) => {
+          clearTimeout(timeout);
+          resolve({
+            models: payload.models ?? [],
+            permissionModes: payload.permissionModes ?? [],
+            effortLevels: payload.effortLevels ?? [],
+            slashCommands: payload.slashCommands ?? [],
+            authMethod: payload.authMethod,
+            currentModel: payload.currentModel,
+            currentEffort: payload.currentEffort,
+            currentPermissionMode: payload.currentPermissionMode,
+          });
+        });
+        proc.sendLine({ type: 'get_capabilities', provider, cwd, requestId });
+      });
+    },
+
     setModel(model: string) {
       currentModel = model || null;
     },
 
     setEffort(effort: string) {
       currentEffort = effort || null;
+    },
+
+    setPermissionMode(mode: string) {
+      currentPermissionMode = mode || null;
     },
   };
 }
@@ -120,9 +150,9 @@ function getLocalBundlePath(): string {
   const version = pkg.version;
 
   if (app.isPackaged) {
-    return path.join(process.resourcesPath, 'agent-server', version, 'index.js');
+    return path.join(process.resourcesPath, 'agent-server', version, 'index.mjs');
   }
-  return path.join(app.getAppPath(), 'dist', 'agent-server', version, 'index.js');
+  return path.join(app.getAppPath(), 'dist', 'agent-server', version, 'index.mjs');
 }
 
 async function deployAgentServer(connection: Connection): Promise<string> {
@@ -135,7 +165,7 @@ async function deployAgentServer(connection: Connection): Promise<string> {
     throw new Error(`Agent-server bundle not found at ${localPath}. Run: node agent-server/build.mjs`);
   }
 
-  const remoteDest = '~/.shelf/agent-server/index.js';
+  const remoteDest = '~/.shelf/agent-server/index.mjs';
 
   if (connection.type === 'ssh') {
     const controlPath = `/tmp/shelf-ssh-${connection.host}-${connection.port}-${connection.user}`;

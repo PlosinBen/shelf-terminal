@@ -1,6 +1,7 @@
 import { query as sdkQuery } from '@anthropic-ai/claude-agent-sdk';
 import type { Query, Options, SDKMessage, CanUseTool } from '@anthropic-ai/claude-agent-sdk';
-import * as path from 'path';
+import { existsSync } from 'fs';
+import { resolve, dirname, join } from 'path';
 import type { QueryInput, SendFn, ServerBackend, ProviderCapabilities } from './types';
 
 type PermissionResult = { behavior: 'allow' } | { behavior: 'deny'; message?: string };
@@ -9,6 +10,26 @@ const CLAUDE_AUTH_METHOD = {
   kind: 'sdk-managed' as const,
   instructions: [{ label: 'Sign in to Claude via the CLI', command: 'claude login' }],
 };
+
+function resolveClaudeBinary(): string | undefined {
+  const platform = process.platform;
+  const arch = process.arch;
+  const pkgName = `claude-agent-sdk-${platform}-${arch}`;
+
+  const candidates = [
+    // Development: node_modules relative to project root
+    resolve(__dirname, '..', 'node_modules', '@anthropic-ai', pkgName, 'claude'),
+    // Development: two levels up (if __dirname is dist/agent-server/<version>)
+    resolve(__dirname, '..', '..', '..', 'node_modules', '@anthropic-ai', pkgName, 'claude'),
+    // Packaged: unpacked from asar
+    resolve(__dirname, '..', '..', 'app.asar.unpacked', 'node_modules', '@anthropic-ai', pkgName, 'claude'),
+  ];
+
+  for (const p of candidates) {
+    if (existsSync(p)) return p;
+  }
+  return undefined;
+}
 
 export function createClaudeBackend(): ServerBackend {
   let activeQuery: Query | null = null;
@@ -40,7 +61,7 @@ export function createClaudeBackend(): ServerBackend {
           cwd,
           permissionMode: 'plan',
           abortController: warmupAbort,
-          pathToClaudeCodeExecutable: path.join(__dirname, 'cli.js'),
+          pathToClaudeCodeExecutable: resolveClaudeBinary(),
         },
       });
       try {
@@ -76,12 +97,10 @@ export function createClaudeBackend(): ServerBackend {
     async query(input: QueryInput, send: SendFn) {
       currentSend = send;
       abortController = new AbortController();
-      const cliPath = path.join(__dirname, 'cli.js');
-
       const options: Options = {
         abortController,
         cwd: input.cwd,
-        pathToClaudeCodeExecutable: cliPath,
+        pathToClaudeCodeExecutable: undefined,
         tools: { type: 'preset', preset: 'claude_code' },
         thinking: { type: 'adaptive' },
         includePartialMessages: true,

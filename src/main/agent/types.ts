@@ -82,6 +82,7 @@ export interface AgentBackend {
   getCapabilities?(cwd: string): Promise<ProviderCapabilities>;
   setModel?(model: string): void;
   setEffort?(effort: string): void;
+  setPermissionMode?(mode: string): void;
   storeCredential?(key: string): Promise<void>;
   clearCredential?(): Promise<void>;
 }

@@ -45,11 +45,12 @@ export function initAgentManager(windowGetter: () => BrowserWindow | null): void
   });
 
   ipcMain.handle(IPC.AGENT_SET_PREFS, async (_e, payload) => {
-    const { tabId, model, effort } = payload;
+    const { tabId, model, effort, permissionMode: mode } = payload;
     const session = sessions.get(tabId);
     if (!session) return false;
     if (model) session.backend.setModel?.(model);
     if (effort) session.backend.setEffort?.(effort);
+    if (mode) session.backend.setPermissionMode?.(mode);
     return true;
   });
 
@@ -114,6 +115,15 @@ async function startSession(
   };
 
   sessions.set(tabId, session);
+
+  if (backend.getCapabilities) {
+    backend.getCapabilities(cwd).then((caps) => {
+      send(IPC.AGENT_CAPABILITIES, tabId, caps);
+    }).catch((err) => {
+      log.error('agent', `${tag} capabilities error: ${err.message}`);
+    });
+  }
+
   return true;
 }
 

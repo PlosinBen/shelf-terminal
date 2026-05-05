@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useStore, setEditingProject, updateProjectConfig } from '../store';
-import type { TabTemplate, QuickCommand } from '@shared/types';
+import type { TabTemplate, QuickCommand, AgentProvider } from '@shared/types';
 import { TAB_COLORS } from './TabBar';
 
 export function ProjectEditPanel() {
@@ -17,6 +17,8 @@ export function ProjectEditPanel() {
   const [colorPickerIndex, setColorPickerIndex] = useState<number | null>(null);
   const [clearing, setClearing] = useState(false);
   const [remoteConnected, setRemoteConnected] = useState(true);
+  const [defaultAgentProvider, setDefaultAgentProvider] = useState<AgentProvider | ''>('');
+  const [openAgentOnConnect, setOpenAgentOnConnect] = useState(false);
 
   useEffect(() => {
     if (project) {
@@ -24,6 +26,8 @@ export function ProjectEditPanel() {
       setInitScript(project.config.initScript || '');
       setDefaultTabs(project.config.defaultTabs || [{ name: 'Terminal' }]);
       setQuickCommands(project.config.quickCommands || []);
+      setDefaultAgentProvider(project.config.defaultAgentProvider || '');
+      setOpenAgentOnConnect(project.config.openAgentOnConnect || false);
     }
   }, [editingProjectIndex]);
 
@@ -59,6 +63,8 @@ export function ProjectEditPanel() {
       initScript: initScript.trim() || undefined,
       defaultTabs: tabs.length > 0 ? tabs : undefined,
       quickCommands: cmds.length > 0 ? cmds : undefined,
+      defaultAgentProvider: defaultAgentProvider || undefined,
+      openAgentOnConnect: openAgentOnConnect || undefined,
     });
     handleClose();
   };
@@ -189,6 +195,30 @@ export function ProjectEditPanel() {
           </div>
 
           <div className="project-edit-field">
+            <label className="settings-label">Agent</label>
+            <div className="project-edit-hint">
+              Default provider for new agent tabs in this project.
+            </div>
+            <select
+              className="settings-input"
+              value={defaultAgentProvider}
+              onChange={(e) => setDefaultAgentProvider(e.target.value as AgentProvider | '')}
+            >
+              <option value="">None (ask each time)</option>
+              <option value="claude">Claude</option>
+              <option value="copilot">Copilot</option>
+            </select>
+            <label className="settings-checkbox" style={{ marginTop: 8 }}>
+              <input
+                type="checkbox"
+                checked={openAgentOnConnect}
+                onChange={(e) => setOpenAgentOnConnect(e.target.checked)}
+              />
+              Open agent tab automatically on connect
+            </label>
+          </div>
+
+          <div className="project-edit-field">
             <label className="settings-label">Default Tabs</label>
             <div className="project-edit-hint">
               Tabs to open on connect. Each tab can have its own command.
@@ -300,7 +330,7 @@ export function ProjectEditPanel() {
                     }
                   >
                     <option value="current">Current tab</option>
-                    {(project.config.defaultTabs || []).map((t) => (
+                    {defaultTabs.filter((t) => t.name.trim()).map((t) => (
                       <option key={t.name} value={t.name}>{t.name}</option>
                     ))}
                   </select>
