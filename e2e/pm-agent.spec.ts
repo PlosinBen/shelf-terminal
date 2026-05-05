@@ -32,9 +32,9 @@ async function configurePmProvider(page: any) {
   // Fill provider fields
   const body = page.locator('.settings-body');
   const inputs = body.locator('.settings-input');
-  await inputs.nth(0).fill('https://api.example.com/v1');
+  await inputs.nth(0).selectOption('openai');
   await inputs.nth(1).fill('test-key-123');
-  await inputs.nth(2).fill('test-model');
+  await inputs.nth(2).selectOption({ index: 1 });
 
   // Save
   await page.locator('.conn-btn-next').click();
