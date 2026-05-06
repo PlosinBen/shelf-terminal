@@ -10,10 +10,17 @@ interface SlashCommand {
   description: string;
 }
 
+type Severity = 'normal' | 'info' | 'warning' | 'critical';
+interface CycleOption {
+  value: string;
+  displayName: string;
+  severity?: Severity;
+}
+
 interface Capabilities {
-  models: { value: string; displayName: string; effortLevels?: string[]; vision?: boolean }[];
-  permissionModes: string[];
-  effortLevels: string[];
+  models: { value: string; displayName: string; effortLevels?: CycleOption[]; vision?: boolean }[];
+  permissionModes: CycleOption[];
+  effortLevels: CycleOption[];
   slashCommands: SlashCommand[];
   authMethod?: AuthMethod;
 }
@@ -66,6 +73,9 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex }: Pr
   const [outputTokens, setOutputTokens] = useState(0);
   const [costUsd, setCostUsd] = useState<number | undefined>(undefined);
   const [numTurns, setNumTurns] = useState<number | undefined>(undefined);
+  type StatusSegment = { text: string; severity?: 'normal' | 'warning' | 'critical' };
+  const [contextUsage, setContextUsage] = useState<StatusSegment | null>(null);
+  const [rateLimits, setRateLimits] = useState<StatusSegment[]>([]);
   const [capabilities, setCapabilities] = useState<Capabilities | null>(null);
   const [permissionMode, setPermissionMode] = useState<string>(savedPrefs?.permissionMode ?? 'default');
   const [currentEffort, setCurrentEffort] = useState<string>(savedPrefs?.effort ?? 'medium');
@@ -287,6 +297,8 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex }: Pr
       if (status.outputTokens != null) setOutputTokens(status.outputTokens);
       if (status.costUsd != null) setCostUsd(status.costUsd);
       if (status.numTurns != null) setNumTurns(status.numTurns);
+      if (status.contextUsage) setContextUsage(status.contextUsage);
+      if (Array.isArray(status.rateLimits) && status.rateLimits.length > 0) setRateLimits(status.rateLimits);
     });
 
     return () => { offMessage(); offStream(); offStatus(); };
@@ -473,20 +485,20 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex }: Pr
 
   const handleCycleMode = useCallback(() => {
     if (!capabilities || capabilities.permissionModes.length === 0) return;
-    const idx = capabilities.permissionModes.indexOf(permissionMode);
+    const idx = capabilities.permissionModes.findIndex((m) => m.value === permissionMode);
     const next = capabilities.permissionModes[(idx + 1) % capabilities.permissionModes.length];
-    setPermissionMode(next);
-    window.shelfApi.agent.setPrefs(tabId, { permissionMode: next });
-    persistPref({ permissionMode: next });
+    setPermissionMode(next.value);
+    window.shelfApi.agent.setPrefs(tabId, { permissionMode: next.value });
+    persistPref({ permissionMode: next.value });
   }, [tabId, capabilities, permissionMode, persistPref]);
 
   const handleCycleEffort = useCallback(() => {
     if (!capabilities || capabilities.effortLevels.length === 0) return;
-    const idx = capabilities.effortLevels.indexOf(currentEffort);
+    const idx = capabilities.effortLevels.findIndex((e) => e.value === currentEffort);
     const next = capabilities.effortLevels[(idx + 1) % capabilities.effortLevels.length];
-    setCurrentEffort(next);
-    window.shelfApi.agent.setPrefs(tabId, { effort: next });
-    persistPref({ effort: next });
+    setCurrentEffort(next.value);
+    window.shelfApi.agent.setPrefs(tabId, { effort: next.value });
+    persistPref({ effort: next.value });
   }, [tabId, capabilities, currentEffort, persistPref]);
 
   const handleReset = useCallback(async () => {
@@ -498,6 +510,8 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex }: Pr
     setInputTokens(0);
     setOutputTokens(0);
     setNumTurns(undefined);
+    setContextUsage(null);
+    setRateLimits([]);
     const newSessionId = crypto.randomUUID();
     sessionIdRef.current = newSessionId;
     const ids = { ...projects[projectIndex]?.config.agentSessionIds, [provider]: newSessionId };
@@ -587,7 +601,8 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex }: Pr
     return result;
   }, [messages]);
 
-  const modeColor = permissionMode === 'bypassPermissions' ? '#e06c75' : permissionMode === 'acceptEdits' ? '#e5c07b' : permissionMode === 'plan' ? '#61afef' : undefined;
+  const currentModeOption = capabilities?.permissionModes.find((m) => m.value === permissionMode);
+  const currentEffortOption = capabilities?.effortLevels.find((e) => e.value === currentEffort);
 
   // Auth required screen
   if (authRequired) {
@@ -780,25 +795,34 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex }: Pr
             <span className={`agent-status-seg${capabilities ? ' agent-status-interactive' : ''}`} onClick={handleCycleModel}>{statusModel}</span>
           </>
         )}
-        {capabilities && capabilities.permissionModes.length > 0 && (
+        {capabilities && capabilities.permissionModes.length > 0 && currentModeOption && (
           <>
             <span className="agent-status-sep">|</span>
-            <span className="agent-status-seg agent-status-interactive" style={modeColor ? { color: modeColor } : undefined} onClick={handleCycleMode}>
-              {permissionMode === 'default' ? 'ask' : permissionMode}
+            <span className="agent-status-seg agent-status-interactive" data-severity={currentModeOption.severity ?? 'normal'} onClick={handleCycleMode}>
+              {currentModeOption.displayName}
             </span>
           </>
         )}
-        {capabilities && capabilities.effortLevels.length > 0 && (
+        {capabilities && capabilities.effortLevels.length > 0 && currentEffortOption && (
           <>
             <span className="agent-status-sep">|</span>
-            <span className="agent-status-seg agent-status-interactive" onClick={handleCycleEffort}>
-              <span className="agent-status-seg-label">effort: </span>{currentEffort}
+            <span className="agent-status-seg agent-status-interactive" data-severity={currentEffortOption.severity ?? 'normal'} onClick={handleCycleEffort}>
+              <span className="agent-status-seg-label">effort: </span>{currentEffortOption.displayName}
             </span>
           </>
+        )}
+        {contextUsage && (
+          <><span className="agent-status-sep">|</span><span className="agent-status-seg" data-severity={contextUsage.severity ?? 'normal'}>{contextUsage.text}</span></>
         )}
         {(inputTokens > 0 || outputTokens > 0) && <><span className="agent-status-sep">|</span><span className="agent-status-seg">{Math.round(inputTokens / 1000)}k+{Math.round(outputTokens / 1000)}k</span></>}
         {costUsd !== undefined && <><span className="agent-status-sep">|</span><span className="agent-status-seg">${costUsd.toFixed(3)}</span></>}
         {numTurns !== undefined && <><span className="agent-status-sep">|</span><span className="agent-status-seg">{numTurns} turns</span></>}
+        {rateLimits.map((seg, i) => (
+          <React.Fragment key={`rl-${i}`}>
+            <span className="agent-status-sep">|</span>
+            <span className="agent-status-seg" data-severity={seg.severity ?? 'normal'}>{seg.text}</span>
+          </React.Fragment>
+        ))}
         <span style={{ marginLeft: 'auto' }} />
         <button className="agent-reset-btn" onClick={handleReset} disabled={isStreaming} title="Reset session">Reset</button>
       </div>

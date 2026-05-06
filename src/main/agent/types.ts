@@ -2,12 +2,18 @@ import type { AuthMethod } from '@shared/types';
 
 export type AgentSessionState = 'idle' | 'streaming' | 'waiting_permission' | 'error';
 
+export interface CycleOption {
+  value: string;
+  displayName: string;
+  severity?: StatusSegmentSeverity;
+}
+
 export interface ModelInfo {
   id: string;
   displayName: string;
   contextWindow: number;
   vision: boolean;
-  effortLevels?: string[];
+  effortLevels?: CycleOption[];
 }
 
 export interface SlashCommand {
@@ -33,6 +39,17 @@ export interface AgentStreamDelta {
   content: string;
 }
 
+export type StatusSegmentSeverity = 'normal' | 'warning' | 'critical';
+
+/**
+ * A pre-formatted status bar segment. Backend decides label, format, severity.
+ * Renderer maps severity to color and emits the text as-is.
+ */
+export interface StatusSegment {
+  text: string;
+  severity?: StatusSegmentSeverity;
+}
+
 export interface AgentStatusPayload {
   state: AgentSessionState;
   model?: string;
@@ -41,14 +58,14 @@ export interface AgentStatusPayload {
   outputTokens?: number;
   numTurns?: number;
   sessionId?: string;
-  contextUsedTokens?: number;
-  contextWindow?: number;
+  contextUsage?: StatusSegment;
+  rateLimits?: StatusSegment[];
 }
 
 export interface ProviderCapabilities {
-  models: { value: string; displayName: string; effortLevels?: string[]; vision?: boolean }[];
-  permissionModes: string[];
-  effortLevels: string[];
+  models: { value: string; displayName: string; effortLevels?: CycleOption[]; vision?: boolean }[];
+  permissionModes: CycleOption[];
+  effortLevels: CycleOption[];
   slashCommands: SlashCommand[];
   authMethod?: AuthMethod;
   currentModel?: string;
@@ -75,7 +92,7 @@ export type AgentEvent =
   | { type: 'error'; error: string };
 
 export type SlashResult =
-  | { type: 'show-model-picker'; models: { value: string; displayName: string; effortLevels?: string[]; vision?: boolean }[]; current: string }
+  | { type: 'show-model-picker'; models: { value: string; displayName: string; effortLevels?: CycleOption[]; vision?: boolean }[]; current: string }
   | { type: 'switch-model'; model: string }
   | { type: 'context-cleared'; message?: string }
   | { type: 'pass-through' }

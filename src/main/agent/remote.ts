@@ -400,6 +400,8 @@ function parseRemoteMessage(msg: any): AgentEvent | null {
         outputTokens: msg.outputTokens,
         numTurns: msg.numTurns,
         sessionId: msg.sessionId,
+        contextUsage: msg.contextUsage,
+        rateLimits: msg.rateLimits,
       },
     };
   }

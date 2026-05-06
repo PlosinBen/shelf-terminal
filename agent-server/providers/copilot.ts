@@ -3,7 +3,13 @@ import * as path from 'path';
 import * as os from 'os';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
-import type { QueryInput, SendFn, ServerBackend, ProviderCapabilities, SlashResult } from './types';
+import type { QueryInput, SendFn, ServerBackend, ProviderCapabilities, SlashResult, StatusSegment } from './types';
+import { severityFromUtilization, formatResetCountdown } from './types';
+
+const COPILOT_QUOTA_LABELS: Record<string, string> = {
+  premium_interactions: 'premium',
+  chat_interactions: 'chat',
+};
 
 const execFileP = promisify(execFile);
 
@@ -122,11 +128,15 @@ export function createCopilotBackend(): ServerBackend {
       models: state.models.map((m) => ({
         value: m.id,
         displayName: m.name ?? m.id,
-        effortLevels: m.supportedReasoningEfforts,
+        effortLevels: (m.supportedReasoningEfforts ?? []).map((v) => ({ value: v, displayName: v })),
       })),
       // acceptEdits has no Copilot equivalent — omit it (honest capability surface).
-      permissionModes: ['default', 'bypassPermissions', 'plan'],
-      effortLevels: effortsFor(currentModel),
+      permissionModes: [
+        { value: 'default', displayName: 'ask' },
+        { value: 'bypassPermissions', displayName: 'bypassPermissions', severity: 'critical' },
+        { value: 'plan', displayName: 'plan', severity: 'info' },
+      ],
+      effortLevels: effortsFor(currentModel).map((v) => ({ value: v, displayName: v })),
       slashCommands: SLASH_COMMANDS,
       authMethod: {
         kind: 'oauth' as const,
@@ -256,24 +266,59 @@ export function createCopilotBackend(): ServerBackend {
           });
           break;
         }
-        case 'assistant.usage':
+        case 'assistant.usage': {
+          const quotaSnapshots = event.data?.quotaSnapshots as Record<string, any> | undefined;
+          const rateLimits: StatusSegment[] = [];
+          if (quotaSnapshots) {
+            for (const [key, snap] of Object.entries(quotaSnapshots)) {
+              if (snap?.isUnlimitedEntitlement) continue;
+              if (typeof snap?.remainingPercentage !== 'number') continue;
+              // No clamp: GitHub shows actual usage including overage (e.g. 120%).
+              const u = Math.max(0, 1 - snap.remainingPercentage);
+              const label = COPILOT_QUOTA_LABELS[key] ?? key;
+              const pct = Math.round(u * 100);
+              const reset = snap.resetDate ? formatResetCountdown(Date.parse(snap.resetDate)) : null;
+              const severity = snap.usageAllowedWithExhaustedQuota === false && u >= 1
+                ? 'critical'
+                : severityFromUtilization(u);
+              rateLimits.push({
+                text: `${label}: ${pct}%${reset ? ` ↻${reset}` : ''}`,
+                severity,
+              });
+            }
+          }
           currentSend({
             type: 'status', state: 'streaming',
             model: currentModel,
             inputTokens: event.data?.inputTokens,
             outputTokens: event.data?.outputTokens,
+            ...(rateLimits.length > 0 ? { rateLimits } : {}),
           });
           break;
-        case 'session.usage_info':
+        }
+        case 'session.usage_info': {
+          const cur = event.data?.currentTokens ?? 0;
+          const limit = event.data?.tokenLimit ?? 0;
           latestUsage = {
-            currentTokens: event.data?.currentTokens ?? 0,
-            tokenLimit: event.data?.tokenLimit ?? 0,
+            currentTokens: cur,
+            tokenLimit: limit,
             conversationTokens: event.data?.conversationTokens,
             systemTokens: event.data?.systemTokens,
             toolDefinitionsTokens: event.data?.toolDefinitionsTokens,
             messagesLength: event.data?.messagesLength ?? 0,
           };
+          if (limit > 0) {
+            const ratio = cur / limit;
+            currentSend({
+              type: 'status', state: 'streaming',
+              contextUsage: {
+                text: `ctx: ${Math.round(ratio * 100)}%`,
+                severity: severityFromUtilization(ratio),
+              },
+            });
+          }
           break;
+        }
         case 'session.plan_changed':
           // Debounced fetch — multiple rapid changes coalesce into one read.
           schedulePlanRead();

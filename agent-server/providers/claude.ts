@@ -2,7 +2,26 @@ import { query as sdkQuery } from '@anthropic-ai/claude-agent-sdk';
 import type { Query, Options, SDKMessage, CanUseTool } from '@anthropic-ai/claude-agent-sdk';
 import { existsSync } from 'fs';
 import { resolve, dirname, join } from 'path';
-import type { QueryInput, SendFn, ServerBackend, ProviderCapabilities, SlashResult } from './types';
+import type { QueryInput, SendFn, ServerBackend, ProviderCapabilities, SlashResult, StatusSegment } from './types';
+import { severityFromUtilization, formatResetCountdown } from './types';
+
+// Claude SDK's `supportedCommands()` only returns user-installed skills, not
+// built-ins. Append these so the autocomplete menu lists them; submission still
+// passes through to the SDK, which handles them natively.
+const CLAUDE_BUILTIN_COMMANDS = [
+  { name: 'model', description: 'Pick or switch the current model' },
+  { name: 'clear', description: 'Reset the conversation context' },
+  { name: 'compact', description: 'Compact the conversation' },
+  { name: 'help', description: 'List available slash commands' },
+];
+
+const RATE_LIMIT_LABELS: Record<string, string> = {
+  five_hour: '5h',
+  seven_day: '7d',
+  seven_day_opus: '7d-opus',
+  seven_day_sonnet: '7d-sonnet',
+  overage: 'overage',
+};
 
 type PermissionResult = { behavior: 'allow' } | { behavior: 'deny'; message?: string };
 
@@ -88,9 +107,20 @@ export function createClaudeBackend(): ServerBackend {
       await ensureInit(cwd);
       return {
         models: (cache.models ?? []).map((m: any) => ({ value: m.value, displayName: m.displayName, vision: true })),
-        permissionModes: ['default', 'acceptEdits', 'bypassPermissions', 'plan'],
-        effortLevels: ['low', 'medium', 'high', 'xhigh', 'max'],
-        slashCommands: (cache.commands ?? []).map((c: any) => ({ name: c.name, description: c.description })),
+        // Provider decides displayName + severity. Renderer just cycles by value.
+        permissionModes: [
+          { value: 'default', displayName: 'ask' },
+          { value: 'acceptEdits', displayName: 'acceptEdits', severity: 'warning' },
+          { value: 'bypassPermissions', displayName: 'bypassPermissions', severity: 'critical' },
+          { value: 'plan', displayName: 'plan', severity: 'info' },
+        ],
+        effortLevels: ['low', 'medium', 'high', 'xhigh', 'max'].map((v) => ({ value: v, displayName: v })),
+        slashCommands: (() => {
+          const userCmds = (cache.commands ?? []).map((c: any) => ({ name: c.name, description: c.description }));
+          const userNames = new Set(userCmds.map((c: any) => c.name));
+          const builtins = CLAUDE_BUILTIN_COMMANDS.filter((b) => !userNames.has(b.name));
+          return [...builtins, ...userCmds];
+        })(),
         authMethod: CLAUDE_AUTH_METHOD,
       };
     },
@@ -200,6 +230,13 @@ function dataUrlToImageBlock(dataUrl: string): { type: 'image'; source: { type: 
   return { type: 'image', source: { type: 'base64', media_type: match[1], data: match[2] } };
 }
 
+// Per-turn usage cache for context %. result.usage is cumulative across the
+// agent loop (grows with each tool call within a turn), so dividing by
+// contextWindow gives nonsense (>100% on long sessions). The right numerator
+// is the LAST top-level assistant message's per-turn usage.
+let lastTurnUsage: { input_tokens: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number } | null = null;
+let lastTurnModel: string | null = null;
+
 function processMessage(msg: SDKMessage, send: SendFn) {
   switch (msg.type) {
     case 'assistant': {
@@ -238,6 +275,15 @@ function processMessage(msg: SDKMessage, send: SendFn) {
         const isSubagent = msg.parent_tool_use_id != null;
         const modelRaw = msg.message.model;
         const isSynthetic = typeof modelRaw === 'string' && modelRaw.startsWith('<');
+        if (!isSubagent && !isSynthetic) {
+          const u = msg.message.usage as any;
+          lastTurnUsage = {
+            input_tokens: u.input_tokens ?? 0,
+            cache_read_input_tokens: u.cache_read_input_tokens,
+            cache_creation_input_tokens: u.cache_creation_input_tokens,
+          };
+          if (typeof modelRaw === 'string') lastTurnModel = modelRaw;
+        }
         send({
           type: 'status', state: 'streaming',
           ...(isSubagent || isSynthetic ? {} : { model: modelRaw }),
@@ -275,6 +321,22 @@ function processMessage(msg: SDKMessage, send: SendFn) {
     }
     case 'result': {
       const isSuccess = msg.subtype === 'success';
+      let contextUsage: StatusSegment | undefined;
+      if (isSuccess) {
+        const u = lastTurnUsage ?? (msg.usage as any);
+        const mu: any = (msg as any).modelUsage;
+        const preferred = mu && lastTurnModel && mu[lastTurnModel] ? mu[lastTurnModel] : (mu && Object.values(mu)[0]);
+        const window = (preferred as any)?.contextWindow as number | undefined;
+        if (u && window && window > 0) {
+          const used = (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0);
+          const ratio = used / window;
+          contextUsage = {
+            text: `ctx: ${Math.round(ratio * 100)}%`,
+            severity: severityFromUtilization(ratio),
+          };
+        }
+      }
+      lastTurnUsage = null;
       send({
         type: 'message', msgType: 'result',
         content: isSuccess ? msg.result : (msg.errors?.join('\n') ?? 'Error'),
@@ -290,12 +352,36 @@ function processMessage(msg: SDKMessage, send: SendFn) {
         outputTokens: isSuccess ? msg.usage?.output_tokens : undefined,
         numTurns: isSuccess ? msg.num_turns : undefined,
         sessionId: msg.session_id,
+        contextUsage,
       });
       break;
     }
     case 'system': {
       if (msg.subtype === 'init') {
         send({ type: 'status', state: 'streaming', model: msg.model, sessionId: msg.session_id });
+      }
+      break;
+    }
+    case 'rate_limit_event': {
+      const info = (msg as any).rate_limit_info;
+      if (info && typeof info.utilization === 'number') {
+        const label = RATE_LIMIT_LABELS[info.rateLimitType] ?? info.rateLimitType ?? 'quota';
+        const pct = Math.round(info.utilization * 100);
+        const reset = info.resetsAt ? formatResetCountdown(info.resetsAt) : null;
+        // 'rejected' status means hard cap reached — escalate severity regardless of pct.
+        const severity = info.status === 'rejected'
+          ? 'critical'
+          : info.status === 'allowed_warning'
+            ? 'warning'
+            : severityFromUtilization(info.utilization);
+        send({
+          type: 'status', state: 'streaming',
+          sessionId: (msg as any).session_id,
+          rateLimits: [{
+            text: `${label}: ${pct}%${reset ? ` ↻${reset}` : ''}`,
+            severity,
+          }],
+        });
       }
       break;
     }
