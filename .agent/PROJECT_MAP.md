@@ -128,6 +128,24 @@
 | 單元測試設定 | `vitest.config.ts` | 獨立 vitest config（不繼承 vite.config.ts，避免載入 electron plugin） |
 | 套件 / 打包設定 | `package.json` | electron-builder config、scripts、dependencies |
 | CI/CD | `.github/workflows/build.yml` | Tag push → 三平台 build → GitHub Release |
+
+### npm scripts
+
+| Script | 用途 |
+|--------|------|
+| `dev` | 開發模式（NODE_ENV=development，userData 加 `-dev` 後綴隔離） |
+| `build` | Vite build + agent-server esbuild bundle，產出 `dist/` |
+| `typecheck` | `tsc --noEmit` 型別檢查（不產出檔案） |
+| `test` | 跑全部測試（typecheck → unit → e2e → docker → ssh） |
+| `test:unit` | vitest 單元測試 |
+| `test:e2e` | Playwright E2E 測試（自動 build，NODE_ENV=test 隔離 userData） |
+| `test:docker` | Docker connector E2E 測試（自動啟動/清理 test container） |
+| `test:ssh` | SSH connector E2E 測試（自動啟動/清理 test container） |
+| `pack` | build + `electron-builder --dir`，產出 unpackaged app（userData 走 `-dev`，用於快速驗證 build） |
+| `dist` | build + `electron-builder`，產出 packaged installer（吃 prod userData） |
+| `dist:mac` | 同 `dist`，限 macOS 平台 |
+| `dist:win` | 同 `dist`，限 Windows 平台 |
+| `dist:linux` | 同 `dist`，限 Linux 平台 |
 | E2E 測試 | `e2e/helpers.ts` | Playwright fixture、每 worker 用 tempdir + `--user-data-dir` 隔離 userData、`readActiveTerminalText()` helper |
 | E2E 測試 | `e2e/app-startup.spec.ts` | App 啟動、sidebar 驗證 |
 | E2E 測試 | `e2e/project-creation.spec.ts` | 建立 project、connect、tab、terminal output |
