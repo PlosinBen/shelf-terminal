@@ -181,9 +181,13 @@ export function createClaudeBackend(): ServerBackend {
       }
     },
 
-    async handleSlashCommand(_cmd: string, _args: string): Promise<SlashResult> {
+    async handleSlashCommand(cmd: string, _args: string): Promise<SlashResult> {
       // Claude SDK handles all slash commands natively (compact, clear, model, etc.)
       // Just send the original input as a regular message — SDK intercepts.
+      // We piggyback to clear the sticky plan panel when context is reset.
+      if (cmd === 'clear') {
+        currentSend?.({ type: 'message', msgType: 'plan_update', content: '' });
+      }
       return { type: 'pass-through' };
     },
   };
@@ -210,6 +214,24 @@ function processMessage(msg: SDKMessage, send: SendFn) {
             toolName: block.name, toolInput: block.input, toolUseId: block.id,
             parentToolUseId: msg.parent_tool_use_id ?? undefined, sessionId: msg.session_id,
           });
+          // Mirror plan-style tools into the sticky panel for parity with Copilot's plan API.
+          // ExitPlanMode: initial plan submission; TodoWrite: ongoing task list updates.
+          if (block.name === 'TodoWrite') {
+            const todos = (block.input as any)?.todos as Array<{ content: string; status: string; activeForm?: string }> | undefined;
+            if (Array.isArray(todos)) {
+              const md = todos.map((t) => {
+                if (t.status === 'completed') return `- [x] ${t.content}`;
+                if (t.status === 'in_progress') return `- [~] ${t.activeForm ?? t.content}`;
+                return `- [ ] ${t.content}`;
+              }).join('\n');
+              send({ type: 'message', msgType: 'plan_update', content: md });
+            }
+          } else if (block.name === 'ExitPlanMode') {
+            const plan = (block.input as any)?.plan;
+            if (typeof plan === 'string') {
+              send({ type: 'message', msgType: 'plan_update', content: plan });
+            }
+          }
         }
       }
       if (msg.message.usage) {

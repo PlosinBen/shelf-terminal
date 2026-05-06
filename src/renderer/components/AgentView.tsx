@@ -56,6 +56,7 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex }: Pr
   const sessionId = sessionIdRef.current;
 
   const [messages, setMessages] = useState<AgentMsg[]>([]);
+  const [currentPlan, setCurrentPlan] = useState<string>('');
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamText, setStreamText] = useState('');
@@ -193,6 +194,10 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex }: Pr
         return;
       }
       if (msg.type === 'result') return;
+      if (msg.type === 'plan_update') {
+        setCurrentPlan(msg.content ?? '');
+        return;
+      }
 
       const newMsg: AgentMsg = {
         id: `msg-${Date.now()}-${Math.random()}`,
@@ -707,6 +712,13 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex }: Pr
             ))}
           </div>
           <div className="agent-perm-hint"><kbd>↑</kbd><kbd>↓</kbd> select · <kbd>Enter</kbd> confirm · <kbd>Esc</kbd> cancel</div>
+        </div>
+      )}
+
+      {currentPlan.trim() && (
+        <div className="agent-plan-panel">
+          <div className="agent-plan-header">Plan</div>
+          <pre className="agent-plan-body">{currentPlan}</pre>
         </div>
       )}
 

@@ -29,11 +29,19 @@
       "dist/**/*",
       "!dist/agent-server",
       "node_modules/node-pty/**/*",
-      "node_modules/@anthropic-ai/claude-agent-sdk-*/**/*"
+      "node_modules/@anthropic-ai/claude-agent-sdk-*/**/*",
+      "node_modules/@github/copilot-sdk/**/*",
+      "node_modules/@github/copilot/**/*",
+      "node_modules/@github/copilot-darwin-*/**/*",
+      "node_modules/@github/copilot-linux-*/**/*",
+      "node_modules/@github/copilot-win32-*/**/*"
     ],
     "asarUnpack": [
       "node_modules/@anthropic-ai/claude-agent-sdk-*/claude",
-      "node_modules/@anthropic-ai/claude-agent-sdk-*/claude.exe"
+      "node_modules/@anthropic-ai/claude-agent-sdk-*/claude.exe",
+      "node_modules/@github/copilot-darwin-*/copilot",
+      "node_modules/@github/copilot-linux-*/copilot",
+      "node_modules/@github/copilot-win32-*/copilot.exe"
     ],
     "extraResources": [
       {
@@ -86,6 +94,7 @@
   "dependencies": {
     "@ai-sdk/openai": "^3.0.58",
     "@anthropic-ai/claude-agent-sdk": "^0.2.126",
+    "@github/copilot-sdk": "^1.0.0-beta.1",
     "@xterm/addon-fit": "0.11.0",
     "@xterm/addon-search": "^0.16.0",
     "@xterm/addon-unicode11": "^0.9.0",

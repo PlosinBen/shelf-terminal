@@ -51,14 +51,11 @@
 |--------|------|-------------|
 | Entry point | `index.ts` | stdin/stdout JSON line protocol server、dispatch to Claude/Copilot backends、啟動時呼叫 `cleanupOldContexts()` 清理 30 天以上的 context 檔 |
 | Claude provider | `providers/claude.ts` | `@anthropic-ai/claude-agent-sdk` wrapper、permission bridging、auto-resume（`lastSessionId`）、stream_event delta 處理、suppress synthetic/subagent model |
-| Copilot provider | `providers/copilot.ts` | Vercel AI SDK (`ai` + `@ai-sdk/openai`)、tool definitions (read/write/edit/bash/list)、auto-compaction、cross-turn memory、file-based context persistence（透過 `context-store`） |
-| Copilot auth | `providers/copilot-auth.ts` | GitHub Copilot OAuth token（`~/.config/github-copilot/` + `gh auth token`）→ session token exchange |
-| Context persistence | `context-store.ts` | `loadContext()`、`saveContext()`、`deleteContext()`、`cleanupOldContexts()`，存放在 `~/.shelf/agent-context/{sessionId}.json`，atomic write（tmp+rename） |
-| Provider types | `providers/types.ts` | `ServerBackend`、`SendFn`、`QueryInput`（含 `sessionId`）、`ProviderCapabilities` 介面 |
-| Context compaction | `compaction.ts` | `needsCompaction()`、`splitForCompaction()`、`truncateToolOutputs()`、`buildCompactionPrompt()` |
+| Copilot provider | `providers/copilot.ts` | `@github/copilot-sdk` wrapper（spawn bundled `@github/copilot` CLI）、`gh auth token` 拿 token 傳 `gitHubToken` 跳過 keychain、permission bridging、event mapping (delta/message/tool/usage/plan)、`/model` `/context` `/compact` `/clear` `/help`、reasoning effort、permission mode mapping (`default→interactive`/`bypassPermissions→autopilot`/`plan→plan`)、TodoWrite/ExitPlanMode 沒在 Copilot — 走 plan_changed 事件 |
+| Context persistence | `context-store.ts` | `loadContext()`、`saveContext()`、`deleteContext()`、`cleanupOldContexts()`，存放在 `~/.shelf/agent-context/{sessionId}.json`，atomic write（tmp+rename）— Claude 用，Copilot SDK 自管 |
+| Provider types | `providers/types.ts` | `ServerBackend`、`SendFn`、`QueryInput`（含 `sessionId`）、`ProviderCapabilities`、`SlashResult` 介面 |
 | Bundle build | `build.mjs` | esbuild → `dist/agent-server/<version>/index.js` 單一 ESM bundle |
-| 單元測試 | `compaction.test.ts` | Compaction 函式 14 個測試 |
-| 單元測試 | `copilot-tools.test.ts` | Tool 邏輯測試 |
+| 單元測試 | `slash-commands.test.ts` | Slash command dispatch 邏輯 |
 
 ### PM Agent (src/main/pm/)
 
