@@ -127,6 +127,11 @@ export function App() {
       } else {
         addTab(projectIndex);
       }
+
+      if (proj.config.openAgentOnConnect) {
+        const provider = proj.config.defaultAgentProvider ?? 'claude';
+        addTab(projectIndex, undefined, undefined, undefined, 'agent', provider);
+      }
     });
 
     const offDisconnectProject = on(Events.DISCONNECT_PROJECT, (projectIndex: number) => {

@@ -7,7 +7,7 @@ import type { OutgoingMessage, QueryInput, ServerBackend } from './providers/typ
 type Provider = 'claude' | 'copilot';
 
 interface IncomingMessage {
-  type: 'send' | 'stop' | 'ping' | 'resolve_permission' | 'get_capabilities' | 'store_credential' | 'clear_credential' | 'clear_context';
+  type: 'send' | 'stop' | 'ping' | 'resolve_permission' | 'get_capabilities' | 'store_credential' | 'clear_credential' | 'clear_context' | 'slash_command';
   provider?: Provider;
   prompt?: string;
   cwd?: string;
@@ -22,6 +22,8 @@ interface IncomingMessage {
   message?: string;
   requestId?: string;
   key?: string;
+  cmd?: string;
+  args?: string;
 }
 
 function send(msg: OutgoingMessage) {
@@ -111,7 +113,7 @@ rl.on('line', (line) => {
       (async () => {
         try {
           const backend = getBackend(provider);
-          const caps = await backend.gatherCapabilities?.(msg.cwd ?? process.cwd());
+          const caps = await backend.gatherCapabilities?.(msg.cwd ?? process.cwd(), msg.sessionId);
           send({ type: 'capabilities', requestId: msg.requestId, ...(caps ?? {}) });
         } catch (err: any) {
           send({ type: 'capabilities', requestId: msg.requestId, error: err?.message ?? String(err) });
@@ -149,6 +151,23 @@ rl.on('line', (line) => {
     }
     case 'clear_context': {
       if (msg.sessionId) deleteContext(msg.sessionId);
+      break;
+    }
+    case 'slash_command': {
+      const provider = msg.provider ?? 'claude';
+      (async () => {
+        try {
+          const backend = getBackend(provider);
+          if (!backend.handleSlashCommand) {
+            send({ type: 'slash_result', requestId: msg.requestId, result: { type: 'pass-through' } });
+            return;
+          }
+          const result = await backend.handleSlashCommand(msg.cmd ?? '', msg.args ?? '');
+          send({ type: 'slash_result', requestId: msg.requestId, result });
+        } catch (err: any) {
+          send({ type: 'slash_result', requestId: msg.requestId, result: { type: 'error', message: err?.message ?? String(err) } });
+        }
+      })();
       break;
     }
   }

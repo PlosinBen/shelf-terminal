@@ -139,6 +139,8 @@ contextBridge.exposeInMainWorld('shelfApi', {
       ipcRenderer.invoke(IPC.AGENT_CLEAR_CREDENTIAL, { tabId }),
     checkAuth: (tabId: string) =>
       ipcRenderer.invoke(IPC.AGENT_CHECK_AUTH, { tabId }),
+    slashCommand: (tabId: string, cmd: string, args: string) =>
+      ipcRenderer.invoke(IPC.AGENT_SLASH_COMMAND, { tabId, cmd, args }),
     onMessage: (callback: (tabId: string, msg: unknown) => void) => {
       const listener = (_event: Electron.IpcRendererEvent, tabId: string, msg: unknown) => callback(tabId, msg);
       ipcRenderer.on(IPC.AGENT_MESSAGE, listener);

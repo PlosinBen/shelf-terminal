@@ -86,6 +86,10 @@ interface ShelfApi {
     storeCredential: (tabId: string, key: string) => Promise<boolean>;
     clearCredential: (tabId: string) => Promise<boolean>;
     checkAuth: (tabId: string) => Promise<boolean>;
+    slashCommand: (tabId: string, cmd: string, args: string) => Promise<{
+      type: 'show-model-picker' | 'switch-model' | 'context-cleared' | 'pass-through' | 'system-message' | 'error';
+      [key: string]: unknown;
+    }>;
     onMessage: (callback: (tabId: string, msg: unknown) => void) => () => void;
     onStream: (callback: (tabId: string, chunk: unknown) => void) => () => void;
     onStatus: (callback: (tabId: string, status: unknown) => void) => () => void;

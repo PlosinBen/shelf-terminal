@@ -2,7 +2,7 @@ import { query as sdkQuery } from '@anthropic-ai/claude-agent-sdk';
 import type { Query, Options, SDKMessage, CanUseTool } from '@anthropic-ai/claude-agent-sdk';
 import { existsSync } from 'fs';
 import { resolve, dirname, join } from 'path';
-import type { QueryInput, SendFn, ServerBackend, ProviderCapabilities } from './types';
+import type { QueryInput, SendFn, ServerBackend, ProviderCapabilities, SlashResult } from './types';
 
 type PermissionResult = { behavior: 'allow' } | { behavior: 'deny'; message?: string };
 
@@ -179,6 +179,12 @@ export function createClaudeBackend(): ServerBackend {
         pendingPermissions.delete(toolUseId);
         resolve(allow ? { behavior: 'allow' } : { behavior: 'deny', message: message ?? 'Denied' });
       }
+    },
+
+    async handleSlashCommand(_cmd: string, _args: string): Promise<SlashResult> {
+      // Claude SDK handles all slash commands natively (compact, clear, model, etc.)
+      // Just send the original input as a regular message — SDK intercepts.
+      return { type: 'pass-through' };
     },
   };
 }

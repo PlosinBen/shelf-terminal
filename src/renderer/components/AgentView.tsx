@@ -220,6 +220,12 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex }: Pr
         return;
       }
 
+      // A text/thinking message supersedes the corresponding streaming buffer
+      // (provider already streamed deltas, then sent the full block). Clear the
+      // buffer to avoid the idle handler flushing it as a duplicate message.
+      if (msg.type === 'text') setStreamText('');
+      if (msg.type === 'thinking') setStreamThinking('');
+
       setMessages((prev) => [...prev, newMsg]);
     });
 
@@ -314,30 +320,65 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex }: Pr
     const text = input.trim();
     if ((!text && pendingFiles.length === 0 && pendingImages.length === 0)) return;
 
-    // /model command interception
-    if (text === '/model' || text.startsWith('/model ')) {
+    // Slash command — dispatch to provider via IPC, act on SlashResult
+    const slashMatch = text.match(/^\/(\w+)(?:\s+(.*))?$/);
+    if (slashMatch && !text.includes('\n')) {
+      const cmd = slashMatch[1];
+      const args = (slashMatch[2] ?? '').trim();
       setInput('');
-      const arg = text.slice('/model'.length).trim();
-      if (!arg) {
-        if (capabilities && capabilities.models.length > 0) {
-          const idx = capabilities.models.findIndex((m) => m.value === statusModel);
-          setModelPicker({ open: true, selected: idx >= 0 ? idx : 0 });
+      void (async () => {
+        const result = await window.shelfApi.agent.slashCommand(tabId, cmd, args);
+        switch (result.type) {
+          case 'show-model-picker': {
+            const models = (result.models ?? []) as { value: string; displayName: string }[];
+            const current = result.current as string | undefined;
+            if (models.length > 0) {
+              setCapabilities((prev) => prev ? { ...prev, models } : prev);
+              const idx = models.findIndex((m) => m.value === current);
+              setModelPicker({ open: true, selected: idx >= 0 ? idx : 0 });
+            }
+            break;
+          }
+          case 'switch-model': {
+            const model = result.model as string;
+            setStatusModel(model);
+            window.shelfApi.agent.setPrefs(tabId, { model });
+            persistPref({ model });
+            const match = capabilities?.models.find((m) => m.value === model);
+            setMessages((prev) => [...prev, {
+              id: `msg-${Date.now()}`, type: 'system', content: `── Model switched to ${match?.displayName ?? model} ──`, timestamp: Date.now(),
+            }]);
+            break;
+          }
+          case 'context-cleared': {
+            setMessages((prev) => [...prev, {
+              id: `msg-${Date.now()}`, type: 'system', content: `── ${(result.message as string | undefined) ?? 'Context cleared'} ──`, timestamp: Date.now(),
+            }]);
+            break;
+          }
+          case 'system-message': {
+            setMessages((prev) => [...prev, {
+              id: `msg-${Date.now()}`, type: 'system', content: result.content as string, timestamp: Date.now(),
+            }]);
+            break;
+          }
+          case 'error': {
+            setMessages((prev) => [...prev, {
+              id: `msg-${Date.now()}`, type: 'error', content: result.message as string, timestamp: Date.now(),
+            }]);
+            break;
+          }
+          case 'pass-through':
+          default: {
+            // Send the original slash command as a regular message — provider's SDK handles it
+            window.shelfApi.agent.send(tabId, text, []);
+            setMessages((prev) => [...prev, {
+              id: `msg-${Date.now()}`, type: 'user', content: text, timestamp: Date.now(),
+            }]);
+            break;
+          }
         }
-        return;
-      }
-      const match = capabilities?.models.find((m) => m.value === arg);
-      if (!match) {
-        setMessages((prev) => [...prev, {
-          id: `msg-${Date.now()}`, type: 'error', content: `Unknown model: ${arg}`, timestamp: Date.now(),
-        }]);
-        return;
-      }
-      setStatusModel(arg);
-      window.shelfApi.agent.setPrefs(tabId, { model: arg });
-      persistPref({ model: arg });
-      setMessages((prev) => [...prev, {
-        id: `msg-${Date.now()}`, type: 'system', content: `── Model switched to ${match.displayName} ──`, timestamp: Date.now(),
-      }]);
+      })();
       return;
     }
 

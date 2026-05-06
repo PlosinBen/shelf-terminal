@@ -132,6 +132,7 @@ export function AgentMessage({ message, cwd }: Props) {
     if (toolMode === 'hidden') return null;
     const isExpanded = expanded || toolMode === 'expanded';
     const summary = getToolSummary(message.toolName, message.toolInput, cwd);
+    const hasDetailBody = message.toolName === 'Edit' || message.toolName === 'Write' || message.toolName === 'edit_file' || message.toolName === 'write_file';
     return (
       <div className="agent-msg agent-msg-tool">
         <div className="agent-tool-header" onClick={() => setExpanded(!expanded)}>
@@ -142,7 +143,7 @@ export function AgentMessage({ message, cwd }: Props) {
         </div>
         {isExpanded && (
           <>
-            <ToolBody toolName={message.toolName} input={message.toolInput} cwd={cwd} />
+            {hasDetailBody && <ToolBody toolName={message.toolName} input={message.toolInput} cwd={cwd} />}
             {message.toolResult && (() => {
               const { lines, remaining } = truncateLines(message.toolResult, 30);
               return <pre className="agent-tool-code agent-tool-result-block">{lines.join('\n')}{remaining > 0 ? `\n... +${remaining} more lines` : ''}</pre>;
