@@ -2581,6 +2581,37 @@ button {
   background: rgba(229, 192, 123, 0.15);
 }
 
+.agent-msg-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.agent-msg-image {
+  max-width: 240px;
+  max-height: 160px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  object-fit: contain;
+  background: var(--surface);
+}
+
+.agent-msg-file-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .agent-msg-queued {
   opacity: 0.5;
   display: flex;

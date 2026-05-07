@@ -26,4 +26,5 @@ export const DEFAULT_SETTINGS: AppSettings = {
   keybindings: { ...DEFAULT_KEYBINDINGS },
   logLevel: 'error' as const,
   maxUploadSizeMB: 50,
+  agentHistoryMaxMessages: 1000,
 };

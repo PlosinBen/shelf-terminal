@@ -141,6 +141,9 @@ export interface AppSettings {
   pmProvider?: PmProviderConfig;
   telegram?: TelegramConfig;
   agentDisplay?: Partial<Record<string, AgentDisplayMode>>;
+  /** Max UI messages persisted per agent session in IndexedDB.
+   *  Trimmed at save time; oldest dropped first. */
+  agentHistoryMaxMessages: number;
   providerModels?: Partial<Record<PmProviderType | 'claude', ProviderModel[]>>;
 }
 

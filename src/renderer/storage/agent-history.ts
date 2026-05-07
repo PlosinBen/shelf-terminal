@@ -41,7 +41,23 @@ export async function loadAgentMessages(sessionId: string): Promise<AgentMsg[]> 
   return all.map(({ dbId: _, sessionId: __, ...msg }) => msg as AgentMsg);
 }
 
-export async function saveAgentMessages(sessionId: string, messages: AgentMsg[]): Promise<void> {
+// Default cap if caller doesn't pass one. Mirrors AppSettings default
+// — agent-history.ts can't import from @shared/defaults without pulling
+// app-level types into the storage layer, so we duplicate the constant.
+const DEFAULT_MAX_MESSAGES = 1000;
+
+export async function saveAgentMessages(
+  sessionId: string,
+  messages: AgentMsg[],
+  maxMessages: number = DEFAULT_MAX_MESSAGES,
+): Promise<void> {
+  // Rotate at write time: keep the most recent `maxMessages` entries,
+  // drop the oldest. Bounds IndexedDB growth without touching component
+  // state (in-memory may temporarily exceed the cap; next save trims).
+  const trimmed = messages.length > maxMessages
+    ? messages.slice(messages.length - maxMessages)
+    : messages;
+
   const db = await getDB();
   const tx = db.transaction(STORE_NAME, 'readwrite');
   const store = tx.objectStore(tx.objectStoreNames[0]);
@@ -50,7 +66,7 @@ export async function saveAgentMessages(sessionId: string, messages: AgentMsg[])
   for (const key of existing) {
     await store.delete(key);
   }
-  for (const msg of messages) {
+  for (const msg of trimmed) {
     await store.add({ ...msg, sessionId } as StoredMsg);
   }
   await tx.done;

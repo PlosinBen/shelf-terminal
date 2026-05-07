@@ -15,6 +15,10 @@ export interface AgentMsg {
   streaming?: boolean;
   provider?: string;
   timestamp: number;
+  // Attachments captured at send-time so history renders the original
+  // user turn faithfully. Images are data URIs (typically image/png base64).
+  images?: string[];
+  files?: Array<{ path: string; displayPath: string }>;
 }
 
 
@@ -225,9 +229,20 @@ export function AgentMessage({ message, cwd }: Props) {
   }
 
   if (message.type === 'user') {
+    const hasAttachments = (message.images?.length ?? 0) > 0 || (message.files?.length ?? 0) > 0;
     return (
       <div className="agent-msg agent-msg-user">
-        <div className="agent-msg-content">{message.content}</div>
+        {message.content && <div className="agent-msg-content">{message.content}</div>}
+        {hasAttachments && (
+          <div className="agent-msg-attachments">
+            {message.images?.map((url, i) => (
+              <img key={`img-${i}`} src={url} className="agent-msg-image" alt={`attachment ${i + 1}`} />
+            ))}
+            {message.files?.map((f) => (
+              <span key={f.path} className="agent-msg-file-chip" title={f.path}>{f.displayPath}</span>
+            ))}
+          </div>
+        )}
       </div>
     );
   }

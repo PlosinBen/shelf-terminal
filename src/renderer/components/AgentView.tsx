@@ -177,12 +177,13 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
   // Save UI messages on unmount (tab close)
   useEffect(() => {
     const sid = sessionId;
+    const maxMessages = settings.agentHistoryMaxMessages;
     return () => {
       if (sid && messagesRef.current.length > 0) {
-        saveAgentMessages(sid, messagesRef.current);
+        saveAgentMessages(sid, messagesRef.current, maxMessages);
       }
     };
-  }, [sessionId]);
+  }, [sessionId, settings.agentHistoryMaxMessages]);
 
   // Capabilities listener
   useEffect(() => {
@@ -320,8 +321,9 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
           });
           // Persist UI messages after state settles
           if (sessionId) {
+            const maxMessages = settings.agentHistoryMaxMessages;
             setTimeout(() => {
-              setMessages((cur) => { saveAgentMessages(sessionId, cur); return cur; });
+              setMessages((cur) => { saveAgentMessages(sessionId, cur, maxMessages); return cur; });
             }, 200);
           }
         }
@@ -463,7 +465,8 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
 
     setMessages((prev) => [...prev, {
       id: `user-${Date.now()}`, type: 'user', content: text, timestamp: Date.now(),
-      ...(files.length > 0 || images.length > 0 ? {} : {}),
+      ...(images.length > 0 ? { images } : {}),
+      ...(files.length > 0 ? { files } : {}),
     }]);
     setStreamText('');
     window.shelfApi.agent.send(tabId, text, images.length > 0 ? images : undefined);
