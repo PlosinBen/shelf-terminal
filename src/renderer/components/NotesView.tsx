@@ -1,8 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { marked } from 'marked';
 import { useStore, toggleNotes } from '../store';
-
-marked.setOptions({ breaks: true, gfm: true });
+import { renderMarkdown } from '../utils/markdown';
 
 const DEFAULT_WIDTH = 380;
 const MIN_WIDTH = 280;
@@ -127,7 +125,7 @@ export function NotesView() {
   const html = useMemo(() => {
     if (!projectId) return '';
     const rewritten = rewriteImagePaths(content, projectId);
-    return marked.parse(rewritten, { async: false }) as string;
+    return renderMarkdown(rewritten, { breaks: true });
   }, [content, projectId]);
 
   return (

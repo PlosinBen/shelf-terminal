@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
-import { marked } from 'marked';
 import { useStore } from '../store';
+import { renderMarkdown } from '../utils/markdown';
 import type { AgentDisplayMode } from '@shared/types';
 
 export interface AgentMsg {
@@ -16,11 +16,6 @@ export interface AgentMsg {
   timestamp: number;
 }
 
-marked.setOptions({ breaks: false, gfm: true });
-
-function renderMarkdown(text: string): string {
-  return marked.parse(text, { async: false }) as string;
-}
 
 function stripCwd(filePath: string, cwd?: string): string {
   if (!cwd || !filePath) return filePath;

@@ -1,11 +1,9 @@
 import React, { useState, useEffect, useReducer, useRef, useCallback, useMemo } from 'react';
 import { useStore, setAwayMode, setPmVisible, updateSettings } from '../store';
-import { marked } from 'marked';
+import { renderMarkdown } from '../utils/markdown';
 import type { PmMessage, PmStreamChunk, PmToolCall, AppSettings } from '@shared/types';
 import { getModelsForProvider } from '@shared/types';
 import { pmStreamReducer, initialPmStreamState, type PmStreamAction } from './pm-view-reducer';
-
-marked.setOptions({ breaks: true, gfm: true });
 
 const DEFAULT_WIDTH = 380;
 const MIN_WIDTH = 280;
@@ -202,7 +200,7 @@ export function PmView() {
             {streamToolCalls.map((tc) => (
               <ToolCallSummary key={tc.id} toolCall={tc} />
             ))}
-            {streamText && <div className="pm-msg-md" dangerouslySetInnerHTML={{ __html: renderMarkdown(streamText) }} />}
+            {streamText && <div className="pm-msg-md" dangerouslySetInnerHTML={{ __html: renderPmMarkdown(streamText) }} />}
           </div>
         )}
         {streaming && !streamText && streamToolCalls.length === 0 && (
@@ -237,8 +235,8 @@ export function PmView() {
   );
 }
 
-function renderMarkdown(text: string): string {
-  return marked.parse(text, { async: false }) as string;
+function renderPmMarkdown(text: string): string {
+  return renderMarkdown(text, { breaks: true });
 }
 
 function MessageBubble({ message }: { message: PmMessage }) {
@@ -247,7 +245,7 @@ function MessageBubble({ message }: { message: PmMessage }) {
   }
   const isUser = message.role === 'user';
   const html = useMemo(
-    () => (!isUser && message.content ? renderMarkdown(message.content) : ''),
+    () => (!isUser && message.content ? renderPmMarkdown(message.content) : ''),
     [message.content, isUser],
   );
   return (
