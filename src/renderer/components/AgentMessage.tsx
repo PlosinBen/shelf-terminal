@@ -69,26 +69,31 @@ function SideBySideDiff({ rows }: { rows: DiffRow[] }) {
   // 'same'/'change' advance both; 'del' advances only old; 'add' advances only new.
   let oldLine = 0;
   let newLine = 0;
+  const annotated = rows.map((row) => {
+    const showOld = row.old !== null;
+    const showNew = row.new !== null;
+    if (showOld) oldLine++;
+    if (showNew) newLine++;
+    return { ...row, oldLine: showOld ? oldLine : null, newLine: showNew ? newLine : null };
+  });
   return (
     <div className="agent-diff-sbs">
-      {rows.map((row, i) => {
-        const showOld = row.old !== null;
-        const showNew = row.new !== null;
-        if (showOld) oldLine++;
-        if (showNew) newLine++;
-        return (
+      <div className="agent-diff-sbs-panel agent-diff-sbs-panel-left">
+        {annotated.map((row, i) => (
           <div key={i} className={`agent-diff-sbs-row agent-diff-sbs-${row.kind}`}>
-            <span className="agent-diff-sbs-ln agent-diff-sbs-left">{showOld ? oldLine : ''}</span>
-            <span className="agent-diff-sbs-cell agent-diff-sbs-left">
-              {showOld ? row.old : ' '}
-            </span>
-            <span className="agent-diff-sbs-ln agent-diff-sbs-right">{showNew ? newLine : ''}</span>
-            <span className="agent-diff-sbs-cell agent-diff-sbs-right">
-              {showNew ? row.new : ' '}
-            </span>
+            <span className="agent-diff-sbs-ln">{row.oldLine ?? ''}</span>
+            <span className="agent-diff-sbs-cell">{row.old !== null ? row.old : ' '}</span>
           </div>
-        );
-      })}
+        ))}
+      </div>
+      <div className="agent-diff-sbs-panel agent-diff-sbs-panel-right">
+        {annotated.map((row, i) => (
+          <div key={i} className={`agent-diff-sbs-row agent-diff-sbs-${row.kind}`}>
+            <span className="agent-diff-sbs-ln">{row.newLine ?? ''}</span>
+            <span className="agent-diff-sbs-cell">{row.new !== null ? row.new : ' '}</span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
