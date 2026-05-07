@@ -368,6 +368,10 @@ function dataUrlToImageBlock(dataUrl: string): { type: 'image'; source: { type: 
 let lastTurnUsage: { input_tokens: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number } | null = null;
 let lastTurnModel: string | null = null;
 
+// Accumulate rate-limit buckets across events so we can always send the full
+// set to the UI.  Key = bucket label (e.g. '5h', '7d').
+const rateLimitBuckets = new Map<string, StatusSegment>();
+
 // Push-mode signal for "thinking actually arrived". The trace logs alone are
 // pull-mode (require grepping); we want a one-shot OS notification on first
 // hit per process, plus a persistent sentinel file as a historical audit
@@ -532,10 +536,12 @@ function processMessage(msg: SDKMessage, send: SendFn) {
       console.error('[rate-limit-trace] event received, info=', JSON.stringify(info));
       const seg = rateLimitInfoToSegment(info);
       if (seg) {
+        const bucketKey = seg.text.split(':')[0];
+        rateLimitBuckets.set(bucketKey, seg);
         send({
           type: 'status', state: 'streaming',
           sessionId: (msg as any).session_id,
-          rateLimits: [seg],
+          rateLimits: [...rateLimitBuckets.values()],
         });
       }
       break;
