@@ -356,6 +356,19 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
     }
   }, [messages, streamText, streamThinking]);
 
+  // When this tab becomes visible again, the auto-scroll effect above
+  // could not run while the parent was display:none (scrollIntoView is a
+  // no-op on hidden elements). Catch up here: if the user was at the
+  // bottom before switching away, snap (not smooth) back to bottom so
+  // they see the latest content immediately rather than a stale middle.
+  useEffect(() => {
+    if (!visible) return;
+    if (!isAtBottomRef.current) return;
+    requestAnimationFrame(() => {
+      bottomRef.current?.scrollIntoView({ behavior: 'auto' });
+    });
+  }, [visible]);
+
   // Force scroll on user message
   const prevCount = useRef(0);
   useEffect(() => {
