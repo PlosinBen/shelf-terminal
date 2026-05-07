@@ -60,6 +60,37 @@ export interface CycleOption {
   severity?: StatusSegmentSeverity;
 }
 
+/**
+ * Central UX descriptors for permission modes and effort levels.
+ * Provider's job is to declare which IDs it supports; displayName / severity
+ * are app-wide concerns (consistency between providers, single point of truth).
+ */
+export const PERMISSION_MODES = {
+  default:           { value: 'default',           displayName: 'ask' },
+  acceptEdits:       { value: 'acceptEdits',       displayName: 'acceptEdits',       severity: 'warning' },
+  bypassPermissions: { value: 'bypassPermissions', displayName: 'bypassPermissions', severity: 'critical' },
+  plan:              { value: 'plan',              displayName: 'plan',              severity: 'info' },
+} as const satisfies Record<string, CycleOption>;
+
+export type PermissionModeId = keyof typeof PERMISSION_MODES;
+
+export function pickPermissionModes(ids: PermissionModeId[]): CycleOption[] {
+  return ids.map((id) => ({ ...PERMISSION_MODES[id] }));
+}
+
+/** Known effort levels. Unknown names (e.g. SDK introduces a new one) fall through identity. */
+export const EFFORT_LEVELS: Record<string, CycleOption> = {
+  low:    { value: 'low',    displayName: 'low' },
+  medium: { value: 'medium', displayName: 'medium' },
+  high:   { value: 'high',   displayName: 'high' },
+  xhigh:  { value: 'xhigh',  displayName: 'xhigh',  severity: 'info' },
+  max:    { value: 'max',    displayName: 'max',    severity: 'warning' },
+};
+
+export function pickEffortLevels(values: string[]): CycleOption[] {
+  return values.map((v) => EFFORT_LEVELS[v] ? { ...EFFORT_LEVELS[v] } : { value: v, displayName: v });
+}
+
 export interface ProviderCapabilities {
   models: { value: string; displayName: string; effortLevels?: CycleOption[]; vision?: boolean }[];
   permissionModes: CycleOption[];

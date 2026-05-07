@@ -4,7 +4,7 @@ import * as os from 'os';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import type { QueryInput, SendFn, ServerBackend, ProviderCapabilities, SlashResult, StatusSegment } from './types';
-import { severityFromUtilization, formatResetCountdown } from './types';
+import { severityFromUtilization, formatResetCountdown, pickPermissionModes, pickEffortLevels } from './types';
 import type { ProviderModel } from '../../src/shared/types';
 
 const COPILOT_QUOTA_LABELS: Record<string, string> = {
@@ -144,15 +144,11 @@ export function createCopilotBackend(): ServerBackend {
       models: state.models.map((m) => ({
         value: m.id,
         displayName: m.name ?? m.id,
-        effortLevels: (m.supportedReasoningEfforts ?? []).map((v) => ({ value: v, displayName: v })),
+        effortLevels: pickEffortLevels(m.supportedReasoningEfforts ?? []),
       })),
       // acceptEdits has no Copilot equivalent — omit it (honest capability surface).
-      permissionModes: [
-        { value: 'default', displayName: 'ask' },
-        { value: 'bypassPermissions', displayName: 'bypassPermissions', severity: 'critical' },
-        { value: 'plan', displayName: 'plan', severity: 'info' },
-      ],
-      effortLevels: effortsFor(currentModel).map((v) => ({ value: v, displayName: v })),
+      permissionModes: pickPermissionModes(['default', 'bypassPermissions', 'plan']),
+      effortLevels: pickEffortLevels(effortsFor(currentModel)),
       slashCommands: SLASH_COMMANDS,
       authMethod: {
         kind: 'oauth' as const,

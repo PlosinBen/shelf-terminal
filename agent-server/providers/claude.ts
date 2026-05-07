@@ -3,7 +3,7 @@ import type { Query, Options, SDKMessage, CanUseTool } from '@anthropic-ai/claud
 import { existsSync } from 'fs';
 import { resolve, dirname, join } from 'path';
 import type { QueryInput, SendFn, ServerBackend, ProviderCapabilities, SlashResult, StatusSegment } from './types';
-import { severityFromUtilization, formatResetCountdown } from './types';
+import { severityFromUtilization, formatResetCountdown, pickPermissionModes, pickEffortLevels } from './types';
 import type { ProviderModel } from '../../src/shared/types';
 
 // Claude SDK's `supportedCommands()` only returns user-installed skills, not
@@ -122,14 +122,8 @@ export function createClaudeBackend(): ServerBackend {
       await ensureInit(cwd);
       return {
         models: mergeClaudeModels(cache.models ?? [], customModels),
-        // Provider decides displayName + severity. Renderer just cycles by value.
-        permissionModes: [
-          { value: 'default', displayName: 'ask' },
-          { value: 'acceptEdits', displayName: 'acceptEdits', severity: 'warning' },
-          { value: 'bypassPermissions', displayName: 'bypassPermissions', severity: 'critical' },
-          { value: 'plan', displayName: 'plan', severity: 'info' },
-        ],
-        effortLevels: ['low', 'medium', 'high', 'xhigh', 'max'].map((v) => ({ value: v, displayName: v })),
+        permissionModes: pickPermissionModes(['default', 'acceptEdits', 'bypassPermissions', 'plan']),
+        effortLevels: pickEffortLevels(['low', 'medium', 'high', 'xhigh', 'max']),
         slashCommands: (() => {
           const userCmds = (cache.commands ?? []).map((c: any) => ({ name: c.name, description: c.description }));
           const userNames = new Set(userCmds.map((c: any) => c.name));
