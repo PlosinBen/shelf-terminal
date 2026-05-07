@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import type { AgentProvider, AgentPrefs, AuthMethod, Connection } from '@shared/types';
 import { AgentMessage, type AgentMsg } from './AgentMessage';
+import { renderMarkdown } from '../utils/markdown';
 import { useAttachmentPaste } from '../hooks/useAttachmentPaste';
 import { useStore, updateProjectConfig } from '../store';
 import { loadAgentMessages, saveAgentMessages, clearAgentSession } from '../storage/agent-history';
@@ -686,7 +687,7 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex }: Pr
         {streamText && (
           <div className="agent-msg agent-msg-assistant">
             <span className="agent-msg-label">{provider.charAt(0).toUpperCase() + provider.slice(1)}:</span>
-            <div className="agent-msg-content agent-markdown" dangerouslySetInnerHTML={{ __html: streamText }} />
+            <div className="agent-msg-content agent-markdown" dangerouslySetInnerHTML={{ __html: renderMarkdown(streamText) }} />
             <span className="agent-cursor" />
           </div>
         )}
