@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo, forwardRef, useImperativeHandle } from 'react';
 import { useStore, toggleNotes } from '../store';
 import { renderMarkdown } from '../utils/markdown';
 
@@ -31,6 +31,10 @@ export function NotesView() {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [width, setWidth] = useState(DEFAULT_WIDTH);
   const [resizing, setResizing] = useState(false);
+  // Imperative handle on the active editor so the Back button (and the Done
+  // auto-close path) can run editor-side close logic — apply title fallback,
+  // delete-if-empty, flush any pending save — before the editor unmounts.
+  const editorRef = useRef<NoteEditorHandle | null>(null);
 
   // Load list when project changes
   useEffect(() => {
@@ -57,9 +61,14 @@ export function NotesView() {
     setActiveId(meta.id);
   }, [projectId, refreshList]);
 
-  const handleBack = useCallback(() => {
+  const handleBack = useCallback(async () => {
+    // Run editor close before tearing it down so the IPC write completes
+    // before refreshList — list otherwise shows stale title or a deleted note.
+    if (editorRef.current) {
+      try { await editorRef.current.close(); } catch { /* swallow — UX shouldn't block on save */ }
+    }
     setActiveId(null);
-    refreshList();
+    await refreshList();
   }, [refreshList]);
 
   const handleDelete = useCallback(async (id: string) => {
@@ -121,10 +130,12 @@ export function NotesView() {
       ) : inActive ? (
         <NoteEditor
           key={activeId}
+          ref={editorRef}
           projectId={projectId}
           noteId={activeId!}
           onAfterSave={refreshList}
           onDelete={() => handleDelete(activeId!)}
+          onRequestBack={handleBack}
         />
       ) : (
         <NotesList
@@ -194,14 +205,25 @@ function FilterTab({
 
 // ── Editor ─────────────────────────────────────────────────────
 
-function NoteEditor({
-  projectId, noteId, onAfterSave, onDelete,
-}: {
+interface NoteEditorHandle {
+  /** Apply title fallback / delete-if-empty / flush pending save.
+   *  Resolves once the IPC write (or delete) completes. */
+  close: () => Promise<void>;
+}
+
+interface NoteEditorProps {
   projectId: string;
   noteId: string;
   onAfterSave: () => void;
   onDelete: () => void;
-}) {
+  /** Called when the editor wants to navigate back to the list
+   *  (e.g. user toggled Done). Parent runs `close()` then unmounts us. */
+  onRequestBack: () => void;
+}
+
+const NoteEditor = forwardRef<NoteEditorHandle, NoteEditorProps>(function NoteEditor({
+  projectId, noteId, onAfterSave, onDelete, onRequestBack,
+}, ref) {
   const [note, setNote] = useState<Note | null>(null);
   const [mode, setMode] = useState<Mode>('edit');
   const [title, setTitle] = useState('');
@@ -272,6 +294,54 @@ function NoteEditor({
     setMode(next);
   }, [mode, flushSave]);
 
+  // Refs mirror state so close() — invoked imperatively from the parent —
+  // reads the latest values without depending on closure capture timing.
+  const titleRef = useRef(title);
+  const contentRef = useRef(content);
+  const isDoneRef = useRef(isDone);
+  useEffect(() => { titleRef.current = title; }, [title]);
+  useEffect(() => { contentRef.current = content; }, [content]);
+  useEffect(() => { isDoneRef.current = isDone; }, [isDone]);
+
+  const close = useCallback(async () => {
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    const t = titleRef.current.trim();
+    const c = contentRef.current;
+    const cTrim = c.trim();
+    // Both empty → drop the note instead of persisting an empty record.
+    // Covers the "+ New, then Back without typing" path.
+    if (!t && !cTrim) {
+      try { await window.shelfApi.notes.delete(projectId, noteId); } catch { /* ignore */ }
+      return;
+    }
+    // Title empty → derive from first non-blank line of body. Strip leading
+    // markdown heading marks and cap at 80 chars so list rows stay tidy.
+    let finalTitle = t;
+    if (!finalTitle) {
+      const firstLine = c.split('\n').map((s) => s.trim()).find((s) => s.length > 0) ?? '';
+      finalTitle = firstLine.replace(/^#+\s+/, '').slice(0, 80);
+    }
+    const last = lastSavedRef.current;
+    const done = isDoneRef.current;
+    if (last.title === finalTitle && last.content === c && last.isDone === done) return;
+    await window.shelfApi.notes.update(projectId, noteId, { title: finalTitle, content: c, isDone: done });
+    lastSavedRef.current = { title: finalTitle, content: c, isDone: done };
+  }, [projectId, noteId]);
+
+  useImperativeHandle(ref, () => ({ close }), [close]);
+
+  // Done toggle: when checked, immediately request close — parent runs
+  // close() (which saves with isDone=true via isDoneRef) and pops back to
+  // the list. Updating the ref synchronously avoids a stale-state save.
+  const handleToggleDone = useCallback((next: boolean) => {
+    setIsDone(next);
+    isDoneRef.current = next;
+    if (next) onRequestBack();
+  }, [onRequestBack]);
+
   const handlePaste = useCallback(async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
     const items = e.clipboardData.items;
     for (const item of items) {
@@ -329,7 +399,7 @@ function NoteEditor({
           <input
             type="checkbox"
             checked={isDone}
-            onChange={(e) => setIsDone(e.target.checked)}
+            onChange={(e) => handleToggleDone(e.target.checked)}
           />
           Done
         </label>
@@ -369,7 +439,7 @@ function NoteEditor({
       </div>
     </>
   );
-}
+});
 
 // Rewrite `images/<file>` paths so the renderer can load them via shelf-image://
 function rewriteImagePaths(content: string, projectId: string): string {
