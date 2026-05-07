@@ -12,6 +12,48 @@ const COPILOT_QUOTA_LABELS: Record<string, string> = {
   chat_interactions: 'chat',
 };
 
+/**
+ * Convert a Copilot `AssistantUsageQuotaSnapshot` to a `StatusSegment`.
+ *
+ * GitHub's `remainingPercentage` is documented as 0.0–1.0 (clamped), so
+ * `1 - remainingPercentage` saturates at 100% even when the user is in
+ * overage. Prefer `usedRequests / entitlementRequests` (which can exceed
+ * 1.0) so overage like 120% surfaces in the status bar — see DECISIONS #47
+ * "100% 不 cap — overage 真實顯示成 120%".
+ *
+ * Returns `null` when the snapshot should be skipped (unlimited entitlement,
+ * or insufficient data).
+ */
+export function quotaSnapshotToSegment(
+  key: string,
+  snap: any,
+): StatusSegment | null {
+  if (!snap || snap.isUnlimitedEntitlement) return null;
+
+  let u: number;
+  if (typeof snap.entitlementRequests === 'number'
+    && snap.entitlementRequests > 0
+    && typeof snap.usedRequests === 'number') {
+    u = Math.max(0, snap.usedRequests / snap.entitlementRequests);
+  } else if (typeof snap.remainingPercentage === 'number') {
+    // Fallback when request counts are missing — caps at 100% (SDK quirk).
+    u = Math.max(0, 1 - snap.remainingPercentage);
+  } else {
+    return null;
+  }
+
+  const label = COPILOT_QUOTA_LABELS[key] ?? key;
+  const pct = Math.round(u * 100);
+  const reset = snap.resetDate ? formatResetCountdown(Date.parse(snap.resetDate)) : null;
+  const severity = snap.usageAllowedWithExhaustedQuota === false && u >= 1
+    ? 'critical'
+    : severityFromUtilization(u);
+  return {
+    text: `${label}: ${pct}%${reset ? ` ↻${reset}` : ''}`,
+    severity,
+  };
+}
+
 const execFileP = promisify(execFile);
 
 async function readGhToken(): Promise<string | undefined> {
@@ -296,20 +338,8 @@ export function createCopilotBackend(): ServerBackend {
           const rateLimits: StatusSegment[] = [];
           if (quotaSnapshots) {
             for (const [key, snap] of Object.entries(quotaSnapshots)) {
-              if (snap?.isUnlimitedEntitlement) continue;
-              if (typeof snap?.remainingPercentage !== 'number') continue;
-              // No clamp: GitHub shows actual usage including overage (e.g. 120%).
-              const u = Math.max(0, 1 - snap.remainingPercentage);
-              const label = COPILOT_QUOTA_LABELS[key] ?? key;
-              const pct = Math.round(u * 100);
-              const reset = snap.resetDate ? formatResetCountdown(Date.parse(snap.resetDate)) : null;
-              const severity = snap.usageAllowedWithExhaustedQuota === false && u >= 1
-                ? 'critical'
-                : severityFromUtilization(u);
-              rateLimits.push({
-                text: `${label}: ${pct}%${reset ? ` ↻${reset}` : ''}`,
-                severity,
-              });
+              const seg = quotaSnapshotToSegment(key, snap);
+              if (seg) rateLimits.push(seg);
             }
           }
           currentSend({
