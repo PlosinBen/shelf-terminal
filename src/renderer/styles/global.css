@@ -3613,3 +3613,17 @@ button {
   background: rgba(239, 68, 68, 0.15);
   color: #fca5a5;
 }
+
+.notes-new-btn {
+  font-size: 16px;
+  line-height: 1;
+  color: var(--text-muted);
+  background: transparent;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.notes-new-btn:hover {
+  background: var(--surface);
+  color: var(--text);
+}

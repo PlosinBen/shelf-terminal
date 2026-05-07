@@ -110,7 +110,7 @@ export function NotesView() {
         )}
         <span className="notes-header-actions">
           {!inActive && (
-            <button className="notes-mode-btn" onClick={handleNew} title="New note">+</button>
+            <button className="notes-new-btn" onClick={handleNew} title="New note">+</button>
           )}
           <button className="notes-close" onClick={() => toggleNotes()}>×</button>
         </span>
