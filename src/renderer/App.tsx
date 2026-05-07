@@ -13,7 +13,8 @@ import { RemoveConfirmDialog } from './components/RemoveConfirmDialog';
 import { BottomBar, SWITCH_BRANCH_EVENT } from './components/BottomBar';
 import { DevToolsPanel } from './components/DevToolsPanel';
 import { PmView } from './components/PmView';
-import { useKeybindings } from './hooks/useKeybindings';
+import { useKeybindings, isMac } from './hooks/useKeybindings';
+import { tooltipWithShortcut } from './utils/format-keybinding';
 import { useStore, setProjects, setSettings, setUpdateStatus, addProject, addTab, setActiveTab, removeTab, removeProject, setSplitTab, toggleSidebar, clearUnread, setInvalidProjects, setPmVisible, toggleDevTools } from './store';
 import type { ProjectConfig } from '@shared/types';
 import { disposeTerminal } from './components/TerminalView';
@@ -322,7 +323,7 @@ export function App() {
               </button>
             )}
             {!devToolsVisible && (
-              <button className="right-tab-btn" onClick={toggleDevTools} title="Dev Tools">
+              <button className="right-tab-btn" onClick={toggleDevTools} title={tooltipWithShortcut('Dev Tools', settings.keybindings.toggleDevTools, isMac)}>
                 <span>Dev Tools</span>
               </button>
             )}

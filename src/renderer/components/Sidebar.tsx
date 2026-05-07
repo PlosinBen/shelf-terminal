@@ -9,11 +9,14 @@ import {
 } from '../store';
 import { emit, Events } from '../events';
 import { CONFIRM_REMOVE_EVENT } from './RemoveConfirmDialog';
+import { tooltipWithShortcut } from '../utils/format-keybinding';
+import { isMac } from '../hooks/useKeybindings';
 
 const version = __APP_VERSION__;
 
 export function Sidebar() {
-  const { projects, activeProjectIndex, updateStatus } = useStore();
+  const { projects, activeProjectIndex, updateStatus, settings } = useStore();
+  const kb = settings.keybindings;
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const [contextMenu, setContextMenu] = useState<{ index: number; x: number; y: number } | null>(null);
@@ -69,11 +72,11 @@ export function Sidebar() {
   return (
     <aside className="sidebar">
       <div className="sidebar-header">
-        <button className="sidebar-btn" onClick={toggleSidebar} title="Collapse sidebar">&#9776;</button>
+        <button className="sidebar-btn" onClick={toggleSidebar} title={tooltipWithShortcut('Collapse sidebar', kb.toggleSidebar, isMac)}>&#9776;</button>
         <span>Shelf</span>
         <span className="sidebar-header-actions">
-          <button className="sidebar-btn" onClick={toggleSettings} title="Settings">&#9881;</button>
-          <button className="sidebar-btn" onClick={handleNewProject} title="New project">+</button>
+          <button className="sidebar-btn" onClick={toggleSettings} title={tooltipWithShortcut('Settings', kb.openSettings, isMac)}>&#9881;</button>
+          <button className="sidebar-btn" onClick={handleNewProject} title={tooltipWithShortcut('New project', kb.newProject, isMac)}>+</button>
         </span>
       </div>
       <div className="sidebar-list">

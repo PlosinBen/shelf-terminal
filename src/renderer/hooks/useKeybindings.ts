@@ -11,8 +11,9 @@ import {
 } from '../store';
 import { emit, Events } from '../events';
 import type { KeybindingAction } from '@shared/types';
+import { formatCombo } from '../utils/format-keybinding';
 
-const isMac = navigator.platform.toUpperCase().includes('MAC');
+export const isMac = navigator.platform.toUpperCase().includes('MAC');
 
 function eventToCombo(e: KeyboardEvent): string {
   const parts: string[] = [];
@@ -89,19 +90,7 @@ export function useKeybindings() {
 
 // Utility: convert a combo string to display label
 export function comboToLabel(combo: string): string {
-  return combo
-    .split('+')
-    .map((part) => {
-      if (part === 'mod') return isMac ? '⌘' : 'Ctrl';
-      if (part === 'shift') return isMac ? '⇧' : 'Shift';
-      if (part === 'alt') return isMac ? '⌥' : 'Alt';
-      if (part === 'ArrowUp') return '↑';
-      if (part === 'ArrowDown') return '↓';
-      if (part === '[') return '[';
-      if (part === ']') return ']';
-      return part.toUpperCase();
-    })
-    .join(isMac ? '' : '+');
+  return formatCombo(combo, isMac);
 }
 
 // Utility: record a key combo from a KeyboardEvent (for the settings UI)
