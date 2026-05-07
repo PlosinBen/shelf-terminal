@@ -309,7 +309,7 @@ function processMessage(msg: SDKMessage, send: SendFn) {
       for (const block of msg.message.content) {
         if (block.type === 'thinking') {
           const thinkingLen = typeof block.thinking === 'string' ? block.thinking.length : 0;
-          console.error('[thinking-trace] claude assembled block, len=', typeof block.thinking === 'string' ? block.thinking.length : 'NA', 'preview=', JSON.stringify((block.thinking ?? '').slice(0, 80)));
+          console.error('[thinking-trace] claude assembled block', 'keys=', Object.keys(block), 'type=', block.type, 'len=', typeof block.thinking === 'string' ? block.thinking.length : 'NA', 'hasSignature=', typeof (block as any).signature === 'string' && (block as any).signature.length > 0, 'preview=', JSON.stringify((block.thinking ?? '').slice(0, 80)));
           if (thinkingLen > 0) {
             notifyThinkingDetected(thinkingLen, block.thinking);
           }
@@ -371,10 +371,10 @@ function processMessage(msg: SDKMessage, send: SendFn) {
         if (delta.type === 'text_delta' && typeof delta.text === 'string' && delta.text.length > 0) {
           send({ type: 'stream', streamType: 'text', content: delta.text });
         } else if (delta.type === 'thinking_delta' && typeof delta.thinking === 'string' && delta.thinking.length > 0) {
-          console.error('[thinking-trace] claude delta, len=', delta.thinking.length, 'preview=', JSON.stringify(delta.thinking.slice(0, 60)));
+          console.error('[thinking-trace] claude delta', 'eventKeys=', Object.keys(event), 'deltaKeys=', Object.keys(delta), 'deltaType=', delta.type, 'len=', delta.thinking.length, 'preview=', JSON.stringify(delta.thinking.slice(0, 60)));
           send({ type: 'stream', streamType: 'thinking', content: delta.thinking });
         } else if (delta.type === 'thinking_delta') {
-          console.error('[thinking-trace] claude delta SKIPPED, type=', delta.type, 'thinking=', JSON.stringify(delta.thinking));
+          console.error('[thinking-trace] claude delta SKIPPED', 'eventKeys=', Object.keys(event), 'deltaKeys=', Object.keys(delta), 'deltaType=', delta.type, 'thinking=', JSON.stringify(delta.thinking));
         }
       }
       break;
