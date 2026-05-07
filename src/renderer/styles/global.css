@@ -3458,3 +3458,158 @@ button {
   background: rgba(34, 197, 94, 0.12);
   color: #86efac;
 }
+
+/* ── Notes panel: list / editor extras ─────────────────────────── */
+
+.notes-back {
+  font-size: 13px;
+  color: var(--text-muted);
+  background: transparent;
+  padding: 0 6px;
+  border-radius: 4px;
+}
+
+.notes-back:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+
+.notes-filter-row {
+  display: flex;
+  gap: 4px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.notes-filter-tab {
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid transparent;
+}
+
+.notes-filter-tab:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+
+.notes-filter-tab.active {
+  background: var(--surface);
+  color: var(--text);
+  border-color: var(--border);
+}
+
+.notes-filter-count {
+  margin-left: 4px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.notes-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.notes-list-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  font-size: 13px;
+  gap: 8px;
+}
+
+.notes-list-item:hover {
+  background: var(--surface);
+}
+
+.notes-list-title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+
+.notes-list-time {
+  color: var(--text-muted);
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+.notes-list-item-done .notes-list-title {
+  text-decoration: line-through;
+  color: var(--text-muted);
+  opacity: 0.7;
+}
+
+.notes-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.notes-title-input {
+  flex: 1;
+  background: transparent;
+  border: 0;
+  outline: none;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+  padding: 2px 4px;
+}
+
+.notes-title-input::placeholder {
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+.notes-done-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.notes-done-toggle input {
+  cursor: pointer;
+}
+
+.notes-mode-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.notes-mode-spacer {
+  flex: 1;
+}
+
+.notes-delete-btn {
+  font-size: 12px;
+  color: var(--text-muted);
+  background: transparent;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.notes-delete-btn:hover {
+  background: rgba(239, 68, 68, 0.15);
+  color: #fca5a5;
+}

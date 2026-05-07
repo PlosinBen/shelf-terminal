@@ -11,7 +11,11 @@ vi.mock('electron', () => ({
   },
 }));
 
-const { readNote, writeNote, saveImage, garbageCollectImages, imagesDir, notePath } = await import('./notes-store');
+const {
+  listNotes, getNote, createNote, updateNote, deleteNote,
+  saveImage, garbageCollectImages, parseFrontmatter,
+  notesDir, notePath, imagesDir,
+} = await import('./notes-store');
 
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'shelf-notes-store-'));
@@ -23,57 +27,135 @@ afterEach(() => {
   }
 });
 
-describe('readNote', () => {
-  it('returns empty string when note does not exist', async () => {
-    expect(await readNote('p1')).toBe('');
+describe('parseFrontmatter', () => {
+  it('returns empty meta when no frontmatter', () => {
+    const r = parseFrontmatter('# heading\n\nbody');
+    expect(r.meta).toEqual({});
+    expect(r.body).toBe('# heading\n\nbody');
   });
 
-  it('returns content when note exists', async () => {
-    await writeNote('p1', '# Hello');
-    expect(await readNote('p1')).toBe('# Hello');
-  });
-});
-
-describe('writeNote', () => {
-  it('creates the project dir and writes the note', async () => {
-    await writeNote('p1', 'content');
-    expect(fs.existsSync(notePath('p1'))).toBe(true);
-    expect(fs.readFileSync(notePath('p1'), 'utf-8')).toBe('content');
-  });
-});
-
-describe('saveImage', () => {
-  it('writes the buffer under images/ and returns relative ref', async () => {
-    const buf = new Uint8Array([1, 2, 3, 4]).buffer;
-    const ref = await saveImage('p1', buf, 'png');
-
-    expect(ref).toMatch(/^images\/[\w.-]+\.png$/);
-    const filename = ref.slice('images/'.length);
-    expect(fs.existsSync(path.join(imagesDir('p1'), filename))).toBe(true);
+  it('parses scalar fields', () => {
+    const raw = '---\ntitle: Hello\nis_done: true\ncreated: 2026-01-01T00:00:00.000Z\nupdated: 2026-01-02T00:00:00.000Z\n---\nbody here';
+    const r = parseFrontmatter(raw);
+    expect(r.meta).toEqual({
+      title: 'Hello',
+      isDone: true,
+      created: '2026-01-01T00:00:00.000Z',
+      updated: '2026-01-02T00:00:00.000Z',
+    });
+    expect(r.body).toBe('body here');
   });
 
-  it('falls back to .png for unknown extensions', async () => {
-    const buf = new Uint8Array([0]).buffer;
-    const ref = await saveImage('p1', buf, 'svg+xml; charset=utf-8');
-    expect(ref).toMatch(/\.png$/);
+  it('unquotes quoted values with escaped chars', () => {
+    const raw = '---\ntitle: "Hello \\"world\\""\nis_done: false\ncreated: x\nupdated: y\n---\n';
+    const r = parseFrontmatter(raw);
+    expect(r.meta.title).toBe('Hello "world"');
   });
 
-  it('accepts jpeg/gif/webp', async () => {
-    const buf = new Uint8Array([0]).buffer;
-    expect(await saveImage('p1', buf, 'jpeg')).toMatch(/\.jpeg$/);
-    expect(await saveImage('p1', buf, 'gif')).toMatch(/\.gif$/);
-    expect(await saveImage('p1', buf, 'webp')).toMatch(/\.webp$/);
+  it('treats unterminated frontmatter as plain content', () => {
+    const raw = '---\ntitle: Hello\nstill in header';
+    const r = parseFrontmatter(raw);
+    expect(r.meta).toEqual({});
+    expect(r.body).toBe(raw);
   });
 });
 
-describe('garbageCollectImages', () => {
-  it('removes images that are not referenced in the note', async () => {
+describe('createNote / getNote / listNotes', () => {
+  it('createNote returns a meta with empty title and isDone false', async () => {
+    const meta = await createNote('p1');
+    expect(meta.title).toBe('');
+    expect(meta.isDone).toBe(false);
+    expect(meta.created).toBe(meta.updated);
+    expect(fs.existsSync(notePath('p1', meta.id))).toBe(true);
+  });
+
+  it('getNote round-trips frontmatter + body', async () => {
+    const meta = await createNote('p1');
+    await updateNote('p1', meta.id, { title: 'My Note', content: '# heading\n\nbody' });
+    const note = await getNote('p1', meta.id);
+    expect(note?.title).toBe('My Note');
+    expect(note?.content).toBe('# heading\n\nbody');
+    expect(note?.isDone).toBe(false);
+  });
+
+  it('listNotes sorts by updated desc', async () => {
+    const a = await createNote('p1');
+    await new Promise((r) => setTimeout(r, 5));
+    const b = await createNote('p1');
+    await new Promise((r) => setTimeout(r, 5));
+    await updateNote('p1', a.id, { content: 'touched a most recently' });
+
+    const list = await listNotes('p1');
+    expect(list.map((n) => n.id)).toEqual([a.id, b.id]);
+  });
+
+  it('listNotes returns empty when notes dir missing', async () => {
+    expect(await listNotes('p-empty')).toEqual([]);
+  });
+
+  it('listNotes ignores non-md files', async () => {
+    const dir = notesDir('p1');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'README.txt'), 'ignore');
+
+    const meta = await createNote('p1');
+    const list = await listNotes('p1');
+    expect(list.map((n) => n.id)).toEqual([meta.id]);
+  });
+});
+
+describe('updateNote', () => {
+  it('updates title and isDone independently', async () => {
+    const m = await createNote('p1');
+    await updateNote('p1', m.id, { title: 'T1' });
+    let n = await getNote('p1', m.id);
+    expect(n?.title).toBe('T1');
+    expect(n?.isDone).toBe(false);
+
+    await updateNote('p1', m.id, { isDone: true });
+    n = await getNote('p1', m.id);
+    expect(n?.title).toBe('T1');
+    expect(n?.isDone).toBe(true);
+  });
+
+  it('returns null for unknown id', async () => {
+    expect(await updateNote('p1', 'does-not-exist', { title: 'x' })).toBeNull();
+  });
+
+  it('refuses unsafe ids (path traversal)', async () => {
+    expect(await updateNote('p1', '../escape', { title: 'x' })).toBeNull();
+  });
+
+  it('bumps updated timestamp', async () => {
+    const m = await createNote('p1');
+    await new Promise((r) => setTimeout(r, 5));
+    const next = await updateNote('p1', m.id, { content: 'changed' });
+    expect(next!.updated > m.updated).toBe(true);
+    expect(next!.created).toBe(m.created);
+  });
+});
+
+describe('deleteNote', () => {
+  it('removes the file', async () => {
+    const m = await createNote('p1');
+    await deleteNote('p1', m.id);
+    expect(fs.existsSync(notePath('p1', m.id))).toBe(false);
+  });
+
+  it('is a no-op on unknown id', async () => {
+    await expect(deleteNote('p1', 'nope')).resolves.toBeUndefined();
+  });
+});
+
+describe('saveImage + garbageCollectImages', () => {
+  it('keeps images referenced by any note (final state after GC)', async () => {
+    const a = await createNote('p1');
+    await createNote('p1');
     const buf = new Uint8Array([1]).buffer;
     const refKept = await saveImage('p1', buf, 'png');
     const refOrphan = await saveImage('p1', buf, 'png');
 
-    const removed = await garbageCollectImages('p1', `text ![](${refKept}) more`);
-    expect(removed).toBe(1);
+    await updateNote('p1', a.id, { content: `keep ![](${refKept})` });
 
     const keptName = refKept.slice('images/'.length);
     const orphanName = refOrphan.slice('images/'.length);
@@ -81,41 +163,32 @@ describe('garbageCollectImages', () => {
     expect(fs.existsSync(path.join(imagesDir('p1'), orphanName))).toBe(false);
   });
 
-  it('keeps images referenced via raw HTML <img>', async () => {
+  it('updateNote auto-runs GC across all notes', async () => {
+    const a = await createNote('p1');
+    const b = await createNote('p1');
     const buf = new Uint8Array([1]).buffer;
     const ref = await saveImage('p1', buf, 'png');
+
+    await updateNote('p1', a.id, { content: `![](${ref})` });
+    await updateNote('p1', b.id, { content: 'unrelated edit' });
+
     const name = ref.slice('images/'.length);
-
-    const removed = await garbageCollectImages('p1', `<img src="${ref}" />`);
-    expect(removed).toBe(0);
     expect(fs.existsSync(path.join(imagesDir('p1'), name))).toBe(true);
+
+    // Drop the only ref → next save should GC it.
+    await updateNote('p1', a.id, { content: 'no image' });
+    expect(fs.existsSync(path.join(imagesDir('p1'), name))).toBe(false);
   });
 
-  it('returns 0 when images dir does not exist', async () => {
-    expect(await garbageCollectImages('p-empty', 'no images')).toBe(0);
-  });
-
-  it('removes all images when note has no references', async () => {
+  it('deleteNote triggers GC of the now-orphaned image', async () => {
+    const a = await createNote('p1');
     const buf = new Uint8Array([1]).buffer;
-    await saveImage('p1', buf, 'png');
-    await saveImage('p1', buf, 'png');
+    const ref = await saveImage('p1', buf, 'png');
+    await updateNote('p1', a.id, { content: `![](${ref})` });
 
-    const removed = await garbageCollectImages('p1', 'plain text');
-    expect(removed).toBe(2);
-  });
-});
+    await deleteNote('p1', a.id);
 
-describe('writeNote auto-GC', () => {
-  it('deletes orphaned images when note is saved', async () => {
-    const buf = new Uint8Array([1]).buffer;
-    const refA = await saveImage('p1', buf, 'png');
-    const refB = await saveImage('p1', buf, 'png');
-
-    await writeNote('p1', `keep ![](${refA})`);
-
-    const aName = refA.slice('images/'.length);
-    const bName = refB.slice('images/'.length);
-    expect(fs.existsSync(path.join(imagesDir('p1'), aName))).toBe(true);
-    expect(fs.existsSync(path.join(imagesDir('p1'), bName))).toBe(false);
+    const name = ref.slice('images/'.length);
+    expect(fs.existsSync(path.join(imagesDir('p1'), name))).toBe(false);
   });
 });

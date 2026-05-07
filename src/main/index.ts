@@ -18,7 +18,7 @@ import { log, setLogLevel, setFileWriter } from '@shared/logger';
 import { applyUserDataIsolation } from './user-data-path';
 import { removeProjectStorage } from './project-storage';
 import { migratePmNotes } from './migrations/migrate-pm-notes';
-import { readNote as readNotesContent, writeNote as writeNotesContent, saveImage as saveNoteImage } from './notes-store';
+import { listNotes, getNote, createNote, updateNote, deleteNote, saveImage as saveNoteImage } from './notes-store';
 import { registerNotesProtocol, SHELF_IMAGE_SCHEME } from './notes-protocol';
 import { handlePmSend, handleTabEvent, getHistory, clearHistory, compactHistory, stopGeneration, updateSyncedState, setWritePtyFn, isAwayMode, setAwayMode, initAwayMode, setStateChangeCallback, updateKnownTabs, startTelegram, stopTelegram, setMessageCallback, setCallbackQueryHandler, setStopCallback } from './pm';
 import { initAgentManager, disposeAllAgents } from './agent';
@@ -405,12 +405,24 @@ ipcMain.handle(IPC.LOGS_CLEAR, () => {
 
 // ── Notes ──
 
-ipcMain.handle(IPC.NOTES_READ, async (_event, projectId: string): Promise<string> => {
-  return readNotesContent(projectId);
+ipcMain.handle(IPC.NOTES_LIST, async (_event, projectId: string) => {
+  return listNotes(projectId);
 });
 
-ipcMain.handle(IPC.NOTES_WRITE, async (_event, payload: { projectId: string; content: string }): Promise<void> => {
-  await writeNotesContent(payload.projectId, payload.content);
+ipcMain.handle(IPC.NOTES_GET, async (_event, payload: { projectId: string; noteId: string }) => {
+  return getNote(payload.projectId, payload.noteId);
+});
+
+ipcMain.handle(IPC.NOTES_CREATE, async (_event, projectId: string) => {
+  return createNote(projectId);
+});
+
+ipcMain.handle(IPC.NOTES_UPDATE, async (_event, payload: { projectId: string; noteId: string; patch: { title?: string; isDone?: boolean; content?: string } }) => {
+  return updateNote(payload.projectId, payload.noteId, payload.patch);
+});
+
+ipcMain.handle(IPC.NOTES_DELETE, async (_event, payload: { projectId: string; noteId: string }) => {
+  await deleteNote(payload.projectId, payload.noteId);
 });
 
 ipcMain.handle(IPC.NOTES_SAVE_IMAGE, async (_event, payload: { projectId: string; buffer: ArrayBuffer; ext: string }): Promise<string> => {
