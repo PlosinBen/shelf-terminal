@@ -13,9 +13,10 @@ import { RemoveConfirmDialog } from './components/RemoveConfirmDialog';
 import { BottomBar, SWITCH_BRANCH_EVENT } from './components/BottomBar';
 import { DevToolsPanel } from './components/DevToolsPanel';
 import { PmView } from './components/PmView';
+import { NotesView } from './components/NotesView';
 import { useKeybindings, isMac } from './hooks/useKeybindings';
 import { tooltipWithShortcut } from './utils/format-keybinding';
-import { useStore, setProjects, setSettings, setUpdateStatus, addProject, addTab, setActiveTab, removeTab, removeProject, setSplitTab, toggleSidebar, clearUnread, setInvalidProjects, setPmVisible, toggleDevTools } from './store';
+import { useStore, setProjects, setSettings, setUpdateStatus, addProject, addTab, setActiveTab, removeTab, removeProject, setSplitTab, toggleSidebar, clearUnread, setInvalidProjects, setPmVisible, toggleDevTools, toggleNotes } from './store';
 import type { ProjectConfig } from '@shared/types';
 import { disposeTerminal } from './components/TerminalView';
 import { on, emit, Events } from './events';
@@ -24,7 +25,7 @@ import { clearAgentSession } from './storage/agent-history';
 import './styles/global.css';
 
 export function App() {
-  const { projects, activeProjectIndex, sidebarVisible, settingsVisible, commandPickerVisible, devToolsVisible, editingProjectIndex, settings, pmVisible, awayMode } = useStore();
+  const { projects, activeProjectIndex, sidebarVisible, settingsVisible, commandPickerVisible, devToolsVisible, notesVisible, editingProjectIndex, settings, pmVisible, awayMode } = useStore();
   useKeybindings();
 
   useEffect(() => {
@@ -313,13 +314,19 @@ export function App() {
         )}
         </div>
         {pmVisible && <PmView />}
+        {notesVisible && <NotesView />}
         {devToolsVisible && <DevToolsPanel />}
-        {(!pmVisible || !devToolsVisible) && (
+        {(!pmVisible || !notesVisible || !devToolsVisible) && (
           <div className="right-tabs-collapsed">
             {!pmVisible && (
               <button className="right-tab-btn" onClick={() => setPmVisible(true)} title="PM Agent">
                 <span className={`pm-tab-dot ${awayMode ? 'pm-dot-away' : 'pm-dot'}`} />
                 <span>PM</span>
+              </button>
+            )}
+            {!notesVisible && (
+              <button className="right-tab-btn" onClick={toggleNotes} title={tooltipWithShortcut('Notes', settings.keybindings.toggleNotes, isMac)}>
+                <span>Notes</span>
               </button>
             )}
             {!devToolsVisible && (

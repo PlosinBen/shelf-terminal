@@ -5,6 +5,7 @@ import {
   toggleSearch,
   toggleCommandPicker,
   toggleDevTools,
+  toggleNotes,
   setActiveProject,
   setActiveTab,
   useStore,
@@ -58,6 +59,7 @@ export function useKeybindings() {
           case 'search':         return toggleSearch;
           case 'openCommandPicker': return activeProject ? toggleCommandPicker : null;
           case 'toggleDevTools':   return toggleDevTools;
+          case 'toggleNotes':      return activeProject ? toggleNotes : null;
           case 'newProject':     return () => emit(Events.OPEN_FOLDER_PICKER);
           case 'prevProject':    return () => setActiveProject(Math.max(0, activeProjectIndex - 1));
           case 'nextProject':    return () => setActiveProject(Math.min(projects.length - 1, activeProjectIndex + 1));

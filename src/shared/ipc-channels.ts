@@ -43,6 +43,11 @@ export const IPC = {
   GIT_WORKTREE_ADD: 'git:worktree-add',
   GIT_WORKTREE_REMOVE: 'git:worktree-remove',
 
+  // Notes (per-project markdown scratch pad)
+  NOTES_READ: 'notes:read',
+  NOTES_WRITE: 'notes:write',
+  NOTES_SAVE_IMAGE: 'notes:save-image',
+
   // Logs
   LOGS_CLEAR: 'logs:clear',
 

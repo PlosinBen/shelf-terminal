@@ -61,6 +61,11 @@ interface ShelfApi {
   logs: {
     clear: () => Promise<void>;
   };
+  notes: {
+    read: (projectId: string) => Promise<string>;
+    write: (projectId: string, content: string) => Promise<void>;
+    saveImage: (projectId: string, buffer: ArrayBuffer, ext: string) => Promise<string>;
+  };
   app: {
     logsPath: () => Promise<string>;
   };

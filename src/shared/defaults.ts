@@ -14,6 +14,7 @@ export const DEFAULT_KEYBINDINGS: KeybindingConfig = {
   toggleSplit: 'mod+\\',
   openCommandPicker: 'mod+e',
   toggleDevTools: 'mod+d',
+  toggleNotes: 'mod+shift+t',
 };
 
 export const DEFAULT_SETTINGS: AppSettings = {
