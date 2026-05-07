@@ -3,7 +3,7 @@ import { useStore, updateSettings, toggleSettings } from '../store';
 import { themes } from '../themes';
 import { comboToLabel, recordCombo } from '../hooks/useKeybindings';
 import type { AppSettings, KeybindingAction, KeybindingConfig, LogLevel, PmProviderType, ProviderModel, AgentDisplayMode } from '@shared/types';
-import { PM_PROVIDERS, getModelsForProvider, AGENT_DISPLAY_KEYS } from '@shared/types';
+import { PM_PROVIDERS, getModelsForProvider, AGENT_DISPLAY_KEYS, AGENT_PROVIDER_REGISTRY } from '@shared/types';
 
 const ACTION_LABELS: Record<KeybindingAction, string> = {
   toggleSidebar: 'Toggle Sidebar',
@@ -271,8 +271,8 @@ export function SettingsPanel() {
             {activeTab === 'models' && (
               <>
                 <div className="settings-section-title">Models</div>
-                <div className="project-edit-hint">Available across PM Agent and OpenAI-based agent providers.</div>
-                {PM_PROVIDERS.map((p) => (
+                <div className="project-edit-hint">Custom entries shown in PM Agent and Claude pickers. SDK-provided defaults are not listed here.</div>
+                {[...PM_PROVIDERS, ...AGENT_PROVIDER_REGISTRY].map((p) => (
                   <ProviderModelsSection
                     key={p.id}
                     provider={p}
@@ -396,7 +396,7 @@ export function SettingsPanel() {
 }
 
 function ProviderModelsSection({ provider, customModels, onChange }: {
-  provider: typeof PM_PROVIDERS[number];
+  provider: { id: string; label: string; models: ProviderModel[] };
   customModels: ProviderModel[];
   onChange: (models: ProviderModel[]) => void;
 }) {

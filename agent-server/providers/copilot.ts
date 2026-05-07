@@ -5,6 +5,7 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import type { QueryInput, SendFn, ServerBackend, ProviderCapabilities, SlashResult, StatusSegment } from './types';
 import { severityFromUtilization, formatResetCountdown } from './types';
+import type { ProviderModel } from '../../src/shared/types';
 
 const COPILOT_QUOTA_LABELS: Record<string, string> = {
   premium_interactions: 'premium',
@@ -364,7 +365,9 @@ export function createCopilotBackend(): ServerBackend {
   }
 
   return {
-    async gatherCapabilities(_cwd: string, sessionId?: string): Promise<ProviderCapabilities> {
+    async gatherCapabilities(_cwd: string, sessionId?: string, _customModels?: ProviderModel[]): Promise<ProviderCapabilities> {
+      // Copilot SDK validates model names against GitHub's model API; user-provided
+      // custom IDs would be rejected at runtime, so we ignore customModels here.
       if (sessionId) currentSessionId = sessionId;
       await listModelsCached();
       if (!currentEffort) currentEffort = modelMeta(currentModel)?.defaultReasoningEffort;

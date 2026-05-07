@@ -4,6 +4,7 @@ import { existsSync } from 'fs';
 import { resolve, dirname, join } from 'path';
 import type { QueryInput, SendFn, ServerBackend, ProviderCapabilities, SlashResult, StatusSegment } from './types';
 import { severityFromUtilization, formatResetCountdown } from './types';
+import type { ProviderModel } from '../../src/shared/types';
 
 // Claude SDK's `supportedCommands()` only returns user-installed skills, not
 // built-ins. Append these so the autocomplete menu lists them; submission still
@@ -103,10 +104,10 @@ export function createClaudeBackend(): ServerBackend {
   }
 
   return {
-    async gatherCapabilities(cwd: string): Promise<ProviderCapabilities> {
+    async gatherCapabilities(cwd: string, _sessionId?: string, customModels?: ProviderModel[]): Promise<ProviderCapabilities> {
       await ensureInit(cwd);
       return {
-        models: (cache.models ?? []).map((m: any) => ({ value: m.value, displayName: m.displayName, vision: true })),
+        models: mergeClaudeModels(cache.models ?? [], customModels),
         // Provider decides displayName + severity. Renderer just cycles by value.
         permissionModes: [
           { value: 'default', displayName: 'ask' },
@@ -221,6 +222,30 @@ export function createClaudeBackend(): ServerBackend {
       return { type: 'pass-through' };
     },
   };
+}
+
+export function mergeClaudeModels(
+  sdkModels: { value: string; displayName: string }[],
+  customs?: ProviderModel[],
+): { value: string; displayName: string; vision: boolean }[] {
+  const result: { value: string; displayName: string; vision: boolean }[] = sdkModels.map((m) => ({
+    value: m.value,
+    displayName: m.displayName,
+    vision: true,
+  }));
+  if (!customs || customs.length === 0) return result;
+  const indexById = new Map(result.map((m, i) => [m.value, i]));
+  for (const c of customs) {
+    const entry = { value: c.id, displayName: c.id, vision: true };
+    const existing = indexById.get(c.id);
+    if (existing != null) {
+      result[existing] = entry;
+    } else {
+      indexById.set(c.id, result.length);
+      result.push(entry);
+    }
+  }
+  return result;
 }
 
 function dataUrlToImageBlock(dataUrl: string): { type: 'image'; source: { type: 'base64'; media_type: string; data: string } } | null {

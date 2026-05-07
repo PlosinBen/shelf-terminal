@@ -140,7 +140,7 @@ export interface AppSettings {
   pmProvider?: PmProviderConfig;
   telegram?: TelegramConfig;
   agentDisplay?: Partial<Record<string, AgentDisplayMode>>;
-  providerModels?: Partial<Record<PmProviderType, ProviderModel[]>>;
+  providerModels?: Partial<Record<PmProviderType | 'claude', ProviderModel[]>>;
 }
 
 
@@ -212,6 +212,15 @@ export const PM_PROVIDERS: { id: PmProviderType; label: string; baseURL?: string
       { id: 'gemini-2.0-flash', contextWindow: 1048576 },
     ],
   },
+];
+
+/**
+ * Agent providers that accept user-defined custom models. Copilot is excluded —
+ * its SDK validates model IDs against GitHub's API and would reject custom entries.
+ * See agent-server/providers/copilot.ts gatherCapabilities.
+ */
+export const AGENT_PROVIDER_REGISTRY: { id: 'claude'; label: string; models: ProviderModel[] }[] = [
+  { id: 'claude', label: 'Claude', models: [] },
 ];
 
 export function getModelsForProvider(providerType: PmProviderType, custom?: Partial<Record<PmProviderType, ProviderModel[]>>): ProviderModel[] {

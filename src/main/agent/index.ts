@@ -4,6 +4,7 @@ import { log } from '@shared/logger';
 import type { Connection, AgentProvider } from '@shared/types';
 import type { AgentSessionState, AgentEvent, AgentBackend, PermissionResult } from './types';
 import { createRemoteBackend } from './remote';
+import { loadSettings } from '../settings-store';
 
 interface SessionInstance {
   tabId: string;
@@ -117,7 +118,9 @@ async function startSession(
   sessions.set(tabId, session);
 
   if (backend.getCapabilities) {
-    backend.getCapabilities(cwd).then((caps) => {
+    const settings = loadSettings();
+    const customModels = settings.ok ? settings.value.providerModels?.[provider as keyof NonNullable<typeof settings.value.providerModels>] : undefined;
+    backend.getCapabilities(cwd, customModels).then((caps) => {
       send(IPC.AGENT_CAPABILITIES, tabId, caps);
     }).catch((err) => {
       log.error('agent', `${tag} capabilities error: ${err.message}`);

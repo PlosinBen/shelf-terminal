@@ -21,6 +21,8 @@ export function formatResetCountdown(resetsAtMs: number): string | null {
   return `${Math.ceil(d / 60_000)}m`;
 }
 
+import type { ProviderModel } from '../../src/shared/types';
+
 export type OutgoingMessage = {
   type: 'message' | 'stream' | 'status' | 'error' | 'pong' | 'ready' | 'capabilities' | 'auth_required' | 'permission_request'
     | 'credential_stored' | 'credential_cleared' | 'slash_result';
@@ -70,7 +72,7 @@ export interface ServerBackend {
   query(input: QueryInput, send: SendFn): Promise<void>;
   stop(): Promise<void>;
   dispose(): void;
-  gatherCapabilities?(cwd: string, sessionId?: string): Promise<ProviderCapabilities>;
+  gatherCapabilities?(cwd: string, sessionId?: string, customModels?: ProviderModel[]): Promise<ProviderCapabilities>;
   resolvePermission?(toolUseId: string, allow: boolean, message?: string): void;
   storeCredential?(key: string): Promise<void>;
   clearCredential?(): Promise<void>;

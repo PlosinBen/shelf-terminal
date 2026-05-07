@@ -1,5 +1,5 @@
 import { log } from '@shared/logger';
-import type { Connection, AgentProvider } from '@shared/types';
+import type { Connection, AgentProvider, ProviderModel } from '@shared/types';
 import type { AgentBackend, AgentEvent, AgentQueryOptions } from './types';
 import { ChildProcess, spawn, execSync } from 'child_process';
 import { app } from 'electron';
@@ -114,7 +114,7 @@ export function createRemoteBackend(
       }
     },
 
-    async getCapabilities(cwd: string) {
+    async getCapabilities(cwd: string, customModels?: ProviderModel[]) {
       const proc = await ensureProcReady(cwd);
       if (!proc) return { models: [], permissionModes: [], effortLevels: [], slashCommands: [] };
       const requestId = `cap-${Date.now()}`;
@@ -135,7 +135,7 @@ export function createRemoteBackend(
             currentPermissionMode: payload.currentPermissionMode,
           });
         });
-        proc.sendLine({ type: 'get_capabilities', provider, cwd, sessionId, requestId });
+        proc.sendLine({ type: 'get_capabilities', provider, cwd, sessionId, customModels, requestId });
       });
     },
 

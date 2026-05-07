@@ -1,4 +1,4 @@
-import type { AuthMethod } from '@shared/types';
+import type { AuthMethod, ProviderModel } from '@shared/types';
 
 export type AgentSessionState = 'idle' | 'streaming' | 'waiting_permission' | 'error';
 
@@ -104,7 +104,7 @@ export interface AgentBackend {
   stop(): Promise<void>;
   dispose(): void;
   checkAuth(): Promise<boolean>;
-  getCapabilities?(cwd: string): Promise<ProviderCapabilities>;
+  getCapabilities?(cwd: string, customModels?: ProviderModel[]): Promise<ProviderCapabilities>;
   setModel?(model: string): void;
   setEffort?(effort: string): void;
   setPermissionMode?(mode: string): void;

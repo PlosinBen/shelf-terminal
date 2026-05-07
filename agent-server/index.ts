@@ -3,6 +3,7 @@ import { createClaudeBackend } from './providers/claude';
 import { createCopilotBackend } from './providers/copilot';
 import { deleteContext, cleanupOldContexts } from './context-store';
 import type { OutgoingMessage, QueryInput, ServerBackend } from './providers/types';
+import type { ProviderModel } from '../src/shared/types';
 
 type Provider = 'claude' | 'copilot';
 
@@ -24,6 +25,7 @@ interface IncomingMessage {
   key?: string;
   cmd?: string;
   args?: string;
+  customModels?: ProviderModel[];
 }
 
 function send(msg: OutgoingMessage) {
@@ -113,7 +115,7 @@ rl.on('line', (line) => {
       (async () => {
         try {
           const backend = getBackend(provider);
-          const caps = await backend.gatherCapabilities?.(msg.cwd ?? process.cwd(), msg.sessionId);
+          const caps = await backend.gatherCapabilities?.(msg.cwd ?? process.cwd(), msg.sessionId, msg.customModels);
           send({ type: 'capabilities', requestId: msg.requestId, ...(caps ?? {}) });
         } catch (err: any) {
           send({ type: 'capabilities', requestId: msg.requestId, error: err?.message ?? String(err) });
