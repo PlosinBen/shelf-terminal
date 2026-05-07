@@ -7,14 +7,20 @@ const CONTEXT_DIR = path.join(os.homedir(), '.shelf', 'agent-context');
 export interface PersistedContext {
   sessionId: string;
   provider: string;
-  /** Chat Completions history (stateless mode). Empty for stateful providers. */
-  modelMessages: unknown[];
-  totalInputTokens: number;
-  totalOutputTokens: number;
-  model: string;
   updatedAt: number;
+  /** Chat Completions history (stateless mode). Only set for stateless OpenAI-compatible providers. */
+  modelMessages?: unknown[];
+  totalInputTokens?: number;
+  totalOutputTokens?: number;
+  model?: string;
   /** OpenAI Responses API stateful chain handle. Set when using a stateful model. */
   lastResponseId?: string;
+  /**
+   * Claude SDK session_id from the last completed turn. Used to set
+   * `options.resume` so the SDK reloads the conversation jsonl on next process
+   * start. Only set for `provider === 'claude'`.
+   */
+  lastSdkSessionId?: string;
 }
 
 function contextPath(sessionId: string): string {
