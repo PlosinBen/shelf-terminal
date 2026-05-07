@@ -71,8 +71,6 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
   const [streamText, setStreamText] = useState('');
   const [streamThinking, setStreamThinking] = useState('');
   const [statusModel, setStatusModel] = useState<string | null>(savedPrefs?.model ?? null);
-  const [inputTokens, setInputTokens] = useState(0);
-  const [outputTokens, setOutputTokens] = useState(0);
   const [costUsd, setCostUsd] = useState<number | undefined>(undefined);
   const [numTurns, setNumTurns] = useState<number | undefined>(undefined);
   type StatusSegment = { text: string; severity?: 'normal' | 'warning' | 'critical' };
@@ -330,8 +328,6 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
         return nowStreaming;
       });
       if (status.model) setStatusModel(status.model);
-      if (status.inputTokens != null) setInputTokens(status.inputTokens);
-      if (status.outputTokens != null) setOutputTokens(status.outputTokens);
       if (status.costUsd != null) setCostUsd(status.costUsd);
       if (status.numTurns != null) setNumTurns(status.numTurns);
       if (status.contextUsage) setContextUsage(status.contextUsage);
@@ -565,8 +561,6 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
     setMessages([]);
     setStreamText('');
     setCostUsd(undefined);
-    setInputTokens(0);
-    setOutputTokens(0);
     setNumTurns(undefined);
     setContextUsage(null);
     setRateLimits([]);
@@ -878,7 +872,6 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
         {contextUsage && (
           <><span className="agent-status-sep">|</span><span className="agent-status-seg" data-severity={contextUsage.severity ?? 'normal'}>{contextUsage.text}</span></>
         )}
-        {(inputTokens > 0 || outputTokens > 0) && <><span className="agent-status-sep">|</span><span className="agent-status-seg">{Math.round(inputTokens / 1000)}k+{Math.round(outputTokens / 1000)}k</span></>}
         {costUsd !== undefined && <><span className="agent-status-sep">|</span><span className="agent-status-seg">${costUsd.toFixed(3)}</span></>}
         {numTurns !== undefined && <><span className="agent-status-sep">|</span><span className="agent-status-seg">{numTurns} turns</span></>}
         {rateLimits.map((seg, i) => (
