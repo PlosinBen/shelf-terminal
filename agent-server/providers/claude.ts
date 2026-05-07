@@ -67,7 +67,7 @@ export function createClaudeBackend(): ServerBackend {
     const result = await new Promise<PermissionResult>((resolve) => {
       pendingPermissions.set(toolUseId, resolve);
     });
-    if (result.behavior === 'allow') return { behavior: 'allow' as const };
+    if (result.behavior === 'allow') return { behavior: 'allow' as const, updatedInput: input };
     return { behavior: 'deny' as const, message: result.message ?? 'Denied by user' };
   }) as CanUseTool;
 
@@ -129,6 +129,14 @@ export function createClaudeBackend(): ServerBackend {
     async query(input: QueryInput, send: SendFn) {
       currentSend = send;
       abortController = new AbortController();
+      const mode = (input.permissionMode as Options['permissionMode']) ?? 'default';
+      const isBypass = mode === 'bypassPermissions';
+      // DIY bypass: SDK stays at 'default' and our canUseTool short-circuits to allow.
+      // Avoids SDK's `allowDangerouslySkipPermissions` flag and keeps plan/acceptEdits
+      // SDK-native (those have non-trivial built-in semantics worth keeping).
+      const effectiveCanUseTool: CanUseTool = isBypass
+        ? ((async (_n, toolInput) => ({ behavior: 'allow' as const, updatedInput: toolInput })) as CanUseTool)
+        : canUseTool;
       const options: Options = {
         abortController,
         cwd: input.cwd,
@@ -136,8 +144,8 @@ export function createClaudeBackend(): ServerBackend {
         tools: { type: 'preset', preset: 'claude_code' },
         thinking: { type: 'adaptive' },
         includePartialMessages: true,
-        permissionMode: (input.permissionMode as Options['permissionMode']) ?? 'default',
-        canUseTool,
+        permissionMode: isBypass ? 'default' : mode,
+        canUseTool: effectiveCanUseTool,
       };
 
       const resumeId = input.resume ?? lastSessionId;
