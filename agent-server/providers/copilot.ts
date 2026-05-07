@@ -436,7 +436,10 @@ export function createCopilotBackend(): ServerBackend {
 
       try {
         const session = await ensureSession();
-        await session.sendAndWait({ prompt: input.prompt });
+        // SDK default timeout is 60s, way too short for agent turns that
+        // chain tool calls (file reads, greps, shell). 30 min is a generous
+        // upper bound that still catches genuinely-stuck sessions.
+        await session.sendAndWait({ prompt: input.prompt }, 30 * 60 * 1000);
         send({ type: 'status', state: 'idle', model: currentModel });
       } catch (err: any) {
         const msg = err?.message ?? String(err);

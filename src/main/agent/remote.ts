@@ -422,6 +422,9 @@ function parseRemoteMessage(msg: any): AgentEvent | null {
   }
 
   if (msg.type === 'error') {
+    // Log to file for postmortem — these errors are otherwise only surfaced
+    // to the renderer via IPC and disappear when the session ends.
+    log.error('agent-remote', 'remote error:', msg.error ?? 'Unknown remote error');
     return { type: 'error', error: msg.error ?? 'Unknown remote error' };
   }
 
