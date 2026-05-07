@@ -73,7 +73,10 @@ export interface ProviderCapabilities {
   currentPermissionMode?: string;
 }
 
-export type PermissionResult = { behavior: 'allow' } | { behavior: 'deny'; message?: string };
+export type PermissionScope = 'once' | 'session';
+export type PermissionResult =
+  | { behavior: 'allow'; scope?: PermissionScope }
+  | { behavior: 'deny'; message?: string };
 export type PermissionCallback = (toolUseId: string, toolName: string, input: Record<string, unknown>) => Promise<PermissionResult>;
 
 export interface AgentQueryOptions {

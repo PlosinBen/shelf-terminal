@@ -24,7 +24,9 @@ const RATE_LIMIT_LABELS: Record<string, string> = {
   overage: 'overage',
 };
 
-type PermissionResult = { behavior: 'allow' } | { behavior: 'deny'; message?: string };
+type PermissionResult =
+  | { behavior: 'allow'; scope?: 'once' | 'session' }
+  | { behavior: 'deny'; message?: string };
 
 const CLAUDE_AUTH_METHOD = {
   kind: 'sdk-managed' as const,
@@ -67,7 +69,19 @@ export function createClaudeBackend(): ServerBackend {
     const result = await new Promise<PermissionResult>((resolve) => {
       pendingPermissions.set(toolUseId, resolve);
     });
-    if (result.behavior === 'allow') return { behavior: 'allow' as const, updatedInput: input };
+    if (result.behavior === 'allow') {
+      const allow: any = { behavior: 'allow' as const, updatedInput: input };
+      if (result.scope === 'session') {
+        // SDK self-records the rule; future invocations of the same tool skip canUseTool entirely.
+        allow.updatedPermissions = [{
+          type: 'addRules',
+          destination: 'session',
+          behavior: 'allow',
+          rules: [{ toolName }],
+        }];
+      }
+      return allow;
+    }
     return { behavior: 'deny' as const, message: result.message ?? 'Denied by user' };
   }) as CanUseTool;
 
@@ -212,11 +226,11 @@ export function createClaudeBackend(): ServerBackend {
       abortController = null;
     },
 
-    resolvePermission(toolUseId: string, allow: boolean, message?: string) {
+    resolvePermission(toolUseId: string, allow: boolean, message?: string, scope?: 'once' | 'session') {
       const resolve = pendingPermissions.get(toolUseId);
       if (resolve) {
         pendingPermissions.delete(toolUseId);
-        resolve(allow ? { behavior: 'allow' } : { behavior: 'deny', message: message ?? 'Denied' });
+        resolve(allow ? { behavior: 'allow', scope } : { behavior: 'deny', message: message ?? 'Denied' });
       }
     },
 

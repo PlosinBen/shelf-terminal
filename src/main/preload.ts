@@ -129,8 +129,8 @@ contextBridge.exposeInMainWorld('shelfApi', {
       ipcRenderer.invoke(IPC.AGENT_STOP, { tabId }),
     destroy: (tabId: string) =>
       ipcRenderer.invoke(IPC.AGENT_DESTROY, { tabId }),
-    resolvePermission: (tabId: string, toolUseId: string, allow: boolean) =>
-      ipcRenderer.invoke(IPC.AGENT_RESOLVE_PERMISSION, { tabId, toolUseId, allow }),
+    resolvePermission: (tabId: string, toolUseId: string, allow: boolean, scope?: 'once' | 'session') =>
+      ipcRenderer.invoke(IPC.AGENT_RESOLVE_PERMISSION, { tabId, toolUseId, allow, scope }),
     setPrefs: (tabId: string, prefs: Record<string, unknown>) =>
       ipcRenderer.invoke(IPC.AGENT_SET_PREFS, { tabId, ...prefs }),
     storeCredential: (tabId: string, key: string) =>

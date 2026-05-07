@@ -26,6 +26,7 @@ interface IncomingMessage {
   cmd?: string;
   args?: string;
   customModels?: ProviderModel[];
+  scope?: 'once' | 'session';
 }
 
 function send(msg: OutgoingMessage) {
@@ -107,7 +108,7 @@ rl.on('line', (line) => {
       break;
     case 'resolve_permission':
       if (activeBackend && msg.toolUseId !== undefined) {
-        activeBackend.resolvePermission?.(msg.toolUseId, msg.allow ?? false, msg.message);
+        activeBackend.resolvePermission?.(msg.toolUseId, msg.allow ?? false, msg.message, msg.scope);
       }
       break;
     case 'get_capabilities': {

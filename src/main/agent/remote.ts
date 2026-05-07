@@ -76,6 +76,7 @@ export function createRemoteBackend(
           toolUseId,
           allow: result.behavior === 'allow',
           message: result.behavior === 'deny' ? result.message : undefined,
+          scope: result.behavior === 'allow' ? result.scope : undefined,
         });
       });
 

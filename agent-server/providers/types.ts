@@ -73,7 +73,7 @@ export interface ServerBackend {
   stop(): Promise<void>;
   dispose(): void;
   gatherCapabilities?(cwd: string, sessionId?: string, customModels?: ProviderModel[]): Promise<ProviderCapabilities>;
-  resolvePermission?(toolUseId: string, allow: boolean, message?: string): void;
+  resolvePermission?(toolUseId: string, allow: boolean, message?: string, scope?: 'once' | 'session'): void;
   storeCredential?(key: string): Promise<void>;
   clearCredential?(): Promise<void>;
   handleSlashCommand?(cmd: string, args: string): Promise<SlashResult>;

@@ -42,7 +42,7 @@ export function initAgentManager(windowGetter: () => BrowserWindow | null): void
   });
 
   ipcMain.handle(IPC.AGENT_RESOLVE_PERMISSION, async (_e, payload) => {
-    return resolvePermission(payload.tabId, payload.toolUseId, payload.allow);
+    return resolvePermission(payload.tabId, payload.toolUseId, payload.allow, payload.scope);
   });
 
   ipcMain.handle(IPC.AGENT_SET_PREFS, async (_e, payload) => {
@@ -204,13 +204,13 @@ async function destroySession(tabId: string): Promise<boolean> {
   return true;
 }
 
-function resolvePermission(tabId: string, toolUseId: string, allow: boolean): boolean {
+function resolvePermission(tabId: string, toolUseId: string, allow: boolean, scope?: 'once' | 'session'): boolean {
   const session = sessions.get(tabId);
   if (!session) return false;
   const resolve = session.pendingPermissions.get(toolUseId);
   if (!resolve) return false;
   session.pendingPermissions.delete(toolUseId);
-  resolve(allow ? { behavior: 'allow' } : { behavior: 'deny', message: 'Denied by user' });
+  resolve(allow ? { behavior: 'allow', scope } : { behavior: 'deny', message: 'Denied by user' });
   return true;
 }
 
