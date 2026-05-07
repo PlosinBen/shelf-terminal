@@ -100,13 +100,13 @@ export function NotesView() {
   const inActive = activeId !== null;
 
   return (
-    <div className="notes-view" style={{ width }}>
-      <div className="notes-resize-handle" onMouseDown={() => setResizing(true)} />
-      <div className="notes-header">
+    <div className="right-panel notes-view" style={{ width }}>
+      <div className="right-panel-resize-handle notes-resize-handle" onMouseDown={() => setResizing(true)} />
+      <div className="right-panel-header notes-header">
         {inActive ? (
           <button className="notes-back" onClick={handleBack}>‹ Back</button>
         ) : (
-          <span className="notes-title">Notes</span>
+          <span className="right-panel-title notes-title">Notes</span>
         )}
         <span className="notes-header-actions">
           {!inActive && (

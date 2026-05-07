@@ -268,10 +268,10 @@ export function DevToolsPanel() {
   if (!devToolsVisible) return null;
 
   return (
-    <div className="devtools-panel" style={{ width }}>
-      <div className="devtools-resize-handle" onMouseDown={onDragStart} />
-      <div className="devtools-header">
-        <span>Dev Tools</span>
+    <div className="right-panel devtools-panel" style={{ width }}>
+      <div className="right-panel-resize-handle devtools-resize-handle" onMouseDown={onDragStart} />
+      <div className="right-panel-header devtools-header">
+        <span className="right-panel-title">Dev Tools</span>
         <button className="settings-close" onClick={toggleDevTools}>×</button>
       </div>
       <div className="devtools-body">

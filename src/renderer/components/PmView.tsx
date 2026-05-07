@@ -166,10 +166,10 @@ export function PmView() {
   }, []);
 
   return (
-    <div className="pm-panel" style={{ width }}>
-      <div className="pm-resize-handle" onMouseDown={onDragStart} />
-      <div className="pm-header">
-        <span className="pm-header-title">PM</span>
+    <div className="right-panel pm-panel" style={{ width }}>
+      <div className="right-panel-resize-handle pm-resize-handle" onMouseDown={onDragStart} />
+      <div className="right-panel-header pm-header">
+        <span className="right-panel-title pm-header-title">PM</span>
         <span className="pm-header-actions">
           <button
             className={`pm-away-toggle ${awayMode ? 'pm-away-on' : ''}`}
