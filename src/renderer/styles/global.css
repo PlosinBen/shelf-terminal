@@ -3412,3 +3412,49 @@ button {
 .notes-preview a {
   color: var(--accent);
 }
+
+/* ── Agent Edit side-by-side diff ─────────────────────── */
+
+.agent-diff-sbs {
+  display: flex;
+  flex-direction: column;
+  font-size: 12px;
+  line-height: 18px;
+  font-family: var(--font-mono, Menlo, monospace);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.agent-diff-sbs-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  min-height: 18px;
+}
+
+.agent-diff-sbs-cell {
+  padding: 0 8px;
+  white-space: pre;
+  overflow-x: auto;
+  border-left: 1px solid var(--border);
+}
+
+.agent-diff-sbs-cell:first-child {
+  border-left: 0;
+}
+
+.agent-diff-sbs-same .agent-diff-sbs-cell {
+  color: var(--text-muted);
+}
+
+.agent-diff-sbs-del .agent-diff-sbs-left,
+.agent-diff-sbs-change .agent-diff-sbs-left {
+  background: rgba(239, 68, 68, 0.12);
+  color: #fca5a5;
+}
+
+.agent-diff-sbs-add .agent-diff-sbs-right,
+.agent-diff-sbs-change .agent-diff-sbs-right {
+  background: rgba(34, 197, 94, 0.12);
+  color: #86efac;
+}

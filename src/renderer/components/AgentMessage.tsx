@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { useStore } from '../store';
 import { renderMarkdown } from '../utils/markdown';
+import { alignLineDiff, type DiffRow } from '../utils/line-diff';
 import type { AgentDisplayMode } from '@shared/types';
 
 export interface AgentMsg {
@@ -53,6 +54,23 @@ function truncateLines(text: string, max: number): { lines: string[]; remaining:
   return { lines: all.slice(0, max), remaining: all.length - max };
 }
 
+function SideBySideDiff({ rows }: { rows: DiffRow[] }) {
+  return (
+    <div className="agent-diff-sbs">
+      {rows.map((row, i) => (
+        <div key={i} className={`agent-diff-sbs-row agent-diff-sbs-${row.kind}`}>
+          <span className="agent-diff-sbs-cell agent-diff-sbs-left">
+            {row.old !== null ? row.old : ' '}
+          </span>
+          <span className="agent-diff-sbs-cell agent-diff-sbs-right">
+            {row.new !== null ? row.new : ' '}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function ToolBody({ toolName, input, cwd }: { toolName?: string; input?: Record<string, unknown>; cwd?: string }) {
   if (!toolName || !input) return <pre className="agent-tool-content">{JSON.stringify(input, null, 2)}</pre>;
 
@@ -65,24 +83,8 @@ function ToolBody({ toolName, input, cwd }: { toolName?: string; input?: Record<
   if (name === 'edit' || name === 'edit_file') {
     const oldStr = String(input.old_string ?? '');
     const newStr = String(input.new_string ?? '');
-    const oldLines = oldStr.split('\n');
-    const newLines = newStr.split('\n');
-    return (
-      <div className="agent-tool-diff-inline">
-        {oldLines.map((line, i) => (
-          <div key={`d${i}`} className="agent-diff-row agent-diff-del">
-            <span className="agent-diff-sign">-</span>
-            <span className="agent-diff-text">{line}</span>
-          </div>
-        ))}
-        {newLines.map((line, i) => (
-          <div key={`a${i}`} className="agent-diff-row agent-diff-add">
-            <span className="agent-diff-sign">+</span>
-            <span className="agent-diff-text">{line}</span>
-          </div>
-        ))}
-      </div>
-    );
+    const rows = alignLineDiff(oldStr.split('\n'), newStr.split('\n'));
+    return <SideBySideDiff rows={rows} />;
   }
 
   if (name === 'write' || name === 'write_file') {
