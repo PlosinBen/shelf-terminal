@@ -56,6 +56,41 @@ function createWindow() {
     return { action: 'deny' };
   });
 
+  // Defense-in-depth: if anything tries to navigate the renderer frame away
+  // from Shelf (markdown link missing target=_blank, stray window.location,
+  // form submission, etc.), block the navigation and offer to open the URL
+  // in the system browser instead. We never want the renderer to actually
+  // navigate — that wipes agent state, terminal scrollback, panel layout.
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    // Initial app load (file:// in prod, vite dev server URL in dev) is allowed
+    // to pass through; only intercept post-load navigations.
+    const current = mainWindow?.webContents.getURL();
+    if (current && url === current) return;
+
+    event.preventDefault();
+    if (!mainWindow) return;
+
+    const isOpenable = url.startsWith('http://') || url.startsWith('https://') || url.startsWith('mailto:');
+    dialog
+      .showMessageBox(mainWindow, {
+        type: 'question',
+        title: 'Leave Shelf?',
+        message: `A link is trying to navigate Shelf to:\n${url}`,
+        detail: isOpenable
+          ? 'Cancel keeps Shelf where it is. Open in browser sends the link to your default browser.'
+          : 'This URL cannot be opened externally. Cancel to stay in Shelf.',
+        buttons: isOpenable ? ['Cancel', 'Open in browser'] : ['Cancel'],
+        defaultId: 0,
+        cancelId: 0,
+        noLink: true,
+      })
+      .then((result) => {
+        if (isOpenable && result.response === 1) {
+          shell.openExternal(url);
+        }
+      });
+  });
+
   // Intercept Cmd/Ctrl+R, Shift+Cmd/Ctrl+R, and F5 — a stray reload would clear
   // xterm scrollback and force the renderer to reconnect. Confirm with the user
   // first regardless of which platform-specific key they hit.
