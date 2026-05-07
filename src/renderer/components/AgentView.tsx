@@ -151,7 +151,18 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
     if (initializedRef.current) return;
     initializedRef.current = true;
     window.shelfApi.agent.init(tabId, cwd, connection, provider, sessionId);
-  }, [tabId, cwd, connection, provider, sessionId]);
+    // Sync saved prefs to backend. Without this, the renderer remembers e.g.
+    // permissionMode='bypassPermissions' across launches, but the backend's
+    // currentPermissionMode stays null until the user explicitly cycles —
+    // so the first turn after launch still triggers the permission popup.
+    const prefs: Record<string, string> = {};
+    if (savedPrefs?.model) prefs.model = savedPrefs.model;
+    if (savedPrefs?.effort) prefs.effort = savedPrefs.effort;
+    if (savedPrefs?.permissionMode) prefs.permissionMode = savedPrefs.permissionMode;
+    if (Object.keys(prefs).length > 0) {
+      window.shelfApi.agent.setPrefs(tabId, prefs);
+    }
+  }, [tabId, cwd, connection, provider, sessionId, savedPrefs]);
 
   // Load UI messages from IndexedDB
   useEffect(() => {
