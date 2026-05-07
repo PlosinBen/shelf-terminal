@@ -428,19 +428,24 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex }: Pr
     setQueuedMessages((q) => q.filter((m) => m.id !== id));
   }, []);
 
-  // Permission response
-  const handlePermissionRespond = useCallback((allow: boolean) => {
+  // Permission response. scope='session' tells provider to remember allow for the rest of the session.
+  const handlePermissionRespond = useCallback((allow: boolean, scope?: 'once' | 'session') => {
     if (!pendingPermission) return;
-    window.shelfApi.agent.resolvePermission(tabId, pendingPermission.toolUseId, allow);
+    window.shelfApi.agent.resolvePermission(tabId, pendingPermission.toolUseId, allow, scope);
     setPendingPermission(null);
   }, [tabId, pendingPermission]);
 
   useEffect(() => {
     if (!pendingPermission) return;
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'ArrowUp') { e.preventDefault(); setPermSelection((p) => (p > 0 ? p - 1 : 1)); }
-      else if (e.key === 'ArrowDown') { e.preventDefault(); setPermSelection((p) => (p < 1 ? p + 1 : 0)); }
-      else if (e.key === 'Enter') { e.preventDefault(); handlePermissionRespond(permSelection === 0); }
+      if (e.key === 'ArrowUp') { e.preventDefault(); setPermSelection((p) => (p > 0 ? p - 1 : 2)); }
+      else if (e.key === 'ArrowDown') { e.preventDefault(); setPermSelection((p) => (p < 2 ? p + 1 : 0)); }
+      else if (e.key === 'Enter') {
+        e.preventDefault();
+        if (permSelection === 0) handlePermissionRespond(true, 'once');
+        else if (permSelection === 1) handlePermissionRespond(true, 'session');
+        else handlePermissionRespond(false);
+      }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
@@ -704,10 +709,14 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex }: Pr
           <div className="agent-permission-header">Allow <strong>{pendingPermission.toolName}</strong>?</div>
           <pre className="agent-permission-input">{JSON.stringify(pendingPermission.input, null, 2)}</pre>
           <div className="agent-perm-options">
-            {['Allow', 'Deny'].map((label, i) => (
-              <div key={label} className={`agent-perm-option agent-perm-option-${i === 0 ? 'allow' : 'deny'}${permSelection === i ? ' selected' : ''}`} onClick={() => handlePermissionRespond(i === 0)}>
+            {([
+              { label: 'Allow once', kind: 'allow', onClick: () => handlePermissionRespond(true, 'once') },
+              { label: 'Allow for session', kind: 'allow', onClick: () => handlePermissionRespond(true, 'session') },
+              { label: 'Deny', kind: 'deny', onClick: () => handlePermissionRespond(false) },
+            ] as const).map((opt, i) => (
+              <div key={opt.label} className={`agent-perm-option agent-perm-option-${opt.kind}${permSelection === i ? ' selected' : ''}`} onClick={opt.onClick}>
                 <span className="agent-perm-indicator">{permSelection === i ? '▶' : ' '}</span>
-                <span>{label}</span>
+                <span>{opt.label}</span>
               </div>
             ))}
           </div>

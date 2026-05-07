@@ -81,7 +81,7 @@ interface ShelfApi {
     send: (tabId: string, prompt: string, images?: string[]) => Promise<boolean>;
     stop: (tabId: string) => Promise<boolean>;
     destroy: (tabId: string) => Promise<void>;
-    resolvePermission: (tabId: string, toolUseId: string, allow: boolean) => Promise<boolean>;
+    resolvePermission: (tabId: string, toolUseId: string, allow: boolean, scope?: 'once' | 'session') => Promise<boolean>;
     setPrefs: (tabId: string, prefs: Record<string, unknown>) => Promise<boolean>;
     storeCredential: (tabId: string, key: string) => Promise<boolean>;
     clearCredential: (tabId: string) => Promise<boolean>;
