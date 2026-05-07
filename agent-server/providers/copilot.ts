@@ -277,9 +277,13 @@ export function createCopilotBackend(): ServerBackend {
           break;
         case 'tool.execution_complete': {
           const data = event.data ?? {};
+          // Use `content` (concise, what the LLM sees) rather than
+          // `detailedContent` (SDK-side rich UI, returns reads as fake
+          // unified diffs). The renderer reconstructs edit visuals from
+          // toolInput, so we don't need detailedContent's diff fidelity.
           const text = data.success === false
             ? `Error: ${data.error?.message ?? 'tool failed'}`
-            : (data.result?.detailedContent ?? data.result?.content ?? '');
+            : (data.result?.content ?? '');
           currentSend({
             type: 'message', msgType: 'tool_result',
             content: text.slice(0, 8000),

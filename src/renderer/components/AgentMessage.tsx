@@ -32,12 +32,18 @@ function getToolSummary(toolName?: string, input?: Record<string, unknown>, cwd?
       return String(input.command ?? '');
     case 'Read':
     case 'read_file':
+    case 'view':
       return stripCwd(String(input.file_path ?? input.path ?? ''), cwd);
     case 'Edit':
     case 'edit_file':
     case 'Write':
     case 'write_file':
       return stripCwd(String(input.file_path ?? input.path ?? ''), cwd);
+    case 'str_replace_editor': {
+      const path = stripCwd(String(input.file_path ?? input.path ?? ''), cwd);
+      const cmd = String(input.command ?? '');
+      return cmd ? `${path} (${cmd})` : path;
+    }
     case 'list_directory':
       return stripCwd(String(input.path ?? ''), cwd);
     default: {
@@ -71,6 +77,23 @@ function SideBySideDiff({ rows }: { rows: DiffRow[] }) {
   );
 }
 
+// Inline "+ line" diff for create/write-style operations where everything
+// is an addition. Truncates at 20 lines to keep tool cards compact.
+function InlineAddDiff({ content }: { content: string }) {
+  const { lines, remaining } = truncateLines(content, 20);
+  return (
+    <div className="agent-tool-diff-inline">
+      {lines.map((line, i) => (
+        <div key={i} className="agent-diff-row agent-diff-add">
+          <span className="agent-diff-sign">+</span>
+          <span className="agent-diff-text">{line}</span>
+        </div>
+      ))}
+      {remaining > 0 && <div className="agent-tool-truncated">... +{remaining} more lines</div>}
+    </div>
+  );
+}
+
 function ToolBody({ toolName, input, cwd }: { toolName?: string; input?: Record<string, unknown>; cwd?: string }) {
   if (!toolName || !input) return <pre className="agent-tool-content">{JSON.stringify(input, null, 2)}</pre>;
 
@@ -89,21 +112,34 @@ function ToolBody({ toolName, input, cwd }: { toolName?: string; input?: Record<
 
   if (name === 'write' || name === 'write_file') {
     const content = String(input.content ?? '');
-    const { lines, remaining } = truncateLines(content, 20);
-    return (
-      <div className="agent-tool-diff-inline">
-        {lines.map((line, i) => (
-          <div key={i} className="agent-diff-row agent-diff-add">
-            <span className="agent-diff-sign">+</span>
-            <span className="agent-diff-text">{line}</span>
-          </div>
-        ))}
-        {remaining > 0 && <div className="agent-tool-truncated">... +{remaining} more lines</div>}
-      </div>
-    );
+    return <InlineAddDiff content={content} />;
   }
 
-  if (name === 'read' || name === 'read_file' || name === 'list_directory' || name === 'glob') {
+  // Copilot's str_replace_editor multiplexes view/create/str_replace/insert/undo_edit
+  // through a `command` field. Dispatch on the sub-command and reuse the same
+  // visual renderers as Claude's Edit/Write/Read for consistency.
+  if (name === 'str_replace_editor') {
+    const cmd = String(input.command ?? '');
+    if (cmd === 'str_replace') {
+      const oldStr = String(input.old_str ?? input.old_string ?? '');
+      const newStr = String(input.new_str ?? input.new_string ?? '');
+      const rows = alignLineDiff(oldStr.split('\n'), newStr.split('\n'));
+      return <SideBySideDiff rows={rows} />;
+    }
+    if (cmd === 'create') {
+      const content = String(input.file_text ?? input.content ?? '');
+      return <InlineAddDiff content={content} />;
+    }
+    if (cmd === 'insert') {
+      const content = String(input.new_str ?? input.new_string ?? '');
+      return <InlineAddDiff content={content} />;
+    }
+    // view / undo_edit / unknown sub-commands: nothing useful to render
+    return null;
+  }
+
+  if (name === 'read' || name === 'read_file' || name === 'view'
+      || name === 'list_directory' || name === 'glob') {
     return null;
   }
 
