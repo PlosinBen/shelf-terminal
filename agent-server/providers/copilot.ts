@@ -24,7 +24,22 @@ async function readGhToken(): Promise<string | undefined> {
   }
 }
 
-type PermissionResult = { behavior: 'allow' } | { behavior: 'deny'; message?: string };
+type PermissionResult =
+  | { behavior: 'allow'; scope?: 'once' | 'session' }
+  | { behavior: 'deny'; message?: string };
+
+// Map Copilot's PermissionRequest.kind to the approve-for-session approval sub-shape
+// it expects back. shell/mcp/custom-tool/url/hook need data we don't have here
+// (commandIdentifiers / serverName / toolName), so omit approval and let the SDK
+// fall back to its default session-allow behavior for those kinds.
+function approvalForKind(kind: string): any | undefined {
+  switch (kind) {
+    case 'read': return { kind: 'read' };
+    case 'write': return { kind: 'write' };
+    case 'memory': return { kind: 'memory' };
+    default: return undefined;
+  }
+}
 
 const DEFAULT_MODEL = 'gpt-5.5';
 
@@ -162,9 +177,16 @@ export function createCopilotBackend(): ServerBackend {
     const result = await new Promise<PermissionResult>((resolve) => {
       pendingPermissions.set(toolUseId, resolve);
     });
-    return result.behavior === 'allow'
-      ? { kind: 'approve-once' as const }
-      : { kind: 'reject' as const, feedback: result.message };
+    if (result.behavior === 'deny') {
+      return { kind: 'reject' as const, feedback: result.message };
+    }
+    if (result.scope === 'session') {
+      const approval = approvalForKind(request.kind);
+      return approval
+        ? { kind: 'approve-for-session' as const, approval }
+        : { kind: 'approve-for-session' as const };
+    }
+    return { kind: 'approve-once' as const };
   };
 
   async function ensureClient(): Promise<import('@github/copilot-sdk').CopilotClient> {
@@ -444,11 +466,11 @@ export function createCopilotBackend(): ServerBackend {
       state.client = null;
     },
 
-    resolvePermission(toolUseId: string, allow: boolean, message?: string) {
+    resolvePermission(toolUseId: string, allow: boolean, message?: string, scope?: 'once' | 'session') {
       const resolve = pendingPermissions.get(toolUseId);
       if (resolve) {
         pendingPermissions.delete(toolUseId);
-        resolve(allow ? { behavior: 'allow' } : { behavior: 'deny', message: message ?? 'Denied' });
+        resolve(allow ? { behavior: 'allow', scope } : { behavior: 'deny', message: message ?? 'Denied' });
       }
     },
 
