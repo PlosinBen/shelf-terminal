@@ -19,6 +19,11 @@
 | 自動更新 state machine | `updater-state.ts` | 純 reducer（idle/available/downloading/downloaded），由 vitest 單元測試 |
 | App 啟動 / config 載入 | `bootstrap.ts` | 預先載入 projects/settings，遇錯顯示 blocking dialog |
 | userData 路徑隔離 | `user-data-path.ts` | `applyUserDataIsolation()`，靠 `app.isPackaged` + `--user-data-dir` 判斷，unpackaged 且無 switch 時加 `-dev` 後綴 |
+| Per-project storage 共用層 | `project-storage.ts` | `projectDir(id)` / `ensureProjectDir(id)` / `removeProjectStorage(id)` — 所有 per-project 檔案統一在 `<userData>/projects/<id>/` 之下；移除 project 一行 `fs.rm` 整包清掉 |
+| 啟動 migration | `migrations/migrate-pm-notes.ts` | 啟動時 idempotent 把舊 `pm-notes/<id>.md` → `projects/<id>/pm-note.md`（copy → verify → unlink，partial run 安全 resume）|
+| Notes 檔案存取 | `notes-store.ts` | `readNote/writeNote/saveImage` + `garbageCollectImages`：每次寫入掃 `images/<uuid>` ref，未被引用的圖檔立刻刪除 |
+| Notes 圖片自訂 protocol | `notes-protocol.ts` | 註冊 `shelf-image://<projectId>/<filename>` scheme 給 renderer 載入 note 圖片；segment 驗證拒絕 path traversal |
+
 ### Connector (src/main/connector/)
 
 | Intent | File | Description |
@@ -100,6 +105,8 @@
 | Worktree 建立 | `components/WorktreeDialog.tsx` | 輸入新 branch name 建立 git worktree，產生 sub-project |
 | 刪除確認 | `components/RemoveConfirmDialog.tsx` | Remove project 確認 modal，worktree 可勾選是否清理 worktree files |
 | PM 聊天面板 | `components/PmView.tsx` | 右側可拖拉 panel（訊息列表 + markdown 渲染 + streaming + tool call 摺疊 + Away Mode toggle + error 顯示）；chunk handling 走 `pm-view-reducer.ts` 的純 reducer |
+| Notes 面板 | `components/NotesView.tsx` | ⌘N toggle 右側 panel，per-project markdown scratch pad（preview / edit toggle）；edit 模式 paste 圖片直接存檔 + 自動插入 ref；debounced auto-save；preview 走 `marked` + `shelf-image://` |
+| Tooltip 快捷鍵 helper | `utils/format-keybinding.ts` | 純函式 `formatCombo(combo, isMac)` / `tooltipWithShortcut(label, combo, isMac)`；`useKeybindings.comboToLabel` 內部 delegate 到這裡 |
 | PM stream reducer | `components/pm-view-reducer.ts` | 純 reducer（`send_start` / `clear_display` / `dismiss_error` / `chunk`），管 streaming/streamText/streamToolCalls/error 四個 UI state；vitest 測 13 case |
 | Project 編輯面板 | `components/ProjectEditPanel.tsx` | 改名、init script、default tabs、quick commands 編輯、Clear uploaded files |
 | Agent UI 訊息持久化 | `storage/agent-history.ts` | IndexedDB（`idb@8.0.3`）存 UI messages keyed by sessionId；`loadAgentMessages()`、`saveAgentMessages()`、`clearAgentSession()` |
