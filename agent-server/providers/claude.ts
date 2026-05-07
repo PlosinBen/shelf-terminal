@@ -283,19 +283,9 @@ function processMessage(msg: SDKMessage, send: SendFn) {
     case 'assistant': {
       for (const block of msg.message.content) {
         if (block.type === 'thinking') {
-          // With includePartialMessages: true, the SDK sometimes leaves the
-          // assembled thinking block empty (content already streamed via
-          // stream_event deltas). Skip the empty message — the renderer's
-          // streamThinking accumulator will be flushed by its idle handler
-          // when the turn ends. Sending empty content here would clobber
-          // the accumulator and lose the thinking text entirely.
-          if (block.thinking) {
-            send({ type: 'message', msgType: 'thinking', content: block.thinking, sessionId: msg.session_id });
-          }
+          send({ type: 'message', msgType: 'thinking', content: block.thinking, sessionId: msg.session_id });
         } else if (block.type === 'text') {
-          if (block.text) {
-            send({ type: 'message', msgType: 'text', content: block.text, sessionId: msg.session_id });
-          }
+          send({ type: 'message', msgType: 'text', content: block.text, sessionId: msg.session_id });
         } else if (block.type === 'tool_use') {
           send({
             type: 'message', msgType: 'tool_use', content: '',

@@ -257,11 +257,22 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
         return;
       }
 
-      // A text/thinking message supersedes the corresponding streaming buffer
-      // (provider already streamed deltas, then sent the full block). Clear the
-      // buffer to avoid the idle handler flushing it as a duplicate message.
-      if (msg.type === 'text') setStreamText('');
-      if (msg.type === 'thinking') setStreamThinking('');
+      // A text/thinking message with content supersedes the corresponding
+      // streaming buffer (provider already streamed deltas, then sent the
+      // assembled block). Clear the buffer to avoid the idle handler flushing
+      // it as a duplicate message. Empty content is dropped — with
+      // includePartialMessages: true the SDK sometimes emits empty assembled
+      // blocks; in that case we keep the streaming buffer and let the idle
+      // handler flush it on turn end.
+      const hasContent = typeof msg.content === 'string' && msg.content.length > 0;
+      if (msg.type === 'text') {
+        if (!hasContent) return;
+        setStreamText('');
+      }
+      if (msg.type === 'thinking') {
+        if (!hasContent) return;
+        setStreamThinking('');
+      }
 
       setMessages((prev) => [...prev, newMsg]);
     });
