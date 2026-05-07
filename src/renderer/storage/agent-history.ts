@@ -2,7 +2,12 @@ import { openDB, type IDBPDatabase } from 'idb';
 import type { AgentMsg } from '../components/AgentMessage';
 
 const DB_NAME = 'shelf-agent-history';
-const DB_VERSION = 1;
+// v1: legacy schema (keyPath 'id', index 'by-project-time'). Long gone but
+// users who ran early shelf builds still have v1 DBs in their browser
+// profile; opening at v1 finds no 'by-session' index and throws NotFoundError.
+// v2: current schema. Migration drops the legacy store wholesale — agent UI
+// history is non-critical and the shapes are incompatible anyway.
+const DB_VERSION = 2;
 const STORE_NAME = 'messages';
 
 let dbPromise: Promise<IDBPDatabase> | null = null;
@@ -10,7 +15,10 @@ let dbPromise: Promise<IDBPDatabase> | null = null;
 function getDB(): Promise<IDBPDatabase> {
   if (!dbPromise) {
     dbPromise = openDB(DB_NAME, DB_VERSION, {
-      upgrade(db) {
+      upgrade(db, oldVersion) {
+        if (oldVersion < 2 && db.objectStoreNames.contains(STORE_NAME)) {
+          db.deleteObjectStore(STORE_NAME);
+        }
         const store = db.createObjectStore(STORE_NAME, {
           keyPath: 'dbId',
           autoIncrement: true,
