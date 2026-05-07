@@ -354,7 +354,9 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
     if (isAtBottomRef.current) {
       bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [messages, streamText, streamThinking]);
+    // isStreaming flip toggles the "Agent is running…" placeholder, which
+    // changes scrollHeight; include it in deps so the auto-follow keeps up.
+  }, [messages, streamText, streamThinking, isStreaming]);
 
   // When this tab becomes visible again, the auto-scroll effect above
   // could not run while the parent was display:none (scrollIntoView is a
