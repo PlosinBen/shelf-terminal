@@ -43,9 +43,10 @@ interface Props {
   connection: Connection;
   provider: AgentProvider;
   projectIndex: number;
+  visible: boolean;
 }
 
-export function AgentView({ tabId, cwd, connection, provider, projectIndex }: Props) {
+export function AgentView({ tabId, cwd, connection, provider, projectIndex, visible }: Props) {
   const { projects, settings } = useStore();
   const savedPrefs = projects[projectIndex]?.config.agentPrefs?.[provider];
 
@@ -111,6 +112,15 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex }: Pr
   const rootRef = useRef<HTMLDivElement>(null);
   const initializedRef = useRef(false);
   const isAtBottomRef = useRef(true);
+
+  // Focus the input whenever this tab becomes visible (tab switch, project
+  // switch, app launch). requestAnimationFrame defers past the layout pass so
+  // the textarea is actually in the visible DOM (parent is display:none → block).
+  useEffect(() => {
+    if (!visible) return;
+    const id = requestAnimationFrame(() => inputRef.current?.focus());
+    return () => cancelAnimationFrame(id);
+  }, [visible]);
 
   // Attachment paste support
   useAttachmentPaste(rootRef, {

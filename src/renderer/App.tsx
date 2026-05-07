@@ -288,6 +288,7 @@ export function App() {
                           connection={proj.config.connection}
                           provider={tab.provider}
                           projectIndex={pi}
+                          visible={visible}
                         />
                       ) : (
                         <TerminalView
