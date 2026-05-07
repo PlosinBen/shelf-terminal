@@ -42,23 +42,22 @@ describe('Copilot handleSlashCommand', () => {
     backend.dispose();
   });
 
-  it('/context shows token usage with default values', async () => {
+  it('/context returns hint message when no usage tracked yet', async () => {
     const backend = createCopilotBackend();
     const result = await backend.handleSlashCommand!('context', '');
     expect(result.type).toBe('system-message');
     if (result.type === 'system-message') {
-      expect(result.content).toMatch(/Token usage:/);
-      expect(result.content).toMatch(/Model:/);
+      expect(result.content).toMatch(/no context info/i);
     }
     backend.dispose();
   });
 
-  it('/compact on empty history returns no-op system message', async () => {
+  it('/compact before any session returns no-op system message', async () => {
     const backend = createCopilotBackend();
     const result = await backend.handleSlashCommand!('compact', '');
     expect(result.type).toBe('system-message');
     if (result.type === 'system-message') {
-      expect(result.content).toMatch(/no history/i);
+      expect(result.content).toMatch(/no active session/i);
     }
     backend.dispose();
   });
