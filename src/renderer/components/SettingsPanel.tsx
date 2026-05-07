@@ -27,7 +27,7 @@ function formatContextWindow(tokens: number): string {
   return `${Math.round(tokens / 1000)}K`;
 }
 
-type SettingsTab = 'terminal' | 'models' | 'pm' | 'shortcuts';
+type SettingsTab = 'terminal' | 'agent' | 'models' | 'pm' | 'shortcuts';
 
 export function SettingsPanel() {
   const { settingsVisible, settings } = useStore();
@@ -117,6 +117,7 @@ export function SettingsPanel() {
         <div className="settings-layout">
           <div className="settings-tabs">
             <button className={`settings-tab ${activeTab === 'terminal' ? 'active' : ''}`} onClick={() => setActiveTab('terminal')}>Terminal</button>
+            <button className={`settings-tab ${activeTab === 'agent' ? 'active' : ''}`} onClick={() => setActiveTab('agent')}>Agent</button>
             <button className={`settings-tab ${activeTab === 'models' ? 'active' : ''}`} onClick={() => setActiveTab('models')}>Models</button>
             <button className={`settings-tab ${activeTab === 'pm' ? 'active' : ''}`} onClick={() => setActiveTab('pm')}>PM Agent</button>
             <button className={`settings-tab ${activeTab === 'shortcuts' ? 'active' : ''}`} onClick={() => setActiveTab('shortcuts')}>Shortcuts</button>
@@ -223,25 +224,6 @@ export function SettingsPanel() {
                 </div>
 
                 <div className="settings-divider" />
-                <div className="settings-section-title">Agent Display</div>
-                {AGENT_DISPLAY_KEYS.map(({ key, label }) => (
-                  <div className="settings-group" key={key}>
-                    <label className="settings-label">{label}</label>
-                    <select
-                      className="settings-select"
-                      value={draft.agentDisplay?.[key] ?? 'collapsed'}
-                      onChange={(e) => updateDraft({
-                        agentDisplay: { ...draft.agentDisplay, [key]: e.target.value as AgentDisplayMode },
-                      })}
-                    >
-                      <option value="collapsed">Collapsed</option>
-                      <option value="expanded">Expanded</option>
-                      <option value="hidden">Hidden</option>
-                    </select>
-                  </div>
-                ))}
-
-                <div className="settings-divider" />
                 <div className="settings-section-title">Logs</div>
                 <div className="settings-group">
                   <label className="settings-label">Log Level</label>
@@ -266,6 +248,44 @@ export function SettingsPanel() {
                 </div>
                 <div className="settings-sub-hint">{logsPath}</div>
 
+              </>
+            )}
+
+            {activeTab === 'agent' && (
+              <>
+                <div className="settings-section-title">History</div>
+                <div className="settings-group">
+                  <label className="settings-label">Max Messages</label>
+                  <input
+                    className="settings-input"
+                    type="number"
+                    min={50}
+                    max={10000}
+                    step={100}
+                    value={draft.agentHistoryMaxMessages}
+                    onChange={(e) => updateDraft({ agentHistoryMaxMessages: Number(e.target.value) })}
+                  />
+                </div>
+                <div className="settings-sub-hint">Oldest messages are dropped from local history when this limit is exceeded.</div>
+
+                <div className="settings-divider" />
+                <div className="settings-section-title">Display</div>
+                {AGENT_DISPLAY_KEYS.map(({ key, label }) => (
+                  <div className="settings-group" key={key}>
+                    <label className="settings-label">{label}</label>
+                    <select
+                      className="settings-select"
+                      value={draft.agentDisplay?.[key] ?? 'collapsed'}
+                      onChange={(e) => updateDraft({
+                        agentDisplay: { ...draft.agentDisplay, [key]: e.target.value as AgentDisplayMode },
+                      })}
+                    >
+                      <option value="collapsed">Collapsed</option>
+                      <option value="expanded">Expanded</option>
+                      <option value="hidden">Hidden</option>
+                    </select>
+                  </div>
+                ))}
               </>
             )}
 
