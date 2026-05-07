@@ -16,6 +16,8 @@ import { createConnector, getAvailableTypes, listDockerContainers, listWSLDistro
 import { loadSSHServers, saveSSHServer } from './ssh-server-store';
 import { log, setLogLevel, setFileWriter } from '@shared/logger';
 import { applyUserDataIsolation } from './user-data-path';
+import { removeProjectStorage } from './project-storage';
+import { migratePmNotes } from './migrations/migrate-pm-notes';
 import { handlePmSend, handleTabEvent, getHistory, clearHistory, compactHistory, stopGeneration, updateSyncedState, setWritePtyFn, isAwayMode, setAwayMode, initAwayMode, setStateChangeCallback, updateKnownTabs, startTelegram, stopTelegram, setMessageCallback, setCallbackQueryHandler, setStopCallback } from './pm';
 import { initAgentManager, disposeAllAgents } from './agent';
 import type { Connection, ProjectConfig, AppSettings, FileUploadResult, FileClearResult, PtySpawnPayload, PtyInputPayload, PtyResizePayload, PtyKillPayload, GitBranchInfo, WorktreeAddResult, WorktreeRemoveResult } from '@shared/types';
@@ -98,9 +100,14 @@ ipcMain.handle(IPC.PROJECT_LOAD, () => {
   return cachedProjects;
 });
 
-ipcMain.handle(IPC.PROJECT_SAVE, (_event, projects: ProjectConfig[]) => {
+ipcMain.handle(IPC.PROJECT_SAVE, async (_event, projects: ProjectConfig[]) => {
+  const oldIds = new Set(cachedProjects.map((p) => p.id));
+  const newIds = new Set(projects.map((p) => p.id));
   cachedProjects = projects;
   saveProjects(projects);
+  for (const id of oldIds) {
+    if (!newIds.has(id)) await removeProjectStorage(id);
+  }
 });
 
 ipcMain.handle(IPC.PROJECT_VALIDATE_DIRS, (_event, projects: ProjectConfig[]): string[] => {
@@ -425,7 +432,7 @@ ipcMain.handle(IPC.PM_AWAY_MODE_GET, () => {
 
 // ── App lifecycle ──
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   Menu.setApplicationMenu(buildAppMenu({ onCheckForUpdates: manualCheckForUpdate }));
 
   const logBaseDir = path.join(app.getPath('userData'), 'logs');
@@ -448,6 +455,8 @@ app.whenReady().then(() => {
   if (!envLogLevel) setLogLevel(settings.logLevel);
 
   log.info('app', `starting, logLevel=${settings.logLevel}, userData=${app.getPath('userData')}`);
+
+  await migratePmNotes();
 
   createWindow();
 

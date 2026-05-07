@@ -1,27 +1,22 @@
 import path from 'path';
 import fs from 'fs';
 import { app } from 'electron';
-
-function notesDir(): string {
-  return path.join(app.getPath('userData'), 'pm-notes');
-}
+import { ensureProjectDir, projectDir } from '../project-storage';
 
 function notePath(projectId: string): string {
-  return path.join(notesDir(), `${projectId}.md`);
+  return path.join(projectDir(projectId), 'pm-note.md');
 }
 
 export function readNote(projectId: string): string {
-  const p = notePath(projectId);
   try {
-    return fs.readFileSync(p, 'utf-8');
+    return fs.readFileSync(notePath(projectId), 'utf-8');
   } catch {
     return '';
   }
 }
 
 export function writeNote(projectId: string, content: string): void {
-  const dir = notesDir();
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  ensureProjectDir(projectId);
   fs.writeFileSync(notePath(projectId), content, 'utf-8');
 }
 
