@@ -65,18 +65,30 @@ function truncateLines(text: string, max: number): { lines: string[]; remaining:
 }
 
 function SideBySideDiff({ rows }: { rows: DiffRow[] }) {
+  // Walk rows once to compute snippet-relative line numbers per side.
+  // 'same'/'change' advance both; 'del' advances only old; 'add' advances only new.
+  let oldLine = 0;
+  let newLine = 0;
   return (
     <div className="agent-diff-sbs">
-      {rows.map((row, i) => (
-        <div key={i} className={`agent-diff-sbs-row agent-diff-sbs-${row.kind}`}>
-          <span className="agent-diff-sbs-cell agent-diff-sbs-left">
-            {row.old !== null ? row.old : ' '}
-          </span>
-          <span className="agent-diff-sbs-cell agent-diff-sbs-right">
-            {row.new !== null ? row.new : ' '}
-          </span>
-        </div>
-      ))}
+      {rows.map((row, i) => {
+        const showOld = row.old !== null;
+        const showNew = row.new !== null;
+        if (showOld) oldLine++;
+        if (showNew) newLine++;
+        return (
+          <div key={i} className={`agent-diff-sbs-row agent-diff-sbs-${row.kind}`}>
+            <span className="agent-diff-sbs-ln agent-diff-sbs-left">{showOld ? oldLine : ''}</span>
+            <span className="agent-diff-sbs-cell agent-diff-sbs-left">
+              {showOld ? row.old : ' '}
+            </span>
+            <span className="agent-diff-sbs-ln agent-diff-sbs-right">{showNew ? newLine : ''}</span>
+            <span className="agent-diff-sbs-cell agent-diff-sbs-right">
+              {showNew ? row.new : ' '}
+            </span>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -89,6 +101,7 @@ function InlineAddDiff({ content }: { content: string }) {
     <div className="agent-tool-diff-inline">
       {lines.map((line, i) => (
         <div key={i} className="agent-diff-row agent-diff-add">
+          <span className="agent-diff-ln">{i + 1}</span>
           <span className="agent-diff-sign">+</span>
           <span className="agent-diff-text">{line}</span>
         </div>

@@ -2926,7 +2926,16 @@ button {
   border-radius: 3px;
   font-size: 12px;
   max-height: 400px;
-  overflow-y: auto;
+  overflow: auto;
+}
+
+.agent-diff-ln {
+  width: 32px;
+  flex-shrink: 0;
+  text-align: right;
+  padding-right: 8px;
+  color: var(--text-muted);
+  user-select: none;
 }
 
 .agent-diff-row {
@@ -3372,31 +3381,42 @@ button {
 /* ── Agent Edit side-by-side diff ─────────────────────── */
 
 .agent-diff-sbs {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  /* 4-col grid: ln | content | ln | content. Line-num cols size to digits;
+     content cols size to widest line — the whole card scrolls horizontally
+     as a unit so left/right columns stay aligned across rows. */
+  grid-template-columns: auto max-content auto max-content;
   font-size: 12px;
   line-height: 18px;
   font-family: var(--font-mono, Menlo, monospace);
   border: 1px solid var(--border);
   border-radius: 4px;
-  overflow: hidden;
+  overflow-x: auto;
 }
 
+/* Each logical row uses display:contents so its 4 spans flow into the
+   parent grid columns; the row's class still scopes background colors
+   onto the cells via descendant selectors below. */
 .agent-diff-sbs-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  min-height: 18px;
+  display: contents;
+}
+
+.agent-diff-sbs-ln {
+  padding: 0 6px;
+  text-align: right;
+  color: var(--text-muted);
+  user-select: none;
+  min-width: 2ch;
+  white-space: pre;
 }
 
 .agent-diff-sbs-cell {
   padding: 0 8px;
   white-space: pre;
-  overflow-x: auto;
-  border-left: 1px solid var(--border);
 }
 
-.agent-diff-sbs-cell:first-child {
-  border-left: 0;
+.agent-diff-sbs-ln.agent-diff-sbs-right {
+  border-left: 1px solid var(--border);
 }
 
 .agent-diff-sbs-same .agent-diff-sbs-cell {
