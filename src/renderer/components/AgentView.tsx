@@ -45,7 +45,7 @@ interface Props {
 }
 
 export function AgentView({ tabId, cwd, connection, provider, projectIndex }: Props) {
-  const { projects } = useStore();
+  const { projects, settings } = useStore();
   const savedPrefs = projects[projectIndex]?.config.agentPrefs?.[provider];
 
   const sessionIdRef = useRef<string | null>(null);
@@ -674,11 +674,13 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex }: Pr
             )}
           </div>
         ))}
-        {streamThinking && (
+        {streamThinking && (settings.agentDisplay?.thinking ?? 'collapsed') !== 'hidden' && (
           <div className="agent-msg agent-msg-thinking">
             <div className="agent-thinking-header">
+              <span className="agent-chevron expanded">&#9654;</span>
               <span className="agent-thinking-label">Thinking...</span>
             </div>
+            <div className="agent-thinking-content">{streamThinking}</div>
           </div>
         )}
         {streamText && (
