@@ -2527,6 +2527,39 @@ button {
   gap: 2px;
 }
 
+/* "Jump to latest" FAB. Lives inside .agent-messages so position:sticky
+   anchors it relative to the scroll viewport — appears at bottom-right of
+   the visible area whenever the user has scrolled away from the tail. */
+.agent-jump-fab {
+  position: sticky;
+  bottom: 12px;
+  align-self: flex-end;
+  margin-right: 4px;
+  /* Pull up into the previous content area so we don't push scrollHeight
+     visibly when toggling on/off. */
+  margin-top: -40px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--surface-hover, rgba(255,255,255,0.08));
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  z-index: 5;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.agent-jump-fab:hover {
+  background: var(--accent, #3b82f6);
+  color: #fff;
+}
+
 .agent-empty {
   display: flex;
   align-items: center;

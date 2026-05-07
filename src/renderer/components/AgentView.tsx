@@ -110,6 +110,10 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
   const rootRef = useRef<HTMLDivElement>(null);
   const initializedRef = useRef(false);
   const isAtBottomRef = useRef(true);
+  // Mirror the ref into state so the "jump to latest" FAB can rerender on
+  // scroll without requiring a setState on every scroll tick — we only
+  // toggle when crossing the threshold.
+  const [showJumpFab, setShowJumpFab] = useState(false);
 
   // Focus the input whenever this tab becomes visible (tab switch, project
   // switch, app launch). requestAnimationFrame defers past the layout pass so
@@ -342,7 +346,11 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
     const el = listRef.current;
     if (!el) return;
     const handleScroll = () => {
-      isAtBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+      const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+      isAtBottomRef.current = atBottom;
+      // Only call setState when crossing the threshold to avoid a rerender
+      // per scroll event.
+      setShowJumpFab((prev) => (prev === !atBottom ? prev : !atBottom));
     };
     el.addEventListener('scroll', handleScroll);
     return () => el.removeEventListener('scroll', handleScroll);
@@ -751,6 +759,20 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
           </div>
         ))}
         <div ref={bottomRef} />
+        {showJumpFab && (
+          <button
+            className="agent-jump-fab"
+            onClick={() => {
+              bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+              isAtBottomRef.current = true;
+              setShowJumpFab(false);
+            }}
+            title="Jump to latest"
+            aria-label="Jump to latest"
+          >
+            ↓
+          </button>
+        )}
       </div>
 
       {pendingPermission && (
