@@ -1,7 +1,9 @@
 import { query as sdkQuery } from '@anthropic-ai/claude-agent-sdk';
 import type { Query, Options, SDKMessage, CanUseTool } from '@anthropic-ai/claude-agent-sdk';
-import { existsSync } from 'fs';
+import { existsSync, appendFileSync } from 'fs';
 import { resolve, dirname, join } from 'path';
+import { homedir } from 'os';
+import { execFile } from 'child_process';
 import type { QueryInput, SendFn, ServerBackend, ProviderCapabilities, SlashResult, StatusSegment } from './types';
 import { severityFromUtilization, formatResetCountdown, pickPermissionModes, pickEffortLevels } from './types';
 import type { ProviderModel } from '../../src/shared/types';
@@ -278,11 +280,39 @@ function dataUrlToImageBlock(dataUrl: string): { type: 'image'; source: { type: 
 let lastTurnUsage: { input_tokens: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number } | null = null;
 let lastTurnModel: string | null = null;
 
+// Push-mode signal for "thinking actually arrived". The trace logs alone are
+// pull-mode (require grepping); we want a one-shot OS notification on first
+// hit per process, plus a persistent sentinel file as a historical audit
+// trail. Failures are swallowed — this is observability, not critical path.
+let thinkingNotifiedThisSession = false;
+function notifyThinkingDetected(len: number, preview: string): void {
+  try {
+    const sentinelPath = join(homedir(), '.shelf-terminal-thinking-detected.log');
+    appendFileSync(sentinelPath, `${new Date().toISOString()} len=${len} ${preview.slice(0, 60)}\n`);
+  } catch {
+    // ignore — sentinel write failure shouldn't break the agent
+  }
+  if (thinkingNotifiedThisSession) return;
+  thinkingNotifiedThisSession = true;
+  if (process.platform === 'darwin') {
+    try {
+      execFile('osascript', ['-e', `display notification "len=${len}" with title "Thinking detected" sound name "Pop"`], () => { /* ignore exit */ });
+    } catch {
+      // ignore — osascript missing or sandboxed
+    }
+  }
+}
+
 function processMessage(msg: SDKMessage, send: SendFn) {
   switch (msg.type) {
     case 'assistant': {
       for (const block of msg.message.content) {
         if (block.type === 'thinking') {
+          const thinkingLen = typeof block.thinking === 'string' ? block.thinking.length : 0;
+          console.error('[thinking-trace] claude assembled block, len=', typeof block.thinking === 'string' ? block.thinking.length : 'NA', 'preview=', JSON.stringify((block.thinking ?? '').slice(0, 80)));
+          if (thinkingLen > 0) {
+            notifyThinkingDetected(thinkingLen, block.thinking);
+          }
           send({ type: 'message', msgType: 'thinking', content: block.thinking, sessionId: msg.session_id });
         } else if (block.type === 'text') {
           send({ type: 'message', msgType: 'text', content: block.text, sessionId: msg.session_id });
@@ -341,7 +371,10 @@ function processMessage(msg: SDKMessage, send: SendFn) {
         if (delta.type === 'text_delta' && typeof delta.text === 'string' && delta.text.length > 0) {
           send({ type: 'stream', streamType: 'text', content: delta.text });
         } else if (delta.type === 'thinking_delta' && typeof delta.thinking === 'string' && delta.thinking.length > 0) {
+          console.error('[thinking-trace] claude delta, len=', delta.thinking.length, 'preview=', JSON.stringify(delta.thinking.slice(0, 60)));
           send({ type: 'stream', streamType: 'thinking', content: delta.thinking });
+        } else if (delta.type === 'thinking_delta') {
+          console.error('[thinking-trace] claude delta SKIPPED, type=', delta.type, 'thinking=', JSON.stringify(delta.thinking));
         }
       }
       break;

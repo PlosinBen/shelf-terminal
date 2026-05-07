@@ -270,6 +270,7 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
         setStreamText('');
       }
       if (msg.type === 'thinking') {
+        console.log('[thinking-trace] renderer onMessage thinking, hasContent=', hasContent, 'len=', (msg.content ?? '').length, 'preview=', (msg.content ?? '').slice(0, 80));
         if (!hasContent) return;
         setStreamThinking('');
       }
@@ -280,6 +281,7 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
     const offStream = window.shelfApi.agent.onStream((id: string, chunk: any) => {
       if (id !== tabId) return;
       if (chunk.type === 'thinking') {
+        console.log('[thinking-trace] renderer onStream thinking, len=', chunk.content?.length ?? 0, 'preview=', (chunk.content ?? '').slice(0, 60));
         setStreamThinking((prev) => prev + (chunk.content ?? ''));
       } else {
         setStreamText((prev) => prev + (chunk.content ?? ''));
