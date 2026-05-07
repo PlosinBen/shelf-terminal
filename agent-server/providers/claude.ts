@@ -26,6 +26,45 @@ const RATE_LIMIT_LABELS: Record<string, string> = {
   overage: 'overage',
 };
 
+/**
+ * Convert Claude's `SDKRateLimitInfo` to a `StatusSegment`.
+ *
+ * Two SDK quirks we work around:
+ * 1. `utilization` is only populated when `status === 'allowed_warning' | 'rejected'` —
+ *    on `'allowed'` it is silently dropped even though the underlying
+ *    `anthropic-ratelimit-unified-*-utilization` headers always carry it.
+ *    We render `5h: — ↻3h` so the bucket + countdown are still visible.
+ * 2. `resetsAt` is a Unix timestamp in *seconds*, but `formatResetCountdown`
+ *    expects milliseconds — multiply by 1000.
+ *
+ * Returns `null` when there is nothing useful to display.
+ */
+export function rateLimitInfoToSegment(info: any): StatusSegment | null {
+  if (!info) return null;
+
+  const label = RATE_LIMIT_LABELS[info.rateLimitType] ?? info.rateLimitType ?? 'quota';
+  const hasPct = typeof info.utilization === 'number';
+  const pctText = hasPct ? `${Math.round(info.utilization * 100)}%` : '—';
+  const reset = typeof info.resetsAt === 'number'
+    ? formatResetCountdown(info.resetsAt * 1000)
+    : null;
+
+  // 'rejected' = hard cap; 'allowed_warning' = SDK-flagged warning. Severity
+  // from utilization only kicks in on 'allowed' when we actually have a number.
+  const severity: StatusSegment['severity'] = info.status === 'rejected'
+    ? 'critical'
+    : info.status === 'allowed_warning'
+      ? 'warning'
+      : hasPct
+        ? severityFromUtilization(info.utilization)
+        : 'normal';
+
+  return {
+    text: `${label}: ${pctText}${reset ? ` ↻${reset}` : ''}`,
+    severity,
+  };
+}
+
 type PermissionResult =
   | { behavior: 'allow'; scope?: 'once' | 'session' }
   | { behavior: 'deny'; message?: string };
@@ -442,23 +481,12 @@ function processMessage(msg: SDKMessage, send: SendFn) {
       // and only "when rate limit info changes". Log every event so we can
       // verify cadence + payload shape if quota segment fails to render.
       console.error('[rate-limit-trace] event received, info=', JSON.stringify(info));
-      if (info && typeof info.utilization === 'number') {
-        const label = RATE_LIMIT_LABELS[info.rateLimitType] ?? info.rateLimitType ?? 'quota';
-        const pct = Math.round(info.utilization * 100);
-        const reset = info.resetsAt ? formatResetCountdown(info.resetsAt) : null;
-        // 'rejected' status means hard cap reached — escalate severity regardless of pct.
-        const severity = info.status === 'rejected'
-          ? 'critical'
-          : info.status === 'allowed_warning'
-            ? 'warning'
-            : severityFromUtilization(info.utilization);
+      const seg = rateLimitInfoToSegment(info);
+      if (seg) {
         send({
           type: 'status', state: 'streaming',
           sessionId: (msg as any).session_id,
-          rateLimits: [{
-            text: `${label}: ${pct}%${reset ? ` ↻${reset}` : ''}`,
-            severity,
-          }],
+          rateLimits: [seg],
         });
       }
       break;
