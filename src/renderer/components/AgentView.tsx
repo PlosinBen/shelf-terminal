@@ -353,27 +353,46 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
   // Track user intent only on user-driven scroll inputs. We deliberately
   // ignore the generic `scroll` event because programmatic scrollIntoView
   // also fires it — distinguishing the two used to require a flag + timeout
-  // (race-prone). Wheel/touch/keyboard are exclusively user actions, so
-  // recomputing geometry on those produces a clean "intent" signal.
+  // (race-prone). Wheel/touch/keyboard are exclusively user actions.
+  //
+  // Direction matters: an UP input is unambiguously "stop following, I want
+  // to read history" — set follow=false synchronously so the next streaming
+  // chunk's auto-scroll effect sees it before firing scrollIntoView, ending
+  // the user-vs-smooth-scroll fight that made upward scroll feel sticky.
+  // A DOWN input is "catch up if I'm there" — defer to a geometry check in
+  // rAF (scrollTop hasn't settled yet inside the handler).
   useEffect(() => {
     const el = listRef.current;
     if (!el) return;
-    const recompute = () => {
-      // rAF: scroll position has not yet updated when wheel/key events fire.
-      requestAnimationFrame(() => {
-        const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
-        setFollow(atBottom);
-      });
+    const isAtBottom = () => el.scrollHeight - el.scrollTop - el.clientHeight < 8;
+    const recomputeFromGeometry = () => {
+      requestAnimationFrame(() => setFollow(isAtBottom()));
+    };
+    const onWheel = (e: WheelEvent) => {
+      if (e.deltaY < 0) setFollow(false);
+      else if (e.deltaY > 0) recomputeFromGeometry();
+    };
+    let touchStartY = 0;
+    const onTouchStart = (e: TouchEvent) => { touchStartY = e.touches[0]?.clientY ?? 0; };
+    const onTouchMove = (e: TouchEvent) => {
+      const dy = (e.touches[0]?.clientY ?? 0) - touchStartY;
+      // Finger moving DOWN (dy > 0) drags content down → reveals earlier
+      // history → user is scrolling UP. Inverse for finger UP.
+      if (dy > 4) setFollow(false);
+      else if (dy < -4) recomputeFromGeometry();
     };
     const onKey = (e: KeyboardEvent) => {
-      if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(e.key)) recompute();
+      if (['ArrowUp', 'PageUp', 'Home'].includes(e.key)) setFollow(false);
+      else if (['ArrowDown', 'PageDown', 'End', ' '].includes(e.key)) recomputeFromGeometry();
     };
-    el.addEventListener('wheel', recompute, { passive: true });
-    el.addEventListener('touchmove', recompute, { passive: true });
+    el.addEventListener('wheel', onWheel, { passive: true });
+    el.addEventListener('touchstart', onTouchStart, { passive: true });
+    el.addEventListener('touchmove', onTouchMove, { passive: true });
     el.addEventListener('keydown', onKey);
     return () => {
-      el.removeEventListener('wheel', recompute);
-      el.removeEventListener('touchmove', recompute);
+      el.removeEventListener('wheel', onWheel);
+      el.removeEventListener('touchstart', onTouchStart);
+      el.removeEventListener('touchmove', onTouchMove);
       el.removeEventListener('keydown', onKey);
     };
   }, [setFollow]);
