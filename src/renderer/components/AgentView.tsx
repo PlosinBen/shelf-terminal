@@ -3,7 +3,7 @@ import type { AgentProvider, AgentPrefs, AuthMethod, Connection } from '@shared/
 import { AgentMessage, type AgentMsg } from './AgentMessage';
 import { renderMarkdown } from '../utils/markdown';
 import { useAttachmentPaste } from '../hooks/useAttachmentPaste';
-import { useStore, updateProjectConfig } from '../store';
+import { useStore, updateProjectConfig, setChatStage } from '../store';
 import { loadAgentMessages, saveAgentMessages, clearAgentSession } from '../storage/agent-history';
 
 interface SlashCommand {
@@ -47,7 +47,7 @@ interface Props {
 }
 
 export function AgentView({ tabId, cwd, connection, provider, projectIndex, visible }: Props) {
-  const { projects, settings } = useStore();
+  const { projects, settings, chatStage } = useStore();
   const savedPrefs = projects[projectIndex]?.config.agentPrefs?.[provider];
 
   const sessionIdRef = useRef<string | null>(null);
@@ -420,6 +420,26 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
       bottomRef.current?.scrollIntoView({ behavior: 'auto' });
     });
   }, [visible]);
+
+  // Consume Note's "Send to Chat" payload when this tab is the visible
+  // agent tab in the staged project. Single-slot stage: only one tab
+  // (the first to be visible after staging) consumes; clearing the stage
+  // prevents other agent tabs in the same project from re-applying it.
+  // Behaviour: append to current input (preserve any unsent typing) and
+  // append images to existing pendingImages.
+  const projectId = projects[projectIndex]?.config.id;
+  useEffect(() => {
+    if (!visible || !chatStage) return;
+    if (chatStage.projectId !== projectId) return;
+    const incoming = chatStage;
+    setInput((prev) => {
+      const trimmed = prev.trimEnd();
+      return trimmed ? `${trimmed}\n\n${incoming.text}` : incoming.text;
+    });
+    setPendingImages((prev) => [...prev, ...incoming.images]);
+    setChatStage(null);
+    requestAnimationFrame(() => inputRef.current?.focus());
+  }, [visible, chatStage, projectId]);
 
   const handleSend = useCallback(() => {
     const text = input.trim();

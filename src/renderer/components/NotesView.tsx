@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo, forwardRef, useImperativeHandle } from 'react';
-import { useStore, toggleNotes } from '../store';
+import { useStore, toggleNotes, setChatStage, setActiveTab } from '../store';
 import { renderMarkdown } from '../utils/markdown';
 
 const DEFAULT_WIDTH = 380;
@@ -225,6 +225,12 @@ interface NoteEditorProps {
 const NoteEditor = forwardRef<NoteEditorHandle, NoteEditorProps>(function NoteEditor({
   projectId, noteId, onAfterSave, onDelete, onRequestBack,
 }, ref) {
+  const { projects, activeProjectIndex } = useStore();
+  const project = projects[activeProjectIndex];
+  // Send to Chat is only enabled when this project has at least one agent
+  // tab to consume the staged payload.
+  const hasAgentTab = !!project && project.tabs.some((t) => t.type === 'agent');
+
   const [note, setNote] = useState<Note | null>(null);
   const [mode, setMode] = useState<Mode>('edit');
   const [title, setTitle] = useState('');
@@ -232,6 +238,7 @@ const NoteEditor = forwardRef<NoteEditorHandle, NoteEditorProps>(function NoteEd
   const [body, setBody] = useState('');
   const [images, setImages] = useState<string[]>([]);
   const [isDone, setIsDone] = useState(false);
+  const [sending, setSending] = useState(false);
 
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -376,6 +383,39 @@ const NoteEditor = forwardRef<NoteEditorHandle, NoteEditorProps>(function NoteEd
     setImages((prev) => prev.filter((f) => f !== filename));
   }, []);
 
+  const handleSendToChat = useCallback(async () => {
+    if (sending) return;
+    setSending(true);
+    try {
+      // Read every attachment into a data URI so the agent IPC pipeline (which
+      // expects strings, see AgentView's pendingImages) can carry them through.
+      const dataUris = await Promise.all(images.map(async (filename) => {
+        const buf = await window.shelfApi.notes.readImage(projectId, filename);
+        if (!buf) return null;
+        const ext = filename.toLowerCase().split('.').pop() ?? 'png';
+        const mime = ext === 'jpg' ? 'image/jpeg' : `image/${ext}`;
+        return await new Promise<string | null>((resolve) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : null);
+          reader.onerror = () => resolve(null);
+          reader.readAsDataURL(new Blob([buf], { type: mime }));
+        });
+      }));
+      const cleanImages = dataUris.filter((u): u is string => typeof u === 'string');
+      setChatStage({ projectId, text: body, images: cleanImages });
+      // Switch to the agent tab in this project so the consumer effect fires
+      // immediately. If multiple agent tabs, we go to the first — the staged
+      // payload is single-slot so this is unambiguous.
+      const agentIndex = project?.tabs.findIndex((t) => t.type === 'agent') ?? -1;
+      if (agentIndex >= 0) {
+        setActiveTab(activeProjectIndex, agentIndex);
+        toggleNotes();
+      }
+    } finally {
+      setSending(false);
+    }
+  }, [sending, images, projectId, body, project, activeProjectIndex]);
+
   const html = useMemo(() => {
     if (!projectId) return '';
     return renderMarkdown(body, { breaks: true });
@@ -417,6 +457,14 @@ const NoteEditor = forwardRef<NoteEditorHandle, NoteEditorProps>(function NoteEd
           Edit
         </button>
         <span className="notes-mode-spacer" />
+        <button
+          className="notes-send-btn"
+          onClick={handleSendToChat}
+          disabled={!hasAgentTab || sending || (body.trim() === '' && images.length === 0)}
+          title={hasAgentTab ? 'Send note to agent chat' : 'Open an agent tab in this project first'}
+        >
+          {sending ? 'Sending…' : 'Send to Chat'}
+        </button>
         <button className="notes-delete-btn" onClick={onDelete} title="Delete note">Delete</button>
       </div>
       <div className="notes-body">

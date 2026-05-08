@@ -40,6 +40,16 @@ let pmVisible = false;
 let awayMode = false;
 let nextTabCounter = 0;
 let layoutGeneration = 0;
+// Pending payload for an agent chat input. Set by Notes' "Send to Chat" and
+// consumed by the next AgentView in the matching project that becomes
+// visible. Single-slot — only one staged note in flight at a time.
+let chatStage: ChatStage | null = null;
+
+export interface ChatStage {
+  projectId: string;
+  text: string;
+  images: string[];  // data URIs
+}
 
 type Listener = () => void;
 const listeners = new Set<Listener>();
@@ -54,7 +64,7 @@ function subscribe(l: Listener) {
 }
 
 function getSnapshot() {
-  return { projects, activeProjectIndex, sidebarVisible, settingsVisible, searchVisible, commandPickerVisible, devToolsVisible, notesVisible, editingProjectIndex, settings, updateStatus, pmVisible, awayMode, layoutGeneration };
+  return { projects, activeProjectIndex, sidebarVisible, settingsVisible, searchVisible, commandPickerVisible, devToolsVisible, notesVisible, editingProjectIndex, settings, updateStatus, pmVisible, awayMode, layoutGeneration, chatStage };
 }
 
 let snapshotRef = getSnapshot();
@@ -442,6 +452,11 @@ function syncToMain() {
 
 export function setUpdateStatus(status: UpdateStatus) {
   updateStatus = status;
+  updateSnapshot();
+}
+
+export function setChatStage(stage: ChatStage | null) {
+  chatStage = stage;
   updateSnapshot();
 }
 

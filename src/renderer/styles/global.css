@@ -3678,6 +3678,25 @@ button {
   color: #fca5a5;
 }
 
+.notes-send-btn {
+  font-size: 12px;
+  color: var(--accent);
+  background: transparent;
+  padding: 2px 8px;
+  border-radius: 4px;
+  margin-right: 4px;
+}
+
+.notes-send-btn:hover:not(:disabled) {
+  background: rgba(139, 233, 253, 0.15);
+}
+
+.notes-send-btn:disabled {
+  color: var(--text-muted);
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 .notes-new-btn {
   font-size: 16px;
   line-height: 1;
