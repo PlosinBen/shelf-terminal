@@ -22,10 +22,17 @@ export function formatResetCountdown(resetsAtMs: number): string | null {
 }
 
 import type { ProviderModel } from '../../src/shared/types';
+import type { PersistedContext } from '../context-store';
 
 export type OutgoingMessage = {
   type: 'message' | 'stream' | 'status' | 'error' | 'pong' | 'ready' | 'capabilities' | 'auth_required' | 'permission_request'
-    | 'credential_stored' | 'credential_cleared' | 'slash_result';
+    | 'credential_stored' | 'credential_cleared' | 'slash_result'
+    /**
+     * Internal: provider asks orchestrator to merge `patch` into the persisted
+     * context for this session. Intercepted by `agent-server/index.ts` and NOT
+     * forwarded to the main process — providers stay decoupled from disk I/O.
+     */
+    | 'context_patch';
   [key: string]: unknown;
 };
 
@@ -48,6 +55,14 @@ export interface QueryInput {
   effort?: string;
   images?: string[];
   sessionId?: string;
+  /**
+   * Pre-loaded persisted context for this session. Orchestrator hydrates this
+   * from disk before calling `query()`; providers read whichever fields are
+   * relevant to their SDK (e.g. `lastSdkSessionId` for Claude/Copilot resume).
+   * Providers MUST NOT import `context-store` directly — emit `context_patch`
+   * outgoing messages to update persistence.
+   */
+  restoreContext?: PersistedContext;
 }
 
 /**
@@ -108,4 +123,11 @@ export interface ServerBackend {
   storeCredential?(key: string): Promise<void>;
   clearCredential?(): Promise<void>;
   handleSlashCommand?(cmd: string, args: string): Promise<SlashResult>;
+  /**
+   * Drop any in-memory session state tied to `sessionId`. Called by the
+   * orchestrator when persisted context is deleted (IPC `clear_context`),
+   * so the provider doesn't keep using a `lastSdkSessionId` that no longer
+   * exists on disk. Sync — providers should clear refs only, not perform I/O.
+   */
+  resetSession?(sessionId: string): void;
 }

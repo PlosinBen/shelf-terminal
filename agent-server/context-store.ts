@@ -16,9 +16,13 @@ export interface PersistedContext {
   /** OpenAI Responses API stateful chain handle. Set when using a stateful model. */
   lastResponseId?: string;
   /**
-   * Claude SDK session_id from the last completed turn. Used to set
-   * `options.resume` so the SDK reloads the conversation jsonl on next process
-   * start. Only set for `provider === 'claude'`.
+   * Provider SDK's session ID from the last completed turn. Used to resume
+   * conversation state across process restarts:
+   * - `claude`: feeds `options.resume` so the SDK reloads its jsonl
+   * - `copilot`: feeds `client.resumeSession()` so the Copilot CLI reloads
+   *   its on-disk session state by id
+   * Written via `context_patch` outgoing messages from providers; orchestrator
+   * (`agent-server/index.ts`) is the single writer to disk.
    */
   lastSdkSessionId?: string;
 }

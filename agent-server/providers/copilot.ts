@@ -205,12 +205,23 @@ export function createCopilotBackend(): ServerBackend {
   // permission_request IPC contract (UI shows Allow/Deny buttons).
   // PermissionRequest shape: { kind: "shell"|"write"|"mcp"|"read"|"url"|"custom-tool"|"memory"|"hook", toolCallId? }
   const onPermissionRequest = async (request: any) => {
+    // bypassPermissions short-circuit: don't trust rpc.mode.set to have
+    // landed (session may have been created before mode was switched, and
+    // SDK silently swallows mode-set failures). Always auto-approve here.
+    if (currentPermissionMode === 'bypassPermissions') {
+      return { kind: 'approve-once' as const };
+    }
     const toolUseId = request.toolCallId ?? `copilot-${Date.now()}`;
+    // PermissionRequest's typed shape is just { kind, toolCallId }, but the
+    // runtime payload carries kind-specific fields (intention, path, command,
+    // commands[], possiblePaths, etc.). Pass everything except kind/toolCallId
+    // through as `input` so the UI can show what's actually being requested.
+    const { kind: _kind, toolCallId: _tcId, ...rest } = request ?? {};
     currentSend?.({
       type: 'permission_request',
       toolUseId,
-      toolName: request.kind ?? 'unknown',
-      input: {},
+      toolName: request?.kind ?? 'unknown',
+      input: rest,
     });
     const result = await new Promise<PermissionResult>((resolve) => {
       pendingPermissions.set(toolUseId, resolve);
@@ -275,8 +286,13 @@ export function createCopilotBackend(): ServerBackend {
     }
     state.session = session;
     state.cliSessionId = session.sessionId;
+    // Tell orchestrator to persist this so the next process can resume the
+    // same Copilot CLI session (CLI keeps session state on disk by sessionId).
+    currentSend?.({ type: 'context_patch', patch: { lastSdkSessionId: session.sessionId } });
 
     // If user already picked a non-default mode before this session existed, apply it.
+    // Note: bypassPermissions has its own short-circuit in onPermissionRequest,
+    // so even if this rpc.mode.set silently fails, bypass still works.
     const sdkMode = MODE_TO_SDK[currentPermissionMode];
     if (sdkMode && sdkMode !== 'interactive') {
       try { await (session as any).rpc.mode.set({ mode: sdkMode }); } catch { /* ignore */ }
@@ -307,16 +323,33 @@ export function createCopilotBackend(): ServerBackend {
             currentSend({ type: 'message', msgType: 'thinking', content: event.data.content });
           }
           break;
-        case 'tool.execution_start':
+        case 'tool.execution_start': {
+          const toolName = event.data?.toolName ?? 'unknown';
+          // Copilot's `task_complete` tool is its end-of-turn signal — args
+          // carry the assistant's final response. Render as a regular text
+          // message; skip the matching tool_result event below.
+          if (toolName === 'task_complete') {
+            // [copilot-task-complete-trace] log args shape so we know the right
+            // field. Remove once confirmed.
+            try { console.error('[copilot-task-complete-trace]', JSON.stringify(event.data?.arguments ?? {}, null, 2)); } catch { /* ignore */ }
+            const args = event.data?.arguments ?? {};
+            const text = args.text ?? args.message ?? args.summary ?? args.content ?? '';
+            if (text) currentSend({ type: 'message', msgType: 'text', content: text });
+            break;
+          }
           currentSend({
             type: 'message', msgType: 'tool_use', content: '',
-            toolName: event.data?.toolName ?? 'unknown',
+            toolName,
             toolInput: event.data?.arguments ?? {},
             toolUseId: event.data?.toolCallId ?? '',
           });
           break;
+        }
         case 'tool.execution_complete': {
           const data = event.data ?? {};
+          // Skip task_complete's result event — its tool_use was suppressed
+          // (rendered as plain text), so the matching result has nothing to attach to.
+          if (data.toolName === 'task_complete') break;
           // Use `content` (concise, what the LLM sees) rather than
           // `detailedContent` (SDK-side rich UI, returns reads as fake
           // unified diffs). The renderer reconstructs edit visuals from
@@ -430,6 +463,12 @@ export function createCopilotBackend(): ServerBackend {
 
     async query(input: QueryInput, send: SendFn) {
       currentSend = send;
+      // Hydrate cliSessionId from orchestrator-provided context. Only the
+      // first turn after a process restart needs this — once we've created
+      // or resumed a session in-memory, we don't clobber.
+      if (!state.cliSessionId && input.restoreContext?.lastSdkSessionId) {
+        state.cliSessionId = input.restoreContext.lastSdkSessionId;
+      }
       const modelChanged = !!(input.model && input.model !== currentModel);
       if (modelChanged) {
         currentModel = input.model!;
@@ -499,6 +538,16 @@ export function createCopilotBackend(): ServerBackend {
       try { state.client?.stop(); } catch { /* ignore */ }
       state.session = null;
       state.client = null;
+    },
+
+    resetSession(_sessionId: string) {
+      // Drop in-memory session refs so the next query() starts a fresh CLI
+      // session instead of trying to resume from a now-deleted lastSdkSessionId.
+      // Disconnect best-effort; the live session is being abandoned anyway.
+      try { state.session?.disconnect(); } catch { /* ignore */ }
+      state.session = null;
+      state.cliSessionId = null;
+      latestUsage = null;
     },
 
     resolvePermission(toolUseId: string, allow: boolean, message?: string, scope?: 'once' | 'session') {

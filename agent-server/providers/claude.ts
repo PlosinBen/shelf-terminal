@@ -4,7 +4,6 @@ import { existsSync } from 'fs';
 import { resolve } from 'path';
 import type { QueryInput, SendFn, ServerBackend, ProviderCapabilities, SlashResult, StatusSegment } from './types';
 import { severityFromUtilization, formatResetCountdown, pickPermissionModes, pickEffortLevels } from './types';
-import { loadContext, saveContext } from '../context-store';
 import type { ProviderModel } from '../../src/shared/types';
 
 // Claude SDK's `supportedCommands()` only returns user-installed skills, not
@@ -135,32 +134,6 @@ export function createClaudeBackend(): ServerBackend {
   const cache: { models?: any[]; commands?: any[] } = {};
   let initPromise: Promise<void> | null = null;
   let lastSessionId: string | null = null;
-  /**
-   * Tracks which app-level sessionIds we've already seeded `lastSessionId`
-   * from disk for in this process. Seeding is idempotent — once per sessionId
-   * per process — so a tab that swaps cwd / model mid-session still resumes
-   * from the correct jsonl on the next process restart.
-   */
-  const seededSessions = new Set<string>();
-
-  /**
-   * Hydrate `lastSessionId` from `~/.shelf/agent-context/<sessionId>.json` so
-   * the SDK can resume the previous conversation jsonl after an app/process
-   * restart. No-op on subsequent calls within the same process — once seeded,
-   * `lastSessionId` is the source of truth and gets updated in-memory by
-   * each turn's `session_id` capture.
-   */
-  function seedSessionFromDisk(sessionId: string | undefined): void {
-    if (!sessionId || seededSessions.has(sessionId)) return;
-    seededSessions.add(sessionId);
-    // Only seed if we don't already have an in-memory id (defensive: avoid
-    // clobbering a fresh session_id captured during a prior turn).
-    if (lastSessionId) return;
-    const ctx = loadContext(sessionId);
-    if (ctx?.lastSdkSessionId) {
-      lastSessionId = ctx.lastSdkSessionId;
-    }
-  }
 
   const pendingPermissions = new Map<string, (result: PermissionResult) => void>();
   let currentSend: SendFn | null = null;
@@ -220,9 +193,8 @@ export function createClaudeBackend(): ServerBackend {
   }
 
   return {
-    async gatherCapabilities(cwd: string, sessionId?: string, customModels?: ProviderModel[]): Promise<ProviderCapabilities> {
+    async gatherCapabilities(cwd: string, _sessionId?: string, customModels?: ProviderModel[]): Promise<ProviderCapabilities> {
       await ensureInit(cwd);
-      seedSessionFromDisk(sessionId);
       return {
         models: mergeClaudeModels(cache.models ?? [], customModels),
         permissionModes: pickPermissionModes(['default', 'acceptEdits', 'bypassPermissions', 'plan']),
@@ -240,10 +212,12 @@ export function createClaudeBackend(): ServerBackend {
     async query(input: QueryInput, send: SendFn) {
       currentSend = send;
       abortController = new AbortController();
-      // Defensive seed: in case `gatherCapabilities` was skipped (e.g. capability
-      // cache hit on a different sessionId before this one), make sure we
-      // resume from disk on the very first turn after a process restart.
-      seedSessionFromDisk(input.sessionId);
+      // Seed in-memory session ID from orchestrator-provided context. Only
+      // applied on the first turn of this process — once `lastSessionId` is
+      // captured from a live `session_id`, we don't clobber it.
+      if (!lastSessionId && input.restoreContext?.lastSdkSessionId) {
+        lastSessionId = input.restoreContext.lastSdkSessionId;
+      }
       const mode = (input.permissionMode as Options['permissionMode']) ?? 'default';
       const isBypass = mode === 'bypassPermissions';
       // DIY bypass: SDK stays at 'default' and our canUseTool short-circuits to allow.
@@ -305,22 +279,14 @@ export function createClaudeBackend(): ServerBackend {
         pendingPermissions.clear();
         activeQuery = null;
         abortController = null;
-        // Persist the latest SDK session_id so the next process can resume.
-        // Single write per turn — avoids disk thrash on every chunk. We tolerate
-        // crashes mid-turn: at worst the user loses the in-flight turn and
-        // resumes from the previous turn's session_id, which is still correct
-        // because the SDK rolls forward a single jsonl per resume chain.
-        if (input.sessionId && lastSessionId) {
-          try {
-            saveContext({
-              sessionId: input.sessionId,
-              provider: 'claude',
-              lastSdkSessionId: lastSessionId,
-              updatedAt: Date.now(),
-            });
-          } catch {
-            // Persistence is best-effort — don't fail the turn.
-          }
+        // Tell orchestrator to persist the latest SDK session_id so the next
+        // process can resume. Single emit per turn — avoids disk thrash on
+        // every chunk. Mid-turn crash tolerance: at worst the user loses the
+        // in-flight turn and resumes from the previous turn's session_id,
+        // which is still correct because the SDK rolls forward a single jsonl
+        // per resume chain.
+        if (lastSessionId) {
+          send({ type: 'context_patch', patch: { lastSdkSessionId: lastSessionId } });
         }
         send({ type: 'status', state: 'idle' });
       }
@@ -344,6 +310,12 @@ export function createClaudeBackend(): ServerBackend {
       abortController?.abort();
       activeQuery = null;
       abortController = null;
+    },
+
+    resetSession(_sessionId: string) {
+      // Drop our resume pointer; SDK has no per-session in-memory state we own.
+      // Next query() with no `restoreContext.lastSdkSessionId` will start fresh.
+      lastSessionId = null;
     },
 
     resolvePermission(toolUseId: string, allow: boolean, message?: string, scope?: 'once' | 'session') {

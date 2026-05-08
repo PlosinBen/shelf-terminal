@@ -54,12 +54,12 @@
 
 | Intent | File | Description |
 |--------|------|-------------|
-| Entry point | `index.ts` | stdin/stdout JSON line protocol server、dispatch to Claude/Copilot backends、啟動時呼叫 `cleanupOldContexts()` 清理 30 天以上的 context 檔 |
+| Entry point | `index.ts` | stdin/stdout JSON line protocol server、dispatch to Claude/Copilot backends、啟動時呼叫 `cleanupOldContexts()` 清理 30 天以上的 context 檔。**Context persistence 在這裡集中**：每次 `send` 前 `loadContext()` 灌進 `QueryInput.restoreContext`、wrap send fn 攔截 provider 回的 `context_patch` 訊息合併寫入；`clear_context` IPC 同步 `deleteContext()` + 呼叫 `backend.resetSession()`；`/clear` 回 `context-cleared` 時也 `deleteContext` |
 | Claude provider | `providers/claude.ts` | `@anthropic-ai/claude-agent-sdk` wrapper、permission bridging、auto-resume（`lastSessionId`）、stream_event delta 處理、suppress synthetic/subagent model |
 | Copilot provider | `providers/copilot.ts` | `@github/copilot-sdk` wrapper（spawn bundled `@github/copilot` CLI）、`gh auth token` 拿 token 傳 `gitHubToken` 跳過 keychain、permission bridging、event mapping (delta/message/tool/usage/plan)、`/model` `/context` `/compact` `/clear` `/help`、reasoning effort、permission mode mapping (`default→interactive`/`bypassPermissions→autopilot`/`plan→plan`)、TodoWrite/ExitPlanMode 沒在 Copilot — 走 plan_changed 事件 |
-| Context persistence | `context-store.ts` | `loadContext()`、`saveContext()`、`deleteContext()`、`cleanupOldContexts()`，存放在 `~/.shelf/agent-context/{sessionId}.json`，atomic write（tmp+rename）。Claude 存 `lastSdkSessionId` 做跨 process resume（每 turn 結束寫一次，process 啟動時 seed 一次）；Copilot SDK 自管，這裡只當預留欄位 |
+| Context persistence | `context-store.ts` | `loadContext()`、`saveContext()`、`deleteContext()`、`cleanupOldContexts()`，存放在 `~/.shelf/agent-context/{sessionId}.json`，atomic write（tmp+rename）。**Provider 不直接 import 這個 module** — 透過 `QueryInput.restoreContext` 讀、發 `context_patch` 訊息寫，由 orchestrator (`index.ts`) 統一處理。`lastSdkSessionId` 給 Claude（SDK `options.resume`）和 Copilot（`client.resumeSession()`）共用 |
 | Context persistence 測試 | `context-store.test.ts` | `loadContext`/`saveContext`/`deleteContext` round-trip，含 Claude resume 指針 + Copilot Responses chain |
-| Provider types | `providers/types.ts` | `ServerBackend`、`SendFn`、`QueryInput`（含 `sessionId`）、`ProviderCapabilities`、`SlashResult` 介面 |
+| Provider types | `providers/types.ts` | `ServerBackend`（含 `resetSession?()`）、`SendFn`、`QueryInput`（含 `sessionId` + orchestrator hydrated `restoreContext`）、`OutgoingMessage`（含 internal `context_patch` 通知 orchestrator 持久化）、`ProviderCapabilities`、`SlashResult` 介面 |
 | Bundle build | `build.mjs` | esbuild → `dist/agent-server/<version>/index.js` 單一 ESM bundle |
 | 單元測試 | `slash-commands.test.ts` | Slash command dispatch 邏輯 |
 

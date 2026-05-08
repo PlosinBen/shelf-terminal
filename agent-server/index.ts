@@ -2,6 +2,7 @@ import * as readline from 'readline';
 import { createClaudeBackend } from './providers/claude';
 import { createCopilotBackend } from './providers/copilot';
 import { deleteContext, cleanupOldContexts } from './context-store';
+import { loadRestoreContextFor, wrapSendForContext } from './orchestrator';
 import type { OutgoingMessage, QueryInput, ServerBackend } from './providers/types';
 import type { ProviderModel } from '../src/shared/types';
 
@@ -66,6 +67,10 @@ async function handleSend(msg: IncomingMessage) {
   }
   activeBackend = backend;
 
+  // Hydrate persisted context once per turn — providers read fields they care
+  // about (e.g. `lastSdkSessionId`) without touching disk themselves.
+  const restoreContext = loadRestoreContextFor(provider, msg.sessionId);
+
   const input: QueryInput = {
     prompt: msg.prompt,
     cwd: msg.cwd,
@@ -75,8 +80,9 @@ async function handleSend(msg: IncomingMessage) {
     effort: msg.effort,
     images: msg.images,
     sessionId: msg.sessionId,
+    restoreContext,
   };
-  await backend.query(input, send);
+  await backend.query(input, wrapSendForContext(provider, msg.sessionId, send));
 }
 
 async function handleStop() {
@@ -153,7 +159,13 @@ rl.on('line', (line) => {
       break;
     }
     case 'clear_context': {
-      if (msg.sessionId) deleteContext(msg.sessionId);
+      if (msg.sessionId) {
+        deleteContext(msg.sessionId);
+        // Tell every provider that has cached state for this session to drop it,
+        // so they don't try to resume from a now-deleted lastSdkSessionId on
+        // the next turn. Sync per-backend call — they just clear in-memory refs.
+        for (const b of backends.values()) b.resetSession?.(msg.sessionId);
+      }
       break;
     }
     case 'slash_command': {
@@ -166,6 +178,12 @@ rl.on('line', (line) => {
             return;
           }
           const result = await backend.handleSlashCommand(msg.cmd ?? '', msg.args ?? '');
+          // Provider's `/clear` only clears its own in-memory state. Mirror it
+          // to disk here so the next process restart doesn't resurrect the
+          // just-cleared session via `restoreContext`.
+          if (result.type === 'context-cleared' && msg.sessionId) {
+            deleteContext(msg.sessionId);
+          }
           send({ type: 'slash_result', requestId: msg.requestId, result });
         } catch (err: any) {
           send({ type: 'slash_result', requestId: msg.requestId, result: { type: 'error', message: err?.message ?? String(err) } });
