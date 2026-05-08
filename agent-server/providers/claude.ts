@@ -293,6 +293,11 @@ export function createClaudeBackend(): ServerBackend {
         if (err.name !== 'AbortError') {
           send({ type: 'error', error: err.message ?? 'Unknown error' });
         }
+        // Always emit idle so the main process's streamRemoteEvents loop
+        // terminates and the UI flips out of "streaming" state. Without this
+        // the for-await caller hangs forever after an SDK error and the
+        // session stays stuck — even AbortError needs the idle to release it.
+        send({ type: 'status', state: 'idle' });
       } finally {
         for (const resolve of pendingPermissions.values()) {
           resolve({ behavior: 'deny', message: 'Session ended' });
