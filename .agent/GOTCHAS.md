@@ -442,3 +442,8 @@ CLI 的預設邏輯**到底看什麼沒驗證**（binary 是 Bun 編譯的 nativ
 - 不要把 fallback 改成 `5h: 0%`，那會誤導使用者以為配額沒在動。
 
 可能改進方向（未實作）: 直接讀底層 HTTP header（`anthropic-ratelimit-*`），跳過 SDK 的 filter。但 SDK 沒暴露 raw response，要 patch SDK 或自己跑一條額外 API 拿。
+
+**追蹤上游進度**:
+- 上游 issue（含詳細 root cause + 解法草案）: https://github.com/anthropics/claude-code/issues/50518
+- 同主題的 client 端 workaround PR（已 closed，未 merge）: https://github.com/agentclientprotocol/claude-agent-acp/pull/568
+- 截至 2026-05 為止 issue 仍 OPEN、無任何 Anthropic 回應、無 triage label。**不要寄望短期內修復**。日後想知道現況時，先點上面 issue link 看有沒有新留言／關閉。
