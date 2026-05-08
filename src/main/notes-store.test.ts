@@ -71,10 +71,11 @@ describe('createNote / getNote / listNotes', () => {
 
   it('getNote round-trips frontmatter + body', async () => {
     const meta = await createNote('p1');
-    await updateNote('p1', meta.id, { title: 'My Note', content: '# heading\n\nbody' });
+    await updateNote('p1', meta.id, { title: 'My Note', body: '# heading\n\nbody' });
     const note = await getNote('p1', meta.id);
     expect(note?.title).toBe('My Note');
-    expect(note?.content).toBe('# heading\n\nbody');
+    expect(note?.body).toBe('# heading\n\nbody');
+    expect(note?.images).toEqual([]);
     expect(note?.isDone).toBe(false);
   });
 
@@ -83,7 +84,7 @@ describe('createNote / getNote / listNotes', () => {
     await new Promise((r) => setTimeout(r, 5));
     const b = await createNote('p1');
     await new Promise((r) => setTimeout(r, 5));
-    await updateNote('p1', a.id, { content: 'touched a most recently' });
+    await updateNote('p1', a.id, { body: 'touched a most recently' });
 
     const list = await listNotes('p1');
     expect(list.map((n) => n.id)).toEqual([a.id, b.id]);
@@ -129,7 +130,7 @@ describe('updateNote', () => {
   it('bumps updated timestamp', async () => {
     const m = await createNote('p1');
     await new Promise((r) => setTimeout(r, 5));
-    const next = await updateNote('p1', m.id, { content: 'changed' });
+    const next = await updateNote('p1', m.id, { body: 'changed' });
     expect(next!.updated > m.updated).toBe(true);
     expect(next!.created).toBe(m.created);
   });
@@ -148,47 +149,51 @@ describe('deleteNote', () => {
 });
 
 describe('saveImage + garbageCollectImages', () => {
+  it('saveImage returns a bare filename (not images/ prefix)', async () => {
+    const buf = new Uint8Array([1]).buffer;
+    const filename = await saveImage('p1', buf, 'png');
+    expect(filename).not.toContain('/');
+    expect(filename).toMatch(/\.png$/);
+    expect(fs.existsSync(path.join(imagesDir('p1'), filename))).toBe(true);
+  });
+
   it('keeps images referenced by any note (final state after GC)', async () => {
     const a = await createNote('p1');
     await createNote('p1');
     const buf = new Uint8Array([1]).buffer;
-    const refKept = await saveImage('p1', buf, 'png');
-    const refOrphan = await saveImage('p1', buf, 'png');
+    const kept = await saveImage('p1', buf, 'png');
+    const orphan = await saveImage('p1', buf, 'png');
 
-    await updateNote('p1', a.id, { content: `keep ![](${refKept})` });
+    await updateNote('p1', a.id, { images: [kept] });
 
-    const keptName = refKept.slice('images/'.length);
-    const orphanName = refOrphan.slice('images/'.length);
-    expect(fs.existsSync(path.join(imagesDir('p1'), keptName))).toBe(true);
-    expect(fs.existsSync(path.join(imagesDir('p1'), orphanName))).toBe(false);
+    expect(fs.existsSync(path.join(imagesDir('p1'), kept))).toBe(true);
+    expect(fs.existsSync(path.join(imagesDir('p1'), orphan))).toBe(false);
   });
 
   it('updateNote auto-runs GC across all notes', async () => {
     const a = await createNote('p1');
     const b = await createNote('p1');
     const buf = new Uint8Array([1]).buffer;
-    const ref = await saveImage('p1', buf, 'png');
+    const filename = await saveImage('p1', buf, 'png');
 
-    await updateNote('p1', a.id, { content: `![](${ref})` });
-    await updateNote('p1', b.id, { content: 'unrelated edit' });
+    await updateNote('p1', a.id, { images: [filename] });
+    await updateNote('p1', b.id, { body: 'unrelated edit' });
 
-    const name = ref.slice('images/'.length);
-    expect(fs.existsSync(path.join(imagesDir('p1'), name))).toBe(true);
+    expect(fs.existsSync(path.join(imagesDir('p1'), filename))).toBe(true);
 
     // Drop the only ref → next save should GC it.
-    await updateNote('p1', a.id, { content: 'no image' });
-    expect(fs.existsSync(path.join(imagesDir('p1'), name))).toBe(false);
+    await updateNote('p1', a.id, { images: [] });
+    expect(fs.existsSync(path.join(imagesDir('p1'), filename))).toBe(false);
   });
 
   it('deleteNote triggers GC of the now-orphaned image', async () => {
     const a = await createNote('p1');
     const buf = new Uint8Array([1]).buffer;
-    const ref = await saveImage('p1', buf, 'png');
-    await updateNote('p1', a.id, { content: `![](${ref})` });
+    const filename = await saveImage('p1', buf, 'png');
+    await updateNote('p1', a.id, { images: [filename] });
 
     await deleteNote('p1', a.id);
 
-    const name = ref.slice('images/'.length);
-    expect(fs.existsSync(path.join(imagesDir('p1'), name))).toBe(false);
+    expect(fs.existsSync(path.join(imagesDir('p1'), filename))).toBe(false);
   });
 });

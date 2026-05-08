@@ -3351,7 +3351,9 @@ button {
 }
 
 .notes-textarea {
-  flex: 1;
+  /* grow to fill available space, but allow shrink so the images row below
+   * can co-exist; keep a sensible min so the editor never looks cramped. */
+  flex: 1 0 240px;
   width: 100%;
   padding: 16px;
   background: var(--bg);
@@ -3362,6 +3364,46 @@ button {
   font-family: var(--font-mono, Menlo, monospace);
   font-size: 13px;
   line-height: 1.5;
+}
+
+.notes-images {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 0 16px 16px;
+}
+
+.notes-image-wrap {
+  position: relative;
+}
+
+.notes-image {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: 4px;
+  background: var(--surface);
+}
+
+.notes-image-remove {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  border: 0;
+  border-radius: 50%;
+  width: 24px;
+  height: 24px;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.notes-image-wrap:hover .notes-image-remove {
+  opacity: 1;
 }
 
 .notes-preview {

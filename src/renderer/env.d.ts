@@ -63,15 +63,16 @@ interface ShelfApi {
   };
   notes: {
     list: (projectId: string) => Promise<Array<{ id: string; title: string; isDone: boolean; created: string; updated: string }>>;
-    get: (projectId: string, noteId: string) => Promise<{ id: string; title: string; isDone: boolean; created: string; updated: string; content: string } | null>;
+    get: (projectId: string, noteId: string) => Promise<{ id: string; title: string; isDone: boolean; created: string; updated: string; body: string; images: string[] } | null>;
     create: (projectId: string) => Promise<{ id: string; title: string; isDone: boolean; created: string; updated: string }>;
     update: (
       projectId: string,
       noteId: string,
-      patch: { title?: string; isDone?: boolean; content?: string },
+      patch: { title?: string; isDone?: boolean; body?: string; images?: string[] },
     ) => Promise<{ id: string; title: string; isDone: boolean; created: string; updated: string } | null>;
     delete: (projectId: string, noteId: string) => Promise<void>;
     saveImage: (projectId: string, buffer: ArrayBuffer, ext: string) => Promise<string>;
+    readImage: (projectId: string, filename: string) => Promise<ArrayBuffer | null>;
   };
   app: {
     logsPath: () => Promise<string>;

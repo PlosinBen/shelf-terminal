@@ -18,7 +18,8 @@ interface NoteMeta {
 }
 
 interface Note extends NoteMeta {
-  content: string;
+  body: string;
+  images: string[];
 }
 
 export function NotesView() {
@@ -228,12 +229,14 @@ const NoteEditor = forwardRef<NoteEditorHandle, NoteEditorProps>(function NoteEd
   const [mode, setMode] = useState<Mode>('edit');
   const [title, setTitle] = useState('');
   const [titleOverridden, setTitleOverridden] = useState(false);
-  const [content, setContent] = useState('');
+  const [body, setBody] = useState('');
+  const [images, setImages] = useState<string[]>([]);
   const [isDone, setIsDone] = useState(false);
 
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastSavedRef = useRef<{ title: string; content: string; isDone: boolean }>({ title: '', content: '', isDone: false });
+  type SavedSnapshot = { title: string; body: string; images: string[]; isDone: boolean };
+  const lastSavedRef = useRef<SavedSnapshot>({ title: '', body: '', images: [], isDone: false });
 
   useEffect(() => {
     let cancelled = false;
@@ -241,12 +244,11 @@ const NoteEditor = forwardRef<NoteEditorHandle, NoteEditorProps>(function NoteEd
       if (cancelled || !n) return;
       setNote(n);
       setTitle(n.title);
-      setContent(n.content);
+      setBody(n.body);
+      setImages(n.images);
       setIsDone(n.isDone);
-      // If title was already set, treat as overridden so auto-derive doesn't fight.
       setTitleOverridden(n.title.length > 0);
-      lastSavedRef.current = { title: n.title, content: n.content, isDone: n.isDone };
-      // Focus textarea on open (new note flow defaults to edit mode).
+      lastSavedRef.current = { title: n.title, body: n.body, images: n.images, isDone: n.isDone };
       requestAnimationFrame(() => textareaRef.current?.focus());
     });
     return () => { cancelled = true; };
@@ -255,38 +257,44 @@ const NoteEditor = forwardRef<NoteEditorHandle, NoteEditorProps>(function NoteEd
   // Auto-derive title from first H1 until the user overrides.
   useEffect(() => {
     if (titleOverridden) return;
-    const m = content.match(/^#\s+(.+?)\s*$/m);
+    const m = body.match(/^#\s+(.+?)\s*$/m);
     const derived = m ? m[1].trim() : '';
     setTitle(derived);
-  }, [content, titleOverridden]);
+  }, [body, titleOverridden]);
+
+  // Equality check shared by debounced + flush save paths. Image array
+  // identity is fine — we only ever replace the array (push/filter), never
+  // mutate in place, so reference comparison catches all real changes.
+  const isUnchanged = (a: SavedSnapshot, b: SavedSnapshot) =>
+    a.title === b.title && a.body === b.body && a.images === b.images && a.isDone === b.isDone;
 
   // Debounced auto-save
   useEffect(() => {
     if (!note) return;
-    const last = lastSavedRef.current;
-    if (last.title === title && last.content === content && last.isDone === isDone) return;
+    const snapshot: SavedSnapshot = { title, body, images, isDone };
+    if (isUnchanged(lastSavedRef.current, snapshot)) return;
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(async () => {
-      await window.shelfApi.notes.update(projectId, noteId, { title, content, isDone });
-      lastSavedRef.current = { title, content, isDone };
+      await window.shelfApi.notes.update(projectId, noteId, { title, body, images, isDone });
+      lastSavedRef.current = snapshot;
       onAfterSave();
     }, 600);
     return () => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     };
-  }, [title, content, isDone, note, projectId, noteId, onAfterSave]);
+  }, [title, body, images, isDone, note, projectId, noteId, onAfterSave]);
 
   const flushSave = useCallback(async () => {
-    const last = lastSavedRef.current;
-    if (last.title === title && last.content === content && last.isDone === isDone) return;
+    const snapshot: SavedSnapshot = { title, body, images, isDone };
+    if (isUnchanged(lastSavedRef.current, snapshot)) return;
     if (saveTimerRef.current) {
       clearTimeout(saveTimerRef.current);
       saveTimerRef.current = null;
     }
-    await window.shelfApi.notes.update(projectId, noteId, { title, content, isDone });
-    lastSavedRef.current = { title, content, isDone };
+    await window.shelfApi.notes.update(projectId, noteId, { title, body, images, isDone });
+    lastSavedRef.current = snapshot;
     onAfterSave();
-  }, [title, content, isDone, projectId, noteId, onAfterSave]);
+  }, [title, body, images, isDone, projectId, noteId, onAfterSave]);
 
   const switchMode = useCallback(async (next: Mode) => {
     if (next === mode) return;
@@ -297,10 +305,12 @@ const NoteEditor = forwardRef<NoteEditorHandle, NoteEditorProps>(function NoteEd
   // Refs mirror state so close() — invoked imperatively from the parent —
   // reads the latest values without depending on closure capture timing.
   const titleRef = useRef(title);
-  const contentRef = useRef(content);
+  const bodyRef = useRef(body);
+  const imagesRef = useRef(images);
   const isDoneRef = useRef(isDone);
   useEffect(() => { titleRef.current = title; }, [title]);
-  useEffect(() => { contentRef.current = content; }, [content]);
+  useEffect(() => { bodyRef.current = body; }, [body]);
+  useEffect(() => { imagesRef.current = images; }, [images]);
   useEffect(() => { isDoneRef.current = isDone; }, [isDone]);
 
   const close = useCallback(async () => {
@@ -309,11 +319,13 @@ const NoteEditor = forwardRef<NoteEditorHandle, NoteEditorProps>(function NoteEd
       saveTimerRef.current = null;
     }
     const t = titleRef.current.trim();
-    const c = contentRef.current;
-    const cTrim = c.trim();
-    // Both empty → drop the note instead of persisting an empty record.
-    // Covers the "+ New, then Back without typing" path.
-    if (!t && !cTrim) {
+    const b = bodyRef.current;
+    const imgs = imagesRef.current;
+    const bTrim = b.trim();
+    // Title + body + attachments all empty → drop the note instead of
+    // persisting an empty record. Covers the "+ New, then Back" path.
+    // A note with only an image (no text) is intentionally kept.
+    if (!t && !bTrim && imgs.length === 0) {
       try { await window.shelfApi.notes.delete(projectId, noteId); } catch { /* ignore */ }
       return;
     }
@@ -321,14 +333,14 @@ const NoteEditor = forwardRef<NoteEditorHandle, NoteEditorProps>(function NoteEd
     // markdown heading marks and cap at 80 chars so list rows stay tidy.
     let finalTitle = t;
     if (!finalTitle) {
-      const firstLine = c.split('\n').map((s) => s.trim()).find((s) => s.length > 0) ?? '';
+      const firstLine = b.split('\n').map((s) => s.trim()).find((s) => s.length > 0) ?? '';
       finalTitle = firstLine.replace(/^#+\s+/, '').slice(0, 80);
     }
-    const last = lastSavedRef.current;
     const done = isDoneRef.current;
-    if (last.title === finalTitle && last.content === c && last.isDone === done) return;
-    await window.shelfApi.notes.update(projectId, noteId, { title: finalTitle, content: c, isDone: done });
-    lastSavedRef.current = { title: finalTitle, content: c, isDone: done };
+    const snapshot: SavedSnapshot = { title: finalTitle, body: b, images: imgs, isDone: done };
+    if (isUnchanged(lastSavedRef.current, snapshot)) return;
+    await window.shelfApi.notes.update(projectId, noteId, { title: finalTitle, body: b, images: imgs, isDone: done });
+    lastSavedRef.current = snapshot;
   }, [projectId, noteId]);
 
   useImperativeHandle(ref, () => ({ close }), [close]);
@@ -343,6 +355,8 @@ const NoteEditor = forwardRef<NoteEditorHandle, NoteEditorProps>(function NoteEd
   }, [onRequestBack]);
 
   const handlePaste = useCallback(async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    // Image paste → store as a separate attachment, never inline in text.
+    // The textarea remains pure text; images render in the row below.
     const items = e.clipboardData.items;
     for (const item of items) {
       if (item.type.startsWith('image/')) {
@@ -351,36 +365,21 @@ const NoteEditor = forwardRef<NoteEditorHandle, NoteEditorProps>(function NoteEd
         if (!file) continue;
         const buffer = await file.arrayBuffer();
         const ext = item.type.split('/')[1] || 'png';
-        const ref = await window.shelfApi.notes.saveImage(projectId, buffer, ext);
-        insertAtCursor(`![](${ref})`);
+        const filename = await window.shelfApi.notes.saveImage(projectId, buffer, ext);
+        setImages((prev) => [...prev, filename]);
         return;
       }
     }
   }, [projectId]);
 
-  const insertAtCursor = useCallback((text: string) => {
-    const ta = textareaRef.current;
-    if (!ta) {
-      setContent((prev) => prev + text);
-      return;
-    }
-    const start = ta.selectionStart;
-    const end = ta.selectionEnd;
-    setContent((prev) => prev.slice(0, start) + text + prev.slice(end));
-    requestAnimationFrame(() => {
-      if (textareaRef.current) {
-        const pos = start + text.length;
-        textareaRef.current.selectionStart = pos;
-        textareaRef.current.selectionEnd = pos;
-      }
-    });
+  const removeImage = useCallback((filename: string) => {
+    setImages((prev) => prev.filter((f) => f !== filename));
   }, []);
 
   const html = useMemo(() => {
     if (!projectId) return '';
-    const rewritten = rewriteImagePaths(content, projectId);
-    return renderMarkdown(rewritten, { breaks: true });
-  }, [content, projectId]);
+    return renderMarkdown(body, { breaks: true });
+  }, [body, projectId]);
 
   if (!note) {
     return <div className="notes-empty">Loading…</div>;
@@ -425,33 +424,58 @@ const NoteEditor = forwardRef<NoteEditorHandle, NoteEditorProps>(function NoteEd
           <textarea
             ref={textareaRef}
             className="notes-textarea"
-            value={content}
-            onChange={(e) => setContent(e.target.value)}
+            value={body}
+            onChange={(e) => setBody(e.target.value)}
             onPaste={handlePaste}
-            placeholder="Write notes here. Paste images directly. Markdown supported."
+            placeholder="Write notes here. Paste images directly."
             spellCheck={false}
           />
-        ) : content.trim() === '' ? (
+        ) : body.trim() === '' && images.length === 0 ? (
           <div className="notes-empty">(empty)</div>
         ) : (
           <div className="notes-preview" dangerouslySetInnerHTML={{ __html: html }} />
+        )}
+        {images.length > 0 && (
+          <div className="notes-images">
+            {images.map((filename) => (
+              <NoteImage
+                key={filename}
+                projectId={projectId}
+                filename={filename}
+                onRemove={() => removeImage(filename)}
+              />
+            ))}
+          </div>
         )}
       </div>
     </>
   );
 });
 
-// Rewrite `images/<file>` paths so the renderer can load them via shelf-image://
-function rewriteImagePaths(content: string, projectId: string): string {
-  let out = content.replace(
-    /(!\[[^\]]*\]\()images\/([\w.-]+)(\))/g,
-    (_m, p1, name, p3) => `${p1}shelf-image://${projectId}/${name}${p3}`,
+// Loads an image attachment via IPC into a Blob URL. Component owns the URL
+// lifecycle so it's revoked on unmount / filename change. Hover-only ✕ in the
+// top-right corner removes the image from the parent's images array.
+function NoteImage({ projectId, filename, onRemove }: { projectId: string; filename: string; onRemove: () => void }) {
+  const [src, setSrc] = useState('');
+  useEffect(() => {
+    let cancelled = false;
+    let url = '';
+    window.shelfApi.notes.readImage(projectId, filename).then((buf) => {
+      if (cancelled || !buf) return;
+      url = URL.createObjectURL(new Blob([buf]));
+      setSrc(url);
+    });
+    return () => {
+      cancelled = true;
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [projectId, filename]);
+  return (
+    <div className="notes-image-wrap">
+      {src && <img src={src} className="notes-image" alt="" />}
+      <button type="button" className="notes-image-remove" onClick={onRemove} title="Remove image" aria-label="Remove image">×</button>
+    </div>
   );
-  out = out.replace(
-    /(<img\s+[^>]*src=["'])images\/([\w.-]+)(["'])/g,
-    (_m, p1, name, p3) => `${p1}shelf-image://${projectId}/${name}${p3}`,
-  );
-  return out;
 }
 
 function relativeTime(iso: string): string {

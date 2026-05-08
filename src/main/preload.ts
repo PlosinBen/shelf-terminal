@@ -100,12 +100,14 @@ contextBridge.exposeInMainWorld('shelfApi', {
     get: (projectId: string, noteId: string) =>
       ipcRenderer.invoke(IPC.NOTES_GET, { projectId, noteId }),
     create: (projectId: string) => ipcRenderer.invoke(IPC.NOTES_CREATE, projectId),
-    update: (projectId: string, noteId: string, patch: { title?: string; isDone?: boolean; content?: string }) =>
+    update: (projectId: string, noteId: string, patch: { title?: string; isDone?: boolean; body?: string; images?: string[] }) =>
       ipcRenderer.invoke(IPC.NOTES_UPDATE, { projectId, noteId, patch }),
     delete: (projectId: string, noteId: string) =>
       ipcRenderer.invoke(IPC.NOTES_DELETE, { projectId, noteId }),
     saveImage: (projectId: string, buffer: ArrayBuffer, ext: string): Promise<string> =>
       ipcRenderer.invoke(IPC.NOTES_SAVE_IMAGE, { projectId, buffer, ext }),
+    readImage: (projectId: string, filename: string): Promise<ArrayBuffer | null> =>
+      ipcRenderer.invoke(IPC.NOTES_READ_IMAGE, { projectId, filename }),
   },
   app: {
     logsPath: (): Promise<string> => ipcRenderer.invoke(IPC.APP_LOGS_PATH),

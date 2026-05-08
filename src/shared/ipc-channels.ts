@@ -50,6 +50,7 @@ export const IPC = {
   NOTES_UPDATE: 'notes:update',
   NOTES_DELETE: 'notes:delete',
   NOTES_SAVE_IMAGE: 'notes:save-image',
+  NOTES_READ_IMAGE: 'notes:read-image',
 
   // Logs
   LOGS_CLEAR: 'logs:clear',

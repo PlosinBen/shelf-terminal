@@ -11,12 +11,15 @@ import { log } from '@shared/logger';
 //     is_done: false
 //     created: 2026-05-07T10:00:00.000Z
 //     updated: 2026-05-07T11:30:00.000Z
+//     images: ["uuid1.png","uuid2.jpg"]
 //     ---
 //
 //     # markdown body…
 //
-// Images are still shared per project under projects/<projectId>/images/<uuid>.<ext>
-// and garbage-collected against references found across ALL notes in the project.
+// Images are stored as separate attachments referenced by filename in the
+// `images` frontmatter array (NOT inline `![](...)` in the body). Files live
+// under projects/<projectId>/images/<uuid>.<ext> and are GC'd against the
+// union of every note's `images` list.
 
 export interface NoteMeta {
   id: string;
@@ -27,7 +30,8 @@ export interface NoteMeta {
 }
 
 export interface Note extends NoteMeta {
-  content: string;
+  body: string;
+  images: string[];
 }
 
 export function notesDir(projectId: string): string {
@@ -89,8 +93,21 @@ export async function getNote(projectId: string, noteId: string): Promise<Note |
       isDone: meta.isDone ?? false,
       created: meta.created ?? '',
       updated: meta.updated ?? '',
-      content: body,
+      body,
+      images: meta.images ?? [],
     };
+  } catch {
+    return null;
+  }
+}
+
+export async function readImage(projectId: string, filename: string): Promise<ArrayBuffer | null> {
+  if (!isSafeFilename(filename)) return null;
+  try {
+    const buf = await fs.promises.readFile(path.join(imagesDir(projectId), filename));
+    // Return a fresh ArrayBuffer over the file bytes (avoid the underlying
+    // Node Buffer's pool offset surfacing through the IPC boundary).
+    return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
   } catch {
     return null;
   }
@@ -100,14 +117,14 @@ export async function createNote(projectId: string): Promise<NoteMeta> {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
   const meta: NoteMeta = { id, title: '', isDone: false, created: now, updated: now };
-  await writeRaw(projectId, id, meta, '');
+  await writeRaw(projectId, id, meta, '', []);
   return meta;
 }
 
 export async function updateNote(
   projectId: string,
   noteId: string,
-  patch: { title?: string; isDone?: boolean; content?: string },
+  patch: { title?: string; isDone?: boolean; body?: string; images?: string[] },
 ): Promise<NoteMeta | null> {
   if (!isSafeId(noteId)) return null;
   const existing = await getNote(projectId, noteId);
@@ -120,8 +137,9 @@ export async function updateNote(
     created: existing.created,
     updated: new Date().toISOString(),
   };
-  const body = patch.content ?? existing.content;
-  await writeRaw(projectId, noteId, next, body);
+  const body = patch.body ?? existing.body;
+  const images = patch.images ?? existing.images;
+  await writeRaw(projectId, noteId, next, body, images);
   await garbageCollectImages(projectId);
   return next;
 }
@@ -136,19 +154,26 @@ export async function deleteNote(projectId: string, noteId: string): Promise<voi
   await garbageCollectImages(projectId);
 }
 
+/**
+ * Save an image file under projects/<id>/images/<uuid>.<ext>.
+ * Returns the bare filename (caller stores it in note.images[]).
+ */
 export async function saveImage(projectId: string, buffer: ArrayBuffer, ext: string): Promise<string> {
   const safeExt = sanitizeExt(ext);
   const dir = imagesDir(projectId);
   await fs.promises.mkdir(dir, { recursive: true });
   const filename = `${crypto.randomUUID()}${safeExt}`;
   await fs.promises.writeFile(path.join(dir, filename), Buffer.from(buffer));
-  return `images/${filename}`;
+  return filename;
 }
 
 // ── Auto-GC across all notes ───────────────────────────────────
 
-const IMAGE_REF_RE = /images\/([\w.-]+)/g;
-
+/**
+ * Walk every note's frontmatter `images` list and delete any file under
+ * <project>/images/ that isn't referenced. Runs after every updateNote /
+ * deleteNote so orphaned uploads don't accumulate.
+ */
 export async function garbageCollectImages(projectId: string): Promise<number> {
   const dir = imagesDir(projectId);
   if (!fs.existsSync(dir)) return 0;
@@ -160,7 +185,6 @@ export async function garbageCollectImages(projectId: string): Promise<number> {
     return 0;
   }
 
-  // Walk every note's raw content (frontmatter + body) and collect refs.
   const refs = new Set<string>();
   const ndir = notesDir(projectId);
   if (fs.existsSync(ndir)) {
@@ -174,7 +198,8 @@ export async function garbageCollectImages(projectId: string): Promise<number> {
       if (!entry.isFile() || !entry.name.endsWith('.md')) continue;
       try {
         const raw = await fs.promises.readFile(path.join(ndir, entry.name), 'utf-8');
-        for (const m of raw.matchAll(IMAGE_REF_RE)) refs.add(m[1]);
+        const { meta } = parseFrontmatter(raw);
+        for (const ref of meta.images ?? []) refs.add(ref);
       } catch {
         // skip unreadable file
       }
@@ -198,12 +223,13 @@ export async function garbageCollectImages(projectId: string): Promise<number> {
 // ── Internal helpers ───────────────────────────────────────────
 
 interface ParsedFrontmatter {
-  meta: { title?: string; isDone?: boolean; created?: string; updated?: string };
+  meta: { title?: string; isDone?: boolean; created?: string; updated?: string; images?: string[] };
   body: string;
 }
 
-// Tiny frontmatter parser. Only supports the four scalar fields we use; intentional
-// constraint to avoid pulling in a YAML library for this much.
+// Tiny frontmatter parser. Only supports the scalar fields we use plus
+// `images` as a JSON-encoded array; intentional constraint to avoid
+// pulling in a YAML library for this much.
 export function parseFrontmatter(raw: string): ParsedFrontmatter {
   const meta: ParsedFrontmatter['meta'] = {};
   if (!raw.startsWith('---\n')) {
@@ -221,11 +247,22 @@ export function parseFrontmatter(raw: string): ParsedFrontmatter {
     if (!m) continue;
     const key = m[1];
     const valueRaw = m[2].trim();
-    const value = unquote(valueRaw);
-    if (key === 'title') meta.title = value;
-    else if (key === 'is_done') meta.isDone = value === 'true';
-    else if (key === 'created') meta.created = value;
-    else if (key === 'updated') meta.updated = value;
+    if (key === 'title') meta.title = unquote(valueRaw);
+    else if (key === 'is_done') meta.isDone = valueRaw === 'true';
+    else if (key === 'created') meta.created = unquote(valueRaw);
+    else if (key === 'updated') meta.updated = unquote(valueRaw);
+    else if (key === 'images') {
+      // JSON-encoded array (e.g. ["uuid1.png","uuid2.jpg"]). Filter to safe
+      // filenames as defence-in-depth — disk paths are derived from these.
+      try {
+        const parsed = JSON.parse(valueRaw);
+        if (Array.isArray(parsed)) {
+          meta.images = parsed.filter((x): x is string => typeof x === 'string' && isSafeFilename(x));
+        }
+      } catch {
+        meta.images = [];
+      }
+    }
   }
   return { meta, body };
 }
@@ -243,22 +280,23 @@ function quoteForYaml(s: string): string {
   return `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 }
 
-function serialize(meta: NoteMeta, body: string): string {
+function serialize(meta: NoteMeta, body: string, images: string[]): string {
   return [
     '---',
     `title: ${quoteForYaml(meta.title)}`,
     `is_done: ${meta.isDone}`,
     `created: ${meta.created}`,
     `updated: ${meta.updated}`,
+    `images: ${JSON.stringify(images)}`,
     '---',
     body,
   ].join('\n');
 }
 
-async function writeRaw(projectId: string, noteId: string, meta: NoteMeta, body: string): Promise<void> {
+async function writeRaw(projectId: string, noteId: string, meta: NoteMeta, body: string, images: string[]): Promise<void> {
   const dir = notesDir(projectId);
   await fs.promises.mkdir(dir, { recursive: true });
-  await fs.promises.writeFile(notePath(projectId, noteId), serialize(meta, body), 'utf-8');
+  await fs.promises.writeFile(notePath(projectId, noteId), serialize(meta, body, images), 'utf-8');
 }
 
 function sanitizeExt(ext: string): string {
@@ -269,4 +307,10 @@ function sanitizeExt(ext: string): string {
 
 function isSafeId(id: string): boolean {
   return /^[A-Za-z0-9_-]+$/.test(id);
+}
+
+function isSafeFilename(s: string): boolean {
+  if (!s) return false;
+  if (s.includes('..') || s.includes('/') || s.includes('\\')) return false;
+  return /^[\w.-]+$/.test(s);
 }

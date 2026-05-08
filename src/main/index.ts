@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, shell, protocol } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from 'electron';
 import path from 'path';
 import fs from 'fs';
 import { IPC } from '@shared/ipc-channels';
@@ -18,19 +18,12 @@ import { log, setLogLevel, setFileWriter } from '@shared/logger';
 import { applyUserDataIsolation } from './user-data-path';
 import { removeProjectStorage } from './project-storage';
 import { migratePmNotes } from './migrations/migrate-pm-notes';
-import { listNotes, getNote, createNote, updateNote, deleteNote, saveImage as saveNoteImage } from './notes-store';
-import { registerNotesProtocol, SHELF_IMAGE_SCHEME } from './notes-protocol';
+import { listNotes, getNote, createNote, updateNote, deleteNote, saveImage as saveNoteImage, readImage as readNoteImage } from './notes-store';
 import { handlePmSend, handleTabEvent, getHistory, clearHistory, compactHistory, stopGeneration, updateSyncedState, setWritePtyFn, isAwayMode, setAwayMode, initAwayMode, setStateChangeCallback, updateKnownTabs, startTelegram, stopTelegram, setMessageCallback, setCallbackQueryHandler, setStopCallback } from './pm';
 import { initAgentManager, disposeAllAgents } from './agent';
 import type { Connection, ProjectConfig, AppSettings, FileUploadResult, FileClearResult, PtySpawnPayload, PtyInputPayload, PtyResizePayload, PtyKillPayload, GitBranchInfo, WorktreeAddResult, WorktreeRemoveResult } from '@shared/types';
 
 applyUserDataIsolation();
-
-// Register notes image scheme as standard so <img src="shelf-image://..."> works
-// in renderer. Must run before app.whenReady().
-protocol.registerSchemesAsPrivileged([
-  { scheme: SHELF_IMAGE_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true } },
-]);
 
 let mainWindow: BrowserWindow | null = null;
 let cachedProjects: ProjectConfig[] = [];
@@ -417,7 +410,7 @@ ipcMain.handle(IPC.NOTES_CREATE, async (_event, projectId: string) => {
   return createNote(projectId);
 });
 
-ipcMain.handle(IPC.NOTES_UPDATE, async (_event, payload: { projectId: string; noteId: string; patch: { title?: string; isDone?: boolean; content?: string } }) => {
+ipcMain.handle(IPC.NOTES_UPDATE, async (_event, payload: { projectId: string; noteId: string; patch: { title?: string; isDone?: boolean; body?: string; images?: string[] } }) => {
   return updateNote(payload.projectId, payload.noteId, payload.patch);
 });
 
@@ -427,6 +420,10 @@ ipcMain.handle(IPC.NOTES_DELETE, async (_event, payload: { projectId: string; no
 
 ipcMain.handle(IPC.NOTES_SAVE_IMAGE, async (_event, payload: { projectId: string; buffer: ArrayBuffer; ext: string }): Promise<string> => {
   return saveNoteImage(payload.projectId, payload.buffer, payload.ext);
+});
+
+ipcMain.handle(IPC.NOTES_READ_IMAGE, async (_event, payload: { projectId: string; filename: string }): Promise<ArrayBuffer | null> => {
+  return readNoteImage(payload.projectId, payload.filename);
 });
 
 // ── Updater ──
@@ -526,7 +523,6 @@ app.whenReady().then(async () => {
   log.info('app', `starting, logLevel=${settings.logLevel}, userData=${app.getPath('userData')}`);
 
   await migratePmNotes();
-  registerNotesProtocol();
 
   createWindow();
 
