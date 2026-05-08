@@ -769,12 +769,24 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
             </div>
           );
         })}
-        {isStreaming && !streamText && !streamThinking && messages.length > 0 && (
-          <div className="agent-loading">
-            <span className="agent-loading-spinner" />
-            <span className="agent-loading-text">Agent is running... (Esc to stop)</span>
-          </div>
-        )}
+        {(() => {
+          // Spinner is the "agent is alive" signal when nothing else visually
+          // indicates progress. We hide it once any visible activity exists:
+          // streamText is rendered with a blinking cursor, and the "Thinking..."
+          // header (collapsed or expanded) is itself a running indicator.
+          // But if thinking display is set to 'hidden', the user sees nothing
+          // even when streamThinking is filling — keep the spinner in that case.
+          const thinkingDisplay = settings.agentDisplay?.thinking ?? 'collapsed';
+          const thinkingVisible = streamThinking && thinkingDisplay !== 'hidden';
+          const showSpinner = isStreaming && !streamText && !thinkingVisible && messages.length > 0;
+          if (!showSpinner) return null;
+          return (
+            <div className="agent-loading">
+              <span className="agent-loading-spinner" />
+              <span className="agent-loading-text">Agent is running... (Esc to stop)</span>
+            </div>
+          );
+        })()}
         {queuedMessages.map((q) => (
           <div key={q.id} className="agent-msg agent-msg-user agent-msg-queued">
             <div className="agent-msg-content">{q.content}</div>
