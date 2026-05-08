@@ -424,3 +424,21 @@ CLI 的預設邏輯**到底看什麼沒驗證**（binary 是 Bun 編譯的 nativ
 **不要改**:
 - 不要刪掉 `pathToClaudeCodeExecutable: CLAUDE_BINARY_PATH` — SDK 的 auto-resolve 在 esbuild bundled + asar packaged 環境下找不到 sibling `node_modules`，會 fallback 到 PATH 上版本可能不符的全域 `claude`。
 - 不要在 packaged build 偷補 env 變數 (`TERM`、`NODE_ENV` 等) 想 workaround — 那是補在錯的層級，CLI 預設邏輯改版就壞，且我們也沒驗證 env 真的是 trigger。
+
+---
+
+## Claude SDK: rate-limit usage 只在接近警戒線才回真實數值
+
+**現象**: status segment 上的「5h: N%」百分比平常顯示 `—`，只有快到 warning 才忽然出現具體數字。看起來像 bug。
+
+**原因**: SDK 的 `SDKRateLimitInfo.utilization` 欄位只在 `status === 'allowed_warning'` 或 `'rejected'` 時才填值；`'allowed'`（一般情況）會把 utilization 整個丟掉，即使底層 `anthropic-ratelimit-unified-*-utilization` HTTP header 一直都有資料。SDK 端看似有意為之的「不在意你還很閒」設計。
+
+`rate_limit_event` 也只在「rate limit info 有變化」時才推一次，不是每個 turn 都會收到，所以剛開新 session 連事件都沒有，segment 一片空。
+
+**現況做法**: `rateLimitInfoToSegment()` 收到 `'allowed'` 時 fallback 顯示 `5h: — ↻3h`（bucket 名 + 倒數），讓使用者至少看得到「reset 時間」這個有用訊號。utilization 欄位只在 SDK 願意給的時候才顯示百分比。
+
+**不要做**:
+- 不要試著從別的地方算 utilization（例如自己累加 inputTokens / window 比例）—— 5h/7d 兩個 bucket 是 server-side 計算，client 沒有完整資訊。
+- 不要把 fallback 改成 `5h: 0%`，那會誤導使用者以為配額沒在動。
+
+可能改進方向（未實作）: 直接讀底層 HTTP header（`anthropic-ratelimit-*`），跳過 SDK 的 filter。但 SDK 沒暴露 raw response，要 patch SDK 或自己跑一條額外 API 拿。

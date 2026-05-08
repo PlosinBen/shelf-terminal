@@ -537,10 +537,6 @@ function processMessage(msg: SDKMessage, send: SendFn) {
     }
     case 'rate_limit_event': {
       const info = (msg as any).rate_limit_info;
-      // Trace: SDK only emits rate_limit_event for claude.ai subscription users
-      // and only "when rate limit info changes". Log every event so we can
-      // verify cadence + payload shape if quota segment fails to render.
-      console.error('[rate-limit-trace] event received, info=', JSON.stringify(info));
       const seg = rateLimitInfoToSegment(info);
       if (seg) {
         const bucketKey = seg.text.split(':')[0];
