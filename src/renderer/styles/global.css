@@ -2853,6 +2853,11 @@ button {
   padding-top: 6px;
 }
 
+.agent-tool-result-error {
+  color: var(--error, #e06c75);
+  border-top-color: var(--error, #e06c75);
+}
+
 .agent-tool-truncated {
   font-size: 11px;
   color: var(--text-muted);

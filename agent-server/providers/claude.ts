@@ -478,7 +478,9 @@ function processMessage(msg: SDKMessage, send: SendFn) {
             send({
               type: 'message', msgType: 'tool_result',
               content: typeof (block as any).content === 'string' ? (block as any).content : JSON.stringify((block as any).content ?? ''),
-              toolUseId: (block as any).tool_use_id, sessionId: msg.session_id,
+              toolUseId: (block as any).tool_use_id,
+              isError: (block as any).is_error === true,
+              sessionId: msg.session_id,
             });
           }
         }

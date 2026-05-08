@@ -321,13 +321,15 @@ export function createCopilotBackend(): ServerBackend {
           // `detailedContent` (SDK-side rich UI, returns reads as fake
           // unified diffs). The renderer reconstructs edit visuals from
           // toolInput, so we don't need detailedContent's diff fidelity.
-          const text = data.success === false
+          const isError = data.success === false;
+          const text = isError
             ? `Error: ${data.error?.message ?? 'tool failed'}`
             : (data.result?.content ?? '');
           currentSend({
             type: 'message', msgType: 'tool_result',
             content: text.slice(0, 8000),
             toolUseId: data.toolCallId ?? '',
+            isError,
           });
           break;
         }

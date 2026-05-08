@@ -12,6 +12,10 @@ export interface AgentMsg {
   toolInput?: Record<string, unknown>;
   toolUseId?: string;
   toolResult?: string;
+  // True when the matching tool_result block had `is_error: true` (Claude) or
+  // `success === false` (Copilot). Used to keep error output visible while
+  // suppressing noisy success acknowledgements (e.g. Edit's "...successfully").
+  toolResultIsError?: boolean;
   streaming?: boolean;
   provider?: string;
   timestamp: number;
@@ -199,9 +203,18 @@ export function AgentMessage({ message, cwd }: Props) {
         {isExpanded && (
           <>
             {hasDetailBody && <ToolBody toolName={message.toolName} input={message.toolInput} cwd={cwd} />}
-            {message.toolResult && (() => {
+            {(() => {
+              if (!message.toolResult) return null;
+              // Edit/Write success messages are noise — the diff already shows
+              // what changed. Errors stay visible so the user can see what
+              // went wrong (e.g. "old_string not found", permission denied).
+              const isWriteFamily = hasDetailBody;
+              if (isWriteFamily && !message.toolResultIsError) return null;
               const { lines, remaining } = truncateLines(message.toolResult, 30);
-              return <pre className="agent-tool-code agent-tool-result-block">{lines.join('\n')}{remaining > 0 ? `\n... +${remaining} more lines` : ''}</pre>;
+              const className = message.toolResultIsError
+                ? 'agent-tool-code agent-tool-result-block agent-tool-result-error'
+                : 'agent-tool-code agent-tool-result-block';
+              return <pre className={className}>{lines.join('\n')}{remaining > 0 ? `\n... +${remaining} more lines` : ''}</pre>;
             })()}
           </>
         )}

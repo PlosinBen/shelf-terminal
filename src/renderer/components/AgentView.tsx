@@ -262,7 +262,7 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
           const updated = [...prev];
           for (let i = updated.length - 1; i >= 0; i--) {
             if (updated[i].type === 'tool_use' && updated[i].toolUseId === msg.toolUseId) {
-              updated[i] = { ...updated[i], toolResult: msg.content };
+              updated[i] = { ...updated[i], toolResult: msg.content, toolResultIsError: msg.isError === true };
               return updated;
             }
           }
