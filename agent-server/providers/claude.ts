@@ -112,6 +112,23 @@ function resolveClaudeBinary(): string | undefined {
 // re-running existsSync per query is wasted work and clutters call sites.
 const CLAUDE_BINARY_PATH = resolveClaudeBinary();
 
+/**
+ * Defaults applied to every real query we issue. NOT used for the warmup
+ * query in `ensureInit` — that one only needs to reach the SDK init handshake
+ * and deliberately omits `tools`/`thinking`/`includePartialMessages` so it
+ * stays cheap.
+ *
+ * If you add a new SDK option that should apply to all real queries, add it
+ * here, not at individual call sites — `thinking.display` was previously
+ * easy to miss and caused dev/packaged behaviour divergence (see GOTCHAS).
+ */
+const CLAUDE_QUERY_DEFAULTS = {
+  pathToClaudeCodeExecutable: CLAUDE_BINARY_PATH,
+  tools: { type: 'preset', preset: 'claude_code' },
+  thinking: { type: 'adaptive', display: 'summarized' },
+  includePartialMessages: true,
+} as const satisfies Partial<Options>;
+
 export function createClaudeBackend(): ServerBackend {
   let activeQuery: Query | null = null;
   let abortController: AbortController | null = null;
@@ -236,24 +253,9 @@ export function createClaudeBackend(): ServerBackend {
         ? ((async (_n, toolInput) => ({ behavior: 'allow' as const, updatedInput: toolInput })) as CanUseTool)
         : canUseTool;
       const options: Options = {
+        ...CLAUDE_QUERY_DEFAULTS,
         abortController,
         cwd: input.cwd,
-        // Must be explicit — SDK's auto-resolution looks for the binary
-        // relative to the SDK package, but esbuild bundles the SDK into
-        // agent-server.mjs so that path no longer points anywhere useful.
-        // Symptom when undefined in packaged builds: assistant blocks arrive
-        // with `signature` but `thinking: ""`, and no streaming deltas.
-        pathToClaudeCodeExecutable: CLAUDE_BINARY_PATH,
-        tools: { type: 'preset', preset: 'claude_code' },
-        // `display: 'summarized'` is critical: without it, the SDK pushes
-        // `--thinking adaptive` to the CLI but omits `--thinking-display`,
-        // which lets the CLI fall back to env/TTY-based default. In packaged
-        // builds (stripped env, no TERM_PROGRAM) the default resolves to
-        // 'omitted' → assistant blocks arrive with `signature` but `thinking: ""`
-        // and no thinking_delta stream events. Setting it explicitly makes
-        // the behaviour deterministic.
-        thinking: { type: 'adaptive', display: 'summarized' },
-        includePartialMessages: true,
         permissionMode: isBypass ? 'default' : mode,
         canUseTool: effectiveCanUseTool,
       };

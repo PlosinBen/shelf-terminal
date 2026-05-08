@@ -115,8 +115,16 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
   // honour intent, not geometric position. Decoupling intent from geometry
   // avoids the smooth-scroll mid-animation race that previously needed a
   // programmaticScrollRef + setTimeout workaround.
+  //
+  // The ref is the source of truth (read by effects without re-render); the
+  // FAB visibility is its mirror as state (so React re-renders when it flips).
+  // Always update them through `setFollow` so they can never drift.
   const followBottomRef = useRef(true);
   const [showJumpFab, setShowJumpFab] = useState(false);
+  const setFollow = useCallback((follow: boolean) => {
+    followBottomRef.current = follow;
+    setShowJumpFab((prev) => (prev === !follow ? prev : !follow));
+  }, []);
 
   // Focus the input whenever this tab becomes visible (tab switch, project
   // switch, app launch). requestAnimationFrame defers past the layout pass so
@@ -354,8 +362,7 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
       // rAF: scroll position has not yet updated when wheel/key events fire.
       requestAnimationFrame(() => {
         const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
-        followBottomRef.current = atBottom;
-        setShowJumpFab((prev) => (prev === !atBottom ? prev : !atBottom));
+        setFollow(atBottom);
       });
     };
     const onKey = (e: KeyboardEvent) => {
@@ -369,7 +376,7 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
       el.removeEventListener('touchmove', recompute);
       el.removeEventListener('keydown', onKey);
     };
-  }, []);
+  }, [setFollow]);
 
   // Auto-follow new content. Reads intent only — programmatic scrolls
   // triggered here do not touch followBottomRef, so subsequent stream
@@ -780,8 +787,7 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
           <button
             className="agent-jump-fab"
             onClick={() => {
-              followBottomRef.current = true;
-              setShowJumpFab(false);
+              setFollow(true);
               bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
             }}
             title="Jump to latest"
