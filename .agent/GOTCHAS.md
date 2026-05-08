@@ -395,3 +395,32 @@
 **原因**: esbuild target 是 `node20`，但遠端 Node.js 版本 < 20。
 
 **解法**: 確保遠端有 Node.js 20+。deploy 時不做版本檢查（avoid extra SSH round-trip），錯誤會在 `waitForReady` timeout 後浮現。
+
+---
+
+## Claude SDK: thinking.display 沒設，dev/packaged 行為會分歧
+
+**現象**: dev (`npm run dev`) 看得到 thinking 內容，packaged app 收到 `len=0` 但 `hasSignature=true` 的 thinking block，且完全沒有 `thinking_delta` stream event。同一份 SDK config (`{ type: 'adaptive' }`)、同一支 `claude` binary、同一份 minified agent-server bundle，**僅執行環境不同**。
+
+**原因**: Claude Agent SDK 在 spawn `claude` CLI 時，依據 `options.thinking` 推 CLI flag：
+
+```ts
+case "adaptive": l.push("--thinking", "adaptive"); break;
+if (U.type !== "disabled" && U.display) l.push("--thinking-display", U.display);
+```
+
+`thinking.display` 沒設值 → SDK **不**推 `--thinking-display` → CLI 走自己的預設邏輯。
+
+CLI 的預設邏輯**到底看什麼沒驗證**（binary 是 Bun 編譯的 native，原始碼看不到）。我們只驗證過：
+
+- 只補 `TERM=xterm-256color` 不能修
+- 進一步補 `TERM_PROGRAM`、`LC_TERMINAL`、`NODE_ENV` 等 env 沒測完就放棄這條路
+- 明確設 `display: 'summarized'` 一定能修
+
+候選 trigger 包含 env (`TERM_PROGRAM`、`NODE_ENV` 之類)、`process.stdout.isTTY`、父行程 type、`__CFBundleIdentifier`（macOS）、其他未列舉的訊號，未深究。
+
+**解法**: `agent-server/providers/claude.ts` 明確設 `thinking: { type: 'adaptive', display: 'summarized' }`，繞過 CLI 的「我自己猜」分支，dev/packaged 行為一致。
+
+**不要改**:
+- 不要刪掉 `pathToClaudeCodeExecutable: CLAUDE_BINARY_PATH` — SDK 的 auto-resolve 在 esbuild bundled + asar packaged 環境下找不到 sibling `node_modules`，會 fallback 到 PATH 上版本可能不符的全域 `claude`。
+- 不要在 packaged build 偷補 env 變數 (`TERM`、`NODE_ENV` 等) 想 workaround — 那是補在錯的層級，CLI 預設邏輯改版就壞，且我們也沒驗證 env 真的是 trigger。

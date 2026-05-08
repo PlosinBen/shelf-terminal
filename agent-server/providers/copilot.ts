@@ -293,7 +293,6 @@ export function createCopilotBackend(): ServerBackend {
           }
           break;
         case 'assistant.reasoning_delta':
-          console.error('[thinking-trace] copilot reasoning_delta, len=', event.data?.deltaContent?.length ?? 0, 'preview=', JSON.stringify((event.data?.deltaContent ?? '').slice(0, 60)));
           if (event.data?.deltaContent) {
             currentSend({ type: 'stream', streamType: 'thinking', content: event.data.deltaContent });
           }
@@ -304,7 +303,6 @@ export function createCopilotBackend(): ServerBackend {
           }
           break;
         case 'assistant.reasoning':
-          console.error('[thinking-trace] copilot reasoning assembled, len=', event.data?.content?.length ?? 0, 'preview=', JSON.stringify((event.data?.content ?? '').slice(0, 80)));
           if (event.data?.content) {
             currentSend({ type: 'message', msgType: 'thinking', content: event.data.content });
           }
