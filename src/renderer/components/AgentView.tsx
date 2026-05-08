@@ -109,10 +109,13 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const initializedRef = useRef(false);
-  const isAtBottomRef = useRef(true);
-  // Mirror the ref into state so the "jump to latest" FAB can rerender on
-  // scroll without requiring a setState on every scroll tick — we only
-  // toggle when crossing the threshold.
+  // User intent to "stick to the bottom of the conversation". Updated only
+  // by user-driven scroll inputs (wheel/touch/keyboard); programmatic scrolls
+  // (scrollIntoView from auto-follow) deliberately do NOT change this — they
+  // honour intent, not geometric position. Decoupling intent from geometry
+  // avoids the smooth-scroll mid-animation race that previously needed a
+  // programmaticScrollRef + setTimeout workaround.
+  const followBottomRef = useRef(true);
   const [showJumpFab, setShowJumpFab] = useState(false);
 
   // Focus the input whenever this tab becomes visible (tab switch, project
@@ -273,7 +276,6 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
         setStreamText('');
       }
       if (msg.type === 'thinking') {
-        console.log('[thinking-trace] renderer onMessage thinking', 'keys=', Object.keys(msg), 'type=', msg.type, 'hasContent=', hasContent, 'len=', (msg.content ?? '').length, 'preview=', (msg.content ?? '').slice(0, 80));
         if (!hasContent) return;
         setStreamThinking('');
       }
@@ -284,7 +286,6 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
     const offStream = window.shelfApi.agent.onStream((id: string, chunk: any) => {
       if (id !== tabId) return;
       if (chunk.type === 'thinking') {
-        console.log('[thinking-trace] renderer onStream thinking', 'keys=', Object.keys(chunk), 'type=', chunk.type, 'len=', chunk.content?.length ?? 0, 'preview=', (chunk.content ?? '').slice(0, 60));
         setStreamThinking((prev) => prev + (chunk.content ?? ''));
       } else {
         setStreamText((prev) => prev + (chunk.content ?? ''));
@@ -341,23 +342,40 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
     return () => { offMessage(); offStream(); offStatus(); };
   }, [tabId, provider]);
 
-  // Scroll management
+  // Track user intent only on user-driven scroll inputs. We deliberately
+  // ignore the generic `scroll` event because programmatic scrollIntoView
+  // also fires it — distinguishing the two used to require a flag + timeout
+  // (race-prone). Wheel/touch/keyboard are exclusively user actions, so
+  // recomputing geometry on those produces a clean "intent" signal.
   useEffect(() => {
     const el = listRef.current;
     if (!el) return;
-    const handleScroll = () => {
-      const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
-      isAtBottomRef.current = atBottom;
-      // Only call setState when crossing the threshold to avoid a rerender
-      // per scroll event.
-      setShowJumpFab((prev) => (prev === !atBottom ? prev : !atBottom));
+    const recompute = () => {
+      // rAF: scroll position has not yet updated when wheel/key events fire.
+      requestAnimationFrame(() => {
+        const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+        followBottomRef.current = atBottom;
+        setShowJumpFab((prev) => (prev === !atBottom ? prev : !atBottom));
+      });
     };
-    el.addEventListener('scroll', handleScroll);
-    return () => el.removeEventListener('scroll', handleScroll);
+    const onKey = (e: KeyboardEvent) => {
+      if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(e.key)) recompute();
+    };
+    el.addEventListener('wheel', recompute, { passive: true });
+    el.addEventListener('touchmove', recompute, { passive: true });
+    el.addEventListener('keydown', onKey);
+    return () => {
+      el.removeEventListener('wheel', recompute);
+      el.removeEventListener('touchmove', recompute);
+      el.removeEventListener('keydown', onKey);
+    };
   }, []);
 
+  // Auto-follow new content. Reads intent only — programmatic scrolls
+  // triggered here do not touch followBottomRef, so subsequent stream
+  // updates within the same turn keep following without races.
   useEffect(() => {
-    if (isAtBottomRef.current) {
+    if (followBottomRef.current) {
       bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
     // isStreaming flip toggles the "Agent is running…" placeholder, which
@@ -366,28 +384,16 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
 
   // When this tab becomes visible again, the auto-scroll effect above
   // could not run while the parent was display:none (scrollIntoView is a
-  // no-op on hidden elements). Catch up here: if the user was at the
-  // bottom before switching away, snap (not smooth) back to bottom so
-  // they see the latest content immediately rather than a stale middle.
+  // no-op on hidden elements). Catch up here: if the user's intent is to
+  // follow, snap (not smooth) to bottom so they see the latest content
+  // immediately rather than a stale middle.
   useEffect(() => {
     if (!visible) return;
-    if (!isAtBottomRef.current) return;
+    if (!followBottomRef.current) return;
     requestAnimationFrame(() => {
       bottomRef.current?.scrollIntoView({ behavior: 'auto' });
     });
   }, [visible]);
-
-  // Force scroll on user message
-  const prevCount = useRef(0);
-  useEffect(() => {
-    if (messages.length > prevCount.current && messages[messages.length - 1]?.type === 'user') {
-      requestAnimationFrame(() => {
-        bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-        isAtBottomRef.current = true;
-      });
-    }
-    prevCount.current = messages.length;
-  }, [messages.length]);
 
   const handleSend = useCallback(() => {
     const text = input.trim();
@@ -719,32 +725,43 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
     <div className="agent-view" ref={rootRef}>
       <div className="agent-messages" ref={listRef}>
         {messages.length === 0 && !isStreaming && <div className="agent-empty">Send a message to start</div>}
-        {turns.map((turn, ti) => (
-          <div key={turn.user?.id ?? `turn-${ti}`} className="agent-turn">
-            {turn.user && <AgentMessage message={turn.user} cwd={cwd} />}
-            {turn.agent.length > 0 && (
-              <div className="agent-turn-response">
-                {turn.agent.map((msg) => <AgentMessage key={msg.id} message={msg} cwd={cwd} />)}
-              </div>
-            )}
-          </div>
-        ))}
-        {streamThinking && (settings.agentDisplay?.thinking ?? 'collapsed') !== 'hidden' && (
-          <div className="agent-msg agent-msg-thinking">
-            <div className="agent-thinking-header">
-              <span className="agent-chevron expanded">&#9654;</span>
-              <span className="agent-thinking-label">Thinking...</span>
+        {turns.map((turn, ti) => {
+          const isLastTurn = ti === turns.length - 1;
+          // Streaming content (thinking/text) goes inside `.agent-turn-response`
+          // alongside committed agent messages so visual styling is identical
+          // before and after the stream commits — avoids layout shift at end
+          // of stream. The loading spinner is rendered outside the wrapper
+          // (below) because it's a status indicator, not agent content.
+          const showStreamThinking = isLastTurn && streamThinking && (settings.agentDisplay?.thinking ?? 'collapsed') !== 'hidden';
+          const showStreamText = isLastTurn && streamText;
+          const hasResponseContent = turn.agent.length > 0 || showStreamThinking || showStreamText;
+          return (
+            <div key={turn.user?.id ?? `turn-${ti}`} className="agent-turn">
+              {turn.user && <AgentMessage message={turn.user} cwd={cwd} />}
+              {hasResponseContent && (
+                <div className="agent-turn-response">
+                  {turn.agent.map((msg) => <AgentMessage key={msg.id} message={msg} cwd={cwd} />)}
+                  {showStreamThinking && (
+                    <div className="agent-msg agent-msg-thinking">
+                      <div className="agent-thinking-header">
+                        <span className="agent-chevron expanded">&#9654;</span>
+                        <span className="agent-thinking-label">Thinking...</span>
+                      </div>
+                      <div className="agent-thinking-content">{streamThinking}</div>
+                    </div>
+                  )}
+                  {showStreamText && (
+                    <div className="agent-msg agent-msg-assistant">
+                      <span className="agent-msg-label">{provider.charAt(0).toUpperCase() + provider.slice(1)}:</span>
+                      <div className="agent-msg-content agent-markdown" dangerouslySetInnerHTML={{ __html: renderMarkdown(streamText) }} />
+                      <span className="agent-cursor" />
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
-            <div className="agent-thinking-content">{streamThinking}</div>
-          </div>
-        )}
-        {streamText && (
-          <div className="agent-msg agent-msg-assistant">
-            <span className="agent-msg-label">{provider.charAt(0).toUpperCase() + provider.slice(1)}:</span>
-            <div className="agent-msg-content agent-markdown" dangerouslySetInnerHTML={{ __html: renderMarkdown(streamText) }} />
-            <span className="agent-cursor" />
-          </div>
-        )}
+          );
+        })}
         {isStreaming && !streamText && !streamThinking && messages.length > 0 && (
           <div className="agent-loading">
             <span className="agent-loading-spinner" />
@@ -763,9 +780,9 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
           <button
             className="agent-jump-fab"
             onClick={() => {
-              bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-              isAtBottomRef.current = true;
+              followBottomRef.current = true;
               setShowJumpFab(false);
+              bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
             }}
             title="Jump to latest"
             aria-label="Jump to latest"
