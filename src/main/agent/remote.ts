@@ -373,21 +373,12 @@ async function* streamRemoteEvents(remote: RemoteProcess): AsyncGenerator<AgentE
 
 function parseRemoteMessage(msg: any): AgentEvent | null {
   if (msg.type === 'message') {
-    return {
-      type: 'message',
-      payload: {
-        type: msg.msgType,
-        content: msg.content ?? '',
-        toolName: msg.toolName,
-        toolInput: msg.toolInput,
-        toolUseId: msg.toolUseId,
-        parentToolUseId: msg.parentToolUseId,
-        sessionId: msg.sessionId,
-        costUsd: msg.costUsd,
-        inputTokens: msg.inputTokens,
-        outputTokens: msg.outputTokens,
-      },
-    };
+    // Construct discriminated union by msgType — each variant only exposes the
+    // fields it actually needs. Provider is responsible for sending matching
+    // shape; unknown msgType returns null (caller drops the message).
+    const payload = buildAgentMessagePayload(msg);
+    if (!payload) return null;
+    return { type: 'message', payload };
   }
 
   if (msg.type === 'status') {
@@ -429,4 +420,47 @@ function parseRemoteMessage(msg: any): AgentEvent | null {
   }
 
   return null;
+}
+
+/**
+ * Build a canonical `AgentMessage` from the raw wire payload's msgType.
+ * Returns null for unknown / unsupported msgType so callers can drop them
+ * cleanly instead of forwarding ill-shaped payloads to the renderer.
+ */
+function buildAgentMessagePayload(msg: any): import('./types').AgentMessage | null {
+  const t = msg.msgType;
+  switch (t) {
+    case 'text':
+    case 'thinking':
+    case 'intent':
+    case 'system':
+    case 'error':
+    case 'plan':
+      return { type: t, content: msg.content ?? '' };
+    case 'tool_use': {
+      if (!msg.toolUseId || !msg.toolName) return null;
+      const out: import('./types').AgentMessage = {
+        type: 'tool_use',
+        toolUseId: msg.toolUseId,
+        toolName: msg.toolName,
+        toolInput: msg.toolInput ?? {},
+      };
+      if (msg.result) out.result = msg.result;
+      return out;
+    }
+    case 'file_edit': {
+      if (!msg.toolUseId || !msg.filePath) return null;
+      const out: import('./types').AgentMessage = {
+        type: 'file_edit',
+        toolUseId: msg.toolUseId,
+        filePath: msg.filePath,
+      };
+      if (msg.diff) out.diff = msg.diff;
+      if (typeof msg.content === 'string') out.content = msg.content;
+      if (msg.result) out.result = msg.result;
+      return out;
+    }
+    default:
+      return null;
+  }
 }

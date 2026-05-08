@@ -15,6 +15,46 @@ export interface AgentPrefs {
   permissionMode?: string;
 }
 
+/**
+ * Canonical agent message types — single source of truth shared across
+ * agent-server (provider translation), main (IPC bridge), and renderer (UI).
+ * Discriminated union: each variant carries exactly the fields it needs.
+ *
+ * Wire ↔ renderer contract:
+ * - `tool_use` and `file_edit` carry a `toolUseId`; renderer upserts on this
+ *   id so a `tool.execution_complete` event arriving as a second `tool_use`
+ *   message replaces the original (now with `result` populated).
+ * - `result?` absent ⇒ pending; present ⇒ completed (success or error).
+ * - `plan` is consumed by a sticky panel before the message stream — never
+ *   reaches the per-message render switch.
+ *
+ * See `.agent/features/AGENT_VIEW_MSG_TYPE.md` for design rationale.
+ */
+export type AgentMessage =
+  | { type: 'text'; content: string }
+  | { type: 'thinking'; content: string }
+  | { type: 'intent'; content: string }
+  | { type: 'system'; content: string }
+  | { type: 'error'; content: string }
+  | { type: 'plan'; content: string }
+  | {
+      type: 'tool_use';
+      toolUseId: string;
+      toolName: string;
+      toolInput: Record<string, unknown>;
+      result?: { content: string; isError?: boolean };
+    }
+  | {
+      type: 'file_edit';
+      toolUseId: string;
+      filePath: string;
+      diff?: { oldString: string; newString: string };
+      content?: string;
+      result?: { success: boolean; error?: string };
+    };
+
+export type AgentMessageType = AgentMessage['type'];
+
 export type AgentDisplayMode = 'collapsed' | 'expanded' | 'hidden';
 
 export const AGENT_DISPLAY_KEYS: { key: string; label: string }[] = [

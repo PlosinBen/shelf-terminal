@@ -2864,6 +2864,47 @@ button {
   padding: 2px 0;
 }
 
+/* ── Intent (provider's "I'm about to do X" announce) ── */
+
+.agent-msg-intent {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 2px 8px;
+  margin: 2px 0;
+  font-size: 12px;
+  color: var(--text-muted);
+  border-left: 2px solid var(--border);
+  font-style: italic;
+}
+
+.agent-intent-marker {
+  color: var(--accent, #61afef);
+  font-style: normal;
+  flex-shrink: 0;
+}
+
+.agent-intent-content {
+  flex: 1;
+  word-break: break-word;
+}
+
+/* ── File edit result indicator (✓/✗ inline in card header) ── */
+
+.agent-tool-result-indicator {
+  font-weight: bold;
+  font-size: 12px;
+  margin-left: 4px;
+}
+
+.agent-tool-result-success {
+  color: #98c379;
+}
+
+.agent-tool-result-failure {
+  color: var(--error, #e06c75);
+}
+
 /* ── Agent Markdown ── */
 
 .agent-markdown {

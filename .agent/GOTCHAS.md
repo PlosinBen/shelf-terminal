@@ -447,3 +447,50 @@ CLI 的預設邏輯**到底看什麼沒驗證**（binary 是 Bun 編譯的 nativ
 - 上游 issue（含詳細 root cause + 解法草案）: https://github.com/anthropics/claude-code/issues/50518
 - 同主題的 client 端 workaround PR（已 closed，未 merge）: https://github.com/agentclientprotocol/claude-agent-acp/pull/568
 - 截至 2026-05 為止 issue 仍 OPEN、無任何 Anthropic 回應、無 triage label。**不要寄望短期內修復**。日後想知道現況時，先點上面 issue link 看有沒有新留言／關閉。
+
+---
+
+## Copilot SDK: `usedRequests` 永遠 ≤ entitlement，超出量在 `overage` 欄位
+
+**現象**: 月配額用爆，UI 上 `premium: 100%` 死卡，怎麼跑都不會跳到 200%／300%。Type def `AssistantUsageQuotaSnapshot` 寫 `usedRequests: Number of requests already consumed`，看起來應該反映真實使用量。
+
+**原因**: 看 `node_modules/@github/copilot/app.js` 的 quota normalization：
+
+```js
+let s = n ? 0 : Math.round(Math.max(0, o*(1-r/100)));
+//      usedRequests = entitlement * (1 - percent_remaining/100)
+return { entitlementRequests: o, usedRequests: s, overage: t.overage_count ?? 0, ... }
+```
+
+CLI 把上游 API 的 `percent_remaining`（自然 cap 在 0-100）反推回 `usedRequests`，所以 `usedRequests` 數學上就 ≤ `entitlementRequests`。**真實的超量計數是 `overage` 這個獨立欄位**（從 API 的 `overage_count` 來），SDK type def 也寫了「Number of requests over the entitlement limit」。
+
+**解法**: utilization 改算 `(usedRequests + overage) / entitlementRequests`。覆蓋測試在 `agent-server/providers/copilot.test.ts`「shows overage above 100%」+「renders extreme overage like 255%」。
+
+**不要做**:
+- 不要回去用 `usedRequests / entitlementRequests` — 永遠 cap 100%
+- 不要用 `1 - remainingPercentage` — 上游 API 也 cap 100%（`percent_remaining` 不會負數）
+- entitlement = 0（unlimited 或缺資料）的 case 要 short-circuit return `null`，現在 code 已處理 — 不要刪掉 `isUnlimitedEntitlement` 檢查
+
+---
+
+## Copilot `apply_patch` tool 的 args 是裸 string，不是 object
+
+**現象**: 想為 Copilot 的 file mutation tool 做差異化 UI（diff 預覽），照其他 tool 慣例去 `event.data.arguments.file_path` / `.old_string` 等欄位拿不到資料。trace 印出來看到 `arguments` 整個就是一坨字串，長這樣：
+
+```
+*** Begin Patch
+*** Update File: /path/to/file.md
+@@
+-# Old
++# New
+*** End Patch
+```
+
+**原因**: Copilot CLI 把所有檔案異動（Update / Add / Delete）統一走 `apply_patch` tool，args 是 unified diff 格式的字串。跟其他 tool 用 JSON object args（`view`/`bash`/`report_intent` 等）不一致，type def 沒寫清楚。
+
+**解法**: `agent-server/providers/copilot.ts` 的 `parseApplyPatch()` 只支援單檔 + 單 hunk 的 Update / Add（共識最常見的情況），multi-hunk / multi-file / Delete / 解析失敗都 fallback 成 generic `tool_use`（顯示 raw patch string 不漂亮但不會壞）。
+
+**不要做**:
+- 不要假設 `apply_patch` args 是 object — 永遠先 `typeof args === 'string'` 檢查
+- 不要為了支援 multi-hunk 寫太複雜的 parser — Copilot 的實際使用 99% 是單 hunk，邊界 case fallback 就好。要擴的話寫 fixture-based test 一個個 case 加
+- 不要把 raw patch string 當 toolInput 餵渲染端 — `parseApplyPatch` parse 失敗時 wrap 成 `{ patch: <raw> }` object，避免 renderer 對 toolInput 做 `Object.values(...)` 之類操作 crash

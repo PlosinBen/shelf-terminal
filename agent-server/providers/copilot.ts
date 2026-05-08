@@ -15,14 +15,18 @@ const COPILOT_QUOTA_LABELS: Record<string, string> = {
 /**
  * Convert a Copilot `AssistantUsageQuotaSnapshot` to a `StatusSegment`.
  *
- * GitHub's `remainingPercentage` is documented as 0.0–1.0 (clamped), so
- * `1 - remainingPercentage` saturates at 100% even when the user is in
- * overage. Prefer `usedRequests / entitlementRequests` (which can exceed
- * 1.0) so overage like 120% surfaces in the status bar — see DECISIONS #47
- * "100% 不 cap — overage 真實顯示成 120%".
+ * Field semantics (verified against `node_modules/@github/copilot/app.js`):
+ * - `usedRequests` is *derived* from `entitlement * (1 - percent_remaining)`
+ *   so it saturates at `entitlementRequests` and CANNOT itself surface
+ *   overage. Using only this field gives a hard 100% ceiling.
+ * - `overage` is a separate counter for requests beyond the entitlement
+ *   (the upstream API returns it as `overage_count` on `chat`/`premium_interactions`/etc.).
  *
- * Returns `null` when the snapshot should be skipped (unlimited entitlement,
- * or insufficient data).
+ * → utilization = (usedRequests + overage) / entitlementRequests, so 25
+ * overage on a 10-request quota correctly renders 350%.
+ *
+ * Returns `null` for unlimited entitlements (no meaningful quota %) or when
+ * we can't form a denominator.
  */
 export function quotaSnapshotToSegment(
   key: string,
@@ -34,7 +38,8 @@ export function quotaSnapshotToSegment(
   if (typeof snap.entitlementRequests === 'number'
     && snap.entitlementRequests > 0
     && typeof snap.usedRequests === 'number') {
-    u = Math.max(0, snap.usedRequests / snap.entitlementRequests);
+    const overage = typeof snap.overage === 'number' ? Math.max(0, snap.overage) : 0;
+    u = Math.max(0, (snap.usedRequests + overage) / snap.entitlementRequests);
   } else if (typeof snap.remainingPercentage === 'number') {
     // Fallback when request counts are missing — caps at 100% (SDK quirk).
     u = Math.max(0, 1 - snap.remainingPercentage);
@@ -55,6 +60,77 @@ export function quotaSnapshotToSegment(
 }
 
 const execFileP = promisify(execFile);
+
+/**
+ * In-flight tool calls awaiting their `tool.execution_complete` event.
+ * Mirrors the Claude provider's pattern: keyed by toolCallId, stores enough
+ * to re-emit the same canonical message with `result` populated when complete.
+ */
+type InflightToolUseEntry =
+  | { kind: 'tool_use'; toolName: string; toolInput: Record<string, unknown> }
+  | { kind: 'file_edit'; filePath: string; diff?: { oldString: string; newString: string }; content?: string };
+const inflightToolUses = new Map<string, InflightToolUseEntry>();
+
+/**
+ * Parse Copilot's `apply_patch` raw-string args into a normalized file_edit
+ * payload. Only handles single-file + single-hunk Update/Add — the common
+ * case. Returns null for multi-file, multi-hunk, Delete, or any malformed
+ * input; caller should fall back to a generic `tool_use` card.
+ */
+export function parseApplyPatch(patch: string): {
+  kind: 'update' | 'add';
+  filePath: string;
+  diff?: { oldString: string; newString: string };
+  content?: string;
+} | null {
+  if (typeof patch !== 'string') return null;
+  // Strip outer Begin/End Patch markers.
+  const begin = patch.indexOf('*** Begin Patch');
+  const end = patch.indexOf('*** End Patch');
+  if (begin < 0 || end < 0 || end < begin) return null;
+  const inner = patch.slice(begin + '*** Begin Patch'.length, end).replace(/^\s*\n/, '').replace(/\n\s*$/, '');
+
+  // Reject multi-file by counting file markers.
+  const fileMarkers = inner.match(/\*\*\*\s+(Update|Add|Delete)\s+File:/g);
+  if (!fileMarkers || fileMarkers.length !== 1) return null;
+  if (fileMarkers[0].includes('Delete')) return null;
+
+  const updateMatch = inner.match(/^\*\*\*\s+Update File:\s*(.+?)\s*\n@@\s*\n([\s\S]*)$/);
+  if (updateMatch) {
+    const [, filePath, body] = updateMatch;
+    // Reject multi-hunk (another @@ separator inside the body).
+    if (body.split('\n').some((l) => l.trim() === '@@')) return null;
+    const oldLines: string[] = [];
+    const newLines: string[] = [];
+    for (const line of body.split('\n')) {
+      if (line.startsWith('+')) newLines.push(line.slice(1));
+      else if (line.startsWith('-')) oldLines.push(line.slice(1));
+      else if (line.startsWith(' ')) {
+        const c = line.slice(1);
+        oldLines.push(c);
+        newLines.push(c);
+      }
+      // Trailing empty / unknown lines: ignored.
+    }
+    return {
+      kind: 'update',
+      filePath: filePath.trim(),
+      diff: { oldString: oldLines.join('\n'), newString: newLines.join('\n') },
+    };
+  }
+
+  const addMatch = inner.match(/^\*\*\*\s+Add File:\s*(.+?)\s*\n([\s\S]*)$/);
+  if (addMatch) {
+    const [, filePath, body] = addMatch;
+    const lines: string[] = [];
+    for (const line of body.split('\n')) {
+      if (line.startsWith('+')) lines.push(line.slice(1));
+    }
+    return { kind: 'add', filePath: filePath.trim(), content: lines.join('\n') };
+  }
+
+  return null;
+}
 
 async function readGhToken(): Promise<string | undefined> {
   try {
@@ -325,45 +401,98 @@ export function createCopilotBackend(): ServerBackend {
           break;
         case 'tool.execution_start': {
           const toolName = event.data?.toolName ?? 'unknown';
-          // Copilot's `task_complete` tool is its end-of-turn signal — args
-          // carry the assistant's final response. Render as a regular text
-          // message; skip the matching tool_result event below.
+          const args = event.data?.arguments ?? {};
+          const toolUseId = event.data?.toolCallId ?? '';
+
+          // `task_complete` is end-of-turn signal — args.summary carries the
+          // assistant's final reply. Render as text, skip matching result.
           if (toolName === 'task_complete') {
-            // [copilot-task-complete-trace] log args shape so we know the right
-            // field. Remove once confirmed.
-            try { console.error('[copilot-task-complete-trace]', JSON.stringify(event.data?.arguments ?? {}, null, 2)); } catch { /* ignore */ }
-            const args = event.data?.arguments ?? {};
-            const text = args.text ?? args.message ?? args.summary ?? args.content ?? '';
+            const text = args.summary ?? args.text ?? args.message ?? args.content ?? '';
             if (text) currentSend({ type: 'message', msgType: 'text', content: text });
             break;
           }
+
+          // `report_intent` announces "I'm about to do X" — render as intent line,
+          // skip matching result. args.intent is a string.
+          if (toolName === 'report_intent') {
+            if (typeof args.intent === 'string' && args.intent.length > 0) {
+              currentSend({ type: 'message', msgType: 'intent', content: args.intent });
+            }
+            break;
+          }
+
+          // `apply_patch` carries a raw unified-diff string (NOT object args).
+          // Try to normalize into canonical file_edit; fall through to generic
+          // tool_use for anything we can't parse (multi-file, multi-hunk,
+          // Delete, malformed).
+          if (toolName === 'apply_patch' && typeof args === 'string') {
+            const parsed = parseApplyPatch(args);
+            if (parsed) {
+              const entry: InflightToolUseEntry = parsed.kind === 'update'
+                ? { kind: 'file_edit', filePath: parsed.filePath, diff: parsed.diff }
+                : { kind: 'file_edit', filePath: parsed.filePath, content: parsed.content };
+              inflightToolUses.set(toolUseId, entry);
+              currentSend({
+                type: 'message', msgType: 'file_edit',
+                toolUseId,
+                filePath: parsed.filePath,
+                ...(parsed.diff ? { diff: parsed.diff } : {}),
+                ...(parsed.content !== undefined ? { content: parsed.content } : {}),
+              });
+              break;
+            }
+          }
+
+          // Generic tool_use path. For apply_patch fallback we wrap the raw
+          // string into a `{ patch }` toolInput so the renderer's generic card
+          // has something to display.
+          const toolInput: Record<string, unknown> = typeof args === 'string'
+            ? { patch: args }
+            : args;
+          inflightToolUses.set(toolUseId, { kind: 'tool_use', toolName, toolInput });
           currentSend({
-            type: 'message', msgType: 'tool_use', content: '',
+            type: 'message', msgType: 'tool_use',
+            toolUseId,
             toolName,
-            toolInput: event.data?.arguments ?? {},
-            toolUseId: event.data?.toolCallId ?? '',
+            toolInput,
           });
           break;
         }
         case 'tool.execution_complete': {
           const data = event.data ?? {};
-          // Skip task_complete's result event — its tool_use was suppressed
-          // (rendered as plain text), so the matching result has nothing to attach to.
-          if (data.toolName === 'task_complete') break;
-          // Use `content` (concise, what the LLM sees) rather than
-          // `detailedContent` (SDK-side rich UI, returns reads as fake
-          // unified diffs). The renderer reconstructs edit visuals from
-          // toolInput, so we don't need detailedContent's diff fidelity.
+          const toolUseId = data.toolCallId ?? '';
+          // task_complete / report_intent had their tool_use suppressed (rendered
+          // as text/intent), so no inflight entry — skip silently.
+          const entry = inflightToolUses.get(toolUseId);
+          if (!entry) break;
+          inflightToolUses.delete(toolUseId);
+
           const isError = data.success === false;
-          const text = isError
-            ? `Error: ${data.error?.message ?? 'tool failed'}`
-            : (data.result?.content ?? '');
-          currentSend({
-            type: 'message', msgType: 'tool_result',
-            content: text.slice(0, 8000),
-            toolUseId: data.toolCallId ?? '',
-            isError,
-          });
+          if (entry.kind === 'file_edit') {
+            currentSend({
+              type: 'message', msgType: 'file_edit',
+              toolUseId,
+              filePath: entry.filePath,
+              ...(entry.diff ? { diff: entry.diff } : {}),
+              ...(entry.content !== undefined ? { content: entry.content } : {}),
+              result: isError
+                ? { success: false, error: data.error?.message ?? 'edit failed' }
+                : { success: true },
+            });
+          } else {
+            // Use `content` (concise, what the LLM sees) over `detailedContent`
+            // (SDK-side rich UI returning reads as fake unified diffs).
+            const text = isError
+              ? `Error: ${data.error?.message ?? 'tool failed'}`
+              : (data.result?.content ?? '');
+            currentSend({
+              type: 'message', msgType: 'tool_use',
+              toolUseId,
+              toolName: entry.toolName,
+              toolInput: entry.toolInput,
+              result: { content: String(text).slice(0, 8000), ...(isError ? { isError: true } : {}) },
+            });
+          }
           break;
         }
         case 'assistant.usage': {
@@ -411,10 +540,30 @@ export function createCopilotBackend(): ServerBackend {
           // Debounced fetch — multiple rapid changes coalesce into one read.
           schedulePlanRead();
           break;
-        case 'session.error':
+        case 'session.error': {
+          // ErrorData fields: message, errorType, errorCode, httpStatus,
+          // providerCallId, stack. Compose a human-readable string from
+          // whatever's present so the UI never shows "Unknown error".
+          const data = event.data ?? {};
+          const parts: string[] = [];
+          if (data.errorType) parts.push(`[${data.errorType}]`);
+          parts.push(data.message ?? 'Session error');
+          if (data.httpStatus) parts.push(`(HTTP ${data.httpStatus})`);
+          if (data.errorCode) parts.push(`code=${data.errorCode}`);
+          currentSend({ type: 'error', error: parts.join(' ') });
+          break;
+        }
         case 'model.call_failure': {
-          const msg = event.data?.message ?? event.data?.error ?? 'Unknown error';
-          currentSend({ type: 'error', error: typeof msg === 'string' ? msg : JSON.stringify(msg) });
+          // ModelCallFailureData uses `errorMessage` (NOT `message`); previous
+          // code looked for `message`/`error` and always fell through to
+          // "Unknown error". Surface statusCode + model to make these useful
+          // for debugging.
+          const data = event.data ?? {};
+          const parts: string[] = ['Model call failed'];
+          if (data.errorMessage) parts.push(`— ${data.errorMessage}`);
+          if (data.statusCode) parts.push(`(HTTP ${data.statusCode})`);
+          if (data.model) parts.push(`[${data.model}]`);
+          currentSend({ type: 'error', error: parts.join(' ') });
           break;
         }
       }
@@ -432,7 +581,7 @@ export function createCopilotBackend(): ServerBackend {
         const result = await (state.session as any).rpc.plan.read();
         currentSend({
           type: 'message',
-          msgType: 'plan_update',
+          msgType: 'plan',
           content: result?.exists ? (result.content ?? '') : '',
         });
       } catch { /* ignore */ }
@@ -548,6 +697,7 @@ export function createCopilotBackend(): ServerBackend {
       state.session = null;
       state.cliSessionId = null;
       latestUsage = null;
+      inflightToolUses.clear();
     },
 
     resolvePermission(toolUseId: string, allow: boolean, message?: string, scope?: 'once' | 'session') {
@@ -621,7 +771,8 @@ export function createCopilotBackend(): ServerBackend {
           state.session = null;
           state.cliSessionId = null;
           latestUsage = null;
-          currentSend?.({ type: 'message', msgType: 'plan_update', content: '' });
+          inflightToolUses.clear();
+          currentSend?.({ type: 'message', msgType: 'plan', content: '' });
           return { type: 'context-cleared', message: 'Context cleared' };
         }
 

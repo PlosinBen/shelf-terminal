@@ -110,7 +110,8 @@
 | Tooltip 快捷鍵 helper | `utils/format-keybinding.ts` | 純函式 `formatCombo(combo, isMac)` / `tooltipWithShortcut(label, combo, isMac)`；`useKeybindings.comboToLabel` 內部 delegate 到這裡 |
 | PM stream reducer | `components/pm-view-reducer.ts` | 純 reducer（`send_start` / `clear_display` / `dismiss_error` / `chunk`），管 streaming/streamText/streamToolCalls/error 四個 UI state；vitest 測 13 case |
 | Project 編輯面板 | `components/ProjectEditPanel.tsx` | 改名、init script、default tabs、quick commands 編輯、Clear uploaded files |
-| Agent UI 訊息持久化 | `storage/agent-history.ts` | IndexedDB（`idb@8.0.3`）存 UI messages keyed by sessionId；`loadAgentMessages()`、`saveAgentMessages()`、`clearAgentSession()` |
+| Agent UI 訊息持久化 | `storage/agent-history.ts` | IndexedDB（`idb@8.0.3`）存 UI messages keyed by sessionId；`loadAgentMessages()`、`saveAgentMessages()`、`clearAgentSession()`。Load 時 `reviveOrphanPending()` 把無 result 的 `tool_use`/`file_edit` 補成 failed result，避免重啟後假 pending 卡死 |
+| Canonical Agent message type | `src/shared/types.ts` (`AgentMessage`) | 9-variant discriminated union（`text`/`thinking`/`intent`/`tool_use`/`file_edit`/`plan`/`system`/`error`，加 renderer-only `user`），agent-server / main / renderer 三邊共用單一來源。`tool_use` 跟 `file_edit` 後到的同 `toolUseId` 訊息會 upsert（result 內嵌而非另發 `tool_result`）。設計細節見 `.agent/features/AGENT_VIEW_MSG_TYPE.md` |
 | 主題定義 | `themes.ts` | 5 個內建主題（terminal + UI 色彩） |
 | Window API 型別 | `env.d.ts` | `window.shelfApi` TypeScript 宣告 |
 | React entry | `main.tsx` | `createRoot` + `<App />` |

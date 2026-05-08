@@ -331,7 +331,8 @@ export function createClaudeBackend(): ServerBackend {
       // Just send the original input as a regular message — SDK intercepts.
       // We piggyback to clear the sticky plan panel when context is reset.
       if (cmd === 'clear') {
-        currentSend?.({ type: 'message', msgType: 'plan_update', content: '' });
+        currentSend?.({ type: 'message', msgType: 'plan', content: '' });
+        inflightToolUses.clear();
       }
       return { type: 'pass-through' };
     },
@@ -376,6 +377,101 @@ function dataUrlToImageBlock(dataUrl: string): { type: 'image'; source: { type: 
 let lastTurnUsage: { input_tokens: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number } | null = null;
 let lastTurnModel: string | null = null;
 
+/**
+ * In-flight tool calls awaiting their `tool_result` event. Keyed by toolUseId.
+ * Stores the canonical wire payload of the original `tool_use` / `file_edit`
+ * emit so we can re-emit the same shape with `result` populated when the
+ * matching tool_result arrives — renderer upserts by toolUseId, so the
+ * second message must carry the full payload, not just the result delta.
+ *
+ * Module-level is fine: one createClaudeBackend per agent-server process.
+ */
+type InflightToolUseEntry =
+  | { kind: 'tool_use'; toolName: string; toolInput: Record<string, unknown> }
+  | { kind: 'file_edit'; filePath: string; diff?: { oldString: string; newString: string }; content?: string };
+const inflightToolUses = new Map<string, InflightToolUseEntry>();
+
+/** Translate a Claude SDK `tool_use` block to either canonical `file_edit` or `tool_use`. */
+function emitClaudeToolUse(
+  send: SendFn,
+  block: { id: string; name: string; input: Record<string, unknown> },
+): void {
+  if (block.name === 'Edit') {
+    const input = block.input as { file_path?: string; old_string?: string; new_string?: string };
+    if (typeof input.file_path === 'string'
+      && typeof input.old_string === 'string'
+      && typeof input.new_string === 'string') {
+      const diff = { oldString: input.old_string, newString: input.new_string };
+      inflightToolUses.set(block.id, { kind: 'file_edit', filePath: input.file_path, diff });
+      send({
+        type: 'message', msgType: 'file_edit',
+        toolUseId: block.id,
+        filePath: input.file_path,
+        diff,
+      });
+      return;
+    }
+    // Malformed Edit — fall through to generic tool_use so we don't drop it.
+  }
+  if (block.name === 'Write') {
+    const input = block.input as { file_path?: string; content?: string };
+    if (typeof input.file_path === 'string' && typeof input.content === 'string') {
+      inflightToolUses.set(block.id, {
+        kind: 'file_edit', filePath: input.file_path, content: input.content,
+      });
+      send({
+        type: 'message', msgType: 'file_edit',
+        toolUseId: block.id,
+        filePath: input.file_path,
+        content: input.content,
+      });
+      return;
+    }
+    // Fall through.
+  }
+  inflightToolUses.set(block.id, {
+    kind: 'tool_use', toolName: block.name, toolInput: block.input,
+  });
+  send({
+    type: 'message', msgType: 'tool_use',
+    toolUseId: block.id,
+    toolName: block.name,
+    toolInput: block.input,
+  });
+}
+
+/** Re-emit the original tool_use/file_edit message with `result` populated. */
+function emitClaudeToolResult(
+  send: SendFn,
+  toolUseId: string,
+  content: string,
+  isError: boolean,
+): void {
+  const entry = inflightToolUses.get(toolUseId);
+  if (!entry) return;
+  inflightToolUses.delete(toolUseId);
+  if (entry.kind === 'file_edit') {
+    send({
+      type: 'message', msgType: 'file_edit',
+      toolUseId,
+      filePath: entry.filePath,
+      ...(entry.diff ? { diff: entry.diff } : {}),
+      ...(entry.content !== undefined ? { content: entry.content } : {}),
+      result: isError
+        ? { success: false, error: content }
+        : { success: true },
+    });
+  } else {
+    send({
+      type: 'message', msgType: 'tool_use',
+      toolUseId,
+      toolName: entry.toolName,
+      toolInput: entry.toolInput,
+      result: { content, ...(isError ? { isError: true } : {}) },
+    });
+  }
+}
+
 // Accumulate rate-limit buckets across events so we can always send the full
 // set to the UI.  Key = bucket label (e.g. '5h', '7d').
 const rateLimitBuckets = new Map<string, StatusSegment>();
@@ -385,15 +481,11 @@ function processMessage(msg: SDKMessage, send: SendFn) {
     case 'assistant': {
       for (const block of msg.message.content) {
         if (block.type === 'thinking') {
-          send({ type: 'message', msgType: 'thinking', content: block.thinking, sessionId: msg.session_id });
+          send({ type: 'message', msgType: 'thinking', content: block.thinking });
         } else if (block.type === 'text') {
-          send({ type: 'message', msgType: 'text', content: block.text, sessionId: msg.session_id });
+          send({ type: 'message', msgType: 'text', content: block.text });
         } else if (block.type === 'tool_use') {
-          send({
-            type: 'message', msgType: 'tool_use', content: '',
-            toolName: block.name, toolInput: block.input, toolUseId: block.id,
-            parentToolUseId: msg.parent_tool_use_id ?? undefined, sessionId: msg.session_id,
-          });
+          emitClaudeToolUse(send, { id: block.id, name: block.name, input: block.input as Record<string, unknown> });
           // Mirror plan-style tools into the sticky panel for parity with Copilot's plan API.
           // ExitPlanMode: initial plan submission; TodoWrite: ongoing task list updates.
           if (block.name === 'TodoWrite') {
@@ -404,12 +496,12 @@ function processMessage(msg: SDKMessage, send: SendFn) {
                 if (t.status === 'in_progress') return `- [~] ${t.activeForm ?? t.content}`;
                 return `- [ ] ${t.content}`;
               }).join('\n');
-              send({ type: 'message', msgType: 'plan_update', content: md });
+              send({ type: 'message', msgType: 'plan', content: md });
             }
           } else if (block.name === 'ExitPlanMode') {
             const plan = (block.input as any)?.plan;
             if (typeof plan === 'string') {
-              send({ type: 'message', msgType: 'plan_update', content: plan });
+              send({ type: 'message', msgType: 'plan', content: plan });
             }
           }
         }
@@ -452,13 +544,9 @@ function processMessage(msg: SDKMessage, send: SendFn) {
       if (Array.isArray(msg.message.content)) {
         for (const block of msg.message.content) {
           if ((block as any).type === 'tool_result') {
-            send({
-              type: 'message', msgType: 'tool_result',
-              content: typeof (block as any).content === 'string' ? (block as any).content : JSON.stringify((block as any).content ?? ''),
-              toolUseId: (block as any).tool_use_id,
-              isError: (block as any).is_error === true,
-              sessionId: msg.session_id,
-            });
+            const raw = (block as any).content;
+            const content = typeof raw === 'string' ? raw : JSON.stringify(raw ?? '');
+            emitClaudeToolResult(send, (block as any).tool_use_id, content, (block as any).is_error === true);
           }
         }
       }
@@ -482,14 +570,8 @@ function processMessage(msg: SDKMessage, send: SendFn) {
         }
       }
       lastTurnUsage = null;
-      send({
-        type: 'message', msgType: 'result',
-        content: isSuccess ? msg.result : (msg.errors?.join('\n') ?? 'Error'),
-        sessionId: msg.session_id,
-        costUsd: isSuccess ? msg.total_cost_usd : undefined,
-        inputTokens: isSuccess ? msg.usage?.input_tokens : undefined,
-        outputTokens: isSuccess ? msg.usage?.output_tokens : undefined,
-      });
+      // `result` msgType was a dead channel — token/cost data is sent via the
+      // status payload below; renderer never used the message form. Drop it.
       send({
         type: 'status', state: 'idle',
         costUsd: isSuccess ? msg.total_cost_usd : undefined,

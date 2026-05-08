@@ -1,4 +1,6 @@
-import type { AuthMethod, ProviderModel } from '@shared/types';
+import type { AgentMessage, AuthMethod, ProviderModel } from '@shared/types';
+
+export type { AgentMessage, AgentMessageType } from '@shared/types';
 
 export type AgentSessionState = 'idle' | 'streaming' | 'waiting_permission' | 'error';
 
@@ -19,19 +21,6 @@ export interface ModelInfo {
 export interface SlashCommand {
   name: string;
   description: string;
-}
-
-export interface AgentMessagePayload {
-  type: 'text' | 'thinking' | 'tool_use' | 'tool_result' | 'system' | 'result' | 'error';
-  content: string;
-  toolName?: string;
-  toolInput?: Record<string, unknown>;
-  toolUseId?: string;
-  parentToolUseId?: string;
-  sessionId?: string;
-  costUsd?: number;
-  inputTokens?: number;
-  outputTokens?: number;
 }
 
 export interface AgentStreamDelta {
@@ -87,7 +76,7 @@ export interface AgentQueryOptions {
 }
 
 export type AgentEvent =
-  | { type: 'message'; payload: AgentMessagePayload }
+  | { type: 'message'; payload: AgentMessage }
   | { type: 'stream'; payload: AgentStreamDelta }
   | { type: 'status'; payload: AgentStatusPayload }
   | { type: 'permission_request'; toolUseId: string; toolName: string; input: Record<string, unknown> }

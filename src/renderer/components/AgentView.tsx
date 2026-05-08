@@ -46,6 +46,60 @@ interface Props {
   visible: boolean;
 }
 
+let nextMsgIdCounter = 0;
+function freshMsgId(prefix: string): string {
+  nextMsgIdCounter += 1;
+  return `${prefix}-${Date.now()}-${nextMsgIdCounter}`;
+}
+
+/**
+ * Translate the canonical AgentMessage payload (from `@shared/types`) into the
+ * renderer-side `AgentMsg` variant. Unknown / malformed payloads return null
+ * so the caller can drop them. Provider field is attached when relevant for
+ * the assistant-text label.
+ */
+function buildAgentMsg(msg: any, provider: string): AgentMsg | null {
+  switch (msg.type) {
+    case 'text':
+      return { id: freshMsgId('msg'), type: 'text', content: msg.content ?? '', provider, timestamp: Date.now() };
+    case 'thinking':
+      return { id: freshMsgId('msg'), type: 'thinking', content: msg.content ?? '', provider, timestamp: Date.now() };
+    case 'intent':
+      return { id: freshMsgId('msg'), type: 'intent', content: msg.content ?? '', provider, timestamp: Date.now() };
+    case 'system':
+      return { id: freshMsgId('msg'), type: 'system', content: msg.content ?? '', provider, timestamp: Date.now() };
+    case 'error':
+      return { id: freshMsgId('err'), type: 'error', content: msg.content ?? 'Unknown error', provider, timestamp: Date.now() };
+    case 'tool_use':
+      if (!msg.toolUseId || !msg.toolName) return null;
+      return {
+        id: freshMsgId('msg'),
+        type: 'tool_use',
+        toolUseId: msg.toolUseId,
+        toolName: msg.toolName,
+        toolInput: msg.toolInput ?? {},
+        ...(msg.result ? { result: msg.result } : {}),
+        provider,
+        timestamp: Date.now(),
+      };
+    case 'file_edit':
+      if (!msg.toolUseId || !msg.filePath) return null;
+      return {
+        id: freshMsgId('msg'),
+        type: 'file_edit',
+        toolUseId: msg.toolUseId,
+        filePath: msg.filePath,
+        ...(msg.diff ? { diff: msg.diff } : {}),
+        ...(typeof msg.content === 'string' ? { content: msg.content } : {}),
+        ...(msg.result ? { result: msg.result } : {}),
+        provider,
+        timestamp: Date.now(),
+      };
+    default:
+      return null;
+  }
+}
+
 export function AgentView({ tabId, cwd, connection, provider, projectIndex, visible }: Props) {
   const { projects, settings, chatStage } = useStore();
   const savedPrefs = projects[projectIndex]?.config.agentPrefs?.[provider];
@@ -164,18 +218,11 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
     if (initializedRef.current) return;
     initializedRef.current = true;
     window.shelfApi.agent.init(tabId, cwd, connection, provider, sessionId);
-    // Sync saved prefs to backend. Without this, the renderer remembers e.g.
-    // permissionMode='bypassPermissions' across launches, but the backend's
-    // currentPermissionMode stays null until the user explicitly cycles —
-    // so the first turn after launch still triggers the permission popup.
-    const prefs: Record<string, string> = {};
-    if (savedPrefs?.model) prefs.model = savedPrefs.model;
-    if (savedPrefs?.effort) prefs.effort = savedPrefs.effort;
-    if (savedPrefs?.permissionMode) prefs.permissionMode = savedPrefs.permissionMode;
-    if (Object.keys(prefs).length > 0) {
-      window.shelfApi.agent.setPrefs(tabId, prefs);
-    }
-  }, [tabId, cwd, connection, provider, sessionId, savedPrefs]);
+    // Saved prefs are reconciled in the capabilities listener below — that
+    // fires on first launch *and* after every reconnect/reset, whereas this
+    // effect only runs once. Single source of truth for the "renderer wants
+    // X but a fresh backend defaults to Y" drift.
+  }, [tabId, cwd, connection, provider, sessionId]);
 
   // Load UI messages from IndexedDB
   useEffect(() => {
@@ -199,16 +246,39 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
   }, [sessionId, settings.agentHistoryMaxMessages]);
 
   // Capabilities listener
+  //
+  // Capabilities arrive after every backend (re)connect — first launch, after
+  // `handleReset` re-spawn, after credential flow, etc. We use this as the
+  // canonical sync point for saved prefs vs. backend defaults:
+  //
+  // - savedPrefs win over `caps.currentXxx` (caps reflect a *fresh* backend
+  //   that doesn't know about the user's previous choices yet)
+  // - any drift between savedPrefs and caps gets pushed back to the backend
+  //   via `setPrefs`, otherwise e.g. bypassPermissions saved in projectConfig
+  //   would silently degrade to "default" after a reset
   useEffect(() => {
     const off = window.shelfApi.agent.onCapabilities((id: string, caps: any) => {
       if (id !== tabId) return;
       setCapabilities(caps);
-      if (caps.currentModel) setStatusModel(caps.currentModel);
-      if (caps.currentPermissionMode) setPermissionMode(caps.currentPermissionMode);
-      if (caps.currentEffort) setCurrentEffort(caps.currentEffort);
+      if (savedPrefs?.model) setStatusModel(savedPrefs.model);
+      else if (caps.currentModel) setStatusModel(caps.currentModel);
+      if (savedPrefs?.permissionMode) setPermissionMode(savedPrefs.permissionMode);
+      else if (caps.currentPermissionMode) setPermissionMode(caps.currentPermissionMode);
+      if (savedPrefs?.effort) setCurrentEffort(savedPrefs.effort);
+      else if (caps.currentEffort) setCurrentEffort(caps.currentEffort);
+
+      const drift: Record<string, string> = {};
+      if (savedPrefs?.model && savedPrefs.model !== caps.currentModel) drift.model = savedPrefs.model;
+      if (savedPrefs?.effort && savedPrefs.effort !== caps.currentEffort) drift.effort = savedPrefs.effort;
+      if (savedPrefs?.permissionMode && savedPrefs.permissionMode !== caps.currentPermissionMode) {
+        drift.permissionMode = savedPrefs.permissionMode;
+      }
+      if (Object.keys(drift).length > 0) {
+        window.shelfApi.agent.setPrefs(tabId, drift);
+      }
     });
     return off;
-  }, [tabId]);
+  }, [tabId, savedPrefs]);
 
   // Permission request listener
   useEffect(() => {
@@ -233,62 +303,52 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
   useEffect(() => {
     const offMessage = window.shelfApi.agent.onMessage((id: string, msg: any) => {
       if (id !== tabId) return;
-      if (msg.type === 'error') {
-        setMessages((prev) => [...prev, {
-          id: `err-${Date.now()}`, type: 'error', content: msg.content, timestamp: Date.now(),
-        }]);
-        return;
-      }
-      if (msg.type === 'result') return;
-      if (msg.type === 'plan_update') {
+
+      // `plan` is consumed by the sticky panel — never enters the timeline.
+      if (msg.type === 'plan') {
         setCurrentPlan(msg.content ?? '');
         return;
       }
 
-      const newMsg: AgentMsg = {
-        id: `msg-${Date.now()}-${Math.random()}`,
-        type: msg.type === 'tool_use' ? 'tool_use' : msg.type === 'tool_result' ? 'tool_result' : msg.type === 'text' ? 'assistant' : msg.type === 'thinking' ? 'thinking' : 'system',
-        content: msg.content,
-        toolName: msg.toolName,
-        toolInput: msg.toolInput,
-        toolUseId: msg.toolUseId,
-        provider,
-        timestamp: Date.now(),
-      };
+      // Build the renderer-side AgentMsg variant from the canonical shape.
+      // Each variant carries only the fields it needs (see AgentMsg type).
+      const built = buildAgentMsg(msg, provider);
+      if (!built) return;
 
-      // Attach tool_result to its matching tool_use
-      if (msg.type === 'tool_result' && msg.toolUseId) {
+      // tool_use / file_edit upsert by toolUseId — when provider re-emits the
+      // same toolUseId with `result` populated, we replace the in-flight entry
+      // rather than appending a second card.
+      if ((built.type === 'tool_use' || built.type === 'file_edit') && built.toolUseId) {
+        const upsertId = built.toolUseId;
         setMessages((prev) => {
-          const updated = [...prev];
-          for (let i = updated.length - 1; i >= 0; i--) {
-            if (updated[i].type === 'tool_use' && updated[i].toolUseId === msg.toolUseId) {
-              updated[i] = { ...updated[i], toolResult: msg.content, toolResultIsError: msg.isError === true };
-              return updated;
+          for (let i = prev.length - 1; i >= 0; i--) {
+            const m = prev[i];
+            if ((m.type === 'tool_use' || m.type === 'file_edit') && m.toolUseId === upsertId) {
+              const next = prev.slice();
+              next[i] = { ...built, id: m.id, timestamp: m.timestamp };
+              return next;
             }
           }
-          return [...prev, newMsg];
+          return [...prev, built];
         });
         return;
       }
 
-      // A text/thinking message with content supersedes the corresponding
-      // streaming buffer (provider already streamed deltas, then sent the
-      // assembled block). Clear the buffer to avoid the idle handler flushing
-      // it as a duplicate message. Empty content is dropped — with
-      // includePartialMessages: true the SDK sometimes emits empty assembled
-      // blocks; in that case we keep the streaming buffer and let the idle
-      // handler flush it on turn end.
-      const hasContent = typeof msg.content === 'string' && msg.content.length > 0;
-      if (msg.type === 'text') {
+      // text/thinking with non-empty content supersede their streaming buffer
+      // (provider already streamed deltas, then sent the assembled block).
+      // Empty assembled blocks happen with includePartialMessages — keep the
+      // streaming buffer and let the idle handler flush it.
+      const hasContent = (built.type === 'text' || built.type === 'thinking') && built.content.length > 0;
+      if (built.type === 'text') {
         if (!hasContent) return;
         setStreamText('');
       }
-      if (msg.type === 'thinking') {
+      if (built.type === 'thinking') {
         if (!hasContent) return;
         setStreamThinking('');
       }
 
-      setMessages((prev) => [...prev, newMsg]);
+      setMessages((prev) => [...prev, built]);
     });
 
     const offStream = window.shelfApi.agent.onStream((id: string, chunk: any) => {
@@ -316,7 +376,7 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
           setStreamText((prev) => {
             if (prev.trim()) {
               setMessages((msgs) => [...msgs, {
-                id: `stream-${Date.now()}`, type: 'assistant', content: prev, provider, timestamp: Date.now(),
+                id: `stream-${Date.now()}`, type: 'text', content: prev, provider, timestamp: Date.now(),
               }]);
             }
             return '';

@@ -30,15 +30,32 @@ function getDB(): Promise<IDBPDatabase> {
   return dbPromise;
 }
 
-interface StoredMsg extends AgentMsg {
-  dbId?: number;
-  sessionId: string;
+// AgentMsg is a discriminated union — TS interfaces can't extend unions, so
+// use an intersection type. dbId/sessionId are non-discriminating so the
+// extension is shape-safe.
+type StoredMsg = AgentMsg & { dbId?: number; sessionId: string };
+
+/**
+ * If we crashed / were closed mid-tool-call, an in-flight `tool_use` or
+ * `file_edit` would have been persisted without a `result`. On reload, that
+ * card would render forever as "running" with no agent-server to ever
+ * complete it. Patch a synthetic failed result so the user sees what
+ * happened instead of a fake pending state.
+ */
+function reviveOrphanPending(msg: AgentMsg): AgentMsg {
+  if (msg.type === 'tool_use' && !msg.result) {
+    return { ...msg, result: { content: 'Session ended before this tool finished.', isError: true } };
+  }
+  if (msg.type === 'file_edit' && !msg.result) {
+    return { ...msg, result: { success: false, error: 'Session ended before this edit finished.' } };
+  }
+  return msg;
 }
 
 export async function loadAgentMessages(sessionId: string): Promise<AgentMsg[]> {
   const db = await getDB();
   const all: StoredMsg[] = await db.getAllFromIndex(STORE_NAME, 'by-session', sessionId);
-  return all.map(({ dbId: _, sessionId: __, ...msg }) => msg as AgentMsg);
+  return all.map(({ dbId: _, sessionId: __, ...msg }) => reviveOrphanPending(msg as AgentMsg));
 }
 
 // Default cap if caller doesn't pass one. Mirrors AppSettings default
