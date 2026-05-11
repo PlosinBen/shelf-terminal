@@ -24,17 +24,93 @@ export function formatResetCountdown(resetsAtMs: number): string | null {
 import type { ProviderModel } from '../../src/shared/types';
 import type { PersistedContext } from '../context-store';
 
-export type OutgoingMessage = {
-  type: 'message' | 'stream' | 'status' | 'error' | 'pong' | 'ready' | 'capabilities' | 'auth_required' | 'permission_request'
-    | 'credential_stored' | 'credential_cleared' | 'slash_result'
-    /**
-     * Internal: provider asks orchestrator to merge `patch` into the persisted
-     * context for this session. Intercepted by `agent-server/index.ts` and NOT
-     * forwarded to the main process — providers stay decoupled from disk I/O.
-     */
-    | 'context_patch';
-  [key: string]: unknown;
-};
+/**
+ * Envelope present on every outgoing message produced inside a turn. Lifecycle
+ * messages (`ready`, `pong`, `capabilities`, `credential_*`, `slash_result`)
+ * are emitted outside any turn and intentionally omit `turnId`. Main side
+ * routes per-turn events back to AsyncIterators by this id; lifecycle is
+ * dispatched separately.
+ */
+export interface WireEnvelope {
+  turnId?: string;
+}
+
+/** Top-level discriminator for canonical conversation messages in the timeline. */
+export type CanonicalMsgType =
+  | 'text' | 'thinking' | 'intent' | 'system' | 'error' | 'plan'
+  | 'tool_use' | 'file_edit';
+
+/**
+ * Outgoing wire message from agent-server to main. Each variant is a
+ * concrete discriminated shape — no `[key: string]: unknown` escape hatch.
+ * Adding a new wire event means adding a new variant here AND a matching
+ * parse case in `src/main/agent/remote.ts`.
+ */
+export type OutgoingMessage = WireEnvelope & (
+  // ── Lifecycle (no turnId) ────────────────────────────────────────────────
+  | { type: 'ready' }
+  | { type: 'pong' }
+  | ({ type: 'capabilities'; requestId: string; error?: string } & Partial<ProviderCapabilities> & {
+      currentModel?: string;
+      currentEffort?: string;
+      currentPermissionMode?: string;
+    })
+  | { type: 'credential_stored'; requestId: string; ok: boolean; error?: string }
+  | { type: 'credential_cleared'; requestId: string; ok: boolean; error?: string }
+  | { type: 'slash_result'; requestId: string; result: SlashResult }
+
+  // ── Per-turn control / status (turnId expected) ──────────────────────────
+  | {
+      type: 'status';
+      state: 'streaming' | 'idle';
+      model?: string;
+      sessionId?: string;
+      costUsd?: number;
+      inputTokens?: number;
+      outputTokens?: number;
+      numTurns?: number;
+      contextUsage?: StatusSegment;
+      rateLimits?: StatusSegment[];
+    }
+  | { type: 'error'; error: string }
+  | { type: 'auth_required'; provider: string }
+  | { type: 'permission_request'; toolUseId: string; toolName: string; input: Record<string, unknown> }
+  /**
+   * Internal: provider asks orchestrator to merge `patch` into the persisted
+   * context for this session. Intercepted by `agent-server/index.ts` and NOT
+   * forwarded to the main process — providers stay decoupled from disk I/O.
+   */
+  | { type: 'context_patch'; patch: Partial<PersistedContext> }
+
+  // ── Streaming (incremental text/thinking chunks) ─────────────────────────
+  | { type: 'stream'; streamType: 'text' | 'thinking'; content: string }
+
+  // ── Canonical conversation messages ──────────────────────────────────────
+  // Renderer-facing variants. Discriminated by `msgType`. Each variant only
+  // carries fields it actually needs (see .agent/features/AGENT_VIEW_MSG_TYPE.md
+  // "Canonical Message — Discriminated Union" for design rationale).
+  | { type: 'message'; msgType: 'text';     content: string }
+  | { type: 'message'; msgType: 'thinking'; content: string }
+  | { type: 'message'; msgType: 'intent';   content: string }
+  | { type: 'message'; msgType: 'system';   content: string }
+  | { type: 'message'; msgType: 'error';    content: string }
+  | { type: 'message'; msgType: 'plan';     content: string }
+  | {
+      type: 'message'; msgType: 'tool_use';
+      toolUseId: string;
+      toolName: string;
+      input: string;
+      result?: { content: string; isError?: boolean };
+    }
+  | {
+      type: 'message'; msgType: 'file_edit';
+      toolUseId: string;
+      filePath: string;
+      diff?: { oldString: string; newString: string };
+      content?: string;
+      result?: { success: boolean; error?: string };
+    }
+);
 
 export type SlashResult =
   | { type: 'show-model-picker'; models: { value: string; displayName: string; effortLevels?: CycleOption[]; vision?: boolean }[]; current: string }
