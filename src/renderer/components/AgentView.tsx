@@ -394,6 +394,9 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
       const nowStreaming = status.state === 'streaming';
       setIsStreaming((wasStreaming) => {
         if (wasStreaming && !nowStreaming) {
+          // Promote streaming buffers to persistent messages on turn end.
+          // Queue flush is handled by a separate useEffect (see below) so we
+          // don't put side effects inside this state-updater.
           setStreamThinking((prevThinking) => {
             if (prevThinking.trim()) {
               setMessages((msgs) => [...msgs, {
@@ -409,15 +412,6 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
               }]);
             }
             return '';
-          });
-          // Flush queued messages
-          setQueuedMessages((queue) => {
-            if (queue.length > 0) {
-              const next = queue[0];
-              setTimeout(() => window.shelfApi.agent.send(tabId, next.content), 50);
-              return queue.slice(1);
-            }
-            return queue;
           });
           // Persist UI messages after state settles
           if (sessionId) {
@@ -438,6 +432,24 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
 
     return () => { offMessage(); offStream(); offStatus(); };
   }, [tabId, provider]);
+
+  // Flush queued messages once the agent goes idle. Mirrors handleSend's
+  // exact path (push user bubble + clear streamText + agent.send) — the queued
+  // message becomes a regular user message on the next turn. Lives in its own
+  // useEffect (not inside the onStatus updater) to avoid side effects in a
+  // state updater and to give agent-server one tick to settle before the
+  // next IPC.AGENT_SEND fires.
+  useEffect(() => {
+    if (isStreaming) return;
+    if (queuedMessages.length === 0) return;
+    const next = queuedMessages[0];
+    setQueuedMessages((q) => q.slice(1));
+    setMessages((prev) => [...prev, {
+      id: `user-${Date.now()}`, type: 'user', content: next.content, timestamp: Date.now(),
+    }]);
+    setStreamText('');
+    window.shelfApi.agent.send(tabId, next.content);
+  }, [isStreaming, queuedMessages, tabId]);
 
   // Track user intent only on user-driven scroll inputs. We deliberately
   // ignore the generic `scroll` event because programmatic scrollIntoView

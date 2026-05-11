@@ -579,3 +579,29 @@ Dev mode 沒事是因為路徑是 `node_modules/@github/copilot/...`，不含 `a
 - 不要 patch `app.js` 把那兩條 replace 改掉 — 每次 npm install 要 reapply，npm update 會蓋掉，brittle
 - 不要建 `app.asar.unpacked.unpacked` symlink 騙 buggy code — code-signing 可能踩 symlink，notarization 不穩
 - 不要把 `@github/copilot-darwin-*` / `-linux-*` / `-win32-*` 拉進來 — 那是給 standalone `npm install -g @github/copilot` 用的 platform-specific binary，SDK 模式下根本不會載入（loader index.js 只 import 同目錄的 app.js）
+
+---
+
+## Queued message flush — claude provider 每 turn 只能發一次 `state: 'idle'`
+
+**現象**: Agent streaming 中送下一則訊息（UI 顯示 queued），等 turn 1 跑完。Queued 訊息的 user bubble 出現在 timeline，但 agent 完全沒回應。再手動送下一則訊息才會看到原本 queued 那輪的回應遲遲補上。
+
+**根因**: `agent-server/providers/claude.ts` 一個 `query()` 會發**兩次** `state: 'idle'`：
+1. `processMessage` 處理 SDK `result` message 時發（line ~678，帶 cost/tokens）
+2. `finally` block 兜底再發一次（line ~299）
+
+`src/main/agent/remote.ts` 的 `streamRemoteEvents` 用單一 `lineHandler` setter（**每個 query 上來會覆寫**，不是 multi-listener）。Queue flush 場景時間軸：
+- T0: turn 1 result handler 發第一個 idle → main `lineHandler1` 收到 → `done=true` → for-await1 結束
+- T0+~100ms: 走完 main finally + renderer flush useEffect + agent.send IPC → main `sendMessage2` 開始 → `streamRemoteEvents2` 設新的 `lineHandler2`
+- T0+~300ms: turn 1 claude.ts 的 `finally` 才執行到，發**第二個** idle
+- 此時 `lineHandler2` 已上線 → 把這個「跨 turn 殘留 idle」當作 turn 2 的 idle → for-await2 立刻結束 → 後續 turn 2 真正的 SDK events（system:init / stream_event / assistant / result）沒人讀
+
+手動間隔送（>1s）不會踩到，因為第二個 idle 落在兩個 turn 之間的空窗。**Queue flush 緊湊送（~50-100ms）剛好踩進時間窗**。
+
+**解法**: claude.ts `query()` 開頭包一層 `dedupSend`，第一個 `state: 'idle'` 過了就丟掉後續同類事件。`processMessage` / catch / finally 都改用 `dedupSend`。
+
+**深層問題還沒解**: `remote.ts` 的 single-lineHandler 設計本身脆弱 — 沒有 turn-id / sessionId routing，任何「跨 turn 殘留 event」都會被下一個 turn 的 handler 吃掉。徹底修法是 protocol 層每個 event 帶 sessionId/requestId，main 端按 id 路由。目前 dedup 在 provider 端強制每 turn 一個 idle，先收住症狀。**未來再加新 provider / 新事件型別時要記得這個 contract**。
+
+**相關**:
+- `agent-server/index.ts` 用 `sendChain` Promise serialize `handleSend`，確保 turn 之間在 agent-server 端不會 race（解決另一層 claude.ts 模組層級狀態被互相覆寫的問題，跟這個 idle race 是兩個獨立 bug）
+- `src/renderer/components/AgentView.tsx` flush 用獨立 `useEffect`（不放在 `setIsStreaming` updater 裡），跟 `handleSend` 走同一條路徑（push user bubble + clear streamText + agent.send）

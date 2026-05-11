@@ -93,6 +93,16 @@ async function handleStop() {
 
 const rl = readline.createInterface({ input: process.stdin, terminal: false });
 
+// Serialize send handling. `rl.on('line')` fires sync per stdin line and the
+// previous `handleSend` is async — without serialization, two sends can run
+// concurrently, racing on the provider backend's module-level state
+// (currentSend / abortController / activeQuery / lastSessionId). The race
+// shows up when the renderer flushes a queued message ~50ms after the
+// previous turn's idle: turn 1's claude.ts `finally` hasn't run yet, turn 2
+// overwrites the module state, then turn 1's finally nukes it — turn 2's
+// sdkQuery silently yields 0 events.
+let sendChain: Promise<void> = Promise.resolve();
+
 rl.on('line', (line) => {
   let msg: IncomingMessage;
   try {
@@ -104,7 +114,11 @@ rl.on('line', (line) => {
 
   switch (msg.type) {
     case 'send':
-      handleSend(msg);
+      sendChain = sendChain
+        .then(() => handleSend(msg))
+        .catch((err) => {
+          send({ type: 'error', error: err?.message ?? String(err) });
+        });
       break;
     case 'stop':
       handleStop();
