@@ -647,9 +647,14 @@ function processMessage(msg: SDKMessage, send: SendFn, cwd: string, blockMsgIds:
           }
         }
       });
-      // Clear block→msgId map: next assistant message's index space (0, 1, ...)
-      // is independent and needs fresh msgIds.
-      blockMsgIds.clear();
+      // DON'T clear blockMsgIds here. With `includePartialMessages: true`
+      // the SDK emits `assistant` multiple times per logical assistant turn
+      // (each partial growing). They all reference the SAME block indices
+      // and MUST resolve to the SAME msgIds so the renderer upserts onto
+      // one timeline entry instead of stacking duplicates. The next "real"
+      // assistant turn (after a tool_result) starts fresh content_block_start
+      // events that overwrite the indices in our map — that's the right
+      // moment for reset, not here.
       if (msg.message.usage) {
         const isSubagent = msg.parent_tool_use_id != null;
         const modelRaw = msg.message.model;
@@ -674,14 +679,22 @@ function processMessage(msg: SDKMessage, send: SendFn, cwd: string, blockMsgIds:
     }
     case 'stream_event': {
       const event: any = (msg as any).event;
-      if (event?.type === 'content_block_delta' && event.delta) {
+      // `content_block_start` is the authoritative new-block signal. ALWAYS
+      // overwrite — across a tool turn the SDK re-uses block index 0 for
+      // the next assistant's first block; if we kept the old msgId the
+      // renderer would upsert new content into the previous block's entry.
+      if (event?.type === 'content_block_start' && typeof event.index === 'number') {
+        const bt = event.content_block?.type;
+        if (bt === 'text' || bt === 'thinking') {
+          blockMsgIds.set(event.index, mintMsgId());
+        }
+        break;
+      }
+      if (event?.type === 'content_block_delta' && event.delta && typeof event.index === 'number') {
         const delta = event.delta;
-        // Each stream chunk carries the msgId of its parent block, lazily
-        // minted on first reference via getOrMintBlockMsgId. The matching
-        // `case 'assistant'` later reads the same block index to emit a
-        // finalize message with the same msgId — renderer upserts both
-        // into a single entry.
-        const msgId = getOrMintBlockMsgId(blockMsgIds, event.index ?? -1);
+        // Defensive: if we somehow missed content_block_start (SDK quirk),
+        // lazily mint so the chunk still has an id.
+        const msgId = getOrMintBlockMsgId(blockMsgIds, event.index);
         if (delta.type === 'text_delta' && typeof delta.text === 'string' && delta.text.length > 0) {
           send({ type: 'stream', msgId, streamType: 'text', content: delta.text });
         } else if (delta.type === 'thinking_delta' && typeof delta.thinking === 'string' && delta.thinking.length > 0) {
