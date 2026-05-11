@@ -200,11 +200,20 @@ export function AgentMessage({ message, cwd }: Props) {
           </div>
           {isExpanded && (
             <>
-              {message.diff && (() => {
+              {/* Skip diff/content body on failure. The dominant reason an
+                  edit fails is stale old_string — and the agent's standard
+                  recovery is "Read the file again, retry the Edit". The
+                  failed diff is a transient intermediate state that the
+                  agent itself supersedes within the same turn. Showing it
+                  fills the timeline with noise the user doesn't need (and
+                  green-add / red-remove coloring next to ✗ is mildly
+                  misleading anyway). Header ✗ + error message is enough to
+                  signal "this attempt failed, agent will retry". */}
+              {!failed && message.diff && (() => {
                 const rows = alignLineDiff(message.diff.oldString.split('\n'), message.diff.newString.split('\n'));
                 return <SideBySideDiff rows={rows} />;
               })()}
-              {message.content !== undefined && <InlineAddDiff content={message.content} />}
+              {!failed && message.content !== undefined && <InlineAddDiff content={message.content} />}
               {failed && result.error && (
                 <pre className="agent-tool-code agent-tool-result-block agent-tool-result-error">{result.error}</pre>
               )}
