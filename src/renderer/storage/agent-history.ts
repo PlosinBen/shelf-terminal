@@ -87,12 +87,25 @@ export async function saveAgentMessages(
   messages: AgentMsg[],
   maxMessages: number = DEFAULT_MAX_MESSAGES,
 ): Promise<void> {
+  // Drop entries still mid-stream — they have no final content yet, and
+  // letting them persist would either show a zombie "still typing" UI on
+  // reload (agent-server is dead) or require synthetic finalization with
+  // partial content. Cleanest: just drop. tool_use / file_edit pending
+  // entries are different — they're concrete actions that did fire, so
+  // reviveOrphanPending synthesizes a failed result. Text/thinking
+  // streaming is mid-utterance and has nothing meaningful to preserve.
+  const settled = messages.filter((m) => {
+    if (m.type === 'text' && m.streaming) return false;
+    if (m.type === 'thinking' && m.streaming) return false;
+    return true;
+  });
+
   // Rotate at write time: keep the most recent `maxMessages` entries,
   // drop the oldest. Bounds IndexedDB growth without touching component
   // state (in-memory may temporarily exceed the cap; next save trims).
-  const trimmed = messages.length > maxMessages
-    ? messages.slice(messages.length - maxMessages)
-    : messages;
+  const trimmed = settled.length > maxMessages
+    ? settled.slice(settled.length - maxMessages)
+    : settled;
 
   const db = await getDB();
   const tx = db.transaction(STORE_NAME, 'readwrite');
