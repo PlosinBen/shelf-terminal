@@ -71,15 +71,29 @@ export type AgentInitStatus =
 
 export type AgentDisplayMode = 'collapsed' | 'expanded' | 'hidden';
 
-export const AGENT_DISPLAY_KEYS: { key: string; label: string }[] = [
-  { key: 'thinking', label: 'Thinking' },
-  { key: 'Read', label: 'Read' },
-  { key: 'Grep', label: 'Grep' },
-  { key: 'Glob', label: 'Glob' },
-  { key: 'Bash', label: 'Bash' },
-  { key: 'Edit', label: 'Edit' },
-  { key: 'Write', label: 'Write' },
-  { key: 'other', label: 'Other Tools' },
+/**
+ * Canonical settings keys for per-message-type display preferences.
+ * Aligns with `AgentMessage` union — provider-specific toolName (Bash / bash /
+ * view / Read / …) no longer leaks into settings. Adding a new SDK tool only
+ * touches provider formatters; settings are stable.
+ *
+ * Notes:
+ * - `tool_use` covers all non-file-edit tools (Read/Grep/Glob/Bash/view/task/...)
+ * - `file_edit` covers Edit/Write/apply_patch (translated to `file_edit`
+ *   canonical type by providers)
+ * - `intent` is Copilot's `report_intent` predictive line; expanded/collapsed
+ *   are visually identical (it's always a one-liner) — only `hidden` is
+ *   meaningful, but we keep the 3-way select for UI consistency
+ * - `text` / `system` / `error` are intentionally NOT here — hiding them would
+ *   break the conversation; they always render
+ */
+export type AgentDisplayKey = 'thinking' | 'tool_use' | 'file_edit' | 'intent';
+
+export const AGENT_DISPLAY_KEYS: { key: AgentDisplayKey; label: string; hint?: string }[] = [
+  { key: 'thinking',  label: 'Thinking',  hint: 'Reasoning blocks (Claude thinking / Copilot reasoning)' },
+  { key: 'tool_use',  label: 'Tool Use',  hint: 'Read / Grep / Glob / Bash / view / Task / WebFetch / etc. Errors always show regardless of this setting.' },
+  { key: 'file_edit', label: 'File Edit', hint: 'Edit / Write / apply_patch. Failed edits always show regardless of this setting.' },
+  { key: 'intent',    label: 'Intent',    hint: 'Copilot report_intent predictive lines. Hidden = do not render at all.' },
 ];
 
 // ── Connection types ──
@@ -194,7 +208,7 @@ export interface AppSettings {
   unicode11?: boolean;
   pmProvider?: PmProviderConfig;
   telegram?: TelegramConfig;
-  agentDisplay?: Partial<Record<string, AgentDisplayMode>>;
+  agentDisplay?: Partial<Record<AgentDisplayKey, AgentDisplayMode>>;
   /** Max UI messages persisted per agent session in IndexedDB.
    *  Trimmed at save time; oldest dropped first. */
   agentHistoryMaxMessages: number;

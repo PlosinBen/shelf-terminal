@@ -361,7 +361,7 @@ User 端訊息保留 `'user'` variant —— 不從 provider 來，本來就跟 
 3. `'system'` msgType 現在實際有人發嗎？claude/copilot 都沒主動發，是 ternary fallback 才會用到。要不要乾脆刪掉 canonical 裡的 `'system'`？
 4. UI marker 細節：`intent` 用 `▸` 還是 `→` 還是 `※` 還是 dim italic？需要看實際畫面決定
 5. `file_edit` 的 diff 渲染要不要支援 large file 折疊（譬如 > 50 行只顯示前後幾行 + 省略 marker）？沿用 git diff 風格還是純色塊？
-6. **Settings 重構（pending）** — 目前 `agentDisplay` 仍用 toolName-keyed（`Read`/`Bash`/`Edit`/...），Copilot 的小寫 toolName 全部 fall back 到 `'other'`。`tool_use` 簡化完後 settings 應該對齊 canonical type（`tool_use` / `file_edit` / `thinking` / `intent`），實際做法是另一輪改動。當前 `AgentMessage.tsx` 已經用 `resolveDisplayMode('tool_use')`，但 settings UI / `AGENT_DISPLAY_KEYS` / 預設值 / 舊資料 migration 還沒一起改。
+6. ~~Settings 重構~~ — 完成。`AGENT_DISPLAY_KEYS` 砍剩 4 個 canonical key（`thinking` / `tool_use` / `file_edit` / `intent`），`AgentDisplayKey` 從 `string` 收緊成 union。Migration 走 A1（直接丟棄舊 toolName-keyed 設定）— 舊 JSON 檔殘留的 `Read`/`Bash`/`Edit` 等鍵在 type system 收緊後存取會回 undefined，自然 fall back 到預設 `collapsed`，不需要主動清理。`tool_use` / `file_edit` 加上「錯誤/失敗 override hidden」邏輯：user 設 hidden 時非錯誤訊息照藏，但 `result.isError === true` / `result.success === false` 的卡片強制顯示，避免靜默失敗。
 
 ## 影響的檔案
 

@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { useStore } from '../store';
 import { renderMarkdown } from '../utils/markdown';
 import { alignLineDiff, type DiffRow } from '../utils/line-diff';
-import type { AgentDisplayMode } from '@shared/types';
+import type { AgentDisplayMode, AgentDisplayKey } from '@shared/types';
 
 /**
  * Renderer-side message variant. Mirrors `AgentMessage` from `@shared/types`
@@ -124,7 +124,9 @@ export function AgentMessage({ message, cwd }: Props) {
   const [expanded, setExpanded] = useState(false);
   const { settings } = useStore();
 
-  const resolveDisplayMode = (key: string): AgentDisplayMode => {
+  // Settings key is now a canonical-type union (AgentDisplayKey), not arbitrary
+  // string. Renderer can only ask about types it actually knows how to render.
+  const resolveDisplayMode = (key: AgentDisplayKey): AgentDisplayMode => {
     return settings.agentDisplay?.[key] ?? 'collapsed';
   };
 
@@ -139,9 +141,12 @@ export function AgentMessage({ message, cwd }: Props) {
       // settings are gone — provider's job is to pre-format `input` for
       // display, renderer just renders the string.
       const toolMode = resolveDisplayMode('tool_use');
-      if (toolMode === 'hidden') return null;
       const result = message.result;
       const isError = result?.isError === true;
+      // Errors override `hidden`: even with the user's setting on hidden,
+      // failures stay visible so silent breakage doesn't fool the user into
+      // thinking everything worked. Only non-error cards respect hidden.
+      if (toolMode === 'hidden' && !isError) return null;
       // Force-expand on error so the failure message is immediately visible.
       // Errors are loud-by-default — collapse is intentionally disabled while
       // result.isError is true (user setting `expanded` to false has no effect).
@@ -169,15 +174,15 @@ export function AgentMessage({ message, cwd }: Props) {
     }
 
     case 'file_edit': {
-      // Reuse the user's per-tool display preference: treat all file edits as
-      // 'Edit' for the collapsed/expanded/hidden setting (regardless of which
-      // SDK tool produced them — Claude `Edit`/`Write`, Copilot `apply_patch`).
-      const editMode = resolveDisplayMode('Edit') ?? resolveDisplayMode('other');
-      if (editMode === 'hidden') return null;
+      // Canonical-type setting; covers Claude Edit/Write + Copilot apply_patch
+      // (all translated to `file_edit` upstream).
+      const editMode = resolveDisplayMode('file_edit');
       const result = message.result;
       const success = result?.success === true;
       const failed = result?.success === false;
-      // Force-expand on failure (mirrors tool_use error behavior).
+      // Failures override `hidden` (parallel to tool_use error behavior).
+      if (editMode === 'hidden' && !failed) return null;
+      // Force-expand on failure.
       const isExpanded = expanded || editMode === 'expanded' || failed;
       return (
         <div className="agent-msg agent-msg-tool agent-msg-file-edit">
@@ -225,13 +230,19 @@ export function AgentMessage({ message, cwd }: Props) {
       );
     }
 
-    case 'intent':
+    case 'intent': {
+      // Intent is always a one-line dim italic — expanded/collapsed render
+      // identically; only `hidden` actually changes anything. We keep the
+      // 3-way select for UI uniformity (see AGENT_DISPLAY_KEYS hint).
+      const intentMode = resolveDisplayMode('intent');
+      if (intentMode === 'hidden') return null;
       return (
         <div className="agent-msg agent-msg-intent">
           <span className="agent-intent-marker">▸</span>
           <span className="agent-intent-content">{message.content}</span>
         </div>
       );
+    }
 
     case 'system':
       return (

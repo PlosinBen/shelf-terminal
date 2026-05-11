@@ -270,21 +270,24 @@ export function SettingsPanel() {
 
                 <div className="settings-divider" />
                 <div className="settings-section-title">Display</div>
-                {AGENT_DISPLAY_KEYS.map(({ key, label }) => (
-                  <div className="settings-group" key={key}>
-                    <label className="settings-label">{label}</label>
-                    <select
-                      className="settings-select"
-                      value={draft.agentDisplay?.[key] ?? 'collapsed'}
-                      onChange={(e) => updateDraft({
-                        agentDisplay: { ...draft.agentDisplay, [key]: e.target.value as AgentDisplayMode },
-                      })}
-                    >
-                      <option value="collapsed">Collapsed</option>
-                      <option value="expanded">Expanded</option>
-                      <option value="hidden">Hidden</option>
-                    </select>
-                  </div>
+                {AGENT_DISPLAY_KEYS.map(({ key, label, hint }) => (
+                  <React.Fragment key={key}>
+                    <div className="settings-group">
+                      <label className="settings-label">{label}</label>
+                      <select
+                        className="settings-select"
+                        value={draft.agentDisplay?.[key] ?? 'collapsed'}
+                        onChange={(e) => updateDraft({
+                          agentDisplay: { ...draft.agentDisplay, [key]: e.target.value as AgentDisplayMode },
+                        })}
+                      >
+                        <option value="collapsed">Collapsed</option>
+                        <option value="expanded">Expanded</option>
+                        <option value="hidden">Hidden</option>
+                      </select>
+                    </div>
+                    {hint && <div className="settings-sub-hint">{hint}</div>}
+                  </React.Fragment>
                 ))}
               </>
             )}
