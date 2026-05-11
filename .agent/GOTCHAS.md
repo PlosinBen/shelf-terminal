@@ -540,3 +540,42 @@ if (currentCwd) config.workingDirectory = currentCwd;
 **不要做**:
 - 不要假設 SDK 的 toolName 永遠穩定 — Claude code SDK 自己會 alias / rename，需要時補 case
 - 不要為了「以後新 SDK 名字」加複雜 prefix-match 邏輯 — 出現時加 case，don't over-engineer
+
+## Copilot CLI 不能放 `app.asar.unpacked`，會踩它自己的 path-replace bug
+
+**現象**: Packaged build（任何 packaged mode）下 Copilot bash tool 每次都失敗：
+```
+Error: <exited with error: posix_spawnp failed.>
+```
+Read / Grep / Glob 等不需要起 subprocess 的 tool 都正常。Dev mode（`npm run dev`）完全沒事。
+
+**根因**: `node_modules/@github/copilot/app.js` 內部用 `loadNativeModule("pty")` 找 native binary，然後做這條：
+```js
+let helperPath = bio.dir + "/spawn-helper";
+helperPath = path.resolve(__dirname, helperPath);
+helperPath = helperPath.replace("app.asar", "app.asar.unpacked");
+helperPath = helperPath.replace("node_modules.asar", "node_modules.asar.unpacked");
+```
+
+Copilot CLI 假設 packaged Electron app 的標準路徑是 `Shelf.app/Contents/Resources/app.asar/...`，所以 replace 把 `app.asar` remap 到 `app.asar.unpacked` 來找實際 unpacked 的 native binary。
+
+問題：JS `String.replace(string, ...)` 只替換第一個 match。當路徑**本身已經**是 `.../app.asar.unpacked/...`（因為我們用 `asarUnpack` 把 `@github/copilot/**` unpack 出來），replace 找到 `app.asar` 子字串 → 變成 `.../app.asar.unpacked.unpacked/...` → 路徑不存在 → spawn-helper 找不到 → posix_spawnp 失敗。
+
+Dev mode 沒事是因為路徑是 `node_modules/@github/copilot/...`，不含 `app.asar` 子字串，replace 是 no-op。
+
+**解法**: `@github/copilot` 不放 `node_modules` / `asarUnpack`，改放 `extraResources`：
+```json
+"extraResources": [
+  { "from": "node_modules/@github/copilot", "to": "copilot-cli", "filter": ["**/*"] }
+]
+```
+路徑變成 `Shelf.app/Contents/Resources/copilot-cli/...`，不含 `app.asar` 子字串 → upstream buggy replace 是 no-op → spawn-helper 找得到。
+
+`resolveCopilotCliPath()` 對應改成 `path.resolve(__dirname, '..', '..', 'copilot-cli', 'index.js')`。
+
+**語意上也更對**: Copilot CLI 是 bundled subprocess（像 ffmpeg 一起 ship 的 binary），不是 `require()`-able library。我們的 agent-server 只 `require('@github/copilot-sdk')` (JS library, 留在 asar)，從不 require `@github/copilot`，只 spawn 它當 CLI 跑。`extraResources` 才是這種 binary distribution 的正確 pattern。
+
+**不要做**:
+- 不要 patch `app.js` 把那兩條 replace 改掉 — 每次 npm install 要 reapply，npm update 會蓋掉，brittle
+- 不要建 `app.asar.unpacked.unpacked` symlink 騙 buggy code — code-signing 可能踩 symlink，notarization 不穩
+- 不要把 `@github/copilot-darwin-*` / `-linux-*` / `-win32-*` 拉進來 — 那是給 standalone `npm install -g @github/copilot` 用的 platform-specific binary，SDK 模式下根本不會載入（loader index.js 只 import 同目錄的 app.js）

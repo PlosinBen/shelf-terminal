@@ -233,27 +233,38 @@ async function getSdk() {
 }
 
 /**
- * Resolve the Copilot CLI binary path. The Copilot SDK spawns a CLI subprocess
- * (the CLI does the actual API/auth/state work; SDK is just a JSON-RPC wrapper).
+ * Resolve the Copilot CLI's entry point. The Copilot SDK spawns this as a
+ * subprocess (the CLI does the actual API/auth/state work; SDK is just a
+ * JSON-RPC wrapper).
  *
- * Mirrors how `claude.ts` resolves the Claude binary — checks dev node_modules
- * and packaged app.asar.unpacked locations.
+ * **Why packaged path is `extraResources/copilot-cli/`, not
+ * `app.asar.unpacked/node_modules/@github/copilot/`:**
+ * Copilot CLI's bundled `app.js` does a naive `path.replace("app.asar",
+ * "app.asar.unpacked")` when resolving its native `spawn-helper` binary,
+ * assuming Electron apps always live under `app.asar/`. If the path already
+ * contains `app.asar.unpacked` (as it does when we asarUnpack the package),
+ * the replace duplicates the suffix to `app.asar.unpacked.unpacked` and the
+ * helper is no longer found → `posix_spawnp failed` on every bash tool call.
+ *
+ * Putting Copilot under `extraResources` sidesteps the bug entirely — the
+ * Resources/copilot-cli/ path contains no `app.asar` substring, so the
+ * upstream replace is a no-op. This also aligns better with what Copilot CLI
+ * actually is: a bundled subprocess (like ffmpeg shipped with an app), not a
+ * `require()`-able library — extraResources is the right pattern for that.
  */
 function resolveCopilotCliPath(): string | undefined {
-  const platform = process.platform;
-  const arch = process.arch;
-  const platformPkg = `copilot-${platform}-${arch}`;
-
-  // The @github/copilot package's index.js is the entry point that resolves the
-  // platform-specific binary internally. Pass it as cliPath; SDK runs `node index.js`.
+  // The @github/copilot package's index.js is the entry point that resolves
+  // the platform-specific native modules internally. SDK runs `node index.js`.
   const candidates = [
     // Dev: relative to agent-server bundle output (dist/agent-server/<v>/index.mjs)
     path.resolve(__dirname, '..', '..', '..', 'node_modules', '@github', 'copilot', 'index.js'),
     // Dev: relative to project root (when running unbundled via tsx/ts-node)
     path.resolve(__dirname, '..', '..', 'node_modules', '@github', 'copilot', 'index.js'),
-    // Packaged: app.asar.unpacked
-    path.resolve(__dirname, '..', '..', 'app.asar.unpacked', 'node_modules', '@github', 'copilot', 'index.js'),
-    // User global install (~/.nvm or system)
+    // Packaged: extraResources/copilot-cli/ (sits next to extraResources/agent-server/
+    // — both are siblings of agent-server bundle dir).
+    path.resolve(__dirname, '..', '..', 'copilot-cli', 'index.js'),
+    // User global install (~/.nvm or system) — last-resort fallback if our
+    // bundle is missing somehow.
     path.join(os.homedir(), '.nvm', 'versions', 'node', process.version, 'lib', 'node_modules', '@github', 'copilot', 'index.js'),
     '/usr/local/lib/node_modules/@github/copilot/index.js',
   ];

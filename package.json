@@ -31,22 +31,24 @@
       "node_modules/node-pty/**/*",
       "node_modules/@anthropic-ai/claude-agent-sdk-*/**/*",
       "node_modules/@github/copilot-sdk/**/*",
-      "node_modules/@github/copilot/**/*",
-      "node_modules/@github/copilot-darwin-*/**/*",
-      "node_modules/@github/copilot-linux-*/**/*",
-      "node_modules/@github/copilot-win32-*/**/*"
+      "!node_modules/@github/copilot/**/*",
+      "!node_modules/@github/copilot-darwin-*/**/*",
+      "!node_modules/@github/copilot-linux-*/**/*",
+      "!node_modules/@github/copilot-win32-*/**/*"
     ],
     "asarUnpack": [
       "node_modules/@anthropic-ai/claude-agent-sdk-*/claude",
-      "node_modules/@anthropic-ai/claude-agent-sdk-*/claude.exe",
-      "node_modules/@github/copilot-darwin-*/copilot",
-      "node_modules/@github/copilot-linux-*/copilot",
-      "node_modules/@github/copilot-win32-*/copilot.exe"
+      "node_modules/@anthropic-ai/claude-agent-sdk-*/claude.exe"
     ],
     "extraResources": [
       {
         "from": "dist/agent-server",
         "to": "agent-server"
+      },
+      {
+        "from": "node_modules/@github/copilot",
+        "to": "copilot-cli",
+        "filter": ["**/*"]
       }
     ],
     "mac": {
