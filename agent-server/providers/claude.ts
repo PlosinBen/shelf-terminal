@@ -1,5 +1,6 @@
 import { query as sdkQuery } from '@anthropic-ai/claude-agent-sdk';
 import type { Query, Options, SDKMessage, CanUseTool } from '@anthropic-ai/claude-agent-sdk';
+import { randomUUID } from 'node:crypto';
 import { existsSync } from 'fs';
 import { resolve } from 'path';
 import type { QueryInput, SendFn, ServerBackend, ProviderCapabilities, SlashResult, StatusSegment } from './types';
@@ -275,12 +276,17 @@ export function createClaudeBackend(): ServerBackend {
 
       activeQuery = sdkQuery({ prompt: promptArg, options });
 
+      // Per-turn map: SDK content_block index → our msgId. Lazily populated
+      // on first stream_delta or assistant block ref; cleared after each
+      // assistant message (next assistant resets its index space).
+      const blockMsgIds: BlockMsgIdMap = new Map();
+
       try {
         for await (const sdkMsg of activeQuery) {
           if ('session_id' in sdkMsg && sdkMsg.session_id) {
             lastSessionId = sdkMsg.session_id as string;
           }
-          processMessage(sdkMsg, dedupSend, input.cwd);
+          processMessage(sdkMsg, dedupSend, input.cwd, blockMsgIds);
         }
       } catch (err: any) {
         if (err.name !== 'AbortError') {
@@ -350,7 +356,7 @@ export function createClaudeBackend(): ServerBackend {
       // Just send the original input as a regular message — SDK intercepts.
       // We piggyback to clear the sticky plan panel when context is reset.
       if (cmd === 'clear') {
-        currentSend?.({ type: 'message', msgType: 'plan', content: '' });
+        currentSend?.({ type: 'message', msgId: mintMsgId(), msgType: 'plan', content: '' });
         inflightToolUses.clear();
         // Eager-clear in-memory + persisted session id so the edge case
         // "/clear then close app before SDK responds" doesn't leave a stale
@@ -510,12 +516,43 @@ export function formatClaudeToolInput(toolName: string, input: Record<string, un
   }
 }
 
+/**
+ * Mint a unique msgId for a non-tool message (text/thinking/intent/system/
+ * error/plan). Tool messages use the SDK-provided toolUseId as their msgId
+ * — see `emitClaudeToolUse`. 8 hex chars is plenty within a single
+ * agent-server process lifetime; collisions across processes don't matter
+ * because the renderer's message store is also process-scoped.
+ */
+function mintMsgId(): string {
+  return `m-${randomUUID().slice(0, 8)}`;
+}
+
+/**
+ * Per-turn map from SDK stream block index → our msgId. Populated lazily
+ * (first time a content_block_delta or assistant block references the
+ * index). Cleared after each assistant message so the next assistant's
+ * fresh index space (0, 1, ...) gets fresh msgIds.
+ */
+type BlockMsgIdMap = Map<number, string>;
+
+function getOrMintBlockMsgId(map: BlockMsgIdMap, idx: number): string {
+  let id = map.get(idx);
+  if (!id) {
+    id = mintMsgId();
+    map.set(idx, id);
+  }
+  return id;
+}
+
 /** Translate a Claude SDK `tool_use` block to either canonical `file_edit` or `tool_use`. */
 function emitClaudeToolUse(
   send: SendFn,
   block: { id: string; name: string; input: Record<string, unknown> },
   cwd: string,
 ): void {
+  // For tool messages, msgId === toolUseId. Same identity, two named fields
+  // (msgId is the universal renderer-side upsert key; toolUseId stays named
+  // for permission_request pairing semantics).
   if (block.name === 'Edit') {
     const input = block.input as { file_path?: string; old_string?: string; new_string?: string };
     if (typeof input.file_path === 'string'
@@ -524,7 +561,7 @@ function emitClaudeToolUse(
       const diff = { oldString: input.old_string, newString: input.new_string };
       inflightToolUses.set(block.id, { kind: 'file_edit', filePath: input.file_path, diff });
       send({
-        type: 'message', msgType: 'file_edit',
+        type: 'message', msgId: block.id, msgType: 'file_edit',
         toolUseId: block.id,
         filePath: input.file_path,
         diff,
@@ -540,7 +577,7 @@ function emitClaudeToolUse(
         kind: 'file_edit', filePath: input.file_path, content: input.content,
       });
       send({
-        type: 'message', msgType: 'file_edit',
+        type: 'message', msgId: block.id, msgType: 'file_edit',
         toolUseId: block.id,
         filePath: input.file_path,
         content: input.content,
@@ -554,7 +591,7 @@ function emitClaudeToolUse(
     kind: 'tool_use', toolName: block.name, input,
   });
   send({
-    type: 'message', msgType: 'tool_use',
+    type: 'message', msgId: block.id, msgType: 'tool_use',
     toolUseId: block.id,
     toolName: block.name,
     input,
@@ -573,7 +610,7 @@ function emitClaudeToolResult(
   inflightToolUses.delete(toolUseId);
   if (entry.kind === 'file_edit') {
     send({
-      type: 'message', msgType: 'file_edit',
+      type: 'message', msgId: toolUseId, msgType: 'file_edit',
       toolUseId,
       filePath: entry.filePath,
       ...(entry.diff ? { diff: entry.diff } : {}),
@@ -584,7 +621,7 @@ function emitClaudeToolResult(
     });
   } else {
     send({
-      type: 'message', msgType: 'tool_use',
+      type: 'message', msgId: toolUseId, msgType: 'tool_use',
       toolUseId,
       toolName: entry.toolName,
       input: entry.input,
@@ -597,14 +634,16 @@ function emitClaudeToolResult(
 // set to the UI.  Key = bucket label (e.g. '5h', '7d').
 const rateLimitBuckets = new Map<string, StatusSegment>();
 
-function processMessage(msg: SDKMessage, send: SendFn, cwd: string) {
+function processMessage(msg: SDKMessage, send: SendFn, cwd: string, blockMsgIds: BlockMsgIdMap) {
   switch (msg.type) {
     case 'assistant': {
-      for (const block of msg.message.content) {
+      msg.message.content.forEach((block, idx) => {
         if (block.type === 'thinking') {
-          send({ type: 'message', msgType: 'thinking', content: block.thinking });
+          // Reuse msgId if stream chunks already minted one for this block;
+          // otherwise (no streaming or non-streamed model) mint fresh.
+          send({ type: 'message', msgId: getOrMintBlockMsgId(blockMsgIds, idx), msgType: 'thinking', content: block.thinking });
         } else if (block.type === 'text') {
-          send({ type: 'message', msgType: 'text', content: block.text });
+          send({ type: 'message', msgId: getOrMintBlockMsgId(blockMsgIds, idx), msgType: 'text', content: block.text });
         } else if (block.type === 'tool_use') {
           emitClaudeToolUse(send, { id: block.id, name: block.name, input: block.input as Record<string, unknown> }, cwd);
           // Mirror plan-style tools into the sticky panel for parity with Copilot's plan API.
@@ -617,16 +656,19 @@ function processMessage(msg: SDKMessage, send: SendFn, cwd: string) {
                 if (t.status === 'in_progress') return `- [~] ${t.activeForm ?? t.content}`;
                 return `- [ ] ${t.content}`;
               }).join('\n');
-              send({ type: 'message', msgType: 'plan', content: md });
+              send({ type: 'message', msgId: mintMsgId(), msgType: 'plan', content: md });
             }
           } else if (block.name === 'ExitPlanMode') {
             const plan = (block.input as any)?.plan;
             if (typeof plan === 'string') {
-              send({ type: 'message', msgType: 'plan', content: plan });
+              send({ type: 'message', msgId: mintMsgId(), msgType: 'plan', content: plan });
             }
           }
         }
-      }
+      });
+      // Clear block→msgId map: next assistant message's index space (0, 1, ...)
+      // is independent and needs fresh msgIds.
+      blockMsgIds.clear();
       if (msg.message.usage) {
         const isSubagent = msg.parent_tool_use_id != null;
         const modelRaw = msg.message.model;
@@ -653,10 +695,16 @@ function processMessage(msg: SDKMessage, send: SendFn, cwd: string) {
       const event: any = (msg as any).event;
       if (event?.type === 'content_block_delta' && event.delta) {
         const delta = event.delta;
+        // Each stream chunk carries the msgId of its parent block, lazily
+        // minted on first reference via getOrMintBlockMsgId. The matching
+        // `case 'assistant'` later reads the same block index to emit a
+        // finalize message with the same msgId — renderer upserts both
+        // into a single entry.
+        const msgId = getOrMintBlockMsgId(blockMsgIds, event.index ?? -1);
         if (delta.type === 'text_delta' && typeof delta.text === 'string' && delta.text.length > 0) {
-          send({ type: 'stream', streamType: 'text', content: delta.text });
+          send({ type: 'stream', msgId, streamType: 'text', content: delta.text });
         } else if (delta.type === 'thinking_delta' && typeof delta.thinking === 'string' && delta.thinking.length > 0) {
-          send({ type: 'stream', streamType: 'thinking', content: delta.thinking });
+          send({ type: 'stream', msgId, streamType: 'thinking', content: delta.thinking });
         }
       }
       break;

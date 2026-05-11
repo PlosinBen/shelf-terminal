@@ -23,8 +23,13 @@ export interface PersistedContext {
    *   its on-disk session state by id
    * Written via `context_patch` outgoing messages from providers; orchestrator
    * (`agent-server/index.ts`) is the single writer to disk.
+   *
+   * `null` is the explicit "clear this field" sentinel used by `/clear` flow:
+   * provider emits `context_patch: { lastSdkSessionId: null }` to overwrite
+   * a stored id so the next process doesn't resurrect a cleared session.
+   * `undefined` (field omitted) on the wire would no-op via spread-merge.
    */
-  lastSdkSessionId?: string;
+  lastSdkSessionId?: string | null;
 }
 
 function contextPath(sessionId: string): string {

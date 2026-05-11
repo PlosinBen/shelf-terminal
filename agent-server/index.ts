@@ -156,9 +156,9 @@ rl.on('line', (line) => {
         try {
           const backend = getBackend(provider);
           const caps = await backend.gatherCapabilities?.(msg.cwd ?? process.cwd(), msg.sessionId, msg.customModels);
-          send({ type: 'capabilities', requestId: msg.requestId, ...(caps ?? {}) });
+          send({ type: 'capabilities', requestId: msg.requestId ?? '', ...(caps ?? {}) });
         } catch (err: any) {
-          send({ type: 'capabilities', requestId: msg.requestId, error: err?.message ?? String(err) });
+          send({ type: 'capabilities', requestId: msg.requestId ?? '', error: err?.message ?? String(err) });
         }
       })();
       break;
@@ -170,9 +170,9 @@ rl.on('line', (line) => {
           const backend = getBackend(provider);
           if (!backend.storeCredential) throw new Error(`Provider ${provider} does not accept API keys`);
           await backend.storeCredential(msg.key ?? '');
-          send({ type: 'credential_stored', requestId: msg.requestId, ok: true });
+          send({ type: 'credential_stored', requestId: msg.requestId ?? '', ok: true });
         } catch (err: any) {
-          send({ type: 'credential_stored', requestId: msg.requestId, ok: false, error: err?.message ?? String(err) });
+          send({ type: 'credential_stored', requestId: msg.requestId ?? '', ok: false, error: err?.message ?? String(err) });
         }
       })();
       break;
@@ -184,9 +184,9 @@ rl.on('line', (line) => {
           const backend = getBackend(provider);
           if (!backend.clearCredential) throw new Error(`Provider ${provider} has no credential to clear`);
           await backend.clearCredential();
-          send({ type: 'credential_cleared', requestId: msg.requestId, ok: true });
+          send({ type: 'credential_cleared', requestId: msg.requestId ?? '', ok: true });
         } catch (err: any) {
-          send({ type: 'credential_cleared', requestId: msg.requestId, ok: false, error: err?.message ?? String(err) });
+          send({ type: 'credential_cleared', requestId: msg.requestId ?? '', ok: false, error: err?.message ?? String(err) });
         }
       })();
       break;
@@ -207,7 +207,7 @@ rl.on('line', (line) => {
         try {
           const backend = getBackend(provider);
           if (!backend.handleSlashCommand) {
-            send({ type: 'slash_result', requestId: msg.requestId, result: { type: 'pass-through' } });
+            send({ type: 'slash_result', requestId: msg.requestId ?? '', result: { type: 'pass-through' } });
             return;
           }
           const result = await backend.handleSlashCommand(msg.cmd ?? '', msg.args ?? '');
@@ -217,9 +217,9 @@ rl.on('line', (line) => {
           if (result.type === 'context-cleared' && msg.sessionId) {
             deleteContext(msg.sessionId);
           }
-          send({ type: 'slash_result', requestId: msg.requestId, result });
+          send({ type: 'slash_result', requestId: msg.requestId ?? '', result });
         } catch (err: any) {
-          send({ type: 'slash_result', requestId: msg.requestId, result: { type: 'error', message: err?.message ?? String(err) } });
+          send({ type: 'slash_result', requestId: msg.requestId ?? '', result: { type: 'error', message: err?.message ?? String(err) } });
         }
       })();
       break;

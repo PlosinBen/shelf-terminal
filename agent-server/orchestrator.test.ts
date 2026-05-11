@@ -63,7 +63,7 @@ describe('orchestrator', () => {
       const seen: OutgoingMessage[] = [];
       const send = wrapSendForContext('claude', sessionId, (m) => seen.push(m));
       send({ type: 'status', state: 'streaming' });
-      send({ type: 'message', msgType: 'text', content: 'hi' });
+      send({ type: 'message', msgId: 'm-1', msgType: 'text', content: 'hi' });
       expect(seen).toHaveLength(2);
       expect(seen[0]).toEqual({ type: 'status', state: 'streaming' });
     });
@@ -136,7 +136,7 @@ describe('orchestrator', () => {
       const sessionId = randomUUID();
       created.push(sessionId);
       const send = wrapSendForContext('claude', sessionId, () => {}, () => 42);
-      send({ type: 'context_patch' });
+      send({ type: 'context_patch', patch: {} });
       const ctx = loadContext(sessionId);
       expect(ctx?.provider).toBe('claude');
       expect(ctx?.sessionId).toBe(sessionId);
@@ -162,10 +162,10 @@ describe('orchestrator', () => {
       const seen: OutgoingMessage[] = [];
       const send = wrapSendForTurn('t-abc12345', (m) => seen.push(m));
       send({ type: 'status', state: 'streaming' });
-      send({ type: 'message', msgType: 'text', content: 'hi' });
+      send({ type: 'message', msgId: 'm-1', msgType: 'text', content: 'hi' });
       expect(seen).toEqual([
         { type: 'status', state: 'streaming', turnId: 't-abc12345' },
-        { type: 'message', msgType: 'text', content: 'hi', turnId: 't-abc12345' },
+        { type: 'message', msgId: 'm-1', msgType: 'text', content: 'hi', turnId: 't-abc12345' },
       ]);
     });
 

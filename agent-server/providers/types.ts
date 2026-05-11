@@ -50,7 +50,14 @@ export type OutgoingMessage = WireEnvelope & (
   // ── Lifecycle (no turnId) ────────────────────────────────────────────────
   | { type: 'ready' }
   | { type: 'pong' }
-  | ({ type: 'capabilities'; requestId: string; error?: string } & Partial<ProviderCapabilities> & {
+  /**
+   * Capabilities is dual-purpose: usually a one-shot RPC response carrying
+   * `requestId` (matched in main's onResponse map), but providers may also
+   * emit unsolicited updates on model/mode change. requestId optional to
+   * cover both. Main side ignores requestId-less variants currently (they
+   * fall through parseRemoteMessage); this stays open for future use.
+   */
+  | ({ type: 'capabilities'; requestId?: string; error?: string } & Partial<ProviderCapabilities> & {
       currentModel?: string;
       currentEffort?: string;
       currentPermissionMode?: string;
@@ -83,28 +90,36 @@ export type OutgoingMessage = WireEnvelope & (
   | { type: 'context_patch'; patch: Partial<PersistedContext> }
 
   // ── Streaming (incremental text/thinking chunks) ─────────────────────────
-  | { type: 'stream'; streamType: 'text' | 'thinking'; content: string }
+  // `msgId` ties each chunk to the eventual `type: 'message'` finalize event
+  // with the same id. Renderer upserts by msgId — stream chunks append to a
+  // placeholder entry that the finalize replaces.
+  | { type: 'stream'; msgId: string; streamType: 'text' | 'thinking'; content: string }
 
   // ── Canonical conversation messages ──────────────────────────────────────
   // Renderer-facing variants. Discriminated by `msgType`. Each variant only
   // carries fields it actually needs (see .agent/features/AGENT_VIEW_MSG_TYPE.md
   // "Canonical Message — Discriminated Union" for design rationale).
-  | { type: 'message'; msgType: 'text';     content: string }
-  | { type: 'message'; msgType: 'thinking'; content: string }
-  | { type: 'message'; msgType: 'intent';   content: string }
-  | { type: 'message'; msgType: 'system';   content: string }
-  | { type: 'message'; msgType: 'error';    content: string }
-  | { type: 'message'; msgType: 'plan';     content: string }
+  //
+  // `msgId` is the upsert key in the renderer's message store. For tool_use
+  // and file_edit, `msgId === toolUseId` — they're the same identity. We
+  // keep `toolUseId` as a named field too because permission_request uses
+  // that name to pair tool runs with their permission flow.
+  | { type: 'message'; msgId: string; msgType: 'text';     content: string }
+  | { type: 'message'; msgId: string; msgType: 'thinking'; content: string }
+  | { type: 'message'; msgId: string; msgType: 'intent';   content: string }
+  | { type: 'message'; msgId: string; msgType: 'system';   content: string }
+  | { type: 'message'; msgId: string; msgType: 'error';    content: string }
+  | { type: 'message'; msgId: string; msgType: 'plan';     content: string }
   | {
-      type: 'message'; msgType: 'tool_use';
-      toolUseId: string;
+      type: 'message'; msgId: string; msgType: 'tool_use';
+      toolUseId: string;  // === msgId; kept named for permission_request pairing
       toolName: string;
       input: string;
       result?: { content: string; isError?: boolean };
     }
   | {
-      type: 'message'; msgType: 'file_edit';
-      toolUseId: string;
+      type: 'message'; msgId: string; msgType: 'file_edit';
+      toolUseId: string;  // === msgId
       filePath: string;
       diff?: { oldString: string; newString: string };
       content?: string;

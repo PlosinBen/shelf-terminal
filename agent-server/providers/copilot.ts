@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
+import { randomUUID } from 'node:crypto';
 import type { QueryInput, SendFn, ServerBackend, ProviderCapabilities, SlashResult, StatusSegment } from './types';
 import { severityFromUtilization, formatResetCountdown, pickPermissionModes, pickEffortLevels } from './types';
 import type { ProviderModel } from '../../src/shared/types';
@@ -291,6 +292,13 @@ interface CopilotState {
   models: CachedModel[];
 }
 
+// Mint a unique msgId for a non-tool message (text/thinking/intent/system/
+// error/plan). Tool messages use the SDK-provided toolCallId as their msgId
+// — see file_edit / tool_use emit sites below.
+function mintMsgId(): string {
+  return `m-${randomUUID().slice(0, 8)}`;
+}
+
 export function createCopilotBackend(): ServerBackend {
   const pendingPermissions = new Map<string, (result: PermissionResult) => void>();
   let currentSend: SendFn | null = null;
@@ -298,6 +306,12 @@ export function createCopilotBackend(): ServerBackend {
   let currentEffort: string | undefined;
   let currentPermissionMode = 'default';
   let currentSessionId: string | null = null;
+  // Per-turn streaming msgId trackers. Copilot SDK doesn't emit explicit
+  // block-start events; we mint on the first delta of a channel and reuse
+  // until the matching finalize message lands. Reset to null when finalize
+  // arrives or a new turn begins.
+  let currentTextMsgId: string | null = null;
+  let currentThinkingMsgId: string | null = null;
   // workingDirectory must be threaded into createSession/resumeSession config —
   // omitting it leaves the CLI's bash tool spawning relative to agent-server's
   // own cwd (which on packaged Electron is something like /), causing
@@ -456,22 +470,31 @@ export function createCopilotBackend(): ServerBackend {
       switch (event.type) {
         case 'assistant.message_delta':
           if (event.data?.deltaContent) {
-            currentSend({ type: 'stream', streamType: 'text', content: event.data.deltaContent });
+            // Mint msgId on first delta of this text block; reuse until finalize.
+            if (currentTextMsgId === null) currentTextMsgId = mintMsgId();
+            currentSend({ type: 'stream', msgId: currentTextMsgId, streamType: 'text', content: event.data.deltaContent });
           }
           break;
         case 'assistant.reasoning_delta':
           if (event.data?.deltaContent) {
-            currentSend({ type: 'stream', streamType: 'thinking', content: event.data.deltaContent });
+            if (currentThinkingMsgId === null) currentThinkingMsgId = mintMsgId();
+            currentSend({ type: 'stream', msgId: currentThinkingMsgId, streamType: 'thinking', content: event.data.deltaContent });
           }
           break;
         case 'assistant.message':
           if (event.data?.content) {
-            currentSend({ type: 'message', msgType: 'text', content: event.data.content });
+            // Use the streaming msgId if there was one; otherwise mint
+            // (covers the case where SDK skips deltas and sends final only).
+            const msgId = currentTextMsgId ?? mintMsgId();
+            currentSend({ type: 'message', msgId, msgType: 'text', content: event.data.content });
+            currentTextMsgId = null;  // Reset for the next text block in this turn.
           }
           break;
         case 'assistant.reasoning':
           if (event.data?.content) {
-            currentSend({ type: 'message', msgType: 'thinking', content: event.data.content });
+            const msgId = currentThinkingMsgId ?? mintMsgId();
+            currentSend({ type: 'message', msgId, msgType: 'thinking', content: event.data.content });
+            currentThinkingMsgId = null;
           }
           break;
         case 'tool.execution_start': {
@@ -483,7 +506,7 @@ export function createCopilotBackend(): ServerBackend {
           // assistant's final reply. Render as text, skip matching result.
           if (toolName === 'task_complete') {
             const text = args.summary ?? args.text ?? args.message ?? args.content ?? '';
-            if (text) currentSend({ type: 'message', msgType: 'text', content: text });
+            if (text) currentSend({ type: 'message', msgId: mintMsgId(), msgType: 'text', content: text });
             break;
           }
 
@@ -491,7 +514,7 @@ export function createCopilotBackend(): ServerBackend {
           // skip matching result. args.intent is a string.
           if (toolName === 'report_intent') {
             if (typeof args.intent === 'string' && args.intent.length > 0) {
-              currentSend({ type: 'message', msgType: 'intent', content: args.intent });
+              currentSend({ type: 'message', msgId: mintMsgId(), msgType: 'intent', content: args.intent });
             }
             break;
           }
@@ -508,7 +531,7 @@ export function createCopilotBackend(): ServerBackend {
                 : { kind: 'file_edit', filePath: parsed.filePath, content: parsed.content };
               inflightToolUses.set(toolUseId, entry);
               currentSend({
-                type: 'message', msgType: 'file_edit',
+                type: 'message', msgId: toolUseId, msgType: 'file_edit',
                 toolUseId,
                 filePath: parsed.filePath,
                 ...(parsed.diff ? { diff: parsed.diff } : {}),
@@ -529,7 +552,7 @@ export function createCopilotBackend(): ServerBackend {
           const input = formatCopilotToolInput(toolName, argObj, currentCwd ?? '');
           inflightToolUses.set(toolUseId, { kind: 'tool_use', toolName, input });
           currentSend({
-            type: 'message', msgType: 'tool_use',
+            type: 'message', msgId: toolUseId, msgType: 'tool_use',
             toolUseId,
             toolName,
             input,
@@ -548,7 +571,7 @@ export function createCopilotBackend(): ServerBackend {
           const isError = data.success === false;
           if (entry.kind === 'file_edit') {
             currentSend({
-              type: 'message', msgType: 'file_edit',
+              type: 'message', msgId: toolUseId, msgType: 'file_edit',
               toolUseId,
               filePath: entry.filePath,
               ...(entry.diff ? { diff: entry.diff } : {}),
@@ -564,7 +587,7 @@ export function createCopilotBackend(): ServerBackend {
               ? `Error: ${data.error?.message ?? 'tool failed'}`
               : (data.result?.content ?? '');
             currentSend({
-              type: 'message', msgType: 'tool_use',
+              type: 'message', msgId: toolUseId, msgType: 'tool_use',
               toolUseId,
               toolName: entry.toolName,
               input: entry.input,
@@ -659,6 +682,7 @@ export function createCopilotBackend(): ServerBackend {
         const result = await (state.session as any).rpc.plan.read();
         currentSend({
           type: 'message',
+          msgId: mintMsgId(),
           msgType: 'plan',
           content: result?.exists ? (result.content ?? '') : '',
         });
@@ -690,6 +714,10 @@ export function createCopilotBackend(): ServerBackend {
 
     async query(input: QueryInput, send: SendFn) {
       currentSend = send;
+      // Reset per-turn streaming msgId state — prior turn's leftover would
+      // otherwise let chunks from this turn attach to a stale msgId.
+      currentTextMsgId = null;
+      currentThinkingMsgId = null;
       // Hydrate cliSessionId from orchestrator-provided context. Only the
       // first turn after a process restart needs this — once we've created
       // or resumed a session in-memory, we don't clobber.
@@ -868,7 +896,7 @@ export function createCopilotBackend(): ServerBackend {
           state.cliSessionId = null;
           latestUsage = null;
           inflightToolUses.clear();
-          currentSend?.({ type: 'message', msgType: 'plan', content: '' });
+          currentSend?.({ type: 'message', msgId: mintMsgId(), msgType: 'plan', content: '' });
           if (hadSession) {
             try {
               await ensureSession();

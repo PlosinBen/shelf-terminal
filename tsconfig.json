@@ -15,5 +15,5 @@
       "@shared/*": ["src/shared/*"]
     }
   },
-  "include": ["src"]
+  "include": ["src", "agent-server"]
 }
