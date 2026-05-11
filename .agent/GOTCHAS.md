@@ -511,3 +511,32 @@ if (currentCwd) config.workingDirectory = currentCwd;
 **不要做**:
 - 不要用 `process.cwd()` 當預設 — agent-server 的 cwd 不是用戶的專案目錄
 - 不要在每個 turn 重設 currentCwd — Copilot CLI 沒有 `rpc.cwd.set`，session 中途換 cwd 改不動，只能 first-write-wins（要切 cwd 就斷 session 重建）
+
+## Claude SDK `tool_result.content` 可能是 content-block array，不是 string
+
+**現象**: 渲染 Claude sub-agent（`Task` / `Agent`）的 result 時，畫面顯示 raw `[{"type":"text","text":"..."}]` 而不是純文字。
+
+**根因**: Claude SDK `assistant.message.content` 裡的 `tool_result` block，它的 `content` 欄位有兩種可能 shape：
+1. 純 string（多數 SDK built-in tool: Bash/Read/Grep stdout）
+2. content-block array：`[{ type: 'text', text: '...' }, ...]`（Task/Agent sub-agent 標準返回；MCP custom tool 也常用）
+
+早期 code `typeof raw === 'string' ? raw : JSON.stringify(raw ?? '')` 對 array case 直接 stringify，把 wrapper 結構也印出來。
+
+**解法**: `agent-server/providers/claude.ts:extractToolResultText()` 統一展開：string passthrough、array 抽 text-block 的 `.text` 用 `\n` join、其他 shape JSON-stringify 保命。
+
+**不要做**:
+- 不要假設 `content` 一定是 string — type def 寫 `string | ContentBlock[]`
+- 不要丟掉非 text block — 至少 fallback JSON 保留資訊（例如 image block）
+- 不要在 renderer 端做 unwrap — provider 已經保證送出純 string，renderer 不該再做格式判斷
+
+## Claude SDK 同時有 `Task` 跟 `Agent` 兩個 toolName 做 sub-agent dispatch
+
+**現象**: 我們的 `formatClaudeToolInput` switch case 只 match `'Task'`，user 看到 sub-agent 卡片 header 只顯示 `description` 文字，看不到 prompt preview — 跟預期 `description: prompt-prefix` 格式不一樣。
+
+**根因**: Claude code SDK 從某個版本開始把 sub-agent dispatch tool 從 `Task` 改名 `Agent`（兩個並存當別名）。Input shape 一樣（`{ description, subagent_type, prompt }`），但 toolName 不同。Match `'Task'` 的 case 漏掉 `'Agent'`，落到 default 分支拿 first string value（就是 `description`）。
+
+**解法**: formatter switch 寫 `case 'Task': case 'Agent':` 共用同一個 body。
+
+**不要做**:
+- 不要假設 SDK 的 toolName 永遠穩定 — Claude code SDK 自己會 alias / rename，需要時補 case
+- 不要為了「以後新 SDK 名字」加複雜 prefix-match 邏輯 — 出現時加 case，don't over-engineer
