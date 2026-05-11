@@ -611,7 +611,13 @@ export function createCopilotBackend(): ServerBackend {
             // doesn't tell us which file caused failure (and apply_patch is
             // typically all-or-nothing — validation fails before any write),
             // so we mark every sub-card with the same result.
-            const errorMsg = data.error?.message ?? 'apply_patch failed';
+            //
+            // Per-card error text intentionally stays generic ("apply_patch
+            // failed") — repeating the detailed SDK reason on N cards is
+            // visual noise, and ✗ + a single top-level error message
+            // already tell the full story. The detail lives on the
+            // top-level error message below.
+            const detailMsg = data.error?.message ?? 'unknown error';
             for (const { msgId, spec } of entry.subs) {
               currentSend({
                 type: 'message', msgId, msgType: 'file_edit',
@@ -619,18 +625,17 @@ export function createCopilotBackend(): ServerBackend {
                 filePath: spec.filePath,
                 ...(spec.kind === 'update' ? { diff: spec.diff } : { content: spec.content }),
                 result: isError
-                  ? { success: false, error: errorMsg }
+                  ? { success: false, error: 'apply_patch failed' }
                   : { success: true },
               });
             }
-            // On failure, also surface a top-level error message in the
-            // timeline. Each sub-card already shows ✗, but a patch-spanning
-            // error message makes the failure unmissable and gives one place
-            // to read the reason instead of opening every card.
+            // On failure, surface a top-level error message carrying the
+            // patch-level reason. Each sub-card's ✗ tells "this file
+            // wasn't changed"; the timeline error tells WHY.
             if (isError) {
               currentSend({
                 type: 'message', msgId: mintMsgId(), msgType: 'error',
-                content: `apply_patch failed: ${errorMsg}`,
+                content: `Patch operation failed: ${detailMsg}`,
               });
             }
           } else {
