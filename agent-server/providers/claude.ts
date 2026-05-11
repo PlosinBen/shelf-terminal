@@ -400,6 +400,35 @@ type InflightToolUseEntry =
   | { kind: 'file_edit'; filePath: string; diff?: { oldString: string; newString: string }; content?: string };
 const inflightToolUses = new Map<string, InflightToolUseEntry>();
 
+/**
+ * Unwrap a Claude SDK tool_result `content` payload into a plain string for
+ * the renderer. SDK delivers it as either:
+ *   - string (legacy / simple tools)
+ *   - array of content blocks: `[{ type: 'text', text: '...' }, ...]` (Task /
+ *     Agent sub-agent returns this shape; MCP tools may too)
+ *   - (rare) other structured shapes — JSON-stringify as last resort
+ *
+ * Earlier code blindly `JSON.stringify`d the array form, surfacing
+ * `[{"type":"text","text":"..."}]` to the user. Unwrap text blocks so the
+ * renderer's <pre> shows readable output.
+ */
+export function extractToolResultText(raw: unknown): string {
+  if (raw == null) return '';
+  if (typeof raw === 'string') return raw;
+  if (Array.isArray(raw)) {
+    const parts = raw.map((b) => {
+      if (typeof b === 'string') return b;
+      if (b && typeof b === 'object') {
+        const block = b as { type?: string; text?: string };
+        if (block.type === 'text' && typeof block.text === 'string') return block.text;
+      }
+      return JSON.stringify(b);
+    });
+    return parts.join('\n');
+  }
+  return JSON.stringify(raw);
+}
+
 function stripCwd(p: string, cwd: string): string {
   if (!cwd || !p) return p;
   if (p.startsWith(cwd + '/')) return p.slice(cwd.length + 1);
@@ -442,7 +471,12 @@ export function formatClaudeToolInput(toolName: string, input: Record<string, un
       return String(input.url ?? '');
     case 'WebSearch':
       return String(input.query ?? '');
-    case 'Task': {
+    // Claude SDK uses both `Task` (older) and `Agent` (newer claude-code SDK)
+    // for sub-agent dispatch. Same input shape: `{ description, subagent_type,
+    // prompt }`. Treat them identically — header surfaces the human-friendly
+    // description plus a prompt preview, not the whole prompt blob.
+    case 'Task':
+    case 'Agent': {
       const desc = input.description ?? input.subagent_type ?? '';
       const prompt = String(input.prompt ?? '');
       return desc ? `${desc}: ${prompt.slice(0, 80)}` : prompt.slice(0, 120);
@@ -613,7 +647,7 @@ function processMessage(msg: SDKMessage, send: SendFn, cwd: string) {
         for (const block of msg.message.content) {
           if ((block as any).type === 'tool_result') {
             const raw = (block as any).content;
-            const content = typeof raw === 'string' ? raw : JSON.stringify(raw ?? '');
+            const content = extractToolResultText(raw);
             emitClaudeToolResult(send, (block as any).tool_use_id, content, (block as any).is_error === true);
           }
         }

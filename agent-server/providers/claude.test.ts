@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { mergeClaudeModels, rateLimitInfoToSegment, formatClaudeToolInput } from './claude';
+import { mergeClaudeModels, rateLimitInfoToSegment, formatClaudeToolInput, extractToolResultText } from './claude';
 import type { ProviderModel } from '../../src/shared/types';
 
 describe('mergeClaudeModels', () => {
@@ -191,5 +191,46 @@ describe('formatClaudeToolInput', () => {
   it('falls back to JSON when no string field', () => {
     const out = formatClaudeToolInput('mystery', { count: 3, ok: true }, cwd);
     expect(out).toContain('"count":3');
+  });
+});
+
+describe('extractToolResultText', () => {
+  // Regression: Claude SDK Task/Agent tool_result content is a content-block
+  // array, not a string. Pre-fix we JSON-stringified it and the user saw
+  // raw `[{"type":"text","text":"..."}]` in the result body.
+  it('joins text blocks into newline-separated string', () => {
+    const raw = [
+      { type: 'text', text: 'first line' },
+      { type: 'text', text: 'second line' },
+    ];
+    expect(extractToolResultText(raw)).toBe('first line\nsecond line');
+  });
+
+  it('passes strings through unchanged (legacy / simple tools)', () => {
+    expect(extractToolResultText('hello world')).toBe('hello world');
+  });
+
+  it('falls back to JSON for non-text block types so info is not lost', () => {
+    const raw = [{ type: 'image', data: 'b64...' }];
+    expect(extractToolResultText(raw)).toContain('"type":"image"');
+  });
+
+  it('returns empty string for nullish input', () => {
+    expect(extractToolResultText(null)).toBe('');
+    expect(extractToolResultText(undefined)).toBe('');
+  });
+});
+
+describe('formatClaudeToolInput Agent alias', () => {
+  // Regression: Claude SDK ships sub-agent dispatch as both `Task` (legacy)
+  // and `Agent` (newer claude-code SDK). Header was previously falling to
+  // the generic default branch when toolName === 'Agent', showing only the
+  // first string field instead of the description + prompt preview.
+  it('formats Agent the same as Task', () => {
+    const input = { description: 'lookup', subagent_type: 'explore', prompt: 'find foo' };
+    expect(formatClaudeToolInput('Agent', input, '/x'))
+      .toBe(formatClaudeToolInput('Task', input, '/x'));
+    expect(formatClaudeToolInput('Agent', input, '/x'))
+      .toMatch(/^lookup: find foo/);
   });
 });
