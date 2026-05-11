@@ -280,8 +280,8 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
 
   // Capabilities listener
   //
-  // Capabilities arrive after every backend (re)connect — first launch, after
-  // `handleReset` re-spawn, after credential flow, etc. We use this as the
+  // Capabilities arrive after every backend (re)connect — first launch,
+  // after credential flow, etc. We use this as the
   // canonical sync point for saved prefs vs. backend defaults:
   //
   // - savedPrefs win over `caps.currentXxx` (caps reflect a *fresh* backend
@@ -734,22 +734,16 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
     persistPref({ effort: next.value });
   }, [tabId, capabilities, currentEffort, persistPref]);
 
-  const handleReset = useCallback(async () => {
-    if (sessionId) clearAgentSession(sessionId);
-    await window.shelfApi.agent.destroy(tabId);
+  const handleClearHistory = useCallback(async () => {
+    // Lightweight cleanup: wipe what the user sees (in-memory + IDB rows
+    // for this session). Do NOT touch the agent backend, sessionId, or
+    // accumulated status indicators (cost / turns / context %). The agent
+    // keeps its memory — if the user wants to also reset agent context,
+    // they use `/clear` slash command which has provider-side semantics
+    // (Claude SDK's own /clear, Copilot's context-cleared pathway).
+    if (sessionId) await clearAgentSession(sessionId);
     setMessages([]);
-    setCostUsd(undefined);
-    setNumTurns(undefined);
-    setContextUsage(null);
-    setRateLimits([]);
-    const newSessionId = crypto.randomUUID();
-    sessionIdRef.current = newSessionId;
-    const ids = { ...projects[projectIndex]?.config.agentSessionIds, [provider]: newSessionId };
-    updateProjectConfig(projectIndex, { agentSessionIds: ids });
-    initializedRef.current = false;
-    window.shelfApi.agent.init(tabId, cwd, connection, provider, newSessionId);
-    initializedRef.current = true;
-  }, [tabId, cwd, connection, provider, sessionId, projectIndex, projects]);
+  }, [sessionId]);
 
   // Slash menu
   const filteredCommands = useMemo(() => {
@@ -1091,7 +1085,7 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
           </React.Fragment>
         ))}
         <span style={{ marginLeft: 'auto' }} />
-        <button className="agent-reset-btn" onClick={handleReset} disabled={isStreaming} title="Reset session">Reset</button>
+        <button className="agent-reset-btn" onClick={handleClearHistory} disabled={isStreaming} title="Clear visible messages (agent keeps its memory; use /clear to reset agent context)">Clear History</button>
       </div>
     </div>
   );
