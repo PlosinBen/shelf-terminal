@@ -391,6 +391,18 @@ export function createCopilotBackend(): ServerBackend {
     if (!ghToken) {
       throw new Error('GitHub Copilot 需要 gh CLI 登入。請執行：gh auth login -s copilot');
     }
+    // Diagnostic: Copilot CLI spawns bash via node-pty whose default env / shell
+    // resolution can break under packaged Electron (no login shell env). Dump
+    // the critical env vars so we can verify what the CLI actually sees.
+    console.error('[copilot-diag] ensureClient', JSON.stringify({
+      cliPath,
+      SHELL: process.env.SHELL ?? '<unset>',
+      PATH_head: (process.env.PATH ?? '<unset>').slice(0, 200),
+      HOME: process.env.HOME ?? '<unset>',
+      USER: process.env.USER ?? '<unset>',
+      LANG: process.env.LANG ?? '<unset>',
+      cwd: process.cwd(),
+    }));
     state.client = new CopilotClient({
       cliPath,
       useStdio: true,
@@ -413,19 +425,44 @@ export function createCopilotBackend(): ServerBackend {
     };
     if (currentEffort) config.reasoningEffort = currentEffort;
     if (currentCwd) config.workingDirectory = currentCwd;
+    // Diagnostic: confirm what workingDirectory + resume sessionId actually
+    // land in the session config, so we can rule out "createSession got
+    // wrong cwd" vs deeper node-pty / posix_spawnp failures.
+    console.error('[copilot-diag] ensureSession', JSON.stringify({
+      workingDirectory: currentCwd,
+      workingDirectoryExists: currentCwd ? (() => {
+        try { return require('fs').existsSync(currentCwd); } catch { return 'check-failed'; }
+      })() : null,
+      resumingSessionId: state.cliSessionId,
+      model: currentModel,
+      effort: currentEffort,
+      permissionMode: currentPermissionMode,
+    }));
 
     let session: import('@github/copilot-sdk').CopilotSession;
+    let creationPath: 'resume-ok' | 'resume-failed-recreate' | 'fresh-create' = 'fresh-create';
     if (state.cliSessionId) {
       try {
         session = await client.resumeSession(state.cliSessionId, config);
-      } catch {
+        creationPath = 'resume-ok';
+      } catch (err) {
+        console.error('[copilot-diag] resumeSession failed, creating fresh', JSON.stringify({
+          attemptedSessionId: state.cliSessionId,
+          error: (err as Error)?.message ?? String(err),
+        }));
         session = await client.createSession(config);
+        creationPath = 'resume-failed-recreate';
       }
     } else {
       session = await client.createSession(config);
+      creationPath = 'fresh-create';
     }
     state.session = session;
     state.cliSessionId = session.sessionId;
+    console.error('[copilot-diag] ensureSession done', JSON.stringify({
+      newSessionId: session.sessionId,
+      creationPath,
+    }));
     // Tell orchestrator to persist this so the next process can resume the
     // same Copilot CLI session (CLI keeps session state on disk by sessionId).
     currentSend?.({ type: 'context_patch', patch: { lastSdkSessionId: session.sessionId } });
@@ -535,6 +572,16 @@ export function createCopilotBackend(): ServerBackend {
           inflightToolUses.delete(toolUseId);
 
           const isError = data.success === false;
+          // Diagnostic: when a tool errors, dump the full error payload so we
+          // see WHY it failed (e.g. node-pty errno, missing binary, etc.) —
+          // SDK normally only surfaces the short message string.
+          if (isError) {
+            console.error('[copilot-diag] tool.execution_complete error', JSON.stringify({
+              toolName: entry.kind === 'tool_use' ? entry.toolName : 'file_edit',
+              toolUseId,
+              data,
+            }));
+          }
           if (entry.kind === 'file_edit') {
             currentSend({
               type: 'message', msgType: 'file_edit',
@@ -684,6 +731,9 @@ export function createCopilotBackend(): ServerBackend {
       // or resumed a session in-memory, we don't clobber.
       if (!state.cliSessionId && input.restoreContext?.lastSdkSessionId) {
         state.cliSessionId = input.restoreContext.lastSdkSessionId;
+        console.error('[copilot-diag] query hydrate cliSessionId from context', JSON.stringify({
+          hydratedSessionId: state.cliSessionId,
+        }));
       }
       const modelChanged = !!(input.model && input.model !== currentModel);
       if (modelChanged) {
@@ -852,7 +902,18 @@ export function createCopilotBackend(): ServerBackend {
           // flows) is treated as a successful no-op so we don't surprise
           // unsuspecting environments with auth / CLI-binary requirements.
           const hadSession = !!state.session || !!state.cliSessionId;
-          try { await state.session?.disconnect(); } catch { /* ignore */ }
+          const oldSessionId = state.cliSessionId;
+          console.error('[copilot-diag] /clear begin', JSON.stringify({
+            hadSession,
+            oldSessionId,
+            hasInflightSession: !!state.session,
+            currentCwd,
+          }));
+          try { await state.session?.disconnect(); } catch (err) {
+            console.error('[copilot-diag] /clear disconnect error (ignored)', JSON.stringify({
+              error: (err as Error)?.message ?? String(err),
+            }));
+          }
           state.session = null;
           state.cliSessionId = null;
           latestUsage = null;
@@ -861,9 +922,19 @@ export function createCopilotBackend(): ServerBackend {
           if (hadSession) {
             try {
               await ensureSession();
+              console.error('[copilot-diag] /clear rebuild ok', JSON.stringify({
+                newSessionId: state.cliSessionId,
+                workingDirectory: currentCwd,
+              }));
             } catch (err: any) {
+              console.error('[copilot-diag] /clear rebuild FAILED', JSON.stringify({
+                error: err?.message ?? String(err),
+                stack: err?.stack,
+              }));
               return { type: 'error', message: `Cleared, but failed to start new session: ${err?.message ?? err}` };
             }
+          } else {
+            console.error('[copilot-diag] /clear no-op (no prior session)');
           }
           return { type: 'context-cleared', message: 'Context cleared' };
         }
