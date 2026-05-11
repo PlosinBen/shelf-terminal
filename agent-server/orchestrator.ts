@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { loadContext, saveContext, type PersistedContext } from './context-store';
 import type { OutgoingMessage, SendFn } from './providers/types';
 
@@ -33,6 +34,34 @@ export function loadRestoreContextFor(
  *
  * @param now optional clock injection for tests; defaults to `Date.now`.
  */
+/**
+ * Generate a unique turn id for a single `handleSend` invocation. Short enough
+ * to read in logs (`t-3f8a91c2`); 8 hex chars give 4 billion combinations,
+ * which is far more than an agent-server process will ever see in its
+ * lifetime. Format intentionally distinct from sessionId so the two don't
+ * collide in eyeball debugging.
+ */
+export function newTurnId(): string {
+  return `t-${randomUUID().slice(0, 8)}`;
+}
+
+/**
+ * Wrap a `send` function so every outgoing message carries the same `turnId`.
+ * Each call to `handleSend` in agent-server is one "turn" — generating a turn
+ * id once per turn and injecting it lets the main-process side route events
+ * back to the correct per-turn AsyncIterator without ambiguity.
+ *
+ * Lifecycle messages (`ready`, `pong`, etc.) are emitted from agent-server
+ * outside of `handleSend` and intentionally do NOT carry a turnId — they
+ * belong to no specific turn. The main side handles those on a separate
+ * dispatch path.
+ */
+export function wrapSendForTurn(turnId: string, raw: SendFn): SendFn {
+  return (msg: OutgoingMessage) => {
+    raw({ ...msg, turnId } as OutgoingMessage);
+  };
+}
+
 export function wrapSendForContext(
   provider: string,
   sessionId: string | undefined,

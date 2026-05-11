@@ -2,7 +2,7 @@ import * as readline from 'readline';
 import { createClaudeBackend } from './providers/claude';
 import { createCopilotBackend } from './providers/copilot';
 import { deleteContext, cleanupOldContexts } from './context-store';
-import { loadRestoreContextFor, wrapSendForContext } from './orchestrator';
+import { loadRestoreContextFor, newTurnId, wrapSendForContext, wrapSendForTurn } from './orchestrator';
 import type { OutgoingMessage, QueryInput, ServerBackend } from './providers/types';
 import type { ProviderModel } from '../src/shared/types';
 
@@ -82,7 +82,15 @@ async function handleSend(msg: IncomingMessage) {
     sessionId: msg.sessionId,
     restoreContext,
   };
-  await backend.query(input, wrapSendForContext(provider, msg.sessionId, send));
+
+  // Compose send wrappers. Order matters: provider's `send(msg)` first hits
+  // context-aware (intercepts `context_patch` and writes to disk, skipping
+  // forward), then turn-aware (stamps `turnId` envelope onto everything that
+  // does get forwarded). Routing on the main side keys off this turnId.
+  const turnId = newTurnId();
+  const turnAware = wrapSendForTurn(turnId, send);
+  const contextAware = wrapSendForContext(provider, msg.sessionId, turnAware);
+  await backend.query(input, contextAware);
 }
 
 async function handleStop() {

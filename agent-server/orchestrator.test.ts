@@ -4,7 +4,7 @@ import { existsSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { loadContext, saveContext } from './context-store';
-import { loadRestoreContextFor, wrapSendForContext } from './orchestrator';
+import { loadRestoreContextFor, newTurnId, wrapSendForContext, wrapSendForTurn } from './orchestrator';
 import type { OutgoingMessage } from './providers/types';
 
 // Mirror context-store.test.ts: real FS, UUID sessionIds for collision-free
@@ -141,6 +141,63 @@ describe('orchestrator', () => {
       expect(ctx?.provider).toBe('claude');
       expect(ctx?.sessionId).toBe(sessionId);
       expect(ctx?.updatedAt).toBe(42);
+    });
+  });
+
+  describe('newTurnId', () => {
+    it('produces `t-` prefixed 10-char ids', () => {
+      const id = newTurnId();
+      expect(id).toMatch(/^t-[0-9a-f]{8}$/);
+    });
+
+    it('yields a fresh id on each call (no collisions in 1k samples)', () => {
+      const ids = new Set<string>();
+      for (let i = 0; i < 1000; i++) ids.add(newTurnId());
+      expect(ids.size).toBe(1000);
+    });
+  });
+
+  describe('wrapSendForTurn', () => {
+    it('stamps turnId onto every forwarded message', () => {
+      const seen: OutgoingMessage[] = [];
+      const send = wrapSendForTurn('t-abc12345', (m) => seen.push(m));
+      send({ type: 'status', state: 'streaming' });
+      send({ type: 'message', msgType: 'text', content: 'hi' });
+      expect(seen).toEqual([
+        { type: 'status', state: 'streaming', turnId: 't-abc12345' },
+        { type: 'message', msgType: 'text', content: 'hi', turnId: 't-abc12345' },
+      ]);
+    });
+
+    it('different turn wrappers stamp different ids (independent state)', () => {
+      const seen: OutgoingMessage[] = [];
+      const raw = (m: OutgoingMessage) => seen.push(m);
+      const a = wrapSendForTurn('t-aaaaaaaa', raw);
+      const b = wrapSendForTurn('t-bbbbbbbb', raw);
+      a({ type: 'status', state: 'streaming' });
+      b({ type: 'status', state: 'idle' });
+      expect((seen[0] as any).turnId).toBe('t-aaaaaaaa');
+      expect((seen[1] as any).turnId).toBe('t-bbbbbbbb');
+    });
+
+    it('composes with wrapSendForContext: context_patch is intercepted before turnId injection so the disk write is untainted', () => {
+      const sessionId = randomUUID();
+      created.push(sessionId);
+      const seen: OutgoingMessage[] = [];
+      const raw = (m: OutgoingMessage) => seen.push(m);
+      const turnAware = wrapSendForTurn('t-99999999', raw);
+      const contextAware = wrapSendForContext('claude', sessionId, turnAware, () => 7);
+      // context_patch never reaches turnAware → no turnId pollution in stored context
+      contextAware({ type: 'context_patch', patch: { lastSdkSessionId: 'sdk-1' } });
+      expect(seen).toHaveLength(0);
+      const ctx = loadContext(sessionId);
+      expect(ctx?.lastSdkSessionId).toBe('sdk-1');
+      expect((ctx as any)?.turnId).toBeUndefined();
+      // Non-patch goes through both wrappers and acquires turnId
+      contextAware({ type: 'status', state: 'streaming' });
+      expect(seen).toEqual([
+        { type: 'status', state: 'streaming', turnId: 't-99999999' },
+      ]);
     });
   });
 });
