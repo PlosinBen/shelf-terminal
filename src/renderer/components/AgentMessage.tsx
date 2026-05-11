@@ -226,13 +226,19 @@ export function AgentMessage({ message, cwd }: Props) {
     case 'thinking': {
       const mode = resolveDisplayMode('thinking');
       if (mode === 'hidden') return null;
+      // While streaming, force-expand so the user can see content accumulating.
+      // After the finalize lands (streaming flag clears), revert to the user's
+      // collapsed/expanded preference. Label switches to "Thinking..." with
+      // trailing dots as the running indicator.
+      const streamingActive = message.streaming === true;
+      const showContent = streamingActive || expanded || mode === 'expanded';
       return (
         <div className="agent-msg agent-msg-thinking">
           <div className="agent-thinking-header" onClick={() => setExpanded(!expanded)}>
-            <span className={`agent-chevron ${expanded || mode === 'expanded' ? 'expanded' : ''}`}>&#9654;</span>
-            <span className="agent-thinking-label">Thinking</span>
+            <span className={`agent-chevron ${showContent ? 'expanded' : ''}`}>&#9654;</span>
+            <span className="agent-thinking-label">{streamingActive ? 'Thinking...' : 'Thinking'}</span>
           </div>
-          {(expanded || mode === 'expanded') && (
+          {showContent && (
             <div className="agent-thinking-content">{message.content}</div>
           )}
         </div>
@@ -295,7 +301,7 @@ export function AgentMessage({ message, cwd }: Props) {
         <div className="agent-msg agent-msg-assistant">
           <span className="agent-msg-label">{label}</span>
           <div className="agent-msg-content agent-markdown" dangerouslySetInnerHTML={{ __html: markdownHtml }} />
-          {message.streaming && <span className="agent-cursor" />}
+          {message.streaming === true && <span className="agent-cursor" />}
         </div>
       );
     }

@@ -24,6 +24,13 @@ export interface SlashCommand {
 }
 
 export interface AgentStreamDelta {
+  /**
+   * Same id as the eventual finalize message — renderer upserts both into
+   * a single timeline entry. Stream chunks accumulate delta content under
+   * this msgId; the finalize message replaces the accumulated content with
+   * the assembled block.
+   */
+  msgId: string;
   type: 'text' | 'thinking';
   content: string;
 }

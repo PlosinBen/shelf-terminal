@@ -376,6 +376,7 @@ function parseRemoteMessage(msg: any): AgentEvent | null {
     return {
       type: 'stream',
       payload: {
+        msgId: msg.msgId ?? `legacy-stream-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         type: msg.streamType ?? 'text',
         content: msg.content ?? '',
       },
@@ -403,6 +404,14 @@ function parseRemoteMessage(msg: any): AgentEvent | null {
  */
 function buildAgentMessagePayload(msg: any): import('./types').AgentMessage | null {
   const t = msg.msgType;
+  // msgId is the universal upsert key. For tool messages, msgId is supplied
+  // by the provider AND equals toolUseId. For text/thinking/etc., provider
+  // mints a fresh `m-...` id. Backward-compat: older agent-server bundle
+  // (pre Step 2.1) sent no msgId — fall back to toolUseId (for tools) or
+  // synthesize a stable string from content (for non-tool). Synthesized
+  // ids are best-effort; they'll never align with stream chunks but at
+  // least give renderer a key for the store.
+  const msgId: string = msg.msgId ?? msg.toolUseId ?? `legacy-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   switch (t) {
     case 'text':
     case 'thinking':
@@ -410,35 +419,36 @@ function buildAgentMessagePayload(msg: any): import('./types').AgentMessage | nu
     case 'system':
     case 'error':
     case 'plan':
-      return { type: t, content: msg.content ?? '' };
+      return { msgId, type: t, content: msg.content ?? '' };
     case 'tool_use': {
       if (!msg.toolUseId || !msg.toolName) return null;
-      const out: import('./types').AgentMessage = {
+      // Provider should always send a string; coerce defensively for
+      // backward-compat (older bundle wire might still emit toolInput object).
+      const input: string = typeof msg.input === 'string'
+        ? msg.input
+        : msg.toolInput
+          ? JSON.stringify(msg.toolInput)
+          : '';
+      return {
+        msgId,
         type: 'tool_use',
         toolUseId: msg.toolUseId,
         toolName: msg.toolName,
-        // Provider should always send a string; coerce defensively for
-        // backward-compat (older bundle wire might still emit toolInput object).
-        input: typeof msg.input === 'string'
-          ? msg.input
-          : msg.toolInput
-            ? JSON.stringify(msg.toolInput)
-            : '',
+        input,
+        ...(msg.result ? { result: msg.result } : {}),
       };
-      if (msg.result) out.result = msg.result;
-      return out;
     }
     case 'file_edit': {
       if (!msg.toolUseId || !msg.filePath) return null;
-      const out: import('./types').AgentMessage = {
+      return {
+        msgId,
         type: 'file_edit',
         toolUseId: msg.toolUseId,
         filePath: msg.filePath,
+        ...(msg.diff ? { diff: msg.diff } : {}),
+        ...(typeof msg.content === 'string' ? { content: msg.content } : {}),
+        ...(msg.result ? { result: msg.result } : {}),
       };
-      if (msg.diff) out.diff = msg.diff;
-      if (typeof msg.content === 'string') out.content = msg.content;
-      if (msg.result) out.result = msg.result;
-      return out;
     }
     default:
       return null;

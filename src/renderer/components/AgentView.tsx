@@ -59,21 +59,29 @@ function freshMsgId(prefix: string): string {
  * the assistant-text label.
  */
 function buildAgentMsg(msg: any, provider: string): AgentMsg | null {
+  // `id` is the universal upsert key — equals `msg.msgId` from the wire
+  // (which equals toolUseId for tool messages). Provider-minted; renderer
+  // uses it both as React key and as the upsert key for the message store.
+  // Fall back to a synthetic id for messages from older agent-server bundles
+  // that don't emit msgId yet (won't pair with stream chunks but at least
+  // gets a usable key).
+  const id: string = msg.msgId ?? msg.toolUseId ?? freshMsgId('msg');
+  const ts = Date.now();
   switch (msg.type) {
     case 'text':
-      return { id: freshMsgId('msg'), type: 'text', content: msg.content ?? '', provider, timestamp: Date.now() };
+      return { id, type: 'text', content: msg.content ?? '', provider, timestamp: ts };
     case 'thinking':
-      return { id: freshMsgId('msg'), type: 'thinking', content: msg.content ?? '', provider, timestamp: Date.now() };
+      return { id, type: 'thinking', content: msg.content ?? '', provider, timestamp: ts };
     case 'intent':
-      return { id: freshMsgId('msg'), type: 'intent', content: msg.content ?? '', provider, timestamp: Date.now() };
+      return { id, type: 'intent', content: msg.content ?? '', provider, timestamp: ts };
     case 'system':
-      return { id: freshMsgId('msg'), type: 'system', content: msg.content ?? '', provider, timestamp: Date.now() };
+      return { id, type: 'system', content: msg.content ?? '', provider, timestamp: ts };
     case 'error':
-      return { id: freshMsgId('err'), type: 'error', content: msg.content ?? 'Unknown error', provider, timestamp: Date.now() };
+      return { id, type: 'error', content: msg.content ?? 'Unknown error', provider, timestamp: ts };
     case 'tool_use':
       if (!msg.toolUseId || !msg.toolName) return null;
       return {
-        id: freshMsgId('msg'),
+        id,
         type: 'tool_use',
         toolUseId: msg.toolUseId,
         toolName: msg.toolName,
@@ -87,12 +95,12 @@ function buildAgentMsg(msg: any, provider: string): AgentMsg | null {
             : '',
         ...(msg.result ? { result: msg.result } : {}),
         provider,
-        timestamp: Date.now(),
+        timestamp: ts,
       };
     case 'file_edit':
       if (!msg.toolUseId || !msg.filePath) return null;
       return {
-        id: freshMsgId('msg'),
+        id,
         type: 'file_edit',
         toolUseId: msg.toolUseId,
         filePath: msg.filePath,
@@ -100,11 +108,29 @@ function buildAgentMsg(msg: any, provider: string): AgentMsg | null {
         ...(typeof msg.content === 'string' ? { content: msg.content } : {}),
         ...(msg.result ? { result: msg.result } : {}),
         provider,
-        timestamp: Date.now(),
+        timestamp: ts,
       };
     default:
       return null;
   }
+}
+
+/**
+ * Insert `built` into the timeline OR replace the existing entry with the
+ * same `id`. Stream chunks and their finalize message share an id; the
+ * provider also re-emits tool_use/file_edit messages with `result` populated.
+ * Either way, upsert-by-id collapses them into a single timeline entry.
+ * `timestamp` is preserved from the original so ordering doesn't jump.
+ */
+function upsertById(prev: AgentMsg[], built: AgentMsg): AgentMsg[] {
+  for (let i = prev.length - 1; i >= 0; i--) {
+    if (prev[i].id === built.id) {
+      const next = prev.slice();
+      next[i] = { ...built, timestamp: prev[i].timestamp };
+      return next;
+    }
+  }
+  return [...prev, built];
 }
 
 export function AgentView({ tabId, cwd, connection, provider, projectIndex, visible }: Props) {
@@ -129,8 +155,6 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
   const [currentPlan, setCurrentPlan] = useState<string>('');
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
-  const [streamText, setStreamText] = useState('');
-  const [streamThinking, setStreamThinking] = useState('');
   const [statusModel, setStatusModel] = useState<string | null>(savedPrefs?.model ?? null);
   const [costUsd, setCostUsd] = useState<number | undefined>(undefined);
   const [numTurns, setNumTurns] = useState<number | undefined>(undefined);
@@ -339,54 +363,42 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
         return;
       }
 
-      // Build the renderer-side AgentMsg variant from the canonical shape.
-      // Each variant carries only the fields it needs (see AgentMsg type).
       const built = buildAgentMsg(msg, provider);
       if (!built) return;
 
-      // tool_use / file_edit upsert by toolUseId — when provider re-emits the
-      // same toolUseId with `result` populated, we replace the in-flight entry
-      // rather than appending a second card.
-      if ((built.type === 'tool_use' || built.type === 'file_edit') && built.toolUseId) {
-        const upsertId = built.toolUseId;
-        setMessages((prev) => {
-          for (let i = prev.length - 1; i >= 0; i--) {
-            const m = prev[i];
-            if ((m.type === 'tool_use' || m.type === 'file_edit') && m.toolUseId === upsertId) {
-              const next = prev.slice();
-              next[i] = { ...built, id: m.id, timestamp: m.timestamp };
-              return next;
-            }
-          }
-          return [...prev, built];
-        });
-        return;
-      }
-
-      // text/thinking with non-empty content supersede their streaming buffer
-      // (provider already streamed deltas, then sent the assembled block).
-      // Empty assembled blocks happen with includePartialMessages — keep the
-      // streaming buffer and let the idle handler flush it.
-      const hasContent = (built.type === 'text' || built.type === 'thinking') && built.content.length > 0;
-      if (built.type === 'text') {
-        if (!hasContent) return;
-        setStreamText('');
-      }
-      if (built.type === 'thinking') {
-        if (!hasContent) return;
-        setStreamThinking('');
-      }
-
-      setMessages((prev) => [...prev, built]);
+      // Finalize message wins over any in-flight streaming version of the
+      // same msgId. Drop the `streaming` flag (built doesn't set it) so the
+      // cursor stops blinking. Provider may also re-emit tool_use/file_edit
+      // with `result` populated — same upsert path handles both.
+      setMessages((prev) => upsertById(prev, built));
     });
 
     const offStream = window.shelfApi.agent.onStream((id: string, chunk: any) => {
       if (id !== tabId) return;
-      if (chunk.type === 'thinking') {
-        setStreamThinking((prev) => prev + (chunk.content ?? ''));
-      } else {
-        setStreamText((prev) => prev + (chunk.content ?? ''));
-      }
+      const chunkMsgId: string | undefined = chunk.msgId;
+      const chunkType: 'text' | 'thinking' = chunk.type === 'thinking' ? 'thinking' : 'text';
+      const delta: string = chunk.content ?? '';
+      if (!chunkMsgId || !delta) return;
+
+      // Stream chunk → upsert into the existing entry (if any) by msgId,
+      // appending delta content. If no entry yet (first chunk of this
+      // block), create a placeholder with `streaming: true` so the cursor
+      // shows up. The matching finalize message will replace this entry
+      // with the assembled full content (and drop the streaming flag).
+      setMessages((prev) => {
+        for (let i = prev.length - 1; i >= 0; i--) {
+          const m = prev[i];
+          if (m.id !== chunkMsgId) continue;
+          if (m.type !== 'text' && m.type !== 'thinking') return prev;  // unexpected; ignore
+          const next = prev.slice();
+          next[i] = { ...m, content: m.content + delta, streaming: true };
+          return next;
+        }
+        return [
+          ...prev,
+          { id: chunkMsgId, type: chunkType, content: delta, streaming: true, provider, timestamp: Date.now() },
+        ];
+      });
     });
 
     const offStatus = window.shelfApi.agent.onStatus((id: string, status: any) => {
@@ -394,26 +406,22 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
       const nowStreaming = status.state === 'streaming';
       setIsStreaming((wasStreaming) => {
         if (wasStreaming && !nowStreaming) {
-          // Promote streaming buffers to persistent messages on turn end.
-          // Queue flush is handled by a separate useEffect (see below) so we
-          // don't put side effects inside this state-updater.
-          setStreamThinking((prevThinking) => {
-            if (prevThinking.trim()) {
-              setMessages((msgs) => [...msgs, {
-                id: `thinking-${Date.now()}`, type: 'thinking', content: prevThinking, provider, timestamp: Date.now(),
-              }]);
-            }
-            return '';
+          // Turn ended — clear streaming flag on any entry still marked
+          // in-flight (no finalize ever landed for it). The content is
+          // whatever the stream deltas accumulated; we just stop the
+          // cursor. Persistence saver fires shortly after so the user
+          // sees a stable state next session open.
+          setMessages((prev) => {
+            let mutated = false;
+            const next = prev.map((m) => {
+              if ((m.type === 'text' || m.type === 'thinking') && m.streaming) {
+                mutated = true;
+                return { ...m, streaming: false };
+              }
+              return m;
+            });
+            return mutated ? next : prev;
           });
-          setStreamText((prev) => {
-            if (prev.trim()) {
-              setMessages((msgs) => [...msgs, {
-                id: `stream-${Date.now()}`, type: 'text', content: prev, provider, timestamp: Date.now(),
-              }]);
-            }
-            return '';
-          });
-          // Persist UI messages after state settles
           if (sessionId) {
             const maxMessages = settings.agentHistoryMaxMessages;
             setTimeout(() => {
@@ -434,11 +442,11 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
   }, [tabId, provider]);
 
   // Flush queued messages once the agent goes idle. Mirrors handleSend's
-  // exact path (push user bubble + clear streamText + agent.send) — the queued
-  // message becomes a regular user message on the next turn. Lives in its own
-  // useEffect (not inside the onStatus updater) to avoid side effects in a
-  // state updater and to give agent-server one tick to settle before the
-  // next IPC.AGENT_SEND fires.
+  // exact path (push user bubble + agent.send) — the queued message
+  // becomes a regular user message on the next turn. Lives in its own
+  // useEffect (not inside the onStatus updater) to avoid side effects in
+  // a state updater and to give agent-server one tick to settle before
+  // the next IPC.AGENT_SEND fires.
   useEffect(() => {
     if (isStreaming) return;
     if (queuedMessages.length === 0) return;
@@ -447,7 +455,6 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
     setMessages((prev) => [...prev, {
       id: `user-${Date.now()}`, type: 'user', content: next.content, timestamp: Date.now(),
     }]);
-    setStreamText('');
     window.shelfApi.agent.send(tabId, next.content);
   }, [isStreaming, queuedMessages, tabId]);
 
@@ -507,7 +514,7 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
     }
     // isStreaming flip toggles the "Agent is running…" placeholder, which
     // changes scrollHeight; include it in deps so the auto-follow keeps up.
-  }, [messages, streamText, streamThinking, isStreaming]);
+  }, [messages, isStreaming]);
 
   // When this tab becomes visible again, the auto-scroll effect above
   // could not run while the parent was display:none (scrollIntoView is a
@@ -625,7 +632,6 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
       ...(images.length > 0 ? { images } : {}),
       ...(files.length > 0 ? { files } : {}),
     }]);
-    setStreamText('');
     window.shelfApi.agent.send(tabId, text, images.length > 0 ? images : undefined);
   }, [tabId, input, isStreaming, pendingFiles, pendingImages, capabilities, statusModel]);
 
@@ -720,7 +726,6 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
     if (sessionId) clearAgentSession(sessionId);
     await window.shelfApi.agent.destroy(tabId);
     setMessages([]);
-    setStreamText('');
     setCostUsd(undefined);
     setNumTurns(undefined);
     setContextUsage(null);
@@ -886,52 +891,35 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
         )}
         {initStatus === 'ready' && messages.length === 0 && !isStreaming && <div className="agent-empty">Send a message to start</div>}
         {turns.map((turn, ti) => {
-          const isLastTurn = ti === turns.length - 1;
-          // Streaming content (thinking/text) goes inside `.agent-turn-response`
-          // alongside committed agent messages so visual styling is identical
-          // before and after the stream commits — avoids layout shift at end
-          // of stream. The loading spinner is rendered outside the wrapper
-          // (below) because it's a status indicator, not agent content.
-          const showStreamThinking = isLastTurn && streamThinking && (settings.agentDisplay?.thinking ?? 'collapsed') !== 'hidden';
-          const showStreamText = isLastTurn && streamText;
-          const hasResponseContent = turn.agent.length > 0 || showStreamThinking || showStreamText;
+          // Streaming content now lives in the messages array as entries
+          // with `streaming: true` — AgentMessage renders the cursor when
+          // that flag is set, so the timeline visually shows the in-flight
+          // chunk inline without a separate render branch.
+          const hasResponseContent = turn.agent.length > 0;
           return (
             <div key={turn.user?.id ?? `turn-${ti}`} className="agent-turn">
               {turn.user && <AgentMessage message={turn.user} cwd={cwd} />}
               {hasResponseContent && (
                 <div className="agent-turn-response">
                   {turn.agent.map((msg) => <AgentMessage key={msg.id} message={msg} cwd={cwd} />)}
-                  {showStreamThinking && (
-                    <div className="agent-msg agent-msg-thinking">
-                      <div className="agent-thinking-header">
-                        <span className="agent-chevron expanded">&#9654;</span>
-                        <span className="agent-thinking-label">Thinking...</span>
-                      </div>
-                      <div className="agent-thinking-content">{streamThinking}</div>
-                    </div>
-                  )}
-                  {showStreamText && (
-                    <div className="agent-msg agent-msg-assistant">
-                      <span className="agent-msg-label">{provider.charAt(0).toUpperCase() + provider.slice(1)}:</span>
-                      <div className="agent-msg-content agent-markdown" dangerouslySetInnerHTML={{ __html: renderMarkdown(streamText) }} />
-                      <span className="agent-cursor" />
-                    </div>
-                  )}
                 </div>
               )}
             </div>
           );
         })}
         {(() => {
-          // Spinner is the "agent is alive" signal when nothing else visually
-          // indicates progress. We hide it once any visible activity exists:
-          // streamText is rendered with a blinking cursor, and the "Thinking..."
-          // header (collapsed or expanded) is itself a running indicator.
-          // But if thinking display is set to 'hidden', the user sees nothing
-          // even when streamThinking is filling — keep the spinner in that case.
+          // Spinner = "agent alive" indicator when nothing visible is
+          // happening yet. With the new pipeline, any visible activity
+          // shows up in `messages` as a `streaming: true` text/thinking
+          // entry (which has its own cursor). The spinner only matters
+          // during the initial wait before any chunk arrives.
           const thinkingDisplay = settings.agentDisplay?.thinking ?? 'collapsed';
-          const thinkingVisible = streamThinking && thinkingDisplay !== 'hidden';
-          const showSpinner = isStreaming && !streamText && !thinkingVisible && messages.length > 0;
+          const hasVisibleStreaming = messages.some((m) => {
+            if (m.type === 'text' && m.streaming) return true;
+            if (m.type === 'thinking' && m.streaming && thinkingDisplay !== 'hidden') return true;
+            return false;
+          });
+          const showSpinner = isStreaming && !hasVisibleStreaming && messages.length > 0;
           if (!showSpinner) return null;
           return (
             <div className="agent-loading">

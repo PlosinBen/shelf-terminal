@@ -30,7 +30,22 @@ export interface AgentPrefs {
  *
  * See `.agent/features/AGENT_VIEW_MSG_TYPE.md` for design rationale.
  */
-export type AgentMessage =
+/**
+ * Universal upsert key for the renderer's message store. Provider mints it
+ * (see `agent-server/providers/*` for `mintMsgId()`). Stream chunks and
+ * their finalize message share one msgId so the renderer accumulates them
+ * into a single timeline entry. For tool_use / file_edit, `msgId ===
+ * toolUseId` — they're the same identity, both fields preserved for
+ * clarity (toolUseId stays named because permission_request pairs by it).
+ *
+ * `streaming?` flag indicates an entry is still receiving delta chunks
+ * (only set on text/thinking — other variants never stream). UI uses it
+ * to render the blinking cursor and to suppress promotion to "completed"
+ * rendering until a finalize message lands or the turn ends.
+ */
+type WithMsgId = { msgId: string; streaming?: boolean };
+
+export type AgentMessage = WithMsgId & (
   | { type: 'text'; content: string }
   | { type: 'thinking'; content: string }
   | { type: 'intent'; content: string }
@@ -39,7 +54,7 @@ export type AgentMessage =
   | { type: 'plan'; content: string }
   | {
       type: 'tool_use';
-      toolUseId: string;
+      toolUseId: string;  // === msgId
       toolName: string;
       // Provider-formatted, human-readable input string. Renderer treats it
       // as opaque text — no toolName-sniffing, no JSON parsing. Truncation
@@ -49,12 +64,13 @@ export type AgentMessage =
     }
   | {
       type: 'file_edit';
-      toolUseId: string;
+      toolUseId: string;  // === msgId
       filePath: string;
       diff?: { oldString: string; newString: string };
       content?: string;
       result?: { success: boolean; error?: string };
-    };
+    }
+);
 
 export type AgentMessageType = AgentMessage['type'];
 
