@@ -455,8 +455,12 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
     setMessages((prev) => [...prev, {
       id: `user-${Date.now()}`, type: 'user', content: next.content, timestamp: Date.now(),
     }]);
+    // Queued msg flush represents the same intent as handleSend (user
+    // pressed send earlier, just had to wait for the previous turn) —
+    // re-engage auto-follow so the new turn's stream lands in view.
+    setFollow(true);
     window.shelfApi.agent.send(tabId, next.content);
-  }, [isStreaming, queuedMessages, tabId]);
+  }, [isStreaming, queuedMessages, tabId, setFollow]);
 
   // Track user intent only on user-driven scroll inputs. We deliberately
   // ignore the generic `scroll` event because programmatic scrollIntoView
@@ -632,8 +636,12 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
       ...(images.length > 0 ? { images } : {}),
       ...(files.length > 0 ? { files } : {}),
     }]);
+    // User explicitly hit send — strong intent to see their message
+    // appear. Force re-engage auto-follow even if they had scrolled up
+    // while reading earlier history.
+    setFollow(true);
     window.shelfApi.agent.send(tabId, text, images.length > 0 ? images : undefined);
-  }, [tabId, input, isStreaming, pendingFiles, pendingImages, capabilities, statusModel]);
+  }, [tabId, input, isStreaming, pendingFiles, pendingImages, capabilities, statusModel, setFollow]);
 
   const handleStop = useCallback(() => {
     setQueuedMessages([]);
