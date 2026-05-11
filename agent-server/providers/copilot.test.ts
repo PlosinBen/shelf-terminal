@@ -104,7 +104,7 @@ describe('quotaSnapshotToSegment', () => {
 });
 
 describe('parseApplyPatch', () => {
-  it('parses single-hunk Update into oldString/newString', () => {
+  it('parses single-hunk Update into a one-element array of oldString/newString', () => {
     const patch = `*** Begin Patch
 *** Update File: /tmp/foo.md
 @@
@@ -114,9 +114,10 @@ describe('parseApplyPatch', () => {
 `;
     const out = parseApplyPatch(patch);
     expect(out).not.toBeNull();
-    expect(out!.kind).toBe('update');
-    expect(out!.filePath).toBe('/tmp/foo.md');
-    expect(out!.diff).toEqual({ oldString: '# Old Title', newString: '# New Title' });
+    expect(out!).toHaveLength(1);
+    expect(out![0].kind).toBe('update');
+    expect(out![0].filePath).toBe('/tmp/foo.md');
+    expect((out![0] as any).diff).toEqual({ oldString: '# Old Title', newString: '# New Title' });
   });
 
   it('preserves context lines on both sides of the diff', () => {
@@ -130,11 +131,11 @@ describe('parseApplyPatch', () => {
 *** End Patch
 `;
     const out = parseApplyPatch(patch);
-    expect(out!.diff!.oldString).toBe('const a = 1;\nconst b = 2;\nconst c = 4;');
-    expect(out!.diff!.newString).toBe('const a = 1;\nconst b = 3;\nconst c = 4;');
+    expect((out![0] as any).diff.oldString).toBe('const a = 1;\nconst b = 2;\nconst c = 4;');
+    expect((out![0] as any).diff.newString).toBe('const a = 1;\nconst b = 3;\nconst c = 4;');
   });
 
-  it('parses Add into content', () => {
+  it('parses Add into a one-element array with content', () => {
     const patch = `*** Begin Patch
 *** Add File: /tmp/hello.txt
 +hi
@@ -142,12 +143,13 @@ describe('parseApplyPatch', () => {
 *** End Patch
 `;
     const out = parseApplyPatch(patch);
-    expect(out!.kind).toBe('add');
-    expect(out!.filePath).toBe('/tmp/hello.txt');
-    expect(out!.content).toBe('hi\nthere');
+    expect(out!).toHaveLength(1);
+    expect(out![0].kind).toBe('add');
+    expect(out![0].filePath).toBe('/tmp/hello.txt');
+    expect((out![0] as any).content).toBe('hi\nthere');
   });
 
-  it('returns null for multi-hunk Update (out of MVP scope)', () => {
+  it('parses multi-hunk Update into one entry per hunk with the same filePath', () => {
     const patch = `*** Begin Patch
 *** Update File: /tmp/foo.ts
 @@
@@ -158,10 +160,13 @@ describe('parseApplyPatch', () => {
 +d
 *** End Patch
 `;
-    expect(parseApplyPatch(patch)).toBeNull();
+    const out = parseApplyPatch(patch);
+    expect(out!).toHaveLength(2);
+    expect(out![0]).toEqual({ kind: 'update', filePath: '/tmp/foo.ts', diff: { oldString: 'a', newString: 'b' } });
+    expect(out![1]).toEqual({ kind: 'update', filePath: '/tmp/foo.ts', diff: { oldString: 'c', newString: 'd' } });
   });
 
-  it('returns null for multi-file patches', () => {
+  it('parses multi-file patches into one entry per file', () => {
     const patch = `*** Begin Patch
 *** Update File: /tmp/a.ts
 @@
@@ -173,12 +178,46 @@ describe('parseApplyPatch', () => {
 +q
 *** End Patch
 `;
+    const out = parseApplyPatch(patch);
+    expect(out!).toHaveLength(2);
+    expect(out![0].filePath).toBe('/tmp/a.ts');
+    expect((out![0] as any).diff).toEqual({ oldString: 'x', newString: 'y' });
+    expect(out![1].filePath).toBe('/tmp/b.ts');
+    expect((out![1] as any).diff).toEqual({ oldString: 'p', newString: 'q' });
+  });
+
+  it('mixes Update and Add in a single patch', () => {
+    const patch = `*** Begin Patch
+*** Update File: /tmp/a.ts
+@@
+-x
++y
+*** Add File: /tmp/new.ts
++hello
+*** End Patch
+`;
+    const out = parseApplyPatch(patch);
+    expect(out!).toHaveLength(2);
+    expect(out![0].kind).toBe('update');
+    expect(out![1].kind).toBe('add');
+    expect((out![1] as any).content).toBe('hello');
+  });
+
+  it('returns null for Delete operations (not yet supported by file_edit canonical type)', () => {
+    const patch = `*** Begin Patch
+*** Delete File: /tmp/gone.txt
+*** End Patch
+`;
     expect(parseApplyPatch(patch)).toBeNull();
   });
 
-  it('returns null for Delete operations (not yet supported)', () => {
+  it('returns null when Delete appears alongside other ops — whole patch falls back to tool_use', () => {
     const patch = `*** Begin Patch
-*** Delete File: /tmp/gone.txt
+*** Update File: /tmp/keep.ts
+@@
+-x
++y
+*** Delete File: /tmp/gone.ts
 *** End Patch
 `;
     expect(parseApplyPatch(patch)).toBeNull();

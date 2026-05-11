@@ -69,7 +69,14 @@ const execFileP = promisify(execFile);
  */
 type InflightToolUseEntry =
   | { kind: 'tool_use'; toolName: string; input: string }
-  | { kind: 'file_edit'; filePath: string; diff?: { oldString: string; newString: string }; content?: string };
+  | { kind: 'file_edit'; filePath: string; diff?: { oldString: string; newString: string }; content?: string }
+  /**
+   * `apply_patch` parsed into N file_edit sub-cards. SDK gives a single
+   * patch-level success/failure on tool.execution_complete; we re-emit each
+   * sub-card with that same result, and additionally emit a top-level error
+   * message on failure so the timeline shows the patch-level reason loudly.
+   */
+  | { kind: 'apply_patch'; subs: Array<{ msgId: string; spec: ApplyPatchFileSpec }> };
 const inflightToolUses = new Map<string, InflightToolUseEntry>();
 
 function stripCwd(p: string, cwd: string): string {
@@ -129,18 +136,22 @@ export function formatCopilotToolInput(toolName: string, args: Record<string, un
   }
 }
 
+export type ApplyPatchFileSpec =
+  | { kind: 'update'; filePath: string; diff: { oldString: string; newString: string } }
+  | { kind: 'add'; filePath: string; content: string };
+
 /**
- * Parse Copilot's `apply_patch` raw-string args into a normalized file_edit
- * payload. Only handles single-file + single-hunk Update/Add — the common
- * case. Returns null for multi-file, multi-hunk, Delete, or any malformed
- * input; caller should fall back to a generic `tool_use` card.
+ * Parse Copilot's `apply_patch` raw-string args into one or more normalized
+ * file_edit payloads. Each `*** Update File:` / `*** Add File:` section
+ * becomes its own entry; multi-hunk in the same Update file produces multiple
+ * entries with the same filePath (one per `@@` hunk — Claude's typical "edit
+ * different regions of the same file" pattern maps cleanly).
+ *
+ * Returns null when the patch contains a `*** Delete File:` (no canonical
+ * representation yet) or when the structure is malformed. Caller should fall
+ * back to a generic `tool_use` card in that case so nothing is silently lost.
  */
-export function parseApplyPatch(patch: string): {
-  kind: 'update' | 'add';
-  filePath: string;
-  diff?: { oldString: string; newString: string };
-  content?: string;
-} | null {
+export function parseApplyPatch(patch: string): ApplyPatchFileSpec[] | null {
   if (typeof patch !== 'string') return null;
   // Strip outer Begin/End Patch markers.
   const begin = patch.indexOf('*** Begin Patch');
@@ -148,46 +159,53 @@ export function parseApplyPatch(patch: string): {
   if (begin < 0 || end < 0 || end < begin) return null;
   const inner = patch.slice(begin + '*** Begin Patch'.length, end).replace(/^\s*\n/, '').replace(/\n\s*$/, '');
 
-  // Reject multi-file by counting file markers.
-  const fileMarkers = inner.match(/\*\*\*\s+(Update|Add|Delete)\s+File:/g);
-  if (!fileMarkers || fileMarkers.length !== 1) return null;
-  if (fileMarkers[0].includes('Delete')) return null;
+  // Delete is the only operation we explicitly don't support yet.
+  if (/\*\*\*\s+Delete\s+File:/.test(inner)) return null;
 
-  const updateMatch = inner.match(/^\*\*\*\s+Update File:\s*(.+?)\s*\n@@\s*\n([\s\S]*)$/);
-  if (updateMatch) {
-    const [, filePath, body] = updateMatch;
-    // Reject multi-hunk (another @@ separator inside the body).
-    if (body.split('\n').some((l) => l.trim() === '@@')) return null;
-    const oldLines: string[] = [];
-    const newLines: string[] = [];
-    for (const line of body.split('\n')) {
-      if (line.startsWith('+')) newLines.push(line.slice(1));
-      else if (line.startsWith('-')) oldLines.push(line.slice(1));
-      else if (line.startsWith(' ')) {
-        const c = line.slice(1);
-        oldLines.push(c);
-        newLines.push(c);
+  // Split into file sections. Each section starts with `*** Update|Add File: ...`
+  // and continues until the next `*** ` marker or end-of-inner. We use a
+  // capture-everything regex with non-greedy lookahead.
+  const sectionRe = /\*\*\*\s+(Update|Add)\s+File:\s*([^\n]+)\n([\s\S]*?)(?=\n\*\*\*\s+(?:Update|Add|Delete)\s+File:|$)/g;
+  const specs: ApplyPatchFileSpec[] = [];
+  let match: RegExpExecArray | null;
+  while ((match = sectionRe.exec(inner)) !== null) {
+    const op = match[1];
+    const filePath = match[2].trim();
+    const body = match[3].replace(/\n\s*$/, '');
+    if (op === 'Add') {
+      const lines: string[] = [];
+      for (const line of body.split('\n')) {
+        if (line.startsWith('+')) lines.push(line.slice(1));
       }
-      // Trailing empty / unknown lines: ignored.
+      specs.push({ kind: 'add', filePath, content: lines.join('\n') });
+      continue;
     }
-    return {
-      kind: 'update',
-      filePath: filePath.trim(),
-      diff: { oldString: oldLines.join('\n'), newString: newLines.join('\n') },
-    };
+    // op === 'Update' — body starts with `@@` (possibly with optional context),
+    // and may contain multiple `@@` hunks. Split on `@@` boundaries.
+    const hunks = body.split(/^@@.*$/m).map((h) => h.replace(/^\n+/, '').replace(/\n+$/, '')).filter((h) => h.length > 0);
+    if (hunks.length === 0) return null;
+    for (const hunk of hunks) {
+      const oldLines: string[] = [];
+      const newLines: string[] = [];
+      for (const line of hunk.split('\n')) {
+        if (line.startsWith('+')) newLines.push(line.slice(1));
+        else if (line.startsWith('-')) oldLines.push(line.slice(1));
+        else if (line.startsWith(' ')) {
+          const c = line.slice(1);
+          oldLines.push(c);
+          newLines.push(c);
+        }
+        // Empty / non-prefixed lines (e.g. trailing whitespace): ignored.
+      }
+      specs.push({
+        kind: 'update',
+        filePath,
+        diff: { oldString: oldLines.join('\n'), newString: newLines.join('\n') },
+      });
+    }
   }
 
-  const addMatch = inner.match(/^\*\*\*\s+Add File:\s*(.+?)\s*\n([\s\S]*)$/);
-  if (addMatch) {
-    const [, filePath, body] = addMatch;
-    const lines: string[] = [];
-    for (const line of body.split('\n')) {
-      if (line.startsWith('+')) lines.push(line.slice(1));
-    }
-    return { kind: 'add', filePath: filePath.trim(), content: lines.join('\n') };
-  }
-
-  return null;
+  return specs.length > 0 ? specs : null;
 }
 
 async function readGhToken(): Promise<string | undefined> {
@@ -520,23 +538,31 @@ export function createCopilotBackend(): ServerBackend {
           }
 
           // `apply_patch` carries a raw unified-diff string (NOT object args).
-          // Try to normalize into canonical file_edit; fall through to generic
-          // tool_use for anything we can't parse (multi-file, multi-hunk,
-          // Delete, malformed).
+          // Try to normalize into one or more canonical file_edit cards (one
+          // per file, plus one per hunk in multi-hunk updates). Fall through
+          // to generic tool_use only when parser returns null (Delete /
+          // malformed / no parseable sections).
           if (toolName === 'apply_patch' && typeof args === 'string') {
             const parsed = parseApplyPatch(args);
             if (parsed) {
-              const entry: InflightToolUseEntry = parsed.kind === 'update'
-                ? { kind: 'file_edit', filePath: parsed.filePath, diff: parsed.diff }
-                : { kind: 'file_edit', filePath: parsed.filePath, content: parsed.content };
-              inflightToolUses.set(toolUseId, entry);
-              currentSend({
-                type: 'message', msgId: toolUseId, msgType: 'file_edit',
-                toolUseId,
-                filePath: parsed.filePath,
-                ...(parsed.diff ? { diff: parsed.diff } : {}),
-                ...(parsed.content !== undefined ? { content: parsed.content } : {}),
-              });
+              // Each sub-card gets a distinct msgId so renderer's upsert
+              // doesn't collapse them. Prefix with toolUseId so the
+              // relationship is recoverable in logs.
+              const subs = parsed.map((spec, i) => ({
+                msgId: `${toolUseId}:f${i}`,
+                spec,
+              }));
+              inflightToolUses.set(toolUseId, { kind: 'apply_patch', subs });
+              for (const { msgId, spec } of subs) {
+                currentSend({
+                  type: 'message', msgId, msgType: 'file_edit',
+                  // Each sub-card mirrors the patch's toolUseId — they share a
+                  // single permission/execution lifecycle on the SDK side.
+                  toolUseId,
+                  filePath: spec.filePath,
+                  ...(spec.kind === 'update' ? { diff: spec.diff } : { content: spec.content }),
+                });
+              }
               break;
             }
           }
@@ -580,6 +606,33 @@ export function createCopilotBackend(): ServerBackend {
                 ? { success: false, error: data.error?.message ?? 'edit failed' }
                 : { success: true },
             });
+          } else if (entry.kind === 'apply_patch') {
+            // Patch-level success/failure applies to every sub-card. SDK
+            // doesn't tell us which file caused failure (and apply_patch is
+            // typically all-or-nothing — validation fails before any write),
+            // so we mark every sub-card with the same result.
+            const errorMsg = data.error?.message ?? 'apply_patch failed';
+            for (const { msgId, spec } of entry.subs) {
+              currentSend({
+                type: 'message', msgId, msgType: 'file_edit',
+                toolUseId,
+                filePath: spec.filePath,
+                ...(spec.kind === 'update' ? { diff: spec.diff } : { content: spec.content }),
+                result: isError
+                  ? { success: false, error: errorMsg }
+                  : { success: true },
+              });
+            }
+            // On failure, also surface a top-level error message in the
+            // timeline. Each sub-card already shows ✗, but a patch-spanning
+            // error message makes the failure unmissable and gives one place
+            // to read the reason instead of opening every card.
+            if (isError) {
+              currentSend({
+                type: 'message', msgId: mintMsgId(), msgType: 'error',
+                content: `apply_patch failed: ${errorMsg}`,
+              });
+            }
           } else {
             // Use `content` (concise, what the LLM sees) over `detailedContent`
             // (SDK-side rich UI returning reads as fake unified diffs).
