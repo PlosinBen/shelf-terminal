@@ -358,9 +358,15 @@ User 端訊息保留 `'user'` variant —— 不從 provider 來，本來就跟 
 
 1. ~~Tool args 欄位確認~~ — 完成。Copilot 端 `report_intent.intent` / `task_complete.summary` / `apply_patch`（裸 unified-diff string）都已驗證。Claude 端 `Edit` / `Write` toolInput 跟 SDK type def 一致（`file_path` / `old_string` / `new_string` / `content`）
 2. `'plan_update'` → `'plan'` 是 breaking rename，要不要保 backward compat（雙寫）一段時間？傾向直接砍乾淨（feature 未外發）
-3. `'system'` msgType 現在實際有人發嗎？claude/copilot 都沒主動發，是 ternary fallback 才會用到。要不要乾脆刪掉 canonical 裡的 `'system'`？
-4. UI marker 細節：`intent` 用 `▸` 還是 `→` 還是 `※` 還是 dim italic？需要看實際畫面決定
-5. `file_edit` 的 diff 渲染要不要支援 large file 折疊（譬如 > 50 行只顯示前後幾行 + 省略 marker）？沿用 git diff 風格還是純色塊？
+3. ~~`'system'` msgType 現在實際有人發嗎？~~ — 保留。盤點下來 provider wire 端確實沒人發，但 renderer 端會主動建 `system` 訊息插進 timeline，用途包括：
+   - Model switch 通知（`── Model switched to Opus ──`）
+   - `/clear` 後的 context-cleared 通知
+   - `/help` / `/context` 等 slash command 的 `system-message` 結果包裝
+   結論：`system` 是「user-facing 的中性通知 type」，不是 error 也不是 assistant text。Provider wire 端理論上能 emit（保留入口給未來 session-level warning），但目前實際只走 renderer 端。`buildAgentMessagePayload` 的 `system` case 是 defensive 預留，可視為文件型 dead code。
+4. UI marker 細節：`intent` 用 `▸` 還是 `→` 還是 `※` 還是 dim italic？需要看實際畫面決定 — 暫緩，Copilot 實務上 `report_intent` 呼叫頻率偏低，沒實際畫面可以校準。等有累積觀察再回來調 marker / spacing / 顏色
+5. ~~`file_edit` 的 diff 渲染要不要支援 large file 折疊？~~ — 暫不做。`SideBySideDiff` 目前不截斷、`InlineAddDiff` 截 20 行；實務上 agent 改檔案多在 20 行內，沒實際觸發痛點。折疊是純 renderer 議題（wire 資料保留完整 diff/content），未來真的痛了再加。要做就走線性截斷 + 點擊展開（Option B）；git-diff 風格智能折疊（Option C）過度設計，本工具不是 code review viewer
+7. ~~`task` / `Agent` 結果改 markdown render？~~ — 不做。tool_use 的核心原則是「renderer 不看 toolName、特殊渲染 = 獨立 canonical type」，回去在 tool_use 內依 toolName 切渲染策略違反這條。Markdown table 在 `<pre>` 下不漂亮但 readable，data 沒丟。User 立場：看 agent 訊息是要追「它實際呼了哪些 tool」，不是讀它的散文摘要 — task 結果本來就不是 UI 焦點。
+   如未來真的痛了，正解是把 `Task` / `Agent` / Copilot `task` 升格成獨立 canonical type（暫名 `tool_task`），renderer 寫專屬 component 做 markdown render + sub-agent type badge + collapsable prompt。**不要回去 tool_use 內加 toolName-sniff 的特殊路徑。**
 6. ~~Settings 重構~~ — 完成。`AGENT_DISPLAY_KEYS` 砍剩 4 個 canonical key（`thinking` / `tool_use` / `file_edit` / `intent`），`AgentDisplayKey` 從 `string` 收緊成 union。Migration 走 A1（直接丟棄舊 toolName-keyed 設定）— 舊 JSON 檔殘留的 `Read`/`Bash`/`Edit` 等鍵在 type system 收緊後存取會回 undefined，自然 fall back 到預設 `collapsed`，不需要主動清理。`tool_use` / `file_edit` 加上「錯誤/失敗 override hidden」邏輯：user 設 hidden 時非錯誤訊息照藏，但 `result.isError === true` / `result.success === false` 的卡片強制顯示，避免靜默失敗。
 
 ## 影響的檔案
