@@ -41,7 +41,10 @@ export type AgentMessage =
       type: 'tool_use';
       toolUseId: string;
       toolName: string;
-      toolInput: Record<string, unknown>;
+      // Provider-formatted, human-readable input string. Renderer treats it
+      // as opaque text — no toolName-sniffing, no JSON parsing. Truncation
+      // for header display is a renderer-side CSS concern.
+      input: string;
       result?: { content: string; isError?: boolean };
     }
   | {
@@ -54,6 +57,17 @@ export type AgentMessage =
     };
 
 export type AgentMessageType = AgentMessage['type'];
+
+/**
+ * Backend lifecycle hint sent from main to renderer right after `agent:init`.
+ * Renderer uses it to show a "Starting agent…" spinner and a retry path when
+ * spawn / capability load fails (e.g. agent-server bundle missing, node not
+ * on PATH, deploy step errors over SSH).
+ */
+export type AgentInitStatus =
+  | { state: 'starting' }
+  | { state: 'ready' }
+  | { state: 'failed'; reason: string };
 
 export type AgentDisplayMode = 'collapsed' | 'expanded' | 'hidden';
 

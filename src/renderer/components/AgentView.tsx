@@ -77,7 +77,14 @@ function buildAgentMsg(msg: any, provider: string): AgentMsg | null {
         type: 'tool_use',
         toolUseId: msg.toolUseId,
         toolName: msg.toolName,
-        toolInput: msg.toolInput ?? {},
+        // Provider sends `input: string`. Defensively coerce in case old
+        // wire bundle still emits structured toolInput (older agent-server
+        // version on remote SSH host that hasn't been redeployed).
+        input: typeof msg.input === 'string'
+          ? msg.input
+          : msg.toolInput
+            ? JSON.stringify(msg.toolInput)
+            : '',
         ...(msg.result ? { result: msg.result } : {}),
         provider,
         timestamp: Date.now(),
@@ -151,6 +158,8 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
   const [authError, setAuthError] = useState<string | null>(null);
   const [pendingFiles, setPendingFiles] = useState<Array<{ path: string; displayPath: string }>>([]);
   const [pendingImages, setPendingImages] = useState<string[]>([]);
+  const [initStatus, setInitStatus] = useState<'starting' | 'ready' | 'failed'>('starting');
+  const [initError, setInitError] = useState<string | null>(null);
   const [escPending, setEscPending] = useState(false);
   const escPendingRef = useRef(false);
   const escTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -298,6 +307,26 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
     });
     return off;
   }, [tabId]);
+
+  // Init status listener — drives the starting-spinner / failed-retry UI.
+  useEffect(() => {
+    const off = window.shelfApi.agent.onInitStatus((id: string, status) => {
+      if (id !== tabId) return;
+      setInitStatus(status.state);
+      setInitError(status.state === 'failed' ? status.reason : null);
+    });
+    return off;
+  }, [tabId]);
+
+  const handleRetryInit = useCallback(async () => {
+    setInitStatus('starting');
+    setInitError(null);
+    await window.shelfApi.agent.destroy(tabId);
+    setCapabilities(null);
+    initializedRef.current = false;
+    window.shelfApi.agent.init(tabId, cwd, connection, provider, sessionId);
+    initializedRef.current = true;
+  }, [tabId, cwd, connection, provider, sessionId]);
 
   // Messages, stream, and status listeners
   useEffect(() => {
@@ -830,7 +859,20 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
   return (
     <div className="agent-view" ref={rootRef}>
       <div className="agent-messages" ref={listRef}>
-        {messages.length === 0 && !isStreaming && <div className="agent-empty">Send a message to start</div>}
+        {initStatus === 'starting' && messages.length === 0 && (
+          <div className="agent-init-pane">
+            <span className="agent-loading-spinner" />
+            <span className="agent-loading-text">Starting agent…</span>
+          </div>
+        )}
+        {initStatus === 'failed' && (
+          <div className="agent-init-pane agent-init-failed">
+            <div className="agent-init-failed-title">Failed to start agent</div>
+            {initError && <div className="agent-init-failed-reason">{initError}</div>}
+            <button className="conn-btn conn-btn-next" onClick={handleRetryInit}>Retry</button>
+          </div>
+        )}
+        {initStatus === 'ready' && messages.length === 0 && !isStreaming && <div className="agent-empty">Send a message to start</div>}
         {turns.map((turn, ti) => {
           const isLastTurn = ti === turns.length - 1;
           // Streaming content (thinking/text) goes inside `.agent-turn-response`

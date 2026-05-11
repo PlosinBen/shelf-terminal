@@ -24,7 +24,7 @@ vi.mock('child_process', () => ({
 
 // Mock logger
 vi.mock('@shared/logger', () => ({
-  log: { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() },
+  log: { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn(), trace: vi.fn(), flushTrace: vi.fn() },
 }));
 
 describe('remote backend', () => {

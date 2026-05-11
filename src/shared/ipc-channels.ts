@@ -100,4 +100,5 @@ export const IPC = {
   AGENT_PERMISSION_REQUEST: 'agent:permission-request',
   AGENT_CAPABILITIES: 'agent:capabilities',
   AGENT_AUTH_REQUIRED: 'agent:auth-required',
+  AGENT_INIT_STATUS: 'agent:init-status',
 } as const;

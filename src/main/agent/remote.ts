@@ -117,7 +117,9 @@ export function createRemoteBackend(
 
     async getCapabilities(cwd: string, customModels?: ProviderModel[]) {
       const proc = await ensureProcReady(cwd);
-      if (!proc) return { models: [], permissionModes: [], effortLevels: [], slashCommands: [] };
+      // 失敗時 throw 而非回空 capabilities — 讓 startSession 的 .catch 能區分
+      // 「真的沒能力」跟「啟動失敗」，並對應送 init_status=failed 給 renderer。
+      if (!proc) throw new Error('Failed to start agent-server');
       const requestId = `cap-${Date.now()}`;
       return new Promise<import('./types').ProviderCapabilities>((resolve) => {
         const timeout = setTimeout(() => {
@@ -221,9 +223,14 @@ async function spawnAgentServer(
 ): Promise<RemoteProcess | null> {
   if (connection.type === 'local') {
     try {
+      const env = getShellEnv();
+      log.trace(
+        'agent-remote',
+        `spawnAgentServer local: cwd=${cwd} deployedPath=${deployedPath} fileExists=${fs.existsSync(deployedPath)} PATH=${env.PATH ?? '<missing>'}`,
+      );
       const proc = spawn('node', [deployedPath], {
         cwd,
-        env: getShellEnv(),
+        env,
         stdio: ['pipe', 'pipe', 'pipe'],
       });
       return wrapProcess(proc);
@@ -302,6 +309,14 @@ function wrapProcess(proc: ChildProcess): RemoteProcess {
 
   proc.on('exit', (code) => {
     log.info('agent-remote', `Process exited with code ${code}`);
+  });
+
+  // spawn() 對 ENOENT 等失敗是非同步 emit 'error' event，try/catch 抓不到；
+  // 沒掛 listener 會升級成 uncaught exception 把 main process 撞掉。
+  // 觸發時 flush trace buffer，把 shell-env / spawn 的 PATH 等診斷資訊倒進 log。
+  proc.on('error', (err) => {
+    log.error('agent-remote', `Process error: ${err.message}`);
+    log.flushTrace('agent-remote', `proc error: ${err.message}`);
   });
 
   return {
@@ -443,7 +458,13 @@ function buildAgentMessagePayload(msg: any): import('./types').AgentMessage | nu
         type: 'tool_use',
         toolUseId: msg.toolUseId,
         toolName: msg.toolName,
-        toolInput: msg.toolInput ?? {},
+        // Provider should always send a string; coerce defensively for
+        // backward-compat (older bundle wire might still emit toolInput object).
+        input: typeof msg.input === 'string'
+          ? msg.input
+          : msg.toolInput
+            ? JSON.stringify(msg.toolInput)
+            : '',
       };
       if (msg.result) out.result = msg.result;
       return out;

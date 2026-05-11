@@ -117,14 +117,23 @@ async function startSession(
 
   sessions.set(tabId, session);
 
+  // Init lifecycle hint for the renderer's loading spinner / retry UI.
+  send(IPC.AGENT_INIT_STATUS, tabId, { state: 'starting' });
+
   if (backend.getCapabilities) {
     const settings = loadSettings();
     const customModels = settings.ok ? settings.value.providerModels?.[provider as keyof NonNullable<typeof settings.value.providerModels>] : undefined;
     backend.getCapabilities(cwd, customModels).then((caps) => {
       send(IPC.AGENT_CAPABILITIES, tabId, caps);
+      send(IPC.AGENT_INIT_STATUS, tabId, { state: 'ready' });
     }).catch((err) => {
       log.error('agent', `${tag} capabilities error: ${err.message}`);
+      log.flushTrace('agent', `${tag} init failed`);
+      send(IPC.AGENT_INIT_STATUS, tabId, { state: 'failed', reason: err.message });
     });
+  } else {
+    // Backend that exposes no capabilities is still "ready" — nothing to wait for.
+    send(IPC.AGENT_INIT_STATUS, tabId, { state: 'ready' });
   }
 
   return true;

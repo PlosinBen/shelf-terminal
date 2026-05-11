@@ -109,6 +109,7 @@ interface ShelfApi {
     onPermissionRequest: (callback: (tabId: string, req: unknown) => void) => () => void;
     onCapabilities: (callback: (tabId: string, caps: unknown) => void) => () => void;
     onAuthRequired: (callback: (tabId: string, provider: string) => void) => () => void;
+    onInitStatus: (callback: (tabId: string, status: import('../shared/types').AgentInitStatus) => void) => () => void;
   };
   updater: {
     check: () => Promise<void>;
