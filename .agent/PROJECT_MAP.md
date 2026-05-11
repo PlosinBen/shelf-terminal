@@ -46,9 +46,11 @@
 | Intent | File | Description |
 |--------|------|-------------|
 | Session manager + IPC handlers | `index.ts` | `initAgentManager(windowGetter)` 註冊所有 agent IPC、管理 tab→session mapping、permission bridging、`getAgentState()` / `isAgentTab()` / `disposeAllAgents()`、傳遞 `sessionId` 到 remote backend |
-| Remote backend | `remote.ts` | `createRemoteBackend()` 透過 stdin/stdout JSON line protocol 跟 agent-server 通訊；支援 local/SSH/Docker spawn；`deployAgentServer()` 自動 SCP/docker cp bundle 到遠端；`clearContext()` 通知 agent-server 刪除 context 檔 |
-| Type 定義 | `types.ts` | `AgentBackend`（含 `clearContext?`）、`AgentEvent`、`AgentSessionState` 等 agent 系統型別 |
+| Remote backend | `remote.ts` | `createRemoteBackend()` 透過 stdin/stdout JSON line protocol 跟 agent-server 通訊；支援 local/SSH/Docker spawn；`deployAgentServer()` 自動 SCP/docker cp bundle 到遠端；`clearContext()` 通知 agent-server 刪除 context 檔。每個 `query()` 生成 `turnId` 註冊到 `turn-dispatcher`，IPC `send` 帶 turnId 給 agent-server，dispatcher 按 turnId 路由 events 回 per-turn AsyncGenerator |
+| Turn dispatcher | `turn-dispatcher.ts` | `createTurnDispatcher()` 純邏輯 event router，按 `turnId` envelope 路由 wire events 到對應 turn 的 AsyncGenerator；lifecycle (`ready` / requestId-keyed RPC) 走獨立 channel；未知 turnId / 過期 turn 的殘留 event 直接 drop。從 `wrapProcess` 抽出來方便單測 |
+| Type 定義 | `types.ts` | `AgentBackend`（含 `clearContext?`）、`AgentEvent`（含 `AgentStreamDelta.msgId`）、`AgentSessionState` 等 agent 系統型別 |
 | 單元測試 | `remote.test.ts` | Remote backend 介面、lifecycle 測試 |
+| Dispatcher 單元測試 | `turn-dispatcher.test.ts` | turnId 路由 / unknown turn drop / lifecycle / permission per-turn isolation / awaitReady / requestId 一次性 handler — 9 case |
 
 ### Agent Server (agent-server/)
 
@@ -93,7 +95,7 @@
 | 快捷鍵系統 | `hooks/useKeybindings.ts` | combo string 對應 action，支援參數化 action（`switchTab_N`） |
 | Paste/drop 上傳 hook | `hooks/useAttachmentPaste.ts` | 從 TerminalView 抽出的 paste/drop/upload pipeline，支援 file size check |
 | Terminal 渲染 | `components/TerminalView.tsx` | xterm.js instance cache、PTY I/O、useAttachmentPaste hook、unread badge |
-| Agent 對話 UI | `components/AgentView.tsx` | Agent tab 聊天介面（訊息列表 + streaming + input bar + send/stop）|
+| Agent 對話 UI | `components/AgentView.tsx` | Agent tab 聊天介面（訊息列表 + input bar + send/stop）。Stream chunks + finalize message 共用 `msgId` 進同一個 `messages` 上 upsert — 沒有獨立 `streamText` / `streamThinking` state；in-flight entry 帶 `streaming: true` flag 由 `AgentMessage` 渲染 cursor |
 | Bottom bar | `components/BottomBar.tsx` | 顯示 connection type、cwd、git branch；branch dropdown 支援切換或跳轉 worktree project |
 | Sidebar | `components/Sidebar.tsx` | Project 列表、拖曳排序、右鍵選單（含 New Worktree）、worktree branch 顯示、收合按鈕 |
 | Tab bar | `components/TabBar.tsx` | Tab 列表、拖曳排序、雙擊重命名、unread badge、tab 顏色 |

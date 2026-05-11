@@ -389,3 +389,429 @@ User 端訊息保留 `'user'` variant —— 不從 provider 來，本來就跟 
 ## 估時
 
 實作 2-3 小時，含測試 + 文件更新。風險中（涉及 file edit 渲染翻新 + message store 從 append 改 upsert，需要對齊 Claude/Copilot 兩家 args 欄位）。
+
+---
+
+# 第二輪：P1 + P2 架構級重構（IPC turn-id routing + Streaming channel 統一）
+
+> 這個 section 是 canonical refactor 跑了一段時間之後的下一階段，記錄 wire protocol 跟 streaming pipeline 的徹底重構計畫。內容以「分階段 + 每階段有 checkpoint」方式組織，**做到一半中斷可以回來照節點繼續**。
+
+## 決策紀錄（動工前對齊）
+
+| # | 議題 | 決策 | 影響 |
+|---|------|------|------|
+| 1 | `msgId` / `toolUseId` 合併或並存 | **合併** — toolUseId 概念升級為 msgId（universal id）。Tool message 上 `msgId === toolUseId`。permission_request wire 仍用 `toolUseId` 欄位（語意更明確），但值是同一個 | Phase 2.1 / 2.2 / 3.1 都照「合併」走 |
+| 2 | 重構完之後 `dedupSend` 去留 | **拿掉** — turn-dispatcher 上線後 dedupSend 變多餘，留著反而誤導。重構同時清理 claude.ts，回歸自然 emit 兩次 idle（main 端按 turnId 各自路由不影響） | Phase 2.3 改成「移除 dedupSend」而非「決策」 |
+| 3 | Persistence: streaming 進行中的訊息要不要寫 IDB | **不存** — `saveAgentMessages` 寫入前 filter 掉 `streaming: true` 的 entry。中斷的 turn 不留半截。對齊現有 `reviveOrphanPending` 對 pending tool_use 的精神但更乾淨 | Phase 3.1 加 filter |
+| 4 | Wire schema 收緊範圍 | **all-in** — 一次把所有 wire event（lifecycle / control / message / stream）都 discriminated union 化，砍掉 `[key: string]: unknown` 兜底 | Phase 1.2 範圍擴大到全部 type |
+| 5 | turnId 格式 | `t-${crypto.randomUUID().slice(0, 8)}` — 8 hex chars 夠用，agent-server 程序壽命內不會撞 | Phase 1.1 |
+| 6 | Block id 來源 | **Provider 自己維護 per-turn counter**，不依賴 SDK 提供的 block_index。形式 `${turnId}:b${n++}`。Claude/Copilot 兩邊各自跑 counter，從 stream 第一個 chunk / message 第一條開始遞增 | Phase 2.1 |
+
+## 為什麼 P1 + P2 綁一起做
+
+P1（turn-id routing）跟 P2（streaming channel 統一）都動到同一層：wire protocol envelope + main/renderer 的 IPC handling。如果分兩波做：
+- 第一波 P1 要先建臨時相容層讓 stream channel 認新的 envelope 欄位
+- 第二波 P2 再拆臨時層
+
+綁一起做：一次重建 wire schema + IPC dispatcher + renderer state pipeline，新 schema 一步到位，沒有過渡期 dead code。
+
+## 目前現況 baseline（重構前的事實）
+
+### Wire protocol（agent-server → main）
+
+`agent-server/providers/types.ts:27-37` 的 `OutgoingMessage` 是 free-form union：
+```ts
+export type OutgoingMessage = {
+  type: 'message' | 'stream' | 'status' | 'error' | 'pong' | 'ready' | 'capabilities'
+      | 'auth_required' | 'permission_request' | 'credential_stored' | 'credential_cleared'
+      | 'slash_result' | 'context_patch';
+  [key: string]: unknown;  // ← payload free-form
+};
+```
+
+每條 wire 事件就是一行 JSON。**沒有 envelope 欄位**（沒有 turnId / sessionId / requestId 之類能標識「這事件屬於哪個 query turn」的 id）。
+
+### Main 端 IPC reader（`src/main/agent/remote.ts`）
+
+- `RemoteProcess.onLine(callback)` 是 setter（line 326-328），每次呼叫**覆寫**前一次的 `lineHandler`
+- 每個 `query()` 呼叫產生一個新的 `streamRemoteEvents` async generator，generator 開頭 `remote.onLine(...)` 設置自己的 callback（line 362-374）
+- Callback 累積到 local `events[]`，看到 `state: 'idle'` 就 `done = true`，generator 結束
+- 結果：**前一個 turn 的 lineHandler 被新 turn 覆寫**，跨 turn 殘留事件被新 turn 的 handler 吃掉（這次 queue msg bug 的根因）
+
+### Renderer 端 stream 處理（`src/renderer/components/AgentView.tsx`）
+
+雙 state 緩衝區：
+- `streamText: string` (line 132) — 累積 `type: 'stream'` 的文字 chunks
+- `streamThinking: string` (line 133) — 累積 thinking chunks
+- `messages: AgentMsg[]` (line 128) — 已完成的訊息陣列
+
+三條對齊邏輯（散在 `onStream` / `onMessage` / `onStatus` 三個 listener）：
+
+1. **`onStream`** (line 391-400 上下)：`setStreamText(prev => prev + chunk.content)` — 累積增量
+2. **`onMessage`(msgType=text)** (line 373-376)：`setStreamText('')` + push assembled block 進 messages — 完整 block 到了，清緩衝、推進 timeline
+3. **`onStatus` streaming→idle transition** (line 397-432)：if `streamText.trim()` 非空，promote 為 `messages` 的 text entry，清空緩衝 — turn 結束時兜底，把還沒被 onMessage 覆蓋的緩衝沖進去
+
+UI 渲染：
+- `streamText` 只在 `isLastTurn` 且 isStreaming 時顯示，帶 cursor（line 895-928 上下）
+- `messages` 永遠按序渲染
+
+**雙 state 是 race source**：上次 queue msg bug 就是 `setStreamText('')` / promote 時序錯亂。Renderer flush 既要清 streamText（避免 turn 2 從 turn 1 殘留累積）又要等 turn 2 的 stream chunks，邏輯散落容易踩坑。
+
+### 目前 Provider 端發兩種 wire 事件
+
+每個 text/thinking block 走兩條 channel：
+
+- `stream` event（increment）：`{ type: 'stream', streamType: 'text'|'thinking', content: delta }`
+- `message` event（finalize）：`{ type: 'message', msgType: 'text'|'thinking', content: fullBlock }`
+
+Claude SDK 跟 Copilot CLI 都遵守這個 pattern（agent-server/providers/claude.ts:657-659 / 605-607、copilot.ts:459-474）。
+
+---
+
+## 目標終態（重構後的事實）
+
+### 1. 每個 wire event 帶 envelope
+
+新增 envelope 欄位 `turnId: string` — 由 agent-server 在每個 `handleSend(msg)` 開頭生成一次，wrap `send` 自動注入。
+
+```ts
+// before
+{ type: 'message', msgType: 'text', content: '...' }
+// after
+{ type: 'message', turnId: 't-1234', msgType: 'text', content: '...' }
+```
+
+例外：lifecycle events（`ready` / `pong` / `capabilities`）跟 query turn 無關，沒有 turnId 是預期的。
+
+### 2. Main 端 turn-dispatcher
+
+`remote.ts` 改架構：
+- **單一全域 `onLine` listener** 在 RemoteProcess 建立時掛上一次，永遠不被覆寫
+- Listener 依 `turnId` 把 event 丟進對應 turn 的 queue
+- `query()` 開始時註冊一個 turnId → 拿到一個只看自己 turn 的 AsyncIterator
+- 沒有 matched turnId 的 event（lifecycle 之外的殘留）→ log warning + drop（不會像目前漏進下個 turn）
+
+```ts
+interface RemoteProcess {
+  registerTurn(turnId: string): AsyncIterator<AgentEvent>;
+  // onLine setter 拿掉，改成內部全域 dispatcher
+}
+```
+
+### 3. Streaming + message 合進單一 upsert pipeline
+
+每個內容區塊（text block / thinking block）由 provider 賦予 `msgId: string`（per-turn, per-block stable），wire 事件改成：
+
+```ts
+// stream chunk (incremental update)
+{ type: 'stream', turnId, msgId, channel: 'text'|'thinking', delta: '...' }
+// finalize (full block ready)
+{ type: 'message', turnId, msgId, msgType: 'text'|'thinking', content: '...' }
+```
+
+Renderer 收到後**都進同一個 `messages` store**，按 `msgId` upsert：
+- stream chunk：找 msgId 對應 entry，append delta；不存在就用 delta 新建
+- finalize：找 msgId，覆蓋 content（完整版蓋掉累積版）；不存在就直接新建
+- 加上 `streaming?: boolean` flag 標記是否還在增量
+
+`streamText` / `streamThinking` 兩個 renderer state 拆掉。UI 渲染只看 `messages`。Streaming cursor 改成「if message.streaming → 末端加 cursor span」。
+
+### 4. tool_use / file_edit 的 result 內嵌維持原樣
+
+這兩條本來就 upsert by `toolUseId`，等同於 `msgId`。重構後 toolUseId 就是 msgId 的一種。不用特別改 schema，只是統一進 `msg.msgId` 欄位（或保留 `toolUseId` 別名，看實作偏好）。
+
+---
+
+## Wire schema 完整定義（重構後）
+
+```ts
+// agent-server/providers/types.ts
+
+interface WireEnvelope {
+  turnId?: string;  // 缺席 = lifecycle event（ready/pong/capabilities）
+}
+
+type OutgoingMessage = WireEnvelope & (
+  // Message channel — finalize
+  | { type: 'message'; msgId: string; msgType: 'text' | 'thinking' | 'intent' | 'system' | 'error' | 'plan'; content: string }
+  | { type: 'message'; msgId: string; msgType: 'tool_use'; toolName: string; input: string; result?: {...} }
+  | { type: 'message'; msgId: string; msgType: 'file_edit'; filePath: string; diff?: {...}; content?: string; result?: {...} }
+
+  // Stream channel — incremental
+  | { type: 'stream'; msgId: string; channel: 'text' | 'thinking'; delta: string }
+
+  // Status / control（per turn）
+  | { type: 'status'; state: 'streaming' | 'idle'; ... }
+  | { type: 'permission_request'; toolUseId: string; ... }
+  | { type: 'error'; error: string }
+  | { type: 'context_patch'; patch: PersistedContext }
+
+  // Lifecycle（no turnId）
+  | { type: 'ready' }
+  | { type: 'pong' }
+  | { type: 'capabilities'; ... }
+  | { type: 'auth_required'; provider: string }
+);
+```
+
+Discriminated union 化，不再 `[key: string]: unknown` 兜底。
+
+---
+
+## 實作步驟與 Checkpoints
+
+> 每個步驟結尾有「驗證指令 + 預期結果」，中斷後從這裡接續。
+
+### Phase 1：Wire envelope + turn dispatcher（P1 主體）
+
+#### Step 1.1 — agent-server 加 turnId 注入
+
+**檔案：** `agent-server/index.ts`、`agent-server/orchestrator.ts`
+
+- 在 `handleSend(msg)` 開頭 `const turnId = 't-' + crypto.randomUUID().slice(0, 8)`（決策 #5）
+- 將 `send: SendFn` wrap 成 `turnAwareSend: (m) => send({ ...m, turnId })`
+- 把 wrapped send 傳進 `backend.query(input, turnAwareSend)`
+- Provider 端不用動（直接收到帶 turnId 的 send）
+
+**Checkpoint：**
+```bash
+npm run typecheck && npm run test:unit
+```
+新增 unit test：mock send 收到的 msg 都帶 turnId（單 handleSend）；不同 handleSend 用不同 turnId。
+
+#### Step 1.2 — OutgoingMessage 全面 discriminated union（all wire events）
+
+**檔案：** `agent-server/providers/types.ts`
+
+依決策 #4，所有 wire event 一次清乾淨：
+
+- `OutgoingMessage` 拆成完整 discriminated union（見上面「Wire schema 完整定義」），含 lifecycle (`ready`/`pong`/`capabilities`/`auth_required`)、control (`status`/`error`/`permission_request`/`context_patch`/`credential_*`/`slash_result`)、message、stream 全部
+- 拿掉 `[key: string]: unknown` 兜底
+- 把目前散落在 provider 各處的 ad-hoc 欄位收進對應 variant 的明確 shape
+- 修 provider 端 type 錯誤（這步可能有零星 cast，是好事，迫使我們明確每個 emit shape）
+
+**注意：** lifecycle 三個（`ready` / `pong` / `capabilities`）依然沒 turnId。type 上用 `WireEnvelope` interface 把 turnId 標為 optional，但其他所有 type 在文件上註明「必須帶 turnId」。
+
+**Checkpoint：**
+```bash
+npm run typecheck
+```
+TS 應該爆出所有 ad-hoc 欄位的 send，逐一修。修完 0 error。
+
+#### Step 1.3 — main 端 RemoteProcess turn-dispatcher 改造
+
+**檔案：** `src/main/agent/remote.ts`
+
+- `RemoteProcess` interface：拿掉 `onLine`，加 `registerTurn(turnId: string): AsyncGenerator<AgentEvent>`
+- 內部維護 `Map<turnId, { queue: AgentEvent[], resolve?: () => void, done: boolean }>`
+- 單一 stdout 'data' parser 在 spawn 時就掛上，按 `parsed.turnId` 路由到對應 queue
+- 沒 turnId 的 lifecycle event 走獨立 channel（`waitForReady` / 設定查詢用）
+- 沒 matched turnId（殘留事件）→ `log.warn` + drop
+- `query()` 改用 `proc.registerTurn(turnId)` 拿 AsyncIterator
+
+**注意：**
+- `parseRemoteMessage` 邏輯保留（純 schema parsing），只是 routing 上移到 RemoteProcess 內部
+- 跟 stdin write 的 `proc.sendLine({ type: 'send', ... })` 要在 `registerTurn` **之前**呼叫，避免 race（先註冊 listener 再送）
+
+**Checkpoint：**
+```bash
+npm run typecheck && npm run test:unit
+```
+新增 unit test：
+1. 兩個 turn 連續 register，event 帶不同 turnId，各自只收到自己的
+2. Event 帶不認得的 turnId → drop + warn
+3. Lifecycle event（無 turnId）正常走 ready/capabilities 流程
+
+#### Step 1.4 — Renderer 不變，但 e2e 驗證 cross-turn race 已修
+
+這時 P1 主體完成。`dedupSend` 還在 — 留著當第二層防護。理論上即使 provider 規矩走、idle 各種發都不會踩坑了，但 dedupSend 的成本很低，留著當 belt-and-suspenders。
+
+**Checkpoint（e2e 場景重現 queue msg）：**
+- 開 packaged app（重打包後）
+- Streaming 中送 queued msg
+- 驗證：turn 1 idle 後，turn 2 user bubble 出現、agent 回應正常出來
+- Log 不應該出現 `dropped event for unknown turnId`（如果出現代表 provider 還有跨 turn emit，需要追）
+
+---
+
+### Phase 2：Stream channel 統一（P2 主體）
+
+#### Step 2.1 — Wire schema 加 msgId（合併 toolUseId）
+
+**檔案：** `agent-server/providers/types.ts`、Claude/Copilot provider
+
+依決策 #1，msgId 是 universal id：
+- 所有 `message` variant 帶 `msgId: string`（取代或統一 toolUseId 作為 upsert key）
+- Tool message 上 `msgId === toolUseId`（語意：tool 卡片的 id 就是 toolUseId）
+- `permission_request` wire event 仍用 `toolUseId` 欄位名（語意更明確）— 對應的 tool message 的 msgId 跟它同值
+- `stream` variant 也帶 `msgId`，跟對應 finalize message 的 msgId 相同
+
+依決策 #6，Provider 自己維護 per-turn counter 生 block id：
+- Claude provider：在 query() 入口宣告 `let blockCounter = 0`，每次新 block 開始（content_block_start）`const msgId = \`${turnId}:b${blockCounter++}\``，stream chunks 跟 finalize 共用
+- Copilot provider：對應的 block-start 事件做一樣的事
+- Tool block 也走同套 counter（但 msgId === toolUseId 是 tool 的特例 — 不過實務上 tool block 的 msgId 直接用 toolUseId 就好，不用透過 counter，因為 SDK 給的 toolUseId 已經 stable 且 unique）
+
+```ts
+// 在 claude.ts query() 大致長這樣
+let blockCounter = 0;
+const nextMsgId = () => `${turnId}:b${blockCounter++}`;
+// text/thinking block
+const blockMsgId = nextMsgId();
+send({ type: 'stream', msgId: blockMsgId, channel: 'text', delta: '...' });
+// ... more deltas ...
+send({ type: 'message', msgId: blockMsgId, msgType: 'text', content: '...full' });
+// tool block — 用 toolUseId 直接
+send({ type: 'message', msgId: toolUseId, msgType: 'tool_use', toolName, input, ... });
+```
+
+**Checkpoint：**
+```bash
+npm run typecheck && npm run test:unit
+```
+Provider 端的 emit 測試覆蓋：
+- 同一個 block 多個 stream chunk 共用 msgId
+- finalize message 跟對應 stream 共用 msgId
+- Tool message 的 msgId === toolUseId
+- 不同 block 用不同 msgId（counter 遞增）
+
+#### Step 2.2 — Renderer message store 改 upsert
+
+**檔案：** `src/renderer/components/AgentView.tsx`
+
+- 拿掉 `streamText` / `streamThinking` state
+- Renderer-side `AgentMsg` type 加 `streaming?: boolean` flag
+- `onStream(chunk)`：找 `messages` 內 msgId 對應 entry，append delta；不存在就新建 `{ type: chunk.channel, msgId, content: delta, streaming: true }`
+- `onMessage(msg)`：找 msgId 對應 entry，覆蓋 content + 設 `streaming: false`；不存在就新建
+- `onStatus(idle)`：把所有還 `streaming: true` 的 entry 設成 `streaming: false`（兜底）
+- UI 渲染：刪掉 `showStreamText` / `streamThinking` 那一塊，所有訊息一律從 `messages` 渲染
+- Streaming cursor：`<AgentMessage>` 內部 if `msg.type === 'text' && msg.streaming` → 末端加 cursor span
+
+**注意：**
+- `tool_use` / `file_edit` 的 upsert key 從 `toolUseId` 統一到 `msgId`（toolUseId 改名或加 alias）
+- queue flush useEffect 不需要 `setStreamText('')` 了（streamText 沒了）
+
+**Checkpoint：**
+```bash
+npm run typecheck && npm run test:unit
+```
+Component test：
+- 連續 stream chunks 累積到同一個 msg
+- finalize 覆蓋累積值
+- 多 block 同 turn 各自獨立累積
+- idle 後所有 streaming flag 都 false
+
+**e2e（手動）：**
+- 開 packaged app，跑一輪正常對話
+- 視覺確認 streaming cursor 還在、字一個個出來的觀感不變
+- 跟 baseline 比對：streaming 中途送 queued msg → 還是正常
+
+#### Step 2.3 — 移除 dedupSend
+
+依決策 #2，turn-dispatcher 上線後 dedupSend 變多餘 → 拿掉。
+
+**檔案：** `agent-server/providers/claude.ts`
+
+- 移除 `dedupSend` wrapper（query() 開頭那段 closure）
+- query 內所有 `dedupSend(...)` 改回 `send(...)`
+- 補一條 comment：「Per-turn idle dedup 由 main 端 turn-dispatcher 處理，provider 自然 emit 即可」
+
+**Checkpoint：**
+```bash
+npm run typecheck && npm run test:unit
+```
+跑一次 queue msg scenario e2e：turn 1 emit 兩次 idle（result handler + finally），main 端 turn-dispatcher 各自帶 turnId，第一個 idle 結束 turn 1 iterator，第二個 idle 帶同 turnId 找不到接收者（已 unregister）→ log warn + drop。Turn 2 不受影響。
+
+---
+
+### Phase 3：清理與收尾
+
+#### Step 3.1 — Persistence schema 兼容 + streaming filter
+
+**檔案：** `src/renderer/storage/agent-history.ts`
+
+依決策 #1（合併 msgId / toolUseId）：load 時把舊 `toolUseId` 補成 `msgId`：
+```ts
+if (msg.toolUseId && !msg.msgId) {
+  msg.msgId = msg.toolUseId;
+}
+```
+
+依決策 #3（不存 streaming 中的訊息）：`saveAgentMessages` 寫入前 filter：
+```ts
+export async function saveAgentMessages(sessionId, messages, maxMessages = DEFAULT_MAX_MESSAGES) {
+  // Drop in-flight streaming entries — they have no final content yet, and
+  // letting them persist would either show a zombie "still typing" UI on
+  // reload (agent-server is dead) or require synthetic finalization that
+  // shows incomplete content. Cleanest: just drop. Tool/file_edit pending
+  // entries are different — they're concrete actions that did fire, so
+  // reviveOrphanPending synthesizes a failed result. Text/thinking
+  // streaming is mid-utterance and has nothing meaningful to preserve.
+  const filtered = messages.filter((m) => !((m as any).streaming));
+  // ... existing trim/rotate logic on `filtered` ...
+}
+```
+
+`reviveOrphanPending` 維持原樣（只動 tool_use / file_edit 的 pending state）。
+
+#### Step 3.2 — GOTCHAS 更新
+
+把 GOTCHAS 裡「Queued message flush — claude provider 每 turn 只能發一次 `state: 'idle'`」這條更新（依決策 #2，dedupSend 已拿掉）：
+- 標註「P1 turn-dispatcher 上線後，跨 turn idle leak 由 turnId routing 在 main 端攔截 → 不會誤入下個 turn iterator。Provider 自然 emit 兩次 idle 沒問題，第二次帶同 turnId 但對應 iterator 已 unregister，被 log warn + drop」
+- 移除原本的 dedupSend 內容（已不存在）
+
+#### Step 3.3 — DECISIONS 新增
+
+新增一條 DECISION：
+> #N — Wire protocol 帶 turnId envelope，main 端按 turnId 路由
+>
+> Rationale: 解決 single-lineHandler 跨 turn event leak（見 GOTCHAS 該條）。Per-event sessionId/requestId 提供 protocol-level 隔離，未來新 provider / 新事件類型都不會踩同坑。
+>
+> Trade-off: 每個 event payload 多 ~30 bytes（turnId UUID）；對目前 event throughput（< 1000/turn）無感。
+
+#### Step 3.4 — PROJECT_MAP 更新
+
+- `remote.ts` 條目更新：single-lineHandler → turn-dispatcher
+- `AgentView.tsx` 條目更新：streamText/streamThinking → unified messages store with streaming flag
+
+---
+
+## 風險與緩解
+
+| 風險 | 緩解 |
+|------|------|
+| **Streaming UX 退化**（cursor 跳動、字出現不順暢） | Phase 2.2 完成後手動 e2e 驗證，跟 baseline 並排比對。preview build 而非 dist 給自己用一週 |
+| **msgId 設計撞 toolUseId** | Phase 2.1 確認 toolUseId 是否合併進 msgId 還是並存。建議合併（toolUseId rename 為 msgId）— 概念上是同一個東西 |
+| **Provider 端 block-index 不穩**（SDK 沒給可靠 block id） | Fallback：用 `${turnId}:${incrementCounter++}` 在 provider 端維護 per-turn counter |
+| **Phase 1.3 (turn-dispatcher) 改錯導致整個 agent 不通** | Phase 1.3 跟 1.4 之間有完整 e2e checkpoint。1.3 失敗就 rollback，wire schema 改動量小（只加 turnId 欄位），rollback 成本低 |
+| **Phase 2.2 改 streamText/streamThinking 引入 regression** | 改前在 1.4 baseline 跑一輪 sanity test 影片留底，改後逐項比對 |
+
+---
+
+## 估時
+
+- Phase 1：2 天（Step 1.1-1.4，含 unit test + e2e 驗證）
+- Phase 2：3 天（Step 2.1-2.3，含 streaming UX 微調）
+- Phase 3：0.5 天（文件 + 清理）
+- **總計：~5-6 天 focused 工作**
+
+## 不在這次範圍（仍延後）
+
+- **Plan panel 行為改造**（replace-semantics + sticky panel 維持）
+- **`intent` sticky 化**
+- **Patch protocol wire-level diff 優化**（message 都 < 1KB，無痛點）
+
+## 進度追蹤
+
+> 每完成一個 Step，把 `[ ]` 改成 `[x]`，附 commit hash。中斷時看最後一個 `[x]` 接續。
+
+- [x] Step 1.1 — agent-server 加 turnId 注入 (`b8e1c88`)
+- [x] Step 1.2 — OutgoingMessage 加 envelope type (`5047c68`)
+- [x] Step 1.3 — main 端 RemoteProcess turn-dispatcher 改造 (`54ff655`)
+- [ ] Step 1.4 — Phase 1 e2e 驗證（queue msg cross-turn 場景不再踩 idle race）
+- [x] Step 2.1 — Wire schema 加 msgId（provider 端生 block-stable id）(`2fc4e44`)
+- [x] Step 2.2 — Renderer message store upsert 化 + 拿掉 streamText/streamThinking (`3e5b9e1`)
+- [x] Step 2.3 — 移除 dedupSend（依決策 #2）(`16e2bd7`)
+- [x] Step 3.1 — Persistence schema 兼容 (`9b86f3c`)
+- [x] Step 3.2 — GOTCHAS 更新 (`3e3a1f5`)
+- [x] Step 3.3 — DECISIONS 新增 (`3e3a1f5`)
+- [x] Step 3.4 — PROJECT_MAP 更新 (`3e3a1f5`)

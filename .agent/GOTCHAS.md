@@ -582,15 +582,17 @@ Dev mode 沒事是因為路徑是 `node_modules/@github/copilot/...`，不含 `a
 
 ---
 
-## Queued message flush — claude provider 每 turn 只能發一次 `state: 'idle'`
+## Queued message flush — cross-turn event leak (historical, fixed by turn-dispatcher)
 
-**現象**: Agent streaming 中送下一則訊息（UI 顯示 queued），等 turn 1 跑完。Queued 訊息的 user bubble 出現在 timeline，但 agent 完全沒回應。再手動送下一則訊息才會看到原本 queued 那輪的回應遲遲補上。
+**狀態**: 由 `src/main/agent/turn-dispatcher.ts` (Phase 1.3) 從架構層杜絕。本條保留作為「為什麼會有 turnId envelope」的脈絡 — 動 wire protocol 前先讀。
 
-**根因**: `agent-server/providers/claude.ts` 一個 `query()` 會發**兩次** `state: 'idle'`：
-1. `processMessage` 處理 SDK `result` message 時發（line ~678，帶 cost/tokens）
-2. `finally` block 兜底再發一次（line ~299）
+**舊現象**: Agent streaming 中送下一則訊息（UI 顯示 queued），等 turn 1 跑完。Queued 訊息的 user bubble 出現在 timeline，但 agent 完全沒回應。再手動送下一則訊息才會看到原本 queued 那輪的回應遲遲補上。
 
-`src/main/agent/remote.ts` 的 `streamRemoteEvents` 用單一 `lineHandler` setter（**每個 query 上來會覆寫**，不是 multi-listener）。Queue flush 場景時間軸：
+**舊根因**: `agent-server/providers/claude.ts` 一個 `query()` 會發**兩次** `state: 'idle'`：
+1. `processMessage` 處理 SDK `result` message 時發（帶 cost/tokens）
+2. `finally` block 兜底再發一次
+
+舊版 `src/main/agent/remote.ts` 的 `streamRemoteEvents` 用單一 `lineHandler` setter（**每個 query 上來會覆寫**）。Queue flush 場景時間軸：
 - T0: turn 1 result handler 發第一個 idle → main `lineHandler1` 收到 → `done=true` → for-await1 結束
 - T0+~100ms: 走完 main finally + renderer flush useEffect + agent.send IPC → main `sendMessage2` 開始 → `streamRemoteEvents2` 設新的 `lineHandler2`
 - T0+~300ms: turn 1 claude.ts 的 `finally` 才執行到，發**第二個** idle
@@ -598,10 +600,15 @@ Dev mode 沒事是因為路徑是 `node_modules/@github/copilot/...`，不含 `a
 
 手動間隔送（>1s）不會踩到，因為第二個 idle 落在兩個 turn 之間的空窗。**Queue flush 緊湊送（~50-100ms）剛好踩進時間窗**。
 
-**解法**: claude.ts `query()` 開頭包一層 `dedupSend`，第一個 `state: 'idle'` 過了就丟掉後續同類事件。`processMessage` / catch / finally 都改用 `dedupSend`。
+**第一次修法（已移除，commit 0f3a1f8 → 16e2bd7）**: claude.ts `query()` 開頭包一層 `dedupSend`，第一個 `state: 'idle'` 過了就丟掉後續同類事件。這是 provider-side workaround，沒解決 single-lineHandler 結構問題。
 
-**深層問題還沒解**: `remote.ts` 的 single-lineHandler 設計本身脆弱 — 沒有 turn-id / sessionId routing，任何「跨 turn 殘留 event」都會被下一個 turn 的 handler 吃掉。徹底修法是 protocol 層每個 event 帶 sessionId/requestId，main 端按 id 路由。目前 dedup 在 provider 端強制每 turn 一個 idle，先收住症狀。**未來再加新 provider / 新事件型別時要記得這個 contract**。
+**最終修法（commit 54ff655，Phase 1.3）**: wire protocol 每個 per-turn event 帶 `turnId` envelope（由 main 端生成、agent-server 在 `handleSend` 入口 wrap send 自動注入）。`src/main/agent/turn-dispatcher.ts` 接管 stdin 解析，按 turnId 路由到 per-turn `AsyncGenerator`。Turn 結束後 generator unregister；任何後續帶舊 turnId 的 event（包括 finally idle）找不到接收者 → log info + drop。dedupSend 隨之拆除（commit 16e2bd7）：provider 自然 emit 不會再造成 cross-turn 污染。
+
+**為什麼這個架構修正值得**: 不只解一個 race。任何 provider 發出「跨 turn 殘留 event」（提前/延遲的 idle、tool result、stream chunk 之類）都會被新 turn 的 handler 誤吃 — single-lineHandler 是整類 race 的同一個根。turnId routing 讓這類 bug 在 protocol 層就不可能發生。
+
+**新增 provider / 新事件型別時要記得**: 在 turn 內部發的所有 event 都會被 `wrapSendForTurn` 自動帶上 turnId，不需要 provider 端做任何事。Lifecycle event（`ready` / `pong` / `capabilities` / `credential_*` / `slash_result`）在 turn 外部，沒 turnId 是預期。
 
 **相關**:
-- `agent-server/index.ts` 用 `sendChain` Promise serialize `handleSend`，確保 turn 之間在 agent-server 端不會 race（解決另一層 claude.ts 模組層級狀態被互相覆寫的問題，跟這個 idle race 是兩個獨立 bug）
-- `src/renderer/components/AgentView.tsx` flush 用獨立 `useEffect`（不放在 `setIsStreaming` updater 裡），跟 `handleSend` 走同一條路徑（push user bubble + clear streamText + agent.send）
+- `agent-server/index.ts` 用 `sendChain` Promise serialize `handleSend`，確保 agent-server 內部一次只跑一個 turn（claude.ts 模組層級狀態如 `currentSend` / `abortController` / `activeQuery` 不會被同時改寫）
+- `src/renderer/components/AgentView.tsx` flush 用獨立 `useEffect`（不放在 `setIsStreaming` updater 裡），跟 `handleSend` 走同一條路徑（push user bubble + agent.send）
+- Phase 2.2 後 `streamText` / `streamThinking` state 移除，stream chunks 跟 finalize message 共用 `msgId` 進同一個 `messages` 上 upsert
