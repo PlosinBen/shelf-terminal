@@ -516,9 +516,13 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
     if (followBottomRef.current) {
       bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
-    // isStreaming flip toggles the "Agent is running…" placeholder, which
-    // changes scrollHeight; include it in deps so the auto-follow keeps up.
-  }, [messages, isStreaming]);
+    // Triggers that change rendered content height:
+    // - `messages`: new bubble / streaming chunk / tool result upsert
+    // - `isStreaming`: flip toggles the "Agent is running…" spinner
+    // - `queuedMessages`: queued chip renders at the bottom of the chat
+    //   container; without it in deps, pressing send while a turn is
+    //   running adds the chip below the viewport and never scrolls.
+  }, [messages, isStreaming, queuedMessages]);
 
   // When this tab becomes visible again, the auto-scroll effect above
   // could not run while the parent was display:none (scrollIntoView is a
