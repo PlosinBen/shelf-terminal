@@ -488,12 +488,12 @@ CLI 把上游 API 的 `percent_remaining`（自然 cap 在 0-100）反推回 `us
 
 **原因**: Copilot CLI 把所有檔案異動（Update / Add / Delete）統一走 `apply_patch` tool，args 是 unified diff 格式的字串。跟其他 tool 用 JSON object args（`view`/`bash`/`report_intent` 等）不一致，type def 沒寫清楚。
 
-**解法**: `agent-server/providers/copilot.ts` 的 `parseApplyPatch()` 只支援單檔 + 單 hunk 的 Update / Add（共識最常見的情況），multi-hunk / multi-file / Delete / 解析失敗都 fallback 成 generic `tool_use`（顯示 raw patch string 不漂亮但不會壞）。
+**解法**: `agent-server/providers/copilot.ts` 的 `parseApplyPatch()` 把 patch 解析成 `ApplyPatchFileSpec[]` — 每個 `*** Update File:` / `*** Add File:` section 各自一個 entry，同檔 multi-hunk（多個 `@@` block）也展成多個 entry（同 filePath 重複，每個 hunk 自己一張 file_edit 卡）。Delete 操作目前沒對應 canonical type 所以整 patch return null → fallback 成 generic `tool_use`（顯示 raw patch string）。Patch-level 失敗時所有 sub-card ✗ + 額外發一條 `msgType: 'error'` 在 timeline 顯示具體原因。
 
 **不要做**:
 - 不要假設 `apply_patch` args 是 object — 永遠先 `typeof args === 'string'` 檢查
-- 不要為了支援 multi-hunk 寫太複雜的 parser — Copilot 的實際使用 99% 是單 hunk，邊界 case fallback 就好。要擴的話寫 fixture-based test 一個個 case 加
-- 不要把 raw patch string 當 toolInput 餵渲染端 — `parseApplyPatch` parse 失敗時 wrap 成 `{ patch: <raw> }` object，避免 renderer 對 toolInput 做 `Object.values(...)` 之類操作 crash
+- 不要把 raw patch string 當 toolInput 餵渲染端 — `parseApplyPatch` return null 時 wrap 成 `{ patch: <raw> }` object，避免 renderer 對 toolInput 做 `Object.values(...)` 之類操作 crash
+- 不要把 Delete 從 fallback 路徑拉出來「假裝是 file_edit」— 需要時應該擴 canonical type（譬如 `file_edit` 加 `deleted?: boolean` 或新增 `file_delete` variant），不是在 parser 偷塞 sentinel
 
 ## Copilot session 必須傳 `workingDirectory`，否則 bash tool `posix_spawnp failed`
 
@@ -580,35 +580,3 @@ Dev mode 沒事是因為路徑是 `node_modules/@github/copilot/...`，不含 `a
 - 不要建 `app.asar.unpacked.unpacked` symlink 騙 buggy code — code-signing 可能踩 symlink，notarization 不穩
 - 不要把 `@github/copilot-darwin-*` / `-linux-*` / `-win32-*` 拉進來 — 那是給 standalone `npm install -g @github/copilot` 用的 platform-specific binary，SDK 模式下根本不會載入（loader index.js 只 import 同目錄的 app.js）
 
----
-
-## Queued message flush — cross-turn event leak (historical, fixed by turn-dispatcher)
-
-**狀態**: 由 `src/main/agent/turn-dispatcher.ts` (Phase 1.3) 從架構層杜絕。本條保留作為「為什麼會有 turnId envelope」的脈絡 — 動 wire protocol 前先讀。
-
-**舊現象**: Agent streaming 中送下一則訊息（UI 顯示 queued），等 turn 1 跑完。Queued 訊息的 user bubble 出現在 timeline，但 agent 完全沒回應。再手動送下一則訊息才會看到原本 queued 那輪的回應遲遲補上。
-
-**舊根因**: `agent-server/providers/claude.ts` 一個 `query()` 會發**兩次** `state: 'idle'`：
-1. `processMessage` 處理 SDK `result` message 時發（帶 cost/tokens）
-2. `finally` block 兜底再發一次
-
-舊版 `src/main/agent/remote.ts` 的 `streamRemoteEvents` 用單一 `lineHandler` setter（**每個 query 上來會覆寫**）。Queue flush 場景時間軸：
-- T0: turn 1 result handler 發第一個 idle → main `lineHandler1` 收到 → `done=true` → for-await1 結束
-- T0+~100ms: 走完 main finally + renderer flush useEffect + agent.send IPC → main `sendMessage2` 開始 → `streamRemoteEvents2` 設新的 `lineHandler2`
-- T0+~300ms: turn 1 claude.ts 的 `finally` 才執行到，發**第二個** idle
-- 此時 `lineHandler2` 已上線 → 把這個「跨 turn 殘留 idle」當作 turn 2 的 idle → for-await2 立刻結束 → 後續 turn 2 真正的 SDK events（system:init / stream_event / assistant / result）沒人讀
-
-手動間隔送（>1s）不會踩到，因為第二個 idle 落在兩個 turn 之間的空窗。**Queue flush 緊湊送（~50-100ms）剛好踩進時間窗**。
-
-**第一次修法（已移除，commit 0f3a1f8 → 16e2bd7）**: claude.ts `query()` 開頭包一層 `dedupSend`，第一個 `state: 'idle'` 過了就丟掉後續同類事件。這是 provider-side workaround，沒解決 single-lineHandler 結構問題。
-
-**最終修法（commit 54ff655，Phase 1.3）**: wire protocol 每個 per-turn event 帶 `turnId` envelope（由 main 端生成、agent-server 在 `handleSend` 入口 wrap send 自動注入）。`src/main/agent/turn-dispatcher.ts` 接管 stdin 解析，按 turnId 路由到 per-turn `AsyncGenerator`。Turn 結束後 generator unregister；任何後續帶舊 turnId 的 event（包括 finally idle）找不到接收者 → log info + drop。dedupSend 隨之拆除（commit 16e2bd7）：provider 自然 emit 不會再造成 cross-turn 污染。
-
-**為什麼這個架構修正值得**: 不只解一個 race。任何 provider 發出「跨 turn 殘留 event」（提前/延遲的 idle、tool result、stream chunk 之類）都會被新 turn 的 handler 誤吃 — single-lineHandler 是整類 race 的同一個根。turnId routing 讓這類 bug 在 protocol 層就不可能發生。
-
-**新增 provider / 新事件型別時要記得**: 在 turn 內部發的所有 event 都會被 `wrapSendForTurn` 自動帶上 turnId，不需要 provider 端做任何事。Lifecycle event（`ready` / `pong` / `capabilities` / `credential_*` / `slash_result`）在 turn 外部，沒 turnId 是預期。
-
-**相關**:
-- `agent-server/index.ts` 用 `sendChain` Promise serialize `handleSend`，確保 agent-server 內部一次只跑一個 turn（claude.ts 模組層級狀態如 `currentSend` / `abortController` / `activeQuery` 不會被同時改寫）
-- `src/renderer/components/AgentView.tsx` flush 用獨立 `useEffect`（不放在 `setIsStreaming` updater 裡），跟 `handleSend` 走同一條路徑（push user bubble + agent.send）
-- Phase 2.2 後 `streamText` / `streamThinking` state 移除，stream chunks 跟 finalize message 共用 `msgId` 進同一個 `messages` 上 upsert
