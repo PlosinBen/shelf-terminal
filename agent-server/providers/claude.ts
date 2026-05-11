@@ -211,26 +211,7 @@ export function createClaudeBackend(): ServerBackend {
     },
 
     async query(input: QueryInput, send: SendFn) {
-      // Dedupe `state: 'idle'` emissions. We emit idle from three sites for
-      // robustness (result handler with rich cost/token data; catch block on
-      // SDK error; finally block as catch-all). Without dedup the happy path
-      // emits twice (result + finally) — `streamRemoteEvents` in main reads
-      // ALL lines from agent-server's stdout via a SINGLE lineHandler that
-      // gets OVERWRITTEN by each new query. If turn 1's finally idle arrives
-      // after turn 2's lineHandler is installed, turn 2 terminates its
-      // for-await loop immediately on the stale idle and never sees its own
-      // SDK events. (Symptom: queued message UI shows turn 2's user bubble
-      // but the agent's response never renders.)
-      let idleEmitted = false;
-      const dedupSend: SendFn = (msg) => {
-        if ((msg as any).type === 'status' && (msg as any).state === 'idle') {
-          if (idleEmitted) return;
-          idleEmitted = true;
-        }
-        send(msg);
-      };
-
-      currentSend = dedupSend;
+      currentSend = send;
       abortController = new AbortController();
       // Seed in-memory session ID from orchestrator-provided context. Only
       // applied on the first turn of this process — once `lastSessionId` is
@@ -286,17 +267,17 @@ export function createClaudeBackend(): ServerBackend {
           if ('session_id' in sdkMsg && sdkMsg.session_id) {
             lastSessionId = sdkMsg.session_id as string;
           }
-          processMessage(sdkMsg, dedupSend, input.cwd, blockMsgIds);
+          processMessage(sdkMsg, send, input.cwd, blockMsgIds);
         }
       } catch (err: any) {
         if (err.name !== 'AbortError') {
-          dedupSend({ type: 'error', error: err.message ?? 'Unknown error' });
+          send({ type: 'error', error: err.message ?? 'Unknown error' });
         }
         // Always emit idle so the main process's streamRemoteEvents loop
         // terminates and the UI flips out of "streaming" state. Without this
         // the for-await caller hangs forever after an SDK error and the
         // session stays stuck — even AbortError needs the idle to release it.
-        dedupSend({ type: 'status', state: 'idle' });
+        send({ type: 'status', state: 'idle' });
       } finally {
         for (const resolve of pendingPermissions.values()) {
           resolve({ behavior: 'deny', message: 'Session ended' });
@@ -311,9 +292,9 @@ export function createClaudeBackend(): ServerBackend {
         // which is still correct because the SDK rolls forward a single jsonl
         // per resume chain.
         if (lastSessionId) {
-          dedupSend({ type: 'context_patch', patch: { lastSdkSessionId: lastSessionId } });
+          send({ type: 'context_patch', patch: { lastSdkSessionId: lastSessionId } });
         }
-        dedupSend({ type: 'status', state: 'idle' });
+        send({ type: 'status', state: 'idle' });
       }
     },
 
