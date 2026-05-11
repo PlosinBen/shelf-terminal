@@ -1,0 +1,165 @@
+import { describe, it, expect, vi } from 'vitest';
+import { createTurnDispatcher, type PermissionHandler } from './turn-dispatcher';
+import type { AgentEvent } from './types';
+
+// Minimal stand-in for `parseRemoteMessage` in remote.ts — we only need it
+// to convert wire shapes the dispatcher routes (status / message / etc.)
+// into AgentEvent for the per-turn queue.
+function parse(msg: any): AgentEvent | null {
+  if (msg?.type === 'status') {
+    return { type: 'status', payload: { state: msg.state } as any };
+  }
+  if (msg?.type === 'message') {
+    return { type: 'message', payload: { type: msg.msgType, content: msg.content ?? '' } as any };
+  }
+  if (msg?.type === 'stream') {
+    return { type: 'stream', payload: { type: msg.streamType, content: msg.content ?? '' } as any };
+  }
+  if (msg?.type === 'error') {
+    return { type: 'error', error: msg.error ?? '' };
+  }
+  return null;
+}
+
+const noopPerm: PermissionHandler = () => {};
+
+describe('createTurnDispatcher', () => {
+  it('routes events to the correct turn by turnId envelope', async () => {
+    const d = createTurnDispatcher(parse);
+    const gen1 = d.registerTurn('t-aaaa', noopPerm);
+    const gen2 = d.registerTurn('t-bbbb', noopPerm);
+
+    // Cross-turn events arriving interleaved on the same dispatcher
+    d.feed({ type: 'message', msgType: 'text', content: 'for-a', turnId: 't-aaaa' });
+    d.feed({ type: 'message', msgType: 'text', content: 'for-b', turnId: 't-bbbb' });
+    d.feed({ type: 'status', state: 'idle', turnId: 't-aaaa' });
+    d.feed({ type: 'status', state: 'idle', turnId: 't-bbbb' });
+
+    const aEvents: AgentEvent[] = [];
+    for await (const e of gen1) aEvents.push(e);
+    const bEvents: AgentEvent[] = [];
+    for await (const e of gen2) bEvents.push(e);
+
+    expect(aEvents.map((e) => ((e as any).payload)?.content ?? ((e as any).payload)?.state)).toEqual(['for-a', 'idle']);
+    expect(bEvents.map((e) => ((e as any).payload)?.content ?? ((e as any).payload)?.state)).toEqual(['for-b', 'idle']);
+  });
+
+  it('drops events for unknown turnIds (stale-turn leftover, e.g. claude.ts finally idle)', async () => {
+    const d = createTurnDispatcher(parse);
+    const gen = d.registerTurn('t-current', noopPerm);
+
+    // Leftover from a previous turn that's already been unregistered
+    d.feed({ type: 'status', state: 'idle', turnId: 't-old' });
+    d.feed({ type: 'message', msgType: 'text', content: 'stale', turnId: 't-old' });
+
+    // Real events for the current turn
+    d.feed({ type: 'message', msgType: 'text', content: 'hello', turnId: 't-current' });
+    d.feed({ type: 'status', state: 'idle', turnId: 't-current' });
+
+    const events: AgentEvent[] = [];
+    for await (const e of gen) events.push(e);
+
+    // Only current turn's events; stale ones silently dropped
+    expect(events.map((e) => ((e as any).payload)?.content ?? ((e as any).payload)?.state)).toEqual(['hello', 'idle']);
+  });
+
+  it('drops events with no turnId (lifecycle outside any turn)', async () => {
+    const d = createTurnDispatcher(parse);
+    const gen = d.registerTurn('t-x', noopPerm);
+
+    // turnId-less per-turn event (shouldn't happen with new protocol, but
+    // we defensively drop rather than misroute to current turn)
+    d.feed({ type: 'message', msgType: 'text', content: 'ghost' });
+
+    d.feed({ type: 'message', msgType: 'text', content: 'ok', turnId: 't-x' });
+    d.feed({ type: 'status', state: 'idle', turnId: 't-x' });
+
+    const events: AgentEvent[] = [];
+    for await (const e of gen) events.push(e);
+
+    expect(events.map((e) => ((e as any).payload)?.content ?? ((e as any).payload)?.state)).toEqual(['ok', 'idle']);
+  });
+
+  it('routes permission_request to per-turn handler, not the event queue', async () => {
+    const d = createTurnDispatcher(parse);
+    const permA = vi.fn();
+    const permB = vi.fn();
+    const genA = d.registerTurn('t-aaaa', permA);
+    const genB = d.registerTurn('t-bbbb', permB);
+
+    d.feed({ type: 'permission_request', toolUseId: 'tool-1', toolName: 'Bash', input: { command: 'ls' }, turnId: 't-aaaa' });
+    d.feed({ type: 'permission_request', toolUseId: 'tool-2', toolName: 'Read', input: { file_path: '/etc' }, turnId: 't-bbbb' });
+
+    // Each turn's handler only saw its own permission request
+    expect(permA).toHaveBeenCalledExactlyOnceWith('tool-1', 'Bash', { command: 'ls' });
+    expect(permB).toHaveBeenCalledExactlyOnceWith('tool-2', 'Read', { file_path: '/etc' });
+
+    // Permission requests don't appear in the event queue — close turns and
+    // verify queue is empty (just the idle event we send below)
+    d.feed({ type: 'status', state: 'idle', turnId: 't-aaaa' });
+    d.feed({ type: 'status', state: 'idle', turnId: 't-bbbb' });
+
+    const aEvents: AgentEvent[] = [];
+    for await (const e of genA) aEvents.push(e);
+    const bEvents: AgentEvent[] = [];
+    for await (const e of genB) bEvents.push(e);
+    expect(aEvents).toHaveLength(1);
+    expect(bEvents).toHaveLength(1);
+    expect(((aEvents[0] as any).payload).state).toBe('idle');
+  });
+
+  it('drains tail events that arrive between idle and generator exit', async () => {
+    const d = createTurnDispatcher(parse);
+    const gen = d.registerTurn('t-x', noopPerm);
+
+    // Burst arrives all at once; queue contains tail events after idle
+    d.feed({ type: 'message', msgType: 'text', content: 'a', turnId: 't-x' });
+    d.feed({ type: 'status', state: 'idle', turnId: 't-x' });
+    d.feed({ type: 'message', msgType: 'text', content: 'tail', turnId: 't-x' });
+
+    const events: AgentEvent[] = [];
+    for await (const e of gen) events.push(e);
+    // 'a' (pre-idle), 'idle', 'tail' (post-idle but pre-drain) all yielded
+    expect(events.map((e) => ((e as any).payload)?.content ?? ((e as any).payload)?.state)).toEqual(['a', 'idle', 'tail']);
+  });
+
+  it('awaitReady resolves true when {type:ready} arrives', async () => {
+    const d = createTurnDispatcher(parse);
+    const pending = d.awaitReady(5000);
+    d.feed({ type: 'ready' });
+    expect(await pending).toBe(true);
+  });
+
+  it('awaitReady resolves false on timeout when no ready arrives', async () => {
+    const d = createTurnDispatcher(parse);
+    const result = await d.awaitReady(50);
+    expect(result).toBe(false);
+  });
+
+  it('routes requestId-keyed responses (capabilities / credential / slash) independent of any turn', () => {
+    const d = createTurnDispatcher(parse);
+    const captured: any[] = [];
+    d.onResponse('cap-1', 'capabilities', (p) => captured.push(p));
+    d.feed({ type: 'capabilities', requestId: 'cap-1', models: [], permissionModes: [], effortLevels: [], slashCommands: [] });
+    expect(captured).toHaveLength(1);
+    expect(captured[0].type).toBe('capabilities');
+
+    // Handlers are one-shot — same requestId firing again is dropped
+    d.feed({ type: 'capabilities', requestId: 'cap-1', error: 'late' });
+    expect(captured).toHaveLength(1);
+  });
+
+  it('removes turn state when generator exits — subsequent events for same turnId are dropped', async () => {
+    const d = createTurnDispatcher(parse);
+    const gen = d.registerTurn('t-x', noopPerm);
+
+    d.feed({ type: 'status', state: 'idle', turnId: 't-x' });
+    const events: AgentEvent[] = [];
+    for await (const e of gen) events.push(e);
+    expect(events).toHaveLength(1);
+
+    // After generator exits, the turn is unregistered. New events for that
+    // turnId should be silently dropped (not crash, not misroute).
+    expect(() => d.feed({ type: 'message', msgType: 'text', content: 'late', turnId: 't-x' })).not.toThrow();
+  });
+});

@@ -2,15 +2,24 @@ import { log } from '@shared/logger';
 import type { Connection, AgentProvider, ProviderModel } from '@shared/types';
 import type { AgentBackend, AgentEvent, AgentQueryOptions } from './types';
 import { ChildProcess, spawn, execSync } from 'child_process';
+import { randomUUID } from 'crypto';
 import { app } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
 import { getShellEnv } from '../connector/shell-env';
+import { createTurnDispatcher, type PermissionHandler } from './turn-dispatcher';
 
 interface RemoteProcess {
   sendLine: (msg: object) => void;
-  onLine: (callback: (line: string) => void) => void;
-  onPermissionRequest: (handler: (toolUseId: string, toolName: string, input: Record<string, unknown>) => void) => void;
+  /**
+   * Register a turn so agent-server events tagged with `turnId` get routed to
+   * the returned AsyncGenerator. MUST be called before `sendLine({type:'send',turnId,...})`
+   * so the dispatcher knows where to deliver events that may arrive before
+   * the registration completes. Generator ends on first `state:'idle'` event.
+   */
+  registerTurn: (turnId: string, permissionHandler: PermissionHandler) => AsyncGenerator<AgentEvent>;
+  /** Wait for agent-server's `{type:'ready'}` signal. Resolves false on timeout. */
+  awaitReady: (timeoutMs?: number) => Promise<boolean>;
   onResponse: (requestId: string, expectedType: string, handler: (payload: any) => void) => void;
   kill: () => void;
 }
@@ -42,7 +51,7 @@ export function createRemoteBackend(
       const proc = await spawnAgentServer(connection, cwd, remotePath, initScript);
       if (!proc) return null;
       remoteProc = proc;
-      const ready = await waitForReady(remoteProc);
+      const ready = await remoteProc.awaitReady();
       if (!ready) {
         remoteProc.kill();
         remoteProc = null;
@@ -64,24 +73,40 @@ export function createRemoteBackend(
         return;
       }
 
+      // Main-side generates the turnId so we can register the per-turn
+      // dispatcher BEFORE sending. Agent-server respects the incoming
+      // turnId and tags every outgoing event with it.
+      const turnId = `t-${randomUUID().slice(0, 8)}`;
+
       const userCallback = opts?.canUseTool;
-      proc.onPermissionRequest(async (toolUseId, toolName, input) => {
-        if (!userCallback) {
-          proc.sendLine({ type: 'resolve_permission', toolUseId, allow: true });
-          return;
-        }
-        const result = await userCallback(toolUseId, toolName, input);
-        proc.sendLine({
-          type: 'resolve_permission',
-          toolUseId,
-          allow: result.behavior === 'allow',
-          message: result.behavior === 'deny' ? result.message : undefined,
-          scope: result.behavior === 'allow' ? result.scope : undefined,
-        });
-      });
+      const permissionHandler: PermissionHandler = (toolUseId, toolName, input) => {
+        // Fire-and-forget — resolve_permission round-trips back to the
+        // dispatcher which delivers the canUseTool answer asynchronously.
+        (async () => {
+          if (!userCallback) {
+            proc.sendLine({ type: 'resolve_permission', toolUseId, allow: true });
+            return;
+          }
+          const result = await userCallback(toolUseId, toolName, input);
+          proc.sendLine({
+            type: 'resolve_permission',
+            toolUseId,
+            allow: result.behavior === 'allow',
+            message: result.behavior === 'deny' ? result.message : undefined,
+            scope: result.behavior === 'allow' ? result.scope : undefined,
+          });
+        })();
+      };
+
+      // Pre-register so events for this turn have a destination from the
+      // get-go. Without pre-registration there's a tiny window between
+      // sendLine and registerTurn where agent-server's first response
+      // could arrive and get dropped as "unknown turn".
+      const events = proc.registerTurn(turnId, permissionHandler);
 
       proc.sendLine({
         type: 'send',
+        turnId,
         provider,
         prompt,
         cwd,
@@ -93,7 +118,7 @@ export function createRemoteBackend(
         images: opts?.images,
       });
 
-      yield* streamRemoteEvents(proc);
+      yield* events;
     },
 
     async stop() {
@@ -269,9 +294,7 @@ async function spawnAgentServer(
 }
 
 function wrapProcess(proc: ChildProcess): RemoteProcess {
-  let lineHandler: ((line: string) => void) | null = null;
-  let permissionHandler: ((toolUseId: string, toolName: string, input: Record<string, unknown>) => void) | null = null;
-  const responseHandlers = new Map<string, (payload: any) => void>();
+  const dispatcher = createTurnDispatcher(parseRemoteMessage);
   let buffer = '';
 
   proc.stdout?.on('data', (chunk: Buffer) => {
@@ -281,25 +304,14 @@ function wrapProcess(proc: ChildProcess): RemoteProcess {
     for (const line of lines) {
       const trimmed = line.trim();
       if (!trimmed) continue;
+      let parsed: any;
       try {
-        const parsed = JSON.parse(trimmed);
-        if (parsed?.type === 'permission_request' && permissionHandler) {
-          permissionHandler(parsed.toolUseId, parsed.toolName, parsed.input ?? {});
-          continue;
-        }
-        if (parsed?.type && parsed.requestId) {
-          const key = `${parsed.type}:${parsed.requestId}`;
-          const handler = responseHandlers.get(key);
-          if (handler) {
-            responseHandlers.delete(key);
-            handler(parsed);
-            continue;
-          }
-        }
+        parsed = JSON.parse(trimmed);
       } catch {
-        // fall through to lineHandler
+        log.info('agent-remote', `non-json line from agent-server, dropping: ${trimmed.slice(0, 100)}`);
+        continue;
       }
-      lineHandler?.(trimmed);
+      dispatcher.feed(parsed);
     }
   });
 
@@ -323,67 +335,14 @@ function wrapProcess(proc: ChildProcess): RemoteProcess {
     sendLine: (msg) => {
       proc.stdin?.write(JSON.stringify(msg) + '\n');
     },
-    onLine: (callback) => {
-      lineHandler = callback;
-    },
-    onPermissionRequest: (handler) => {
-      permissionHandler = handler;
-    },
-    onResponse: (requestId, expectedType, handler) => {
-      responseHandlers.set(`${expectedType}:${requestId}`, handler);
-    },
+    registerTurn: dispatcher.registerTurn,
+    awaitReady: dispatcher.awaitReady,
+    onResponse: dispatcher.onResponse,
     kill: () => {
       proc.stdin?.end();
       proc.kill();
     },
   };
-}
-
-function waitForReady(remote: RemoteProcess): Promise<boolean> {
-  return new Promise((resolve) => {
-    const timeout = setTimeout(() => resolve(false), 10000);
-    remote.onLine((line) => {
-      try {
-        const msg = JSON.parse(line);
-        if (msg.type === 'ready') {
-          clearTimeout(timeout);
-          resolve(true);
-        }
-      } catch {}
-    });
-  });
-}
-
-async function* streamRemoteEvents(remote: RemoteProcess): AsyncGenerator<AgentEvent> {
-  const events: AgentEvent[] = [];
-  let resolve: (() => void) | null = null;
-  let done = false;
-
-  remote.onLine((line) => {
-    try {
-      const msg = JSON.parse(line);
-      const event = parseRemoteMessage(msg);
-      if (event) {
-        events.push(event);
-        if (event.type === 'status' && (event as any).payload?.state === 'idle') {
-          done = true;
-        }
-        resolve?.();
-      }
-    } catch {}
-  });
-
-  while (!done) {
-    if (events.length > 0) {
-      yield events.shift()!;
-    } else {
-      await new Promise<void>((r) => { resolve = r; });
-    }
-  }
-
-  while (events.length > 0) {
-    yield events.shift()!;
-  }
 }
 
 function parseRemoteMessage(msg: any): AgentEvent | null {
