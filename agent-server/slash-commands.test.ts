@@ -21,7 +21,10 @@ describe('Claude handleSlashCommand', () => {
 });
 
 describe('Copilot handleSlashCommand', () => {
-  it('/clear resets context and returns context-cleared', async () => {
+  it('/clear without prior session is a successful no-op (does not attempt SDK auth)', async () => {
+    // Regression: eager-rebuild /clear must skip ensureSession when there's
+    // no session to actually clear, so unit tests / fresh agent-servers
+    // don't get tripped up by missing Copilot CLI / gh auth.
     const backend = createCopilotBackend();
     const result = await backend.handleSlashCommand!('clear', '');
     expect(result.type).toBe('context-cleared');

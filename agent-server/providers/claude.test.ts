@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { mergeClaudeModels, rateLimitInfoToSegment } from './claude';
+import { mergeClaudeModels, rateLimitInfoToSegment, formatClaudeToolInput } from './claude';
 import type { ProviderModel } from '../../src/shared/types';
 
 describe('mergeClaudeModels', () => {
@@ -148,5 +148,48 @@ describe('rateLimitInfoToSegment', () => {
       rateLimitType: 'five_hour',
     });
     expect(seg!.text).toBe('5h: —');
+  });
+});
+
+describe('formatClaudeToolInput', () => {
+  const cwd = '/Users/me/proj';
+
+  it('formats Bash to bare command', () => {
+    expect(formatClaudeToolInput('Bash', { command: 'ls -la', description: 'list files' }, cwd))
+      .toBe('ls -la');
+  });
+
+  it('strips cwd from Read file_path and shows offset/limit', () => {
+    expect(formatClaudeToolInput('Read', { file_path: '/Users/me/proj/src/foo.ts' }, cwd))
+      .toBe('src/foo.ts');
+    expect(formatClaudeToolInput('Read', { file_path: '/Users/me/proj/src/foo.ts', offset: 10, limit: 50 }, cwd))
+      .toBe('src/foo.ts (10..+50)');
+  });
+
+  it('formats Grep with pattern + relative path', () => {
+    expect(formatClaudeToolInput('Grep', { pattern: 'TODO', path: '/Users/me/proj/src' }, cwd))
+      .toBe('TODO in src');
+  });
+
+  it('formats Glob with pattern only when path absent', () => {
+    expect(formatClaudeToolInput('Glob', { pattern: '**/*.ts' }, cwd))
+      .toBe('**/*.ts');
+  });
+
+  it('formats Task with description + truncated prompt', () => {
+    const prompt = 'a'.repeat(200);
+    const out = formatClaudeToolInput('Task', { description: 'lookup', prompt }, cwd);
+    expect(out.startsWith('lookup: ')).toBe(true);
+    expect(out.length).toBeLessThan(prompt.length);
+  });
+
+  it('falls back to first string for unknown tool', () => {
+    expect(formatClaudeToolInput('mystery_mcp_tool', { foo: 42, bar: 'hello' }, cwd))
+      .toBe('hello');
+  });
+
+  it('falls back to JSON when no string field', () => {
+    const out = formatClaudeToolInput('mystery', { count: 3, ok: true }, cwd);
+    expect(out).toContain('"count":3');
   });
 });

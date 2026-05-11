@@ -67,9 +67,66 @@ const execFileP = promisify(execFile);
  * to re-emit the same canonical message with `result` populated when complete.
  */
 type InflightToolUseEntry =
-  | { kind: 'tool_use'; toolName: string; toolInput: Record<string, unknown> }
+  | { kind: 'tool_use'; toolName: string; input: string }
   | { kind: 'file_edit'; filePath: string; diff?: { oldString: string; newString: string }; content?: string };
 const inflightToolUses = new Map<string, InflightToolUseEntry>();
+
+function stripCwd(p: string, cwd: string): string {
+  if (!cwd || !p) return p;
+  if (p.startsWith(cwd + '/')) return p.slice(cwd.length + 1);
+  return p;
+}
+
+/**
+ * Format a Copilot CLI tool's `arguments` object into a single human-readable
+ * string for the renderer. Mirrors `formatClaudeToolInput` but for Copilot's
+ * lowercase / snake_case tool names (bash, view, grep, glob, list_directory…).
+ *
+ * `apply_patch` is parsed separately via `parseApplyPatch`, so we never reach
+ * this formatter for it. `task_complete` / `report_intent` are intercepted
+ * earlier (rendered as text/intent), also never here.
+ *
+ * Falls back to first string value / JSON for unknown tools so MCP custom
+ * tools still surface something useful.
+ */
+export function formatCopilotToolInput(toolName: string, args: Record<string, unknown>, cwd: string): string {
+  switch (toolName) {
+    case 'bash':
+    case 'shell':
+      return String(args.command ?? '');
+    case 'view':
+    case 'read_file':
+    case 'read': {
+      const p = String(args.path ?? args.file_path ?? '');
+      return stripCwd(p, cwd);
+    }
+    case 'list_directory': {
+      const p = String(args.path ?? '');
+      return stripCwd(p, cwd) || '.';
+    }
+    case 'grep': {
+      const pattern = String(args.pattern ?? args.query ?? '');
+      const p = args.path ? ` in ${stripCwd(String(args.path), cwd)}` : '';
+      return pattern + p;
+    }
+    case 'glob': {
+      const pattern = String(args.pattern ?? '');
+      const p = args.path ? ` in ${stripCwd(String(args.path), cwd)}` : '';
+      return pattern + p;
+    }
+    case 'task': {
+      const at = args.agent_type ? `${args.agent_type}: ` : '';
+      const name = args.name ? `${args.name} — ` : '';
+      const prompt = String(args.prompt ?? args.description ?? '');
+      return `${at}${name}${prompt.slice(0, 100)}`;
+    }
+    default: {
+      const firstStr = Object.values(args).find((v) => typeof v === 'string') as string | undefined;
+      if (firstStr) return firstStr;
+      return JSON.stringify(args);
+    }
+  }
+}
 
 /**
  * Parse Copilot's `apply_patch` raw-string args into a normalized file_edit
@@ -230,6 +287,12 @@ export function createCopilotBackend(): ServerBackend {
   let currentEffort: string | undefined;
   let currentPermissionMode = 'default';
   let currentSessionId: string | null = null;
+  // workingDirectory must be threaded into createSession/resumeSession config —
+  // omitting it leaves the CLI's bash tool spawning relative to agent-server's
+  // own cwd (which on packaged Electron is something like /), causing
+  // "posix_spawnp failed" when the shell tries to run from a non-existent or
+  // unreadable working directory.
+  let currentCwd: string | null = null;
   // External vocabulary (shared with Claude) → Copilot SDK SessionMode.
   const MODE_TO_SDK: Record<string, 'interactive' | 'plan' | 'autopilot'> = {
     default: 'interactive',
@@ -349,6 +412,7 @@ export function createCopilotBackend(): ServerBackend {
       onPermissionRequest,
     };
     if (currentEffort) config.reasoningEffort = currentEffort;
+    if (currentCwd) config.workingDirectory = currentCwd;
 
     let session: import('@github/copilot-sdk').CopilotSession;
     if (state.cliSessionId) {
@@ -443,18 +507,21 @@ export function createCopilotBackend(): ServerBackend {
             }
           }
 
-          // Generic tool_use path. For apply_patch fallback we wrap the raw
-          // string into a `{ patch }` toolInput so the renderer's generic card
-          // has something to display.
-          const toolInput: Record<string, unknown> = typeof args === 'string'
+          // Generic tool_use path. For apply_patch fallback (multi-hunk /
+          // multi-file / Delete that parseApplyPatch refused), wrap the raw
+          // string into a one-shot `{ patch }` object so the formatter has
+          // something to chew on — output will be the raw patch text, ugly
+          // but not lost.
+          const argObj: Record<string, unknown> = typeof args === 'string'
             ? { patch: args }
             : args;
-          inflightToolUses.set(toolUseId, { kind: 'tool_use', toolName, toolInput });
+          const input = formatCopilotToolInput(toolName, argObj, currentCwd ?? '');
+          inflightToolUses.set(toolUseId, { kind: 'tool_use', toolName, input });
           currentSend({
             type: 'message', msgType: 'tool_use',
             toolUseId,
             toolName,
-            toolInput,
+            input,
           });
           break;
         }
@@ -489,7 +556,7 @@ export function createCopilotBackend(): ServerBackend {
               type: 'message', msgType: 'tool_use',
               toolUseId,
               toolName: entry.toolName,
-              toolInput: entry.toolInput,
+              input: entry.input,
               result: { content: String(text).slice(0, 8000), ...(isError ? { isError: true } : {}) },
             });
           }
@@ -653,6 +720,11 @@ export function createCopilotBackend(): ServerBackend {
       }
       if (modelChanged) send({ type: 'capabilities', ...buildCapabilities() });
       if (input.sessionId) currentSessionId = input.sessionId;
+      // Capture cwd before ensureSession so workingDirectory lands in createSession config.
+      // If cwd changes mid-session (e.g. user switches project), we don't recreate the
+      // session — Copilot CLI doesn't have a rpc.cwd.set, and most users stay in one
+      // project per session. The first cwd we see wins.
+      if (input.cwd && !currentCwd) currentCwd = input.cwd;
 
       send({ type: 'status', state: 'streaming', model: currentModel });
 
@@ -766,13 +838,33 @@ export function createCopilotBackend(): ServerBackend {
         }
 
         case 'clear': {
-          // Drop session — next query creates a fresh one.
+          // Eager rebuild semantics: dispose old session, immediately create
+          // a fresh one bound to the *current* cwd. Without the new-session
+          // build step, Copilot CLI's server-side session state (which
+          // includes workingDirectory) would be re-restored on the next
+          // query via any persisted lastSdkSessionId — defeating the point
+          // of /clear when the user switched project or hit a wedged
+          // session. `ensureSession()` also emits `context_patch` with the
+          // new sessionId, so persisted state stays consistent.
+          //
+          // We only attempt the rebuild when there *was* a session to clear.
+          // First-/clear-before-any-query (mostly tests, also degenerate UI
+          // flows) is treated as a successful no-op so we don't surprise
+          // unsuspecting environments with auth / CLI-binary requirements.
+          const hadSession = !!state.session || !!state.cliSessionId;
           try { await state.session?.disconnect(); } catch { /* ignore */ }
           state.session = null;
           state.cliSessionId = null;
           latestUsage = null;
           inflightToolUses.clear();
           currentSend?.({ type: 'message', msgType: 'plan', content: '' });
+          if (hadSession) {
+            try {
+              await ensureSession();
+            } catch (err: any) {
+              return { type: 'error', message: `Cleared, but failed to start new session: ${err?.message ?? err}` };
+            }
+          }
           return { type: 'context-cleared', message: 'Context cleared' };
         }
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { quotaSnapshotToSegment, parseApplyPatch } from './copilot';
+import { quotaSnapshotToSegment, parseApplyPatch, formatCopilotToolInput } from './copilot';
 
 describe('quotaSnapshotToSegment', () => {
   it('renders premium quota at 100%', () => {
@@ -192,5 +192,52 @@ describe('parseApplyPatch', () => {
   it('returns null for non-string input', () => {
     expect(parseApplyPatch(null as any)).toBeNull();
     expect(parseApplyPatch({} as any)).toBeNull();
+  });
+});
+
+describe('formatCopilotToolInput', () => {
+  const cwd = '/Users/me/proj';
+
+  it('formats bash to bare command', () => {
+    expect(formatCopilotToolInput('bash', { command: 'ls -la' }, cwd)).toBe('ls -la');
+  });
+
+  it('strips cwd from view path', () => {
+    expect(formatCopilotToolInput('view', { path: '/Users/me/proj/src/foo.ts' }, cwd))
+      .toBe('src/foo.ts');
+  });
+
+  it('formats grep with pattern + relative path', () => {
+    expect(formatCopilotToolInput('grep', { pattern: 'TODO', path: '/Users/me/proj/src' }, cwd))
+      .toBe('TODO in src');
+  });
+
+  it('formats glob with pattern only', () => {
+    expect(formatCopilotToolInput('glob', { pattern: '**/*.ts' }, cwd))
+      .toBe('**/*.ts');
+  });
+
+  it('formats task with agent_type + name + truncated prompt', () => {
+    const out = formatCopilotToolInput('task', {
+      agent_type: 'explore',
+      name: 'find-foo',
+      prompt: 'a'.repeat(200),
+    }, cwd);
+    expect(out).toContain('explore:');
+    expect(out).toContain('find-foo');
+    expect(out.length).toBeLessThan(180);
+  });
+
+  it('list_directory returns "." when path empty', () => {
+    expect(formatCopilotToolInput('list_directory', {}, cwd)).toBe('.');
+  });
+
+  it('falls back to first string for unknown tool', () => {
+    expect(formatCopilotToolInput('mystery_mcp', { count: 1, label: 'hi' }, cwd))
+      .toBe('hi');
+  });
+
+  it('falls back to JSON when no string field', () => {
+    expect(formatCopilotToolInput('mystery', { x: 1 }, cwd)).toContain('"x":1');
   });
 });

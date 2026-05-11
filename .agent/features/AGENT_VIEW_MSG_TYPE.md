@@ -40,11 +40,13 @@ export type AgentMessage =
   | { type: 'plan'; content: string }
 
   // 通用 tool — result 內嵌（同 toolUseId 後到的 message 整條 upsert）
+  // **`input` 是 provider 預先格式化的單一字串**，不是結構化 object。
+  // 詳見「設計選擇 3：tool_use 的 input 是字串而非 object」。
   | {
       type: 'tool_use';
       toolUseId: string;
       toolName: string;
-      toolInput: Record<string, unknown>;
+      input: string;
       result?: { content: string; isError?: boolean };
     }
 
@@ -95,6 +97,40 @@ type RendererMessage = AgentMessage | { type: 'user'; content: string; images?: 
 - **TS exhaustiveness 自然** — switch on type 漏 case 直接 error；kind 套在內層要多一層 narrowing 才能查
 - **避免「行為隱藏在第二層」反模式** — 跟 anti-corruption layer 同精神：外部介面儘量扁平，深層判斷不可見地影響行為很容易踩雷
 - **Renderer dispatch 一個 switch 結束** — 看 message.type 就決定要 render 哪個 component，不用先看 type 再進去看 kind 二次分流
+
+## 設計選擇 3：tool_use 的 input 是字串而非 object
+
+第一版 `tool_use` 帶 `toolInput: Record<string, unknown>`，渲染端用 `getToolSummary(toolName, input)` + `ToolBody(toolName, input)` 兩個 helper 各自 switch on toolName 從 input 抽欄位。問題：
+
+- **Renderer 知道太多 SDK 細節** — 對 `Bash` 抽 `command`、對 `Read` 抽 `file_path`、對 `view` 抽 `path`、對 `Grep` 抽 `pattern`…全部寫死在 renderer 裡，每加一個新 SDK tool 要改兩個 switch。
+- **case-sensitivity 問題** — Claude 是 `Bash`，Copilot 是 `bash`，renderer 要 `toLowerCase()` 或寫兩條 case，散落在多處。
+- **重複顯示** — header summary 跟 body 各自從 input 抽 `command` 字段顯示，bash command 在卡片上出現兩次，純粹是 renderer 兩段邏輯都選擇展示 command 造成的視覺噪音。
+- **task 之類複雜 input 退化成 JSON dump** — Copilot `task` tool 的 `input.prompt` 是上百字的自然語句，body 直接 `JSON.stringify` 整個物件變成噪音矩形。
+
+**現行方案：** Provider 翻譯時就把 `toolInput` 攤平成「人能讀的單行字串」`input`，renderer 把它當不透明文字渲染，只做 CSS 截斷。
+
+```ts
+{ type: 'tool_use'; toolUseId; toolName; input: string; result? }
+```
+
+實作位置：
+
+- Claude: `agent-server/providers/claude.ts:formatClaudeToolInput(toolName, input, cwd)`
+- Copilot: `agent-server/providers/copilot.ts:formatCopilotToolInput(toolName, args, cwd)`
+
+兩張表各自 switch on toolName 抽出最該顯示的字段（Bash → command、Read → cwd-relative file_path + 可選 offset/limit、Grep → `pattern in path`、view → cwd-relative path、…），未知 tool 退化到「第一個字串值」或 `JSON.stringify`。
+
+**收益：**
+
+- Renderer 砍掉 `getToolSummary` / `ToolBody`（共 ~70 行），整個 tool_use case 變成「header 顯示 toolName + input（CSS 截斷），expand 後只顯示 result」。
+- Header 跟 body 不再各自抽 input，自然消除重複顯示。
+- Provider 端負責把 cwd 從絕對路徑剝掉，renderer 不需要知道 cwd（從前 `stripCwd(filePath, cwd)` 在 renderer 跑）。
+- 接新 SDK tool 只需在 provider 的 formatter 表加一條，renderer 永遠不動。
+- MCP custom tool 自動有 fallback（first string / JSON），不會崩。
+
+**規則：** Tool 渲染需求 == 「input/output 兩塊」→ 用 `tool_use`；任何偏離（檔案編輯有 diff、sub-agent 結果是 markdown、web fetch 顯示 URL preview…）→ 自己一個 canonical type，**不要在 `tool_use` 內部偷偷分流**。
+
+**Persistence backward-compat：** 舊版存的 `tool_use` 帶 structured `toolInput`，新版讀到沒有 `input` 字串時用 `JSON.stringify(toolInput)` 一次性遷移（`src/renderer/storage/agent-history.ts:migrateLegacyToolUseInput`）。歷史 session 仍然顯示得出來，雖然格式醜（純 JSON dump）。新存的訊息直接就是 `input: string`，不會再經過這條路徑。
 
 ## 設計選擇 2：Result 內嵌而非獨立 type
 
@@ -151,10 +187,11 @@ function AgentMessageView({ msg }: { msg: AgentMessage }) {
     case 'error':    return <ErrorBlock content={msg.content} />;
 
     case 'tool_use':
-      // msg 已 narrow，msg.toolName / msg.toolInput / msg.result 全部都對
+      // msg 已 narrow，msg.toolName / msg.input / msg.result 全部都對。
+      // input 是 provider 預先格式化好的字串；renderer 不解析、不抽欄位。
       return <ToolUseCard
         toolName={msg.toolName}
-        toolInput={msg.toolInput}
+        input={msg.input}
         result={msg.result}
       />;
 
@@ -275,13 +312,21 @@ function upsertMessage(messages: AgentMsg[], incoming: AgentMsg): AgentMsg[] {
 
 **`tool_use`：**
 
-- 通用卡片 header：toolName + 摘要（`getToolSummary` 沿用，吃 toolInput）
-- pending（無 result）：卡片不顯示 result 區塊，可選 dim / spinner
-- result 在卡片同一張，inline 顯示在 header 之下：
-  - `result.content` 短（< N 行）直接 render
-  - 長（> N 行）折疊 + 「展開全部」trigger（沿用現有 ToolResultCard 折疊邏輯）
-  - `result.isError === true` 時整個 result 區塊套紅色 `.agent-tool-result-error` 樣式
-- 不再有獨立 ToolResultCard component；既有渲染搬到 ToolUseCard 內 result block
+- 通用卡片 header：toolName + `message.input`（provider 預格式化的字串，CSS 截斷處理超長）
+- 展開後 body：**只顯示 result**，不重複印 input（input 已經在 header；展開時 header summary 自動切換到完整不截斷版）
+- pending（無 result）：卡片不顯示 result 區塊，header 加 `running` badge
+- result 區塊樣式：
+  - 30 行內直接 render
+  - 超出 30 行截斷 + `... +N more lines`
+  - `result.isError === true` 時整個 result 區塊套紅色 `.agent-tool-result-error` 樣式，並強制展開（user 無法縮起來，errors are loud-by-default）
+- 不再有獨立 `ToolBody` / `getToolSummary` helper — renderer 不看 toolName、不解析 input
+
+**Provider 端 input formatter（不在 renderer！）：**
+
+- `formatClaudeToolInput(toolName, input, cwd) → string`：Claude SDK 各 tool（Bash/Read/Grep/Glob/Task/WebFetch/...）的 cwd-relative 摘要
+- `formatCopilotToolInput(toolName, args, cwd) → string`：Copilot CLI 各 tool（bash/view/grep/glob/list_directory/task/...）對應
+- 未知 tool fallback：第一個 string 值 / `JSON.stringify(args)`
+- 兩張表分別有單元測試覆蓋（`claude.test.ts` / `copilot.test.ts`）
 
 **`file_edit`：**
 
@@ -316,16 +361,21 @@ User 端訊息保留 `'user'` variant —— 不從 provider 來，本來就跟 
 3. `'system'` msgType 現在實際有人發嗎？claude/copilot 都沒主動發，是 ternary fallback 才會用到。要不要乾脆刪掉 canonical 裡的 `'system'`？
 4. UI marker 細節：`intent` 用 `▸` 還是 `→` 還是 `※` 還是 dim italic？需要看實際畫面決定
 5. `file_edit` 的 diff 渲染要不要支援 large file 折疊（譬如 > 50 行只顯示前後幾行 + 省略 marker）？沿用 git diff 風格還是純色塊？
+6. **Settings 重構（pending）** — 目前 `agentDisplay` 仍用 toolName-keyed（`Read`/`Bash`/`Edit`/...），Copilot 的小寫 toolName 全部 fall back 到 `'other'`。`tool_use` 簡化完後 settings 應該對齊 canonical type（`tool_use` / `file_edit` / `thinking` / `intent`），實際做法是另一輪改動。當前 `AgentMessage.tsx` 已經用 `resolveDisplayMode('tool_use')`，但 settings UI / `AGENT_DISPLAY_KEYS` / 預設值 / 舊資料 migration 還沒一起改。
 
 ## 影響的檔案
 
-- `src/shared/types.ts` — 新 `AgentMessage` discriminated union（每 variant 自帶欄位）+ derived `AgentMessageType`
+> 這份清單記的是 canonical refactor + tool_use input 簡化兩輪改動的累積結果。第二輪（tool_use input: string）以 ★ 標註。
+
+- `src/shared/types.ts` — 新 `AgentMessage` discriminated union（每 variant 自帶欄位）+ derived `AgentMessageType`；★ `tool_use.toolInput: object` 改為 `tool_use.input: string`
 - `src/main/agent/types.ts` — 移除重複 union，import canonical
 - `agent-server/providers/types.ts` — `OutgoingMessage` 註解 doc canonical type
-- `agent-server/providers/claude.ts` — rename `plan_update` → `plan`、移除 `result`、`Edit`/`Write` 翻譯成 `file_edit` + result upsert、其他 tool 改成 result 內嵌的 `tool_use`
-- `agent-server/providers/copilot.ts` — rename `plan_update` → `plan`、加 `report_intent` → `intent`、`apply_patch` parse + 翻譯成 `file_edit`（parser 限制單檔單 hunk，邊界 case fallback `tool_use`）、其他 tool 改成 result 內嵌的 `tool_use`、移除診斷 log
-- `src/renderer/components/AgentView.tsx` — 移除 ternary mapping（dispatch 改由 AgentMessage.tsx 內 switch 處理）、`plan` sticky 路徑攔截、message store 改 upsert by toolUseId、`'assistant'` 內部詞彙改成 canonical `'text'`
-- `src/renderer/components/AgentMessage.tsx` — switch 重寫、加 `intent` / `file_edit` render 分支、`tool_use` 改成內嵌 result、移除 `hasDetailBody` 寫死 toolName 判斷
+- `agent-server/providers/claude.ts` — rename `plan_update` → `plan`、移除 `result`、`Edit`/`Write` 翻譯成 `file_edit` + result upsert、其他 tool 改成 result 內嵌的 `tool_use`；★ 新增 `formatClaudeToolInput()` 把 toolInput 攤平成單一字串，`emitClaudeToolUse` / `emitClaudeToolResult` 全改用 `input: string`，`processMessage` 多收一個 `cwd` 參數傳進 formatter
+- `agent-server/providers/copilot.ts` — rename `plan_update` → `plan`、加 `report_intent` → `intent`、`apply_patch` parse + 翻譯成 `file_edit`（parser 限制單檔單 hunk，邊界 case fallback `tool_use`）、其他 tool 改成 result 內嵌的 `tool_use`、移除診斷 log、新增 `workingDirectory` 傳給 Copilot SDK；★ 新增 `formatCopilotToolInput()`，generic tool_use 路徑改用 `input: string`（含 apply_patch 多檔/多 hunk fallback）
+- `src/renderer/components/AgentView.tsx` — 移除 ternary mapping（dispatch 改由 AgentMessage.tsx 內 switch 處理）、`plan` sticky 路徑攔截、message store 改 upsert by toolUseId、`'assistant'` 內部詞彙改成 canonical `'text'`；★ `buildAgentMsg` 的 `tool_use` 分支改讀 `msg.input`，對舊版 bundle 殘留的 `toolInput` 做 defensive coerce
+- `src/renderer/components/AgentMessage.tsx` — switch 重寫、加 `intent` / `file_edit` render 分支、`tool_use` 改成內嵌 result、移除 `hasDetailBody` 寫死 toolName 判斷；★ 移除 `getToolSummary` / `ToolBody` helper，tool_use case 簡化成「header 顯示 toolName + input、body 只顯示 result」、所有 toolName-keyed settings lookup 統一改成 `resolveDisplayMode('tool_use')`
+- `src/renderer/storage/agent-history.ts` — ★ 新增 `migrateLegacyToolUseInput()` load-time 把舊 `toolInput` object 一次性 JSON-stringify 成 `input` 字串
+- `src/main/agent/remote.ts` — ★ `buildAgentMessagePayload` 的 `tool_use` 分支改讀 `input: string`，舊 bundle 殘留 `toolInput` 也做 defensive JSON-stringify
 - `src/renderer/styles/global.css` — 加 `.agent-intent` / `.agent-file-edit` 樣式、調整 `.agent-tool-use` 內嵌 result 區塊
 - `.agent/DECISIONS.md` — #46 更新 `plan_update` → `plan`
 - `.agent/PROJECT_MAP.md` — agent-server 描述更新（如果有提到 plan_update / hasDetailBody）

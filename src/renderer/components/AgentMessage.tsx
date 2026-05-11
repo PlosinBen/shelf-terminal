@@ -28,7 +28,7 @@ export type AgentMsg = {
       type: 'tool_use';
       toolUseId: string;
       toolName: string;
-      toolInput: Record<string, unknown>;
+      input: string;
       result?: { content: string; isError?: boolean };
     }
   | {
@@ -48,32 +48,13 @@ export type AgentMsg = {
 );
 
 
+// file_edit still strips cwd from filePath for header display. tool_use
+// no longer needs this helper — provider already pre-formats with cwd
+// stripped.
 function stripCwd(filePath: string, cwd?: string): string {
   if (!cwd || !filePath) return filePath;
   if (filePath.startsWith(cwd + '/')) return filePath.slice(cwd.length + 1);
   return filePath;
-}
-
-function getToolSummary(toolName: string, input: Record<string, unknown>, cwd?: string): string {
-  // File-mutation tools (Edit/Write/edit_file/write_file/apply_patch) are
-  // translated by providers into the dedicated `file_edit` canonical type, so
-  // they never reach this generic tool_use renderer.
-  switch (toolName) {
-    case 'Bash':
-    case 'bash':
-      return String(input.command ?? '');
-    case 'Read':
-    case 'read_file':
-    case 'view':
-      return stripCwd(String(input.file_path ?? input.path ?? ''), cwd);
-    case 'list_directory':
-      return stripCwd(String(input.path ?? ''), cwd);
-    default: {
-      const first = Object.values(input)[0];
-      if (typeof first === 'string') return first.slice(0, 60);
-      return '';
-    }
-  }
 }
 
 function truncateLines(text: string, max: number): { lines: string[]; remaining: number } {
@@ -134,19 +115,6 @@ function InlineAddDiff({ content }: { content: string }) {
   );
 }
 
-function ToolBody({ toolName, input }: { toolName: string; input: Record<string, unknown> }) {
-  const name = toolName.toLowerCase();
-  if (name === 'bash') {
-    return <pre className="agent-tool-code">{String(input.command ?? '')}</pre>;
-  }
-  // Read-style tools have nothing useful to show in the body — header summary is enough.
-  if (name === 'read' || name === 'read_file' || name === 'view'
-      || name === 'list_directory' || name === 'glob') {
-    return null;
-  }
-  return <pre className="agent-tool-content">{JSON.stringify(input, null, 2)}</pre>;
-}
-
 interface Props {
   message: AgentMsg;
   cwd?: string;
@@ -167,32 +135,35 @@ export function AgentMessage({ message, cwd }: Props) {
 
   switch (message.type) {
     case 'tool_use': {
-      const toolMode = resolveDisplayMode(message.toolName) ?? resolveDisplayMode('other');
+      // Single canonical setting for all tool_use cards. toolName-keyed
+      // settings are gone — provider's job is to pre-format `input` for
+      // display, renderer just renders the string.
+      const toolMode = resolveDisplayMode('tool_use');
       if (toolMode === 'hidden') return null;
-      const isExpanded = expanded || toolMode === 'expanded';
-      const summary = getToolSummary(message.toolName, message.toolInput, cwd);
       const result = message.result;
       const isError = result?.isError === true;
+      // Force-expand on error so the failure message is immediately visible.
+      // Errors are loud-by-default — collapse is intentionally disabled while
+      // result.isError is true (user setting `expanded` to false has no effect).
+      const isExpanded = expanded || toolMode === 'expanded' || isError;
       return (
         <div className="agent-msg agent-msg-tool">
           <div className="agent-tool-header" onClick={() => setExpanded(!expanded)}>
             <span className={`agent-chevron ${isExpanded ? 'expanded' : ''}`}>&#9654;</span>
             <span className="agent-tool-name">{message.toolName}</span>
-            {summary && <span className={`agent-tool-summary ${isExpanded ? 'agent-tool-summary-full' : ''}`}>{summary}</span>}
+            {message.input && <span className={`agent-tool-summary ${isExpanded ? 'agent-tool-summary-full' : ''}`}>{message.input}</span>}
             {!result && <span className="agent-tool-badge">running</span>}
           </div>
-          {isExpanded && (
-            <>
-              <ToolBody toolName={message.toolName} input={message.toolInput} />
-              {result && (() => {
-                const { lines, remaining } = truncateLines(result.content, 30);
-                const className = isError
-                  ? 'agent-tool-code agent-tool-result-block agent-tool-result-error'
-                  : 'agent-tool-code agent-tool-result-block';
-                return <pre className={className}>{lines.join('\n')}{remaining > 0 ? `\n... +${remaining} more lines` : ''}</pre>;
-              })()}
-            </>
-          )}
+          {isExpanded && result && (() => {
+            // Body shows ONLY result. `input` already lives in the header
+            // (full string when expanded via .agent-tool-summary-full); no
+            // need to repeat it as a separate body block.
+            const { lines, remaining } = truncateLines(result.content, 30);
+            const className = isError
+              ? 'agent-tool-code agent-tool-result-block agent-tool-result-error'
+              : 'agent-tool-code agent-tool-result-block';
+            return <pre className={className}>{lines.join('\n')}{remaining > 0 ? `\n... +${remaining} more lines` : ''}</pre>;
+          })()}
         </div>
       );
     }
@@ -203,10 +174,11 @@ export function AgentMessage({ message, cwd }: Props) {
       // SDK tool produced them — Claude `Edit`/`Write`, Copilot `apply_patch`).
       const editMode = resolveDisplayMode('Edit') ?? resolveDisplayMode('other');
       if (editMode === 'hidden') return null;
-      const isExpanded = expanded || editMode === 'expanded';
       const result = message.result;
       const success = result?.success === true;
       const failed = result?.success === false;
+      // Force-expand on failure (mirrors tool_use error behavior).
+      const isExpanded = expanded || editMode === 'expanded' || failed;
       return (
         <div className="agent-msg agent-msg-tool agent-msg-file-edit">
           <div className="agent-tool-header" onClick={() => setExpanded(!expanded)}>

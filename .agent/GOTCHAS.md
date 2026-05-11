@@ -494,3 +494,20 @@ CLI 把上游 API 的 `percent_remaining`（自然 cap 在 0-100）反推回 `us
 - 不要假設 `apply_patch` args 是 object — 永遠先 `typeof args === 'string'` 檢查
 - 不要為了支援 multi-hunk 寫太複雜的 parser — Copilot 的實際使用 99% 是單 hunk，邊界 case fallback 就好。要擴的話寫 fixture-based test 一個個 case 加
 - 不要把 raw patch string 當 toolInput 餵渲染端 — `parseApplyPatch` parse 失敗時 wrap 成 `{ patch: <raw> }` object，避免 renderer 對 toolInput 做 `Object.values(...)` 之類操作 crash
+
+## Copilot session 必須傳 `workingDirectory`，否則 bash tool `posix_spawnp failed`
+
+**現象**: Copilot 跑 bash tool 顯示 `Error: <exited with error: posix_spawnp failed.>`，read/grep/edit 都正常只有 bash 死。
+
+**根因**: Copilot SDK 的 `client.createSession({...})` config 有 `workingDirectory?: string` 欄位（[types.d.ts](../node_modules/@github/copilot-sdk/dist/types.d.ts) line 1039），CLI 內建的 bash tool 用這個值當子程序 cwd。沒傳就用 CLI 自己的 cwd — agent-server 在 packaged Electron 裡 cwd 可能是 `/` 之類的怪地方，bash spawn 起來 posix 直接拒絕。
+
+**解法**: `query()` 收到 `input.cwd` 時 stash 成 `currentCwd`，`ensureSession` 把它放進 `config.workingDirectory`：
+```ts
+if (input.cwd && !currentCwd) currentCwd = input.cwd;
+// ...
+if (currentCwd) config.workingDirectory = currentCwd;
+```
+
+**不要做**:
+- 不要用 `process.cwd()` 當預設 — agent-server 的 cwd 不是用戶的專案目錄
+- 不要在每個 turn 重設 currentCwd — Copilot CLI 沒有 `rpc.cwd.set`，session 中途換 cwd 改不動，只能 first-write-wins（要切 cwd 就斷 session 重建）

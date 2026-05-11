@@ -261,7 +261,7 @@ export function createClaudeBackend(): ServerBackend {
           if ('session_id' in sdkMsg && sdkMsg.session_id) {
             lastSessionId = sdkMsg.session_id as string;
           }
-          processMessage(sdkMsg, send);
+          processMessage(sdkMsg, send, input.cwd);
         }
       } catch (err: any) {
         if (err.name !== 'AbortError') {
@@ -333,6 +333,15 @@ export function createClaudeBackend(): ServerBackend {
       if (cmd === 'clear') {
         currentSend?.({ type: 'message', msgType: 'plan', content: '' });
         inflightToolUses.clear();
+        // Eager-clear in-memory + persisted session id so the edge case
+        // "/clear then close app before SDK responds" doesn't leave a stale
+        // resume pointer in context-store. Steady-state correctness is
+        // already handled by the SDK assigning a new session_id on the next
+        // assistant message (captured in the for-await loop and emitted as
+        // context_patch), but if the user closes mid-flight we'd otherwise
+        // hydrate the pre-clear session id on next launch and resume it.
+        lastSessionId = null;
+        currentSend?.({ type: 'context_patch', patch: { lastSdkSessionId: null } });
       }
       return { type: 'pass-through' };
     },
@@ -387,14 +396,72 @@ let lastTurnModel: string | null = null;
  * Module-level is fine: one createClaudeBackend per agent-server process.
  */
 type InflightToolUseEntry =
-  | { kind: 'tool_use'; toolName: string; toolInput: Record<string, unknown> }
+  | { kind: 'tool_use'; toolName: string; input: string }
   | { kind: 'file_edit'; filePath: string; diff?: { oldString: string; newString: string }; content?: string };
 const inflightToolUses = new Map<string, InflightToolUseEntry>();
+
+function stripCwd(p: string, cwd: string): string {
+  if (!cwd || !p) return p;
+  if (p.startsWith(cwd + '/')) return p.slice(cwd.length + 1);
+  return p;
+}
+
+/**
+ * Format a Claude SDK tool's `input` object into a single human-readable
+ * string for the renderer. Renderer treats the result as opaque text and only
+ * does CSS truncation — all "what's the headline of this tool call" logic
+ * lives here in the provider, where SDK semantics are already known.
+ *
+ * Falls back to JSON for unknown tools so MCP custom tools still display
+ * something instead of a blank line.
+ */
+export function formatClaudeToolInput(toolName: string, input: Record<string, unknown>, cwd: string): string {
+  switch (toolName) {
+    case 'Bash':
+      return String(input.command ?? '');
+    case 'Read': {
+      const fp = String(input.file_path ?? '');
+      const off = input.offset != null ? Number(input.offset) : null;
+      const lim = input.limit != null ? Number(input.limit) : null;
+      const range = off != null || lim != null
+        ? ` (${off ?? 0}${lim != null ? `..+${lim}` : ''})`
+        : '';
+      return stripCwd(fp, cwd) + range;
+    }
+    case 'Grep': {
+      const pattern = String(input.pattern ?? '');
+      const path = input.path ? ` in ${stripCwd(String(input.path), cwd)}` : '';
+      return pattern + path;
+    }
+    case 'Glob': {
+      const pattern = String(input.pattern ?? '');
+      const path = input.path ? ` in ${stripCwd(String(input.path), cwd)}` : '';
+      return pattern + path;
+    }
+    case 'WebFetch':
+      return String(input.url ?? '');
+    case 'WebSearch':
+      return String(input.query ?? '');
+    case 'Task': {
+      const desc = input.description ?? input.subagent_type ?? '';
+      const prompt = String(input.prompt ?? '');
+      return desc ? `${desc}: ${prompt.slice(0, 80)}` : prompt.slice(0, 120);
+    }
+    default: {
+      // Generic fallback: first string value if any (most SDK tools have one
+      // dominant arg), else JSON.
+      const firstStr = Object.values(input).find((v) => typeof v === 'string') as string | undefined;
+      if (firstStr) return firstStr;
+      return JSON.stringify(input);
+    }
+  }
+}
 
 /** Translate a Claude SDK `tool_use` block to either canonical `file_edit` or `tool_use`. */
 function emitClaudeToolUse(
   send: SendFn,
   block: { id: string; name: string; input: Record<string, unknown> },
+  cwd: string,
 ): void {
   if (block.name === 'Edit') {
     const input = block.input as { file_path?: string; old_string?: string; new_string?: string };
@@ -429,14 +496,15 @@ function emitClaudeToolUse(
     }
     // Fall through.
   }
+  const input = formatClaudeToolInput(block.name, block.input, cwd);
   inflightToolUses.set(block.id, {
-    kind: 'tool_use', toolName: block.name, toolInput: block.input,
+    kind: 'tool_use', toolName: block.name, input,
   });
   send({
     type: 'message', msgType: 'tool_use',
     toolUseId: block.id,
     toolName: block.name,
-    toolInput: block.input,
+    input,
   });
 }
 
@@ -466,7 +534,7 @@ function emitClaudeToolResult(
       type: 'message', msgType: 'tool_use',
       toolUseId,
       toolName: entry.toolName,
-      toolInput: entry.toolInput,
+      input: entry.input,
       result: { content, ...(isError ? { isError: true } : {}) },
     });
   }
@@ -476,7 +544,7 @@ function emitClaudeToolResult(
 // set to the UI.  Key = bucket label (e.g. '5h', '7d').
 const rateLimitBuckets = new Map<string, StatusSegment>();
 
-function processMessage(msg: SDKMessage, send: SendFn) {
+function processMessage(msg: SDKMessage, send: SendFn, cwd: string) {
   switch (msg.type) {
     case 'assistant': {
       for (const block of msg.message.content) {
@@ -485,7 +553,7 @@ function processMessage(msg: SDKMessage, send: SendFn) {
         } else if (block.type === 'text') {
           send({ type: 'message', msgType: 'text', content: block.text });
         } else if (block.type === 'tool_use') {
-          emitClaudeToolUse(send, { id: block.id, name: block.name, input: block.input as Record<string, unknown> });
+          emitClaudeToolUse(send, { id: block.id, name: block.name, input: block.input as Record<string, unknown> }, cwd);
           // Mirror plan-style tools into the sticky panel for parity with Copilot's plan API.
           // ExitPlanMode: initial plan submission; TodoWrite: ongoing task list updates.
           if (block.name === 'TodoWrite') {

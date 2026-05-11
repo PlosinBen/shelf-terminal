@@ -52,10 +52,29 @@ function reviveOrphanPending(msg: AgentMsg): AgentMsg {
   return msg;
 }
 
+/**
+ * Pre-canonicalization persisted records had `tool_use` with structured
+ * `toolInput: Record<string, unknown>` instead of `input: string`. Old saves
+ * loaded under the new schema would render with empty header. JSON-stringify
+ * the legacy field as a one-shot fallback so historical sessions still show
+ * something readable. New writes already carry `input`, so this branch only
+ * fires for stale rows.
+ */
+function migrateLegacyToolUseInput(msg: any): AgentMsg {
+  if (msg?.type === 'tool_use' && typeof msg.input !== 'string' && msg.toolInput) {
+    const { toolInput, ...rest } = msg;
+    return { ...rest, input: JSON.stringify(toolInput) } as AgentMsg;
+  }
+  return msg as AgentMsg;
+}
+
 export async function loadAgentMessages(sessionId: string): Promise<AgentMsg[]> {
   const db = await getDB();
   const all: StoredMsg[] = await db.getAllFromIndex(STORE_NAME, 'by-session', sessionId);
-  return all.map(({ dbId: _, sessionId: __, ...msg }) => reviveOrphanPending(msg as AgentMsg));
+  return all.map(({ dbId: _, sessionId: __, ...rest }) => {
+    const migrated = migrateLegacyToolUseInput(rest);
+    return reviveOrphanPending(migrated);
+  });
 }
 
 // Default cap if caller doesn't pass one. Mirrors AppSettings default
