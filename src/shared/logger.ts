@@ -37,6 +37,11 @@ function write(level: string, tag: string, msg: string, args: unknown[]) {
   fileWriter?.(line);
 }
 
+// In-memory ring buffer of診斷用 trace 訊息。不過 level check、不寫檔，
+// 只有 flushTrace() 被觸發時才整批當 error 倒出來，確保正常情況下不污染 log。
+const TRACE_BUFFER_MAX = 200;
+const traceBuffer: Array<{ tag: string; msg: string; iso: string }> = [];
+
 export const log = {
   error(tag: string, msg: string, ...args: unknown[]) {
     if (shouldLog('error')) write('ERROR', tag, msg, args);
@@ -46,5 +51,22 @@ export const log = {
   },
   debug(tag: string, msg: string, ...args: unknown[]) {
     if (shouldLog('debug')) write('DEBUG', tag, msg, args);
+  },
+  trace(tag: string, msg: string) {
+    traceBuffer.push({ tag, msg, iso: new Date().toISOString() });
+    if (traceBuffer.length > TRACE_BUFFER_MAX) traceBuffer.shift();
+  },
+  flushTrace(tag: string, reason: string) {
+    if (traceBuffer.length === 0) {
+      write('ERROR', tag, `flushTrace: no entries (reason: ${reason})`, []);
+      return;
+    }
+    write('ERROR', tag, `flushTrace: ${traceBuffer.length} entries follow (reason: ${reason})`, []);
+    for (const e of traceBuffer) {
+      const line = `${e.iso} [TRACE][${e.tag}] ${e.msg}`;
+      console.error(line);
+      fileWriter?.(line);
+    }
+    traceBuffer.length = 0;
   },
 };
