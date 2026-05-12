@@ -79,6 +79,23 @@ export function NotesView() {
     await refreshList();
   }, [projectId, activeId, refreshList]);
 
+  // Bulk delete every done note in this project. Confirm dialog spells out
+  // the count so the user knows the scope before agreeing — see
+  // .agent/DECISIONS.md note delete UX.
+  const handleDeleteAllDone = useCallback(async () => {
+    if (!projectId) return;
+    const doneCount = notes.filter((n) => n.isDone).length;
+    if (doneCount === 0) return;
+    const ok = await window.shelfApi.dialog.confirm(
+      'Delete done notes',
+      `Delete ${doneCount} done note${doneCount === 1 ? '' : 's'}? This cannot be undone.`,
+      'Delete',
+    );
+    if (!ok) return;
+    await window.shelfApi.notes.deleteAllDone(projectId);
+    await refreshList();
+  }, [projectId, notes, refreshList]);
+
   // Resize handle
   useEffect(() => {
     if (!resizing) return;
@@ -145,6 +162,7 @@ export function NotesView() {
           filter={filter}
           onFilterChange={setFilter}
           onPick={setActiveId}
+          onDeleteAllDone={handleDeleteAllDone}
         />
       )}
     </div>
@@ -154,14 +172,18 @@ export function NotesView() {
 // ── List ───────────────────────────────────────────────────────
 
 function NotesList({
-  notes, counts, filter, onFilterChange, onPick,
+  notes, counts, filter, onFilterChange, onPick, onDeleteAllDone,
 }: {
   notes: NoteMeta[];
   counts: { active: number; done: number; all: number };
   filter: Filter;
   onFilterChange: (f: Filter) => void;
   onPick: (id: string) => void;
+  onDeleteAllDone: () => void;
 }) {
+  // Bulk-action row only surfaces when there's actually something to act on
+  // — keeps the toolbar clean for Active / All filters.
+  const showBulkRow = filter === 'done' && counts.done > 0;
   return (
     <>
       <div className="notes-filter-row">
@@ -169,6 +191,11 @@ function NotesList({
         <FilterTab label="Done" count={counts.done} active={filter === 'done'} onClick={() => onFilterChange('done')} />
         <FilterTab label="All" count={counts.all} active={filter === 'all'} onClick={() => onFilterChange('all')} />
       </div>
+      {showBulkRow && (
+        <div className="notes-bulk-row">
+          <button className="notes-bulk-delete" onClick={onDeleteAllDone}>Delete all</button>
+        </div>
+      )}
       <div className="notes-body">
         {notes.length === 0 ? (
           <div className="notes-empty">No notes yet</div>

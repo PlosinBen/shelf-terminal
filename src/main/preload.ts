@@ -104,6 +104,8 @@ contextBridge.exposeInMainWorld('shelfApi', {
       ipcRenderer.invoke(IPC.NOTES_UPDATE, { projectId, noteId, patch }),
     delete: (projectId: string, noteId: string) =>
       ipcRenderer.invoke(IPC.NOTES_DELETE, { projectId, noteId }),
+    deleteAllDone: (projectId: string): Promise<number> =>
+      ipcRenderer.invoke(IPC.NOTES_DELETE_ALL_DONE, projectId),
     saveImage: (projectId: string, buffer: ArrayBuffer, ext: string): Promise<string> =>
       ipcRenderer.invoke(IPC.NOTES_SAVE_IMAGE, { projectId, buffer, ext }),
     readImage: (projectId: string, filename: string): Promise<ArrayBuffer | null> =>

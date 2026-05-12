@@ -12,7 +12,7 @@ vi.mock('electron', () => ({
 }));
 
 const {
-  listNotes, getNote, createNote, updateNote, deleteNote,
+  listNotes, getNote, createNote, updateNote, deleteNote, deleteAllDone,
   saveImage, garbageCollectImages, parseFrontmatter,
   notesDir, notePath, imagesDir,
 } = await import('./notes-store');
@@ -145,6 +145,46 @@ describe('deleteNote', () => {
 
   it('is a no-op on unknown id', async () => {
     await expect(deleteNote('p1', 'nope')).resolves.toBeUndefined();
+  });
+});
+
+describe('deleteAllDone', () => {
+  it('removes only notes with isDone=true and returns the count', async () => {
+    const a = await createNote('p1'); // stays active
+    const b = await createNote('p1');
+    const c = await createNote('p1');
+    await updateNote('p1', b.id, { isDone: true });
+    await updateNote('p1', c.id, { isDone: true });
+
+    const removed = await deleteAllDone('p1');
+    expect(removed).toBe(2);
+
+    const remaining = await listNotes('p1');
+    expect(remaining.map((n) => n.id)).toEqual([a.id]);
+    expect(fs.existsSync(notePath('p1', b.id))).toBe(false);
+    expect(fs.existsSync(notePath('p1', c.id))).toBe(false);
+  });
+
+  it('returns 0 when there are no done notes', async () => {
+    await createNote('p1');
+    const removed = await deleteAllDone('p1');
+    expect(removed).toBe(0);
+  });
+
+  it('returns 0 when the project has no notes', async () => {
+    const removed = await deleteAllDone('empty-proj');
+    expect(removed).toBe(0);
+  });
+
+  it('does not touch other projects', async () => {
+    const a = await createNote('p1');
+    await updateNote('p1', a.id, { isDone: true });
+    const b = await createNote('p2');
+    await updateNote('p2', b.id, { isDone: true });
+
+    const removed = await deleteAllDone('p1');
+    expect(removed).toBe(1);
+    expect(fs.existsSync(notePath('p2', b.id))).toBe(true);
   });
 });
 

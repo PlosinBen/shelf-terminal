@@ -18,7 +18,7 @@ import { log, setLogLevel, setFileWriter } from '@shared/logger';
 import { applyUserDataIsolation } from './user-data-path';
 import { removeProjectStorage } from './project-storage';
 import { migratePmNotes } from './migrations/migrate-pm-notes';
-import { listNotes, getNote, createNote, updateNote, deleteNote, saveImage as saveNoteImage, readImage as readNoteImage } from './notes-store';
+import { listNotes, getNote, createNote, updateNote, deleteNote, deleteAllDone as deleteAllDoneNotes, saveImage as saveNoteImage, readImage as readNoteImage } from './notes-store';
 import { handlePmSend, handleTabEvent, getHistory, clearHistory, compactHistory, stopGeneration, updateSyncedState, setWritePtyFn, isAwayMode, setAwayMode, initAwayMode, setStateChangeCallback, updateKnownTabs, startTelegram, stopTelegram, setMessageCallback, setCallbackQueryHandler, setStopCallback } from './pm';
 import { initAgentManager, disposeAllAgents } from './agent';
 import type { Connection, ProjectConfig, AppSettings, FileUploadResult, FileClearResult, PtySpawnPayload, PtyInputPayload, PtyResizePayload, PtyKillPayload, GitBranchInfo, WorktreeAddResult, WorktreeRemoveResult } from '@shared/types';
@@ -416,6 +416,10 @@ ipcMain.handle(IPC.NOTES_UPDATE, async (_event, payload: { projectId: string; no
 
 ipcMain.handle(IPC.NOTES_DELETE, async (_event, payload: { projectId: string; noteId: string }) => {
   await deleteNote(payload.projectId, payload.noteId);
+});
+
+ipcMain.handle(IPC.NOTES_DELETE_ALL_DONE, async (_event, projectId: string): Promise<number> => {
+  return deleteAllDoneNotes(projectId);
 });
 
 ipcMain.handle(IPC.NOTES_SAVE_IMAGE, async (_event, payload: { projectId: string; buffer: ArrayBuffer; ext: string }): Promise<string> => {

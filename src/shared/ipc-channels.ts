@@ -49,6 +49,7 @@ export const IPC = {
   NOTES_CREATE: 'notes:create',
   NOTES_UPDATE: 'notes:update',
   NOTES_DELETE: 'notes:delete',
+  NOTES_DELETE_ALL_DONE: 'notes:delete-all-done',
   NOTES_SAVE_IMAGE: 'notes:save-image',
   NOTES_READ_IMAGE: 'notes:read-image',
 

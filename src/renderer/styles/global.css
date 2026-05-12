@@ -3667,6 +3667,33 @@ button {
   font-size: 11px;
 }
 
+/* Bulk-action row appears below the filter row when the "Done" filter is
+ * active and there's at least one done note to clear. Low-key visual weight
+ * (smaller padding than filter row, no own background) so it doesn't compete
+ * with the note list below. */
+.notes-bulk-row {
+  display: flex;
+  justify-content: flex-end;
+  padding: 4px 12px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.notes-bulk-delete {
+  font-size: 11px;
+  padding: 3px 10px;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+
+.notes-bulk-delete:hover {
+  background: var(--danger, #c53030);
+  color: #fff;
+  border-color: var(--danger, #c53030);
+}
+
 .notes-list {
   list-style: none;
   margin: 0;

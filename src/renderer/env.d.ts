@@ -71,6 +71,7 @@ interface ShelfApi {
       patch: { title?: string; isDone?: boolean; body?: string; images?: string[] },
     ) => Promise<{ id: string; title: string; isDone: boolean; created: string; updated: string } | null>;
     delete: (projectId: string, noteId: string) => Promise<void>;
+    deleteAllDone: (projectId: string) => Promise<number>;
     saveImage: (projectId: string, buffer: ArrayBuffer, ext: string) => Promise<string>;
     readImage: (projectId: string, filename: string) => Promise<ArrayBuffer | null>;
   };

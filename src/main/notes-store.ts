@@ -155,6 +155,28 @@ export async function deleteNote(projectId: string, noteId: string): Promise<voi
 }
 
 /**
+ * Bulk-delete every note whose `isDone === true` for the project. Returns
+ * the number of notes actually removed. Single image GC pass at the end
+ * (vs one per delete) keeps it cheap for large batches.
+ */
+export async function deleteAllDone(projectId: string): Promise<number> {
+  const notes = await listNotes(projectId);
+  const done = notes.filter((n) => n.isDone);
+  let removed = 0;
+  for (const n of done) {
+    if (!isSafeId(n.id)) continue;
+    try {
+      await fs.promises.unlink(notePath(projectId, n.id));
+      removed++;
+    } catch (err) {
+      log.error('notes-store', `bulk delete failed: ${n.id}`, err);
+    }
+  }
+  if (removed > 0) await garbageCollectImages(projectId);
+  return removed;
+}
+
+/**
  * Save an image file under projects/<id>/images/<uuid>.<ext>.
  * Returns the bare filename (caller stores it in note.images[]).
  */
