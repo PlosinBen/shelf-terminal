@@ -605,3 +605,33 @@ Dev mode 沒事是因為路徑是 `node_modules/@github/copilot/...`，不含 `a
 - 降版的舊 code 看到 `type: 'slash_response'` 就 fall through default → return null → 從 list 上消失但不爆
 
 **注意**: 是 lossy，不是 lossy-with-warning — 降版使用者根本不會知道有訊息被吃掉。如果這條 invariant 在未來放寬（e.g., 改成 throw on unknown），請同時調 `loadAgentMessages` 加 schema-version 紀錄。
+
+
+## Claude SDK content_block_start 會 mid-turn 重發
+
+**症狀**: 同一個 Claude assistant 回覆在 agent view 渲染成兩條相同訊息，並列堆疊。
+
+**根因**: 之前 `agent-server/providers/claude.ts` processMessage 對 `content_block_start` 事件**永遠 overwrite** `blockMsgIds[idx]`：
+
+```ts
+// 舊版（buggy）
+if (event?.type === 'content_block_start' && ...) {
+  blockMsgIds.set(event.index, mintMsgId());
+}
+```
+
+預期：SDK 只在新 block 開始時發 content_block_start，所以 overwrite 沒問題。
+實際：SDK 在 mid-turn 對同一邏輯 block 也會再發 content_block_start（觀察到的行為，原因未追究 — 可能是 partial message resync / 內部重試）。Overwrite 會：
+
+1. 孤兒化 renderer 已經 stream 累積的 entry（原 msgId）
+2. 後續 assistant emit 用新 msgId
+3. 兩個 msgId 不同 → renderer upsert 路徑分岔 → 兩條訊息同內容
+
+**解法**: 把「new block」跟「reset block space」拆成兩個訊號：
+
+- `content_block_start`：只在沒 entry 時 mint（idempotent）
+- `user` case 處理到 `tool_result` 時，明確 `blockMsgIds.clear()` — 這才是真的 turn boundary
+
+**不要改**:
+- 不要把 mint 改回 always-overwrite — 那會復活這個 bug
+- 不要在 `content_block_stop` 或其他事件做 reset — 沒驗證過 SDK 行為是否一致
