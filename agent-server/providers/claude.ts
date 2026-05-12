@@ -332,7 +332,7 @@ export function createClaudeBackend(): ServerBackend {
       }
     },
 
-    async handleSlashCommand(cmd: string, _args: string): Promise<SlashResult> {
+    async handleSlashCommand(cmd: string, _args: string, _send: SendFn): Promise<SlashResult> {
       // Claude SDK handles all slash commands natively (compact, clear, model, etc.)
       // Just send the original input as a regular message — SDK intercepts.
       // We piggyback to clear the sticky plan panel when context is reset.

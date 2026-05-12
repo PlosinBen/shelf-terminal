@@ -210,11 +210,14 @@ rl.on('line', (line) => {
             send({ type: 'slash_result', requestId: msg.requestId ?? '', result: { type: 'pass-through' } });
             return;
           }
-          const result = await backend.handleSlashCommand(msg.cmd ?? '', msg.args ?? '');
+          const result = await backend.handleSlashCommand(msg.cmd ?? '', msg.args ?? '', send);
           // Provider's `/clear` only clears its own in-memory state. Mirror it
           // to disk here so the next process restart doesn't resurrect the
-          // just-cleared session via `restoreContext`.
-          if (result.type === 'context-cleared' && msg.sessionId) {
+          // just-cleared session via `restoreContext`. Both the legacy
+          // `context-cleared` SlashResult and the new `handled` path (where
+          // provider emits slash_response itself) for `/clear` need this — we
+          // gate on cmd name so the new path doesn't lose persistence cleanup.
+          if (msg.sessionId && (result.type === 'context-cleared' || (result.type === 'handled' && msg.cmd === 'clear'))) {
             deleteContext(msg.sessionId);
           }
           send({ type: 'slash_result', requestId: msg.requestId ?? '', result });

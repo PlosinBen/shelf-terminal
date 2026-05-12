@@ -609,6 +609,16 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
             }]);
             break;
           }
+          case 'handled': {
+            // Provider already emitted slash_response message(s) on the
+            // stream. Renderer only records the user-echo so the slash itself
+            // shows in conversation; the response messages arrive (or already
+            // did) via the normal AgentEvent pipeline.
+            setMessages((prev) => [...prev, {
+              id: `user-${Date.now()}`, type: 'user', content: text, timestamp: Date.now(),
+            }]);
+            break;
+          }
           case 'pass-through':
           default: {
             // Send the original slash command as a regular message — provider's SDK handles it

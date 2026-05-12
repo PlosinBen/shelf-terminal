@@ -450,6 +450,20 @@ function buildAgentMessagePayload(msg: any): import('./types').AgentMessage | nu
         ...(msg.result ? { result: msg.result } : {}),
       };
     }
+    case 'slash_response': {
+      // status guard: only the three known values map cleanly into the renderer
+      // union; anything else from a future / mismatched bundle is dropped.
+      const status = msg.status;
+      if (status !== 'pending' && status !== 'success' && status !== 'error') return null;
+      if (typeof msg.slashCmd !== 'string' || typeof msg.content !== 'string') return null;
+      return {
+        msgId,
+        type: 'slash_response',
+        slashCmd: msg.slashCmd,
+        status,
+        content: msg.content,
+      };
+    }
     default:
       return null;
   }

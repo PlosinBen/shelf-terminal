@@ -877,7 +877,16 @@ export function createCopilotBackend(): ServerBackend {
       }
     },
 
-    async handleSlashCommand(cmd: string, args: string): Promise<SlashResult> {
+    async handleSlashCommand(cmd: string, args: string, send: SendFn): Promise<SlashResult> {
+      // Helper to keep emit boilerplate manageable. Migrated commands emit a
+      // `pending` slash_response on entry and a terminal `success`/`error` on
+      // exit, sharing one msgId so the renderer upserts the pending entry.
+      // Provider returns `{ type: 'handled' }` after the terminal emit — the
+      // orchestrator skips synthesizing any further UI from the SlashResult.
+      const emitSlash = (msgId: string, slashCmd: string, status: 'pending' | 'success' | 'error', content: string) => {
+        send({ type: 'message', msgId, msgType: 'slash_response', slashCmd, status, content });
+      };
+
       switch (cmd) {
         case 'model': {
           const arg = args.trim();
@@ -901,8 +910,14 @@ export function createCopilotBackend(): ServerBackend {
         }
 
         case 'context': {
+          const msgId = mintMsgId();
+          // `/context` is effectively synchronous — no work between pending and
+          // result — but we still emit pending first to keep the UI shape
+          // uniform across all slashes (and for parity with future async usage).
+          emitSlash(msgId, cmd, 'pending', 'Reading context...');
           if (!latestUsage) {
-            return { type: 'system-message', content: 'No context info yet. Send a message first.' };
+            emitSlash(msgId, cmd, 'error', 'No context info yet. Send a message first.');
+            return { type: 'handled' };
           }
           const u = latestUsage;
           const pct = u.tokenLimit > 0 ? Math.round((u.currentTokens / u.tokenLimit) * 100) : 0;
@@ -914,23 +929,30 @@ export function createCopilotBackend(): ServerBackend {
             `  - System: ${fmt(u.systemTokens)}`,
             `  - Tools: ${fmt(u.toolDefinitionsTokens)}`,
           ];
-          return { type: 'system-message', content: lines.join('\n') };
+          emitSlash(msgId, cmd, 'success', lines.join('\n'));
+          return { type: 'handled' };
         }
 
         case 'compact': {
+          const msgId = mintMsgId();
+          emitSlash(msgId, cmd, 'pending', 'Compacting...');
           if (!state.session) {
-            return { type: 'system-message', content: 'No active session to compact.' };
+            emitSlash(msgId, cmd, 'error', 'No active session to compact.');
+            return { type: 'handled' };
           }
           try {
             const result = await (state.session as any).rpc.history.compact();
             if (!result?.success) {
-              return { type: 'error', message: 'Compaction failed' };
+              emitSlash(msgId, cmd, 'error', 'Compaction failed');
+              return { type: 'handled' };
             }
             const removed = result.tokensRemoved?.toLocaleString() ?? '?';
             const msgs = result.messagesRemoved ?? 0;
-            return { type: 'system-message', content: `Compacted: freed ${removed} tokens across ${msgs} messages.` };
+            emitSlash(msgId, cmd, 'success', `Compacted: freed ${removed} tokens across ${msgs} messages.`);
+            return { type: 'handled' };
           } catch (err: any) {
-            return { type: 'error', message: `Compact failed: ${err?.message ?? err}` };
+            emitSlash(msgId, cmd, 'error', `Compact failed: ${err?.message ?? err}`);
+            return { type: 'handled' };
           }
         }
 
@@ -948,30 +970,42 @@ export function createCopilotBackend(): ServerBackend {
           // First-/clear-before-any-query (mostly tests, also degenerate UI
           // flows) is treated as a successful no-op so we don't surprise
           // unsuspecting environments with auth / CLI-binary requirements.
+          const msgId = mintMsgId();
+          emitSlash(msgId, cmd, 'pending', 'Clearing context...');
           const hadSession = !!state.session || !!state.cliSessionId;
           try { await state.session?.disconnect(); } catch { /* ignore */ }
           state.session = null;
           state.cliSessionId = null;
           latestUsage = null;
           inflightToolUses.clear();
-          currentSend?.({ type: 'message', msgId: mintMsgId(), msgType: 'plan', content: '' });
+          send({ type: 'message', msgId: mintMsgId(), msgType: 'plan', content: '' });
           if (hadSession) {
             try {
               await ensureSession();
             } catch (err: any) {
-              return { type: 'error', message: `Cleared, but failed to start new session: ${err?.message ?? err}` };
+              emitSlash(msgId, cmd, 'error', `Cleared, but failed to start new session: ${err?.message ?? err}`);
+              // Still report `handled` — orchestrator's cmd-name-gated
+              // deleteContext still fires because the wipe semantically
+              // succeeded; only session re-init failed.
+              return { type: 'handled' };
             }
           }
-          return { type: 'context-cleared', message: 'Context cleared' };
+          emitSlash(msgId, cmd, 'success', 'Context cleared');
+          return { type: 'handled' };
         }
 
         case 'help': {
+          const msgId = mintMsgId();
           const lines = SLASH_COMMANDS.map((c) => `- /${c.name} — ${c.description}`).join('\n');
-          return { type: 'system-message', content: `Available commands:\n${lines}` };
+          emitSlash(msgId, cmd, 'success', `Available commands:\n${lines}`);
+          return { type: 'handled' };
         }
 
-        default:
-          return { type: 'error', message: `Unknown command: /${cmd}` };
+        default: {
+          const msgId = mintMsgId();
+          emitSlash(msgId, cmd, 'error', `Unknown command: /${cmd}`);
+          return { type: 'handled' };
+        }
       }
     },
   };

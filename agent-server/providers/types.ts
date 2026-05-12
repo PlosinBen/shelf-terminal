@@ -125,6 +125,15 @@ export type OutgoingMessage = WireEnvelope & (
       content?: string;
       result?: { success: boolean; error?: string };
     }
+  | {
+      // Provider-emitted slash command response. Renderer is opaque to
+      // `slashCmd` — only `status` drives styling. Provider emits pending
+      // first, then success/error with the same msgId (upsert pattern).
+      type: 'message'; msgId: string; msgType: 'slash_response';
+      slashCmd: string;
+      status: 'pending' | 'success' | 'error';
+      content: string;
+    }
 );
 
 export type SlashResult =
@@ -133,7 +142,14 @@ export type SlashResult =
   | { type: 'context-cleared'; message?: string }
   | { type: 'pass-through' }
   | { type: 'system-message'; content: string }
-  | { type: 'error'; message: string };
+  | { type: 'error'; message: string }
+  /**
+   * Provider already emitted slash_response message(s) via the `send` fn passed
+   * to handleSlashCommand. Orchestrator should NOT synthesize any further UI
+   * from this return — the messages already carry status. Renderer just pushes
+   * the user-echo entry and waits for the streamed slash_response.
+   */
+  | { type: 'handled' };
 
 export type SendFn = (msg: OutgoingMessage) => void;
 
@@ -213,7 +229,13 @@ export interface ServerBackend {
   resolvePermission?(toolUseId: string, allow: boolean, message?: string, scope?: 'once' | 'session'): void;
   storeCredential?(key: string): Promise<void>;
   clearCredential?(): Promise<void>;
-  handleSlashCommand?(cmd: string, args: string): Promise<SlashResult>;
+  /**
+   * `send` is the live wire send fn for this process — passed explicitly so
+   * providers can emit messages (e.g. `slash_response` pending/success pairs)
+   * without relying on `currentSend` state from a prior `query()` call (which
+   * would be null for slash commands fired before the first normal turn).
+   */
+  handleSlashCommand?(cmd: string, args: string, send: SendFn): Promise<SlashResult>;
   /**
    * Drop any in-memory session state tied to `sessionId`. Called by the
    * orchestrator when persisted context is deleted (IPC `clear_context`),
