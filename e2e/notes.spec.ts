@@ -118,13 +118,16 @@ test.describe('Notes panel', () => {
     await page.locator('.notes-textarea').fill('# Task\n\nthings to do');
     await page.waitForTimeout(900);
 
-    // Mark done and go back.
+    // Mark done. NotesView's handleToggleDone calls onRequestBack on the
+    // "checked" transition — UI auto-pops back to the list and saves with
+    // isDone=true. Don't click `.notes-back` manually after this — the
+    // button no longer exists by the time we'd click it (Playwright would
+    // wait for it up to test timeout, ending with a confusing
+    // "Target page, context or browser has been closed" error).
     await page.locator('.notes-done-toggle input').check();
-    await page.waitForTimeout(900);
-    await page.locator('.notes-back').click();
 
     // Active tab is empty.
-    await expect(page.locator('.notes-empty')).toContainText('No notes yet');
+    await expect(page.locator('.notes-empty')).toContainText('No notes yet', { timeout: 3_000 });
 
     // Done tab has the note.
     await page.locator('.notes-filter-tab', { hasText: 'Done' }).click();
