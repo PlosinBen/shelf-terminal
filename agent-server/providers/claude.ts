@@ -285,6 +285,26 @@ export function createClaudeBackend(): ServerBackend {
       // assistant message (next assistant resets its index space).
       const blockMsgIds: BlockMsgIdMap = new Map();
 
+      // Idle-emit dedup. Three idle emit sites in query():
+      //   1. processMessage's `result` case — success path, carries metrics
+      //   2. catch block — error / abort path
+      //   3. finally block — safety net for the case where SDK iteration
+      //      ends without hitting result or catch (rare)
+      //
+      // Without dedup, normal turns double-emit (result + finally on success,
+      // catch + finally on error). The second arrives after turn-dispatcher
+      // already unregistered the turn (first idle marks turn.done) and gets
+      // logged as "event for unknown turn ... dropping". Wrap `send` with
+      // an idle-dedup guard so only the first idle of this turn goes through.
+      let idleEmitted = false;
+      const turnSend: SendFn = (msg) => {
+        if (msg.type === 'status' && (msg as any).state === 'idle') {
+          if (idleEmitted) return;
+          idleEmitted = true;
+        }
+        send(msg);
+      };
+
       // Slash detection — most slashes are forwarded to the SDK unchanged
       // (SDK natively interprets `/cmd` strings and replies with assistant
       // text). We only side-effect on slashes that need provider-side
@@ -359,7 +379,7 @@ export function createClaudeBackend(): ServerBackend {
             }
           }
 
-          processMessage(sdkMsg, send, input.cwd, blockMsgIds);
+          processMessage(sdkMsg, turnSend, input.cwd, blockMsgIds);
         }
       } catch (err: any) {
         if (err.name !== 'AbortError') {
@@ -369,7 +389,7 @@ export function createClaudeBackend(): ServerBackend {
         // terminates and the UI flips out of "streaming" state. Without this
         // the for-await caller hangs forever after an SDK error and the
         // session stays stuck — even AbortError needs the idle to release it.
-        send({ type: 'status', state: 'idle' });
+        turnSend({ type: 'status', state: 'idle' });
       } finally {
         for (const resolve of pendingPermissions.values()) {
           resolve({ behavior: 'deny', message: 'Session ended' });
@@ -400,7 +420,7 @@ export function createClaudeBackend(): ServerBackend {
         if (lastSessionId) {
           send({ type: 'context_patch', patch: { lastSdkSessionId: lastSessionId } });
         }
-        send({ type: 'status', state: 'idle' });
+        turnSend({ type: 'status', state: 'idle' });
       }
     },
 
