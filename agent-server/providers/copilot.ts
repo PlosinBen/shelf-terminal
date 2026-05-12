@@ -373,6 +373,12 @@ export function createCopilotBackend(): ServerBackend {
     try { return await fn(); } finally { stoppable = true; }
   }
 
+  // Pending picker promises keyed by picker id (minted by dispatchSlash when
+  // emitting picker_request). resolvePicker drains the matching entry with
+  // the user-selected value (or null for cancellation). Multiple concurrent
+  // pickers shouldn't happen by design, but the Map shape tolerates it.
+  const pendingPickers = new Map<string, (value: string | null) => void>();
+
   function modelMeta(id: string): CachedModel | undefined {
     return state.models.find((m) => m.id === id);
   }
@@ -804,6 +810,76 @@ export function createCopilotBackend(): ServerBackend {
     };
 
     switch (cmd) {
+      case 'model': {
+        // Two paths:
+        //   With arg → switch directly (no picker). Emit pending → terminal
+        //     slash_response after applying. Echoes what users get if they
+        //     typed the model name in full.
+        //   No arg → open picker. Emit picker_request, await user
+        //     selection / cancel, apply (or no-op), emit terminal
+        //     slash_response. The orchestrator-level picker channel handles
+        //     the round-trip with renderer; we just await our pending Map.
+        const msgId = mintMsgId();
+        emitSlash(msgId, 'pending', 'Loading models...');
+        const models = await listModelsCached();
+        const list = models.map((m) => ({ value: m.id, displayName: m.name ?? m.id }));
+
+        const applyModel = async (id: string) => {
+          currentModel = id;
+          const supported = effortsFor(currentModel);
+          if (!currentEffort || !supported.includes(currentEffort)) {
+            currentEffort = modelMeta(currentModel)?.defaultReasoningEffort;
+          }
+          if (state.session) {
+            try {
+              await state.session.setModel(currentModel, currentEffort ? { reasoningEffort: currentEffort as any } : undefined);
+            } catch { /* SDK retries on next send */ }
+          }
+          send({ type: 'capabilities', ...buildCapabilities() });
+        };
+
+        const arg = args.trim();
+        if (arg) {
+          const match = list.find((m) => m.value === arg);
+          if (!match) {
+            emitSlash(msgId, 'error', `Unknown model: ${arg}`);
+            return;
+          }
+          await applyModel(arg);
+          emitSlash(msgId, 'success', `Switched to ${match.displayName}`);
+          return;
+        }
+
+        // Open picker — provider mints id, registers pending resolver, emits
+        // request, awaits user selection via resolvePicker IPC.
+        const pickerId = `pk-${randomUUID().slice(0, 8)}`;
+        const picked = await new Promise<string | null>((resolve) => {
+          pendingPickers.set(pickerId, resolve);
+          send({
+            type: 'picker_request',
+            id: pickerId,
+            title: 'Select model',
+            options: list.map((m) => ({ value: m.value, label: m.displayName })),
+            currentValue: currentModel,
+            searchable: list.length > 6,
+          });
+        });
+        pendingPickers.delete(pickerId);
+
+        if (picked === null) {
+          emitSlash(msgId, 'success', 'Cancelled');
+          return;
+        }
+        const match = list.find((m) => m.value === picked);
+        if (!match) {
+          emitSlash(msgId, 'error', `Unknown model: ${picked}`);
+          return;
+        }
+        await applyModel(picked);
+        emitSlash(msgId, 'success', `Switched to ${match.displayName}`);
+        return;
+      }
+
       case 'help': {
         const msgId = mintMsgId();
         const lines = SLASH_COMMANDS.map((c) => `- /${c.name} — ${c.description}`).join('\n');
@@ -922,15 +998,12 @@ export function createCopilotBackend(): ServerBackend {
       // Slash detection. Bypass normal SDK setup — most slashes are
       // pre-SDK ops (help/context), session-rebuilding ops (clear), or
       // session-aware RPC calls (compact). None benefit from the
-      // model/effort/mode sync that precedes a real SDK send. /model
-      // currently still routes via the legacy slash_command IPC →
-      // handleSlashCommand path; this branch is dormant for /model until
-      // step 9 migrates it to the picker channel. Dead code today for
-      // non-/model slashes too — renderer routes them all via
-      // slash_command IPC → handleSlashCommand → dispatchSlash. Step 10
-      // unifies renderer to send via this branch.
+      // model/effort/mode sync that precedes a real SDK send. Currently
+      // dead code — renderer routes all slashes via slash_command IPC →
+      // handleSlashCommand → dispatchSlash. Step 10 unifies renderer to
+      // send via this branch.
       const slash = parseSlashPrefix(input.prompt);
-      if (slash && slash.cmd !== 'model') {
+      if (slash) {
         send({ type: 'status', state: 'streaming', model: currentModel });
         try {
           await dispatchSlash(slash.cmd, slash.args, send);
@@ -1046,34 +1119,19 @@ export function createCopilotBackend(): ServerBackend {
       }
     },
 
-    async handleSlashCommand(cmd: string, args: string, send: SendFn): Promise<SlashResult> {
-      // /model still uses the legacy RPC-return path because the renderer
-      // consumes show-model-picker / switch-model SlashResults to drive its
-      // model picker overlay. Step 9 migrates this to the generic picker
-      // channel; until then, /model bypasses dispatchSlash.
-      if (cmd === 'model') {
-        const arg = args.trim();
-        const models = await listModelsCached();
-        const list = models.map((m) => ({ value: m.id, displayName: m.name ?? m.id }));
-        if (!arg) return { type: 'show-model-picker', models: list, current: currentModel };
-        const match = list.find((m) => m.value === arg);
-        if (!match) return { type: 'error', message: `Unknown model: ${arg}` };
-        currentModel = arg;
-        const supported = effortsFor(currentModel);
-        if (!currentEffort || !supported.includes(currentEffort)) {
-          currentEffort = modelMeta(currentModel)?.defaultReasoningEffort;
-        }
-        if (state.session) {
-          try {
-            await state.session.setModel(currentModel, currentEffort ? { reasoningEffort: currentEffort as any } : undefined);
-          } catch { /* SDK will retry on next send */ }
-        }
-        currentSend?.({ type: 'capabilities', ...buildCapabilities() });
-        return { type: 'switch-model', model: arg };
+    resolvePicker(id: string, value: string | null) {
+      const resolve = pendingPickers.get(id);
+      if (resolve) {
+        pendingPickers.delete(id);
+        resolve(value);
       }
+    },
 
-      // All other slashes go through the unified dispatchSlash. Same code
-      // path that query() will hit once step 10 unifies renderer send.
+    async handleSlashCommand(cmd: string, args: string, send: SendFn): Promise<SlashResult> {
+      // All slashes (including /model since step 9) go through dispatchSlash.
+      // /model emits picker_request via the new channel for the no-arg form,
+      // or applies directly if user provided the model name. Renderer's
+      // legacy slash switch sees `handled` and just records the user echo.
       await dispatchSlash(cmd, args, send);
       return { type: 'handled' };
     },
