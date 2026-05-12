@@ -20,8 +20,11 @@ function mintSlashMsgId(): string {
 // Claude SDK's `supportedCommands()` only returns user-installed skills, not
 // built-ins. Append these so the autocomplete menu lists them; submission still
 // passes through to the SDK, which handles them natively.
+//
+// /model intentionally not listed — it's a renderer-local config-edit slash
+// (see src/renderer/components/AgentView.tsx RENDERER_LOCAL_SLASHES), and the
+// renderer merges its own command list into the autocomplete display.
 const CLAUDE_BUILTIN_COMMANDS = [
-  { name: 'model', description: 'Pick or switch the current model' },
   { name: 'clear', description: 'Reset the conversation context' },
   { name: 'compact', description: 'Compact the conversation' },
   { name: 'help', description: 'List available slash commands' },

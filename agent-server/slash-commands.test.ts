@@ -53,7 +53,8 @@ describe('Copilot slash dispatch via query()', () => {
     expect(responses.length).toBe(1);
     expect(responses[0].status).toBe('success');
     expect(responses[0].slashCmd).toBe('help');
-    expect(responses[0].content).toContain('/model');
+    // /model is renderer-local (not provider-handled) so it's intentionally
+    // absent from this list — see SLASH_COMMANDS in copilot.ts.
     expect(responses[0].content).toContain('/clear');
     expect(responses[0].content).toContain('/compact');
     expect(responses[0].content).toContain('/context');

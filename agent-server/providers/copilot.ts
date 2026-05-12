@@ -238,8 +238,10 @@ function approvalForKind(kind: string): any | undefined {
 
 const DEFAULT_MODEL = 'gpt-5.5';
 
+// /model intentionally not listed — it's a renderer-local config-edit slash
+// (see src/renderer/components/AgentView.tsx RENDERER_LOCAL_SLASHES). The
+// renderer merges its own command list into the autocomplete display.
 const SLASH_COMMANDS = [
-  { name: 'model', description: 'Pick or switch the current model' },
   { name: 'context', description: 'Show context window usage' },
   { name: 'compact', description: 'Summarize conversation to free up context' },
   { name: 'clear', description: 'Reset the conversation context' },
@@ -800,9 +802,12 @@ export function createCopilotBackend(): ServerBackend {
    * (compact, clear), the critical-section is wrapped in `critical()` so
    * concurrent stop() calls don't leave the session half-modified.
    *
-   * `/model` is intentionally NOT handled here — it returns SlashResult
-   * variants the renderer's legacy switch consumes. Migration to the picker
-   * channel lands in step 9.
+   * `/model` is intentionally NOT handled here — it's a renderer-local
+   * config-edit slash (see src/renderer/components/AgentView.tsx
+   * RENDERER_LOCAL_SLASHES). Renderer intercepts before send IPC fires;
+   * if a /model slash somehow reaches this dispatcher, it falls into the
+   * default "unknown command" branch — that's intentional, signals the
+   * routing layer above failed.
    */
   async function dispatchSlash(cmd: string, args: string, send: SendFn): Promise<void> {
     const emitSlash = (msgId: string, status: 'pending' | 'success' | 'error', content: string) => {
@@ -810,80 +815,6 @@ export function createCopilotBackend(): ServerBackend {
     };
 
     switch (cmd) {
-      case 'model': {
-        // Two paths:
-        //   With arg → switch directly (no picker). Emit pending → terminal
-        //     slash_response after applying. Echoes what users get if they
-        //     typed the model name in full.
-        //   No arg → open picker. Emit picker_request, await user
-        //     selection / cancel, apply (or no-op), emit terminal
-        //     slash_response. The orchestrator-level picker channel handles
-        //     the round-trip with renderer; we just await our pending Map.
-        const msgId = mintMsgId();
-        emitSlash(msgId, 'pending', 'Loading models...');
-        const models = await listModelsCached();
-        const list = models.map((m) => ({ value: m.id, displayName: m.name ?? m.id }));
-
-        const applyModel = async (id: string) => {
-          currentModel = id;
-          const supported = effortsFor(currentModel);
-          if (!currentEffort || !supported.includes(currentEffort)) {
-            currentEffort = modelMeta(currentModel)?.defaultReasoningEffort;
-          }
-          if (state.session) {
-            try {
-              await state.session.setModel(currentModel, currentEffort ? { reasoningEffort: currentEffort as any } : undefined);
-            } catch { /* SDK retries on next send */ }
-          }
-          send({ type: 'capabilities', ...buildCapabilities() });
-        };
-
-        const arg = args.trim();
-        if (arg) {
-          const match = list.find((m) => m.value === arg);
-          if (!match) {
-            emitSlash(msgId, 'error', `Unknown model: ${arg}`);
-            return;
-          }
-          await applyModel(arg);
-          emitSlash(msgId, 'success', `Switched to ${match.displayName}`);
-          return;
-        }
-
-        // Open picker — provider mints id, registers pending resolver, emits
-        // request, awaits user selection via resolvePicker IPC. `prefKey:
-        // 'model'` tells renderer to persist + setStatusModel locally as
-        // the authoritative pref update; provider's own applyModel below
-        // still runs to push the new model into the active SDK session.
-        const pickerId = `pk-${randomUUID().slice(0, 8)}`;
-        const picked = await new Promise<string | null>((resolve) => {
-          pendingPickers.set(pickerId, resolve);
-          send({
-            type: 'picker_request',
-            id: pickerId,
-            title: 'Select model',
-            options: list.map((m) => ({ value: m.value, label: m.displayName })),
-            currentValue: currentModel,
-            searchable: list.length > 6,
-            prefKey: 'model',
-          });
-        });
-        pendingPickers.delete(pickerId);
-
-        if (picked === null) {
-          emitSlash(msgId, 'success', 'Cancelled');
-          return;
-        }
-        const match = list.find((m) => m.value === picked);
-        if (!match) {
-          emitSlash(msgId, 'error', `Unknown model: ${picked}`);
-          return;
-        }
-        await applyModel(picked);
-        emitSlash(msgId, 'success', `Switched to ${match.displayName}`);
-        return;
-      }
-
       case 'help': {
         const msgId = mintMsgId();
         const lines = SLASH_COMMANDS.map((c) => `- /${c.name} — ${c.description}`).join('\n');
