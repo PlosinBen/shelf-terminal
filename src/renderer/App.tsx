@@ -122,18 +122,18 @@ export function App() {
         }
       }
 
-      const templates = proj.config.defaultTabs;
-      if (templates && templates.length > 0) {
-        templates.forEach((t) => addTab(projectIndex, t.name, t.cmd, t.color));
-        setActiveTab(projectIndex, 0);
-      } else {
-        addTab(projectIndex);
-      }
-
       if (proj.config.openAgentOnConnect) {
         const provider = proj.config.defaultAgentProvider ?? 'claude';
         addTab(projectIndex, undefined, undefined, undefined, 'agent', provider);
       }
+
+      const templates = proj.config.defaultTabs;
+      if (templates && templates.length > 0) {
+        templates.forEach((t) => addTab(projectIndex, t.name, t.cmd, t.color));
+      } else {
+        addTab(projectIndex);
+      }
+      setActiveTab(projectIndex, 0);
     });
 
     const offDisconnectProject = on(Events.DISCONNECT_PROJECT, (projectIndex: number) => {
