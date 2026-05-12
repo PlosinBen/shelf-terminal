@@ -177,8 +177,8 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
   const [pendingPermission, setPendingPermission] = useState<PendingPermission | null>(null);
   // Generic picker state — provider-emitted picker_request lands here. When
   // permission and picker both want to show, permission wins (priority gate
-  // in JSX renders `pendingPermission ?? pendingPicker ?? legacy modelPicker`);
-  // pendingPicker stays preserved during permission so it re-renders after.
+  // in JSX renders `pendingPermission ?? pendingPicker`); pendingPicker stays
+  // preserved during permission so it re-renders after.
   const [pendingPicker, setPendingPicker] = useState<{
     id: string;
     title: string;
@@ -186,11 +186,6 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
     currentValue?: string;
     searchable?: boolean;
   } | null>(null);
-  // modelPicker.selected is unused after SelectionPanel extraction (component
-  // owns cursor state) but the shape is preserved so callers that flip
-  // `open` don't break. Remove fully when /model migrates to picker channel
-  // in step 9.
-  const [modelPicker, setModelPicker] = useState<{ open: boolean; selected: number }>({ open: false, selected: 0 });
   const [queuedMessages, setQueuedMessages] = useState<QueuedMessage[]>([]);
   const [authRequired, setAuthRequired] = useState<{ provider: string } | null>(null);
   const [authBusy, setAuthBusy] = useState(false);
@@ -600,78 +595,11 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
     const text = input.trim();
     if ((!text && pendingFiles.length === 0 && pendingImages.length === 0)) return;
 
-    // Slash command — dispatch to provider via IPC, act on SlashResult
-    const slashMatch = text.match(/^\/(\w+)(?:\s+(.*))?$/);
-    if (slashMatch && !text.includes('\n')) {
-      const cmd = slashMatch[1];
-      const args = (slashMatch[2] ?? '').trim();
-      setInput('');
-      void (async () => {
-        const result = await window.shelfApi.agent.slashCommand(tabId, cmd, args);
-        switch (result.type) {
-          case 'show-model-picker': {
-            const models = (result.models ?? []) as { value: string; displayName: string }[];
-            const current = result.current as string | undefined;
-            if (models.length > 0) {
-              setCapabilities((prev) => prev ? { ...prev, models } : prev);
-              const idx = models.findIndex((m) => m.value === current);
-              setModelPicker({ open: true, selected: idx >= 0 ? idx : 0 });
-            }
-            break;
-          }
-          case 'switch-model': {
-            const model = result.model as string;
-            setStatusModel(model);
-            window.shelfApi.agent.setPrefs(tabId, { model });
-            persistPref({ model });
-            const match = capabilities?.models.find((m) => m.value === model);
-            setMessages((prev) => [...prev, {
-              id: `msg-${Date.now()}`, type: 'system', content: `── Model switched to ${match?.displayName ?? model} ──`, timestamp: Date.now(),
-            }]);
-            break;
-          }
-          case 'context-cleared': {
-            setMessages((prev) => [...prev, {
-              id: `msg-${Date.now()}`, type: 'system', content: `── ${(result.message as string | undefined) ?? 'Context cleared'} ──`, timestamp: Date.now(),
-            }]);
-            break;
-          }
-          case 'system-message': {
-            setMessages((prev) => [...prev, {
-              id: `msg-${Date.now()}`, type: 'system', content: result.content as string, timestamp: Date.now(),
-            }]);
-            break;
-          }
-          case 'error': {
-            setMessages((prev) => [...prev, {
-              id: `msg-${Date.now()}`, type: 'error', content: result.message as string, timestamp: Date.now(),
-            }]);
-            break;
-          }
-          case 'handled': {
-            // Provider already emitted slash_response message(s) on the
-            // stream. Renderer only records the user-echo so the slash itself
-            // shows in conversation; the response messages arrive (or already
-            // did) via the normal AgentEvent pipeline.
-            setMessages((prev) => [...prev, {
-              id: `user-${Date.now()}`, type: 'user', content: text, timestamp: Date.now(),
-            }]);
-            break;
-          }
-          case 'pass-through':
-          default: {
-            // Send the original slash command as a regular message — provider's SDK handles it
-            window.shelfApi.agent.send(tabId, text, []);
-            setMessages((prev) => [...prev, {
-              id: `msg-${Date.now()}`, type: 'user', content: text, timestamp: Date.now(),
-            }]);
-            break;
-          }
-        }
-      })();
-      return;
-    }
-
+    // No slash special-casing — slash is just a string the provider interprets.
+    // User echo, queue-during-streaming, attachments, and IPC all flow through
+    // the same single path below. Slashes appear in the conversation as user
+    // messages (same as any text), and provider emits slash_response /
+    // picker_request events via the normal stream pipeline.
     const files = pendingFiles;
     const images = pendingImages;
     setInput('');
@@ -712,24 +640,11 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
     setPendingPermission(null);
   }, [tabId, pendingPermission]);
 
-  // Permission / model picker keyboard handling is now owned by the
-  // <SelectionPanel> component (internal cursor state + window keydown
-  // listener with priority capture). AgentView only owns the "is panel
-  // open?" gates (pendingPermission / modelPicker.open) and the callbacks
-  // that act on the selected value.
-
-  const handleModelPickerSelect = useCallback((idx: number) => {
-    if (!capabilities) return;
-    const picked = capabilities.models[idx];
-    if (!picked) return;
-    setStatusModel(picked.value);
-    window.shelfApi.agent.setPrefs(tabId, { model: picked.value });
-    persistPref({ model: picked.value });
-    setMessages((prev) => [...prev, {
-      id: `msg-${Date.now()}`, type: 'system', content: `── Model switched to ${picked.displayName} ──`, timestamp: Date.now(),
-    }]);
-    setModelPicker({ open: false, selected: 0 });
-  }, [tabId, capabilities]);
+  // Permission / picker keyboard handling is owned by the <SelectionPanel>
+  // component (internal cursor state + window keydown listener with priority
+  // capture). AgentView only owns the "is panel open?" gates
+  // (pendingPermission / pendingPicker) and the callbacks that act on the
+  // selected value.
 
   // Status bar cycling
   const handleCycleModel = useCallback(() => {
@@ -1019,21 +934,6 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
             window.shelfApi.agent.resolvePicker(tabId, pendingPicker.id, null);
             setPendingPicker(null);
           }}
-        />
-      ) : modelPicker.open && capabilities && capabilities.models.length > 0 ? (
-        <SelectionPanel
-          title="Select model"
-          options={capabilities.models.map((m) => ({
-            value: m.value,
-            label: m.value === statusModel ? `${m.displayName} (current)` : m.displayName,
-          }))}
-          initialSelected={Math.max(0, capabilities.models.findIndex((m) => m.value === statusModel))}
-          cancellable
-          onSelect={(value) => {
-            const idx = capabilities.models.findIndex((m) => m.value === value);
-            if (idx >= 0) handleModelPickerSelect(idx);
-          }}
-          onCancel={() => setModelPicker({ open: false, selected: 0 })}
         />
       ) : null}
 
