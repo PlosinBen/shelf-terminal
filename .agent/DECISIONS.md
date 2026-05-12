@@ -822,8 +822,6 @@ SDK 原生提供 `SDKCompactBoundaryMessage`（subtype `compact_boundary`，帶 
 - IPC `AGENT_RESOLVE_PICKER` + outgoing `picker_request` event（generic N-way 互動）
 - `<SelectionPanel>` 元件取代 permission popup + model picker 重複 JSX
 
-See `.agent/features/slash-command-redesign.md` for the full 12-step migration trace.
-
 
 ## 55. Renderer-authoritative prefs + orchestrator-driven setX
 
@@ -910,9 +908,6 @@ SDK `supportedModels()` 會隱藏 legacy models，但 SDK 實際接受）。`/mo
 - `parseSlashPrefix` 從 agent-server 搬 `src/shared/` 共用（step D）
 - /model 從 `CLAUDE_BUILTIN_COMMANDS` / `SLASH_COMMANDS` 移除（step E）
 - Copilot `dispatchSlash` /model case 整段刪掉（step E）
-
-See `.agent/features/slash-command-redesign.md` "Follow-up: pref sync architecture"
-for design discussion.
 
 
 ## 56. Local shell HISTFILE=/dev/null：tab 間 history 完全隔離、不持久化

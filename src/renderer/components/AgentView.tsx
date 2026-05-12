@@ -715,8 +715,8 @@ export function AgentView({ tabId, cwd, connection, provider, projectId, visible
    * (orchestrator diffs and calls provider.setX).
    *
    * No validation: SDK is the final arbiter of model legitimacy (see
-   * .agent/features/slash-command-redesign.md "Follow-up" section). Typos
-   * surface as `error` events when the next send fails to apply.
+   * .agent/DECISIONS.md #55). Typos surface as `error` events when the next
+   * send fails to apply.
    */
   const handleConfigEdit = useCallback((key: 'model' | 'effort' | 'permissionMode', value: string) => {
     if (key === 'model') {
