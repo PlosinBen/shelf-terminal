@@ -3,7 +3,7 @@ import type { Query, Options, SDKMessage, CanUseTool } from '@anthropic-ai/claud
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'fs';
 import { resolve } from 'path';
-import type { QueryInput, SendFn, ServerBackend, ProviderCapabilities, SlashResult, StatusSegment } from './types';
+import type { QueryInput, SendFn, ServerBackend, ProviderCapabilities, StatusSegment } from './types';
 import { severityFromUtilization, formatResetCountdown, pickPermissionModes, pickEffortLevels } from './types';
 import { parseSlashPrefix } from './slash-prefix';
 import type { ProviderModel } from '../../src/shared/types';
@@ -278,15 +278,26 @@ export function createClaudeBackend(): ServerBackend {
       // assistant message (next assistant resets its index space).
       const blockMsgIds: BlockMsgIdMap = new Map();
 
-      // Slash detection — only `/compact` gets explicit slash_response
-      // tracking on Claude. SDK natively interprets `/cmd` strings (we
-      // forward unchanged), and most slashes produce assistant text in
-      // response. `/compact` is special because it emits dedicated boundary
-      // + status events the SDK guarantees, so we can synthesize a precise
-      // "Compacted: pre → post tokens" completion message that wouldn't
-      // otherwise reach the user. Other slashes (`/help`, `/clear`, etc.)
-      // stay as SDK pass-through with their normal assistant-text output.
+      // Slash detection — most slashes are forwarded to the SDK unchanged
+      // (SDK natively interprets `/cmd` strings and replies with assistant
+      // text). We only side-effect on slashes that need provider-side
+      // bookkeeping the SDK can't reach:
+      //   - `/clear`: reset our in-memory lastSessionId and emit
+      //     context_patch so persistence doesn't resurrect the dead session
+      //     on next launch. Pre-step 11 this side-effect lived in
+      //     handleSlashCommand (a separate IPC path); now slash flows
+      //     through send → query(), so we own it here.
+      //   - `/compact`: capture completion via SDKCompactBoundaryMessage +
+      //     SDKStatusMessage and surface as a slash_response card with
+      //     token deltas (otherwise SDK swallows the outcome silently).
       const slash = parseSlashPrefix(input.prompt);
+      if (slash?.cmd === 'clear') {
+        send({ type: 'message', msgId: mintMsgId(), msgType: 'plan', content: '' });
+        inflightToolUses.clear();
+        lastSessionId = null;
+        send({ type: 'context_patch', patch: { lastSdkSessionId: null } });
+        // Fall through — SDK still handles the actual /clear semantics.
+      }
       let pendingCompactMsgId: string | null = null;
       let compactMeta: { pre_tokens?: number; post_tokens?: number; duration_ms?: number } | null = null;
       if (slash?.cmd === 'compact') {
@@ -424,25 +435,6 @@ export function createClaudeBackend(): ServerBackend {
       }
     },
 
-    async handleSlashCommand(cmd: string, _args: string, _send: SendFn): Promise<SlashResult> {
-      // Claude SDK handles all slash commands natively (compact, clear, model, etc.)
-      // Just send the original input as a regular message — SDK intercepts.
-      // We piggyback to clear the sticky plan panel when context is reset.
-      if (cmd === 'clear') {
-        currentSend?.({ type: 'message', msgId: mintMsgId(), msgType: 'plan', content: '' });
-        inflightToolUses.clear();
-        // Eager-clear in-memory + persisted session id so the edge case
-        // "/clear then close app before SDK responds" doesn't leave a stale
-        // resume pointer in context-store. Steady-state correctness is
-        // already handled by the SDK assigning a new session_id on the next
-        // assistant message (captured in the for-await loop and emitted as
-        // context_patch), but if the user closes mid-flight we'd otherwise
-        // hydrate the pre-clear session id on next launch and resume it.
-        lastSessionId = null;
-        currentSend?.({ type: 'context_patch', patch: { lastSdkSessionId: null } });
-      }
-      return { type: 'pass-through' };
-    },
   };
 }
 

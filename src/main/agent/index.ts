@@ -82,12 +82,6 @@ export function initAgentManager(windowGetter: () => BrowserWindow | null): void
     return session.backend.checkAuth();
   });
 
-  ipcMain.handle(IPC.AGENT_SLASH_COMMAND, async (_e, payload) => {
-    const session = sessions.get(payload.tabId);
-    if (!session) return { type: 'error', message: 'Session not found' };
-    if (!session.backend.handleSlashCommand) return { type: 'pass-through' };
-    return session.backend.handleSlashCommand(payload.cmd, payload.args ?? '', session.cwd);
-  });
 }
 
 function send(channel: string, tabId: string, ...args: unknown[]) {

@@ -98,20 +98,6 @@ export type AgentEvent =
   | { type: 'auth_required'; provider: string }
   | { type: 'error'; error: string };
 
-export type SlashResult =
-  | { type: 'show-model-picker'; models: { value: string; displayName: string; effortLevels?: CycleOption[]; vision?: boolean }[]; current: string }
-  | { type: 'switch-model'; model: string }
-  | { type: 'context-cleared'; message?: string }
-  | { type: 'pass-through' }
-  | { type: 'system-message'; content: string }
-  | { type: 'error'; message: string }
-  /**
-   * Provider has already emitted slash_response messages via the wire send
-   * channel. Renderer should push the user-echo and wait for those streamed
-   * messages instead of materializing UI from this return value.
-   */
-  | { type: 'handled' };
-
 export interface AgentBackend {
   query(prompt: string, cwd: string, opts?: AgentQueryOptions): AsyncGenerator<AgentEvent>;
   stop(): Promise<void>;
@@ -124,7 +110,6 @@ export interface AgentBackend {
   storeCredential?(key: string): Promise<void>;
   clearCredential?(): Promise<void>;
   clearContext?(): void;
-  handleSlashCommand?(cmd: string, args: string, cwd?: string): Promise<SlashResult>;
   /**
    * Resolve a pending picker_request by forwarding the user's selection (or
    * cancellation) to the remote agent-server. The provider tracks the

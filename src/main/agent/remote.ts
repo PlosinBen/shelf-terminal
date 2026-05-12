@@ -183,22 +183,6 @@ export function createRemoteBackend(
     setPermissionMode(mode: string) {
       currentPermissionMode = mode || null;
     },
-
-    async handleSlashCommand(cmd: string, args: string, cwd?: string) {
-      const proc = await ensureProcReady(cwd ?? '');
-      if (!proc) return { type: 'error' as const, message: 'Backend not ready' };
-      const requestId = `slash-${Date.now()}`;
-      return new Promise<import('./types').SlashResult>((resolve) => {
-        const timeout = setTimeout(() => {
-          resolve({ type: 'error', message: 'Timeout waiting for slash command response' });
-        }, 30000);
-        proc.onResponse(requestId, 'slash_result', (payload) => {
-          clearTimeout(timeout);
-          resolve(payload.result ?? { type: 'pass-through' });
-        });
-        proc.sendLine({ type: 'slash_command', provider, cmd, args, requestId });
-      });
-    },
   };
 }
 

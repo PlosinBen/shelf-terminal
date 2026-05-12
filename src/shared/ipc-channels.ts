@@ -75,7 +75,6 @@ export const IPC = {
   AGENT_STORE_CREDENTIAL: 'agent:store-credential',
   AGENT_CLEAR_CREDENTIAL: 'agent:clear-credential',
   AGENT_CHECK_AUTH: 'agent:check-auth',
-  AGENT_SLASH_COMMAND: 'agent:slash-command',
 
   // PM Agent
   PM_SEND: 'pm:send',

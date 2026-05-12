@@ -4,7 +4,7 @@ import * as os from 'os';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { randomUUID } from 'node:crypto';
-import type { QueryInput, SendFn, ServerBackend, ProviderCapabilities, SlashResult, StatusSegment } from './types';
+import type { QueryInput, SendFn, ServerBackend, ProviderCapabilities, StatusSegment } from './types';
 import { severityFromUtilization, formatResetCountdown, pickPermissionModes, pickEffortLevels } from './types';
 import { parseSlashPrefix } from './slash-prefix';
 import type { ProviderModel } from '../../src/shared/types';
@@ -937,9 +937,16 @@ export function createCopilotBackend(): ServerBackend {
         // fresh one bound to the *current* cwd. Without the new-session step,
         // Copilot CLI's server-side session state (which includes
         // workingDirectory) would be re-restored on the next query via any
-        // persisted lastSdkSessionId. ensureSession() also emits
-        // context_patch with the new sessionId, so persisted state stays
-        // consistent.
+        // persisted lastSdkSessionId. ensureSession() emits context_patch
+        // with the new sessionId, so persisted state stays consistent.
+        //
+        // Persistence handling: clear lastSdkSessionId in context_patch up
+        // front so even if ensureSession fails, next launch starts cold
+        // (won't try to resume the just-disposed SDK session). On success,
+        // ensureSession's own context_patch with the new id overwrites.
+        // Pre-step 11 the orchestrator deleted the context file directly on
+        // /clear via SlashResult; now that slash flows through send/query()
+        // we own that responsibility here in provider land.
         //
         // First-/clear-before-any-query is treated as a successful no-op so
         // tests / fresh environments don't trip on missing auth or CLI binary.
@@ -953,6 +960,7 @@ export function createCopilotBackend(): ServerBackend {
             state.cliSessionId = null;
             latestUsage = null;
             inflightToolUses.clear();
+            send({ type: 'context_patch', patch: { lastSdkSessionId: null } });
             send({ type: 'message', msgId: mintMsgId(), msgType: 'plan', content: '' });
             if (hadSession) {
               try {
@@ -1125,15 +1133,6 @@ export function createCopilotBackend(): ServerBackend {
         pendingPickers.delete(id);
         resolve(value);
       }
-    },
-
-    async handleSlashCommand(cmd: string, args: string, send: SendFn): Promise<SlashResult> {
-      // All slashes (including /model since step 9) go through dispatchSlash.
-      // /model emits picker_request via the new channel for the no-arg form,
-      // or applies directly if user provided the model name. Renderer's
-      // legacy slash switch sees `handled` and just records the user echo.
-      await dispatchSlash(cmd, args, send);
-      return { type: 'handled' };
     },
   };
 }

@@ -26,9 +26,9 @@ import type { PersistedContext } from '../context-store';
 
 /**
  * Envelope present on every outgoing message produced inside a turn. Lifecycle
- * messages (`ready`, `pong`, `capabilities`, `credential_*`, `slash_result`)
- * are emitted outside any turn and intentionally omit `turnId`. Main side
- * routes per-turn events back to AsyncIterators by this id; lifecycle is
+ * messages (`ready`, `pong`, `capabilities`, `credential_*`) are emitted
+ * outside any turn and intentionally omit `turnId`. Main side routes per-turn
+ * events back to AsyncIterators by this id; lifecycle is
  * dispatched separately.
  */
 export interface WireEnvelope {
@@ -64,7 +64,6 @@ export type OutgoingMessage = WireEnvelope & (
     })
   | { type: 'credential_stored'; requestId: string; ok: boolean; error?: string }
   | { type: 'credential_cleared'; requestId: string; ok: boolean; error?: string }
-  | { type: 'slash_result'; requestId: string; result: SlashResult }
 
   // ── Per-turn control / status (turnId expected) ──────────────────────────
   | {
@@ -152,20 +151,6 @@ export type OutgoingMessage = WireEnvelope & (
     }
 );
 
-export type SlashResult =
-  | { type: 'show-model-picker'; models: { value: string; displayName: string; effortLevels?: CycleOption[]; vision?: boolean }[]; current: string }
-  | { type: 'switch-model'; model: string }
-  | { type: 'context-cleared'; message?: string }
-  | { type: 'pass-through' }
-  | { type: 'system-message'; content: string }
-  | { type: 'error'; message: string }
-  /**
-   * Provider already emitted slash_response message(s) via the `send` fn passed
-   * to handleSlashCommand. Orchestrator should NOT synthesize any further UI
-   * from this return — the messages already carry status. Renderer just pushes
-   * the user-echo entry and waits for the streamed slash_response.
-   */
-  | { type: 'handled' };
 
 export type SendFn = (msg: OutgoingMessage) => void;
 
@@ -251,13 +236,6 @@ export interface ServerBackend {
   resolvePicker?(id: string, value: string | null): void;
   storeCredential?(key: string): Promise<void>;
   clearCredential?(): Promise<void>;
-  /**
-   * `send` is the live wire send fn for this process — passed explicitly so
-   * providers can emit messages (e.g. `slash_response` pending/success pairs)
-   * without relying on `currentSend` state from a prior `query()` call (which
-   * would be null for slash commands fired before the first normal turn).
-   */
-  handleSlashCommand?(cmd: string, args: string, send: SendFn): Promise<SlashResult>;
   /**
    * Drop any in-memory session state tied to `sessionId`. Called by the
    * orchestrator when persisted context is deleted (IPC `clear_context`),
