@@ -289,17 +289,13 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
     };
   }, [sessionId, settings.agentHistoryMaxMessages]);
 
-  // Capabilities listener
-  //
-  // Capabilities arrive after every backend (re)connect — first launch,
-  // after credential flow, etc. We use this as the
-  // canonical sync point for saved prefs vs. backend defaults:
-  //
-  // - savedPrefs win over `caps.currentXxx` (caps reflect a *fresh* backend
-  //   that doesn't know about the user's previous choices yet)
-  // - any drift between savedPrefs and caps gets pushed back to the backend
-  //   via `setPrefs`, otherwise e.g. bypassPermissions saved in projectConfig
-  //   would silently degrade to "default" after a reset
+  // Capabilities listener — backend announces available models / effort
+  // levels / permission modes (and SDK-reported "current" hints). Renderer
+  // is the authoritative owner of prefs (savedPrefs in projectConfig); we
+  // only fall back to `caps.currentXxx` for the initial defaults when the
+  // user has no saved pref yet. No more drift-back / setPrefs push-back —
+  // backend reads prefs from each AGENT_SEND payload, so the old "backend
+  // forgot, renderer remembers" sync isn't needed.
   useEffect(() => {
     const off = window.shelfApi.agent.onCapabilities((id: string, caps: any) => {
       if (id !== tabId) return;
@@ -310,16 +306,6 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
       else if (caps.currentPermissionMode) setPermissionMode(caps.currentPermissionMode);
       if (savedPrefs?.effort) setCurrentEffort(savedPrefs.effort);
       else if (caps.currentEffort) setCurrentEffort(caps.currentEffort);
-
-      const drift: Record<string, string> = {};
-      if (savedPrefs?.model && savedPrefs.model !== caps.currentModel) drift.model = savedPrefs.model;
-      if (savedPrefs?.effort && savedPrefs.effort !== caps.currentEffort) drift.effort = savedPrefs.effort;
-      if (savedPrefs?.permissionMode && savedPrefs.permissionMode !== caps.currentPermissionMode) {
-        drift.permissionMode = savedPrefs.permissionMode;
-      }
-      if (Object.keys(drift).length > 0) {
-        window.shelfApi.agent.setPrefs(tabId, drift);
-      }
     });
     return off;
   }, [tabId, savedPrefs]);
@@ -656,33 +642,32 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
   // (pendingPermission / pendingPicker) and the callbacks that act on the
   // selected value.
 
-  // Status bar cycling
+  // Status bar cycling. Renderer-only — persist to projectConfig and update
+  // local status state. Backend learns the new pref on the next AGENT_SEND
+  // payload (orchestrator diffs and calls provider.setX). No setPrefs IPC.
   const handleCycleModel = useCallback(() => {
     if (!capabilities || capabilities.models.length === 0) return;
     const idx = capabilities.models.findIndex((m) => m.value === statusModel);
     const next = capabilities.models[(idx + 1) % capabilities.models.length];
     setStatusModel(next.value);
-    window.shelfApi.agent.setPrefs(tabId, { model: next.value });
     persistPref({ model: next.value });
-  }, [tabId, capabilities, statusModel, persistPref]);
+  }, [capabilities, statusModel, persistPref]);
 
   const handleCycleMode = useCallback(() => {
     if (!capabilities || capabilities.permissionModes.length === 0) return;
     const idx = capabilities.permissionModes.findIndex((m) => m.value === permissionMode);
     const next = capabilities.permissionModes[(idx + 1) % capabilities.permissionModes.length];
     setPermissionMode(next.value);
-    window.shelfApi.agent.setPrefs(tabId, { permissionMode: next.value });
     persistPref({ permissionMode: next.value });
-  }, [tabId, capabilities, permissionMode, persistPref]);
+  }, [capabilities, permissionMode, persistPref]);
 
   const handleCycleEffort = useCallback(() => {
     if (!capabilities || capabilities.effortLevels.length === 0) return;
     const idx = capabilities.effortLevels.findIndex((e) => e.value === currentEffort);
     const next = capabilities.effortLevels[(idx + 1) % capabilities.effortLevels.length];
     setCurrentEffort(next.value);
-    window.shelfApi.agent.setPrefs(tabId, { effort: next.value });
     persistPref({ effort: next.value });
-  }, [tabId, capabilities, currentEffort, persistPref]);
+  }, [capabilities, currentEffort, persistPref]);
 
   const handleClearHistory = useCallback(async () => {
     // Lightweight cleanup: wipe what the user sees (in-memory + IDB rows
@@ -937,25 +922,22 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
           }
           cancellable
           onSelect={(value) => {
-            // If the picker carried a prefKey hint, apply locally now —
-            // persist to project config, push down to backend, update the
-            // status bar. This makes the renderer authoritative on the
-            // pref change, sidestepping the onCapabilities drift-back
-            // loop that would otherwise revert the choice when caps
-            // arrive a few ms later (savedPrefs still showed the old
-            // value because state hadn't propagated).
+            // If the picker carried a prefKey hint, persist + reflect in
+            // status bar locally. Renderer is the source of truth for
+            // prefs; backend learns on next AGENT_SEND payload (no
+            // setPrefs IPC). NOTE: prefKey on picker_request is going
+            // away in step D — /model picker becomes renderer-local
+            // instead of provider-emitted. This branch survives only for
+            // hypothetical future provider-driven pref pickers.
             const key = pendingPicker.prefKey;
             if (key === 'model') {
               setStatusModel(value);
-              window.shelfApi.agent.setPrefs(tabId, { model: value });
               persistPref({ model: value });
             } else if (key === 'effort') {
               setCurrentEffort(value);
-              window.shelfApi.agent.setPrefs(tabId, { effort: value });
               persistPref({ effort: value });
             } else if (key === 'permissionMode') {
               setPermissionMode(value);
-              window.shelfApi.agent.setPrefs(tabId, { permissionMode: value });
               persistPref({ permissionMode: value });
             }
             window.shelfApi.agent.resolvePicker(tabId, pendingPicker.id, value);

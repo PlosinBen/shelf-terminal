@@ -52,16 +52,6 @@ export function initAgentManager(windowGetter: () => BrowserWindow | null): void
     return true;
   });
 
-  ipcMain.handle(IPC.AGENT_SET_PREFS, async (_e, payload) => {
-    const { tabId, model, effort, permissionMode: mode } = payload;
-    const session = sessions.get(tabId);
-    if (!session) return false;
-    if (model) session.backend.setModel?.(model);
-    if (effort) session.backend.setEffort?.(effort);
-    if (mode) session.backend.setPermissionMode?.(mode);
-    return true;
-  });
-
   ipcMain.handle(IPC.AGENT_STORE_CREDENTIAL, async (_e, payload) => {
     const session = sessions.get(payload.tabId);
     if (!session?.backend.storeCredential) return false;

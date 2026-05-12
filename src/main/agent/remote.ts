@@ -33,9 +33,6 @@ export function createRemoteBackend(
   let remoteProc: RemoteProcess | null = null;
   let deployed = false;
   let remotePath = '';
-  let currentModel: string | null = null;
-  let currentEffort: string | null = null;
-  let currentPermissionMode: string | null = null;
 
   async function ensureProcReady(cwd: string): Promise<RemoteProcess | null> {
     if (!deployed) {
@@ -104,10 +101,10 @@ export function createRemoteBackend(
       // could arrive and get dropped as "unknown turn".
       const events = proc.registerTurn(turnId, permissionHandler);
 
-      // Opts come from main's AGENT_SEND payload (authoritative renderer
-      // state). Closure cache is a transitional fallback for callers that
-      // haven't migrated to passing prefs in send payload — removed in the
-      // next phase along with setModel/setEffort/setPermissionMode methods.
+      // Opts are authoritative — renderer reads savedPrefs / statusModel /
+      // currentEffort / permissionMode and sends them with every AGENT_SEND
+      // IPC. No closure cache in this layer; agent-server orchestrator
+      // diff-detects per-session and calls provider.setModel etc on change.
       proc.sendLine({
         type: 'send',
         turnId,
@@ -116,9 +113,9 @@ export function createRemoteBackend(
         cwd,
         sessionId,
         resume: opts?.resume,
-        permissionMode: opts?.permissionMode ?? currentPermissionMode ?? undefined,
-        model: opts?.model ?? currentModel ?? undefined,
-        effort: opts?.effort ?? currentEffort ?? undefined,
+        permissionMode: opts?.permissionMode,
+        model: opts?.model,
+        effort: opts?.effort,
         images: opts?.images,
       });
 
@@ -174,18 +171,6 @@ export function createRemoteBackend(
         });
         proc.sendLine({ type: 'get_capabilities', provider, cwd, sessionId, customModels, requestId });
       });
-    },
-
-    setModel(model: string) {
-      currentModel = model || null;
-    },
-
-    setEffort(effort: string) {
-      currentEffort = effort || null;
-    },
-
-    setPermissionMode(mode: string) {
-      currentPermissionMode = mode || null;
     },
   };
 }

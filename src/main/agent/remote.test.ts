@@ -44,8 +44,9 @@ describe('remote backend', () => {
     expect(backend).toHaveProperty('stop');
     expect(backend).toHaveProperty('dispose');
     expect(backend).toHaveProperty('checkAuth');
-    expect(backend).toHaveProperty('setModel');
-    expect(backend).toHaveProperty('setEffort');
+    // setModel/setEffort/setPermissionMode removed — renderer now passes
+    // prefs in each AGENT_SEND payload; orchestrator on the agent-server
+    // side drives diff detection and calls provider.setX as needed.
   });
 
   it('checkAuth returns true', async () => {
@@ -61,11 +62,4 @@ describe('remote backend', () => {
     expect(() => backend.dispose()).not.toThrow();
   });
 
-  it('setModel and setEffort work', async () => {
-    const { createRemoteBackend } = await import('./remote');
-    const backend = createRemoteBackend({ type: 'local' } as any);
-    backend.setModel?.('gpt-4o');
-    backend.setEffort?.('high');
-    // No error means success
-  });
 });
