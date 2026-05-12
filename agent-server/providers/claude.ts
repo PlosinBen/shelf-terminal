@@ -382,14 +382,25 @@ export function createClaudeBackend(): ServerBackend {
           processMessage(sdkMsg, turnSend, input.cwd, blockMsgIds);
         }
       } catch (err: any) {
-        if (err.name !== 'AbortError') {
-          send({ type: 'error', error: err.message ?? 'Unknown error' });
+        // Two arrival timings for catch:
+        //   (a) BEFORE result case ran (SDK threw mid-stream) — turn never
+        //       reached idle; emit error + idle to release main.
+        //   (b) AFTER result case ran (SDK threw during post-result cleanup
+        //       / abort teardown) — idle was already emitted by `result`,
+        //       main has deregistered the turn. Re-emitting error here
+        //       would arrive at an "unknown turn" and just clutter logs.
+        //       The user already got their result; the teardown error is
+        //       provider-internal noise.
+        if (!idleEmitted) {
+          if (err.name !== 'AbortError') {
+            send({ type: 'error', error: err.message ?? 'Unknown error' });
+          }
+          turnSend({ type: 'status', state: 'idle' });
+        } else if (err.name !== 'AbortError') {
+          // Log to stderr so it still surfaces in agent-server.log for
+          // postmortem — just not over the wire.
+          console.error('[claude] post-idle SDK error suppressed:', err?.message ?? err);
         }
-        // Always emit idle so the main process's streamRemoteEvents loop
-        // terminates and the UI flips out of "streaming" state. Without this
-        // the for-await caller hangs forever after an SDK error and the
-        // session stays stuck — even AbortError needs the idle to release it.
-        turnSend({ type: 'status', state: 'idle' });
       } finally {
         for (const resolve of pendingPermissions.values()) {
           resolve({ behavior: 'deny', message: 'Session ended' });
