@@ -803,9 +803,26 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
     if (showSlashMenu && filteredCommands.length > 0) {
       if (e.key === 'ArrowDown') { e.preventDefault(); setSlashSelection((s) => Math.min(s + 1, filteredCommands.length - 1)); return; }
       if (e.key === 'ArrowUp') { e.preventDefault(); setSlashSelection((s) => Math.max(s - 1, 0)); return; }
-      if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
+      if (e.key === 'Tab') {
         e.preventDefault();
         handleSlashSelect(filteredCommands[slashSelection]);
+        return;
+      }
+      if (e.key === 'Enter' && !e.shiftKey) {
+        // If the typed text already exactly matches the selected suggestion
+        // (e.g. user typed `/model` fully — slashFilter is 'model' and the
+        // selected cmd name is 'model'), treat Enter as submit instead of
+        // auto-completing into `/model `. Otherwise users have to hit Enter
+        // twice to send a no-arg slash. Tab still always auto-completes.
+        const selected = filteredCommands[slashSelection];
+        if (selected && selected.name === slashFilter) {
+          e.preventDefault();
+          setShowSlashMenu(false);
+          handleSend();
+          return;
+        }
+        e.preventDefault();
+        handleSlashSelect(selected);
         return;
       }
     }
