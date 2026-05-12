@@ -61,9 +61,11 @@
 | Copilot provider | `providers/copilot.ts` | `@github/copilot-sdk` wrapper（spawn bundled `@github/copilot` CLI）、`gh auth token` 拿 token 傳 `gitHubToken` 跳過 keychain、permission bridging、event mapping (delta/message/tool/usage/plan)、`/model` `/context` `/compact` `/clear` `/help`、reasoning effort、permission mode mapping (`default→interactive`/`bypassPermissions→autopilot`/`plan→plan`)、TodoWrite/ExitPlanMode 沒在 Copilot — 走 plan_changed 事件。`formatCopilotToolInput()` 把 args 攤平成 canonical `tool_use.input` 字串；`parseApplyPatch()` 把 `apply_patch` 的裸 unified-diff string 翻譯成 canonical `file_edit`，無法 parse 的 fallback 成 generic `tool_use` 顯示 raw patch。`workingDirectory` 必須傳進 `createSession`/`resumeSession` config（綁定 session lifecycle），否則 bash tool 會 `posix_spawnp failed`（GOTCHAS）。`/clear` eager-rebuild：dispose 舊 session + 立刻 `ensureSession()` 建新 session（帶當前 cwd），new sessionId 直接 emit `context_patch` 寫回 orchestrator，避免舊 session 的 workingDirectory 卡死。**Packaged layout**：`@github/copilot` CLI 放 `extraResources/copilot-cli/`（不放 `asarUnpack`），閃開上游 `app.asar.unpacked.unpacked` path-replace bug — 詳見 GOTCHAS |
 | Context persistence | `context-store.ts` | `loadContext()`、`saveContext()`、`deleteContext()`、`cleanupOldContexts()`，存放在 `~/.shelf/agent-context/{sessionId}.json`，atomic write（tmp+rename）。**Provider 不直接 import 這個 module** — 透過 `QueryInput.restoreContext` 讀、發 `context_patch` 訊息寫，由 orchestrator (`index.ts`) 統一處理。`lastSdkSessionId` 給 Claude（SDK `options.resume`）和 Copilot（`client.resumeSession()`）共用 |
 | Context persistence 測試 | `context-store.test.ts` | `loadContext`/`saveContext`/`deleteContext` round-trip，含 Claude resume 指針 + Copilot Responses chain |
-| Provider types | `providers/types.ts` | `ServerBackend`（含 `resetSession?()`）、`SendFn`、`QueryInput`（含 `sessionId` + orchestrator hydrated `restoreContext`）、`OutgoingMessage`（含 internal `context_patch` 通知 orchestrator 持久化）、`ProviderCapabilities`、`SlashResult` 介面 |
+| Provider types | `providers/types.ts` | `ServerBackend`（含 `resetSession?()` / `resolvePicker?()`）、`SendFn`、`QueryInput`（含 `sessionId` + orchestrator hydrated `restoreContext`）、`OutgoingMessage`（含 internal `context_patch` 通知 orchestrator 持久化；`picker_request` 走 generic N-way picker channel）、`ProviderCapabilities`。**SlashResult 已移除** — slash 經 `query()` 內 `parseSlashPrefix` 偵測後走 provider 內部 dispatch，輸出走 `slash_response` AgentMessage variant |
+| Slash prefix detection | `providers/slash-prefix.ts` | `parseSlashPrefix(prompt)` 共用 helper — 兩個 provider 在 `query()` 入口偵測 `/cmd args` prefix。多行不認、bare slash 不認、cmd 名支援底線/數字。Provider 自主決定要不要叫（可改 prefix 或直接 forward 給 SDK） |
 | Bundle build | `build.mjs` | esbuild → `dist/agent-server/<version>/index.js` 單一 ESM bundle |
-| 單元測試 | `slash-commands.test.ts` | Slash command dispatch 邏輯 |
+| 單元測試 | `slash-commands.test.ts` | Slash dispatch（透過 `query()` 入口）：/help /context /compact /clear unknown + streaming/idle status pair 不帶 cost metrics |
+| 單元測試 | `slash-prefix.test.ts` | `parseSlashPrefix` helper：bare slash 不認、multi-line 不認、底線/數字 cmd 名 |
 
 ### PM Agent (src/main/pm/)
 
@@ -95,7 +97,8 @@
 | 快捷鍵系統 | `hooks/useKeybindings.ts` | combo string 對應 action，支援參數化 action（`switchTab_N`） |
 | Paste/drop 上傳 hook | `hooks/useAttachmentPaste.ts` | 從 TerminalView 抽出的 paste/drop/upload pipeline，支援 file size check |
 | Terminal 渲染 | `components/TerminalView.tsx` | xterm.js instance cache、PTY I/O、useAttachmentPaste hook、unread badge |
-| Agent 對話 UI | `components/AgentView.tsx` | Agent tab 聊天介面（訊息列表 + input bar + send/stop）。Stream chunks + finalize message 共用 `msgId` 進同一個 `messages` 上 upsert — 沒有獨立 `streamText` / `streamThinking` state；in-flight entry 帶 `streaming: true` flag 由 `AgentMessage` 渲染 cursor |
+| Agent 對話 UI | `components/AgentView.tsx` | Agent tab 聊天介面（訊息列表 + input bar + send/stop）。Stream chunks + finalize message 共用 `msgId` 進同一個 `messages` 上 upsert — 沒有獨立 `streamText` / `streamThinking` state；in-flight entry 帶 `streaming: true` flag 由 `AgentMessage` 渲染 cursor。**Slash + 普通 text 走同一條 send path** — provider 在 query() 內偵測 prefix 自行 dispatch，renderer 不分流 |
+| 選擇面板 | `components/SelectionPanel.tsx` | Bottom-anchored N-way 選單，permission popup + generic picker 共用元件。Owns 鍵盤 cursor + ↑↓/Enter/Esc（cancellable）handler（capture phase）。Provider 觸發 picker_request → renderer 渲染 SelectionPanel → resolvePicker IPC 回 provider |
 | Bottom bar | `components/BottomBar.tsx` | 顯示 connection type、cwd、git branch；branch dropdown 支援切換或跳轉 worktree project |
 | Sidebar | `components/Sidebar.tsx` | Project 列表、拖曳排序、右鍵選單（含 New Worktree）、worktree branch 顯示、收合按鈕 |
 | Tab bar | `components/TabBar.tsx` | Tab 列表、拖曳排序、雙擊重命名、unread badge、tab 顏色 |
@@ -112,8 +115,8 @@
 | Tooltip 快捷鍵 helper | `utils/format-keybinding.ts` | 純函式 `formatCombo(combo, isMac)` / `tooltipWithShortcut(label, combo, isMac)`；`useKeybindings.comboToLabel` 內部 delegate 到這裡 |
 | PM stream reducer | `components/pm-view-reducer.ts` | 純 reducer（`send_start` / `clear_display` / `dismiss_error` / `chunk`），管 streaming/streamText/streamToolCalls/error 四個 UI state；vitest 測 13 case |
 | Project 編輯面板 | `components/ProjectEditPanel.tsx` | 改名、init script、default tabs、quick commands 編輯、Clear uploaded files |
-| Agent UI 訊息持久化 | `storage/agent-history.ts` | IndexedDB（`idb@8.0.3`）存 UI messages keyed by sessionId；`loadAgentMessages()`、`saveAgentMessages()`、`clearAgentSession()`。Load 時 `reviveOrphanPending()` 把無 result 的 `tool_use`/`file_edit` 補成 failed result，避免重啟後假 pending 卡死 |
-| Canonical Agent message type | `src/shared/types.ts` (`AgentMessage`) | 9-variant discriminated union（`text`/`thinking`/`intent`/`tool_use`/`file_edit`/`plan`/`system`/`error`，加 renderer-only `user`），agent-server / main / renderer 三邊共用單一來源。`tool_use` 跟 `file_edit` 後到的同 `toolUseId` 訊息會 upsert（result 內嵌而非另發 `tool_result`）。**`tool_use.input` 是 provider 預格式化的單一字串**（`formatClaudeToolInput` / `formatCopilotToolInput`），renderer 不解析、不抽欄位、不知道 toolName 細節。設計 rationale 見 DECISIONS #52 |
+| Agent UI 訊息持久化 | `storage/agent-history.ts` | IndexedDB（`idb@8.0.3`）存 UI messages keyed by sessionId；`loadAgentMessages()`、`saveAgentMessages()`、`clearAgentSession()`。Load 時 `reviveOrphanPending()` 把無 result 的 `tool_use`/`file_edit` 補成 failed result，並把無 terminal status 的 `slash_response` (pending) 補成 error，避免重啟後假 pending 卡死 |
+| Canonical Agent message type | `src/shared/types.ts` (`AgentMessage`) | 10-variant discriminated union（`text`/`thinking`/`intent`/`tool_use`/`file_edit`/`plan`/`system`/`error`/`slash_response`，加 renderer-only `user`），agent-server / main / renderer 三邊共用單一來源。`tool_use` / `file_edit` / `slash_response` 後到的同 msgId 訊息會 upsert（result/status 內嵌而非另發訊息）。**`tool_use.input` 跟 `slash_response.content` 都是 provider 預格式化的單一字串**，renderer 不解析、不抽欄位、不認 cmd 名稱細節。設計 rationale 見 DECISIONS #52 |
 | 主題定義 | `themes.ts` | 5 個內建主題（terminal + UI 色彩） |
 | Window API 型別 | `env.d.ts` | `window.shelfApi` TypeScript 宣告 |
 | React entry | `main.tsx` | `createRoot` + `<App />` |

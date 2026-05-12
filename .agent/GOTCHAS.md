@@ -580,3 +580,28 @@ Dev mode 沒事是因為路徑是 `node_modules/@github/copilot/...`，不含 `a
 - 不要建 `app.asar.unpacked.unpacked` symlink 騙 buggy code — code-signing 可能踩 symlink，notarization 不穩
 - 不要把 `@github/copilot-darwin-*` / `-linux-*` / `-win32-*` 拉進來 — 那是給 standalone `npm install -g @github/copilot` 用的 platform-specific binary，SDK 模式下根本不會載入（loader index.js 只 import 同目錄的 app.js）
 
+
+
+## Slash `/compact` `/clear` 期間 stop 按鈕沒反應
+
+**症狀**: 使用者按 `/compact` 跑了一陣子，覺得太久按 stop — 按鈕沒任何反應，要等 SDK 自己跑完。
+
+**根本原因**: by-design。Provider 內部 `stoppable` flag 在 critical-section（compact 進行中、`/clear` 的 dispose+rebuild 期間）set 為 false，`stop()` 看到後 silently no-op。中斷會留半完成 session — Copilot CLI `rpc.history.compact()` 已發出 RPC、Claude SDK 已進入內部 compact loop，外部 abort 沒有乾淨退出語意。
+
+**為什麼不做 UI 提示**: 不上 renderer 是有理由的（見 DECISIONS #54）— 使用者預期已對齊（compact/clear 修改 session 狀態，直覺就知道不該打斷），業界主流（Cursor / Claude Code / Aider）也都這樣。加 `stoppable` 欄位需要：協定加欄位、provider 維護 mid-turn 切換、renderer 條件 UI、跨 component 一致性處理。複雜度沒對應到痛點。
+
+**Future 路徑**: 若使用者反映「stop 沒反應困惑」，加 `stoppable?: boolean` 到 status event payload，provider critical section 進出時 emit 切換訊號，renderer 條件 disable / 不同視覺。改動範圍小，能升級時再升級。
+
+## Slash response 寫入後降版的相容性
+
+**症狀** (假想): 使用者升版用了 `/compact`，slash_response 訊息存進 IndexedDB；降版回舊版 shelf 沒這 variant，載入歷史會怎樣？
+
+**結論**: 安全 lossy degradation — 整個 conversation 載入不會崩，只是 slash_response 訊息會 silently 不渲染。
+
+**為什麼**:
+- `loadAgentMessages` 只 `.map()` row → AgentMsg，沒有 throw on unknown variant
+- `reviveOrphanPending` 只認自己處理的 type（tool_use / file_edit / slash_response），其他 pass through unchanged
+- `AgentMessage.tsx` render switch 有 `default: return null`（exhaustive `never` check），TS compile 時抓未對齊 variant，runtime 對未知 type 就是不渲染
+- 降版的舊 code 看到 `type: 'slash_response'` 就 fall through default → return null → 從 list 上消失但不爆
+
+**注意**: 是 lossy，不是 lossy-with-warning — 降版使用者根本不會知道有訊息被吃掉。如果這條 invariant 在未來放寬（e.g., 改成 throw on unknown），請同時調 `loadAgentMessages` 加 schema-version 紀錄。
