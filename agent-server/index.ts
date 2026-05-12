@@ -45,6 +45,43 @@ function send(msg: OutgoingMessage) {
 const backends = new Map<Provider, ServerBackend>();
 let activeBackend: ServerBackend | null = null;
 
+/**
+ * Per-session pref cache. Orchestrator drives "did renderer change pref X
+ * since last send?" diff detection — calls backend.setModel/setEffort/
+ * setPermissionMode only on change. Keyed by sessionId so multi-tab
+ * scenarios don't cross-contaminate each other's diff state (which the
+ * old per-provider-singleton closure cache in Copilot did suffer from).
+ */
+const lastAppliedPrefs = new Map<string, { model?: string; effort?: string; permissionMode?: string }>();
+
+async function applyPrefDiff(
+  backend: ServerBackend,
+  sessionKey: string,
+  incoming: { model?: string; effort?: string; permissionMode?: string },
+): Promise<void> {
+  const last = lastAppliedPrefs.get(sessionKey) ?? {};
+  const next = { ...last };
+  if (incoming.model !== undefined && incoming.model !== last.model) {
+    try { await backend.setModel?.(incoming.model); } catch (err: any) {
+      send({ type: 'error', error: `Failed to switch model to "${incoming.model}": ${err?.message ?? err}` });
+    }
+    next.model = incoming.model;
+  }
+  if (incoming.effort !== undefined && incoming.effort !== last.effort) {
+    try { await backend.setEffort?.(incoming.effort); } catch (err: any) {
+      send({ type: 'error', error: `Failed to set effort "${incoming.effort}": ${err?.message ?? err}` });
+    }
+    next.effort = incoming.effort;
+  }
+  if (incoming.permissionMode !== undefined && incoming.permissionMode !== last.permissionMode) {
+    try { await backend.setPermissionMode?.(incoming.permissionMode); } catch (err: any) {
+      send({ type: 'error', error: `Failed to set permission mode "${incoming.permissionMode}": ${err?.message ?? err}` });
+    }
+    next.permissionMode = incoming.permissionMode;
+  }
+  lastAppliedPrefs.set(sessionKey, next);
+}
+
 function getBackend(provider: Provider): ServerBackend {
   let b = backends.get(provider);
   if (b) return b;
@@ -78,6 +115,17 @@ async function handleSend(msg: IncomingMessage) {
   // Hydrate persisted context once per turn — providers read fields they care
   // about (e.g. `lastSdkSessionId`) without touching disk themselves.
   const restoreContext = loadRestoreContextFor(provider, msg.sessionId);
+
+  // Pref diff: renderer-authoritative model/effort/permissionMode arrive in
+  // every send payload. Orchestrator compares against last-applied for this
+  // session and calls provider.setX? only on change. Provider's own setX
+  // implementations are imperative ("apply this now") — diff is here, not
+  // there. Per-sessionId so multi-tab doesn't cross-contaminate.
+  await applyPrefDiff(backend, msg.sessionId ?? '', {
+    model: msg.model,
+    effort: msg.effort,
+    permissionMode: msg.permissionMode,
+  });
 
   const input: QueryInput = {
     prompt: msg.prompt,

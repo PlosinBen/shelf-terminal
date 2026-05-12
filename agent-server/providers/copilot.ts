@@ -1032,40 +1032,11 @@ export function createCopilotBackend(): ServerBackend {
       if (!state.cliSessionId && input.restoreContext?.lastSdkSessionId) {
         state.cliSessionId = input.restoreContext.lastSdkSessionId;
       }
-      const modelChanged = !!(input.model && input.model !== currentModel);
-      if (modelChanged) {
-        currentModel = input.model!;
-        // Reset effort to new model's default if previous effort isn't supported.
-        const supported = effortsFor(currentModel);
-        if (currentEffort && !supported.includes(currentEffort)) {
-          currentEffort = modelMeta(currentModel)?.defaultReasoningEffort;
-        } else if (!currentEffort) {
-          currentEffort = modelMeta(currentModel)?.defaultReasoningEffort;
-        }
-      }
-      if (input.effort && input.effort !== currentEffort) {
-        currentEffort = input.effort;
-      }
-      const modeChanged = !!(input.permissionMode && input.permissionMode !== currentPermissionMode);
-      if (modeChanged) currentPermissionMode = input.permissionMode!;
-      if (state.session && (modelChanged || input.effort)) {
-        try {
-          await state.session.setModel(currentModel, currentEffort ? { reasoningEffort: currentEffort as any } : undefined);
-        } catch (err: any) {
-          send({ type: 'error', error: `Failed to switch model: ${err.message}` });
-        }
-      }
-      if (state.session && modeChanged) {
-        const sdkMode = MODE_TO_SDK[currentPermissionMode];
-        if (sdkMode) {
-          try {
-            await (state.session as any).rpc.mode.set({ mode: sdkMode });
-          } catch (err: any) {
-            send({ type: 'error', error: `Failed to switch mode: ${err.message}` });
-          }
-        }
-      }
-      if (modelChanged) send({ type: 'capabilities', ...buildCapabilities() });
+      // Pref sync (model / effort / permissionMode) is handled by the
+      // orchestrator's applyPrefDiff before query() runs — see
+      // agent-server/index.ts. By this point closure currentModel /
+      // currentEffort / currentPermissionMode already match input, so we
+      // don't need to do the diff here anymore.
       if (input.sessionId) currentSessionId = input.sessionId;
       // Capture cwd before ensureSession so workingDirectory lands in createSession config.
       // If cwd changes mid-session (e.g. user switches project), we don't recreate the
@@ -1136,6 +1107,45 @@ export function createCopilotBackend(): ServerBackend {
       if (resolve) {
         pendingPickers.delete(id);
         resolve(value);
+      }
+    },
+
+    /**
+     * Apply model to the current Copilot session. Imperative — orchestrator
+     * decides when to call (only on diff). Effort comes along because
+     * `session.setModel` takes it as the second-arg config; effort fallback
+     * to model's default if currently unsupported.
+     */
+    async setModel(model: string) {
+      const supported = effortsFor(model);
+      if (currentEffort && !supported.includes(currentEffort)) {
+        currentEffort = modelMeta(model)?.defaultReasoningEffort;
+      } else if (!currentEffort) {
+        currentEffort = modelMeta(model)?.defaultReasoningEffort;
+      }
+      currentModel = model;
+      if (state.session) {
+        await state.session.setModel(model, currentEffort ? { reasoningEffort: currentEffort as any } : undefined);
+      }
+      // Capabilities re-broadcast for renderer status bar — capability list
+      // itself didn't change, but currentModel did.
+      currentSend?.({ type: 'capabilities', ...buildCapabilities() });
+    },
+
+    async setEffort(effort: string) {
+      currentEffort = effort;
+      if (state.session) {
+        await state.session.setModel(currentModel, { reasoningEffort: effort as any });
+      }
+    },
+
+    async setPermissionMode(mode: string) {
+      currentPermissionMode = mode;
+      if (state.session) {
+        const sdkMode = MODE_TO_SDK[mode];
+        if (sdkMode) {
+          await (state.session as any).rpc.mode.set({ mode: sdkMode });
+        }
       }
     },
   };
