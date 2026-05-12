@@ -11,14 +11,20 @@ import { parseSlashPrefix } from '@shared/slash-prefix';
  * entirely; nothing goes to agent-server (the next AGENT_SEND carries the new
  * pref value and the orchestrator's diff detector fires setX on the provider).
  *
- * Anything not in this set is treated as an agent command and forwarded as
- * normal text through agent.send — the provider parses and dispatches.
+ * Map: user-facing slash name → internal pref key in projectConfig.agentPrefs.
+ * The two diverge for `permission` because `/permissionMode` would be a
+ * camelCase eyesore in a slash menu (everything else is single-word lowercase
+ * to match `/clear`, `/compact`, etc.); the pref key stays `permissionMode`
+ * to match its existing AgentPrefs / settings shape.
  *
- * Currently only `/model` is implemented. `/effort` and `/permissionMode` are
- * documented as future symmetric extensions (see slash-command-redesign.md);
- * if added, just extend this set + handleConfigEdit + handleLocalSlash dispatch.
+ * Anything not in this map falls through to agent.send — provider parses
+ * and dispatches.
  */
-const RENDERER_LOCAL_SLASHES = new Set<string>(['model']);
+const RENDERER_LOCAL_SLASHES: Record<string, 'model' | 'effort' | 'permissionMode'> = {
+  model: 'model',
+  effort: 'effort',
+  permission: 'permissionMode',
+};
 import { renderMarkdown } from '../utils/markdown';
 import { useAttachmentPaste } from '../hooks/useAttachmentPaste';
 import { useStore, updateProjectConfig, setChatStage } from '../store';
@@ -619,14 +625,14 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
     // /model (no arg) opens the renderer-local picker.
     // Anything else falls through to agent.send — provider parses + dispatches.
     const slash = parseSlashPrefix(text);
-    if (slash && RENDERER_LOCAL_SLASHES.has(slash.cmd)) {
+    const localKey = slash ? RENDERER_LOCAL_SLASHES[slash.cmd] : undefined;
+    if (slash && localKey) {
       setInput('');
       setShowSlashMenu(false);
-      const key = slash.cmd as 'model' | 'effort' | 'permissionMode';
       if (slash.args) {
-        handleConfigEdit(key, slash.args);
+        handleConfigEdit(localKey, slash.args);
       } else {
-        setLocalPicker({ key });
+        setLocalPicker({ key: localKey });
       }
       return;
     }
@@ -751,11 +757,11 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
   // canonical source for those names), so a simple concat + dedup is fine.
   const allCommands = useMemo(() => {
     const providerCmds = capabilities?.slashCommands ?? [];
-    const localCmds = Array.from(RENDERER_LOCAL_SLASHES).map((name) => {
+    const localCmds = Object.keys(RENDERER_LOCAL_SLASHES).map((name) => {
       const description =
         name === 'model' ? 'Switch agent model' :
         name === 'effort' ? 'Set reasoning effort' :
-        name === 'permissionMode' ? 'Set permission mode' :
+        name === 'permission' ? 'Set permission mode' :
         '';
       return { name, description };
     });
