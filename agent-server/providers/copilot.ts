@@ -6,7 +6,7 @@ import { promisify } from 'util';
 import { randomUUID } from 'node:crypto';
 import type { QueryInput, SendFn, ServerBackend, ProviderCapabilities, StatusSegment } from './types';
 import { severityFromUtilization, formatResetCountdown, pickPermissionModes, pickEffortLevels } from './types';
-import { parseSlashPrefix } from './slash-prefix';
+import { parseSlashPrefix } from '../../src/shared/slash-prefix';
 import type { ProviderModel } from '../../src/shared/types';
 
 const COPILOT_QUOTA_LABELS: Record<string, string> = {

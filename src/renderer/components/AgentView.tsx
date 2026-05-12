@@ -2,6 +2,23 @@ import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import type { AgentProvider, AgentPrefs, AuthMethod, Connection } from '@shared/types';
 import { AgentMessage, type AgentMsg } from './AgentMessage';
 import { SelectionPanel } from './SelectionPanel';
+import { parseSlashPrefix } from '@shared/slash-prefix';
+
+/**
+ * Slash commands that mutate renderer-owned project config (model / effort /
+ * permissionMode). These are "config edits" via slash syntax — same effect as
+ * cycling via the status bar, just keyboard-driven. Renderer intercepts them
+ * entirely; nothing goes to agent-server (the next AGENT_SEND carries the new
+ * pref value and the orchestrator's diff detector fires setX on the provider).
+ *
+ * Anything not in this set is treated as an agent command and forwarded as
+ * normal text through agent.send — the provider parses and dispatches.
+ *
+ * Currently only `/model` is implemented. `/effort` and `/permissionMode` are
+ * documented as future symmetric extensions (see slash-command-redesign.md);
+ * if added, just extend this set + handleConfigEdit + handleLocalSlash dispatch.
+ */
+const RENDERER_LOCAL_SLASHES = new Set<string>(['model']);
 import { renderMarkdown } from '../utils/markdown';
 import { useAttachmentPaste } from '../hooks/useAttachmentPaste';
 import { useStore, updateProjectConfig, setChatStage } from '../store';
@@ -187,6 +204,12 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
     searchable?: boolean;
     prefKey?: 'model' | 'effort' | 'permissionMode';
   } | null>(null);
+  // Renderer-local picker triggered by `/model` (and future /effort,
+  // /permissionMode). Distinct from `pendingPicker` (provider-emitted via
+  // picker_request) because the resolve handling is local — no IPC roundtrip.
+  // Options/title derived from `capabilities` + current pref value at render
+  // time, so closing & reopening always reflects latest state.
+  const [localPicker, setLocalPicker] = useState<{ key: 'model' | 'effort' | 'permissionMode' } | null>(null);
   const [queuedMessages, setQueuedMessages] = useState<QueuedMessage[]>([]);
   const [authRequired, setAuthRequired] = useState<{ provider: string } | null>(null);
   const [authBusy, setAuthBusy] = useState(false);
@@ -587,11 +610,31 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
     const text = input.trim();
     if ((!text && pendingFiles.length === 0 && pendingImages.length === 0)) return;
 
-    // No slash special-casing — slash is just a string the provider interprets.
-    // User echo, queue-during-streaming, attachments, and IPC all flow through
-    // the same single path below. Slashes appear in the conversation as user
-    // messages (same as any text), and provider emits slash_response /
-    // picker_request events via the normal stream pipeline.
+    // Renderer-local slash interception. /model (and future /effort,
+    // /permissionMode) mutate project config — semantically equivalent to a
+    // status bar cycle, just keyboard-driven. Zero IPC: backend learns of
+    // the change on the next normal send via the AGENT_SEND payload.
+    //
+    // /model <id> applies directly via handleConfigEdit.
+    // /model (no arg) opens the renderer-local picker.
+    // Anything else falls through to agent.send — provider parses + dispatches.
+    const slash = parseSlashPrefix(text);
+    if (slash && RENDERER_LOCAL_SLASHES.has(slash.cmd)) {
+      setInput('');
+      setShowSlashMenu(false);
+      const key = slash.cmd as 'model' | 'effort' | 'permissionMode';
+      if (slash.args) {
+        handleConfigEdit(key, slash.args);
+      } else {
+        setLocalPicker({ key });
+      }
+      return;
+    }
+
+    // No further slash special-casing — agent-bound slashes (/help, /context,
+    // /compact, /clear) flow through agent.send as normal text. Provider
+    // parses prefix and dispatches internally; output arrives via the normal
+    // slash_response message stream.
     const files = pendingFiles;
     const images = pendingImages;
     setInput('');
@@ -642,6 +685,30 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
   // (pendingPermission / pendingPicker) and the callbacks that act on the
   // selected value.
 
+  /**
+   * Apply a config edit (model / effort / permissionMode change). Used by
+   * status bar cycle, `/model X` slash, and renderer-local picker resolve.
+   * Renderer is the source of truth for prefs — savedPrefs in projectConfig
+   * + local status state. Backend learns on the next AGENT_SEND payload
+   * (orchestrator diffs and calls provider.setX).
+   *
+   * No validation: SDK is the final arbiter of model legitimacy (see
+   * .agent/features/slash-command-redesign.md "Follow-up" section). Typos
+   * surface as `error` events when the next send fails to apply.
+   */
+  const handleConfigEdit = useCallback((key: 'model' | 'effort' | 'permissionMode', value: string) => {
+    if (key === 'model') {
+      setStatusModel(value);
+      persistPref({ model: value });
+    } else if (key === 'effort') {
+      setCurrentEffort(value);
+      persistPref({ effort: value });
+    } else if (key === 'permissionMode') {
+      setPermissionMode(value);
+      persistPref({ permissionMode: value });
+    }
+  }, [persistPref]);
+
   // Status bar cycling. Renderer-only — persist to projectConfig and update
   // local status state. Backend learns the new pref on the next AGENT_SEND
   // payload (orchestrator diffs and calls provider.setX). No setPrefs IPC.
@@ -649,25 +716,22 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
     if (!capabilities || capabilities.models.length === 0) return;
     const idx = capabilities.models.findIndex((m) => m.value === statusModel);
     const next = capabilities.models[(idx + 1) % capabilities.models.length];
-    setStatusModel(next.value);
-    persistPref({ model: next.value });
-  }, [capabilities, statusModel, persistPref]);
+    handleConfigEdit('model', next.value);
+  }, [capabilities, statusModel, handleConfigEdit]);
 
   const handleCycleMode = useCallback(() => {
     if (!capabilities || capabilities.permissionModes.length === 0) return;
     const idx = capabilities.permissionModes.findIndex((m) => m.value === permissionMode);
     const next = capabilities.permissionModes[(idx + 1) % capabilities.permissionModes.length];
-    setPermissionMode(next.value);
-    persistPref({ permissionMode: next.value });
-  }, [capabilities, permissionMode, persistPref]);
+    handleConfigEdit('permissionMode', next.value);
+  }, [capabilities, permissionMode, handleConfigEdit]);
 
   const handleCycleEffort = useCallback(() => {
     if (!capabilities || capabilities.effortLevels.length === 0) return;
     const idx = capabilities.effortLevels.findIndex((e) => e.value === currentEffort);
     const next = capabilities.effortLevels[(idx + 1) % capabilities.effortLevels.length];
-    setCurrentEffort(next.value);
-    persistPref({ effort: next.value });
-  }, [capabilities, currentEffort, persistPref]);
+    handleConfigEdit('effort', next.value);
+  }, [capabilities, currentEffort, handleConfigEdit]);
 
   const handleClearHistory = useCallback(async () => {
     // Lightweight cleanup: wipe what the user sees (in-memory + IDB rows
@@ -680,11 +744,31 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
     setMessages([]);
   }, [sessionId]);
 
-  // Slash menu
+  // Slash menu: union of provider-declared agent slashes and renderer-local
+  // config-edit slashes. Display layer only — routing in handleSend decides
+  // who actually handles each. Names are short-circuit unique (provider
+  // shouldn't claim /model after step E cleanup; renderer-local list is the
+  // canonical source for those names), so a simple concat + dedup is fine.
   const filteredCommands = useMemo(() => {
-    return capabilities?.slashCommands.filter(
+    const providerCmds = capabilities?.slashCommands ?? [];
+    const localCmds = Array.from(RENDERER_LOCAL_SLASHES).map((name) => {
+      const description =
+        name === 'model' ? 'Switch agent model' :
+        name === 'effort' ? 'Set reasoning effort' :
+        name === 'permissionMode' ? 'Set permission mode' :
+        '';
+      return { name, description };
+    });
+    const seen = new Set<string>();
+    const merged: { name: string; description: string }[] = [];
+    for (const cmd of [...providerCmds, ...localCmds]) {
+      if (seen.has(cmd.name)) continue;
+      seen.add(cmd.name);
+      merged.push(cmd);
+    }
+    return merged.filter(
       (cmd) => !slashFilter || cmd.name.toLowerCase().startsWith(slashFilter.toLowerCase()),
-    ) ?? [];
+    );
   }, [capabilities, slashFilter]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -922,24 +1006,13 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
           }
           cancellable
           onSelect={(value) => {
-            // If the picker carried a prefKey hint, persist + reflect in
-            // status bar locally. Renderer is the source of truth for
-            // prefs; backend learns on next AGENT_SEND payload (no
-            // setPrefs IPC). NOTE: prefKey on picker_request is going
-            // away in step D — /model picker becomes renderer-local
-            // instead of provider-emitted. This branch survives only for
-            // hypothetical future provider-driven pref pickers.
+            // prefKey on picker_request is vestigial — /model picker is now
+            // renderer-local (see localPicker render branch below). This
+            // branch survives only for hypothetical future provider-driven
+            // pref pickers; for now no provider emits picker_request with
+            // a prefKey set.
             const key = pendingPicker.prefKey;
-            if (key === 'model') {
-              setStatusModel(value);
-              persistPref({ model: value });
-            } else if (key === 'effort') {
-              setCurrentEffort(value);
-              persistPref({ effort: value });
-            } else if (key === 'permissionMode') {
-              setPermissionMode(value);
-              persistPref({ permissionMode: value });
-            }
+            if (key) handleConfigEdit(key, value);
             window.shelfApi.agent.resolvePicker(tabId, pendingPicker.id, value);
             setPendingPicker(null);
           }}
@@ -948,7 +1021,32 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
             setPendingPicker(null);
           }}
         />
-      ) : null}
+      ) : localPicker ? (() => {
+        // Renderer-local picker for config edits (/model, future /effort
+        // /permissionMode). Options + current value derived from
+        // capabilities at render time — no provider roundtrip.
+        const key = localPicker.key;
+        const options = key === 'model'
+          ? (capabilities?.models ?? []).map((m) => ({ value: m.value, label: m.displayName }))
+          : key === 'effort'
+            ? (capabilities?.effortLevels ?? []).map((e) => ({ value: e.value, label: e.displayName }))
+            : (capabilities?.permissionModes ?? []).map((p) => ({ value: p.value, label: p.displayName }));
+        const current = key === 'model' ? statusModel : key === 'effort' ? currentEffort : permissionMode;
+        const title = key === 'model' ? 'Select model' : key === 'effort' ? 'Select effort' : 'Select permission mode';
+        return (
+          <SelectionPanel
+            title={title}
+            options={options}
+            initialSelected={Math.max(0, options.findIndex((o) => o.value === current))}
+            cancellable
+            onSelect={(value) => {
+              handleConfigEdit(key, value);
+              setLocalPicker(null);
+            }}
+            onCancel={() => setLocalPicker(null)}
+          />
+        );
+      })() : null}
 
       {currentPlan.trim() && (
         <div className="agent-plan-panel">
