@@ -6,6 +6,7 @@ import { promisify } from 'util';
 import { randomUUID } from 'node:crypto';
 import type { QueryInput, SendFn, ServerBackend, ProviderCapabilities, SlashResult, StatusSegment } from './types';
 import { severityFromUtilization, formatResetCountdown, pickPermissionModes, pickEffortLevels } from './types';
+import { parseSlashPrefix } from './slash-prefix';
 import type { ProviderModel } from '../../src/shared/types';
 
 const COPILOT_QUOTA_LABELS: Record<string, string> = {
@@ -351,6 +352,26 @@ export function createCopilotBackend(): ServerBackend {
     messagesLength: number;
   } | null = null;
   const state: CopilotState = { client: null, session: null, cliSessionId: null, models: [] };
+
+  // Stoppable flag — provider-internal stop semantics. Set to false during
+  // critical sections (e.g. compact in flight, /clear's dispose+rebuild
+  // window) so stop() silently no-ops. Not surfaced to renderer — Cursor /
+  // Claude Code / Aider all behave the same way (button always present, some
+  // operations just can't be interrupted). If we ever want explicit
+  // "cannot stop" UI feedback, add a `stoppable` field on status events.
+  let stoppable = true;
+
+  /**
+   * Marks a code block as non-cancellable. Sets `stoppable = false` for the
+   * duration so concurrent stop() calls are silently ignored, restored in
+   * the finally regardless of throw. Use sparingly — only for sections where
+   * an interrupt would leave session state half-modified (compaction in
+   * flight, session disconnect+rebuild, etc.).
+   */
+  async function critical<T>(fn: () => Promise<T>): Promise<T> {
+    stoppable = false;
+    try { return await fn(); } finally { stoppable = true; }
+  }
 
   function modelMeta(id: string): CachedModel | undefined {
     return state.models.find((m) => m.id === id);
@@ -760,6 +781,127 @@ export function createCopilotBackend(): ServerBackend {
     return state.models;
   }
 
+  /**
+   * Internal slash dispatcher. Two entry points feed it:
+   *
+   *   1. `query()` — when the prompt parses as `/cmd args` (the new unified
+   *      send path; activated by step 10's renderer change).
+   *   2. `handleSlashCommand()` — legacy slash_command IPC (still used by
+   *      renderer for /model, will be removed entirely in step 10/11).
+   *
+   * Slash output is emitted as `slash_response` messages (pending → terminal
+   * status, same msgId for upsert). For slashes that touch session state
+   * (compact, clear), the critical-section is wrapped in `critical()` so
+   * concurrent stop() calls don't leave the session half-modified.
+   *
+   * `/model` is intentionally NOT handled here — it returns SlashResult
+   * variants the renderer's legacy switch consumes. Migration to the picker
+   * channel lands in step 9.
+   */
+  async function dispatchSlash(cmd: string, args: string, send: SendFn): Promise<void> {
+    const emitSlash = (msgId: string, status: 'pending' | 'success' | 'error', content: string) => {
+      send({ type: 'message', msgId, msgType: 'slash_response', slashCmd: cmd, status, content });
+    };
+
+    switch (cmd) {
+      case 'help': {
+        const msgId = mintMsgId();
+        const lines = SLASH_COMMANDS.map((c) => `- /${c.name} — ${c.description}`).join('\n');
+        emitSlash(msgId, 'success', `Available commands:\n${lines}`);
+        return;
+      }
+
+      case 'context': {
+        const msgId = mintMsgId();
+        emitSlash(msgId, 'pending', 'Reading context...');
+        if (!latestUsage) {
+          emitSlash(msgId, 'error', 'No context info yet. Send a message first.');
+          return;
+        }
+        const u = latestUsage;
+        const pct = u.tokenLimit > 0 ? Math.round((u.currentTokens / u.tokenLimit) * 100) : 0;
+        const fmt = (n?: number) => n != null ? n.toLocaleString() : '-';
+        const lines = [
+          `Context: ${fmt(u.currentTokens)} / ${fmt(u.tokenLimit)} tokens (${pct}%)`,
+          `Messages: ${u.messagesLength}`,
+          `  - Conversation: ${fmt(u.conversationTokens)}`,
+          `  - System: ${fmt(u.systemTokens)}`,
+          `  - Tools: ${fmt(u.toolDefinitionsTokens)}`,
+        ];
+        emitSlash(msgId, 'success', lines.join('\n'));
+        return;
+      }
+
+      case 'compact': {
+        const msgId = mintMsgId();
+        emitSlash(msgId, 'pending', 'Compacting...');
+        if (!state.session) {
+          emitSlash(msgId, 'error', 'No active session to compact.');
+          return;
+        }
+        try {
+          await critical(async () => {
+            const result = await (state.session as any).rpc.history.compact();
+            if (!result?.success) {
+              emitSlash(msgId, 'error', 'Compaction failed');
+              return;
+            }
+            const removed = result.tokensRemoved?.toLocaleString() ?? '?';
+            const msgs = result.messagesRemoved ?? 0;
+            emitSlash(msgId, 'success', `Compacted: freed ${removed} tokens across ${msgs} messages.`);
+          });
+        } catch (err: any) {
+          emitSlash(msgId, 'error', `Compact failed: ${err?.message ?? err}`);
+        }
+        return;
+      }
+
+      case 'clear': {
+        // Eager rebuild semantics: dispose old session, immediately create a
+        // fresh one bound to the *current* cwd. Without the new-session step,
+        // Copilot CLI's server-side session state (which includes
+        // workingDirectory) would be re-restored on the next query via any
+        // persisted lastSdkSessionId. ensureSession() also emits
+        // context_patch with the new sessionId, so persisted state stays
+        // consistent.
+        //
+        // First-/clear-before-any-query is treated as a successful no-op so
+        // tests / fresh environments don't trip on missing auth or CLI binary.
+        const msgId = mintMsgId();
+        emitSlash(msgId, 'pending', 'Clearing context...');
+        try {
+          await critical(async () => {
+            const hadSession = !!state.session || !!state.cliSessionId;
+            try { await state.session?.disconnect(); } catch { /* ignore */ }
+            state.session = null;
+            state.cliSessionId = null;
+            latestUsage = null;
+            inflightToolUses.clear();
+            send({ type: 'message', msgId: mintMsgId(), msgType: 'plan', content: '' });
+            if (hadSession) {
+              try {
+                await ensureSession();
+              } catch (err: any) {
+                emitSlash(msgId, 'error', `Cleared, but failed to start new session: ${err?.message ?? err}`);
+                return;
+              }
+            }
+            emitSlash(msgId, 'success', 'Context cleared');
+          });
+        } catch (err: any) {
+          emitSlash(msgId, 'error', `Clear failed: ${err?.message ?? err}`);
+        }
+        return;
+      }
+
+      default: {
+        const msgId = mintMsgId();
+        emitSlash(msgId, 'error', `Unknown command: /${cmd}`);
+        return;
+      }
+    }
+  }
+
   return {
     async gatherCapabilities(_cwd: string, sessionId?: string, _customModels?: ProviderModel[]): Promise<ProviderCapabilities> {
       // Copilot SDK validates model names against GitHub's model API; user-provided
@@ -776,6 +918,29 @@ export function createCopilotBackend(): ServerBackend {
       // otherwise let chunks from this turn attach to a stale msgId.
       currentTextMsgId = null;
       currentThinkingMsgId = null;
+
+      // Slash detection. Bypass normal SDK setup — most slashes are
+      // pre-SDK ops (help/context), session-rebuilding ops (clear), or
+      // session-aware RPC calls (compact). None benefit from the
+      // model/effort/mode sync that precedes a real SDK send. /model
+      // currently still routes via the legacy slash_command IPC →
+      // handleSlashCommand path; this branch is dormant for /model until
+      // step 9 migrates it to the picker channel. Dead code today for
+      // non-/model slashes too — renderer routes them all via
+      // slash_command IPC → handleSlashCommand → dispatchSlash. Step 10
+      // unifies renderer to send via this branch.
+      const slash = parseSlashPrefix(input.prompt);
+      if (slash && slash.cmd !== 'model') {
+        send({ type: 'status', state: 'streaming', model: currentModel });
+        try {
+          await dispatchSlash(slash.cmd, slash.args, send);
+        } finally {
+          // Slash idle deliberately omits cost / tokens / numTurns /
+          // contextUsage — renderer keeps last real turn's metric values.
+          send({ type: 'status', state: 'idle' });
+        }
+        return;
+      }
       // Hydrate cliSessionId from orchestrator-provided context. Only the
       // first turn after a process restart needs this — once we've created
       // or resumed a session in-memory, we don't clobber.
@@ -844,6 +1009,10 @@ export function createCopilotBackend(): ServerBackend {
     },
 
     async stop() {
+      // Silently ignore while provider is in a non-cancellable critical
+      // section (compact in flight, /clear's dispose+rebuild window).
+      // Interrupting mid-way would leave session state half-modified.
+      if (!stoppable) return;
       for (const resolve of pendingPermissions.values()) {
         resolve({ behavior: 'deny', message: 'Stopped by user' });
       }
@@ -878,135 +1047,35 @@ export function createCopilotBackend(): ServerBackend {
     },
 
     async handleSlashCommand(cmd: string, args: string, send: SendFn): Promise<SlashResult> {
-      // Helper to keep emit boilerplate manageable. Migrated commands emit a
-      // `pending` slash_response on entry and a terminal `success`/`error` on
-      // exit, sharing one msgId so the renderer upserts the pending entry.
-      // Provider returns `{ type: 'handled' }` after the terminal emit — the
-      // orchestrator skips synthesizing any further UI from the SlashResult.
-      const emitSlash = (msgId: string, slashCmd: string, status: 'pending' | 'success' | 'error', content: string) => {
-        send({ type: 'message', msgId, msgType: 'slash_response', slashCmd, status, content });
-      };
-
-      switch (cmd) {
-        case 'model': {
-          const arg = args.trim();
-          const models = await listModelsCached();
-          const list = models.map((m) => ({ value: m.id, displayName: m.name ?? m.id }));
-          if (!arg) return { type: 'show-model-picker', models: list, current: currentModel };
-          const match = list.find((m) => m.value === arg);
-          if (!match) return { type: 'error', message: `Unknown model: ${arg}` };
-          currentModel = arg;
-          const supported = effortsFor(currentModel);
-          if (!currentEffort || !supported.includes(currentEffort)) {
-            currentEffort = modelMeta(currentModel)?.defaultReasoningEffort;
-          }
-          if (state.session) {
-            try {
-              await state.session.setModel(currentModel, currentEffort ? { reasoningEffort: currentEffort as any } : undefined);
-            } catch { /* SDK will retry on next send */ }
-          }
-          currentSend?.({ type: 'capabilities', ...buildCapabilities() });
-          return { type: 'switch-model', model: arg };
+      // /model still uses the legacy RPC-return path because the renderer
+      // consumes show-model-picker / switch-model SlashResults to drive its
+      // model picker overlay. Step 9 migrates this to the generic picker
+      // channel; until then, /model bypasses dispatchSlash.
+      if (cmd === 'model') {
+        const arg = args.trim();
+        const models = await listModelsCached();
+        const list = models.map((m) => ({ value: m.id, displayName: m.name ?? m.id }));
+        if (!arg) return { type: 'show-model-picker', models: list, current: currentModel };
+        const match = list.find((m) => m.value === arg);
+        if (!match) return { type: 'error', message: `Unknown model: ${arg}` };
+        currentModel = arg;
+        const supported = effortsFor(currentModel);
+        if (!currentEffort || !supported.includes(currentEffort)) {
+          currentEffort = modelMeta(currentModel)?.defaultReasoningEffort;
         }
-
-        case 'context': {
-          const msgId = mintMsgId();
-          // `/context` is effectively synchronous — no work between pending and
-          // result — but we still emit pending first to keep the UI shape
-          // uniform across all slashes (and for parity with future async usage).
-          emitSlash(msgId, cmd, 'pending', 'Reading context...');
-          if (!latestUsage) {
-            emitSlash(msgId, cmd, 'error', 'No context info yet. Send a message first.');
-            return { type: 'handled' };
-          }
-          const u = latestUsage;
-          const pct = u.tokenLimit > 0 ? Math.round((u.currentTokens / u.tokenLimit) * 100) : 0;
-          const fmt = (n?: number) => n != null ? n.toLocaleString() : '-';
-          const lines = [
-            `Context: ${fmt(u.currentTokens)} / ${fmt(u.tokenLimit)} tokens (${pct}%)`,
-            `Messages: ${u.messagesLength}`,
-            `  - Conversation: ${fmt(u.conversationTokens)}`,
-            `  - System: ${fmt(u.systemTokens)}`,
-            `  - Tools: ${fmt(u.toolDefinitionsTokens)}`,
-          ];
-          emitSlash(msgId, cmd, 'success', lines.join('\n'));
-          return { type: 'handled' };
-        }
-
-        case 'compact': {
-          const msgId = mintMsgId();
-          emitSlash(msgId, cmd, 'pending', 'Compacting...');
-          if (!state.session) {
-            emitSlash(msgId, cmd, 'error', 'No active session to compact.');
-            return { type: 'handled' };
-          }
+        if (state.session) {
           try {
-            const result = await (state.session as any).rpc.history.compact();
-            if (!result?.success) {
-              emitSlash(msgId, cmd, 'error', 'Compaction failed');
-              return { type: 'handled' };
-            }
-            const removed = result.tokensRemoved?.toLocaleString() ?? '?';
-            const msgs = result.messagesRemoved ?? 0;
-            emitSlash(msgId, cmd, 'success', `Compacted: freed ${removed} tokens across ${msgs} messages.`);
-            return { type: 'handled' };
-          } catch (err: any) {
-            emitSlash(msgId, cmd, 'error', `Compact failed: ${err?.message ?? err}`);
-            return { type: 'handled' };
-          }
+            await state.session.setModel(currentModel, currentEffort ? { reasoningEffort: currentEffort as any } : undefined);
+          } catch { /* SDK will retry on next send */ }
         }
-
-        case 'clear': {
-          // Eager rebuild semantics: dispose old session, immediately create
-          // a fresh one bound to the *current* cwd. Without the new-session
-          // build step, Copilot CLI's server-side session state (which
-          // includes workingDirectory) would be re-restored on the next
-          // query via any persisted lastSdkSessionId — defeating the point
-          // of /clear when the user switched project or hit a wedged
-          // session. `ensureSession()` also emits `context_patch` with the
-          // new sessionId, so persisted state stays consistent.
-          //
-          // We only attempt the rebuild when there *was* a session to clear.
-          // First-/clear-before-any-query (mostly tests, also degenerate UI
-          // flows) is treated as a successful no-op so we don't surprise
-          // unsuspecting environments with auth / CLI-binary requirements.
-          const msgId = mintMsgId();
-          emitSlash(msgId, cmd, 'pending', 'Clearing context...');
-          const hadSession = !!state.session || !!state.cliSessionId;
-          try { await state.session?.disconnect(); } catch { /* ignore */ }
-          state.session = null;
-          state.cliSessionId = null;
-          latestUsage = null;
-          inflightToolUses.clear();
-          send({ type: 'message', msgId: mintMsgId(), msgType: 'plan', content: '' });
-          if (hadSession) {
-            try {
-              await ensureSession();
-            } catch (err: any) {
-              emitSlash(msgId, cmd, 'error', `Cleared, but failed to start new session: ${err?.message ?? err}`);
-              // Still report `handled` — orchestrator's cmd-name-gated
-              // deleteContext still fires because the wipe semantically
-              // succeeded; only session re-init failed.
-              return { type: 'handled' };
-            }
-          }
-          emitSlash(msgId, cmd, 'success', 'Context cleared');
-          return { type: 'handled' };
-        }
-
-        case 'help': {
-          const msgId = mintMsgId();
-          const lines = SLASH_COMMANDS.map((c) => `- /${c.name} — ${c.description}`).join('\n');
-          emitSlash(msgId, cmd, 'success', `Available commands:\n${lines}`);
-          return { type: 'handled' };
-        }
-
-        default: {
-          const msgId = mintMsgId();
-          emitSlash(msgId, cmd, 'error', `Unknown command: /${cmd}`);
-          return { type: 'handled' };
-        }
+        currentSend?.({ type: 'capabilities', ...buildCapabilities() });
+        return { type: 'switch-model', model: arg };
       }
+
+      // All other slashes go through the unified dispatchSlash. Same code
+      // path that query() will hit once step 10 unifies renderer send.
+      await dispatchSlash(cmd, args, send);
+      return { type: 'handled' };
     },
   };
 }
