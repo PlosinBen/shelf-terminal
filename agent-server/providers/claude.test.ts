@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { mergeClaudeModels, rateLimitInfoToSegment, formatClaudeToolInput, extractToolResultText } from './claude';
+import { mergeClaudeModels, rateLimitInfoToSegment, formatClaudeToolInput, extractToolResultText, processMessage } from './claude';
+import type { OutgoingMessage } from './types';
 import type { ProviderModel } from '../../src/shared/types';
 
 describe('mergeClaudeModels', () => {
@@ -218,6 +219,86 @@ describe('extractToolResultText', () => {
   it('returns empty string for nullish input', () => {
     expect(extractToolResultText(null)).toBe('');
     expect(extractToolResultText(undefined)).toBe('');
+  });
+});
+
+describe('processMessage — text msgId stability across SDK quirks', () => {
+  // Helpers to drive processMessage like the real for-await loop does.
+  function makeSink() {
+    const sent: any[] = [];
+    const send = (m: OutgoingMessage) => { sent.push(m); };
+    return { send, sent };
+  }
+  const textBlocksAt = (msgs: any[]) => msgs.filter((m) => m.type === 'message' && m.msgType === 'text');
+
+  it('clears blockMsgIds on message_start, mints fresh ids per assistant message', () => {
+    // Two logical assistant messages, both starting with text at idx 0.
+    // After message_start fires for #2, the idx-0 msgId must NOT be reused
+    // from #1 — otherwise renderer upserts #2's text onto #1's entry.
+    const { send, sent } = makeSink();
+    const map = new Map<number, string>();
+
+    // Turn 1
+    processMessage({ type: 'stream_event', event: { type: 'message_start' } } as any, send, '/x', map);
+    processMessage({ type: 'stream_event', event: { type: 'content_block_start', index: 0, content_block: { type: 'text' } } } as any, send, '/x', map);
+    processMessage({ type: 'assistant', message: { content: [{ type: 'text', text: 'First message' }] } } as any, send, '/x', map);
+
+    // Turn 2 starts
+    processMessage({ type: 'stream_event', event: { type: 'message_start' } } as any, send, '/x', map);
+    processMessage({ type: 'stream_event', event: { type: 'content_block_start', index: 0, content_block: { type: 'text' } } } as any, send, '/x', map);
+    processMessage({ type: 'assistant', message: { content: [{ type: 'text', text: 'Second message' }] } } as any, send, '/x', map);
+
+    const texts = textBlocksAt(sent);
+    expect(texts).toHaveLength(2);
+    expect(texts[0].content).toBe('First message');
+    expect(texts[1].content).toBe('Second message');
+    expect(texts[0].msgId).not.toBe(texts[1].msgId);
+  });
+
+  it('content_block_start mid-turn re-fire is idempotent (no msgId churn)', () => {
+    // Regression: SDK was observed re-firing content_block_start for an
+    // already-active text block mid-turn. If we re-minted, the renderer
+    // entry already accumulating under M1 would orphan, and the next
+    // assistant emit (now M2) would create a duplicate timeline entry.
+    const { send, sent } = makeSink();
+    const map = new Map<number, string>();
+
+    processMessage({ type: 'stream_event', event: { type: 'message_start' } } as any, send, '/x', map);
+    processMessage({ type: 'stream_event', event: { type: 'content_block_start', index: 0, content_block: { type: 'text' } } } as any, send, '/x', map);
+    const firstId = map.get(0);
+    processMessage({ type: 'stream_event', event: { type: 'content_block_start', index: 0, content_block: { type: 'text' } } } as any, send, '/x', map);
+    expect(map.get(0)).toBe(firstId);
+
+    // Two partial assistants for the same logical text block share one id.
+    processMessage({ type: 'assistant', message: { content: [{ type: 'text', text: 'OK' }] } } as any, send, '/x', map);
+    processMessage({ type: 'assistant', message: { content: [{ type: 'text', text: 'OK done' }] } } as any, send, '/x', map);
+    const texts = textBlocksAt(sent);
+    expect(texts).toHaveLength(2);
+    expect(texts[0].msgId).toBe(texts[1].msgId);
+  });
+
+  it('late partial assistant arriving after tool_result does NOT duplicate text', () => {
+    // The bug: previously we cleared blockMsgIds on tool_result. If the
+    // SDK delivered one more late partial assistant for the just-finished
+    // turn (observed empirically), getOrMintBlockMsgId(0) would mint a
+    // fresh msgId and the renderer would see two timeline entries with
+    // identical content. With message_start as the only boundary, the
+    // late emit reuses the existing id → upsert collapses on the renderer.
+    const { send, sent } = makeSink();
+    const map = new Map<number, string>();
+
+    processMessage({ type: 'stream_event', event: { type: 'message_start' } } as any, send, '/x', map);
+    processMessage({ type: 'stream_event', event: { type: 'content_block_start', index: 0, content_block: { type: 'text' } } } as any, send, '/x', map);
+    processMessage({ type: 'assistant', message: { content: [{ type: 'text', text: 'Result text' }, { type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'ls' } }] } } as any, send, '/x', map);
+    // user tool_result arrives
+    processMessage({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't1', content: 'output' }] } } as any, send, '/x', map);
+    // late partial assistant for the SAME turn
+    processMessage({ type: 'assistant', message: { content: [{ type: 'text', text: 'Result text' }, { type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'ls' } }] } } as any, send, '/x', map);
+
+    const texts = textBlocksAt(sent);
+    expect(texts.length).toBe(2); // emitted twice
+    expect(texts[0].msgId).toBe(texts[1].msgId); // ...but with SAME id → renderer collapses
+    expect(texts[0].content).toBe(texts[1].content);
   });
 });
 

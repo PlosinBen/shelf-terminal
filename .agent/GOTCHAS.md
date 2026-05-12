@@ -627,14 +627,17 @@ if (event?.type === 'content_block_start' && ...) {
 2. 後續 assistant emit 用新 msgId
 3. 兩個 msgId 不同 → renderer upsert 路徑分岔 → 兩條訊息同內容
 
-**解法**: 把「new block」跟「reset block space」拆成兩個訊號：
+**解法**（最終版，原本的「clear-on-tool_result」是錯的，見下方修正）:
 
-- `content_block_start`：只在沒 entry 時 mint（idempotent）
-- `user` case 處理到 `tool_result` 時，明確 `blockMsgIds.clear()` — 這才是真的 turn boundary
+- `content_block_start`：只在沒 entry 時 mint（idempotent）— 保留
+- `message_start`（SDK 自己的訊號）：清空 `blockMsgIds`，這才是兩個 logical assistant message 之間的真正邊界
+
+**為什麼不是 `tool_result`**: 第一次修這 bug 時用 `tool_result` 當邊界 clear，後來發現 SDK 在 `includePartialMessages: true` 下，**有時會在 `tool_result` 之後再發一次該 turn 的 partial assistant**（觀察到，原因未追究）。tool_result clear 後 `blockMsgIds` 是空的，這個 late partial 進到 `assistant` case 會給同一段 text mint 新 msgId → 又重複了。`message_start` 是 SDK 對「下一個 assistant message 開始」的明確訊號，沒這個 race。
 
 **不要改**:
-- 不要把 mint 改回 always-overwrite — 那會復活這個 bug
-- 不要在 `content_block_stop` 或其他事件做 reset — 沒驗證過 SDK 行為是否一致
+- 不要把 `content_block_start` 改回 always-overwrite — 那會復活原本的 bug
+- 不要回到 `tool_result` 當邊界 — 那會踩 late-partial 的 race
+- 不要在 `content_block_stop` / `message_stop` 做 reset — late partial 可能在 stop 之後才到
 
 
 ## AgentView `projectIndex` drift on project reorder

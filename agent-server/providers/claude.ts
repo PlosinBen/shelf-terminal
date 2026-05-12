@@ -726,7 +726,7 @@ function emitClaudeToolResult(
 // set to the UI.  Key = bucket label (e.g. '5h', '7d').
 const rateLimitBuckets = new Map<string, StatusSegment>();
 
-function processMessage(msg: SDKMessage, send: SendFn, cwd: string, blockMsgIds: BlockMsgIdMap) {
+export function processMessage(msg: SDKMessage, send: SendFn, cwd: string, blockMsgIds: BlockMsgIdMap) {
   switch (msg.type) {
     case 'assistant': {
       msg.message.content.forEach((block, idx) => {
@@ -790,17 +790,24 @@ function processMessage(msg: SDKMessage, send: SendFn, cwd: string, blockMsgIds:
     }
     case 'stream_event': {
       const event: any = (msg as any).event;
-      // `content_block_start` is the new-block signal. Mint a fresh msgId
-      // ONLY when there's no existing entry for this index — the SDK can
-      // re-fire content_block_start mid-turn (observed for the same logical
-      // block); overwriting would orphan whatever the renderer has already
-      // accumulated under the old msgId and the next assistant emit would
-      // land on the new id, producing a duplicate "Claude said the same
-      // thing twice" entry.
-      //
-      // The tool-turn boundary (where SDK genuinely re-uses block index 0
-      // for a brand-new block) is now reset explicitly in the `user` case
-      // when a tool_result arrives — see clearBlockMsgIds logic below.
+      // `message_start` = boundary between two logical assistant messages.
+      // SDK reuses block indices (0, 1, ...) for each new assistant message,
+      // so we MUST clear the per-index → msgId map here. Prior approach
+      // (clear-on-tool_result) was too eager: with `includePartialMessages:
+      // true` the SDK can emit one more partial assistant for the
+      // already-finished turn after tool_result has been delivered (rare,
+      // observed empirically), which then re-mints msgIds for the same
+      // text content → duplicate "Claude said the same thing twice" entries
+      // in the timeline. message_start is the SDK's own authoritative
+      // boundary signal — no heuristic, no edge cases.
+      if (event?.type === 'message_start') {
+        blockMsgIds.clear();
+        break;
+      }
+      // `content_block_start` mints a fresh msgId for this index, but only
+      // if absent. The SDK can re-fire content_block_start mid-turn for the
+      // SAME logical block (observed quirk); overwriting would orphan the
+      // renderer entry already streaming under the old msgId.
       if (event?.type === 'content_block_start' && typeof event.index === 'number') {
         const bt = event.content_block?.type;
         if (bt === 'text' || bt === 'thinking') {
@@ -825,22 +832,17 @@ function processMessage(msg: SDKMessage, send: SendFn, cwd: string, blockMsgIds:
     }
     case 'user': {
       if (Array.isArray(msg.message.content)) {
-        let sawToolResult = false;
         for (const block of msg.message.content) {
           if ((block as any).type === 'tool_result') {
-            sawToolResult = true;
             const raw = (block as any).content;
             const content = extractToolResultText(raw);
             emitClaudeToolResult(send, (block as any).tool_use_id, content, (block as any).is_error === true);
           }
         }
-        // After a tool_result, the next assistant turn starts a fresh block
-        // index space (0, 1, ...). Clear blockMsgIds here so the next
-        // content_block_start mints new msgIds instead of reusing the
-        // previous turn's. This is the explicit tool-turn boundary that
-        // replaces the prior "always overwrite on content_block_start"
-        // approach (which mis-fired on spurious mid-turn re-starts).
-        if (sawToolResult) blockMsgIds.clear();
+        // No blockMsgIds clear here — the next assistant message's own
+        // `message_start` stream event handles that boundary. See the
+        // stream_event case for the rationale (eager clear-on-tool_result
+        // mis-fires on late partial assistant emits).
       }
       break;
     }
