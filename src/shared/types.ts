@@ -70,6 +70,24 @@ export type AgentMessage = WithMsgId & (
       content?: string;
       result?: { success: boolean; error?: string };
     }
+  | {
+      /**
+       * Provider-emitted response to a slash command. Renderer is opaque to
+       * `slashCmd` — only `status` drives styling (pending indicator / success
+       * / error). `content` is provider-preformatted text, renderer just shows
+       * it. Complex output (context tables, progress bars, etc.) belongs in
+       * dedicated message types — slash_response stays a narrow status carrier.
+       *
+       * Upsert by msgId: provider emits `pending` first, then `success`/`error`
+       * with the same msgId. Persistence revives orphan pending (no terminal
+       * status landed before close) as a synthetic `error` so reload doesn't
+       * show a fake-pending entry.
+       */
+      type: 'slash_response';
+      slashCmd: string;
+      status: 'pending' | 'success' | 'error';
+      content: string;
+    }
 );
 
 export type AgentMessageType = AgentMessage['type'];

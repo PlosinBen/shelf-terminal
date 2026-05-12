@@ -49,6 +49,9 @@ function reviveOrphanPending(msg: AgentMsg): AgentMsg {
   if (msg.type === 'file_edit' && !msg.result) {
     return { ...msg, result: { success: false, error: 'Session ended before this edit finished.' } };
   }
+  if (msg.type === 'slash_response' && msg.status === 'pending') {
+    return { ...msg, status: 'error', content: 'Session ended before this command finished.' };
+  }
   return msg;
 }
 

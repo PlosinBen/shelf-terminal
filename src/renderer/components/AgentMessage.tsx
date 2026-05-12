@@ -40,6 +40,12 @@ export type AgentMsg = {
       result?: { success: boolean; error?: string };
     }
   | {
+      type: 'slash_response';
+      slashCmd: string;
+      status: 'pending' | 'success' | 'error';
+      content: string;
+    }
+  | {
       type: 'user';
       content: string;
       images?: string[];
@@ -265,6 +271,21 @@ export function AgentMessage({ message, cwd }: Props) {
           <span>{message.content}</span>
         </div>
       );
+
+    case 'slash_response': {
+      // Renderer is opaque to slashCmd — only `status` drives visual style.
+      // `content` is provider-preformatted text. Pending reuses the streaming
+      // cursor pattern (same as text/thinking mid-stream) so visual language
+      // for "in-flight" stays consistent across message types.
+      const statusClass = `agent-msg-slash-${message.status}`;
+      return (
+        <div className={`agent-msg agent-msg-slash ${statusClass}`}>
+          <span className="agent-msg-slash-cmd">/{message.slashCmd}</span>
+          <span className="agent-msg-slash-content">{message.content}</span>
+          {message.status === 'pending' && <span className="agent-cursor" />}
+        </div>
+      );
+    }
 
     case 'error':
       return (

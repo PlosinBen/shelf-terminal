@@ -2736,6 +2736,36 @@ button {
   margin-right: 6px;
 }
 
+/* ── Slash response ── */
+
+.agent-msg-slash {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 0;
+  font-size: 12px;
+}
+
+.agent-msg-slash-cmd {
+  color: var(--accent);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.agent-msg-slash-content {
+  color: var(--text);
+  white-space: pre-wrap;
+}
+
+.agent-msg-slash-pending .agent-msg-slash-content {
+  color: var(--text-muted);
+}
+
+.agent-msg-slash-error .agent-msg-slash-content {
+  color: #e06c75;
+}
+
 /* ── Agent Cursor ── */
 
 .agent-cursor {
