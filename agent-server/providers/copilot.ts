@@ -790,12 +790,8 @@ export function createCopilotBackend(): ServerBackend {
   }
 
   /**
-   * Internal slash dispatcher. Two entry points feed it:
-   *
-   *   1. `query()` — when the prompt parses as `/cmd args` (the new unified
-   *      send path; activated by step 10's renderer change).
-   *   2. `handleSlashCommand()` — legacy slash_command IPC (still used by
-   *      renderer for /model, will be removed entirely in step 10/11).
+   * Internal slash dispatcher. Sole entry point is `query()` — when the
+   * prompt parses as `/cmd args`, query() routes here before any SDK call.
    *
    * Slash output is emitted as `slash_response` messages (pending → terminal
    * status, same msgId for upsert). For slashes that touch session state
@@ -879,9 +875,9 @@ export function createCopilotBackend(): ServerBackend {
         // front so even if ensureSession fails, next launch starts cold
         // (won't try to resume the just-disposed SDK session). On success,
         // ensureSession's own context_patch with the new id overwrites.
-        // Pre-step 11 the orchestrator deleted the context file directly on
-        // /clear via SlashResult; now that slash flows through send/query()
-        // we own that responsibility here in provider land.
+        // Context-file cleanup is the provider's responsibility — slash
+        // flows through send/query() and there's no separate orchestrator
+        // hook for /clear semantics.
         //
         // First-/clear-before-any-query is treated as a successful no-op so
         // tests / fresh environments don't trip on missing auth or CLI binary.
@@ -941,10 +937,9 @@ export function createCopilotBackend(): ServerBackend {
       // Slash detection. Bypass normal SDK setup — most slashes are
       // pre-SDK ops (help/context), session-rebuilding ops (clear), or
       // session-aware RPC calls (compact). None benefit from the
-      // model/effort/mode sync that precedes a real SDK send. Currently
-      // dead code — renderer routes all slashes via slash_command IPC →
-      // handleSlashCommand → dispatchSlash. Step 10 unifies renderer to
-      // send via this branch.
+      // model/effort/mode sync that precedes a real SDK send. Renderer-local
+      // slashes (/model /effort /permission) are intercepted before send IPC
+      // fires, so anything reaching here is a provider slash by elimination.
       const slash = parseSlashPrefix(input.prompt);
       if (slash) {
         send({ type: 'status', state: 'streaming', model: currentModel });

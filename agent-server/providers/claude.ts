@@ -311,9 +311,8 @@ export function createClaudeBackend(): ServerBackend {
       // bookkeeping the SDK can't reach:
       //   - `/clear`: reset our in-memory lastSessionId and emit
       //     context_patch so persistence doesn't resurrect the dead session
-      //     on next launch. Pre-step 11 this side-effect lived in
-      //     handleSlashCommand (a separate IPC path); now slash flows
-      //     through send → query(), so we own it here.
+      //     on next launch. Slash flows through send → query() so this
+      //     side-effect lives here, not in a separate IPC handler.
       //   - `/compact`: capture completion via SDKCompactBoundaryMessage +
       //     SDKStatusMessage and surface as a slash_response card with
       //     token deltas (otherwise SDK swallows the outcome silently).
