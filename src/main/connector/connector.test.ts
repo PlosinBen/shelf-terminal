@@ -1,6 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { getAvailableTypes } from './index';
 import { wrapPty } from './wrap-pty';
+
+// Mock node-pty so we can spy on spawn args without actually forking a shell.
+vi.mock('node-pty', () => ({
+  spawn: vi.fn(() => ({
+    onData: () => ({ dispose: () => {} }),
+    onExit: () => ({ dispose: () => {} }),
+    write: () => {},
+    resize: () => {},
+    kill: () => {},
+  })),
+}));
 import {
   makePrefix, parseUploadPrefix, sanitizeFilename, shellSingleQuote,
   assertSafeCwd, buildPaths, buildRemoteUploadCmd, normalizeCwd,
@@ -95,6 +106,30 @@ describe('wrapPty', () => {
     disposable.dispose();
     emitData('after');
     expect(received).toEqual(['before']);
+  });
+});
+
+// ── LocalUnixConnector shell-history isolation ──
+// Regression: every tab used to inherit the user's ~/.zsh_history (shared),
+// causing cross-tab + cross-project history pollution. We now override
+// HISTFILE per spawn so each shell process keeps its own in-memory history
+// without persisting / sharing.
+
+describe('LocalUnixConnector createShell', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('overrides HISTFILE to /dev/null in spawned shell env', async () => {
+    if (process.platform === 'win32') return; // unix-only connector
+    const pty = await import('node-pty');
+    const { LocalUnixConnector } = await import('./local/unix');
+    const connector = new LocalUnixConnector();
+    connector.createShell('/tmp');
+    expect(pty.spawn).toHaveBeenCalledTimes(1);
+    const spawnArgs = (pty.spawn as any).mock.calls[0];
+    const env = spawnArgs[2].env as Record<string, string>;
+    expect(env.HISTFILE).toBe('/dev/null');
   });
 });
 

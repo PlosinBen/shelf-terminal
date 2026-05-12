@@ -913,3 +913,26 @@ SDK `supportedModels()` 會隱藏 legacy models，但 SDK 實際接受）。`/mo
 
 See `.agent/features/slash-command-redesign.md` "Follow-up: pref sync architecture"
 for design discussion.
+
+
+## 56. Local shell HISTFILE=/dev/null：tab 間 history 完全隔離、不持久化
+
+**決定**: `LocalUnixConnector.createShell()` spawn pty 時把 `HISTFILE=/dev/null` 塞進 env。每個 tab 的 shell process 只保留 in-memory history（↑↓ 在當前 session 內仍可叫回剛跑的指令），但不寫檔、不共享、關 tab 就沒。
+
+**為什麼不直接用 user 的 `~/.zsh_history`**:
+- Shelf 把 project 當 working context；多個 project 共用同一個 history file 會洩漏「我剛在哪個 project 跑了什麼」的狀態
+- 多 tab 並開時，A tab 跑的指令污染 B tab 的 ↑（zsh `share_history` / inc_append 行為）
+- 使用者實際 workflow：以 session 內微調指令重跑為主，少用 `history | grep xxx` 翻舊紀錄
+
+**為什麼不寫 per-project history file**:
+- 多一個檔案要管（mkdir、project 刪除 cleanup、備份範圍）
+- 為了極少使用的 cross-session 翻舊紀錄需求增加架構複雜度，不值得
+- 若之後有人需求，HISTFILE 從 `/dev/null` 改成 `userData/shell-history/<projectId>.history` 是一行改動，model 相容
+
+**範圍**:
+- Phase 1：只 `local/unix`（macOS / Linux 的 bash / zsh）
+- Phase 2 候補：`local/win32` (PowerShell 用 PSReadLine，要 `Set-PSReadLineOption -HistorySavePath`)、`wsl`、`ssh`（遠端 history，要 ssh remote exec 注入，corner case 多）
+
+**不要改**:
+- 不要回到 `getShellEnv()` 直接傳（會繼承使用者 `HISTFILE` 設定）
+- 不要 default 啟用持久化 — 沒有使用者訴求前先保持簡單

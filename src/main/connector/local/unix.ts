@@ -18,12 +18,19 @@ export class LocalUnixConnector implements Connector {
     const resolvedCwd = fs.existsSync(cwd) ? cwd : os.homedir();
     const shell = resolveShell();
     log.info('connector', `local/unix spawn: shell=${shell} cwd=${resolvedCwd}`);
+    // Shelf treats every tab as an isolated workspace — sharing one
+    // ~/.zsh_history across all tabs (and across all projects) leaks
+    // indeterminate "what did I run last?" state, especially noisy when a
+    // project is the long-lived working context. We point HISTFILE at
+    // /dev/null so each shell process keeps its own in-memory history
+    // (↑ within the same tab still works) but nothing persists or bleeds
+    // across tabs. See .agent/DECISIONS.md "shell history isolation".
     const p = pty.spawn(shell, ['-l'], {
       name: 'xterm-256color',
       cols: 80,
       rows: 24,
       cwd: resolvedCwd,
-      env: getShellEnv(),
+      env: { ...getShellEnv(), HISTFILE: '/dev/null' },
     });
     return wrapPty(p);
   }
