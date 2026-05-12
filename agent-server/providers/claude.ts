@@ -283,7 +283,7 @@ export function createClaudeBackend(): ServerBackend {
       // Per-turn map: SDK content_block index → our msgId. Lazily populated
       // on first stream_delta or assistant block ref; cleared after each
       // assistant message (next assistant resets its index space).
-      const blockMsgIds: BlockMsgIdMap = new Map();
+      const blockMsgIds: BlockMsgIdState = createBlockMsgIdState();
 
       // Idle-emit dedup. Three idle emit sites in query():
       //   1. processMessage's `result` case — success path, carries metrics
@@ -630,18 +630,51 @@ function mintMsgId(): string {
 }
 
 /**
- * Per-turn map from SDK stream block index → our msgId. Populated lazily
- * (first time a content_block_delta or assistant block references the
- * index). Cleared after each assistant message so the next assistant's
- * fresh index space (0, 1, ...) gets fresh msgIds.
+ * Per-turn state mapping SDK stream block index → our msgId, plus the
+ * highest absolute block index announced so far by `content_block_start`.
+ * Reset on `message_start` for a fresh assistant message.
+ *
+ * Why we need `lastBlockStartIdx`: the SDK emits `assistant` events whose
+ * `message.content` array can be one of three shapes (which we cannot
+ * distinguish by content shape alone):
+ *
+ *   (a) growing partial — same block re-emitted as its text grows;
+ *       `content.length` stays 1 (or N), block index unchanged.
+ *   (b) delta — each new block emitted alone; `content.length === 1`,
+ *       index advances per emit. Empirically observed with
+ *       `includePartialMessages: true`.
+ *   (c) cumulative — all blocks so far in one emit; `content.length`
+ *       equals current block count.
+ *
+ * Strategy: map `content[N-1]` to `lastBlockStartIdx`, `content[N-2]` to
+ * `lastBlockStartIdx - 1`, etc. — i.e., positions are counted from the END
+ * relative to the most recent block-start. This works for all three:
+ *   (a) lastBlockStartIdx doesn't change between same-block emits → same id
+ *   (b) lastBlockStartIdx advances with each new block → new id per emit
+ *   (c) full cumulative emit aligns content[0..N-1] with indices
+ *       [lastBlockStartIdx-N+1..lastBlockStartIdx]
+ *
+ * Bug this replaces: previously we used `forEach((b, i) => byIndex.get(i))`,
+ * which silently treated in-batch position as absolute index. In delta mode
+ * (b) that mis-aligns: a thinking-then-text turn would look up idx 0 for the
+ * text finalize, hit the thinking block's msgId, and overwrite the thinking
+ * entry with text — leaving the streamed-text entry under its real msgId
+ * orphaned. Two text entries + no thinking.
  */
-type BlockMsgIdMap = Map<number, string>;
+type BlockMsgIdState = {
+  byIndex: Map<number, string>;
+  lastBlockStartIdx: number; // -1 before any content_block_start
+};
 
-function getOrMintBlockMsgId(map: BlockMsgIdMap, idx: number): string {
-  let id = map.get(idx);
+export function createBlockMsgIdState(): BlockMsgIdState {
+  return { byIndex: new Map(), lastBlockStartIdx: -1 };
+}
+
+function getOrMintBlockMsgId(state: BlockMsgIdState, idx: number): string {
+  let id = state.byIndex.get(idx);
   if (!id) {
     id = mintMsgId();
-    map.set(idx, id);
+    state.byIndex.set(idx, id);
   }
   return id;
 }
@@ -736,10 +769,16 @@ function emitClaudeToolResult(
 // set to the UI.  Key = bucket label (e.g. '5h', '7d').
 const rateLimitBuckets = new Map<string, StatusSegment>();
 
-export function processMessage(msg: SDKMessage, send: SendFn, cwd: string, blockMsgIds: BlockMsgIdMap) {
+export function processMessage(msg: SDKMessage, send: SendFn, cwd: string, blockMsgIds: BlockMsgIdState) {
   switch (msg.type) {
     case 'assistant': {
-      msg.message.content.forEach((block, idx) => {
+      // Map content[] positions to absolute block indices by anchoring the
+      // LAST entry to `lastBlockStartIdx`. See BlockMsgIdState docstring for
+      // why this works across delta / growing-partial / cumulative shapes.
+      const N = msg.message.content.length;
+      const baseIdx = blockMsgIds.lastBlockStartIdx - N + 1;
+      msg.message.content.forEach((block, i) => {
+        const idx = baseIdx + i;
         if (block.type === 'thinking') {
           // Reuse msgId if stream chunks already minted one for this block;
           // otherwise (no streaming or non-streamed model) mint fresh.
@@ -768,14 +807,11 @@ export function processMessage(msg: SDKMessage, send: SendFn, cwd: string, block
           }
         }
       });
-      // DON'T clear blockMsgIds here. With `includePartialMessages: true`
-      // the SDK emits `assistant` multiple times per logical assistant turn
-      // (each partial growing). They all reference the SAME block indices
-      // and MUST resolve to the SAME msgIds so the renderer upserts onto
-      // one timeline entry instead of stacking duplicates. The next "real"
-      // assistant turn (after a tool_result) starts fresh content_block_start
-      // events that overwrite the indices in our map — that's the right
-      // moment for reset, not here.
+      // DON'T clear blockMsgIds here. The next assistant message's own
+      // `message_start` stream event is the authoritative boundary that
+      // resets both the map and lastBlockStartIdx. Clearing on tool_result
+      // was too eager — observed cases where SDK emits one more partial
+      // assistant for the already-finished turn after tool_result.
       if (msg.message.usage) {
         const isSubagent = msg.parent_tool_use_id != null;
         const modelRaw = msg.message.model;
@@ -811,18 +847,25 @@ export function processMessage(msg: SDKMessage, send: SendFn, cwd: string, block
       // in the timeline. message_start is the SDK's own authoritative
       // boundary signal — no heuristic, no edge cases.
       if (event?.type === 'message_start') {
-        blockMsgIds.clear();
+        blockMsgIds.byIndex.clear();
+        blockMsgIds.lastBlockStartIdx = -1;
         break;
       }
-      // `content_block_start` mints a fresh msgId for this index, but only
-      // if absent. The SDK can re-fire content_block_start mid-turn for the
-      // SAME logical block (observed quirk); overwriting would orphan the
-      // renderer entry already streaming under the old msgId.
+      // `content_block_start` tracks the highest seen index (used to anchor
+      // assistant-emit position → absolute index), and mints a msgId for
+      // text/thinking blocks. The SDK can re-fire content_block_start
+      // mid-turn for the SAME logical block (observed quirk); we KEEP the
+      // existing msgId so the renderer entry already streaming under it
+      // doesn't orphan. tool_use blocks don't need a msgId but DO need to
+      // bump lastBlockStartIdx so subsequent assistant emits align.
       if (event?.type === 'content_block_start' && typeof event.index === 'number') {
+        if (event.index > blockMsgIds.lastBlockStartIdx) {
+          blockMsgIds.lastBlockStartIdx = event.index;
+        }
         const bt = event.content_block?.type;
         if (bt === 'text' || bt === 'thinking') {
-          if (!blockMsgIds.has(event.index)) {
-            blockMsgIds.set(event.index, mintMsgId());
+          if (!blockMsgIds.byIndex.has(event.index)) {
+            blockMsgIds.byIndex.set(event.index, mintMsgId());
           }
         }
         break;

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { mergeClaudeModels, rateLimitInfoToSegment, formatClaudeToolInput, extractToolResultText, processMessage } from './claude';
+import { mergeClaudeModels, rateLimitInfoToSegment, formatClaudeToolInput, extractToolResultText, processMessage, createBlockMsgIdState } from './claude';
 import type { OutgoingMessage } from './types';
 import type { ProviderModel } from '../../src/shared/types';
 
@@ -236,7 +236,7 @@ describe('processMessage — text msgId stability across SDK quirks', () => {
     // After message_start fires for #2, the idx-0 msgId must NOT be reused
     // from #1 — otherwise renderer upserts #2's text onto #1's entry.
     const { send, sent } = makeSink();
-    const map = new Map<number, string>();
+    const map = createBlockMsgIdState();
 
     // Turn 1
     processMessage({ type: 'stream_event', event: { type: 'message_start' } } as any, send, '/x', map);
@@ -261,13 +261,13 @@ describe('processMessage — text msgId stability across SDK quirks', () => {
     // entry already accumulating under M1 would orphan, and the next
     // assistant emit (now M2) would create a duplicate timeline entry.
     const { send, sent } = makeSink();
-    const map = new Map<number, string>();
+    const map = createBlockMsgIdState();
 
     processMessage({ type: 'stream_event', event: { type: 'message_start' } } as any, send, '/x', map);
     processMessage({ type: 'stream_event', event: { type: 'content_block_start', index: 0, content_block: { type: 'text' } } } as any, send, '/x', map);
-    const firstId = map.get(0);
+    const firstId = map.byIndex.get(0);
     processMessage({ type: 'stream_event', event: { type: 'content_block_start', index: 0, content_block: { type: 'text' } } } as any, send, '/x', map);
-    expect(map.get(0)).toBe(firstId);
+    expect(map.byIndex.get(0)).toBe(firstId);
 
     // Two partial assistants for the same logical text block share one id.
     processMessage({ type: 'assistant', message: { content: [{ type: 'text', text: 'OK' }] } } as any, send, '/x', map);
@@ -275,6 +275,37 @@ describe('processMessage — text msgId stability across SDK quirks', () => {
     const texts = textBlocksAt(sent);
     expect(texts).toHaveLength(2);
     expect(texts[0].msgId).toBe(texts[1].msgId);
+  });
+
+  it('delta-mode assistant emits map each block to its absolute index, not array idx', () => {
+    // Regression: SDK with includePartialMessages: true emits one assistant
+    // event per block, each with content.length === 1 — NOT a cumulative
+    // growing array. So content[0] of the text-block emit is at absolute
+    // index 1 (after thinking at 0), not 0. The old `forEach((b, i) => ...)`
+    // looked up i=0 and got thinking's msgId, then upserted the thinking
+    // entry to text → duplicate text entries + missing thinking.
+    const { send, sent } = makeSink();
+    const map = createBlockMsgIdState();
+
+    processMessage({ type: 'stream_event', event: { type: 'message_start' } } as any, send, '/x', map);
+    processMessage({ type: 'stream_event', event: { type: 'content_block_start', index: 0, content_block: { type: 'thinking' } } } as any, send, '/x', map);
+    const thinkingId = map.byIndex.get(0);
+    processMessage({ type: 'assistant', message: { content: [{ type: 'thinking', thinking: 'think...' }] } } as any, send, '/x', map);
+
+    processMessage({ type: 'stream_event', event: { type: 'content_block_start', index: 1, content_block: { type: 'text' } } } as any, send, '/x', map);
+    const textId = map.byIndex.get(1);
+    processMessage({ type: 'assistant', message: { content: [{ type: 'text', text: 'hello' }] } } as any, send, '/x', map);
+
+    expect(thinkingId).toBeDefined();
+    expect(textId).toBeDefined();
+    expect(thinkingId).not.toBe(textId);
+
+    const thinkings = sent.filter((m) => m.type === 'message' && m.msgType === 'thinking');
+    const texts = textBlocksAt(sent);
+    expect(thinkings).toHaveLength(1);
+    expect(thinkings[0].msgId).toBe(thinkingId);
+    expect(texts).toHaveLength(1);
+    expect(texts[0].msgId).toBe(textId); // NOT thinkingId
   });
 
   it('late partial assistant arriving after tool_result does NOT duplicate text', () => {
@@ -285,14 +316,15 @@ describe('processMessage — text msgId stability across SDK quirks', () => {
     // identical content. With message_start as the only boundary, the
     // late emit reuses the existing id → upsert collapses on the renderer.
     const { send, sent } = makeSink();
-    const map = new Map<number, string>();
+    const map = createBlockMsgIdState();
 
     processMessage({ type: 'stream_event', event: { type: 'message_start' } } as any, send, '/x', map);
     processMessage({ type: 'stream_event', event: { type: 'content_block_start', index: 0, content_block: { type: 'text' } } } as any, send, '/x', map);
+    processMessage({ type: 'stream_event', event: { type: 'content_block_start', index: 1, content_block: { type: 'tool_use' } } } as any, send, '/x', map);
     processMessage({ type: 'assistant', message: { content: [{ type: 'text', text: 'Result text' }, { type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'ls' } }] } } as any, send, '/x', map);
     // user tool_result arrives
     processMessage({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't1', content: 'output' }] } } as any, send, '/x', map);
-    // late partial assistant for the SAME turn
+    // late partial assistant for the SAME turn (cumulative content)
     processMessage({ type: 'assistant', message: { content: [{ type: 'text', text: 'Result text' }, { type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'ls' } }] } } as any, send, '/x', map);
 
     const texts = textBlocksAt(sent);
