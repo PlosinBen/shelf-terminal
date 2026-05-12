@@ -29,8 +29,8 @@ export function initAgentManager(windowGetter: () => BrowserWindow | null): void
   });
 
   ipcMain.handle(IPC.AGENT_SEND, async (_e, payload) => {
-    const { tabId, prompt, images } = payload;
-    return sendMessage(tabId, prompt, images);
+    const { tabId, prompt, images, model, effort, permissionMode } = payload;
+    return sendMessage(tabId, prompt, images, { model, effort, permissionMode });
   });
 
   ipcMain.handle(IPC.AGENT_STOP, async (_e, payload) => {
@@ -140,7 +140,12 @@ async function startSession(
   return true;
 }
 
-async function sendMessage(tabId: string, prompt: string, images?: string[]): Promise<boolean> {
+async function sendMessage(
+  tabId: string,
+  prompt: string,
+  images?: string[],
+  prefs?: { model?: string; effort?: string; permissionMode?: string },
+): Promise<boolean> {
   const session = sessions.get(tabId);
   if (!session) return false;
 
@@ -161,6 +166,9 @@ async function sendMessage(tabId: string, prompt: string, images?: string[]): Pr
     for await (const event of session.backend.query(prompt, session.cwd, {
       canUseTool,
       images,
+      model: prefs?.model,
+      effort: prefs?.effort,
+      permissionMode: prefs?.permissionMode,
     })) {
       dispatchEvent(tabId, event);
     }
@@ -196,6 +204,7 @@ function dispatchEvent(tabId: string, event: AgentEvent) {
         options: event.options,
         currentValue: event.currentValue,
         searchable: event.searchable,
+        prefKey: event.prefKey,
       });
       break;
     case 'auth_required':

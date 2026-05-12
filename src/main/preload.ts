@@ -137,8 +137,8 @@ contextBridge.exposeInMainWorld('shelfApi', {
   agent: {
     init: (tabId: string, cwd: string, connection: unknown, provider: string, sessionId?: string, opts?: Record<string, unknown>) =>
       ipcRenderer.invoke(IPC.AGENT_INIT, { tabId, cwd, connection, provider, sessionId, ...opts }),
-    send: (tabId: string, prompt: string, images?: string[]) =>
-      ipcRenderer.invoke(IPC.AGENT_SEND, { tabId, prompt, images }),
+    send: (tabId: string, prompt: string, images?: string[], prefs?: { model?: string; effort?: string; permissionMode?: string }) =>
+      ipcRenderer.invoke(IPC.AGENT_SEND, { tabId, prompt, images, ...prefs }),
     stop: (tabId: string) =>
       ipcRenderer.invoke(IPC.AGENT_STOP, { tabId }),
     destroy: (tabId: string) =>

@@ -155,6 +155,10 @@ export function createClaudeBackend(): ServerBackend {
   // indeterminate compacted/un-compacted state.
   let stoppable = true;
 
+  // Pending picker promises keyed by picker id. Mirrors Copilot's approach —
+  // resolvePicker drains the entry with user's selection (or null on cancel).
+  const pendingPickers = new Map<string, (value: string | null) => void>();
+
   const canUseTool: CanUseTool = (async (toolName, input, canUseOpts) => {
     const toolUseId = (canUseOpts as any)?.toolUseID ?? `sdk-${Date.now()}`;
     currentSend?.({ type: 'permission_request', toolUseId, toolName, input });

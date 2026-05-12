@@ -80,6 +80,15 @@ export interface AgentQueryOptions {
   permissionMode?: string;
   canUseTool?: PermissionCallback;
   images?: string[];
+  /**
+   * Per-send pref values. Renderer is the authoritative owner of these
+   * (savedPrefs in projectConfig); main passes them straight through from
+   * the AGENT_SEND payload. remote.ts forwards them to agent-server in the
+   * send line; orchestrator there diff-detects against last-applied prefs
+   * for the session and calls provider.setModel / setEffort etc on change.
+   */
+  model?: string;
+  effort?: string;
 }
 
 export type AgentEvent =
@@ -94,6 +103,7 @@ export type AgentEvent =
       options: { value: string; label: string; description?: string; badges?: string[] }[];
       currentValue?: string;
       searchable?: boolean;
+      prefKey?: 'model' | 'effort' | 'permissionMode';
     }
   | { type: 'auth_required'; provider: string }
   | { type: 'error'; error: string };

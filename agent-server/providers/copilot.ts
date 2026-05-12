@@ -851,7 +851,10 @@ export function createCopilotBackend(): ServerBackend {
         }
 
         // Open picker — provider mints id, registers pending resolver, emits
-        // request, awaits user selection via resolvePicker IPC.
+        // request, awaits user selection via resolvePicker IPC. `prefKey:
+        // 'model'` tells renderer to persist + setStatusModel locally as
+        // the authoritative pref update; provider's own applyModel below
+        // still runs to push the new model into the active SDK session.
         const pickerId = `pk-${randomUUID().slice(0, 8)}`;
         const picked = await new Promise<string | null>((resolve) => {
           pendingPickers.set(pickerId, resolve);
@@ -862,6 +865,7 @@ export function createCopilotBackend(): ServerBackend {
             options: list.map((m) => ({ value: m.value, label: m.displayName })),
             currentValue: currentModel,
             searchable: list.length > 6,
+            prefKey: 'model',
           });
         });
         pendingPickers.delete(pickerId);

@@ -91,7 +91,7 @@ interface ShelfApi {
   };
   agent: {
     init: (tabId: string, cwd: string, connection: import('../shared/types').Connection, provider: string, sessionId?: string, opts?: Record<string, unknown>) => Promise<boolean>;
-    send: (tabId: string, prompt: string, images?: string[]) => Promise<boolean>;
+    send: (tabId: string, prompt: string, images?: string[], prefs?: { model?: string; effort?: string; permissionMode?: string }) => Promise<boolean>;
     stop: (tabId: string) => Promise<boolean>;
     destroy: (tabId: string) => Promise<void>;
     resolvePermission: (tabId: string, toolUseId: string, allow: boolean, scope?: 'once' | 'session') => Promise<boolean>;

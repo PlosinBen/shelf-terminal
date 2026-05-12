@@ -185,6 +185,7 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
     options: { value: string; label: string; description?: string; badges?: string[] }[];
     currentValue?: string;
     searchable?: boolean;
+    prefKey?: 'model' | 'effort' | 'permissionMode';
   } | null>(null);
   const [queuedMessages, setQueuedMessages] = useState<QueuedMessage[]>([]);
   const [authRequired, setAuthRequired] = useState<{ provider: string } | null>(null);
@@ -351,6 +352,7 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
           options: req.options ?? [],
           currentValue: req.currentValue,
           searchable: req.searchable,
+          prefKey: req.prefKey,
         };
       });
     });
@@ -493,8 +495,12 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
     // pressed send earlier, just had to wait for the previous turn) —
     // re-engage auto-follow so the new turn's stream lands in view.
     setFollow(true);
-    window.shelfApi.agent.send(tabId, next.content);
-  }, [isStreaming, queuedMessages, tabId, setFollow]);
+    window.shelfApi.agent.send(tabId, next.content, undefined, {
+      model: statusModel ?? undefined,
+      effort: currentEffort,
+      permissionMode,
+    });
+  }, [isStreaming, queuedMessages, tabId, setFollow, statusModel, currentEffort, permissionMode]);
 
   // Track user intent only on user-driven scroll inputs. We deliberately
   // ignore the generic `scroll` event because programmatic scrollIntoView
@@ -621,8 +627,12 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
     // appear. Force re-engage auto-follow even if they had scrolled up
     // while reading earlier history.
     setFollow(true);
-    window.shelfApi.agent.send(tabId, text, images.length > 0 ? images : undefined);
-  }, [tabId, input, isStreaming, pendingFiles, pendingImages, capabilities, statusModel, setFollow]);
+    window.shelfApi.agent.send(tabId, text, images.length > 0 ? images : undefined, {
+      model: statusModel ?? undefined,
+      effort: currentEffort,
+      permissionMode,
+    });
+  }, [tabId, input, isStreaming, pendingFiles, pendingImages, capabilities, statusModel, currentEffort, permissionMode, setFollow]);
 
   const handleStop = useCallback(() => {
     setQueuedMessages([]);
@@ -927,6 +937,27 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
           }
           cancellable
           onSelect={(value) => {
+            // If the picker carried a prefKey hint, apply locally now —
+            // persist to project config, push down to backend, update the
+            // status bar. This makes the renderer authoritative on the
+            // pref change, sidestepping the onCapabilities drift-back
+            // loop that would otherwise revert the choice when caps
+            // arrive a few ms later (savedPrefs still showed the old
+            // value because state hadn't propagated).
+            const key = pendingPicker.prefKey;
+            if (key === 'model') {
+              setStatusModel(value);
+              window.shelfApi.agent.setPrefs(tabId, { model: value });
+              persistPref({ model: value });
+            } else if (key === 'effort') {
+              setCurrentEffort(value);
+              window.shelfApi.agent.setPrefs(tabId, { effort: value });
+              persistPref({ effort: value });
+            } else if (key === 'permissionMode') {
+              setPermissionMode(value);
+              window.shelfApi.agent.setPrefs(tabId, { permissionMode: value });
+              persistPref({ permissionMode: value });
+            }
             window.shelfApi.agent.resolvePicker(tabId, pendingPicker.id, value);
             setPendingPicker(null);
           }}

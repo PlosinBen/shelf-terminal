@@ -96,6 +96,18 @@ export type OutgoingMessage = WireEnvelope & (
       options: { value: string; label: string; description?: string; badges?: string[] }[];
       currentValue?: string;
       searchable?: boolean;
+      /**
+       * Optional hint that this picker resolves into a renderer-side agent
+       * preference (saved to project config + pushed to backend via setPrefs).
+       * When set, renderer treats the picked value as the authoritative new
+       * pref, persists it, updates the status bar locally, and skips the
+       * normal capability-drift sync — provider doesn't need to round-trip
+       * the change back via a `capabilities` emit just to update the UI.
+       *
+       * Without `prefKey`, renderer just resolves the picker; what to do
+       * with the value is purely the provider's concern.
+       */
+      prefKey?: 'model' | 'effort' | 'permissionMode';
     }
   /**
    * Internal: provider asks orchestrator to merge `patch` into the persisted

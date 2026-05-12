@@ -104,6 +104,10 @@ export function createRemoteBackend(
       // could arrive and get dropped as "unknown turn".
       const events = proc.registerTurn(turnId, permissionHandler);
 
+      // Opts come from main's AGENT_SEND payload (authoritative renderer
+      // state). Closure cache is a transitional fallback for callers that
+      // haven't migrated to passing prefs in send payload — removed in the
+      // next phase along with setModel/setEffort/setPermissionMode methods.
       proc.sendLine({
         type: 'send',
         turnId,
@@ -112,9 +116,9 @@ export function createRemoteBackend(
         cwd,
         sessionId,
         resume: opts?.resume,
-        permissionMode: currentPermissionMode ?? opts?.permissionMode,
-        model: currentModel ?? undefined,
-        effort: currentEffort ?? undefined,
+        permissionMode: opts?.permissionMode ?? currentPermissionMode ?? undefined,
+        model: opts?.model ?? currentModel ?? undefined,
+        effort: opts?.effort ?? currentEffort ?? undefined,
         images: opts?.images,
       });
 
@@ -387,6 +391,7 @@ function parseRemoteMessage(msg: any): AgentEvent | null {
       options: msg.options,
       currentValue: msg.currentValue,
       searchable: msg.searchable,
+      prefKey: msg.prefKey === 'model' || msg.prefKey === 'effort' || msg.prefKey === 'permissionMode' ? msg.prefKey : undefined,
     };
   }
 
