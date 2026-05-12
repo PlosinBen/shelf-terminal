@@ -45,6 +45,13 @@ export function initAgentManager(windowGetter: () => BrowserWindow | null): void
     return resolvePermission(payload.tabId, payload.toolUseId, payload.allow, payload.scope);
   });
 
+  ipcMain.handle(IPC.AGENT_RESOLVE_PICKER, async (_e, payload) => {
+    const session = sessions.get(payload.tabId);
+    if (!session?.backend.resolvePicker) return false;
+    session.backend.resolvePicker(payload.pickerId, payload.value ?? null);
+    return true;
+  });
+
   ipcMain.handle(IPC.AGENT_SET_PREFS, async (_e, payload) => {
     const { tabId, model, effort, permissionMode: mode } = payload;
     const session = sessions.get(tabId);
@@ -188,11 +195,24 @@ function dispatchEvent(tabId: string, event: AgentEvent) {
     case 'status':
       send(IPC.AGENT_STATUS, tabId, event.payload);
       break;
+    case 'picker_request':
+      send(IPC.AGENT_PICKER_REQUEST, tabId, {
+        id: event.id,
+        title: event.title,
+        options: event.options,
+        currentValue: event.currentValue,
+        searchable: event.searchable,
+      });
+      break;
     case 'auth_required':
       send(IPC.AGENT_AUTH_REQUIRED, tabId, event.provider);
       break;
     case 'error':
       send(IPC.AGENT_MESSAGE, tabId, { type: 'error', content: event.error });
+      break;
+    case 'permission_request':
+      // Handled via canUseTool callback in sendMessage — never reaches the
+      // dispatcher event queue. Exhaustiveness only.
       break;
   }
 }

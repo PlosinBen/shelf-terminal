@@ -87,6 +87,14 @@ export type AgentEvent =
   | { type: 'stream'; payload: AgentStreamDelta }
   | { type: 'status'; payload: AgentStatusPayload }
   | { type: 'permission_request'; toolUseId: string; toolName: string; input: Record<string, unknown> }
+  | {
+      type: 'picker_request';
+      id: string;
+      title: string;
+      options: { value: string; label: string; description?: string; badges?: string[] }[];
+      currentValue?: string;
+      searchable?: boolean;
+    }
   | { type: 'auth_required'; provider: string }
   | { type: 'error'; error: string };
 
@@ -117,4 +125,10 @@ export interface AgentBackend {
   clearCredential?(): Promise<void>;
   clearContext?(): void;
   handleSlashCommand?(cmd: string, args: string, cwd?: string): Promise<SlashResult>;
+  /**
+   * Resolve a pending picker_request by forwarding the user's selection (or
+   * cancellation) to the remote agent-server. The provider tracks the
+   * pending Promise by id and unblocks its slash dispatch.
+   */
+  resolvePicker?(pickerId: string, value: string | null): void;
 }

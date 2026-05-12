@@ -145,6 +145,8 @@ contextBridge.exposeInMainWorld('shelfApi', {
       ipcRenderer.invoke(IPC.AGENT_DESTROY, { tabId }),
     resolvePermission: (tabId: string, toolUseId: string, allow: boolean, scope?: 'once' | 'session') =>
       ipcRenderer.invoke(IPC.AGENT_RESOLVE_PERMISSION, { tabId, toolUseId, allow, scope }),
+    resolvePicker: (tabId: string, pickerId: string, value: string | null) =>
+      ipcRenderer.invoke(IPC.AGENT_RESOLVE_PICKER, { tabId, pickerId, value }),
     setPrefs: (tabId: string, prefs: Record<string, unknown>) =>
       ipcRenderer.invoke(IPC.AGENT_SET_PREFS, { tabId, ...prefs }),
     storeCredential: (tabId: string, key: string) =>
@@ -174,6 +176,11 @@ contextBridge.exposeInMainWorld('shelfApi', {
       const listener = (_event: Electron.IpcRendererEvent, tabId: string, req: unknown) => callback(tabId, req);
       ipcRenderer.on(IPC.AGENT_PERMISSION_REQUEST, listener);
       return () => ipcRenderer.removeListener(IPC.AGENT_PERMISSION_REQUEST, listener);
+    },
+    onPickerRequest: (callback: (tabId: string, req: unknown) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, tabId: string, req: unknown) => callback(tabId, req);
+      ipcRenderer.on(IPC.AGENT_PICKER_REQUEST, listener);
+      return () => ipcRenderer.removeListener(IPC.AGENT_PICKER_REQUEST, listener);
     },
     onCapabilities: (callback: (tabId: string, caps: unknown) => void) => {
       const listener = (_event: Electron.IpcRendererEvent, tabId: string, caps: unknown) => callback(tabId, caps);

@@ -95,6 +95,7 @@ interface ShelfApi {
     stop: (tabId: string) => Promise<boolean>;
     destroy: (tabId: string) => Promise<void>;
     resolvePermission: (tabId: string, toolUseId: string, allow: boolean, scope?: 'once' | 'session') => Promise<boolean>;
+    resolvePicker: (tabId: string, pickerId: string, value: string | null) => Promise<boolean>;
     setPrefs: (tabId: string, prefs: Record<string, unknown>) => Promise<boolean>;
     storeCredential: (tabId: string, key: string) => Promise<boolean>;
     clearCredential: (tabId: string) => Promise<boolean>;
@@ -107,6 +108,7 @@ interface ShelfApi {
     onStream: (callback: (tabId: string, chunk: unknown) => void) => () => void;
     onStatus: (callback: (tabId: string, status: unknown) => void) => () => void;
     onPermissionRequest: (callback: (tabId: string, req: unknown) => void) => () => void;
+    onPickerRequest: (callback: (tabId: string, req: unknown) => void) => () => void;
     onCapabilities: (callback: (tabId: string, caps: unknown) => void) => () => void;
     onAuthRequired: (callback: (tabId: string, provider: string) => void) => () => void;
     onInitStatus: (callback: (tabId: string, status: import('../shared/types').AgentInitStatus) => void) => () => void;

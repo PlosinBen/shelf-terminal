@@ -175,6 +175,17 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
   const [slashFilter, setSlashFilter] = useState('');
   const [slashSelection, setSlashSelection] = useState(0);
   const [pendingPermission, setPendingPermission] = useState<PendingPermission | null>(null);
+  // Generic picker state — provider-emitted picker_request lands here. When
+  // permission and picker both want to show, permission wins (priority gate
+  // in JSX renders `pendingPermission ?? pendingPicker ?? legacy modelPicker`);
+  // pendingPicker stays preserved during permission so it re-renders after.
+  const [pendingPicker, setPendingPicker] = useState<{
+    id: string;
+    title: string;
+    options: { value: string; label: string; description?: string; badges?: string[] }[];
+    currentValue?: string;
+    searchable?: boolean;
+  } | null>(null);
   // modelPicker.selected is unused after SelectionPanel extraction (component
   // owns cursor state) but the shape is preserved so callers that flip
   // `open` don't break. Remove fully when /model migrates to picker channel
@@ -323,6 +334,30 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
       if (id !== tabId) return;
       setPendingPermission({ toolUseId: req.toolUseId, toolName: req.toolName, input: req.input ?? {} });
       // SelectionPanel owns its own cursor; no separate cursor reset needed.
+    });
+    return off;
+  }, [tabId]);
+
+  // Picker request listener — latest-wins: a second picker request before
+  // the previous resolves auto-cancels the prior one and shows the new.
+  // Plan decision: provider isn't expected to send concurrent pickers during
+  // normal flow; if it happens it's a race and most-recent intent wins.
+  useEffect(() => {
+    const off = window.shelfApi.agent.onPickerRequest((id: string, req: any) => {
+      if (id !== tabId) return;
+      setPendingPicker((prev) => {
+        // Cancel any in-flight picker so the provider's pending Promise resolves.
+        if (prev) {
+          window.shelfApi.agent.resolvePicker(tabId, prev.id, null);
+        }
+        return {
+          id: req.id,
+          title: req.title,
+          options: req.options ?? [],
+          currentValue: req.currentValue,
+          searchable: req.searchable,
+        };
+      });
     });
     return off;
   }, [tabId]);
@@ -964,6 +999,25 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
             if (value === 'once') handlePermissionRespond(true, 'once');
             else if (value === 'session') handlePermissionRespond(true, 'session');
             else handlePermissionRespond(false);
+          }}
+        />
+      ) : pendingPicker ? (
+        <SelectionPanel
+          title={pendingPicker.title}
+          options={pendingPicker.options.map((o) => ({ value: o.value, label: o.label }))}
+          initialSelected={
+            pendingPicker.currentValue
+              ? Math.max(0, pendingPicker.options.findIndex((o) => o.value === pendingPicker.currentValue))
+              : 0
+          }
+          cancellable
+          onSelect={(value) => {
+            window.shelfApi.agent.resolvePicker(tabId, pendingPicker.id, value);
+            setPendingPicker(null);
+          }}
+          onCancel={() => {
+            window.shelfApi.agent.resolvePicker(tabId, pendingPicker.id, null);
+            setPendingPicker(null);
           }}
         />
       ) : modelPicker.open && capabilities && capabilities.models.length > 0 ? (

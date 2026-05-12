@@ -140,6 +140,11 @@ export function createRemoteBackend(
       }
     },
 
+    resolvePicker(pickerId: string, value: string | null) {
+      if (!remoteProc) return;
+      remoteProc.sendLine({ type: 'resolve_picker', pickerId, pickerValue: value });
+    },
+
     async getCapabilities(cwd: string, customModels?: ProviderModel[]) {
       const proc = await ensureProcReady(cwd);
       // 失敗時 throw 而非回空 capabilities — 讓 startSession 的 .catch 能區分
@@ -385,6 +390,20 @@ function parseRemoteMessage(msg: any): AgentEvent | null {
 
   if (msg.type === 'auth_required') {
     return { type: 'auth_required', provider: msg.provider ?? 'copilot' };
+  }
+
+  if (msg.type === 'picker_request') {
+    if (typeof msg.id !== 'string' || typeof msg.title !== 'string' || !Array.isArray(msg.options)) {
+      return null;
+    }
+    return {
+      type: 'picker_request',
+      id: msg.id,
+      title: msg.title,
+      options: msg.options,
+      currentValue: msg.currentValue,
+      searchable: msg.searchable,
+    };
   }
 
   if (msg.type === 'error') {

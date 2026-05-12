@@ -83,6 +83,22 @@ export type OutgoingMessage = WireEnvelope & (
   | { type: 'auth_required'; provider: string }
   | { type: 'permission_request'; toolUseId: string; toolName: string; input: Record<string, unknown> }
   /**
+   * Generic N-way selection prompt. Provider asks renderer to display a
+   * picker and resolve with the chosen value (or cancellation). Mirrors the
+   * permission_request channel — same pairing pattern, just N options
+   * instead of allow/deny. Used by /model (step 9) and any future picker
+   * (effort, perm-mode, etc.). `id` is provider-minted, echoed back via
+   * resolve_picker IPC.
+   */
+  | {
+      type: 'picker_request';
+      id: string;
+      title: string;
+      options: { value: string; label: string; description?: string; badges?: string[] }[];
+      currentValue?: string;
+      searchable?: boolean;
+    }
+  /**
    * Internal: provider asks orchestrator to merge `patch` into the persisted
    * context for this session. Intercepted by `agent-server/index.ts` and NOT
    * forwarded to the main process — providers stay decoupled from disk I/O.
@@ -227,6 +243,12 @@ export interface ServerBackend {
   dispose(): void;
   gatherCapabilities?(cwd: string, sessionId?: string, customModels?: ProviderModel[]): Promise<ProviderCapabilities>;
   resolvePermission?(toolUseId: string, allow: boolean, message?: string, scope?: 'once' | 'session'): void;
+  /**
+   * Resolve a pending picker_request by id. `value` is null for cancellation
+   * (user pressed Esc), else the chosen option's value. Provider's internal
+   * Promise for that picker resolves with this.
+   */
+  resolvePicker?(id: string, value: string | null): void;
   storeCredential?(key: string): Promise<void>;
   clearCredential?(): Promise<void>;
   /**
