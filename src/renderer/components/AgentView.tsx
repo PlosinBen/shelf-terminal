@@ -121,6 +121,18 @@ function buildAgentMsg(msg: any, provider: string): AgentMsg | null {
         provider,
         timestamp: ts,
       };
+    case 'slash_response':
+      if (typeof msg.slashCmd !== 'string' || typeof msg.content !== 'string') return null;
+      if (msg.status !== 'pending' && msg.status !== 'success' && msg.status !== 'error') return null;
+      return {
+        id,
+        type: 'slash_response',
+        slashCmd: msg.slashCmd,
+        status: msg.status,
+        content: msg.content,
+        provider,
+        timestamp: ts,
+      };
     case 'file_edit':
       if (!msg.toolUseId || !msg.filePath) return null;
       return {
@@ -831,6 +843,10 @@ export function AgentView({ tabId, cwd, connection, provider, projectId, visible
         return;
       }
     }
+
+    // Swallow Tab so focus doesn't jump to surrounding buttons (e.g. Clear
+    // History) and trigger destructive actions on accidental Enter.
+    if (e.key === 'Tab') { e.preventDefault(); return; }
 
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
     if (e.key === 'Escape') {
