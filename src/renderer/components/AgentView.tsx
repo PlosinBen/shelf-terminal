@@ -748,7 +748,7 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
   // Slash menu
   const filteredCommands = useMemo(() => {
     return capabilities?.slashCommands.filter(
-      (cmd) => !slashFilter || cmd.name.includes(slashFilter) || cmd.description.toLowerCase().includes(slashFilter.toLowerCase()),
+      (cmd) => !slashFilter || cmd.name.toLowerCase().startsWith(slashFilter.toLowerCase()),
     ) ?? [];
   }, [capabilities, slashFilter]);
 
