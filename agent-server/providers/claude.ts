@@ -770,14 +770,23 @@ function processMessage(msg: SDKMessage, send: SendFn, cwd: string, blockMsgIds:
     }
     case 'stream_event': {
       const event: any = (msg as any).event;
-      // `content_block_start` is the authoritative new-block signal. ALWAYS
-      // overwrite — across a tool turn the SDK re-uses block index 0 for
-      // the next assistant's first block; if we kept the old msgId the
-      // renderer would upsert new content into the previous block's entry.
+      // `content_block_start` is the new-block signal. Mint a fresh msgId
+      // ONLY when there's no existing entry for this index — the SDK can
+      // re-fire content_block_start mid-turn (observed for the same logical
+      // block); overwriting would orphan whatever the renderer has already
+      // accumulated under the old msgId and the next assistant emit would
+      // land on the new id, producing a duplicate "Claude said the same
+      // thing twice" entry.
+      //
+      // The tool-turn boundary (where SDK genuinely re-uses block index 0
+      // for a brand-new block) is now reset explicitly in the `user` case
+      // when a tool_result arrives — see clearBlockMsgIds logic below.
       if (event?.type === 'content_block_start' && typeof event.index === 'number') {
         const bt = event.content_block?.type;
         if (bt === 'text' || bt === 'thinking') {
-          blockMsgIds.set(event.index, mintMsgId());
+          if (!blockMsgIds.has(event.index)) {
+            blockMsgIds.set(event.index, mintMsgId());
+          }
         }
         break;
       }
@@ -796,13 +805,22 @@ function processMessage(msg: SDKMessage, send: SendFn, cwd: string, blockMsgIds:
     }
     case 'user': {
       if (Array.isArray(msg.message.content)) {
+        let sawToolResult = false;
         for (const block of msg.message.content) {
           if ((block as any).type === 'tool_result') {
+            sawToolResult = true;
             const raw = (block as any).content;
             const content = extractToolResultText(raw);
             emitClaudeToolResult(send, (block as any).tool_use_id, content, (block as any).is_error === true);
           }
         }
+        // After a tool_result, the next assistant turn starts a fresh block
+        // index space (0, 1, ...). Clear blockMsgIds here so the next
+        // content_block_start mints new msgIds instead of reusing the
+        // previous turn's. This is the explicit tool-turn boundary that
+        // replaces the prior "always overwrite on content_block_start"
+        // approach (which mis-fired on spurious mid-turn re-starts).
+        if (sawToolResult) blockMsgIds.clear();
       }
       break;
     }
