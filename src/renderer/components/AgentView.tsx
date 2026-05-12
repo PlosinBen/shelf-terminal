@@ -749,7 +749,7 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
   // who actually handles each. Names are short-circuit unique (provider
   // shouldn't claim /model after step E cleanup; renderer-local list is the
   // canonical source for those names), so a simple concat + dedup is fine.
-  const filteredCommands = useMemo(() => {
+  const allCommands = useMemo(() => {
     const providerCmds = capabilities?.slashCommands ?? [];
     const localCmds = Array.from(RENDERER_LOCAL_SLASHES).map((name) => {
       const description =
@@ -766,24 +766,36 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
       seen.add(cmd.name);
       merged.push(cmd);
     }
-    return merged.filter(
+    return merged;
+  }, [capabilities]);
+
+  const filteredCommands = useMemo(() => {
+    return allCommands.filter(
       (cmd) => !slashFilter || cmd.name.toLowerCase().startsWith(slashFilter.toLowerCase()),
     );
-  }, [capabilities, slashFilter]);
+  }, [allCommands, slashFilter]);
+
+  const allCommandNames = useMemo(
+    () => new Set(allCommands.map((c) => c.name)),
+    [allCommands],
+  );
 
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const val = e.target.value;
     setInput(val);
-    // Slash menu is for *command name* autocomplete only — show it while the
-    // user is typing the slash command itself (`/m`, `/mo`, `/model`), hide it
-    // the moment they add a space (`/model opu`). Once a space is present,
-    // the input is in "args" territory; keeping the menu open would steal
-    // Enter for slash completion and overwrite the user's args (e.g.,
-    // typing /model opus + Enter would collapse to `/model `).
+    // Slash menu is for *command name* autocomplete only:
+    // - Show while user types the slash command (`/m`, `/mo`, `/model`)
+    // - Hide once they've typed an exact known cmd name (nothing more to
+    //   autocomplete — keeping it open just blocks Enter from submitting)
+    // - Hide once they add a space (now in "args" territory, e.g. `/model
+    //   claude-sonnet`)
     //
     // Pattern: `/` followed by zero or more word chars, nothing else.
-    if (/^\/\w*$/.test(val)) {
-      setSlashFilter(val.slice(1));
+    const matchesSlashShape = /^\/\w*$/.test(val);
+    const filter = val.slice(1);
+    const isExactMatch = filter.length > 0 && allCommandNames.has(filter);
+    if (matchesSlashShape && !isExactMatch) {
+      setSlashFilter(filter);
       setShowSlashMenu(true);
       setSlashSelection(0);
     } else {
@@ -803,26 +815,9 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
     if (showSlashMenu && filteredCommands.length > 0) {
       if (e.key === 'ArrowDown') { e.preventDefault(); setSlashSelection((s) => Math.min(s + 1, filteredCommands.length - 1)); return; }
       if (e.key === 'ArrowUp') { e.preventDefault(); setSlashSelection((s) => Math.max(s - 1, 0)); return; }
-      if (e.key === 'Tab') {
+      if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
         e.preventDefault();
         handleSlashSelect(filteredCommands[slashSelection]);
-        return;
-      }
-      if (e.key === 'Enter' && !e.shiftKey) {
-        // If the typed text already exactly matches the selected suggestion
-        // (e.g. user typed `/model` fully — slashFilter is 'model' and the
-        // selected cmd name is 'model'), treat Enter as submit instead of
-        // auto-completing into `/model `. Otherwise users have to hit Enter
-        // twice to send a no-arg slash. Tab still always auto-completes.
-        const selected = filteredCommands[slashSelection];
-        if (selected && selected.name === slashFilter) {
-          e.preventDefault();
-          setShowSlashMenu(false);
-          handleSend();
-          return;
-        }
-        e.preventDefault();
-        handleSlashSelect(selected);
         return;
       }
     }
