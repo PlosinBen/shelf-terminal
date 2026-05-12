@@ -66,7 +66,7 @@ interface Props {
   cwd: string;
   connection: Connection;
   provider: AgentProvider;
-  projectIndex: number;
+  projectId: string;
   visible: boolean;
 }
 
@@ -157,8 +157,13 @@ function upsertById(prev: AgentMsg[], built: AgentMsg): AgentMsg[] {
   return [...prev, built];
 }
 
-export function AgentView({ tabId, cwd, connection, provider, projectIndex, visible }: Props) {
+export function AgentView({ tabId, cwd, connection, provider, projectId, visible }: Props) {
   const { projects, settings, chatStage } = useStore();
+  // Derive index from stable id every render — projectIndex (array position)
+  // shifts when user reorders projects via drag, which would otherwise point
+  // this AgentView at the wrong project's prefs / sessionIds. See
+  // .agent/GOTCHAS.md "AgentView projectIndex drift on reorder".
+  const projectIndex = projects.findIndex((p) => p.config.id === projectId);
   const savedPrefs = projects[projectIndex]?.config.agentPrefs?.[provider];
 
   const sessionIdRef = useRef<string | null>(null);
@@ -598,7 +603,6 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
   // prevents other agent tabs in the same project from re-applying it.
   // Behaviour: append to current input (preserve any unsent typing) and
   // append images to existing pendingImages.
-  const projectId = projects[projectIndex]?.config.id;
   useEffect(() => {
     if (!visible || !chatStage) return;
     if (chatStage.projectId !== projectId) return;

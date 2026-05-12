@@ -287,7 +287,7 @@ export function App() {
                           cwd={proj.config.cwd}
                           connection={proj.config.connection}
                           provider={tab.provider}
-                          projectIndex={pi}
+                          projectId={proj.config.id}
                           visible={visible}
                         />
                       ) : (

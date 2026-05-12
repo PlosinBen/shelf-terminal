@@ -635,3 +635,22 @@ if (event?.type === 'content_block_start' && ...) {
 **不要改**:
 - 不要把 mint 改回 always-overwrite — 那會復活這個 bug
 - 不要在 `content_block_stop` 或其他事件做 reset — 沒驗證過 SDK 行為是否一致
+
+
+## AgentView `projectIndex` drift on project reorder
+
+**現象**: 拖拉 sidebar 重新排序 project 後，agent view status bar 的 model / effort / permissionMode 變成別人家專案的值（或重置）。Session id、prefs 後續寫入也會錯位到別的 project。
+
+**根因**: `App.tsx` render `AgentView` 時 `key={tab.id}`（stable）但 `projectIndex={pi}`（陣列 index）。Reorder 後：
+
+1. `key` 穩定 → React 不會 unmount，沿用同一個 AgentView 實例
+2. 但 `projectIndex` prop 改了 → 指到別人家的 project
+3. `savedPrefs = projects[projectIndex]?.config.agentPrefs?.[provider]` 讀到錯誤 project
+4. `Line 328-340` 的 capabilities useEffect deps 包 `savedPrefs`，下次 `onCapabilities` 抵達會用錯誤值覆蓋 status bar
+5. `updateProjectConfig(projectIndex, ...)` 寫入也錯位
+
+**解法**: AgentView 改收 `projectId: string`（stable），內部 `const projectIndex = projects.findIndex(p => p.config.id === projectId)` 每次 render 重新解析。Reorder 後 lookup 跟著走，永遠指向自己原本的 project。
+
+**不要改**:
+- 不要把 `projectIndex` 加回 props — index 對 reorder 不穩
+- 不要嘗試讓 key 包含 projectId（會在 reorder 時 unmount，丟掉 timeline / streaming 狀態）
