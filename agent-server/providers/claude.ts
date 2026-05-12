@@ -27,7 +27,9 @@ function mintSlashMsgId(): string {
 const CLAUDE_BUILTIN_COMMANDS = [
   { name: 'clear', description: 'Reset the conversation context' },
   { name: 'compact', description: 'Compact the conversation' },
-  { name: 'help', description: 'List available slash commands' },
+  // /help 尚未實作 provider-side dispatch — SDK 不會原生回 command list，
+  // 若列在 autocomplete 上送出去只會被當成普通 prompt 餵給模型。實作前先註解。
+  // { name: 'help', description: 'List available slash commands' },
 ];
 
 const RATE_LIMIT_LABELS: Record<string, string> = {
