@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import type { AgentProvider, AgentPrefs, AuthMethod, Connection } from '@shared/types';
 import { AgentMessage, type AgentMsg } from './AgentMessage';
+import { SelectionPanel } from './SelectionPanel';
 import { renderMarkdown } from '../utils/markdown';
 import { useAttachmentPaste } from '../hooks/useAttachmentPaste';
 import { useStore, updateProjectConfig, setChatStage } from '../store';
@@ -174,7 +175,10 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
   const [slashFilter, setSlashFilter] = useState('');
   const [slashSelection, setSlashSelection] = useState(0);
   const [pendingPermission, setPendingPermission] = useState<PendingPermission | null>(null);
-  const [permSelection, setPermSelection] = useState(0);
+  // modelPicker.selected is unused after SelectionPanel extraction (component
+  // owns cursor state) but the shape is preserved so callers that flip
+  // `open` don't break. Remove fully when /model migrates to picker channel
+  // in step 9.
   const [modelPicker, setModelPicker] = useState<{ open: boolean; selected: number }>({ open: false, selected: 0 });
   const [queuedMessages, setQueuedMessages] = useState<QueuedMessage[]>([]);
   const [authRequired, setAuthRequired] = useState<{ provider: string } | null>(null);
@@ -318,7 +322,7 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
     const off = window.shelfApi.agent.onPermissionRequest((id: string, req: any) => {
       if (id !== tabId) return;
       setPendingPermission({ toolUseId: req.toolUseId, toolName: req.toolName, input: req.input ?? {} });
-      setPermSelection(0);
+      // SelectionPanel owns its own cursor; no separate cursor reset needed.
     });
     return off;
   }, [tabId]);
@@ -673,23 +677,12 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
     setPendingPermission(null);
   }, [tabId, pendingPermission]);
 
-  useEffect(() => {
-    if (!pendingPermission) return;
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'ArrowUp') { e.preventDefault(); setPermSelection((p) => (p > 0 ? p - 1 : 2)); }
-      else if (e.key === 'ArrowDown') { e.preventDefault(); setPermSelection((p) => (p < 2 ? p + 1 : 0)); }
-      else if (e.key === 'Enter') {
-        e.preventDefault();
-        if (permSelection === 0) handlePermissionRespond(true, 'once');
-        else if (permSelection === 1) handlePermissionRespond(true, 'session');
-        else handlePermissionRespond(false);
-      }
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [pendingPermission, permSelection, handlePermissionRespond]);
+  // Permission / model picker keyboard handling is now owned by the
+  // <SelectionPanel> component (internal cursor state + window keydown
+  // listener with priority capture). AgentView only owns the "is panel
+  // open?" gates (pendingPermission / modelPicker.open) and the callbacks
+  // that act on the selected value.
 
-  // Model picker keyboard
   const handleModelPickerSelect = useCallback((idx: number) => {
     if (!capabilities) return;
     const picked = capabilities.models[idx];
@@ -702,19 +695,6 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
     }]);
     setModelPicker({ open: false, selected: 0 });
   }, [tabId, capabilities]);
-
-  useEffect(() => {
-    if (!modelPicker.open || !capabilities) return;
-    const max = capabilities.models.length - 1;
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'ArrowUp') { e.preventDefault(); setModelPicker((p) => ({ ...p, selected: p.selected > 0 ? p.selected - 1 : max })); }
-      else if (e.key === 'ArrowDown') { e.preventDefault(); setModelPicker((p) => ({ ...p, selected: p.selected < max ? p.selected + 1 : 0 })); }
-      else if (e.key === 'Enter') { e.preventDefault(); handleModelPickerSelect(modelPicker.selected); }
-      else if (e.key === 'Escape') { e.preventDefault(); setModelPicker({ open: false, selected: 0 }); }
-    };
-    window.addEventListener('keydown', handler, true);
-    return () => window.removeEventListener('keydown', handler, true);
-  }, [modelPicker.open, modelPicker.selected, capabilities, handleModelPickerSelect]);
 
   // Status bar cycling
   const handleCycleModel = useCallback(() => {
@@ -967,40 +947,41 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
         )}
       </div>
 
-      {pendingPermission && (
-        <div className="agent-permission">
-          <div className="agent-permission-header">Allow <strong>{pendingPermission.toolName}</strong>?</div>
-          <pre className="agent-permission-input">{JSON.stringify(pendingPermission.input, null, 2)}</pre>
-          <div className="agent-perm-options">
-            {([
-              { label: 'Allow once', kind: 'allow', onClick: () => handlePermissionRespond(true, 'once') },
-              { label: 'Allow for session', kind: 'allow', onClick: () => handlePermissionRespond(true, 'session') },
-              { label: 'Deny', kind: 'deny', onClick: () => handlePermissionRespond(false) },
-            ] as const).map((opt, i) => (
-              <div key={opt.label} className={`agent-perm-option agent-perm-option-${opt.kind}${permSelection === i ? ' selected' : ''}`} onClick={opt.onClick}>
-                <span className="agent-perm-indicator">{permSelection === i ? '▶' : ' '}</span>
-                <span>{opt.label}</span>
-              </div>
-            ))}
-          </div>
-          <div className="agent-perm-hint"><kbd>↑</kbd><kbd>↓</kbd> select · <kbd>Enter</kbd> confirm</div>
-        </div>
-      )}
-
-      {modelPicker.open && capabilities && capabilities.models.length > 0 && (
-        <div className="agent-permission">
-          <div className="agent-permission-header">Select model</div>
-          <div className="agent-perm-options">
-            {capabilities.models.map((m, i) => (
-              <div key={m.value} className={`agent-perm-option agent-perm-option-allow${modelPicker.selected === i ? ' selected' : ''}`} onClick={() => handleModelPickerSelect(i)}>
-                <span className="agent-perm-indicator">{modelPicker.selected === i ? '▶' : ' '}</span>
-                <span>{m.displayName}{m.value === statusModel ? ' (current)' : ''}</span>
-              </div>
-            ))}
-          </div>
-          <div className="agent-perm-hint"><kbd>↑</kbd><kbd>↓</kbd> select · <kbd>Enter</kbd> confirm · <kbd>Esc</kbd> cancel</div>
-        </div>
-      )}
+      {/* Priority gate: permission (agent-driven blocking) > picker (user-driven).
+          When both want to show, permission takes the panel and picker state
+          stays preserved; permission resolution lets picker re-render
+          naturally via this conditional. See plan: UI focus rules. */}
+      {pendingPermission ? (
+        <SelectionPanel
+          title={<>Allow <strong>{pendingPermission.toolName}</strong>?</>}
+          description={<pre>{JSON.stringify(pendingPermission.input, null, 2)}</pre>}
+          options={[
+            { value: 'once',    label: 'Allow once',        kind: 'allow' },
+            { value: 'session', label: 'Allow for session', kind: 'allow' },
+            { value: 'deny',    label: 'Deny',              kind: 'deny'  },
+          ]}
+          onSelect={(value) => {
+            if (value === 'once') handlePermissionRespond(true, 'once');
+            else if (value === 'session') handlePermissionRespond(true, 'session');
+            else handlePermissionRespond(false);
+          }}
+        />
+      ) : modelPicker.open && capabilities && capabilities.models.length > 0 ? (
+        <SelectionPanel
+          title="Select model"
+          options={capabilities.models.map((m) => ({
+            value: m.value,
+            label: m.value === statusModel ? `${m.displayName} (current)` : m.displayName,
+          }))}
+          initialSelected={Math.max(0, capabilities.models.findIndex((m) => m.value === statusModel))}
+          cancellable
+          onSelect={(value) => {
+            const idx = capabilities.models.findIndex((m) => m.value === value);
+            if (idx >= 0) handleModelPickerSelect(idx);
+          }}
+          onCancel={() => setModelPicker({ open: false, selected: 0 })}
+        />
+      ) : null}
 
       {currentPlan.trim() && (
         <div className="agent-plan-panel">
