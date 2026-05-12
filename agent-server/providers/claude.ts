@@ -5,7 +5,17 @@ import { existsSync } from 'fs';
 import { resolve } from 'path';
 import type { QueryInput, SendFn, ServerBackend, ProviderCapabilities, SlashResult, StatusSegment } from './types';
 import { severityFromUtilization, formatResetCountdown, pickPermissionModes, pickEffortLevels } from './types';
+import { parseSlashPrefix } from './slash-prefix';
 import type { ProviderModel } from '../../src/shared/types';
+
+/**
+ * Mint a unique msgId for slash_response messages (no SDK-provided id like
+ * tool_use has). 8-char random suffix keeps logs readable while collision-free
+ * within reasonable lifetimes.
+ */
+function mintSlashMsgId(): string {
+  return `s-${randomUUID().slice(0, 8)}`;
+}
 
 // Claude SDK's `supportedCommands()` only returns user-installed skills, not
 // built-ins. Append these so the autocomplete menu lists them; submission still
@@ -139,6 +149,12 @@ export function createClaudeBackend(): ServerBackend {
   const pendingPermissions = new Map<string, (result: PermissionResult) => void>();
   let currentSend: SendFn | null = null;
 
+  // Non-cancellable critical-section flag (see Copilot's matching helper for
+  // rationale). Wraps Claude's `/compact` SDK turn so stop() silently no-ops
+  // mid-compaction — interrupting half-way would leave the SDK session in an
+  // indeterminate compacted/un-compacted state.
+  let stoppable = true;
+
   const canUseTool: CanUseTool = (async (toolName, input, canUseOpts) => {
     const toolUseId = (canUseOpts as any)?.toolUseID ?? `sdk-${Date.now()}`;
     currentSend?.({ type: 'permission_request', toolUseId, toolName, input });
@@ -262,11 +278,69 @@ export function createClaudeBackend(): ServerBackend {
       // assistant message (next assistant resets its index space).
       const blockMsgIds: BlockMsgIdMap = new Map();
 
+      // Slash detection — only `/compact` gets explicit slash_response
+      // tracking on Claude. SDK natively interprets `/cmd` strings (we
+      // forward unchanged), and most slashes produce assistant text in
+      // response. `/compact` is special because it emits dedicated boundary
+      // + status events the SDK guarantees, so we can synthesize a precise
+      // "Compacted: pre → post tokens" completion message that wouldn't
+      // otherwise reach the user. Other slashes (`/help`, `/clear`, etc.)
+      // stay as SDK pass-through with their normal assistant-text output.
+      const slash = parseSlashPrefix(input.prompt);
+      let pendingCompactMsgId: string | null = null;
+      let compactMeta: { pre_tokens?: number; post_tokens?: number; duration_ms?: number } | null = null;
+      if (slash?.cmd === 'compact') {
+        pendingCompactMsgId = mintSlashMsgId();
+        send({
+          type: 'message', msgId: pendingCompactMsgId, msgType: 'slash_response',
+          slashCmd: 'compact', status: 'pending', content: 'Compacting...',
+        });
+        // Whole compact turn is critical — stop() silently no-ops until done.
+        stoppable = false;
+      }
+
       try {
         for await (const sdkMsg of activeQuery) {
           if ('session_id' in sdkMsg && sdkMsg.session_id) {
             lastSessionId = sdkMsg.session_id as string;
           }
+
+          // /compact completion detection — must run before processMessage so
+          // we capture metadata from the system message while it's in scope.
+          // SDK emits two relevant events: subtype 'compact_boundary' carries
+          // pre/post token counts; subtype 'status' with compact_result is
+          // the terminal success/failure flag.
+          if (pendingCompactMsgId && sdkMsg.type === 'system') {
+            const subtype = (sdkMsg as any).subtype;
+            if (subtype === 'compact_boundary') {
+              compactMeta = (sdkMsg as any).compact_metadata ?? null;
+            } else if (subtype === 'status' && (sdkMsg as any).compact_result) {
+              const result = (sdkMsg as any).compact_result as 'success' | 'failed';
+              if (result === 'success') {
+                const pre = compactMeta?.pre_tokens?.toLocaleString() ?? '?';
+                const post = compactMeta?.post_tokens?.toLocaleString() ?? '?';
+                const dur = compactMeta?.duration_ms
+                  ? ` in ${(compactMeta.duration_ms / 1000).toFixed(1)}s`
+                  : '';
+                send({
+                  type: 'message', msgId: pendingCompactMsgId, msgType: 'slash_response',
+                  slashCmd: 'compact', status: 'success',
+                  content: `Compacted: ${pre} → ${post} tokens${dur}`,
+                });
+              } else {
+                const errMsg = (sdkMsg as any).compact_error ?? 'Compaction failed';
+                send({
+                  type: 'message', msgId: pendingCompactMsgId, msgType: 'slash_response',
+                  slashCmd: 'compact', status: 'error',
+                  content: `Compact failed: ${errMsg}`,
+                });
+              }
+              pendingCompactMsgId = null;
+              compactMeta = null;
+              stoppable = true;
+            }
+          }
+
           processMessage(sdkMsg, send, input.cwd, blockMsgIds);
         }
       } catch (err: any) {
@@ -285,6 +359,20 @@ export function createClaudeBackend(): ServerBackend {
         pendingPermissions.clear();
         activeQuery = null;
         abortController = null;
+
+        // Compact turn ended without a terminal status event — emit a
+        // generic error so the pending slash_response card doesn't sit
+        // forever waiting for an outcome. Reachable on SDK error / abort.
+        if (pendingCompactMsgId) {
+          send({
+            type: 'message', msgId: pendingCompactMsgId, msgType: 'slash_response',
+            slashCmd: 'compact', status: 'error',
+            content: 'Compaction did not complete',
+          });
+          pendingCompactMsgId = null;
+        }
+        stoppable = true;
+
         // Tell orchestrator to persist the latest SDK session_id so the next
         // process can resume. Single emit per turn — avoids disk thrash on
         // every chunk. Mid-turn crash tolerance: at worst the user loses the
@@ -299,6 +387,10 @@ export function createClaudeBackend(): ServerBackend {
     },
 
     async stop() {
+      // Silently ignore mid-compaction (or any other critical section the
+      // provider sets `stoppable = false` for). Interrupting `/compact`
+      // half-way leaves the SDK session in an indeterminate state.
+      if (!stoppable) return;
       for (const resolve of pendingPermissions.values()) {
         resolve({ behavior: 'deny', message: 'Stopped by user' });
       }
