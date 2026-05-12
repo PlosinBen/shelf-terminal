@@ -774,8 +774,16 @@ export function AgentView({ tabId, cwd, connection, provider, projectIndex, visi
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const val = e.target.value;
     setInput(val);
-    if (val.startsWith('/') && !val.includes('\n')) {
-      setSlashFilter(val.slice(1).split(/\s/)[0]);
+    // Slash menu is for *command name* autocomplete only — show it while the
+    // user is typing the slash command itself (`/m`, `/mo`, `/model`), hide it
+    // the moment they add a space (`/model opu`). Once a space is present,
+    // the input is in "args" territory; keeping the menu open would steal
+    // Enter for slash completion and overwrite the user's args (e.g.,
+    // typing /model opus + Enter would collapse to `/model `).
+    //
+    // Pattern: `/` followed by zero or more word chars, nothing else.
+    if (/^\/\w*$/.test(val)) {
+      setSlashFilter(val.slice(1));
       setShowSlashMenu(true);
       setSlashSelection(0);
     } else {
