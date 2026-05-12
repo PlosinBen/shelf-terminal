@@ -823,3 +823,93 @@ SDK 原生提供 `SDKCompactBoundaryMessage`（subtype `compact_boundary`，帶 
 - `<SelectionPanel>` 元件取代 permission popup + model picker 重複 JSX
 
 See `.agent/features/slash-command-redesign.md` for the full 12-step migration trace.
+
+
+## 55. Renderer-authoritative prefs + orchestrator-driven setX
+
+**問題**: 三個進入點切 model 走三條路徑：
+
+1. `/model X` slash → Copilot provider 內部 `applyModel` → emit capabilities
+2. `/model` picker → 同 (1)
+3. Status bar click → renderer `setStatusModel + setPrefs IPC + persistPref`
+
+(1)(2) 是 backend → renderer，(3) 是 renderer → backend，方向相反。
+Source of truth 散在兩邊（Copilot closure `currentModel` vs renderer `savedPrefs`），
+靠 `onCapabilities` drift-back loop 強同步 — 不但複雜，還在 user 主動 picker
+選 model 時把選擇撤回去（drift detect 認為 backend 漂走了 savedPrefs，推回去）。
+
+而且 Copilot 的 closure `currentModel` 是 per-Provider 單例（`backends` Map
+key 是 Provider，不是 sessionId），多 Copilot tab 共用同一 backend instance
+等於互相覆蓋 model state — latent multi-tab bug。
+
+**決策**: Renderer 是 prefs 唯一 source of truth；agent-server orchestrator
+做 diff + 喊 setX。
+
+- Renderer 每次 `agent.send` IPC payload 帶 `model` + `effort` +
+  `permissionMode`（從 `savedPrefs` / `statusModel` 等讀），不再依賴 `setPrefs`
+  IPC pre-load backend cache
+- Agent-server `handleSend` 用 `lastAppliedPrefs: Map<sessionId, prefs>` diff
+  detect — 跟上次套用的 prefs 比，差異才 call `backend.setModel?(value)` /
+  `setEffort?` / `setPermissionMode?`
+- Provider 的 setX 是**imperative**「apply this now」，不做 diff（orchestrator
+  保證 only-on-change）。Copilot 實作會 call `state.session.setModel(...)`；
+  Claude 不實作（per-call `options.model` 由 `sdkQuery` 直接用，不需要 setX）
+
+**為什麼這樣設計**:
+
+1. **持久化本來就是 renderer 工作**（`savedPrefs` in projectConfig）— prefs 順
+   理成章是 renderer-owned
+2. **單一 source of truth**：drift-back loop 砍掉（兩個 owner 互推的設計缺陷消失）
+3. **Per-sessionId diff** 在 orchestrator → 多 tab 自然分離，沒 closure singleton
+   覆蓋問題
+4. **Claude / Copilot 不對稱優雅處理**：Claude 不實作 setX，optional
+   `?.()` 自動 skip
+5. **Provider 介面職責收斂**：query 跑 SDK / setX apply prefs，不再 inline 做
+   「上次 X 是什麼」判斷
+
+**配套：renderer-local config-edit slash**:
+
+`/model` 不再是 agent command，是「快捷鍵版的 config edit」（跟 status bar
+click 同義）。Renderer 在 `handleSend` 偵測 `RENDERER_LOCAL_SLASHES`（目前只
+有 `model`，預留 `effort` / `permissionMode`）就攔截 → call `handleConfigEdit`
+→ persistPref + setStatus state。零 IPC，下次 normal send 自然帶上新 pref。
+
+`/model` 無參數 → renderer-local `<SelectionPanel>`（不走 picker_request channel，
+那是給 provider-driven 互動預留）。Options 從 `capabilities.models` 拿（含 user
+自訂 custom models — `mergeClaudeModels` 處理 SDK curated list + user 加的）。
+
+**Validation 策略：SDK 是唯一仲裁者**:
+
+不在 renderer 端驗 model 合法性。Capabilities.models 不是 authoritative（Claude
+SDK `supportedModels()` 會隱藏 legacy models，但 SDK 實際接受）。`/model X`
+直接 optimistic apply；SDK 拒絕時 orchestrator catch + emit `error` event，
+文字包 `model` 名 + SDK 真實 error 訊息。No auto-revert — 使用者看到錯誤
+自己再 `/model Y` 修。Hidden / legacy models 走 Settings 加 custom entry 的
+既有路徑。
+
+**不要改**:
+
+- 不要把 prefs 放回 backend authoritative（drift-back loop 是這個設計的副作用）
+- 不要在 renderer 加 model validation against capabilities — 我們不該替 SDK 扛
+  curated list 維護責任
+- 不要把 /model 放回 provider 的 SLASH_COMMANDS / CLAUDE_BUILTIN_COMMANDS —
+  Provider 不該宣告它不處理的指令
+- 不要在 provider 內 setX 做 diff — orchestrator 已經做了，重複 diff 沒意義
+
+**配套變更**:
+
+- `AGENT_SEND` payload 加 `model` / `effort` / `permissionMode`（step A）
+- 加 `lastAppliedPrefs` Map + `applyPrefDiff` 到 agent-server orchestrator（step B）
+- ServerBackend 加 optional `setModel?` / `setEffort?` / `setPermissionMode?`（step B）
+- Copilot impl setX（step B），closure `currentModel` 等保留給 capabilities /
+  ensureSession 用
+- Claude 不 impl setX
+- `AGENT_SET_PREFS` IPC、preload setPrefs、remote.ts 閉包 cache、`onCapabilities`
+  drift-back 邏輯 — 全部砍（step C）
+- `RENDERER_LOCAL_SLASHES` + `handleConfigEdit` + `localPicker` state（step D）
+- `parseSlashPrefix` 從 agent-server 搬 `src/shared/` 共用（step D）
+- /model 從 `CLAUDE_BUILTIN_COMMANDS` / `SLASH_COMMANDS` 移除（step E）
+- Copilot `dispatchSlash` /model case 整段刪掉（step E）
+
+See `.agent/features/slash-command-redesign.md` "Follow-up: pref sync architecture"
+for design discussion.

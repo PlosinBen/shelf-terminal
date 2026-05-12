@@ -62,10 +62,9 @@
 | Context persistence | `context-store.ts` | `loadContext()`、`saveContext()`、`deleteContext()`、`cleanupOldContexts()`，存放在 `~/.shelf/agent-context/{sessionId}.json`，atomic write（tmp+rename）。**Provider 不直接 import 這個 module** — 透過 `QueryInput.restoreContext` 讀、發 `context_patch` 訊息寫，由 orchestrator (`index.ts`) 統一處理。`lastSdkSessionId` 給 Claude（SDK `options.resume`）和 Copilot（`client.resumeSession()`）共用 |
 | Context persistence 測試 | `context-store.test.ts` | `loadContext`/`saveContext`/`deleteContext` round-trip，含 Claude resume 指針 + Copilot Responses chain |
 | Provider types | `providers/types.ts` | `ServerBackend`（含 `resetSession?()` / `resolvePicker?()`）、`SendFn`、`QueryInput`（含 `sessionId` + orchestrator hydrated `restoreContext`）、`OutgoingMessage`（含 internal `context_patch` 通知 orchestrator 持久化；`picker_request` 走 generic N-way picker channel）、`ProviderCapabilities`。**SlashResult 已移除** — slash 經 `query()` 內 `parseSlashPrefix` 偵測後走 provider 內部 dispatch，輸出走 `slash_response` AgentMessage variant |
-| Slash prefix detection | `providers/slash-prefix.ts` | `parseSlashPrefix(prompt)` 共用 helper — 兩個 provider 在 `query()` 入口偵測 `/cmd args` prefix。多行不認、bare slash 不認、cmd 名支援底線/數字。Provider 自主決定要不要叫（可改 prefix 或直接 forward 給 SDK） |
+| Slash prefix detection | `src/shared/slash-prefix.ts` | `parseSlashPrefix(prompt)` 共用 helper — 兩個 provider 在 `query()` 入口偵測 `/cmd args` prefix；renderer (AgentView.handleSend) 也 import 同份做 RENDERER_LOCAL_SLASHES 攔截。多行不認、bare slash 不認、cmd 名支援底線/數字 |
 | Bundle build | `build.mjs` | esbuild → `dist/agent-server/<version>/index.js` 單一 ESM bundle |
 | 單元測試 | `slash-commands.test.ts` | Slash dispatch（透過 `query()` 入口）：/help /context /compact /clear unknown + streaming/idle status pair 不帶 cost metrics |
-| 單元測試 | `slash-prefix.test.ts` | `parseSlashPrefix` helper：bare slash 不認、multi-line 不認、底線/數字 cmd 名 |
 
 ### PM Agent (src/main/pm/)
 
@@ -97,7 +96,7 @@
 | 快捷鍵系統 | `hooks/useKeybindings.ts` | combo string 對應 action，支援參數化 action（`switchTab_N`） |
 | Paste/drop 上傳 hook | `hooks/useAttachmentPaste.ts` | 從 TerminalView 抽出的 paste/drop/upload pipeline，支援 file size check |
 | Terminal 渲染 | `components/TerminalView.tsx` | xterm.js instance cache、PTY I/O、useAttachmentPaste hook、unread badge |
-| Agent 對話 UI | `components/AgentView.tsx` | Agent tab 聊天介面（訊息列表 + input bar + send/stop）。Stream chunks + finalize message 共用 `msgId` 進同一個 `messages` 上 upsert — 沒有獨立 `streamText` / `streamThinking` state；in-flight entry 帶 `streaming: true` flag 由 `AgentMessage` 渲染 cursor。**Slash + 普通 text 走同一條 send path** — provider 在 query() 內偵測 prefix 自行 dispatch，renderer 不分流 |
+| Agent 對話 UI | `components/AgentView.tsx` | Agent tab 聊天介面（訊息列表 + input bar + send/stop）。Stream chunks + finalize message 共用 `msgId` 進同一個 `messages` 上 upsert — 沒有獨立 `streamText` / `streamThinking` state；in-flight entry 帶 `streaming: true` flag 由 `AgentMessage` 渲染 cursor。**Slash 分兩類**：agent-bound（/help /context /compact /clear）走 agent.send → provider dispatchSlash；renderer-local 配置編輯（`RENDERER_LOCAL_SLASHES`：/model 目前；/effort /permissionMode 預留）由 `handleConfigEdit` 直接 mutate projectConfig + status state，零 IPC，下次 send 自然帶上新 pref。**Prefs (model/effort/permissionMode) 是 renderer-authoritative** — savedPrefs 是 source of truth，每次 agent.send 在 payload 帶過去，agent-server orchestrator diff 後 call provider.setX |
 | 選擇面板 | `components/SelectionPanel.tsx` | Bottom-anchored N-way 選單，permission popup + generic picker 共用元件。Owns 鍵盤 cursor + ↑↓/Enter/Esc（cancellable）handler（capture phase）。Provider 觸發 picker_request → renderer 渲染 SelectionPanel → resolvePicker IPC 回 provider |
 | Bottom bar | `components/BottomBar.tsx` | 顯示 connection type、cwd、git branch；branch dropdown 支援切換或跳轉 worktree project |
 | Sidebar | `components/Sidebar.tsx` | Project 列表、拖曳排序、右鍵選單（含 New Worktree）、worktree branch 顯示、收合按鈕 |
@@ -129,6 +128,8 @@
 | IPC channel 常數 | `ipc-channels.ts` | 所有 IPC channel name（含 pm:send/stream/away-mode、git:branch-list 等），避免 string typo |
 | Logger | `logger.ts` | 統一 log 模組，支援 file writer、log level、env override |
 | 預設值 | `defaults.ts` | DEFAULT_SETTINGS, DEFAULT_KEYBINDINGS |
+| Slash prefix parser | `slash-prefix.ts` | `parseSlashPrefix(prompt)` — agent-server providers 跟 renderer 都用同一份；multi-line 不認、bare slash 不認、底線/數字 cmd 名 |
+| 單元測試 | `slash-prefix.test.ts` | `parseSlashPrefix` 邊界 case 覆蓋 |
 
 ## Config / CI
 
