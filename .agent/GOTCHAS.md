@@ -699,3 +699,25 @@ if (event?.type === 'content_block_start' && ...) {
 **未來路徑**:
 - Anthropic 可能後續加 `onAskUserQuestion?: (input) => Promise<output>` callback（對齊既有 `onElicitation`）— 那時把 `canUseTool` 攔截改成註冊新 callback，wire shape (picker_request) 不變
 - 若 deny+message hack 哪天壞了（SDK 把 deny content 改成 "Denied"-style string 不傳 message 內容）— GOTCHAS 補一筆，臨時改 `disallowedTools` 加 AskUserQuestion 退回純文字模式
+
+## bypassPermissions 模式下 AskUserQuestion 仍需攔截
+
+**現象**: Claude provider 在 `bypassPermissions` 下走 DIY bypass — `canUseTool` 對所有 tool 短路 return allow（避開 SDK 的 `allowDangerouslySkipPermissions` flag）。早期版本把 bypass 短路寫在 canUseTool 入口，**順手把 AskUserQuestion 也 bypass 掉**：SDK 看到 allow → 跑 AskUserQuestion 的內建實作 → 沒 TTY → 自動 resolve 空答案 → 使用者看到 model 抱怨 "didn't come through"。
+
+**修法**: bypass 短路必須**排在 AskUserQuestion 攔截之後**。判定原則：
+
+- **bypass = 「跳過 tool 權限把關」** —— Bash/Edit/Write 等 SDK 內建工具不要再問
+- **bypass ≠ 「跳過使用者互動 prompt」** —— AskUserQuestion 是 agent 主動發起的問答，UI 本來就該跳
+
+實作上 canUseTool 的判斷順序：
+```ts
+canUseTool = async (toolName, input, opts) => {
+  if (toolName === 'AskUserQuestion') return handleAskUserQuestion(...);  // ← 永遠先攔
+  if (currentBypassMode) return { behavior: 'allow', updatedInput: input };  // ← bypass 在後
+  // ... 一般 permission_request 流程
+};
+```
+
+**未來如果加新的「使用者互動」型 tool**（例如 SDK 哪天加 `AskUserConfirm`、`AskUserSelect` 之類），同樣要排在 bypass 之前。判定方法：tool 的語意是「我需要使用者親自做決定」就要先攔；tool 的語意是「我要存取系統資源」才走 bypass 路徑。
+
+**回歸測試**: `agent-server/providers/claude.test.ts` 的 "AskUserQuestion intercept survives bypassPermissions" 段。

@@ -928,7 +928,7 @@ Shelf-terminal 原本完全沒處理：Claude SDK 把 AskUserQuestion 當普通 
 舊 `picker_request` 是 RPC channel 預留架構（single-question N-way pick，原本要服務 /model picker，後來 /model 走 renderer-local — DECISIONS #55），shipped 但無 producer。
 
 **決策**: 重塑 picker_request 為「多題結構化 form」一統 channel：
-- Wire shape：`prompts[]`（N 題）+ per-prompt `multiSelect` + `options[]` + 可選 `inputType: 'text' | 'number' | 'integer'` 開「Other」自填
+- Wire shape：`prompts[]`（N 題）+ per-prompt `multiSelect` + `options[]` + 可選 `inputType: 'text' | 'number' | 'integer'`（設定後 renderer always-render 一個自填輸入框；AskUserQuestion 的隱含 Other auto-add 就靠這條映射過來）
 - PickerResolvePayload：`{ answers: Array<string | string[]> }` index-aligned 或 `{ cancelled: true }`
 - Claude provider：`canUseTool` 偵測 `toolName === 'AskUserQuestion'` 攔截、轉 picker_request、await renderer resolve、SDK output JSON 塞進 `{ behavior: 'deny', message: ... }` 餵回 model（spike 確認 model 解析 deny content 不看 is_error flag — `scripts/spike-askuser.ts`）
 - Copilot provider：`registerElicitationHandler` 把 ElicitationSchema 7 field types → picker_request prompts（reverse mapping 含 integer/number parseInt/parseFloat fallback）
