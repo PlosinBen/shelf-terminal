@@ -320,6 +320,229 @@ function mintMsgId(): string {
   return `m-${randomUUID().slice(0, 8)}`;
 }
 
+// ── Elicitation ↔ picker_request mapping ─────────────────────────────────
+// Copilot SDK's elicitation API delivers a JSON-Schema-style form definition
+// (ElicitationSchema with N typed properties). We translate that into our
+// picker_request shape (multi-question form) and translate the answers back
+// into the typed ElicitationResult.content map.
+//
+// See .agent/features/picker-request-redesign.md for the field-type mapping
+// table. Exported for unit testing — handler integration lives below.
+
+export interface ElicitationFieldEntry {
+  /** Property key in the schema (becomes the content map key on resolve). */
+  key: string;
+  /** Original field definition (used for value coercion on resolve). */
+  field: any;
+}
+
+export interface ElicitationMapped {
+  prompts: Array<{
+    question: string;
+    header?: string;
+    multiSelect: boolean;
+    options: Array<{ label: string; description?: string }>;
+    inputType?: 'text' | 'number' | 'integer';
+    currentValue?: string | string[];
+  }>;
+  /** Schema fields in property order — used by the answer-coercion step
+   *  to map index-aligned picker answers back into a typed content map. */
+  fields: ElicitationFieldEntry[];
+}
+
+/**
+ * Pure mapper: ElicitationSchema → picker_request prompts + ordered field
+ * list for the reverse mapping. Returns `null` for empty/malformed schemas
+ * — caller should decline the elicitation in that case.
+ *
+ * Field type → prompt configuration:
+ *   string + enum/enumNames     → options from enum (no inputType)
+ *   string + oneOf              → options from oneOf.title (no inputType)
+ *   array + items.enum          → options, multiSelect=true
+ *   array + items.anyOf         → options from anyOf.title, multiSelect=true
+ *   boolean                     → options=[Yes,No] (no inputType)
+ *   string + format/length      → options=[], inputType='text'
+ *   number                      → options=[], inputType='number'
+ *   integer                     → options=[], inputType='integer'
+ */
+export function elicitationSchemaToPrompts(schema: any): ElicitationMapped | null {
+  if (!schema || schema.type !== 'object' || !schema.properties) return null;
+  const keys = Object.keys(schema.properties);
+  if (keys.length === 0) return null;
+
+  const fields: ElicitationFieldEntry[] = [];
+  const prompts = keys.map((key) => {
+    const field = schema.properties[key];
+    fields.push({ key, field });
+
+    // Header is the schema's `title` (clipped to 12 chars to match
+    // AskUserQuestion's chip-style header convention); question text is
+    // `description` if present, otherwise the property key.
+    const header = typeof field.title === 'string' ? field.title.slice(0, 12) : undefined;
+    const question = typeof field.description === 'string' ? field.description : key;
+
+    // Boolean
+    if (field.type === 'boolean') {
+      return {
+        question,
+        header,
+        multiSelect: false,
+        options: [{ label: 'Yes' }, { label: 'No' }],
+        inputType: undefined,
+        currentValue: typeof field.default === 'boolean' ? (field.default ? 'Yes' : 'No') : undefined,
+      };
+    }
+
+    // String with enum / enumNames (single-select)
+    if (field.type === 'string' && Array.isArray(field.enum)) {
+      const names: string[] | undefined = Array.isArray(field.enumNames) ? field.enumNames : undefined;
+      const options = field.enum.map((v: string, i: number) => ({
+        label: names?.[i] ?? v,
+        description: names?.[i] ? v : undefined,
+      }));
+      const def = typeof field.default === 'string' ? field.default : undefined;
+      // currentValue uses the displayed label when enumNames provided.
+      const defLabel = def !== undefined
+        ? (names ? names[field.enum.indexOf(def)] ?? def : def)
+        : undefined;
+      return { question, header, multiSelect: false, options, inputType: undefined, currentValue: defLabel };
+    }
+
+    // String with oneOf (single-select, richer title)
+    if (field.type === 'string' && Array.isArray(field.oneOf)) {
+      const options = field.oneOf.map((o: any) => ({
+        label: String(o?.title ?? o?.const ?? ''),
+        description: o?.const && o?.title && o.const !== o.title ? String(o.const) : undefined,
+      }));
+      const def = typeof field.default === 'string' ? field.default : undefined;
+      const defLabel = def !== undefined
+        ? field.oneOf.find((o: any) => o.const === def)?.title ?? def
+        : undefined;
+      return { question, header, multiSelect: false, options, inputType: undefined, currentValue: defLabel };
+    }
+
+    // Array of enum strings (multi-select)
+    if (field.type === 'array' && field.items?.type === 'string' && Array.isArray(field.items.enum)) {
+      const options = field.items.enum.map((v: string) => ({ label: v }));
+      const def = Array.isArray(field.default) ? field.default : undefined;
+      return { question, header, multiSelect: true, options, inputType: undefined, currentValue: def };
+    }
+
+    // Array of anyOf (multi-select, richer titles)
+    if (field.type === 'array' && Array.isArray(field.items?.anyOf)) {
+      const options = field.items.anyOf.map((o: any) => ({
+        label: String(o?.title ?? o?.const ?? ''),
+        description: o?.const && o?.title && o.const !== o.title ? String(o.const) : undefined,
+      }));
+      const def = Array.isArray(field.default)
+        ? field.default.map((d: string) => field.items.anyOf.find((o: any) => o.const === d)?.title ?? d)
+        : undefined;
+      return { question, header, multiSelect: true, options, inputType: undefined, currentValue: def };
+    }
+
+    // Numeric (free-text with type hint)
+    if (field.type === 'integer' || field.type === 'number') {
+      return {
+        question,
+        header,
+        multiSelect: false,
+        options: [],
+        inputType: field.type as 'integer' | 'number',
+        currentValue: typeof field.default === 'number' ? String(field.default) : undefined,
+      };
+    }
+
+    // Fallback: plain string with no enum (format/length/maxLength hints
+    // are dropped — see picker-request-redesign.md "Out of scope v1").
+    return {
+      question,
+      header,
+      multiSelect: false,
+      options: [],
+      inputType: 'text' as const,
+      currentValue: typeof field.default === 'string' ? field.default : undefined,
+    };
+  });
+
+  return { prompts, fields };
+}
+
+/**
+ * Pure coerce: PickerResolvePayload answers → ElicitationResult.content map.
+ *
+ * Numeric fields try `parseInt` / `parseFloat`; on parse failure the raw
+ * string is sent through so the agent can re-prompt with feedback (we don't
+ * validate min/max/format — see picker-request-redesign.md "Out of scope v1").
+ *
+ * Boolean fields map 'Yes' → true, anything else → false. Multi-select array
+ * fields with enumNames need to reverse the displayed label back to the const
+ * value if the original schema provided enumNames distinct from enum.
+ */
+export function picksToElicitationContent(
+  fields: ElicitationFieldEntry[],
+  answers: Array<string | string[]>,
+): Record<string, any> {
+  const content: Record<string, any> = {};
+  fields.forEach((entry, i) => {
+    const { key, field } = entry;
+    const ans = answers[i];
+
+    if (field.type === 'boolean') {
+      content[key] = ans === 'Yes';
+      return;
+    }
+
+    if (field.type === 'integer') {
+      const raw = typeof ans === 'string' ? ans : Array.isArray(ans) ? ans[0] : '';
+      const n = parseInt(raw, 10);
+      content[key] = Number.isFinite(n) ? n : raw;
+      return;
+    }
+    if (field.type === 'number') {
+      const raw = typeof ans === 'string' ? ans : Array.isArray(ans) ? ans[0] : '';
+      const n = parseFloat(raw);
+      content[key] = Number.isFinite(n) ? n : raw;
+      return;
+    }
+
+    if (field.type === 'array') {
+      const arr = Array.isArray(ans) ? ans : [String(ans ?? '')];
+      // Reverse-lookup label → const when the schema used enumNames / anyOf.title.
+      if (Array.isArray(field.items?.enum) && Array.isArray(field.items?.enumNames)) {
+        content[key] = arr.map((label) => {
+          const idx = field.items.enumNames.indexOf(label);
+          return idx >= 0 ? field.items.enum[idx] : label;
+        });
+        return;
+      }
+      if (Array.isArray(field.items?.anyOf)) {
+        content[key] = arr.map((label) => {
+          const found = field.items.anyOf.find((o: any) => o.title === label || o.const === label);
+          return found?.const ?? label;
+        });
+        return;
+      }
+      content[key] = arr;
+      return;
+    }
+
+    // String single-select (enum/oneOf/freeText)
+    const raw = typeof ans === 'string' ? ans : Array.isArray(ans) ? ans[0] : '';
+    if (Array.isArray(field.enum) && Array.isArray(field.enumNames)) {
+      const idx = field.enumNames.indexOf(raw);
+      content[key] = idx >= 0 ? field.enum[idx] : raw;
+      return;
+    }
+    if (Array.isArray(field.oneOf)) {
+      const found = field.oneOf.find((o: any) => o.title === raw || o.const === raw);
+      content[key] = found?.const ?? raw;
+      return;
+    }
+    content[key] = raw;
+  });
+  return content;
+}
+
 export function createCopilotBackend(): ServerBackend {
   const pendingPermissions = new Map<string, (result: PermissionResult) => void>();
   let currentSend: SendFn | null = null;
@@ -501,6 +724,32 @@ export function createCopilotBackend(): ServerBackend {
     // Tell orchestrator to persist this so the next process can resume the
     // same Copilot CLI session (CLI keeps session state on disk by sessionId).
     currentSend?.({ type: 'context_patch', patch: { lastSdkSessionId: session.sessionId } });
+
+    // Elicitation handler: bridge Copilot SDK's session.ui.* /
+    // session.ui.elicitation requests to our picker_request channel. URL
+    // mode (OAuth-style external auth) is not wired in v1 — declined with
+    // a console warning. See picker-request-redesign.md.
+    session.registerElicitationHandler(async (ctx) => {
+      if (ctx.mode === 'url') {
+        console.warn('[copilot] URL-mode elicitation not supported; declining', {
+          url: ctx.url, source: ctx.elicitationSource,
+        });
+        return { action: 'decline' };
+      }
+      const schema = ctx.requestedSchema;
+      const mapped = schema ? elicitationSchemaToPrompts(schema) : null;
+      if (!mapped) {
+        console.warn('[copilot] elicitation has no usable schema; declining', { message: ctx.message });
+        return { action: 'decline' };
+      }
+      const pickerId = `pk-${randomUUID().slice(0, 8)}`;
+      currentSend?.({ type: 'picker_request', id: pickerId, prompts: mapped.prompts });
+      const resolved = await new Promise<PickerResolvePayload>((resolve) => {
+        pendingPickers.set(pickerId, resolve);
+      });
+      if ('cancelled' in resolved) return { action: 'cancel' };
+      return { action: 'accept', content: picksToElicitationContent(mapped.fields, resolved.answers) };
+    });
 
     // If user already picked a non-default mode before this session existed, apply it.
     // Note: bypassPermissions has its own short-circuit in onPermissionRequest,

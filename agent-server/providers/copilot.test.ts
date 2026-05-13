@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { quotaSnapshotToSegment, parseApplyPatch, formatCopilotToolInput } from './copilot';
+import { quotaSnapshotToSegment, parseApplyPatch, formatCopilotToolInput, elicitationSchemaToPrompts, picksToElicitationContent } from './copilot';
 
 describe('quotaSnapshotToSegment', () => {
   it('renders premium quota at 100%', () => {
@@ -278,5 +278,172 @@ describe('formatCopilotToolInput', () => {
 
   it('falls back to JSON when no string field', () => {
     expect(formatCopilotToolInput('mystery', { x: 1 }, cwd)).toContain('"x":1');
+  });
+});
+
+describe('elicitationSchemaToPrompts', () => {
+  it('returns null for malformed schema', () => {
+    expect(elicitationSchemaToPrompts(null)).toBeNull();
+    expect(elicitationSchemaToPrompts({ type: 'string' })).toBeNull();
+    expect(elicitationSchemaToPrompts({ type: 'object', properties: {} })).toBeNull();
+  });
+
+  it('maps string + enum to single-select options', () => {
+    const result = elicitationSchemaToPrompts({
+      type: 'object',
+      properties: {
+        role: { type: 'string', title: 'Role', description: 'Pick role', enum: ['admin', 'user'] },
+      },
+    })!;
+    expect(result.prompts).toHaveLength(1);
+    expect(result.prompts[0]).toEqual({
+      question: 'Pick role',
+      header: 'Role',
+      multiSelect: false,
+      options: [
+        { label: 'admin', description: undefined },
+        { label: 'user', description: undefined },
+      ],
+      inputType: undefined,
+      currentValue: undefined,
+    });
+    expect(result.fields[0].key).toBe('role');
+  });
+
+  it('maps string + enumNames to options with const stored as description', () => {
+    const result = elicitationSchemaToPrompts({
+      type: 'object',
+      properties: {
+        env: { type: 'string', enum: ['p', 's'], enumNames: ['Production', 'Staging'] },
+      },
+    })!;
+    expect(result.prompts[0].options).toEqual([
+      { label: 'Production', description: 'p' },
+      { label: 'Staging', description: 's' },
+    ]);
+  });
+
+  it('maps array + items.enum to multi-select', () => {
+    const result = elicitationSchemaToPrompts({
+      type: 'object',
+      properties: {
+        regions: {
+          type: 'array',
+          description: 'Pick regions',
+          items: { type: 'string', enum: ['us', 'eu', 'asia'] },
+          default: ['us'],
+        },
+      },
+    })!;
+    expect(result.prompts[0].multiSelect).toBe(true);
+    expect(result.prompts[0].options).toEqual([{ label: 'us' }, { label: 'eu' }, { label: 'asia' }]);
+    expect(result.prompts[0].currentValue).toEqual(['us']);
+  });
+
+  it('maps boolean to Yes/No options with default', () => {
+    const result = elicitationSchemaToPrompts({
+      type: 'object',
+      properties: {
+        autoscale: { type: 'boolean', default: true },
+      },
+    })!;
+    expect(result.prompts[0]).toMatchObject({
+      multiSelect: false,
+      options: [{ label: 'Yes' }, { label: 'No' }],
+      currentValue: 'Yes',
+    });
+  });
+
+  it('maps integer to free-text input with inputType', () => {
+    const result = elicitationSchemaToPrompts({
+      type: 'object',
+      properties: {
+        replicas: { type: 'integer', minimum: 1, maximum: 10, default: 3 },
+      },
+    })!;
+    expect(result.prompts[0]).toMatchObject({
+      options: [],
+      inputType: 'integer',
+      currentValue: '3',
+    });
+  });
+
+  it('maps multi-field schemas preserving property order', () => {
+    const result = elicitationSchemaToPrompts({
+      type: 'object',
+      properties: {
+        name: { type: 'string', maxLength: 50 },
+        role: { type: 'string', enum: ['a', 'b'] },
+        count: { type: 'integer' },
+      },
+    })!;
+    expect(result.prompts).toHaveLength(3);
+    expect(result.fields.map((f) => f.key)).toEqual(['name', 'role', 'count']);
+    expect(result.prompts[0].inputType).toBe('text');     // plain string
+    expect(result.prompts[1].inputType).toBeUndefined();  // enum
+    expect(result.prompts[2].inputType).toBe('integer');
+  });
+
+  it('clips long title to 12-char header (chip convention)', () => {
+    const result = elicitationSchemaToPrompts({
+      type: 'object',
+      properties: {
+        x: { type: 'boolean', title: 'This is a very long title' },
+      },
+    })!;
+    expect(result.prompts[0].header).toBe('This is a ve');
+    expect(result.prompts[0].header!.length).toBe(12);
+  });
+});
+
+describe('picksToElicitationContent', () => {
+  it('boolean Yes → true, anything else → false', () => {
+    const fields = [{ key: 'autoscale', field: { type: 'boolean' } }];
+    expect(picksToElicitationContent(fields, ['Yes'])).toEqual({ autoscale: true });
+    expect(picksToElicitationContent(fields, ['No'])).toEqual({ autoscale: false });
+  });
+
+  it('integer parses to number, falls through string on parse fail', () => {
+    const fields = [{ key: 'count', field: { type: 'integer' } }];
+    expect(picksToElicitationContent(fields, ['42'])).toEqual({ count: 42 });
+    expect(picksToElicitationContent(fields, ['abc'])).toEqual({ count: 'abc' });
+  });
+
+  it('number parses to float', () => {
+    const fields = [{ key: 'rate', field: { type: 'number' } }];
+    expect(picksToElicitationContent(fields, ['1.5'])).toEqual({ rate: 1.5 });
+  });
+
+  it('array enumNames label reverses back to const value', () => {
+    const fields = [{
+      key: 'env',
+      field: { type: 'array', items: { type: 'string', enum: ['p', 's'], enumNames: ['Prod', 'Stage'] } },
+    }];
+    const out = picksToElicitationContent(fields, [['Prod', 'Stage']]);
+    expect(out).toEqual({ env: ['p', 's'] });
+  });
+
+  it('string enumNames label reverses back to const value', () => {
+    const fields = [{
+      key: 'role',
+      field: { type: 'string', enum: ['a', 'b'], enumNames: ['Alpha', 'Beta'] },
+    }];
+    expect(picksToElicitationContent(fields, ['Beta'])).toEqual({ role: 'b' });
+  });
+
+  it('plain string field passes through', () => {
+    const fields = [{ key: 'name', field: { type: 'string' } }];
+    expect(picksToElicitationContent(fields, ['Alice'])).toEqual({ name: 'Alice' });
+  });
+
+  it('multi-field content keyed by property order', () => {
+    const fields = [
+      { key: 'name', field: { type: 'string' } },
+      { key: 'count', field: { type: 'integer' } },
+      { key: 'enabled', field: { type: 'boolean' } },
+    ];
+    expect(picksToElicitationContent(fields, ['Alice', '3', 'Yes'])).toEqual({
+      name: 'Alice', count: 3, enabled: true,
+    });
   });
 });
