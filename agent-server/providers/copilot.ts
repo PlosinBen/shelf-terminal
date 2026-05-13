@@ -326,8 +326,10 @@ function mintMsgId(): string {
 // picker_request shape (multi-question form) and translate the answers back
 // into the typed ElicitationResult.content map.
 //
-// See .agent/features/picker-request-redesign.md for the field-type mapping
-// table. Exported for unit testing — handler integration lives below.
+// Field-type → prompt mapping table is implemented in
+// `elicitationSchemaToPrompts` below — see the function comment + its
+// branch structure for the per-type details. Exported for unit testing;
+// handler integration lives further down (registerElicitationHandler).
 
 export interface ElicitationFieldEntry {
   /** Property key in the schema (becomes the content map key on resolve). */
@@ -453,7 +455,7 @@ export function elicitationSchemaToPrompts(schema: any): ElicitationMapped | nul
     }
 
     // Fallback: plain string with no enum (format/length/maxLength hints
-    // are dropped — see picker-request-redesign.md "Out of scope v1").
+    // are dropped — v1 doesn't validate, see DECISIONS #57 "Out of scope").
     return {
       question,
       header,
@@ -472,7 +474,7 @@ export function elicitationSchemaToPrompts(schema: any): ElicitationMapped | nul
  *
  * Numeric fields try `parseInt` / `parseFloat`; on parse failure the raw
  * string is sent through so the agent can re-prompt with feedback (we don't
- * validate min/max/format — see picker-request-redesign.md "Out of scope v1").
+ * validate min/max/format — v1 out-of-scope, see DECISIONS #57).
  *
  * Boolean fields map 'Yes' → true, anything else → false. Multi-select array
  * fields with enumNames need to reverse the displayed label back to the const
@@ -728,7 +730,7 @@ export function createCopilotBackend(): ServerBackend {
     // Elicitation handler: bridge Copilot SDK's session.ui.* /
     // session.ui.elicitation requests to our picker_request channel. URL
     // mode (OAuth-style external auth) is not wired in v1 — declined with
-    // a console warning. See picker-request-redesign.md.
+    // a console warning. See DECISIONS #57 for the design.
     session.registerElicitationHandler(async (ctx) => {
       if (ctx.mode === 'url') {
         console.warn('[copilot] URL-mode elicitation not supported; declining', {

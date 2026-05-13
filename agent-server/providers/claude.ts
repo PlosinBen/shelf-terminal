@@ -146,7 +146,7 @@ const CLAUDE_QUERY_DEFAULTS = {
 
 /** Sample of a preview field carried on an AskUserQuestion option. Logged by
  * the runtime caller — v1 picker UI doesn't render preview content yet
- * (see picker-request-redesign.md "Out of scope v1"). */
+ * (v1 doesn't render preview content — see DECISIONS #57 "Out of scope"). */
 export interface AskUserQuestionPreviewSample {
   question: string;
   optionLabel: string;

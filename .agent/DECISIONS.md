@@ -962,5 +962,3 @@ Shelf-terminal 原本完全沒處理：Claude SDK 把 AskUserQuestion 當普通 
 - `src/main/agent/` 全層 + preload + env.d.ts — signature 同步
 - `src/renderer/components/PickerPanel.tsx` — 新元件
 - `scripts/spike-askuser.ts` — manual smoke regression（SDK 升級時跑一次驗 canUseTool deny+message hack 仍 work）
-
-See `.agent/features/picker-request-redesign.md` for implementation guide.

@@ -98,9 +98,9 @@ export type OutgoingMessage = WireEnvelope & (
    * picker and resolve with index-aligned answers (or cancellation).
    *
    * First real producer: Claude's AskUserQuestion tool (intercepted via
-   * canUseTool) — see .agent/features/picker-request-redesign.md. Copilot
-   * elicitation handler emits this too. `id` is provider-minted (Claude uses
-   * toolUseID; Copilot mints a uuid), echoed back via resolve_picker IPC.
+   * canUseTool — see DECISIONS #57). Copilot elicitation handler emits
+   * this too. `id` is provider-minted (Claude uses toolUseID; Copilot
+   * mints a uuid), echoed back via resolve_picker IPC.
    *
    * Each prompt is one question with N options. `multiSelect` toggles
    * checkbox vs radio. `inputType` opens a free-text input (the "Other"

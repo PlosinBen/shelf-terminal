@@ -2,8 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { initialStateFor, isComplete, packAnswer, type PickerPrompt } from './PickerPanel';
 
 /**
- * Pure-logic tests for PickerPanel state shape. Component interaction is
- * covered by E2E (step 5 of picker-request-redesign.md) — DOM-level vitest
+ * Pure-logic tests for PickerPanel state shape. Component interaction
+ * (rendering, clicks, keyboard) is deferred to E2E — DOM-level vitest
  * would require introducing jsdom + @testing-library/react infrastructure
  * for a single component, not worth the dep weight.
  */

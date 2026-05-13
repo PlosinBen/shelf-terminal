@@ -12,19 +12,19 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
  * Shares the bottom-panel visual language with `<SelectionPanel>` (permission
  * popup) via the `agent-permission` / `agent-perm-*` CSS family.
  *
- * Wire shape comes from `agent-server/providers/types.ts` PickerRequest —
- * see `.agent/features/picker-request-redesign.md` for the protocol.
+ * Wire shape comes from `agent-server/providers/types.ts` PickerRequest;
+ * design rationale lives in DECISIONS #57.
  *
  * Producer-side: Claude AskUserQuestion intercept (claude.ts canUseTool
- * branch) and Copilot elicitation handler (forthcoming) both emit
- * picker_request through this component.
+ * branch) and Copilot elicitation handler both emit picker_request
+ * through this component.
  */
 
 export interface PickerPromptOption {
   label: string;
   description?: string;
-  /** Optional preview content — v1 doesn't render this, kept for v2 (see
-   *  picker-request-redesign.md "Out of scope v1"). */
+  /** Optional preview content — v1 doesn't render this, kept on the wire
+   *  for a future renderer (see DECISIONS #57 "Out of scope"). */
   preview?: string;
 }
 
@@ -70,10 +70,10 @@ export function initialStateFor(prompt: PickerPrompt): PromptState {
 }
 
 export function isComplete(prompt: PickerPrompt, state: PromptState): boolean {
-  // Every prompt is required (see picker-request-redesign.md "Out of scope
-  // v1" — optional-aware UI is YAGNI for now). A prompt is satisfied as
-  // long as the user provides SOME answer: a picked option OR a non-empty
-  // free-text input (when inputType is set). Both pathways count equally.
+  // Every prompt is required — optional-aware UI is YAGNI (DECISIONS #57
+  // out-of-scope). A prompt is satisfied as long as the user provides
+  // SOME answer: a picked option OR a non-empty free-text input (when
+  // inputType is set). Both pathways count equally.
   if (state.selected.length > 0) return true;
   if (prompt.inputType && state.input.trim() !== '') return true;
   return false;
