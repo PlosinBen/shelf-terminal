@@ -258,6 +258,11 @@ export function createClaudeBackend(): ServerBackend {
   // either index-aligned answers or { cancelled: true }.
   const pendingPickers = new Map<string, (payload: PickerResolvePayload) => void>();
 
+  // Set per-query() based on permissionMode === 'bypassPermissions'. Read
+  // inside canUseTool so bypass short-circuits non-AskUserQuestion tools
+  // *without* skipping the AskUserQuestion intercept itself.
+  let currentBypassMode = false;
+
   const canUseTool: CanUseTool = (async (toolName, input, canUseOpts) => {
     const toolUseId = (canUseOpts as any)?.toolUseID ?? `sdk-${Date.now()}`;
 
@@ -267,8 +272,20 @@ export function createClaudeBackend(): ServerBackend {
     // smuggle the SDK-shaped answer JSON back through canUseTool's deny
     // message — the model treats deny content as tool_result content (despite
     // `is_error: true` on the wire). Spike-verified: scripts/spike-askuser.ts.
+    //
+    // Must run BEFORE the bypass-mode short-circuit below — in bypass mode we
+    // still want to surface AskUserQuestion as a picker (bypass means "skip
+    // tool permission gating", not "skip user-facing interaction prompts").
     if (toolName === 'AskUserQuestion') {
       return handleAskUserQuestion(input, toolUseId, canUseOpts?.signal);
+    }
+
+    // DIY bypass: SDK stays at 'default' permissionMode and our canUseTool
+    // short-circuits to allow. Avoids SDK's `allowDangerouslySkipPermissions`
+    // flag and keeps plan/acceptEdits SDK-native (those have non-trivial
+    // built-in semantics worth keeping).
+    if (currentBypassMode) {
+      return { behavior: 'allow', updatedInput: input };
     }
 
     currentSend?.({ type: 'permission_request', toolUseId, toolName, input });
@@ -402,18 +419,16 @@ export function createClaudeBackend(): ServerBackend {
       }
       const mode = (input.permissionMode as Options['permissionMode']) ?? 'default';
       const isBypass = mode === 'bypassPermissions';
-      // DIY bypass: SDK stays at 'default' and our canUseTool short-circuits to allow.
-      // Avoids SDK's `allowDangerouslySkipPermissions` flag and keeps plan/acceptEdits
-      // SDK-native (those have non-trivial built-in semantics worth keeping).
-      const effectiveCanUseTool: CanUseTool = isBypass
-        ? ((async (_n, toolInput) => ({ behavior: 'allow' as const, updatedInput: toolInput })) as CanUseTool)
-        : canUseTool;
+      // Flip the closure flag so canUseTool's bypass short-circuit takes
+      // effect for this query. Single canUseTool path keeps the
+      // AskUserQuestion intercept active regardless of permission mode.
+      currentBypassMode = isBypass;
       const options: Options = {
         ...CLAUDE_QUERY_DEFAULTS,
         abortController,
         cwd: input.cwd,
         permissionMode: isBypass ? 'default' : mode,
-        canUseTool: effectiveCanUseTool,
+        canUseTool,
       };
 
       const resumeId = input.resume ?? lastSessionId;

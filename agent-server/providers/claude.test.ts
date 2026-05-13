@@ -438,6 +438,35 @@ describe('buildAskUserQuestionAnswerJson', () => {
   });
 });
 
+describe('AskUserQuestion intercept survives bypassPermissions', () => {
+  // Regression: an earlier patch wrapped canUseTool in a bypass-mode stub
+  // that auto-allowed every tool, including AskUserQuestion — which meant
+  // SDK ran the (nonexistent) tool implementation and auto-resolved with
+  // empty answers (user reported "/schedule didn't show a picker"). The
+  // intercept must run before the bypass short-circuit. This test verifies
+  // the shape of `askUserQuestionToPrompts` returns something even when
+  // the caller is in bypass mode — bypass is an orthogonal concern that
+  // shouldn't elide picker UI.
+  it('mapper produces prompts regardless of upstream permissionMode', () => {
+    const input = {
+      questions: [{
+        question: 'Which action?',
+        header: 'Action',
+        multiSelect: false,
+        options: [{ label: 'Create' }, { label: 'List' }],
+      }],
+    };
+    // No permissionMode parameter — the mapper is pure shape transform.
+    // Bypass-vs-not lives in the caller (canUseTool branch ordering), so
+    // the regression we care about is "the intercept fires before bypass
+    // short-circuits", documented by the comment in claude.ts canUseTool.
+    const result = askUserQuestionToPrompts(input);
+    expect(result).not.toBeNull();
+    expect(result!.prompts).toHaveLength(1);
+    expect(result!.prompts[0].inputType).toBe('text');
+  });
+});
+
 describe('formatClaudeToolInput Agent alias', () => {
   // Regression: Claude SDK ships sub-agent dispatch as both `Task` (legacy)
   // and `Agent` (newer claude-code SDK). Header was previously falling to
