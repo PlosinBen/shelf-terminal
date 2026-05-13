@@ -48,48 +48,56 @@ export interface PickerPanelProps {
   onCancel: () => void;
 }
 
-/** Sentinel string to identify the synthetic "Other" option distinct from any
- *  agent-supplied label. Internal-only — never escapes `packAnswer` (we
- *  replace it with the user's free-text input before submit). */
-export const OTHER_SENTINEL = '__picker_other__';
-
 export interface PromptState {
-  /** Selected option labels (single-select: 0-or-1 entry; multi: any). May
-   *  include OTHER_SENTINEL if the prompt has an inputType and the user
-   *  chose "Other". */
+  /** Selected option labels (single-select: 0-or-1 entry; multi: any). */
   selected: string[];
-  /** Current free-text input value. Only meaningful when OTHER_SENTINEL is
-   *  in `selected`. */
-  freeText: string;
+  /** Free-text / numeric input contents. Meaningful only when the prompt
+   *  has `inputType` set. Independent of `selected` — fills count toward
+   *  completeness on their own. */
+  input: string;
 }
 
 export function initialStateFor(prompt: PickerPrompt): PromptState {
   // Seed from currentValue when provided. Multi-select: array of labels.
   // Single-select: a single label string.
   if (Array.isArray(prompt.currentValue)) {
-    return { selected: [...prompt.currentValue], freeText: '' };
+    return { selected: [...prompt.currentValue], input: '' };
   }
   if (typeof prompt.currentValue === 'string' && prompt.currentValue.length > 0) {
-    return { selected: [prompt.currentValue], freeText: '' };
+    return { selected: [prompt.currentValue], input: '' };
   }
-  return { selected: [], freeText: '' };
+  return { selected: [], input: '' };
 }
 
 export function isComplete(prompt: PickerPrompt, state: PromptState): boolean {
   // Every prompt is required (see picker-request-redesign.md "Out of scope
-  // v1" — optional-aware UI is YAGNI for now).
-  if (state.selected.length === 0) return false;
-  // "Other" must have a non-empty free-text body to count as answered.
-  if (state.selected.includes(OTHER_SENTINEL) && state.freeText.trim() === '') return false;
-  return true;
+  // v1" — optional-aware UI is YAGNI for now). A prompt is satisfied as
+  // long as the user provides SOME answer: a picked option OR a non-empty
+  // free-text input (when inputType is set). Both pathways count equally.
+  if (state.selected.length > 0) return true;
+  if (prompt.inputType && state.input.trim() !== '') return true;
+  return false;
 }
 
-/** Translate prompt + state into the answer slot for onSubmit. */
+/** Translate prompt + state into the answer slot for onSubmit.
+ *
+ * Rules:
+ *   single-select: prefer a non-empty input value (covers Copilot
+ *     `session.ui.input()` where options=[] / inputType set, and the
+ *     "Other" semantics from AskUserQuestion where the user types
+ *     something instead of picking a listed option). Otherwise fall back
+ *     to the picked option label.
+ *   multi-select: array of picked option labels + the input value
+ *     appended when non-empty.
+ */
 export function packAnswer(prompt: PickerPrompt, state: PromptState): string | string[] {
-  const resolved = state.selected.map((s) => (s === OTHER_SENTINEL ? state.freeText : s));
-  if (prompt.multiSelect) return resolved;
-  // Single-select: take the first (state should hold at most one when single).
-  return resolved[0] ?? '';
+  const inputValue = state.input.trim();
+  const hasInput = prompt.inputType !== undefined && inputValue !== '';
+  if (prompt.multiSelect) {
+    return hasInput ? [...state.selected, inputValue] : [...state.selected];
+  }
+  if (hasInput) return inputValue;
+  return state.selected[0] ?? '';
 }
 
 export function PickerPanel({ prompts, onSubmit, onCancel }: PickerPanelProps) {
@@ -124,26 +132,19 @@ export function PickerPanel({ prompts, onSubmit, onCancel }: PickerPanelProps) {
   const toggleOption = useCallback((label: string) => {
     if (!currentPrompt) return;
     if (currentPrompt.multiSelect) {
-      setCurrent((s) => {
-        const next = s.selected.includes(label)
+      setCurrent((s) => ({
+        ...s,
+        selected: s.selected.includes(label)
           ? s.selected.filter((x) => x !== label)
-          : [...s.selected, label];
-        // Reset freeText when "Other" gets unchecked so stale text doesn't
-        // resurface if the user toggles it back on.
-        const nextFreeText = next.includes(OTHER_SENTINEL) ? s.freeText : '';
-        return { selected: next, freeText: nextFreeText };
-      });
+          : [...s.selected, label],
+      }));
     } else {
-      setCurrent((s) => {
-        const nextSelected = [label];
-        const nextFreeText = label === OTHER_SENTINEL ? s.freeText : '';
-        return { selected: nextSelected, freeText: nextFreeText };
-      });
+      setCurrent((s) => ({ ...s, selected: [label] }));
     }
   }, [currentPrompt, setCurrent]);
 
-  const setFreeText = useCallback((value: string) => {
-    setCurrent((s) => ({ ...s, freeText: value }));
+  const setInput = useCallback((value: string) => {
+    setCurrent((s) => ({ ...s, input: value }));
   }, [setCurrent]);
 
   const goNext = useCallback(() => {
@@ -160,27 +161,11 @@ export function PickerPanel({ prompts, onSubmit, onCancel }: PickerPanelProps) {
     if (index > 0) setIndex((i) => i - 1);
   }, [index]);
 
-  // Build the option list with "Other" appended when inputType is configured.
-  // Computed early because the keyboard handler depends on length / values.
-  const renderedOptions: Array<PickerPromptOption & { value: string; isOther?: boolean }> = currentPrompt
-    ? [
-        ...currentPrompt.options.map((o) => ({ ...o, value: o.label })),
-        ...(currentPrompt.inputType ? [{ label: 'Other', value: OTHER_SENTINEL, isOther: true }] : []),
-      ]
+  // Option list (no synthetic "Other" — free-text input is rendered
+  // separately below, always visible when inputType is set).
+  const renderedOptions: Array<PickerPromptOption & { value: string }> = currentPrompt
+    ? currentPrompt.options.map((o) => ({ ...o, value: o.label }))
     : [];
-
-  // Auto-focus the free-text input whenever the cursor sits on a selected
-  // "Other" option — covers two flows:
-  //   (a) Just toggled Other on (selected changes) → focus immediately so
-  //       the user can start typing without an extra click.
-  //   (b) Arrowed away from Other to inspect another option, then arrowed
-  //       back to Other → focus again so typing resumes naturally.
-  useEffect(() => {
-    const opt = renderedOptions[focusedIdx];
-    if (opt?.value === OTHER_SENTINEL && currentState?.selected.includes(OTHER_SENTINEL)) {
-      inputRef.current?.focus();
-    }
-  }, [focusedIdx, renderedOptions, currentState?.selected]);
 
   // Keep cursor in bounds when option count changes (between prompts).
   useEffect(() => {
@@ -271,35 +256,49 @@ export function PickerPanel({ prompts, onSubmit, onCancel }: PickerPanelProps) {
             ? (checked ? '☑' : '☐')
             : (checked ? '◉' : '○');
           return (
-            <div key={opt.value} className="picker-option-row">
-              <button
-                type="button"
-                role={role}
-                aria-checked={checked}
-                className={`agent-perm-option picker-option${checked ? ' selected' : ''}${focused ? ' focused' : ''}`}
-                onClick={() => { setFocusedIdx(i); toggleOption(opt.value); }}
-              >
-                <span className="agent-perm-indicator">{marker}</span>
-                <span className="picker-option-label">{opt.label}</span>
-                {opt.description && (
-                  <span className="picker-option-desc">{opt.description}</span>
-                )}
-              </button>
-              {opt.isOther && checked && (
-                <input
-                  ref={inputRef}
-                  type={inputHtmlType}
-                  step={inputStep}
-                  className="picker-other-input"
-                  value={currentState.freeText}
-                  placeholder={currentPrompt.inputType === 'number' || currentPrompt.inputType === 'integer' ? 'Enter a number' : 'Enter your answer'}
-                  onChange={(e) => setFreeText(e.target.value)}
-                />
+            <button
+              key={opt.value}
+              type="button"
+              role={role}
+              aria-checked={checked}
+              className={`agent-perm-option picker-option${checked ? ' selected' : ''}${focused ? ' focused' : ''}`}
+              onClick={() => { setFocusedIdx(i); toggleOption(opt.value); }}
+            >
+              <span className="agent-perm-indicator">{marker}</span>
+              <span className="picker-option-label">{opt.label}</span>
+              {opt.description && (
+                <span className="picker-option-desc">{opt.description}</span>
               )}
-            </div>
+            </button>
           );
         })}
       </div>
+      {currentPrompt.inputType && (
+        // Always-visible free-text / numeric input. The user can type here
+        // without first picking an "Other" option — non-empty content counts
+        // as a valid answer on its own (covers Copilot session.ui.input
+        // where options=[] / inputType set, and AskUserQuestion's implicit
+        // Other affordance). isComplete() and packAnswer() treat input as
+        // an OR-pathway alongside picked options.
+        <div className="picker-input-row">
+          <label className="picker-input-label">
+            {renderedOptions.length > 0 ? 'Or type your own:' : 'Your answer:'}
+          </label>
+          <input
+            ref={inputRef}
+            type={inputHtmlType}
+            step={inputStep}
+            className="picker-other-input"
+            value={currentState.input}
+            placeholder={
+              currentPrompt.inputType === 'number' || currentPrompt.inputType === 'integer'
+                ? 'Enter a number'
+                : 'Enter your answer'
+            }
+            onChange={(e) => setInput(e.target.value)}
+          />
+        </div>
+      )}
       <div className="picker-actions">
         <button type="button" className="picker-btn" onClick={onCancel}>
           Cancel

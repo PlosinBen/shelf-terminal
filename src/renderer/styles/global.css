@@ -3294,8 +3294,19 @@ button {
   color: var(--text-muted);
 }
 
+.picker-input-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.picker-input-label {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
 .picker-other-input {
-  margin-left: 22px;  /* align under the option label, past the indicator */
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 3px;

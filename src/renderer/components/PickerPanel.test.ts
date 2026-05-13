@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { initialStateFor, isComplete, packAnswer, OTHER_SENTINEL, type PickerPrompt } from './PickerPanel';
+import { initialStateFor, isComplete, packAnswer, type PickerPrompt } from './PickerPanel';
 
 /**
  * Pure-logic tests for PickerPanel state shape. Component interaction is
@@ -19,12 +19,12 @@ function makePrompt(over: Partial<PickerPrompt> = {}): PickerPrompt {
 
 describe('initialStateFor', () => {
   it('returns empty state when no currentValue', () => {
-    expect(initialStateFor(makePrompt())).toEqual({ selected: [], freeText: '' });
+    expect(initialStateFor(makePrompt())).toEqual({ selected: [], input: '' });
   });
 
   it('seeds single-select from string currentValue', () => {
     const p = makePrompt({ currentValue: 'A' });
-    expect(initialStateFor(p)).toEqual({ selected: ['A'], freeText: '' });
+    expect(initialStateFor(p)).toEqual({ selected: ['A'], input: '' });
   });
 
   it('seeds multi-select from string[] currentValue (copy)', () => {
@@ -39,64 +39,85 @@ describe('initialStateFor', () => {
 
   it('treats empty string currentValue as unset', () => {
     const p = makePrompt({ currentValue: '' });
-    expect(initialStateFor(p)).toEqual({ selected: [], freeText: '' });
+    expect(initialStateFor(p)).toEqual({ selected: [], input: '' });
   });
 });
 
 describe('isComplete', () => {
-  const prompt = makePrompt();
-
-  it('is false with no selection', () => {
-    expect(isComplete(prompt, { selected: [], freeText: '' })).toBe(false);
+  it('is false with nothing selected and no input', () => {
+    const p = makePrompt();
+    expect(isComplete(p, { selected: [], input: '' })).toBe(false);
   });
 
-  it('is true with any non-Other selection', () => {
-    expect(isComplete(prompt, { selected: ['A'], freeText: '' })).toBe(true);
+  it('is true with any picked option', () => {
+    const p = makePrompt();
+    expect(isComplete(p, { selected: ['A'], input: '' })).toBe(true);
   });
 
-  it('is false when Other is selected but freeText is empty', () => {
-    expect(isComplete(prompt, { selected: [OTHER_SENTINEL], freeText: '' })).toBe(false);
+  it('input alone counts when inputType is set (no option needed)', () => {
+    const p = makePrompt({ inputType: 'text' });
+    expect(isComplete(p, { selected: [], input: 'custom' })).toBe(true);
   });
 
-  it('is false when Other freeText is whitespace only', () => {
-    expect(isComplete(prompt, { selected: [OTHER_SENTINEL], freeText: '   \t  ' })).toBe(false);
+  it('input alone with only whitespace is not complete', () => {
+    const p = makePrompt({ inputType: 'text' });
+    expect(isComplete(p, { selected: [], input: '   \t  ' })).toBe(false);
   });
 
-  it('is true when Other selected with non-empty freeText', () => {
-    expect(isComplete(prompt, { selected: [OTHER_SENTINEL], freeText: 'custom' })).toBe(true);
+  it('input ignored when inputType is not set', () => {
+    const p = makePrompt();  // no inputType
+    // Even if state.input has content, without inputType the user cannot
+    // have actually typed it (no input field rendered). Belt-and-braces:
+    // the completeness check ignores it.
+    expect(isComplete(p, { selected: [], input: 'stray' })).toBe(false);
   });
 
-  it('multi-select with Other requires freeText alongside other picks', () => {
-    const multi = makePrompt({ multiSelect: true });
-    expect(isComplete(multi, { selected: ['A', OTHER_SENTINEL], freeText: '' })).toBe(false);
-    expect(isComplete(multi, { selected: ['A', OTHER_SENTINEL], freeText: 'x' })).toBe(true);
+  it('multi-select with input alone is complete (no option required)', () => {
+    const multi = makePrompt({ multiSelect: true, inputType: 'text' });
+    expect(isComplete(multi, { selected: [], input: 'x' })).toBe(true);
   });
 });
 
 describe('packAnswer', () => {
   it('single-select returns the picked label as string', () => {
     const p = makePrompt();
-    expect(packAnswer(p, { selected: ['A'], freeText: '' })).toBe('A');
+    expect(packAnswer(p, { selected: ['A'], input: '' })).toBe('A');
   });
 
-  it('single-select empty selection returns empty string', () => {
+  it('single-select with no selection returns empty string', () => {
     const p = makePrompt();
-    expect(packAnswer(p, { selected: [], freeText: '' })).toBe('');
+    expect(packAnswer(p, { selected: [], input: '' })).toBe('');
+  });
+
+  it('single-select prefers input over picked option when input is non-empty', () => {
+    // User picked A but then typed "custom" — typed answer wins (AskUserQuestion
+    // Other semantics + Copilot session.ui.input() where options=[]).
+    const p = makePrompt({ inputType: 'text' });
+    expect(packAnswer(p, { selected: ['A'], input: 'custom' })).toBe('custom');
+  });
+
+  it('single-select trims whitespace from input value', () => {
+    const p = makePrompt({ inputType: 'text' });
+    expect(packAnswer(p, { selected: [], input: '  custom  ' })).toBe('custom');
+  });
+
+  it('single-select input ignored when inputType is not set', () => {
+    const p = makePrompt();
+    expect(packAnswer(p, { selected: ['A'], input: 'stray' })).toBe('A');
   });
 
   it('multi-select returns selected labels as string[]', () => {
     const p = makePrompt({ multiSelect: true });
-    expect(packAnswer(p, { selected: ['A', 'B'], freeText: '' })).toEqual(['A', 'B']);
+    expect(packAnswer(p, { selected: ['A', 'B'], input: '' })).toEqual(['A', 'B']);
   });
 
-  it('substitutes Other sentinel with freeText value (single)', () => {
-    const p = makePrompt();
-    expect(packAnswer(p, { selected: [OTHER_SENTINEL], freeText: 'custom' })).toBe('custom');
+  it('multi-select appends input value when non-empty', () => {
+    const p = makePrompt({ multiSelect: true, inputType: 'text' });
+    expect(packAnswer(p, { selected: ['A'], input: 'custom' })).toEqual(['A', 'custom']);
   });
 
-  it('substitutes Other sentinel with freeText value (multi, mixed with options)', () => {
-    const p = makePrompt({ multiSelect: true });
-    const answer = packAnswer(p, { selected: ['A', OTHER_SENTINEL], freeText: 'custom' });
-    expect(answer).toEqual(['A', 'custom']);
+  it('multi-select returns just input when no options selected', () => {
+    const p = makePrompt({ multiSelect: true, inputType: 'text' });
+    expect(packAnswer(p, { selected: [], input: 'custom' })).toEqual(['custom']);
   });
 });
