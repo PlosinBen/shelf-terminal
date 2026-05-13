@@ -488,6 +488,13 @@ export function AgentView({ tabId, cwd, connection, provider, projectId, visible
             });
             return mutated ? next : prev;
           });
+          // Auto-dismiss any in-flight picker — the provider's abort path
+          // already resolved its pendingPickers entry as cancelled (see
+          // claude.ts handleAskUserQuestion signal listener), so a UI that
+          // still showed the panel would be a ghost: clicks would IPC to a
+          // backend that already moved on. Drop the panel so user state
+          // matches backend state at turn end.
+          setPendingPicker(null);
           if (sessionId) {
             const maxMessages = settings.agentHistoryMaxMessages;
             setTimeout(() => {
