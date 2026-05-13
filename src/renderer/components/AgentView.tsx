@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import type { AgentProvider, AgentPrefs, AuthMethod, Connection } from '@shared/types';
 import { AgentMessage, type AgentMsg } from './AgentMessage';
 import { SelectionPanel } from './SelectionPanel';
+import { PickerPanel } from './PickerPanel';
 import { parseSlashPrefix } from '@shared/slash-prefix';
 
 /**
@@ -1038,35 +1039,19 @@ export function AgentView({ tabId, cwd, connection, provider, projectId, visible
             else handlePermissionRespond(false);
           }}
         />
-      ) : pendingPicker ? (() => {
-        // Placeholder: degenerate single-prompt, single-select rendering via
-        // SelectionPanel until <PickerPanel> ships (Step 3 of picker-request
-        // redesign). Multi-prompt / multiSelect / free-text fall through to
-        // first prompt's options only — provider sees partial answers in
-        // dev until full UI lands.
-        const first = pendingPicker.prompts[0];
-        if (!first) return null;
-        return (
-          <SelectionPanel
-            title={first.header ? `${first.header}: ${first.question}` : first.question}
-            options={first.options.map((o) => ({ value: o.label, label: o.label }))}
-            initialSelected={0}
-            cancellable
-            onSelect={(value) => {
-              // Stub: just pass first-prompt single answer through. Step 3
-              // will provide full multi-prompt + multiSelect + freeText UX.
-              window.shelfApi.agent.resolvePicker(tabId, pendingPicker.id, {
-                answers: [value],
-              });
-              setPendingPicker(null);
-            }}
-            onCancel={() => {
-              window.shelfApi.agent.resolvePicker(tabId, pendingPicker.id, { cancelled: true });
-              setPendingPicker(null);
-            }}
-          />
-        );
-      })() : localPicker ? (() => {
+      ) : pendingPicker ? (
+        <PickerPanel
+          prompts={pendingPicker.prompts}
+          onSubmit={(answers) => {
+            window.shelfApi.agent.resolvePicker(tabId, pendingPicker.id, { answers });
+            setPendingPicker(null);
+          }}
+          onCancel={() => {
+            window.shelfApi.agent.resolvePicker(tabId, pendingPicker.id, { cancelled: true });
+            setPendingPicker(null);
+          }}
+        />
+      ) : localPicker ? (() => {
         // Renderer-local picker for config edits (/model, future /effort
         // /permissionMode). Options + current value derived from
         // capabilities at render time — no provider roundtrip.

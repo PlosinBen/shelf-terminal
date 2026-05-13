@@ -3220,6 +3220,122 @@ button {
   font-size: 10px;
 }
 
+/* ── Picker Panel (multi-question form) ──
+ * Reuses .agent-permission shell + .agent-perm-option base styles; the
+ * picker-* classes layer on multi-question / multi-select / free-text
+ * affordances. Visual language stays consistent with permission panel
+ * (yellow accent), distinguished by progress indicator + action buttons.
+ */
+
+.picker-panel .agent-permission-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.picker-header-chip {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  background: rgba(229, 192, 123, 0.15);
+  color: #e5c07b;
+  border: 1px solid rgba(229, 192, 123, 0.3);
+  border-radius: 10px;
+  padding: 1px 8px;
+  white-space: nowrap;
+}
+
+.picker-question {
+  color: var(--text);
+  font-weight: normal;
+  font-size: 13px;
+}
+
+.picker-progress {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.picker-option-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.picker-option {
+  /* Buttons by default have rendering quirks — flatten them so they look like
+   * the .agent-perm-option divs they neighbor with. */
+  background: transparent;
+  border: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  width: 100%;
+}
+
+.picker-option-label {
+  color: var(--text);
+}
+
+.picker-option-desc {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.picker-other-input {
+  margin-left: 22px;  /* align under the option label, past the indicator */
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 4px 8px;
+  font-size: 12px;
+  color: var(--text);
+  font-family: inherit;
+}
+
+.picker-other-input:focus {
+  outline: none;
+  border-color: #e5c07b;
+}
+
+.picker-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.picker-btn {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 12px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.picker-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.picker-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.picker-btn-primary {
+  background: rgba(229, 192, 123, 0.15);
+  border-color: rgba(229, 192, 123, 0.4);
+  color: #e5c07b;
+}
+
+.picker-btn-primary:hover:not(:disabled) {
+  background: rgba(229, 192, 123, 0.25);
+}
+
 /* ── Agent Plan Panel ── */
 
 .agent-plan-panel {
