@@ -915,3 +915,52 @@ SDK `supportedModels()` 會隱藏 legacy models，但 SDK 實際接受）。`/mo
 **不要改**:
 - 不要回到 `getShellEnv()` 直接傳（會繼承使用者 `HISTFILE` 設定）
 - 不要 default 啟用持久化 — 沒有使用者訴求前先保持簡單
+
+
+## 57. Picker_request 收編 AskUserQuestion / Elicitation 為多題互動 form
+
+**問題**: Agent 主動發起的互動 prompt 有兩條真實 channel：
+1. Claude SDK 的 `AskUserQuestion` tool — 1-4 題、per-題 N options、`multiSelect`、隱含 Other auto-add
+2. Copilot SDK 的 `session.ui.confirm/select/input/elicitation` — JSON-Schema 形態的多 field form
+
+Shelf-terminal 原本完全沒處理：Claude SDK 把 AskUserQuestion 當普通 tool_use 發出、`canUseTool` 沒攔；Copilot 沒 register elicitation handler。`/schedule` 之類仰賴 AskUserQuestion 的流程拿到空答案就卡住。
+
+舊 `picker_request` 是 RPC channel 預留架構（single-question N-way pick，原本要服務 /model picker，後來 /model 走 renderer-local — DECISIONS #55），shipped 但無 producer。
+
+**決策**: 重塑 picker_request 為「多題結構化 form」一統 channel：
+- Wire shape：`prompts[]`（N 題）+ per-prompt `multiSelect` + `options[]` + 可選 `inputType: 'text' | 'number' | 'integer'` 開「Other」自填
+- PickerResolvePayload：`{ answers: Array<string | string[]> }` index-aligned 或 `{ cancelled: true }`
+- Claude provider：`canUseTool` 偵測 `toolName === 'AskUserQuestion'` 攔截、轉 picker_request、await renderer resolve、SDK output JSON 塞進 `{ behavior: 'deny', message: ... }` 餵回 model（spike 確認 model 解析 deny content 不看 is_error flag — `scripts/spike-askuser.ts`）
+- Copilot provider：`registerElicitationHandler` 把 ElicitationSchema 7 field types → picker_request prompts（reverse mapping 含 integer/number parseInt/parseFloat fallback）
+
+**為什麼不合併 permission_request 進 picker_request**:
+- 字串 ownership 不同：permission 的 "Allow"/"Deny"/"Allow and remember" 是 app-owned 需要 i18n；picker question/option label 全是 agent-supplied 不能翻譯。合併會把 ownership 邊界從 channel level 退到 field-level discriminator，比一開始分兩個 type 還醜
+- SDK 耦合：permission resolve shape (`{ behavior, message?, scope? }`) 跟 picker resolve shape (`{ answers }`) 不一樣，合併需要 adapter 互譯
+- 「Allow + remember」是 permission domain 獨有的 3rd outcome，塞進 generic picker option 等於走私 side-effect
+- 物理不會並存：兩條 channel 都走 canUseTool，SDK serialize tool calls，同 session 不可能同時 pending — DECISIONS #54 的「permission > picker」優先級規則對應「provider 主動 emit picker」假想場景，現實中不需要
+
+**SDK 機制**:
+- Claude 0.2.126 沒有 `onAskUserQuestion` callback，但 `canUseTool` 對所有 tool 觸發；deny 的 `message` 被 SDK 包成 tool_result content，model 解析 content 不看 is_error flag — spike 驗證
+- Copilot SDK 有完整的 `registerElicitationHandler` API，handler 直接 return `{action: 'accept'|'cancel'|'decline', content?}`
+
+**Out of scope v1**:
+- Preview content 渲染（只 console.warn 收樣本，累積到 v2 決定 layout）
+- `min/max/format/maxLength` 驗證（對齊 Claude CLI 行為 — 不驗，丟給 LLM 自己 re-prompt）
+- Required field 區分（全部當必填）
+- Copilot URL-mode elicitation（OAuth 外部 auth，decline + warn）
+- `elicitationSource` 標示（UX 簡潔）
+
+**不要改**:
+- 不要把 permission 跟 picker channel 合併（i18n 邊界 + SDK adapter cost）
+- 不要在 renderer 端 validate 數字 min/max（SDK 是仲裁者）
+- 不要把 AskUserQuestion 加進 disallowedTools 退回純文字 — 我們已有 picker UI 跑完整流程
+
+**配套變更**:
+- `agent-server/providers/types.ts` — picker_request shape + PickerResolvePayload
+- `agent-server/providers/claude.ts` — canUseTool 攔截 + askUserQuestionToPrompts / buildAskUserQuestionAnswerJson
+- `agent-server/providers/copilot.ts` — registerElicitationHandler + elicitationSchemaToPrompts / picksToElicitationContent
+- `src/main/agent/` 全層 + preload + env.d.ts — signature 同步
+- `src/renderer/components/PickerPanel.tsx` — 新元件
+- `scripts/spike-askuser.ts` — manual smoke regression（SDK 升級時跑一次驗 canUseTool deny+message hack 仍 work）
+
+See `.agent/features/picker-request-redesign.md` for implementation guide.

@@ -687,3 +687,15 @@ if (event?.type === 'content_block_start' && ...) {
 - 不要在 `dispatchSlash` 內為了「先做一件事再跑使用者 prompt」開第二個 `sdkQuery()` — 改成單次 query 用 system prompt / pre-pended user message 達成
 - 不要把 `activeQuery` 改成 array / set 想支援並發 — turn lifecycle 的其他狀態（abort / permissions）也跟著要重設計，不是小改
 - Copilot 沒這個限制（`state.session.rpc.*` 可在 turn 間 call），但 mid-critical-section 仍要走 `critical()` helper
+
+## Claude SDK 0.2.126 沒有 onAskUserQuestion，靠 canUseTool deny+message 走私 answer
+
+**現象**: SDK 把 AskUserQuestion 當普通 tool dispatch、`canUseTool` 對它觸發、但 SDK 沒提供 `onAskUserQuestion` 之類的專屬 callback。Harness 想接管這個 tool，唯一可走的 channel 是 `canUseTool` 的 `{behavior: 'deny', message}` 返回值 — `message` 內容被 SDK 包成 `tool_result.content`（即使 `is_error: true`），model 讀 content 不看 flag、解析 JSON 繼續對話。
+
+**Spike 驗證**: `scripts/spike-askuser.ts`。SDK 升級（0.3.x、未來引入真正的 callback）時 manual `npx tsx scripts/spike-askuser.ts` 跑一次驗 hack 還 work。
+
+**為什麼不放 unit test**: 需要真 API key + 真打 Claude（spike script 是 integration smoke 不是 CI test）。改 unit-test 要 mock 整個 SDK transport — cost 高、回報低（SDK 內部 deny→tool_result 流程改了 mock 也測不到）。
+
+**未來路徑**:
+- Anthropic 可能後續加 `onAskUserQuestion?: (input) => Promise<output>` callback（對齊既有 `onElicitation`）— 那時把 `canUseTool` 攔截改成註冊新 callback，wire shape (picker_request) 不變
+- 若 deny+message hack 哪天壞了（SDK 把 deny content 改成 "Denied"-style string 不傳 message 內容）— GOTCHAS 補一筆，臨時改 `disallowedTools` 加 AskUserQuestion 退回純文字模式
