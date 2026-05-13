@@ -169,13 +169,18 @@ export function PickerPanel({ prompts, onSubmit, onCancel }: PickerPanelProps) {
       ]
     : [];
 
-  // Auto-focus the free-text input when "Other" gets selected, so the user
-  // can start typing without an extra Tab.
+  // Auto-focus the free-text input whenever the cursor sits on a selected
+  // "Other" option — covers two flows:
+  //   (a) Just toggled Other on (selected changes) → focus immediately so
+  //       the user can start typing without an extra click.
+  //   (b) Arrowed away from Other to inspect another option, then arrowed
+  //       back to Other → focus again so typing resumes naturally.
   useEffect(() => {
-    if (currentState?.selected.includes(OTHER_SENTINEL)) {
+    const opt = renderedOptions[focusedIdx];
+    if (opt?.value === OTHER_SENTINEL && currentState?.selected.includes(OTHER_SENTINEL)) {
       inputRef.current?.focus();
     }
-  }, [currentState?.selected]);
+  }, [focusedIdx, renderedOptions, currentState?.selected]);
 
   // Keep cursor in bounds when option count changes (between prompts).
   useEffect(() => {
@@ -185,12 +190,17 @@ export function PickerPanel({ prompts, onSubmit, onCancel }: PickerPanelProps) {
   }, [focusedIdx, renderedOptions.length]);
 
   // Keyboard:
-  //   ↑/↓     move focused option cursor (with wrap)
-  //   Space   toggle focused option (multi-select adds/removes; single picks)
-  //   Enter   advance (next prompt / submit) when current is complete
-  //   Esc     cancel the whole picker
-  // When the free-text input is focused, arrow / Space / Enter belong to the
-  // input — we no-op so the field behaves like a normal text field.
+  //   ↑/↓     move focused option cursor (with wrap) — always navigates,
+  //           even when the free-text input is focused. Blurs input so
+  //           the user can step away from "Other" without clicking out.
+  //           Trade-off: arrows don't move the text caret inside the input
+  //           (Home/End or click still work).
+  //   Space   toggle focused option — but only when NOT typing in the
+  //           free-text input (otherwise the user can't include spaces).
+  //   Enter   advance (next prompt / submit) when current is complete —
+  //           suppressed in input so Enter doesn't submit prematurely
+  //           while the user is still typing.
+  //   Esc     cancel the whole picker.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -199,6 +209,18 @@ export function PickerPanel({ prompts, onSubmit, onCancel }: PickerPanelProps) {
         return;
       }
       const inputFocused = document.activeElement === inputRef.current;
+
+      if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+        if (renderedOptions.length === 0) return;
+        e.preventDefault();
+        if (inputFocused) inputRef.current?.blur();
+        const max = renderedOptions.length - 1;
+        setFocusedIdx((p) => e.key === 'ArrowUp'
+          ? (p > 0 ? p - 1 : max)
+          : (p < max ? p + 1 : 0));
+        return;
+      }
+
       if (e.key === 'Enter') {
         if (inputFocused) return;
         if (!currentComplete) return;
@@ -206,16 +228,10 @@ export function PickerPanel({ prompts, onSubmit, onCancel }: PickerPanelProps) {
         goNext();
         return;
       }
-      if (inputFocused) return;
-      if (renderedOptions.length === 0) return;
-      const max = renderedOptions.length - 1;
-      if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        setFocusedIdx((p) => (p > 0 ? p - 1 : max));
-      } else if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        setFocusedIdx((p) => (p < max ? p + 1 : 0));
-      } else if (e.key === ' ' || e.key === 'Spacebar') {
+
+      if (e.key === ' ' || e.key === 'Spacebar') {
+        if (inputFocused) return;  // allow spaces inside free-text
+        if (renderedOptions.length === 0) return;
         e.preventDefault();
         const opt = renderedOptions[focusedIdx];
         if (opt) toggleOption(opt.value);
