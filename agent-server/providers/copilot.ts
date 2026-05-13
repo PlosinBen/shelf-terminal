@@ -4,7 +4,7 @@ import * as os from 'os';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { randomUUID } from 'node:crypto';
-import type { QueryInput, SendFn, ServerBackend, ProviderCapabilities, StatusSegment } from './types';
+import type { QueryInput, SendFn, ServerBackend, ProviderCapabilities, StatusSegment, PickerResolvePayload } from './types';
 import { severityFromUtilization, formatResetCountdown, pickPermissionModes, pickEffortLevels } from './types';
 import { parseSlashPrefix } from '../../src/shared/slash-prefix';
 import type { ProviderModel } from '../../src/shared/types';
@@ -375,11 +375,11 @@ export function createCopilotBackend(): ServerBackend {
     try { return await fn(); } finally { stoppable = true; }
   }
 
-  // Pending picker promises keyed by picker id (minted by dispatchSlash when
-  // emitting picker_request). resolvePicker drains the matching entry with
-  // the user-selected value (or null for cancellation). Multiple concurrent
-  // pickers shouldn't happen by design, but the Map shape tolerates it.
-  const pendingPickers = new Map<string, (value: string | null) => void>();
+  // Pending picker promises keyed by picker id (minted when the provider
+  // emits a picker_request). resolvePicker drains the matching entry with
+  // the renderer's PickerResolvePayload (answers or cancelled). Filled in
+  // when Step 4 of picker-request redesign wires the elicitation handler.
+  const pendingPickers = new Map<string, (payload: PickerResolvePayload) => void>();
 
   function modelMeta(id: string): CachedModel | undefined {
     return state.models.find((m) => m.id === id);
@@ -1028,11 +1028,11 @@ export function createCopilotBackend(): ServerBackend {
       }
     },
 
-    resolvePicker(id: string, value: string | null) {
+    resolvePicker(id: string, payload: PickerResolvePayload) {
       const resolve = pendingPickers.get(id);
       if (resolve) {
         pendingPickers.delete(id);
-        resolve(value);
+        resolve(payload);
       }
     },
 

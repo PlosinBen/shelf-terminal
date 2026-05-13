@@ -3,7 +3,7 @@ import { createClaudeBackend } from './providers/claude';
 import { createCopilotBackend } from './providers/copilot';
 import { deleteContext, cleanupOldContexts } from './context-store';
 import { loadRestoreContextFor, newTurnId, wrapSendForContext, wrapSendForTurn } from './orchestrator';
-import type { OutgoingMessage, QueryInput, ServerBackend } from './providers/types';
+import type { OutgoingMessage, QueryInput, ServerBackend, PickerResolvePayload } from './providers/types';
 import type { ProviderModel } from '../src/shared/types';
 
 type Provider = 'claude' | 'copilot';
@@ -28,9 +28,10 @@ interface IncomingMessage {
   sessionId?: string;
   toolUseId?: string;
   allow?: boolean;
-  /** resolve_picker payload — picker id minted by provider, value (null = cancel). */
+  /** resolve_picker payload — picker id minted by provider, payload carries
+   * index-aligned answers or { cancelled: true } (see PickerResolvePayload). */
   pickerId?: string;
-  pickerValue?: string | null;
+  payload?: PickerResolvePayload;
   message?: string;
   requestId?: string;
   key?: string;
@@ -200,8 +201,8 @@ rl.on('line', (line) => {
       }
       break;
     case 'resolve_picker':
-      if (activeBackend && msg.pickerId !== undefined) {
-        activeBackend.resolvePicker?.(msg.pickerId, msg.pickerValue ?? null);
+      if (activeBackend && msg.pickerId !== undefined && msg.payload !== undefined) {
+        activeBackend.resolvePicker?.(msg.pickerId, msg.payload);
       }
       break;
     case 'get_capabilities': {

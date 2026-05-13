@@ -48,7 +48,9 @@ export function initAgentManager(windowGetter: () => BrowserWindow | null): void
   ipcMain.handle(IPC.AGENT_RESOLVE_PICKER, async (_e, payload) => {
     const session = sessions.get(payload.tabId);
     if (!session?.backend.resolvePicker) return false;
-    session.backend.resolvePicker(payload.pickerId, payload.value ?? null);
+    // Payload comes from renderer pre-shaped as PickerResolvePayload; preload
+    // is a thin pass-through (see src/main/preload.ts resolvePicker).
+    session.backend.resolvePicker(payload.pickerId, payload.payload);
     return true;
   });
 
@@ -190,11 +192,7 @@ function dispatchEvent(tabId: string, event: AgentEvent) {
     case 'picker_request':
       send(IPC.AGENT_PICKER_REQUEST, tabId, {
         id: event.id,
-        title: event.title,
-        options: event.options,
-        currentValue: event.currentValue,
-        searchable: event.searchable,
-        prefKey: event.prefKey,
+        prompts: event.prompts,
       });
       break;
     case 'auth_required':

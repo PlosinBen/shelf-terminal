@@ -2,6 +2,15 @@ import type { AgentMessage, AuthMethod, ProviderModel } from '@shared/types';
 
 export type { AgentMessage, AgentMessageType } from '@shared/types';
 
+/**
+ * Renderer → main response to a picker_request. Mirrors
+ * `agent-server/providers/types.ts` PickerResolvePayload. Kept duplicated
+ * here so the main process doesn't depend on agent-server's type module.
+ */
+export type PickerResolvePayload =
+  | { answers: Array<string | string[]> }
+  | { cancelled: true };
+
 export type AgentSessionState = 'idle' | 'streaming' | 'waiting_permission' | 'error';
 
 export interface CycleOption {
@@ -99,11 +108,14 @@ export type AgentEvent =
   | {
       type: 'picker_request';
       id: string;
-      title: string;
-      options: { value: string; label: string; description?: string; badges?: string[] }[];
-      currentValue?: string;
-      searchable?: boolean;
-      prefKey?: 'model' | 'effort' | 'permissionMode';
+      prompts: Array<{
+        question: string;
+        header?: string;
+        multiSelect: boolean;
+        options: Array<{ label: string; description?: string; preview?: string }>;
+        inputType?: 'text' | 'number' | 'integer';
+        currentValue?: string | string[];
+      }>;
     }
   | { type: 'auth_required'; provider: string }
   | { type: 'error'; error: string };
@@ -118,9 +130,9 @@ export interface AgentBackend {
   clearCredential?(): Promise<void>;
   clearContext?(): void;
   /**
-   * Resolve a pending picker_request by forwarding the user's selection (or
-   * cancellation) to the remote agent-server. The provider tracks the
-   * pending Promise by id and unblocks its slash dispatch.
+   * Resolve a pending picker_request by forwarding the user's answers (or
+   * cancellation) to the remote agent-server. Provider tracks the pending
+   * Promise by id and unblocks its in-flight tool / elicitation handler.
    */
-  resolvePicker?(pickerId: string, value: string | null): void;
+  resolvePicker?(pickerId: string, payload: PickerResolvePayload): void;
 }

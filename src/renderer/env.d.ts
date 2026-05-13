@@ -96,7 +96,11 @@ interface ShelfApi {
     stop: (tabId: string) => Promise<boolean>;
     destroy: (tabId: string) => Promise<void>;
     resolvePermission: (tabId: string, toolUseId: string, allow: boolean, scope?: 'once' | 'session') => Promise<boolean>;
-    resolvePicker: (tabId: string, pickerId: string, value: string | null) => Promise<boolean>;
+    resolvePicker: (
+      tabId: string,
+      pickerId: string,
+      payload: { answers: Array<string | string[]> } | { cancelled: true },
+    ) => Promise<boolean>;
     storeCredential: (tabId: string, key: string) => Promise<boolean>;
     clearCredential: (tabId: string) => Promise<boolean>;
     checkAuth: (tabId: string) => Promise<boolean>;

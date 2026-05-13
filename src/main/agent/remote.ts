@@ -1,6 +1,6 @@
 import { log } from '@shared/logger';
 import type { Connection, AgentProvider, ProviderModel } from '@shared/types';
-import type { AgentBackend, AgentEvent, AgentQueryOptions } from './types';
+import type { AgentBackend, AgentEvent, AgentQueryOptions, PickerResolvePayload } from './types';
 import { ChildProcess, spawn, execSync } from 'child_process';
 import { randomUUID } from 'crypto';
 import { app } from 'electron';
@@ -141,9 +141,9 @@ export function createRemoteBackend(
       }
     },
 
-    resolvePicker(pickerId: string, value: string | null) {
+    resolvePicker(pickerId: string, payload: PickerResolvePayload) {
       if (!remoteProc) return;
-      remoteProc.sendLine({ type: 'resolve_picker', pickerId, pickerValue: value });
+      remoteProc.sendLine({ type: 'resolve_picker', pickerId, payload });
     },
 
     async getCapabilities(cwd: string, customModels?: ProviderModel[]) {
@@ -366,17 +366,35 @@ function parseRemoteMessage(msg: any): AgentEvent | null {
   }
 
   if (msg.type === 'picker_request') {
-    if (typeof msg.id !== 'string' || typeof msg.title !== 'string' || !Array.isArray(msg.options)) {
+    if (typeof msg.id !== 'string' || !Array.isArray(msg.prompts)) {
       return null;
     }
+    // Defensive validation — each prompt must have a question + options array.
+    // Skip the whole message on malformed payload rather than render half a UI.
+    const prompts = msg.prompts.map((p: any) => {
+      if (!p || typeof p.question !== 'string' || !Array.isArray(p.options)) return null;
+      return {
+        question: p.question,
+        header: typeof p.header === 'string' ? p.header : undefined,
+        multiSelect: !!p.multiSelect,
+        options: p.options.map((o: any) => ({
+          label: typeof o?.label === 'string' ? o.label : '',
+          description: typeof o?.description === 'string' ? o.description : undefined,
+          preview: typeof o?.preview === 'string' ? o.preview : undefined,
+        })),
+        inputType: p.inputType === 'text' || p.inputType === 'number' || p.inputType === 'integer'
+          ? p.inputType
+          : undefined,
+        currentValue: Array.isArray(p.currentValue) || typeof p.currentValue === 'string'
+          ? p.currentValue
+          : undefined,
+      };
+    });
+    if (prompts.some((p: unknown) => p === null)) return null;
     return {
       type: 'picker_request',
       id: msg.id,
-      title: msg.title,
-      options: msg.options,
-      currentValue: msg.currentValue,
-      searchable: msg.searchable,
-      prefKey: msg.prefKey === 'model' || msg.prefKey === 'effort' || msg.prefKey === 'permissionMode' ? msg.prefKey : undefined,
+      prompts: prompts as Array<NonNullable<typeof prompts[number]>>,
     };
   }
 

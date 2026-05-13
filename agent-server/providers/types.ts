@@ -25,6 +25,18 @@ import type { ProviderModel } from '../../src/shared/types';
 import type { PersistedContext } from '../context-store';
 
 /**
+ * Renderer → provider response to a picker_request. Answers are index-aligned
+ * with the request's `prompts[]`. Each answer is `string` for single-select /
+ * free-text or `string[]` for multi-select (renderer narrows via
+ * `Array.isArray`). `cancelled: true` is dispatched when the user dismisses
+ * the picker (Cancel button, Esc) — provider should release any pending
+ * resources and respond to the upstream agent in the appropriate cancel form.
+ */
+export type PickerResolvePayload =
+  | { answers: Array<string | string[]> }
+  | { cancelled: true };
+
+/**
  * Envelope present on every outgoing message produced inside a turn. Lifecycle
  * messages (`ready`, `pong`, `capabilities`, `credential_*`) are emitted
  * outside any turn and intentionally omit `turnId`. Main side routes per-turn
@@ -82,32 +94,29 @@ export type OutgoingMessage = WireEnvelope & (
   | { type: 'auth_required'; provider: string }
   | { type: 'permission_request'; toolUseId: string; toolName: string; input: Record<string, unknown> }
   /**
-   * Generic N-way selection prompt. Provider asks renderer to display a
-   * picker and resolve with the chosen value (or cancellation). Mirrors the
-   * permission_request channel — same pairing pattern, just N options
-   * instead of allow/deny. Used by /model (step 9) and any future picker
-   * (effort, perm-mode, etc.). `id` is provider-minted, echoed back via
-   * resolve_picker IPC.
+   * Multi-question interactive form. Provider asks renderer to display a
+   * picker and resolve with index-aligned answers (or cancellation).
+   *
+   * First real producer: Claude's AskUserQuestion tool (intercepted via
+   * canUseTool) — see .agent/features/picker-request-redesign.md. Copilot
+   * elicitation handler emits this too. `id` is provider-minted (Claude uses
+   * toolUseID; Copilot mints a uuid), echoed back via resolve_picker IPC.
+   *
+   * Each prompt is one question with N options. `multiSelect` toggles
+   * checkbox vs radio. `inputType` opens a free-text input (the "Other"
+   * affordance from AskUserQuestion); undefined disables free-text.
    */
   | {
       type: 'picker_request';
       id: string;
-      title: string;
-      options: { value: string; label: string; description?: string; badges?: string[] }[];
-      currentValue?: string;
-      searchable?: boolean;
-      /**
-       * Optional hint that this picker resolves into a renderer-side agent
-       * preference (saved to project config + pushed to backend via setPrefs).
-       * When set, renderer treats the picked value as the authoritative new
-       * pref, persists it, updates the status bar locally, and skips the
-       * normal capability-drift sync — provider doesn't need to round-trip
-       * the change back via a `capabilities` emit just to update the UI.
-       *
-       * Without `prefKey`, renderer just resolves the picker; what to do
-       * with the value is purely the provider's concern.
-       */
-      prefKey?: 'model' | 'effort' | 'permissionMode';
+      prompts: Array<{
+        question: string;
+        header?: string;
+        multiSelect: boolean;
+        options: Array<{ label: string; description?: string; preview?: string }>;
+        inputType?: 'text' | 'number' | 'integer';
+        currentValue?: string | string[];
+      }>;
     }
   /**
    * Internal: provider asks orchestrator to merge `patch` into the persisted
@@ -241,11 +250,12 @@ export interface ServerBackend {
   gatherCapabilities?(cwd: string, sessionId?: string, customModels?: ProviderModel[]): Promise<ProviderCapabilities>;
   resolvePermission?(toolUseId: string, allow: boolean, message?: string, scope?: 'once' | 'session'): void;
   /**
-   * Resolve a pending picker_request by id. `value` is null for cancellation
-   * (user pressed Esc), else the chosen option's value. Provider's internal
+   * Resolve a pending picker_request by id. `payload` carries index-aligned
+   * answers (one per prompt, multi-select uses string[]) or `cancelled: true`
+   * (user pressed Cancel / Esc, or the turn aborted). Provider's internal
    * Promise for that picker resolves with this.
    */
-  resolvePicker?(id: string, value: string | null): void;
+  resolvePicker?(id: string, payload: PickerResolvePayload): void;
 
   /**
    * Imperative pref setters. Orchestrator drives diff detection (sessionId-keyed

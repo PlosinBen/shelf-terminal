@@ -215,17 +215,20 @@ export function AgentView({ tabId, cwd, connection, provider, projectId, visible
   const [slashFilter, setSlashFilter] = useState('');
   const [slashSelection, setSlashSelection] = useState(0);
   const [pendingPermission, setPendingPermission] = useState<PendingPermission | null>(null);
-  // Generic picker state — provider-emitted picker_request lands here. When
-  // permission and picker both want to show, permission wins (priority gate
-  // in JSX renders `pendingPermission ?? pendingPicker`); pendingPicker stays
-  // preserved during permission so it re-renders after.
+  // Generic picker state — provider-emitted picker_request lands here. Shape
+  // mirrors the wire `PickerRequest` (multi-question form). Realistically
+  // permission and picker can't both be pending at once (both go through
+  // canUseTool, SDK serializes tool calls), so no priority gate needed.
   const [pendingPicker, setPendingPicker] = useState<{
     id: string;
-    title: string;
-    options: { value: string; label: string; description?: string; badges?: string[] }[];
-    currentValue?: string;
-    searchable?: boolean;
-    prefKey?: 'model' | 'effort' | 'permissionMode';
+    prompts: Array<{
+      question: string;
+      header?: string;
+      multiSelect: boolean;
+      options: Array<{ label: string; description?: string; preview?: string }>;
+      inputType?: 'text' | 'number' | 'integer';
+      currentValue?: string | string[];
+    }>;
   } | null>(null);
   // Renderer-local picker triggered by `/model` (and future /effort,
   // /permissionMode). Distinct from `pendingPicker` (provider-emitted via
@@ -373,19 +376,13 @@ export function AgentView({ tabId, cwd, connection, provider, projectId, visible
   useEffect(() => {
     const off = window.shelfApi.agent.onPickerRequest((id: string, req: any) => {
       if (id !== tabId) return;
+      if (typeof req?.id !== 'string' || !Array.isArray(req?.prompts)) return;
       setPendingPicker((prev) => {
         // Cancel any in-flight picker so the provider's pending Promise resolves.
         if (prev) {
-          window.shelfApi.agent.resolvePicker(tabId, prev.id, null);
+          window.shelfApi.agent.resolvePicker(tabId, prev.id, { cancelled: true });
         }
-        return {
-          id: req.id,
-          title: req.title,
-          options: req.options ?? [],
-          currentValue: req.currentValue,
-          searchable: req.searchable,
-          prefKey: req.prefKey,
-        };
+        return { id: req.id, prompts: req.prompts };
       });
     });
     return off;
@@ -1041,33 +1038,35 @@ export function AgentView({ tabId, cwd, connection, provider, projectId, visible
             else handlePermissionRespond(false);
           }}
         />
-      ) : pendingPicker ? (
-        <SelectionPanel
-          title={pendingPicker.title}
-          options={pendingPicker.options.map((o) => ({ value: o.value, label: o.label }))}
-          initialSelected={
-            pendingPicker.currentValue
-              ? Math.max(0, pendingPicker.options.findIndex((o) => o.value === pendingPicker.currentValue))
-              : 0
-          }
-          cancellable
-          onSelect={(value) => {
-            // prefKey on picker_request is vestigial — /model picker is now
-            // renderer-local (see localPicker render branch below). This
-            // branch survives only for hypothetical future provider-driven
-            // pref pickers; for now no provider emits picker_request with
-            // a prefKey set.
-            const key = pendingPicker.prefKey;
-            if (key) handleConfigEdit(key, value);
-            window.shelfApi.agent.resolvePicker(tabId, pendingPicker.id, value);
-            setPendingPicker(null);
-          }}
-          onCancel={() => {
-            window.shelfApi.agent.resolvePicker(tabId, pendingPicker.id, null);
-            setPendingPicker(null);
-          }}
-        />
-      ) : localPicker ? (() => {
+      ) : pendingPicker ? (() => {
+        // Placeholder: degenerate single-prompt, single-select rendering via
+        // SelectionPanel until <PickerPanel> ships (Step 3 of picker-request
+        // redesign). Multi-prompt / multiSelect / free-text fall through to
+        // first prompt's options only — provider sees partial answers in
+        // dev until full UI lands.
+        const first = pendingPicker.prompts[0];
+        if (!first) return null;
+        return (
+          <SelectionPanel
+            title={first.header ? `${first.header}: ${first.question}` : first.question}
+            options={first.options.map((o) => ({ value: o.label, label: o.label }))}
+            initialSelected={0}
+            cancellable
+            onSelect={(value) => {
+              // Stub: just pass first-prompt single answer through. Step 3
+              // will provide full multi-prompt + multiSelect + freeText UX.
+              window.shelfApi.agent.resolvePicker(tabId, pendingPicker.id, {
+                answers: [value],
+              });
+              setPendingPicker(null);
+            }}
+            onCancel={() => {
+              window.shelfApi.agent.resolvePicker(tabId, pendingPicker.id, { cancelled: true });
+              setPendingPicker(null);
+            }}
+          />
+        );
+      })() : localPicker ? (() => {
         // Renderer-local picker for config edits (/model, future /effort
         // /permissionMode). Options + current value derived from
         // capabilities at render time — no provider roundtrip.

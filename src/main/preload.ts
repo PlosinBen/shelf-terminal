@@ -147,8 +147,11 @@ contextBridge.exposeInMainWorld('shelfApi', {
       ipcRenderer.invoke(IPC.AGENT_DESTROY, { tabId }),
     resolvePermission: (tabId: string, toolUseId: string, allow: boolean, scope?: 'once' | 'session') =>
       ipcRenderer.invoke(IPC.AGENT_RESOLVE_PERMISSION, { tabId, toolUseId, allow, scope }),
-    resolvePicker: (tabId: string, pickerId: string, value: string | null) =>
-      ipcRenderer.invoke(IPC.AGENT_RESOLVE_PICKER, { tabId, pickerId, value }),
+    resolvePicker: (
+      tabId: string,
+      pickerId: string,
+      payload: { answers: Array<string | string[]> } | { cancelled: true },
+    ) => ipcRenderer.invoke(IPC.AGENT_RESOLVE_PICKER, { tabId, pickerId, payload }),
     storeCredential: (tabId: string, key: string) =>
       ipcRenderer.invoke(IPC.AGENT_STORE_CREDENTIAL, { tabId, key }),
     clearCredential: (tabId: string) =>
