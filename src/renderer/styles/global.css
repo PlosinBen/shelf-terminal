@@ -3265,13 +3265,23 @@ button {
 
 .picker-option {
   /* Buttons by default have rendering quirks — flatten them so they look like
-   * the .agent-perm-option divs they neighbor with. */
+   * the .agent-perm-option divs they neighbor with. `font: inherit` shorthand
+   * would reset font-size to UA default; spell out each font property so the
+   * .agent-perm-option font-size: 13px stays in effect. */
   background: transparent;
   border: none;
   color: inherit;
-  font: inherit;
+  font-family: inherit;
+  font-size: 13px;
   text-align: left;
   width: 100%;
+}
+
+.picker-option.focused {
+  /* Keyboard cursor indicator — distinct from `.selected` (which marks
+   * checked options). Outline because background is already used by .selected. */
+  outline: 1px solid rgba(229, 192, 123, 0.5);
+  outline-offset: -1px;
 }
 
 .picker-option-label {

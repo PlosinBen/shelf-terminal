@@ -97,7 +97,13 @@ export function PickerPanel({ prompts, onSubmit, onCancel }: PickerPanelProps) {
   // the user navigates back/forward; their prior answers stay editable.
   const [states, setStates] = useState<PromptState[]>(() => prompts.map(initialStateFor));
   const [index, setIndex] = useState(0);
+  // Keyboard cursor within the current prompt's option list. Resets when the
+  // user navigates between prompts.
+  const [focusedIdx, setFocusedIdx] = useState(0);
   const inputRef = useRef<HTMLInputElement | null>(null);
+
+  // Reset focused option when stepping to a new prompt.
+  useEffect(() => { setFocusedIdx(0); }, [index]);
 
   const currentPrompt = prompts[index];
   const currentState = states[index];
@@ -154,6 +160,15 @@ export function PickerPanel({ prompts, onSubmit, onCancel }: PickerPanelProps) {
     if (index > 0) setIndex((i) => i - 1);
   }, [index]);
 
+  // Build the option list with "Other" appended when inputType is configured.
+  // Computed early because the keyboard handler depends on length / values.
+  const renderedOptions: Array<PickerPromptOption & { value: string; isOther?: boolean }> = currentPrompt
+    ? [
+        ...currentPrompt.options.map((o) => ({ ...o, value: o.label })),
+        ...(currentPrompt.inputType ? [{ label: 'Other', value: OTHER_SENTINEL, isOther: true }] : []),
+      ]
+    : [];
+
   // Auto-focus the free-text input when "Other" gets selected, so the user
   // can start typing without an extra Tab.
   useEffect(() => {
@@ -162,10 +177,20 @@ export function PickerPanel({ prompts, onSubmit, onCancel }: PickerPanelProps) {
     }
   }, [currentState?.selected]);
 
-  // Keyboard: Esc cancels, Enter advances when actionable. Arrow keys are
-  // intentionally NOT bound — multi-select + free-text combos make a single
-  // cursor confusing. Users click options (or Tab through them — buttons
-  // get native focus).
+  // Keep cursor in bounds when option count changes (between prompts).
+  useEffect(() => {
+    if (focusedIdx >= renderedOptions.length && renderedOptions.length > 0) {
+      setFocusedIdx(0);
+    }
+  }, [focusedIdx, renderedOptions.length]);
+
+  // Keyboard:
+  //   ↑/↓     move focused option cursor (with wrap)
+  //   Space   toggle focused option (multi-select adds/removes; single picks)
+  //   Enter   advance (next prompt / submit) when current is complete
+  //   Esc     cancel the whole picker
+  // When the free-text input is focused, arrow / Space / Enter belong to the
+  // input — we no-op so the field behaves like a normal text field.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -173,29 +198,35 @@ export function PickerPanel({ prompts, onSubmit, onCancel }: PickerPanelProps) {
         onCancel();
         return;
       }
+      const inputFocused = document.activeElement === inputRef.current;
       if (e.key === 'Enter') {
-        // Don't hijack Enter when the free-text input is focused (would
-        // submit prematurely when the user just hit Enter inside the field).
-        const active = document.activeElement;
-        if (active === inputRef.current) return;
+        if (inputFocused) return;
         if (!currentComplete) return;
         e.preventDefault();
         goNext();
+        return;
+      }
+      if (inputFocused) return;
+      if (renderedOptions.length === 0) return;
+      const max = renderedOptions.length - 1;
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setFocusedIdx((p) => (p > 0 ? p - 1 : max));
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setFocusedIdx((p) => (p < max ? p + 1 : 0));
+      } else if (e.key === ' ' || e.key === 'Spacebar') {
+        e.preventDefault();
+        const opt = renderedOptions[focusedIdx];
+        if (opt) toggleOption(opt.value);
       }
     };
+    // Capture phase so we beat xterm / global combo handlers that consume keys.
     window.addEventListener('keydown', handler, true);
     return () => window.removeEventListener('keydown', handler, true);
-  }, [onCancel, goNext, currentComplete]);
+  }, [onCancel, goNext, currentComplete, focusedIdx, renderedOptions, toggleOption]);
 
   if (!currentPrompt) return null;
-
-  // Build the option list with "Other" appended when inputType is configured.
-  const renderedOptions: Array<PickerPromptOption & { value: string; isOther?: boolean }> = [
-    ...currentPrompt.options.map((o) => ({ ...o, value: o.label })),
-  ];
-  if (currentPrompt.inputType) {
-    renderedOptions.push({ label: 'Other', value: OTHER_SENTINEL, isOther: true });
-  }
 
   const inputHtmlType = currentPrompt.inputType === 'number' || currentPrompt.inputType === 'integer'
     ? 'number'
@@ -216,8 +247,9 @@ export function PickerPanel({ prompts, onSubmit, onCancel }: PickerPanelProps) {
         </div>
       )}
       <div className="agent-perm-options picker-options">
-        {renderedOptions.map((opt) => {
+        {renderedOptions.map((opt, i) => {
           const checked = currentState.selected.includes(opt.value);
+          const focused = focusedIdx === i;
           const role = currentPrompt.multiSelect ? 'checkbox' : 'radio';
           const marker = currentPrompt.multiSelect
             ? (checked ? '☑' : '☐')
@@ -228,8 +260,8 @@ export function PickerPanel({ prompts, onSubmit, onCancel }: PickerPanelProps) {
                 type="button"
                 role={role}
                 aria-checked={checked}
-                className={`agent-perm-option picker-option${checked ? ' selected' : ''}`}
-                onClick={() => toggleOption(opt.value)}
+                className={`agent-perm-option picker-option${checked ? ' selected' : ''}${focused ? ' focused' : ''}`}
+                onClick={() => { setFocusedIdx(i); toggleOption(opt.value); }}
               >
                 <span className="agent-perm-indicator">{marker}</span>
                 <span className="picker-option-label">{opt.label}</span>
@@ -271,7 +303,7 @@ export function PickerPanel({ prompts, onSubmit, onCancel }: PickerPanelProps) {
         </button>
       </div>
       <div className="agent-perm-hint">
-        <kbd>Enter</kbd> {isLast ? 'submit' : 'next'} · <kbd>Esc</kbd> cancel
+        <kbd>↑</kbd><kbd>↓</kbd> move · <kbd>Space</kbd> {currentPrompt.multiSelect ? 'toggle' : 'pick'} · <kbd>Enter</kbd> {isLast ? 'submit' : 'next'} · <kbd>Esc</kbd> cancel
       </div>
     </div>
   );
