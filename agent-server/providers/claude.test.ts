@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { mergeClaudeModels, rateLimitInfoToSegment, formatClaudeToolInput, extractToolResultText, processMessage, createBlockMsgIdState } from './claude';
+import { mergeClaudeModels, rateLimitInfoToSegment, formatClaudeToolInput, extractToolResultText, processMessage, createBlockMsgIdState, askUserQuestionToPrompts, buildAskUserQuestionAnswerJson } from './claude';
 import type { OutgoingMessage } from './types';
 import type { ProviderModel } from '../../src/shared/types';
 
@@ -331,6 +331,110 @@ describe('processMessage — text msgId stability across SDK quirks', () => {
     expect(texts.length).toBe(2); // emitted twice
     expect(texts[0].msgId).toBe(texts[1].msgId); // ...but with SAME id → renderer collapses
     expect(texts[0].content).toBe(texts[1].content);
+  });
+});
+
+describe('askUserQuestionToPrompts', () => {
+  it('maps single question with options to one prompt, inputType always text', () => {
+    const input = {
+      questions: [{
+        question: 'Which color?',
+        header: 'Color',
+        multiSelect: false,
+        options: [
+          { label: 'Red', description: 'warm' },
+          { label: 'Blue', description: 'cool' },
+        ],
+      }],
+    };
+    const result = askUserQuestionToPrompts(input);
+    expect(result).not.toBeNull();
+    expect(result!.prompts).toHaveLength(1);
+    expect(result!.prompts[0]).toEqual({
+      question: 'Which color?',
+      header: 'Color',
+      multiSelect: false,
+      options: [
+        { label: 'Red', description: 'warm', preview: undefined },
+        { label: 'Blue', description: 'cool', preview: undefined },
+      ],
+      // 'Other' is auto-added by AskUserQuestion spec → inputType always 'text'.
+      inputType: 'text',
+    });
+    expect(result!.previewSamples).toEqual([]);
+  });
+
+  it('maps multi-question form preserving order', () => {
+    const input = {
+      questions: [
+        { question: 'Q1', header: 'A', multiSelect: false, options: [{ label: 'a' }] },
+        { question: 'Q2', header: 'B', multiSelect: true,  options: [{ label: 'b' }, { label: 'c' }] },
+      ],
+    };
+    const result = askUserQuestionToPrompts(input)!;
+    expect(result.prompts.map((p) => p.question)).toEqual(['Q1', 'Q2']);
+    expect(result.prompts[1].multiSelect).toBe(true);
+  });
+
+  it('collects preview samples without filtering them out of the prompt', () => {
+    const input = {
+      questions: [{
+        question: 'Pick',
+        multiSelect: false,
+        options: [
+          { label: 'A', preview: 'snippet A' },
+          { label: 'B' },
+          { label: 'C', preview: 'snippet C' },
+        ],
+      }],
+    };
+    const result = askUserQuestionToPrompts(input)!;
+    // Preview text stays on the prompt — even though v1 UI doesn't render it,
+    // we don't strip it on the wire so a future UI doesn't need a provider change.
+    expect(result.prompts[0].options[0].preview).toBe('snippet A');
+    expect(result.previewSamples).toHaveLength(2);
+    expect(result.previewSamples[0]).toMatchObject({
+      question: 'Pick', optionLabel: 'A', previewLength: 9, preview: 'snippet A',
+    });
+    expect(result.previewSamples[1].optionLabel).toBe('C');
+  });
+
+  it('returns null on missing or empty questions array', () => {
+    expect(askUserQuestionToPrompts({})).toBeNull();
+    expect(askUserQuestionToPrompts({ questions: [] })).toBeNull();
+    expect(askUserQuestionToPrompts({ questions: 'oops' as any })).toBeNull();
+  });
+});
+
+describe('buildAskUserQuestionAnswerJson', () => {
+  it('produces SDK-shaped output with answers keyed by question text', () => {
+    const questions = [
+      { question: 'Which color?' },
+      { question: 'Which size?' },
+    ];
+    const json = buildAskUserQuestionAnswerJson(questions, ['Blue', 'Large']);
+    const parsed = JSON.parse(json);
+    expect(parsed).toEqual({
+      questions,
+      answers: { 'Which color?': 'Blue', 'Which size?': 'Large' },
+    });
+    // annotations intentionally absent (optional per SDK schema)
+    expect(parsed.annotations).toBeUndefined();
+  });
+
+  it('joins multi-select answers comma-separated (per SDK spec)', () => {
+    const questions = [{ question: 'Features?' }];
+    const json = buildAskUserQuestionAnswerJson(questions, [['TypeScript', 'React', 'Vitest']]);
+    const parsed = JSON.parse(json);
+    // SDK spec: "multi-select answers are comma-separated" (sdk-tools.d.ts:2688)
+    expect(parsed.answers['Features?']).toBe('TypeScript, React, Vitest');
+  });
+
+  it('coerces non-string single answers to string', () => {
+    const questions = [{ question: 'Count?' }];
+    const json = buildAskUserQuestionAnswerJson(questions, [42 as any]);
+    const parsed = JSON.parse(json);
+    expect(parsed.answers['Count?']).toBe('42');
   });
 });
 

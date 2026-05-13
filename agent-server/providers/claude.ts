@@ -3,7 +3,7 @@ import type { Query, Options, SDKMessage, CanUseTool } from '@anthropic-ai/claud
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'fs';
 import { resolve } from 'path';
-import type { QueryInput, SendFn, ServerBackend, ProviderCapabilities, StatusSegment } from './types';
+import type { QueryInput, SendFn, ServerBackend, ProviderCapabilities, StatusSegment, PickerResolvePayload } from './types';
 import { severityFromUtilization, formatResetCountdown, pickPermissionModes, pickEffortLevels } from './types';
 import { parseSlashPrefix } from '../../src/shared/slash-prefix';
 import type { ProviderModel } from '../../src/shared/types';
@@ -144,6 +144,99 @@ const CLAUDE_QUERY_DEFAULTS = {
   includePartialMessages: true,
 } as const satisfies Partial<Options>;
 
+/** Sample of a preview field carried on an AskUserQuestion option. Logged by
+ * the runtime caller — v1 picker UI doesn't render preview content yet
+ * (see picker-request-redesign.md "Out of scope v1"). */
+export interface AskUserQuestionPreviewSample {
+  question: string;
+  optionLabel: string;
+  previewLength: number;
+  preview: string;
+}
+
+/** Output of `askUserQuestionToPrompts` — picker_request `prompts[]` plus
+ * the original `questions` array (kept for the answer-JSON builder) plus
+ * any preview samples the caller should log. */
+export interface AskUserQuestionMapped {
+  questions: Array<{ question: string; [k: string]: unknown }>;
+  prompts: Array<{
+    question: string;
+    header?: string;
+    multiSelect: boolean;
+    options: Array<{ label: string; description?: string; preview?: string }>;
+    inputType: 'text';
+  }>;
+  previewSamples: AskUserQuestionPreviewSample[];
+}
+
+/**
+ * Pure mapper: AskUserQuestionInput → picker_request `prompts[]`.
+ *
+ * Returns `null` for malformed input (no questions array, or empty). Caller
+ * uses that as the signal to reject the tool call with an explanatory deny
+ * rather than emit an empty picker.
+ *
+ * `inputType: 'text'` is hardcoded — AskUserQuestion's spec auto-adds an
+ * "Other" option to every question (sdk-tools.d.ts comment on `options`),
+ * so the picker must always offer free-text entry alongside the listed
+ * options.
+ */
+export function askUserQuestionToPrompts(input: Record<string, unknown>): AskUserQuestionMapped | null {
+  const questions = Array.isArray((input as any)?.questions) ? (input as any).questions : null;
+  if (!questions || questions.length === 0) return null;
+
+  const previewSamples: AskUserQuestionPreviewSample[] = [];
+  const prompts = questions.map((q: any) => {
+    const options = Array.isArray(q?.options) ? q.options : [];
+    for (const opt of options) {
+      if (typeof opt?.preview === 'string' && opt.preview.length > 0) {
+        previewSamples.push({
+          question: String(q?.question ?? ''),
+          optionLabel: String(opt?.label ?? ''),
+          previewLength: opt.preview.length,
+          preview: opt.preview,
+        });
+      }
+    }
+    return {
+      question: String(q?.question ?? ''),
+      header: typeof q?.header === 'string' ? q.header : undefined,
+      multiSelect: !!q?.multiSelect,
+      options: options.map((o: any) => ({
+        label: String(o?.label ?? ''),
+        description: typeof o?.description === 'string' ? o.description : undefined,
+        preview: typeof o?.preview === 'string' ? o.preview : undefined,
+      })),
+      inputType: 'text' as const,
+    };
+  });
+
+  return { questions, prompts, previewSamples };
+}
+
+/**
+ * Pure builder: PickerResolvePayload answers → AskUserQuestionOutput JSON.
+ *
+ * Output shape per SDK spec (sdk-tools.d.ts:2530 AskUserQuestionOutput):
+ *   { questions: [...echo], answers: { [questionText]: string } }
+ *
+ * Multi-select answers are comma-joined per SDK spec comment line 2688
+ * ("multi-select answers are comma-separated"). `annotations` is omitted —
+ * it's optional in the SDK schema, and we don't surface preview/notes in
+ * v1 UI so there's nothing to echo back.
+ */
+export function buildAskUserQuestionAnswerJson(
+  questions: Array<{ question: string; [k: string]: unknown }>,
+  answers: Array<string | string[]>,
+): string {
+  const answersMap: Record<string, string> = {};
+  questions.forEach((q, i) => {
+    const ans = answers[i];
+    answersMap[q.question] = Array.isArray(ans) ? ans.join(', ') : String(ans ?? '');
+  });
+  return JSON.stringify({ questions, answers: answersMap });
+}
+
 export function createClaudeBackend(): ServerBackend {
   let activeQuery: Query | null = null;
   let abortController: AbortController | null = null;
@@ -160,12 +253,24 @@ export function createClaudeBackend(): ServerBackend {
   // indeterminate compacted/un-compacted state.
   let stoppable = true;
 
-  // Pending picker promises keyed by picker id. Mirrors Copilot's approach —
-  // resolvePicker drains the entry with user's selection (or null on cancel).
-  const pendingPickers = new Map<string, (value: string | null) => void>();
+  // Pending picker promises keyed by picker id (= AskUserQuestion toolUseID).
+  // resolvePicker drains the entry with renderer's PickerResolvePayload —
+  // either index-aligned answers or { cancelled: true }.
+  const pendingPickers = new Map<string, (payload: PickerResolvePayload) => void>();
 
   const canUseTool: CanUseTool = (async (toolName, input, canUseOpts) => {
     const toolUseId = (canUseOpts as any)?.toolUseID ?? `sdk-${Date.now()}`;
+
+    // AskUserQuestion: SDK 0.2.126 has no `onAskUserQuestion` callback, but
+    // canUseTool fires for every tool including this one. We intercept here,
+    // round-trip the questions to the renderer via picker_request, then
+    // smuggle the SDK-shaped answer JSON back through canUseTool's deny
+    // message — the model treats deny content as tool_result content (despite
+    // `is_error: true` on the wire). Spike-verified: scripts/spike-askuser.ts.
+    if (toolName === 'AskUserQuestion') {
+      return handleAskUserQuestion(input, toolUseId, canUseOpts?.signal);
+    }
+
     currentSend?.({ type: 'permission_request', toolUseId, toolName, input });
     const result = await new Promise<PermissionResult>((resolve) => {
       pendingPermissions.set(toolUseId, resolve);
@@ -185,6 +290,57 @@ export function createClaudeBackend(): ServerBackend {
     }
     return { behavior: 'deny' as const, message: result.message ?? 'Denied by user' };
   }) as CanUseTool;
+
+  /**
+   * Translate an AskUserQuestion tool_use into a picker_request, await the
+   * renderer's answer, and shape the response back into the SDK's expected
+   * `AskUserQuestionOutput` JSON. Cancellation (user dismiss, abort signal)
+   * returns a plain-text deny so the model can decide how to proceed.
+   *
+   * The pure mapping logic is factored into module-level helpers
+   * (askUserQuestionToPrompts / buildAskUserQuestionAnswerJson) so unit
+   * tests can exercise the wire transformation without spinning up a
+   * full backend / SDK session.
+   */
+  async function handleAskUserQuestion(
+    input: Record<string, unknown>,
+    toolUseId: string,
+    signal?: AbortSignal,
+  ): Promise<PermissionResult> {
+    const mapped = askUserQuestionToPrompts(input);
+    if (!mapped) {
+      // Malformed input — fail loud rather than silently send empty answers.
+      return { behavior: 'deny', message: 'AskUserQuestion received with no questions' };
+    }
+    for (const sample of mapped.previewSamples) {
+      console.warn('[picker] preview content received, not rendered yet', sample);
+    }
+
+    currentSend?.({ type: 'picker_request', id: toolUseId, prompts: mapped.prompts });
+
+    const resolved = await new Promise<PickerResolvePayload>((resolve) => {
+      pendingPickers.set(toolUseId, resolve);
+      // Abort path: if the turn is cancelled mid-picker, force-resolve as
+      // cancelled so the SDK can wind the turn down cleanly. The signal may
+      // fire either before pendingPickers has the entry (race) or after —
+      // the once-listener handles both.
+      signal?.addEventListener('abort', () => {
+        if (pendingPickers.has(toolUseId)) {
+          pendingPickers.delete(toolUseId);
+          resolve({ cancelled: true });
+        }
+      }, { once: true });
+    });
+
+    if ('cancelled' in resolved) {
+      return { behavior: 'deny', message: 'User declined to answer' };
+    }
+
+    return {
+      behavior: 'deny',
+      message: buildAskUserQuestionAnswerJson(mapped.questions, resolved.answers),
+    };
+  }
 
   function ensureInit(cwd: string): Promise<void> {
     if (cache.models && cache.commands) return Promise.resolve();
@@ -471,6 +627,14 @@ export function createClaudeBackend(): ServerBackend {
       if (resolve) {
         pendingPermissions.delete(toolUseId);
         resolve(allow ? { behavior: 'allow', scope } : { behavior: 'deny', message: message ?? 'Denied' });
+      }
+    },
+
+    resolvePicker(id: string, payload: PickerResolvePayload) {
+      const resolve = pendingPickers.get(id);
+      if (resolve) {
+        pendingPickers.delete(id);
+        resolve(payload);
       }
     },
 
