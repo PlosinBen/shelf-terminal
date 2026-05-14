@@ -63,6 +63,8 @@
 | Context persistence 測試 | `context-store.test.ts` | `loadContext`/`saveContext`/`deleteContext` round-trip，含 Claude resume 指針 + Copilot Responses chain |
 | Provider types | `providers/types.ts` | `ServerBackend`（含 `resetSession?()` / `resolvePicker?()`）、`SendFn`、`QueryInput`（含 `sessionId` + orchestrator hydrated `restoreContext`）、`OutgoingMessage`（含 internal `context_patch` 通知 orchestrator 持久化；`picker_request` 是多題互動 form — N=1-4 prompts、per-prompt multiSelect/inputType/options，給 Claude AskUserQuestion 攔截跟 Copilot elicitation handler 共用）、`PickerResolvePayload`（index-aligned answers 或 cancelled）、`ProviderCapabilities`。**SlashResult 已移除** — slash 經 `query()` 內 `parseSlashPrefix` 偵測後走 provider 內部 dispatch，輸出走 `slash_response` AgentMessage variant |
 | Slash prefix detection | `src/shared/slash-prefix.ts` | `parseSlashPrefix(prompt)` 共用 helper — 兩個 provider 在 `query()` 入口偵測 `/cmd args` prefix；renderer (AgentView.handleSend) 也 import 同份做 RENDERER_LOCAL_SLASHES 攔截。多行不認、bare slash 不認、cmd 名支援底線/數字 |
+| Fake provider | `providers/fake.ts` | E2E-only backend，`SHELF_TEST_MODE=1` 時 `getBackend()` 不論 provider 都回它（agent-server/index.ts gate）。Prompt 走 prefix-matched scenario：`text:` / `thinking:` / `tool:` / `tool_err:` / `permission:` / `picker_single` / `picker_multi` / `picker_input` / `picker_number` / `auth_required` / `error:` / `delay:`，用 `\|` chain 多步。Picker resolve 後 echo `picker_answers:<json>` 給 spec assert。詳見 `.agent/features/fake-provider-e2e.md` |
+| Fake provider 測試 | `providers/fake.test.ts` | 每個 scenario 的 wire-shape 驗證 + stop/abort 行為 + canned prompt shapes |
 | Bundle build | `build.mjs` | esbuild → `dist/agent-server/<version>/index.js` 單一 ESM bundle |
 | 單元測試 | `slash-commands.test.ts` | Slash dispatch（透過 `query()` 入口）：/help /context /compact /clear unknown + streaming/idle status pair 不帶 cost metrics |
 
@@ -159,7 +161,8 @@
 | `dist:mac` | 同 `dist`，限 macOS 平台 |
 | `dist:win` | 同 `dist`，限 Windows 平台 |
 | `dist:linux` | 同 `dist`，限 Linux 平台 |
-| E2E 測試 | `e2e/helpers.ts` | Playwright fixture、每 worker 用 tempdir + `--user-data-dir` 隔離 userData、`readActiveTerminalText()` helper |
+| E2E 測試 | `e2e/helpers.ts` | Playwright fixture、每 worker 用 tempdir + `--user-data-dir` 隔離 userData、`readActiveTerminalText()` helper。**fixture 預設帶 `SHELF_TEST_MODE=1` env**，讓 agent-server 走 fake provider。Agent helper：`openAgentTab()`、`sendAgentPrompt()` |
+| E2E 測試 | `e2e/agent-picker.spec.ts` | Picker_request 全鏈：single-select、multi-prompt（含 multi-select+description+free-text）、cancel via Esc、free-text-only。走 fake provider 的 `picker_*` scenarios |
 | E2E 測試 | `e2e/app-startup.spec.ts` | App 啟動、sidebar 驗證 |
 | E2E 測試 | `e2e/project-creation.spec.ts` | 建立 project、connect、tab、terminal output |
 | E2E 測試 | `e2e/features.spec.ts` | Search、settings、project edit、dev tools、所有快捷鍵 |

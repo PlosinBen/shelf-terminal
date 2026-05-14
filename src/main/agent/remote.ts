@@ -226,7 +226,11 @@ async function spawnAgentServer(
 ): Promise<RemoteProcess | null> {
   if (connection.type === 'local') {
     try {
-      const env = getShellEnv();
+      // Forward SHELF_TEST_MODE from Electron's env so E2E specs can enable
+      // the fake provider. getShellEnv() returns a cached login-shell env
+      // snapshot that won't pick up test-only flags set at launch time.
+      const env: Record<string, string> = { ...getShellEnv() };
+      if (process.env.SHELF_TEST_MODE) env.SHELF_TEST_MODE = process.env.SHELF_TEST_MODE;
       log.trace(
         'agent-remote',
         `spawnAgentServer local: cwd=${cwd} deployedPath=${deployedPath} fileExists=${fs.existsSync(deployedPath)} PATH=${env.PATH ?? '<missing>'}`,

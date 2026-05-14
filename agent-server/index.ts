@@ -1,6 +1,7 @@
 import * as readline from 'readline';
 import { createClaudeBackend } from './providers/claude';
 import { createCopilotBackend } from './providers/copilot';
+import { createFakeBackend } from './providers/fake';
 import { deleteContext, cleanupOldContexts } from './context-store';
 import { loadRestoreContextFor, newTurnId, wrapSendForContext, wrapSendForTurn } from './orchestrator';
 import type { OutgoingMessage, QueryInput, ServerBackend, PickerResolvePayload } from './providers/types';
@@ -83,18 +84,32 @@ async function applyPrefDiff(
   lastAppliedPrefs.set(sessionKey, next);
 }
 
+/**
+ * Test-mode override: when SHELF_TEST_MODE=1, every provider lookup returns
+ * the same fake backend regardless of requested provider name. E2E specs
+ * exercise renderer + main + agent-server wire chain without spinning up
+ * real Claude/Copilot SDKs. Production builds set the env to undefined so
+ * this branch is dead. See `.agent/features/fake-provider-e2e.md`.
+ */
+const TEST_MODE = process.env.SHELF_TEST_MODE === '1';
+
 function getBackend(provider: Provider): ServerBackend {
-  let b = backends.get(provider);
+  const key = (TEST_MODE ? 'fake' : provider) as Provider;
+  let b = backends.get(key);
   if (b) return b;
-  switch (provider) {
-    case 'claude':
-      b = createClaudeBackend();
-      break;
-    case 'copilot':
-      b = createCopilotBackend();
-      break;
+  if (TEST_MODE) {
+    b = createFakeBackend();
+  } else {
+    switch (provider) {
+      case 'claude':
+        b = createClaudeBackend();
+        break;
+      case 'copilot':
+        b = createCopilotBackend();
+        break;
+    }
   }
-  backends.set(provider, b);
+  backends.set(key, b);
   return b;
 }
 

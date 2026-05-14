@@ -1,4 +1,4 @@
-import { test as base, type ElectronApplication, type Page, _electron as electron } from '@playwright/test';
+import { test as base, type ElectronApplication, type Page, _electron as electron, expect } from '@playwright/test';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
@@ -37,9 +37,13 @@ export const test = base.extend<{}, { shelfApp: { app: ElectronApplication; page
     seedProjectsData(userDataDir);
     ensureTestDirectories();
 
+    // SHELF_TEST_MODE=1 swaps every agent-server backend lookup for the fake
+    // provider (agent-server/providers/fake.ts) so renderer specs can drive
+    // the full wire chain without real Claude/Copilot SDKs. Toggle per worker
+    // — once set here, all specs sharing the worker see the fake provider.
     const app = await electron.launch({
       args: [path.join(__dirname, '..'), `--user-data-dir=${userDataDir}`],
-      env: { ...process.env },
+      env: { ...process.env, SHELF_TEST_MODE: '1' },
     });
 
     let page: Page;
@@ -61,6 +65,38 @@ export const test = base.extend<{}, { shelfApp: { app: ElectronApplication; page
 });
 
 export { expect } from '@playwright/test';
+
+/**
+ * Open a Claude agent tab on the active project. Assumes a project is already
+ * created and visible in the sidebar (use `setupProject` from the calling
+ * spec). Right-clicks the `+` tab-add button to open the kind menu, then
+ * clicks "Agent (Claude)".
+ *
+ * In SHELF_TEST_MODE the renderer still sees `provider='claude'`, but the
+ * agent-server swaps the backend for the fake provider — so prompts use
+ * the fake-provider scenario syntax (`text:`, `picker_single`, etc.).
+ */
+export async function openAgentTab(page: Page): Promise<void> {
+  const addBtn = page.locator('.tab-add');
+  await addBtn.click({ button: 'right' });
+  await page.locator('.context-menu-item', { hasText: 'Agent (Claude)' }).click();
+  // Worker-scoped fixture means previous tests' agent-views may still be in
+  // the DOM under other projects. Match only the visible one (active tab).
+  await expect(page.locator('.agent-view:visible')).toBeVisible({ timeout: 5_000 });
+  await expect(page.locator('.agent-textarea:visible')).toBeVisible();
+}
+
+/**
+ * Type a fake-provider scenario into the agent input and submit. Scenarios
+ * are documented in `agent-server/providers/fake.ts`.
+ */
+export async function sendAgentPrompt(page: Page, scenario: string): Promise<void> {
+  // `:visible` discipline as in openAgentTab — active project's textarea only.
+  const ta = page.locator('.agent-textarea:visible');
+  await ta.click();
+  await ta.fill(scenario);
+  await ta.press('Enter');
+}
 
 export async function readActiveTerminalText(page: Page): Promise<string> {
   return await page.evaluate(() => {
