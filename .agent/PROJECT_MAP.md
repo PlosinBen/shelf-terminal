@@ -163,6 +163,7 @@
 | `dist:linux` | 同 `dist`，限 Linux 平台 |
 | E2E 測試 | `e2e/helpers.ts` | Playwright fixture、每 worker 用 tempdir + `--user-data-dir` 隔離 userData、`readActiveTerminalText()` helper。**fixture 預設帶 `SHELF_TEST_MODE=1` env**，讓 agent-server 走 fake provider。Agent helper：`openAgentTab()`、`sendAgentPrompt()` |
 | E2E 測試 | `e2e/agent-picker.spec.ts` | Picker_request 全鏈：single-select、multi-prompt（含 multi-select+description+free-text）、cancel via Esc、free-text-only。走 fake provider 的 `picker_*` scenarios |
+| E2E 測試 | `e2e/agent-flows.spec.ts` | 其餘 wire event 渲染：permission allow/deny、stream chunks → finalize upsert、tool_use 卡片（含 isError）、auth_required pane、error message、雙 Esc stop mid-turn。走 fake provider |
 | E2E 測試 | `e2e/app-startup.spec.ts` | App 啟動、sidebar 驗證 |
 | E2E 測試 | `e2e/project-creation.spec.ts` | 建立 project、connect、tab、terminal output |
 | E2E 測試 | `e2e/features.spec.ts` | Search、settings、project edit、dev tools、所有快捷鍵 |
