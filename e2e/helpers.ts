@@ -31,16 +31,25 @@ function cleanupTestDirectories() {
 /**
  * Custom test fixture that guarantees Electron is killed even on failure.
  */
-export const test = base.extend<{}, { shelfApp: { app: ElectronApplication; page: Page } }>({
-  shelfApp: [async ({}, use) => {
+/**
+ * Per-test scoped fixture: each test gets a fresh Electron launch + tempdir.
+ *
+ * Trade-off: ~3s startup × N tests adds to total run time (~3 min on the
+ * full suite), but eliminates cross-test state leaks that previously made
+ * `app-startup.spec.ts:22 no projects on fresh start` order-dependent —
+ * it expected 0 sidebar items but inherited 4 from prior tests that ran
+ * setupProject. Worker-scope was a premature optimization.
+ *
+ * SHELF_TEST_MODE=1 swaps every agent-server backend lookup for the fake
+ * provider (agent-server/providers/fake.ts) so renderer specs can drive
+ * the full wire chain without real Claude/Copilot SDKs.
+ */
+export const test = base.extend<{ shelfApp: { app: ElectronApplication; page: Page } }>({
+  shelfApp: async ({}, use) => {
     const userDataDir = createTempUserDataDir();
     seedProjectsData(userDataDir);
     ensureTestDirectories();
 
-    // SHELF_TEST_MODE=1 swaps every agent-server backend lookup for the fake
-    // provider (agent-server/providers/fake.ts) so renderer specs can drive
-    // the full wire chain without real Claude/Copilot SDKs. Toggle per worker
-    // — once set here, all specs sharing the worker see the fake provider.
     const app = await electron.launch({
       args: [path.join(__dirname, '..'), `--user-data-dir=${userDataDir}`],
       env: { ...process.env, SHELF_TEST_MODE: '1' },
@@ -61,7 +70,7 @@ export const test = base.extend<{}, { shelfApp: { app: ElectronApplication; page
     await app.close().catch(() => {});
     cleanupTestDirectories();
     fs.rmSync(userDataDir, { recursive: true, force: true });
-  }, { scope: 'worker' }],
+  },
 });
 
 export { expect } from '@playwright/test';
@@ -80,8 +89,8 @@ export async function openAgentTab(page: Page): Promise<void> {
   const addBtn = page.locator('.tab-add');
   await addBtn.click({ button: 'right' });
   await page.locator('.context-menu-item', { hasText: 'Agent (Claude)' }).click();
-  // Worker-scoped fixture means previous tests' agent-views may still be in
-  // the DOM under other projects. Match only the visible one (active tab).
+  // `:visible` defends against transient stacking during tab switch and
+  // any future fixture-scope changes; harmless under per-test fixture.
   await expect(page.locator('.agent-view:visible')).toBeVisible({ timeout: 5_000 });
   await expect(page.locator('.agent-textarea:visible')).toBeVisible();
 }

@@ -104,6 +104,13 @@ test.describe('Notes panel', () => {
     await openNotesPanel(page);
     await page.locator('.notes-new-btn').click();
 
+    // Wait for the note to fully load before typing — NotesView's load
+    // effect resets `titleOverridden` and `title` from the fetched note,
+    // and on a cold app (per-test fixture) that effect can race with our
+    // first .fill() and clobber it. The post-load focus() (line 286 of
+    // NotesView) is the canonical "ready" signal.
+    await expect(page.locator('.notes-textarea')).toBeFocused({ timeout: 5_000 });
+
     const titleInput = page.locator('.notes-title-input');
     await titleInput.fill('Custom Title');
 

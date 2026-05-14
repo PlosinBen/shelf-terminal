@@ -1,5 +1,7 @@
 import { test, expect, readActiveTerminalText } from './helpers';
 
+const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
+
 // Helper: open folder picker and go through connection step
 async function openFolderPicker(page: any) {
   await page.locator('.sidebar-btn', { hasText: '+' }).click();
@@ -14,6 +16,33 @@ async function openFolderPicker(page: any) {
   // Now in browse step
   const header = page.locator('.fp-header');
   await expect(header).toContainText('Open Project', { timeout: 5_000 });
+}
+
+/**
+ * Per-test fixture means earlier tests in this file no longer leave a
+ * project + terminal lying around — every test that needs them has to
+ * build them itself. Idempotent: skips steps already done.
+ */
+async function ensureProjectWithTerminal(page: any) {
+  // Close any stale folder picker first.
+  if (await page.locator('.folder-picker-overlay').isVisible().catch(() => false)) {
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.folder-picker-overlay')).not.toBeVisible({ timeout: 3_000 });
+  }
+  // Create project if sidebar is empty.
+  if (await page.locator('.sidebar-item').count() === 0) {
+    await openFolderPicker(page);
+    await page.keyboard.press(`${modifier}+Enter`);
+    await expect(page.locator('.folder-picker-overlay')).not.toBeVisible({ timeout: 3_000 });
+  }
+  // Open a terminal tab if none.
+  if (await page.locator('.tab-bar .tab').count() === 0) {
+    const prompt = page.locator('.connect-prompt');
+    if (await prompt.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      await prompt.click();
+    }
+    await expect(page.locator('.tab-bar .tab')).toHaveCount(1, { timeout: 5_000 });
+  }
 }
 
 test('open folder picker via sidebar button', async ({ shelfApp: { page } }) => {
@@ -88,11 +117,20 @@ test('select folder and create project', async ({ shelfApp: { page } }) => {
 });
 
 test('project shows connect prompt before connecting', async ({ shelfApp: { page } }) => {
+  // Need a project but no terminal yet — open folder picker manually.
+  await openFolderPicker(page);
+  await page.keyboard.press(`${modifier}+Enter`);
+  await expect(page.locator('.folder-picker-overlay')).not.toBeVisible({ timeout: 3_000 });
+
   const prompt = page.locator('.connect-prompt');
   await expect(prompt).toBeVisible({ timeout: 5_000 });
 });
 
 test('clicking connect prompt opens terminal', async ({ shelfApp: { page } }) => {
+  await openFolderPicker(page);
+  await page.keyboard.press(`${modifier}+Enter`);
+  await expect(page.locator('.folder-picker-overlay')).not.toBeVisible({ timeout: 3_000 });
+
   const prompt = page.locator('.connect-prompt');
   if (await prompt.isVisible()) {
     await prompt.click();
@@ -105,13 +143,14 @@ test('clicking connect prompt opens terminal', async ({ shelfApp: { page } }) =>
 });
 
 test('Cmd+T adds another tab', async ({ shelfApp: { page } }) => {
-  const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
+  await ensureProjectWithTerminal(page);
   await page.keyboard.press(`${modifier}+t`);
 
   await expect(page.locator('.tab-bar .tab')).toHaveCount(2, { timeout: 5_000 });
 });
 
 test('terminal spawns and shows output', async ({ shelfApp: { page } }) => {
+  await ensureProjectWithTerminal(page);
   const terminal = page.locator('.terminal-container:visible');
   await expect(terminal).toBeVisible({ timeout: 5_000 });
 
@@ -120,6 +159,7 @@ test('terminal spawns and shows output', async ({ shelfApp: { page } }) => {
 });
 
 test('project shows green status dot', async ({ shelfApp: { page } }) => {
+  await ensureProjectWithTerminal(page);
   const statusDot = page.locator('.sidebar-item .status-dot.alive').first();
   await expect(statusDot).toBeVisible({ timeout: 5_000 });
 });
