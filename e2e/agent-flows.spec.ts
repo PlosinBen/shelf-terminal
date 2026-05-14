@@ -109,6 +109,62 @@ test.describe('agent flows via fake provider', () => {
     await expect(page.locator('.agent-auth-title:visible')).toContainText('Fake');
   });
 
+  test('thinking: renders as a thinking message card', async ({ shelfApp: { page } }) => {
+    await setupProject(page);
+    await openAgentTab(page);
+    await sendAgentPrompt(page, 'thinking:considering options');
+
+    const card = page.locator('.agent-msg-thinking:visible').last();
+    await expect(card).toBeVisible({ timeout: 5_000 });
+    // Click chevron to expand (collapsed by default per agentDisplay.thinking).
+    await card.locator('.agent-thinking-header').click();
+    await expect(card.locator('.agent-thinking-content')).toContainText('considering options');
+  });
+
+  test('picker_number: integer-only input flow', async ({ shelfApp: { page } }) => {
+    await setupProject(page);
+    await openAgentTab(page);
+    await sendAgentPrompt(page, 'picker_number');
+
+    const panel = page.locator('.picker-panel:visible');
+    await expect(panel).toBeVisible({ timeout: 5_000 });
+    // No option list — only the numeric input.
+    await expect(panel.locator('.picker-option')).toHaveCount(0);
+    // input[type=number] is the rendered control for integer inputType.
+    const input = panel.locator('.picker-other-input');
+    await expect(input).toHaveAttribute('type', 'number');
+
+    await input.fill('42');
+    await panel.locator('.picker-btn-primary').click();
+
+    await expect(page.locator('.agent-messages:visible')).toContainText('picker_answers:["42"]', { timeout: 5_000 });
+  });
+
+  test('chain: scenarios run in order and produce all messages', async ({ shelfApp: { page } }) => {
+    await setupProject(page);
+    await openAgentTab(page);
+    // Two text + one tool, separated by a tiny delay. All three should
+    // appear and the turn should settle to idle.
+    await sendAgentPrompt(page, 'text:hello|delay:30|tool:Read|text:bye');
+
+    const messages = page.locator('.agent-messages:visible');
+    await expect(messages).toContainText('hello', { timeout: 5_000 });
+    await expect(messages).toContainText('bye');
+    await expect(messages.locator('.agent-tool-name', { hasText: 'Read' })).toBeVisible();
+    await expect(page.locator('.agent-status-label:visible')).toHaveText('idle', { timeout: 5_000 });
+  });
+
+  test('unknown prompt: fake-echo fallback renders as text', async ({ shelfApp: { page } }) => {
+    await setupProject(page);
+    await openAgentTab(page);
+    // Anything that doesn't prefix-match a known scenario falls back to
+    // an echo so dev-mode pokes still produce visible output.
+    await sendAgentPrompt(page, 'totally unknown scenario');
+
+    await expect(page.locator('.agent-messages:visible'))
+      .toContainText('fake-echo: totally unknown scenario', { timeout: 5_000 });
+  });
+
   test('error event renders as an error message', async ({ shelfApp: { page } }) => {
     await setupProject(page);
     await openAgentTab(page);
