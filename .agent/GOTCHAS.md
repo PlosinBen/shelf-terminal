@@ -102,36 +102,6 @@
 
 ---
 
-## 11. Playwright E2E 共用 worker scope
-
-**現象**: 測試之間的 state 互相影響（例如一個測試建了 project，後面的測試看到多個 project）。
-
-**原因**: `shelfApp` fixture 是 `scope: 'worker'`，同一個 worker 的所有 spec file 共用同一個 Electron instance。
-
-**注意**: 斷言不要用精確的 count（如 `toHaveCount(1)`），改用 `toBeGreaterThanOrEqual(1)` 或 `.first()`。
-
----
-
-## 12. autoHideMenuBar 只影響 Windows
-
-**現象**: macOS 上設 `autoHideMenuBar: true` 沒效果。
-
-**原因**: macOS 的 menu bar 在螢幕頂部（系統層級），不在視窗內。`autoHideMenuBar` 只影響 Windows/Linux 的視窗內 menu bar。
-
-**注意**: 這是正常行為，不是 bug。
-
----
-
-## 13. Connector 問題可用 Local 重現
-
-**現象**: WSL 雙重 prompt 問題，看似只能在 Windows 測試。
-
-**原因**: 所有 connector 都透過 `createConnector()` factory 走統一的 `Connector` 介面（`createShell`、`listDir`、`uploadFile` 等），spawn 邏輯集中在 `pty-manager.ts` 的 `connector.createShell(cwd)`。問題通常不是特定 connection type 造成的。
-
-**注意**: Connector 統一介面後，spawn/connect/disconnect 等行為在 local 上就能驗證。不需要等特定平台測試。修 bug 前先在 local 用 log 確認。
-
----
-
 ## 14. TerminalView 的 paste/drop handler 是 closure，settings 要走 ref
 
 **現象**: 改了 Settings 的 Max Upload Size 後，已經開著的 tab 還是用舊的上限。
@@ -175,14 +145,9 @@
 
 **現象**: macOS 上 electron-updater 檢查到新版但無法安裝更新。
 
-**原因**: `.github/workflows/build.yml` 設了 `CSC_IDENTITY_AUTO_DISCOVERY: false`，CI build 出來的 macOS binary 沒有簽名。electron-updater 在 macOS 上使用 Squirrel.Mac，要求更新包必須經過 code signing 才能安裝。
+**原因**: CI build 設了 `CSC_IDENTITY_AUTO_DISCOVERY: false`、出來的 macOS binary 沒簽名；Squirrel.Mac 要求更新包必須經 code signing。Windows 不受影響。
 
-**解法**: 需要 Apple Developer ID certificate（Apple Developer Program, $99/年），然後：
-1. 匯出 `.p12` 憑證，base64 encode 存到 GitHub Secrets（`CSC_LINK` + `CSC_KEY_PASSWORD`）
-2. 移除或改掉 `CSC_IDENTITY_AUTO_DISCOVERY: false`
-3. 可能還需要 notarization（macOS 10.15+ 要求）
-
-**注意**: Windows 不需要 code signing 就能自動更新。在沒有 Apple 憑證之前，macOS 用戶只能手動下載新版。
+**現況**: 沒 Apple Developer cert（年費 $99），macOS 用戶手動下載新版。要啟用時把 cert 經 `CSC_LINK` + `CSC_KEY_PASSWORD` 帶進 CI、移除 `CSC_IDENTITY_AUTO_DISCOVERY: false`、補 notarization。
 
 ---
 
@@ -248,7 +213,7 @@
 
 **原因**: PM provider config（baseUrl、apiKey、model）跟著 `AppSettings.pmProvider` 走，存在 `settings.json`。Telegram bot token 也在 `AppSettings.telegram`。
 
-**注意**: 目前是明文。Gemini 免費 key 風險低，但如果未來放付費 key，應該考慮移到 `~/.config/shelf/` 或用 OS keychain。
+**注意**: 目前是明文。
 
 ---
 
@@ -282,16 +247,6 @@
 
 ---
 
-## 28. Gemini OpenAI-compatible endpoint model 名稱
-
-**現象**: 填 `gemini-2.5-flash-preview-05-20` 回 404。
-
-**原因**: OpenAI-compatible endpoint 的 model ID 跟 native API 不同。正確的是 `gemini-2.5-flash`（不帶日期後綴）。
-
-**解法**: 用簡短名稱：`gemini-2.5-flash`、`gemini-2.5-pro`、`gemini-2.0-flash`。
-
----
-
 ## 29. 503/429 auto-retry 用 exponential backoff
 
 **現象**: PM 對話撞 503 後自動重試。
@@ -309,16 +264,6 @@
 **原因**: 收合 tab 的渲染已從各自 component 移到 App.tsx 的 `.right-tabs-collapsed` 容器。DevToolsPanel 的 `if (!devToolsVisible) return null`（不再 return collapsed button）。
 
 **注意**: 新增右側 panel 時要在 App.tsx 加收合 tab，不要在 panel component 裡加。
-
----
-
-## 31. Settings tab 切換不觸發 re-mount，state 共享
-
-**現象**: 在 Terminal tab 改了值，切到 PM Agent tab 再切回，值還在。
-
-**原因**: SettingsPanel 用一個 `draft` state 管所有 tab 的欄位，切 tab 只是 conditional render 不同區塊。Cancel 會 reset 整個 draft。
-
-**注意**: 這是正確行為。不要把 draft 拆成 per-tab state。
 
 ---
 
