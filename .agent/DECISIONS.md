@@ -962,3 +962,37 @@ Shelf-terminal 原本完全沒處理：Claude SDK 把 AskUserQuestion 當普通 
 - `src/main/agent/` 全層 + preload + env.d.ts — signature 同步
 - `src/renderer/components/PickerPanel.tsx` — 新元件
 - `scripts/spike-askuser.ts` — manual smoke regression（SDK 升級時跑一次驗 canUseTool deny+message hack 仍 work）
+
+
+## 58. Fake provider 作為 E2E 入口、fixture per-test scope
+
+**問題**: Renderer 收 wire event → 顯示之間有大量 state machine（stream upsert、permission popup、picker panel、auth flow、error display），完全沒 E2E 覆蓋。靠真 Claude/Copilot SDK 做 E2E 太慢、需 auth、CI 不適合；靠 jsdom mock 跳過 main IPC 跟 agent-server stdin/stdout protocol，少測兩層。Picker 重塑期間累積三輪這類問題（bypass mode 漏接、font-size、keyboard trap），都本該被 E2E 抓到。
+
+**決策**:
+- **agent-server 內建 fake provider** (`agent-server/providers/fake.ts`)，speak 同一個 `ServerBackend` interface + 同一組 `OutgoingMessage` shape — 沒有 test-only event，凡 fake 能 emit 的事 real provider 都可能 emit
+- **`SHELF_TEST_MODE=1` hijack 模式**：env 開時 `agent-server/index.ts` 的 `getBackend()` **不論 renderer 要哪個 provider** 都回 fake。Renderer 維持 `claude`/`copilot` 選項、Status bar 看到的還是 "Claude"，但 wire 後面整條鏈走 fake。production build 沒設 env → fake code dead branch。
+- **Scenario syntax 用 prefix match + `|` chain**（`text:hi|delay:30|tool:Read`）。文件在 `fake.ts` JSDoc，不另外建 typed builder（決議當下 12 個 scenario、寫了 16 支 spec 零 typo，builder 純成本沒收益）
+- **Picker resolve 用 echo 驗 IPC round-trip**：fake 解 picker 後 emit `text` message `picker_answers:<json>` 或 `picker_answers:cancelled`，spec assert 這條 echo（避免戳 renderer 內部 state）
+- **Playwright fixture per-test scope**（不是 worker scope）：每 test 一個新 Electron + tempdir。worker scope 早期看似省 ~3s × N，實際讓 spec 互相耦合 — `app-startup.spec.ts` 期待 0 project、`project-creation.spec.ts` 後段測試假設前面建好的 project 還在、`notes.spec.ts` 載入 effect 跟 user input race。per-test 後總時間反而從 18 分掉到 3.3 分（先前的 18 分多半是 flake retry 累出來的）
+
+**為什麼不走其他路**:
+
+| 替代 | 涵蓋 | 駁回理由 |
+|------|------|----------|
+| Mock `window.shelfApi` (jsdom) | renderer state machine | 不過 main IPC、jsdom DOM 跟 Electron renderer 有落差 |
+| Mock backend at main 層 | main IPC + renderer | 跳過 agent-server stdin/stdout protocol 少測一層 |
+| Real Claude/Copilot SDK | 全部 | auth + 跨網路 + flaky + 慢，CI 不適合 |
+| renderer 加 test-mode 條件分支 | — | 污染 production code 路徑、prod / test divergence 真實 risk |
+
+**不要改**:
+- **不要把 fake.ts 改成跟 real provider 不同的 wire shape** — 整套保證來自「same wire 鏈、不跳層」
+- **不要回到 worker-scoped fixture** — `project-creation.spec.ts` 後半段、`app-startup.spec.ts:22 no projects on fresh start`、`notes.spec.ts:103 manual title overrides` 會立刻壞
+- **不要在 renderer 暴露 fake provider** — hijack 是底層替換、UI 保持跟 production 一樣的路徑
+- **不要把 SHELF_TEST_MODE 從 hijack 改成「register fake as a third provider」** — 那會逼 `AgentProvider` union 改 shared/types.ts、persistence schema、Settings UI 都動，contained boundary 失守
+
+**配套變更**:
+- `agent-server/providers/fake.ts` + `fake.test.ts` — backend + 21 unit
+- `agent-server/index.ts` — `TEST_MODE` 短路 `getBackend()`
+- `src/main/agent/remote.ts` — `SHELF_TEST_MODE` 從 Electron `process.env` 顯式 forward 到 spawn env（GOTCHAS：getShellEnv cache）
+- `e2e/helpers.ts` — fixture per-test、`openAgentTab()` / `sendAgentPrompt()`
+- `e2e/agent-picker.spec.ts`、`e2e/agent-flows.spec.ts` — 16 specs 覆蓋每個 scenario

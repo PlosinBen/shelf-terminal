@@ -721,3 +721,20 @@ canUseTool = async (toolName, input, opts) => {
 **未來如果加新的「使用者互動」型 tool**（例如 SDK 哪天加 `AskUserConfirm`、`AskUserSelect` 之類），同樣要排在 bypass 之前。判定方法：tool 的語意是「我需要使用者親自做決定」就要先攔；tool 的語意是「我要存取系統資源」才走 bypass 路徑。
 
 **回歸測試**: `agent-server/providers/claude.test.ts` 的 "AskUserQuestion intercept survives bypassPermissions" 段。
+
+## `SHELF_TEST_MODE` 等 runtime env flag 不會自動帶到 agent-server subprocess
+
+**現象**: E2E 把 `SHELF_TEST_MODE=1` 透過 `electron.launch({ env })` 注入 Electron process，期望 agent-server subprocess 也吃得到 → 結果 fake provider 沒被 hijack、agent-server 還是嘗試起 Claude/Copilot backend。
+
+**原因**: `spawnAgentServer()`（`src/main/agent/remote.ts`）用的不是 `process.env`，是 `getShellEnv()` 回傳的「import 那一刻 cache 的 login-shell env」（`src/main/connector/shell-env.ts`）。Login shell 是用 `execFile` 在 import time 跑出來的、跟 Electron 自己的 process.env 是兩個世界，所以 Electron launch 時才設的 flag 看不到。
+
+**修法**: 顯式從 `process.env` 撈出來覆蓋進 spawn env：
+
+```ts
+// remote.ts spawnAgentServer 'local' 分支
+const env: Record<string, string> = { ...getShellEnv() };
+if (process.env.SHELF_TEST_MODE) env.SHELF_TEST_MODE = process.env.SHELF_TEST_MODE;
+const proc = spawn('node', [deployedPath], { cwd, env, stdio: [...] });
+```
+
+**判斷原則**: 任何「runtime 才決定、跟 user login shell 無關」的 env flag（測試開關、debug toggle、CI 標記），都要照這個 pattern 顯式 forward；遠端 `ssh` / `docker` 分支同理（要的話包進 `env` arg 或 shell prefix）。**user-config 性質的**（`PATH`、`SHELL`、`LANG`）才放心交給 `getShellEnv()` 全帶。

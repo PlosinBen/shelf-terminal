@@ -89,7 +89,7 @@ async function applyPrefDiff(
  * the same fake backend regardless of requested provider name. E2E specs
  * exercise renderer + main + agent-server wire chain without spinning up
  * real Claude/Copilot SDKs. Production builds set the env to undefined so
- * this branch is dead. See `.agent/features/fake-provider-e2e.md`.
+ * this branch is dead. See DECISIONS #58.
  */
 const TEST_MODE = process.env.SHELF_TEST_MODE === '1';
 
