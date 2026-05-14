@@ -206,16 +206,6 @@
 
 ---
 
-## 20. Tab Mute 狀態不持久化
-
-**現象**: 重啟 app 後 tab 的 mute 狀態消失。
-
-**原因**: mute 狀態只存在 main process 的 `mutedTabs` Set 中，沒有寫入 settings 或 projects.json。
-
-**注意**: 這是 v0.2.4 的設計——僅 runtime mute，重啟重置。如果未來要持久化需另外實作。
-
----
-
 ## 21. xterm.js 6.0 pre-minified bundle 不能被 esbuild 二次 minify
 
 **現象**: Production build 的 terminal 執行 vim、claude 等 TUI app 時卡住無回應。DevTools 顯示 `ReferenceError: i is not defined` at `requestMode`。
@@ -441,12 +431,7 @@ CLI 的預設邏輯**到底看什麼沒驗證**（binary 是 Bun 編譯的 nativ
 - 不要試著從別的地方算 utilization（例如自己累加 inputTokens / window 比例）—— 5h/7d 兩個 bucket 是 server-side 計算，client 沒有完整資訊。
 - 不要把 fallback 改成 `5h: 0%`，那會誤導使用者以為配額沒在動。
 
-可能改進方向（未實作）: 直接讀底層 HTTP header（`anthropic-ratelimit-*`），跳過 SDK 的 filter。但 SDK 沒暴露 raw response，要 patch SDK 或自己跑一條額外 API 拿。
-
-**追蹤上游進度**:
-- 上游 issue（含詳細 root cause + 解法草案）: https://github.com/anthropics/claude-code/issues/50518
-- 同主題的 client 端 workaround PR（已 closed，未 merge）: https://github.com/agentclientprotocol/claude-agent-acp/pull/568
-- 截至 2026-05 為止 issue 仍 OPEN、無任何 Anthropic 回應、無 triage label。**不要寄望短期內修復**。日後想知道現況時，先點上面 issue link 看有沒有新留言／關閉。
+上游 issue: https://github.com/anthropics/claude-code/issues/50518
 
 ---
 
@@ -588,24 +573,7 @@ Dev mode 沒事是因為路徑是 `node_modules/@github/copilot/...`，不含 `a
 
 **根本原因**: by-design。Provider 內部 `stoppable` flag 在 critical-section（compact 進行中、`/clear` 的 dispose+rebuild 期間）set 為 false，`stop()` 看到後 silently no-op。中斷會留半完成 session — Copilot CLI `rpc.history.compact()` 已發出 RPC、Claude SDK 已進入內部 compact loop，外部 abort 沒有乾淨退出語意。
 
-**為什麼不做 UI 提示**: 不上 renderer 是有理由的（見 DECISIONS #54）— 使用者預期已對齊（compact/clear 修改 session 狀態，直覺就知道不該打斷），業界主流（Cursor / Claude Code / Aider）也都這樣。加 `stoppable` 欄位需要：協定加欄位、provider 維護 mid-turn 切換、renderer 條件 UI、跨 component 一致性處理。複雜度沒對應到痛點。
-
-**Future 路徑**: 若使用者反映「stop 沒反應困惑」，加 `stoppable?: boolean` 到 status event payload，provider critical section 進出時 emit 切換訊號，renderer 條件 disable / 不同視覺。改動範圍小，能升級時再升級。
-
-## Slash response 寫入後降版的相容性
-
-**症狀** (假想): 使用者升版用了 `/compact`，slash_response 訊息存進 IndexedDB；降版回舊版 shelf 沒這 variant，載入歷史會怎樣？
-
-**結論**: 安全 lossy degradation — 整個 conversation 載入不會崩，只是 slash_response 訊息會 silently 不渲染。
-
-**為什麼**:
-- `loadAgentMessages` 只 `.map()` row → AgentMsg，沒有 throw on unknown variant
-- `reviveOrphanPending` 只認自己處理的 type（tool_use / file_edit / slash_response），其他 pass through unchanged
-- `AgentMessage.tsx` render switch 有 `default: return null`（exhaustive `never` check），TS compile 時抓未對齊 variant，runtime 對未知 type 就是不渲染
-- 降版的舊 code 看到 `type: 'slash_response'` 就 fall through default → return null → 從 list 上消失但不爆
-
-**注意**: 是 lossy，不是 lossy-with-warning — 降版使用者根本不會知道有訊息被吃掉。如果這條 invariant 在未來放寬（e.g., 改成 throw on unknown），請同時調 `loadAgentMessages` 加 schema-version 紀錄。
-
+**為什麼不做 UI 提示**: by-design — 使用者預期已對齊（compact/clear 修改 session 狀態，直覺就知道不該打斷），業界主流（Cursor / Claude Code / Aider）也都這樣。詳見 DECISIONS #54。
 
 ## Claude SDK content_block_start 會 mid-turn 重發
 
@@ -695,10 +663,6 @@ if (event?.type === 'content_block_start' && ...) {
 **Spike 驗證**: `scripts/spike-askuser.ts`。SDK 升級（0.3.x、未來引入真正的 callback）時 manual `npx tsx scripts/spike-askuser.ts` 跑一次驗 hack 還 work。
 
 **為什麼不放 unit test**: 需要真 API key + 真打 Claude（spike script 是 integration smoke 不是 CI test）。改 unit-test 要 mock 整個 SDK transport — cost 高、回報低（SDK 內部 deny→tool_result 流程改了 mock 也測不到）。
-
-**未來路徑**:
-- Anthropic 可能後續加 `onAskUserQuestion?: (input) => Promise<output>` callback（對齊既有 `onElicitation`）— 那時把 `canUseTool` 攔截改成註冊新 callback，wire shape (picker_request) 不變
-- 若 deny+message hack 哪天壞了（SDK 把 deny content 改成 "Denied"-style string 不傳 message 內容）— GOTCHAS 補一筆，臨時改 `disallowedTools` 加 AskUserQuestion 退回純文字模式
 
 ## bypassPermissions 模式下 AskUserQuestion 仍需攔截
 
