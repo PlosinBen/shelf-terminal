@@ -627,35 +627,6 @@ if (event?.type === 'content_block_start' && ...) {
 - 不要嘗試讓 key 包含 projectId（會在 reorder 時 unmount，丟掉 timeline / streaming 狀態）
 
 
-## Claude provider `sdkQuery()` 不能 re-entrant，一個 turn 只能一次
-
-**症狀** (預期會踩到): 未來在 `dispatchSlash` 想為某個 slash command 另開一個 `sdkQuery()` 做 side effect（例如「先 query 一輪取資訊、再跑使用者 prompt」），會發現第一個 generator 被 orphan、abort controller 被踩、`pendingPermissions` map 提前清空。
-
-**根因**: `agent-server/providers/claude.ts` 用 module-level 閉包狀態管 turn lifecycle：
-
-- `activeQuery`（line ~281）：當前 SDK generator，single slot
-- `abortController`：當前 turn 的 abort signal，`finally` 清成 null
-- `pendingPermissions`：tool permission 對應 map，`finally` drain
-- `blockMsgIds`：assistant block → msgId 映射，per-turn local
-- `stoppable`：critical section flag
-
-這些狀態散在 281 / 341 / 384 / 404 幾個點 set/clear，從單一函式 read 看不出全貌。第二次呼叫 `sdkQuery()` 會：
-
-1. 覆蓋 `activeQuery` → 第一個 generator 沒人 consume，記憶體洩漏 + SDK 子程序停在半路
-2. 覆蓋 `abortController` → 第一個 turn 的 stop 訊號失效
-3. `finally` 跑兩次 → `pendingPermissions` 被提早清，第一輪 in-flight 的 permission resolve 找不到對應 entry
-
-**正確 pattern**:
-
-- Slash 需要 SDK 處理時（Claude `/compact` `/clear`）：把 slash prefix **塞進唯一一次的 `sdkQuery()`** `options.prompt`，讓 SDK 自己 dispatch。在 event stream 內 scan 完成訊號（既有實作 line 351-380 掃 `compact_boundary` / `compact_result` 就是這 pattern）。
-- Slash 不需要 SDK（`/help` `/context`）：完全不 call SDK，直接 emit `slash_response`，立即發 idle status 收掉 turn。
-- After-idle 重 call 可以，但前提是前一輪 `finally` 完整跑完 — 也就是必須等 `query()` return 之後才開新 SDK turn。
-
-**不要做**:
-- 不要在 `dispatchSlash` 內為了「先做一件事再跑使用者 prompt」開第二個 `sdkQuery()` — 改成單次 query 用 system prompt / pre-pended user message 達成
-- 不要把 `activeQuery` 改成 array / set 想支援並發 — turn lifecycle 的其他狀態（abort / permissions）也跟著要重設計，不是小改
-- Copilot 沒這個限制（`state.session.rpc.*` 可在 turn 間 call），但 mid-critical-section 仍要走 `critical()` helper
-
 ## Claude SDK 0.2.126 沒有 onAskUserQuestion，靠 canUseTool deny+message 走私 answer
 
 **現象**: SDK 把 AskUserQuestion 當普通 tool dispatch、`canUseTool` 對它觸發、但 SDK 沒提供 `onAskUserQuestion` 之類的專屬 callback。Harness 想接管這個 tool，唯一可走的 channel 是 `canUseTool` 的 `{behavior: 'deny', message}` 返回值 — `message` 內容被 SDK 包成 `tool_result.content`（即使 `is_error: true`），model 讀 content 不看 flag、解析 JSON 繼續對話。
