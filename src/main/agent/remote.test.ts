@@ -27,6 +27,24 @@ vi.mock('@shared/logger', () => ({
   log: { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn(), trace: vi.fn(), flushTrace: vi.fn() },
 }));
 
+describe('toWslPath', () => {
+  it('converts Windows drive paths to WSL mount paths', async () => {
+    const { toWslPath } = await import('./remote');
+    expect(toWslPath('C:\\Users\\ben\\app\\resources\\agent-server\\1.2.3\\index.mjs'))
+      .toBe('/mnt/c/Users/ben/app/resources/agent-server/1.2.3/index.mjs');
+  });
+
+  it('handles lowercase drive letters', async () => {
+    const { toWslPath } = await import('./remote');
+    expect(toWslPath('c:\\foo\\bar')).toBe('/mnt/c/foo/bar');
+  });
+
+  it('handles other drive letters', async () => {
+    const { toWslPath } = await import('./remote');
+    expect(toWslPath('D:\\Program Files\\Shelf')).toBe('/mnt/d/Program Files/Shelf');
+  });
+});
+
 describe('remote backend', () => {
   beforeEach(() => {
     vi.clearAllMocks();

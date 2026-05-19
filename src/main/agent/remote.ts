@@ -175,6 +175,12 @@ export function createRemoteBackend(
   };
 }
 
+export function toWslPath(winPath: string): string {
+  return winPath
+    .replace(/^([A-Za-z]):\\/, (_, drive: string) => `/mnt/${drive.toLowerCase()}/`)
+    .replace(/\\/g, '/');
+}
+
 function getLocalBundlePath(): string {
   const pkg = JSON.parse(fs.readFileSync(path.join(app.getAppPath(), 'package.json'), 'utf-8'));
   const version = pkg.version;
@@ -215,7 +221,11 @@ async function deployAgentServer(connection: Connection): Promise<string> {
     return remoteDest;
   }
 
-  throw new Error(`Unsupported connection type for deploy: ${connection.type}`);
+  if (connection.type === 'wsl') {
+    return toWslPath(getLocalBundlePath());
+  }
+
+  throw new Error(`Unsupported connection type for deploy: ${(connection as any).type}`);
 }
 
 async function spawnAgentServer(
@@ -267,6 +277,13 @@ async function spawnAgentServer(
   if (connection.type === 'docker') {
     const cmd = `node ${deployedPath}`;
     const proc = spawn('docker', ['exec', '-i', connection.container, 'sh', '-c', cmd], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    return wrapProcess(proc);
+  }
+
+  if (connection.type === 'wsl') {
+    const proc = spawn('wsl.exe', ['-d', connection.distro, '--', 'node', deployedPath], {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     return wrapProcess(proc);
