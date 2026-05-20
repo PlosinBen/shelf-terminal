@@ -4,8 +4,8 @@ import type { AgentMsg } from './components/AgentMessage';
 // Mock the IDB storage module — we don't want real IndexedDB calls,
 // and we need to control load/save timing for race tests.
 const mockedStorage = vi.hoisted(() => ({
-  loadAgentMessages: vi.fn<(sessionId: string) => Promise<AgentMsg[]>>(),
-  saveAgentMessages: vi.fn<(sessionId: string, msgs: AgentMsg[], max: number) => Promise<void>>(),
+  loadAgentMessagesLatest: vi.fn<(sessionId: string, limit: number) => Promise<AgentMsg[]>>(),
+  saveAgentMessagesDelta: vi.fn<(sessionId: string, dirty: AgentMsg[], deleted?: Set<string>) => Promise<void>>(),
   clearAgentSession: vi.fn<(sessionId: string) => Promise<void>>(),
 }));
 vi.mock('./storage/agent-history', () => mockedStorage);
@@ -32,7 +32,6 @@ import {
   setAuthRequired,
   setInitStatus,
   setInMemoryMax,
-  setIdbMax,
   setSaveThrottleMs,
   buildTurns,
   __resetStoreForTests,
@@ -55,8 +54,8 @@ function userMsg(id: string, content: string): AgentMsg {
 
 beforeEach(() => {
   __resetStoreForTests();
-  mockedStorage.loadAgentMessages.mockReset().mockResolvedValue([]);
-  mockedStorage.saveAgentMessages.mockReset().mockResolvedValue();
+  mockedStorage.loadAgentMessagesLatest.mockReset().mockResolvedValue([]);
+  mockedStorage.saveAgentMessagesDelta.mockReset().mockResolvedValue();
   mockedStorage.clearAgentSession.mockReset().mockResolvedValue();
   vi.useFakeTimers();
 });
@@ -97,16 +96,15 @@ describe('agentTabStore — lifecycle', () => {
     removeTab(TAB);
     expect(__getTabForTests(TAB)).toBeUndefined();
     expect(__getPendingSaveForTests(TAB)).toBeUndefined();
-    // flushSave fires synchronously inside removeTab. saveAgentMessages
-    // is called but returns a promise — let microtasks settle.
-    expect(mockedStorage.saveAgentMessages).toHaveBeenCalledTimes(1);
+    // flushSave fires synchronously inside removeTab.
+    expect(mockedStorage.saveAgentMessagesDelta).toHaveBeenCalledTimes(1);
   });
 });
 
 describe('agentTabStore — IDB load merge (race-safe)', () => {
   it('merges loaded behind current messages, preserving in-flight events', async () => {
     let resolveLoad!: (msgs: AgentMsg[]) => void;
-    mockedStorage.loadAgentMessages.mockReturnValue(new Promise<AgentMsg[]>((r) => { resolveLoad = r; }));
+    mockedStorage.loadAgentMessagesLatest.mockReturnValue(new Promise<AgentMsg[]>((r) => { resolveLoad = r; }));
     initTab(TAB, { sessionId: SESSION, provider: 'claude' });
     // Backend event arrives before load resolves
     upsertMessage(TAB, textMsg('m-live', 'live'));
@@ -121,7 +119,7 @@ describe('agentTabStore — IDB load merge (race-safe)', () => {
 
   it('ID-conflict between loaded and current → keeps current', async () => {
     let resolveLoad!: (msgs: AgentMsg[]) => void;
-    mockedStorage.loadAgentMessages.mockReturnValue(new Promise<AgentMsg[]>((r) => { resolveLoad = r; }));
+    mockedStorage.loadAgentMessagesLatest.mockReturnValue(new Promise<AgentMsg[]>((r) => { resolveLoad = r; }));
     initTab(TAB, { sessionId: SESSION, provider: 'claude' });
     upsertMessage(TAB, textMsg('m-shared', 'new-version'));
     resolveLoad([textMsg('m-shared', 'old-version')]);
@@ -133,7 +131,7 @@ describe('agentTabStore — IDB load merge (race-safe)', () => {
   });
 
   it('load failure does not crash; messages stays as-is', async () => {
-    mockedStorage.loadAgentMessages.mockRejectedValueOnce(new Error('idb gone'));
+    mockedStorage.loadAgentMessagesLatest.mockRejectedValueOnce(new Error('idb gone'));
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     initTab(TAB, { sessionId: SESSION, provider: 'claude' });
     upsertMessage(TAB, textMsg('m1', 'live'));
@@ -307,47 +305,53 @@ describe('agentTabStore — save throttle', () => {
     upsertMessage(TAB, textMsg('m1', 'a'));
     upsertMessage(TAB, textMsg('m2', 'b'));
     upsertMessage(TAB, textMsg('m3', 'c'));
-    expect(mockedStorage.saveAgentMessages).not.toHaveBeenCalled();
+    expect(mockedStorage.saveAgentMessagesDelta).not.toHaveBeenCalled();
     vi.advanceTimersByTime(5001);
-    expect(mockedStorage.saveAgentMessages).toHaveBeenCalledTimes(1);
+    expect(mockedStorage.saveAgentMessagesDelta).toHaveBeenCalledTimes(1);
   });
 
   it('streaming-in-progress skips doSave (deferred to turn end)', () => {
     setStreaming(TAB, true);
     upsertMessage(TAB, textMsg('m1', 'mid-stream'));
     vi.advanceTimersByTime(5001);
-    expect(mockedStorage.saveAgentMessages).not.toHaveBeenCalled();
+    expect(mockedStorage.saveAgentMessagesDelta).not.toHaveBeenCalled();
   });
 
   it('removeTab flushes pending save synchronously', () => {
     upsertMessage(TAB, textMsg('m1', 'hi'));
     removeTab(TAB);
-    expect(mockedStorage.saveAgentMessages).toHaveBeenCalledTimes(1);
+    expect(mockedStorage.saveAgentMessagesDelta).toHaveBeenCalledTimes(1);
   });
 });
 
 describe('agentTabStore — in-memory trim', () => {
   beforeEach(() => {
     setInMemoryMax(5);
-    setIdbMax(10);
     initTab(TAB, { sessionId: SESSION, provider: 'claude' });
   });
 
-  it('doSave trims messages to inMemoryMax', () => {
-    for (let i = 0; i < 8; i++) upsertMessage(TAB, textMsg(`m${i}`, `c${i}`));
+  it('trim runs at setStreaming(false), aligned to nearest user msg', () => {
+    // Build u0,t0, u1,t1, u2,t2, u3,t3 — 8 msgs, user every other slot.
+    for (let i = 0; i < 4; i++) {
+      upsertMessage(TAB, userMsg(`u${i}`, `q${i}`));
+      upsertMessage(TAB, textMsg(`t${i}`, `a${i}`));
+    }
+    // doSave throttle no longer trims — only setStreaming(false) does.
     vi.advanceTimersByTime(5001);
-    expect(__getTabForTests(TAB)!.messages.length).toBe(5);
-    expect(__getTabForTests(TAB)!.messages[0].id).toBe('m3');  // oldest kept
+    expect(__getTabForTests(TAB)!.messages.length).toBe(8);
+
+    setStreaming(TAB, true);
+    setStreaming(TAB, false);
+    // target idx = length - cap = 8 - 5 = 3 → messages[3] = t1 (not user),
+    // so the loop walks forward to messages[4] = u2 and cuts there.
+    // Kept tail = [u2, t2, u3, t3] = 4 msgs (slightly under cap — the
+    // turn-alignment trade-off).
+    const msgs = __getTabForTests(TAB)!.messages;
+    expect(msgs.length).toBe(4);
+    expect(msgs[0].id).toBe('u2');
   });
 
-  it('saveAgentMessages is called with idbMax (independent from inMemoryMax)', () => {
-    for (let i = 0; i < 3; i++) upsertMessage(TAB, textMsg(`m${i}`, `c${i}`));
-    vi.advanceTimersByTime(5001);
-    const call = mockedStorage.saveAgentMessages.mock.calls[0];
-    expect(call[2]).toBe(10);  // idbMax
-  });
-
-  it('streaming-in-progress does NOT trim', () => {
+  it('streaming-in-progress does NOT trim (cap deferred to turn end)', () => {
     setStreaming(TAB, true);
     for (let i = 0; i < 8; i++) upsertMessage(TAB, textMsg(`m${i}`, `c${i}`));
     vi.advanceTimersByTime(5001);
@@ -356,18 +360,11 @@ describe('agentTabStore — in-memory trim', () => {
 });
 
 describe('agentTabStore — settings constraints', () => {
-  it('setInMemoryMax clamps to idbMax', () => {
-    setIdbMax(100);
-    setInMemoryMax(200);
-    expect(__getCapsForTests().inMemoryMax).toBe(100);
-  });
-
-  it('setIdbMax lowering below inMemoryMax re-clamps inMemoryMax', () => {
-    setInMemoryMax(500);
-    setIdbMax(1000);
-    expect(__getCapsForTests().inMemoryMax).toBe(500);
-    setIdbMax(300);
-    expect(__getCapsForTests().inMemoryMax).toBe(300);
+  it('setInMemoryMax floors at 1', () => {
+    setInMemoryMax(0);
+    expect(__getCapsForTests().inMemoryMax).toBe(1);
+    setInMemoryMax(-50);
+    expect(__getCapsForTests().inMemoryMax).toBe(1);
   });
 
   it('setSaveThrottleMs floors at 0', () => {

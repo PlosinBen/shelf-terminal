@@ -266,21 +266,7 @@ export function SettingsPanel() {
                     onChange={(e) => updateDraft({ agentInMemoryMaxMessages: Number(e.target.value) })}
                   />
                 </div>
-                <div className="settings-sub-hint">How many messages stay rendered. Higher values use more memory and slow input typing.</div>
-
-                <div className="settings-group">
-                  <label className="settings-label">Stored Messages (IDB)</label>
-                  <input
-                    className="settings-input"
-                    type="number"
-                    min={50}
-                    max={50000}
-                    step={100}
-                    value={draft.agentHistoryMaxMessages}
-                    onChange={(e) => updateDraft({ agentHistoryMaxMessages: Number(e.target.value) })}
-                  />
-                </div>
-                <div className="settings-sub-hint">Safety-net cap on disk history. Must be ≥ in-memory; values above ~5000 noticeably slow saves.</div>
+                <div className="settings-sub-hint">How many messages stay rendered. Higher values use more memory and slow input typing. Disk history is unbounded — older messages stay in IDB and (in future) can be loaded back on demand.</div>
 
                 <div className="settings-group">
                   <label className="settings-label">Save Throttle (ms)</label>

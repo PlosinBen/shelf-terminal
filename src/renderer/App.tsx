@@ -22,7 +22,7 @@ import { disposeTerminal } from './components/TerminalView';
 import { on, emit, Events } from './events';
 import { bindAgentIPCGroup } from './events';
 import { bindAgentStoreSubscriptions } from './agentTabSubscriptions';
-import { setInMemoryMax, setIdbMax, setSaveThrottleMs } from './agentTabStore';
+import { setInMemoryMax, setSaveThrottleMs } from './agentTabStore';
 import { getTheme } from './themes';
 import { clearAgentSession } from './storage/agent-history';
 import './styles/global.css';
@@ -50,16 +50,14 @@ export function App() {
     return () => { offIPC(); offStore(); };
   }, []);
 
-  // Push the three size/throttle settings into the agentTabStore module.
-  // Store keeps its own module-scoped copies (not React state) so that
-  // non-React subscription handlers can read them without going through
-  // hooks. Re-fires on settings change.
+  // Push agent in-memory cap + save throttle settings into the
+  // agentTabStore module. Store keeps its own module-scoped copies
+  // (not React state) so non-React subscription handlers can read
+  // them without going through hooks. Re-fires on settings change.
   useEffect(() => {
-    setIdbMax(settings.agentHistoryMaxMessages);          // clamps inMemoryMax if needed
     setInMemoryMax(settings.agentInMemoryMaxMessages);
     setSaveThrottleMs(settings.agentHistorySaveThrottleMs);
   }, [
-    settings.agentHistoryMaxMessages,
     settings.agentInMemoryMaxMessages,
     settings.agentHistorySaveThrottleMs,
   ]);

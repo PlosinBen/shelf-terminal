@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from 'react';
 import type { AgentMsg } from './components/AgentMessage';
 import type { AgentPrefs, AgentProvider, AuthMethod } from '../shared/types';
-import { loadAgentMessages, saveAgentMessages, clearAgentSession } from './storage/agent-history';
+import { loadAgentMessagesLatest, saveAgentMessagesDelta, clearAgentSession } from './storage/agent-history';
 
 // Per-tab store for agent UI state. Split from store.ts because the
 // global store rebuilds its snapshot on every change — every useStore
@@ -107,22 +107,17 @@ type Listener = () => void;
 const tabs = new Map<string, AgentTabState>();
 const listeners = new Map<string, Set<Listener>>();
 
-// Settings synced from App.tsx. Constraint: inMemoryMax <= idbMax.
-// Setters clamp both ways so the invariant holds even if settings UI
-// validation misses an edge case.
+// Settings synced from App.tsx. inMemoryMax used to be clamped against
+// an idbMax sibling; that was removed when IDB went unlimited
+// (see agent-history-refactor.md). in-memory still has a cap for RAM /
+// React reconciliation reasons.
 const DEFAULT_THROTTLE_MS = 5000;
 const DEFAULT_IN_MEMORY_MAX = 500;
-const DEFAULT_IDB_MAX = 1000;
 let saveThrottleMs = DEFAULT_THROTTLE_MS;
 let inMemoryMax = DEFAULT_IN_MEMORY_MAX;
-let idbMax = DEFAULT_IDB_MAX;
 
 export function setInMemoryMax(n: number) {
-  inMemoryMax = Math.max(1, Math.min(n, idbMax));
-}
-export function setIdbMax(n: number) {
-  idbMax = Math.max(1, n);
-  if (inMemoryMax > idbMax) inMemoryMax = idbMax;
+  inMemoryMax = Math.max(1, n);
 }
 export function setSaveThrottleMs(ms: number) {
   saveThrottleMs = Math.max(0, ms);
@@ -173,51 +168,103 @@ export function useAgentTab(tabId: string): AgentTabState | undefined {
 }
 
 // ── Save throttle infrastructure ──
+//
+// Delta-save model: we batch dirty msg snapshots inside a throttle
+// window and append them to IDB at flush time. Why snapshot at mark
+// time (Map<id, AgentMsg>) instead of filter-at-save against
+// tab.messages: the latter races with trimMessagesInMemory — a msg
+// marked dirty mid-window can be evicted from tab.messages before
+// doSave runs, then the filter misses it and we lose the write.
+// Snapshotting decouples the two paths: trim only affects in-memory
+// view, dirty queue is its own buffer.
+//
+// `deletedIds` is forward-compat (no caller populates it yet — only
+// whole-session clear exists). Implementation supports it so the
+// PendingSave shape matches future single-message deletion.
 
-interface PendingSave { timer: ReturnType<typeof setTimeout>; dirty: boolean }
+interface PendingSave {
+  timer: ReturnType<typeof setTimeout>;
+  dirtyMsgs: Map<string, AgentMsg>;
+  deletedIds: Set<string>;
+}
 const pendingSaves = new Map<string, PendingSave>();
 
-function requestSave(tabId: string) {
+function ensurePendingSave(tabId: string): PendingSave {
   const existing = pendingSaves.get(tabId);
-  if (existing) { existing.dirty = true; return; }
-  pendingSaves.set(tabId, {
-    dirty: true,
-    timer: setTimeout(() => {
-      const entry = pendingSaves.get(tabId);
-      pendingSaves.delete(tabId);
-      if (entry?.dirty) doSave(tabId);
-    }, saveThrottleMs),
-  });
+  if (existing) return existing;
+  const entry: PendingSave = {
+    dirtyMsgs: new Map(),
+    deletedIds: new Set(),
+    timer: setTimeout(() => doSaveCallback(tabId), saveThrottleMs),
+  };
+  pendingSaves.set(tabId, entry);
+  return entry;
+}
+
+function markDirty(tabId: string, msg: AgentMsg) {
+  const entry = ensurePendingSave(tabId);
+  // Later mark within the same window wins — Map.set overwrites the
+  // snapshot, which is correct (latest state is what we want to persist).
+  entry.dirtyMsgs.set(msg.id, msg);
 }
 
 function flushSave(tabId: string) {
   const entry = pendingSaves.get(tabId);
   if (!entry) return;
   clearTimeout(entry.timer);
-  pendingSaves.delete(tabId);
-  if (entry.dirty) doSave(tabId);
+  // doSaveCallback owns the delete + isStreaming check + actual write.
+  // Calling it directly here makes flush semantically "fire now instead
+  // of waiting for the timer" — same isStreaming guard applies (a tab
+  // currently streaming can't be flushed; caller paths that need a
+  // sync flush also clear streaming first, e.g. removeTab).
+  doSaveCallback(tabId);
 }
 
+function doSaveCallback(tabId: string) {
+  const entry = pendingSaves.get(tabId);
+  if (!entry) return;
+  const tab = tabs.get(tabId);
+  if (!tab) {
+    pendingSaves.delete(tabId);
+    return;
+  }
+  // Streaming mid-turn → DON'T delete the entry (old overwrite-all code
+  // dropped it and relied on the next save rewriting everything; delta
+  // save can't recover lost dirtyMsgs that way). Re-arm the timer
+  // instead so we retry next window.
+  if (tab.isStreaming) {
+    entry.timer = setTimeout(() => doSaveCallback(tabId), saveThrottleMs);
+    return;
+  }
+  pendingSaves.delete(tabId);
+  const dirty = [...entry.dirtyMsgs.values()];
+  saveAgentMessagesDelta(tab.sessionId, dirty, entry.deletedIds).catch((err) => {
+    console.error('[agentTabStore] saveAgentMessagesDelta failed', err);
+  });
+}
+
+/**
+ * Trim in-memory tab.messages down to inMemoryMax. Cut point snaps
+ * forward to the nearest user msg so MessageList never renders a
+ * "headless" turn (agent msgs without their preceding user msg).
+ *
+ * Called only from setStreaming(false) — turn boundary is the one
+ * unambiguous moment when trimming can't surprise the user (no live
+ * content gets cut). Used to live inside doSave but that conflated
+ * persistence timing with in-memory bookkeeping.
+ */
 function trimMessagesInMemory(tabId: string) {
   const tab = tabs.get(tabId);
   if (!tab || tab.messages.length <= inMemoryMax) return;
-  const trimmed = tab.messages.slice(tab.messages.length - inMemoryMax);
+  const target = tab.messages.length - inMemoryMax;
+  let cutAt = target;
+  for (let i = target; i < tab.messages.length; i++) {
+    if (tab.messages[i].type === 'user') { cutAt = i; break; }
+  }
+  if (cutAt === 0) return;
+  const trimmed = tab.messages.slice(cutAt);
   tabs.set(tabId, { ...tab, messages: trimmed });
   notify(tabId);
-}
-
-function doSave(tabId: string) {
-  const tab = tabs.get(tabId);
-  if (!tab) return;
-  // Streaming mid-turn → skip. Next setStreaming(false) at turn end
-  // will requestSave, and we'll arrive here in steady state.
-  if (tab.isStreaming) return;
-  trimMessagesInMemory(tabId);
-  const current = tabs.get(tabId);
-  if (!current) return;
-  saveAgentMessages(current.sessionId, current.messages, idbMax).catch((err) => {
-    console.error('[agentTabStore] saveAgentMessages failed', err);
-  });
 }
 
 // ── State updaters ──
@@ -283,10 +330,15 @@ export function initTab(tabId: string, opts: InitTabOpts) {
   tabs.set(tabId, initial);
   notify(tabId);
 
-  // Async IDB load. Backend events that fire before this resolves write
-  // into `messages` first; load merges loaded-before-current with ID
-  // dedupe so the new entries aren't clobbered.
-  loadAgentMessages(opts.sessionId).then((loaded) => {
+  // Async IDB load — only the latest `inMemoryMax` rows, not the whole
+  // session. With IDB now unbounded, pulling everything would blow up
+  // RAM on long histories. Older rows stay in IDB; future Load earlier
+  // UI surfaces them on demand (see agent-history-refactor.md).
+  //
+  // Backend events that fire before this resolves write into `messages`
+  // first; load merges loaded-before-current with ID dedupe so the new
+  // entries aren't clobbered.
+  loadAgentMessagesLatest(opts.sessionId, inMemoryMax).then((loaded) => {
     if (loaded.length === 0) return;
     const current = tabs.get(tabId);
     if (!current) return;  // tab removed during load
@@ -296,7 +348,7 @@ export function initTab(tabId: string, opts: InitTabOpts) {
     tabs.set(tabId, { ...current, messages: [...filteredLoaded, ...current.messages] });
     notify(tabId);
   }).catch((err) => {
-    console.error('[agentTabStore] loadAgentMessages failed', err);
+    console.error('[agentTabStore] loadAgentMessagesLatest failed', err);
   });
 }
 
@@ -310,8 +362,9 @@ export function removeTab(tabId: string) {
 // ── Message actions ──
 
 export function upsertMessage(tabId: string, msg: AgentMsg) {
+  if (!tabs.has(tabId)) return;
   update(tabId, (prev) => ({ ...prev, messages: upsertById(prev.messages, msg) }));
-  requestSave(tabId);
+  markDirty(tabId, msg);
 }
 
 // ── Stream chunk batching ──
@@ -450,7 +503,16 @@ export function clearQueuedMessages(tabId: string) {
 export async function clearMessages(tabId: string) {
   const tab = tabs.get(tabId);
   if (!tab) return;
-  flushSave(tabId);
+  // Drop any queued dirty snapshots outright — don't flushSave, because
+  // if the tab is streaming flushSave just re-arms the timer, then a
+  // later fire would re-write pre-clear msgs back to IDB after we wipe
+  // the session. clearAgentSession is authoritative; nothing in the
+  // window before it should survive.
+  const entry = pendingSaves.get(tabId);
+  if (entry) {
+    clearTimeout(entry.timer);
+    pendingSaves.delete(tabId);
+  }
   update(tabId, (prev) => ({ ...prev, messages: [] }));
   await clearAgentSession(tab.sessionId).catch((err) => {
     console.error('[agentTabStore] clearAgentSession failed', err);
@@ -481,13 +543,18 @@ export function setStreaming(tabId: string, value: boolean) {
   let nextMessages = cur.messages;
   let mutated = false;
   // Streaming → idle: clear `streaming` flag on any text/thinking that
-  // never received a finalize message. Content stays whatever the
-  // stream accumulated.
+  // never received a finalize message, and mark each one dirty so the
+  // delta save persists the final settled state. This is the ONLY path
+  // that writes text/thinking msgs to IDB — appendChunk deliberately
+  // skips markDirty (partials shouldn't persist), so without this loop
+  // streamed responses would never land in storage.
   if (wasStreaming && !value) {
     const cleared = cur.messages.map((m) => {
       if ((m.type === 'text' || m.type === 'thinking') && m.streaming) {
         mutated = true;
-        return { ...m, streaming: false };
+        const settled = { ...m, streaming: false };
+        markDirty(tabId, settled);
+        return settled;
       }
       return m;
     });
@@ -504,9 +571,18 @@ export function setStreaming(tabId: string, value: boolean) {
   });
   notify(tabId);
 
-  // Persist on turn end. doSave guards on isStreaming again so a race
-  // where setStreaming(true) lands before the timer fires is safe.
-  if (wasStreaming && !value) requestSave(tabId);
+  // Turn end: trim in-memory once (cap was off during streaming so the
+  // turn could grow freely). markDirty above already scheduled the save
+  // timer; trim snapshot has already been preserved in dirtyMsgs so
+  // even if trim drops a msg here it'll still be persisted.
+  if (wasStreaming && !value) {
+    trimMessagesInMemory(tabId);
+    // Ensure a save fires even if nothing was marked dirty above
+    // (e.g. a turn that produced only non-text msgs already marked
+    // via upsertMessage but whose throttle timer was reset by
+    // streaming-skip retries). ensurePendingSave is idempotent.
+    ensurePendingSave(tabId);
+  }
 }
 
 export interface StatusPartial {
@@ -644,12 +720,11 @@ export function __resetStoreForTests() {
   listeners.clear();
   saveThrottleMs = DEFAULT_THROTTLE_MS;
   inMemoryMax = DEFAULT_IN_MEMORY_MAX;
-  idbMax = DEFAULT_IDB_MAX;
 }
 
 /** Read internal config. Tests only. */
 export function __getCapsForTests() {
-  return { saveThrottleMs, inMemoryMax, idbMax };
+  return { saveThrottleMs, inMemoryMax };
 }
 
 /** Direct read for tests that don't want to set up React. */
