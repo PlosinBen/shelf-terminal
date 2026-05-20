@@ -1,9 +1,32 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import type { AgentProvider, AgentPrefs, AuthMethod, Connection } from '@shared/types';
+import type { AgentProvider, AgentPrefs, Connection } from '@shared/types';
 import { AgentMessage, type AgentMsg } from './AgentMessage';
 import { SelectionPanel } from './SelectionPanel';
 import { PickerPanel } from './PickerPanel';
 import { parseSlashPrefix } from '@shared/slash-prefix';
+import {
+  initTab as initTabStore,
+  removeTab as removeTabStore,
+  upsertMessage,
+  enqueueMessage,
+  dequeueMessage,
+  cancelQueuedMessage as cancelQueuedMessageStore,
+  clearQueuedMessages,
+  clearMessages as clearMessagesStore,
+  setActualModel,
+  setActualEffort,
+  setActualPermissionMode,
+  setAuthBusy,
+  setAuthError,
+  setAuthRequired,
+  setCapabilities as setCapabilitiesStore,
+  setInitStatus as setInitStatusStore,
+  setLocalPicker as setLocalPickerStore,
+  setPendingPermission as setPendingPermissionStore,
+  setPendingPicker as setPendingPickerStore,
+  useAgentTab,
+} from '../agentTabStore';
+import { emitAgent } from '../events';
 
 /**
  * Slash commands that mutate renderer-owned project config (model / effort /
@@ -26,40 +49,15 @@ const RENDERER_LOCAL_SLASHES: Record<string, 'model' | 'effort' | 'permissionMod
   effort: 'effort',
   permission: 'permissionMode',
 };
-import { renderMarkdown } from '../utils/markdown';
 import { useAttachmentPaste } from '../hooks/useAttachmentPaste';
 import { useStore, updateProjectConfig, setChatStage } from '../store';
-import { loadAgentMessages, saveAgentMessages, clearAgentSession } from '../storage/agent-history';
 
+// Local-only types — store's Capabilities is the source of truth and
+// tabState.capabilities carries it. SlashCommand is the shape of items
+// shown in the slash autocomplete menu (subset of Capabilities['slashCommands']).
 interface SlashCommand {
   name: string;
   description: string;
-}
-
-type Severity = 'normal' | 'info' | 'warning' | 'critical';
-interface CycleOption {
-  value: string;
-  displayName: string;
-  severity?: Severity;
-}
-
-interface Capabilities {
-  models: { value: string; displayName: string; effortLevels?: CycleOption[]; vision?: boolean }[];
-  permissionModes: CycleOption[];
-  effortLevels: CycleOption[];
-  slashCommands: SlashCommand[];
-  authMethod?: AuthMethod;
-}
-
-interface PendingPermission {
-  toolUseId: string;
-  toolName: string;
-  input: Record<string, unknown>;
-}
-
-interface QueuedMessage {
-  id: string;
-  content: string;
 }
 
 interface Props {
@@ -69,105 +67,6 @@ interface Props {
   provider: AgentProvider;
   projectId: string;
   visible: boolean;
-}
-
-let nextMsgIdCounter = 0;
-function freshMsgId(prefix: string): string {
-  nextMsgIdCounter += 1;
-  return `${prefix}-${Date.now()}-${nextMsgIdCounter}`;
-}
-
-/**
- * Translate the canonical AgentMessage payload (from `@shared/types`) into the
- * renderer-side `AgentMsg` variant. Unknown / malformed payloads return null
- * so the caller can drop them. Provider field is attached when relevant for
- * the assistant-text label.
- */
-function buildAgentMsg(msg: any, provider: string): AgentMsg | null {
-  // `id` is the universal upsert key — equals `msg.msgId` from the wire
-  // (which equals toolUseId for tool messages). Provider-minted; renderer
-  // uses it both as React key and as the upsert key for the message store.
-  // Fall back to a synthetic id for messages from older agent-server bundles
-  // that don't emit msgId yet (won't pair with stream chunks but at least
-  // gets a usable key).
-  const id: string = msg.msgId ?? msg.toolUseId ?? freshMsgId('msg');
-  const ts = Date.now();
-  switch (msg.type) {
-    case 'text':
-      return { id, type: 'text', content: msg.content ?? '', provider, timestamp: ts };
-    case 'thinking':
-      return { id, type: 'thinking', content: msg.content ?? '', provider, timestamp: ts };
-    case 'intent':
-      return { id, type: 'intent', content: msg.content ?? '', provider, timestamp: ts };
-    case 'system':
-      return { id, type: 'system', content: msg.content ?? '', provider, timestamp: ts };
-    case 'error':
-      return { id, type: 'error', content: msg.content ?? 'Unknown error', provider, timestamp: ts };
-    case 'tool_use':
-      if (!msg.toolUseId || !msg.toolName) return null;
-      return {
-        id,
-        type: 'tool_use',
-        toolUseId: msg.toolUseId,
-        toolName: msg.toolName,
-        // Provider sends `input: string`. Defensively coerce in case old
-        // wire bundle still emits structured toolInput (older agent-server
-        // version on remote SSH host that hasn't been redeployed).
-        input: typeof msg.input === 'string'
-          ? msg.input
-          : msg.toolInput
-            ? JSON.stringify(msg.toolInput)
-            : '',
-        ...(msg.result ? { result: msg.result } : {}),
-        provider,
-        timestamp: ts,
-      };
-    case 'slash_response':
-      if (typeof msg.slashCmd !== 'string' || typeof msg.content !== 'string') return null;
-      if (msg.status !== 'pending' && msg.status !== 'success' && msg.status !== 'error') return null;
-      return {
-        id,
-        type: 'slash_response',
-        slashCmd: msg.slashCmd,
-        status: msg.status,
-        content: msg.content,
-        provider,
-        timestamp: ts,
-      };
-    case 'file_edit':
-      if (!msg.toolUseId || !msg.filePath) return null;
-      return {
-        id,
-        type: 'file_edit',
-        toolUseId: msg.toolUseId,
-        filePath: msg.filePath,
-        ...(msg.diff ? { diff: msg.diff } : {}),
-        ...(typeof msg.content === 'string' ? { content: msg.content } : {}),
-        ...(msg.result ? { result: msg.result } : {}),
-        provider,
-        timestamp: ts,
-      };
-    default:
-      return null;
-  }
-}
-
-/**
- * Insert `built` into the timeline OR replace the existing entry with the
- * same `id`. Stream chunks and their finalize message share an id; the
- * provider also re-emits tool_use/file_edit messages with `result` populated.
- * Either way, upsert-by-id collapses them into a single timeline entry.
- * `timestamp` is preserved from the original so ordering doesn't jump.
- */
-function upsertById(prev: AgentMsg[], built: AgentMsg): AgentMsg[] {
-  for (let i = prev.length - 1; i >= 0; i--) {
-    if (prev[i].id === built.id) {
-      const next = prev.slice();
-      next[i] = { ...built, timestamp: prev[i].timestamp };
-      return next;
-    }
-  }
-  return [...prev, built];
 }
 
 export function AgentView({ tabId, cwd, connection, provider, projectId, visible }: Props) {
@@ -193,70 +92,59 @@ export function AgentView({ tabId, cwd, connection, provider, projectId, visible
   }
   const sessionId = sessionIdRef.current;
 
-  const [messages, setMessages] = useState<AgentMsg[]>([]);
-  const [currentPlan, setCurrentPlan] = useState<string>('');
+  // Domain state lives in agentTabStore now. AgentView subscribes via
+  // useAgentTab so only changes for THIS tab trigger a re-render
+  // (unlike the global useStore which rebuilds snapshot on every
+  // change). The slice is created synchronously by initTab in the
+  // mount effect below; until that runs, `tabState` is undefined and
+  // we fall back to safe defaults.
+  const tabState = useAgentTab(tabId);
+  const messages: AgentMsg[] = tabState?.messages ?? [];
+  const currentPlan = tabState?.currentPlan ?? '';
+  const isStreaming = tabState?.isStreaming ?? false;
+  const statusModel = tabState?.actualModel ?? null;
+  const costUsd = tabState?.costUsd;
+  const numTurns = tabState?.numTurns;
+  const contextUsage = tabState?.contextUsage ?? null;
+  const rateLimits = tabState?.rateLimits ?? [];
+  const capabilities = tabState?.capabilities ?? null;
+  const permissionMode = tabState?.actualPermissionMode ?? 'default';
+  const currentEffort = tabState?.actualEffort ?? 'medium';
+  const pendingPermission = tabState?.pendingPermission ?? null;
+  const pendingPicker = tabState?.pendingPicker ?? null;
+  const localPicker = tabState?.localPicker ?? null;
+  const queuedMessages = tabState?.queuedMessages ?? [];
+  const authRequired = tabState?.authRequired ?? null;
+  const authBusy = tabState?.authBusy ?? false;
+  const authError = tabState?.authError ?? null;
+  const initStatus = tabState?.initStatus ?? 'starting';
+  const initError = tabState?.initError ?? null;
+
+  // Input zone state stays local — no external reader. Same for slash
+  // menu, ESC pending, and pending attachments. These move into
+  // <InputZone> in PR 5; for now they're still wired into AgentView.
   const [input, setInput] = useState('');
-  const [isStreaming, setIsStreaming] = useState(false);
-  const [statusModel, setStatusModel] = useState<string | null>(savedPrefs?.model ?? null);
-  const [costUsd, setCostUsd] = useState<number | undefined>(undefined);
-  const [numTurns, setNumTurns] = useState<number | undefined>(undefined);
-  type StatusSegment = { text: string; severity?: 'normal' | 'warning' | 'critical' };
-  const [contextUsage, setContextUsage] = useState<StatusSegment | null>(null);
-  const [rateLimits, setRateLimits] = useState<StatusSegment[]>([]);
-  const [capabilities, setCapabilities] = useState<Capabilities | null>(null);
-  const [permissionMode, setPermissionMode] = useState<string>(savedPrefs?.permissionMode ?? 'default');
-  const [currentEffort, setCurrentEffort] = useState<string>(savedPrefs?.effort ?? 'medium');
+  const [showSlashMenu, setShowSlashMenu] = useState(false);
+  const [slashFilter, setSlashFilter] = useState('');
+  const [slashSelection, setSlashSelection] = useState(0);
+  const [pendingFiles, setPendingFiles] = useState<Array<{ path: string; displayPath: string }>>([]);
+  const [pendingImages, setPendingImages] = useState<string[]>([]);
+  const [escPending, setEscPending] = useState(false);
+  const escPendingRef = useRef(false);
+  const escTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const persistPref = useCallback((partial: Partial<AgentPrefs>) => {
     const current = projects[projectIndex]?.config.agentPrefs ?? {};
     const updated = { ...current, [provider]: { ...current[provider], ...partial } };
     updateProjectConfig(projectIndex, { agentPrefs: updated });
   }, [projectIndex, provider, projects]);
-  const [showSlashMenu, setShowSlashMenu] = useState(false);
-  const [slashFilter, setSlashFilter] = useState('');
-  const [slashSelection, setSlashSelection] = useState(0);
-  const [pendingPermission, setPendingPermission] = useState<PendingPermission | null>(null);
-  // Generic picker state — provider-emitted picker_request lands here. Shape
-  // mirrors the wire `PickerRequest` (multi-question form). Realistically
-  // permission and picker can't both be pending at once (both go through
-  // canUseTool, SDK serializes tool calls), so no priority gate needed.
-  const [pendingPicker, setPendingPicker] = useState<{
-    id: string;
-    prompts: Array<{
-      question: string;
-      header?: string;
-      multiSelect: boolean;
-      options: Array<{ label: string; description?: string; preview?: string }>;
-      inputType?: 'text' | 'number' | 'integer';
-      currentValue?: string | string[];
-    }>;
-  } | null>(null);
-  // Renderer-local picker triggered by `/model` (and future /effort,
-  // /permissionMode). Distinct from `pendingPicker` (provider-emitted via
-  // picker_request) because the resolve handling is local — no IPC roundtrip.
-  // Options/title derived from `capabilities` + current pref value at render
-  // time, so closing & reopening always reflects latest state.
-  const [localPicker, setLocalPicker] = useState<{ key: 'model' | 'effort' | 'permissionMode' } | null>(null);
-  const [queuedMessages, setQueuedMessages] = useState<QueuedMessage[]>([]);
-  const [authRequired, setAuthRequired] = useState<{ provider: string } | null>(null);
-  const [authBusy, setAuthBusy] = useState(false);
-  const [authError, setAuthError] = useState<string | null>(null);
-  const [pendingFiles, setPendingFiles] = useState<Array<{ path: string; displayPath: string }>>([]);
-  const [pendingImages, setPendingImages] = useState<string[]>([]);
-  const [initStatus, setInitStatus] = useState<'starting' | 'ready' | 'failed'>('starting');
-  const [initError, setInitError] = useState<string | null>(null);
-  const [escPending, setEscPending] = useState(false);
-  const escPendingRef = useRef(false);
-  const escTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const messagesRef = useRef(messages);
-  messagesRef.current = messages;
 
   const listRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
-  const initializedRef = useRef(false);
+  // initializedRef removed — initTab is idempotent + tied to tabId
+  // dependency, so the mount effect handles the once-per-tab guarantee.
   // User intent to "stick to the bottom of the conversation". Updated only
   // by user-driven scroll inputs (wheel/touch/keyboard); programmatic scrolls
   // (scrollIntoView from auto-follow) deliberately do NOT change this — they
@@ -308,211 +196,30 @@ export function AgentView({ tabId, cwd, connection, provider, projectId, visible
     },
   });
 
+  // Per-tab lifecycle: initTab creates the slice (synchronously),
+  // warm-starts actual* from savedPrefs (intent), and triggers async
+  // IDB load. Backend events route through agentTabSubscriptions →
+  // store actions; this component just emits the init request.
+  // removeTab on unmount flushes any pending IDB save synchronously.
   useEffect(() => {
-    if (initializedRef.current) return;
-    initializedRef.current = true;
-    window.shelfApi.agent.init(tabId, cwd, connection, provider, sessionId);
-    // Saved prefs are reconciled in the capabilities listener below — that
-    // fires on first launch *and* after every reconnect/reset, whereas this
-    // effect only runs once. Single source of truth for the "renderer wants
-    // X but a fresh backend defaults to Y" drift.
-  }, [tabId, cwd, connection, provider, sessionId]);
-
-  // Load UI messages from IndexedDB
-  useEffect(() => {
-    if (!sessionId) return;
-    let cancelled = false;
-    loadAgentMessages(sessionId).then((loaded) => {
-      if (!cancelled && loaded.length > 0) setMessages(loaded);
+    initTabStore(tabId, {
+      sessionId,
+      provider,
+      intent: savedPrefs,
     });
-    return () => { cancelled = true; };
-  }, [sessionId]);
-
-  // Save UI messages on unmount (tab close)
-  useEffect(() => {
-    const sid = sessionId;
-    const maxMessages = settings.agentHistoryMaxMessages;
+    emitAgent('agent:init', { tabId, cwd, connection, provider, sessionId });
     return () => {
-      if (sid && messagesRef.current.length > 0) {
-        saveAgentMessages(sid, messagesRef.current, maxMessages);
-      }
+      removeTabStore(tabId);
     };
-  }, [sessionId, settings.agentHistoryMaxMessages]);
-
-  // Capabilities listener — backend announces available models / effort
-  // levels / permission modes (and SDK-reported "current" hints). Renderer
-  // is the authoritative owner of prefs (savedPrefs in projectConfig); we
-  // only fall back to `caps.currentXxx` for the initial defaults when the
-  // user has no saved pref yet. No more drift-back / setPrefs push-back —
-  // backend reads prefs from each AGENT_SEND payload, so the old "backend
-  // forgot, renderer remembers" sync isn't needed.
-  useEffect(() => {
-    const off = window.shelfApi.agent.onCapabilities((id: string, caps: any) => {
-      if (id !== tabId) return;
-      setCapabilities(caps);
-      if (savedPrefs?.model) setStatusModel(savedPrefs.model);
-      else if (caps.currentModel) setStatusModel(caps.currentModel);
-      if (savedPrefs?.permissionMode) setPermissionMode(savedPrefs.permissionMode);
-      else if (caps.currentPermissionMode) setPermissionMode(caps.currentPermissionMode);
-      if (savedPrefs?.effort) setCurrentEffort(savedPrefs.effort);
-      else if (caps.currentEffort) setCurrentEffort(caps.currentEffort);
-    });
-    return off;
-  }, [tabId, savedPrefs]);
-
-  // Permission request listener
-  useEffect(() => {
-    const off = window.shelfApi.agent.onPermissionRequest((id: string, req: any) => {
-      if (id !== tabId) return;
-      setPendingPermission({ toolUseId: req.toolUseId, toolName: req.toolName, input: req.input ?? {} });
-      // SelectionPanel owns its own cursor; no separate cursor reset needed.
-    });
-    return off;
-  }, [tabId]);
-
-  // Picker request listener — latest-wins: a second picker request before
-  // the previous resolves auto-cancels the prior one and shows the new.
-  // Plan decision: provider isn't expected to send concurrent pickers during
-  // normal flow; if it happens it's a race and most-recent intent wins.
-  useEffect(() => {
-    const off = window.shelfApi.agent.onPickerRequest((id: string, req: any) => {
-      if (id !== tabId) return;
-      if (typeof req?.id !== 'string' || !Array.isArray(req?.prompts)) return;
-      setPendingPicker((prev) => {
-        // Cancel any in-flight picker so the provider's pending Promise resolves.
-        if (prev) {
-          window.shelfApi.agent.resolvePicker(tabId, prev.id, { cancelled: true });
-        }
-        return { id: req.id, prompts: req.prompts };
-      });
-    });
-    return off;
-  }, [tabId]);
-
-  // Auth required listener
-  useEffect(() => {
-    const off = window.shelfApi.agent.onAuthRequired((id: string, prov: string) => {
-      if (id !== tabId) return;
-      setAuthRequired({ provider: prov });
-    });
-    return off;
-  }, [tabId]);
-
-  // Init status listener — drives the starting-spinner / failed-retry UI.
-  useEffect(() => {
-    const off = window.shelfApi.agent.onInitStatus((id: string, status) => {
-      if (id !== tabId) return;
-      setInitStatus(status.state);
-      setInitError(status.state === 'failed' ? status.reason : null);
-    });
-    return off;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tabId]);
 
   const handleRetryInit = useCallback(async () => {
-    setInitStatus('starting');
-    setInitError(null);
-    await window.shelfApi.agent.destroy(tabId);
-    setCapabilities(null);
-    initializedRef.current = false;
-    window.shelfApi.agent.init(tabId, cwd, connection, provider, sessionId);
-    initializedRef.current = true;
+    setInitStatusStore(tabId, 'starting');
+    emitAgent('agent:destroy', { tabId });
+    setCapabilitiesStore(tabId, null);
+    emitAgent('agent:init', { tabId, cwd, connection, provider, sessionId });
   }, [tabId, cwd, connection, provider, sessionId]);
-
-  // Messages, stream, and status listeners
-  useEffect(() => {
-    const offMessage = window.shelfApi.agent.onMessage((id: string, msg: any) => {
-      if (id !== tabId) return;
-
-      // `plan` is consumed by the sticky panel — never enters the timeline.
-      if (msg.type === 'plan') {
-        setCurrentPlan(msg.content ?? '');
-        return;
-      }
-
-      const built = buildAgentMsg(msg, provider);
-      if (!built) return;
-
-      // Finalize message wins over any in-flight streaming version of the
-      // same msgId. Drop the `streaming` flag (built doesn't set it) so the
-      // cursor stops blinking. Provider may also re-emit tool_use/file_edit
-      // with `result` populated — same upsert path handles both.
-      setMessages((prev) => upsertById(prev, built));
-    });
-
-    const offStream = window.shelfApi.agent.onStream((id: string, chunk: any) => {
-      if (id !== tabId) return;
-      const chunkMsgId: string | undefined = chunk.msgId;
-      const chunkType: 'text' | 'thinking' = chunk.type === 'thinking' ? 'thinking' : 'text';
-      const delta: string = chunk.content ?? '';
-      if (!chunkMsgId || !delta) return;
-
-      // Stream chunk → upsert into the existing entry (if any) by msgId,
-      // appending delta content. If no entry yet (first chunk of this
-      // block), create a placeholder with `streaming: true` so the cursor
-      // shows up. The matching finalize message will replace this entry
-      // with the assembled full content (and drop the streaming flag).
-      setMessages((prev) => {
-        for (let i = prev.length - 1; i >= 0; i--) {
-          const m = prev[i];
-          if (m.id !== chunkMsgId) continue;
-          if (m.type !== 'text' && m.type !== 'thinking') return prev;  // unexpected; ignore
-          const next = prev.slice();
-          next[i] = { ...m, content: m.content + delta, streaming: true };
-          return next;
-        }
-        return [
-          ...prev,
-          { id: chunkMsgId, type: chunkType, content: delta, streaming: true, provider, timestamp: Date.now() },
-        ];
-      });
-    });
-
-    const offStatus = window.shelfApi.agent.onStatus((id: string, status: any) => {
-      if (id !== tabId) return;
-      const nowStreaming = status.state === 'streaming';
-      setIsStreaming((wasStreaming) => {
-        if (wasStreaming && !nowStreaming) {
-          // Turn ended — clear streaming flag on any entry still marked
-          // in-flight (no finalize ever landed for it). The content is
-          // whatever the stream deltas accumulated; we just stop the
-          // cursor. Persistence saver fires shortly after so the user
-          // sees a stable state next session open.
-          setMessages((prev) => {
-            let mutated = false;
-            const next = prev.map((m) => {
-              if ((m.type === 'text' || m.type === 'thinking') && m.streaming) {
-                mutated = true;
-                return { ...m, streaming: false };
-              }
-              return m;
-            });
-            return mutated ? next : prev;
-          });
-          // Auto-dismiss any in-flight picker — the provider's abort path
-          // already resolved its pendingPickers entry as cancelled (see
-          // claude.ts handleAskUserQuestion signal listener), so a UI that
-          // still showed the panel would be a ghost: clicks would IPC to a
-          // backend that already moved on. Drop the panel so user state
-          // matches backend state at turn end.
-          setPendingPicker(null);
-          if (sessionId) {
-            const maxMessages = settings.agentHistoryMaxMessages;
-            setTimeout(() => {
-              setMessages((cur) => { saveAgentMessages(sessionId, cur, maxMessages); return cur; });
-            }, 200);
-          }
-        }
-        return nowStreaming;
-      });
-      if (status.model) setStatusModel(status.model);
-      if (status.costUsd != null) setCostUsd(status.costUsd);
-      if (status.numTurns != null) setNumTurns(status.numTurns);
-      if (status.contextUsage) setContextUsage(status.contextUsage);
-      if (Array.isArray(status.rateLimits) && status.rateLimits.length > 0) setRateLimits(status.rateLimits);
-    });
-
-    return () => { offMessage(); offStream(); offStatus(); };
-  }, [tabId, provider]);
 
   // Flush queued messages once the agent goes idle. Mirrors handleSend's
   // exact path (push user bubble + agent.send) — the queued message
@@ -523,19 +230,26 @@ export function AgentView({ tabId, cwd, connection, provider, projectId, visible
   useEffect(() => {
     if (isStreaming) return;
     if (queuedMessages.length === 0) return;
-    const next = queuedMessages[0];
-    setQueuedMessages((q) => q.slice(1));
-    setMessages((prev) => [...prev, {
-      id: `user-${Date.now()}`, type: 'user', content: next.content, timestamp: Date.now(),
-    }]);
+    const next = dequeueMessage(tabId);
+    if (!next) return;
+    upsertMessage(tabId, {
+      id: `user-${Date.now()}`,
+      type: 'user',
+      content: next.content,
+      timestamp: Date.now(),
+    });
     // Queued msg flush represents the same intent as handleSend (user
     // pressed send earlier, just had to wait for the previous turn) —
     // re-engage auto-follow so the new turn's stream lands in view.
     setFollow(true);
-    window.shelfApi.agent.send(tabId, next.content, undefined, {
-      model: statusModel ?? undefined,
-      effort: currentEffort,
-      permissionMode,
+    emitAgent('agent:send', {
+      tabId,
+      text: next.content,
+      prefs: {
+        model: statusModel ?? undefined,
+        effort: currentEffort,
+        permissionMode,
+      },
     });
   }, [isStreaming, queuedMessages, tabId, setFollow, statusModel, currentEffort, permissionMode]);
 
@@ -653,7 +367,7 @@ export function AgentView({ tabId, cwd, connection, provider, projectId, visible
       if (slash.args) {
         handleConfigEdit(localKey, slash.args);
       } else {
-        setLocalPicker({ key: localKey });
+        setLocalPickerStore(tabId, { key: localKey });
       }
       return;
     }
@@ -670,40 +384,53 @@ export function AgentView({ tabId, cwd, connection, provider, projectId, visible
     setShowSlashMenu(false);
 
     if (isStreaming) {
-      setQueuedMessages((q) => [...q, { id: `q-${Date.now()}`, content: text }]);
+      enqueueMessage(tabId, text);
       return;
     }
 
-    setMessages((prev) => [...prev, {
-      id: `user-${Date.now()}`, type: 'user', content: text, timestamp: Date.now(),
+    upsertMessage(tabId, {
+      id: `user-${Date.now()}`,
+      type: 'user',
+      content: text,
+      timestamp: Date.now(),
       ...(images.length > 0 ? { images } : {}),
       ...(files.length > 0 ? { files } : {}),
-    }]);
+    });
     // User explicitly hit send — strong intent to see their message
     // appear. Force re-engage auto-follow even if they had scrolled up
     // while reading earlier history.
     setFollow(true);
-    window.shelfApi.agent.send(tabId, text, images.length > 0 ? images : undefined, {
-      model: statusModel ?? undefined,
-      effort: currentEffort,
-      permissionMode,
+    emitAgent('agent:send', {
+      tabId,
+      text,
+      images: images.length > 0 ? images : undefined,
+      prefs: {
+        model: statusModel ?? undefined,
+        effort: currentEffort,
+        permissionMode,
+      },
     });
   }, [tabId, input, isStreaming, pendingFiles, pendingImages, capabilities, statusModel, currentEffort, permissionMode, setFollow]);
 
   const handleStop = useCallback(() => {
-    setQueuedMessages([]);
-    window.shelfApi.agent.stop(tabId);
+    clearQueuedMessages(tabId);
+    emitAgent('agent:stop', { tabId });
   }, [tabId]);
 
   const handleCancelQueued = useCallback((id: string) => {
-    setQueuedMessages((q) => q.filter((m) => m.id !== id));
-  }, []);
+    cancelQueuedMessageStore(tabId, id);
+  }, [tabId]);
 
   // Permission response. scope='session' tells provider to remember allow for the rest of the session.
   const handlePermissionRespond = useCallback((allow: boolean, scope?: 'once' | 'session') => {
     if (!pendingPermission) return;
-    window.shelfApi.agent.resolvePermission(tabId, pendingPermission.toolUseId, allow, scope);
-    setPendingPermission(null);
+    emitAgent('agent:resolvePermission', {
+      tabId,
+      toolUseId: pendingPermission.toolUseId,
+      allow,
+      scope,
+    });
+    setPendingPermissionStore(tabId, null);
   }, [tabId, pendingPermission]);
 
   // Permission / picker keyboard handling is owned by the <SelectionPanel>
@@ -725,16 +452,16 @@ export function AgentView({ tabId, cwd, connection, provider, projectId, visible
    */
   const handleConfigEdit = useCallback((key: 'model' | 'effort' | 'permissionMode', value: string) => {
     if (key === 'model') {
-      setStatusModel(value);
+      setActualModel(tabId, value);
       persistPref({ model: value });
     } else if (key === 'effort') {
-      setCurrentEffort(value);
+      setActualEffort(tabId, value);
       persistPref({ effort: value });
     } else if (key === 'permissionMode') {
-      setPermissionMode(value);
+      setActualPermissionMode(tabId, value);
       persistPref({ permissionMode: value });
     }
-  }, [persistPref]);
+  }, [tabId, persistPref]);
 
   // Status bar cycling. Renderer-only — persist to projectConfig and update
   // local status state. Backend learns the new pref on the next AGENT_SEND
@@ -767,9 +494,8 @@ export function AgentView({ tabId, cwd, connection, provider, projectId, visible
     // keeps its memory — if the user wants to also reset agent context,
     // they use `/clear` slash command which has provider-side semantics
     // (Claude SDK's own /clear, Copilot's context-cleared pathway).
-    if (sessionId) await clearAgentSession(sessionId);
-    setMessages([]);
-  }, [sessionId]);
+    await clearMessagesStore(tabId);
+  }, [tabId]);
 
   // Slash menu: union of provider-declared agent slashes and renderer-local
   // config-edit slashes. Display layer only — routing in handleSend decides
@@ -904,16 +630,20 @@ export function AgentView({ tabId, cwd, connection, provider, projectId, visible
     const providerLabel = authRequired.provider.charAt(0).toUpperCase() + authRequired.provider.slice(1);
 
     const retry = async () => {
-      setAuthBusy(true);
-      setAuthError(null);
+      setAuthBusy(tabId, true);
+      setAuthError(tabId, null);
+      // checkAuth is a query (returns Promise<boolean>), not a notify
+      // — direct IPC keeps the return value. Going through emit would
+      // need an inbound 'agent:onAuthChecked' event, not worth the
+      // extra plumbing for a one-shot UI affordance.
       const result = await window.shelfApi.agent.checkAuth(tabId);
       if (result) {
-        setAuthRequired(null);
-        setAuthError(null);
+        setAuthRequired(tabId, null);
+        setAuthError(tabId, null);
       } else {
-        setAuthError('Still no valid credentials found.');
+        setAuthError(tabId, 'Still no valid credentials found.');
       }
-      setAuthBusy(false);
+      setAuthBusy(tabId, false);
     };
 
     return (
@@ -1050,12 +780,20 @@ export function AgentView({ tabId, cwd, connection, provider, projectId, visible
         <PickerPanel
           prompts={pendingPicker.prompts}
           onSubmit={(answers) => {
-            window.shelfApi.agent.resolvePicker(tabId, pendingPicker.id, { answers });
-            setPendingPicker(null);
+            emitAgent('agent:resolvePicker', {
+              tabId,
+              pickerId: pendingPicker.id,
+              payload: { answers },
+            });
+            setPendingPickerStore(tabId, null);
           }}
           onCancel={() => {
-            window.shelfApi.agent.resolvePicker(tabId, pendingPicker.id, { cancelled: true });
-            setPendingPicker(null);
+            emitAgent('agent:resolvePicker', {
+              tabId,
+              pickerId: pendingPicker.id,
+              payload: { cancelled: true },
+            });
+            setPendingPickerStore(tabId, null);
           }}
         />
       ) : localPicker ? (() => {
@@ -1078,9 +816,9 @@ export function AgentView({ tabId, cwd, connection, provider, projectId, visible
             cancellable
             onSelect={(value) => {
               handleConfigEdit(key, value);
-              setLocalPicker(null);
+              setLocalPickerStore(tabId, null);
             }}
-            onCancel={() => setLocalPicker(null)}
+            onCancel={() => setLocalPickerStore(tabId, null)}
           />
         );
       })() : null}

@@ -153,6 +153,16 @@ function getSnapshot(tabId: string): AgentTabState | undefined {
   return tabs.get(tabId);
 }
 
+/**
+ * Non-reactive read for cross-module callers that need to peek at a
+ * tab's current state outside of React (e.g. IPC subscription handlers
+ * inspecting `pendingPicker` to decide whether to cancel before
+ * replacing). Treat the result as a snapshot — never mutate.
+ */
+export function peekAgentTab(tabId: string): AgentTabState | undefined {
+  return tabs.get(tabId);
+}
+
 // ── React hook ──
 
 export function useAgentTab(tabId: string): AgentTabState | undefined {
@@ -365,6 +375,12 @@ export function cancelQueuedMessage(tabId: string, id: string) {
   }));
 }
 
+export function clearQueuedMessages(tabId: string) {
+  update(tabId, (prev) =>
+    prev.queuedMessages.length === 0 ? prev : { ...prev, queuedMessages: [] }
+  );
+}
+
 export async function clearMessages(tabId: string) {
   const tab = tabs.get(tabId);
   if (!tab) return;
@@ -443,17 +459,26 @@ export function setPlan(tabId: string, content: string) {
   update(tabId, (prev) => ({ ...prev, currentPlan: content }));
 }
 
-export function setCapabilities(tabId: string, caps: Capabilities) {
-  update(tabId, (prev) => ({
-    ...prev,
-    capabilities: caps,
-    // Backend-reported actuals overwrite — no fallback to intent.
-    // Provider/backend is responsible for any fallback logic; renderer
-    // just reflects what was reported.
-    actualModel: caps.currentModel ?? prev.actualModel,
-    actualEffort: caps.currentEffort ?? prev.actualEffort,
-    actualPermissionMode: caps.currentPermissionMode ?? prev.actualPermissionMode,
-  }));
+export function setCapabilities(tabId: string, caps: Capabilities | null) {
+  update(tabId, (prev) => {
+    if (caps === null) {
+      // Clear capabilities — used during retryInit so cycle buttons
+      // hide until the next capabilities event re-populates. Leaves
+      // actual* untouched (they're warm-started from intent on next
+      // initTab if the tab is fully reset).
+      return { ...prev, capabilities: null };
+    }
+    return {
+      ...prev,
+      capabilities: caps,
+      // Backend-reported actuals overwrite — no fallback to intent.
+      // Provider/backend is responsible for any fallback logic;
+      // renderer just reflects what was reported.
+      actualModel: caps.currentModel ?? prev.actualModel,
+      actualEffort: caps.currentEffort ?? prev.actualEffort,
+      actualPermissionMode: caps.currentPermissionMode ?? prev.actualPermissionMode,
+    };
+  });
 }
 
 // ── Optimistic actual updates (cycle handlers) ──
