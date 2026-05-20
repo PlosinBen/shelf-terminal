@@ -54,6 +54,14 @@ export interface AgentEventMap {
     payload: { answers: Array<string | string[]> } | { cancelled: true };
   };
   'agent:checkAuth': { tabId: string };
+
+  // -------- Internal (renderer-only, never crosses IPC) --------
+  // Cross-component nudge for sibling components that don't share a
+  // direct parent state. Sender (InputZone after send / AgentView
+  // queue-flush) wants the message list to snap to bottom. Receiver
+  // (MessageList) subscribes; if tabId matches, force-engage follow
+  // and scroll. Renderer-only — not bound to any IPC channel.
+  'agent:scrollToBottom': { tabId: string };
 }
 
 export type AgentEventName = keyof AgentEventMap;

@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import type { AgentProvider, AgentPrefs, Connection } from '@shared/types';
-import { AgentMessage, type AgentMsg } from './AgentMessage';
+import { type AgentMsg } from './AgentMessage';
+import { MessageList } from './agent/MessageList';
 import { SelectionPanel } from './SelectionPanel';
 import { PickerPanel } from './PickerPanel';
 import { parseSlashPrefix } from '@shared/slash-prefix';
@@ -10,7 +11,6 @@ import {
   upsertMessage,
   enqueueMessage,
   dequeueMessage,
-  cancelQueuedMessage as cancelQueuedMessageStore,
   clearQueuedMessages,
   clearMessages as clearMessagesStore,
   setActualModel,
@@ -139,28 +139,14 @@ export function AgentView({ tabId, cwd, connection, provider, projectId, visible
     updateProjectConfig(projectIndex, { agentPrefs: updated });
   }, [projectIndex, provider, projects]);
 
-  const listRef = useRef<HTMLDivElement>(null);
-  const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
-  // initializedRef removed — initTab is idempotent + tied to tabId
-  // dependency, so the mount effect handles the once-per-tab guarantee.
-  // User intent to "stick to the bottom of the conversation". Updated only
-  // by user-driven scroll inputs (wheel/touch/keyboard); programmatic scrolls
-  // (scrollIntoView from auto-follow) deliberately do NOT change this — they
-  // honour intent, not geometric position. Decoupling intent from geometry
-  // avoids the smooth-scroll mid-animation race that previously needed a
-  // programmaticScrollRef + setTimeout workaround.
-  //
-  // The ref is the source of truth (read by effects without re-render); the
-  // FAB visibility is its mirror as state (so React re-renders when it flips).
-  // Always update them through `setFollow` so they can never drift.
-  const followBottomRef = useRef(true);
-  const [showJumpFab, setShowJumpFab] = useState(false);
-  const setFollow = useCallback((follow: boolean) => {
-    followBottomRef.current = follow;
-    setShowJumpFab((prev) => (prev === !follow ? prev : !follow));
-  }, []);
+  // listRef / bottomRef / followBottom / showJumpFab moved into
+  // <MessageList>. AgentView no longer owns scroll geometry; when it
+  // needs the timeline to snap to bottom (after handleSend / queue
+  // flush), it emits 'agent:scrollToBottom' which MessageList listens
+  // for. initTab is idempotent + keyed on tabId so no init guard ref
+  // is needed.
 
   // Focus the input whenever this tab becomes visible (tab switch, project
   // switch, app launch). requestAnimationFrame defers past the layout pass so
@@ -240,8 +226,8 @@ export function AgentView({ tabId, cwd, connection, provider, projectId, visible
     });
     // Queued msg flush represents the same intent as handleSend (user
     // pressed send earlier, just had to wait for the previous turn) —
-    // re-engage auto-follow so the new turn's stream lands in view.
-    setFollow(true);
+    // nudge MessageList to snap to bottom so the new turn lands in view.
+    emitAgent('agent:scrollToBottom', { tabId });
     emitAgent('agent:send', {
       tabId,
       text: next.content,
@@ -251,82 +237,12 @@ export function AgentView({ tabId, cwd, connection, provider, projectId, visible
         permissionMode,
       },
     });
-  }, [isStreaming, queuedMessages, tabId, setFollow, statusModel, currentEffort, permissionMode]);
+  }, [isStreaming, queuedMessages, tabId, statusModel, currentEffort, permissionMode]);
 
-  // Track user intent only on user-driven scroll inputs. We deliberately
-  // ignore the generic `scroll` event because programmatic scrollIntoView
-  // also fires it — distinguishing the two used to require a flag + timeout
-  // (race-prone). Wheel/touch/keyboard are exclusively user actions.
-  //
-  // Direction matters: an UP input is unambiguously "stop following, I want
-  // to read history" — set follow=false synchronously so the next streaming
-  // chunk's auto-scroll effect sees it before firing scrollIntoView, ending
-  // the user-vs-smooth-scroll fight that made upward scroll feel sticky.
-  // A DOWN input is "catch up if I'm there" — defer to a geometry check in
-  // rAF (scrollTop hasn't settled yet inside the handler).
-  useEffect(() => {
-    const el = listRef.current;
-    if (!el) return;
-    const isAtBottom = () => el.scrollHeight - el.scrollTop - el.clientHeight < 8;
-    const recomputeFromGeometry = () => {
-      requestAnimationFrame(() => setFollow(isAtBottom()));
-    };
-    const onWheel = (e: WheelEvent) => {
-      if (e.deltaY < 0) setFollow(false);
-      else if (e.deltaY > 0) recomputeFromGeometry();
-    };
-    let touchStartY = 0;
-    const onTouchStart = (e: TouchEvent) => { touchStartY = e.touches[0]?.clientY ?? 0; };
-    const onTouchMove = (e: TouchEvent) => {
-      const dy = (e.touches[0]?.clientY ?? 0) - touchStartY;
-      // Finger moving DOWN (dy > 0) drags content down → reveals earlier
-      // history → user is scrolling UP. Inverse for finger UP.
-      if (dy > 4) setFollow(false);
-      else if (dy < -4) recomputeFromGeometry();
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (['ArrowUp', 'PageUp', 'Home'].includes(e.key)) setFollow(false);
-      else if (['ArrowDown', 'PageDown', 'End', ' '].includes(e.key)) recomputeFromGeometry();
-    };
-    el.addEventListener('wheel', onWheel, { passive: true });
-    el.addEventListener('touchstart', onTouchStart, { passive: true });
-    el.addEventListener('touchmove', onTouchMove, { passive: true });
-    el.addEventListener('keydown', onKey);
-    return () => {
-      el.removeEventListener('wheel', onWheel);
-      el.removeEventListener('touchstart', onTouchStart);
-      el.removeEventListener('touchmove', onTouchMove);
-      el.removeEventListener('keydown', onKey);
-    };
-  }, [setFollow]);
-
-  // Auto-follow new content. Reads intent only — programmatic scrolls
-  // triggered here do not touch followBottomRef, so subsequent stream
-  // updates within the same turn keep following without races.
-  useEffect(() => {
-    if (followBottomRef.current) {
-      bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }
-    // Triggers that change rendered content height:
-    // - `messages`: new bubble / streaming chunk / tool result upsert
-    // - `isStreaming`: flip toggles the "Agent is running…" spinner
-    // - `queuedMessages`: queued chip renders at the bottom of the chat
-    //   container; without it in deps, pressing send while a turn is
-    //   running adds the chip below the viewport and never scrolls.
-  }, [messages, isStreaming, queuedMessages]);
-
-  // When this tab becomes visible again, the auto-scroll effect above
-  // could not run while the parent was display:none (scrollIntoView is a
-  // no-op on hidden elements). Catch up here: if the user's intent is to
-  // follow, snap (not smooth) to bottom so they see the latest content
-  // immediately rather than a stale middle.
-  useEffect(() => {
-    if (!visible) return;
-    if (!followBottomRef.current) return;
-    requestAnimationFrame(() => {
-      bottomRef.current?.scrollIntoView({ behavior: 'auto' });
-    });
-  }, [visible]);
+  // Scroll-tracking / auto-follow / visible-catchup effects live in
+  // <MessageList>. AgentView used to own them because messages lived
+  // in component state; now that messages live in the store and
+  // MessageList subscribes directly, the effects move alongside.
 
   // Consume Note's "Send to Chat" payload when this tab is the visible
   // agent tab in the staged project. Single-slot stage: only one tab
@@ -397,9 +313,9 @@ export function AgentView({ tabId, cwd, connection, provider, projectId, visible
       ...(files.length > 0 ? { files } : {}),
     });
     // User explicitly hit send — strong intent to see their message
-    // appear. Force re-engage auto-follow even if they had scrolled up
-    // while reading earlier history.
-    setFollow(true);
+    // appear. Force snap to bottom even if they had scrolled up while
+    // reading earlier history. MessageList listens.
+    emitAgent('agent:scrollToBottom', { tabId });
     emitAgent('agent:send', {
       tabId,
       text,
@@ -410,16 +326,16 @@ export function AgentView({ tabId, cwd, connection, provider, projectId, visible
         permissionMode,
       },
     });
-  }, [tabId, input, isStreaming, pendingFiles, pendingImages, capabilities, statusModel, currentEffort, permissionMode, setFollow]);
+  }, [tabId, input, isStreaming, pendingFiles, pendingImages, capabilities, statusModel, currentEffort, permissionMode]);
 
   const handleStop = useCallback(() => {
     clearQueuedMessages(tabId);
     emitAgent('agent:stop', { tabId });
   }, [tabId]);
 
-  const handleCancelQueued = useCallback((id: string) => {
-    cancelQueuedMessageStore(tabId, id);
-  }, [tabId]);
+  // handleCancelQueued lives inside <MessageList> now — the cancel
+  // button is part of the queued-message row, and MessageList calls
+  // cancelQueuedMessage(tabId, id) directly.
 
   // Permission response. scope='session' tells provider to remember allow for the rest of the session.
   const handlePermissionRespond = useCallback((allow: boolean, scope?: 'once' | 'session') => {
@@ -610,17 +526,7 @@ export function AgentView({ tabId, cwd, connection, provider, projectId, visible
     if (el) { el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 200) + 'px'; }
   }, [input]);
 
-  // Turn-based grouping
-  const turns = useMemo(() => {
-    const result: { user?: AgentMsg; agent: AgentMsg[] }[] = [];
-    for (const msg of messages) {
-      if (msg.type === 'user') { result.push({ user: msg, agent: [] }); }
-      else if (result.length === 0) { result.push({ agent: [msg] }); }
-      else { result[result.length - 1].agent.push(msg); }
-    }
-    return result;
-  }, [messages]);
-
+  // Turn grouping moved into <MessageList> (the only consumer).
   const currentModeOption = capabilities?.permissionModes.find((m) => m.value === permissionMode);
   const currentEffortOption = capabilities?.effortLevels.find((e) => e.value === currentEffort);
 
@@ -681,81 +587,12 @@ export function AgentView({ tabId, cwd, connection, provider, projectId, visible
 
   return (
     <div className="agent-view" ref={rootRef}>
-      <div className="agent-messages" ref={listRef}>
-        {initStatus === 'starting' && messages.length === 0 && (
-          <div className="agent-init-pane">
-            <span className="agent-loading-spinner" />
-            <span className="agent-loading-text">Starting agent…</span>
-          </div>
-        )}
-        {initStatus === 'failed' && (
-          <div className="agent-init-pane agent-init-failed">
-            <div className="agent-init-failed-title">Failed to start agent</div>
-            {initError && <div className="agent-init-failed-reason">{initError}</div>}
-            <button className="conn-btn conn-btn-next" onClick={handleRetryInit}>Retry</button>
-          </div>
-        )}
-        {initStatus === 'ready' && messages.length === 0 && !isStreaming && <div className="agent-empty">Send a message to start</div>}
-        {turns.map((turn, ti) => {
-          // Streaming content now lives in the messages array as entries
-          // with `streaming: true` — AgentMessage renders the cursor when
-          // that flag is set, so the timeline visually shows the in-flight
-          // chunk inline without a separate render branch.
-          const hasResponseContent = turn.agent.length > 0;
-          return (
-            <div key={turn.user?.id ?? `turn-${ti}`} className="agent-turn">
-              {turn.user && <AgentMessage message={turn.user} cwd={cwd} />}
-              {hasResponseContent && (
-                <div className="agent-turn-response">
-                  {turn.agent.map((msg) => <AgentMessage key={msg.id} message={msg} cwd={cwd} />)}
-                </div>
-              )}
-            </div>
-          );
-        })}
-        {(() => {
-          // Spinner = "agent alive" indicator when nothing visible is
-          // happening yet. With the new pipeline, any visible activity
-          // shows up in `messages` as a `streaming: true` text/thinking
-          // entry (which has its own cursor). The spinner only matters
-          // during the initial wait before any chunk arrives.
-          const thinkingDisplay = settings.agentDisplay?.thinking ?? 'collapsed';
-          const hasVisibleStreaming = messages.some((m) => {
-            if (m.type === 'text' && m.streaming) return true;
-            if (m.type === 'thinking' && m.streaming && thinkingDisplay !== 'hidden') return true;
-            return false;
-          });
-          const showSpinner = isStreaming && !hasVisibleStreaming && messages.length > 0;
-          if (!showSpinner) return null;
-          return (
-            <div className="agent-loading">
-              <span className="agent-loading-spinner" />
-              <span className="agent-loading-text">Agent is running... (Esc to stop)</span>
-            </div>
-          );
-        })()}
-        {queuedMessages.map((q) => (
-          <div key={q.id} className="agent-msg agent-msg-user agent-msg-queued">
-            <div className="agent-msg-content">{q.content}</div>
-            <span className="agent-queued-label">queued</span>
-            <button className="agent-queued-cancel" onClick={() => handleCancelQueued(q.id)} title="Cancel">×</button>
-          </div>
-        ))}
-        <div ref={bottomRef} />
-        {showJumpFab && (
-          <button
-            className="agent-jump-fab"
-            onClick={() => {
-              setFollow(true);
-              bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-            }}
-            title="Jump to latest"
-            aria-label="Jump to latest"
-          >
-            ↓
-          </button>
-        )}
-      </div>
+      <MessageList
+        tabId={tabId}
+        cwd={cwd}
+        visible={visible}
+        onRetryInit={handleRetryInit}
+      />
 
       {/* Priority gate: permission (agent-driven blocking) > picker (user-driven).
           When both want to show, permission takes the panel and picker state
