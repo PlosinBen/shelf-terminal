@@ -302,6 +302,7 @@ export function initTab(tabId: string, opts: InitTabOpts) {
 
 export function removeTab(tabId: string) {
   flushSave(tabId);
+  clearChunkBuffer(tabId);
   tabs.delete(tabId);
   listeners.delete(tabId);
 }
@@ -313,43 +314,108 @@ export function upsertMessage(tabId: string, msg: AgentMsg) {
   requestSave(tabId);
 }
 
+// ── Stream chunk batching ──
+//
+// Raw incoming chunks (one per IPC 'agent:onStream' event) come in
+// fast — 30-60/sec for Claude — and naively writing to the store
+// per chunk would re-render MessageList just as often. We buffer
+// deltas per (tabId, msgId) and flush at most ~30 Hz (33ms timer).
+// Visual streaming looks identical at 30 Hz vs 60 Hz for text; we
+// halve the React work for free.
+//
+// Buffer shape: `pendingChunks[tabId][msgId] = { type, delta }`.
+// Concurrent msgIds in the same tab are rare in practice (provider
+// finalizes one before starting the next) but the nested map keeps
+// them independent if it ever happens.
+
+interface ChunkBuffer { type: 'text' | 'thinking'; delta: string }
+const pendingChunks = new Map<string, Map<string, ChunkBuffer>>();
+const chunkTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const CHUNK_FLUSH_INTERVAL_MS = 33;
+
+function scheduleChunkFlush(tabId: string) {
+  if (chunkTimers.has(tabId)) return;  // already scheduled
+  const t = setTimeout(() => {
+    chunkTimers.delete(tabId);
+    flushChunkBuffer(tabId);
+  }, CHUNK_FLUSH_INTERVAL_MS);
+  chunkTimers.set(tabId, t);
+}
+
+function clearChunkBuffer(tabId: string) {
+  const t = chunkTimers.get(tabId);
+  if (t) { clearTimeout(t); chunkTimers.delete(tabId); }
+  pendingChunks.delete(tabId);
+}
+
+function flushChunkBuffer(tabId: string) {
+  const buffer = pendingChunks.get(tabId);
+  if (!buffer || buffer.size === 0) return;
+  pendingChunks.delete(tabId);
+  const tab = tabs.get(tabId);
+  if (!tab) return;  // tab gone — drop buffer
+
+  // Apply every buffered (msgId, delta) to a single new messages
+  // array. One reducer pass, one notify — even if 200 chunks landed
+  // in the 33 ms window for the same msgId, MessageList commits once.
+  let messages = tab.messages;
+  for (const [msgId, { type, delta }] of buffer) {
+    let found = false;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      if (m.id !== msgId) continue;
+      if (m.type !== 'text' && m.type !== 'thinking') { found = true; break; }  // unexpected, skip
+      const next = messages.slice();
+      next[i] = { ...m, content: (m.content as string) + delta, streaming: true };
+      messages = next;
+      found = true;
+      break;
+    }
+    if (!found) {
+      messages = [
+        ...messages,
+        {
+          id: msgId,
+          type,
+          content: delta,
+          streaming: true,
+          provider: tab.provider,
+          timestamp: Date.now(),
+        } as AgentMsg,
+      ];
+    }
+  }
+  tabs.set(tabId, { ...tab, messages });
+  notify(tabId);
+}
+
 export function appendChunk(
   tabId: string,
   chunkMsgId: string,
   delta: string,
   type: 'text' | 'thinking',
 ) {
-  const tab = tabs.get(tabId);
-  if (!tab) return;
-  const prev = tab.messages;
-  let updated: AgentMsg[] | null = null;
-  for (let i = prev.length - 1; i >= 0; i--) {
-    const m = prev[i];
-    if (m.id !== chunkMsgId) continue;
-    if (m.type !== 'text' && m.type !== 'thinking') return;  // unexpected
-    const next = prev.slice();
-    next[i] = { ...m, content: (m.content as string) + delta, streaming: true };
-    updated = next;
-    break;
+  // Drop chunks for tabs that don't exist yet — initTab may not have
+  // run, or the tab was already removed. Mirrors the pre-batching
+  // behaviour (`tabs.get(tabId)` guard was the first line).
+  if (!tabs.has(tabId)) return;
+
+  let buffer = pendingChunks.get(tabId);
+  if (!buffer) { buffer = new Map(); pendingChunks.set(tabId, buffer); }
+  const existing = buffer.get(chunkMsgId);
+  if (existing) {
+    // Same msgId in the same window — concatenate deltas. Type is
+    // taken from the first chunk; mid-stream type changes shouldn't
+    // happen.
+    existing.delta += delta;
+  } else {
+    buffer.set(chunkMsgId, { type, delta });
   }
-  if (!updated) {
-    updated = [
-      ...prev,
-      {
-        id: chunkMsgId,
-        type,
-        content: delta,
-        streaming: true,
-        provider: tab.provider,
-        timestamp: Date.now(),
-      } as AgentMsg,
-    ];
-  }
-  tabs.set(tabId, { ...tab, messages: updated });
-  notify(tabId);
-  // Stream chunks deliberately skip requestSave — saving partials would
-  // re-write the full message list every throttle window during a long
-  // turn. doSave at turn end (setStreaming(false)) captures the final.
+  scheduleChunkFlush(tabId);
+  // Stream chunks deliberately skip requestSave — saving partials
+  // would re-write the full message list every throttle window
+  // during a long turn. doSave at turn end (setStreaming(false))
+  // captures the final.
 }
 
 export function enqueueMessage(tabId: string, content: string) {
@@ -399,13 +465,26 @@ export function setStreaming(tabId: string, value: boolean) {
   const wasStreaming = tab.isStreaming;
   if (wasStreaming === value) return;
 
-  let nextMessages = tab.messages;
+  // streaming → idle: flush any pending chunks **first** so the
+  // last partial deltas land in messages before we clear the
+  // `streaming: true` flag below. Otherwise the final chunks would
+  // be either dropped (clearChunkBuffer) or appear without the
+  // cursor having been visible (race between timer + finalize msg).
+  if (wasStreaming && !value) {
+    flushChunkBuffer(tabId);
+  }
+
+  // Re-read tab — flushChunkBuffer may have written new messages.
+  // Using `tab` (pre-flush snapshot) here would clobber those writes.
+  const cur = tabs.get(tabId);
+  if (!cur) return;
+  let nextMessages = cur.messages;
   let mutated = false;
   // Streaming → idle: clear `streaming` flag on any text/thinking that
   // never received a finalize message. Content stays whatever the
   // stream accumulated.
   if (wasStreaming && !value) {
-    const cleared = tab.messages.map((m) => {
+    const cleared = cur.messages.map((m) => {
       if ((m.type === 'text' || m.type === 'thinking') && m.streaming) {
         mutated = true;
         return { ...m, streaming: false };
@@ -415,13 +494,13 @@ export function setStreaming(tabId: string, value: boolean) {
     if (mutated) nextMessages = cleared;
   }
   tabs.set(tabId, {
-    ...tab,
+    ...cur,
     isStreaming: value,
     messages: nextMessages,
     // Auto-dismiss any in-flight picker at turn end — provider's abort
     // path already resolved its pending Promise, so leaving the UI up
     // would be a ghost panel.
-    pendingPicker: wasStreaming && !value ? null : tab.pendingPicker,
+    pendingPicker: wasStreaming && !value ? null : cur.pendingPicker,
   });
   notify(tabId);
 
@@ -558,6 +637,9 @@ export function buildTurns(messages: AgentMsg[]): Turn[] {
 export function __resetStoreForTests() {
   for (const { timer } of pendingSaves.values()) clearTimeout(timer);
   pendingSaves.clear();
+  for (const t of chunkTimers.values()) clearTimeout(t);
+  chunkTimers.clear();
+  pendingChunks.clear();
   tabs.clear();
   listeners.clear();
   saveThrottleMs = DEFAULT_THROTTLE_MS;
@@ -585,4 +667,10 @@ export function __setTabForTests(tabId: string, state: AgentTabState) {
 /** Inspect pending save state. Tests only. */
 export function __getPendingSaveForTests(tabId: string) {
   return pendingSaves.get(tabId);
+}
+
+/** Subscribe to a tab's notify channel directly. Tests only — production
+ *  callers should use `useAgentTab` which wires React's useSyncExternalStore. */
+export function __subscribeForTests(tabId: string, listener: () => void) {
+  return subscribe(tabId, listener);
 }

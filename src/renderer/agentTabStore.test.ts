@@ -39,6 +39,7 @@ import {
   __getCapsForTests,
   __getTabForTests,
   __getPendingSaveForTests,
+  __subscribeForTests,
 } from './agentTabStore';
 
 const TAB = 'tab-1';
@@ -154,18 +155,69 @@ describe('agentTabStore — message actions', () => {
     expect((msgs[0] as any).content).toBe('v1-updated');
   });
 
-  it('appendChunk creates streaming placeholder then appends delta', () => {
+  it('appendChunk buffers deltas and flushes after the 33ms window', () => {
     appendChunk(TAB, 'chunk-1', 'Hello ', 'text');
     appendChunk(TAB, 'chunk-1', 'world', 'text');
+    // Before the timer fires, messages is still empty — deltas live
+    // in the chunk buffer, not in the store slice.
+    expect(__getTabForTests(TAB)!.messages.length).toBe(0);
+
+    vi.advanceTimersByTime(33);
+
     const msgs = __getTabForTests(TAB)!.messages;
     expect(msgs.length).toBe(1);
     expect((msgs[0] as any).content).toBe('Hello world');
     expect((msgs[0] as any).streaming).toBe(true);
   });
 
+  it('appendChunk coalesces multiple chunks into a single notify', () => {
+    let notifyCount = 0;
+    const unsub = __subscribeForTests(TAB, () => { notifyCount += 1; });
+    for (let i = 0; i < 10; i++) appendChunk(TAB, 'chunk-1', 'x', 'text');
+    expect(notifyCount).toBe(0);  // nothing flushed yet
+    vi.advanceTimersByTime(33);
+    expect(notifyCount).toBe(1);  // ten chunks → one re-render
+    unsub();
+  });
+
+  it('appendChunk for separate msgIds in same window merges into one flush', () => {
+    appendChunk(TAB, 'm1', 'A', 'text');
+    appendChunk(TAB, 'm2', 'B', 'thinking');
+    vi.advanceTimersByTime(33);
+    const msgs = __getTabForTests(TAB)!.messages;
+    expect(msgs.length).toBe(2);
+    expect(msgs.find((m) => m.id === 'm1')).toBeDefined();
+    expect(msgs.find((m) => m.id === 'm2')).toBeDefined();
+  });
+
   it('appendChunk does NOT requestSave (skips during streaming)', () => {
     appendChunk(TAB, 'chunk-1', 'hi', 'text');
+    vi.advanceTimersByTime(33);
     expect(__getPendingSaveForTests(TAB)).toBeUndefined();
+  });
+
+  it('setStreaming(false) flushes pending chunks before clearing streaming flag', () => {
+    setStreaming(TAB, true);
+    appendChunk(TAB, 'chunk-1', 'pending', 'text');
+    // Buffer not yet flushed
+    expect(__getTabForTests(TAB)!.messages.length).toBe(0);
+    setStreaming(TAB, false);
+    // Flushed synchronously by setStreaming, AND the streaming flag
+    // got cleared on the flushed entry in the same pass.
+    const msgs = __getTabForTests(TAB)!.messages;
+    expect(msgs.length).toBe(1);
+    expect((msgs[0] as any).content).toBe('pending');
+    expect((msgs[0] as any).streaming).toBe(false);
+  });
+
+  it('removeTab clears pending chunk buffer + timer', () => {
+    appendChunk(TAB, 'chunk-1', 'lost', 'text');
+    removeTab(TAB);
+    // Tab gone — re-adding shouldn't see any zombie content from
+    // the previous buffer.
+    initTab(TAB, { sessionId: SESSION, provider: 'claude' });
+    vi.advanceTimersByTime(33);
+    expect(__getTabForTests(TAB)!.messages.length).toBe(0);
   });
 
   it('enqueue/dequeue/cancelQueuedMessage', () => {
