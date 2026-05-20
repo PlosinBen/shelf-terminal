@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { Connection } from '@shared/types';
+import type { AgentPrefs, Connection } from '@shared/types';
 import { parseSlashPrefix } from '@shared/slash-prefix';
 import { useStore, setChatStage } from '../../store';
 import {
@@ -34,10 +34,16 @@ interface Props {
    *  AgentView passes its rootRef so paste anywhere in the agent area
    *  is captured. */
   rootRef: React.RefObject<HTMLDivElement | null>;
+  /** User intent for model / effort / permissionMode. Source of truth
+   *  for what gets sent in the next AGENT_SEND payload. **Not** the
+   *  same as store.actual* — actual reflects what the backend reports
+   *  (possibly after a fallback / cap), intent reflects what the user
+   *  asked for. We send intent so a backend fallback doesn't silently
+   *  pin future turns to the fallback model. See DECISIONS #59. */
+  intent: AgentPrefs | undefined;
   /** Bridge to AgentView's persistPref + setActualX optimistic update.
    *  Kept as a prop (not a store action) because persisting requires
-   *  projectIndex which AgentView already has lazy-bound. PR 6/7 may
-   *  centralize this into a store action that takes projectId. */
+   *  projectIndex which AgentView already has lazy-bound. */
   onConfigEdit: (key: 'model' | 'effort' | 'permissionMode', value: string) => void;
 }
 
@@ -53,16 +59,17 @@ interface Props {
  * etc) goes through onConfigEdit (immediate apply with arg) or
  * setLocalPicker (open the picker if no arg).
  */
-export function InputZone({ tabId, projectId, cwd, connection, visible, rootRef, onConfigEdit }: Props) {
+export function InputZone({ tabId, projectId, cwd, connection, visible, rootRef, intent, onConfigEdit }: Props) {
   const tab = useAgentTab(tabId);
   const { settings, chatStage } = useStore();
 
   const isStreaming = tab?.isStreaming ?? false;
   const queuedMessages = tab?.queuedMessages ?? [];
   const capabilities = tab?.capabilities ?? null;
+  // store.actual* reads stay — they're used for the vision-capability
+  // check (matches model in capabilities.models list) and as the
+  // current value in localPicker selection. Send payload uses `intent`.
   const statusModel = tab?.actualModel ?? null;
-  const currentEffort = tab?.actualEffort ?? 'medium';
-  const permissionMode = tab?.actualPermissionMode ?? 'default';
 
   const [input, setInput] = useState('');
   const [showSlashMenu, setShowSlashMenu] = useState(false);
@@ -232,12 +239,12 @@ export function InputZone({ tabId, projectId, cwd, connection, visible, rootRef,
       text,
       images: images.length > 0 ? images : undefined,
       prefs: {
-        model: statusModel ?? undefined,
-        effort: currentEffort,
-        permissionMode,
+        model: intent?.model,
+        effort: intent?.effort,
+        permissionMode: intent?.permissionMode,
       },
     });
-  }, [tabId, input, isStreaming, pendingFiles, pendingImages, statusModel, currentEffort, permissionMode, onConfigEdit]);
+  }, [tabId, input, isStreaming, pendingFiles, pendingImages, intent, onConfigEdit]);
 
   const handleStop = useCallback(() => {
     // ESC-twice (stop) means "abort this turn AND drop everything I
@@ -270,12 +277,12 @@ export function InputZone({ tabId, projectId, cwd, connection, visible, rootRef,
       tabId,
       text: next.content,
       prefs: {
-        model: statusModel ?? undefined,
-        effort: currentEffort,
-        permissionMode,
+        model: intent?.model,
+        effort: intent?.effort,
+        permissionMode: intent?.permissionMode,
       },
     });
-  }, [isStreaming, queuedMessages, tabId, statusModel, currentEffort, permissionMode]);
+  }, [isStreaming, queuedMessages, tabId, intent]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const val = e.target.value;

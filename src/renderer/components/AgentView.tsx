@@ -155,6 +155,7 @@ export function AgentView({ tabId, cwd, connection, provider, projectId, visible
         connection={connection}
         visible={visible}
         rootRef={rootRef}
+        intent={savedPrefs}
         onConfigEdit={handleConfigEdit}
       />
       <StatusBar

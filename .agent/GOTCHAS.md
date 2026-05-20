@@ -618,3 +618,16 @@ const proc = spawn('node', [deployedPath], { cwd, env, stdio: [...] });
 ```
 
 **判斷原則**: 任何「runtime 才決定、跟 user login shell 無關」的 env flag（測試開關、debug toggle、CI 標記），都要照這個 pattern 顯式 forward；遠端 `ssh` / `docker` 分支同理（要的話包進 `env` arg 或 shell prefix）。**user-config 性質的**（`PATH`、`SHELL`、`LANG`）才放心交給 `getShellEnv()` 全帶。
+
+## Agent send payload 用 intent，不用 actual
+
+**現象** (修復前): 使用者把 model 從 `opus` 切到 `sonnet` 試試看，發現太慢又切回 `opus`。但因為 backend 在 `sonnet` 時 fallback 過某個 model 上限，下次送訊息 `prefs.model` 莫名變回 fallback 結果，不是使用者期望的 `opus`。
+
+**原因**: 重構前 `AgentView.handleSend` 的 `prefs.model` 是讀 `statusModel`（display state，從 capabilities event 寫入 = backend reported）。Backend 的 fallback 結果蓋掉 statusModel 後，handleSend 自然帶 fallback 值出去。
+
+**修法**: PR 8 把 send payload 改成讀 `projectConfig.agentPrefs[provider]`（intent，由使用者透過 cycle / `/model` / config picker 寫入）。`store.actual*` 只用在 StatusBar 顯示、vision-capability 檢查、localPicker initial selection。**不能用在 send 路徑**。
+
+**判斷原則**:
+- 任何「下次跟 backend 互動要送什麼」→ 讀 intent（projectConfig.agentPrefs）
+- 任何「現況顯示給使用者看」→ 讀 actual（store.actualModel / actualEffort / actualPermissionMode）
+- 兩條線本來就應該獨立 — actual 不該回灌進 intent（reconnect bug 也是同個 root cause）
