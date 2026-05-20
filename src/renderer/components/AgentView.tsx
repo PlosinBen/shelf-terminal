@@ -1,17 +1,12 @@
-import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import React, { useCallback, useEffect, useRef } from 'react';
 import type { AgentProvider, AgentPrefs, Connection } from '@shared/types';
-import { type AgentMsg } from './AgentMessage';
 import { MessageList } from './agent/MessageList';
+import { InputZone } from './agent/InputZone';
 import { SelectionPanel } from './SelectionPanel';
 import { PickerPanel } from './PickerPanel';
-import { parseSlashPrefix } from '@shared/slash-prefix';
 import {
   initTab as initTabStore,
   removeTab as removeTabStore,
-  upsertMessage,
-  enqueueMessage,
-  dequeueMessage,
-  clearQueuedMessages,
   clearMessages as clearMessagesStore,
   setActualModel,
   setActualEffort,
@@ -27,30 +22,7 @@ import {
   useAgentTab,
 } from '../agentTabStore';
 import { emitAgent } from '../events';
-
-/**
- * Slash commands that mutate renderer-owned project config (model / effort /
- * permissionMode). These are "config edits" via slash syntax — same effect as
- * cycling via the status bar, just keyboard-driven. Renderer intercepts them
- * entirely; nothing goes to agent-server (the next AGENT_SEND carries the new
- * pref value and the orchestrator's diff detector fires setX on the provider).
- *
- * Map: user-facing slash name → internal pref key in projectConfig.agentPrefs.
- * The two diverge for `permission` because `/permissionMode` would be a
- * camelCase eyesore in a slash menu (everything else is single-word lowercase
- * to match `/clear`, `/compact`, etc.); the pref key stays `permissionMode`
- * to match its existing AgentPrefs / settings shape.
- *
- * Anything not in this map falls through to agent.send — provider parses
- * and dispatches.
- */
-const RENDERER_LOCAL_SLASHES: Record<string, 'model' | 'effort' | 'permissionMode'> = {
-  model: 'model',
-  effort: 'effort',
-  permission: 'permissionMode',
-};
-import { useAttachmentPaste } from '../hooks/useAttachmentPaste';
-import { useStore, updateProjectConfig, setChatStage } from '../store';
+import { useStore, updateProjectConfig } from '../store';
 
 // Local-only types — store's Capabilities is the source of truth and
 // tabState.capabilities carries it. SlashCommand is the shape of items
@@ -99,7 +71,10 @@ export function AgentView({ tabId, cwd, connection, provider, projectId, visible
   // mount effect below; until that runs, `tabState` is undefined and
   // we fall back to safe defaults.
   const tabState = useAgentTab(tabId);
-  const messages: AgentMsg[] = tabState?.messages ?? [];
+  // messages / initStatus / queuedMessages live in <MessageList>;
+  // input-related state in <InputZone>. AgentView only reads what
+  // its remaining UI surface needs: plan panel + status bar +
+  // decision panels + auth pane.
   const currentPlan = tabState?.currentPlan ?? '';
   const isStreaming = tabState?.isStreaming ?? false;
   const statusModel = tabState?.actualModel ?? null;
@@ -113,25 +88,12 @@ export function AgentView({ tabId, cwd, connection, provider, projectId, visible
   const pendingPermission = tabState?.pendingPermission ?? null;
   const pendingPicker = tabState?.pendingPicker ?? null;
   const localPicker = tabState?.localPicker ?? null;
-  const queuedMessages = tabState?.queuedMessages ?? [];
   const authRequired = tabState?.authRequired ?? null;
   const authBusy = tabState?.authBusy ?? false;
   const authError = tabState?.authError ?? null;
-  const initStatus = tabState?.initStatus ?? 'starting';
-  const initError = tabState?.initError ?? null;
 
-  // Input zone state stays local — no external reader. Same for slash
-  // menu, ESC pending, and pending attachments. These move into
-  // <InputZone> in PR 5; for now they're still wired into AgentView.
-  const [input, setInput] = useState('');
-  const [showSlashMenu, setShowSlashMenu] = useState(false);
-  const [slashFilter, setSlashFilter] = useState('');
-  const [slashSelection, setSlashSelection] = useState(0);
-  const [pendingFiles, setPendingFiles] = useState<Array<{ path: string; displayPath: string }>>([]);
-  const [pendingImages, setPendingImages] = useState<string[]>([]);
-  const [escPending, setEscPending] = useState(false);
-  const escPendingRef = useRef(false);
-  const escTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Input value, slash menu, attachment chips, ESC twice — all moved
+  // to <InputZone>. AgentView no longer touches input UI state.
 
   const persistPref = useCallback((partial: Partial<AgentPrefs>) => {
     const current = projects[projectIndex]?.config.agentPrefs ?? {};
@@ -139,48 +101,11 @@ export function AgentView({ tabId, cwd, connection, provider, projectId, visible
     updateProjectConfig(projectIndex, { agentPrefs: updated });
   }, [projectIndex, provider, projects]);
 
-  const inputRef = useRef<HTMLTextAreaElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
-  // listRef / bottomRef / followBottom / showJumpFab moved into
-  // <MessageList>. AgentView no longer owns scroll geometry; when it
-  // needs the timeline to snap to bottom (after handleSend / queue
-  // flush), it emits 'agent:scrollToBottom' which MessageList listens
-  // for. initTab is idempotent + keyed on tabId so no init guard ref
-  // is needed.
-
-  // Focus the input whenever this tab becomes visible (tab switch, project
-  // switch, app launch). requestAnimationFrame defers past the layout pass so
-  // the textarea is actually in the visible DOM (parent is display:none → block).
-  useEffect(() => {
-    if (!visible) return;
-    const id = requestAnimationFrame(() => inputRef.current?.focus());
-    return () => cancelAnimationFrame(id);
-  }, [visible]);
-
-  // Attachment paste support
-  useAttachmentPaste(rootRef, {
-    connection,
-    cwd,
-    maxUploadSizeMB: 50,
-    onUpload: (uploads) => {
-      setPendingFiles((prev) => [
-        ...prev,
-        ...uploads.map((u) => ({ path: u.remotePath, displayPath: u.displayPath })),
-      ]);
-    },
-    onImages: (urls) => {
-      const currentModel = capabilities?.models.find((m) => m.value === statusModel);
-      if (currentModel && currentModel.vision === false) {
-        window.shelfApi.dialog.warn('Images not supported', `The current model does not accept image input.`);
-        return;
-      }
-      const accepted = urls.filter((u) => u.length < 20 * 1024 * 1024);
-      if (accepted.length < urls.length) {
-        window.shelfApi.dialog.warn('Image too large', 'Images over ~20MB were skipped.');
-      }
-      if (accepted.length > 0) setPendingImages((prev) => [...prev, ...accepted]);
-    },
-  });
+  // listRef / bottomRef / scroll-follow state moved into <MessageList>;
+  // inputRef / input state moved into <InputZone>. rootRef stays — it's
+  // the paste/drop target passed into InputZone's useAttachmentPaste so
+  // the whole agent area captures attachments, not just the textarea.
 
   // Per-tab lifecycle: initTab creates the slice (synchronously),
   // warm-starts actual* from savedPrefs (intent), and triggers async
@@ -207,135 +132,9 @@ export function AgentView({ tabId, cwd, connection, provider, projectId, visible
     emitAgent('agent:init', { tabId, cwd, connection, provider, sessionId });
   }, [tabId, cwd, connection, provider, sessionId]);
 
-  // Flush queued messages once the agent goes idle. Mirrors handleSend's
-  // exact path (push user bubble + agent.send) — the queued message
-  // becomes a regular user message on the next turn. Lives in its own
-  // useEffect (not inside the onStatus updater) to avoid side effects in
-  // a state updater and to give agent-server one tick to settle before
-  // the next IPC.AGENT_SEND fires.
-  useEffect(() => {
-    if (isStreaming) return;
-    if (queuedMessages.length === 0) return;
-    const next = dequeueMessage(tabId);
-    if (!next) return;
-    upsertMessage(tabId, {
-      id: `user-${Date.now()}`,
-      type: 'user',
-      content: next.content,
-      timestamp: Date.now(),
-    });
-    // Queued msg flush represents the same intent as handleSend (user
-    // pressed send earlier, just had to wait for the previous turn) —
-    // nudge MessageList to snap to bottom so the new turn lands in view.
-    emitAgent('agent:scrollToBottom', { tabId });
-    emitAgent('agent:send', {
-      tabId,
-      text: next.content,
-      prefs: {
-        model: statusModel ?? undefined,
-        effort: currentEffort,
-        permissionMode,
-      },
-    });
-  }, [isStreaming, queuedMessages, tabId, statusModel, currentEffort, permissionMode]);
-
-  // Scroll-tracking / auto-follow / visible-catchup effects live in
-  // <MessageList>. AgentView used to own them because messages lived
-  // in component state; now that messages live in the store and
-  // MessageList subscribes directly, the effects move alongside.
-
-  // Consume Note's "Send to Chat" payload when this tab is the visible
-  // agent tab in the staged project. Single-slot stage: only one tab
-  // (the first to be visible after staging) consumes; clearing the stage
-  // prevents other agent tabs in the same project from re-applying it.
-  // Behaviour: append to current input (preserve any unsent typing) and
-  // append images to existing pendingImages.
-  useEffect(() => {
-    if (!visible || !chatStage) return;
-    if (chatStage.projectId !== projectId) return;
-    const incoming = chatStage;
-    setInput((prev) => {
-      const trimmed = prev.trimEnd();
-      return trimmed ? `${trimmed}\n\n${incoming.text}` : incoming.text;
-    });
-    setPendingImages((prev) => [...prev, ...incoming.images]);
-    setChatStage(null);
-    requestAnimationFrame(() => inputRef.current?.focus());
-  }, [visible, chatStage, projectId]);
-
-  const handleSend = useCallback(() => {
-    const text = input.trim();
-    if ((!text && pendingFiles.length === 0 && pendingImages.length === 0)) return;
-
-    // Renderer-local slash interception. /model (and future /effort,
-    // /permissionMode) mutate project config — semantically equivalent to a
-    // status bar cycle, just keyboard-driven. Zero IPC: backend learns of
-    // the change on the next normal send via the AGENT_SEND payload.
-    //
-    // /model <id> applies directly via handleConfigEdit.
-    // /model (no arg) opens the renderer-local picker.
-    // Anything else falls through to agent.send — provider parses + dispatches.
-    const slash = parseSlashPrefix(text);
-    const localKey = slash ? RENDERER_LOCAL_SLASHES[slash.cmd] : undefined;
-    if (slash && localKey) {
-      setInput('');
-      setShowSlashMenu(false);
-      if (slash.args) {
-        handleConfigEdit(localKey, slash.args);
-      } else {
-        setLocalPickerStore(tabId, { key: localKey });
-      }
-      return;
-    }
-
-    // No further slash special-casing — agent-bound slashes (/help, /context,
-    // /compact, /clear) flow through agent.send as normal text. Provider
-    // parses prefix and dispatches internally; output arrives via the normal
-    // slash_response message stream.
-    const files = pendingFiles;
-    const images = pendingImages;
-    setInput('');
-    setPendingFiles([]);
-    setPendingImages([]);
-    setShowSlashMenu(false);
-
-    if (isStreaming) {
-      enqueueMessage(tabId, text);
-      return;
-    }
-
-    upsertMessage(tabId, {
-      id: `user-${Date.now()}`,
-      type: 'user',
-      content: text,
-      timestamp: Date.now(),
-      ...(images.length > 0 ? { images } : {}),
-      ...(files.length > 0 ? { files } : {}),
-    });
-    // User explicitly hit send — strong intent to see their message
-    // appear. Force snap to bottom even if they had scrolled up while
-    // reading earlier history. MessageList listens.
-    emitAgent('agent:scrollToBottom', { tabId });
-    emitAgent('agent:send', {
-      tabId,
-      text,
-      images: images.length > 0 ? images : undefined,
-      prefs: {
-        model: statusModel ?? undefined,
-        effort: currentEffort,
-        permissionMode,
-      },
-    });
-  }, [tabId, input, isStreaming, pendingFiles, pendingImages, capabilities, statusModel, currentEffort, permissionMode]);
-
-  const handleStop = useCallback(() => {
-    clearQueuedMessages(tabId);
-    emitAgent('agent:stop', { tabId });
-  }, [tabId]);
-
-  // handleCancelQueued lives inside <MessageList> now — the cancel
-  // button is part of the queued-message row, and MessageList calls
-  // cancelQueuedMessage(tabId, id) directly.
+  // Queued-message flush, handleSend, handleStop, chatStage consumer,
+  // and all input-related state moved into <InputZone>. AgentView no
+  // longer touches the input path at all.
 
   // Permission response. scope='session' tells provider to remember allow for the rest of the session.
   const handlePermissionRespond = useCallback((allow: boolean, scope?: 'once' | 'session') => {
@@ -413,118 +212,9 @@ export function AgentView({ tabId, cwd, connection, provider, projectId, visible
     await clearMessagesStore(tabId);
   }, [tabId]);
 
-  // Slash menu: union of provider-declared agent slashes and renderer-local
-  // config-edit slashes. Display layer only — routing in handleSend decides
-  // who actually handles each. Names are short-circuit unique (provider
-  // shouldn't claim /model after step E cleanup; renderer-local list is the
-  // canonical source for those names), so a simple concat + dedup is fine.
-  const allCommands = useMemo(() => {
-    const providerCmds = capabilities?.slashCommands ?? [];
-    const localCmds = Object.keys(RENDERER_LOCAL_SLASHES).map((name) => {
-      const description =
-        name === 'model' ? 'Switch agent model' :
-        name === 'effort' ? 'Set reasoning effort' :
-        name === 'permission' ? 'Set permission mode' :
-        '';
-      return { name, description };
-    });
-    const seen = new Set<string>();
-    const merged: { name: string; description: string }[] = [];
-    for (const cmd of [...providerCmds, ...localCmds]) {
-      if (seen.has(cmd.name)) continue;
-      seen.add(cmd.name);
-      merged.push(cmd);
-    }
-    return merged;
-  }, [capabilities]);
-
-  const filteredCommands = useMemo(() => {
-    return allCommands.filter(
-      (cmd) => !slashFilter || cmd.name.toLowerCase().startsWith(slashFilter.toLowerCase()),
-    );
-  }, [allCommands, slashFilter]);
-
-  const allCommandNames = useMemo(
-    () => new Set(allCommands.map((c) => c.name)),
-    [allCommands],
-  );
-
-  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const val = e.target.value;
-    setInput(val);
-    // Slash menu is for *command name* autocomplete only:
-    // - Show while user types the slash command (`/m`, `/mo`, `/model`)
-    // - Hide once they've typed an exact known cmd name (nothing more to
-    //   autocomplete — keeping it open just blocks Enter from submitting)
-    // - Hide once they add a space (now in "args" territory, e.g. `/model
-    //   claude-sonnet`)
-    //
-    // Pattern: `/` followed by zero or more word chars, nothing else.
-    const matchesSlashShape = /^\/\w*$/.test(val);
-    const filter = val.slice(1);
-    const isExactMatch = filter.length > 0 && allCommandNames.has(filter);
-    if (matchesSlashShape && !isExactMatch) {
-      setSlashFilter(filter);
-      setShowSlashMenu(true);
-      setSlashSelection(0);
-    } else {
-      setShowSlashMenu(false);
-    }
-  };
-
-  const handleSlashSelect = (cmd: SlashCommand) => {
-    setInput(`/${cmd.name} `);
-    setShowSlashMenu(false);
-    inputRef.current?.focus();
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.nativeEvent.isComposing) return;
-
-    if (showSlashMenu && filteredCommands.length > 0) {
-      if (e.key === 'ArrowDown') { e.preventDefault(); setSlashSelection((s) => Math.min(s + 1, filteredCommands.length - 1)); return; }
-      if (e.key === 'ArrowUp') { e.preventDefault(); setSlashSelection((s) => Math.max(s - 1, 0)); return; }
-      if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
-        e.preventDefault();
-        handleSlashSelect(filteredCommands[slashSelection]);
-        return;
-      }
-    }
-
-    // Swallow Tab so focus doesn't jump to surrounding buttons (e.g. Clear
-    // History) and trigger destructive actions on accidental Enter.
-    if (e.key === 'Tab') { e.preventDefault(); return; }
-
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
-    if (e.key === 'Escape') {
-      if (showSlashMenu) { setShowSlashMenu(false); return; }
-      if (isStreaming) {
-        e.preventDefault();
-        if (escPendingRef.current) {
-          if (escTimerRef.current) { clearTimeout(escTimerRef.current); escTimerRef.current = null; }
-          escPendingRef.current = false;
-          setEscPending(false);
-          handleStop();
-        } else {
-          escPendingRef.current = true;
-          setEscPending(true);
-          escTimerRef.current = setTimeout(() => { escPendingRef.current = false; setEscPending(false); escTimerRef.current = null; }, 1500);
-        }
-      }
-    }
-  };
-
-  useEffect(() => {
-    if (isStreaming) return;
-    escPendingRef.current = false;
-    setEscPending(false);
-    if (escTimerRef.current) { clearTimeout(escTimerRef.current); escTimerRef.current = null; }
-  }, [isStreaming]);
-
-  useEffect(() => {
-    const el = inputRef.current;
-    if (el) { el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 200) + 'px'; }
-  }, [input]);
+  // Slash menu memos, handleInputChange / handleSlashSelect /
+  // handleKeyDown, ESC-reset on stream end, textarea auto-resize —
+  // all moved to <InputZone>.
 
   // Turn grouping moved into <MessageList> (the only consumer).
   const currentModeOption = capabilities?.permissionModes.find((m) => m.value === permissionMode);
@@ -667,52 +357,15 @@ export function AgentView({ tabId, cwd, connection, provider, projectId, visible
         </div>
       )}
 
-      <div className="agent-input-area">
-        {showSlashMenu && filteredCommands.length > 0 && (
-          <div className="agent-slash-menu">
-            {filteredCommands.slice(0, 10).map((cmd, i) => (
-              <div
-                key={cmd.name}
-                className={`agent-slash-item${i === slashSelection ? ' agent-slash-item-selected' : ''}`}
-                onMouseDown={(e) => { e.preventDefault(); handleSlashSelect(cmd); }}
-                onMouseEnter={() => setSlashSelection(i)}
-              >
-                <span className="agent-slash-name">/{cmd.name}</span>
-                <span className="agent-slash-desc">{cmd.description}</span>
-              </div>
-            ))}
-          </div>
-        )}
-        {(pendingFiles.length > 0 || pendingImages.length > 0) && (
-          <div className="agent-attachment-row">
-            {pendingImages.map((url, i) => (
-              <span key={`img-${i}`} className="agent-attachment-chip">
-                img {i + 1} ({Math.round(url.length * 3 / 4 / 1024)} KB)
-                <button type="button" className="agent-attachment-remove" onClick={() => setPendingImages((prev) => prev.filter((_, j) => j !== i))}>×</button>
-              </span>
-            ))}
-            {pendingFiles.map((f) => (
-              <span key={f.path} className="agent-attachment-chip">
-                {f.displayPath}
-                <button type="button" className="agent-attachment-remove" onClick={() => setPendingFiles((prev) => prev.filter((p) => p.path !== f.path))}>×</button>
-              </span>
-            ))}
-          </div>
-        )}
-        <div className="agent-input-row">
-          <span className="agent-prompt">&#10095;</span>
-          <textarea
-            ref={inputRef}
-            className="agent-textarea"
-            value={input}
-            onChange={handleInputChange}
-            onKeyDown={handleKeyDown}
-            placeholder="Ask something..."
-            rows={1}
-          />
-          {escPending && <span className="agent-esc-hint">Press Esc again to stop</span>}
-        </div>
-      </div>
+      <InputZone
+        tabId={tabId}
+        projectId={projectId}
+        cwd={cwd}
+        connection={connection}
+        visible={visible}
+        rootRef={rootRef}
+        onConfigEdit={handleConfigEdit}
+      />
 
       <div className="agent-status-bar">
         <span className="agent-status-dot" style={{ color: isStreaming ? '#e5c07b' : '#98c379' }}>{'●'}</span>
