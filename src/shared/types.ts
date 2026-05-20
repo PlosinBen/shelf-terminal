@@ -244,8 +244,16 @@ export interface AppSettings {
   telegram?: TelegramConfig;
   agentDisplay?: Partial<Record<AgentDisplayKey, AgentDisplayMode>>;
   /** Max UI messages persisted per agent session in IndexedDB.
-   *  Trimmed at save time; oldest dropped first. */
+   *  Trimmed at save time; oldest dropped first. Acts as a safety net
+   *  / "reload depth" — typically larger than the in-memory cap. */
   agentHistoryMaxMessages: number;
+  /** Max UI messages kept in memory per agent tab. Controls render perf
+   *  (and indirectly React reconciliation cost). Set <= IDB cap; setter
+   *  in agentTabStore clamps if you violate that. */
+  agentInMemoryMaxMessages: number;
+  /** How long (ms) to coalesce dirty writes before flushing to IDB.
+   *  Lower = less data lost on crash, higher = fewer IDB transactions. */
+  agentHistorySaveThrottleMs: number;
   providerModels?: Partial<Record<PmProviderType | 'claude', ProviderModel[]>>;
 }
 

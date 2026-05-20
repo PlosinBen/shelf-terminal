@@ -27,4 +27,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
   logLevel: 'error' as const,
   maxUploadSizeMB: 50,
   agentHistoryMaxMessages: 1000,
+  agentInMemoryMaxMessages: 500,
+  agentHistorySaveThrottleMs: 5000,
 };

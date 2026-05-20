@@ -1,0 +1,563 @@
+import { useSyncExternalStore } from 'react';
+import type { AgentMsg } from './components/AgentMessage';
+import type { AgentPrefs, AgentProvider, AuthMethod } from '../shared/types';
+import { loadAgentMessages, saveAgentMessages, clearAgentSession } from './storage/agent-history';
+
+// Per-tab store for agent UI state. Split from store.ts because the
+// global store rebuilds its snapshot on every change — every useStore
+// consumer re-renders. Agent state changes (stream chunks, status
+// pings) fire dozens of times per turn; bundling them with project /
+// settings would force every component to re-render. This store
+// notifies only the listeners registered for the tab that changed.
+//
+// Lifecycle: AgentView calls initTab on mount and removeTab on unmount
+// (next PR wires this up). Backend events route here via the typed bus
+// (events/ipc-agent.ts → store subscriptions installed by App.tsx in
+// PR 3). For now this module is pure data + no subscribers.
+
+// ── Types ──
+
+export type StatusSegment = { text: string; severity?: 'normal' | 'warning' | 'critical' };
+
+export interface CycleOption {
+  value: string;
+  displayName: string;
+  severity?: 'normal' | 'info' | 'warning' | 'critical';
+}
+
+export interface Capabilities {
+  models: { value: string; displayName: string; effortLevels?: CycleOption[]; vision?: boolean }[];
+  permissionModes: CycleOption[];
+  effortLevels: CycleOption[];
+  slashCommands: { name: string; description: string }[];
+  authMethod?: AuthMethod;
+  currentModel?: string;
+  currentEffort?: string;
+  currentPermissionMode?: string;
+}
+
+export interface PendingPermission {
+  toolUseId: string;
+  toolName: string;
+  input: Record<string, unknown>;
+}
+
+export interface PendingPicker {
+  id: string;
+  prompts: Array<{
+    question: string;
+    header?: string;
+    multiSelect: boolean;
+    options: Array<{ label: string; description?: string; preview?: string }>;
+    inputType?: 'text' | 'number' | 'integer';
+    currentValue?: string | string[];
+  }>;
+}
+
+export interface LocalPicker {
+  key: 'model' | 'effort' | 'permissionMode';
+}
+
+export interface QueuedMessage {
+  id: string;
+  content: string;
+}
+
+export interface AgentTabState {
+  // identity
+  sessionId: string;
+  provider: AgentProvider;
+
+  // domain
+  messages: AgentMsg[];
+  queuedMessages: QueuedMessage[];
+  currentPlan: string;
+
+  // status (display only — what backend reports)
+  isStreaming: boolean;
+  actualModel: string | null;
+  actualEffort: string;
+  actualPermissionMode: string;
+  costUsd: number | undefined;
+  numTurns: number | undefined;
+  contextUsage: StatusSegment | null;
+  rateLimits: StatusSegment[];
+
+  // capabilities
+  capabilities: Capabilities | null;
+
+  // decisions
+  pendingPermission: PendingPermission | null;
+  pendingPicker: PendingPicker | null;
+  localPicker: LocalPicker | null;
+
+  // auth
+  authRequired: { provider: string } | null;
+  authBusy: boolean;
+  authError: string | null;
+
+  // init
+  initStatus: 'starting' | 'ready' | 'failed';
+  initError: string | null;
+}
+
+// ── Module-scoped state ──
+
+type Listener = () => void;
+const tabs = new Map<string, AgentTabState>();
+const listeners = new Map<string, Set<Listener>>();
+
+// Settings synced from App.tsx. Constraint: inMemoryMax <= idbMax.
+// Setters clamp both ways so the invariant holds even if settings UI
+// validation misses an edge case.
+const DEFAULT_THROTTLE_MS = 5000;
+const DEFAULT_IN_MEMORY_MAX = 500;
+const DEFAULT_IDB_MAX = 1000;
+let saveThrottleMs = DEFAULT_THROTTLE_MS;
+let inMemoryMax = DEFAULT_IN_MEMORY_MAX;
+let idbMax = DEFAULT_IDB_MAX;
+
+export function setInMemoryMax(n: number) {
+  inMemoryMax = Math.max(1, Math.min(n, idbMax));
+}
+export function setIdbMax(n: number) {
+  idbMax = Math.max(1, n);
+  if (inMemoryMax > idbMax) inMemoryMax = idbMax;
+}
+export function setSaveThrottleMs(ms: number) {
+  saveThrottleMs = Math.max(0, ms);
+}
+
+// ── Listener bookkeeping ──
+
+function notify(tabId: string) {
+  const set = listeners.get(tabId);
+  if (!set) return;
+  set.forEach((l) => l());
+}
+
+function subscribe(tabId: string, listener: Listener): () => void {
+  let set = listeners.get(tabId);
+  if (!set) {
+    set = new Set();
+    listeners.set(tabId, set);
+  }
+  set.add(listener);
+  return () => {
+    set!.delete(listener);
+    if (set!.size === 0) listeners.delete(tabId);
+  };
+}
+
+function getSnapshot(tabId: string): AgentTabState | undefined {
+  return tabs.get(tabId);
+}
+
+// ── React hook ──
+
+export function useAgentTab(tabId: string): AgentTabState | undefined {
+  return useSyncExternalStore(
+    (l) => subscribe(tabId, l),
+    () => getSnapshot(tabId),
+  );
+}
+
+// ── Save throttle infrastructure ──
+
+interface PendingSave { timer: ReturnType<typeof setTimeout>; dirty: boolean }
+const pendingSaves = new Map<string, PendingSave>();
+
+function requestSave(tabId: string) {
+  const existing = pendingSaves.get(tabId);
+  if (existing) { existing.dirty = true; return; }
+  pendingSaves.set(tabId, {
+    dirty: true,
+    timer: setTimeout(() => {
+      const entry = pendingSaves.get(tabId);
+      pendingSaves.delete(tabId);
+      if (entry?.dirty) doSave(tabId);
+    }, saveThrottleMs),
+  });
+}
+
+function flushSave(tabId: string) {
+  const entry = pendingSaves.get(tabId);
+  if (!entry) return;
+  clearTimeout(entry.timer);
+  pendingSaves.delete(tabId);
+  if (entry.dirty) doSave(tabId);
+}
+
+function trimMessagesInMemory(tabId: string) {
+  const tab = tabs.get(tabId);
+  if (!tab || tab.messages.length <= inMemoryMax) return;
+  const trimmed = tab.messages.slice(tab.messages.length - inMemoryMax);
+  tabs.set(tabId, { ...tab, messages: trimmed });
+  notify(tabId);
+}
+
+function doSave(tabId: string) {
+  const tab = tabs.get(tabId);
+  if (!tab) return;
+  // Streaming mid-turn → skip. Next setStreaming(false) at turn end
+  // will requestSave, and we'll arrive here in steady state.
+  if (tab.isStreaming) return;
+  trimMessagesInMemory(tabId);
+  const current = tabs.get(tabId);
+  if (!current) return;
+  saveAgentMessages(current.sessionId, current.messages, idbMax).catch((err) => {
+    console.error('[agentTabStore] saveAgentMessages failed', err);
+  });
+}
+
+// ── State updaters ──
+
+function update(tabId: string, mutator: (prev: AgentTabState) => AgentTabState) {
+  const prev = tabs.get(tabId);
+  if (!prev) return;
+  const next = mutator(prev);
+  if (next === prev) return;
+  tabs.set(tabId, next);
+  notify(tabId);
+}
+
+// upsert-by-id, preserving original timestamp on replace so timeline
+// ordering doesn't jump when finalize lands after streaming.
+function upsertById(prev: AgentMsg[], built: AgentMsg): AgentMsg[] {
+  for (let i = prev.length - 1; i >= 0; i--) {
+    if (prev[i].id === built.id) {
+      const next = prev.slice();
+      next[i] = { ...built, timestamp: prev[i].timestamp };
+      return next;
+    }
+  }
+  return [...prev, built];
+}
+
+// ── Lifecycle actions ──
+
+export interface InitTabOpts {
+  sessionId: string;
+  provider: AgentProvider;
+  intent?: AgentPrefs;
+}
+
+export function initTab(tabId: string, opts: InitTabOpts) {
+  if (tabs.has(tabId)) return;  // idempotent
+  const initial: AgentTabState = {
+    sessionId: opts.sessionId,
+    provider: opts.provider,
+    messages: [],
+    queuedMessages: [],
+    currentPlan: '',
+    isStreaming: false,
+    // Warm-start from intent so StatusBar doesn't flash "—" on mount.
+    // First capabilities event overwrites with backend-reported actual.
+    actualModel: opts.intent?.model ?? null,
+    actualEffort: opts.intent?.effort ?? 'medium',
+    actualPermissionMode: opts.intent?.permissionMode ?? 'default',
+    costUsd: undefined,
+    numTurns: undefined,
+    contextUsage: null,
+    rateLimits: [],
+    capabilities: null,
+    pendingPermission: null,
+    pendingPicker: null,
+    localPicker: null,
+    authRequired: null,
+    authBusy: false,
+    authError: null,
+    initStatus: 'starting',
+    initError: null,
+  };
+  tabs.set(tabId, initial);
+  notify(tabId);
+
+  // Async IDB load. Backend events that fire before this resolves write
+  // into `messages` first; load merges loaded-before-current with ID
+  // dedupe so the new entries aren't clobbered.
+  loadAgentMessages(opts.sessionId).then((loaded) => {
+    if (loaded.length === 0) return;
+    const current = tabs.get(tabId);
+    if (!current) return;  // tab removed during load
+    const currentIds = new Set(current.messages.map((m) => m.id));
+    const filteredLoaded = loaded.filter((m) => !currentIds.has(m.id));
+    if (filteredLoaded.length === 0) return;
+    tabs.set(tabId, { ...current, messages: [...filteredLoaded, ...current.messages] });
+    notify(tabId);
+  }).catch((err) => {
+    console.error('[agentTabStore] loadAgentMessages failed', err);
+  });
+}
+
+export function removeTab(tabId: string) {
+  flushSave(tabId);
+  tabs.delete(tabId);
+  listeners.delete(tabId);
+}
+
+// ── Message actions ──
+
+export function upsertMessage(tabId: string, msg: AgentMsg) {
+  update(tabId, (prev) => ({ ...prev, messages: upsertById(prev.messages, msg) }));
+  requestSave(tabId);
+}
+
+export function appendChunk(
+  tabId: string,
+  chunkMsgId: string,
+  delta: string,
+  type: 'text' | 'thinking',
+) {
+  const tab = tabs.get(tabId);
+  if (!tab) return;
+  const prev = tab.messages;
+  let updated: AgentMsg[] | null = null;
+  for (let i = prev.length - 1; i >= 0; i--) {
+    const m = prev[i];
+    if (m.id !== chunkMsgId) continue;
+    if (m.type !== 'text' && m.type !== 'thinking') return;  // unexpected
+    const next = prev.slice();
+    next[i] = { ...m, content: (m.content as string) + delta, streaming: true };
+    updated = next;
+    break;
+  }
+  if (!updated) {
+    updated = [
+      ...prev,
+      {
+        id: chunkMsgId,
+        type,
+        content: delta,
+        streaming: true,
+        provider: tab.provider,
+        timestamp: Date.now(),
+      } as AgentMsg,
+    ];
+  }
+  tabs.set(tabId, { ...tab, messages: updated });
+  notify(tabId);
+  // Stream chunks deliberately skip requestSave — saving partials would
+  // re-write the full message list every throttle window during a long
+  // turn. doSave at turn end (setStreaming(false)) captures the final.
+}
+
+export function enqueueMessage(tabId: string, content: string) {
+  update(tabId, (prev) => ({
+    ...prev,
+    queuedMessages: [...prev.queuedMessages, { id: `q-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, content }],
+  }));
+}
+
+export function dequeueMessage(tabId: string): QueuedMessage | null {
+  const tab = tabs.get(tabId);
+  if (!tab || tab.queuedMessages.length === 0) return null;
+  const next = tab.queuedMessages[0];
+  tabs.set(tabId, { ...tab, queuedMessages: tab.queuedMessages.slice(1) });
+  notify(tabId);
+  return next;
+}
+
+export function cancelQueuedMessage(tabId: string, id: string) {
+  update(tabId, (prev) => ({
+    ...prev,
+    queuedMessages: prev.queuedMessages.filter((q) => q.id !== id),
+  }));
+}
+
+export async function clearMessages(tabId: string) {
+  const tab = tabs.get(tabId);
+  if (!tab) return;
+  flushSave(tabId);
+  update(tabId, (prev) => ({ ...prev, messages: [] }));
+  await clearAgentSession(tab.sessionId).catch((err) => {
+    console.error('[agentTabStore] clearAgentSession failed', err);
+  });
+}
+
+// ── Status actions (dumb setters — backend authoritative) ──
+
+export function setStreaming(tabId: string, value: boolean) {
+  const tab = tabs.get(tabId);
+  if (!tab) return;
+  const wasStreaming = tab.isStreaming;
+  if (wasStreaming === value) return;
+
+  let nextMessages = tab.messages;
+  let mutated = false;
+  // Streaming → idle: clear `streaming` flag on any text/thinking that
+  // never received a finalize message. Content stays whatever the
+  // stream accumulated.
+  if (wasStreaming && !value) {
+    const cleared = tab.messages.map((m) => {
+      if ((m.type === 'text' || m.type === 'thinking') && m.streaming) {
+        mutated = true;
+        return { ...m, streaming: false };
+      }
+      return m;
+    });
+    if (mutated) nextMessages = cleared;
+  }
+  tabs.set(tabId, {
+    ...tab,
+    isStreaming: value,
+    messages: nextMessages,
+    // Auto-dismiss any in-flight picker at turn end — provider's abort
+    // path already resolved its pending Promise, so leaving the UI up
+    // would be a ghost panel.
+    pendingPicker: wasStreaming && !value ? null : tab.pendingPicker,
+  });
+  notify(tabId);
+
+  // Persist on turn end. doSave guards on isStreaming again so a race
+  // where setStreaming(true) lands before the timer fires is safe.
+  if (wasStreaming && !value) requestSave(tabId);
+}
+
+export interface StatusPartial {
+  state?: 'idle' | 'streaming' | string;
+  model?: string;
+  costUsd?: number;
+  numTurns?: number;
+  contextUsage?: StatusSegment;
+  rateLimits?: StatusSegment[];
+}
+
+export function setStatus(tabId: string, partial: StatusPartial) {
+  update(tabId, (prev) => {
+    const next: AgentTabState = { ...prev };
+    if (partial.model) next.actualModel = partial.model;
+    if (partial.costUsd != null) next.costUsd = partial.costUsd;
+    if (partial.numTurns != null) next.numTurns = partial.numTurns;
+    if (partial.contextUsage) next.contextUsage = partial.contextUsage;
+    if (Array.isArray(partial.rateLimits) && partial.rateLimits.length > 0) {
+      next.rateLimits = partial.rateLimits;
+    }
+    return next;
+  });
+  // Streaming flag transition is handled separately via setStreaming —
+  // the IPC binder in PR 3 will call both based on status.state.
+}
+
+export function setPlan(tabId: string, content: string) {
+  update(tabId, (prev) => ({ ...prev, currentPlan: content }));
+}
+
+export function setCapabilities(tabId: string, caps: Capabilities) {
+  update(tabId, (prev) => ({
+    ...prev,
+    capabilities: caps,
+    // Backend-reported actuals overwrite — no fallback to intent.
+    // Provider/backend is responsible for any fallback logic; renderer
+    // just reflects what was reported.
+    actualModel: caps.currentModel ?? prev.actualModel,
+    actualEffort: caps.currentEffort ?? prev.actualEffort,
+    actualPermissionMode: caps.currentPermissionMode ?? prev.actualPermissionMode,
+  }));
+}
+
+// ── Optimistic actual updates (cycle handlers) ──
+
+export function setActualModel(tabId: string, model: string) {
+  update(tabId, (prev) => ({ ...prev, actualModel: model }));
+}
+export function setActualEffort(tabId: string, effort: string) {
+  update(tabId, (prev) => ({ ...prev, actualEffort: effort }));
+}
+export function setActualPermissionMode(tabId: string, mode: string) {
+  update(tabId, (prev) => ({ ...prev, actualPermissionMode: mode }));
+}
+
+// ── Decision actions ──
+
+export function setPendingPermission(tabId: string, perm: PendingPermission | null) {
+  update(tabId, (prev) => ({ ...prev, pendingPermission: perm }));
+}
+
+export function setPendingPicker(tabId: string, picker: PendingPicker | null) {
+  update(tabId, (prev) => ({ ...prev, pendingPicker: picker }));
+}
+
+export function setLocalPicker(tabId: string, lp: LocalPicker | null) {
+  update(tabId, (prev) => ({ ...prev, localPicker: lp }));
+}
+
+// ── Auth / Init actions ──
+
+export function setAuthRequired(tabId: string, auth: { provider: string } | null) {
+  update(tabId, (prev) => ({ ...prev, authRequired: auth }));
+}
+
+export function setAuthBusy(tabId: string, busy: boolean) {
+  update(tabId, (prev) => ({ ...prev, authBusy: busy }));
+}
+
+export function setAuthError(tabId: string, err: string | null) {
+  update(tabId, (prev) => ({ ...prev, authError: err }));
+}
+
+export function setInitStatus(
+  tabId: string,
+  status: 'starting' | 'ready' | 'failed',
+  error: string | null = null,
+) {
+  update(tabId, (prev) => ({ ...prev, initStatus: status, initError: error }));
+}
+
+// ── Selectors ──
+
+export interface Turn { user?: AgentMsg; agent: AgentMsg[] }
+
+/**
+ * Turn grouping selector — pure derivation from messages. Not memoized
+ * here; consumer (MessageList) wraps in useMemo. Logic mirrors the
+ * existing AgentView turns useMemo so behaviour stays identical.
+ */
+export function buildTurns(messages: AgentMsg[]): Turn[] {
+  const result: Turn[] = [];
+  for (const msg of messages) {
+    if (msg.type === 'user') {
+      result.push({ user: msg, agent: [] });
+    } else if (result.length === 0) {
+      result.push({ agent: [msg] });
+    } else {
+      result[result.length - 1].agent.push(msg);
+    }
+  }
+  return result;
+}
+
+// ── Test helpers ──
+
+/** Reset module state. Tests only. */
+export function __resetStoreForTests() {
+  for (const { timer } of pendingSaves.values()) clearTimeout(timer);
+  pendingSaves.clear();
+  tabs.clear();
+  listeners.clear();
+  saveThrottleMs = DEFAULT_THROTTLE_MS;
+  inMemoryMax = DEFAULT_IN_MEMORY_MAX;
+  idbMax = DEFAULT_IDB_MAX;
+}
+
+/** Read internal config. Tests only. */
+export function __getCapsForTests() {
+  return { saveThrottleMs, inMemoryMax, idbMax };
+}
+
+/** Direct read for tests that don't want to set up React. */
+export function __getTabForTests(tabId: string) {
+  return tabs.get(tabId);
+}
+
+/** Direct write for tests that need to seed state without going through
+ *  initTab's async IDB load path. */
+export function __setTabForTests(tabId: string, state: AgentTabState) {
+  tabs.set(tabId, state);
+  notify(tabId);
+}
+
+/** Inspect pending save state. Tests only. */
+export function __getPendingSaveForTests(tabId: string) {
+  return pendingSaves.get(tabId);
+}

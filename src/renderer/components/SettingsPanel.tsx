@@ -255,18 +255,46 @@ export function SettingsPanel() {
               <>
                 <div className="settings-section-title">History</div>
                 <div className="settings-group">
-                  <label className="settings-label">Max Messages</label>
+                  <label className="settings-label">In-Memory Messages</label>
                   <input
                     className="settings-input"
                     type="number"
                     min={50}
                     max={10000}
+                    step={50}
+                    value={draft.agentInMemoryMaxMessages}
+                    onChange={(e) => updateDraft({ agentInMemoryMaxMessages: Number(e.target.value) })}
+                  />
+                </div>
+                <div className="settings-sub-hint">How many messages stay rendered. Higher values use more memory and slow input typing.</div>
+
+                <div className="settings-group">
+                  <label className="settings-label">Stored Messages (IDB)</label>
+                  <input
+                    className="settings-input"
+                    type="number"
+                    min={50}
+                    max={50000}
                     step={100}
                     value={draft.agentHistoryMaxMessages}
                     onChange={(e) => updateDraft({ agentHistoryMaxMessages: Number(e.target.value) })}
                   />
                 </div>
-                <div className="settings-sub-hint">Oldest messages are dropped from local history when this limit is exceeded.</div>
+                <div className="settings-sub-hint">Safety-net cap on disk history. Must be ≥ in-memory; values above ~5000 noticeably slow saves.</div>
+
+                <div className="settings-group">
+                  <label className="settings-label">Save Throttle (ms)</label>
+                  <input
+                    className="settings-input"
+                    type="number"
+                    min={0}
+                    max={60000}
+                    step={500}
+                    value={draft.agentHistorySaveThrottleMs}
+                    onChange={(e) => updateDraft({ agentHistorySaveThrottleMs: Number(e.target.value) })}
+                  />
+                </div>
+                <div className="settings-sub-hint">How often the in-memory state flushes to disk. Lower = less data loss on crash, higher = fewer IDB writes.</div>
 
                 <div className="settings-divider" />
                 <div className="settings-section-title">Display</div>
