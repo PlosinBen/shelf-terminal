@@ -246,7 +246,7 @@ export interface AppSettings {
   /** Max UI messages kept in memory per agent tab. Controls render perf
    *  (and indirectly React reconciliation cost). IDB no longer has a
    *  separate cap — history is unbounded on disk and we load only the
-   *  latest `inMemoryMax` rows on tab open. See agent-history-refactor.md. */
+   *  latest `inMemoryMax` rows on tab open. */
   agentInMemoryMaxMessages: number;
   /** How long (ms) to coalesce dirty writes before flushing to IDB.
    *  Lower = less data lost on crash, higher = fewer IDB transactions. */

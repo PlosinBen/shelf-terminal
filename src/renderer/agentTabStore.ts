@@ -108,8 +108,8 @@ const tabs = new Map<string, AgentTabState>();
 const listeners = new Map<string, Set<Listener>>();
 
 // Settings synced from App.tsx. inMemoryMax used to be clamped against
-// an idbMax sibling; that was removed when IDB went unlimited
-// (see agent-history-refactor.md). in-memory still has a cap for RAM /
+// an idbMax sibling; that was removed when IDB went unlimited via the
+// append-only delta save refactor. in-memory still has a cap for RAM /
 // React reconciliation reasons.
 const DEFAULT_THROTTLE_MS = 5000;
 const DEFAULT_IN_MEMORY_MAX = 500;
@@ -332,8 +332,8 @@ export function initTab(tabId: string, opts: InitTabOpts) {
 
   // Async IDB load — only the latest `inMemoryMax` rows, not the whole
   // session. With IDB now unbounded, pulling everything would blow up
-  // RAM on long histories. Older rows stay in IDB; future Load earlier
-  // UI surfaces them on demand (see agent-history-refactor.md).
+  // RAM on long histories. Older rows stay in IDB; a future Load earlier
+  // UI would surface them on demand.
   //
   // Backend events that fire before this resolves write into `messages`
   // first; load merges loaded-before-current with ID dedupe so the new
