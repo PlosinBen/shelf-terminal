@@ -641,3 +641,30 @@ const proc = spawn('node', [deployedPath], { cwd, env, stdio: [...] });
 **修法**: `agent:init` opts 帶 `intent: savedPrefs`，main `startSession` 轉給 `backend.getCapabilities(cwd, customModels, intent)`，remote.ts 寫進 `get_capabilities` line，copilot.ts 的 `gatherCapabilities` 在 `buildCapabilities()` 之前用 `intent.{model,effort,permissionMode}` seed closure。Claude provider 不報 `current*`，intent 可以忽略。
 
 **判斷原則**: Provider 只要在 caps event 報任何 `current*`，就**必須**讓 init 時的 intent 影響該值。否則 backend 的 hardcoded default 會在每次 reconnect 蓋掉 renderer 的 saved intent。新 provider 加 `currentX` 欄位時記得同步擴 `gatherCapabilities` 的 intent 處理。
+
+## WSL agent-server spawn 必須走 login shell
+
+**現象**: Packaged Windows app 開 WSL project 的 agent view，agent-server 啟動成功（ready signal 收到）但 query 時 Claude SDK 報 `Native CLI binary for linux-x64 not found`。
+
+**原因**: 兩個問題疊加：
+1. `spawn('wsl.exe', ['-d', distro, '--', 'node', path])` 直接跑 `node`，不經過 login shell → `.bashrc` / `.zshrc` 的 `PATH` / env 不會載入
+2. Windows build 只打包 `claude-agent-sdk-win32-x64`，WSL 裡跑時 `resolveClaudeBinary()` 找不到 `linux-x64` binary → SDK 嘗試 PATH fallback 但因 #1 PATH 不完整也找不到
+
+**解法**:
+1. WSL spawn 改 `wsl.exe -d distro -- sh -lc 'exec node <path>'`（login shell，載入 profile）
+2. CI Windows build 額外 `npm install --force --no-save @anthropic-ai/claude-agent-sdk-linux-x64`，打包時包進 `app.asar.unpacked`
+
+**不要做**:
+- 不要把 `claude-agent-sdk-linux-x64` 加進 `package.json` dependencies — `os: linux` 限制會讓 macOS CI fail
+- 不要在 `resolveClaudeBinary()` 加 `which claude` fallback — 正確打包就不需要 fallback
+
+## agent-server handleSend 的 error 必須帶 turnId
+
+**現象**: agent-server query 階段出錯，renderer 的 agent view 空白無回應（沒顯示錯誤訊息）。Log 顯示 `non-lifecycle event missing turnId, dropping: type=error`。
+
+**原因**: `handleSend()` 裡的 early error path（`Missing prompt or cwd`、`getBackend()` throw）和外部 `.catch` block 用 raw `send()` 而不是 turnId-stamped wrapper。`turnAware` wrapper 在 early return 之後才建立，所以 error 沒帶 turnId → turn-dispatcher 無法路由 → 靜默丟掉。
+
+**解法**: `handleSend` 頂部立刻建立 `turnSend = wrapSendForTurn(msg.turnId ?? newTurnId(), send)`，所有 error path 用 `turnSend`。外部 `.catch` block 從 `msg.turnId` 手動帶。
+
+**不要做**:
+- 不要在 turn-dispatcher 加「沒 turnId 就分配給 currentTurn」的 fallback — 那會復活跨 turn 串擾的 bug（DECISIONS #53 的原始問題）

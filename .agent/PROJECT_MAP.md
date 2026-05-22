@@ -46,7 +46,7 @@
 | Intent | File | Description |
 |--------|------|-------------|
 | Session manager + IPC handlers | `index.ts` | `initAgentManager(windowGetter)` 註冊所有 agent IPC、管理 tab→session mapping、permission bridging、`getAgentState()` / `isAgentTab()` / `disposeAllAgents()`、傳遞 `sessionId` 到 remote backend |
-| Remote backend | `remote.ts` | `createRemoteBackend()` 透過 stdin/stdout JSON line protocol 跟 agent-server 通訊；支援 local/SSH/Docker spawn；`deployAgentServer()` 自動 SCP/docker cp bundle 到遠端；`clearContext()` 通知 agent-server 刪除 context 檔。每個 `query()` 生成 `turnId` 註冊到 `turn-dispatcher`，IPC `send` 帶 turnId 給 agent-server，dispatcher 按 turnId 路由 events 回 per-turn AsyncGenerator |
+| Remote backend | `remote.ts` | `createRemoteBackend()` 透過 stdin/stdout JSON line protocol 跟 agent-server 通訊；支援 local/SSH/Docker/WSL spawn；`deployAgentServer()` 自動 SCP/docker cp bundle 到遠端（WSL 走 `toWslPath` 轉換 Windows→`/mnt/` 路徑）；`clearContext()` 通知 agent-server 刪除 context 檔。每個 `query()` 生成 `turnId` 註冊到 `turn-dispatcher`，IPC `send` 帶 turnId 給 agent-server，dispatcher 按 turnId 路由 events 回 per-turn AsyncGenerator |
 | Turn dispatcher | `turn-dispatcher.ts` | `createTurnDispatcher()` 純邏輯 event router，按 `turnId` envelope 路由 wire events 到對應 turn 的 AsyncGenerator；lifecycle (`ready` / requestId-keyed RPC) 走獨立 channel；未知 turnId / 過期 turn 的殘留 event 直接 drop。從 `wrapProcess` 抽出來方便單測 |
 | Type 定義 | `types.ts` | `AgentBackend`（含 `clearContext?`）、`AgentEvent`（含 `AgentStreamDelta.msgId`）、`AgentSessionState` 等 agent 系統型別 |
 | 單元測試 | `remote.test.ts` | Remote backend 介面、lifecycle 測試 |
@@ -142,7 +142,7 @@
 | Build 設定 | `vite.config.ts` | Vite + electron plugin、manualChunks 拆包、node-pty external |
 | 單元測試設定 | `vitest.config.ts` | 獨立 vitest config（不繼承 vite.config.ts，避免載入 electron plugin） |
 | 套件 / 打包設定 | `package.json` | electron-builder config、scripts、dependencies |
-| CI/CD | `.github/workflows/build.yml` | Tag push → 三平台 build → GitHub Release |
+| CI/CD | `.github/workflows/build.yml` | Tag push → 三平台 build → GitHub Release；Windows build 額外 force-install `claude-agent-sdk-linux-x64`（WSL agent-server 需要） |
 
 ### npm scripts
 
