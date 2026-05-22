@@ -116,7 +116,13 @@ async function startSession(
   if (backend.getCapabilities) {
     const settings = loadSettings();
     const customModels = settings.ok ? settings.value.providerModels?.[provider as keyof NonNullable<typeof settings.value.providerModels>] : undefined;
-    backend.getCapabilities(cwd, customModels).then((caps) => {
+    // `intent` originates in AgentView (projectConfig.agentPrefs[provider]),
+    // carried through agent:init's opts → preload spread into AGENT_INIT
+    // payload. Seeds the provider's session-level closures before the first
+    // capabilities event so renderer's status bar reflects saved prefs after
+    // reconnect instead of the provider's hardcoded default ("ask" etc.).
+    const intent = (opts as { intent?: { model?: string; effort?: string; permissionMode?: string } } | undefined)?.intent;
+    backend.getCapabilities(cwd, customModels, intent).then((caps) => {
       send(IPC.AGENT_CAPABILITIES, tabId, caps);
       send(IPC.AGENT_INIT_STATUS, tabId, { state: 'ready' });
     }).catch((err) => {

@@ -38,6 +38,12 @@ interface IncomingMessage {
   key?: string;
   customModels?: ProviderModel[];
   scope?: 'once' | 'session';
+  /**
+   * For `type: 'get_capabilities'`: renderer's saved prefs forwarded so
+   * session-stateful providers (Copilot) can seed currentModel/currentEffort/
+   * currentPermissionMode closures before reporting `current*` back.
+   */
+  intent?: { model?: string; effort?: string; permissionMode?: string };
 }
 
 function send(msg: OutgoingMessage) {
@@ -225,7 +231,7 @@ rl.on('line', (line) => {
       (async () => {
         try {
           const backend = getBackend(provider);
-          const caps = await backend.gatherCapabilities?.(msg.cwd ?? process.cwd(), msg.sessionId, msg.customModels);
+          const caps = await backend.gatherCapabilities?.(msg.cwd ?? process.cwd(), msg.sessionId, msg.customModels, msg.intent);
           send({ type: 'capabilities', requestId: msg.requestId ?? '', ...(caps ?? {}) });
         } catch (err: any) {
           send({ type: 'capabilities', requestId: msg.requestId ?? '', error: err?.message ?? String(err) });

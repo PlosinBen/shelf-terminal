@@ -1169,11 +1169,25 @@ export function createCopilotBackend(): ServerBackend {
   }
 
   return {
-    async gatherCapabilities(_cwd: string, sessionId?: string, _customModels?: ProviderModel[]): Promise<ProviderCapabilities> {
+    async gatherCapabilities(
+      _cwd: string,
+      sessionId?: string,
+      _customModels?: ProviderModel[],
+      intent?: { model?: string; effort?: string; permissionMode?: string },
+    ): Promise<ProviderCapabilities> {
       // Copilot SDK validates model names against GitHub's model API; user-provided
       // custom IDs would be rejected at runtime, so we ignore customModels here.
       if (sessionId) currentSessionId = sessionId;
       await listModelsCached();
+      // Seed closures from renderer's saved intent BEFORE buildCapabilities so
+      // the first `currentPermissionMode` (and model/effort) the renderer sees
+      // after a reconnect matches projectConfig.agentPrefs instead of the
+      // hardcoded provider defaults. No `session.setX` calls — state.session
+      // doesn't exist yet at this point; the closure values flow into
+      // createSession config on the next query() turn.
+      if (intent?.model) currentModel = intent.model;
+      if (intent?.effort) currentEffort = intent.effort;
+      if (intent?.permissionMode) currentPermissionMode = intent.permissionMode;
       if (!currentEffort) currentEffort = modelMeta(currentModel)?.defaultReasoningEffort;
       return buildCapabilities();
     },

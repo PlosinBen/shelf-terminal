@@ -88,7 +88,12 @@ export function AgentView({ tabId, cwd, connection, provider, projectId, visible
   // AgentView (they come from the tab's identity).
   useEffect(() => {
     initTabStore(tabId, { sessionId, provider, intent: savedPrefs });
-    emitAgent('agent:init', { tabId, cwd, connection, provider, sessionId });
+    // `opts.intent` flows main-side through AGENT_INIT → getCapabilities so
+    // session-stateful providers (Copilot) can seed their closures BEFORE
+    // emitting the first capabilities event. Without this, copilot's
+    // `currentPermissionMode` reports its hardcoded 'default' on every
+    // reconnect, overwriting the warm-started actual* in agentTabStore.
+    emitAgent('agent:init', { tabId, cwd, connection, provider, sessionId, opts: { intent: savedPrefs } });
     return () => { removeTabStore(tabId); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tabId]);
@@ -127,8 +132,8 @@ export function AgentView({ tabId, cwd, connection, provider, projectId, visible
     setInitStatusStore(tabId, 'starting');
     emitAgent('agent:destroy', { tabId });
     setCapabilitiesStore(tabId, null);
-    emitAgent('agent:init', { tabId, cwd, connection, provider, sessionId });
-  }, [tabId, cwd, connection, provider, sessionId]);
+    emitAgent('agent:init', { tabId, cwd, connection, provider, sessionId, opts: { intent: savedPrefs } });
+  }, [tabId, cwd, connection, provider, sessionId, savedPrefs]);
 
   if (authRequired) {
     return (

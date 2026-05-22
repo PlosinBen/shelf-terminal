@@ -146,7 +146,11 @@ export function createRemoteBackend(
       remoteProc.sendLine({ type: 'resolve_picker', pickerId, payload });
     },
 
-    async getCapabilities(cwd: string, customModels?: ProviderModel[]) {
+    async getCapabilities(
+      cwd: string,
+      customModels?: ProviderModel[],
+      intent?: { model?: string; effort?: string; permissionMode?: string },
+    ) {
       const proc = await ensureProcReady(cwd);
       // 失敗時 throw 而非回空 capabilities — 讓 startSession 的 .catch 能區分
       // 「真的沒能力」跟「啟動失敗」，並對應送 init_status=failed 給 renderer。
@@ -169,7 +173,9 @@ export function createRemoteBackend(
             currentPermissionMode: payload.currentPermissionMode,
           });
         });
-        proc.sendLine({ type: 'get_capabilities', provider, cwd, sessionId, customModels, requestId });
+        // `intent` lets agent-server's provider seed session-level closures
+        // (e.g. Copilot's currentPermissionMode) before reporting caps back.
+        proc.sendLine({ type: 'get_capabilities', provider, cwd, sessionId, customModels, intent, requestId });
       });
     },
   };

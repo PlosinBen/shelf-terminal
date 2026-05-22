@@ -247,7 +247,21 @@ export interface ServerBackend {
   query(input: QueryInput, send: SendFn): Promise<void>;
   stop(): Promise<void>;
   dispose(): void;
-  gatherCapabilities?(cwd: string, sessionId?: string, customModels?: ProviderModel[]): Promise<ProviderCapabilities>;
+  /**
+   * `intent` carries the renderer's saved prefs (projectConfig.agentPrefs) so
+   * providers that track session-level state (Copilot's currentPermissionMode,
+   * currentModel, currentEffort closures) can seed them BEFORE building caps —
+   * otherwise the first `currentPermissionMode` reported after a reconnect
+   * always reflects the provider's hardcoded default instead of the user's
+   * saved choice. Providers whose caps don't include `current*` (Claude) can
+   * ignore intent; per-call pref hand-off via QueryInput is still authoritative.
+   */
+  gatherCapabilities?(
+    cwd: string,
+    sessionId?: string,
+    customModels?: ProviderModel[],
+    intent?: { model?: string; effort?: string; permissionMode?: string },
+  ): Promise<ProviderCapabilities>;
   resolvePermission?(toolUseId: string, allow: boolean, message?: string, scope?: 'once' | 'session'): void;
   /**
    * Resolve a pending picker_request by id. `payload` carries index-aligned

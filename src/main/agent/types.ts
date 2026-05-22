@@ -125,7 +125,18 @@ export interface AgentBackend {
   stop(): Promise<void>;
   dispose(): void;
   checkAuth(): Promise<boolean>;
-  getCapabilities?(cwd: string, customModels?: ProviderModel[]): Promise<ProviderCapabilities>;
+  /**
+   * `intent` carries renderer's saved prefs (projectConfig.agentPrefs[provider]).
+   * Forwarded to agent-server so providers with session-level state (Copilot)
+   * can seed currentModel / currentEffort / currentPermissionMode BEFORE
+   * reporting `current*` back, so the status bar after reconnect reflects
+   * the user's saved choice instead of the provider's hardcoded default.
+   */
+  getCapabilities?(
+    cwd: string,
+    customModels?: ProviderModel[],
+    intent?: { model?: string; effort?: string; permissionMode?: string },
+  ): Promise<ProviderCapabilities>;
   storeCredential?(key: string): Promise<void>;
   clearCredential?(): Promise<void>;
   clearContext?(): void;

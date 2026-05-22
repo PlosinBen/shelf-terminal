@@ -392,7 +392,14 @@ export function createClaudeBackend(): ServerBackend {
   }
 
   return {
-    async gatherCapabilities(cwd: string, _sessionId?: string, customModels?: ProviderModel[]): Promise<ProviderCapabilities> {
+    async gatherCapabilities(
+      cwd: string,
+      _sessionId?: string,
+      customModels?: ProviderModel[],
+      _intent?: { model?: string; effort?: string; permissionMode?: string },
+    ): Promise<ProviderCapabilities> {
+      // intent unused — Claude has no session-level state to seed; per-call
+      // QueryInput.{model,effort,permissionMode} fully drives behavior.
       await ensureInit(cwd);
       return {
         models: mergeClaudeModels(cache.models ?? [], customModels),

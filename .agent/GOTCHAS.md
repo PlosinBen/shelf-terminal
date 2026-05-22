@@ -631,3 +631,13 @@ const proc = spawn('node', [deployedPath], { cwd, env, stdio: [...] });
 - 任何「下次跟 backend 互動要送什麼」→ 讀 intent（projectConfig.agentPrefs）
 - 任何「現況顯示給使用者看」→ 讀 actual（store.actualModel / actualEffort / actualPermissionMode）
 - 兩條線本來就應該獨立 — actual 不該回灌進 intent（reconnect bug 也是同個 root cause）
+
+## Provider session-stateful caps 需要 init 時帶 intent
+
+**現象**: Copilot tab 在 status bar 把 permission mode 從 ask 切到 bypass，disconnect 後 reconnect 又變回 ask。projectConfig.agentPrefs 裡值還在。
+
+**原因**: `AGENT_INIT` → `backend.getCapabilities()` 沒帶 intent，agent-server 的 copilot provider 用 closure `currentPermissionMode = 'default'` 回報，renderer 的 `actualPermissionMode` 被 caps event 覆蓋（`agentTabStore.ts:634` "Backend-reported actuals overwrite — no fallback to intent"）。intent 原本只在 `AGENT_SEND` 才推給 backend，所以實際生效要等使用者送下一則 prompt。
+
+**修法**: `agent:init` opts 帶 `intent: savedPrefs`，main `startSession` 轉給 `backend.getCapabilities(cwd, customModels, intent)`，remote.ts 寫進 `get_capabilities` line，copilot.ts 的 `gatherCapabilities` 在 `buildCapabilities()` 之前用 `intent.{model,effort,permissionMode}` seed closure。Claude provider 不報 `current*`，intent 可以忽略。
+
+**判斷原則**: Provider 只要在 caps event 報任何 `current*`，就**必須**讓 init 時的 intent 影響該值。否則 backend 的 hardcoded default 會在每次 reconnect 蓋掉 renderer 的 saved intent。新 provider 加 `currentX` 欄位時記得同步擴 `gatherCapabilities` 的 intent 處理。
