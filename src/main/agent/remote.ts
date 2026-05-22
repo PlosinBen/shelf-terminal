@@ -289,7 +289,7 @@ async function spawnAgentServer(
   }
 
   if (connection.type === 'wsl') {
-    const proc = spawn('wsl.exe', ['-d', connection.distro, '--', 'node', deployedPath], {
+    const proc = spawn('wsl.exe', ['-d', connection.distro, '--', 'sh', '-lc', `exec node ${deployedPath}`], {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     return wrapProcess(proc);
