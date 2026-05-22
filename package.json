@@ -1,6 +1,6 @@
 {
   "name": "shelf-terminal",
-  "version": "2.0.4",
+  "version": "2.0.5",
   "description": "Cross-platform, project-based terminal manager",
   "main": "dist/main/index.js",
   "scripts": {
@@ -96,7 +96,6 @@
   "dependencies": {
     "@ai-sdk/openai": "^3.0.58",
     "@anthropic-ai/claude-agent-sdk": "^0.2.126",
-    "@anthropic-ai/claude-agent-sdk-linux-x64": "^0.2.126",
     "@github/copilot-sdk": "^1.0.0-beta.1",
     "@xterm/addon-fit": "0.11.0",
     "@xterm/addon-search": "^0.16.0",

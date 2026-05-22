@@ -45,6 +45,10 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Install cross-platform Claude SDK binary (WSL support)
+        if: matrix.platform == 'win'
+        run: npm install --no-save --force @anthropic-ai/claude-agent-sdk-linux-x64@$(node -p "require('./node_modules/@anthropic-ai/claude-agent-sdk-win32-x64/package.json').version")
+
       - name: Build and publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
