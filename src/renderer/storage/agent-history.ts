@@ -2,18 +2,18 @@ import { openDB, type IDBPDatabase } from 'idb';
 import type { AgentMsg } from '../components/AgentMessage';
 
 const DB_NAME = 'shelf-agent-history';
-// v1: legacy schema (keyPath 'id', index 'by-project-time'). Long gone but
-// users who ran early shelf builds still have v1 DBs in their browser
-// profile; opening at v1 finds no 'by-session' index and throws NotFoundError.
-// v2: keyPath 'dbId' autoIncrement, index 'by-session'. Overwrite-all save.
-// v3: same keyPath/store, adds 'by-session-time' composite index for the
-// paginated `loadLatest` cursor. Save layer switches to append-only delta
-// (see agentTabStore.PendingSave + saveAgentMessagesDelta below) — IDB no
-// longer trims itself, so there's no `maxMessages` knob anymore. Writes
-// only happen at turn end (agentTabStore's doSave isStreaming guard), so
-// each msg.id appears in the store exactly once and we never need upsert
-// semantics. Hence keyPath stays on the synthetic dbId.
-const DB_VERSION = 3;
+// v1–v3: legacy schemas storing the old AgentMessage discriminated union
+// (tool_use / file_edit / thinking / intent / slash_response / plan). The
+// type system was refactored to renderer primitives (reply / note / system /
+// error / fold_text / fold_code / fold_markdown / fold_diff / user — see
+// .agent/features/agent-message-type-refactor.md). User=developer, so we
+// don't migrate per-row; v4 just drops the old store and starts fresh.
+// v4: keyPath 'dbId' autoIncrement, indexes 'by-session' and the composite
+// 'by-session-time' that lets `loadLatest` reverse-iterate the tail of a
+// session in O(limit). Save layer is append-only delta — writes only happen
+// at turn end (agentTabStore's doSave isStreaming guard), so each msg.id
+// appears in the store exactly once and we never need upsert semantics.
+const DB_VERSION = 4;
 const STORE_NAME = 'messages';
 
 let dbPromise: Promise<IDBPDatabase> | null = null;
@@ -21,26 +21,19 @@ let dbPromise: Promise<IDBPDatabase> | null = null;
 function getDB(): Promise<IDBPDatabase> {
   if (!dbPromise) {
     dbPromise = openDB(DB_NAME, DB_VERSION, {
-      upgrade(db, oldVersion, _newVersion, tx) {
-        if (oldVersion < 2 && db.objectStoreNames.contains(STORE_NAME)) {
+      upgrade(db) {
+        // Clean break: drop any pre-v4 store and recreate. We don't migrate
+        // legacy rows — the old union shape is gone, and reviving them as
+        // new types is more code than the developer-user audience needs.
+        if (db.objectStoreNames.contains(STORE_NAME)) {
           db.deleteObjectStore(STORE_NAME);
         }
-        let store;
-        if (!db.objectStoreNames.contains(STORE_NAME)) {
-          store = db.createObjectStore(STORE_NAME, {
-            keyPath: 'dbId',
-            autoIncrement: true,
-          });
-          store.createIndex('by-session', 'sessionId');
-        } else {
-          store = tx.objectStore(STORE_NAME);
-        }
-        if (oldVersion < 3 && !store.indexNames.contains('by-session-time')) {
-          // Composite (sessionId, timestamp) index lets `loadLatest` cursor
-          // reverse-iterate the tail of a session in O(limit) instead of
-          // pulling the whole session via getAllFromIndex.
-          store.createIndex('by-session-time', ['sessionId', 'timestamp']);
-        }
+        const store = db.createObjectStore(STORE_NAME, {
+          keyPath: 'dbId',
+          autoIncrement: true,
+        });
+        store.createIndex('by-session', 'sessionId');
+        store.createIndex('by-session-time', ['sessionId', 'timestamp']);
       },
     });
   }
@@ -57,10 +50,6 @@ type StoredMsg = AgentMsg & { dbId?: number; sessionId: string };
  * have been persisted without body/errorMessage. On reload that card would
  * render forever as "running"; patch a synthetic errorMessage so the user
  * sees what happened.
- *
- * NOTE: full v3→v4 IDB migration + orphan-revive rewrite is phase 6.
- * This function preserves behaviour for new-schema rows; legacy rows are
- * handled by the migration in phase 6.
  */
 function reviveOrphanPending(msg: AgentMsg): AgentMsg {
   if ((msg.type === 'fold_text' || msg.type === 'fold_code'
@@ -69,16 +58,6 @@ function reviveOrphanPending(msg: AgentMsg): AgentMsg {
     return { ...msg, errorMessage: 'Session ended before completion' } as AgentMsg;
   }
   return msg;
-}
-
-/**
- * Placeholder for legacy migration. The actual v3→v4 IDB upgrade + per-row
- * shape mapping lives in phase 6. For now this is the identity function so
- * the file compiles under the new union; phase 6 will replace this with the
- * real conversion (old tool_use/file_edit/slash_response → fold_*).
- */
-function migrateLegacyToolUseInput(msg: any): AgentMsg {
-  return msg as AgentMsg;
 }
 
 /**
@@ -115,7 +94,7 @@ export async function loadAgentMessagesLatest(
   await tx.done;
   rows.reverse();
   return rows.map(({ dbId: _, sessionId: __, ...rest }) => {
-    return reviveOrphanPending(migrateLegacyToolUseInput(rest));
+    return reviveOrphanPending(rest as AgentMsg);
   });
 }
 
