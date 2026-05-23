@@ -878,3 +878,51 @@ InputZone ──emit('agent:send', ...)──▶ EventBus
 - `.agent/features/agent-view-perf.md` — perf 問題的根因記錄
 - Decision #1 — Event bus + 副作用集中 App.tsx
 - Decision #50 — Per-project storage
+
+
+## 60. Agent Message Type 渲染原語化（9-variant union + Plan side-channel）
+
+**決策**: `AgentMessage` discriminated union 從「provider 語意命名」（thinking / tool_use / file_edit / intent / slash_response / plan / text / system / error / user）重構成「**渲染原語命名**」9 個 variant，plan 從 message channel 抽出成獨立 AgentEvent。
+
+新 union：
+- 純 inline：`reply` / `note` / `system` / `error` / `user`
+- 可收合卡片（共用 `FoldBase` interface）：`fold_text` / `fold_code` / `fold_markdown` / `fold_diff`
+- **`plan` 不在 union 內** — 走獨立 `AgentEvent::plan` + `AGENT_PLAN` IPC channel → 直接寫 `agentTabStore.currentPlan`，永遠不進 timeline
+
+**原因**:
+- 舊 union type 名混雜兩層概念：渲染原語（text/error/system）與 provider 語意（thinking/tool_use/file_edit/intent/slash_response）。Renderer 不該知道 provider 語意 — 從渲染視角，「可收合卡片」是同個 UI primitive，差別只在 body format（純文字 / code / markdown / diff）
+- 新增類似 entity 要新 type：未來加 MCP rich output、custom slash 等都要 variant + builder case + renderer case + CSS class
+- 語意洩漏到 settings：舊 `AgentDisplayKey` 是 `thinking|tool_use|file_edit|intent`，使用者要記「Tool Use」對應到哪些工具；新 key 是 4 個 `fold_*`、跟 body format 1:1
+- `slash_response` 跟 `tool_use` 結構同形但分兩個 type 是歷史包袱；`file_edit` 成功/失敗用不同 body shape 本來就該共用 fold 殼
+
+**Key Q-locked 決策**:
+- **`note` marker（▸）由 renderer 渲染** — provider 只給純內容，視覺契約跟 `error` 紅色 / `reply` markdown 同層級
+- **`subtitle` 截斷由 CSS 處理** — provider 給完整字串、renderer CSS truncate + `title={subtitle}` tooltip 給 hover 看原文，不在 provider 截斷
+- **`errorMessage` 兩層分工**：
+  - `fold_*` 卡片的 `errorMessage`：tool/action/slash 業務失敗（Bash exit 1、Edit old_string not found、/compact 失敗），紅色 banner inline 在卡片內
+  - `AgentEvent::error` (無 msgId)：transport/framework 失敗（連線斷、agent-server 沒起來、JSON parse fail），main 端 `dispatchEvent` mint msgId 轉成 renderer `error` message
+  - `OutgoingMessage msgType='error'`：provider 業務層錯誤（已有 turn 上下文）
+- **`fold_code` vs `fold_markdown` 區分**：markdown 是否解析。`fold_code` 用 `<pre>` 不解析（shell stdout、raw output 含 `*` `#` 不會誤判）；`fold_markdown` 解析 markdown（slash 結果、MCP rich text、想顯示 code 包 ```lang fence）— **不另開 `fold_json`**
+- **`FoldBase` interface 共享** label / subtitle / errorMessage，避免四個 fold 重複定義
+- **`errorMessage` 強制 expanded** override 任何 display setting — 「失敗一定要看見」沿用既有原則
+- **不做 hidden** — `collapsed` 留 header 在 timeline 事後 trace；hidden 違反「不在意但回頭要找得到」原則
+- **Plan 抽出獨立 event channel**：plan 是 state update（替換語意，當前 plan = X），不該擠進 timeline；error 不像 plan 抽出是因為它兩層都該進 timeline（差別只在來源層級）
+- **Streaming flag 留在 `WithMsgId` 最外層** — 是 lifecycle metadata 跟 msgId 同類，不是 content 屬性。實際只有 `reply` / `fold_text` 會用，其他 type 不設
+
+**不做 migration**:
+- User = developer，IDB 歷史可棄
+- Settings 舊 key (`thinking` / `tool_use` / `file_edit` / `intent`) 直接拿掉、不轉換
+- IndexedDB version bump v3 → v4，upgrade handler drop old store + 重建
+
+**不要改**:
+- 不要在 renderer 加任何「if (toolName === ...) special case」分支 — 渲染決策走 type，type 決策已在 provider
+- 不要把 plan 放回 `AgentMessage` union — plan 屬性是「替換式 state update」、不是 timeline append
+- 不要把 `fold_*` 收回成單一 `fold` type + `bodyFormat: 'text'|'code'|'markdown'|'diff'` discriminator — TS narrowing 變兩層，format-specific 欄位擴充會污染其他 fold 類
+- 不要在 renderer 解析 label / content 語意（例如「label === 'Thinking' 就顯示閃爍 caret」）— 動態 affordance 純靠 `streaming` flag + body cursor
+- 不要為 errorMessage 也加獨立 setting key — 永遠強制顯示，不暴露關閉選項
+
+**Related**:
+- `.agent/features/agent-message-type-refactor.md` — 完整重構規劃與 phases
+- Decision #52 — `tool_use` 字串對哲學（被本決策進一步推進，tool_use type 被拆成 fold_code / fold_diff）
+- Decision #54 — Slash 內部 dispatch（slash_response type 廢除、改 emit fold_markdown）
+- Decision #46 — Plan panel（從 message channel 攔截改成獨立 event channel）

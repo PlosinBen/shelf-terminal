@@ -418,12 +418,14 @@ CLI 把上游 API 的 `percent_remaining`（自然 cap 在 0-100）反推回 `us
 
 **原因**: Copilot CLI 把所有檔案異動（Update / Add / Delete）統一走 `apply_patch` tool，args 是 unified diff 格式的字串。跟其他 tool 用 JSON object args（`view`/`bash`/`report_intent` 等）不一致，type def 沒寫清楚。
 
-**解法**: `agent-server/providers/copilot.ts` 的 `parseApplyPatch()` 把 patch 解析成 `ApplyPatchFileSpec[]` — 每個 `*** Update File:` / `*** Add File:` section 各自一個 entry，同檔 multi-hunk（多個 `@@` block）也展成多個 entry（同 filePath 重複，每個 hunk 自己一張 file_edit 卡）。Delete 操作目前沒對應 canonical type 所以整 patch return null → fallback 成 generic `tool_use`（顯示 raw patch string）。Patch-level 失敗時所有 sub-card ✗ + 額外發一條 `msgType: 'error'` 在 timeline 顯示具體原因。
+**解法**: `agent-server/providers/copilot.ts` 的 `parseApplyPatch()` 把 patch 解析成 `ApplyPatchFileSpec[]` — 每個 `*** Update File:` / `*** Add File:` section 各自一個 entry，同檔 multi-hunk（多個 `@@` block）也展成多個 entry（同 filePath 重複，每個 hunk 自己一張 `fold_diff` 卡 — 重構後 type 名，舊版叫 `file_edit`）。Delete 操作目前沒對應 fold variant 所以整 patch fallback → 一張 `fold_code` 卡顯示 raw patch string（舊版 fallback 成 generic `tool_use`）。Patch-level 失敗時所有 sub-card 帶 `errorMessage` + 額外發一條 `error` msgType 在 timeline 顯示具體原因。
 
 **不要做**:
 - 不要假設 `apply_patch` args 是 object — 永遠先 `typeof args === 'string'` 檢查
-- 不要把 raw patch string 當 toolInput 餵渲染端 — `parseApplyPatch` return null 時 wrap 成 `{ patch: <raw> }` object，避免 renderer 對 toolInput 做 `Object.values(...)` 之類操作 crash
-- 不要把 Delete 從 fallback 路徑拉出來「假裝是 file_edit」— 需要時應該擴 canonical type（譬如 `file_edit` 加 `deleted?: boolean` 或新增 `file_delete` variant），不是在 parser 偷塞 sentinel
+- 不要把 raw patch string 直接餵渲染端的 `subtitle` — `parseApplyPatch` return null 時包進 `fold_code` body，避免 header subtitle 變一坨 unified-diff
+- 不要把 Delete 從 fallback 路徑拉出來「假裝是 fold_diff」— 需要時應該擴 fold union（譬如 `fold_diff` 加 `deleted?: boolean` 或新增 fold variant），不是在 parser 偷塞 sentinel
+
+**Refactor note (DECISIONS #60)**: 渲染原語化重構後，canonical type 從 `file_edit` / `tool_use` 改為 `fold_diff` / `fold_code`；parseApplyPatch 邏輯本身（hunk 拆解、Delete fallback）不變。
 
 ## Copilot session 必須傳 `workingDirectory`，否則 bash tool `posix_spawnp failed`
 
@@ -470,6 +472,8 @@ if (currentCwd) config.workingDirectory = currentCwd;
 **不要做**:
 - 不要假設 SDK 的 toolName 永遠穩定 — Claude code SDK 自己會 alias / rename，需要時補 case
 - 不要為了「以後新 SDK 名字」加複雜 prefix-match 邏輯 — 出現時加 case，don't over-engineer
+
+**Refactor note (DECISIONS #60)**: 渲染原語化重構後，`formatClaudeToolInput` 的輸出餵給 `fold_code.subtitle` / `fold_diff.subtitle`，不再叫 `tool_use.input`；switch case alias 邏輯本身不變。
 
 ## Copilot CLI 不能放 `app.asar.unpacked`，會踩它自己的 path-replace bug
 
