@@ -128,10 +128,9 @@ export function MessageList({ tabId, cwd, visible, onRetryInit }: Props) {
     });
   }, [visible]);
 
-  const thinkingDisplay = settings.agentDisplay?.thinking ?? 'collapsed';
   const hasVisibleStreaming = messages.some((m) => {
-    if (m.type === 'text' && m.streaming) return true;
-    if (m.type === 'thinking' && m.streaming && thinkingDisplay !== 'hidden') return true;
+    if (m.type === 'reply' && m.streaming) return true;
+    if (m.type === 'fold_text' && m.streaming) return true;
     return false;
   });
   // Spinner shows during the gap between turn-start and first visible

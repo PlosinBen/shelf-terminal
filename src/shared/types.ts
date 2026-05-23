@@ -16,78 +16,78 @@ export interface AgentPrefs {
 }
 
 /**
- * Canonical agent message types — single source of truth shared across
- * agent-server (provider translation), main (IPC bridge), and renderer (UI).
- * Discriminated union: each variant carries exactly the fields it needs.
- *
- * Wire ↔ renderer contract:
- * - `tool_use` and `file_edit` carry a `toolUseId`; renderer upserts on this
- *   id so a `tool.execution_complete` event arriving as a second `tool_use`
- *   message replaces the original (now with `result` populated).
- * - `result?` absent ⇒ pending; present ⇒ completed (success or error).
- * - `plan` is consumed by a sticky panel before the message stream — never
- *   reaches the per-message render switch.
- *
- * See `.agent/features/AGENT_VIEW_MSG_TYPE.md` for design rationale.
+ * A file attachment on a user message. `path` is the canonical / absolute
+ * path; `displayPath` is the basename or short-form for chip rendering.
  */
+export interface AgentFile {
+  path: string;
+  displayPath: string;
+}
+
 /**
  * Universal upsert key for the renderer's message store. Provider mints it
  * (see `agent-server/providers/*` for `mintMsgId()`). Stream chunks and
  * their finalize message share one msgId so the renderer accumulates them
- * into a single timeline entry. For tool_use / file_edit, `msgId ===
- * toolUseId` — they're the same identity, both fields preserved for
- * clarity (toolUseId stays named because permission_request pairs by it).
+ * into a single timeline entry.
  *
  * `streaming?` flag indicates an entry is still receiving delta chunks
- * (only set on text/thinking — other variants never stream). UI uses it
- * to render the blinking cursor and to suppress promotion to "completed"
- * rendering until a finalize message lands or the turn ends.
+ * (only set on `reply` / `fold_text` — other variants never stream). UI
+ * uses it to render the blinking cursor at the end of body content and
+ * to suppress promotion to "completed" rendering until a finalize lands.
  */
 type WithMsgId = { msgId: string; streaming?: boolean };
 
+/**
+ * Shared header shape for all `fold_*` variants. Provider supplies the full
+ * subtitle string (no upstream truncation); renderer handles CSS-level
+ * ellipsis + `title={subtitle}` tooltip on hover.
+ *
+ * `errorMessage`: when present, the card is treated as failed — renderer
+ * shows a red banner and force-expands regardless of the user's display
+ * setting. `body` may be undefined (pure failure) or present (failed with
+ * partial output — e.g. Bash exit 1 with stderr text).
+ */
+export interface FoldBase {
+  label: string;
+  subtitle?: string;
+  errorMessage?: string;
+}
+
+/**
+ * Canonical agent message types — single source of truth shared across
+ * agent-server (provider translation), main (IPC bridge), and renderer (UI).
+ * Discriminated union: each variant carries exactly the fields it needs.
+ *
+ * Naming is purely rendering-oriented (no provider semantics leak in):
+ *   - `reply`: assistant's primary markdown reply (streams).
+ *   - `note`: one-line dim italic inline note (Copilot report_intent etc).
+ *     Renderer renders the leading `▸` marker — provider sends pure content.
+ *   - `system`: framework / SDK-level inline notification.
+ *   - `error`: inline red error (provider-business layer errors).
+ *   - `fold_text`: collapsible block, body is plain wrapped text (reasoning,
+ *     prose output). Streams. body.tone='muted' renders dim.
+ *   - `fold_code`: collapsible block, monospace `<pre>` body (shell stdout,
+ *     file contents). Markdown intentionally NOT parsed.
+ *   - `fold_markdown`: collapsible block, body is rendered markdown
+ *     (slash command output, MCP rich text, anything wanting ```fence```).
+ *   - `fold_diff`: collapsible block, side-by-side diff body.
+ *   - `user`: user-typed message (NEVER emitted by providers — renderer-only).
+ *
+ * `plan` is NOT in this union — it's transported via its own AgentEvent /
+ * IPC channel and lands in `agentTabStore.currentPlan`, not the timeline.
+ *
+ * See `.agent/features/agent-message-type-refactor.md` for design rationale.
+ */
 export type AgentMessage = WithMsgId & (
-  | { type: 'text'; content: string }
-  | { type: 'thinking'; content: string }
-  | { type: 'intent'; content: string }
-  | { type: 'system'; content: string }
-  | { type: 'error'; content: string }
-  | { type: 'plan'; content: string }
-  | {
-      type: 'tool_use';
-      toolUseId: string;  // === msgId
-      toolName: string;
-      // Provider-formatted, human-readable input string. Renderer treats it
-      // as opaque text — no toolName-sniffing, no JSON parsing. Truncation
-      // for header display is a renderer-side CSS concern.
-      input: string;
-      result?: { content: string; isError?: boolean };
-    }
-  | {
-      type: 'file_edit';
-      toolUseId: string;  // === msgId
-      filePath: string;
-      diff?: { oldString: string; newString: string };
-      content?: string;
-      result?: { success: boolean; error?: string };
-    }
-  | {
-      /**
-       * Provider-emitted response to a slash command. Renderer is opaque to
-       * `slashCmd` — only `status` drives styling (pending indicator / success
-       * / error). `content` is provider-preformatted text, renderer just shows
-       * it. Complex output (context tables, progress bars, etc.) belongs in
-       * dedicated message types — slash_response stays a narrow status carrier.
-       *
-       * Upsert by msgId: provider emits `pending` first, then `success`/`error`
-       * with the same msgId. Persistence revives orphan pending (no terminal
-       * status landed before close) as a synthetic `error` so reload doesn't
-       * show a fake-pending entry.
-       */
-      type: 'slash_response';
-      slashCmd: string;
-      status: 'pending' | 'success' | 'error';
-      content: string;
-    }
+  | { type: 'reply';   content: string }
+  | { type: 'note';    content: string }
+  | { type: 'system';  content: string }
+  | { type: 'error';   content: string }
+  | (FoldBase & { type: 'fold_text';     body?: { content: string; tone?: 'muted' } })
+  | (FoldBase & { type: 'fold_code';     body?: { content: string } })
+  | (FoldBase & { type: 'fold_markdown'; body?: { content: string } })
+  | (FoldBase & { type: 'fold_diff';     body?: { diff: { oldString: string; newString: string } } })
+  | { type: 'user';    content: string; images?: string[]; files?: AgentFile[] }
 );
 
 export type AgentMessageType = AgentMessage['type'];
@@ -103,31 +103,29 @@ export type AgentInitStatus =
   | { state: 'ready' }
   | { state: 'failed'; reason: string };
 
-export type AgentDisplayMode = 'collapsed' | 'expanded' | 'hidden';
+export type AgentDisplayMode = 'collapsed' | 'expanded';
 
 /**
- * Canonical settings keys for per-message-type display preferences.
- * Aligns with `AgentMessage` union — provider-specific toolName (Bash / bash /
- * view / Read / …) no longer leaks into settings. Adding a new SDK tool only
- * touches provider formatters; settings are stable.
- *
- * Notes:
- * - `tool_use` covers all non-file-edit tools (Read/Grep/Glob/Bash/view/task/...)
- * - `file_edit` covers Edit/Write/apply_patch (translated to `file_edit`
- *   canonical type by providers)
- * - `intent` is Copilot's `report_intent` predictive line; expanded/collapsed
- *   are visually identical (it's always a one-liner) — only `hidden` is
- *   meaningful, but we keep the 3-way select for UI consistency
- * - `text` / `system` / `error` are intentionally NOT here — hiding them would
- *   break the conversation; they always render
+ * Per-fold-type display preference key. 1:1 mapping with the `fold_*` variants
+ * of `AgentMessage` — no separate mapping layer. `reply` / `note` / `system` /
+ * `error` / `user` always render (no setting); failed fold cards
+ * (`errorMessage` set) always force-expand regardless of these settings.
  */
-export type AgentDisplayKey = 'thinking' | 'tool_use' | 'file_edit' | 'intent';
+export type AgentDisplayKey =
+  | 'fold_text'      // default collapsed (reasoning, prose)
+  | 'fold_code'      // default collapsed (raw output, monospace, no markdown)
+  | 'fold_markdown'  // default expanded (markdown structure)
+  | 'fold_diff';     // default expanded (file diff)
 
 export const AGENT_DISPLAY_KEYS: { key: AgentDisplayKey; label: string; hint?: string }[] = [
-  { key: 'thinking',  label: 'Thinking',  hint: 'Reasoning blocks (Claude thinking / Copilot reasoning)' },
-  { key: 'tool_use',  label: 'Tool Use',  hint: 'Read / Grep / Glob / Bash / view / Task / WebFetch / etc. Errors always show regardless of this setting.' },
-  { key: 'file_edit', label: 'File Edit', hint: 'Edit / Write / apply_patch. Failed edits always show regardless of this setting.' },
-  { key: 'intent',    label: 'Intent',    hint: 'Copilot report_intent predictive lines. Hidden = do not render at all.' },
+  { key: 'fold_text',     label: 'Plain Text',
+    hint: 'Wrapped text content (reasoning, prose output). Default collapsed.' },
+  { key: 'fold_code',     label: 'Raw Output',
+    hint: 'Monospace text with preserved whitespace, no markdown parsing (shell output, file contents). Default collapsed.' },
+  { key: 'fold_markdown', label: 'Markdown',
+    hint: 'Rendered markdown — lists, tables, code fences (```json / ```ts), links. Default expanded.' },
+  { key: 'fold_diff',     label: 'File Diff',
+    hint: 'Side-by-side diff (file edits). Default expanded.' },
 ];
 
 // ── Connection types ──

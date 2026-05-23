@@ -104,6 +104,12 @@ export type AgentEvent =
   | { type: 'message'; payload: AgentMessage }
   | { type: 'stream'; payload: AgentStreamDelta }
   | { type: 'status'; payload: AgentStatusPayload }
+  /**
+   * Plan side-channel — agent's current TodoWrite / ExitPlanMode plan.
+   * State update ("current plan = content"), not a timeline entry.
+   * Routed via IPC.AGENT_PLAN, lands in agentTabStore.currentPlan.
+   */
+  | { type: 'plan'; content: string }
   | { type: 'permission_request'; toolUseId: string; toolName: string; input: Record<string, unknown> }
   | {
       type: 'picker_request';

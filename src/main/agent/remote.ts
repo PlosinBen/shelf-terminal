@@ -360,6 +360,10 @@ function parseRemoteMessage(msg: any): AgentEvent | null {
     return { type: 'message', payload };
   }
 
+  if (msg.type === 'plan') {
+    return { type: 'plan', content: typeof msg.content === 'string' ? msg.content : '' };
+  }
+
   if (msg.type === 'status') {
     return {
       type: 'status',
@@ -442,64 +446,62 @@ function parseRemoteMessage(msg: any): AgentEvent | null {
  */
 function buildAgentMessagePayload(msg: any): import('./types').AgentMessage | null {
   const t = msg.msgType;
-  // msgId is the universal upsert key. For tool messages, msgId is supplied
-  // by the provider AND equals toolUseId. For text/thinking/etc., provider
-  // mints a fresh `m-...` id. Backward-compat: older agent-server bundle
-  // (pre Step 2.1) sent no msgId — fall back to toolUseId (for tools) or
-  // synthesize a stable string from content (for non-tool). Synthesized
-  // ids are best-effort; they'll never align with stream chunks but at
-  // least give renderer a key for the store.
-  const msgId: string = msg.msgId ?? msg.toolUseId ?? `legacy-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  // msgId is the universal upsert key (provider-minted).
+  const msgId: string = msg.msgId ?? `legacy-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   switch (t) {
-    case 'text':
-    case 'thinking':
-    case 'intent':
+    case 'reply':
+    case 'note':
     case 'system':
     case 'error':
-    case 'plan':
       return { msgId, type: t, content: msg.content ?? '' };
-    case 'tool_use': {
-      if (!msg.toolUseId || !msg.toolName) return null;
-      // Provider should always send a string; coerce defensively for
-      // backward-compat (older bundle wire might still emit toolInput object).
-      const input: string = typeof msg.input === 'string'
-        ? msg.input
-        : msg.toolInput
-          ? JSON.stringify(msg.toolInput)
-          : '';
+    case 'fold_text': {
+      if (typeof msg.label !== 'string') return null;
       return {
         msgId,
-        type: 'tool_use',
-        toolUseId: msg.toolUseId,
-        toolName: msg.toolName,
-        input,
-        ...(msg.result ? { result: msg.result } : {}),
+        type: 'fold_text',
+        label: msg.label,
+        ...(typeof msg.subtitle === 'string' ? { subtitle: msg.subtitle } : {}),
+        ...(typeof msg.errorMessage === 'string' ? { errorMessage: msg.errorMessage } : {}),
+        ...(msg.body && typeof msg.body.content === 'string'
+          ? { body: { content: msg.body.content, ...(msg.body.tone === 'muted' ? { tone: 'muted' as const } : {}) } }
+          : {}),
       };
     }
-    case 'file_edit': {
-      if (!msg.toolUseId || !msg.filePath) return null;
+    case 'fold_code': {
+      if (typeof msg.label !== 'string') return null;
       return {
         msgId,
-        type: 'file_edit',
-        toolUseId: msg.toolUseId,
-        filePath: msg.filePath,
-        ...(msg.diff ? { diff: msg.diff } : {}),
-        ...(typeof msg.content === 'string' ? { content: msg.content } : {}),
-        ...(msg.result ? { result: msg.result } : {}),
+        type: 'fold_code',
+        label: msg.label,
+        ...(typeof msg.subtitle === 'string' ? { subtitle: msg.subtitle } : {}),
+        ...(typeof msg.errorMessage === 'string' ? { errorMessage: msg.errorMessage } : {}),
+        ...(msg.body && typeof msg.body.content === 'string' ? { body: { content: msg.body.content } } : {}),
       };
     }
-    case 'slash_response': {
-      // status guard: only the three known values map cleanly into the renderer
-      // union; anything else from a future / mismatched bundle is dropped.
-      const status = msg.status;
-      if (status !== 'pending' && status !== 'success' && status !== 'error') return null;
-      if (typeof msg.slashCmd !== 'string' || typeof msg.content !== 'string') return null;
+    case 'fold_markdown': {
+      if (typeof msg.label !== 'string') return null;
       return {
         msgId,
-        type: 'slash_response',
-        slashCmd: msg.slashCmd,
-        status,
-        content: msg.content,
+        type: 'fold_markdown',
+        label: msg.label,
+        ...(typeof msg.subtitle === 'string' ? { subtitle: msg.subtitle } : {}),
+        ...(typeof msg.errorMessage === 'string' ? { errorMessage: msg.errorMessage } : {}),
+        ...(msg.body && typeof msg.body.content === 'string' ? { body: { content: msg.body.content } } : {}),
+      };
+    }
+    case 'fold_diff': {
+      if (typeof msg.label !== 'string') return null;
+      return {
+        msgId,
+        type: 'fold_diff',
+        label: msg.label,
+        ...(typeof msg.subtitle === 'string' ? { subtitle: msg.subtitle } : {}),
+        ...(typeof msg.errorMessage === 'string' ? { errorMessage: msg.errorMessage } : {}),
+        ...(msg.body && msg.body.diff
+          && typeof msg.body.diff.oldString === 'string'
+          && typeof msg.body.diff.newString === 'string'
+          ? { body: { diff: { oldString: msg.body.diff.oldString, newString: msg.body.diff.newString } } }
+          : {}),
       };
     }
     default:

@@ -784,14 +784,18 @@ export function createCopilotBackend(): ServerBackend {
             // Use the streaming msgId if there was one; otherwise mint
             // (covers the case where SDK skips deltas and sends final only).
             const msgId = currentTextMsgId ?? mintMsgId();
-            currentSend({ type: 'message', msgId, msgType: 'text', content: event.data.content });
+            currentSend({ type: 'message', msgId, msgType: 'reply', content: event.data.content });
             currentTextMsgId = null;  // Reset for the next text block in this turn.
           }
           break;
         case 'assistant.reasoning':
           if (event.data?.content) {
             const msgId = currentThinkingMsgId ?? mintMsgId();
-            currentSend({ type: 'message', msgId, msgType: 'thinking', content: event.data.content });
+            currentSend({
+              type: 'message', msgId, msgType: 'fold_text',
+              label: 'Thinking',
+              body: { content: event.data.content, tone: 'muted' },
+            });
             currentThinkingMsgId = null;
           }
           break;
@@ -801,18 +805,18 @@ export function createCopilotBackend(): ServerBackend {
           const toolUseId = event.data?.toolCallId ?? '';
 
           // `task_complete` is end-of-turn signal — args.summary carries the
-          // assistant's final reply. Render as text, skip matching result.
+          // assistant's final reply. Render as reply, skip matching result.
           if (toolName === 'task_complete') {
             const text = args.summary ?? args.text ?? args.message ?? args.content ?? '';
-            if (text) currentSend({ type: 'message', msgId: mintMsgId(), msgType: 'text', content: text });
+            if (text) currentSend({ type: 'message', msgId: mintMsgId(), msgType: 'reply', content: text });
             break;
           }
 
-          // `report_intent` announces "I'm about to do X" — render as intent line,
-          // skip matching result. args.intent is a string.
+          // `report_intent` announces "I'm about to do X" — render as `note`.
+          // Renderer adds the leading `▸` marker; provider sends pure content.
           if (toolName === 'report_intent') {
             if (typeof args.intent === 'string' && args.intent.length > 0) {
-              currentSend({ type: 'message', msgId: mintMsgId(), msgType: 'intent', content: args.intent });
+              currentSend({ type: 'message', msgId: mintMsgId(), msgType: 'note', content: args.intent });
             }
             break;
           }
@@ -834,34 +838,38 @@ export function createCopilotBackend(): ServerBackend {
               }));
               inflightToolUses.set(toolUseId, { kind: 'apply_patch', subs });
               for (const { msgId, spec } of subs) {
-                currentSend({
-                  type: 'message', msgId, msgType: 'file_edit',
-                  // Each sub-card mirrors the patch's toolUseId — they share a
-                  // single permission/execution lifecycle on the SDK side.
-                  toolUseId,
-                  filePath: spec.filePath,
-                  ...(spec.kind === 'update' ? { diff: spec.diff } : { content: spec.content }),
-                });
+                if (spec.kind === 'update') {
+                  currentSend({
+                    type: 'message', msgId, msgType: 'fold_diff',
+                    label: 'Edit',
+                    subtitle: stripCwd(spec.filePath, currentCwd ?? ''),
+                  });
+                } else {
+                  currentSend({
+                    type: 'message', msgId, msgType: 'fold_code',
+                    label: 'Add',
+                    subtitle: stripCwd(spec.filePath, currentCwd ?? ''),
+                  });
+                }
               }
               break;
             }
           }
 
-          // Generic tool_use path. For apply_patch fallback (multi-hunk /
-          // multi-file / Delete that parseApplyPatch refused), wrap the raw
-          // string into a one-shot `{ patch }` object so the formatter has
-          // something to chew on — output will be the raw patch text, ugly
-          // but not lost.
+          // Generic tool_use path → fold_code. For apply_patch fallback
+          // (multi-hunk / multi-file / Delete that parseApplyPatch refused),
+          // wrap the raw string into a one-shot `{ patch }` object so the
+          // formatter has something to chew on — output will be the raw patch
+          // text, ugly but not lost.
           const argObj: Record<string, unknown> = typeof args === 'string'
             ? { patch: args }
             : args;
           const input = formatCopilotToolInput(toolName, argObj, currentCwd ?? '');
           inflightToolUses.set(toolUseId, { kind: 'tool_use', toolName, input });
           currentSend({
-            type: 'message', msgId: toolUseId, msgType: 'tool_use',
-            toolUseId,
-            toolName,
-            input,
+            type: 'message', msgId: toolUseId, msgType: 'fold_code',
+            label: toolName,
+            subtitle: input,
           });
           break;
         }
@@ -875,17 +883,26 @@ export function createCopilotBackend(): ServerBackend {
           inflightToolUses.delete(toolUseId);
 
           const isError = data.success === false;
+          const cwd = currentCwd ?? '';
           if (entry.kind === 'file_edit') {
-            currentSend({
-              type: 'message', msgId: toolUseId, msgType: 'file_edit',
-              toolUseId,
-              filePath: entry.filePath,
-              ...(entry.diff ? { diff: entry.diff } : {}),
-              ...(entry.content !== undefined ? { content: entry.content } : {}),
-              result: isError
-                ? { success: false, error: data.error?.message ?? 'edit failed' }
-                : { success: true },
-            });
+            if (entry.diff) {
+              currentSend({
+                type: 'message', msgId: toolUseId, msgType: 'fold_diff',
+                label: 'Edit',
+                subtitle: stripCwd(entry.filePath, cwd),
+                ...(isError
+                  ? { errorMessage: data.error?.message ?? 'edit failed' }
+                  : { body: { diff: entry.diff } }),
+              });
+            } else {
+              currentSend({
+                type: 'message', msgId: toolUseId, msgType: 'fold_code',
+                label: 'Write',
+                subtitle: stripCwd(entry.filePath, cwd),
+                ...(entry.content !== undefined ? { body: { content: entry.content } } : {}),
+                ...(isError ? { errorMessage: data.error?.message ?? 'edit failed' } : {}),
+              });
+            }
           } else if (entry.kind === 'apply_patch') {
             // Patch-level success/failure applies to every sub-card. SDK
             // doesn't tell us which file caused failure (and apply_patch is
@@ -894,24 +911,29 @@ export function createCopilotBackend(): ServerBackend {
             //
             // Per-card error text intentionally stays generic ("apply_patch
             // failed") — repeating the detailed SDK reason on N cards is
-            // visual noise, and ✗ + a single top-level error message
-            // already tell the full story. The detail lives on the
-            // top-level error message below.
+            // visual noise; the top-level error message below carries the
+            // patch-level reason in detail.
             const detailMsg = data.error?.message ?? 'unknown error';
             for (const { msgId, spec } of entry.subs) {
-              currentSend({
-                type: 'message', msgId, msgType: 'file_edit',
-                toolUseId,
-                filePath: spec.filePath,
-                ...(spec.kind === 'update' ? { diff: spec.diff } : { content: spec.content }),
-                result: isError
-                  ? { success: false, error: 'apply_patch failed' }
-                  : { success: true },
-              });
+              if (spec.kind === 'update') {
+                currentSend({
+                  type: 'message', msgId, msgType: 'fold_diff',
+                  label: 'Edit',
+                  subtitle: stripCwd(spec.filePath, cwd),
+                  ...(isError
+                    ? { errorMessage: 'apply_patch failed' }
+                    : { body: { diff: spec.diff } }),
+                });
+              } else {
+                currentSend({
+                  type: 'message', msgId, msgType: 'fold_code',
+                  label: 'Add',
+                  subtitle: stripCwd(spec.filePath, cwd),
+                  body: { content: spec.content },
+                  ...(isError ? { errorMessage: 'apply_patch failed' } : {}),
+                });
+              }
             }
-            // On failure, surface a top-level error message carrying the
-            // patch-level reason. Each sub-card's ✗ tells "this file
-            // wasn't changed"; the timeline error tells WHY.
             if (isError) {
               currentSend({
                 type: 'message', msgId: mintMsgId(), msgType: 'error',
@@ -922,14 +944,14 @@ export function createCopilotBackend(): ServerBackend {
             // Use `content` (concise, what the LLM sees) over `detailedContent`
             // (SDK-side rich UI returning reads as fake unified diffs).
             const text = isError
-              ? `Error: ${data.error?.message ?? 'tool failed'}`
+              ? (data.error?.message ?? 'tool failed')
               : (data.result?.content ?? '');
             currentSend({
-              type: 'message', msgId: toolUseId, msgType: 'tool_use',
-              toolUseId,
-              toolName: entry.toolName,
-              input: entry.input,
-              result: { content: String(text).slice(0, 8000), ...(isError ? { isError: true } : {}) },
+              type: 'message', msgId: toolUseId, msgType: 'fold_code',
+              label: entry.toolName,
+              subtitle: entry.input,
+              body: { content: String(text).slice(0, 8000) },
+              ...(isError ? { errorMessage: 'Tool returned an error' } : {}),
             });
           }
           break;
@@ -1019,9 +1041,7 @@ export function createCopilotBackend(): ServerBackend {
       try {
         const result = await (state.session as any).rpc.plan.read();
         currentSend({
-          type: 'message',
-          msgId: mintMsgId(),
-          msgType: 'plan',
+          type: 'plan',
           content: result?.exists ? (result.content ?? '') : '',
         });
       } catch { /* ignore */ }
@@ -1057,23 +1077,38 @@ export function createCopilotBackend(): ServerBackend {
    * routing layer above failed.
    */
   async function dispatchSlash(cmd: string, args: string, send: SendFn): Promise<void> {
-    const emitSlash = (msgId: string, status: 'pending' | 'success' | 'error', content: string) => {
-      send({ type: 'message', msgId, msgType: 'slash_response', slashCmd: cmd, status, content });
+    const label = `/${cmd}`;
+    // Provider-side helpers — wire shape uses fold_markdown:
+    //  - pending: no body, no errorMessage (renderer shows running indicator)
+    //  - success: body present (markdown content)
+    //  - error:   errorMessage present; body optional when there's extra detail
+    const emitPending = (msgId: string) => {
+      send({ type: 'message', msgId, msgType: 'fold_markdown', label });
+    };
+    const emitSuccess = (msgId: string, content: string) => {
+      send({ type: 'message', msgId, msgType: 'fold_markdown', label, body: { content } });
+    };
+    const emitError = (msgId: string, errorMessage: string, content?: string) => {
+      send({
+        type: 'message', msgId, msgType: 'fold_markdown', label,
+        errorMessage,
+        ...(content ? { body: { content } } : {}),
+      });
     };
 
     switch (cmd) {
       case 'help': {
         const msgId = mintMsgId();
         const lines = SLASH_COMMANDS.map((c) => `- /${c.name} — ${c.description}`).join('\n');
-        emitSlash(msgId, 'success', `Available commands:\n${lines}`);
+        emitSuccess(msgId, `Available commands:\n${lines}`);
         return;
       }
 
       case 'context': {
         const msgId = mintMsgId();
-        emitSlash(msgId, 'pending', 'Reading context...');
+        emitPending(msgId);
         if (!latestUsage) {
-          emitSlash(msgId, 'error', 'No context info yet. Send a message first.');
+          emitError(msgId, 'No context info yet. Send a message first.');
           return;
         }
         const u = latestUsage;
@@ -1086,54 +1121,37 @@ export function createCopilotBackend(): ServerBackend {
           `  - System: ${fmt(u.systemTokens)}`,
           `  - Tools: ${fmt(u.toolDefinitionsTokens)}`,
         ];
-        emitSlash(msgId, 'success', lines.join('\n'));
+        emitSuccess(msgId, lines.join('\n'));
         return;
       }
 
       case 'compact': {
         const msgId = mintMsgId();
-        emitSlash(msgId, 'pending', 'Compacting...');
+        emitPending(msgId);
         if (!state.session) {
-          emitSlash(msgId, 'error', 'No active session to compact.');
+          emitError(msgId, 'No active session to compact.');
           return;
         }
         try {
           await critical(async () => {
             const result = await (state.session as any).rpc.history.compact();
             if (!result?.success) {
-              emitSlash(msgId, 'error', 'Compaction failed');
+              emitError(msgId, 'Compaction failed');
               return;
             }
             const removed = result.tokensRemoved?.toLocaleString() ?? '?';
             const msgs = result.messagesRemoved ?? 0;
-            emitSlash(msgId, 'success', `Compacted: freed ${removed} tokens across ${msgs} messages.`);
+            emitSuccess(msgId, `Compacted: freed ${removed} tokens across ${msgs} messages.`);
           });
         } catch (err: any) {
-          emitSlash(msgId, 'error', `Compact failed: ${err?.message ?? err}`);
+          emitError(msgId, `Compact failed: ${err?.message ?? err}`);
         }
         return;
       }
 
       case 'clear': {
-        // Eager rebuild semantics: dispose old session, immediately create a
-        // fresh one bound to the *current* cwd. Without the new-session step,
-        // Copilot CLI's server-side session state (which includes
-        // workingDirectory) would be re-restored on the next query via any
-        // persisted lastSdkSessionId. ensureSession() emits context_patch
-        // with the new sessionId, so persisted state stays consistent.
-        //
-        // Persistence handling: clear lastSdkSessionId in context_patch up
-        // front so even if ensureSession fails, next launch starts cold
-        // (won't try to resume the just-disposed SDK session). On success,
-        // ensureSession's own context_patch with the new id overwrites.
-        // Context-file cleanup is the provider's responsibility — slash
-        // flows through send/query() and there's no separate orchestrator
-        // hook for /clear semantics.
-        //
-        // First-/clear-before-any-query is treated as a successful no-op so
-        // tests / fresh environments don't trip on missing auth or CLI binary.
         const msgId = mintMsgId();
-        emitSlash(msgId, 'pending', 'Clearing context...');
+        emitPending(msgId);
         try {
           await critical(async () => {
             const hadSession = !!state.session || !!state.cliSessionId;
@@ -1143,26 +1161,26 @@ export function createCopilotBackend(): ServerBackend {
             latestUsage = null;
             inflightToolUses.clear();
             send({ type: 'context_patch', patch: { lastSdkSessionId: null } });
-            send({ type: 'message', msgId: mintMsgId(), msgType: 'plan', content: '' });
+            send({ type: 'plan', content: '' });
             if (hadSession) {
               try {
                 await ensureSession();
               } catch (err: any) {
-                emitSlash(msgId, 'error', `Cleared, but failed to start new session: ${err?.message ?? err}`);
+                emitError(msgId, `Cleared, but failed to start new session: ${err?.message ?? err}`);
                 return;
               }
             }
-            emitSlash(msgId, 'success', 'Context cleared');
+            emitSuccess(msgId, 'Context cleared');
           });
         } catch (err: any) {
-          emitSlash(msgId, 'error', `Clear failed: ${err?.message ?? err}`);
+          emitError(msgId, `Clear failed: ${err?.message ?? err}`);
         }
         return;
       }
 
       default: {
         const msgId = mintMsgId();
-        emitSlash(msgId, 'error', `Unknown command: /${cmd}`);
+        emitError(msgId, `Unknown command: /${cmd}`);
         return;
       }
     }

@@ -29,14 +29,17 @@ export function bindAgentStoreSubscriptions(): () => void {
   const offMessage = onAgent('agent:onMessage', ({ tabId, msg }) => {
     const tab = peekAgentTab(tabId);
     if (!tab) return;  // tab not initialized yet — drop
-    const m = msg as any;
-    if (m.type === 'plan') {
-      setPlan(tabId, m.content ?? '');
-      return;
-    }
-    const built = buildAgentMsg(m, tab.provider);
+    const built = buildAgentMsg(msg, tab.provider);
     if (!built) return;
     upsertMessage(tabId, built);
+  });
+
+  // Plan side-channel — state update, not a timeline entry. Provider emits
+  // a top-level `{ type:'plan' }` wire message; main forwards over IPC.AGENT_PLAN;
+  // bus surfaces it as `agent:onPlan`. We route it straight to the store's
+  // currentPlan; the sticky PlanPanel reads from there.
+  const offPlan = onAgent('agent:onPlan', ({ tabId, content }) => {
+    setPlan(tabId, content);
   });
 
   const offStream = onAgent('agent:onStream', ({ tabId, chunk }) => {
@@ -111,6 +114,7 @@ export function bindAgentStoreSubscriptions(): () => void {
 
   return () => {
     offMessage();
+    offPlan();
     offStream();
     offStatus();
     offCapabilities();

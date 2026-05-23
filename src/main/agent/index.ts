@@ -195,6 +195,9 @@ function dispatchEvent(tabId: string, event: AgentEvent) {
     case 'status':
       send(IPC.AGENT_STATUS, tabId, event.payload);
       break;
+    case 'plan':
+      send(IPC.AGENT_PLAN, tabId, { content: event.content });
+      break;
     case 'picker_request':
       send(IPC.AGENT_PICKER_REQUEST, tabId, {
         id: event.id,

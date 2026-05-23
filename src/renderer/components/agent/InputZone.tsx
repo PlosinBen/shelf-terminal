@@ -212,7 +212,7 @@ export function InputZone({ tabId, projectId, cwd, connection, visible, rootRef,
 
     // Agent-bound slashes (/help /context /compact /clear) flow
     // through agent.send as normal text — provider parses + dispatches
-    // internally; output arrives as slash_response messages.
+    // internally; output arrives as fold_markdown messages.
     const files = pendingFiles;
     const images = pendingImages;
     setInput('');

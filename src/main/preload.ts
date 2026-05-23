@@ -173,6 +173,11 @@ contextBridge.exposeInMainWorld('shelfApi', {
       ipcRenderer.on(IPC.AGENT_STATUS, listener);
       return () => ipcRenderer.removeListener(IPC.AGENT_STATUS, listener);
     },
+    onPlan: (callback: (tabId: string, payload: { content: string }) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, tabId: string, payload: { content: string }) => callback(tabId, payload);
+      ipcRenderer.on(IPC.AGENT_PLAN, listener);
+      return () => ipcRenderer.removeListener(IPC.AGENT_PLAN, listener);
+    },
     onPermissionRequest: (callback: (tabId: string, req: unknown) => void) => {
       const listener = (_event: Electron.IpcRendererEvent, tabId: string, req: unknown) => callback(tabId, req);
       ipcRenderer.on(IPC.AGENT_PERMISSION_REQUEST, listener);

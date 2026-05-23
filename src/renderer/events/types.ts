@@ -19,6 +19,7 @@ export interface AgentEventMap {
   'agent:onMessage': { tabId: string; msg: unknown };
   'agent:onStream': { tabId: string; chunk: unknown };
   'agent:onStatus': { tabId: string; status: unknown };
+  'agent:onPlan': { tabId: string; content: string };
   'agent:onCapabilities': { tabId: string; caps: unknown };
   'agent:onPermissionRequest': { tabId: string; req: unknown };
   'agent:onPickerRequest': { tabId: string; req: unknown };

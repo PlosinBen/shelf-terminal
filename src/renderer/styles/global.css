@@ -2675,7 +2675,7 @@ button {
 
 /* ── Assistant message ── */
 
-.agent-msg-assistant {
+.agent-msg-reply {
   padding: 2px 0;
 }
 
@@ -2698,33 +2698,6 @@ button {
   background: var(--border);
 }
 
-.agent-msg-thinking {
-  padding: 4px 0;
-}
-
-.agent-thinking-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  cursor: pointer;
-  font-size: 12px;
-  color: var(--text-muted);
-}
-
-.agent-thinking-label {
-  font-style: italic;
-}
-
-.agent-thinking-content {
-  padding: 6px 0 6px 18px;
-  font-size: 12px;
-  color: var(--text-muted);
-  white-space: pre-wrap;
-  word-break: break-word;
-  max-height: 300px;
-  overflow-y: auto;
-}
-
 .agent-msg-error {
   padding: 4px 0;
   font-size: 12px;
@@ -2734,36 +2707,6 @@ button {
   font-weight: bold;
   color: #e06c75;
   margin-right: 6px;
-}
-
-/* ── Slash response ── */
-
-.agent-msg-slash {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  padding: 6px 0;
-  font-size: 12px;
-}
-
-.agent-msg-slash-cmd {
-  color: var(--accent);
-  font-family: var(--font-mono, ui-monospace, monospace);
-  font-weight: 600;
-  flex-shrink: 0;
-}
-
-.agent-msg-slash-content {
-  color: var(--text);
-  white-space: pre-wrap;
-}
-
-.agent-msg-slash-pending .agent-msg-slash-content {
-  color: var(--text-muted);
-}
-
-.agent-msg-slash-error .agent-msg-slash-content {
-  color: #e06c75;
 }
 
 /* ── Agent Cursor ── */
@@ -2796,16 +2739,16 @@ button {
   transform: rotate(90deg);
 }
 
-/* ── Tool call block ── */
+/* ── Fold card (shared by all fold_* variants) ── */
 
-.agent-msg-tool {
+.agent-msg-fold {
   margin: 4px 0;
 }
 
-.agent-tool-header {
+.fold-header {
   display: flex;
   gap: 8px;
-  align-items: flex-start;
+  align-items: center;
   padding: 4px;
   cursor: pointer;
   user-select: none;
@@ -2813,18 +2756,18 @@ button {
   min-width: 0;
 }
 
-.agent-tool-header:hover {
+.fold-header:hover {
   background: var(--surface);
 }
 
-.agent-tool-name {
+.fold-label {
   font-weight: bold;
   color: #c678dd;
   font-size: 12px;
   flex-shrink: 0;
 }
 
-.agent-tool-summary {
+.fold-subtitle {
   color: var(--text-muted);
   font-size: 12px;
   overflow: hidden;
@@ -2833,37 +2776,37 @@ button {
   min-width: 0;
 }
 
-.agent-tool-summary-full {
-  white-space: pre-wrap;
-  word-break: break-word;
-  overflow: visible;
-  text-overflow: unset;
-}
-
-.agent-tool-badge {
-  font-size: 11px;
-  padding: 1px 6px;
-  border-radius: 3px;
-  font-weight: 500;
-  color: #61afef;
-  background: rgba(97, 175, 239, 0.15);
-  flex-shrink: 0;
-}
-
-.agent-tool-content {
-  padding: 6px 12px;
+.fold-error-banner {
   font-size: 12px;
-  color: var(--text-muted);
-  background: var(--surface);
-  border-radius: 3px;
-  margin-top: 4px;
+  color: var(--error, #e06c75);
+  background: rgba(224, 108, 117, 0.08);
+  border-left: 2px solid var(--error, #e06c75);
+  padding: 4px 10px;
+  margin: 4px 0;
   white-space: pre-wrap;
   word-break: break-word;
-  max-height: 400px;
+}
+
+.fold-body {
+  margin-top: 4px;
+}
+
+.fold-body-text {
+  padding: 6px 0 6px 18px;
+  font-size: 12px;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 300px;
   overflow-y: auto;
 }
 
-.agent-tool-code {
+.fold-body-text[data-tone="muted"] {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.fold-body-code {
   background: var(--surface);
   border-radius: 3px;
   padding: 6px 10px;
@@ -2877,26 +2820,19 @@ button {
   scrollbar-color: var(--scrollbar-thumb) transparent;
 }
 
-.agent-tool-result-block {
-  margin-top: 6px;
-  border-top: 1px solid var(--border);
-  padding-top: 6px;
+.fold-body-markdown {
+  padding: 4px 10px;
+  font-size: 13px;
+  color: var(--text);
 }
 
-.agent-tool-result-error {
-  color: var(--error, #e06c75);
-  border-top-color: var(--error, #e06c75);
+.fold-body-diff {
+  margin-top: 4px;
 }
 
-.agent-tool-truncated {
-  font-size: 11px;
-  color: var(--text-muted);
-  padding: 2px 0;
-}
+/* ── Note (renderer-owned ▸ marker, dim italic one-liner) ── */
 
-/* ── Intent (provider's "I'm about to do X" announce) ── */
-
-.agent-msg-intent {
+.agent-msg-note {
   display: flex;
   align-items: baseline;
   gap: 6px;
@@ -2908,31 +2844,15 @@ button {
   font-style: italic;
 }
 
-.agent-intent-marker {
+.agent-msg-note__marker {
   color: var(--accent, #61afef);
   font-style: normal;
   flex-shrink: 0;
 }
 
-.agent-intent-content {
+.agent-msg-note__content {
   flex: 1;
   word-break: break-word;
-}
-
-/* ── File edit result indicator (✓/✗ inline in card header) ── */
-
-.agent-tool-result-indicator {
-  font-weight: bold;
-  font-size: 12px;
-  margin-left: 4px;
-}
-
-.agent-tool-result-success {
-  color: #98c379;
-}
-
-.agent-tool-result-failure {
-  color: var(--error, #e06c75);
 }
 
 /* ── Agent Markdown ── */

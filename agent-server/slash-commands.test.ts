@@ -4,9 +4,9 @@ import type { OutgoingMessage, SendFn, QueryInput } from './providers/types';
 
 /**
  * Test helper — captures all messages emitted by the provider via the wire
- * send fn. Slash commands now flow through `query()` (post-step-11): provider
- * parses the prefix internally and dispatches via dispatchSlash without
- * touching SDK for the migrated commands.
+ * send fn. Slash commands flow through `query()`: provider parses the prefix
+ * internally and dispatches via dispatchSlash. Output is emitted as
+ * fold_markdown wire messages (pending → success/error upsert by msgId).
  */
 function makeSendCapture(): { send: SendFn; emitted: OutgoingMessage[] } {
   const emitted: OutgoingMessage[] = [];
@@ -14,10 +14,12 @@ function makeSendCapture(): { send: SendFn; emitted: OutgoingMessage[] } {
   return { send, emitted };
 }
 
-function pickSlashResponses(emitted: OutgoingMessage[]) {
+type FoldMarkdownMsg = Extract<OutgoingMessage, { type: 'message'; msgType: 'fold_markdown' }>;
+
+function pickFoldMarkdown(emitted: OutgoingMessage[]): FoldMarkdownMsg[] {
   return emitted.filter(
-    (m): m is Extract<OutgoingMessage, { type: 'message'; msgType: 'slash_response' }> =>
-      m.type === 'message' && (m as any).msgType === 'slash_response',
+    (m): m is FoldMarkdownMsg =>
+      m.type === 'message' && (m as any).msgType === 'fold_markdown',
   );
 }
 
@@ -26,82 +28,71 @@ function makeQueryInput(prompt: string): QueryInput {
 }
 
 describe('Copilot slash dispatch via query()', () => {
-  it('/clear without prior session emits slash_response pending → success', async () => {
-    // Regression: eager-rebuild /clear must skip ensureSession when there's
-    // no session to actually clear, so unit tests / fresh agent-servers
-    // don't get tripped up by missing Copilot CLI / gh auth.
+  it('/clear without prior session emits pending → success fold_markdown', async () => {
     const backend = createCopilotBackend();
     const { send, emitted } = makeSendCapture();
     await backend.query(makeQueryInput('/clear'), send);
-    const responses = pickSlashResponses(emitted);
-    // Pending first, then success.
+    const responses = pickFoldMarkdown(emitted);
     expect(responses.length).toBe(2);
-    expect(responses[0].status).toBe('pending');
-    expect(responses[1].status).toBe('success');
-    expect(responses[1].content).toMatch(/cleared/i);
-    expect(responses[0].slashCmd).toBe('clear');
-    expect(responses[0].msgId).toBe(responses[1].msgId); // upsert pairing
+    // Pending: no body, no errorMessage.
+    expect(responses[0].label).toBe('/clear');
+    expect(responses[0].body).toBeUndefined();
+    expect(responses[0].errorMessage).toBeUndefined();
+    // Success: body present, no errorMessage.
+    expect(responses[1].body?.content).toMatch(/cleared/i);
+    expect(responses[1].errorMessage).toBeUndefined();
+    expect(responses[0].msgId).toBe(responses[1].msgId);
     backend.dispose();
   });
 
-  it('/help emits slash_response success listing commands', async () => {
+  it('/help emits one success fold_markdown listing commands', async () => {
     const backend = createCopilotBackend();
     const { send, emitted } = makeSendCapture();
     await backend.query(makeQueryInput('/help'), send);
-    const responses = pickSlashResponses(emitted);
-    // /help is synchronous — single success emission, no pending.
+    const responses = pickFoldMarkdown(emitted);
     expect(responses.length).toBe(1);
-    expect(responses[0].status).toBe('success');
-    expect(responses[0].slashCmd).toBe('help');
-    // /model is renderer-local (not provider-handled) so it's intentionally
-    // absent from this list — see SLASH_COMMANDS in copilot.ts.
-    expect(responses[0].content).toContain('/clear');
-    expect(responses[0].content).toContain('/compact');
-    expect(responses[0].content).toContain('/context');
-    expect(responses[0].content).toContain('/help');
+    expect(responses[0].label).toBe('/help');
+    expect(responses[0].errorMessage).toBeUndefined();
+    expect(responses[0].body?.content).toContain('/clear');
+    expect(responses[0].body?.content).toContain('/compact');
+    expect(responses[0].body?.content).toContain('/context');
+    expect(responses[0].body?.content).toContain('/help');
     backend.dispose();
   });
 
-  it('/context emits slash_response error when no usage tracked yet', async () => {
+  it('/context emits error fold_markdown when no usage tracked yet', async () => {
     const backend = createCopilotBackend();
     const { send, emitted } = makeSendCapture();
     await backend.query(makeQueryInput('/context'), send);
-    const responses = pickSlashResponses(emitted);
+    const responses = pickFoldMarkdown(emitted);
     expect(responses.length).toBe(2);
-    expect(responses[0].status).toBe('pending');
-    expect(responses[1].status).toBe('error');
-    expect(responses[1].content).toMatch(/no context info/i);
+    expect(responses[0].body).toBeUndefined();
+    expect(responses[1].errorMessage).toMatch(/no context info/i);
     backend.dispose();
   });
 
-  it('/compact before any session emits slash_response error', async () => {
+  it('/compact before any session emits error fold_markdown', async () => {
     const backend = createCopilotBackend();
     const { send, emitted } = makeSendCapture();
     await backend.query(makeQueryInput('/compact'), send);
-    const responses = pickSlashResponses(emitted);
+    const responses = pickFoldMarkdown(emitted);
     expect(responses.length).toBe(2);
-    expect(responses[0].status).toBe('pending');
-    expect(responses[1].status).toBe('error');
-    expect(responses[1].content).toMatch(/no active session/i);
+    expect(responses[0].body).toBeUndefined();
+    expect(responses[1].errorMessage).toMatch(/no active session/i);
     backend.dispose();
   });
 
-  it('unknown command emits slash_response error', async () => {
+  it('unknown command emits error fold_markdown', async () => {
     const backend = createCopilotBackend();
     const { send, emitted } = makeSendCapture();
     await backend.query(makeQueryInput('/foobar'), send);
-    const responses = pickSlashResponses(emitted);
+    const responses = pickFoldMarkdown(emitted);
     expect(responses.length).toBe(1);
-    expect(responses[0].status).toBe('error');
-    expect(responses[0].content).toContain('foobar');
+    expect(responses[0].errorMessage).toContain('foobar');
     backend.dispose();
   });
 
   it('emits streaming → idle status pair around slash dispatch (no cost/tokens on slash idle)', async () => {
-    // Slash turn lifecycle parity with normal turns — renderer's isStreaming
-    // gate flips on streaming and off on idle. Slash idle must NOT carry
-    // cost / tokens / numTurns / contextUsage so the renderer's status bar
-    // keeps the last real turn's values.
     const backend = createCopilotBackend();
     const { send, emitted } = makeSendCapture();
     await backend.query(makeQueryInput('/help'), send);
@@ -109,14 +100,10 @@ describe('Copilot slash dispatch via query()', () => {
     expect(statusEvents.length).toBe(2);
     expect(statusEvents[0].state).toBe('streaming');
     expect(statusEvents[1].state).toBe('idle');
-    // The idle payload from the slash path should carry only state — no
-    // numeric metrics that would overwrite the last real turn's values.
     expect(statusEvents[1].costUsd).toBeUndefined();
     expect(statusEvents[1].inputTokens).toBeUndefined();
     expect(statusEvents[1].numTurns).toBeUndefined();
     expect(statusEvents[1].contextUsage).toBeUndefined();
     backend.dispose();
   });
-
 });
-

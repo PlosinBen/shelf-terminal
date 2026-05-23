@@ -498,7 +498,7 @@ export function createClaudeBackend(): ServerBackend {
       //     token deltas (otherwise SDK swallows the outcome silently).
       const slash = parseSlashPrefix(input.prompt);
       if (slash?.cmd === 'clear') {
-        send({ type: 'message', msgId: mintMsgId(), msgType: 'plan', content: '' });
+        send({ type: 'plan', content: '' });
         inflightToolUses.clear();
         lastSessionId = null;
         send({ type: 'context_patch', patch: { lastSdkSessionId: null } });
@@ -508,8 +508,8 @@ export function createClaudeBackend(): ServerBackend {
       if (slash?.cmd === 'compact') {
         pendingCompactMsgId = mintSlashMsgId();
         send({
-          type: 'message', msgId: pendingCompactMsgId, msgType: 'slash_response',
-          slashCmd: 'compact', status: 'pending', content: 'Compacting...',
+          type: 'message', msgId: pendingCompactMsgId, msgType: 'fold_markdown',
+          label: '/compact',
         });
         // Whole compact turn is critical — stop() silently no-ops until done.
         stoppable = false;
@@ -533,16 +533,16 @@ export function createClaudeBackend(): ServerBackend {
               const result = (sdkMsg as any).compact_result as 'success' | 'failed';
               if (result === 'success') {
                 send({
-                  type: 'message', msgId: pendingCompactMsgId, msgType: 'slash_response',
-                  slashCmd: 'compact', status: 'success',
-                  content: 'Compact completed',
+                  type: 'message', msgId: pendingCompactMsgId, msgType: 'fold_markdown',
+                  label: '/compact',
+                  body: { content: 'Compact completed' },
                 });
               } else {
                 const errMsg = (sdkMsg as any).compact_error ?? 'Compaction failed';
                 send({
-                  type: 'message', msgId: pendingCompactMsgId, msgType: 'slash_response',
-                  slashCmd: 'compact', status: 'error',
-                  content: `Compact failed: ${errMsg}`,
+                  type: 'message', msgId: pendingCompactMsgId, msgType: 'fold_markdown',
+                  label: '/compact',
+                  errorMessage: `Compact failed: ${errMsg}`,
                 });
               }
               pendingCompactMsgId = null;
@@ -585,9 +585,9 @@ export function createClaudeBackend(): ServerBackend {
         // forever waiting for an outcome. Reachable on SDK error / abort.
         if (pendingCompactMsgId) {
           send({
-            type: 'message', msgId: pendingCompactMsgId, msgType: 'slash_response',
-            slashCmd: 'compact', status: 'error',
-            content: 'Compaction did not complete',
+            type: 'message', msgId: pendingCompactMsgId, msgType: 'fold_markdown',
+            label: '/compact',
+            errorMessage: 'Compaction did not complete',
           });
           pendingCompactMsgId = null;
         }
@@ -859,15 +859,13 @@ function getOrMintBlockMsgId(state: BlockMsgIdState, idx: number): string {
   return id;
 }
 
-/** Translate a Claude SDK `tool_use` block to either canonical `file_edit` or `tool_use`. */
+/** Translate a Claude SDK `tool_use` block into a canonical fold_* card.
+ *  Edit → fold_diff, Write → fold_code (raw add), other tools → fold_code. */
 function emitClaudeToolUse(
   send: SendFn,
   block: { id: string; name: string; input: Record<string, unknown> },
   cwd: string,
 ): void {
-  // For tool messages, msgId === toolUseId. Same identity, two named fields
-  // (msgId is the universal renderer-side upsert key; toolUseId stays named
-  // for permission_request pairing semantics).
   if (block.name === 'Edit') {
     const input = block.input as { file_path?: string; old_string?: string; new_string?: string };
     if (typeof input.file_path === 'string'
@@ -876,14 +874,13 @@ function emitClaudeToolUse(
       const diff = { oldString: input.old_string, newString: input.new_string };
       inflightToolUses.set(block.id, { kind: 'file_edit', filePath: input.file_path, diff });
       send({
-        type: 'message', msgId: block.id, msgType: 'file_edit',
-        toolUseId: block.id,
-        filePath: input.file_path,
-        diff,
+        type: 'message', msgId: block.id, msgType: 'fold_diff',
+        label: 'Edit',
+        subtitle: stripCwd(input.file_path, cwd),
       });
       return;
     }
-    // Malformed Edit — fall through to generic tool_use so we don't drop it.
+    // Malformed Edit — fall through to generic fold_code so we don't drop it.
   }
   if (block.name === 'Write') {
     const input = block.input as { file_path?: string; content?: string };
@@ -892,10 +889,9 @@ function emitClaudeToolUse(
         kind: 'file_edit', filePath: input.file_path, content: input.content,
       });
       send({
-        type: 'message', msgId: block.id, msgType: 'file_edit',
-        toolUseId: block.id,
-        filePath: input.file_path,
-        content: input.content,
+        type: 'message', msgId: block.id, msgType: 'fold_code',
+        label: 'Write',
+        subtitle: stripCwd(input.file_path, cwd),
       });
       return;
     }
@@ -906,41 +902,53 @@ function emitClaudeToolUse(
     kind: 'tool_use', toolName: block.name, input,
   });
   send({
-    type: 'message', msgId: block.id, msgType: 'tool_use',
-    toolUseId: block.id,
-    toolName: block.name,
-    input,
+    type: 'message', msgId: block.id, msgType: 'fold_code',
+    label: block.name,
+    subtitle: input,
   });
 }
 
-/** Re-emit the original tool_use/file_edit message with `result` populated. */
+/** Re-emit the original fold_diff/fold_code card with body/errorMessage
+ *  populated. Pending → completed upsert (same msgId). */
 function emitClaudeToolResult(
   send: SendFn,
   toolUseId: string,
   content: string,
   isError: boolean,
+  cwd: string,
 ): void {
   const entry = inflightToolUses.get(toolUseId);
   if (!entry) return;
   inflightToolUses.delete(toolUseId);
   if (entry.kind === 'file_edit') {
-    send({
-      type: 'message', msgId: toolUseId, msgType: 'file_edit',
-      toolUseId,
-      filePath: entry.filePath,
-      ...(entry.diff ? { diff: entry.diff } : {}),
-      ...(entry.content !== undefined ? { content: entry.content } : {}),
-      result: isError
-        ? { success: false, error: content }
-        : { success: true },
-    });
+    if (entry.diff) {
+      // Edit — fold_diff. Success → diff body; failure → errorMessage, no body
+      // (renderer skips body on Edit failure anyway; agent typically retries).
+      send({
+        type: 'message', msgId: toolUseId, msgType: 'fold_diff',
+        label: 'Edit',
+        subtitle: stripCwd(entry.filePath, cwd),
+        ...(isError ? { errorMessage: content } : { body: { diff: entry.diff } }),
+      });
+    } else {
+      // Write — fold_code with the new content as the body. On failure, attach
+      // body when we have content (so the user sees what was attempted).
+      send({
+        type: 'message', msgId: toolUseId, msgType: 'fold_code',
+        label: 'Write',
+        subtitle: stripCwd(entry.filePath, cwd),
+        ...(entry.content !== undefined ? { body: { content: entry.content } } : {}),
+        ...(isError ? { errorMessage: content } : {}),
+      });
+    }
   } else {
     send({
-      type: 'message', msgId: toolUseId, msgType: 'tool_use',
-      toolUseId,
-      toolName: entry.toolName,
-      input: entry.input,
-      result: { content, ...(isError ? { isError: true } : {}) },
+      type: 'message', msgId: toolUseId, msgType: 'fold_code',
+      label: entry.toolName,
+      subtitle: entry.input,
+      ...(isError
+        ? { body: { content }, errorMessage: 'Tool returned an error' }
+        : { body: { content } }),
     });
   }
 }
@@ -962,9 +970,16 @@ export function processMessage(msg: SDKMessage, send: SendFn, cwd: string, block
         if (block.type === 'thinking') {
           // Reuse msgId if stream chunks already minted one for this block;
           // otherwise (no streaming or non-streamed model) mint fresh.
-          send({ type: 'message', msgId: getOrMintBlockMsgId(blockMsgIds, idx), msgType: 'thinking', content: block.thinking });
+          send({
+            type: 'message', msgId: getOrMintBlockMsgId(blockMsgIds, idx), msgType: 'fold_text',
+            label: 'Thinking',
+            body: { content: block.thinking, tone: 'muted' },
+          });
         } else if (block.type === 'text') {
-          send({ type: 'message', msgId: getOrMintBlockMsgId(blockMsgIds, idx), msgType: 'text', content: block.text });
+          send({
+            type: 'message', msgId: getOrMintBlockMsgId(blockMsgIds, idx), msgType: 'reply',
+            content: block.text,
+          });
         } else if (block.type === 'tool_use') {
           emitClaudeToolUse(send, { id: block.id, name: block.name, input: block.input as Record<string, unknown> }, cwd);
           // Mirror plan-style tools into the sticky panel for parity with Copilot's plan API.
@@ -977,12 +992,12 @@ export function processMessage(msg: SDKMessage, send: SendFn, cwd: string, block
                 if (t.status === 'in_progress') return `- [~] ${t.activeForm ?? t.content}`;
                 return `- [ ] ${t.content}`;
               }).join('\n');
-              send({ type: 'message', msgId: mintMsgId(), msgType: 'plan', content: md });
+              send({ type: 'plan', content: md });
             }
           } else if (block.name === 'ExitPlanMode') {
             const plan = (block.input as any)?.plan;
             if (typeof plan === 'string') {
-              send({ type: 'message', msgId: mintMsgId(), msgType: 'plan', content: plan });
+              send({ type: 'plan', content: plan });
             }
           }
         }
@@ -1069,7 +1084,7 @@ export function processMessage(msg: SDKMessage, send: SendFn, cwd: string, block
           if ((block as any).type === 'tool_result') {
             const raw = (block as any).content;
             const content = extractToolResultText(raw);
-            emitClaudeToolResult(send, (block as any).tool_use_id, content, (block as any).is_error === true);
+            emitClaudeToolResult(send, (block as any).tool_use_id, content, (block as any).is_error === true, cwd);
           }
         }
         // No blockMsgIds clear here — the next assistant message's own

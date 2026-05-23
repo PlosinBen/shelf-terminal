@@ -2,66 +2,36 @@ import React, { useState, useMemo } from 'react';
 import { useStore } from '../store';
 import { renderMarkdown } from '../utils/markdown';
 import { alignLineDiff, type DiffRow } from '../utils/line-diff';
-import type { AgentDisplayMode, AgentDisplayKey } from '@shared/types';
+import type { AgentDisplayMode, AgentDisplayKey, AgentFile, FoldBase } from '@shared/types';
 
 /**
  * Renderer-side message variant. Mirrors `AgentMessage` from `@shared/types`
- * (canonical provider-emitted shape) and adds a `'user'` variant for messages
- * the user types into the input — those don't come from any provider.
+ * (canonical provider-emitted shape) PLUS a `'user'` variant for messages the
+ * user types into the input — providers never emit `user` (renderer-only).
  *
  * Discriminated union: each `type` carries exactly the fields it needs.
  * Common metadata (id / timestamp / provider) is intersected on top.
  *
- * See `.agent/features/AGENT_VIEW_MSG_TYPE.md` for design rationale.
+ * Naming is pure rendering vocabulary — no provider semantics:
+ *   reply / note / system / error / fold_* / user.
+ *
+ * See `.agent/features/agent-message-type-refactor.md` for design rationale.
  */
 export type AgentMsg = {
   id: string;
   provider?: string;
   timestamp: number;
 } & (
-  | { type: 'text'; content: string; streaming?: boolean }
-  | { type: 'thinking'; content: string; streaming?: boolean }
-  | { type: 'intent'; content: string }
+  | { type: 'reply'; content: string; streaming?: boolean }
+  | { type: 'note'; content: string }
   | { type: 'system'; content: string }
   | { type: 'error'; content: string }
-  | {
-      type: 'tool_use';
-      toolUseId: string;
-      toolName: string;
-      input: string;
-      result?: { content: string; isError?: boolean };
-    }
-  | {
-      type: 'file_edit';
-      toolUseId: string;
-      filePath: string;
-      diff?: { oldString: string; newString: string };
-      content?: string;
-      result?: { success: boolean; error?: string };
-    }
-  | {
-      type: 'slash_response';
-      slashCmd: string;
-      status: 'pending' | 'success' | 'error';
-      content: string;
-    }
-  | {
-      type: 'user';
-      content: string;
-      images?: string[];
-      files?: Array<{ path: string; displayPath: string }>;
-    }
+  | (FoldBase & { type: 'fold_text';     body?: { content: string; tone?: 'muted' }; streaming?: boolean })
+  | (FoldBase & { type: 'fold_code';     body?: { content: string } })
+  | (FoldBase & { type: 'fold_markdown'; body?: { content: string } })
+  | (FoldBase & { type: 'fold_diff';     body?: { diff: { oldString: string; newString: string } } })
+  | { type: 'user'; content: string; images?: string[]; files?: AgentFile[] }
 );
-
-
-// file_edit still strips cwd from filePath for header display. tool_use
-// no longer needs this helper — provider already pre-formats with cwd
-// stripped.
-function stripCwd(filePath: string, cwd?: string): string {
-  if (!cwd || !filePath) return filePath;
-  if (filePath.startsWith(cwd + '/')) return filePath.slice(cwd.length + 1);
-  return filePath;
-}
 
 function truncateLines(text: string, max: number): { lines: string[]; remaining: number } {
   const all = text.split('\n');
@@ -71,7 +41,6 @@ function truncateLines(text: string, max: number): { lines: string[]; remaining:
 
 function SideBySideDiff({ rows }: { rows: DiffRow[] }) {
   // Walk rows once to compute snippet-relative line numbers per side.
-  // 'same'/'change' advance both; 'del' advances only old; 'add' advances only new.
   let oldLine = 0;
   let newLine = 0;
   const annotated = rows.map((row) => {
@@ -87,7 +56,7 @@ function SideBySideDiff({ rows }: { rows: DiffRow[] }) {
         {annotated.map((row, i) => (
           <div key={i} className={`agent-diff-sbs-row agent-diff-sbs-${row.kind}`}>
             <span className="agent-diff-sbs-ln">{row.oldLine ?? ''}</span>
-            <span className="agent-diff-sbs-cell">{row.old !== null ? row.old : ' '}</span>
+            <span className="agent-diff-sbs-cell">{row.old !== null ? row.old : ' '}</span>
           </div>
         ))}
       </div>
@@ -95,7 +64,7 @@ function SideBySideDiff({ rows }: { rows: DiffRow[] }) {
         {annotated.map((row, i) => (
           <div key={i} className={`agent-diff-sbs-row agent-diff-sbs-${row.kind}`}>
             <span className="agent-diff-sbs-ln">{row.newLine ?? ''}</span>
-            <span className="agent-diff-sbs-cell">{row.new !== null ? row.new : ' '}</span>
+            <span className="agent-diff-sbs-cell">{row.new !== null ? row.new : ' '}</span>
           </div>
         ))}
       </div>
@@ -103,20 +72,35 @@ function SideBySideDiff({ rows }: { rows: DiffRow[] }) {
   );
 }
 
-// Inline "+ line" diff for create/write-style operations where everything
-// is an addition. Truncates at 20 lines to keep tool cards compact.
-function InlineAddDiff({ content }: { content: string }) {
-  const { lines, remaining } = truncateLines(content, 20);
+/** Default display mode per fold key. fold_text / fold_code default collapsed
+ *  (low signal-to-noise output); fold_markdown / fold_diff default expanded
+ *  (structured / high-information content). */
+const DEFAULT_FOLD_MODE: Record<AgentDisplayKey, AgentDisplayMode> = {
+  fold_text: 'collapsed',
+  fold_code: 'collapsed',
+  fold_markdown: 'expanded',
+  fold_diff: 'expanded',
+};
+
+interface FoldHeaderProps {
+  label: string;
+  subtitle?: string;
+  isExpanded: boolean;
+  onToggle: () => void;
+}
+
+/** Shared header for all fold_* variants: chevron + label + subtitle.
+ *  Subtitle truncates via CSS (white-space + text-overflow:ellipsis); the
+ *  full string lives in the `title` attribute so users get the original on
+ *  hover regardless of viewport width. */
+function FoldHeader({ label, subtitle, isExpanded, onToggle }: FoldHeaderProps) {
   return (
-    <div className="agent-tool-diff-inline">
-      {lines.map((line, i) => (
-        <div key={i} className="agent-diff-row agent-diff-add">
-          <span className="agent-diff-ln">{i + 1}</span>
-          <span className="agent-diff-sign">+</span>
-          <span className="agent-diff-text">{line}</span>
-        </div>
-      ))}
-      {remaining > 0 && <div className="agent-tool-truncated">... +{remaining} more lines</div>}
+    <div className="fold-header" onClick={onToggle}>
+      <span className={`agent-chevron ${isExpanded ? 'expanded' : ''}`}>&#9654;</span>
+      <span className="fold-label">{label}</span>
+      {subtitle && (
+        <span className="fold-subtitle" title={subtitle}>{subtitle}</span>
+      )}
     </div>
   );
 }
@@ -126,144 +110,48 @@ interface Props {
   cwd?: string;
 }
 
-export function AgentMessage({ message, cwd }: Props) {
-  const [expanded, setExpanded] = useState(false);
+export function AgentMessage({ message, cwd: _cwd }: Props) {
+  const [userToggled, setUserToggled] = useState<boolean | null>(null);
   const { settings } = useStore();
 
-  // Settings key is now a canonical-type union (AgentDisplayKey), not arbitrary
-  // string. Renderer can only ask about types it actually knows how to render.
   const resolveDisplayMode = (key: AgentDisplayKey): AgentDisplayMode => {
-    return settings.agentDisplay?.[key] ?? 'collapsed';
+    return settings.agentDisplay?.[key] ?? DEFAULT_FOLD_MODE[key];
   };
 
-  // useMemo must run on every render path → compute markdown HTML for any
-  // content-bearing variant up front (cheap when content is short / unchanged).
-  const markdownContent = message.type === 'text' ? message.content : '';
-  const markdownHtml = useMemo(() => renderMarkdown(markdownContent), [markdownContent]);
+  // Markdown for the `reply` variant — useMemo must run on every render.
+  const replyContent = message.type === 'reply' ? message.content : '';
+  const replyHtml = useMemo(() => renderMarkdown(replyContent), [replyContent]);
+
+  // Markdown for the `fold_markdown` body — same constraint.
+  const foldMdContent = message.type === 'fold_markdown' && message.body
+    ? message.body.content
+    : '';
+  const foldMdHtml = useMemo(() => renderMarkdown(foldMdContent), [foldMdContent]);
 
   switch (message.type) {
-    case 'tool_use': {
-      // Single canonical setting for all tool_use cards. toolName-keyed
-      // settings are gone — provider's job is to pre-format `input` for
-      // display, renderer just renders the string.
-      const toolMode = resolveDisplayMode('tool_use');
-      const result = message.result;
-      const isError = result?.isError === true;
-      // Errors override `hidden`: even with the user's setting on hidden,
-      // failures stay visible so silent breakage doesn't fool the user into
-      // thinking everything worked. Only non-error cards respect hidden.
-      if (toolMode === 'hidden' && !isError) return null;
-      // Force-expand on error so the failure message is immediately visible.
-      // Errors are loud-by-default — collapse is intentionally disabled while
-      // result.isError is true (user setting `expanded` to false has no effect).
-      const isExpanded = expanded || toolMode === 'expanded' || isError;
+    case 'reply': {
+      const label = message.provider
+        ? `${message.provider.charAt(0).toUpperCase() + message.provider.slice(1)}:`
+        : 'Assistant:';
       return (
-        <div className="agent-msg agent-msg-tool">
-          <div className="agent-tool-header" onClick={() => setExpanded(!expanded)}>
-            <span className={`agent-chevron ${isExpanded ? 'expanded' : ''}`}>&#9654;</span>
-            <span className="agent-tool-name">{message.toolName}</span>
-            {message.input && <span className={`agent-tool-summary ${isExpanded ? 'agent-tool-summary-full' : ''}`}>{message.input}</span>}
-            {!result && <span className="agent-tool-badge">running</span>}
-          </div>
-          {isExpanded && result && (() => {
-            // Body shows ONLY result. `input` already lives in the header
-            // (full string when expanded via .agent-tool-summary-full); no
-            // need to repeat it as a separate body block.
-            const { lines, remaining } = truncateLines(result.content, 30);
-            const className = isError
-              ? 'agent-tool-code agent-tool-result-block agent-tool-result-error'
-              : 'agent-tool-code agent-tool-result-block';
-            return <pre className={className}>{lines.join('\n')}{remaining > 0 ? `\n... +${remaining} more lines` : ''}</pre>;
-          })()}
+        <div className="agent-msg agent-msg-reply">
+          <span className="agent-msg-label">{label}</span>
+          <div className="agent-msg-content agent-markdown" dangerouslySetInnerHTML={{ __html: replyHtml }} />
+          {message.streaming === true && <span className="agent-cursor" />}
         </div>
       );
     }
 
-    case 'file_edit': {
-      // Canonical-type setting; covers Claude Edit/Write + Copilot apply_patch
-      // (all translated to `file_edit` upstream).
-      const editMode = resolveDisplayMode('file_edit');
-      const result = message.result;
-      const success = result?.success === true;
-      const failed = result?.success === false;
-      // Failures override `hidden` (parallel to tool_use error behavior).
-      if (editMode === 'hidden' && !failed) return null;
-      // Force-expand on failure.
-      const isExpanded = expanded || editMode === 'expanded' || failed;
+    case 'note':
+      // Provider sends pure content; renderer owns the leading marker so the
+      // visual contract for "note" lives in one place. Same layering as
+      // `error` red coloring and `reply` markdown rendering.
       return (
-        <div className="agent-msg agent-msg-tool agent-msg-file-edit">
-          <div className="agent-tool-header" onClick={() => setExpanded(!expanded)}>
-            <span className={`agent-chevron ${isExpanded ? 'expanded' : ''}`}>&#9654;</span>
-            <span className="agent-tool-name">
-              {message.diff ? 'Edit' : 'Write'}
-              {success && <span className="agent-tool-result-indicator agent-tool-result-success" title="Success">{' '}✓</span>}
-              {failed && <span className="agent-tool-result-indicator agent-tool-result-failure" title="Failed">{' '}✗</span>}
-            </span>
-            <span className={`agent-tool-summary ${isExpanded ? 'agent-tool-summary-full' : ''}`}>
-              {stripCwd(message.filePath, cwd)}
-            </span>
-            {!result && <span className="agent-tool-badge">running</span>}
-          </div>
-          {isExpanded && (
-            <>
-              {/* Skip diff/content body on failure. The dominant reason an
-                  edit fails is stale old_string — and the agent's standard
-                  recovery is "Read the file again, retry the Edit". The
-                  failed diff is a transient intermediate state that the
-                  agent itself supersedes within the same turn. Showing it
-                  fills the timeline with noise the user doesn't need (and
-                  green-add / red-remove coloring next to ✗ is mildly
-                  misleading anyway). Header ✗ + error message is enough to
-                  signal "this attempt failed, agent will retry". */}
-              {!failed && message.diff && (() => {
-                const rows = alignLineDiff(message.diff.oldString.split('\n'), message.diff.newString.split('\n'));
-                return <SideBySideDiff rows={rows} />;
-              })()}
-              {!failed && message.content !== undefined && <InlineAddDiff content={message.content} />}
-              {failed && result.error && (
-                <pre className="agent-tool-code agent-tool-result-block agent-tool-result-error">{result.error}</pre>
-              )}
-            </>
-          )}
+        <div className="agent-msg agent-msg-note">
+          <span className="agent-msg-note__marker">▸</span>
+          <span className="agent-msg-note__content">{message.content}</span>
         </div>
       );
-    }
-
-    case 'thinking': {
-      const mode = resolveDisplayMode('thinking');
-      if (mode === 'hidden') return null;
-      // While streaming, force-expand so the user can see content accumulating.
-      // After the finalize lands (streaming flag clears), revert to the user's
-      // collapsed/expanded preference. Label switches to "Thinking..." with
-      // trailing dots as the running indicator.
-      const streamingActive = message.streaming === true;
-      const showContent = streamingActive || expanded || mode === 'expanded';
-      return (
-        <div className="agent-msg agent-msg-thinking">
-          <div className="agent-thinking-header" onClick={() => setExpanded(!expanded)}>
-            <span className={`agent-chevron ${showContent ? 'expanded' : ''}`}>&#9654;</span>
-            <span className="agent-thinking-label">{streamingActive ? 'Thinking...' : 'Thinking'}</span>
-          </div>
-          {showContent && (
-            <div className="agent-thinking-content">{message.content}</div>
-          )}
-        </div>
-      );
-    }
-
-    case 'intent': {
-      // Intent is always a one-line dim italic — expanded/collapsed render
-      // identically; only `hidden` actually changes anything. We keep the
-      // 3-way select for UI uniformity (see AGENT_DISPLAY_KEYS hint).
-      const intentMode = resolveDisplayMode('intent');
-      if (intentMode === 'hidden') return null;
-      return (
-        <div className="agent-msg agent-msg-intent">
-          <span className="agent-intent-marker">▸</span>
-          <span className="agent-intent-content">{message.content}</span>
-        </div>
-      );
-    }
 
     case 'system':
       return (
@@ -272,21 +160,6 @@ export function AgentMessage({ message, cwd }: Props) {
         </div>
       );
 
-    case 'slash_response': {
-      // Renderer is opaque to slashCmd — only `status` drives visual style.
-      // `content` is provider-preformatted text. Pending reuses the streaming
-      // cursor pattern (same as text/thinking mid-stream) so visual language
-      // for "in-flight" stays consistent across message types.
-      const statusClass = `agent-msg-slash-${message.status}`;
-      return (
-        <div className={`agent-msg agent-msg-slash ${statusClass}`}>
-          <span className="agent-msg-slash-cmd">/{message.slashCmd}</span>
-          <span className="agent-msg-slash-content">{message.content}</span>
-          {message.status === 'pending' && <span className="agent-cursor" />}
-        </div>
-      );
-    }
-
     case 'error':
       return (
         <div className="agent-msg agent-msg-error">
@@ -294,6 +167,130 @@ export function AgentMessage({ message, cwd }: Props) {
           <span>{message.content}</span>
         </div>
       );
+
+    case 'fold_text': {
+      const hasError = !!message.errorMessage;
+      const settingMode = resolveDisplayMode('fold_text');
+      // Failed cards always expand; otherwise default per setting, user toggle wins.
+      const isExpanded = hasError
+        ? true
+        : (userToggled !== null ? userToggled : settingMode === 'expanded');
+      const streaming = message.streaming === true;
+      return (
+        <div className="agent-msg agent-msg-fold">
+          <FoldHeader
+            label={message.label}
+            subtitle={message.subtitle}
+            isExpanded={isExpanded}
+            onToggle={() => setUserToggled(!isExpanded)}
+          />
+          {hasError && (
+            <div className="fold-error-banner">{message.errorMessage}</div>
+          )}
+          {isExpanded && message.body && (
+            <div
+              className="fold-body fold-body-text"
+              data-tone={message.body.tone ?? 'normal'}
+            >
+              {message.body.content}
+              {streaming && <span className="agent-cursor" />}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    case 'fold_code': {
+      const hasError = !!message.errorMessage;
+      const settingMode = resolveDisplayMode('fold_code');
+      const isExpanded = hasError
+        ? true
+        : (userToggled !== null ? userToggled : settingMode === 'expanded');
+      return (
+        <div className="agent-msg agent-msg-fold">
+          <FoldHeader
+            label={message.label}
+            subtitle={message.subtitle}
+            isExpanded={isExpanded}
+            onToggle={() => setUserToggled(!isExpanded)}
+          />
+          {hasError && (
+            <div className="fold-error-banner">{message.errorMessage}</div>
+          )}
+          {isExpanded && message.body && (() => {
+            const { lines, remaining } = truncateLines(message.body.content, 30);
+            return (
+              <pre className="fold-body fold-body-code">
+                {lines.join('\n')}
+                {remaining > 0 ? `\n... +${remaining} more lines` : ''}
+              </pre>
+            );
+          })()}
+        </div>
+      );
+    }
+
+    case 'fold_markdown': {
+      const hasError = !!message.errorMessage;
+      const settingMode = resolveDisplayMode('fold_markdown');
+      const isExpanded = hasError
+        ? true
+        : (userToggled !== null ? userToggled : settingMode === 'expanded');
+      return (
+        <div className="agent-msg agent-msg-fold">
+          <FoldHeader
+            label={message.label}
+            subtitle={message.subtitle}
+            isExpanded={isExpanded}
+            onToggle={() => setUserToggled(!isExpanded)}
+          />
+          {hasError && (
+            <div className="fold-error-banner">{message.errorMessage}</div>
+          )}
+          {isExpanded && message.body && (
+            <div
+              className="fold-body fold-body-markdown agent-markdown"
+              dangerouslySetInnerHTML={{ __html: foldMdHtml }}
+            />
+          )}
+        </div>
+      );
+    }
+
+    case 'fold_diff': {
+      const hasError = !!message.errorMessage;
+      const settingMode = resolveDisplayMode('fold_diff');
+      const isExpanded = hasError
+        ? true
+        : (userToggled !== null ? userToggled : settingMode === 'expanded');
+      return (
+        <div className="agent-msg agent-msg-fold">
+          <FoldHeader
+            label={message.label}
+            subtitle={message.subtitle}
+            isExpanded={isExpanded}
+            onToggle={() => setUserToggled(!isExpanded)}
+          />
+          {hasError && (
+            <div className="fold-error-banner">{message.errorMessage}</div>
+          )}
+          {/* Skip diff body on failure — failed edits with stale old_string
+              are transient intermediate states the agent itself retries; the
+              red banner + header are enough to signal "this attempt failed". */}
+          {isExpanded && !hasError && message.body?.diff && (() => {
+            const rows = alignLineDiff(
+              message.body.diff.oldString.split('\n'),
+              message.body.diff.newString.split('\n'),
+            );
+            return (
+              <div className="fold-body fold-body-diff">
+                <SideBySideDiff rows={rows} />
+              </div>
+            );
+          })()}
+        </div>
+      );
+    }
 
     case 'user': {
       const hasAttachments = (message.images?.length ?? 0) > 0 || (message.files?.length ?? 0) > 0;
@@ -314,22 +311,8 @@ export function AgentMessage({ message, cwd }: Props) {
       );
     }
 
-    case 'text': {
-      const label = message.provider
-        ? `${message.provider.charAt(0).toUpperCase() + message.provider.slice(1)}:`
-        : 'Assistant:';
-      return (
-        <div className="agent-msg agent-msg-assistant">
-          <span className="agent-msg-label">{label}</span>
-          <div className="agent-msg-content agent-markdown" dangerouslySetInnerHTML={{ __html: markdownHtml }} />
-          {message.streaming === true && <span className="agent-cursor" />}
-        </div>
-      );
-    }
-
     default: {
-      // Exhaustiveness check — adding a new variant to AgentMsg without a
-      // matching case here is a TS compile error.
+      // Exhaustiveness — new variants without a case here error at compile time.
       const _exhaustive: never = message;
       void _exhaustive;
       return null;

@@ -107,6 +107,7 @@ interface ShelfApi {
     onMessage: (callback: (tabId: string, msg: unknown) => void) => () => void;
     onStream: (callback: (tabId: string, chunk: unknown) => void) => () => void;
     onStatus: (callback: (tabId: string, status: unknown) => void) => () => void;
+    onPlan: (callback: (tabId: string, payload: { content: string }) => void) => () => void;
     onPermissionRequest: (callback: (tabId: string, req: unknown) => void) => () => void;
     onPickerRequest: (callback: (tabId: string, req: unknown) => void) => () => void;
     onCapabilities: (callback: (tabId: string, caps: unknown) => void) => () => void;

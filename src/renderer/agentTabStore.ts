@@ -424,28 +424,60 @@ function flushChunkBuffer(tabId: string) {
   let messages = tab.messages;
   for (const [msgId, { type, delta }] of buffer) {
     let found = false;
+    // Wire streamType ('text' | 'thinking') maps to renderer-side variants:
+    //   'text'     → reply       (assistant markdown reply)
+    //   'thinking' → fold_text   (label='Thinking', body.tone='muted')
     for (let i = messages.length - 1; i >= 0; i--) {
       const m = messages[i];
       if (m.id !== msgId) continue;
-      if (m.type !== 'text' && m.type !== 'thinking') { found = true; break; }  // unexpected, skip
       const next = messages.slice();
-      next[i] = { ...m, content: (m.content as string) + delta, streaming: true };
+      if (type === 'text' && m.type === 'reply') {
+        next[i] = { ...m, content: (m.content as string) + delta, streaming: true };
+      } else if (type === 'thinking' && m.type === 'fold_text') {
+        const prev = m.body?.content ?? '';
+        next[i] = {
+          ...m,
+          body: { content: prev + delta, tone: 'muted' as const },
+          streaming: true,
+        };
+      } else {
+        // Type mismatch — unexpected, skip safely.
+        found = true;
+        break;
+      }
       messages = next;
       found = true;
       break;
     }
     if (!found) {
-      messages = [
-        ...messages,
-        {
-          id: msgId,
-          type,
-          content: delta,
-          streaming: true,
-          provider: tab.provider,
-          timestamp: Date.now(),
-        } as AgentMsg,
-      ];
+      if (type === 'text') {
+        messages = [
+          ...messages,
+          {
+            id: msgId,
+            type: 'reply',
+            content: delta,
+            streaming: true,
+            provider: tab.provider,
+            timestamp: Date.now(),
+          } as AgentMsg,
+        ];
+      } else {
+        // Thinking stream → fold_text placeholder. Label matches what the
+        // provider will send on finalize (`Thinking`); body accumulates deltas.
+        messages = [
+          ...messages,
+          {
+            id: msgId,
+            type: 'fold_text',
+            label: 'Thinking',
+            body: { content: delta, tone: 'muted' as const },
+            streaming: true,
+            provider: tab.provider,
+            timestamp: Date.now(),
+          } as AgentMsg,
+        ];
+      }
     }
   }
   tabs.set(tabId, { ...tab, messages });
@@ -560,7 +592,7 @@ export function setStreaming(tabId: string, value: boolean) {
   // streamed responses would never land in storage.
   if (wasStreaming && !value) {
     const cleared = cur.messages.map((m) => {
-      if ((m.type === 'text' || m.type === 'thinking') && m.streaming) {
+      if ((m.type === 'reply' || m.type === 'fold_text') && m.streaming) {
         mutated = true;
         const settled = { ...m, streaming: false };
         markDirty(tabId, settled);

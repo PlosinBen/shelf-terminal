@@ -47,10 +47,12 @@ export interface WireEnvelope {
   turnId?: string;
 }
 
-/** Top-level discriminator for canonical conversation messages in the timeline. */
+/** Top-level discriminator for canonical conversation messages in the timeline.
+ *  Mirrors the renderer-side `AgentMessage` union MINUS `user` (renderer-only
+ *  variant — providers never emit user messages). */
 export type CanonicalMsgType =
-  | 'text' | 'thinking' | 'intent' | 'system' | 'error' | 'plan'
-  | 'tool_use' | 'file_edit';
+  | 'reply' | 'note' | 'system' | 'error'
+  | 'fold_text' | 'fold_code' | 'fold_markdown' | 'fold_diff';
 
 /**
  * Outgoing wire message from agent-server to main. Each variant is a
@@ -125,50 +127,61 @@ export type OutgoingMessage = WireEnvelope & (
    */
   | { type: 'context_patch'; patch: Partial<PersistedContext> }
 
-  // ── Streaming (incremental text/thinking chunks) ─────────────────────────
+  // ── Streaming (incremental reply/fold_text chunks) ───────────────────────
   // `msgId` ties each chunk to the eventual `type: 'message'` finalize event
   // with the same id. Renderer upserts by msgId — stream chunks append to a
   // placeholder entry that the finalize replaces.
+  //
+  // `streamType` is the renderer-side variant the finalize will land as:
+  //   'text'     → reply (assistant markdown reply)
+  //   'thinking' → fold_text (reasoning / Copilot thinking)
+  // Wire vocabulary stays 'text'|'thinking' for backward-compatibility with
+  // the existing stream-event handler; provider semantics map at finalize time.
   | { type: 'stream'; msgId: string; streamType: 'text' | 'thinking'; content: string }
+
+  // ── Plan side-channel ────────────────────────────────────────────────────
+  // Plan is a STATE UPDATE ("current plan = X"), not a timeline entry. Top-
+  // level `type: 'plan'` (no msgType envelope) — main forwards to renderer
+  // over its own IPC channel; consumer is `agentTabStore.currentPlan`, never
+  // the message timeline.
+  | { type: 'plan'; content: string }
 
   // ── Canonical conversation messages ──────────────────────────────────────
   // Renderer-facing variants. Discriminated by `msgType`. Each variant only
-  // carries fields it actually needs (see .agent/features/AGENT_VIEW_MSG_TYPE.md
-  // "Canonical Message — Discriminated Union" for design rationale).
+  // carries fields it actually needs (see .agent/features/agent-message-type-refactor.md
+  // for design rationale).
   //
-  // `msgId` is the upsert key in the renderer's message store. For tool_use
-  // and file_edit, `msgId === toolUseId` — they're the same identity. We
-  // keep `toolUseId` as a named field too because permission_request uses
-  // that name to pair tool runs with their permission flow.
-  | { type: 'message'; msgId: string; msgType: 'text';     content: string }
-  | { type: 'message'; msgId: string; msgType: 'thinking'; content: string }
-  | { type: 'message'; msgId: string; msgType: 'intent';   content: string }
-  | { type: 'message'; msgId: string; msgType: 'system';   content: string }
-  | { type: 'message'; msgId: string; msgType: 'error';    content: string }
-  | { type: 'message'; msgId: string; msgType: 'plan';     content: string }
+  // `msgId` is the upsert key in the renderer's message store. For fold_*
+  // tool messages, providers typically use the SDK-provided toolUseId as
+  // msgId so a pending → completed upsert flows naturally; permission_request
+  // still pairs separately via its own toolUseId field.
+  //
+  // `user` is NOT a wire msgType — `user` messages are renderer-only, minted
+  // when the user types into the input. Reflecting that on the wire keeps
+  // the agent-server → renderer contract honest about provider authorship.
+  | { type: 'message'; msgId: string; msgType: 'reply';   content: string }
+  | { type: 'message'; msgId: string; msgType: 'note';    content: string }
+  | { type: 'message'; msgId: string; msgType: 'system';  content: string }
+  | { type: 'message'; msgId: string; msgType: 'error';   content: string }
   | {
-      type: 'message'; msgId: string; msgType: 'tool_use';
-      toolUseId: string;  // === msgId; kept named for permission_request pairing
-      toolName: string;
-      input: string;
-      result?: { content: string; isError?: boolean };
+      type: 'message'; msgId: string; msgType: 'fold_text';
+      label: string; subtitle?: string; errorMessage?: string;
+      body?: { content: string; tone?: 'muted' };
     }
   | {
-      type: 'message'; msgId: string; msgType: 'file_edit';
-      toolUseId: string;  // === msgId
-      filePath: string;
-      diff?: { oldString: string; newString: string };
-      content?: string;
-      result?: { success: boolean; error?: string };
+      type: 'message'; msgId: string; msgType: 'fold_code';
+      label: string; subtitle?: string; errorMessage?: string;
+      body?: { content: string };
     }
   | {
-      // Provider-emitted slash command response. Renderer is opaque to
-      // `slashCmd` — only `status` drives styling. Provider emits pending
-      // first, then success/error with the same msgId (upsert pattern).
-      type: 'message'; msgId: string; msgType: 'slash_response';
-      slashCmd: string;
-      status: 'pending' | 'success' | 'error';
-      content: string;
+      type: 'message'; msgId: string; msgType: 'fold_markdown';
+      label: string; subtitle?: string; errorMessage?: string;
+      body?: { content: string };
+    }
+  | {
+      type: 'message'; msgId: string; msgType: 'fold_diff';
+      label: string; subtitle?: string; errorMessage?: string;
+      body?: { diff: { oldString: string; newString: string } };
     }
 );
 

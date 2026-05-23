@@ -29,6 +29,9 @@ export function bindAgentIPCGroup(): () => void {
   const offStatus = api.onStatus((tabId, status) => {
     emitAgent('agent:onStatus', { tabId, status });
   });
+  const offPlan = api.onPlan((tabId, payload) => {
+    emitAgent('agent:onPlan', { tabId, content: payload.content });
+  });
   const offCapabilities = api.onCapabilities((tabId, caps) => {
     emitAgent('agent:onCapabilities', { tabId, caps });
   });
@@ -72,6 +75,7 @@ export function bindAgentIPCGroup(): () => void {
     offMessage();
     offStream();
     offStatus();
+    offPlan();
     offCapabilities();
     offPermission();
     offPicker();

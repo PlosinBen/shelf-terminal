@@ -31,6 +31,7 @@ function makeMockAgentApi() {
       onMessage: listener('onMessage'),
       onStream: listener('onStream'),
       onStatus: listener('onStatus'),
+      onPlan: listener('onPlan'),
       onPermissionRequest: listener('onPermissionRequest'),
       onPickerRequest: listener('onPickerRequest'),
       onCapabilities: listener('onCapabilities'),

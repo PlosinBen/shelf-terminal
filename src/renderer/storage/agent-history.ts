@@ -53,38 +53,31 @@ function getDB(): Promise<IDBPDatabase> {
 type StoredMsg = AgentMsg & { dbId?: number; sessionId: string };
 
 /**
- * If we crashed / were closed mid-tool-call, an in-flight `tool_use` or
- * `file_edit` would have been persisted without a `result`. On reload, that
- * card would render forever as "running" with no agent-server to ever
- * complete it. Patch a synthetic failed result so the user sees what
- * happened instead of a fake pending state.
+ * If we crashed / were closed mid-tool-call, an in-flight fold_* card may
+ * have been persisted without body/errorMessage. On reload that card would
+ * render forever as "running"; patch a synthetic errorMessage so the user
+ * sees what happened.
+ *
+ * NOTE: full v3→v4 IDB migration + orphan-revive rewrite is phase 6.
+ * This function preserves behaviour for new-schema rows; legacy rows are
+ * handled by the migration in phase 6.
  */
 function reviveOrphanPending(msg: AgentMsg): AgentMsg {
-  if (msg.type === 'tool_use' && !msg.result) {
-    return { ...msg, result: { content: 'Session ended before this tool finished.', isError: true } };
-  }
-  if (msg.type === 'file_edit' && !msg.result) {
-    return { ...msg, result: { success: false, error: 'Session ended before this edit finished.' } };
-  }
-  if (msg.type === 'slash_response' && msg.status === 'pending') {
-    return { ...msg, status: 'error', content: 'Session ended before this command finished.' };
+  if ((msg.type === 'fold_text' || msg.type === 'fold_code'
+       || msg.type === 'fold_markdown' || msg.type === 'fold_diff')
+       && !msg.body && !msg.errorMessage) {
+    return { ...msg, errorMessage: 'Session ended before completion' } as AgentMsg;
   }
   return msg;
 }
 
 /**
- * Pre-canonicalization persisted records had `tool_use` with structured
- * `toolInput: Record<string, unknown>` instead of `input: string`. Old saves
- * loaded under the new schema would render with empty header. JSON-stringify
- * the legacy field as a one-shot fallback so historical sessions still show
- * something readable. New writes already carry `input`, so this branch only
- * fires for stale rows.
+ * Placeholder for legacy migration. The actual v3→v4 IDB upgrade + per-row
+ * shape mapping lives in phase 6. For now this is the identity function so
+ * the file compiles under the new union; phase 6 will replace this with the
+ * real conversion (old tool_use/file_edit/slash_response → fold_*).
  */
 function migrateLegacyToolUseInput(msg: any): AgentMsg {
-  if (msg?.type === 'tool_use' && typeof msg.input !== 'string' && msg.toolInput) {
-    const { toolInput, ...rest } = msg;
-    return { ...rest, input: JSON.stringify(toolInput) } as AgentMsg;
-  }
   return msg as AgentMsg;
 }
 
@@ -171,8 +164,8 @@ export async function saveAgentMessagesDelta(
   }
 
   for (const msg of dirty) {
-    if (msg.type === 'text' && msg.streaming) continue;
-    if (msg.type === 'thinking' && msg.streaming) continue;
+    if (msg.type === 'reply' && msg.streaming) continue;
+    if (msg.type === 'fold_text' && msg.streaming) continue;
     await store.add({ ...msg, sessionId } as StoredMsg);
   }
   await tx.done;

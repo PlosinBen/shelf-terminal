@@ -37,33 +37,35 @@ describe('createFakeBackend — scenarios', () => {
     expect(types).toContain('stream');
     expect(msgs.filter((m) => m.type === 'stream').length).toBeGreaterThanOrEqual(2);
     const finalize = msgs.find((m) => m.type === 'message') as any;
-    expect(finalize.msgType).toBe('text');
+    expect(finalize.msgType).toBe('reply');
     expect(finalize.content).toBe('hello');
     expect((msgs[msgs.length - 1] as any).state).toBe('idle');
   });
 
-  it('thinking: emits one thinking message', async () => {
+  it('thinking: emits one fold_text message labeled Thinking', async () => {
     const { send, msgs } = collect();
     await createFakeBackend().query(makeInput('thinking:reasoning'), send);
     const m = msgs.find((x) => x.type === 'message') as any;
-    expect(m.msgType).toBe('thinking');
-    expect(m.content).toBe('reasoning');
+    expect(m.msgType).toBe('fold_text');
+    expect(m.label).toBe('Thinking');
+    expect(m.body.content).toBe('reasoning');
+    expect(m.body.tone).toBe('muted');
   });
 
-  it('tool: emits tool_use with success result', async () => {
+  it('tool: emits fold_code without errorMessage on success', async () => {
     const { send, msgs } = collect();
     await createFakeBackend().query(makeInput('tool:Read'), send);
-    const m = msgs.find((x) => x.type === 'message' && (x as any).msgType === 'tool_use') as any;
-    expect(m.toolName).toBe('Read');
-    expect(m.result.isError).toBeUndefined();
+    const m = msgs.find((x) => x.type === 'message' && (x as any).msgType === 'fold_code') as any;
+    expect(m.label).toBe('Read');
+    expect(m.errorMessage).toBeUndefined();
   });
 
-  it('tool_err: emits tool_use with isError', async () => {
+  it('tool_err: emits fold_code with errorMessage', async () => {
     const { send, msgs } = collect();
     await createFakeBackend().query(makeInput('tool_err:Bash'), send);
-    const m = msgs.find((x) => x.type === 'message' && (x as any).msgType === 'tool_use') as any;
-    expect(m.toolName).toBe('Bash');
-    expect(m.result.isError).toBe(true);
+    const m = msgs.find((x) => x.type === 'message' && (x as any).msgType === 'fold_code') as any;
+    expect(m.label).toBe('Bash');
+    expect(m.errorMessage).toBeDefined();
   });
 
   it('permission: emits permission_request and waits for resolve', async () => {
@@ -180,7 +182,7 @@ describe('createFakeBackend — scenarios', () => {
     await createFakeBackend().query(makeInput('text:a|delay:60|text:b'), send);
     const elapsed = Date.now() - start;
     expect(elapsed).toBeGreaterThanOrEqual(50);
-    const texts = msgs.filter((m) => m.type === 'message' && (m as any).msgType === 'text');
+    const texts = msgs.filter((m) => m.type === 'message' && (m as any).msgType === 'reply');
     expect(texts).toHaveLength(2);
   });
 
@@ -188,18 +190,18 @@ describe('createFakeBackend — scenarios', () => {
     const { send, msgs } = collect();
     await createFakeBackend().query(makeInput('text:hi|tool:Read|text:bye'), send);
     const ordered = msgs.filter((m) => m.type === 'message') as any[];
-    expect(ordered[0].msgType).toBe('text');
+    expect(ordered[0].msgType).toBe('reply');
     expect(ordered[0].content).toBe('hi');
-    expect(ordered[1].msgType).toBe('tool_use');
-    expect(ordered[2].msgType).toBe('text');
+    expect(ordered[1].msgType).toBe('fold_code');
+    expect(ordered[2].msgType).toBe('reply');
     expect(ordered[2].content).toBe('bye');
   });
 
-  it('unknown prompt falls back to echo text', async () => {
+  it('unknown prompt falls back to echo reply', async () => {
     const { send, msgs } = collect();
     await createFakeBackend().query(makeInput('not a known scenario'), send);
     const m = msgs.find((x) => x.type === 'message') as any;
-    expect(m.msgType).toBe('text');
+    expect(m.msgType).toBe('reply');
     expect(m.content).toContain('fake-echo');
   });
 

@@ -297,7 +297,6 @@ export function SettingsPanel() {
                       >
                         <option value="collapsed">Collapsed</option>
                         <option value="expanded">Expanded</option>
-                        <option value="hidden">Hidden</option>
                       </select>
                     </div>
                     {hint && <div className="settings-sub-hint">{hint}</div>}

@@ -97,6 +97,7 @@ export const IPC = {
   AGENT_MESSAGE: 'agent:message',
   AGENT_STREAM: 'agent:stream',
   AGENT_STATUS: 'agent:status',
+  AGENT_PLAN: 'agent:plan',
   AGENT_PERMISSION_REQUEST: 'agent:permission-request',
   AGENT_PICKER_REQUEST: 'agent:picker-request',
   AGENT_CAPABILITIES: 'agent:capabilities',

@@ -229,7 +229,7 @@ describe('processMessage — text msgId stability across SDK quirks', () => {
     const send = (m: OutgoingMessage) => { sent.push(m); };
     return { send, sent };
   }
-  const textBlocksAt = (msgs: any[]) => msgs.filter((m) => m.type === 'message' && m.msgType === 'text');
+  const textBlocksAt = (msgs: any[]) => msgs.filter((m) => m.type === 'message' && m.msgType === 'reply');
 
   it('clears blockMsgIds on message_start, mints fresh ids per assistant message', () => {
     // Two logical assistant messages, both starting with text at idx 0.
@@ -300,7 +300,7 @@ describe('processMessage — text msgId stability across SDK quirks', () => {
     expect(textId).toBeDefined();
     expect(thinkingId).not.toBe(textId);
 
-    const thinkings = sent.filter((m) => m.type === 'message' && m.msgType === 'thinking');
+    const thinkings = sent.filter((m) => m.type === 'message' && m.msgType === 'fold_text');
     const texts = textBlocksAt(sent);
     expect(thinkings).toHaveLength(1);
     expect(thinkings[0].msgId).toBe(thinkingId);

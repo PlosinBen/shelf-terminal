@@ -133,7 +133,7 @@ export function createFakeBackend(): ServerBackend {
   ): Promise<void> {
     if (signal.aborted) return;
 
-    // text:<msg> — streaming chunks + finalize
+    // text:<msg> — streaming chunks + finalize (renderer-side: reply)
     if (step.startsWith('text:')) {
       const content = step.slice('text:'.length);
       const msgId = mintId('m');
@@ -141,14 +141,18 @@ export function createFakeBackend(): ServerBackend {
       const mid = Math.ceil(content.length / 2);
       send({ type: 'stream', msgId, streamType: 'text', content: content.slice(0, mid) });
       send({ type: 'stream', msgId, streamType: 'text', content: content.slice(mid) });
-      send({ type: 'message', msgId, msgType: 'text', content });
+      send({ type: 'message', msgId, msgType: 'reply', content });
       return;
     }
 
     if (step.startsWith('thinking:')) {
       const content = step.slice('thinking:'.length);
       const msgId = mintId('m');
-      send({ type: 'message', msgId, msgType: 'thinking', content });
+      send({
+        type: 'message', msgId, msgType: 'fold_text',
+        label: 'Thinking',
+        body: { content, tone: 'muted' },
+      });
       return;
     }
 
@@ -159,14 +163,11 @@ export function createFakeBackend(): ServerBackend {
       send({
         type: 'message',
         msgId: toolUseId,
-        msgType: 'tool_use',
-        toolUseId,
-        toolName,
-        input: '{}',
-        result: {
-          content: isErr ? `${toolName} failed` : `${toolName} ok`,
-          isError: isErr || undefined,
-        },
+        msgType: 'fold_code',
+        label: toolName,
+        subtitle: '{}',
+        body: { content: isErr ? `${toolName} failed` : `${toolName} ok` },
+        ...(isErr ? { errorMessage: 'Tool returned an error' } : {}),
       });
       return;
     }
@@ -213,7 +214,7 @@ export function createFakeBackend(): ServerBackend {
       const echo = 'cancelled' in payload
         ? 'picker_answers:cancelled'
         : `picker_answers:${JSON.stringify(payload.answers)}`;
-      send({ type: 'message', msgId: mintId('m'), msgType: 'text', content: echo });
+      send({ type: 'message', msgId: mintId('m'), msgType: 'reply', content: echo });
       return;
     }
 
@@ -233,11 +234,11 @@ export function createFakeBackend(): ServerBackend {
       return;
     }
 
-    // Unknown — echo as plain text so the user sees something during dev.
+    // Unknown — echo as plain reply so the user sees something during dev.
     send({
       type: 'message',
       msgId: mintId('m'),
-      msgType: 'text',
+      msgType: 'reply',
       content: `fake-echo: ${step}`,
     });
   }

@@ -45,7 +45,7 @@ const TAB = 'tab-1';
 const SESSION = 'sess-1';
 
 function textMsg(id: string, content: string, streaming = false): AgentMsg {
-  return { id, type: 'text', content, streaming, provider: 'claude', timestamp: 1000 };
+  return { id, type: 'reply', content, streaming, provider: 'claude', timestamp: 1000 };
 }
 
 function userMsg(id: string, content: string): AgentMsg {
