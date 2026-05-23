@@ -363,6 +363,16 @@ export function removeTab(tabId: string) {
 
 export function upsertMessage(tabId: string, msg: AgentMsg) {
   if (!tabs.has(tabId)) return;
+  // 清掉該 msgId 的 pending chunk buffer — 如果剛收到 finalize message
+  // (provider 的 finalize content 是完整文字、已含所有 stream chunks)，
+  // buffer 裡尚未 flush 的 delta 是 stale；不清會被下次 flush 追加到已
+  // finalize 的 content 後面，導致結尾重複（例如「...可以開工。工。」）。
+  // Race window: finalize 在 33ms flush timer 觸發前抵達。
+  const buffer = pendingChunks.get(tabId);
+  if (buffer?.has(msg.id)) {
+    buffer.delete(msg.id);
+    if (buffer.size === 0) clearChunkBuffer(tabId);
+  }
   update(tabId, (prev) => ({ ...prev, messages: upsertById(prev.messages, msg) }));
   markDirty(tabId, msg);
 }

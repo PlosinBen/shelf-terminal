@@ -208,6 +208,40 @@ describe('agentTabStore — message actions', () => {
     expect((msgs[0] as any).streaming).toBe(false);
   });
 
+  it('upsertMessage clears pending chunks for same msgId — fixes stream-finalize race (no trailing duplicate)', () => {
+    // 模擬 race：finalize message 在 33ms timer 觸發前抵達。
+    // Buffer 內未 flush 的 delta 已經包含在 finalize content 內，不該再追加。
+    appendChunk(TAB, 'm1', '可以開', 'text');
+    appendChunk(TAB, 'm1', '工。', 'text');
+    // Buffer 還沒 flush
+    expect(__getTabForTests(TAB)!.messages.length).toBe(0);
+
+    // Finalize message 帶完整 content 抵達
+    upsertMessage(TAB, textMsg('m1', '確認後寫進 plan 文件，五個 Q 全部完成可以開工。'));
+
+    // 推進 timer — buffer 應該已被 upsertMessage 清掉，不該追加重複文字
+    vi.advanceTimersByTime(33);
+
+    const msgs = __getTabForTests(TAB)!.messages;
+    expect(msgs.length).toBe(1);
+    expect((msgs[0] as any).content).toBe('確認後寫進 plan 文件，五個 Q 全部完成可以開工。');
+    // 修復前的 bug：content 會變成 '...可以開工。可以開工。'（buffer 追加）
+  });
+
+  it('upsertMessage only clears buffer for the same msgId — other msgIds untouched', () => {
+    appendChunk(TAB, 'm1', 'foo', 'text');
+    appendChunk(TAB, 'm2', 'bar', 'text');
+    // 只 finalize m1
+    upsertMessage(TAB, textMsg('m1', 'final-m1'));
+    vi.advanceTimersByTime(33);
+
+    const msgs = __getTabForTests(TAB)!.messages;
+    expect(msgs.length).toBe(2);
+    expect((msgs.find((m) => m.id === 'm1') as any).content).toBe('final-m1');
+    // m2 沒被 finalize，buffer 仍正常 flush
+    expect((msgs.find((m) => m.id === 'm2') as any).content).toBe('bar');
+  });
+
   it('removeTab clears pending chunk buffer + timer', () => {
     appendChunk(TAB, 'chunk-1', 'lost', 'text');
     removeTab(TAB);
