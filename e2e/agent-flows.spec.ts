@@ -80,8 +80,9 @@ test.describe('agent flows via fake provider', () => {
       await openAgentTab(page);
       await sendAgentPrompt(page, 'tool:Read');
 
-      // Tool results render as fold_code cards — narrow by fold-body-code presence.
-      const toolCard = page.locator('.agent-msg-fold:has(.fold-body-code):visible').last();
+      // Tool results render as fold cards. Body is hidden when collapsed
+      // (fold_code defaults to collapsed), so match by header label instead.
+      const toolCard = page.locator('.agent-msg-fold:has(.fold-label:has-text("Read")):visible').last();
       await expect(toolCard).toBeVisible({ timeout: 5_000 });
       await expect(toolCard.locator('.fold-label')).toHaveText('Read');
     });
@@ -114,10 +115,10 @@ test.describe('agent flows via fake provider', () => {
     await openAgentTab(page);
     await sendAgentPrompt(page, 'thinking:considering options');
 
-    // Thinking maps to fold_text — narrow by fold-body-text presence.
-    const card = page.locator('.agent-msg-fold:has(.fold-body-text):visible').last();
+    // Thinking maps to fold_text with label "Thinking". Body is collapsed by
+    // default — match by header label, then click to expand and verify content.
+    const card = page.locator('.agent-msg-fold:has(.fold-label:has-text("Thinking")):visible').last();
     await expect(card).toBeVisible({ timeout: 5_000 });
-    // Click header to expand (collapsed by default per agentDisplay.fold_text).
     await card.locator('.fold-header').click();
     await expect(card.locator('.fold-body-text')).toContainText('considering options');
   });
