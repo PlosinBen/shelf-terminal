@@ -505,7 +505,6 @@ export function createClaudeBackend(): ServerBackend {
         // Fall through — SDK still handles the actual /clear semantics.
       }
       let pendingCompactMsgId: string | null = null;
-      let compactMeta: { pre_tokens?: number; post_tokens?: number; duration_ms?: number } | null = null;
       if (slash?.cmd === 'compact') {
         pendingCompactMsgId = mintSlashMsgId();
         send({
@@ -522,27 +521,21 @@ export function createClaudeBackend(): ServerBackend {
             lastSessionId = sdkMsg.session_id as string;
           }
 
-          // /compact completion detection — must run before processMessage so
-          // we capture metadata from the system message while it's in scope.
-          // SDK emits two relevant events: subtype 'compact_boundary' carries
-          // pre/post token counts; subtype 'status' with compact_result is
-          // the terminal success/failure flag.
+          // /compact completion detection — listen for status with compact_result.
+          // SDK 也會發 'compact_boundary' 帶 pre/post token，但 post_tokens 是
+          // optional（壓縮完還沒實際送 model 算不出來），顯示 'pre → ?' 沒意義，
+          // duration_ms 也常缺。直接吃 status.compact_result 當 terminal flag，
+          // 顯示 'Compact completed' / 'Compact failed' 就好；要看 context 變化
+          // 使用者本來就能從 status bar 的 context% 觀察。
           if (pendingCompactMsgId && sdkMsg.type === 'system') {
             const subtype = (sdkMsg as any).subtype;
-            if (subtype === 'compact_boundary') {
-              compactMeta = (sdkMsg as any).compact_metadata ?? null;
-            } else if (subtype === 'status' && (sdkMsg as any).compact_result) {
+            if (subtype === 'status' && (sdkMsg as any).compact_result) {
               const result = (sdkMsg as any).compact_result as 'success' | 'failed';
               if (result === 'success') {
-                const pre = compactMeta?.pre_tokens?.toLocaleString() ?? '?';
-                const post = compactMeta?.post_tokens?.toLocaleString() ?? '?';
-                const dur = compactMeta?.duration_ms
-                  ? ` in ${(compactMeta.duration_ms / 1000).toFixed(1)}s`
-                  : '';
                 send({
                   type: 'message', msgId: pendingCompactMsgId, msgType: 'slash_response',
                   slashCmd: 'compact', status: 'success',
-                  content: `Compacted: ${pre} → ${post} tokens${dur}`,
+                  content: 'Compact completed',
                 });
               } else {
                 const errMsg = (sdkMsg as any).compact_error ?? 'Compaction failed';
@@ -553,7 +546,6 @@ export function createClaudeBackend(): ServerBackend {
                 });
               }
               pendingCompactMsgId = null;
-              compactMeta = null;
               stoppable = true;
             }
           }
