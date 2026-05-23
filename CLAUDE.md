@@ -5,7 +5,7 @@
 | Situation | Read |
 |-----------|------|
 | 找功能在哪個檔案 | [.agent/PROJECT_MAP.md](.agent/PROJECT_MAP.md) |
-| 理解為什麼這樣設計、什麼不該改 | [.agent/DECISIONS.md](.agent/DECISIONS.md) |
+| 理解為什麼這樣設計、什麼不該改（按領域分檔，編號全域唯一）| [.agent/DECISIONS-core.md](.agent/DECISIONS-core.md) (基礎建設) ・ [.agent/DECISIONS-pm.md](.agent/DECISIONS-pm.md) (PM agent) ・ [.agent/DECISIONS-agent.md](.agent/DECISIONS-agent.md) (Agent provider) |
 | 遇到奇怪行為、debug 前先看 | [.agent/GOTCHAS.md](.agent/GOTCHAS.md) |
 | 發版流程、tag 規範 | [.agent/RELEASE_FLOW.md](.agent/RELEASE_FLOW.md) |
 
