@@ -4,7 +4,7 @@ import type { Page } from '@playwright/test';
 /**
  * Agent rendering flows beyond picker — exercises every other major wire
  * event the renderer must handle: permission_request, streaming chunks
- * pairing with finalize, tool_use cards (success + error), error events,
+ * pairing with finalize, fold cards (tool success + error), error events,
  * auth_required pane, and stop mid-turn.
  *
  * All driven via the fake provider (SHELF_TEST_MODE=1, see helpers.ts).
@@ -74,28 +74,28 @@ test.describe('agent flows via fake provider', () => {
     });
   });
 
-  test.describe('tool_use', () => {
-    test('tool: renders a tool card with the tool name and ok result', async ({ shelfApp: { page } }) => {
+  test.describe('fold (tool_use)', () => {
+    test('tool: renders a fold card with the tool name and ok result', async ({ shelfApp: { page } }) => {
       await setupProject(page);
       await openAgentTab(page);
       await sendAgentPrompt(page, 'tool:Read');
 
-      const toolCard = page.locator('.agent-msg-tool:visible').last();
+      // Tool results render as fold_code cards — narrow by fold-body-code presence.
+      const toolCard = page.locator('.agent-msg-fold:has(.fold-body-code):visible').last();
       await expect(toolCard).toBeVisible({ timeout: 5_000 });
-      await expect(toolCard.locator('.agent-tool-name')).toHaveText('Read');
+      await expect(toolCard.locator('.fold-label')).toHaveText('Read');
     });
 
-    test('tool_err: marks result block as error', async ({ shelfApp: { page } }) => {
+    test('tool_err: shows error banner on failed fold card', async ({ shelfApp: { page } }) => {
       await setupProject(page);
       await openAgentTab(page);
       await sendAgentPrompt(page, 'tool_err:Bash');
 
-      const toolCard = page.locator('.agent-msg-tool:visible').last();
+      const toolCard = page.locator('.agent-msg-fold:has(.fold-error-banner):visible').last();
       await expect(toolCard).toBeVisible({ timeout: 5_000 });
-      await expect(toolCard.locator('.agent-tool-name')).toHaveText('Bash');
-      // Expand to surface the result block (collapsed by default).
-      await toolCard.locator('.agent-tool-header').click();
-      await expect(toolCard.locator('.agent-tool-result-error')).toBeVisible();
+      await expect(toolCard.locator('.fold-label')).toHaveText('Bash');
+      // Failed fold cards force-expand; error banner is visible without clicking.
+      await expect(toolCard.locator('.fold-error-banner')).toBeVisible();
     });
   });
 
@@ -109,16 +109,17 @@ test.describe('agent flows via fake provider', () => {
     await expect(page.locator('.agent-auth-title:visible')).toContainText('Fake');
   });
 
-  test('thinking: renders as a thinking message card', async ({ shelfApp: { page } }) => {
+  test('thinking: renders as a fold_text card', async ({ shelfApp: { page } }) => {
     await setupProject(page);
     await openAgentTab(page);
     await sendAgentPrompt(page, 'thinking:considering options');
 
-    const card = page.locator('.agent-msg-thinking:visible').last();
+    // Thinking maps to fold_text — narrow by fold-body-text presence.
+    const card = page.locator('.agent-msg-fold:has(.fold-body-text):visible').last();
     await expect(card).toBeVisible({ timeout: 5_000 });
-    // Click chevron to expand (collapsed by default per agentDisplay.thinking).
-    await card.locator('.agent-thinking-header').click();
-    await expect(card.locator('.agent-thinking-content')).toContainText('considering options');
+    // Click header to expand (collapsed by default per agentDisplay.fold_text).
+    await card.locator('.fold-header').click();
+    await expect(card.locator('.fold-body-text')).toContainText('considering options');
   });
 
   test('picker_number: integer-only input flow', async ({ shelfApp: { page } }) => {
@@ -150,7 +151,7 @@ test.describe('agent flows via fake provider', () => {
     const messages = page.locator('.agent-messages:visible');
     await expect(messages).toContainText('hello', { timeout: 5_000 });
     await expect(messages).toContainText('bye');
-    await expect(messages.locator('.agent-tool-name', { hasText: 'Read' })).toBeVisible();
+    await expect(messages.locator('.fold-label', { hasText: 'Read' })).toBeVisible();
     await expect(page.locator('.agent-status-label:visible')).toHaveText('idle', { timeout: 5_000 });
   });
 
