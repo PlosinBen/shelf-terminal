@@ -27,9 +27,12 @@
 
 ## Conventions
 
-- All user actions go through event bus (`src/renderer/events.ts`)
-- Trigger sites (UI components, keybindings) only `emit()` events
-- Side effects (pty kill, terminal dispose, persist) handled centrally in `App.tsx`
-- Connection-specific logic abstracted via `createConnector()` factory in `src/main/connector/`; preload is RPC bridge only
-- Keybindings are configurable via Settings; parameterized actions use `action_param` pattern (e.g. `switchTab_3`)
-- App keybindings intercept at capture phase with `stopPropagation`; xterm never receives matched combos
+- 所有 user action 走 event bus (`src/renderer/events.ts`)
+- 觸發點 (UI 元件、keybindings) 只 `emit()` event，不執行 side effect
+- Side effect (pty kill、terminal dispose、persist) 集中在 `App.tsx` 處理
+- Sibling 元件間接相依：動作走 EventBus、共享 state 走 Store；不靠共同父層 state coordinator（避免父層 cascade re-render）
+- Connection-specific 邏輯走 `createConnector()` factory (`src/main/connector/`)；preload 純 RPC bridge 不含 dispatch
+- Agent backend (provider/SDK 細節) 完全封裝在 `agent-server/`；renderer 不感知 provider type、tool name、slash 語法
+- Wire payload 給 renderer 是渲染原語 (reply / fold_code / fold_markdown / fold_diff / note / system / error)，不是 provider 語意 (thinking / tool_use / slash_response)
+- Config source-of-truth 單向流動：renderer 持有 prefs → backend imperative apply 不 cache；backend 持有 status / capabilities → renderer 純展示
+- 有參數的 keybinding action 用 `action_param` pattern (例: `switchTab_3`)
