@@ -1,6 +1,56 @@
 # Shelf Terminal
 
+> 中文版：[README-zhtw.md](./README-zhtw.md)
+
 Cross-platform, project-based terminal manager built with Electron. Replaces tmux for multi-project CLI management.
+
+## What Shelf Is
+
+Shelf is a project-based terminal manager — open 10+ terminals across multiple projects without spending mental energy on window/session housekeeping. It's a spiritual successor to tmux + session-management plugins, aimed at being more comfortable than that route. The agent view (Claude Code / Copilot CLI etc.) is a bonus, not the headline feature.
+
+## Why I Built This
+
+I used tmux heavily for years, but managing windows and sessions became painful as my project count grew. Saving window state required plugins, and finding things still hurt. On a typical workday I have 10+ terminals open — even more since vibing CLI tools (Claude Code, Copilot CLI) entered my workflow. That overhead became a daily tax.
+
+My workflow shifted in this period too. I used to split time between terminal and JetBrains IDE; vibing pushed me toward CLI-first, with the IDE demoted to a code viewer. Once the terminal stopped being a sidekick and became the main stage, its ergonomics turned into a critical pain point.
+
+The agent view was a separate motivation. CLI agents like Claude Code and Copilot CLI are powerful, but their input area is weak — multi-line editing, going back to fix text, pasting long prompts all behave differently from what people expect from a normal editor. I wanted "the power of a terminal + the comfort of an editor input."
+
+Why build my own instead of using Warp / Cursor / Zed / Wave? Using someone else's tool means living with their decisions — send a PR and wait for release, or fork and maintain. Vibe coding makes the cost of building tools low; rather than route around friction every time, it's faster to build something that actually fits my workflow. There's also a personal motivation: this project doubles as a substantial piece on my resume.
+
+## Who It's For
+
+Shelf isn't aimed at a specific role (front-end / back-end / SRE all welcome) — it targets a **workflow profile**. If yours matches, Shelf fits; if not, it doesn't.
+
+**Good fit**:
+- **Multiple projects in parallel** — switching between working trees / environments throughout the day, not "finish one project then start the next"
+- **CLI-first** — terminal is the main surface, IDE / Editor is the assistant
+- **Heavy vibe coding** — Claude Code / Copilot CLI etc. running constantly
+- **Cross-platform** — macOS / Windows (WSL) as daily drivers; SSH / Docker are part of normal work
+
+**Not a fit**: people who want a large integrated environment (IDE-class). If you want file tree + LSP + debugger + refactor tools + graphical git client all in one window, VS Code / JetBrains is the right tool. Shelf is for "I already have my IDE / Editor — I just want the terminal layer to feel better."
+
+## Typical Workflow
+
+I typically have ~10 projects loaded but only the actively-worked ones connected. The rhythm is **constant project switching** — while one project's agent is thinking, jump to another and do something else, then come back when the agent finishes.
+
+Where each surface fits in:
+
+| Surface | Frequency | Use |
+|---------|-----------|-----|
+| Terminal | All the time | Main stage |
+| Agent View | Always open (per connected project) | Vibing |
+| Notes | As needed | Quick capture of gotchas / thoughts mid-work |
+| PM Agent | Occasionally at home | Not suitable in work environments (corporate assets / security policy) |
+| DevTools | Handy during debug | Base64 / JSON / URL / Hash — replaces external apps and online tools |
+
+## Where Shelf Shines
+
+1. **Fast project switching** — In tmux it was `cmd-b w` → scan list → find session → Enter. In Shelf it's one sidebar click, or `cmd+digit`. When you have 10 projects and switch constantly, switching cost matters a lot.
+
+2. **Agent view beats raw CLI** — Mostly about input ergonomics (multi-line, editing, pasting long prompts) and a more comfortable surface. Feature parity with the CLI, but every day's worth of typing accumulates.
+
+3. **SSH agents feel local** — Claude / Copilot over SSH behave the same as local because Shelf just forwards the PTY, with the agent running on the remote and output streamed back. Not specifically designed for this, but it ended up being one of Shelf's quiet wins (most other tools have a friction shift when you switch to SSH).
 
 ## Features
 
@@ -170,6 +220,16 @@ Stored at `~/Library/Application Support/shelf-terminal/settings.json` (macOS) o
 Projects stored at the same location in `projects.json`.
 
 Dev and test environments use isolated paths (`shelf-terminal-development`, `shelf-terminal-test`).
+
+## Project Status
+
+This is a public personal project. I don't actively market it, but if you find Shelf and your workflow lines up — or you just want to poke around — issues and PRs are welcome.
+
+How it actually runs:
+- ✅ Public repo, public releases, binaries published
+- ✅ Issues read, reasonable PRs reviewed / merged
+- ❌ No marketing / outreach / public roadmap commitments
+- ❌ Won't add features that drift from the positioning just to grow the user base
 
 ## License
 
