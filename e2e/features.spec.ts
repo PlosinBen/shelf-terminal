@@ -398,19 +398,22 @@ test('mod+D toggles dev tools panel', async ({ shelfApp: { page } }) => {
   const panel = page.locator('.devtools-panel');
   const collapsed = page.locator('.right-tab-btn', { hasText: 'Dev Tools' });
 
-  // Initially collapsed tab visible, panel hidden
+  // Initially collapsed tab visible (inactive), panel hidden
   await expect(collapsed).toBeVisible({ timeout: 3_000 });
+  await expect(collapsed).not.toHaveClass(/active/);
   await expect(panel).not.toBeVisible();
 
-  // Open via keyboard
+  // Open via keyboard — tab stays visible but becomes active
   await page.keyboard.press(`${modifier}+d`);
   await expect(panel).toBeVisible({ timeout: 3_000 });
-  await expect(collapsed).not.toBeVisible();
+  await expect(collapsed).toBeVisible();
+  await expect(collapsed).toHaveClass(/active/);
 
-  // Close via keyboard
+  // Close via keyboard — active class removed
   await page.keyboard.press(`${modifier}+d`);
   await expect(panel).not.toBeVisible();
   await expect(collapsed).toBeVisible();
+  await expect(collapsed).not.toHaveClass(/active/);
 });
 
 test('dev tools panel opens via collapsed tab click', async ({ shelfApp: { page } }) => {

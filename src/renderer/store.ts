@@ -38,6 +38,7 @@ let settings: AppSettings = { ...DEFAULT_SETTINGS };
 let updateStatus: UpdateStatus = { state: 'idle' };
 let pmVisible = false;
 let awayMode = false;
+let quickNoteVisible = false;
 let nextTabCounter = 0;
 let layoutGeneration = 0;
 // Pending payload for an agent chat input. Set by Notes' "Send to Chat" and
@@ -64,7 +65,7 @@ function subscribe(l: Listener) {
 }
 
 function getSnapshot() {
-  return { projects, activeProjectIndex, sidebarVisible, settingsVisible, searchVisible, commandPickerVisible, devToolsVisible, notesVisible, editingProjectIndex, settings, updateStatus, pmVisible, awayMode, layoutGeneration, chatStage };
+  return { projects, activeProjectIndex, sidebarVisible, settingsVisible, searchVisible, commandPickerVisible, devToolsVisible, notesVisible, editingProjectIndex, settings, updateStatus, pmVisible, awayMode, quickNoteVisible, layoutGeneration, chatStage };
 }
 
 let snapshotRef = getSnapshot();
@@ -313,22 +314,34 @@ export function closeCommandPicker() {
   updateSnapshot();
 }
 
-// ── Dev Tools actions ──
+// ── Right sidebar actions ──
 
-export function toggleDevTools() {
-  devToolsVisible = !devToolsVisible;
+export type RightSidebarFeature = 'pm' | 'notes' | 'devtools';
+
+export function toggleRightSidebar(feature: RightSidebarFeature) {
+  switch (feature) {
+    case 'pm':
+      pmVisible = !pmVisible;
+      break;
+    case 'notes':
+      notesVisible = !notesVisible;
+      break;
+    case 'devtools':
+      devToolsVisible = !devToolsVisible;
+      break;
+  }
   updateSnapshot();
 }
 
-// ── Notes actions ──
+// ── Quick Note overlay actions ──
 
-export function toggleNotes() {
-  notesVisible = !notesVisible;
+export function openQuickNote() {
+  quickNoteVisible = true;
   updateSnapshot();
 }
 
-export function setNotesVisible(visible: boolean) {
-  notesVisible = visible;
+export function closeQuickNote() {
+  quickNoteVisible = false;
   updateSnapshot();
 }
 
@@ -418,11 +431,6 @@ export function appendDefaultTab(projectIndex: number, name: string, color?: str
 }
 
 // ── PM actions ──
-
-export function setPmVisible(visible: boolean) {
-  pmVisible = visible;
-  updateSnapshot();
-}
 
 export function setAwayMode(on: boolean) {
   awayMode = on;

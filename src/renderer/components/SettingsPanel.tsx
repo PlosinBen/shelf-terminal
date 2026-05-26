@@ -20,6 +20,7 @@ const ACTION_LABELS: Record<KeybindingAction, string> = {
   openCommandPicker: 'Quick Commands',
   toggleDevTools: 'Dev Tools',
   toggleNotes: 'Notes',
+  quickNote: 'Quick Note',
 };
 
 function formatContextWindow(tokens: number): string {

@@ -15,6 +15,7 @@ export const DEFAULT_KEYBINDINGS: KeybindingConfig = {
   openCommandPicker: 'mod+e',
   toggleDevTools: 'mod+d',
   toggleNotes: 'mod+n',
+  quickNote: 'mod+shift+n',
 };
 
 export const DEFAULT_SETTINGS: AppSettings = {

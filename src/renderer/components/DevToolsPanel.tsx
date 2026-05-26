@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useRef } from 'react';
-import { useStore, toggleDevTools } from '../store';
+import { useStore, toggleRightSidebar } from '../store';
 
 // ── Tool definitions ──
 
@@ -272,7 +272,7 @@ export function DevToolsPanel() {
       <div className="right-panel-resize-handle devtools-resize-handle" onMouseDown={onDragStart} />
       <div className="right-panel-header devtools-header">
         <span className="right-panel-title">Dev Tools</span>
-        <button className="settings-close" onClick={toggleDevTools}>×</button>
+        <button className="settings-close" onClick={() => toggleRightSidebar('devtools')}>×</button>
       </div>
       <div className="devtools-body">
         {TOOLS.map((tool) => (

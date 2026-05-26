@@ -221,7 +221,8 @@ export type KeybindingAction =
   | 'toggleSplit'
   | 'openCommandPicker'
   | 'toggleDevTools'
-  | 'toggleNotes';
+  | 'toggleNotes'
+  | 'quickNote';
 
 export type KeybindingConfig = Record<KeybindingAction, string>;
 

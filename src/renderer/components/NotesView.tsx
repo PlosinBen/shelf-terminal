@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo, forwardRef, useImperativeHandle } from 'react';
-import { useStore, toggleNotes, setChatStage, setActiveTab } from '../store';
+import { useStore, toggleRightSidebar, setChatStage, setActiveTab } from '../store';
 import { renderMarkdown } from '../utils/markdown';
 
 const DEFAULT_WIDTH = 380;
@@ -139,7 +139,7 @@ export function NotesView() {
           {!inActive && (
             <button className="notes-new-btn" onClick={handleNew} title="New note">+</button>
           )}
-          <button className="notes-close" onClick={() => toggleNotes()}>×</button>
+          <button className="notes-close" onClick={() => toggleRightSidebar('notes')}>×</button>
         </span>
       </div>
 
@@ -436,7 +436,7 @@ const NoteEditor = forwardRef<NoteEditorHandle, NoteEditorProps>(function NoteEd
       const agentIndex = project?.tabs.findIndex((t) => t.type === 'agent') ?? -1;
       if (agentIndex >= 0) {
         setActiveTab(activeProjectIndex, agentIndex);
-        toggleNotes();
+        toggleRightSidebar('notes');
       }
     } finally {
       setSending(false);

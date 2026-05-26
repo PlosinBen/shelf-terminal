@@ -18,7 +18,7 @@ import { log, setLogLevel, setFileWriter } from '@shared/logger';
 import { applyUserDataIsolation } from './user-data-path';
 import { removeProjectStorage } from './project-storage';
 import { migratePmNotes } from './migrations/migrate-pm-notes';
-import { listNotes, getNote, createNote, updateNote, deleteNote, deleteAllDone as deleteAllDoneNotes, saveImage as saveNoteImage, readImage as readNoteImage } from './notes-store';
+import { listNotes, getNote, createNote, quickCreateNote, updateNote, deleteNote, deleteAllDone as deleteAllDoneNotes, saveImage as saveNoteImage, readImage as readNoteImage } from './notes-store';
 import { handlePmSend, handleTabEvent, getHistory, clearHistory, compactHistory, stopGeneration, updateSyncedState, setWritePtyFn, isAwayMode, setAwayMode, initAwayMode, setStateChangeCallback, updateKnownTabs, startTelegram, stopTelegram, setMessageCallback, setCallbackQueryHandler, setStopCallback } from './pm';
 import { initAgentManager, disposeAllAgents } from './agent';
 import type { Connection, ProjectConfig, AppSettings, FileUploadResult, FileClearResult, PtySpawnPayload, PtyInputPayload, PtyResizePayload, PtyKillPayload, GitBranchInfo, WorktreeAddResult, WorktreeRemoveResult } from '@shared/types';
@@ -408,6 +408,10 @@ ipcMain.handle(IPC.NOTES_GET, async (_event, payload: { projectId: string; noteI
 
 ipcMain.handle(IPC.NOTES_CREATE, async (_event, projectId: string) => {
   return createNote(projectId);
+});
+
+ipcMain.handle(IPC.NOTES_QUICK_CREATE, async (_event, payload: { projectId: string; body: string }) => {
+  return quickCreateNote(payload.projectId, payload.body);
 });
 
 ipcMain.handle(IPC.NOTES_UPDATE, async (_event, payload: { projectId: string; noteId: string; patch: { title?: string; isDone?: boolean; body?: string; images?: string[] } }) => {

@@ -121,6 +121,30 @@ export async function createNote(projectId: string): Promise<NoteMeta> {
   return meta;
 }
 
+/**
+ * One-shot create-with-body for the quick-capture overlay. Title is auto-derived
+ * (first `# heading` → otherwise first non-blank line, stripped of leading `#`
+ * marks and capped at 80 chars) so the caller doesn't have to mirror the
+ * NotesView logic. Empty / whitespace-only bodies are rejected (returns null).
+ */
+export async function quickCreateNote(projectId: string, body: string): Promise<NoteMeta | null> {
+  const trimmed = body.trim();
+  if (!trimmed) return null;
+
+  const headingMatch = body.match(/^#\s+(.+?)\s*$/m);
+  let title = headingMatch ? headingMatch[1].trim() : '';
+  if (!title) {
+    const firstLine = body.split('\n').map((s) => s.trim()).find((s) => s.length > 0) ?? '';
+    title = firstLine.replace(/^#+\s+/, '').slice(0, 80);
+  }
+
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  const meta: NoteMeta = { id, title, isDone: false, created: now, updated: now };
+  await writeRaw(projectId, id, meta, body, []);
+  return meta;
+}
+
 export async function updateNote(
   projectId: string,
   noteId: string,

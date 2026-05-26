@@ -14,9 +14,10 @@ import { BottomBar, SWITCH_BRANCH_EVENT } from './components/BottomBar';
 import { DevToolsPanel } from './components/DevToolsPanel';
 import { PmView } from './components/PmView';
 import { NotesView } from './components/NotesView';
+import { QuickNoteOverlay } from './components/QuickNoteOverlay';
 import { useKeybindings, isMac } from './hooks/useKeybindings';
 import { tooltipWithShortcut } from './utils/format-keybinding';
-import { useStore, setProjects, setSettings, setUpdateStatus, addProject, addTab, setActiveTab, removeTab, removeProject, setSplitTab, toggleSidebar, clearUnread, setInvalidProjects, setPmVisible, toggleDevTools, toggleNotes } from './store';
+import { useStore, setProjects, setSettings, setUpdateStatus, addProject, addTab, setActiveTab, removeTab, removeProject, setSplitTab, toggleSidebar, clearUnread, setInvalidProjects, toggleRightSidebar } from './store';
 import type { ProjectConfig } from '@shared/types';
 import { disposeTerminal } from './components/TerminalView';
 import { on, emit, Events } from './events';
@@ -343,31 +344,36 @@ export function App() {
         {pmVisible && <PmView />}
         {notesVisible && <NotesView />}
         {devToolsVisible && <DevToolsPanel />}
-        {(!pmVisible || !notesVisible || !devToolsVisible) && (
-          <div className="right-tabs-collapsed">
-            {!pmVisible && (
-              <button className="right-tab-btn" onClick={() => setPmVisible(true)} title="PM Agent">
-                <span className={`pm-tab-dot ${awayMode ? 'pm-dot-away' : 'pm-dot'}`} />
-                <span>PM</span>
-              </button>
-            )}
-            {!notesVisible && (
-              <button className="right-tab-btn" onClick={toggleNotes} title={tooltipWithShortcut('Notes', settings.keybindings.toggleNotes, isMac)}>
-                <span>Notes</span>
-              </button>
-            )}
-            {!devToolsVisible && (
-              <button className="right-tab-btn" onClick={toggleDevTools} title={tooltipWithShortcut('Dev Tools', settings.keybindings.toggleDevTools, isMac)}>
-                <span>Dev Tools</span>
-              </button>
-            )}
-          </div>
-        )}
+        <div className="right-tabs-collapsed">
+          <button
+            className={`right-tab-btn${pmVisible ? ' active' : ''}`}
+            onClick={() => toggleRightSidebar('pm')}
+            title="PM Agent"
+          >
+            <span className={`pm-tab-dot ${awayMode ? 'pm-dot-away' : 'pm-dot'}`} />
+            <span>PM</span>
+          </button>
+          <button
+            className={`right-tab-btn${notesVisible ? ' active' : ''}`}
+            onClick={() => toggleRightSidebar('notes')}
+            title={tooltipWithShortcut('Notes', settings.keybindings.toggleNotes, isMac)}
+          >
+            <span>Notes</span>
+          </button>
+          <button
+            className={`right-tab-btn${devToolsVisible ? ' active' : ''}`}
+            onClick={() => toggleRightSidebar('devtools')}
+            title={tooltipWithShortcut('Dev Tools', settings.keybindings.toggleDevTools, isMac)}
+          >
+            <span>Dev Tools</span>
+          </button>
+        </div>
       </main>
       <FolderPicker />
       <SettingsPanel />
       <ProjectEditPanel />
       <CommandPicker />
+      <QuickNoteOverlay />
       <WorktreeDialog />
       <RemoveConfirmDialog />
     </div>

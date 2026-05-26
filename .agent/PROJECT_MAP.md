@@ -114,6 +114,8 @@
 | 刪除確認 | `components/RemoveConfirmDialog.tsx` | Remove project 確認 modal，worktree 可勾選是否清理 worktree files |
 | PM 聊天面板 | `components/PmView.tsx` | 右側可拖拉 panel（訊息列表 + markdown 渲染 + streaming + tool call 摺疊 + Away Mode toggle + error 顯示）；chunk handling 走 `pm-view-reducer.ts` 的純 reducer |
 | Notes 面板 | `components/NotesView.tsx` | ⌘N toggle 右側 panel，per-project markdown scratch pad（preview / edit toggle）；edit 模式 paste 圖片直接存檔 + 自動插入 ref；debounced auto-save；preview 走 `marked` + `shelf-image://` |
+| Quick Note overlay | `components/QuickNoteOverlay.tsx` | ⌘⇧N 叫出 floating textarea，Enter 送出 / Shift+Enter 換行 / Esc 取消；走 `notes.quickCreate` IPC atomic 寫入當下 active project（title 自動 derive：先 `# heading` → fallback 第一行 trim 80） |
+| 右側 sidebar toggle | `store.toggleRightSidebar(feature)` | PM / Notes / DevTools 三個 panel 共用同一個 toggle action（feature: 'pm' \| 'notes' \| 'devtools'）；sidebar button 永遠顯示，依狀態套 `.active` class |
 | Tooltip 快捷鍵 helper | `utils/format-keybinding.ts` | 純函式 `formatCombo(combo, isMac)` / `tooltipWithShortcut(label, combo, isMac)`；`useKeybindings.comboToLabel` 內部 delegate 到這裡 |
 | PM stream reducer | `components/pm-view-reducer.ts` | 純 reducer（`send_start` / `clear_display` / `dismiss_error` / `chunk`），管 streaming/streamText/streamToolCalls/error 四個 UI state；vitest 測 13 case |
 | Project 編輯面板 | `components/ProjectEditPanel.tsx` | 改名、init script、default tabs、quick commands 編輯、Clear uploaded files |

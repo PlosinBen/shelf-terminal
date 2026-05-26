@@ -100,6 +100,8 @@ contextBridge.exposeInMainWorld('shelfApi', {
     get: (projectId: string, noteId: string) =>
       ipcRenderer.invoke(IPC.NOTES_GET, { projectId, noteId }),
     create: (projectId: string) => ipcRenderer.invoke(IPC.NOTES_CREATE, projectId),
+    quickCreate: (projectId: string, body: string) =>
+      ipcRenderer.invoke(IPC.NOTES_QUICK_CREATE, { projectId, body }),
     update: (projectId: string, noteId: string, patch: { title?: string; isDone?: boolean; body?: string; images?: string[] }) =>
       ipcRenderer.invoke(IPC.NOTES_UPDATE, { projectId, noteId, patch }),
     delete: (projectId: string, noteId: string) =>

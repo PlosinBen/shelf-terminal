@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useReducer, useRef, useCallback, useMemo } from 'react';
-import { useStore, setAwayMode, setPmVisible, updateSettings } from '../store';
+import { useStore, setAwayMode, toggleRightSidebar, updateSettings } from '../store';
 import { renderMarkdown } from '../utils/markdown';
 import type { PmMessage, PmStreamChunk, PmToolCall, AppSettings } from '@shared/types';
 import { getModelsForProvider } from '@shared/types';
@@ -181,7 +181,7 @@ export function PmView() {
           <button className="pm-header-btn" onClick={handleClear} title="Clear conversation">
             Clear
           </button>
-          <button className="pm-header-btn" onClick={() => setPmVisible(false)} title="Close">
+          <button className="pm-header-btn" onClick={() => toggleRightSidebar('pm')} title="Close">
             ×
           </button>
         </span>

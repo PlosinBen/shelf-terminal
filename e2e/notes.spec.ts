@@ -170,6 +170,62 @@ test.describe('Notes panel', () => {
     expect(afterFiles.length).toBe(0);
   });
 
+  // ── Quick Note overlay ──
+
+  test('mod+shift+n opens quick note overlay', async () => {
+    await page.keyboard.press(`${modifier}+Shift+n`);
+    const overlay = page.locator('.quick-note-overlay');
+    await expect(overlay).toBeVisible({ timeout: 3_000 });
+    await expect(page.locator('.quick-note-textarea')).toBeFocused();
+  });
+
+  test('Esc cancels quick note without creating a file', async () => {
+    await page.keyboard.press(`${modifier}+Shift+n`);
+    const textarea = page.locator('.quick-note-textarea');
+    await expect(textarea).toBeFocused({ timeout: 3_000 });
+    await textarea.fill('this should not persist');
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.quick-note-overlay')).not.toBeVisible({ timeout: 3_000 });
+
+    // Verify no note file landed on disk.
+    const notesDir = path.join(userDataDir, 'projects', PROJECT_ID, 'notes');
+    const files = fs.existsSync(notesDir)
+      ? fs.readdirSync(notesDir).filter((f) => f.endsWith('.md'))
+      : [];
+    expect(files.length).toBe(0);
+  });
+
+  test('Enter submits quick note and it appears in Notes list', async () => {
+    await page.keyboard.press(`${modifier}+Shift+n`);
+    const textarea = page.locator('.quick-note-textarea');
+    await expect(textarea).toBeFocused({ timeout: 3_000 });
+    await textarea.fill('# Quick capture\n\nfollow-up body');
+    await page.keyboard.press('Enter');
+    await expect(page.locator('.quick-note-overlay')).not.toBeVisible({ timeout: 3_000 });
+
+    // Note file exists on disk.
+    const notesDir = path.join(userDataDir, 'projects', PROJECT_ID, 'notes');
+    const files = fs.readdirSync(notesDir).filter((f) => f.endsWith('.md'));
+    expect(files.length).toBe(1);
+
+    // Title auto-derived from `# heading` and shows in the list.
+    await openNotesPanel(page);
+    await expect(page.locator('.notes-list-title')).toContainText('Quick capture');
+  });
+
+  test('Shift+Enter inserts newline, does not submit', async () => {
+    await page.keyboard.press(`${modifier}+Shift+n`);
+    const textarea = page.locator('.quick-note-textarea');
+    await expect(textarea).toBeFocused({ timeout: 3_000 });
+    await textarea.type('line one');
+    await page.keyboard.press('Shift+Enter');
+    await textarea.type('line two');
+
+    // Still open after Shift+Enter.
+    await expect(page.locator('.quick-note-overlay')).toBeVisible();
+    await expect(textarea).toHaveValue('line one\nline two');
+  });
+
   test('multiple notes: list sorts by updated desc', async () => {
     await openNotesPanel(page);
     // Create A
