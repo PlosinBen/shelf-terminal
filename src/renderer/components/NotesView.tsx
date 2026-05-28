@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo, forwardRef, useImperativeHandle } from 'react';
 import { useStore, toggleRightSidebar, setChatStage, setActiveTab } from '../store';
 import { renderMarkdown } from '../utils/markdown';
+import { parseDataTransfer } from '../utils/parse-data-transfer';
 
 const DEFAULT_WIDTH = 380;
 const MIN_WIDTH = 280;
@@ -391,18 +392,17 @@ const NoteEditor = forwardRef<NoteEditorHandle, NoteEditorProps>(function NoteEd
   const handlePaste = useCallback(async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
     // Image paste → store as a separate attachment, never inline in text.
     // The textarea remains pure text; images render in the row below.
-    const items = e.clipboardData.items;
-    for (const item of items) {
-      if (item.type.startsWith('image/')) {
-        e.preventDefault();
-        const file = item.getAsFile();
-        if (!file) continue;
-        const buffer = await file.arrayBuffer();
-        const ext = item.type.split('/')[1] || 'png';
-        const filename = await window.shelfApi.notes.saveImage(projectId, buffer, ext);
-        setImages((prev) => [...prev, filename]);
-        return;
-      }
+    // Text (non-image) clipboard content falls through to the textarea's
+    // default behavior — we only intercept when an image is present.
+    const items = parseDataTransfer(e.clipboardData);
+    const images = items.filter((i) => i.kind === 'file' && i.isImage);
+    if (images.length === 0) return;
+    e.preventDefault();
+    for (const item of images) {
+      if (item.kind !== 'file') continue; // type narrowing
+      const buffer = await item.file.arrayBuffer();
+      const filename = await window.shelfApi.notes.saveImage(projectId, buffer, item.ext);
+      setImages((prev) => [...prev, filename]);
     }
   }, [projectId]);
 
