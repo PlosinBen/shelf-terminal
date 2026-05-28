@@ -1,5 +1,8 @@
 import { useEffect, useRef, type RefObject } from 'react';
 import type { Connection } from '@shared/types';
+import { parseDataTransfer, type PastedItem } from '../utils/parse-data-transfer';
+
+type FileItem = Extract<PastedItem, { kind: 'file' }>;
 
 export interface AttachmentUpload {
   file: File;
@@ -104,18 +107,18 @@ export function useAttachmentPaste(
     const el = ref.current;
     if (!el) return;
 
-    async function routeFiles(files: File[]) {
+    async function routeFiles(fileItems: FileItem[]) {
       const current = optsRef.current;
       const extractImages = !!current.onImages;
       const toUpload: File[] = [];
       const imageDataUrls: string[] = [];
 
-      for (const f of files) {
-        if (extractImages && f.type.startsWith('image/')) {
-          const url = await readFileAsDataUrl(f);
+      for (const item of fileItems) {
+        if (extractImages && item.isImage) {
+          const url = await readFileAsDataUrl(item.file);
           if (url) imageDataUrls.push(url);
         } else {
-          toUpload.push(f);
+          toUpload.push(item.file);
         }
       }
 
@@ -126,31 +129,22 @@ export function useAttachmentPaste(
       }
     }
 
-    const handlePaste = async (e: ClipboardEvent) => {
-      const items = e.clipboardData?.items;
-      if (!items) return;
-      const itemArr = Array.from(items);
+    function extractFileItems(data: DataTransfer | null): FileItem[] {
+      return parseDataTransfer(data).filter(
+        (i): i is FileItem => i.kind === 'file',
+      );
+    }
 
-      // Collect file items first. Many sources (browsers, chat apps, macOS
-      // screenshot utilities) place an image/<mime> *and* a text/html preview
-      // on the clipboard at the same time. Previously we bailed on any
-      // text/html → the image got silently dropped. Rule: if there's a file,
-      // we own the paste; otherwise let the native handler put the text in.
-      const files: File[] = [];
-      for (const item of itemArr) {
-        if (item.kind === 'file') {
-          const f = item.getAsFile();
-          if (f) files.push(f);
-        }
-      }
-      if (files.length === 0) {
-        // Pure text/html paste — leave to the browser (xterm, textarea, ...).
-        return;
-      }
-      const summary = itemArr.map((it) => `${it.kind}/${it.type || '?'}`).join(',');
-      console.debug('[useAttachmentPaste] paste intercepted', { files: files.length, items: summary });
+    const handlePaste = async (e: ClipboardEvent) => {
+      // Many sources (browsers, chat apps, macOS screenshot utilities) place
+      // an image/<mime> *and* a text/html preview on the clipboard at the
+      // same time. Rule: if there's a file, we own the paste; otherwise let
+      // the native handler put the text in.
+      const fileItems = extractFileItems(e.clipboardData);
+      if (fileItems.length === 0) return; // pure text → browser handles
+      console.debug('[useAttachmentPaste] paste intercepted', { files: fileItems.length });
       e.preventDefault();
-      await routeFiles(files);
+      await routeFiles(fileItems);
     };
 
     const handleDragOver = (e: DragEvent) => {
@@ -161,10 +155,10 @@ export function useAttachmentPaste(
     };
 
     const handleDrop = async (e: DragEvent) => {
-      const list = e.dataTransfer?.files;
-      if (!list || list.length === 0) return;
+      const fileItems = extractFileItems(e.dataTransfer);
+      if (fileItems.length === 0) return;
       e.preventDefault();
-      await routeFiles(Array.from(list));
+      await routeFiles(fileItems);
     };
 
     el.addEventListener('paste', handlePaste, true);

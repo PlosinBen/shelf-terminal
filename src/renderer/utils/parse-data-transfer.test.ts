@@ -148,4 +148,39 @@ describe('parseDataTransfer', () => {
     const [item] = parseDataTransfer(makeDataTransfer({ files: [file] }));
     expect(item).toMatchObject({ ext: 'bin', isImage: false });
   });
+
+  it('uppercase filename extension is lowercased', () => {
+    const file = makeFile('REPORT.PDF', 'application/pdf');
+    const [item] = parseDataTransfer(makeDataTransfer({ files: [file] }));
+    expect(item).toMatchObject({ ext: 'pdf', isImage: false });
+  });
+
+  it('multi-dot extension grabs the last segment', () => {
+    // archive.tar.gz → 'gz' (consumer that cares about compound exts has to
+    // inspect file.name itself; parser keeps it simple).
+    const file = makeFile('archive.tar.gz', 'application/gzip');
+    const [item] = parseDataTransfer(makeDataTransfer({ files: [file] }));
+    expect(item).toMatchObject({ ext: 'gz', isImage: false });
+  });
+
+  it('clipboard with only text/html (no text/plain) does not surface a text item', () => {
+    // Some sources (Slack, browsers) put rich HTML on the clipboard without
+    // a text/plain twin. Parser only reads text/plain — anything else falls
+    // through to the browser's default handler.
+    const data = {
+      getData: (format: string) => (format === 'text/html' ? '<b>rich</b>' : ''),
+      items: [] as unknown as DataTransferItemList,
+    } as unknown as DataTransfer;
+    expect(parseDataTransfer(data)).toEqual([]);
+  });
+
+  it('file with empty MIME is NOT treated as image (rule is strict prefix)', () => {
+    // Rare but real: some sources (older Electron / clipboard quirks) hand
+    // over a file with file.type === ''. Without a positive image/* signal,
+    // the parser refuses to guess — caller can still inspect the filename
+    // and decide.
+    const file = makeFile('mystery.png', '');
+    const [item] = parseDataTransfer(makeDataTransfer({ files: [file] }));
+    expect(item).toMatchObject({ isImage: false, ext: 'png' }); // ext still from filename
+  });
 });
