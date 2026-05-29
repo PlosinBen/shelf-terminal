@@ -18,7 +18,7 @@
  */
 
 export type PastedItem =
-  | { kind: 'text'; text: string }
+  | { kind: 'text'; text: string; isImage: false }
   | { kind: 'file'; file: File; ext: string; isImage: boolean };
 
 export function parseDataTransfer(data: DataTransfer | null): PastedItem[] {
@@ -31,7 +31,7 @@ export function parseDataTransfer(data: DataTransfer | null): PastedItem[] {
   // synchronous and is the conventional source for plain text.
   const text = data.getData('text/plain');
   if (text) {
-    result.push({ kind: 'text', text });
+    result.push({ kind: 'text', text, isImage: false });
   }
 
   // Files — iterate `.items` (the superset; `.files` is a derived subset of

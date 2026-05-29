@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo, forwardRef, u
 import { useStore, toggleRightSidebar, setChatStage, setActiveTab } from '../store';
 import { renderMarkdown } from '../utils/markdown';
 import { parseDataTransfer } from '../utils/parse-data-transfer';
+import { NoteImage } from './NoteImage';
 
 const DEFAULT_WIDTH = 380;
 const MIN_WIDTH = 280;
@@ -395,11 +396,11 @@ const NoteEditor = forwardRef<NoteEditorHandle, NoteEditorProps>(function NoteEd
     // Text (non-image) clipboard content falls through to the textarea's
     // default behavior — we only intercept when an image is present.
     const items = parseDataTransfer(e.clipboardData);
-    const images = items.filter((i) => i.kind === 'file' && i.isImage);
+    const images = items.filter((i) => i.isImage);
     if (images.length === 0) return;
     e.preventDefault();
     for (const item of images) {
-      if (item.kind !== 'file') continue; // type narrowing
+      if (!item.isImage) continue; // narrows text variant away
       const buffer = await item.file.arrayBuffer();
       const filename = await window.shelfApi.notes.saveImage(projectId, buffer, item.ext);
       setImages((prev) => [...prev, filename]);
@@ -527,31 +528,6 @@ const NoteEditor = forwardRef<NoteEditorHandle, NoteEditorProps>(function NoteEd
   );
 });
 
-// Loads an image attachment via IPC into a Blob URL. Component owns the URL
-// lifecycle so it's revoked on unmount / filename change. Hover-only ✕ in the
-// top-right corner removes the image from the parent's images array.
-function NoteImage({ projectId, filename, onRemove }: { projectId: string; filename: string; onRemove: () => void }) {
-  const [src, setSrc] = useState('');
-  useEffect(() => {
-    let cancelled = false;
-    let url = '';
-    window.shelfApi.notes.readImage(projectId, filename).then((buf) => {
-      if (cancelled || !buf) return;
-      url = URL.createObjectURL(new Blob([buf]));
-      setSrc(url);
-    });
-    return () => {
-      cancelled = true;
-      if (url) URL.revokeObjectURL(url);
-    };
-  }, [projectId, filename]);
-  return (
-    <div className="notes-image-wrap">
-      {src && <img src={src} className="notes-image" alt="" />}
-      <button type="button" className="notes-image-remove" onClick={onRemove} title="Remove image" aria-label="Remove image">×</button>
-    </div>
-  );
-}
 
 function relativeTime(iso: string): string {
   if (!iso) return '';

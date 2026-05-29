@@ -226,6 +226,125 @@ test.describe('Notes panel', () => {
     await expect(textarea).toHaveValue('line one\nline two');
   });
 
+  test('paste image into quick note: thumbnail appears + saves to disk + frontmatter has filename', async () => {
+    await page.keyboard.press(`${modifier}+Shift+n`);
+    const textarea = page.locator('.quick-note-textarea');
+    await expect(textarea).toBeFocused({ timeout: 3_000 });
+
+    // Dispatch a synthetic paste with a minimal 1x1 PNG. `ClipboardEvent`'s
+    // clipboardData is normally readonly but Chromium accepts it via
+    // ClipboardEventInit when running under Playwright.
+    await page.evaluate(async () => {
+      const png = new Uint8Array([
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+        0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+        0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+        0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4,
+        0x89, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x44, 0x41,
+        0x54, 0x78, 0x9c, 0x63, 0x00, 0x01, 0x00, 0x00,
+        0x05, 0x00, 0x01, 0x0d, 0x0a, 0x2d, 0xb4, 0x00,
+        0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae,
+        0x42, 0x60, 0x82,
+      ]);
+      const file = new File([png], 'shot.png', { type: 'image/png' });
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      const target = document.querySelector('.quick-note-textarea') as HTMLTextAreaElement;
+      target.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+    });
+
+    // Thumbnail row should render (one image-wrap element under quick-note-images).
+    await expect(page.locator('.quick-note-images .notes-image-wrap')).toHaveCount(1, { timeout: 5_000 });
+
+    // Image bytes landed in projects/<id>/images/.
+    const imagesDir = path.join(userDataDir, 'projects', PROJECT_ID, 'images');
+    expect(fs.existsSync(imagesDir)).toBe(true);
+    const imgFiles = fs.readdirSync(imagesDir).filter((f) => f.endsWith('.png'));
+    expect(imgFiles.length).toBe(1);
+    const imageFilename = imgFiles[0];
+
+    // Add some body text and submit.
+    await textarea.fill('caption for the screenshot');
+    await page.keyboard.press('Enter');
+    await expect(page.locator('.quick-note-overlay')).not.toBeVisible({ timeout: 3_000 });
+
+    // Note file exists and frontmatter `images:` references the saved file.
+    const notesDir = path.join(userDataDir, 'projects', PROJECT_ID, 'notes');
+    const noteFiles = fs.readdirSync(notesDir).filter((f) => f.endsWith('.md'));
+    expect(noteFiles.length).toBe(1);
+    const noteContent = fs.readFileSync(path.join(notesDir, noteFiles[0]), 'utf-8');
+    expect(noteContent).toContain(`images: ["${imageFilename}"]`);
+    expect(noteContent).toContain('caption for the screenshot');
+  });
+
+  test('pure-image submission (no text) creates the note', async () => {
+    await page.keyboard.press(`${modifier}+Shift+n`);
+    const textarea = page.locator('.quick-note-textarea');
+    await expect(textarea).toBeFocused({ timeout: 3_000 });
+
+    await page.evaluate(async () => {
+      const png = new Uint8Array([
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+        0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+        0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+        0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4,
+        0x89, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x44, 0x41,
+        0x54, 0x78, 0x9c, 0x63, 0x00, 0x01, 0x00, 0x00,
+        0x05, 0x00, 0x01, 0x0d, 0x0a, 0x2d, 0xb4, 0x00,
+        0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae,
+        0x42, 0x60, 0x82,
+      ]);
+      const file = new File([png], 'shot.png', { type: 'image/png' });
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      const target = document.querySelector('.quick-note-textarea') as HTMLTextAreaElement;
+      target.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+    });
+
+    await expect(page.locator('.quick-note-images .notes-image-wrap')).toHaveCount(1, { timeout: 5_000 });
+
+    // Submit with empty body — should still create the note because there's
+    // at least one image attached.
+    await page.keyboard.press('Enter');
+    await expect(page.locator('.quick-note-overlay')).not.toBeVisible({ timeout: 3_000 });
+
+    const notesDir = path.join(userDataDir, 'projects', PROJECT_ID, 'notes');
+    const noteFiles = fs.readdirSync(notesDir).filter((f) => f.endsWith('.md'));
+    expect(noteFiles.length).toBe(1);
+  });
+
+  test('remove pasted image before submit', async () => {
+    await page.keyboard.press(`${modifier}+Shift+n`);
+    const textarea = page.locator('.quick-note-textarea');
+    await expect(textarea).toBeFocused({ timeout: 3_000 });
+
+    await page.evaluate(async () => {
+      const png = new Uint8Array([
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+        0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+        0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+        0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4,
+        0x89, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x44, 0x41,
+        0x54, 0x78, 0x9c, 0x63, 0x00, 0x01, 0x00, 0x00,
+        0x05, 0x00, 0x01, 0x0d, 0x0a, 0x2d, 0xb4, 0x00,
+        0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae,
+        0x42, 0x60, 0x82,
+      ]);
+      const file = new File([png], 'shot.png', { type: 'image/png' });
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      const target = document.querySelector('.quick-note-textarea') as HTMLTextAreaElement;
+      target.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+    });
+
+    const thumb = page.locator('.quick-note-images .notes-image-wrap');
+    await expect(thumb).toHaveCount(1, { timeout: 5_000 });
+
+    // Click ✕ on the thumbnail to remove it.
+    await thumb.locator('.notes-image-remove').click();
+    await expect(thumb).toHaveCount(0);
+  });
+
   test('multiple notes: list sorts by updated desc', async () => {
     await openNotesPanel(page);
     // Create A

@@ -125,11 +125,21 @@ export async function createNote(projectId: string): Promise<NoteMeta> {
  * One-shot create-with-body for the quick-capture overlay. Title is auto-derived
  * (first `# heading` → otherwise first non-blank line, stripped of leading `#`
  * marks and capped at 80 chars) so the caller doesn't have to mirror the
- * NotesView logic. Empty / whitespace-only bodies are rejected (returns null).
+ * NotesView logic. Returns null when both body and images are empty — a note
+ * with no content is never persisted.
+ *
+ * Images are filenames (UUID-named) already saved under projects/<id>/images/
+ * via `saveImage`. They live in the note's frontmatter `images` array, not
+ * inline in the body — matching NotesView's "image as separate attachment"
+ * model so the same note can be opened and edited later without surprises.
  */
-export async function quickCreateNote(projectId: string, body: string): Promise<NoteMeta | null> {
+export async function quickCreateNote(
+  projectId: string,
+  body: string,
+  images: string[] = [],
+): Promise<NoteMeta | null> {
   const trimmed = body.trim();
-  if (!trimmed) return null;
+  if (!trimmed && images.length === 0) return null;
 
   const headingMatch = body.match(/^#\s+(.+?)\s*$/m);
   let title = headingMatch ? headingMatch[1].trim() : '';
@@ -141,7 +151,7 @@ export async function quickCreateNote(projectId: string, body: string): Promise<
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
   const meta: NoteMeta = { id, title, isDone: false, created: now, updated: now };
-  await writeRaw(projectId, id, meta, body, []);
+  await writeRaw(projectId, id, meta, body, images);
   return meta;
 }
 

@@ -3917,6 +3917,7 @@ button {
   border-radius: 8px;
   width: 560px;
   max-width: calc(100vw - 32px);
+  max-height: 70vh;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -3960,6 +3961,16 @@ button {
 
 .quick-note-textarea::placeholder {
   color: var(--text-muted);
+}
+
+.quick-note-images {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 0 14px 14px;
+  overflow-y: auto;
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
 }
 
 .quick-note-hint {

@@ -65,7 +65,7 @@ interface ShelfApi {
     list: (projectId: string) => Promise<Array<{ id: string; title: string; isDone: boolean; created: string; updated: string }>>;
     get: (projectId: string, noteId: string) => Promise<{ id: string; title: string; isDone: boolean; created: string; updated: string; body: string; images: string[] } | null>;
     create: (projectId: string) => Promise<{ id: string; title: string; isDone: boolean; created: string; updated: string }>;
-    quickCreate: (projectId: string, body: string) => Promise<{ id: string; title: string; isDone: boolean; created: string; updated: string } | null>;
+    quickCreate: (projectId: string, body: string, images?: string[]) => Promise<{ id: string; title: string; isDone: boolean; created: string; updated: string } | null>;
     update: (
       projectId: string,
       noteId: string,

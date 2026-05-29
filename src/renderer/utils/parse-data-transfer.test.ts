@@ -41,12 +41,18 @@ describe('parseDataTransfer', () => {
 
   it('extracts plain text', () => {
     const result = parseDataTransfer(makeDataTransfer({ text: 'hello world' }));
-    expect(result).toEqual([{ kind: 'text', text: 'hello world' }]);
+    expect(result).toEqual([{ kind: 'text', text: 'hello world', isImage: false }]);
   });
 
   it('preserves \\r\\n in plain text', () => {
     const result = parseDataTransfer(makeDataTransfer({ text: 'line1\r\nline2' }));
-    expect(result).toEqual([{ kind: 'text', text: 'line1\r\nline2' }]);
+    expect(result).toEqual([{ kind: 'text', text: 'line1\r\nline2', isImage: false }]);
+  });
+
+  it('text items carry isImage: false (so consumers can filter on isImage uniformly)', () => {
+    const [item] = parseDataTransfer(makeDataTransfer({ text: 'hi' }));
+    expect(item.isImage).toBe(false);
+    expect(item.kind).toBe('text');
   });
 
   it('skips empty text (does not push text item)', () => {
@@ -110,7 +116,7 @@ describe('parseDataTransfer', () => {
     const file = makeFile('shot.png', 'image/png');
     const result = parseDataTransfer(makeDataTransfer({ text: 'caption', files: [file] }));
     expect(result).toHaveLength(2);
-    expect(result[0]).toEqual({ kind: 'text', text: 'caption' });
+    expect(result[0]).toEqual({ kind: 'text', text: 'caption', isImage: false });
     expect(result[1]).toMatchObject({ kind: 'file', isImage: true });
   });
 
@@ -184,3 +190,4 @@ describe('parseDataTransfer', () => {
     expect(item).toMatchObject({ isImage: false, ext: 'png' }); // ext still from filename
   });
 });
+

@@ -410,8 +410,8 @@ ipcMain.handle(IPC.NOTES_CREATE, async (_event, projectId: string) => {
   return createNote(projectId);
 });
 
-ipcMain.handle(IPC.NOTES_QUICK_CREATE, async (_event, payload: { projectId: string; body: string }) => {
-  return quickCreateNote(payload.projectId, payload.body);
+ipcMain.handle(IPC.NOTES_QUICK_CREATE, async (_event, payload: { projectId: string; body: string; images?: string[] }) => {
+  return quickCreateNote(payload.projectId, payload.body, payload.images ?? []);
 });
 
 ipcMain.handle(IPC.NOTES_UPDATE, async (_event, payload: { projectId: string; noteId: string; patch: { title?: string; isDone?: boolean; body?: string; images?: string[] } }) => {
