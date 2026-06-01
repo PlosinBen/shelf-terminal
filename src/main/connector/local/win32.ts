@@ -124,6 +124,28 @@ export class LocalWin32Connector implements Connector {
     }
     return removed;
   }
+
+  async getUploadsSize(cwd: string): Promise<{ totalBytes: number; fileCount: number }> {
+    try {
+      assertSafeCwd(cwd);
+    } catch {
+      return { totalBytes: 0, fileCount: 0 };
+    }
+    const dir = `${normalizeCwd(cwd)}/${REL_DIR}`;
+    const entries = listLocalShelfDir(dir);
+    let totalBytes = 0;
+    let fileCount = 0;
+    for (const name of entries) {
+      try {
+        const stat = fs.statSync(path.join(dir, name));
+        if (stat.isFile()) {
+          totalBytes += stat.size;
+          fileCount++;
+        }
+      } catch { /* ignore per-file errors */ }
+    }
+    return { totalBytes, fileCount };
+  }
 }
 
 function listLocalShelfDir(dir: string): string[] {

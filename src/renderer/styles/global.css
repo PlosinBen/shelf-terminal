@@ -1038,6 +1038,18 @@ button {
   opacity: 0.7;
 }
 
+.project-edit-uploads-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.project-edit-uploads-size {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
 .project-edit-textarea {
   background: var(--bg-secondary);
   border: 1px solid var(--border);
@@ -1203,6 +1215,12 @@ button {
   margin-top: -10px;
   font-size: 11px;
   color: var(--text-muted);
+}
+
+.settings-logs-size {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
 }
 
 .settings-sub-hint a {

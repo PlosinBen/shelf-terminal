@@ -7,7 +7,7 @@ import { saveProjects } from './project-store';
 import { saveSettings } from './settings-store';
 import { bootstrap } from './bootstrap';
 import { DEFAULT_SETTINGS } from '@shared/defaults';
-import { uploadFile, clearUploads } from './file-transfer';
+import { uploadFile, clearUploads, getUploadsSize } from './file-transfer';
 import { initAutoUpdater, stopAutoUpdater, manualCheckForUpdate, startUpdateDownload, confirmAndInstallUpdate } from './updater';
 import { buildAppMenu } from './app-menu';
 import { isReloadKeyEvent } from './reload-guard';
@@ -333,6 +333,26 @@ ipcMain.handle(
   },
 );
 
+/**
+ * Powers the "X MB · N files" badge next to Clear uploaded files in
+ * Project Edit. On any failure (remote unreachable, dir missing) the
+ * connector itself returns zeros — we surface that as a zeroed result
+ * rather than throwing, so the UI displays `0 B` instead of a flash of
+ * error text. Caller still has to gate on connectivity for remote
+ * projects (no point asking when the connection is down).
+ */
+ipcMain.handle(
+  IPC.FILE_UPLOADS_SIZE,
+  async (_event, payload: { connection: Connection; cwd: string }): Promise<{ totalBytes: number; fileCount: number }> => {
+    try {
+      return await getUploadsSize(payload.connection, payload.cwd);
+    } catch (err: any) {
+      log.debug('file-transfer', `getUploadsSize failed: ${err?.message ?? err}`);
+      return { totalBytes: 0, fileCount: 0 };
+    }
+  },
+);
+
 // ── Dialogs ──
 
 ipcMain.handle(IPC.DIALOG_WARN, async (_event, payload: { title: string; message: string }) => {
@@ -394,6 +414,45 @@ ipcMain.handle(IPC.LOGS_CLEAR, () => {
     fs.rmSync(logBaseDir, { recursive: true, force: true });
   }
   log.info('app', 'logs cleared');
+});
+
+/**
+ * Walk logs/<YYYYMM>/<MMDD>.log, sum file sizes, count files. Used by
+ * Settings → Logs to display total on-disk footprint next to Clear Logs.
+ * Silently treats a missing logs dir as 0 — the UI uses `0 B` for both
+ * "no files yet" and "after Clear", so the API gives the same shape.
+ */
+ipcMain.handle(IPC.LOGS_SIZE, async (): Promise<{ totalBytes: number; fileCount: number }> => {
+  const base = path.join(app.getPath('userData'), 'logs');
+  if (!fs.existsSync(base)) return { totalBytes: 0, fileCount: 0 };
+  let totalBytes = 0;
+  let fileCount = 0;
+  let monthDirs: string[] = [];
+  try {
+    monthDirs = await fs.promises.readdir(base);
+  } catch {
+    return { totalBytes: 0, fileCount: 0 };
+  }
+  for (const monthDir of monthDirs) {
+    const dir = path.join(base, monthDir);
+    const dirStat = await fs.promises.stat(dir).catch(() => null);
+    if (!dirStat?.isDirectory()) continue;
+    let files: string[] = [];
+    try {
+      files = await fs.promises.readdir(dir);
+    } catch {
+      continue;
+    }
+    for (const file of files) {
+      const filePath = path.join(dir, file);
+      const fstat = await fs.promises.stat(filePath).catch(() => null);
+      if (fstat?.isFile()) {
+        totalBytes += fstat.size;
+        fileCount++;
+      }
+    }
+  }
+  return { totalBytes, fileCount };
 });
 
 // ── Notes ──

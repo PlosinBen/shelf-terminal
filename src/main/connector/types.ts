@@ -37,4 +37,12 @@ export interface Connector {
   uploadFile(cwd: string, filename: string, buffer: Buffer): Promise<string>;
   cleanupSession(cwd: string, cutoffMs: number): Promise<number>;
   clearUploads(cwd: string): Promise<number>;
+  /**
+   * Total bytes + file count under `<cwd>/.tmp/shelf/`. Powers the "Uploaded
+   * Files: X MB · N files" display in Project Edit. Returns zeros on any
+   * failure (missing dir, no permission, remote unreachable) — caller can't
+   * meaningfully distinguish "0 bytes" from "couldn't read", and `0 B` is
+   * also the post-Clear display, so the UI is uniform.
+   */
+  getUploadsSize(cwd: string): Promise<{ totalBytes: number; fileCount: number }>;
 }

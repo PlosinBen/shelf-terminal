@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useStore, setEditingProject, updateProjectConfig } from '../store';
 import type { TabTemplate, QuickCommand, AgentProvider } from '@shared/types';
 import { TAB_COLORS } from './TabBar';
+import { formatBytes } from '../utils/format-bytes';
 
 export function ProjectEditPanel() {
   const { editingProjectIndex, projects } = useStore();
@@ -17,6 +18,7 @@ export function ProjectEditPanel() {
   const [colorPickerIndex, setColorPickerIndex] = useState<number | null>(null);
   const [clearing, setClearing] = useState(false);
   const [remoteConnected, setRemoteConnected] = useState(true);
+  const [uploadsSize, setUploadsSize] = useState<{ totalBytes: number; fileCount: number } | null>(null);
   const [defaultAgentProvider, setDefaultAgentProvider] = useState<AgentProvider | ''>('');
   const [openAgentOnConnect, setOpenAgentOnConnect] = useState(false);
 
@@ -48,6 +50,35 @@ export function ProjectEditPanel() {
       cancelled = true;
     };
   }, [editingProjectIndex]);
+
+  // Reset cached size whenever the editing target changes so we don't flash
+  // the previous project's value before the next fetch lands.
+  useEffect(() => {
+    setUploadsSize(null);
+  }, [editingProjectIndex]);
+
+  const refreshUploadsSize = useCallback(() => {
+    if (!project) return;
+    const conn = project.config.connection;
+    const isRemote = conn.type !== 'local';
+    // Skip remote dirs when not connected — the IPC would just round-trip
+    // back zeros after a failed SSH/Docker/WSL command. Display stays at
+    // `null` ("…") which the JSX renders as "—" for the disabled state.
+    if (isRemote && !remoteConnected) {
+      setUploadsSize(null);
+      return;
+    }
+    setUploadsSize(null);
+    window.shelfApi.connector
+      .getUploadsSize(conn, project.config.cwd)
+      .then(setUploadsSize)
+      .catch(() => setUploadsSize({ totalBytes: 0, fileCount: 0 }));
+  }, [project, remoteConnected]);
+
+  // Fetch on open + whenever remote connectivity transitions to true.
+  useEffect(() => {
+    refreshUploadsSize();
+  }, [refreshUploadsSize]);
 
   if (!project || editingProjectIndex === null) return null;
 
@@ -152,6 +183,7 @@ export function ProjectEditPanel() {
       }
     } finally {
       setClearing(false);
+      refreshUploadsSize();
     }
   };
 
@@ -361,14 +393,24 @@ export function ProjectEditPanel() {
               Leftovers from previous sessions are auto-cleaned a few seconds after the
               project's first tab opens.
             </div>
-            <button
-              className="conn-btn conn-btn-cancel"
-              onClick={handleClearUploads}
-              disabled={clearDisabled}
-              title={clearTooltip}
-            >
-              {clearing ? 'Clearing…' : 'Clear uploaded files'}
-            </button>
+            <div className="project-edit-uploads-row">
+              <button
+                className="conn-btn conn-btn-cancel"
+                onClick={handleClearUploads}
+                disabled={clearDisabled}
+                title={clearTooltip}
+              >
+                {clearing ? 'Clearing…' : 'Clear uploaded files'}
+              </button>
+              <span className="project-edit-uploads-size">
+                {(() => {
+                  // Disconnected remote — no point asking; show em-dash.
+                  if (isRemote && !remoteConnected) return '—';
+                  if (uploadsSize === null) return '…';
+                  return `${formatBytes(uploadsSize.totalBytes)} · ${uploadsSize.fileCount} ${uploadsSize.fileCount === 1 ? 'file' : 'files'}`;
+                })()}
+              </span>
+            </div>
           </div>
         </div>
         <div className="project-edit-footer">

@@ -8,7 +8,7 @@ import { wrapPty } from './wrap-pty';
 import { getShellEnv, shellEscape } from './shell-env';
 import {
   assertSafeCwd, buildPaths, parseUploadPrefix, buildRemoteUploadCmd,
-  spawnPipeWrite, listRemoteShelfDir, removeRemoteFiles,
+  spawnPipeWrite, listRemoteShelfDir, removeRemoteFiles, sizeRemoteShelfDir,
 } from './file-utils';
 
 
@@ -122,6 +122,15 @@ export class DockerConnector implements Connector {
     if (entries.length === 0) return 0;
     await removeRemoteFiles(bin, (cmd) => this.dockerExecArgs(cmd), cwd, entries, 'docker');
     return entries.length;
+  }
+
+  async getUploadsSize(cwd: string): Promise<{ totalBytes: number; fileCount: number }> {
+    try {
+      assertSafeCwd(cwd);
+    } catch {
+      return { totalBytes: 0, fileCount: 0 };
+    }
+    return sizeRemoteShelfDir('docker', (cmd) => this.dockerExecArgs(cmd), cwd, 'docker');
   }
 }
 

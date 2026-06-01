@@ -9,6 +9,7 @@ export const IPC = {
   // File upload (paste/drag) — generic across local/SSH/WSL/Docker
   FILE_UPLOAD: 'file:upload',
   FILE_CLEAR_UPLOADS: 'file:clear-uploads',
+  FILE_UPLOADS_SIZE: 'file:uploads-size',
 
   // Generic dialog from renderer
   DIALOG_WARN: 'dialog:warn',
@@ -56,6 +57,7 @@ export const IPC = {
 
   // Logs
   LOGS_CLEAR: 'logs:clear',
+  LOGS_SIZE: 'logs:size',
 
   // App info
   APP_LOGS_PATH: 'app:logs-path',

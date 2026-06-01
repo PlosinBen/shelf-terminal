@@ -10,7 +10,7 @@ import { getControlPath, checkConnection, getKnownHostsPath } from '../../ssh-co
 import {
   assertSafeCwd, buildPaths, parseUploadPrefix, normalizeCwd, REL_DIR,
   shellSingleQuote, buildRemoteUploadCmd, spawnPipeWrite,
-  listRemoteShelfDir, removeRemoteFiles,
+  listRemoteShelfDir, removeRemoteFiles, sizeRemoteShelfDir,
 } from '../file-utils';
 
 export class SSHUnixConnector implements Connector {
@@ -228,5 +228,14 @@ export class SSHUnixConnector implements Connector {
     if (entries.length === 0) return 0;
     await removeRemoteFiles('ssh', (cmd) => this.sshExecArgs([cmd]), cwd, entries, 'ssh');
     return entries.length;
+  }
+
+  async getUploadsSize(cwd: string): Promise<{ totalBytes: number; fileCount: number }> {
+    try {
+      assertSafeCwd(cwd);
+    } catch {
+      return { totalBytes: 0, fileCount: 0 };
+    }
+    return sizeRemoteShelfDir('ssh', (cmd) => this.sshExecArgs([cmd]), cwd, 'ssh');
   }
 }

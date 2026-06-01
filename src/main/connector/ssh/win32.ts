@@ -9,7 +9,7 @@ import { shellEscape } from '../shell-env';
 import { getKnownHostsPath } from '../../ssh-control';
 import {
   assertSafeCwd, buildPaths, parseUploadPrefix, buildRemoteUploadCmd,
-  spawnPipeWrite, listRemoteShelfDir, removeRemoteFiles,
+  spawnPipeWrite, listRemoteShelfDir, removeRemoteFiles, sizeRemoteShelfDir,
 } from '../file-utils';
 
 /**
@@ -214,5 +214,14 @@ export class SSHWin32Connector implements Connector {
     if (entries.length === 0) return 0;
     await removeRemoteFiles('ssh', (cmd) => this.sshExecArgs([cmd]), cwd, entries, 'ssh');
     return entries.length;
+  }
+
+  async getUploadsSize(cwd: string): Promise<{ totalBytes: number; fileCount: number }> {
+    try {
+      assertSafeCwd(cwd);
+    } catch {
+      return { totalBytes: 0, fileCount: 0 };
+    }
+    return sizeRemoteShelfDir('ssh', (cmd) => this.sshExecArgs([cmd]), cwd, 'ssh');
   }
 }

@@ -44,7 +44,9 @@ function cleanupTestDirectories() {
  * provider (agent-server/providers/fake.ts) so renderer specs can drive
  * the full wire chain without real Claude/Copilot SDKs.
  */
-export const test = base.extend<{ shelfApp: { app: ElectronApplication; page: Page } }>({
+export const test = base.extend<{
+  shelfApp: { app: ElectronApplication; page: Page; userDataDir: string };
+}>({
   shelfApp: async ({}, use) => {
     const userDataDir = createTempUserDataDir();
     seedProjectsData(userDataDir);
@@ -64,7 +66,7 @@ export const test = base.extend<{ shelfApp: { app: ElectronApplication; page: Pa
       throw err;
     }
 
-    await use({ app, page });
+    await use({ app, page, userDataDir });
 
     // Always runs — even after test failures
     await app.close().catch(() => {});

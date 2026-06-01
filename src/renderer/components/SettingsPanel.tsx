@@ -4,6 +4,7 @@ import { themes } from '../themes';
 import { comboToLabel, recordCombo } from '../hooks/useKeybindings';
 import type { AppSettings, KeybindingAction, KeybindingConfig, LogLevel, PmProviderType, ProviderModel, AgentDisplayMode } from '@shared/types';
 import { PM_PROVIDERS, getModelsForProvider, AGENT_DISPLAY_KEYS, AGENT_PROVIDER_REGISTRY } from '@shared/types';
+import { formatBytes } from '../utils/format-bytes';
 
 const ACTION_LABELS: Record<KeybindingAction, string> = {
   toggleSidebar: 'Toggle Sidebar',
@@ -37,6 +38,12 @@ export function SettingsPanel() {
   const [recordingAction, setRecordingAction] = useState<KeybindingAction | null>(null);
   const [pathError, setPathError] = useState<string | null>(null);
   const [logsPath, setLogsPath] = useState<string>('');
+  const [logsSize, setLogsSize] = useState<{ totalBytes: number; fileCount: number } | null>(null);
+
+  const refreshLogsSize = useCallback(() => {
+    setLogsSize(null);
+    window.shelfApi.logs.size().then(setLogsSize).catch(() => setLogsSize({ totalBytes: 0, fileCount: 0 }));
+  }, []);
 
   // Reset draft when panel opens
   useEffect(() => {
@@ -46,8 +53,9 @@ export function SettingsPanel() {
       setRecordingAction(null);
       setPathError(null);
       window.shelfApi.app.logsPath().then(setLogsPath);
+      refreshLogsSize();
     }
-  }, [settingsVisible, settings]);
+  }, [settingsVisible, settings, refreshLogsSize]);
 
   const updateDraft = (partial: Partial<AppSettings>) => {
     setDraft((d) => ({ ...d, ...partial }));
@@ -242,10 +250,16 @@ export function SettingsPanel() {
                     className="conn-btn conn-btn-cancel"
                     onClick={async () => {
                       await window.shelfApi.logs.clear();
+                      refreshLogsSize();
                     }}
                   >
                     Clear Logs
                   </button>
+                  <span className="settings-logs-size">
+                    {logsSize === null
+                      ? '…'
+                      : `${formatBytes(logsSize.totalBytes)} · ${logsSize.fileCount} ${logsSize.fileCount === 1 ? 'file' : 'files'}`}
+                  </span>
                 </div>
                 <div className="settings-sub-hint">{logsPath}</div>
 

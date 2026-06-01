@@ -27,6 +27,10 @@ interface ShelfApi {
       connection: import('../shared/types').Connection,
       cwd: string,
     ) => Promise<import('../shared/types').FileClearResult>;
+    getUploadsSize: (
+      connection: import('../shared/types').Connection,
+      cwd: string,
+    ) => Promise<{ totalBytes: number; fileCount: number }>;
   };
   project: {
     load: () => Promise<import('../shared/types').ProjectConfig[]>;
@@ -60,6 +64,7 @@ interface ShelfApi {
   };
   logs: {
     clear: () => Promise<void>;
+    size: () => Promise<{ totalBytes: number; fileCount: number }>;
   };
   notes: {
     list: (projectId: string) => Promise<Array<{ id: string; title: string; isDone: boolean; created: string; updated: string }>>;

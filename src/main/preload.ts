@@ -50,6 +50,8 @@ contextBridge.exposeInMainWorld('shelfApi', {
       ipcRenderer.invoke(IPC.FILE_UPLOAD, { connection, cwd, filename, buffer }),
     clearUploads: (connection: any, cwd: string) =>
       ipcRenderer.invoke(IPC.FILE_CLEAR_UPLOADS, { connection, cwd }),
+    getUploadsSize: (connection: any, cwd: string): Promise<{ totalBytes: number; fileCount: number }> =>
+      ipcRenderer.invoke(IPC.FILE_UPLOADS_SIZE, { connection, cwd }),
   },
   project: {
     load: () => ipcRenderer.invoke(IPC.PROJECT_LOAD),
@@ -94,6 +96,8 @@ contextBridge.exposeInMainWorld('shelfApi', {
   },
   logs: {
     clear: () => ipcRenderer.invoke(IPC.LOGS_CLEAR),
+    size: (): Promise<{ totalBytes: number; fileCount: number }> =>
+      ipcRenderer.invoke(IPC.LOGS_SIZE),
   },
   notes: {
     list: (projectId: string) => ipcRenderer.invoke(IPC.NOTES_LIST, projectId),

@@ -36,6 +36,14 @@ export async function clearUploads(connection: Connection, cwd: string): Promise
   return connector.clearUploads(cwd);
 }
 
+export async function getUploadsSize(
+  connection: Connection,
+  cwd: string,
+): Promise<{ totalBytes: number; fileCount: number }> {
+  const connector = createConnector(connection);
+  return connector.getUploadsSize(cwd);
+}
+
 // ── Scheduling ──
 
 const cleanedProjects = new Set<string>();

@@ -151,6 +151,42 @@ export async function listRemoteShelfDir(
 }
 
 /**
+ * Sum file sizes + count in `<cwd>/.tmp/shelf/` on a remote transport.
+ *
+ * `ls -la` works on both Linux (GNU coreutils) and macOS (BSD) — the column
+ * positions are identical for the size field ($5). `awk` does the sum
+ * server-side so we ship two numbers across the connector instead of N
+ * lines. Regular files only (`$1 ~ /^-/`) — directories, symlinks, and the
+ * header line are skipped. Anything that fails (dir missing, permission
+ * denied) collapses to zeros via the `|| echo "0 0"` fallback, matching the
+ * `clearUploads` "silent on missing dir" semantics.
+ */
+export async function sizeRemoteShelfDir(
+  bin: string,
+  args: (cmd: string) => string[],
+  cwd: string,
+  label: string,
+): Promise<{ totalBytes: number; fileCount: number }> {
+  const dir = `${normalizeCwd(cwd)}/${REL_DIR}`;
+  const cmd =
+    `ls -la ${shellSingleQuote(dir)} 2>/dev/null | ` +
+    `awk '$1 ~ /^-/ { sum += $5; n++ } END { print (sum ? sum : 0), (n ? n : 0) }' ` +
+    `|| echo '0 0'`;
+  try {
+    const out = await spawnRemoteCmd(bin, args(cmd), label);
+    const [sumStr, nStr] = out.trim().split(/\s+/);
+    const totalBytes = Number.parseInt(sumStr ?? '0', 10);
+    const fileCount = Number.parseInt(nStr ?? '0', 10);
+    return {
+      totalBytes: Number.isFinite(totalBytes) ? totalBytes : 0,
+      fileCount: Number.isFinite(fileCount) ? fileCount : 0,
+    };
+  } catch {
+    return { totalBytes: 0, fileCount: 0 };
+  }
+}
+
+/**
  * Delete files from the remote shelf dir.
  */
 export async function removeRemoteFiles(
