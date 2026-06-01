@@ -575,6 +575,8 @@ export function createClaudeBackend(): ServerBackend {
       if (slash?.cmd === 'clear') {
         send({ type: 'plan', content: '' });
         inflightToolUses.clear();
+        tasks.clear();
+        pendingTaskCreates.clear();
         lastSessionId = null;
         send({ type: 'context_patch', patch: { lastSdkSessionId: null } });
         // Fall through — SDK still handles the actual /clear semantics.
@@ -783,6 +785,35 @@ type InflightToolUseEntry =
 const inflightToolUses = new Map<string, InflightToolUseEntry>();
 
 /**
+ * Plan-panel task mirror (replaces TodoWrite mirror as of SDK 0.3.142).
+ *
+ * Wire protocol to renderer is unchanged: still `{type:'plan', content:markdown}`.
+ * Renderer is oblivious to task ids, TaskCreate vs TaskUpdate, etc.
+ *
+ * State machine:
+ *   - TaskCreate `tool_use` → input has no id (assigned by SDK). Stash to
+ *     pendingTaskCreates keyed by tool_use_id; wait for tool_result.
+ *   - TaskCreate `tool_result` → JSON.parse output to extract task.id;
+ *     promote pending → tasks Map; re-render plan.
+ *   - TaskUpdate `tool_use` → input has taskId. Mutate tasks Map directly
+ *     (optimistic, no tool_result wait). Next TaskList reconciles drift.
+ *   - TaskList `tool_result` → snapshot is server ground truth; reconcile
+ *     local Map (add missing, remove orphans, sync status).
+ *   - `status: 'deleted'` on TaskUpdate is the only path that removes a
+ *     task; `completed` stays in the list (rendered as `- [x]`).
+ *
+ * See .agent/features/sdk-upgrade-0.3.md for the rationale and design log.
+ */
+type TaskRecord = {
+  subject: string;
+  description: string;
+  activeForm?: string;
+  status: 'pending' | 'in_progress' | 'completed';
+};
+const tasks = new Map<string, TaskRecord>();
+const pendingTaskCreates = new Map<string, Omit<TaskRecord, 'status'>>();
+
+/**
  * Unwrap a Claude SDK tool_result `content` payload into a plain string for
  * the renderer. SDK delivers it as either:
  *   - string (legacy / simple tools)
@@ -809,6 +840,104 @@ export function extractToolResultText(raw: unknown): string {
     return parts.join('\n');
   }
   return JSON.stringify(raw);
+}
+
+/**
+ * Parse `TaskCreate` tool_result to extract the SDK-assigned task id.
+ * Output shape (per `@anthropic-ai/claude-agent-sdk/sdk-tools.d.ts`):
+ *   `{ task: { id: string; subject: string } }` — JSON-stringified into the
+ *   tool_result content (after `extractToolResultText` unwrap).
+ * Returns null if content isn't valid JSON or doesn't have the expected shape;
+ * caller drops the pending entry and lets the next TaskList reconcile.
+ */
+export function parseTaskCreateOutput(content: string): string | null {
+  try {
+    const parsed = JSON.parse(content) as { task?: { id?: string } };
+    return parsed?.task?.id ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Parse `TaskList` tool_result. Output shape:
+ *   `{ tasks: Array<{ id, subject, status, owner? }> }`
+ * Description and activeForm are NOT in TaskListOutput, so reconcile leaves
+ * those fields empty when filling from a snapshot.
+ */
+export function parseTaskListOutput(content: string): Array<{
+  id: string;
+  subject: string;
+  status: 'pending' | 'in_progress' | 'completed';
+}> | null {
+  try {
+    const parsed = JSON.parse(content) as {
+      tasks?: Array<{ id?: string; subject?: string; status?: string }>;
+    };
+    if (!Array.isArray(parsed?.tasks)) return null;
+    const VALID_STATUS = new Set(['pending', 'in_progress', 'completed']);
+    const out: Array<{ id: string; subject: string; status: TaskRecord['status'] }> = [];
+    for (const t of parsed.tasks) {
+      if (typeof t?.id !== 'string' || typeof t?.subject !== 'string') continue;
+      if (typeof t?.status !== 'string' || !VALID_STATUS.has(t.status)) continue;
+      out.push({ id: t.id, subject: t.subject, status: t.status as TaskRecord['status'] });
+    }
+    return out;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Render the tasks Map as a markdown checklist and emit to renderer as a
+ * `plan` event. Renderer doesn't change; this replaces the old TodoWrite
+ * snapshot path with the same wire shape.
+ *
+ *   pending      → `- [ ] subject`
+ *   in_progress  → `- [~] activeForm` (or subject if activeForm absent)
+ *   completed    → `- [x] subject`
+ *
+ * Insertion order of the Map drives row order — matches the order Agent
+ * created tasks, which matches user mental model of "plan steps".
+ */
+export function renderPlan(send: SendFn, taskMap: Map<string, TaskRecord>) {
+  const md = Array.from(taskMap.values()).map((t) => {
+    if (t.status === 'completed') return `- [x] ${t.subject}`;
+    if (t.status === 'in_progress') return `- [~] ${t.activeForm ?? t.subject}`;
+    return `- [ ] ${t.subject}`;
+  }).join('\n');
+  send({ type: 'plan', content: md });
+}
+
+/**
+ * Apply a TaskList snapshot to the local Map as drift-correction.
+ *
+ * Snapshot is server ground truth; possible local-vs-server divergences:
+ *   - Local has id missing from snapshot → task deleted server-side, drop locally
+ *   - Snapshot has id missing locally → resume-session or we missed a create,
+ *     add with empty description/activeForm (TaskListOutput doesn't carry them)
+ *   - Both have id but different status/subject → trust snapshot
+ *
+ * Always re-emits plan after applying so renderer sees the corrected state.
+ */
+export function reconcileTasks(
+  taskMap: Map<string, TaskRecord>,
+  snapshot: Array<{ id: string; subject: string; status: TaskRecord['status'] }>,
+  send: SendFn,
+) {
+  const snapshotIds = new Set(snapshot.map((t) => t.id));
+  for (const id of Array.from(taskMap.keys())) {
+    if (!snapshotIds.has(id)) taskMap.delete(id);
+  }
+  for (const t of snapshot) {
+    const existing = taskMap.get(t.id);
+    if (existing) {
+      taskMap.set(t.id, { ...existing, subject: t.subject, status: t.status });
+    } else {
+      taskMap.set(t.id, { subject: t.subject, description: '', status: t.status });
+    }
+  }
+  renderPlan(send, taskMap);
 }
 
 function stripCwd(p: string, cwd: string): string {
@@ -1058,16 +1187,47 @@ export function processMessage(msg: SDKMessage, send: SendFn, cwd: string, block
         } else if (block.type === 'tool_use') {
           emitClaudeToolUse(send, { id: block.id, name: block.name, input: block.input as Record<string, unknown> }, cwd);
           // Mirror plan-style tools into the sticky panel for parity with Copilot's plan API.
-          // ExitPlanMode: initial plan submission; TodoWrite: ongoing task list updates.
-          if (block.name === 'TodoWrite') {
-            const todos = (block.input as any)?.todos as Array<{ content: string; status: string; activeForm?: string }> | undefined;
-            if (Array.isArray(todos)) {
-              const md = todos.map((t) => {
-                if (t.status === 'completed') return `- [x] ${t.content}`;
-                if (t.status === 'in_progress') return `- [~] ${t.activeForm ?? t.content}`;
-                return `- [ ] ${t.content}`;
-              }).join('\n');
-              send({ type: 'plan', content: md });
+          // ExitPlanMode: initial plan submission.
+          // TaskCreate / TaskUpdate: ongoing task list (replaces TodoWrite as of SDK 0.3.142).
+          if (block.name === 'TaskCreate') {
+            // Input has no id (assigned by SDK in tool_result). Stash and wait.
+            const i = block.input as { subject?: string; description?: string; activeForm?: string };
+            if (typeof i?.subject === 'string' && typeof i?.description === 'string') {
+              pendingTaskCreates.set(block.id, {
+                subject: i.subject,
+                description: i.description,
+                activeForm: i.activeForm,
+              });
+            }
+          } else if (block.name === 'TaskUpdate') {
+            // Input carries taskId; mutate optimistically. Next TaskList reconciles.
+            const i = block.input as {
+              taskId?: string;
+              subject?: string;
+              description?: string;
+              activeForm?: string;
+              status?: 'pending' | 'in_progress' | 'completed' | 'deleted';
+            };
+            if (typeof i?.taskId === 'string') {
+              if (i.status === 'deleted') {
+                tasks.delete(i.taskId);
+                renderPlan(send, tasks);
+              } else {
+                const existing = tasks.get(i.taskId);
+                if (existing) {
+                  tasks.set(i.taskId, {
+                    ...existing,
+                    ...(i.subject !== undefined && { subject: i.subject }),
+                    ...(i.description !== undefined && { description: i.description }),
+                    ...(i.activeForm !== undefined && { activeForm: i.activeForm }),
+                    ...(i.status !== undefined && { status: i.status }),
+                  });
+                  renderPlan(send, tasks);
+                }
+                // Unknown taskId: TaskUpdate references a task we haven't seen
+                // Create for (likely resume-session). Ignore; TaskList reconcile
+                // will recover the missing task.
+              }
             }
           } else if (block.name === 'ExitPlanMode') {
             const plan = (block.input as any)?.plan;
@@ -1159,7 +1319,31 @@ export function processMessage(msg: SDKMessage, send: SendFn, cwd: string, block
           if ((block as any).type === 'tool_result') {
             const raw = (block as any).content;
             const content = extractToolResultText(raw);
-            emitClaudeToolResult(send, (block as any).tool_use_id, content, (block as any).is_error === true, cwd);
+            const toolUseId = (block as any).tool_use_id;
+            const isError = (block as any).is_error === true;
+
+            // TaskCreate completion: promote pending → tasks Map using
+            // server-assigned id from the result payload.
+            if (!isError && pendingTaskCreates.has(toolUseId)) {
+              const pending = pendingTaskCreates.get(toolUseId)!;
+              pendingTaskCreates.delete(toolUseId);
+              const taskId = parseTaskCreateOutput(content);
+              if (taskId) {
+                tasks.set(taskId, { ...pending, status: 'pending' });
+                renderPlan(send, tasks);
+              }
+              // Parse failure: drop the pending entry; next TaskList recovers.
+            }
+
+            // TaskList output: reconcile local Map against server ground truth.
+            // Only attempt if content parses as a TaskList shape — other tools
+            // (Read, Bash, ...) also flow through here.
+            if (!isError) {
+              const snapshot = parseTaskListOutput(content);
+              if (snapshot) reconcileTasks(tasks, snapshot, send);
+            }
+
+            emitClaudeToolResult(send, toolUseId, content, isError, cwd);
           }
         }
         // No blockMsgIds clear here — the next assistant message's own

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { mergeClaudeModels, rateLimitInfoToSegment, formatClaudeToolInput, extractToolResultText, processMessage, createBlockMsgIdState, askUserQuestionToPrompts, buildAskUserQuestionAnswerJson } from './claude';
+import { mergeClaudeModels, rateLimitInfoToSegment, formatClaudeToolInput, extractToolResultText, processMessage, createBlockMsgIdState, askUserQuestionToPrompts, buildAskUserQuestionAnswerJson, parseTaskCreateOutput, parseTaskListOutput, reconcileTasks, renderPlan } from './claude';
 import type { OutgoingMessage } from './types';
 import type { ProviderModel } from '../../src/shared/types';
 
@@ -478,5 +478,180 @@ describe('formatClaudeToolInput Agent alias', () => {
       .toBe(formatClaudeToolInput('Task', input, '/x'));
     expect(formatClaudeToolInput('Agent', input, '/x'))
       .toMatch(/^lookup: find foo/);
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+// Task* plan-panel mirror (replaces TodoWrite as of SDK 0.3.142)
+// ──────────────────────────────────────────────────────────────────────────
+//
+// These tests exercise the pure helpers (parse / render / reconcile). The
+// processMessage-level wiring is intentionally NOT tested here because the
+// task state Maps in claude.ts are module-scoped and cross-test pollution
+// would make assertions fragile — mirroring existing convention for
+// inflightToolUses. The pure helpers carry the actual logic; the wiring
+// just calls them.
+
+describe('parseTaskCreateOutput', () => {
+  it('extracts task.id from valid JSON', () => {
+    expect(parseTaskCreateOutput('{"task":{"id":"abc-123","subject":"Setup"}}'))
+      .toBe('abc-123');
+  });
+
+  it('returns null when content is not JSON', () => {
+    expect(parseTaskCreateOutput('not json at all')).toBeNull();
+  });
+
+  it('returns null when JSON lacks task.id', () => {
+    expect(parseTaskCreateOutput('{"task":{}}')).toBeNull();
+    expect(parseTaskCreateOutput('{"foo":"bar"}')).toBeNull();
+  });
+
+  it('returns null for empty / whitespace content', () => {
+    expect(parseTaskCreateOutput('')).toBeNull();
+  });
+});
+
+describe('parseTaskListOutput', () => {
+  it('parses well-formed TaskList output', () => {
+    const content = JSON.stringify({
+      tasks: [
+        { id: 't1', subject: 'Setup', status: 'pending' },
+        { id: 't2', subject: 'Write tests', status: 'in_progress' },
+        { id: 't3', subject: 'Ship', status: 'completed' },
+      ],
+    });
+    expect(parseTaskListOutput(content)).toEqual([
+      { id: 't1', subject: 'Setup', status: 'pending' },
+      { id: 't2', subject: 'Write tests', status: 'in_progress' },
+      { id: 't3', subject: 'Ship', status: 'completed' },
+    ]);
+  });
+
+  it('skips entries with missing id / subject / status', () => {
+    const content = JSON.stringify({
+      tasks: [
+        { id: 't1', subject: 'Good', status: 'pending' },
+        { id: 't2', subject: 'Missing status' },
+        { subject: 'Missing id', status: 'pending' },
+      ],
+    });
+    expect(parseTaskListOutput(content)).toEqual([
+      { id: 't1', subject: 'Good', status: 'pending' },
+    ]);
+  });
+
+  it('rejects unknown status values (e.g. "deleted") to keep TaskRecord type clean', () => {
+    const content = JSON.stringify({
+      tasks: [{ id: 't1', subject: 'X', status: 'deleted' }],
+    });
+    expect(parseTaskListOutput(content)).toEqual([]);
+  });
+
+  it('returns null when not JSON or wrong shape (so non-TaskList tool_results pass through)', () => {
+    expect(parseTaskListOutput('Read file output')).toBeNull();
+    expect(parseTaskListOutput('{"foo":"bar"}')).toBeNull();
+    expect(parseTaskListOutput('{"tasks":"not an array"}')).toBeNull();
+  });
+});
+
+describe('renderPlan', () => {
+  function makeSink() {
+    const sent: any[] = [];
+    return { send: (m: any) => { sent.push(m); }, sent };
+  }
+
+  it('renders each status with the correct checklist prefix', () => {
+    const { send, sent } = makeSink();
+    const m = new Map<string, any>();
+    m.set('t1', { subject: 'pending task', description: '', status: 'pending' });
+    m.set('t2', { subject: 'doing task', description: '', activeForm: 'Doing thing', status: 'in_progress' });
+    m.set('t3', { subject: 'done task', description: '', status: 'completed' });
+    renderPlan(send, m);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toEqual({
+      type: 'plan',
+      content: '- [ ] pending task\n- [~] Doing thing\n- [x] done task',
+    });
+  });
+
+  it('falls back to subject when in_progress task has no activeForm', () => {
+    const { send, sent } = makeSink();
+    const m = new Map<string, any>();
+    m.set('t1', { subject: 'no-activeForm task', description: '', status: 'in_progress' });
+    renderPlan(send, m);
+    expect(sent[0].content).toBe('- [~] no-activeForm task');
+  });
+
+  it('preserves insertion order so plan rows match Agent creation order', () => {
+    const { send, sent } = makeSink();
+    const m = new Map<string, any>();
+    m.set('t3', { subject: 'third', description: '', status: 'pending' });
+    m.set('t1', { subject: 'first', description: '', status: 'pending' });
+    m.set('t2', { subject: 'second', description: '', status: 'pending' });
+    renderPlan(send, m);
+    // Map iteration follows insertion order — t3 first, then t1, then t2.
+    expect(sent[0].content).toBe('- [ ] third\n- [ ] first\n- [ ] second');
+  });
+
+  it('emits empty content when Map is empty', () => {
+    const { send, sent } = makeSink();
+    renderPlan(send, new Map());
+    expect(sent[0]).toEqual({ type: 'plan', content: '' });
+  });
+});
+
+describe('reconcileTasks', () => {
+  function makeSink() {
+    const sent: any[] = [];
+    return { send: (m: any) => { sent.push(m); }, sent };
+  }
+
+  it('removes local tasks missing from snapshot (server-side deletion)', () => {
+    const { send } = makeSink();
+    const local = new Map<string, any>();
+    local.set('t1', { subject: 'stays', description: 'd1', status: 'pending' });
+    local.set('t2', { subject: 'orphan', description: 'd2', status: 'pending' });
+    reconcileTasks(local, [{ id: 't1', subject: 'stays', status: 'pending' }], send);
+    expect(local.has('t2')).toBe(false);
+    expect(local.has('t1')).toBe(true);
+  });
+
+  it('adds snapshot tasks missing locally (resume-session recovery)', () => {
+    const { send } = makeSink();
+    const local = new Map<string, any>();
+    reconcileTasks(
+      local,
+      [
+        { id: 't1', subject: 'recovered', status: 'in_progress' },
+        { id: 't2', subject: 'also recovered', status: 'completed' },
+      ],
+      send,
+    );
+    expect(local.get('t1')).toEqual({ subject: 'recovered', description: '', status: 'in_progress' });
+    expect(local.get('t2')).toEqual({ subject: 'also recovered', description: '', status: 'completed' });
+  });
+
+  it('preserves local description/activeForm when snapshot updates status', () => {
+    // TaskListOutput doesn't carry description/activeForm, so reconcile must
+    // not clobber them when an entry exists in both local and snapshot.
+    const { send } = makeSink();
+    const local = new Map<string, any>();
+    local.set('t1', { subject: 'old subject', description: 'rich desc', activeForm: 'Doing it', status: 'pending' });
+    reconcileTasks(local, [{ id: 't1', subject: 'new subject', status: 'in_progress' }], send);
+    expect(local.get('t1')).toEqual({
+      subject: 'new subject',          // updated from snapshot
+      description: 'rich desc',         // preserved
+      activeForm: 'Doing it',           // preserved
+      status: 'in_progress',            // updated from snapshot
+    });
+  });
+
+  it('re-emits plan after reconciliation', () => {
+    const { send, sent } = makeSink();
+    const local = new Map<string, any>();
+    reconcileTasks(local, [{ id: 't1', subject: 'new', status: 'pending' }], send);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toEqual({ type: 'plan', content: '- [ ] new' });
   });
 });

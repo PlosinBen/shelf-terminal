@@ -461,6 +461,29 @@ if (currentCwd) config.workingDirectory = currentCwd;
 - 不要丟掉非 text block — 至少 fallback JSON 保留資訊（例如 image block）
 - 不要在 renderer 端做 unwrap — provider 已經保證送出純 string，renderer 不該再做格式判斷
 
+## Claude SDK 0.3.142+ `TaskCreate` 的 taskId 只在 `tool_result` 才回來
+
+**現象**：嘗試在 `tool_use` 階段就把新 task 加進 plan-panel mirror Map，發現沒辦法 key — input 完全沒有 id 欄位。
+
+**根因**：SDK 把 TodoWrite snapshot 換成 `TaskCreate / TaskUpdate / TaskGet / TaskList` 後（0.3.142），taskId 改成 SDK 端配發：
+- `TaskCreateInput = { subject, description, activeForm?, metadata? }` ← 沒 id
+- `TaskCreateOutput = { task: { id, subject } }` ← id 在這
+- `TaskUpdateInput = { taskId, ... }` ← 需要引用既有 id
+
+也就是 agent 在 `tool_use` block 發出 TaskCreate 時根本還不知道 taskId 是什麼。
+
+**解法**：provider 用兩段式 state：
+1. `pendingTaskCreates: Map<tool_use_id, {subject, description, activeForm}>` — 暫存等 tool_result
+2. `tasks: Map<taskId, TaskRecord>` — 正式狀態
+3. tool_result 經 `extractToolResultText()` 拿到字串後再 `parseTaskCreateOutput()` JSON.parse 拿 id，搬到正式 Map
+
+詳見 `agent-server/providers/claude.ts` (`pendingTaskCreates` / `tasks` 兩個 Map) 和 `.agent/features/sdk-upgrade-0.3.md`。
+
+**不要做**：
+- 不要嘗試從 `tool_use.input` 拿 taskId — 它真的不在裡面
+- 不要相信 tool_result 一定是合法 JSON — parse 失敗時 drop pending、等下次 TaskList reconcile
+- 不要在 renderer 處理 taskId — 那是 provider 內部實作細節，wire protocol 永遠只看到 `{type:'plan', content:markdown}`
+
 ## Claude SDK 同時有 `Task` 跟 `Agent` 兩個 toolName 做 sub-agent dispatch
 
 **現象**: 我們的 `formatClaudeToolInput` switch case 只 match `'Task'`，user 看到 sub-agent 卡片 header 只顯示 `description` 文字，看不到 prompt preview — 跟預期 `description: prompt-prefix` 格式不一樣。
