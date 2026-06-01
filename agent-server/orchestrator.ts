@@ -81,8 +81,11 @@ export function wrapSendForContext(
           provider,
           updatedAt: now(),
         });
-      } catch {
-        // Persistence is best-effort — never let it break the turn.
+      } catch (err: any) {
+        // Persistence is best-effort — never let it break the turn — but
+        // also never invisibly: consistent persist failure means user history
+        // is being lost, which is a much-harder-to-debug class of bug.
+        console.error('[orchestrator] context persistence failed', { sessionId, provider, message: err?.message ?? err });
       }
       return;
     }

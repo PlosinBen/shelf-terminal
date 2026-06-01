@@ -214,7 +214,15 @@ async function readGhToken(): Promise<string | undefined> {
     const { stdout } = await execFileP('gh', ['auth', 'token'], { timeout: 3000 });
     const tok = stdout.trim();
     return tok || undefined;
-  } catch {
+  } catch (err: any) {
+    // ENOENT (gh not installed) and "exit code 1" (gh not authenticated) are
+    // expected on fresh setup — both surface as user-facing auth prompts
+    // downstream. Other errors (timeout, permission denied, ...) shouldn't
+    // be silently swallowed.
+    const code = err?.code;
+    if (code !== 'ENOENT' && code !== 1) {
+      console.error('[copilot] readGhToken unexpected error', { code, message: err?.message ?? err });
+    }
     return undefined;
   }
 }
@@ -715,7 +723,11 @@ export function createCopilotBackend(): ServerBackend {
     if (state.cliSessionId) {
       try {
         session = await client.resumeSession(state.cliSessionId, config);
-      } catch {
+      } catch (err: any) {
+        // Stale / expired sessionId is expected; SDK auth or RPC errors are not.
+        // Log so we can tell the difference when the user reports "no history
+        // restored after restart".
+        console.error('[copilot] resumeSession failed; falling back to createSession', { sessionId: state.cliSessionId, message: err?.message ?? err });
         session = await client.createSession(config);
       }
     } else {
@@ -758,7 +770,14 @@ export function createCopilotBackend(): ServerBackend {
     // so even if this rpc.mode.set silently fails, bypass still works.
     const sdkMode = MODE_TO_SDK[currentPermissionMode];
     if (sdkMode && sdkMode !== 'interactive') {
-      try { await (session as any).rpc.mode.set({ mode: sdkMode }); } catch { /* ignore */ }
+      try {
+        await (session as any).rpc.mode.set({ mode: sdkMode });
+      } catch (err: any) {
+        // For bypass mode our onPermissionRequest short-circuit makes this
+        // failure harmless. For plan/default we'd silently be in interactive,
+        // which IS user-visible — log so we know.
+        console.error('[copilot] rpc.mode.set failed; user may be in interactive mode despite picked', { sdkMode, message: err?.message ?? err });
+      }
     }
 
     // Wire events to send fn. Copilot CLI's built-in tools (read_file, edit, bash, etc.)
@@ -1052,7 +1071,12 @@ export function createCopilotBackend(): ServerBackend {
           type: 'plan',
           content: result?.exists ? (result.content ?? '') : '',
         });
-      } catch { /* ignore */ }
+      } catch (err: any) {
+        // Polled on every plan_changed event (debounced 150ms). Failure means
+        // plan panel won't update — could be transient (mid-rebuild) or a
+        // breaking SDK change. Logging gives us the diagnosis path.
+        console.error('[copilot] rpc.plan.read failed; plan panel may be stale', err?.message ?? err);
+      }
     }, 150);
   }
 
@@ -1163,7 +1187,11 @@ export function createCopilotBackend(): ServerBackend {
         try {
           await critical(async () => {
             const hadSession = !!state.session || !!state.cliSessionId;
-            try { await state.session?.disconnect(); } catch { /* ignore */ }
+            try {
+              await state.session?.disconnect();
+            } catch (err: any) {
+              console.error('[copilot] session.disconnect() failed during /clear rebuild', err?.message ?? err);
+            }
             state.session = null;
             state.cliSessionId = null;
             latestUsage = null;
@@ -1371,12 +1399,24 @@ export function createCopilotBackend(): ServerBackend {
         resolve({ behavior: 'deny', message: 'Stopped by user' });
       }
       pendingPermissions.clear();
-      try { await state.session?.abort(); } catch { /* ignore */ }
+      try {
+        await state.session?.abort();
+      } catch (err: any) {
+        console.error('[copilot] session.abort() failed during stop()', err?.message ?? err);
+      }
     },
 
     dispose() {
-      try { state.session?.disconnect(); } catch { /* ignore */ }
-      try { state.client?.stop(); } catch { /* ignore */ }
+      try {
+        state.session?.disconnect();
+      } catch (err: any) {
+        console.error('[copilot] session.disconnect() failed during dispose()', err?.message ?? err);
+      }
+      try {
+        state.client?.stop();
+      } catch (err: any) {
+        console.error('[copilot] client.stop() failed during dispose()', err?.message ?? err);
+      }
       state.session = null;
       state.client = null;
     },
@@ -1385,7 +1425,11 @@ export function createCopilotBackend(): ServerBackend {
       // Drop in-memory session refs so the next query() starts a fresh CLI
       // session instead of trying to resume from a now-deleted lastSdkSessionId.
       // Disconnect best-effort; the live session is being abandoned anyway.
-      try { state.session?.disconnect(); } catch { /* ignore */ }
+      try {
+        state.session?.disconnect();
+      } catch (err: any) {
+        console.error('[copilot] session.disconnect() failed during resetSession', err?.message ?? err);
+      }
       state.session = null;
       state.cliSessionId = null;
       latestUsage = null;

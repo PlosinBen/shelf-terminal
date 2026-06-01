@@ -387,8 +387,14 @@ export function createClaudeBackend(): ServerBackend {
         for await (const msg of generator) {
           if (msg.type === 'system' && msg.subtype === 'init') {
             const [models, commands] = await Promise.all([
-              generator.supportedModels().catch(() => []),
-              generator.supportedCommands().catch(() => []),
+              generator.supportedModels().catch((err) => {
+                console.error('[claude] supportedModels() failed; model picker will be empty', err?.message ?? err);
+                return [];
+              }),
+              generator.supportedCommands().catch((err) => {
+                console.error('[claude] supportedCommands() failed; slash picker will be empty', err?.message ?? err);
+                return [];
+              }),
             ]);
             cache.models = models;
             cache.commands = commands;
@@ -396,7 +402,12 @@ export function createClaudeBackend(): ServerBackend {
             break;
           }
         }
-      } catch { /* abort throws, expected */ }
+      } catch (err: any) {
+        // warmupAbort.abort() throws here on success path — only log non-abort.
+        if (err?.name !== 'AbortError') {
+          console.error('[claude] warmup loop unexpected error', err?.message ?? err);
+        }
+      }
     })();
     return initPromise;
   }
@@ -696,7 +707,11 @@ export function createClaudeBackend(): ServerBackend {
       if (activeQuery) {
         try {
           await activeQuery.interrupt();
-        } catch {
+        } catch (err: any) {
+          // SDK interrupt fail-loud, then fall back to AbortController so the
+          // stop intent still resolves. Repeated occurrence means SDK interrupt
+          // surface broke — we'd silently lose user-visible stop responsiveness.
+          console.error('[claude] activeQuery.interrupt() failed; falling back to AbortController', err?.message ?? err);
           abortController?.abort();
         }
       }
