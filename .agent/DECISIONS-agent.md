@@ -462,3 +462,37 @@ InputZone ──emit('agent:send', ...)──▶ EventBus
 - `.agent/features/agent-message-type-refactor.md` — 完整重構規劃與 phases
 - Decision #54 — Slash 內部 dispatch（slash_response type 廢除、改 emit fold_markdown）
 - Decision #46 — Plan panel（從 message channel 攔截改成獨立 event channel）
+
+---
+
+## 61. Provider 格式解析失敗一定要 fail-loud（console.error log）
+
+**決策**：任何 provider 端的 wire-format 解析（SDK tool_result content、apply_patch 字串、自訂協議 payload）失敗時，**必須在 caller 端 `console.error` 記錄 content preview**（前 200~300 字）。不要靜默 return null/fallback。
+
+**適用範圍**：
+- `parseTaskCreateOutput` / `parseTaskListOutput`（Claude 0.3.142+ Task 系統）
+- `parseApplyPatch`（Copilot apply_patch）
+- 任何未來新增的 SDK-output 解析 helper
+
+**為何**：SDK 版本升級時 type def 跟 runtime 不一致很常見（已踩過 TaskCreate 是 text 不是 JSON、AskUserQuestion is_error 透傳變化）。沒有 log 時：
+- Plan panel 莫名空白
+- diff 卡突然變 raw 字串
+- 用戶 / dev 都不知道原因，debug 從零開始
+
+有 log 時：升版後第一次踩到立刻看到 `[provider] X parse failed; format may have changed { contentPreview: '...' }`，5 分鐘修。
+
+**設計細節**：
+1. **Pure parser 自己不 log**（保持可組合、可測），return null
+2. **Caller 在「已知該成功的路徑」上 log** — 例如註冊過 tool_use_id 的 tool_result 才 log，避免對任意 result 都嘗試 parse + log（noise）
+3. **預期 silent path 例外** — 例如 `parseApplyPatch` 對 Delete File 回 null 是設計如此，caller 用 marker 偵測排除這條再 log
+4. **不走 wire**：用 `console.error` 寫 stderr，由 `src/main/agent/remote.ts` stderr handler 進 logger，不送到 renderer（不是 user-facing error）
+
+**反例**（不要做）：
+- 在 pure parser 內部 `console.error` — parser 應該可組合測試，log 是 caller 的責任
+- 把 silent fallback 改成 throw — provider 不該因 wire 格式變化整個 turn 失敗
+- 在 renderer 端 log — 訊號到那邊已經晚了，且 wire 已經把 fallback 形式送過去
+
+**Related**：
+- `.agent/GOTCHAS.md` — Claude SDK 0.3.x TaskCreate text 格式 / AskUserQuestion is_error 透傳
+- `agent-server/providers/claude.ts:parseTaskCreateOutput / parseTaskListOutput` 範例
+- `agent-server/providers/copilot.ts:parseApplyPatch` caller 範例
