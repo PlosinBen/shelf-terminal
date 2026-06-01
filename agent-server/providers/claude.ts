@@ -577,6 +577,7 @@ export function createClaudeBackend(): ServerBackend {
         inflightToolUses.clear();
         tasks.clear();
         pendingTaskCreates.clear();
+        pendingTaskLists.clear();
         lastSessionId = null;
         send({ type: 'context_patch', patch: { lastSdkSessionId: null } });
         // Fall through — SDK still handles the actual /clear semantics.
@@ -812,6 +813,13 @@ type TaskRecord = {
 };
 const tasks = new Map<string, TaskRecord>();
 const pendingTaskCreates = new Map<string, Omit<TaskRecord, 'status'>>();
+// Track outstanding TaskList tool_use ids so we can recognize matching
+// tool_result content and only run parseTaskListOutput on candidates we know
+// should be TaskList results. Without this, the parser would be used as a
+// content sniffer (parse-or-null as detector) and we couldn't distinguish
+// "this isn't TaskList" from "this IS TaskList but format changed" — the
+// latter being a real bug worth logging.
+const pendingTaskLists = new Set<string>();
 
 /**
  * Unwrap a Claude SDK tool_result `content` payload into a plain string for
@@ -1251,6 +1259,11 @@ export function processMessage(msg: SDKMessage, send: SendFn, cwd: string, block
                 // will recover the missing task.
               }
             }
+          } else if (block.name === 'TaskList') {
+            // Register so tool_result handler runs parseTaskListOutput on the
+            // matching reply. Without this we'd have to parse-sniff every
+            // tool_result, conflating "not TaskList" with "TaskList parse fail".
+            pendingTaskLists.add(block.id);
           } else if (block.name === 'ExitPlanMode') {
             const plan = (block.input as any)?.plan;
             if (typeof plan === 'string') {
@@ -1353,16 +1366,25 @@ export function processMessage(msg: SDKMessage, send: SendFn, cwd: string, block
               if (taskId) {
                 tasks.set(taskId, { ...pending, status: 'pending' });
                 renderPlan(send, tasks);
+              } else {
+                // Parser failed on a tool_result we KNOW is TaskCreate — SDK
+                // wire format likely changed. Drops the task from the plan
+                // panel; next TaskList reconcile can recover. Log the format
+                // so we know what to fix.
+                console.error('[claude] TaskCreate result parse failed; format may have changed', { contentPreview: content.slice(0, 300) });
               }
-              // Parse failure: drop the pending entry; next TaskList recovers.
             }
 
             // TaskList output: reconcile local Map against server ground truth.
-            // Only attempt if content parses as a TaskList shape — other tools
-            // (Read, Bash, ...) also flow through here.
-            if (!isError) {
+            // Only attempt for tool_use_ids we registered as TaskList.
+            if (!isError && pendingTaskLists.has(toolUseId)) {
+              pendingTaskLists.delete(toolUseId);
               const snapshot = parseTaskListOutput(content);
-              if (snapshot) reconcileTasks(tasks, snapshot, send);
+              if (snapshot) {
+                reconcileTasks(tasks, snapshot, send);
+              } else {
+                console.error('[claude] TaskList result parse failed; format may have changed', { contentPreview: content.slice(0, 300) });
+              }
             }
 
             emitClaudeToolResult(send, toolUseId, content, isError, cwd);
