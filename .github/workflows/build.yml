@@ -9,7 +9,38 @@ permissions:
   contents: write
 
 jobs:
+  # Gate the release on typecheck + unit tests. e2e is verified locally before
+  # tagging (per CLAUDE.md workflow) — running it here would add ~4min for
+  # limited value since the local run is the canonical check.
+  test:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22.22.0
+          cache: npm
+
+      - name: Setup Python for node-gyp
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install setuptools (needed by node-gyp for node-pty)
+        run: pip install setuptools
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm run test:unit
+
   build:
+    needs: test
     strategy:
       matrix:
         include:
