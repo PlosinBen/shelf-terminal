@@ -247,6 +247,16 @@ export function createClaudeBackend(): ServerBackend {
   const pendingPermissions = new Map<string, (result: PermissionResult) => void>();
   let currentSend: SendFn | null = null;
 
+  // Claude is per-call by SDK design (model / effort / permissionMode flow
+  // in via QueryInput each turn). These closure values exist to let the
+  // /model /effort /permission slash handlers broadcast updated capabilities
+  // immediately — without them, the renderer's status bar wouldn't know the
+  // new pref took effect until the next SDK init event reported it.
+  // gatherCapabilities() seeds them from the renderer's intent on reconnect.
+  let currentModel: string | undefined;
+  let currentEffort: string | undefined;
+  let currentPermissionMode: string | undefined;
+
   // Non-cancellable critical-section flag (see Copilot's matching helper for
   // rationale). Wraps Claude's `/compact` SDK turn so stop() silently no-ops
   // mid-compaction — interrupting half-way would leave the SDK session in an
@@ -391,28 +401,58 @@ export function createClaudeBackend(): ServerBackend {
     return initPromise;
   }
 
+  function buildCapabilities(customModels?: ProviderModel[]): ProviderCapabilities {
+    return {
+      models: mergeClaudeModels(cache.models ?? [], customModels),
+      permissionModes: pickPermissionModes(['default', 'acceptEdits', 'bypassPermissions', 'plan']),
+      effortLevels: pickEffortLevels(['low', 'medium', 'high', 'xhigh', 'max']),
+      slashCommands: (() => {
+        const userCmds = (cache.commands ?? []).map((c: any) => ({ name: c.name, description: c.description }));
+        const userNames = new Set(userCmds.map((c: any) => c.name));
+        const builtins = CLAUDE_BUILTIN_COMMANDS.filter((b) => !userNames.has(b.name));
+        return [...builtins, ...userCmds];
+      })(),
+      authMethod: CLAUDE_AUTH_METHOD,
+      ...(currentModel ? { currentModel } : {}),
+      ...(currentEffort ? { currentEffort } : {}),
+      ...(currentPermissionMode ? { currentPermissionMode } : {}),
+    };
+  }
+
   return {
     async gatherCapabilities(
       cwd: string,
       _sessionId?: string,
       customModels?: ProviderModel[],
-      _intent?: { model?: string; effort?: string; permissionMode?: string },
+      intent?: { model?: string; effort?: string; permissionMode?: string },
     ): Promise<ProviderCapabilities> {
-      // intent unused — Claude has no session-level state to seed; per-call
-      // QueryInput.{model,effort,permissionMode} fully drives behavior.
+      // Seed closures from renderer's saved intent so /model /effort /permission
+      // slash handlers can re-broadcast capabilities with the right current*.
+      // Per-call QueryInput.{model,effort,permissionMode} still drives the
+      // actual SDK behavior; closures are renderer-facing bookkeeping only.
       await ensureInit(cwd);
-      return {
-        models: mergeClaudeModels(cache.models ?? [], customModels),
-        permissionModes: pickPermissionModes(['default', 'acceptEdits', 'bypassPermissions', 'plan']),
-        effortLevels: pickEffortLevels(['low', 'medium', 'high', 'xhigh', 'max']),
-        slashCommands: (() => {
-          const userCmds = (cache.commands ?? []).map((c: any) => ({ name: c.name, description: c.description }));
-          const userNames = new Set(userCmds.map((c: any) => c.name));
-          const builtins = CLAUDE_BUILTIN_COMMANDS.filter((b) => !userNames.has(b.name));
-          return [...builtins, ...userCmds];
-        })(),
-        authMethod: CLAUDE_AUTH_METHOD,
-      };
+      if (intent?.model) currentModel = intent.model;
+      if (intent?.effort) currentEffort = intent.effort;
+      if (intent?.permissionMode) currentPermissionMode = intent.permissionMode;
+      return buildCapabilities(customModels);
+    },
+
+    setModel(model: string) {
+      // Per-call options.model wins on the next query; we just track for
+      // capabilities broadcasts so renderer's status bar reflects the
+      // current intent immediately.
+      currentModel = model;
+      currentSend?.({ type: 'capabilities', ...buildCapabilities() });
+    },
+
+    setEffort(effort: string) {
+      currentEffort = effort;
+      currentSend?.({ type: 'capabilities', ...buildCapabilities() });
+    },
+
+    setPermissionMode(mode: string) {
+      currentPermissionMode = mode;
+      currentSend?.({ type: 'capabilities', ...buildCapabilities() });
     },
 
     async query(input: QueryInput, send: SendFn) {
@@ -497,6 +537,41 @@ export function createClaudeBackend(): ServerBackend {
       //     SDKStatusMessage and surface as a slash_response card with
       //     token deltas (otherwise SDK swallows the outcome silently).
       const slash = parseSlashPrefix(input.prompt);
+      // /model /effort /permission with args: intercept entirely. Claude has
+      // no SDK validation point (per-call options), so we just record the
+      // change in closure + re-broadcast capabilities so the renderer's
+      // status bar + capability-driven persist see the new value immediately.
+      // No SDK iteration runs for these — emit a fold_markdown reply and a
+      // single idle status so the turn closes cleanly.
+      if (slash && (slash.cmd === 'model' || slash.cmd === 'effort' || slash.cmd === 'permission')) {
+        const msgId = mintSlashMsgId();
+        const label = `/${slash.cmd}`;
+        send({ type: 'status', state: 'streaming' });
+        if (!slash.args) {
+          send({
+            type: 'message', msgId, msgType: 'fold_markdown', label,
+            errorMessage: `Usage: /${slash.cmd} <value>`,
+          });
+          send({ type: 'status', state: 'idle' });
+          return;
+        }
+        if (slash.cmd === 'model') currentModel = slash.args;
+        else if (slash.cmd === 'effort') currentEffort = slash.args;
+        else currentPermissionMode = slash.args;
+        send({ type: 'capabilities', ...buildCapabilities() });
+        send({
+          type: 'message', msgId, msgType: 'fold_markdown', label,
+          body: {
+            content: slash.cmd === 'model'
+              ? `Model set to **${slash.args}** (applies on next query)`
+              : slash.cmd === 'effort'
+                ? `Reasoning effort set to **${slash.args}** (applies on next query)`
+                : `Permission mode set to **${slash.args}** (applies on next query)`,
+          },
+        });
+        send({ type: 'status', state: 'idle' });
+        return;
+      }
       if (slash?.cmd === 'clear') {
         send({ type: 'plan', content: '' });
         inflightToolUses.clear();

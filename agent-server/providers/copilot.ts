@@ -1178,6 +1178,87 @@ export function createCopilotBackend(): ServerBackend {
         return;
       }
 
+      // Renderer dispatches /model /effort /permission here when the user
+      // types them with args (without args opens a renderer-side picker
+      // from capabilities). Provider is the single source of truth for
+      // whether the switch took effect — we apply imperatively against
+      // the session and emit a fold_markdown pending → success/error
+      // card just like /help, /clear, etc. After success we also
+      // re-broadcast capabilities so the renderer's actualModel updates
+      // (and its capability-driven persist effect saves to projectConfig).
+      case 'model': {
+        const msgId = mintMsgId();
+        if (!args) {
+          emitError(msgId, 'Usage: /model <model-id>');
+          return;
+        }
+        emitPending(msgId);
+        try {
+          if (state.session) {
+            const supported = effortsFor(args);
+            const nextEffort = currentEffort && supported.includes(currentEffort)
+              ? currentEffort
+              : modelMeta(args)?.defaultReasoningEffort;
+            await state.session.setModel(
+              args,
+              nextEffort ? { reasoningEffort: nextEffort as any } : undefined,
+            );
+            currentEffort = nextEffort;
+          }
+          // closure update only after SDK accepted — if setModel throws,
+          // currentModel stays consistent with the active session.
+          currentModel = args;
+          currentSend?.({ type: 'capabilities', ...buildCapabilities() });
+          emitSuccess(msgId, `Switched model to **${args}**`);
+        } catch (err: any) {
+          emitError(msgId, `Failed to switch model: ${err?.message ?? err}`);
+        }
+        return;
+      }
+
+      case 'effort': {
+        const msgId = mintMsgId();
+        if (!args) {
+          emitError(msgId, 'Usage: /effort <level>');
+          return;
+        }
+        emitPending(msgId);
+        try {
+          if (state.session) {
+            await state.session.setModel(currentModel, { reasoningEffort: args as any });
+          }
+          currentEffort = args;
+          currentSend?.({ type: 'capabilities', ...buildCapabilities() });
+          emitSuccess(msgId, `Set reasoning effort to **${args}**`);
+        } catch (err: any) {
+          emitError(msgId, `Failed to set effort: ${err?.message ?? err}`);
+        }
+        return;
+      }
+
+      case 'permission': {
+        const msgId = mintMsgId();
+        if (!args) {
+          emitError(msgId, 'Usage: /permission <mode>');
+          return;
+        }
+        emitPending(msgId);
+        try {
+          if (state.session) {
+            const sdkMode = MODE_TO_SDK[args];
+            if (sdkMode) {
+              await (state.session as any).rpc.mode.set({ mode: sdkMode });
+            }
+          }
+          currentPermissionMode = args;
+          currentSend?.({ type: 'capabilities', ...buildCapabilities() });
+          emitSuccess(msgId, `Set permission mode to **${args}**`);
+        } catch (err: any) {
+          emitError(msgId, `Failed to set permission mode: ${err?.message ?? err}`);
+        }
+        return;
+      }
+
       default: {
         const msgId = mintMsgId();
         emitError(msgId, `Unknown command: /${cmd}`);
@@ -1324,18 +1405,23 @@ export function createCopilotBackend(): ServerBackend {
      * decides when to call (only on diff). Effort comes along because
      * `session.setModel` takes it as the second-arg config; effort fallback
      * to model's default if currently unsupported.
+     *
+     * Closure mutation is deferred until after the SDK accepts the change.
+     * If `session.setModel` throws (invalid model id, etc.), `currentModel`
+     * and `currentEffort` stay consistent with the active session — otherwise
+     * later status / capabilities events would broadcast a model that's
+     * different from what the session actually runs.
      */
     async setModel(model: string) {
       const supported = effortsFor(model);
-      if (currentEffort && !supported.includes(currentEffort)) {
-        currentEffort = modelMeta(model)?.defaultReasoningEffort;
-      } else if (!currentEffort) {
-        currentEffort = modelMeta(model)?.defaultReasoningEffort;
+      const nextEffort = currentEffort && supported.includes(currentEffort)
+        ? currentEffort
+        : modelMeta(model)?.defaultReasoningEffort;
+      if (state.session) {
+        await state.session.setModel(model, nextEffort ? { reasoningEffort: nextEffort as any } : undefined);
       }
       currentModel = model;
-      if (state.session) {
-        await state.session.setModel(model, currentEffort ? { reasoningEffort: currentEffort as any } : undefined);
-      }
+      currentEffort = nextEffort;
       // Capabilities re-broadcast for renderer status bar — capability list
       // itself didn't change, but currentModel did.
       currentSend?.({ type: 'capabilities', ...buildCapabilities() });

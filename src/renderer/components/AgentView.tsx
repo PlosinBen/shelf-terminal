@@ -105,6 +105,37 @@ export function AgentView({ tabId, cwd, connection, provider, projectId, visible
   }, [projectIndex, provider, projects]);
 
   /**
+   * Capability-driven persist: when provider re-broadcasts capabilities
+   * (after /model X slash, picker pick, or any setX), commit the backend's
+   * reported current* to projectConfig if it differs from what's saved.
+   *
+   * Init is naturally a no-op — provider seeds its closures from the intent
+   * we passed in agent:init, so the first capabilities event carries back
+   * exactly what savedPrefs already has. Only real changes (slash, cycle)
+   * cause persist to fire.
+   *
+   * This is what makes the typing path (/model X falls through to
+   * agent:send → provider slash → capabilities) eventually update
+   * projectConfig — InputZone no longer calls handleConfigEdit for
+   * with-args slashes.
+   */
+  const capabilities = tabState?.capabilities;
+  useEffect(() => {
+    if (!capabilities) return;
+    const partial: Partial<AgentPrefs> = {};
+    if (capabilities.currentModel && capabilities.currentModel !== savedPrefs?.model) {
+      partial.model = capabilities.currentModel;
+    }
+    if (capabilities.currentEffort && capabilities.currentEffort !== savedPrefs?.effort) {
+      partial.effort = capabilities.currentEffort;
+    }
+    if (capabilities.currentPermissionMode && capabilities.currentPermissionMode !== savedPrefs?.permissionMode) {
+      partial.permissionMode = capabilities.currentPermissionMode;
+    }
+    if (Object.keys(partial).length > 0) persistPref(partial);
+  }, [capabilities?.currentModel, capabilities?.currentEffort, capabilities?.currentPermissionMode, savedPrefs?.model, savedPrefs?.effort, savedPrefs?.permissionMode, persistPref]);
+
+  /**
    * Apply a config edit (model / effort / permissionMode). Used by
    * status bar cycle, /model slash, and renderer-local picker.
    * Renderer-authoritative: persists intent into projectConfig +

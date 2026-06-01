@@ -67,25 +67,35 @@ async function applyPrefDiff(
   sessionKey: string,
   incoming: { model?: string; effort?: string; permissionMode?: string },
 ): Promise<void> {
+  // Cache update is gated on apply success — a failed setX must not record
+  // the requested value as "applied" or the next turn's diff would skip the
+  // retry (silently leaving the SDK on the prior value while the cache
+  // pretends the switch happened).
   const last = lastAppliedPrefs.get(sessionKey) ?? {};
   const next = { ...last };
   if (incoming.model !== undefined && incoming.model !== last.model) {
-    try { await backend.setModel?.(incoming.model); } catch (err: any) {
+    try {
+      await backend.setModel?.(incoming.model);
+      next.model = incoming.model;
+    } catch (err: any) {
       send({ type: 'error', error: `Failed to switch model to "${incoming.model}": ${err?.message ?? err}` });
     }
-    next.model = incoming.model;
   }
   if (incoming.effort !== undefined && incoming.effort !== last.effort) {
-    try { await backend.setEffort?.(incoming.effort); } catch (err: any) {
+    try {
+      await backend.setEffort?.(incoming.effort);
+      next.effort = incoming.effort;
+    } catch (err: any) {
       send({ type: 'error', error: `Failed to set effort "${incoming.effort}": ${err?.message ?? err}` });
     }
-    next.effort = incoming.effort;
   }
   if (incoming.permissionMode !== undefined && incoming.permissionMode !== last.permissionMode) {
-    try { await backend.setPermissionMode?.(incoming.permissionMode); } catch (err: any) {
+    try {
+      await backend.setPermissionMode?.(incoming.permissionMode);
+      next.permissionMode = incoming.permissionMode;
+    } catch (err: any) {
       send({ type: 'error', error: `Failed to set permission mode "${incoming.permissionMode}": ${err?.message ?? err}` });
     }
-    next.permissionMode = incoming.permissionMode;
   }
   lastAppliedPrefs.set(sessionKey, next);
 }

@@ -13,7 +13,18 @@ import {
 import { emitAgent } from '../../events';
 import { useAttachmentPaste } from '../../hooks/useAttachmentPaste';
 
-const RENDERER_LOCAL_SLASHES: Record<string, 'model' | 'effort' | 'permissionMode'> = {
+/**
+ * Slash commands whose arguments come from a finite option list known to the
+ * renderer (via capabilities). Typing `/{cmd}` without args opens an inline
+ * picker — saves a backend round-trip just to fetch options. Typing
+ * `/{cmd} value` falls through to `agent:send` and is dispatched by the
+ * provider's own slash handler (which validates, applies imperatively, and
+ * replies with a fold_markdown card — same shape as /help, /clear, etc.).
+ *
+ * Value is the picker key used by SelectionPanel (differs from cmd name
+ * when the slash uses a shorter form, e.g. /permission → permissionMode).
+ */
+const OPTIONED_SLASHES: Record<string, 'model' | 'effort' | 'permissionMode'> = {
   model: 'model',
   effort: 'effort',
   permission: 'permissionMode',
@@ -156,12 +167,15 @@ export function InputZone({ tabId, projectId, cwd, connection, visible, rootRef,
     }
   }, [input]);
 
-  // Slash menu: union of provider-declared agent slashes and
-  // renderer-local config-edit slashes. Display layer only — routing
-  // in handleSend decides who handles each.
+  // Slash menu: union of provider-declared agent slashes and renderer-known
+  // optioned slashes (model/effort/permission). All ultimately dispatch
+  // through the provider — OPTIONED_SLASHES only signals "renderer can render
+  // an inline picker on no-args" (saves a round-trip), not "renderer handles
+  // dispatch". The display merge here just ensures the suggestion menu shows
+  // both sets, even when a provider doesn't list these in its slashCommands.
   const allCommands = useMemo<SlashCommand[]>(() => {
     const providerCmds = capabilities?.slashCommands ?? [];
-    const localCmds = Object.keys(RENDERER_LOCAL_SLASHES).map((name) => {
+    const localCmds = Object.keys(OPTIONED_SLASHES).map((name) => {
       const description =
         name === 'model' ? 'Switch agent model' :
         name === 'effort' ? 'Set reasoning effort' :
@@ -194,19 +208,20 @@ export function InputZone({ tabId, projectId, cwd, connection, visible, rootRef,
     const text = input.trim();
     if (!text && pendingFiles.length === 0 && pendingImages.length === 0) return;
 
-    // Renderer-local slash interception. /model (and future /effort,
-    // /permissionMode) mutate project config — same effect as a status
-    // bar cycle, just keyboard-driven. Zero IPC.
+    // Inline picker shortcut: `/model` / `/effort` / `/permission` without
+    // args opens a renderer-side picker (options come from capabilities,
+    // no backend round-trip needed). With-args (e.g. `/model claude-sonnet`)
+    // falls through to agent.send below — provider's slash handler is the
+    // single source of truth for "did the switch actually happen", emits a
+    // fold_markdown reply card, and broadcasts updated capabilities. The
+    // renderer persists to projectConfig when capabilities reports the new
+    // value (see AgentView's capability-driven persist effect).
     const slash = parseSlashPrefix(text);
-    const localKey = slash ? RENDERER_LOCAL_SLASHES[slash.cmd] : undefined;
-    if (slash && localKey) {
+    const pickerKey = slash ? OPTIONED_SLASHES[slash.cmd] : undefined;
+    if (slash && pickerKey && !slash.args) {
       setInput('');
       setShowSlashMenu(false);
-      if (slash.args) {
-        onConfigEdit(localKey, slash.args);
-      } else {
-        setLocalPickerStore(tabId, { key: localKey });
-      }
+      setLocalPickerStore(tabId, { key: pickerKey });
       return;
     }
 
