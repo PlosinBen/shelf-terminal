@@ -461,6 +461,46 @@ if (currentCwd) config.workingDirectory = currentCwd;
 - 不要丟掉非 text block — 至少 fallback JSON 保留資訊（例如 image block）
 - 不要在 renderer 端做 unwrap — provider 已經保證送出純 string，renderer 不該再做格式判斷
 
+## Claude SDK 0.3.x 把 `AskUserQuestion` deny 攔截的 `is_error:true` 透傳給 renderer
+
+**現象**：升 SDK 0.2.126 → 0.3.159 後，AskUserQuestion picker 答完後 chat 上多了紅色「Tool returned an error」banner，但對話本身正常往下走。
+
+**根因**：我們攔截 AskUserQuestion 用的 hack 是 `canUseTool` 返回 `{behavior:'deny', message:JSON_answer}`，SDK 把 deny.message 當 tool_result content 餵 model（spike 驗證）。Wire 層 `is_error:true` 是 deny 的副作用。
+- SDK 0.2.x：tool_result 不發給 client，所以紅 banner 看不到
+- SDK 0.3.x：tool_result 帶 `is_error:true` 一路 fire 到我們的 user message 處理，`emitClaudeToolResult` 看 is_error 套上 errorMessage
+
+**解法**：`agent-server/providers/claude.ts:emitClaudeToolResult()` 特例處理 `entry.toolName === 'AskUserQuestion'`：suppressError 直接吃掉 isError，不顯示紅 banner。Model 仍然收到答案 JSON 正常往下走。
+
+**不要做**：
+- 不要把整段 hack 拆掉 — SDK 0.3.x 還是沒有 `onAskUserQuestion` callback，deny+smuggle 是目前唯一可行解
+- 不要全域 suppress is_error — 真的 tool error（如 Bash 失敗）還是要顯示紅 banner
+- 不要假設未來 SDK 升版這 hack 還能用 — 如果 SDK 開始檢查 deny.message 不該是 JSON，就要找新攔截點
+
+## Claude SDK 0.3.x `TaskCreate` 的 `tool_result.content` 是人類可讀文字，不是 JSON
+
+**現象**：用 `JSON.parse(content)?.task?.id` 解析 TaskCreate result 永遠 null，plan panel 永遠空白。
+
+**根因**：`@anthropic-ai/claude-agent-sdk/sdk-tools.d.ts` (0.3.159) 寫的：
+```ts
+TaskCreateOutput = { task: { id: string; subject: string } }
+```
+
+但實際 wire format（驗證於 SDK 0.3.159 + claude-opus-4-8）是純文字：
+```
+Task #1 created successfully: Run typecheck
+```
+
+`#N` 的 N 就是 taskId — TaskUpdate 的 `taskId` 輸入也是 `"1"` `"2"` `"3"` 這種數字字串，跟 text 對得起來。Type def 跟 runtime 不一致是 SDK bug 或 type def 過早寫好。
+
+**解法**：`parseTaskCreateOutput()` 先 regex 比 `/^Task\s+#(\d+)\s+created\s+successfully/i` 拿 N，失敗才退回 JSON.parse 當 defensive fallback。
+
+**不要做**：
+- 不要相信 sdk-tools.d.ts 的 Output type 一定對應 wire 格式 — 它們宣稱的是 Input 端傳遞的結構，不一定是 model 看到的 string format
+- 改 parser 之前用 log dump 真實 content（前 200 字），不要 blind 改
+- 跑 unit test 時測試案例要用 real wire format，不是 type def 推測的形狀
+
+**未驗證**：`TaskListOutput` 的實際 wire 格式也可能跟 type def 不符（我們的 parser 還是用 JSON shape，因為實測未觸發）。下次看到 TaskList result 漏 reconcile 時要先 log content 確認。
+
 ## Claude SDK 0.3.142+ `TaskCreate` 的 taskId 只在 `tool_result` 才回來
 
 **現象**：嘗試在 `tool_use` 階段就把新 task 加進 plan-panel mirror Map，發現沒辦法 key — input 完全沒有 id 欄位。

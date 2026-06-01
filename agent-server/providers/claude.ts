@@ -844,19 +844,34 @@ export function extractToolResultText(raw: unknown): string {
 
 /**
  * Parse `TaskCreate` tool_result to extract the SDK-assigned task id.
- * Output shape (per `@anthropic-ai/claude-agent-sdk/sdk-tools.d.ts`):
- *   `{ task: { id: string; subject: string } }` — JSON-stringified into the
- *   tool_result content (after `extractToolResultText` unwrap).
- * Returns null if content isn't valid JSON or doesn't have the expected shape;
- * caller drops the pending entry and lets the next TaskList reconcile.
+ *
+ * Type def in `@anthropic-ai/claude-agent-sdk/sdk-tools.d.ts` claims
+ * `{ task: { id, subject } }`, but the actual wire content (verified empirically
+ * on SDK 0.3.159 with model claude-opus-4-8) is human-readable text:
+ *
+ *   "Task #1 created successfully: Run typecheck"
+ *
+ * The `#N` integer is the taskId — TaskUpdate's `taskId` input matches it
+ * verbatim (`"1"`, `"2"`, ...). Type-def-vs-runtime mismatch is documented
+ * in `.agent/GOTCHAS.md`.
+ *
+ * Falls back to JSON shape just in case some flow returns the documented
+ * structured form. Returns null when neither matches; caller drops the
+ * pending entry and lets the next TaskList reconcile.
  */
 export function parseTaskCreateOutput(content: string): string | null {
+  // Wire format (observed): "Task #N created successfully: <subject>"
+  const m = content.match(/^Task\s+#(\d+)\s+created\s+successfully/i);
+  if (m) return m[1];
+  // Documented JSON shape — kept as defensive fallback.
   try {
-    const parsed = JSON.parse(content) as { task?: { id?: string } };
-    return parsed?.task?.id ?? null;
+    const parsed = JSON.parse(content) as { task?: { id?: string | number } };
+    const id = parsed?.task?.id;
+    if (id != null) return String(id);
   } catch {
-    return null;
+    /* fall through */
   }
+  return null;
 }
 
 /**
@@ -1146,11 +1161,18 @@ function emitClaudeToolResult(
       });
     }
   } else {
+    // AskUserQuestion special case: our intercept (canUseTool deny + smuggled
+    // JSON answer) returns is_error:true on the wire even when the user
+    // answered successfully. SDK 0.3.x now passes that through to the renderer
+    // (0.2.x swallowed it). Suppress the red "Tool returned an error" banner
+    // for this tool only — the model receives the answer JSON regardless and
+    // continues the conversation normally.
+    const suppressError = entry.toolName === 'AskUserQuestion';
     send({
       type: 'message', msgId: toolUseId, msgType: 'fold_code',
       label: entry.toolName,
       subtitle: entry.input,
-      ...(isError
+      ...(isError && !suppressError
         ? { body: { content }, errorMessage: 'Tool returned an error' }
         : { body: { content } }),
     });

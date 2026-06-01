@@ -493,21 +493,34 @@ describe('formatClaudeToolInput Agent alias', () => {
 // just calls them.
 
 describe('parseTaskCreateOutput', () => {
-  it('extracts task.id from valid JSON', () => {
+  // Real wire format (verified on SDK 0.3.159 + claude-opus-4-8):
+  // "Task #1 created successfully: <subject>"
+  // sdk-tools.d.ts documents a JSON shape that doesn't match runtime — we
+  // try text first, JSON as defensive fallback.
+
+  it('extracts numeric id from observed text wire format', () => {
+    expect(parseTaskCreateOutput('Task #1 created successfully: Run typecheck'))
+      .toBe('1');
+    expect(parseTaskCreateOutput('Task #42 created successfully: Multi-digit'))
+      .toBe('42');
+  });
+
+  it('is case-insensitive on the "Task #N created successfully" prefix', () => {
+    expect(parseTaskCreateOutput('task #5 created successfully: lowercase')).toBe('5');
+  });
+
+  it('falls back to documented JSON shape when text pattern fails', () => {
     expect(parseTaskCreateOutput('{"task":{"id":"abc-123","subject":"Setup"}}'))
       .toBe('abc-123');
   });
 
-  it('returns null when content is not JSON', () => {
-    expect(parseTaskCreateOutput('not json at all')).toBeNull();
+  it('coerces numeric JSON ids to string', () => {
+    expect(parseTaskCreateOutput('{"task":{"id":7}}')).toBe('7');
   });
 
-  it('returns null when JSON lacks task.id', () => {
+  it('returns null when neither shape matches', () => {
+    expect(parseTaskCreateOutput('not json and no task header')).toBeNull();
     expect(parseTaskCreateOutput('{"task":{}}')).toBeNull();
-    expect(parseTaskCreateOutput('{"foo":"bar"}')).toBeNull();
-  });
-
-  it('returns null for empty / whitespace content', () => {
     expect(parseTaskCreateOutput('')).toBeNull();
   });
 });
