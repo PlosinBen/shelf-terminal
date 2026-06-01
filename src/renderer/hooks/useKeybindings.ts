@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import {
-  toggleSidebar,
+  toggleProjectList,
   toggleSettings,
   toggleSearch,
   toggleCommandPicker,
@@ -54,19 +54,20 @@ export function useKeybindings() {
 
       const fn = ((): (() => void) | null => {
         switch (action) {
-          case 'toggleSidebar':  return toggleSidebar;
+          case 'toggleProjectList': return toggleProjectList;
           case 'openSettings':   return toggleSettings;
           case 'search':         return toggleSearch;
           case 'openCommandPicker': return activeProject ? toggleCommandPicker : null;
           case 'toggleDevTools':   return () => toggleRightSidebar('devtools');
           case 'toggleNotes':      return activeProject ? () => toggleRightSidebar('notes') : null;
+          case 'togglePm':         return () => toggleRightSidebar('pm');
           case 'quickNote':        return activeProject ? openQuickNote : null;
           case 'newProject':     return () => emit(Events.OPEN_FOLDER_PICKER);
           case 'prevProject':    return () => setActiveProject(Math.max(0, activeProjectIndex - 1));
           case 'nextProject':    return () => setActiveProject(Math.min(projects.length - 1, activeProjectIndex + 1));
           case 'removeProject':   return activeProject ? () => emit('confirm-remove-project', activeProjectIndex) : null;
           case 'newTab':         return activeProject ? () => emit(Events.NEW_TAB, activeProjectIndex) : null;
-          case 'toggleSplit':    return activeProject ? () => emit(Events.TOGGLE_SPLIT, activeProjectIndex) : null;
+          case 'toggleSplitRight': return activeProject ? () => emit(Events.TOGGLE_SPLIT, activeProjectIndex) : null;
           case 'prevTab':        return activeProject ? () => setActiveTab(activeProjectIndex, Math.max(0, activeProject.activeTabIndex - 1)) : null;
           case 'nextTab':        return activeProject ? () => setActiveTab(activeProjectIndex, Math.min(activeProject.tabs.length - 1, activeProject.activeTabIndex + 1)) : null;
           case 'switchTab': {

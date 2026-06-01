@@ -1,7 +1,7 @@
 import type { AppSettings, KeybindingConfig } from './types';
 
 export const DEFAULT_KEYBINDINGS: KeybindingConfig = {
-  toggleSidebar: 'mod+b',
+  toggleProjectList: 'mod+shift+b',
   newProject: 'mod+o',
   removeProject: 'mod+w',
   newTab: 'mod+t',
@@ -11,11 +11,12 @@ export const DEFAULT_KEYBINDINGS: KeybindingConfig = {
   nextTab: 'mod+shift+]',
   openSettings: 'mod+,',
   search: 'mod+f',
-  toggleSplit: 'mod+\\',
+  toggleSplitRight: 'mod+shift+\\',
   openCommandPicker: 'mod+e',
-  toggleDevTools: 'mod+d',
-  toggleNotes: 'mod+n',
-  quickNote: 'mod+shift+n',
+  toggleDevTools: 'mod+shift+d',
+  toggleNotes: 'mod+shift+n',
+  togglePm: 'mod+shift+m',
+  quickNote: 'mod+n',
 };
 
 export const DEFAULT_SETTINGS: AppSettings = {

@@ -7,7 +7,7 @@ import { PM_PROVIDERS, getModelsForProvider, AGENT_DISPLAY_KEYS, AGENT_PROVIDER_
 import { formatBytes } from '../utils/format-bytes';
 
 const ACTION_LABELS: Record<KeybindingAction, string> = {
-  toggleSidebar: 'Toggle Sidebar',
+  toggleProjectList: 'Toggle Project List',
   newProject: 'New Project',
   removeProject: 'Remove Project',
   newTab: 'New Tab',
@@ -17,10 +17,11 @@ const ACTION_LABELS: Record<KeybindingAction, string> = {
   nextTab: 'Next Tab',
   openSettings: 'Settings',
   search: 'Search',
-  toggleSplit: 'Toggle Split',
+  toggleSplitRight: 'Split Right',
   openCommandPicker: 'Quick Commands',
   toggleDevTools: 'Dev Tools',
   toggleNotes: 'Notes',
+  togglePm: 'PM Agent',
   quickNote: 'Quick Note',
 };
 

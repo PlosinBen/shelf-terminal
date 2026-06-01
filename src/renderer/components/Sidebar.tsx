@@ -4,7 +4,7 @@ import {
   setActiveProject,
   setEditingProject,
   toggleSettings,
-  toggleSidebar,
+  toggleProjectList,
   reorderProjects,
 } from '../store';
 import { emit, Events } from '../events';
@@ -72,7 +72,7 @@ export function Sidebar() {
   return (
     <aside className="sidebar">
       <div className="sidebar-header">
-        <button className="sidebar-btn" onClick={toggleSidebar} title={tooltipWithShortcut('Collapse sidebar', kb.toggleSidebar, isMac)}>&#9776;</button>
+        <button className="sidebar-btn" onClick={toggleProjectList} title={tooltipWithShortcut('Collapse project list', kb.toggleProjectList, isMac)}>&#9776;</button>
         <span>Shelf</span>
         <span className="sidebar-header-actions">
           <button className="sidebar-btn" onClick={toggleSettings} title={tooltipWithShortcut('Settings', kb.openSettings, isMac)}>&#9881;</button>

@@ -5,7 +5,7 @@ import {
   renameTab,
   reorderTabs,
   clearUnread,
-  toggleSidebar,
+  toggleProjectList,
   toggleMuted,
   setTabColor,
   appendDefaultTab,
@@ -65,7 +65,7 @@ export function TabBar() {
     return (
       <div className="tab-bar">
         {!sidebarVisible && (
-          <button className="tab-sidebar-btn" onClick={toggleSidebar} title="Expand sidebar">&#9776;</button>
+          <button className="tab-sidebar-btn" onClick={toggleProjectList} title="Expand project list">&#9776;</button>
         )}
       </div>
     );
@@ -126,7 +126,7 @@ export function TabBar() {
   return (
     <div className="tab-bar">
       {!sidebarVisible && (
-        <button className="tab-sidebar-btn" onClick={toggleSidebar} title="Expand sidebar">&#9776;</button>
+        <button className="tab-sidebar-btn" onClick={toggleProjectList} title="Expand project list">&#9776;</button>
       )}
       {project.tabs.map((tab, i) => {
         const isEditing = editingIndex === i;

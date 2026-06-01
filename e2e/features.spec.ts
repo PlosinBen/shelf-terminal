@@ -149,8 +149,8 @@ test('sidebar collapse and expand', async ({ shelfApp: { page } }) => {
   const sidebar = page.locator('.sidebar');
   await expect(sidebar).toBeVisible();
 
-  // Collapse via mod+B
-  await page.keyboard.press(`${modifier}+b`);
+  // Collapse via mod+Shift+B (project list toggle)
+  await page.keyboard.press(`${modifier}+Shift+b`);
   await expect(sidebar).not.toBeVisible();
 
   // Expand button should appear in tab bar
@@ -394,7 +394,7 @@ test('terminal content preserved after project reorder', async ({ shelfApp: { pa
 
 // ── Dev Tools ──
 
-test('mod+D toggles dev tools panel', async ({ shelfApp: { page } }) => {
+test('mod+Shift+D toggles dev tools panel', async ({ shelfApp: { page } }) => {
   const panel = page.locator('.devtools-panel');
   const collapsed = page.locator('.right-tab-btn', { hasText: 'Dev Tools' });
 
@@ -404,13 +404,13 @@ test('mod+D toggles dev tools panel', async ({ shelfApp: { page } }) => {
   await expect(panel).not.toBeVisible();
 
   // Open via keyboard — tab stays visible but becomes active
-  await page.keyboard.press(`${modifier}+d`);
+  await page.keyboard.press(`${modifier}+Shift+d`);
   await expect(panel).toBeVisible({ timeout: 3_000 });
   await expect(collapsed).toBeVisible();
   await expect(collapsed).toHaveClass(/active/);
 
   // Close via keyboard — active class removed
-  await page.keyboard.press(`${modifier}+d`);
+  await page.keyboard.press(`${modifier}+Shift+d`);
   await expect(panel).not.toBeVisible();
   await expect(collapsed).toBeVisible();
   await expect(collapsed).not.toHaveClass(/active/);
@@ -430,7 +430,7 @@ test('dev tools panel opens via collapsed tab click', async ({ shelfApp: { page 
 });
 
 test('dev tools accordion expands and collapses', async ({ shelfApp: { page } }) => {
-  await page.keyboard.press(`${modifier}+d`);
+  await page.keyboard.press(`${modifier}+Shift+d`);
   const panel = page.locator('.devtools-panel');
   await expect(panel).toBeVisible({ timeout: 3_000 });
 
@@ -484,18 +484,18 @@ test('mod+O opens folder picker', async ({ shelfApp: { page } }) => {
 
 // ── Split View ──
 
-test('mod+backslash toggles split view', async ({ shelfApp: { page } }) => {
+test('mod+shift+backslash toggles split view', async ({ shelfApp: { page } }) => {
   await ensureConnected(page);
 
   const tabs = page.locator('.tab-bar .tab');
   const before = await tabs.count();
 
   // Open split — adds a new tab
-  await page.keyboard.press(`${modifier}+\\`);
+  await page.keyboard.press(`${modifier}+Shift+\\`);
   await expect(tabs).toHaveCount(before + 1, { timeout: 5_000 });
 
   // Close split — removes the split tab
-  await page.keyboard.press(`${modifier}+\\`);
+  await page.keyboard.press(`${modifier}+Shift+\\`);
   await expect(tabs).toHaveCount(before, { timeout: 5_000 });
 });
 

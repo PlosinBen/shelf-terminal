@@ -17,7 +17,7 @@ import { NotesView } from './components/NotesView';
 import { QuickNoteOverlay } from './components/QuickNoteOverlay';
 import { useKeybindings, isMac } from './hooks/useKeybindings';
 import { tooltipWithShortcut } from './utils/format-keybinding';
-import { useStore, setProjects, setSettings, setUpdateStatus, addProject, addTab, setActiveTab, removeTab, removeProject, setSplitTab, toggleSidebar, clearUnread, setInvalidProjects, toggleRightSidebar } from './store';
+import { useStore, setProjects, setSettings, setUpdateStatus, addProject, addTab, setActiveTab, removeTab, removeProject, setSplitTab, toggleProjectList, clearUnread, setInvalidProjects, toggleRightSidebar } from './store';
 import type { ProjectConfig } from '@shared/types';
 import { disposeTerminal } from './components/TerminalView';
 import { on, emit, Events } from './events';
@@ -348,7 +348,7 @@ export function App() {
           <button
             className={`right-tab-btn${pmVisible ? ' active' : ''}`}
             onClick={() => toggleRightSidebar('pm')}
-            title="PM Agent"
+            title={tooltipWithShortcut('PM Agent', settings.keybindings.togglePm, isMac)}
           >
             <span className={`pm-tab-dot ${awayMode ? 'pm-dot-away' : 'pm-dot'}`} />
             <span>PM</span>

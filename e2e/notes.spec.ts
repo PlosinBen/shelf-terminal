@@ -70,10 +70,10 @@ test.describe('Notes panel', () => {
     await expect(page.locator('.notes-empty')).toContainText('No notes yet');
   });
 
-  test('Cmd+N keybinding toggles panel', async () => {
-    await page.keyboard.press(`${modifier}+n`);
+  test('Cmd+Shift+N keybinding toggles panel', async () => {
+    await page.keyboard.press(`${modifier}+Shift+n`);
     await expect(page.locator('.notes-view')).toBeVisible({ timeout: 3_000 });
-    await page.keyboard.press(`${modifier}+n`);
+    await page.keyboard.press(`${modifier}+Shift+n`);
     await expect(page.locator('.notes-view')).not.toBeVisible({ timeout: 3_000 });
   });
 
@@ -172,15 +172,15 @@ test.describe('Notes panel', () => {
 
   // ── Quick Note overlay ──
 
-  test('mod+shift+n opens quick note overlay', async () => {
-    await page.keyboard.press(`${modifier}+Shift+n`);
+  test('mod+n opens quick note overlay', async () => {
+    await page.keyboard.press(`${modifier}+n`);
     const overlay = page.locator('.quick-note-overlay');
     await expect(overlay).toBeVisible({ timeout: 3_000 });
     await expect(page.locator('.quick-note-textarea')).toBeFocused();
   });
 
   test('Esc cancels quick note without creating a file', async () => {
-    await page.keyboard.press(`${modifier}+Shift+n`);
+    await page.keyboard.press(`${modifier}+n`);
     const textarea = page.locator('.quick-note-textarea');
     await expect(textarea).toBeFocused({ timeout: 3_000 });
     await textarea.fill('this should not persist');
@@ -196,7 +196,7 @@ test.describe('Notes panel', () => {
   });
 
   test('Enter submits quick note and it appears in Notes list', async () => {
-    await page.keyboard.press(`${modifier}+Shift+n`);
+    await page.keyboard.press(`${modifier}+n`);
     const textarea = page.locator('.quick-note-textarea');
     await expect(textarea).toBeFocused({ timeout: 3_000 });
     await textarea.fill('# Quick capture\n\nfollow-up body');
@@ -214,7 +214,7 @@ test.describe('Notes panel', () => {
   });
 
   test('Shift+Enter inserts newline, does not submit', async () => {
-    await page.keyboard.press(`${modifier}+Shift+n`);
+    await page.keyboard.press(`${modifier}+n`);
     const textarea = page.locator('.quick-note-textarea');
     await expect(textarea).toBeFocused({ timeout: 3_000 });
     await textarea.type('line one');
@@ -227,7 +227,7 @@ test.describe('Notes panel', () => {
   });
 
   test('paste image into quick note: thumbnail appears + saves to disk + frontmatter has filename', async () => {
-    await page.keyboard.press(`${modifier}+Shift+n`);
+    await page.keyboard.press(`${modifier}+n`);
     const textarea = page.locator('.quick-note-textarea');
     await expect(textarea).toBeFocused({ timeout: 3_000 });
 
@@ -278,7 +278,7 @@ test.describe('Notes panel', () => {
   });
 
   test('pure-image submission (no text) creates the note', async () => {
-    await page.keyboard.press(`${modifier}+Shift+n`);
+    await page.keyboard.press(`${modifier}+n`);
     const textarea = page.locator('.quick-note-textarea');
     await expect(textarea).toBeFocused({ timeout: 3_000 });
 
@@ -314,7 +314,7 @@ test.describe('Notes panel', () => {
   });
 
   test('remove pasted image before submit', async () => {
-    await page.keyboard.press(`${modifier}+Shift+n`);
+    await page.keyboard.press(`${modifier}+n`);
     const textarea = page.locator('.quick-note-textarea');
     await expect(textarea).toBeFocused({ timeout: 3_000 });
 

@@ -153,7 +153,7 @@ export function reorderProjects(fromIndex: number, toIndex: number) {
   window.shelfApi.project.save(projects.map((p) => p.config));
 }
 
-export function toggleSidebar() {
+export function toggleProjectList() {
   sidebarVisible = !sidebarVisible;
   updateSnapshot();
 }

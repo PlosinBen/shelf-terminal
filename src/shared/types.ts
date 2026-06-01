@@ -208,7 +208,7 @@ export interface PtyExitPayload {
 // ── App settings (persisted) ──
 
 export type KeybindingAction =
-  | 'toggleSidebar'
+  | 'toggleProjectList'
   | 'newProject'
   | 'removeProject'
   | 'newTab'
@@ -218,10 +218,11 @@ export type KeybindingAction =
   | 'nextTab'
   | 'openSettings'
   | 'search'
-  | 'toggleSplit'
+  | 'toggleSplitRight'
   | 'openCommandPicker'
   | 'toggleDevTools'
   | 'toggleNotes'
+  | 'togglePm'
   | 'quickNote';
 
 export type KeybindingConfig = Record<KeybindingAction, string>;
