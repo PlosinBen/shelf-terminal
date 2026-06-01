@@ -854,6 +854,14 @@ export function createCopilotBackend(): ServerBackend {
               }
               break;
             }
+            // Parser refused. Two known-OK cases: Delete File (we don't
+            // support yet — see parseApplyPatch:164) and missing Begin/End
+            // markers in totally unrelated content. Anything else is a
+            // format drift worth diagnosing. Log so the raw preview tells us
+            // which case we hit without having to repro live.
+            if (!/\*\*\*\s+Delete\s+File:/.test(args)) {
+              console.error('[copilot] parseApplyPatch refused non-Delete content; falling back to raw display', { argsPreview: args.slice(0, 300) });
+            }
           }
 
           // Generic tool_use path → fold_code. For apply_patch fallback
