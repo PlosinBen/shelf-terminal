@@ -1,26 +1,25 @@
 import React, { useCallback } from 'react';
 import type { AgentProvider } from '@shared/types';
-import { clearMessages as clearMessagesStore, useAgentTab } from '../../agentTabStore';
+import { clearMessages as clearMessagesStore, setLocalPicker, useAgentTab } from '../../agentTabStore';
 
 interface Props {
   tabId: string;
   provider: AgentProvider;
-  /** Apply a config edit (model / effort / permissionMode change).
-   *  Same callback used by InputZone's /model slash. Lives in AgentView
-   *  because it persists into projectConfig.agentPrefs[provider]. */
-  onConfigEdit: (key: 'model' | 'effort' | 'permissionMode', value: string) => void;
 }
 
 /**
  * Bottom status bar — running/idle dot, provider label, clickable
- * model / mode / effort cycles, context usage, cost, turns, rate-limit
+ * model / mode / effort segments, context usage, cost, turns, rate-limit
  * segments, Clear History button.
  *
- * Reads everything from the store slice; cycle clicks call onConfigEdit
- * (which writes intent to projectConfig + sets optimistic actual* in
- * store).
+ * Clicking a model / mode / effort segment opens the renderer-local picker
+ * (same one /model etc. open) rather than blind-cycling to the next value.
+ * Cycle-on-click was easy to misfire — a stray click would silently switch
+ * the model with no confirmation. Opening a dismissable picker makes a
+ * misclick harmless (Esc closes it) and the selection explicit. Options come
+ * from `capabilities`; the picker's onSelect runs onConfigEdit (AgentView).
  */
-export function StatusBar({ tabId, provider, onConfigEdit }: Props) {
+export function StatusBar({ tabId, provider }: Props) {
   const tab = useAgentTab(tabId);
   const isStreaming = tab?.isStreaming ?? false;
   const statusModel = tab?.actualModel ?? null;
@@ -32,26 +31,20 @@ export function StatusBar({ tabId, provider, onConfigEdit }: Props) {
   const contextUsage = tab?.contextUsage ?? null;
   const rateLimits = tab?.rateLimits ?? [];
 
-  const handleCycleModel = useCallback(() => {
+  const handleOpenModelPicker = useCallback(() => {
     if (!capabilities || capabilities.models.length === 0) return;
-    const idx = capabilities.models.findIndex((m) => m.value === statusModel);
-    const next = capabilities.models[(idx + 1) % capabilities.models.length];
-    onConfigEdit('model', next.value);
-  }, [capabilities, statusModel, onConfigEdit]);
+    setLocalPicker(tabId, { key: 'model' });
+  }, [tabId, capabilities]);
 
-  const handleCycleMode = useCallback(() => {
+  const handleOpenModePicker = useCallback(() => {
     if (!capabilities || capabilities.permissionModes.length === 0) return;
-    const idx = capabilities.permissionModes.findIndex((m) => m.value === permissionMode);
-    const next = capabilities.permissionModes[(idx + 1) % capabilities.permissionModes.length];
-    onConfigEdit('permissionMode', next.value);
-  }, [capabilities, permissionMode, onConfigEdit]);
+    setLocalPicker(tabId, { key: 'permissionMode' });
+  }, [tabId, capabilities]);
 
-  const handleCycleEffort = useCallback(() => {
+  const handleOpenEffortPicker = useCallback(() => {
     if (!capabilities || capabilities.effortLevels.length === 0) return;
-    const idx = capabilities.effortLevels.findIndex((e) => e.value === currentEffort);
-    const next = capabilities.effortLevels[(idx + 1) % capabilities.effortLevels.length];
-    onConfigEdit('effort', next.value);
-  }, [capabilities, currentEffort, onConfigEdit]);
+    setLocalPicker(tabId, { key: 'effort' });
+  }, [tabId, capabilities]);
 
   const handleClearHistory = useCallback(async () => {
     // Wipes what the user sees (in-memory + IDB). Does NOT touch agent
@@ -74,7 +67,7 @@ export function StatusBar({ tabId, provider, onConfigEdit }: Props) {
           <span className="agent-status-sep">|</span>
           <span
             className={`agent-status-seg${capabilities ? ' agent-status-interactive' : ''}`}
-            onClick={handleCycleModel}
+            onClick={handleOpenModelPicker}
           >{statusModel}</span>
         </>
       )}
@@ -84,7 +77,7 @@ export function StatusBar({ tabId, provider, onConfigEdit }: Props) {
           <span
             className="agent-status-seg agent-status-interactive"
             data-severity={currentModeOption.severity ?? 'normal'}
-            onClick={handleCycleMode}
+            onClick={handleOpenModePicker}
           >{currentModeOption.displayName}</span>
         </>
       )}
@@ -94,7 +87,7 @@ export function StatusBar({ tabId, provider, onConfigEdit }: Props) {
           <span
             className="agent-status-seg agent-status-interactive"
             data-severity={currentEffortOption.severity ?? 'normal'}
-            onClick={handleCycleEffort}
+            onClick={handleOpenEffortPicker}
           >
             <span className="agent-status-seg-label">effort: </span>{currentEffortOption.displayName}
           </span>

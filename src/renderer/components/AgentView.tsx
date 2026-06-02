@@ -197,7 +197,6 @@ export function AgentView({ tabId, cwd, connection, provider, projectId, visible
       <StatusBar
         tabId={tabId}
         provider={provider}
-        onConfigEdit={handleConfigEdit}
       />
     </div>
   );
