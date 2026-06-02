@@ -203,3 +203,49 @@ PM agent（背景自動駕駛、Telegram bridge、write_to_pty、project note）
 
 ---
 
+## 67. Telegram bridge 加 mode state machine、可遠端遙控 agent view（bypass PM）
+
+**決策**: Telegram bridge 擴成兩 mode：
+
+- `pm` mode（既有、預設）：訊息走 PM agent loop
+- `agent:{tabId}` mode：訊息直接送 `agent.sendFromInternal(tabId, ...)`、agent 回覆透過 observer pattern mirror 回 Telegram、**完全 bypass PM**
+
+User 用 slash command 切 mode：`/pm` / `/use_<alias>` / `/projects` / `/mode`。Alias 從 project name derive（移除非英數 + lower case），動態 register 進 `setMyCommands` 讓 Telegram 提供 autocomplete。
+
+跨 process plumbing 走兩個 internal API（`src/main/agent/index.ts`）：
+- `sendFromInternal(tabId, prompt)` — 同 IPC `AGENT_SEND` path、不經 renderer
+- `registerOutputObserver(tabId, fn)` — 訂閱該 tab outgoing AgentEvent 流（tee 自 dispatchEvent + sendMessage 直接 send 的 status/permission/error）
+- 配套 `stopFromInternal` / `listAgentTabs` / `getAgentProvider` 給 telegram bridge enumerate / 模式切換用
+
+**原因**:
+- PM 作為中介有「轉述失真 + 多一輪 LLM round-trip 延遲」兩個固有問題
+- User 真實工作流：多 project 看進度走 PM、處理事情想直連 agent view
+- 走 internal API 而非 IPC：Telegram bridge 在 main process、不該繞 renderer
+
+**MVP 範圍刻意收窄**（明確不做、保留為 future enhancement）:
+- ❌ Agent slash command（`/clear` `/compact` 等）的主動 forwarding 測試
+- ❌ Reply keyboard 快速按鈕
+- ❌ Streaming edit-in-place（agent turn 結束才送完整 reply）
+- ❌ Permission inline keyboard（agent 跳 permission 時 Telegram 只通知 "Open Shelf to respond"、不互動）
+- ❌ Picker request handling
+- ❌ AgentMessage 9 variant 視覺對映（fold_diff / fold_code 等都 ignore，只取 `reply` text）
+- ❌ Fuzzy alias match / mode indicator prefix / user-set alias
+
+**配套**:
+- `tools.ts` 加 `setSyncCallback` — telegram bridge 訂閱 project list 變化時 debounced re-register `/use_*` commands
+- `telegram-mode.ts` 純函式 helpers：`deriveAlias` / `aliasOrFallback` / `resolveAlias` / `buildUseCommands` / `formatProjectsList`
+- Observer 累積 `reply` text、status='idle' 時 flush 到 Telegram；permission/picker 即時送「Open Shelf to respond」notification
+
+**不要改**:
+- 不要把 Telegram bridge 內嵌進 agent-server — agent-server 是 deployable bundle、加 Telegram 客戶端污染封閉性
+- 不要為 Telegram 設計獨立的 agent message stream channel — observer pattern register 到既有 dispatch、共用 wire 不另立
+- 不要在 `setMyCommands` 註冊 provider-specific slash（`/clear` 等）— autocomplete 列表會炸、且每 provider 不同；agent slash 走 user 手打 → fall through 給 provider parseSlashPrefix
+- 不要在 Telegram 嘗試完整還原 Shelf UI（fold_diff 不展開、picker 不互動）— Telegram 是 thin client、不是 full UI replica
+- 不要把 mode 改 per-chat — MVP 假設單一 user、global mode
+
+**Alias collision**：MVP 不處理。第一個註冊的 project 拿走 alias、第二個 silently fail（user 看 `/projects` 發現問題、改 project name 解）。
+
+**Related**: `.agent/features/telegram-agent-bridge.md`、DECISIONS-pm #39（PM 唯一輸出通道是 write_to_pty — 本 feature 不違反、是另開 channel）、DECISIONS-pm #40（PM 對話是單一 thread、Shelf UI ↔ Telegram 兩 view — 本 feature 延伸到 agent）、DECISIONS-agent #43（provider 對外行為一致 — Telegram bridge 不對 provider 做特殊處理）、DECISIONS-agent #53（turnId envelope — observer pattern 設計考量）、DECISIONS-agent #60（AgentMessage 9 variant — MVP 只取 `reply` text）
+
+---
+

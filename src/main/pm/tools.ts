@@ -28,8 +28,19 @@ interface SyncedProject {
 
 let syncedProjects: SyncedProject[] = [];
 
+// Subscriber callback for state-change notifications. Currently only the
+// telegram bridge uses this — it needs to re-register dynamic /use_<alias>
+// slash commands when project list changes (add/rename/remove). Decoupled via
+// callback to avoid tools.ts → telegram.ts dep.
+let onSync: (() => void) | null = null;
+
+export function setSyncCallback(cb: (() => void) | null): void {
+  onSync = cb;
+}
+
 export function updateSyncedState(projects: SyncedProject[]): void {
   syncedProjects = projects;
+  onSync?.();
 }
 
 /**
@@ -45,6 +56,15 @@ export function getCurrentFocus(): { project: SyncedProject; tab: SyncedTab | nu
   if (!project) return null;
   const tab = project.tabs.find((t) => t.active) ?? null;
   return { project, tab };
+}
+
+/**
+ * Read-only snapshot of all synced projects. Used by telegram bridge to
+ * derive aliases for /use_<alias> mode-switch commands. See
+ * features/telegram-agent-bridge.md.
+ */
+export function getSyncedProjects(): readonly SyncedProject[] {
+  return syncedProjects;
 }
 
 // ── Tool schemas (OpenAI function-calling format) ──

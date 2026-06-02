@@ -18,6 +18,25 @@ interface SessionInstance {
 
 const sessions = new Map<string, SessionInstance>();
 
+// ── Internal output observers (for Telegram bridge etc.) ──
+// Lets in-process modules (PM telegram bridge) tee a tab's outgoing agent
+// events without going through renderer IPC. See features/telegram-agent-bridge.md.
+type OutputObserver = (event: AgentEvent) => void;
+const observers = new Map<string, Set<OutputObserver>>();
+
+function notifyObservers(tabId: string, event: AgentEvent): void {
+  const set = observers.get(tabId);
+  if (!set) return;
+  // Snapshot in case observer unsubscribes during iteration.
+  for (const obs of Array.from(set)) {
+    try {
+      obs(event);
+    } catch (e: any) {
+      log.error('agent', `observer error tab=${tabId.slice(0, 8)}: ${e?.message ?? e}`);
+    }
+  }
+}
+
 let getWindow: (() => BrowserWindow | null) | null = null;
 
 export function initAgentManager(windowGetter: () => BrowserWindow | null): void {
@@ -157,9 +176,11 @@ async function sendMessage(
 
   session.state = 'streaming';
   send(IPC.AGENT_STATUS, tabId, { state: 'streaming' });
+  notifyObservers(tabId, { type: 'status', payload: { state: 'streaming' } });
 
   const canUseTool = async (toolUseId: string, toolName: string, input: Record<string, unknown>) => {
     send(IPC.AGENT_PERMISSION_REQUEST, tabId, { toolUseId, toolName, input });
+    notifyObservers(tabId, { type: 'permission_request', toolUseId, toolName, input });
     return new Promise<PermissionResult>((resolve) => {
       session.pendingPermissions.set(toolUseId, resolve);
     });
@@ -179,6 +200,7 @@ async function sendMessage(
   } catch (err: any) {
     log.error('agent', `${tag} query error: ${err.message}`);
     send(IPC.AGENT_MESSAGE, tabId, { type: 'error', content: err.message });
+    notifyObservers(tabId, { type: 'error', error: err.message });
   } finally {
     session.state = 'idle';
     for (const resolve of session.pendingPermissions.values()) {
@@ -191,6 +213,10 @@ async function sendMessage(
 }
 
 function dispatchEvent(tabId: string, event: AgentEvent) {
+  // Tee everything backend.query yields to internal observers (e.g. Telegram
+  // bridge mirror agent output). Observer fires before IPC dispatch so a
+  // crash in observer won't block renderer updates.
+  notifyObservers(tabId, event);
   switch (event.type) {
     case 'message':
       send(IPC.AGENT_MESSAGE, tabId, event.payload);
@@ -261,6 +287,64 @@ export function getAgentState(tabId: string): AgentSessionState | null {
 
 export function isAgentTab(tabId: string): boolean {
   return sessions.has(tabId);
+}
+
+/**
+ * In-process equivalent of the AGENT_SEND IPC handler. Routes a prompt to an
+ * existing agent session without going through renderer. Used by the Telegram
+ * bridge in agent mode (see features/telegram-agent-bridge.md).
+ *
+ * Returns the same boolean as sendMessage: false if tabId has no session, true
+ * once the turn completes (including catch'd errors — those propagate through
+ * the observer stream as AgentEvent.error, not as a rejected promise).
+ */
+export async function sendFromInternal(tabId: string, prompt: string): Promise<boolean> {
+  return sendMessage(tabId, prompt);
+}
+
+/** In-process equivalent of the AGENT_STOP IPC handler. */
+export async function stopFromInternal(tabId: string): Promise<boolean> {
+  return stopSession(tabId);
+}
+
+/**
+ * Subscribe to agent output events for a given tab. Mirrors all AgentEvent
+ * values flowing through dispatchEvent + the direct sends in sendMessage
+ * (status streaming, permission request, error).
+ *
+ * Returns an unsubscribe function. Caller must call it (typically in a try /
+ * finally around sendFromInternal). Observer exceptions are logged and
+ * swallowed — they cannot break the agent event stream.
+ */
+export function registerOutputObserver(tabId: string, observer: OutputObserver): () => void {
+  let set = observers.get(tabId);
+  if (!set) {
+    set = new Set();
+    observers.set(tabId, set);
+  }
+  set.add(observer);
+  return () => {
+    const s = observers.get(tabId);
+    if (!s) return;
+    s.delete(observer);
+    if (s.size === 0) observers.delete(tabId);
+  };
+}
+
+/**
+ * Snapshot which tabs currently have agent sessions. Used by telegram bridge
+ * /projects listing to know which projects have an agent open.
+ */
+export function listAgentTabs(): string[] {
+  return Array.from(sessions.keys());
+}
+
+/**
+ * Get provider type for an agent tab. Used by telegram bridge to display
+ * "shelf_terminal/claude" style mode confirmation.
+ */
+export function getAgentProvider(tabId: string): AgentProvider | null {
+  return sessions.get(tabId)?.provider ?? null;
 }
 
 export function disposeAllAgents(): void {
