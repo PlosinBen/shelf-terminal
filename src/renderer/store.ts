@@ -445,12 +445,20 @@ function syncToMain() {
   if (syncTimer) return;
   syncTimer = setTimeout(() => {
     syncTimer = null;
-    const state = projects.map((p) => ({
+    // Mark active project / active tab so main-side PM can resolve current
+    // focus without a separate IPC. See features/pm-current-focus.md and
+    // tools.ts getCurrentFocus().
+    const state = projects.map((p, pi) => ({
       id: p.config.id,
       name: p.config.name,
       cwd: p.config.cwd,
       connectionType: p.config.connection.type,
-      tabs: p.tabs.map((t) => ({ id: t.id, label: t.label })),
+      active: pi === activeProjectIndex,
+      tabs: p.tabs.map((t, ti) => ({
+        id: t.id,
+        label: t.label,
+        active: ti === p.activeTabIndex,
+      })),
     }));
     window.shelfApi.pm.syncState(state);
   }, 200);

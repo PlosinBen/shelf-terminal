@@ -6,7 +6,14 @@ import type { ChatMessage, StreamEvent } from './llm-client';
 // (GOTCHAS #29: retryable 503/429/500/502/504, 3 retries, 5s→10s→20s).
 const streamChat = vi.fn();
 vi.mock('./llm-client', () => ({ streamChat: (...a: unknown[]) => streamChat(...a) }));
-vi.mock('./tools', () => ({ getActiveToolSchemas: () => [], executeTool: () => '' }));
+vi.mock('./tools', () => ({
+  getActiveToolSchemas: () => [],
+  executeTool: () => '',
+  // getCurrentFocus is called by agent-loop's getSystemPrompt() to inject the
+  // "Current Focus" section (DECISIONS-pm #66). Tests don't care about focus
+  // routing — return null so PM falls back to scan-first behaviour.
+  getCurrentFocus: () => null,
+}));
 vi.mock('./telegram', () => ({ sendPmResponse: vi.fn().mockResolvedValue(undefined), isRunning: () => false }));
 vi.mock('./away-mode', () => ({ isAwayMode: () => false }));
 vi.mock('./history-store', () => ({

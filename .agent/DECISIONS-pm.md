@@ -179,3 +179,27 @@ PM agent（背景自動駕駛、Telegram bridge、write_to_pty、project note）
 
 ---
 
+## 66. PM 每 turn inject current focus 段落，default routing 走 focused project/tab
+
+**決策**: PM `getSystemPrompt()` 每個 turn 動態組 `# Current Focus` 段落，從 renderer-synced state 拿當前 active project + tab，注入到 system prompt 尾端，並加 routing rule「user 沒明說時 default 用 focused，scan_all_tabs 只做 cross-project 驗證」。
+
+**原因**:
+- 消除「請幫我在 X 專案做 Y」冗長前綴 — 大多訊息是對 focused tab 的指令
+- Telegram 場景效益最大（user 手機打字成本高）— "active" 仍可用「user 上次在 Shelf focus 的 tab」當合理 default
+- 動態組 = active 切換馬上反映；寫死 prompt = 失去 reactiveness
+
+**配套**:
+- `tools.ts` `SyncedProject/SyncedTab` 加 `active?: boolean`
+- `store.ts` `syncToMain` payload 帶 active marker
+- `tools.ts` `getCurrentFocus()` helper
+- 無 active 時 fall through 不 inject、PM 退回原 scan-first 行為
+
+**不要改**:
+- Routing rule 不要寫成「always use focused」— PM 失去 cross-project 能力
+- 不要把 focus 段落寫進 SYSTEM_PROMPT_BASE — active 變化跟不上
+- 不要在 user message 前綴 inject — focus 是 context 不是 user 訊息
+
+**Related**: `.agent/features/pm-current-focus.md`、DECISIONS-pm #41（雙層 prompt 設計）— current focus 是 per-turn reminder 的特化形式
+
+---
+

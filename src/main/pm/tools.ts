@@ -9,6 +9,10 @@ import { checkRedline } from './redline';
 interface SyncedTab {
   id: string;
   label: string;
+  /** True when this tab is the active tab within its parent project.
+   *  Used by getCurrentFocus() to inject "current focus" into PM's prompt
+   *  (see DECISIONS-pm #66, features/pm-current-focus.md). */
+  active?: boolean;
 }
 
 interface SyncedProject {
@@ -17,12 +21,30 @@ interface SyncedProject {
   cwd: string;
   connectionType: string;
   tabs: SyncedTab[];
+  /** True when this project is the active project in the renderer's
+   *  activeProjectIndex. See SyncedTab.active. */
+  active?: boolean;
 }
 
 let syncedProjects: SyncedProject[] = [];
 
 export function updateSyncedState(projects: SyncedProject[]): void {
   syncedProjects = projects;
+}
+
+/**
+ * Resolve the user's current focus from synced renderer state. Used by
+ * PM's getSystemPrompt() to inject a "Current Focus" section so the model
+ * can default-route messages without asking "which project/tab?" every turn.
+ *
+ * Returns null when no project is marked active. Returns { project, tab:null }
+ * when project is active but no tab marker — caller formats accordingly.
+ */
+export function getCurrentFocus(): { project: SyncedProject; tab: SyncedTab | null } | null {
+  const project = syncedProjects.find((p) => p.active);
+  if (!project) return null;
+  const tab = project.tabs.find((t) => t.active) ?? null;
+  return { project, tab };
 }
 
 // ── Tool schemas (OpenAI function-calling format) ──

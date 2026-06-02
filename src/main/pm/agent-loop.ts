@@ -3,7 +3,7 @@ import { IPC } from '@shared/ipc-channels';
 import type { PmMessage, PmStreamChunk, PmProviderConfig } from '@shared/types';
 import { log } from '@shared/logger';
 import { streamChat, type ChatMessage, type ToolCall } from './llm-client';
-import { getActiveToolSchemas, executeTool } from './tools';
+import { getActiveToolSchemas, executeTool, getCurrentFocus } from './tools';
 import { isAwayMode } from './away-mode';
 import { sendPmResponse, isRunning as isTelegramRunning } from './telegram';
 import { loadHistory, saveHistory, clearPersistedHistory } from './history-store';
@@ -114,7 +114,33 @@ Rules:
 - When delegating a task, compose a clear, complete prompt. Do not send partial instructions that require follow-up.`;
 
 function getSystemPrompt(): string {
-  return SYSTEM_PROMPT_BASE + (isAwayMode() ? AWAY_MODE_ON_ADDENDUM : AWAY_MODE_OFF_ADDENDUM);
+  const base = SYSTEM_PROMPT_BASE + (isAwayMode() ? AWAY_MODE_ON_ADDENDUM : AWAY_MODE_OFF_ADDENDUM);
+  return base + buildCurrentFocusSection();
+}
+
+/**
+ * Build the "Current Focus" section appended to PM's system prompt per turn.
+ * Dynamically resolves the renderer-synced active project / tab so PM can
+ * default-route messages without scan-then-ask. See DECISIONS-pm #66 and
+ * features/pm-current-focus.md.
+ *
+ * Returns empty string when no project is currently active (app just opened,
+ * no projects yet) — PM falls back to its original scan-first behaviour.
+ */
+function buildCurrentFocusSection(): string {
+  const focus = getCurrentFocus();
+  if (!focus) return '';
+
+  const lines: string[] = ['', '', '# Current Focus', ''];
+  lines.push(`Project: ${focus.project.name} (id=${focus.project.id})`);
+  if (focus.tab) {
+    lines.push(`Tab: ${focus.tab.label} (id=${focus.tab.id})`);
+  }
+  lines.push('');
+  lines.push(
+    'Routing rule: When the user gives a task or query without explicitly naming a project or tab, assume they mean the current focus above. Use scan_all_tabs only for cross-project queries or to verify state across projects.',
+  );
+  return lines.join('\n');
 }
 
 const MAX_HISTORY_TURNS = 40;
