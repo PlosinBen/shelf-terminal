@@ -7,6 +7,7 @@ import { randomUUID } from 'node:crypto';
 import type { QueryInput, SendFn, ServerBackend, ProviderCapabilities, StatusSegment, PickerResolvePayload } from '../types';
 import { severityFromUtilization, pickPermissionModes, pickEffortLevels } from '../types';
 import { parseSlashPrefix } from '@shared/slash-prefix';
+import { formatConfigAck, type ConfigEditKey } from '@shared/config-ack';
 import type { ProviderModel } from '@shared/types';
 import { stripCwd } from '../shared';
 import {
@@ -735,6 +736,16 @@ export function createCopilotBackend(): ServerBackend {
         ...(content ? { body: { content } } : {}),
       });
     };
+    // Config edits (model/effort/permission) are status transitions, not slash
+    // content — render them as a centered `system` divider via the shared
+    // formatConfigAck, matching Claude's applyConfigEdit. Failures still surface
+    // as a plain `error` message with the SDK's reason.
+    const emitConfigAck = (key: ConfigEditKey, value: string) => {
+      send({ type: 'message', msgId: mintMsgId(), msgType: 'system', content: formatConfigAck(key, value) });
+    };
+    const emitConfigError = (reason: string) => {
+      send({ type: 'message', msgId: mintMsgId(), msgType: 'error', content: reason });
+    };
 
     switch (cmd) {
       case 'help': {
@@ -831,12 +842,10 @@ export function createCopilotBackend(): ServerBackend {
       // re-broadcast capabilities so the renderer's actualModel updates
       // (and its capability-driven persist effect saves to projectConfig).
       case 'model': {
-        const msgId = mintMsgId();
         if (!args) {
-          emitError(msgId, 'Usage: /model <model-id>');
+          emitConfigError('Usage: /model <model-id>');
           return;
         }
-        emitPending(msgId);
         try {
           if (state.session) {
             const supported = effortsFor(args);
@@ -853,40 +862,36 @@ export function createCopilotBackend(): ServerBackend {
           // currentModel stays consistent with the active session.
           currentModel = args;
           currentSend?.({ type: 'capabilities', ...buildCapabilities() });
-          emitSuccess(msgId, `Switched model to **${args}**`);
+          emitConfigAck('model', args);
         } catch (err: any) {
-          emitError(msgId, `Failed to switch model: ${err?.message ?? err}`);
+          emitConfigError(`Failed to switch model: ${err?.message ?? err}`);
         }
         return;
       }
 
       case 'effort': {
-        const msgId = mintMsgId();
         if (!args) {
-          emitError(msgId, 'Usage: /effort <level>');
+          emitConfigError('Usage: /effort <level>');
           return;
         }
-        emitPending(msgId);
         try {
           if (state.session) {
             await state.session.setModel(currentModel, { reasoningEffort: args as any });
           }
           currentEffort = args;
           currentSend?.({ type: 'capabilities', ...buildCapabilities() });
-          emitSuccess(msgId, `Set reasoning effort to **${args}**`);
+          emitConfigAck('effort', args);
         } catch (err: any) {
-          emitError(msgId, `Failed to set effort: ${err?.message ?? err}`);
+          emitConfigError(`Failed to set effort: ${err?.message ?? err}`);
         }
         return;
       }
 
       case 'permission': {
-        const msgId = mintMsgId();
         if (!args) {
-          emitError(msgId, 'Usage: /permission <mode>');
+          emitConfigError('Usage: /permission <mode>');
           return;
         }
-        emitPending(msgId);
         try {
           if (state.session) {
             const sdkMode = MODE_TO_SDK[args];
@@ -896,9 +901,9 @@ export function createCopilotBackend(): ServerBackend {
           }
           currentPermissionMode = args;
           currentSend?.({ type: 'capabilities', ...buildCapabilities() });
-          emitSuccess(msgId, `Set permission mode to **${args}**`);
+          emitConfigAck('permissionMode', args);
         } catch (err: any) {
-          emitError(msgId, `Failed to set permission mode: ${err?.message ?? err}`);
+          emitConfigError(`Failed to set permission mode: ${err?.message ?? err}`);
         }
         return;
       }
@@ -942,13 +947,18 @@ export function createCopilotBackend(): ServerBackend {
       currentTextMsgId = null;
       currentThinkingMsgId = null;
 
-      // Slash detection. Bypass normal SDK setup — most slashes are
-      // pre-SDK ops (help/context), session-rebuilding ops (clear), or
-      // session-aware RPC calls (compact). None benefit from the
-      // model/effort/mode sync that precedes a real SDK send. Renderer-local
-      // slashes (/model /effort /permission) are intercepted before send IPC
-      // fires, so anything reaching here is a provider slash by elimination.
-      const slash = parseSlashPrefix(input.prompt);
+      // Slash / config-edit detection. Both bypass normal SDK setup and route
+      // to dispatchSlash:
+      //   - typed `/model X` etc. → parseSlashPrefix(prompt)
+      //   - structured config-edit turn (picker / status-bar) → input.configEdit
+      //     with an empty prompt. Without handling this explicitly the empty
+      //     prompt falls through to a normal SDK send, silently continuing the
+      //     conversation and never applying the change or emitting a card.
+      // Converges both entry points onto one imperative apply (DECISION #63).
+      // configEdit.key 'permissionMode' maps to the '/permission' slash.
+      const slash = input.configEdit
+        ? { cmd: input.configEdit.key === 'permissionMode' ? 'permission' : input.configEdit.key, args: input.configEdit.value }
+        : parseSlashPrefix(input.prompt);
       if (slash) {
         send({ type: 'status', state: 'streaming', model: currentModel });
         try {

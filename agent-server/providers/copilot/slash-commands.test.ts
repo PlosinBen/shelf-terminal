@@ -92,6 +92,41 @@ describe('Copilot slash dispatch via query()', () => {
     backend.dispose();
   });
 
+  // Config-edit turns (picker / status-bar) arrive as { configEdit, prompt: '' }.
+  // Regression: Copilot's query() used to ignore input.configEdit and only parse
+  // the (empty) prompt, so the turn fell through to a normal SDK send — no card,
+  // and the model never switched (it continued the conversation instead).
+  // Config edits render as a `system` divider (like Claude), NOT a fold_markdown
+  // card.
+  const pickSystem = (emitted: OutgoingMessage[]) =>
+    emitted.filter((m): m is Extract<OutgoingMessage, { type: 'message' }> =>
+      m.type === 'message' && (m as any).msgType === 'system');
+
+  it('config-edit model turn applies the change and emits a system divider, no SDK send', async () => {
+    const backend = createCopilotBackend();
+    const { send, emitted } = makeSendCapture();
+    await backend.query({ prompt: '', cwd: '/tmp', configEdit: { key: 'model', value: 'gpt-5.5' } }, send);
+
+    expect(pickFoldMarkdown(emitted).length).toBe(0); // not a slash-style card
+    expect((pickSystem(emitted).at(-1) as any)?.content).toMatch(/gpt-5\.5/);
+
+    const caps = emitted.find((m) => m.type === 'capabilities') as any;
+    expect(caps?.currentModel).toBe('gpt-5.5');
+    // No SDK round-trip: a normal send would surface auth/error from ensureSession.
+    expect(emitted.some((m) => m.type === 'auth_required')).toBe(false);
+    backend.dispose();
+  });
+
+  it('config-edit permissionMode turn maps to /permission and emits a system divider', async () => {
+    const backend = createCopilotBackend();
+    const { send, emitted } = makeSendCapture();
+    await backend.query({ prompt: '', cwd: '/tmp', configEdit: { key: 'permissionMode', value: 'bypassPermissions' } }, send);
+
+    expect(pickFoldMarkdown(emitted).length).toBe(0);
+    expect((pickSystem(emitted).at(-1) as any)?.content).toMatch(/bypassPermissions/);
+    backend.dispose();
+  });
+
   it('emits streaming → idle status pair around slash dispatch (no cost/tokens on slash idle)', async () => {
     const backend = createCopilotBackend();
     const { send, emitted } = makeSendCapture();
