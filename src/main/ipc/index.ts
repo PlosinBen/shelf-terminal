@@ -1,0 +1,30 @@
+import { registerPtyHandlers } from './pty';
+import { registerProjectHandlers } from './project';
+import { registerConnectorHandlers } from './connector';
+import { registerGitHandlers } from './git';
+import { registerFileTransferHandlers } from './file-transfer';
+import { registerDialogHandlers } from './dialog';
+import { registerSettingsHandlers } from './settings';
+import { registerLogsHandlers } from './logs';
+import { registerNotesHandlers } from './notes';
+import { registerUpdaterHandlers } from './updater';
+import { registerPmHandlers } from './pm';
+
+/**
+ * Registers every domain's IPC handlers. Agent handlers are registered
+ * separately via initAgentManager() (see ../agent), and window lifecycle /
+ * reload-guard / menu wiring stays in index.ts.
+ */
+export function registerAllIpcHandlers(): void {
+  registerPtyHandlers();
+  registerProjectHandlers();
+  registerConnectorHandlers();
+  registerGitHandlers();
+  registerFileTransferHandlers();
+  registerDialogHandlers();
+  registerSettingsHandlers();
+  registerLogsHandlers();
+  registerNotesHandlers();
+  registerUpdaterHandlers();
+  registerPmHandlers();
+}

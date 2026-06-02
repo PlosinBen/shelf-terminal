@@ -1,36 +1,24 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from 'electron';
+import { app, BrowserWindow, dialog, Menu, shell } from 'electron';
 import path from 'path';
 import fs from 'fs';
-import { IPC } from '@shared/ipc-channels';
-import { spawnPty, writePty, resizePty, killPty, killAllPtys, setMuted } from './pty-manager';
-import { saveProjects } from './project-store';
-import { saveSettings } from './settings-store';
+import { writePty, killAllPtys } from './pty-manager';
 import { bootstrap } from './bootstrap';
-import { DEFAULT_SETTINGS } from '@shared/defaults';
-import { uploadFile, clearUploads, getUploadsSize } from './file-transfer';
-import { initAutoUpdater, stopAutoUpdater, manualCheckForUpdate, startUpdateDownload, confirmAndInstallUpdate } from './updater';
+import { initAutoUpdater, stopAutoUpdater, manualCheckForUpdate } from './updater';
 import { buildAppMenu } from './app-menu';
 import { isReloadKeyEvent } from './reload-guard';
-import { removeHostKey } from './ssh-control';
-import { createConnector, getAvailableTypes, listDockerContainers, listWSLDistros, cleanupConnectors } from './connector';
-import { loadSSHServers, saveSSHServer } from './ssh-server-store';
+import { cleanupConnectors } from './connector';
 import { log, setLogLevel, setFileWriter } from '@shared/logger';
 import { applyUserDataIsolation } from './user-data-path';
-import { removeProjectStorage } from './project-storage';
 import { migratePmNotes } from './migrations/migrate-pm-notes';
-import { listNotes, getNote, createNote, quickCreateNote, updateNote, deleteNote, deleteAllDone as deleteAllDoneNotes, saveImage as saveNoteImage, readImage as readNoteImage } from './notes-store';
-import { handlePmSend, handleTabEvent, getHistory, clearHistory, compactHistory, stopGeneration, updateSyncedState, setWritePtyFn, isAwayMode, setAwayMode, initAwayMode, setStateChangeCallback, updateKnownTabs, startTelegram, stopTelegram, setMessageCallback, setCallbackQueryHandler, setStopCallback } from './pm';
+import { handlePmSend, handleTabEvent, stopGeneration, setWritePtyFn, initAwayMode, setStateChangeCallback, startTelegram, stopTelegram, setMessageCallback, setCallbackQueryHandler, setStopCallback } from './pm';
 import { initAgentManager, disposeAllAgents } from './agent';
-import type { Connection, ProjectConfig, AppSettings, FileUploadResult, FileClearResult, PtySpawnPayload, PtyInputPayload, PtyResizePayload, PtyKillPayload, GitBranchInfo, WorktreeAddResult, WorktreeRemoveResult } from '@shared/types';
+import { getMainWindow, setMainWindow, setProjects, setSettings, getSettings } from './app-state';
+import { registerAllIpcHandlers } from './ipc';
 
 applyUserDataIsolation();
 
-let mainWindow: BrowserWindow | null = null;
-let cachedProjects: ProjectConfig[] = [];
-let cachedSettings: AppSettings = { ...DEFAULT_SETTINGS };
-
 function createWindow() {
-  mainWindow = new BrowserWindow({
+  const win = new BrowserWindow({
     width: 1200,
     height: 800,
     autoHideMenuBar: true,
@@ -41,8 +29,9 @@ function createWindow() {
       nodeIntegration: false,
     },
   });
+  setMainWindow(win);
 
-  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+  win.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('mailto:')) {
       shell.openExternal(url);
     }
@@ -54,18 +43,17 @@ function createWindow() {
   // form submission, etc.), block the navigation and offer to open the URL
   // in the system browser instead. We never want the renderer to actually
   // navigate — that wipes agent state, terminal scrollback, panel layout.
-  mainWindow.webContents.on('will-navigate', (event, url) => {
+  win.webContents.on('will-navigate', (event, url) => {
     // Initial app load (file:// in prod, vite dev server URL in dev) is allowed
     // to pass through; only intercept post-load navigations.
-    const current = mainWindow?.webContents.getURL();
+    const current = win.webContents.getURL();
     if (current && url === current) return;
 
     event.preventDefault();
-    if (!mainWindow) return;
 
     const isOpenable = url.startsWith('http://') || url.startsWith('https://') || url.startsWith('mailto:');
     dialog
-      .showMessageBox(mainWindow, {
+      .showMessageBox(win, {
         type: 'question',
         title: 'Leave Shelf?',
         message: `A link is trying to navigate Shelf to:\n${url}`,
@@ -87,12 +75,11 @@ function createWindow() {
   // Intercept Cmd/Ctrl+R, Shift+Cmd/Ctrl+R, and F5 — a stray reload would clear
   // xterm scrollback and force the renderer to reconnect. Confirm with the user
   // first regardless of which platform-specific key they hit.
-  mainWindow.webContents.on('before-input-event', (event, input) => {
+  win.webContents.on('before-input-event', (event, input) => {
     if (!isReloadKeyEvent(input)) return;
     event.preventDefault();
-    if (!mainWindow) return;
     dialog
-      .showMessageBox(mainWindow, {
+      .showMessageBox(win, {
         type: 'question',
         title: 'Reload Shelf?',
         message: 'Reloading the window clears terminal scrollback.',
@@ -103,465 +90,24 @@ function createWindow() {
         noLink: true,
       })
       .then((result) => {
-        if (result.response === 1 && mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.reload();
+        if (result.response === 1 && !win.isDestroyed()) {
+          win.webContents.reload();
         }
       });
   });
 
   if (process.env.VITE_DEV_SERVER_URL) {
-    mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
+    win.loadURL(process.env.VITE_DEV_SERVER_URL);
   } else {
-    mainWindow.loadFile(path.join(__dirname, '../index.html'));
+    win.loadFile(path.join(__dirname, '../index.html'));
   }
 
-  mainWindow.on('closed', () => {
-    mainWindow = null;
+  win.on('closed', () => {
+    setMainWindow(null);
   });
 }
 
-// ── IPC Handlers ──
-
-ipcMain.handle(IPC.PTY_SPAWN, (_event, payload: PtySpawnPayload) => {
-  if (mainWindow) {
-    spawnPty(payload.projectId, payload.tabId, payload.cwd, payload.connection, mainWindow, payload.initScript, payload.tabCmd);
-  }
-});
-
-ipcMain.handle(IPC.PTY_KILL, (_event, payload: PtyKillPayload) => {
-  killPty(payload.tabId);
-});
-
-ipcMain.handle(IPC.PROJECT_LOAD, () => {
-  return cachedProjects;
-});
-
-ipcMain.handle(IPC.PROJECT_SAVE, async (_event, projects: ProjectConfig[]) => {
-  const oldIds = new Set(cachedProjects.map((p) => p.id));
-  const newIds = new Set(projects.map((p) => p.id));
-  cachedProjects = projects;
-  saveProjects(projects);
-  for (const id of oldIds) {
-    if (!newIds.has(id)) await removeProjectStorage(id);
-  }
-});
-
-ipcMain.handle(IPC.PROJECT_VALIDATE_DIRS, (_event, projects: ProjectConfig[]): string[] => {
-  const invalid: string[] = [];
-  for (const p of projects) {
-    if (p.connection.type === 'local' && !fs.existsSync(p.cwd)) {
-      invalid.push(p.id);
-    }
-  }
-  return invalid;
-});
-
-// ── Connector (unified) ──
-
-ipcMain.handle(IPC.CONNECTOR_LIST_DIR, (_event, payload: { connection: Connection; path: string }) => {
-  const connector = createConnector(payload.connection);
-  return connector.listDir(payload.path);
-});
-
-ipcMain.handle(IPC.CONNECTOR_HOME_PATH, (_event, connection: Connection) => {
-  const connector = createConnector(connection);
-  return connector.homePath();
-});
-
-ipcMain.handle(IPC.CONNECTOR_CHECK, (_event, connection: Connection) => {
-  const connector = createConnector(connection);
-  return connector.isConnected();
-});
-
-ipcMain.handle(IPC.CONNECTOR_ESTABLISH, async (_event, payload: { connection: Connection; password?: string }) => {
-  const connector = createConnector(payload.connection);
-  await connector.connect(payload.password);
-  // Auto-save SSH server on successful connect
-  if (payload.connection.type === 'ssh') {
-    saveSSHServer({
-      host: payload.connection.host,
-      port: payload.connection.port,
-      user: payload.connection.user,
-    });
-  }
-});
-
-ipcMain.handle(IPC.CONNECTOR_AVAILABLE_TYPES, () => {
-  return getAvailableTypes();
-});
-
-// ── Connector — type-specific ──
-
-ipcMain.handle(IPC.SSH_REMOVE_HOST_KEY, (_event, payload: { host: string; port: number }) => {
-  removeHostKey(payload.host, payload.port);
-});
-
-ipcMain.handle(IPC.SSH_SERVERS, () => {
-  return loadSSHServers();
-});
-
-ipcMain.handle(IPC.WSL_LIST_DISTROS, () => {
-  return listWSLDistros();
-});
-
-ipcMain.handle(IPC.DOCKER_LIST_CONTAINERS, () => {
-  return listDockerContainers();
-});
-
-// ── Git ──
-
-ipcMain.handle(IPC.GIT_BRANCH_LIST, async (_event, payload: { connection: Connection; cwd: string }): Promise<GitBranchInfo[]> => {
-  try {
-    const connector = createConnector(payload.connection);
-    const [branchResult, worktreeResult] = await Promise.all([
-      connector.exec(payload.cwd, 'git branch --no-color 2>/dev/null'),
-      connector.exec(payload.cwd, 'git worktree list --porcelain 2>/dev/null').catch(() => ({ stdout: '', stderr: '' })),
-    ]);
-
-    // Parse worktree list to map branch → path
-    const worktreeMap = new Map<string, string>();
-    let currentPath = '';
-    for (const line of worktreeResult.stdout.split('\n')) {
-      if (line.startsWith('worktree ')) {
-        currentPath = line.slice('worktree '.length);
-      } else if (line.startsWith('branch refs/heads/')) {
-        worktreeMap.set(line.slice('branch refs/heads/'.length), currentPath);
-      }
-    }
-
-    return branchResult.stdout.trim().split('\n')
-      .filter((line) => line.length > 0)
-      .map((line) => {
-        const name = line.replace(/^[*+]?\s+/, '');
-        const isCurrent = line.startsWith('*');
-        const worktreePath = !isCurrent ? worktreeMap.get(name) : undefined;
-        return { name, current: isCurrent, worktreePath };
-      });
-  } catch {
-    return [];
-  }
-});
-
-ipcMain.handle(IPC.GIT_CHECK_DIRTY, async (_event, payload: { connection: Connection; cwd: string }): Promise<boolean> => {
-  try {
-    const connector = createConnector(payload.connection);
-    const { stdout } = await connector.exec(payload.cwd, 'git status --porcelain 2>/dev/null');
-    return stdout.trim().length > 0;
-  } catch {
-    return false;
-  }
-});
-
-ipcMain.handle(IPC.GIT_CHECKOUT, async (_event, payload: { connection: Connection; cwd: string; branch: string }): Promise<{ ok: boolean; error?: string }> => {
-  try {
-    const connector = createConnector(payload.connection);
-    await connector.exec(payload.cwd, `git checkout ${JSON.stringify(payload.branch)}`);
-    return { ok: true };
-  } catch (err: any) {
-    const msg = (err?.message ?? String(err)).replace(/^Error:\s*/, '');
-    return { ok: false, error: msg };
-  }
-});
-
-ipcMain.handle(
-  IPC.GIT_WORKTREE_ADD,
-  async (_event, payload: { connection: Connection; cwd: string; branch: string; newBranch: boolean }): Promise<WorktreeAddResult> => {
-    try {
-      const connector = createConnector(payload.connection);
-      const parentDir = payload.cwd.replace(/\/+$/, '').replace(/[^/]+$/, '').replace(/\/+$/, '');
-      const dirName = `${payload.cwd.replace(/\/+$/, '').split('/').pop()}-${payload.branch.replace(/\//g, '-')}`;
-      const worktreePath = `${parentDir}/${dirName}`;
-
-      const branchFlag = payload.newBranch ? '-b' : '';
-      const cmd = branchFlag
-        ? `git worktree add ${branchFlag} ${JSON.stringify(payload.branch)} ${JSON.stringify(worktreePath)}`
-        : `git worktree add ${JSON.stringify(worktreePath)} ${JSON.stringify(payload.branch)}`;
-
-      await connector.exec(payload.cwd, cmd);
-      return { ok: true, path: worktreePath };
-    } catch (err: any) {
-      return { ok: false, error: err?.message ?? String(err) };
-    }
-  },
-);
-
-ipcMain.handle(
-  IPC.GIT_WORKTREE_REMOVE,
-  async (_event, payload: { connection: Connection; cwd: string; worktreePath: string }): Promise<WorktreeRemoveResult> => {
-    try {
-      const connector = createConnector(payload.connection);
-      await connector.exec(payload.cwd, `git worktree remove ${JSON.stringify(payload.worktreePath)} --force`);
-      return { ok: true };
-    } catch (err: any) {
-      return { ok: false, error: err?.message ?? String(err) };
-    }
-  },
-);
-
-// ── File transfer ──
-
-ipcMain.handle(
-  IPC.FILE_UPLOAD,
-  async (_event, payload: { connection: Connection; cwd: string; filename: string; buffer: ArrayBuffer }): Promise<FileUploadResult> => {
-    try {
-      const remotePath = await uploadFile(
-        payload.connection,
-        payload.cwd,
-        payload.filename,
-        Buffer.from(payload.buffer),
-      );
-      return { ok: true, remotePath };
-    } catch (err: any) {
-      const message = err?.message ?? String(err);
-      log.error('file-transfer', `upload failed: ${message}`);
-      return { ok: false, reason: message };
-    }
-  },
-);
-
-ipcMain.handle(
-  IPC.FILE_CLEAR_UPLOADS,
-  async (_event, payload: { connection: Connection; cwd: string }): Promise<FileClearResult> => {
-    try {
-      const removed = await clearUploads(payload.connection, payload.cwd);
-      return { ok: true, removed };
-    } catch (err: any) {
-      const message = err?.message ?? String(err);
-      log.error('file-transfer', `clearUploads failed: ${message}`);
-      return { ok: false, reason: message };
-    }
-  },
-);
-
-/**
- * Powers the "X MB · N files" badge next to Clear uploaded files in
- * Project Edit. On any failure (remote unreachable, dir missing) the
- * connector itself returns zeros — we surface that as a zeroed result
- * rather than throwing, so the UI displays `0 B` instead of a flash of
- * error text. Caller still has to gate on connectivity for remote
- * projects (no point asking when the connection is down).
- */
-ipcMain.handle(
-  IPC.FILE_UPLOADS_SIZE,
-  async (_event, payload: { connection: Connection; cwd: string }): Promise<{ totalBytes: number; fileCount: number }> => {
-    try {
-      return await getUploadsSize(payload.connection, payload.cwd);
-    } catch (err: any) {
-      log.debug('file-transfer', `getUploadsSize failed: ${err?.message ?? err}`);
-      return { totalBytes: 0, fileCount: 0 };
-    }
-  },
-);
-
-// ── Dialogs ──
-
-ipcMain.handle(IPC.DIALOG_WARN, async (_event, payload: { title: string; message: string }) => {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  await dialog.showMessageBox(mainWindow, {
-    type: 'warning',
-    title: payload.title,
-    message: payload.message,
-    buttons: ['OK'],
-    defaultId: 0,
-    noLink: true,
-  });
-});
-
-ipcMain.handle(
-  IPC.DIALOG_CONFIRM,
-  async (_event, payload: { title: string; message: string; confirmLabel?: string }): Promise<boolean> => {
-    if (!mainWindow || mainWindow.isDestroyed()) return false;
-    const result = await dialog.showMessageBox(mainWindow, {
-      type: 'question',
-      title: payload.title,
-      message: payload.message,
-      buttons: [payload.confirmLabel ?? 'OK', 'Cancel'],
-      defaultId: 0,
-      cancelId: 1,
-      noLink: true,
-    });
-    return result.response === 0;
-  },
-);
-
-// ── Settings ──
-
-ipcMain.handle(IPC.SETTINGS_LOAD, () => {
-  return cachedSettings;
-});
-
-ipcMain.handle(IPC.SETTINGS_SAVE, (_event, settings: AppSettings) => {
-  cachedSettings = settings;
-  saveSettings(settings);
-  setLogLevel(settings.logLevel);
-  // Restart Telegram if config changed
-  if (settings.telegram?.botToken && settings.telegram?.chatId) {
-    startTelegram(settings.telegram);
-  } else {
-    stopTelegram();
-  }
-});
-
-// ── Logs ──
-
-ipcMain.handle(IPC.APP_LOGS_PATH, () => {
-  return path.join(app.getPath('userData'), 'logs');
-});
-
-ipcMain.handle(IPC.LOGS_CLEAR, () => {
-  const logBaseDir = path.join(app.getPath('userData'), 'logs');
-  if (fs.existsSync(logBaseDir)) {
-    fs.rmSync(logBaseDir, { recursive: true, force: true });
-  }
-  log.info('app', 'logs cleared');
-});
-
-/**
- * Walk logs/<YYYYMM>/<MMDD>.log, sum file sizes, count files. Used by
- * Settings → Logs to display total on-disk footprint next to Clear Logs.
- * Silently treats a missing logs dir as 0 — the UI uses `0 B` for both
- * "no files yet" and "after Clear", so the API gives the same shape.
- */
-ipcMain.handle(IPC.LOGS_SIZE, async (): Promise<{ totalBytes: number; fileCount: number }> => {
-  const base = path.join(app.getPath('userData'), 'logs');
-  if (!fs.existsSync(base)) return { totalBytes: 0, fileCount: 0 };
-  let totalBytes = 0;
-  let fileCount = 0;
-  let monthDirs: string[] = [];
-  try {
-    monthDirs = await fs.promises.readdir(base);
-  } catch {
-    return { totalBytes: 0, fileCount: 0 };
-  }
-  for (const monthDir of monthDirs) {
-    const dir = path.join(base, monthDir);
-    const dirStat = await fs.promises.stat(dir).catch(() => null);
-    if (!dirStat?.isDirectory()) continue;
-    let files: string[] = [];
-    try {
-      files = await fs.promises.readdir(dir);
-    } catch {
-      continue;
-    }
-    for (const file of files) {
-      const filePath = path.join(dir, file);
-      const fstat = await fs.promises.stat(filePath).catch(() => null);
-      if (fstat?.isFile()) {
-        totalBytes += fstat.size;
-        fileCount++;
-      }
-    }
-  }
-  return { totalBytes, fileCount };
-});
-
-// ── Notes ──
-
-ipcMain.handle(IPC.NOTES_LIST, async (_event, projectId: string) => {
-  return listNotes(projectId);
-});
-
-ipcMain.handle(IPC.NOTES_GET, async (_event, payload: { projectId: string; noteId: string }) => {
-  return getNote(payload.projectId, payload.noteId);
-});
-
-ipcMain.handle(IPC.NOTES_CREATE, async (_event, projectId: string) => {
-  return createNote(projectId);
-});
-
-ipcMain.handle(IPC.NOTES_QUICK_CREATE, async (_event, payload: { projectId: string; body: string; images?: string[] }) => {
-  return quickCreateNote(payload.projectId, payload.body, payload.images ?? []);
-});
-
-ipcMain.handle(IPC.NOTES_UPDATE, async (_event, payload: { projectId: string; noteId: string; patch: { title?: string; isDone?: boolean; body?: string; images?: string[] } }) => {
-  return updateNote(payload.projectId, payload.noteId, payload.patch);
-});
-
-ipcMain.handle(IPC.NOTES_DELETE, async (_event, payload: { projectId: string; noteId: string }) => {
-  await deleteNote(payload.projectId, payload.noteId);
-});
-
-ipcMain.handle(IPC.NOTES_DELETE_ALL_DONE, async (_event, projectId: string): Promise<number> => {
-  return deleteAllDoneNotes(projectId);
-});
-
-ipcMain.handle(IPC.NOTES_SAVE_IMAGE, async (_event, payload: { projectId: string; buffer: ArrayBuffer; ext: string }): Promise<string> => {
-  return saveNoteImage(payload.projectId, payload.buffer, payload.ext);
-});
-
-ipcMain.handle(IPC.NOTES_READ_IMAGE, async (_event, payload: { projectId: string; filename: string }): Promise<ArrayBuffer | null> => {
-  return readNoteImage(payload.projectId, payload.filename);
-});
-
-// ── Updater ──
-
-ipcMain.handle(IPC.UPDATE_CHECK, () => {
-  manualCheckForUpdate();
-});
-
-ipcMain.handle(IPC.UPDATE_DOWNLOAD, () => {
-  startUpdateDownload();
-});
-
-ipcMain.handle(IPC.UPDATE_INSTALL, () => {
-  return confirmAndInstallUpdate();
-});
-
-// Renderer → Main (send, fire-and-forget)
-ipcMain.on(IPC.PTY_INPUT, (_event, payload: PtyInputPayload) => {
-  writePty(payload.tabId, payload.data);
-});
-
-ipcMain.on(IPC.PTY_RESIZE, (_event, payload: PtyResizePayload) => {
-  resizePty(payload.tabId, payload.cols, payload.rows);
-});
-
-ipcMain.on(IPC.PTY_MUTE, (_event, payload: { tabId: string; muted: boolean }) => {
-  setMuted(payload.tabId, payload.muted);
-});
-
-// ── PM Agent ──
-
-ipcMain.handle(IPC.PM_SEND, async (_event, message: string) => {
-  if (!mainWindow || !cachedSettings.pmProvider) return;
-  await handlePmSend(message, cachedSettings.pmProvider, mainWindow);
-});
-
-ipcMain.handle(IPC.PM_STOP, () => {
-  stopGeneration();
-});
-
-ipcMain.handle(IPC.PM_HISTORY, () => {
-  return getHistory();
-});
-
-ipcMain.handle(IPC.PM_CLEAR, () => {
-  clearHistory();
-});
-
-ipcMain.handle(IPC.PM_COMPACT, () => {
-  return compactHistory();
-});
-
-ipcMain.on(IPC.PM_SYNC_STATE, (_event, state: any) => {
-  updateSyncedState(state);
-  // Also update tab watcher's known tabs
-  const tabs: { tabId: string; tabName: string; projectName: string }[] = [];
-  for (const proj of state) {
-    for (const tab of proj.tabs) {
-      tabs.push({ tabId: tab.id, tabName: tab.label, projectName: proj.name });
-    }
-  }
-  updateKnownTabs(tabs);
-});
-
-ipcMain.handle(IPC.PM_AWAY_MODE, (_event, on: boolean) => {
-  setAwayMode(on);
-});
-
-ipcMain.handle(IPC.PM_AWAY_MODE_GET, () => {
-  return isAwayMode();
-});
+registerAllIpcHandlers();
 
 // ── App lifecycle ──
 
@@ -582,8 +128,8 @@ app.whenReady().then(async () => {
   if (envLogLevel) setLogLevel(envLogLevel);
 
   const { projects, settings } = bootstrap();
-  cachedProjects = projects;
-  cachedSettings = settings;
+  setProjects(projects);
+  setSettings(settings);
 
   if (!envLogLevel) setLogLevel(settings.logLevel);
 
@@ -594,38 +140,45 @@ app.whenReady().then(async () => {
   createWindow();
 
   // Agent View wiring
-  initAgentManager(() => mainWindow);
+  initAgentManager(() => getMainWindow());
 
   // PM wiring
-  initAwayMode(mainWindow!);
+  initAwayMode(getMainWindow()!);
   setWritePtyFn(writePty);
   setStateChangeCallback((tabId, tabName, projectName, oldState, newState) => {
-    if (mainWindow && cachedSettings.pmProvider) {
-      handleTabEvent(tabId, tabName, projectName, oldState, newState, cachedSettings.pmProvider, mainWindow);
+    const win = getMainWindow();
+    const pmProvider = getSettings().pmProvider;
+    if (win && pmProvider) {
+      handleTabEvent(tabId, tabName, projectName, oldState, newState, pmProvider, win);
     }
   });
   setMessageCallback(async (text, _chatId) => {
-    if (mainWindow && cachedSettings.pmProvider) {
+    const win = getMainWindow();
+    const pmProvider = getSettings().pmProvider;
+    if (win && pmProvider) {
       // If Away Mode is OFF and user sends a command (not just a question),
       // PM will respond read-only. The user can use /away to toggle.
-      handlePmSend(`[from Telegram] ${text}`, cachedSettings.pmProvider, mainWindow);
+      handlePmSend(`[from Telegram] ${text}`, pmProvider, win);
     }
   });
   setCallbackQueryHandler((action, tabId) => {
-    if (mainWindow && cachedSettings.pmProvider) {
+    const win = getMainWindow();
+    const pmProvider = getSettings().pmProvider;
+    if (win && pmProvider) {
       const verb = action === 'allow' ? 'approved' : 'denied';
-      handlePmSend(`[from Telegram] User ${verb} the permission request for tab ${tabId}. Send the appropriate keystroke.`, cachedSettings.pmProvider, mainWindow);
+      handlePmSend(`[from Telegram] User ${verb} the permission request for tab ${tabId}. Send the appropriate keystroke.`, pmProvider, win);
     }
   });
   setStopCallback(() => {
     stopGeneration();
   });
-  if (cachedSettings.telegram?.botToken && cachedSettings.telegram?.chatId) {
-    startTelegram(cachedSettings.telegram);
+  const telegram = getSettings().telegram;
+  if (telegram?.botToken && telegram?.chatId) {
+    startTelegram(telegram);
   }
 
   if (process.env.NODE_ENV !== 'test' && app.isPackaged) {
-    initAutoUpdater(mainWindow!);
+    initAutoUpdater(getMainWindow()!);
   }
 });
 
@@ -647,7 +200,7 @@ app.on('before-quit', () => {
 });
 
 app.on('activate', () => {
-  if (mainWindow === null) {
+  if (getMainWindow() === null) {
     createWindow();
   }
 });
