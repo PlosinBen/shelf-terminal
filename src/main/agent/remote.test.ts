@@ -81,3 +81,45 @@ describe('remote backend', () => {
   });
 
 });
+
+describe('parseRemoteMessage — mid-turn capabilities', () => {
+  // Regression: mid-turn capabilities (from /model slash or provider model
+  // promotion) were dropped because parseRemoteMessage had no 'capabilities'
+  // case, so the status bar never reflected a mid-session model change.
+  it('maps a capabilities wire message to a capabilities AgentEvent', async () => {
+    const { parseRemoteMessage } = await import('./remote');
+    const event = parseRemoteMessage({
+      type: 'capabilities',
+      turnId: 't-1',
+      models: [{ value: 'default', displayName: 'Default' }],
+      permissionModes: [],
+      effortLevels: [],
+      slashCommands: [],
+      currentModel: 'claude-opus-4-8',
+      currentEffort: 'high',
+      currentPermissionMode: 'plan',
+    });
+    expect(event).toEqual({
+      type: 'capabilities',
+      caps: {
+        models: [{ value: 'default', displayName: 'Default' }],
+        permissionModes: [],
+        effortLevels: [],
+        slashCommands: [],
+        authMethod: undefined,
+        currentModel: 'claude-opus-4-8',
+        currentEffort: 'high',
+        currentPermissionMode: 'plan',
+      },
+    });
+  });
+
+  it('defaults missing capability arrays to empty', async () => {
+    const { parseRemoteMessage } = await import('./remote');
+    const event = parseRemoteMessage({ type: 'capabilities', currentModel: 'sonnet' });
+    expect(event).toMatchObject({
+      type: 'capabilities',
+      caps: { models: [], permissionModes: [], effortLevels: [], slashCommands: [], currentModel: 'sonnet' },
+    });
+  });
+});

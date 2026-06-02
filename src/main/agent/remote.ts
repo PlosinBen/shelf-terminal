@@ -350,7 +350,7 @@ function wrapProcess(proc: ChildProcess): RemoteProcess {
   };
 }
 
-function parseRemoteMessage(msg: any): AgentEvent | null {
+export function parseRemoteMessage(msg: any): AgentEvent | null {
   if (msg.type === 'message') {
     // Construct discriminated union by msgType — each variant only exposes the
     // fields it actually needs. Provider is responsible for sending matching
@@ -362,6 +362,25 @@ function parseRemoteMessage(msg: any): AgentEvent | null {
 
   if (msg.type === 'plan') {
     return { type: 'plan', content: typeof msg.content === 'string' ? msg.content : '' };
+  }
+
+  if (msg.type === 'capabilities') {
+    // Mid-turn capabilities (e.g. /model slash, provider model promotion).
+    // Mirror the field extraction used by getCapabilities()'s RPC response so
+    // the renderer's setCapabilities gets the same shape.
+    return {
+      type: 'capabilities',
+      caps: {
+        models: msg.models ?? [],
+        permissionModes: msg.permissionModes ?? [],
+        effortLevels: msg.effortLevels ?? [],
+        slashCommands: msg.slashCommands ?? [],
+        authMethod: msg.authMethod,
+        currentModel: msg.currentModel,
+        currentEffort: msg.currentEffort,
+        currentPermissionMode: msg.currentPermissionMode,
+      },
+    };
   }
 
   if (msg.type === 'status') {

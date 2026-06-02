@@ -110,6 +110,15 @@ export type AgentEvent =
    * Routed via IPC.AGENT_PLAN, lands in agentTabStore.currentPlan.
    */
   | { type: 'plan'; content: string }
+  /**
+   * Mid-turn capabilities update — e.g. /model slash changing currentModel, or
+   * the provider promoting a resolved model. Unlike the initial capabilities
+   * (a requestId-keyed RPC response), these arrive on the turn stream and must
+   * be forwarded to the renderer's status bar. Without this variant they'd be
+   * dropped by parseRemoteMessage and the status bar would never reflect a
+   * mid-session model/effort/permission change.
+   */
+  | { type: 'capabilities'; caps: ProviderCapabilities }
   | { type: 'permission_request'; toolUseId: string; toolName: string; input: Record<string, unknown> }
   | {
       type: 'picker_request';

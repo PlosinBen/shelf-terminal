@@ -198,6 +198,12 @@ function dispatchEvent(tabId: string, event: AgentEvent) {
     case 'plan':
       send(IPC.AGENT_PLAN, tabId, { content: event.content });
       break;
+    case 'capabilities':
+      // Mid-turn capabilities update (model/effort/permission changed during a
+      // turn). Same IPC channel as the initial capabilities so the renderer's
+      // onCapabilities → setCapabilities path updates the status bar.
+      send(IPC.AGENT_CAPABILITIES, tabId, event.caps);
+      break;
     case 'picker_request':
       send(IPC.AGENT_PICKER_REQUEST, tabId, {
         id: event.id,
