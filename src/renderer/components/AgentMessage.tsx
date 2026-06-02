@@ -3,6 +3,7 @@ import { useStore } from '../store';
 import { renderMarkdown } from '../utils/markdown';
 import { alignLineDiff, type DiffRow } from '../utils/line-diff';
 import type { AgentDisplayMode, AgentDisplayKey, AgentFile, FoldBase } from '@shared/types';
+import { DEFAULT_AGENT_DISPLAY } from '@shared/types';
 
 /**
  * Renderer-side message variant. Mirrors `AgentMessage` from `@shared/types`
@@ -72,16 +73,6 @@ function SideBySideDiff({ rows }: { rows: DiffRow[] }) {
   );
 }
 
-/** Default display mode per fold key. fold_text / fold_code default collapsed
- *  (low signal-to-noise output); fold_markdown / fold_diff default expanded
- *  (structured / high-information content). */
-const DEFAULT_FOLD_MODE: Record<AgentDisplayKey, AgentDisplayMode> = {
-  fold_text: 'collapsed',
-  fold_code: 'collapsed',
-  fold_markdown: 'expanded',
-  fold_diff: 'expanded',
-};
-
 interface FoldHeaderProps {
   label: string;
   subtitle?: string;
@@ -115,7 +106,7 @@ export function AgentMessage({ message, cwd: _cwd }: Props) {
   const { settings } = useStore();
 
   const resolveDisplayMode = (key: AgentDisplayKey): AgentDisplayMode => {
-    return settings.agentDisplay?.[key] ?? DEFAULT_FOLD_MODE[key];
+    return settings.agentDisplay?.[key] ?? DEFAULT_AGENT_DISPLAY[key];
   };
 
   // Markdown for the `reply` variant — useMemo must run on every render.

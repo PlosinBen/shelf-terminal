@@ -3,7 +3,7 @@ import { useStore, updateSettings, toggleSettings } from '../store';
 import { themes } from '../themes';
 import { comboToLabel, recordCombo } from '../hooks/useKeybindings';
 import type { AppSettings, KeybindingAction, KeybindingConfig, LogLevel, PmProviderType, ProviderModel, AgentDisplayMode } from '@shared/types';
-import { PM_PROVIDERS, getModelsForProvider, AGENT_DISPLAY_KEYS, AGENT_PROVIDER_REGISTRY } from '@shared/types';
+import { PM_PROVIDERS, getModelsForProvider, AGENT_DISPLAY_KEYS, AGENT_PROVIDER_REGISTRY, DEFAULT_AGENT_DISPLAY } from '@shared/types';
 import { formatBytes } from '../utils/format-bytes';
 
 const ACTION_LABELS: Record<KeybindingAction, string> = {
@@ -306,7 +306,7 @@ export function SettingsPanel() {
                       <label className="settings-label">{label}</label>
                       <select
                         className="settings-select"
-                        value={draft.agentDisplay?.[key] ?? 'collapsed'}
+                        value={draft.agentDisplay?.[key] ?? DEFAULT_AGENT_DISPLAY[key]}
                         onChange={(e) => updateDraft({
                           agentDisplay: { ...draft.agentDisplay, [key]: e.target.value as AgentDisplayMode },
                         })}

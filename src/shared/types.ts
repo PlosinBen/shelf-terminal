@@ -128,6 +128,20 @@ export const AGENT_DISPLAY_KEYS: { key: AgentDisplayKey; label: string; hint?: s
     hint: 'Side-by-side diff (file edits). Default expanded.' },
 ];
 
+/**
+ * Per-fold-key default display mode — the SINGLE source of truth shared by the
+ * renderer (AgentMessage's render fallback) and the Settings panel (dropdown
+ * fallback value). These MUST match: a hardcoded mismatch previously made the
+ * Settings dropdown show "Collapsed" for Markdown while messages actually
+ * rendered expanded, because each side fell back to a different default.
+ */
+export const DEFAULT_AGENT_DISPLAY: Record<AgentDisplayKey, AgentDisplayMode> = {
+  fold_text: 'collapsed',
+  fold_code: 'collapsed',
+  fold_markdown: 'expanded',
+  fold_diff: 'expanded',
+};
+
 // ── Connection types ──
 
 export type LocalConnection = { type: 'local' };
