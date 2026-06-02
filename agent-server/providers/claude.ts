@@ -468,6 +468,44 @@ export function createClaudeBackend(): ServerBackend {
 
     async query(input: QueryInput, send: SendFn) {
       currentSend = send;
+
+      // Slash interception MUST run BEFORE the SDK query is built/created below.
+      // /model /effort /permission are provider-only config edits. If we let the
+      // raw "/model opus" string become the SDK prompt, the bundled Claude Code
+      // CLI interprets it natively and records it in the session — the NEXT turn
+      // then resumes a session that "saw" /model opus and the model comments on
+      // it. Intercept-and-return here keeps these slashes entirely out of the
+      // SDK (and avoids building a never-consumed sdkQuery). /clear and /compact
+      // intentionally fall through below — they need the real SDK turn.
+      const slash = parseSlashPrefix(input.prompt);
+      if (slash && (slash.cmd === 'model' || slash.cmd === 'effort' || slash.cmd === 'permission')) {
+        const msgId = mintSlashMsgId();
+        send({ type: 'status', state: 'streaming' });
+        // No-args normally never reaches here — InputZone intercepts optioned
+        // slashes with no arg and opens a renderer-side picker instead. This is
+        // a defensive fallback (renderer logic could change): surface a plain
+        // error rather than silently swallowing the turn.
+        if (!slash.args) {
+          send({ type: 'message', msgId, msgType: 'error', content: `Usage: /${slash.cmd} <value>` });
+          send({ type: 'status', state: 'idle' });
+          return;
+        }
+        if (slash.cmd === 'model') currentModel = slash.args;
+        else if (slash.cmd === 'effort') currentEffort = slash.args;
+        else currentPermissionMode = slash.args;
+        send({ type: 'capabilities', ...buildCapabilities() });
+        // Config acknowledgements are status transitions, not content — render
+        // as a centered divider (`system`), not a collapsible fold_markdown card.
+        const ack = slash.cmd === 'model'
+          ? `Model set to ${slash.args} (applies on next query)`
+          : slash.cmd === 'effort'
+            ? `Reasoning effort set to ${slash.args} (applies on next query)`
+            : `Permission mode set to ${slash.args} (applies on next query)`;
+        send({ type: 'message', msgId, msgType: 'system', content: ack });
+        send({ type: 'status', state: 'idle' });
+        return;
+      }
+
       abortController = new AbortController();
       // Seed in-memory session ID from orchestrator-provided context. Only
       // applied on the first turn of this process — once `lastSessionId` is
@@ -536,53 +574,14 @@ export function createClaudeBackend(): ServerBackend {
         send(msg);
       };
 
-      // Slash detection — most slashes are forwarded to the SDK unchanged
-      // (SDK natively interprets `/cmd` strings and replies with assistant
-      // text). We only side-effect on slashes that need provider-side
-      // bookkeeping the SDK can't reach:
-      //   - `/clear`: reset our in-memory lastSessionId and emit
-      //     context_patch so persistence doesn't resurrect the dead session
-      //     on next launch. Slash flows through send → query() so this
-      //     side-effect lives here, not in a separate IPC handler.
+      // /clear and /compact need provider-side bookkeeping the SDK can't reach,
+      // but unlike /model etc. they DO run a real SDK turn (fall through below).
+      // `slash` was already parsed at the top of query() for the early-return
+      // interception of /model /effort /permission.
+      //   - `/clear`: reset in-memory lastSessionId + emit context_patch so
+      //     persistence doesn't resurrect the dead session on next launch.
       //   - `/compact`: capture completion via SDKCompactBoundaryMessage +
-      //     SDKStatusMessage and surface as a slash_response card with
-      //     token deltas (otherwise SDK swallows the outcome silently).
-      const slash = parseSlashPrefix(input.prompt);
-      // /model /effort /permission with args: intercept entirely. Claude has
-      // no SDK validation point (per-call options), so we just record the
-      // change in closure + re-broadcast capabilities so the renderer's
-      // status bar + capability-driven persist see the new value immediately.
-      // No SDK iteration runs for these — emit a fold_markdown reply and a
-      // single idle status so the turn closes cleanly.
-      if (slash && (slash.cmd === 'model' || slash.cmd === 'effort' || slash.cmd === 'permission')) {
-        const msgId = mintSlashMsgId();
-        const label = `/${slash.cmd}`;
-        send({ type: 'status', state: 'streaming' });
-        if (!slash.args) {
-          send({
-            type: 'message', msgId, msgType: 'fold_markdown', label,
-            errorMessage: `Usage: /${slash.cmd} <value>`,
-          });
-          send({ type: 'status', state: 'idle' });
-          return;
-        }
-        if (slash.cmd === 'model') currentModel = slash.args;
-        else if (slash.cmd === 'effort') currentEffort = slash.args;
-        else currentPermissionMode = slash.args;
-        send({ type: 'capabilities', ...buildCapabilities() });
-        send({
-          type: 'message', msgId, msgType: 'fold_markdown', label,
-          body: {
-            content: slash.cmd === 'model'
-              ? `Model set to **${slash.args}** (applies on next query)`
-              : slash.cmd === 'effort'
-                ? `Reasoning effort set to **${slash.args}** (applies on next query)`
-                : `Permission mode set to **${slash.args}** (applies on next query)`,
-          },
-        });
-        send({ type: 'status', state: 'idle' });
-        return;
-      }
+      //     SDKStatusMessage and surface as a fold_markdown card.
       if (slash?.cmd === 'clear') {
         send({ type: 'plan', content: '' });
         inflightToolUses.clear();
@@ -640,6 +639,28 @@ export function createClaudeBackend(): ServerBackend {
           }
 
           processMessage(sdkMsg, turnSend, input.cwd, blockMsgIds);
+
+          // Alias resolution → pin concrete model.
+          //
+          // supportedModels() returns the SDK's recommended aliases
+          // (default/sonnet/haiku) — cached in cache.models. The rule:
+          //   - intent IS one of those aliases → keep it (it tracks the
+          //     recommendation; never overwrite with a concrete id, so the
+          //     status bar shows a stable 'default' instead of flip-flopping
+          //     to 'claude-opus-4-8' per turn and back to 'default' on restart)
+          //   - intent is NOT a known alias (user pinned a specific model, e.g.
+          //     via custom model id) → adopt the SDK's actual resolved model and
+          //     re-emit capabilities so the status bar + project config reflect
+          //     what actually ran (existing capabilities→persist path handles both).
+          // Guarded on cache.models being populated so we never misclassify an
+          // alias as "unknown" before warmup completes. See DECISIONS-agent #62.
+          if (sdkMsg.type === 'assistant' && sdkMsg.parent_tool_use_id == null) {
+            const resolved = sdkMsg.message?.model;
+            if (shouldAdoptResolvedModel(resolved, currentModel, cache.models ?? [])) {
+              currentModel = resolved;
+              send({ type: 'capabilities', ...buildCapabilities() });
+            }
+          }
         }
       } catch (err: any) {
         // Two arrival timings for catch:
@@ -746,6 +767,36 @@ export function createClaudeBackend(): ServerBackend {
     },
 
   };
+}
+
+/**
+ * Decide whether a per-turn SDK-resolved model id should replace the user's
+ * current model selection (and thus overwrite status bar + project config).
+ *
+ * Rule (see DECISIONS-agent #62):
+ *   - currentModel is one of supportedModels()' recommended aliases
+ *     (default/sonnet/haiku) → DON'T adopt; the alias tracks the
+ *     recommendation and must stay stable.
+ *   - currentModel is anything else (user pinned a specific / custom id) →
+ *     adopt the concrete model the SDK actually used.
+ *
+ * Defensive guards: skip synthetic models ('<...>'), no-op when unchanged,
+ * skip when currentModel is unset (treated as alias-like / unpinned), and
+ * skip when the alias list isn't populated yet (don't misclassify before
+ * warmup completes).
+ */
+export function shouldAdoptResolvedModel(
+  resolved: unknown,
+  currentModel: string | undefined,
+  aliases: { value: string }[],
+): resolved is string {
+  if (typeof resolved !== 'string') return false;
+  if (resolved.startsWith('<')) return false;
+  if (currentModel == null) return false;
+  if (resolved === currentModel) return false;
+  if (aliases.length === 0) return false;
+  if (aliases.some((m) => m.value === currentModel)) return false;
+  return true;
 }
 
 export function mergeClaudeModels(
@@ -1305,9 +1356,15 @@ export function processMessage(msg: SDKMessage, send: SendFn, cwd: string, block
           };
           if (typeof modelRaw === 'string') lastTurnModel = modelRaw;
         }
+        // Model intentionally NOT sent here. The displayed model is driven by
+        // the capabilities channel (currentModel), which carries the user's
+        // intent — a recommended alias (default/sonnet/haiku) stays as-is, and
+        // a user-pinned non-alias gets resolved to the concrete model via the
+        // promotion logic in the query loop. Emitting the per-turn resolved
+        // model here would clobber the alias display (flip-flop). See the
+        // alias-resolution block in query() and DECISIONS-agent #62.
         send({
           type: 'status', state: 'streaming',
-          ...(isSubagent || isSynthetic ? {} : { model: modelRaw }),
           inputTokens: msg.message.usage.input_tokens, outputTokens: msg.message.usage.output_tokens,
           sessionId: msg.session_id,
         });
@@ -1445,7 +1502,10 @@ export function processMessage(msg: SDKMessage, send: SendFn, cwd: string, block
     }
     case 'system': {
       if (msg.subtype === 'init') {
-        send({ type: 'status', state: 'streaming', model: msg.model, sessionId: msg.session_id });
+        // msg.model is the SDK-resolved concrete model (e.g. 'claude-opus-4-8[1m]'),
+        // NOT the user's selected alias. Don't send it — see the per-turn status
+        // emit above for why the model display is capabilities-driven only.
+        send({ type: 'status', state: 'streaming', sessionId: msg.session_id });
       }
       break;
     }

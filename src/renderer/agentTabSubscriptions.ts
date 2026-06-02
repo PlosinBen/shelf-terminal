@@ -61,7 +61,6 @@ export function bindAgentStoreSubscriptions(): () => void {
     if (s.state === 'streaming') setStreaming(tabId, true);
     else if (s.state === 'idle' || s.state === 'done') setStreaming(tabId, false);
     setStatus(tabId, {
-      model: s.model,
       costUsd: s.costUsd,
       numTurns: s.numTurns,
       contextUsage: s.contextUsage,

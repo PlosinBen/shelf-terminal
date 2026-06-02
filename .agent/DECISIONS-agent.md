@@ -496,3 +496,32 @@ InputZone ──emit('agent:send', ...)──▶ EventBus
 - `.agent/GOTCHAS.md` — Claude SDK 0.3.x TaskCreate text 格式 / AskUserQuestion is_error 透傳
 - `agent-server/providers/claude.ts:parseTaskCreateOutput / parseTaskListOutput` 範例
 - `agent-server/providers/copilot.ts:parseApplyPatch` caller 範例
+
+---
+
+## 62. Model 顯示：intent-driven，alias 不被 per-turn 解析值覆蓋
+
+**背景**：Claude SDK 0.3.x 的 `supportedModels()` 回傳的是「推薦 alias」清單（runtime 拿、非寫死）：`default`（= recommended，現為 opus 4.8）/ `sonnet` / `haiku`。**清單裡沒有 `opus`**。使用者選 alias 後，SDK 每個 turn 回報的 `message.model` 是解析後的具體 id（如 `claude-opus-4-8`，init 甚至帶 `[1m]` 標記）。
+
+**問題**：舊邏輯把 per-turn 解析的具體 model 經 status 事件灌進 `actualModel`，導致 flip-flop：選 `default` → query 後顯示 `claude-opus-4-8` → 重啟又變 `default`。
+
+**決策**：status bar 顯示的 model 是 **intent**（使用者選的），由 capabilities channel + intent seed + 明確 edit 驅動，**per-turn status 不帶 model**。再依 intent 性質分流：
+
+- **intent 是 alias（在 `supportedModels()` 清單內）** → 永遠顯示該 alias，不被解析值覆蓋。`default` 維持「跟著 recommended 走」語意，不 pin 死、重啟一致。
+- **intent 不是 alias（使用者 pin 了具體 / custom id）** → 採用 SDK 實際回報的 model，promote 到 `currentModel` 並重發 capabilities → 顯示 + project config 都更新成實際 model。
+
+判斷邏輯抽成 pure helper `shouldAdoptResolvedModel(resolved, currentModel, aliases)`（claude.ts），query loop 呼叫。守備：synthetic `<...>` 跳過、unchanged no-op、`currentModel` 未設視為 unpinned 不 promote、alias 清單未填（warmup 未完）不 promote 避免誤判。
+
+**為何不 pin alias**：
+1. `default` 字面意思就是 recommended — pin 死等於放棄追新（4.9 出來跟不上）
+2. 解析 id 帶 `[1m]` 等標記，不保證是合法 `--model` 輸入，餵回 API 可能壞
+3. 清單沒 `opus`，選 alias 是「我要推薦的」不是「我要這個特定版本」
+
+**不要改**：
+- `setStatus` 不要再加 model 欄位 — 顯示走 capabilities，避免 per-turn 覆蓋
+- 不要在 renderer 判斷 alias vs 具體 id — provider 有 `cache.models`（SDK 清單）才是權威，renderer 的 `capabilities.models` 含 custom models 會誤判
+- 不要為了「想看 default 實際跑哪版」把解析值 persist 進 `agentPrefs.model` — 那會 pin 死 alias；要顯示就走 annotation（另開 `resolvedModel` 欄位，未實作）
+
+**Related**：
+- `agent-server/providers/claude.ts:shouldAdoptResolvedModel` + query loop promotion
+- `.agent/GOTCHAS.md` — SDK init.model 是解析後具體 id（帶 `[1m]`）不是 alias

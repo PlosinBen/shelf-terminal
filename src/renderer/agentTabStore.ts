@@ -629,7 +629,6 @@ export function setStreaming(tabId: string, value: boolean) {
 
 export interface StatusPartial {
   state?: 'idle' | 'streaming' | string;
-  model?: string;
   costUsd?: number;
   numTurns?: number;
   contextUsage?: StatusSegment;
@@ -637,9 +636,13 @@ export interface StatusPartial {
 }
 
 export function setStatus(tabId: string, partial: StatusPartial) {
+  // NOTE: model is intentionally NOT a status field. The displayed model
+  // (actualModel) is driven solely by the capabilities channel + intent seed
+  // + explicit edits — never by the per-turn resolved model. This keeps a
+  // selected alias (default/sonnet/haiku) stable instead of flip-flopping to
+  // the concrete resolved id each turn. See claude.ts alias-resolution block.
   update(tabId, (prev) => {
     const next: AgentTabState = { ...prev };
-    if (partial.model) next.actualModel = partial.model;
     if (partial.costUsd != null) next.costUsd = partial.costUsd;
     if (partial.numTurns != null) next.numTurns = partial.numTurns;
     if (partial.contextUsage) next.contextUsage = partial.contextUsage;

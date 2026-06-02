@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { mergeClaudeModels, rateLimitInfoToSegment, formatClaudeToolInput, extractToolResultText, processMessage, createBlockMsgIdState, askUserQuestionToPrompts, buildAskUserQuestionAnswerJson, parseTaskCreateOutput, parseTaskListOutput, reconcileTasks, renderPlan } from './claude';
+import { mergeClaudeModels, rateLimitInfoToSegment, formatClaudeToolInput, extractToolResultText, processMessage, createBlockMsgIdState, askUserQuestionToPrompts, buildAskUserQuestionAnswerJson, parseTaskCreateOutput, parseTaskListOutput, reconcileTasks, renderPlan, shouldAdoptResolvedModel } from './claude';
 import type { OutgoingMessage } from './types';
 import type { ProviderModel } from '../../src/shared/types';
 
@@ -478,6 +478,44 @@ describe('formatClaudeToolInput Agent alias', () => {
       .toBe(formatClaudeToolInput('Task', input, '/x'));
     expect(formatClaudeToolInput('Agent', input, '/x'))
       .toMatch(/^lookup: find foo/);
+  });
+});
+
+describe('shouldAdoptResolvedModel', () => {
+  // supportedModels() returns recommended aliases; concrete ids are not in it.
+  const ALIASES = [{ value: 'default' }, { value: 'sonnet' }, { value: 'haiku' }];
+
+  it('does NOT adopt when current selection is a recommended alias', () => {
+    // User picked "default"; SDK resolves to claude-opus-4-8. Keep "default".
+    expect(shouldAdoptResolvedModel('claude-opus-4-8', 'default', ALIASES)).toBe(false);
+    expect(shouldAdoptResolvedModel('claude-sonnet-4-5', 'sonnet', ALIASES)).toBe(false);
+  });
+
+  it('adopts when current selection is a pinned non-alias model', () => {
+    // User pinned a custom/specific id (not in supportedModels) → reflect actual.
+    expect(shouldAdoptResolvedModel('claude-opus-4-8[1m]', 'claude-opus-4-8', ALIASES)).toBe(true);
+  });
+
+  it('does not adopt synthetic models', () => {
+    expect(shouldAdoptResolvedModel('<synthetic>', 'claude-opus-4-8', ALIASES)).toBe(false);
+  });
+
+  it('does not adopt when resolved equals current (no-op)', () => {
+    expect(shouldAdoptResolvedModel('claude-opus-4-8', 'claude-opus-4-8', ALIASES)).toBe(false);
+  });
+
+  it('does not adopt when current model is unset (unpinned / alias-like)', () => {
+    expect(shouldAdoptResolvedModel('claude-opus-4-8', undefined, ALIASES)).toBe(false);
+  });
+
+  it('does not adopt before alias list is populated (warmup guard)', () => {
+    // Empty alias list = can't classify; be conservative and keep current.
+    expect(shouldAdoptResolvedModel('claude-opus-4-8', 'claude-opus-4-8-old', [])).toBe(false);
+  });
+
+  it('does not adopt non-string resolved values', () => {
+    expect(shouldAdoptResolvedModel(undefined, 'claude-opus-4-8', ALIASES)).toBe(false);
+    expect(shouldAdoptResolvedModel(null, 'claude-opus-4-8', ALIASES)).toBe(false);
   });
 });
 

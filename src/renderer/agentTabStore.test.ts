@@ -298,12 +298,15 @@ describe('agentTabStore — status / capabilities (no-fallback semantics)', () =
     expect(__getTabForTests(TAB)!.actualModel).toBe('haiku');
   });
 
-  it('setStatus updates fields and respects model overwrite', () => {
-    setStatus(TAB, { costUsd: 0.05, numTurns: 3, model: 'sonnet' });
+  it('setStatus updates metric fields but does NOT touch actualModel', () => {
+    // Model display is capabilities-driven only — per-turn status must not
+    // change actualModel (prevents alias flip-flop, see claude.ts).
+    setActualModel(TAB, 'default');
+    setStatus(TAB, { costUsd: 0.05, numTurns: 3 });
     const tab = __getTabForTests(TAB)!;
     expect(tab.costUsd).toBe(0.05);
     expect(tab.numTurns).toBe(3);
-    expect(tab.actualModel).toBe('sonnet');
+    expect(tab.actualModel).toBe('default'); // unchanged by setStatus
   });
 });
 
