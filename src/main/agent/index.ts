@@ -29,8 +29,8 @@ export function initAgentManager(windowGetter: () => BrowserWindow | null): void
   });
 
   ipcMain.handle(IPC.AGENT_SEND, async (_e, payload) => {
-    const { tabId, prompt, images, model, effort, permissionMode } = payload;
-    return sendMessage(tabId, prompt, images, { model, effort, permissionMode });
+    const { tabId, prompt, images, model, effort, permissionMode, configEdit } = payload;
+    return sendMessage(tabId, prompt, images, { model, effort, permissionMode, configEdit });
   });
 
   ipcMain.handle(IPC.AGENT_STOP, async (_e, payload) => {
@@ -142,13 +142,18 @@ async function sendMessage(
   tabId: string,
   prompt: string,
   images?: string[],
-  prefs?: { model?: string; effort?: string; permissionMode?: string },
+  prefs?: {
+    model?: string;
+    effort?: string;
+    permissionMode?: string;
+    configEdit?: { key: 'model' | 'effort' | 'permissionMode'; value: string };
+  },
 ): Promise<boolean> {
   const session = sessions.get(tabId);
   if (!session) return false;
 
   const tag = `[agent:${tabId.slice(0, 8)}]`;
-  log.info('agent', `${tag} send promptLen=${prompt.length}`);
+  log.info('agent', `${tag} send promptLen=${(prompt ?? '').length}${prefs?.configEdit ? ` configEdit=${prefs.configEdit.key}` : ''}`);
 
   session.state = 'streaming';
   send(IPC.AGENT_STATUS, tabId, { state: 'streaming' });
@@ -167,6 +172,7 @@ async function sendMessage(
       model: prefs?.model,
       effort: prefs?.effort,
       permissionMode: prefs?.permissionMode,
+      configEdit: prefs?.configEdit,
     })) {
       dispatchEvent(tabId, event);
     }

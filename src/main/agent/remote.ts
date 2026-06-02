@@ -117,6 +117,7 @@ export function createRemoteBackend(
         model: opts?.model,
         effort: opts?.effort,
         images: opts?.images,
+        configEdit: opts?.configEdit,
       });
 
       yield* events;

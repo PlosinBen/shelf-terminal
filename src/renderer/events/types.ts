@@ -40,6 +40,9 @@ export interface AgentEventMap {
     text: string;
     images?: string[];
     prefs?: AgentPrefs;
+    /** Structured config edit (picker / status-bar). When set, text is empty
+     *  and no user echo is written — the provider applies it + emits a divider. */
+    configEdit?: { key: 'model' | 'effort' | 'permissionMode'; value: string };
   };
   'agent:stop': { tabId: string };
   'agent:destroy': { tabId: string };

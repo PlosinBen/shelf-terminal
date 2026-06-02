@@ -198,6 +198,15 @@ export interface QueryInput {
   images?: string[];
   sessionId?: string;
   /**
+   * Structured config edit (from a picker / status-bar click). When set, the
+   * provider applies it (set current value + emit capabilities + emit a
+   * `system` divider) and returns WITHOUT running an SDK query — `prompt` is
+   * empty for these turns. Converges UI config edits onto the same provider
+   * path as a typed `/model` slash, so the divider + capabilities come back
+   * identically regardless of entry point.
+   */
+  configEdit?: { key: 'model' | 'effort' | 'permissionMode'; value: string };
+  /**
    * Pre-loaded persisted context for this session. Orchestrator hydrates this
    * from disk before calling `query()`; providers read whichever fields are
    * relevant to their SDK (e.g. `lastSdkSessionId` for Claude/Copilot resume).

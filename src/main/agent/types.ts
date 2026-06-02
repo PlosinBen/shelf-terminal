@@ -98,6 +98,12 @@ export interface AgentQueryOptions {
    */
   model?: string;
   effort?: string;
+  /**
+   * Structured config edit (picker / status-bar click). Routed as a no-prompt
+   * turn so the provider applies it + emits a divider the same way a typed
+   * /model slash does. Threaded through to agent-server's send line.
+   */
+  configEdit?: { key: 'model' | 'effort' | 'permissionMode'; value: string };
 }
 
 export type AgentEvent =

@@ -27,6 +27,10 @@ interface IncomingMessage {
   effort?: string;
   images?: string[];
   sessionId?: string;
+  /** For `type: 'send'`: a structured config edit (picker / status-bar). When
+   *  present, the provider applies it + emits a divider instead of running a
+   *  query — prompt is empty for these turns. */
+  configEdit?: { key: 'model' | 'effort' | 'permissionMode'; value: string };
   toolUseId?: string;
   allow?: boolean;
   /** resolve_picker payload — picker id minted by provider, payload carries
@@ -133,8 +137,14 @@ async function handleSend(msg: IncomingMessage) {
   const turnId = msg.turnId ?? newTurnId();
   const turnSend = wrapSendForTurn(turnId, send);
 
-  if (!msg.prompt || !msg.cwd) {
+  // A config-edit turn carries a structured edit instead of a prompt.
+  const isConfigEdit = !!msg.configEdit;
+  if (!isConfigEdit && (!msg.prompt || !msg.cwd)) {
     turnSend({ type: 'error', error: 'Missing prompt or cwd' });
+    return;
+  }
+  if (isConfigEdit && !msg.cwd) {
+    turnSend({ type: 'error', error: 'Missing cwd' });
     return;
   }
   const provider = msg.provider ?? 'claude';
@@ -151,26 +161,31 @@ async function handleSend(msg: IncomingMessage) {
   // about (e.g. `lastSdkSessionId`) without touching disk themselves.
   const restoreContext = loadRestoreContextFor(provider, msg.sessionId);
 
-  // Pref diff: renderer-authoritative model/effort/permissionMode arrive in
-  // every send payload. Orchestrator compares against last-applied for this
-  // session and calls provider.setX? only on change. Provider's own setX
-  // implementations are imperative ("apply this now") — diff is here, not
-  // there. Per-sessionId so multi-tab doesn't cross-contaminate.
-  await applyPrefDiff(backend, msg.sessionId ?? '', {
-    model: msg.model,
-    effort: msg.effort,
-    permissionMode: msg.permissionMode,
-  });
+  // Pref diff only for prompt turns. A config-edit turn IS the change — it's
+  // applied by the provider via input.configEdit; running the diff too would
+  // double-apply (and emit a redundant capabilities).
+  if (!isConfigEdit) {
+    // Renderer-authoritative model/effort/permissionMode arrive in every send
+    // payload. Orchestrator compares against last-applied for this session and
+    // calls provider.setX? only on change. Per-sessionId so multi-tab doesn't
+    // cross-contaminate.
+    await applyPrefDiff(backend, msg.sessionId ?? '', {
+      model: msg.model,
+      effort: msg.effort,
+      permissionMode: msg.permissionMode,
+    });
+  }
 
   const input: QueryInput = {
-    prompt: msg.prompt,
-    cwd: msg.cwd,
+    prompt: msg.prompt ?? '',
+    cwd: msg.cwd!,
     resume: msg.resume,
     permissionMode: msg.permissionMode,
     model: msg.model,
     effort: msg.effort,
     images: msg.images,
     sessionId: msg.sessionId,
+    configEdit: msg.configEdit,
     restoreContext,
   };
 

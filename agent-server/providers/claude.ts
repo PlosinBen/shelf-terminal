@@ -6,6 +6,7 @@ import { resolve } from 'path';
 import type { QueryInput, SendFn, ServerBackend, ProviderCapabilities, StatusSegment, PickerResolvePayload } from './types';
 import { severityFromUtilization, formatResetCountdown, pickPermissionModes, pickEffortLevels } from './types';
 import { parseSlashPrefix } from '../../src/shared/slash-prefix';
+import { formatConfigAck, type ConfigEditKey } from '../../src/shared/config-ack';
 import type { ProviderModel } from '../../src/shared/types';
 
 /**
@@ -430,6 +431,27 @@ export function createClaudeBackend(): ServerBackend {
     };
   }
 
+  /**
+   * Apply a config edit and emit the full turn lifecycle: set the closure
+   * value, broadcast capabilities (drives renderer display + persist), and
+   * render the change as a centered `system` divider (status transition, not
+   * content). Single convergence point for BOTH entry points:
+   *   - typed `/model X` slash (parsed in query())
+   *   - structured config-edit turn (input.configEdit, from picker / status bar)
+   * so the divider + capabilities come back identically regardless of how the
+   * user triggered the change. Distinct from setModel/setEffort/etc., which are
+   * the orchestrator's silent per-message pref-diff apply (no divider).
+   */
+  function applyConfigEdit(key: ConfigEditKey, value: string, send: SendFn) {
+    send({ type: 'status', state: 'streaming' });
+    if (key === 'model') currentModel = value;
+    else if (key === 'effort') currentEffort = value;
+    else currentPermissionMode = value;
+    send({ type: 'capabilities', ...buildCapabilities() });
+    send({ type: 'message', msgId: mintSlashMsgId(), msgType: 'system', content: formatConfigAck(key, value) });
+    send({ type: 'status', state: 'idle' });
+  }
+
   return {
     async gatherCapabilities(
       cwd: string,
@@ -469,6 +491,14 @@ export function createClaudeBackend(): ServerBackend {
     async query(input: QueryInput, send: SendFn) {
       currentSend = send;
 
+      // Config-edit turn (picker / status-bar): structured key+value, no prompt,
+      // no SDK query. Converges UI config edits onto applyConfigEdit — the same
+      // path a typed /model slash takes below.
+      if (input.configEdit) {
+        applyConfigEdit(input.configEdit.key, input.configEdit.value, send);
+        return;
+      }
+
       // Slash interception MUST run BEFORE the SDK query is built/created below.
       // /model /effort /permission are provider-only config edits. If we let the
       // raw "/model opus" string become the SDK prompt, the bundled Claude Code
@@ -479,30 +509,19 @@ export function createClaudeBackend(): ServerBackend {
       // intentionally fall through below — they need the real SDK turn.
       const slash = parseSlashPrefix(input.prompt);
       if (slash && (slash.cmd === 'model' || slash.cmd === 'effort' || slash.cmd === 'permission')) {
-        const msgId = mintSlashMsgId();
-        send({ type: 'status', state: 'streaming' });
         // No-args normally never reaches here — InputZone intercepts optioned
         // slashes with no arg and opens a renderer-side picker instead. This is
         // a defensive fallback (renderer logic could change): surface a plain
         // error rather than silently swallowing the turn.
         if (!slash.args) {
-          send({ type: 'message', msgId, msgType: 'error', content: `Usage: /${slash.cmd} <value>` });
+          send({ type: 'status', state: 'streaming' });
+          send({ type: 'message', msgId: mintSlashMsgId(), msgType: 'error', content: `Usage: /${slash.cmd} <value>` });
           send({ type: 'status', state: 'idle' });
           return;
         }
-        if (slash.cmd === 'model') currentModel = slash.args;
-        else if (slash.cmd === 'effort') currentEffort = slash.args;
-        else currentPermissionMode = slash.args;
-        send({ type: 'capabilities', ...buildCapabilities() });
-        // Config acknowledgements are status transitions, not content — render
-        // as a centered divider (`system`), not a collapsible fold_markdown card.
-        const ack = slash.cmd === 'model'
-          ? `Model set to ${slash.args} (applies on next query)`
-          : slash.cmd === 'effort'
-            ? `Reasoning effort set to ${slash.args} (applies on next query)`
-            : `Permission mode set to ${slash.args} (applies on next query)`;
-        send({ type: 'message', msgId, msgType: 'system', content: ack });
-        send({ type: 'status', state: 'idle' });
+        // `/permission` slash → normalized key `permissionMode`.
+        const key: ConfigEditKey = slash.cmd === 'permission' ? 'permissionMode' : slash.cmd;
+        applyConfigEdit(key, slash.args, send);
         return;
       }
 

@@ -9,9 +9,6 @@ import { AuthPane } from './agent/AuthPane';
 import {
   initTab as initTabStore,
   removeTab as removeTabStore,
-  setActualModel,
-  setActualEffort,
-  setActualPermissionMode,
   setCapabilities as setCapabilitiesStore,
   setInitStatus as setInitStatusStore,
   useAgentTab,
@@ -136,28 +133,20 @@ export function AgentView({ tabId, cwd, connection, provider, projectId, visible
   }, [capabilities?.currentModel, capabilities?.currentEffort, capabilities?.currentPermissionMode, savedPrefs?.model, savedPrefs?.effort, savedPrefs?.permissionMode, persistPref]);
 
   /**
-   * Apply a config edit (model / effort / permissionMode). Used by
-   * status bar cycle, /model slash, and renderer-local picker.
-   * Renderer-authoritative: persists intent into projectConfig +
-   * optimistic `actual*` for immediate display. Backend learns on
-   * the next AGENT_SEND payload (orchestrator diffs and calls
-   * provider.setX). No setPrefs IPC.
+   * Apply a config edit (model / effort / permissionMode). Used by the picker
+   * (status-bar click / `/model` no-arg) for all three.
    *
-   * Validation deferred to SDK (Decision #55) — typos surface as
-   * `error` events when the next send fails to apply.
+   * Routes through the provider as a structured config-edit turn — the SAME
+   * path a typed `/model X` takes — so the divider + capabilities come back
+   * identically regardless of entry point (DECISION #63). No optimistic
+   * `setActual*` / `persistPref` here: display updates when the provider's
+   * capabilities event lands, and the capability-driven effect persists intent.
+   * Keeping a renderer-local optimistic update would diverge from the typed
+   * path's round-trip behaviour — the inconsistency we set out to remove.
    */
   const handleConfigEdit = useCallback((key: 'model' | 'effort' | 'permissionMode', value: string) => {
-    if (key === 'model') {
-      setActualModel(tabId, value);
-      persistPref({ model: value });
-    } else if (key === 'effort') {
-      setActualEffort(tabId, value);
-      persistPref({ effort: value });
-    } else if (key === 'permissionMode') {
-      setActualPermissionMode(tabId, value);
-      persistPref({ permissionMode: value });
-    }
-  }, [tabId, persistPref]);
+    emitAgent('agent:send', { tabId, text: '', configEdit: { key, value } });
+  }, [tabId]);
 
   const handleRetryInit = useCallback(() => {
     setInitStatusStore(tabId, 'starting');

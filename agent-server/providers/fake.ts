@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { formatConfigAck } from '../../src/shared/config-ack';
 import type {
   OutgoingMessage,
   PickerResolvePayload,
@@ -247,6 +248,16 @@ export function createFakeBackend(): ServerBackend {
     async query(input: QueryInput, send: SendFn): Promise<void> {
       abortController = new AbortController();
       const signal = abortController.signal;
+
+      // Config-edit turn: mirror the real providers — emit a `system` divider
+      // and close the turn. No scenario chain runs (prompt is empty).
+      if (input.configEdit) {
+        const { key, value } = input.configEdit;
+        send({ type: 'status', state: 'streaming' });
+        send({ type: 'message', msgId: mintId('m'), msgType: 'system', content: formatConfigAck(key, value) });
+        send({ type: 'status', state: 'idle' });
+        return;
+      }
 
       send({ type: 'status', state: 'streaming', sessionId: input.sessionId });
 

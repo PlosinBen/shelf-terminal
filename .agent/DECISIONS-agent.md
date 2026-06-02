@@ -525,3 +525,41 @@ InputZone ──emit('agent:send', ...)──▶ EventBus
 **Related**：
 - `agent-server/providers/claude.ts:shouldAdoptResolvedModel` + query loop promotion
 - `.agent/GOTCHAS.md` — SDK init.model 是解析後具體 id（帶 `[1m]`）不是 alias
+
+---
+
+## 63. Config 變更三入口收斂到 provider 的單一 config-edit turn（取代 #55 的 renderer-local 樂觀）
+
+**背景**：改 model/effort/permission 有三個入口 —— 打字 `/model X`、picker（`/model` 無參數開的清單）、status bar 點擊。#55 當初讓 picker/status-bar 走 renderer-local（`handleConfigEdit` 直接 `setActual*` + `persistPref`，零 round-trip 樂觀更新），只有打字走 provider。
+
+**問題**：兩種行為不一致 ——
+- 打字：round-trip → provider 發 divider + capabilities
+- picker/status-bar：renderer 樂觀、靜默、無 divider
+
+權責也分散（renderer 跟 provider 都在改 config）。timeline 上 config 變更的呈現因入口而異。
+
+**決策（P1）**：三個入口全部收斂到 provider 的 `applyConfigEdit(key, value, send)`：
+- **打字 `/model X`**：`query()` parseSlash → `applyConfigEdit`（`/permission` → 正規化 key `permissionMode`）
+- **picker / status-bar**：`handleConfigEdit` emit **結構化 config-edit turn**（`agent:send` 帶 `configEdit: {key,value}`、`text:''`、無 echo）→ 經 `QueryInput.configEdit` → `query()` 開頭 → `applyConfigEdit`
+
+`applyConfigEdit` = set currentX + emit capabilities + emit `system` divider（文案走 shared `formatConfigAck`）+ status streaming/idle。**單一責任、單一資訊路線**：不管哪個入口，timeline 都呈現同一種 divider，顯示/持久化都由 capabilities 驅動。
+
+**移除 renderer 樂觀更新**：`handleConfigEdit` 不再 `setActual*` / `persistPref`。理由：保留樂觀就會跟打字的 round-trip 行為分歧，正是要消除的不一致。顯示等 provider capabilities 回來才更新（約一個 round-trip，可接受）。
+
+**echo 差異是設計**：打字有 user echo（使用者真的打了字，忠實記錄）、picker/status-bar 無 echo（使用者只點選）。兩者都產生 divider —— echo 是正交的「打了什麼」紀錄，divider 是統一的「config 變了」標記。
+
+**傳輸**：擴充既有 `agent:send` → AGENT_SEND → agent-server send line 帶 `configEdit` 欄位（跟 prefs 同模式 thread 過每層）。**不開新 IPC** —— config-edit 本質就是「一種 turn」（打字 `/model X` 本來就是 prompt 形式的 config edit），重用 turn 機制讓 divider 經 turnId 自然路由（依賴 #DECISION wire mid-turn capabilities 的修復）。
+
+**為何不讓 renderer 組 `/model X` 字串**：那會把 slash 語法塞進 renderer。結構化 `{key, value}` 讓 renderer 只懂 config 維度（本來就懂）、不懂 slash 語法。
+
+**不要改**：
+- 不要在 `handleConfigEdit` 加回樂觀 `setActual*` — 會重新分歧
+- 不要為 config-edit 開獨立 IPC — 它是 turn，重用 send/turn 路由
+- 不要讓 renderer 組 slash 字串 — 用結構化 configEdit 欄位
+- `applyConfigEdit` 跟 `setModel`/`setEffort`/`setPermissionMode` 不同：後者是 orchestrator 每則訊息的 silent pref-diff apply（無 divider），前者是明確 config 變更（有 divider）
+
+**Related**：
+- `src/shared/config-ack.ts` — `formatConfigAck` + `ConfigEditKey`
+- `agent-server/providers/claude.ts:applyConfigEdit` + query() configEdit/slash 分流
+- `src/renderer/components/AgentView.tsx:handleConfigEdit`
+- 取代 #55 中「renderer-local config slash 樂觀更新」的部分
