@@ -10,7 +10,7 @@
 | 自訂 application menu (wiring) | `app-menu.ts` | `buildAppMenu({ onCheckForUpdates })` 串 electron `Menu.buildFromTemplate` + `shell.openExternal` / `openPath`，呼叫 `app-menu-template` 拿純資料 |
 | Application menu template | `app-menu-template.ts` | 純函式 `buildAppMenuTemplate(actions, platform, appName)` 回傳 `MenuItemConstructorOptions[]`；vitest 測 25 case，含 NO `reload` / `forceReload` regression guard |
 | Reload key predicate | `reload-guard.ts` | `isReloadKeyEvent(input)` 判斷 webContents `before-input-event` 是不是 Cmd/Ctrl+R / F5；vitest 測 11 case 涵蓋平台差異 |
-| PTY spawn/kill/resize | `pty-manager.ts` | 透過 connector.createShell() spawn、idle notification、首次 spawn per project 觸發背景上傳清理 |
+| PTY spawn/kill/resize | `pty-manager.ts` | 透過 connector.createShell() spawn、idle notification、首次 spawn per project 觸發背景上傳清理。**不依賴 pm/**（P1-1）：輸出/lifecycle 透過注入的 `PtyObserver`（`setPtyObserver()`）回報，由 index.ts 接到 pm handler。同 `setWritePtyFn` 的注入慣例 |
 | Preload bridge | `preload.ts` | contextBridge 暴露 `window.shelfApi`，RPC bridge 到 main process |
 | Project 持久化 | `project-store.ts` | 讀寫 `projects.json`（userData 路徑） |
 | Settings 持久化 | `settings-store.ts` | 讀寫 `settings.json`，merge defaults |
@@ -88,6 +88,8 @@
 | Away Mode 狀態 | `away-mode.ts` | 全域 boolean + 同步到 renderer |
 | 硬紅線檢查 | `redline.ts` | scrollback pattern match（rm -rf、git push --force、DROP TABLE 等） |
 | Tab 狀態監控 | `tab-watcher.ts` | scrollback 狀態轉換偵測（cli_running → cli_waiting_permission 等）觸發 PM 自動事件；`snapshotTabs()` 給 `/status` 用 |
+| PTY → PM bridge | `pty-bridge.ts` | `handlePtyData` / `handlePtyRemove` / `handlePtyClear` — pty-manager 的 `PtyObserver` 注入目標（P1-1 依賴反轉）。`handlePtyData` 先 `scrollback.append` 再 `tab-watcher.checkTab`（順序契約：watcher 讀 scrollback）。**不 import pty-manager**，接線在 index.ts |
+| PTY bridge 單元測試 | `pty-bridge.test.ts` | 三種訊號路由到 scrollback/tab-watcher + append-before-checkTab 順序契約（守 P1-1 靜默壞掉風險）|
 | Telegram bridge | `telegram.ts` | Bot API long polling、sendMessage、inline button（Allow/Deny、Away toggle）、slash commands（`/help` `/away` `/status` `/tabs` `/stop`）+ `setMyCommands` 自動註冊 |
 | 單元測試 | `scrollback-buffer.test.ts` | Ring buffer + ANSI strip 測試 |
 | 單元測試 | `tools.test.ts` | inferTabState heuristic 測試 |

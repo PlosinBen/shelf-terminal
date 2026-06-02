@@ -5,8 +5,30 @@ import type { Shell } from './connector/types';
 import { createConnector } from './connector';
 import { log } from '@shared/logger';
 import { maybeScheduleCleanup } from './file-transfer';
-import * as scrollback from './pm/scrollback-buffer';
-import { checkTab as watcherCheckTab, removeTab as watcherRemoveTab, clearAll as watcherClearAll } from './pm/tab-watcher';
+
+/**
+ * Terminal-infra → feature decoupling (architecture-health P1-1).
+ *
+ * pty-manager owns PTY lifecycle and reports raw signals to an injected
+ * observer; feature modules that care about terminal output (pm/ scrollback +
+ * tab-watcher) provide the observer, wired by the composition root (index.ts).
+ * pty-manager MUST NOT import pm/ — the dependency points feature→infra only,
+ * never the reverse. Same injection pattern as pm's setWritePtyFn.
+ */
+export interface PtyObserver {
+  /** Every PTY output chunk, before it's forwarded to the renderer. */
+  onData?(tabId: string, data: string): void;
+  /** A single tab was killed (killPty). */
+  onRemove?(tabId: string): void;
+  /** All tabs were killed (killAllPtys). */
+  onClear?(): void;
+}
+
+let observer: PtyObserver = {};
+
+export function setPtyObserver(o: PtyObserver): void {
+  observer = o;
+}
 
 const shells = new Map<string, Shell>();
 
@@ -99,8 +121,7 @@ export function spawnPty(
   }
 
   shell.onData((data) => {
-    scrollback.append(tabId, data);
-    watcherCheckTab(tabId);
+    observer.onData?.(tabId, data);
 
     if (!win.isDestroyed()) {
       win.webContents.send(IPC.PTY_DATA, { tabId, data });
@@ -162,8 +183,7 @@ export function killPty(tabId: string) {
   if (s) {
     s.kill();
     clearActivity(tabId);
-    scrollback.remove(tabId);
-    watcherRemoveTab(tabId);
+    observer.onRemove?.(tabId);
     shells.delete(tabId);
   }
 }
@@ -174,6 +194,5 @@ export function killAllPtys() {
     s.kill();
     shells.delete(tabId);
   }
-  scrollback.clear();
-  watcherClearAll();
+  observer.onClear?.();
 }

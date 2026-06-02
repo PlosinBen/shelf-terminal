@@ -1,7 +1,7 @@
 import { app, BrowserWindow, dialog, Menu, shell } from 'electron';
 import path from 'path';
 import fs from 'fs';
-import { writePty, killAllPtys } from './pty-manager';
+import { writePty, killAllPtys, setPtyObserver } from './pty-manager';
 import { bootstrap } from './bootstrap';
 import { initAutoUpdater, stopAutoUpdater, manualCheckForUpdate } from './updater';
 import { buildAppMenu } from './app-menu';
@@ -10,7 +10,7 @@ import { cleanupConnectors } from './connector';
 import { log, setLogLevel, setFileWriter } from '@shared/logger';
 import { applyUserDataIsolation } from './user-data-path';
 import { migratePmNotes } from './migrations/migrate-pm-notes';
-import { handlePmSend, handleTabEvent, stopGeneration, setWritePtyFn, initAwayMode, setStateChangeCallback, startTelegram, stopTelegram, setMessageCallback, setCallbackQueryHandler, setStopCallback } from './pm';
+import { handlePmSend, handleTabEvent, stopGeneration, setWritePtyFn, initAwayMode, setStateChangeCallback, startTelegram, stopTelegram, setMessageCallback, setCallbackQueryHandler, setStopCallback, handlePtyData, handlePtyRemove, handlePtyClear } from './pm';
 import { initAgentManager, disposeAllAgents } from './agent';
 import { getMainWindow, setMainWindow, setProjects, setSettings, getSettings } from './app-state';
 import { registerAllIpcHandlers } from './ipc';
@@ -145,6 +145,9 @@ app.whenReady().then(async () => {
   // PM wiring
   initAwayMode(getMainWindow()!);
   setWritePtyFn(writePty);
+  // Feed PTY output/lifecycle into PM scrollback + tab-watcher (P1-1: the
+  // dependency now points pm→infra via this injection, not pty-manager→pm).
+  setPtyObserver({ onData: handlePtyData, onRemove: handlePtyRemove, onClear: handlePtyClear });
   setStateChangeCallback((tabId, tabName, projectName, oldState, newState) => {
     const win = getMainWindow();
     const pmProvider = getSettings().pmProvider;
