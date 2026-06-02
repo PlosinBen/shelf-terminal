@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { mergeClaudeModels, rateLimitInfoToSegment, formatClaudeToolInput, extractToolResultText, processMessage, createBlockMsgIdState, askUserQuestionToPrompts, buildAskUserQuestionAnswerJson, parseTaskCreateOutput, parseTaskListOutput, reconcileTasks, renderPlan, shouldAdoptResolvedModel } from './claude';
+import { mergeClaudeModels, rateLimitInfoToSegment, formatClaudeToolInput, extractToolResultText, processMessage, createBlockMsgIdState, askUserQuestionToPrompts, buildAskUserQuestionAnswerJson, parseTaskCreateOutput, parseTaskListOutput, reconcileTasks, renderPlan, shouldAdoptResolvedModel, stripToolErrorWrapper } from './claude';
 import type { OutgoingMessage } from './types';
 import type { ProviderModel } from '../../src/shared/types';
 
@@ -219,6 +219,28 @@ describe('extractToolResultText', () => {
   it('returns empty string for nullish input', () => {
     expect(extractToolResultText(null)).toBe('');
     expect(extractToolResultText(undefined)).toBe('');
+  });
+});
+
+describe('stripToolErrorWrapper', () => {
+  it('strips the <tool_use_error> wrapper and trims', () => {
+    expect(stripToolErrorWrapper('<tool_use_error>file_path is missing</tool_use_error>'))
+      .toBe('file_path is missing');
+  });
+
+  it('handles multi-line wrapped content', () => {
+    expect(stripToolErrorWrapper('<tool_use_error>line 1\nline 2</tool_use_error>'))
+      .toBe('line 1\nline 2');
+  });
+
+  it('is a no-op when no wrapper present', () => {
+    expect(stripToolErrorWrapper('plain error text')).toBe('plain error text');
+    expect(stripToolErrorWrapper('{"answer":"json"}')).toBe('{"answer":"json"}');
+  });
+
+  it('only strips a full wrapper, not a stray mention of the tag', () => {
+    const s = 'see <tool_use_error> in the docs';
+    expect(stripToolErrorWrapper(s)).toBe(s);
   });
 });
 

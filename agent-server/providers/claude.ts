@@ -936,6 +936,17 @@ export function extractToolResultText(raw: unknown): string {
 }
 
 /**
+ * Claude SDK wraps tool error content in `<tool_use_error>…</tool_use_error>`
+ * tags. That wrapper is an SDK wire detail — strip it so the renderer shows
+ * just the message (the red "Tool returned an error" banner already signals
+ * it's an error). No-op when the wrapper is absent.
+ */
+export function stripToolErrorWrapper(content: string): string {
+  const m = content.match(/^\s*<tool_use_error>([\s\S]*)<\/tool_use_error>\s*$/);
+  return m ? m[1].trim() : content;
+}
+
+/**
  * Parse `TaskCreate` tool_result to extract the SDK-assigned task id.
  *
  * Type def in `@anthropic-ai/claude-agent-sdk/sdk-tools.d.ts` claims
@@ -1232,6 +1243,10 @@ function emitClaudeToolResult(
   const entry = inflightToolUses.get(toolUseId);
   if (!entry) return;
   inflightToolUses.delete(toolUseId);
+  // Strip the SDK's <tool_use_error> wrapper once for all error branches below.
+  // No-op on non-error content (and on AskUserQuestion's smuggled JSON, which
+  // carries no wrapper).
+  if (isError) content = stripToolErrorWrapper(content);
   if (entry.kind === 'file_edit') {
     if (entry.diff) {
       // Edit — fold_diff. Success → diff body; failure → errorMessage, no body
