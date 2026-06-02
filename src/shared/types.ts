@@ -308,15 +308,28 @@ export interface WorktreeRemoveResult {
 
 // ── PM Agent ──
 
-export type PmProviderType = 'openai' | 'gemini';
+export type PmProviderType = 'openai' | 'gemini' | 'ollama';
 
 export interface ProviderModel {
   id: string;
-  contextWindow: number;
+  /** Optional — dynamically-discovered models (e.g. ollama) don't carry this.
+   *  Renderer should render `(<N>K)` only when present. */
+  contextWindow?: number;
   reasoning?: boolean;
 }
 
-export const PM_PROVIDERS: { id: PmProviderType; label: string; baseURL?: string; defaultModel: string; models: ProviderModel[] }[] = [
+export interface PmProviderMeta {
+  id: PmProviderType;
+  label: string;
+  baseURL?: string;
+  defaultModel: string;
+  models: ProviderModel[];
+  /** When true, SettingsPanel calls `pm.listModels(baseURL)` and merges the
+   *  result with user-defined custom entries. See DECISIONS-pm #65. */
+  dynamicModelList?: boolean;
+}
+
+export const PM_PROVIDERS: PmProviderMeta[] = [
   {
     id: 'openai', label: 'OpenAI', defaultModel: 'gpt-4o',
     models: [
@@ -336,6 +349,11 @@ export const PM_PROVIDERS: { id: PmProviderType; label: string; baseURL?: string
       { id: 'gemini-2.5-pro', contextWindow: 1048576, reasoning: true },
       { id: 'gemini-2.0-flash', contextWindow: 1048576 },
     ],
+  },
+  {
+    id: 'ollama', label: 'Ollama (local)', baseURL: 'http://localhost:11434/v1', defaultModel: 'qwen3:8b',
+    models: [],
+    dynamicModelList: true,
   },
 ];
 
@@ -365,7 +383,18 @@ export interface PmProviderConfig {
   provider: PmProviderType;
   apiKey: string;
   model: string;
+  /** Optional override of the provider's default baseURL. Used by ollama
+   *  (remote server) and any self-hosted OpenAI-compatible endpoint.
+   *  See DECISIONS-pm #65. */
+  baseURL?: string;
 }
+
+/** IPC `pm:listModels` response. `unreachable` = connection refused / DNS fail;
+ *  `timeout` = server didn't respond in time; `parse_error` = response shape
+ *  not OpenAI-compatible (e.g. wrong URL pointed at a non-OpenAI server). */
+export type PmListModelsResult =
+  | { ok: true; models: ProviderModel[] }
+  | { ok: false; error: 'unreachable' | 'timeout' | 'parse_error' };
 
 export type TabInferredState =
   | 'idle_shell'

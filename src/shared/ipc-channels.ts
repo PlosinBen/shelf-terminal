@@ -89,6 +89,7 @@ export const IPC = {
   PM_AWAY_MODE: 'pm:away-mode',
   PM_AWAY_MODE_GET: 'pm:away-mode-get',
   PM_ESCALATION_RESPOND: 'pm:escalation-respond',
+  PM_LIST_MODELS: 'pm:list-models',
 
   // Main → Renderer (send)
   PTY_DATA: 'pty:data',

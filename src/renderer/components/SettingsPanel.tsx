@@ -6,6 +6,9 @@ import type { AppSettings, KeybindingAction, KeybindingConfig, LogLevel, PmProvi
 import { PM_PROVIDERS, getModelsForProvider, AGENT_DISPLAY_KEYS, AGENT_PROVIDER_REGISTRY, DEFAULT_AGENT_DISPLAY } from '@shared/types';
 import { formatBytes } from '../utils/format-bytes';
 
+type ListStatus = 'idle' | 'loading' | 'success' | 'empty' | 'error';
+type ListError = 'unreachable' | 'timeout' | 'parse_error' | null;
+
 const ACTION_LABELS: Record<KeybindingAction, string> = {
   toggleProjectList: 'Toggle Project List',
   newProject: 'New Project',
@@ -30,6 +33,16 @@ function formatContextWindow(tokens: number): string {
   return `${Math.round(tokens / 1000)}K`;
 }
 
+/** Merge detected + custom models, deduped by id. Custom overrides detected
+ *  for the same id (lets user enrich auto-discovered entries with
+ *  contextWindow / reasoning flag). */
+function mergeModelLists(detected: ProviderModel[], custom: ProviderModel[]): ProviderModel[] {
+  const byId = new Map<string, ProviderModel>();
+  for (const m of detected) byId.set(m.id, m);
+  for (const m of custom) byId.set(m.id, m); // custom wins
+  return Array.from(byId.values());
+}
+
 type SettingsTab = 'terminal' | 'agent' | 'models' | 'pm' | 'shortcuts';
 
 export function SettingsPanel() {
@@ -40,6 +53,14 @@ export function SettingsPanel() {
   const [pathError, setPathError] = useState<string | null>(null);
   const [logsPath, setLogsPath] = useState<string>('');
   const [logsSize, setLogsSize] = useState<{ totalBytes: number; fileCount: number } | null>(null);
+
+  // Dynamic model discovery for providers with `dynamicModelList` (e.g. ollama).
+  // Hits GET <baseURL>/models via main-process `pm.listModels` IPC; result is
+  // merged with user-defined custom entries from `providerModels`. See D3-b in
+  // .agent/features/pm-ollama-provider.md.
+  const [detectedModels, setDetectedModels] = useState<ProviderModel[]>([]);
+  const [listStatus, setListStatus] = useState<ListStatus>('idle');
+  const [listError, setListError] = useState<ListError>(null);
 
   const refreshLogsSize = useCallback(() => {
     setLogsSize(null);
@@ -82,6 +103,40 @@ export function SettingsPanel() {
     window.addEventListener('keydown', handleRecord, true);
     return () => window.removeEventListener('keydown', handleRecord, true);
   }, [recordingAction, handleRecord]);
+
+  // Effective baseURL for current draft (user override > provider default).
+  const pmProvider = draft.pmProvider?.provider;
+  const pmMeta = pmProvider ? PM_PROVIDERS.find((p) => p.id === pmProvider) : undefined;
+  const pmBaseURL = draft.pmProvider?.baseURL || pmMeta?.baseURL || '';
+  const pmDynamic = !!pmMeta?.dynamicModelList;
+
+  const refreshModelList = useCallback(async (baseURL: string) => {
+    setListStatus('loading');
+    setListError(null);
+    const res = await window.shelfApi.pm.listModels(baseURL);
+    if (res.ok) {
+      setDetectedModels(res.models);
+      setListStatus(res.models.length === 0 ? 'empty' : 'success');
+    } else {
+      setDetectedModels([]);
+      setListStatus('error');
+      setListError(res.error);
+    }
+  }, []);
+
+  // Debounced auto-fetch on provider/baseURL change.
+  useEffect(() => {
+    if (!settingsVisible || !pmDynamic || !pmBaseURL) {
+      setDetectedModels([]);
+      setListStatus('idle');
+      setListError(null);
+      return;
+    }
+    const handle = setTimeout(() => {
+      refreshModelList(pmBaseURL);
+    }, 500);
+    return () => clearTimeout(handle);
+  }, [settingsVisible, pmDynamic, pmBaseURL, refreshModelList]);
 
   const handleSave = async () => {
     if (draft.defaultLocalPath) {
@@ -353,15 +408,40 @@ export function SettingsPanel() {
                       const id = e.target.value as PmProviderType;
                       const meta = PM_PROVIDERS.find((p) => p.id === id);
                       updateDraft({
-                        pmProvider: { ...draft.pmProvider ?? { provider: id, apiKey: '', model: '' }, provider: id, model: meta?.defaultModel ?? '' },
+                        // Drop any previous baseURL override on provider switch — different
+                        // provider, different default endpoint. User can re-enter if needed.
+                        pmProvider: {
+                          ...(draft.pmProvider ?? { provider: id, apiKey: '', model: '' }),
+                          provider: id,
+                          model: meta?.defaultModel ?? '',
+                          baseURL: undefined,
+                        },
                       });
                     }}
                   >
                     <option value="">Select...</option>
-                    <option value="openai">OpenAI</option>
-                    <option value="gemini">Gemini</option>
+                    {PM_PROVIDERS.map((p) => (
+                      <option key={p.id} value={p.id}>{p.label}</option>
+                    ))}
                   </select>
                 </div>
+                {pmProvider && (
+                  <div className="settings-group">
+                    <label className="settings-label">Base URL</label>
+                    <input
+                      className="settings-input settings-input-wide"
+                      type="text"
+                      value={draft.pmProvider?.baseURL || ''}
+                      onChange={(e) => updateDraft({
+                        pmProvider: {
+                          ...(draft.pmProvider ?? { provider: pmProvider, apiKey: '', model: '' }),
+                          baseURL: e.target.value || undefined,
+                        },
+                      })}
+                      placeholder={pmMeta?.baseURL || '(provider default)'}
+                    />
+                  </div>
+                )}
                 <div className="settings-group">
                   <label className="settings-label">API Key</label>
                   <input
@@ -371,24 +451,83 @@ export function SettingsPanel() {
                     onChange={(e) => updateDraft({
                       pmProvider: { ...draft.pmProvider ?? { provider: 'gemini', apiKey: '', model: '' }, apiKey: e.target.value },
                     })}
-                    placeholder="API key"
+                    placeholder={pmDynamic ? 'Optional for local providers' : 'API key'}
                   />
                 </div>
                 <div className="settings-group">
                   <label className="settings-label">Model</label>
-                  <select
-                    className="settings-input settings-input-wide"
-                    value={draft.pmProvider?.model || ''}
-                    onChange={(e) => updateDraft({
-                      pmProvider: { ...draft.pmProvider ?? { provider: 'gemini', apiKey: '', model: '' }, model: e.target.value },
-                    })}
-                  >
-                    <option value="">Select model...</option>
-                    {draft.pmProvider?.provider && getModelsForProvider(draft.pmProvider.provider, draft.providerModels).map((m) => (
-                      <option key={m.id} value={m.id}>{m.id} ({formatContextWindow(m.contextWindow)})</option>
-                    ))}
-                  </select>
+                  <div className="settings-model-row">
+                    <select
+                      className="settings-input settings-input-wide"
+                      value={draft.pmProvider?.model || ''}
+                      onChange={(e) => updateDraft({
+                        pmProvider: { ...draft.pmProvider ?? { provider: 'gemini', apiKey: '', model: '' }, model: e.target.value },
+                      })}
+                    >
+                      <option value="">Select model...</option>
+                      {(() => {
+                        if (!pmProvider) return null;
+                        const customList = getModelsForProvider(pmProvider, draft.providerModels);
+                        const list = pmDynamic ? mergeModelLists(detectedModels, customList) : customList;
+                        // Ensure currently-selected model is always an option, even if not in list yet
+                        // (e.g. user has defaultModel='qwen3:8b' but hasn't pulled it; detected list
+                        // is empty or fetching). Otherwise the <select> visually deselects.
+                        const current = draft.pmProvider?.model;
+                        const hasCurrent = current && list.some((m) => m.id === current);
+                        const finalList = hasCurrent || !current ? list : [{ id: current }, ...list];
+                        return finalList.map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.contextWindow ? `${m.id} (${formatContextWindow(m.contextWindow)})` : m.id}
+                          </option>
+                        ));
+                      })()}
+                    </select>
+                    {pmDynamic && (
+                      <button
+                        type="button"
+                        className="settings-icon-btn"
+                        title="Refresh model list"
+                        onClick={() => pmBaseURL && refreshModelList(pmBaseURL)}
+                        disabled={listStatus === 'loading' || !pmBaseURL}
+                      >↻</button>
+                    )}
+                  </div>
+                  {/* Three-state hint for dynamic model list. See D3-b in
+                      .agent/features/pm-ollama-provider.md. */}
+                  {pmDynamic && listStatus === 'loading' && (
+                    <div className="settings-sub-hint">Loading models from {pmBaseURL}…</div>
+                  )}
+                  {pmDynamic && listStatus === 'error' && (
+                    <div className="settings-sub-hint settings-sub-hint-warn">
+                      {listError === 'timeout'
+                        ? `Ollama at ${pmBaseURL} didn't respond in time.`
+                        : listError === 'parse_error'
+                          ? `Got unexpected response from ${pmBaseURL}. Is this an OpenAI-compatible endpoint?`
+                          : `Cannot reach Ollama at ${pmBaseURL}. Is \`ollama serve\` running?`}
+                    </div>
+                  )}
+                  {pmDynamic && listStatus === 'empty' && (
+                    <div className="settings-sub-hint">
+                      Ollama is running but has no models. Run{' '}
+                      <code
+                        className="settings-copy-code"
+                        title="Click to copy"
+                        onClick={() => navigator.clipboard?.writeText('ollama pull qwen3:8b')}
+                      >ollama pull qwen3:8b</code>
+                      {' '}in a terminal first.
+                    </div>
+                  )}
                 </div>
+                {pmProvider === 'ollama' && (
+                  // Provider-specific informational hint (i18n-level UX, see DECISIONS #43
+                  // exception). Background: ollama tool_call support is model-dependent —
+                  // qwen2.5-coder emits JSON-as-text, qwen3:8b emits proper tool-call events.
+                  // See GOTCHAS "Ollama: model 看似支援 tool_call、實測只吐 JSON text".
+                  <div className="settings-sub-hint">
+                    PM Agent needs native tool_call support. Verified working: <strong>qwen3:8b</strong>.
+                    Some models (qwen2.5-coder) claim support but emit JSON-as-text.
+                  </div>
+                )}
 
                 <div className="settings-divider" />
                 <div className="settings-section-title">Telegram Bridge</div>
@@ -487,13 +626,13 @@ function ProviderModelsSection({ provider, customModels, onChange }: {
         {provider.models.map((m) => (
           <div key={m.id} className="custom-model-row">
             <span className="custom-model-id">{m.id}{m.reasoning && <span className="custom-model-reasoning">reasoning</span>}</span>
-            <span className="custom-model-ctx">{formatContextWindow(m.contextWindow)}</span>
+            <span className="custom-model-ctx">{m.contextWindow ? formatContextWindow(m.contextWindow) : '—'}</span>
           </div>
         ))}
         {customModels.filter((m) => !provider.models.some((d) => d.id === m.id)).map((m) => (
           <div key={m.id} className="custom-model-row">
             <span className="custom-model-id">{m.id}{m.reasoning && <span className="custom-model-reasoning">reasoning</span>}</span>
-            <span className="custom-model-ctx">{formatContextWindow(m.contextWindow)}</span>
+            <span className="custom-model-ctx">{m.contextWindow ? formatContextWindow(m.contextWindow) : '—'}</span>
             <button className="default-tab-remove" onClick={() => handleRemove(m.id)} title="Remove">×</button>
           </div>
         ))}

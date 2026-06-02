@@ -93,6 +93,7 @@ interface ShelfApi {
     syncState: (state: any) => void;
     setAwayMode: (on: boolean) => Promise<void>;
     getAwayMode: () => Promise<boolean>;
+    listModels: (baseURL: string) => Promise<import('../shared/types').PmListModelsResult>;
     onAwayMode: (callback: (on: boolean) => void) => () => void;
     onStream: (callback: (chunk: import('../shared/types').PmStreamChunk) => void) => () => void;
   };

@@ -1232,6 +1232,54 @@ button {
   text-decoration: underline;
 }
 
+.settings-sub-hint-warn {
+  color: var(--error, #e06c75);
+}
+
+.settings-copy-code {
+  font-family: var(--font-mono, monospace);
+  background: var(--bg-elevated, rgba(255, 255, 255, 0.05));
+  padding: 1px 4px;
+  border-radius: 3px;
+  cursor: pointer;
+  user-select: all;
+}
+
+.settings-copy-code:hover {
+  background: var(--bg-hover, rgba(255, 255, 255, 0.1));
+}
+
+.settings-model-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+}
+
+.settings-icon-btn {
+  background: transparent;
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.15));
+  color: var(--text);
+  border-radius: 4px;
+  width: 28px;
+  height: 28px;
+  cursor: pointer;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.settings-icon-btn:hover:not(:disabled) {
+  background: var(--bg-hover, rgba(255, 255, 255, 0.08));
+}
+
+.settings-icon-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 .settings-checkbox {
   display: flex;
   align-items: center;

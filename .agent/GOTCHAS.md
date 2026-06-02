@@ -735,3 +735,66 @@ const proc = spawn('node', [deployedPath], { cwd, env, stdio: [...] });
 
 **不要做**:
 - 不要在 turn-dispatcher 加「沒 turnId 就分配給 currentTurn」的 fallback — 那會復活跨 turn 串擾的 bug（DECISIONS #53 的原始問題）
+
+## ai-sdk v6 ModelMessage schema 拒收 PM 的 OpenAI-style tool messages
+
+**現象**: PM 第一輪走 tool（譬如 `read_global_note`）拿到 tool result 進第二輪 streamText 時撞：
+```
+AI_InvalidPromptError: The messages do not match the ModelMessage[] schema
+```
+Zod errors 指向：
+- assistant message `content: null` 不被接受
+- tool message `content: '...'` 不被接受（要 array）
+- `tool_calls` 欄位不在 schema 內
+
+**根因**: PM 內部 `ChatMessage` 用 OpenAI Chat Completions 老 wire 格式（`{role:'assistant', content:null, tool_calls:[...]}` + `{role:'tool', content:'string', tool_call_id}`）。`ai` package 從 v5 升到 v6 後 ModelMessage zod schema 變嚴：
+- `assistant.content` 必須是 `string` 或 `Array<TextPart | ToolCallPart | ...>`
+- `tool.content` 必須是 `Array<ToolResultPart>`
+- tool call 改成 content-block `{type:'tool-call', toolCallId, toolName, input}`
+- tool result 改成 content-block `{type:'tool-result', toolCallId, toolName, output:{type:'text', value:'...'}}`，**`toolName` 是 required**
+
+老 code `streamText({ messages: messages as any })` 用 `as any` 過 TS 編譯但 runtime zod 抓得到。
+
+**解法**: `src/main/pm/llm-client.ts` 加 `toModelMessages()` adapter，PM 內部仍用既有 ChatMessage 結構（history-store 不動 = 無 migration），在送進 ai-sdk 前轉成 ModelMessage：
+- system message 抽出走 `streamText({ system, messages })` 的 `system` 欄位（順便消除「prompt-injection 風險」warning）
+- assistant text + tool_calls 合併成 content array
+- tool result 包成 `[{type:'tool-result', ...}]`
+- 追蹤 `toolCallId → toolName` map 補 tool result 必填的 `toolName`；history 被 sliding window 切掉前置 assistant 時 fallback `'unknown'`
+
+**驗證**: `src/main/pm/llm-client.test.ts` 13 test case 守 adapter 行為 — system 抽取、tool_calls 轉換、孤兒 tool result、JSON arg parse 失敗 fallback、空 content fallback、multi-round tool sequence。
+
+**不要做**:
+- 不要把 PM 內部 ChatMessage 直接改成 ModelMessage 結構 — history-store 已持久化舊格式，會破壞 backward-compat（user 既有 pm-history.json 全廢）
+- 不要在 ChatMessage 加 `toolName` 欄位「為了通過 schema」— adapter 從前一個 assistant 推就好，PM 自己的內部格式越保守越好
+- 不要 import `ai-sdk/openai` 的 message converter helper 自動處理 — 那會把 PM 的 ChatMessage 拉成 ai-sdk private contract，等於放棄「PM 內部格式跟 SDK 解耦」的隔離
+
+**升 ai-sdk 時的監測點**: 任何「ModelMessage schema 變嚴」的 changelog 條目都要重跑 `llm-client.test.ts`。如果 ai-sdk 進一步要求 (e.g. tool result 加新 required 欄位)，adapter 也要同步加。
+
+## Ollama: model 看似支援 tool_call、實測只吐 JSON text
+
+**現象**: PM 切到 ollama provider + 選 `qwen2.5-coder:7b`/`:14b`，PM 的 10 個 tool 全部失效。Assistant 回覆變成 raw JSON 字串：
+```
+{"name": "read_terminal", "arguments": {"tab_id": "..."}}
+```
+PM 把它當 plain assistant message 顯示，沒觸發任何 tool 執行。
+
+**根因**: `@ai-sdk/openai` 的 `streamText` + ollama `/v1/chat/completions` + qwen2.5-coder 系列實測：model 不走 native function calling，**把 tool call 直接當 plain text token 串流出來**。`fullStream` 沒 `tool-call` event，全是 `text-delta`。非 streaming (`generateText`) 也一樣 — 不是 streaming 問題，是 model 本身行為。
+
+**矩陣**（測試於 ollama localhost:11434 + `@ai-sdk/openai`，`scripts/spike-ollama.ts`）:
+
+| Model | tool-call event | 結論 |
+|-------|----------------|------|
+| **qwen3:8b** | ✅ proper event + reasoning stream | **PM 可用**（預設 model） |
+| qwen2.5-coder:7b | ❌ JSON-as-text | PM 廢 |
+| qwen2.5-coder:14b | ❌ JSON-as-text | PM 廢（size 大也救不了） |
+
+ollama 官方 [tool support blog](https://ollama.com/blog/tool-support) 列 qwen2.5 為支援，實測不符 — 可能是 chat template / Modelfile 設定問題、或 ollama 的 `/v1` adapter 對某些 model 沒接通 native tool_call 路徑。未深究上游。
+
+**解法**: 不在 code 端擋。SettingsPanel 對 ollama provider 顯示靜態 hint：「PM Agent needs native tool_call support. Verified working: qwen3:8b. Some models (qwen2.5-coder) claim support but emit JSON-as-text.」Model 列在 dropdown 是事實陳述（user 已 pull），能不能跟 PM 配合是 user 自選 model 的責任。
+
+**驗證資產**: `scripts/spike-ollama.ts` — 升級 `@ai-sdk/openai` 或 ollama 後 manual 跑一次（`npx tsx scripts/spike-ollama.ts`）re-validate；新增 verified model 時加進 `MODELS` 陣列重跑。
+
+**不要做**:
+- 不要在 renderer 端 parse JSON-as-text 救回 tool_call — 那等於在 wrong layer 補 model 的缺陷，且 stream 中途 JSON 不一定完整、容易踩 quoting/escape 邊界
+- 不要在 PM_PROVIDERS 維護「verified models」清單再去 filter dropdown — model list 本來就是 user pull 出來的事實，filter 等於說謊；hint 引導更誠實
+- 不要在 typecheck/test 內 mock ollama 行為 — 上游真的可能改，spike script 留著手動驗才是對的訊號來源

@@ -129,6 +129,8 @@ contextBridge.exposeInMainWorld('shelfApi', {
     syncState: (state: any) => ipcRenderer.send(IPC.PM_SYNC_STATE, state),
     setAwayMode: (on: boolean) => ipcRenderer.invoke(IPC.PM_AWAY_MODE, on),
     getAwayMode: () => ipcRenderer.invoke(IPC.PM_AWAY_MODE_GET) as Promise<boolean>,
+    listModels: (baseURL: string) =>
+      ipcRenderer.invoke(IPC.PM_LIST_MODELS, baseURL) as Promise<import('../shared/types').PmListModelsResult>,
     onAwayMode: (callback: (on: boolean) => void) => {
       const listener = (_event: Electron.IpcRendererEvent, on: boolean) => callback(on);
       ipcRenderer.on(IPC.PM_AWAY_MODE, listener);

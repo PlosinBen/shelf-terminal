@@ -16,13 +16,17 @@ PM agent（背景自動駕駛、Telegram bridge、write_to_pty、project note）
 
 ---
 
-## 24. PM 用 OpenAI-compatible API Format（無新 npm dependency）
+## 24. PM 用 OpenAI-compatible API + `@ai-sdk/openai` 收斂多 provider
 
-**決策**: `llm-client.ts` 用 Electron `net.fetch` 直接打 OpenAI-compatible chat/completions endpoint + SSE streaming，不依賴任何 SDK。使用者在 PM settings 填 baseUrl + apiKey + model。
+**決策**: `llm-client.ts` 透過 `@ai-sdk/openai` 的 `createOpenAI({ baseURL, apiKey })` + `ai` 套件的 `streamText()` 打 OpenAI-compatible `/v1/chat/completions`，所有 provider（OpenAI / Gemini / Ollama / 未來自建）共用同一條 code path。`PM_PROVIDERS` metadata 定義每家的 `baseURL` 預設值，user 可在 `PmProviderConfig.baseURL` 覆寫（見 #65）。
 
-**原因**: 支援 Gemini（免費 tier）、OpenAI、Anthropic（OpenAI-compatible endpoint）等多家 provider，不需要 per-provider SDK。`net.fetch` 繞過 CORS 限制。
+**原因**: 一次 SDK 處理 SSE streaming、tool_call args 跨 chunk 合併、reasoning_effort、abort signal 等 OpenAI-compatible 細節，不需要為每個 provider 重新對齊 wire 行為。`@ai-sdk/openai` 是 provider-agnostic，加新 OpenAI-compatible provider 只要新增 metadata entry，零新邏輯。
 
-**不要改**: 不要加 `openai` 或 `@anthropic-ai/sdk` dependency — PM 的需求（chat + tool use + streaming）用 raw fetch 足夠。
+**不要改**:
+- 不要加 `openai` SDK 或 `@anthropic-ai/sdk` dependency — `@ai-sdk/openai` 已涵蓋
+- 不要繞過 `streamText` 自己用 `net.fetch` 打 SSE — 已驗證 ai-sdk 內部處理 OpenAI/Gemini/Ollama 都正常，自寫 fetch 等於重做 tool_call args 合併、abort、usage callback 等邏輯
+
+**歷史**: 早期 PM 用 Electron `net.fetch` 直接打 + 手寫 SSE parser（無 npm dependency 路線），後期切到 `@ai-sdk/openai` 換取 tool_call streaming 跟跨 provider 行為一致性。本 entry 描述以新實作為準。
 
 ---
 
@@ -146,6 +150,32 @@ PM agent（背景自動駕駛、Telegram bridge、write_to_pty、project note）
 - 不要把 note 換成 append-only log — 會無限膨脹
 - 不要拿掉 size 上限 — PM 不自我約束會無限膨脹
 - 不要讓 user 直接編輯 note 當「寫 PM 指示」用 — PM 下次 write 會覆蓋。要影響 PM，請 PM 同步或改寫
+
+---
+
+## 65. PM provider 加 ollama + baseURL 對稱化覆寫 + 動態 model list flag
+
+**決策**: PM 加 `ollama` provider 走 OpenAI-compatible `/v1` endpoint，沿用既有 `@ai-sdk/openai` 路徑（#24）。三個配套：
+
+1. **`PmProviderConfig.baseURL?`**：所有 provider 都能 user 覆寫 baseURL（不只 ollama）。Renderer 寫的 baseURL 是 source of truth、metadata 提供 placeholder/預設。Provider 切換時清空覆寫（不同 provider 不同 endpoint）。
+2. **`PM_PROVIDERS[].dynamicModelList?: boolean` flag**：generic 機制決定哪些 provider 走 `GET <baseURL>/models` 動態抓 model list。Renderer 用 metadata 判斷、不寫 `if (provider === 'ollama')`。當前只有 ollama 開，未來自建 vLLM / LM Studio 改 metadata 即可。
+3. **`ProviderModel.contextWindow?` 改 optional**：`/v1/models` 不回 contextWindow，dynamic-discovered entry 留空。Renderer 顯示時 nullish guard，user 想 enrich 在 Models tab 加 custom entry override 同 id。
+
+**原因**:
+- Ollama 是 OpenAI-compatible drop-in，PM 既有 `streamText()` 0 行改就能跑通（spike `scripts/spike-ollama.ts` H1+H2 驗證）
+- BaseURL 對稱化讓未來 self-hosted OpenAI / vLLM / LM Studio 都不用改 renderer，只動 metadata
+- Dynamic model list 用 flag 開關：機制 generic（renderer 不感知 provider 名）但可 selective enable（避免對 OpenAI 動態 list 又要 filter 一堆 user 不關心的 dall-e/whisper）
+- `/v1/models` 走得通就不走 `/api/tags` — 後者需從 baseURL 抽 host 拼路徑，會引入 ollama-specific 路徑邏輯
+
+**不要改**:
+- 不要為了 ollama 在 renderer 寫 `if (provider === 'ollama')` 條件分支（違反 DECISIONS-agent #43）。Provider-specific 純資訊 hint（tool_call model-dependent 警示）是 i18n-level UX exception，行為差異不可走這條路
+- 不要走 `/api/tags`：要從 baseURL 抽 host 拼路徑，破壞 baseURL 設定一致性
+- 不要在 Settings 加「Pull Model」UI — Shelf 不是 ollama 管理面板，user 在 terminal 跑 `ollama pull` 才符合 PRODUCT.md 第 1-2 點 + DECISIONS-pm #39（PM 唯一輸出通道是 write_to_pty 的精神延伸）
+- 不要寫死 dynamic-discovered model 的 contextWindow — 該欄位由 user 在 Models tab 補 custom entry 提供
+
+**配套 GOTCHAS**: 「Ollama: model 看似支援 tool_call、實測只吐 JSON text」— qwen2.5-coder 系列實測不走 native tool_call，PM 廢掉；qwen3:8b 實測 work。預設 model `qwen3:8b`、SettingsPanel 對 ollama 加靜態 hint。
+
+**Related**: `.agent/features/pm-ollama-provider.md`、`scripts/spike-ollama.ts`、DECISIONS-pm #24（baseURL/ai-sdk 路徑）、#39（PM 不直接執行 — pull UI 拒絕的精神依據）、DECISIONS-agent #43（provider 對外行為一致）
 
 ---
 
