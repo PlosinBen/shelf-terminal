@@ -21,7 +21,7 @@ export function formatResetCountdown(resetsAtMs: number): string | null {
   return `${Math.ceil(d / 60_000)}m`;
 }
 
-import type { ProviderModel } from '../../src/shared/types';
+import type { ProviderModel } from '@shared/types';
 import type { PersistedContext } from '../context-store';
 
 /**

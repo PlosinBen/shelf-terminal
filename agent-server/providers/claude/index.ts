@@ -3,11 +3,27 @@ import type { Query, Options, SDKMessage, CanUseTool } from '@anthropic-ai/claud
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'fs';
 import { resolve } from 'path';
-import type { QueryInput, SendFn, ServerBackend, ProviderCapabilities, StatusSegment, PickerResolvePayload } from './types';
-import { severityFromUtilization, formatResetCountdown, pickPermissionModes, pickEffortLevels } from './types';
-import { parseSlashPrefix } from '../../src/shared/slash-prefix';
-import { formatConfigAck, type ConfigEditKey } from '../../src/shared/config-ack';
-import type { ProviderModel } from '../../src/shared/types';
+import type { QueryInput, SendFn, ServerBackend, ProviderCapabilities, StatusSegment, PickerResolvePayload } from '../types';
+import { severityFromUtilization, pickPermissionModes, pickEffortLevels } from '../types';
+import { parseSlashPrefix } from '@shared/slash-prefix';
+import { formatConfigAck, type ConfigEditKey } from '@shared/config-ack';
+import type { ProviderModel } from '@shared/types';
+import { stripCwd } from '../shared';
+import {
+  rateLimitInfoToSegment,
+  askUserQuestionToPrompts,
+  buildAskUserQuestionAnswerJson,
+  shouldAdoptResolvedModel,
+  mergeClaudeModels,
+  extractToolResultText,
+  stripToolErrorWrapper,
+  parseTaskCreateOutput,
+  parseTaskListOutput,
+  renderPlan,
+  reconcileTasks,
+  formatClaudeToolInput,
+  type TaskRecord,
+} from './helpers';
 
 /**
  * Mint a unique msgId for slash_response messages (no SDK-provided id like
@@ -33,52 +49,6 @@ const CLAUDE_BUILTIN_COMMANDS = [
   // { name: 'help', description: 'List available slash commands' },
 ];
 
-const RATE_LIMIT_LABELS: Record<string, string> = {
-  five_hour: '5h',
-  seven_day: '7d',
-  seven_day_opus: '7d-opus',
-  seven_day_sonnet: '7d-sonnet',
-  overage: 'overage',
-};
-
-/**
- * Convert Claude's `SDKRateLimitInfo` to a `StatusSegment`.
- *
- * Two SDK quirks we work around:
- * 1. `utilization` is only populated when `status === 'allowed_warning' | 'rejected'` —
- *    on `'allowed'` it is silently dropped even though the underlying
- *    `anthropic-ratelimit-unified-*-utilization` headers always carry it.
- *    We render `5h: — ↻3h` so the bucket + countdown are still visible.
- * 2. `resetsAt` is a Unix timestamp in *seconds*, but `formatResetCountdown`
- *    expects milliseconds — multiply by 1000.
- *
- * Returns `null` when there is nothing useful to display.
- */
-export function rateLimitInfoToSegment(info: any): StatusSegment | null {
-  if (!info) return null;
-
-  const label = RATE_LIMIT_LABELS[info.rateLimitType] ?? info.rateLimitType ?? 'quota';
-  const hasPct = typeof info.utilization === 'number';
-  const pctText = hasPct ? `${Math.round(info.utilization * 100)}%` : '—';
-  const reset = typeof info.resetsAt === 'number'
-    ? formatResetCountdown(info.resetsAt * 1000)
-    : null;
-
-  // 'rejected' = hard cap; 'allowed_warning' = SDK-flagged warning. Severity
-  // from utilization only kicks in on 'allowed' when we actually have a number.
-  const severity: StatusSegment['severity'] = info.status === 'rejected'
-    ? 'critical'
-    : info.status === 'allowed_warning'
-      ? 'warning'
-      : hasPct
-        ? severityFromUtilization(info.utilization)
-        : 'normal';
-
-  return {
-    text: `${label}: ${pctText}${reset ? ` ↻${reset}` : ''}`,
-    severity,
-  };
-}
 
 type PermissionResult =
   | { behavior: 'allow'; scope?: 'once' | 'session' }
@@ -145,98 +115,6 @@ const CLAUDE_QUERY_DEFAULTS = {
   includePartialMessages: true,
 } as const satisfies Partial<Options>;
 
-/** Sample of a preview field carried on an AskUserQuestion option. Logged by
- * the runtime caller — v1 picker UI doesn't render preview content yet
- * (v1 doesn't render preview content — see DECISIONS #57 "Out of scope"). */
-export interface AskUserQuestionPreviewSample {
-  question: string;
-  optionLabel: string;
-  previewLength: number;
-  preview: string;
-}
-
-/** Output of `askUserQuestionToPrompts` — picker_request `prompts[]` plus
- * the original `questions` array (kept for the answer-JSON builder) plus
- * any preview samples the caller should log. */
-export interface AskUserQuestionMapped {
-  questions: Array<{ question: string; [k: string]: unknown }>;
-  prompts: Array<{
-    question: string;
-    header?: string;
-    multiSelect: boolean;
-    options: Array<{ label: string; description?: string; preview?: string }>;
-    inputType: 'text';
-  }>;
-  previewSamples: AskUserQuestionPreviewSample[];
-}
-
-/**
- * Pure mapper: AskUserQuestionInput → picker_request `prompts[]`.
- *
- * Returns `null` for malformed input (no questions array, or empty). Caller
- * uses that as the signal to reject the tool call with an explanatory deny
- * rather than emit an empty picker.
- *
- * `inputType: 'text'` is hardcoded — AskUserQuestion's spec auto-adds an
- * "Other" option to every question (sdk-tools.d.ts comment on `options`),
- * so the picker must always offer free-text entry alongside the listed
- * options.
- */
-export function askUserQuestionToPrompts(input: Record<string, unknown>): AskUserQuestionMapped | null {
-  const questions = Array.isArray((input as any)?.questions) ? (input as any).questions : null;
-  if (!questions || questions.length === 0) return null;
-
-  const previewSamples: AskUserQuestionPreviewSample[] = [];
-  const prompts = questions.map((q: any) => {
-    const options = Array.isArray(q?.options) ? q.options : [];
-    for (const opt of options) {
-      if (typeof opt?.preview === 'string' && opt.preview.length > 0) {
-        previewSamples.push({
-          question: String(q?.question ?? ''),
-          optionLabel: String(opt?.label ?? ''),
-          previewLength: opt.preview.length,
-          preview: opt.preview,
-        });
-      }
-    }
-    return {
-      question: String(q?.question ?? ''),
-      header: typeof q?.header === 'string' ? q.header : undefined,
-      multiSelect: !!q?.multiSelect,
-      options: options.map((o: any) => ({
-        label: String(o?.label ?? ''),
-        description: typeof o?.description === 'string' ? o.description : undefined,
-        preview: typeof o?.preview === 'string' ? o.preview : undefined,
-      })),
-      inputType: 'text' as const,
-    };
-  });
-
-  return { questions, prompts, previewSamples };
-}
-
-/**
- * Pure builder: PickerResolvePayload answers → AskUserQuestionOutput JSON.
- *
- * Output shape per SDK spec (sdk-tools.d.ts:2530 AskUserQuestionOutput):
- *   { questions: [...echo], answers: { [questionText]: string } }
- *
- * Multi-select answers are comma-joined per SDK spec comment line 2688
- * ("multi-select answers are comma-separated"). `annotations` is omitted —
- * it's optional in the SDK schema, and we don't surface preview/notes in
- * v1 UI so there's nothing to echo back.
- */
-export function buildAskUserQuestionAnswerJson(
-  questions: Array<{ question: string; [k: string]: unknown }>,
-  answers: Array<string | string[]>,
-): string {
-  const answersMap: Record<string, string> = {};
-  questions.forEach((q, i) => {
-    const ans = answers[i];
-    answersMap[q.question] = Array.isArray(ans) ? ans.join(', ') : String(ans ?? '');
-  });
-  return JSON.stringify({ questions, answers: answersMap });
-}
 
 export function createClaudeBackend(): ServerBackend {
   let activeQuery: Query | null = null;
@@ -788,59 +666,6 @@ export function createClaudeBackend(): ServerBackend {
   };
 }
 
-/**
- * Decide whether a per-turn SDK-resolved model id should replace the user's
- * current model selection (and thus overwrite status bar + project config).
- *
- * Rule (see DECISIONS-agent #62):
- *   - currentModel is one of supportedModels()' recommended aliases
- *     (default/sonnet/haiku) → DON'T adopt; the alias tracks the
- *     recommendation and must stay stable.
- *   - currentModel is anything else (user pinned a specific / custom id) →
- *     adopt the concrete model the SDK actually used.
- *
- * Defensive guards: skip synthetic models ('<...>'), no-op when unchanged,
- * skip when currentModel is unset (treated as alias-like / unpinned), and
- * skip when the alias list isn't populated yet (don't misclassify before
- * warmup completes).
- */
-export function shouldAdoptResolvedModel(
-  resolved: unknown,
-  currentModel: string | undefined,
-  aliases: { value: string }[],
-): resolved is string {
-  if (typeof resolved !== 'string') return false;
-  if (resolved.startsWith('<')) return false;
-  if (currentModel == null) return false;
-  if (resolved === currentModel) return false;
-  if (aliases.length === 0) return false;
-  if (aliases.some((m) => m.value === currentModel)) return false;
-  return true;
-}
-
-export function mergeClaudeModels(
-  sdkModels: { value: string; displayName: string }[],
-  customs?: ProviderModel[],
-): { value: string; displayName: string; vision: boolean }[] {
-  const result: { value: string; displayName: string; vision: boolean }[] = sdkModels.map((m) => ({
-    value: m.value,
-    displayName: m.displayName,
-    vision: true,
-  }));
-  if (!customs || customs.length === 0) return result;
-  const indexById = new Map(result.map((m, i) => [m.value, i]));
-  for (const c of customs) {
-    const entry = { value: c.id, displayName: c.id, vision: true };
-    const existing = indexById.get(c.id);
-    if (existing != null) {
-      result[existing] = entry;
-    } else {
-      indexById.set(c.id, result.length);
-      result.push(entry);
-    }
-  }
-  return result;
-}
 
 function dataUrlToImageBlock(dataUrl: string): { type: 'image'; source: { type: 'base64'; media_type: string; data: string } } | null {
   const match = dataUrl.match(/^data:(image\/[a-z+]+);base64,(.+)$/i);
@@ -890,12 +715,6 @@ const inflightToolUses = new Map<string, InflightToolUseEntry>();
  *
  * See .agent/features/sdk-upgrade-0.3.md for the rationale and design log.
  */
-type TaskRecord = {
-  subject: string;
-  description: string;
-  activeForm?: string;
-  status: 'pending' | 'in_progress' | 'completed';
-};
 const tasks = new Map<string, TaskRecord>();
 const pendingTaskCreates = new Map<string, Omit<TaskRecord, 'status'>>();
 // Track outstanding TaskList tool_use ids so we can recognize matching
@@ -906,220 +725,9 @@ const pendingTaskCreates = new Map<string, Omit<TaskRecord, 'status'>>();
 // latter being a real bug worth logging.
 const pendingTaskLists = new Set<string>();
 
-/**
- * Unwrap a Claude SDK tool_result `content` payload into a plain string for
- * the renderer. SDK delivers it as either:
- *   - string (legacy / simple tools)
- *   - array of content blocks: `[{ type: 'text', text: '...' }, ...]` (Task /
- *     Agent sub-agent returns this shape; MCP tools may too)
- *   - (rare) other structured shapes — JSON-stringify as last resort
- *
- * Earlier code blindly `JSON.stringify`d the array form, surfacing
- * `[{"type":"text","text":"..."}]` to the user. Unwrap text blocks so the
- * renderer's <pre> shows readable output.
- */
-export function extractToolResultText(raw: unknown): string {
-  if (raw == null) return '';
-  if (typeof raw === 'string') return raw;
-  if (Array.isArray(raw)) {
-    const parts = raw.map((b) => {
-      if (typeof b === 'string') return b;
-      if (b && typeof b === 'object') {
-        const block = b as { type?: string; text?: string };
-        if (block.type === 'text' && typeof block.text === 'string') return block.text;
-      }
-      return JSON.stringify(b);
-    });
-    return parts.join('\n');
-  }
-  return JSON.stringify(raw);
-}
 
-/**
- * Claude SDK wraps tool error content in `<tool_use_error>…</tool_use_error>`
- * tags. That wrapper is an SDK wire detail — strip it so the renderer shows
- * just the message (the red "Tool returned an error" banner already signals
- * it's an error). No-op when the wrapper is absent.
- */
-export function stripToolErrorWrapper(content: string): string {
-  const m = content.match(/^\s*<tool_use_error>([\s\S]*)<\/tool_use_error>\s*$/);
-  return m ? m[1].trim() : content;
-}
 
-/**
- * Parse `TaskCreate` tool_result to extract the SDK-assigned task id.
- *
- * Type def in `@anthropic-ai/claude-agent-sdk/sdk-tools.d.ts` claims
- * `{ task: { id, subject } }`, but the actual wire content (verified empirically
- * on SDK 0.3.159 with model claude-opus-4-8) is human-readable text:
- *
- *   "Task #1 created successfully: Run typecheck"
- *
- * The `#N` integer is the taskId — TaskUpdate's `taskId` input matches it
- * verbatim (`"1"`, `"2"`, ...). Type-def-vs-runtime mismatch is documented
- * in `.agent/GOTCHAS.md`.
- *
- * Falls back to JSON shape just in case some flow returns the documented
- * structured form. Returns null when neither matches; caller drops the
- * pending entry and lets the next TaskList reconcile.
- */
-export function parseTaskCreateOutput(content: string): string | null {
-  // Wire format (observed): "Task #N created successfully: <subject>"
-  const m = content.match(/^Task\s+#(\d+)\s+created\s+successfully/i);
-  if (m) return m[1];
-  // Documented JSON shape — kept as defensive fallback.
-  try {
-    const parsed = JSON.parse(content) as { task?: { id?: string | number } };
-    const id = parsed?.task?.id;
-    if (id != null) return String(id);
-  } catch {
-    /* fall through */
-  }
-  return null;
-}
 
-/**
- * Parse `TaskList` tool_result. Output shape:
- *   `{ tasks: Array<{ id, subject, status, owner? }> }`
- * Description and activeForm are NOT in TaskListOutput, so reconcile leaves
- * those fields empty when filling from a snapshot.
- */
-export function parseTaskListOutput(content: string): Array<{
-  id: string;
-  subject: string;
-  status: 'pending' | 'in_progress' | 'completed';
-}> | null {
-  try {
-    const parsed = JSON.parse(content) as {
-      tasks?: Array<{ id?: string; subject?: string; status?: string }>;
-    };
-    if (!Array.isArray(parsed?.tasks)) return null;
-    const VALID_STATUS = new Set(['pending', 'in_progress', 'completed']);
-    const out: Array<{ id: string; subject: string; status: TaskRecord['status'] }> = [];
-    for (const t of parsed.tasks) {
-      if (typeof t?.id !== 'string' || typeof t?.subject !== 'string') continue;
-      if (typeof t?.status !== 'string' || !VALID_STATUS.has(t.status)) continue;
-      out.push({ id: t.id, subject: t.subject, status: t.status as TaskRecord['status'] });
-    }
-    return out;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Render the tasks Map as a markdown checklist and emit to renderer as a
- * `plan` event. Renderer doesn't change; this replaces the old TodoWrite
- * snapshot path with the same wire shape.
- *
- *   pending      → `- [ ] subject`
- *   in_progress  → `- [~] activeForm` (or subject if activeForm absent)
- *   completed    → `- [x] subject`
- *
- * Insertion order of the Map drives row order — matches the order Agent
- * created tasks, which matches user mental model of "plan steps".
- */
-export function renderPlan(send: SendFn, taskMap: Map<string, TaskRecord>) {
-  const md = Array.from(taskMap.values()).map((t) => {
-    if (t.status === 'completed') return `- [x] ${t.subject}`;
-    if (t.status === 'in_progress') return `- [~] ${t.activeForm ?? t.subject}`;
-    return `- [ ] ${t.subject}`;
-  }).join('\n');
-  send({ type: 'plan', content: md });
-}
-
-/**
- * Apply a TaskList snapshot to the local Map as drift-correction.
- *
- * Snapshot is server ground truth; possible local-vs-server divergences:
- *   - Local has id missing from snapshot → task deleted server-side, drop locally
- *   - Snapshot has id missing locally → resume-session or we missed a create,
- *     add with empty description/activeForm (TaskListOutput doesn't carry them)
- *   - Both have id but different status/subject → trust snapshot
- *
- * Always re-emits plan after applying so renderer sees the corrected state.
- */
-export function reconcileTasks(
-  taskMap: Map<string, TaskRecord>,
-  snapshot: Array<{ id: string; subject: string; status: TaskRecord['status'] }>,
-  send: SendFn,
-) {
-  const snapshotIds = new Set(snapshot.map((t) => t.id));
-  for (const id of Array.from(taskMap.keys())) {
-    if (!snapshotIds.has(id)) taskMap.delete(id);
-  }
-  for (const t of snapshot) {
-    const existing = taskMap.get(t.id);
-    if (existing) {
-      taskMap.set(t.id, { ...existing, subject: t.subject, status: t.status });
-    } else {
-      taskMap.set(t.id, { subject: t.subject, description: '', status: t.status });
-    }
-  }
-  renderPlan(send, taskMap);
-}
-
-function stripCwd(p: string, cwd: string): string {
-  if (!cwd || !p) return p;
-  if (p.startsWith(cwd + '/')) return p.slice(cwd.length + 1);
-  return p;
-}
-
-/**
- * Format a Claude SDK tool's `input` object into a single human-readable
- * string for the renderer. Renderer treats the result as opaque text and only
- * does CSS truncation — all "what's the headline of this tool call" logic
- * lives here in the provider, where SDK semantics are already known.
- *
- * Falls back to JSON for unknown tools so MCP custom tools still display
- * something instead of a blank line.
- */
-export function formatClaudeToolInput(toolName: string, input: Record<string, unknown>, cwd: string): string {
-  switch (toolName) {
-    case 'Bash':
-      return String(input.command ?? '');
-    case 'Read': {
-      const fp = String(input.file_path ?? '');
-      const off = input.offset != null ? Number(input.offset) : null;
-      const lim = input.limit != null ? Number(input.limit) : null;
-      const range = off != null || lim != null
-        ? ` (${off ?? 0}${lim != null ? `..+${lim}` : ''})`
-        : '';
-      return stripCwd(fp, cwd) + range;
-    }
-    case 'Grep': {
-      const pattern = String(input.pattern ?? '');
-      const path = input.path ? ` in ${stripCwd(String(input.path), cwd)}` : '';
-      return pattern + path;
-    }
-    case 'Glob': {
-      const pattern = String(input.pattern ?? '');
-      const path = input.path ? ` in ${stripCwd(String(input.path), cwd)}` : '';
-      return pattern + path;
-    }
-    case 'WebFetch':
-      return String(input.url ?? '');
-    case 'WebSearch':
-      return String(input.query ?? '');
-    // Claude SDK uses both `Task` (older) and `Agent` (newer claude-code SDK)
-    // for sub-agent dispatch. Same input shape: `{ description, subagent_type,
-    // prompt }`. Treat them identically — header surfaces the human-friendly
-    // description plus a prompt preview, not the whole prompt blob.
-    case 'Task':
-    case 'Agent': {
-      const desc = input.description ?? input.subagent_type ?? '';
-      const prompt = String(input.prompt ?? '');
-      return desc ? `${desc}: ${prompt.slice(0, 80)}` : prompt.slice(0, 120);
-    }
-    default: {
-      // Generic fallback: first string value if any (most SDK tools have one
-      // dominant arg), else JSON.
-      const firstStr = Object.values(input).find((v) => typeof v === 'string') as string | undefined;
-      if (firstStr) return firstStr;
-      return JSON.stringify(input);
-    }
-  }
-}
 
 /**
  * Mint a unique msgId for a non-tool message (text/thinking/intent/system/

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { createCopilotBackend } from './providers/copilot';
-import type { OutgoingMessage, SendFn, QueryInput } from './providers/types';
+import { createCopilotBackend } from './index';
+import type { OutgoingMessage, SendFn, QueryInput } from '../types';
 
 /**
  * Test helper — captures all messages emitted by the provider via the wire

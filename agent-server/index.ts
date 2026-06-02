@@ -5,7 +5,7 @@ import { createFakeBackend } from './providers/fake';
 import { deleteContext, cleanupOldContexts } from './context-store';
 import { loadRestoreContextFor, newTurnId, wrapSendForContext, wrapSendForTurn } from './orchestrator';
 import type { OutgoingMessage, QueryInput, ServerBackend, PickerResolvePayload } from './providers/types';
-import type { ProviderModel } from '../src/shared/types';
+import type { ProviderModel } from '@shared/types';
 
 type Provider = 'claude' | 'copilot';
 

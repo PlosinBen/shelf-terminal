@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { formatConfigAck } from '../../src/shared/config-ack';
+import { formatConfigAck } from '@shared/config-ack';
 import type {
   OutgoingMessage,
   PickerResolvePayload,
@@ -7,7 +7,7 @@ import type {
   QueryInput,
   SendFn,
   ServerBackend,
-} from './types';
+} from '../types';
 
 /**
  * Fake provider for E2E — emits scripted OutgoingMessage sequences in

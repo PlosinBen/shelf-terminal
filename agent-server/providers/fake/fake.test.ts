@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { createFakeBackend, parseChain, pickerSinglePrompts, pickerMultiPrompts } from './fake';
-import type { OutgoingMessage, QueryInput } from './types';
+import { createFakeBackend, parseChain, pickerSinglePrompts, pickerMultiPrompts } from './index';
+import type { OutgoingMessage, QueryInput } from '../types';
 
 /**
  * Fake provider unit tests — verify each scenario emits a well-formed

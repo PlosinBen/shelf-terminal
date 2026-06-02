@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { quotaSnapshotToSegment, parseApplyPatch, formatCopilotToolInput, elicitationSchemaToPrompts, picksToElicitationContent } from './copilot';
+import { quotaSnapshotToSegment, parseApplyPatch, formatCopilotToolInput, elicitationSchemaToPrompts, picksToElicitationContent } from './helpers';
 
 describe('quotaSnapshotToSegment', () => {
   it('renders premium quota at 100%', () => {

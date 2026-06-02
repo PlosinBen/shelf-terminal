@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { mergeClaudeModels, rateLimitInfoToSegment, formatClaudeToolInput, extractToolResultText, processMessage, createBlockMsgIdState, askUserQuestionToPrompts, buildAskUserQuestionAnswerJson, parseTaskCreateOutput, parseTaskListOutput, reconcileTasks, renderPlan, shouldAdoptResolvedModel, stripToolErrorWrapper } from './claude';
-import type { OutgoingMessage } from './types';
-import type { ProviderModel } from '../../src/shared/types';
+import { processMessage, createBlockMsgIdState } from './index';
+import { mergeClaudeModels, rateLimitInfoToSegment, formatClaudeToolInput, extractToolResultText, askUserQuestionToPrompts, buildAskUserQuestionAnswerJson, parseTaskCreateOutput, parseTaskListOutput, reconcileTasks, renderPlan, shouldAdoptResolvedModel, stripToolErrorWrapper } from './helpers';
+import type { OutgoingMessage } from '../types';
+import type { ProviderModel } from '@shared/types';
 
 describe('mergeClaudeModels', () => {
   it('returns SDK models unchanged when no customs', () => {
