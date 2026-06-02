@@ -892,12 +892,18 @@ export function createCopilotBackend(): ServerBackend {
           emitConfigError('Usage: /permission <mode>');
           return;
         }
+        // Translate our shared app vocab (PermissionModeId) → Copilot SDK's
+        // session mode. No mapping = no SDK action we can take for this value
+        // (invalid, or a valid app mode Copilot doesn't support e.g.
+        // acceptEdits) — report it rather than silently claiming success.
+        const sdkMode = MODE_TO_SDK[args];
+        if (!sdkMode) {
+          emitConfigError(`Unknown permission mode "${args}". Valid: ${Object.keys(MODE_TO_SDK).join(', ')}`);
+          return;
+        }
         try {
           if (state.session) {
-            const sdkMode = MODE_TO_SDK[args];
-            if (sdkMode) {
-              await (state.session as any).rpc.mode.set({ mode: sdkMode });
-            }
+            await (state.session as any).rpc.mode.set({ mode: sdkMode });
           }
           currentPermissionMode = args;
           currentSend?.({ type: 'capabilities', ...buildCapabilities() });

@@ -127,6 +127,19 @@ describe('Copilot slash dispatch via query()', () => {
     backend.dispose();
   });
 
+  // An app permission mode Copilot can't translate (invalid, or unsupported
+  // like acceptEdits) has no SDK action — report error, do not claim success.
+  it('rejects an untranslatable permission mode instead of silently accepting it', async () => {
+    const backend = createCopilotBackend();
+    const { send, emitted } = makeSendCapture();
+    await backend.query({ prompt: '/permission acceptEdits', cwd: '/tmp' }, send);
+
+    expect(pickSystem(emitted).length).toBe(0); // no "success" divider
+    const err = emitted.find((m) => m.type === 'message' && (m as any).msgType === 'error') as any;
+    expect(err?.content).toMatch(/acceptEdits/);
+    backend.dispose();
+  });
+
   it('emits streaming → idle status pair around slash dispatch (no cost/tokens on slash idle)', async () => {
     const backend = createCopilotBackend();
     const { send, emitted } = makeSendCapture();
