@@ -95,6 +95,10 @@ interface ShelfApi {
     getAwayMode: () => Promise<boolean>;
     listModels: (baseURL: string) => Promise<import('../shared/types').PmListModelsResult>;
     onAwayMode: (callback: (on: boolean) => void) => () => void;
+    setActive: (on: boolean) => Promise<void>;
+    getActive: () => Promise<boolean>;
+    onActive: (callback: (on: boolean) => void) => () => void;
+    onActiveError: (callback: (reason: string) => void) => () => void;
     onStream: (callback: (chunk: import('../shared/types').PmStreamChunk) => void) => () => void;
   };
   agent: {

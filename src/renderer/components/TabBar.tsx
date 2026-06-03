@@ -5,12 +5,29 @@ import {
   renameTab,
   reorderTabs,
   clearUnread,
-  toggleProjectList,
   toggleMuted,
   setTabColor,
   appendDefaultTab,
+  toggleRightSidebar,
 } from '../store';
 import { emit, Events } from '../events';
+import { MessageIcon } from './icons';
+
+// PM Active (telegram listener) live badge — shown in the tab bar's top-right
+// only while active. Click opens the PM panel. Global, so it renders even with
+// no project open.
+function PmActiveBadge() {
+  return (
+    <button
+      className="tab-pm-badge"
+      tabIndex={-1}
+      onClick={() => toggleRightSidebar('pm')}
+      title="PM Active — telegram listener running"
+    >
+      <MessageIcon size={13} />
+    </button>
+  );
+}
 
 const TAB_COLORS = [
   { name: 'Red', hex: '#f38ba8' },
@@ -26,7 +43,7 @@ const TAB_COLORS = [
 export { TAB_COLORS };
 
 export function TabBar() {
-  const { projects, activeProjectIndex, sidebarVisible } = useStore();
+  const { projects, activeProjectIndex, pmActive } = useStore();
   const project = projects[activeProjectIndex];
 
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
@@ -64,9 +81,7 @@ export function TabBar() {
   if (!project) {
     return (
       <div className="tab-bar">
-        {!sidebarVisible && (
-          <button className="tab-sidebar-btn" onClick={toggleProjectList} title="Expand project list">&#9776;</button>
-        )}
+        {pmActive && <PmActiveBadge />}
       </div>
     );
   }
@@ -125,9 +140,6 @@ export function TabBar() {
 
   return (
     <div className="tab-bar">
-      {!sidebarVisible && (
-        <button className="tab-sidebar-btn" onClick={toggleProjectList} title="Expand project list">&#9776;</button>
-      )}
       {project.tabs.map((tab, i) => {
         const isEditing = editingIndex === i;
         const isDragging = dragIndex === i;
@@ -170,6 +182,7 @@ export function TabBar() {
             )}
             <button
               className="tab-close"
+              tabIndex={-1}
               onClick={(e) => handleCloseTab(i, e)}
             >
               ×
@@ -179,6 +192,7 @@ export function TabBar() {
       })}
       <button
         className="tab-add"
+        tabIndex={-1}
         onClick={handleNewTab}
         onContextMenu={(e) => {
           e.preventDefault();
@@ -191,6 +205,8 @@ export function TabBar() {
       >
         +
       </button>
+
+      {pmActive && <PmActiveBadge />}
 
       {contextMenu && (() => {
         const tab = project.tabs[contextMenu.index];

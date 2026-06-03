@@ -52,11 +52,13 @@ PM agent（背景自動駕駛、Telegram bridge、write_to_pty、project note）
 
 ## 27. PM/DevTools 共用右側 Panel + 收合欄
 
-**決策**: PM 和 DevTools 都以右側可拖拉 panel 存在，收合時共用 `.right-tabs-collapsed` 容器（單一 28px 欄），label 垂直堆疊。App.tsx 統一管理收合 tab 渲染，各 panel 不自己 render。PM 不放 Sidebar、不做全頁切換。
+**決策**: PM 和 DevTools 都以右側可拖拉 panel 存在。PM 不放 Sidebar、不做全頁切換。toggle 按鈕集中渲染、各 panel 不自己 render collapsed tab。
 
-**原因**: PM 和 terminal 需要同時可見（邊看 terminal 邊跟 PM 對話），放 Sidebar 會跟 project 列表衝突，全頁切換會失去 terminal 可見性。兩個獨立 28px 收合欄太寬，統一容器視覺乾淨且方便未來加更多 panel。
+**原因**: PM 和 terminal 需要同時可見（邊看 terminal 邊跟 PM 對話），放 Sidebar 會跟 project 列表衝突，全頁切換會失去 terminal 可見性。toggle 集中渲染視覺乾淨、方便加更多 panel。
 
-**不要改**: 不要讓各 panel 自己 render 收合 tab — App.tsx 統一管理（GOTCHAS #30 對應）。
+**更新（footer 重設計後）**: toggle 不再用 App.tsx 的 `.right-tabs-collapsed`（28px 垂直欄已移除），改集中在 **BottomBar footer-right**（水平、沿用 `right-tab-btn` class，與 Projects toggle 並排）。「集中渲染、panel 不自己 render」的原則不變，只是渲染位置從 App.tsx 移到 BottomBar。詳見 `footer-redesign.md`。
+
+**不要改**: 不要讓各 panel 自己 render collapsed tab — 由 BottomBar 統一管理（GOTCHAS #30 對應）。
 
 ---
 
@@ -249,3 +251,27 @@ User 用 slash command 切 mode：`/pm` / `/use_<alias>` / `/projects` / `/mode`
 
 ---
 
+
+## 68. PM Active = telegram listener master switch（Phase A）
+
+**決策**: 新增明確的 PM Active 開關控制 telegram listener,取代「有 config 就 boot 啟動」的隱性行為。詳見 `.agent/features/pm-active-status.md`(含 Phase B / autopilot 移除評估)。
+
+- **PM Active** = telegram listener on/off。需 telegram config(無則 toggle disabled)。持久化「當下狀態」到 `AppSettings.pmActive`,boot 還原。
+- **Away 依賴 PM Active**:Away toggle 在 `!pmActive` 時 disabled;PM Active 轉 off 連帶關 Away(cascade)。理由:沒有 telegram 通道就不該進 autopilot。
+- **搶權模型(409)**:同一 bot 最新 poller 贏、舊的收 409 → 舊的**立刻 yield(PM Active off)、不重試**。效果:開哪台搶哪台,其他台自動讓出,手動再開即搶回。**不可重試**(會 ping-pong)。
+- **錯誤分類**:401/404(bad token)→停+報;409→yield;transient→5s retry。`apiCall` 吐 HTTP status 供分類。
+- **啟動通知**:listener start 後發「Now controlled by <hostname>」+ project list（merge 後擴加 `/use_<alias>` 提示給有 agent tab 的 project,見 #67 mode switch）;兼 chat-id 驗證(首次 send,400→停)。
+- **PmView read-only**:移除訊息 input + in-app slash(/clear→Clear History 鈕、/model→Settings、/compact 拿掉)。PM 由 tab 事件 / telegram 驅動,不需 app 內繞一層對話。app 內不再有 slash(只剩 telegram 一套,消除雙 `/` 混淆)。
+
+**原因**: 給 PM 明確開關(取代隱性 always-on 燒 token);多機時免改 config 互搶(409 yield);read-only 對齊「人在電腦前不需繞一層」。
+
+**不要改**:
+- 不要把 telegram 改回「config-driven 自動啟動」— 現在由 PM Active 驅動。
+- **不要在 409 重試** — 必須立刻 yield,否則兩 instance 無限搶。
+- `SHELF_TEST_MODE=1` 時 `startTelegram` 故意 no-op(不打網路)— e2e 靠它驗 PM Active/Away,別拿掉。
+- **Phase B(把監看 gate 從 away 搬到 pmActive、移除 autopilot)等 `/use-project-id` bridge 後再做** — 別提前(見 feature doc 評估)。merge 時注意:`/use_<alias>` bridge 已在 #67 落地,Phase B 評估可以重啟。
+- `stopTelegram` 跟 `stopOnError` 共用 `cleanupListener()`(merge 時補的 bug fix:舊版 `stopOnError` 漏清 #67 加的 setSyncCallback / observer / mode state,409 yield 後 re-grab 會雙重訂閱)。修任一條 cleanup path 時記得另一條同步。
+
+**Related**: `.agent/features/pm-active-status.md`(branch 原始位置)、DECISIONS-pm #25(Away Mode)、#39(PM 不直接執行)、#40(Shelf UI ↔ Telegram 兩 view)、#67(telegram bridge agent mode — Phase B unblocker)
+
+---

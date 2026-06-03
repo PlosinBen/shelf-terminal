@@ -73,7 +73,16 @@ button {
 
 .app {
   display: flex;
+  flex-direction: column;
   height: 100%;
+}
+
+.content {
+  flex: 1;
+  display: flex;
+  flex-direction: row;
+  min-height: 0;
+  min-width: 0;
 }
 
 /* ── Sidebar ── */
@@ -168,49 +177,6 @@ button {
 
 .sidebar-item.drag-over {
   border-top: 2px solid var(--accent);
-}
-
-.sidebar-footer {
-  padding: 8px 16px;
-  border-top: 1px solid var(--border);
-  font-size: 11px;
-  color: var(--text-muted);
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.sidebar-update-btn {
-  font-size: 14px;
-  color: var(--accent);
-  cursor: pointer;
-  line-height: 1;
-  background: none;
-  border: none;
-  padding: 0;
-}
-
-.sidebar-update-btn:hover {
-  opacity: 0.8;
-}
-
-.sidebar-update-btn.ready {
-  color: var(--success, #4caf50);
-}
-
-.sidebar-update-progress {
-  flex: 1;
-  height: 6px;
-  background: var(--border);
-  border-radius: 3px;
-  overflow: hidden;
-  margin-left: 4px;
-}
-
-.sidebar-update-progress-bar {
-  height: 100%;
-  background: var(--accent);
-  transition: width 0.15s linear;
 }
 
 /* ── Context Menu ── */
@@ -364,24 +330,6 @@ button {
   -webkit-app-region: drag;
 }
 
-.tab-sidebar-btn {
-  -webkit-app-region: no-drag;
-  width: 24px;
-  height: 24px;
-  border-radius: 4px;
-  font-size: 16px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-muted);
-  flex-shrink: 0;
-}
-
-.tab-sidebar-btn:hover {
-  background: var(--bg);
-  color: var(--text);
-}
-
 .tab {
   -webkit-app-region: no-drag;
   height: 28px;
@@ -450,6 +398,30 @@ button {
 .tab-add:disabled {
   opacity: 0.3;
   cursor: default;
+}
+
+.tab-pm-badge {
+  -webkit-app-region: no-drag;
+  margin-left: auto;
+  margin-right: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 6px;
+  height: 28px;
+  color: var(--accent);
+  cursor: pointer;
+  animation: pm-badge-pulse 2s ease-in-out infinite;
+}
+
+.tab-pm-badge:hover {
+  opacity: 0.8;
+  animation: none;
+}
+
+@keyframes pm-badge-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
 }
 
 .tab.dragging {
@@ -1825,7 +1797,7 @@ button {
 /* ── Bottom Bar ── */
 
 .bottom-bar {
-  height: 24px;
+  height: 30px;
   background: var(--bg-secondary);
   border-top: 1px solid var(--border);
   display: flex;
@@ -1866,100 +1838,52 @@ button {
 .bottom-bar-right {
   display: flex;
   align-items: center;
+  gap: 6px;
   flex-shrink: 0;
 }
 
-.bottom-bar-branch-wrapper {
-  position: relative;
-}
-
-.bottom-bar-branch {
-  display: flex;
-  align-items: center;
-  gap: 4px;
+.bottom-bar-version {
   color: var(--text-muted);
   font-size: 12px;
-  padding: 0 6px;
-  border-radius: 3px;
-  height: 20px;
-  cursor: pointer;
-  background: none;
-  border: none;
 }
 
-.bottom-bar-branch:hover:not(:disabled) {
-  background: var(--surface);
-  color: var(--text);
-}
-
-.bottom-bar-branch.disabled {
-  cursor: default;
-  opacity: 0.6;
-}
-
-.bottom-bar-branch.switching {
-  color: var(--accent);
-}
-
-.bottom-bar-branch-icon {
+.bottom-bar-update-btn {
   font-size: 14px;
+  color: var(--accent);
+  cursor: pointer;
   line-height: 1;
-}
-
-.bottom-bar-branch-dropdown {
-  position: absolute;
-  bottom: 100%;
-  right: 0;
-  margin-bottom: 4px;
-  min-width: 180px;
-  max-height: 300px;
-  overflow-y: auto;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 4px;
-  box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.4);
-  z-index: 50;
-}
-
-.bottom-bar-branch-item {
-  display: block;
-  width: 100%;
-  padding: 6px 10px;
-  border-radius: 4px;
-  font-size: 12px;
-  text-align: left;
-  color: var(--text);
   background: none;
   border: none;
-  cursor: pointer;
-  white-space: nowrap;
+  padding: 0;
+}
+
+.bottom-bar-update-btn:hover {
+  opacity: 0.8;
+}
+
+.bottom-bar-update-btn.ready {
+  color: var(--success, #4caf50);
+}
+
+.bottom-bar-update-progress {
+  width: 60px;
+  height: 6px;
+  background: var(--border);
+  border-radius: 3px;
   overflow: hidden;
-  text-overflow: ellipsis;
 }
 
-.bottom-bar-branch-item:hover:not(:disabled) {
-  background: var(--surface);
+.bottom-bar-update-progress-bar {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.15s linear;
 }
 
-.bottom-bar-branch-item.current {
-  color: var(--accent);
-  cursor: default;
-}
-
-.bottom-bar-branch-worktree-hint {
-  font-size: 10px;
-  color: var(--text-muted);
-  opacity: 0.5;
-  margin-left: auto;
-  padding-left: 8px;
-}
-
-.bottom-bar-branch-empty {
-  padding: 8px 10px;
-  color: var(--text-muted);
-  font-size: 12px;
-  text-align: center;
+.bottom-bar-toggles {
+  display: inline-flex;
+  align-items: center;
+  height: 100%;
+  margin-left: 2px;
 }
 
 /* ── Worktree Dialog ── */
@@ -2076,67 +2000,47 @@ button {
 /* ── PM Agent ── */
 
 
-.pm-dot {
-  background: #a6e3a1 !important;
-}
-
-.pm-dot-away {
-  background: #f38ba8 !important;
-}
-
-.right-tabs-collapsed {
-  width: 28px;
-  flex-shrink: 0;
-  background: var(--bg-secondary);
-  border-left: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding-top: 8px;
-  gap: 12px;
-}
-
 .right-tab-btn {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
+  display: inline-flex;
   align-items: center;
-  justify-content: center;
   gap: 4px;
   cursor: pointer;
-  width: 100%;
-}
-
-.right-tab-btn + .right-tab-btn {
-  border-top: 1px solid var(--border);
-}
-
-.right-tab-btn span {
-  writing-mode: vertical-rl;
-  text-orientation: mixed;
-  font-size: 11px;
-  font-weight: 600;
+  height: 100%;
+  padding: 0 7px;
+  background: none;
+  border: none;
   color: var(--text-muted);
-  letter-spacing: 1px;
 }
 
-.right-tab-btn:hover span {
+.right-tab-btn svg {
+  display: block;
+}
+
+.right-tab-btn:hover {
   color: var(--text);
 }
 
 .right-tab-btn.active {
-  background: var(--surface);
+  color: var(--accent);
 }
 
-.right-tab-btn.active span {
-  color: var(--text);
+/* Away Mode signal — red overrides active/hover so PM-in-control is always
+   visible regardless of whether the panel is open. */
+.right-tab-btn.pm-away,
+.right-tab-btn.pm-away:hover {
+  color: #f38ba8;
 }
 
-.pm-tab-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  writing-mode: horizontal-tb;
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .pm-no-provider {
@@ -2409,6 +2313,30 @@ button {
 
 
 /* Away Mode */
+
+.pm-active-toggle {
+  font-size: 11px;
+  padding: 2px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+}
+
+.pm-active-toggle:hover:not(:disabled) {
+  background: var(--surface);
+}
+
+.pm-active-toggle.pm-active-on {
+  background: var(--accent);
+  color: #1e1e2e;
+  border-color: var(--accent);
+}
+
+.pm-active-toggle:disabled,
+.pm-away-toggle:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
 
 .pm-away-toggle {
   font-size: 11px;

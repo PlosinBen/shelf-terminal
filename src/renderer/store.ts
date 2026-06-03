@@ -38,6 +38,7 @@ let settings: AppSettings = { ...DEFAULT_SETTINGS };
 let updateStatus: UpdateStatus = { state: 'idle' };
 let pmVisible = false;
 let awayMode = false;
+let pmActive = false;
 let quickNoteVisible = false;
 let nextTabCounter = 0;
 let layoutGeneration = 0;
@@ -65,7 +66,7 @@ function subscribe(l: Listener) {
 }
 
 function getSnapshot() {
-  return { projects, activeProjectIndex, sidebarVisible, settingsVisible, searchVisible, commandPickerVisible, devToolsVisible, notesVisible, editingProjectIndex, settings, updateStatus, pmVisible, awayMode, quickNoteVisible, layoutGeneration, chatStage };
+  return { projects, activeProjectIndex, sidebarVisible, settingsVisible, searchVisible, commandPickerVisible, devToolsVisible, notesVisible, editingProjectIndex, settings, updateStatus, pmVisible, awayMode, pmActive, quickNoteVisible, layoutGeneration, chatStage };
 }
 
 let snapshotRef = getSnapshot();
@@ -434,6 +435,11 @@ export function appendDefaultTab(projectIndex: number, name: string, color?: str
 
 export function setAwayMode(on: boolean) {
   awayMode = on;
+  updateSnapshot();
+}
+
+export function setPmActive(on: boolean) {
+  pmActive = on;
   updateSnapshot();
 }
 

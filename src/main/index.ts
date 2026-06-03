@@ -10,9 +10,10 @@ import { cleanupConnectors } from './connector';
 import { log, setLogLevel, setFileWriter } from '@shared/logger';
 import { applyUserDataIsolation } from './user-data-path';
 import { migratePmNotes } from './migrations/migrate-pm-notes';
-import { handlePmSend, handleTabEvent, stopGeneration, setWritePtyFn, initAwayMode, setStateChangeCallback, startTelegram, stopTelegram, setMessageCallback, setCallbackQueryHandler, setStopCallback, handlePtyData, handlePtyRemove, handlePtyClear } from './pm';
+import { handlePmSend, handleTabEvent, stopGeneration, setWritePtyFn, initAwayMode, initPmActive, setProjectsProvider, setStateChangeCallback, stopTelegram, setMessageCallback, setCallbackQueryHandler, setStopCallback, handlePtyData, handlePtyRemove, handlePtyClear } from './pm';
+import { applyPmActive } from './ipc/pm';
 import { initAgentManager, disposeAllAgents } from './agent';
-import { getMainWindow, setMainWindow, setProjects, setSettings, getSettings } from './app-state';
+import { getMainWindow, setMainWindow, setProjects, setSettings, getSettings, getProjects } from './app-state';
 import { registerAllIpcHandlers } from './ipc';
 
 applyUserDataIsolation();
@@ -144,6 +145,8 @@ app.whenReady().then(async () => {
 
   // PM wiring
   initAwayMode(getMainWindow()!);
+  initPmActive(getMainWindow()!);
+  setProjectsProvider(() => getProjects().map((p) => ({ name: p.name, connectionType: p.connection.type })));
   setWritePtyFn(writePty);
   // Feed PTY output/lifecycle into PM scrollback + tab-watcher (P1-1: the
   // dependency now points pm→infra via this injection, not pty-manager→pm).
@@ -175,9 +178,11 @@ app.whenReady().then(async () => {
   setStopCallback(() => {
     stopGeneration();
   });
-  const telegram = getSettings().telegram;
-  if (telegram?.botToken && telegram?.chatId) {
-    startTelegram(telegram);
+  // Restore persisted PM Active intent: start the listener if it was on AND
+  // telegram is configured. A bad token / taken-over on first fetch will then
+  // auto-stop via the listener-stopped path (handleListenerStopped).
+  if (settings.pmActive && settings.telegram?.botToken && settings.telegram?.chatId) {
+    applyPmActive(true);
   }
 
   if (process.env.NODE_ENV !== 'test' && app.isPackaged) {

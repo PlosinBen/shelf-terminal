@@ -2,7 +2,7 @@ import { test, expect } from './helpers';
 
 const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
 
-// Helper: open PM panel via right-side collapsed tab
+// Helper: open PM panel via footer toggle
 async function openPmPanel(page: any) {
   const panel = page.locator('.pm-panel');
   if (await panel.isVisible().catch(() => false)) return;
@@ -61,19 +61,44 @@ async function openSettingsOnPmTab(page: any) {
   return settingsPanel;
 }
 
-// ── Right-side collapsed tab ──
+// Helper: enable PM Active (Away requires it). Sets dummy telegram config +
+// flips PM Active on via IPC. In SHELF_TEST_MODE the listener is a no-op, so
+// PM Active stays on without touching the network. Opens the PM panel.
+async function enablePmActive(page: any) {
+  await page.evaluate(async () => {
+    const api = (window as any).shelfApi;
+    const s = await api.settings.load();
+    await api.settings.save({ ...s, telegram: { botToken: 'test-token', chatId: '123' } });
+    await api.pm.setActive(true);
+  });
+  await openPmPanel(page);
+  await expect(page.locator('.pm-active-toggle.pm-active-on')).toBeVisible({ timeout: 3_000 });
+}
 
-test('right-side shows PM collapsed tab', async ({ shelfApp: { page } }) => {
+// ── Footer toggle ──
+
+test('footer shows PM toggle', async ({ shelfApp: { page } }) => {
   const pmBtn = page.locator('.right-tab-btn', { hasText: 'PM' });
   await expect(pmBtn).toBeVisible({ timeout: 5_000 });
 });
 
-test('PM collapsed tab has status dot', async ({ shelfApp: { page } }) => {
-  const dot = page.locator('.right-tab-btn .pm-tab-dot');
-  await expect(dot).toBeVisible({ timeout: 5_000 });
+test('PM footer toggle reflects away mode', async ({ shelfApp: { page } }) => {
+  const pmBtn = page.locator('.right-tab-btn', { hasText: 'PM' });
+  await expect(pmBtn).not.toHaveClass(/pm-away/);
+
+  // Turn Away Mode on from the PM panel header → footer toggle goes red (pm-away)
+  await enablePmActive(page);
+  await page.locator('.pm-away-toggle').click();
+  await expect(page.locator('.pm-away-toggle')).toContainText('Away ON', { timeout: 3_000 });
+  await expect(pmBtn).toHaveClass(/pm-away/);
+
+  // Off + cleanup
+  await page.locator('.pm-away-toggle').click();
+  await expect(pmBtn).not.toHaveClass(/pm-away/);
+  await closePmPanel(page);
 });
 
-test('right-side shows DevTools collapsed tab alongside PM', async ({ shelfApp: { page } }) => {
+test('footer shows DevTools toggle alongside PM', async ({ shelfApp: { page } }) => {
   const devToolsBtn = page.locator('.right-tab-btn', { hasText: 'Dev Tools' });
   await expect(devToolsBtn).toBeVisible({ timeout: 5_000 });
 });
@@ -92,7 +117,7 @@ test('PM panel has header with title', async ({ shelfApp: { page } }) => {
   await expect(page.locator('.pm-header-title')).toContainText('PM');
 });
 
-test('closing PM panel shows collapsed tab again', async ({ shelfApp: { page } }) => {
+test('closing PM panel shows footer toggle again', async ({ shelfApp: { page } }) => {
   await openPmPanel(page);
   await closePmPanel(page);
 
@@ -130,11 +155,11 @@ test('settings panel has PM Agent tab', async ({ shelfApp: { page } }) => {
 test('PM provider can be configured via Settings', async ({ shelfApp: { page } }) => {
   await configurePmProvider(page);
 
-  // Open PM panel — should show chat UI, not no-provider message
+  // Open PM panel — should show the (read-only) conversation area, not the
+  // no-provider message.
   await openPmPanel(page);
   await expect(page.locator('.pm-no-provider')).not.toBeVisible();
-  await expect(page.locator('.pm-input')).toBeVisible();
-  await expect(page.locator('.pm-send-btn')).toBeVisible();
+  await expect(page.locator('.pm-messages')).toBeVisible();
   await closePmPanel(page);
 });
 
@@ -148,8 +173,8 @@ test('Away Mode toggle exists in PM panel header', async ({ shelfApp: { page } }
   await closePmPanel(page);
 });
 
-test('Away Mode toggle changes button state and dot color', async ({ shelfApp: { page } }) => {
-  await openPmPanel(page);
+test('Away Mode toggle changes its on/off state', async ({ shelfApp: { page } }) => {
+  await enablePmActive(page);
   const toggle = page.locator('.pm-away-toggle');
   await expect(toggle).toContainText('Away OFF');
 
@@ -165,7 +190,7 @@ test('Away Mode toggle changes button state and dot color', async ({ shelfApp: {
 });
 
 test('Away Mode overlay shows on terminal', async ({ shelfApp: { page } }) => {
-  await openPmPanel(page);
+  await enablePmActive(page);
   const toggle = page.locator('.pm-away-toggle');
 
   // Turn ON

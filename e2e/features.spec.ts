@@ -153,12 +153,10 @@ test('sidebar collapse and expand', async ({ shelfApp: { page } }) => {
   await page.keyboard.press(`${modifier}+Shift+b`);
   await expect(sidebar).not.toBeVisible();
 
-  // Expand button should appear in tab bar
-  const expandBtn = page.locator('.tab-sidebar-btn');
-  await expect(expandBtn).toBeVisible();
-
-  // Click to expand
-  await expandBtn.click();
+  // Expand via the footer Projects toggle (always visible)
+  const projectsToggle = page.locator('.right-tab-btn', { hasText: 'Projects' });
+  await expect(projectsToggle).toBeVisible();
+  await projectsToggle.click();
   await expect(sidebar).toBeVisible();
 });
 
@@ -398,12 +396,12 @@ test('mod+Shift+D toggles dev tools panel', async ({ shelfApp: { page } }) => {
   const panel = page.locator('.devtools-panel');
   const collapsed = page.locator('.right-tab-btn', { hasText: 'Dev Tools' });
 
-  // Initially collapsed tab visible (inactive), panel hidden
+  // Initially footer toggle visible (inactive), panel hidden
   await expect(collapsed).toBeVisible({ timeout: 3_000 });
   await expect(collapsed).not.toHaveClass(/active/);
   await expect(panel).not.toBeVisible();
 
-  // Open via keyboard — tab stays visible but becomes active
+  // Open via keyboard — toggle stays visible but becomes active
   await page.keyboard.press(`${modifier}+Shift+d`);
   await expect(panel).toBeVisible({ timeout: 3_000 });
   await expect(collapsed).toBeVisible();
@@ -416,7 +414,7 @@ test('mod+Shift+D toggles dev tools panel', async ({ shelfApp: { page } }) => {
   await expect(collapsed).not.toHaveClass(/active/);
 });
 
-test('dev tools panel opens via collapsed tab click', async ({ shelfApp: { page } }) => {
+test('dev tools panel opens via footer toggle click', async ({ shelfApp: { page } }) => {
   const panel = page.locator('.devtools-panel');
   const collapsed = page.locator('.right-tab-btn', { hasText: 'Dev Tools' });
 

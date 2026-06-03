@@ -1,78 +1,25 @@
 import React, { useState, useEffect, useReducer, useRef, useCallback, useMemo } from 'react';
-import { useStore, setAwayMode, toggleRightSidebar, updateSettings } from '../store';
+import { useStore, setAwayMode, toggleRightSidebar } from '../store';
 import { renderMarkdown } from '../utils/markdown';
-import type { PmMessage, PmStreamChunk, PmToolCall, AppSettings } from '@shared/types';
-import { getModelsForProvider } from '@shared/types';
-import { pmStreamReducer, initialPmStreamState, type PmStreamAction } from './pm-view-reducer';
+import type { PmMessage, PmStreamChunk, PmToolCall } from '@shared/types';
+import { pmStreamReducer, initialPmStreamState } from './pm-view-reducer';
 
 const DEFAULT_WIDTH = 380;
 const MIN_WIDTH = 280;
 const MAX_WIDTH = 700;
 
-type SetMessages = React.Dispatch<React.SetStateAction<PmMessage[]>>;
-
-async function handleSlashCommand(
-  text: string,
-  settings: AppSettings,
-  setMessages: SetMessages,
-  dispatch: React.Dispatch<PmStreamAction>,
-): Promise<boolean> {
-  const [cmd, ...rest] = text.split(/\s+/);
-  const arg = rest.join(' ').trim();
-
-  switch (cmd) {
-    case '/clear':
-      await window.shelfApi.pm.clear();
-      setMessages([]);
-      dispatch({ type: 'clear_display' });
-      return true;
-
-    case '/compact': {
-      const result = await window.shelfApi.pm.compact();
-      setMessages((prev) => {
-        const kept = prev.slice(-result.kept);
-        return [...kept, { role: 'assistant' as const, content: `Compacted: removed ${result.removed} messages, kept ${result.kept}.`, timestamp: Date.now() }];
-      });
-      return true;
-    }
-
-    case '/model': {
-      const provider = settings.pmProvider?.provider;
-      if (!provider) {
-        setMessages((prev) => [...prev, { role: 'error', content: 'No provider configured.', timestamp: Date.now() }]);
-        return true;
-      }
-      const models = getModelsForProvider(provider, settings.providerModels);
-      if (!arg) {
-        const current = settings.pmProvider?.model || '(none)';
-        const list = models.map((m) => `  ${m.id === current ? '● ' : '  '}${m.id}`).join('\n');
-        setMessages((prev) => [...prev, { role: 'assistant' as const, content: `Current model: **${current}**\n\nAvailable:\n\`\`\`\n${list}\n\`\`\``, timestamp: Date.now() }]);
-        return true;
-      }
-      const match = models.find((m) => m.id === arg);
-      if (!match) {
-        setMessages((prev) => [...prev, { role: 'error', content: `Unknown model: ${arg}\nAvailable: ${models.map((m) => m.id).join(', ')}`, timestamp: Date.now() }]);
-        return true;
-      }
-      updateSettings({ pmProvider: { ...settings.pmProvider!, model: match.id } });
-      setMessages((prev) => [...prev, { role: 'assistant' as const, content: `Model switched to **${match.id}**`, timestamp: Date.now() }]);
-      return true;
-    }
-
-    default:
-      return false;
-  }
-}
-
+// Read-only PM panel: PM is driven by tab events / Telegram, not in-app chat
+// (you're at the computer — no need to relay through PM). No message input, no
+// in-app slash commands. Model selection lives in Settings; history clears via
+// the Clear History button.
 export function PmView() {
-  const { settings, awayMode } = useStore();
+  const { settings, awayMode, pmActive } = useStore();
+  const hasTelegram = !!(settings.telegram?.botToken && settings.telegram?.chatId);
   const [messages, setMessages] = useState<PmMessage[]>([]);
-  const [input, setInput] = useState('');
   const [streamState, dispatch] = useReducer(pmStreamReducer, initialPmStreamState);
   const { streaming, streamText, streamToolCalls, error } = streamState;
   const [width, setWidth] = useState(DEFAULT_WIDTH);
   const listRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
   const dragging = useRef(false);
 
   const hasProvider = !!(settings.pmProvider?.provider && settings.pmProvider?.apiKey && settings.pmProvider?.model);
@@ -103,40 +50,11 @@ export function PmView() {
     return off;
   }, []);
 
-  const handleSend = useCallback(async () => {
-    const text = input.trim();
-    if (!text || streaming) return;
-    setInput('');
-
-    if (text.startsWith('/')) {
-      const handled = await handleSlashCommand(text, settings, setMessages, dispatch);
-      if (handled) return;
-    }
-
-    setMessages((prev) => [...prev, { role: 'user', content: text, timestamp: Date.now() }]);
-    dispatch({ type: 'send_start' });
-    await window.shelfApi.pm.send(text);
-  }, [input, streaming, settings]);
-
-  const handleStop = useCallback(() => {
-    window.shelfApi.pm.stop();
-  }, []);
-
   const handleClear = useCallback(async () => {
     await window.shelfApi.pm.clear();
     setMessages([]);
     dispatch({ type: 'clear_display' });
   }, []);
-
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault();
-        handleSend();
-      }
-    },
-    [handleSend],
-  );
 
   const onDragStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -161,10 +79,6 @@ export function PmView() {
     document.addEventListener('mouseup', onUp);
   }, [width]);
 
-  useEffect(() => {
-    inputRef.current?.focus();
-  }, []);
-
   return (
     <div className="right-panel pm-panel" style={{ width }}>
       <div className="right-panel-resize-handle pm-resize-handle" onMouseDown={onDragStart} />
@@ -172,14 +86,27 @@ export function PmView() {
         <span className="right-panel-title pm-header-title">PM</span>
         <span className="pm-header-actions">
           <button
+            className={`pm-active-toggle ${pmActive ? 'pm-active-on' : ''}`}
+            onClick={() => window.shelfApi.pm.setActive(!pmActive)}
+            disabled={!hasTelegram}
+            title={!hasTelegram
+              ? 'Configure Telegram in Settings to enable PM Active'
+              : pmActive ? 'PM Active ON — telegram listener running (click to stop)' : 'PM Active OFF (click to start)'}
+          >
+            {pmActive ? 'PM ON' : 'PM OFF'}
+          </button>
+          <button
             className={`pm-away-toggle ${awayMode ? 'pm-away-on' : ''}`}
             onClick={() => window.shelfApi.pm.setAwayMode(!awayMode)}
-            title={awayMode ? 'Away Mode ON — PM can control terminals' : 'Away Mode OFF — read only'}
+            disabled={!pmActive}
+            title={!pmActive
+              ? 'Enable PM Active first'
+              : awayMode ? 'Away Mode ON — PM can control terminals' : 'Away Mode OFF — read only'}
           >
             {awayMode ? 'Away ON' : 'Away OFF'}
           </button>
-          <button className="pm-header-btn" onClick={handleClear} title="Clear conversation">
-            Clear
+          <button className="pm-header-btn" onClick={handleClear} title="Clear conversation history">
+            Clear History
           </button>
           <button className="pm-header-btn" onClick={() => toggleRightSidebar('pm')} title="Close">
             ×
@@ -212,23 +139,6 @@ export function PmView() {
           <div className="pm-error" onClick={() => dispatch({ type: 'dismiss_error' })}>
             {error}
           </div>
-        )}
-      </div>
-      <div className="pm-input-area">
-        <textarea
-          ref={inputRef}
-          className="pm-input"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder="Ask PM..."
-          rows={2}
-          disabled={streaming}
-        />
-        {streaming ? (
-          <button className="pm-send-btn" onClick={handleStop}>Stop</button>
-        ) : (
-          <button className="pm-send-btn" onClick={handleSend} disabled={!input.trim()}>Send</button>
         )}
       </div>
     </div>

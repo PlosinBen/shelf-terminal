@@ -1,9 +1,10 @@
+import os from 'os';
 import { net } from 'electron';
 import { log } from '@shared/logger';
 import type { TabInferredState, TelegramConfig } from '@shared/types';
 import { isAwayMode, setAwayMode as setAwayModeState } from './away-mode';
 import { snapshotTabs } from './tab-watcher';
-import { setSyncCallback } from './tools';
+import { setSyncCallback, getSyncedProjects } from './tools';
 import {
   sendFromInternal,
   registerOutputObserver,
@@ -15,7 +16,10 @@ import {
   resolveAlias,
   buildUseCommands,
   formatProjectsList,
+  aliasOrFallback,
 } from './telegram-mode';
+
+export type ListenerStopReason = 'bad-token' | 'bad-chat-id' | 'taken-over';
 
 const API = 'https://api.telegram.org/bot';
 const POLL_TIMEOUT = 30; // seconds (Telegram long poll)
@@ -59,6 +63,21 @@ let onMessage: MessageCallback | null = null;
 let onCallbackQuery: CallbackQueryHandler | null = null;
 let onStop: StopCallback | null = null;
 
+// Fires when the listener stops itself on a fatal/conflict error (bad token,
+// bad chat id, or another instance grabbing the bot). The wiring layer turns
+// PM Active off + notifies the user. NOT fired on user-initiated stopTelegram().
+type ListenerStoppedCallback = (reason: ListenerStopReason) => void;
+let onListenerStopped: ListenerStoppedCallback | null = null;
+let getProjectsFn: (() => { name: string; connectionType: string }[]) | null = null;
+
+export function setListenerStoppedCallback(cb: ListenerStoppedCallback): void {
+  onListenerStopped = cb;
+}
+
+export function setProjectsProvider(fn: () => { name: string; connectionType: string }[]): void {
+  getProjectsFn = fn;
+}
+
 export function setMessageCallback(cb: MessageCallback): void {
   onMessage = cb;
 }
@@ -76,6 +95,21 @@ export function startTelegram(cfg: TelegramConfig): void {
   config = cfg;
   if (!config.botToken || !config.chatId) return;
   polling = true;
+  // E2E: no real network — mark running so PM Active flows can be exercised
+  // (enabling PM Active, Away dependency) without hitting api.telegram.org.
+  if (process.env.SHELF_TEST_MODE === '1') {
+    log.info('telegram', 'test mode — listener no-op (no network)');
+    return;
+  }
+  // Validating first send — announces which host grabbed control AND validates
+  // the config: bad token → 401, bad chat id → 400, either stops + notifies.
+  // (getUpdates only validates the token; the announcement covers chat id.)
+  sendControlAnnouncement().catch((err: any) => {
+    const status = err?.status as number | undefined;
+    if (status === 401 || status === 404) { stopOnError('bad-token'); return; }
+    if (status === 400) { stopOnError('bad-chat-id'); return; }
+    log.error('telegram', `announcement send failed: ${err?.message}`); // transient — pollLoop continues
+  });
   registerCommands().catch((e) => log.error('telegram', `setMyCommands failed: ${e.message}`));
   // Project list changes (add/rename/remove/agent-tab-open) → re-register
   // dynamic /use_<alias> commands so Telegram autocomplete reflects current
@@ -105,7 +139,16 @@ async function registerCommands(): Promise<void> {
   log.debug('telegram', `registered ${all.length} commands (${dynamic.length} dynamic /use_*)`);
 }
 
-export function stopTelegram(): void {
+/**
+ * Tear down listener-bound state. Called by both `stopTelegram` (user-
+ * initiated, via PM Active off) and `stopOnError` (fatal/conflict error).
+ * Keeping these unified ensures the agent-mode observer / sync-callback /
+ * pending refresh timer / agent-reply buffer get cleaned in BOTH paths —
+ * an earlier split version leaked the observer/callback on 409 yield, so
+ * after a re-grab the bridge would double-subscribe (see merge commit for
+ * pm-active-listener integration).
+ */
+function cleanupListener(): void {
   polling = false;
   if (pollAbort) {
     pollAbort.abort();
@@ -116,14 +159,61 @@ export function stopTelegram(): void {
     clearTimeout(refreshCommandsTimer);
     refreshCommandsTimer = null;
   }
-  // Force any active agent observer to detach so we don't pump events into
-  // a stopped bridge.
   if (agentObserverUnsubscribe) {
     agentObserverUnsubscribe();
     agentObserverUnsubscribe = null;
   }
+  agentReplyBuffer.length = 0;
+  agentTurnInProgress = false;
   mode = { type: 'pm' };
+}
+
+export function stopTelegram(): void {
+  cleanupListener();
   log.info('telegram', 'stopped polling');
+}
+
+// Internal: stop the listener due to a fatal/conflict error and notify the
+// wiring layer (→ PM Active off). Distinct from user-initiated stopTelegram().
+function stopOnError(reason: ListenerStopReason): void {
+  if (!polling) return;
+  cleanupListener();
+  log.info('telegram', `listener stopped: ${reason}`);
+  onListenerStopped?.(reason);
+}
+
+async function sendControlAnnouncement(): Promise<void> {
+  if (!config) return;
+  // Prefer synced state (has tab info + ids for alias derivation). Falls back
+  // to the simpler getProjectsFn shape if sync hasn't fired yet — early boot
+  // edge case. See features/telegram-agent-bridge.md MVP scope.
+  const synced = getSyncedProjects();
+  const lines = [`🖥 Now controlled by *${os.hostname()}*`, ''];
+  if (synced.length > 0) {
+    lines.push('*Projects:*');
+    for (const proj of synced) {
+      const hasAgent = proj.tabs.some((t) => isAgentTab(t.id));
+      if (hasAgent) {
+        const alias = aliasOrFallback(proj.name, proj.id);
+        lines.push(`  • ${proj.name} (${proj.connectionType}) → /use_${alias}`);
+      } else {
+        lines.push(`  • ${proj.name} (${proj.connectionType})`);
+      }
+    }
+  } else {
+    const projects = getProjectsFn?.() ?? [];
+    if (projects.length === 0) {
+      lines.push('_No projects._');
+    } else {
+      lines.push('*Projects:*');
+      for (const p of projects) lines.push(`  • ${p.name} (${p.connectionType})`);
+    }
+  }
+  await apiCall('sendMessage', {
+    chat_id: config.chatId,
+    text: lines.join('\n'),
+    parse_mode: 'Markdown',
+  });
 }
 
 export function isRunning(): boolean {
@@ -240,8 +330,23 @@ async function pollLoop(): Promise<void> {
       }
     } catch (err: any) {
       if (err.name === 'AbortError') continue;
+      const status = err?.status as number | undefined;
+      // 409 Conflict = another instance started polling the same bot and won
+      // (newest poller wins). Yield immediately, NO retry — retrying would kick
+      // the winner back and ping-pong forever. The user re-grabs by re-enabling.
+      if (status === 409) {
+        log.info('telegram', 'conflict (409) — another instance took over, yielding');
+        stopOnError('taken-over');
+        break;
+      }
+      // Bad bot token — won't fix itself, stop + report.
+      if (status === 401 || status === 404) {
+        log.error('telegram', `auth error ${status} — bad bot token, stopping`);
+        stopOnError('bad-token');
+        break;
+      }
+      // Transient (429 / 5xx / network / timeout) — back off and retry.
       log.error('telegram', `poll error: ${err.message}`);
-      // Back off on error
       if (polling) await sleep(5000);
     }
   }
@@ -502,7 +607,9 @@ async function apiCall(method: string, params: Record<string, any>, signal?: Abo
   });
   if (!resp.ok) {
     const text = await resp.text();
-    throw new Error(`Telegram API ${method} failed ${resp.status}: ${text}`);
+    const err: any = new Error(`Telegram API ${method} failed ${resp.status}: ${text}`);
+    err.status = resp.status;
+    throw err;
   }
   const json = await resp.json();
   return json.result;
