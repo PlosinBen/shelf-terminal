@@ -41,6 +41,20 @@ async function configurePmProvider(page: any) {
   await expect(settingsPanel).not.toBeVisible({ timeout: 3_000 });
 }
 
+// Helper: enable PM Active (Away requires it). Sets dummy telegram config +
+// flips PM Active on via IPC. In SHELF_TEST_MODE the listener is a no-op, so
+// PM Active stays on without touching the network. Opens the PM panel.
+async function enablePmActive(page: any) {
+  await page.evaluate(async () => {
+    const api = (window as any).shelfApi;
+    const s = await api.settings.load();
+    await api.settings.save({ ...s, telegram: { botToken: 'test-token', chatId: '123' } });
+    await api.pm.setActive(true);
+  });
+  await openPmPanel(page);
+  await expect(page.locator('.pm-active-toggle.pm-active-on')).toBeVisible({ timeout: 3_000 });
+}
+
 // ── Footer toggle ──
 
 test('footer shows PM toggle', async ({ shelfApp: { page } }) => {
@@ -53,7 +67,7 @@ test('PM footer toggle reflects away mode', async ({ shelfApp: { page } }) => {
   await expect(pmBtn).not.toHaveClass(/pm-away/);
 
   // Turn Away Mode on from the PM panel header → footer toggle goes red (pm-away)
-  await openPmPanel(page);
+  await enablePmActive(page);
   await page.locator('.pm-away-toggle').click();
   await expect(page.locator('.pm-away-toggle')).toContainText('Away ON', { timeout: 3_000 });
   await expect(pmBtn).toHaveClass(/pm-away/);
@@ -140,7 +154,7 @@ test('Away Mode toggle exists in PM panel header', async ({ shelfApp: { page } }
 });
 
 test('Away Mode toggle changes its on/off state', async ({ shelfApp: { page } }) => {
-  await openPmPanel(page);
+  await enablePmActive(page);
   const toggle = page.locator('.pm-away-toggle');
   await expect(toggle).toContainText('Away OFF');
 
@@ -156,7 +170,7 @@ test('Away Mode toggle changes its on/off state', async ({ shelfApp: { page } })
 });
 
 test('Away Mode overlay shows on terminal', async ({ shelfApp: { page } }) => {
-  await openPmPanel(page);
+  await enablePmActive(page);
   const toggle = page.locator('.pm-away-toggle');
 
   // Turn ON

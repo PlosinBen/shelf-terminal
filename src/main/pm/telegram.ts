@@ -63,6 +63,12 @@ export function startTelegram(cfg: TelegramConfig): void {
   config = cfg;
   if (!config.botToken || !config.chatId) return;
   polling = true;
+  // E2E: no real network — mark running so PM Active flows can be exercised
+  // (enabling PM Active, Away dependency) without hitting api.telegram.org.
+  if (process.env.SHELF_TEST_MODE === '1') {
+    log.info('telegram', 'test mode — listener no-op (no network)');
+    return;
+  }
   // Validating first send — announces which host grabbed control AND validates
   // the config: bad token → 401, bad chat id → 400, either stops + notifies.
   // (getUpdates only validates the token; the announcement covers chat id.)
