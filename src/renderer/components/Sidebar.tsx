@@ -71,8 +71,8 @@ export function Sidebar() {
       <div className="sidebar-header">
         <span>Shelf</span>
         <span className="sidebar-header-actions">
-          <button className="sidebar-btn" onClick={toggleSettings} title={tooltipWithShortcut('Settings', kb.openSettings, isMac)}>&#9881;</button>
-          <button className="sidebar-btn" onClick={handleNewProject} title={tooltipWithShortcut('New project', kb.newProject, isMac)}>+</button>
+          <button className="sidebar-btn" tabIndex={-1} onClick={toggleSettings} title={tooltipWithShortcut('Settings', kb.openSettings, isMac)}>&#9881;</button>
+          <button className="sidebar-btn" tabIndex={-1} onClick={handleNewProject} title={tooltipWithShortcut('New project', kb.newProject, isMac)}>+</button>
         </span>
       </div>
       <div className="sidebar-list">

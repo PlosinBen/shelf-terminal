@@ -160,6 +160,7 @@ export function TabBar() {
             )}
             <button
               className="tab-close"
+              tabIndex={-1}
               onClick={(e) => handleCloseTab(i, e)}
             >
               ×
@@ -169,6 +170,7 @@ export function TabBar() {
       })}
       <button
         className="tab-add"
+        tabIndex={-1}
         onClick={handleNewTab}
         onContextMenu={(e) => {
           e.preventDefault();

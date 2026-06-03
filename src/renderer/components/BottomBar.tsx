@@ -53,6 +53,7 @@ export function BottomBar() {
         {updateStatus.state === 'idle' && (
           <button
             className="bottom-bar-update-btn"
+            tabIndex={-1}
             title="Check for updates"
             onClick={() => window.shelfApi.updater.check()}
           >
@@ -62,6 +63,7 @@ export function BottomBar() {
         {updateStatus.state === 'available' && (
           <button
             className="bottom-bar-update-btn"
+            tabIndex={-1}
             title={`Download v${updateStatus.version}`}
             onClick={() => window.shelfApi.updater.download()}
           >
@@ -82,6 +84,7 @@ export function BottomBar() {
         {updateStatus.state === 'downloaded' && (
           <button
             className="bottom-bar-update-btn ready"
+            tabIndex={-1}
             title={`Install v${updateStatus.version}`}
             onClick={() => window.shelfApi.updater.install()}
           >
@@ -92,6 +95,7 @@ export function BottomBar() {
         <span className="bottom-bar-toggles">
           <button
             className={`right-tab-btn${sidebarVisible ? ' active' : ''}`}
+            tabIndex={-1}
             onClick={toggleProjectList}
             title={tooltipWithShortcut('Projects', kb.toggleProjectList, isMac)}
           >
@@ -99,6 +103,7 @@ export function BottomBar() {
           </button>
           <button
             className={`right-tab-btn${pmVisible ? ' active' : ''}`}
+            tabIndex={-1}
             onClick={() => toggleRightSidebar('pm')}
             title={tooltipWithShortcut('PM Agent', kb.togglePm, isMac)}
           >
@@ -107,6 +112,7 @@ export function BottomBar() {
           </button>
           <button
             className={`right-tab-btn${notesVisible ? ' active' : ''}`}
+            tabIndex={-1}
             onClick={() => toggleRightSidebar('notes')}
             title={tooltipWithShortcut('Notes', kb.toggleNotes, isMac)}
           >
@@ -114,6 +120,7 @@ export function BottomBar() {
           </button>
           <button
             className={`right-tab-btn${devToolsVisible ? ' active' : ''}`}
+            tabIndex={-1}
             onClick={() => toggleRightSidebar('devtools')}
             title={tooltipWithShortcut('Dev Tools', kb.toggleDevTools, isMac)}
           >
