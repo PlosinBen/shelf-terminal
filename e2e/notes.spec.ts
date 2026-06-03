@@ -59,7 +59,7 @@ test.describe('Notes panel', () => {
     fs.rmSync(userDataDir, { recursive: true, force: true });
   });
 
-  test('Notes button shows in right-side collapsed tabs', async () => {
+  test('Notes toggle shows in footer', async () => {
     const btn = page.locator('.right-tab-btn', { hasText: 'Notes' });
     await expect(btn).toBeVisible({ timeout: 5_000 });
   });

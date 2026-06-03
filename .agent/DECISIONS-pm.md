@@ -48,11 +48,13 @@ PM agent（背景自動駕駛、Telegram bridge、write_to_pty、project note）
 
 ## 27. PM/DevTools 共用右側 Panel + 收合欄
 
-**決策**: PM 和 DevTools 都以右側可拖拉 panel 存在，收合時共用 `.right-tabs-collapsed` 容器（單一 28px 欄），label 垂直堆疊。App.tsx 統一管理收合 tab 渲染，各 panel 不自己 render。PM 不放 Sidebar、不做全頁切換。
+**決策**: PM 和 DevTools 都以右側可拖拉 panel 存在。PM 不放 Sidebar、不做全頁切換。toggle 按鈕集中渲染、各 panel 不自己 render collapsed tab。
 
-**原因**: PM 和 terminal 需要同時可見（邊看 terminal 邊跟 PM 對話），放 Sidebar 會跟 project 列表衝突，全頁切換會失去 terminal 可見性。兩個獨立 28px 收合欄太寬，統一容器視覺乾淨且方便未來加更多 panel。
+**原因**: PM 和 terminal 需要同時可見（邊看 terminal 邊跟 PM 對話），放 Sidebar 會跟 project 列表衝突，全頁切換會失去 terminal 可見性。toggle 集中渲染視覺乾淨、方便加更多 panel。
 
-**不要改**: 不要讓各 panel 自己 render 收合 tab — App.tsx 統一管理（GOTCHAS #30 對應）。
+**更新（footer 重設計後）**: toggle 不再用 App.tsx 的 `.right-tabs-collapsed`（28px 垂直欄已移除），改集中在 **BottomBar footer-right**（水平、沿用 `right-tab-btn` class，與 Projects toggle 並排）。「集中渲染、panel 不自己 render」的原則不變，只是渲染位置從 App.tsx 移到 BottomBar。詳見 `footer-redesign.md`。
+
+**不要改**: 不要讓各 panel 自己 render collapsed tab — 由 BottomBar 統一管理（GOTCHAS #30 對應）。
 
 ---
 

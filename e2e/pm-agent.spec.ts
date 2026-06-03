@@ -2,7 +2,7 @@ import { test, expect } from './helpers';
 
 const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
 
-// Helper: open PM panel via right-side collapsed tab
+// Helper: open PM panel via footer toggle
 async function openPmPanel(page: any) {
   const panel = page.locator('.pm-panel');
   if (await panel.isVisible().catch(() => false)) return;
@@ -41,19 +41,19 @@ async function configurePmProvider(page: any) {
   await expect(settingsPanel).not.toBeVisible({ timeout: 3_000 });
 }
 
-// ── Right-side collapsed tab ──
+// ── Footer toggle ──
 
-test('right-side shows PM collapsed tab', async ({ shelfApp: { page } }) => {
+test('footer shows PM toggle', async ({ shelfApp: { page } }) => {
   const pmBtn = page.locator('.right-tab-btn', { hasText: 'PM' });
   await expect(pmBtn).toBeVisible({ timeout: 5_000 });
 });
 
-test('PM collapsed tab has status dot', async ({ shelfApp: { page } }) => {
+test('PM footer toggle has status dot', async ({ shelfApp: { page } }) => {
   const dot = page.locator('.right-tab-btn .pm-tab-dot');
   await expect(dot).toBeVisible({ timeout: 5_000 });
 });
 
-test('right-side shows DevTools collapsed tab alongside PM', async ({ shelfApp: { page } }) => {
+test('footer shows DevTools toggle alongside PM', async ({ shelfApp: { page } }) => {
   const devToolsBtn = page.locator('.right-tab-btn', { hasText: 'Dev Tools' });
   await expect(devToolsBtn).toBeVisible({ timeout: 5_000 });
 });
@@ -72,7 +72,7 @@ test('PM panel has header with title', async ({ shelfApp: { page } }) => {
   await expect(page.locator('.pm-header-title')).toContainText('PM');
 });
 
-test('closing PM panel shows collapsed tab again', async ({ shelfApp: { page } }) => {
+test('closing PM panel shows footer toggle again', async ({ shelfApp: { page } }) => {
   await openPmPanel(page);
   await closePmPanel(page);
 

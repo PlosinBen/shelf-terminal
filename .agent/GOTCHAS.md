@@ -257,13 +257,13 @@
 
 ---
 
-## 30. PM panel 和 DevTools 收合 tab 由 App.tsx 統一管理
+## 30. PM panel 和 DevTools 的 toggle 按鈕由 BottomBar 統一管理
 
-**現象**: 修改 PM 或 DevTools 的收合行為時，改 PmView/DevToolsPanel 沒效果。
+**現象**: 修改 PM 或 DevTools 的 toggle/收合行為時，改 PmView/DevToolsPanel 沒效果。
 
-**原因**: 收合 tab 的渲染已從各自 component 移到 App.tsx 的 `.right-tabs-collapsed` 容器。DevToolsPanel 的 `if (!devToolsVisible) return null`（不再 return collapsed button）。
+**原因**: toggle 按鈕的渲染不在各 panel component 內。DevToolsPanel 的 `if (!devToolsVisible) return null`（不 return toggle button）。**footer 重設計後**：toggle 已從 App.tsx 的 `.right-tabs-collapsed`（已移除）搬到 **BottomBar footer-right**（沿用 `right-tab-btn` class）。
 
-**注意**: 新增右側 panel 時要在 App.tsx 加收合 tab，不要在 panel component 裡加。
+**注意**: 新增右側 panel 時要在 **BottomBar** 加 toggle 按鈕，不要在 panel component 裡加。
 
 ---
 

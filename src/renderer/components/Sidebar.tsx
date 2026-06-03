@@ -4,7 +4,6 @@ import {
   setActiveProject,
   setEditingProject,
   toggleSettings,
-  toggleProjectList,
   reorderProjects,
 } from '../store';
 import { emit, Events } from '../events';
@@ -12,10 +11,8 @@ import { CONFIRM_REMOVE_EVENT } from './RemoveConfirmDialog';
 import { tooltipWithShortcut } from '../utils/format-keybinding';
 import { isMac } from '../hooks/useKeybindings';
 
-const version = __APP_VERSION__;
-
 export function Sidebar() {
-  const { projects, activeProjectIndex, updateStatus, settings } = useStore();
+  const { projects, activeProjectIndex, settings } = useStore();
   const kb = settings.keybindings;
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
@@ -72,7 +69,6 @@ export function Sidebar() {
   return (
     <aside className="sidebar">
       <div className="sidebar-header">
-        <button className="sidebar-btn" onClick={toggleProjectList} title={tooltipWithShortcut('Collapse project list', kb.toggleProjectList, isMac)}>&#9776;</button>
         <span>Shelf</span>
         <span className="sidebar-header-actions">
           <button className="sidebar-btn" onClick={toggleSettings} title={tooltipWithShortcut('Settings', kb.openSettings, isMac)}>&#9881;</button>
@@ -107,48 +103,6 @@ export function Sidebar() {
             </div>
           );
         })}
-      </div>
-
-      <div className="sidebar-footer">
-        <span className="sidebar-version">v{version}</span>
-        {updateStatus.state === 'idle' && (
-          <button
-            className="sidebar-update-btn"
-            title="Check for updates"
-            onClick={() => window.shelfApi.updater.check()}
-          >
-            &#x21BB;
-          </button>
-        )}
-        {updateStatus.state === 'available' && (
-          <button
-            className="sidebar-update-btn"
-            title={`Download v${updateStatus.version}`}
-            onClick={() => window.shelfApi.updater.download()}
-          >
-            &#x21E9;
-          </button>
-        )}
-        {updateStatus.state === 'downloading' && (
-          <div
-            className="sidebar-update-progress"
-            title={`Downloading v${updateStatus.version} — ${Math.round(updateStatus.percent)}%`}
-          >
-            <div
-              className="sidebar-update-progress-bar"
-              style={{ width: `${Math.max(0, Math.min(100, updateStatus.percent))}%` }}
-            />
-          </div>
-        )}
-        {updateStatus.state === 'downloaded' && (
-          <button
-            className="sidebar-update-btn ready"
-            title={`Install v${updateStatus.version}`}
-            onClick={() => window.shelfApi.updater.install()}
-          >
-            &#x21BB;
-          </button>
-        )}
       </div>
 
       {contextMenu && (() => {

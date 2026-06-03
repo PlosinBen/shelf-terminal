@@ -15,9 +15,8 @@ import { DevToolsPanel } from './components/DevToolsPanel';
 import { PmView } from './components/PmView';
 import { NotesView } from './components/NotesView';
 import { QuickNoteOverlay } from './components/QuickNoteOverlay';
-import { useKeybindings, isMac } from './hooks/useKeybindings';
-import { tooltipWithShortcut } from './utils/format-keybinding';
-import { useStore, setProjects, setSettings, setUpdateStatus, addProject, addTab, setActiveTab, removeTab, removeProject, setSplitTab, toggleProjectList, clearUnread, setInvalidProjects, toggleRightSidebar } from './store';
+import { useKeybindings } from './hooks/useKeybindings';
+import { useStore, setProjects, setSettings, setUpdateStatus, addProject, addTab, setActiveTab, removeTab, removeProject, setSplitTab, clearUnread, setInvalidProjects } from './store';
 import type { ProjectConfig } from '@shared/types';
 import { disposeTerminal } from './components/TerminalView';
 import { on, emit, Events } from './events';
@@ -269,6 +268,7 @@ export function App() {
 
   return (
     <div className="app">
+      <div className="content">
       {sidebarVisible && <Sidebar />}
       <main className="main-area">
         <div className="terminal-section">
@@ -334,7 +334,6 @@ export function App() {
               })}
           </div>
         </div>
-        <BottomBar />
         {awayMode && (
           <div className="away-mode-overlay">
             <span>Away Mode — PM is in control</span>
@@ -344,31 +343,9 @@ export function App() {
         {pmVisible && <PmView />}
         {notesVisible && <NotesView />}
         {devToolsVisible && <DevToolsPanel />}
-        <div className="right-tabs-collapsed">
-          <button
-            className={`right-tab-btn${pmVisible ? ' active' : ''}`}
-            onClick={() => toggleRightSidebar('pm')}
-            title={tooltipWithShortcut('PM Agent', settings.keybindings.togglePm, isMac)}
-          >
-            <span className={`pm-tab-dot ${awayMode ? 'pm-dot-away' : 'pm-dot'}`} />
-            <span>PM</span>
-          </button>
-          <button
-            className={`right-tab-btn${notesVisible ? ' active' : ''}`}
-            onClick={() => toggleRightSidebar('notes')}
-            title={tooltipWithShortcut('Notes', settings.keybindings.toggleNotes, isMac)}
-          >
-            <span>Notes</span>
-          </button>
-          <button
-            className={`right-tab-btn${devToolsVisible ? ' active' : ''}`}
-            onClick={() => toggleRightSidebar('devtools')}
-            title={tooltipWithShortcut('Dev Tools', settings.keybindings.toggleDevTools, isMac)}
-          >
-            <span>Dev Tools</span>
-          </button>
-        </div>
       </main>
+      </div>
+      <BottomBar />
       <FolderPicker />
       <SettingsPanel />
       <ProjectEditPanel />
