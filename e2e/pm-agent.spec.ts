@@ -135,11 +135,11 @@ test('settings panel has PM Agent tab', async ({ shelfApp: { page } }) => {
 test('PM provider can be configured via Settings', async ({ shelfApp: { page } }) => {
   await configurePmProvider(page);
 
-  // Open PM panel — should show chat UI, not no-provider message
+  // Open PM panel — should show the (read-only) conversation area, not the
+  // no-provider message.
   await openPmPanel(page);
   await expect(page.locator('.pm-no-provider')).not.toBeVisible();
-  await expect(page.locator('.pm-input')).toBeVisible();
-  await expect(page.locator('.pm-send-btn')).toBeVisible();
+  await expect(page.locator('.pm-messages')).toBeVisible();
   await closePmPanel(page);
 });
 
