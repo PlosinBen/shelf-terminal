@@ -20,6 +20,9 @@ async function setupProject(page: Page) {
   await expect(page.locator('.folder-picker-overlay')).toBeVisible({ timeout: 5_000 });
   await page.locator('.conn-btn-next').click();
   await expect(page.locator('.fp-header')).toContainText('Open Project', { timeout: 5_000 });
+  // See agent-flows.spec.ts setupProject — wait for path to populate so
+  // Cmd+Enter doesn't fire mid-listDir and confirm with empty cwd.
+  await expect(page.locator('.fp-browser-path')).toContainText('/', { timeout: 5_000 });
   await page.keyboard.press(`${modifier}+Enter`);
   await expect(page.locator('.folder-picker-overlay')).not.toBeVisible({ timeout: 3_000 });
 
