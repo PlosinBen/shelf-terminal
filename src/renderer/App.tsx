@@ -16,7 +16,7 @@ import { PmView } from './components/PmView';
 import { NotesView } from './components/NotesView';
 import { QuickNoteOverlay } from './components/QuickNoteOverlay';
 import { useKeybindings } from './hooks/useKeybindings';
-import { useStore, setProjects, setSettings, setUpdateStatus, addProject, addTab, setActiveTab, removeTab, removeProject, setSplitTab, clearUnread, setInvalidProjects } from './store';
+import { useStore, setProjects, setSettings, setUpdateStatus, addProject, addTab, setActiveTab, removeTab, removeProject, setSplitTab, clearUnread, setInvalidProjects, setPmActive } from './store';
 import type { ProjectConfig } from '@shared/types';
 import { disposeTerminal } from './components/TerminalView';
 import { on, emit, Events } from './events';
@@ -37,6 +37,25 @@ export function App() {
 
   useEffect(() => {
     return window.shelfApi.updater.onStatus(setUpdateStatus);
+  }, []);
+
+  // PM Active (telegram listener) status — synced app-wide so the tab-bar badge
+  // reflects it whether or not the PM panel is open.
+  useEffect(() => {
+    window.shelfApi.pm.getActive().then(setPmActive);
+    const offActive = window.shelfApi.pm.onActive(setPmActive);
+    const offErr = window.shelfApi.pm.onActiveError((reason) => {
+      // 'taken-over' (409) is expected when grabbing control on another machine
+      // — the badge just disappears, no dialog. Only surface config errors.
+      if (reason === 'taken-over') return;
+      const msg = reason === 'bad-token'
+        ? 'PM Active stopped: invalid Telegram bot token.'
+        : reason === 'bad-chat-id'
+        ? 'PM Active stopped: invalid Telegram chat id.'
+        : 'PM Active stopped.';
+      window.shelfApi.dialog.confirm('PM Active', msg, 'OK').catch(() => {});
+    });
+    return () => { offActive(); offErr(); };
   }, []);
 
   // Wire the typed agent event layer once at app lifetime. IPC ↔ bus

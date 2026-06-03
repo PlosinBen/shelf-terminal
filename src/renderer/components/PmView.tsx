@@ -65,7 +65,8 @@ async function handleSlashCommand(
 }
 
 export function PmView() {
-  const { settings, awayMode } = useStore();
+  const { settings, awayMode, pmActive } = useStore();
+  const hasTelegram = !!(settings.telegram?.botToken && settings.telegram?.chatId);
   const [messages, setMessages] = useState<PmMessage[]>([]);
   const [input, setInput] = useState('');
   const [streamState, dispatch] = useReducer(pmStreamReducer, initialPmStreamState);
@@ -172,9 +173,22 @@ export function PmView() {
         <span className="right-panel-title pm-header-title">PM</span>
         <span className="pm-header-actions">
           <button
+            className={`pm-active-toggle ${pmActive ? 'pm-active-on' : ''}`}
+            onClick={() => window.shelfApi.pm.setActive(!pmActive)}
+            disabled={!hasTelegram}
+            title={!hasTelegram
+              ? 'Configure Telegram in Settings to enable PM Active'
+              : pmActive ? 'PM Active ON — telegram listener running (click to stop)' : 'PM Active OFF (click to start)'}
+          >
+            {pmActive ? 'PM ON' : 'PM OFF'}
+          </button>
+          <button
             className={`pm-away-toggle ${awayMode ? 'pm-away-on' : ''}`}
             onClick={() => window.shelfApi.pm.setAwayMode(!awayMode)}
-            title={awayMode ? 'Away Mode ON — PM can control terminals' : 'Away Mode OFF — read only'}
+            disabled={!pmActive}
+            title={!pmActive
+              ? 'Enable PM Active first'
+              : awayMode ? 'Away Mode ON — PM can control terminals' : 'Away Mode OFF — read only'}
           >
             {awayMode ? 'Away ON' : 'Away OFF'}
           </button>
