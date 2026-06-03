@@ -20,7 +20,10 @@ async function closePmPanel(page: any) {
   await expect(panel).not.toBeVisible({ timeout: 3_000 });
 }
 
-// Helper: configure PM provider via Settings panel
+// Helper: configure PM provider via Settings panel.
+// Uses label-based group filters because input index ordering changed after
+// the Base URL input was added (only appears after a provider is selected —
+// see features/pm-ollama-provider.md).
 async function configurePmProvider(page: any) {
   await page.keyboard.press(`${modifier}+,`);
   const settingsPanel = page.locator('.settings-panel');
@@ -29,16 +32,33 @@ async function configurePmProvider(page: any) {
   // Click PM Agent tab
   await page.locator('.settings-tab', { hasText: 'PM Agent' }).click();
 
-  // Fill provider fields
   const body = page.locator('.settings-body');
-  const inputs = body.locator('.settings-input');
-  await inputs.nth(0).selectOption('openai');
-  await inputs.nth(1).fill('test-key-123');
-  await inputs.nth(2).selectOption({ index: 1 });
+  // Filter settings-group by the label text. hasText is case-insensitive
+  // substring — works because no other group's text contains "Provider" /
+  // "API Key" / "Model" as a label.
+  await body.locator('.settings-group').filter({ hasText: 'Provider' }).locator('select').selectOption('openai');
+  await body.locator('.settings-group').filter({ hasText: 'API Key' }).locator('input').fill('test-key-123');
+  // Model select lives inside a .settings-model-row wrapper; .nth(0) picks
+  // the select (the refresh button isn't a select).
+  await body.locator('.settings-group')
+    .filter({ has: page.locator('label.settings-label', { hasText: 'Model' }) })
+    .locator('select')
+    .selectOption({ index: 1 });
 
   // Save
   await page.locator('.conn-btn-next').click();
   await expect(settingsPanel).not.toBeVisible({ timeout: 3_000 });
+}
+
+/** Open Settings panel on PM tab. Reusable helper for the ollama / provider
+ *  UI tests below. */
+async function openSettingsOnPmTab(page: any) {
+  await page.keyboard.press(`${modifier}+,`);
+  const settingsPanel = page.locator('.settings-panel');
+  await expect(settingsPanel).toBeVisible({ timeout: 5_000 });
+  await page.locator('.settings-tab', { hasText: 'PM Agent' }).click();
+  await expect(page.locator('.settings-section-title', { hasText: 'Provider' })).toBeVisible();
+  return settingsPanel;
 }
 
 // ── Right-side collapsed tab ──
@@ -170,4 +190,95 @@ test('PM clear button exists', async ({ shelfApp: { page } }) => {
   const clearBtn = page.locator('.pm-header-btn', { hasText: 'Clear' });
   await expect(clearBtn).toBeVisible({ timeout: 3_000 });
   await closePmPanel(page);
+});
+
+// ── Ollama provider UI (features/pm-ollama-provider.md) ──
+//
+// These verify the deterministic UI bits of selecting Ollama in PM Settings:
+// option presence, Base URL input visibility/placeholder, API Key placeholder
+// change, tool_call compatibility hint, refresh button presence. The dynamic
+// model dropdown's three-state hints (loading/error/empty) depend on the
+// pm:listModels IPC result against the live host machine — covered by manual
+// testing in the feature plan to keep E2E deterministic across CI / dev.
+
+test('Provider dropdown includes Ollama (local) option', async ({ shelfApp: { page } }) => {
+  await openSettingsOnPmTab(page);
+
+  const providerSelect = page.locator('.settings-body .settings-group')
+    .filter({ hasText: 'Provider' })
+    .locator('select');
+  await expect(providerSelect.locator('option', { hasText: 'Ollama' })).toHaveCount(1);
+
+  await page.keyboard.press('Escape');
+});
+
+test('Selecting Ollama reveals Base URL input with localhost placeholder', async ({ shelfApp: { page } }) => {
+  await openSettingsOnPmTab(page);
+
+  const body = page.locator('.settings-body');
+  await body.locator('.settings-group').filter({ hasText: 'Provider' }).locator('select').selectOption('ollama');
+
+  const baseUrlInput = body.locator('.settings-group').filter({ hasText: 'Base URL' }).locator('input');
+  await expect(baseUrlInput).toBeVisible({ timeout: 2_000 });
+  await expect(baseUrlInput).toHaveAttribute('placeholder', 'http://localhost:11434/v1');
+
+  await page.keyboard.press('Escape');
+});
+
+test('Selecting Ollama changes API Key placeholder to "Optional"', async ({ shelfApp: { page } }) => {
+  await openSettingsOnPmTab(page);
+
+  const body = page.locator('.settings-body');
+  await body.locator('.settings-group').filter({ hasText: 'Provider' }).locator('select').selectOption('ollama');
+
+  const apiKeyInput = body.locator('.settings-group').filter({ hasText: 'API Key' }).locator('input');
+  await expect(apiKeyInput).toHaveAttribute('placeholder', /Optional/i);
+
+  await page.keyboard.press('Escape');
+});
+
+test('Selecting Ollama shows tool_call compatibility hint', async ({ shelfApp: { page } }) => {
+  await openSettingsOnPmTab(page);
+
+  const body = page.locator('.settings-body');
+  await body.locator('.settings-group').filter({ hasText: 'Provider' }).locator('select').selectOption('ollama');
+
+  // The hint references qwen3:8b as the verified working model — see
+  // GOTCHAS "Ollama: model 看似支援 tool_call、實測只吐 JSON text".
+  await expect(body.locator('.settings-sub-hint', { hasText: /qwen3:8b/ })).toBeVisible({ timeout: 2_000 });
+
+  await page.keyboard.press('Escape');
+});
+
+test('Selecting Ollama shows refresh button next to Model select', async ({ shelfApp: { page } }) => {
+  await openSettingsOnPmTab(page);
+
+  const body = page.locator('.settings-body');
+  await body.locator('.settings-group').filter({ hasText: 'Provider' }).locator('select').selectOption('ollama');
+
+  // Refresh button is only rendered for providers with dynamicModelList=true.
+  // OpenAI / Gemini won't show it; Ollama does.
+  const refreshBtn = body.locator('.settings-icon-btn[title="Refresh model list"]');
+  await expect(refreshBtn).toBeVisible({ timeout: 2_000 });
+
+  await page.keyboard.press('Escape');
+});
+
+test('Switching OpenAI → Ollama → OpenAI hides refresh button on non-dynamic providers', async ({ shelfApp: { page } }) => {
+  await openSettingsOnPmTab(page);
+
+  const body = page.locator('.settings-body');
+  const providerSelect = body.locator('.settings-group').filter({ hasText: 'Provider' }).locator('select');
+  const refreshBtn = body.locator('.settings-icon-btn[title="Refresh model list"]');
+
+  await providerSelect.selectOption('openai');
+  await expect(refreshBtn).toHaveCount(0);
+
+  await providerSelect.selectOption('ollama');
+  await expect(refreshBtn).toBeVisible({ timeout: 2_000 });
+
+  await providerSelect.selectOption('gemini');
+  await expect(refreshBtn).toHaveCount(0);
+
+  await page.keyboard.press('Escape');
 });
