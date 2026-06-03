@@ -182,22 +182,41 @@ function stopOnError(reason: ListenerStopReason): void {
   onListenerStopped?.(reason);
 }
 
+/**
+ * Escape Telegram legacy-Markdown special chars so user-controlled strings
+ * (project names, derived aliases, hostnames) don't make the parser look for
+ * matching `_..._` / `*...*` / `` `...` `` markers and return 400 Bad Request
+ * ("can't parse entities"). Catches: `_`, `*`, `` ` ``, `[`, `]`.
+ *
+ * Critical for `/use_<alias>` lines — a single underscore in an unwrapped
+ * command opens an italic span that never closes, breaking the whole message.
+ * Telegram surfaces this as a generic 400 which our error classifier maps to
+ * "bad chat id" — confusing but fits the listener-stop contract.
+ *
+ * Exported for testing only.
+ */
+export function escapeTelegramMarkdown(text: string): string {
+  return text.replace(/([_*`[\]])/g, '\\$1');
+}
+
 async function sendControlAnnouncement(): Promise<void> {
   if (!config) return;
   // Prefer synced state (has tab info + ids for alias derivation). Falls back
   // to the simpler getProjectsFn shape if sync hasn't fired yet — early boot
   // edge case. See features/telegram-agent-bridge.md MVP scope.
   const synced = getSyncedProjects();
-  const lines = [`🖥 Now controlled by *${os.hostname()}*`, ''];
+  const lines = [`🖥 Now controlled by *${escapeTelegramMarkdown(os.hostname())}*`, ''];
   if (synced.length > 0) {
     lines.push('*Projects:*');
     for (const proj of synced) {
       const hasAgent = proj.tabs.some((t) => isAgentTab(t.id));
+      const safeName = escapeTelegramMarkdown(proj.name);
       if (hasAgent) {
         const alias = aliasOrFallback(proj.name, proj.id);
-        lines.push(`  • ${proj.name} (${proj.connectionType}) → /use_${alias}`);
+        const safeAlias = escapeTelegramMarkdown(alias);
+        lines.push(`  • ${safeName} (${proj.connectionType}) → /use\\_${safeAlias}`);
       } else {
-        lines.push(`  • ${proj.name} (${proj.connectionType})`);
+        lines.push(`  • ${safeName} (${proj.connectionType})`);
       }
     }
   } else {
@@ -206,7 +225,7 @@ async function sendControlAnnouncement(): Promise<void> {
       lines.push('_No projects._');
     } else {
       lines.push('*Projects:*');
-      for (const p of projects) lines.push(`  • ${p.name} (${p.connectionType})`);
+      for (const p of projects) lines.push(`  • ${escapeTelegramMarkdown(p.name)} (${p.connectionType})`);
     }
   }
   await apiCall('sendMessage', {
