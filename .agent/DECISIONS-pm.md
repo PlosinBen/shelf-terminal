@@ -147,6 +147,27 @@ PM agent（背景自動駕駛、Telegram bridge、write_to_pty、project note）
 **不要改**:
 - 不要把 note 換成 append-only log — 會無限膨脹
 - 不要拿掉 size 上限 — PM 不自我約束會無限膨脹
+
+---
+
+## 43. PM Active = telegram listener master switch（Phase A）
+
+**決策**: 新增明確的 PM Active 開關控制 telegram listener,取代「有 config 就 boot 啟動」的隱性行為。詳見 `.agent/features/pm-active-status.md`(含 Phase B / autopilot 移除評估)。
+
+- **PM Active** = telegram listener on/off。需 telegram config(無則 toggle disabled)。持久化「當下狀態」到 `AppSettings.pmActive`,boot 還原。
+- **Away 依賴 PM Active**:Away toggle 在 `!pmActive` 時 disabled;PM Active 轉 off 連帶關 Away(cascade)。理由:沒有 telegram 通道就不該進 autopilot。
+- **搶權模型(409)**:同一 bot 最新 poller 贏、舊的收 409 → 舊的**立刻 yield(PM Active off)、不重試**。效果:開哪台搶哪台,其他台自動讓出,手動再開即搶回。**不可重試**(會 ping-pong)。
+- **錯誤分類**:401/404(bad token)→停+報;409→yield;transient→5s retry。`apiCall` 吐 HTTP status 供分類。
+- **啟動通知**:listener start 後發「Now controlled by <hostname>」+ project list;兼 chat-id 驗證(首次 send,400→停)。
+- **PmView read-only**:移除訊息 input + in-app slash(/clear→Clear History 鈕、/model→Settings、/compact 拿掉)。PM 由 tab 事件 / telegram 驅動,不需 app 內繞一層對話。app 內不再有 slash(只剩 telegram 一套,消除雙 `/` 混淆)。
+
+**原因**: 給 PM 明確開關(取代隱性 always-on 燒 token);多機時免改 config 互搶(409 yield);read-only 對齊「人在電腦前不需繞一層」。
+
+**不要改**:
+- 不要把 telegram 改回「config-driven 自動啟動」— 現在由 PM Active 驅動。
+- **不要在 409 重試** — 必須立刻 yield,否則兩 instance 無限搶。
+- `SHELF_TEST_MODE=1` 時 `startTelegram` 故意 no-op(不打網路)— e2e 靠它驗 PM Active/Away,別拿掉。
+- **Phase B(把監看 gate 從 away 搬到 pmActive、移除 autopilot)等 `/use-project-id` bridge 後再做** — 別提前(見 feature doc 評估)。
 - 不要讓 user 直接編輯 note 當「寫 PM 指示」用 — PM 下次 write 會覆蓋。要影響 PM，請 PM 同步或改寫
 
 ---

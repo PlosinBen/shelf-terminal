@@ -86,11 +86,12 @@
 | Note 儲存 | `note-store.ts` | Project notes（`<userData>/pm-notes/<projectId>.md`）+ global note（`<userData>/pm-global-note.md`）|
 | 對話持久化 | `history-store.ts` | `<userData>/pm-history.json` 讀寫、app 啟動載入、每 turn 存檔 |
 | Away Mode 狀態 | `away-mode.ts` | 全域 boolean + 同步到 renderer |
+| PM Active 狀態 | `pm-active.ts` | telegram listener 的 master 開關 runtime state + 同步 renderer（mirror away-mode）。純 state holder；orchestration（start/stop telegram、persist、cascade away off）在 `ipc/pm.ts` 的 `applyPmActive`。持久化在 `AppSettings.pmActive`，boot 還原 |
 | 硬紅線檢查 | `redline.ts` | scrollback pattern match（rm -rf、git push --force、DROP TABLE 等） |
 | Tab 狀態監控 | `tab-watcher.ts` | scrollback 狀態轉換偵測（cli_running → cli_waiting_permission 等）觸發 PM 自動事件；`snapshotTabs()` 給 `/status` 用 |
 | PTY → PM bridge | `pty-bridge.ts` | `handlePtyData` / `handlePtyRemove` / `handlePtyClear` — pty-manager 的 `PtyObserver` 注入目標（P1-1 依賴反轉）。`handlePtyData` 先 `scrollback.append` 再 `tab-watcher.checkTab`（順序契約：watcher 讀 scrollback）。**不 import pty-manager**，接線在 index.ts |
 | PTY bridge 單元測試 | `pty-bridge.test.ts` | 三種訊號路由到 scrollback/tab-watcher + append-before-checkTab 順序契約（守 P1-1 靜默壞掉風險）|
-| Telegram bridge | `telegram.ts` | Bot API long polling、sendMessage、inline button（Allow/Deny、Away toggle）、slash commands（`/help` `/away` `/status` `/tabs` `/stop`）+ `setMyCommands` 自動註冊 |
+| Telegram bridge | `telegram.ts` | Bot API long polling、sendMessage、inline button（Allow/Deny、Away toggle）、slash commands（`/help` `/away` `/status` `/tabs` `/stop`）+ `setMyCommands` 自動註冊。**由 PM Active 驅動 start/stop**（非 config）。**錯誤分類**（`apiCall` 吐 HTTP status）：409→立刻 yield（stopOnError，不重試，最新 poller 贏）、401/404→停、transient→5s retry。`startTelegram` 成功後發**啟動通知**（hostname + project list，兼 chat-id 驗證,400→停）。`stopOnError`→`onListenerStopped` callback（→ ipc/pm 關 PM Active）。**`SHELF_TEST_MODE=1` 時 listener no-op**（不打網路,給 e2e 驗 PM Active/Away）|
 | 單元測試 | `scrollback-buffer.test.ts` | Ring buffer + ANSI strip 測試 |
 | 單元測試 | `tools.test.ts` | inferTabState heuristic 測試 |
 | 單元測試 | `redline.test.ts` | 硬紅線 pattern match 測試 |
@@ -110,7 +111,7 @@
 | Picker 面板 | `components/PickerPanel.tsx` | Bottom-anchored 多題互動 form。Provider 透過 picker_request 觸發（Claude AskUserQuestion 攔截、Copilot elicitation handler）。1-4 prompts 一次顯示一題、next button 導航；per-prompt single/multi-select + 當 `inputType` 設定時 always-visible 自填輸入框（text / number / integer，HTML5 type 對應 + integer 用 step=1）。鍵盤：↑↓ 永遠導航 options（input focus 也 blur）、Space toggle（input focused 時 native space）、Enter advance、Esc cancel。Streaming → idle 自動 dismiss（避免 ghost panel）。Pure helpers `initialStateFor` / `isComplete` / `packAnswer` 抽出做 unit test |
 | Bottom bar（全寬 app footer） | `components/BottomBar.tsx` | **App 層全寬狀態列**（在 `.content` row 之下，跨 sidebar 底）。左：service type（local/wsl/ssh/docker）+ cwd。右：`v{version}`+更新狀態機 widget（idle 檢查/available 下載/downloading 進度/downloaded 安裝，走 `updater.*`）+ Projects/PM/Notes/DevTools toggle（icon-only，inline SVG 見 `components/icons.tsx`；保留 `sr-only` 文字供 e2e `hasText` + a11y）。狀態走 icon 顏色（Zed 風，無底色）：inactive=`--text-muted`、hover=`--text`、**active=`--accent`**；PM **away 模式**加 `pm-away` class 把 icon 染紅（`#f38ba8`，蓋過 active，panel 開關都看得到 PM 被接管）—— 舊的 `pm-tab-dot` 綠/紅圓點已移除。**branch UI 已移除**（更新時機不可靠）；切換邏輯休眠保留 — `SWITCH_BRANCH_EVENT` handler 仍在 App.tsx，re-wire 只需重發 event（見 DECISIONS-core #21、footer-redesign.md）。footer 恆顯示（無 project 時左側留空） |
 | Sidebar | `components/Sidebar.tsx` | Project 列表、拖曳排序、右鍵選單（含 New Worktree）、worktree branch 顯示。**收合改由 footer 的 Projects toggle**（不再有 header 收合鈕）；**版號+更新 widget 已搬到 BottomBar** |
-| Tab bar | `components/TabBar.tsx` | Tab 列表、拖曳排序、雙擊重命名、unread badge、tab 顏色 |
+| Tab bar | `components/TabBar.tsx` | Tab 列表、拖曳排序、雙擊重命名、unread badge、tab 顏色。右上 **PM Active badge**（`pmActive` 時顯示 pulsing message icon,點擊開 PmView;全域,無 project 也顯示） |
 | 快速指令選擇器 | `components/CommandPicker.tsx` | ⌘E 叫出 overlay，過濾 + 執行 per-project 快速指令 |
 | 開發工具面板 | `components/DevToolsPanel.tsx` | ⌘D toggle 右側 panel，accordion 可收合，Base64/JSON/URL/UUID/Timestamp/Hash 工具，寬度可拖拉調整 |
 | 資料夾選擇器 | `components/FolderPicker.tsx` | 兩步驟（connection type → browse），用 connector API |
@@ -119,7 +120,7 @@
 | Settings 面板 | `components/SettingsPanel.tsx` | 左側 tab 分頁（Terminal / Models / PM Agent / Shortcuts）；Models tab 顯示 PM 與 Claude 的 custom model entries；PM Agent tab 含 provider config + Telegram bridge |
 | Worktree 建立 | `components/WorktreeDialog.tsx` | 輸入新 branch name 建立 git worktree，產生 sub-project |
 | 刪除確認 | `components/RemoveConfirmDialog.tsx` | Remove project 確認 modal，worktree 可勾選是否清理 worktree files |
-| PM 聊天面板 | `components/PmView.tsx` | 右側可拖拉 panel（訊息列表 + markdown 渲染 + streaming + tool call 摺疊 + Away Mode toggle + error 顯示）；chunk handling 走 `pm-view-reducer.ts` 的純 reducer |
+| PM 狀態面板（read-only） | `components/PmView.tsx` | 右側可拖拉 panel（訊息列表 + markdown 渲染 + streaming + tool call 摺疊 + error 顯示）；chunk handling 走 `pm-view-reducer.ts` 純 reducer。**read-only：無訊息 input、無 in-app slash**（PM 由 tab 事件 / telegram 驅動）。Header：**PM Active toggle**（無 telegram config 時 disabled）、**Away toggle**（`!pmActive` 時 disabled,依賴 PM Active）、**Clear History** 鈕、× 關閉 |
 | Notes 面板 | `components/NotesView.tsx` | ⌘N toggle 右側 panel，per-project markdown scratch pad（preview / edit toggle）；edit 模式 paste 圖片直接存檔 + 自動插入 ref；debounced auto-save；preview 走 `marked` + `shelf-image://` |
 | Quick Note overlay | `components/QuickNoteOverlay.tsx` | ⌘⇧N 叫出 floating textarea，Enter 送出 / Shift+Enter 換行 / Esc 取消；paste 圖片支援（走 `parseDataTransfer` + `notes.saveImage` IPC，縮圖列下方顯示、可 ✕ 移除），純圖片也能送；走 `notes.quickCreate` IPC atomic 寫入當下 active project（title 自動 derive：先 `# heading` → fallback 第一行 trim 80） |
 | Note 圖片縮圖 | `components/NoteImage.tsx` | 共用元件，NotesView 跟 QuickNoteOverlay 都用；透過 `notes.readImage` IPC 載 Blob URL，hover 顯示 ✕，URL lifecycle 由元件自己管 |
