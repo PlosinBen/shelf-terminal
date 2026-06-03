@@ -1725,7 +1725,7 @@ button {
 /* ── Bottom Bar ── */
 
 .bottom-bar {
-  height: 24px;
+  height: 30px;
   background: var(--bg-secondary);
   border-top: 1px solid var(--border);
   display: flex;
@@ -1772,7 +1772,7 @@ button {
 
 .bottom-bar-version {
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .bottom-bar-update-btn {
@@ -1948,7 +1948,7 @@ button {
 }
 
 .right-tab-btn span {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--text-muted);
   letter-spacing: 0.3px;
