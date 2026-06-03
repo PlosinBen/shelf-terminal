@@ -256,6 +256,10 @@ export interface AppSettings {
   unicode11?: boolean;
   pmProvider?: PmProviderConfig;
   telegram?: TelegramConfig;
+  /** Persisted PM Active (telegram listener) on/off intent. Restored at launch
+   *  (start if true + telegram configured). Toggled via PM_SET_ACTIVE, and
+   *  auto-set false when the listener stops on a fatal/conflict error. */
+  pmActive?: boolean;
   agentDisplay?: Partial<Record<AgentDisplayKey, AgentDisplayMode>>;
   /** Max UI messages kept in memory per agent tab. Controls render perf
    *  (and indirectly React reconciliation cost). IDB no longer has a

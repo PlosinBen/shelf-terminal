@@ -88,6 +88,10 @@ export const IPC = {
   PM_SYNC_STATE: 'pm:sync-state',
   PM_AWAY_MODE: 'pm:away-mode',
   PM_AWAY_MODE_GET: 'pm:away-mode-get',
+  PM_ACTIVE: 'pm:active',
+  PM_SET_ACTIVE: 'pm:set-active',
+  PM_ACTIVE_GET: 'pm:active-get',
+  PM_ACTIVE_ERROR: 'pm:active-error',
   PM_ESCALATION_RESPOND: 'pm:escalation-respond',
 
   // Main → Renderer (send)
