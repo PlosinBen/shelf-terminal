@@ -1928,14 +1928,6 @@ button {
 /* ── PM Agent ── */
 
 
-.pm-dot {
-  background: #a6e3a1 !important;
-}
-
-.pm-dot-away {
-  background: #f38ba8 !important;
-}
-
 .right-tab-btn {
   display: inline-flex;
   align-items: center;
@@ -1957,8 +1949,14 @@ button {
 }
 
 .right-tab-btn.active {
-  background: var(--surface);
-  color: var(--text);
+  color: var(--accent);
+}
+
+/* Away Mode signal — red overrides active/hover so PM-in-control is always
+   visible regardless of whether the panel is open. */
+.right-tab-btn.pm-away,
+.right-tab-btn.pm-away:hover {
+  color: #f38ba8;
 }
 
 .sr-only {
@@ -1971,13 +1969,6 @@ button {
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   border: 0;
-}
-
-.pm-tab-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  writing-mode: horizontal-tb;
 }
 
 .pm-no-provider {

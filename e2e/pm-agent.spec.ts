@@ -48,9 +48,20 @@ test('footer shows PM toggle', async ({ shelfApp: { page } }) => {
   await expect(pmBtn).toBeVisible({ timeout: 5_000 });
 });
 
-test('PM footer toggle has status dot', async ({ shelfApp: { page } }) => {
-  const dot = page.locator('.right-tab-btn .pm-tab-dot');
-  await expect(dot).toBeVisible({ timeout: 5_000 });
+test('PM footer toggle reflects away mode', async ({ shelfApp: { page } }) => {
+  const pmBtn = page.locator('.right-tab-btn', { hasText: 'PM' });
+  await expect(pmBtn).not.toHaveClass(/pm-away/);
+
+  // Turn Away Mode on from the PM panel header → footer toggle goes red (pm-away)
+  await openPmPanel(page);
+  await page.locator('.pm-away-toggle').click();
+  await expect(page.locator('.pm-away-toggle')).toContainText('Away ON', { timeout: 3_000 });
+  await expect(pmBtn).toHaveClass(/pm-away/);
+
+  // Off + cleanup
+  await page.locator('.pm-away-toggle').click();
+  await expect(pmBtn).not.toHaveClass(/pm-away/);
+  await closePmPanel(page);
 });
 
 test('footer shows DevTools toggle alongside PM', async ({ shelfApp: { page } }) => {
@@ -128,7 +139,7 @@ test('Away Mode toggle exists in PM panel header', async ({ shelfApp: { page } }
   await closePmPanel(page);
 });
 
-test('Away Mode toggle changes button state and dot color', async ({ shelfApp: { page } }) => {
+test('Away Mode toggle changes its on/off state', async ({ shelfApp: { page } }) => {
   await openPmPanel(page);
   const toggle = page.locator('.pm-away-toggle');
   await expect(toggle).toContainText('Away OFF');

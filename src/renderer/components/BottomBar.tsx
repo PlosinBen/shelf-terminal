@@ -104,12 +104,11 @@ export function BottomBar() {
             <span className="sr-only">Projects</span>
           </button>
           <button
-            className={`right-tab-btn${pmVisible ? ' active' : ''}`}
+            className={`right-tab-btn${pmVisible ? ' active' : ''}${awayMode ? ' pm-away' : ''}`}
             tabIndex={-1}
             onClick={() => toggleRightSidebar('pm')}
             title={tooltipWithShortcut('PM Agent', kb.togglePm, isMac)}
           >
-            <span className={`pm-tab-dot ${awayMode ? 'pm-dot-away' : 'pm-dot'}`} />
             <MessageIcon />
             <span className="sr-only">PM</span>
           </button>
