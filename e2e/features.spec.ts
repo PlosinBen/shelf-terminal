@@ -153,12 +153,10 @@ test('sidebar collapse and expand', async ({ shelfApp: { page } }) => {
   await page.keyboard.press(`${modifier}+Shift+b`);
   await expect(sidebar).not.toBeVisible();
 
-  // Expand button should appear in tab bar
-  const expandBtn = page.locator('.tab-sidebar-btn');
-  await expect(expandBtn).toBeVisible();
-
-  // Click to expand
-  await expandBtn.click();
+  // Expand via the footer Projects toggle (always visible)
+  const projectsToggle = page.locator('.right-tab-btn', { hasText: 'Projects' });
+  await expect(projectsToggle).toBeVisible();
+  await projectsToggle.click();
   await expect(sidebar).toBeVisible();
 });
 

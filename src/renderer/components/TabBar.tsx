@@ -5,7 +5,6 @@ import {
   renameTab,
   reorderTabs,
   clearUnread,
-  toggleProjectList,
   toggleMuted,
   setTabColor,
   appendDefaultTab,
@@ -26,7 +25,7 @@ const TAB_COLORS = [
 export { TAB_COLORS };
 
 export function TabBar() {
-  const { projects, activeProjectIndex, sidebarVisible } = useStore();
+  const { projects, activeProjectIndex } = useStore();
   const project = projects[activeProjectIndex];
 
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
@@ -62,13 +61,7 @@ export function TabBar() {
   }, [contextMenu, addMenu]);
 
   if (!project) {
-    return (
-      <div className="tab-bar">
-        {!sidebarVisible && (
-          <button className="tab-sidebar-btn" onClick={toggleProjectList} title="Expand project list">&#9776;</button>
-        )}
-      </div>
-    );
+    return <div className="tab-bar" />;
   }
 
   const handleNewTab = () => {
@@ -125,9 +118,6 @@ export function TabBar() {
 
   return (
     <div className="tab-bar">
-      {!sidebarVisible && (
-        <button className="tab-sidebar-btn" onClick={toggleProjectList} title="Expand project list">&#9776;</button>
-      )}
       {project.tabs.map((tab, i) => {
         const isEditing = editingIndex === i;
         const isDragging = dragIndex === i;
