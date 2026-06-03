@@ -13,9 +13,13 @@ async function openFolderPicker(page: any) {
   await expect(nextBtn).toBeVisible({ timeout: 3_000 });
   await nextBtn.click();
 
-  // Now in browse step
+  // Now in browse step. setStep('browse') is synchronous but listDir is
+  // async — on slow hosts a subsequent Cmd+Enter fires while currentPath
+  // is still '', producing an empty-cwd project. Wait for the resolved
+  // path to render before returning.
   const header = page.locator('.fp-header');
   await expect(header).toContainText('Open Project', { timeout: 5_000 });
+  await expect(page.locator('.fp-browser-path')).toContainText('/', { timeout: 5_000 });
 }
 
 /**
