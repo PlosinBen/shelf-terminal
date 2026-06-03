@@ -1945,25 +1945,32 @@ button {
   padding: 0 7px;
   background: none;
   border: none;
-}
-
-.right-tab-btn span {
-  font-size: 12px;
-  font-weight: 600;
   color: var(--text-muted);
-  letter-spacing: 0.3px;
 }
 
-.right-tab-btn:hover span {
+.right-tab-btn svg {
+  display: block;
+}
+
+.right-tab-btn:hover {
   color: var(--text);
 }
 
 .right-tab-btn.active {
   background: var(--surface);
+  color: var(--text);
 }
 
-.right-tab-btn.active span {
-  color: var(--text);
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .pm-tab-dot {

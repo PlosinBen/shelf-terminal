@@ -2,6 +2,7 @@ import React from 'react';
 import { useStore, toggleProjectList, toggleRightSidebar } from '../store';
 import { tooltipWithShortcut } from '../utils/format-keybinding';
 import { isMac } from '../hooks/useKeybindings';
+import { PanelLeftIcon, MessageIcon, NoteIcon, CodeIcon } from './icons';
 import type { Connection } from '@shared/types';
 
 const version = __APP_VERSION__;
@@ -99,7 +100,8 @@ export function BottomBar() {
             onClick={toggleProjectList}
             title={tooltipWithShortcut('Projects', kb.toggleProjectList, isMac)}
           >
-            <span>Projects</span>
+            <PanelLeftIcon />
+            <span className="sr-only">Projects</span>
           </button>
           <button
             className={`right-tab-btn${pmVisible ? ' active' : ''}`}
@@ -108,7 +110,8 @@ export function BottomBar() {
             title={tooltipWithShortcut('PM Agent', kb.togglePm, isMac)}
           >
             <span className={`pm-tab-dot ${awayMode ? 'pm-dot-away' : 'pm-dot'}`} />
-            <span>PM</span>
+            <MessageIcon />
+            <span className="sr-only">PM</span>
           </button>
           <button
             className={`right-tab-btn${notesVisible ? ' active' : ''}`}
@@ -116,7 +119,8 @@ export function BottomBar() {
             onClick={() => toggleRightSidebar('notes')}
             title={tooltipWithShortcut('Notes', kb.toggleNotes, isMac)}
           >
-            <span>Notes</span>
+            <NoteIcon />
+            <span className="sr-only">Notes</span>
           </button>
           <button
             className={`right-tab-btn${devToolsVisible ? ' active' : ''}`}
@@ -124,7 +128,8 @@ export function BottomBar() {
             onClick={() => toggleRightSidebar('devtools')}
             title={tooltipWithShortcut('Dev Tools', kb.toggleDevTools, isMac)}
           >
-            <span>Dev Tools</span>
+            <CodeIcon />
+            <span className="sr-only">Dev Tools</span>
           </button>
         </span>
       </div>
