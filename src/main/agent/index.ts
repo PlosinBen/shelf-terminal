@@ -297,8 +297,21 @@ export function isAgentTab(tabId: string): boolean {
  * Returns the same boolean as sendMessage: false if tabId has no session, true
  * once the turn completes (including catch'd errors — those propagate through
  * the observer stream as AgentEvent.error, not as a rejected promise).
+ *
+ * Mirrors a user-message bubble into the renderer's history before kicking
+ * off the turn. The IPC path doesn't need this because InputZone upserts the
+ * user bubble locally before emitting agent:send — but internal callers (the
+ * Telegram bridge) bypass that, so without this mirror the renderer would
+ * only see the agent reply with no record of what was asked. The bridge IS
+ * just a forwarder, so the agent view should look identical to a direct send.
  */
 export async function sendFromInternal(tabId: string, prompt: string): Promise<boolean> {
+  if (!sessions.has(tabId)) return false;
+  send(IPC.AGENT_MESSAGE, tabId, {
+    type: 'user',
+    msgId: `bridge-user-${Date.now()}`,
+    content: prompt,
+  });
   return sendMessage(tabId, prompt);
 }
 

@@ -35,6 +35,15 @@ export function buildAgentMsg(msg: any, provider: string): AgentMsg | null {
       return { id, type: 'system', content: msg.content ?? '', provider, timestamp: ts };
     case 'error':
       return { id, type: 'error', content: msg.content ?? 'Unknown error', provider, timestamp: ts };
+    case 'user':
+      // Wire-emitted user bubble. Providers never emit this — but main can
+      // (e.g. the Telegram bridge mirrors forwarded prompts so the agent view
+      // history shows the message that was sent on the user's behalf).
+      return {
+        id, type: 'user', content: msg.content ?? '', timestamp: ts,
+        ...(Array.isArray(msg.images) && msg.images.length > 0 ? { images: msg.images } : {}),
+        ...(Array.isArray(msg.files) && msg.files.length > 0 ? { files: msg.files } : {}),
+      };
     case 'fold_text':
       return {
         id, type: 'fold_text', ...foldBase(msg),
