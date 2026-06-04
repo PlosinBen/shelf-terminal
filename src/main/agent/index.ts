@@ -19,18 +19,28 @@ interface SessionInstance {
 const sessions = new Map<string, SessionInstance>();
 
 // ── Internal output observers (for Telegram bridge etc.) ──
-// Lets in-process modules (PM telegram bridge) tee a tab's outgoing agent
-// events without going through renderer IPC. See features/telegram-agent-bridge.md.
-type OutputObserver = (event: AgentEvent) => void;
-const observers = new Map<string, Set<OutputObserver>>();
+// Lets in-process modules (PM telegram bridge) tee EVERY tab's outgoing agent
+// events without going through renderer IPC. Observers are global — there is
+// no per-tab subscription; the bridge listens to everything and filters by
+// `(mode active && tabId matches)` inside its own handler.
+//
+// Rationale: dispatchEvent is a pure transport layer. It MUST NOT know which
+// consumers care about which tabs, or which buffering / display strategy each
+// consumer uses (renderer streams chunk-by-chunk, telegram batches + flushes
+// on idle). Pushing tabId filtering and lifecycle into the consumer keeps
+// dispatch O(1) and lets the bridge be a permanent listener registered once
+// at app boot — no register/unregister coupled to mode switches.
+//
+// See features/telegram-agent-bridge.md (Architecture: Global Observer).
+type GlobalObserver = (tabId: string, event: AgentEvent) => void;
+const globalObservers = new Set<GlobalObserver>();
 
 function notifyObservers(tabId: string, event: AgentEvent): void {
-  const set = observers.get(tabId);
-  if (!set) return;
-  // Snapshot in case observer unsubscribes during iteration.
-  for (const obs of Array.from(set)) {
+  if (globalObservers.size === 0) return;
+  // Snapshot in case an observer unsubscribes during iteration.
+  for (const obs of Array.from(globalObservers)) {
     try {
-      obs(event);
+      obs(tabId, event);
     } catch (e: any) {
       log.error('agent', `observer error tab=${tabId.slice(0, 8)}: ${e?.message ?? e}`);
     }
@@ -321,26 +331,20 @@ export async function stopFromInternal(tabId: string): Promise<boolean> {
 }
 
 /**
- * Subscribe to agent output events for a given tab. Mirrors all AgentEvent
- * values flowing through dispatchEvent + the direct sends in sendMessage
- * (status streaming, permission request, error).
+ * Subscribe to ALL tabs' agent output events. Mirrors every AgentEvent
+ * flowing through dispatchEvent + the direct sends in sendMessage (status
+ * streaming, permission_request, error). Observer receives `(tabId, event)`
+ * and is responsible for filtering to the tabs it cares about.
  *
- * Returns an unsubscribe function. Caller must call it (typically in a try /
- * finally around sendFromInternal). Observer exceptions are logged and
- * swallowed — they cannot break the agent event stream.
+ * Returns an unsubscribe function — typically unused in practice since the
+ * single consumer (telegram bridge) registers once at boot and lives the
+ * whole process. Observer exceptions are logged and swallowed so a bridge
+ * crash can't break the agent event stream feeding the renderer.
  */
-export function registerOutputObserver(tabId: string, observer: OutputObserver): () => void {
-  let set = observers.get(tabId);
-  if (!set) {
-    set = new Set();
-    observers.set(tabId, set);
-  }
-  set.add(observer);
+export function registerOutputObserver(observer: GlobalObserver): () => void {
+  globalObservers.add(observer);
   return () => {
-    const s = observers.get(tabId);
-    if (!s) return;
-    s.delete(observer);
-    if (s.size === 0) observers.delete(tabId);
+    globalObservers.delete(observer);
   };
 }
 

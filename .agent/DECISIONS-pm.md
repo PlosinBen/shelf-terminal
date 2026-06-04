@@ -215,9 +215,13 @@ PM agent（背景自動駕駛、Telegram bridge、write_to_pty、project note）
 User 用 slash command 切 mode：`/pm` / `/use_<alias>` / `/projects` / `/mode`。Alias 從 project name derive（移除非英數 + lower case），動態 register 進 `setMyCommands` 讓 Telegram 提供 autocomplete。
 
 跨 process plumbing 走兩個 internal API（`src/main/agent/index.ts`）：
-- `sendFromInternal(tabId, prompt)` — 同 IPC `AGENT_SEND` path、不經 renderer
-- `registerOutputObserver(tabId, fn)` — 訂閱該 tab outgoing AgentEvent 流（tee 自 dispatchEvent + sendMessage 直接 send 的 status/permission/error）
+- `sendFromInternal(tabId, prompt)` — 同 IPC `AGENT_SEND` path、不經 renderer。會額外 emit 一則 `{type:'user', content:prompt}` 進 IPC.AGENT_MESSAGE 讓 renderer 把使用者氣泡也加進歷史（bridge 是 forwarder，不該讓 agent view 漏掉訊息）
+- `registerOutputObserver(fn)` — 訂閱**所有 tab** outgoing AgentEvent 流，handler signature 為 `(tabId, event) => void`，由 caller 自己過濾。Bridge 在 boot 註冊一次（`initTelegramBridge`）永不解綁，handler 內部用 `mode === 'agent' && mode.tabId === tabId` gate 是否處理
 - 配套 `stopFromInternal` / `listAgentTabs` / `getAgentProvider` 給 telegram bridge enumerate / 模式切換用
+
+**為什麼 observer 是 global 不是 per-tab**: `dispatchEvent` 是純 transport layer，**不該知道**哪些 consumer 在乎哪個 tab、也不該知道 consumer 用什麼 buffering / 顯示策略（renderer streams chunk-by-chunk、telegram 一次 flush 整段）。Per-tab subscribe/unsubscribe 把生命週期跟 mode 切換綁在一起，造成「bridge 內部狀態的時機」跟「分派層」相互滲透。改成 global + caller 自己 filter 後，bridge 純粹是 message bus 的另一個 consumer，跟 renderer IPC 站平級。
+
+**Bridge reply buffer 設計（`telegram-bridge-accumulator.ts`）**: Telegram API 對單則訊息一次 send 比多次 edit 成本低、Markdown 也要完整文字才能正確 parse，所以 bridge 要等 turn 結束才 flush — 這是 listener 自己的顯示策略，不是 dispatch 層的事。Accumulator 是**streaming-status agnostic**：只追蹤 `reply` 累積 + `idle` flush，**完全不看 `streaming`**（早期版本用 first-streaming 當 turn-start，但 claude 一個 turn 內 emit 多次 streaming refresh token counts，會把 buffer 清掉 → telegram 永遠收到 "turn ended with no reply" fallback）。Turn-start reset 由 caller 在 `routeMessageToAgent` 顯式做。
 
 **原因**:
 - PM 作為中介有「轉述失真 + 多一輪 LLM round-trip 延遲」兩個固有問題

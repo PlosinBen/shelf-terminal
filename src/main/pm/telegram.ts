@@ -18,6 +18,7 @@ import {
   formatProjectsList,
   aliasOrFallback,
 } from './telegram-mode';
+import { AgentReplyAccumulator } from './telegram-bridge-accumulator';
 
 export type ListenerStopReason = 'bad-token' | 'bad-chat-id' | 'taken-over';
 
@@ -31,14 +32,17 @@ type Mode =
   | { type: 'agent'; tabId: string; projectName: string; provider: string };
 let mode: Mode = { type: 'pm' };
 
-// Active output observer for current agent mode. Null in PM mode.
-let agentObserverUnsubscribe: (() => void) | null = null;
+// Per-agent-turn reply accumulator. The bridge handler is a permanent global
+// observer (registered once at boot via initTelegramBridge), so the
+// accumulator's lifetime spans the whole process. Turn-start reset is the
+// caller's job (routeMessageToAgent before sendFromInternal); flush happens
+// on the `idle` event. See telegram-bridge-accumulator.ts for the design
+// constraint (telegram needs one complete message per turn).
+const agentAccumulator = new AgentReplyAccumulator();
 
-// Per-agent-turn reply accumulator. `reply` AgentMessage content is appended
-// while `streaming`; flushed to Telegram on the next `idle` status event.
-// Reset at the start of each turn so old text doesn't leak into a new one.
-const agentReplyBuffer: string[] = [];
-let agentTurnInProgress = false;
+// `true` once initTelegramBridge has registered the global observer. Guards
+// against double-registration on hot reload / repeated init calls.
+let bridgeObserverRegistered = false;
 
 const BASE_COMMANDS: { command: string; description: string }[] = [
   { command: 'help', description: 'List available commands' },
@@ -72,6 +76,22 @@ let getProjectsFn: (() => { name: string; connectionType: string }[]) | null = n
 
 export function setListenerStoppedCallback(cb: ListenerStoppedCallback): void {
   onListenerStopped = cb;
+}
+
+/**
+ * Register the bridge's global agent-event observer. Call once at app boot.
+ *
+ * The observer is permanent — it lives for the whole process lifetime, which
+ * is why this function isn't symmetric with a teardown. The handler internally
+ * filters by `(mode active && tabId matches)` so it sees every agent tab's
+ * events but only acts when the bridge is currently routing to that tab.
+ *
+ * Idempotent: extra calls are no-ops (guards hot-reload / re-init scenarios).
+ */
+export function initTelegramBridge(): void {
+  if (bridgeObserverRegistered) return;
+  registerOutputObserver(handleAgentEvent);
+  bridgeObserverRegistered = true;
 }
 
 export function setProjectsProvider(fn: () => { name: string; connectionType: string }[]): void {
@@ -142,11 +162,15 @@ async function registerCommands(): Promise<void> {
 /**
  * Tear down listener-bound state. Called by both `stopTelegram` (user-
  * initiated, via PM Active off) and `stopOnError` (fatal/conflict error).
- * Keeping these unified ensures the agent-mode observer / sync-callback /
- * pending refresh timer / agent-reply buffer get cleaned in BOTH paths —
- * an earlier split version leaked the observer/callback on 409 yield, so
- * after a re-grab the bridge would double-subscribe (see merge commit for
- * pm-active-listener integration).
+ * Keeping these unified ensures the sync-callback / pending refresh timer /
+ * agent-reply buffer get cleaned in BOTH paths — an earlier split version
+ * leaked the callback on 409 yield (see merge commit for pm-active-listener
+ * integration).
+ *
+ * Does NOT unregister the global agent observer — it stays for the process
+ * lifetime (see initTelegramBridge). The handler's mode-gate is what makes
+ * "listener off" effectively silent the bridge: with `mode = pm`, no agent
+ * events get forwarded to Telegram.
  */
 function cleanupListener(): void {
   polling = false;
@@ -159,12 +183,7 @@ function cleanupListener(): void {
     clearTimeout(refreshCommandsTimer);
     refreshCommandsTimer = null;
   }
-  if (agentObserverUnsubscribe) {
-    agentObserverUnsubscribe();
-    agentObserverUnsubscribe = null;
-  }
-  agentReplyBuffer.length = 0;
-  agentTurnInProgress = false;
+  agentAccumulator.reset();
   mode = { type: 'pm' };
 }
 
@@ -430,15 +449,10 @@ function handleIncomingMessage(text: string, chatId: string): void {
 }
 
 async function switchToPmMode(): Promise<void> {
-  if (agentObserverUnsubscribe) {
-    agentObserverUnsubscribe();
-    agentObserverUnsubscribe = null;
-  }
-  // Don't drop in-flight agent reply buffer — let it flush if turn completes
-  // after switch. But mode is already 'pm' so the flush goes nowhere meaningful;
-  // safe to clear.
-  agentReplyBuffer.length = 0;
-  agentTurnInProgress = false;
+  // Drop any in-flight buffered reply — once `mode = 'pm'` the handler will
+  // ignore further agent events, so an unflushed buffer would just leak into
+  // the next agent-mode session.
+  agentAccumulator.reset();
   mode = { type: 'pm' };
   await sendMessage('Back to PM mode.');
 }
@@ -455,13 +469,9 @@ async function switchToAgentMode(alias: string): Promise<void> {
     return;
   }
 
-  // Tear down previous observer if we were already in agent mode.
-  if (agentObserverUnsubscribe) {
-    agentObserverUnsubscribe();
-    agentObserverUnsubscribe = null;
-  }
-  agentReplyBuffer.length = 0;
-  agentTurnInProgress = false;
+  // Reset buffer before switching — leftover content from the previous tab
+  // would otherwise flush into the new tab's first idle.
+  agentAccumulator.reset();
 
   mode = {
     type: 'agent',
@@ -469,9 +479,6 @@ async function switchToAgentMode(alias: string): Promise<void> {
     projectName: res.projectName,
     provider: res.provider,
   };
-
-  // Subscribe to this tab's agent events for the duration of agent mode.
-  agentObserverUnsubscribe = registerOutputObserver(res.tabId, handleAgentEvent);
 
   await sendMessage(`Switched to \`${res.projectName}/${res.provider}\`. Send a message to talk to the agent. /pm to switch back.`);
 }
@@ -499,42 +506,39 @@ async function routeMessageToAgent(text: string): Promise<void> {
     if (onMessage && config) onMessage(text, config.chatId);
     return;
   }
-  // Reset accumulator for the new turn. handleAgentEvent will fill it during
-  // streaming and flush on idle.
-  agentReplyBuffer.length = 0;
-  agentTurnInProgress = false;
+  // Reset accumulator for the new turn — observer will fill it as `reply`
+  // events flow and emit a flush when the turn ends.
+  agentAccumulator.reset();
   // sendFromInternal returns when the turn loop exits. Errors propagate
   // through the observer as AgentEvent.error — not as a rejected promise.
   await sendFromInternal(mode.tabId, text);
 }
 
 /**
- * Observer callback for events flowing through the active agent session.
+ * Permanent global agent-event observer for the bridge. Registered once at
+ * boot (initTelegramBridge) and lives the process lifetime; gates itself by
+ * the current `mode` + matching tabId. Events for tabs we're not currently
+ * forwarding to (or any event while in PM mode) are dropped on the floor.
+ *
  * Accumulates reply text and flushes on idle. Permission/picker requests
  * trigger a "go to Shelf" fallback message (MVP — see plan).
  */
-function handleAgentEvent(event: AgentEvent): void {
-  // Defensive: if mode changed (user typed /pm mid-turn) we already
-  // unsubscribed, but a race could land one stale event here. Drop it.
-  if (mode.type !== 'agent') return;
+function handleAgentEvent(tabId: string, event: AgentEvent): void {
+  // Two-stage gate:
+  //   1. Bridge is in agent mode (not PM).
+  //   2. Event is for the tab the bridge is currently routing to.
+  // Anything else is silently dropped — the observer is permanent, so this is
+  // where "not interested right now" decisions are made (NOT in dispatch).
+  if (mode.type !== 'agent' || mode.tabId !== tabId) return;
+
+  // Accumulator handles per-turn reply buffering. Idle event triggers flush.
+  const result = agentAccumulator.onEvent(event);
+  if (result) flushAgentReply(result.flush);
 
   switch (event.type) {
-    case 'status': {
-      const state = event.payload.state;
-      if (state === 'streaming') {
-        agentTurnInProgress = true;
-        agentReplyBuffer.length = 0;
-      } else if (state === 'idle' && agentTurnInProgress) {
-        agentTurnInProgress = false;
-        flushAgentReply();
-      }
-      break;
-    }
     case 'message': {
       const m = event.payload;
-      if (m.type === 'reply') {
-        agentReplyBuffer.push(m.content);
-      } else if (m.type === 'error') {
+      if (m.type === 'error') {
         sendMessage(`❌ ${m.content}`).catch((e) => log.error('telegram', `error msg send failed: ${e.message}`));
       }
       // Other AgentMessage variants (note, system, fold_*, user) are
@@ -559,9 +563,7 @@ function handleAgentEvent(event: AgentEvent): void {
   }
 }
 
-function flushAgentReply(): void {
-  const text = agentReplyBuffer.join('');
-  agentReplyBuffer.length = 0;
+function flushAgentReply(text: string): void {
   if (text.length === 0) {
     sendMessage('_(turn ended with no reply — open Shelf for details)_')
       .catch((e) => log.error('telegram', `empty-reply notify failed: ${e.message}`));

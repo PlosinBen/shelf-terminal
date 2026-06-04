@@ -10,7 +10,7 @@ import { cleanupConnectors } from './connector';
 import { log, setLogLevel, setFileWriter } from '@shared/logger';
 import { applyUserDataIsolation } from './user-data-path';
 import { migratePmNotes } from './migrations/migrate-pm-notes';
-import { handlePmSend, handleTabEvent, stopGeneration, setWritePtyFn, initAwayMode, initPmActive, setProjectsProvider, setStateChangeCallback, stopTelegram, setMessageCallback, setCallbackQueryHandler, setStopCallback, handlePtyData, handlePtyRemove, handlePtyClear } from './pm';
+import { handlePmSend, handleTabEvent, stopGeneration, setWritePtyFn, initAwayMode, initPmActive, initTelegramBridge, setProjectsProvider, setStateChangeCallback, stopTelegram, setMessageCallback, setCallbackQueryHandler, setStopCallback, handlePtyData, handlePtyRemove, handlePtyClear } from './pm';
 import { applyPmActive } from './ipc/pm';
 import { initAgentManager, disposeAllAgents } from './agent';
 import { getMainWindow, setMainWindow, setProjects, setSettings, getSettings, getProjects } from './app-state';
@@ -146,6 +146,11 @@ app.whenReady().then(async () => {
   // PM wiring
   initAwayMode(getMainWindow()!);
   initPmActive(getMainWindow()!);
+  // Telegram bridge's permanent global agent-event observer. Registered once
+  // here so it lives the process lifetime, regardless of PM Active on/off.
+  // The handler's mode-gate decides whether to forward events to Telegram —
+  // PM Active off → `mode = pm` → everything dropped on the floor.
+  initTelegramBridge();
   setProjectsProvider(() => getProjects().map((p) => ({ name: p.name, connectionType: p.connection.type })));
   setWritePtyFn(writePty);
   // Feed PTY output/lifecycle into PM scrollback + tab-watcher (P1-1: the
