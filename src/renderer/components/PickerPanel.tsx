@@ -207,7 +207,16 @@ export function PickerPanel({ prompts, onSubmit, onCancel }: PickerPanelProps) {
       }
 
       if (e.key === 'Enter') {
-        if (inputFocused) return;
+        // Enter advances/submits whether the cursor is in the free-text input
+        // or on the option list — typing an answer and pressing Enter is the
+        // natural gesture (and the hint advertises "Enter submit"). Two guards:
+        //   - isComposing: an IME commit keystroke (CJK candidate selection)
+        //     also surfaces as Enter; submitting here would swallow the
+        //     candidate and send half-composed text. Let the IME consume it.
+        //   - !currentComplete: nothing to submit yet — don't fire on an empty
+        //     prompt (this is what previously made input-focus suppression
+        //     unnecessary, now enforced directly).
+        if (e.isComposing) return;
         if (!currentComplete) return;
         e.preventDefault();
         goNext();

@@ -27,6 +27,8 @@ import type {
  *   tool_err:<name>     tool_use + tool_result error
  *   permission:<tool>   permission_request, await resolve, follow-up system msg
  *   picker_single       1-prompt single-select picker (3 options)
+ *   picker_combo        1-prompt picker with options AND free-text (real
+ *                       AskUserQuestion shape: options + inputType together)
  *   picker_multi        3-prompt picker (single, multi+desc, free-text)
  *   picker_input        free-text only (options=[], inputType=text)
  *   picker_number       free-text only (options=[], inputType=integer)
@@ -122,6 +124,20 @@ export function pickerSinglePrompts(): FakePrompt[] {
   }];
 }
 
+/** Pure: shape picker_combo — options AND free-text in one prompt. This is
+ *  the shape every real Claude AskUserQuestion produces (askUserQuestionToPrompts
+ *  hardcodes inputType:'text' alongside the listed options), so it exercises
+ *  the "type your own without picking an option" path end-to-end. Exported
+ *  for tests. */
+export function pickerComboPrompts(): FakePrompt[] {
+  return [{
+    question: 'Pick one or type your own',
+    multiSelect: false,
+    options: [{ label: 'A' }, { label: 'B' }, { label: 'C' }],
+    inputType: 'text' as const,
+  }];
+}
+
 export function createFakeBackend(): ServerBackend {
   const pendingPickers = new Map<string, PendingPicker>();
   const pendingPermissions = new Map<string, PendingPermission>();
@@ -195,10 +211,11 @@ export function createFakeBackend(): ServerBackend {
       return;
     }
 
-    if (step === 'picker_single' || step === 'picker_multi' || step === 'picker_input' || step === 'picker_number') {
+    if (step === 'picker_single' || step === 'picker_combo' || step === 'picker_multi' || step === 'picker_input' || step === 'picker_number') {
       const id = mintId('p');
       const prompts =
         step === 'picker_single' ? pickerSinglePrompts() :
+        step === 'picker_combo'  ? pickerComboPrompts() :
         step === 'picker_multi'  ? pickerMultiPrompts() :
         step === 'picker_input'  ? [{ question: 'Type something', multiSelect: false, options: [], inputType: 'text' as const }] :
         /* picker_number */         [{ question: 'Type a number', multiSelect: false, options: [], inputType: 'integer' as const }];

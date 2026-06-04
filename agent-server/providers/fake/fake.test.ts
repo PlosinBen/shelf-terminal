@@ -110,6 +110,22 @@ describe('createFakeBackend — scenarios', () => {
     expect(echo.content).toBe('picker_answers:["B"]');
   });
 
+  it('picker_combo: one prompt carries BOTH options and inputType=text (real AskUserQuestion shape)', async () => {
+    const { send, msgs } = collect();
+    const b = createFakeBackend();
+    const done = b.query(makeInput('picker_combo'), send);
+    await new Promise((r) => setTimeout(r, 10));
+    const req = msgs.find((m) => m.type === 'picker_request') as any;
+    expect(req.prompts).toHaveLength(1);
+    expect(req.prompts[0].options).toHaveLength(3);
+    expect(req.prompts[0].inputType).toBe('text');
+    // Resolve with typed text, no option label — the "type your own" path.
+    b.resolvePicker!(req.id, { answers: ['my own answer'] });
+    await done;
+    const echo = msgs.find((m) => m.type === 'message' && (m as any).content?.startsWith('picker_answers:')) as any;
+    expect(echo.content).toBe('picker_answers:["my own answer"]');
+  });
+
   it('picker_multi: 3 prompts with mixed shapes', async () => {
     const { send, msgs } = collect();
     const b = createFakeBackend();

@@ -798,3 +798,19 @@ ollama 官方 [tool support blog](https://ollama.com/blog/tool-support) 列 qwen
 - 不要在 renderer 端 parse JSON-as-text 救回 tool_call — 那等於在 wrong layer 補 model 的缺陷，且 stream 中途 JSON 不一定完整、容易踩 quoting/escape 邊界
 - 不要在 PM_PROVIDERS 維護「verified models」清單再去 filter dropdown — model list 本來就是 user pull 出來的事實，filter 等於說謊；hint 引導更誠實
 - 不要在 typecheck/test 內 mock ollama 行為 — 上游真的可能改，spike script 留著手動驗才是對的訊號來源
+
+---
+
+## PickerPanel：在自填輸入框按 Enter 送不出去（CJK / 鍵盤使用者）
+
+**現象**: agent 發 `AskUserQuestion`（Claude intercept 永遠帶 `inputType:'text'`，見 DECISIONS #57），picker 同時顯示選項與「Or type your own」輸入框。使用者在輸入框打字（尤其中文）後按 Enter，**沒反應**，感覺像「不選一個選項就送不出去」。
+
+**根因**: `PickerPanel.tsx` 的 window-level keydown handler 對 Enter 有 `if (inputFocused) return;` —— 游標在輸入框時 Enter 直接被吃掉。選了選項（焦點不在輸入框）才走得到 `goNext()`，所以症狀表現成「被迫先選選項」。底部 hint 又寫著「Enter submit」，等於說謊。
+
+**解法**: Enter handler 拿掉 `inputFocused` early-return，改成兩道閘：
+- `if (e.isComposing) return;` — **CJK IME 組字確認也會觸發 Enter**（候選字選定那一下）。不擋的話會吞掉候選字、送出半成品。這是修這個 bug 時最容易漏的一條。
+- `if (!currentComplete) return;` — 空 prompt 不送（這正是原本用 input-focus 擋住的目的，現在直接用完成度判斷）。
+
+**回歸測試**: `e2e/agent-picker.spec.ts` 的 `pressing Enter inside the input submits the typed answer`（用 `picker_combo` fake scenario：options + inputType 並存,真實 AskUserQuestion 形狀）。
+
+**不要做**: 不要為了「怕打字打到一半誤送」而整個擋掉 input 裡的 Enter — 單行輸入框 Enter=送出是慣例,且 hint 已昭告;真正要擋的只有 IME 組字中那一下（`isComposing`）。

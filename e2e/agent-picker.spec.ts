@@ -89,6 +89,65 @@ test.describe('agent picker via fake provider', () => {
     );
   });
 
+  test('options+free-text picker: type own answer without picking an option → resolves with typed text', async ({ shelfApp: { page } }) => {
+    // The real AskUserQuestion shape — every prompt carries options AND a
+    // free-text input (claude helpers hardcode inputType:'text'). Guards that
+    // Shelf does NOT have the harness-picker limitation where you're forced
+    // to select a listed option before you can submit your own text.
+    await setupProject(page);
+    await openAgentTab(page);
+
+    await sendAgentPrompt(page, 'picker_combo');
+
+    const panel = page.locator('.picker-panel:visible');
+    await expect(panel).toBeVisible({ timeout: 5_000 });
+    // Both the options AND the free-text input are present.
+    await expect(panel.locator('.picker-option')).toHaveCount(3);
+    await expect(panel.locator('.picker-other-input')).toBeVisible();
+
+    // Submit is disabled until SOME answer exists (no option picked, no text).
+    await expect(panel.locator('.picker-btn-primary')).toBeDisabled();
+
+    // Type a custom answer — do NOT click any option.
+    await panel.locator('.picker-other-input').fill('my own answer');
+
+    // Typed text alone satisfies the prompt → Submit becomes enabled.
+    await expect(panel.locator('.picker-btn-primary')).toBeEnabled();
+    await panel.locator('.picker-btn-primary').click();
+
+    await expect(page.locator('.agent-messages:visible')).toContainText(
+      'picker_answers:["my own answer"]',
+      { timeout: 5_000 },
+    );
+  });
+
+  test('options+free-text picker: pressing Enter inside the input submits the typed answer', async ({ shelfApp: { page } }) => {
+    // Regression: with the cursor in the free-text input and no option picked,
+    // pressing Enter must submit (the hint advertises "Enter submit"). Earlier
+    // the Enter handler bailed whenever the input was focused, so a user who
+    // typed an answer and hit Enter — the natural gesture, and the only one
+    // for keyboard-driven CJK input — got nothing and concluded they were
+    // forced to pick a listed option first.
+    await setupProject(page);
+    await openAgentTab(page);
+
+    await sendAgentPrompt(page, 'picker_combo');
+
+    const panel = page.locator('.picker-panel:visible');
+    await expect(panel).toBeVisible({ timeout: 5_000 });
+
+    // Type into the input and press Enter from there — no option click,
+    // no Submit-button click.
+    const input = panel.locator('.picker-other-input');
+    await input.fill('typed via enter');
+    await input.press('Enter');
+
+    await expect(page.locator('.agent-messages:visible')).toContainText(
+      'picker_answers:["typed via enter"]',
+      { timeout: 5_000 },
+    );
+  });
+
   test('cancel picker: Esc dismisses and echoes cancelled', async ({ shelfApp: { page } }) => {
     await setupProject(page);
     await openAgentTab(page);
