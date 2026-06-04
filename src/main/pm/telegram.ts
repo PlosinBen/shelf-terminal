@@ -26,6 +26,20 @@ const API = 'https://api.telegram.org/bot';
 const POLL_TIMEOUT = 30; // seconds (Telegram long poll)
 const MAX_MESSAGE_LENGTH = 4096;
 
+// Per-turn channel hint appended to Telegram-relayed prompts (agent mode).
+// Tells the agent it's replying into a phone chat so it adapts BOTH constraints
+// that share this root cause: (1) Telegram renders no rich text here, so emit
+// plain text; (2) screen + 4096-char limits, so stay short and list topics
+// instead of dumping everything. Injected into the AGENT context only — the
+// Shelf user bubble mirrors the original text (sendFromInternal's displayText
+// arg), so this never shows in the UI. Soft guidance; the plain-text send +
+// 4096 splitMessage still backstop a non-compliant reply.
+const TELEGRAM_BRIEF_HINT =
+  '\n\n[System note: your reply is delivered into a Telegram chat on a phone. ' +
+  'Plain text only — no Markdown (no **bold**, _italics_, # headings, `code`, code fences, tables); it will not render and just clutters the screen. ' +
+  'Keep it short. If the answer spans multiple topics or issues, just list the topic titles and let me ask which to expand — do not explain them all at once. ' +
+  'For long code or command output, say "see Shelf" instead of pasting it.]';
+
 // Mode 切換 + agent-view bridge — see features/telegram-agent-bridge.md.
 type Mode =
   | { type: 'pm' }
@@ -39,6 +53,13 @@ let mode: Mode = { type: 'pm' };
 // on the `idle` event. See telegram-bridge-accumulator.ts for the design
 // constraint (telegram needs one complete message per turn).
 const agentAccumulator = new AgentReplyAccumulator();
+
+// Throttle clock for the "typing…" chat action. sendChatAction's indicator
+// auto-expires after ~5s, so maybeSendTyping refreshes at most every 4s while
+// agent events flow. Timestamp-only — NO timer to start/stop: when events stop
+// the indicator clears itself, and flushAgentReply's reply send clears it
+// immediately. See DECISIONS-pm #67 (loading indicator).
+let lastTypingAt = 0;
 
 // `true` once initTelegramBridge has registered the global observer. Guards
 // against double-registration on hot reload / repeated init calls.
@@ -258,16 +279,18 @@ export function isRunning(): boolean {
   return polling;
 }
 
-export async function sendMessage(text: string): Promise<void> {
+export async function sendMessage(text: string, opts?: { plain?: boolean }): Promise<void> {
   if (!config) return;
 
-  // Split long messages
+  // Split long messages. `plain` omits parse_mode so the text is sent verbatim
+  // — used for agent-mode replies (the agent is told to emit plain text, and
+  // dropping parse_mode means a stray `_`/`*` can't 400 the whole message).
   const chunks = splitMessage(text);
   for (const chunk of chunks) {
     await apiCall('sendMessage', {
       chat_id: config.chatId,
       text: chunk,
-      parse_mode: 'Markdown',
+      ...(opts?.plain ? {} : { parse_mode: 'Markdown' }),
     });
   }
 }
@@ -509,9 +532,11 @@ async function routeMessageToAgent(text: string): Promise<void> {
   // Reset accumulator for the new turn — observer will fill it as `reply`
   // events flow and emit a flush when the turn ends.
   agentAccumulator.reset();
+  // Inject the brevity hint into the agent context, but mirror only the
+  // original text to Shelf (3rd arg) so the user bubble stays clean.
   // sendFromInternal returns when the turn loop exits. Errors propagate
   // through the observer as AgentEvent.error — not as a rejected promise.
-  await sendFromInternal(mode.tabId, text);
+  await sendFromInternal(mode.tabId, text + TELEGRAM_BRIEF_HINT, text);
 }
 
 /**
@@ -531,6 +556,10 @@ function handleAgentEvent(tabId: string, event: AgentEvent): void {
   // where "not interested right now" decisions are made (NOT in dispatch).
   if (mode.type !== 'agent' || mode.tabId !== tabId) return;
 
+  // Any agent activity refreshes the "typing…" indicator (throttled). When
+  // events stop the indicator self-clears; the reply send below clears it too.
+  maybeSendTyping();
+
   // Accumulator handles per-turn reply buffering. Idle event triggers flush.
   const result = agentAccumulator.onEvent(event);
   if (result) flushAgentReply(result.flush);
@@ -539,7 +568,9 @@ function handleAgentEvent(tabId: string, event: AgentEvent): void {
     case 'message': {
       const m = event.payload;
       if (m.type === 'error') {
-        sendMessage(`❌ ${m.content}`).catch((e) => log.error('telegram', `error msg send failed: ${e.message}`));
+        // Plain: m.content is agent-generated, may contain `_`/`*` → markdown
+        // would 400 and swallow the error notification entirely.
+        sendMessage(`❌ ${m.content}`, { plain: true }).catch((e) => log.error('telegram', `error msg send failed: ${e.message}`));
       }
       // Other AgentMessage variants (note, system, fold_*, user) are
       // intentionally ignored in MVP — see plan's "MVP Wire 簡化".
@@ -556,7 +587,8 @@ function handleAgentEvent(tabId: string, event: AgentEvent): void {
       break;
     }
     case 'error': {
-      sendMessage(`❌ ${event.error}`).catch((e) => log.error('telegram', `error notify failed: ${e.message}`));
+      // Plain: provider error text is freeform → avoid a markdown 400.
+      sendMessage(`❌ ${event.error}`, { plain: true }).catch((e) => log.error('telegram', `error notify failed: ${e.message}`));
       break;
     }
     // stream/plan/capabilities/auth_required: ignore in MVP.
@@ -569,7 +601,24 @@ function flushAgentReply(text: string): void {
       .catch((e) => log.error('telegram', `empty-reply notify failed: ${e.message}`));
     return;
   }
-  sendMessage(text).catch((e) => log.error('telegram', `flush reply failed: ${e.message}`));
+  // Plain text: the agent is asked to emit no Markdown, and omitting parse_mode
+  // means any stray special char can't 400 the send. sendMessage splits
+  // >4096-char replies; sending also clears the "typing…" indicator.
+  sendMessage(text, { plain: true }).catch((e) => log.error('telegram', `flush reply failed: ${e.message}`));
+}
+
+/**
+ * Send a throttled "typing…" chat action so Telegram's header shows the agent
+ * is working. Refreshed at most every 4s (the indicator self-expires after
+ * ~5s); when agent events stop it clears on its own, and flushAgentReply's
+ * message send clears it immediately. Fire-and-forget — failures are ignored.
+ */
+export function maybeSendTyping(): void {
+  if (!config) return;
+  const now = Date.now();
+  if (now - lastTypingAt < 4000) return;
+  lastTypingAt = now;
+  apiCall('sendChatAction', { chat_id: config.chatId, action: 'typing' }).catch(() => {});
 }
 
 async function handleCallbackQuery(cbq: any): Promise<void> {

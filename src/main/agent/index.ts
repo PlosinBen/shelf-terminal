@@ -315,12 +315,20 @@ export function isAgentTab(tabId: string): boolean {
  * only see the agent reply with no record of what was asked. The bridge IS
  * just a forwarder, so the agent view should look identical to a direct send.
  */
-export async function sendFromInternal(tabId: string, prompt: string): Promise<boolean> {
+export async function sendFromInternal(
+  tabId: string,
+  prompt: string,
+  displayText: string = prompt,
+): Promise<boolean> {
   if (!sessions.has(tabId)) return false;
+  // The Shelf user bubble mirrors `displayText` (the human-typed text); the
+  // agent receives `prompt`, which the telegram bridge augments with a hidden
+  // brevity hint. Keeping them separate stops the hint from leaking into the
+  // visible conversation.
   send(IPC.AGENT_MESSAGE, tabId, {
     type: 'user',
     msgId: `bridge-user-${Date.now()}`,
-    content: prompt,
+    content: displayText,
   });
   return sendMessage(tabId, prompt);
 }
