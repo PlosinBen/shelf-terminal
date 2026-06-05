@@ -15,8 +15,8 @@ import {
   MIN_REMOTE_NODE_MAJOR,
   TARGET_PROBE_CMD,
 } from './runtime-target';
-import { CLAUDE_SDK_VERSION } from './agent-runtime-versions';
-import { ensureNodeCached, ensureClaudeCached } from './runtime-cache';
+import { CLAUDE_SDK_VERSION, COPILOT_CLI_VERSION } from './agent-runtime-versions';
+import { ensureNodeCached, ensureClaudeCached, ensureCopilotCached } from './runtime-cache';
 import {
   deployRoot,
   agentServerDir,
@@ -26,6 +26,7 @@ import {
   DEPLOY_FILES,
   DEPLOYED_SENTINEL,
   type DeployFile,
+  type ProviderBin,
   type RemoteInventory,
 } from './deploy-layout';
 
@@ -67,7 +68,7 @@ export function createRemoteBackend(
   async function ensureProcReady(cwd: string): Promise<RemoteProcess | null> {
     if (!deployed) {
       try {
-        deployResult = await deployAgentServer(connection);
+        deployResult = await deployAgentServer(connection, provider);
       } catch (err: any) {
         log.error('agent-remote', `Deploy failed: ${err.message}`);
         return null;
@@ -288,7 +289,7 @@ function readRemoteInventory(ops: RemoteOps, root: string): RemoteInventory {
  * {node, index.mjs, claude} to a versioned root. The `.deployed` sentinel is
  * written LAST so a half-finished transfer never looks complete.
  */
-async function deploySelfContained(connection: Connection, ops: RemoteOps): Promise<DeployResult> {
+async function deploySelfContained(connection: Connection, ops: RemoteOps, providerBin: ProviderBin): Promise<DeployResult> {
   const version = getAppVersion();
   const root = deployRoot(ops.base, version);
 
@@ -315,10 +316,10 @@ async function deploySelfContained(connection: Connection, ops: RemoteOps): Prom
   }
   const result: DeployResult = { nodeBin, indexPath: `${root}/index.mjs` };
 
-  const expected = deployFilesFor(target.libc);
+  const expected = deployFilesFor(target.libc, providerBin);
   const inv = readRemoteInventory(ops, root);
   if (!needsDeploy(inv, expected)) {
-    log.info('agent-remote', `agent-server already deployed at ${root} (${targetId(target)})`);
+    log.info('agent-remote', `agent-server already deployed at ${root} (${targetId(target)}, ${providerBin})`);
     return result;
   }
 
@@ -329,19 +330,22 @@ async function deploySelfContained(connection: Connection, ops: RemoteOps): Prom
   if (!fs.existsSync(indexLocal)) {
     throw new Error(`Agent-server bundle not found at ${indexLocal}. Run: node agent-server/build.mjs`);
   }
-  // Only the files this target ships (musl omits node).
-  const sources: Partial<Record<DeployFile, string>> = {
-    'index.mjs': indexLocal,
-    claude: await ensureClaudeCached(cacheRoot, target, CLAUDE_SDK_VERSION),
-  };
+  // Only the files this target+provider ships (musl omits node; binary = provider).
+  const sources: Partial<Record<DeployFile, string>> = { 'index.mjs': indexLocal };
   if (!isMusl) sources.node = await ensureNodeCached(cacheRoot, target);
+  if (providerBin === 'copilot') {
+    sources.copilot = await ensureCopilotCached(cacheRoot, target, COPILOT_CLI_VERSION);
+  } else {
+    sources.claude = await ensureClaudeCached(cacheRoot, target, CLAUDE_SDK_VERSION);
+  }
 
   ops.exec(`mkdir -p ${root}`);
   for (const f of missingFiles(inv, expected)) {
     ops.copyIn(sources[f]!, `${root}/${f}`);
   }
-  // Exec bits on what we shipped (node only for glibc).
-  ops.exec(`chmod +x ${isMusl ? `${root}/claude` : `${root}/node ${root}/claude`}`);
+  // Exec bits on what we shipped (node only for glibc; the provider binary).
+  const execBits = [isMusl ? null : `${root}/node`, `${root}/${providerBin}`].filter(Boolean).join(' ');
+  ops.exec(`chmod +x ${execBits}`);
   ops.exec(`touch ${root}/${DEPLOYED_SENTINEL}`); // completion marker — last
   log.info('agent-remote', `Deployed agent-server to ${root} (${targetId(target)}, ${isMusl ? 'remote node' : 'own node'})`);
 
@@ -360,20 +364,21 @@ async function deploySelfContained(connection: Connection, ops: RemoteOps): Prom
   return result;
 }
 
-async function deployAgentServer(connection: Connection): Promise<DeployResult> {
+async function deployAgentServer(connection: Connection, provider: AgentProvider): Promise<DeployResult> {
   // local / wsl: use the target's own node (no version-drift problem there);
-  // unchanged from before. ssh / docker: ship our own runtime + Claude binary.
+  // unchanged from before. ssh / docker: ship our own runtime + provider binary.
   if (connection.type === 'local') {
     return { nodeBin: 'node', indexPath: getLocalBundlePath() };
   }
   if (connection.type === 'wsl') {
     return { nodeBin: 'node', indexPath: toWslPath(getLocalBundlePath()) };
   }
+  const providerBin: ProviderBin = provider === 'copilot' ? 'copilot' : 'claude';
   if (connection.type === 'ssh') {
-    return deploySelfContained(connection, sshOps(connection));
+    return deploySelfContained(connection, sshOps(connection), providerBin);
   }
   if (connection.type === 'docker') {
-    return deploySelfContained(connection, dockerOps(connection));
+    return deploySelfContained(connection, dockerOps(connection), providerBin);
   }
   throw new Error(`Unsupported connection type for deploy: ${(connection as any).type}`);
 }

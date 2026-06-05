@@ -10,10 +10,11 @@ import {
   sha256hex,
   ensureNodeCached,
   ensureClaudeCached,
+  ensureCopilotCached,
   type CacheDeps,
 } from './runtime-cache';
-import { nodeArchiveName, nodeShasumsUrl, claudeManifestUrl } from './agent-runtime-versions';
-import { cachedNodeBin, cachedClaudeBin } from './deploy-layout';
+import { nodeArchiveName, nodeShasumsUrl, claudeManifestUrl, copilotManifestUrl } from './agent-runtime-versions';
+import { cachedNodeBin, cachedClaudeBin, cachedCopilotBin } from './deploy-layout';
 import { targetId, type RuntimeTarget } from './runtime-target';
 
 const X64: RuntimeTarget = { arch: 'x64', libc: 'glibc' };
@@ -153,5 +154,30 @@ describe('ensureClaudeCached', () => {
       },
     };
     await expect(ensureClaudeCached(userData, X64, VER, badDeps)).rejects.toThrow(/integrity mismatch/);
+  });
+});
+
+describe('ensureCopilotCached', () => {
+  let userData: string;
+  beforeEach(() => {
+    userData = fs.mkdtempSync(path.join(os.tmpdir(), 'rc-copilot-'));
+  });
+  afterEach(() => fs.rmSync(userData, { recursive: true, force: true }));
+
+  const VER = '1.0.56';
+  it('downloads, SRI-verifies, extracts package/copilot with exec bit', async () => {
+    const tgz = tarGz('package/copilot', 'COPILOTBIN');
+    const integrity = 'sha512-' + createHash('sha512').update(tgz).digest('base64');
+    const deps: CacheDeps = {
+      async download(url) {
+        return url === copilotManifestUrl(X64, VER)
+          ? Buffer.from(JSON.stringify({ dist: { integrity } }))
+          : tgz;
+      },
+    };
+    const p = await ensureCopilotCached(userData, X64, VER, deps);
+    expect(p).toBe(cachedCopilotBin(userData, targetId(X64), VER));
+    expect(fs.readFileSync(p, 'utf8')).toBe('COPILOTBIN');
+    expect(fs.statSync(p).mode & 0o111).not.toBe(0);
   });
 });

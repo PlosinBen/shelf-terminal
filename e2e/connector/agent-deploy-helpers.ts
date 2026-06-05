@@ -76,17 +76,29 @@ export function deployedFiles(container: string): string[] {
   }
 }
 
+/** Open a Copilot agent tab (mirrors openAgentTab, which opens Claude). */
+export async function openCopilotAgentTab(page: Page): Promise<void> {
+  await page.locator('.tab-add').click({ button: 'right' });
+  await page.locator('.context-menu-item', { hasText: 'Agent (Copilot)' }).click();
+  await expect(page.locator('.agent-view:visible')).toBeVisible({ timeout: 5_000 });
+  await expect(page.locator('.agent-textarea:visible')).toBeVisible();
+}
+
 /**
  * Drive a fake picker turn and assert the panel appears — only possible if the
  * remote agent-server actually ran (deploy + spawn worked). A text echo would
  * be satisfied by the user's own bubble, so we use the picker (distinct DOM).
+ * `openTab` selects which provider agent to open (default Claude).
  */
-export async function assertPickerRoundTrip(page: Page): Promise<void> {
+export async function assertPickerRoundTrip(
+  page: Page,
+  openTab: (p: Page) => Promise<void> = openAgentTab,
+): Promise<void> {
   const prompt = page.locator('.connect-prompt');
   if (await prompt.isVisible({ timeout: 5_000 }).catch(() => false)) await prompt.click();
   await expect(page.locator('.tab-bar .tab')).toHaveCount(1, { timeout: 10_000 });
 
-  await openAgentTab(page);
+  await openTab(page);
   await sendAgentPrompt(page, 'picker_single');
   const panel = page.locator('.picker-panel:visible');
   await expect(panel).toBeVisible({ timeout: 150_000 });

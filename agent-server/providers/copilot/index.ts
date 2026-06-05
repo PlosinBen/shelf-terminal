@@ -1,6 +1,5 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import * as os from 'os';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { randomUUID } from 'node:crypto';
@@ -116,20 +115,21 @@ async function getSdk() {
  * `require()`-able library — extraResources is the right pattern for that.
  */
 function resolveCopilotCliPath(): string | undefined {
-  // The @github/copilot package's index.js is the entry point that resolves
-  // the platform-specific native modules internally. SDK runs `node index.js`.
+  // R1: on a remote deploy we ship the standalone Copilot binary next to
+  // index.mjs (`<__dirname>/copilot`); copilot-sdk spawns it directly (non-.js
+  // cliPath → no node, no node-24 requirement). Dev/packaged keep the
+  // @github/copilot dispatcher (JS path). We deliberately do NOT fall back to a
+  // remote-global install (~/.nvm, /usr/local) — the remote's CLI is never used
+  // (R1: ship our own, ignore what's installed).
   const candidates = [
+    // Remote self-contained deploy: standalone Copilot binary.
+    path.resolve(__dirname, 'copilot'),
     // Dev: relative to agent-server bundle output (dist/agent-server/<v>/index.mjs)
     path.resolve(__dirname, '..', '..', '..', 'node_modules', '@github', 'copilot', 'index.js'),
     // Dev: relative to project root (when running unbundled via tsx/ts-node)
     path.resolve(__dirname, '..', '..', 'node_modules', '@github', 'copilot', 'index.js'),
-    // Packaged: extraResources/copilot-cli/ (sits next to extraResources/agent-server/
-    // — both are siblings of agent-server bundle dir).
+    // Packaged: extraResources/copilot-cli/ (sibling of agent-server bundle dir).
     path.resolve(__dirname, '..', '..', 'copilot-cli', 'index.js'),
-    // User global install (~/.nvm or system) — last-resort fallback if our
-    // bundle is missing somehow.
-    path.join(os.homedir(), '.nvm', 'versions', 'node', process.version, 'lib', 'node_modules', '@github', 'copilot', 'index.js'),
-    '/usr/local/lib/node_modules/@github/copilot/index.js',
   ];
 
   for (const p of candidates) {

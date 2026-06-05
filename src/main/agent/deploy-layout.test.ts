@@ -9,12 +9,11 @@ import {
   cacheDir,
   cachedNodeBin,
   cachedClaudeBin,
-  DEPLOY_FILES,
   type RemoteInventory,
 } from './deploy-layout';
 
-const GLIBC_FILES = deployFilesFor('glibc');
-const MUSL_FILES = deployFilesFor('musl');
+const GLIBC_FILES = deployFilesFor('glibc', 'claude');
+const MUSL_FILES = deployFilesFor('musl', 'claude');
 
 describe('deployRoot / remoteFilePath (POSIX, version-scoped)', () => {
   it('builds versioned root under <base>/.shelf/agent-server', () => {
@@ -37,8 +36,12 @@ describe('deployRoot / remoteFilePath (POSIX, version-scoped)', () => {
 
 describe('deployFilesFor', () => {
   it('glibc ships node; musl does not (uses remote node)', () => {
-    expect(deployFilesFor('glibc')).toEqual(['node', 'index.mjs', 'claude']);
-    expect(deployFilesFor('musl')).toEqual(['index.mjs', 'claude']);
+    expect(deployFilesFor('glibc', 'claude')).toEqual(['node', 'index.mjs', 'claude']);
+    expect(deployFilesFor('musl', 'claude')).toEqual(['index.mjs', 'claude']);
+  });
+  it('ships the provider-specific binary (claude vs copilot)', () => {
+    expect(deployFilesFor('glibc', 'copilot')).toEqual(['node', 'index.mjs', 'copilot']);
+    expect(deployFilesFor('musl', 'copilot')).toEqual(['index.mjs', 'copilot']);
   });
 });
 
@@ -68,7 +71,7 @@ describe('needsDeploy / missingFiles (sentinel + expected files)', () => {
     expect(needsDeploy(inv, GLIBC_FILES)).toBe(true);
   });
   it('all expected missing when inventory empty', () => {
-    expect(missingFiles({ sentinel: false, files: {} }, GLIBC_FILES)).toEqual([...DEPLOY_FILES]);
+    expect(missingFiles({ sentinel: false, files: {} }, GLIBC_FILES)).toEqual(GLIBC_FILES);
   });
 });
 

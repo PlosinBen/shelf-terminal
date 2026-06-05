@@ -3,10 +3,13 @@ import { readFileSync } from 'fs';
 import {
   NODE_VERSION,
   CLAUDE_SDK_VERSION,
+  COPILOT_CLI_VERSION,
   nodeArchiveName,
   nodeDownloadUrl,
   claudePackageName,
   claudeTarballUrl,
+  copilotPackageName,
+  copilotTarballUrl,
 } from './agent-runtime-versions';
 import { UnsupportedTargetError, type RuntimeTarget } from './runtime-target';
 
@@ -75,5 +78,28 @@ describe('CLAUDE_SDK_VERSION', () => {
       readFileSync('node_modules/@anthropic-ai/claude-agent-sdk/package.json', 'utf8'),
     );
     expect(CLAUDE_SDK_VERSION).toBe(pkg.version);
+  });
+});
+
+describe('COPILOT_CLI_VERSION', () => {
+  // Drift guard: pinned Copilot companion version must equal the installed
+  // @github/copilot dependency.
+  it('matches the installed @github/copilot version', () => {
+    const pkg = JSON.parse(readFileSync('node_modules/@github/copilot/package.json', 'utf8'));
+    expect(COPILOT_CLI_VERSION).toBe(pkg.version);
+  });
+});
+
+describe('copilotPackageName / copilotTarballUrl', () => {
+  it('uses linux / linuxmusl variant prefix per (arch × libc)', () => {
+    expect(copilotPackageName(X64_GLIBC)).toBe('@github/copilot-linux-x64');
+    expect(copilotPackageName(ARM64_GLIBC)).toBe('@github/copilot-linux-arm64');
+    expect(copilotPackageName(X64_MUSL)).toBe('@github/copilot-linuxmusl-x64');
+    expect(copilotPackageName({ arch: 'arm64', libc: 'musl' })).toBe('@github/copilot-linuxmusl-arm64');
+  });
+  it('builds the scoped registry tarball URL', () => {
+    expect(copilotTarballUrl(X64_GLIBC, '1.0.56')).toBe(
+      'https://registry.npmjs.org/@github/copilot-linux-x64/-/copilot-linux-x64-1.0.56.tgz',
+    );
   });
 });

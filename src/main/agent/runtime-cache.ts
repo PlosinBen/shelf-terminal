@@ -29,8 +29,10 @@ import {
   nodeShasumsUrl,
   claudeTarballUrl,
   claudeManifestUrl,
+  copilotTarballUrl,
+  copilotManifestUrl,
 } from './agent-runtime-versions';
-import { cachedNodeBin, cachedClaudeBin } from './deploy-layout';
+import { cachedNodeBin, cachedClaudeBin, cachedCopilotBin } from './deploy-layout';
 
 // ── pure helpers ──────────────────────────────────────────────────────────
 
@@ -131,32 +133,57 @@ export async function ensureNodeCached(
 }
 
 /**
- * Ensure the Claude CLI binary for `target`+`sdkVersion` is cached; returns its
- * path. Downloads + SRI-verifies (npm `dist.integrity`) + extracts on a miss.
+ * Shared: ensure an npm-published CLI binary (single file inside `package/`) is
+ * cached. Downloads + SRI-verifies (npm `dist.integrity`) + extracts on a miss.
  */
-export async function ensureClaudeCached(
+async function ensureNpmCliBinary(
+  deps: CacheDeps,
+  o: { tarballUrl: string; manifestUrl: string; binEntry: string; dest: string; label: string },
+): Promise<string> {
+  if (fs.existsSync(o.dest)) return o.dest;
+
+  const tgz = await deps.download(o.tarballUrl);
+  const integrity: string | undefined = JSON.parse((await deps.download(o.manifestUrl)).toString('utf8'))?.dist?.integrity;
+  if (integrity && !integrityMatches(tgz, integrity)) {
+    throw new Error(`${o.label} tarball integrity mismatch`);
+  }
+  const entry = findFile(gunzipSync(tgz), o.binEntry);
+  if (!entry) throw new Error(`${o.binEntry} not found in ${o.label} tarball`);
+
+  await writeBinary(o.dest, entry.data);
+  return o.dest;
+}
+
+/** Ensure the Claude CLI binary for `target`+`sdkVersion` is cached. */
+export function ensureClaudeCached(
   userData: string,
   target: RuntimeTarget,
   sdkVersion: string,
   deps: CacheDeps = defaultDeps,
 ): Promise<string> {
-  const dest = cachedClaudeBin(userData, targetId(target), sdkVersion);
-  if (fs.existsSync(dest)) return dest;
+  return ensureNpmCliBinary(deps, {
+    tarballUrl: claudeTarballUrl(target, sdkVersion),
+    manifestUrl: claudeManifestUrl(target, sdkVersion),
+    binEntry: 'package/claude',
+    dest: cachedClaudeBin(userData, targetId(target), sdkVersion),
+    label: `Claude (${targetId(target)}@${sdkVersion})`,
+  });
+}
 
-  const tgz = await deps.download(claudeTarballUrl(target, sdkVersion));
-
-  // Integrity from the npm version manifest's dist.integrity (SRI sha512).
-  const manifestRaw = await deps.download(claudeManifestUrl(target, sdkVersion));
-  const integrity: string | undefined = JSON.parse(manifestRaw.toString('utf8'))?.dist?.integrity;
-  if (integrity && !integrityMatches(tgz, integrity)) {
-    throw new Error(`Claude tarball integrity mismatch for ${targetId(target)}@${sdkVersion}`);
-  }
-
-  const entry = findFile(gunzipSync(tgz), 'package/claude');
-  if (!entry) throw new Error('package/claude not found in Claude companion tarball');
-
-  await writeBinary(dest, entry.data);
-  return dest;
+/** Ensure the Copilot CLI binary for `target`+`version` is cached. */
+export function ensureCopilotCached(
+  userData: string,
+  target: RuntimeTarget,
+  version: string,
+  deps: CacheDeps = defaultDeps,
+): Promise<string> {
+  return ensureNpmCliBinary(deps, {
+    tarballUrl: copilotTarballUrl(target, version),
+    manifestUrl: copilotManifestUrl(target, version),
+    binEntry: 'package/copilot',
+    dest: cachedCopilotBin(userData, targetId(target), version),
+    label: `Copilot (${targetId(target)}@${version})`,
+  });
 }
 
 export { NODE_VERSION };

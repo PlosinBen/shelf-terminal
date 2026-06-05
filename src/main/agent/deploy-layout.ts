@@ -22,16 +22,20 @@
 import * as path from 'path';
 import type { Libc } from './runtime-target';
 
-/** All possible payload files (the superset; the actual set is libc-dependent). */
-export const DEPLOY_FILES = ['node', 'index.mjs', 'claude'] as const;
+/** All possible payload files (superset; the actual set is libc+provider-dependent). */
+export const DEPLOY_FILES = ['node', 'index.mjs', 'claude', 'copilot'] as const;
 export type DeployFile = (typeof DEPLOY_FILES)[number];
 
+/** The provider whose CLI binary a session ships (= the deployed filename). */
+export type ProviderBin = 'claude' | 'copilot';
+
 /**
- * Files we ship for a target. glibc ships our own Node; musl uses the remote's
- * node, so it ships everything EXCEPT node.
+ * Files we ship for a target+provider. glibc ships our own Node; musl uses the
+ * remote's node (omits node). The provider's CLI binary is named after it.
  */
-export function deployFilesFor(libc: Libc): DeployFile[] {
-  return libc === 'musl' ? ['index.mjs', 'claude'] : ['node', 'index.mjs', 'claude'];
+export function deployFilesFor(libc: Libc, provider: ProviderBin): DeployFile[] {
+  const base: DeployFile[] = libc === 'musl' ? ['index.mjs'] : ['node', 'index.mjs'];
+  return [...base, provider];
 }
 
 /** Completion sentinel, written only after every payload file is in place. */
@@ -97,4 +101,9 @@ export function cachedNodeBin(userData: string, targetId: string, nodeArchiveNam
 /** Cached Claude binary for a target+sdkVersion. */
 export function cachedClaudeBin(userData: string, targetId: string, sdkVersion: string): string {
   return path.join(cacheDir(userData, targetId), `claude-${sdkVersion}`, 'claude');
+}
+
+/** Cached Copilot binary for a target+version. */
+export function cachedCopilotBin(userData: string, targetId: string, version: string): string {
+  return path.join(cacheDir(userData, targetId), `copilot-${version}`, 'copilot');
 }

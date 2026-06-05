@@ -79,3 +79,32 @@ export function claudeTarballUrl(t: RuntimeTarget, version: string): string {
   return `https://registry.npmjs.org/${pkg}/-/${unscoped}-${version}.tgz`;
 }
 
+/**
+ * Copilot CLI companion version — MUST match the `@github/copilot` JS the
+ * copilot-sdk drives. Pinned (same reasoning as CLAUDE_SDK_VERSION); a unit
+ * test asserts it equals the installed dependency.
+ */
+export const COPILOT_CLI_VERSION = '1.0.56';
+
+/**
+ * Scoped npm package shipping the standalone Copilot CLI binary for a target.
+ * The variant is a PREFIX (`linux` / `linuxmusl`) — different shape from
+ * Claude's `-musl` suffix. All four (arch × libc) combos exist.
+ */
+export function copilotPackageName(t: RuntimeTarget): string {
+  const variant = t.libc === 'musl' ? 'linuxmusl' : 'linux';
+  return `@github/copilot-${variant}-${t.arch}`;
+}
+
+/** Direct npm registry tarball URL for the Copilot companion. */
+export function copilotTarballUrl(t: RuntimeTarget, version: string): string {
+  const pkg = copilotPackageName(t);
+  const unscoped = pkg.split('/')[1];
+  return `https://registry.npmjs.org/${pkg}/-/${unscoped}-${version}.tgz`;
+}
+
+/** npm version manifest URL — carries `dist.integrity` (SRI) for the Copilot tgz. */
+export function copilotManifestUrl(t: RuntimeTarget, version: string): string {
+  return `https://registry.npmjs.org/${copilotPackageName(t)}/${version}`;
+}
+
