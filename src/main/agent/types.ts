@@ -76,6 +76,8 @@ export interface ProviderCapabilities {
   currentModel?: string;
   currentEffort?: string;
   currentPermissionMode?: string;
+  /** True when the provider's tab-open auth probe found no valid credentials. */
+  authRequired?: boolean;
 }
 
 export type PermissionScope = 'once' | 'session';
@@ -145,7 +147,13 @@ export interface AgentBackend {
   query(prompt: string, cwd: string, opts?: AgentQueryOptions): AsyncGenerator<AgentEvent>;
   stop(): Promise<void>;
   dispose(): void;
-  checkAuth(): Promise<boolean>;
+  /**
+   * Re-run the provider's auth probe and report whether credentials are now
+   * valid. `cwd` is required because the probe spins up (or reuses) the remote
+   * agent-server, which needs a working directory. Drives the AuthPane Retry
+   * button: true clears the pane, false keeps it.
+   */
+  checkAuth(cwd: string): Promise<boolean>;
   /**
    * `intent` carries renderer's saved prefs (projectConfig.agentPrefs[provider]).
    * Forwarded to agent-server so providers with session-level state (Copilot)

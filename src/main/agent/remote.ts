@@ -1,5 +1,5 @@
 import { log } from '@shared/logger';
-import type { Connection, AgentProvider, ProviderModel } from '@shared/types';
+import type { Connection, AgentProvider, AgentInitPhase, ProviderModel } from '@shared/types';
 import type { AgentBackend, AgentEvent, AgentQueryOptions, PickerResolvePayload } from './types';
 import { ChildProcess, spawn, execSync } from 'child_process';
 import { randomUUID } from 'crypto';
@@ -60,6 +60,10 @@ export function createRemoteBackend(
   initScript?: string,
   provider: AgentProvider = 'claude',
   sessionId?: string,
+  // Optional per-tab init-phase reporter — main wires it to AGENT_INIT_STATUS
+  // so the renderer's spinner text refines as deploy/spawn/probe progress.
+  // Defaults to no-op, keeping the backend connection-agnostic.
+  onPhase?: (phase: AgentInitPhase) => void,
 ): AgentBackend {
   let remoteProc: RemoteProcess | null = null;
   let deployed = false;
@@ -67,6 +71,7 @@ export function createRemoteBackend(
 
   async function ensureProcReady(cwd: string): Promise<RemoteProcess | null> {
     if (!deployed) {
+      onPhase?.('deploying');
       try {
         deployResult = await deployAgentServer(connection, provider);
       } catch (err: any) {
@@ -76,6 +81,7 @@ export function createRemoteBackend(
       deployed = true;
     }
     if (!remoteProc) {
+      onPhase?.('connecting');
       const proc = await spawnAgentServer(connection, cwd, deployResult!, initScript);
       if (!proc) return null;
       remoteProc = proc;
@@ -89,9 +95,18 @@ export function createRemoteBackend(
     return remoteProc;
   }
 
-  return {
-    async checkAuth() {
-      return true;
+  const backend: AgentBackend = {
+    async checkAuth(cwd: string) {
+      // Reuse the capabilities probe and invert its verdict. Claude's
+      // ensureInit re-runs here because a failed probe isn't cached, so after
+      // the user runs `claude login` on the remote this flips to true and the
+      // AuthPane clears. Any spawn/RPC failure → false (stay on AuthPane).
+      try {
+        const caps = await backend.getCapabilities!(cwd);
+        return !caps.authRequired;
+      } catch {
+        return false;
+      }
     },
 
     async *query(prompt: string, cwd: string, opts?: AgentQueryOptions): AsyncGenerator<AgentEvent> {
@@ -203,14 +218,18 @@ export function createRemoteBackend(
             currentModel: payload.currentModel,
             currentEffort: payload.currentEffort,
             currentPermissionMode: payload.currentPermissionMode,
+            authRequired: payload.authRequired,
           });
         });
         // `intent` lets agent-server's provider seed session-level closures
         // (e.g. Copilot's currentPermissionMode) before reporting caps back.
+        onPhase?.('checking-auth');
         proc.sendLine({ type: 'get_capabilities', provider, cwd, sessionId, customModels, intent, requestId });
       });
     },
   };
+
+  return backend;
 }
 
 export function toWslPath(winPath: string): string {
@@ -563,6 +582,7 @@ export function parseRemoteMessage(msg: any): AgentEvent | null {
         currentModel: msg.currentModel,
         currentEffort: msg.currentEffort,
         currentPermissionMode: msg.currentPermissionMode,
+        authRequired: msg.authRequired,
       },
     };
   }

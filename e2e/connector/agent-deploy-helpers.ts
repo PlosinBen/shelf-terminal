@@ -15,7 +15,12 @@ import { openAgentTab, sendAgentPrompt } from '../helpers';
  * The glibc container has NO node (we ship ours); the musl container is
  * node:alpine (has node — we use the remote's, shipping only index.mjs + claude).
  */
-export function makeShelfAppFixture(container: string) {
+export function makeShelfAppFixture(container: string, opts: { testMode?: boolean } = {}) {
+  // testMode defaults to true (fake provider) — the deploy/picker specs don't
+  // need real auth. The auth-detection spec passes testMode:false so the REAL
+  // claude provider runs its ensureInit probe against the (unauthenticated)
+  // deployed binary, which is the only way to exercise AuthPane end to end.
+  const testMode = opts.testMode ?? true;
   return base.extend<{}, { shelfApp: { app: ElectronApplication; page: Page } }>({
     shelfApp: [async ({}, use) => {
       const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'shelf-agentdeploy-'));
@@ -33,7 +38,11 @@ export function makeShelfAppFixture(container: string) {
 
       const app = await electron.launch({
         args: [path.join(__dirname, '../..'), `--user-data-dir=${userDataDir}`],
-        env: { ...process.env, SHELF_TEST_MODE: '1', SHELF_RUNTIME_CACHE_DIR: runtimeCacheDir },
+        env: {
+          ...process.env,
+          ...(testMode ? { SHELF_TEST_MODE: '1' } : {}),
+          SHELF_RUNTIME_CACHE_DIR: runtimeCacheDir,
+        },
       });
 
       let page: Page;

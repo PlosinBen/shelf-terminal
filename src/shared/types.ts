@@ -98,8 +98,16 @@ export type AgentMessageType = AgentMessage['type'];
  * spawn / capability load fails (e.g. agent-server bundle missing, node not
  * on PATH, deploy step errors over SSH).
  */
+/**
+ * Sub-phase of the `starting` state, refining the spinner text during a
+ * (sometimes slow) remote tab-open: 'deploying' (first-run runtime copy,
+ * ~200MB), 'connecting' (spawn + await-ready), 'checking-auth' (the SDK init
+ * auth probe). Undefined → generic "Starting agent…".
+ */
+export type AgentInitPhase = 'deploying' | 'connecting' | 'checking-auth';
+
 export type AgentInitStatus =
-  | { state: 'starting' }
+  | { state: 'starting'; phase?: AgentInitPhase }
   | { state: 'ready' }
   | { state: 'failed'; reason: string };
 

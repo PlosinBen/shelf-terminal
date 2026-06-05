@@ -457,6 +457,12 @@ describe('agentTabStore — decisions / auth / init', () => {
     setInitStatus(TAB, 'failed', 'no creds');
     expect(__getTabForTests(TAB)!.initStatus).toBe('failed');
     expect(__getTabForTests(TAB)!.initError).toBe('no creds');
+    expect(__getTabForTests(TAB)!.initPhase).toBe(null);
+    // starting + phase drives the refined spinner text
+    setInitStatus(TAB, 'starting', null, 'checking-auth');
+    expect(__getTabForTests(TAB)!.initStatus).toBe('starting');
+    expect(__getTabForTests(TAB)!.initPhase).toBe('checking-auth');
+    expect(__getTabForTests(TAB)!.initError).toBe(null);
   });
 
   it('setPlan / setActual*', () => {

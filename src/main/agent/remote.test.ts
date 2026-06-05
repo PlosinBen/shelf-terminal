@@ -67,11 +67,14 @@ describe('remote backend', () => {
     // side drives diff detection and calls provider.setX as needed.
   });
 
-  it('checkAuth returns true', async () => {
+  it('checkAuth probes via capabilities and returns false when the server cannot start', async () => {
+    // checkAuth now delegates to getCapabilities (re-running the provider auth
+    // probe). With child_process.spawn mocked, the agent-server never starts →
+    // getCapabilities throws → checkAuth catches and reports not-authed.
     const { createRemoteBackend } = await import('./remote');
     const backend = createRemoteBackend({ type: 'local' } as any);
-    const result = await backend.checkAuth();
-    expect(result).toBe(true);
+    const result = await backend.checkAuth('/tmp');
+    expect(result).toBe(false);
   });
 
   it('dispose does not throw when no process exists', async () => {

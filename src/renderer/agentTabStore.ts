@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import type { AgentMsg } from './components/AgentMessage';
-import type { AgentPrefs, AgentProvider, AuthMethod } from '../shared/types';
+import type { AgentInitPhase, AgentPrefs, AgentProvider, AuthMethod } from '../shared/types';
 import { loadAgentMessagesLatest, saveAgentMessagesDelta, clearAgentSession } from './storage/agent-history';
 
 // Per-tab store for agent UI state. Split from store.ts because the
@@ -34,6 +34,8 @@ export interface Capabilities {
   currentModel?: string;
   currentEffort?: string;
   currentPermissionMode?: string;
+  /** True when the provider's tab-open auth probe found no valid credentials. */
+  authRequired?: boolean;
 }
 
 export interface PendingPermission {
@@ -98,6 +100,9 @@ export interface AgentTabState {
 
   // init
   initStatus: 'starting' | 'ready' | 'failed';
+  // Sub-phase shown only while initStatus==='starting' (display-only; the
+  // tri-state initStatus stays the control signal). Null = generic spinner text.
+  initPhase: AgentInitPhase | null;
   initError: string | null;
 }
 
@@ -325,6 +330,7 @@ export function initTab(tabId: string, opts: InitTabOpts) {
     authBusy: false,
     authError: null,
     initStatus: 'starting',
+    initPhase: null,
     initError: null,
   };
   tabs.set(tabId, initial);
@@ -725,8 +731,9 @@ export function setInitStatus(
   tabId: string,
   status: 'starting' | 'ready' | 'failed',
   error: string | null = null,
+  phase: AgentInitPhase | null = null,
 ) {
-  update(tabId, (prev) => ({ ...prev, initStatus: status, initError: error }));
+  update(tabId, (prev) => ({ ...prev, initStatus: status, initError: error, initPhase: phase }));
 }
 
 // ── Selectors ──

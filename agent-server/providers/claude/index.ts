@@ -56,8 +56,53 @@ type PermissionResult =
 
 const CLAUDE_AUTH_METHOD = {
   kind: 'sdk-managed' as const,
-  instructions: [{ label: 'Sign in to Claude via the CLI', command: 'claude login' }],
+  // Option A: the user signs in ON the remote host in a real terminal — the
+  // credential is written to the remote's own ~/.claude and NEVER crosses
+  // machines. We deliberately don't inject the deployed binary path: `claude`
+  // reads credentials by home-dir, not by binary-dir, so a plain `claude login`
+  // is correct regardless of which claude binary is invoked. On headless hosts
+  // (SSH/container/WSL) the CLI falls back to a paste-the-code flow.
+  instructions: [
+    { label: 'Run this in a terminal on the remote host, then click Retry', command: 'claude login' },
+  ],
 };
+
+/**
+ * Tri-state result of the tab-open auth probe (ensureInit).
+ *  - 'authed'      SDK reached `system/init` — credentials are valid.
+ *  - 'auth-failed' a structured auth-failure frame arrived — show AuthPane.
+ *  - 'error'       transient/unknown (timeout, non-auth error) — do NOT block
+ *                  the pane; the user falls through to chat and any real auth
+ *                  problem re-surfaces mid-turn (see query()).
+ */
+export type AuthOutcome = 'authed' | 'auth-failed' | 'error';
+
+/**
+ * Hang guard for the auth probe. An unauthenticated CLI may emit neither an
+ * `init` nor an `auth_status` failure; without a bound the probe (and tab-open)
+ * could hang forever. Kept under remote.ts's 30s capabilities RPC timeout so we
+ * always resolve before that fires its empty-caps fallback.
+ */
+const AUTH_PROBE_TIMEOUT_MS = 20_000;
+
+/**
+ * Structured (NOT string-matched) detection of a Claude auth failure in the SDK
+ * message stream. Only these exact signals count as "not signed in":
+ *  - SDKAuthStatusMessage settled to a failure (isAuthenticating:false + error)
+ *  - SDKAssistantMessage.error of the two auth members of SDKAssistantMessageError
+ * rate_limit / server_error / transient isAuthenticating:true are deliberately
+ * NOT treated as auth failures, so we never falsely take over the pane.
+ */
+export function isClaudeAuthFailure(msg: any): boolean {
+  if (msg?.type === 'auth_status' && msg.isAuthenticating === false && msg.error) {
+    return true;
+  }
+  if (msg?.type === 'assistant'
+    && (msg.error === 'authentication_failed' || msg.error === 'oauth_org_not_allowed')) {
+    return true;
+  }
+  return false;
+}
 
 /**
  * Resolve the bundled `claude` binary path.
@@ -123,7 +168,7 @@ export function createClaudeBackend(): ServerBackend {
   let activeQuery: Query | null = null;
   let abortController: AbortController | null = null;
   const cache: { models?: any[]; commands?: any[] } = {};
-  let initPromise: Promise<void> | null = null;
+  let initPromise: Promise<AuthOutcome> | null = null;
   let lastSessionId: string | null = null;
 
   const pendingPermissions = new Map<string, (result: PermissionResult) => void>();
@@ -251,11 +296,51 @@ export function createClaudeBackend(): ServerBackend {
     };
   }
 
-  function ensureInit(cwd: string): Promise<void> {
-    if (cache.models && cache.commands) return Promise.resolve();
+  /**
+   * Probe the authenticated account via the SDK control channel. `system/init`
+   * arrives even when logged out, so this is the real auth verdict. A populated
+   * AccountInfo (any credential indicator) → authed; an empty/absent one →
+   * auth-failed; a control-channel throw → 'error' (unknown, don't block).
+   */
+  async function probeAccount(gen: Query): Promise<AuthOutcome> {
+    const TIMEOUT = Symbol('timeout');
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      // accountInfo resolves fast even when logged out (verified), so a short
+      // race only guards a pathological hang.
+      const info = await Promise.race([
+        gen.accountInfo(),
+        new Promise<typeof TIMEOUT>((res) => { timer = setTimeout(() => res(TIMEOUT), 8000); }),
+      ]);
+      if (info === TIMEOUT) return 'error';
+      const a = info as any;
+      // Logged-out accountInfo returns `{ tokenSource:'none', apiProvider:'firstParty' }`
+      // (verified against a real unauthenticated claude). So `apiProvider` is
+      // NOT an auth indicator, and `tokenSource` must be present AND not 'none'.
+      // A real credential source (oauth/apiKey/...), an email, or an apiKeySource
+      // means signed in.
+      const authed = !!(a && (a.email || a.apiKeySource || (a.tokenSource && a.tokenSource !== 'none')));
+      return authed ? 'authed' : 'auth-failed';
+    } catch {
+      // A control-channel throw is ambiguous — treat as unknown, not a definite
+      // logout, so we don't lock out an authed user on a transient error.
+      return 'error';
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  function ensureInit(cwd: string): Promise<AuthOutcome> {
+    if (cache.models && cache.commands) return Promise.resolve('authed');
     if (initPromise) return initPromise;
-    initPromise = (async () => {
+    initPromise = (async (): Promise<AuthOutcome> => {
       const warmupAbort = new AbortController();
+      // Hang guard — see AUTH_PROBE_TIMEOUT_MS. A logged-out CLI may emit
+      // neither `init` nor an auth_status failure; bound the wait so tab-open
+      // can't hang. Timeout → 'error' (unknown), which does NOT block the pane.
+      let timedOut = false;
+      const guard = setTimeout(() => { timedOut = true; warmupAbort.abort(); }, AUTH_PROBE_TIMEOUT_MS);
+      let outcome: AuthOutcome = 'error';
       const generator = sdkQuery({
         prompt: ' ',
         options: {
@@ -267,6 +352,12 @@ export function createClaudeBackend(): ServerBackend {
       });
       try {
         for await (const msg of generator) {
+          // Auth failure may surface as a structured frame before init.
+          if (isClaudeAuthFailure(msg)) {
+            outcome = 'auth-failed';
+            warmupAbort.abort();
+            break;
+          }
           if (msg.type === 'system' && msg.subtype === 'init') {
             const [models, commands] = await Promise.all([
               generator.supportedModels().catch((err) => {
@@ -280,18 +371,41 @@ export function createClaudeBackend(): ServerBackend {
             ]);
             cache.models = models;
             cache.commands = commands;
+            // system/init alone does NOT prove auth — the CLI inits a session
+            // without credentials; auth is only validated on a real call. Probe
+            // the account explicitly via the control channel.
+            outcome = await probeAccount(generator);
+            // Never leave caps cached on a non-authed outcome, or the top-of-
+            // function short-circuit would wrongly report 'authed' next time.
+            if (outcome !== 'authed') { cache.models = undefined; cache.commands = undefined; }
             warmupAbort.abort();
             break;
           }
         }
       } catch (err: any) {
-        // warmupAbort.abort() throws here on success path — only log non-abort.
+        // warmupAbort.abort() throws AbortError on every break path (success /
+        // auth-failed / timeout) — expected. Only a non-abort error is a real
+        // failure; keep it as 'error' so we don't falsely block the pane.
         if (err?.name !== 'AbortError') {
           console.error('[claude] warmup loop unexpected error', err?.message ?? err);
+          outcome = 'error';
         }
+      } finally {
+        clearTimeout(guard);
       }
+      if (timedOut) {
+        console.error('[claude] auth probe timed out; treating as unknown (not blocking)');
+        outcome = 'error';
+      }
+      return outcome;
     })();
-    return initPromise;
+    // Memoize ONLY a successful probe (cache populated → top short-circuit). On
+    // auth-failed / error, drop the memo so a later re-probe (checkAuth Retry,
+    // or next gatherCapabilities) re-runs against the now-changed credential
+    // state instead of returning the stale failure forever.
+    const p = initPromise;
+    p.then((o) => { if (o !== 'authed') initPromise = null; }, () => { initPromise = null; });
+    return p;
   }
 
   function buildCapabilities(customModels?: ProviderModel[]): ProviderCapabilities {
@@ -344,11 +458,13 @@ export function createClaudeBackend(): ServerBackend {
       // slash handlers can re-broadcast capabilities with the right current*.
       // Per-call QueryInput.{model,effort,permissionMode} still drives the
       // actual SDK behavior; closures are renderer-facing bookkeeping only.
-      await ensureInit(cwd);
+      const outcome = await ensureInit(cwd);
       if (intent?.model) currentModel = intent.model;
       if (intent?.effort) currentEffort = intent.effort;
       if (intent?.permissionMode) currentPermissionMode = intent.permissionMode;
-      return buildCapabilities(customModels);
+      // authRequired ONLY on a definitive auth-failure. 'error' (timeout /
+      // unknown) leaves it false so a slow remote isn't mistaken for logged-out.
+      return { ...buildCapabilities(customModels), authRequired: outcome === 'auth-failed' };
     },
 
     setModel(model: string) {
@@ -507,6 +623,15 @@ export function createClaudeBackend(): ServerBackend {
         for await (const sdkMsg of activeQuery) {
           if ('session_id' in sdkMsg && sdkMsg.session_id) {
             lastSessionId = sdkMsg.session_id as string;
+          }
+
+          // Mid-turn auth failure (e.g. credentials revoked / expired during a
+          // session). Surface the same AuthPane takeover as the tab-open probe.
+          // Mirrors copilot's query() auth_required emit. Structured detection
+          // (isClaudeAuthFailure), provider passed explicitly so remote.ts
+          // doesn't default it to 'copilot'.
+          if (isClaudeAuthFailure(sdkMsg)) {
+            send({ type: 'auth_required', provider: 'claude' });
           }
 
           // /compact completion detection — listen for status with compact_result.

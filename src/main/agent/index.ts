@@ -100,7 +100,7 @@ export function initAgentManager(windowGetter: () => BrowserWindow | null): void
   ipcMain.handle(IPC.AGENT_CHECK_AUTH, async (_e, payload) => {
     const session = sessions.get(payload.tabId);
     if (!session) return false;
-    return session.backend.checkAuth();
+    return session.backend.checkAuth(session.cwd);
   });
 
 }
@@ -125,7 +125,15 @@ async function startSession(
   log.info('agent', `${tag} start provider=${provider} cwd=${cwd}`);
 
   const sessionId = opts?.sessionId as string | undefined;
-  const backend = createRemoteBackend(connection, undefined, provider, sessionId);
+  const backend = createRemoteBackend(
+    connection,
+    undefined,
+    provider,
+    sessionId,
+    // Refine the renderer's "starting" spinner text as deploy/spawn/probe
+    // progress (deploying → connecting → checking-auth).
+    (phase) => send(IPC.AGENT_INIT_STATUS, tabId, { state: 'starting', phase }),
+  );
 
   const session: SessionInstance = {
     tabId,
@@ -152,7 +160,12 @@ async function startSession(
     // reconnect instead of the provider's hardcoded default ("ask" etc.).
     const intent = (opts as { intent?: { model?: string; effort?: string; permissionMode?: string } } | undefined)?.intent;
     backend.getCapabilities(cwd, customModels, intent).then((caps) => {
+      // Capabilities first so AuthPane can read caps.authMethod for its
+      // instructions; then flip auth (reusing the existing auth_required
+      // routing → setAuthRequired → AuthPane takeover); then mark ready (the
+      // chat underneath is harmless while AuthPane covers the pane).
       send(IPC.AGENT_CAPABILITIES, tabId, caps);
+      if (caps.authRequired) send(IPC.AGENT_AUTH_REQUIRED, tabId, provider);
       send(IPC.AGENT_INIT_STATUS, tabId, { state: 'ready' });
     }).catch((err) => {
       log.error('agent', `${tag} capabilities error: ${err.message}`);

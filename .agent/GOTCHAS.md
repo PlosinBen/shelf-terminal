@@ -867,3 +867,33 @@ ollama 官方 [tool support blog](https://ollama.com/blog/tool-support) 列 qwen
 - **不要為了「保證連線當下一定就緒」改成同步在 connect path 解析** —— 那會在第一次連線凍住 UI 6 秒。背景預熱 + lazy fallback 才是對的取捨。
 
 **回歸測試**: `src/main/connector/shell-env.test.ts` —— import 時不得 spawn(`execFileSync`/`execFile` 皆未被呼叫)。
+
+---
+
+## Claude remote auth 偵測:`system/init` 登出也會來,要用 `accountInfo()` 看 `tokenSource`
+
+**現象**: 想在開 agent tab 時偵測「remote 從沒 `claude login` 過」,自然會想「跑一次 SDK warmup,等 `system/init` 到就算登入成功」。實測(docker 無登入容器,真 claude binary)**完全錯**:登出狀態下 `system/init` 照樣抵達 → 被誤判成已登入,AuthPane 永遠不出現。
+
+**根因**: claude binary 的 session 初始化(`system/init`)在**沒有憑證時也會成功** —— auth 只在「真的發一次 inference」時才驗。所以 init 不是 auth 訊號。
+
+**正解**: init 之後,用 SDK control-channel 的 `generator.accountInfo()` 探。實測回傳:
+- **登出**: `{ tokenSource: 'none', apiProvider: 'firstParty' }`(秒回,不會 hang)
+- **登入**: `tokenSource` 是真正來源(oauth/apiKey…),或有 `email`/`apiKeySource`
+
+判別:`authed = email || apiKeySource || (tokenSource && tokenSource !== 'none')`。**`apiProvider` 不是 auth 指標**(登出也有 `firstParty`),別拿它判。`accountInfo()` throw / 逾時 → 當 `'error'`(未知,不鎖 pane),避免誤鎖已登入的人。見 `agent-server/providers/claude/index.ts` 的 `probeAccount` / `ensureInit`(三態 `AuthOutcome`)。
+
+**回歸測試**: `agent-server/providers/claude/auth-detect.test.ts`(mock `accountInfo` 各形狀)+ `e2e/connector/agent-deploy-auth.spec.ts`(真 claude、無登入容器 → 斷言 AuthPane)。
+
+**不要做**: 不要用「等到 init」或字串比對錯誤訊息當 auth 偵測;前者誤判登出為登入,後者脆弱。
+
+---
+
+## R1 deploy 是冪等的(`.deployed` sentinel)→ 重用 remote/容器會跑到舊 bundle
+
+**現象**: 改了 agent-server 程式、rebuild、重跑 E2E,**行為完全沒變**。改一次、十次都一樣。
+
+**根因**: `deploySelfContained` 用 `.deployed` sentinel 做冪等 —— 目標 remote/容器已部署過就**跳過複製**,於是一直跑**第一次**部署進去的 `index.mjs`。本機 rebuild 的新 bundle 根本沒送過去。(這在正式使用是優點:不重複傳 200MB+;但在「重用同一台目標反覆測新 code」時會咬人。)
+
+**解法 / 測試**: 要讓新 bundle 生效,得**清掉部署根**(`~/.shelf/agent-server/`)或換新容器。`test:agent-deploy` 每次 `docker run` 全新容器所以沒事;但若手動重用容器跑單一 spec,spec 內要先 `docker exec <c> rm -rf /root/.shelf`(見 `agent-deploy-auth.spec.ts`)。
+
+**附帶踩雷(E2E 觀測)**: Playwright Electron 下,**main process 的 `console.*` 不在 `app.process()` 的 stdout/stderr**(只有 renderer console 透過 `ELECTRON_ENABLE_LOGGING` 會出來)。要看 agent-server(跑在容器內)的內部訊息,最穩是讓它寫容器內檔案,再從**測試行程**用 `execSync('docker exec … cat …')` 讀出來(測試行程的 docker 可用)。

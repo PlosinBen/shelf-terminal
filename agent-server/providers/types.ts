@@ -263,6 +263,13 @@ export interface ProviderCapabilities {
   effortLevels: CycleOption[];
   slashCommands: { name: string; description: string }[];
   authMethod?: unknown;
+  /**
+   * Set true by a provider's gatherCapabilities when its tab-open auth probe
+   * (e.g. Claude's ensureInit SDK init) determined the remote has no valid
+   * credentials. Drives the renderer's AuthPane takeover. Undefined/false =
+   * authed or unknown (we never block the pane on "unknown").
+   */
+  authRequired?: boolean;
 }
 
 export interface ServerBackend {

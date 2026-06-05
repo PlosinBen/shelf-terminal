@@ -32,7 +32,13 @@ export function MessageList({ tabId, cwd, visible, onRetryInit }: Props) {
   const isStreaming = tab?.isStreaming ?? false;
   const queuedMessages = tab?.queuedMessages ?? [];
   const initStatus = tab?.initStatus ?? 'starting';
+  const initPhase = tab?.initPhase ?? null;
   const initError = tab?.initError ?? null;
+  const startingText =
+    initPhase === 'deploying' ? 'Deploying runtime…' :
+    initPhase === 'connecting' ? 'Connecting…' :
+    initPhase === 'checking-auth' ? 'Checking sign-in…' :
+    'Starting agent…';
 
   const turns = useMemo(() => buildTurns(messages), [messages]);
 
@@ -143,7 +149,7 @@ export function MessageList({ tabId, cwd, visible, onRetryInit }: Props) {
       {initStatus === 'starting' && messages.length === 0 && (
         <div className="agent-init-pane">
           <span className="agent-loading-spinner" />
-          <span className="agent-loading-text">Starting agent…</span>
+          <span className="agent-loading-text">{startingText}</span>
         </div>
       )}
       {initStatus === 'failed' && (
