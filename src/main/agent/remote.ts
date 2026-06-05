@@ -271,6 +271,31 @@ function dockerOps(c: Extract<Connection, { type: 'docker' }>): RemoteOps {
   };
 }
 
+/**
+ * ⚠️ Phase 1.6 SCAFFOLD — UNVERIFIED ON WINDOWS. WSL is a Linux distro reached
+ * via `wsl.exe`, so the self-contained model (ship our own node + provider
+ * binary, exactly like ssh/docker) should apply; this wires it but it has NOT
+ * been run on a Windows host. Validate there before making it the default:
+ *   1. Quoting: execSync's default shell on a Windows HOST is cmd.exe, where the
+ *      single-quote wrapping below does NOT work. May need a different quoting
+ *      strategy or `{ shell: 'cmd.exe' }` handling.
+ *   2. `~` expansion under `wsl.exe -d <distro> -- sh -c '...'`.
+ *   3. copyIn reads the Windows-side cached file via /mnt (toWslPath); confirm
+ *      it works and that copying ~215MB over the /mnt bridge is acceptably fast
+ *      (may be slow — consider an alternative transfer if so).
+ * arch/libc detection + the musl remote-node path are reused unchanged.
+ */
+function wslOps(c: Extract<Connection, { type: 'wsl' }>): RemoteOps {
+  const wsl = (cmd: string) => `wsl.exe -d ${c.distro} -- sh -c '${sq(cmd)}'`;
+  return {
+    base: '~',
+    exec: (cmd, t = 15000) => execSync(wsl(cmd), { timeout: t, encoding: 'utf8' }),
+    copyIn: (local, remote, t = 180000) => {
+      execSync(wsl(`cp '${sq(toWslPath(local))}' '${sq(remote)}'`), { timeout: t });
+    },
+  };
+}
+
 /** One round-trip: list which deploy files + sentinel already exist on the target. */
 function readRemoteInventory(ops: RemoteOps, root: string): RemoteInventory {
   const names = [...DEPLOY_FILES, DEPLOYED_SENTINEL];
@@ -365,20 +390,32 @@ async function deploySelfContained(connection: Connection, ops: RemoteOps, provi
 }
 
 async function deployAgentServer(connection: Connection, provider: AgentProvider): Promise<DeployResult> {
-  // local / wsl: use the target's own node (no version-drift problem there);
-  // unchanged from before. ssh / docker: ship our own runtime + provider binary.
+  // local: use the host's own node (no version-drift problem on your own box).
   if (connection.type === 'local') {
     return { nodeBin: 'node', indexPath: getLocalBundlePath() };
   }
-  if (connection.type === 'wsl') {
-    return { nodeBin: 'node', indexPath: toWslPath(getLocalBundlePath()) };
-  }
   const providerBin: ProviderBin = provider === 'copilot' ? 'copilot' : 'claude';
+  // ssh / docker: ship our own runtime + provider binary.
   if (connection.type === 'ssh') {
     return deploySelfContained(connection, sshOps(connection), providerBin);
   }
   if (connection.type === 'docker') {
     return deploySelfContained(connection, dockerOps(connection), providerBin);
+  }
+  if (connection.type === 'wsl') {
+    // Phase 1.6 scaffold: the self-contained path (ship our node + provider
+    // binary, like ssh/docker) is wired via wslOps but UNVERIFIED on Windows —
+    // gated behind SHELF_WSL_SELF_CONTAINED so it's INERT by default (no change
+    // to current WSL behavior). On a Windows host: set the flag, finish/verify
+    // wslOps (see its header), then make this the default and delete the legacy
+    // path below.
+    if (process.env.SHELF_WSL_SELF_CONTAINED) {
+      return deploySelfContained(connection, wslOps(connection), providerBin);
+    }
+    // Legacy (pre-R1): run on WSL's own node against the Windows-side bundle via
+    // /mnt. NOTE: claude/copilot binaries are NOT shipped on this path, so
+    // agents currently can't find their CLI on WSL — that's what 1.6 fixes.
+    return { nodeBin: 'node', indexPath: toWslPath(getLocalBundlePath()) };
   }
   throw new Error(`Unsupported connection type for deploy: ${(connection as any).type}`);
 }
