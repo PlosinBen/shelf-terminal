@@ -16,6 +16,7 @@ import { initAgentManager, disposeAllAgents } from './agent';
 import { getMainWindow, setMainWindow, setProjects, setSettings, getSettings, getProjects } from './app-state';
 import { registerAllIpcHandlers } from './ipc';
 import { shouldRecreateWindowOnActivate } from './window-lifecycle';
+import { primeShellEnv } from './connector/shell-env';
 
 applyUserDataIsolation();
 
@@ -140,6 +141,12 @@ app.whenReady().then(async () => {
   await migratePmNotes();
 
   createWindow();
+
+  // Warm the login-shell env in the background now that the window is up. Not
+  // done at import (it cost ~6s synchronously on cold start); projects start
+  // disconnected so nothing needs it until the user connects, by which point
+  // this async prime has usually finished. No-op on Windows.
+  primeShellEnv();
 
   // Agent View wiring
   initAgentManager(() => getMainWindow());

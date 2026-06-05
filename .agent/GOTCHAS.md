@@ -673,7 +673,7 @@ canUseTool = async (toolName, input, opts) => {
 
 **現象**: E2E 把 `SHELF_TEST_MODE=1` 透過 `electron.launch({ env })` 注入 Electron process，期望 agent-server subprocess 也吃得到 → 結果 fake provider 沒被 hijack、agent-server 還是嘗試起 Claude/Copilot backend。
 
-**原因**: `spawnAgentServer()`（`src/main/agent/remote.ts`）用的不是 `process.env`，是 `getShellEnv()` 回傳的「import 那一刻 cache 的 login-shell env」（`src/main/connector/shell-env.ts`）。Login shell 是用 `execFile` 在 import time 跑出來的、跟 Electron 自己的 process.env 是兩個世界，所以 Electron launch 時才設的 flag 看不到。
+**原因**: `spawnAgentServer()`（`src/main/agent/remote.ts`）用的不是 `process.env`，是 `getShellEnv()` 回傳的 login-shell env（`src/main/connector/shell-env.ts`）。那份 env 是 spawn `zsh -ilc env` 抓回來 cache 的、跟 Electron 自己的 process.env 是兩個世界，所以 Electron launch 時才設的 flag 看不到。（解析時機已從 import-time 同步改為 lazy + 視窗後背景 `primeShellEnv()`，見下方「shell-env 解析改 lazy」一條；但「兩個 env 世界」這個本質不變。）
 
 **修法**: 顯式從 `process.env` 撈出來覆蓋進 spawn env：
 
@@ -828,3 +828,22 @@ ollama 官方 [tool support blog](https://ollama.com/blog/tool-support) 列 qwen
 **回歸測試**: `src/main/window-lifecycle.test.ts` —— `shouldRecreateWindowOnActivate(false, *)` 必為 false。
 
 **測不到的層**: Playwright E2E 啟動時會等 ready,**重現不了** ready-前 activate 的時序,所以這條只能靠純函式單元測守。
+
+---
+
+## shell-env 解析改 lazy + 背景預熱(別放回 import-time)
+
+**現象**: 打包後的 macOS app 啟動要等 ~6 秒才出現視窗。boot timing(`boot-timing.ts`)顯示 6 秒全花在「main module evaluated」之前 —— 也就是 import 階段。
+
+**根因**: `shell-env.ts` 舊版在 **import 時就同步** `execFileSync(zsh, ['-ilc', 'env'])` 抓 login-shell env。重的 `.zshrc`(oh-my-zsh + nvm + pyenv)cold start 要 6~7 秒,而且**同步卡在 import**,整個主行程(含建視窗)都得等它。但專案啟動時 `tabs.length === 0` 顯示 connect prompt、**不自動連線**,所以 boot 階段根本不需要 shell env。
+
+**修法**:
+- **不在 import 時跑**。`getShellEnv()` 改 lazy:第一次被呼叫才同步解析(memoize)當 fallback。
+- `primeShellEnv()`(`execFile` 非同步)在 `index.ts` 的 `whenReady` 內、`createWindow()` 之後呼叫 → 視窗先出來,shell env 背景解析,等使用者真的連線時通常已備好。
+- win32 兩者皆 no-op(GUI app 在 Windows 不需要這招)。
+
+**不要做**:
+- **不要把解析放回 module top-level / import-time**(就算包成函式也一樣)—— 會把 6 秒壓回啟動關鍵路徑。
+- **不要為了「保證連線當下一定就緒」改成同步在 connect path 解析** —— 那會在第一次連線凍住 UI 6 秒。背景預熱 + lazy fallback 才是對的取捨。
+
+**回歸測試**: `src/main/connector/shell-env.test.ts` —— import 時不得 spawn(`execFileSync`/`execFile` 皆未被呼叫)。
