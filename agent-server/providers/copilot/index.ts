@@ -1,7 +1,5 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { execFile } from 'child_process';
-import { promisify } from 'util';
 import { randomUUID } from 'node:crypto';
 import type { QueryInput, SendFn, ServerBackend, ProviderCapabilities, StatusSegment, PickerResolvePayload } from '../types';
 import { severityFromUtilization, pickPermissionModes, pickEffortLevels } from '../types';
@@ -17,9 +15,6 @@ import {
   picksToElicitationContent,
   type ApplyPatchFileSpec,
 } from './helpers';
-
-
-const execFileP = promisify(execFile);
 
 /**
  * In-flight tool calls awaiting their `tool.execution_complete` event.
@@ -37,27 +32,6 @@ type InflightToolUseEntry =
    */
   | { kind: 'apply_patch'; subs: Array<{ msgId: string; spec: ApplyPatchFileSpec }> };
 const inflightToolUses = new Map<string, InflightToolUseEntry>();
-
-
-
-
-async function readGhToken(): Promise<string | undefined> {
-  try {
-    const { stdout } = await execFileP('gh', ['auth', 'token'], { timeout: 3000 });
-    const tok = stdout.trim();
-    return tok || undefined;
-  } catch (err: any) {
-    // ENOENT (gh not installed) and "exit code 1" (gh not authenticated) are
-    // expected on fresh setup — both surface as user-facing auth prompts
-    // downstream. Other errors (timeout, permission denied, ...) shouldn't
-    // be silently swallowed.
-    const code = err?.code;
-    if (code !== 'ENOENT' && code !== 1) {
-      console.error('[copilot] readGhToken unexpected error', { code, message: err?.message ?? err });
-    }
-    return undefined;
-  }
-}
 
 type PermissionResult =
   | { behavior: 'allow'; scope?: 'once' | 'session' }
@@ -298,18 +272,17 @@ export function createCopilotBackend(): ServerBackend {
     if (!cliPath) {
       throw new Error('GitHub Copilot CLI not found. Install with: npm install -g @github/copilot');
     }
-    // Force gh-CLI auth path: explicit gitHubToken takes priority over keychain/plaintext,
-    // so the spawned CLI never touches macOS Keychain (no scary OS prompt).
-    // Mirrors how the Claude integration relies on the user's existing Claude Code login.
-    const ghToken = await readGhToken();
-    if (!ghToken) {
-      throw new Error('GitHub Copilot 需要 gh CLI 登入。請執行：gh auth login -s copilot');
-    }
+    // Auth: let the Copilot CLI use its OWN stored GitHub login (its OAuth /
+    // device-flow login, kept in the CLI's own config). `useLoggedInUser: true`
+    // uses that — and gh CLI auth IF present — so a GitHub login is required but
+    // the `gh` command is NOT a dependency (we don't want to bind an extra tool,
+    // and on remotes `gh auth token` would run remote-side anyway).
+    // We deliberately don't pass `gitHubToken`, which would force
+    // useLoggedInUser off and require an external token source like gh.
     state.client = new CopilotClient({
       cliPath,
       useStdio: true,
-      gitHubToken: ghToken,
-      useLoggedInUser: false,
+      useLoggedInUser: true,
       logLevel: 'warning',
       // Suppress Node's "SQLite is experimental" warning the CLI emits on stdout/stderr.
       env: { ...process.env, NODE_NO_WARNINGS: '1' },

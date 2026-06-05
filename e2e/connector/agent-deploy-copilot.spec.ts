@@ -12,9 +12,10 @@ import {
  * picks the right per-provider binary.
  *
  * NOTE: SHELF_TEST_MODE swaps the runtime backend to fake, so the Copilot
- * binary is deployed but NOT actually executed here (a real Copilot turn needs
- * gh auth on the remote — the deferred #3). This validates deploy + round-trip
- * wiring; real Copilot execution is verified separately once auth is in scope.
+ * binary is deployed but NOT actually executed here. A real Copilot turn needs
+ * a GitHub login (the Copilot CLI's own login via useLoggedInUser — NOT the gh
+ * command). This validates deploy + round-trip wiring; real Copilot execution
+ * is verified separately on a GitHub-authenticated environment.
  */
 const test = makeShelfAppFixture('shelf-agent-test-copilot');
 test.setTimeout(180_000);
