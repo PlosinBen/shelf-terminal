@@ -1,5 +1,7 @@
 # Release Flow
 
+> ⛔ **禁止自主發版**。版號 bump、commit release note、push tag、觸發 release workflow —— 這些動作**一律等使用者明確要求(例如「發 2.x.y」「release」)才執行**。即使測試全綠、即使修了 blocker、即使「看起來就差發版」,也**不要自己 bump / tag / push**。可以做好前置(寫 code、測試、commit 到 branch/main)並**告知已就緒、詢問是否發版**,但發版的板機由使用者扣。
+
 ## Steps
 
 1. Run `git log <last-tag>..HEAD --oneline` to get actual changes since last release
