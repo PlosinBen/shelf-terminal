@@ -80,6 +80,9 @@ function resolveClaudeBinary(): string | undefined {
   const pkgName = `claude-agent-sdk-${platform}-${arch}`;
 
   const candidates = [
+    // R1 self-contained remote deploy: the Claude binary is shipped next to
+    // index.mjs in the versioned deploy root, so __dirname/claude is it.
+    resolve(__dirname, 'claude'),
     // Dev: node_modules sibling to source tree
     resolve(__dirname, '..', 'node_modules', '@anthropic-ai', pkgName, 'claude'),
     // Dev (built): __dirname is dist/agent-server/<version>/, three levels up to project root

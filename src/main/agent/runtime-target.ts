@@ -51,8 +51,11 @@ export class UnsupportedTargetError extends Error {
  * Single command run on the remote to probe arch + libc in one round-trip.
  * Line 1 = `uname -m`; the `ls` lines reveal the dynamic loader family.
  */
+// `|| true` is required: on glibc systems the `ld-musl-*` glob matches nothing,
+// so `ls` exits non-zero — without it, execSync treats the whole probe as a
+// failure and deploy never starts. (Found via the docker E2E.)
 export const TARGET_PROBE_CMD =
-  'uname -m; ls /lib/ld-musl-* /lib/ld-linux-* /lib64/ld-linux-* /usr/lib/ld-linux-* 2>/dev/null';
+  'uname -m; ls /lib/ld-musl-* /lib/ld-linux-* /lib64/ld-linux-* /usr/lib/ld-linux-* 2>/dev/null || true';
 
 export function parseArch(unameM: string): Arch {
   const m = unameM.trim().toLowerCase();

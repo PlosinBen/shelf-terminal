@@ -1,11 +1,12 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'fs';
 import {
   NODE_VERSION,
+  CLAUDE_SDK_VERSION,
   nodeArchiveName,
   nodeDownloadUrl,
   claudePackageName,
   claudeTarballUrl,
-  claudeSdkVersion,
 } from './agent-runtime-versions';
 import { UnsupportedTargetError, type RuntimeTarget } from './runtime-target';
 
@@ -62,11 +63,14 @@ describe('claudeTarballUrl', () => {
   });
 });
 
-describe('claudeSdkVersion', () => {
-  it('reads the bundled SDK version via injected reader', () => {
-    expect(claudeSdkVersion((name) => (name.endsWith('claude-agent-sdk') ? '0.3.159' : ''))).toBe('0.3.159');
-  });
-  it('throws if version cannot be resolved', () => {
-    expect(() => claudeSdkVersion(() => '')).toThrow();
+describe('CLAUDE_SDK_VERSION', () => {
+  // Drift guard: the pinned companion version must equal the installed
+  // @anthropic-ai/claude-agent-sdk dependency, or the downloaded Claude binary
+  // won't match the SDK JS bundled into agent-server.
+  it('matches the installed @anthropic-ai/claude-agent-sdk version', () => {
+    const pkg = JSON.parse(
+      readFileSync('node_modules/@anthropic-ai/claude-agent-sdk/package.json', 'utf8'),
+    );
+    expect(CLAUDE_SDK_VERSION).toBe(pkg.version);
   });
 });

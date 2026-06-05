@@ -8,6 +8,28 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { getShellEnv } from '../connector/shell-env';
 import { createTurnDispatcher, type PermissionHandler } from './turn-dispatcher';
+import { detectTargetFromProbe, targetId, TARGET_PROBE_CMD } from './runtime-target';
+import { CLAUDE_SDK_VERSION } from './agent-runtime-versions';
+import { ensureNodeCached, ensureClaudeCached } from './runtime-cache';
+import {
+  deployRoot,
+  needsDeploy,
+  missingFiles,
+  DEPLOY_FILES,
+  DEPLOYED_SENTINEL,
+  type DeployFile,
+  type RemoteInventory,
+} from './deploy-layout';
+
+/**
+ * How to launch agent-server on a target. `nodeBin` is `'node'` (local/wsl —
+ * use the target's own node) or an absolute `<root>/node` (ssh/docker — the
+ * Node runtime we shipped). `indexPath` is the agent-server bundle on the target.
+ */
+interface DeployResult {
+  nodeBin: string;
+  indexPath: string;
+}
 
 interface RemoteProcess {
   sendLine: (msg: object) => void;
@@ -32,12 +54,12 @@ export function createRemoteBackend(
 ): AgentBackend {
   let remoteProc: RemoteProcess | null = null;
   let deployed = false;
-  let remotePath = '';
+  let deployResult: DeployResult | null = null;
 
   async function ensureProcReady(cwd: string): Promise<RemoteProcess | null> {
     if (!deployed) {
       try {
-        remotePath = await deployAgentServer(connection);
+        deployResult = await deployAgentServer(connection);
       } catch (err: any) {
         log.error('agent-remote', `Deploy failed: ${err.message}`);
         return null;
@@ -45,7 +67,7 @@ export function createRemoteBackend(
       deployed = true;
     }
     if (!remoteProc) {
-      const proc = await spawnAgentServer(connection, cwd, remotePath, initScript);
+      const proc = await spawnAgentServer(connection, cwd, deployResult!, initScript);
       if (!proc) return null;
       remoteProc = proc;
       const ready = await remoteProc.awaitReady();
@@ -188,75 +210,151 @@ export function toWslPath(winPath: string): string {
     .replace(/\\/g, '/');
 }
 
-function getLocalBundlePath(): string {
-  const pkg = JSON.parse(fs.readFileSync(path.join(app.getAppPath(), 'package.json'), 'utf-8'));
-  const version = pkg.version;
+function getAppVersion(): string {
+  return JSON.parse(fs.readFileSync(path.join(app.getAppPath(), 'package.json'), 'utf-8')).version;
+}
 
+function getLocalBundlePath(): string {
+  const version = getAppVersion();
   if (app.isPackaged) {
     return path.join(process.resourcesPath, 'agent-server', version, 'index.mjs');
   }
   return path.join(app.getAppPath(), 'dist', 'agent-server', version, 'index.mjs');
 }
 
-async function deployAgentServer(connection: Connection): Promise<string> {
+/**
+ * Per-connection primitives for the self-contained deploy. `base` is the home
+ * the deploy root hangs off (`~` expands in the remote shell for ssh; docker
+ * has no per-user home shell so we use `/root`). `exec` runs a command on the
+ * target and returns stdout; `copyIn` transfers a local file to the target.
+ */
+interface RemoteOps {
+  base: string;
+  exec(cmd: string, timeoutMs?: number): string;
+  copyIn(localPath: string, remotePath: string, timeoutMs?: number): void;
+}
+
+/** Single-quote a string for safe embedding inside an outer single-quoted shell arg. */
+function sq(s: string): string {
+  return s.replace(/'/g, `'\\''`);
+}
+
+function sshOps(c: Extract<Connection, { type: 'ssh' }>): RemoteOps {
+  const target = `${c.user}@${c.host}`;
+  const opts = ['-o', 'ControlMaster=auto', '-o', `ControlPath=/tmp/shelf-ssh-${c.host}-${c.port}-${c.user}`, '-o', 'ControlPersist=600', '-p', String(c.port)];
+  const optStr = opts.map((o) => `'${o}'`).join(' ');
+  return {
+    base: '~',
+    exec: (cmd, t = 15000) => execSync(`ssh ${optStr} ${target} '${sq(cmd)}'`, { timeout: t, encoding: 'utf8' }),
+    copyIn: (local, remote, t = 180000) => {
+      execSync(`scp ${optStr} '${local}' ${target}:'${sq(remote)}'`, { timeout: t });
+    },
+  };
+}
+
+function dockerOps(c: Extract<Connection, { type: 'docker' }>): RemoteOps {
+  return {
+    base: '/root',
+    exec: (cmd, t = 15000) => execSync(`docker exec ${c.container} sh -c '${sq(cmd)}'`, { timeout: t, encoding: 'utf8' }),
+    copyIn: (local, remote, t = 180000) => {
+      execSync(`docker cp '${local}' ${c.container}:'${sq(remote)}'`, { timeout: t });
+    },
+  };
+}
+
+/** One round-trip: list which deploy files + sentinel already exist on the target. */
+function readRemoteInventory(ops: RemoteOps, root: string): RemoteInventory {
+  const names = [...DEPLOY_FILES, DEPLOYED_SENTINEL];
+  // `; true` keeps exit 0 — on a fresh target every `[ -e ]` is false, so the
+  // loop's last command fails and execSync would otherwise throw.
+  const out = ops.exec(`for f in ${names.join(' ')}; do [ -e ${root}/$f ] && echo $f; done; true`);
+  const present = new Set(out.split('\n').map((s) => s.trim()).filter(Boolean));
+  const files: Partial<Record<DeployFile, boolean>> = {};
+  for (const f of DEPLOY_FILES) files[f] = present.has(f);
+  return { sentinel: present.has(DEPLOYED_SENTINEL), files };
+}
+
+/**
+ * Self-contained deploy (ssh/docker): probe the target's arch+libc, ensure the
+ * matching Node + Claude binaries are cached locally, then incrementally ship
+ * {node, index.mjs, claude} to a versioned root. The `.deployed` sentinel is
+ * written LAST so a half-finished transfer never looks complete.
+ */
+async function deploySelfContained(connection: Connection, ops: RemoteOps): Promise<DeployResult> {
+  const version = getAppVersion();
+  const root = deployRoot(ops.base, version);
+  const result: DeployResult = { nodeBin: `${root}/node`, indexPath: `${root}/index.mjs` };
+
+  // Probe arch+libc (throws UnsupportedTargetError on musl/unknown → logged).
+  const target = detectTargetFromProbe(ops.exec(TARGET_PROBE_CMD));
+
+  const inv = readRemoteInventory(ops, root);
+  if (!needsDeploy(inv)) {
+    log.info('agent-remote', `agent-server already deployed at ${root} (${targetId(target)})`);
+    return result;
+  }
+
+  // Cache root defaults to userData; SHELF_RUNTIME_CACHE_DIR lets E2E (which
+  // uses a throwaway userData per run) reuse downloads across runs.
+  const cacheRoot = process.env.SHELF_RUNTIME_CACHE_DIR || app.getPath('userData');
+  const indexLocal = getLocalBundlePath();
+  if (!fs.existsSync(indexLocal)) {
+    throw new Error(`Agent-server bundle not found at ${indexLocal}. Run: node agent-server/build.mjs`);
+  }
+  const sources: Record<DeployFile, string> = {
+    node: await ensureNodeCached(cacheRoot, target),
+    'index.mjs': indexLocal,
+    claude: await ensureClaudeCached(cacheRoot, target, CLAUDE_SDK_VERSION),
+  };
+
+  ops.exec(`mkdir -p ${root}`);
+  for (const f of missingFiles(inv)) {
+    ops.copyIn(sources[f], `${root}/${f}`);
+  }
+  ops.exec(`chmod +x ${root}/node ${root}/claude`);
+  ops.exec(`touch ${root}/${DEPLOYED_SENTINEL}`); // completion marker — last
+  log.info('agent-remote', `Deployed self-contained agent-server to ${root} (${targetId(target)})`);
+  return result;
+}
+
+async function deployAgentServer(connection: Connection): Promise<DeployResult> {
+  // local / wsl: use the target's own node (no version-drift problem there);
+  // unchanged from before. ssh / docker: ship our own runtime + Claude binary.
   if (connection.type === 'local') {
-    return getLocalBundlePath();
+    return { nodeBin: 'node', indexPath: getLocalBundlePath() };
   }
-
-  const localPath = getLocalBundlePath();
-  if (!fs.existsSync(localPath)) {
-    throw new Error(`Agent-server bundle not found at ${localPath}. Run: node agent-server/build.mjs`);
-  }
-
-  const remoteDest = '~/.shelf/agent-server/index.mjs';
-
-  if (connection.type === 'ssh') {
-    const controlPath = `/tmp/shelf-ssh-${connection.host}-${connection.port}-${connection.user}`;
-    const target = `${connection.user}@${connection.host}`;
-    const sshOpts = ['-o', 'ControlMaster=auto', '-o', `ControlPath=${controlPath}`, '-o', 'ControlPersist=600', '-p', String(connection.port)];
-
-    execSync(`ssh ${sshOpts.map((o) => `'${o}'`).join(' ')} ${target} 'mkdir -p ~/.shelf/agent-server'`, { timeout: 10000 });
-    execSync(`scp ${sshOpts.map((o) => `'${o}'`).join(' ')} '${localPath}' ${target}:${remoteDest}`, { timeout: 30000 });
-    log.info('agent-remote', `Deployed agent-server to ${target}:${remoteDest}`);
-    return remoteDest;
-  }
-
-  if (connection.type === 'docker') {
-    execSync(`docker exec ${connection.container} mkdir -p /root/.shelf/agent-server`, { timeout: 10000 });
-    execSync(`docker cp '${localPath}' ${connection.container}:/root/.shelf/agent-server/index.js`, { timeout: 30000 });
-    log.info('agent-remote', `Deployed agent-server to docker:${connection.container}:${remoteDest}`);
-    return remoteDest;
-  }
-
   if (connection.type === 'wsl') {
-    return toWslPath(getLocalBundlePath());
+    return { nodeBin: 'node', indexPath: toWslPath(getLocalBundlePath()) };
   }
-
+  if (connection.type === 'ssh') {
+    return deploySelfContained(connection, sshOps(connection));
+  }
+  if (connection.type === 'docker') {
+    return deploySelfContained(connection, dockerOps(connection));
+  }
   throw new Error(`Unsupported connection type for deploy: ${(connection as any).type}`);
 }
 
 async function spawnAgentServer(
   connection: Connection,
   cwd: string,
-  deployedPath: string,
+  deploy: DeployResult,
   initScript?: string,
 ): Promise<RemoteProcess | null> {
+  const { nodeBin, indexPath } = deploy;
+  // Forward SHELF_TEST_MODE to the remote agent-server so E2E specs can drive
+  // the fake provider over ssh/docker (prod leaves it unset → empty prefix).
+  const testEnv = process.env.SHELF_TEST_MODE ? `SHELF_TEST_MODE=${process.env.SHELF_TEST_MODE} ` : '';
+
   if (connection.type === 'local') {
     try {
-      // Forward SHELF_TEST_MODE from Electron's env so E2E specs can enable
-      // the fake provider. getShellEnv() returns a cached login-shell env
-      // snapshot that won't pick up test-only flags set at launch time.
       const env: Record<string, string> = { ...getShellEnv() };
       if (process.env.SHELF_TEST_MODE) env.SHELF_TEST_MODE = process.env.SHELF_TEST_MODE;
       log.trace(
         'agent-remote',
-        `spawnAgentServer local: cwd=${cwd} deployedPath=${deployedPath} fileExists=${fs.existsSync(deployedPath)} PATH=${env.PATH ?? '<missing>'}`,
+        `spawnAgentServer local: cwd=${cwd} indexPath=${indexPath} fileExists=${fs.existsSync(indexPath)} PATH=${env.PATH ?? '<missing>'}`,
       );
-      const proc = spawn('node', [deployedPath], {
-        cwd,
-        env,
-        stdio: ['pipe', 'pipe', 'pipe'],
-      });
+      const proc = spawn(nodeBin, [indexPath], { cwd, env, stdio: ['pipe', 'pipe', 'pipe'] });
       return wrapProcess(proc);
     } catch (err: any) {
       log.error('agent-remote', `Local spawn failed: ${err.message}`);
@@ -268,7 +366,7 @@ async function spawnAgentServer(
     const shellPrefix = initScript
       ? `eval '${initScript.replace(/'/g, "'\\''")}' >/dev/null 2>&1; `
       : '';
-    const cmd = `${shellPrefix}exec node ${deployedPath}`;
+    const cmd = `${shellPrefix}${testEnv}exec ${nodeBin} ${indexPath}`;
     const args = [
       '-o', 'ControlMaster=auto',
       '-o', `ControlPath=/tmp/shelf-ssh-${connection.host}-${connection.port}-${connection.user}`,
@@ -282,7 +380,7 @@ async function spawnAgentServer(
   }
 
   if (connection.type === 'docker') {
-    const cmd = `node ${deployedPath}`;
+    const cmd = `${testEnv}exec ${nodeBin} ${indexPath}`;
     const proc = spawn('docker', ['exec', '-i', connection.container, 'sh', '-c', cmd], {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
@@ -290,7 +388,7 @@ async function spawnAgentServer(
   }
 
   if (connection.type === 'wsl') {
-    const proc = spawn('wsl.exe', ['-d', connection.distro, '--', 'sh', '-lc', `exec node ${deployedPath}`], {
+    const proc = spawn('wsl.exe', ['-d', connection.distro, '--', 'sh', '-lc', `${testEnv}exec ${nodeBin} ${indexPath}`], {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     return wrapProcess(proc);

@@ -22,6 +22,15 @@ import { type RuntimeTarget, targetId, UnsupportedTargetError } from './runtime-
 /** Aligned with esbuild `target: node20` and validated by the R1 spike. */
 export const NODE_VERSION = 'v20.18.1';
 
+/**
+ * Claude CLI companion version to download — MUST match the
+ * `@anthropic-ai/claude-agent-sdk` JS bundled into agent-server (JS↔binary is a
+ * versioned wire pair). The SDK package's `exports` map blocks importing its
+ * package.json, so we pin it here; a unit test asserts it equals the installed
+ * dependency's version, so bumping the dep without updating this fails loudly.
+ */
+export const CLAUDE_SDK_VERSION = '0.3.159';
+
 function assertGlibc(t: RuntimeTarget): void {
   if (t.libc !== 'glibc') {
     throw new UnsupportedTargetError(`${targetId(t)} is unsupported here: only glibc targets are built.`);
@@ -66,13 +75,3 @@ export function claudeTarballUrl(t: RuntimeTarget, version: string): string {
   return `https://registry.npmjs.org/${pkg}/-/${unscoped}-${version}.tgz`;
 }
 
-/**
- * Resolve the Claude SDK version actually bundled into the app, so the
- * companion binary we ship matches it. Reader is injected for testability;
- * the wiring layer passes a fn that reads the installed package.json.
- */
-export function claudeSdkVersion(readPackageVersion: (pkgName: string) => string): string {
-  const v = readPackageVersion('@anthropic-ai/claude-agent-sdk');
-  if (!v) throw new Error('Could not resolve @anthropic-ai/claude-agent-sdk version from app packages.');
-  return v;
-}

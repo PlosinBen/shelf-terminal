@@ -24,5 +24,10 @@ export default defineConfig({
       testDir: './e2e/connector',
       testMatch: 'ssh.spec.ts',
     },
+    {
+      name: 'agent-deploy',
+      testDir: './e2e/connector',
+      testMatch: 'agent-deploy.spec.ts',
+    },
   ],
 });
