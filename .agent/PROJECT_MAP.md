@@ -7,9 +7,11 @@
 | App lifecycle, IPC wiring | `index.ts` | BrowserWindow 建立、外部連結 handler（`setWindowOpenHandler` → `shell.openExternal`）、Cmd/Ctrl+R / F5 reload 攔截 + 確認 dialog、`registerAllIpcHandlers()` 一次註冊、PM/Agent/updater wiring、app quit cleanup。**不再含 inline IPC handler**（P0-2 已拆到 `ipc/`）|
 | 共享 app 狀態 | `app-state.ts` | `mainWindow` / `cachedProjects` / `cachedSettings` 的 getter/setter；index.ts 與 `ipc/*` 共用的單一來源 |
 | IPC handler（按領域分檔） | `ipc/` (`index.ts` + `pty`/`project`/`connector`/`git`/`file-transfer`/`dialog`/`settings`/`logs`/`notes`/`updater`/`pm`) | 每檔 export `registerXxxHandlers()`，`ipc/index.ts` 的 `registerAllIpcHandlers()` 匯總。狀態走 `app-state` accessors。agent handler 仍由 `agent/index.ts` 的 `initAgentManager()` 獨立註冊 |
-| 自訂 application menu (wiring) | `app-menu.ts` | `buildAppMenu({ onCheckForUpdates })` 串 electron `Menu.buildFromTemplate` + `shell.openExternal` / `openPath`，呼叫 `app-menu-template` 拿純資料 |
-| Application menu template | `app-menu-template.ts` | 純函式 `buildAppMenuTemplate(actions, platform, appName)` 回傳 `MenuItemConstructorOptions[]`；vitest 測 25 case，含 NO `reload` / `forceReload` regression guard |
-| Reload key predicate | `reload-guard.ts` | `isReloadKeyEvent(input)` 判斷 webContents `before-input-event` 是不是 Cmd/Ctrl+R / F5；vitest 測 11 case 涵蓋平台差異 |
+| 自訂 application menu (wiring) | `app-menu.ts` | `buildAppMenu({ onCheckForUpdates })` 串 electron `Menu.buildFromTemplate`，呼叫 `app-menu-template` 拿純資料（mac only，見 `menu-platform`） |
+| Application menu template | `app-menu-template.ts` | 純函式 `buildAppMenuTemplate(actions, platform, appName)` 回傳 `MenuItemConstructorOptions[]`；R0 後無 Help submenu；含 NO `reload` / `forceReload` regression guard |
+| 選單安裝平台判斷 | `menu-platform.ts` | `shouldInstallAppMenu(platform)`（只有 darwin true）。Win/Linux 不裝選單（`createWindow → win.removeMenu()`）消除 Alt 撕裂；GOTCHAS #35 |
+| Reload key predicate | `reload-guard.ts` | `isReloadKeyEvent(input)` 判斷 webContents `before-input-event` 是不是 Cmd/Ctrl+R / F5；vitest 涵蓋平台差異 |
+| DevTools key predicate | `devtools-guard.ts` | `isDevToolsKeyEvent(input)`（F12 / Ctrl+Shift+I）。三平台都在 main `before-input-event` 寫死（mac 額外加法、不撞 Cmd+Alt+I）；刻意不走 renderer keybinding。E2E `devtools-key.spec.ts` 用 `sendInputEvent` 實測，GOTCHAS #35 |
 | PTY spawn/kill/resize | `pty-manager.ts` | 透過 connector.createShell() spawn、idle notification、首次 spawn per project 觸發背景上傳清理。**不依賴 pm/**（P1-1）：輸出/lifecycle 透過注入的 `PtyObserver`（`setPtyObserver()`）回報，由 index.ts 接到 pm handler。同 `setWritePtyFn` 的注入慣例 |
 | Preload bridge | `preload.ts` | contextBridge 暴露 `window.shelfApi`，RPC bridge 到 main process |
 | Project 持久化 | `project-store.ts` | 讀寫 `projects.json`（userData 路徑） |

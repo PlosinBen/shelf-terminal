@@ -5,8 +5,6 @@ import { buildAppMenuTemplate, type AppMenuActions } from './app-menu-template';
 function noopActions(): AppMenuActions {
   return {
     onCheckForUpdates: vi.fn(),
-    onReportIssue: vi.fn(),
-    onViewLogs: vi.fn(),
   };
 }
 
@@ -45,13 +43,6 @@ describe('buildAppMenuTemplate (macOS)', () => {
     expect(items[1].label).toBe('Check for Updates…');
   });
 
-  it('does NOT add Check for Updates to Help (avoids duplication)', () => {
-    const t = buildAppMenuTemplate(noopActions(), 'darwin', 'Shelf');
-    const helpItems = submenuItems(topLevel(t, 'Help'));
-    const labels = helpItems.map((i) => i.label);
-    expect(labels).not.toContain('Check for Updates…');
-  });
-
   it('Window menu has Front (mac-only convention)', () => {
     const t = buildAppMenuTemplate(noopActions(), 'darwin', 'Shelf');
     const windowItems = submenuItems(topLevel(t, 'Window'));
@@ -67,13 +58,6 @@ describe('buildAppMenuTemplate (Windows / Linux)', () => {
       it('starts with File menu (no app menu)', () => {
         const t = buildAppMenuTemplate(noopActions(), platform, 'Shelf');
         expect(t[0].label).toBe('File');
-      });
-
-      it('puts Check for Updates in Help menu', () => {
-        const t = buildAppMenuTemplate(noopActions(), platform, 'Shelf');
-        const helpItems = submenuItems(topLevel(t, 'Help'));
-        const labels = helpItems.map((i) => i.label);
-        expect(labels[0]).toBe('Check for Updates…');
       });
 
       it('Window menu has Close (not Front)', () => {
@@ -120,12 +104,11 @@ describe('buildAppMenuTemplate (cross-platform invariants)', () => {
         expect(allRoles).not.toContain('forceReload');
       });
 
-      it('Help menu contains Report Issue and View Logs', () => {
+      // R0: Help submenu (Report Issue / View Logs) was removed for mac/win
+      // parity. Guard that it stays gone until it returns inside app chrome.
+      it('has NO Help menu', () => {
         const t = buildAppMenuTemplate(noopActions(), platform, 'Shelf');
-        const helpItems = submenuItems(topLevel(t, 'Help'));
-        const labels = helpItems.map((i) => i.label);
-        expect(labels).toContain('Report Issue…');
-        expect(labels).toContain('View Logs');
+        expect(topLevel(t, 'Help')).toBeUndefined();
       });
     });
   }
@@ -140,23 +123,5 @@ describe('buildAppMenuTemplate click handlers', () => {
     expect(checkItem?.click).toBeTypeOf('function');
     (checkItem!.click as () => void)();
     expect(actions.onCheckForUpdates).toHaveBeenCalledOnce();
-  });
-
-  it('Report Issue click invokes the provided callback', () => {
-    const actions = noopActions();
-    const t = buildAppMenuTemplate(actions, 'linux', 'Shelf');
-    const helpItems = submenuItems(topLevel(t, 'Help'));
-    const reportItem = helpItems.find((i) => i.label === 'Report Issue…');
-    (reportItem!.click as () => void)();
-    expect(actions.onReportIssue).toHaveBeenCalledOnce();
-  });
-
-  it('View Logs click invokes the provided callback', () => {
-    const actions = noopActions();
-    const t = buildAppMenuTemplate(actions, 'win32', 'Shelf');
-    const helpItems = submenuItems(topLevel(t, 'Help'));
-    const logsItem = helpItems.find((i) => i.label === 'View Logs');
-    (logsItem!.click as () => void)();
-    expect(actions.onViewLogs).toHaveBeenCalledOnce();
   });
 });

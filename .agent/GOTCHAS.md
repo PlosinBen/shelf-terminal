@@ -313,6 +313,24 @@
 
 ---
 
+## 35. Win/Linux DevTools 寫死在 main，刻意不走 renderer keybinding
+
+**現象**: Win/Linux 沒有選單列（R0 為消除 Alt 撕裂感，`createWindow → win.removeMenu()`），但 F12 / Ctrl+Shift+I 仍能開 Chromium DevTools。
+
+**原因**: DevTools 原本靠選單 `role: 'toggleDevTools'` 提供 accelerator，removeMenu 後會一起失效。改在 main 的 `before-input-event` 用 `isDevToolsKeyEvent`（`devtools-guard.ts`）攔 F12 / Ctrl+Shift+I → `webContents.toggleDevTools()`。
+
+**為何不會雙觸發**: 三平台都接線。Win/Linux 選單已移除，main 是唯一 handler。macOS 選單的 toggleDevTools accelerator 是 **Cmd+Alt+I**，跟 F12 / Ctrl+Shift+I 不撞，所以 mac 上是「純加法」（多了 F12/Ctrl+Shift+I 兩個入口），不會 toggle 兩次互相抵消。
+
+**不要改**:
+- **不要「統一」改走 renderer keybinding 系統** — DevTools 是 renderer 壞掉時的逃生口，走 renderer keybinding 會「renderer 一死快捷鍵也死」。main 的 input 層不受 renderer 影響，這是刻意設計。
+- **predicate 不要加 Cmd+Alt+I** — 那是 mac 選單已綁的，加了才會在 mac 雙觸發。維持只配 F12 / Ctrl+Shift+I。
+- ⚠️ 易混淆：renderer 的 `toggleDevTools` keybinding（mod+shift+d）開的是 app 自己的 **DevToolsPanel**，不是 Chromium DevTools，同名但無關。
+- 選單安裝與否的判斷集中在 `menu-platform.ts` `shouldInstallAppMenu`（只有 darwin true），有迴歸測試守住「非 darwin 不裝選單」。
+
+**測試陷阱**: E2E 測 before-input-event **不能用 `page.keyboard.press`** —— Playwright 走 CDP 把鍵注入 renderer DOM，**不會觸發** main 的 `before-input-event`（這正是它「renderer 死也能用」的特性）。要測必須用 `app.evaluate` 呼 `webContents.sendInputEvent`（走 native input pipeline，會觸發 before-input-event）。見 `e2e/devtools-key.spec.ts`。
+
+---
+
 ## Agent View: inferTabState 對 TUI 類 CLI 永遠回傳 cli_running
 
 **現象**: PM Agent 的 `inferTabState` 對 Claude Code、Copilot CLI 等 TUI 程式永遠回傳 `cli_running`，無法偵測 done/idle 狀態。

@@ -2,8 +2,6 @@ import type { MenuItemConstructorOptions } from 'electron';
 
 export interface AppMenuActions {
   onCheckForUpdates: () => void;
-  onReportIssue: () => void;
-  onViewLogs: () => void;
 }
 
 /**
@@ -27,18 +25,12 @@ export function buildAppMenuTemplate(
     click: () => actions.onCheckForUpdates(),
   };
 
-  const helpItems: MenuItemConstructorOptions[] = [
-    ...(isMac ? [] : [checkForUpdatesItem, { type: 'separator' as const }]),
-    {
-      label: 'Report Issue…',
-      click: () => actions.onReportIssue(),
-    },
-    {
-      label: 'View Logs',
-      click: () => actions.onViewLogs(),
-    },
-  ];
-
+  // Help submenu (Report Issue / View Logs) was removed in R0 for mac/win
+  // parity: those were menu-only entries, so Win/Linux (which drops the whole
+  // menu) couldn't reach them. They'll return inside the app chrome later. On
+  // Win/Linux the entire template is dead code anyway (window menu is removed);
+  // the non-mac branch is kept harmless. Check for Updates lives in the mac
+  // app-name menu here, and in the footer widget on every platform.
   return [
     ...(isMac
       ? [{
@@ -98,10 +90,6 @@ export function buildAppMenuTemplate(
             { role: 'minimize' },
             { role: 'close' },
           ],
-    },
-    {
-      label: 'Help',
-      submenu: helpItems,
     },
   ];
 }

@@ -6,6 +6,8 @@ import { bootstrap } from './bootstrap';
 import { initAutoUpdater, stopAutoUpdater, manualCheckForUpdate } from './updater';
 import { buildAppMenu } from './app-menu';
 import { isReloadKeyEvent } from './reload-guard';
+import { isDevToolsKeyEvent } from './devtools-guard';
+import { shouldInstallAppMenu } from './menu-platform';
 import { cleanupConnectors } from './connector';
 import { log, setLogLevel, setFileWriter } from '@shared/logger';
 import { applyUserDataIsolation } from './user-data-path';
@@ -21,6 +23,7 @@ import { primeShellEnv } from './connector/shell-env';
 applyUserDataIsolation();
 
 function createWindow() {
+  const isMac = process.platform === 'darwin';
   const win = new BrowserWindow({
     width: 1200,
     height: 800,
@@ -33,6 +36,10 @@ function createWindow() {
     },
   });
   setMainWindow(win);
+
+  // Win/Linux: drop the in-window menu bar so Alt no longer reveals/toggles it
+  // (layout tearing). macOS keeps its system top menu bar. See menu-platform.ts.
+  if (!isMac) win.removeMenu();
 
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('mailto:')) {
@@ -79,6 +86,17 @@ function createWindow() {
   // xterm scrollback and force the renderer to reconnect. Confirm with the user
   // first regardless of which platform-specific key they hit.
   win.webContents.on('before-input-event', (event, input) => {
+    // DevTools escape hatch, all platforms. On Win/Linux this replaces the
+    // menu's toggleDevTools accelerator (we removed the menu). On macOS the View
+    // menu still owns DevTools via Cmd+Alt+I — F12 / Ctrl+Shift+I don't collide
+    // with that, so this is purely additive (no double-toggle). Intentionally
+    // bypasses the renderer keybinding system so it works even when the renderer
+    // is broken. See devtools-guard.ts.
+    if (isDevToolsKeyEvent(input)) {
+      event.preventDefault();
+      win.webContents.toggleDevTools();
+      return;
+    }
     if (!isReloadKeyEvent(input)) return;
     event.preventDefault();
     dialog
@@ -115,7 +133,11 @@ registerAllIpcHandlers();
 // ── App lifecycle ──
 
 app.whenReady().then(async () => {
-  Menu.setApplicationMenu(buildAppMenu({ onCheckForUpdates: manualCheckForUpdate }));
+  // macOS only — owns the system top menu bar. Win/Linux drop the menu
+  // entirely (createWindow → win.removeMenu()). See menu-platform.ts.
+  if (shouldInstallAppMenu(process.platform)) {
+    Menu.setApplicationMenu(buildAppMenu({ onCheckForUpdates: manualCheckForUpdate }));
+  }
 
   const logBaseDir = path.join(app.getPath('userData'), 'logs');
   setFileWriter((line) => {
