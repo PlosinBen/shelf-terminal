@@ -39,38 +39,19 @@ jobs:
       - name: Unit tests
         run: npm run test:unit
 
-  # Create the draft release ONCE, before the platform matrix fans out. The
-  # three electron-builder jobs run in parallel; each one's "find-or-create
-  # release for this tag" is not atomic, so without a pre-existing draft they
-  # race and each creates its own — producing duplicate drafts with the
-  # platform assets (and the auto-update latest*.yml files) split across them,
-  # leaving neither publishable. With the draft already present, every builder
-  # finds it and only uploads. Idempotent so re-runs reuse the same draft.
-  create_release:
-    needs: test
-    runs-on: ubuntu-22.04
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-
-      - name: Ensure a single draft release exists for this tag
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          VERSION="${GITHUB_REF_NAME}"
-          if gh release view "$VERSION" >/dev/null 2>&1; then
-            echo "Draft release $VERSION already exists — reusing."
-          else
-            gh release create "$VERSION" \
-              --draft \
-              --title "${VERSION#v}" \
-              --notes "$(git tag -l --format='%(contents)' "$VERSION")"
-          fi
-
   build:
-    needs: create_release
+    needs: test
+    # Serialize the platform builds. Each electron-builder publish does a
+    # non-atomic find-or-create of the draft release for this tag; running
+    # mac/win/linux in parallel makes them race and create duplicate drafts
+    # with the installers + auto-update latest*.yml split across them, leaving
+    # neither publishable. With max-parallel 1 the first job creates the draft
+    # and the rest find it and only upload. Uses electron-builder's native
+    # GitHub publish (GH_TOKEN) — no gh CLI or extra tooling. Cost: ~3x wall
+    # clock vs parallel.
     strategy:
+      max-parallel: 1
+
       matrix:
         include:
           - os: macos-latest
