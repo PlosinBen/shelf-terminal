@@ -19,6 +19,7 @@ import { CLAUDE_SDK_VERSION } from './agent-runtime-versions';
 import { ensureNodeCached, ensureClaudeCached } from './runtime-cache';
 import {
   deployRoot,
+  agentServerDir,
   deployFilesFor,
   needsDeploy,
   missingFiles,
@@ -343,6 +344,19 @@ async function deploySelfContained(connection: Connection, ops: RemoteOps): Prom
   ops.exec(`chmod +x ${isMusl ? `${root}/claude` : `${root}/node ${root}/claude`}`);
   ops.exec(`touch ${root}/${DEPLOYED_SENTINEL}`); // completion marker — last
   log.info('agent-remote', `Deployed agent-server to ${root} (${targetId(target)}, ${isMusl ? 'remote node' : 'own node'})`);
+
+  // Best-effort: drop the pre-R1 flat orphan (`index.mjs`/`index.js` directly
+  // under agent-server/) and stale version dirs (~300MB each). Never fails the
+  // deploy (decision C); current version is preserved via the case-skip.
+  try {
+    const dir = agentServerDir(ops.base);
+    ops.exec(
+      `D="${dir}"; rm -f "$D/index.mjs" "$D/index.js" 2>/dev/null; ` +
+        `for p in "$D"/*/; do [ -d "$p" ] || continue; case "$p" in */${version}/) ;; *) rm -rf "$p" 2>/dev/null;; esac; done; true`,
+    );
+  } catch (err: any) {
+    log.info('agent-remote', `old-artifact cleanup skipped: ${err?.message ?? err}`);
+  }
   return result;
 }
 

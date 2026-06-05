@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   deployRoot,
+  agentServerDir,
   remoteFilePath,
   deployFilesFor,
   needsDeploy,
@@ -19,6 +20,11 @@ describe('deployRoot / remoteFilePath (POSIX, version-scoped)', () => {
   it('builds versioned root under <base>/.shelf/agent-server', () => {
     expect(deployRoot('~', '2.4.3')).toBe('~/.shelf/agent-server/2.4.3');
     expect(deployRoot('/root', '2.4.3')).toBe('/root/.shelf/agent-server/2.4.3');
+  });
+  it('agentServerDir is the version parent', () => {
+    expect(agentServerDir('~')).toBe('~/.shelf/agent-server');
+    expect(agentServerDir('/root/')).toBe('/root/.shelf/agent-server');
+    expect(deployRoot('~', '2.4.3')).toBe(`${agentServerDir('~')}/2.4.3`);
   });
   it('trims trailing slashes on base', () => {
     expect(deployRoot('/root/', '1.0.0')).toBe('/root/.shelf/agent-server/1.0.0');

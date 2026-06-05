@@ -38,12 +38,17 @@ export function deployFilesFor(libc: Libc): DeployFile[] {
 export const DEPLOYED_SENTINEL = '.deployed';
 
 /**
- * Versioned remote deploy root. `base` is the connection-appropriate home
- * (e.g. `~` for ssh where the shell expands it, `/root` for docker). POSIX.
+ * Parent dir holding all versioned deploy roots: `<base>/.shelf/agent-server`.
+ * `base` is the connection-appropriate home (`~` for ssh where the shell
+ * expands it, `/root` for docker). POSIX.
  */
+export function agentServerDir(base: string): string {
+  return `${base.replace(/\/+$/, '')}/.shelf/agent-server`;
+}
+
+/** Versioned remote deploy root: `<base>/.shelf/agent-server/<version>`. POSIX. */
 export function deployRoot(base: string, version: string): string {
-  const trimmed = base.replace(/\/+$/, '');
-  return `${trimmed}/.shelf/agent-server/${version}`;
+  return `${agentServerDir(base)}/${version}`;
 }
 
 /** Absolute (POSIX) remote path of a deployed file under the versioned root. */
