@@ -39,6 +39,16 @@ export function nodeDownloadUrl(t: RuntimeTarget, version: string = NODE_VERSION
   return `https://nodejs.org/dist/${version}/${nodeArchiveName(t, version)}.tar.gz`;
 }
 
+/** nodejs.org SHASUMS256.txt for integrity verification of the Node tarball. */
+export function nodeShasumsUrl(version: string = NODE_VERSION): string {
+  return `https://nodejs.org/dist/${version}/SHASUMS256.txt`;
+}
+
+/** npm version manifest URL — carries `dist.integrity` (SRI) for the Claude tgz. */
+export function claudeManifestUrl(t: RuntimeTarget, version: string): string {
+  return `https://registry.npmjs.org/${claudePackageName(t)}/${version}`;
+}
+
 /** Scoped npm package that ships the Claude CLI binary for a target. */
 export function claudePackageName(t: RuntimeTarget): string {
   assertGlibc(t);
