@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   deployRoot,
   remoteFilePath,
+  deployFilesFor,
   needsDeploy,
   missingFiles,
   cacheDir,
@@ -10,6 +11,9 @@ import {
   DEPLOY_FILES,
   type RemoteInventory,
 } from './deploy-layout';
+
+const GLIBC_FILES = deployFilesFor('glibc');
+const MUSL_FILES = deployFilesFor('musl');
 
 describe('deployRoot / remoteFilePath (POSIX, version-scoped)', () => {
   it('builds versioned root under <base>/.shelf/agent-server', () => {
@@ -25,26 +29,40 @@ describe('deployRoot / remoteFilePath (POSIX, version-scoped)', () => {
   });
 });
 
-describe('needsDeploy / missingFiles (sentinel + all payload files)', () => {
+describe('deployFilesFor', () => {
+  it('glibc ships node; musl does not (uses remote node)', () => {
+    expect(deployFilesFor('glibc')).toEqual(['node', 'index.mjs', 'claude']);
+    expect(deployFilesFor('musl')).toEqual(['index.mjs', 'claude']);
+  });
+});
+
+describe('needsDeploy / missingFiles (sentinel + expected files)', () => {
   const allPresent = (sentinel: boolean): RemoteInventory => ({
     sentinel,
     files: { node: true, 'index.mjs': true, claude: true },
   });
 
   it('needs deploy when sentinel missing even if files exist', () => {
-    expect(needsDeploy(allPresent(false))).toBe(true);
+    expect(needsDeploy(allPresent(false), GLIBC_FILES)).toBe(true);
   });
-  it('needs deploy when a payload file is missing even with sentinel', () => {
+  it('needs deploy when an expected file is missing even with sentinel', () => {
     const inv: RemoteInventory = { sentinel: true, files: { node: true, claude: true } };
-    expect(needsDeploy(inv)).toBe(true);
-    expect(missingFiles(inv)).toEqual(['index.mjs']);
+    expect(needsDeploy(inv, GLIBC_FILES)).toBe(true);
+    expect(missingFiles(inv, GLIBC_FILES)).toEqual(['index.mjs']);
   });
-  it('skips deploy when sentinel present AND all files exist', () => {
-    expect(needsDeploy(allPresent(true))).toBe(false);
-    expect(missingFiles(allPresent(true))).toEqual([]);
+  it('skips deploy when sentinel present AND all expected files exist', () => {
+    expect(needsDeploy(allPresent(true), GLIBC_FILES)).toBe(false);
+    expect(missingFiles(allPresent(true), GLIBC_FILES)).toEqual([]);
   });
-  it('all missing when inventory empty', () => {
-    expect(missingFiles({ sentinel: false, files: {} })).toEqual([...DEPLOY_FILES]);
+  it('musl does not require node: a node-less inventory is complete for musl', () => {
+    const inv: RemoteInventory = { sentinel: true, files: { 'index.mjs': true, claude: true } };
+    expect(needsDeploy(inv, MUSL_FILES)).toBe(false);
+    expect(missingFiles(inv, MUSL_FILES)).toEqual([]);
+    // ...but the same inventory WOULD need node under glibc.
+    expect(needsDeploy(inv, GLIBC_FILES)).toBe(true);
+  });
+  it('all expected missing when inventory empty', () => {
+    expect(missingFiles({ sentinel: false, files: {} }, GLIBC_FILES)).toEqual([...DEPLOY_FILES]);
   });
 });
 

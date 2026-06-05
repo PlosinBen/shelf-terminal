@@ -27,7 +27,7 @@ export default defineConfig({
     {
       name: 'agent-deploy',
       testDir: './e2e/connector',
-      testMatch: 'agent-deploy.spec.ts',
+      testMatch: 'agent-deploy*.spec.ts',
     },
   ],
 });

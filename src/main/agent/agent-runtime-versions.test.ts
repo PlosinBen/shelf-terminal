@@ -47,8 +47,11 @@ describe('claudePackageName', () => {
     expect(claudePackageName(ARM64_GLIBC)).toBe('@anthropic-ai/claude-agent-sdk-linux-arm64');
     expect(claudePackageName(X64_GLIBC)).toBe('@anthropic-ai/claude-agent-sdk-linux-x64');
   });
-  it('throws on musl (defensive)', () => {
-    expect(() => claudePackageName(X64_MUSL)).toThrow(UnsupportedTargetError);
+  it('musl package per arch (official -musl companion exists for both)', () => {
+    expect(claudePackageName(X64_MUSL)).toBe('@anthropic-ai/claude-agent-sdk-linux-x64-musl');
+    expect(claudePackageName({ arch: 'arm64', libc: 'musl' })).toBe(
+      '@anthropic-ai/claude-agent-sdk-linux-arm64-musl',
+    );
   });
 });
 
@@ -57,8 +60,8 @@ describe('claudeTarballUrl', () => {
     expect(claudeTarballUrl(ARM64_GLIBC, '0.3.159')).toBe(
       'https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk-linux-arm64/-/claude-agent-sdk-linux-arm64-0.3.159.tgz',
     );
-    expect(claudeTarballUrl(X64_GLIBC, '0.3.159')).toBe(
-      'https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk-linux-x64/-/claude-agent-sdk-linux-x64-0.3.159.tgz',
+    expect(claudeTarballUrl(X64_MUSL, '0.3.159')).toBe(
+      'https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk-linux-x64-musl/-/claude-agent-sdk-linux-x64-musl-0.3.159.tgz',
     );
   });
 });

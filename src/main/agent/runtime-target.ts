@@ -7,17 +7,17 @@
  * dynamic loader is missing). So the deploy unit is `(arch × libc)`, not arch
  * alone. These pure parsers turn a remote probe into a validated target.
  *
- * Scope decision (2026-06): **glibc only.** Node.js publishes NO official musl
- * build for any arch — musl Node exists solely on the community
- * `unofficial-builds.nodejs.org` (and only for x64, never arm64). Rather than
- * tie our supply chain to an unofficial source, we mirror Node's own support
- * matrix: if upstream doesn't officially support musl, neither do we. All musl
- * remotes (every Alpine, any arch) are refused with a clear error — we never
- * silently fall back to the remote's node (that would reintroduce the version
- * drift this whole feature exists to kill).
+ * Strategy by libc (2026-06):
+ * - **glibc** → we ship our own Node (official nodejs.org), fully decoupled from
+ *   the remote's node version.
+ * - **musl** → we do NOT ship Node (no official musl Node exists; the community
+ *   x64-only build isn't worth tying our supply chain to). Instead we use the
+ *   remote's own node, gated by a minimum-version check (isRemoteNodeSupported).
+ *   The Claude CLI binary is still ours (the `-musl` companion exists for both
+ *   arches and is self-contained — verified on bare Alpine in the spike).
  *
- * Verified by spike (2026-06): glibc distros (debian/ubuntu) interchange; glibc
- * binaries fail on musl with `no such file or directory` (missing loader).
+ * Result: all four (arch × libc) combos are supported — the earlier arm64-musl
+ * gap (no prebuilt musl Node) disappears because musl never ships our Node.
  */
 
 export type Arch = 'x64' | 'arm64';
@@ -33,11 +33,11 @@ export function targetId(t: RuntimeTarget): string {
   return `${t.arch}-${t.libc}`;
 }
 
-/**
- * Targets we support — glibc only, matching Node's official release matrix.
- * musl is excluded entirely (see file header): no official musl Node exists.
- */
-export const SUPPORTED_TARGETS: readonly string[] = ['x64-glibc', 'arm64-glibc'];
+/** All four (arch × libc) combos are supported (see file header). */
+export const SUPPORTED_TARGETS: readonly string[] = ['x64-glibc', 'arm64-glibc', 'x64-musl', 'arm64-musl'];
+
+/** Minimum remote Node major for musl targets (we run agent-server on it). */
+export const MIN_REMOTE_NODE_MAJOR = 20; // aligned with esbuild `target: node20`
 
 /** Thrown when a remote's arch/libc cannot be determined or isn't supported. */
 export class UnsupportedTargetError extends Error {
@@ -87,15 +87,25 @@ export function detectTargetFromProbe(stdout: string): RuntimeTarget {
   const firstLine = stdout.split('\n').map((l) => l.trim()).find((l) => l.length > 0) ?? '';
   const arch = parseArch(firstLine);
   const libc = parseLibc(stdout);
-  if (libc === 'musl') {
-    throw new UnsupportedTargetError(
-      'musl-based remotes (e.g. Alpine) are not supported: Node.js publishes no official musl build. ' +
-        'Use a glibc distro (Debian, Ubuntu, Fedora, etc.).',
-    );
-  }
   const target: RuntimeTarget = { arch, libc };
   if (!SUPPORTED_TARGETS.includes(targetId(target))) {
     throw new UnsupportedTargetError(`${targetId(target)} is not a supported remote target.`);
   }
   return target;
+}
+
+/** Parse the major version from `node --version` output (`v20.18.1` → 20). */
+export function parseNodeMajor(versionStr: string): number | null {
+  const m = versionStr.trim().match(/v?(\d+)\./);
+  return m ? parseInt(m[1], 10) : null;
+}
+
+/**
+ * Whether a remote's `node --version` meets our minimum (musl path, where we
+ * run agent-server on the remote's own node). Too-old node would crash the
+ * esbuild-node20 bundle with a cryptic SyntaxError (GOTCHAS #344).
+ */
+export function isRemoteNodeSupported(versionStr: string): boolean {
+  const major = parseNodeMajor(versionStr);
+  return major !== null && major >= MIN_REMOTE_NODE_MAJOR;
 }

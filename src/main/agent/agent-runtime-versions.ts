@@ -12,9 +12,9 @@
  * registry tarball URL — no dependency on an `npm` CLI being present on the
  * user's machine (packaged apps often have none).
  *
- * Scope: glibc only (see runtime-target.ts header). Targets here are always
- * glibc — musl is rejected upstream at detectTargetFromProbe — so the URL
- * builders assume glibc; they throw defensively if handed a musl target.
+ * Node builders are glibc-only (we never ship our own musl Node — see
+ * runtime-target.ts header) and throw on a musl target. Claude builders handle
+ * all four combos (an official `-musl` companion exists for both arches).
  */
 
 import { type RuntimeTarget, targetId, UnsupportedTargetError } from './runtime-target';
@@ -58,10 +58,14 @@ export function claudeManifestUrl(t: RuntimeTarget, version: string): string {
   return `https://registry.npmjs.org/${claudePackageName(t)}/${version}`;
 }
 
-/** Scoped npm package that ships the Claude CLI binary for a target. */
+/**
+ * Scoped npm package that ships the Claude CLI binary for a target. Unlike Node,
+ * Claude has an official `-musl` companion for both arches, so this handles all
+ * four (arch × libc) combos.
+ */
 export function claudePackageName(t: RuntimeTarget): string {
-  assertGlibc(t);
-  return `@anthropic-ai/claude-agent-sdk-linux-${t.arch}`;
+  const suffix = t.libc === 'musl' ? '-musl' : '';
+  return `@anthropic-ai/claude-agent-sdk-linux-${t.arch}${suffix}`;
 }
 
 /**

@@ -20,10 +20,19 @@
  */
 
 import * as path from 'path';
+import type { Libc } from './runtime-target';
 
-/** Payload files that must all be present for a deploy to count as complete. */
+/** All possible payload files (the superset; the actual set is libc-dependent). */
 export const DEPLOY_FILES = ['node', 'index.mjs', 'claude'] as const;
 export type DeployFile = (typeof DEPLOY_FILES)[number];
+
+/**
+ * Files we ship for a target. glibc ships our own Node; musl uses the remote's
+ * node, so it ships everything EXCEPT node.
+ */
+export function deployFilesFor(libc: Libc): DeployFile[] {
+  return libc === 'musl' ? ['index.mjs', 'claude'] : ['node', 'index.mjs', 'claude'];
+}
 
 /** Completion sentinel, written only after every payload file is in place. */
 export const DEPLOYED_SENTINEL = '.deployed';
@@ -48,19 +57,19 @@ export interface RemoteInventory {
   files: Partial<Record<DeployFile, boolean>>;
 }
 
-/** Which payload files still need transferring (empty = none). */
-export function missingFiles(inv: RemoteInventory): DeployFile[] {
-  return DEPLOY_FILES.filter((f) => !inv.files[f]);
+/** Which of the `expected` files still need transferring (empty = none). */
+export function missingFiles(inv: RemoteInventory, expected: DeployFile[]): DeployFile[] {
+  return expected.filter((f) => !inv.files[f]);
 }
 
 /**
- * True if we must (re)deploy: sentinel absent OR any payload file missing.
- * When the sentinel is present AND all files exist, skip the whole transfer
- * (avoids re-sending the ~215MB Claude binary every reconnect).
+ * True if we must (re)deploy: sentinel absent OR any `expected` file missing.
+ * When the sentinel is present AND all expected files exist, skip the whole
+ * transfer (avoids re-sending the ~215MB Claude binary every reconnect).
  */
-export function needsDeploy(inv: RemoteInventory): boolean {
+export function needsDeploy(inv: RemoteInventory, expected: DeployFile[]): boolean {
   if (!inv.sentinel) return true;
-  return missingFiles(inv).length > 0;
+  return missingFiles(inv, expected).length > 0;
 }
 
 // ── Host-side cache (per arch×libc, under userData; app stays slim) ──

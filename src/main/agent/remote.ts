@@ -8,11 +8,18 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { getShellEnv } from '../connector/shell-env';
 import { createTurnDispatcher, type PermissionHandler } from './turn-dispatcher';
-import { detectTargetFromProbe, targetId, TARGET_PROBE_CMD } from './runtime-target';
+import {
+  detectTargetFromProbe,
+  targetId,
+  isRemoteNodeSupported,
+  MIN_REMOTE_NODE_MAJOR,
+  TARGET_PROBE_CMD,
+} from './runtime-target';
 import { CLAUDE_SDK_VERSION } from './agent-runtime-versions';
 import { ensureNodeCached, ensureClaudeCached } from './runtime-cache';
 import {
   deployRoot,
+  deployFilesFor,
   needsDeploy,
   missingFiles,
   DEPLOY_FILES,
@@ -283,13 +290,33 @@ function readRemoteInventory(ops: RemoteOps, root: string): RemoteInventory {
 async function deploySelfContained(connection: Connection, ops: RemoteOps): Promise<DeployResult> {
   const version = getAppVersion();
   const root = deployRoot(ops.base, version);
-  const result: DeployResult = { nodeBin: `${root}/node`, indexPath: `${root}/index.mjs` };
 
-  // Probe arch+libc (throws UnsupportedTargetError on musl/unknown → logged).
+  // Probe arch+libc (throws UnsupportedTargetError on unknown arch/libc).
   const target = detectTargetFromProbe(ops.exec(TARGET_PROBE_CMD));
+  const isMusl = target.libc === 'musl';
 
+  // glibc → run on the Node we ship (<root>/node). musl → run on the remote's
+  // own node (no official musl Node to ship), gated on a minimum version.
+  let nodeBin: string;
+  if (isMusl) {
+    const ver = ops.exec('node --version 2>/dev/null || true').trim();
+    if (!ver) {
+      throw new Error(
+        `Remote (${targetId(target)}) has no node on PATH. Install Node >= ${MIN_REMOTE_NODE_MAJOR}, or use a glibc remote (we ship Node there).`,
+      );
+    }
+    if (!isRemoteNodeSupported(ver)) {
+      throw new Error(`Remote node ${ver} is too old (${targetId(target)} uses the remote's node; needs >= ${MIN_REMOTE_NODE_MAJOR}).`);
+    }
+    nodeBin = 'node';
+  } else {
+    nodeBin = `${root}/node`;
+  }
+  const result: DeployResult = { nodeBin, indexPath: `${root}/index.mjs` };
+
+  const expected = deployFilesFor(target.libc);
   const inv = readRemoteInventory(ops, root);
-  if (!needsDeploy(inv)) {
+  if (!needsDeploy(inv, expected)) {
     log.info('agent-remote', `agent-server already deployed at ${root} (${targetId(target)})`);
     return result;
   }
@@ -301,19 +328,21 @@ async function deploySelfContained(connection: Connection, ops: RemoteOps): Prom
   if (!fs.existsSync(indexLocal)) {
     throw new Error(`Agent-server bundle not found at ${indexLocal}. Run: node agent-server/build.mjs`);
   }
-  const sources: Record<DeployFile, string> = {
-    node: await ensureNodeCached(cacheRoot, target),
+  // Only the files this target ships (musl omits node).
+  const sources: Partial<Record<DeployFile, string>> = {
     'index.mjs': indexLocal,
     claude: await ensureClaudeCached(cacheRoot, target, CLAUDE_SDK_VERSION),
   };
+  if (!isMusl) sources.node = await ensureNodeCached(cacheRoot, target);
 
   ops.exec(`mkdir -p ${root}`);
-  for (const f of missingFiles(inv)) {
-    ops.copyIn(sources[f], `${root}/${f}`);
+  for (const f of missingFiles(inv, expected)) {
+    ops.copyIn(sources[f]!, `${root}/${f}`);
   }
-  ops.exec(`chmod +x ${root}/node ${root}/claude`);
+  // Exec bits on what we shipped (node only for glibc).
+  ops.exec(`chmod +x ${isMusl ? `${root}/claude` : `${root}/node ${root}/claude`}`);
   ops.exec(`touch ${root}/${DEPLOYED_SENTINEL}`); // completion marker — last
-  log.info('agent-remote', `Deployed self-contained agent-server to ${root} (${targetId(target)})`);
+  log.info('agent-remote', `Deployed agent-server to ${root} (${targetId(target)}, ${isMusl ? 'remote node' : 'own node'})`);
   return result;
 }
 
