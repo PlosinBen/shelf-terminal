@@ -160,6 +160,34 @@ accept a connection object, or write a small WSL-specific fixture.
 > validates deploy + our-Node spawn without needing Claude/Copilot auth — same as
 > the docker E2E.
 
+### Running it (differs from docker — no container to start)
+
+The docker E2E's `test:agent-deploy` script does `docker run` to create the
+target container. **WSL has no such step** — you use a WSL distro **already
+installed** on the Windows machine.
+
+1. List your distros and pick one: `wsl -l -v`. Put its exact name in the spec's
+   `{ type: 'wsl', distro: '<name>' }`.
+   - glibc distro (Ubuntu/Debian) exercises the "ship our Node" path.
+   - an Alpine WSL distro (musl) exercises the "use remote node" path — optional.
+   - For a clean "no node" assertion, use a distro where node isn't installed
+     (or `which node` is empty); for the musl path you DO want node present.
+2. Add a dedicated npm script — **build only, no `docker run`** — e.g.:
+   ```jsonc
+   "test:agent-deploy-wsl": "set SHELF_WSL_SELF_CONTAINED=1 && NODE_ENV=test npm run build && NODE_ENV=test npx playwright test --project=agent-deploy agent-deploy-wsl.spec.ts"
+   ```
+   (Windows shell syntax; adjust env-var setting for your shell. Or set
+   `SHELF_WSL_SELF_CONTAINED` inside the spec's fixture `env` instead — cleaner
+   and shell-independent, matching how the fixture already sets `SHELF_TEST_MODE`.)
+3. First run downloads the per-target Node/Claude into `SHELF_RUNTIME_CACHE_DIR`
+   (persistent) → reused after. Deploy lands in the distro's
+   `~/.shelf/agent-server/<version>/`; you can inspect via
+   `wsl -d <name> -- ls ~/.shelf/agent-server/*/`.
+
+> Recommended: set `SHELF_WSL_SELF_CONTAINED` (and the other flags) in the test
+> fixture's `env`, so the test is self-driving and you don't depend on a shell
+> script — then you can just run `npx playwright test --project=agent-deploy`.
+
 ---
 
 ## Definition of done
