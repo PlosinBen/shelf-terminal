@@ -814,3 +814,17 @@ ollama 官方 [tool support blog](https://ollama.com/blog/tool-support) 列 qwen
 **回歸測試**: `e2e/agent-picker.spec.ts` 的 `pressing Enter inside the input submits the typed answer`（用 `picker_combo` fake scenario：options + inputType 並存,真實 AskUserQuestion 形狀）。
 
 **不要做**: 不要為了「怕打字打到一半誤送」而整個擋掉 input 裡的 Enter — 單行輸入框 Enter=送出是慣例,且 hint 已昭告;真正要擋的只有 IME 組字中那一下（`isComposing`）。
+
+---
+
+## macOS `activate` 可能在 app ready 前 fire → BrowserWindow 建構 crash
+
+**現象**: 打包後的 mac app 一啟動就 `Uncaught Exception: Error: Cannot create BrowserWindow before app is ready`,堆疊指向 `app.on('activate')` handler。
+
+**根因**: macOS 在 app 啟動時就可能 emit `activate`,而且**可能早於 `app.whenReady()`**。舊的 activate handler 只檢查「目前沒有 window」就 `createWindow()`,於是在 ready 前建構 `BrowserWindow` → Electron 直接丟例外、main process 啟動即 crash。第一個 window 本來就由 `whenReady().then()` 內的 `createWindow()` 負責,activate handler 只該負責「全部關閉後再點 dock 重開」。
+
+**解法**: activate 的 guard 除了「沒有 window」還要加 `app.isReady()` —— `src/main/window-lifecycle.ts` 的 `shouldRecreateWindowOnActivate(appReady, hasWindow)`(`appReady && !hasWindow`)。純函式抽出來方便單元測(不必 boot Electron)。
+
+**回歸測試**: `src/main/window-lifecycle.test.ts` —— `shouldRecreateWindowOnActivate(false, *)` 必為 false。
+
+**測不到的層**: Playwright E2E 啟動時會等 ready,**重現不了** ready-前 activate 的時序,所以這條只能靠純函式單元測守。

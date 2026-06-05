@@ -15,6 +15,7 @@ import { applyPmActive } from './ipc/pm';
 import { initAgentManager, disposeAllAgents } from './agent';
 import { getMainWindow, setMainWindow, setProjects, setSettings, getSettings, getProjects } from './app-state';
 import { registerAllIpcHandlers } from './ipc';
+import { shouldRecreateWindowOnActivate } from './window-lifecycle';
 
 applyUserDataIsolation();
 
@@ -212,8 +213,11 @@ app.on('before-quit', () => {
   shutdown();
 });
 
+// macOS can emit `activate` on launch BEFORE the app is ready; creating a
+// BrowserWindow then crashes the process ("Cannot create BrowserWindow before
+// app is ready"). Guard on app.isReady() in addition to the no-window check.
 app.on('activate', () => {
-  if (getMainWindow() === null) {
+  if (shouldRecreateWindowOnActivate(app.isReady(), getMainWindow() !== null)) {
     createWindow();
   }
 });
