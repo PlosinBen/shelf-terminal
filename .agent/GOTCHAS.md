@@ -349,6 +349,8 @@
 
 **解法**: 確保遠端有 Node.js 20+。deploy 時不做版本檢查（avoid extra SSH round-trip），錯誤會在 `waitForReady` timeout 後浮現。
 
+**更新（R1，2026-06）**: ssh/docker 的 **glibc** remote 已改成**自帶 node**（`src/main/agent/{runtime-target,runtime-cache,deploy-layout}.ts` + `remote.ts` deploySelfContained）→ deploy 我們釘死的 node-v20.18.1 + claude binary 到 `~/.shelf/agent-server/<version>/`，用 `<root>/node` 起，**不再吃 remote node 版本**。**仍適用此 gotcha 的**：wsl（暫用 remote node）與 musl remote（Phase 1 直接 reject，未來改用 remote node + 驗 `node ≥ 20`）。
+
 ---
 
 ## Claude SDK: thinking.display 沒設，dev/packaged 行為會分歧
