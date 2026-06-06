@@ -454,15 +454,11 @@ async function spawnAgentServer(
   // Forward SHELF_TEST_MODE to the remote agent-server so E2E specs can drive
   // the fake provider over ssh/docker (prod leaves it unset → empty prefix).
   const testEnv = process.env.SHELF_TEST_MODE ? `SHELF_TEST_MODE=${process.env.SHELF_TEST_MODE} ` : '';
-  // Phase 0 background-task spike: env doesn't cross the spawn boundary on its
-  // own, so forward the flag explicitly. REMOVE with the spike. See background-tasks.md.
-  const spikeEnv = process.env.SHELF_TASK_SPIKE ? `SHELF_TASK_SPIKE=${process.env.SHELF_TASK_SPIKE} ` : '';
 
   if (connection.type === 'local') {
     try {
       const env: Record<string, string> = { ...getShellEnv() };
       if (process.env.SHELF_TEST_MODE) env.SHELF_TEST_MODE = process.env.SHELF_TEST_MODE;
-      if (process.env.SHELF_TASK_SPIKE) env.SHELF_TASK_SPIKE = process.env.SHELF_TASK_SPIKE;
       log.trace(
         'agent-remote',
         `spawnAgentServer local: cwd=${cwd} indexPath=${indexPath} fileExists=${fs.existsSync(indexPath)} PATH=${env.PATH ?? '<missing>'}`,
@@ -479,7 +475,7 @@ async function spawnAgentServer(
     const shellPrefix = initScript
       ? `eval '${initScript.replace(/'/g, "'\\''")}' >/dev/null 2>&1; `
       : '';
-    const cmd = `${shellPrefix}${testEnv}${spikeEnv}exec ${nodeBin} ${indexPath}`;
+    const cmd = `${shellPrefix}${testEnv}exec ${nodeBin} ${indexPath}`;
     const args = [
       '-o', 'ControlMaster=auto',
       '-o', `ControlPath=/tmp/shelf-ssh-${connection.host}-${connection.port}-${connection.user}`,
@@ -493,7 +489,7 @@ async function spawnAgentServer(
   }
 
   if (connection.type === 'docker') {
-    const cmd = `${testEnv}${spikeEnv}exec ${nodeBin} ${indexPath}`;
+    const cmd = `${testEnv}exec ${nodeBin} ${indexPath}`;
     const proc = spawn('docker', ['exec', '-i', connection.container, 'sh', '-c', cmd], {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
@@ -501,7 +497,7 @@ async function spawnAgentServer(
   }
 
   if (connection.type === 'wsl') {
-    const proc = spawn('wsl.exe', ['-d', connection.distro, '--', 'sh', '-lc', `${testEnv}${spikeEnv}exec ${nodeBin} ${indexPath}`], {
+    const proc = spawn('wsl.exe', ['-d', connection.distro, '--', 'sh', '-lc', `${testEnv}exec ${nodeBin} ${indexPath}`], {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     return wrapProcess(proc, onTaskEvent);

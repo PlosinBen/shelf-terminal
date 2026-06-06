@@ -621,11 +621,11 @@ export function createClaudeBackend(): ServerBackend {
 
       try {
         for await (const sdkMsg of activeQuery) {
-          // ── Phase 0 spike (env-gated, REMOVE after World A/B is decided) ──
+          // ── Phase 0 spike (THROWAWAY — whole block reverted after World A/B) ──
           // Prints the post-`result` message sequence so we can tell whether
           // `result` precedes or follows background-task settle. See the
-          // "Phase 0 — Spike" section of background-tasks.md. Set SHELF_TASK_SPIKE=1.
-          if (process.env.SHELF_TASK_SPIKE === '1') {
+          // "Phase 0 — Spike" section of background-tasks.md.
+          {
             const a = sdkMsg as any;
             console.error('[task-spike] msg ' + JSON.stringify({
               type: a.type,
@@ -703,13 +703,11 @@ export function createClaudeBackend(): ServerBackend {
             }
           }
         }
-        // ── Phase 0 spike (env-gated, REMOVE after World A/B is decided) ──
+        // ── Phase 0 spike (THROWAWAY — whole block reverted after World A/B) ──
         // Marks the point the SDK generator actually ends (for-await complete),
         // i.e. when query() currently resolves and unblocks sendChain. Compare
         // its timing vs the `result` line above. See background-tasks.md.
-        if (process.env.SHELF_TASK_SPIKE === '1') {
-          console.error('[task-spike] generator ended (for-await complete)');
-        }
+        console.error('[task-spike] generator ended (for-await complete)');
       } catch (err: any) {
         // Two arrival timings for catch:
         //   (a) BEFORE result case ran (SDK threw mid-stream) — turn never
