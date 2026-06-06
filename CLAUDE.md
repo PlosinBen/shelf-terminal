@@ -9,6 +9,7 @@
 | 理解為什麼這樣設計、什麼不該改（按領域分檔，編號全域唯一）| [.agent/DECISIONS-core.md](.agent/DECISIONS-core.md) (基礎建設) ・ [.agent/DECISIONS-pm.md](.agent/DECISIONS-pm.md) (PM agent) ・ [.agent/DECISIONS-agent.md](.agent/DECISIONS-agent.md) (Agent provider) |
 | 遇到奇怪行為、debug 前先看 | [.agent/GOTCHAS.md](.agent/GOTCHAS.md) |
 | 發版流程、tag 規範 | [.agent/RELEASE_FLOW.md](.agent/RELEASE_FLOW.md) |
+| 開發某個 feature 時的暫存 context（規劃、spike 記錄、待辦）| [.agent/features/](.agent/features/) — 純開發過程的工作筆記，feature 做完即丟，**非永久文件**（gitignored、不跨機器同步）|
 
 ## Development
 
@@ -24,7 +25,9 @@
 - 優先使用 `package.json` 定義的 npm scripts（如 `npm run typecheck`、`npm run test:unit`、`npm run test:e2e`），不要直接組底層指令（如 `tsc --noEmit`、`vitest run`）— 使用者開了 bypass permission，直接組指令會增加審閱負擔
 - Commit 前確認 `.agent/` 文件是否需要更新（PROJECT_MAP, DECISIONS, GOTCHAS）— 有新增功能、改變架構、或發現 gotcha 時一併更新
 - `.agent/features/` 是暫時開發 context（gitignored、不跨機器同步）— **程式碼 / 測試 / 永久 doc 絕對禁止引用它**
-- 安裝套件前先 `npm view <pkg> versions` 確認最新穩定版，不要假設版本號
+- 優先思考、查證再動手，不要猜測 — 不確定的事先查 code / 文件 / 既有實作確認（例：裝套件前先 `npm view <pkg> versions` 確認版本，不要假設版號）
+- 設計盡可能簡單，避免過度設計 / 過度抽象 / 過度設定 — 先滿足當前需求，不預先為想像中的未來鋪設
+- 修正問題時只動必要的項目 — 不順手改無關的 code / 格式 / 重構，降低審閱與回歸風險
 - 有錯就停，逐一修復再測，不要重複跑整套 build/test
 
 ## Conventions
