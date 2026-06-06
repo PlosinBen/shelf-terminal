@@ -1,5 +1,5 @@
 import { log } from '@shared/logger';
-import type { Connection, AgentProvider, AgentInitPhase, ProviderModel } from '@shared/types';
+import type { Connection, AgentProvider, AgentInitPhase, ProviderModel, TaskEvent } from '@shared/types';
 import type { AgentBackend, AgentEvent, AgentQueryOptions, PickerResolvePayload } from './types';
 import { ChildProcess, spawn, execSync } from 'child_process';
 import { randomUUID } from 'crypto';
@@ -64,6 +64,10 @@ export function createRemoteBackend(
   // so the renderer's spinner text refines as deploy/spawn/probe progress.
   // Defaults to no-op, keeping the backend connection-agnostic.
   onPhase?: (phase: AgentInitPhase) => void,
+  // Optional per-tab background-task sink — main wires it to
+  // AGENT_BACKGROUND_TASKS. Session-level (NOT per-turn): a backgrounded task
+  // outlives the turn that spawned it. See background-tasks.md.
+  onTaskEvent?: (ev: TaskEvent) => void,
 ): AgentBackend {
   let remoteProc: RemoteProcess | null = null;
   let deployed = false;
@@ -82,7 +86,7 @@ export function createRemoteBackend(
     }
     if (!remoteProc) {
       onPhase?.('connecting');
-      const proc = await spawnAgentServer(connection, cwd, deployResult!, initScript);
+      const proc = await spawnAgentServer(connection, cwd, deployResult!, initScript, onTaskEvent);
       if (!proc) return null;
       remoteProc = proc;
       const ready = await remoteProc.awaitReady();
@@ -444,6 +448,7 @@ async function spawnAgentServer(
   cwd: string,
   deploy: DeployResult,
   initScript?: string,
+  onTaskEvent?: (ev: TaskEvent) => void,
 ): Promise<RemoteProcess | null> {
   const { nodeBin, indexPath } = deploy;
   // Forward SHELF_TEST_MODE to the remote agent-server so E2E specs can drive
@@ -459,7 +464,7 @@ async function spawnAgentServer(
         `spawnAgentServer local: cwd=${cwd} indexPath=${indexPath} fileExists=${fs.existsSync(indexPath)} PATH=${env.PATH ?? '<missing>'}`,
       );
       const proc = spawn(nodeBin, [indexPath], { cwd, env, stdio: ['pipe', 'pipe', 'pipe'] });
-      return wrapProcess(proc);
+      return wrapProcess(proc, onTaskEvent);
     } catch (err: any) {
       log.error('agent-remote', `Local spawn failed: ${err.message}`);
       return null;
@@ -480,7 +485,7 @@ async function spawnAgentServer(
       cmd,
     ];
     const proc = spawn('ssh', args, { stdio: ['pipe', 'pipe', 'pipe'] });
-    return wrapProcess(proc);
+    return wrapProcess(proc, onTaskEvent);
   }
 
   if (connection.type === 'docker') {
@@ -488,21 +493,21 @@ async function spawnAgentServer(
     const proc = spawn('docker', ['exec', '-i', connection.container, 'sh', '-c', cmd], {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
-    return wrapProcess(proc);
+    return wrapProcess(proc, onTaskEvent);
   }
 
   if (connection.type === 'wsl') {
     const proc = spawn('wsl.exe', ['-d', connection.distro, '--', 'sh', '-lc', `${testEnv}exec ${nodeBin} ${indexPath}`], {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
-    return wrapProcess(proc);
+    return wrapProcess(proc, onTaskEvent);
   }
 
   return null;
 }
 
-function wrapProcess(proc: ChildProcess): RemoteProcess {
-  const dispatcher = createTurnDispatcher(parseRemoteMessage);
+function wrapProcess(proc: ChildProcess, onTaskEvent?: (ev: TaskEvent) => void): RemoteProcess {
+  const dispatcher = createTurnDispatcher(parseRemoteMessage, onTaskEvent);
   let buffer = '';
 
   proc.stdout?.on('data', (chunk: Buffer) => {

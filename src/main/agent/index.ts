@@ -133,6 +133,10 @@ async function startSession(
     // Refine the renderer's "starting" spinner text as deploy/spawn/probe
     // progress (deploying → connecting → checking-auth).
     (phase) => send(IPC.AGENT_INIT_STATUS, tabId, { state: 'starting', phase }),
+    // Background-task sink — forwarded straight to the renderer. Session-level
+    // (NOT tied to session.state): a backgrounded task outlives its turn, so we
+    // never touch the turn's busy/idle state here. See background-tasks.md.
+    (ev) => send(IPC.AGENT_BACKGROUND_TASKS, tabId, ev),
   );
 
   const session: SessionInstance = {

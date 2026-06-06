@@ -58,6 +58,14 @@ export function newTurnId(): string {
  */
 export function wrapSendForTurn(turnId: string, raw: SendFn): SendFn {
   return (msg: OutgoingMessage) => {
+    // Background task events are intentionally turnId-less: a backgrounded task
+    // outlives its originating turn, so stamping the (soon-deregistered) turnId
+    // would get it dropped as "unknown turn" main-side. Pass through raw —
+    // mirrors how lifecycle messages stay turnId-less. See background-tasks.md.
+    if (msg.type === 'task_event') {
+      raw(msg);
+      return;
+    }
     raw({ ...msg, turnId } as OutgoingMessage);
   };
 }

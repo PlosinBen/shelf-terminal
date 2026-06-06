@@ -1,4 +1,5 @@
 import { log } from '@shared/logger';
+import type { TaskEvent } from '@shared/types';
 import type { AgentEvent } from './types';
 
 /**
@@ -45,6 +46,12 @@ interface TurnState {
 
 export function createTurnDispatcher(
   parseRemoteMessage: (msg: any) => AgentEvent | null,
+  // Session-level sink for background-task events. These carry NO turnId
+  // (decoupled from busy-state) so they're routed here BEFORE the per-turn
+  // turnId check — otherwise they'd hit the "missing turnId, dropping" branch.
+  // Defaults to a no-op so non-background callers (tests, providers without
+  // background support) need not pass it.
+  onTaskEvent?: (ev: TaskEvent) => void,
 ): TurnDispatcher {
   const turns = new Map<string, TurnState>();
   const responseHandlers = new Map<string, (payload: any) => void>();
@@ -71,6 +78,16 @@ export function createTurnDispatcher(
         handler(m);
         return;
       }
+    }
+
+    // Background task events: turnId-less by design (a backgrounded task
+    // outlives its turn). Route to the session-level sink BEFORE the turnId
+    // check so they don't fall into the "missing turnId, dropping" branch.
+    // This is the fix for the "event for unknown turn … dropping" bug when the
+    // model backgrounds work mid-turn. See background-tasks.md.
+    if (m?.type === 'task_event') {
+      onTaskEvent?.({ kind: m.kind, task: m.task, tasks: m.tasks });
+      return;
     }
 
     // Per-turn events: route by turnId envelope.

@@ -169,6 +169,25 @@ describe('orchestrator', () => {
       ]);
     });
 
+    it('does NOT stamp turnId onto task_event (backgrounded task outlives its turn)', () => {
+      const seen: OutgoingMessage[] = [];
+      const send = wrapSendForTurn('t-abc12345', (m) => seen.push(m));
+      send({
+        type: 'task_event',
+        kind: 'started',
+        task: { id: 'task-1', type: 'shell', label: 'sleep 30', status: 'running', done: false },
+      });
+      // Passed through verbatim — no turnId injected, else the main-side
+      // dispatcher would drop it as "unknown turn" once the turn is idle.
+      expect(seen).toHaveLength(1);
+      expect((seen[0] as any).turnId).toBeUndefined();
+      expect(seen[0]).toEqual({
+        type: 'task_event',
+        kind: 'started',
+        task: { id: 'task-1', type: 'shell', label: 'sleep 30', status: 'running', done: false },
+      });
+    });
+
     it('different turn wrappers stamp different ids (independent state)', () => {
       const seen: OutgoingMessage[] = [];
       const raw = (m: OutgoingMessage) => seen.push(m);

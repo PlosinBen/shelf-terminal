@@ -330,6 +330,46 @@ export interface ProviderModel {
   reasoning?: boolean;
 }
 
+/**
+ * Background task render primitive. Provider-agnostic by design — claude maps
+ * its SDK task_* system messages into this, copilot maps its TaskInfo into the
+ * same shape, and the renderer only ever sees this (never SDK / provider
+ * vocabulary). See `.agent/features/background-tasks.md`.
+ *
+ * `type` keeps a small fixed vocabulary across providers; unknown source types
+ * collapse to 'unknown' rather than leaking provider strings.
+ */
+export interface NormalizedTask {
+  id: string;
+  type: 'shell' | 'subagent' | 'monitor' | 'workflow' | 'agent' | 'unknown';
+  /** Human-readable description (SDK `description` / TaskInfo.description). */
+  label: string;
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'stopped';
+  /** Shell command, when the task is a shell. */
+  command?: string;
+  /** Latest progress / result summary line. */
+  summary?: string;
+  /** Terminal flag — true once the task reached a completed/failed/stopped end. */
+  done: boolean;
+  error?: string;
+}
+
+export type TaskEventKind = 'started' | 'updated' | 'progress' | 'done' | 'snapshot';
+
+/**
+ * One background-task update. Routed OUTSIDE the per-turn lane (no turnId) so a
+ * backgrounded task never gets dropped when the foreground turn goes idle.
+ *
+ * - `task` present for started/updated/progress/done (the single task affected)
+ * - `tasks` present for `snapshot` (authoritative full list, e.g. claude's
+ *   `result.background_tasks[]`) — used to reconcile drift from incremental events
+ */
+export interface TaskEvent {
+  kind: TaskEventKind;
+  task?: NormalizedTask;
+  tasks?: NormalizedTask[];
+}
+
 export interface PmProviderMeta {
   id: PmProviderType;
   label: string;

@@ -111,4 +111,6 @@ export const IPC = {
   AGENT_CAPABILITIES: 'agent:capabilities',
   AGENT_AUTH_REQUIRED: 'agent:auth-required',
   AGENT_INIT_STATUS: 'agent:init-status',
+  /** Background task updates (turnId-less; see background-tasks.md). Carries a TaskEvent. */
+  AGENT_BACKGROUND_TASKS: 'agent:background-tasks',
 } as const;

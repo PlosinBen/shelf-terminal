@@ -21,7 +21,7 @@ export function formatResetCountdown(resetsAtMs: number): string | null {
   return `${Math.ceil(d / 60_000)}m`;
 }
 
-import type { ProviderModel } from '@shared/types';
+import type { ProviderModel, TaskEvent } from '@shared/types';
 import type { PersistedContext } from '../context-store';
 
 /**
@@ -126,6 +126,15 @@ export type OutgoingMessage = WireEnvelope & (
    * forwarded to the main process — providers stay decoupled from disk I/O.
    */
   | { type: 'context_patch'; patch: Partial<PersistedContext> }
+
+  // ── Background tasks (NO turnId) ─────────────────────────────────────────
+  // Decoupled from busy-state: a backgrounded task keeps emitting after the
+  // foreground turn goes idle. `wrapSendForTurn` MUST NOT stamp a turnId on
+  // these (it's exempted) — otherwise the main-side dispatcher drops them as
+  // "unknown turn" once the turn is deregistered. Routed via a session-level
+  // `onTaskEvent` callback, never the per-turn AsyncIterator.
+  // See `.agent/features/background-tasks.md`.
+  | ({ type: 'task_event' } & TaskEvent)
 
   // ── Streaming (incremental reply/fold_text chunks) ───────────────────────
   // `msgId` ties each chunk to the eventual `type: 'message'` finalize event

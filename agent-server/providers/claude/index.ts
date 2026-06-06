@@ -621,6 +621,22 @@ export function createClaudeBackend(): ServerBackend {
 
       try {
         for await (const sdkMsg of activeQuery) {
+          // ── Phase 0 spike (env-gated, REMOVE after World A/B is decided) ──
+          // Prints the post-`result` message sequence so we can tell whether
+          // `result` precedes or follows background-task settle. See the
+          // "Phase 0 — Spike" section of background-tasks.md. Set SHELF_TASK_SPIKE=1.
+          if (process.env.SHELF_TASK_SPIKE === '1') {
+            const a = sdkMsg as any;
+            console.error('[task-spike] msg ' + JSON.stringify({
+              type: a.type,
+              subtype: a.subtype,
+              task_id: a.task_id,
+              parent_tool_use_id: a.parent_tool_use_id,
+              is_backgrounded: a.patch?.is_backgrounded,
+              bg_tasks: Array.isArray(a.background_tasks) ? a.background_tasks.length : undefined,
+            }));
+          }
+
           if ('session_id' in sdkMsg && sdkMsg.session_id) {
             lastSessionId = sdkMsg.session_id as string;
           }
@@ -686,6 +702,13 @@ export function createClaudeBackend(): ServerBackend {
               send({ type: 'capabilities', ...buildCapabilities() });
             }
           }
+        }
+        // ── Phase 0 spike (env-gated, REMOVE after World A/B is decided) ──
+        // Marks the point the SDK generator actually ends (for-await complete),
+        // i.e. when query() currently resolves and unblocks sendChain. Compare
+        // its timing vs the `result` line above. See background-tasks.md.
+        if (process.env.SHELF_TASK_SPIKE === '1') {
+          console.error('[task-spike] generator ended (for-await complete)');
         }
       } catch (err: any) {
         // Two arrival timings for catch:

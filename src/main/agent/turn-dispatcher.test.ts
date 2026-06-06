@@ -149,6 +149,87 @@ describe('createTurnDispatcher', () => {
     expect(captured).toHaveLength(1);
   });
 
+  // ── Background tasks: turnId-less routing (the "unknown turn dropping" fix) ──
+  it('routes task_event (turnId-less) to the onTaskEvent sink, not the turn queue', async () => {
+    const taskEvents: any[] = [];
+    const d = createTurnDispatcher(parse, (ev) => taskEvents.push(ev));
+    const gen = d.registerTurn('t-x', noopPerm);
+
+    d.feed({
+      type: 'task_event',
+      kind: 'started',
+      task: { id: 'task-1', type: 'shell', label: 'sleep 30', status: 'running', done: false },
+    });
+    d.feed({ type: 'message', msgType: 'text', content: 'hi', turnId: 't-x' });
+    d.feed({ type: 'status', state: 'idle', turnId: 't-x' });
+
+    const events: AgentEvent[] = [];
+    for await (const e of gen) events.push(e);
+
+    // task_event went to the sink, NOT into the turn's event stream
+    expect(events.map((e) => ((e as any).payload)?.content ?? ((e as any).payload)?.state)).toEqual(['hi', 'idle']);
+    expect(taskEvents).toHaveLength(1);
+    expect(taskEvents[0]).toEqual({
+      kind: 'started',
+      task: { id: 'task-1', type: 'shell', label: 'sleep 30', status: 'running', done: false },
+      tasks: undefined,
+    });
+  });
+
+  it('delivers task_event AFTER the turn went idle (regression: backgrounded task no longer dropped as unknown turn)', async () => {
+    const taskEvents: any[] = [];
+    const d = createTurnDispatcher(parse, (ev) => taskEvents.push(ev));
+    const gen = d.registerTurn('t-x', noopPerm);
+
+    // Foreground turn completes...
+    d.feed({ type: 'status', state: 'idle', turnId: 't-x' });
+    const events: AgentEvent[] = [];
+    for await (const e of gen) events.push(e);
+    expect(events).toHaveLength(1);
+
+    // ...then the backgrounded task keeps emitting. Pre-fix these carried the
+    // now-dead turnId and were logged as "event for unknown turn … dropping".
+    // task_event is turnId-less, so it reaches the sink regardless of turn state.
+    d.feed({
+      type: 'task_event',
+      kind: 'progress',
+      task: { id: 'task-1', type: 'shell', label: 'sleep 30', status: 'running', summary: 'still running', done: false },
+    });
+    d.feed({
+      type: 'task_event',
+      kind: 'done',
+      task: { id: 'task-1', type: 'shell', label: 'sleep 30', status: 'completed', done: true },
+    });
+
+    expect(taskEvents.map((e) => e.kind)).toEqual(['progress', 'done']);
+  });
+
+  it('passes a snapshot task_event (tasks[] reconcile) through to the sink', () => {
+    const taskEvents: any[] = [];
+    const d = createTurnDispatcher(parse, (ev) => taskEvents.push(ev));
+    d.feed({
+      type: 'task_event',
+      kind: 'snapshot',
+      tasks: [
+        { id: 'a', type: 'shell', label: 'x', status: 'running', done: false },
+        { id: 'b', type: 'subagent', label: 'y', status: 'completed', done: true },
+      ],
+    });
+    expect(taskEvents).toHaveLength(1);
+    expect(taskEvents[0].kind).toBe('snapshot');
+    expect(taskEvents[0].tasks).toHaveLength(2);
+  });
+
+  it('task_event without an onTaskEvent sink is a harmless no-op (does not throw / misroute)', async () => {
+    const d = createTurnDispatcher(parse);
+    const gen = d.registerTurn('t-x', noopPerm);
+    expect(() => d.feed({ type: 'task_event', kind: 'started', task: { id: 'task-1', type: 'shell', label: 's', status: 'running', done: false } })).not.toThrow();
+    d.feed({ type: 'status', state: 'idle', turnId: 't-x' });
+    const events: AgentEvent[] = [];
+    for await (const e of gen) events.push(e);
+    expect(events).toHaveLength(1);
+  });
+
   it('removes turn state when generator exits — subsequent events for same turnId are dropped', async () => {
     const d = createTurnDispatcher(parse);
     const gen = d.registerTurn('t-x', noopPerm);
