@@ -7,7 +7,7 @@ import type { QueryInput, SendFn, ServerBackend, ProviderCapabilities, StatusSeg
 import { severityFromUtilization, pickPermissionModes, pickEffortLevels } from '../types';
 import { parseSlashPrefix } from '@shared/slash-prefix';
 import { formatConfigAck, type ConfigEditKey } from '@shared/config-ack';
-import type { ProviderModel } from '@shared/types';
+import type { ProviderModel, NormalizedTask } from '@shared/types';
 import { stripCwd } from '../shared';
 import {
   rateLimitInfoToSegment,
@@ -22,6 +22,7 @@ import {
   renderPlan,
   reconcileTasks,
   formatClaudeToolInput,
+  normalizeTaskMessage,
   type TaskRecord,
 } from './helpers';
 
@@ -604,6 +605,9 @@ export function createClaudeBackend(): ServerBackend {
         tasks.clear();
         pendingTaskCreates.clear();
         pendingTaskLists.clear();
+        backgroundTasks.clear();
+        taskOutputFiles.clear();
+        ambientTaskIds.clear();
         lastSessionId = null;
         send({ type: 'context_patch', patch: { lastSdkSessionId: null } });
         // Fall through — SDK still handles the actual /clear semantics.
@@ -619,147 +623,206 @@ export function createClaudeBackend(): ServerBackend {
         stoppable = false;
       }
 
-      try {
-        for await (const sdkMsg of activeQuery) {
-          // ── Phase 0 spike (THROWAWAY — whole block reverted after World A/B) ──
-          // Prints the post-`result` message sequence so we can tell whether
-          // `result` precedes or follows background-task settle. See the
-          // "Phase 0 — Spike" section of background-tasks.md.
-          {
-            const a = sdkMsg as any;
-            console.error('[task-spike] msg ' + JSON.stringify({
-              type: a.type,
-              subtype: a.subtype,
-              task_id: a.task_id,
-              parent_tool_use_id: a.parent_tool_use_id,
-              is_backgrounded: a.patch?.is_backgrounded,
-              bg_tasks: Array.isArray(a.background_tasks) ? a.background_tasks.length : undefined,
-            }));
-          }
+      // Detached drain (World A — Phase 0 confirmed). The SDK keeps this
+      // generator alive past the foreground `result` to (1) drain a backgrounded
+      // task and (2) auto-resume the agent when it finishes; `query()` would
+      // otherwise only resolve at generator-end (~when the task settles),
+      // blocking the sendChain (next user send) for that whole window. So we
+      // resolve query()'s Promise at the foreground-idle checkpoint and let this
+      // loop keep pumping turnId-less `task_event` in the background.
+      // `myQuery`/identity-guarded teardown prevent a later turn's module state
+      // from being clobbered by this one's late finally. See background-tasks.md.
+      const myQuery = activeQuery;
+      let foregroundDone = false;
+      let releaseSendChain: () => void = () => {};
+      const sendChainGate = new Promise<void>((r) => { releaseSendChain = r; });
 
-          if ('session_id' in sdkMsg && sdkMsg.session_id) {
-            lastSessionId = sdkMsg.session_id as string;
-          }
+      const drain = async () => {
+        try {
+          for await (const sdkMsg of myQuery) {
+            if ('session_id' in sdkMsg && sdkMsg.session_id) {
+              lastSessionId = sdkMsg.session_id as string;
+            }
 
-          // Mid-turn auth failure (e.g. credentials revoked / expired during a
-          // session). Surface the same AuthPane takeover as the tab-open probe.
-          // Mirrors copilot's query() auth_required emit. Structured detection
-          // (isClaudeAuthFailure), provider passed explicitly so remote.ts
-          // doesn't default it to 'copilot'.
-          if (isClaudeAuthFailure(sdkMsg)) {
-            send({ type: 'auth_required', provider: 'claude' });
-          }
-
-          // /compact completion detection — listen for status with compact_result.
-          // SDK 也會發 'compact_boundary' 帶 pre/post token，但 post_tokens 是
-          // optional（壓縮完還沒實際送 model 算不出來），顯示 'pre → ?' 沒意義，
-          // duration_ms 也常缺。直接吃 status.compact_result 當 terminal flag，
-          // 顯示 'Compact completed' / 'Compact failed' 就好；要看 context 變化
-          // 使用者本來就能從 status bar 的 context% 觀察。
-          if (pendingCompactMsgId && sdkMsg.type === 'system') {
-            const subtype = (sdkMsg as any).subtype;
-            if (subtype === 'status' && (sdkMsg as any).compact_result) {
-              const result = (sdkMsg as any).compact_result as 'success' | 'failed';
-              if (result === 'success') {
-                send({
-                  type: 'message', msgId: pendingCompactMsgId, msgType: 'fold_markdown',
-                  label: '/compact',
-                  body: { content: 'Compact completed' },
-                });
-              } else {
-                const errMsg = (sdkMsg as any).compact_error ?? 'Compaction failed';
-                send({
-                  type: 'message', msgId: pendingCompactMsgId, msgType: 'fold_markdown',
-                  label: '/compact',
-                  errorMessage: `Compact failed: ${errMsg}`,
-                });
+            // Background-task system messages (task_started/updated/progress/
+            // notification) → turnId-less task_event. Accumulate state always;
+            // emit timing depends on phase:
+            //   - during the foreground turn: accumulate only (a synchronous
+            //     Bash that emits task_* settles BEFORE the foreground result,
+            //     so it's excluded from the snapshot below — no spurious card)
+            //   - after the foreground turn: emit each individually (it's
+            //     unambiguously background by then).
+            // processMessage ignores task_* so handle + continue.
+            if (sdkMsg.type === 'system' && typeof (sdkMsg as any).subtype === 'string'
+                && (sdkMsg as any).subtype.startsWith('task_')) {
+              const id = (sdkMsg as any).task_id as string | undefined;
+              if (typeof id === 'string' && id && !ambientTaskIds.has(id)) {
+                const norm = normalizeTaskMessage(sdkMsg, backgroundTasks.get(id));
+                if (norm?.ambient) {
+                  ambientTaskIds.add(id);
+                } else if (norm) {
+                  backgroundTasks.set(norm.task.id, norm.task);
+                  if (norm.outputFile) taskOutputFiles.set(norm.task.id, norm.outputFile);
+                  if (foregroundDone) send({ type: 'task_event', kind: norm.kind, task: norm.task });
+                }
               }
-              pendingCompactMsgId = null;
-              stoppable = true;
+              continue;
+            }
+
+            // Past the foreground turn the generator still yields the background
+            // drain + the SDK's auto-resume reply (its result carries
+            // origin.kind === 'task-notification'), all tagged with a turn the
+            // main side already deregistered. Suppress it — task_event is the
+            // only channel background state leaves on. (Auto-resume prose → M2.)
+            if (foregroundDone) continue;
+
+            // Mid-turn auth failure (e.g. credentials revoked / expired during a
+            // session). Surface the same AuthPane takeover as the tab-open probe.
+            // Mirrors copilot's query() auth_required emit. Structured detection
+            // (isClaudeAuthFailure), provider passed explicitly so remote.ts
+            // doesn't default it to 'copilot'.
+            if (isClaudeAuthFailure(sdkMsg)) {
+              send({ type: 'auth_required', provider: 'claude' });
+            }
+
+            // /compact completion detection — listen for status with compact_result.
+            // SDK 也會發 'compact_boundary' 帶 pre/post token，但 post_tokens 是
+            // optional（壓縮完還沒實際送 model 算不出來），顯示 'pre → ?' 沒意義，
+            // duration_ms 也常缺。直接吃 status.compact_result 當 terminal flag，
+            // 顯示 'Compact completed' / 'Compact failed' 就好；要看 context 變化
+            // 使用者本來就能從 status bar 的 context% 觀察。
+            if (pendingCompactMsgId && sdkMsg.type === 'system') {
+              const subtype = (sdkMsg as any).subtype;
+              if (subtype === 'status' && (sdkMsg as any).compact_result) {
+                const result = (sdkMsg as any).compact_result as 'success' | 'failed';
+                if (result === 'success') {
+                  send({
+                    type: 'message', msgId: pendingCompactMsgId, msgType: 'fold_markdown',
+                    label: '/compact',
+                    body: { content: 'Compact completed' },
+                  });
+                } else {
+                  const errMsg = (sdkMsg as any).compact_error ?? 'Compaction failed';
+                  send({
+                    type: 'message', msgId: pendingCompactMsgId, msgType: 'fold_markdown',
+                    label: '/compact',
+                    errorMessage: `Compact failed: ${errMsg}`,
+                  });
+                }
+                pendingCompactMsgId = null;
+                stoppable = true;
+              }
+            }
+
+            processMessage(sdkMsg, turnSend, input.cwd, blockMsgIds);
+
+            // Alias resolution → pin concrete model.
+            //
+            // supportedModels() returns the SDK's recommended aliases
+            // (default/sonnet/haiku) — cached in cache.models. The rule:
+            //   - intent IS one of those aliases → keep it (it tracks the
+            //     recommendation; never overwrite with a concrete id, so the
+            //     status bar shows a stable 'default' instead of flip-flopping
+            //     to 'claude-opus-4-8' per turn and back to 'default' on restart)
+            //   - intent is NOT a known alias (user pinned a specific model, e.g.
+            //     via custom model id) → adopt the SDK's actual resolved model and
+            //     re-emit capabilities so the status bar + project config reflect
+            //     what actually ran (existing capabilities→persist path handles both).
+            // Guarded on cache.models being populated so we never misclassify an
+            // alias as "unknown" before warmup completes. See DECISIONS-agent #62.
+            if (sdkMsg.type === 'assistant' && sdkMsg.parent_tool_use_id == null) {
+              const resolved = sdkMsg.message?.model;
+              if (shouldAdoptResolvedModel(resolved, currentModel, cache.models ?? [])) {
+                currentModel = resolved;
+                send({ type: 'capabilities', ...buildCapabilities() });
+              }
+            }
+
+            // Foreground turn end: a `result` NOT triggered by a task-notification
+            // (Phase 0: the auto-resume turn's result carries
+            // origin.kind === 'task-notification'). idle was already emitted by
+            // processMessage's `result` case; now snapshot the tasks still running
+            // (= the genuinely backgrounded ones) and release the sendChain so the
+            // next user send isn't queued behind the background drain.
+            if (sdkMsg.type === 'result' && (sdkMsg as any).origin?.kind !== 'task-notification') {
+              foregroundDone = true;
+              const running = [...backgroundTasks.values()].filter((t) => !t.done);
+              if (running.length > 0) send({ type: 'task_event', kind: 'snapshot', tasks: running });
+              releaseSendChain();
             }
           }
-
-          processMessage(sdkMsg, turnSend, input.cwd, blockMsgIds);
-
-          // Alias resolution → pin concrete model.
-          //
-          // supportedModels() returns the SDK's recommended aliases
-          // (default/sonnet/haiku) — cached in cache.models. The rule:
-          //   - intent IS one of those aliases → keep it (it tracks the
-          //     recommendation; never overwrite with a concrete id, so the
-          //     status bar shows a stable 'default' instead of flip-flopping
-          //     to 'claude-opus-4-8' per turn and back to 'default' on restart)
-          //   - intent is NOT a known alias (user pinned a specific model, e.g.
-          //     via custom model id) → adopt the SDK's actual resolved model and
-          //     re-emit capabilities so the status bar + project config reflect
-          //     what actually ran (existing capabilities→persist path handles both).
-          // Guarded on cache.models being populated so we never misclassify an
-          // alias as "unknown" before warmup completes. See DECISIONS-agent #62.
-          if (sdkMsg.type === 'assistant' && sdkMsg.parent_tool_use_id == null) {
-            const resolved = sdkMsg.message?.model;
-            if (shouldAdoptResolvedModel(resolved, currentModel, cache.models ?? [])) {
-              currentModel = resolved;
-              send({ type: 'capabilities', ...buildCapabilities() });
+        } catch (err: any) {
+          // Two arrival timings for catch:
+          //   (a) BEFORE result case ran (SDK threw mid-stream) — turn never
+          //       reached idle; emit error + idle to release main.
+          //   (b) AFTER result case ran (SDK threw during post-result cleanup
+          //       / abort teardown) — idle was already emitted by `result`,
+          //       main has deregistered the turn. Re-emitting error here
+          //       would arrive at an "unknown turn" and just clutter logs.
+          //       The user already got their result; the teardown error is
+          //       provider-internal noise.
+          if (!idleEmitted) {
+            if (err.name !== 'AbortError') {
+              send({ type: 'error', error: err.message ?? 'Unknown error' });
             }
+            turnSend({ type: 'status', state: 'idle' });
+          } else if (err.name !== 'AbortError') {
+            // Log to stderr so it still surfaces in agent-server.log for
+            // postmortem — just not over the wire.
+            console.error('[claude] post-idle SDK error suppressed:', err?.message ?? err);
           }
-        }
-        // ── Phase 0 spike (THROWAWAY — whole block reverted after World A/B) ──
-        // Marks the point the SDK generator actually ends (for-await complete),
-        // i.e. when query() currently resolves and unblocks sendChain. Compare
-        // its timing vs the `result` line above. See background-tasks.md.
-        console.error('[task-spike] generator ended (for-await complete)');
-      } catch (err: any) {
-        // Two arrival timings for catch:
-        //   (a) BEFORE result case ran (SDK threw mid-stream) — turn never
-        //       reached idle; emit error + idle to release main.
-        //   (b) AFTER result case ran (SDK threw during post-result cleanup
-        //       / abort teardown) — idle was already emitted by `result`,
-        //       main has deregistered the turn. Re-emitting error here
-        //       would arrive at an "unknown turn" and just clutter logs.
-        //       The user already got their result; the teardown error is
-        //       provider-internal noise.
-        if (!idleEmitted) {
-          if (err.name !== 'AbortError') {
-            send({ type: 'error', error: err.message ?? 'Unknown error' });
+        } finally {
+          for (const resolve of pendingPermissions.values()) {
+            resolve({ behavior: 'deny', message: 'Session ended' });
+          }
+          pendingPermissions.clear();
+          // Identity-guarded teardown: query() resolved early (at the foreground
+          // result), so by the time this background drain finishes a LATER turn
+          // may already own activeQuery/abortController. Only null them if
+          // they're still ours — otherwise we'd clobber the newer turn (the race
+          // the sendChain serialization was built to prevent).
+          if (activeQuery === myQuery) {
+            activeQuery = null;
+            abortController = null;
+          }
+
+          // Compact turn ended without a terminal status event — emit a
+          // generic error so the pending slash_response card doesn't sit
+          // forever waiting for an outcome. Reachable on SDK error / abort.
+          if (pendingCompactMsgId) {
+            send({
+              type: 'message', msgId: pendingCompactMsgId, msgType: 'fold_markdown',
+              label: '/compact',
+              errorMessage: 'Compaction did not complete',
+            });
+            pendingCompactMsgId = null;
+          }
+          stoppable = true;
+
+          // Tell orchestrator to persist the latest SDK session_id so the next
+          // process can resume. Single emit per turn — avoids disk thrash on
+          // every chunk. Mid-turn crash tolerance: at worst the user loses the
+          // in-flight turn and resumes from the previous turn's session_id,
+          // which is still correct because the SDK rolls forward a single jsonl
+          // per resume chain.
+          if (lastSessionId) {
+            send({ type: 'context_patch', patch: { lastSdkSessionId: lastSessionId } });
           }
           turnSend({ type: 'status', state: 'idle' });
-        } else if (err.name !== 'AbortError') {
-          // Log to stderr so it still surfaces in agent-server.log for
-          // postmortem — just not over the wire.
-          console.error('[claude] post-idle SDK error suppressed:', err?.message ?? err);
+          // Safety net: if we never reached a foreground result (pure error /
+          // abort before any result), still release the sendChain so it can't wedge.
+          releaseSendChain();
         }
-      } finally {
-        for (const resolve of pendingPermissions.values()) {
-          resolve({ behavior: 'deny', message: 'Session ended' });
-        }
-        pendingPermissions.clear();
-        activeQuery = null;
-        abortController = null;
+      };
 
-        // Compact turn ended without a terminal status event — emit a
-        // generic error so the pending slash_response card doesn't sit
-        // forever waiting for an outcome. Reachable on SDK error / abort.
-        if (pendingCompactMsgId) {
-          send({
-            type: 'message', msgId: pendingCompactMsgId, msgType: 'fold_markdown',
-            label: '/compact',
-            errorMessage: 'Compaction did not complete',
-          });
-          pendingCompactMsgId = null;
-        }
-        stoppable = true;
-
-        // Tell orchestrator to persist the latest SDK session_id so the next
-        // process can resume. Single emit per turn — avoids disk thrash on
-        // every chunk. Mid-turn crash tolerance: at worst the user loses the
-        // in-flight turn and resumes from the previous turn's session_id,
-        // which is still correct because the SDK rolls forward a single jsonl
-        // per resume chain.
-        if (lastSessionId) {
-          send({ type: 'context_patch', patch: { lastSdkSessionId: lastSessionId } });
-        }
-        turnSend({ type: 'status', state: 'idle' });
-      }
+      // Detached: keep draining the background after query() resolves. The
+      // .catch guarantees the sendChain is released even if the finally throws,
+      // so a crashed drain can never wedge the next send.
+      void drain().catch((err) => {
+        console.error('[claude] background drain crashed:', err?.message ?? err);
+        releaseSendChain();
+      });
+      await sendChainGate;
     },
 
     async stop() {
@@ -788,6 +851,11 @@ export function createClaudeBackend(): ServerBackend {
       abortController?.abort();
       activeQuery = null;
       abortController = null;
+      // The per-tab process is killed on dispose, so any detached background
+      // drain dies with it; clearing here keeps state tidy if reused in tests.
+      backgroundTasks.clear();
+      taskOutputFiles.clear();
+      ambientTaskIds.clear();
     },
 
     resetSession(_sessionId: string) {
@@ -874,7 +942,20 @@ const pendingTaskCreates = new Map<string, Omit<TaskRecord, 'status'>>();
 // latter being a real bug worth logging.
 const pendingTaskLists = new Set<string>();
 
-
+/**
+ * Background tasks — DISTINCT from the `tasks` plan/TODO map above. These mirror
+ * the SDK's `task_*` system messages (a backgrounded Bash, subagent, etc.) and
+ * are emitted to the renderer via the turnId-less `task_event` lane. Accumulating
+ * here lets `task_updated`/`task_notification` merge with the fields established
+ * at `task_started`. `taskOutputFiles` stashes the remote `output_file` path
+ * (server-only — not a render primitive; consumed by the M2 read_task_output RPC).
+ * See .agent/features/background-tasks.md (Phase 0 confirmed the SDK shapes).
+ */
+const backgroundTasks = new Map<string, NormalizedTask>();
+const taskOutputFiles = new Map<string, string>();
+// task_started.skip_transcript === true marks ambient/housekeeping tasks the
+// SDK says to hide from the transcript. We drop them from the card stream.
+const ambientTaskIds = new Set<string>();
 
 
 

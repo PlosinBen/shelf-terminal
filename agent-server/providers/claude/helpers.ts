@@ -4,7 +4,7 @@
 // and the small data types they share with the backend.
 import type { StatusSegment, SendFn } from '../types';
 import { severityFromUtilization, formatResetCountdown } from '../types';
-import type { ProviderModel } from '@shared/types';
+import type { ProviderModel, NormalizedTask, TaskEventKind } from '@shared/types';
 import { stripCwd } from '../shared';
 
 const RATE_LIMIT_LABELS: Record<string, string> = {
@@ -414,6 +414,118 @@ export function formatClaudeToolInput(toolName: string, input: Record<string, un
       if (firstStr) return firstStr;
       return JSON.stringify(input);
     }
+  }
+}
+
+// ── Background tasks ────────────────────────────────────────────────────────
+// Pure mapper for the SDK's `task_*` system messages → NormalizedTask render
+// primitives. State (the per-id Map, output-file stash, ambient set) lives in
+// the backend closure; this fn is side-effect-free so it's unit-testable like
+// the other parsers here. See .agent/features/background-tasks.md (Phase 0
+// confirmed the SDK shapes against a real backgrounded Bash).
+
+/** SDK `task_type` → NormalizedTask.type. Unknown values collapse to 'unknown'
+ *  (a backgrounded Bash is 'local_bash'; never leak SDK vocabulary). */
+const BG_TASK_TYPE_MAP: Record<string, NormalizedTask['type']> = {
+  local_bash: 'shell',
+  shell: 'shell',
+  subagent: 'subagent',
+  monitor: 'monitor',
+  workflow: 'workflow',
+  local_workflow: 'workflow',
+};
+/** SDK task status → NormalizedTask.status. SDK uses 'killed'/'paused' which our
+ *  render primitive doesn't carry: killed→stopped, paused→running. */
+const BG_STATUS_MAP: Record<string, NormalizedTask['status']> = {
+  pending: 'pending',
+  running: 'running',
+  completed: 'completed',
+  failed: 'failed',
+  killed: 'stopped',
+  paused: 'running',
+};
+const TERMINAL_BG_STATUS = new Set<NormalizedTask['status']>(['completed', 'failed', 'stopped']);
+
+function mapBgTaskType(t: unknown): NormalizedTask['type'] {
+  return (typeof t === 'string' && BG_TASK_TYPE_MAP[t]) || 'unknown';
+}
+function mapBgStatus(s: unknown, fallback: NormalizedTask['status']): NormalizedTask['status'] {
+  return (typeof s === 'string' && BG_STATUS_MAP[s]) || fallback;
+}
+
+export interface NormalizedTaskMessage {
+  kind: TaskEventKind;
+  task: NormalizedTask;
+  /** Remote path to the task's full output (task_notification only) — stashed
+   *  server-side for the M2 read_task_output RPC, never sent as a render primitive. */
+  outputFile?: string;
+  /** task_started.skip_transcript === true: ambient/housekeeping task to hide. */
+  ambient?: boolean;
+}
+
+/**
+ * Map one claude SDK background-task system message into a NormalizedTask + event
+ * kind, merging onto `prev` (previously-known state for this task_id, or
+ * undefined). Returns null if `msg` isn't a task_* system message. PURE — the
+ * caller owns the per-id Map and output-file stash. Phase 0 confirmed shapes:
+ *   task_started      { task_id, description, task_type, tool_use_id, skip_transcript? }
+ *   task_updated      { task_id, patch:{ status, error? } }
+ *   task_progress     { task_id, summary? }
+ *   task_notification { task_id, status, summary, output_file }
+ */
+export function normalizeTaskMessage(msg: any, prev?: NormalizedTask): NormalizedTaskMessage | null {
+  if (msg?.type !== 'system' || typeof msg.subtype !== 'string') return null;
+  const id = msg.task_id;
+  if (typeof id !== 'string' || !id) return null;
+  const base: NormalizedTask = prev ?? { id, type: 'unknown', label: id, status: 'running', done: false };
+
+  switch (msg.subtype) {
+    case 'task_started': {
+      if (msg.skip_transcript === true) return { kind: 'started', task: base, ambient: true };
+      return {
+        kind: 'started',
+        task: {
+          id,
+          type: mapBgTaskType(msg.task_type),
+          label: typeof msg.description === 'string' ? msg.description : id,
+          status: 'running',
+          done: false,
+        },
+      };
+    }
+    case 'task_updated': {
+      const status = mapBgStatus(msg.patch?.status, base.status);
+      const done = TERMINAL_BG_STATUS.has(status);
+      return {
+        kind: done ? 'done' : 'updated',
+        task: {
+          ...base,
+          status,
+          error: typeof msg.patch?.error === 'string' ? msg.patch.error : base.error,
+          done,
+        },
+      };
+    }
+    case 'task_progress':
+      return {
+        kind: 'progress',
+        task: { ...base, summary: typeof msg.summary === 'string' ? msg.summary : base.summary },
+      };
+    case 'task_notification': {
+      const status = mapBgStatus(msg.status, base.status);
+      return {
+        kind: 'done',
+        task: {
+          ...base,
+          status,
+          summary: typeof msg.summary === 'string' ? msg.summary : base.summary,
+          done: TERMINAL_BG_STATUS.has(status),
+        },
+        outputFile: typeof msg.output_file === 'string' ? msg.output_file : undefined,
+      };
+    }
+    default:
+      return null;
   }
 }
 

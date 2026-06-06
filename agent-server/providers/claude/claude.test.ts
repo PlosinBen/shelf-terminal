@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { processMessage, createBlockMsgIdState } from './index';
-import { mergeClaudeModels, rateLimitInfoToSegment, formatClaudeToolInput, extractToolResultText, askUserQuestionToPrompts, buildAskUserQuestionAnswerJson, parseTaskCreateOutput, parseTaskListOutput, reconcileTasks, renderPlan, shouldAdoptResolvedModel, stripToolErrorWrapper } from './helpers';
+import { mergeClaudeModels, rateLimitInfoToSegment, formatClaudeToolInput, extractToolResultText, askUserQuestionToPrompts, buildAskUserQuestionAnswerJson, parseTaskCreateOutput, parseTaskListOutput, reconcileTasks, renderPlan, shouldAdoptResolvedModel, stripToolErrorWrapper, normalizeTaskMessage } from './helpers';
 import type { OutgoingMessage } from '../types';
-import type { ProviderModel } from '@shared/types';
+import type { ProviderModel, NormalizedTask } from '@shared/types';
 
 describe('mergeClaudeModels', () => {
   it('returns SDK models unchanged when no customs', () => {
@@ -672,6 +672,113 @@ describe('renderPlan', () => {
     const { send, sent } = makeSink();
     renderPlan(send, new Map());
     expect(sent[0]).toEqual({ type: 'plan', content: '' });
+  });
+});
+
+describe('normalizeTaskMessage', () => {
+  // Field shapes verified against a real backgrounded Bash (Phase 0 spike,
+  // .agent/features/background-tasks.md):
+  //   task_started      { task_id, description, task_type:'local_bash', tool_use_id, skip_transcript? }
+  //   task_updated      { task_id, patch:{ status, end_time } }
+  //   task_notification { task_id, status, summary, output_file }
+  const started = (over: any = {}) => ({
+    type: 'system', subtype: 'task_started',
+    task_id: 'bm2esv0l0', description: 'Sleep 30 seconds then echo done',
+    task_type: 'local_bash', tool_use_id: 'toolu_x', ...over,
+  });
+
+  it('maps task_started (local_bash) → running shell task', () => {
+    const out = normalizeTaskMessage(started());
+    expect(out).toEqual({
+      kind: 'started',
+      task: { id: 'bm2esv0l0', type: 'shell', label: 'Sleep 30 seconds then echo done', status: 'running', done: false },
+    });
+  });
+
+  it('flags skip_transcript task_started as ambient (caller hides it)', () => {
+    const out = normalizeTaskMessage(started({ skip_transcript: true }));
+    expect(out?.ambient).toBe(true);
+    expect(out?.kind).toBe('started');
+  });
+
+  it('collapses unknown task_type to "unknown"', () => {
+    expect(normalizeTaskMessage(started({ task_type: 'some_future_type' }))?.task.type).toBe('unknown');
+    expect(normalizeTaskMessage(started({ task_type: undefined }))?.task.type).toBe('unknown');
+  });
+
+  it('maps subagent / workflow task types', () => {
+    expect(normalizeTaskMessage(started({ task_type: 'subagent' }))?.task.type).toBe('subagent');
+    expect(normalizeTaskMessage(started({ task_type: 'local_workflow' }))?.task.type).toBe('workflow');
+  });
+
+  it('task_updated → done when status terminal, merging prev label/type', () => {
+    const prev: NormalizedTask = { id: 'bm2esv0l0', type: 'shell', label: 'Sleep 30', status: 'running', done: false };
+    const out = normalizeTaskMessage(
+      { type: 'system', subtype: 'task_updated', task_id: 'bm2esv0l0', patch: { status: 'completed', end_time: 1 } },
+      prev,
+    );
+    expect(out).toEqual({
+      kind: 'done',
+      task: { id: 'bm2esv0l0', type: 'shell', label: 'Sleep 30', status: 'completed', done: true },
+    });
+  });
+
+  it('task_updated non-terminal status → kind "updated", done false', () => {
+    const out = normalizeTaskMessage(
+      { type: 'system', subtype: 'task_updated', task_id: 't1', patch: { status: 'running' } },
+    );
+    expect(out?.kind).toBe('updated');
+    expect(out?.task.done).toBe(false);
+  });
+
+  it('maps SDK-only statuses: killed→stopped (terminal), paused→running', () => {
+    const killed = normalizeTaskMessage({ type: 'system', subtype: 'task_updated', task_id: 't1', patch: { status: 'killed' } });
+    expect(killed?.task.status).toBe('stopped');
+    expect(killed?.task.done).toBe(true);
+    const paused = normalizeTaskMessage({ type: 'system', subtype: 'task_updated', task_id: 't1', patch: { status: 'paused' } });
+    expect(paused?.task.status).toBe('running');
+    expect(paused?.task.done).toBe(false);
+  });
+
+  it('carries patch.error onto the task', () => {
+    const out = normalizeTaskMessage(
+      { type: 'system', subtype: 'task_updated', task_id: 't1', patch: { status: 'failed', error: 'boom' } },
+    );
+    expect(out?.task.status).toBe('failed');
+    expect(out?.task.error).toBe('boom');
+    expect(out?.task.done).toBe(true);
+  });
+
+  it('task_progress updates summary, preserves the rest', () => {
+    const prev: NormalizedTask = { id: 't1', type: 'shell', label: 'x', status: 'running', done: false };
+    const out = normalizeTaskMessage({ type: 'system', subtype: 'task_progress', task_id: 't1', summary: 'half way' }, prev);
+    expect(out).toEqual({
+      kind: 'progress',
+      task: { id: 't1', type: 'shell', label: 'x', status: 'running', summary: 'half way', done: false },
+    });
+  });
+
+  it('task_notification → done with summary + returns output_file separately (not on the task)', () => {
+    const prev: NormalizedTask = { id: 'bm2esv0l0', type: 'shell', label: 'Sleep 30', status: 'running', done: false };
+    const out = normalizeTaskMessage({
+      type: 'system', subtype: 'task_notification', task_id: 'bm2esv0l0',
+      status: 'completed',
+      summary: 'Background command "Sleep 30" completed (exit code 0)',
+      output_file: '/tmp/claude/tasks/bm2esv0l0.output',
+    }, prev);
+    expect(out?.kind).toBe('done');
+    expect(out?.task.done).toBe(true);
+    expect(out?.task.summary).toBe('Background command "Sleep 30" completed (exit code 0)');
+    expect(out?.outputFile).toBe('/tmp/claude/tasks/bm2esv0l0.output');
+    // output_file is server-only (M2 RPC), never a render-primitive field.
+    expect('outputFile' in (out!.task as any)).toBe(false);
+  });
+
+  it('returns null for non-task / malformed messages', () => {
+    expect(normalizeTaskMessage({ type: 'system', subtype: 'init' })).toBeNull();
+    expect(normalizeTaskMessage({ type: 'assistant' })).toBeNull();
+    expect(normalizeTaskMessage({ type: 'system', subtype: 'task_started' })).toBeNull(); // no task_id
+    expect(normalizeTaskMessage(null)).toBeNull();
   });
 });
 
