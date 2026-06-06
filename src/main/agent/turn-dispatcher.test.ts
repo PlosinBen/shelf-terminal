@@ -243,4 +243,40 @@ describe('createTurnDispatcher', () => {
     // turnId should be silently dropped (not crash, not misroute).
     expect(() => d.feed({ type: 'message', msgType: 'text', content: 'late', turnId: 't-x' })).not.toThrow();
   });
+
+  // ── Server-initiated turn (auto-resume prose) — background-tasks.md M3 ──
+
+  it('turn_started registers the turn and hands its generator to onServerTurn; subsequent prose routes there (not dropped as unknown turn)', async () => {
+    const handed: Array<{ turnId: string; events: AsyncGenerator<AgentEvent> }> = [];
+    const d = createTurnDispatcher(parse, undefined, (turnId, events) => {
+      handed.push({ turnId, events });
+    });
+
+    // Provider opens a server turn the main side never sent a `send` for.
+    d.feed({ type: 'turn_started', turnId: 't-srv' });
+    // Its prose + idle arrive on later lines — must route to the registered turn.
+    d.feed({ type: 'message', msgType: 'reply', content: 'sleep done', turnId: 't-srv' });
+    d.feed({ type: 'status', state: 'idle', turnId: 't-srv' });
+
+    expect(handed).toHaveLength(1);
+    expect(handed[0].turnId).toBe('t-srv');
+
+    const events: AgentEvent[] = [];
+    for await (const e of handed[0].events) events.push(e);
+    expect(events.map((e) => ((e as any).payload)?.content ?? ((e as any).payload)?.state))
+      .toEqual(['sleep done', 'idle']);
+  });
+
+  it('turn_started without an onServerTurn sink is a harmless no-op', () => {
+    const d = createTurnDispatcher(parse);
+    expect(() => d.feed({ type: 'turn_started', turnId: 't-srv' })).not.toThrow();
+  });
+
+  it('ignores a duplicate turn_started for an already-registered turnId', () => {
+    const handed: string[] = [];
+    const d = createTurnDispatcher(parse, undefined, (turnId) => { handed.push(turnId); });
+    d.feed({ type: 'turn_started', turnId: 't-srv' });
+    d.feed({ type: 'turn_started', turnId: 't-srv' });
+    expect(handed).toEqual(['t-srv']);
+  });
 });

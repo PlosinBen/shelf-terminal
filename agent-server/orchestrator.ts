@@ -66,7 +66,11 @@ export function wrapSendForTurn(turnId: string, raw: SendFn): SendFn {
       raw(msg);
       return;
     }
-    raw({ ...msg, turnId } as OutgoingMessage);
+    // Respect a pre-set turnId so a provider can open a server-initiated turn
+    // with its OWN id (auto-resume prose after a background task: `turn_started`
+    // + the prose reply carry the server turnId, NOT the foreground one). Falls
+    // back to this turn's id for ordinary messages. See background-tasks.md M3.
+    raw({ ...msg, turnId: msg.turnId ?? turnId } as OutgoingMessage);
   };
 }
 

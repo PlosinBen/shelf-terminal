@@ -45,6 +45,26 @@ test.describe('background tasks panel via fake provider', () => {
     await expect(item.locator('.agent-task-label')).toContainText('bg t1');
   });
 
+  test('auto-resume prose renders as its own (user-less) turn block', async ({ shelfApp: { page } }) => {
+    await setupProject(page);
+    await openAgentTab(page);
+
+    // serverturn: drives the M3 server-initiated turn end-to-end (wire
+    // turn_started → dispatcher registers → main forwarder → renderer
+    // buildTurns opens a fresh block). See background-tasks.md M3.
+    await sendAgentPrompt(page, 'serverturn:the sleep finished');
+
+    // The prose appears...
+    await expect(page.locator('.agent-turn-response')).toContainText('the sleep finished', { timeout: 5_000 });
+
+    // ...in an agent-only turn block (no user bubble) — i.e. it did NOT glue
+    // onto the prompt's turn. The server turn is the LAST .agent-turn and it
+    // contains the prose but no user message.
+    const serverBlock = page.locator('.agent-turn').last();
+    await expect(serverBlock).toContainText('the sleep finished');
+    await expect(serverBlock.locator('.agent-msg-user')).toHaveCount(0);
+  });
+
   test('completed task: read output + dismiss', async ({ shelfApp: { page } }) => {
     await setupProject(page);
     await openAgentTab(page);

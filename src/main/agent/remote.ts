@@ -68,6 +68,10 @@ export function createRemoteBackend(
   // AGENT_BACKGROUND_TASKS. Session-level (NOT per-turn): a backgrounded task
   // outlives the turn that spawned it. See background-tasks.md.
   onTaskEvent?: (ev: TaskEvent) => void,
+  // Optional sink for a server-initiated turn (auto-resume prose after a
+  // background task finishes). Receives the turnId + the turn's event
+  // generator to drain into the renderer. See background-tasks.md M3.
+  onServerTurn?: (turnId: string, events: AsyncGenerator<AgentEvent>) => void,
 ): AgentBackend {
   let remoteProc: RemoteProcess | null = null;
   let deployed = false;
@@ -86,7 +90,7 @@ export function createRemoteBackend(
     }
     if (!remoteProc) {
       onPhase?.('connecting');
-      const proc = await spawnAgentServer(connection, cwd, deployResult!, initScript, onTaskEvent);
+      const proc = await spawnAgentServer(connection, cwd, deployResult!, initScript, onTaskEvent, onServerTurn);
       if (!proc) return null;
       remoteProc = proc;
       const ready = await remoteProc.awaitReady();
@@ -466,6 +470,7 @@ async function spawnAgentServer(
   deploy: DeployResult,
   initScript?: string,
   onTaskEvent?: (ev: TaskEvent) => void,
+  onServerTurn?: (turnId: string, events: AsyncGenerator<AgentEvent>) => void,
 ): Promise<RemoteProcess | null> {
   const { nodeBin, indexPath } = deploy;
   // Forward SHELF_TEST_MODE to the remote agent-server so E2E specs can drive
@@ -481,7 +486,7 @@ async function spawnAgentServer(
         `spawnAgentServer local: cwd=${cwd} indexPath=${indexPath} fileExists=${fs.existsSync(indexPath)} PATH=${env.PATH ?? '<missing>'}`,
       );
       const proc = spawn(nodeBin, [indexPath], { cwd, env, stdio: ['pipe', 'pipe', 'pipe'] });
-      return wrapProcess(proc, onTaskEvent);
+      return wrapProcess(proc, onTaskEvent, onServerTurn);
     } catch (err: any) {
       log.error('agent-remote', `Local spawn failed: ${err.message}`);
       return null;
@@ -502,7 +507,7 @@ async function spawnAgentServer(
       cmd,
     ];
     const proc = spawn('ssh', args, { stdio: ['pipe', 'pipe', 'pipe'] });
-    return wrapProcess(proc, onTaskEvent);
+    return wrapProcess(proc, onTaskEvent, onServerTurn);
   }
 
   if (connection.type === 'docker') {
@@ -510,21 +515,25 @@ async function spawnAgentServer(
     const proc = spawn('docker', ['exec', '-i', connection.container, 'sh', '-c', cmd], {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
-    return wrapProcess(proc, onTaskEvent);
+    return wrapProcess(proc, onTaskEvent, onServerTurn);
   }
 
   if (connection.type === 'wsl') {
     const proc = spawn('wsl.exe', ['-d', connection.distro, '--', 'sh', '-lc', `${testEnv}exec ${nodeBin} ${indexPath}`], {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
-    return wrapProcess(proc, onTaskEvent);
+    return wrapProcess(proc, onTaskEvent, onServerTurn);
   }
 
   return null;
 }
 
-function wrapProcess(proc: ChildProcess, onTaskEvent?: (ev: TaskEvent) => void): RemoteProcess {
-  const dispatcher = createTurnDispatcher(parseRemoteMessage, onTaskEvent);
+function wrapProcess(
+  proc: ChildProcess,
+  onTaskEvent?: (ev: TaskEvent) => void,
+  onServerTurn?: (turnId: string, events: AsyncGenerator<AgentEvent>) => void,
+): RemoteProcess {
+  const dispatcher = createTurnDispatcher(parseRemoteMessage, onTaskEvent, onServerTurn);
   let buffer = '';
 
   proc.stdout?.on('data', (chunk: Buffer) => {
@@ -582,6 +591,9 @@ export function parseRemoteMessage(msg: any): AgentEvent | null {
     // shape; unknown msgType returns null (caller drops the message).
     const payload = buildAgentMessagePayload(msg);
     if (!payload) return null;
+    // Server-initiated turn marker (auto-resume prose) — pass through so the
+    // renderer opens a new turn block for it. See background-tasks.md M3.
+    if (msg.startsTurn) payload.startsTurn = true;
     return { type: 'message', payload };
   }
 

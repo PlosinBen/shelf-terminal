@@ -35,7 +35,17 @@ export interface AgentFile {
  * uses it to render the blinking cursor at the end of body content and
  * to suppress promotion to "completed" rendering until a finalize lands.
  */
-type WithMsgId = { msgId: string; streaming?: boolean };
+type WithMsgId = {
+  msgId: string;
+  streaming?: boolean;
+  /**
+   * First message of a server-initiated turn (auto-resume prose after a
+   * background task). Tells the renderer's buildTurns to open a fresh turn
+   * block — these turns have no `user` message to anchor one. See
+   * background-tasks.md M3.
+   */
+  startsTurn?: boolean;
+};
 
 /**
  * Shared header shape for all `fold_*` variants. Provider supplies the full

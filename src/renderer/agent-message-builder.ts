@@ -17,6 +17,14 @@ function freshMsgId(prefix: string): string {
  * dedicated subscription in `agentTabSubscriptions.ts`.
  */
 export function buildAgentMsg(msg: any, provider: string): AgentMsg | null {
+  const built = buildAgentMsgInner(msg, provider);
+  // Server-initiated turn marker (auto-resume prose) — carry through so
+  // buildTurns opens a fresh turn block for it. See background-tasks.md M3.
+  if (built && msg.startsTurn) built.startsTurn = true;
+  return built;
+}
+
+function buildAgentMsgInner(msg: any, provider: string): AgentMsg | null {
   const id: string = msg.msgId ?? freshMsgId('msg');
   const ts = Date.now();
 

@@ -143,6 +143,24 @@ async function startSession(
     // (NOT tied to session.state): a backgrounded task outlives its turn, so we
     // never touch the turn's busy/idle state here. See background-tasks.md.
     (ev) => send(IPC.AGENT_BACKGROUND_TASKS, tabId, ev),
+    // Server-initiated turn (auto-resume prose after a background task). Drain
+    // the turn's events into the renderer like a normal turn, but SKIP its
+    // status events: the tab's busy/idle spinner belongs to the user's
+    // foreground turn, and forwarding this turn's idle would clear the spinner
+    // of an unrelated in-flight foreground turn. The dispatcher still ends the
+    // generator on idle independently. See background-tasks.md M3.
+    (turnId, events) => {
+      void (async () => {
+        try {
+          for await (const ev of events) {
+            if (ev.type === 'status') continue;
+            dispatchEvent(tabId, ev);
+          }
+        } catch (err: any) {
+          log.error('agent', `${tag} server-turn ${turnId} drain error: ${err?.message ?? err}`);
+        }
+      })();
+    },
   );
 
   const session: SessionInstance = {

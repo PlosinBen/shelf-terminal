@@ -45,6 +45,14 @@ export type PickerResolvePayload =
  */
 export interface WireEnvelope {
   turnId?: string;
+  /**
+   * Marks a `message` as the first of a new render turn so the renderer's
+   * buildTurns opens a fresh turn block for it. Needed for server-initiated
+   * (auto-resume) turns: they have no `user` message to anchor a new block, so
+   * without this the prose would glue onto the previous (possibly unrelated)
+   * turn. Only meaningful on `message` events. See background-tasks.md M3.
+   */
+  startsTurn?: boolean;
 }
 
 /** Top-level discriminator for canonical conversation messages in the timeline.
@@ -96,6 +104,15 @@ export type OutgoingMessage = WireEnvelope & (
       rateLimits?: StatusSegment[];
     }
   | { type: 'error'; error: string }
+  /**
+   * Server-initiated turn announcement. Carries a provider-minted `turnId`
+   * (via WireEnvelope) that the main side registers BEFORE the turn's content
+   * arrives — without registration the dispatcher drops the content as
+   * "unknown turn". Used when a backgrounded task finishes and the SDK
+   * auto-resumes the agent to write a real reply: that prose has no live turn,
+   * so the provider opens one. See background-tasks.md M3.
+   */
+  | { type: 'turn_started' }
   | { type: 'auth_required'; provider: string }
   | { type: 'permission_request'; toolUseId: string; toolName: string; input: Record<string, unknown> }
   /**

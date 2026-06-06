@@ -22,6 +22,12 @@ export type AgentMsg = {
   id: string;
   provider?: string;
   timestamp: number;
+  /**
+   * First message of a server-initiated turn (auto-resume prose after a
+   * background task). buildTurns opens a fresh turn block for it — these turns
+   * have no `user` message to anchor one. See background-tasks.md M3.
+   */
+  startsTurn?: boolean;
 } & (
   | { type: 'reply'; content: string; streaming?: boolean }
   | { type: 'note'; content: string }

@@ -492,6 +492,24 @@ describe('agentTabStore — buildTurns selector', () => {
     expect(turns[0].user?.id).toBe('u1');
     expect(turns[1].user?.id).toBe('u2');
   });
+
+  it('opens a new turn on a startsTurn message (server-initiated auto-resume prose)', () => {
+    // Background-task auto-resume prose has no `user` message; the startsTurn
+    // flag must open its own block instead of gluing onto the prior turn.
+    // See background-tasks.md M3.
+    const serverReply: AgentMsg = { ...textMsg('m2', 'sleep done'), startsTurn: true };
+    const msgs: AgentMsg[] = [
+      userMsg('u1', 'run sleep in background'),
+      textMsg('m1', 'ok, backgrounding it'),
+      serverReply,
+    ];
+    const turns = buildTurns(msgs);
+    expect(turns.length).toBe(2);
+    expect(turns[0].user?.id).toBe('u1');
+    expect(turns[0].agent.map((m) => m.id)).toEqual(['m1']); // prose did NOT glue here
+    expect(turns[1].user).toBeUndefined();
+    expect(turns[1].agent.map((m) => m.id)).toEqual(['m2']);
+  });
 });
 
 describe('agentTabStore — decisions / auth / init', () => {

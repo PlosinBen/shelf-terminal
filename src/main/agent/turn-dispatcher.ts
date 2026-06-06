@@ -52,6 +52,12 @@ export function createTurnDispatcher(
   // Defaults to a no-op so non-background callers (tests, providers without
   // background support) need not pass it.
   onTaskEvent?: (ev: TaskEvent) => void,
+  // Sink for a server-initiated turn (auto-resume prose after a background
+  // task finishes). On `turn_started` the dispatcher registers the
+  // provider-minted turnId and hands the caller the turn's AsyncGenerator to
+  // drain into the renderer. Permissionless (noop handler) — the auto-resume
+  // path doesn't route tool permissions in v1. See background-tasks.md M3.
+  onServerTurn?: (turnId: string, events: AsyncGenerator<AgentEvent>) => void,
 ): TurnDispatcher {
   const turns = new Map<string, TurnState>();
   const responseHandlers = new Map<string, (payload: any) => void>();
@@ -87,6 +93,18 @@ export function createTurnDispatcher(
     // model backgrounds work mid-turn. See background-tasks.md.
     if (m?.type === 'task_event') {
       onTaskEvent?.({ kind: m.kind, task: m.task, tasks: m.tasks });
+      return;
+    }
+
+    // Server-initiated turn: the provider opened a turn we never sent a `send`
+    // for (auto-resume prose). Register it NOW — synchronously, before the next
+    // feed() delivers its content — so those events have a destination instead
+    // of hitting the "unknown turn" drop below. registerTurn sets turn state
+    // synchronously, so the just-handed generator is safe to drain lazily.
+    if (m?.type === 'turn_started' && typeof m.turnId === 'string' && m.turnId) {
+      if (turns.has(m.turnId)) return; // dup announcement — ignore
+      const events = registerTurn(m.turnId, () => {});
+      onServerTurn?.(m.turnId, events);
       return;
     }
 

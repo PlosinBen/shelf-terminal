@@ -48,6 +48,7 @@ const TASK_STARTED = { type: 'system', subtype: 'task_started', task_id: 't1', d
 const FG_RESULT = { type: 'result', subtype: 'success', session_id: 's1' };
 const TASK_DONE = { type: 'system', subtype: 'task_notification', task_id: 't1', status: 'completed', summary: 'done (exit 0)', output_file: '/tmp/t1.output' };
 // The SDK auto-resume turn after the task settles — its result carries origin.kind.
+const RESUME_REPLY = { type: 'assistant', parent_tool_use_id: null, message: { content: [{ type: 'text', text: 'The sleep finished — output: done' }] } };
 const RESUME_RESULT = { type: 'result', subtype: 'success', origin: { kind: 'task-notification' }, session_id: 's1' };
 
 describe('claude detached-loop background tasks', () => {
@@ -98,6 +99,45 @@ describe('claude detached-loop background tasks', () => {
     // The SDK's auto-resume reply + its result are suppressed (no second idle,
     // no stray reply leaking on the dead turn).
     expect(sent.filter((m) => m.type === 'status' && (m as any).state === 'idle')).toHaveLength(1);
+  });
+
+  it('surfaces the auto-resume prose as a server-initiated turn (M3: turn_started + reply + idle, fresh turnId)', async () => {
+    // Regression for the M3 gap: when a backgrounded task finishes the SDK
+    // auto-resumes the agent to write a real reply. It used to be dropped on
+    // the dead foreground turnId (`if (foregroundDone) continue`). Now it must
+    // be re-emitted as a server-initiated turn. See background-tasks.md M3.
+    const { it, release } = controllableQuery(
+      [INIT, FG_REPLY, TASK_STARTED, FG_RESULT],
+      [TASK_DONE, RESUME_REPLY, RESUME_RESULT],
+    );
+    sdkQueryMock.mockImplementation(() => it);
+
+    const sent: OutgoingMessage[] = [];
+    const backend = createClaudeBackend();
+    disposer = () => backend.dispose();
+
+    await backend.query({ prompt: 'go', cwd: '/tmp' } as any, (m) => sent.push(m));
+    release();
+    await flush();
+
+    // A server turn was opened with a fresh turnId (distinct from foreground).
+    const started = sent.find((m) => m.type === 'turn_started') as any;
+    expect(started?.turnId).toMatch(/^t-/);
+
+    // The prose is re-emitted as a normal reply tagged with that turnId and
+    // flagged startsTurn so the renderer opens a new turn block for it.
+    const reply = sent.find((m) => m.type === 'message' && (m as any).msgType === 'reply'
+      && (m as any).turnId === started.turnId) as any;
+    expect(reply?.content).toContain('sleep finished');
+    expect(reply?.startsTurn).toBe(true);
+
+    // The server turn is closed with its OWN idle (carries the server turnId),
+    // separate from the single foreground idle (which has no turnId here).
+    const serverIdle = sent.find((m) => m.type === 'status' && (m as any).state === 'idle'
+      && (m as any).turnId === started.turnId);
+    expect(serverIdle).toBeTruthy();
+    expect(sent.filter((m) => m.type === 'status' && (m as any).state === 'idle'
+      && !(m as any).turnId)).toHaveLength(1); // foreground idle untouched
   });
 
   it('a turn with no backgrounded task emits no task_event and resolves normally', async () => {

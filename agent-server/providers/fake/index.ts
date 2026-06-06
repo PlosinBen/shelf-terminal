@@ -38,6 +38,8 @@ import type {
  *   task:<id>           emit a running background task_event (turnId-less)
  *   taskdone:<id>       emit a completed background task_event + stash its
  *                       output so read_task_output (fetchTaskOutput) returns it
+ *   serverturn:<msg>    server-initiated turn (auto-resume prose): turn_started
+ *                       + reply (startsTurn) + idle, all on a fresh turnId
  *
  * Chain steps with `|`:
  *   text:hi|delay:50|tool:Read|text:bye
@@ -263,6 +265,20 @@ export function createFakeBackend(): ServerBackend {
         kind: 'done',
         task: { id, type: 'shell', label: `bg ${id}`, status: 'completed', summary: `bg ${id} completed (exit 0)`, done: true },
       });
+      return;
+    }
+
+    // serverturn:<msg> — a server-initiated turn (auto-resume prose after a
+    // background task finishes). Opens a fresh turnId via turn_started, emits
+    // the prose tagged with it + startsTurn so the renderer renders it in its
+    // own turn block, then closes with that turn's idle. Same wire shapes a
+    // real provider emits. See background-tasks.md M3.
+    if (step.startsWith('serverturn:')) {
+      const content = step.slice('serverturn:'.length);
+      const turnId = mintId('t');
+      send({ type: 'turn_started', turnId });
+      send({ type: 'message', msgId: mintId('m'), msgType: 'reply', content, turnId, startsTurn: true });
+      send({ type: 'status', state: 'idle', turnId });
       return;
     }
 

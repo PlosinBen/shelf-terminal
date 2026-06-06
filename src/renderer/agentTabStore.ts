@@ -783,7 +783,11 @@ export function buildTurns(messages: AgentMsg[]): Turn[] {
   for (const msg of messages) {
     if (msg.type === 'user') {
       result.push({ user: msg, agent: [] });
-    } else if (result.length === 0) {
+    } else if (msg.startsTurn || result.length === 0) {
+      // `startsTurn`: first message of a server-initiated turn (auto-resume
+      // prose after a background task). It has no `user` message to anchor a
+      // block, so open one explicitly — otherwise it'd glue onto the previous
+      // (possibly unrelated) turn. See background-tasks.md M3.
       result.push({ agent: [msg] });
     } else {
       result[result.length - 1].agent.push(msg);

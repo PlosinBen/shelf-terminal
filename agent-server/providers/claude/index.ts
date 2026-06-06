@@ -638,6 +638,14 @@ export function createClaudeBackend(): ServerBackend {
       let releaseSendChain: () => void = () => {};
       const sendChainGate = new Promise<void>((r) => { releaseSendChain = r; });
 
+      // Server-initiated turn state (auto-resume prose after a background task).
+      // Each finished task triggers the SDK to auto-resume the agent for one
+      // assistant→result sub-turn; we open a fresh turnId per sub-turn so the
+      // prose renders as a normal reply. Reset after each sub-turn's result.
+      let serverTurnId: string | null = null;
+      let serverBlockIds: BlockMsgIdState | null = null;
+      let serverStarted = false;
+
       const drain = async () => {
         try {
           for await (const sdkMsg of myQuery) {
@@ -673,9 +681,44 @@ export function createClaudeBackend(): ServerBackend {
             // Past the foreground turn the generator still yields the background
             // drain + the SDK's auto-resume reply (its result carries
             // origin.kind === 'task-notification'), all tagged with a turn the
-            // main side already deregistered. Suppress it — task_event is the
-            // only channel background state leaves on. (Auto-resume prose → M2.)
-            if (foregroundDone) continue;
+            // main side already deregistered. Surface the prose as a
+            // server-initiated turn: a fresh turnId the main side registers via
+            // `turn_started`, so it renders as a normal reply + persists instead
+            // of being dropped on the dead foreground turnId. (task_* were
+            // already handled+continued above.) See background-tasks.md M3.
+            if (foregroundDone) {
+              // Route ONLY assistant/result (skip stream_event): the assistant
+              // case emits a COMPLETE reply, so the prose is non-streaming and
+              // we avoid the stream-placeholder turn-grouping path. Tool calls
+              // during auto-resume remain a pre-existing limitation (canUseTool
+              // still tags via the stale foreground send) — out of M3 scope.
+              if (sdkMsg.type === 'assistant') {
+                if (serverTurnId == null) {
+                  serverTurnId = `t-${randomUUID().slice(0, 8)}`;
+                  serverBlockIds = createBlockMsgIdState();
+                  serverStarted = false;
+                  send({ type: 'turn_started', turnId: serverTurnId });
+                }
+                const stid = serverTurnId;
+                const serverSend: SendFn = (msg) => {
+                  const tagged: any = { ...msg, turnId: stid };
+                  // Mark the sub-turn's first message so buildTurns opens a new
+                  // block (a server turn has no `user` message to anchor one).
+                  if (!serverStarted && msg.type === 'message') {
+                    tagged.startsTurn = true;
+                    serverStarted = true;
+                  }
+                  send(tagged);
+                };
+                processMessage(sdkMsg, serverSend, input.cwd, serverBlockIds!);
+              } else if (sdkMsg.type === 'result' && serverTurnId != null) {
+                // Close the sub-turn. The main forwarder swallows this status,
+                // but the dispatcher needs it to end the turn's generator.
+                send({ type: 'status', state: 'idle', turnId: serverTurnId });
+                serverTurnId = null;
+              }
+              continue;
+            }
 
             // Mid-turn auth failure (e.g. credentials revoked / expired during a
             // session). Surface the same AuthPane takeover as the tab-open probe.
