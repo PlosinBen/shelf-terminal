@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { AgentPrefs, Connection } from '@shared/types';
 import { parseSlashPrefix } from '@shared/slash-prefix';
 import { useStore, setChatStage } from '../../store';
@@ -12,28 +12,9 @@ import {
 } from '../../agentTabStore';
 import { emitAgent } from '../../events';
 import { useAttachmentPaste } from '../../hooks/useAttachmentPaste';
-
-/**
- * Slash commands whose arguments come from a finite option list known to the
- * renderer (via capabilities). Typing `/{cmd}` without args opens an inline
- * picker — saves a backend round-trip just to fetch options. Typing
- * `/{cmd} value` falls through to `agent:send` and is dispatched by the
- * provider's own slash handler (which validates, applies imperatively, and
- * replies with a fold_markdown card — same shape as /help, /clear, etc.).
- *
- * Value is the picker key used by SelectionPanel (differs from cmd name
- * when the slash uses a shorter form, e.g. /permission → permissionMode).
- */
-const OPTIONED_SLASHES: Record<string, 'model' | 'effort' | 'permissionMode'> = {
-  model: 'model',
-  effort: 'effort',
-  permission: 'permissionMode',
-};
-
-interface SlashCommand {
-  name: string;
-  description: string;
-}
+import { OPTIONED_SLASHES, useSlashCommands, type SlashCommand } from './slash-commands';
+import { SlashMenu } from './SlashMenu';
+import { AttachmentChips } from './AttachmentChips';
 
 interface Props {
   tabId: string;
@@ -167,42 +148,7 @@ export function InputZone({ tabId, projectId, cwd, connection, visible, rootRef,
     }
   }, [input]);
 
-  // Slash menu: union of provider-declared agent slashes and renderer-known
-  // optioned slashes (model/effort/permission). All ultimately dispatch
-  // through the provider — OPTIONED_SLASHES only signals "renderer can render
-  // an inline picker on no-args" (saves a round-trip), not "renderer handles
-  // dispatch". The display merge here just ensures the suggestion menu shows
-  // both sets, even when a provider doesn't list these in its slashCommands.
-  const allCommands = useMemo<SlashCommand[]>(() => {
-    const providerCmds = capabilities?.slashCommands ?? [];
-    const localCmds = Object.keys(OPTIONED_SLASHES).map((name) => {
-      const description =
-        name === 'model' ? 'Switch agent model' :
-        name === 'effort' ? 'Set reasoning effort' :
-        name === 'permission' ? 'Set permission mode' :
-        '';
-      return { name, description };
-    });
-    const seen = new Set<string>();
-    const merged: SlashCommand[] = [];
-    for (const cmd of [...providerCmds, ...localCmds]) {
-      if (seen.has(cmd.name)) continue;
-      seen.add(cmd.name);
-      merged.push(cmd);
-    }
-    return merged;
-  }, [capabilities]);
-
-  const filteredCommands = useMemo(() => {
-    return allCommands.filter(
-      (cmd) => !slashFilter || cmd.name.toLowerCase().startsWith(slashFilter.toLowerCase()),
-    );
-  }, [allCommands, slashFilter]);
-
-  const allCommandNames = useMemo(
-    () => new Set(allCommands.map((c) => c.name)),
-    [allCommands],
-  );
+  const { filteredCommands, allCommandNames } = useSlashCommands(capabilities, slashFilter);
 
   const handleSend = useCallback(() => {
     const text = input.trim();
@@ -386,43 +332,20 @@ export function InputZone({ tabId, projectId, cwd, connection, visible, rootRef,
   return (
     <div className="agent-input-area">
       {showSlashMenu && filteredCommands.length > 0 && (
-        <div className="agent-slash-menu">
-          {filteredCommands.slice(0, 10).map((cmd, i) => (
-            <div
-              key={cmd.name}
-              className={`agent-slash-item${i === slashSelection ? ' agent-slash-item-selected' : ''}`}
-              onMouseDown={(e) => { e.preventDefault(); handleSlashSelect(cmd); }}
-              onMouseEnter={() => setSlashSelection(i)}
-            >
-              <span className="agent-slash-name">/{cmd.name}</span>
-              <span className="agent-slash-desc">{cmd.description}</span>
-            </div>
-          ))}
-        </div>
+        <SlashMenu
+          commands={filteredCommands}
+          selection={slashSelection}
+          onSelect={handleSlashSelect}
+          onHover={setSlashSelection}
+        />
       )}
       {(pendingFiles.length > 0 || pendingImages.length > 0) && (
-        <div className="agent-attachment-row">
-          {pendingImages.map((url, i) => (
-            <span key={`img-${i}`} className="agent-attachment-chip">
-              img {i + 1} ({Math.round(url.length * 3 / 4 / 1024)} KB)
-              <button
-                type="button"
-                className="agent-attachment-remove"
-                onClick={() => setPendingImages((prev) => prev.filter((_, j) => j !== i))}
-              >×</button>
-            </span>
-          ))}
-          {pendingFiles.map((f) => (
-            <span key={f.path} className="agent-attachment-chip">
-              {f.displayPath}
-              <button
-                type="button"
-                className="agent-attachment-remove"
-                onClick={() => setPendingFiles((prev) => prev.filter((p) => p.path !== f.path))}
-              >×</button>
-            </span>
-          ))}
-        </div>
+        <AttachmentChips
+          images={pendingImages}
+          files={pendingFiles}
+          onRemoveImage={(i) => setPendingImages((prev) => prev.filter((_, j) => j !== i))}
+          onRemoveFile={(path) => setPendingFiles((prev) => prev.filter((p) => p.path !== path))}
+        />
       )}
       <div className="agent-input-row">
         <span className="agent-prompt">&#10095;</span>
