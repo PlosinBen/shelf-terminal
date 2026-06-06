@@ -269,6 +269,22 @@ export function InputZone({ tabId, projectId, cwd, connection, visible, rootRef,
     emitAgent('agent:stop', { tabId });
   }, [tabId]);
 
+  // One-at-a-time guard for the queued flush below. The flush is
+  // level-triggered on `isStreaming === false`, but isStreaming only flips
+  // back to true after the dispatched send round-trips through IPC
+  // (status:streaming). In that window the effect re-fires (queuedMessages
+  // changed by the dequeue) with isStreaming STILL false — without this guard
+  // it drains the WHOLE queue in a burst instead of one message per turn.
+  // We disarm on flush and re-arm only when streaming actually begins, so
+  // exactly one message flushes per streaming→idle cycle. Every dispatched
+  // message emits a streaming status (even instant config edits), so re-arming
+  // is guaranteed → never stalls. (Surfaced by background tasks: foreground
+  // turns idle near-instantly, making the burst obvious. See background-tasks.md.)
+  const flushArmedRef = useRef(true);
+  useEffect(() => {
+    if (isStreaming) flushArmedRef.current = true;
+  }, [isStreaming]);
+
   // Queued-message flush. When the agent transitions streaming →
   // idle and queued messages exist, pop the front and send it as a
   // normal turn. Lives here (not in the store) so the same path as
@@ -278,7 +294,9 @@ export function InputZone({ tabId, projectId, cwd, connection, visible, rootRef,
   // before the next AGENT_SEND lands.
   useEffect(() => {
     if (isStreaming) return;
+    if (!flushArmedRef.current) return;
     if (queuedMessages.length === 0) return;
+    flushArmedRef.current = false;
     const next = dequeueMessage(tabId);
     if (!next) return;
     upsertMessage(tabId, {

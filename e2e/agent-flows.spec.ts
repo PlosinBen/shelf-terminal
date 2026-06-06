@@ -207,4 +207,40 @@ test.describe('agent flows via fake provider', () => {
     // Status returns to idle after stop().
     await expect(page.locator('.agent-status-label:visible')).toHaveText('idle', { timeout: 5_000 });
   });
+
+  test.describe('queued messages', () => {
+    // Regression: messages queued during a turn must flush ONE per turn, not
+    // drain in a burst. The flush effect (InputZone) is level-triggered on
+    // `isStreaming === false`, but isStreaming only flips back to true after the
+    // dispatched send round-trips through IPC — so the effect used to re-fire in
+    // that window and drain the whole queue at once. The fix arms/disarms so
+    // exactly one message flushes per streaming→idle cycle. Surfaced by
+    // background tasks (foreground turns idle near-instantly, making the burst
+    // obvious). See .agent/features/background-tasks.md.
+    test('flush one at a time, not a burst', async ({ shelfApp: { page } }) => {
+      await setupProject(page);
+      await openAgentTab(page);
+
+      // T1 holds the turn open (spinner) long enough to queue behind it.
+      await sendAgentPrompt(page, 'delay:3000|text:T1');
+      await expect(page.locator('.agent-loading')).toBeVisible({ timeout: 5_000 });
+
+      // Queue T2 and T3 while T1 streams — each its own slow turn.
+      await sendAgentPrompt(page, 'delay:1500|text:T2');
+      await sendAgentPrompt(page, 'delay:1500|text:T3');
+      await expect(page.locator('.agent-msg-queued')).toHaveCount(2, { timeout: 5_000 });
+
+      // When T1 idles ONLY T2 flushes; T3 stays queued while T2 streams. The
+      // burst bug jumped 2→0 (count 1 never observed) → this intermediate
+      // assertion times out (fails) on the unfixed code.
+      await expect(page.locator('.agent-msg-queued')).toHaveCount(1, { timeout: 8_000 });
+      await expect(page.locator('.agent-msg-queued')).toHaveCount(0, { timeout: 8_000 });
+
+      // All three turns ran (sendChain serializes → order preserved).
+      const messages = page.locator('.agent-messages:visible');
+      await expect(messages).toContainText('T1', { timeout: 8_000 });
+      await expect(messages).toContainText('T2');
+      await expect(messages).toContainText('T3');
+    });
+  });
 });
