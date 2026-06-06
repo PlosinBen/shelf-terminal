@@ -155,4 +155,16 @@ describe('claude detached-loop background tasks', () => {
     expect(sent.some((m) => m.type === 'task_event')).toBe(false);
     expect(sent.filter((m) => m.type === 'status' && (m as any).state === 'idle')).toHaveLength(1);
   });
+
+  it('readTaskOutput returns a friendly note (not a throw) for a task with no output file', async () => {
+    // Regression: subagent / monitor / workflow tasks (and tasks that settled via
+    // task_updated without a terminal task_notification) never record an
+    // output_file. Clicking such a completed task used to throw "No output file
+    // recorded for task …", surfacing as a raw "invoke remote method" error in
+    // the panel. It must resolve to a calm message instead.
+    const backend = createClaudeBackend();
+    disposer = () => backend.dispose();
+
+    await expect(backend.readTaskOutput!('never-recorded')).resolves.toBe('(no output recorded for this task)');
+  });
 });

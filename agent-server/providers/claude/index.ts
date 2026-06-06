@@ -910,7 +910,13 @@ export function createClaudeBackend(): ServerBackend {
 
     async readTaskOutput(taskId: string): Promise<string> {
       const file = taskOutputFiles.get(taskId);
-      if (!file) throw new Error(`No output file recorded for task ${taskId}`);
+      // Not every settled task has a separate output file — only shell-type
+      // tasks write one. Subagent / monitor / workflow tasks report their result
+      // inline in the conversation, and a task that settled via `task_updated`
+      // (without a terminal `task_notification`) never recorded a path either.
+      // Return a friendly note rather than throwing, so clicking such a task
+      // shows a calm message instead of a raw "invoke remote method" error.
+      if (!file) return '(no output recorded for this task)';
       // We run ON the remote, so this reads the remote file directly — main /
       // renderer never touch the remote fs. Cap the read so a runaway log can't
       // blow up the wire / renderer; note truncation explicitly.
