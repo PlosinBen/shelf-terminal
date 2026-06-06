@@ -170,6 +170,12 @@ export interface AgentBackend {
   clearCredential?(): Promise<void>;
   clearContext?(): void;
   /**
+   * Read a background task's full output from its remote `output_file`. The
+   * read happens on the agent-server (on the remote), so main/renderer never
+   * touch the remote fs. Rejects if the task is unknown or the file is gone.
+   */
+  readTaskOutput?(taskId: string): Promise<string>;
+  /**
    * Resolve a pending picker_request by forwarding the user's answers (or
    * cancellation) to the remote agent-server. Provider tracks the pending
    * Promise by id and unblocks its in-flight tool / elicitation handler.

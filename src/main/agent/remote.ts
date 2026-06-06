@@ -231,6 +231,23 @@ export function createRemoteBackend(
         proc.sendLine({ type: 'get_capabilities', provider, cwd, sessionId, customModels, intent, requestId });
       });
     },
+
+    async readTaskOutput(taskId: string): Promise<string> {
+      // Reuse the already-running session process — don't spawn just to read a
+      // log. The panel only shows tasks after a turn ran, so remoteProc is set.
+      const proc = remoteProc;
+      if (!proc) throw new Error('agent-server not running');
+      const requestId = `tout-${randomUUID().slice(0, 8)}`;
+      return new Promise<string>((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error('read_task_output timed out')), 15000);
+        proc.onResponse(requestId, 'task_output', (payload) => {
+          clearTimeout(timeout);
+          if (payload.error) reject(new Error(payload.error));
+          else resolve(payload.content ?? '');
+        });
+        proc.sendLine({ type: 'read_task_output', provider, taskId, requestId });
+      });
+    },
   };
 
   return backend;

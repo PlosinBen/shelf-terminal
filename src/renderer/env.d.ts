@@ -115,6 +115,7 @@ interface ShelfApi {
     storeCredential: (tabId: string, key: string) => Promise<boolean>;
     clearCredential: (tabId: string) => Promise<boolean>;
     checkAuth: (tabId: string) => Promise<boolean>;
+    fetchTaskOutput: (tabId: string, taskId: string) => Promise<string>;
     onMessage: (callback: (tabId: string, msg: unknown) => void) => () => void;
     onStream: (callback: (tabId: string, chunk: unknown) => void) => () => void;
     onStatus: (callback: (tabId: string, status: unknown) => void) => () => void;

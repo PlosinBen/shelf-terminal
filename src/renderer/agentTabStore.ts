@@ -565,7 +565,9 @@ export async function clearMessages(tabId: string) {
     clearTimeout(entry.timer);
     pendingSaves.delete(tabId);
   }
-  update(tabId, (prev) => ({ ...prev, messages: [] }));
+  // Clear background tasks too — the backend clears its task map on /clear,
+  // so the panel must not keep showing stale tasks from the wiped session.
+  update(tabId, (prev) => ({ ...prev, messages: [], backgroundTasks: [] }));
   await clearAgentSession(tab.sessionId).catch((err) => {
     console.error('[agentTabStore] clearAgentSession failed', err);
   });
@@ -686,6 +688,14 @@ export function applyTaskEvent(tabId: string, event: TaskEvent) {
     const byId = new Map(prev.backgroundTasks.map((t) => [t.id, t]));
     for (const t of incoming) byId.set(t.id, t);
     return { ...prev, backgroundTasks: [...byId.values()] };
+  });
+}
+
+/** Dismiss a single background task card (renderer-local display action). */
+export function removeBackgroundTask(tabId: string, id: string) {
+  update(tabId, (prev) => {
+    if (!prev.backgroundTasks.some((t) => t.id === id)) return prev;
+    return { ...prev, backgroundTasks: prev.backgroundTasks.filter((t) => t.id !== id) };
   });
 }
 

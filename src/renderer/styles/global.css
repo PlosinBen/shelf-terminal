@@ -3338,12 +3338,20 @@ button {
   padding: 0;
 }
 
+.agent-task-item {
+  padding: 1px 0;
+}
+
 .agent-task-row {
   display: flex;
   align-items: baseline;
   gap: 6px;
   padding: 2px 0;
   line-height: 1.4;
+}
+
+.agent-task-row.agent-task-clickable {
+  cursor: pointer;
 }
 
 .agent-task-icon {
@@ -3353,10 +3361,10 @@ button {
   color: var(--text-muted);
 }
 
-.agent-task-row.agent-task-running .agent-task-icon { color: var(--agent-fold-label, #c678dd); }
-.agent-task-row.agent-task-completed .agent-task-icon { color: #98c379; }
-.agent-task-row.agent-task-failed .agent-task-icon,
-.agent-task-row.agent-task-stopped .agent-task-icon { color: var(--agent-error, #e06c75); }
+.agent-task-item.agent-task-running .agent-task-icon { color: var(--agent-fold-label, #c678dd); }
+.agent-task-item.agent-task-completed .agent-task-icon { color: #98c379; }
+.agent-task-item.agent-task-failed .agent-task-icon,
+.agent-task-item.agent-task-stopped .agent-task-icon { color: var(--agent-error, #e06c75); }
 
 .agent-task-label {
   flex-shrink: 0;
@@ -3373,6 +3381,33 @@ button {
 }
 
 .agent-task-error { color: var(--agent-error, #e06c75); }
+
+.agent-task-dismiss {
+  margin-left: auto;
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 2px;
+}
+.agent-task-dismiss:hover { color: var(--text-primary); }
+
+.agent-task-output {
+  margin: 2px 0 6px 18px;
+  padding: 6px 8px;
+  background: var(--bg-primary, rgba(0, 0, 0, 0.2));
+  border-radius: 4px;
+  max-height: 240px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  color: var(--text-secondary);
+}
 
 /* ── Agent Input Area ── */
 

@@ -78,6 +78,8 @@ export const IPC = {
   AGENT_STORE_CREDENTIAL: 'agent:store-credential',
   AGENT_CLEAR_CREDENTIAL: 'agent:clear-credential',
   AGENT_CHECK_AUTH: 'agent:check-auth',
+  /** Read a background task's full remote output_file (invoke). See background-tasks.md. */
+  AGENT_READ_TASK_OUTPUT: 'agent:read-task-output',
 
   // PM Agent
   PM_SEND: 'pm:send',

@@ -103,6 +103,12 @@ export function initAgentManager(windowGetter: () => BrowserWindow | null): void
     return session.backend.checkAuth(session.cwd);
   });
 
+  ipcMain.handle(IPC.AGENT_READ_TASK_OUTPUT, async (_e, payload) => {
+    const session = sessions.get(payload.tabId);
+    if (!session?.backend.readTaskOutput) throw new Error('No session for task output');
+    return session.backend.readTaskOutput(payload.taskId);
+  });
+
 }
 
 function send(channel: string, tabId: string, ...args: unknown[]) {

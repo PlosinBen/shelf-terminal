@@ -78,6 +78,9 @@ export type OutgoingMessage = WireEnvelope & (
     })
   | { type: 'credential_stored'; requestId: string; ok: boolean; error?: string }
   | { type: 'credential_cleared'; requestId: string; ok: boolean; error?: string }
+  /** RPC response: full output of a background task (read from its remote
+   *  output_file). One-shot, matched by requestId. See background-tasks.md. */
+  | { type: 'task_output'; requestId: string; content?: string; error?: string }
 
   // ── Per-turn control / status (turnId expected) ──────────────────────────
   | {
@@ -324,6 +327,13 @@ export interface ServerBackend {
   setPermissionMode?(mode: string): Promise<void> | void;
   storeCredential?(key: string): Promise<void>;
   clearCredential?(): Promise<void>;
+  /**
+   * Read the full output of a background task from its remote `output_file`
+   * (captured at task_notification). Runs on the agent-server — i.e. ON the
+   * remote — so main/renderer never touch the remote fs. Throws if the task
+   * is unknown or the file is gone (remote may have GC'd it).
+   */
+  readTaskOutput?(taskId: string): Promise<string>;
   /**
    * Drop any in-memory session state tied to `sessionId`. Called by the
    * orchestrator when persisted context is deleted (IPC `clear_context`),

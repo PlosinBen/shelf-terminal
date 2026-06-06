@@ -2,6 +2,7 @@ import { query as sdkQuery } from '@anthropic-ai/claude-agent-sdk';
 import type { Query, Options, SDKMessage, CanUseTool } from '@anthropic-ai/claude-agent-sdk';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'fs';
+import { readFile } from 'fs/promises';
 import { resolve } from 'path';
 import type { QueryInput, SendFn, ServerBackend, ProviderCapabilities, StatusSegment, PickerResolvePayload } from '../types';
 import { severityFromUtilization, pickPermissionModes, pickEffortLevels } from '../types';
@@ -862,6 +863,21 @@ export function createClaudeBackend(): ServerBackend {
       // Drop our resume pointer; SDK has no per-session in-memory state we own.
       // Next query() with no `restoreContext.lastSdkSessionId` will start fresh.
       lastSessionId = null;
+    },
+
+    async readTaskOutput(taskId: string): Promise<string> {
+      const file = taskOutputFiles.get(taskId);
+      if (!file) throw new Error(`No output file recorded for task ${taskId}`);
+      // We run ON the remote, so this reads the remote file directly — main /
+      // renderer never touch the remote fs. Cap the read so a runaway log can't
+      // blow up the wire / renderer; note truncation explicitly.
+      const MAX = 256 * 1024;
+      const buf = await readFile(file);
+      if (buf.length > MAX) {
+        return buf.subarray(buf.length - MAX).toString('utf8')
+          + `\n\n… (truncated — showing last ${MAX / 1024}KB of ${Math.round(buf.length / 1024)}KB)`;
+      }
+      return buf.toString('utf8');
     },
 
     resolvePermission(toolUseId: string, allow: boolean, message?: string, scope?: 'once' | 'session') {

@@ -23,6 +23,7 @@ import {
   setStatus,
   setPlan,
   applyTaskEvent,
+  removeBackgroundTask,
   setCapabilities,
   setActualModel,
   setActualEffort,
@@ -100,6 +101,22 @@ describe('agentTabStore — applyTaskEvent (background tasks)', () => {
     applyTaskEvent(TAB, { kind: 'snapshot', tasks: [] });
     applyTaskEvent(TAB, { kind: 'updated' });
     expect(__getTabForTests(TAB)!.backgroundTasks).toEqual([task('t1')]);
+  });
+
+  it('removeBackgroundTask dismisses a single task by id', () => {
+    applyTaskEvent(TAB, { kind: 'started', task: task('t1') });
+    applyTaskEvent(TAB, { kind: 'started', task: task('t2') });
+    removeBackgroundTask(TAB, 't1');
+    expect(__getTabForTests(TAB)!.backgroundTasks.map((t) => t.id)).toEqual(['t2']);
+    // Removing an unknown id is a no-op (no throw, no change).
+    removeBackgroundTask(TAB, 'nope');
+    expect(__getTabForTests(TAB)!.backgroundTasks.map((t) => t.id)).toEqual(['t2']);
+  });
+
+  it('clearMessages also clears background tasks (session wiped)', async () => {
+    applyTaskEvent(TAB, { kind: 'started', task: task('t1') });
+    await clearMessages(TAB);
+    expect(__getTabForTests(TAB)!.backgroundTasks).toEqual([]);
   });
 });
 
