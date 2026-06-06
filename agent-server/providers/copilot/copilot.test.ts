@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { quotaSnapshotToSegment, parseApplyPatch, formatCopilotToolInput, elicitationSchemaToPrompts, picksToElicitationContent } from './helpers';
+import { quotaSnapshotToSegment, parseApplyPatch, formatCopilotToolInput, elicitationSchemaToPrompts, picksToElicitationContent, normalizeCopilotTask, isBackgroundedCopilotTask } from './helpers';
 
 describe('quotaSnapshotToSegment', () => {
   it('renders premium quota at 100%', () => {
@@ -445,5 +445,47 @@ describe('picksToElicitationContent', () => {
     expect(picksToElicitationContent(fields, ['Alice', '3', 'Yes'])).toEqual({
       name: 'Alice', count: 3, enabled: true,
     });
+  });
+});
+
+describe('normalizeCopilotTask', () => {
+  // Shapes per copilot SDK rpc.d.ts (TaskAgentInfo | TaskShellInfo).
+  it('maps a backgrounded shell task → shell NormalizedTask with command', () => {
+    expect(normalizeCopilotTask({
+      type: 'shell', id: 's1', description: 'run build', status: 'running',
+      command: 'npm run build', attachmentMode: 'detached', executionMode: 'background',
+    })).toEqual({
+      id: 's1', type: 'shell', label: 'run build', status: 'running', command: 'npm run build', error: undefined, done: false,
+    });
+  });
+
+  it('maps an agent task → agent NormalizedTask (no command)', () => {
+    const out = normalizeCopilotTask({ type: 'agent', id: 'a1', description: 'research', status: 'completed', agentType: 'explore' });
+    expect(out).toMatchObject({ id: 'a1', type: 'agent', label: 'research', status: 'completed', done: true });
+    expect(out?.command).toBeUndefined();
+  });
+
+  it('maps copilot-only statuses: idle→running, cancelled→stopped', () => {
+    expect(normalizeCopilotTask({ type: 'shell', id: 's', description: 'x', status: 'idle' }))
+      .toMatchObject({ status: 'running', done: false });
+    expect(normalizeCopilotTask({ type: 'shell', id: 's', description: 'x', status: 'cancelled' }))
+      .toMatchObject({ status: 'stopped', done: true });
+  });
+
+  it('carries error + collapses unknown type', () => {
+    expect(normalizeCopilotTask({ type: 'agent', id: 'a', description: 'x', status: 'failed', error: 'boom' }))
+      .toMatchObject({ status: 'failed', error: 'boom', done: true });
+    expect(normalizeCopilotTask({ type: 'mystery', id: 'm', description: 'x', status: 'running' })?.type).toBe('unknown');
+  });
+
+  it('returns null for malformed input', () => {
+    expect(normalizeCopilotTask(null)).toBeNull();
+    expect(normalizeCopilotTask({ type: 'shell' })).toBeNull(); // no id
+  });
+
+  it('isBackgroundedCopilotTask only true for executionMode background', () => {
+    expect(isBackgroundedCopilotTask({ executionMode: 'background' })).toBe(true);
+    expect(isBackgroundedCopilotTask({ executionMode: 'sync' })).toBe(false);
+    expect(isBackgroundedCopilotTask({})).toBe(false);
   });
 });

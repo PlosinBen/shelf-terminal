@@ -13,6 +13,8 @@ import {
   parseApplyPatch,
   elicitationSchemaToPrompts,
   picksToElicitationContent,
+  normalizeCopilotTask,
+  isBackgroundedCopilotTask,
   type ApplyPatchFileSpec,
 } from './helpers';
 
@@ -615,6 +617,16 @@ export function createCopilotBackend(): ServerBackend {
           // Debounced fetch — multiple rapid changes coalesce into one read.
           schedulePlanRead();
           break;
+        case 'session.background_tasks_changed':
+          // Empty-payload ping → re-fetch the authoritative task list (debounced).
+          scheduleTaskRead();
+          break;
+        case 'system.notification':
+          // agent_completed / agent_idle / shell_completed / shell_detached_completed
+          // change task state without a background_tasks_changed — refresh the list
+          // so completion lands. Other kinds (inbox/instruction) are harmless no-ops.
+          scheduleTaskRead();
+          break;
         case 'session.error': {
           // ErrorData fields: message, errorType, errorCode, httpStatus,
           // providerCallId, stack. Compose a human-readable string from
@@ -663,6 +675,31 @@ export function createCopilotBackend(): ServerBackend {
         // plan panel won't update — could be transient (mid-rebuild) or a
         // breaking SDK change. Logging gives us the diagnosis path.
         console.error('[copilot] rpc.plan.read failed; plan panel may be stale', err?.message ?? err);
+      }
+    }, 150);
+  }
+
+  // Background tasks (DECISIONS #69). Unlike claude (task_* system messages in
+  // the turn stream), copilot signals list changes via `session.background_tasks_changed`
+  // and `system.notification` events — we (debounced) re-fetch the authoritative
+  // list via rpc.tasks.list() and emit a turnId-less `task_event` snapshot.
+  // currentSend is never nulled, so this works even when a backgrounded task
+  // settles between turns; task_event is turnId-exempt → routed via onTaskEvent.
+  let taskReadTimer: NodeJS.Timeout | null = null;
+  function scheduleTaskRead() {
+    if (taskReadTimer) return;
+    taskReadTimer = setTimeout(async () => {
+      taskReadTimer = null;
+      if (!state.session || !currentSend) return;
+      try {
+        const list = await (state.session as any).rpc.tasks.list();
+        const tasks = (list?.tasks ?? [])
+          .filter(isBackgroundedCopilotTask)
+          .map(normalizeCopilotTask)
+          .filter((t: unknown): t is NonNullable<typeof t> => t !== null);
+        currentSend({ type: 'task_event', kind: 'snapshot', tasks });
+      } catch (err: any) {
+        console.error('[copilot] rpc.tasks.list failed; task panel may be stale', err?.message ?? err);
       }
     }, 150);
   }
@@ -1052,6 +1089,26 @@ export function createCopilotBackend(): ServerBackend {
       state.cliSessionId = null;
       latestUsage = null;
       inflightToolUses.clear();
+    },
+
+    async readTaskOutput(taskId: string): Promise<string> {
+      if (!state.session) throw new Error('No active Copilot session');
+      const list = await (state.session as any).rpc.tasks.list();
+      const task = (list?.tasks ?? []).find((t: any) => t?.id === taskId);
+      if (!task) throw new Error(`No task ${taskId}`);
+      // Shell tasks write a detached log file (read it ON the remote — main/
+      // renderer never touch remote fs). Agent tasks carry their output inline.
+      if (task.type === 'shell') {
+        if (typeof task.logPath !== 'string' || !task.logPath) throw new Error('Task has no log file');
+        const MAX = 256 * 1024;
+        const buf = await fs.promises.readFile(task.logPath);
+        if (buf.length > MAX) {
+          return buf.subarray(buf.length - MAX).toString('utf8')
+            + `\n\n… (truncated — showing last ${MAX / 1024}KB of ${Math.round(buf.length / 1024)}KB)`;
+        }
+        return buf.toString('utf8');
+      }
+      return task.result ?? task.latestResponse ?? '(no output)';
     },
 
     resolvePermission(toolUseId: string, allow: boolean, message?: string, scope?: 'once' | 'session') {

@@ -5,6 +5,7 @@
 import type { StatusSegment } from '../types';
 import { severityFromUtilization, formatResetCountdown } from '../types';
 import { stripCwd } from '../shared';
+import type { NormalizedTask } from '@shared/types';
 
 const COPILOT_QUOTA_LABELS: Record<string, string> = {
   premium_interactions: 'premium',
@@ -404,5 +405,52 @@ export function picksToElicitationContent(
     content[key] = raw;
   });
   return content;
+}
+
+// ── Background tasks ────────────────────────────────────────────────────────
+// Pure mapper for the Copilot SDK's TaskInfo (TaskAgentInfo | TaskShellInfo,
+// from rpc.tasks.list()) → NormalizedTask render primitives — the same shape
+// claude maps its task_* system messages into. Side-effect-free for unit tests.
+// See .agent/features/background-tasks.md + DECISIONS #69.
+
+/** Copilot TaskInfo.status → NormalizedTask.status. Copilot's 'idle' (agent
+ *  waiting) maps to 'running' (still alive); 'cancelled' → 'stopped'. */
+const COPILOT_STATUS_MAP: Record<string, NormalizedTask['status']> = {
+  pending: 'pending',
+  running: 'running',
+  idle: 'running',
+  completed: 'completed',
+  failed: 'failed',
+  cancelled: 'stopped',
+};
+const TERMINAL_COPILOT_STATUS = new Set<NormalizedTask['status']>(['completed', 'failed', 'stopped']);
+
+function mapCopilotStatus(s: unknown): NormalizedTask['status'] {
+  return (typeof s === 'string' && COPILOT_STATUS_MAP[s]) || 'running';
+}
+
+/**
+ * Map one Copilot TaskInfo into a NormalizedTask. PURE. `type: 'agent'` →
+ * 'agent', `type: 'shell'` → 'shell'. Shell carries `command`; agent's
+ * `error` surfaces as the task error. Returns null for malformed input.
+ */
+export function normalizeCopilotTask(t: any): NormalizedTask | null {
+  if (!t || typeof t.id !== 'string' || !t.id) return null;
+  const status = mapCopilotStatus(t.status);
+  return {
+    id: t.id,
+    type: t.type === 'shell' ? 'shell' : t.type === 'agent' ? 'agent' : 'unknown',
+    label: typeof t.description === 'string' ? t.description : t.id,
+    status,
+    command: typeof t.command === 'string' ? t.command : undefined,
+    error: typeof t.error === 'string' ? t.error : undefined,
+    done: TERMINAL_COPILOT_STATUS.has(status),
+  };
+}
+
+/** Is this a genuinely-backgrounded task (vs a synchronous foreground one)?
+ *  Only these become cards. `executionMode === 'background'` is the signal. */
+export function isBackgroundedCopilotTask(t: any): boolean {
+  return t?.executionMode === 'background';
 }
 
