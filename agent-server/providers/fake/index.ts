@@ -35,6 +35,9 @@ import type {
  *   auth_required       emit auth_required
  *   error:<msg>         emit error
  *   delay:<ms>          sleep before next step
+ *   task:<id>           emit a running background task_event (turnId-less)
+ *   taskdone:<id>       emit a completed background task_event + stash its
+ *                       output so read_task_output (fetchTaskOutput) returns it
  *
  * Chain steps with `|`:
  *   text:hi|delay:50|tool:Read|text:bye
@@ -141,6 +144,10 @@ export function pickerComboPrompts(): FakePrompt[] {
 export function createFakeBackend(): ServerBackend {
   const pendingPickers = new Map<string, PendingPicker>();
   const pendingPermissions = new Map<string, PendingPermission>();
+  // Canned output per background task id, populated by the `taskdone:` scenario
+  // so `readTaskOutput` can answer the same way claude's would (without a real
+  // remote output_file). Cleared on dispose.
+  const taskOutputs = new Map<string, string>();
   let abortController: AbortController | null = null;
 
   async function runStep(
@@ -236,6 +243,29 @@ export function createFakeBackend(): ServerBackend {
       return;
     }
 
+    // task:<id> — a running background task (turnId-less task_event lane).
+    if (step.startsWith('task:')) {
+      const id = step.slice('task:'.length);
+      send({
+        type: 'task_event',
+        kind: 'started',
+        task: { id, type: 'shell', label: `bg ${id}`, status: 'running', done: false },
+      });
+      return;
+    }
+
+    // taskdone:<id> — completed background task + stash its output for read.
+    if (step.startsWith('taskdone:')) {
+      const id = step.slice('taskdone:'.length);
+      taskOutputs.set(id, `output of ${id}\nexit code 0`);
+      send({
+        type: 'task_event',
+        kind: 'done',
+        task: { id, type: 'shell', label: `bg ${id}`, status: 'completed', summary: `bg ${id} completed (exit 0)`, done: true },
+      });
+      return;
+    }
+
     if (step === 'auth_required') {
       send({ type: 'auth_required', provider: 'fake' });
       return;
@@ -307,6 +337,7 @@ export function createFakeBackend(): ServerBackend {
       abortController?.abort();
       pendingPickers.clear();
       pendingPermissions.clear();
+      taskOutputs.clear();
     },
 
     async gatherCapabilities(): Promise<ProviderCapabilities> {
@@ -326,6 +357,12 @@ export function createFakeBackend(): ServerBackend {
     resolvePicker(id, payload) {
       const p = pendingPickers.get(id);
       if (p) p.resolve(payload);
+    },
+
+    async readTaskOutput(taskId: string): Promise<string> {
+      const out = taskOutputs.get(taskId);
+      if (out === undefined) throw new Error(`No output for task ${taskId}`);
+      return out;
     },
   };
 }
