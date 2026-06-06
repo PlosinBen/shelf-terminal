@@ -899,3 +899,13 @@ ollama 官方 [tool support blog](https://ollama.com/blog/tool-support) 列 qwen
 **解法 / 測試**: 要讓新 bundle 生效,得**清掉部署根**(`~/.shelf/agent-server/`)或換新容器。`test:agent-deploy` 每次 `docker run` 全新容器所以沒事;但若手動重用容器跑單一 spec,spec 內要先 `docker exec <c> rm -rf /root/.shelf`(見 `agent-deploy-auth.spec.ts`)。
 
 **附帶踩雷(E2E 觀測)**: Playwright Electron 下,**main process 的 `console.*` 不在 `app.process()` 的 stdout/stderr**(只有 renderer console 透過 `ELECTRON_ENABLE_LOGGING` 會出來)。要看 agent-server(跑在容器內)的內部訊息,最穩是讓它寫容器內檔案,再從**測試行程**用 `execSync('docker exec … cat …')` 讀出來(測試行程的 docker 可用)。
+
+## 背景任務:`break` 出 for-await 會殺 SDK generator、turnId 會被當 unknown turn 丟
+
+claude SDK 的 single-prompt `query()` generator **不在 `result` 結束** —— 模型把工作背景化後(Bash `run_in_background`/自動背景化),generator 繼續吐 `task_*` 訊息,任務 settle 後還會**自動讓主 agent 續寫一段回覆**(其 `result` 帶 `origin.kind:'task-notification'`),整個 generator 到那時才結束(實測 sleep 30 → 約 +29s)。三個雷:
+
+1. **不能 `break` 出 for-await 去「接手」背景**:`break` 會呼叫 iterator 的 `.return()`,直接終結 SDK generator —— 背景任務一起被殺。要續跑就把整個 loop 包進 detached async,別 break。
+2. **背景訊息不能帶 turnId**:前景 turn 在 `result` 就 idle、turn-dispatcher 隨即註銷;之後任何帶該 turnId 的訊息都會 `event for unknown turn … dropping`。背景一律走 `task_event`(無 turnId,`wrapSendForTurn` 豁免)。
+3. **`query()` 提早 resolve 會重開 sendChain race**:detached-loop 讓 `query()` 在前景 `result` 就 resolve(解 sendChain 阻塞),但後一個 turn 可能已接管 module-level `activeQuery`/`abortController` —— finally 必須 `if (activeQuery === myQuery)` 才清,否則蓋掉新 turn。
+
+判別前景 vs 自動續寫的 `result`:`origin.kind === 'task-notification'` = 自動續寫(不再 resolve、不再 idle)。`result` **不帶** `background_tasks[]`(snapshot 靠累積事件)。詳見 DECISIONS #69 + `.agent/features/background-tasks.md`。
