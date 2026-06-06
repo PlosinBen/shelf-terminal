@@ -5,6 +5,7 @@ import { InputZone } from './agent/InputZone';
 import { StatusBar } from './agent/StatusBar';
 import { DecisionPanel } from './agent/DecisionPanel';
 import { PlanPanel } from './agent/PlanPanel';
+import { BackgroundTasksPanel } from './agent/BackgroundTasksPanel';
 import { AuthPane } from './agent/AuthPane';
 import {
   initTab as initTabStore,
@@ -172,6 +173,7 @@ export function AgentView({ tabId, cwd, connection, provider, projectId, visible
       />
       <DecisionPanel tabId={tabId} onConfigEdit={handleConfigEdit} />
       <PlanPanel tabId={tabId} />
+      <BackgroundTasksPanel tabId={tabId} />
       <InputZone
         tabId={tabId}
         projectId={projectId}

@@ -22,6 +22,7 @@ import {
   setStreaming,
   setStatus,
   setPlan,
+  applyTaskEvent,
   setCapabilities,
   setActualModel,
   setActualEffort,
@@ -63,6 +64,43 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
+});
+
+describe('agentTabStore — applyTaskEvent (background tasks)', () => {
+  beforeEach(() => initTab(TAB, { sessionId: SESSION, provider: 'claude' }));
+
+  const task = (id: string, over: Partial<import('../shared/types').NormalizedTask> = {}) => ({
+    id, type: 'shell' as const, label: id, status: 'running' as const, done: false, ...over,
+  });
+
+  it('started → adds a running task', () => {
+    applyTaskEvent(TAB, { kind: 'started', task: task('t1') });
+    expect(__getTabForTests(TAB)!.backgroundTasks).toEqual([task('t1')]);
+  });
+
+  it('upserts by id (later event replaces, preserving position)', () => {
+    applyTaskEvent(TAB, { kind: 'started', task: task('t1') });
+    applyTaskEvent(TAB, { kind: 'started', task: task('t2') });
+    applyTaskEvent(TAB, { kind: 'done', task: task('t1', { status: 'completed', done: true, summary: 'ok' }) });
+    const bg = __getTabForTests(TAB)!.backgroundTasks;
+    expect(bg.map((t) => t.id)).toEqual(['t1', 't2']); // order preserved
+    expect(bg[0]).toMatchObject({ id: 't1', status: 'completed', done: true, summary: 'ok' });
+  });
+
+  it('snapshot upserts running tasks without dropping already-completed ones', () => {
+    applyTaskEvent(TAB, { kind: 'done', task: task('t0', { status: 'completed', done: true }) });
+    applyTaskEvent(TAB, { kind: 'snapshot', tasks: [task('t1'), task('t2')] });
+    const bg = __getTabForTests(TAB)!.backgroundTasks;
+    expect(bg.map((t) => t.id)).toEqual(['t0', 't1', 't2']);
+    expect(bg[0].done).toBe(true); // completed task survived the snapshot
+  });
+
+  it('ignores empty events (no task / empty snapshot)', () => {
+    applyTaskEvent(TAB, { kind: 'started', task: task('t1') });
+    applyTaskEvent(TAB, { kind: 'snapshot', tasks: [] });
+    applyTaskEvent(TAB, { kind: 'updated' });
+    expect(__getTabForTests(TAB)!.backgroundTasks).toEqual([task('t1')]);
+  });
 });
 
 describe('agentTabStore — lifecycle', () => {

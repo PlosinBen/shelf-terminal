@@ -1,4 +1,4 @@
-import type { AgentInitStatus, AgentPrefs, Connection } from '../../shared/types';
+import type { AgentInitStatus, AgentPrefs, Connection, TaskEvent } from '../../shared/types';
 import { on, emit } from './bus';
 
 // Typed agent event vocabulary. Names prefixed 'agent:' to coexist with
@@ -20,6 +20,7 @@ export interface AgentEventMap {
   'agent:onStream': { tabId: string; chunk: unknown };
   'agent:onStatus': { tabId: string; status: unknown };
   'agent:onPlan': { tabId: string; content: string };
+  'agent:onBackgroundTasks': { tabId: string; event: TaskEvent };
   'agent:onCapabilities': { tabId: string; caps: unknown };
   'agent:onPermissionRequest': { tabId: string; req: unknown };
   'agent:onPickerRequest': { tabId: string; req: unknown };

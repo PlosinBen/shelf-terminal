@@ -32,6 +32,7 @@ function makeMockAgentApi() {
       onStream: listener('onStream'),
       onStatus: listener('onStatus'),
       onPlan: listener('onPlan'),
+      onBackgroundTasks: listener('onBackgroundTasks'),
       onPermissionRequest: listener('onPermissionRequest'),
       onPickerRequest: listener('onPickerRequest'),
       onCapabilities: listener('onCapabilities'),
@@ -80,6 +81,14 @@ describe('bindAgentIPCGroup', () => {
       onAgent('agent:onStatus', handler);
       mock.callbacks.onStatus('tab-1', { state: 'streaming' });
       expect(handler).toHaveBeenCalledWith({ tabId: 'tab-1', status: { state: 'streaming' } });
+    });
+
+    it('forwards onBackgroundTasks to agent:onBackgroundTasks', () => {
+      const handler = vi.fn();
+      onAgent('agent:onBackgroundTasks', handler);
+      const event = { kind: 'started', task: { id: 't1', type: 'shell', label: 'x', status: 'running', done: false } };
+      mock.callbacks.onBackgroundTasks('tab-1', event);
+      expect(handler).toHaveBeenCalledWith({ tabId: 'tab-1', event });
     });
 
     it('forwards onCapabilities to agent:onCapabilities', () => {

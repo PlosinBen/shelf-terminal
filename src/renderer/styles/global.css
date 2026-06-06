@@ -3308,6 +3308,72 @@ button {
   line-height: 1.4;
 }
 
+/* ── Background tasks panel ── */
+
+.agent-tasks-panel {
+  border-top: 1px solid var(--border);
+  background: var(--bg-secondary);
+  max-height: 30vh;
+  overflow-y: auto;
+  padding: 6px 12px;
+  font-size: 12px;
+}
+
+.agent-tasks-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+  color: var(--text-secondary);
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.agent-tasks-list {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+}
+
+.agent-task-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 2px 0;
+  line-height: 1.4;
+}
+
+.agent-task-icon {
+  flex-shrink: 0;
+  width: 1em;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.agent-task-row.agent-task-running .agent-task-icon { color: var(--agent-fold-label, #c678dd); }
+.agent-task-row.agent-task-completed .agent-task-icon { color: #98c379; }
+.agent-task-row.agent-task-failed .agent-task-icon,
+.agent-task-row.agent-task-stopped .agent-task-icon { color: var(--agent-error, #e06c75); }
+
+.agent-task-label {
+  flex-shrink: 0;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+.agent-task-summary,
+.agent-task-error {
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-task-error { color: var(--agent-error, #e06c75); }
+
 /* ── Agent Input Area ── */
 
 .agent-input-area {

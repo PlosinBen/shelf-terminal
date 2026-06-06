@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import type { AgentMsg } from './components/AgentMessage';
-import type { AgentInitPhase, AgentPrefs, AgentProvider, AuthMethod } from '../shared/types';
+import type { AgentInitPhase, AgentPrefs, AgentProvider, AuthMethod, NormalizedTask, TaskEvent } from '../shared/types';
 import { loadAgentMessagesLatest, saveAgentMessagesDelta, clearAgentSession } from './storage/agent-history';
 
 // Per-tab store for agent UI state. Split from store.ts because the
@@ -74,6 +74,9 @@ export interface AgentTabState {
   messages: AgentMsg[];
   queuedMessages: QueuedMessage[];
   currentPlan: string;
+  // Background tasks (turnId-less side-channel). Upserted by id from task_event;
+  // ordered by first-seen. See .agent/features/background-tasks.md.
+  backgroundTasks: NormalizedTask[];
 
   // status (display only — what backend reports)
   isStreaming: boolean;
@@ -312,6 +315,7 @@ export function initTab(tabId: string, opts: InitTabOpts) {
     messages: [],
     queuedMessages: [],
     currentPlan: '',
+    backgroundTasks: [],
     isStreaming: false,
     // Warm-start from intent so StatusBar doesn't flash "—" on mount.
     // First capabilities event overwrites with backend-reported actual.
@@ -663,6 +667,26 @@ export function setStatus(tabId: string, partial: StatusPartial) {
 
 export function setPlan(tabId: string, content: string) {
   update(tabId, (prev) => ({ ...prev, currentPlan: content }));
+}
+
+/**
+ * Apply a background-task event (turnId-less side-channel).
+ *   - started/updated/progress/done: upsert the single task by id, preserving
+ *     first-seen order; later events merge over earlier state (the provider
+ *     already merged, so we just replace the entry).
+ *   - snapshot: reconcile the authoritative list — upsert each, preserving
+ *     existing order for known ids and appending new ones. (We don't drop
+ *     tasks absent from a snapshot: claude's snapshot only carries the
+ *     still-running set at a turn boundary; completed ones must stay visible.)
+ */
+export function applyTaskEvent(tabId: string, event: TaskEvent) {
+  update(tabId, (prev) => {
+    const incoming = event.kind === 'snapshot' ? (event.tasks ?? []) : (event.task ? [event.task] : []);
+    if (incoming.length === 0) return prev;
+    const byId = new Map(prev.backgroundTasks.map((t) => [t.id, t]));
+    for (const t of incoming) byId.set(t.id, t);
+    return { ...prev, backgroundTasks: [...byId.values()] };
+  });
 }
 
 export function setCapabilities(tabId: string, caps: Capabilities | null) {

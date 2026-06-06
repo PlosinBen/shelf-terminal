@@ -9,6 +9,7 @@ import {
   setPendingPermission,
   setPendingPicker,
   setPlan,
+  applyTaskEvent,
   setStatus,
   setStreaming,
   upsertMessage,
@@ -40,6 +41,13 @@ export function bindAgentStoreSubscriptions(): () => void {
   // currentPlan; the sticky PlanPanel reads from there.
   const offPlan = onAgent('agent:onPlan', ({ tabId, content }) => {
     setPlan(tabId, content);
+  });
+
+  // Background-task side-channel — turnId-less; main forwards over
+  // IPC.AGENT_BACKGROUND_TASKS; bus surfaces it as `agent:onBackgroundTasks`.
+  // Upserts into the store's backgroundTasks; BackgroundTasksPanel reads it.
+  const offBackgroundTasks = onAgent('agent:onBackgroundTasks', ({ tabId, event }) => {
+    applyTaskEvent(tabId, event);
   });
 
   const offStream = onAgent('agent:onStream', ({ tabId, chunk }) => {
@@ -115,6 +123,7 @@ export function bindAgentStoreSubscriptions(): () => void {
   return () => {
     offMessage();
     offPlan();
+    offBackgroundTasks();
     offStream();
     offStatus();
     offCapabilities();

@@ -198,6 +198,11 @@ contextBridge.exposeInMainWorld('shelfApi', {
       ipcRenderer.on(IPC.AGENT_PLAN, listener);
       return () => ipcRenderer.removeListener(IPC.AGENT_PLAN, listener);
     },
+    onBackgroundTasks: (callback: (tabId: string, event: unknown) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, tabId: string, event: unknown) => callback(tabId, event);
+      ipcRenderer.on(IPC.AGENT_BACKGROUND_TASKS, listener);
+      return () => ipcRenderer.removeListener(IPC.AGENT_BACKGROUND_TASKS, listener);
+    },
     onPermissionRequest: (callback: (tabId: string, req: unknown) => void) => {
       const listener = (_event: Electron.IpcRendererEvent, tabId: string, req: unknown) => callback(tabId, req);
       ipcRenderer.on(IPC.AGENT_PERMISSION_REQUEST, listener);
