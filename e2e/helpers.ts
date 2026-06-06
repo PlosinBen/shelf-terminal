@@ -54,7 +54,11 @@ export const test = base.extend<{
 
     const app = await electron.launch({
       args: [path.join(__dirname, '..'), `--user-data-dir=${userDataDir}`],
-      env: { ...process.env, SHELF_TEST_MODE: '1' },
+      // NODE_ENV=test keeps the main window hidden (index.ts: `show: NODE_ENV
+      // !== 'test'`) so e2e launches don't steal macOS foreground focus. Set it
+      // HERE (not only via the `NODE_ENV=test npx playwright` npm script) so a
+      // bare `npx playwright test` invocation still gets hidden windows.
+      env: { ...process.env, SHELF_TEST_MODE: '1', NODE_ENV: 'test' },
     });
 
     let page: Page;
