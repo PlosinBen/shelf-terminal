@@ -28,6 +28,16 @@ export default defineConfig({
       name: 'agent-deploy',
       testDir: './e2e/connector',
       testMatch: 'agent-deploy*.spec.ts',
+      // WSL has its own project (Windows-host-only); keep it out of the
+      // docker-backed agent-deploy run so non-Windows CI stays green.
+      testIgnore: 'agent-deploy-wsl.spec.ts',
+    },
+    {
+      // Windows-host-only: targets a pre-installed WSL distro via wsl.exe (no
+      // container to start). Run standalone: npm run test:agent-deploy-wsl
+      name: 'agent-deploy-wsl',
+      testDir: './e2e/connector',
+      testMatch: 'agent-deploy-wsl.spec.ts',
     },
   ],
 });

@@ -341,7 +341,9 @@
 
 **解法**: 確保遠端有 Node.js 20+。deploy 時不做版本檢查（avoid extra SSH round-trip），錯誤會在 `waitForReady` timeout 後浮現。
 
-**更新（R1，2026-06）**: ssh/docker 的 **glibc** remote 已改成**自帶 node**（`src/main/agent/{runtime-target,runtime-cache,deploy-layout}.ts` + `remote.ts` deploySelfContained）→ deploy 我們釘死的 node-v20.18.1 + claude binary 到 `~/.shelf/agent-server/<version>/`，用 `<root>/node` 起，**不再吃 remote node 版本**。**仍適用此 gotcha 的**：wsl（暫用 remote node）與 musl remote（Phase 1 直接 reject，未來改用 remote node + 驗 `node ≥ 20`）。
+**更新（R1，2026-06）**: ssh/docker/**wsl** 的 **glibc** remote 都改成**自帶 node**（`src/main/agent/{runtime-target,runtime-cache,deploy-layout}.ts` + `remote.ts` deploySelfContained）→ deploy 我們釘死的 node-v20.18.1 + provider binary 到 `<home>/.shelf/agent-server/<version>/`，用 `<root>/node` 起，**不再吃 remote node 版本**。**musl** remote 沒有官方 musl Node 可送 → 改用 **remote 自己的 node**，deploy 時驗 `node ≥ 20`（`isRemoteNodeSupported`），只送 provider binary。所以原 gotcha（「確保遠端有 Node 20+」）現在**只剩 musl remote 適用**；glibc 完全不依賴 remote node。
+
+**WSL 專屬細節（R1 完成於 Windows host 實測）**: `wslOps` 經 `wsl.exe` 跑,要點兩個 —— (1) 用 `execFileSync('wsl.exe', ['-d', distro, '--', 'sh', '-c', cmd])` **array form**,不要組 `execSync` 字串:Windows host 的預設 shell 是 cmd.exe,**不認 POSIX 單引號包法**(ssh/docker 那套),array form 直接繞過 host-shell parsing。(2) `base` 用 `echo "$HOME"` 抓**絕對路徑**,**不要用 `~`**:deploy 路徑會被單引號包(如 copyIn 的 remote arg),而**單引號內的 `~` 不展開**(ssh 能用 `~` 是因為 scp 在遠端展開)。copyIn 經 `/mnt`(toWslPath)讀 Windows 端 cache 檔再 `cp`,~215MB 實測約數秒可接受。
 
 ---
 

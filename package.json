@@ -14,6 +14,7 @@
     "test:docker": "docker run -d --name shelf-test-container -p 2222:2222 -e USER_NAME=testuser -e USER_PASSWORD=testpass -e PASSWORD_ACCESS=true linuxserver/openssh-server && NODE_ENV=test npm run build && NODE_ENV=test npx playwright test --project=docker; docker rm -f shelf-test-container",
     "test:ssh": "docker run -d --name shelf-test-container -p 2222:2222 -e USER_NAME=testuser -e USER_PASSWORD=testpass -e PASSWORD_ACCESS=true linuxserver/openssh-server && NODE_ENV=test npm run build && NODE_ENV=test npx playwright test --project=ssh; docker rm -f shelf-test-container",
     "test:agent-deploy": "docker run -d --name shelf-agent-test debian:bookworm-slim tail -f /dev/null && docker run -d --name shelf-agent-test-musl node:20-alpine tail -f /dev/null && docker run -d --name shelf-agent-test-copilot debian:bookworm-slim tail -f /dev/null && NODE_ENV=test npm run build && NODE_ENV=test npx playwright test --project=agent-deploy; docker rm -f shelf-agent-test shelf-agent-test-musl shelf-agent-test-copilot",
+    "test:agent-deploy-wsl": "npm run build && npx playwright test --project=agent-deploy-wsl",
     "pack": "npm run build && npx electron-builder --dir",
     "dist": "npm run build && npx electron-builder",
     "dist:mac": "npm run build && npx electron-builder --mac",
