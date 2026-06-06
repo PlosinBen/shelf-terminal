@@ -219,10 +219,15 @@ export function createCopilotBackend(): ServerBackend {
       permissionModes: pickPermissionModes(['default', 'bypassPermissions', 'plan']),
       effortLevels: pickEffortLevels(effortsFor(currentModel)),
       slashCommands: SLASH_COMMANDS,
+      // Option A: the user signs in ON the remote host via the Copilot CLI's
+      // own device-flow login (`copilot login` → shows a code, authorize in any
+      // browser). Credential is written to the remote's own ~/.copilot and
+      // NEVER crosses machines. We deliberately do NOT bind `gh` (removed in
+      // 6d5c615) — the Copilot CLI has its own login.
       authMethod: {
         kind: 'oauth' as const,
         instructions: [
-          { label: 'Sign in via gh CLI', command: 'gh auth login -s copilot' },
+          { label: 'Run this in a terminal on the remote host, then click Retry', command: 'copilot login' },
         ],
       },
     };
@@ -905,7 +910,23 @@ export function createCopilotBackend(): ServerBackend {
       // Copilot SDK validates model names against GitHub's model API; user-provided
       // custom IDs would be rejected at runtime, so we ignore customModels here.
       if (sessionId) currentSessionId = sessionId;
-      await listModelsCached();
+      // Auth probe (provider-internal detail). Copilot exposes a first-class
+      // getAuthStatus() → { isAuthenticated }, so unlike Claude we need no
+      // warmup/heuristic — but the SHARED contract is still just `authRequired`
+      // on caps; main/renderer stay provider-agnostic. A probe error is treated
+      // as unknown (don't block the pane); a real failure still surfaces
+      // mid-turn via query()'s auth_required emit.
+      let authRequired = false;
+      try {
+        const client = await ensureClient();
+        const status = await client.getAuthStatus();
+        authRequired = !status.isAuthenticated;
+      } catch (err: any) {
+        console.error('[copilot] getAuthStatus failed; treating as unknown (not blocking)', err?.message ?? err);
+      }
+      // listModels hits the GitHub model API — only fetch when authed. Logged
+      // out it would throw/hang, and AuthPane covers the pane anyway.
+      if (!authRequired) await listModelsCached();
       // Seed closures from renderer's saved intent BEFORE buildCapabilities so
       // the first `currentPermissionMode` (and model/effort) the renderer sees
       // after a reconnect matches projectConfig.agentPrefs instead of the
@@ -916,7 +937,7 @@ export function createCopilotBackend(): ServerBackend {
       if (intent?.effort) currentEffort = intent.effort;
       if (intent?.permissionMode) currentPermissionMode = intent.permissionMode;
       if (!currentEffort) currentEffort = modelMeta(currentModel)?.defaultReasoningEffort;
-      return buildCapabilities();
+      return { ...buildCapabilities(), authRequired };
     },
 
     async query(input: QueryInput, send: SendFn) {

@@ -886,6 +886,8 @@ ollama 官方 [tool support blog](https://ollama.com/blog/tool-support) 列 qwen
 
 **不要做**: 不要用「等到 init」或字串比對錯誤訊息當 auth 偵測;前者誤判登出為登入,後者脆弱。
 
+**跨 provider 分層(重要)**: 探測機制是 **provider 內部細節**,各家 SDK 不同 —— claude 沒 auth API 要繞 `accountInfo`;**copilot 有 first-class `client.getAuthStatus() → {isAuthenticated}`**(乾淨,`agent-server/providers/copilot/index.ts` `gatherCapabilities`,未登入跳過 `listModels`)。對外**只吐共用契約 `authRequired`**,main/renderer 完全 provider-agnostic。不要因為兩家現在剛好都收斂成「terminal 跑指令 + Retry」就把流程控制上移外層 —— auth **flow** 也可能 per-provider 不同(device flow / secret 輸入 / 多步),那要走 provider 驅動的原語(`authMethod` 各自宣告、或 `storeCredential` 旁路),不是在外層加分支。
+
 ---
 
 ## R1 deploy 是冪等的(`.deployed` sentinel)→ 重用 remote/容器會跑到舊 bundle
