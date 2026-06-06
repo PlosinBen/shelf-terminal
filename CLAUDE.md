@@ -15,7 +15,7 @@
 
 - Node.js 22+
 - `npm run dev` — development (NODE_ENV=development, isolated userData)
-- `npm run test:e2e` — E2E tests (NODE_ENV=test, isolated userData)
+- `npm run test:e2e` — E2E tests (NODE_ENV=test, isolated userData)。**耗時長（含 build，數分鐘）→ 用 Bash `run_in_background` 跑，不要前景阻塞等待**
 - Production (packaged) uses default userData path
 
 ## Rules
