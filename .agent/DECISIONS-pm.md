@@ -177,7 +177,7 @@ PM agent（背景自動駕駛、Telegram bridge、write_to_pty、project note）
 
 **配套 GOTCHAS**: 「Ollama: model 看似支援 tool_call、實測只吐 JSON text」— qwen2.5-coder 系列實測不走 native tool_call，PM 廢掉；qwen3:8b 實測 work。預設 model `qwen3:8b`、SettingsPanel 對 ollama 加靜態 hint。
 
-**Related**: `.agent/features/pm-ollama-provider.md`、`scripts/spike-ollama.ts`、DECISIONS-pm #24（baseURL/ai-sdk 路徑）、#39（PM 不直接執行 — pull UI 拒絕的精神依據）、DECISIONS-agent #43（provider 對外行為一致）
+**Related**: `scripts/spike-ollama.ts`、DECISIONS-pm #24（baseURL/ai-sdk 路徑）、#39（PM 不直接執行 — pull UI 拒絕的精神依據）、DECISIONS-agent #43（provider 對外行為一致）
 
 ---
 
@@ -201,7 +201,7 @@ PM agent（背景自動駕駛、Telegram bridge、write_to_pty、project note）
 - 不要把 focus 段落寫進 SYSTEM_PROMPT_BASE — active 變化跟不上
 - 不要在 user message 前綴 inject — focus 是 context 不是 user 訊息
 
-**Related**: `.agent/features/pm-current-focus.md`、DECISIONS-pm #41（雙層 prompt 設計）— current focus 是 per-turn reminder 的特化形式
+**Related**: DECISIONS-pm #41（雙層 prompt 設計）— current focus 是 per-turn reminder 的特化形式
 
 ---
 
@@ -259,14 +259,14 @@ User 用 slash command 切 mode：`/pm` / `/use_<alias>` / `/projects` / `/mode`
 
 **Alias collision**：MVP 不處理。第一個註冊的 project 拿走 alias、第二個 silently fail（user 看 `/projects` 發現問題、改 project name 解）。
 
-**Related**: `.agent/features/telegram-agent-bridge.md`、DECISIONS-pm #39（PM 唯一輸出通道是 write_to_pty — 本 feature 不違反、是另開 channel）、DECISIONS-pm #40（PM 對話是單一 thread、Shelf UI ↔ Telegram 兩 view — 本 feature 延伸到 agent）、DECISIONS-agent #43（provider 對外行為一致 — Telegram bridge 不對 provider 做特殊處理）、DECISIONS-agent #53（turnId envelope — observer pattern 設計考量）、DECISIONS-agent #60（AgentMessage 9 variant — MVP 只取 `reply` text）
+**Related**: DECISIONS-pm #39（PM 唯一輸出通道是 write_to_pty — 本 feature 不違反、是另開 channel）、DECISIONS-pm #40（PM 對話是單一 thread、Shelf UI ↔ Telegram 兩 view — 本 feature 延伸到 agent）、DECISIONS-agent #43（provider 對外行為一致 — Telegram bridge 不對 provider 做特殊處理）、DECISIONS-agent #53（turnId envelope — observer pattern 設計考量）、DECISIONS-agent #60（AgentMessage 9 variant — MVP 只取 `reply` text）
 
 ---
 
 
 ## 68. PM Active = telegram listener master switch（Phase A）
 
-**決策**: 新增明確的 PM Active 開關控制 telegram listener,取代「有 config 就 boot 啟動」的隱性行為。詳見 `.agent/features/pm-active-status.md`(含 Phase B / autopilot 移除評估)。
+**決策**: 新增明確的 PM Active 開關控制 telegram listener,取代「有 config 就 boot 啟動」的隱性行為。
 
 - **PM Active** = telegram listener on/off。需 telegram config(無則 toggle disabled)。持久化「當下狀態」到 `AppSettings.pmActive`,boot 還原。
 - **Away 依賴 PM Active**:Away toggle 在 `!pmActive` 時 disabled;PM Active 轉 off 連帶關 Away(cascade)。理由:沒有 telegram 通道就不該進 autopilot。
@@ -284,6 +284,6 @@ User 用 slash command 切 mode：`/pm` / `/use_<alias>` / `/projects` / `/mode`
 - **Phase B(把監看 gate 從 away 搬到 pmActive、移除 autopilot)等 `/use-project-id` bridge 後再做** — 別提前(見 feature doc 評估)。merge 時注意:`/use_<alias>` bridge 已在 #67 落地,Phase B 評估可以重啟。
 - `stopTelegram` 跟 `stopOnError` 共用 `cleanupListener()`(merge 時補的 bug fix:舊版 `stopOnError` 漏清 #67 加的 setSyncCallback / observer / mode state,409 yield 後 re-grab 會雙重訂閱)。修任一條 cleanup path 時記得另一條同步。
 
-**Related**: `.agent/features/pm-active-status.md`(branch 原始位置)、DECISIONS-pm #25(Away Mode)、#39(PM 不直接執行)、#40(Shelf UI ↔ Telegram 兩 view)、#67(telegram bridge agent mode — Phase B unblocker)
+**Related**: DECISIONS-pm #25(Away Mode)、#39(PM 不直接執行)、#40(Shelf UI ↔ Telegram 兩 view)、#67(telegram bridge agent mode — Phase B unblocker)
 
 ---
