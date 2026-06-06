@@ -2,12 +2,23 @@
 
 This is a **self-contained** handoff for finishing WSL support on a **Windows
 host** (it can't be developed/validated on macOS/Linux). The scaffold is already
-in the branch and **inert by default** — turning it on is a single env flag.
+on `main` and **inert by default** — turning it on is a single env flag.
 
-> Branch: `feat/r1-self-contained-agent-server`. This doc is committed so it
-> reaches the Windows machine via git. (The richer design notes live in
-> `.agent/features/rust-shell-target.md`, which is gitignored and will NOT sync —
-> everything you need is reproduced here.)
+> **Work on `main`.** The R1 scaffold (and everything else) has since been
+> merged to `main`; the old `feat/r1-self-contained-agent-server` branch is
+> deleted locally and the copy on `origin` is stale (~27 commits behind main) —
+> do **not** use it. This doc is committed so it reaches the Windows machine via
+> git. (The richer design notes live in `.agent/features/rust-shell-target.md`,
+> which is gitignored and will NOT sync — everything you need is reproduced here.)
+>
+> **Start here on the Windows machine:**
+> 1. `git checkout main && git pull` (gets the scaffold + current code)
+> 2. `npm install` (rebuilds native deps for this host via electron-rebuild)
+> 3. `npm run typecheck` to sanity-check the tree
+> 4. Jump to "The 3 things to finish/verify on Windows" below.
+>
+> Note: e2e always runs via the `npm run test:*` scripts, which set `NODE_ENV=test`;
+> the launch fixture also sets it itself, so windows stay hidden either way.
 
 ---
 
@@ -74,7 +85,7 @@ the working examples. `wslOps` must do the same via `wsl.exe`.
 
 ---
 
-## Current scaffold (already in the branch)
+## Current scaffold (already on `main`)
 
 In `src/main/agent/remote.ts`:
 
