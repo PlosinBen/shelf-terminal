@@ -1,5 +1,5 @@
-import React, { useState, useMemo } from 'react';
-import { useStore } from '../store';
+import React, { useState, useMemo, useContext } from 'react';
+import { AgentDisplayContext } from './agent/AgentDisplayContext';
 import { renderMarkdown } from '../utils/markdown';
 import { alignLineDiff, type DiffRow } from '../utils/line-diff';
 import type { AgentDisplayMode, AgentDisplayKey, AgentFile, FoldBase } from '@shared/types';
@@ -103,10 +103,10 @@ interface Props {
 
 export function AgentMessage({ message, cwd: _cwd }: Props) {
   const [userToggled, setUserToggled] = useState<boolean | null>(null);
-  const { settings } = useStore();
+  const agentDisplay = useContext(AgentDisplayContext);
 
   const resolveDisplayMode = (key: AgentDisplayKey): AgentDisplayMode => {
-    return settings.agentDisplay?.[key] ?? DEFAULT_AGENT_DISPLAY[key];
+    return agentDisplay[key] ?? DEFAULT_AGENT_DISPLAY[key];
   };
 
   // Markdown for the `reply` variant — useMemo must run on every render.

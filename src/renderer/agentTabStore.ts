@@ -741,9 +741,8 @@ export function setInitStatus(
 export interface Turn { user?: AgentMsg; agent: AgentMsg[] }
 
 /**
- * Turn grouping selector — pure derivation from messages. Not memoized
- * here; consumer (MessageList) wraps in useMemo. Logic mirrors the
- * existing AgentView turns useMemo so behaviour stays identical.
+ * Turn grouping selector — pure derivation from messages. Not memoized here;
+ * consumer (MessageList) wraps in useMemo.
  */
 export function buildTurns(messages: AgentMsg[]): Turn[] {
   const result: Turn[] = [];

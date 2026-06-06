@@ -167,7 +167,6 @@ export function AgentView({ tabId, cwd, connection, provider, projectId, visible
     <div className="agent-view" ref={rootRef}>
       <MessageList
         tabId={tabId}
-        cwd={cwd}
         visible={visible}
         onRetryInit={handleRetryInit}
       />

@@ -2613,7 +2613,7 @@ button {
 
 .agent-msg-user {
   padding: 8px 12px;
-  background: rgba(229, 192, 123, 0.15);
+  background: var(--agent-user-bubble, rgba(229, 192, 123, 0.15));
 }
 
 .agent-msg-attachments {
@@ -2707,7 +2707,7 @@ button {
 
 .agent-error-label {
   font-weight: bold;
-  color: #e06c75;
+  color: var(--agent-error, #e06c75);
   margin-right: 6px;
 }
 
@@ -2764,7 +2764,7 @@ button {
 
 .fold-label {
   font-weight: bold;
-  color: #c678dd;
+  color: var(--agent-fold-label, #c678dd);
   font-size: 12px;
   flex-shrink: 0;
 }
