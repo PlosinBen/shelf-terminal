@@ -58,7 +58,7 @@ export function StatusBar({ tabId, provider }: Props) {
 
   return (
     <div className="agent-status-bar">
-      <span className="agent-status-dot" style={{ color: isStreaming ? '#e5c07b' : '#98c379' }}>{'●'}</span>
+      <span className="agent-status-dot" style={{ color: isStreaming ? 'var(--agent-warning, #e5c07b)' : 'var(--agent-success, #98c379)' }}>{'●'}</span>
       <span className="agent-status-label">{isStreaming ? 'running' : 'idle'}</span>
       <span className="agent-status-sep">|</span>
       <span className="agent-status-seg">{provider.charAt(0).toUpperCase() + provider.slice(1)}</span>

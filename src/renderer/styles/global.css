@@ -2443,7 +2443,7 @@ button {
 }
 
 .agent-auth-error {
-  color: #e06c75;
+  color: var(--agent-error, #e06c75);
   font-size: 12px;
   text-align: center;
 }
@@ -2479,9 +2479,9 @@ button {
   color: var(--text-muted);
 }
 
-.agent-status-seg[data-severity="info"] { color: #61afef; }
-.agent-status-seg[data-severity="warning"] { color: #e5c07b; }
-.agent-status-seg[data-severity="critical"] { color: #e06c75; }
+.agent-status-seg[data-severity="info"] { color: var(--agent-info, #61afef); }
+.agent-status-seg[data-severity="warning"] { color: var(--agent-warning, #e5c07b); }
+.agent-status-seg[data-severity="critical"] { color: var(--agent-error, #e06c75); }
 
 .agent-status-seg-label {
   color: var(--text-muted);
@@ -2672,7 +2672,7 @@ button {
 }
 
 .agent-queued-cancel:hover {
-  color: #e06c75;
+  color: var(--agent-error, #e06c75);
 }
 
 /* ── Assistant message ── */
@@ -2780,9 +2780,9 @@ button {
 
 .fold-error-banner {
   font-size: 12px;
-  color: var(--error, #e06c75);
+  color: var(--agent-error, #e06c75);
   background: rgba(224, 108, 117, 0.08);
-  border-left: 2px solid var(--error, #e06c75);
+  border-left: 2px solid var(--agent-error, #e06c75);
   padding: 4px 10px;
   margin: 4px 0;
   white-space: pre-wrap;
@@ -3062,7 +3062,7 @@ button {
 
 .agent-permission {
   padding: 10px 14px;
-  border-left: 3px solid #e5c07b;
+  border-left: 3px solid var(--agent-warning, #e5c07b);
   background: rgba(229, 192, 123, 0.06);
   border-radius: 0 4px 4px 0;
   margin: 4px 12px;
@@ -3074,7 +3074,7 @@ button {
 .agent-permission-header {
   font-weight: bold;
   font-size: 14px;
-  color: #e5c07b;
+  color: var(--agent-warning, #e5c07b);
 }
 
 .agent-permission-input {
@@ -3122,11 +3122,11 @@ button {
 }
 
 .agent-perm-option-allow {
-  color: #98c379;
+  color: var(--agent-success, #98c379);
 }
 
 .agent-perm-option-deny {
-  color: #e06c75;
+  color: var(--agent-error, #e06c75);
 }
 
 .agent-perm-hint {
@@ -3161,7 +3161,7 @@ button {
   text-transform: uppercase;
   letter-spacing: 0.5px;
   background: rgba(229, 192, 123, 0.15);
-  color: #e5c07b;
+  color: var(--agent-warning, #e5c07b);
   border: 1px solid rgba(229, 192, 123, 0.3);
   border-radius: 10px;
   padding: 1px 8px;
@@ -3240,7 +3240,7 @@ button {
 
 .picker-other-input:focus {
   outline: none;
-  border-color: #e5c07b;
+  border-color: var(--agent-warning, #e5c07b);
 }
 
 .picker-actions {
@@ -3272,7 +3272,7 @@ button {
 .picker-btn-primary {
   background: rgba(229, 192, 123, 0.15);
   border-color: rgba(229, 192, 123, 0.4);
-  color: #e5c07b;
+  color: var(--agent-warning, #e5c07b);
 }
 
 .picker-btn-primary:hover:not(:disabled) {
@@ -3362,7 +3362,7 @@ button {
 }
 
 .agent-task-item.agent-task-running .agent-task-icon { color: var(--agent-fold-label, #c678dd); }
-.agent-task-item.agent-task-completed .agent-task-icon { color: #98c379; }
+.agent-task-item.agent-task-completed .agent-task-icon { color: var(--agent-success, #98c379); }
 .agent-task-item.agent-task-failed .agent-task-icon,
 .agent-task-item.agent-task-stopped .agent-task-icon { color: var(--agent-error, #e06c75); }
 
@@ -3430,7 +3430,7 @@ button {
 }
 
 .agent-prompt {
-  color: #98c379;
+  color: var(--agent-success, #98c379);
   font-weight: bold;
   line-height: 24px;
   flex-shrink: 0;

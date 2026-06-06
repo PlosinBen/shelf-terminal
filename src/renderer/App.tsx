@@ -23,7 +23,7 @@ import { on, emit, Events } from './events';
 import { bindAgentIPCGroup } from './events';
 import { bindAgentStoreSubscriptions } from './agentTabSubscriptions';
 import { setInMemoryMax, setSaveThrottleMs } from './agentTabStore';
-import { getTheme } from './themes';
+import { getTheme, buildThemeVars } from './themes';
 import { clearAgentSession } from './storage/agent-history';
 import './styles/global.css';
 
@@ -274,13 +274,9 @@ export function App() {
 
   useEffect(() => {
     const root = document.documentElement;
-    root.style.setProperty('--bg', theme.ui.bg);
-    root.style.setProperty('--bg-secondary', theme.ui.bgSecondary);
-    root.style.setProperty('--border', theme.ui.border);
-    root.style.setProperty('--text', theme.ui.text);
-    root.style.setProperty('--text-muted', theme.ui.textMuted);
-    root.style.setProperty('--accent', theme.ui.accent);
-    root.style.setProperty('--surface', theme.ui.surface);
+    for (const [name, value] of Object.entries(buildThemeVars(theme))) {
+      root.style.setProperty(name, value);
+    }
   }, [theme]);
 
   const activeProject = projects[activeProjectIndex] ?? null;

@@ -212,3 +212,43 @@ export function getTheme(name: string): ShelfTheme {
   }
   return theme;
 }
+
+/**
+ * Theme-invariant semantic colors (error / success / warning / info / etc).
+ * These do NOT vary per theme today — every theme used the same One Dark-ish
+ * palette for these roles — so they live in one shared source rather than being
+ * duplicated (and silently allowed to drift) across each theme's `ui` block.
+ * Promoting them here makes `themes.ts` the single source for ALL theme tokens.
+ */
+export const SEMANTIC_TOKENS = {
+  error: '#e06c75',
+  success: '#98c379',
+  warning: '#e5c07b',
+  info: '#61afef',
+  foldLabel: '#c678dd',
+  userBubble: 'rgba(229, 192, 123, 0.15)',
+} as const;
+
+/**
+ * The single serializable derivation of a theme into a flat CSS-variable map.
+ * App.tsx feeds this to `documentElement.style.setProperty`; a future native /
+ * webview host (R4) consumes the same plain `Record<string,string>` — no second
+ * copy of the token→var mapping. Per-theme `ui` + shared `SEMANTIC_TOKENS`.
+ */
+export function buildThemeVars(theme: ShelfTheme): Record<string, string> {
+  return {
+    '--bg': theme.ui.bg,
+    '--bg-secondary': theme.ui.bgSecondary,
+    '--border': theme.ui.border,
+    '--text': theme.ui.text,
+    '--text-muted': theme.ui.textMuted,
+    '--accent': theme.ui.accent,
+    '--surface': theme.ui.surface,
+    '--agent-error': SEMANTIC_TOKENS.error,
+    '--agent-success': SEMANTIC_TOKENS.success,
+    '--agent-warning': SEMANTIC_TOKENS.warning,
+    '--agent-info': SEMANTIC_TOKENS.info,
+    '--agent-fold-label': SEMANTIC_TOKENS.foldLabel,
+    '--agent-user-bubble': SEMANTIC_TOKENS.userBubble,
+  };
+}
