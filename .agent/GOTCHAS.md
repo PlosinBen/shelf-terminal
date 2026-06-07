@@ -347,6 +347,16 @@
 
 ---
 
+## WSL: `wsl.exe -- sh -c` 裡的遠端 shell 變數會變空 ⚠️
+
+**現象**: WSL 部署**每次連線都重抄** ~215MB（`needsDeploy` 永遠 true，`.deployed` sentinel 失效）。diag 顯示 `readRemoteInventory` 的探測指令 `for f in node …; do [ -e $root/$f ] && echo $f; done` 在已部署的 root 上回傳 **5 個空行**（`rawOut="\n\n\n\n\n"`）——`echo $f` 印空、且 `$f` 空讓 `[ -e $root/ ]` 測到 root 目錄本身恆為 true。
+
+**原因**: 經 `execFileSync('wsl.exe', ['-d', distro, '--', 'sh', '-c', cmd])`（WSL 用的 array form）傳進去時，**遠端 sh 的 `for` loop 變數 / `D=…` 賦值變數會展開成空**（`$f`、`$p`、`$D` 全空）。ssh/docker **不受影響**——它們走 `execSync` 字串並用單引號把整段包起來（`'${sq(cmd)}'`），保護了 `$var`；WSL 的 array form 沒這層保護。**注意這只影響「remote shell 自己定義的變數」**；`"$HOME"`、`$(uname -m)` 這類仍正常（它們在遠端 sh 求值、不靠 wsl.exe 轉傳變數）。
+
+**解法**: WSL 的遠端指令**不要依賴 remote shell 變數**。`readRemoteInventory` 已改用 `ls -a <root>`（純路徑、無變數，且 `ls` 實測能穩過 wsl.exe）。**同類隱患**: `deploySelfContained` 結尾清舊版本目錄那段（`D="$dir"; for p in "$D"/*/; …`）在 WSL 下因 `$D`/`$p` 變空而**靜默 no-op**（舊 version 目錄不會被清，每個 ~300MB 會累積）——目前刻意不修（best-effort、且「不清」在多版本並存如 2.4.2+2.5.1 時反而安全，避免誤刪他版部署）；之後要修必須改寫成不靠 remote 變數的形式。
+
+---
+
 ## Claude SDK: thinking.display 沒設，dev/packaged 行為會分歧
 
 **現象**: dev (`npm run dev`) 看得到 thinking 內容，packaged app 收到 `len=0` 但 `hasSignature=true` 的 thinking block，且完全沒有 `thinking_delta` stream event。同一份 SDK config (`{ type: 'adaptive' }`)、同一支 `claude` binary、同一份 minified agent-server bundle，**僅執行環境不同**。

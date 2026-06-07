@@ -76,31 +76,43 @@ export function createRemoteBackend(
   let remoteProc: RemoteProcess | null = null;
   let deployed = false;
   let deployResult: DeployResult | null = null;
+  // Single in-flight init shared by concurrent callers. getCapabilities (on tab
+  // open) and query (on first send) fire almost together, so without this BOTH
+  // would pass the `!deployed` check and run deploySelfContained concurrently —
+  // the two deploys then collide copying the same files (one deploy's spawned
+  // `<root>/node` is already executing while the other `cp`s over it → ETXTBSY
+  // "Text file busy", failing one turn nondeterministically). Reset on failure
+  // so a later call can retry (e.g. after the user authenticates on the remote).
+  let initInFlight: Promise<RemoteProcess | null> | null = null;
 
-  async function ensureProcReady(cwd: string): Promise<RemoteProcess | null> {
-    if (!deployed) {
-      onPhase?.('deploying');
-      try {
-        deployResult = await deployAgentServer(connection, provider);
-      } catch (err: any) {
-        log.error('agent-remote', `Deploy failed: ${err.message}`);
+  function ensureProcReady(cwd: string): Promise<RemoteProcess | null> {
+    if (remoteProc) return Promise.resolve(remoteProc);
+    if (!initInFlight) {
+      initInFlight = (async () => {
+        if (!deployed) {
+          onPhase?.('deploying');
+          deployResult = await deployAgentServer(connection, provider);
+          deployed = true;
+        }
+        onPhase?.('connecting');
+        const proc = await spawnAgentServer(connection, cwd, deployResult!, initScript, onTaskEvent, onServerTurn);
+        if (!proc) return null;
+        const ready = await proc.awaitReady();
+        if (!ready) {
+          proc.kill();
+          return null;
+        }
+        remoteProc = proc;
+        return proc;
+      })().catch((err: any) => {
+        log.error('agent-remote', `Init failed: ${err.message}`);
         return null;
-      }
-      deployed = true;
+      });
     }
-    if (!remoteProc) {
-      onPhase?.('connecting');
-      const proc = await spawnAgentServer(connection, cwd, deployResult!, initScript, onTaskEvent, onServerTurn);
-      if (!proc) return null;
-      remoteProc = proc;
-      const ready = await remoteProc.awaitReady();
-      if (!ready) {
-        remoteProc.kill();
-        remoteProc = null;
-        return null;
-      }
-    }
-    return remoteProc;
+    return initInFlight.then((proc) => {
+      if (!proc) initInFlight = null; // failed → allow a fresh attempt next call
+      return proc;
+    });
   }
 
   const backend: AgentBackend = {
@@ -188,6 +200,7 @@ export function createRemoteBackend(
         remoteProc.kill();
         remoteProc = null;
       }
+      initInFlight = null; // so a later ensureProcReady re-spawns instead of returning the dead proc
     },
 
     clearContext() {
@@ -351,10 +364,14 @@ function wslOps(c: Extract<Connection, { type: 'wsl' }>): RemoteOps {
 
 /** One round-trip: list which deploy files + sentinel already exist on the target. */
 function readRemoteInventory(ops: RemoteOps, root: string): RemoteInventory {
-  const names = [...DEPLOY_FILES, DEPLOYED_SENTINEL];
-  // `; true` keeps exit 0 — on a fresh target every `[ -e ]` is false, so the
-  // loop's last command fails and execSync would otherwise throw.
-  const out = ops.exec(`for f in ${names.join(' ')}; do [ -e ${root}/$f ] && echo $f; done; true`);
+  // List the root and test membership — do NOT use a remote `for f in …; echo $f`
+  // loop. Over WSL's `wsl.exe -- sh -c <cmd>` the loop variable comes back EMPTY
+  // (`$f` expands to nothing), so every file looked absent and `needsDeploy` was
+  // always true → a full ~215MB redeploy on every connect. `ls -a` carries no
+  // remote shell variable and is known to survive wsl.exe. `|| true` keeps exit 0
+  // on a fresh target whose root doesn't exist yet (ls would otherwise non-zero
+  // and make ops.exec throw).
+  const out = ops.exec(`ls -a ${root} 2>/dev/null || true`);
   const present = new Set(out.split('\n').map((s) => s.trim()).filter(Boolean));
   const files: Partial<Record<DeployFile, boolean>> = {};
   for (const f of DEPLOY_FILES) files[f] = present.has(f);

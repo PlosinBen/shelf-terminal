@@ -86,14 +86,38 @@ export function wslHasNode(distro: string = WSL_TEST_DISTRO): boolean {
 }
 
 /**
- * List files in the distro's deploy root (empty array if none). Uses $HOME (an
- * absolute home), mirroring wslOps' base — `~` would not expand here.
+ * All three helpers below are scoped to a SPECIFIC version dir
+ * (`$HOME/.shelf/agent-server/<version>/`) — never the whole `agent-server`
+ * tree — so the test only ever touches its own deploy and leaves other
+ * versions' deploys (e.g. the Shelf you run day-to-day) untouched. Uses $HOME
+ * (an absolute home), mirroring wslOps' base — `~` would not expand here.
  */
-export function wslDeployedFiles(distro: string = WSL_TEST_DISTRO): string[] {
+
+/** List files in the version's deploy root (empty array if none). */
+export function wslDeployedFiles(version: string, distro: string = WSL_TEST_DISTRO): string[] {
   try {
-    const out = wsl(distro, 'ls "$HOME"/.shelf/agent-server/*/ 2>/dev/null');
+    const out = wsl(distro, `ls "$HOME/.shelf/agent-server/${version}/" 2>/dev/null`);
     return out.split('\n').map((s) => s.trim()).filter(Boolean);
   } catch {
     return [];
+  }
+}
+
+/** Remove this version's deploy dir — clean slate so the next connect deploys fresh. */
+export function wslCleanDeployRoot(version: string, distro: string = WSL_TEST_DISTRO): void {
+  wsl(distro, `rm -rf "$HOME/.shelf/agent-server/${version}"`);
+}
+
+/**
+ * Full-precision mtime of the version's deployed `node` ('' if absent). A
+ * re-copy (`cp`) rewrites the file and changes this; a skipped deploy leaves it
+ * byte-identical, so comparing the string proves whether the second connect
+ * re-copied.
+ */
+export function wslDeployedNodeMtime(version: string, distro: string = WSL_TEST_DISTRO): string {
+  try {
+    return wsl(distro, `stat -c %y "$HOME/.shelf/agent-server/${version}/node" 2>/dev/null`).trim();
+  } catch {
+    return '';
   }
 }
