@@ -217,30 +217,32 @@ test.describe('agent flows via fake provider', () => {
     // exactly one message flushes per streaming→idle cycle. Surfaced by
     // background tasks (foreground turns idle near-instantly, making the burst
     // obvious). See .agent/features/background-tasks.md.
-    test('flush one at a time, not a burst', async ({ shelfApp: { page } }) => {
+    // The one-at-a-time burst guard itself is covered deterministically by
+    // queue-flush.test.ts (reduceFlush). This e2e covers the WIRING a unit test
+    // can't: a message submitted while a turn streams is enqueued, and the single
+    // drain effect actually flushes it through IPC so every queued turn runs.
+    //
+    // We deliberately DON'T assert the transient `.agent-msg-queued` count
+    // (2→1→0): that intermediate state is timing-sensitive and was flaky on slow
+    // e2e hosts (e.g. WSL2) for no added coverage — the latch logic is unit-tested.
+    // Asserting the final outcome (all three ran, queue drained) is robust.
+    test('queued messages all flush through and run', async ({ shelfApp: { page } }) => {
       await setupProject(page);
       await openAgentTab(page);
 
-      // T1 holds the turn open (spinner) long enough to queue behind it.
-      await sendAgentPrompt(page, 'delay:3000|text:T1');
+      // T1 holds the turn open so T2/T3 are submitted while streaming → enqueued.
+      await sendAgentPrompt(page, 'delay:1500|text:T1');
       await expect(page.locator('.agent-loading')).toBeVisible({ timeout: 5_000 });
+      await sendAgentPrompt(page, 'delay:300|text:T2');
+      await sendAgentPrompt(page, 'delay:300|text:T3');
 
-      // Queue T2 and T3 while T1 streams — each its own slow turn.
-      await sendAgentPrompt(page, 'delay:1500|text:T2');
-      await sendAgentPrompt(page, 'delay:1500|text:T3');
-      await expect(page.locator('.agent-msg-queued')).toHaveCount(2, { timeout: 5_000 });
-
-      // When T1 idles ONLY T2 flushes; T3 stays queued while T2 streams. The
-      // burst bug jumped 2→0 (count 1 never observed) → this intermediate
-      // assertion times out (fails) on the unfixed code.
-      await expect(page.locator('.agent-msg-queued')).toHaveCount(1, { timeout: 8_000 });
-      await expect(page.locator('.agent-msg-queued')).toHaveCount(0, { timeout: 8_000 });
-
-      // All three turns ran (sendChain serializes → order preserved).
+      // All three turns flush through the queue and produce their output, and the
+      // queue ends empty.
       const messages = page.locator('.agent-messages:visible');
-      await expect(messages).toContainText('T1', { timeout: 8_000 });
-      await expect(messages).toContainText('T2');
-      await expect(messages).toContainText('T3');
+      await expect(messages).toContainText('T1', { timeout: 10_000 });
+      await expect(messages).toContainText('T2', { timeout: 10_000 });
+      await expect(messages).toContainText('T3', { timeout: 10_000 });
+      await expect(page.locator('.agent-msg-queued')).toHaveCount(0, { timeout: 10_000 });
     });
   });
 });

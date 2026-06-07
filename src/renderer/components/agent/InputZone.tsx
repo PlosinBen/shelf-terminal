@@ -15,6 +15,7 @@ import { useAttachmentPaste } from '../../hooks/useAttachmentPaste';
 import { OPTIONED_SLASHES, useSlashCommands, type SlashCommand } from './slash-commands';
 import { SlashMenu } from './SlashMenu';
 import { AttachmentChips } from './AttachmentChips';
+import { reduceFlush } from './queue-flush';
 
 interface Props {
   tabId: string;
@@ -181,31 +182,13 @@ export function InputZone({ tabId, projectId, cwd, connection, visible, rootRef,
     setPendingImages([]);
     setShowSlashMenu(false);
 
-    if (isStreaming) {
-      enqueueMessage(tabId, text);
-      return;
-    }
-
-    upsertMessage(tabId, {
-      id: `user-${Date.now()}`,
-      type: 'user',
-      content: text,
-      timestamp: Date.now(),
-      ...(images.length > 0 ? { images } : {}),
-      ...(files.length > 0 ? { files } : {}),
-    });
-    emitAgent('agent:scrollToBottom', { tabId });
-    emitAgent('agent:send', {
-      tabId,
-      text,
-      images: images.length > 0 ? images : undefined,
-      prefs: {
-        model: intent?.model,
-        effort: intent?.effort,
-        permissionMode: intent?.permissionMode,
-      },
-    });
-  }, [tabId, input, isStreaming, pendingFiles, pendingImages, intent, onConfigEdit]);
+    // Single entry point: every submission is enqueued — never sent directly.
+    // The drain effect below is the ONE sender: it fires immediately when the
+    // agent is idle (enqueue → next-tick dequeue) or after the current turn when
+    // streaming. Unifies the send path (attachments included) and keeps the
+    // one-at-a-time burst guard in one place.
+    enqueueMessage(tabId, text, images, files);
+  }, [tabId, input, pendingFiles, pendingImages]);
 
   const handleStop = useCallback(() => {
     // ESC-twice (stop) means "abort this turn AND drop everything I
@@ -215,34 +198,22 @@ export function InputZone({ tabId, projectId, cwd, connection, visible, rootRef,
     emitAgent('agent:stop', { tabId });
   }, [tabId]);
 
-  // One-at-a-time guard for the queued flush below. The flush is
-  // level-triggered on `isStreaming === false`, but isStreaming only flips
-  // back to true after the dispatched send round-trips through IPC
-  // (status:streaming). In that window the effect re-fires (queuedMessages
-  // changed by the dequeue) with isStreaming STILL false — without this guard
-  // it drains the WHOLE queue in a burst instead of one message per turn.
-  // We disarm on flush and re-arm only when streaming actually begins, so
-  // exactly one message flushes per streaming→idle cycle. Every dispatched
-  // message emits a streaming status (even instant config edits), so re-arming
-  // is guaranteed → never stalls. (Surfaced by background tasks: foreground
-  // turns idle near-instantly, making the burst obvious. See background-tasks.md.)
+  // Single queue drain — the ONE place messages are sent. Every submission is
+  // enqueued (handleSend), and this effect pops the front when allowed. The
+  // one-at-a-time latch lives in `reduceFlush` (queue-flush.ts, unit-tested):
+  // an idle enqueue flushes next tick; messages enqueued during the post-flush
+  // window (isStreaming not yet true) are held — without the latch the effect
+  // re-fire (queuedMessages changed by the dequeue) would drain the whole queue
+  // in a burst. The send sits in useEffect (not in handleSend) so agent-server
+  // gets one tick to settle before the next AGENT_SEND lands.
   const flushArmedRef = useRef(true);
   useEffect(() => {
-    if (isStreaming) flushArmedRef.current = true;
-  }, [isStreaming]);
-
-  // Queued-message flush. When the agent transitions streaming →
-  // idle and queued messages exist, pop the front and send it as a
-  // normal turn. Lives here (not in the store) so the same path as
-  // handleSend constructs the user bubble + emits agent:send with
-  // the current prefs snapshot. Side effect in useEffect (not in
-  // the setStreaming action) so agent-server has one tick to settle
-  // before the next AGENT_SEND lands.
-  useEffect(() => {
-    if (isStreaming) return;
-    if (!flushArmedRef.current) return;
-    if (queuedMessages.length === 0) return;
-    flushArmedRef.current = false;
+    const { armed, flush } = reduceFlush(flushArmedRef.current, {
+      isStreaming,
+      queueLength: queuedMessages.length,
+    });
+    flushArmedRef.current = armed;
+    if (!flush) return;
     const next = dequeueMessage(tabId);
     if (!next) return;
     upsertMessage(tabId, {
@@ -250,11 +221,14 @@ export function InputZone({ tabId, projectId, cwd, connection, visible, rootRef,
       type: 'user',
       content: next.content,
       timestamp: Date.now(),
+      ...(next.images && next.images.length > 0 ? { images: next.images } : {}),
+      ...(next.files && next.files.length > 0 ? { files: next.files } : {}),
     });
     emitAgent('agent:scrollToBottom', { tabId });
     emitAgent('agent:send', {
       tabId,
       text: next.content,
+      images: next.images && next.images.length > 0 ? next.images : undefined,
       prefs: {
         model: intent?.model,
         effort: intent?.effort,

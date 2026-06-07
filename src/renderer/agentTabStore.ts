@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import type { AgentMsg } from './components/AgentMessage';
-import type { AgentInitPhase, AgentPrefs, AgentProvider, AuthMethod, NormalizedTask, TaskEvent } from '../shared/types';
+import type { AgentFile, AgentInitPhase, AgentPrefs, AgentProvider, AuthMethod, NormalizedTask, TaskEvent } from '../shared/types';
 import { loadAgentMessagesLatest, saveAgentMessagesDelta, clearAgentSession } from './storage/agent-history';
 
 // Per-tab store for agent UI state. Split from store.ts because the
@@ -63,6 +63,11 @@ export interface LocalPicker {
 export interface QueuedMessage {
   id: string;
   content: string;
+  // Attachments ride along so a queued message sends identically to one sent
+  // immediately (the flush path is the single sender). Optional — most queued
+  // messages are plain text.
+  images?: string[];
+  files?: AgentFile[];
 }
 
 export interface AgentTabState {
@@ -523,10 +528,18 @@ export function appendChunk(
   // captures the final.
 }
 
-export function enqueueMessage(tabId: string, content: string) {
+export function enqueueMessage(tabId: string, content: string, images?: string[], files?: AgentFile[]) {
   update(tabId, (prev) => ({
     ...prev,
-    queuedMessages: [...prev.queuedMessages, { id: `q-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, content }],
+    queuedMessages: [
+      ...prev.queuedMessages,
+      {
+        id: `q-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        content,
+        ...(images && images.length > 0 ? { images } : {}),
+        ...(files && files.length > 0 ? { files } : {}),
+      },
+    ],
   }));
 }
 
