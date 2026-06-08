@@ -454,3 +454,24 @@ export function isBackgroundedCopilotTask(t: any): boolean {
   return t?.executionMode === 'background';
 }
 
+/**
+ * Transitional Copilot auth-config selection (pure).
+ *
+ * If a gh-derived token is available, pass it as `gitHubToken` (which forces
+ * `useLoggedInUser: false`): the spawned Copilot CLI then uses that token and
+ * NEVER touches its own keychain-stored login → no macOS Keychain prompt (gh
+ * keeps its token in a plaintext file, not the keychain). If no gh token, fall
+ * back to `useLoggedInUser: true` (Copilot's own login, which on macOS lives in
+ * the keychain → may prompt on unsigned builds).
+ *
+ * gh is OPTIONAL — a convenience to avoid the keychain prompt when it happens to
+ * be installed+authed, NOT a hard dependency. See DECISIONS-agent #45.
+ */
+export function buildCopilotAuthConfig(
+  ghToken: string | undefined,
+): { gitHubToken: string; useLoggedInUser: false } | { useLoggedInUser: true } {
+  return ghToken
+    ? { gitHubToken: ghToken, useLoggedInUser: false }
+    : { useLoggedInUser: true };
+}
+

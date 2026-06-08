@@ -7,6 +7,8 @@ import { parseSlashPrefix } from '@shared/slash-prefix';
 import { formatConfigAck, type ConfigEditKey } from '@shared/config-ack';
 import type { ProviderModel } from '@shared/types';
 import { stripCwd } from '../shared';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import {
   quotaSnapshotToSegment,
   formatCopilotToolInput,
@@ -15,8 +17,29 @@ import {
   picksToElicitationContent,
   normalizeCopilotTask,
   isBackgroundedCopilotTask,
+  buildCopilotAuthConfig,
   type ApplyPatchFileSpec,
 } from './helpers';
+
+const execFileP = promisify(execFile);
+
+/**
+ * Transitional: read a GitHub token from the `gh` CLI if it's installed AND
+ * authed. Used to keep the old gitHubToken auth path (no macOS Keychain prompt)
+ * when gh is present, while still working without gh (caller falls back to
+ * useLoggedInUser). gh is OPTIONAL: any failure (not installed → ENOENT, not
+ * authed, no scope, empty output) resolves to `undefined` and NEVER throws.
+ * On remotes this runs remote-side, picking up the remote's own gh — consistent
+ * with where Copilot itself runs. See DECISIONS-agent #45.
+ */
+async function readGhToken(): Promise<string | undefined> {
+  try {
+    const { stdout } = await execFileP('gh', ['auth', 'token'], { timeout: 3000 });
+    return stdout.trim() || undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 /**
  * In-flight tool calls awaiting their `tool.execution_complete` event.
@@ -279,17 +302,21 @@ export function createCopilotBackend(): ServerBackend {
     if (!cliPath) {
       throw new Error('GitHub Copilot CLI not found. Install with: npm install -g @github/copilot');
     }
-    // Auth: let the Copilot CLI use its OWN stored GitHub login (its OAuth /
-    // device-flow login, kept in the CLI's own config). `useLoggedInUser: true`
-    // uses that — and gh CLI auth IF present — so a GitHub login is required but
-    // the `gh` command is NOT a dependency (we don't want to bind an extra tool,
-    // and on remotes `gh auth token` would run remote-side anyway).
-    // We deliberately don't pass `gitHubToken`, which would force
-    // useLoggedInUser off and require an external token source like gh.
+    // Auth (transitional dual-path):
+    //  - gh present+authed → pass its token as `gitHubToken` (forces
+    //    useLoggedInUser:false). The CLI then uses that token and never reads its
+    //    own keychain login → no macOS Keychain prompt (gh stores its token in a
+    //    plaintext file). This restores the pre-6d5c615 behaviour, but gh is now
+    //    OPTIONAL (only used if present), not a hard dependency.
+    //  - no gh → fall back to `useLoggedInUser: true` (Copilot's own login; on
+    //    macOS that lives in the keychain and may prompt on unsigned builds).
+    // See DECISIONS-agent #45. The keychain tradeoff is the reason gh is offered
+    // back as an opt-in shortcut while a permanent fix (signing) is decided.
+    const ghToken = await readGhToken();
     state.client = new CopilotClient({
       cliPath,
       useStdio: true,
-      useLoggedInUser: true,
+      ...buildCopilotAuthConfig(ghToken),
       logLevel: 'warning',
       // Suppress Node's "SQLite is experimental" warning the CLI emits on stdout/stderr.
       env: { ...process.env, NODE_NO_WARNINGS: '1' },

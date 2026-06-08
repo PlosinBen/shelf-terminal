@@ -1,5 +1,22 @@
 import { describe, it, expect } from 'vitest';
-import { quotaSnapshotToSegment, parseApplyPatch, formatCopilotToolInput, elicitationSchemaToPrompts, picksToElicitationContent, normalizeCopilotTask, isBackgroundedCopilotTask } from './helpers';
+import { quotaSnapshotToSegment, parseApplyPatch, formatCopilotToolInput, elicitationSchemaToPrompts, picksToElicitationContent, normalizeCopilotTask, isBackgroundedCopilotTask, buildCopilotAuthConfig } from './helpers';
+
+describe('buildCopilotAuthConfig (transitional gh-or-loggedInUser)', () => {
+  it('uses gitHubToken + useLoggedInUser:false when a gh token is present', () => {
+    expect(buildCopilotAuthConfig('gho_abc123')).toEqual({
+      gitHubToken: 'gho_abc123',
+      useLoggedInUser: false,
+    });
+  });
+
+  it('falls back to useLoggedInUser:true when no gh token (undefined)', () => {
+    expect(buildCopilotAuthConfig(undefined)).toEqual({ useLoggedInUser: true });
+  });
+
+  it('treats empty string as no token (falls back)', () => {
+    expect(buildCopilotAuthConfig('')).toEqual({ useLoggedInUser: true });
+  });
+});
 
 describe('quotaSnapshotToSegment', () => {
   it('renders premium quota at 100%', () => {
