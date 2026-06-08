@@ -995,7 +995,7 @@ const inflightToolUses = new Map<string, InflightToolUseEntry>();
  *   - `status: 'deleted'` on TaskUpdate is the only path that removes a
  *     task; `completed` stays in the list (rendered as `- [x]`).
  *
- * See .agent/features/sdk-upgrade-0.3.md for the rationale and design log.
+ * See DECISIONS #46 and GOTCHAS (Claude SDK 0.3.x TaskCreate) for rationale.
  */
 const tasks = new Map<string, TaskRecord>();
 const pendingTaskCreates = new Map<string, Omit<TaskRecord, 'status'>>();
@@ -1014,7 +1014,7 @@ const pendingTaskLists = new Set<string>();
  * here lets `task_updated`/`task_notification` merge with the fields established
  * at `task_started`. `taskOutputFiles` stashes the remote `output_file` path
  * (server-only — not a render primitive; consumed by the M2 read_task_output RPC).
- * See .agent/features/background-tasks.md (Phase 0 confirmed the SDK shapes).
+ * See DECISIONS #69 (Phase 0 confirmed the SDK shapes).
  */
 const backgroundTasks = new Map<string, NormalizedTask>();
 const taskOutputFiles = new Map<string, string>();

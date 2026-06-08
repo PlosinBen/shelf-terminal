@@ -421,7 +421,7 @@ export function formatClaudeToolInput(toolName: string, input: Record<string, un
 // Pure mapper for the SDK's `task_*` system messages → NormalizedTask render
 // primitives. State (the per-id Map, output-file stash, ambient set) lives in
 // the backend closure; this fn is side-effect-free so it's unit-testable like
-// the other parsers here. See .agent/features/background-tasks.md (Phase 0
+// the other parsers here. See DECISIONS #69 (Phase 0
 // confirmed the SDK shapes against a real backgrounded Bash).
 
 /** SDK `task_type` → NormalizedTask.type. Unknown values collapse to 'unknown'

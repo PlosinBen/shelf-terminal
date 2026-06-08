@@ -3,7 +3,7 @@
  * (`e.clipboardData`) and drag-drop (`e.dataTransfer`) since both expose the
  * same `DataTransfer` interface.
  *
- * Design rules (see `.agent/features/parse-data-transfer.md`):
+ * Design rules:
  * - Synchronous, no side effects.
  * - Does NOT call `preventDefault()` — caller decides based on result.
  * - Does NOT read file contents (`arrayBuffer` / `readAsDataURL`) — caller

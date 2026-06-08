@@ -121,8 +121,7 @@ function getSystemPrompt(): string {
 /**
  * Build the "Current Focus" section appended to PM's system prompt per turn.
  * Dynamically resolves the renderer-synced active project / tab so PM can
- * default-route messages without scan-then-ask. See DECISIONS-pm #66 and
- * features/pm-current-focus.md.
+ * default-route messages without scan-then-ask. See DECISIONS-pm #66.
  *
  * Returns empty string when no project is currently active (app just opened,
  * no projects yet) — PM falls back to its original scan-first behaviour.

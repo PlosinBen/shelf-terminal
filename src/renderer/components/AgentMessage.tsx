@@ -16,7 +16,7 @@ import { DEFAULT_AGENT_DISPLAY } from '@shared/types';
  * Naming is pure rendering vocabulary — no provider semantics:
  *   reply / note / system / error / fold_* / user.
  *
- * See `.agent/features/agent-message-type-refactor.md` for design rationale.
+ * See DECISIONS #60 for design rationale.
  */
 export type AgentMsg = {
   id: string;

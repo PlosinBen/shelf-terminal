@@ -86,7 +86,7 @@ export interface FoldBase {
  * `plan` is NOT in this union — it's transported via its own AgentEvent /
  * IPC channel and lands in `agentTabStore.currentPlan`, not the timeline.
  *
- * See `.agent/features/agent-message-type-refactor.md` for design rationale.
+ * See DECISIONS #60 for design rationale.
  */
 export type AgentMessage = WithMsgId & (
   | { type: 'reply';   content: string }
@@ -344,7 +344,7 @@ export interface ProviderModel {
  * Background task render primitive. Provider-agnostic by design — claude maps
  * its SDK task_* system messages into this, copilot maps its TaskInfo into the
  * same shape, and the renderer only ever sees this (never SDK / provider
- * vocabulary). See `.agent/features/background-tasks.md`.
+ * vocabulary). See DECISIONS #69.
  *
  * `type` keeps a small fixed vocabulary across providers; unknown source types
  * collapse to 'unknown' rather than leaking provider strings.

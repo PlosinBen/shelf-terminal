@@ -31,7 +31,7 @@ const sessions = new Map<string, SessionInstance>();
 // dispatch O(1) and lets the bridge be a permanent listener registered once
 // at app boot — no register/unregister coupled to mode switches.
 //
-// See features/telegram-agent-bridge.md (Architecture: Global Observer).
+// See DECISIONS-pm #67 (Architecture: Global Observer).
 type GlobalObserver = (tabId: string, event: AgentEvent) => void;
 const globalObservers = new Set<GlobalObserver>();
 
@@ -343,7 +343,7 @@ export function isAgentTab(tabId: string): boolean {
 /**
  * In-process equivalent of the AGENT_SEND IPC handler. Routes a prompt to an
  * existing agent session without going through renderer. Used by the Telegram
- * bridge in agent mode (see features/telegram-agent-bridge.md).
+ * bridge in agent mode (see DECISIONS-pm #67).
  *
  * Returns the same boolean as sendMessage: false if tabId has no session, true
  * once the turn completes (including catch'd errors — those propagate through

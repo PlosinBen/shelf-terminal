@@ -8,7 +8,7 @@ import type { Page } from '@playwright/test';
  * output via read_task_output, and tasks can be dismissed. Scenarios:
  *   task:<id>     → running background task_event
  *   taskdone:<id> → completed task_event + stashed output (fetchTaskOutput)
- * See .agent/features/background-tasks.md and agent-server/providers/fake/index.ts.
+ * See DECISIONS #69 and agent-server/providers/fake/index.ts.
  */
 
 const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';

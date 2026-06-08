@@ -23,7 +23,7 @@ async function closePmPanel(page: any) {
 // Helper: configure PM provider via Settings panel.
 // Uses label-based group filters because input index ordering changed after
 // the Base URL input was added (only appears after a provider is selected —
-// see features/pm-ollama-provider.md).
+// see DECISIONS-pm #65).
 async function configurePmProvider(page: any) {
   await page.keyboard.press(`${modifier}+,`);
   const settingsPanel = page.locator('.settings-panel');
@@ -217,7 +217,7 @@ test('PM clear button exists', async ({ shelfApp: { page } }) => {
   await closePmPanel(page);
 });
 
-// ── Ollama provider UI (features/pm-ollama-provider.md) ──
+// ── Ollama provider UI (DECISIONS-pm #65) ──
 //
 // These verify the deterministic UI bits of selecting Ollama in PM Settings:
 // option presence, Base URL input visibility/placeholder, API Key placeholder

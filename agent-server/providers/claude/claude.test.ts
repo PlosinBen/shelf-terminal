@@ -677,7 +677,7 @@ describe('renderPlan', () => {
 
 describe('normalizeTaskMessage', () => {
   // Field shapes verified against a real backgrounded Bash (Phase 0 spike,
-  // .agent/features/background-tasks.md):
+  // DECISIONS #69):
   //   task_started      { task_id, description, task_type:'local_bash', tool_use_id, skip_transcript? }
   //   task_updated      { task_id, patch:{ status, end_time } }
   //   task_notification { task_id, status, summary, output_file }

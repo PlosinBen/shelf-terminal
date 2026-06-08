@@ -6,7 +6,7 @@ const DB_NAME = 'shelf-agent-history';
 // (tool_use / file_edit / thinking / intent / slash_response / plan). The
 // type system was refactored to renderer primitives (reply / note / system /
 // error / fold_text / fold_code / fold_markdown / fold_diff / user — see
-// .agent/features/agent-message-type-refactor.md). User=developer, so we
+// DECISIONS #60). User=developer, so we
 // don't migrate per-row; v4 just drops the old store and starts fresh.
 // v4: keyPath 'dbId' autoIncrement, indexes 'by-session' and the composite
 // 'by-session-time' that lets `loadLatest` reverse-iterate the tail of a

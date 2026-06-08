@@ -40,7 +40,7 @@ const TELEGRAM_BRIEF_HINT =
   'Keep it short. If the answer spans multiple topics or issues, just list the topic titles and let me ask which to expand — do not explain them all at once. ' +
   'For long code or command output, say "see Shelf" instead of pasting it.]';
 
-// Mode 切換 + agent-view bridge — see features/telegram-agent-bridge.md.
+// Mode 切換 + agent-view bridge — see DECISIONS-pm #67.
 type Mode =
   | { type: 'pm' }
   | { type: 'agent'; tabId: string; projectName: string; provider: string };
@@ -243,7 +243,7 @@ async function sendControlAnnouncement(): Promise<void> {
   if (!config) return;
   // Prefer synced state (has tab info + ids for alias derivation). Falls back
   // to the simpler getProjectsFn shape if sync hasn't fired yet — early boot
-  // edge case. See features/telegram-agent-bridge.md MVP scope.
+  // edge case. See DECISIONS-pm #67 MVP scope.
   const synced = getSyncedProjects();
   const lines = [`🖥 Now controlled by *${escapeTelegramMarkdown(os.hostname())}*`, ''];
   if (synced.length > 0) {
@@ -416,7 +416,7 @@ async function pollLoop(): Promise<void> {
 /**
  * Routes one incoming Telegram message to the right handler. Slash commands
  * are dispatched here; non-slash text goes to current mode (PM or agent).
- * See features/telegram-agent-bridge.md mode state machine.
+ * See DECISIONS-pm #67 mode state machine.
  */
 function handleIncomingMessage(text: string, chatId: string): void {
   const cmd = text.split(/\s+/)[0];

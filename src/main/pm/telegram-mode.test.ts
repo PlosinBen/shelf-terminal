@@ -1,8 +1,8 @@
 /**
  * Pure tests for telegram-mode helpers — alias derivation and fallback.
  * resolveAlias / buildUseCommands / formatProjectsList are exercised by the
- * Telegram bridge manual test plan (see features/telegram-agent-bridge.md
- * Task 6) since they pull from live agent/tools state.
+ * Telegram bridge manual test plan (see DECISIONS-pm #67) since they
+ * pull from live agent/tools state.
  */
 import { describe, it, expect, vi } from 'vitest';
 

@@ -411,7 +411,7 @@ export function picksToElicitationContent(
 // Pure mapper for the Copilot SDK's TaskInfo (TaskAgentInfo | TaskShellInfo,
 // from rpc.tasks.list()) → NormalizedTask render primitives — the same shape
 // claude maps its task_* system messages into. Side-effect-free for unit tests.
-// See .agent/features/background-tasks.md + DECISIONS #69.
+// See DECISIONS #69.
 
 /** Copilot TaskInfo.status → NormalizedTask.status. Copilot's 'idle' (agent
  *  waiting) maps to 'running' (still alive); 'cancelled' → 'stopped'. */

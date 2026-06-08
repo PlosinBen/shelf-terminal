@@ -80,7 +80,7 @@ export interface AgentTabState {
   queuedMessages: QueuedMessage[];
   currentPlan: string;
   // Background tasks (turnId-less side-channel). Upserted by id from task_event;
-  // ordered by first-seen. See .agent/features/background-tasks.md.
+  // ordered by first-seen. See DECISIONS #69.
   backgroundTasks: NormalizedTask[];
 
   // status (display only — what backend reports)

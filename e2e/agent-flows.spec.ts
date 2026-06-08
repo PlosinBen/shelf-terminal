@@ -216,7 +216,7 @@ test.describe('agent flows via fake provider', () => {
     // that window and drain the whole queue at once. The fix arms/disarms so
     // exactly one message flushes per streaming→idle cycle. Surfaced by
     // background tasks (foreground turns idle near-instantly, making the burst
-    // obvious). See .agent/features/background-tasks.md.
+    // obvious). See DECISIONS #69.
     // The one-at-a-time burst guard itself is covered deterministically by
     // queue-flush.test.ts (reduceFlush). This e2e covers the WIRING a unit test
     // can't: a message submitted while a turn streams is enqueued, and the single

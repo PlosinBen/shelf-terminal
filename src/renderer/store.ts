@@ -452,7 +452,7 @@ function syncToMain() {
   syncTimer = setTimeout(() => {
     syncTimer = null;
     // Mark active project / active tab so main-side PM can resolve current
-    // focus without a separate IPC. See features/pm-current-focus.md and
+    // focus without a separate IPC. See DECISIONS-pm #66 and
     // tools.ts getCurrentFocus().
     const state = projects.map((p, pi) => ({
       id: p.config.id,

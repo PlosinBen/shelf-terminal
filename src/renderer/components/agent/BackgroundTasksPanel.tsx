@@ -26,7 +26,7 @@ interface OutputState {
  * `agent:onBackgroundTasks` → `applyTaskEvent` → `tab.backgroundTasks`.
  * Completed tasks can be clicked to fetch their full remote output (read on
  * the agent-server — main/renderer never touch the remote fs) and dismissed
- * with ×. Renders nothing when empty. See .agent/features/background-tasks.md.
+ * with ×. Renders nothing when empty. See DECISIONS #69.
  */
 export function BackgroundTasksPanel({ tabId }: Props) {
   const tab = useAgentTab(tabId);

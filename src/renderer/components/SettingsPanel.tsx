@@ -23,8 +23,8 @@ export function SettingsPanel() {
 
   // Dynamic model discovery for providers with `dynamicModelList` (e.g. ollama).
   // Hits GET <baseURL>/models via main-process `pm.listModels` IPC; result is
-  // merged with user-defined custom entries from `providerModels`. See D3-b in
-  // .agent/features/pm-ollama-provider.md.
+  // merged with user-defined custom entries from `providerModels`. See
+  // DECISIONS-pm #65.
   const [detectedModels, setDetectedModels] = useState<ProviderModel[]>([]);
   const [listStatus, setListStatus] = useState<ListStatus>('idle');
   const [listError, setListError] = useState<ListError>(null);

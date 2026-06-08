@@ -153,7 +153,7 @@ export type OutgoingMessage = WireEnvelope & (
   // these (it's exempted) — otherwise the main-side dispatcher drops them as
   // "unknown turn" once the turn is deregistered. Routed via a session-level
   // `onTaskEvent` callback, never the per-turn AsyncIterator.
-  // See `.agent/features/background-tasks.md`.
+  // See DECISIONS #69.
   | ({ type: 'task_event' } & TaskEvent)
 
   // ── Streaming (incremental reply/fold_text chunks) ───────────────────────
@@ -177,7 +177,7 @@ export type OutgoingMessage = WireEnvelope & (
 
   // ── Canonical conversation messages ──────────────────────────────────────
   // Renderer-facing variants. Discriminated by `msgType`. Each variant only
-  // carries fields it actually needs (see .agent/features/agent-message-type-refactor.md
+  // carries fields it actually needs (see DECISIONS #60
   // for design rationale).
   //
   // `msgId` is the upsert key in the renderer's message store. For fold_*

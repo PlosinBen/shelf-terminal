@@ -115,8 +115,7 @@ export function PmAgentSettingsTab({ draft, updateDraft, detectedModels, listSta
             >↻</button>
           )}
         </div>
-        {/* Three-state hint for dynamic model list. See D3-b in
-            .agent/features/pm-ollama-provider.md. */}
+        {/* Three-state hint for dynamic model list. See DECISIONS-pm #65. */}
         {pmDynamic && listStatus === 'loading' && (
           <div className="settings-sub-hint">Loading models from {pmBaseURL}…</div>
         )}
