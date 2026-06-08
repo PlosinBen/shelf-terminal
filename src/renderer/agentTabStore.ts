@@ -800,7 +800,7 @@ export function buildTurns(messages: AgentMsg[]): Turn[] {
       // `startsTurn`: first message of a server-initiated turn (auto-resume
       // prose after a background task). It has no `user` message to anchor a
       // block, so open one explicitly — otherwise it'd glue onto the previous
-      // (possibly unrelated) turn. See background-tasks.md M3.
+      // (possibly unrelated) turn. See DECISIONS #69.
       result.push({ agent: [msg] });
     } else {
       result[result.length - 1].agent.push(msg);

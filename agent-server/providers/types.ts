@@ -50,7 +50,7 @@ export interface WireEnvelope {
    * buildTurns opens a fresh turn block for it. Needed for server-initiated
    * (auto-resume) turns: they have no `user` message to anchor a new block, so
    * without this the prose would glue onto the previous (possibly unrelated)
-   * turn. Only meaningful on `message` events. See background-tasks.md M3.
+   * turn. Only meaningful on `message` events. See DECISIONS #69.
    */
   startsTurn?: boolean;
 }
@@ -87,7 +87,7 @@ export type OutgoingMessage = WireEnvelope & (
   | { type: 'credential_stored'; requestId: string; ok: boolean; error?: string }
   | { type: 'credential_cleared'; requestId: string; ok: boolean; error?: string }
   /** RPC response: full output of a background task (read from its remote
-   *  output_file). One-shot, matched by requestId. See background-tasks.md. */
+   *  output_file). One-shot, matched by requestId. See DECISIONS #69. */
   | { type: 'task_output'; requestId: string; content?: string; error?: string }
 
   // ── Per-turn control / status (turnId expected) ──────────────────────────
@@ -110,7 +110,7 @@ export type OutgoingMessage = WireEnvelope & (
    * arrives — without registration the dispatcher drops the content as
    * "unknown turn". Used when a backgrounded task finishes and the SDK
    * auto-resumes the agent to write a real reply: that prose has no live turn,
-   * so the provider opens one. See background-tasks.md M3.
+   * so the provider opens one. See DECISIONS #69.
    */
   | { type: 'turn_started' }
   | { type: 'auth_required'; provider: string }

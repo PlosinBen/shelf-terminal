@@ -19,7 +19,7 @@ function freshMsgId(prefix: string): string {
 export function buildAgentMsg(msg: any, provider: string): AgentMsg | null {
   const built = buildAgentMsgInner(msg, provider);
   // Server-initiated turn marker (auto-resume prose) — carry through so
-  // buildTurns opens a fresh turn block for it. See background-tasks.md M3.
+  // buildTurns opens a fresh turn block for it. See DECISIONS #69.
   if (built && msg.startsTurn) built.startsTurn = true;
   return built;
 }

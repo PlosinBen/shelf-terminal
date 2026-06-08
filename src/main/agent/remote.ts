@@ -66,11 +66,11 @@ export function createRemoteBackend(
   onPhase?: (phase: AgentInitPhase) => void,
   // Optional per-tab background-task sink — main wires it to
   // AGENT_BACKGROUND_TASKS. Session-level (NOT per-turn): a backgrounded task
-  // outlives the turn that spawned it. See background-tasks.md.
+  // outlives the turn that spawned it. See DECISIONS #69.
   onTaskEvent?: (ev: TaskEvent) => void,
   // Optional sink for a server-initiated turn (auto-resume prose after a
   // background task finishes). Receives the turnId + the turn's event
-  // generator to drain into the renderer. See background-tasks.md M3.
+  // generator to drain into the renderer. See DECISIONS #69.
   onServerTurn?: (turnId: string, events: AsyncGenerator<AgentEvent>) => void,
 ): AgentBackend {
   let remoteProc: RemoteProcess | null = null;
@@ -610,7 +610,7 @@ export function parseRemoteMessage(msg: any): AgentEvent | null {
     const payload = buildAgentMessagePayload(msg);
     if (!payload) return null;
     // Server-initiated turn marker (auto-resume prose) — pass through so the
-    // renderer opens a new turn block for it. See background-tasks.md M3.
+    // renderer opens a new turn block for it. See DECISIONS #69.
     if (msg.startsTurn) payload.startsTurn = true;
     return { type: 'message', payload };
   }

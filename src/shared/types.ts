@@ -42,7 +42,7 @@ type WithMsgId = {
    * First message of a server-initiated turn (auto-resume prose after a
    * background task). Tells the renderer's buildTurns to open a fresh turn
    * block — these turns have no `user` message to anchor one. See
-   * background-tasks.md M3.
+   * DECISIONS #69.
    */
   startsTurn?: boolean;
 };

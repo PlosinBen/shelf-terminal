@@ -51,7 +51,7 @@ test.describe('background tasks panel via fake provider', () => {
 
     // serverturn: drives the M3 server-initiated turn end-to-end (wire
     // turn_started → dispatcher registers → main forwarder → renderer
-    // buildTurns opens a fresh block). See background-tasks.md M3.
+    // buildTurns opens a fresh block). See DECISIONS #69.
     await sendAgentPrompt(page, 'serverturn:the sleep finished');
 
     // The prose appears...

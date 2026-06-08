@@ -272,7 +272,7 @@ export function createFakeBackend(): ServerBackend {
     // background task finishes). Opens a fresh turnId via turn_started, emits
     // the prose tagged with it + startsTurn so the renderer renders it in its
     // own turn block, then closes with that turn's idle. Same wire shapes a
-    // real provider emits. See background-tasks.md M3.
+    // real provider emits. See DECISIONS #69.
     if (step.startsWith('serverturn:')) {
       const content = step.slice('serverturn:'.length);
       const turnId = mintId('t');

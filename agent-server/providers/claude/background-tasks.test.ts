@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import type { OutgoingMessage } from '../types';
 
 /**
- * Integration regression for the detached-loop M1 fix (background-tasks.md).
+ * Integration regression for the detached-loop M1 fix (DECISIONS #69).
  * The bug: when the model backgrounds a task, the SDK keeps its single-prompt
  * generator alive past the foreground `result` (to drain the task + auto-resume
  * the agent), and claude's `query()` only resolved at generator-end — blocking
@@ -105,7 +105,7 @@ describe('claude detached-loop background tasks', () => {
     // Regression for the M3 gap: when a backgrounded task finishes the SDK
     // auto-resumes the agent to write a real reply. It used to be dropped on
     // the dead foreground turnId (`if (foregroundDone) continue`). Now it must
-    // be re-emitted as a server-initiated turn. See background-tasks.md M3.
+    // be re-emitted as a server-initiated turn. See DECISIONS #69.
     const { it, release } = controllableQuery(
       [INIT, FG_REPLY, TASK_STARTED, FG_RESULT],
       [TASK_DONE, RESUME_REPLY, RESUME_RESULT],

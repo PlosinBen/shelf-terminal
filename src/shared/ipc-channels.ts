@@ -78,7 +78,7 @@ export const IPC = {
   AGENT_STORE_CREDENTIAL: 'agent:store-credential',
   AGENT_CLEAR_CREDENTIAL: 'agent:clear-credential',
   AGENT_CHECK_AUTH: 'agent:check-auth',
-  /** Read a background task's full remote output_file (invoke). See background-tasks.md. */
+  /** Read a background task's full remote output_file (invoke). See DECISIONS #69. */
   AGENT_READ_TASK_OUTPUT: 'agent:read-task-output',
 
   // PM Agent
@@ -113,6 +113,6 @@ export const IPC = {
   AGENT_CAPABILITIES: 'agent:capabilities',
   AGENT_AUTH_REQUIRED: 'agent:auth-required',
   AGENT_INIT_STATUS: 'agent:init-status',
-  /** Background task updates (turnId-less; see background-tasks.md). Carries a TaskEvent. */
+  /** Background task updates (turnId-less; see DECISIONS #69). Carries a TaskEvent. */
   AGENT_BACKGROUND_TASKS: 'agent:background-tasks',
 } as const;

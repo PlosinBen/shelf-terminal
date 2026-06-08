@@ -632,7 +632,7 @@ export function createClaudeBackend(): ServerBackend {
       // resolve query()'s Promise at the foreground-idle checkpoint and let this
       // loop keep pumping turnId-less `task_event` in the background.
       // `myQuery`/identity-guarded teardown prevent a later turn's module state
-      // from being clobbered by this one's late finally. See background-tasks.md.
+      // from being clobbered by this one's late finally. See DECISIONS #69.
       const myQuery = activeQuery;
       let foregroundDone = false;
       let releaseSendChain: () => void = () => {};
@@ -685,7 +685,7 @@ export function createClaudeBackend(): ServerBackend {
             // server-initiated turn: a fresh turnId the main side registers via
             // `turn_started`, so it renders as a normal reply + persists instead
             // of being dropped on the dead foreground turnId. (task_* were
-            // already handled+continued above.) See background-tasks.md M3.
+            // already handled+continued above.) See DECISIONS #69.
             if (foregroundDone) {
               // Route ONLY assistant/result (skip stream_event): the assistant
               // case emits a COMPLETE reply, so the prose is non-streaming and

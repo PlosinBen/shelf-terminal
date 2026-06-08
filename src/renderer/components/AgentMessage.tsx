@@ -25,7 +25,7 @@ export type AgentMsg = {
   /**
    * First message of a server-initiated turn (auto-resume prose after a
    * background task). buildTurns opens a fresh turn block for it — these turns
-   * have no `user` message to anchor one. See background-tasks.md M3.
+   * have no `user` message to anchor one. See DECISIONS #69.
    */
   startsTurn?: boolean;
 } & (
