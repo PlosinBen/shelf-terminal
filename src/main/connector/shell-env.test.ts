@@ -75,3 +75,69 @@ describe('shell-env resolution timing', () => {
     }
   });
 });
+
+describe('pickUtf8Locale (region-agnostic UTF-8 LANG injection)', () => {
+  const AVAIL = ['C', 'C.UTF-8', 'en_US.UTF-8', 'zh_TW.UTF-8', 'ja_JP.UTF-8', 'POSIX'];
+
+  it('uses the OS region when its .UTF-8 locale exists (not hardcoded)', async () => {
+    const { pickUtf8Locale } = await import('./shell-env');
+    expect(pickUtf8Locale({ hasLocale: false, appleLocale: 'zh_TW', available: AVAIL })).toBe('zh_TW.UTF-8');
+    expect(pickUtf8Locale({ hasLocale: false, appleLocale: 'ja_JP', available: AVAIL })).toBe('ja_JP.UTF-8');
+  });
+
+  it('strips @modifiers from AppleLocale (en_US@rg=… → en_US.UTF-8)', async () => {
+    const { pickUtf8Locale } = await import('./shell-env');
+    expect(pickUtf8Locale({ hasLocale: false, appleLocale: 'en_US@rg=uszzzz', available: AVAIL })).toBe('en_US.UTF-8');
+  });
+
+  it('falls back to en_US.UTF-8 when the region locale is not installed', async () => {
+    const { pickUtf8Locale } = await import('./shell-env');
+    expect(pickUtf8Locale({ hasLocale: false, appleLocale: 'de_DE', available: AVAIL })).toBe('en_US.UTF-8');
+  });
+
+  it('falls back to C.UTF-8 when neither region nor en_US exist (Linux-ish)', async () => {
+    const { pickUtf8Locale } = await import('./shell-env');
+    expect(pickUtf8Locale({ hasLocale: false, appleLocale: null, available: ['C', 'C.UTF-8', 'POSIX'] })).toBe('C.UTF-8');
+  });
+
+  it('matches verbatim across UTF-8/utf8 spelling (Linux lists utf8)', async () => {
+    const { pickUtf8Locale } = await import('./shell-env');
+    expect(pickUtf8Locale({ hasLocale: false, appleLocale: 'en_US', available: ['en_US.utf8', 'C.utf8'] })).toBe('en_US.utf8');
+  });
+
+  it('returns undefined (sets nothing) when no UTF-8 locale is available', async () => {
+    const { pickUtf8Locale } = await import('./shell-env');
+    expect(pickUtf8Locale({ hasLocale: false, appleLocale: 'zh_TW', available: ['C', 'POSIX'] })).toBeUndefined();
+  });
+
+  it('respects an existing locale: hasLocale=true → undefined (no override)', async () => {
+    const { pickUtf8Locale } = await import('./shell-env');
+    expect(pickUtf8Locale({ hasLocale: true, appleLocale: 'zh_TW', available: AVAIL })).toBeUndefined();
+  });
+
+  it('ignores malformed AppleLocale and falls back', async () => {
+    const { pickUtf8Locale } = await import('./shell-env');
+    expect(pickUtf8Locale({ hasLocale: false, appleLocale: 'garbage!!', available: AVAIL })).toBe('en_US.UTF-8');
+  });
+});
+
+describe('shell-env locale injection wiring', () => {
+  it('injects LANG when the login-shell env has none', async () => {
+    execFileSync.mockImplementation((cmd: string, args: string[]) => {
+      if (cmd === 'defaults') return 'zh_TW\n';
+      if (cmd === 'locale') return 'C\nC.UTF-8\nen_US.UTF-8\nzh_TW.UTF-8\n';
+      return 'PATH=/usr/bin\n'; // the `zsh -ilc env` call — no LANG
+    });
+    const m = await import('./shell-env');
+    const env = m.getShellEnv();
+    expect(env.LANG).toBe('zh_TW.UTF-8');
+  });
+
+  it('does NOT inject (or probe locale) when the shell env already has LANG', async () => {
+    execFileSync.mockReturnValue('PATH=/usr/bin\nLANG=en_US.UTF-8\n');
+    const m = await import('./shell-env');
+    const env = m.getShellEnv();
+    expect(env.LANG).toBe('en_US.UTF-8');
+    expect(execFileSync).toHaveBeenCalledTimes(1); // only `zsh -ilc env`, no defaults/locale probes
+  });
+});

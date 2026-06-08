@@ -31,8 +31,78 @@ function parseEnv(output: string): Record<string, string> {
   return env;
 }
 
+/**
+ * Pick a UTF-8 locale to inject as LANG, region-agnostic. PURE (testable).
+ *
+ * Why we inject at all: GUI-launched apps (and the login shell they spawn) have
+ * no LANG on macOS — Terminal.app/iTerm2 *inject* it at startup, it's not set by
+ * any shell rc. Without a UTF-8 locale the spawned shell runs in C/POSIX and
+ * mangles multi-byte (e.g. Chinese) input. Shelf is the terminal now, so it must
+ * do the terminal-emulator's job. NEVER hardcode a region — derive from the OS.
+ *
+ * @param hasLocale   env already has LANG/LC_ALL/LC_CTYPE → return undefined (respect user)
+ * @param appleLocale macOS `AppleLocale` (e.g. "zh_TW", "en_US@rg=…") or null
+ * @param available   `locale -a` lines; we return a value VERBATIM from here so
+ *                    setlocale never fails (matches macOS "UTF-8" / Linux "utf8")
+ */
+export function pickUtf8Locale(opts: {
+  hasLocale: boolean;
+  appleLocale: string | null;
+  available: string[];
+}): string | undefined {
+  if (opts.hasLocale) return undefined;
+  const norm = (s: string) => s.toLowerCase().replace(/-/g, '');
+  const find = (wanted: string) => {
+    const w = norm(wanted);
+    return opts.available.find((a) => norm(a) === w);
+  };
+  if (opts.appleLocale) {
+    const base = opts.appleLocale.split('@')[0].trim(); // strip @rg=…/@modifiers
+    if (/^[a-z]{2,3}_[A-Za-z]{2,}$/.test(base)) {
+      const m = find(`${base}.UTF-8`);
+      if (m) return m;
+    }
+  }
+  return find('en_US.UTF-8') ?? find('C.UTF-8') ?? undefined;
+}
+
+function readAppleLocale(): string | null {
+  if (process.platform !== 'darwin') return null;
+  try {
+    return execFileSync('defaults', ['read', '-g', 'AppleLocale'], {
+      encoding: 'utf-8', timeout: 2000, stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim() || null;
+  } catch { return null; }
+}
+
+function readAvailableLocales(): string[] {
+  try {
+    return execFileSync('locale', ['-a'], {
+      encoding: 'utf-8', timeout: 2000, stdio: ['ignore', 'pipe', 'ignore'],
+    }).split('\n').map((s) => s.trim()).filter(Boolean);
+  } catch { return []; }
+}
+
+/**
+ * Inject a UTF-8 LANG into the resolved env if it has no locale at all — the
+ * terminal-emulator layer that `zsh -ilc env` structurally can't capture.
+ * Mutates `env`. No-op on win32, or when the user already has LANG/LC_*.
+ */
+function ensureUtf8Locale(env: Record<string, string>): void {
+  if (process.platform === 'win32') return;
+  // Short-circuit BEFORE detection: user/Terminal-provided locale wins, and we
+  // avoid spawning `defaults`/`locale` when not needed.
+  if (env.LANG || env.LC_ALL || env.LC_CTYPE) return;
+  const locale = pickUtf8Locale({ hasLocale: false, appleLocale: readAppleLocale(), available: readAvailableLocales() });
+  if (locale) {
+    env.LANG = locale;
+    log.info('connector', `injected UTF-8 locale LANG=${locale} (shell env had none)`);
+  }
+}
+
 function applyResolved(env: Record<string, string>, dt: number, mode: string): void {
   if (env.PATH) {
+    ensureUtf8Locale(env);
     resolvedEnv = env;
     log.info('connector', `resolved shell env (${Object.keys(env).length} vars) in ${dt}ms [${mode}]`);
   } else {
