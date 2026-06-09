@@ -34,10 +34,6 @@ interface Props {
    *  asked for. We send intent so a backend fallback doesn't silently
    *  pin future turns to the fallback model. See DECISIONS #59. */
   intent: AgentPrefs | undefined;
-  /** Bridge to AgentView's persistPref + setActualX optimistic update.
-   *  Kept as a prop (not a store action) because persisting requires
-   *  projectIndex which AgentView already has lazy-bound. */
-  onConfigEdit: (key: 'model' | 'effort' | 'permissionMode', value: string) => void;
 }
 
 /**
@@ -47,12 +43,12 @@ interface Props {
  * flag) — none of which other components read. Domain reads come from
  * agentTabStore via useAgentTab.
  *
- * Outbound: emits 'agent:send' / 'agent:stop'.
- * No direct IPC calls. The renderer-local config-edit path (/model
- * etc) goes through onConfigEdit (immediate apply with arg) or
- * setLocalPicker (open the picker if no arg).
+ * Outbound: emits 'agent:send' / 'agent:stop'. Config slashes: with-arg
+ * (/model X) falls through to agent:send (provider's slash handler); no-arg
+ * (/model) opens the renderer-local picker via setLocalPicker (DecisionPanel
+ * renders it and emits the config-edit turn on select).
  */
-export function InputZone({ tabId, projectId, cwd, connection, visible, rootRef, intent, onConfigEdit }: Props) {
+export function InputZone({ tabId, projectId, cwd, connection, visible, rootRef, intent }: Props) {
   const tab = useAgentTab(tabId);
   const { settings, chatStage } = useStore();
 

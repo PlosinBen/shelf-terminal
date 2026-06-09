@@ -17,7 +17,8 @@ interface Props {
  * Cycle-on-click was easy to misfire — a stray click would silently switch
  * the model with no confirmation. Opening a dismissable picker makes a
  * misclick harmless (Esc closes it) and the selection explicit. Options come
- * from `capabilities`; the picker's onSelect runs onConfigEdit (AgentView).
+ * from `capabilities`; the picker's onSelect emits a config-edit turn
+ * (DecisionPanel → agent:send + configEdit).
  */
 export function StatusBar({ tabId, provider }: Props) {
   const tab = useAgentTab(tabId);

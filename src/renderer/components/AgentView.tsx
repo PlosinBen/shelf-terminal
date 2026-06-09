@@ -32,11 +32,12 @@ interface Props {
  *
  * 1. **Per-tab lifecycle** — sessionId allocation (lazy create +
  *    persist into projectConfig), initTab/removeTab, emit init/destroy.
- * 2. **Config-edit bridge** — `handleConfigEdit` writes intent into
- *    projectConfig.agentPrefs (needs projectIndex; sub-components don't
- *    have it) and sets optimistic `actual*` in the store. Shared by
- *    InputZone's /model slash, DecisionPanel's local picker resolve,
- *    and StatusBar's cycle buttons.
+ * 2. **Capability-driven persist** — when the provider reports
+ *    capabilities (after any config-edit turn), commit the backend's
+ *    current* into projectConfig.agentPrefs (needs projectIndex;
+ *    sub-components don't have it). The config-edit *action* itself is
+ *    emitted directly by DecisionPanel (agent:send + configEdit), not
+ *    routed through here.
  * 3. **Retry-init** — full re-arm sequence (setInitStatus + emit
  *    destroy + clear capabilities + emit init). Used by MessageList's
  *    failed-init UI.
@@ -112,10 +113,10 @@ export function AgentView({ tabId, cwd, connection, provider, projectId, visible
    * exactly what savedPrefs already has. Only real changes (slash, cycle)
    * cause persist to fire.
    *
-   * This is what makes the typing path (/model X falls through to
+   * This is what makes the config-edit path (/model X or the picker →
    * agent:send → provider slash → capabilities) eventually update
-   * projectConfig — InputZone no longer calls handleConfigEdit for
-   * with-args slashes.
+   * projectConfig — there is no renderer-side optimistic config write;
+   * persist follows the backend's capabilities event.
    */
   const capabilities = tabState?.capabilities;
   useEffect(() => {
@@ -132,22 +133,6 @@ export function AgentView({ tabId, cwd, connection, provider, projectId, visible
     }
     if (Object.keys(partial).length > 0) persistPref(partial);
   }, [capabilities?.currentModel, capabilities?.currentEffort, capabilities?.currentPermissionMode, savedPrefs?.model, savedPrefs?.effort, savedPrefs?.permissionMode, persistPref]);
-
-  /**
-   * Apply a config edit (model / effort / permissionMode). Used by the picker
-   * (status-bar click / `/model` no-arg) for all three.
-   *
-   * Routes through the provider as a structured config-edit turn — the SAME
-   * path a typed `/model X` takes — so the divider + capabilities come back
-   * identically regardless of entry point (DECISION #63). No optimistic
-   * `setActual*` / `persistPref` here: display updates when the provider's
-   * capabilities event lands, and the capability-driven effect persists intent.
-   * Keeping a renderer-local optimistic update would diverge from the typed
-   * path's round-trip behaviour — the inconsistency we set out to remove.
-   */
-  const handleConfigEdit = useCallback((key: 'model' | 'effort' | 'permissionMode', value: string) => {
-    emitAgent('agent:send', { tabId, text: '', configEdit: { key, value } });
-  }, [tabId]);
 
   const handleRetryInit = useCallback(() => {
     setInitStatusStore(tabId, 'starting');
@@ -171,7 +156,7 @@ export function AgentView({ tabId, cwd, connection, provider, projectId, visible
         visible={visible}
         onRetryInit={handleRetryInit}
       />
-      <DecisionPanel tabId={tabId} onConfigEdit={handleConfigEdit} />
+      <DecisionPanel tabId={tabId} />
       <PlanPanel tabId={tabId} />
       <BackgroundTasksPanel tabId={tabId} />
       <InputZone
@@ -182,7 +167,6 @@ export function AgentView({ tabId, cwd, connection, provider, projectId, visible
         visible={visible}
         rootRef={rootRef}
         intent={savedPrefs}
-        onConfigEdit={handleConfigEdit}
       />
       <StatusBar
         tabId={tabId}

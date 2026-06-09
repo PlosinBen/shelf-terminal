@@ -11,11 +11,6 @@ import { emitAgent } from '../../events';
 
 interface Props {
   tabId: string;
-  /** Apply a config edit (model / effort / permissionMode change).
-   *  Used by the renderer-local picker (/model) when the user selects
-   *  an option. Lives in AgentView because it persists into
-   *  projectConfig.agentPrefs. */
-  onConfigEdit: (key: 'model' | 'effort' | 'permissionMode', value: string) => void;
 }
 
 /**
@@ -26,13 +21,14 @@ interface Props {
  * 2. **pendingPicker** (provider-driven via picker_request, e.g.
  *    Claude AskUserQuestion). Resolves through IPC.
  * 3. **localPicker** (renderer-only, triggered by /model and friends).
- *    Resolves locally — onConfigEdit applies, no IPC.
+ *    On select, emits a structured config-edit turn (agent:send +
+ *    configEdit) — same path as a typed /model X (DECISION #63).
  *
  * Realistically permission + picker can't both be active (both gated
  * by canUseTool which SDK serializes), so the priority gate is a
  * defence-in-depth detail rather than a likely scenario.
  */
-export function DecisionPanel({ tabId, onConfigEdit }: Props) {
+export function DecisionPanel({ tabId }: Props) {
   const tab = useAgentTab(tabId);
   const pendingPermission = tab?.pendingPermission ?? null;
   const pendingPicker = tab?.pendingPicker ?? null;
@@ -111,7 +107,11 @@ export function DecisionPanel({ tabId, onConfigEdit }: Props) {
         initialSelected={Math.max(0, options.findIndex((o) => o.value === current))}
         cancellable
         onSelect={(value) => {
-          onConfigEdit(key, value);
+          // Route as a structured config-edit turn — same path a typed
+          // `/model X` takes, so divider + capabilities come back identically
+          // (DECISION #63). No optimistic update; display follows the
+          // provider's capabilities event.
+          emitAgent('agent:send', { tabId, text: '', configEdit: { key, value } });
           setLocalPickerStore(tabId, null);
         }}
         onCancel={() => setLocalPickerStore(tabId, null)}

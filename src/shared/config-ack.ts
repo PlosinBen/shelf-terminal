@@ -1,6 +1,7 @@
 /**
- * Canonical config-edit keys shared across the renderer (handleConfigEdit,
- * pickers) and the provider (applyConfigEdit). Note `permissionMode` — the
+ * Canonical config-edit keys shared across the renderer (DecisionPanel
+ * picker, /model slash) and the provider (applyConfigEdit). Note
+ * `permissionMode` — the
  * Claude slash uses `/permission` but the normalized key is `permissionMode`.
  */
 export type ConfigEditKey = 'model' | 'effort' | 'permissionMode';
