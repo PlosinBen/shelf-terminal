@@ -845,6 +845,29 @@ ollama 官方 [tool support blog](https://ollama.com/blog/tool-support) 列 qwen
 
 ---
 
+## 貼中文/多位元組變亂碼 = spawned shell 缺 UTF-8 locale,不是 xterm/字寬
+
+**現象**: 在 Shelf terminal 貼中文 → zsh 收到 `zsh: command not found: @\M-^\\M-^K`、xterm 選取顯示 `<009c><008b>`。直覺會懷疑 xterm Unicode/字寬 → **錯方向**。
+
+**根因**: env 有**兩層**,`getShellEnv()`(`zsh -ilc env`)只抓得到第一層:
+1. **shell config 層**(`.zshrc`/nvm/brew 設的 `PATH` 等)→ login shell 忠實吐出。
+2. **terminal-emulator 層**(`LANG`/`LC_*`)→ **由終端機程式注入**(Terminal.app 的「Set locale on startup」、iTerm2 同),**不是任何 rc 檔設的**。GUI(Dock/Finder)啟動的 app 拿到 minimal env、也沒有它。
+
+→ login shell **結構上吐不出 `LANG`**(它從來沒有可吐)。沒有 UTF-8 locale → shell 跑在 C/POSIX → 行編輯器不認多位元組 → 亂碼。**Shelf 現在就是終端機,必須比照 Terminal.app 自己注入這層**(不是 hack,是補完整)。
+
+**修法**(`shell-env.ts` `ensureUtf8Locale()` + 純函式 `pickUtf8Locale()`,在 `applyResolved` 注入): resolved env 完全沒 `LANG`/`LC_ALL`/`LC_CTYPE` 時 → 讀 `defaults read -g AppleLocale`(每台不同)→ strip `@modifier` → 候選 `<lang_REGION>.UTF-8` → **必用 `locale -a` 驗證存在**才設(亂設會噴 `setlocale: cannot set locale`)→ 不在則 fallback `en_US.UTF-8` → `C.UTF-8` → 都沒有就不設。
+
+**不要做**:
+- ❌ 寫死任何 region(如 `zh_TW.UTF-8`)—— region 要查出來,換機器自動變;真正修好 bug 的是 codeset `.UTF-8`,退到 `en_US.UTF-8` 中文一樣不亂碼。
+- ❌ 不驗證(`locale -a`)就設 LANG。
+- ❌ 覆寫使用者已設的 `LANG`/`LC_*`(尊重既有環境)。
+- ❌ 把 `defaults`/`locale -a` 放回 import-time(沿用上一條 shell-env lazy/prime 紀律)。
+- ❌ 以為這是 xterm/Rust 才能解的 Unicode 問題 —— 它純粹是 locale(這也是 `rust-shell-target` R4 動機 2 被推翻的證據)。
+
+**回歸測試**: `shell-env.test.ts` —— `pickUtf8Locale` 各分支(region 命中 / @modifier strip / fallback 鏈 / UTF-8·utf8 拼寫 / 無可用回 undefined / 已有 locale 不覆寫 / malformed)+ wiring(無 LANG 才注入、有 LANG 不 probe)。
+
+---
+
 ## Claude remote auth 偵測:`system/init` 登出也會來,要用 `accountInfo()` 看 `tokenSource`
 
 **現象**: 想在開 agent tab 時偵測「remote 從沒 `claude login` 過」,自然會想「跑一次 SDK warmup,等 `system/init` 到就算登入成功」。實測(docker 無登入容器,真 claude binary)**完全錯**:登出狀態下 `system/init` 照樣抵達 → 被誤判成已登入,AuthPane 永遠不出現。
