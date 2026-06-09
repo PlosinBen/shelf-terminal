@@ -70,9 +70,6 @@ export function bindAgentIPCGroup(): () => void {
   const offResolvePicker = onAgent('agent:resolvePicker', ({ tabId, pickerId, payload }) => {
     api.resolvePicker(tabId, pickerId, payload);
   });
-  const offCheckAuth = onAgent('agent:checkAuth', ({ tabId }) => {
-    api.checkAuth(tabId);
-  });
 
   return () => {
     offMessage();
@@ -91,6 +88,5 @@ export function bindAgentIPCGroup(): () => void {
     offDestroyEvt();
     offResolvePerm();
     offResolvePicker();
-    offCheckAuth();
   };
 }

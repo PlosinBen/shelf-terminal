@@ -168,11 +168,6 @@ describe('bindAgentIPCGroup', () => {
       expect(mock.calls.find((c) => c.method === 'resolvePicker')!.args)
         .toEqual(['t1', 'p1', { cancelled: true }]);
     });
-
-    it('forwards agent:checkAuth', () => {
-      emitAgent('agent:checkAuth', { tabId: 't1' });
-      expect(mock.calls.find((c) => c.method === 'checkAuth')!.args).toEqual(['t1']);
-    });
   });
 
   describe('cleanup', () => {

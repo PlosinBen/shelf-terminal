@@ -58,7 +58,6 @@ export interface AgentEventMap {
     pickerId: string;
     payload: { answers: Array<string | string[]> } | { cancelled: true };
   };
-  'agent:checkAuth': { tabId: string };
 }
 
 export type AgentEventName = keyof AgentEventMap;
