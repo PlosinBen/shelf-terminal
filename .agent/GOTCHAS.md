@@ -862,7 +862,7 @@ ollama 官方 [tool support blog](https://ollama.com/blog/tool-support) 列 qwen
 - ❌ 不驗證(`locale -a`)就設 LANG。
 - ❌ 覆寫使用者已設的 `LANG`/`LC_*`(尊重既有環境)。
 - ❌ 把 `defaults`/`locale -a` 放回 import-time(沿用上一條 shell-env lazy/prime 紀律)。
-- ❌ 以為這是 xterm/Rust 才能解的 Unicode 問題 —— 它純粹是 locale(這也是 `rust-shell-target` R4 動機 2 被推翻的證據)。
+- ❌ 以為這是 xterm/Rust 才能解的 Unicode 問題 —— 它純粹是 locale。
 
 **回歸測試**: `shell-env.test.ts` —— `pickUtf8Locale` 各分支(region 命中 / @modifier strip / fallback 鏈 / UTF-8·utf8 拼寫 / 無可用回 undefined / 已有 locale 不覆寫 / malformed)+ wiring(無 LANG 才注入、有 LANG 不 probe)。
 
