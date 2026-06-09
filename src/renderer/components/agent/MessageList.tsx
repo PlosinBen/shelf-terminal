@@ -3,7 +3,7 @@ import { AgentMessage } from '../AgentMessage';
 import { AgentDisplayContext } from './AgentDisplayContext';
 import { buildTurns, cancelQueuedMessage, useAgentTab } from '../../agentTabStore';
 import { useStore } from '../../store';
-import { onAgent } from '../../events';
+import { nextForceFollow } from './scroll-follow';
 
 interface Props {
   tabId: string;
@@ -54,15 +54,16 @@ export function MessageList({ tabId, visible, onRetryInit }: Props) {
     setShowJumpFab((prev) => (prev === !follow ? prev : !follow));
   }, []);
 
-  // Cross-component bus nudge: send / queue-flush want to force snap to bottom
-  // regardless of current scroll geometry.
+  // A locally-sent (or bridge-mirrored) prompt appends a user message at the
+  // tail → re-engage bottom-follow even if the user had scrolled up. Derived
+  // from our own slice (replaces the old agent:scrollToBottom bus nudge); the
+  // actual scroll is done by the auto-follow effect below once it re-renders.
+  const tailUserIdRef = useRef<string | null>(null);
   useEffect(() => {
-    return onAgent('agent:scrollToBottom', ({ tabId: id }) => {
-      if (id !== tabId) return;
-      setFollow(true);
-      bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-    });
-  }, [tabId, setFollow]);
+    const { tailUserId, force } = nextForceFollow(tailUserIdRef.current, messages);
+    tailUserIdRef.current = tailUserId;
+    if (force) setFollow(true);
+  }, [messages, setFollow]);
 
   // Track user-driven scroll inputs (UP = stop following; DOWN = catch up if
   // already at bottom, checked in rAF since scrollTop hasn't settled).

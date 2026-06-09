@@ -47,7 +47,7 @@ interface Props {
  * flag) — none of which other components read. Domain reads come from
  * agentTabStore via useAgentTab.
  *
- * Outbound: emits 'agent:send' / 'agent:stop' / 'agent:scrollToBottom'.
+ * Outbound: emits 'agent:send' / 'agent:stop'.
  * No direct IPC calls. The renderer-local config-edit path (/model
  * etc) goes through onConfigEdit (immediate apply with arg) or
  * setLocalPicker (open the picker if no arg).
@@ -224,7 +224,6 @@ export function InputZone({ tabId, projectId, cwd, connection, visible, rootRef,
       ...(next.images && next.images.length > 0 ? { images: next.images } : {}),
       ...(next.files && next.files.length > 0 ? { files: next.files } : {}),
     });
-    emitAgent('agent:scrollToBottom', { tabId });
     emitAgent('agent:send', {
       tabId,
       text: next.content,
