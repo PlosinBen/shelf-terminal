@@ -1,5 +1,7 @@
 # GOTCHAS — Non-obvious Behaviors & Past Issues
 
+> **寫法**：每條 = **現象 → 根因 → 修法**。不留試錯歷程（「試了 A 不行再試 B」是噪音）。「不要做」只列**誘惑性陷阱**（看似對、卻會把 bug 弄回來的解），寫成「別改回 X，會 Y」，不寫「我們試過 X 沒用」。
+
 ## 1. DEFAULT_SETTINGS 不能放在 types.ts
 
 **現象**: Renderer 啟動時報 `settings is not defined`，白屏。
@@ -349,7 +351,7 @@
 
 ## WSL: `wsl.exe -- sh -c` 裡的遠端 shell 變數會變空 ⚠️
 
-**現象**: WSL 部署**每次連線都重抄** ~215MB（`needsDeploy` 永遠 true，`.deployed` sentinel 失效）。diag 顯示 `readRemoteInventory` 的探測指令 `for f in node …; do [ -e $root/$f ] && echo $f; done` 在已部署的 root 上回傳 **5 個空行**（`rawOut="\n\n\n\n\n"`）——`echo $f` 印空、且 `$f` 空讓 `[ -e $root/ ]` 測到 root 目錄本身恆為 true。
+**現象**: WSL 部署**每次連線都重抄** ~215MB（`needsDeploy` 永遠 true、`.deployed` sentinel 失效）—— `readRemoteInventory` 的探測在已部署的 root 上抓不到任何檔。
 
 **原因**: 經 `execFileSync('wsl.exe', ['-d', distro, '--', 'sh', '-c', cmd])`（WSL 用的 array form）傳進去時，**遠端 sh 的 `for` loop 變數 / `D=…` 賦值變數會展開成空**（`$f`、`$p`、`$D` 全空）。ssh/docker **不受影響**——它們走 `execSync` 字串並用單引號把整段包起來（`'${sq(cmd)}'`），保護了 `$var`；WSL 的 array form 沒這層保護。**注意這只影響「remote shell 自己定義的變數」**；`"$HOME"`、`$(uname -m)` 這類仍正常（它們在遠端 sh 求值、不靠 wsl.exe 轉傳變數）。
 
@@ -368,15 +370,7 @@ case "adaptive": l.push("--thinking", "adaptive"); break;
 if (U.type !== "disabled" && U.display) l.push("--thinking-display", U.display);
 ```
 
-`thinking.display` 沒設值 → SDK **不**推 `--thinking-display` → CLI 走自己的預設邏輯。
-
-CLI 的預設邏輯**到底看什麼沒驗證**（binary 是 Bun 編譯的 native，原始碼看不到）。我們只驗證過：
-
-- 只補 `TERM=xterm-256color` 不能修
-- 進一步補 `TERM_PROGRAM`、`LC_TERMINAL`、`NODE_ENV` 等 env 沒測完就放棄這條路
-- 明確設 `display: 'summarized'` 一定能修
-
-候選 trigger 包含 env (`TERM_PROGRAM`、`NODE_ENV` 之類)、`process.stdout.isTTY`、父行程 type、`__CFBundleIdentifier`（macOS）、其他未列舉的訊號，未深究。
+`thinking.display` 沒設值 → SDK **不**推 `--thinking-display` → CLI 走自己的預設邏輯（依執行環境而異，binary 是 Bun native、看不到原始碼，未深究），dev/packaged 因此分歧。
 
 **解法**: `agent-server/providers/claude.ts` 明確設 `thinking: { type: 'adaptive', display: 'summarized' }`，繞過 CLI 的「我自己猜」分支，dev/packaged 行為一致。
 
@@ -602,12 +596,12 @@ if (event?.type === 'content_block_start' && ...) {
 2. 後續 assistant emit 用新 msgId
 3. 兩個 msgId 不同 → renderer upsert 路徑分岔 → 兩條訊息同內容
 
-**解法**（最終版，原本的「clear-on-tool_result」是錯的，見下方修正）:
+**解法**:
 
-- `content_block_start`：只在沒 entry 時 mint（idempotent）— 保留
+- `content_block_start`：只在沒 entry 時 mint（idempotent）
 - `message_start`（SDK 自己的訊號）：清空 `blockMsgIds`，這才是兩個 logical assistant message 之間的真正邊界
 
-**為什麼不是 `tool_result`**: 第一次修這 bug 時用 `tool_result` 當邊界 clear，後來發現 SDK 在 `includePartialMessages: true` 下，**有時會在 `tool_result` 之後再發一次該 turn 的 partial assistant**（觀察到，原因未追究）。tool_result clear 後 `blockMsgIds` 是空的，這個 late partial 進到 `assistant` case 會給同一段 text mint 新 msgId → 又重複了。`message_start` 是 SDK 對「下一個 assistant message 開始」的明確訊號，沒這個 race。
+**為什麼用 `message_start` 而非 `tool_result` 當邊界**: SDK 在 `includePartialMessages: true` 下，**有時會在 `tool_result` 之後再發一次該 turn 的 partial assistant**（原因未追究）。若用 tool_result clear，`blockMsgIds` 已空，這個 late partial 進 `assistant` case 會給同段 text mint 新 msgId → 又重複。`message_start` 是「下一個 assistant message 開始」的明確訊號，沒這 race。
 
 **不要改**:
 - 不要把 `content_block_start` 改回 always-overwrite — 那會復活原本的 bug
