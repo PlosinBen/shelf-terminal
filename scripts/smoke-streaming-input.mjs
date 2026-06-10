@@ -15,7 +15,7 @@ import { dirname, join } from 'node:path';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const version = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version;
-const bundle = join(root, 'dist', 'agent-server', `${version}`, 'index.mjs');
+const bundle = process.env.SMOKE_BUNDLE || join(root, 'dist', 'agent-server', `${version}`, 'index.mjs');
 const cwd = root;
 
 const proc = spawn('node', [bundle], { stdio: ['pipe', 'pipe', 'inherit'] });
