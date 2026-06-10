@@ -619,22 +619,49 @@ function wrapProcess(
   const health = new ConnectionHealthTracker(Date.now());
   let lastHealthState: ConnectionHealthState | undefined;
   let heartbeatSeq = 0;
+
+  // ACK logging — kept LEAN: a rolling in-memory window emits ONE summary line
+  // per N healthy beats (so a quiet night is ~one line / 10 min, not per-beat),
+  // while any health-state change (slow / unstable / dead / recovery — e.g. the
+  // dead→healthy blip after machine sleep) is logged IMMEDIATELY and starts a
+  // fresh window so summaries never straddle an anomaly.
+  const HB_SUMMARY_EVERY = 10; // beats — ~10 min at the default 1/min
+  let win = { sent: 0, acked: 0, rttSum: 0, rttN: 0, rttMin: Infinity, rttMax: 0, since: Date.now() };
+  const resetWin = (t: number) => { win = { sent: 0, acked: 0, rttSum: 0, rttN: 0, rttMin: Infinity, rttMax: 0, since: t }; };
+  const flushWin = (t: number, tag: string) => {
+    if (win.sent === 0) return;
+    const rtt = win.rttN
+      ? `rtt avg ${Math.round(win.rttSum / win.rttN)}ms (${win.rttMin}–${win.rttMax}ms)`
+      : 'no acks';
+    log.info('agent-remote', `heartbeat ${tag}: ${win.acked}/${win.sent} acked over ${Math.round((t - win.since) / 1000)}s, ${rtt}`);
+    resetWin(t);
+  };
+
   const emitHealth = () => {
-    const h = health.evaluate(Date.now());
+    const now = Date.now();
+    const h = health.evaluate(now);
     if (h.state !== lastHealthState) {
+      flushWin(now, `pre-${h.state}`); // close the current window before the anomaly line
+      log.info('agent-remote', `heartbeat health ${lastHealthState ?? 'init'}→${h.state}`
+        + (h.rttMs != null ? ` rtt=${h.rttMs}ms` : '')
+        + (h.lastAckAgoMs != null ? ` lastAckAgo=${Math.round(h.lastAckAgoMs / 1000)}s` : ''));
       lastHealthState = h.state;
       onHealth?.(h);
     }
   };
+
   const heartbeatTimer = setInterval(() => {
+    const now = Date.now();
     heartbeatSeq += 1;
-    health.onSent(heartbeatSeq, Date.now());
+    health.onSent(heartbeatSeq, now);
+    win.sent += 1;
     try {
       proc.stdin?.write(JSON.stringify({ type: 'ping', seq: heartbeatSeq }) + '\n');
     } catch {
       /* stdin closed — the next evaluate() will surface unstable/dead */
     }
     emitHealth(); // catches missed-beat → unstable/dead between acks
+    if (win.sent >= HB_SUMMARY_EVERY) flushWin(now, 'ok');
   }, HEARTBEAT_INTERVAL_MS);
   heartbeatTimer.unref?.(); // never keep the process (or a test) alive for the beat
 
@@ -654,7 +681,17 @@ function wrapProcess(
       }
       // Heartbeat ack — transport-level, never reaches the turn dispatcher.
       if (parsed?.type === 'pong') {
-        if (typeof parsed.seq === 'number') health.onAck(parsed.seq, Date.now());
+        const now = Date.now();
+        if (typeof parsed.seq === 'number') {
+          health.onAck(parsed.seq, now);
+          win.acked += 1;
+          const r = health.evaluate(now).rttMs;
+          if (typeof r === 'number') {
+            win.rttSum += r; win.rttN += 1;
+            win.rttMin = Math.min(win.rttMin, r);
+            win.rttMax = Math.max(win.rttMax, r);
+          }
+        }
         emitHealth();
         continue;
       }
