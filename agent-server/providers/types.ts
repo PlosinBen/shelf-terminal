@@ -245,6 +245,12 @@ export interface QueryInput {
    * outgoing messages to update persistence.
    */
   restoreContext?: PersistedContext;
+  /**
+   * App-instance id. Names this app's projected skills dir at
+   * `os.homedir()/.shelf/apps/<appId>/skills` — providers point their SDK at it
+   * (Claude `plugins`, Copilot `skillDirectories`) when it exists. See #70.
+   */
+  appId?: string;
 }
 
 /**

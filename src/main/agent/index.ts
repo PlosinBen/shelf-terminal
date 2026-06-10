@@ -5,6 +5,8 @@ import type { Connection, AgentProvider } from '@shared/types';
 import type { AgentSessionState, AgentEvent, AgentBackend, PermissionResult } from './types';
 import { createRemoteBackend } from './remote';
 import { loadSettings } from '../settings-store';
+import { projectSkillsLocal } from '../skills-projection';
+import { getAppInstanceId } from '../app-instance-id';
 
 interface SessionInstance {
   tabId: string;
@@ -129,6 +131,14 @@ async function startSession(
 
   const tag = `[agent:${tabId.slice(0, 8)}]`;
   log.info('agent', `${tag} start provider=${provider} cwd=${cwd}`);
+
+  // Project app-level skills onto this machine's ~/.shelf/apps/<appId>/skills so
+  // the (local) agent-server's provider can load them. Remote machines get the
+  // skills via deploy-time sync (L3); this local projection covers local agents.
+  // See DECISION #70 / feature §5.4.
+  if (connection.type === 'local') {
+    projectSkillsLocal(getAppInstanceId());
+  }
 
   const sessionId = opts?.sessionId as string | undefined;
   const backend = createRemoteBackend(

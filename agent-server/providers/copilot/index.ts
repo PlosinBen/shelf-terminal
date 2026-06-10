@@ -6,7 +6,7 @@ import { severityFromUtilization, pickPermissionModes, pickEffortLevels } from '
 import { parseSlashPrefix } from '@shared/slash-prefix';
 import { formatConfigAck, type ConfigEditKey } from '@shared/config-ack';
 import type { ProviderModel } from '@shared/types';
-import { stripCwd } from '../shared';
+import { stripCwd, resolveSkillsPluginRoot } from '../shared';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import {
@@ -180,6 +180,9 @@ export function createCopilotBackend(): ServerBackend {
   // "posix_spawnp failed" when the shell tries to run from a non-existent or
   // unreadable working directory.
   let currentCwd: string | null = null;
+  // App-instance id (for the projected skills dir); bound on first query, used
+  // when the session is created. Like currentCwd, first value wins.
+  let currentAppId: string | undefined;
   // External vocabulary (shared with Claude) → Copilot SDK SessionMode.
   const MODE_TO_SDK: Record<string, 'interactive' | 'plan' | 'autopilot'> = {
     default: 'interactive',
@@ -334,6 +337,11 @@ export function createCopilotBackend(): ServerBackend {
     };
     if (currentEffort) config.reasoningEffort = currentEffort;
     if (currentCwd) config.workingDirectory = currentCwd;
+    // App-level skills: point Copilot at this app's projected skills collection
+    // (the inner `skills/` dir, parent of the skill folders) when it exists. See
+    // #2.5/#70. Session-cached — new skills mid-session may need `/skills reload`.
+    const skillsRoot = resolveSkillsPluginRoot(currentAppId);
+    if (skillsRoot) config.skillDirectories = [path.join(skillsRoot, 'skills')];
 
     let session: import('@github/copilot-sdk').CopilotSession;
     if (state.cliSessionId) {
@@ -1051,6 +1059,7 @@ export function createCopilotBackend(): ServerBackend {
       // session — Copilot CLI doesn't have a rpc.cwd.set, and most users stay in one
       // project per session. The first cwd we see wins.
       if (input.cwd && !currentCwd) currentCwd = input.cwd;
+      if (input.appId && !currentAppId) currentAppId = input.appId;
 
       send({ type: 'status', state: 'streaming', model: currentModel });
 

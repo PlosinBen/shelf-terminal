@@ -37,6 +37,9 @@ interface IncomingMessage {
   allow?: boolean;
   /** For `type: 'ping'`: client heartbeat sequence, echoed back in pong for RTT. */
   seq?: number;
+  /** For `type: 'send'`: app-instance id — names this app's projected skills dir
+   *  at `~/.shelf/apps/<appId>/skills` (see DECISION #70). */
+  appId?: string;
   /** resolve_picker payload — picker id minted by provider, payload carries
    * index-aligned answers or { cancelled: true } (see PickerResolvePayload). */
   pickerId?: string;
@@ -208,6 +211,7 @@ async function handleSend(msg: IncomingMessage) {
     images: msg.images,
     sessionId: msg.sessionId,
     configEdit: msg.configEdit,
+    appId: msg.appId,
     restoreContext,
   };
 

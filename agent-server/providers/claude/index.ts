@@ -9,7 +9,7 @@ import { severityFromUtilization, pickPermissionModes, pickEffortLevels } from '
 import { parseSlashPrefix } from '@shared/slash-prefix';
 import { formatConfigAck, type ConfigEditKey } from '@shared/config-ack';
 import type { ProviderModel, NormalizedTask } from '@shared/types';
-import { stripCwd } from '../shared';
+import { stripCwd, resolveSkillsPluginRoot } from '../shared';
 import {
   rateLimitInfoToSegment,
   askUserQuestionToPrompts,
@@ -549,6 +549,13 @@ export function createClaudeBackend(): ServerBackend {
       if (resumeId) options.resume = resumeId;
       if (input.model) (options as any).model = input.model;
       if (input.effort) (options as any).effort = input.effort;
+
+      // App-level skills: load this app's projected skills as a local plugin
+      // (the only way to load skills from a custom dir — see #2.5/#70). Only
+      // when the dir exists (skills created + projected); skills appear
+      // namespaced as `shelf-skills:<name>`. Per-query so edits show next turn.
+      const skillsPluginRoot = resolveSkillsPluginRoot(input.appId);
+      if (skillsPluginRoot) (options as any).plugins = [{ type: 'local', path: skillsPluginRoot }];
 
       let promptArg: Parameters<typeof sdkQuery>[0]['prompt'] = input.prompt;
       const imageBlocks = (input.images ?? [])

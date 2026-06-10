@@ -9,6 +9,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { getShellEnv } from '../connector/shell-env';
 import { createTurnDispatcher, type PermissionHandler } from './turn-dispatcher';
+import { getAppInstanceId } from '../app-instance-id';
 import {
   detectTargetFromProbe,
   targetId,
@@ -189,6 +190,9 @@ export function createRemoteBackend(
         effort: opts?.effort,
         images: opts?.images,
         configEdit: opts?.configEdit,
+        // Names this app's projected skills dir (~/.shelf/apps/<appId>/skills)
+        // for the provider to point its SDK at. See #70.
+        appId: getAppInstanceId(),
       });
 
       yield* events;
