@@ -319,6 +319,18 @@
 - **不要「統一」改走 renderer keybinding 系統** — DevTools 是 renderer 壞掉時的逃生口，走 renderer keybinding 會「renderer 一死快捷鍵也死」。main 的 input 層不受 renderer 影響，這是刻意設計。
 - **predicate 不要加 Cmd+Alt+I** — 那是 mac 選單已綁的，加了才會在 mac 雙觸發。維持只配 F12 / Ctrl+Shift+I。
 - ⚠️ 易混淆：renderer 的 `toggleDevTools` keybinding（mod+shift+d）開的是 app 自己的 **DevToolsPanel**，不是 Chromium DevTools，同名但無關。
+
+---
+
+## 36. agent-server 每個 send 都必須以 idle 收尾，否則 renderer 整個卡死
+
+**現象**: 送圖片但沒打字（空 prompt）→ 整個對話卡住、spinner 一直轉、連 ESC 都停不了。
+
+**原因**: renderer 在送出當下就把 tab 翻成 streaming（等 idle 才解除）。agent-server `handleSend` 的早退路徑（prompt/cwd guard、`getBackend` 失敗、`sendChain.catch`）若只 emit `error` 就 `return`、**沒發 idle** → renderer 永遠等不到 idle → spinner + queue-flush latch 永久 wedge。ESC 也救不了 —— 此時 provider 根本沒有 active turn，`stop()` 的 interrupt / cancelActiveTurns 都是 no-op。
+
+**解法**: image-only 放行（有 `images` 就算空 prompt 也進 SDK）；**每個 `handleSend` 早退 / catch 一律補發 `{type:'status', state:'idle'}`**。見 DECISIONS #72。
+
+**不要改**: 別在任何 turn 終止路徑（含純錯誤回報）省略 idle —— 看似「只是回報錯誤」，實際會把 renderer 永久卡死。新增任何 early-return 都要記得收尾 idle。
 - 選單安裝與否的判斷集中在 `menu-platform.ts` `shouldInstallAppMenu`（只有 darwin true），有迴歸測試守住「非 darwin 不裝選單」。
 
 **測試陷阱**: E2E 測 before-input-event **不能用 `page.keyboard.press`** —— Playwright 走 CDP 把鍵注入 renderer DOM，**不會觸發** main 的 `before-input-event`（這正是它「renderer 死也能用」的特性）。要測必須用 `app.evaluate` 呼 `webContents.sendInputEvent`（走 native input pipeline，會觸發 before-input-event）。見 `e2e/devtools-key.spec.ts`。
