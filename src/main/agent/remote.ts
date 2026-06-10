@@ -454,16 +454,17 @@ async function deploySelfContained(connection: Connection, ops: RemoteOps, provi
   log.info('agent-remote', `Deployed agent-server to ${root} (${targetId(target)}, ${isMusl ? 'remote node' : 'own node'})`);
 
   // Best-effort: drop the pre-R1 flat orphan (`index.mjs`/`index.js` directly
-  // under agent-server/) and stale version dirs (~300MB each). Never fails the
-  // deploy (decision C); current version is preserved via the case-skip.
+  // under agent-server/). Stale VERSION dirs are NO LONGER deleted here — the
+  // old "delete every dir but the current version" loop thrashed when two apps
+  // on different versions shared a remote (each deploy nuked the other's in-use
+  // version → re-deploy → re-nuke). Version reclamation now runs in agent-server
+  // at startup via the heartbeat-lease sweep (agent-server/cleanup.ts; #70/§5.9),
+  // which never deletes a version another live agent-server is using.
   try {
     const dir = agentServerDir(ops.base);
-    ops.exec(
-      `D="${dir}"; rm -f "$D/index.mjs" "$D/index.js" 2>/dev/null; ` +
-        `for p in "$D"/*/; do [ -d "$p" ] || continue; case "$p" in */${version}/) ;; *) rm -rf "$p" 2>/dev/null;; esac; done; true`,
-    );
+    ops.exec(`rm -f "${dir}/index.mjs" "${dir}/index.js" 2>/dev/null; true`);
   } catch (err: any) {
-    log.info('agent-remote', `old-artifact cleanup skipped: ${err?.message ?? err}`);
+    log.info('agent-remote', `flat-orphan cleanup skipped: ${err?.message ?? err}`);
   }
   return result;
 }

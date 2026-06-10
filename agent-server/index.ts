@@ -1,10 +1,12 @@
 import * as readline from 'readline';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as os from 'os';
 import { createClaudeBackend } from './providers/claude';
 import { createCopilotBackend } from './providers/copilot';
 import { createFakeBackend } from './providers/fake';
 import { deleteContext, cleanupOldContexts } from './context-store';
+import { runCleanupSweep } from './cleanup';
 import { loadRestoreContextFor, newTurnId, wrapSendForContext, wrapSendForTurn } from './orchestrator';
 import type { OutgoingMessage, QueryInput, ServerBackend, PickerResolvePayload } from './providers/types';
 import type { ProviderModel } from '@shared/types';
@@ -63,20 +65,29 @@ function send(msg: OutgoingMessage) {
   process.stdout.write(JSON.stringify(msg) + '\n');
 }
 
+// Last appId seen on a `send` — names this app's projected skills dir; used to
+// keep its `.heartbeat` lease fresh + protect it from the startup sweep.
+let lastAppId: string | undefined;
+
 /**
- * Refresh the version dir's `.heartbeat` lease (the cleanup sweep keeps any
- * version whose lease is fresh — see §5.9 / planned DECISION). agent-server runs
- * from `<deployRoot>/index.mjs`; on remote `deployRoot` = `~/.shelf/agent-server/
- * <version>/`. Local runs from the app's dist bundle (not under `.shelf`) — no
- * version dir to keep alive, so skip. Best-effort: never break the pong reply.
+ * Refresh the `.heartbeat` leases the cleanup sweep reads (see #70 / §5.9):
+ * the version dir (when running under `~/.shelf/agent-server/<version>/`; local
+ * dist runs skip it) and this app's `~/.shelf/apps/<appId>/` dir. Best-effort —
+ * never break the pong reply.
  */
-function touchVersionHeartbeat(): void {
+function touchHeartbeats(): void {
   try {
-    if (!/\.shelf\/agent-server\//.test(__dirname)) return;
-    fs.writeFileSync(path.join(__dirname, '.heartbeat'), '');
-  } catch {
-    /* lease is best-effort */
-  }
+    if (/\.shelf\/agent-server\//.test(__dirname)) {
+      fs.writeFileSync(path.join(__dirname, '.heartbeat'), '');
+    }
+  } catch { /* version lease best-effort */ }
+  try {
+    if (lastAppId) {
+      const appDir = path.join(os.homedir(), '.shelf', 'apps', lastAppId);
+      fs.mkdirSync(appDir, { recursive: true });
+      fs.writeFileSync(path.join(appDir, '.heartbeat'), '');
+    }
+  } catch { /* app lease best-effort */ }
 }
 
 const backends = new Map<Provider, ServerBackend>();
@@ -159,6 +170,7 @@ function getBackend(provider: Provider): ServerBackend {
 }
 
 async function handleSend(msg: IncomingMessage) {
+  if (msg.appId) lastAppId = msg.appId;
   const turnId = msg.turnId ?? newTurnId();
   const turnSend = wrapSendForTurn(turnId, send);
 
@@ -262,7 +274,7 @@ rl.on('line', (line) => {
       // Heartbeat: echo `seq` (client measures RTT on its own clock) and refresh
       // the version-dir liveness lease the cleanup sweep reads. See §5.9.
       send({ type: 'pong', seq: msg.seq });
-      touchVersionHeartbeat();
+      touchHeartbeats();
       break;
     case 'resolve_permission':
       if (activeBackend && msg.toolUseId !== undefined) {
@@ -348,4 +360,9 @@ rl.on('close', () => {
 });
 
 cleanupOldContexts();
+// Reclaim stale ~/.shelf dirs via heartbeat-lease (replaces the old eager
+// "delete every other version" cleanup that thrashed on shared remotes — see
+// #70 / §5.9). currentVersion = our own deploy dir name. lastAppId is unknown
+// until the first send, so the apps sweep keeps any fresh-lease dir this pass.
+runCleanupSweep(path.basename(__dirname), lastAppId);
 send({ type: 'ready' });
