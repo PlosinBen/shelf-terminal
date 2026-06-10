@@ -198,6 +198,7 @@ async function handleSend(msg: IncomingMessage) {
     backend = getBackend(provider);
   } catch (err: any) {
     turnSend({ type: 'error', error: err.message });
+    turnSend({ type: 'status', state: 'idle' });
     return;
   }
   activeBackend = backend;
@@ -271,8 +272,11 @@ rl.on('line', (line) => {
       sendChain = sendChain
         .then(() => handleSend(msg))
         .catch((err) => {
+          // A thrown handleSend must STILL terminate the turn with idle, or the
+          // renderer (already streaming) wedges forever. See the image-only bug.
           const tid = msg.turnId ?? '';
           send({ type: 'error', error: err?.message ?? String(err), turnId: tid } as any);
+          send({ type: 'status', state: 'idle', turnId: tid } as any);
         });
       break;
     case 'stop':
