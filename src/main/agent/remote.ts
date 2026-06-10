@@ -621,11 +621,12 @@ function wrapProcess(
   let heartbeatSeq = 0;
 
   // ACK logging — kept LEAN: a rolling in-memory window emits ONE summary line
-  // per N healthy beats (so a quiet night is ~one line / 10 min, not per-beat),
-  // while any health-state change (slow / unstable / dead / recovery — e.g. the
-  // dead→healthy blip after machine sleep) is logged IMMEDIATELY and starts a
-  // fresh window so summaries never straddle an anomaly.
-  const HB_SUMMARY_EVERY = 10; // beats — ~10 min at the default 1/min
+  // at most once per HB_SUMMARY_MS of healthy beats (so a quiet 8–10h overnight
+  // is a handful of lines, not per-beat), while any health-state change (slow /
+  // unstable / dead / recovery — e.g. the dead→healthy blip after machine sleep)
+  // is logged IMMEDIATELY and starts a fresh window so summaries never straddle
+  // an anomaly. Time-driven (not beat-count) so it's robust to the beat interval.
+  const HB_SUMMARY_MS = Number(process.env.SHELF_HEARTBEAT_SUMMARY_MS) || 3_600_000; // 60 min
   let win = { sent: 0, acked: 0, rttSum: 0, rttN: 0, rttMin: Infinity, rttMax: 0, since: Date.now() };
   const resetWin = (t: number) => { win = { sent: 0, acked: 0, rttSum: 0, rttN: 0, rttMin: Infinity, rttMax: 0, since: t }; };
   const flushWin = (t: number, tag: string) => {
@@ -660,8 +661,8 @@ function wrapProcess(
     } catch {
       /* stdin closed — the next evaluate() will surface unstable/dead */
     }
-    emitHealth(); // catches missed-beat → unstable/dead between acks
-    if (win.sent >= HB_SUMMARY_EVERY) flushWin(now, 'ok');
+    emitHealth(); // catches missed-beat → unstable/dead between acks (flushes the window on change)
+    if (now - win.since >= HB_SUMMARY_MS) flushWin(now, 'ok');
   }, HEARTBEAT_INTERVAL_MS);
   heartbeatTimer.unref?.(); // never keep the process (or a test) alive for the beat
 
