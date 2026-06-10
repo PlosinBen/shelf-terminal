@@ -1,6 +1,7 @@
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
+import crypto from 'crypto';
 import { app } from 'electron';
 import { log } from '@shared/logger';
 
@@ -17,8 +18,46 @@ import { log } from '@shared/logger';
  * the only truth, so the projection is disposable.
  */
 
-function skillsSourceRoot(): string {
+export function skillsSourceRoot(): string {
   return path.join(app.getPath('userData'), 'skills');
+}
+
+/** All files under `root`, as POSIX-relative paths (sorted) — ready to mirror
+ *  onto a remote. POSIX separators so remote paths are correct from any host. */
+export function listSkillFilesRel(root: string): string[] {
+  const out: string[] = [];
+  const walk = (dir: string, rel: string) => {
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      const childRel = rel ? `${rel}/${e.name}` : e.name;
+      if (e.isDirectory()) walk(path.join(dir, e.name), childRel);
+      else if (e.isFile()) out.push(childRel);
+    }
+  };
+  walk(root, '');
+  return out.sort();
+}
+
+/** Content fingerprint of the skills tree (sorted relpath + bytes). Drives the
+ *  remote `.synced` incremental gate — re-sync only when this changes. */
+export function hashSkillsTree(root: string): string {
+  const h = crypto.createHash('sha256');
+  for (const rel of listSkillFilesRel(root)) {
+    h.update(rel);
+    h.update('\0');
+    try {
+      h.update(fs.readFileSync(path.join(root, rel)));
+    } catch {
+      /* unreadable file — relpath alone still perturbs the hash */
+    }
+    h.update('\0');
+  }
+  return h.digest('hex');
 }
 
 /** The local consumption path (Claude plugin root) for this app instance. */

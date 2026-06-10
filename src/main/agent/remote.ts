@@ -10,6 +10,7 @@ import * as fs from 'fs';
 import { getShellEnv } from '../connector/shell-env';
 import { createTurnDispatcher, type PermissionHandler } from './turn-dispatcher';
 import { getAppInstanceId } from '../app-instance-id';
+import { skillsSourceRoot, listSkillFilesRel, hashSkillsTree } from '../skills-projection';
 import {
   detectTargetFromProbe,
   targetId,
@@ -469,27 +470,55 @@ async function deploySelfContained(connection: Connection, ops: RemoteOps, provi
   return result;
 }
 
+/**
+ * Mirror the app-level skills source onto the remote at
+ * `<base>/.shelf/apps/<appId>/skills` (the path the remote agent-server
+ * self-resolves via os.homedir() — see #70/§5.7). Whole-tree replace, gated by a
+ * content-hash `.synced` sentinel so unchanged skills skip the transfer. Small
+ * text files copied one-by-one (a few per skill); best-effort — never fails the
+ * deploy. Re-runs each time a remote agent tab opens (deploy is per-backend), so
+ * reopening the tab picks up skill edits.
+ */
+function syncSkillsToRemote(ops: RemoteOps, appId: string): void {
+  try {
+    const src = skillsSourceRoot();
+    if (!fs.existsSync(src)) return;
+    const files = listSkillFilesRel(src);
+    if (files.length === 0) return;
+    const hash = hashSkillsTree(src);
+    const target = `${ops.base}/.shelf/apps/${appId}/skills`;
+    const synced = ops.exec(`cat "${target}/.synced" 2>/dev/null || true`).trim();
+    if (synced === hash) return; // up to date
+
+    const dirs = [...new Set(files.map((f) => path.posix.dirname(f)).filter((d) => d && d !== '.'))];
+    const mkdirs = dirs.length ? ` && cd "${target}" && mkdir -p ${dirs.map((d) => `"${d}"`).join(' ')}` : '';
+    ops.exec(`rm -rf "${target}"; mkdir -p "${target}"${mkdirs}`);
+    for (const f of files) ops.copyIn(path.join(src, f), `${target}/${f}`);
+    ops.exec(`printf %s '${hash}' > "${target}/.synced"`);
+    log.info('agent-remote', `Synced ${files.length} skill file(s) to ${target}`);
+  } catch (err: any) {
+    log.info('agent-remote', `skills sync skipped: ${err?.message ?? err}`);
+  }
+}
+
 async function deployAgentServer(connection: Connection, provider: AgentProvider): Promise<DeployResult> {
   // local: use the host's own node (no version-drift problem on your own box).
+  // Local skills go through projectSkillsLocal (agent/index.ts), not here.
   if (connection.type === 'local') {
     return { nodeBin: 'node', indexPath: getLocalBundlePath() };
   }
   const providerBin: ProviderBin = provider === 'copilot' ? 'copilot' : 'claude';
-  // ssh / docker: ship our own runtime + provider binary.
-  if (connection.type === 'ssh') {
-    return deploySelfContained(connection, sshOps(connection), providerBin);
-  }
-  if (connection.type === 'docker') {
-    return deploySelfContained(connection, dockerOps(connection), providerBin);
-  }
-  if (connection.type === 'wsl') {
-    // Self-contained, like ssh/docker: ship our own node (glibc) + provider
-    // binary into the distro via wslOps. (Pre-R1 WSL ran on the distro's own
-    // node against the Windows bundle via /mnt and shipped NO provider binary,
-    // so agents couldn't find their CLI — that legacy path is gone.)
-    return deploySelfContained(connection, wslOps(connection), providerBin);
-  }
-  throw new Error(`Unsupported connection type for deploy: ${(connection as any).type}`);
+  // ssh / docker / wsl: ship our own runtime + provider binary, then mirror the
+  // app-level skills onto the remote (#70/§5.7) so the remote agent loads them.
+  let ops: RemoteOps;
+  if (connection.type === 'ssh') ops = sshOps(connection);
+  else if (connection.type === 'docker') ops = dockerOps(connection);
+  else if (connection.type === 'wsl') ops = wslOps(connection);
+  else throw new Error(`Unsupported connection type for deploy: ${(connection as any).type}`);
+
+  const result = await deploySelfContained(connection, ops, providerBin);
+  syncSkillsToRemote(ops, getAppInstanceId());
+  return result;
 }
 
 async function spawnAgentServer(

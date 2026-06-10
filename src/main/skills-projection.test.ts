@@ -14,7 +14,7 @@ vi.mock('os', async (importOriginal) => {
   return { ...actual, default: { ...actual, homedir: () => homeDir }, homedir: () => homeDir };
 });
 
-const { projectSkillsLocal, localSkillsTarget } = await import('./skills-projection');
+const { projectSkillsLocal, localSkillsTarget, listSkillFilesRel, hashSkillsTree, skillsSourceRoot } = await import('./skills-projection');
 const { getAppInstanceId } = await import('./app-instance-id');
 
 beforeEach(() => {
@@ -68,5 +68,25 @@ describe('projectSkillsLocal', () => {
   it('no-ops when there is no source', () => {
     expect(() => projectSkillsLocal('app-x')).not.toThrow();
     expect(fs.existsSync(localSkillsTarget('app-x'))).toBe(false);
+  });
+});
+
+describe('listSkillFilesRel + hashSkillsTree', () => {
+  it('lists POSIX-relative file paths, sorted', () => {
+    seedSourceSkill('beta', 'B');
+    seedSourceSkill('alpha', 'A');
+    const rels = listSkillFilesRel(skillsSourceRoot());
+    expect(rels).toContain('skills/alpha/SKILL.md');
+    expect(rels).toContain('skills/beta/SKILL.md');
+    expect(rels).toContain('.claude-plugin/plugin.json');
+    expect([...rels]).toEqual([...rels].sort()); // sorted
+  });
+
+  it('hash is stable across calls and changes with content', () => {
+    seedSourceSkill('a', 'A');
+    const h1 = hashSkillsTree(skillsSourceRoot());
+    expect(hashSkillsTree(skillsSourceRoot())).toBe(h1); // stable
+    seedSourceSkill('a', 'A-edited');
+    expect(hashSkillsTree(skillsSourceRoot())).not.toBe(h1); // content change perturbs
   });
 });
