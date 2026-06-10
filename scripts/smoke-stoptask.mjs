@@ -1,13 +1,13 @@
 /**
- * Attempt to verify stop-task end-to-end: start a background task, send
- * stop_task, confirm a 'stopped' task_notification flows back.
+ * Verify stop-task end-to-end: start a background task, send stop_task, confirm
+ * a 'stopped' task_notification flows back as a task_event. Drives the bundled
+ * agent-server against real claude. ✅ Confirmed working.
  *
- * ⚠️ Often can't get a stoppable card: the SDK's run_in_background is
- * NONDETERMINISTIC about emitting a `task_started` system message — frequently
- * it backgrounds via a "Command running in background with ID: …" tool-result
- * ONLY, with no task_started → no task_event → nothing surfaces in the panel to
- * stop. When the SDK DOES emit task_started, this confirms the round-trip. The
- * provider→SDK wiring is covered deterministically in background-tasks.test.ts.
+ * NOTE: `task_started` can land just AFTER the foreground turn's idle (the SDK
+ * emits it around the run_in_background tool-result), so this WAITS for a
+ * task_event after the turn rather than checking synchronously — checking too
+ * early was a false "no task" earlier. The SDK reliably emits task_started for
+ * run_in_background:true (confirmed raw in scripts/spike-bg-notify.ts).
  *
  * Run (after `node agent-server/build.mjs`): node scripts/smoke-stoptask.mjs
  */
@@ -65,6 +65,9 @@ async function main() {
     prompt: 'Run this shell command IN THE BACKGROUND (run_in_background): `sleep 15 && echo BG_DONE`. Immediately reply "started" without waiting for it.' });
   await waitFor((m) => m.type === 'status' && m.state === 'idle' && m.turnId === 't-bg', 60000);
 
+  // task_started can land just AFTER the foreground idle (then routeTask emits an
+  // individual task_event), so wait for a task_event rather than checking now.
+  await waitFor((m) => m.type === 'task_event' && (m.task?.id || m.tasks?.length), 10000);
   const taskId = anyTaskId();
   console.log(`\n${taskId ? '✅ got a background task id: ' + taskId : '💥 no task id seen'}`);
   if (!taskId) { proc.kill(); process.exit(1); }
