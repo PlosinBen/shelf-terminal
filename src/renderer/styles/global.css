@@ -3421,6 +3421,22 @@ button {
 }
 .agent-task-dismiss:hover { color: var(--text-primary); }
 
+/* Stop a running background task. Right-aligned (margin-left:auto) so it leads
+   the stop+dismiss group; hover hints at the destructive action via the
+   project-status "dead" colour. */
+.agent-task-stop {
+  margin-left: auto;
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 10px;
+  line-height: 1;
+  padding: 0 2px;
+}
+.agent-task-stop:hover { color: var(--status-dead, #f38ba8); }
+
 .agent-task-output {
   margin: 2px 0 6px 18px;
   padding: 6px 8px;

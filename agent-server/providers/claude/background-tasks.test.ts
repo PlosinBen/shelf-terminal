@@ -185,6 +185,29 @@ describe('claude detached-loop background tasks', () => {
     expect(sent.filter((m) => m.type === 'status' && (m as any).state === 'idle')).toHaveLength(1);
   });
 
+  it('stopTask forwards the taskId to the live session query (provider→SDK wiring)', async () => {
+    // The SDK's run_in_background is nondeterministic about whether it emits a
+    // task_started (so a real backgrounded task can't be reliably surfaced in a
+    // smoke), so verify the wiring we own deterministically: stopTask reaches
+    // the persistent query's SDK stopTask with the right id.
+    const { it } = controllableQuery([INIT, FG_REPLY, FG_RESULT], []);
+    const stopTaskMock = vi.fn(async () => {});
+    it.stopTask = stopTaskMock;
+    sdkQueryMock.mockImplementation(() => it);
+
+    const backend = createClaudeBackend();
+    disposer = () => backend.dispose();
+    await backend.query({ prompt: 'go', cwd: '/tmp' } as any, () => {}); // opens the persistent session
+    await backend.stopTask!('task-123');
+    expect(stopTaskMock).toHaveBeenCalledWith('task-123');
+  });
+
+  it('stopTask is a no-op (no throw) when there is no live session', async () => {
+    const backend = createClaudeBackend();
+    disposer = () => backend.dispose();
+    await expect(backend.stopTask!('whatever')).resolves.toBeUndefined();
+  });
+
   it('readTaskOutput returns a friendly note (not a throw) for a task with no output file', async () => {
     // Regression: subagent / monitor / workflow tasks (and tasks that settled via
     // task_updated without a terminal task_notification) never record an

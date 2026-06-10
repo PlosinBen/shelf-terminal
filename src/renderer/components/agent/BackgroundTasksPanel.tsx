@@ -75,6 +75,15 @@ export function BackgroundTasksPanel({ tabId }: Props) {
                   <span className="agent-task-label" title={t.label}>{t.label}</span>
                   {t.summary && <span className="agent-task-summary" title={t.summary}>{t.summary}</span>}
                   {t.error && <span className="agent-task-error" title={t.error}>{t.error}</span>}
+                  {!t.done && (
+                    <button
+                      className="agent-task-stop"
+                      title="Stop task"
+                      onClick={(e) => { e.stopPropagation(); void window.shelfApi.agent.stopTask(tabId, t.id); }}
+                    >
+                      &#9632;
+                    </button>
+                  )}
                   <button
                     className="agent-task-dismiss"
                     title="Dismiss"

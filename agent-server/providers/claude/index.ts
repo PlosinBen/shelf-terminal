@@ -940,6 +940,18 @@ export function createClaudeBackend(): ServerBackend {
       lastSessionId = null;
     },
 
+    async stopTask(taskId: string) {
+      // Streaming-mode control method; the SDK emits a task_notification
+      // (status 'stopped') in response, which the consumer routes to a
+      // task_event so the card updates. No live session → nothing to stop.
+      if (!session) return;
+      try {
+        await session.query.stopTask(taskId);
+      } catch (err: any) {
+        console.error('[claude] stopTask failed', { taskId, message: err?.message ?? err });
+      }
+    },
+
     async readTaskOutput(taskId: string): Promise<string> {
       const file = taskOutputFiles.get(taskId);
       // Not every settled task has a separate output file — only shell-type

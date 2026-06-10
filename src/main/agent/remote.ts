@@ -205,6 +205,14 @@ export function createRemoteBackend(
       }
     },
 
+    async stopTask(taskId: string) {
+      // Fire-and-forget: agent-server forwards to the provider; the resulting
+      // 'stopped' task_notification flows back over the task_event lane.
+      if (remoteProc) {
+        remoteProc.sendLine({ type: 'stop_task', taskId });
+      }
+    },
+
     dispose() {
       if (remoteProc) {
         remoteProc.kill();

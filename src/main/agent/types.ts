@@ -175,6 +175,9 @@ export interface AgentBackend {
    * touch the remote fs. Rejects if the task is unknown or the file is gone.
    */
   readTaskOutput?(taskId: string): Promise<string>;
+  /** Stop a running background task (fire-and-forget; the 'stopped'
+   *  task_notification flows back via the task_event lane). See DECISIONS #72. */
+  stopTask?(taskId: string): Promise<void>;
   /**
    * Resolve a pending picker_request by forwarding the user's answers (or
    * cancellation) to the remote agent-server. Provider tracks the pending

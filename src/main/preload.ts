@@ -188,6 +188,8 @@ contextBridge.exposeInMainWorld('shelfApi', {
       ipcRenderer.invoke(IPC.AGENT_CHECK_AUTH, { tabId }),
     fetchTaskOutput: (tabId: string, taskId: string) =>
       ipcRenderer.invoke(IPC.AGENT_READ_TASK_OUTPUT, { tabId, taskId }),
+    stopTask: (tabId: string, taskId: string) =>
+      ipcRenderer.invoke(IPC.AGENT_STOP_TASK, { tabId, taskId }),
     onMessage: (callback: (tabId: string, msg: unknown) => void) => {
       const listener = (_event: Electron.IpcRendererEvent, tabId: string, msg: unknown) => callback(tabId, msg);
       ipcRenderer.on(IPC.AGENT_MESSAGE, listener);

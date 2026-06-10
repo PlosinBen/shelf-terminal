@@ -87,6 +87,9 @@ export const IPC = {
   AGENT_CHECK_AUTH: 'agent:check-auth',
   /** Read a background task's full remote output_file (invoke). See DECISIONS #69. */
   AGENT_READ_TASK_OUTPUT: 'agent:read-task-output',
+  /** Stop a running background task (fire-and-forget; SDK emits task_notification
+   *  'stopped' which flows back via AGENT_BACKGROUND_TASKS). See DECISIONS #72. */
+  AGENT_STOP_TASK: 'agent:stop-task',
 
   // PM Agent
   PM_SEND: 'pm:send',

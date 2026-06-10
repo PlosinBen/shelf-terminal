@@ -111,6 +111,11 @@ export function initAgentManager(windowGetter: () => BrowserWindow | null): void
     return session.backend.readTaskOutput(payload.taskId);
   });
 
+  ipcMain.handle(IPC.AGENT_STOP_TASK, async (_e, payload) => {
+    const session = sessions.get(payload.tabId);
+    await session?.backend.stopTask?.(payload.taskId);
+  });
+
 }
 
 function send(channel: string, tabId: string, ...args: unknown[]) {

@@ -360,6 +360,13 @@ export interface ServerBackend {
    */
   readTaskOutput?(taskId: string): Promise<string>;
   /**
+   * Stop a running background task. Fire-and-forget — the provider asks its SDK
+   * to stop the task; the resulting `task_notification` (status 'stopped') flows
+   * back through the normal `task_event` lane to update the card. No-op for
+   * providers without a stop-task API. See DECISIONS #72.
+   */
+  stopTask?(taskId: string): Promise<void>;
+  /**
    * Drop any in-memory session state tied to `sessionId`. Called by the
    * orchestrator when persisted context is deleted (IPC `clear_context`),
    * so the provider doesn't keep using a `lastSdkSessionId` that no longer
