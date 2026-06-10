@@ -47,7 +47,11 @@ const FG_REPLY = { type: 'assistant', parent_tool_use_id: null, message: { conte
 const TASK_STARTED = { type: 'system', subtype: 'task_started', task_id: 't1', description: 'Sleep 30', task_type: 'local_bash', tool_use_id: 'toolu_x' };
 const FG_RESULT = { type: 'result', subtype: 'success', session_id: 's1' };
 const TASK_DONE = { type: 'system', subtype: 'task_notification', task_id: 't1', status: 'completed', summary: 'done (exit 0)', output_file: '/tmp/t1.output' };
-// The SDK auto-resume turn after the task settles — its result carries origin.kind.
+// The SDK auto-resume turn after the task settles. Real wire order (Phase 0
+// spike): task_notification → init → assistant → result(origin task-notification).
+// The init is what opens the server turn (armed by the preceding notification);
+// the result's origin closes it. See turn-router.ts.
+const RESUME_INIT = { type: 'system', subtype: 'init', session_id: 's1' };
 const RESUME_REPLY = { type: 'assistant', parent_tool_use_id: null, message: { content: [{ type: 'text', text: 'The sleep finished — output: done' }] } };
 const RESUME_RESULT = { type: 'result', subtype: 'success', origin: { kind: 'task-notification' }, session_id: 's1' };
 
@@ -108,7 +112,7 @@ describe('claude detached-loop background tasks', () => {
     // be re-emitted as a server-initiated turn. See DECISIONS #69.
     const { it, release } = controllableQuery(
       [INIT, FG_REPLY, TASK_STARTED, FG_RESULT],
-      [TASK_DONE, RESUME_REPLY, RESUME_RESULT],
+      [TASK_DONE, RESUME_INIT, RESUME_REPLY, RESUME_RESULT],
     );
     sdkQueryMock.mockImplementation(() => it);
 

@@ -1,5 +1,6 @@
 import { query as sdkQuery } from '@anthropic-ai/claude-agent-sdk';
-import type { Query, Options, SDKMessage, CanUseTool } from '@anthropic-ai/claude-agent-sdk';
+import type { Query, Options, SDKMessage, SDKUserMessage, CanUseTool } from '@anthropic-ai/claude-agent-sdk';
+import { createRouterState, notePush, routeMessage } from './turn-router';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'fs';
 import { readFile } from 'fs/promises';
@@ -167,40 +168,78 @@ const CLAUDE_QUERY_DEFAULTS = {
 
 
 export function createClaudeBackend(): ServerBackend {
-  let activeQuery: Query | null = null;
-  let abortController: AbortController | null = null;
   const cache: { models?: any[]; commands?: any[] } = {};
   let initPromise: Promise<AuthOutcome> | null = null;
   let lastSessionId: string | null = null;
 
   const pendingPermissions = new Map<string, (result: PermissionResult) => void>();
-  let currentSend: SendFn | null = null;
 
-  // Claude is per-call by SDK design (model / effort / permissionMode flow
-  // in via QueryInput each turn). These closure values exist to let the
-  // /model /effort /permission slash handlers broadcast updated capabilities
-  // immediately — without them, the renderer's status bar wouldn't know the
-  // new pref took effect until the next SDK init event reported it.
-  // gatherCapabilities() seeds them from the renderer's intent on reconnect.
+  // Renderer-facing pref bookkeeping (Architecture B applies them via SDK
+  // control methods — see setModel/setEffort/setPermissionMode). Seeded from
+  // the renderer's intent on reconnect via gatherCapabilities().
   let currentModel: string | undefined;
   let currentEffort: string | undefined;
   let currentPermissionMode: string | undefined;
 
   // Non-cancellable critical-section flag (see Copilot's matching helper for
-  // rationale). Wraps Claude's `/compact` SDK turn so stop() silently no-ops
-  // mid-compaction — interrupting half-way would leave the SDK session in an
+  // rationale). Wraps Claude's `/compact` turn so stop() silently no-ops
+  // mid-compaction — interrupting half-way would leave the session in an
   // indeterminate compacted/un-compacted state.
   let stoppable = true;
 
   // Pending picker promises keyed by picker id (= AskUserQuestion toolUseID).
-  // resolvePicker drains the entry with renderer's PickerResolvePayload —
-  // either index-aligned answers or { cancelled: true }.
   const pendingPickers = new Map<string, (payload: PickerResolvePayload) => void>();
 
-  // Set per-query() based on permissionMode === 'bypassPermissions'. Read
-  // inside canUseTool so bypass short-circuits non-AskUserQuestion tools
-  // *without* skipping the AskUserQuestion intercept itself.
+  // Set when permissionMode === 'bypassPermissions'. Read inside canUseTool so
+  // bypass short-circuits non-AskUserQuestion tools without skipping the
+  // AskUserQuestion intercept.
   let currentBypassMode = false;
+
+  // ── Persistent streaming-input session (Architecture B) ──────────────────
+  // ONE sdkQuery for the whole tab. A single consumer loop drains its
+  // generator and the pure turn-router (turn-router.ts) attributes each
+  // message to a foreground turn or a server (auto-resume) turn. Replaces the
+  // old per-turn sdkQuery + detached-drain. See DECISIONS / streaming-input.
+  interface ForegroundTurn {
+    /** Turn-bound send (orchestrator already wrapped it with turnId+context). */
+    send: SendFn;
+    /** Idle-deduped wrapper over `send` (multiple idle emit sites per turn). */
+    turnSend: SendFn;
+    blockMsgIds: BlockMsgIdState;
+    cwd: string;
+    pendingCompactMsgId: string | null;
+    /** Resolves this turn's `query()` promise (consumer calls on foreground result). */
+    resolve: () => void;
+  }
+  interface ServerTurn {
+    turnId: string;
+    /** Base session send pre-stamped with `turnId` + `startsTurn` on first message. */
+    send: SendFn;
+    blockMsgIds: BlockMsgIdState;
+    started: boolean;
+  }
+  interface Session {
+    query: Query;
+    abort: AbortController;
+    pushUser: (content: SDKUserMessage['message']['content']) => void;
+    closeInput: () => void;
+  }
+  let session: Session | null = null;
+  let creatingSession: Promise<Session> | null = null;
+  let sessionCwd = '';
+  const pendingPush: ForegroundTurn[] = [];
+  let activeForeground: ForegroundTurn | null = null;
+  let activeServer: ServerTurn | null = null;
+  const router = createRouterState();
+  // Most-recent foreground turn's send — base for server turns (same session →
+  // context-patch interception is correct) and out-of-turn capabilities emits.
+  let lastTurnSend: SendFn | null = null;
+
+  /** The send fn to route an inbound permission/picker request to: the turn
+   *  the SDK is currently working (server turn takes precedence during an
+   *  auto-resume; else the active foreground turn; else most-recent). */
+  const activeSend = (): SendFn | null =>
+    (activeServer?.send ?? activeForeground?.turnSend ?? lastTurnSend);
 
   const canUseTool: CanUseTool = (async (toolName, input, canUseOpts) => {
     const toolUseId = (canUseOpts as any)?.toolUseID ?? `sdk-${Date.now()}`;
@@ -227,7 +266,7 @@ export function createClaudeBackend(): ServerBackend {
       return { behavior: 'allow', updatedInput: input };
     }
 
-    currentSend?.({ type: 'permission_request', toolUseId, toolName, input });
+    activeSend()?.({ type: 'permission_request', toolUseId, toolName, input });
     const result = await new Promise<PermissionResult>((resolve) => {
       pendingPermissions.set(toolUseId, resolve);
     });
@@ -272,7 +311,7 @@ export function createClaudeBackend(): ServerBackend {
       console.warn('[picker] preview content received, not rendered yet', sample);
     }
 
-    currentSend?.({ type: 'picker_request', id: toolUseId, prompts: mapped.prompts });
+    activeSend()?.({ type: 'picker_request', id: toolUseId, prompts: mapped.prompts });
 
     const resolved = await new Promise<PickerResolvePayload>((resolve) => {
       pendingPickers.set(toolUseId, resolve);
@@ -449,6 +488,230 @@ export function createClaudeBackend(): ServerBackend {
     send({ type: 'status', state: 'idle' });
   }
 
+  // ── Persistent-session machinery ────────────────────────────────────────
+
+  /** Create the single long-lived streaming-input query + its consumer loop.
+   *  Options snapshot the CURRENT prefs; mid-session changes go via control
+   *  methods (model/permission) or a rebuild (effort). */
+  function createSession(cwd: string, resume: string | undefined, appId: string | undefined): Session {
+    const queue: SDKUserMessage[] = [];
+    let wake: (() => void) | null = null;
+    let closed = false;
+    async function* inputStream(): AsyncGenerator<SDKUserMessage> {
+      while (!closed) {
+        if (queue.length) { yield queue.shift()!; continue; }
+        await new Promise<void>((r) => { wake = r; });
+      }
+    }
+    const abort = new AbortController();
+    const options: Options = {
+      ...CLAUDE_QUERY_DEFAULTS,
+      abortController: abort,
+      cwd,
+      permissionMode: currentBypassMode ? 'default' : ((currentPermissionMode as Options['permissionMode']) ?? 'default'),
+      canUseTool,
+    };
+    const resumeId = resume ?? lastSessionId ?? undefined;
+    if (resumeId) options.resume = resumeId;
+    if (currentModel) (options as any).model = currentModel;
+    if (currentEffort) (options as any).effort = currentEffort;
+    const skillsPluginRoot = resolveSkillsPluginRoot(appId);
+    if (skillsPluginRoot) (options as any).plugins = [{ type: 'local', path: skillsPluginRoot }];
+
+    const q = sdkQuery({ prompt: inputStream(), options }) as Query;
+    sessionCwd = cwd;
+    const s: Session = {
+      query: q,
+      abort,
+      pushUser: (content) => {
+        queue.push({ type: 'user', message: { role: 'user', content }, parent_tool_use_id: null });
+        wake?.(); wake = null;
+      },
+      closeInput: () => { closed = true; wake?.(); wake = null; },
+    };
+    void consume(q);
+    return s;
+  }
+
+  function ensureSession(cwd: string, resume: string | undefined, appId: string | undefined): Session {
+    if (!session) session = createSession(cwd, resume, appId);
+    return session;
+  }
+
+  /** Drain the persistent generator forever, attributing each message to a
+   *  turn via the pure router. */
+  async function consume(q: Query) {
+    try {
+      for await (const msg of q) handleSdkMessage(msg);
+    } catch (err: any) {
+      if (err?.name !== 'AbortError') console.error('[claude] session consumer error:', err?.message ?? err);
+    } finally {
+      teardownTurns();
+      if (session?.query === q) session = null;
+    }
+  }
+
+  /** Settle every in-flight / queued turn so their query() promises resolve
+   *  when the session ends (input closed, abort, or fatal generator error). */
+  function teardownTurns() {
+    for (const resolve of pendingPermissions.values()) resolve({ behavior: 'deny', message: 'Session ended' });
+    pendingPermissions.clear();
+    const stuck = [...pendingPush];
+    pendingPush.length = 0;
+    if (activeForeground) stuck.unshift(activeForeground);
+    activeForeground = null;
+    activeServer = null;
+    stoppable = true;
+    for (const t of stuck) {
+      t.turnSend({ type: 'status', state: 'idle' });
+      t.resolve();
+    }
+  }
+
+  function handleSdkMessage(msg: SDKMessage) {
+    const any = msg as any;
+    if (typeof any.session_id === 'string' && any.session_id) lastSessionId = any.session_id;
+
+    const action = routeMessage(router, {
+      type: msg.type,
+      systemSubtype: msg.type === 'system' ? any.subtype : undefined,
+      resultOrigin: msg.type === 'result' ? any.origin?.kind : undefined,
+    });
+
+    switch (action.lane) {
+      case 'task': routeTask(msg); return;
+      case 'ignore': return;
+      case 'server':
+        if (action.start) startServerTurn();
+        routeServer(msg, !!action.close);
+        return;
+      case 'foreground':
+        if (action.start) startForegroundTurn();
+        routeForeground(msg, !!action.close);
+        return;
+    }
+  }
+
+  function startForegroundTurn() {
+    const turn = pendingPush.shift();
+    // lastTurnSend is the RAW (non-idle-deduped) send: server turns + capability
+    // + task_event emits base off it and must NOT be swallowed by this turn's
+    // idle dedup. The foreground idle itself goes via turn.turnSend.
+    if (turn) { activeForeground = turn; lastTurnSend = turn.send; }
+    else {
+      // Stray init with no pending push — synthesize so content isn't dropped.
+      const s = lastTurnSend ?? (() => {});
+      activeForeground = { send: s, turnSend: s, blockMsgIds: createBlockMsgIdState(), cwd: sessionCwd, pendingCompactMsgId: null, resolve: () => {} };
+    }
+  }
+
+  function closeForegroundTurn() {
+    const turn = activeForeground;
+    if (!turn) return;
+    activeForeground = null;
+    // Snapshot the still-running background tasks (the genuinely backgrounded
+    // ones; sync tasks already settled before this result, so excluded).
+    const running = [...backgroundTasks.values()].filter((t) => !t.done);
+    if (running.length > 0 && lastTurnSend) lastTurnSend({ type: 'task_event', kind: 'snapshot', tasks: running });
+    // Persist the latest SDK session id once per turn.
+    if (lastSessionId) turn.send({ type: 'context_patch', patch: { lastSdkSessionId: lastSessionId } });
+    // Compact turn ended without a terminal compact_result — surface a note so
+    // the pending card doesn't sit forever (error / abort path).
+    if (turn.pendingCompactMsgId) {
+      turn.send({ type: 'message', msgId: turn.pendingCompactMsgId, msgType: 'fold_markdown', label: '/compact', errorMessage: 'Compaction did not complete' });
+      turn.pendingCompactMsgId = null;
+    }
+    stoppable = true;
+    turn.turnSend({ type: 'status', state: 'idle' }); // deduped — result case already emitted it
+    turn.resolve();
+  }
+
+  function routeForeground(msg: SDKMessage, close: boolean) {
+    const turn = activeForeground;
+    if (!turn) return;
+    const any = msg as any;
+
+    // Mid-turn auth failure → AuthPane takeover (mirrors copilot).
+    if (isClaudeAuthFailure(msg)) turn.send({ type: 'auth_required', provider: 'claude' });
+
+    // /compact completion detection (terminal compact_result status).
+    if (turn.pendingCompactMsgId && msg.type === 'system') {
+      const subtype = any.subtype;
+      if (subtype === 'status' && any.compact_result) {
+        const result = any.compact_result as 'success' | 'failed';
+        if (result === 'success') {
+          turn.send({ type: 'message', msgId: turn.pendingCompactMsgId, msgType: 'fold_markdown', label: '/compact', body: { content: 'Compact completed' } });
+        } else {
+          const errMsg = any.compact_error ?? 'Compaction failed';
+          turn.send({ type: 'message', msgId: turn.pendingCompactMsgId, msgType: 'fold_markdown', label: '/compact', errorMessage: `Compact failed: ${errMsg}` });
+        }
+        turn.pendingCompactMsgId = null;
+        stoppable = true;
+      }
+    }
+
+    processMessage(msg, turn.turnSend, turn.cwd, turn.blockMsgIds);
+
+    // Alias resolution → pin concrete model (see DECISIONS-agent #62).
+    if (msg.type === 'assistant' && any.parent_tool_use_id == null) {
+      const resolved = any.message?.model;
+      if (shouldAdoptResolvedModel(resolved, currentModel, cache.models ?? [])) {
+        currentModel = resolved;
+        turn.send({ type: 'capabilities', ...buildCapabilities() });
+      }
+    }
+
+    if (close) closeForegroundTurn();
+  }
+
+  /** Open a server-initiated (auto-resume) turn: mint a turnId the main side
+   *  registers via `turn_started`, so the prose renders as a normal reply. */
+  function startServerTurn() {
+    const base = lastTurnSend;
+    if (!base) { activeServer = null; return; }
+    const turnId = `t-${randomUUID().slice(0, 8)}`;
+    base({ type: 'turn_started', turnId });
+    const st: ServerTurn = {
+      turnId,
+      blockMsgIds: createBlockMsgIdState(),
+      started: false,
+      send: (m) => {
+        const tagged: any = { ...m, turnId };
+        if (!st.started && m.type === 'message') { tagged.startsTurn = true; st.started = true; }
+        base(tagged);
+      },
+    };
+    activeServer = st;
+  }
+
+  function routeServer(msg: SDKMessage, close: boolean) {
+    const st = activeServer;
+    if (!st) return;
+    // Route ONLY the assistant prose (skip stream_event to avoid the
+    // streaming-placeholder grouping path). Tool calls during auto-resume use
+    // the active send (pre-existing limitation — see DECISIONS #69).
+    if (msg.type === 'assistant') processMessage(msg, st.send, sessionCwd, st.blockMsgIds);
+    if (close) {
+      st.send({ type: 'status', state: 'idle' });
+      activeServer = null;
+    }
+  }
+
+  function routeTask(msg: SDKMessage) {
+    const any = msg as any;
+    if (!(typeof any.subtype === 'string' && any.subtype.startsWith('task_'))) return;
+    const id = any.task_id as string | undefined;
+    if (typeof id !== 'string' || !id || ambientTaskIds.has(id)) return;
+    const norm = normalizeTaskMessage(msg, backgroundTasks.get(id));
+    if (norm?.ambient) { ambientTaskIds.add(id); return; }
+    if (!norm) return;
+    backgroundTasks.set(norm.task.id, norm.task);
+    if (norm.outputFile) taskOutputFiles.set(norm.task.id, norm.outputFile);
+    // Emit individually only when no foreground turn is consuming — a task_*
+    // that fires mid-turn is accumulated (snapshotted at the turn's close).
+    if (!activeForeground && lastTurnSend) lastTurnSend({ type: 'task_event', kind: norm.kind, task: norm.task });
+  }
+
   return {
     async gatherCapabilities(
       cwd: string,
@@ -470,26 +733,38 @@ export function createClaudeBackend(): ServerBackend {
     },
 
     setModel(model: string) {
-      // Per-call options.model wins on the next query; we just track for
-      // capabilities broadcasts so renderer's status bar reflects the
-      // current intent immediately.
       currentModel = model;
-      currentSend?.({ type: 'capabilities', ...buildCapabilities() });
+      // Apply to the live session via the streaming-mode control method.
+      if (session) session.query.setModel(model).catch((e: any) => console.error('[claude] setModel failed', e?.message ?? e));
+      lastTurnSend?.({ type: 'capabilities', ...buildCapabilities() });
     },
 
     setEffort(effort: string) {
+      const changed = currentEffort !== effort;
       currentEffort = effort;
-      currentSend?.({ type: 'capabilities', ...buildCapabilities() });
+      // No control method for effort — rebuild the persistent session (resume
+      // keeps context). Rare (user toggles effort mid-conversation). The next
+      // query()'s ensureSession recreates with the new options.effort.
+      if (changed && session) {
+        const old = session;
+        session = null;
+        try { old.closeInput(); } catch { /* best-effort */ }
+        try { old.query.close(); } catch { /* best-effort */ }
+      }
+      lastTurnSend?.({ type: 'capabilities', ...buildCapabilities() });
     },
 
     setPermissionMode(mode: string) {
       currentPermissionMode = mode;
-      currentSend?.({ type: 'capabilities', ...buildCapabilities() });
+      currentBypassMode = mode === 'bypassPermissions';
+      if (session) {
+        const applied = (currentBypassMode ? 'default' : mode) as Options['permissionMode'];
+        session.query.setPermissionMode(applied!).catch((e: any) => console.error('[claude] setPermissionMode failed', e?.message ?? e));
+      }
+      lastTurnSend?.({ type: 'capabilities', ...buildCapabilities() });
     },
 
     async query(input: QueryInput, send: SendFn) {
-      currentSend = send;
-
       // Config-edit turn (picker / status-bar): structured key+value, no prompt,
       // no SDK query. Converges UI config edits onto applyConfigEdit — the same
       // path a typed /model slash takes below.
@@ -524,72 +799,23 @@ export function createClaudeBackend(): ServerBackend {
         return;
       }
 
-      abortController = new AbortController();
-      // Seed in-memory session ID from orchestrator-provided context. Only
-      // applied on the first turn of this process — once `lastSessionId` is
-      // captured from a live `session_id`, we don't clobber it.
+      // Seed in-memory session ID from orchestrator-provided context (first
+      // turn only; once captured from a live session_id we don't clobber it).
       if (!lastSessionId && input.restoreContext?.lastSdkSessionId) {
         lastSessionId = input.restoreContext.lastSdkSessionId;
       }
-      const mode = (input.permissionMode as Options['permissionMode']) ?? 'default';
-      const isBypass = mode === 'bypassPermissions';
-      // Flip the closure flag so canUseTool's bypass short-circuit takes
-      // effect for this query. Single canUseTool path keeps the
-      // AskUserQuestion intercept active regardless of permission mode.
-      currentBypassMode = isBypass;
-      const options: Options = {
-        ...CLAUDE_QUERY_DEFAULTS,
-        abortController,
-        cwd: input.cwd,
-        permissionMode: isBypass ? 'default' : mode,
-        canUseTool,
-      };
+      // Renderer sends permissionMode every turn; orchestrator's applyPrefDiff
+      // already applied changes via setPermissionMode, but keep bypass in sync
+      // defensively (it gates canUseTool's short-circuit).
+      if (input.permissionMode) currentBypassMode = input.permissionMode === 'bypassPermissions';
 
-      const resumeId = input.resume ?? lastSessionId;
-      if (resumeId) options.resume = resumeId;
-      if (input.model) (options as any).model = input.model;
-      if (input.effort) (options as any).effort = input.effort;
+      // Ensure the single persistent streaming-input session exists (created
+      // lazily on the first real turn; reused thereafter — Architecture B).
+      const s = ensureSession(input.cwd, input.resume, input.appId);
 
-      // App-level skills: load this app's projected skills as a local plugin
-      // (the only way to load skills from a custom dir — see #2.5/#70). Only
-      // when the dir exists (skills created + projected); skills appear
-      // namespaced as `shelf-skills:<name>`. Per-query so edits show next turn.
-      const skillsPluginRoot = resolveSkillsPluginRoot(input.appId);
-      if (skillsPluginRoot) (options as any).plugins = [{ type: 'local', path: skillsPluginRoot }];
-
-      let promptArg: Parameters<typeof sdkQuery>[0]['prompt'] = input.prompt;
-      const imageBlocks = (input.images ?? [])
-        .map(dataUrlToImageBlock)
-        .filter((b): b is NonNullable<typeof b> => b !== null);
-      if (imageBlocks.length > 0) {
-        const content: any[] = [
-          ...imageBlocks,
-          ...(input.prompt ? [{ type: 'text', text: input.prompt }] : []),
-        ];
-        async function* single() {
-          yield { type: 'user' as const, message: { role: 'user' as const, content } } as any;
-        }
-        promptArg = single() as any;
-      }
-
-      activeQuery = sdkQuery({ prompt: promptArg, options });
-
-      // Per-turn map: SDK content_block index → our msgId. Lazily populated
-      // on first stream_delta or assistant block ref; cleared after each
-      // assistant message (next assistant resets its index space).
-      const blockMsgIds: BlockMsgIdState = createBlockMsgIdState();
-
-      // Idle-emit dedup. Three idle emit sites in query():
-      //   1. processMessage's `result` case — success path, carries metrics
-      //   2. catch block — error / abort path
-      //   3. finally block — safety net for the case where SDK iteration
-      //      ends without hitting result or catch (rare)
-      //
-      // Without dedup, normal turns double-emit (result + finally on success,
-      // catch + finally on error). The second arrives after turn-dispatcher
-      // already unregistered the turn (first idle marks turn.done) and gets
-      // logged as "event for unknown turn ... dropping". Wrap `send` with
-      // an idle-dedup guard so only the first idle of this turn goes through.
+      // Per-turn render state. turnSend de-dupes idle (the result case and the
+      // turn-close path can both emit one).
+      const blockMsgIds = createBlockMsgIdState();
       let idleEmitted = false;
       const turnSend: SendFn = (msg) => {
         if (msg.type === 'status' && (msg as any).state === 'idle') {
@@ -599,14 +825,8 @@ export function createClaudeBackend(): ServerBackend {
         send(msg);
       };
 
-      // /clear and /compact need provider-side bookkeeping the SDK can't reach,
-      // but unlike /model etc. they DO run a real SDK turn (fall through below).
-      // `slash` was already parsed at the top of query() for the early-return
-      // interception of /model /effort /permission.
-      //   - `/clear`: reset in-memory lastSessionId + emit context_patch so
-      //     persistence doesn't resurrect the dead session on next launch.
-      //   - `/compact`: capture completion via SDKCompactBoundaryMessage +
-      //     SDKStatusMessage and surface as a fold_markdown card.
+      // /clear and /compact run a real turn (pushed below) but need
+      // provider-side bookkeeping the SDK can't reach.
       if (slash?.cmd === 'clear') {
         send({ type: 'plan', content: '' });
         inflightToolUses.clear();
@@ -618,292 +838,64 @@ export function createClaudeBackend(): ServerBackend {
         ambientTaskIds.clear();
         lastSessionId = null;
         send({ type: 'context_patch', patch: { lastSdkSessionId: null } });
-        // Fall through — SDK still handles the actual /clear semantics.
       }
       let pendingCompactMsgId: string | null = null;
       if (slash?.cmd === 'compact') {
         pendingCompactMsgId = mintSlashMsgId();
-        send({
-          type: 'message', msgId: pendingCompactMsgId, msgType: 'fold_markdown',
-          label: '/compact',
-        });
+        send({ type: 'message', msgId: pendingCompactMsgId, msgType: 'fold_markdown', label: '/compact' });
         // Whole compact turn is critical — stop() silently no-ops until done.
         stoppable = false;
       }
 
-      // Detached drain (World A — Phase 0 confirmed). The SDK keeps this
-      // generator alive past the foreground `result` to (1) drain a backgrounded
-      // task and (2) auto-resume the agent when it finishes; `query()` would
-      // otherwise only resolve at generator-end (~when the task settles),
-      // blocking the sendChain (next user send) for that whole window. So we
-      // resolve query()'s Promise at the foreground-idle checkpoint and let this
-      // loop keep pumping turnId-less `task_event` in the background.
-      // `myQuery`/identity-guarded teardown prevent a later turn's module state
-      // from being clobbered by this one's late finally. See DECISIONS #69.
-      const myQuery = activeQuery;
-      let foregroundDone = false;
-      let releaseSendChain: () => void = () => {};
-      const sendChainGate = new Promise<void>((r) => { releaseSendChain = r; });
+      // Register the foreground turn, then push its prompt into the live
+      // session. The consumer loop attributes the SDK's reply back to this
+      // entry (FIFO) and resolves `done` at the foreground result.
+      const turn: ForegroundTurn = { send, turnSend, blockMsgIds, cwd: input.cwd, pendingCompactMsgId, resolve: () => {} };
+      const done = new Promise<void>((r) => { turn.resolve = r; });
+      pendingPush.push(turn);
+      notePush(router);
 
-      // Server-initiated turn state (auto-resume prose after a background task).
-      // Each finished task triggers the SDK to auto-resume the agent for one
-      // assistant→result sub-turn; we open a fresh turnId per sub-turn so the
-      // prose renders as a normal reply. Reset after each sub-turn's result.
-      let serverTurnId: string | null = null;
-      let serverBlockIds: BlockMsgIdState | null = null;
-      let serverStarted = false;
-
-      const drain = async () => {
-        try {
-          for await (const sdkMsg of myQuery) {
-            if ('session_id' in sdkMsg && sdkMsg.session_id) {
-              lastSessionId = sdkMsg.session_id as string;
-            }
-
-            // Background-task system messages (task_started/updated/progress/
-            // notification) → turnId-less task_event. Accumulate state always;
-            // emit timing depends on phase:
-            //   - during the foreground turn: accumulate only (a synchronous
-            //     Bash that emits task_* settles BEFORE the foreground result,
-            //     so it's excluded from the snapshot below — no spurious card)
-            //   - after the foreground turn: emit each individually (it's
-            //     unambiguously background by then).
-            // processMessage ignores task_* so handle + continue.
-            if (sdkMsg.type === 'system' && typeof (sdkMsg as any).subtype === 'string'
-                && (sdkMsg as any).subtype.startsWith('task_')) {
-              const id = (sdkMsg as any).task_id as string | undefined;
-              if (typeof id === 'string' && id && !ambientTaskIds.has(id)) {
-                const norm = normalizeTaskMessage(sdkMsg, backgroundTasks.get(id));
-                if (norm?.ambient) {
-                  ambientTaskIds.add(id);
-                } else if (norm) {
-                  backgroundTasks.set(norm.task.id, norm.task);
-                  if (norm.outputFile) taskOutputFiles.set(norm.task.id, norm.outputFile);
-                  if (foregroundDone) send({ type: 'task_event', kind: norm.kind, task: norm.task });
-                }
-              }
-              continue;
-            }
-
-            // Past the foreground turn the generator still yields the background
-            // drain + the SDK's auto-resume reply (its result carries
-            // origin.kind === 'task-notification'), all tagged with a turn the
-            // main side already deregistered. Surface the prose as a
-            // server-initiated turn: a fresh turnId the main side registers via
-            // `turn_started`, so it renders as a normal reply + persists instead
-            // of being dropped on the dead foreground turnId. (task_* were
-            // already handled+continued above.) See DECISIONS #69.
-            if (foregroundDone) {
-              // Route ONLY assistant/result (skip stream_event): the assistant
-              // case emits a COMPLETE reply, so the prose is non-streaming and
-              // we avoid the stream-placeholder turn-grouping path. Tool calls
-              // during auto-resume remain a pre-existing limitation (canUseTool
-              // still tags via the stale foreground send) — out of M3 scope.
-              if (sdkMsg.type === 'assistant') {
-                if (serverTurnId == null) {
-                  serverTurnId = `t-${randomUUID().slice(0, 8)}`;
-                  serverBlockIds = createBlockMsgIdState();
-                  serverStarted = false;
-                  send({ type: 'turn_started', turnId: serverTurnId });
-                }
-                const stid = serverTurnId;
-                const serverSend: SendFn = (msg) => {
-                  const tagged: any = { ...msg, turnId: stid };
-                  // Mark the sub-turn's first message so buildTurns opens a new
-                  // block (a server turn has no `user` message to anchor one).
-                  if (!serverStarted && msg.type === 'message') {
-                    tagged.startsTurn = true;
-                    serverStarted = true;
-                  }
-                  send(tagged);
-                };
-                processMessage(sdkMsg, serverSend, input.cwd, serverBlockIds!);
-              } else if (sdkMsg.type === 'result' && serverTurnId != null) {
-                // Close the sub-turn. The main forwarder swallows this status,
-                // but the dispatcher needs it to end the turn's generator.
-                send({ type: 'status', state: 'idle', turnId: serverTurnId });
-                serverTurnId = null;
-              }
-              continue;
-            }
-
-            // Mid-turn auth failure (e.g. credentials revoked / expired during a
-            // session). Surface the same AuthPane takeover as the tab-open probe.
-            // Mirrors copilot's query() auth_required emit. Structured detection
-            // (isClaudeAuthFailure), provider passed explicitly so remote.ts
-            // doesn't default it to 'copilot'.
-            if (isClaudeAuthFailure(sdkMsg)) {
-              send({ type: 'auth_required', provider: 'claude' });
-            }
-
-            // /compact completion detection — listen for status with compact_result.
-            // SDK 也會發 'compact_boundary' 帶 pre/post token，但 post_tokens 是
-            // optional（壓縮完還沒實際送 model 算不出來），顯示 'pre → ?' 沒意義，
-            // duration_ms 也常缺。直接吃 status.compact_result 當 terminal flag，
-            // 顯示 'Compact completed' / 'Compact failed' 就好；要看 context 變化
-            // 使用者本來就能從 status bar 的 context% 觀察。
-            if (pendingCompactMsgId && sdkMsg.type === 'system') {
-              const subtype = (sdkMsg as any).subtype;
-              if (subtype === 'status' && (sdkMsg as any).compact_result) {
-                const result = (sdkMsg as any).compact_result as 'success' | 'failed';
-                if (result === 'success') {
-                  send({
-                    type: 'message', msgId: pendingCompactMsgId, msgType: 'fold_markdown',
-                    label: '/compact',
-                    body: { content: 'Compact completed' },
-                  });
-                } else {
-                  const errMsg = (sdkMsg as any).compact_error ?? 'Compaction failed';
-                  send({
-                    type: 'message', msgId: pendingCompactMsgId, msgType: 'fold_markdown',
-                    label: '/compact',
-                    errorMessage: `Compact failed: ${errMsg}`,
-                  });
-                }
-                pendingCompactMsgId = null;
-                stoppable = true;
-              }
-            }
-
-            processMessage(sdkMsg, turnSend, input.cwd, blockMsgIds);
-
-            // Alias resolution → pin concrete model.
-            //
-            // supportedModels() returns the SDK's recommended aliases
-            // (default/sonnet/haiku) — cached in cache.models. The rule:
-            //   - intent IS one of those aliases → keep it (it tracks the
-            //     recommendation; never overwrite with a concrete id, so the
-            //     status bar shows a stable 'default' instead of flip-flopping
-            //     to 'claude-opus-4-8' per turn and back to 'default' on restart)
-            //   - intent is NOT a known alias (user pinned a specific model, e.g.
-            //     via custom model id) → adopt the SDK's actual resolved model and
-            //     re-emit capabilities so the status bar + project config reflect
-            //     what actually ran (existing capabilities→persist path handles both).
-            // Guarded on cache.models being populated so we never misclassify an
-            // alias as "unknown" before warmup completes. See DECISIONS-agent #62.
-            if (sdkMsg.type === 'assistant' && sdkMsg.parent_tool_use_id == null) {
-              const resolved = sdkMsg.message?.model;
-              if (shouldAdoptResolvedModel(resolved, currentModel, cache.models ?? [])) {
-                currentModel = resolved;
-                send({ type: 'capabilities', ...buildCapabilities() });
-              }
-            }
-
-            // Foreground turn end: a `result` NOT triggered by a task-notification
-            // (Phase 0: the auto-resume turn's result carries
-            // origin.kind === 'task-notification'). idle was already emitted by
-            // processMessage's `result` case; now snapshot the tasks still running
-            // (= the genuinely backgrounded ones) and release the sendChain so the
-            // next user send isn't queued behind the background drain.
-            if (sdkMsg.type === 'result' && (sdkMsg as any).origin?.kind !== 'task-notification') {
-              foregroundDone = true;
-              const running = [...backgroundTasks.values()].filter((t) => !t.done);
-              if (running.length > 0) send({ type: 'task_event', kind: 'snapshot', tasks: running });
-              releaseSendChain();
-            }
-          }
-        } catch (err: any) {
-          // Two arrival timings for catch:
-          //   (a) BEFORE result case ran (SDK threw mid-stream) — turn never
-          //       reached idle; emit error + idle to release main.
-          //   (b) AFTER result case ran (SDK threw during post-result cleanup
-          //       / abort teardown) — idle was already emitted by `result`,
-          //       main has deregistered the turn. Re-emitting error here
-          //       would arrive at an "unknown turn" and just clutter logs.
-          //       The user already got their result; the teardown error is
-          //       provider-internal noise.
-          if (!idleEmitted) {
-            if (err.name !== 'AbortError') {
-              send({ type: 'error', error: err.message ?? 'Unknown error' });
-            }
-            turnSend({ type: 'status', state: 'idle' });
-          } else if (err.name !== 'AbortError') {
-            // Log to stderr so it still surfaces in agent-server.log for
-            // postmortem — just not over the wire.
-            console.error('[claude] post-idle SDK error suppressed:', err?.message ?? err);
-          }
-        } finally {
-          for (const resolve of pendingPermissions.values()) {
-            resolve({ behavior: 'deny', message: 'Session ended' });
-          }
-          pendingPermissions.clear();
-          // Identity-guarded teardown: query() resolved early (at the foreground
-          // result), so by the time this background drain finishes a LATER turn
-          // may already own activeQuery/abortController. Only null them if
-          // they're still ours — otherwise we'd clobber the newer turn (the race
-          // the sendChain serialization was built to prevent).
-          if (activeQuery === myQuery) {
-            activeQuery = null;
-            abortController = null;
-          }
-
-          // Compact turn ended without a terminal status event — emit a
-          // generic error so the pending slash_response card doesn't sit
-          // forever waiting for an outcome. Reachable on SDK error / abort.
-          if (pendingCompactMsgId) {
-            send({
-              type: 'message', msgId: pendingCompactMsgId, msgType: 'fold_markdown',
-              label: '/compact',
-              errorMessage: 'Compaction did not complete',
-            });
-            pendingCompactMsgId = null;
-          }
-          stoppable = true;
-
-          // Tell orchestrator to persist the latest SDK session_id so the next
-          // process can resume. Single emit per turn — avoids disk thrash on
-          // every chunk. Mid-turn crash tolerance: at worst the user loses the
-          // in-flight turn and resumes from the previous turn's session_id,
-          // which is still correct because the SDK rolls forward a single jsonl
-          // per resume chain.
-          if (lastSessionId) {
-            send({ type: 'context_patch', patch: { lastSdkSessionId: lastSessionId } });
-          }
-          turnSend({ type: 'status', state: 'idle' });
-          // Safety net: if we never reached a foreground result (pure error /
-          // abort before any result), still release the sendChain so it can't wedge.
-          releaseSendChain();
-        }
-      };
-
-      // Detached: keep draining the background after query() resolves. The
-      // .catch guarantees the sendChain is released even if the finally throws,
-      // so a crashed drain can never wedge the next send.
-      void drain().catch((err) => {
-        console.error('[claude] background drain crashed:', err?.message ?? err);
-        releaseSendChain();
-      });
-      await sendChainGate;
+      const imageBlocks = (input.images ?? [])
+        .map(dataUrlToImageBlock)
+        .filter((b): b is NonNullable<typeof b> => b !== null);
+      const content = imageBlocks.length > 0
+        ? [...imageBlocks, ...(input.prompt ? [{ type: 'text' as const, text: input.prompt }] : [])]
+        : input.prompt;
+      s.pushUser(content as SDKUserMessage['message']['content']);
+      await done;
     },
 
     async stop() {
       // Silently ignore mid-compaction (or any other critical section the
       // provider sets `stoppable = false` for). Interrupting `/compact`
-      // half-way leaves the SDK session in an indeterminate state.
+      // half-way leaves the session in an indeterminate state.
       if (!stoppable) return;
       for (const resolve of pendingPermissions.values()) {
         resolve({ behavior: 'deny', message: 'Stopped by user' });
       }
       pendingPermissions.clear();
-      if (activeQuery) {
+      if (session) {
         try {
-          await activeQuery.interrupt();
+          // Streaming-mode interrupt: stops the CURRENT turn but keeps the
+          // session alive for the next prompt. The interrupted turn yields a
+          // result (no origin) which the consumer routes to a foreground idle.
+          await session.query.interrupt();
         } catch (err: any) {
-          // SDK interrupt fail-loud, then fall back to AbortController so the
-          // stop intent still resolves. Repeated occurrence means SDK interrupt
-          // surface broke — we'd silently lose user-visible stop responsiveness.
-          console.error('[claude] activeQuery.interrupt() failed; falling back to AbortController', err?.message ?? err);
-          abortController?.abort();
+          // Interrupt fail-loud, then fall back to AbortController. Repeated
+          // occurrence means the SDK interrupt surface broke.
+          console.error('[claude] interrupt() failed; aborting session', err?.message ?? err);
+          try { session.abort.abort(); } catch { /* best-effort */ }
         }
       }
     },
 
     dispose() {
-      abortController?.abort();
-      activeQuery = null;
-      abortController = null;
-      // The per-tab process is killed on dispose, so any detached background
-      // drain dies with it; clearing here keeps state tidy if reused in tests.
+      if (session) {
+        try { session.closeInput(); } catch { /* best-effort */ }
+        try { session.query.close(); } catch { /* best-effort */ }
+        try { session.abort.abort(); } catch { /* best-effort */ }
+        session = null;
+      }
       backgroundTasks.clear();
       taskOutputFiles.clear();
       ambientTaskIds.clear();
