@@ -78,6 +78,10 @@ export function projectSkillsLocal(appId: string): void {
     fs.rmSync(dst, { recursive: true, force: true });
     fs.mkdirSync(path.dirname(dst), { recursive: true });
     fs.cpSync(src, dst, { recursive: true });
+    // Touch the app's lease so the agent-server startup sweep (which may run
+    // before the first heartbeat) doesn't reclaim a just-projected dir as an
+    // orphan. The projection IS a liveness signal. See cleanup.ts / §5.9.
+    fs.writeFileSync(path.join(path.dirname(dst), '.heartbeat'), '');
   } catch (err: any) {
     log.error('skills', `local projection failed for app ${appId.slice(0, 8)}: ${err?.message ?? err}`);
   }

@@ -494,7 +494,11 @@ function syncSkillsToRemote(ops: RemoteOps, appId: string): void {
     const mkdirs = dirs.length ? ` && cd "${target}" && mkdir -p ${dirs.map((d) => `"${d}"`).join(' ')}` : '';
     ops.exec(`rm -rf "${target}"; mkdir -p "${target}"${mkdirs}`);
     for (const f of files) ops.copyIn(path.join(src, f), `${target}/${f}`);
-    ops.exec(`printf %s '${hash}' > "${target}/.synced"`);
+    // `.synced` = content-hash gate; `.heartbeat` = freshness lease so the
+    // remote agent-server's startup sweep doesn't reclaim this just-synced dir
+    // before the first heartbeat (cleanup.ts / §5.9). appDir = parent of skills.
+    const appDir = `${ops.base}/.shelf/apps/${appId}`;
+    ops.exec(`printf %s '${hash}' > "${target}/.synced"; touch "${appDir}/.heartbeat"`);
     log.info('agent-remote', `Synced ${files.length} skill file(s) to ${target}`);
   } catch (err: any) {
     log.info('agent-remote', `skills sync skipped: ${err?.message ?? err}`);
