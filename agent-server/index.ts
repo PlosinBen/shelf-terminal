@@ -1,4 +1,6 @@
 import * as readline from 'readline';
+import * as fs from 'fs';
+import * as path from 'path';
 import { createClaudeBackend } from './providers/claude';
 import { createCopilotBackend } from './providers/copilot';
 import { createFakeBackend } from './providers/fake';
@@ -33,6 +35,8 @@ interface IncomingMessage {
   configEdit?: { key: 'model' | 'effort' | 'permissionMode'; value: string };
   toolUseId?: string;
   allow?: boolean;
+  /** For `type: 'ping'`: client heartbeat sequence, echoed back in pong for RTT. */
+  seq?: number;
   /** resolve_picker payload — picker id minted by provider, payload carries
    * index-aligned answers or { cancelled: true } (see PickerResolvePayload). */
   pickerId?: string;
@@ -54,6 +58,22 @@ interface IncomingMessage {
 
 function send(msg: OutgoingMessage) {
   process.stdout.write(JSON.stringify(msg) + '\n');
+}
+
+/**
+ * Refresh the version dir's `.heartbeat` lease (the cleanup sweep keeps any
+ * version whose lease is fresh — see §5.9 / planned DECISION). agent-server runs
+ * from `<deployRoot>/index.mjs`; on remote `deployRoot` = `~/.shelf/agent-server/
+ * <version>/`. Local runs from the app's dist bundle (not under `.shelf`) — no
+ * version dir to keep alive, so skip. Best-effort: never break the pong reply.
+ */
+function touchVersionHeartbeat(): void {
+  try {
+    if (!/\.shelf\/agent-server\//.test(__dirname)) return;
+    fs.writeFileSync(path.join(__dirname, '.heartbeat'), '');
+  } catch {
+    /* lease is best-effort */
+  }
 }
 
 const backends = new Map<Provider, ServerBackend>();
@@ -235,7 +255,10 @@ rl.on('line', (line) => {
       handleStop();
       break;
     case 'ping':
-      send({ type: 'pong' });
+      // Heartbeat: echo `seq` (client measures RTT on its own clock) and refresh
+      // the version-dir liveness lease the cleanup sweep reads. See §5.9.
+      send({ type: 'pong', seq: msg.seq });
+      touchVersionHeartbeat();
       break;
     case 'resolve_permission':
       if (activeBackend && msg.toolUseId !== undefined) {

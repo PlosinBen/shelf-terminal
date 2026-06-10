@@ -121,6 +121,23 @@ export type AgentInitStatus =
   | { state: 'ready' }
   | { state: 'failed'; reason: string };
 
+/**
+ * Per-agent-server connection health, derived from the heartbeat round-trip
+ * (see agent feature `skills-workflows` §5.9). `healthy → slow → unstable →
+ * dead` is a degradation gradient; the renderer carries the steady state in the
+ * project status icon and flashes a row tint on any worsening transition.
+ * RTT is client-clock only (no cross-end clock comparison).
+ */
+export type ConnectionHealthState = 'healthy' | 'slow' | 'unstable' | 'dead';
+
+export interface ConnectionHealth {
+  state: ConnectionHealthState;
+  /** Latest round-trip time in ms (client clock). Absent before the first ack. */
+  rttMs?: number;
+  /** Time since the last ack in ms — for the tooltip. */
+  lastAckAgoMs?: number;
+}
+
 export type AgentDisplayMode = 'collapsed' | 'expanded';
 
 /**

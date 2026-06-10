@@ -161,6 +161,10 @@ async function startSession(
         }
       })();
     },
+    // Connection health from the heartbeat round-trip (per-tab agent-server).
+    // The renderer aggregates per-project (worst among the project's agent
+    // tabs) for the project status icon. See §5.9.
+    (healthState) => send(IPC.AGENT_CONNECTION_HEALTH, tabId, healthState),
   );
 
   const session: SessionInstance = {

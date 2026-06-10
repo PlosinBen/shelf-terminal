@@ -115,4 +115,6 @@ export const IPC = {
   AGENT_INIT_STATUS: 'agent:init-status',
   /** Background task updates (turnId-less; see DECISIONS #69). Carries a TaskEvent. */
   AGENT_BACKGROUND_TASKS: 'agent:background-tasks',
+  /** Per-agent-server connection health from the heartbeat round-trip. Carries a ConnectionHealth. */
+  AGENT_CONNECTION_HEALTH: 'agent:connection-health',
 } as const;

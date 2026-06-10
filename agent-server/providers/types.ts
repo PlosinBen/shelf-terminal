@@ -71,7 +71,9 @@ export type CanonicalMsgType =
 export type OutgoingMessage = WireEnvelope & (
   // ── Lifecycle (no turnId) ────────────────────────────────────────────────
   | { type: 'ready' }
-  | { type: 'pong' }
+  // pong echoes the heartbeat's `seq` so the client can correlate the ack to its
+  // send-time and measure RTT on its own clock (see connection-health.ts).
+  | { type: 'pong'; seq?: number }
   /**
    * Capabilities is dual-purpose: usually a one-shot RPC response carrying
    * `requestId` (matched in main's onResponse map), but providers may also

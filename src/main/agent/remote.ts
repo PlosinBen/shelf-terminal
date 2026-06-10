@@ -1,6 +1,7 @@
 import { log } from '@shared/logger';
-import type { Connection, AgentProvider, AgentInitPhase, ProviderModel, TaskEvent } from '@shared/types';
+import type { Connection, AgentProvider, AgentInitPhase, ProviderModel, TaskEvent, ConnectionHealth, ConnectionHealthState } from '@shared/types';
 import type { AgentBackend, AgentEvent, AgentQueryOptions, PickerResolvePayload } from './types';
+import { ConnectionHealthTracker, DEFAULT_HEALTH_THRESHOLDS } from './connection-health';
 import { ChildProcess, spawn, execSync, execFileSync } from 'child_process';
 import { randomUUID } from 'crypto';
 import { app } from 'electron';
@@ -72,6 +73,10 @@ export function createRemoteBackend(
   // background task finishes). Receives the turnId + the turn's event
   // generator to drain into the renderer. See DECISIONS #69.
   onServerTurn?: (turnId: string, events: AsyncGenerator<AgentEvent>) => void,
+  // Optional per-connection health sink — main wires it to
+  // AGENT_CONNECTION_HEALTH. Driven by the heartbeat round-trip (see §5.9 /
+  // connection-health.ts). Fires only on health-state change.
+  onHealth?: (health: ConnectionHealth) => void,
 ): AgentBackend {
   let remoteProc: RemoteProcess | null = null;
   let deployed = false;
@@ -95,7 +100,7 @@ export function createRemoteBackend(
           deployed = true;
         }
         onPhase?.('connecting');
-        const proc = await spawnAgentServer(connection, cwd, deployResult!, initScript, onTaskEvent, onServerTurn);
+        const proc = await spawnAgentServer(connection, cwd, deployResult!, initScript, onTaskEvent, onServerTurn, onHealth);
         if (!proc) return null;
         const ready = await proc.awaitReady();
         if (!ready) {
@@ -489,6 +494,7 @@ async function spawnAgentServer(
   initScript?: string,
   onTaskEvent?: (ev: TaskEvent) => void,
   onServerTurn?: (turnId: string, events: AsyncGenerator<AgentEvent>) => void,
+  onHealth?: (health: ConnectionHealth) => void,
 ): Promise<RemoteProcess | null> {
   const { nodeBin, indexPath } = deploy;
   // Forward SHELF_TEST_MODE to the remote agent-server so E2E specs can drive
@@ -504,7 +510,7 @@ async function spawnAgentServer(
         `spawnAgentServer local: cwd=${cwd} indexPath=${indexPath} fileExists=${fs.existsSync(indexPath)} PATH=${env.PATH ?? '<missing>'}`,
       );
       const proc = spawn(nodeBin, [indexPath], { cwd, env, stdio: ['pipe', 'pipe', 'pipe'] });
-      return wrapProcess(proc, onTaskEvent, onServerTurn);
+      return wrapProcess(proc, onTaskEvent, onServerTurn, onHealth);
     } catch (err: any) {
       log.error('agent-remote', `Local spawn failed: ${err.message}`);
       return null;
@@ -525,7 +531,7 @@ async function spawnAgentServer(
       cmd,
     ];
     const proc = spawn('ssh', args, { stdio: ['pipe', 'pipe', 'pipe'] });
-    return wrapProcess(proc, onTaskEvent, onServerTurn);
+    return wrapProcess(proc, onTaskEvent, onServerTurn, onHealth);
   }
 
   if (connection.type === 'docker') {
@@ -533,26 +539,58 @@ async function spawnAgentServer(
     const proc = spawn('docker', ['exec', '-i', connection.container, 'sh', '-c', cmd], {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
-    return wrapProcess(proc, onTaskEvent, onServerTurn);
+    return wrapProcess(proc, onTaskEvent, onServerTurn, onHealth);
   }
 
   if (connection.type === 'wsl') {
     const proc = spawn('wsl.exe', ['-d', connection.distro, '--', 'sh', '-lc', `${testEnv}exec ${nodeBin} ${indexPath}`], {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
-    return wrapProcess(proc, onTaskEvent, onServerTurn);
+    return wrapProcess(proc, onTaskEvent, onServerTurn, onHealth);
   }
 
   return null;
 }
 
+// Heartbeat send interval. Env override (ms) lets E2E drive the lease/health
+// loop fast without waiting a real minute; prod uses the §5.9 default (1m).
+const HEARTBEAT_INTERVAL_MS = Number(process.env.SHELF_HEARTBEAT_INTERVAL_MS) || DEFAULT_HEALTH_THRESHOLDS.intervalMs;
+
 function wrapProcess(
   proc: ChildProcess,
   onTaskEvent?: (ev: TaskEvent) => void,
   onServerTurn?: (turnId: string, events: AsyncGenerator<AgentEvent>) => void,
+  onHealth?: (health: ConnectionHealth) => void,
 ): RemoteProcess {
   const dispatcher = createTurnDispatcher(parseRemoteMessage, onTaskEvent, onServerTurn);
   let buffer = '';
+
+  // ── Heartbeat: app→agent-server liveness + RTT (see §5.9 / connection-health.ts).
+  // The `ping`/`pong` round-trip serves three things off one beat: the version-dir
+  // lease (agent-server touches `.heartbeat` on ping), connection-health UX (RTT
+  // measured client-side here), and zombie/dead detection. RTT is client-clock
+  // only — pong echoes our `seq`, never the server's time.
+  const health = new ConnectionHealthTracker(Date.now());
+  let lastHealthState: ConnectionHealthState | undefined;
+  let heartbeatSeq = 0;
+  const emitHealth = () => {
+    const h = health.evaluate(Date.now());
+    if (h.state !== lastHealthState) {
+      lastHealthState = h.state;
+      onHealth?.(h);
+    }
+  };
+  const heartbeatTimer = setInterval(() => {
+    heartbeatSeq += 1;
+    health.onSent(heartbeatSeq, Date.now());
+    try {
+      proc.stdin?.write(JSON.stringify({ type: 'ping', seq: heartbeatSeq }) + '\n');
+    } catch {
+      /* stdin closed — the next evaluate() will surface unstable/dead */
+    }
+    emitHealth(); // catches missed-beat → unstable/dead between acks
+  }, HEARTBEAT_INTERVAL_MS);
+  heartbeatTimer.unref?.(); // never keep the process (or a test) alive for the beat
 
   proc.stdout?.on('data', (chunk: Buffer) => {
     buffer += chunk.toString();
@@ -566,6 +604,12 @@ function wrapProcess(
         parsed = JSON.parse(trimmed);
       } catch {
         log.info('agent-remote', `non-json line from agent-server, dropping: ${trimmed.slice(0, 100)}`);
+        continue;
+      }
+      // Heartbeat ack — transport-level, never reaches the turn dispatcher.
+      if (parsed?.type === 'pong') {
+        if (typeof parsed.seq === 'number') health.onAck(parsed.seq, Date.now());
+        emitHealth();
         continue;
       }
       dispatcher.feed(parsed);
@@ -596,6 +640,7 @@ function wrapProcess(
     awaitReady: dispatcher.awaitReady,
     onResponse: dispatcher.onResponse,
     kill: () => {
+      clearInterval(heartbeatTimer);
       proc.stdin?.end();
       proc.kill();
     },
