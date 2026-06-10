@@ -617,7 +617,14 @@ function wrapProcess(
   // measured client-side here), and zombie/dead detection. RTT is client-clock
   // only — pong echoes our `seq`, never the server's time.
   const health = new ConnectionHealthTracker(Date.now());
-  let lastHealthState: ConnectionHealthState | undefined;
+  // Start optimistic: the tracker's grace period reports 'healthy' until the
+  // first beat could plausibly be missed. Seeding 'healthy' (not undefined)
+  // suppresses a spurious init→healthy transition on the first beat — which
+  // otherwise flushed a half-open window ("0/1 acked, no acks") because
+  // emitHealth runs synchronously right after the ping is sent, before its pong
+  // can round-trip.
+  let lastHealthState: ConnectionHealthState = 'healthy';
+  let established = false; // log the first successful ack once (startup confirmation)
   let heartbeatSeq = 0;
 
   // ACK logging — kept LEAN: a rolling in-memory window emits ONE summary line
@@ -643,7 +650,7 @@ function wrapProcess(
     const h = health.evaluate(now);
     if (h.state !== lastHealthState) {
       flushWin(now, `pre-${h.state}`); // close the current window before the anomaly line
-      log.info('agent-remote', `heartbeat health ${lastHealthState ?? 'init'}→${h.state}`
+      log.info('agent-remote', `heartbeat health ${lastHealthState}→${h.state}`
         + (h.rttMs != null ? ` rtt=${h.rttMs}ms` : '')
         + (h.lastAckAgoMs != null ? ` lastAckAgo=${Math.round(h.lastAckAgoMs / 1000)}s` : ''));
       lastHealthState = h.state;
@@ -691,6 +698,10 @@ function wrapProcess(
             win.rttSum += r; win.rttN += 1;
             win.rttMin = Math.min(win.rttMin, r);
             win.rttMax = Math.max(win.rttMax, r);
+          }
+          if (!established) {
+            established = true;
+            log.info('agent-remote', `heartbeat established${typeof r === 'number' ? ` rtt=${r}ms` : ''}`);
           }
         }
         emitHealth();
