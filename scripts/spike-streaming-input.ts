@@ -56,12 +56,14 @@ function logMsg(tag: string, m: SDKMessage) {
     const txt = (m.message.content.find((b: any) => b.type === 'text') as any)?.text;
     const tools = m.message.content.filter((b: any) => b.type === 'tool_use').map((b: any) => b.name);
     console.log(`${base} text="${(txt ?? '').slice(0, 80).replace(/\n/g, ' ')}"${tools.length ? ` tools=[${tools}]` : ''}`);
+    if (process.env.DUMP) console.log('     A-KEYS:', Object.keys(any).join(','), '| msg-keys:', Object.keys(m.message).join(','), '| origin:', JSON.stringify(any.origin));
   } else if (m.type === 'result') {
     // Dump the WHOLE result envelope keys once — we want to see if ANY field
     // back-references the originating user message (the §3 hard risk).
     console.log(`${base} subtype=${any.subtype} keys=[${Object.keys(any).join(',')}]`);
   } else if (m.type === 'system') {
     console.log(`${base} subtype=${any.subtype}`);
+    if (process.env.DUMP) console.log('     FULL:', JSON.stringify(any));
   } else if (m.type === 'user') {
     const tr = Array.isArray(any.message?.content) ? any.message.content.find((b: any) => b.type === 'tool_result') : null;
     console.log(`${base}${tr ? ` tool_result(is_error=${tr.is_error})` : ''}`);
