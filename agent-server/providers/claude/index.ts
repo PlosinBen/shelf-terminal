@@ -575,7 +575,6 @@ export function createClaudeBackend(): ServerBackend {
     const action = routeMessage(router, {
       type: msg.type,
       systemSubtype: msg.type === 'system' ? any.subtype : undefined,
-      resultOrigin: msg.type === 'result' ? any.origin?.kind : undefined,
     });
 
     switch (action.lane) {
