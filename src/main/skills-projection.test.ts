@@ -51,6 +51,9 @@ describe('projectSkillsLocal', () => {
     expect(dst).toBe(path.join(homeDir, '.shelf', 'apps', 'app-123', 'skills'));
     expect(fs.readFileSync(path.join(dst, 'skills', 'kibana-connect', 'SKILL.md'), 'utf-8')).toBe('ssh to bastion');
     expect(fs.existsSync(path.join(dst, '.claude-plugin', 'plugin.json'))).toBe(true);
+    // Touches the app lease so the startup sweep doesn't reclaim the just-
+    // projected dir before the first heartbeat (cleanup.ts interaction).
+    expect(fs.existsSync(path.join(homeDir, '.shelf', 'apps', 'app-123', '.heartbeat'))).toBe(true);
   });
 
   it('is a mirror: deletes vanish from the target on re-projection', () => {
