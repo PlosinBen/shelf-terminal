@@ -160,6 +160,31 @@ describe('claude detached-loop background tasks', () => {
     expect(sent.filter((m) => m.type === 'status' && (m as any).state === 'idle')).toHaveLength(1);
   });
 
+  it('stop() force-ends the active turn even when interrupt() is a no-op (ESC escape guarantee)', async () => {
+    // The turn streams INIT + a reply, then the SDK generator suspends with NO
+    // result (mimics a wedged turn). query() would hang forever. ESC → stop()
+    // must unstick the UI + resolve query() on its own — interrupt() here is a
+    // no-op (mock), proving stop() does not depend on it.
+    const { it } = controllableQuery([INIT, FG_REPLY], []);
+    sdkQueryMock.mockImplementation(() => it);
+
+    const sent: OutgoingMessage[] = [];
+    const backend = createClaudeBackend();
+    disposer = () => backend.dispose();
+
+    // Start the turn but DON'T await — it would hang (no result arrives).
+    const turn = backend.query({ prompt: 'go', cwd: '/tmp' } as any, (m) => sent.push(m));
+    await flush(); // consumer processes INIT + reply; turn is mid-stream
+    expect(sent.some((m) => m.type === 'status' && (m as any).state === 'idle')).toBe(false);
+
+    await backend.stop();
+
+    // query() resolved (sendChain unblocks) and a foreground idle was emitted
+    // (renderer spinner clears) — the highest-priority ESC guarantee.
+    await expect(turn).resolves.toBeUndefined();
+    expect(sent.filter((m) => m.type === 'status' && (m as any).state === 'idle')).toHaveLength(1);
+  });
+
   it('readTaskOutput returns a friendly note (not a throw) for a task with no output file', async () => {
     // Regression: subagent / monitor / workflow tasks (and tasks that settled via
     // task_updated without a terminal task_notification) never record an

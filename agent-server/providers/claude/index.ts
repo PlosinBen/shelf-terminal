@@ -568,6 +568,34 @@ export function createClaudeBackend(): ServerBackend {
     }
   }
 
+  /**
+   * Force every in-flight turn to end NOW — resolve its `query()` and emit idle —
+   * WITHOUT touching the persistent session. This is the highest-priority ESC
+   * guarantee: the UI (and the sendChain) escape immediately and unconditionally,
+   * independent of whether `interrupt()` succeeds. `interrupt()` can be a no-op
+   * if the SDK turn already ended but our routing is wedged, so we must not rely
+   * on it to unstick the user. Router state is reset so the SDK's now-orphaned
+   * trailing messages for the cancelled turn route to `ignore` instead of
+   * re-closing or mis-attributing. sendChain serialization means at most one
+   * foreground turn is ever in flight (active or a single pending push).
+   */
+  function cancelActiveTurns() {
+    const stuck = [...pendingPush];
+    pendingPush.length = 0;
+    if (activeForeground) stuck.unshift(activeForeground);
+    activeForeground = null;
+    for (const t of stuck) {
+      t.turnSend({ type: 'status', state: 'idle' });
+      t.resolve();
+    }
+    if (activeServer) {
+      activeServer.send({ type: 'status', state: 'idle' });
+      activeServer = null;
+    }
+    router.active = null;
+    router.pendingPush = 0;
+  }
+
   function handleSdkMessage(msg: SDKMessage) {
     const any = msg as any;
     if (typeof any.session_id === 'string' && any.session_id) lastSessionId = any.session_id;
@@ -873,11 +901,17 @@ export function createClaudeBackend(): ServerBackend {
         resolve({ behavior: 'deny', message: 'Stopped by user' });
       }
       pendingPermissions.clear();
+      // HIGHEST PRIORITY: unstick the UI + sendChain immediately and
+      // unconditionally, BEFORE (and independent of) interrupt(). interrupt()
+      // can be a slow await or a no-op (SDK turn already ended), so we never let
+      // ESC depend on it to escape. This emits idle + resolves the turn's
+      // query() synchronously.
+      cancelActiveTurns();
       if (session) {
         try {
-          // Streaming-mode interrupt: stops the CURRENT turn but keeps the
-          // session alive for the next prompt. The interrupted turn yields a
-          // result (no origin) which the consumer routes to a foreground idle.
+          // Best-effort: actually stop the SDK turn (saves tokens). Its trailing
+          // result is now ignored (the turn is already closed above). Keeps the
+          // session alive for the next prompt.
           await session.query.interrupt();
         } catch (err: any) {
           // Interrupt fail-loud, then fall back to AbortController. Repeated
