@@ -176,12 +176,20 @@ async function handleSend(msg: IncomingMessage) {
 
   // A config-edit turn carries a structured edit instead of a prompt.
   const isConfigEdit = !!msg.configEdit;
-  if (!isConfigEdit && (!msg.prompt || !msg.cwd)) {
-    turnSend({ type: 'error', error: 'Missing prompt or cwd' });
+  // An image-only turn has an empty prompt but DOES carry images — it's valid.
+  // Every early-return below MUST emit `idle` (not just an error): the renderer
+  // flipped to streaming on send, and without a terminal idle its spinner +
+  // queue-flush latch wedge forever (the "whole conversation stuck" bug when an
+  // image was sent with no text).
+  const hasInput = !!msg.prompt || (msg.images?.length ?? 0) > 0;
+  if (!isConfigEdit && (!hasInput || !msg.cwd)) {
+    turnSend({ type: 'error', error: !msg.cwd ? 'Missing cwd' : 'Missing prompt or images' });
+    turnSend({ type: 'status', state: 'idle' });
     return;
   }
   if (isConfigEdit && !msg.cwd) {
     turnSend({ type: 'error', error: 'Missing cwd' });
+    turnSend({ type: 'status', state: 'idle' });
     return;
   }
   const provider = msg.provider ?? 'claude';
