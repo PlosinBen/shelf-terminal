@@ -64,3 +64,12 @@ export function CodeIcon({ size }: IconProps) {
     </Svg>
   );
 }
+
+// Spark / star — Skills (a reusable capability).
+export function SkillIcon({ size }: IconProps) {
+  return (
+    <Svg size={size}>
+      <path d="M12 3l2 5 5 2-5 2-2 5-2-5-5-2 5-2z" />
+    </Svg>
+  );
+}

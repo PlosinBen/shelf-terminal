@@ -14,6 +14,7 @@ import { BottomBar, SWITCH_BRANCH_EVENT } from './components/BottomBar';
 import { DevToolsPanel } from './components/DevToolsPanel';
 import { PmView } from './components/PmView';
 import { NotesView } from './components/NotesView';
+import { SkillsView } from './components/SkillsView';
 import { QuickNoteOverlay } from './components/QuickNoteOverlay';
 import { useKeybindings } from './hooks/useKeybindings';
 import { useStore, setProjects, setSettings, setUpdateStatus, addProject, addTab, setActiveTab, removeTab, removeProject, setSplitTab, clearUnread, setInvalidProjects, setPmActive, setConnectionHealth } from './store';
@@ -29,7 +30,7 @@ import { clearAgentSession } from './storage/agent-history';
 import './styles/global.css';
 
 export function App() {
-  const { projects, activeProjectIndex, sidebarVisible, settingsVisible, commandPickerVisible, devToolsVisible, notesVisible, editingProjectIndex, settings, pmVisible, awayMode } = useStore();
+  const { projects, activeProjectIndex, sidebarVisible, settingsVisible, commandPickerVisible, devToolsVisible, notesVisible, skillsVisible, editingProjectIndex, settings, pmVisible, awayMode } = useStore();
   useKeybindings();
 
   useEffect(() => {
@@ -368,6 +369,7 @@ export function App() {
         </div>
         {pmVisible && <PmView />}
         {notesVisible && <NotesView />}
+        {skillsVisible && <SkillsView />}
         {devToolsVisible && <DevToolsPanel />}
       </main>
       </div>

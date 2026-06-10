@@ -3908,6 +3908,46 @@ button {
   color: var(--text);
 }
 
+/* ── Skills panel (reuses right-panel + notes-* editor classes) ── */
+.skills-list {
+  overflow-y: auto;
+  flex: 1;
+}
+
+.skills-list-item {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+}
+
+.skills-list-item:hover {
+  background: var(--surface);
+}
+
+.skills-list-name {
+  font-size: 13px;
+  color: var(--text);
+  font-weight: 600;
+}
+
+.skills-list-desc {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skills-error {
+  margin: 8px 12px 0;
+  padding: 6px 10px;
+  border-radius: 4px;
+  background: rgba(243, 139, 168, 0.12);
+  color: #f38ba8;
+  font-size: 12px;
+}
+
 .notes-list-time {
   color: var(--text-muted);
   font-size: 11px;

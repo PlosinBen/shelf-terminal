@@ -2,7 +2,7 @@ import React from 'react';
 import { useStore, toggleProjectList, toggleRightSidebar } from '../store';
 import { tooltipWithShortcut } from '../utils/format-keybinding';
 import { isMac } from '../hooks/useKeybindings';
-import { PanelLeftIcon, MessageIcon, NoteIcon, CodeIcon } from './icons';
+import { PanelLeftIcon, MessageIcon, NoteIcon, CodeIcon, SkillIcon } from './icons';
 import type { Connection } from '@shared/types';
 
 const version = __APP_VERSION__;
@@ -30,6 +30,7 @@ export function BottomBar() {
     sidebarVisible,
     pmVisible,
     notesVisible,
+    skillsVisible,
     devToolsVisible,
     awayMode,
     updateStatus,
@@ -120,6 +121,15 @@ export function BottomBar() {
           >
             <NoteIcon />
             <span className="sr-only">Notes</span>
+          </button>
+          <button
+            className={`right-tab-btn${skillsVisible ? ' active' : ''}`}
+            tabIndex={-1}
+            onClick={() => toggleRightSidebar('skills')}
+            title="Skills"
+          >
+            <SkillIcon />
+            <span className="sr-only">Skills</span>
           </button>
           <button
             className={`right-tab-btn${devToolsVisible ? ' active' : ''}`}

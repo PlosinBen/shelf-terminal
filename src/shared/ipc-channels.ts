@@ -55,6 +55,13 @@ export const IPC = {
   NOTES_SAVE_IMAGE: 'notes:save-image',
   NOTES_READ_IMAGE: 'notes:read-image',
 
+  // Skills (app-level Agent Skills — one folder per skill under userData)
+  SKILLS_LIST: 'skills:list',
+  SKILLS_GET: 'skills:get',
+  SKILLS_CREATE: 'skills:create',
+  SKILLS_UPDATE: 'skills:update',
+  SKILLS_DELETE: 'skills:delete',
+
   // Logs
   LOGS_CLEAR: 'logs:clear',
   LOGS_SIZE: 'logs:size',

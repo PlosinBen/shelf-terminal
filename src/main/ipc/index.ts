@@ -7,6 +7,7 @@ import { registerDialogHandlers } from './dialog';
 import { registerSettingsHandlers } from './settings';
 import { registerLogsHandlers } from './logs';
 import { registerNotesHandlers } from './notes';
+import { registerSkillsHandlers } from './skills';
 import { registerUpdaterHandlers } from './updater';
 import { registerPmHandlers } from './pm';
 
@@ -25,6 +26,7 @@ export function registerAllIpcHandlers(): void {
   registerSettingsHandlers();
   registerLogsHandlers();
   registerNotesHandlers();
+  registerSkillsHandlers();
   registerUpdaterHandlers();
   registerPmHandlers();
 }

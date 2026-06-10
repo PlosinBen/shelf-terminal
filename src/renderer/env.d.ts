@@ -81,6 +81,13 @@ interface ShelfApi {
     saveImage: (projectId: string, buffer: ArrayBuffer, ext: string) => Promise<string>;
     readImage: (projectId: string, filename: string) => Promise<ArrayBuffer | null>;
   };
+  skills: {
+    list: () => Promise<Array<{ name: string; description?: string }>>;
+    get: (name: string) => Promise<string | null>;
+    create: () => Promise<{ name: string; description?: string }>;
+    update: (name: string, content: string) => Promise<{ ok: boolean; name?: string; error?: string }>;
+    delete: (name: string) => Promise<void>;
+  };
   app: {
     logsPath: () => Promise<string>;
   };

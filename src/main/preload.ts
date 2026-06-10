@@ -117,6 +117,14 @@ contextBridge.exposeInMainWorld('shelfApi', {
     readImage: (projectId: string, filename: string): Promise<ArrayBuffer | null> =>
       ipcRenderer.invoke(IPC.NOTES_READ_IMAGE, { projectId, filename }),
   },
+  skills: {
+    list: () => ipcRenderer.invoke(IPC.SKILLS_LIST),
+    get: (name: string) => ipcRenderer.invoke(IPC.SKILLS_GET, name),
+    create: () => ipcRenderer.invoke(IPC.SKILLS_CREATE),
+    update: (name: string, content: string) =>
+      ipcRenderer.invoke(IPC.SKILLS_UPDATE, { name, content }),
+    delete: (name: string) => ipcRenderer.invoke(IPC.SKILLS_DELETE, name),
+  },
   app: {
     logsPath: (): Promise<string> => ipcRenderer.invoke(IPC.APP_LOGS_PATH),
   },
