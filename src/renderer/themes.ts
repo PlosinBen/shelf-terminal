@@ -227,6 +227,14 @@ export const SEMANTIC_TOKENS = {
   info: '#61afef',
   foldLabel: '#c678dd',
   userBubble: 'rgba(229, 192, 123, 0.15)',
+  // Project/connection status-dot colours (Sidebar). Deliberately a SEPARATE
+  // palette from the agent-status `--agent-*` severity colours: the project dot
+  // expresses connection health as a warm healthy→dead heat gradient, which is
+  // its own visual language, not the agent status bar's info/warn/error one.
+  statusHealthy: '#a6e3a1',
+  statusSlow: '#f9e2af',
+  statusUnstable: '#fab387',
+  statusDead: '#f38ba8',
 } as const;
 
 /**
@@ -250,5 +258,10 @@ export function buildThemeVars(theme: ShelfTheme): Record<string, string> {
     '--agent-info': SEMANTIC_TOKENS.info,
     '--agent-fold-label': SEMANTIC_TOKENS.foldLabel,
     '--agent-user-bubble': SEMANTIC_TOKENS.userBubble,
+    // Project status-dot palette — separate namespace from `--agent-*`.
+    '--status-healthy': SEMANTIC_TOKENS.statusHealthy,
+    '--status-slow': SEMANTIC_TOKENS.statusSlow,
+    '--status-unstable': SEMANTIC_TOKENS.statusUnstable,
+    '--status-dead': SEMANTIC_TOKENS.statusDead,
   };
 }

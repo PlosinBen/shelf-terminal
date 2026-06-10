@@ -287,7 +287,7 @@ button {
 }
 
 .status-dot.alive {
-  background: #a6e3a1;
+  background: var(--status-healthy, #a6e3a1);
 }
 
 .status-dot.dead {
@@ -297,15 +297,16 @@ button {
 /* Connection-health overlay on the project status dot (§5.9). Defined after the
    base alive/dead so equal-specificity rules win. `health-dead` (red, lost
    connection) is deliberately distinct from the grey base `.dead` (no tabs /
-   disconnected). Colours are placeholders pending per-theme severity tokens. */
+   disconnected). Colours are project-status tokens (`--status-*`), a SEPARATE
+   palette from the agent status bar's `--agent-*` severity colours. */
 .status-dot.health-slow {
-  background: #f9e2af; /* info — laggy but working */
+  background: var(--status-slow, #f9e2af); /* laggy but working */
 }
 .status-dot.health-unstable {
-  background: #fab387; /* warning — intermittent */
+  background: var(--status-unstable, #fab387); /* intermittent */
 }
 .status-dot.health-dead {
-  background: #f38ba8; /* critical — connection lost */
+  background: var(--status-dead, #f38ba8); /* connection lost */
 }
 
 /* One-shot "connection got worse" pulse on the project row — a single light-red

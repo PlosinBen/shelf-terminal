@@ -13,6 +13,7 @@ const EXPECTED_KEYS = [
   '--bg', '--bg-secondary', '--border', '--text', '--text-muted', '--accent', '--surface',
   '--agent-error', '--agent-success', '--agent-warning', '--agent-info',
   '--agent-fold-label', '--agent-user-bubble',
+  '--status-healthy', '--status-slow', '--status-unstable', '--status-dead',
 ].sort();
 
 describe('buildThemeVars', () => {
@@ -35,11 +36,12 @@ describe('buildThemeVars', () => {
     // Semantic colors are identical across themes by design (theme-invariant).
     const a = buildThemeVars(getTheme('catppuccin-mocha'));
     const b = buildThemeVars(getTheme('dracula'));
-    for (const key of ['--agent-error', '--agent-success', '--agent-warning', '--agent-info', '--agent-fold-label', '--agent-user-bubble']) {
+    for (const key of ['--agent-error', '--agent-success', '--agent-warning', '--agent-info', '--agent-fold-label', '--agent-user-bubble', '--status-healthy', '--status-slow', '--status-unstable', '--status-dead']) {
       expect(a[key]).toBe(b[key]);
     }
     expect(a['--agent-error']).toBe(SEMANTIC_TOKENS.error);
     expect(a['--agent-user-bubble']).toBe(SEMANTIC_TOKENS.userBubble);
+    expect(a['--status-dead']).toBe(SEMANTIC_TOKENS.statusDead);
   });
 
   it('is plain-serializable (structuredClone round-trips identically)', () => {
