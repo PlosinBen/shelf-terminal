@@ -1,5 +1,5 @@
 import { useState, useCallback, useSyncExternalStore } from 'react';
-import type { ProjectConfig, AppSettings, UpdateStatus, TabType, AgentProvider } from '@shared/types';
+import type { ProjectConfig, AppSettings, UpdateStatus, TabType, AgentProvider, ConnectionHealth, ConnectionHealthState } from '@shared/types';
 import { DEFAULT_SETTINGS } from '@shared/defaults';
 
 // ── Tab state ──
@@ -42,6 +42,10 @@ let pmActive = false;
 let quickNoteVisible = false;
 let nextTabCounter = 0;
 let layoutGeneration = 0;
+// Per-agent-tab connection health from the heartbeat round-trip (keyed by
+// tabId). Transient — never persisted. The Sidebar aggregates per project
+// (worst among the project's agent tabs) for the status dot. See §5.9.
+let connectionHealth: Record<string, ConnectionHealth> = {};
 // Pending payload for an agent chat input. Set by Notes' "Send to Chat" and
 // consumed by the next AgentView in the matching project that becomes
 // visible. Single-slot — only one staged note in flight at a time.
@@ -66,7 +70,7 @@ function subscribe(l: Listener) {
 }
 
 function getSnapshot() {
-  return { projects, activeProjectIndex, sidebarVisible, settingsVisible, searchVisible, commandPickerVisible, devToolsVisible, notesVisible, editingProjectIndex, settings, updateStatus, pmVisible, awayMode, pmActive, quickNoteVisible, layoutGeneration, chatStage };
+  return { projects, activeProjectIndex, sidebarVisible, settingsVisible, searchVisible, commandPickerVisible, devToolsVisible, notesVisible, editingProjectIndex, settings, updateStatus, pmVisible, awayMode, pmActive, quickNoteVisible, layoutGeneration, chatStage, connectionHealth };
 }
 
 let snapshotRef = getSnapshot();
@@ -468,6 +472,39 @@ function syncToMain() {
     }));
     window.shelfApi.pm.syncState(state);
   }, 200);
+}
+
+// ── Connection health (heartbeat) ──
+
+export function setConnectionHealth(tabId: string, health: ConnectionHealth) {
+  if (connectionHealth[tabId]?.state === health.state
+    && connectionHealth[tabId]?.rttMs === health.rttMs) return; // no-op, skip churn
+  connectionHealth = { ...connectionHealth, [tabId]: health };
+  updateSnapshot();
+}
+
+export function clearConnectionHealth(tabId: string) {
+  if (!(tabId in connectionHealth)) return;
+  const next = { ...connectionHealth };
+  delete next[tabId];
+  connectionHealth = next;
+  updateSnapshot();
+}
+
+/** Worst (most degraded) health among a project's agent tabs, or null if none
+ *  is being monitored yet. Degradation order: dead > unstable > slow > healthy. */
+export const HEALTH_RANK: Record<ConnectionHealthState, number> = { healthy: 0, slow: 1, unstable: 2, dead: 3 };
+export function projectHealth(
+  project: ProjectRuntime,
+  health: Record<string, ConnectionHealth>,
+): ConnectionHealth | null {
+  let worst: ConnectionHealth | null = null;
+  for (const tab of project.tabs) {
+    const h = health[tab.id];
+    if (!h) continue;
+    if (!worst || HEALTH_RANK[h.state] > HEALTH_RANK[worst.state]) worst = h;
+  }
+  return worst;
 }
 
 // ── Update actions ──

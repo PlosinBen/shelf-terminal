@@ -121,6 +121,7 @@ interface ShelfApi {
     onStatus: (callback: (tabId: string, status: unknown) => void) => () => void;
     onPlan: (callback: (tabId: string, payload: { content: string }) => void) => () => void;
     onBackgroundTasks: (callback: (tabId: string, event: import('../shared/types').TaskEvent) => void) => () => void;
+    onConnectionHealth: (callback: (tabId: string, health: import('../shared/types').ConnectionHealth) => void) => () => void;
     onPermissionRequest: (callback: (tabId: string, req: unknown) => void) => () => void;
     onPickerRequest: (callback: (tabId: string, req: unknown) => void) => () => void;
     onCapabilities: (callback: (tabId: string, caps: unknown) => void) => () => void;

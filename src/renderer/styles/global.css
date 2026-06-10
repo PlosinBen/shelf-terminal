@@ -294,6 +294,31 @@ button {
   background: var(--text-muted);
 }
 
+/* Connection-health overlay on the project status dot (§5.9). Defined after the
+   base alive/dead so equal-specificity rules win. `health-dead` (red, lost
+   connection) is deliberately distinct from the grey base `.dead` (no tabs /
+   disconnected). Colours are placeholders pending per-theme severity tokens. */
+.status-dot.health-slow {
+  background: #f9e2af; /* info — laggy but working */
+}
+.status-dot.health-unstable {
+  background: #fab387; /* warning — intermittent */
+}
+.status-dot.health-dead {
+  background: #f38ba8; /* critical — connection lost */
+}
+
+/* One-shot "connection got worse" pulse on the project row — a single light-red
+   wash that fades out (the steady state stays in the dot colour; the flash just
+   pulls the eye once, then leaves). Not per-state by design. */
+@keyframes sidebar-health-flash {
+  from { background-color: rgba(243, 139, 168, 0.16); }
+  to { background-color: transparent; }
+}
+.sidebar-item.health-flash {
+  animation: sidebar-health-flash 1.8s ease-out;
+}
+
 .project-name {
   overflow: hidden;
   text-overflow: ellipsis;

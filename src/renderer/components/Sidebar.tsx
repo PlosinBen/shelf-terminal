@@ -5,19 +5,47 @@ import {
   setEditingProject,
   toggleSettings,
   reorderProjects,
+  projectHealth,
+  HEALTH_RANK,
 } from '../store';
+import type { ConnectionHealthState } from '@shared/types';
 import { emit, Events } from '../events';
 import { CONFIRM_REMOVE_EVENT } from './RemoveConfirmDialog';
 import { tooltipWithShortcut } from '../utils/format-keybinding';
 import { isMac } from '../hooks/useKeybindings';
 
 export function Sidebar() {
-  const { projects, activeProjectIndex, settings } = useStore();
+  const { projects, activeProjectIndex, settings, connectionHealth } = useStore();
   const kb = settings.keybindings;
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const [contextMenu, setContextMenu] = useState<{ index: number; x: number; y: number } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+
+  // Row-tint flash on connection-health *worsening* (a one-shot attention pulse;
+  // the steady state lives in the dot colour — see §5.9). Track each project's
+  // last-seen aggregate health; when it degrades, flash the row for ~1.8s.
+  const prevHealthRef = useRef<Record<string, ConnectionHealthState>>({});
+  const [flashingIds, setFlashingIds] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    const prev = prevHealthRef.current;
+    const next: Record<string, ConnectionHealthState> = {};
+    const worsened: string[] = [];
+    for (const proj of projects) {
+      const h = projectHealth(proj, connectionHealth);
+      if (!h) continue;
+      next[proj.config.id] = h.state;
+      const before = prev[proj.config.id];
+      if (before && HEALTH_RANK[h.state] > HEALTH_RANK[before]) worsened.push(proj.config.id);
+    }
+    prevHealthRef.current = next;
+    if (worsened.length === 0) return;
+    setFlashingIds((s) => new Set([...s, ...worsened]));
+    const timers = worsened.map((id) =>
+      setTimeout(() => setFlashingIds((s) => { const n = new Set(s); n.delete(id); return n; }), 1800),
+    );
+    return () => timers.forEach(clearTimeout);
+  }, [projects, connectionHealth]);
 
   // Close context menu on outside click
   useEffect(() => {
@@ -80,11 +108,20 @@ export function Sidebar() {
           const hasAlive = proj.tabs.length > 0;
           const isDragging = dragIndex === i;
           const isDragOver = dragOverIndex === i && dragIndex !== i;
+          // Health overlays the base alive/dead dot: healthy keeps the green
+          // `alive`; slow/unstable/dead recolour via `health-*` (distinct from
+          // the grey base `dead` = disconnected). Tooltip carries RTT.
+          const health = hasAlive ? projectHealth(proj, connectionHealth) : null;
+          const healthClass = health && health.state !== 'healthy' ? ` health-${health.state}` : '';
+          const healthTitle = health
+            ? `Connection: ${health.state}${health.rttMs != null ? ` · ${Math.round(health.rttMs)}ms` : ''}`
+            : undefined;
+          const isFlashing = flashingIds.has(proj.config.id);
 
           return (
             <div
               key={proj.config.id}
-              className={`sidebar-item ${i === activeProjectIndex ? 'active' : ''} ${isDragging ? 'dragging' : ''} ${isDragOver ? 'drag-over' : ''}`}
+              className={`sidebar-item ${i === activeProjectIndex ? 'active' : ''} ${isDragging ? 'dragging' : ''} ${isDragOver ? 'drag-over' : ''}${isFlashing ? ' health-flash' : ''}`}
               onClick={() => setActiveProject(i)}
               onContextMenu={(e) => { setActiveProject(i); handleContextMenu(e, i); }}
               draggable
@@ -93,7 +130,7 @@ export function Sidebar() {
               onDrop={(e) => handleDrop(e, i)}
               onDragEnd={handleDragEnd}
             >
-              <span className={`status-dot ${hasAlive ? 'alive' : 'dead'}`} />
+              <span className={`status-dot ${hasAlive ? 'alive' : 'dead'}${healthClass}`} title={healthTitle} />
               <span className="project-name-group">
                 <span className="project-name">{proj.config.name}</span>
                 {proj.config.worktreeBranch && (

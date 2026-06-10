@@ -16,7 +16,8 @@ import { PmView } from './components/PmView';
 import { NotesView } from './components/NotesView';
 import { QuickNoteOverlay } from './components/QuickNoteOverlay';
 import { useKeybindings } from './hooks/useKeybindings';
-import { useStore, setProjects, setSettings, setUpdateStatus, addProject, addTab, setActiveTab, removeTab, removeProject, setSplitTab, clearUnread, setInvalidProjects, setPmActive } from './store';
+import { useStore, setProjects, setSettings, setUpdateStatus, addProject, addTab, setActiveTab, removeTab, removeProject, setSplitTab, clearUnread, setInvalidProjects, setPmActive, setConnectionHealth } from './store';
+import type { ConnectionHealth } from '@shared/types';
 import type { ProjectConfig } from '@shared/types';
 import { disposeTerminal } from './components/TerminalView';
 import { on, emit, Events } from './events';
@@ -67,6 +68,16 @@ export function App() {
     const offIPC = bindAgentIPCGroup();
     const offStore = bindAgentStoreSubscriptions();
     return () => { offIPC(); offStore(); };
+  }, []);
+
+  // Connection health (heartbeat) → main store, keyed by tabId. Bound directly
+  // (not via the agent typed-event river) because it's connection
+  // infrastructure, not agent-conversation domain state — the Sidebar reads it
+  // off `store` to color the project status dot. See §5.9.
+  useEffect(() => {
+    return window.shelfApi.agent.onConnectionHealth((tabId: string, health: ConnectionHealth) => {
+      setConnectionHealth(tabId, health);
+    });
   }, []);
 
   // Push agent in-memory cap + save throttle settings into the
