@@ -3393,13 +3393,22 @@ button {
 .agent-task-item.agent-task-stopped .agent-task-icon { color: var(--agent-error, #e06c75); }
 
 .agent-task-label {
-  flex-shrink: 0;
+  /* Shrink + ellipsize instead of pushing the row wide (which used to x-scroll
+     the panel and shove the × out of view). Full text stays on the title hover. */
+  flex: 0 1 auto;
+  min-width: 0;
   color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .agent-task-summary,
 .agent-task-error {
+  /* The typically-long field: absorb the slack and truncate FIRST (grows, so it
+     collapses before the label does). min-width:0 lets it actually shrink. */
+  flex: 1 1 auto;
+  min-width: 0;
   color: var(--text-muted);
   overflow: hidden;
   text-overflow: ellipsis;
