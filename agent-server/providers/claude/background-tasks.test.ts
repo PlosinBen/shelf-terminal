@@ -105,6 +105,28 @@ describe('claude detached-loop background tasks', () => {
     expect(sent.filter((m) => m.type === 'status' && (m as any).state === 'idle')).toHaveLength(1);
   });
 
+  it('emits task_started LIVE mid-turn (panel updates as tasks start, not batched at close)', async () => {
+    // UX fix: each task surfaces as its own live 'started' task_event the moment
+    // it arrives — NOT held and dumped only in the close snapshot. Safe because a
+    // sync Bash never emits task_started (scripts/spike-sync-vs-bg.ts). See #75.
+    const started = (n: number) => ({
+      type: 'system', subtype: 'task_started', task_id: `bg${n}`,
+      description: `cmd ${n}`, task_type: 'local_bash', tool_use_id: `toolu_${n}`,
+    });
+    const { it } = controllableQuery([INIT, FG_REPLY, started(1), started(2), FG_RESULT], []);
+    sdkQueryMock.mockImplementation(() => it);
+
+    const sent: OutgoingMessage[] = [];
+    const backend = createClaudeBackend();
+    disposer = () => backend.dispose();
+
+    await backend.query({ prompt: 'go', cwd: '/tmp' } as any, (m) => sent.push(m));
+
+    const live = (id: string) => sent.filter((m) => m.type === 'task_event' && (m as any).kind === 'started' && (m as any).task?.id === id);
+    expect(live('bg1')).toHaveLength(1); // emitted individually, not only via snapshot
+    expect(live('bg2')).toHaveLength(1);
+  });
+
   it('keeps N background tasks distinct — 5 task_started in one turn → snapshot of 5 (no collapse)', async () => {
     // Repro for "5 launched, panel shows 1". Real SDK (spike-bg-notify, 5×
     // run_in_background) emits 5 task_started with 5 DISTINCT task_ids, one per

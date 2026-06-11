@@ -9,7 +9,7 @@ import type { QueryInput, SendFn, ServerBackend, ProviderCapabilities, StatusSeg
 import { severityFromUtilization, pickPermissionModes, pickEffortLevels } from '../types';
 import { parseSlashPrefix } from '@shared/slash-prefix';
 import { formatConfigAck, type ConfigEditKey } from '@shared/config-ack';
-import type { ProviderModel, NormalizedTask, TaskEventKind } from '@shared/types';
+import type { ProviderModel, NormalizedTask } from '@shared/types';
 import { stripCwd, resolveSkillsPluginRoot } from '../shared';
 import {
   rateLimitInfoToSegment,
@@ -234,12 +234,6 @@ export function createClaudeBackend(): ServerBackend {
   // Most-recent foreground turn's send — base for server turns (same session →
   // context-patch interception is correct) and out-of-turn capabilities emits.
   let lastTurnSend: SendFn | null = null;
-  // task_* events that arrived DURING the active foreground turn. They're not
-  // emitted live (would interleave with the turn's content stream); instead we
-  // flush them at the turn's close. Critical: a backgrounded task that COMPLETES
-  // before the foreground result must still be flushed — otherwise it's lost
-  // (the close snapshot only carries still-running tasks). See DECISIONS #69/#75.
-  let pendingForegroundTaskEvents: { kind: TaskEventKind; task: NormalizedTask }[] = [];
 
   /** The send fn to route an inbound permission/picker request to: the turn
    *  the SDK is currently working (server turn takes precedence during an
@@ -590,7 +584,6 @@ export function createClaudeBackend(): ServerBackend {
     pendingPush.length = 0;
     if (activeForeground) stuck.unshift(activeForeground);
     activeForeground = null;
-    pendingForegroundTaskEvents = [];
     for (const t of stuck) {
       t.turnSend({ type: 'status', state: 'idle' });
       t.resolve();
@@ -658,14 +651,10 @@ export function createClaudeBackend(): ServerBackend {
     const turn = activeForeground;
     if (!turn) return;
     activeForeground = null;
-    // Flush the task events that fired mid-turn (suppressed in routeTask). This
-    // includes terminal events for tasks that settled before this result — they
-    // must reach the renderer even though the running-only snapshot below omits
-    // them. See DECISIONS #75.
-    if (lastTurnSend) for (const ev of pendingForegroundTaskEvents) lastTurnSend({ type: 'task_event', kind: ev.kind, task: ev.task });
-    pendingForegroundTaskEvents = [];
     // Snapshot the still-running background tasks for reconciliation at the turn
-    // boundary (renderer upserts by id; terminal ones were flushed above).
+    // boundary. Each task was already emitted live in routeTask; this is a
+    // belt-and-braces authoritative running-set, idempotently upserted by the
+    // renderer. See #75.
     const running = [...backgroundTasks.values()].filter((t) => !t.done);
     if (running.length > 0 && lastTurnSend) lastTurnSend({ type: 'task_event', kind: 'snapshot', tasks: running });
     // Persist the latest SDK session id once per turn.
@@ -772,15 +761,16 @@ export function createClaudeBackend(): ServerBackend {
     }
     backgroundTasks.set(norm.task.id, norm.task);
     if (norm.outputFile) taskOutputFiles.set(norm.task.id, norm.outputFile);
-    // Emit individually only when no foreground turn is consuming. A task_* that
-    // fires mid-turn is accumulated and flushed at the turn's close (below) — both
-    // started AND terminal events, so a task that settles before the foreground
-    // result is still surfaced (not silently dropped by the running-only snapshot).
-    if (!activeForeground) {
-      if (lastTurnSend) lastTurnSend({ type: 'task_event', kind: norm.kind, task: norm.task });
-    } else {
-      pendingForegroundTaskEvents.push({ kind: norm.kind, task: norm.task });
-    }
+    // Emit LIVE — even mid-foreground-turn. task_event is turnId-less and lands
+    // in the sticky BackgroundTasksPanel, a separate lane from the turn's content
+    // stream, so emitting it now does NOT interleave with the reply — the panel
+    // updates as each task starts and settles, instead of all cards popping out
+    // at the turn's close. Safe because a SYNC Bash does NOT emit task_started
+    // (spike-confirmed, scripts/spike-sync-vs-bg.ts) — only genuinely backgrounded
+    // tasks do — so live emission never shows a spurious card for a foreground
+    // shell call. This also surfaces a task that settles before the foreground
+    // result (the running-only close snapshot would omit it). See #75.
+    if (lastTurnSend) lastTurnSend({ type: 'task_event', kind: norm.kind, task: norm.task });
   }
 
   return {
