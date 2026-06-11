@@ -113,6 +113,24 @@ describe('agentTabStore — applyTaskEvent (background tasks)', () => {
     expect(__getTabForTests(TAB)!.backgroundTasks.map((t) => t.id)).toEqual(['t2']);
   });
 
+  it('tombstones a removed id — a later task_notification cannot resurrect it', () => {
+    applyTaskEvent(TAB, { kind: 'started', task: task('t1') });
+    removeBackgroundTask(TAB, 't1');
+    // The SDK's 'stopped' echo (and any turn-boundary snapshot) arrives AFTER
+    // the user deleted the card — it must not re-add it.
+    applyTaskEvent(TAB, { kind: 'done', task: task('t1', { status: 'stopped', done: true }) });
+    applyTaskEvent(TAB, { kind: 'snapshot', tasks: [task('t1')] });
+    expect(__getTabForTests(TAB)!.backgroundTasks).toEqual([]);
+  });
+
+  it('clearMessages resets the tombstone (a reused id can appear again)', async () => {
+    applyTaskEvent(TAB, { kind: 'started', task: task('t1') });
+    removeBackgroundTask(TAB, 't1');
+    await clearMessages(TAB);
+    applyTaskEvent(TAB, { kind: 'started', task: task('t1') });
+    expect(__getTabForTests(TAB)!.backgroundTasks.map((t) => t.id)).toEqual(['t1']);
+  });
+
   it('clearMessages also clears background tasks (session wiped)', async () => {
     applyTaskEvent(TAB, { kind: 'started', task: task('t1') });
     await clearMessages(TAB);

@@ -151,6 +151,10 @@ export function createFakeBackend(): ServerBackend {
   // remote output_file). Cleared on dispose.
   const taskOutputs = new Map<string, string>();
   let abortController: AbortController | null = null;
+  // Most-recent turn's send — reused to emit out-of-turn task_events (the
+  // 'stopped' echo from stopTask), mirroring how the claude backend routes
+  // task_notifications through its persistent session. See DECISIONS #69.
+  let lastSend: SendFn | null = null;
 
   async function runStep(
     step: string,
@@ -311,6 +315,7 @@ export function createFakeBackend(): ServerBackend {
     async query(input: QueryInput, send: SendFn): Promise<void> {
       abortController = new AbortController();
       const signal = abortController.signal;
+      lastSend = send;
 
       // Config-edit turn: mirror the real providers — emit a `system` divider
       // and close the turn. No scenario chain runs (prompt is empty).
@@ -379,6 +384,17 @@ export function createFakeBackend(): ServerBackend {
       const out = taskOutputs.get(taskId);
       if (out === undefined) throw new Error(`No output for task ${taskId}`);
       return out;
+    },
+
+    // Mirror claude: stopping a task emits a terminal 'stopped' task_event on the
+    // turnId-less lane (here via the last turn's send), which the panel waits for
+    // before removing the card. No-op if no turn has run yet.
+    async stopTask(taskId: string): Promise<void> {
+      lastSend?.({
+        type: 'task_event',
+        kind: 'done',
+        task: { id: taskId, type: 'shell', label: `bg ${taskId}`, status: 'stopped', summary: `bg ${taskId} stopped`, done: true },
+      });
     },
   };
 }

@@ -91,4 +91,22 @@ test.describe('background tasks panel via fake provider', () => {
     await item.locator('.agent-task-dismiss').click();
     await expect(page.locator('.agent-tasks-panel')).toHaveCount(0, { timeout: 5_000 });
   });
+
+  test('running task: × stops it through the SDK, then removes the card on confirmation', async ({ shelfApp: { page } }) => {
+    await setupProject(page);
+    await openAgentTab(page);
+    await sendAgentPrompt(page, 'task:t1');
+
+    const panel = page.locator('.agent-tasks-panel:visible');
+    await expect(panel).toBeVisible({ timeout: 5_000 });
+    const item = panel.locator('.agent-task-item.agent-task-running');
+    await expect(item).toBeVisible();
+
+    // × on a RUNNING task must not just hide it: it sends stopTask to the
+    // backend, which echoes a terminal 'stopped' task_event. The panel keeps the
+    // card ("stopping…") until that confirmation arrives, then removes it — so
+    // the panel only disappears once the stop round-tripped through the SDK.
+    await item.locator('.agent-task-dismiss').click();
+    await expect(page.locator('.agent-tasks-panel')).toHaveCount(0, { timeout: 5_000 });
+  });
 });

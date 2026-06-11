@@ -82,6 +82,10 @@ export interface AgentTabState {
   // Background tasks (turnId-less side-channel). Upserted by id from task_event;
   // ordered by first-seen. See DECISIONS #69.
   backgroundTasks: NormalizedTask[];
+  // Ids the user deleted — tombstoned so a later task_notification (e.g. the
+  // 'stopped' echo after stopTask, or a turn-boundary snapshot) can't resurrect
+  // a card the user already dismissed. Cleared on /clear.
+  dismissedTaskIds: Set<string>;
 
   // status (display only — what backend reports)
   isStreaming: boolean;
@@ -321,6 +325,7 @@ export function initTab(tabId: string, opts: InitTabOpts) {
     queuedMessages: [],
     currentPlan: '',
     backgroundTasks: [],
+    dismissedTaskIds: new Set(),
     isStreaming: false,
     // Warm-start from intent so StatusBar doesn't flash "—" on mount.
     // First capabilities event overwrites with backend-reported actual.
@@ -580,7 +585,7 @@ export async function clearMessages(tabId: string) {
   }
   // Clear background tasks too — the backend clears its task map on /clear,
   // so the panel must not keep showing stale tasks from the wiped session.
-  update(tabId, (prev) => ({ ...prev, messages: [], backgroundTasks: [] }));
+  update(tabId, (prev) => ({ ...prev, messages: [], backgroundTasks: [], dismissedTaskIds: new Set() }));
   await clearAgentSession(tab.sessionId).catch((err) => {
     console.error('[agentTabStore] clearAgentSession failed', err);
   });
@@ -699,16 +704,26 @@ export function applyTaskEvent(tabId: string, event: TaskEvent) {
     const incoming = event.kind === 'snapshot' ? (event.tasks ?? []) : (event.task ? [event.task] : []);
     if (incoming.length === 0) return prev;
     const byId = new Map(prev.backgroundTasks.map((t) => [t.id, t]));
-    for (const t of incoming) byId.set(t.id, t);
+    for (const t of incoming) {
+      if (prev.dismissedTaskIds.has(t.id)) continue; // user deleted it — never resurrect
+      byId.set(t.id, t);
+    }
     return { ...prev, backgroundTasks: [...byId.values()] };
   });
 }
 
-/** Dismiss a single background task card (renderer-local display action). */
+/**
+ * Remove a background task card and tombstone its id so a later task_notification
+ * can't bring it back. For a still-running task the caller is expected to have
+ * already sent stopTask to the SDK — this only touches renderer-local display.
+ */
 export function removeBackgroundTask(tabId: string, id: string) {
   update(tabId, (prev) => {
-    if (!prev.backgroundTasks.some((t) => t.id === id)) return prev;
-    return { ...prev, backgroundTasks: prev.backgroundTasks.filter((t) => t.id !== id) };
+    const present = prev.backgroundTasks.some((t) => t.id === id);
+    if (!present && prev.dismissedTaskIds.has(id)) return prev; // already gone + tombstoned
+    const dismissedTaskIds = new Set(prev.dismissedTaskIds);
+    dismissedTaskIds.add(id);
+    return { ...prev, backgroundTasks: prev.backgroundTasks.filter((t) => t.id !== id), dismissedTaskIds };
   });
 }
 
