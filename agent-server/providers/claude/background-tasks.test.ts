@@ -105,6 +105,75 @@ describe('claude detached-loop background tasks', () => {
     expect(sent.filter((m) => m.type === 'status' && (m as any).state === 'idle')).toHaveLength(1);
   });
 
+  it('keeps N background tasks distinct — 5 task_started in one turn → snapshot of 5 (no collapse)', async () => {
+    // Repro for "5 launched, panel shows 1". Real SDK (spike-bg-notify, 5×
+    // run_in_background) emits 5 task_started with 5 DISTINCT task_ids, one per
+    // tool_use_id — no reuse. So if a card is lost it must be in our path. This
+    // pins the provider: 5 mid-turn task_started must be accumulated and snapshot
+    // out as 5 distinct tasks (the renderer then upserts 5 cards by id).
+    const started = (n: number) => ({
+      type: 'system', subtype: 'task_started', task_id: `bg${n}`,
+      description: `sleep ${n}`, task_type: 'local_bash', tool_use_id: `toolu_${n}`,
+    });
+    const { it, release } = controllableQuery(
+      [INIT, FG_REPLY, started(1), started(2), started(3), started(4), started(5), FG_RESULT],
+      [],
+    );
+    sdkQueryMock.mockImplementation(() => it);
+
+    const sent: OutgoingMessage[] = [];
+    const backend = createClaudeBackend();
+    disposer = () => backend.dispose();
+
+    await backend.query({ prompt: 'go', cwd: '/tmp' } as any, (m) => sent.push(m));
+    release();
+    await flush();
+
+    const snap = sent.find((m) => m.type === 'task_event' && (m as any).kind === 'snapshot') as any;
+    expect(snap).toBeTruthy();
+    expect(snap.tasks.map((t: any) => t.id)).toEqual(['bg1', 'bg2', 'bg3', 'bg4', 'bg5']);
+    expect(new Set(snap.tasks.map((t: any) => t.id)).size).toBe(5); // distinct, not collapsed
+  });
+
+  it('a background task that finishes BEFORE the foreground result is still surfaced (not dropped)', async () => {
+    // The "5 launched, 1 shown" root cause: mid-turn task_* are accumulated (not
+    // emitted individually), and the turn-close snapshot only carries STILL-RUNNING
+    // tasks. So a backgrounded task that completes before the foreground result is
+    // marked done in the map → excluded from the snapshot → never reaches the
+    // renderer at all. Here bg1 completes mid-turn, bg2 stays running; BOTH must
+    // surface (bg1 as completed, bg2 as running).
+    const started = (n: number) => ({
+      type: 'system', subtype: 'task_started', task_id: `bg${n}`,
+      description: `cmd ${n}`, task_type: 'local_bash', tool_use_id: `toolu_${n}`,
+    });
+    const bg1Done = { type: 'system', subtype: 'task_notification', task_id: 'bg1', status: 'completed', summary: 'bg1 done', output_file: '/tmp/bg1' };
+    const { it, release } = controllableQuery(
+      [INIT, FG_REPLY, started(1), started(2), bg1Done, FG_RESULT],
+      [],
+    );
+    sdkQueryMock.mockImplementation(() => it);
+
+    const sent: OutgoingMessage[] = [];
+    const backend = createClaudeBackend();
+    disposer = () => backend.dispose();
+
+    await backend.query({ prompt: 'go', cwd: '/tmp' } as any, (m) => sent.push(m));
+    release();
+    await flush();
+
+    // Reconstruct what the renderer would hold after applying every task_event
+    // (mirrors applyTaskEvent's by-id upsert over started/done/snapshot).
+    const seen = new Map<string, any>();
+    for (const m of sent) {
+      if (m.type !== 'task_event') continue;
+      const ev = m as any;
+      for (const t of ev.kind === 'snapshot' ? (ev.tasks ?? []) : (ev.task ? [ev.task] : [])) seen.set(t.id, t);
+    }
+    expect([...seen.keys()].sort()).toEqual(['bg1', 'bg2']); // bg1 must NOT be dropped
+    expect(seen.get('bg1')).toMatchObject({ id: 'bg1', status: 'completed', done: true });
+    expect(seen.get('bg2')).toMatchObject({ id: 'bg2', status: 'running', done: false });
+  });
+
   it('surfaces the auto-resume prose as a server-initiated turn (M3: turn_started + reply + idle, fresh turnId)', async () => {
     // Regression for the M3 gap: when a backgrounded task finishes the SDK
     // auto-resumes the agent to write a real reply. It used to be dropped on
