@@ -29,9 +29,18 @@ import {
 export function bindAgentStoreSubscriptions(): () => void {
   const offMessage = onAgent('agent:onMessage', ({ tabId, msg }) => {
     const tab = peekAgentTab(tabId);
-    if (!tab) return;  // tab not initialized yet — drop
+    if (!tab) {
+      console.warn('[agent] message for uninitialized tab — dropping', { tabId, msgType: (msg as any)?.msgType });
+      return;
+    }
     const built = buildAgentMsg(msg, tab.provider);
-    if (!built) return;
+    if (!built) {
+      // Unknown msgType (buildAgentMsg default → null). Real content being
+      // dropped on the renderer side — log so an unhandled render primitive is
+      // visible instead of a message silently not showing. See DECISIONS #75.
+      console.warn('[agent] unhandled msgType — message dropped, not rendered', { tabId, msgType: (msg as any)?.msgType });
+      return;
+    }
     upsertMessage(tabId, built);
   });
 

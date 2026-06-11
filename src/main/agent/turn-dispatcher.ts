@@ -133,7 +133,14 @@ export function createTurnDispatcher(
     }
 
     const event = parseRemoteMessage(m);
-    if (!event) return;
+    if (!event) {
+      // parseRemoteMessage couldn't build an AgentEvent (unknown type / unknown
+      // msgType / malformed payload). This is real turn content being dropped —
+      // log it so an unrecognized wire shape is visible instead of silently
+      // vanishing (e.g. "tool result not showing").
+      log.info('agent-remote', `turn ${turnId}: unparseable message dropped: type=${m?.type}${m?.msgType ? `/${m.msgType}` : ''}`);
+      return;
+    }
     turn.events.push(event);
     if (event.type === 'status' && (event.payload as any).state === 'idle') {
       turn.done = true;

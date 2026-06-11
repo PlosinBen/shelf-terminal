@@ -756,10 +756,20 @@ export function createClaudeBackend(): ServerBackend {
     const any = msg as any;
     if (!(typeof any.subtype === 'string' && any.subtype.startsWith('task_'))) return;
     const id = any.task_id as string | undefined;
-    if (typeof id !== 'string' || !id || ambientTaskIds.has(id)) return;
+    if (typeof id !== 'string' || !id) {
+      console.error('[claude] task_ message with no task_id — dropping (a card may go missing)', { subtype: any.subtype });
+      return;
+    }
+    if (ambientTaskIds.has(id)) return; // known ambient/housekeeping task — intentionally hidden
     const norm = normalizeTaskMessage(msg, backgroundTasks.get(id));
     if (norm?.ambient) { ambientTaskIds.add(id); return; }
-    if (!norm) return;
+    if (!norm) {
+      // Unknown task_ subtype (or unparseable) — dropped silently before. Log so
+      // a new SDK task subtype that we don't handle is visible instead of a
+      // mysteriously-missing card. See #75.
+      console.error('[claude] unhandled task_ subtype — dropping', { subtype: any.subtype, task_id: id });
+      return;
+    }
     backgroundTasks.set(norm.task.id, norm.task);
     if (norm.outputFile) taskOutputFiles.set(norm.task.id, norm.outputFile);
     // Emit individually only when no foreground turn is consuming. A task_* that
