@@ -57,6 +57,9 @@ type InflightToolUseEntry =
    */
   | { kind: 'apply_patch'; subs: Array<{ msgId: string; spec: ApplyPatchFileSpec }> };
 const inflightToolUses = new Map<string, InflightToolUseEntry>();
+// SDK `session.on` event types we don't handle — logged once each (the switch
+// has no default, so an unrecognized/new type would otherwise vanish silently).
+const seenUnhandledCopilotEvents = new Set<string>();
 
 type PermissionResult =
   | { behavior: 'allow'; scope?: 'once' | 'session' }
@@ -688,6 +691,15 @@ export function createCopilotBackend(): ServerBackend {
           currentSend({ type: 'error', error: parts.join(' ') });
           break;
         }
+        default:
+          // No handler for this SDK event type. Most are intentional no-ops
+          // (lifecycle noise), but a NEW/renamed type we should render would
+          // vanish silently. Log each unseen type ONCE so drift is visible
+          // without spamming on every occurrence. See DECISIONS #75.
+          if (typeof event?.type === 'string' && !seenUnhandledCopilotEvents.has(event.type)) {
+            seenUnhandledCopilotEvents.add(event.type);
+            console.warn('[copilot] unhandled session event type (first occurrence)', { type: event.type });
+          }
       }
     });
     return session;
