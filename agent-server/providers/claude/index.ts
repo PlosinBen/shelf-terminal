@@ -614,7 +614,22 @@ export function createClaudeBackend(): ServerBackend {
 
     switch (action.lane) {
       case 'task': routeTask(msg); return;
-      case 'ignore': return;
+      case 'ignore':
+        // Diagnostic: a content-bearing message with NO active turn is being
+        // dropped here. In steady state this never fires — if it does, a turn
+        // boundary (init/result) was mis-attributed (router drift) or the SDK
+        // emitted assistant/tool content after the turn's `result` (active is
+        // already null). This is the otherwise-SILENT drop path for foreground
+        // replies / tool results ("tool use result not showing"). See #75.
+        if (msg.type === 'assistant' || msg.type === 'stream_event' || msg.type === 'user') {
+          console.error('[claude] router dropped content with no active turn', {
+            type: msg.type,
+            subtype: any.subtype,
+            pendingPush: router.pendingPush,
+            active: router.active,
+          });
+        }
+        return;
       case 'server':
         if (action.start) startServerTurn();
         routeServer(msg, !!action.close);
