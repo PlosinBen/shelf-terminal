@@ -3380,6 +3380,20 @@ button {
   cursor: pointer;
 }
 
+/* Expanded row: stop truncating — wrap label/summary to show the full text
+   (e.g. a long command). Top-align so the × stays put as the text grows tall. */
+.agent-task-row.agent-task-expanded {
+  align-items: flex-start;
+}
+.agent-task-row.agent-task-expanded .agent-task-label,
+.agent-task-row.agent-task-expanded .agent-task-summary,
+.agent-task-row.agent-task-expanded .agent-task-error {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  word-break: break-word;
+}
+
 .agent-task-icon {
   flex-shrink: 0;
   width: 1em;
@@ -3392,11 +3406,19 @@ button {
 .agent-task-item.agent-task-failed .agent-task-icon,
 .agent-task-item.agent-task-stopped .agent-task-icon { color: var(--agent-error, #e06c75); }
 
-.agent-task-label {
-  /* Shrink + ellipsize instead of pushing the row wide (which used to x-scroll
-     the panel and shove the × out of view). Full text stays on the title hover. */
-  flex: 0 1 auto;
+/* Middle column: the flexible, shrinkable text area (min-width:0 lets its
+   children ellipsize instead of x-scrolling the panel). Collapsed it holds just
+   the label; expanded it stacks label + summary + error vertically. */
+.agent-task-text {
+  flex: 1 1 auto;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.agent-task-label {
+  /* Collapsed → single truncated line; full text on the title hover. */
   color: var(--text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3405,10 +3427,7 @@ button {
 
 .agent-task-summary,
 .agent-task-error {
-  /* The typically-long field: absorb the slack and truncate FIRST (grows, so it
-     collapses before the label does). min-width:0 lets it actually shrink. */
-  flex: 1 1 auto;
-  min-width: 0;
+  /* Only rendered when expanded (where the rule below wraps them to full text). */
   color: var(--text-muted);
   overflow: hidden;
   text-overflow: ellipsis;

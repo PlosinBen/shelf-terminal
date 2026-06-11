@@ -30,8 +30,10 @@ interface OutputState {
  * Sticky "N tasks" indicator + collapsible list of background tasks (a
  * backgrounded Bash, subagent, etc.). Tasks arrive turnId-less via
  * `agent:onBackgroundTasks` → `applyTaskEvent` → `tab.backgroundTasks`.
- * Completed tasks can be clicked to fetch their full remote output (read on
- * the agent-server — main/renderer never touch the remote fs). A single × per
+ * Clicking a task row expands it: the label/summary stop truncating and wrap to
+ * show the full text (e.g. a long command), and a settled task additionally
+ * fetches its remote output (read on the agent-server — main/renderer never
+ * touch the remote fs). A single × per
  * task deletes it: a settled task is just dismissed; a running task is first
  * stopped through the SDK (stopTask) and only leaves the list once the SDK
  * confirms it settled (or a fallback timeout fires). Renders nothing when
@@ -43,7 +45,9 @@ export function BackgroundTasksPanel({ tabId }: Props) {
   const runningCount = tasks.filter((t) => !t.done).length;
   const [override, setOverride] = useState<boolean | null>(null);
   const expanded = override ?? runningCount > 0;
-  const [openOutputs, setOpenOutputs] = useState<Record<string, OutputState>>({});
+  // Expanded rows (by id). Presence = expanded (label/summary wrap to full text);
+  // for a settled task the value also carries its fetched output state.
+  const [expandedTasks, setExpandedTasks] = useState<Record<string, OutputState>>({});
   // Ids the user clicked × on while still running — kept visible as "stopping…"
   // until the SDK confirms (task becomes done → auto-removed below) or the
   // fallback timer fires.
@@ -94,19 +98,22 @@ export function BackgroundTasksPanel({ tabId }: Props) {
     ? `${tasks.length} task${tasks.length > 1 ? 's' : ''} · ${runningCount} running`
     : `${tasks.length} task${tasks.length > 1 ? 's' : ''}`;
 
-  const toggleOutput = (task: NormalizedTask) => {
-    if (!task.done) return; // output only exists once the task settled
-    setOpenOutputs((prev) => {
+  const toggleExpand = (task: NormalizedTask) => {
+    setExpandedTasks((prev) => {
       if (prev[task.id]) {
         const next = { ...prev };
         delete next[task.id];
         return next;
       }
-      // Open + kick off the fetch.
-      void window.shelfApi.agent.fetchTaskOutput(tabId, task.id)
-        .then((content) => setOpenOutputs((p) => (p[task.id] ? { ...p, [task.id]: { loading: false, content } } : p)))
-        .catch((err: Error) => setOpenOutputs((p) => (p[task.id] ? { ...p, [task.id]: { loading: false, error: err.message } } : p)));
-      return { ...prev, [task.id]: { loading: true } };
+      // Expanding. A settled task also fetches its remote output; a running task
+      // just reveals its full (now wrapping) label/summary — no output yet.
+      if (task.done) {
+        void window.shelfApi.agent.fetchTaskOutput(tabId, task.id)
+          .then((content) => setExpandedTasks((p) => (p[task.id] ? { ...p, [task.id]: { loading: false, content } } : p)))
+          .catch((err: Error) => setExpandedTasks((p) => (p[task.id] ? { ...p, [task.id]: { loading: false, error: err.message } } : p)));
+        return { ...prev, [task.id]: { loading: true } };
+      }
+      return { ...prev, [task.id]: { loading: false } };
     });
   };
 
@@ -119,14 +126,22 @@ export function BackgroundTasksPanel({ tabId }: Props) {
       {expanded && (
         <ul className="agent-tasks-list">
           {tasks.map((t) => {
-            const out = openOutputs[t.id];
+            const out = expandedTasks[t.id];
+            const isExpanded = !!out;
             return (
               <li key={t.id} className={`agent-task-item agent-task-${t.status}`}>
-                <div className={`agent-task-row ${t.done ? 'agent-task-clickable' : ''}`} onClick={() => toggleOutput(t)}>
+                <div
+                  className={`agent-task-row agent-task-clickable ${isExpanded ? 'agent-task-expanded' : ''}`}
+                  onClick={() => toggleExpand(t)}
+                >
                   <span className="agent-task-icon">{STATUS_ICON[t.status] ?? '•'}</span>
-                  <span className="agent-task-label" title={t.label}>{t.label}</span>
-                  {t.summary && <span className="agent-task-summary" title={t.summary}>{t.summary}</span>}
-                  {t.error && <span className="agent-task-error" title={t.error}>{t.error}</span>}
+                  <div className="agent-task-text">
+                    {/* Collapsed: just the description (truncated). Expanded:
+                        description + summary + error stack vertically, full text. */}
+                    <span className="agent-task-label" title={t.label}>{t.label}</span>
+                    {isExpanded && t.summary && <span className="agent-task-summary">{t.summary}</span>}
+                    {isExpanded && t.error && <span className="agent-task-error">{t.error}</span>}
+                  </div>
                   {stopping[t.id]
                     ? <span className="agent-task-stopping" title="Stopping…">stopping…</span>
                     : (
@@ -139,7 +154,7 @@ export function BackgroundTasksPanel({ tabId }: Props) {
                       </button>
                     )}
                 </div>
-                {out && (
+                {isExpanded && t.done && (
                   <pre className="agent-task-output">
                     {out.loading ? 'Loading…' : (out.error ? `Error: ${out.error}` : (out.content || '(empty output)'))}
                   </pre>

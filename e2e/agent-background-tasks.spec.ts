@@ -81,10 +81,12 @@ test.describe('background tasks panel via fake provider', () => {
 
     const item = panel.locator('.agent-task-item.agent-task-completed');
     await expect(item).toBeVisible();
-    await expect(item.locator('.agent-task-summary')).toContainText('completed (exit 0)');
+    // Collapsed shows only the description — summary is hidden until expanded.
+    await expect(item.locator('.agent-task-summary')).toHaveCount(0);
 
-    // Click the (clickable) completed row → fetchTaskOutput → output shows.
+    // Click the row → expand: summary + output appear (fetchTaskOutput).
     await item.locator('.agent-task-row').click();
+    await expect(item.locator('.agent-task-summary')).toContainText('completed (exit 0)', { timeout: 5_000 });
     await expect(item.locator('.agent-task-output')).toContainText('output of t1', { timeout: 5_000 });
 
     // Dismiss the only task → panel disappears.
