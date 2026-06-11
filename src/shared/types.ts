@@ -180,7 +180,18 @@ export const DEFAULT_AGENT_DISPLAY: Record<AgentDisplayKey, AgentDisplayMode> = 
 // ── Connection types ──
 
 export type LocalConnection = { type: 'local' };
-export type SSHConnection = { type: 'ssh'; host: string; port: number; user: string; password?: string };
+export type SSHConnection = {
+  type: 'ssh'; host: string; port: number; user: string; password?: string;
+  /**
+   * Idle-shutdown boundary (minutes): if the remote agent-server gets no `ping`
+   * for this long (app closed / laptop slept), it self-exits to free remote
+   * resources — the host is NOT fate-shared with the client (unlike local/
+   * docker/wsl, which suspend together, so the watchdog is ssh-only). `0` =
+   * always keep alive; absent → default 5min (applied in remote.ts). See
+   * DECISIONS #73.
+   */
+  idleShutdownMinutes?: number;
+};
 export type WSLConnection = { type: 'wsl'; distro: string };
 export type DockerConnection = { type: 'docker'; container: string };
 export type Connection = LocalConnection | SSHConnection | WSLConnection | DockerConnection;

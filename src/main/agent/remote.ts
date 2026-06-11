@@ -567,7 +567,13 @@ async function spawnAgentServer(
     const shellPrefix = initScript
       ? `eval '${initScript.replace(/'/g, "'\\''")}' >/dev/null 2>&1; `
       : '';
-    const cmd = `${shellPrefix}${testEnv}exec ${nodeBin} ${indexPath}`;
+    // Idle-shutdown watchdog — ssh ONLY (the remote host is not fate-shared with
+    // the client, so it keeps burning resources while the laptop sleeps). Other
+    // transports suspend together → never pass it. Default 5min; `0` keeps it
+    // alive. See DECISIONS #73.
+    const idleMin = connection.idleShutdownMinutes ?? 5;
+    const idleArg = idleMin > 0 ? ` --idle-shutdown-min=${idleMin}` : '';
+    const cmd = `${shellPrefix}${testEnv}exec ${nodeBin} ${indexPath}${idleArg}`;
     const args = [
       '-o', 'ControlMaster=auto',
       '-o', `ControlPath=/tmp/shelf-ssh-${connection.host}-${connection.port}-${connection.user}`,

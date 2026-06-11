@@ -246,6 +246,27 @@ async function handleStop() {
   }
 }
 
+// ── Idle-shutdown watchdog (ssh only) ────────────────────────────────────────
+// `--idle-shutdown-min=N` is passed ONLY by the ssh spawn path (remote.ts): the
+// remote host is not fate-shared with the client, so it keeps running while the
+// laptop sleeps / app closes. When no `ping` arrives for N minutes, self-exit to
+// free remote resources; the client respawns + resumes on reconnect. Fate-shared
+// transports (local/docker/wsl) suspend with the host and never pass this arg.
+// N is parsed as a float so tests can use sub-minute values. See DECISIONS #73.
+const idleArg = process.argv.find((a) => a.startsWith('--idle-shutdown-min='));
+const IDLE_SHUTDOWN_MS = idleArg ? Math.max(0, Number(idleArg.split('=')[1]) || 0) * 60_000 : 0;
+let watchdogTimer: NodeJS.Timeout | undefined;
+function resetWatchdog() {
+  if (!IDLE_SHUTDOWN_MS) return;
+  if (watchdogTimer) clearTimeout(watchdogTimer);
+  watchdogTimer = setTimeout(() => {
+    console.error(`[agent-server] idle-shutdown: no ping for ${IDLE_SHUTDOWN_MS / 60_000}min — self-exiting`);
+    for (const b of backends.values()) b.dispose();
+    process.exit(0);
+  }, IDLE_SHUTDOWN_MS);
+}
+resetWatchdog(); // arm from boot — if the client never pings, it's already gone
+
 const rl = readline.createInterface({ input: process.stdin, terminal: false });
 
 // Serialize send handling. `rl.on('line')` fires sync per stdin line and the
@@ -283,10 +304,12 @@ rl.on('line', (line) => {
       handleStop();
       break;
     case 'ping':
-      // Heartbeat: echo `seq` (client measures RTT on its own clock) and refresh
-      // the version-dir liveness lease the cleanup sweep reads. See §5.9.
+      // Heartbeat: echo `seq` (client measures RTT on its own clock), refresh the
+      // version-dir liveness lease the cleanup sweep reads (§5.9), and reset the
+      // ssh idle-shutdown watchdog (the client is alive).
       send({ type: 'pong', seq: msg.seq });
       touchHeartbeats();
+      resetWatchdog();
       break;
     case 'resolve_permission':
       if (activeBackend && msg.toolUseId !== undefined) {
