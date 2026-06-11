@@ -51,12 +51,20 @@ jobs:
     # clock vs parallel.
     strategy:
       max-parallel: 1
+      # One platform's failure must not cancel the others — each produces an
+      # independent installer for the same draft release.
+      fail-fast: false
 
       matrix:
         include:
           - os: macos-latest
             platform: mac
-          - os: windows-latest
+          # Pin windows-2022: GitHub is redirecting `windows-latest` to the
+          # windows-2025 image, whose Visual Studio layout node-gyp can't find
+          # ("Could not find any Visual Studio installation to use"), breaking
+          # the node-pty native rebuild. windows-2022 ships VS2022 that node-gyp
+          # detects.
+          - os: windows-2022
             platform: win
           - os: ubuntu-22.04
             platform: linux
