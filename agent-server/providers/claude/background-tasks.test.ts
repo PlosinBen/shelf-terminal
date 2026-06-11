@@ -219,6 +219,13 @@ describe('claude detached-loop background tasks', () => {
     const started = sent.find((m) => m.type === 'turn_started') as any;
     expect(started?.turnId).toMatch(/^t-/);
 
+    // The auto-resume drives busy state: a streaming status tagged with the
+    // server turnId is emitted on open (main forwards it only when no foreground
+    // turn is in flight, so the spinner reflects the agent writing). See #76.
+    const serverStreaming = sent.find((m) => m.type === 'status' && (m as any).state === 'streaming'
+      && (m as any).turnId === started.turnId);
+    expect(serverStreaming).toBeTruthy();
+
     // The prose is re-emitted as a normal reply tagged with that turnId and
     // flagged startsTurn so the renderer opens a new turn block for it.
     const reply = sent.find((m) => m.type === 'message' && (m as any).msgType === 'reply'

@@ -281,6 +281,7 @@ export function createFakeBackend(): ServerBackend {
       const content = step.slice('serverturn:'.length);
       const turnId = mintId('t');
       send({ type: 'turn_started', turnId });
+      send({ type: 'status', state: 'streaming', turnId });
       send({ type: 'message', msgId: mintId('m'), msgType: 'reply', content, turnId, startsTurn: true });
       send({ type: 'status', state: 'idle', turnId });
       return;

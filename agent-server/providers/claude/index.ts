@@ -715,6 +715,11 @@ export function createClaudeBackend(): ServerBackend {
     if (!base) { activeServer = null; return; }
     const turnId = `t-${randomUUID().slice(0, 8)}`;
     base({ type: 'turn_started', turnId });
+    // Drive busy state for the auto-resume: streaming on open, idle on close
+    // (routeServer). main forwards these ONLY when no foreground turn is in
+    // flight, so the spinner reflects the agent actively writing instead of a
+    // frozen "idle". See DECISIONS #76.
+    base({ type: 'status', state: 'streaming', turnId });
     const st: ServerTurn = {
       turnId,
       blockMsgIds: createBlockMsgIdState(),

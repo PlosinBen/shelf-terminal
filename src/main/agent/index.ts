@@ -159,16 +159,18 @@ async function startSession(
     // never touch the turn's busy/idle state here. See DECISIONS #69.
     (ev) => send(IPC.AGENT_BACKGROUND_TASKS, tabId, ev),
     // Server-initiated turn (auto-resume prose after a background task). Drain
-    // the turn's events into the renderer like a normal turn, but SKIP its
-    // status events: the tab's busy/idle spinner belongs to the user's
-    // foreground turn, and forwarding this turn's idle would clear the spinner
-    // of an unrelated in-flight foreground turn. The dispatcher still ends the
-    // generator on idle independently. See DECISIONS #69.
+    // the turn's events into the renderer like a normal turn. Its status
+    // (streaming on open, idle on close) drives the spinner ONLY when no
+    // foreground turn is in flight (session.state !== 'streaming') — so a pure
+    // auto-resume shows busy while the agent writes instead of a frozen "idle".
+    // If a foreground turn IS active (user sent a new prompt mid-auto-resume),
+    // skip the status so this turn's idle doesn't clear the foreground spinner.
+    // The dispatcher still ends the generator on idle independently. See #69/#76.
     (turnId, events) => {
       void (async () => {
         try {
           for await (const ev of events) {
-            if (ev.type === 'status') continue;
+            if (ev.type === 'status' && sessions.get(tabId)?.state === 'streaming') continue;
             dispatchEvent(tabId, ev);
           }
         } catch (err: any) {
