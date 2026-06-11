@@ -56,3 +56,4 @@ Co-Authored-By: <model name> <noreply@anthropic.com>
 - `package.json` version 必須與 tag 一致，否則 electron-builder 不會建立對應的 GitHub Release
 - Version bump + release note 合在同一個 commit，tag 打在該 commit 上
 - GitHub Actions 由 tag push 觸發 build，產出 draft release
+- **Tag push 出去後視為不可變 —— 絕對不要移動 / 覆蓋既有 tag**。remote 對 tag 有 ref protection（刪除/重建要 admin bypass，且會重觸發一輪 build、留下混亂歷史）。build 失敗時：修好問題，**bump 下一個 patch 版號重發**（例：v2.6.1 build 掛 → 修完發 v2.6.2），失敗的 tag 原地留著即可，不用回收。
