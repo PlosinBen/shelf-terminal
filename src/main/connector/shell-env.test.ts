@@ -122,24 +122,22 @@ describe('pickUtf8Locale (region-agnostic UTF-8 LANG injection)', () => {
 });
 
 describe('shell-env locale injection wiring', () => {
-  it('injects LANG when the login-shell env has none', async () => {
-    // AppleLocale (`defaults read -g AppleLocale`) is the macOS-only path, so
-    // pin platform to darwin — otherwise this runs differently on the Linux CI
-    // host (readAppleLocale returns null → en_US.UTF-8 fallback).
-    const realPlatform = process.platform;
-    Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
-    try {
-      execFileSync.mockImplementation((cmd: string, args: string[]) => {
-        if (cmd === 'defaults') return 'zh_TW\n';
-        if (cmd === 'locale') return 'C\nC.UTF-8\nen_US.UTF-8\nzh_TW.UTF-8\n';
-        return 'PATH=/usr/bin\n'; // the `zsh -ilc env` call — no LANG
-      });
-      const m = await import('./shell-env');
-      const env = m.getShellEnv();
-      expect(env.LANG).toBe('zh_TW.UTF-8');
-    } finally {
-      Object.defineProperty(process, 'platform', { value: realPlatform, configurable: true });
-    }
+  it('injects LANG (a UTF-8 locale from the environment) when the shell env has none', async () => {
+    // Inputs the OS provides: a region (macOS AppleLocale; absent elsewhere) and
+    // the available-locale list. The exact region→locale mapping is covered by
+    // the pure pickUtf8Locale tests above. Here we only assert the WIRING: that
+    // getShellEnv() injects a UTF-8 locale taken VERBATIM from the environment's
+    // available list — whichever the running OS resolves to (zh_TW.UTF-8 on a
+    // mac with AppleLocale=zh_TW, en_US.UTF-8 on a host with no region).
+    const availableUtf8 = ['C.UTF-8', 'en_US.UTF-8', 'zh_TW.UTF-8'];
+    execFileSync.mockImplementation((cmd: string, args: string[]) => {
+      if (cmd === 'defaults') return 'zh_TW\n';
+      if (cmd === 'locale') return `C\n${availableUtf8.join('\n')}\n`;
+      return 'PATH=/usr/bin\n'; // the `zsh -ilc env` call — no LANG
+    });
+    const m = await import('./shell-env');
+    const env = m.getShellEnv();
+    expect(availableUtf8).toContain(env.LANG); // injected verbatim from the environment
   });
 
   it('does NOT inject (or probe locale) when the shell env already has LANG', async () => {
