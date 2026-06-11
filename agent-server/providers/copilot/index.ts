@@ -57,8 +57,22 @@ type InflightToolUseEntry =
    */
   | { kind: 'apply_patch'; subs: Array<{ msgId: string; spec: ApplyPatchFileSpec }> };
 const inflightToolUses = new Map<string, InflightToolUseEntry>();
-// SDK `session.on` event types we don't handle — logged once each (the switch
-// has no default, so an unrecognized/new type would otherwise vanish silently).
+// Copilot SDK `session.on` event types we KNOWINGLY don't render — pure
+// lifecycle / already-covered-elsewhere. Enumerated (observed live, 2026-06) so
+// the switch default only warns for a genuinely NEW/unknown type instead of
+// spamming these benign ones on every turn. Notes on the non-obvious ones:
+//   permission.requested/completed → handled via registered onPermissionRequest
+//   session.idle / assistant.turn_end → idle is driven by sendAndWait() resolving
+//   session.task_complete → final reply handled via tool.execution_start(task_complete)
+const KNOWN_IGNORED_COPILOT_EVENTS = new Set<string>([
+  'pending_messages.modified', 'session.skills_loaded', 'system.message',
+  'session.tools_updated', 'user.message', 'assistant.turn_start',
+  'assistant.turn_end', 'assistant.intent', 'hook.start', 'hook.end',
+  'permission.requested', 'permission.completed', 'tool.execution_partial_result',
+  'session.task_complete', 'session.idle',
+]);
+// Genuinely-unexpected types we've warned about once (dedup so a new type that
+// SHOULD be handled is visible without spamming).
 const seenUnhandledCopilotEvents = new Set<string>();
 
 type PermissionResult =
@@ -692,13 +706,15 @@ export function createCopilotBackend(): ServerBackend {
           break;
         }
         default:
-          // No handler for this SDK event type. Most are intentional no-ops
-          // (lifecycle noise), but a NEW/renamed type we should render would
-          // vanish silently. Log each unseen type ONCE so drift is visible
-          // without spamming on every occurrence. See DECISIONS #75.
-          if (typeof event?.type === 'string' && !seenUnhandledCopilotEvents.has(event.type)) {
+          // Known-benign lifecycle types are knowingly ignored (see the set
+          // above). Only a genuinely NEW/unknown type warns — once — so real
+          // SDK drift (an event we ought to render) is visible without spamming
+          // the benign ones every turn. See DECISIONS #75.
+          if (typeof event?.type === 'string'
+            && !KNOWN_IGNORED_COPILOT_EVENTS.has(event.type)
+            && !seenUnhandledCopilotEvents.has(event.type)) {
             seenUnhandledCopilotEvents.add(event.type);
-            console.warn('[copilot] unhandled session event type (first occurrence)', { type: event.type });
+            console.warn('[copilot] unrecognized session event type — not rendered (first occurrence)', { type: event.type });
           }
       }
     });
