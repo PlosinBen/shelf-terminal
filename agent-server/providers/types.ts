@@ -91,6 +91,11 @@ export type OutgoingMessage = WireEnvelope & (
   /** RPC response: full output of a background task (read from its remote
    *  output_file). One-shot, matched by requestId. See DECISIONS #69. */
   | { type: 'task_output'; requestId: string; content?: string; error?: string }
+  /** server→main request from an in-process bridge tool (app-level capabilities):
+   *  the handler runs in main against client-owned resources (skills-store), and
+   *  replies with `app_tool_result` matched by requestId. See
+   *  .agent/features/app-level-capabilities.md. */
+  | { type: 'app_tool'; requestId: string; op: string; args: Record<string, unknown> }
 
   // ── Per-turn control / status (turnId expected) ──────────────────────────
   | {

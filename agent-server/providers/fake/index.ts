@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { formatConfigAck } from '@shared/config-ack';
+import { callMain } from '../../app-tool-client';
 import type {
   OutgoingMessage,
   PickerResolvePayload,
@@ -269,6 +270,16 @@ export function createFakeBackend(): ServerBackend {
         kind: 'done',
         task: { id, type: 'shell', label: `bg ${id}`, status: 'completed', summary: `bg ${id} completed (exit 0)`, done: true },
       });
+      return;
+    }
+
+    // apptool:<op> — exercise the app-tool bridge end-to-end: call main via
+    // callMain(op) and render the result as a reply so an E2E can assert the
+    // round-trip (agent-server → main handler → skills-store → reply).
+    if (step.startsWith('apptool:')) {
+      const op = step.slice('apptool:'.length);
+      const res = await callMain(op);
+      send({ type: 'message', msgId: mintId('m'), msgType: 'reply', content: `apptool ${op} ${JSON.stringify(res)}` });
       return;
     }
 

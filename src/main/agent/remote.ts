@@ -11,6 +11,7 @@ import { getShellEnv } from '../connector/shell-env';
 import { createTurnDispatcher, type PermissionHandler } from './turn-dispatcher';
 import { getAppInstanceId } from '../app-instance-id';
 import { skillsSourceRoot, listSkillFilesRel, hashSkillsTree } from '../skills-projection';
+import { handleAppTool } from './app-tool';
 import {
   detectTargetFromProbe,
   targetId,
@@ -711,6 +712,21 @@ function wrapProcess(
           }
         }
         emitHealth();
+        continue;
+      }
+      // App-tool bridge — transport-level request/response (like pong), never a
+      // turn event. An in-process bridge tool on the agent-server asks main to
+      // act on a client-owned resource (skills-store); handle + reply by
+      // requestId. See .agent/features/app-level-capabilities.md.
+      if (parsed?.type === 'app_tool') {
+        const requestId = parsed.requestId;
+        const op = typeof parsed.op === 'string' ? parsed.op : '';
+        const args = (parsed.args && typeof parsed.args === 'object') ? parsed.args : {};
+        void handleAppTool(op, args).then((result) => {
+          try {
+            proc.stdin?.write(JSON.stringify({ type: 'app_tool_result', requestId, ...result }) + '\n');
+          } catch { /* stdin closed — bridge tool will time out / get a dead channel */ }
+        });
         continue;
       }
       dispatcher.feed(parsed);
