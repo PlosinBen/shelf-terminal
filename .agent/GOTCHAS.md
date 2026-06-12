@@ -337,6 +337,14 @@
 
 ---
 
+## 37. `skills-store.updateSkill` 是 upsert —— 對不存在的 name 會「靜默新建」
+
+**現象**: agent 經 `update_app_skill` 改一個**打錯/不存在**的 skill name，竟然**成功**並建出一顆新 skill（而非報錯）。
+
+**原因**: `updateSkill(currentName, content)` 在同名分支 `mkdir(recursive) + writeFile`、rename 分支來源不存在時也 `mkdir`，本質是 **upsert**。這是刻意的 —— `createSkill` flow 依賴它（建空 placeholder dir → `updateSkill` 寫內容）。但 agent bridge 的 `app_skill.update` 契約是「**只覆蓋既有**」，直接信任 store 就會 fall through 成新建。
+
+**解法**: 守門加在 **bridge 層**（`agent/app-tool.ts` 的 `app_skill.update`）：先 `getSkill(name) === null → 報錯`（指引去用 `create_app_skill`），再查 `isSkillLocked`。**不要把 `updateSkill` 改成非 upsert** —— 會打斷 create flow 的 placeholder 寫入。store 維持 upsert、由 bridge 補契約。見 DECISIONS-agent #77。
+
 ## Agent View: inferTabState 對 TUI 類 CLI 永遠回傳 cli_running
 
 **現象**: PM Agent 的 `inferTabState` 對 Claude Code、Copilot CLI 等 TUI 程式永遠回傳 `cli_running`，無法偵測 done/idle 狀態。
