@@ -107,11 +107,17 @@ function SkillsList({ skills, onPick }: { skills: SkillMeta[]; onPick: (name: st
     <div className="skills-list">
       {skills.map((s) => (
         <div key={s.name} className="skills-list-item" onClick={() => onPick(s.name)}>
-          <div className="skills-list-name">
-            {s.locked && <span className="skills-lock-badge" title="Locked — agent can't edit this skill">🔒</span>}
-            {s.name}
+          <div className="skills-list-main">
+            <div className="skills-list-name">{s.name}</div>
+            {s.description && <div className="skills-list-desc">{s.description}</div>}
           </div>
-          {s.description && <div className="skills-list-desc">{s.description}</div>}
+          <button
+            className={`skills-lock-toggle ${s.locked ? 'locked' : ''}`}
+            title={s.locked ? 'Locked against agent edits — click to unlock' : 'Lock against agent edits'}
+            onClick={(e) => { e.stopPropagation(); void window.shelfApi.skills.setLocked(s.name, !s.locked); }}
+          >
+            {s.locked ? '🔒' : '🔓'}
+          </button>
         </div>
       ))}
     </div>

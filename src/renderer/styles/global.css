@@ -3959,10 +3959,41 @@ button {
   padding: 10px 16px;
   border-bottom: 1px solid var(--border);
   cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.skills-list-main {
+  flex: 1;
+  min-width: 0;
 }
 
 .skills-list-item:hover {
   background: var(--surface);
+}
+
+/* Lock toggle sits at the row's edge. Unlocked is faded until row-hover so it
+   reads as a quiet affordance; locked stays visible as a status. */
+.skills-lock-toggle {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 4px;
+  border-radius: 4px;
+  opacity: 0;
+}
+
+.skills-list-item:hover .skills-lock-toggle,
+.skills-lock-toggle.locked {
+  opacity: 1;
+}
+
+.skills-lock-toggle:hover {
+  background: var(--border);
 }
 
 .skills-list-name {
