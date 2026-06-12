@@ -9,6 +9,12 @@ export function registerLogsHandlers(): void {
     return path.join(app.getPath('userData'), 'logs');
   });
 
+  // Fire-and-forget renderer diagnostic → main log file (persists at log level
+  // info/debug). Lets renderer-only UI flows be traced from the log file.
+  ipcMain.on(IPC.APP_DEBUG_LOG, (_e, tag: unknown, msg: unknown) => {
+    log.info(typeof tag === 'string' ? tag : 'renderer', typeof msg === 'string' ? msg : String(msg));
+  });
+
   ipcMain.handle(IPC.LOGS_CLEAR, () => {
     const logBaseDir = path.join(app.getPath('userData'), 'logs');
     if (fs.existsSync(logBaseDir)) {

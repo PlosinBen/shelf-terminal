@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAgentTab, removeBackgroundTask } from '../../agentTabStore';
+import { debugLog } from '../../debugLog';
 import type { NormalizedTask } from '../../../shared/types';
 
 // How long to wait for the SDK's terminal task_notification after stopTask
@@ -96,10 +97,20 @@ export function BackgroundTasksPanel({ tabId }: Props) {
   // Fetch a settled task's remote output into its expanded entry. Best-effort —
   // a fetch failure surfaces as the entry's error.
   const loadOutput = useCallback((taskId: string) => {
-    setExpandedTasks((p) => (p[taskId] ? { ...p, [taskId]: { loading: true } } : p));
+    // Create/replace the entry unconditionally — this is what opens the card for
+    // a click on an already-settled task. The .then/.catch keep the `p[taskId]?`
+    // guard so a collapse mid-fetch can't resurrect the entry.
+    debugLog('bg-tasks', `loadOutput fire id=${taskId.slice(0, 8)}`);
+    setExpandedTasks((p) => ({ ...p, [taskId]: { loading: true } }));
     window.shelfApi.agent.fetchTaskOutput(tabId, taskId)
-      .then((content) => setExpandedTasks((p) => (p[taskId] ? { ...p, [taskId]: { loading: false, content } } : p)))
-      .catch((err: Error) => setExpandedTasks((p) => (p[taskId] ? { ...p, [taskId]: { loading: false, error: err.message } } : p)));
+      .then((content) => {
+        debugLog('bg-tasks', `loadOutput ok id=${taskId.slice(0, 8)} len=${content?.length ?? 0}`);
+        setExpandedTasks((p) => (p[taskId] ? { ...p, [taskId]: { loading: false, content } } : p));
+      })
+      .catch((err: Error) => {
+        debugLog('bg-tasks', `loadOutput err id=${taskId.slice(0, 8)} ${err.message}`);
+        setExpandedTasks((p) => (p[taskId] ? { ...p, [taskId]: { loading: false, error: err.message } } : p));
+      });
   }, [tabId]);
 
   // A task expanded WHILE running takes the no-fetch branch in toggleExpand;
@@ -107,7 +118,10 @@ export function BackgroundTasksPanel({ tabId }: Props) {
   // stuck on "(empty output)". (Tasks expanded after settling already fetched.)
   useEffect(() => {
     for (const t of tasks) {
-      if (needsOutputFetch(t.done, expandedTasks[t.id])) loadOutput(t.id);
+      if (needsOutputFetch(t.done, expandedTasks[t.id])) {
+        debugLog('bg-tasks', `settle-fetch id=${t.id.slice(0, 8)} (expanded-while-running, now done)`);
+        loadOutput(t.id);
+      }
     }
   }, [tasks, expandedTasks, loadOutput]);
 
@@ -130,9 +144,11 @@ export function BackgroundTasksPanel({ tabId }: Props) {
 
   const toggleExpand = (task: NormalizedTask) => {
     if (expandedTasks[task.id]) {
+      debugLog('bg-tasks', `toggleExpand collapse id=${task.id.slice(0, 8)}`);
       setExpandedTasks((prev) => { const next = { ...prev }; delete next[task.id]; return next; });
       return;
     }
+    debugLog('bg-tasks', `toggleExpand open id=${task.id.slice(0, 8)} done=${task.done}`);
     // Expanding. A settled task fetches its remote output now; a running task
     // just reveals its full (now wrapping) label/summary — its output is fetched
     // by the effect above once it settles.

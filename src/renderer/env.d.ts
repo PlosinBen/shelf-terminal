@@ -93,6 +93,7 @@ interface ShelfApi {
   };
   app: {
     logsPath: () => Promise<string>;
+    debugLog: (tag: string, msg: string) => void;
   };
   pm: {
     send: (message: string) => Promise<void>;

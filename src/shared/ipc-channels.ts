@@ -72,6 +72,10 @@ export const IPC = {
 
   // App info
   APP_LOGS_PATH: 'app:logs-path',
+  // renderer→main fire-and-forget diagnostic log → main log file (persists when
+  // log level is info/debug). For tracing UI flows unobservable from outside the
+  // renderer. See src/renderer/debugLog.ts.
+  APP_DEBUG_LOG: 'app:debug-log',
 
   // Updater
   UPDATE_CHECK: 'update:check',

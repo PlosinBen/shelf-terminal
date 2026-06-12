@@ -134,6 +134,7 @@ contextBridge.exposeInMainWorld('shelfApi', {
   },
   app: {
     logsPath: (): Promise<string> => ipcRenderer.invoke(IPC.APP_LOGS_PATH),
+    debugLog: (tag: string, msg: string): void => ipcRenderer.send(IPC.APP_DEBUG_LOG, tag, msg),
   },
   pm: {
     send: (message: string) => ipcRenderer.invoke(IPC.PM_SEND, message),
