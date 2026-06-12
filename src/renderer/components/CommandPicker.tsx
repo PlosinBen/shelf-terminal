@@ -2,6 +2,26 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useStore, closeCommandPicker } from '../store';
 import type { QuickCommand } from '@shared/types';
 
+export type CommandPickerKeyAction = 'up' | 'down' | 'execute' | 'close' | 'none';
+
+/**
+ * Decide what a keydown means for the command picker. Pure + exported so the
+ * IME guard is unit-testable. While an IME composition is active (CJK candidate
+ * selection in the filter input), arrows/Enter/Esc drive the candidate window —
+ * defer EVERY key to the IME so the user can pick characters instead of
+ * accidentally moving the selection / running a command. See GOTCHAS.
+ */
+export function decideCommandPickerKey(key: string, isComposing: boolean): CommandPickerKeyAction {
+  if (isComposing) return 'none';
+  switch (key) {
+    case 'ArrowDown': return 'down';
+    case 'ArrowUp': return 'up';
+    case 'Enter': return 'execute';
+    case 'Escape': return 'close';
+    default: return 'none';
+  }
+}
+
 export function CommandPicker() {
   const { commandPickerVisible, projects, activeProjectIndex } = useStore();
   const [filter, setFilter] = useState('');
@@ -64,23 +84,20 @@ export function CommandPicker() {
   );
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    switch (e.key) {
-      case 'ArrowDown':
-        e.preventDefault();
+    const action = decideCommandPickerKey(e.key, e.nativeEvent.isComposing);
+    if (action === 'none') return;
+    e.preventDefault();
+    switch (action) {
+      case 'down':
         setSelectedIndex((i) => Math.min(i + 1, filtered.length - 1));
         break;
-      case 'ArrowUp':
-        e.preventDefault();
+      case 'up':
         setSelectedIndex((i) => Math.max(i - 1, 0));
         break;
-      case 'Enter':
-        e.preventDefault();
-        if (filtered[selectedIndex]) {
-          executeCommand(filtered[selectedIndex]);
-        }
+      case 'execute':
+        if (filtered[selectedIndex]) executeCommand(filtered[selectedIndex]);
         break;
-      case 'Escape':
-        e.preventDefault();
+      case 'close':
         closeCommandPicker();
         break;
     }

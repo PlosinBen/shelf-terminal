@@ -345,6 +345,16 @@
 
 **解法**: 守門加在 **bridge 層**（`agent/app-tool.ts` 的 `app_skill.update`）：先 `getSkill(name) === null → 報錯`（指引去用 `create_app_skill`），再查 `isSkillLocked`。**不要把 `updateSkill` 改成非 upsert** —— 會打斷 create flow 的 placeholder 寫入。store 維持 upsert、由 bridge 補契約。見 DECISIONS-agent #77。
 
+---
+
+## 38. 攔方向鍵/Enter 的 keydown handler 必須擋 IME composition，否則中文選字壞掉
+
+**現象**: 在面板的 free-text input 打中文，按 ↑/↓ 選字候選時，**被拿去切換選項**（還順手 blur 掉 input），無法選字；按 Enter 變成提前送出。
+
+**原因**: 面板用 `window.addEventListener('keydown', …, true)`（capture phase，要贏過 xterm/全域 combo）或元件 `onKeyDown` 攔 ArrowUp/Down/Enter 做選項導航。**IME 組字期間**，候選視窗就是靠這些鍵驅動 —— 若 handler 沒先看 `isComposing` 就 `preventDefault` + 改 state，等於把鍵從 IME 手上搶走。
+
+**解法**: handler **最前面**統一 `if (isComposing) return`（native event 用 `e.isComposing`；React SyntheticEvent 用 `e.nativeEvent.isComposing`），整組候選驅動鍵（方向、Enter、Space、Esc）一律讓 IME 先吃。把決策抽成純函式（`decidePickerKey` / `decideCommandPickerKey`）讓這條規則可單測。**只擋「有 focus 可編輯元素」的面板** —— 像 FolderPicker 那種「全域逐字攔截、沒有 `<input>`」的就沒有 composition、不適用。已套：`PickerPanel`（AskUserQuestion）、`CommandPicker`、`QuickNoteOverlay`（Enter）。
+
 ## Agent View: inferTabState 對 TUI 類 CLI 永遠回傳 cli_running
 
 **現象**: PM Agent 的 `inferTabState` 對 Claude Code、Copilot CLI 等 TUI 程式永遠回傳 `cli_running`，無法偵測 done/idle 狀態。
