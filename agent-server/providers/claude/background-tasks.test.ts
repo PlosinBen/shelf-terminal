@@ -14,10 +14,13 @@ import type { OutgoingMessage } from '../types';
  * while the background is still pending — the core World-A fix.
  */
 
-// Mock the SDK before importing the provider (value import of `query`).
+// Mock the SDK before importing the provider (value import of `query` + the
+// in-process bridge-tool builders `tool` / `createSdkMcpServer`).
 const sdkQueryMock = vi.fn();
 vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
   query: (...args: unknown[]) => sdkQueryMock(...args),
+  tool: (name: string, description: string, inputSchema: unknown, handler: unknown) => ({ name, description, inputSchema, handler }),
+  createSdkMcpServer: (opts: { name: string }) => ({ type: 'sdk', name: opts.name, instance: {} }),
 }));
 
 import { createClaudeBackend } from './index';

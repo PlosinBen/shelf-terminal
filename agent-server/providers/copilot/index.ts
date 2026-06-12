@@ -7,6 +7,7 @@ import { parseSlashPrefix } from '@shared/slash-prefix';
 import { formatConfigAck, type ConfigEditKey } from '@shared/config-ack';
 import type { ProviderModel } from '@shared/types';
 import { stripCwd, resolveSkillsPluginRoot } from '../shared';
+import { runBridgeTool, APP_SKILL_LIST_DESC, APP_SKILL_GET_DESC } from '../../app-tool-tools';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import {
@@ -376,6 +377,26 @@ export function createCopilotBackend(): ServerBackend {
     }
     state.session = session;
     state.cliSessionId = session.sessionId;
+    // Register the in-process app-level bridge tools (read ops). skipPermission:
+    // safe reads need no prompt. Handlers call main via runBridgeTool.
+    try {
+      session.registerTools([
+        sdkModule!.defineTool('list_app_skills', {
+          description: APP_SKILL_LIST_DESC,
+          parameters: { type: 'object', properties: {}, additionalProperties: false },
+          handler: async () => (await runBridgeTool('app_skill.list', {})).text,
+          skipPermission: true,
+        }),
+        sdkModule!.defineTool('get_app_skill', {
+          description: APP_SKILL_GET_DESC,
+          parameters: { type: 'object', properties: { name: { type: 'string', description: 'skill folder name from list_app_skills' } }, required: ['name'], additionalProperties: false },
+          handler: async (args: any) => (await runBridgeTool('app_skill.get', { name: args?.name })).text,
+          skipPermission: true,
+        }),
+      ]);
+    } catch (err: any) {
+      console.error('[copilot] registerTools(app bridge) failed; bridge tools unavailable this session', err?.message ?? err);
+    }
     // Tell orchestrator to persist this so the next process can resume the
     // same Copilot CLI session (CLI keeps session state on disk by sessionId).
     currentSend?.({ type: 'context_patch', patch: { lastSdkSessionId: session.sessionId } });

@@ -1,5 +1,7 @@
-import { query as sdkQuery } from '@anthropic-ai/claude-agent-sdk';
+import { query as sdkQuery, tool, createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk';
 import type { Query, Options, SDKMessage, SDKUserMessage, CanUseTool } from '@anthropic-ai/claude-agent-sdk';
+import { z } from 'zod';
+import { runBridgeTool, APP_SKILL_LIST_DESC, APP_SKILL_GET_DESC } from '../../app-tool-tools';
 import { createRouterState, notePush, routeMessage } from './turn-router';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'fs';
@@ -166,6 +168,29 @@ const CLAUDE_QUERY_DEFAULTS = {
   includePartialMessages: true,
 } as const satisfies Partial<Options>;
 
+// In-process MCP server exposing the app-level capability bridge tools (read
+// ops). Built once (handlers are stateless → callMain). Merged into a session's
+// `options.mcpServers`. The model sees `mcp__shelf__list_app_skills` etc.
+let shelfMcpServer: ReturnType<typeof createSdkMcpServer> | null = null;
+function getShelfMcpServer() {
+  if (!shelfMcpServer) {
+    shelfMcpServer = createSdkMcpServer({
+      name: 'shelf',
+      version: '1.0.0',
+      tools: [
+        tool('list_app_skills', APP_SKILL_LIST_DESC, {}, async () => {
+          const { text } = await runBridgeTool('app_skill.list', {});
+          return { content: [{ type: 'text' as const, text }] };
+        }),
+        tool('get_app_skill', APP_SKILL_GET_DESC, { name: z.string().describe('skill folder name from list_app_skills') }, async ({ name }) => {
+          const { text, isError } = await runBridgeTool('app_skill.get', { name });
+          return { content: [{ type: 'text' as const, text }], ...(isError ? { isError: true } : {}) };
+        }),
+      ],
+    });
+  }
+  return shelfMcpServer;
+}
 
 export function createClaudeBackend(): ServerBackend {
   const cache: { models?: any[]; commands?: any[] } = {};
@@ -517,6 +542,9 @@ export function createClaudeBackend(): ServerBackend {
     if (currentEffort) (options as any).effort = currentEffort;
     const skillsPluginRoot = resolveSkillsPluginRoot(appId);
     if (skillsPluginRoot) (options as any).plugins = [{ type: 'local', path: skillsPluginRoot }];
+    // In-process bridge tools for app-level capabilities (read ops). Additive —
+    // merged with any existing mcpServers so it can't clobber other config.
+    (options as any).mcpServers = { ...(options as any).mcpServers, shelf: getShelfMcpServer() };
 
     const q = sdkQuery({ prompt: inputStream(), options }) as Query;
     sessionCwd = cwd;
