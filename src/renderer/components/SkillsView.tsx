@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef, forwardRef, useImperativeHandle } from 'react';
 import { toggleRightSidebar } from '../store';
 import { renderMarkdown } from '../utils/markdown';
+import { LockIcon, UnlockIcon } from './icons';
 
 interface SkillMeta {
   name: string;
@@ -116,7 +117,7 @@ function SkillsList({ skills, onPick }: { skills: SkillMeta[]; onPick: (name: st
             title={s.locked ? 'Locked against agent edits — click to unlock' : 'Lock against agent edits'}
             onClick={(e) => { e.stopPropagation(); void window.shelfApi.skills.setLocked(s.name, !s.locked); }}
           >
-            {s.locked ? '🔒' : '🔓'}
+            {s.locked ? <LockIcon size={14} /> : <UnlockIcon size={14} />}
           </button>
         </div>
       ))}
@@ -218,11 +219,12 @@ const SkillEditor = forwardRef<SkillEditorHandle, {
           {saving ? 'Saving…' : 'Save'}
         </button>
         <button
-          className="notes-mode-btn"
+          className="notes-mode-btn skills-lock-btn"
           onClick={() => void toggleLock()}
           title={locked ? 'Locked against agent edits — click to unlock' : 'Lock against agent edits'}
         >
-          {locked ? '🔒 Locked' : '🔓 Lock'}
+          {locked ? <LockIcon size={13} /> : <UnlockIcon size={13} />}
+          {locked ? 'Locked' : 'Lock'}
         </button>
         <button className="notes-delete-btn" onClick={handleDelete} title="Delete skill">Delete</button>
       </div>

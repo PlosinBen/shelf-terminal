@@ -3977,13 +3977,15 @@ button {
    reads as a quiet affordance; locked stays visible as a status. */
 .skills-lock-toggle {
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   background: none;
   border: none;
   cursor: pointer;
-  font-size: 13px;
-  line-height: 1;
   padding: 4px;
   border-radius: 4px;
+  color: var(--text-muted);
   opacity: 0;
 }
 
@@ -3992,8 +3994,20 @@ button {
   opacity: 1;
 }
 
+.skills-lock-toggle.locked {
+  color: var(--text);
+}
+
 .skills-lock-toggle:hover {
   background: var(--border);
+  color: var(--text);
+}
+
+/* Editor lock button: icon + label inline. */
+.skills-lock-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .skills-list-name {
