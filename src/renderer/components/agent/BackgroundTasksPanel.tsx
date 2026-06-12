@@ -137,9 +137,14 @@ export function BackgroundTasksPanel({ tabId }: Props) {
                   <span className="agent-task-icon">{STATUS_ICON[t.status] ?? '•'}</span>
                   <div className="agent-task-text">
                     {/* Collapsed: just the description (truncated). Expanded:
-                        description + summary + error stack vertically, full text. */}
+                        description + summary + error stack vertically, full text.
+                        Skip the summary when it just repeats the label (some
+                        tasks report their description back as the summary) — a
+                        duplicated line is noise. */}
                     <span className="agent-task-label" title={t.label}>{t.label}</span>
-                    {isExpanded && t.summary && <span className="agent-task-summary">{t.summary}</span>}
+                    {isExpanded && t.summary && t.summary.trim() !== t.label.trim() && (
+                      <span className="agent-task-summary">{t.summary}</span>
+                    )}
                     {isExpanded && t.error && <span className="agent-task-error">{t.error}</span>}
                   </div>
                   {stopping[t.id]
