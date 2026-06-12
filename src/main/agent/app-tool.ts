@@ -70,6 +70,11 @@ const REGISTRY: Record<string, AppToolDef> = {
       const content = typeof args.content === 'string' ? args.content : '';
       if (!name) throw new Error('app_skill.update requires a "name"');
       if (!content.trim()) throw new Error('app_skill.update requires "content" (a full SKILL.md)');
+      // updateSkill UPSERTS at the store level (the create flow relies on that),
+      // so without this guard "updating" a wrong/typo'd name would silently
+      // CREATE a skill. The agent contract is overwrite-existing-only — direct
+      // it to create_app_skill instead by failing on a missing target.
+      if (await getSkill(name) === null) throw new Error(`skill not found: ${name} (use create_app_skill to make a new one)`);
       const res = await updateSkill(name, content);
       if (!res.ok) throw new Error(res.error ?? 'failed to update skill');
       onSkillsChanged();

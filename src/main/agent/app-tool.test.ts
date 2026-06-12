@@ -104,6 +104,7 @@ describe('app-tool dispatcher (write ops)', () => {
   });
 
   it('app_skill.update writes by name, returns finalName, fires onSkillsChanged', async () => {
+    getSkill.mockResolvedValue('---\nname: old\n---\nb'); // exists → passes the guard
     updateSkill.mockResolvedValue({ ok: true, name: 'renamed' });
     const r = await handleAppTool('app_skill.update', { name: 'old', content: '---\nname: renamed\n---\nb' });
     expect(r).toEqual({ ok: true, data: { name: 'renamed' } });
@@ -111,7 +112,17 @@ describe('app-tool dispatcher (write ops)', () => {
     expect(onSkillsChanged).toHaveBeenCalledTimes(1);
   });
 
+  it('app_skill.update on a non-existent skill → ok:false, never upserts (no create)', async () => {
+    getSkill.mockResolvedValue(null); // skill does not exist
+    const r = await handleAppTool('app_skill.update', { name: 'does-not-exist', content: '---\nname: does-not-exist\n---\nb' });
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/not found/);
+    expect(updateSkill).not.toHaveBeenCalled(); // must not fall through to the store's upsert
+    expect(onSkillsChanged).not.toHaveBeenCalled();
+  });
+
   it('app_skill.update surfaces store errors without firing onSkillsChanged', async () => {
+    getSkill.mockResolvedValue('---\nname: old\n---\nb'); // exists → passes the guard
     updateSkill.mockResolvedValue({ ok: false, error: 'needs a name' });
     const r = await handleAppTool('app_skill.update', { name: 'old', content: '...' });
     expect(r.ok).toBe(false);
