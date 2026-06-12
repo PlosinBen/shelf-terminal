@@ -3,10 +3,11 @@ import { IPC } from '@shared/ipc-channels';
 import { log } from '@shared/logger';
 import type { Connection, AgentProvider } from '@shared/types';
 import type { AgentSessionState, AgentEvent, AgentBackend, PermissionResult } from './types';
-import { createRemoteBackend } from './remote';
+import { createRemoteBackend, syncSkillsForConnection } from './remote';
 import { loadSettings } from '../settings-store';
 import { projectSkillsLocal } from '../skills-projection';
 import { getAppInstanceId } from '../app-instance-id';
+import { subscribeSkillsChanged } from '../skills-sync';
 
 interface SessionInstance {
   tabId: string;
@@ -53,6 +54,34 @@ let getWindow: (() => BrowserWindow | null) | null = null;
 
 export function initAgentManager(windowGetter: () => BrowserWindow | null): void {
   getWindow = windowGetter;
+
+  // After ANY skill mutation, re-mirror onto every live remote connection so a
+  // running remote agent sees the change next session. Deduped by connection and
+  // deferred off the mutation's call stack — each sync is a blocking execSync
+  // round-trip (hash-gated, usually a quick no-op), so we don't want N of them
+  // stalling the tool/IPC handler that triggered the change. Local sessions need
+  // nothing here (onSkillsChanged already re-projected locally).
+  subscribeSkillsChanged(() => {
+    const seen = new Set<string>();
+    const conns: Connection[] = [];
+    for (const s of sessions.values()) {
+      if (s.connection.type === 'local') continue;
+      const key = JSON.stringify(s.connection);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      conns.push(s.connection);
+    }
+    if (conns.length === 0) return;
+    setImmediate(() => {
+      for (const c of conns) {
+        try {
+          syncSkillsForConnection(c);
+        } catch (err: any) {
+          log.error('agent', `skills resync failed for ${c.type}: ${err?.message ?? err}`);
+        }
+      }
+    });
+  });
 
   ipcMain.handle(IPC.AGENT_INIT, async (_e, payload) => {
     const { tabId, cwd, connection, provider, sessionId, ...opts } = payload;

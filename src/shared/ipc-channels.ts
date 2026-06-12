@@ -61,6 +61,9 @@ export const IPC = {
   SKILLS_CREATE: 'skills:create',
   SKILLS_UPDATE: 'skills:update',
   SKILLS_DELETE: 'skills:delete',
+  // main→renderer: app-level skills changed (by the manager UI OR the agent
+  // bridge) — the SkillsView refetches its list. See skills-sync.ts.
+  SKILLS_CHANGED: 'skills:changed',
 
   // Logs
   LOGS_CLEAR: 'logs:clear',

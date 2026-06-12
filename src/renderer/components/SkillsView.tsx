@@ -31,6 +31,11 @@ export function SkillsView() {
 
   useEffect(() => { void refreshList(); }, [refreshList]);
 
+  // Keep the list live when a skill changes outside this view — e.g. the agent
+  // creates/updates one through the app-skill bridge. Refetch only refreshes the
+  // list; an open editor keeps its own (possibly dirty) content untouched.
+  useEffect(() => window.shelfApi.skills.onChanged(() => { void refreshList(); }), [refreshList]);
+
   const handleNew = useCallback(async () => {
     const meta = await window.shelfApi.skills.create();
     await refreshList();

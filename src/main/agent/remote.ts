@@ -514,6 +514,23 @@ function syncSkillsToRemote(ops: RemoteOps, appId: string): void {
   }
 }
 
+/**
+ * Re-mirror the app-level skills onto one already-connected remote, out of band
+ * from a tab open (which is when the deploy path normally syncs). Called by the
+ * skills-changed pipeline (agent/index.ts subscriber) so an edit reaches live
+ * remote agents without reopening the tab. Hash-gated + best-effort inside
+ * syncSkillsToRemote; local is a no-op (it re-projects via projectSkillsLocal).
+ */
+export function syncSkillsForConnection(connection: Connection): void {
+  if (connection.type === 'local') return;
+  let ops: RemoteOps;
+  if (connection.type === 'ssh') ops = sshOps(connection);
+  else if (connection.type === 'docker') ops = dockerOps(connection);
+  else if (connection.type === 'wsl') ops = wslOps(connection);
+  else return;
+  syncSkillsToRemote(ops, getAppInstanceId());
+}
+
 async function deployAgentServer(connection: Connection, provider: AgentProvider): Promise<DeployResult> {
   // local: use the host's own node (no version-drift problem on your own box).
   // Local skills go through projectSkillsLocal (agent/index.ts), not here.

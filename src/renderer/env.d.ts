@@ -87,6 +87,8 @@ interface ShelfApi {
     create: () => Promise<{ name: string; description?: string }>;
     update: (name: string, content: string) => Promise<{ ok: boolean; name?: string; error?: string }>;
     delete: (name: string) => Promise<void>;
+    /** Subscribe to "skills changed" (any trigger). Returns an unsubscribe fn. */
+    onChanged: (callback: () => void) => () => void;
   };
   app: {
     logsPath: () => Promise<string>;

@@ -124,6 +124,11 @@ contextBridge.exposeInMainWorld('shelfApi', {
     update: (name: string, content: string) =>
       ipcRenderer.invoke(IPC.SKILLS_UPDATE, { name, content }),
     delete: (name: string) => ipcRenderer.invoke(IPC.SKILLS_DELETE, name),
+    onChanged: (callback: () => void) => {
+      const listener = () => callback();
+      ipcRenderer.on(IPC.SKILLS_CHANGED, listener);
+      return () => ipcRenderer.removeListener(IPC.SKILLS_CHANGED, listener);
+    },
   },
   app: {
     logsPath: (): Promise<string> => ipcRenderer.invoke(IPC.APP_LOGS_PATH),
