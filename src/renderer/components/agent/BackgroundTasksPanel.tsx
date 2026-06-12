@@ -93,6 +93,24 @@ export function BackgroundTasksPanel({ tabId }: Props) {
   // Drop any outstanding timers when the panel unmounts.
   useEffect(() => () => { for (const id of Object.keys(timers.current)) clearTimeout(timers.current[id]); }, []);
 
+  // Fetch a settled task's remote output into its expanded entry. Best-effort —
+  // a fetch failure surfaces as the entry's error.
+  const loadOutput = useCallback((taskId: string) => {
+    setExpandedTasks((p) => (p[taskId] ? { ...p, [taskId]: { loading: true } } : p));
+    window.shelfApi.agent.fetchTaskOutput(tabId, taskId)
+      .then((content) => setExpandedTasks((p) => (p[taskId] ? { ...p, [taskId]: { loading: false, content } } : p)))
+      .catch((err: Error) => setExpandedTasks((p) => (p[taskId] ? { ...p, [taskId]: { loading: false, error: err.message } } : p)));
+  }, [tabId]);
+
+  // A task expanded WHILE running takes the no-fetch branch in toggleExpand;
+  // once it settles, fetch its output here so the card fills in instead of being
+  // stuck on "(empty output)". (Tasks expanded after settling already fetched.)
+  useEffect(() => {
+    for (const t of tasks) {
+      if (needsOutputFetch(t.done, expandedTasks[t.id])) loadOutput(t.id);
+    }
+  }, [tasks, expandedTasks, loadOutput]);
+
   const deleteTask = (task: NormalizedTask) => {
     if (task.done) { removeBackgroundTask(tabId, task.id); return; } // settled — nothing to stop
     // Running: stop through the SDK, keep the card as "stopping…" until confirmed.
@@ -109,24 +127,6 @@ export function BackgroundTasksPanel({ tabId }: Props) {
   const label = runningCount > 0
     ? `${tasks.length} task${tasks.length > 1 ? 's' : ''} · ${runningCount} running`
     : `${tasks.length} task${tasks.length > 1 ? 's' : ''}`;
-
-  // Fetch a settled task's remote output into its expanded entry. Best-effort —
-  // a fetch failure surfaces as the entry's error.
-  const loadOutput = useCallback((taskId: string) => {
-    setExpandedTasks((p) => (p[taskId] ? { ...p, [taskId]: { loading: true } } : p));
-    window.shelfApi.agent.fetchTaskOutput(tabId, taskId)
-      .then((content) => setExpandedTasks((p) => (p[taskId] ? { ...p, [taskId]: { loading: false, content } } : p)))
-      .catch((err: Error) => setExpandedTasks((p) => (p[taskId] ? { ...p, [taskId]: { loading: false, error: err.message } } : p)));
-  }, [tabId]);
-
-  // A task expanded WHILE running takes the no-fetch branch below; once it
-  // settles, fetch its output here so the card fills in instead of being stuck
-  // on "(empty output)". (Tasks expanded after settling already fetched.)
-  useEffect(() => {
-    for (const t of tasks) {
-      if (needsOutputFetch(t.done, expandedTasks[t.id])) loadOutput(t.id);
-    }
-  }, [tasks, expandedTasks, loadOutput]);
 
   const toggleExpand = (task: NormalizedTask) => {
     if (expandedTasks[task.id]) {
