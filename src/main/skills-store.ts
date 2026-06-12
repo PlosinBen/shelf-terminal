@@ -25,6 +25,9 @@ export interface SkillMeta {
   name: string;
   /** `description` from the frontmatter (for the list subtitle). */
   description?: string;
+  /** True when the user has locked this skill against AGENT edits (the manager
+   *  UI can still edit/unlock it). Marker = a `.locked` file in the folder. */
+  locked?: boolean;
 }
 
 export interface SkillUpdateResult {
@@ -47,6 +50,11 @@ function skillDir(name: string): string {
 }
 function skillFile(name: string): string {
   return path.join(skillDir(name), 'SKILL.md');
+}
+/** Lock marker: a `.locked` file inside the skill folder. In-folder so a rename
+ *  carries it for free; a stray dotfile is ignored by the skill loaders. */
+function lockMarkerPath(name: string): string {
+  return path.join(skillDir(name), '.locked');
 }
 function manifestPath(): string {
   return path.join(skillsRoot(), '.claude-plugin', 'plugin.json');
@@ -130,7 +138,11 @@ export async function listSkills(): Promise<SkillMeta[]> {
     } catch {
       continue; // no SKILL.md → not a skill folder
     }
-    out.push({ name: entry.name, ...(description ? { description } : {}) });
+    out.push({
+      name: entry.name,
+      ...(description ? { description } : {}),
+      ...(isSkillLocked(entry.name) ? { locked: true } : {}),
+    });
   }
   out.sort((a, b) => a.name.localeCompare(b.name));
   return out;
@@ -143,6 +155,21 @@ export async function getSkill(name: string): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+/** Whether the skill is locked against AGENT edits (presence of its `.locked`
+ *  marker). Synchronous — the bridge gates an update on it before writing. */
+export function isSkillLocked(name: string): boolean {
+  if (!isValidSkillName(name)) return false;
+  return fs.existsSync(lockMarkerPath(name));
+}
+
+/** Set/clear a skill's lock. No-op for an invalid name or a skill that doesn't
+ *  exist (can't lock what isn't there). */
+export async function setSkillLocked(name: string, locked: boolean): Promise<void> {
+  if (!isValidSkillName(name) || !fs.existsSync(skillDir(name))) return;
+  if (locked) await fs.promises.writeFile(lockMarkerPath(name), '');
+  else await fs.promises.rm(lockMarkerPath(name), { force: true });
 }
 
 /** Materialise a new skill from the template under a unique placeholder name. */

@@ -1,6 +1,6 @@
 import { ipcMain } from 'electron';
 import { IPC } from '@shared/ipc-channels';
-import { listSkills, getSkill, createSkill, updateSkill, deleteSkill } from '../skills-store';
+import { listSkills, getSkill, createSkill, updateSkill, deleteSkill, setSkillLocked } from '../skills-store';
 import { onSkillsChanged } from '../skills-sync';
 
 // The manager UI is just one TRIGGER of a skill mutation — like the agent
@@ -31,6 +31,11 @@ export function registerSkillsHandlers(): void {
 
   ipcMain.handle(IPC.SKILLS_DELETE, async (_event, name: string) => {
     await deleteSkill(name);
+    onSkillsChanged();
+  });
+
+  ipcMain.handle(IPC.SKILLS_SET_LOCKED, async (_event, payload: { name: string; locked: boolean }) => {
+    await setSkillLocked(payload.name, payload.locked);
     onSkillsChanged();
   });
 }

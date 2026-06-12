@@ -14,6 +14,7 @@ vi.mock('electron', () => ({
 const {
   listSkills, getSkill, createSkill, updateSkill, deleteSkill,
   parseSkillMeta, isValidSkillName, uniqueSkillName,
+  isSkillLocked, setSkillLocked,
 } = await import('./skills-store');
 
 beforeEach(() => {
@@ -120,5 +121,35 @@ describe('CRUD + scaffold', () => {
 
   it('list is empty (not error) before any skill exists', async () => {
     expect(await listSkills()).toEqual([]);
+  });
+});
+
+describe('lock', () => {
+  it('defaults unlocked; setSkillLocked(true) locks, list reflects it', async () => {
+    await createSkill();
+    expect(isSkillLocked('my-skill')).toBe(false);
+    expect((await listSkills())[0].locked).toBeUndefined();
+    await setSkillLocked('my-skill', true);
+    expect(isSkillLocked('my-skill')).toBe(true);
+    expect((await listSkills())[0].locked).toBe(true);
+  });
+
+  it('setSkillLocked(false) unlocks', async () => {
+    await createSkill();
+    await setSkillLocked('my-skill', true);
+    await setSkillLocked('my-skill', false);
+    expect(isSkillLocked('my-skill')).toBe(false);
+  });
+
+  it('the lock survives a rename (marker lives in the folder)', async () => {
+    await createSkill();
+    await setSkillLocked('my-skill', true);
+    await updateSkill('my-skill', '---\nname: renamed\ndescription: d\n---\n');
+    expect(isSkillLocked('renamed')).toBe(true);
+  });
+
+  it('locking a non-existent skill is a no-op (cannot lock what is not there)', async () => {
+    await setSkillLocked('ghost', true);
+    expect(isSkillLocked('ghost')).toBe(false);
   });
 });

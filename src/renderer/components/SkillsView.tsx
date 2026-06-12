@@ -5,6 +5,7 @@ import { renderMarkdown } from '../utils/markdown';
 interface SkillMeta {
   name: string;
   description?: string;
+  locked?: boolean;
 }
 
 const DEFAULT_WIDTH = 380;
@@ -86,6 +87,7 @@ export function SkillsView() {
           key={activeName!}
           ref={editorRef}
           name={activeName!}
+          locked={skills.find((s) => s.name === activeName)?.locked ?? false}
           onRenamed={(newName) => setActiveName(newName)}
           onAfterSave={refreshList}
           onDeleted={handleBack}
@@ -105,7 +107,10 @@ function SkillsList({ skills, onPick }: { skills: SkillMeta[]; onPick: (name: st
     <div className="skills-list">
       {skills.map((s) => (
         <div key={s.name} className="skills-list-item" onClick={() => onPick(s.name)}>
-          <div className="skills-list-name">{s.name}</div>
+          <div className="skills-list-name">
+            {s.locked && <span className="skills-lock-badge" title="Locked — agent can't edit this skill">🔒</span>}
+            {s.name}
+          </div>
           {s.description && <div className="skills-list-desc">{s.description}</div>}
         </div>
       ))}
@@ -122,10 +127,11 @@ interface SkillEditorHandle {
 
 const SkillEditor = forwardRef<SkillEditorHandle, {
   name: string;
+  locked: boolean;
   onRenamed: (newName: string) => void;
   onAfterSave: () => void | Promise<void>;
   onDeleted: () => void;
-}>(function SkillEditor({ name, onRenamed, onAfterSave, onDeleted }, ref) {
+}>(function SkillEditor({ name, locked, onRenamed, onAfterSave, onDeleted }, ref) {
   const [content, setContent] = useState<string | null>(null);
   const [mode, setMode] = useState<'edit' | 'preview'>('edit');
   const [error, setError] = useState<string | null>(null);
@@ -175,6 +181,13 @@ const SkillEditor = forwardRef<SkillEditorHandle, {
     return renderMarkdown(body, { breaks: true });
   }, [content]);
 
+  // Lock only fences the AGENT out (enforced main-side) — the manager UI here
+  // can always toggle it. The list refresh that reflects the new icon arrives
+  // via the SKILLS_CHANGED subscription in the parent.
+  const toggleLock = useCallback(async () => {
+    await window.shelfApi.skills.setLocked(name, !locked);
+  }, [name, locked]);
+
   const handleDelete = useCallback(async () => {
     const ok = await window.shelfApi.dialog.confirm('Delete skill', `Delete skill "${name}"? This cannot be undone.`, 'Delete');
     if (!ok) return;
@@ -197,6 +210,13 @@ const SkillEditor = forwardRef<SkillEditorHandle, {
           title="Save (renames the folder if the frontmatter name changed)"
         >
           {saving ? 'Saving…' : 'Save'}
+        </button>
+        <button
+          className="notes-mode-btn"
+          onClick={() => void toggleLock()}
+          title={locked ? 'Locked against agent edits — click to unlock' : 'Lock against agent edits'}
+        >
+          {locked ? '🔒 Locked' : '🔓 Lock'}
         </button>
         <button className="notes-delete-btn" onClick={handleDelete} title="Delete skill">Delete</button>
       </div>

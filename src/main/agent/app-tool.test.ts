@@ -5,12 +5,14 @@ const getSkill = vi.fn();
 const createSkill = vi.fn();
 const updateSkill = vi.fn();
 const deleteSkill = vi.fn();
+const isSkillLocked = vi.fn();
 vi.mock('../skills-store', () => ({
   listSkills: (...a: unknown[]) => listSkills(...a),
   getSkill: (...a: unknown[]) => getSkill(...a),
   createSkill: (...a: unknown[]) => createSkill(...a),
   updateSkill: (...a: unknown[]) => updateSkill(...a),
   deleteSkill: (...a: unknown[]) => deleteSkill(...a),
+  isSkillLocked: (...a: unknown[]) => isSkillLocked(...a),
 }));
 const onSkillsChanged = vi.fn();
 vi.mock('../skills-sync', () => ({ onSkillsChanged: () => onSkillsChanged() }));
@@ -23,6 +25,7 @@ beforeEach(() => {
   createSkill.mockReset();
   updateSkill.mockReset();
   deleteSkill.mockReset();
+  isSkillLocked.mockReset();
   onSkillsChanged.mockReset();
 });
 
@@ -118,6 +121,16 @@ describe('app-tool dispatcher (write ops)', () => {
     expect(r.ok).toBe(false);
     expect(r.error).toMatch(/not found/);
     expect(updateSkill).not.toHaveBeenCalled(); // must not fall through to the store's upsert
+    expect(onSkillsChanged).not.toHaveBeenCalled();
+  });
+
+  it('app_skill.update on a locked skill → ok:false, never writes (holds in bypass mode)', async () => {
+    getSkill.mockResolvedValue('---\nname: locked-one\n---\nb'); // exists
+    isSkillLocked.mockReturnValue(true);
+    const r = await handleAppTool('app_skill.update', { name: 'locked-one', content: '---\nname: locked-one\n---\nnew' });
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/locked/);
+    expect(updateSkill).not.toHaveBeenCalled();
     expect(onSkillsChanged).not.toHaveBeenCalled();
   });
 

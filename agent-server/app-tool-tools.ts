@@ -23,7 +23,8 @@ export const APP_SKILL_CREATE_DESC =
 
 export const APP_SKILL_UPDATE_DESC =
   'Overwrite an existing app-level skill. `name` is its current folder name; `content` is the full new SKILL.md '
-  + '(its frontmatter `name` may rename the skill). Takes effect on the next session.';
+  + '(its frontmatter `name` may rename the skill). Fails if the skill is locked (the user has reserved it — '
+  + 'do not retry; list_app_skills reports `locked`). Takes effect on the next session.';
 
 export interface BridgeToolText {
   text: string;

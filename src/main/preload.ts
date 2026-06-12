@@ -124,6 +124,8 @@ contextBridge.exposeInMainWorld('shelfApi', {
     update: (name: string, content: string) =>
       ipcRenderer.invoke(IPC.SKILLS_UPDATE, { name, content }),
     delete: (name: string) => ipcRenderer.invoke(IPC.SKILLS_DELETE, name),
+    setLocked: (name: string, locked: boolean) =>
+      ipcRenderer.invoke(IPC.SKILLS_SET_LOCKED, { name, locked }),
     onChanged: (callback: () => void) => {
       const listener = () => callback();
       ipcRenderer.on(IPC.SKILLS_CHANGED, listener);

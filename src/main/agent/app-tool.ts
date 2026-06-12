@@ -13,7 +13,7 @@
  * Step 1 ships the safe READ ops only (list/get). Mutations (create/update) +
  * their confirm + the skills:changed broadcast land in later steps.
  */
-import { listSkills, getSkill, createSkill, updateSkill } from '../skills-store';
+import { listSkills, getSkill, createSkill, updateSkill, isSkillLocked } from '../skills-store';
 import { onSkillsChanged } from '../skills-sync';
 
 export interface AppToolResult {
@@ -75,6 +75,10 @@ const REGISTRY: Record<string, AppToolDef> = {
       // CREATE a skill. The agent contract is overwrite-existing-only — direct
       // it to create_app_skill instead by failing on a missing target.
       if (await getSkill(name) === null) throw new Error(`skill not found: ${name} (use create_app_skill to make a new one)`);
+      // Lock = the user's hard "agent, hands off this skill" — enforced here so
+      // it holds even in bypass permission mode (where the update confirm is
+      // pre-granted). The manager UI is the only way to edit/unlock a locked one.
+      if (isSkillLocked(name)) throw new Error(`skill '${name}' is locked against agent edits; unlock it in the Skills panel`);
       const res = await updateSkill(name, content);
       if (!res.ok) throw new Error(res.error ?? 'failed to update skill');
       onSkillsChanged();

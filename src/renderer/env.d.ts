@@ -82,11 +82,12 @@ interface ShelfApi {
     readImage: (projectId: string, filename: string) => Promise<ArrayBuffer | null>;
   };
   skills: {
-    list: () => Promise<Array<{ name: string; description?: string }>>;
+    list: () => Promise<Array<{ name: string; description?: string; locked?: boolean }>>;
     get: (name: string) => Promise<string | null>;
     create: () => Promise<{ name: string; description?: string }>;
     update: (name: string, content: string) => Promise<{ ok: boolean; name?: string; error?: string }>;
     delete: (name: string) => Promise<void>;
+    setLocked: (name: string, locked: boolean) => Promise<void>;
     /** Subscribe to "skills changed" (any trigger). Returns an unsubscribe fn. */
     onChanged: (callback: () => void) => () => void;
   };
