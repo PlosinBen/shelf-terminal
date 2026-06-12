@@ -7,7 +7,7 @@ import { parseSlashPrefix } from '@shared/slash-prefix';
 import { formatConfigAck, type ConfigEditKey } from '@shared/config-ack';
 import type { ProviderModel } from '@shared/types';
 import { stripCwd, resolveSkillsPluginRoot } from '../shared';
-import { runBridgeTool, APP_SKILL_LIST_DESC, APP_SKILL_GET_DESC } from '../../app-tool-tools';
+import { runBridgeTool, APP_SKILL_LIST_DESC, APP_SKILL_GET_DESC, APP_SKILL_CREATE_DESC, APP_SKILL_UPDATE_DESC } from '../../app-tool-tools';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import {
@@ -392,6 +392,17 @@ export function createCopilotBackend(): ServerBackend {
           parameters: { type: 'object', properties: { name: { type: 'string', description: 'skill folder name from list_app_skills' } }, required: ['name'], additionalProperties: false },
           handler: async (args: any) => (await runBridgeTool('app_skill.get', { name: args?.name })).text,
           skipPermission: true,
+        }),
+        // Mutations: no skipPermission → the user is prompted to confirm.
+        sdkModule!.defineTool('create_app_skill', {
+          description: APP_SKILL_CREATE_DESC,
+          parameters: { type: 'object', properties: { content: { type: 'string', description: 'full SKILL.md (frontmatter name+description + body)' } }, required: ['content'], additionalProperties: false },
+          handler: async (args: any) => (await runBridgeTool('app_skill.create', { content: args?.content })).text,
+        }),
+        sdkModule!.defineTool('update_app_skill', {
+          description: APP_SKILL_UPDATE_DESC,
+          parameters: { type: 'object', properties: { name: { type: 'string', description: 'current skill folder name' }, content: { type: 'string', description: 'full new SKILL.md' } }, required: ['name', 'content'], additionalProperties: false },
+          handler: async (args: any) => (await runBridgeTool('app_skill.update', { name: args?.name, content: args?.content })).text,
         }),
       ]);
     } catch (err: any) {

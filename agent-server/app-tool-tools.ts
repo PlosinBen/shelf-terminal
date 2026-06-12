@@ -15,6 +15,16 @@ export const APP_SKILL_LIST_DESC =
 export const APP_SKILL_GET_DESC =
   'Read the full SKILL.md content of one app-level skill, by its folder name (as returned by list_app_skills).';
 
+export const APP_SKILL_CREATE_DESC =
+  'Create a new app-level Agent Skill. `content` is the full SKILL.md, including YAML frontmatter with `name` '
+  + '(lowercase kebab-case — this is the skill\'s identity) and `description`, followed by the markdown body. '
+  + 'Fails if a skill with that name already exists (read list_app_skills first, or use update_app_skill). '
+  + 'Takes effect for the agent on the next session.';
+
+export const APP_SKILL_UPDATE_DESC =
+  'Overwrite an existing app-level skill. `name` is its current folder name; `content` is the full new SKILL.md '
+  + '(its frontmatter `name` may rename the skill). Takes effect on the next session.';
+
 export interface BridgeToolText {
   text: string;
   isError: boolean;

@@ -1,7 +1,7 @@
 import { query as sdkQuery, tool, createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk';
 import type { Query, Options, SDKMessage, SDKUserMessage, CanUseTool } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
-import { runBridgeTool, APP_SKILL_LIST_DESC, APP_SKILL_GET_DESC } from '../../app-tool-tools';
+import { runBridgeTool, APP_SKILL_LIST_DESC, APP_SKILL_GET_DESC, APP_SKILL_CREATE_DESC, APP_SKILL_UPDATE_DESC } from '../../app-tool-tools';
 import { createRouterState, notePush, routeMessage } from './turn-router';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'fs';
@@ -184,6 +184,14 @@ function getShelfMcpServer() {
         }),
         tool('get_app_skill', APP_SKILL_GET_DESC, { name: z.string().describe('skill folder name from list_app_skills') }, async ({ name }) => {
           const { text, isError } = await runBridgeTool('app_skill.get', { name });
+          return { content: [{ type: 'text' as const, text }], ...(isError ? { isError: true } : {}) };
+        }),
+        tool('create_app_skill', APP_SKILL_CREATE_DESC, { content: z.string().describe('full SKILL.md (frontmatter name+description + body)') }, async ({ content }) => {
+          const { text, isError } = await runBridgeTool('app_skill.create', { content });
+          return { content: [{ type: 'text' as const, text }], ...(isError ? { isError: true } : {}) };
+        }),
+        tool('update_app_skill', APP_SKILL_UPDATE_DESC, { name: z.string().describe('current skill folder name'), content: z.string().describe('full new SKILL.md') }, async ({ name, content }) => {
+          const { text, isError } = await runBridgeTool('app_skill.update', { name, content });
           return { content: [{ type: 'text' as const, text }], ...(isError ? { isError: true } : {}) };
         }),
       ],

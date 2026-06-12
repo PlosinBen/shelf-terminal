@@ -13,7 +13,8 @@
  * Step 1 ships the safe READ ops only (list/get). Mutations (create/update) +
  * their confirm + the skills:changed broadcast land in later steps.
  */
-import { listSkills, getSkill } from '../skills-store';
+import { listSkills, getSkill, createSkill, updateSkill } from '../skills-store';
+import { onSkillsChanged } from '../skills-sync';
 
 export interface AppToolResult {
   ok: boolean;
@@ -44,7 +45,45 @@ const REGISTRY: Record<string, AppToolDef> = {
       return { name, content };
     },
   },
+  'app_skill.create': {
+    safe: false, // mutation — gated by the tool permission prompt
+    run: async (args) => {
+      const content = typeof args.content === 'string' ? args.content : '';
+      if (!content.trim()) throw new Error('app_skill.create requires "content" (a full SKILL.md)');
+      // Materialise a placeholder, then write the real content — its frontmatter
+      // `name` becomes the identity (folder renamed to match; collision → error).
+      const placeholder = await createSkill();
+      const res = await updateSkill(placeholder.name, content);
+      if (!res.ok) {
+        // Roll back the empty placeholder so a failed create leaves nothing.
+        await deleteSkillSafe(placeholder.name);
+        throw new Error(res.error ?? 'failed to create skill');
+      }
+      onSkillsChanged();
+      return { name: res.name };
+    },
+  },
+  'app_skill.update': {
+    safe: false,
+    run: async (args) => {
+      const name = typeof args.name === 'string' ? args.name.trim() : '';
+      const content = typeof args.content === 'string' ? args.content : '';
+      if (!name) throw new Error('app_skill.update requires a "name"');
+      if (!content.trim()) throw new Error('app_skill.update requires "content" (a full SKILL.md)');
+      const res = await updateSkill(name, content);
+      if (!res.ok) throw new Error(res.error ?? 'failed to update skill');
+      onSkillsChanged();
+      return { name: res.name };
+    },
+  },
 };
+
+async function deleteSkillSafe(name: string): Promise<void> {
+  try {
+    const { deleteSkill } = await import('../skills-store');
+    await deleteSkill(name);
+  } catch { /* best-effort rollback */ }
+}
 
 /** True iff `op` is a known safe (read-only) op — caller may skip confirmation. */
 export function isSafeAppToolOp(op: string): boolean {
