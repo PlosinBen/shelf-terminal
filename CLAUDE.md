@@ -30,6 +30,7 @@
 - 修正問題時只動必要的項目 — 不順手改無關的 code / 格式 / 重構，降低審閱與回歸風險
 - 有錯就停，逐一修復再測，不要重複跑整套 build/test
 - 需要 dev 整個重 build 才能驗的項目（如 agent-server bundle 改動），先把所有相關項目一口氣做完再交給 dev 驗一輪 — 不要做一個交一個，造成來回重 build 浪費時間
+- 同一個問題一次無法修正，請嘗試使用 logger 靠實際輸出定位，不要純粹依靠讀 code（renderer 端走 `debugLog` bridge 落 main log 檔，AI 可直接讀）
 
 ## Conventions
 
