@@ -100,6 +100,56 @@ export function packAnswer(prompt: PickerPrompt, state: PromptState): string | s
   return state.selected[0] ?? '';
 }
 
+/** A keyboard intent, decided purely from the event + current panel context.
+ *  The component maps it to side effects (preventDefault, focus moves, submit). */
+export type PickerKeyAction =
+  | { type: 'none' }
+  | { type: 'cancel' }
+  | { type: 'navigate'; direction: 'up' | 'down' }
+  | { type: 'submit' }
+  | { type: 'toggle' };
+
+export interface PickerKeyContext {
+  key: string;
+  /** True mid-IME-composition (CJK candidate selection). */
+  isComposing: boolean;
+  /** True when the free-text input owns focus. */
+  inputFocused: boolean;
+  hasOptions: boolean;
+  currentComplete: boolean;
+}
+
+/**
+ * Decide what a keydown means for the picker. Pure so the IME / navigation
+ * rules are unit-testable (component DOM wiring stays a thin adapter).
+ *
+ *   IME first  — while composing, arrows/Enter/Esc drive the candidate window;
+ *                hijacking them for option nav or submit eats the user's CJK
+ *                character pick. Defer to the IME for EVERY key (return none).
+ *   ↑/↓        — move the option cursor (the adapter wraps + blurs the input).
+ *   Enter      — advance/submit, only when the current prompt is complete.
+ *   Space      — toggle the focused option, but not while typing in the input
+ *                (so spaces can be typed) and only when options exist.
+ *   Esc        — cancel the whole picker.
+ */
+export function decidePickerKey(ctx: PickerKeyContext): PickerKeyAction {
+  if (ctx.isComposing) return { type: 'none' };
+  if (ctx.key === 'Escape') return { type: 'cancel' };
+  if (ctx.key === 'ArrowUp' || ctx.key === 'ArrowDown') {
+    if (!ctx.hasOptions) return { type: 'none' };
+    return { type: 'navigate', direction: ctx.key === 'ArrowUp' ? 'up' : 'down' };
+  }
+  if (ctx.key === 'Enter') {
+    if (!ctx.currentComplete) return { type: 'none' };
+    return { type: 'submit' };
+  }
+  if (ctx.key === ' ' || ctx.key === 'Spacebar') {
+    if (ctx.inputFocused || !ctx.hasOptions) return { type: 'none' };
+    return { type: 'toggle' };
+  }
+  return { type: 'none' };
+}
+
 export function PickerPanel({ prompts, onSubmit, onCancel }: PickerPanelProps) {
   // One state slot per prompt — initialized once. We do NOT reset state when
   // the user navigates back/forward; their prior answers stay editable.
@@ -174,61 +224,47 @@ export function PickerPanel({ prompts, onSubmit, onCancel }: PickerPanelProps) {
     }
   }, [focusedIdx, renderedOptions.length]);
 
-  // Keyboard:
-  //   ↑/↓     move focused option cursor (with wrap) — always navigates,
-  //           even when the free-text input is focused. Blurs input so
-  //           the user can step away from "Other" without clicking out.
-  //           Trade-off: arrows don't move the text caret inside the input
-  //           (Home/End or click still work).
-  //   Space   toggle focused option — but only when NOT typing in the
-  //           free-text input (otherwise the user can't include spaces).
-  //   Enter   advance (next prompt / submit) when current is complete —
-  //           suppressed in input so Enter doesn't submit prematurely
-  //           while the user is still typing.
-  //   Esc     cancel the whole picker.
+  // Keyboard intents are decided by the pure `decidePickerKey` (see its doc for
+  // the IME / nav / submit rules); this effect is the thin adapter that applies
+  // the chosen action's side effects. ↑/↓ blur the input so the user can step
+  // away from the free-text field onto the options without clicking out (the
+  // caret trade-off only applies once they've left composition).
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        onCancel();
-        return;
-      }
       const inputFocused = document.activeElement === inputRef.current;
-
-      if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
-        if (renderedOptions.length === 0) return;
-        e.preventDefault();
-        if (inputFocused) inputRef.current?.blur();
-        const max = renderedOptions.length - 1;
-        setFocusedIdx((p) => e.key === 'ArrowUp'
-          ? (p > 0 ? p - 1 : max)
-          : (p < max ? p + 1 : 0));
-        return;
-      }
-
-      if (e.key === 'Enter') {
-        // Enter advances/submits whether the cursor is in the free-text input
-        // or on the option list — typing an answer and pressing Enter is the
-        // natural gesture (and the hint advertises "Enter submit"). Two guards:
-        //   - isComposing: an IME commit keystroke (CJK candidate selection)
-        //     also surfaces as Enter; submitting here would swallow the
-        //     candidate and send half-composed text. Let the IME consume it.
-        //   - !currentComplete: nothing to submit yet — don't fire on an empty
-        //     prompt (this is what previously made input-focus suppression
-        //     unnecessary, now enforced directly).
-        if (e.isComposing) return;
-        if (!currentComplete) return;
-        e.preventDefault();
-        goNext();
-        return;
-      }
-
-      if (e.key === ' ' || e.key === 'Spacebar') {
-        if (inputFocused) return;  // allow spaces inside free-text
-        if (renderedOptions.length === 0) return;
-        e.preventDefault();
-        const opt = renderedOptions[focusedIdx];
-        if (opt) toggleOption(opt.value);
+      const action = decidePickerKey({
+        key: e.key,
+        isComposing: e.isComposing,
+        inputFocused,
+        hasOptions: renderedOptions.length > 0,
+        currentComplete,
+      });
+      switch (action.type) {
+        case 'cancel':
+          e.preventDefault();
+          onCancel();
+          break;
+        case 'navigate': {
+          e.preventDefault();
+          if (inputFocused) inputRef.current?.blur();
+          const max = renderedOptions.length - 1;
+          setFocusedIdx((p) => action.direction === 'up'
+            ? (p > 0 ? p - 1 : max)
+            : (p < max ? p + 1 : 0));
+          break;
+        }
+        case 'submit':
+          e.preventDefault();
+          goNext();
+          break;
+        case 'toggle': {
+          e.preventDefault();
+          const opt = renderedOptions[focusedIdx];
+          if (opt) toggleOption(opt.value);
+          break;
+        }
+        default:
+          break;
       }
     };
     // Capture phase so we beat xterm / global combo handlers that consume keys.

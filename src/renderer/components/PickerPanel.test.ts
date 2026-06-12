@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { initialStateFor, isComplete, packAnswer, type PickerPrompt } from './PickerPanel';
+import {
+  initialStateFor, isComplete, packAnswer, decidePickerKey,
+  type PickerPrompt, type PickerKeyContext,
+} from './PickerPanel';
 
 /**
  * Pure-logic tests for PickerPanel state shape. Component interaction
@@ -119,5 +122,47 @@ describe('packAnswer', () => {
   it('multi-select returns just input when no options selected', () => {
     const p = makePrompt({ multiSelect: true, inputType: 'text' });
     expect(packAnswer(p, { selected: [], input: 'custom' })).toEqual(['custom']);
+  });
+});
+
+describe('decidePickerKey', () => {
+  const base: PickerKeyContext = {
+    key: '', isComposing: false, inputFocused: false, hasOptions: true, currentComplete: true,
+  };
+  const ctx = (over: Partial<PickerKeyContext>): PickerKeyContext => ({ ...base, ...over });
+
+  // ── Regression: IME composition must win over option navigation ──
+  // Typing CJK in the free-text input and pressing ↑/↓ to pick a candidate was
+  // hijacked into switching options (and blurring the input) — can't choose a
+  // character. While composing, EVERY key defers to the IME.
+  it('arrows during IME composition → none (do not switch options)', () => {
+    expect(decidePickerKey(ctx({ key: 'ArrowDown', isComposing: true, inputFocused: true }))).toEqual({ type: 'none' });
+    expect(decidePickerKey(ctx({ key: 'ArrowUp', isComposing: true, inputFocused: true }))).toEqual({ type: 'none' });
+  });
+  it('Enter / Space / Esc during composition → none (IME commit / candidate keys)', () => {
+    expect(decidePickerKey(ctx({ key: 'Enter', isComposing: true }))).toEqual({ type: 'none' });
+    expect(decidePickerKey(ctx({ key: ' ', isComposing: true }))).toEqual({ type: 'none' });
+    expect(decidePickerKey(ctx({ key: 'Escape', isComposing: true }))).toEqual({ type: 'none' });
+  });
+
+  // ── Normal (not composing) behavior is preserved ──
+  it('arrows navigate when options exist', () => {
+    expect(decidePickerKey(ctx({ key: 'ArrowUp' }))).toEqual({ type: 'navigate', direction: 'up' });
+    expect(decidePickerKey(ctx({ key: 'ArrowDown' }))).toEqual({ type: 'navigate', direction: 'down' });
+  });
+  it('arrows do nothing when there are no options', () => {
+    expect(decidePickerKey(ctx({ key: 'ArrowDown', hasOptions: false }))).toEqual({ type: 'none' });
+  });
+  it('Escape cancels', () => {
+    expect(decidePickerKey(ctx({ key: 'Escape' }))).toEqual({ type: 'cancel' });
+  });
+  it('Enter submits only when complete', () => {
+    expect(decidePickerKey(ctx({ key: 'Enter', currentComplete: true }))).toEqual({ type: 'submit' });
+    expect(decidePickerKey(ctx({ key: 'Enter', currentComplete: false }))).toEqual({ type: 'none' });
+  });
+  it('Space toggles, except while typing in the input or with no options', () => {
+    expect(decidePickerKey(ctx({ key: ' ' }))).toEqual({ type: 'toggle' });
+    expect(decidePickerKey(ctx({ key: ' ', inputFocused: true }))).toEqual({ type: 'none' });
+    expect(decidePickerKey(ctx({ key: ' ', hasOptions: false }))).toEqual({ type: 'none' });
   });
 });
