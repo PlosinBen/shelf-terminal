@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAgentTab, removeBackgroundTask } from '../../agentTabStore';
 import type { NormalizedTask } from '../../../shared/types';
 
@@ -24,6 +24,18 @@ interface OutputState {
   loading: boolean;
   content?: string;
   error?: string;
+}
+
+/**
+ * A task is expanded but its output was never fetched — true when it was
+ * expanded WHILE running (toggleExpand took the no-fetch branch, leaving an
+ * entry with no content/error and not loading) and has since settled. Without a
+ * follow-up fetch the card would show "(empty output)" forever despite real
+ * output existing on disk. `content === undefined` distinguishes "never
+ * fetched" from a genuinely empty fetched result (`content === ''`).
+ */
+export function needsOutputFetch(done: boolean, out: OutputState | undefined): boolean {
+  return done && !!out && !out.loading && out.content === undefined && out.error === undefined;
 }
 
 /**
@@ -98,23 +110,34 @@ export function BackgroundTasksPanel({ tabId }: Props) {
     ? `${tasks.length} task${tasks.length > 1 ? 's' : ''} · ${runningCount} running`
     : `${tasks.length} task${tasks.length > 1 ? 's' : ''}`;
 
+  // Fetch a settled task's remote output into its expanded entry. Best-effort —
+  // a fetch failure surfaces as the entry's error.
+  const loadOutput = useCallback((taskId: string) => {
+    setExpandedTasks((p) => (p[taskId] ? { ...p, [taskId]: { loading: true } } : p));
+    window.shelfApi.agent.fetchTaskOutput(tabId, taskId)
+      .then((content) => setExpandedTasks((p) => (p[taskId] ? { ...p, [taskId]: { loading: false, content } } : p)))
+      .catch((err: Error) => setExpandedTasks((p) => (p[taskId] ? { ...p, [taskId]: { loading: false, error: err.message } } : p)));
+  }, [tabId]);
+
+  // A task expanded WHILE running takes the no-fetch branch below; once it
+  // settles, fetch its output here so the card fills in instead of being stuck
+  // on "(empty output)". (Tasks expanded after settling already fetched.)
+  useEffect(() => {
+    for (const t of tasks) {
+      if (needsOutputFetch(t.done, expandedTasks[t.id])) loadOutput(t.id);
+    }
+  }, [tasks, expandedTasks, loadOutput]);
+
   const toggleExpand = (task: NormalizedTask) => {
-    setExpandedTasks((prev) => {
-      if (prev[task.id]) {
-        const next = { ...prev };
-        delete next[task.id];
-        return next;
-      }
-      // Expanding. A settled task also fetches its remote output; a running task
-      // just reveals its full (now wrapping) label/summary — no output yet.
-      if (task.done) {
-        void window.shelfApi.agent.fetchTaskOutput(tabId, task.id)
-          .then((content) => setExpandedTasks((p) => (p[task.id] ? { ...p, [task.id]: { loading: false, content } } : p)))
-          .catch((err: Error) => setExpandedTasks((p) => (p[task.id] ? { ...p, [task.id]: { loading: false, error: err.message } } : p)));
-        return { ...prev, [task.id]: { loading: true } };
-      }
-      return { ...prev, [task.id]: { loading: false } };
-    });
+    if (expandedTasks[task.id]) {
+      setExpandedTasks((prev) => { const next = { ...prev }; delete next[task.id]; return next; });
+      return;
+    }
+    // Expanding. A settled task fetches its remote output now; a running task
+    // just reveals its full (now wrapping) label/summary — its output is fetched
+    // by the effect above once it settles.
+    if (task.done) loadOutput(task.id);
+    else setExpandedTasks((prev) => ({ ...prev, [task.id]: { loading: false } }));
   };
 
   return (
