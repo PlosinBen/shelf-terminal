@@ -50,3 +50,22 @@
 
 新依賴進 codebase 之前先問「使用者需不需要為這個東西多裝什麼？」
 如果是，預設要 bundle / 自帶 / lazy download，不要丟給使用者。
+
+## 5. 原生的歸原生，Shelf 的歸 Shelf
+
+Claude / Copilot **原生支援**的能力（project-level skills、MCP discovery、
+instruction files、slash…），Shelf 預設**盡量打開、照原生行為走**，讓「用
+原生 CLI」和「用 Shelf agent view」體驗一致、甚至更好，不給降級體驗。連帶
+行為（如 project 的 MCP 自動載入）是 native parity 的一部分、不是 bug。
+
+更關鍵的是**責任歸屬要清楚 —— 出問題該查誰**：
+
+| 層級 | 由誰定義 | 出問題查 |
+|------|----------|----------|
+| **Project 層**（`.claude/`、`.agents/`、`.mcp.json`…） | **官方**（Claude / Copilot） | 官方 docs / 行為 |
+| **App 層**（跨 project、跨兩家的 skill / MCP…） | **Shelf** | Shelf |
+
+**Shelf 不介入 project 層的機制**：硬去改寫/橋接官方的 project-level 行為
+（例：把 `.claude/skills` 餵給 copilot 做「跨兩家共用」），等於把官方的責任
+攬上身、造成行為與支援的混亂。跨 project / 跨 provider 的統整是 **App 層**
+（Shelf 加值）的事，疊在原生之上，**不取代、不改寫原生**。
