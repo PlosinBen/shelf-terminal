@@ -355,9 +355,18 @@ export function createCopilotBackend(): ServerBackend {
     };
     if (currentEffort) config.reasoningEffort = currentEffort;
     if (currentCwd) config.workingDirectory = currentCwd;
-    // App-level skills: point Copilot at this app's projected skills collection
-    // (the inner `skills/` dir, parent of the skill folders) when it exists. See
-    // #2.5/#70. Session-cached — new skills mid-session may need `/skills reload`.
+    // Match the native Copilot CLI: auto-discover the project's own skill dirs
+    // (`.agents/skills`, `.github/skills`) + MCP configs (`.mcp.json`,
+    // `.vscode/mcp.json`) from the working directory. Project-level config is the
+    // official tools' domain — Shelf just turns native discovery on so the agent
+    // view matches the raw CLI, and does NOT bridge/rewrite it. See PRODUCT.md #5.
+    // Discovered dirs merge with the explicit app-skill `skillDirectories` below
+    // (explicit wins on name collision).
+    config.enableConfigDiscovery = true;
+    // App-level skills (Shelf's domain, NOT native): point Copilot at this app's
+    // projected skills collection (the inner `skills/` dir, parent of the skill
+    // folders) when it exists. See #2.5/#70. Session-cached — new skills
+    // mid-session may need `/skills reload`.
     const skillsRoot = resolveSkillsPluginRoot(currentAppId);
     if (skillsRoot) config.skillDirectories = [path.join(skillsRoot, 'skills')];
 

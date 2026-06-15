@@ -166,6 +166,11 @@ const CLAUDE_QUERY_DEFAULTS = {
   tools: { type: 'preset', preset: 'claude_code' },
   thinking: { type: 'adaptive', display: 'summarized' },
   includePartialMessages: true,
+  // Deliberately NOT setting `settingSources` — when omitted the SDK loads all
+  // filesystem settings (user/project/local), so project-level config is read
+  // natively: `.claude/skills`, CLAUDE.md, project settings. Native parity with
+  // the raw CLI (PRODUCT.md #5). Do NOT pass `settingSources: []` (SDK isolation
+  // mode) or project skills / CLAUDE.md silently stop loading.
 } as const satisfies Partial<Options>;
 
 // In-process MCP server exposing the app-level capability bridge tools (read
