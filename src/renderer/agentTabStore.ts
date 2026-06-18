@@ -61,16 +61,6 @@ export interface LocalPicker {
   key: 'model' | 'effort' | 'permissionMode';
 }
 
-export interface QueuedMessage {
-  id: string;
-  content: string;
-  // Attachments ride along so a queued message sends identically to one sent
-  // immediately (the flush path is the single sender). Optional — most queued
-  // messages are plain text.
-  images?: string[];
-  files?: AgentFile[];
-}
-
 export interface AgentTabState {
   // identity
   sessionId: string;
@@ -78,7 +68,6 @@ export interface AgentTabState {
 
   // domain
   messages: AgentMsg[];
-  queuedMessages: QueuedMessage[];
   // Server-owned send queue (display mirror). The renderer eager-sends every
   // submission and optimistically tracks it here as a chip; agent-server emits
   // the authoritative queue snapshot and reconcileQueueSnapshot folds it in,
@@ -330,7 +319,6 @@ export function initTab(tabId: string, opts: InitTabOpts) {
     sessionId: opts.sessionId,
     provider: opts.provider,
     messages: [],
-    queuedMessages: [],
     pendingSends: [],
     promotedClientMsgIds: new Set(),
     currentPlan: '',
@@ -543,43 +531,6 @@ export function appendChunk(
   // captures the final.
 }
 
-export function enqueueMessage(tabId: string, content: string, images?: string[], files?: AgentFile[]) {
-  update(tabId, (prev) => ({
-    ...prev,
-    queuedMessages: [
-      ...prev.queuedMessages,
-      {
-        id: `q-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        content,
-        ...(images && images.length > 0 ? { images } : {}),
-        ...(files && files.length > 0 ? { files } : {}),
-      },
-    ],
-  }));
-}
-
-export function dequeueMessage(tabId: string): QueuedMessage | null {
-  const tab = tabs.get(tabId);
-  if (!tab || tab.queuedMessages.length === 0) return null;
-  const next = tab.queuedMessages[0];
-  tabs.set(tabId, { ...tab, queuedMessages: tab.queuedMessages.slice(1) });
-  notify(tabId);
-  return next;
-}
-
-export function cancelQueuedMessage(tabId: string, id: string) {
-  update(tabId, (prev) => ({
-    ...prev,
-    queuedMessages: prev.queuedMessages.filter((q) => q.id !== id),
-  }));
-}
-
-export function clearQueuedMessages(tabId: string) {
-  update(tabId, (prev) =>
-    prev.queuedMessages.length === 0 ? prev : { ...prev, queuedMessages: [] }
-  );
-}
-
 // ── Server-owned send queue (optimistic chips + snapshot reconcile) ──
 
 /**
@@ -632,7 +583,7 @@ export function applyQueueSnapshot(tabId: string, items: AgentQueueItem[]) {
       timestamp: Date.now(),
       ...(p.images && p.images.length > 0 ? { images: p.images } : {}),
       ...(p.files && p.files.length > 0 ? { files: p.files } : {}),
-    } as AgentMsg);
+    });
   }
   update(tabId, (prev) => ({ ...prev, pendingSends: pending, promotedClientMsgIds: promoted }));
 }
@@ -647,6 +598,18 @@ export function cancelPendingSend(tabId: string, clientMsgId: string) {
     const pendingSends = prev.pendingSends.filter((p) => p.clientMsgId !== clientMsgId);
     return pendingSends.length === prev.pendingSends.length ? prev : { ...prev, pendingSends };
   });
+}
+
+/**
+ * Drop ALL optimistic pending chips (ESC / stop). The server clears its own
+ * queue in parallel; this clears the local optimistic view (incl. items not yet
+ * confirmed by a snapshot, which reconcile would otherwise keep). The running
+ * turn — already promoted to a timeline bubble — is unaffected.
+ */
+export function clearPendingSends(tabId: string) {
+  update(tabId, (prev) =>
+    prev.pendingSends.length === 0 ? prev : { ...prev, pendingSends: [] }
+  );
 }
 
 export async function clearMessages(tabId: string) {

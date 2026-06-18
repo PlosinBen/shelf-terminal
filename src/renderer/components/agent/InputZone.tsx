@@ -3,11 +3,9 @@ import type { AgentPrefs, Connection } from '@shared/types';
 import { parseSlashPrefix } from '@shared/slash-prefix';
 import { useStore, setChatStage } from '../../store';
 import {
-  clearQueuedMessages,
-  dequeueMessage,
-  enqueueMessage,
+  clearPendingSends,
+  enqueuePendingSend,
   setLocalPicker as setLocalPickerStore,
-  upsertMessage,
   useAgentTab,
 } from '../../agentTabStore';
 import { emitAgent } from '../../events';
@@ -15,7 +13,6 @@ import { useAttachmentPaste } from '../../hooks/useAttachmentPaste';
 import { OPTIONED_SLASHES, useSlashCommands, type SlashCommand } from './slash-commands';
 import { SlashMenu } from './SlashMenu';
 import { AttachmentChips } from './AttachmentChips';
-import { reduceFlush } from './queue-flush';
 
 interface Props {
   tabId: string;
@@ -43,7 +40,11 @@ interface Props {
  * flag) — none of which other components read. Domain reads come from
  * agentTabStore via useAgentTab.
  *
- * Outbound: emits 'agent:send' / 'agent:stop'. Config slashes: with-arg
+ * Outbound: every submission EAGER-sends 'agent:send' immediately with a
+ * renderer-minted `clientMsgId` (no client-side queueing / turn-boundary
+ * guessing — agent-server owns the queue). The submission also records an
+ * optimistic pending chip (enqueuePendingSend); the server's queue snapshot
+ * promotes it into the timeline when its turn runs. Config slashes: with-arg
  * (/model X) falls through to agent:send (provider's slash handler); no-arg
  * (/model) opens the renderer-local picker via setLocalPicker (DecisionPanel
  * renders it and emits the config-edit turn on select).
@@ -53,7 +54,11 @@ export function InputZone({ tabId, projectId, cwd, connection, visible, rootRef,
   const { settings, chatStage } = useStore();
 
   const isStreaming = tab?.isStreaming ?? false;
-  const queuedMessages = tab?.queuedMessages ?? [];
+  const pendingCount = tab?.pendingSends.length ?? 0;
+  // "Busy" = a turn is running OR sends are still queued. Used for ESC-to-stop
+  // and the streaming→idle reset so ESC keeps working across the brief inter-turn
+  // idle gap while the server drains the queue.
+  const busy = isStreaming || pendingCount > 0;
   const capabilities = tab?.capabilities ?? null;
   // store.actual* reads stay — they're used for the vision-capability
   // check (matches model in capabilities.models list) and as the
@@ -125,15 +130,15 @@ export function InputZone({ tabId, projectId, cwd, connection, visible, rootRef,
     requestAnimationFrame(() => inputRef.current?.focus());
   }, [visible, chatStage, projectId]);
 
-  // ESC pending reset on stream end. Streaming → idle clears any
-  // half-armed double-tap so the next ESC isn't surprise-stopping
-  // the (now-idle) agent.
+  // ESC pending reset when the agent goes fully idle (no running turn AND no
+  // queued sends) — clears any half-armed double-tap so the next ESC isn't
+  // surprise-stopping the (now-idle) agent.
   useEffect(() => {
-    if (isStreaming) return;
+    if (busy) return;
     escPendingRef.current = false;
     setEscPending(false);
     if (escTimerRef.current) { clearTimeout(escTimerRef.current); escTimerRef.current = null; }
-  }, [isStreaming]);
+  }, [busy]);
 
   // Textarea auto-resize. Cap at 200px so a multi-screen paste
   // doesn't push the timeline out of view.
@@ -172,65 +177,42 @@ export function InputZone({ tabId, projectId, cwd, connection, visible, rootRef,
     // through agent.send as normal text — provider parses + dispatches
     // internally; output arrives as fold_markdown messages.
     const files = pendingFiles;
-    const images = pendingImages;
+    const images = pendingImages.length > 0 ? pendingImages : undefined;
     setInput('');
     setPendingFiles([]);
     setPendingImages([]);
     setShowSlashMenu(false);
 
-    // Single entry point: every submission is enqueued — never sent directly.
-    // The drain effect below is the ONE sender: it fires immediately when the
-    // agent is idle (enqueue → next-tick dequeue) or after the current turn when
-    // streaming. Unifies the send path (attachments included) and keeps the
-    // one-at-a-time burst guard in one place.
-    enqueueMessage(tabId, text, images, files);
-  }, [tabId, input, pendingFiles, pendingImages]);
-
-  const handleStop = useCallback(() => {
-    // ESC-twice (stop) means "abort this turn AND drop everything I
-    // queued up while it was running". If we only stopped the turn,
-    // the queue would auto-flush as the next turn — surprising.
-    clearQueuedMessages(tabId);
-    emitAgent('agent:stop', { tabId });
-  }, [tabId]);
-
-  // Single queue drain — the ONE place messages are sent. Every submission is
-  // enqueued (handleSend), and this effect pops the front when allowed. The
-  // one-at-a-time latch lives in `reduceFlush` (queue-flush.ts, unit-tested):
-  // an idle enqueue flushes next tick; messages enqueued during the post-flush
-  // window (isStreaming not yet true) are held — without the latch the effect
-  // re-fire (queuedMessages changed by the dequeue) would drain the whole queue
-  // in a burst. The send sits in useEffect (not in handleSend) so agent-server
-  // gets one tick to settle before the next AGENT_SEND lands.
-  const flushArmedRef = useRef(true);
-  useEffect(() => {
-    const { armed, flush } = reduceFlush(flushArmedRef.current, {
-      isStreaming,
-      queueLength: queuedMessages.length,
-    });
-    flushArmedRef.current = armed;
-    if (!flush) return;
-    const next = dequeueMessage(tabId);
-    if (!next) return;
-    upsertMessage(tabId, {
-      id: `user-${Date.now()}`,
-      type: 'user',
-      content: next.content,
-      timestamp: Date.now(),
-      ...(next.images && next.images.length > 0 ? { images: next.images } : {}),
-      ...(next.files && next.files.length > 0 ? { files: next.files } : {}),
-    });
+    // Eager send: emit immediately with a renderer-minted clientMsgId — no
+    // client-side queueing or turn-boundary guessing. agent-server owns the
+    // queue; it echoes the clientMsgId in the queue snapshot. The optimistic
+    // pending chip (enqueuePendingSend) shows instantly; the snapshot promotes
+    // it into the timeline when its turn runs. Attachments (files) ride on the
+    // chip for display only — agent:send carries text + images (matches the
+    // prior behaviour: files were never forwarded to the agent).
+    const clientMsgId = crypto.randomUUID();
+    enqueuePendingSend(tabId, clientMsgId, text, images, files.length > 0 ? files : undefined);
     emitAgent('agent:send', {
       tabId,
-      text: next.content,
-      images: next.images && next.images.length > 0 ? next.images : undefined,
+      text,
+      images,
       prefs: {
         model: intent?.model,
         effort: intent?.effort,
         permissionMode: intent?.permissionMode,
       },
+      clientMsgId,
     });
-  }, [isStreaming, queuedMessages, tabId, intent]);
+  }, [tabId, input, pendingFiles, pendingImages, intent]);
+
+  const handleStop = useCallback(() => {
+    // ESC-twice (stop) means "abort this turn AND drop everything I queued up
+    // while it was running". The server clears its queue on stop; we clear the
+    // local optimistic chips too (incl. not-yet-confirmed ones). The running
+    // turn — already a timeline bubble — stays, marked interrupted by the agent.
+    clearPendingSends(tabId);
+    emitAgent('agent:stop', { tabId });
+  }, [tabId]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const val = e.target.value;
@@ -278,7 +260,7 @@ export function InputZone({ tabId, projectId, cwd, connection, visible, rootRef,
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
     if (e.key === 'Escape') {
       if (showSlashMenu) { setShowSlashMenu(false); return; }
-      if (isStreaming) {
+      if (busy) {
         e.preventDefault();
         if (escPendingRef.current) {
           if (escTimerRef.current) { clearTimeout(escTimerRef.current); escTimerRef.current = null; }

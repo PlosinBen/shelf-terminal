@@ -209,23 +209,18 @@ test.describe('agent flows via fake provider', () => {
   });
 
   test.describe('queued messages', () => {
-    // Regression: messages queued during a turn must flush ONE per turn, not
-    // drain in a burst. The flush effect (InputZone) is level-triggered on
-    // `isStreaming === false`, but isStreaming only flips back to true after the
-    // dispatched send round-trips through IPC — so the effect used to re-fire in
-    // that window and drain the whole queue at once. The fix arms/disarms so
-    // exactly one message flushes per streaming→idle cycle. Surfaced by
-    // background tasks (foreground turns idle near-instantly, making the burst
-    // obvious). See DECISIONS #69.
-    // The one-at-a-time burst guard itself is covered deterministically by
-    // queue-flush.test.ts (reduceFlush). This e2e covers the WIRING a unit test
-    // can't: a message submitted while a turn streams is enqueued, and the single
-    // drain effect actually flushes it through IPC so every queued turn runs.
+    // Messages submitted while a turn streams are EAGER-sent (each with a
+    // clientMsgId) and queued by agent-server, which serializes them one turn at
+    // a time and emits a queue snapshot the renderer mirrors as chips. This e2e
+    // covers the WIRING a unit test can't: every queued send actually drains
+    // through IPC → agent-server → provider and runs in order.
+    // The reconcile + queue logic itself is unit-tested deterministically
+    // (queue-reconcile.test.ts, send-queue.test.ts).
     //
     // We deliberately DON'T assert the transient `.agent-msg-queued` count
     // (2→1→0): that intermediate state is timing-sensitive and was flaky on slow
-    // e2e hosts (e.g. WSL2) for no added coverage — the latch logic is unit-tested.
-    // Asserting the final outcome (all three ran, queue drained) is robust.
+    // e2e hosts (e.g. WSL2) for no added coverage. Asserting the final outcome
+    // (all three ran, queue drained) is robust.
     test('queued messages all flush through and run', async ({ shelfApp: { page } }) => {
       await setupProject(page);
       await openAgentTab(page);
