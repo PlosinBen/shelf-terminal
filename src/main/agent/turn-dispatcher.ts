@@ -1,5 +1,5 @@
 import { log } from '@shared/logger';
-import type { TaskEvent } from '@shared/types';
+import type { AgentQueueItem, TaskEvent } from '@shared/types';
 import type { AgentEvent } from './types';
 
 /**
@@ -58,6 +58,10 @@ export function createTurnDispatcher(
   // drain into the renderer. Permissionless (noop handler) — the auto-resume
   // path doesn't route tool permissions in v1. See DECISIONS #69.
   onServerTurn?: (turnId: string, events: AsyncGenerator<AgentEvent>) => void,
+  // Session-level sink for the server-owned send-queue snapshot. Like
+  // task_event, these carry NO turnId (the queue is session-scoped) so they're
+  // routed here BEFORE the per-turn turnId check. See message-queue-ownership.
+  onQueue?: (items: AgentQueueItem[]) => void,
 ): TurnDispatcher {
   const turns = new Map<string, TurnState>();
   const responseHandlers = new Map<string, (payload: any) => void>();
@@ -93,6 +97,13 @@ export function createTurnDispatcher(
     // model backgrounds work mid-turn. See DECISIONS #69.
     if (m?.type === 'task_event') {
       onTaskEvent?.({ kind: m.kind, task: m.task, tasks: m.tasks });
+      return;
+    }
+
+    // Send-queue snapshot: session-level (turnId-less), like task_event. Route
+    // to the session sink before the turnId check below.
+    if (m?.type === 'queue') {
+      onQueue?.(Array.isArray(m.items) ? (m.items as AgentQueueItem[]) : []);
       return;
     }
 

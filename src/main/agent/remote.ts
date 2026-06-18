@@ -1,5 +1,5 @@
 import { log } from '@shared/logger';
-import type { Connection, AgentProvider, AgentInitPhase, ProviderModel, TaskEvent, ConnectionHealth, ConnectionHealthState } from '@shared/types';
+import type { Connection, AgentProvider, AgentInitPhase, AgentQueueItem, ProviderModel, TaskEvent, ConnectionHealth, ConnectionHealthState } from '@shared/types';
 import type { AgentBackend, AgentEvent, AgentQueryOptions, PickerResolvePayload } from './types';
 import { ConnectionHealthTracker, DEFAULT_HEALTH_THRESHOLDS } from './connection-health';
 import { ChildProcess, spawn, execSync, execFileSync } from 'child_process';
@@ -80,6 +80,10 @@ export function createRemoteBackend(
   // AGENT_CONNECTION_HEALTH. Driven by the heartbeat round-trip (see §5.9 /
   // connection-health.ts). Fires only on health-state change.
   onHealth?: (health: ConnectionHealth) => void,
+  // Optional session-level sink for the server-owned send-queue snapshot. Main
+  // wires it to IPC.AGENT_QUEUE. Session-scoped (turnId-less), like onTaskEvent.
+  // See message-queue-ownership.
+  onQueue?: (items: AgentQueueItem[]) => void,
 ): AgentBackend {
   let remoteProc: RemoteProcess | null = null;
   let deployed = false;
@@ -103,7 +107,7 @@ export function createRemoteBackend(
           deployed = true;
         }
         onPhase?.('connecting');
-        const proc = await spawnAgentServer(connection, cwd, deployResult!, initScript, onTaskEvent, onServerTurn, onHealth);
+        const proc = await spawnAgentServer(connection, cwd, deployResult!, initScript, onTaskEvent, onServerTurn, onHealth, onQueue);
         if (!proc) return null;
         const ready = await proc.awaitReady();
         if (!ready) {
@@ -212,6 +216,14 @@ export function createRemoteBackend(
       // 'stopped' task_notification flows back over the task_event lane.
       if (remoteProc) {
         remoteProc.sendLine({ type: 'stop_task', taskId });
+      }
+    },
+
+    cancelQueued(clientMsgId: string) {
+      // Fire-and-forget: agent-server drops the matching not-yet-running send
+      // from its queue + re-emits the queue snapshot. No-op if already running.
+      if (remoteProc) {
+        remoteProc.sendLine({ type: 'cancel_queued', clientMsgId });
       }
     },
 
@@ -560,6 +572,7 @@ async function spawnAgentServer(
   onTaskEvent?: (ev: TaskEvent) => void,
   onServerTurn?: (turnId: string, events: AsyncGenerator<AgentEvent>) => void,
   onHealth?: (health: ConnectionHealth) => void,
+  onQueue?: (items: AgentQueueItem[]) => void,
 ): Promise<RemoteProcess | null> {
   const { nodeBin, indexPath } = deploy;
   // Forward SHELF_TEST_MODE to the remote agent-server so E2E specs can drive
@@ -575,7 +588,7 @@ async function spawnAgentServer(
         `spawnAgentServer local: cwd=${cwd} indexPath=${indexPath} fileExists=${fs.existsSync(indexPath)} PATH=${env.PATH ?? '<missing>'}`,
       );
       const proc = spawn(nodeBin, [indexPath], { cwd, env, stdio: ['pipe', 'pipe', 'pipe'] });
-      return wrapProcess(proc, onTaskEvent, onServerTurn, onHealth);
+      return wrapProcess(proc, onTaskEvent, onServerTurn, onHealth, onQueue);
     } catch (err: any) {
       log.error('agent-remote', `Local spawn failed: ${err.message}`);
       return null;
@@ -602,7 +615,7 @@ async function spawnAgentServer(
       cmd,
     ];
     const proc = spawn('ssh', args, { stdio: ['pipe', 'pipe', 'pipe'] });
-    return wrapProcess(proc, onTaskEvent, onServerTurn, onHealth);
+    return wrapProcess(proc, onTaskEvent, onServerTurn, onHealth, onQueue);
   }
 
   if (connection.type === 'docker') {
@@ -610,14 +623,14 @@ async function spawnAgentServer(
     const proc = spawn('docker', ['exec', '-i', connection.container, 'sh', '-c', cmd], {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
-    return wrapProcess(proc, onTaskEvent, onServerTurn, onHealth);
+    return wrapProcess(proc, onTaskEvent, onServerTurn, onHealth, onQueue);
   }
 
   if (connection.type === 'wsl') {
     const proc = spawn('wsl.exe', ['-d', connection.distro, '--', 'sh', '-lc', `${testEnv}exec ${nodeBin} ${indexPath}`], {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
-    return wrapProcess(proc, onTaskEvent, onServerTurn, onHealth);
+    return wrapProcess(proc, onTaskEvent, onServerTurn, onHealth, onQueue);
   }
 
   return null;
@@ -632,8 +645,9 @@ function wrapProcess(
   onTaskEvent?: (ev: TaskEvent) => void,
   onServerTurn?: (turnId: string, events: AsyncGenerator<AgentEvent>) => void,
   onHealth?: (health: ConnectionHealth) => void,
+  onQueue?: (items: AgentQueueItem[]) => void,
 ): RemoteProcess {
-  const dispatcher = createTurnDispatcher(parseRemoteMessage, onTaskEvent, onServerTurn);
+  const dispatcher = createTurnDispatcher(parseRemoteMessage, onTaskEvent, onServerTurn, onQueue);
   let buffer = '';
 
   // ── Heartbeat: app→agent-server liveness + RTT (see §5.9 / connection-health.ts).

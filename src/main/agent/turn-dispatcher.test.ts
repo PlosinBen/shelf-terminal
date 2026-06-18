@@ -220,6 +220,34 @@ describe('createTurnDispatcher', () => {
     expect(taskEvents[0].tasks).toHaveLength(2);
   });
 
+  it('routes queue snapshot (turnId-less) to the onQueue sink, not the turn queue', async () => {
+    const queueSnaps: any[] = [];
+    const d = createTurnDispatcher(parse, undefined, undefined, (items) => queueSnaps.push(items));
+    const gen = d.registerTurn('t-x', noopPerm);
+
+    d.feed({ type: 'queue', items: [{ clientMsgId: 'a', state: 'running' }, { clientMsgId: 'b', state: 'queued' }] });
+    d.feed({ type: 'message', msgType: 'text', content: 'hi', turnId: 't-x' });
+    d.feed({ type: 'status', state: 'idle', turnId: 't-x' });
+
+    const events: AgentEvent[] = [];
+    for await (const e of gen) events.push(e);
+
+    // queue snapshot went to the sink, NOT into the turn's event stream.
+    expect(events.map((e) => ((e as any).payload)?.content ?? ((e as any).payload)?.state)).toEqual(['hi', 'idle']);
+    expect(queueSnaps).toHaveLength(1);
+    expect(queueSnaps[0]).toEqual([{ clientMsgId: 'a', state: 'running' }, { clientMsgId: 'b', state: 'queued' }]);
+  });
+
+  it('queue snapshot without an onQueue sink (or malformed items) is a harmless no-op', () => {
+    const d = createTurnDispatcher(parse);
+    expect(() => d.feed({ type: 'queue', items: [{ clientMsgId: 'a', state: 'queued' }] })).not.toThrow();
+    // Malformed items coerces to [] when a sink IS present.
+    const snaps: any[] = [];
+    const d2 = createTurnDispatcher(parse, undefined, undefined, (items) => snaps.push(items));
+    d2.feed({ type: 'queue' });
+    expect(snaps).toEqual([[]]);
+  });
+
   it('task_event without an onTaskEvent sink is a harmless no-op (does not throw / misroute)', async () => {
     const d = createTurnDispatcher(parse);
     const gen = d.registerTurn('t-x', noopPerm);

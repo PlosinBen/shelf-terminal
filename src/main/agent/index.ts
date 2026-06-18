@@ -16,6 +16,15 @@ interface SessionInstance {
   cwd: string;
   backend: AgentBackend;
   state: AgentSessionState;
+  /**
+   * Count of concurrently in-flight foreground turns. With the server-owned
+   * queue the renderer eager-sends, so several `sendMessage` generators can run
+   * at once (agent-server serializes them, but main holds one generator each).
+   * `state` is 'streaming' while this is > 0 — without the counter, the FIRST
+   * turn's finally would flip `state` to 'idle' while later queued turns are
+   * still draining, breaking the server-turn busy-skip (see startSession).
+   */
+  activeTurns: number;
   pendingPermissions: Map<string, (result: PermissionResult) => void>;
 }
 
@@ -145,6 +154,11 @@ export function initAgentManager(windowGetter: () => BrowserWindow | null): void
     await session?.backend.stopTask?.(payload.taskId);
   });
 
+  ipcMain.handle(IPC.AGENT_CANCEL_QUEUED, async (_e, payload) => {
+    const session = sessions.get(payload.tabId);
+    session?.backend.cancelQueued?.(payload.clientMsgId);
+  });
+
 }
 
 function send(channel: string, tabId: string, ...args: unknown[]) {
@@ -211,6 +225,10 @@ async function startSession(
     // The renderer aggregates per-project (worst among the project's agent
     // tabs) for the project status icon. See §5.9.
     (healthState) => send(IPC.AGENT_CONNECTION_HEALTH, tabId, healthState),
+    // Server-owned send-queue snapshot — forwarded straight to the renderer,
+    // which mirrors it (optimistic chips reconciled against this authoritative
+    // list). Session-level (turnId-less). See message-queue-ownership.
+    (items) => send(IPC.AGENT_QUEUE, tabId, items),
   );
 
   const session: SessionInstance = {
@@ -220,6 +238,7 @@ async function startSession(
     cwd,
     backend,
     state: 'idle',
+    activeTurns: 0,
     pendingPermissions: new Map(),
   };
 
@@ -276,6 +295,7 @@ async function sendMessage(
   const tag = `[agent:${tabId.slice(0, 8)}]`;
   log.info('agent', `${tag} send promptLen=${(prompt ?? '').length}${prefs?.configEdit ? ` configEdit=${prefs.configEdit.key}` : ''}`);
 
+  session.activeTurns += 1;
   session.state = 'streaming';
   send(IPC.AGENT_STATUS, tabId, { state: 'streaming' });
   notifyObservers(tabId, { type: 'status', payload: { state: 'streaming' } });
@@ -305,7 +325,11 @@ async function sendMessage(
     send(IPC.AGENT_MESSAGE, tabId, { type: 'error', content: err.message });
     notifyObservers(tabId, { type: 'error', error: err.message });
   } finally {
-    session.state = 'idle';
+    // Only the LAST in-flight turn flips the session back to idle — earlier
+    // turns finishing while later queued turns still drain must keep it
+    // streaming (see activeTurns doc on SessionInstance).
+    session.activeTurns = Math.max(0, session.activeTurns - 1);
+    if (session.activeTurns === 0) session.state = 'idle';
     for (const resolve of session.pendingPermissions.values()) {
       resolve({ behavior: 'deny', message: 'Turn ended' });
     }

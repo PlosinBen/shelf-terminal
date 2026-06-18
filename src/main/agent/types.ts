@@ -1,4 +1,4 @@
-import type { AgentMessage, AgentQueueItem, AuthMethod, ProviderModel } from '@shared/types';
+import type { AgentMessage, AuthMethod, ProviderModel } from '@shared/types';
 
 export type { AgentMessage, AgentMessageType } from '@shared/types';
 
@@ -147,12 +147,6 @@ export type AgentEvent =
       }>;
     }
   | { type: 'auth_required'; provider: string }
-  /**
-   * Server-owned send-queue snapshot (session-level, turnId-less). Full ordered
-   * list of in-flight client sends. Routed via the session `onQueue` sink (like
-   * task_event), forwarded to the renderer over IPC.AGENT_QUEUE.
-   */
-  | { type: 'queue'; items: AgentQueueItem[] }
   | { type: 'error'; error: string };
 
 export interface AgentBackend {
