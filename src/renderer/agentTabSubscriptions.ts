@@ -3,6 +3,7 @@ import { buildAgentMsg } from './agent-message-builder';
 import {
   peekAgentTab,
   appendChunk,
+  applyQueueSnapshot,
   setAuthRequired,
   setCapabilities,
   setInitStatus,
@@ -57,6 +58,13 @@ export function bindAgentStoreSubscriptions(): () => void {
   // Upserts into the store's backgroundTasks; BackgroundTasksPanel reads it.
   const offBackgroundTasks = onAgent('agent:onBackgroundTasks', ({ tabId, event }) => {
     applyTaskEvent(tabId, event);
+  });
+
+  // Server-owned send-queue snapshot — turnId-less; main forwards over
+  // IPC.AGENT_QUEUE; bus surfaces it as `agent:onQueue`. Reconciles against the
+  // optimistic pending chips + promotes newly-running sends into the timeline.
+  const offQueue = onAgent('agent:onQueue', ({ tabId, items }) => {
+    applyQueueSnapshot(tabId, items);
   });
 
   const offStream = onAgent('agent:onStream', ({ tabId, chunk }) => {
@@ -133,6 +141,7 @@ export function bindAgentStoreSubscriptions(): () => void {
     offMessage();
     offPlan();
     offBackgroundTasks();
+    offQueue();
     offStream();
     offStatus();
     offCapabilities();

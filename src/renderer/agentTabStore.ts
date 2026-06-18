@@ -1,7 +1,8 @@
 import { useSyncExternalStore } from 'react';
 import type { AgentMsg } from './components/AgentMessage';
-import type { AgentFile, AgentInitPhase, AgentPrefs, AgentProvider, AuthMethod, NormalizedTask, TaskEvent } from '../shared/types';
+import type { AgentFile, AgentInitPhase, AgentPrefs, AgentProvider, AgentQueueItem, AuthMethod, NormalizedTask, TaskEvent } from '../shared/types';
 import { loadAgentMessagesLatest, saveAgentMessagesDelta, clearAgentSession } from './storage/agent-history';
+import { reconcileQueueSnapshot, type PendingSend } from './queue-reconcile';
 
 // Per-tab store for agent UI state. Split from store.ts because the
 // global store rebuilds its snapshot on every change — every useStore
@@ -78,6 +79,13 @@ export interface AgentTabState {
   // domain
   messages: AgentMsg[];
   queuedMessages: QueuedMessage[];
+  // Server-owned send queue (display mirror). The renderer eager-sends every
+  // submission and optimistically tracks it here as a chip; agent-server emits
+  // the authoritative queue snapshot and reconcileQueueSnapshot folds it in,
+  // promoting items into the timeline when their turn starts. `promotedClientMsgIds`
+  // dedups promotion. See queue-reconcile.ts + message-queue-ownership design.
+  pendingSends: PendingSend[];
+  promotedClientMsgIds: Set<string>;
   currentPlan: string;
   // Background tasks (turnId-less side-channel). Upserted by id from task_event;
   // ordered by first-seen. See DECISIONS #69.
@@ -323,6 +331,8 @@ export function initTab(tabId: string, opts: InitTabOpts) {
     provider: opts.provider,
     messages: [],
     queuedMessages: [],
+    pendingSends: [],
+    promotedClientMsgIds: new Set(),
     currentPlan: '',
     backgroundTasks: [],
     dismissedTaskIds: new Set(),
@@ -570,6 +580,75 @@ export function clearQueuedMessages(tabId: string) {
   );
 }
 
+// ── Server-owned send queue (optimistic chips + snapshot reconcile) ──
+
+/**
+ * Optimistically record an eager-sent submission as a pending chip (confirmed
+ * by the next server snapshot). Called at submit time, BEFORE the send round-
+ * trips, so the CLI-style instant-feedback chip shows without waiting.
+ */
+export function enqueuePendingSend(
+  tabId: string,
+  clientMsgId: string,
+  content: string,
+  images?: string[],
+  files?: AgentFile[],
+) {
+  update(tabId, (prev) => ({
+    ...prev,
+    pendingSends: [
+      ...prev.pendingSends,
+      {
+        clientMsgId,
+        content,
+        ...(images && images.length > 0 ? { images } : {}),
+        ...(files && files.length > 0 ? { files } : {}),
+        confirmed: false,
+      },
+    ],
+  }));
+}
+
+/**
+ * Apply an authoritative server queue snapshot: reconcile against the optimistic
+ * pending chips, promote any newly-running item into the timeline as a user
+ * bubble, and update the chip list. See reconcileQueueSnapshot.
+ */
+export function applyQueueSnapshot(tabId: string, items: AgentQueueItem[]) {
+  const tab = tabs.get(tabId);
+  if (!tab) return;
+  const { pending, promote, promoted } = reconcileQueueSnapshot(
+    tab.pendingSends,
+    tab.promotedClientMsgIds,
+    items,
+  );
+  // Promote first (adds timeline user bubbles + marks dirty for persistence),
+  // then commit the reduced chip list + promoted set in one update.
+  for (const p of promote) {
+    upsertMessage(tabId, {
+      id: `user-${p.clientMsgId}`,
+      type: 'user',
+      content: p.content,
+      timestamp: Date.now(),
+      ...(p.images && p.images.length > 0 ? { images: p.images } : {}),
+      ...(p.files && p.files.length > 0 ? { files: p.files } : {}),
+    } as AgentMsg);
+  }
+  update(tabId, (prev) => ({ ...prev, pendingSends: pending, promotedClientMsgIds: promoted }));
+}
+
+/**
+ * Optimistically drop a not-yet-running pending chip (the IPC cancel is emitted
+ * separately by the caller). The server's next snapshot confirms; if it raced to
+ * 'running' first, the snapshot still carries it and reconcile re-promotes it.
+ */
+export function cancelPendingSend(tabId: string, clientMsgId: string) {
+  update(tabId, (prev) => {
+    const pendingSends = prev.pendingSends.filter((p) => p.clientMsgId !== clientMsgId);
+    return pendingSends.length === prev.pendingSends.length ? prev : { ...prev, pendingSends };
+  });
+}
+
 export async function clearMessages(tabId: string) {
   const tab = tabs.get(tabId);
   if (!tab) return;
@@ -585,7 +664,7 @@ export async function clearMessages(tabId: string) {
   }
   // Clear background tasks too — the backend clears its task map on /clear,
   // so the panel must not keep showing stale tasks from the wiped session.
-  update(tabId, (prev) => ({ ...prev, messages: [], backgroundTasks: [], dismissedTaskIds: new Set() }));
+  update(tabId, (prev) => ({ ...prev, messages: [], backgroundTasks: [], dismissedTaskIds: new Set(), pendingSends: [], promotedClientMsgIds: new Set() }));
   await clearAgentSession(tab.sessionId).catch((err) => {
     console.error('[agentTabStore] clearAgentSession failed', err);
   });
