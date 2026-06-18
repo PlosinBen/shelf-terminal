@@ -114,8 +114,9 @@ interface ShelfApi {
   };
   agent: {
     init: (tabId: string, cwd: string, connection: import('../shared/types').Connection, provider: string, sessionId?: string, opts?: Record<string, unknown>) => Promise<boolean>;
-    send: (tabId: string, prompt: string, images?: string[], prefs?: { model?: string; effort?: string; permissionMode?: string; configEdit?: { key: 'model' | 'effort' | 'permissionMode'; value: string } }) => Promise<boolean>;
+    send: (tabId: string, prompt: string, images?: string[], prefs?: { model?: string; effort?: string; permissionMode?: string; configEdit?: { key: 'model' | 'effort' | 'permissionMode'; value: string }; clientMsgId?: string }) => Promise<boolean>;
     stop: (tabId: string) => Promise<boolean>;
+    cancelQueued: (tabId: string, clientMsgId: string) => Promise<boolean>;
     destroy: (tabId: string) => Promise<void>;
     resolvePermission: (tabId: string, toolUseId: string, allow: boolean, scope?: 'once' | 'session') => Promise<boolean>;
     resolvePicker: (
@@ -133,6 +134,7 @@ interface ShelfApi {
     onStatus: (callback: (tabId: string, status: unknown) => void) => () => void;
     onPlan: (callback: (tabId: string, payload: { content: string }) => void) => () => void;
     onBackgroundTasks: (callback: (tabId: string, event: import('../shared/types').TaskEvent) => void) => () => void;
+    onQueue: (callback: (tabId: string, items: import('../shared/types').AgentQueueItem[]) => void) => () => void;
     onConnectionHealth: (callback: (tabId: string, health: import('../shared/types').ConnectionHealth) => void) => () => void;
     onPermissionRequest: (callback: (tabId: string, req: unknown) => void) => () => void;
     onPickerRequest: (callback: (tabId: string, req: unknown) => void) => () => void;

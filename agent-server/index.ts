@@ -36,6 +36,9 @@ interface IncomingMessage {
    *  present, the provider applies it + emits a divider instead of running a
    *  query — prompt is empty for these turns. */
   configEdit?: { key: 'model' | 'effort' | 'permissionMode'; value: string };
+  /** For `type: 'send'` / `type: 'cancel_queued'`: renderer-minted correlation
+   *  key. Tracked through the send queue + echoed in the queue snapshot. */
+  clientMsgId?: string;
   toolUseId?: string;
   allow?: boolean;
   /** For `type: 'ping'`: client heartbeat sequence, echoed back in pong for RTT. */
@@ -237,6 +240,7 @@ async function handleSend(msg: IncomingMessage) {
     images: msg.images,
     sessionId: msg.sessionId,
     configEdit: msg.configEdit,
+    clientMsgId: msg.clientMsgId,
     appId: msg.appId,
     restoreContext,
   };

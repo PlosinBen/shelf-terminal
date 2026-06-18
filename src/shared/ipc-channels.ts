@@ -98,6 +98,10 @@ export const IPC = {
   /** Stop a running background task (fire-and-forget; SDK emits task_notification
    *  'stopped' which flows back via AGENT_BACKGROUND_TASKS). See DECISIONS #72. */
   AGENT_STOP_TASK: 'agent:stop-task',
+  /** Cancel a specific not-yet-running queued message by clientMsgId
+   *  (fire-and-forget). Server drops it from its queue + re-emits AGENT_QUEUE.
+   *  No-op once the message is running. See message-queue-ownership design. */
+  AGENT_CANCEL_QUEUED: 'agent:cancel-queued',
 
   // PM Agent
   PM_SEND: 'pm:send',
@@ -133,6 +137,10 @@ export const IPC = {
   AGENT_INIT_STATUS: 'agent:init-status',
   /** Background task updates (turnId-less; see DECISIONS #69). Carries a TaskEvent. */
   AGENT_BACKGROUND_TASKS: 'agent:background-tasks',
+  /** Server-owned send-queue snapshot (session-level, turnId-less). Carries the
+   *  full ordered AgentQueueItem[] of in-flight client sends. Renderer mirrors
+   *  it. See message-queue-ownership design. */
+  AGENT_QUEUE: 'agent:queue',
   /** Per-agent-server connection health from the heartbeat round-trip. Carries a ConnectionHealth. */
   AGENT_CONNECTION_HEALTH: 'agent:connection-health',
 } as const;

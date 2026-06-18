@@ -1,4 +1,4 @@
-import type { AgentMessage, AuthMethod, ProviderModel } from '@shared/types';
+import type { AgentMessage, AgentQueueItem, AuthMethod, ProviderModel } from '@shared/types';
 
 export type { AgentMessage, AgentMessageType } from '@shared/types';
 
@@ -106,6 +106,12 @@ export interface AgentQueryOptions {
    * /model slash does. Threaded through to agent-server's send line.
    */
   configEdit?: { key: 'model' | 'effort' | 'permissionMode'; value: string };
+  /**
+   * Renderer-minted correlation key for this send. Forwarded to agent-server in
+   * the send line so the server's queue snapshot can echo it back. See
+   * message-queue-ownership design.
+   */
+  clientMsgId?: string;
 }
 
 export type AgentEvent =
@@ -141,6 +147,12 @@ export type AgentEvent =
       }>;
     }
   | { type: 'auth_required'; provider: string }
+  /**
+   * Server-owned send-queue snapshot (session-level, turnId-less). Full ordered
+   * list of in-flight client sends. Routed via the session `onQueue` sink (like
+   * task_event), forwarded to the renderer over IPC.AGENT_QUEUE.
+   */
+  | { type: 'queue'; items: AgentQueueItem[] }
   | { type: 'error'; error: string };
 
 export interface AgentBackend {
@@ -178,6 +190,10 @@ export interface AgentBackend {
   /** Stop a running background task (fire-and-forget; the 'stopped'
    *  task_notification flows back via the task_event lane). See DECISIONS #72. */
   stopTask?(taskId: string): Promise<void>;
+  /** Cancel a not-yet-running queued message by clientMsgId (fire-and-forget).
+   *  Server drops it from its queue + re-emits the queue snapshot. No-op once
+   *  running. See message-queue-ownership design. */
+  cancelQueued?(clientMsgId: string): void;
   /**
    * Resolve a pending picker_request by forwarding the user's answers (or
    * cancellation) to the remote agent-server. Provider tracks the pending

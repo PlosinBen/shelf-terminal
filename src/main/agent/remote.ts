@@ -192,6 +192,7 @@ export function createRemoteBackend(
         effort: opts?.effort,
         images: opts?.images,
         configEdit: opts?.configEdit,
+        clientMsgId: opts?.clientMsgId,
         // Names this app's projected skills dir (~/.shelf/apps/<appId>/skills)
         // for the provider to point its SDK at. See #70.
         appId: getAppInstanceId(),

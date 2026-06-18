@@ -35,6 +35,9 @@ export function bindAgentIPCGroup(): () => void {
   const offBackgroundTasks = api.onBackgroundTasks((tabId, event) => {
     emitAgent('agent:onBackgroundTasks', { tabId, event });
   });
+  const offQueue = api.onQueue((tabId, items) => {
+    emitAgent('agent:onQueue', { tabId, items });
+  });
   const offCapabilities = api.onCapabilities((tabId, caps) => {
     emitAgent('agent:onCapabilities', { tabId, caps });
   });
@@ -55,11 +58,14 @@ export function bindAgentIPCGroup(): () => void {
   const offInitEvt = onAgent('agent:init', ({ tabId, cwd, connection, provider, sessionId, opts }) => {
     api.init(tabId, cwd, connection, provider, sessionId, opts);
   });
-  const offSendEvt = onAgent('agent:send', ({ tabId, text, images, prefs, configEdit }) => {
-    api.send(tabId, text, images, { ...prefs, configEdit });
+  const offSendEvt = onAgent('agent:send', ({ tabId, text, images, prefs, configEdit, clientMsgId }) => {
+    api.send(tabId, text, images, { ...prefs, configEdit, clientMsgId });
   });
   const offStopEvt = onAgent('agent:stop', ({ tabId }) => {
     api.stop(tabId);
+  });
+  const offCancelQueuedEvt = onAgent('agent:cancelQueued', ({ tabId, clientMsgId }) => {
+    api.cancelQueued(tabId, clientMsgId);
   });
   const offDestroyEvt = onAgent('agent:destroy', ({ tabId }) => {
     api.destroy(tabId);
@@ -77,6 +83,7 @@ export function bindAgentIPCGroup(): () => void {
     offStatus();
     offPlan();
     offBackgroundTasks();
+    offQueue();
     offCapabilities();
     offPermission();
     offPicker();
@@ -85,6 +92,7 @@ export function bindAgentIPCGroup(): () => void {
     offInitEvt();
     offSendEvt();
     offStopEvt();
+    offCancelQueuedEvt();
     offDestroyEvt();
     offResolvePerm();
     offResolvePicker();

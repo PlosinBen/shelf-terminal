@@ -89,8 +89,8 @@ export function initAgentManager(windowGetter: () => BrowserWindow | null): void
   });
 
   ipcMain.handle(IPC.AGENT_SEND, async (_e, payload) => {
-    const { tabId, prompt, images, model, effort, permissionMode, configEdit } = payload;
-    return sendMessage(tabId, prompt, images, { model, effort, permissionMode, configEdit });
+    const { tabId, prompt, images, model, effort, permissionMode, configEdit, clientMsgId } = payload;
+    return sendMessage(tabId, prompt, images, { model, effort, permissionMode, configEdit, clientMsgId });
   });
 
   ipcMain.handle(IPC.AGENT_STOP, async (_e, payload) => {
@@ -267,6 +267,7 @@ async function sendMessage(
     effort?: string;
     permissionMode?: string;
     configEdit?: { key: 'model' | 'effort' | 'permissionMode'; value: string };
+    clientMsgId?: string;
   },
 ): Promise<boolean> {
   const session = sessions.get(tabId);
@@ -295,6 +296,7 @@ async function sendMessage(
       effort: prefs?.effort,
       permissionMode: prefs?.permissionMode,
       configEdit: prefs?.configEdit,
+      clientMsgId: prefs?.clientMsgId,
     })) {
       dispatchEvent(tabId, event);
     }
