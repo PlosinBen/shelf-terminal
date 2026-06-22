@@ -301,6 +301,13 @@ const sendQueue = createSendQueue<IncomingMessage>({
     send({ type: 'error', error: (err as any)?.message ?? String(err), turnId: tid } as OutgoingMessage);
     send({ type: 'status', state: 'idle', turnId: tid } as OutgoingMessage);
   },
+  // Never silent: a cancel that didn't cleanly remove a queued item. stderr is
+  // captured into the main log (remote.ts proc.stderr → log.error). 'cancel-
+  // running' is a benign race (snapshot re-promotes); 'cancel-unknown' is a real
+  // desync worth investigating. (console.error → stderr; NEVER stdout = the wire.)
+  onAnomaly: (reason, clientMsgId) => {
+    console.error(`[send-queue] ${reason} clientMsgId=${clientMsgId}`);
+  },
 });
 
 rl.on('line', (line) => {

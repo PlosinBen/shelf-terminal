@@ -12,6 +12,7 @@ describe('reconcileQueueSnapshot', () => {
     expect(r.promote.map((p) => p.clientMsgId)).toEqual(['a']);
     expect(r.pending).toEqual([]); // chip became a bubble
     expect([...r.promoted]).toEqual(['a']);
+    expect(r.anomalies).toEqual([]); // normal flow → no anomaly
   });
 
   it('confirms a queued item as a chip without promoting', () => {
@@ -34,10 +35,17 @@ describe('reconcileQueueSnapshot', () => {
     expect(r.promote).toEqual([]);
   });
 
-  it('drops a previously-confirmed item that vanished without running (cancel / respawn loss)', () => {
+  it('drops a previously-confirmed item that vanished without running, and FLAGS it (not silent)', () => {
     const r = reconcileQueueSnapshot([mk('a', true)], new Set(), []);
     expect(r.pending).toEqual([]);
     expect(r.promote).toEqual([]);
+    expect(r.anomalies).toEqual([{ kind: 'dropped-confirmed-vanished', clientMsgId: 'a' }]);
+  });
+
+  it('does NOT flag a never-confirmed optimistic item absent from the snapshot (still in-flight)', () => {
+    const r = reconcileQueueSnapshot([mk('a', false)], new Set(), []);
+    expect(r.pending.map((p) => p.clientMsgId)).toEqual(['a']);
+    expect(r.anomalies).toEqual([]);
   });
 
   it('promotes in snapshot (FIFO) order when several start at once', () => {
@@ -46,10 +54,11 @@ describe('reconcileQueueSnapshot', () => {
     expect(r.pending).toEqual([]);
   });
 
-  it('marks a running id promoted even with no local content (other tab / reconnect)', () => {
+  it('marks a running id promoted even with no local content (other tab / reconnect) and FLAGS it', () => {
     const r = reconcileQueueSnapshot([], new Set(), snap(['x', 'running']));
     expect(r.promote).toEqual([]); // no bubble — no content
     expect([...r.promoted]).toEqual(['x']); // but guarded against future re-promote
+    expect(r.anomalies).toEqual([{ kind: 'promote-without-content', clientMsgId: 'x' }]);
   });
 
   it('prunes promoted ids that left the snapshot (bounded set)', () => {

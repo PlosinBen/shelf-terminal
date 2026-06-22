@@ -238,14 +238,17 @@ describe('createTurnDispatcher', () => {
     expect(queueSnaps[0]).toEqual([{ clientMsgId: 'a', state: 'running' }, { clientMsgId: 'b', state: 'queued' }]);
   });
 
-  it('queue snapshot without an onQueue sink (or malformed items) is a harmless no-op', () => {
+  it('queue snapshot without an onQueue sink is a harmless no-op; malformed items do NOT call the sink', () => {
     const d = createTurnDispatcher(parse);
     expect(() => d.feed({ type: 'queue', items: [{ clientMsgId: 'a', state: 'queued' }] })).not.toThrow();
-    // Malformed items coerces to [] when a sink IS present.
+    // Malformed (non-array) items must NOT reach the sink — an empty snapshot
+    // would wrongly drop the renderer's queued chips. The dispatcher logs + skips.
     const snaps: any[] = [];
     const d2 = createTurnDispatcher(parse, undefined, undefined, (items) => snaps.push(items));
     d2.feed({ type: 'queue' });
-    expect(snaps).toEqual([[]]);
+    expect(snaps).toEqual([]); // sink not called
+    d2.feed({ type: 'queue', items: [{ clientMsgId: 'a', state: 'queued' }] });
+    expect(snaps).toEqual([[{ clientMsgId: 'a', state: 'queued' }]]); // valid → delivered
   });
 
   it('task_event without an onTaskEvent sink is a harmless no-op (does not throw / misroute)', async () => {

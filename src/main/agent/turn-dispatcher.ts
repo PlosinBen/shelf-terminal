@@ -103,7 +103,13 @@ export function createTurnDispatcher(
     // Send-queue snapshot: session-level (turnId-less), like task_event. Route
     // to the session sink before the turnId check below.
     if (m?.type === 'queue') {
-      onQueue?.(Array.isArray(m.items) ? (m.items as AgentQueueItem[]) : []);
+      if (Array.isArray(m.items)) {
+        onQueue?.(m.items as AgentQueueItem[]);
+      } else {
+        // Malformed snapshot — log rather than silently treating as empty (an
+        // empty snapshot would wrongly drop the renderer's queued chips).
+        log.info('agent-remote', `queue snapshot with non-array items, ignoring: ${typeof m.items}`);
+      }
       return;
     }
 

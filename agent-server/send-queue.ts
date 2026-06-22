@@ -34,6 +34,10 @@ export interface SendQueueDeps<T extends QueuedSend> {
   /** A handle() that threw must STILL end the turn (idle), or the renderer —
    *  already streaming — wedges forever. */
   onHandleError: (msg: T, err: unknown) => void;
+  /** Diagnostic for a cancel/clear edge that isn't a clean queue removal (never
+   *  silent). `reason`: 'cancel-running' = the id is the turn already running
+   *  (benign race — can't un-run); 'cancel-unknown' = no such id anywhere. */
+  onAnomaly?: (reason: 'cancel-running' | 'cancel-unknown', clientMsgId: string) => void;
 }
 
 export interface SendQueue<T extends QueuedSend> {
@@ -98,7 +102,12 @@ export function createSendQueue<T extends QueuedSend>(deps: SendQueueDeps<T>): S
     },
     cancel(clientMsgId: string): void {
       const i = queue.findIndex((m) => m.clientMsgId === clientMsgId);
-      if (i < 0) return;
+      if (i < 0) {
+        // Not in the waiting queue: either it's the running turn (benign race —
+        // the snapshot re-promotes it) or genuinely unknown. Report, never silent.
+        deps.onAnomaly?.(clientMsgId === runningClientMsgId ? 'cancel-running' : 'cancel-unknown', clientMsgId);
+        return;
+      }
       const [removed] = queue.splice(i, 1);
       terminate(removed);
       emit();

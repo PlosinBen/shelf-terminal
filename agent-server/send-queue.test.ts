@@ -8,6 +8,7 @@ function setup() {
   const snapshots: AgentQueueItem[][] = [];
   const terminated: string[] = [];
   const errors: Array<{ msg: Msg; err: unknown }> = [];
+  const anomalies: Array<{ reason: string; clientMsgId: string }> = [];
   // Controllable handles: each handle() parks until the test resolves/rejects it.
   const handles: Array<{ msg: Msg; resolve: () => void; reject: (e: unknown) => void }> = [];
   const q = createSendQueue<Msg>({
@@ -15,8 +16,9 @@ function setup() {
     emitSnapshot: (items) => snapshots.push(items),
     terminateTurn: (t) => terminated.push(t),
     onHandleError: (msg, err) => errors.push({ msg, err }),
+    onAnomaly: (reason, clientMsgId) => anomalies.push({ reason, clientMsgId }),
   });
-  return { q, snapshots, terminated, errors, handles };
+  return { q, snapshots, terminated, errors, anomalies, handles };
 }
 
 // Flush the microtask/macrotask queue so pump's Promise.then/finally chain runs.
@@ -73,13 +75,29 @@ describe('createSendQueue', () => {
     expect(handles.map((h) => h.msg.id)).toEqual(['a', 'c']);
   });
 
-  it('cancel of the running send is a no-op', async () => {
-    const { q, snapshots, terminated } = setup();
+  it('cancel of the running send is a no-op but is FLAGGED (cancel-running), not silent', async () => {
+    const { q, snapshots, terminated, anomalies } = setup();
     q.enqueue({ id: 'a', clientMsgId: 'a', turnId: 't1' });
     const before = snapshots.length;
     q.cancel('a'); // already running → not in queue
     expect(terminated).toEqual([]);
     expect(snapshots.length).toBe(before); // no new snapshot
+    expect(anomalies).toEqual([{ reason: 'cancel-running', clientMsgId: 'a' }]);
+  });
+
+  it('cancel of an unknown id is FLAGGED (cancel-unknown), not silent', () => {
+    const { q, anomalies } = setup();
+    q.enqueue({ id: 'a', clientMsgId: 'a', turnId: 't1' });
+    q.cancel('nope');
+    expect(anomalies).toEqual([{ reason: 'cancel-unknown', clientMsgId: 'nope' }]);
+  });
+
+  it('a clean cancel of a queued send does NOT flag an anomaly', () => {
+    const { q, anomalies } = setup();
+    q.enqueue({ id: 'a', clientMsgId: 'a', turnId: 't1' });
+    q.enqueue({ id: 'b', clientMsgId: 'b', turnId: 't2' });
+    q.cancel('b');
+    expect(anomalies).toEqual([]);
   });
 
   it('clear drops every waiting send (keeps the running one)', async () => {

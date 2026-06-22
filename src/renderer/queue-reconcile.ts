@@ -37,6 +37,32 @@ export interface PendingSend {
   confirmed: boolean;
 }
 
+/**
+ * A reconcile mismatch the caller MUST log (no silent drops). Each is a case
+ * where the server's authoritative snapshot and the renderer's optimistic state
+ * disagree — benign on reconnect / multi-tab, but a bug-signal otherwise.
+ */
+export type QueueAnomalyKind =
+  /** Snapshot says 'running' but there's no local optimistic content → no
+   *  timeline bubble can be rendered for it (e.g. reconnect / another tab). */
+  | 'promote-without-content'
+  /** A confirmed chip (seen in a prior snapshot) vanished WITHOUT running → its
+   *  chip is dropped. The user didn't cancel it (that removes it client-side
+   *  first), so this means the server lost it — typically an agent-server
+   *  respawn. Potential message loss; loudest anomaly. */
+  | 'dropped-confirmed-vanished';
+
+// NOTE: deliberately NO 'queued id with no local content' anomaly. An in-flight
+// snapshot emitted just before the server processes a cancel/ESC still lists the
+// id the client already removed — a benign race that would false-fire on every
+// cancel. A genuine "server running something we don't know" is still caught by
+// 'promote-without-content' when that item actually runs.
+
+export interface QueueAnomaly {
+  kind: QueueAnomalyKind;
+  clientMsgId: string;
+}
+
 export interface QueueReconcileResult {
   /** Next chip list (waiting sends), in order. */
   pending: PendingSend[];
@@ -44,6 +70,8 @@ export interface QueueReconcileResult {
   promote: PendingSend[];
   /** Next promoted-id set (dedup guard). */
   promoted: Set<string>;
+  /** Snapshot↔optimistic mismatches the caller MUST surface (never silent). */
+  anomalies: QueueAnomaly[];
 }
 
 export function reconcileQueueSnapshot(
@@ -55,16 +83,19 @@ export function reconcileQueueSnapshot(
   const snapState = new Map(snapshot.map((s) => [s.clientMsgId, s.state]));
   const nextPromoted = new Set(promoted);
   const promote: PendingSend[] = [];
+  const anomalies: QueueAnomaly[] = [];
 
   // Promotions: 'running' ids not yet promoted. Iterate the snapshot so promote
   // order is the server's FIFO order. An id running with no local content
   // (another tab, or post-reconnect with no optimistic entry) is still marked
-  // promoted to avoid re-checking, but produces no bubble.
+  // promoted to avoid re-checking, but produces no bubble — flagged as an
+  // anomaly so it's never a silent skip.
   for (const item of snapshot) {
     if (item.state !== 'running' || nextPromoted.has(item.clientMsgId)) continue;
     nextPromoted.add(item.clientMsgId);
     const p = byId.get(item.clientMsgId);
     if (p) promote.push(p);
+    else anomalies.push({ kind: 'promote-without-content', clientMsgId: item.clientMsgId });
   }
 
   // Forget promoted ids no longer in the snapshot: their turn finished and
@@ -81,12 +112,15 @@ export function reconcileQueueSnapshot(
     if (state === 'queued') {
       next.push(p.confirmed ? p : { ...p, confirmed: true });
     } else if (state === undefined) {
-      // Absent from snapshot: keep if still optimistic, drop if it had been
-      // confirmed and vanished without running (cancelled / lost on respawn).
+      // Absent from snapshot: keep if still optimistic (not yet acked), but if it
+      // had been confirmed and vanished WITHOUT running, it was dropped by the
+      // server (user-cancel removes it client-side first, so this is respawn /
+      // desync loss) → flag, don't drop silently.
       if (!p.confirmed) next.push(p);
+      else anomalies.push({ kind: 'dropped-confirmed-vanished', clientMsgId: p.clientMsgId });
     }
     // state === 'running' handled by the promote loop above.
   }
 
-  return { pending: next, promote, promoted: nextPromoted };
+  return { pending: next, promote, promoted: nextPromoted, anomalies };
 }

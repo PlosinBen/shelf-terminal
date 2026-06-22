@@ -3,6 +3,7 @@ import type { AgentMsg } from './components/AgentMessage';
 import type { AgentFile, AgentInitPhase, AgentPrefs, AgentProvider, AgentQueueItem, AuthMethod, NormalizedTask, TaskEvent } from '../shared/types';
 import { loadAgentMessagesLatest, saveAgentMessagesDelta, clearAgentSession } from './storage/agent-history';
 import { reconcileQueueSnapshot, type PendingSend } from './queue-reconcile';
+import { debugLog } from './debugLog';
 
 // Per-tab store for agent UI state. Split from store.ts because the
 // global store rebuilds its snapshot on every change — every useStore
@@ -568,11 +569,24 @@ export function enqueuePendingSend(
 export function applyQueueSnapshot(tabId: string, items: AgentQueueItem[]) {
   const tab = tabs.get(tabId);
   if (!tab) return;
-  const { pending, promote, promoted } = reconcileQueueSnapshot(
+  const { pending, promote, promoted, anomalies } = reconcileQueueSnapshot(
     tab.pendingSends,
     tab.promotedClientMsgIds,
     items,
   );
+  // Never drop / mismatch silently: surface every snapshot↔optimistic
+  // discrepancy to the persistent main log (debugLog), and console.warn the
+  // potential-message-loss case so it's loud in devtools too.
+  for (const a of anomalies) {
+    debugLog('agent-queue', `tab=${tabId.slice(0, 8)} ${a.kind} clientMsgId=${a.clientMsgId}`);
+    if (a.kind === 'dropped-confirmed-vanished') {
+      console.warn(
+        '[agent-queue] a queued message vanished from the server queue before running ' +
+        '(connection lost / respawn) — chip dropped, NOT auto-resent',
+        { tabId, clientMsgId: a.clientMsgId },
+      );
+    }
+  }
   // Promote first (adds timeline user bubbles + marks dirty for persistence),
   // then commit the reduced chip list + promoted set in one update.
   for (const p of promote) {
