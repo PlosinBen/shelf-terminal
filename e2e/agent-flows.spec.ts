@@ -264,6 +264,8 @@ test.describe('agent flows via fake provider', () => {
       await openAgentTab(page);
       await sendAgentPrompt(page, '/mcp');
       const body = await expandedBody(page, '/mcp');
+      // Renders as a GFM table (not raw markdown / a bullet list).
+      await expect(body.locator('table')).toBeVisible();
       await expect(body).toContainText('fake-fs');
       await expect(body).toContainText('connected');
       await expect(body).toContainText('fake-db');
@@ -275,6 +277,7 @@ test.describe('agent flows via fake provider', () => {
       await openAgentTab(page);
       await sendAgentPrompt(page, '/skills');
       const body = await expandedBody(page, '/skills');
+      await expect(body.locator('table')).toBeVisible(); // GFM table
       await expect(body).toContainText('fake-skill');
       await expect(body).toContainText('app'); // normalized source tag
     });

@@ -104,28 +104,51 @@ export function normalizeCopilotMcpServers(
 }
 
 // ── Markdown card formatting (pure) ─────────────────────────────────────────
+//
+// Rendered as GFM tables (the renderer's `marked` has gfm + table CSS) — clearer
+// than a bullet list for these column-y listings. Columns are ADAPTIVE: a column
+// present on no row is dropped (e.g. Claude skills carry no `source`, so the
+// Source column never shows for Claude).
+
+/** Escape a cell value for a GFM table (pipes break the column boundary). */
+function cell(v: string): string {
+  return v.replace(/\|/g, '\\|').replace(/\n+/g, ' ');
+}
+
+/** Build a GFM table from headers + rows (cells pre-escaped). */
+function mdTable(headers: string[], rows: string[][]): string {
+  const head = `| ${headers.join(' | ')} |`;
+  const sep = `| ${headers.map(() => '---').join(' | ')} |`;
+  const body = rows.map((r) => `| ${r.join(' | ')} |`).join('\n');
+  return `${head}\n${sep}\n${body}`;
+}
 
 /** `/mcp` card body. Empty → an explicit "none" line, never blank. */
 export function formatMcpCard(servers: NormalizedMcpServer[]): string {
   if (servers.length === 0) return 'No MCP servers loaded in this session.';
-  const lines = servers.map((s) => {
-    const bits = [`**${s.name}**`, `— ${s.status}`];
-    if (s.error) bits.push(`(${s.error})`);
-    if (s.source) bits.push(`· ${s.source}`);
-    return `- ${bits.join(' ')}`;
+  const hasSource = servers.some((s) => s.source);
+  const headers = ['Server', 'Status', ...(hasSource ? ['Source'] : [])];
+  const rows = servers.map((s) => {
+    const status = s.error ? `${s.status} (${s.error})` : s.status;
+    const r = [`\`${cell(s.name)}\``, cell(status)];
+    if (hasSource) r.push(cell(s.source ?? '—'));
+    return r;
   });
-  return `${servers.length} MCP server${servers.length > 1 ? 's' : ''}:\n${lines.join('\n')}`;
+  return `${servers.length} MCP server${servers.length > 1 ? 's' : ''}:\n\n${mdTable(headers, rows)}`;
 }
 
 /** `/skills` card body. Empty → an explicit "none" line, never blank. */
 export function formatSkillsCard(skills: NormalizedSkill[]): string {
   if (skills.length === 0) return 'No skills loaded in this session.';
-  const lines = skills.map((s) => {
-    const bits = [`**${s.name}**`];
-    if (s.source) bits.push(`· ${s.source}`);
-    if (s.enabled === false) bits.push('(disabled)');
-    if (s.description) bits.push(`— ${s.description}`);
-    return `- ${bits.join(' ')}`;
+  const hasSource = skills.some((s) => s.source);
+  const hasDesc = skills.some((s) => s.description);
+  const headers = ['Skill', ...(hasSource ? ['Source'] : []), ...(hasDesc ? ['Description'] : [])];
+  const rows = skills.map((s) => {
+    const name = s.enabled === false ? `\`${cell(s.name)}\` (disabled)` : `\`${cell(s.name)}\``;
+    const r = [name];
+    if (hasSource) r.push(cell(s.source ?? '—'));
+    if (hasDesc) r.push(cell(s.description ?? '—'));
+    return r;
   });
-  return `${skills.length} skill${skills.length > 1 ? 's' : ''}:\n${lines.join('\n')}`;
+  return `${skills.length} skill${skills.length > 1 ? 's' : ''}:\n\n${mdTable(headers, rows)}`;
 }
