@@ -43,7 +43,9 @@ function dump(m: SDKMessage) {
   const any = m as any;
   if (m.type === 'system' && typeof any.subtype === 'string' && any.subtype.startsWith('task_')) {
     if (any.subtype === 'task_started' && typeof any.tool_use_id === 'string') startedByToolUse.add(any.tool_use_id);
-    console.log(`  ⟪SYSTEM ${any.subtype}⟫`, JSON.stringify({ task_id: any.task_id, tool_use_id: any.tool_use_id, status: any.status }));
+    // Dump the FULL task_ message so we can see task_type / description / any
+    // field that distinguishes a sync from a background task at task_started time.
+    console.log(`  ⟪SYSTEM ${any.subtype}⟫`, JSON.stringify(any));
   } else if (m.type === 'assistant') {
     for (const b of (m.message.content as any[])) {
       if (b.type === 'tool_use' && b.name === 'Bash') {
@@ -71,7 +73,7 @@ async function main() {
 
   const PROMPT =
     'Run TWO Bash commands in this one turn: ' +
-    '(1) a NORMAL foreground command `echo SYNC_HELLO` and WAIT for its result; ' +
+    '(1) a NORMAL foreground command `sleep 4 && echo SYNC_HELLO` (run_in_background=false) and WAIT for its result; ' +
     '(2) a background command `sleep 6 && echo BG_BYE` with run_in_background=true (do not wait). ' +
     'Then reply "both issued".';
   console.log('--- spike-sync-vs-bg ---\n');

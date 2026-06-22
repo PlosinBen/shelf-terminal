@@ -35,6 +35,7 @@ import {
   reconcileTasks,
   formatClaudeToolInput,
   normalizeTaskMessage,
+  isForegroundBashTaskStart,
   type TaskRecord,
 } from './helpers';
 
@@ -697,6 +698,18 @@ export function createClaudeBackend(): ServerBackend {
     // emitter below is module-level and can't). See refreshLoadedContext.
     if (msg.type === 'system' && (msg as any).subtype === 'init') void refreshLoadedContext();
 
+    // Record each Bash tool_use's run_in_background flag (the tool_use precedes
+    // its task_started in the stream) so routeTask can drop FOREGROUND Bash —
+    // the SDK emits task_started for slow sync Bash too, which must NOT show as a
+    // background-task card. See isForegroundBashTaskStart.
+    if (msg.type === 'assistant') {
+      for (const block of (((msg as any).message?.content ?? []) as any[])) {
+        if (block?.type === 'tool_use' && block.name === 'Bash' && typeof block.id === 'string') {
+          bashToolUseBg.set(block.id, block.input?.run_in_background === true);
+        }
+      }
+    }
+
     const action = routeMessage(router, {
       type: msg.type,
       systemSubtype: msg.type === 'system' ? any.subtype : undefined,
@@ -852,6 +865,14 @@ export function createClaudeBackend(): ServerBackend {
       return;
     }
     if (ambientTaskIds.has(id)) return; // known ambient/housekeeping task — intentionally hidden
+    if (foregroundBashTaskIds.has(id)) return; // foreground Bash — never a background card
+    // Foreground (sync) Bash also emits task_started (slow ones do) but isn't a
+    // background task. Classify at task_started via the spawning tool_use's
+    // run_in_background flag, then drop this + every later event for that id.
+    if (isForegroundBashTaskStart(any, bashToolUseBg)) {
+      foregroundBashTaskIds.add(id);
+      return;
+    }
     const norm = normalizeTaskMessage(msg, backgroundTasks.get(id));
     if (norm?.ambient) { ambientTaskIds.add(id); return; }
     if (!norm) {
@@ -1022,6 +1043,8 @@ export function createClaudeBackend(): ServerBackend {
         backgroundTasks.clear();
         taskOutputFiles.clear();
         ambientTaskIds.clear();
+        bashToolUseBg.clear();
+        foregroundBashTaskIds.clear();
         lastSessionId = null;
         send({ type: 'context_patch', patch: { lastSdkSessionId: null } });
       }
@@ -1091,6 +1114,8 @@ export function createClaudeBackend(): ServerBackend {
       backgroundTasks.clear();
       taskOutputFiles.clear();
       ambientTaskIds.clear();
+      bashToolUseBg.clear();
+      foregroundBashTaskIds.clear();
     },
 
     resetSession(_sessionId: string) {
@@ -1224,6 +1249,14 @@ const taskOutputFiles = new Map<string, string>();
 // task_started.skip_transcript === true marks ambient/housekeeping tasks the
 // SDK says to hide from the transcript. We drop them from the card stream.
 const ambientTaskIds = new Set<string>();
+// Bash tool_use id → run_in_background flag (recorded when the assistant emits
+// the tool_use, which precedes its task_started). Lets routeTask tell a real
+// backgrounded Bash from a FOREGROUND one — the SDK emits task_started for slow
+// sync Bash too, but those aren't background tasks. See isForegroundBashTaskStart.
+const bashToolUseBg = new Map<string, boolean>();
+// task_ids classified as foreground Bash → all their subsequent task_ events
+// (updated / notification) are dropped too, so no card ever appears for them.
+const foregroundBashTaskIds = new Set<string>();
 
 
 

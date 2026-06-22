@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { processMessage, createBlockMsgIdState } from './index';
-import { mergeClaudeModels, rateLimitInfoToSegment, formatClaudeToolInput, extractToolResultText, askUserQuestionToPrompts, buildAskUserQuestionAnswerJson, parseTaskCreateOutput, parseTaskListOutput, reconcileTasks, renderPlan, shouldAdoptResolvedModel, stripToolErrorWrapper, normalizeTaskMessage } from './helpers';
+import { mergeClaudeModels, rateLimitInfoToSegment, formatClaudeToolInput, extractToolResultText, askUserQuestionToPrompts, buildAskUserQuestionAnswerJson, parseTaskCreateOutput, parseTaskListOutput, reconcileTasks, renderPlan, shouldAdoptResolvedModel, stripToolErrorWrapper, normalizeTaskMessage, isForegroundBashTaskStart } from './helpers';
 import type { OutgoingMessage } from '../types';
 import type { ProviderModel, NormalizedTask } from '@shared/types';
 
@@ -834,5 +834,34 @@ describe('reconcileTasks', () => {
     reconcileTasks(local, [{ id: 't1', subject: 'new', status: 'pending' }], send);
     expect(sent).toHaveLength(1);
     expect(sent[0]).toEqual({ type: 'plan', content: '- [ ] new' });
+  });
+});
+
+describe('isForegroundBashTaskStart', () => {
+  const started = (over: Record<string, unknown> = {}) =>
+    ({ type: 'system', subtype: 'task_started', task_id: 't1', task_type: 'local_bash', tool_use_id: 'tu1', ...over });
+
+  it('true for a foreground Bash (tool_use run_in_background=false)', () => {
+    const bg = new Map([['tu1', false]]);
+    expect(isForegroundBashTaskStart(started(), bg)).toBe(true);
+  });
+
+  it('false for a backgrounded Bash (run_in_background=true)', () => {
+    const bg = new Map([['tu1', true]]);
+    expect(isForegroundBashTaskStart(started(), bg)).toBe(false);
+  });
+
+  it('false when the tool_use is unknown (do not hide a real task)', () => {
+    expect(isForegroundBashTaskStart(started(), new Map())).toBe(false);
+  });
+
+  it('false for a non-local_bash task type (subagent etc.)', () => {
+    const bg = new Map([['tu1', false]]);
+    expect(isForegroundBashTaskStart(started({ task_type: 'subagent' }), bg)).toBe(false);
+  });
+
+  it('false for non-task_started subtypes (only classify at start)', () => {
+    const bg = new Map([['tu1', false]]);
+    expect(isForegroundBashTaskStart(started({ subtype: 'task_notification' }), bg)).toBe(false);
   });
 });
