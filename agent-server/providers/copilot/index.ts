@@ -356,7 +356,9 @@ export function createCopilotBackend(): ServerBackend {
     if (currentEffort) config.reasoningEffort = currentEffort;
     if (currentCwd) config.workingDirectory = currentCwd;
     // Match the native Copilot CLI: auto-discover the project's own skill dirs
-    // (`.agents/skills`, `.github/skills`) + MCP configs (`.mcp.json`,
+    // (`.github/skills`, `.agents/skills`, `.claude/skills` — Copilot reads
+    // Claude's dir cross-tool; verified against copilot CLI 1.0.56's own
+    // "Skills are loaded from: Project:" help text) + MCP configs (`.mcp.json`,
     // `.vscode/mcp.json`) from the working directory. Project-level config is the
     // official tools' domain — Shelf just turns native discovery on so the agent
     // view matches the raw CLI, and does NOT bridge/rewrite it. See PRODUCT.md #5.
