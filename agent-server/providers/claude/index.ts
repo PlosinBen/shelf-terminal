@@ -14,6 +14,14 @@ import { formatConfigAck, type ConfigEditKey } from '@shared/config-ack';
 import type { ProviderModel, NormalizedTask } from '@shared/types';
 import { stripCwd, resolveSkillsPluginRoot } from '../shared';
 import {
+  normalizeClaudeMcpServers,
+  normalizeClaudeCommandsAsSkills,
+  formatMcpCard,
+  formatSkillsCard,
+  type NormalizedMcpServer,
+  type NormalizedSkill,
+} from '../loaded-context';
+import {
   rateLimitInfoToSegment,
   askUserQuestionToPrompts,
   buildAskUserQuestionAnswerJson,
@@ -49,10 +57,25 @@ function mintSlashMsgId(): string {
 const CLAUDE_BUILTIN_COMMANDS = [
   { name: 'clear', description: 'Reset the conversation context' },
   { name: 'compact', description: 'Compact the conversation' },
+  // /mcp /skills: provider-intercepted read-only listings (see query()). They
+  // are NOT SDK-dispatchable (interactive-TUI-only) — Shelf prints the listing
+  // itself from init-cached data. Listed here so they appear in autocomplete +
+  // are dispatched (list ↔ dispatch must be paired — see the /help note above).
+  { name: 'mcp', description: 'List loaded MCP servers' },
+  { name: 'skills', description: 'List loaded skills' },
   // /help 尚未實作 provider-side dispatch — SDK 不會原生回 command list，
   // 若列在 autocomplete 上送出去只會被當成普通 prompt 餵給模型。實作前先註解。
   // { name: 'help', description: 'List available slash commands' },
 ];
+
+// Command names that are NOT user skills — filtered out when deriving the
+// `/skills` listing from supportedCommands() (which mixes built-ins + config
+// slashes + custom commands + skills, with no way to tell them apart). What
+// remains = user-added commands + skills.
+const CLAUDE_NON_SKILL_COMMANDS = new Set([
+  'clear', 'compact', 'context', 'usage', 'mcp', 'skills',
+  'model', 'effort', 'permission', 'help',
+]);
 
 
 type PermissionResult =
@@ -206,7 +229,7 @@ function getShelfMcpServer() {
 }
 
 export function createClaudeBackend(): ServerBackend {
-  const cache: { models?: any[]; commands?: any[] } = {};
+  const cache: { models?: any[]; commands?: any[]; mcpServers?: NormalizedMcpServer[]; skills?: NormalizedSkill[] } = {};
   let initPromise: Promise<AuthOutcome> | null = null;
   let lastSessionId: string | null = null;
 
@@ -450,6 +473,11 @@ export function createClaudeBackend(): ServerBackend {
             ]);
             cache.models = models;
             cache.commands = commands;
+            // NOTE: /mcp /skills cache is NOT populated here. This warmup probe is
+            // cwd-only (no `plugins` / in-process MCP), so it would MISS app-level
+            // skills + the in-process `shelf` bridge. The accurate source is the
+            // real persistent session — see refreshLoadedContext() (called from
+            // its system/init in handleSdkMessage).
             // system/init alone does NOT prove auth — the CLI inits a session
             // without credentials; auth is only validated on a real call. Probe
             // the account explicitly via the control channel.
@@ -592,6 +620,28 @@ export function createClaudeBackend(): ServerBackend {
     }
   }
 
+  /**
+   * Refresh the `/mcp` `/skills` listings from the REAL persistent session's
+   * control methods (full options: plugins/app skills + in-process MCP + cwd).
+   * Fire-and-forget from the session's system/init. Normalize ONCE here; the
+   * slash handlers just read the cache. Refresh = reconnect (new session →
+   * new init → re-run this). Best-effort — leaves the prior cache on failure.
+   */
+  async function refreshLoadedContext(): Promise<void> {
+    const q = session?.query;
+    if (!q) return;
+    try {
+      const [servers, commands] = await Promise.all([
+        q.mcpServerStatus().catch(() => [] as any[]),
+        q.supportedCommands().catch(() => [] as any[]),
+      ]);
+      cache.mcpServers = normalizeClaudeMcpServers(servers as any[]);
+      cache.skills = normalizeClaudeCommandsAsSkills(commands as any[], CLAUDE_NON_SKILL_COMMANDS);
+    } catch (err: any) {
+      console.error('[claude] refreshLoadedContext failed', err?.message ?? err);
+    }
+  }
+
   /** Settle every in-flight / queued turn so their query() promises resolve
    *  when the session ends (input closed, abort, or fatal generator error). */
   function teardownTurns() {
@@ -640,6 +690,12 @@ export function createClaudeBackend(): ServerBackend {
   function handleSdkMessage(msg: SDKMessage) {
     const any = msg as any;
     if (typeof any.session_id === 'string' && any.session_id) lastSessionId = any.session_id;
+
+    // On the REAL session's init, refresh the /mcp /skills listings from its
+    // control methods (full options: app skills + in-process MCP). Fire-and-
+    // forget — factory-scoped so it can reach the cache (the per-turn init
+    // emitter below is module-level and can't). See refreshLoadedContext.
+    if (msg.type === 'system' && (msg as any).subtype === 'init') void refreshLoadedContext();
 
     const action = routeMessage(router, {
       type: msg.type,
@@ -903,6 +959,29 @@ export function createClaudeBackend(): ServerBackend {
         // `/permission` slash → normalized key `permissionMode`.
         const key: ConfigEditKey = slash.cmd === 'permission' ? 'permissionMode' : slash.cmd;
         applyConfigEdit(key, slash.args, send);
+        return;
+      }
+
+      // /mcp /skills: provider-intercepted read-only listings. NOT SDK-
+      // dispatchable (interactive-TUI-only) — print a fold_markdown card from the
+      // init-cached, normalized data (populated by refreshLoadedContext on the
+      // real session's init). `undefined` cache = session hasn't inited yet →
+      // tell the user, don't claim "none". See mcp-skills-visibility.md.
+      if (slash && (slash.cmd === 'mcp' || slash.cmd === 'skills')) {
+        send({ type: 'status', state: 'streaming' });
+        const label = `/${slash.cmd}`;
+        let content: string;
+        if (slash.cmd === 'mcp') {
+          content = cache.mcpServers === undefined
+            ? 'Session not initialized yet — send a message first.'
+            : formatMcpCard(cache.mcpServers);
+        } else {
+          content = cache.skills === undefined
+            ? 'Session not initialized yet — send a message first.'
+            : formatSkillsCard(cache.skills);
+        }
+        send({ type: 'message', msgId: mintSlashMsgId(), msgType: 'fold_markdown', label, body: { content } });
+        send({ type: 'status', state: 'idle' });
         return;
       }
 
