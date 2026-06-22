@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { formatConfigAck } from '@shared/config-ack';
+import { parseSlashPrefix } from '@shared/slash-prefix';
+import { formatMcpCard, formatSkillsCard } from '../loaded-context';
 import { callMain } from '../../app-tool-client';
 import type {
   OutgoingMessage,
@@ -350,6 +352,25 @@ export function createFakeBackend(): ServerBackend {
         return;
       }
 
+      // /mcp /skills: mirror the real providers — provider-intercepted read-only
+      // fold_markdown cards from (here, canned) normalized data, via the same
+      // format helpers. Lets an E2E exercise the slash → card path.
+      const slash = parseSlashPrefix(input.prompt);
+      if (slash && (slash.cmd === 'mcp' || slash.cmd === 'skills')) {
+        send({ type: 'status', state: 'streaming' });
+        const content = slash.cmd === 'mcp'
+          ? formatMcpCard([
+              { name: 'fake-fs', status: 'connected' },
+              { name: 'fake-db', status: 'failed', error: 'down' },
+            ])
+          : formatSkillsCard([
+              { name: 'fake-skill', description: 'a fake skill', source: 'app' },
+            ]);
+        send({ type: 'message', msgId: mintId('m'), msgType: 'fold_markdown', label: `/${slash.cmd}`, body: { content } });
+        send({ type: 'status', state: 'idle' });
+        return;
+      }
+
       send({ type: 'status', state: 'streaming', sessionId: input.sessionId });
 
       try {
@@ -389,7 +410,10 @@ export function createFakeBackend(): ServerBackend {
         models: [{ value: 'fake-model', displayName: 'fake-model' }],
         permissionModes: [{ value: 'default', displayName: 'ask' }],
         effortLevels: [],
-        slashCommands: [],
+        slashCommands: [
+          { name: 'mcp', description: 'List loaded MCP servers' },
+          { name: 'skills', description: 'List loaded skills' },
+        ],
       };
     },
 
