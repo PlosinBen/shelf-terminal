@@ -905,18 +905,21 @@ export function createCopilotBackend(): ServerBackend {
       }
 
       // /mcp /skills: read-only listing from the init-captured snapshot
-      // (skills_loaded / mcp_servers_loaded events). `undefined` = events not in
-      // yet → say so rather than claim "none".
+      // (skills_loaded / mcp_servers_loaded events). Emit a plain `reply`
+      // (full-width markdown table), NOT a fold card — the fold indentation
+      // cramps the table. `undefined` = events not in yet → say so, not "none".
       case 'mcp': {
-        emitSuccess(mintMsgId(), loadedMcpServers === undefined
+        const content = loadedMcpServers === undefined
           ? 'Session not initialized yet — send a message first.'
-          : formatMcpCard(loadedMcpServers));
+          : formatMcpCard(loadedMcpServers);
+        send({ type: 'message', msgId: mintMsgId(), msgType: 'reply', content });
         return;
       }
       case 'skills': {
-        emitSuccess(mintMsgId(), loadedSkills === undefined
+        const content = loadedSkills === undefined
           ? 'Session not initialized yet — send a message first.'
-          : formatSkillsCard(loadedSkills));
+          : formatSkillsCard(loadedSkills);
+        send({ type: 'message', msgId: mintMsgId(), msgType: 'reply', content });
         return;
       }
 

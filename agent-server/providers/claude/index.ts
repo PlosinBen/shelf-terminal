@@ -984,13 +984,13 @@ export function createClaudeBackend(): ServerBackend {
       }
 
       // /mcp /skills: provider-intercepted read-only listings. NOT SDK-
-      // dispatchable (interactive-TUI-only) — print a fold_markdown card from the
-      // init-cached, normalized data (populated by refreshLoadedContext on the
-      // real session's init). `undefined` cache = session hasn't inited yet →
-      // tell the user, don't claim "none". See mcp-skills-visibility.md.
+      // dispatchable (interactive-TUI-only) — render the init-cached, normalized
+      // data (populated by refreshLoadedContext on the real session's init) as a
+      // plain `reply` (full-width markdown table), NOT a fold card — the fold
+      // indentation cramps the table. `undefined` cache = session not inited yet
+      // → tell the user, don't claim "none". See mcp-skills-visibility.md.
       if (slash && (slash.cmd === 'mcp' || slash.cmd === 'skills')) {
         send({ type: 'status', state: 'streaming' });
-        const label = `/${slash.cmd}`;
         let content: string;
         if (slash.cmd === 'mcp') {
           content = cache.mcpServers === undefined
@@ -1001,7 +1001,7 @@ export function createClaudeBackend(): ServerBackend {
             ? 'Session not initialized yet — send a message first.'
             : formatSkillsCard(cache.skills);
         }
-        send({ type: 'message', msgId: mintSlashMsgId(), msgType: 'fold_markdown', label, body: { content } });
+        send({ type: 'message', msgId: mintSlashMsgId(), msgType: 'reply', content });
         send({ type: 'status', state: 'idle' });
         return;
       }

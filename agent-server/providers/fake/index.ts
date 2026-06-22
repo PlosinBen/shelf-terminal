@@ -353,8 +353,8 @@ export function createFakeBackend(): ServerBackend {
       }
 
       // /mcp /skills: mirror the real providers — provider-intercepted read-only
-      // fold_markdown cards from (here, canned) normalized data, via the same
-      // format helpers. Lets an E2E exercise the slash → card path.
+      // listing from (here, canned) normalized data, via the same format helpers,
+      // emitted as a plain `reply` (full-width markdown table, not a fold card).
       const slash = parseSlashPrefix(input.prompt);
       if (slash && (slash.cmd === 'mcp' || slash.cmd === 'skills')) {
         send({ type: 'status', state: 'streaming' });
@@ -366,7 +366,7 @@ export function createFakeBackend(): ServerBackend {
           : formatSkillsCard([
               { name: 'fake-skill', description: 'a fake skill', source: 'app' },
             ]);
-        send({ type: 'message', msgId: mintId('m'), msgType: 'fold_markdown', label: `/${slash.cmd}`, body: { content } });
+        send({ type: 'message', msgId: mintId('m'), msgType: 'reply', content });
         send({ type: 'status', state: 'idle' });
         return;
       }
