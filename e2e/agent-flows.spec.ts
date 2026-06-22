@@ -240,4 +240,43 @@ test.describe('agent flows via fake provider', () => {
       await expect(page.locator('.agent-msg-queued')).toHaveCount(0, { timeout: 10_000 });
     });
   });
+
+  // /mcp and /skills are interactive-TUI-only in the real CLIs (not SDK-
+  // dispatchable), so the provider intercepts them and prints a read-only
+  // fold_markdown card from normalized data. The fake provider mirrors this with
+  // canned data. Covers the slash → intercept → card wiring (the format itself
+  // is unit-tested in loaded-context.test.ts).
+  test.describe('loaded MCP / skills listings', () => {
+    // Expand the fold card if collapsed (default depends on a display setting),
+    // then assert its body content.
+    async function expandedBody(page: import('@playwright/test').Page, label: string) {
+      const card = page.locator(`.agent-msg-fold:has(.fold-label:has-text("${label}")):visible`).last();
+      await expect(card).toBeVisible({ timeout: 5_000 });
+      const body = card.locator('.fold-body-markdown');
+      if (!(await body.isVisible().catch(() => false))) {
+        await card.locator('.fold-header').click();
+      }
+      return body;
+    }
+
+    test('/mcp prints a card listing MCP servers + status', async ({ shelfApp: { page } }) => {
+      await setupProject(page);
+      await openAgentTab(page);
+      await sendAgentPrompt(page, '/mcp');
+      const body = await expandedBody(page, '/mcp');
+      await expect(body).toContainText('fake-fs');
+      await expect(body).toContainText('connected');
+      await expect(body).toContainText('fake-db');
+      await expect(body).toContainText('down'); // failed server's error
+    });
+
+    test('/skills prints a card listing skills + source', async ({ shelfApp: { page } }) => {
+      await setupProject(page);
+      await openAgentTab(page);
+      await sendAgentPrompt(page, '/skills');
+      const body = await expandedBody(page, '/skills');
+      await expect(body).toContainText('fake-skill');
+      await expect(body).toContainText('app'); // normalized source tag
+    });
+  });
 });

@@ -464,6 +464,32 @@ export interface NormalizedTaskMessage {
 }
 
 /**
+ * Is this `task_started` actually a FOREGROUND (synchronous) Bash, not a real
+ * background task? The SDK emits `task_started` for a slow SYNC Bash too (a fast
+ * one doesn't — spike-confirmed, scripts/spike-sync-vs-bg.ts), and its
+ * task_started is structurally identical to a backgrounded one
+ * (`task_type: 'local_bash'`). The only reliable signal AT task_started time is
+ * the spawning tool_use's `run_in_background` flag (the tool_use precedes
+ * task_started in the stream, so the caller has recorded it by id). A foreground
+ * Bash's terminal task_notification also has an empty `output_file`, but that's
+ * too late to avoid showing a card — hence filtering here, at the start.
+ *
+ * Returns true ONLY when we KNOW it's a foreground Bash (tool_use seen with
+ * run_in_background===false). Unknown tool_use → false (don't hide — safer to
+ * show a stray card than to swallow a real background task). Non-`local_bash`
+ * task types (subagents etc.) are never foreground-Bash → false.
+ */
+export function isForegroundBashTaskStart(
+  msg: any,
+  bgByToolUse: Map<string, boolean>,
+): boolean {
+  return msg?.subtype === 'task_started'
+    && msg?.task_type === 'local_bash'
+    && typeof msg?.tool_use_id === 'string'
+    && bgByToolUse.get(msg.tool_use_id) === false;
+}
+
+/**
  * Map one claude SDK background-task system message into a NormalizedTask + event
  * kind, merging onto `prev` (previously-known state for this task_id, or
  * undefined). Returns null if `msg` isn't a task_* system message. PURE — the

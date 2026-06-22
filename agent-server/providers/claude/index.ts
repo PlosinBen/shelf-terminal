@@ -14,6 +14,14 @@ import { formatConfigAck, type ConfigEditKey } from '@shared/config-ack';
 import type { ProviderModel, NormalizedTask } from '@shared/types';
 import { stripCwd, resolveSkillsPluginRoot } from '../shared';
 import {
+  normalizeClaudeMcpServers,
+  normalizeClaudeCommandsAsSkills,
+  formatMcpCard,
+  formatSkillsCard,
+  type NormalizedMcpServer,
+  type NormalizedSkill,
+} from '../loaded-context';
+import {
   rateLimitInfoToSegment,
   askUserQuestionToPrompts,
   buildAskUserQuestionAnswerJson,
@@ -27,6 +35,7 @@ import {
   reconcileTasks,
   formatClaudeToolInput,
   normalizeTaskMessage,
+  isForegroundBashTaskStart,
   type TaskRecord,
 } from './helpers';
 
@@ -49,10 +58,25 @@ function mintSlashMsgId(): string {
 const CLAUDE_BUILTIN_COMMANDS = [
   { name: 'clear', description: 'Reset the conversation context' },
   { name: 'compact', description: 'Compact the conversation' },
+  // /mcp /skills: provider-intercepted read-only listings (see query()). They
+  // are NOT SDK-dispatchable (interactive-TUI-only) — Shelf prints the listing
+  // itself from init-cached data. Listed here so they appear in autocomplete +
+  // are dispatched (list ↔ dispatch must be paired — see the /help note above).
+  { name: 'mcp', description: 'List loaded MCP servers' },
+  { name: 'skills', description: 'List loaded skills' },
   // /help 尚未實作 provider-side dispatch — SDK 不會原生回 command list，
   // 若列在 autocomplete 上送出去只會被當成普通 prompt 餵給模型。實作前先註解。
   // { name: 'help', description: 'List available slash commands' },
 ];
+
+// Command names that are NOT user skills — filtered out when deriving the
+// `/skills` listing from supportedCommands() (which mixes built-ins + config
+// slashes + custom commands + skills, with no way to tell them apart). What
+// remains = user-added commands + skills.
+const CLAUDE_NON_SKILL_COMMANDS = new Set([
+  'clear', 'compact', 'context', 'usage', 'mcp', 'skills',
+  'model', 'effort', 'permission', 'help',
+]);
 
 
 type PermissionResult =
@@ -206,7 +230,7 @@ function getShelfMcpServer() {
 }
 
 export function createClaudeBackend(): ServerBackend {
-  const cache: { models?: any[]; commands?: any[] } = {};
+  const cache: { models?: any[]; commands?: any[]; mcpServers?: NormalizedMcpServer[]; skills?: NormalizedSkill[] } = {};
   let initPromise: Promise<AuthOutcome> | null = null;
   let lastSessionId: string | null = null;
 
@@ -450,6 +474,11 @@ export function createClaudeBackend(): ServerBackend {
             ]);
             cache.models = models;
             cache.commands = commands;
+            // NOTE: /mcp /skills cache is NOT populated here. This warmup probe is
+            // cwd-only (no `plugins` / in-process MCP), so it would MISS app-level
+            // skills + the in-process `shelf` bridge. The accurate source is the
+            // real persistent session — see refreshLoadedContext() (called from
+            // its system/init in handleSdkMessage).
             // system/init alone does NOT prove auth — the CLI inits a session
             // without credentials; auth is only validated on a real call. Probe
             // the account explicitly via the control channel.
@@ -592,6 +621,28 @@ export function createClaudeBackend(): ServerBackend {
     }
   }
 
+  /**
+   * Refresh the `/mcp` `/skills` listings from the REAL persistent session's
+   * control methods (full options: plugins/app skills + in-process MCP + cwd).
+   * Fire-and-forget from the session's system/init. Normalize ONCE here; the
+   * slash handlers just read the cache. Refresh = reconnect (new session →
+   * new init → re-run this). Best-effort — leaves the prior cache on failure.
+   */
+  async function refreshLoadedContext(): Promise<void> {
+    const q = session?.query;
+    if (!q) return;
+    try {
+      const [servers, commands] = await Promise.all([
+        q.mcpServerStatus().catch(() => [] as any[]),
+        q.supportedCommands().catch(() => [] as any[]),
+      ]);
+      cache.mcpServers = normalizeClaudeMcpServers(servers as any[]);
+      cache.skills = normalizeClaudeCommandsAsSkills(commands as any[], CLAUDE_NON_SKILL_COMMANDS);
+    } catch (err: any) {
+      console.error('[claude] refreshLoadedContext failed', err?.message ?? err);
+    }
+  }
+
   /** Settle every in-flight / queued turn so their query() promises resolve
    *  when the session ends (input closed, abort, or fatal generator error). */
   function teardownTurns() {
@@ -640,6 +691,24 @@ export function createClaudeBackend(): ServerBackend {
   function handleSdkMessage(msg: SDKMessage) {
     const any = msg as any;
     if (typeof any.session_id === 'string' && any.session_id) lastSessionId = any.session_id;
+
+    // On the REAL session's init, refresh the /mcp /skills listings from its
+    // control methods (full options: app skills + in-process MCP). Fire-and-
+    // forget — factory-scoped so it can reach the cache (the per-turn init
+    // emitter below is module-level and can't). See refreshLoadedContext.
+    if (msg.type === 'system' && (msg as any).subtype === 'init') void refreshLoadedContext();
+
+    // Record each Bash tool_use's run_in_background flag (the tool_use precedes
+    // its task_started in the stream) so routeTask can drop FOREGROUND Bash —
+    // the SDK emits task_started for slow sync Bash too, which must NOT show as a
+    // background-task card. See isForegroundBashTaskStart.
+    if (msg.type === 'assistant') {
+      for (const block of (((msg as any).message?.content ?? []) as any[])) {
+        if (block?.type === 'tool_use' && block.name === 'Bash' && typeof block.id === 'string') {
+          bashToolUseBg.set(block.id, block.input?.run_in_background === true);
+        }
+      }
+    }
 
     const action = routeMessage(router, {
       type: msg.type,
@@ -796,6 +865,14 @@ export function createClaudeBackend(): ServerBackend {
       return;
     }
     if (ambientTaskIds.has(id)) return; // known ambient/housekeeping task — intentionally hidden
+    if (foregroundBashTaskIds.has(id)) return; // foreground Bash — never a background card
+    // Foreground (sync) Bash also emits task_started (slow ones do) but isn't a
+    // background task. Classify at task_started via the spawning tool_use's
+    // run_in_background flag, then drop this + every later event for that id.
+    if (isForegroundBashTaskStart(any, bashToolUseBg)) {
+      foregroundBashTaskIds.add(id);
+      return;
+    }
     const norm = normalizeTaskMessage(msg, backgroundTasks.get(id));
     if (norm?.ambient) { ambientTaskIds.add(id); return; }
     if (!norm) {
@@ -906,6 +983,29 @@ export function createClaudeBackend(): ServerBackend {
         return;
       }
 
+      // /mcp /skills: provider-intercepted read-only listings. NOT SDK-
+      // dispatchable (interactive-TUI-only) — print a fold_markdown card from the
+      // init-cached, normalized data (populated by refreshLoadedContext on the
+      // real session's init). `undefined` cache = session hasn't inited yet →
+      // tell the user, don't claim "none". See mcp-skills-visibility.md.
+      if (slash && (slash.cmd === 'mcp' || slash.cmd === 'skills')) {
+        send({ type: 'status', state: 'streaming' });
+        const label = `/${slash.cmd}`;
+        let content: string;
+        if (slash.cmd === 'mcp') {
+          content = cache.mcpServers === undefined
+            ? 'Session not initialized yet — send a message first.'
+            : formatMcpCard(cache.mcpServers);
+        } else {
+          content = cache.skills === undefined
+            ? 'Session not initialized yet — send a message first.'
+            : formatSkillsCard(cache.skills);
+        }
+        send({ type: 'message', msgId: mintSlashMsgId(), msgType: 'fold_markdown', label, body: { content } });
+        send({ type: 'status', state: 'idle' });
+        return;
+      }
+
       // Seed in-memory session ID from orchestrator-provided context (first
       // turn only; once captured from a live session_id we don't clobber it).
       if (!lastSessionId && input.restoreContext?.lastSdkSessionId) {
@@ -943,6 +1043,8 @@ export function createClaudeBackend(): ServerBackend {
         backgroundTasks.clear();
         taskOutputFiles.clear();
         ambientTaskIds.clear();
+        bashToolUseBg.clear();
+        foregroundBashTaskIds.clear();
         lastSessionId = null;
         send({ type: 'context_patch', patch: { lastSdkSessionId: null } });
       }
@@ -1012,6 +1114,8 @@ export function createClaudeBackend(): ServerBackend {
       backgroundTasks.clear();
       taskOutputFiles.clear();
       ambientTaskIds.clear();
+      bashToolUseBg.clear();
+      foregroundBashTaskIds.clear();
     },
 
     resetSession(_sessionId: string) {
@@ -1145,6 +1249,14 @@ const taskOutputFiles = new Map<string, string>();
 // task_started.skip_transcript === true marks ambient/housekeeping tasks the
 // SDK says to hide from the transcript. We drop them from the card stream.
 const ambientTaskIds = new Set<string>();
+// Bash tool_use id → run_in_background flag (recorded when the assistant emits
+// the tool_use, which precedes its task_started). Lets routeTask tell a real
+// backgrounded Bash from a FOREGROUND one — the SDK emits task_started for slow
+// sync Bash too, but those aren't background tasks. See isForegroundBashTaskStart.
+const bashToolUseBg = new Map<string, boolean>();
+// task_ids classified as foreground Bash → all their subsequent task_ events
+// (updated / notification) are dropped too, so no card ever appears for them.
+const foregroundBashTaskIds = new Set<string>();
 
 
 
