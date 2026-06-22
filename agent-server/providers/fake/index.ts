@@ -39,6 +39,8 @@ import type {
  *   task:<id>           emit a running background task_event (turnId-less)
  *   taskdone:<id>       emit a completed background task_event + stash its
  *                       output so read_task_output (fetchTaskOutput) returns it
+ *   plan:<markdown>     emit a plan / todo-list side-channel update (→ PlanPanel,
+ *                       distinct from the background-tasks panel)
  *   serverturn:<msg>    server-initiated turn (auto-resume prose): turn_started
  *                       + reply (startsTurn) + idle, all on a fresh turnId
  *
@@ -270,6 +272,15 @@ export function createFakeBackend(): ServerBackend {
         kind: 'done',
         task: { id, type: 'shell', label: `bg ${id}`, status: 'completed', summary: `bg ${id} completed (exit 0)`, done: true },
       });
+      return;
+    }
+
+    // plan:<markdown> — emit a plan / todo-list side-channel update. Routed to
+    // PlanPanel (tab.currentPlan), NOT the timeline and NOT the background-tasks
+    // panel — lets an E2E assert the plan/todo surface renders independently of
+    // background tasks. See DECISIONS #60 (plan side-channel) / #69.
+    if (step.startsWith('plan:')) {
+      send({ type: 'plan', content: step.slice('plan:'.length) });
       return;
     }
 

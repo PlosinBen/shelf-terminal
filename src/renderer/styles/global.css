@@ -3449,6 +3449,39 @@ button {
 }
 .agent-task-dismiss:hover { color: var(--text-primary); }
 
+/* Running-task icon: a small spinner (instead of a static glyph) so a live job
+   reads as obviously alive vs a settled ✓/✗. */
+.agent-task-spinner {
+  width: 10px;
+  height: 10px;
+  border-width: 1.5px;
+  vertical-align: middle;
+}
+
+/* Running-task action: a DISTINCT danger button (vs the faint × dismiss on a
+   settled task) so killing live work reads as deliberate + destructive. Two
+   states: idle "Stop" (outlined) → armed "Stop?" (filled, on first click). */
+.agent-task-stop {
+  margin-left: auto;
+  flex-shrink: 0;
+  background: none;
+  border: 1px solid var(--agent-error, #e06c75);
+  color: var(--agent-error, #e06c75);
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 10px;
+  line-height: 1.5;
+  padding: 0 5px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+.agent-task-stop:hover,
+.agent-task-stop.armed {
+  background: var(--agent-error, #e06c75);
+  color: var(--bg-primary, #1e1e2e);
+}
+.agent-task-stop.armed { font-weight: 600; }
+
 /* Transient label while a stopped task waits for the SDK to confirm it settled
    (replaces the × until the card auto-removes). Right-aligned like the button. */
 .agent-task-stopping {

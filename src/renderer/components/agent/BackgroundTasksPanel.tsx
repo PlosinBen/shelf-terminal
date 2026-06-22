@@ -8,18 +8,41 @@ import type { NormalizedTask } from '../../../shared/types';
 // so a stopping card can't get stuck forever). The id is tombstoned on removal,
 // so a late event still can't resurrect it.
 const STOP_CONFIRM_TIMEOUT_MS = 5000;
+// How long a "Stop?" confirm stays armed before reverting to "Stop" — so a
+// stray first click can't leave the button primed to kill on a later click.
+const STOP_ARM_REVERT_MS = 3000;
 
 interface Props {
   tabId: string;
 }
 
+// Icons for SETTLED tasks only — a running task renders an animated spinner
+// instead (see render) so "alive vs done" is legible at a glance.
 const STATUS_ICON: Record<NormalizedTask['status'], string> = {
   pending: '○',
-  running: '◐',
+  running: '◐', // unused in render (spinner shown) — kept for completeness
   completed: '✓',
   failed: '✗',
   stopped: '⊘',
 };
+
+/**
+ * Which trailing affordance a task row shows. Pure so the (done → dismiss) vs
+ * (running → two-step Stop) decision is unit-testable without rendering.
+ *   - 'stopping'   : stop already requested, awaiting the SDK's terminal event.
+ *   - 'dismiss'    : settled task → a plain × that just hides the card (benign).
+ *   - 'stop-idle'  : running task → a "Stop" button (first click arms).
+ *   - 'stop-armed' : running task, armed → "Stop?" (second click actually kills).
+ * Background tasks are real processes; the two-step confirm + distinct danger
+ * affordance keep an accidental click from killing live work (unlike the plan
+ * panel, which is a read-only checklist with no destructive action).
+ */
+export type TaskButtonState = 'stopping' | 'dismiss' | 'stop-idle' | 'stop-armed';
+export function decideTaskButton(done: boolean, stopping: boolean, armed: boolean): TaskButtonState {
+  if (stopping) return 'stopping';
+  if (done) return 'dismiss';
+  return armed ? 'stop-armed' : 'stop-idle';
+}
 
 interface OutputState {
   loading: boolean;
@@ -65,7 +88,23 @@ export function BackgroundTasksPanel({ tabId }: Props) {
   // until the SDK confirms (task becomes done → auto-removed below) or the
   // fallback timer fires.
   const [stopping, setStopping] = useState<Record<string, true>>({});
+  // Ids whose Stop button is "armed" (first click) — a second click within
+  // STOP_ARM_REVERT_MS actually stops; otherwise it reverts. Guards live work
+  // against an accidental single click.
+  const [confirmStop, setConfirmStop] = useState<Record<string, true>>({});
   const timers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const armTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+
+  const disarm = (id: string) => {
+    const timer = armTimers.current[id];
+    if (timer) { clearTimeout(timer); delete armTimers.current[id]; }
+    setConfirmStop((prev) => {
+      if (!prev[id]) return prev;
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+  };
 
   const clearStopping = (id: string) => {
     const timer = timers.current[id];
@@ -92,7 +131,10 @@ export function BackgroundTasksPanel({ tabId }: Props) {
   }, [tasks, stopping, tabId]);
 
   // Drop any outstanding timers when the panel unmounts.
-  useEffect(() => () => { for (const id of Object.keys(timers.current)) clearTimeout(timers.current[id]); }, []);
+  useEffect(() => () => {
+    for (const id of Object.keys(timers.current)) clearTimeout(timers.current[id]);
+    for (const id of Object.keys(armTimers.current)) clearTimeout(armTimers.current[id]);
+  }, []);
 
   // Fetch a settled task's remote output into its expanded entry. Best-effort —
   // a fetch failure surfaces as the entry's error.
@@ -125,9 +167,19 @@ export function BackgroundTasksPanel({ tabId }: Props) {
     }
   }, [tasks, expandedTasks, loadOutput]);
 
-  const deleteTask = (task: NormalizedTask) => {
+  // Settled task: × just dismisses (benign). Running task: kill is destructive,
+  // so the first click ARMS ("Stop?") and only a second click within
+  // STOP_ARM_REVERT_MS actually stops the process.
+  const onAction = (task: NormalizedTask) => {
     if (task.done) { removeBackgroundTask(tabId, task.id); return; } // settled — nothing to stop
-    // Running: stop through the SDK, keep the card as "stopping…" until confirmed.
+    if (!confirmStop[task.id]) {
+      // Arm: show "Stop?" and auto-revert if not confirmed in time.
+      setConfirmStop((prev) => ({ ...prev, [task.id]: true }));
+      armTimers.current[task.id] = setTimeout(() => disarm(task.id), STOP_ARM_REVERT_MS);
+      return;
+    }
+    // Confirmed: stop through the SDK, keep the card as "stopping…" until confirmed.
+    disarm(task.id);
     void window.shelfApi.agent.stopTask(tabId, task.id);
     setStopping((prev) => ({ ...prev, [task.id]: true }));
     timers.current[task.id] = setTimeout(() => {
@@ -173,7 +225,11 @@ export function BackgroundTasksPanel({ tabId }: Props) {
                   className={`agent-task-row agent-task-clickable ${isExpanded ? 'agent-task-expanded' : ''}`}
                   onClick={() => toggleExpand(t)}
                 >
-                  <span className="agent-task-icon">{STATUS_ICON[t.status] ?? '•'}</span>
+                  <span className="agent-task-icon">
+                    {t.status === 'running'
+                      ? <span className="agent-loading-spinner agent-task-spinner" />
+                      : (STATUS_ICON[t.status] ?? '•')}
+                  </span>
                   <div className="agent-task-text">
                     {/* Collapsed: just the description (truncated). Expanded:
                         description + summary + error stack vertically, full text.
@@ -186,17 +242,34 @@ export function BackgroundTasksPanel({ tabId }: Props) {
                     )}
                     {isExpanded && t.error && <span className="agent-task-error">{t.error}</span>}
                   </div>
-                  {stopping[t.id]
-                    ? <span className="agent-task-stopping" title="Stopping…">stopping…</span>
-                    : (
+                  {(() => {
+                    const btn = decideTaskButton(t.done, !!stopping[t.id], !!confirmStop[t.id]);
+                    if (btn === 'stopping') {
+                      return <span className="agent-task-stopping" title="Stopping…">stopping…</span>;
+                    }
+                    if (btn === 'dismiss') {
+                      return (
+                        <button
+                          className="agent-task-dismiss"
+                          title="Remove"
+                          onClick={(e) => { e.stopPropagation(); onAction(t); }}
+                        >
+                          &times;
+                        </button>
+                      );
+                    }
+                    // Running: a distinct danger "Stop" button (two-step confirm).
+                    const armed = btn === 'stop-armed';
+                    return (
                       <button
-                        className="agent-task-dismiss"
-                        title={t.done ? 'Remove' : 'Stop & remove'}
-                        onClick={(e) => { e.stopPropagation(); deleteTask(t); }}
+                        className={`agent-task-stop ${armed ? 'armed' : ''}`}
+                        title={armed ? 'Click again to stop the running task' : 'Stop the running task'}
+                        onClick={(e) => { e.stopPropagation(); onAction(t); }}
                       >
-                        &times;
+                        {armed ? 'Stop?' : 'Stop'}
                       </button>
-                    )}
+                    );
+                  })()}
                 </div>
                 {isExpanded && t.done && (
                   <pre className="agent-task-output">

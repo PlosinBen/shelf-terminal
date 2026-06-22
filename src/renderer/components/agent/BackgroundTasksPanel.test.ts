@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { needsOutputFetch } from './BackgroundTasksPanel';
+import { needsOutputFetch, decideTaskButton } from './BackgroundTasksPanel';
 
 /**
  * Pure-logic test for the "fetch output after a running task settles" gate
@@ -31,5 +31,25 @@ describe('needsOutputFetch', () => {
 
   it('is false when the task is not expanded', () => {
     expect(needsOutputFetch(true, undefined)).toBe(false);
+  });
+});
+
+describe('decideTaskButton', () => {
+  it('settled task → plain dismiss (×)', () => {
+    expect(decideTaskButton(true, false, false)).toBe('dismiss');
+  });
+
+  it('running task → Stop (idle) until armed, then Stop? (armed)', () => {
+    expect(decideTaskButton(false, false, false)).toBe('stop-idle');
+    expect(decideTaskButton(false, false, true)).toBe('stop-armed');
+  });
+
+  it('stopping wins over everything (running or done)', () => {
+    expect(decideTaskButton(false, true, true)).toBe('stopping');
+    expect(decideTaskButton(true, true, false)).toBe('stopping');
+  });
+
+  it('a settled task never shows a stop affordance, even if armed flag lingers', () => {
+    expect(decideTaskButton(true, false, true)).toBe('dismiss');
   });
 });
