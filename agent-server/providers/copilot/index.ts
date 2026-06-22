@@ -7,6 +7,14 @@ import { parseSlashPrefix } from '@shared/slash-prefix';
 import { formatConfigAck, type ConfigEditKey } from '@shared/config-ack';
 import type { ProviderModel } from '@shared/types';
 import { stripCwd, resolveSkillsPluginRoot } from '../shared';
+import {
+  normalizeCopilotSkills,
+  normalizeCopilotMcpServers,
+  formatMcpCard,
+  formatSkillsCard,
+  type NormalizedMcpServer,
+  type NormalizedSkill,
+} from '../loaded-context';
 import { runBridgeTool, APP_SKILL_LIST_DESC, APP_SKILL_GET_DESC, APP_SKILL_CREATE_DESC, APP_SKILL_UPDATE_DESC } from '../../app-tool-tools';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -66,7 +74,7 @@ const inflightToolUses = new Map<string, InflightToolUseEntry>();
 //   session.idle / assistant.turn_end → idle is driven by sendAndWait() resolving
 //   session.task_complete → final reply handled via tool.execution_start(task_complete)
 const KNOWN_IGNORED_COPILOT_EVENTS = new Set<string>([
-  'pending_messages.modified', 'session.skills_loaded', 'system.message',
+  'pending_messages.modified', 'system.message',
   'session.tools_updated', 'user.message', 'assistant.turn_start',
   'assistant.turn_end', 'assistant.intent', 'hook.start', 'hook.end',
   'permission.requested', 'permission.completed', 'tool.execution_partial_result',
@@ -103,6 +111,12 @@ const SLASH_COMMANDS = [
   { name: 'compact', description: 'Summarize conversation to free up context' },
   { name: 'clear', description: 'Reset the conversation context' },
   { name: 'help', description: 'List available slash commands' },
+  // /mcp /skills: provider-intercepted read-only listings (see dispatchSlash).
+  // NOT SDK-dispatchable (interactive-TUI-only) — Shelf prints them from data
+  // captured via the skills_loaded / mcp_servers_loaded session events. Listed
+  // here so they appear in autocomplete + /help (list ↔ dispatch must be paired).
+  { name: 'mcp', description: 'List loaded MCP servers' },
+  { name: 'skills', description: 'List loaded skills' },
 ];
 
 let sdkModule: typeof import('@github/copilot-sdk') | null = null;
@@ -201,6 +215,12 @@ export function createCopilotBackend(): ServerBackend {
   // App-instance id (for the projected skills dir); bound on first query, used
   // when the session is created. Like currentCwd, first value wins.
   let currentAppId: string | undefined;
+  // Loaded MCP / skills snapshot for the `/mcp` `/skills` cards. Captured from
+  // the session's skills_loaded / mcp_servers_loaded events (fire at session
+  // start). `undefined` = not yet received → the slash handler says so rather
+  // than claiming "none". Refreshed on reconnect (new session re-emits).
+  let loadedMcpServers: NormalizedMcpServer[] | undefined;
+  let loadedSkills: NormalizedSkill[] | undefined;
   // External vocabulary (shared with Claude) → Copilot SDK SessionMode.
   const MODE_TO_SDK: Record<string, 'interactive' | 'plan' | 'autopilot'> = {
     default: 'interactive',
@@ -706,6 +726,14 @@ export function createCopilotBackend(): ServerBackend {
           }
           break;
         }
+        case 'session.skills_loaded':
+          // Snapshot the loaded skills for /skills (init-once; reconnect re-emits).
+          loadedSkills = normalizeCopilotSkills(Array.isArray(event.data?.skills) ? event.data.skills : []);
+          break;
+        case 'session.mcp_servers_loaded':
+          // Snapshot the loaded MCP servers for /mcp (init-once; reconnect re-emits).
+          loadedMcpServers = normalizeCopilotMcpServers(Array.isArray(event.data?.servers) ? event.data.servers : []);
+          break;
         case 'session.plan_changed':
           // Debounced fetch — multiple rapid changes coalesce into one read.
           schedulePlanRead();
@@ -871,6 +899,22 @@ export function createCopilotBackend(): ServerBackend {
         const msgId = mintMsgId();
         const lines = SLASH_COMMANDS.map((c) => `- /${c.name} — ${c.description}`).join('\n');
         emitSuccess(msgId, `Available commands:\n${lines}`);
+        return;
+      }
+
+      // /mcp /skills: read-only listing from the init-captured snapshot
+      // (skills_loaded / mcp_servers_loaded events). `undefined` = events not in
+      // yet → say so rather than claim "none".
+      case 'mcp': {
+        emitSuccess(mintMsgId(), loadedMcpServers === undefined
+          ? 'Session not initialized yet — send a message first.'
+          : formatMcpCard(loadedMcpServers));
+        return;
+      }
+      case 'skills': {
+        emitSuccess(mintMsgId(), loadedSkills === undefined
+          ? 'Session not initialized yet — send a message first.'
+          : formatSkillsCard(loadedSkills));
         return;
       }
 
