@@ -469,6 +469,8 @@ InputZone ──emit('agent:send', ...)──▶ EventBus
 
 ## 61. Provider 格式解析失敗一定要 fail-loud（console.error log）
 
+> 通則見 CLAUDE.md「禁止靜默吞錯 / 丟資料」;本條是 **provider wire-format 解析**的具體化（preview 字數、stderr 不走 wire、pure parser 不 log 等）。
+
 **決策**：任何 provider 端的 wire-format 解析（SDK tool_result content、apply_patch 字串、自訂協議 payload）失敗時，**必須在 caller 端 `console.error` 記錄 content preview**（前 200~300 字）。不要靜默 return null/fallback。
 
 **適用範圍**：
