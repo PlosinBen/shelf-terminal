@@ -15,9 +15,10 @@ import {
   removeTab,
   upsertMessage,
   appendChunk,
-  enqueueMessage,
-  dequeueMessage,
-  cancelQueuedMessage,
+  enqueuePendingSend,
+  applyQueueSnapshot,
+  cancelPendingSend,
+  clearPendingSends,
   clearMessages,
   setStreaming,
   setStatus,
@@ -325,16 +326,29 @@ describe('agentTabStore — message actions', () => {
     expect(__getTabForTests(TAB)!.messages.length).toBe(0);
   });
 
-  it('enqueue/dequeue/cancelQueuedMessage', () => {
-    enqueueMessage(TAB, 'A');
-    enqueueMessage(TAB, 'B');
-    expect(__getTabForTests(TAB)!.queuedMessages.length).toBe(2);
-    const first = dequeueMessage(TAB);
-    expect(first!.content).toBe('A');
-    expect(__getTabForTests(TAB)!.queuedMessages.length).toBe(1);
-    const remaining = __getTabForTests(TAB)!.queuedMessages[0];
-    cancelQueuedMessage(TAB, remaining.id);
-    expect(__getTabForTests(TAB)!.queuedMessages.length).toBe(0);
+  it('pending sends: optimistic chip → snapshot promotes to timeline', () => {
+    enqueuePendingSend(TAB, 'cm-1', 'A');
+    enqueuePendingSend(TAB, 'cm-2', 'B');
+    expect(__getTabForTests(TAB)!.pendingSends.map((p) => p.clientMsgId)).toEqual(['cm-1', 'cm-2']);
+
+    // Snapshot: cm-1 running, cm-2 queued → cm-1 promoted to a timeline user bubble.
+    applyQueueSnapshot(TAB, [
+      { clientMsgId: 'cm-1', state: 'running' },
+      { clientMsgId: 'cm-2', state: 'queued' },
+    ]);
+    const tab = __getTabForTests(TAB)!;
+    expect(tab.pendingSends.map((p) => p.clientMsgId)).toEqual(['cm-2']);
+    const bubble = tab.messages.find((m) => m.id === 'user-cm-1');
+    expect(bubble).toMatchObject({ type: 'user', content: 'A' });
+  });
+
+  it('pending sends: cancel removes the optimistic chip', () => {
+    enqueuePendingSend(TAB, 'cm-1', 'A');
+    enqueuePendingSend(TAB, 'cm-2', 'B');
+    cancelPendingSend(TAB, 'cm-1');
+    expect(__getTabForTests(TAB)!.pendingSends.map((p) => p.clientMsgId)).toEqual(['cm-2']);
+    clearPendingSends(TAB);
+    expect(__getTabForTests(TAB)!.pendingSends.length).toBe(0);
   });
 
   it('clearMessages flushes pending and calls clearAgentSession', async () => {

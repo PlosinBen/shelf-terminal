@@ -1,4 +1,4 @@
-import type { AgentInitStatus, AgentPrefs, Connection, TaskEvent } from '../../shared/types';
+import type { AgentInitStatus, AgentPrefs, AgentQueueItem, Connection, TaskEvent } from '../../shared/types';
 import { on, emit } from './bus';
 
 // Typed agent event vocabulary. Names prefixed 'agent:' to coexist with
@@ -21,6 +21,7 @@ export interface AgentEventMap {
   'agent:onStatus': { tabId: string; status: unknown };
   'agent:onPlan': { tabId: string; content: string };
   'agent:onBackgroundTasks': { tabId: string; event: TaskEvent };
+  'agent:onQueue': { tabId: string; items: AgentQueueItem[] };
   'agent:onCapabilities': { tabId: string; caps: unknown };
   'agent:onPermissionRequest': { tabId: string; req: unknown };
   'agent:onPickerRequest': { tabId: string; req: unknown };
@@ -44,8 +45,13 @@ export interface AgentEventMap {
     /** Structured config edit (picker / status-bar). When set, text is empty
      *  and no user echo is written — the provider applies it + emits a divider. */
     configEdit?: { key: 'model' | 'effort' | 'permissionMode'; value: string };
+    /** Renderer-minted correlation key (crypto.randomUUID at submit). Threaded
+     *  to agent-server so its queue snapshot can echo it back. */
+    clientMsgId?: string;
   };
   'agent:stop': { tabId: string };
+  /** Cancel a specific not-yet-running queued message by clientMsgId. */
+  'agent:cancelQueued': { tabId: string; clientMsgId: string };
   'agent:destroy': { tabId: string };
   'agent:resolvePermission': {
     tabId: string;

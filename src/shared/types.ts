@@ -408,6 +408,23 @@ export interface TaskEvent {
   tasks?: NormalizedTask[];
 }
 
+/**
+ * One entry in the server-owned send queue snapshot. The queue lives in
+ * agent-server (the execution plane serializes turns); it emits the full
+ * ordered snapshot of in-flight client sends on every change, and the renderer
+ * mirrors it (optimistic chips reconciled against this authoritative list).
+ *
+ * - `clientMsgId`: renderer-minted correlation key (crypto.randomUUID at submit).
+ * - `state`: 'queued' = waiting its turn (render as a chip); 'running' = the
+ *   turn agent-server is actively processing (renderer promotes it from chip to
+ *   a real timeline user bubble). An id that leaves the snapshot without ever
+ *   appearing as 'running' was cancelled. See message-queue-ownership design.
+ */
+export interface AgentQueueItem {
+  clientMsgId: string;
+  state: 'queued' | 'running';
+}
+
 export interface PmProviderMeta {
   id: PmProviderType;
   label: string;

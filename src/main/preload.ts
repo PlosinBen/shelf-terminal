@@ -175,10 +175,12 @@ contextBridge.exposeInMainWorld('shelfApi', {
   agent: {
     init: (tabId: string, cwd: string, connection: unknown, provider: string, sessionId?: string, opts?: Record<string, unknown>) =>
       ipcRenderer.invoke(IPC.AGENT_INIT, { tabId, cwd, connection, provider, sessionId, ...opts }),
-    send: (tabId: string, prompt: string, images?: string[], prefs?: { model?: string; effort?: string; permissionMode?: string; configEdit?: { key: 'model' | 'effort' | 'permissionMode'; value: string } }) =>
+    send: (tabId: string, prompt: string, images?: string[], prefs?: { model?: string; effort?: string; permissionMode?: string; configEdit?: { key: 'model' | 'effort' | 'permissionMode'; value: string }; clientMsgId?: string }) =>
       ipcRenderer.invoke(IPC.AGENT_SEND, { tabId, prompt, images, ...prefs }),
     stop: (tabId: string) =>
       ipcRenderer.invoke(IPC.AGENT_STOP, { tabId }),
+    cancelQueued: (tabId: string, clientMsgId: string) =>
+      ipcRenderer.invoke(IPC.AGENT_CANCEL_QUEUED, { tabId, clientMsgId }),
     destroy: (tabId: string) =>
       ipcRenderer.invoke(IPC.AGENT_DESTROY, { tabId }),
     resolvePermission: (tabId: string, toolUseId: string, allow: boolean, scope?: 'once' | 'session') =>
@@ -222,6 +224,11 @@ contextBridge.exposeInMainWorld('shelfApi', {
       const listener = (_event: Electron.IpcRendererEvent, tabId: string, event: unknown) => callback(tabId, event);
       ipcRenderer.on(IPC.AGENT_BACKGROUND_TASKS, listener);
       return () => ipcRenderer.removeListener(IPC.AGENT_BACKGROUND_TASKS, listener);
+    },
+    onQueue: (callback: (tabId: string, items: unknown) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, tabId: string, items: unknown) => callback(tabId, items);
+      ipcRenderer.on(IPC.AGENT_QUEUE, listener);
+      return () => ipcRenderer.removeListener(IPC.AGENT_QUEUE, listener);
     },
     onConnectionHealth: (callback: (tabId: string, health: unknown) => void) => {
       const listener = (_event: Electron.IpcRendererEvent, tabId: string, health: unknown) => callback(tabId, health);

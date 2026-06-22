@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AgentMessage } from '../AgentMessage';
 import { AgentDisplayContext } from './AgentDisplayContext';
-import { buildTurns, cancelQueuedMessage, useAgentTab } from '../../agentTabStore';
+import { buildTurns, cancelPendingSend, useAgentTab } from '../../agentTabStore';
+import { emitAgent } from '../../events';
 import { useStore } from '../../store';
 import { nextForceFollow } from './scroll-follow';
 
@@ -15,7 +16,7 @@ interface Props {
  * Complete, self-contained agent message-history component.
  *
  * Subscribes to its own per-tab store slice (messages / isStreaming /
- * queuedMessages / initStatus) so input keystrokes elsewhere don't re-render
+ * pendingSends / initStatus) so input keystrokes elsewhere don't re-render
  * the timeline (DECISIONS #59), owns its scroll-position intent, and renders
  * the entire message area: init/empty/failed pane, the turn timeline, the
  * streaming spinner, queued-message chips, and the jump-to-bottom FAB.
@@ -29,7 +30,7 @@ export function MessageList({ tabId, visible, onRetryInit }: Props) {
 
   const messages = tab?.messages ?? [];
   const isStreaming = tab?.isStreaming ?? false;
-  const queuedMessages = tab?.queuedMessages ?? [];
+  const pendingSends = tab?.pendingSends ?? [];
   const initStatus = tab?.initStatus ?? 'starting';
   const initPhase = tab?.initPhase ?? null;
   const initError = tab?.initError ?? null;
@@ -107,8 +108,8 @@ export function MessageList({ tabId, visible, onRetryInit }: Props) {
       bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
     // Deps: messages (new bubble / chunk / upsert), isStreaming (spinner flip),
-    // queuedMessages (queued chip below the timeline).
-  }, [messages, isStreaming, queuedMessages]);
+    // pendingSends (queued chip below the timeline).
+  }, [messages, isStreaming, pendingSends]);
 
   // When tab becomes visible again, catch up (scrollIntoView is a no-op while
   // display:none, so auto-follow couldn't run).
@@ -126,7 +127,10 @@ export function MessageList({ tabId, visible, onRetryInit }: Props) {
     return false;
   });
   // Spinner shows during the gap between turn-start and first visible chunk.
-  const showSpinner = isStreaming && !hasVisibleStreaming && messages.length > 0;
+  // "Busy" includes a non-empty queue so the spinner stays up across the brief
+  // inter-turn idle while the server drains queued sends (no flicker).
+  const busy = isStreaming || pendingSends.length > 0;
+  const showSpinner = busy && !hasVisibleStreaming && messages.length > 0;
 
   return (
     <AgentDisplayContext.Provider value={agentDisplay}>
@@ -169,13 +173,18 @@ export function MessageList({ tabId, visible, onRetryInit }: Props) {
           </div>
         )}
 
-        {queuedMessages.map((q) => (
-          <div key={q.id} className="agent-msg agent-msg-user agent-msg-queued">
-            <div className="agent-msg-content">{q.content}</div>
+        {pendingSends.map((p) => (
+          <div key={p.clientMsgId} className="agent-msg agent-msg-user agent-msg-queued">
+            <div className="agent-msg-content">{p.content}</div>
             <span className="agent-queued-label">queued</span>
             <button
               className="agent-queued-cancel"
-              onClick={() => cancelQueuedMessage(tabId, q.id)}
+              onClick={() => {
+                // Optimistic local removal + fire the IPC cancel. If it raced to
+                // 'running', the next snapshot re-promotes it (reconcile).
+                cancelPendingSend(tabId, p.clientMsgId);
+                emitAgent('agent:cancelQueued', { tabId, clientMsgId: p.clientMsgId });
+              }}
               title="Cancel"
             >×</button>
           </div>

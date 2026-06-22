@@ -21,7 +21,7 @@ export function formatResetCountdown(resetsAtMs: number): string | null {
   return `${Math.ceil(d / 60_000)}m`;
 }
 
-import type { ProviderModel, TaskEvent } from '@shared/types';
+import type { AgentQueueItem, ProviderModel, TaskEvent } from '@shared/types';
 import type { PersistedContext } from '../context-store';
 
 /**
@@ -154,6 +154,14 @@ export type OutgoingMessage = WireEnvelope & (
    */
   | { type: 'context_patch'; patch: Partial<PersistedContext> }
 
+  // ── Send queue snapshot (NO turnId) ──────────────────────────────────────
+  // Session-level, like task_event: agent-server owns the send queue (it
+  // serializes turns) and emits the FULL ordered snapshot of in-flight client
+  // sends on every change (enqueue / start-running / complete / cancel).
+  // Routed via the session-level `onQueue` sink, never the per-turn lane —
+  // wrapSendForTurn MUST NOT stamp a turnId on it. See message-queue-ownership.
+  | { type: 'queue'; items: AgentQueueItem[] }
+
   // ── Background tasks (NO turnId) ─────────────────────────────────────────
   // Decoupled from busy-state: a backgrounded task keeps emitting after the
   // foreground turn goes idle. `wrapSendForTurn` MUST NOT stamp a turnId on
@@ -242,6 +250,13 @@ export interface QueryInput {
    * identically regardless of entry point.
    */
   configEdit?: { key: 'model' | 'effort' | 'permissionMode'; value: string };
+  /**
+   * Renderer-minted correlation key for this send (crypto.randomUUID at submit
+   * time). Echoed back in the queue snapshot + used by the orchestrator to track
+   * this send through its queue. Optional — internal callers (telegram bridge)
+   * may omit it. See message-queue-ownership design.
+   */
+  clientMsgId?: string;
   /**
    * Pre-loaded persisted context for this session. Orchestrator hydrates this
    * from disk before calling `query()`; providers read whichever fields are
