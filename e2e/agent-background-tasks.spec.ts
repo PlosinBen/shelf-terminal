@@ -118,3 +118,39 @@ test.describe('background tasks panel via fake provider', () => {
     await expect(page.locator('.agent-tasks-panel')).toHaveCount(0, { timeout: 5_000 });
   });
 });
+
+test.describe('plan/todo vs background tasks — distinct surfaces', () => {
+  test('plan-panel renders the todo list independently of the timeline', async ({ shelfApp: { page } }) => {
+    await setupProject(page);
+    await openAgentTab(page);
+    await sendAgentPrompt(page, 'plan:PLAN_MARKER_ONE');
+
+    const plan = page.locator('.agent-plan-panel:visible');
+    await expect(plan).toBeVisible({ timeout: 5_000 });
+    await expect(plan.locator('.agent-plan-header')).toContainText('Plan');
+    await expect(plan.locator('.agent-plan-body')).toContainText('PLAN_MARKER_ONE');
+    // The plan is a side-channel panel, NOT an agent timeline message — the only
+    // place the marker appears in the timeline is the user's own prompt echo, so
+    // there is no agent reply / fold card carrying it.
+    await expect(page.locator('.agent-messages .agent-turn-response').getByText('PLAN_MARKER_ONE')).toHaveCount(0);
+  });
+
+  test('plan-panel and background-tasks-panel render side by side as separate panels', async ({ shelfApp: { page } }) => {
+    await setupProject(page);
+    await openAgentTab(page);
+    // One turn emits BOTH a plan/todo update and a running background task.
+    await sendAgentPrompt(page, 'plan:PLAN_MARKER_TWO|task:bgjob');
+
+    const plan = page.locator('.agent-plan-panel:visible');
+    const tasks = page.locator('.agent-tasks-panel:visible');
+    // Both surfaces render, distinctly — the todo list in the plan panel, the
+    // live job in the tasks panel (with its running spinner + Stop affordance).
+    await expect(plan).toBeVisible({ timeout: 5_000 });
+    await expect(plan.locator('.agent-plan-body')).toContainText('PLAN_MARKER_TWO');
+    await expect(tasks).toBeVisible({ timeout: 5_000 });
+    await expect(tasks.locator('.agent-task-item.agent-task-running')).toBeVisible();
+    await expect(tasks.locator('.agent-task-label')).toContainText('bg bgjob');
+    // They are two different DOM panels (not one shared list).
+    await expect(plan).not.toHaveClass(/agent-tasks-panel/);
+  });
+});
