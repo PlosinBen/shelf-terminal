@@ -31,11 +31,12 @@
 - 有錯就停，逐一修復再測，不要重複跑整套 build/test
 - 需要 dev 整個重 build 才能驗的項目（如 agent-server bundle 改動），先把所有相關項目一口氣做完再交給 dev 驗一輪 — 不要做一個交一個，造成來回重 build 浪費時間
 - 同一個問題一次無法修正，請嘗試使用 logger 靠實際輸出定位，不要純粹依靠讀 code（renderer 端走 `debugLog` bridge 落 main log 檔，AI 可直接讀）
+- 禁止靜默吞錯 / 丟資料 — 狀態對不上、解析失敗、收到非預期輸入時要 fail-loud（log 出關鍵 id / context），不要 silent `return` 或 catch 後不處理。良性 race 用低調 log（`debugLog` 落檔）、真資料遺失要大聲（`console.warn/error`）；純函式回傳 anomaly 讓 caller log（保持可測）。樂觀更新尤其要在跟真相源對帳對不上時留痕
 
 ## Conventions
 
 - **Renderer 三機制職責**（先想清楚一個動作屬於哪個）：
-  - **Store（中心化 state 服務，zustand 式）** = 所有 renderer-local state 的讀與改；mutation 走 store 具名 action（同步、可回傳值，如 `dequeueMessage`）。state 的事就 store 管。
+  - **Store（中心化 state 服務，zustand 式）** = 所有 renderer-local state 的讀與改；mutation 走 store 具名 action（同步呼叫，需要時可回傳值，如 `peekAgentTab` 讀、`enqueuePendingSend` 寫）。state 的事就 store 管。
   - **Event bus (`src/renderer/events.ts`)** = 跨 component 的事件/意圖傳遞（解耦 pub/sub：component → 別的 component 或中央 handler），含「我 `emit` → 中央 handler 執行（常打 IPC）」這種跨界意圖。
   - **IPC (`window.shelfApi.*`)** = 跨 process 到 main 的唯一通道（preload 純 RPC bridge）。
   - 判別：碰 main → IPC；動 renderer state → store action；跨 component 傳事件/意圖 → bus。**read-return（同步要回傳值）用函式呼叫，別拆成 request/response event**（會把原子同步呼叫劈成非同步 + correlation，在 bus 上重造函式回傳）。
