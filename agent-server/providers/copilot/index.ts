@@ -392,6 +392,37 @@ export function createCopilotBackend(): ServerBackend {
     const skillsRoot = resolveSkillsPluginRoot(currentAppId);
     if (skillsRoot) config.skillDirectories = [path.join(skillsRoot, 'skills')];
 
+    // In-process app-level bridge tools. As of copilot-sdk 1.0.56 tools are
+    // passed in the session CONFIG (`config.tools`, the typed/documented API) —
+    // NOT via a post-create `session.registerTools()` (removed from the public
+    // API). That's why config-based skillDirectories load but the bridge didn't:
+    // registering after createSession no longer surfaces the tools to the model.
+    // skipPermission on the read ops (safe); mutations omit it → user confirms.
+    config.tools = [
+      sdkModule!.defineTool('list_app_skills', {
+        description: APP_SKILL_LIST_DESC,
+        parameters: { type: 'object', properties: {}, additionalProperties: false },
+        handler: async () => (await runBridgeTool('app_skill.list', {})).text,
+        skipPermission: true,
+      }),
+      sdkModule!.defineTool('get_app_skill', {
+        description: APP_SKILL_GET_DESC,
+        parameters: { type: 'object', properties: { name: { type: 'string', description: 'skill folder name from list_app_skills' } }, required: ['name'], additionalProperties: false },
+        handler: async (args: any) => (await runBridgeTool('app_skill.get', { name: args?.name })).text,
+        skipPermission: true,
+      }),
+      sdkModule!.defineTool('create_app_skill', {
+        description: APP_SKILL_CREATE_DESC,
+        parameters: { type: 'object', properties: { content: { type: 'string', description: 'full SKILL.md (frontmatter name+description + body)' } }, required: ['content'], additionalProperties: false },
+        handler: async (args: any) => (await runBridgeTool('app_skill.create', { content: args?.content })).text,
+      }),
+      sdkModule!.defineTool('update_app_skill', {
+        description: APP_SKILL_UPDATE_DESC,
+        parameters: { type: 'object', properties: { name: { type: 'string', description: 'current skill folder name' }, content: { type: 'string', description: 'full new SKILL.md' } }, required: ['name', 'content'], additionalProperties: false },
+        handler: async (args: any) => (await runBridgeTool('app_skill.update', { name: args?.name, content: args?.content })).text,
+      }),
+    ];
+
     let session: import('@github/copilot-sdk').CopilotSession;
     if (state.cliSessionId) {
       try {
@@ -408,37 +439,6 @@ export function createCopilotBackend(): ServerBackend {
     }
     state.session = session;
     state.cliSessionId = session.sessionId;
-    // Register the in-process app-level bridge tools (read ops). skipPermission:
-    // safe reads need no prompt. Handlers call main via runBridgeTool.
-    try {
-      session.registerTools([
-        sdkModule!.defineTool('list_app_skills', {
-          description: APP_SKILL_LIST_DESC,
-          parameters: { type: 'object', properties: {}, additionalProperties: false },
-          handler: async () => (await runBridgeTool('app_skill.list', {})).text,
-          skipPermission: true,
-        }),
-        sdkModule!.defineTool('get_app_skill', {
-          description: APP_SKILL_GET_DESC,
-          parameters: { type: 'object', properties: { name: { type: 'string', description: 'skill folder name from list_app_skills' } }, required: ['name'], additionalProperties: false },
-          handler: async (args: any) => (await runBridgeTool('app_skill.get', { name: args?.name })).text,
-          skipPermission: true,
-        }),
-        // Mutations: no skipPermission → the user is prompted to confirm.
-        sdkModule!.defineTool('create_app_skill', {
-          description: APP_SKILL_CREATE_DESC,
-          parameters: { type: 'object', properties: { content: { type: 'string', description: 'full SKILL.md (frontmatter name+description + body)' } }, required: ['content'], additionalProperties: false },
-          handler: async (args: any) => (await runBridgeTool('app_skill.create', { content: args?.content })).text,
-        }),
-        sdkModule!.defineTool('update_app_skill', {
-          description: APP_SKILL_UPDATE_DESC,
-          parameters: { type: 'object', properties: { name: { type: 'string', description: 'current skill folder name' }, content: { type: 'string', description: 'full new SKILL.md' } }, required: ['name', 'content'], additionalProperties: false },
-          handler: async (args: any) => (await runBridgeTool('app_skill.update', { name: args?.name, content: args?.content })).text,
-        }),
-      ]);
-    } catch (err: any) {
-      console.error('[copilot] registerTools(app bridge) failed; bridge tools unavailable this session', err?.message ?? err);
-    }
     // Tell orchestrator to persist this so the next process can resume the
     // same Copilot CLI session (CLI keeps session state on disk by sessionId).
     currentSend?.({ type: 'context_patch', patch: { lastSdkSessionId: session.sessionId } });
