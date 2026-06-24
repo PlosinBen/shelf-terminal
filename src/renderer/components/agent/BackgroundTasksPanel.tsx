@@ -51,15 +51,28 @@ interface OutputState {
 }
 
 /**
- * A task is expanded but its output was never fetched — true when it was
- * expanded WHILE running (toggleExpand took the no-fetch branch, leaving an
- * entry with no content/error and not loading) and has since settled. Without a
- * follow-up fetch the card would show "(empty output)" forever despite real
- * output existing on disk. `content === undefined` distinguishes "never
- * fetched" from a genuinely empty fetched result (`content === ''`).
+ * Should we (re)fetch a settled task's output? True when the task is expanded,
+ * settled, not mid-fetch, AND we haven't already fetched THIS version of the
+ * task object (`lastFetched !== task`).
+ *
+ * Why identity, not `content === undefined`: a backgrounded shell task settles
+ * in TWO steps — a `task_updated` 'done' (no output_file) then, moments-to-
+ * minutes later (gated on the SDK auto-resuming at session idle), a
+ * `task_notification` that finally carries the output_file. Each lands as a
+ * fresh task object via applyTaskEvent. If the user expands in the gap, the
+ * first fetch returns the empty "(no output recorded)" placeholder; the OLD
+ * gate (`content === undefined`) then cached that forever and never refetched
+ * when the file arrived — the empty-card bug. Keying on the task object's
+ * identity instead refetches exactly once per new task version (so the
+ * file-bearing notification fills the card) without looping on a stable task.
+ * See .agent/features/empty-background-task-cards.md.
  */
-export function needsOutputFetch(done: boolean, out: OutputState | undefined): boolean {
-  return done && !!out && !out.loading && out.content === undefined && out.error === undefined;
+export function shouldFetchOutput(
+  task: NormalizedTask,
+  out: OutputState | undefined,
+  lastFetched: NormalizedTask | undefined,
+): boolean {
+  return !!out && task.done && !out.loading && lastFetched !== task;
 }
 
 /**
@@ -94,6 +107,10 @@ export function BackgroundTasksPanel({ tabId }: Props) {
   const [confirmStop, setConfirmStop] = useState<Record<string, true>>({});
   const timers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const armTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  // The task-object version we last issued an output fetch for, per id. Lets the
+  // refetch effect tell "already fetched this version" from "a newer task_event
+  // arrived" (e.g. the trailing notification that finally carries output_file).
+  const lastFetched = useRef<Record<string, NormalizedTask>>({});
 
   const disarm = (id: string) => {
     const timer = armTimers.current[id];
@@ -138,7 +155,13 @@ export function BackgroundTasksPanel({ tabId }: Props) {
 
   // Fetch a settled task's remote output into its expanded entry. Best-effort —
   // a fetch failure surfaces as the entry's error.
-  const loadOutput = useCallback((taskId: string) => {
+  const loadOutput = useCallback((task: NormalizedTask) => {
+    const taskId = task.id;
+    // Mark THIS task version as fetched so the refetch effect won't re-issue
+    // until a newer task_event replaces the object (e.g. the file-bearing
+    // notification). Recorded before the async fetch so a re-render mid-fetch
+    // doesn't double-issue.
+    lastFetched.current[taskId] = task;
     // Create/replace the entry unconditionally — this is what opens the card for
     // a click on an already-settled task. The .then/.catch keep the `p[taskId]?`
     // guard so a collapse mid-fetch can't resurrect the entry.
@@ -155,14 +178,19 @@ export function BackgroundTasksPanel({ tabId }: Props) {
       });
   }, [tabId]);
 
-  // A task expanded WHILE running takes the no-fetch branch in toggleExpand;
-  // once it settles, fetch its output here so the card fills in instead of being
-  // stuck on "(empty output)". (Tasks expanded after settling already fetched.)
+  // Fetch (or refetch) a settled, expanded task's output. Covers two cases:
+  //   1. expanded WHILE running → fetch once it settles (was the no-fetch branch
+  //      in toggleExpand), so the card fills instead of showing "(empty output)".
+  //   2. already fetched the empty placeholder in the gap before the output_file
+  //      arrived → refetch when the trailing notification replaces the task
+  //      object, so a card that first read empty fills in with the real output.
+  // shouldFetchOutput keys on task identity, so this fires once per new task
+  // version and can't loop on a stable task.
   useEffect(() => {
     for (const t of tasks) {
-      if (needsOutputFetch(t.done, expandedTasks[t.id])) {
-        debugLog('bg-tasks', `settle-fetch id=${t.id.slice(0, 8)} (expanded-while-running, now done)`);
-        loadOutput(t.id);
+      if (shouldFetchOutput(t, expandedTasks[t.id], lastFetched.current[t.id])) {
+        debugLog('bg-tasks', `refetch id=${t.id.slice(0, 8)} done=${t.done}`);
+        loadOutput(t);
       }
     }
   }, [tasks, expandedTasks, loadOutput]);
@@ -204,7 +232,7 @@ export function BackgroundTasksPanel({ tabId }: Props) {
     // Expanding. A settled task fetches its remote output now; a running task
     // just reveals its full (now wrapping) label/summary — its output is fetched
     // by the effect above once it settles.
-    if (task.done) loadOutput(task.id);
+    if (task.done) loadOutput(task);
     else setExpandedTasks((prev) => ({ ...prev, [task.id]: { loading: false } }));
   };
 
