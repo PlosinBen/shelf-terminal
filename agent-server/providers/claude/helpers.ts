@@ -430,6 +430,10 @@ const BG_TASK_TYPE_MAP: Record<string, NormalizedTask['type']> = {
   local_bash: 'shell',
   shell: 'shell',
   subagent: 'subagent',
+  // The SDK emits `local_agent` (not `subagent`) for a backgrounded Task-tool
+  // subagent — confirmed live via scripts/spike-task-loggers.mjs. Without this
+  // the card fell through to 'unknown'.
+  local_agent: 'subagent',
   monitor: 'monitor',
   workflow: 'workflow',
   local_workflow: 'workflow',

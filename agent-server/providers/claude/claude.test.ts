@@ -708,6 +708,10 @@ describe('normalizeTaskMessage', () => {
 
   it('maps subagent / workflow task types', () => {
     expect(normalizeTaskMessage(started({ task_type: 'subagent' }))?.task.type).toBe('subagent');
+    // Regression: a backgrounded Task-tool subagent reports task_type
+    // 'local_agent' (live-confirmed, scripts/spike-task-loggers.mjs); must map
+    // to 'subagent', not fall through to 'unknown'.
+    expect(normalizeTaskMessage(started({ task_type: 'local_agent' }))?.task.type).toBe('subagent');
     expect(normalizeTaskMessage(started({ task_type: 'local_workflow' }))?.task.type).toBe('workflow');
   });
 
