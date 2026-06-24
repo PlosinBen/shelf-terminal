@@ -559,3 +559,32 @@ export function normalizeTaskMessage(msg: any, prev?: NormalizedTask): Normalize
   }
 }
 
+/**
+ * Reconstruct the SDK's per-session task-output directory when the terminal
+ * `task_notification` — the SOLE carrier of the exact `output_file` path — never
+ * arrived for a task. That happens for tasks that settle mid-turn or when
+ * several finish at once: a known upstream delivery bug
+ * (anthropics/claude-code#20754 / #20525; the SDK's own changelog notes a task
+ * can settle via `task_updated` with NO TaskNotificationMessage). The output
+ * file itself IS on disk at `<base>/<project-slug>/<sessionId>/tasks/<id>.output`.
+ *
+ * The `<project-slug>` segment uses Claude's own path encoding (`/` AND `_` → `-`,
+ * etc.) which we deliberately do NOT replicate — instead pick the slug whose
+ * `<sessionId>/tasks` directory actually exists (the sessionId is unique, so at
+ * most one matches). PURE: the caller supplies the candidate slug list + an
+ * existence predicate, so it's unit-testable without touching the filesystem.
+ */
+export function pickSessionTasksDir(
+  base: string,
+  sessionId: string,
+  slugs: string[],
+  exists: (dir: string) => boolean,
+): string | undefined {
+  if (!base || !sessionId) return undefined;
+  for (const slug of slugs) {
+    const dir = `${base}/${slug}/${sessionId}/tasks`;
+    if (exists(dir)) return dir;
+  }
+  return undefined;
+}
+

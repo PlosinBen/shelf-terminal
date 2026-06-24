@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { processMessage, createBlockMsgIdState } from './index';
-import { mergeClaudeModels, rateLimitInfoToSegment, formatClaudeToolInput, extractToolResultText, askUserQuestionToPrompts, buildAskUserQuestionAnswerJson, parseTaskCreateOutput, parseTaskListOutput, reconcileTasks, renderPlan, shouldAdoptResolvedModel, stripToolErrorWrapper, normalizeTaskMessage, isForegroundBashTaskStart } from './helpers';
+import { mergeClaudeModels, rateLimitInfoToSegment, formatClaudeToolInput, extractToolResultText, askUserQuestionToPrompts, buildAskUserQuestionAnswerJson, parseTaskCreateOutput, parseTaskListOutput, reconcileTasks, renderPlan, shouldAdoptResolvedModel, stripToolErrorWrapper, normalizeTaskMessage, isForegroundBashTaskStart, pickSessionTasksDir } from './helpers';
 import type { OutgoingMessage } from '../types';
 import type { ProviderModel, NormalizedTask } from '@shared/types';
 
@@ -867,5 +867,27 @@ describe('isForegroundBashTaskStart', () => {
   it('false for non-task_started subtypes (only classify at start)', () => {
     const bg = new Map([['tu1', false]]);
     expect(isForegroundBashTaskStart(started({ subtype: 'task_notification' }), bg)).toBe(false);
+  });
+});
+
+describe('pickSessionTasksDir', () => {
+  const base = '/tmp/claude-504';
+  const sid = 'sess-abc';
+  // The slug uses Claude's own encoding (Ben_Hsu → Ben-Hsu) we don't replicate;
+  // we glob it by the unique session id instead.
+  const slugs = ['-Users-Ben-Hsu-Project-shelf-terminal', '-Users-Ben-Hsu-Project-other', 'node-compile-cache'];
+
+  it('picks the slug whose <sessionId>/tasks exists (encoding-agnostic)', () => {
+    const exists = (d: string) => d === `${base}/-Users-Ben-Hsu-Project-shelf-terminal/${sid}/tasks`;
+    expect(pickSessionTasksDir(base, sid, slugs, exists)).toBe(`${base}/-Users-Ben-Hsu-Project-shelf-terminal/${sid}/tasks`);
+  });
+
+  it('returns undefined when no slug has the session dir', () => {
+    expect(pickSessionTasksDir(base, sid, slugs, () => false)).toBeUndefined();
+  });
+
+  it('returns undefined for empty base / sessionId', () => {
+    expect(pickSessionTasksDir('', sid, slugs, () => true)).toBeUndefined();
+    expect(pickSessionTasksDir(base, '', slugs, () => true)).toBeUndefined();
   });
 });

@@ -4,9 +4,9 @@ import { z } from 'zod';
 import { runBridgeTool, APP_SKILL_LIST_DESC, APP_SKILL_GET_DESC, APP_SKILL_CREATE_DESC, APP_SKILL_UPDATE_DESC } from '../../app-tool-tools';
 import { createRouterState, notePush, routeMessage } from './turn-router';
 import { randomUUID } from 'node:crypto';
-import { existsSync } from 'fs';
+import { existsSync, readdirSync } from 'fs';
 import { readFile } from 'fs/promises';
-import { resolve } from 'path';
+import { resolve, join, dirname } from 'path';
 import type { QueryInput, SendFn, ServerBackend, ProviderCapabilities, StatusSegment, PickerResolvePayload } from '../types';
 import { severityFromUtilization, pickPermissionModes, pickEffortLevels } from '../types';
 import { parseSlashPrefix } from '@shared/slash-prefix';
@@ -36,6 +36,7 @@ import {
   formatClaudeToolInput,
   normalizeTaskMessage,
   isForegroundBashTaskStart,
+  pickSessionTasksDir,
   type TaskRecord,
 } from './helpers';
 
@@ -233,6 +234,23 @@ export function createClaudeBackend(): ServerBackend {
   const cache: { models?: any[]; commands?: any[]; mcpServers?: NormalizedMcpServer[]; skills?: NormalizedSkill[] } = {};
   let initPromise: Promise<AuthOutcome> | null = null;
   let lastSessionId: string | null = null;
+  // The SDK's per-session task-output dir. Authoritatively set from the first
+  // task_notification's output_file (its dirname); derived by globbing the
+  // session id when no notification ever arrives (upstream delivery bug). Lets
+  // readTaskOutput recover a task's output from `<tasksDir>/<id>.output` even
+  // when the path-bearing notification was dropped. See pickSessionTasksDir.
+  let tasksDir: string | undefined;
+
+  /** Best-effort reconstruction of `tasksDir` from the SDK's
+   *  `/tmp/claude-<uid>/<slug>/<session>/tasks` convention (POSIX-only; the
+   *  agent-server's env lacks CLAUDE_CODE_TMPDIR). Globs the slug by session id. */
+  function deriveTasksDir(sessionId: string | null): string | undefined {
+    if (!sessionId || process.platform === 'win32' || typeof process.getuid !== 'function') return undefined;
+    const base = `/tmp/claude-${process.getuid()}`;
+    let slugs: string[];
+    try { slugs = readdirSync(base); } catch { return undefined; }
+    return pickSessionTasksDir(base, sessionId, slugs, existsSync);
+  }
 
   const pendingPermissions = new Map<string, (result: PermissionResult) => void>();
 
@@ -903,6 +921,10 @@ export function createClaudeBackend(): ServerBackend {
     backgroundTasks.set(norm.task.id, norm.task);
     if (norm.outputFile) {
       taskOutputFiles.set(norm.task.id, norm.outputFile);
+      // Authoritative tasks-dir: the SDK just handed us a real output_file path,
+      // so its dirname IS the exact per-session tasks dir — overrides any derived
+      // guess and lets sibling tasks (whose own notification was dropped) resolve.
+      tasksDir = dirname(norm.outputFile);
       // DIAGNOSTIC (positive counterpart to "settled with no output file"): a
       // real output_file arrived (always via task_notification). Pairs with the
       // no-output log so a reader can see WHETHER/WHEN the file landed for a
@@ -1174,19 +1196,27 @@ export function createClaudeBackend(): ServerBackend {
     },
 
     async readTaskOutput(taskId: string): Promise<string> {
-      const file = taskOutputFiles.get(taskId);
-      // Not every settled task has a separate output file — only shell-type
-      // tasks write one. Subagent / monitor / workflow tasks report their result
-      // inline in the conversation, and a task that settled via `task_updated`
-      // (without a terminal `task_notification`) never recorded a path either.
-      // Return a friendly note rather than throwing, so clicking such a task
-      // shows a calm message instead of a raw "invoke remote method" error.
+      let file = taskOutputFiles.get(taskId);
+      // No recorded path means the terminal task_notification (sole carrier of
+      // output_file) never arrived for this task — the upstream delivery bug for
+      // tasks that settle mid-turn / in batches. The output file itself IS on
+      // disk, so reconstruct `<tasksDir>/<id>.output`. tasksDir is the exact dir
+      // from any earlier notification, else derived by globbing the session id.
       if (!file) {
-        // DIAGNOSTIC: a card was clicked but no output file was ever recorded for
-        // it. Cross-reference with the "carding"/"settled with no output file"
-        // logs by task_id to see whether it was a leaked foreground bash ('shell')
-        // or an inline-output task (subagent/workflow/monitor).
-        console.warn('[claude] readTaskOutput: no output file for task ' + JSON.stringify({ task_id: taskId, task_type: backgroundTasks.get(taskId)?.type ?? 'unknown', known: backgroundTasks.has(taskId) }));
+        const dir = tasksDir ?? deriveTasksDir(lastSessionId);
+        if (dir) {
+          const candidate = join(dir, `${taskId}.output`);
+          if (existsSync(candidate)) {
+            file = candidate;
+            tasksDir ??= dir; // cache a derived hit for sibling tasks
+            console.warn('[claude] readTaskOutput: recovered via tasks dir ' + JSON.stringify({ task_id: taskId, dir }));
+          }
+        }
+      }
+      // Still nothing: a subagent/monitor/workflow whose output is inline, or a
+      // genuinely fileless task. Return a calm note rather than throwing.
+      if (!file) {
+        console.warn('[claude] readTaskOutput: no output file for task ' + JSON.stringify({ task_id: taskId, task_type: backgroundTasks.get(taskId)?.type ?? 'unknown', known: backgroundTasks.has(taskId), triedDir: tasksDir ?? deriveTasksDir(lastSessionId) ?? null }));
         return '(no output recorded for this task)';
       }
       // We run ON the remote, so this reads the remote file directly — main /
