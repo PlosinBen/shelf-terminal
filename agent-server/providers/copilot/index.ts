@@ -1246,11 +1246,20 @@ export function createCopilotBackend(): ServerBackend {
       if (!state.session) throw new Error('No active Copilot session');
       const list = await (state.session as any).rpc.tasks.list();
       const task = (list?.tasks ?? []).find((t: any) => t?.id === taskId);
-      if (!task) throw new Error(`No task ${taskId}`);
+      if (!task) {
+        // DIAGNOSTIC: a carded task can't be found in the live task list. Likely a
+        // stale card from a previous session / provider switch, or an id mismatch.
+        // Log the known ids so we can see what the list DID contain.
+        console.warn('[copilot] readTaskOutput: task not found ' + JSON.stringify({ task_id: taskId, known_ids: (list?.tasks ?? []).map((t: any) => t?.id) }));
+        throw new Error(`No task ${taskId}`);
+      }
       // Shell tasks write a detached log file (read it ON the remote — main/
       // renderer never touch remote fs). Agent tasks carry their output inline.
       if (task.type === 'shell') {
-        if (typeof task.logPath !== 'string' || !task.logPath) throw new Error('Task has no log file');
+        if (typeof task.logPath !== 'string' || !task.logPath) {
+          console.warn('[copilot] readTaskOutput: shell task has no logPath ' + JSON.stringify({ task_id: taskId, status: task.status }));
+          throw new Error('Task has no log file');
+        }
         const MAX = 256 * 1024;
         const buf = await fs.promises.readFile(task.logPath);
         if (buf.length > MAX) {
@@ -1258,6 +1267,9 @@ export function createCopilotBackend(): ServerBackend {
             + `\n\n… (truncated — showing last ${MAX / 1024}KB of ${Math.round(buf.length / 1024)}KB)`;
         }
         return buf.toString('utf8');
+      }
+      if (task.result == null && task.latestResponse == null) {
+        console.warn('[copilot] readTaskOutput: non-shell task has no inline result ' + JSON.stringify({ task_id: taskId, type: task.type, status: task.status }));
       }
       return task.result ?? task.latestResponse ?? '(no output)';
     },

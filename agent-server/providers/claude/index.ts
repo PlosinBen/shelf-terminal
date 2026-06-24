@@ -871,7 +871,25 @@ export function createClaudeBackend(): ServerBackend {
     // run_in_background flag, then drop this + every later event for that id.
     if (isForegroundBashTaskStart(any, bashToolUseBg)) {
       foregroundBashTaskIds.add(id);
+      // DIAGNOSTIC: correctly-filtered foreground Bash. Pairs with the "carding"
+      // log below — if a foreground card ever leaks, it will appear there (with
+      // bgState 'unknown') instead of here, telling us the tool_use linkage broke.
+      console.warn('[claude] dropped foreground bash task_started ' + JSON.stringify({ task_id: id, tool_use_id: any.tool_use_id }));
       return;
+    }
+    // DIAGNOSTIC (fail-loud): we're about to turn THIS task_started into a card.
+    // A genuine background Bash always carries a real output_file at notification
+    // (spike-confirmed, scripts/spike-sync-vs-bg.ts) — so any card that later
+    // reads back empty must be either a FOREGROUND local_bash that leaked past the
+    // filter (its tool_use wasn't recorded → bg state 'unknown') or a non-bash
+    // task (subagent etc.) whose output is inline, not a file. Log the signal that
+    // tells these apart so a stray empty card is diagnosable instead of mysterious.
+    if (any.subtype === 'task_started') {
+      const tuid = typeof any.tool_use_id === 'string' ? any.tool_use_id : undefined;
+      const bgState = any.task_type === 'local_bash'
+        ? (tuid && bashToolUseBg.has(tuid) ? String(bashToolUseBg.get(tuid)) : 'unknown')
+        : 'n/a';
+      console.warn('[claude] carding task_started ' + JSON.stringify({ task_id: id, task_type: any.task_type, tool_use_id: tuid, bgState }));
     }
     const norm = normalizeTaskMessage(msg, backgroundTasks.get(id));
     if (norm?.ambient) { ambientTaskIds.add(id); return; }
@@ -883,7 +901,26 @@ export function createClaudeBackend(): ServerBackend {
       return;
     }
     backgroundTasks.set(norm.task.id, norm.task);
-    if (norm.outputFile) taskOutputFiles.set(norm.task.id, norm.outputFile);
+    if (norm.outputFile) {
+      taskOutputFiles.set(norm.task.id, norm.outputFile);
+      // DIAGNOSTIC (positive counterpart to "settled with no output file"): a
+      // real output_file arrived (always via task_notification). Pairs with the
+      // no-output log so a reader can see WHETHER/WHEN the file landed for a
+      // given task_id — a 'shell' task that only ever logs the no-output line
+      // (never this one) is the empty-card bug; one that logs this is healthy.
+      console.warn('[claude] recorded output file ' + JSON.stringify({ task_id: norm.task.id, task_type: norm.task.type }));
+    }
+    // DIAGNOSTIC (fail-loud): the SDK closes out a background task with TWO
+    // terminal-ish messages — a `task_updated` (status→completed, NO output_file)
+    // then, moments later, a `task_notification` carrying the real output_file.
+    // So a `task_updated`-done with no file yet is NORMAL (file still en route)
+    // and must NOT be flagged — flagging it false-alarms on every healthy bg task.
+    // Only a terminal `task_notification` that STILL has no recorded file is
+    // anomalous: the output truly never materialized (live-confirmed ordering via
+    // scripts/spike-task-loggers.mjs). Pairs with the "recorded output file" log.
+    if (any.subtype === 'task_notification' && !taskOutputFiles.has(norm.task.id)) {
+      console.warn('[claude] task_notification settled with no output file ' + JSON.stringify({ task_id: norm.task.id, task_type: norm.task.type, status: norm.task.status }));
+    }
     // Emit LIVE — even mid-foreground-turn. task_event is turnId-less and lands
     // in the sticky BackgroundTasksPanel, a separate lane from the turn's content
     // stream, so emitting it now does NOT interleave with the reply — the panel
@@ -1144,7 +1181,14 @@ export function createClaudeBackend(): ServerBackend {
       // (without a terminal `task_notification`) never recorded a path either.
       // Return a friendly note rather than throwing, so clicking such a task
       // shows a calm message instead of a raw "invoke remote method" error.
-      if (!file) return '(no output recorded for this task)';
+      if (!file) {
+        // DIAGNOSTIC: a card was clicked but no output file was ever recorded for
+        // it. Cross-reference with the "carding"/"settled with no output file"
+        // logs by task_id to see whether it was a leaked foreground bash ('shell')
+        // or an inline-output task (subagent/workflow/monitor).
+        console.warn('[claude] readTaskOutput: no output file for task ' + JSON.stringify({ task_id: taskId, task_type: backgroundTasks.get(taskId)?.type ?? 'unknown', known: backgroundTasks.has(taskId) }));
+        return '(no output recorded for this task)';
+      }
       // We run ON the remote, so this reads the remote file directly — main /
       // renderer never touch the remote fs. Cap the read so a runaway log can't
       // blow up the wire / renderer; note truncation explicitly.
