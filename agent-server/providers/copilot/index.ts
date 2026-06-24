@@ -1291,6 +1291,31 @@ export function createCopilotBackend(): ServerBackend {
     },
 
     /**
+     * Re-scan the session's configured skillDirectories (our projected app-skill
+     * dir among them) so an app-level skill edit is live without re-init. Uses
+     * the SDK's experimental `rpc.skills.reload()` — the programmatic twin of the
+     * CLI `/skills reload`. Best-effort: no live session → nothing to reload; an
+     * SDK/RPC failure logs and leaves the current snapshot (change still lands on
+     * next session init). Takes effect from the session's next turn.
+     */
+    async reloadSkills() {
+      const session = state.session;
+      if (!session) {
+        console.warn('[copilot] reloadSkills: no live session — app-skill edit will apply on next session init');
+        return;
+      }
+      try {
+        await (session as any).rpc.skills.reload();
+        // Experimental SDK API — log success so a dev build can confirm the
+        // reload actually fired (and re-scanned our skillDirectories) for the
+        // live session, not just that we called it. See DECISIONS #80.
+        console.warn('[copilot] skills.reload() applied — app-skill edit now live for this session (effective next turn)');
+      } catch (err: any) {
+        console.warn('[copilot] skills.reload() failed; app-skill edit will apply on next session init instead', err?.message ?? err);
+      }
+    },
+
+    /**
      * Apply model to the current Copilot session. Imperative — orchestrator
      * decides when to call (only on diff). Effort comes along because
      * `session.setModel` takes it as the second-arg config; effort fallback

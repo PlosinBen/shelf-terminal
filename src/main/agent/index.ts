@@ -64,29 +64,60 @@ let getWindow: (() => BrowserWindow | null) | null = null;
 export function initAgentManager(windowGetter: () => BrowserWindow | null): void {
   getWindow = windowGetter;
 
-  // After ANY skill mutation, re-mirror onto every live remote connection so a
-  // running remote agent sees the change next session. Deduped by connection and
-  // deferred off the mutation's call stack — each sync is a blocking execSync
-  // round-trip (hash-gated, usually a quick no-op), so we don't want N of them
-  // stalling the tool/IPC handler that triggered the change. Local sessions need
-  // nothing here (onSkillsChanged already re-projected locally).
+  // After ANY skill mutation: get the new files onto each live session's
+  // consumption path, then tell that session to hot-reload so the edit lands
+  // WITHOUT a reconnect (effect from the session's next turn). Two transports:
+  //   - local  : onSkillsChanged already re-projected to the local path
+  //              synchronously → reload the session right away.
+  //   - remote : must re-mirror onto the remote FIRST (blocking execSync
+  //              round-trip, hash-gated, usually a quick no-op) → deferred off
+  //              the mutation's call stack so N syncs don't stall the IPC/tool
+  //              handler — then reload once the files have landed.
+  // Reload is per-session (each tab is its own agent-server process), best-effort
+  // (no-op for providers without a hot-reload API). See DECISIONS (skill reload).
   subscribeSkillsChanged(() => {
-    const seen = new Set<string>();
-    const conns: Connection[] = [];
-    for (const s of sessions.values()) {
-      if (s.connection.type === 'local') continue;
-      const key = JSON.stringify(s.connection);
-      if (seen.has(key)) continue;
-      seen.add(key);
-      conns.push(s.connection);
+    const live = [...sessions.values()];
+    const localCount = live.filter((s) => s.connection.type === 'local').length;
+    // Low-key trace (info) so a dev build can confirm the change reached the
+    // reload pipeline and how many live sessions it targets. The per-session
+    // reload outcome is logged provider-side (console.warn → main log). #80.
+    if (live.length > 0) {
+      log.info('agent', `skills changed → reloading live sessions: local=${localCount} remote=${live.length - localCount}`);
     }
-    if (conns.length === 0) return;
+
+    // Local: files are already on disk → reload immediately (cheap sendLine).
+    for (const s of live) {
+      if (s.connection.type !== 'local') continue;
+      try {
+        s.backend.reloadSkills?.();
+      } catch (err: any) {
+        log.error('agent', `local skills reload failed: ${err?.message ?? err}`);
+      }
+    }
+
+    // Remote: sync files (deduped by connection) THEN reload that connection's
+    // sessions. Skip reload when the file sync failed — we'd only reload stale.
+    const remote = live.filter((s) => s.connection.type !== 'local');
+    if (remote.length === 0) return;
     setImmediate(() => {
-      for (const c of conns) {
+      const syncOk = new Map<string, boolean>();
+      for (const s of remote) {
+        const key = JSON.stringify(s.connection);
+        if (!syncOk.has(key)) {
+          let ok = true;
+          try {
+            syncSkillsForConnection(s.connection);
+          } catch (err: any) {
+            ok = false;
+            log.error('agent', `skills resync failed for ${s.connection.type}: ${err?.message ?? err}`);
+          }
+          syncOk.set(key, ok);
+        }
+        if (!syncOk.get(key)) continue;
         try {
-          syncSkillsForConnection(c);
+          s.backend.reloadSkills?.();
         } catch (err: any) {
-          log.error('agent', `skills resync failed for ${c.type}: ${err?.message ?? err}`);
+          log.error('agent', `remote skills reload failed: ${err?.message ?? err}`);
         }
       }
     });

@@ -194,4 +194,8 @@ export interface AgentBackend {
    * Promise by id and unblocks its in-flight tool / elicitation handler.
    */
   resolvePicker?(pickerId: string, payload: PickerResolvePayload): void;
+  /** Tell the live agent-server session to re-scan its app-skill dir so an
+   *  app-level skill edit takes effect without reconnect (fire-and-forget).
+   *  No-op when there's no live process. See DECISIONS (skill live reload). */
+  reloadSkills?(): void;
 }

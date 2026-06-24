@@ -1183,6 +1183,38 @@ export function createClaudeBackend(): ServerBackend {
       lastSessionId = null;
     },
 
+    /**
+     * Re-scan plugins (our app skills are injected as a local plugin) on the
+     * LIVE session so an app-level skill edit is live without re-init. Uses the
+     * SDK's documented `query.reloadPlugins()` ("reload plugins from disk").
+     * Best-effort: no live session → nothing to reload; failure logs and leaves
+     * the current state (change still lands on next session init). We refresh the
+     * `/skills` `/mcp` cache from the reload result so the cards reflect the new
+     * set immediately. NOTE: reload makes a NEW skill model-invocable but does
+     * not rebuild Claude's `/` slash parser index — a brand-new skill may still
+     * be missing from `/` autocomplete until a full restart (editing an existing
+     * skill is unaffected). See GOTCHAS.
+     */
+    async reloadSkills() {
+      const q = session?.query;
+      if (!q) {
+        console.warn('[claude] reloadSkills: no live session — app-skill edit will apply on next session init');
+        return;
+      }
+      try {
+        const refreshed = await q.reloadPlugins();
+        cache.skills = normalizeClaudeCommandsAsSkills(refreshed.commands as any[], CLAUDE_NON_SKILL_COMMANDS);
+        cache.mcpServers = normalizeClaudeMcpServers(refreshed.mcpServers as any[]);
+        // Log success so a dev build can confirm the reload re-scanned plugins
+        // from disk for the live session. plugins/skills counts let us eyeball
+        // that our app-skill local plugin is present. See DECISIONS #80.
+        console.warn('[claude] reloadPlugins() applied — app-skill edit now live (effective next turn) '
+          + JSON.stringify({ plugins: refreshed.plugins?.length ?? 0, skills: cache.skills.length }));
+      } catch (err: any) {
+        console.warn('[claude] reloadPlugins() failed; app-skill edit will apply on next session init instead', err?.message ?? err);
+      }
+    },
+
     async stopTask(taskId: string) {
       // Streaming-mode control method; the SDK emits a task_notification
       // (status 'stopped') in response, which the consumer routes to a

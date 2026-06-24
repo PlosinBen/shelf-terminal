@@ -155,3 +155,19 @@ describe('Copilot slash dispatch via query()', () => {
     backend.dispose();
   });
 });
+
+describe('Copilot reloadSkills (live skill hot-reload)', () => {
+  it('exposes reloadSkills (provider supports hot-reload)', () => {
+    const backend = createCopilotBackend();
+    expect(typeof backend.reloadSkills).toBe('function');
+    backend.dispose();
+  });
+
+  it('is a best-effort no-op (resolves, never throws) when there is no live session', async () => {
+    const backend = createCopilotBackend();
+    // No query() has run → state.session is null. reloadSkills must short-circuit
+    // without touching the SDK and without throwing into the dispatch loop.
+    await expect(backend.reloadSkills!()).resolves.toBeUndefined();
+    backend.dispose();
+  });
+});

@@ -355,6 +355,14 @@
 
 **解法**: handler **最前面**統一 `if (isComposing) return`（native event 用 `e.isComposing`；React SyntheticEvent 用 `e.nativeEvent.isComposing`），整組候選驅動鍵（方向、Enter、Space、Esc）一律讓 IME 先吃。把決策抽成純函式（`decidePickerKey` / `decideCommandPickerKey`）讓這條規則可單測。**只擋「有 focus 可編輯元素」的面板** —— 像 FolderPicker 那種「全域逐字攔截、沒有 `<input>`」的就沒有 composition、不適用。已套：`PickerPanel`（AskUserQuestion）、`CommandPicker`、`QuickNoteOverlay`（Enter）。
 
+## 39. Claude `reloadPlugins()` 熱重載 skill 後，全新 skill 的 `/` slash 仍可能 "Unknown skill"
+
+**現象**: app-skill live reload（DECISION #80）後,**新增**一個 skill,model 確實能用它,但使用者直接打 `/<新skill名>` 卻回 "Unknown skill",或在 `/` autocomplete 看不到 —— 要整個 restart 才正常。
+
+**原因**: Claude SDK `query.reloadPlugins()` 重掃磁碟、把新 skill 餵進 **model-facing** 的能力集,但**不重建 `/` slash 指令的解析索引**(autocomplete / 直接派發那條)。這是 SDK 行為,不是我們的 bug。
+
+**解法**: 認知差異即可,不要為了「`/` 也能立刻打」去硬塞 —— **改既有 skill 內容不受此限**(名稱本就在索引),只有「全新 skill 名稱」會這樣,且 model 仍可主動使用。我們 `/skills` 卡是用 `reloadPlugins()` 回傳的 `commands` 自己重組,所以卡片會即時反映;真正受限的只有原生 `/` 直接派發。**別**為此把 reload 改成 fresh session(會丟對話歷史,得不償失)。Copilot `skills.reload()` 無此問題。
+
 ## Agent View: inferTabState 對 TUI 類 CLI 永遠回傳 cli_running
 
 **現象**: PM Agent 的 `inferTabState` 對 Claude Code、Copilot CLI 等 TUI 程式永遠回傳 `cli_running`，無法偵測 done/idle 狀態。
