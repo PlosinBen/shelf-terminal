@@ -27,7 +27,8 @@ import {
   normalizeCopilotTask,
   isBackgroundedCopilotTask,
   buildCopilotAuthConfig,
-  type ApplyPatchFileSpec,
+  buildOrphanFinalizeMessages,
+  type InflightToolUseEntry,
 } from './helpers';
 
 const execFileP = promisify(execFile);
@@ -50,21 +51,9 @@ async function readGhToken(): Promise<string | undefined> {
   }
 }
 
-/**
- * In-flight tool calls awaiting their `tool.execution_complete` event.
- * Mirrors the Claude provider's pattern: keyed by toolCallId, stores enough
- * to re-emit the same canonical message with `result` populated when complete.
- */
-type InflightToolUseEntry =
-  | { kind: 'tool_use'; toolName: string; input: string }
-  | { kind: 'file_edit'; filePath: string; diff?: { oldString: string; newString: string }; content?: string }
-  /**
-   * `apply_patch` parsed into N file_edit sub-cards. SDK gives a single
-   * patch-level success/failure on tool.execution_complete; we re-emit each
-   * sub-card with that same result, and additionally emit a top-level error
-   * message on failure so the timeline shows the patch-level reason loudly.
-   */
-  | { kind: 'apply_patch'; subs: Array<{ msgId: string; spec: ApplyPatchFileSpec }> };
+// In-flight tool calls awaiting their `tool.execution_complete` event (keyed by
+// toolCallId). Mirrors the Claude provider's pattern. Type + the orphan-card
+// builder live in helpers.ts. See InflightToolUseEntry there.
 const inflightToolUses = new Map<string, InflightToolUseEntry>();
 // Copilot SDK `session.on` event types we KNOWINGLY don't render — pure
 // lifecycle / already-covered-elsewhere. Enumerated (observed live, 2026-06) so
@@ -83,6 +72,50 @@ const KNOWN_IGNORED_COPILOT_EVENTS = new Set<string>([
 // Genuinely-unexpected types we've warned about once (dedup so a new type that
 // SHOULD be handled is visible without spamming).
 const seenUnhandledCopilotEvents = new Set<string>();
+
+// TEMP DIAG (copilot big-grep hang): trace the FULL lifecycle of every tool
+// call + system notification straight to stderr → main log, regardless of
+// whether the switch below renders it. Goal: see, for a large `rg`/grep that
+// "hangs with no error", which events actually arrive — does
+// tool.execution_complete ever fire, or does the card stay running until the
+// 30-min turn timeout? Are partial_result/progress streaming (feedback we drop)?
+// Single-line JSON so grep stays sane. partial_result can be high-volume, so we
+// aggregate per toolCallId and only log first + every 50th + the final tally.
+// Remove once root cause is confirmed.
+const diagPartials = new Map<string, { n: number; bytes: number }>();
+function diagTraceCopilotToolEvent(event: any): void {
+  const t = event?.type;
+  const d = event?.data ?? {};
+  const id = d.toolCallId ?? d.shellId ?? d.agentId ?? '';
+  switch (t) {
+    case 'tool.execution_start':
+      console.warn('[copilot] DIAG tool.start ' + JSON.stringify({ id, tool: d.toolName, args: JSON.stringify(d.arguments ?? '').slice(0, 200) }));
+      break;
+    case 'tool.execution_partial_result': {
+      const prev = diagPartials.get(id) ?? { n: 0, bytes: 0 };
+      const next = { n: prev.n + 1, bytes: prev.bytes + (typeof d.partialOutput === 'string' ? d.partialOutput.length : 0) };
+      diagPartials.set(id, next);
+      if (next.n === 1 || next.n % 50 === 0) console.warn('[copilot] DIAG tool.partial ' + JSON.stringify({ id, chunks: next.n, bytes: next.bytes }));
+      break;
+    }
+    case 'tool.execution_progress':
+      console.warn('[copilot] DIAG tool.progress ' + JSON.stringify({ id, msg: String(d.progressMessage ?? '').slice(0, 200) }));
+      break;
+    case 'tool.execution_complete': {
+      const tally = diagPartials.get(id);
+      diagPartials.delete(id);
+      console.warn('[copilot] DIAG tool.complete ' + JSON.stringify({ id, success: d.success, hasResult: d.result != null, resultType: d.result?.type, errType: d.error?.type, partials: tally?.n ?? 0 }));
+      break;
+    }
+    case 'system.notification':
+      console.warn('[copilot] DIAG system.notification ' + JSON.stringify({ kind: d.kind?.type ?? d.kind, content: String(d.content ?? '').slice(0, 160) }));
+      break;
+    case 'session.error':
+    case 'model.call_failure':
+      console.warn('[copilot] DIAG ' + t + ' ' + JSON.stringify({ msg: d.message ?? d.errorMessage, code: d.errorCode ?? d.statusCode }));
+      break;
+  }
+}
 
 type PermissionResult =
   | { behavior: 'allow'; scope?: 'once' | 'session' }
@@ -488,6 +521,7 @@ export function createCopilotBackend(): ServerBackend {
     // are used directly; we don't register custom tools.
     session.on((event: any) => {
       if (!currentSend) return;
+      diagTraceCopilotToolEvent(event);
       switch (event.type) {
         case 'assistant.message_delta':
           if (event.data?.deltaContent) {
@@ -836,6 +870,26 @@ export function createCopilotBackend(): ServerBackend {
         console.error('[copilot] rpc.tasks.list failed; task panel may be stale', err?.message ?? err);
       }
     }, 150);
+  }
+
+  // Turn-end safety net: finalize any tool cards still in-flight when the turn
+  // settled (idle / error / abort). Their `tool.execution_complete` never came
+  // — the Copilot CLI's rg/grep tool can hang internally and never return,
+  // leaving the card spinning forever with no error (fail-silent). Emit a loud
+  // terminal card per orphan so the spinner resolves, then clear the map. No-op
+  // when nothing is in flight (the common case).
+  function finalizeOrphanedToolCards(send: SendFn): void {
+    if (inflightToolUses.size === 0) return;
+    const entries = [...inflightToolUses];
+    inflightToolUses.clear();
+    console.warn('[copilot] finalizing orphaned tool cards (turn ended, no tool.execution_complete) '
+      + JSON.stringify({ count: entries.length, ids: entries.map(([id]) => id) }));
+    const msgs = buildOrphanFinalizeMessages(
+      entries,
+      currentCwd ?? '',
+      'Tool did not complete — the turn ended while it was still running (it may have hung).',
+    );
+    for (const m of msgs) send({ type: 'message', ...m });
   }
 
   async function listModelsCached(): Promise<CachedModel[]> {
@@ -1193,6 +1247,11 @@ export function createCopilotBackend(): ServerBackend {
           send({ type: 'error', error: `Copilot error: ${msg}` });
         }
         send({ type: 'status', state: 'idle' });
+      } finally {
+        // Runs on every turn-end path (success / error / timeout / abort): any
+        // tool card still in-flight here never got its completion → finalize it
+        // so the UI never shows an eternal spinner.
+        finalizeOrphanedToolCards(send);
       }
     },
 

@@ -115,6 +115,84 @@ export type ApplyPatchFileSpec =
   | { kind: 'add'; filePath: string; content: string };
 
 /**
+ * In-flight tool calls awaiting their `tool.execution_complete` event, keyed by
+ * toolCallId. Stores enough to re-emit the same canonical card with `result`
+ * populated when the tool completes — or, if completion never arrives (turn
+ * ends while the tool is still running), to finalize it as an orphan.
+ */
+export type InflightToolUseEntry =
+  | { kind: 'tool_use'; toolName: string; input: string }
+  | { kind: 'file_edit'; filePath: string; diff?: { oldString: string; newString: string }; content?: string }
+  /**
+   * `apply_patch` parsed into N file_edit sub-cards. SDK gives a single
+   * patch-level success/failure on tool.execution_complete; we re-emit each
+   * sub-card with that same result, and additionally emit a top-level error
+   * message on failure so the timeline shows the patch-level reason loudly.
+   */
+  | { kind: 'apply_patch'; subs: Array<{ msgId: string; spec: ApplyPatchFileSpec }> };
+
+/** A terminal "did not complete" card emitted for an orphaned tool call. */
+export interface OrphanFinalizeMessage {
+  msgId: string;
+  msgType: 'fold_code' | 'fold_diff';
+  label: string;
+  subtitle: string;
+  errorMessage: string;
+}
+
+/**
+ * Build the terminal cards for tool calls still in-flight when a turn ends.
+ *
+ * When a turn settles (idle / error / abort) some tool cards may still be
+ * "running" because their `tool.execution_complete` never arrived — e.g. the
+ * Copilot CLI's rg/grep tool hangs internally and never returns (observed:
+ * large-scope grep spins forever, no completion, no error). Leaving the
+ * fold_code card in a permanent pending state is a silent failure; we finalize
+ * each orphan with a loud `errorMessage` so the spinner resolves and the user
+ * sees it didn't finish. Shape mirrors the `tool.execution_complete` error
+ * branch (same msgId → renderer upserts the running card into a terminal one).
+ *
+ * Pure: the caller (createCopilotBackend) does the actual `send()`.
+ */
+export function buildOrphanFinalizeMessages(
+  entries: Array<[string, InflightToolUseEntry]>,
+  cwd: string,
+  errorMessage: string,
+): OrphanFinalizeMessage[] {
+  const out: OrphanFinalizeMessage[] = [];
+  for (const [toolUseId, entry] of entries) {
+    if (entry.kind === 'apply_patch') {
+      for (const { msgId, spec } of entry.subs) {
+        out.push({
+          msgId,
+          msgType: spec.kind === 'update' ? 'fold_diff' : 'fold_code',
+          label: spec.kind === 'update' ? 'Edit' : 'Add',
+          subtitle: stripCwd(spec.filePath, cwd),
+          errorMessage,
+        });
+      }
+    } else if (entry.kind === 'file_edit') {
+      out.push({
+        msgId: toolUseId,
+        msgType: entry.diff ? 'fold_diff' : 'fold_code',
+        label: entry.diff ? 'Edit' : 'Write',
+        subtitle: stripCwd(entry.filePath, cwd),
+        errorMessage,
+      });
+    } else {
+      out.push({
+        msgId: toolUseId,
+        msgType: 'fold_code',
+        label: entry.toolName,
+        subtitle: entry.input,
+        errorMessage,
+      });
+    }
+  }
+  return out;
+}
+
+/**
  * Parse Copilot's `apply_patch` raw-string args into one or more normalized
  * file_edit payloads. Each `*** Update File:` / `*** Add File:` section
  * becomes its own entry; multi-hunk in the same Update file produces multiple
