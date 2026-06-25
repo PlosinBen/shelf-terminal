@@ -1231,9 +1231,10 @@ export function createClaudeBackend(): ServerBackend {
       let file = taskOutputFiles.get(taskId);
       // No recorded path means the terminal task_notification (sole carrier of
       // output_file) never arrived for this task — the upstream delivery bug for
-      // tasks that settle mid-turn / in batches. The output file itself IS on
-      // disk, so reconstruct `<tasksDir>/<id>.output`. tasksDir is the exact dir
-      // from any earlier notification, else derived by globbing the session id.
+      // tasks that settle mid-turn / in batches (issue refs: see
+      // pickSessionTasksDir in helpers.ts). The output file itself IS on disk, so
+      // reconstruct `<tasksDir>/<id>.output`. tasksDir is the exact dir from any
+      // earlier notification, else derived by globbing the session id.
       if (!file) {
         const dir = tasksDir ?? deriveTasksDir(lastSessionId);
         if (dir) {
