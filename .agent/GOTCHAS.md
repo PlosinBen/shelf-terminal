@@ -355,6 +355,16 @@
 
 **解法**: handler **最前面**統一 `if (isComposing) return`（native event 用 `e.isComposing`；React SyntheticEvent 用 `e.nativeEvent.isComposing`），整組候選驅動鍵（方向、Enter、Space、Esc）一律讓 IME 先吃。把決策抽成純函式（`decidePickerKey` / `decideCommandPickerKey`）讓這條規則可單測。**只擋「有 focus 可編輯元素」的面板** —— 像 FolderPicker 那種「全域逐字攔截、沒有 `<input>`」的就沒有 composition、不適用。已套：`PickerPanel`（AskUserQuestion）、`CommandPicker`、`QuickNoteOverlay`（Enter）。
 
+## 39. SKILL.md frontmatter 無效 YAML → Copilot 默默跳過該 skill(Claude 卻載得到)
+
+**現象**: 在 SkillsView 存了一個 skill,**Claude 用得到、Copilot 完全載入不到**那個 skill —— 而且兩邊都沒有任何錯誤訊息。重啟、重連都救不了。
+
+**原因**: SKILL.md frontmatter 的某個值(最常見是 `description`)**未加引號卻含 `: `(冒號+空格)**,例如 `description: ... conventions: folder ...`,這是**無效 YAML**。Copilot CLI 用**嚴格** YAML parser → 解析失敗 → 整個 skill 被跳過;Claude loader 寬鬆 → 照樣載入。而 Shelf 自己的 `parseSkillMeta` 是 **regex 寬鬆**解析(只抽 name/description),所以這種檔案**存得進去、零警告**,問題延後到 Copilot 端才爆,且無聲。
+
+**解法**: `updateSkill`(`skills-store.ts`,UI 存檔與 agent bridge 寫入的**共用 chokepoint**)在寫檔前用 `js-yaml` **嚴格 parse frontmatter**(`validateFrontmatterYaml`),不合法就回 `{ok:false,error}` —— SkillsView 直接顯示錯誤、agent bridge 直接 throw。使用者修法:把含冒號的值**包雙引號**(`description: "a: b"`)。
+
+**不要**: 別用 regex heuristic 做「半套驗證」—— 只擋冒號這一種會給假安全感,別的 YAML 破綻(tab 縮排、引號不對稱、未來新欄位)照樣漏到 Copilot。要擋就用真的 YAML parser(跟 Copilot 同類)。也**別把驗證放 renderer** —— agent 寫入那條(app-tool bridge)會繞過;放共用的 `updateSkill` 才兩條路都守得到。
+
 ## Agent View: inferTabState 對 TUI 類 CLI 永遠回傳 cli_running
 
 **現象**: PM Agent 的 `inferTabState` 對 Claude Code、Copilot CLI 等 TUI 程式永遠回傳 `cli_running`，無法偵測 done/idle 狀態。

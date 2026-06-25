@@ -1,6 +1,7 @@
 import path from 'path';
 import fs from 'fs';
 import { app } from 'electron';
+import { load as parseYaml, YAMLException } from 'js-yaml';
 import { log } from '@shared/logger';
 
 /**
@@ -81,6 +82,29 @@ function unquote(s: string): string {
     return s.slice(1, -1);
   }
   return s;
+}
+
+/**
+ * Validate that the SKILL.md frontmatter parses as STRICT YAML — the same gate
+ * the Copilot CLI applies when loading skills. The store's own `parseSkillMeta`
+ * is deliberately lenient (regex), so an invalid-YAML frontmatter (most commonly
+ * an unquoted value containing a colon, e.g. `description: foo: bar`) sails past
+ * it AND past Claude's lenient loader — but Copilot SILENTLY SKIPS the skill. The
+ * result is a skill that "works" under Claude and vanishes under Copilot with no
+ * error anywhere. We reject it at save time instead (fail-loud). Returns an error
+ * string, or null when the frontmatter is valid (or absent — `updateSkill`'s
+ * `name:` check handles a missing block). Pure → unit-testable. See GOTCHAS.
+ */
+export function validateFrontmatterYaml(content: string): string | null {
+  const m = content.match(/^---[ \t]*\r?\n([\s\S]*?)\r?\n---/);
+  if (!m) return null;
+  try {
+    parseYaml(m[1]);
+    return null;
+  } catch (err) {
+    const reason = err instanceof YAMLException ? err.reason : (err as Error).message;
+    return `SKILL.md frontmatter is not valid YAML: ${reason}. Tip: wrap any value containing a colon in double quotes (e.g. description: "a: b").`;
+  }
 }
 
 /** Lenient read-only parse of `name` / `description` from SKILL.md frontmatter. */
@@ -190,6 +214,11 @@ export async function createSkill(): Promise<SkillMeta> {
 export async function updateSkill(currentName: string, content: string): Promise<SkillUpdateResult> {
   ensureScaffold();
   if (!isValidSkillName(currentName)) return { ok: false, error: 'Invalid current skill name' };
+
+  // Reject frontmatter Copilot can't parse BEFORE writing — otherwise the skill
+  // loads under Claude but silently vanishes under Copilot. See #80 / GOTCHAS.
+  const yamlError = validateFrontmatterYaml(content);
+  if (yamlError) return { ok: false, error: yamlError };
 
   const parsed = parseSkillMeta(content);
   const nextName = parsed.name?.trim();

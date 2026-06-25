@@ -84,6 +84,7 @@
   "devDependencies": {
     "@electron/rebuild": "4.0.3",
     "@playwright/test": "1.59.1",
+    "@types/js-yaml": "^4.0.9",
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "4.7.0",
@@ -111,6 +112,7 @@
     "ai": "^6.0.174",
     "electron-updater": "^6.8.3",
     "idb": "^8.0.3",
+    "js-yaml": "^4.2.0",
     "marked": "^18.0.2",
     "node-pty": "1.1.0",
     "react": "19.2.4",
