@@ -13,7 +13,7 @@ title: shelf-terminal — Intent → File Index
 |--------|------|------|
 | App lifecycle, IPC wiring | `index.ts` | app/window 啟動、`registerAllIpcHandlers()` 一次註冊、PM/Agent/updater 接線與 quit cleanup 的中樞 |
 | 共享 app 狀態 | `app-state.ts` | `mainWindow` / `cachedProjects` / `cachedSettings` 的 getter/setter，index 與 ipc 共用單一來源 |
-| IPC handler（按領域分檔） | `ipc/` (`index.ts` + `pty`/`project`/`connector`/`git`/`file-transfer`/`dialog`/`settings`/`logs`/`notes`/`skills`/`updater`/`pm`) | 各檔 export `registerXxxHandlers()`，`ipc/index.ts` 匯總註冊 |
+| IPC handler（按領域分檔） | `ipc/` (`index.ts` + `pty`/`project`/`connector`/`git`/`file-transfer`/`dialog`/`settings`/`logs`/`web`/`notes`/`skills`/`updater`/`pm`) | 各檔 export `registerXxxHandlers()`，`ipc/index.ts` 匯總註冊 |
 | App 層 Agent Skills（CRUD + lock） | `skills-store.ts` | `<userData>/skills/` 下 app 層 skill 的檔案 CRUD + frontmatter 驗證 + lock marker |
 | Skills 變更後處理（統一 pipeline） | `skills-sync.ts` | `onSkillsChanged()`：任何 skill mutation 後的單一出口（re-project + subscribers + 通知 renderer） |
 | App-tool bridge（main 端 dispatcher） | `agent/app-tool.ts` | `handleAppTool(op,args)` 把 agent-server 的 `app_tool` 請求轉成 client-owned 資源動作的純 dispatcher |
@@ -39,6 +39,11 @@ title: shelf-terminal — Intent → File Index
 | 啟動 migration | `migrations/migrate-pm-notes.ts` | 啟動時 idempotent 把舊 `pm-notes/<id>.md` 搬到 `projects/<id>/pm-note.md` |
 | Notes 檔案存取 | `notes-store.ts` | Per-project 多筆 note CRUD + frontmatter + 圖片存檔/GC |
 | Notes 圖片自訂 protocol | `notes-protocol.ts` | 註冊 `shelf-image://` scheme 給 renderer 載 note 圖片 |
+| Web session（cookie jar + agent web.fetch） | `web-session.ts` | `getWebSession()`（`persist:web` 單例）+ `webFetch()`（騎 cookie 回原始回應）+ `listSessions`/`deleteSession` |
+| Web session 純 helper | `web-session-helpers.ts` | `parseHttpOrigin()`：`new URL()` 防偽解析 origin + tldts 取 registrable domain（grant key / 提示顯示） |
+| Web.fetch grant 持久化 | `web-grants.ts` | per-`(projectId, origin)` grant CRUD（`projects/<id>/web-grants.json`）+ `listAllGrants` |
+| Web.fetch permission channel | `web-permission.ts` | `requestWebPermission()`：app 層全域 popup + away→Telegram + first-wins + timeout backstop |
+| Webview hardening | `web-session-harden.ts` | 強制安全 webPreferences、彈窗/導航/權限/下載鎖定（全在 main） |
 
 ## Connector (src/main/connector/)
 
@@ -126,6 +131,9 @@ title: shelf-terminal — Intent → File Index
 | Paste/drop 上傳 hook | `hooks/useAttachmentPaste.ts` | paste/drop/upload pipeline + file size check |
 | Terminal 渲染 | `components/TerminalView.tsx` | xterm.js instance cache + PTY I/O + paste hook + unread badge |
 | Agent 對話 UI | `components/AgentView.tsx` + `components/agent/{MessageList,InputZone,StatusBar,DecisionPanel,PlanPanel,AuthPane}.tsx` + `agentTabStore.ts` + `agentTabSubscriptions.ts` + `agent-message-builder.ts` | AgentView 是 layout coordinator，domain state 在 per-tab `agentTabStore`，子 component 各自 subscribe |
+| Web tab（登入 surface + 瀏覽） | `components/WebTabView.tsx` | `<webview partition=persist:web>` + 網址列 + identity chip；人在這登入內網服務 |
+| Web.fetch 授權 popup | `components/WebPermissionPrompt.tsx` | app 層全域 popup，防偽 origin 顯示 + allow once/always/deny（由 `web:permission-request` 驅動） |
+| Web session/grant 管理 | `components/settings/WebSettingsTab.tsx` | Settings → Web 分頁：已登入 session 清單(刪) + grant whitelist(per-project 分組、revoke) |
 | 選擇面板 | `components/SelectionPanel.tsx` | Bottom-anchored 單題 N-way 選單，permission popup + config picker 共用 |
 | Picker 面板 | `components/PickerPanel.tsx` | Bottom-anchored 多題互動 form（AskUserQuestion / elicitation 共用） |
 | Bottom bar（全寬 app footer） | `components/BottomBar.tsx` | App 層全寬狀態列：service type/cwd + 版號更新 widget + Projects/PM/Notes/DevTools toggle |
@@ -165,6 +173,7 @@ title: shelf-terminal — Intent → File Index
 | Logger | `logger.ts` | 統一 log 模組，支援 file writer / log level / env override |
 | 預設值 | `defaults.ts` | DEFAULT_SETTINGS, DEFAULT_KEYBINDINGS |
 | Slash prefix parser | `slash-prefix.ts` | `parseSlashPrefix(prompt)`，provider + renderer 同份 |
+| Web session 常數/型別 | `web-session.ts` | `WEB_SESSION_PARTITION`、`WEB_FETCH_TOOL`/`isWebFetchTool`、`WebFetchRequest/Result`、`WebPermissionMeta` |
 | 單元測試 | `slash-prefix.test.ts` | `parseSlashPrefix` 邊界 case 覆蓋 |
 
 ## Config / CI

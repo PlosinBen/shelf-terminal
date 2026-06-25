@@ -46,6 +46,7 @@ Authoritative definition: the `REGISTRY` constant and `handleAppTool` in `src/ma
 | `app_skill.get` | `{ name: string }` | `{ name, content }` (full raw SKILL.md) | **yes** (read) | `get_app_skill` |
 | `app_skill.create` | `{ content: string }` (full SKILL.md) | `{ name }` (final folder name) | no (write — confirm) | `create_app_skill` |
 | `app_skill.update` | `{ name: string, content: string }` | `{ name }` (may differ if frontmatter renames) | no (write — confirm) | `update_app_skill` |
+| `web.fetch` | `{ url, method?, headers?, body? }` | `{ status, headers, body }` (raw response) | no — gated **in main** per origin (not the provider confirm; see below) | `web_fetch` |
 
 **Errors (`ok:false`):** missing/blank `name` or `content` → arg error; `app_skill.get` on absent skill → `skill not found: <name>`. See guards below for `update`. `delete` is **deliberately not registered** — agents cannot delete skills (UI-only, same stance as unlock).
 
@@ -58,3 +59,9 @@ Authoritative definition: the `REGISTRY` constant and `handleAppTool` in `src/ma
   2. **Lock guard** — `isSkillLocked(name)` → error. The lock is a `.locked` marker the user sets in the Skills panel; it is enforced in **main** so it holds even under bypass/allow-all permission mode (where the write confirm is pre-granted). Agents have no unlock tool.
 
   Only after both guards does it call `updateSkill` and, on `ok`, `onSkillsChanged()`.
+
+### `web.fetch` — gated in main, not at the provider (`context/web-tab`)
+
+`web.fetch` rides the user's logged-in web session (cookies in main), so unlike the skill ops its authorization is **NOT** the provider tool-confirm. Both providers register `web_fetch` as **skip-confirm** (claude `canUseTool` short-circuits `isWebFetchTool`, copilot `skipPermission:true`) and the real gate runs inside `handleAppTool('web.fetch')`: parse the origin (`parseHttpOrigin`, anti-spoof), check the per-`(projectId, origin)` grant (`web-grants.ts`), and on a miss raise a dedicated app-global permission popup via `requestWebPermission` (`web-permission.ts` — its own `web:permission-request`/`-resolve` IPC, decoupled from the agent permission path). `allow always` persists the grant; `deny` → `{ ok:false }`. Because the tool always executes `handleAppTool`, this gates even under bypass permission mode, and is identical for Claude/Copilot. Returns the **raw** response — no expiry interpretation.
+
+This op needs context the skill ops don't: `handleAppTool(op, args, ctx)` carries `ctx.projectId` (the grant key), threaded from `createRemoteBackend` → `spawnAgentServer` → `wrapProcess` → the `app_tool` handler.

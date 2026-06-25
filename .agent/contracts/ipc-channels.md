@@ -122,6 +122,22 @@ App-level Agent Skills (one folder per skill under userData).
 | `setLocked(name, locked: boolean)` | invoke `skills:set-locked` |
 | `onChanged(cb())` | recv `skills:changed` → unsubscribe fn (manager UI or agent bridge mutated skills) |
 
+## web (`shelfApi.web`)
+
+Manage the shared web session + the app-global `web.fetch` permission popup. See `context/web-tab`. The `<webview>` itself uses the `persist:web` partition directly (it is not an IPC channel); these methods are the management + permission surface only.
+
+| Method | Shape |
+|--------|-------|
+| `listSessions()` | invoke `web:list-sessions` → `WebSessionEntry[]` (`{ domain, cookieCount }`, grouped by registrable domain; see `src/shared/web-session.ts`) |
+| `deleteSession(domain)` | invoke `web:delete-session` (log out of a registrable domain) |
+| `listGrants()` | invoke `web:list-grants` → `WebGrantsByProject` (`{ [projectId]: origin[] }`) |
+| `revokeGrant(projectId, origin)` | invoke `web:revoke-grant` |
+| `onPermissionRequest(cb(req))` | recv `web:permission-request` → unsubscribe fn. `req`: `WebPermissionMeta & { requestId }` (`{ requestId, origin, registrableDomain, method }`) |
+| `resolvePermission(requestId, decision: 'once'|'always'|'deny')` | invoke `web:permission-resolve` |
+| `onPermissionClose(cb(requestId))` | recv `web:permission-close` → unsubscribe fn (resolved elsewhere — Telegram / timeout — dismiss the local popup) |
+
+> The permission round-trip is **decoupled from the agent path** (`shelfApi.agent.resolvePermission` / `agent:permission-request`): `web.fetch` is gated at the resource layer in main, not the provider tool-confirm. See `contracts/app-tool-bridge` (`web.fetch`) and `context/web-tab` web-tab#2.
+
 ## updater (`shelfApi.updater`)
 
 | Method | Shape |
