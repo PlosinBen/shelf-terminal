@@ -29,7 +29,7 @@ interface Props {
    *  same as store.actual* — actual reflects what the backend reports
    *  (possibly after a fallback / cap), intent reflects what the user
    *  asked for. We send intent so a backend fallback doesn't silently
-   *  pin future turns to the fallback model. See DECISIONS #59. */
+   *  pin future turns to the fallback model. See agent-ui#4. */
   intent: AgentPrefs | undefined;
 }
 

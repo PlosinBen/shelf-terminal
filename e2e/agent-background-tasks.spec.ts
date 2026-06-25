@@ -8,7 +8,7 @@ import type { Page } from '@playwright/test';
  * output via read_task_output, and tasks can be dismissed. Scenarios:
  *   task:<id>     → running background task_event
  *   taskdone:<id> → completed task_event + stashed output (fetchTaskOutput)
- * See DECISIONS #69 and agent-server/providers/fake/index.ts.
+ * See background-tasks#2 and agent-server/providers/fake/index.ts.
  */
 
 const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
@@ -51,7 +51,7 @@ test.describe('background tasks panel via fake provider', () => {
 
     // serverturn: drives the M3 server-initiated turn end-to-end (wire
     // turn_started → dispatcher registers → main forwarder → renderer
-    // buildTurns opens a fresh block). See DECISIONS #69.
+    // buildTurns opens a fresh block). See background-tasks#2.
     await sendAgentPrompt(page, 'serverturn:the sleep finished');
 
     // The prose appears...

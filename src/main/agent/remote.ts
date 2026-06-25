@@ -70,11 +70,11 @@ export function createRemoteBackend(
   onPhase?: (phase: AgentInitPhase) => void,
   // Optional per-tab background-task sink — main wires it to
   // AGENT_BACKGROUND_TASKS. Session-level (NOT per-turn): a backgrounded task
-  // outlives the turn that spawned it. See DECISIONS #69.
+  // outlives the turn that spawned it. See background-tasks#2.
   onTaskEvent?: (ev: TaskEvent) => void,
   // Optional sink for a server-initiated turn (auto-resume prose after a
   // background task finishes). Receives the turnId + the turn's event
-  // generator to drain into the renderer. See DECISIONS #69.
+  // generator to drain into the renderer. See background-tasks#2.
   onServerTurn?: (turnId: string, events: AsyncGenerator<AgentEvent>) => void,
   // Optional per-connection health sink — main wires it to
   // AGENT_CONNECTION_HEALTH. Driven by the heartbeat round-trip (see §5.9 /
@@ -611,7 +611,7 @@ async function spawnAgentServer(
     // Idle-shutdown watchdog — ssh ONLY (the remote host is not fate-shared with
     // the client, so it keeps burning resources while the laptop sleeps). Other
     // transports suspend together → never pass it. Default 5min; `0` keeps it
-    // alive. See DECISIONS #73.
+    // alive. See connection-health#2.
     const idleMin = connection.idleShutdownMinutes ?? 5;
     const idleArg = idleMin > 0 ? ` --idle-shutdown-min=${idleMin}` : '';
     const cmd = `${shellPrefix}${testEnv}exec ${nodeBin} ${indexPath}${idleArg}`;
@@ -813,7 +813,7 @@ export function parseRemoteMessage(msg: any): AgentEvent | null {
     const payload = buildAgentMessagePayload(msg);
     if (!payload) return null;
     // Server-initiated turn marker (auto-resume prose) — pass through so the
-    // renderer opens a new turn block for it. See DECISIONS #69.
+    // renderer opens a new turn block for it. See background-tasks#2.
     if (msg.startsTurn) payload.startsTurn = true;
     return { type: 'message', payload };
   }

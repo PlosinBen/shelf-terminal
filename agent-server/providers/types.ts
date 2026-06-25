@@ -50,7 +50,7 @@ export interface WireEnvelope {
    * buildTurns opens a fresh turn block for it. Needed for server-initiated
    * (auto-resume) turns: they have no `user` message to anchor a new block, so
    * without this the prose would glue onto the previous (possibly unrelated)
-   * turn. Only meaningful on `message` events. See DECISIONS #69.
+   * turn. Only meaningful on `message` events. See background-tasks#2.
    */
   startsTurn?: boolean;
 }
@@ -89,7 +89,7 @@ export type OutgoingMessage = WireEnvelope & (
   | { type: 'credential_stored'; requestId: string; ok: boolean; error?: string }
   | { type: 'credential_cleared'; requestId: string; ok: boolean; error?: string }
   /** RPC response: full output of a background task (read from its remote
-   *  output_file). One-shot, matched by requestId. See DECISIONS #69. */
+   *  output_file). One-shot, matched by requestId. See background-tasks#2. */
   | { type: 'task_output'; requestId: string; content?: string; error?: string }
   /** server→main request from an in-process bridge tool (app-level capabilities):
    *  the handler runs in main against client-owned resources (skills-store), and
@@ -117,7 +117,7 @@ export type OutgoingMessage = WireEnvelope & (
    * arrives — without registration the dispatcher drops the content as
    * "unknown turn". Used when a backgrounded task finishes and the SDK
    * auto-resumes the agent to write a real reply: that prose has no live turn,
-   * so the provider opens one. See DECISIONS #69.
+   * so the provider opens one. See background-tasks#2.
    */
   | { type: 'turn_started' }
   | { type: 'auth_required'; provider: string }
@@ -127,7 +127,7 @@ export type OutgoingMessage = WireEnvelope & (
    * picker and resolve with index-aligned answers (or cancellation).
    *
    * First real producer: Claude's AskUserQuestion tool (intercepted via
-   * canUseTool — see DECISIONS #57). Copilot elicitation handler emits
+   * canUseTool — see agent-ui#3). Copilot elicitation handler emits
    * this too. `id` is provider-minted (Claude uses toolUseID; Copilot
    * mints a uuid), echoed back via resolve_picker IPC.
    *
@@ -168,7 +168,7 @@ export type OutgoingMessage = WireEnvelope & (
   // these (it's exempted) — otherwise the main-side dispatcher drops them as
   // "unknown turn" once the turn is deregistered. Routed via a session-level
   // `onTaskEvent` callback, never the per-turn AsyncIterator.
-  // See DECISIONS #69.
+  // See background-tasks#2.
   | ({ type: 'task_event' } & TaskEvent)
 
   // ── Streaming (incremental reply/fold_text chunks) ───────────────────────
@@ -192,7 +192,7 @@ export type OutgoingMessage = WireEnvelope & (
 
   // ── Canonical conversation messages ──────────────────────────────────────
   // Renderer-facing variants. Discriminated by `msgType`. Each variant only
-  // carries fields it actually needs (see DECISIONS #60
+  // carries fields it actually needs (see agent-ui#5
   // for design rationale).
   //
   // `msgId` is the upsert key in the renderer's message store. For fold_*
@@ -383,7 +383,7 @@ export interface ServerBackend {
    * Stop a running background task. Fire-and-forget — the provider asks its SDK
    * to stop the task; the resulting `task_notification` (status 'stopped') flows
    * back through the normal `task_event` lane to update the card. No-op for
-   * providers without a stop-task API. See DECISIONS #72.
+   * providers without a stop-task API. See background-tasks#3.
    */
   stopTask?(taskId: string): Promise<void>;
   /**

@@ -115,7 +115,7 @@ export function PmAgentSettingsTab({ draft, updateDraft, detectedModels, listSta
             >↻</button>
           )}
         </div>
-        {/* Three-state hint for dynamic model list. See DECISIONS-pm #65. */}
+        {/* Three-state hint for dynamic model list. See pm-agent#10. */}
         {pmDynamic && listStatus === 'loading' && (
           <div className="settings-sub-hint">Loading models from {pmBaseURL}…</div>
         )}
@@ -141,7 +141,7 @@ export function PmAgentSettingsTab({ draft, updateDraft, detectedModels, listSta
         )}
       </div>
       {pmProvider === 'ollama' && (
-        // Provider-specific informational hint (i18n-level UX, see DECISIONS #43
+        // Provider-specific informational hint (i18n-level UX, see agent-providers#1
         // exception). Background: ollama tool_call support is model-dependent —
         // qwen2.5-coder emits JSON-as-text, qwen3:8b emits proper tool-call events.
         // See GOTCHAS "Ollama: model 看似支援 tool_call、實測只吐 JSON text".

@@ -824,7 +824,7 @@ export function createClaudeBackend(): ServerBackend {
 
     processMessage(msg, turn.turnSend, turn.cwd, turn.blockMsgIds);
 
-    // Alias resolution → pin concrete model (see DECISIONS-agent #62).
+    // Alias resolution → pin concrete model (see agent-config-flow#4).
     if (msg.type === 'assistant' && any.parent_tool_use_id == null) {
       const resolved = any.message?.model;
       if (shouldAdoptResolvedModel(resolved, currentModel, cache.models ?? [])) {
@@ -846,7 +846,7 @@ export function createClaudeBackend(): ServerBackend {
     // Drive busy state for the auto-resume: streaming on open, idle on close
     // (routeServer). main forwards these ONLY when no foreground turn is in
     // flight, so the spinner reflects the agent actively writing instead of a
-    // frozen "idle". See DECISIONS #76.
+    // frozen "idle". See background-tasks#6.
     base({ type: 'status', state: 'streaming', turnId });
     const st: ServerTurn = {
       turnId,
@@ -866,7 +866,7 @@ export function createClaudeBackend(): ServerBackend {
     if (!st) return;
     // Route ONLY the assistant prose (skip stream_event to avoid the
     // streaming-placeholder grouping path). Tool calls during auto-resume use
-    // the active send (pre-existing limitation — see DECISIONS #69).
+    // the active send (pre-existing limitation — see background-tasks#2).
     if (msg.type === 'assistant') processMessage(msg, st.send, sessionCwd, st.blockMsgIds);
     if (close) {
       st.send({ type: 'status', state: 'idle' });
@@ -1207,7 +1207,7 @@ export function createClaudeBackend(): ServerBackend {
         cache.mcpServers = normalizeClaudeMcpServers(refreshed.mcpServers as any[]);
         // Log success so a dev build can confirm the reload re-scanned plugins
         // from disk for the live session. plugins/skills counts let us eyeball
-        // that our app-skill local plugin is present. See DECISIONS #80.
+        // that our app-skill local plugin is present. See skills#4.
         console.warn('[claude] reloadPlugins() applied — app-skill edit now live (effective next turn) '
           + JSON.stringify({ plugins: refreshed.plugins?.length ?? 0, skills: cache.skills.length }));
       } catch (err: any) {
@@ -1330,7 +1330,7 @@ const inflightToolUses = new Map<string, InflightToolUseEntry>();
  *   - `status: 'deleted'` on TaskUpdate is the only path that removes a
  *     task; `completed` stays in the list (rendered as `- [x]`).
  *
- * See DECISIONS #46 and GOTCHAS (Claude SDK 0.3.x TaskCreate) for rationale.
+ * See agent-ui#1 and GOTCHAS (Claude SDK 0.3.x TaskCreate) for rationale.
  */
 const tasks = new Map<string, TaskRecord>();
 const pendingTaskCreates = new Map<string, Omit<TaskRecord, 'status'>>();
@@ -1349,7 +1349,7 @@ const pendingTaskLists = new Set<string>();
  * here lets `task_updated`/`task_notification` merge with the fields established
  * at `task_started`. `taskOutputFiles` stashes the remote `output_file` path
  * (server-only — not a render primitive; consumed by the M2 read_task_output RPC).
- * See DECISIONS #69 (Phase 0 confirmed the SDK shapes).
+ * See background-tasks#2 (Phase 0 confirmed the SDK shapes).
  */
 const backgroundTasks = new Map<string, NormalizedTask>();
 const taskOutputFiles = new Map<string, string>();
@@ -1642,7 +1642,7 @@ export function processMessage(msg: SDKMessage, send: SendFn, cwd: string, block
         // a user-pinned non-alias gets resolved to the concrete model via the
         // promotion logic in the query loop. Emitting the per-turn resolved
         // model here would clobber the alias display (flip-flop). See the
-        // alias-resolution block in query() and DECISIONS-agent #62.
+        // alias-resolution block in query() and agent-config-flow#4.
         send({
           type: 'status', state: 'streaming',
           inputTokens: msg.message.usage.input_tokens, outputTokens: msg.message.usage.output_tokens,

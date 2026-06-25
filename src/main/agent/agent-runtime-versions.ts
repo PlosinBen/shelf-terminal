@@ -2,7 +2,7 @@
  * Pinned runtime versions + download URL construction (R1, Phase 1.0).
  *
  * We bring our own Node so the remote's installed version (or absence) never
- * affects correctness — kills GOTCHAS #344 (esbuild target node20 vs old
+ * affects correctness — kills build-packaging#6 (esbuild target node20 vs old
  * remote node → SyntaxError). The Claude companion binary version is NOT pinned
  * here: it must match the `@anthropic-ai/claude-agent-sdk` JS bundled into
  * agent-server (the JS↔binary wire is a versioned pair), so it's resolved from

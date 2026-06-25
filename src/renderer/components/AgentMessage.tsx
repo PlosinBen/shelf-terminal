@@ -16,7 +16,7 @@ import { DEFAULT_AGENT_DISPLAY } from '@shared/types';
  * Naming is pure rendering vocabulary — no provider semantics:
  *   reply / note / system / error / fold_* / user.
  *
- * See DECISIONS #60 for design rationale.
+ * See agent-ui#5 for design rationale.
  */
 export type AgentMsg = {
   id: string;
@@ -25,7 +25,7 @@ export type AgentMsg = {
   /**
    * First message of a server-initiated turn (auto-resume prose after a
    * background task). buildTurns opens a fresh turn block for it — these turns
-   * have no `user` message to anchor one. See DECISIONS #69.
+   * have no `user` message to anchor one. See background-tasks#2.
    */
   startsTurn?: boolean;
 } & (

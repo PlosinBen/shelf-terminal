@@ -1,5 +1,5 @@
 /**
- * Verify the ssh idle-shutdown watchdog (DECISIONS #73). Spawns the bundled
+ * Verify the ssh idle-shutdown watchdog (connection-health#2). Spawns the bundled
  * agent-server with `--idle-shutdown-min=0.05` (3s) and checks three cases:
  *   A. no ping        → self-exits within ~3s
  *   B. periodic ping  → stays alive past the window (watchdog reset)

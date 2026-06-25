@@ -40,7 +40,7 @@ const execFileP = promisify(execFile);
  * useLoggedInUser). gh is OPTIONAL: any failure (not installed → ENOENT, not
  * authed, no scope, empty output) resolves to `undefined` and NEVER throws.
  * On remotes this runs remote-side, picking up the remote's own gh — consistent
- * with where Copilot itself runs. See DECISIONS-agent #45.
+ * with where Copilot itself runs. See agent-providers#2.
  */
 async function readGhToken(): Promise<string | undefined> {
   try {
@@ -384,7 +384,7 @@ export function createCopilotBackend(): ServerBackend {
     //    OPTIONAL (only used if present), not a hard dependency.
     //  - no gh → fall back to `useLoggedInUser: true` (Copilot's own login; on
     //    macOS that lives in the keychain and may prompt on unsigned builds).
-    // See DECISIONS-agent #45. The keychain tradeoff is the reason gh is offered
+    // See agent-providers#2. The keychain tradeoff is the reason gh is offered
     // back as an opt-in shortcut while a permanent fix (signing) is decided.
     const ghToken = await readGhToken();
     state.client = new CopilotClient({
@@ -479,7 +479,7 @@ export function createCopilotBackend(): ServerBackend {
     // Elicitation handler: bridge Copilot SDK's session.ui.* /
     // session.ui.elicitation requests to our picker_request channel. URL
     // mode (OAuth-style external auth) is not wired in v1 — declined with
-    // a console warning. See DECISIONS #57 for the design.
+    // a console warning. See agent-ui#3 for the design.
     session.registerElicitationHandler(async (ctx) => {
       if (ctx.mode === 'url') {
         console.warn('[copilot] URL-mode elicitation not supported; declining', {
@@ -814,7 +814,7 @@ export function createCopilotBackend(): ServerBackend {
           // Known-benign lifecycle types are knowingly ignored (see the set
           // above). Only a genuinely NEW/unknown type warns — once — so real
           // SDK drift (an event we ought to render) is visible without spamming
-          // the benign ones every turn. See DECISIONS #75.
+          // the benign ones every turn. See background-tasks#5.
           if (typeof event?.type === 'string'
             && !KNOWN_IGNORED_COPILOT_EVENTS.has(event.type)
             && !seenUnhandledCopilotEvents.has(event.type)) {
@@ -847,7 +847,7 @@ export function createCopilotBackend(): ServerBackend {
     }, 150);
   }
 
-  // Background tasks (DECISIONS #69). Unlike claude (task_* system messages in
+  // Background tasks (background-tasks#2). Unlike claude (task_* system messages in
   // the turn stream), copilot signals list changes via `session.background_tasks_changed`
   // and `system.notification` events — we (debounced) re-fetch the authoritative
   // list via rpc.tasks.list() and emit a turnId-less `task_event` snapshot.
@@ -1198,7 +1198,7 @@ export function createCopilotBackend(): ServerBackend {
       //     with an empty prompt. Without handling this explicitly the empty
       //     prompt falls through to a normal SDK send, silently continuing the
       //     conversation and never applying the change or emitting a card.
-      // Converges both entry points onto one imperative apply (DECISION #63).
+      // Converges both entry points onto one imperative apply (agent-config-flow#5).
       // configEdit.key 'permissionMode' maps to the '/permission' slash.
       const slash = input.configEdit
         ? { cmd: input.configEdit.key === 'permissionMode' ? 'permission' : input.configEdit.key, args: input.configEdit.value }
@@ -1370,7 +1370,7 @@ export function createCopilotBackend(): ServerBackend {
         await (session as any).rpc.skills.reload();
         // Experimental SDK API — log success so a dev build can confirm the
         // reload actually fired (and re-scanned our skillDirectories) for the
-        // live session, not just that we called it. See DECISIONS #80.
+        // live session, not just that we called it. See skills#4.
         console.warn('[copilot] skills.reload() applied — app-skill edit now live for this session (effective next turn)');
       } catch (err: any) {
         console.warn('[copilot] skills.reload() failed; app-skill edit will apply on next session init instead', err?.message ?? err);

@@ -7,7 +7,7 @@ import { log } from '@shared/logger';
 
 /**
  * Local projection of the app-level skills source onto the per-app consumption
- * path the agent-server reads (see DECISION #70 / feature §5.4–§5.9):
+ * path the agent-server reads (see deployment#1 / feature §5.4–§5.9):
  *
  *   <userData>/skills/  →  ~/.shelf/apps/<appId>/skills/   (whole-tree mirror)
  *

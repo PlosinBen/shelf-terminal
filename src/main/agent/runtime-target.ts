@@ -103,7 +103,7 @@ export function parseNodeMajor(versionStr: string): number | null {
 /**
  * Whether a remote's `node --version` meets our minimum (musl path, where we
  * run agent-server on the remote's own node). Too-old node would crash the
- * esbuild-node20 bundle with a cryptic SyntaxError (GOTCHAS #344).
+ * esbuild-node20 bundle with a cryptic SyntaxError (build-packaging#6).
  */
 export function isRemoteNodeSupported(versionStr: string): boolean {
   const major = parseNodeMajor(versionStr);

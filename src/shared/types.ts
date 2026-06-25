@@ -42,7 +42,7 @@ type WithMsgId = {
    * First message of a server-initiated turn (auto-resume prose after a
    * background task). Tells the renderer's buildTurns to open a fresh turn
    * block — these turns have no `user` message to anchor one. See
-   * DECISIONS #69.
+   * background-tasks#2.
    */
   startsTurn?: boolean;
 };
@@ -86,7 +86,7 @@ export interface FoldBase {
  * `plan` is NOT in this union — it's transported via its own AgentEvent /
  * IPC channel and lands in `agentTabStore.currentPlan`, not the timeline.
  *
- * See DECISIONS #60 for design rationale.
+ * See agent-ui#5 for design rationale.
  */
 export type AgentMessage = WithMsgId & (
   | { type: 'reply';   content: string }
@@ -188,7 +188,7 @@ export type SSHConnection = {
    * resources — the host is NOT fate-shared with the client (unlike local/
    * docker/wsl, which suspend together, so the watchdog is ssh-only). `0` =
    * always keep alive; absent → default 5min (applied in remote.ts). See
-   * DECISIONS #73.
+   * connection-health#2.
    */
   idleShutdownMinutes?: number;
 };
@@ -372,7 +372,7 @@ export interface ProviderModel {
  * Background task render primitive. Provider-agnostic by design — claude maps
  * its SDK task_* system messages into this, copilot maps its TaskInfo into the
  * same shape, and the renderer only ever sees this (never SDK / provider
- * vocabulary). See DECISIONS #69.
+ * vocabulary). See background-tasks#2.
  *
  * `type` keeps a small fixed vocabulary across providers; unknown source types
  * collapse to 'unknown' rather than leaking provider strings.
@@ -432,7 +432,7 @@ export interface PmProviderMeta {
   defaultModel: string;
   models: ProviderModel[];
   /** When true, SettingsPanel calls `pm.listModels(baseURL)` and merges the
-   *  result with user-defined custom entries. See DECISIONS-pm #65. */
+   *  result with user-defined custom entries. See pm-agent#10. */
   dynamicModelList?: boolean;
 }
 
@@ -492,7 +492,7 @@ export interface PmProviderConfig {
   model: string;
   /** Optional override of the provider's default baseURL. Used by ollama
    *  (remote server) and any self-hosted OpenAI-compatible endpoint.
-   *  See DECISIONS-pm #65. */
+   *  See pm-agent#10. */
   baseURL?: string;
 }
 

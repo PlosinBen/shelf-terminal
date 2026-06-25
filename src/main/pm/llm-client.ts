@@ -33,7 +33,7 @@ export interface StreamEvent {
 function buildProvider(config: PmProviderConfig) {
   const meta = PM_PROVIDERS.find((p) => p.id === config.provider);
   // User-set baseURL overrides provider default (e.g. ollama on remote host).
-  // See DECISIONS-pm #65. Empty apiKey is accepted (ollama doesn't validate it,
+  // See pm-agent#10. Empty apiKey is accepted (ollama doesn't validate it,
   // spike scripts/spike-ollama.ts confirms createOpenAI tolerates '').
   const baseURL = config.baseURL ?? meta?.baseURL;
   return createOpenAI({

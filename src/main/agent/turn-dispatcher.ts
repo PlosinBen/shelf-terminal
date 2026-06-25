@@ -56,7 +56,7 @@ export function createTurnDispatcher(
   // task finishes). On `turn_started` the dispatcher registers the
   // provider-minted turnId and hands the caller the turn's AsyncGenerator to
   // drain into the renderer. Permissionless (noop handler) — the auto-resume
-  // path doesn't route tool permissions in v1. See DECISIONS #69.
+  // path doesn't route tool permissions in v1. See background-tasks#2.
   onServerTurn?: (turnId: string, events: AsyncGenerator<AgentEvent>) => void,
   // Session-level sink for the server-owned send-queue snapshot. Like
   // task_event, these carry NO turnId (the queue is session-scoped) so they're
@@ -94,7 +94,7 @@ export function createTurnDispatcher(
     // outlives its turn). Route to the session-level sink BEFORE the turnId
     // check so they don't fall into the "missing turnId, dropping" branch.
     // This is the fix for the "event for unknown turn … dropping" bug when the
-    // model backgrounds work mid-turn. See DECISIONS #69.
+    // model backgrounds work mid-turn. See background-tasks#2.
     if (m?.type === 'task_event') {
       onTaskEvent?.({ kind: m.kind, task: m.task, tasks: m.tasks });
       return;

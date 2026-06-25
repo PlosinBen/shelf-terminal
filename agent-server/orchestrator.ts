@@ -61,7 +61,7 @@ export function wrapSendForTurn(turnId: string, raw: SendFn): SendFn {
     // Background task events are intentionally turnId-less: a backgrounded task
     // outlives its originating turn, so stamping the (soon-deregistered) turnId
     // would get it dropped as "unknown turn" main-side. Pass through raw —
-    // mirrors how lifecycle messages stay turnId-less. See DECISIONS #69.
+    // mirrors how lifecycle messages stay turnId-less. See background-tasks#2.
     if (msg.type === 'task_event') {
       raw(msg);
       return;
@@ -69,7 +69,7 @@ export function wrapSendForTurn(turnId: string, raw: SendFn): SendFn {
     // Respect a pre-set turnId so a provider can open a server-initiated turn
     // with its OWN id (auto-resume prose after a background task: `turn_started`
     // + the prose reply carry the server turnId, NOT the foreground one). Falls
-    // back to this turn's id for ordinary messages. See DECISIONS #69.
+    // back to this turn's id for ordinary messages. See background-tasks#2.
     raw({ ...msg, turnId: msg.turnId ?? turnId } as OutgoingMessage);
   };
 }

@@ -78,7 +78,7 @@ export interface AgentTabState {
   promotedClientMsgIds: Set<string>;
   currentPlan: string;
   // Background tasks (turnId-less side-channel). Upserted by id from task_event;
-  // ordered by first-seen. See DECISIONS #69.
+  // ordered by first-seen. See background-tasks#2.
   backgroundTasks: NormalizedTask[];
   // Ids the user deleted — tombstoned so a later task_notification (e.g. the
   // 'stopped' echo after stopTask, or a turn-boundary snapshot) can't resurrect
@@ -871,7 +871,7 @@ export function buildTurns(messages: AgentMsg[]): Turn[] {
       // `startsTurn`: first message of a server-initiated turn (auto-resume
       // prose after a background task). It has no `user` message to anchor a
       // block, so open one explicitly — otherwise it'd glue onto the previous
-      // (possibly unrelated) turn. See DECISIONS #69.
+      // (possibly unrelated) turn. See background-tasks#2.
       result.push({ agent: [msg] });
     } else {
       result[result.length - 1].agent.push(msg);

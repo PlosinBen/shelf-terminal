@@ -528,7 +528,7 @@ describe('agentTabStore — buildTurns selector', () => {
   it('opens a new turn on a startsTurn message (server-initiated auto-resume prose)', () => {
     // Background-task auto-resume prose has no `user` message; the startsTurn
     // flag must open its own block instead of gluing onto the prior turn.
-    // See DECISIONS #69.
+    // See background-tasks#2.
     const serverReply: AgentMsg = { ...textMsg('m2', 'sleep done'), startsTurn: true };
     const msgs: AgentMsg[] = [
       userMsg('u1', 'run sleep in background'),

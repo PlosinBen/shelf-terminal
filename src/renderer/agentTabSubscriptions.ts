@@ -38,7 +38,7 @@ export function bindAgentStoreSubscriptions(): () => void {
     if (!built) {
       // Unknown msgType (buildAgentMsg default → null). Real content being
       // dropped on the renderer side — log so an unhandled render primitive is
-      // visible instead of a message silently not showing. See DECISIONS #75.
+      // visible instead of a message silently not showing. See background-tasks#5.
       console.warn('[agent] unhandled msgType — message dropped, not rendered', { tabId, msgType: (msg as any)?.msgType });
       return;
     }

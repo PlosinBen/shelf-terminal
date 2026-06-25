@@ -43,7 +43,7 @@ const sessions = new Map<string, SessionInstance>();
 // dispatch O(1) and lets the bridge be a permanent listener registered once
 // at app boot — no register/unregister coupled to mode switches.
 //
-// See DECISIONS-pm #67 (Architecture: Global Observer).
+// See pm-agent#12 (Architecture: Global Observer).
 type GlobalObserver = (tabId: string, event: AgentEvent) => void;
 const globalObservers = new Set<GlobalObserver>();
 
@@ -214,7 +214,7 @@ async function startSession(
   // Project app-level skills onto this machine's ~/.shelf/apps/<appId>/skills so
   // the (local) agent-server's provider can load them. Remote machines get the
   // skills via deploy-time sync (L3); this local projection covers local agents.
-  // See DECISION #70 / feature §5.4.
+  // See deployment#1 / feature §5.4.
   if (connection.type === 'local') {
     projectSkillsLocal(getAppInstanceId());
   }
@@ -230,7 +230,7 @@ async function startSession(
     (phase) => send(IPC.AGENT_INIT_STATUS, tabId, { state: 'starting', phase }),
     // Background-task sink — forwarded straight to the renderer. Session-level
     // (NOT tied to session.state): a backgrounded task outlives its turn, so we
-    // never touch the turn's busy/idle state here. See DECISIONS #69.
+    // never touch the turn's busy/idle state here. See background-tasks#2.
     (ev) => send(IPC.AGENT_BACKGROUND_TASKS, tabId, ev),
     // Server-initiated turn (auto-resume prose after a background task). Drain
     // the turn's events into the renderer like a normal turn. Its status
@@ -450,7 +450,7 @@ export function isAgentTab(tabId: string): boolean {
 /**
  * In-process equivalent of the AGENT_SEND IPC handler. Routes a prompt to an
  * existing agent session without going through renderer. Used by the Telegram
- * bridge in agent mode (see DECISIONS-pm #67).
+ * bridge in agent mode (see pm-agent#12).
  *
  * Returns the same boolean as sendMessage: false if tabId has no session, true
  * once the turn completes (including catch'd errors — those propagate through

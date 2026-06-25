@@ -275,7 +275,7 @@ describe('createTurnDispatcher', () => {
     expect(() => d.feed({ type: 'message', msgType: 'text', content: 'late', turnId: 't-x' })).not.toThrow();
   });
 
-  // ── Server-initiated turn (auto-resume prose) — DECISIONS #69 ──
+  // ── Server-initiated turn (auto-resume prose) — background-tasks#2 ──
 
   it('turn_started registers the turn and hands its generator to onServerTurn; subsequent prose routes there (not dropped as unknown turn)', async () => {
     const handed: Array<{ turnId: string; events: AsyncGenerator<AgentEvent> }> = [];

@@ -3,7 +3,7 @@
  *
  * Pure (no Telegram API side-effects). Tests can exercise alias derivation
  * and resolve logic without mocking the Telegram polling loop. See
- * DECISIONS-pm #67.
+ * pm-agent#12.
  */
 import { isAgentTab, getAgentProvider } from '../agent';
 import { getSyncedProjects } from './tools';
@@ -77,7 +77,7 @@ export function resolveAlias(aliasArg: string): AliasResolveResult {
  * Only includes projects that currently have an active agent session — no
  * point registering a command that resolves to `no_agent`. Alias collision
  * is silently ignored per MVP (first registered wins, see
- * DECISIONS-pm #67).
+ * pm-agent#12).
  */
 export function buildUseCommands(): { command: string; description: string }[] {
   const seen = new Set<string>();

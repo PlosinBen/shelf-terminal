@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
-// Idle-notification logic (GOTCHAS #7) is the risky bit in pty-manager:
+// Idle-notification logic (terminal-pty#4) is the risky bit in pty-manager:
 // a "Command finished" notification fires only when ALL hold —
 //   active for >= 5s (MIN_ACTIVE_MS), the user typed something this window
 //   (userInput), the tab isn't muted, and the window is alive but unfocused.
@@ -52,7 +52,7 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe('pty-manager idle notification (GOTCHAS #7)', () => {
+describe('pty-manager idle notification (terminal-pty#4)', () => {
   it('notifies after sustained activity when user typed and window is unfocused', async () => {
     spawnPty('p', 'tab-ok', '/cwd', conn, makeWin(false));
     emit('seed');                 // create activity state

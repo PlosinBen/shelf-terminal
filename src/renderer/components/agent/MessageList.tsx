@@ -17,7 +17,7 @@ interface Props {
  *
  * Subscribes to its own per-tab store slice (messages / isStreaming /
  * pendingSends / initStatus) so input keystrokes elsewhere don't re-render
- * the timeline (DECISIONS #59), owns its scroll-position intent, and renders
+ * the timeline (agent-ui#4), owns its scroll-position intent, and renders
  * the entire message area: init/empty/failed pane, the turn timeline, the
  * streaming spinner, queued-message chips, and the jump-to-bottom FAB.
  *

@@ -64,7 +64,7 @@ export function App() {
   // adapter and bus → store subscriptions are both global; per-tab
   // routing happens inside agentTabStore via tabId in payloads. Living
   // at App.tsx (not AgentView mount) means IPC streams survive
-  // AgentView unmount mid-turn — see DECISIONS #59.
+  // AgentView unmount mid-turn — see agent-ui#4.
   useEffect(() => {
     const offIPC = bindAgentIPCGroup();
     const offStore = bindAgentStoreSubscriptions();

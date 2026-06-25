@@ -106,7 +106,7 @@ describe('pmStreamReducer', () => {
     expect(next).toEqual(initialPmStreamState);
   });
 
-  // Regression: see GOTCHAS #33 (to be added). Retry succeeded, done chunk
+  // Regression: see pm-agent#19 (to be added). Retry succeeded, done chunk
   // arrives — banner must not stick around on top of the new reply.
   it('regression: done chunk clears stale retry banner', () => {
     const withBanner: PmStreamState = {

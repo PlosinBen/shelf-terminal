@@ -395,7 +395,7 @@ export function elicitationSchemaToPrompts(schema: any): ElicitationMapped | nul
     }
 
     // Fallback: plain string with no enum (format/length/maxLength hints
-    // are dropped — v1 doesn't validate, see DECISIONS #57 "Out of scope").
+    // are dropped — v1 doesn't validate, see agent-ui#3 "Out of scope").
     return {
       question,
       header,
@@ -414,7 +414,7 @@ export function elicitationSchemaToPrompts(schema: any): ElicitationMapped | nul
  *
  * Numeric fields try `parseInt` / `parseFloat`; on parse failure the raw
  * string is sent through so the agent can re-prompt with feedback (we don't
- * validate min/max/format — v1 out-of-scope, see DECISIONS #57).
+ * validate min/max/format — v1 out-of-scope, see agent-ui#3).
  *
  * Boolean fields map 'Yes' → true, anything else → false. Multi-select array
  * fields with enumNames need to reverse the displayed label back to the const
@@ -489,7 +489,7 @@ export function picksToElicitationContent(
 // Pure mapper for the Copilot SDK's TaskInfo (TaskAgentInfo | TaskShellInfo,
 // from rpc.tasks.list()) → NormalizedTask render primitives — the same shape
 // claude maps its task_* system messages into. Side-effect-free for unit tests.
-// See DECISIONS #69.
+// See background-tasks#2.
 
 /** Copilot TaskInfo.status → NormalizedTask.status. Copilot's 'idle' (agent
  *  waiting) maps to 'running' (still alive); 'cancelled' → 'stopped'. */
@@ -543,7 +543,7 @@ export function isBackgroundedCopilotTask(t: any): boolean {
  * the keychain → may prompt on unsigned builds).
  *
  * gh is OPTIONAL — a convenience to avoid the keychain prompt when it happens to
- * be installed+authed, NOT a hard dependency. See DECISIONS-agent #45.
+ * be installed+authed, NOT a hard dependency. See agent-providers#2.
  */
 export function buildCopilotAuthConfig(
   ghToken: string | undefined,

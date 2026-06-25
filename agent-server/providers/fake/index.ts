@@ -158,7 +158,7 @@ export function createFakeBackend(): ServerBackend {
   let abortController: AbortController | null = null;
   // Most-recent turn's send — reused to emit out-of-turn task_events (the
   // 'stopped' echo from stopTask), mirroring how the claude backend routes
-  // task_notifications through its persistent session. See DECISIONS #69.
+  // task_notifications through its persistent session. See background-tasks#2.
   let lastSend: SendFn | null = null;
 
   async function runStep(
@@ -280,7 +280,7 @@ export function createFakeBackend(): ServerBackend {
     // plan:<markdown> — emit a plan / todo-list side-channel update. Routed to
     // PlanPanel (tab.currentPlan), NOT the timeline and NOT the background-tasks
     // panel — lets an E2E assert the plan/todo surface renders independently of
-    // background tasks. See DECISIONS #60 (plan side-channel) / #69.
+    // background tasks. See agent-ui#5 (plan side-channel) / #69.
     if (step.startsWith('plan:')) {
       send({ type: 'plan', content: step.slice('plan:'.length) });
       return;
@@ -300,7 +300,7 @@ export function createFakeBackend(): ServerBackend {
     // background task finishes). Opens a fresh turnId via turn_started, emits
     // the prose tagged with it + startsTurn so the renderer renders it in its
     // own turn block, then closes with that turn's idle. Same wire shapes a
-    // real provider emits. See DECISIONS #69.
+    // real provider emits. See background-tasks#2.
     if (step.startsWith('serverturn:')) {
       const content = step.slice('serverturn:'.length);
       const turnId = mintId('t');

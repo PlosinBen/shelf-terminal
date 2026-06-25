@@ -19,7 +19,7 @@ export function stripCwd(p: string, cwd: string): string {
  * `os.homedir()/.shelf/apps/<appId>/skills` — or null if `appId` is missing or
  * the dir hasn't been projected yet (no skills, or remote not yet synced). Both
  * ends self-resolve via `os.homedir()`, so the path is identical local/remote
- * with zero branching (see DECISION #70 / feature §5.4). Providers point their
+ * with zero branching (see deployment#1 / feature §5.4). Providers point their
  * SDK at it: Claude `plugins[].path` = this root, Copilot `skillDirectories` =
  * `<root>/skills`.
  */

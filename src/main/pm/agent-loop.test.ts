@@ -3,14 +3,14 @@ import type { ChatMessage, StreamEvent } from './llm-client';
 
 // agent-loop has heavy side-effect deps (LLM streaming, tools, telegram,
 // persisted history). Mock them so we can unit-test the retry/backoff logic
-// (GOTCHAS #29: retryable 503/429/500/502/504, 3 retries, 5s→10s→20s).
+// (pm-agent#17: retryable 503/429/500/502/504, 3 retries, 5s→10s→20s).
 const streamChat = vi.fn();
 vi.mock('./llm-client', () => ({ streamChat: (...a: unknown[]) => streamChat(...a) }));
 vi.mock('./tools', () => ({
   getActiveToolSchemas: () => [],
   executeTool: () => '',
   // getCurrentFocus is called by agent-loop's getSystemPrompt() to inject the
-  // "Current Focus" section (DECISIONS-pm #66). Tests don't care about focus
+  // "Current Focus" section (pm-agent#11). Tests don't care about focus
   // routing — return null so PM falls back to scan-first behaviour.
   getCurrentFocus: () => null,
 }));
@@ -53,7 +53,7 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe('handlePmSend retry/backoff (GOTCHAS #29)', () => {
+describe('handlePmSend retry/backoff (pm-agent#17)', () => {
   it('retries a 503 after 5s then succeeds', async () => {
     streamChat
       .mockImplementationOnce(() => { throw new Error('LLM API error 503: high demand'); })

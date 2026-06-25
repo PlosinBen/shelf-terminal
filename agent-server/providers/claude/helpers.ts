@@ -56,7 +56,7 @@ export function rateLimitInfoToSegment(info: any): StatusSegment | null {
 
 /** Sample of a preview field carried on an AskUserQuestion option. Logged by
  * the runtime caller — v1 picker UI doesn't render preview content yet
- * (v1 doesn't render preview content — see DECISIONS #57 "Out of scope"). */
+ * (v1 doesn't render preview content — see agent-ui#3 "Out of scope"). */
 export interface AskUserQuestionPreviewSample {
   question: string;
   optionLabel: string;
@@ -151,7 +151,7 @@ export function buildAskUserQuestionAnswerJson(
  * Decide whether a per-turn SDK-resolved model id should replace the user's
  * current model selection (and thus overwrite status bar + project config).
  *
- * Rule (see DECISIONS-agent #62):
+ * Rule (see agent-config-flow#4):
  *   - currentModel is one of supportedModels()' recommended aliases
  *     (default/sonnet/haiku) → DON'T adopt; the alias tracks the
  *     recommendation and must stay stable.
@@ -421,7 +421,7 @@ export function formatClaudeToolInput(toolName: string, input: Record<string, un
 // Pure mapper for the SDK's `task_*` system messages → NormalizedTask render
 // primitives. State (the per-id Map, output-file stash, ambient set) lives in
 // the backend closure; this fn is side-effect-free so it's unit-testable like
-// the other parsers here. See DECISIONS #69 (Phase 0
+// the other parsers here. See background-tasks#2 (Phase 0
 // confirmed the SDK shapes against a real backgrounded Bash).
 
 /** SDK `task_type` → NormalizedTask.type. Unknown values collapse to 'unknown'

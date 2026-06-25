@@ -11,7 +11,7 @@ interface SyncedTab {
   label: string;
   /** True when this tab is the active tab within its parent project.
    *  Used by getCurrentFocus() to inject "current focus" into PM's prompt
-   *  (see DECISIONS-pm #66). */
+   *  (see pm-agent#11). */
   active?: boolean;
 }
 
@@ -61,7 +61,7 @@ export function getCurrentFocus(): { project: SyncedProject; tab: SyncedTab | nu
 /**
  * Read-only snapshot of all synced projects. Used by telegram bridge to
  * derive aliases for /use_<alias> mode-switch commands. See
- * DECISIONS-pm #67.
+ * pm-agent#12.
  */
 export function getSyncedProjects(): readonly SyncedProject[] {
   return syncedProjects;

@@ -22,7 +22,7 @@ interface Props {
  *    Claude AskUserQuestion). Resolves through IPC.
  * 3. **localPicker** (renderer-only, triggered by /model and friends).
  *    On select, emits a structured config-edit turn (agent:send +
- *    configEdit) — same path as a typed /model X (DECISION #63).
+ *    configEdit) — same path as a typed /model X (agent-config-flow#5).
  *
  * Realistically permission + picker can't both be active (both gated
  * by canUseTool which SDK serializes), so the priority gate is a
@@ -109,7 +109,7 @@ export function DecisionPanel({ tabId }: Props) {
         onSelect={(value) => {
           // Route as a structured config-edit turn — same path a typed
           // `/model X` takes, so divider + capabilities come back identically
-          // (DECISION #63). No optimistic update; display follows the
+          // (agent-config-flow#5). No optimistic update; display follows the
           // provider's capabilities event.
           emitAgent('agent:send', { tabId, text: '', configEdit: { key, value } });
           setLocalPickerStore(tabId, null);

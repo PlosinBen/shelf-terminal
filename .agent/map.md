@@ -1,0 +1,216 @@
+---
+type: map
+title: shelf-terminal — Intent → File Index
+---
+
+# Intent → File Index
+
+每列 = 「想做什麼 → 哪個檔 → 這個模組是什麼」。資料流 / 簽名 / 為什麼這樣設計請查 architecture/ contracts/ context/。
+
+## Main Process (src/main/)
+
+| Intent | File | Role |
+|--------|------|------|
+| App lifecycle, IPC wiring | `index.ts` | app/window 啟動、`registerAllIpcHandlers()` 一次註冊、PM/Agent/updater 接線與 quit cleanup 的中樞 |
+| 共享 app 狀態 | `app-state.ts` | `mainWindow` / `cachedProjects` / `cachedSettings` 的 getter/setter，index 與 ipc 共用單一來源 |
+| IPC handler（按領域分檔） | `ipc/` (`index.ts` + `pty`/`project`/`connector`/`git`/`file-transfer`/`dialog`/`settings`/`logs`/`notes`/`skills`/`updater`/`pm`) | 各檔 export `registerXxxHandlers()`，`ipc/index.ts` 匯總註冊 |
+| App 層 Agent Skills（CRUD + lock） | `skills-store.ts` | `<userData>/skills/` 下 app 層 skill 的檔案 CRUD + frontmatter 驗證 + lock marker |
+| Skills 變更後處理（統一 pipeline） | `skills-sync.ts` | `onSkillsChanged()`：任何 skill mutation 後的單一出口（re-project + subscribers + 通知 renderer） |
+| App-tool bridge（main 端 dispatcher） | `agent/app-tool.ts` | `handleAppTool(op,args)` 把 agent-server 的 `app_tool` 請求轉成 client-owned 資源動作的純 dispatcher |
+| Skills 投影（local + hash） | `skills-projection.ts` | `projectSkillsLocal` mirror skills 到 `~/.shelf/apps/<appId>/skills` + hash helper |
+| App-instance id | `app-instance-id.ts` | `getAppInstanceId()`：`<userData>/app-instance-id` 的 generate-once 穩定 UUID |
+| 自訂 application menu (wiring) | `app-menu.ts` | `buildAppMenu()` 串 electron `Menu.buildFromTemplate`（mac only） |
+| Application menu template | `app-menu-template.ts` | 純函式回傳 `MenuItemConstructorOptions[]` 的選單資料 |
+| 選單安裝平台判斷 | `menu-platform.ts` | `shouldInstallAppMenu(platform)`（只有 darwin true） |
+| Reload key predicate | `reload-guard.ts` | `isReloadKeyEvent(input)` 判斷是不是 Cmd/Ctrl+R / F5 |
+| DevTools key predicate | `devtools-guard.ts` | `isDevToolsKeyEvent(input)`（F12 / Ctrl+Shift+I）的純判斷 |
+| PTY spawn/kill/resize | `pty-manager.ts` | 透過 connector spawn shell、idle notification、輸出經注入的 `PtyObserver` 回報 |
+| Preload bridge | `preload.ts` | contextBridge 暴露 `window.shelfApi`，純 RPC bridge 到 main |
+| Project 持久化 | `project-store.ts` | 讀寫 `projects.json`（userData 路徑） |
+| Settings 持久化 | `settings-store.ts` | 讀寫 `settings.json`，merge defaults |
+| SSH ControlMaster 管理 | `ssh-control.ts` | socket 路徑產生、app quit 時清理 |
+| SSH 伺服器列表 | `ssh-server-store.ts` | 儲存已知 SSH server 列表 |
+| 檔案上傳 + 清理（paste / drag-drop） | `file-transfer.ts` | 上傳到 `<cwd>/.tmp/shelf/` + session 清理 + 檔名 prefix 解析 |
+| 自動更新 wiring | `updater.ts` | electron-updater event 接線、download/install 兩段確認 |
+| 自動更新 state machine | `updater-state.ts` | 純 reducer（idle/available/downloading/downloaded） |
+| App 啟動 / config 載入 | `bootstrap.ts` | 預先載入 projects/settings，遇錯顯示 blocking dialog |
+| userData 路徑隔離 | `user-data-path.ts` | `applyUserDataIsolation()`，依 packaged / switch 加 `-dev` 後綴 |
+| Per-project storage 共用層 | `project-storage.ts` | `projectDir`/`ensureProjectDir`/`removeProjectStorage` — per-project 檔案統一在 `<userData>/projects/<id>/` |
+| 啟動 migration | `migrations/migrate-pm-notes.ts` | 啟動時 idempotent 把舊 `pm-notes/<id>.md` 搬到 `projects/<id>/pm-note.md` |
+| Notes 檔案存取 | `notes-store.ts` | Per-project 多筆 note CRUD + frontmatter + 圖片存檔/GC |
+| Notes 圖片自訂 protocol | `notes-protocol.ts` | 註冊 `shelf-image://` scheme 給 renderer 載 note 圖片 |
+
+## Connector (src/main/connector/)
+
+| Intent | File | Role |
+|--------|------|------|
+| Factory + 匯出 | `index.ts` | `createConnector(connection)` factory + type 列舉 + cleanup |
+| 介面定義 | `types.ts` | `Connector` / `Shell` / `Disposable` / `ExecResult` 介面 |
+| PTY wrapper | `wrap-pty.ts` | 將 node-pty 包成 `Shell` 介面 |
+| Shell 環境解析 | `shell-env.ts` | macOS/Linux GUI app 的 login shell env 修正 |
+| 檔案操作工具 | `file-utils.ts` | 跨 connector 共用的上傳/清理/目錄操作 |
+| Local (Unix) | `local/unix.ts` | macOS/Linux 本機 connector |
+| Local (Win32) | `local/win32.ts` | Windows 本機 connector |
+| SSH (Unix) | `ssh/unix.ts` | macOS/Linux SSH connector（ControlMaster） |
+| SSH (Win32) | `ssh/win32.ts` | Windows SSH connector |
+| WSL | `wsl.ts` | Windows WSL connector |
+| Docker | `docker.ts` | Docker exec connector |
+| 單元測試 | `connector.test.ts` | available() / buildSpawnConfig() 等測試 |
+
+## Agent View (src/main/agent/)
+
+| Intent | File | Role |
+|--------|------|------|
+| Session manager + IPC handlers | `index.ts` | `initAgentManager()`：註冊 agent IPC、管理 tab→session、permission bridging |
+| Remote backend | `remote.ts` | `createRemoteBackend()`：JSON line protocol 跟 agent-server 通訊 + 自帶 node/provider 部署 |
+| Turn dispatcher | `turn-dispatcher.ts` | 純邏輯 event router，按 turnId 路由 wire events 到對應 turn 的 generator |
+| Type 定義 | `types.ts` | `AgentBackend` / `AgentEvent` / `AgentSessionState` 等系統型別 |
+| 連線健康（heartbeat RTT） | `connection-health.ts` | `ConnectionHealthTracker` 純狀態機：心跳 RTT → healthy/slow/unstable/dead |
+| 單元測試 | `connection-health.test.ts` | RTT/狀態機 7 case |
+| 單元測試 | `remote.test.ts` | Remote backend 介面、lifecycle 測試 |
+| Dispatcher 單元測試 | `turn-dispatcher.test.ts` | turnId 路由 / unknown drop / lifecycle / permission isolation — 9 case |
+
+## Agent Server (agent-server/)
+
+| Intent | File | Role |
+|--------|------|------|
+| Entry point | `index.ts` | stdin/stdout JSON line protocol server + dispatch to Claude/Copilot + context persistence 統一處理 |
+| Claude provider | `providers/claude/index.ts` | `@anthropic-ai/claude-agent-sdk` wrapper：持久 streaming-input session、emit 渲染原語、auth 偵測 |
+| Copilot provider | `providers/copilot/index.ts` | `@github/copilot-sdk` wrapper：spawn bundled CLI、emit 渲染原語、auth 偵測、elicitation handler |
+| Provider 純 helper（claude） | `providers/claude/helpers.ts` | claude/index 抽出的 side-effect-free 函式 + types（封閉邊界，只被 claude/ 引用） |
+| Turn 路由（claude） | `providers/claude/turn-router.ts` | 純 attribution 狀態機，按順序把 message 分 foreground/server/task lane |
+| Provider 純 helper（copilot） | `providers/copilot/helpers.ts` | copilot/index 抽出的純函式 + types（只被 copilot/ 引用） |
+| Provider 共用 helper | `providers/shared.ts` | `stripCwd` / `resolveSkillsPluginRoot` — 跨 provider 共用純函式 |
+| App-tool bridge（agent-server 端） | `app-tool-client.ts` + `app-tool-tools.ts` | in-process MCP 工具的共用 body：`callMain` + `runBridgeTool` + 描述常數 |
+| ~/.shelf 清理（heartbeat-lease） | `cleanup.ts` | `runCleanupSweep()` 啟動時按 `.heartbeat` lease 回收 version/appId 殘留 |
+| Context persistence | `context-store.ts` | `loadContext`/`saveContext`/`deleteContext`/`cleanupOldContexts`，atomic write 到 `~/.shelf/agent-context/` |
+| Context persistence 測試 | `context-store.test.ts` | round-trip + Claude resume / Copilot chain |
+| Provider types | `providers/types.ts` | `ServerBackend` / `SendFn` / `QueryInput` / `OutgoingMessage` / `ProviderCapabilities` 等 |
+| Slash prefix detection | `src/shared/slash-prefix.ts` | `parseSlashPrefix(prompt)` 共用 helper（provider + renderer 同份） |
+| Fake provider | `providers/fake/index.ts` | E2E-only backend，`SHELF_TEST_MODE=1` 時回它，prompt 走 prefix-matched scenario |
+| Fake provider 測試 | `providers/fake/fake.test.ts` | 每個 scenario 的 wire-shape 驗證 + stop/abort 行為 |
+| Bundle build | `build.mjs` | esbuild → `dist/agent-server/<version>/index.js` 單一 ESM bundle |
+| 單元測試 | `providers/copilot/slash-commands.test.ts` | slash dispatch + streaming/idle status pair 測試 |
+
+## PM Agent (src/main/pm/)
+
+| Intent | File | Role |
+|--------|------|------|
+| Barrel export | `index.ts` | 統一匯出 PM 模組所有公開 API |
+| LLM 對話循環 | `agent-loop.ts` | 結構化 system prompt + tool use loop + streaming + sliding window + auto-retry |
+| Sliding window helper | `history-window.ts` | `trimHistoryForLLM` 切到 user boundary，避免裸切 function_call |
+| LLM streaming client | `llm-client.ts` | OpenAI-compatible SSE streaming（Electron `net.fetch`），解析 tool_calls |
+| Tool 定義 + 執行 | `tools.ts` | tool schemas + `executeTool` dispatcher + `inferTabState` + Away Mode 過濾 |
+| Scrollback ring buffer | `scrollback-buffer.ts` | Per-tab 100KB ring buffer、ANSI strip、lastNLines 讀取 |
+| Note 儲存 | `note-store.ts` | PM 單筆 note + global note 讀寫 |
+| 對話持久化 | `history-store.ts` | `pm-history.json` 讀寫、boot 載入、每 turn 存檔 |
+| Away Mode 狀態 | `away-mode.ts` | 全域 boolean + 同步到 renderer |
+| PM Active 狀態 | `pm-active.ts` | telegram listener master 開關的純 state holder + renderer 同步 |
+| 硬紅線檢查 | `redline.ts` | scrollback pattern match（rm -rf、git push --force、DROP TABLE 等） |
+| Tab 狀態監控 | `tab-watcher.ts` | scrollback 狀態轉換偵測，觸發 PM 自動事件 + `snapshotTabs()` |
+| PTY → PM bridge | `pty-bridge.ts` | pty-manager `PtyObserver` 的注入目標（scrollback append + tab-watcher） |
+| PTY bridge 單元測試 | `pty-bridge.test.ts` | 三種訊號路由 + append-before-checkTab 順序契約 |
+| Telegram bridge | `telegram.ts` | Bot API long polling、inline button、slash commands，由 PM Active 驅動 start/stop |
+| 單元測試 | `scrollback-buffer.test.ts` | Ring buffer + ANSI strip 測試 |
+| 單元測試 | `tools.test.ts` | inferTabState heuristic 測試 |
+| 單元測試 | `redline.test.ts` | 硬紅線 pattern match 測試 |
+
+## Renderer (src/renderer/)
+
+| Intent | File | Role |
+|--------|------|------|
+| Root 元件 / Event handler 中樞 | `App.tsx` | 載入 projects/settings、集中處理所有 event bus 事件、split view 渲染的唯一 side-effect hub |
+| 全域狀態管理 | `store.ts` | `useSyncExternalStore` store，管 projects/tabs/settings/UI state + connectionHealth + skillsVisible |
+| Event bus | `events/` (`bus.ts` / `types.ts` / `ipc-agent.ts` / `index.ts`) | pub/sub + 類型化 `agent:*` vocabulary + IPC↔bus 適配層 |
+| 快捷鍵系統 | `hooks/useKeybindings.ts` | combo string 對應 action，支援參數化 action |
+| Paste/drop 上傳 hook | `hooks/useAttachmentPaste.ts` | paste/drop/upload pipeline + file size check |
+| Terminal 渲染 | `components/TerminalView.tsx` | xterm.js instance cache + PTY I/O + paste hook + unread badge |
+| Agent 對話 UI | `components/AgentView.tsx` + `components/agent/{MessageList,InputZone,StatusBar,DecisionPanel,PlanPanel,AuthPane}.tsx` + `agentTabStore.ts` + `agentTabSubscriptions.ts` + `agent-message-builder.ts` | AgentView 是 layout coordinator，domain state 在 per-tab `agentTabStore`，子 component 各自 subscribe |
+| 選擇面板 | `components/SelectionPanel.tsx` | Bottom-anchored 單題 N-way 選單，permission popup + config picker 共用 |
+| Picker 面板 | `components/PickerPanel.tsx` | Bottom-anchored 多題互動 form（AskUserQuestion / elicitation 共用） |
+| Bottom bar（全寬 app footer） | `components/BottomBar.tsx` | App 層全寬狀態列：service type/cwd + 版號更新 widget + Projects/PM/Notes/DevTools toggle |
+| Sidebar | `components/Sidebar.tsx` | Project 列表、拖曳排序、右鍵選單、worktree branch、連線健康 status-dot |
+| Tab bar | `components/TabBar.tsx` | Tab 列表、拖曳排序、雙擊重命名、unread badge、PM Active badge |
+| 快速指令選擇器 | `components/CommandPicker.tsx` | ⌘E overlay，過濾 + 執行 per-project 快速指令 |
+| 開發工具面板 | `components/DevToolsPanel.tsx` | ⌘D 右側 panel，Base64/JSON/URL/UUID/Timestamp/Hash 工具 |
+| 資料夾選擇器 | `components/FolderPicker.tsx` | 兩步驟（connection type → browse）選資料夾 |
+| 資料夾瀏覽器 | `components/FolderBrowser.tsx` | 純展示元件，顯示目錄清單和 keyboard hints |
+| Terminal 搜尋 | `components/SearchBar.tsx` | xterm SearchAddon 整合 |
+| Settings 面板 | `components/SettingsPanel.tsx` | 左側 tab 分頁（Terminal / Models / PM Agent / Shortcuts） |
+| Worktree 建立 | `components/WorktreeDialog.tsx` | 輸入 branch name 建 git worktree，產生 sub-project |
+| 刪除確認 | `components/RemoveConfirmDialog.tsx` | Remove project 確認 modal，可勾選清理 worktree files |
+| PM 狀態面板（read-only） | `components/PmView.tsx` | 右側可拖拉 panel，read-only 訊息列表 + markdown，header 含 PM Active/Away/Clear toggle |
+| Notes 面板 | `components/NotesView.tsx` | ⌘N 右側 panel，per-project markdown scratch pad（preview/edit、貼圖、auto-save） |
+| Skills 面板 | `components/SkillsView.tsx` | 右側 panel，app 層 Agent Skills 管理（master-detail md 編輯器 + lock toggle） |
+| Quick Note overlay | `components/QuickNoteOverlay.tsx` | ⌘⇧N floating textarea，送到當下 active project（支援貼圖） |
+| Note 圖片縮圖 | `components/NoteImage.tsx` | 共用縮圖元件，透過 `notes.readImage` IPC 載 Blob URL |
+| Clipboard / drop 解析 | `utils/parse-data-transfer.ts` | 純 parser，`DataTransfer → PastedItem[]`（paste/drop 共用） |
+| 右側 sidebar toggle | `store.toggleRightSidebar(feature)` | PM/Notes/DevTools 三 panel 共用的 toggle action |
+| Tooltip 快捷鍵 helper | `utils/format-keybinding.ts` | 純函式 `formatCombo` / `tooltipWithShortcut` |
+| PM stream reducer | `components/pm-view-reducer.ts` | 純 reducer 管 PM streaming/streamText/streamToolCalls/error 四個 UI state |
+| Project 編輯面板 | `components/ProjectEditPanel.tsx` | 改名、init script、default tabs、quick commands、Clear uploaded files |
+| Agent UI 訊息持久化 | `storage/agent-history.ts` | IndexedDB 存 UI messages keyed by sessionId（append-only delta save） |
+| Canonical Agent message type | `src/shared/types.ts` (`AgentMessage`) | 9-variant 渲染原語 discriminated union（inline + fold_* 卡片類） |
+| Inline SVG icon | `components/icons.tsx` | 手繪原創 line icon（24x24，`currentColor`），footer toggle 用 |
+| 主題定義 | `themes.ts` | 5 個內建主題（terminal + UI 色彩） |
+| Window API 型別 | `env.d.ts` | `window.shelfApi` TypeScript 宣告 |
+| React entry | `main.tsx` | `createRoot` + `<App />` |
+
+## Shared (src/shared/)
+
+| Intent | File | Role |
+|--------|------|------|
+| Type 定義 | `types.ts` | Connection / ProjectConfig / AppSettings / PM types / IPC payloads |
+| IPC channel 常數 | `ipc-channels.ts` | 所有 IPC channel name 常數 |
+| Logger | `logger.ts` | 統一 log 模組，支援 file writer / log level / env override |
+| 預設值 | `defaults.ts` | DEFAULT_SETTINGS, DEFAULT_KEYBINDINGS |
+| Slash prefix parser | `slash-prefix.ts` | `parseSlashPrefix(prompt)`，provider + renderer 同份 |
+| 單元測試 | `slash-prefix.test.ts` | `parseSlashPrefix` 邊界 case 覆蓋 |
+
+## Config / CI
+
+| Intent | File | Role |
+|--------|------|------|
+| Path alias 定義 | `aliases.ts` | `@shared` alias 的單一來源，vite/vitest 共用 |
+| Build 設定 | `vite.config.ts` | Vite + electron plugin、manualChunks、node-pty external |
+| 單元測試設定 | `vitest.config.ts` | 獨立 vitest config（不繼承 vite.config.ts） |
+| 套件 / 打包設定 | `package.json` | electron-builder config、scripts、dependencies |
+| CI/CD | `.github/workflows/build.yml` | Tag push → 三平台 build → GitHub Release |
+
+### npm scripts
+
+| Script | 用途 |
+|--------|------|
+| `dev` | 開發模式（NODE_ENV=development，userData 加 `-dev` 後綴隔離） |
+| `build` | Vite build + agent-server esbuild bundle，產出 `dist/` |
+| `typecheck` | `tsc --noEmit` 型別檢查 |
+| `test` | 跑全部測試（typecheck → unit → e2e → docker → ssh） |
+| `test:unit` | vitest 單元測試 |
+| `test:e2e` | Playwright E2E 測試（自動 build，NODE_ENV=test 隔離 userData） |
+| `test:docker` | Docker connector E2E 測試 |
+| `test:ssh` | SSH connector E2E 測試 |
+| `pack` | build + `electron-builder --dir`，產出 unpackaged app |
+| `dist` | build + `electron-builder`，產出 packaged installer |
+| `dist:mac` | 同 `dist`，限 macOS |
+| `dist:win` | 同 `dist`，限 Windows |
+| `dist:linux` | 同 `dist`，限 Linux |
+
+### Tests
+
+| Intent | File | Role |
+|--------|------|------|
+| E2E helpers | `e2e/helpers.ts` | Playwright fixture、per-worker tempdir userData 隔離、agent helper（預設 `SHELF_TEST_MODE=1`） |
+| E2E 測試 | `e2e/agent-picker.spec.ts` | Picker_request 全鏈（single/multi/cancel/free-text），fake provider |
+| E2E 測試 | `e2e/agent-flows.spec.ts` | permission / stream / fold 卡片 / auth_required / error / Esc stop，fake provider |
+| E2E 測試 | `e2e/app-startup.spec.ts` | App 啟動、sidebar 驗證 |
+| E2E 測試 | `e2e/project-creation.spec.ts` | 建立 project、connect、tab、terminal output |
+| E2E 測試 | `e2e/features.spec.ts` | Search、settings、project edit、dev tools、快捷鍵 |
+| E2E 測試 | `e2e/config-bootstrap.spec.ts` | Config 損毀 bootstrap dialog（quit / backup & continue） |
+| E2E 測試 | `e2e/pm-agent.spec.ts` | PM sidebar、PmView toggle、provider settings、Away Mode、Telegram |
+| E2E 測試 | `e2e/init-script.spec.ts` | Init script 不重複顯示 |
+| Connector 測試 | `e2e/connector/ssh.spec.ts` | SSH connect/multiplex/file upload + clearUploads |
+| Connector 測試 | `e2e/connector/docker.spec.ts` | Docker exec spawn / file upload / clearUploads |
+| 單元測試 | `src/main/updater-state.test.ts` | Updater reducer 21 個 transition 測試 |
+| 單元測試 | `src/main/file-transfer.test.ts` | 純函式 + local fs 行為 |
+| 單元測試 | `src/main/user-data-path.test.ts` | `applyUserDataIsolation()` 五個分支 |
+| 單元測試 | `src/main/project-store.test.ts` | Project store read/write/backup 測試 |

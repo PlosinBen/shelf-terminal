@@ -86,7 +86,7 @@ export function shouldFetchOutput(
  * task deletes it: a settled task is just dismissed; a running task is first
  * stopped through the SDK (stopTask) and only leaves the list once the SDK
  * confirms it settled (or a fallback timeout fires). Renders nothing when
- * empty. See DECISIONS #69.
+ * empty. See background-tasks#2.
  */
 export function BackgroundTasksPanel({ tabId }: Props) {
   const tab = useAgentTab(tabId);

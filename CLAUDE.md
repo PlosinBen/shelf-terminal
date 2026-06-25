@@ -2,14 +2,20 @@
 
 ## Agent Reference Docs
 
+先讀 [.agent/index.md](.agent/index.md)（bundle 入口），或依情境直接跳：
+
 | Situation | Read |
 |-----------|------|
+| 找功能在哪個檔案 | [.agent/map.md](.agent/map.md) |
+| 理解系統結構 / 抽象資料流 | [.agent/architecture/index.md](.agent/architecture/index.md) |
+| 查介面規格 / 訊息格式 / 路由規則 | [.agent/contracts/index.md](.agent/contracts/index.md) |
+| 理解為什麼這樣設計、什麼不該改、debug 前先看 | [.agent/context/index.md](.agent/context/index.md) — decisions + gotchas 按 topic；code 以 `<topic>#N` 引用（如 `skills#4` → `context/skills.md` 第 4 條）|
 | 評估新 feature 該不該做、判斷是否偏離產品定位 | [.agent/PRODUCT.md](.agent/PRODUCT.md) |
-| 找功能在哪個檔案 | [.agent/PROJECT_MAP.md](.agent/PROJECT_MAP.md) |
-| 理解為什麼這樣設計、什麼不該改（按領域分檔，編號全域唯一）| [.agent/DECISIONS-core.md](.agent/DECISIONS-core.md) (基礎建設) ・ [.agent/DECISIONS-pm.md](.agent/DECISIONS-pm.md) (PM agent) ・ [.agent/DECISIONS-agent.md](.agent/DECISIONS-agent.md) (Agent provider) |
-| 遇到奇怪行為、debug 前先看 | [.agent/GOTCHAS.md](.agent/GOTCHAS.md) |
 | 發版流程、tag 規範 | [.agent/RELEASE_FLOW.md](.agent/RELEASE_FLOW.md) |
-| 開發某個 feature 時的暫存 context（規劃、spike 記錄、待辦）| [.agent/features/](.agent/features/) — 純開發過程的工作筆記，feature 做完即丟，**非永久文件**（gitignored、不跨機器同步）|
+| 開發中 feature 的暫存 context（規劃、spike、待辦）| [.agent/features/](.agent/features/) — 工作筆記，做完即丟，**非永久文件**（gitignored、不跨機器同步）|
+
+### Documentation maintenance
+改動時一併更新 `.agent/`：**新增/搬移模組** → `map.md`（intent → file + 一行 role）；**改資料流** → `architecture/<topic>.md`（抽象、不提檔名）；**介面/訊息變更** → `contracts/<topic>.md`；**新決策或 gotcha** → 對應 `context/<topic>.md`（append 下一個 `topic#N`，從 code 以 `<topic>#N` 引用）。context entry 寫**現況 + 為什麼**，不留 changelog / 已廢棄 feature / commit hash / 日期。
 
 ## Development
 
@@ -23,7 +29,7 @@
 - Bug fix 必須包含迴歸測試 — 先寫測試重現問題，再修 code
 - 不要啟動 dev server 或 Electron（`npm run dev` / `npx electron`）— AI 看不到畫面，只會干擾使用者。驗證用 `npm run typecheck` + `npm run test:unit`；需要驗 UI 行為就寫 E2E test
 - 優先使用 `package.json` 定義的 npm scripts（如 `npm run typecheck`、`npm run test:unit`、`npm run test:e2e`），不要直接組底層指令（如 `tsc --noEmit`、`vitest run`）— 使用者開了 bypass permission，直接組指令會增加審閱負擔
-- Commit 前確認 `.agent/` 文件是否需要更新（PROJECT_MAP, DECISIONS, GOTCHAS）— 有新增功能、改變架構、或發現 gotcha 時一併更新（GOTCHAS 條目的寫法規範見該檔開頭）
+- Commit 前確認 `.agent/` 是否需要更新（規範見上方「Documentation maintenance」）— 有新增功能、改變架構、或發現 gotcha 時一併更新
 - `.agent/features/` 是暫時開發 context（gitignored、不跨機器同步）— **程式碼 / 測試 / 永久 doc 絕對禁止引用它**
 - 優先思考、查證再動手，不要猜測 — 不確定的事先查 code / 文件 / 既有實作確認（例：裝套件前先 `npm view <pkg> versions` 確認版本，不要假設版號）
 - 設計盡可能簡單，避免過度設計 / 過度抽象 / 過度設定 — 先滿足當前需求，不預先為想像中的未來鋪設

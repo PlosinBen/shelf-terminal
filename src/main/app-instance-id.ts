@@ -4,7 +4,7 @@ import crypto from 'crypto';
 import { app } from 'electron';
 
 /**
- * Stable per-install identifier (see DECISION #70 / feature §5.3). Generated
+ * Stable per-install identifier (see deployment#1 / feature §5.3). Generated
  * once and persisted in userData; survives restarts and app updates, only
  * regenerating on a full reinstall / userData wipe. Because it lives in
  * userData, dev/test/prod each get their own id (the `-dev` userData isolation)

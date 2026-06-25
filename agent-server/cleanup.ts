@@ -3,7 +3,7 @@ import * as path from 'path';
 import * as os from 'os';
 
 /**
- * Heartbeat-lease cleanup of ~/.shelf (DECISION #70 / feature section 5.9).
+ * Heartbeat-lease cleanup of ~/.shelf (deployment#1 / feature section 5.9).
  * Runs in agent-server at startup (same machine as files -> own clock, no skew;
  * client never touches remote fs). Replaces the old "delete every version but
  * current" eager cleanup, which thrashed when two apps on different versions

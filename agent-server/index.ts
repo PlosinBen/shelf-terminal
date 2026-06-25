@@ -45,7 +45,7 @@ interface IncomingMessage {
   /** For `type: 'ping'`: client heartbeat sequence, echoed back in pong for RTT. */
   seq?: number;
   /** For `type: 'send'`: app-instance id — names this app's projected skills dir
-   *  at `~/.shelf/apps/<appId>/skills` (see DECISION #70). */
+   *  at `~/.shelf/apps/<appId>/skills` (see deployment#1). */
   appId?: string;
   /** resolve_picker payload — picker id minted by provider, payload carries
    * index-aligned answers or { cancelled: true } (see PickerResolvePayload). */
@@ -154,7 +154,7 @@ async function applyPrefDiff(
  * the same fake backend regardless of requested provider name. E2E specs
  * exercise renderer + main + agent-server wire chain without spinning up
  * real Claude/Copilot SDKs. Production builds set the env to undefined so
- * this branch is dead. See DECISIONS #58.
+ * this branch is dead. See agent-core#5.
  */
 const TEST_MODE = process.env.SHELF_TEST_MODE === '1';
 
@@ -262,7 +262,7 @@ async function handleStop() {
 // laptop sleeps / app closes. When no `ping` arrives for N minutes, self-exit to
 // free remote resources; the client respawns + resumes on reconnect. Fate-shared
 // transports (local/docker/wsl) suspend with the host and never pass this arg.
-// N is parsed as a float so tests can use sub-minute values. See DECISIONS #73.
+// N is parsed as a float so tests can use sub-minute values. See connection-health#2.
 const idleArg = process.argv.find((a) => a.startsWith('--idle-shutdown-min='));
 const IDLE_SHUTDOWN_MS = idleArg ? Math.max(0, Number(idleArg.split('=')[1]) || 0) * 60_000 : 0;
 let watchdogTimer: NodeJS.Timeout | undefined;

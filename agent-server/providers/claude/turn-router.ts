@@ -1,6 +1,6 @@
 /**
  * Pure turn-attribution state machine for claude's streaming-input persistent
- * session (Architecture B — see DECISIONS #72 / streaming-input feature).
+ * session (Architecture B — see background-tasks#3 / streaming-input feature).
  *
  * In streaming-input mode ONE long-lived `sdkQuery` serves the whole session,
  * so a single consumer loop drains a generator that carries messages for MANY

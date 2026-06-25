@@ -13,7 +13,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
  * popup) via the `agent-permission` / `agent-perm-*` CSS family.
  *
  * Wire shape comes from `agent-server/providers/types.ts` PickerRequest;
- * design rationale lives in DECISIONS #57.
+ * design rationale lives in agent-ui#3.
  *
  * Producer-side: Claude AskUserQuestion intercept (claude.ts canUseTool
  * branch) and Copilot elicitation handler both emit picker_request
@@ -24,7 +24,7 @@ export interface PickerPromptOption {
   label: string;
   description?: string;
   /** Optional preview content — v1 doesn't render this, kept on the wire
-   *  for a future renderer (see DECISIONS #57 "Out of scope"). */
+   *  for a future renderer (see agent-ui#3 "Out of scope"). */
   preview?: string;
 }
 
@@ -70,7 +70,7 @@ export function initialStateFor(prompt: PickerPrompt): PromptState {
 }
 
 export function isComplete(prompt: PickerPrompt, state: PromptState): boolean {
-  // Every prompt is required — optional-aware UI is YAGNI (DECISIONS #57
+  // Every prompt is required — optional-aware UI is YAGNI (agent-ui#3
   // out-of-scope). A prompt is satisfied as long as the user provides
   // SOME answer: a picked option OR a non-empty free-text input (when
   // inputType is set). Both pathways count equally.

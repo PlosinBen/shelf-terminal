@@ -182,7 +182,7 @@ export interface AgentBackend {
    */
   readTaskOutput?(taskId: string): Promise<string>;
   /** Stop a running background task (fire-and-forget; the 'stopped'
-   *  task_notification flows back via the task_event lane). See DECISIONS #72. */
+   *  task_notification flows back via the task_event lane). See background-tasks#3. */
   stopTask?(taskId: string): Promise<void>;
   /** Cancel a not-yet-running queued message by clientMsgId (fire-and-forget).
    *  Server drops it from its queue + re-emits the queue snapshot. No-op once
