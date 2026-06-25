@@ -2,7 +2,7 @@ import React from 'react';
 import { useStore, toggleProjectList, toggleRightSidebar } from '../store';
 import { tooltipWithShortcut } from '../utils/format-keybinding';
 import { isMac } from '../hooks/useKeybindings';
-import { PanelLeftIcon, MessageIcon, NoteIcon, CodeIcon, SkillIcon } from './icons';
+import { PanelLeftIcon, PaperPlaneIcon, NoteIcon, CodeIcon, SkillIcon } from './icons';
 import type { Connection } from '@shared/types';
 
 const version = __APP_VERSION__;
@@ -110,7 +110,7 @@ export function BottomBar() {
             onClick={() => toggleRightSidebar('pm')}
             title={tooltipWithShortcut('PM Agent', kb.togglePm, isMac)}
           >
-            <MessageIcon />
+            <PaperPlaneIcon />
             <span className="sr-only">PM</span>
           </button>
           <button

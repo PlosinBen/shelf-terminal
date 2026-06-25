@@ -34,23 +34,23 @@ export function PanelLeftIcon({ size }: IconProps) {
   );
 }
 
-// Speech bubble — PM agent.
-export function MessageIcon({ size }: IconProps) {
+// Paper plane — PM agent (Telegram-driven remote control / watcher).
+export function PaperPlaneIcon({ size }: IconProps) {
   return (
     <Svg size={size}>
-      <path d="M20 4H4a2 2 0 0 0-2 2v15l4-4h14a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2z" />
+      <path d="M22 2 11 13" />
+      <path d="M22 2 15 22 11 13 2 9z" />
     </Svg>
   );
 }
 
-// Document with text lines — Notes.
+// Pencil — Notes (user-authored scratch; paired with the Skills "book" the
+// agent reads, the pencil reads as "what I write").
 export function NoteIcon({ size }: IconProps) {
   return (
     <Svg size={size}>
-      <path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" />
-      <polyline points="14 3 14 9 20 9" />
-      <line x1="8" y1="13" x2="16" y2="13" />
-      <line x1="8" y1="17" x2="13" y2="17" />
+      <path d="M12 20h9" />
+      <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z" />
     </Svg>
   );
 }
@@ -65,11 +65,12 @@ export function CodeIcon({ size }: IconProps) {
   );
 }
 
-// Spark / star — Skills (a reusable capability).
+// Closed book — Skills (a reusable capability playbook the agent reads).
 export function SkillIcon({ size }: IconProps) {
   return (
     <Svg size={size}>
-      <path d="M12 3l2 5 5 2-5 2-2 5-2-5-5-2 5-2z" />
+      <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+      <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
     </Svg>
   );
 }

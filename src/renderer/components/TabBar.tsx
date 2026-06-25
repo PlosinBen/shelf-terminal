@@ -11,7 +11,7 @@ import {
   toggleRightSidebar,
 } from '../store';
 import { emit, Events } from '../events';
-import { MessageIcon } from './icons';
+import { PaperPlaneIcon } from './icons';
 
 // PM Active (telegram listener) live badge — shown in the tab bar's top-right
 // only while active. Click opens the PM panel. Global, so it renders even with
@@ -24,7 +24,7 @@ function PmActiveBadge() {
       onClick={() => toggleRightSidebar('pm')}
       title="PM Active — telegram listener running"
     >
-      <MessageIcon size={13} />
+      <PaperPlaneIcon size={13} />
     </button>
   );
 }
