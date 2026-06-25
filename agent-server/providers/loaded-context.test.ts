@@ -78,14 +78,21 @@ describe('formatMcpCard', () => {
   it('explicit none line when empty (never blank)', () => {
     expect(formatMcpCard([])).toBe('No MCP servers loaded in this session.');
   });
-  it('lists servers with status, error, source', () => {
+  it('renders a GFM table with status, error, source', () => {
     const out = formatMcpCard([
       { name: 'fs', status: 'connected' },
       { name: 'db', status: 'failed', error: 'ECONNREFUSED', source: 'project' },
     ]);
     expect(out).toContain('2 MCP servers:');
-    expect(out).toContain('- **fs** — connected');
-    expect(out).toContain('- **db** — failed (ECONNREFUSED) · project');
+    expect(out).toContain('| Server | Status | Source |');
+    expect(out).toContain('| --- | --- | --- |');
+    expect(out).toContain('| `fs` | connected | — |');
+    expect(out).toContain('| `db` | failed (ECONNREFUSED) | project |');
+  });
+  it('drops the Source column when no server has one', () => {
+    const out = formatMcpCard([{ name: 'fs', status: 'connected' }]);
+    expect(out).toContain('| Server | Status |');
+    expect(out).not.toContain('Source');
   });
 });
 
@@ -93,15 +100,27 @@ describe('formatSkillsCard', () => {
   it('explicit none line when empty', () => {
     expect(formatSkillsCard([])).toBe('No skills loaded in this session.');
   });
-  it('lists skills with source/disabled/description', () => {
+  it('renders a GFM table with source/disabled/description', () => {
     const out = formatSkillsCard([
       { name: 'review', description: 'do a review', source: 'app', enabled: true },
       { name: 'old', source: 'personal', enabled: false },
       { name: 'bare' },
     ]);
     expect(out).toContain('3 skills:');
-    expect(out).toContain('- **review** · app — do a review');
-    expect(out).toContain('- **old** · personal (disabled)');
-    expect(out).toContain('- **bare**');
+    expect(out).toContain('| Skill | Source | Description |');
+    expect(out).toContain('| `review` | app | do a review |');
+    expect(out).toContain('| `old` (disabled) | personal | — |');
+    expect(out).toContain('| `bare` | — | — |');
+  });
+  it('drops Source + Description columns for a Claude-style list (name only)', () => {
+    const out = formatSkillsCard([{ name: 'a' }, { name: 'b' }]);
+    expect(out).toContain('| Skill |');
+    expect(out).not.toContain('Source');
+    expect(out).not.toContain('Description');
+    expect(out).toContain('| `a` |');
+  });
+  it('escapes pipes in cell values', () => {
+    const out = formatSkillsCard([{ name: 'x', description: 'a | b' }]);
+    expect(out).toContain('a \\| b');
   });
 });

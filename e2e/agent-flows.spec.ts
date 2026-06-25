@@ -247,36 +247,30 @@ test.describe('agent flows via fake provider', () => {
   // canned data. Covers the slash → intercept → card wiring (the format itself
   // is unit-tested in loaded-context.test.ts).
   test.describe('loaded MCP / skills listings', () => {
-    // Expand the fold card if collapsed (default depends on a display setting),
-    // then assert its body content.
-    async function expandedBody(page: import('@playwright/test').Page, label: string) {
-      const card = page.locator(`.agent-msg-fold:has(.fold-label:has-text("${label}")):visible`).last();
-      await expect(card).toBeVisible({ timeout: 5_000 });
-      const body = card.locator('.fold-body-markdown');
-      if (!(await body.isVisible().catch(() => false))) {
-        await card.locator('.fold-header').click();
-      }
-      return body;
-    }
-
-    test('/mcp prints a card listing MCP servers + status', async ({ shelfApp: { page } }) => {
+    // Rendered as a plain agent reply (full-width markdown table), NOT a fold
+    // card — so the result is a `<table>` directly in the timeline.
+    test('/mcp prints a full-width table of MCP servers + status', async ({ shelfApp: { page } }) => {
       await setupProject(page);
       await openAgentTab(page);
       await sendAgentPrompt(page, '/mcp');
-      const body = await expandedBody(page, '/mcp');
-      await expect(body).toContainText('fake-fs');
-      await expect(body).toContainText('connected');
-      await expect(body).toContainText('fake-db');
-      await expect(body).toContainText('down'); // failed server's error
+      const table = page.locator('.agent-messages:visible table').last();
+      await expect(table).toBeVisible({ timeout: 5_000 });
+      await expect(table).toContainText('fake-fs');
+      await expect(table).toContainText('connected');
+      await expect(table).toContainText('fake-db');
+      await expect(table).toContainText('down'); // failed server's error
+      // Not wrapped in a fold/tool card.
+      await expect(page.locator('.agent-msg-fold:has(.fold-label:has-text("/mcp"))')).toHaveCount(0);
     });
 
-    test('/skills prints a card listing skills + source', async ({ shelfApp: { page } }) => {
+    test('/skills prints a full-width table of skills + source', async ({ shelfApp: { page } }) => {
       await setupProject(page);
       await openAgentTab(page);
       await sendAgentPrompt(page, '/skills');
-      const body = await expandedBody(page, '/skills');
-      await expect(body).toContainText('fake-skill');
-      await expect(body).toContainText('app'); // normalized source tag
+      const table = page.locator('.agent-messages:visible table').last();
+      await expect(table).toBeVisible({ timeout: 5_000 });
+      await expect(table).toContainText('fake-skill');
+      await expect(table).toContainText('app'); // normalized source tag
     });
   });
 });
