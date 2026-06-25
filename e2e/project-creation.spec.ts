@@ -102,6 +102,28 @@ test('folder picker keyboard navigation works', async ({ shelfApp: { page } }) =
   await expect(selected).toBeVisible();
 });
 
+test('Tab in browse step does not leak focus to background', async ({ shelfApp: { page } }) => {
+  if (await page.locator('.folder-picker-overlay').isVisible()) {
+    await page.keyboard.press('Escape');
+  }
+  await expect(page.locator('.folder-picker-overlay')).not.toBeVisible();
+
+  await openFolderPicker(page);
+
+  // Browse step has no focusable inputs; Tab must stay trapped (not jump the
+  // focus ring to a control behind the modal, e.g. a sidebar button).
+  await page.keyboard.press('Tab');
+
+  const leaked = await page.evaluate(() => {
+    const el = document.activeElement;
+    if (!el) return false;
+    return !el.closest('.folder-picker-overlay') && el.tagName !== 'BODY';
+  });
+  expect(leaked).toBe(false);
+  // Picker is still open and usable.
+  await expect(page.locator('.folder-picker-overlay')).toBeVisible();
+});
+
 test('select folder and create project', async ({ shelfApp: { page } }) => {
   if (await page.locator('.folder-picker-overlay').isVisible()) {
     await page.keyboard.press('Escape');

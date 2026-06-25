@@ -213,6 +213,12 @@ export function FolderPicker() {
           e.preventDefault();
           handleCancel();
           break;
+        case 'Tab':
+          // Browse step has no focusable inputs (it's a fully keyboard-driven
+          // list). Default Tab would leak the focus ring to background app
+          // controls behind the modal — trap it.
+          e.preventDefault();
+          break;
         case 'Backspace':
           e.preventDefault();
           setFilter((f) => f.slice(0, -1));
