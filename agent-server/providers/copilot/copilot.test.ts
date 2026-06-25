@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { quotaSnapshotToSegment, parseApplyPatch, formatCopilotToolInput, elicitationSchemaToPrompts, picksToElicitationContent, normalizeCopilotTask, isBackgroundedCopilotTask, buildCopilotAuthConfig } from './helpers';
+import { quotaSnapshotToSegment, parseApplyPatch, formatCopilotToolInput, elicitationSchemaToPrompts, picksToElicitationContent, normalizeCopilotTask, isBackgroundedCopilotTask, buildCopilotAuthConfig, buildOrphanFinalizeMessages, type InflightToolUseEntry } from './helpers';
 
 describe('buildCopilotAuthConfig (transitional gh-or-loggedInUser)', () => {
   it('uses gitHubToken + useLoggedInUser:false when a gh token is present', () => {
@@ -504,5 +504,49 @@ describe('normalizeCopilotTask', () => {
     expect(isBackgroundedCopilotTask({ executionMode: 'background' })).toBe(true);
     expect(isBackgroundedCopilotTask({ executionMode: 'sync' })).toBe(false);
     expect(isBackgroundedCopilotTask({})).toBe(false);
+  });
+});
+
+describe('buildOrphanFinalizeMessages', () => {
+  const ERR = 'Tool did not complete — the turn ended while it was still running (it may have hung).';
+
+  // Regression (the rg/grep forever-spinner): a tool whose tool.execution_complete
+  // never arrived must be finalized as a terminal error card with the SAME msgId,
+  // so the renderer upserts the running card instead of leaving it spinning.
+  it('finalizes a generic tool_use orphan as an errored fold_code on the same msgId', () => {
+    const entries: Array<[string, InflightToolUseEntry]> = [
+      ['call_rg1', { kind: 'tool_use', toolName: 'rg', input: 'process.env' }],
+    ];
+    expect(buildOrphanFinalizeMessages(entries, '/repo', ERR)).toEqual([
+      { msgId: 'call_rg1', msgType: 'fold_code', label: 'rg', subtitle: 'process.env', errorMessage: ERR },
+    ]);
+  });
+
+  it('returns an empty array when nothing is in flight (the common case)', () => {
+    expect(buildOrphanFinalizeMessages([], '/repo', ERR)).toEqual([]);
+  });
+
+  it('finalizes each apply_patch sub-card (update→fold_diff, add→fold_code) with cwd-stripped subtitles', () => {
+    const entries: Array<[string, InflightToolUseEntry]> = [
+      ['call_patch', { kind: 'apply_patch', subs: [
+        { msgId: 'call_patch:f0', spec: { kind: 'update', filePath: '/repo/a.ts', diff: { oldString: 'x', newString: 'y' } } },
+        { msgId: 'call_patch:f1', spec: { kind: 'add', filePath: '/repo/b.ts', content: 'new' } },
+      ] }],
+    ];
+    expect(buildOrphanFinalizeMessages(entries, '/repo', ERR)).toEqual([
+      { msgId: 'call_patch:f0', msgType: 'fold_diff', label: 'Edit', subtitle: 'a.ts', errorMessage: ERR },
+      { msgId: 'call_patch:f1', msgType: 'fold_code', label: 'Add', subtitle: 'b.ts', errorMessage: ERR },
+    ]);
+  });
+
+  it('finalizes a file_edit orphan (diff→Edit/fold_diff, content-only→Write/fold_code)', () => {
+    const entries: Array<[string, InflightToolUseEntry]> = [
+      ['call_edit', { kind: 'file_edit', filePath: '/repo/c.ts', diff: { oldString: 'a', newString: 'b' } }],
+      ['call_write', { kind: 'file_edit', filePath: '/repo/d.ts', content: 'hello' }],
+    ];
+    expect(buildOrphanFinalizeMessages(entries, '/repo', ERR)).toEqual([
+      { msgId: 'call_edit', msgType: 'fold_diff', label: 'Edit', subtitle: 'c.ts', errorMessage: ERR },
+      { msgId: 'call_write', msgType: 'fold_code', label: 'Write', subtitle: 'd.ts', errorMessage: ERR },
+    ]);
   });
 });
