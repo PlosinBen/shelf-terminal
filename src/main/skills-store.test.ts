@@ -14,7 +14,7 @@ vi.mock('electron', () => ({
 const {
   listSkills, getSkill, createSkill, updateSkill, deleteSkill,
   parseSkillMeta, isValidSkillName, uniqueSkillName,
-  isSkillLocked, setSkillLocked,
+  isSkillLocked, setSkillLocked, validateFrontmatterYaml,
 } = await import('./skills-store');
 
 beforeEach(() => {
@@ -47,6 +47,24 @@ describe('pure helpers', () => {
     expect(uniqueSkillName('my-skill', new Set())).toBe('my-skill');
     expect(uniqueSkillName('my-skill', new Set(['my-skill']))).toBe('my-skill-2');
     expect(uniqueSkillName('my-skill', new Set(['my-skill', 'my-skill-2']))).toBe('my-skill-3');
+  });
+
+  it('validateFrontmatterYaml: valid frontmatter (bare + quoted) → null', () => {
+    expect(validateFrontmatterYaml('---\nname: a\ndescription: plain desc\n---\nbody')).toBeNull();
+    expect(validateFrontmatterYaml('---\nname: a\ndescription: "has a: colon"\n---\nbody')).toBeNull();
+  });
+  it('validateFrontmatterYaml: no frontmatter block → null (name check handles it)', () => {
+    expect(validateFrontmatterYaml('just a body, no frontmatter')).toBeNull();
+  });
+  it('validateFrontmatterYaml: unquoted colon-space in a value → error (the Copilot-skip hazard)', () => {
+    // The real bug: `conventions: folder` mid-value breaks strict YAML.
+    const bad = '---\nname: a\ndescription: uses conventions: folder categories here\n---\nbody';
+    const err = validateFrontmatterYaml(bad);
+    expect(err).toMatch(/not valid YAML/i);
+    expect(err).toMatch(/double quotes/i);
+  });
+  it('validateFrontmatterYaml: a colon WITHOUT a following space (e.g. a URL) is valid YAML', () => {
+    expect(validateFrontmatterYaml('---\nname: a\ndescription: see https://x.test/y\n---\nbody')).toBeNull();
   });
 });
 
@@ -111,6 +129,19 @@ describe('CRUD + scaffold', () => {
     await createSkill();
     expect((await updateSkill('my-skill', 'no frontmatter')).ok).toBe(false);
     expect((await updateSkill('my-skill', '---\nname: Bad Name\n---\n')).ok).toBe(false);
+  });
+
+  it('update rejects invalid-YAML frontmatter (Copilot-skip hazard) and does NOT write it', async () => {
+    await createSkill();
+    const good = '---\nname: my-skill\ndescription: original\n---\n\nbody';
+    await updateSkill('my-skill', good);
+    // Unquoted colon-space — valid to the lenient regex, invalid to strict YAML.
+    const bad = '---\nname: my-skill\ndescription: uses conventions: folder categories\n---\n\nnew body';
+    const r = await updateSkill('my-skill', bad);
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/not valid YAML/i);
+    // The on-disk file must be untouched (last good content preserved).
+    expect(await getSkill('my-skill')).toBe(good);
   });
 
   it('delete removes the skill', async () => {
