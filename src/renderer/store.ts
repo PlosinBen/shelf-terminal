@@ -13,6 +13,8 @@ export interface Tab {
   muted: boolean;
   type: TabType;
   provider?: AgentProvider;
+  /** Web tabs only: current address shown in the address bar. */
+  url?: string;
 }
 
 export interface ProjectRuntime {
@@ -182,7 +184,9 @@ export function addTab(
   nextTabCounter++;
   const defaultLabel = type === 'agent'
     ? `${provider ? provider.charAt(0).toUpperCase() + provider.slice(1) : 'Agent'}`
-    : `Terminal ${proj.tabs.length + 1}`;
+    : type === 'web'
+      ? 'Web'
+      : `Terminal ${proj.tabs.length + 1}`;
   const tab: Tab = {
     id: `tab-${Date.now()}-${nextTabCounter}`,
     label: name || defaultLabel,
@@ -241,6 +245,25 @@ export function renameTab(projectIndex: number, tabIndex: number, name: string) 
     i === projectIndex ? { ...p, tabs } : p,
   );
   updateSnapshot();
+}
+
+// Web tab navigated — persist its current URL and reflect the host as the tab
+// label so the tab bar shows where you are. Keyed by tabId (the WebTabView only
+// knows its own id, not project/tab indices).
+export function setWebTabUrl(tabId: string, url: string) {
+  let changed = false;
+  projects = projects.map((p) => {
+    if (!p.tabs.some((t) => t.id === tabId && t.type === 'web')) return p;
+    const tabs = p.tabs.map((t) => {
+      if (t.id !== tabId || t.type !== 'web') return t;
+      changed = true;
+      let label = 'Web';
+      try { label = new URL(url).host || 'Web'; } catch { /* keep default */ }
+      return { ...t, url, label };
+    });
+    return { ...p, tabs };
+  });
+  if (changed) updateSnapshot();
 }
 
 export function reorderTabs(projectIndex: number, fromIndex: number, toIndex: number) {

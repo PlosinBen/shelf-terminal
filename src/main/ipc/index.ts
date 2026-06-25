@@ -6,6 +6,7 @@ import { registerFileTransferHandlers } from './file-transfer';
 import { registerDialogHandlers } from './dialog';
 import { registerSettingsHandlers } from './settings';
 import { registerLogsHandlers } from './logs';
+import { registerWebHandlers } from './web';
 import { registerNotesHandlers } from './notes';
 import { registerSkillsHandlers } from './skills';
 import { registerUpdaterHandlers } from './updater';
@@ -25,6 +26,7 @@ export function registerAllIpcHandlers(): void {
   registerDialogHandlers();
   registerSettingsHandlers();
   registerLogsHandlers();
+  registerWebHandlers();
   registerNotesHandlers();
   registerSkillsHandlers();
   registerUpdaterHandlers();

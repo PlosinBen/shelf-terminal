@@ -26,6 +26,17 @@ export const APP_SKILL_UPDATE_DESC =
   + '(its frontmatter `name` may rename the skill). Fails if the skill is locked (the user has reserved it — '
   + 'do not retry; list_app_skills reports `locked`). Takes effect on the next session.';
 
+export const WEB_FETCH_DESC =
+  "HTTP request to an internal/SSO-protected web service using the USER's logged-in browser session "
+  + '(their cookies, from this machine — NOT this shell\'s network). Use this for company web apps the user '
+  + 'has signed into in a Web tab (e.g. Kibana, ArgoCD): prefer their JSON APIs (Kibana `_search`, ArgoCD '
+  + '`/api/v1/applications`) over scraping HTML. For ordinary shell/network access use bash/curl instead — that '
+  + "runs from this environment without the user's identity. The user is prompted to authorize each origin. "
+  + 'Returns the raw { status, headers, body }. If the response looks like a login page or an auth error (e.g. a '
+  + '401/400, or a 3xx redirect to a login/SSO URL in the Location header), the session is likely not logged in — '
+  + 'tell the user to log in to that service in a Web tab, then retry. '
+  + 'Args: url (required), method (default GET), headers (object), body (string, e.g. a JSON query).';
+
 export interface BridgeToolText {
   text: string;
   isError: boolean;

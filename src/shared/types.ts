@@ -1,7 +1,7 @@
 // ── Agent types ──
 
 export type AgentProvider = 'claude' | 'copilot';
-export type TabType = 'terminal' | 'agent';
+export type TabType = 'terminal' | 'agent' | 'web';
 
 export type AuthMethod =
   | { kind: 'api-key'; envVar: string; setupUrl?: string; placeholder?: string }

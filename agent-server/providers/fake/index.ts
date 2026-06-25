@@ -229,6 +229,17 @@ export function createFakeBackend(): ServerBackend {
       return;
     }
 
+    // webfetch:<url> — call the real web.fetch app-tool op so the downstream
+    // per-origin gate (main handleAppTool → web-permission popup) is exercised
+    // E2E. The actual network fetch will fail in tests (unreachable host); we're
+    // testing the gate, so the result is just echoed.
+    if (step.startsWith('webfetch:')) {
+      const url = step.slice('webfetch:'.length);
+      const res = await callMain('web.fetch', { url, method: 'GET' });
+      send({ type: 'message', msgId: mintId('m'), msgType: 'reply', content: `webfetch ${JSON.stringify(res)}` });
+      return;
+    }
+
     if (step === 'picker_single' || step === 'picker_combo' || step === 'picker_multi' || step === 'picker_input' || step === 'picker_number') {
       const id = mintId('p');
       const prompts =

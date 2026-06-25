@@ -260,6 +260,8 @@ async function startSession(
     // which mirrors it (optimistic chips reconciled against this authoritative
     // list). Session-level (turnId-less). See message-queue-ownership.
     (items) => send(IPC.AGENT_QUEUE, tabId, items),
+    // Owning project — the app_tool bridge keys the web.fetch grant on it.
+    typeof opts?.projectId === 'string' ? opts.projectId : undefined,
   );
 
   const session: SessionInstance = {

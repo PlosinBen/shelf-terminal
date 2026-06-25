@@ -17,6 +17,7 @@ import { applyPmActive } from './ipc/pm';
 import { initAgentManager, disposeAllAgents } from './agent';
 import { getMainWindow, setMainWindow, setProjects, setSettings, getSettings, getProjects } from './app-state';
 import { registerAllIpcHandlers } from './ipc';
+import { hardenWebSession, installWebviewHardening } from './web-session-harden';
 import { shouldRecreateWindowOnActivate } from './window-lifecycle';
 import { primeShellEnv } from './connector/shell-env';
 
@@ -33,6 +34,11 @@ function createWindow() {
       preload: path.join(__dirname, '../preload/preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      // Enables the <webview> tag used by the Web tab (login surface + agent
+      // web.fetch session). Web content stays isolated in its own process; the
+      // webview itself is hardened in WebTabView (no nodeintegration, scoped
+      // partition). See web-tab network-identity design.
+      webviewTag: true,
     },
   });
   setMainWindow(win);
@@ -169,6 +175,11 @@ app.whenReady().then(async () => {
   // disconnected so nothing needs it until the user connects, by which point
   // this async prime has usually finished. No-op on Windows.
   primeShellEnv();
+
+  // Web tab hardening — session-level (permissions/downloads) + webContents-level
+  // (popups/navigation/forced webPreferences). Once, covers all windows.
+  hardenWebSession();
+  installWebviewHardening();
 
   // Agent View wiring
   initAgentManager(() => getMainWindow());

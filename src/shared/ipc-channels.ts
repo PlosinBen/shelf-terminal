@@ -70,6 +70,18 @@ export const IPC = {
   LOGS_CLEAR: 'logs:clear',
   LOGS_SIZE: 'logs:size',
 
+  // Web session (login surface + agent web.fetch management)
+  WEB_LIST_SESSIONS: 'web:list-sessions',
+  WEB_DELETE_SESSION: 'web:delete-session',
+  WEB_LIST_GRANTS: 'web:list-grants',
+  WEB_REVOKE_GRANT: 'web:revoke-grant',
+  // web.fetch per-origin permission popup (main→renderer request, renderer→main resolve)
+  WEB_PERMISSION_REQUEST: 'web:permission-request',
+  WEB_PERMISSION_RESOLVE: 'web:permission-resolve',
+  // main→renderer: a pending web-permission was resolved elsewhere (Telegram /
+  // timeout) → dismiss the local popup.
+  WEB_PERMISSION_CLOSE: 'web:permission-close',
+
   // App info
   APP_LOGS_PATH: 'app:logs-path',
   // renderer→main fire-and-forget diagnostic log → main log file (persists when

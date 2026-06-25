@@ -3,6 +3,8 @@ import { Sidebar } from './components/Sidebar';
 import { TabBar } from './components/TabBar';
 import { TerminalView } from './components/TerminalView';
 import { AgentView } from './components/AgentView';
+import { WebTabView } from './components/WebTabView';
+import { WebPermissionPrompt } from './components/WebPermissionPrompt';
 import { FolderPicker } from './components/FolderPicker';
 import { SettingsPanel } from './components/SettingsPanel';
 import { SearchBar } from './components/SearchBar';
@@ -101,10 +103,11 @@ export function App() {
       if (tab) {
         if (tab.type === 'agent') {
           window.shelfApi.agent.destroy(tab.id);
-        } else {
+        } else if (tab.type === 'terminal') {
           window.shelfApi.pty.kill(tab.id);
           disposeTerminal(tab.id);
         }
+        // web tabs: the <webview> tears down on unmount — no explicit cleanup.
       }
       removeTab(projectIndex, tabIndex);
     });
@@ -120,10 +123,11 @@ export function App() {
         proj.tabs.forEach((tab) => {
           if (tab.type === 'agent') {
             window.shelfApi.agent.destroy(tab.id);
-          } else {
+          } else if (tab.type === 'terminal') {
             window.shelfApi.pty.kill(tab.id);
             disposeTerminal(tab.id);
           }
+          // web tabs need no explicit teardown (see CLOSE_TAB).
         });
       }
       removeProject(projectIndex);
@@ -142,6 +146,12 @@ export function App() {
       if (!proj) return;
       const resolvedProvider = provider ?? proj.config.defaultAgentProvider ?? 'claude';
       addTab(projectIndex, undefined, undefined, undefined, 'agent', resolvedProvider);
+    });
+
+    const offNewWebTab = on(Events.NEW_WEB_TAB, (projectIndex: number) => {
+      const proj = projects[projectIndex];
+      if (!proj) return;
+      addTab(projectIndex, undefined, undefined, undefined, 'web');
     });
 
     const offConnectProject = on(Events.CONNECT_PROJECT, async (projectIndex: number) => {
@@ -221,8 +231,12 @@ export function App() {
         // Close split — kill the split tab
         const splitTab = proj.tabs.find((t) => t.id === proj.splitTabId);
         if (splitTab) {
-          window.shelfApi.pty.kill(splitTab.id);
-          disposeTerminal(splitTab.id);
+          // Split only ever holds terminals (opened via addTab below), but guard
+          // anyway so a non-terminal never gets a spurious pty.kill.
+          if (splitTab.type === 'terminal') {
+            window.shelfApi.pty.kill(splitTab.id);
+            disposeTerminal(splitTab.id);
+          }
           const tabIndex = proj.tabs.findIndex((t) => t.id === splitTab.id);
           if (tabIndex !== -1) removeTab(projectIndex, tabIndex);
         }
@@ -249,7 +263,7 @@ export function App() {
       }
     });
 
-    return () => { offCloseTab(); offRemoveProject(); offNewTab(); offNewAgentTab(); offConnectProject(); offDisconnectProject(); offAddProject(); offToggleSplit(); offSwitchBranch(); };
+    return () => { offCloseTab(); offRemoveProject(); offNewTab(); offNewAgentTab(); offNewWebTab(); offConnectProject(); offDisconnectProject(); offAddProject(); offToggleSplit(); offSwitchBranch(); };
   }, [projects]);
 
   useEffect(() => {
@@ -335,7 +349,13 @@ export function App() {
                       className={isSplit && visible ? 'split-pane' : undefined}
                       style={!visible ? { display: 'none' } : undefined}
                     >
-                      {tab.type === 'agent' && tab.provider ? (
+                      {tab.type === 'web' ? (
+                        <WebTabView
+                          tabId={tab.id}
+                          initialUrl={tab.url}
+                          visible={visible}
+                        />
+                      ) : tab.type === 'agent' && tab.provider ? (
                         <AgentView
                           tabId={tab.id}
                           cwd={proj.config.cwd}
@@ -381,6 +401,7 @@ export function App() {
       <QuickNoteOverlay />
       <WorktreeDialog />
       <RemoveConfirmDialog />
+      <WebPermissionPrompt />
     </div>
   );
 }

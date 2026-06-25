@@ -293,6 +293,13 @@ export function TabBar() {
           >
             Agent (Copilot)
           </button>
+          <div className="context-menu-divider" />
+          <button
+            className="context-menu-item"
+            onClick={() => { emit(Events.NEW_WEB_TAB, activeProjectIndex); setAddMenu(null); }}
+          >
+            Web
+          </button>
         </div>
       )}
     </div>

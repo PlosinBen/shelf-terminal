@@ -84,6 +84,9 @@ export function createRemoteBackend(
   // wires it to IPC.AGENT_QUEUE. Session-scoped (turnId-less), like onTaskEvent.
   // See message-queue-ownership.
   onQueue?: (items: AgentQueueItem[]) => void,
+  // Owning project id — threaded into the app_tool bridge so the web.fetch gate
+  // can key its grant on (projectId, origin). Connection-agnostic; defaults empty.
+  projectId?: string,
 ): AgentBackend {
   let remoteProc: RemoteProcess | null = null;
   let deployed = false;
@@ -107,7 +110,7 @@ export function createRemoteBackend(
           deployed = true;
         }
         onPhase?.('connecting');
-        const proc = await spawnAgentServer(connection, cwd, deployResult!, initScript, onTaskEvent, onServerTurn, onHealth, onQueue);
+        const proc = await spawnAgentServer(connection, cwd, deployResult!, initScript, onTaskEvent, onServerTurn, onHealth, onQueue, projectId);
         if (!proc) return null;
         const ready = await proc.awaitReady();
         if (!ready) {
@@ -582,6 +585,7 @@ async function spawnAgentServer(
   onServerTurn?: (turnId: string, events: AsyncGenerator<AgentEvent>) => void,
   onHealth?: (health: ConnectionHealth) => void,
   onQueue?: (items: AgentQueueItem[]) => void,
+  projectId?: string,
 ): Promise<RemoteProcess | null> {
   const { nodeBin, indexPath } = deploy;
   // Forward SHELF_TEST_MODE to the remote agent-server so E2E specs can drive
@@ -597,7 +601,7 @@ async function spawnAgentServer(
         `spawnAgentServer local: cwd=${cwd} indexPath=${indexPath} fileExists=${fs.existsSync(indexPath)} PATH=${env.PATH ?? '<missing>'}`,
       );
       const proc = spawn(nodeBin, [indexPath], { cwd, env, stdio: ['pipe', 'pipe', 'pipe'] });
-      return wrapProcess(proc, onTaskEvent, onServerTurn, onHealth, onQueue);
+      return wrapProcess(proc, onTaskEvent, onServerTurn, onHealth, onQueue, projectId);
     } catch (err: any) {
       log.error('agent-remote', `Local spawn failed: ${err.message}`);
       return null;
@@ -624,7 +628,7 @@ async function spawnAgentServer(
       cmd,
     ];
     const proc = spawn('ssh', args, { stdio: ['pipe', 'pipe', 'pipe'] });
-    return wrapProcess(proc, onTaskEvent, onServerTurn, onHealth, onQueue);
+    return wrapProcess(proc, onTaskEvent, onServerTurn, onHealth, onQueue, projectId);
   }
 
   if (connection.type === 'docker') {
@@ -632,14 +636,14 @@ async function spawnAgentServer(
     const proc = spawn('docker', ['exec', '-i', connection.container, 'sh', '-c', cmd], {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
-    return wrapProcess(proc, onTaskEvent, onServerTurn, onHealth, onQueue);
+    return wrapProcess(proc, onTaskEvent, onServerTurn, onHealth, onQueue, projectId);
   }
 
   if (connection.type === 'wsl') {
     const proc = spawn('wsl.exe', ['-d', connection.distro, '--', 'sh', '-lc', `${testEnv}exec ${nodeBin} ${indexPath}`], {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
-    return wrapProcess(proc, onTaskEvent, onServerTurn, onHealth, onQueue);
+    return wrapProcess(proc, onTaskEvent, onServerTurn, onHealth, onQueue, projectId);
   }
 
   return null;
@@ -655,6 +659,7 @@ function wrapProcess(
   onServerTurn?: (turnId: string, events: AsyncGenerator<AgentEvent>) => void,
   onHealth?: (health: ConnectionHealth) => void,
   onQueue?: (items: AgentQueueItem[]) => void,
+  projectId?: string,
 ): RemoteProcess {
   const dispatcher = createTurnDispatcher(parseRemoteMessage, onTaskEvent, onServerTurn, onQueue);
   let buffer = '';
@@ -763,7 +768,7 @@ function wrapProcess(
         const requestId = parsed.requestId;
         const op = typeof parsed.op === 'string' ? parsed.op : '';
         const args = (parsed.args && typeof parsed.args === 'object') ? parsed.args : {};
-        void handleAppTool(op, args).then((result) => {
+        void handleAppTool(op, args, { projectId }).then((result) => {
           try {
             proc.stdin?.write(JSON.stringify({ type: 'app_tool_result', requestId, ...result }) + '\n');
           } catch { /* stdin closed — bridge tool will time out / get a dead channel */ }

@@ -136,6 +136,25 @@ contextBridge.exposeInMainWorld('shelfApi', {
     logsPath: (): Promise<string> => ipcRenderer.invoke(IPC.APP_LOGS_PATH),
     debugLog: (tag: string, msg: string): void => ipcRenderer.send(IPC.APP_DEBUG_LOG, tag, msg),
   },
+  web: {
+    listSessions: () => ipcRenderer.invoke(IPC.WEB_LIST_SESSIONS),
+    deleteSession: (domain: string) => ipcRenderer.invoke(IPC.WEB_DELETE_SESSION, domain),
+    listGrants: () => ipcRenderer.invoke(IPC.WEB_LIST_GRANTS),
+    revokeGrant: (projectId: string, origin: string) =>
+      ipcRenderer.invoke(IPC.WEB_REVOKE_GRANT, { projectId, origin }),
+    onPermissionRequest: (callback: (req: { requestId: string; origin: string; registrableDomain: string | null; method: string }) => void) => {
+      const listener = (_e: Electron.IpcRendererEvent, req: any) => callback(req);
+      ipcRenderer.on(IPC.WEB_PERMISSION_REQUEST, listener);
+      return () => ipcRenderer.removeListener(IPC.WEB_PERMISSION_REQUEST, listener);
+    },
+    resolvePermission: (requestId: string, decision: 'once' | 'always' | 'deny') =>
+      ipcRenderer.invoke(IPC.WEB_PERMISSION_RESOLVE, { requestId, decision }),
+    onPermissionClose: (callback: (requestId: string) => void) => {
+      const listener = (_e: Electron.IpcRendererEvent, payload: { requestId: string }) => callback(payload.requestId);
+      ipcRenderer.on(IPC.WEB_PERMISSION_CLOSE, listener);
+      return () => ipcRenderer.removeListener(IPC.WEB_PERMISSION_CLOSE, listener);
+    },
+  },
   pm: {
     send: (message: string) => ipcRenderer.invoke(IPC.PM_SEND, message),
     stop: () => ipcRenderer.invoke(IPC.PM_STOP),

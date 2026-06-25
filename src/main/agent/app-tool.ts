@@ -15,6 +15,16 @@
  */
 import { listSkills, getSkill, createSkill, updateSkill, isSkillLocked } from '../skills-store';
 import { onSkillsChanged } from '../skills-sync';
+import { webFetch } from '../web-session';
+import { parseHttpOrigin } from '../web-session-helpers';
+import { isGranted, grant } from '../web-grants';
+import { requestWebPermission } from '../web-permission';
+
+/** Per-call context the bridge threads in (which tab/project asked). */
+export interface AppToolContext {
+  /** Owning project — the web.fetch grant key is (projectId, origin). */
+  projectId?: string;
+}
 
 export interface AppToolResult {
   ok: boolean;
@@ -27,7 +37,7 @@ export interface AppToolResult {
 interface AppToolDef {
   /** Safe (read-only) ops need no user confirmation; mutations do. */
   safe: boolean;
-  run: (args: Record<string, unknown>) => Promise<unknown>;
+  run: (args: Record<string, unknown>, ctx: AppToolContext) => Promise<unknown>;
 }
 
 const REGISTRY: Record<string, AppToolDef> = {
@@ -61,6 +71,42 @@ const REGISTRY: Record<string, AppToolDef> = {
       }
       onSkillsChanged();
       return { name: res.name };
+    },
+  },
+  'web.fetch': {
+    // The per-(project,origin) gate lives HERE — the single provider-agnostic
+    // choke point both Claude and Copilot funnel through (so behaviour is
+    // identical, and bypass mode is gated automatically because the tool still
+    // executes this). A granted origin runs with no prompt; an un-granted one
+    // raises a generic web-permission popup (decoupled from the agent timeline).
+    safe: false,
+    run: async (args, ctx) => {
+      const url = typeof args.url === 'string' ? args.url : '';
+      if (!url) throw new Error('web.fetch requires a "url"');
+      const parsed = parseHttpOrigin(url);
+      if (!parsed) throw new Error(`web.fetch: invalid or non-http(s) URL: ${url}`);
+      const projectId = ctx.projectId ?? '';
+      const method = typeof args.method === 'string' ? args.method : undefined;
+
+      if (!isGranted(projectId, parsed.origin)) {
+        const decision = await requestWebPermission({
+          origin: parsed.origin,
+          registrableDomain: parsed.registrableDomain,
+          method: method ?? 'GET',
+        });
+        if (decision === 'deny') {
+          throw new Error(`web.fetch denied by user for ${parsed.origin}`);
+        }
+        if (decision === 'always') grant(projectId, parsed.origin);
+      }
+
+      const headers = (args.headers && typeof args.headers === 'object')
+        ? (args.headers as Record<string, string>) : undefined;
+      const body = typeof args.body === 'string' ? args.body : undefined;
+      // Return the raw {status, headers, body}. No auth/expiry interpretation —
+      // the agent/user judges from the actual response (a login page or 401/400
+      // is not reliably distinguishable from real data on the wire).
+      return await webFetch({ url, method, headers, body });
     },
   },
   'app_skill.update': {
@@ -105,11 +151,11 @@ export function isKnownAppToolOp(op: string): boolean {
 }
 
 /** Run an app-tool op. Never throws — failures come back as `{ ok:false, error }`. */
-export async function handleAppTool(op: string, args: Record<string, unknown> = {}): Promise<AppToolResult> {
+export async function handleAppTool(op: string, args: Record<string, unknown> = {}, ctx: AppToolContext = {}): Promise<AppToolResult> {
   const def = REGISTRY[op];
   if (!def) return { ok: false, error: `unknown app_tool op: ${op}` };
   try {
-    return { ok: true, data: await def.run(args) };
+    return { ok: true, data: await def.run(args, ctx) };
   } catch (err: any) {
     return { ok: false, error: err?.message ?? String(err) };
   }

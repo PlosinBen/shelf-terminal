@@ -92,7 +92,7 @@ export function AgentView({ tabId, cwd, connection, provider, projectId, visible
     // emitting the first capabilities event. Without this, copilot's
     // `currentPermissionMode` reports its hardcoded 'default' on every
     // reconnect, overwriting the warm-started actual* in agentTabStore.
-    emitAgent('agent:init', { tabId, cwd, connection, provider, sessionId, opts: { intent: savedPrefs } });
+    emitAgent('agent:init', { tabId, cwd, connection, provider, sessionId, opts: { intent: savedPrefs, projectId } });
     return () => { removeTabStore(tabId); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tabId]);
@@ -138,7 +138,7 @@ export function AgentView({ tabId, cwd, connection, provider, projectId, visible
     setInitStatusStore(tabId, 'starting');
     emitAgent('agent:destroy', { tabId });
     setCapabilitiesStore(tabId, null);
-    emitAgent('agent:init', { tabId, cwd, connection, provider, sessionId, opts: { intent: savedPrefs } });
+    emitAgent('agent:init', { tabId, cwd, connection, provider, sessionId, opts: { intent: savedPrefs, projectId } });
   }, [tabId, cwd, connection, provider, sessionId, savedPrefs]);
 
   if (authRequired) {

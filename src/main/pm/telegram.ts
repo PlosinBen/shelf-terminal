@@ -279,6 +279,59 @@ export function isRunning(): boolean {
   return polling;
 }
 
+// ── Generic interactive prompt over Telegram (inline buttons) ───────────────
+// A reusable "ask the user a multiple-choice question remotely" transport. The
+// web-permission router uses it when the user is Away; onAnswer fires with the
+// chosen value when a button is tapped. Decoupled from any specific feature —
+// callers supply the text + labelled values.
+interface InteractivePrompt { onAnswer: (value: string) => void; messageId?: number }
+const pendingInteractive = new Map<string, InteractivePrompt>();
+let interactiveSeq = 0;
+
+/** True when the bridge can actually deliver a message (polling + configured). */
+export function isTelegramAvailable(): boolean {
+  return polling && !!config?.botToken && !!config?.chatId;
+}
+
+/** Send an inline-button prompt; onAnswer fires once with the chosen value.
+ *  Returns a promptId for later cancellation, or null if it couldn't be sent. */
+export async function sendInteractivePrompt(
+  text: string,
+  options: { label: string; value: string }[],
+  onAnswer: (value: string) => void,
+): Promise<string | null> {
+  if (!config) return null;
+  interactiveSeq += 1;
+  const promptId = `ip${interactiveSeq}`;
+  pendingInteractive.set(promptId, { onAnswer });
+  try {
+    const res = await apiCall('sendMessage', {
+      chat_id: config.chatId,
+      text,
+      parse_mode: 'Markdown',
+      reply_markup: { inline_keyboard: [options.map((o) => ({ text: o.label, callback_data: `ip:${promptId}:${o.value}` }))] },
+    });
+    const entry = pendingInteractive.get(promptId);
+    if (entry) entry.messageId = res?.message_id;
+    return promptId;
+  } catch (e: any) {
+    pendingInteractive.delete(promptId);
+    log.error('telegram', `interactive prompt send failed: ${e.message}`);
+    return null;
+  }
+}
+
+/** Withdraw a still-open prompt (e.g. answered in the desktop popup first). */
+export async function cancelInteractivePrompt(promptId: string, note?: string): Promise<void> {
+  const entry = pendingInteractive.get(promptId);
+  if (!entry || !config) { pendingInteractive.delete(promptId); return; }
+  pendingInteractive.delete(promptId);
+  if (entry.messageId) {
+    await apiCall('editMessageReplyMarkup', { chat_id: config.chatId, message_id: entry.messageId, reply_markup: { inline_keyboard: [] } }).catch(() => {});
+    if (note) await apiCall('editMessageText', { chat_id: config.chatId, message_id: entry.messageId, text: note, parse_mode: 'Markdown' }).catch(() => {});
+  }
+}
+
 export async function sendMessage(text: string, opts?: { plain?: boolean }): Promise<void> {
   if (!config) return;
 
@@ -662,6 +715,29 @@ async function handleCallbackQuery(cbq: any): Promise<void> {
         message_id: messageId,
         text: ack,
       }).catch(() => {});
+    }
+  } else if (data.startsWith('ip:')) {
+    // Generic interactive prompt (e.g. web.fetch permission while Away).
+    const parts = data.split(':');
+    const promptId = parts[1];
+    const value = parts.slice(2).join(':');
+    const entry = pendingInteractive.get(promptId);
+    if (entry) {
+      pendingInteractive.delete(promptId);
+      if (messageId) {
+        await apiCall('editMessageReplyMarkup', {
+          chat_id: config!.chatId,
+          message_id: messageId,
+          reply_markup: { inline_keyboard: [] },
+        }).catch(() => {});
+        await apiCall('editMessageText', {
+          chat_id: config!.chatId,
+          message_id: messageId,
+          text: `${cbq.message?.text ?? ''}\n\n✓ ${value} at ${now}`,
+          parse_mode: 'Markdown',
+        }).catch(() => {});
+      }
+      entry.onAnswer(value);
     }
   }
 }

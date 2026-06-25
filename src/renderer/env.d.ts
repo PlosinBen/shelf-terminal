@@ -95,6 +95,17 @@ interface ShelfApi {
     logsPath: () => Promise<string>;
     debugLog: (tag: string, msg: string) => void;
   };
+  web: {
+    listSessions: () => Promise<import('../shared/web-session').WebSessionEntry[]>;
+    deleteSession: (domain: string) => Promise<void>;
+    listGrants: () => Promise<import('../shared/web-session').WebGrantsByProject>;
+    revokeGrant: (projectId: string, origin: string) => Promise<void>;
+    onPermissionRequest: (
+      callback: (req: import('../shared/web-session').WebPermissionMeta & { requestId: string }) => void,
+    ) => () => void;
+    resolvePermission: (requestId: string, decision: 'once' | 'always' | 'deny') => Promise<void>;
+    onPermissionClose: (callback: (requestId: string) => void) => () => void;
+  };
   pm: {
     send: (message: string) => Promise<void>;
     stop: () => Promise<void>;
@@ -152,4 +163,18 @@ interface ShelfApi {
 
 interface Window {
   shelfApi: ShelfApi;
+}
+
+// The Electron <webview> tag (enabled via webviewTag) isn't part of React's
+// intrinsic elements. Declare the attributes the Web tab uses. The runtime
+// object is an Electron.WebviewTag (loadURL/getURL/goBack/reload/etc.).
+declare namespace JSX {
+  interface IntrinsicElements {
+    webview: React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement> & {
+      src?: string;
+      partition?: string;
+      allowpopups?: string;
+      useragent?: string;
+    };
+  }
 }

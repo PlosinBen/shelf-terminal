@@ -1,7 +1,8 @@
 import { query as sdkQuery, tool, createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk';
 import type { Query, Options, SDKMessage, SDKUserMessage, CanUseTool } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
-import { runBridgeTool, APP_SKILL_LIST_DESC, APP_SKILL_GET_DESC, APP_SKILL_CREATE_DESC, APP_SKILL_UPDATE_DESC } from '../../app-tool-tools';
+import { runBridgeTool, APP_SKILL_LIST_DESC, APP_SKILL_GET_DESC, APP_SKILL_CREATE_DESC, APP_SKILL_UPDATE_DESC, WEB_FETCH_DESC } from '../../app-tool-tools';
+import { isWebFetchTool } from '@shared/web-session';
 import { createRouterState, notePush, routeMessage } from './turn-router';
 import { randomUUID } from 'node:crypto';
 import { existsSync, readdirSync } from 'fs';
@@ -224,6 +225,15 @@ function getShelfMcpServer() {
           const { text, isError } = await runBridgeTool('app_skill.update', { name, content });
           return { content: [{ type: 'text' as const, text }], ...(isError ? { isError: true } : {}) };
         }),
+        tool('web_fetch', WEB_FETCH_DESC, {
+          url: z.string().describe('absolute http(s) URL of the internal service'),
+          method: z.string().optional().describe('HTTP method (default GET)'),
+          headers: z.record(z.string(), z.string()).optional().describe('extra request headers, e.g. {"kbn-xsrf":"true"}'),
+          body: z.string().optional().describe('request body, e.g. a JSON query string'),
+        }, async ({ url, method, headers, body }) => {
+          const { text, isError } = await runBridgeTool('web.fetch', { url, method, headers, body });
+          return { content: [{ type: 'text' as const, text }], ...(isError ? { isError: true } : {}) };
+        }),
       ],
     });
   }
@@ -336,6 +346,14 @@ export function createClaudeBackend(): ServerBackend {
     // tool permission gating", not "skip user-facing interaction prompts").
     if (toolName === 'AskUserQuestion') {
       return handleAskUserQuestion(input, toolUseId, canUseOpts?.signal);
+    }
+
+    // web_fetch carries its OWN gate downstream (main handleAppTool: a generic,
+    // provider-agnostic per-origin web-permission popup). Skip the provider tool
+    // prompt here so the user isn't asked twice. The downstream gate runs even in
+    // bypass mode (the tool still executes), so credential use stays authorized.
+    if (isWebFetchTool(toolName)) {
+      return { behavior: 'allow', updatedInput: input };
     }
 
     // DIY bypass: SDK stays at 'default' permissionMode and our canUseTool

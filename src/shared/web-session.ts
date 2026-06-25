@@ -1,0 +1,54 @@
+// Shared constants + payload shapes for the web session (login surface +
+// agent `web.fetch`).
+//
+// The partition NAME is shared so the renderer's <webview> and main's
+// session.fromPartition() resolve to the SAME cookie store. The `persist:`
+// prefix makes cookies survive restarts → log in once, shared across all
+// (local) projects. See the web-tab network-identity design.
+
+export const WEB_SESSION_PARTITION = 'persist:web';
+
+/**
+ * Bare bridge-tool name the agent calls. Reaches main's canUseTool as
+ * `mcp__shelf__web_fetch` (real providers prefix MCP tools) or bare `web_fetch`
+ * (fake provider). Match with isWebFetchTool().
+ */
+export const WEB_FETCH_TOOL = 'web_fetch';
+
+export function isWebFetchTool(toolName: string): boolean {
+  return toolName === WEB_FETCH_TOOL || toolName.endsWith('__web_fetch');
+}
+
+/** Anti-spoof origin metadata attached to a web.fetch permission request. */
+export interface WebPermissionMeta {
+  /** Canonical scheme://host[:port] — the grant key, parsed authoritatively. */
+  origin: string;
+  /** eTLD+1 for display highlight (null if unknown). */
+  registrableDomain: string | null;
+  method: string;
+}
+
+export interface WebFetchRequest {
+  url: string;
+  /** Defaults to GET. */
+  method?: string;
+  headers?: Record<string, string>;
+  /** Raw request body (e.g. a JSON string for Kibana `_search`). */
+  body?: string;
+}
+
+export interface WebFetchResult {
+  status: number;
+  headers: Record<string, string>;
+  /** Raw response body. Redirects (not followed) have an empty body + Location header. */
+  body: string;
+}
+
+/** A logged-in session, grouped by registrable domain, for the manage-sessions UI. */
+export interface WebSessionEntry {
+  domain: string;
+  cookieCount: number;
+}
+
+/** All agent web.fetch grants, keyed by projectId → granted origins. */
+export type WebGrantsByProject = Record<string, string[]>;
