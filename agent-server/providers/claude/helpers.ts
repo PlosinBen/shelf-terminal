@@ -563,10 +563,20 @@ export function normalizeTaskMessage(msg: any, prev?: NormalizedTask): Normalize
  * Reconstruct the SDK's per-session task-output directory when the terminal
  * `task_notification` — the SOLE carrier of the exact `output_file` path — never
  * arrived for a task. That happens for tasks that settle mid-turn or when
- * several finish at once: a known upstream delivery bug
- * (anthropics/claude-code#20754 / #20525; the SDK's own changelog notes a task
- * can settle via `task_updated` with NO TaskNotificationMessage). The output
- * file itself IS on disk at `<base>/<project-slug>/<sessionId>/tasks/<id>.output`.
+ * several finish at once: a known upstream delivery bug where a task can settle
+ * via `task_updated` with NO corresponding TaskNotificationMessage. Upstream refs
+ * (canonical citation for this bug — other "upstream delivery bug" comments in
+ * this provider point here):
+ *   - https://github.com/anthropics/claude-code/issues/20754
+ *       N tasks finishing at once → only ONE TaskNotificationMessage delivered.
+ *       This is the core case we recover from.
+ *   - https://github.com/anthropics/claude-code/issues/20525
+ *   - https://github.com/anthropics/claude-code/issues/17011
+ *   - https://github.com/anthropics/claude-agent-sdk-python/blob/main/CHANGELOG.md
+ *       The SDK's own changelog admits a task can settle via `task_updated` with
+ *       no TaskNotificationMessage.
+ * The output file itself IS on disk at
+ * `<base>/<project-slug>/<sessionId>/tasks/<id>.output`.
  *
  * The `<project-slug>` segment uses Claude's own path encoding (`/` AND `_` → `-`,
  * etc.) which we deliberately do NOT replicate — instead pick the slug whose
