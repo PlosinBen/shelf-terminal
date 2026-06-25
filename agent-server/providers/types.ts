@@ -393,4 +393,15 @@ export interface ServerBackend {
    * exists on disk. Sync — providers should clear refs only, not perform I/O.
    */
   resetSession?(sessionId: string): void;
+  /**
+   * Re-scan the configured app-skill directory on the LIVE session so an
+   * app-level skill edit takes effect WITHOUT re-init (no reconnect, no lost
+   * conversation context). Triggered by main when skills change (after the
+   * file has been projected/synced to the consumption path). Best-effort —
+   * a provider whose SDK has no hot-reload API omits this; one that does wraps
+   * the call so a reload failure logs and falls back to today's behaviour
+   * (change picked up on next session init). Effective from the session's next
+   * turn — an in-flight turn keeps its init-time skill snapshot. See DECISIONS.
+   */
+  reloadSkills?(): Promise<void>;
 }

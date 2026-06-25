@@ -227,6 +227,15 @@ export function createRemoteBackend(
       }
     },
 
+    reloadSkills() {
+      // Fire-and-forget: agent-server asks every live provider session to
+      // re-scan its app-skill dir so an app-level skill edit lands without
+      // reconnect. No-op if the process isn't up. See DECISIONS (skill reload).
+      if (remoteProc) {
+        remoteProc.sendLine({ type: 'reload_skills' });
+      }
+    },
+
     dispose() {
       if (remoteProc) {
         remoteProc.kill();

@@ -375,6 +375,14 @@
 
 **不要**: 別用 regex heuristic 做「半套驗證」—— 只擋冒號這一種會給假安全感,別的 YAML 破綻(tab 縮排、引號不對稱、未來新欄位)照樣漏到 Copilot。要擋就用真的 YAML parser(跟 Copilot 同類)。也**別把驗證放 renderer** —— agent 寫入那條(app-tool bridge)會繞過;放共用的 `updateSkill` 才兩條路都守得到。
 
+## 41. Claude `reloadPlugins()` 熱重載 skill 後，全新 skill 的 `/` slash 仍可能 "Unknown skill"
+
+**現象**: app-skill live reload（DECISION #80）後,**新增**一個 skill,model 確實能用它,但使用者直接打 `/<新skill名>` 卻回 "Unknown skill",或在 `/` autocomplete 看不到 —— 要整個 restart 才正常。
+
+**原因**: Claude SDK `query.reloadPlugins()` 重掃磁碟、把新 skill 餵進 **model-facing** 的能力集,但**不重建 `/` slash 指令的解析索引**(autocomplete / 直接派發那條)。這是 SDK 行為,不是我們的 bug。
+
+**解法**: 認知差異即可,不要為了「`/` 也能立刻打」去硬塞 —— **改既有 skill 內容不受此限**(名稱本就在索引),只有「全新 skill 名稱」會這樣,且 model 仍可主動使用。我們 `/skills` 卡是用 `reloadPlugins()` 回傳的 `commands` 自己重組,所以卡片會即時反映;真正受限的只有原生 `/` 直接派發。**別**為此把 reload 改成 fresh session(會丟對話歷史,得不償失)。Copilot `skills.reload()` 無此問題。
+
 ## Agent View: inferTabState 對 TUI 類 CLI 永遠回傳 cli_running
 
 **現象**: PM Agent 的 `inferTabState` 對 Claude Code、Copilot CLI 等 TUI 程式永遠回傳 `cli_running`，無法偵測 done/idle 狀態。

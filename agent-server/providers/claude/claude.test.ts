@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { processMessage, createBlockMsgIdState } from './index';
+import { processMessage, createBlockMsgIdState, createClaudeBackend } from './index';
 import { mergeClaudeModels, rateLimitInfoToSegment, formatClaudeToolInput, extractToolResultText, askUserQuestionToPrompts, buildAskUserQuestionAnswerJson, parseTaskCreateOutput, parseTaskListOutput, reconcileTasks, renderPlan, shouldAdoptResolvedModel, stripToolErrorWrapper, normalizeTaskMessage, isForegroundBashTaskStart, pickSessionTasksDir } from './helpers';
 import type { OutgoingMessage } from '../types';
 import type { ProviderModel, NormalizedTask } from '@shared/types';
@@ -889,5 +889,21 @@ describe('pickSessionTasksDir', () => {
   it('returns undefined for empty base / sessionId', () => {
     expect(pickSessionTasksDir('', sid, slugs, () => true)).toBeUndefined();
     expect(pickSessionTasksDir(base, '', slugs, () => true)).toBeUndefined();
+  });
+});
+
+describe('Claude reloadSkills (live skill hot-reload)', () => {
+  it('exposes reloadSkills (provider supports hot-reload via reloadPlugins)', () => {
+    const backend = createClaudeBackend();
+    expect(typeof backend.reloadSkills).toBe('function');
+    backend.dispose();
+  });
+
+  it('is a best-effort no-op (resolves, never throws) when there is no live session', async () => {
+    const backend = createClaudeBackend();
+    // No session yet → query is null. reloadSkills must short-circuit without
+    // touching the SDK and without throwing into the dispatch loop.
+    await expect(backend.reloadSkills!()).resolves.toBeUndefined();
+    backend.dispose();
   });
 });
