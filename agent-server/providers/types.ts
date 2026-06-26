@@ -96,6 +96,11 @@ export type OutgoingMessage = WireEnvelope & (
    *  replies with `app_tool_result` matched by requestId. See
    *  .agent/features/app-level-capabilities.md. */
   | { type: 'app_tool'; requestId: string; op: string; args: Record<string, unknown> }
+  /** Diagnostic log routed to main's @shared/logger (agent-server has no
+   *  electron, so it can't write the log file itself). Level-filtered at main.
+   *  agent-server keeps NO independent logging — everything but a fatal crash
+   *  comes back this way. See agent-server/server-logger.ts. */
+  | { type: 'log'; level: 'error' | 'warn' | 'info' | 'debug'; tag: string; msg: string }
 
   // ── Per-turn control / status (turnId expected) ──────────────────────────
   | {

@@ -3,8 +3,9 @@ import type { LogLevel } from './types';
 const LEVELS: Record<LogLevel, number> = {
   off: 0,
   error: 1,
-  info: 2,
-  debug: 3,
+  warn: 2,
+  info: 3,
+  debug: 4,
 };
 
 let currentLevel: LogLevel = 'error';
@@ -29,8 +30,11 @@ function shouldLog(level: LogLevel): boolean {
 function write(level: string, tag: string, msg: string, args: unknown[]) {
   const timestamp = new Date().toISOString();
   const line = `${timestamp} [${level}][${tag}] ${msg}${args.length ? ' ' + JSON.stringify(args) : ''}`;
-  if (level === 'error') {
+  // error/warn → stderr; info/debug → stdout. (level is the upper-case display tag.)
+  if (level === 'ERROR') {
     console.error(line);
+  } else if (level === 'WARN') {
+    console.warn(line);
   } else {
     console.log(line);
   }
@@ -45,6 +49,9 @@ const traceBuffer: Array<{ tag: string; msg: string; iso: string }> = [];
 export const log = {
   error(tag: string, msg: string, ...args: unknown[]) {
     if (shouldLog('error')) write('ERROR', tag, msg, args);
+  },
+  warn(tag: string, msg: string, ...args: unknown[]) {
+    if (shouldLog('warn')) write('WARN', tag, msg, args);
   },
   info(tag: string, msg: string, ...args: unknown[]) {
     if (shouldLog('info')) write('INFO', tag, msg, args);

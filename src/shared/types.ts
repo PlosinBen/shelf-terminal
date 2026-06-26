@@ -287,7 +287,7 @@ export type KeybindingAction =
 
 export type KeybindingConfig = Record<KeybindingAction, string>;
 
-export type LogLevel = 'off' | 'error' | 'info' | 'debug';
+export type LogLevel = 'off' | 'error' | 'warn' | 'info' | 'debug';
 
 export interface AppSettings {
   fontSize: number;

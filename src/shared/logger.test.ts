@@ -57,3 +57,31 @@ describe('logger trace buffer', () => {
     expect(written[200]).toMatch(/entry-249$/);
   });
 });
+
+describe('logger level filtering (incl. warn)', () => {
+  let written: string[];
+  beforeEach(() => {
+    written = [];
+    setFileWriter((line) => written.push(line));
+  });
+  const tags = () => written.map((l) => l.match(/\[(ERROR|WARN|INFO|DEBUG)\]/)?.[1]);
+  const emitAll = () => { log.error('t', 'e'); log.warn('t', 'w'); log.info('t', 'i'); log.debug('t', 'd'); };
+
+  it('"error" (default) writes only error', () => {
+    setLogLevel('error');
+    emitAll();
+    expect(tags()).toEqual(['ERROR']);
+  });
+
+  it('"warn" writes error + warn (warn sits between error and info)', () => {
+    setLogLevel('warn');
+    emitAll();
+    expect(tags()).toEqual(['ERROR', 'WARN']);
+  });
+
+  it('"debug" writes everything', () => {
+    setLogLevel('debug');
+    emitAll();
+    expect(tags()).toEqual(['ERROR', 'WARN', 'INFO', 'DEBUG']);
+  });
+});

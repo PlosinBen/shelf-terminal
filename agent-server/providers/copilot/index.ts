@@ -16,6 +16,7 @@ import {
   type NormalizedSkill,
 } from '../loaded-context';
 import { runBridgeTool, APP_SKILL_LIST_DESC, APP_SKILL_GET_DESC, APP_SKILL_CREATE_DESC, APP_SKILL_UPDATE_DESC, WEB_FETCH_DESC } from '../../app-tool-tools';
+import { serverLog } from '../../server-logger';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import {
@@ -89,30 +90,30 @@ function diagTraceCopilotToolEvent(event: any): void {
   const id = d.toolCallId ?? d.shellId ?? d.agentId ?? '';
   switch (t) {
     case 'tool.execution_start':
-      console.warn('[copilot] DIAG tool.start ' + JSON.stringify({ id, tool: d.toolName, args: JSON.stringify(d.arguments ?? '').slice(0, 200) }));
+      serverLog('debug', 'copilot', 'DIAG tool.start ' + JSON.stringify({ id, tool: d.toolName, args: JSON.stringify(d.arguments ?? '').slice(0, 200) }));
       break;
     case 'tool.execution_partial_result': {
       const prev = diagPartials.get(id) ?? { n: 0, bytes: 0 };
       const next = { n: prev.n + 1, bytes: prev.bytes + (typeof d.partialOutput === 'string' ? d.partialOutput.length : 0) };
       diagPartials.set(id, next);
-      if (next.n === 1 || next.n % 50 === 0) console.warn('[copilot] DIAG tool.partial ' + JSON.stringify({ id, chunks: next.n, bytes: next.bytes }));
+      if (next.n === 1 || next.n % 50 === 0) serverLog('debug', 'copilot', 'DIAG tool.partial ' + JSON.stringify({ id, chunks: next.n, bytes: next.bytes }));
       break;
     }
     case 'tool.execution_progress':
-      console.warn('[copilot] DIAG tool.progress ' + JSON.stringify({ id, msg: String(d.progressMessage ?? '').slice(0, 200) }));
+      serverLog('debug', 'copilot', 'DIAG tool.progress ' + JSON.stringify({ id, msg: String(d.progressMessage ?? '').slice(0, 200) }));
       break;
     case 'tool.execution_complete': {
       const tally = diagPartials.get(id);
       diagPartials.delete(id);
-      console.warn('[copilot] DIAG tool.complete ' + JSON.stringify({ id, success: d.success, hasResult: d.result != null, resultType: d.result?.type, errType: d.error?.type, partials: tally?.n ?? 0 }));
+      serverLog('debug', 'copilot', 'DIAG tool.complete ' + JSON.stringify({ id, success: d.success, hasResult: d.result != null, resultType: d.result?.type, errType: d.error?.type, partials: tally?.n ?? 0 }));
       break;
     }
     case 'system.notification':
-      console.warn('[copilot] DIAG system.notification ' + JSON.stringify({ kind: d.kind?.type ?? d.kind, content: String(d.content ?? '').slice(0, 160) }));
+      serverLog('debug', 'copilot', 'DIAG system.notification ' + JSON.stringify({ kind: d.kind?.type ?? d.kind, content: String(d.content ?? '').slice(0, 160) }));
       break;
     case 'session.error':
     case 'model.call_failure':
-      console.warn('[copilot] DIAG ' + t + ' ' + JSON.stringify({ msg: d.message ?? d.errorMessage, code: d.errorCode ?? d.statusCode }));
+      serverLog('debug', 'copilot', 'DIAG ' + t + ' ' + JSON.stringify({ msg: d.message ?? d.errorMessage, code: d.errorCode ?? d.statusCode }));
       break;
   }
 }
@@ -478,7 +479,7 @@ export function createCopilotBackend(): ServerBackend {
         // Stale / expired sessionId is expected; SDK auth or RPC errors are not.
         // Log so we can tell the difference when the user reports "no history
         // restored after restart".
-        console.error('[copilot] resumeSession failed; falling back to createSession', { sessionId: state.cliSessionId, message: err?.message ?? err });
+        serverLog('error', 'copilot', 'resumeSession failed; falling back to createSession', { sessionId: state.cliSessionId, message: err?.message ?? err });
         session = await client.createSession(config);
       }
     } else {
@@ -496,7 +497,7 @@ export function createCopilotBackend(): ServerBackend {
     // a console warning. See agent-ui#3 for the design.
     session.registerElicitationHandler(async (ctx) => {
       if (ctx.mode === 'url') {
-        console.warn('[copilot] URL-mode elicitation not supported; declining', {
+        serverLog('warn', 'copilot', 'URL-mode elicitation not supported; declining', {
           url: ctx.url, source: ctx.elicitationSource,
         });
         return { action: 'decline' };
@@ -504,7 +505,7 @@ export function createCopilotBackend(): ServerBackend {
       const schema = ctx.requestedSchema;
       const mapped = schema ? elicitationSchemaToPrompts(schema) : null;
       if (!mapped) {
-        console.warn('[copilot] elicitation has no usable schema; declining', { message: ctx.message });
+        serverLog('warn', 'copilot', 'elicitation has no usable schema; declining', { message: ctx.message });
         return { action: 'decline' };
       }
       const pickerId = `pk-${randomUUID().slice(0, 8)}`;
@@ -527,7 +528,7 @@ export function createCopilotBackend(): ServerBackend {
         // For bypass mode our onPermissionRequest short-circuit makes this
         // failure harmless. For plan/default we'd silently be in interactive,
         // which IS user-visible — log so we know.
-        console.error('[copilot] rpc.mode.set failed; user may be in interactive mode despite picked', { sdkMode, message: err?.message ?? err });
+        serverLog('error', 'copilot', 'rpc.mode.set failed; user may be in interactive mode despite picked', { sdkMode, message: err?.message ?? err });
       }
     }
 
@@ -631,7 +632,7 @@ export function createCopilotBackend(): ServerBackend {
             // format drift worth diagnosing. Log so the raw preview tells us
             // which case we hit without having to repro live.
             if (!/\*\*\*\s+Delete\s+File:/.test(args)) {
-              console.error('[copilot] parseApplyPatch refused non-Delete content; falling back to raw display', { argsPreview: args.slice(0, 300) });
+              serverLog('error', 'copilot', 'parseApplyPatch refused non-Delete content; falling back to raw display', { argsPreview: args.slice(0, 300) });
             }
           }
 
@@ -833,7 +834,7 @@ export function createCopilotBackend(): ServerBackend {
             && !KNOWN_IGNORED_COPILOT_EVENTS.has(event.type)
             && !seenUnhandledCopilotEvents.has(event.type)) {
             seenUnhandledCopilotEvents.add(event.type);
-            console.warn('[copilot] unrecognized session event type — not rendered (first occurrence)', { type: event.type });
+            serverLog('warn', 'copilot', 'unrecognized session event type — not rendered (first occurrence)', { type: event.type });
           }
       }
     });
@@ -856,7 +857,7 @@ export function createCopilotBackend(): ServerBackend {
         // Polled on every plan_changed event (debounced 150ms). Failure means
         // plan panel won't update — could be transient (mid-rebuild) or a
         // breaking SDK change. Logging gives us the diagnosis path.
-        console.error('[copilot] rpc.plan.read failed; plan panel may be stale', err?.message ?? err);
+        serverLog('error', 'copilot', 'rpc.plan.read failed; plan panel may be stale', err?.message ?? err);
       }
     }, 150);
   }
@@ -881,7 +882,7 @@ export function createCopilotBackend(): ServerBackend {
           .filter((t: unknown): t is NonNullable<typeof t> => t !== null);
         currentSend({ type: 'task_event', kind: 'snapshot', tasks });
       } catch (err: any) {
-        console.error('[copilot] rpc.tasks.list failed; task panel may be stale', err?.message ?? err);
+        serverLog('error', 'copilot', 'rpc.tasks.list failed; task panel may be stale', err?.message ?? err);
       }
     }, 150);
   }
@@ -896,7 +897,7 @@ export function createCopilotBackend(): ServerBackend {
     if (inflightToolUses.size === 0) return;
     const entries = [...inflightToolUses];
     inflightToolUses.clear();
-    console.warn('[copilot] finalizing orphaned tool cards (turn ended, no tool.execution_complete) '
+    serverLog('warn', 'copilot', 'finalizing orphaned tool cards (turn ended, no tool.execution_complete) '
       + JSON.stringify({ count: entries.length, ids: entries.map(([id]) => id) }));
     const msgs = buildOrphanFinalizeMessages(
       entries,
@@ -1045,7 +1046,7 @@ export function createCopilotBackend(): ServerBackend {
             try {
               await state.session?.disconnect();
             } catch (err: any) {
-              console.error('[copilot] session.disconnect() failed during /clear rebuild', err?.message ?? err);
+              serverLog('error', 'copilot', 'session.disconnect() failed during /clear rebuild', err?.message ?? err);
             }
             state.session = null;
             state.cliSessionId = null;
@@ -1180,7 +1181,7 @@ export function createCopilotBackend(): ServerBackend {
         const status = await client.getAuthStatus();
         authRequired = !status.isAuthenticated;
       } catch (err: any) {
-        console.error('[copilot] getAuthStatus failed; treating as unknown (not blocking)', err?.message ?? err);
+        serverLog('error', 'copilot', 'getAuthStatus failed; treating as unknown (not blocking)', err?.message ?? err);
       }
       // listModels hits the GitHub model API — only fetch when authed. Logged
       // out it would throw/hang, and AuthPane covers the pane anyway.
@@ -1284,7 +1285,7 @@ export function createCopilotBackend(): ServerBackend {
       try {
         await state.session?.abort();
       } catch (err: any) {
-        console.error('[copilot] session.abort() failed during stop()', err?.message ?? err);
+        serverLog('error', 'copilot', 'session.abort() failed during stop()', err?.message ?? err);
       }
     },
 
@@ -1292,12 +1293,12 @@ export function createCopilotBackend(): ServerBackend {
       try {
         state.session?.disconnect();
       } catch (err: any) {
-        console.error('[copilot] session.disconnect() failed during dispose()', err?.message ?? err);
+        serverLog('error', 'copilot', 'session.disconnect() failed during dispose()', err?.message ?? err);
       }
       try {
         state.client?.stop();
       } catch (err: any) {
-        console.error('[copilot] client.stop() failed during dispose()', err?.message ?? err);
+        serverLog('error', 'copilot', 'client.stop() failed during dispose()', err?.message ?? err);
       }
       state.session = null;
       state.client = null;
@@ -1310,7 +1311,7 @@ export function createCopilotBackend(): ServerBackend {
       try {
         state.session?.disconnect();
       } catch (err: any) {
-        console.error('[copilot] session.disconnect() failed during resetSession', err?.message ?? err);
+        serverLog('error', 'copilot', 'session.disconnect() failed during resetSession', err?.message ?? err);
       }
       state.session = null;
       state.cliSessionId = null;
@@ -1326,14 +1327,14 @@ export function createCopilotBackend(): ServerBackend {
         // DIAGNOSTIC: a carded task can't be found in the live task list. Likely a
         // stale card from a previous session / provider switch, or an id mismatch.
         // Log the known ids so we can see what the list DID contain.
-        console.warn('[copilot] readTaskOutput: task not found ' + JSON.stringify({ task_id: taskId, known_ids: (list?.tasks ?? []).map((t: any) => t?.id) }));
+        serverLog('warn', 'copilot', 'readTaskOutput: task not found ' + JSON.stringify({ task_id: taskId, known_ids: (list?.tasks ?? []).map((t: any) => t?.id) }));
         throw new Error(`No task ${taskId}`);
       }
       // Shell tasks write a detached log file (read it ON the remote — main/
       // renderer never touch remote fs). Agent tasks carry their output inline.
       if (task.type === 'shell') {
         if (typeof task.logPath !== 'string' || !task.logPath) {
-          console.warn('[copilot] readTaskOutput: shell task has no logPath ' + JSON.stringify({ task_id: taskId, status: task.status }));
+          serverLog('warn', 'copilot', 'readTaskOutput: shell task has no logPath ' + JSON.stringify({ task_id: taskId, status: task.status }));
           throw new Error('Task has no log file');
         }
         const MAX = 256 * 1024;
@@ -1345,7 +1346,7 @@ export function createCopilotBackend(): ServerBackend {
         return buf.toString('utf8');
       }
       if (task.result == null && task.latestResponse == null) {
-        console.warn('[copilot] readTaskOutput: non-shell task has no inline result ' + JSON.stringify({ task_id: taskId, type: task.type, status: task.status }));
+        serverLog('warn', 'copilot', 'readTaskOutput: non-shell task has no inline result ' + JSON.stringify({ task_id: taskId, type: task.type, status: task.status }));
       }
       return task.result ?? task.latestResponse ?? '(no output)';
     },
@@ -1377,7 +1378,7 @@ export function createCopilotBackend(): ServerBackend {
     async reloadSkills() {
       const session = state.session;
       if (!session) {
-        console.warn('[copilot] reloadSkills: no live session — app-skill edit will apply on next session init');
+        serverLog('warn', 'copilot', 'reloadSkills: no live session — app-skill edit will apply on next session init');
         return;
       }
       try {
@@ -1385,9 +1386,9 @@ export function createCopilotBackend(): ServerBackend {
         // Experimental SDK API — log success so a dev build can confirm the
         // reload actually fired (and re-scanned our skillDirectories) for the
         // live session, not just that we called it. See skills#4.
-        console.warn('[copilot] skills.reload() applied — app-skill edit now live for this session (effective next turn)');
+        serverLog('warn', 'copilot', 'skills.reload() applied — app-skill edit now live for this session (effective next turn)');
       } catch (err: any) {
-        console.warn('[copilot] skills.reload() failed; app-skill edit will apply on next session init instead', err?.message ?? err);
+        serverLog('warn', 'copilot', 'skills.reload() failed; app-skill edit will apply on next session init instead', err?.message ?? err);
       }
     },
 

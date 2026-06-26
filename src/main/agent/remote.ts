@@ -764,6 +764,17 @@ function wrapProcess(
       // turn event. An in-process bridge tool on the agent-server asks main to
       // act on a client-owned resource (skills-store); handle + reply by
       // requestId. See .agent/features/app-level-capabilities.md.
+      // Diagnostic log from agent-server (it has no electron to write the file
+      // itself). Route to @shared/logger at the carried level — main applies the
+      // level filter. See agent-server/server-logger.ts.
+      if (parsed?.type === 'log') {
+        const raw = parsed.level;
+        const level: 'error' | 'warn' | 'info' | 'debug' =
+          raw === 'error' ? 'error' : raw === 'warn' ? 'warn' : raw === 'debug' ? 'debug' : 'info';
+        const tag = typeof parsed.tag === 'string' ? parsed.tag : 'agent-server';
+        log[level](tag, typeof parsed.msg === 'string' ? parsed.msg : String(parsed.msg));
+        continue;
+      }
       if (parsed?.type === 'app_tool') {
         const requestId = parsed.requestId;
         const op = typeof parsed.op === 'string' ? parsed.op : '';

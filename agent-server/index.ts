@@ -9,6 +9,7 @@ import { deleteContext, cleanupOldContexts } from './context-store';
 import { runCleanupSweep } from './cleanup';
 import { loadRestoreContextFor, newTurnId, wrapSendForContext, wrapSendForTurn } from './orchestrator';
 import { initAppToolClient, resolveAppToolResult } from './app-tool-client';
+import { setLogSink, serverLog } from './server-logger';
 import { createSendQueue } from './send-queue';
 import type { OutgoingMessage, QueryInput, ServerBackend, PickerResolvePayload } from './providers/types';
 import type { ProviderModel } from '@shared/types';
@@ -73,6 +74,10 @@ interface IncomingMessage {
 function send(msg: OutgoingMessage) {
   process.stdout.write(JSON.stringify(msg) + '\n');
 }
+
+// Route all agent-server diagnostics back to main over the wire (see
+// server-logger.ts). After this, serverLog() no longer falls back to stderr.
+setLogSink(send);
 
 // Last appId seen on a `send` — names this app's projected skills dir; used to
 // keep its `.heartbeat` lease fresh + protect it from the startup sweep.
@@ -270,6 +275,8 @@ function resetWatchdog() {
   if (!IDLE_SHUTDOWN_MS) return;
   if (watchdogTimer) clearTimeout(watchdogTimer);
   watchdogTimer = setTimeout(() => {
+    // Death path → stderr (NOT serverLog): we're about to process.exit, and main
+    // stopped pinging (likely gone), so a wire log wouldn't deliver/flush anyway.
     console.error(`[agent-server] idle-shutdown: no ping for ${IDLE_SHUTDOWN_MS / 60_000}min — self-exiting`);
     for (const b of backends.values()) b.dispose();
     process.exit(0);
@@ -301,12 +308,11 @@ const sendQueue = createSendQueue<IncomingMessage>({
     send({ type: 'error', error: (err as any)?.message ?? String(err), turnId: tid } as OutgoingMessage);
     send({ type: 'status', state: 'idle', turnId: tid } as OutgoingMessage);
   },
-  // Never silent: a cancel that didn't cleanly remove a queued item. stderr is
-  // captured into the main log (remote.ts proc.stderr → log.error). 'cancel-
+  // Never silent: a cancel that didn't cleanly remove a queued item. 'cancel-
   // running' is a benign race (snapshot re-promotes); 'cancel-unknown' is a real
-  // desync worth investigating. (console.error → stderr; NEVER stdout = the wire.)
+  // desync worth investigating → warn, routed to main's logger over the wire.
   onAnomaly: (reason, clientMsgId) => {
-    console.error(`[send-queue] ${reason} clientMsgId=${clientMsgId}`);
+    serverLog('warn', 'send-queue', `${reason} clientMsgId=${clientMsgId}`);
   },
 });
 

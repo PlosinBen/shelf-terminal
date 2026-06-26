@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { serverLog } from './server-logger';
 import { loadContext, saveContext, type PersistedContext } from './context-store';
 import type { OutgoingMessage, SendFn } from './providers/types';
 
@@ -97,7 +98,7 @@ export function wrapSendForContext(
         // Persistence is best-effort — never let it break the turn — but
         // also never invisibly: consistent persist failure means user history
         // is being lost, which is a much-harder-to-debug class of bug.
-        console.error('[orchestrator] context persistence failed', { sessionId, provider, message: err?.message ?? err });
+        serverLog('error', 'orchestrator', 'context persistence failed', { sessionId, provider, message: err?.message ?? err });
       }
       return;
     }

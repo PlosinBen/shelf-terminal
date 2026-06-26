@@ -237,6 +237,13 @@ Emitted outside any turn. Some are one-shot RPC responses keyed `<type>:<request
 | `credential_cleared` | `requestId; ok; error?` | RPC response |
 | `task_output` | `requestId; content?; error?` | RPC response — full background-task output |
 | `app_tool` | `requestId; op; args` | server→main bridge-tool request; main replies `app_tool_result` |
+| `log` | `level: error\|warn\|info\|debug; tag; msg` | diagnostic → main's `@shared/logger` at `level` (main applies the filter). See below. |
 | `context_patch` | `patch: Partial<PersistedContext>` | intercepted in `agent-server/index.ts`, NOT forwarded to main |
+
+### `log` — agent-server has no independent observability
+
+agent-server can't use `@shared/logger` (it writes a file via electron `app.getPath`, and there is no electron in agent-server) and its **stdout is this wire**, so it routes every diagnostic to main as a `log` message instead of writing anywhere itself. `serverLog(level, tag, msg, ...args)` (`agent-server/server-logger.ts`) flattens args to text at the source (where `Error` objects are still intact — they'd serialize to `{}` over the wire) and emits `{type:'log', ...}`; main's reader (`remote.ts`) calls `log[level](tag, msg)`, so the **level filter lives in main** (single source of truth) — agent-server emits every level and main drops what's below `currentLevel`. Benign per-event diagnostics use `debug` (silent at the default `error` level).
+
+The ONLY things still on the child's **stderr**: a log emitted before the sink is wired (early boot fallback) and a fatal/death path (Node's default uncaught dump; the idle-shutdown self-exit). main logs raw stderr at `error` — now rare and meaningful, since routine diagnostics no longer go there. See `context/agent-core` agent-core#N.
 
 (`capabilities` is also requestId-keyed when used as an RPC response — documented above under its render section since it doubles as a mid-turn broadcast.)

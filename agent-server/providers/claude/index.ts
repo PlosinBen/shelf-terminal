@@ -3,6 +3,7 @@ import type { Query, Options, SDKMessage, SDKUserMessage, CanUseTool } from '@an
 import { z } from 'zod';
 import { runBridgeTool, APP_SKILL_LIST_DESC, APP_SKILL_GET_DESC, APP_SKILL_CREATE_DESC, APP_SKILL_UPDATE_DESC, WEB_FETCH_DESC } from '../../app-tool-tools';
 import { isWebFetchTool } from '@shared/web-session';
+import { serverLog } from '../../server-logger';
 import { createRouterState, notePush, routeMessage } from './turn-router';
 import { randomUUID } from 'node:crypto';
 import { existsSync, readdirSync } from 'fs';
@@ -406,7 +407,7 @@ export function createClaudeBackend(): ServerBackend {
       return { behavior: 'deny', message: 'AskUserQuestion received with no questions' };
     }
     for (const sample of mapped.previewSamples) {
-      console.warn('[picker] preview content received, not rendered yet', sample);
+      serverLog('debug', 'picker', 'preview content received, not rendered yet', sample);
     }
 
     activeSend()?.({ type: 'picker_request', id: toolUseId, prompts: mapped.prompts });
@@ -500,11 +501,11 @@ export function createClaudeBackend(): ServerBackend {
           if (msg.type === 'system' && msg.subtype === 'init') {
             const [models, commands] = await Promise.all([
               generator.supportedModels().catch((err) => {
-                console.error('[claude] supportedModels() failed; model picker will be empty', err?.message ?? err);
+                serverLog('error', 'claude', 'supportedModels() failed; model picker will be empty', err?.message ?? err);
                 return [];
               }),
               generator.supportedCommands().catch((err) => {
-                console.error('[claude] supportedCommands() failed; slash picker will be empty', err?.message ?? err);
+                serverLog('error', 'claude', 'supportedCommands() failed; slash picker will be empty', err?.message ?? err);
                 return [];
               }),
             ]);
@@ -531,14 +532,14 @@ export function createClaudeBackend(): ServerBackend {
         // auth-failed / timeout) — expected. Only a non-abort error is a real
         // failure; keep it as 'error' so we don't falsely block the pane.
         if (err?.name !== 'AbortError') {
-          console.error('[claude] warmup loop unexpected error', err?.message ?? err);
+          serverLog('error', 'claude', 'warmup loop unexpected error', err?.message ?? err);
           outcome = 'error';
         }
       } finally {
         clearTimeout(guard);
       }
       if (timedOut) {
-        console.error('[claude] auth probe timed out; treating as unknown (not blocking)');
+        serverLog('error', 'claude', 'auth probe timed out; treating as unknown (not blocking)');
         outcome = 'error';
       }
       return outcome;
@@ -650,7 +651,7 @@ export function createClaudeBackend(): ServerBackend {
     try {
       for await (const msg of q) handleSdkMessage(msg);
     } catch (err: any) {
-      if (err?.name !== 'AbortError') console.error('[claude] session consumer error:', err?.message ?? err);
+      if (err?.name !== 'AbortError') serverLog('error', 'claude', 'session consumer error:', err?.message ?? err);
     } finally {
       teardownTurns();
       if (session?.query === q) session = null;
@@ -675,7 +676,7 @@ export function createClaudeBackend(): ServerBackend {
       cache.mcpServers = normalizeClaudeMcpServers(servers as any[]);
       cache.skills = normalizeClaudeCommandsAsSkills(commands as any[], CLAUDE_NON_SKILL_COMMANDS);
     } catch (err: any) {
-      console.error('[claude] refreshLoadedContext failed', err?.message ?? err);
+      serverLog('error', 'claude', 'refreshLoadedContext failed', err?.message ?? err);
     }
   }
 
@@ -761,7 +762,7 @@ export function createClaudeBackend(): ServerBackend {
         // already null). This is the otherwise-SILENT drop path for foreground
         // replies / tool results ("tool use result not showing"). See #75.
         if (msg.type === 'assistant' || msg.type === 'stream_event' || msg.type === 'user') {
-          console.error('[claude] router dropped content with no active turn', {
+          serverLog('error', 'claude', 'router dropped content with no active turn', {
             type: msg.type,
             subtype: any.subtype,
             pendingPush: router.pendingPush,
@@ -897,7 +898,7 @@ export function createClaudeBackend(): ServerBackend {
     if (!(typeof any.subtype === 'string' && any.subtype.startsWith('task_'))) return;
     const id = any.task_id as string | undefined;
     if (typeof id !== 'string' || !id) {
-      console.error('[claude] task_ message with no task_id — dropping (a card may go missing)', { subtype: any.subtype });
+      serverLog('error', 'claude', 'task_ message with no task_id — dropping (a card may go missing)', { subtype: any.subtype });
       return;
     }
     if (ambientTaskIds.has(id)) return; // known ambient/housekeeping task — intentionally hidden
@@ -910,7 +911,7 @@ export function createClaudeBackend(): ServerBackend {
       // DIAGNOSTIC: correctly-filtered foreground Bash. Pairs with the "carding"
       // log below — if a foreground card ever leaks, it will appear there (with
       // bgState 'unknown') instead of here, telling us the tool_use linkage broke.
-      console.warn('[claude] dropped foreground bash task_started ' + JSON.stringify({ task_id: id, tool_use_id: any.tool_use_id }));
+      serverLog('debug', 'claude', 'dropped foreground bash task_started ' + JSON.stringify({ task_id: id, tool_use_id: any.tool_use_id }));
       return;
     }
     // DIAGNOSTIC (fail-loud): we're about to turn THIS task_started into a card.
@@ -925,7 +926,7 @@ export function createClaudeBackend(): ServerBackend {
       const bgState = any.task_type === 'local_bash'
         ? (tuid && bashToolUseBg.has(tuid) ? String(bashToolUseBg.get(tuid)) : 'unknown')
         : 'n/a';
-      console.warn('[claude] carding task_started ' + JSON.stringify({ task_id: id, task_type: any.task_type, tool_use_id: tuid, bgState }));
+      serverLog('debug', 'claude', 'carding task_started ' + JSON.stringify({ task_id: id, task_type: any.task_type, tool_use_id: tuid, bgState }));
     }
     const norm = normalizeTaskMessage(msg, backgroundTasks.get(id));
     if (norm?.ambient) { ambientTaskIds.add(id); return; }
@@ -933,7 +934,7 @@ export function createClaudeBackend(): ServerBackend {
       // Unknown task_ subtype (or unparseable) — dropped silently before. Log so
       // a new SDK task subtype that we don't handle is visible instead of a
       // mysteriously-missing card. See #75.
-      console.error('[claude] unhandled task_ subtype — dropping', { subtype: any.subtype, task_id: id });
+      serverLog('error', 'claude', 'unhandled task_ subtype — dropping', { subtype: any.subtype, task_id: id });
       return;
     }
     backgroundTasks.set(norm.task.id, norm.task);
@@ -948,7 +949,7 @@ export function createClaudeBackend(): ServerBackend {
       // no-output log so a reader can see WHETHER/WHEN the file landed for a
       // given task_id — a 'shell' task that only ever logs the no-output line
       // (never this one) is the empty-card bug; one that logs this is healthy.
-      console.warn('[claude] recorded output file ' + JSON.stringify({ task_id: norm.task.id, task_type: norm.task.type }));
+      serverLog('debug', 'claude', 'recorded output file ' + JSON.stringify({ task_id: norm.task.id, task_type: norm.task.type }));
     }
     // DIAGNOSTIC (fail-loud): the SDK closes out a background task with TWO
     // terminal-ish messages — a `task_updated` (status→completed, NO output_file)
@@ -959,7 +960,7 @@ export function createClaudeBackend(): ServerBackend {
     // anomalous: the output truly never materialized (live-confirmed ordering via
     // scripts/spike-task-loggers.mjs). Pairs with the "recorded output file" log.
     if (any.subtype === 'task_notification' && !taskOutputFiles.has(norm.task.id)) {
-      console.warn('[claude] task_notification settled with no output file ' + JSON.stringify({ task_id: norm.task.id, task_type: norm.task.type, status: norm.task.status }));
+      serverLog('warn', 'claude', 'task_notification settled with no output file ' + JSON.stringify({ task_id: norm.task.id, task_type: norm.task.type, status: norm.task.status }));
     }
     // Emit LIVE — even mid-foreground-turn. task_event is turnId-less and lands
     // in the sticky BackgroundTasksPanel, a separate lane from the turn's content
@@ -996,7 +997,7 @@ export function createClaudeBackend(): ServerBackend {
     setModel(model: string) {
       currentModel = model;
       // Apply to the live session via the streaming-mode control method.
-      if (session) session.query.setModel(model).catch((e: any) => console.error('[claude] setModel failed', e?.message ?? e));
+      if (session) session.query.setModel(model).catch((e: any) => serverLog('error', 'claude', 'setModel failed', e?.message ?? e));
       lastTurnSend?.({ type: 'capabilities', ...buildCapabilities() });
     },
 
@@ -1020,7 +1021,7 @@ export function createClaudeBackend(): ServerBackend {
       currentBypassMode = mode === 'bypassPermissions';
       if (session) {
         const applied = (currentBypassMode ? 'default' : mode) as Options['permissionMode'];
-        session.query.setPermissionMode(applied!).catch((e: any) => console.error('[claude] setPermissionMode failed', e?.message ?? e));
+        session.query.setPermissionMode(applied!).catch((e: any) => serverLog('error', 'claude', 'setPermissionMode failed', e?.message ?? e));
       }
       lastTurnSend?.({ type: 'capabilities', ...buildCapabilities() });
     },
@@ -1175,7 +1176,7 @@ export function createClaudeBackend(): ServerBackend {
         } catch (err: any) {
           // Interrupt fail-loud, then fall back to AbortController. Repeated
           // occurrence means the SDK interrupt surface broke.
-          console.error('[claude] interrupt() failed; aborting session', err?.message ?? err);
+          serverLog('error', 'claude', 'interrupt() failed; aborting session', err?.message ?? err);
           try { session.abort.abort(); } catch { /* best-effort */ }
         }
       }
@@ -1216,7 +1217,7 @@ export function createClaudeBackend(): ServerBackend {
     async reloadSkills() {
       const q = session?.query;
       if (!q) {
-        console.warn('[claude] reloadSkills: no live session — app-skill edit will apply on next session init');
+        serverLog('warn', 'claude', 'reloadSkills: no live session — app-skill edit will apply on next session init');
         return;
       }
       try {
@@ -1226,10 +1227,10 @@ export function createClaudeBackend(): ServerBackend {
         // Log success so a dev build can confirm the reload re-scanned plugins
         // from disk for the live session. plugins/skills counts let us eyeball
         // that our app-skill local plugin is present. See skills#4.
-        console.warn('[claude] reloadPlugins() applied — app-skill edit now live (effective next turn) '
+        serverLog('warn', 'claude', 'reloadPlugins() applied — app-skill edit now live (effective next turn) '
           + JSON.stringify({ plugins: refreshed.plugins?.length ?? 0, skills: cache.skills.length }));
       } catch (err: any) {
-        console.warn('[claude] reloadPlugins() failed; app-skill edit will apply on next session init instead', err?.message ?? err);
+        serverLog('warn', 'claude', 'reloadPlugins() failed; app-skill edit will apply on next session init instead', err?.message ?? err);
       }
     },
 
@@ -1241,7 +1242,7 @@ export function createClaudeBackend(): ServerBackend {
       try {
         await session.query.stopTask(taskId);
       } catch (err: any) {
-        console.error('[claude] stopTask failed', { taskId, message: err?.message ?? err });
+        serverLog('error', 'claude', 'stopTask failed', { taskId, message: err?.message ?? err });
       }
     },
 
@@ -1260,14 +1261,14 @@ export function createClaudeBackend(): ServerBackend {
           if (existsSync(candidate)) {
             file = candidate;
             tasksDir ??= dir; // cache a derived hit for sibling tasks
-            console.warn('[claude] readTaskOutput: recovered via tasks dir ' + JSON.stringify({ task_id: taskId, dir }));
+            serverLog('debug', 'claude', 'readTaskOutput: recovered via tasks dir ' + JSON.stringify({ task_id: taskId, dir }));
           }
         }
       }
       // Still nothing: a subagent/monitor/workflow whose output is inline, or a
       // genuinely fileless task. Return a calm note rather than throwing.
       if (!file) {
-        console.warn('[claude] readTaskOutput: no output file for task ' + JSON.stringify({ task_id: taskId, task_type: backgroundTasks.get(taskId)?.type ?? 'unknown', known: backgroundTasks.has(taskId), triedDir: tasksDir ?? deriveTasksDir(lastSessionId) ?? null }));
+        serverLog('warn', 'claude', 'readTaskOutput: no output file for task ' + JSON.stringify({ task_id: taskId, task_type: backgroundTasks.get(taskId)?.type ?? 'unknown', known: backgroundTasks.has(taskId), triedDir: tasksDir ?? deriveTasksDir(lastSessionId) ?? null }));
         return '(no output recorded for this task)';
       }
       // We run ON the remote, so this reads the remote file directly — main /
@@ -1741,7 +1742,7 @@ export function processMessage(msg: SDKMessage, send: SendFn, cwd: string, block
                 // wire format likely changed. Drops the task from the plan
                 // panel; next TaskList reconcile can recover. Log the format
                 // so we know what to fix.
-                console.error('[claude] TaskCreate result parse failed; format may have changed', { contentPreview: content.slice(0, 300) });
+                serverLog('error', 'claude', 'TaskCreate result parse failed; format may have changed', { contentPreview: content.slice(0, 300) });
               }
             }
 
@@ -1753,7 +1754,7 @@ export function processMessage(msg: SDKMessage, send: SendFn, cwd: string, block
               if (snapshot) {
                 reconcileTasks(tasks, snapshot, send);
               } else {
-                console.error('[claude] TaskList result parse failed; format may have changed', { contentPreview: content.slice(0, 300) });
+                serverLog('error', 'claude', 'TaskList result parse failed; format may have changed', { contentPreview: content.slice(0, 300) });
               }
             }
 

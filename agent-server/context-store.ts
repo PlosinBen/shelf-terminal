@@ -1,4 +1,5 @@
 import * as fs from 'fs';
+import { serverLog } from './server-logger';
 import * as path from 'path';
 import * as os from 'os';
 
@@ -45,7 +46,7 @@ export function loadContext(sessionId: string): PersistedContext | null {
     // Anything else (permission denied, JSON corruption) is worth flagging
     // because it silently loses user history.
     if (err?.code !== 'ENOENT') {
-      console.error('[context-store] loadContext failed', { sessionId, code: err?.code, message: err?.message ?? err });
+      serverLog('error', 'context-store', 'loadContext failed', { sessionId, code: err?.code, message: err?.message ?? err });
     }
     return null;
   }
@@ -65,7 +66,7 @@ export function deleteContext(sessionId: string): void {
     // ENOENT = already deleted, no-op. Anything else (permission denied)
     // is a real problem — context lingers beyond /clear, may resurrect.
     if (err?.code !== 'ENOENT') {
-      console.error('[context-store] deleteContext failed', { sessionId, code: err?.code, message: err?.message ?? err });
+      serverLog('error', 'context-store', 'deleteContext failed', { sessionId, code: err?.code, message: err?.message ?? err });
     }
   }
 }
@@ -86,15 +87,15 @@ export function cleanupOldContexts(maxAgeDays = 30): void {
       } catch (err: any) {
         // Corrupt file — remove it. The parse/read failure itself is worth
         // logging so we know context files are getting corrupted.
-        console.error('[context-store] corrupt context file removed', { file, code: err?.code, message: err?.message ?? err });
+        serverLog('error', 'context-store', 'corrupt context file removed', { file, code: err?.code, message: err?.message ?? err });
         try {
           fs.unlinkSync(filePath);
         } catch (unlinkErr: any) {
-          console.error('[context-store] failed to remove corrupt context file', { file, code: unlinkErr?.code, message: unlinkErr?.message ?? unlinkErr });
+          serverLog('error', 'context-store', 'failed to remove corrupt context file', { file, code: unlinkErr?.code, message: unlinkErr?.message ?? unlinkErr });
         }
       }
     }
   } catch (err: any) {
-    console.error('[context-store] cleanupOldContexts dir scan failed', err?.message ?? err);
+    serverLog('error', 'context-store', 'cleanupOldContexts dir scan failed', err?.message ?? err);
   }
 }
