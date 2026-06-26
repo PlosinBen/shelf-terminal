@@ -87,6 +87,7 @@ title: shelf-terminal — Intent → File Index
 | Provider 純 helper（copilot） | `providers/copilot/helpers.ts` | copilot/index 抽出的純函式 + types（只被 copilot/ 引用） |
 | Provider 共用 helper | `providers/shared.ts` | `stripCwd` / `resolveSkillsPluginRoot` — 跨 provider 共用純函式 |
 | App-tool bridge（agent-server 端） | `app-tool-client.ts` + `app-tool-tools.ts` | in-process MCP 工具的共用 body：`callMain` + `runBridgeTool` + 描述常數 |
+| Log proxy → main | `server-logger.ts` | `serverLog(level,tag,msg,...args)`：args 源頭 flatten 後走 wire `log` 訊息回 main（agent-server 無獨立 observability，見 `contracts/agent-wire-protocol`） |
 | ~/.shelf 清理（heartbeat-lease） | `cleanup.ts` | `runCleanupSweep()` 啟動時按 `.heartbeat` lease 回收 version/appId 殘留 |
 | Context persistence | `context-store.ts` | `loadContext`/`saveContext`/`deleteContext`/`cleanupOldContexts`，atomic write 到 `~/.shelf/agent-context/` |
 | Context persistence 測試 | `context-store.test.ts` | round-trip + Claude resume / Copilot chain |
