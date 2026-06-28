@@ -54,18 +54,19 @@ related:
 
 **Decision**：**provider 內部攔截 `/mcp` `/skills`（像 `/model`），讀自家 SDK 結構化資料 → 各自組 markdown → 印 `reply`**。renderer / wire / main **零改**。**不建跨 provider 共通 result type** —— 各 provider 用自己的形狀組卡片（`{claude,copilot}/helpers.ts` 的純函式 formatter），只共用無語意排版工具 `md-table.ts`。見 `agent-providers#6`（含為何共通 normalized type 會權責倒置）。
 - **資料來源（init 抓一次、cache raw、reconnect 刷新）**：Claude `Query.mcpServerStatus()` + `supportedCommands()`，**必須在 REAL persistent session 的 `system/init` 抓**（`refreshLoadedContext()`，full options），不是 cwd-only warmup probe（會漏 app skills + in-process bridge）；Copilot 從 `session.skills_loaded` / `session.mcp_servers_loaded` event 抓。cache 存 **raw SDK 結果**，讀時才 format。
-- **tools 列出**：Claude `mcpServerStatus()` 每 server 帶 `tools[]`（+`readOnly`/`destructive` annotations）→ `/mcp` 巢狀列出。Copilot **沒有** per-server tool 來源（event / `mcp.list()` / `mcp.discover()` 皆無）→ 只列 server；要補得走 client `tools.list()` + `namespacedName`（`server/tool`）前綴 group，未驗證、deferred。
+- **tools 列出（`/mcp` 每 server 巢狀列其 tools）**：Claude `mcpServerStatus()` 每 server 直接帶 `tools[]`（+`readOnly`/`destructive` annotations）。Copilot 的 `mcp.list()`/event/`mcp.discover()` **都不帶 per-server tools** → 只能列 server header;**要補真實外部 MCP server 的 tools 得走 client `tools.list()` + `namespacedName`（`server/tool`）前綴 group,未驗證、deferred（等 `app-level-mcps` 有東西可測）**。
+- **in-process `shelf` bridge 兩家都要顯示（可用性）**：bridge（`list_app_skills`/.../`web.fetch`）是 in-process 工具,**Claude SDK 把它包成 MCP server `shelf`**（`mcpServerStatus()` 直接含,帶 tools）；**Copilot 把它註冊成 `config.tools`、不是 MCP server**（`mcp.list()` 不含）。為了兩家一致都看得到,Copilot `/mcp` **主動補一個 `shelf` 條目**,其 tools 取自單一來源 `app-tool-tools.ts` 的 `SHELF_BRIDGE_TOOLS`（與註冊同源、不漂移）。bridge 永遠顯示;真實 server pull 失敗只加 fail-loud 註記、不藏 bridge。
 - **不對稱（SDK 限制）**：`source`/`enabled` 只有 Copilot 給得出；Claude `/skills` = `supportedCommands()` 去掉已知 built-ins。各 provider 卡片本就不同 —— 在 `agent-providers#6` 下合法。
 - **list ↔ dispatch 必須成對**：加進 command list **且**實作攔截 —— 只列不攔會被當 prompt 餵模型。
 - **cold-start read-through warm（`ensureLoadedContext`）**：cache 是 read-through —— slash handler 先 `await ensureLoadedContext()` 再讀。**冷窗（開 tab、未送訊息、就打 `/mcp`）**就地暖一次。**兩家機制不同,都源於「載入訊號要等第一個 turn」**：
   - **Claude**:常駐 session 是 streaming-input，**未 push 訊息前不發 `system/init`**（實測:streaming 流不送訊息 15s 無 init;字串 prompt `' '` 會 init）→ 另開**字串 prompt 拋棄式 probe**（full options:plugins + in-process `shelf` MCP,少一樣就漏報）,init 即讀 `mcpServerStatus()`/`supportedCommands()` 即 abort。real session 出現後由 `refreshLoadedContext()` 持續刷新。
   - **Copilot**:`skills_loaded`/`mcp_servers_loaded` event **在第一個 turn 才發、不是 bare `createSession()`**（症狀:冷窗按 `/mcp` 回 "failed to initialize"）→ 不等事件,改**直接 pull** `session.rpc.mcp.list()` / `session.rpc.skills.list()`（deterministic）。event 仍負責後續 turn/reconnect 的刷新。
   - 暖機**刻意與 auth probe 分離**（載 MCP/skills 不與登入判斷 fate-share,慢/壞的 MCP 不擋開 pane）;idempotent、per-listing（部分 event 已填則只補缺的）。
-- **fail-loud**：暖機後 cache 仍 `undefined`（probe 真的失敗）→ 印「Could not load …」，**不謊報「none」**。
+- **fail-loud**：載入真的失敗 → 印「Could not load …」，**不謊報「none」**。`/skills` 整張 fail-loud；`/mcp` 因為 `shelf` bridge 永遠在,失敗時仍顯示 bridge + 加一行「無法載入已設定的 MCP server」註記。
 
 **Do not change casually because**：① 在 warmup probe（cwd-only）抓會漏掉 app skills + in-process `shelf` bridge —— 一定要在 full-options 的 session 抓（含 `ensureLoadedContext` 的拋棄式 probe，真機 `/mcp` 確認 `shelf` 有列出）。② Claude 冷窗不能改用「`ensureSession()` 不送訊息」暖機 —— streaming session 不會 init。③ 別把暖機折進 auth warmup 省一個行程 —— 會讓登入判斷被 MCP 啟動健康度綁架（`app-level-mcps` 上線後尤甚）。
 
-**Related**：`agent-providers#1`、`agent-providers#6`、PRODUCT #5（原生的歸原生）、`agent-server/providers/{md-table,claude/index,claude/helpers,copilot/index,copilot/helpers,fake/index}.ts`、測試 `agent-server/providers/{claude,copilot}/{loaded-context-warm,mcp-skills-cards}.test.ts`。
+**Related**：`agent-providers#1`、`agent-providers#6`、`skills#2`、PRODUCT #5（原生的歸原生）、`agent-server/{app-tool-tools,providers/md-table,providers/claude/index,providers/claude/helpers,providers/copilot/index,providers/copilot/helpers,providers/fake/index}.ts`、測試 `agent-server/providers/{claude,copilot}/{loaded-context-warm,mcp-skills-cards}.test.ts`。
 
 ## skills#4 — App-skill live hot-reload：skill 改完免重連即生效  ·  [Decision]
 

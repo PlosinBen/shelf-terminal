@@ -11,7 +11,7 @@ import { describe, it, expect, vi } from 'vitest';
 
 const h = vi.hoisted(() => ({
   skills: [{ name: 'my-skill', description: 'd', source: 'custom' }] as any[],
-  servers: [{ name: 'shelf', status: 'connected' }] as any[],
+  servers: [{ name: 'playwright', status: 'connected', source: 'user' }] as any[],
   rpcThrows: false,
 }));
 
@@ -55,15 +55,17 @@ function collect() {
 const replyOf = (msgs: any[]) => msgs.find((m) => m.type === 'message' && m.msgType === 'reply');
 
 describe('copilot /mcp /skills cold-start warm (RPC pull)', () => {
-  it('cold /mcp pulls the server list via rpc.mcp.list() — no "failed to initialize"', async () => {
+  it('cold /mcp pulls real servers AND surfaces the in-process shelf bridge with its tools', async () => {
     h.rpcThrows = false;
     const backend = createCopilotBackend();
     const { msgs, send } = collect();
     await backend.query({ prompt: '/mcp', cwd: '/tmp' } as any, send);
     const reply = replyOf(msgs);
     expect(reply).toBeDefined();
-    expect(reply.content).toContain('shelf');
-    expect(reply.content).not.toMatch(/not initialized|send a message first|Could not load|failed to initialize/i);
+    expect(reply.content).toContain('playwright');                 // real server from rpc.mcp.list()
+    expect(reply.content).toContain('**`shelf`** · connected');    // appended in-process bridge
+    expect(reply.content).toContain('list_app_skills');            // a bridge tool
+    expect(reply.content).not.toMatch(/not initialized|Could not load|failed to initialize/i);
   });
 
   it('cold /skills pulls via rpc.skills.list()', async () => {
@@ -74,11 +76,13 @@ describe('copilot /mcp /skills cold-start warm (RPC pull)', () => {
     expect(replyOf(msgs).content).toContain('my-skill');
   });
 
-  it('rpc pull throws → fail-loud load error (never "none")', async () => {
+  it('real-server pull throws → fail-loud note, but the shelf bridge still shows', async () => {
     h.rpcThrows = true;
     const backend = createCopilotBackend();
     const { msgs, send } = collect();
     await backend.query({ prompt: '/mcp', cwd: '/tmp' } as any, send);
-    expect(replyOf(msgs).content).toMatch(/Could not load/i);
+    const content = replyOf(msgs).content;
+    expect(content).toMatch(/Could not load configured MCP servers/i);  // fail-loud
+    expect(content).toContain('**`shelf`** · connected');               // bridge never hidden
   });
 });
