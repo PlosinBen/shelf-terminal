@@ -586,11 +586,11 @@ function copilotSkillSource(source?: string): 'project' | 'app' | 'personal' | '
 }
 
 /**
- * `/mcp` card. Per server: a header line (name · status [· source] [· error])
- * followed by a bullet list of its tools (mirrors Claude's card). The in-process
- * `shelf` bridge is passed in with its tools by the caller (it isn't an MCP
- * server in Copilot's model — see formatCopilotMcpCard caller). Empty → an
- * explicit "none" line.
+ * `/mcp` card = two tables: a servers table (Server · Status [· Source]) and a
+ * flat tools table (Tool · Server · Description) aggregating every server's
+ * tools. The in-process `shelf` bridge is passed in with its tools by the caller
+ * (it isn't an MCP server in Copilot's model). Empty → an explicit "none" line.
+ * Tools table omitted when no server reports tools. Mirrors Claude's card.
  */
 export function formatCopilotMcpCard(
   servers: Array<{
@@ -599,17 +599,26 @@ export function formatCopilotMcpCard(
   }>,
 ): string {
   if (servers.length === 0) return 'No MCP servers loaded in this session.';
-  const sections = servers.map((s) => {
-    const bits = [s.status ?? 'unknown', ...(s.source ? [s.source] : [])];
-    let head = `**\`${s.name}\`** · ${bits.join(' · ')}`;
-    if (s.error) head += ` · ${s.error}`;
-    const tools = s.tools ?? [];
-    if (tools.length === 0) return head;
-    const lines = tools.map((t) => `- \`${t.name}\`${t.description ? ` — ${t.description.replace(/\n+/g, ' ')}` : ''}`);
-    return `${head}\n${lines.join('\n')}`;
+  const hasSource = servers.some((s) => s.source);
+  const serverHeaders = ['Server', 'Status', ...(hasSource ? ['Source'] : [])];
+  const serverRows = servers.map((s) => {
+    const status = s.error ? `${s.status ?? 'unknown'} (${s.error})` : (s.status ?? 'unknown');
+    const r = [`\`${cell(s.name)}\``, cell(status)];
+    if (hasSource) r.push(cell(s.source ?? '—'));
+    return r;
   });
+  const toolRows: string[][] = [];
+  for (const s of servers) {
+    for (const t of s.tools ?? []) {
+      toolRows.push([`\`${cell(t.name)}\``, `\`${cell(s.name)}\``, cell(t.description ?? '—')]);
+    }
+  }
   const n = servers.length;
-  return `${n} MCP server${n > 1 ? 's' : ''}:\n\n${sections.join('\n\n')}`;
+  let out = `${n} MCP server${n > 1 ? 's' : ''}:\n\n${mdTable(serverHeaders, serverRows)}`;
+  if (toolRows.length) {
+    out += `\n\n${toolRows.length} MCP tool${toolRows.length > 1 ? 's' : ''}:\n\n${mdTable(['Tool', 'Server', 'Description'], toolRows)}`;
+  }
+  return out;
 }
 
 /** `/skills` card from raw skills_loaded skills. Adaptive Source/Description

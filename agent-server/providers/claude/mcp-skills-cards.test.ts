@@ -4,7 +4,7 @@ import { formatClaudeMcpCard, formatClaudeSkillsCard } from './helpers';
 const BUILTINS = new Set(['clear', 'compact', 'mcp', 'skills', 'model']);
 
 describe('formatClaudeMcpCard', () => {
-  it('renders each server with a header and its tools (with annotations)', () => {
+  it('renders a servers table and a flat tools table (with annotations)', () => {
     const md = formatClaudeMcpCard([
       {
         name: 'shelf',
@@ -16,21 +16,23 @@ describe('formatClaudeMcpCard', () => {
       },
     ]);
     expect(md).toContain('1 MCP server:');
-    expect(md).toContain('**`shelf`** · connected');
-    expect(md).toContain('`list_app_skills` — list skills');
-    expect(md).toContain('(read-only)');
-    expect(md).toContain('(destructive)');
+    expect(md).toContain('| Server | Status |');
+    expect(md).toContain('| `shelf` | connected |');
+    expect(md).toContain('2 MCP tools:');
+    expect(md).toContain('| Tool | Server | Description |');
+    expect(md).toContain('| `list_app_skills` _(read-only)_ | `shelf` | list skills |');
+    expect(md).toContain('_(destructive)_');
   });
 
-  it('a connected server with no tools is just its header line', () => {
+  it('a server with no tools → servers table only, no tools table', () => {
     const md = formatClaudeMcpCard([{ name: 'empty', status: 'connected' }]);
-    expect(md).toContain('**`empty`** · connected');
-    expect(md).not.toContain('\n-'); // no bullet tool lines
+    expect(md).toContain('| `empty` | connected |');
+    expect(md).not.toContain('MCP tool');
   });
 
-  it('surfaces a failed server error in the header', () => {
+  it('folds a failed server error into the status cell', () => {
     const md = formatClaudeMcpCard([{ name: 'broken', status: 'failed', error: 'spawn ENOENT' }]);
-    expect(md).toContain('**`broken`** · failed · spawn ENOENT');
+    expect(md).toContain('| `broken` | failed (spawn ENOENT) |');
   });
 
   it('empty server set → explicit none line, never blank', () => {

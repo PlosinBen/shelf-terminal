@@ -62,9 +62,9 @@ describe('copilot /mcp /skills cold-start warm (RPC pull)', () => {
     await backend.query({ prompt: '/mcp', cwd: '/tmp' } as any, send);
     const reply = replyOf(msgs);
     expect(reply).toBeDefined();
-    expect(reply.content).toContain('playwright');                 // real server from rpc.mcp.list()
-    expect(reply.content).toContain('**`shelf`** · connected');    // appended in-process bridge
-    expect(reply.content).toContain('list_app_skills');            // a bridge tool
+    expect(reply.content).toContain('| `playwright` |');           // real server from rpc.mcp.list()
+    expect(reply.content).toContain('| `shelf` |');                // appended in-process bridge
+    expect(reply.content).toContain('| `list_app_skills` | `shelf` |'); // a bridge tool in the tools table
     expect(reply.content).not.toMatch(/not initialized|Could not load|failed to initialize/i);
   });
 
@@ -83,6 +83,6 @@ describe('copilot /mcp /skills cold-start warm (RPC pull)', () => {
     await backend.query({ prompt: '/mcp', cwd: '/tmp' } as any, send);
     const content = replyOf(msgs).content;
     expect(content).toMatch(/Could not load configured MCP servers/i);  // fail-loud
-    expect(content).toContain('**`shelf`** · connected');               // bridge never hidden
+    expect(content).toContain('| `shelf` |');                           // bridge never hidden
   });
 });

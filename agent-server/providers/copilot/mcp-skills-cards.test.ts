@@ -2,32 +2,34 @@ import { describe, it, expect } from 'vitest';
 import { formatCopilotMcpCard, formatCopilotSkillsCard } from './helpers';
 
 describe('formatCopilotMcpCard', () => {
-  it('renders each server as a header line (name · status · source)', () => {
+  it('renders a servers table with adaptive Source column', () => {
     const md = formatCopilotMcpCard([
       { name: 'fs', status: 'connected', source: 'user' },
       { name: 'db', status: 'failed', error: 'down' },
     ]);
     expect(md).toContain('2 MCP servers:');
-    expect(md).toContain('**`fs`** · connected · user');
-    expect(md).toContain('**`db`** · failed · down');
+    expect(md).toContain('| Server | Status | Source |');
+    expect(md).toContain('| `fs` | connected | user |');
+    expect(md).toContain('| `db` | failed (down) |');
   });
 
-  it('nests a server\'s tools as a bullet list', () => {
+  it('renders a flat tools table (Tool · Server · Description)', () => {
     const md = formatCopilotMcpCard([
       { name: 'shelf', status: 'connected', source: 'in-process', tools: [
         { name: 'list_app_skills', description: 'list skills' },
         { name: 'web.fetch', description: 'fetch a url' },
       ] },
     ]);
-    expect(md).toContain('**`shelf`** · connected · in-process');
-    expect(md).toContain('- `list_app_skills` — list skills');
-    expect(md).toContain('- `web.fetch` — fetch a url');
+    expect(md).toContain('2 MCP tools:');
+    expect(md).toContain('| Tool | Server | Description |');
+    expect(md).toContain('| `list_app_skills` | `shelf` | list skills |');
+    expect(md).toContain('| `web.fetch` | `shelf` | fetch a url |');
   });
 
-  it('a server with no tools is just its header line', () => {
+  it('a server with no tools → servers table only, no tools table', () => {
     const md = formatCopilotMcpCard([{ name: 'fs', status: 'connected' }]);
-    expect(md).toContain('**`fs`** · connected');
-    expect(md).not.toContain('\n-');
+    expect(md).toContain('| `fs` | connected |');
+    expect(md).not.toContain('MCP tool');
   });
 
   it('empty → explicit none line', () => {
