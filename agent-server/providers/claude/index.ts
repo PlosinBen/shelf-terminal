@@ -2,7 +2,7 @@ import { query as sdkQuery, tool, createSdkMcpServer } from '@anthropic-ai/claud
 import type { Query, Options, SDKMessage, SDKUserMessage, CanUseTool } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 import { runBridgeTool, APP_SKILL_LIST_DESC, APP_SKILL_GET_DESC, APP_SKILL_CREATE_DESC, APP_SKILL_UPDATE_DESC, WEB_FETCH_DESC } from '../../app-tool-tools';
-import { isWebFetchTool } from '@shared/web-session';
+import { isWebFetchTool, WEB_FETCH_TOOL } from '@shared/web-session';
 import { serverLog } from '../../server-logger';
 import { createRouterState, notePush, routeMessage } from './turn-router';
 import { randomUUID } from 'node:crypto';
@@ -226,7 +226,7 @@ function getShelfMcpServer() {
           const { text, isError } = await runBridgeTool('app_skill.update', { name, content });
           return { content: [{ type: 'text' as const, text }], ...(isError ? { isError: true } : {}) };
         }),
-        tool('web_fetch', WEB_FETCH_DESC, {
+        tool(WEB_FETCH_TOOL, WEB_FETCH_DESC, {
           url: z.string().describe('absolute http(s) URL of the internal service'),
           method: z.string().optional().describe('HTTP method (default GET)'),
           headers: z.record(z.string(), z.string()).optional().describe('extra request headers, e.g. {"kbn-xsrf":"true"}'),

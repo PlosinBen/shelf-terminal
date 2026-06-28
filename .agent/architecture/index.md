@@ -1,8 +1,3 @@
----
-type: index
-title: Architecture
----
-
 # Architecture
 
 Abstract data flow at the system level (component names, no filenames).

@@ -4,13 +4,15 @@ import { isWebFetchTool } from '@shared/web-session';
 
 describe('isWebFetchTool', () => {
   it('matches the bare name and the MCP-prefixed name', () => {
-    expect(isWebFetchTool('web_fetch')).toBe(true);
-    expect(isWebFetchTool('mcp__shelf__web_fetch')).toBe(true);
+    expect(isWebFetchTool('browser_fetch')).toBe(true);
+    expect(isWebFetchTool('mcp__shelf__browser_fetch')).toBe(true);
   });
   it('does not match other tools', () => {
     expect(isWebFetchTool('mcp__shelf__list_app_skills')).toBe(false);
     expect(isWebFetchTool('Bash')).toBe(false);
-    expect(isWebFetchTool('web_fetch_other')).toBe(false);
+    expect(isWebFetchTool('browser_fetch_other')).toBe(false);
+    // The SDK's built-in web_fetch is a different tool — must NOT match.
+    expect(isWebFetchTool('web_fetch')).toBe(false);
   });
 });
 

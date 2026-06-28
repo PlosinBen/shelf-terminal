@@ -15,6 +15,11 @@ export interface Tab {
   provider?: AgentProvider;
   /** Web tabs only: current address shown in the address bar. */
   url?: string;
+  /**
+   * Web tabs only: the user renamed this tab, so navigation must not overwrite
+   * its label with the page host anymore. Set by renameTab.
+   */
+  labelPinned?: boolean;
 }
 
 export interface ProjectRuntime {
@@ -239,7 +244,8 @@ export function renameTab(projectIndex: number, tabIndex: number, name: string) 
   if (!proj || !proj.tabs[tabIndex]) return;
 
   const tabs = proj.tabs.map((t, i) =>
-    i === tabIndex ? { ...t, label: name } : t,
+    // Pin the label so a web tab's navigation no longer auto-overwrites it.
+    i === tabIndex ? { ...t, label: name, labelPinned: true } : t,
   );
   projects = projects.map((p, i) =>
     i === projectIndex ? { ...p, tabs } : p,
@@ -250,6 +256,15 @@ export function renameTab(projectIndex: number, tabIndex: number, name: string) 
 // Web tab navigated — persist its current URL and reflect the host as the tab
 // label so the tab bar shows where you are. Keyed by tabId (the WebTabView only
 // knows its own id, not project/tab indices).
+/**
+ * Web tab label on navigation: a user-pinned label (set via renameTab) is kept
+ * verbatim; otherwise the label follows the page host. Pure for testability.
+ */
+export function webTabLabelOnNav(tab: Pick<Tab, 'label' | 'labelPinned'>, url: string): string {
+  if (tab.labelPinned) return tab.label;
+  try { return new URL(url).host || 'Web'; } catch { return 'Web'; }
+}
+
 export function setWebTabUrl(tabId: string, url: string) {
   let changed = false;
   projects = projects.map((p) => {
@@ -257,9 +272,7 @@ export function setWebTabUrl(tabId: string, url: string) {
     const tabs = p.tabs.map((t) => {
       if (t.id !== tabId || t.type !== 'web') return t;
       changed = true;
-      let label = 'Web';
-      try { label = new URL(url).host || 'Web'; } catch { /* keep default */ }
-      return { ...t, url, label };
+      return { ...t, url, label: webTabLabelOnNav(t, url) };
     });
     return { ...p, tabs };
   });

@@ -55,6 +55,11 @@ export function webFetch(req: WebFetchRequest): Promise<WebFetchResult> {
       url: req.url,
       method: req.method ?? 'GET',
       session: getWebSession(),
+      // Ride the logged-in cookie jar. Electron's net.request does NOT send
+      // session cookies unless this is set — without it every authed request
+      // comes back 401 even though the user is signed in. This is the whole
+      // point of browser_fetch (vs the agent's anonymous web_fetch).
+      useSessionCookies: true,
       redirect: 'manual', // do NOT follow — see doc comment above
     });
 

@@ -193,14 +193,9 @@ export function TabBar() {
       <button
         className="tab-add"
         tabIndex={-1}
-        onClick={handleNewTab}
-        onContextMenu={(e) => {
-          e.preventDefault();
-          if (project.tabs.length < project.config.maxTabs) {
-            setAddMenu({ x: e.clientX, y: e.clientY });
-          }
-        }}
-        title="New terminal (right-click for agent)"
+        onClick={(e) => { e.preventDefault(); setAddMenu({ x: e.clientX, y: e.clientY }); }}
+        onContextMenu={(e) => { e.preventDefault(); setAddMenu({ x: e.clientX, y: e.clientY }); }}
+        title="New tab"
         disabled={project.tabs.length >= project.config.maxTabs}
       >
         +

@@ -35,7 +35,7 @@ related:
 
 **Decision**：gate 放在 **`handleAppTool('web.fetch')`**（`src/main/agent/app-tool.ts`）——兩 provider 都經 `callMain('web.fetch')` 匯流到這個**單一 provider-agnostic 窄口**。
 - permission 走**自有的 web-permission channel**（`src/main/web-permission.ts`：`requestWebPermission(meta)` → `WEB_PERMISSION_REQUEST` IPC → renderer app 層全域 popup `WebPermissionPrompt.tsx` → `WEB_PERMISSION_RESOLVE`）。跟 agent timeline / DecisionPanel **完全脫鉤**（重用 `SelectionPanel` 純元件,但不走 agent permission plumbing）。
-- 兩 provider 只做一件 trivial 的事:**web_fetch 跳過 provider 層提示**（claude `canUseTool` 對 `isWebFetchTool(toolName)` 直接 allow、copilot `defineTool(..., {skipPermission:true})`）,避免雙重提示。
+- 兩 provider 只做一件 trivial 的事:**`browser_fetch` 跳過 provider 層提示**（claude `canUseTool` 對 `isWebFetchTool(toolName)` 直接 allow、copilot `defineTool(..., {skipPermission:true})`）,避免雙重提示。工具命名為 `browser_fetch` 而非 `web_fetch`:Claude SDK 內建了同名 `web_fetch`,外部工具撞名會直接報錯;且語意不同（內建 `web`=匿名抓公網、本工具 `browser`=帶你瀏覽器分頁的登入 session）。
 - **連帶解掉三件事**：① Claude/Copilot 一致（gate 不依賴 provider permission 形狀,copilot 也拿到 origin 防偽 popup + grant）;② **bypass 模式自動 gate**（bypass 只讓 provider 跳過 tool 提示,但 tool 仍執行到 handleAppTool → gate 照常,不需 provider 特例）;③ renderer 無 tool 語意分支。
 - **projectId 串接**（grant key 要）：`AgentView` opts → `AGENT_INIT` → `createRemoteBackend` → `spawnAgentServer` → `wrapProcess` → app_tool ctx `{projectId}`。**不放 agent SessionInstance**。
 
@@ -89,3 +89,13 @@ related:
 **Open**：完整共用 prompt 路由層（把既有 agent permission/picker 也接上 `sendInteractivePrompt`）尚未做——目前只 web-permission 用,agent permission 仍是 telegram notify-only fallback（見 `pm-agent`）。transport 已備妥,只差接過去。
 
 **Related**：`src/main/{web-permission,pm/telegram,pm/away-mode}.ts`、`WebPermissionPrompt.tsx`。
+
+## web-tab#6 — cookie jar：必 `useSessionCookies`，但不主動延長 session 壽命 · [Decision + Gotcha]
+
+**Gotcha（必修）**：`browser_fetch`（main `webFetch`，`src/main/web-session.ts`）的 `net.request` **一定要 `useSessionCookies: true`**。Electron 的 `net.request` 預設**不送 session cookie**——少了它,即使使用者在 web 分頁登入了,每個 authed request 仍回 401（实测 Kibana `/api/spaces/space` 401→200 就差這個）。這就是 `browser_fetch`（騎登入身分）相對內建 `web_fetch`（匿名）的全部意義。
+
+**持久化現況**：`persist:web` 是持久化 partition，**有 `Max-Age`/`Expires` 的 cookie 會自動跨 app 重啟存活**（Chromium 還原），完全免 code。**但 session cookie（無 expiry，如 Kibana 的 `sid`）Chromium 啟動時不載回** → 那類服務的登入態不跨重啟,使用者要重新登入。
+
+**Decision（刻意不做）**：**不**實作「跨重啟還原 session cookie」。服務把 cookie 設成 session（關閉即失效）是它**刻意的安全意圖**;我們主動把它撐過重啟 = 替使用者延長別人設計的短命 session = 越權。尊重來源服務的生命週期,讓使用者重新登入即可。用 persistent cookie 的服務本來就跨重啟存活,不受影響。
+
+**Do not change casually because**：別為了「方便」加回 session-cookie 還原機制——那是越權延長敏感 session,不是 bug。`useSessionCookies` 則相反,是必要的、不可拿掉。

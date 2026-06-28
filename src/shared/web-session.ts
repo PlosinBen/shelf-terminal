@@ -10,13 +10,19 @@ export const WEB_SESSION_PARTITION = 'persist:web';
 
 /**
  * Bare bridge-tool name the agent calls. Reaches main's canUseTool as
- * `mcp__shelf__web_fetch` (real providers prefix MCP tools) or bare `web_fetch`
- * (fake provider). Match with isWebFetchTool().
+ * `mcp__shelf__browser_fetch` (real providers prefix MCP tools) or bare
+ * `browser_fetch` (fake provider). Match with isWebFetchTool().
+ *
+ * NOT named `web_fetch`: the Claude Agent SDK now ships a built-in `web_fetch`
+ * tool (generic anonymous public-web fetch on the agent's side) and a same-named
+ * external tool errors out. Ours is distinct — it rides the user's logged-in
+ * browser session (the web tab's `persist:web` cookies) — hence `browser_fetch`:
+ * browser = carries your identity, vs web = anonymous public fetch.
  */
-export const WEB_FETCH_TOOL = 'web_fetch';
+export const WEB_FETCH_TOOL = 'browser_fetch';
 
 export function isWebFetchTool(toolName: string): boolean {
-  return toolName === WEB_FETCH_TOOL || toolName.endsWith('__web_fetch');
+  return toolName === WEB_FETCH_TOOL || toolName.endsWith('__browser_fetch');
 }
 
 /** Anti-spoof origin metadata attached to a web.fetch permission request. */

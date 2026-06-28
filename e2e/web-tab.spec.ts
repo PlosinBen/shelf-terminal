@@ -31,11 +31,27 @@ async function setupProject(page: Page) {
 }
 
 async function openWebTab(page: Page) {
-  await page.locator('.tab-add').click({ button: 'right' });
+  // Left-click the + button opens the kind menu (Terminal / Agent / Web).
+  await page.locator('.tab-add').click();
   await page.locator('.context-menu-item', { hasText: 'Web' }).click();
 }
 
 test.describe('web tab', () => {
+  test('the + button opens the kind menu instead of adding a terminal directly', async ({ shelfApp: { page } }) => {
+    await setupProject(page);
+    await expect(page.locator('.tab-bar .tab')).toHaveCount(1);
+
+    await page.locator('.tab-add').click();
+    // The menu appears with every tab kind; no tab was created by the click.
+    await expect(page.locator('.context-menu-item', { hasText: 'Terminal' })).toBeVisible({ timeout: 5_000 });
+    await expect(page.locator('.context-menu-item', { hasText: 'Web' })).toBeVisible();
+    await expect(page.locator('.tab-bar .tab')).toHaveCount(1);
+
+    // Picking Terminal from the menu is what actually adds the tab.
+    await page.locator('.context-menu-item', { hasText: 'Terminal' }).click();
+    await expect(page.locator('.tab-bar .tab')).toHaveCount(2, { timeout: 5_000 });
+  });
+
   test('opens a web tab with toolbar, address bar, scoped webview, and identity chip', async ({ shelfApp: { page } }) => {
     await setupProject(page);
     await openWebTab(page);
@@ -50,6 +66,20 @@ test.describe('web tab', () => {
 
     // A second tab was added alongside the initial terminal.
     await expect(page.locator('.tab-bar .tab')).toHaveCount(2);
+
+    // Regression: the <webview> must fill the tab body, not collapse to its
+    // content height. `.web-tab` relied on height:100% against an unsized
+    // wrapper and collapsed to ~content; it now fills via position:absolute.
+    const container = await page.locator('.web-tab:visible').boundingBox();
+    const toolbar = await page.locator('.web-tab-toolbar:visible').boundingBox();
+    const webview = await page.locator('webview[partition="persist:web"]').boundingBox();
+    expect(container).not.toBeNull();
+    expect(webview).not.toBeNull();
+    // The webview takes essentially all height below the toolbar (allow a few px).
+    const expectedHeight = container!.height - toolbar!.height;
+    expect(Math.abs(webview!.height - expectedHeight)).toBeLessThan(4);
+    // And the body is tall — guards against the collapsed ~content-height bug.
+    expect(webview!.height).toBeGreaterThan(400);
   });
 
   test('address bar accepts input', async ({ shelfApp: { page } }) => {
@@ -59,6 +89,41 @@ test.describe('web tab', () => {
     const address = page.locator('.web-tab-address:visible');
     await address.fill('kibana.corp.com');
     await expect(address).toHaveValue('kibana.corp.com');
+  });
+
+  test('a fresh web tab auto-focuses the address bar', async ({ shelfApp: { page } }) => {
+    await setupProject(page);
+    await openWebTab(page);
+
+    const address = page.locator('.web-tab-address:visible');
+    await expect(address).toBeFocused({ timeout: 5_000 });
+    // The bar stays empty — the about:blank starter page must not leak into it.
+    await expect(address).toHaveValue('');
+  });
+
+  test('Enter blurs the address bar (browser-like)', async ({ shelfApp: { page } }) => {
+    await setupProject(page);
+    await openWebTab(page);
+
+    const address = page.locator('.web-tab-address:visible');
+    await address.click();
+    await expect(address).toBeFocused();
+    await address.fill('example.com');
+    await address.press('Enter');
+    await expect(address).not.toBeFocused({ timeout: 5_000 });
+  });
+
+  test('a failed navigation surfaces an error banner', async ({ shelfApp: { page } }) => {
+    await setupProject(page);
+    await openWebTab(page);
+
+    const address = page.locator('.web-tab-address:visible');
+    await address.click();
+    // The reserved .invalid TLD never resolves → deterministic did-fail-load,
+    // independent of network availability.
+    await address.fill('does-not-exist.invalid');
+    await address.press('Enter');
+    await expect(page.locator('.web-tab-error:visible')).toBeVisible({ timeout: 10_000 });
   });
 
   test('settings → Web tab manages sessions and grants (empty states via IPC)', async ({ shelfApp: { page } }) => {
@@ -87,6 +152,16 @@ test.describe('web tab', () => {
     // Anti-spoof: the authoritatively-parsed origin is shown.
     await expect(popup.locator('.web-perm-origin')).toContainText('https://kibana.corp.com');
     await expect(popup.locator('.agent-perm-option', { hasText: 'Always allow this origin' })).toBeVisible();
+
+    // Regression: as a floating modal the panel needs its OWN opaque surface.
+    // It reuses .agent-permission, whose inline-timeline style is a 6%-alpha
+    // tint (fine over the opaque chat bg, but see-through as a modal) — the page
+    // bled through and the popup looked transparent. Opaque colors compute to
+    // `rgb(...)`; any alpha<1 computes to `rgba(...)`.
+    const panelBg = await popup
+      .locator('.agent-permission')
+      .evaluate((el) => getComputedStyle(el).backgroundColor);
+    expect(panelBg).toMatch(/^rgb\(/);
 
     await popup.locator('.agent-perm-option', { hasText: 'Allow once' }).click();
     await expect(popup).not.toBeVisible({ timeout: 5_000 });

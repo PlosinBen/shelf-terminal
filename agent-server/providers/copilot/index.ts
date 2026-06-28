@@ -16,6 +16,7 @@ import {
   type NormalizedSkill,
 } from '../loaded-context';
 import { runBridgeTool, APP_SKILL_LIST_DESC, APP_SKILL_GET_DESC, APP_SKILL_CREATE_DESC, APP_SKILL_UPDATE_DESC, WEB_FETCH_DESC } from '../../app-tool-tools';
+import { WEB_FETCH_TOOL } from '@shared/web-session';
 import { serverLog } from '../../server-logger';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -458,7 +459,7 @@ export function createCopilotBackend(): ServerBackend {
       // skipPermission: the gate lives downstream in main's handleAppTool (a
       // generic per-origin web-permission popup, provider-agnostic). Skipping the
       // copilot tool prompt avoids a double prompt; the downstream gate still runs.
-      sdkModule!.defineTool('web_fetch', {
+      sdkModule!.defineTool(WEB_FETCH_TOOL, {
         description: WEB_FETCH_DESC,
         parameters: { type: 'object', properties: {
           url: { type: 'string', description: 'absolute http(s) URL of the internal service' },
