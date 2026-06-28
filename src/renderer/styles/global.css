@@ -4381,6 +4381,11 @@ button {
   max-width: 460px;
   width: 90%;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  /* Inline-timeline panels use a 6%-alpha tint because an opaque chat bg sits
+     right behind them. As a floating modal the only thing behind the panel is
+     the page, so it needs its OWN opaque surface — keep the warm tint, but
+     layer it over an opaque --bg instead of letting the page bleed through. */
+  background: linear-gradient(rgba(229, 192, 123, 0.06), rgba(229, 192, 123, 0.06)), var(--bg);
 }
 .web-perm-desc { display: flex; flex-direction: column; gap: 3px; }
 .web-perm-origin { font-size: 13px; word-break: break-all; }

@@ -31,11 +31,27 @@ async function setupProject(page: Page) {
 }
 
 async function openWebTab(page: Page) {
-  await page.locator('.tab-add').click({ button: 'right' });
+  // Left-click the + button opens the kind menu (Terminal / Agent / Web).
+  await page.locator('.tab-add').click();
   await page.locator('.context-menu-item', { hasText: 'Web' }).click();
 }
 
 test.describe('web tab', () => {
+  test('the + button opens the kind menu instead of adding a terminal directly', async ({ shelfApp: { page } }) => {
+    await setupProject(page);
+    await expect(page.locator('.tab-bar .tab')).toHaveCount(1);
+
+    await page.locator('.tab-add').click();
+    // The menu appears with every tab kind; no tab was created by the click.
+    await expect(page.locator('.context-menu-item', { hasText: 'Terminal' })).toBeVisible({ timeout: 5_000 });
+    await expect(page.locator('.context-menu-item', { hasText: 'Web' })).toBeVisible();
+    await expect(page.locator('.tab-bar .tab')).toHaveCount(1);
+
+    // Picking Terminal from the menu is what actually adds the tab.
+    await page.locator('.context-menu-item', { hasText: 'Terminal' }).click();
+    await expect(page.locator('.tab-bar .tab')).toHaveCount(2, { timeout: 5_000 });
+  });
+
   test('opens a web tab with toolbar, address bar, scoped webview, and identity chip', async ({ shelfApp: { page } }) => {
     await setupProject(page);
     await openWebTab(page);
@@ -81,6 +97,8 @@ test.describe('web tab', () => {
 
     const address = page.locator('.web-tab-address:visible');
     await expect(address).toBeFocused({ timeout: 5_000 });
+    // The bar stays empty — the about:blank starter page must not leak into it.
+    await expect(address).toHaveValue('');
   });
 
   test('Enter blurs the address bar (browser-like)', async ({ shelfApp: { page } }) => {
@@ -134,6 +152,16 @@ test.describe('web tab', () => {
     // Anti-spoof: the authoritatively-parsed origin is shown.
     await expect(popup.locator('.web-perm-origin')).toContainText('https://kibana.corp.com');
     await expect(popup.locator('.agent-perm-option', { hasText: 'Always allow this origin' })).toBeVisible();
+
+    // Regression: as a floating modal the panel needs its OWN opaque surface.
+    // It reuses .agent-permission, whose inline-timeline style is a 6%-alpha
+    // tint (fine over the opaque chat bg, but see-through as a modal) — the page
+    // bled through and the popup looked transparent. Opaque colors compute to
+    // `rgb(...)`; any alpha<1 computes to `rgba(...)`.
+    const panelBg = await popup
+      .locator('.agent-permission')
+      .evaluate((el) => getComputedStyle(el).backgroundColor);
+    expect(panelBg).toMatch(/^rgb\(/);
 
     await popup.locator('.agent-perm-option', { hasText: 'Allow once' }).click();
     await expect(popup).not.toBeVisible({ timeout: 5_000 });
