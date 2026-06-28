@@ -9,7 +9,7 @@ interface SkillMeta {
   locked?: boolean;
 }
 
-const DEFAULT_WIDTH = 380;
+const DEFAULT_WIDTH = 480; // wider than the other right panels — the editor packs a Files list + a full button row
 const MIN_WIDTH = 280;
 const MAX_WIDTH = 700;
 
