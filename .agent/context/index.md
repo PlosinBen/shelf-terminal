@@ -1,8 +1,3 @@
----
-type: index
-title: Context
----
-
 # Context
 
 Decisions + gotchas grouped by topic. Cited from code as `<topic>#N`.

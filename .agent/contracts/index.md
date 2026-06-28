@@ -1,8 +1,3 @@
----
-type: index
-title: Contracts
----
-
 # Contracts
 
 Exact interface specs / message formats. Point to source types rather than duplicate them.

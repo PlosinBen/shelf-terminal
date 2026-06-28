@@ -1,8 +1,3 @@
----
-type: index
-title: shelf-terminal — Agent Knowledge Bundle
----
-
 # Agent Knowledge Bundle
 
 Read this first, then jump to the category you need.
