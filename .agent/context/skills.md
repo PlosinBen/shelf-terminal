@@ -48,20 +48,21 @@ related:
 
 **Related**：`skills#1`、`deployment#1`、`agent-providers#1`、`background-tasks#3`、`src/main/agent/app-tool.ts`、`src/main/{skills-sync,skills-store,ipc/skills}.ts`、`agent-server/{app-tool-client,app-tool-tools}.ts`、測試 `app-tool.test.ts` / `skills-store.test.ts`。
 
-## skills#3 — `/mcp` `/skills` provider 內部攔截 → 印 normalized 唯讀卡片（不轉發 SDK）  ·  [Decision]
+## skills#3 — `/mcp` `/skills` provider 內部攔截 → 各自組 md 唯讀卡片（不轉發 SDK）  ·  [Decision]
 
 **Problem**：使用者要直觀看到「這個 session 載入了哪些 MCP server / skill」。但 `/mcp` `/skills` 在兩家 CLI 都是**互動式 TUI-only、SDK/headless 不可派發**（Claude 官方：只有非互動指令可經 SDK 派發；`system/init.slash_commands` 只列 clear/compact/context/usage）。轉發給 SDK 會失敗或被當 prompt 餵模型。
 
-**Decision**：**provider 內部攔截 `/mcp` `/skills`（像 `/model`），自己讀 SDK 結構化資料 → normalize → 印 `fold_markdown` 卡片**。renderer / wire / main **零改**（重用既有 fold 渲染）。純 provider 端。
-- **資料來源（init 抓一次、cache、reconnect 刷新）**：Claude `Query.mcpServerStatus()` + `supportedCommands()`，**必須在 REAL persistent session 的 `system/init` 抓**（`refreshLoadedContext()`，full options），不是 cwd-only warmup probe（會漏 app skills + in-process bridge）；Copilot 從 `session.skills_loaded` / `session.mcp_servers_loaded` event 抓。
-- **不對稱（SDK 限制）**：`source`/`enabled` 只有 Copilot 給得出；Claude `/skills` = `supportedCommands()` 去掉已知 built-ins。
+**Decision**：**provider 內部攔截 `/mcp` `/skills`（像 `/model`），讀自家 SDK 結構化資料 → 各自組 markdown → 印 `reply`**。renderer / wire / main **零改**。**不建跨 provider 共通 result type** —— 各 provider 用自己的形狀組卡片（`{claude,copilot}/helpers.ts` 的純函式 formatter），只共用無語意排版工具 `md-table.ts`。見 `agent-providers#6`（含為何共通 normalized type 會權責倒置）。
+- **資料來源（init 抓一次、cache raw、reconnect 刷新）**：Claude `Query.mcpServerStatus()` + `supportedCommands()`，**必須在 REAL persistent session 的 `system/init` 抓**（`refreshLoadedContext()`，full options），不是 cwd-only warmup probe（會漏 app skills + in-process bridge）；Copilot 從 `session.skills_loaded` / `session.mcp_servers_loaded` event 抓。cache 存 **raw SDK 結果**，讀時才 format。
+- **tools 列出**：Claude `mcpServerStatus()` 每 server 帶 `tools[]`（+`readOnly`/`destructive` annotations）→ `/mcp` 巢狀列出。Copilot **沒有** per-server tool 來源（event / `mcp.list()` / `mcp.discover()` 皆無）→ 只列 server；要補得走 client `tools.list()` + `namespacedName`（`server/tool`）前綴 group，未驗證、deferred。
+- **不對稱（SDK 限制）**：`source`/`enabled` 只有 Copilot 給得出；Claude `/skills` = `supportedCommands()` 去掉已知 built-ins。各 provider 卡片本就不同 —— 在 `agent-providers#6` 下合法。
 - **list ↔ dispatch 必須成對**：加進 command list **且**實作攔截 —— 只列不攔會被當 prompt 餵模型。
 - **cold-start read-through warm（`ensureLoadedContext`）**：cache 是 read-through —— slash handler 先 `await ensureLoadedContext()` 再讀。real session 出現後由 `refreshLoadedContext()` 持續刷新；**冷窗（開 tab、未送訊息、就打 `/mcp`）**則就地暖一次。**兩家機制不同**：Claude 的常駐 session 是 streaming-input，**未 push 訊息前不發 `system/init`**（實測：streaming 流不送訊息 15s 無 init；字串 prompt `' '` 會 init）→ 必須另開**字串 prompt 拋棄式 probe**（full options：plugins + in-process `shelf` MCP，少一樣就漏報），init 即讀即 abort；Copilot 直接 `ensureSession()`（createSession 即觸發 loaded events），等事件到。idempotent + in-flight 去重；暖機**刻意與 auth probe 分離**（載 MCP/skills 不與登入判斷 fate-share，慢/壞的 MCP 不擋開 pane）。
 - **fail-loud**：暖機後 cache 仍 `undefined`（probe 真的失敗）→ 印「Could not load …」，**不謊報「none」**。
 
 **Do not change casually because**：① 在 warmup probe（cwd-only）抓會漏掉 app skills + in-process `shelf` bridge —— 一定要在 full-options 的 session 抓（含 `ensureLoadedContext` 的拋棄式 probe，真機 `/mcp` 確認 `shelf` 有列出）。② Claude 冷窗不能改用「`ensureSession()` 不送訊息」暖機 —— streaming session 不會 init。③ 別把暖機折進 auth warmup 省一個行程 —— 會讓登入判斷被 MCP 啟動健康度綁架（`app-level-mcps` 上線後尤甚）。
 
-**Related**：`agent-providers#1`、PRODUCT #5（原生的歸原生）、`agent-server/providers/{loaded-context,claude/index,copilot/index,fake/index}.ts`、測試 `agent-server/providers/{claude,copilot}/loaded-context-warm.test.ts`。
+**Related**：`agent-providers#1`、`agent-providers#6`、PRODUCT #5（原生的歸原生）、`agent-server/providers/{md-table,claude/index,claude/helpers,copilot/index,copilot/helpers,fake/index}.ts`、測試 `agent-server/providers/{claude,copilot}/{loaded-context-warm,mcp-skills-cards}.test.ts`。
 
 ## skills#4 — App-skill live hot-reload：skill 改完免重連即生效  ·  [Decision]
 

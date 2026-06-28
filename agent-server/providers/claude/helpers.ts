@@ -598,3 +598,67 @@ export function pickSessionTasksDir(
   return undefined;
 }
 
+
+// ── /mcp /skills cards (provider-composed markdown) ──────────────────────────
+// Claude builds these from its OWN raw SDK shapes (mcpServerStatus() /
+// supportedCommands()) — there is no cross-provider "normalized listing" type.
+// PURE + loose input types (no SDK package import) so they're unit-tested
+// without a backend. See agent-providers decision on provider-composed output.
+
+/** One MCP tool as Claude's mcpServerStatus() reports it. */
+export interface ClaudeMcpTool {
+  name: string;
+  description?: string;
+  annotations?: { readOnly?: boolean; destructive?: boolean; openWorld?: boolean };
+}
+/** One server as mcpServerStatus() reports it (loose subset). */
+export interface ClaudeMcpServer {
+  name: string;
+  status: string;
+  error?: string;
+  tools?: ClaudeMcpTool[];
+}
+
+/** Per-tool annotation suffix, e.g. " (read-only)" / " (destructive)". */
+function toolAnnotationSuffix(t: ClaudeMcpTool): string {
+  const tags: string[] = [];
+  if (t.annotations?.readOnly) tags.push('read-only');
+  if (t.annotations?.destructive) tags.push('destructive');
+  return tags.length ? ` _(${tags.join(', ')})_` : '';
+}
+
+/**
+ * `/mcp` card. Per server: a header line (name · status [· error]) followed by
+ * a bullet list of its tools (only available when connected). Empty server set
+ * → an explicit "none" line, never blank.
+ */
+export function formatClaudeMcpCard(servers: ClaudeMcpServer[]): string {
+  if (servers.length === 0) return 'No MCP servers loaded in this session.';
+  const sections = servers.map((s) => {
+    const head = s.error ? `**\`${s.name}\`** · ${s.status} · ${s.error}` : `**\`${s.name}\`** · ${s.status}`;
+    const tools = s.tools ?? [];
+    if (tools.length === 0) return head;
+    const lines = tools.map((t) => {
+      const desc = t.description ? ` — ${t.description.replace(/\n+/g, ' ')}` : '';
+      return `- \`${t.name}\`${desc}${toolAnnotationSuffix(t)}`;
+    });
+    return `${head}\n${lines.join('\n')}`;
+  });
+  const n = servers.length;
+  return `${n} MCP server${n > 1 ? 's' : ''}:\n\n${sections.join('\n\n')}`;
+}
+
+/**
+ * `/skills` card. Claude has no skill-listing API — skills ARE slash commands
+ * (`supportedCommands()` minus known built-ins). Loose command input; no source
+ * (the SDK doesn't tag it). Empty → an explicit "none" line.
+ */
+export function formatClaudeSkillsCard(
+  commands: Array<{ name: string; description?: string }>,
+  builtinNames: Set<string>,
+): string {
+  const skills = commands.filter((c) => !builtinNames.has(c.name));
+  if (skills.length === 0) return 'No skills loaded in this session.';
+  const lines = skills.map((c) => `- \`${c.name}\`${c.description ? ` — ${c.description.replace(/\n+/g, ' ')}` : ''}`);
+  return `${skills.length} skill${skills.length > 1 ? 's' : ''}:\n\n${lines.join('\n')}`;
+}

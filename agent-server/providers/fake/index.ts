@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { formatConfigAck } from '@shared/config-ack';
 import { parseSlashPrefix } from '@shared/slash-prefix';
-import { formatMcpCard, formatSkillsCard } from '../loaded-context';
+import { mdTable } from '../md-table';
 import { callMain } from '../../app-tool-client';
 import type {
   OutgoingMessage,
@@ -364,19 +364,19 @@ export function createFakeBackend(): ServerBackend {
       }
 
       // /mcp /skills: mirror the real providers — provider-intercepted read-only
-      // listing from (here, canned) normalized data, via the same format helpers,
-      // emitted as a plain `reply` (full-width markdown table, not a fold card).
+      // listing composed as canned markdown (each provider owns its own card;
+      // no cross-provider result type). Emitted as a plain `reply`.
       const slash = parseSlashPrefix(input.prompt);
       if (slash && (slash.cmd === 'mcp' || slash.cmd === 'skills')) {
         send({ type: 'status', state: 'streaming' });
         const content = slash.cmd === 'mcp'
-          ? formatMcpCard([
-              { name: 'fake-fs', status: 'connected' },
-              { name: 'fake-db', status: 'failed', error: 'down' },
-            ])
-          : formatSkillsCard([
-              { name: 'fake-skill', description: 'a fake skill', source: 'app' },
-            ]);
+          ? `2 MCP servers:\n\n${mdTable(['Server', 'Status'], [
+              ['`fake-fs`', 'connected'],
+              ['`fake-db`', 'failed (down)'],
+            ])}`
+          : `1 skill:\n\n${mdTable(['Skill', 'Source', 'Description'], [
+              ['`fake-skill`', 'app', 'a fake skill'],
+            ])}`;
         send({ type: 'message', msgId: mintId('m'), msgType: 'reply', content });
         send({ type: 'status', state: 'idle' });
         return;

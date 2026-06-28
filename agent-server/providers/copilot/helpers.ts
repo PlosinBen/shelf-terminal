@@ -6,6 +6,7 @@ import type { StatusSegment } from '../types';
 import { severityFromUtilization, formatResetCountdown } from '../types';
 import { stripCwd } from '../shared';
 import type { NormalizedTask } from '@shared/types';
+import { mdTable, cell } from '../md-table';
 
 const COPILOT_QUOTA_LABELS: Record<string, string> = {
   premium_interactions: 'premium',
@@ -553,3 +554,72 @@ export function buildCopilotAuthConfig(
     : { useLoggedInUser: true };
 }
 
+
+// ── /mcp /skills cards (provider-composed markdown) ──────────────────────────
+// Copilot builds these from its OWN raw session-event shapes (skills_loaded /
+// mcp_servers_loaded). No cross-provider "normalized listing" type — list-style
+// output is composed as markdown here. PURE; rendered as GFM tables.
+//
+// NOTE: Copilot's MCP events carry NO per-server tool list (unlike Claude's
+// mcpServerStatus().tools), so `/mcp` lists servers only. Adding tools would
+// need the client-level `tools.list()` + `namespacedName` (`server/tool`)
+// grouping — a separate, unverified path; deferred. See agent-providers decision.
+
+/** Map Copilot's raw SkillSource → a display bucket. `custom` = a configured
+ *  skillDirectory (for Shelf, the app-level skills dir). */
+function copilotSkillSource(source?: string): 'project' | 'app' | 'personal' | 'other' | undefined {
+  switch (source) {
+    case 'project':
+    case 'inherited':
+      return 'project';
+    case 'custom':
+      return 'app';
+    case 'personal-copilot':
+    case 'personal-agents':
+    case 'personal-claude':
+      return 'personal';
+    case undefined:
+      return undefined;
+    default:
+      return 'other'; // plugin / builtin / remote / unknown
+  }
+}
+
+/** `/mcp` card from raw mcp_servers_loaded servers. Adaptive Source column
+ *  (dropped when no row has one). Empty → explicit "none" line. */
+export function formatCopilotMcpCard(
+  servers: Array<{ name: string; status?: string; error?: string; source?: string }>,
+): string {
+  if (servers.length === 0) return 'No MCP servers loaded in this session.';
+  const hasSource = servers.some((s) => s.source);
+  const headers = ['Server', 'Status', ...(hasSource ? ['Source'] : [])];
+  const rows = servers.map((s) => {
+    const status = s.error ? `${s.status ?? 'unknown'} (${s.error})` : (s.status ?? 'unknown');
+    const r = [`\`${cell(s.name)}\``, cell(status)];
+    if (hasSource) r.push(cell(s.source ?? '—'));
+    return r;
+  });
+  const n = servers.length;
+  return `${n} MCP server${n > 1 ? 's' : ''}:\n\n${mdTable(headers, rows)}`;
+}
+
+/** `/skills` card from raw skills_loaded skills. Adaptive Source/Description
+ *  columns. `enabled === false` → "(disabled)" tag. Empty → "none" line. */
+export function formatCopilotSkillsCard(
+  skills: Array<{ name: string; description?: string; enabled?: boolean; source?: string }>,
+): string {
+  if (skills.length === 0) return 'No skills loaded in this session.';
+  const mapped = skills.map((s) => ({ ...s, bucket: copilotSkillSource(s.source) }));
+  const hasSource = mapped.some((s) => s.bucket);
+  const hasDesc = mapped.some((s) => s.description);
+  const headers = ['Skill', ...(hasSource ? ['Source'] : []), ...(hasDesc ? ['Description'] : [])];
+  const rows = mapped.map((s) => {
+    const name = s.enabled === false ? `\`${cell(s.name)}\` (disabled)` : `\`${cell(s.name)}\``;
+    const r = [name];
+    if (hasSource) r.push(cell(s.bucket ?? '—'));
+    if (hasDesc) r.push(cell(s.description ?? '—'));
+    return r;
+  });
+  const n = skills.length;
+  return `${n} skill${n > 1 ? 's' : ''}:\n\n${mdTable(headers, rows)}`;
+}
