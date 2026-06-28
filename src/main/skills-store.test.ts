@@ -15,7 +15,11 @@ const {
   listSkills, getSkill, createSkill, updateSkill, deleteSkill,
   parseSkillMeta, isValidSkillName, uniqueSkillName,
   isSkillLocked, setSkillLocked, validateFrontmatterYaml,
+  resolveAuxPath, listSkillAuxFiles, readSkillFile, writeSkillFile, deleteSkillFile,
 } = await import('./skills-store');
+
+const auxAbs = (name: string, rel: string) =>
+  path.join(tmpDir, 'skills', 'skills', name, rel);
 
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'shelf-skills-store-'));
@@ -152,6 +156,91 @@ describe('CRUD + scaffold', () => {
 
   it('list is empty (not error) before any skill exists', async () => {
     expect(await listSkills()).toEqual([]);
+  });
+});
+
+describe('aux files', () => {
+  describe('resolveAuxPath (path-safety gate)', () => {
+    it('accepts a plain and a nested relative path', () => {
+      expect(resolveAuxPath('my-skill', 'reference.md')).toBe(auxAbs('my-skill', 'reference.md'));
+      expect(resolveAuxPath('my-skill', 'scripts/build.sh')).toBe(auxAbs('my-skill', 'scripts/build.sh'));
+    });
+    it('rejects blank, absolute, drive-letter and backslash paths', () => {
+      expect(resolveAuxPath('my-skill', '')).toBeNull();
+      expect(resolveAuxPath('my-skill', '   ')).toBeNull();
+      expect(resolveAuxPath('my-skill', '/etc/passwd')).toBeNull();
+      expect(resolveAuxPath('my-skill', 'C:\\x')).toBeNull();
+      expect(resolveAuxPath('my-skill', 'scripts\\b.sh')).toBeNull();
+    });
+    it('rejects traversal that escapes the skill folder', () => {
+      expect(resolveAuxPath('my-skill', '../other/x')).toBeNull();
+      expect(resolveAuxPath('my-skill', '../../../../etc/passwd')).toBeNull();
+      expect(resolveAuxPath('my-skill', 'scripts/../../sibling')).toBeNull();
+    });
+    it('rejects the reserved files (SKILL.md / .locked) and the folder itself', () => {
+      expect(resolveAuxPath('my-skill', 'SKILL.md')).toBeNull();
+      expect(resolveAuxPath('my-skill', '.locked')).toBeNull();
+      expect(resolveAuxPath('my-skill', '.')).toBeNull();
+    });
+    it('rejects an invalid skill name', () => {
+      expect(resolveAuxPath('Bad Name', 'x.txt')).toBeNull();
+    });
+  });
+
+  it('write creates nested dirs; read returns it; list excludes SKILL.md/.locked and sorts', async () => {
+    await createSkill();
+    await setSkillLocked('my-skill', true); // .locked must NOT appear in the list
+    expect(await writeSkillFile('my-skill', 'scripts/build.sh', '#!/bin/sh\necho hi')).toEqual({ ok: true });
+    expect(await writeSkillFile('my-skill', 'reference.md', 'ref')).toEqual({ ok: true });
+    expect(fs.existsSync(auxAbs('my-skill', 'scripts/build.sh'))).toBe(true);
+    expect(await readSkillFile('my-skill', 'scripts/build.sh')).toBe('#!/bin/sh\necho hi');
+    expect(await listSkillAuxFiles('my-skill')).toEqual(['reference.md', 'scripts/build.sh']);
+  });
+
+  it('write overwrites an existing aux file', async () => {
+    await createSkill();
+    await writeSkillFile('my-skill', 'a.txt', 'one');
+    await writeSkillFile('my-skill', 'a.txt', 'two');
+    expect(await readSkillFile('my-skill', 'a.txt')).toBe('two');
+  });
+
+  it('write/delete reject reserved + traversal paths (fail-loud, no write)', async () => {
+    await createSkill();
+    expect((await writeSkillFile('my-skill', 'SKILL.md', 'x')).ok).toBe(false);
+    expect((await writeSkillFile('my-skill', '../escape.txt', 'x')).ok).toBe(false);
+    // SKILL.md on disk is untouched by the rejected write.
+    expect(await getSkill('my-skill')).toContain('name: my-skill');
+    expect((await deleteSkillFile('my-skill', '.locked')).ok).toBe(false);
+  });
+
+  it('write to a non-existent skill fails', async () => {
+    expect((await writeSkillFile('ghost', 'a.txt', 'x')).ok).toBe(false);
+  });
+
+  it('delete removes the file; deleting an absent file fails', async () => {
+    await createSkill();
+    await writeSkillFile('my-skill', 'a.txt', 'x');
+    expect(await deleteSkillFile('my-skill', 'a.txt')).toEqual({ ok: true });
+    expect(fs.existsSync(auxAbs('my-skill', 'a.txt'))).toBe(false);
+    expect((await deleteSkillFile('my-skill', 'a.txt')).ok).toBe(false);
+  });
+
+  it('read returns null for an invalid path or an absent file', async () => {
+    await createSkill();
+    expect(await readSkillFile('my-skill', '../x')).toBeNull();
+    expect(await readSkillFile('my-skill', 'nope.txt')).toBeNull();
+  });
+
+  it('aux files survive a rename (carried with the folder)', async () => {
+    await createSkill();
+    await writeSkillFile('my-skill', 'scripts/run.sh', 'go');
+    await updateSkill('my-skill', '---\nname: renamed\ndescription: d\n---\n');
+    expect(await readSkillFile('renamed', 'scripts/run.sh')).toBe('go');
+  });
+
+  it('listSkillAuxFiles is empty for a skill with only SKILL.md', async () => {
+    await createSkill();
+    expect(await listSkillAuxFiles('my-skill')).toEqual([]);
   });
 });
 
