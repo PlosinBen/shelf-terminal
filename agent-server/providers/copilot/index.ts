@@ -138,6 +138,11 @@ function approvalForKind(kind: string): any | undefined {
 
 const DEFAULT_MODEL = 'gpt-5.5';
 
+// Hang guard for ensureLoadedContext()'s cold-start wait on the skills_loaded /
+// mcp_servers_loaded events. Best-effort: on timeout the snapshot stays unset
+// and the slash reports a load failure rather than blocking forever.
+const LOADED_CONTEXT_PROBE_TIMEOUT_MS = 20_000;
+
 // /model intentionally not listed — it's a renderer-local config-edit slash
 // (see src/renderer/components/AgentView.tsx RENDERER_LOCAL_SLASHES). The
 // renderer merges its own command list into the autocomplete display.
@@ -256,6 +261,15 @@ export function createCopilotBackend(): ServerBackend {
   // than claiming "none". Refreshed on reconnect (new session re-emits).
   let loadedMcpServers: NormalizedMcpServer[] | undefined;
   let loadedSkills: NormalizedSkill[] | undefined;
+  // Resolvers for ensureLoadedContext()'s cold-start wait — settled once BOTH
+  // snapshots have arrived (or on its own timeout).
+  let loadedContextWaiters: Array<() => void> = [];
+  function settleLoadedContextWaiters() {
+    if (loadedSkills === undefined || loadedMcpServers === undefined || !loadedContextWaiters.length) return;
+    const waiters = loadedContextWaiters;
+    loadedContextWaiters = [];
+    for (const w of waiters) w();
+  }
   // External vocabulary (shared with Claude) → Copilot SDK SessionMode.
   const MODE_TO_SDK: Record<string, 'interactive' | 'plan' | 'autopilot'> = {
     default: 'interactive',
@@ -781,10 +795,12 @@ export function createCopilotBackend(): ServerBackend {
         case 'session.skills_loaded':
           // Snapshot the loaded skills for /skills (init-once; reconnect re-emits).
           loadedSkills = normalizeCopilotSkills(Array.isArray(event.data?.skills) ? event.data.skills : []);
+          settleLoadedContextWaiters();
           break;
         case 'session.mcp_servers_loaded':
           // Snapshot the loaded MCP servers for /mcp (init-once; reconnect re-emits).
           loadedMcpServers = normalizeCopilotMcpServers(Array.isArray(event.data?.servers) ? event.data.servers : []);
+          settleLoadedContextWaiters();
           break;
         case 'session.plan_changed':
           // Debounced fetch — multiple rapid changes coalesce into one read.
@@ -840,6 +856,30 @@ export function createCopilotBackend(): ServerBackend {
       }
     });
     return session;
+  }
+
+  /**
+   * Cold-start fill of the /mcp /skills snapshot when the user runs the slash
+   * before sending any message. Unlike Claude's streaming session (which needs a
+   * throwaway probe — it emits no init until a message is pushed), creating the
+   * Copilot session directly fires the skills_loaded / mcp_servers_loaded events,
+   * so we just ensure the real session exists and await those events (bounded).
+   * Best-effort: on timeout the snapshot stays unset and the slash reports a load
+   * failure. Idempotent — no-op once both snapshots are in.
+   */
+  async function ensureLoadedContext(): Promise<void> {
+    if (loadedSkills !== undefined && loadedMcpServers !== undefined) return;
+    try {
+      await ensureSession();
+    } catch (err: any) {
+      serverLog('error', 'copilot', 'ensureLoadedContext: ensureSession failed', err?.message ?? err);
+      return;
+    }
+    if (loadedSkills !== undefined && loadedMcpServers !== undefined) return;
+    await new Promise<void>((resolve) => {
+      loadedContextWaiters.push(resolve);
+      setTimeout(resolve, LOADED_CONTEXT_PROBE_TIMEOUT_MS);
+    });
   }
 
   let planReadTimer: NodeJS.Timeout | null = null;
@@ -974,20 +1014,24 @@ export function createCopilotBackend(): ServerBackend {
         return;
       }
 
-      // /mcp /skills: read-only listing from the init-captured snapshot
-      // (skills_loaded / mcp_servers_loaded events). Emit a plain `reply`
-      // (full-width markdown table), NOT a fold card — the fold indentation
-      // cramps the table. `undefined` = events not in yet → say so, not "none".
+      // /mcp /skills: read-only listing from the snapshot captured off the
+      // skills_loaded / mcp_servers_loaded events. Emit a plain `reply` (full-
+      // width markdown table), NOT a fold card — the fold indentation cramps the
+      // table. In the cold-start window (slash before any message) ensureLoadedContext
+      // creates the session so those events fire. Still `undefined` after that =
+      // the events never arrived (fail-loud), never claim "none".
       case 'mcp': {
+        await ensureLoadedContext();
         const content = loadedMcpServers === undefined
-          ? 'Session not initialized yet — send a message first.'
+          ? 'Could not load the MCP server list — the session failed to initialize.'
           : formatMcpCard(loadedMcpServers);
         send({ type: 'message', msgId: mintMsgId(), msgType: 'reply', content });
         return;
       }
       case 'skills': {
+        await ensureLoadedContext();
         const content = loadedSkills === undefined
-          ? 'Session not initialized yet — send a message first.'
+          ? 'Could not load the skills list — the session failed to initialize.'
           : formatSkillsCard(loadedSkills);
         send({ type: 'message', msgId: mintMsgId(), msgType: 'reply', content });
         return;
@@ -1207,6 +1251,12 @@ export function createCopilotBackend(): ServerBackend {
       currentTextMsgId = null;
       currentThinkingMsgId = null;
 
+      // Capture cwd / appId up front (first value wins) so they land in the
+      // createSession config — including when a cold-start /mcp /skills slash
+      // calls ensureSession via ensureLoadedContext below, BEFORE any real turn.
+      if (input.cwd && !currentCwd) currentCwd = input.cwd;
+      if (input.appId && !currentAppId) currentAppId = input.appId;
+
       // Slash / config-edit detection. Both bypass normal SDK setup and route
       // to dispatchSlash:
       //   - typed `/model X` etc. → parseSlashPrefix(prompt)
@@ -1242,12 +1292,9 @@ export function createCopilotBackend(): ServerBackend {
       // currentEffort / currentPermissionMode already match input, so we
       // don't need to do the diff here anymore.
       if (input.sessionId) currentSessionId = input.sessionId;
-      // Capture cwd before ensureSession so workingDirectory lands in createSession config.
-      // If cwd changes mid-session (e.g. user switches project), we don't recreate the
-      // session — Copilot CLI doesn't have a rpc.cwd.set, and most users stay in one
-      // project per session. The first cwd we see wins.
-      if (input.cwd && !currentCwd) currentCwd = input.cwd;
-      if (input.appId && !currentAppId) currentAppId = input.appId;
+      // cwd / appId already captured at the top of query() (first value wins).
+      // Copilot CLI has no rpc.cwd.set, so a mid-session cwd change doesn't
+      // recreate the session — most users stay in one project per session.
 
       send({ type: 'status', state: 'streaming', model: currentModel });
 

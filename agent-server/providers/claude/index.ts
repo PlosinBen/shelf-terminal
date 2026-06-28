@@ -118,6 +118,14 @@ export type AuthOutcome = 'authed' | 'auth-failed' | 'error';
 const AUTH_PROBE_TIMEOUT_MS = 20_000;
 
 /**
+ * Hang guard for the `/mcp` `/skills` cold-start probe (ensureLoadedContext).
+ * Same rationale as AUTH_PROBE_TIMEOUT_MS — bound the wait so a stuck CLI can't
+ * wedge a slash. Best-effort: on timeout the cache stays unset and the slash
+ * reports a load failure rather than hanging.
+ */
+const LOADED_CONTEXT_PROBE_TIMEOUT_MS = 20_000;
+
+/**
  * Structured (NOT string-matched) detection of a Claude auth failure in the SDK
  * message stream. Only these exact signals count as "not signed in":
  *  - SDKAuthStatusMessage settled to a failure (isAuthenticating:false + error)
@@ -244,6 +252,9 @@ function getShelfMcpServer() {
 export function createClaudeBackend(): ServerBackend {
   const cache: { models?: any[]; commands?: any[]; mcpServers?: NormalizedMcpServer[]; skills?: NormalizedSkill[] } = {};
   let initPromise: Promise<AuthOutcome> | null = null;
+  // In-flight dedup for ensureLoadedContext so concurrent /mcp + /skills (or a
+  // double-tap) spin only one cold-start probe.
+  let loadedContextWarm: Promise<void> | null = null;
   let lastSessionId: string | null = null;
   // The SDK's per-session task-output dir. Authoritatively set from the first
   // task_notification's output_file (its dirname); derived by globbing the
@@ -680,6 +691,60 @@ export function createClaudeBackend(): ServerBackend {
     }
   }
 
+  /**
+   * Cold-start fill of the `/mcp` `/skills` cache when no real session exists yet
+   * (user opened a tab and typed the slash before sending any message). The real
+   * persistent session is streaming-input — it emits NO `system/init` until the
+   * first user message is pushed, so `ensureSession()` alone can't warm the cache.
+   * A string-prompt probe DOES init immediately (same trick as the auth warmup),
+   * so we spin a throwaway one with the SAME full options as the real session
+   * (plugins/app skills + in-process `shelf` MCP + cwd) — anything less would
+   * under-report (the exact trap the auth warmup's cwd-only probe falls into) —
+   * read the listings off its init, then abort it. Deliberately separate from the
+   * auth warmup so loading the MCP/skills world never fate-shares with the auth
+   * verdict (a slow/broken MCP must not block tab-open). Idempotent + deduped:
+   * no-op once the cache is filled (e.g. by the real session's refreshLoadedContext).
+   */
+  function ensureLoadedContext(cwd: string, appId: string | undefined): Promise<void> {
+    if (cache.mcpServers !== undefined && cache.skills !== undefined) return Promise.resolve();
+    if (loadedContextWarm) return loadedContextWarm;
+    loadedContextWarm = (async () => {
+      const abort = new AbortController();
+      const guard = setTimeout(() => abort.abort(), LOADED_CONTEXT_PROBE_TIMEOUT_MS);
+      try {
+        const options: Options = {
+          ...CLAUDE_QUERY_DEFAULTS,
+          cwd,
+          // Read-only probe — aborted at init before any turn runs.
+          permissionMode: 'plan',
+          abortController: abort,
+        };
+        const skillsPluginRoot = resolveSkillsPluginRoot(appId);
+        if (skillsPluginRoot) (options as any).plugins = [{ type: 'local', path: skillsPluginRoot }];
+        (options as any).mcpServers = { shelf: getShelfMcpServer() };
+        const gen = sdkQuery({ prompt: ' ', options }) as Query;
+        for await (const msg of gen) {
+          if (msg.type === 'system' && (msg as any).subtype === 'init') {
+            const [servers, commands] = await Promise.all([
+              gen.mcpServerStatus().catch(() => [] as any[]),
+              gen.supportedCommands().catch(() => [] as any[]),
+            ]);
+            cache.mcpServers = normalizeClaudeMcpServers(servers as any[]);
+            cache.skills = normalizeClaudeCommandsAsSkills(commands as any[], CLAUDE_NON_SKILL_COMMANDS);
+            abort.abort();
+            break;
+          }
+        }
+      } catch (err: any) {
+        if (err?.name !== 'AbortError') serverLog('error', 'claude', 'ensureLoadedContext failed', err?.message ?? err);
+      } finally {
+        clearTimeout(guard);
+        loadedContextWarm = null;
+      }
+    })();
+    return loadedContextWarm;
+  }
+
   /** Settle every in-flight / queued turn so their query() promises resolve
    *  when the session ends (input closed, abort, or fatal generator error). */
   function teardownTurns() {
@@ -1062,21 +1127,23 @@ export function createClaudeBackend(): ServerBackend {
       }
 
       // /mcp /skills: provider-intercepted read-only listings. NOT SDK-
-      // dispatchable (interactive-TUI-only) — render the init-cached, normalized
-      // data (populated by refreshLoadedContext on the real session's init) as a
-      // plain `reply` (full-width markdown table), NOT a fold card — the fold
-      // indentation cramps the table. `undefined` cache = session not inited yet
-      // → tell the user, don't claim "none". See mcp-skills-visibility.md.
+      // dispatchable (interactive-TUI-only) — render normalized, init-cached data
+      // as a plain `reply` (full-width markdown table), NOT a fold card — the fold
+      // indentation cramps the table. The cache is filled by the real session's
+      // refreshLoadedContext once it exists; in the cold-start window (slash before
+      // any message) ensureLoadedContext warms it on demand. Still `undefined` after
+      // that = the probe genuinely failed → say so (fail-loud), never claim "none".
       if (slash && (slash.cmd === 'mcp' || slash.cmd === 'skills')) {
         send({ type: 'status', state: 'streaming' });
+        await ensureLoadedContext(input.cwd, input.appId);
         let content: string;
         if (slash.cmd === 'mcp') {
           content = cache.mcpServers === undefined
-            ? 'Session not initialized yet — send a message first.'
+            ? 'Could not load the MCP server list — the session failed to initialize.'
             : formatMcpCard(cache.mcpServers);
         } else {
           content = cache.skills === undefined
-            ? 'Session not initialized yet — send a message first.'
+            ? 'Could not load the skills list — the session failed to initialize.'
             : formatSkillsCard(cache.skills);
         }
         send({ type: 'message', msgId: mintSlashMsgId(), msgType: 'reply', content });
