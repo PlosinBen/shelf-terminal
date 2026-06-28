@@ -132,11 +132,6 @@ function approvalForKind(kind: string): any | undefined {
 
 const DEFAULT_MODEL = 'gpt-5.5';
 
-// Hang guard for ensureLoadedContext()'s cold-start wait on the skills_loaded /
-// mcp_servers_loaded events. Best-effort: on timeout the snapshot stays unset
-// and the slash reports a load failure rather than blocking forever.
-const LOADED_CONTEXT_PROBE_TIMEOUT_MS = 20_000;
-
 // /model intentionally not listed — it's a renderer-local config-edit slash
 // (see src/renderer/components/AgentView.tsx RENDERER_LOCAL_SLASHES). The
 // renderer merges its own command list into the autocomplete display.
@@ -249,24 +244,14 @@ export function createCopilotBackend(): ServerBackend {
   // App-instance id (for the projected skills dir); bound on first query, used
   // when the session is created. Like currentCwd, first value wins.
   let currentAppId: string | undefined;
-  // Loaded MCP / skills snapshot for the `/mcp` `/skills` cards. Captured from
-  // the session's skills_loaded / mcp_servers_loaded events (fire at session
-  // start). `undefined` = not yet received → the slash handler says so rather
-  // than claiming "none". Refreshed on reconnect (new session re-emits).
-  // Raw session-event payloads (NOT a normalized cross-provider type); the card
-  // markdown is composed on read by formatCopilot*Card. `undefined` = event not
-  // yet received.
+  // Raw listings (NOT a normalized cross-provider type) for the `/mcp` `/skills`
+  // cards; the markdown is composed on read by formatCopilot*Card. Filled by the
+  // session's skills_loaded / mcp_servers_loaded events (which fire on a TURN /
+  // reconnect — NOT on bare session creation), or pulled via RPC on cold-start
+  // (ensureLoadedContext). `undefined` = not yet loaded → slash says so, never
+  // claims "none".
   let loadedMcpServers: Array<{ name: string; status?: string; error?: string; source?: string }> | undefined;
   let loadedSkills: Array<{ name: string; description?: string; enabled?: boolean; source?: string }> | undefined;
-  // Resolvers for ensureLoadedContext()'s cold-start wait — settled once BOTH
-  // snapshots have arrived (or on its own timeout).
-  let loadedContextWaiters: Array<() => void> = [];
-  function settleLoadedContextWaiters() {
-    if (loadedSkills === undefined || loadedMcpServers === undefined || !loadedContextWaiters.length) return;
-    const waiters = loadedContextWaiters;
-    loadedContextWaiters = [];
-    for (const w of waiters) w();
-  }
   // External vocabulary (shared with Claude) → Copilot SDK SessionMode.
   const MODE_TO_SDK: Record<string, 'interactive' | 'plan' | 'autopilot'> = {
     default: 'interactive',
@@ -792,12 +777,10 @@ export function createCopilotBackend(): ServerBackend {
         case 'session.skills_loaded':
           // Snapshot the loaded skills for /skills (init-once; reconnect re-emits).
           loadedSkills = Array.isArray(event.data?.skills) ? event.data.skills : [];
-          settleLoadedContextWaiters();
           break;
         case 'session.mcp_servers_loaded':
           // Snapshot the loaded MCP servers for /mcp (init-once; reconnect re-emits).
           loadedMcpServers = Array.isArray(event.data?.servers) ? event.data.servers : [];
-          settleLoadedContextWaiters();
           break;
         case 'session.plan_changed':
           // Debounced fetch — multiple rapid changes coalesce into one read.
@@ -857,26 +840,41 @@ export function createCopilotBackend(): ServerBackend {
 
   /**
    * Cold-start fill of the /mcp /skills snapshot when the user runs the slash
-   * before sending any message. Unlike Claude's streaming session (which needs a
-   * throwaway probe — it emits no init until a message is pushed), creating the
-   * Copilot session directly fires the skills_loaded / mcp_servers_loaded events,
-   * so we just ensure the real session exists and await those events (bounded).
-   * Best-effort: on timeout the snapshot stays unset and the slash reports a load
-   * failure. Idempotent — no-op once both snapshots are in.
+   * before sending any message. The skills_loaded / mcp_servers_loaded events
+   * fire on the first TURN, not on bare session creation — so in the cold-start
+   * window (no message sent yet) they never arrive. Instead of waiting on events,
+   * PULL the listings directly via the session RPC (`mcp.list()` / `skills.list()`,
+   * deterministic). The events still keep the snapshot fresh on later turns /
+   * reconnect. Idempotent — no-op once both snapshots are in; per-listing so a
+   * partial event fill is completed. Best-effort: a failed pull leaves the
+   * snapshot unset and the slash reports a load failure (fail-loud).
    */
   async function ensureLoadedContext(): Promise<void> {
     if (loadedSkills !== undefined && loadedMcpServers !== undefined) return;
+    let session: import('@github/copilot-sdk').CopilotSession;
     try {
-      await ensureSession();
+      session = await ensureSession();
     } catch (err: any) {
       serverLog('error', 'copilot', 'ensureLoadedContext: ensureSession failed', err?.message ?? err);
       return;
     }
-    if (loadedSkills !== undefined && loadedMcpServers !== undefined) return;
-    await new Promise<void>((resolve) => {
-      loadedContextWaiters.push(resolve);
-      setTimeout(resolve, LOADED_CONTEXT_PROBE_TIMEOUT_MS);
-    });
+    const rpc = (session as any).rpc;
+    if (loadedMcpServers === undefined) {
+      try {
+        const res = await rpc.mcp.list();
+        loadedMcpServers = Array.isArray(res?.servers) ? res.servers : [];
+      } catch (err: any) {
+        serverLog('error', 'copilot', 'ensureLoadedContext: mcp.list() failed', err?.message ?? err);
+      }
+    }
+    if (loadedSkills === undefined) {
+      try {
+        const res = await rpc.skills.list();
+        loadedSkills = Array.isArray(res?.skills) ? res.skills : [];
+      } catch (err: any) {
+        serverLog('error', 'copilot', 'ensureLoadedContext: skills.list() failed', err?.message ?? err);
+      }
+    }
   }
 
   let planReadTimer: NodeJS.Timeout | null = null;

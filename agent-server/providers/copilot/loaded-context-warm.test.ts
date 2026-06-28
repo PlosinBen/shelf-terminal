@@ -1,17 +1,18 @@
 import { describe, it, expect, vi } from 'vitest';
 
 /**
- * Regression: a cold-start `/mcp` / `/skills` (tab open, no message sent yet)
- * used to print "Session not initialized yet — send a message first." Unlike
- * Claude, creating the Copilot session directly fires the skills_loaded /
- * mcp_servers_loaded events, so `ensureLoadedContext` just ensures the session
- * exists and awaits those events. The fake session fires both on registration.
+ * Regression: a cold-start `/mcp` / `/skills` (tab open, no message sent yet).
+ * The skills_loaded / mcp_servers_loaded events fire on the first TURN, not on
+ * bare session creation — so in the cold-start window they never arrive and the
+ * card used to fail ("the session failed to initialize"). The fix PULLS the
+ * listings via the session RPC (`mcp.list()` / `skills.list()`). The fake
+ * session below deliberately fires NO events and only answers the RPC pulls.
  */
 
 const h = vi.hoisted(() => ({
-  skills: [{ name: 'my-skill', description: 'd' }] as any[],
+  skills: [{ name: 'my-skill', description: 'd', source: 'custom' }] as any[],
   servers: [{ name: 'shelf', status: 'connected' }] as any[],
-  fireEvents: true,
+  rpcThrows: false,
 }));
 
 vi.mock('fs', () => ({ existsSync: () => true }));
@@ -20,17 +21,13 @@ vi.mock('@github/copilot-sdk', () => {
   function makeSession() {
     return {
       sessionId: 'cs1',
-      on(cb: (e: any) => void) {
-        if (!h.fireEvents) return;
-        // Fire after registration so the waiter (pushed in ensureLoadedContext
-        // right after ensureSession resolves) is in place to be settled.
-        setTimeout(() => {
-          cb({ type: 'session.skills_loaded', data: { skills: h.skills } });
-          cb({ type: 'session.mcp_servers_loaded', data: { servers: h.servers } });
-        }, 0);
-      },
+      on(_cb: (e: any) => void) { /* no events in the cold-start window */ },
       registerElicitationHandler() { /* noop */ },
-      rpc: { mode: { set: async () => {} } },
+      rpc: {
+        mode: { set: async () => {} },
+        mcp: { list: async () => { if (h.rpcThrows) throw new Error('rpc down'); return { servers: h.servers }; } },
+        skills: { list: async () => { if (h.rpcThrows) throw new Error('rpc down'); return { skills: h.skills }; } },
+      },
       sendAndWait: async () => {},
       abort: async () => {},
       disconnect() { /* noop */ },
@@ -57,28 +54,31 @@ function collect() {
 }
 const replyOf = (msgs: any[]) => msgs.find((m) => m.type === 'message' && m.msgType === 'reply');
 
-describe('copilot /mcp /skills cold-start warm', () => {
-  it('cold /mcp creates the session and reports the loaded servers', async () => {
-    h.fireEvents = true;
+describe('copilot /mcp /skills cold-start warm (RPC pull)', () => {
+  it('cold /mcp pulls the server list via rpc.mcp.list() — no "failed to initialize"', async () => {
+    h.rpcThrows = false;
     const backend = createCopilotBackend();
     const { msgs, send } = collect();
     await backend.query({ prompt: '/mcp', cwd: '/tmp' } as any, send);
     const reply = replyOf(msgs);
     expect(reply).toBeDefined();
     expect(reply.content).toContain('shelf');
-    expect(reply.content).not.toMatch(/not initialized|send a message first|Could not load/i);
+    expect(reply.content).not.toMatch(/not initialized|send a message first|Could not load|failed to initialize/i);
   });
 
-  it('cold /skills reports the loaded skills', async () => {
-    h.fireEvents = true;
+  it('cold /skills pulls via rpc.skills.list()', async () => {
+    h.rpcThrows = false;
     const backend = createCopilotBackend();
     const { msgs, send } = collect();
     await backend.query({ prompt: '/skills', cwd: '/tmp' } as any, send);
     expect(replyOf(msgs).content).toContain('my-skill');
   });
 
-  // The "events never arrive → fail-loud load error" path (snapshot stays
-  // undefined → "Could not load …", never "none") is symmetric with — and
-  // covered by — the Claude probe-failure test; exercising it here would force a
-  // real 20s timeout wait (the dynamic SDK import fights fake timers).
+  it('rpc pull throws → fail-loud load error (never "none")', async () => {
+    h.rpcThrows = true;
+    const backend = createCopilotBackend();
+    const { msgs, send } = collect();
+    await backend.query({ prompt: '/mcp', cwd: '/tmp' } as any, send);
+    expect(replyOf(msgs).content).toMatch(/Could not load/i);
+  });
 });
