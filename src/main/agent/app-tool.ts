@@ -13,7 +13,10 @@
  * Step 1 ships the safe READ ops only (list/get). Mutations (create/update) +
  * their confirm + the skills:changed broadcast land in later steps.
  */
-import { listSkills, getSkill, createSkill, updateSkill, isSkillLocked } from '../skills-store';
+import {
+  listSkills, getSkill, createSkill, updateSkill, isSkillLocked,
+  listSkillAuxFiles, readSkillFile, writeSkillFile, deleteSkillFile, resolveAuxPath,
+} from '../skills-store';
 import { onSkillsChanged } from '../skills-sync';
 import { webFetch } from '../web-session';
 import { parseHttpOrigin } from '../web-session-helpers';
@@ -52,7 +55,62 @@ const REGISTRY: Record<string, AppToolDef> = {
       if (!name) throw new Error('app_skill.get requires a "name"');
       const content = await getSkill(name);
       if (content === null) throw new Error(`skill not found: ${name}`);
-      return { name, content };
+      // `files` lets the model SEE bundled scripts/resources (read them via
+      // read_app_skill_file); excludes SKILL.md (already in `content`) + .locked.
+      const files = await listSkillAuxFiles(name);
+      return { name, content, files };
+    },
+  },
+  'app_skill.read_file': {
+    safe: true,
+    run: async (args) => {
+      const name = typeof args.name === 'string' ? args.name.trim() : '';
+      const filePath = typeof args.path === 'string' ? args.path.trim() : '';
+      if (!name) throw new Error('app_skill.read_file requires a "name"');
+      if (!filePath) throw new Error('app_skill.read_file requires a "path"');
+      if (await getSkill(name) === null) throw new Error(`skill not found: ${name}`);
+      // Distinguish an invalid/reserved path (guard) from a genuinely absent file.
+      if (resolveAuxPath(name, filePath) === null) throw new Error(`invalid or reserved skill file path: ${filePath}`);
+      const content = await readSkillFile(name, filePath);
+      if (content === null) throw new Error(`file not found: ${filePath}`);
+      return { name, path: filePath, content };
+    },
+  },
+  'app_skill.write_file': {
+    safe: false,
+    run: async (args) => {
+      const name = typeof args.name === 'string' ? args.name.trim() : '';
+      const filePath = typeof args.path === 'string' ? args.path.trim() : '';
+      const content = args.content;
+      if (!name) throw new Error('app_skill.write_file requires a "name"');
+      if (!filePath) throw new Error('app_skill.write_file requires a "path"');
+      if (typeof content !== 'string') throw new Error('app_skill.write_file requires "content" (a string)');
+      // Aux files cannot bootstrap a skill — identity comes only from SKILL.md.
+      if (await getSkill(name) === null) throw new Error(`skill not found: ${name} (use create_app_skill to make a new one)`);
+      // Lock = the user's hard "agent, hands off this whole skill" — covers aux
+      // files too, enforced here so it holds under bypass permission mode.
+      if (isSkillLocked(name)) throw new Error(`skill '${name}' is locked against agent edits; unlock it in the Skills panel`);
+      const res = await writeSkillFile(name, filePath, content);
+      if (!res.ok) throw new Error(res.error ?? 'failed to write skill file');
+      onSkillsChanged();
+      return { name, path: filePath };
+    },
+  },
+  'app_skill.delete_file': {
+    safe: false,
+    run: async (args) => {
+      const name = typeof args.name === 'string' ? args.name.trim() : '';
+      const filePath = typeof args.path === 'string' ? args.path.trim() : '';
+      if (!name) throw new Error('app_skill.delete_file requires a "name"');
+      if (!filePath) throw new Error('app_skill.delete_file requires a "path"');
+      if (await getSkill(name) === null) throw new Error(`skill not found: ${name}`);
+      if (isSkillLocked(name)) throw new Error(`skill '${name}' is locked against agent edits; unlock it in the Skills panel`);
+      // SKILL.md / .locked are reserved in resolveAuxPath → can never be deleted
+      // here, so this op can never orphan a skill's SKILL.md.
+      const res = await deleteSkillFile(name, filePath);
+      if (!res.ok) throw new Error(res.error ?? 'failed to delete skill file');
+      onSkillsChanged();
+      return { name, path: filePath };
     },
   },
   'app_skill.create': {
