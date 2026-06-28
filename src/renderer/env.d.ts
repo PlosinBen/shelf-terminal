@@ -88,6 +88,11 @@ interface ShelfApi {
     update: (name: string, content: string) => Promise<{ ok: boolean; name?: string; error?: string }>;
     delete: (name: string) => Promise<void>;
     setLocked: (name: string, locked: boolean) => Promise<void>;
+    /** Aux files inside a skill folder (scripts/reference docs — NOT SKILL.md). */
+    listFiles: (name: string) => Promise<string[]>;
+    readFile: (name: string, path: string) => Promise<string | null>;
+    writeFile: (name: string, path: string, content: string) => Promise<{ ok: boolean; error?: string }>;
+    deleteFile: (name: string, path: string) => Promise<{ ok: boolean; error?: string }>;
     /** Subscribe to "skills changed" (any trigger). Returns an unsubscribe fn. */
     onChanged: (callback: () => void) => () => void;
   };

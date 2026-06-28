@@ -126,6 +126,13 @@ contextBridge.exposeInMainWorld('shelfApi', {
     delete: (name: string) => ipcRenderer.invoke(IPC.SKILLS_DELETE, name),
     setLocked: (name: string, locked: boolean) =>
       ipcRenderer.invoke(IPC.SKILLS_SET_LOCKED, { name, locked }),
+    listFiles: (name: string) => ipcRenderer.invoke(IPC.SKILLS_LIST_FILES, name),
+    readFile: (name: string, path: string) =>
+      ipcRenderer.invoke(IPC.SKILLS_READ_FILE, { name, path }),
+    writeFile: (name: string, path: string, content: string) =>
+      ipcRenderer.invoke(IPC.SKILLS_WRITE_FILE, { name, path, content }),
+    deleteFile: (name: string, path: string) =>
+      ipcRenderer.invoke(IPC.SKILLS_DELETE_FILE, { name, path }),
     onChanged: (callback: () => void) => {
       const listener = () => callback();
       ipcRenderer.on(IPC.SKILLS_CHANGED, listener);
