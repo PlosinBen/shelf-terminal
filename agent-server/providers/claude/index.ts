@@ -16,14 +16,9 @@ import { formatConfigAck, type ConfigEditKey } from '@shared/config-ack';
 import type { ProviderModel, NormalizedTask } from '@shared/types';
 import { stripCwd, resolveSkillsPluginRoot } from '../shared';
 import {
-  normalizeClaudeMcpServers,
-  normalizeClaudeCommandsAsSkills,
-  formatMcpCard,
-  formatSkillsCard,
-  type NormalizedMcpServer,
-  type NormalizedSkill,
-} from '../loaded-context';
-import {
+  formatClaudeMcpCard,
+  formatClaudeSkillsCard,
+  type ClaudeMcpServer,
   rateLimitInfoToSegment,
   askUserQuestionToPrompts,
   buildAskUserQuestionAnswerJson,
@@ -250,7 +245,10 @@ function getShelfMcpServer() {
 }
 
 export function createClaudeBackend(): ServerBackend {
-  const cache: { models?: any[]; commands?: any[]; mcpServers?: NormalizedMcpServer[]; skills?: NormalizedSkill[] } = {};
+  // `/mcp` `/skills` hold RAW SDK results (not a normalized cross-provider type);
+  // the card markdown is composed on read by formatClaude*Card. `undefined` =
+  // not loaded yet.
+  const cache: { models?: any[]; commands?: any[]; mcpServers?: ClaudeMcpServer[]; skills?: Array<{ name: string; description?: string }> } = {};
   let initPromise: Promise<AuthOutcome> | null = null;
   // In-flight dedup for ensureLoadedContext so concurrent /mcp + /skills (or a
   // double-tap) spin only one cold-start probe.
@@ -684,8 +682,8 @@ export function createClaudeBackend(): ServerBackend {
         q.mcpServerStatus().catch(() => [] as any[]),
         q.supportedCommands().catch(() => [] as any[]),
       ]);
-      cache.mcpServers = normalizeClaudeMcpServers(servers as any[]);
-      cache.skills = normalizeClaudeCommandsAsSkills(commands as any[], CLAUDE_NON_SKILL_COMMANDS);
+      cache.mcpServers = servers as ClaudeMcpServer[];
+      cache.skills = commands as Array<{ name: string; description?: string }>;
     } catch (err: any) {
       serverLog('error', 'claude', 'refreshLoadedContext failed', err?.message ?? err);
     }
@@ -729,8 +727,8 @@ export function createClaudeBackend(): ServerBackend {
               gen.mcpServerStatus().catch(() => [] as any[]),
               gen.supportedCommands().catch(() => [] as any[]),
             ]);
-            cache.mcpServers = normalizeClaudeMcpServers(servers as any[]);
-            cache.skills = normalizeClaudeCommandsAsSkills(commands as any[], CLAUDE_NON_SKILL_COMMANDS);
+            cache.mcpServers = servers as ClaudeMcpServer[];
+            cache.skills = commands as Array<{ name: string; description?: string }>;
             abort.abort();
             break;
           }
@@ -1140,11 +1138,11 @@ export function createClaudeBackend(): ServerBackend {
         if (slash.cmd === 'mcp') {
           content = cache.mcpServers === undefined
             ? 'Could not load the MCP server list — the session failed to initialize.'
-            : formatMcpCard(cache.mcpServers);
+            : formatClaudeMcpCard(cache.mcpServers);
         } else {
           content = cache.skills === undefined
             ? 'Could not load the skills list — the session failed to initialize.'
-            : formatSkillsCard(cache.skills);
+            : formatClaudeSkillsCard(cache.skills, CLAUDE_NON_SKILL_COMMANDS);
         }
         send({ type: 'message', msgId: mintSlashMsgId(), msgType: 'reply', content });
         send({ type: 'status', state: 'idle' });
@@ -1289,13 +1287,13 @@ export function createClaudeBackend(): ServerBackend {
       }
       try {
         const refreshed = await q.reloadPlugins();
-        cache.skills = normalizeClaudeCommandsAsSkills(refreshed.commands as any[], CLAUDE_NON_SKILL_COMMANDS);
-        cache.mcpServers = normalizeClaudeMcpServers(refreshed.mcpServers as any[]);
+        cache.skills = refreshed.commands as Array<{ name: string; description?: string }>;
+        cache.mcpServers = refreshed.mcpServers as ClaudeMcpServer[];
         // Log success so a dev build can confirm the reload re-scanned plugins
-        // from disk for the live session. plugins/skills counts let us eyeball
+        // from disk for the live session. plugins/commands counts let us eyeball
         // that our app-skill local plugin is present. See skills#4.
         serverLog('warn', 'claude', 'reloadPlugins() applied — app-skill edit now live (effective next turn) '
-          + JSON.stringify({ plugins: refreshed.plugins?.length ?? 0, skills: cache.skills.length }));
+          + JSON.stringify({ plugins: refreshed.plugins?.length ?? 0, commands: cache.skills.length }));
       } catch (err: any) {
         serverLog('warn', 'claude', 'reloadPlugins() failed; app-skill edit will apply on next session init instead', err?.message ?? err);
       }

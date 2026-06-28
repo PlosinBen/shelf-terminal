@@ -7,14 +7,6 @@ import { parseSlashPrefix } from '@shared/slash-prefix';
 import { formatConfigAck, type ConfigEditKey } from '@shared/config-ack';
 import type { ProviderModel } from '@shared/types';
 import { stripCwd, resolveSkillsPluginRoot } from '../shared';
-import {
-  normalizeCopilotSkills,
-  normalizeCopilotMcpServers,
-  formatMcpCard,
-  formatSkillsCard,
-  type NormalizedMcpServer,
-  type NormalizedSkill,
-} from '../loaded-context';
 import { runBridgeTool, APP_SKILL_LIST_DESC, APP_SKILL_GET_DESC, APP_SKILL_CREATE_DESC, APP_SKILL_UPDATE_DESC, WEB_FETCH_DESC } from '../../app-tool-tools';
 import { WEB_FETCH_TOOL } from '@shared/web-session';
 import { serverLog } from '../../server-logger';
@@ -30,6 +22,8 @@ import {
   isBackgroundedCopilotTask,
   buildCopilotAuthConfig,
   buildOrphanFinalizeMessages,
+  formatCopilotMcpCard,
+  formatCopilotSkillsCard,
   type InflightToolUseEntry,
 } from './helpers';
 
@@ -259,8 +253,11 @@ export function createCopilotBackend(): ServerBackend {
   // the session's skills_loaded / mcp_servers_loaded events (fire at session
   // start). `undefined` = not yet received → the slash handler says so rather
   // than claiming "none". Refreshed on reconnect (new session re-emits).
-  let loadedMcpServers: NormalizedMcpServer[] | undefined;
-  let loadedSkills: NormalizedSkill[] | undefined;
+  // Raw session-event payloads (NOT a normalized cross-provider type); the card
+  // markdown is composed on read by formatCopilot*Card. `undefined` = event not
+  // yet received.
+  let loadedMcpServers: Array<{ name: string; status?: string; error?: string; source?: string }> | undefined;
+  let loadedSkills: Array<{ name: string; description?: string; enabled?: boolean; source?: string }> | undefined;
   // Resolvers for ensureLoadedContext()'s cold-start wait — settled once BOTH
   // snapshots have arrived (or on its own timeout).
   let loadedContextWaiters: Array<() => void> = [];
@@ -794,12 +791,12 @@ export function createCopilotBackend(): ServerBackend {
         }
         case 'session.skills_loaded':
           // Snapshot the loaded skills for /skills (init-once; reconnect re-emits).
-          loadedSkills = normalizeCopilotSkills(Array.isArray(event.data?.skills) ? event.data.skills : []);
+          loadedSkills = Array.isArray(event.data?.skills) ? event.data.skills : [];
           settleLoadedContextWaiters();
           break;
         case 'session.mcp_servers_loaded':
           // Snapshot the loaded MCP servers for /mcp (init-once; reconnect re-emits).
-          loadedMcpServers = normalizeCopilotMcpServers(Array.isArray(event.data?.servers) ? event.data.servers : []);
+          loadedMcpServers = Array.isArray(event.data?.servers) ? event.data.servers : [];
           settleLoadedContextWaiters();
           break;
         case 'session.plan_changed':
@@ -1024,7 +1021,7 @@ export function createCopilotBackend(): ServerBackend {
         await ensureLoadedContext();
         const content = loadedMcpServers === undefined
           ? 'Could not load the MCP server list — the session failed to initialize.'
-          : formatMcpCard(loadedMcpServers);
+          : formatCopilotMcpCard(loadedMcpServers);
         send({ type: 'message', msgId: mintMsgId(), msgType: 'reply', content });
         return;
       }
@@ -1032,7 +1029,7 @@ export function createCopilotBackend(): ServerBackend {
         await ensureLoadedContext();
         const content = loadedSkills === undefined
           ? 'Could not load the skills list — the session failed to initialize.'
-          : formatSkillsCard(loadedSkills);
+          : formatCopilotSkillsCard(loadedSkills);
         send({ type: 'message', msgId: mintMsgId(), msgType: 'reply', content });
         return;
       }
