@@ -7,7 +7,7 @@ import { parseSlashPrefix } from '@shared/slash-prefix';
 import { formatConfigAck, type ConfigEditKey } from '@shared/config-ack';
 import type { ProviderModel } from '@shared/types';
 import { stripCwd, resolveSkillsPluginRoot } from '../shared';
-import { runBridgeTool, APP_SKILL_LIST_DESC, APP_SKILL_GET_DESC, APP_SKILL_CREATE_DESC, APP_SKILL_UPDATE_DESC, WEB_FETCH_DESC } from '../../app-tool-tools';
+import { runBridgeTool, APP_SKILL_LIST_DESC, APP_SKILL_GET_DESC, APP_SKILL_CREATE_DESC, APP_SKILL_UPDATE_DESC, WEB_FETCH_DESC, SHELF_BRIDGE_TOOLS } from '../../app-tool-tools';
 import { WEB_FETCH_TOOL } from '@shared/web-session';
 import { serverLog } from '../../server-logger';
 import { execFile } from 'node:child_process';
@@ -1009,17 +1009,22 @@ export function createCopilotBackend(): ServerBackend {
         return;
       }
 
-      // /mcp /skills: read-only listing from the snapshot captured off the
-      // skills_loaded / mcp_servers_loaded events. Emit a plain `reply` (full-
-      // width markdown table), NOT a fold card — the fold indentation cramps the
-      // table. In the cold-start window (slash before any message) ensureLoadedContext
-      // creates the session so those events fire. Still `undefined` after that =
-      // the events never arrived (fail-loud), never claim "none".
+      // /mcp /skills: read-only listing, emitted as a plain `reply`. Snapshot is
+      // filled by the loaded events (later turns) or pulled on cold-start via
+      // ensureLoadedContext.
+      //
+      // The in-process Shelf bridge is registered as `config.tools` (NOT an MCP
+      // server in Copilot's model), so it never appears in `mcp.list()`. Surface
+      // it explicitly — with its tools — for usability + parity with Claude
+      // (where the SDK reports it as the in-process `shelf` MCP server). Always
+      // shown; a failed real-server pull adds a fail-loud note but never hides
+      // the bridge. See skills#3 / agent-providers#6.
       case 'mcp': {
         await ensureLoadedContext();
-        const content = loadedMcpServers === undefined
-          ? 'Could not load the MCP server list — the session failed to initialize.'
-          : formatCopilotMcpCard(loadedMcpServers);
+        const shelf = { name: 'shelf', status: 'connected', source: 'in-process', tools: SHELF_BRIDGE_TOOLS };
+        const servers = [...(loadedMcpServers ?? []), shelf];
+        let content = formatCopilotMcpCard(servers);
+        if (loadedMcpServers === undefined) content += '\n\n_Could not load configured MCP servers (showing the built-in bridge only)._';
         send({ type: 'message', msgId: mintMsgId(), msgType: 'reply', content });
         return;
       }

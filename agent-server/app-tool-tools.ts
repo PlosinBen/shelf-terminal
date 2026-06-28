@@ -2,11 +2,11 @@
  * Provider-agnostic handler + copy for the in-process bridge tools that expose
  * client-owned resources (app-level skills) to the model. Each provider
  * registers these via its own SDK API (claude `tool()` / copilot `defineTool`),
- * but the handler body — call main, format the result — is shared here. Step 3
- * ships the safe READ tools (list/get); writes land later.
- * See .agent/features/app-level-capabilities.md.
+ * but the handler body — call main, format the result — is shared here.
+ * See context/skills (`skills#2`, the app-skill bridge).
  */
 import { callMain } from './app-tool-client';
+import { WEB_FETCH_TOOL } from '@shared/web-session';
 
 export const APP_SKILL_LIST_DESC =
   'List the app-level Agent Skills available in this app (each skill\'s name and description). '
@@ -36,6 +36,24 @@ export const WEB_FETCH_DESC =
   + '401/400, or a 3xx redirect to a login/SSO URL in the Location header), the session is likely not logged in — '
   + 'tell the user to log in to that service in a Web tab, then retry. '
   + 'Args: url (required), method (default GET), headers (object), body (string, e.g. a JSON query).';
+
+/**
+ * Canonical inventory of the in-process Shelf bridge tools (name + description).
+ * Single source for the `/mcp` card's `shelf` entry. The bridge is registered
+ * per-provider (claude `tool()` inside `createSdkMcpServer` / copilot `defineTool`
+ * in `config.tools`) — Claude's SDK then reports it back via `mcpServerStatus()`,
+ * but Copilot's `mcp.list()` does NOT (it's `config.tools`, not an MCP server),
+ * so Copilot composes its `shelf` entry from this list. Keep in sync with each
+ * provider's registration (same names/descriptions).
+ */
+export interface BridgeToolSpec { name: string; description: string; }
+export const SHELF_BRIDGE_TOOLS: BridgeToolSpec[] = [
+  { name: 'list_app_skills', description: APP_SKILL_LIST_DESC },
+  { name: 'get_app_skill', description: APP_SKILL_GET_DESC },
+  { name: 'create_app_skill', description: APP_SKILL_CREATE_DESC },
+  { name: 'update_app_skill', description: APP_SKILL_UPDATE_DESC },
+  { name: WEB_FETCH_TOOL, description: WEB_FETCH_DESC },
+];
 
 export interface BridgeToolText {
   text: string;

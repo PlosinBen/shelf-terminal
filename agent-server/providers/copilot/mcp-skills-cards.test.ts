@@ -2,21 +2,32 @@ import { describe, it, expect } from 'vitest';
 import { formatCopilotMcpCard, formatCopilotSkillsCard } from './helpers';
 
 describe('formatCopilotMcpCard', () => {
-  it('renders a server table with adaptive Source column', () => {
+  it('renders each server as a header line (name · status · source)', () => {
     const md = formatCopilotMcpCard([
       { name: 'fs', status: 'connected', source: 'user' },
       { name: 'db', status: 'failed', error: 'down' },
     ]);
     expect(md).toContain('2 MCP servers:');
-    expect(md).toContain('| Server | Status | Source |');
-    expect(md).toContain('`fs`');
-    expect(md).toContain('failed (down)');
+    expect(md).toContain('**`fs`** · connected · user');
+    expect(md).toContain('**`db`** · failed · down');
   });
 
-  it('drops the Source column when no server has a source', () => {
+  it('nests a server\'s tools as a bullet list', () => {
+    const md = formatCopilotMcpCard([
+      { name: 'shelf', status: 'connected', source: 'in-process', tools: [
+        { name: 'list_app_skills', description: 'list skills' },
+        { name: 'web.fetch', description: 'fetch a url' },
+      ] },
+    ]);
+    expect(md).toContain('**`shelf`** · connected · in-process');
+    expect(md).toContain('- `list_app_skills` — list skills');
+    expect(md).toContain('- `web.fetch` — fetch a url');
+  });
+
+  it('a server with no tools is just its header line', () => {
     const md = formatCopilotMcpCard([{ name: 'fs', status: 'connected' }]);
-    expect(md).toContain('| Server | Status |');
-    expect(md).not.toContain('Source');
+    expect(md).toContain('**`fs`** · connected');
+    expect(md).not.toContain('\n-');
   });
 
   it('empty → explicit none line', () => {
