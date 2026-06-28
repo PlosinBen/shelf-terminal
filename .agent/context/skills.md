@@ -103,3 +103,23 @@ related:
 **Root cause**：`query.reloadPlugins()` 重掃磁碟、把新 skill 餵進 **model-facing** 能力集，但**不重建 `/` slash 解析索引**。這是 SDK 行為，不是我們的 bug。
 
 **Fix**：認知差異即可。**改既有 skill 內容不受此限**（名稱已在索引），只有「全新 skill 名稱」會這樣，且 model 仍可主動使用；我們 `/skills` 卡用 `reloadPlugins()` 回傳值自己重組、會即時反映。**別**為此把 reload 改成 fresh session（會丟對話歷史）。Copilot `skills.reload()` 無此問題。
+
+## skills#8 — 多檔 skill：SKILL.md 維持特權，aux 檔走通用 file ops（agent 經 bridge 管理 scripts）  ·  [Decision]
+
+**Background**：skill 資料夾可帶 aux 檔（`scripts/`、`reference.md`）。**消費端本來就 folder-aware**（投影是整棵 `cpSync`、兩家 SDK 都指資料夾 root 原生載入）—— 缺的只有 **authoring**：app-tool bridge 原本只把 SKILL.md 當一個字串（`get/create/update`），agent 看不到也管不到 aux 檔。
+
+**Why bridge（不是 worker 直接寫）**：投影到 worker 的是**下游 copy**，每次 `onSkillsChanged()` wipe-and-copy 覆寫。agent 可在 worker bash *讀* 那些檔，但 *改* 會被下次投影蓋掉、永不回流真相源 → 寫入**必須**經 bridge（同 SKILL.md 走 bridge 的理由）。
+
+**Decision**：
+- **SKILL.md 維持特權**：identity（frontmatter `name`）、rename、YAML 驗證、lock 都綁它 → 仍由 `update_app_skill` 獨佔，**不可降級成普通檔**。aux 檔走另一組通用 `*_file` ops（`read/write/delete_app_skill_file`），內容當 opaque utf-8。`get_app_skill` 加吐 `files`（aux 路徑清單，排除 SKILL.md/.locked），agent 才知道有 scripts。
+- **Full CRUD**（非唯讀）：authoring 含 script 的 skill 要能*建*出 script，唯讀會讓 SKILL.md 引用一個生不出來的檔 → 壞 skill。
+- **路徑封閉 = security gate**：store 的 `resolveAuxPath(name, rel)` 是唯一閘 —— resolve 進 `skillDir` 內，blank/絕對/backslash/drive-letter/`..`-escape/保留字（`SKILL.md`/`.locked`）一律 null，「resolve 後仍在 skillDir 內」是權威檢查。
+- **無孤兒不變式**：保留 `SKILL.md`（`*_file` 刪不到）+ **不開 whole-skill delete 給 agent**（UI-only）→ **沒有任何 bridge 路徑能拿掉 SKILL.md**，skill 不會變「有 script 沒 SKILL.md」。防呆：`listSkills` 本就跳過無 SKILL.md 的資料夾。
+- **Lock 一致**：lock = 「agent 整顆別碰」，aux 檔 write/delete 也擋（main 端，bypass mode 也守得住）；read 仍允許。
+- **良性中間態不報錯**：寫了一個 SKILL.md 還沒引用的 script（或反之）照投影、引用補上即生效。
+
+**Out of scope**：binary 檔（bridge 是字串模型，text-only）；UI 多檔編輯器（renderer 仍單 textarea）；chmod/exec bit/runtime deps（使用者環境問題，bridge 寫檔 0644）。
+
+**Do not change casually because**：別把 SKILL.md 併進通用 file ops（會丟掉 identity/rename/YAML/lock 語意）；別把保留字檢查從 `resolveAuxPath` 搬走（無孤兒不變式靠它 + no-agent-delete 兩者共同成立）。
+
+**Related**：`skills#2`（bridge）、`skills#4`（hot-reload，aux 寫入同樣 `onSkillsChanged()`）、`contracts/app-tool-bridge`、`src/main/{skills-store,agent/app-tool}.ts`、`agent-server/{app-tool-tools,providers/claude/index,providers/copilot/index}.ts`。

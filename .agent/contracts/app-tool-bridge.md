@@ -43,12 +43,23 @@ Authoritative definition: the `REGISTRY` constant and `handleAppTool` in `src/ma
 | op | args | return (`data`) | safe? | tool name |
 |----|------|-----------------|-------|-----------|
 | `app_skill.list` | — | `{ skills: SkillMeta[] }` (each `{ name, description? }`, includes `locked`) | **yes** (read) | `list_app_skills` |
-| `app_skill.get` | `{ name: string }` | `{ name, content }` (full raw SKILL.md) | **yes** (read) | `get_app_skill` |
+| `app_skill.get` | `{ name: string }` | `{ name, content, files }` (`content` = full raw SKILL.md; `files` = aux-file paths) | **yes** (read) | `get_app_skill` |
+| `app_skill.read_file` | `{ name, path }` | `{ name, path, content }` (one aux file, utf-8) | **yes** (read) | `read_app_skill_file` |
 | `app_skill.create` | `{ content: string }` (full SKILL.md) | `{ name }` (final folder name) | no (write — confirm) | `create_app_skill` |
 | `app_skill.update` | `{ name: string, content: string }` | `{ name }` (may differ if frontmatter renames) | no (write — confirm) | `update_app_skill` |
+| `app_skill.write_file` | `{ name, path, content }` | `{ name, path }` | no (write — confirm) | `write_app_skill_file` |
+| `app_skill.delete_file` | `{ name, path }` | `{ name, path }` | no (write — confirm) | `delete_app_skill_file` |
 | `web.fetch` | `{ url, method?, headers?, body? }` | `{ status, headers, body }` (raw response) | no — gated **in main** per origin (not the provider confirm; see below) | `browser_fetch` |
 
-**Errors (`ok:false`):** missing/blank `name` or `content` → arg error; `app_skill.get` on absent skill → `skill not found: <name>`. See guards below for `update`. `delete` is **deliberately not registered** — agents cannot delete skills (UI-only, same stance as unlock).
+**Errors (`ok:false`):** missing/blank `name` / `content` / `path` → arg error; `app_skill.get` / `*_file` on absent skill → `skill not found: <name>`; `read_file` on a reserved/invalid path → `invalid or reserved skill file path: <path>`, on an absent file → `file not found: <path>`. See guards below for `update` / `*_file`. `delete` (whole-skill) is **deliberately not registered** — agents cannot delete skills (UI-only, same stance as unlock).
+
+### Multi-file skills — the aux-file ops (`*_file`)
+
+A skill folder can bundle aux files (scripts, reference docs) alongside SKILL.md. SKILL.md stays **privileged** — `update_app_skill` owns it (identity / rename / YAML validation / lock). The `*_file` ops handle every OTHER file as opaque utf-8, so an agent can author and maintain a script-bearing skill. (Projection + SDK loading were always folder-aware; this just opens the authoring path. Binary files are out — the bridge is a string model.)
+
+The store gate is `resolveAuxPath(name, rel)` (`src/main/skills-store.ts`): resolves a folder-relative path within `skillDir`, returning null for anything blank, absolute, backslash/drive-letter, `..`-escaping, or **reserved** (`SKILL.md` / `.locked`). The "resolved path still inside skillDir" check is authoritative. Reserving SKILL.md + barring whole-skill delete is why **no bridge path can orphan a skill's SKILL.md**.
+
+`*_file` write/delete guards in main (`src/main/agent/app-tool.ts`), in order: skill must exist (`getSkill !== null` — aux files cannot bootstrap a skill); not locked (`isSkillLocked` — lock covers the whole skill, enforced in main so it holds under bypass mode); then the store op (which re-asserts `resolveAuxPath`). On success → `onSkillsChanged()` (re-project + hot-reload). Writing an aux file not yet referenced by SKILL.md (or vice-versa) is a benign intermediate state, **not** an error.
 
 ### Write-path details (`src/main/agent/app-tool.ts`)
 
