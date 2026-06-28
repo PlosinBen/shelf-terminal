@@ -13,7 +13,24 @@ export const APP_SKILL_LIST_DESC =
   + 'Use this before creating a skill to avoid duplicate names, or to find one to read/update.';
 
 export const APP_SKILL_GET_DESC =
-  'Read the full SKILL.md content of one app-level skill, by its folder name (as returned by list_app_skills).';
+  'Read one app-level skill by its folder name (as returned by list_app_skills). Returns the full SKILL.md '
+  + 'content AND `files` — the skill\'s bundled aux files (scripts, reference docs) as folder-relative paths. '
+  + 'Use read_app_skill_file to read one of those files.';
+
+export const APP_SKILL_READ_FILE_DESC =
+  'Read one bundled aux file of an app-level skill (a script or reference doc, NOT SKILL.md itself). '
+  + '`name` is the skill folder name; `path` is a folder-relative path as listed in get_app_skill\'s `files`.';
+
+export const APP_SKILL_WRITE_FILE_DESC =
+  'Create or overwrite one bundled aux file inside an app-level skill\'s folder (e.g. `scripts/build.sh`, '
+  + '`reference.md`). `name` is the skill folder name (the skill must already exist — use create_app_skill '
+  + 'first); `path` is a folder-relative path (no leading slash, no `..`); `content` is the file text. '
+  + 'Cannot write SKILL.md (use update_app_skill) and fails if the skill is locked. Takes effect on the next session.';
+
+export const APP_SKILL_DELETE_FILE_DESC =
+  'Delete one bundled aux file from an app-level skill\'s folder. `name` is the skill folder name; `path` is '
+  + 'a folder-relative path. Cannot delete SKILL.md (deleting a whole skill is UI-only) and fails if the skill '
+  + 'is locked. Takes effect on the next session.';
 
 export const APP_SKILL_CREATE_DESC =
   'Create a new app-level Agent Skill. `content` is the full SKILL.md, including YAML frontmatter with `name` '
@@ -52,6 +69,9 @@ export const SHELF_BRIDGE_TOOLS: BridgeToolSpec[] = [
   { name: 'get_app_skill', description: APP_SKILL_GET_DESC },
   { name: 'create_app_skill', description: APP_SKILL_CREATE_DESC },
   { name: 'update_app_skill', description: APP_SKILL_UPDATE_DESC },
+  { name: 'read_app_skill_file', description: APP_SKILL_READ_FILE_DESC },
+  { name: 'write_app_skill_file', description: APP_SKILL_WRITE_FILE_DESC },
+  { name: 'delete_app_skill_file', description: APP_SKILL_DELETE_FILE_DESC },
   { name: WEB_FETCH_TOOL, description: WEB_FETCH_DESC },
 ];
 
