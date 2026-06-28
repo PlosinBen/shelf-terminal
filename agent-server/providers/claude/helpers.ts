@@ -6,6 +6,7 @@ import type { StatusSegment, SendFn } from '../types';
 import { severityFromUtilization, formatResetCountdown } from '../types';
 import type { ProviderModel, NormalizedTask, TaskEventKind } from '@shared/types';
 import { stripCwd } from '../shared';
+import { mdTable, cell } from '../md-table';
 
 const RATE_LIMIT_LABELS: Record<string, string> = {
   five_hour: '5h',
@@ -628,24 +629,33 @@ function toolAnnotationSuffix(t: ClaudeMcpTool): string {
 }
 
 /**
- * `/mcp` card. Per server: a header line (name · status [· error]) followed by
- * a bullet list of its tools (only available when connected). Empty server set
- * → an explicit "none" line, never blank.
+ * `/mcp` card = two tables: a servers table (Server · Status) and a flat tools
+ * table (Tool · Server · Description) aggregating every server's tools. Empty
+ * server set → an explicit "none" line, never blank. The tools table is omitted
+ * when no server reports any tools.
  */
 export function formatClaudeMcpCard(servers: ClaudeMcpServer[]): string {
   if (servers.length === 0) return 'No MCP servers loaded in this session.';
-  const sections = servers.map((s) => {
-    const head = s.error ? `**\`${s.name}\`** · ${s.status} · ${s.error}` : `**\`${s.name}\`** · ${s.status}`;
-    const tools = s.tools ?? [];
-    if (tools.length === 0) return head;
-    const lines = tools.map((t) => {
-      const desc = t.description ? ` — ${t.description.replace(/\n+/g, ' ')}` : '';
-      return `- \`${t.name}\`${desc}${toolAnnotationSuffix(t)}`;
-    });
-    return `${head}\n${lines.join('\n')}`;
-  });
+  const serverRows = servers.map((s) => [
+    `\`${cell(s.name)}\``,
+    cell(s.error ? `${s.status} (${s.error})` : s.status),
+  ]);
+  const toolRows: string[][] = [];
+  for (const s of servers) {
+    for (const t of s.tools ?? []) {
+      toolRows.push([
+        `\`${cell(t.name)}\`${toolAnnotationSuffix(t)}`,
+        `\`${cell(s.name)}\``,
+        cell(t.description ?? '—'),
+      ]);
+    }
+  }
   const n = servers.length;
-  return `${n} MCP server${n > 1 ? 's' : ''}:\n\n${sections.join('\n\n')}`;
+  let out = `${n} MCP server${n > 1 ? 's' : ''}:\n\n${mdTable(['Server', 'Status'], serverRows)}`;
+  if (toolRows.length) {
+    out += `\n\n${toolRows.length} MCP tool${toolRows.length > 1 ? 's' : ''}:\n\n${mdTable(['Tool', 'Server', 'Description'], toolRows)}`;
+  }
+  return out;
 }
 
 /**
