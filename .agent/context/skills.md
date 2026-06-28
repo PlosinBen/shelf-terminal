@@ -56,12 +56,14 @@ related:
 - **資料來源（init 抓一次、cache、reconnect 刷新）**：Claude `Query.mcpServerStatus()` + `supportedCommands()`，**必須在 REAL persistent session 的 `system/init` 抓**（`refreshLoadedContext()`，full options），不是 cwd-only warmup probe（會漏 app skills + in-process bridge）；Copilot 從 `session.skills_loaded` / `session.mcp_servers_loaded` event 抓。
 - **不對稱（SDK 限制）**：`source`/`enabled` 只有 Copilot 給得出；Claude `/skills` = `supportedCommands()` 去掉已知 built-ins。
 - **list ↔ dispatch 必須成對**：加進 command list **且**實作攔截 —— 只列不攔會被當 prompt 餵模型。
+- **cold-start read-through warm（`ensureLoadedContext`）**：cache 是 read-through —— slash handler 先 `await ensureLoadedContext()` 再讀。real session 出現後由 `refreshLoadedContext()` 持續刷新；**冷窗（開 tab、未送訊息、就打 `/mcp`）**則就地暖一次。**兩家機制不同**：Claude 的常駐 session 是 streaming-input，**未 push 訊息前不發 `system/init`**（實測：streaming 流不送訊息 15s 無 init；字串 prompt `' '` 會 init）→ 必須另開**字串 prompt 拋棄式 probe**（full options：plugins + in-process `shelf` MCP，少一樣就漏報），init 即讀即 abort；Copilot 直接 `ensureSession()`（createSession 即觸發 loaded events），等事件到。idempotent + in-flight 去重；暖機**刻意與 auth probe 分離**（載 MCP/skills 不與登入判斷 fate-share，慢/壞的 MCP 不擋開 pane）。
+- **fail-loud**：暖機後 cache 仍 `undefined`（probe 真的失敗）→ 印「Could not load …」，**不謊報「none」**。
 
-**Do not change casually because**：在 warmup probe（cwd-only）抓會漏掉 app skills + in-process `shelf` bridge —— 一定要在 full-options 的 real session init 抓。
+**Do not change casually because**：① 在 warmup probe（cwd-only）抓會漏掉 app skills + in-process `shelf` bridge —— 一定要在 full-options 的 session 抓（含 `ensureLoadedContext` 的拋棄式 probe）。② Claude 冷窗不能改用「`ensureSession()` 不送訊息」暖機 —— streaming session 不會 init。③ 別把暖機折進 auth warmup 省一個行程 —— 會讓登入判斷被 MCP 啟動健康度綁架（`app-level-mcps` 上線後尤甚）。
 
-**Open**：Claude in-process `shelf` bridge 是否進 `mcpServerStatus()` 待真機驗；Copilot event cache 時機（極早打 `/mcp` 可能空）。
+**Open**：Claude in-process `shelf` bridge 是否進 `mcpServerStatus()` 待真機驗（unit test mock 過、未真機跑）。
 
-**Related**：`agent-providers#1`、PRODUCT #5（原生的歸原生）、`agent-server/providers/{loaded-context,claude/index,copilot/index,fake/index}.ts`。
+**Related**：`agent-providers#1`、PRODUCT #5（原生的歸原生）、`agent-server/providers/{loaded-context,claude/index,copilot/index,fake/index}.ts`、測試 `agent-server/providers/{claude,copilot}/loaded-context-warm.test.ts`。
 
 ## skills#4 — App-skill live hot-reload：skill 改完免重連即生效  ·  [Decision]
 

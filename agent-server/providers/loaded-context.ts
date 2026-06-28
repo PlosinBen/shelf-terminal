@@ -9,7 +9,7 @@
  * / `mcp_servers_loaded` events) — captured + normalized ONCE at init.
  *
  * Pure (no SDK imports / no I/O) so the normalize + format logic is unit-tested
- * without spinning up a backend. See .agent/features/mcp-skills-visibility.md.
+ * without spinning up a backend.
  */
 
 /** Normalized MCP server (cross-provider). `source` is Copilot-only. */
