@@ -115,11 +115,12 @@ related:
 - **Full CRUD**（非唯讀）：authoring 含 script 的 skill 要能*建*出 script，唯讀會讓 SKILL.md 引用一個生不出來的檔 → 壞 skill。
 - **路徑封閉 = security gate**：store 的 `resolveAuxPath(name, rel)` 是唯一閘 —— resolve 進 `skillDir` 內，blank/絕對/backslash/drive-letter/`..`-escape/保留字（`SKILL.md`/`.locked`）一律 null，「resolve 後仍在 skillDir 內」是權威檢查。
 - **無孤兒不變式**：保留 `SKILL.md`（`*_file` 刪不到）+ **不開 whole-skill delete 給 agent**（UI-only）→ **沒有任何 bridge 路徑能拿掉 SKILL.md**，skill 不會變「有 script 沒 SKILL.md」。防呆：`listSkills` 本就跳過無 SKILL.md 的資料夾。
-- **Lock 一致**：lock = 「agent 整顆別碰」，aux 檔 write/delete 也擋（main 端，bypass mode 也守得住）；read 仍允許。
+- **Lock 一致（但只對 agent）**：lock = 「agent 整顆別碰」，aux 檔 write/delete 在 **bridge/main 端**也擋（bypass mode 也守得住）；read 仍允許。**manager UI 不受 lock 約束**（lock 只 fence agent，使用者永遠能改，同 SKILL.md/unlock 立場）→ UI 的 aux IPC handler 直接打 store、不檢查 lock。
 - **良性中間態不報錯**：寫了一個 SKILL.md 還沒引用的 script（或反之）照投影、引用補上即生效。
+- **Manager UI 同樣 full CRUD（與 agent 對齊）**：`SkillsView` editor 多一個 `activeFile` 維度 —— SKILL.md 走 `skills.update`（特權：驗證/rename），aux 檔走 `skills.writeFile`/`deleteFile`（新 IPC `skills:*-file`，寫入照樣 `onSkillsChanged()` 重投影）。Files 清單**沒 aux 檔就隱藏**（簡單 skill 視覺零變）；Preview 只對 SKILL.md/`*.md`，script 純文字編輯。
 
-**Out of scope**：binary 檔（bridge 是字串模型，text-only）；UI 多檔編輯器（renderer 仍單 textarea）；chmod/exec bit/runtime deps（使用者環境問題，bridge 寫檔 0644）。
+**Out of scope**：binary 檔（bridge 與 UI 都是字串/utf-8 模型，text-only）；rich code 編輯（syntax highlight/LSP，UI 維持純 textarea）；chmod/exec bit/runtime deps（使用者環境問題，寫檔 0644）。
 
 **Do not change casually because**：別把 SKILL.md 併進通用 file ops（會丟掉 identity/rename/YAML/lock 語意）；別把保留字檢查從 `resolveAuxPath` 搬走（無孤兒不變式靠它 + no-agent-delete 兩者共同成立）。
 
-**Related**：`skills#2`（bridge）、`skills#4`（hot-reload，aux 寫入同樣 `onSkillsChanged()`）、`contracts/app-tool-bridge`、`src/main/{skills-store,agent/app-tool}.ts`、`agent-server/{app-tool-tools,providers/claude/index,providers/copilot/index}.ts`。
+**Related**：`skills#2`（bridge + 統一 mutation pipeline）、`skills#4`（hot-reload，aux 寫入同樣 `onSkillsChanged()`）、`contracts/app-tool-bridge`、`src/main/{skills-store,agent/app-tool,ipc/skills}.ts`、`src/renderer/components/SkillsView.tsx`、`agent-server/{app-tool-tools,providers/claude/index,providers/copilot/index}.ts`、e2e `skills.spec.ts`。
