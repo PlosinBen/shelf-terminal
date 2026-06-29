@@ -124,3 +124,17 @@ related:
 **Do not change casually because**：別把 SKILL.md 併進通用 file ops（會丟掉 identity/rename/YAML/lock 語意）；別把保留字檢查從 `resolveAuxPath` 搬走（無孤兒不變式靠它 + no-agent-delete 兩者共同成立）。
 
 **Related**：`skills#2`（bridge + 統一 mutation pipeline）、`skills#4`（hot-reload，aux 寫入同樣 `onSkillsChanged()`）、`contracts/app-tool-bridge`、`src/main/{skills-store,agent/app-tool,ipc/skills}.ts`、`src/renderer/components/SkillsView.tsx`、`agent-server/{app-tool-tools,providers/claude/index,providers/copilot/index}.ts`、e2e `skills.spec.ts`。
+
+## skills#9 — App-skill reload 在 agent view 顯示回饋（不再靜默）  ·  [Decision]
+
+**Problem**：`skills#4` 的 hot-reload 是 **fire-and-forget**——`reloadSkills()` 回 `void`、成功只進 agent-server stderr，**什麼都不回 renderer**。使用者改完 skill，reload 默默發生,無從得知「我的編輯到底有沒有進到正在跑的 agent」。
+
+**Decision**：reload 完由 **provider 在 agent view 顯示一條線**（成功 system 分隔線 `Skills reloaded`、失敗既有 error 樣式），責任切分清楚：
+- `SKILLS_CHANGED` IPC = **sidebar 的事**（刷新 Skills 面板 list），與此無關。
+- agent-view 回饋 = **agent-server 的事**：`reloadSkills()` 改回傳 `{reloaded, ok, error?}`；`reload_skills` handler 依結果**用 base send** emit `skills_reloaded`（session-scoped、turnId-less），main 合成 system/error `AGENT_MESSAGE` 到該 tab。
+- **per live session**：skill 是 app 全域,一次編輯 reload N 個 live session,每個在自己的 tab 各顯示一條;沒 live session(`reloaded:false`)不顯示。
+- 失敗走 **fail-loud**(error 線),正好落在 reload 完那個時間點。
+
+**Do not change casually because**：別把回饋掛回 `SKILLS_CHANGED`(那是 sidebar，不分 tab、不知 reload 結果);emit 必須走 base send 而非 turn send(turn-less,且 reload 不在任何 turn 裡 —— 見 `architecture/agent-turn` 的 content session-scoped 投遞)。wire 規格見 `contracts/agent-routing` 的 `skills_reloaded`。
+
+**Related**：`skills#4`(hot-reload)、`contracts/agent-routing`(`skills_reloaded` wire)、`architecture/agent-turn`(turnId-scoping / session-scoped 投遞)、`agent-server/{index,providers/{claude,copilot}/index}.ts`、`src/main/agent/{turn-dispatcher,remote,index}.ts`、e2e `app-tool.spec.ts`。

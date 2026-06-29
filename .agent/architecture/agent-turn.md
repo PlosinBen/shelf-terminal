@@ -56,10 +56,11 @@ How a typed user message becomes rendered agent output. The path runs through th
    ═════════════════╪═══════════════════  process boundary │
                     │                                       │
         ┌───────────▼──────────────┐                        │
-        │   per-turn router        │  routes each event by  │
-        │   (host process)         │  its turn id to that   │
-        └───────────┬──────────────┘  turn's reader; stray  │
-                    │                  ids are dropped+logged│
+        │  host-process router     │  CONTENT (reply/fold/  │
+        │  content→session (by tab)│  stream/error) → session│
+        │  status →turn (by id)    │  sink by TAB, turnId-   │
+        └───────────┬──────────────┘  free; STATUS/control →│
+                    │                  the turn's reader byid│
         ┌───────────▼──────────────┐                        │
         │   per-tab message store  │ ◄──────────────────────┘
         │   - upsert by message id │   queue snapshot reconciled here:
@@ -74,7 +75,7 @@ How a typed user message becomes rendered agent output. The path runs through th
         └──────────────────────────┘
 ```
 
-The conversational spine: a keystroke becomes a draft in the input zone, which on submit emits a send intent onto the event bus and performs no side effect itself. A single central handler receives the intent, writes an optimistic user entry into the per-tab store (instant echo), and eager-sends the message across the wire stamped with a client-minted correlation id — it does not hold or batch. The provider backend's send queue is the sole ordering authority: it serializes overlapping turns and, on every change, emits a complete ordered snapshot of what is queued versus running. The renderer mirrors that snapshot rather than guessing turn boundaries — queued items draw as chips, and when an item flips to running the optimistic entry is promoted into a real timeline bubble. Each turn then runs as a native provider query; its output crosses back as render primitives (an inline reply, a foldable card, a note, a system divider, an error) carried on a per-turn envelope. A per-turn router in the host process fans these events to the reader for that turn by id and drops anything whose turn is already gone. The store upserts by message id; the timeline subscribes and renders primitives only.
+The conversational spine: a keystroke becomes a draft in the input zone, which on submit emits a send intent onto the event bus and performs no side effect itself. A single central handler receives the intent, writes an optimistic user entry into the per-tab store (instant echo), and eager-sends the message across the wire stamped with a client-minted correlation id — it does not hold or batch. The provider backend's send queue is the sole ordering authority: it serializes overlapping turns and, on every change, emits a complete ordered snapshot of what is queued versus running. The renderer mirrors that snapshot rather than guessing turn boundaries — queued items draw as chips, and when an item flips to running the optimistic entry is promoted into a real timeline bubble. Each turn then runs as a native provider query; its output crosses back as render primitives (an inline reply, a foldable card, a note, a system divider, an error). In the host process these split by kind: **content render primitives (reply / fold / stream / error) are delivered session-scoped by tab id — never gated on a turn id**, so content late at a turn boundary is never dropped; **status / lifecycle events route by turn id** to that turn's reader, driving busy/idle and turn-end. The store upserts by message id; the timeline subscribes and renders primitives only.
 
 Two branches leave this spine without leaving the machinery:
 
@@ -88,7 +89,8 @@ A state side-channel runs parallel to the timeline: the plan/todo view is replac
 - **Renderer owns drafting and display; the backend owns ordering and turn boundaries.** The client eager-sends and mirrors the server's ordered snapshot — it never decides when a turn starts or ends, and never re-derives the queue locally.
 - **The wire carries render primitives, not provider semantics.** What crosses to the renderer is shaped for rendering (reply / foldable card / note / system / error); the renderer holds no provider type, tool name, or slash grammar and adds no "if this tool then…" branch.
 - **Every send must terminate in an idle signal on its own turn id.** The renderer flips to streaming the instant a message is sent and waits for idle to release; any early-out or error path that skips idle wedges the spinner permanently. Each dropped or cancelled send still emits a terminal idle on its turn id.
-- **Correlation ids and turn ids stay internal.** The client-minted send id exists only to reconcile the optimistic entry against the server snapshot; the per-turn id exists only to route events and key store upserts. Neither leaks into UI behavior decisions.
+- **Correlation ids and turn ids stay internal.** The client-minted send id exists only to reconcile the optimistic entry against the server snapshot; the per-turn id exists only to route **status/lifecycle** events (turn-end / busy-idle). Neither leaks into UI behavior decisions, and neither reaches the renderer (it keys on tab id + message id).
+- **turn id is the serial-seam token, NOT a concurrency or content key.** Turns are strictly serial (a foreground turn and an SDK auto-resume turn never overlap), so turn id is not for concurrency — it disambiguates **status/lifecycle at the seam** between one turn's trailing events (a tail idle after the first) and the next turn's opening, including an unsolicited auto-resume turn. Content render primitives are therefore decoupled from turn id (session-scoped by tab) so a mis-attributed turn boundary (router drift) can never lose a reply or tool result; on the provider side, content the turn-router can't attribute to an active turn is emitted session-scoped rather than dropped. Permission round-trips correlate by tool-use id, not turn id. Do not re-introduce a turn-id gate on content delivery.
 - **Config flows one way per concern.** The renderer holds preferences and sends edits imperatively; the backend holds confirmed status and capabilities and broadcasts them. Disk persists only what the backend has confirmed — rejected values never broadcast, so they never persist.
 - **The trigger never performs the effect.** UI elements and keybindings only emit intents; the host-touching side effects (send, append, persist) are centralized in one handler, keeping siblings indirectly coupled through the store rather than directly wired.
 - **Plan/todo state is not timeline.** It is replace-semantics state on its own channel and slice, deliberately kept out of the appendable message history.

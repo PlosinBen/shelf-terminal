@@ -89,7 +89,21 @@ A provider's in-process bridge tool calls `callMain(op, args)` (`agent-server/ap
 - trigger: main's skills-changed pipeline (`onSkillsChanged` → subscriber in `src/main/agent/index.ts`) calls `session.backend.reloadSkills()` per live session.
 - main → agent-server: `sendLine({ type: 'reload_skills' })`. The switch fans out to every instantiated backend: `for (const b of backends.values()) void b.reloadSkills?.()` — best-effort, no-op without a live session, effective from the session's next turn.
 
-No payload beyond `type`. (`reloadSkills?()` exists on both `AgentBackend` and `ServerBackend`.)
+No payload beyond `type`. (`reloadSkills?()` exists on both `AgentBackend` and `ServerBackend`.) `ServerBackend.reloadSkills()` returns `{ reloaded, ok, error? }` so the agent-server can surface the result (see `skills_reloaded`); `reloaded:false` = no live session (no line emitted).
+
+## skills_reloaded
+
+**Direction**: agent-server → main → renderer (the result of a `reload_skills`). Session-scoped (NO turnId) — emitted by the agent-server `reload_skills` handler via the **base send** after each backend's `reloadSkills()` resolves, so it bypasses `wrapSendForTurn` and is turnId-less by construction.
+
+- agent-server → main: `{ type: 'skills_reloaded', ok: boolean, error?: string }`, only when `reloaded` (no-op reloads emit nothing).
+- routing: the host-process dispatcher routes it by type (before the turnId check) to a session-level `onSkillsReloaded` sink — its callback in `index.ts` captures `tabId` (the agent-server child is 1:1 with a tab, like `task_event` / `queue`).
+- main synthesizes an `AGENT_MESSAGE` for that tab, reusing the existing renderer rendering: `ok` → `{ type:'system', content:'Skills reloaded' }` (a divider line); `!ok` → `{ type:'error', content:'Skills reload failed: …' }` (fail-loud).
+
+This is the user-visible feedback for skill hot-reload (`context/skills` skills#4) — without it the re-scan is silent and the user can't tell their edit reached the running agent.
+
+## skills_reloaded ⟂ content delivery (turnId-scoping)
+
+`skills_reloaded` rides the same **session-scoped delivery** that all conversation content now uses: the host-process dispatcher routes `message` / `stream` / `error` events to a session sink (`onSessionEvent` → `dispatchEvent` by tab id) **before** the turnId check, so content is never gated on (or dropped by) turn id. turn id routes only `status` / control events (turn-end, busy/idle, permission). See `architecture/agent-turn` for the full model. Conversation-content event SHAPES stay in `contracts/agent-wire-protocol`; this is only their host-side routing.
 
 ## stop_task
 
