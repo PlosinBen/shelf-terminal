@@ -1635,7 +1635,13 @@ function emitClaudeToolResult(
 // set to the UI.  Key = bucket label (e.g. '5h', '7d').
 const rateLimitBuckets = new Map<string, StatusSegment>();
 
-export function processMessage(msg: SDKMessage, send: SendFn, cwd: string, blockMsgIds: BlockMsgIdState) {
+export function processMessage(msg: SDKMessage, send: SendFn, cwd: string, blockMsgIds: BlockMsgIdState, contentSend?: SendFn) {
+  // DISPLAY content (reply / fold_* / stream / tool result) goes via `content`;
+  // STATUS (streaming/idle) + plan stay on `send`. `contentSend` lets the caller
+  // route content session-scoped (independent of the active turn) so it's never
+  // dropped at the turn-router seam; defaults to `send` (turn-scoped) → identical
+  // behavior when omitted. See turnId-scoping (Phase 3).
+  const content = contentSend ?? send;
   switch (msg.type) {
     case 'assistant': {
       // Map content[] positions to absolute block indices by anchoring the
@@ -1648,18 +1654,18 @@ export function processMessage(msg: SDKMessage, send: SendFn, cwd: string, block
         if (block.type === 'thinking') {
           // Reuse msgId if stream chunks already minted one for this block;
           // otherwise (no streaming or non-streamed model) mint fresh.
-          send({
+          content({
             type: 'message', msgId: getOrMintBlockMsgId(blockMsgIds, idx), msgType: 'fold_text',
             label: 'Thinking',
             body: { content: block.thinking, tone: 'muted' },
           });
         } else if (block.type === 'text') {
-          send({
+          content({
             type: 'message', msgId: getOrMintBlockMsgId(blockMsgIds, idx), msgType: 'reply',
             content: block.text,
           });
         } else if (block.type === 'tool_use') {
-          emitClaudeToolUse(send, { id: block.id, name: block.name, input: block.input as Record<string, unknown> }, cwd);
+          emitClaudeToolUse(content, { id: block.id, name: block.name, input: block.input as Record<string, unknown> }, cwd);
           // Mirror plan-style tools into the sticky panel for parity with Copilot's plan API.
           // ExitPlanMode: initial plan submission.
           // TaskCreate / TaskUpdate: ongoing task list (replaces TodoWrite as of SDK 0.3.142).
@@ -1791,9 +1797,9 @@ export function processMessage(msg: SDKMessage, send: SendFn, cwd: string, block
         // lazily mint so the chunk still has an id.
         const msgId = getOrMintBlockMsgId(blockMsgIds, event.index);
         if (delta.type === 'text_delta' && typeof delta.text === 'string' && delta.text.length > 0) {
-          send({ type: 'stream', msgId, streamType: 'text', content: delta.text });
+          content({ type: 'stream', msgId, streamType: 'text', content: delta.text });
         } else if (delta.type === 'thinking_delta' && typeof delta.thinking === 'string' && delta.thinking.length > 0) {
-          send({ type: 'stream', msgId, streamType: 'thinking', content: delta.thinking });
+          content({ type: 'stream', msgId, streamType: 'thinking', content: delta.thinking });
         }
       }
       break;
@@ -1803,7 +1809,7 @@ export function processMessage(msg: SDKMessage, send: SendFn, cwd: string, block
         for (const block of msg.message.content) {
           if ((block as any).type === 'tool_result') {
             const raw = (block as any).content;
-            const content = extractToolResultText(raw);
+            const contentText = extractToolResultText(raw);
             const toolUseId = (block as any).tool_use_id;
             const isError = (block as any).is_error === true;
 
@@ -1812,7 +1818,7 @@ export function processMessage(msg: SDKMessage, send: SendFn, cwd: string, block
             if (!isError && pendingTaskCreates.has(toolUseId)) {
               const pending = pendingTaskCreates.get(toolUseId)!;
               pendingTaskCreates.delete(toolUseId);
-              const taskId = parseTaskCreateOutput(content);
+              const taskId = parseTaskCreateOutput(contentText);
               if (taskId) {
                 tasks.set(taskId, { ...pending, status: 'pending' });
                 renderPlan(send, tasks);
@@ -1821,7 +1827,7 @@ export function processMessage(msg: SDKMessage, send: SendFn, cwd: string, block
                 // wire format likely changed. Drops the task from the plan
                 // panel; next TaskList reconcile can recover. Log the format
                 // so we know what to fix.
-                serverLog('error', 'claude', 'TaskCreate result parse failed; format may have changed', { contentPreview: content.slice(0, 300) });
+                serverLog('error', 'claude', 'TaskCreate result parse failed; format may have changed', { contentPreview: contentText.slice(0, 300) });
               }
             }
 
@@ -1829,15 +1835,15 @@ export function processMessage(msg: SDKMessage, send: SendFn, cwd: string, block
             // Only attempt for tool_use_ids we registered as TaskList.
             if (!isError && pendingTaskLists.has(toolUseId)) {
               pendingTaskLists.delete(toolUseId);
-              const snapshot = parseTaskListOutput(content);
+              const snapshot = parseTaskListOutput(contentText);
               if (snapshot) {
                 reconcileTasks(tasks, snapshot, send);
               } else {
-                serverLog('error', 'claude', 'TaskList result parse failed; format may have changed', { contentPreview: content.slice(0, 300) });
+                serverLog('error', 'claude', 'TaskList result parse failed; format may have changed', { contentPreview: contentText.slice(0, 300) });
               }
             }
 
-            emitClaudeToolResult(send, toolUseId, content, isError, cwd);
+            emitClaudeToolResult(content, toolUseId, contentText, isError, cwd);
           }
         }
         // No blockMsgIds clear here — the next assistant message's own
