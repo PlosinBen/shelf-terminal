@@ -3458,6 +3458,33 @@ button {
   vertical-align: middle;
 }
 
+/* Auto-dismiss countdown bar for a cleanly-completed task: a thin track whose
+   fill shrinks to zero over AUTO_REMOVE_MS (duration set inline from the JS
+   constant). Purely cosmetic — the JS timer owns the real removal. Removed from
+   the DOM the moment the user engages the card, so the animation never lingers. */
+.agent-task-countdown {
+  height: 2px;
+  margin-top: 3px;
+  border-radius: 1px;
+  background: var(--border, rgba(255, 255, 255, 0.08));
+  overflow: hidden;
+}
+
+.agent-task-countdown > span {
+  display: block;
+  height: 100%;
+  width: 100%;
+  background: var(--agent-success, #98c379);
+  opacity: 0.6;
+  transform-origin: left center;
+  animation: agent-task-countdown-shrink linear forwards;
+}
+
+@keyframes agent-task-countdown-shrink {
+  from { transform: scaleX(1); }
+  to { transform: scaleX(0); }
+}
+
 /* Running-task action: a DISTINCT danger button (vs the faint × dismiss on a
    settled task) so killing live work reads as deliberate + destructive. Two
    states: idle "Stop" (outlined) → armed "Stop?" (filled, on first click). */

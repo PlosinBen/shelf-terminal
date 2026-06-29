@@ -11,6 +11,18 @@ const STOP_CONFIRM_TIMEOUT_MS = 5000;
 // How long a "Stop?" confirm stays armed before reverting to "Stop" — so a
 // stray first click can't leave the button primed to kill on a later click.
 const STOP_ARM_REVERT_MS = 3000;
+// How long a cleanly-completed task lingers before auto-dismissing itself, so a
+// finished card doesn't pile up. Cancelled the moment the user expands the task
+// (they're reading it) and never started for a failed/errored task.
+const DEFAULT_AUTO_REMOVE_MS = 30000;
+
+// Read lazily (not a module const) so an E2E can shrink the delay via a window
+// override at any point before a task settles — driving a real 30s timer in a
+// browser test is otherwise impractical. Prod default stays 30s.
+function autoRemoveMs(): number {
+  const override = (window as { __SHELF_TASK_AUTO_REMOVE_MS__?: number }).__SHELF_TASK_AUTO_REMOVE_MS__;
+  return typeof override === 'number' && override > 0 ? override : DEFAULT_AUTO_REMOVE_MS;
+}
 
 interface Props {
   tabId: string;
@@ -42,6 +54,22 @@ export function decideTaskButton(done: boolean, stopping: boolean, armed: boolea
   if (stopping) return 'stopping';
   if (done) return 'dismiss';
   return armed ? 'stop-armed' : 'stop-idle';
+}
+
+/**
+ * Should a settled task start (or keep) its auto-dismiss countdown? True only
+ * for a task that finished cleanly (status 'completed', no error) AND that the
+ * user hasn't engaged with (expanded) AND that isn't mid-stop. A failed /
+ * stopped / errored task is never auto-removed (the user should see it), and an
+ * engaged task is frozen because the user clicked in to read it. Pure so the
+ * timing wiring stays unit-testable.
+ */
+export function shouldAutoRemove(
+  task: NormalizedTask,
+  engaged: boolean,
+  stopping: boolean,
+): boolean {
+  return task.done && task.status === 'completed' && !task.error && !engaged && !stopping;
 }
 
 interface OutputState {
@@ -85,8 +113,11 @@ export function shouldFetchOutput(
  * touch the remote fs). A single × per
  * task deletes it: a settled task is just dismissed; a running task is first
  * stopped through the SDK (stopTask) and only leaves the list once the SDK
- * confirms it settled (or a fallback timeout fires). Renders nothing when
- * empty. See background-tasks#2.
+ * confirms it settled (or a fallback timeout fires). A cleanly-completed task
+ * (status 'completed', no error) additionally auto-dismisses after
+ * AUTO_REMOVE_MS unless the user expands it first (engagement freezes the
+ * countdown); a failed/stopped/errored task never auto-removes so the user can
+ * see it. Renders nothing when empty. See background-tasks#2 / #4.
  */
 export function BackgroundTasksPanel({ tabId }: Props) {
   const tab = useAgentTab(tabId);
@@ -111,6 +142,11 @@ export function BackgroundTasksPanel({ tabId }: Props) {
   // refetch effect tell "already fetched this version" from "a newer task_event
   // arrived" (e.g. the trailing notification that finally carries output_file).
   const lastFetched = useRef<Record<string, NormalizedTask>>({});
+  // Pending auto-dismiss timers (cleanly-completed tasks), keyed by id.
+  const autoRemoveTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  // Ids the user expanded at least once — engagement permanently cancels the
+  // auto-dismiss countdown (they've looked at it; don't yank it away).
+  const engaged = useRef<Set<string>>(new Set());
 
   const disarm = (id: string) => {
     const timer = armTimers.current[id];
@@ -151,7 +187,30 @@ export function BackgroundTasksPanel({ tabId }: Props) {
   useEffect(() => () => {
     for (const id of Object.keys(timers.current)) clearTimeout(timers.current[id]);
     for (const id of Object.keys(armTimers.current)) clearTimeout(armTimers.current[id]);
+    for (const id of Object.keys(autoRemoveTimers.current)) clearTimeout(autoRemoveTimers.current[id]);
   }, []);
+
+  // Auto-dismiss a cleanly-completed task after AUTO_REMOVE_MS. Arm a timer once
+  // per eligible id; cancel it the moment the task stops being eligible (the user
+  // expanded it → `engaged`, or it turned out to be stopping). Engagement is
+  // sticky, so collapsing again won't restart the countdown.
+  useEffect(() => {
+    for (const t of tasks) {
+      if (shouldAutoRemove(t, engaged.current.has(t.id), !!stopping[t.id])) {
+        if (!autoRemoveTimers.current[t.id]) {
+          autoRemoveTimers.current[t.id] = setTimeout(() => {
+            delete autoRemoveTimers.current[t.id];
+            removeBackgroundTask(tabId, t.id);
+          }, autoRemoveMs());
+        }
+      } else {
+        const timer = autoRemoveTimers.current[t.id];
+        if (timer) { clearTimeout(timer); delete autoRemoveTimers.current[t.id]; }
+      }
+    }
+    // expandedTasks: engagement is recorded alongside it in toggleExpand, so its
+    // change is what re-runs this effect to cancel a just-engaged task's timer.
+  }, [tasks, stopping, expandedTasks, tabId]);
 
   // Fetch a settled task's remote output into its expanded entry. Best-effort —
   // a fetch failure surfaces as the entry's error.
@@ -229,6 +288,9 @@ export function BackgroundTasksPanel({ tabId }: Props) {
       return;
     }
     debugLog('bg-tasks', `toggleExpand open id=${task.id.slice(0, 8)} done=${task.done}`);
+    // The user engaged with this task — permanently cancel its auto-dismiss
+    // countdown (the effect below clears any pending timer next render).
+    engaged.current.add(task.id);
     // Expanding. A settled task fetches its remote output now; a running task
     // just reveals its full (now wrapping) label/summary — its output is fetched
     // by the effect above once it settles.
@@ -303,6 +365,17 @@ export function BackgroundTasksPanel({ tabId }: Props) {
                   <pre className="agent-task-output">
                     {out.loading ? 'Loading…' : (out.error ? `Error: ${out.error}` : (out.content || '(empty output)'))}
                   </pre>
+                )}
+                {/* Auto-dismiss countdown: a bar that shrinks over AUTO_REMOVE_MS,
+                    purely cosmetic — the JS timer above owns the actual removal.
+                    Shown only while the task is auto-remove-eligible, so it
+                    vanishes the moment the user engages (expands) the card. The
+                    animationDuration is sourced from the same constant so the
+                    visual and the timer stay in lockstep. */}
+                {shouldAutoRemove(t, engaged.current.has(t.id), !!stopping[t.id]) && (
+                  <div className="agent-task-countdown" aria-hidden="true">
+                    <span style={{ animationDuration: `${autoRemoveMs()}ms` }} />
+                  </div>
                 )}
               </li>
             );

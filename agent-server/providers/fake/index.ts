@@ -41,6 +41,7 @@ import type {
  *   task:<id>           emit a running background task_event (turnId-less)
  *   taskdone:<id>       emit a completed background task_event + stash its
  *                       output so read_task_output (fetchTaskOutput) returns it
+ *   taskfail:<id>       emit a failed (errored) terminal background task_event
  *   plan:<markdown>     emit a plan / todo-list side-channel update (→ PlanPanel,
  *                       distinct from the background-tasks panel)
  *   serverturn:<msg>    server-initiated turn (auto-resume prose): turn_started
@@ -295,6 +296,18 @@ export function createFakeBackend(): ServerBackend {
         type: 'task_event',
         kind: 'done',
         task: { id, type: 'shell', label: `bg ${id}`, status: 'completed', summary: `bg ${id} completed (exit 0)`, done: true },
+      });
+      return;
+    }
+
+    // taskfail:<id> — a failed background task (terminal, carries an error). Used
+    // to assert that a failed card is NOT auto-dismissed (the user must see it).
+    if (step.startsWith('taskfail:')) {
+      const id = step.slice('taskfail:'.length);
+      send({
+        type: 'task_event',
+        kind: 'done',
+        task: { id, type: 'shell', label: `bg ${id}`, status: 'failed', summary: `bg ${id} failed (exit 1)`, done: true, error: 'exit 1' },
       });
       return;
     }

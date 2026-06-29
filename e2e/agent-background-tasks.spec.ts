@@ -5,10 +5,13 @@ import type { Page } from '@playwright/test';
  * Background-tasks panel — end-to-end over the fake provider (SHELF_TEST_MODE=1).
  * Exercises the turnId-less task_event lane all the way to the renderer:
  * a running task shows in the "N tasks" panel, a completed task exposes its
- * output via read_task_output, and tasks can be dismissed. Scenarios:
+ * output via read_task_output, tasks can be dismissed, and a cleanly-completed
+ * card auto-dismisses after a countdown (shrunk via a window override) while a
+ * failed/engaged card does not. Scenarios:
  *   task:<id>     → running background task_event
  *   taskdone:<id> → completed task_event + stashed output (fetchTaskOutput)
- * See background-tasks#2 and agent-server/providers/fake/index.ts.
+ *   taskfail:<id> → failed (errored) terminal task_event
+ * See background-tasks#2 / #4 and agent-server/providers/fake/index.ts.
  */
 
 const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
@@ -92,6 +95,73 @@ test.describe('background tasks panel via fake provider', () => {
     // Dismiss the only task → panel disappears.
     await item.locator('.agent-task-dismiss').click();
     await expect(page.locator('.agent-tasks-panel')).toHaveCount(0, { timeout: 5_000 });
+  });
+
+  test('a cleanly-completed task auto-dismisses after the countdown', async ({ shelfApp: { page } }) => {
+    // Shrink the 30s auto-dismiss so the test doesn't wait 30s. Read lazily by
+    // the panel, so setting it before the task settles is enough (no reload). A
+    // couple of seconds leaves room to observe the bar before removal without
+    // making the test slow.
+    await page.evaluate(() => { (window as { __SHELF_TASK_AUTO_REMOVE_MS__?: number }).__SHELF_TASK_AUTO_REMOVE_MS__ = 2000; });
+
+    await setupProject(page);
+    await openAgentTab(page);
+    await sendAgentPrompt(page, 'taskdone:t1');
+
+    const panel = page.locator('.agent-tasks-panel:visible');
+    await expect(panel.locator('.agent-tasks-label')).toHaveText('1 task', { timeout: 5_000 });
+    await panel.locator('.agent-tasks-header').click();
+
+    const item = panel.locator('.agent-task-item.agent-task-completed');
+    await expect(item).toBeVisible();
+    // The countdown bar renders for a cleanly-completed card...
+    await expect(item.locator('.agent-task-countdown')).toBeVisible();
+    // ...and the card auto-removes when it elapses (whole panel goes once empty).
+    await expect(page.locator('.agent-tasks-panel')).toHaveCount(0, { timeout: 5_000 });
+  });
+
+  test('a failed task is NOT auto-dismissed and shows no countdown', async ({ shelfApp: { page } }) => {
+    await page.evaluate(() => { (window as { __SHELF_TASK_AUTO_REMOVE_MS__?: number }).__SHELF_TASK_AUTO_REMOVE_MS__ = 600; });
+
+    await setupProject(page);
+    await openAgentTab(page);
+    await sendAgentPrompt(page, 'taskfail:t1');
+
+    const panel = page.locator('.agent-tasks-panel:visible');
+    await expect(panel.locator('.agent-tasks-label')).toHaveText('1 task', { timeout: 5_000 });
+    await panel.locator('.agent-tasks-header').click();
+
+    const item = panel.locator('.agent-task-item.agent-task-failed');
+    await expect(item).toBeVisible();
+    // A failed card never gets a countdown bar...
+    await expect(item.locator('.agent-task-countdown')).toHaveCount(0);
+    // ...and is still there well after the (shrunk) countdown would have fired —
+    // the user must see the failure. It only leaves via an explicit dismiss.
+    await page.waitForTimeout(1500);
+    await expect(item).toBeVisible();
+    await item.locator('.agent-task-dismiss').click();
+    await expect(page.locator('.agent-tasks-panel')).toHaveCount(0, { timeout: 5_000 });
+  });
+
+  test('expanding a completed task cancels its auto-dismiss', async ({ shelfApp: { page } }) => {
+    await page.evaluate(() => { (window as { __SHELF_TASK_AUTO_REMOVE_MS__?: number }).__SHELF_TASK_AUTO_REMOVE_MS__ = 600; });
+
+    await setupProject(page);
+    await openAgentTab(page);
+    await sendAgentPrompt(page, 'taskdone:t1');
+
+    const panel = page.locator('.agent-tasks-panel:visible');
+    await expect(panel.locator('.agent-tasks-label')).toHaveText('1 task', { timeout: 5_000 });
+    await panel.locator('.agent-tasks-header').click();
+
+    const item = panel.locator('.agent-task-item.agent-task-completed');
+    await expect(item).toBeVisible();
+    // Engage: expand the row → countdown is cancelled (and the bar disappears).
+    await item.locator('.agent-task-row').click();
+    await expect(item.locator('.agent-task-countdown')).toHaveCount(0);
+    // Survives well past when the countdown would have removed it.
+    await page.waitForTimeout(1500);
+    await expect(item).toBeVisible();
   });
 
   test('running task: two-step Stop kills it through the SDK, then removes the card on confirmation', async ({ shelfApp: { page } }) => {

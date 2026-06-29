@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { shouldFetchOutput, decideTaskButton } from './BackgroundTasksPanel';
+import { shouldFetchOutput, decideTaskButton, shouldAutoRemove } from './BackgroundTasksPanel';
 import type { NormalizedTask } from '../../../shared/types';
 
 /**
@@ -61,5 +61,38 @@ describe('decideTaskButton', () => {
 
   it('a settled task never shows a stop affordance, even if armed flag lingers', () => {
     expect(decideTaskButton(true, false, true)).toBe('dismiss');
+  });
+});
+
+describe('shouldAutoRemove', () => {
+  const task = (over: Partial<NormalizedTask> = {}): NormalizedTask =>
+    ({ id: 't1', type: 'shell', label: 'cmd', status: 'completed', done: true, ...over });
+
+  it('is true for a cleanly-completed, un-engaged task', () => {
+    expect(shouldAutoRemove(task(), false, false)).toBe(true);
+  });
+
+  it('is false once the user engaged (expanded) — countdown frozen', () => {
+    expect(shouldAutoRemove(task(), true, false)).toBe(false);
+  });
+
+  it('is false for a failed task (user should see the error)', () => {
+    expect(shouldAutoRemove(task({ status: 'failed' }), false, false)).toBe(false);
+  });
+
+  it('is false for a completed task that carries an error message', () => {
+    expect(shouldAutoRemove(task({ error: 'boom' }), false, false)).toBe(false);
+  });
+
+  it('is false for a stopped task', () => {
+    expect(shouldAutoRemove(task({ status: 'stopped' }), false, false)).toBe(false);
+  });
+
+  it('is false while the task is still running (not done)', () => {
+    expect(shouldAutoRemove(task({ status: 'running', done: false }), false, false)).toBe(false);
+  });
+
+  it('is false while a stop is in flight', () => {
+    expect(shouldAutoRemove(task(), false, true)).toBe(false);
   });
 });
