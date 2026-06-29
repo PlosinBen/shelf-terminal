@@ -56,3 +56,30 @@ test.describe('app-tool bridge via fake provider', () => {
     await expect(reply).toContainText('unknown app_tool op');
   });
 });
+
+/**
+ * Skill reload feedback — end-to-end over the fake provider. A skill change on a
+ * LIVE agent session re-scans the provider (`reload_skills`), which emits a
+ * turnId-less `skills_reloaded` session event; main surfaces it as a system line
+ * in that tab's agent view. See .agent/features/skill-reload-feedback.md (Phase 1).
+ */
+test.describe('skill reload feedback via fake provider', () => {
+  test('a skill change surfaces a "Skills reloaded" line in the live agent view', async ({ shelfApp: { page } }) => {
+    await setupProject(page);
+    await openAgentTab(page);
+
+    // Run a turn so the session is "live" (the fake captures its send) — a no-op
+    // reload (no live session) would emit nothing.
+    await sendAgentPrompt(page, 'text:hello');
+    await expect(page.locator('.agent-turn-response')).toContainText('hello', { timeout: 8_000 });
+
+    // Change a skill via the Skills panel → onSkillsChanged → reload_skills →
+    // fake.reloadSkills(reloaded:true) → skills_reloaded → a system line here.
+    await page.locator('.right-tab-btn', { hasText: 'Skills' }).click();
+    await expect(page.locator('.skills-view')).toBeVisible();
+    await page.locator('.skills-view .notes-new-btn').click();
+
+    await expect(page.locator('.agent-msg-system', { hasText: 'Skills reloaded' }))
+      .toBeVisible({ timeout: 8_000 });
+  });
+});

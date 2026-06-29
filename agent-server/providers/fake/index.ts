@@ -416,6 +416,13 @@ export function createFakeBackend(): ServerBackend {
       taskOutputs.clear();
     },
 
+    async reloadSkills() {
+      // Mirror the real providers: no-op (reloaded:false) until a turn has run
+      // (lastSend captured = a "live session"), then report a successful re-scan
+      // so the agent-server emits a `skills_reloaded` line. Drives the e2e.
+      return lastSend ? { reloaded: true, ok: true } : { reloaded: false, ok: true };
+    },
+
     async gatherCapabilities(): Promise<ProviderCapabilities> {
       return {
         models: [{ value: 'fake-model', displayName: 'fake-model' }],
