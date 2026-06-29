@@ -10,12 +10,21 @@ export type CommandPickerKeyAction = 'up' | 'down' | 'execute' | 'close' | 'none
  * selection in the filter input), arrows/Enter/Esc drive the candidate window —
  * defer EVERY key to the IME so the user can pick characters instead of
  * accidentally moving the selection / running a command. See GOTCHAS.
+ *
+ * Tab/Shift+Tab navigate the list (command-palette convention). This also keeps
+ * focus trapped inside the open picker — the input has no Tab-stop siblings, so
+ * an unhandled Tab would yank focus out to the page behind the overlay.
  */
-export function decideCommandPickerKey(key: string, isComposing: boolean): CommandPickerKeyAction {
+export function decideCommandPickerKey(
+  key: string,
+  isComposing: boolean,
+  shiftKey = false,
+): CommandPickerKeyAction {
   if (isComposing) return 'none';
   switch (key) {
     case 'ArrowDown': return 'down';
     case 'ArrowUp': return 'up';
+    case 'Tab': return shiftKey ? 'up' : 'down';
     case 'Enter': return 'execute';
     case 'Escape': return 'close';
     default: return 'none';
@@ -84,7 +93,7 @@ export function CommandPicker() {
   );
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    const action = decideCommandPickerKey(e.key, e.nativeEvent.isComposing);
+    const action = decideCommandPickerKey(e.key, e.nativeEvent.isComposing, e.shiftKey);
     if (action === 'none') return;
     e.preventDefault();
     switch (action) {

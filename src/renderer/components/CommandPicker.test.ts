@@ -22,4 +22,16 @@ describe('decideCommandPickerKey', () => {
     expect(decideCommandPickerKey('Escape', false)).toBe('close');
     expect(decideCommandPickerKey('x', false)).toBe('none');
   });
+
+  // ── Tab navigates the list (and is captured so focus can't escape the
+  // overlay): Tab → down, Shift+Tab → up. ──
+  it('maps Tab to list navigation so focus stays trapped', () => {
+    expect(decideCommandPickerKey('Tab', false)).toBe('down');
+    expect(decideCommandPickerKey('Tab', false, true)).toBe('up');
+  });
+
+  it('still defers Tab to the IME while composing', () => {
+    expect(decideCommandPickerKey('Tab', true)).toBe('none');
+    expect(decideCommandPickerKey('Tab', true, true)).toBe('none');
+  });
 });
