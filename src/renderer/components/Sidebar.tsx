@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import {
   useStore,
   setActiveProject,
@@ -14,6 +14,28 @@ import { CONFIRM_REMOVE_EVENT } from './RemoveConfirmDialog';
 import { tooltipWithShortcut } from '../utils/format-keybinding';
 import { isMac } from '../hooks/useKeybindings';
 
+/**
+ * Clamp a context-menu's desired top-left so the whole menu stays on screen
+ * (with a small margin). Prefers the requested spot and only pulls the menu
+ * back when it would overflow the right/bottom edge; never past the top/left
+ * margin (so a menu taller than the viewport stays reachable from the top).
+ * Pure so the overflow math is unit-testable without a DOM.
+ */
+export function clampMenuPosition(
+  x: number,
+  y: number,
+  menuW: number,
+  menuH: number,
+  viewW: number,
+  viewH: number,
+  margin = 8,
+): { left: number; top: number } {
+  return {
+    left: Math.max(margin, Math.min(x, viewW - menuW - margin)),
+    top: Math.max(margin, Math.min(y, viewH - menuH - margin)),
+  };
+}
+
 export function Sidebar() {
   const { projects, activeProjectIndex, settings, connectionHealth } = useStore();
   const kb = settings.keybindings;
@@ -21,6 +43,9 @@ export function Sidebar() {
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const [contextMenu, setContextMenu] = useState<{ index: number; x: number; y: number } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  // Clamped on-screen position, measured after the menu mounts. Null until
+  // measured → first paint falls back to the raw cursor position.
+  const [menuPos, setMenuPos] = useState<{ left: number; top: number } | null>(null);
 
   // Row-tint flash on connection-health *worsening* (a one-shot attention pulse;
   // the steady state lives in the dot colour — see §5.9). Track each project's
@@ -46,6 +71,20 @@ export function Sidebar() {
     );
     return () => timers.forEach(clearTimeout);
   }, [projects, connectionHealth]);
+
+  // After the menu mounts, measure it and clamp so it never spills off-screen
+  // (e.g. right-clicking a project near the bottom edge). Runs before paint, so
+  // the corrected position is the one the user sees — no visible jump.
+  useLayoutEffect(() => {
+    if (!contextMenu || !menuRef.current) {
+      setMenuPos(null);
+      return;
+    }
+    const rect = menuRef.current.getBoundingClientRect();
+    setMenuPos(
+      clampMenuPosition(contextMenu.x, contextMenu.y, rect.width, rect.height, window.innerWidth, window.innerHeight),
+    );
+  }, [contextMenu]);
 
   // Close context menu on outside click
   useEffect(() => {
@@ -150,7 +189,7 @@ export function Sidebar() {
           <div
             ref={menuRef}
             className="context-menu"
-            style={{ top: contextMenu.y, left: contextMenu.x }}
+            style={{ top: menuPos?.top ?? contextMenu.y, left: menuPos?.left ?? contextMenu.x }}
           >
             {isConnected ? (
               <button
