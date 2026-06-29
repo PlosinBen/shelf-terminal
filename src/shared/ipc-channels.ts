@@ -62,6 +62,12 @@ export const IPC = {
   SKILLS_UPDATE: 'skills:update',
   SKILLS_DELETE: 'skills:delete',
   SKILLS_SET_LOCKED: 'skills:set-locked',
+  // Aux files inside a skill folder (scripts/reference docs — NOT SKILL.md, which
+  // goes through SKILLS_GET/UPDATE). Mirror the skills-store aux-file fns.
+  SKILLS_LIST_FILES: 'skills:list-files',
+  SKILLS_READ_FILE: 'skills:read-file',
+  SKILLS_WRITE_FILE: 'skills:write-file',
+  SKILLS_DELETE_FILE: 'skills:delete-file',
   // main→renderer: app-level skills changed (by the manager UI OR the agent
   // bridge) — the SkillsView refetches its list. See skills-sync.ts.
   SKILLS_CHANGED: 'skills:changed',

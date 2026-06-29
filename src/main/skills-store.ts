@@ -38,6 +38,11 @@ export interface SkillUpdateResult {
   error?: string;
 }
 
+export interface SkillFileResult {
+  ok: boolean;
+  error?: string;
+}
+
 const PLUGIN_NAME = 'shelf-skills';
 
 function skillsRoot(): string {
@@ -60,6 +65,12 @@ function lockMarkerPath(name: string): string {
 function manifestPath(): string {
   return path.join(skillsRoot(), '.claude-plugin', 'plugin.json');
 }
+
+/** Top-level files an agent may NOT touch via the generic aux-file ops: SKILL.md
+ *  (owned by update_app_skill — identity/rename/YAML validation) and `.locked`
+ *  (the user's UI-only agent-handsoff marker). Reserving them in the path guard
+ *  is what makes "an agent can never orphan a skill's SKILL.md" true. */
+const RESERVED_AUX_FILES = new Set(['SKILL.md', '.locked']);
 
 /** Ensure the plugin scaffold exists so the tree is projection-ready. Idempotent. */
 function ensureScaffold(): void {
@@ -254,4 +265,96 @@ export async function updateSkill(currentName: string, content: string): Promise
 export async function deleteSkill(name: string): Promise<void> {
   if (!isValidSkillName(name)) return;
   await fs.promises.rm(skillDir(name), { recursive: true, force: true });
+}
+
+/**
+ * Resolve a skill-folder-relative aux path to an absolute path INSIDE that
+ * skill's folder, or null if the path is unusable: invalid skill name, blank,
+ * absolute, a reserved file (SKILL.md / .locked), or escaping the folder (`..`).
+ * The "resolved path is still within skillDir" check is authoritative — it
+ * defends against every traversal trick, not just literal `..`. Pure (only path
+ * math over skillDir) → unit-testable, and the single gate every aux op funnels
+ * through. See contracts/app-tool-bridge.
+ */
+export function resolveAuxPath(name: string, rel: string): string | null {
+  if (!isValidSkillName(name)) return null;
+  if (typeof rel !== 'string') return null;
+  const trimmed = rel.trim();
+  if (!trimmed) return null;
+  // Reject absolute, Windows drive-letter, and backslash separators outright.
+  if (path.isAbsolute(trimmed) || /^[a-zA-Z]:/.test(trimmed) || trimmed.includes('\\')) return null;
+  const dir = skillDir(name);
+  const resolved = path.resolve(dir, trimmed);
+  const relToDir = path.relative(dir, resolved);
+  // Empty = the folder itself; `..`-prefixed / absolute = outside it.
+  if (relToDir === '' || relToDir.startsWith('..') || path.isAbsolute(relToDir)) return null;
+  if (RESERVED_AUX_FILES.has(relToDir)) return null;
+  return resolved;
+}
+
+/** List a skill's aux files (everything except SKILL.md / .locked) as sorted,
+ *  POSIX-relative paths. Empty for an unknown/invalid skill. */
+export async function listSkillAuxFiles(name: string): Promise<string[]> {
+  if (!isValidSkillName(name)) return [];
+  const dir = skillDir(name);
+  if (!fs.existsSync(dir)) return [];
+  const out: string[] = [];
+  const walk = async (cur: string, rel: string): Promise<void> => {
+    let entries: fs.Dirent[];
+    try {
+      entries = await fs.promises.readdir(cur, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      const childRel = rel ? `${rel}/${e.name}` : e.name;
+      if (e.isDirectory()) await walk(path.join(cur, e.name), childRel);
+      else if (e.isFile() && !RESERVED_AUX_FILES.has(childRel)) out.push(childRel);
+    }
+  };
+  await walk(dir, '');
+  return out.sort();
+}
+
+/** Read one aux file as utf-8. null = invalid/reserved path OR file absent (the
+ *  bridge distinguishes them via `resolveAuxPath` for the error message). */
+export async function readSkillFile(name: string, rel: string): Promise<string | null> {
+  const abs = resolveAuxPath(name, rel);
+  if (!abs) return null;
+  try {
+    return await fs.promises.readFile(abs, 'utf-8');
+  } catch {
+    return null;
+  }
+}
+
+/** Create/overwrite one aux file (utf-8), making parent dirs as needed. The path
+ *  guard + skill-exists check are re-asserted here so the store is safe even if a
+ *  caller skips the bridge guards. */
+export async function writeSkillFile(name: string, rel: string, content: string): Promise<SkillFileResult> {
+  const abs = resolveAuxPath(name, rel);
+  if (!abs) return { ok: false, error: `Invalid or reserved skill file path: ${rel}` };
+  if (!fs.existsSync(skillDir(name))) return { ok: false, error: `skill not found: ${name}` };
+  try {
+    await fs.promises.mkdir(path.dirname(abs), { recursive: true });
+    await fs.promises.writeFile(abs, content, 'utf-8');
+    return { ok: true };
+  } catch (err: any) {
+    log.error('skills', `write aux ${name}/${rel} failed: ${err?.message ?? err}`);
+    return { ok: false, error: 'Failed to write skill file' };
+  }
+}
+
+/** Delete one aux file. Cannot touch SKILL.md / .locked (reserved → guard null). */
+export async function deleteSkillFile(name: string, rel: string): Promise<SkillFileResult> {
+  const abs = resolveAuxPath(name, rel);
+  if (!abs) return { ok: false, error: `Invalid or reserved skill file path: ${rel}` };
+  try {
+    if (!fs.existsSync(abs)) return { ok: false, error: `file not found: ${rel}` };
+    await fs.promises.rm(abs, { force: true });
+    return { ok: true };
+  } catch (err: any) {
+    log.error('skills', `delete aux ${name}/${rel} failed: ${err?.message ?? err}`);
+    return { ok: false, error: 'Failed to delete skill file' };
+  }
 }

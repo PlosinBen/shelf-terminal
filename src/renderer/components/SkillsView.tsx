@@ -9,7 +9,7 @@ interface SkillMeta {
   locked?: boolean;
 }
 
-const DEFAULT_WIDTH = 380;
+const DEFAULT_WIDTH = 480; // wider than the other right panels — the editor packs a Files list + a full button row
 const MIN_WIDTH = 280;
 const MAX_WIDTH = 700;
 
@@ -132,6 +132,9 @@ interface SkillEditorHandle {
   flush: () => Promise<boolean>;
 }
 
+const SKILL_MD = 'SKILL.md';
+const isMarkdownFile = (file: string) => file === SKILL_MD || file.toLowerCase().endsWith('.md');
+
 const SkillEditor = forwardRef<SkillEditorHandle, {
   name: string;
   locked: boolean;
@@ -139,41 +142,72 @@ const SkillEditor = forwardRef<SkillEditorHandle, {
   onAfterSave: () => void | Promise<void>;
   onDeleted: () => void;
 }>(function SkillEditor({ name, locked, onRenamed, onAfterSave, onDeleted }, ref) {
+  // Which file the editor body is currently showing. SKILL.md is the privileged
+  // default (its own save path: frontmatter validation + rename); aux files
+  // (scripts/reference docs) use the generic file IPC. See skills#8.
+  const [activeFile, setActiveFile] = useState<string>(SKILL_MD);
+  const [files, setFiles] = useState<string[]>([]);
   const [content, setContent] = useState<string | null>(null);
   const [mode, setMode] = useState<'edit' | 'preview'>('edit');
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [newPath, setNewPath] = useState('');
   const savedRef = useRef<string>('');
   const contentRef = useRef<string>('');
+  const activeFileRef = useRef<string>(SKILL_MD);
+  activeFileRef.current = activeFile;
 
+  const refreshFiles = useCallback(async () => {
+    setFiles(await window.shelfApi.skills.listFiles(name));
+  }, [name]);
+
+  useEffect(() => { void refreshFiles(); }, [refreshFiles]);
+  // An agent (or external edit) can add/remove aux files while the panel is open.
+  useEffect(() => window.shelfApi.skills.onChanged(() => { void refreshFiles(); }), [refreshFiles]);
+
+  // Load the active file's content whenever the file (or skill) changes.
   useEffect(() => {
     let cancelled = false;
-    window.shelfApi.skills.get(name).then((raw) => {
+    const load = activeFile === SKILL_MD
+      ? window.shelfApi.skills.get(name)
+      : window.shelfApi.skills.readFile(name, activeFile);
+    setContent(null);
+    load.then((raw) => {
       if (cancelled) return;
       const c = raw ?? '';
       setContent(c);
       savedRef.current = c;
       contentRef.current = c;
+      if (!isMarkdownFile(activeFile)) setMode('edit'); // no markdown preview for scripts
     });
     return () => { cancelled = true; };
-  }, [name]);
+  }, [name, activeFile]);
 
   const dirty = content !== null && content !== savedRef.current;
+  const canPreview = isMarkdownFile(activeFile);
 
+  // Save the CURRENTLY active file. SKILL.md → skills.update (validation/rename);
+  // an aux file → skills.writeFile. Returns false if rejected (stay on the file).
   const save = useCallback(async (): Promise<boolean> => {
     const c = contentRef.current;
     if (c === savedRef.current) return true; // unchanged
+    const file = activeFileRef.current;
     setSaving(true);
     try {
-      const res = await window.shelfApi.skills.update(name, c);
-      if (!res.ok) {
-        setError(res.error ?? 'Save failed');
-        return false;
+      if (file === SKILL_MD) {
+        const res = await window.shelfApi.skills.update(name, c);
+        if (!res.ok) { setError(res.error ?? 'Save failed'); return false; }
+        setError(null);
+        savedRef.current = c;
+        if (res.name && res.name !== name) onRenamed(res.name);
+        await onAfterSave();
+        return true;
       }
+      const res = await window.shelfApi.skills.writeFile(name, file, c);
+      if (!res.ok) { setError(res.error ?? 'Save failed'); return false; }
       setError(null);
       savedRef.current = c;
-      if (res.name && res.name !== name) onRenamed(res.name);
-      await onAfterSave();
       return true;
     } finally {
       setSaving(false);
@@ -182,11 +216,44 @@ const SkillEditor = forwardRef<SkillEditorHandle, {
 
   useImperativeHandle(ref, () => ({ flush: save }), [save]);
 
+  // Switch files — flush (save) the current one first; a rejected save keeps you put.
+  const switchFile = useCallback(async (target: string) => {
+    if (target === activeFileRef.current) return;
+    if (!(await save())) return;
+    setError(null);
+    setActiveFile(target);
+  }, [save]);
+
+  const submitNewFile = useCallback(async () => {
+    const p = newPath.trim();
+    if (!p) return;
+    if (!(await save())) return; // don't lose unsaved edits on the current file
+    const res = await window.shelfApi.skills.writeFile(name, p, '');
+    if (!res.ok) { setError(res.error ?? 'Could not create file'); return; }
+    setError(null);
+    setAdding(false);
+    setNewPath('');
+    await refreshFiles();
+    setActiveFile(p);
+  }, [name, newPath, save, refreshFiles]);
+
+  const deleteFile = useCallback(async (file: string) => {
+    const ok = await window.shelfApi.dialog.confirm('Delete file', `Delete "${file}" from skill "${name}"?`, 'Delete');
+    if (!ok) return;
+    const res = await window.shelfApi.skills.deleteFile(name, file);
+    if (!res.ok) { setError(res.error ?? 'Delete failed'); return; }
+    await refreshFiles();
+    if (activeFileRef.current === file) setActiveFile(SKILL_MD);
+  }, [name, refreshFiles]);
+
   const previewHtml = useMemo(() => {
-    if (content === null) return '';
-    const body = content.replace(/^---[ \t]*\r?\n[\s\S]*?\r?\n---\r?\n?/, '');
+    if (content === null || !canPreview) return '';
+    // SKILL.md hides its frontmatter in preview; an aux .md renders whole.
+    const body = activeFile === SKILL_MD
+      ? content.replace(/^---[ \t]*\r?\n[\s\S]*?\r?\n---\r?\n?/, '')
+      : content;
     return renderMarkdown(body, { breaks: true });
-  }, [content]);
+  }, [content, canPreview, activeFile]);
 
   // Lock only fences the AGENT out (enforced main-side) — the manager UI here
   // can always toggle it. The list refresh that reflects the new icon arrives
@@ -202,19 +269,26 @@ const SkillEditor = forwardRef<SkillEditorHandle, {
     onDeleted();
   }, [name, onDeleted]);
 
-  if (content === null) return <div className="notes-empty">Loading…</div>;
+  const showFilesBox = files.length > 0 || adding;
 
   return (
     <>
       <div className="notes-mode-row">
         <button className={`notes-mode-btn ${mode === 'edit' ? 'active' : ''}`} onClick={() => setMode('edit')}>Edit</button>
-        <button className={`notes-mode-btn ${mode === 'preview' ? 'active' : ''}`} onClick={() => setMode('preview')}>Preview</button>
+        {canPreview && (
+          <button className={`notes-mode-btn ${mode === 'preview' ? 'active' : ''}`} onClick={() => setMode('preview')}>Preview</button>
+        )}
+        <button
+          className="notes-mode-btn skills-addfile-btn"
+          onClick={() => { setAdding(true); setNewPath(''); }}
+          title="Add a file (script / reference) to this skill"
+        >+ File</button>
         <span className="notes-mode-spacer" />
         <button
           className="notes-send-btn"
           onClick={() => void save()}
           disabled={!dirty || saving}
-          title="Save (renames the folder if the frontmatter name changed)"
+          title={activeFile === SKILL_MD ? 'Save (renames the folder if the frontmatter name changed)' : `Save ${activeFile}`}
         >
           {saving ? 'Saving…' : 'Save'}
         </button>
@@ -226,16 +300,62 @@ const SkillEditor = forwardRef<SkillEditorHandle, {
           {locked ? <LockIcon size={13} /> : <UnlockIcon size={13} />}
           {locked ? 'Locked' : 'Lock'}
         </button>
-        <button className="notes-delete-btn" onClick={handleDelete} title="Delete skill">Delete</button>
+        <button className="notes-delete-btn" onClick={handleDelete} title="Delete this skill">Delete</button>
       </div>
+
+      {showFilesBox && (
+        <div className="skills-files">
+          <div
+            className={`skills-file-item ${activeFile === SKILL_MD ? 'active' : ''}`}
+            onClick={() => void switchFile(SKILL_MD)}
+          >
+            <span className="skills-file-name">{SKILL_MD}</span>
+          </div>
+          {files.map((f) => (
+            <div
+              key={f}
+              className={`skills-file-item ${activeFile === f ? 'active' : ''}`}
+              onClick={() => void switchFile(f)}
+            >
+              <span className="skills-file-name">{f}</span>
+              <button
+                className="skills-file-del"
+                title={`Delete ${f}`}
+                onClick={(e) => { e.stopPropagation(); void deleteFile(f); }}
+              >×</button>
+            </div>
+          ))}
+          {adding && (
+            <div className="skills-file-add">
+              <input
+                className="skills-file-add-input"
+                autoFocus
+                value={newPath}
+                placeholder="scripts/build.sh"
+                spellCheck={false}
+                onChange={(e) => setNewPath(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') void submitNewFile();
+                  else if (e.key === 'Escape') { setAdding(false); setNewPath(''); }
+                }}
+              />
+              <button className="skills-file-add-ok" onClick={() => void submitNewFile()} disabled={!newPath.trim()}>Add</button>
+              <button className="skills-file-add-cancel" onClick={() => { setAdding(false); setNewPath(''); }}>Cancel</button>
+            </div>
+          )}
+        </div>
+      )}
+
       {error && <div className="skills-error">{error}</div>}
       <div className="notes-body">
-        {mode === 'edit' ? (
+        {content === null ? (
+          <div className="notes-empty">Loading…</div>
+        ) : mode === 'edit' || !canPreview ? (
           <textarea
             className="notes-textarea"
             value={content}
             onChange={(e) => { setContent(e.target.value); contentRef.current = e.target.value; }}
-            placeholder="SKILL.md — paste a skill, or fill in the template."
+            placeholder={activeFile === SKILL_MD ? 'SKILL.md — paste a skill, or fill in the template.' : activeFile}
             spellCheck={false}
           />
         ) : (

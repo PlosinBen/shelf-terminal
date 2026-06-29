@@ -6,6 +6,11 @@ const createSkill = vi.fn();
 const updateSkill = vi.fn();
 const deleteSkill = vi.fn();
 const isSkillLocked = vi.fn();
+const listSkillAuxFiles = vi.fn();
+const readSkillFile = vi.fn();
+const writeSkillFile = vi.fn();
+const deleteSkillFile = vi.fn();
+const resolveAuxPath = vi.fn();
 vi.mock('../skills-store', () => ({
   listSkills: (...a: unknown[]) => listSkills(...a),
   getSkill: (...a: unknown[]) => getSkill(...a),
@@ -13,6 +18,11 @@ vi.mock('../skills-store', () => ({
   updateSkill: (...a: unknown[]) => updateSkill(...a),
   deleteSkill: (...a: unknown[]) => deleteSkill(...a),
   isSkillLocked: (...a: unknown[]) => isSkillLocked(...a),
+  listSkillAuxFiles: (...a: unknown[]) => listSkillAuxFiles(...a),
+  readSkillFile: (...a: unknown[]) => readSkillFile(...a),
+  writeSkillFile: (...a: unknown[]) => writeSkillFile(...a),
+  deleteSkillFile: (...a: unknown[]) => deleteSkillFile(...a),
+  resolveAuxPath: (...a: unknown[]) => resolveAuxPath(...a),
 }));
 const onSkillsChanged = vi.fn();
 vi.mock('../skills-sync', () => ({ onSkillsChanged: () => onSkillsChanged() }));
@@ -26,6 +36,11 @@ beforeEach(() => {
   updateSkill.mockReset();
   deleteSkill.mockReset();
   isSkillLocked.mockReset();
+  listSkillAuxFiles.mockReset();
+  readSkillFile.mockReset();
+  writeSkillFile.mockReset();
+  deleteSkillFile.mockReset();
+  resolveAuxPath.mockReset();
   onSkillsChanged.mockReset();
 });
 
@@ -36,10 +51,11 @@ describe('app-tool dispatcher (read ops)', () => {
     expect(r).toEqual({ ok: true, data: { skills: [{ name: 'a' }, { name: 'b', description: 'B' }] } });
   });
 
-  it('app_skill.get → { name, content }', async () => {
+  it('app_skill.get → { name, content, files } (aux files surfaced)', async () => {
     getSkill.mockResolvedValue('---\nname: foo\n---\nbody');
+    listSkillAuxFiles.mockResolvedValue(['scripts/build.sh']);
     const r = await handleAppTool('app_skill.get', { name: 'foo' });
-    expect(r).toEqual({ ok: true, data: { name: 'foo', content: '---\nname: foo\n---\nbody' } });
+    expect(r).toEqual({ ok: true, data: { name: 'foo', content: '---\nname: foo\n---\nbody', files: ['scripts/build.sh'] } });
     expect(getSkill).toHaveBeenCalledWith('foo');
   });
 
@@ -71,10 +87,133 @@ describe('app-tool dispatcher (read ops)', () => {
   it('registry flags: reads are safe, writes are not; delete is not exposed', () => {
     expect(isSafeAppToolOp('app_skill.list')).toBe(true);
     expect(isSafeAppToolOp('app_skill.get')).toBe(true);
+    expect(isSafeAppToolOp('app_skill.read_file')).toBe(true);
     expect(isSafeAppToolOp('app_skill.create')).toBe(false); // mutation → confirm
     expect(isSafeAppToolOp('app_skill.update')).toBe(false);
+    expect(isSafeAppToolOp('app_skill.write_file')).toBe(false);
+    expect(isSafeAppToolOp('app_skill.delete_file')).toBe(false);
     expect(isKnownAppToolOp('app_skill.create')).toBe(true);
-    expect(isKnownAppToolOp('app_skill.delete')).toBe(false); // never exposed to the agent
+    expect(isKnownAppToolOp('app_skill.delete')).toBe(false); // whole-skill delete: never exposed to the agent
+  });
+});
+
+describe('app-tool dispatcher (aux-file ops)', () => {
+  it('read_file → { name, path, content }', async () => {
+    getSkill.mockResolvedValue('---\nname: foo\n---\nb'); // skill exists
+    resolveAuxPath.mockReturnValue('/abs/foo/scripts/build.sh'); // valid path
+    readSkillFile.mockResolvedValue('#!/bin/sh');
+    const r = await handleAppTool('app_skill.read_file', { name: 'foo', path: 'scripts/build.sh' });
+    expect(r).toEqual({ ok: true, data: { name: 'foo', path: 'scripts/build.sh', content: '#!/bin/sh' } });
+  });
+
+  it('read_file on a missing skill → ok:false (never reads)', async () => {
+    getSkill.mockResolvedValue(null);
+    const r = await handleAppTool('app_skill.read_file', { name: 'ghost', path: 'a.txt' });
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/not found/);
+    expect(readSkillFile).not.toHaveBeenCalled();
+  });
+
+  it('read_file on a reserved/invalid path → ok:false distinct from a missing file', async () => {
+    getSkill.mockResolvedValue('---\nname: foo\n---\nb');
+    resolveAuxPath.mockReturnValue(null); // guard rejects (e.g. SKILL.md / ..)
+    const r = await handleAppTool('app_skill.read_file', { name: 'foo', path: 'SKILL.md' });
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/invalid or reserved/);
+    expect(readSkillFile).not.toHaveBeenCalled();
+  });
+
+  it('read_file on an absent file → ok:false (file not found)', async () => {
+    getSkill.mockResolvedValue('---\nname: foo\n---\nb');
+    resolveAuxPath.mockReturnValue('/abs/foo/nope.txt');
+    readSkillFile.mockResolvedValue(null);
+    const r = await handleAppTool('app_skill.read_file', { name: 'foo', path: 'nope.txt' });
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/file not found/);
+  });
+
+  it('write_file writes + fires onSkillsChanged, returns { name, path }', async () => {
+    getSkill.mockResolvedValue('---\nname: foo\n---\nb'); // exists
+    isSkillLocked.mockReturnValue(false);
+    writeSkillFile.mockResolvedValue({ ok: true });
+    const r = await handleAppTool('app_skill.write_file', { name: 'foo', path: 'scripts/build.sh', content: 'echo hi' });
+    expect(r).toEqual({ ok: true, data: { name: 'foo', path: 'scripts/build.sh' } });
+    expect(writeSkillFile).toHaveBeenCalledWith('foo', 'scripts/build.sh', 'echo hi');
+    expect(onSkillsChanged).toHaveBeenCalledTimes(1);
+  });
+
+  it('write_file allows empty content (an empty aux file is valid)', async () => {
+    getSkill.mockResolvedValue('---\nname: foo\n---\nb');
+    isSkillLocked.mockReturnValue(false);
+    writeSkillFile.mockResolvedValue({ ok: true });
+    const r = await handleAppTool('app_skill.write_file', { name: 'foo', path: 'empty.txt', content: '' });
+    expect(r.ok).toBe(true);
+    expect(writeSkillFile).toHaveBeenCalledWith('foo', 'empty.txt', '');
+  });
+
+  it('write_file with non-string content → ok:false, touches nothing', async () => {
+    const r = await handleAppTool('app_skill.write_file', { name: 'foo', path: 'a.txt' });
+    expect(r.ok).toBe(false);
+    expect(getSkill).not.toHaveBeenCalled();
+    expect(writeSkillFile).not.toHaveBeenCalled();
+  });
+
+  it('write_file on a missing skill → ok:false (aux files cannot bootstrap a skill)', async () => {
+    getSkill.mockResolvedValue(null);
+    const r = await handleAppTool('app_skill.write_file', { name: 'ghost', path: 'a.txt', content: 'x' });
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/not found/);
+    expect(writeSkillFile).not.toHaveBeenCalled();
+    expect(onSkillsChanged).not.toHaveBeenCalled();
+  });
+
+  it('write_file on a locked skill → ok:false, never writes (holds in bypass mode)', async () => {
+    getSkill.mockResolvedValue('---\nname: foo\n---\nb');
+    isSkillLocked.mockReturnValue(true);
+    const r = await handleAppTool('app_skill.write_file', { name: 'foo', path: 'a.txt', content: 'x' });
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/locked/);
+    expect(writeSkillFile).not.toHaveBeenCalled();
+    expect(onSkillsChanged).not.toHaveBeenCalled();
+  });
+
+  it('write_file surfaces a store error (e.g. path guard) without firing onSkillsChanged', async () => {
+    getSkill.mockResolvedValue('---\nname: foo\n---\nb');
+    isSkillLocked.mockReturnValue(false);
+    writeSkillFile.mockResolvedValue({ ok: false, error: 'Invalid or reserved skill file path: ../x' });
+    const r = await handleAppTool('app_skill.write_file', { name: 'foo', path: '../x', content: 'x' });
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/Invalid or reserved/);
+    expect(onSkillsChanged).not.toHaveBeenCalled();
+  });
+
+  it('delete_file deletes + fires onSkillsChanged', async () => {
+    getSkill.mockResolvedValue('---\nname: foo\n---\nb');
+    isSkillLocked.mockReturnValue(false);
+    deleteSkillFile.mockResolvedValue({ ok: true });
+    const r = await handleAppTool('app_skill.delete_file', { name: 'foo', path: 'a.txt' });
+    expect(r).toEqual({ ok: true, data: { name: 'foo', path: 'a.txt' } });
+    expect(deleteSkillFile).toHaveBeenCalledWith('foo', 'a.txt');
+    expect(onSkillsChanged).toHaveBeenCalledTimes(1);
+  });
+
+  it('delete_file on a locked skill → ok:false, never deletes', async () => {
+    getSkill.mockResolvedValue('---\nname: foo\n---\nb');
+    isSkillLocked.mockReturnValue(true);
+    const r = await handleAppTool('app_skill.delete_file', { name: 'foo', path: 'a.txt' });
+    expect(r.ok).toBe(false);
+    expect(deleteSkillFile).not.toHaveBeenCalled();
+    expect(onSkillsChanged).not.toHaveBeenCalled();
+  });
+
+  it('delete_file surfaces a store error (absent file) without firing onSkillsChanged', async () => {
+    getSkill.mockResolvedValue('---\nname: foo\n---\nb');
+    isSkillLocked.mockReturnValue(false);
+    deleteSkillFile.mockResolvedValue({ ok: false, error: 'file not found: a.txt' });
+    const r = await handleAppTool('app_skill.delete_file', { name: 'foo', path: 'a.txt' });
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/file not found/);
+    expect(onSkillsChanged).not.toHaveBeenCalled();
   });
 });
 

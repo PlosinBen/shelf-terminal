@@ -1,6 +1,9 @@
 import { ipcMain } from 'electron';
 import { IPC } from '@shared/ipc-channels';
-import { listSkills, getSkill, createSkill, updateSkill, deleteSkill, setSkillLocked } from '../skills-store';
+import {
+  listSkills, getSkill, createSkill, updateSkill, deleteSkill, setSkillLocked,
+  listSkillAuxFiles, readSkillFile, writeSkillFile, deleteSkillFile,
+} from '../skills-store';
 import { onSkillsChanged } from '../skills-sync';
 
 // The manager UI is just one TRIGGER of a skill mutation — like the agent
@@ -37,5 +40,28 @@ export function registerSkillsHandlers(): void {
   ipcMain.handle(IPC.SKILLS_SET_LOCKED, async (_event, payload: { name: string; locked: boolean }) => {
     await setSkillLocked(payload.name, payload.locked);
     onSkillsChanged();
+  });
+
+  // Aux files: the manager is, like the agent bridge, just a TRIGGER — writes
+  // funnel into onSkillsChanged() (re-project). UNLIKE the bridge, the manager
+  // is NOT lock-gated (lock fences the agent out, not the user).
+  ipcMain.handle(IPC.SKILLS_LIST_FILES, async (_event, name: string) => {
+    return listSkillAuxFiles(name);
+  });
+
+  ipcMain.handle(IPC.SKILLS_READ_FILE, async (_event, payload: { name: string; path: string }) => {
+    return readSkillFile(payload.name, payload.path);
+  });
+
+  ipcMain.handle(IPC.SKILLS_WRITE_FILE, async (_event, payload: { name: string; path: string; content: string }) => {
+    const res = await writeSkillFile(payload.name, payload.path, payload.content);
+    if (res.ok) onSkillsChanged();
+    return res;
+  });
+
+  ipcMain.handle(IPC.SKILLS_DELETE_FILE, async (_event, payload: { name: string; path: string }) => {
+    const res = await deleteSkillFile(payload.name, payload.path);
+    if (res.ok) onSkillsChanged();
+    return res;
   });
 }

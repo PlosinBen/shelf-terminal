@@ -4067,6 +4067,82 @@ button {
   font-size: 12px;
 }
 
+/* Multi-file skills: the Files list inside the editor (auto-hidden when empty). */
+.skills-files {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 6px 12px 0;
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+  border-radius: 4px;
+  overflow: hidden;
+}
+.skills-file-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+  cursor: pointer;
+  color: var(--text-muted);
+}
+.skills-file-item:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+.skills-file-item.active {
+  background: rgba(137, 180, 250, 0.14);
+  color: var(--text, #cdd6f4);
+}
+.skills-file-name {
+  flex: 1;
+  font-family: var(--font-mono, monospace);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.skills-file-del {
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 2px;
+  opacity: 0;
+}
+.skills-file-item:hover .skills-file-del { opacity: 1; }
+.skills-file-del:hover { color: #f38ba8; }
+.skills-file-add {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+}
+.skills-file-add-input {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  padding: 3px 6px;
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.15));
+  border-radius: 3px;
+  background: var(--bg, #1e1e2e);
+  color: var(--text, #cdd6f4);
+}
+.skills-file-add-ok,
+.skills-file-add-cancel {
+  flex-shrink: 0;
+  font-size: 11px;
+  padding: 3px 8px;
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.15));
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.skills-file-add-ok:disabled { opacity: 0.4; cursor: default; }
+
 .notes-list-time {
   color: var(--text-muted);
   font-size: 11px;

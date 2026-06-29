@@ -7,7 +7,7 @@ import { parseSlashPrefix } from '@shared/slash-prefix';
 import { formatConfigAck, type ConfigEditKey } from '@shared/config-ack';
 import type { ProviderModel } from '@shared/types';
 import { stripCwd, resolveSkillsPluginRoot } from '../shared';
-import { runBridgeTool, APP_SKILL_LIST_DESC, APP_SKILL_GET_DESC, APP_SKILL_CREATE_DESC, APP_SKILL_UPDATE_DESC, WEB_FETCH_DESC, SHELF_BRIDGE_TOOLS } from '../../app-tool-tools';
+import { runBridgeTool, APP_SKILL_LIST_DESC, APP_SKILL_GET_DESC, APP_SKILL_CREATE_DESC, APP_SKILL_UPDATE_DESC, APP_SKILL_READ_FILE_DESC, APP_SKILL_WRITE_FILE_DESC, APP_SKILL_DELETE_FILE_DESC, WEB_FETCH_DESC, SHELF_BRIDGE_TOOLS } from '../../app-tool-tools';
 import { WEB_FETCH_TOOL } from '@shared/web-session';
 import { serverLog } from '../../server-logger';
 import { execFile } from 'node:child_process';
@@ -451,6 +451,22 @@ export function createCopilotBackend(): ServerBackend {
         description: APP_SKILL_UPDATE_DESC,
         parameters: { type: 'object', properties: { name: { type: 'string', description: 'current skill folder name' }, content: { type: 'string', description: 'full new SKILL.md' } }, required: ['name', 'content'], additionalProperties: false },
         handler: async (args: any) => (await runBridgeTool('app_skill.update', { name: args?.name, content: args?.content })).text,
+      }),
+      sdkModule!.defineTool('read_app_skill_file', {
+        description: APP_SKILL_READ_FILE_DESC,
+        parameters: { type: 'object', properties: { name: { type: 'string', description: 'skill folder name' }, path: { type: 'string', description: 'folder-relative aux-file path from get_app_skill files' } }, required: ['name', 'path'], additionalProperties: false },
+        handler: async (args: any) => (await runBridgeTool('app_skill.read_file', { name: args?.name, path: args?.path })).text,
+        skipPermission: true,
+      }),
+      sdkModule!.defineTool('write_app_skill_file', {
+        description: APP_SKILL_WRITE_FILE_DESC,
+        parameters: { type: 'object', properties: { name: { type: 'string', description: 'skill folder name' }, path: { type: 'string', description: 'folder-relative aux-file path (no leading slash, no ..)' }, content: { type: 'string', description: 'file content' } }, required: ['name', 'path', 'content'], additionalProperties: false },
+        handler: async (args: any) => (await runBridgeTool('app_skill.write_file', { name: args?.name, path: args?.path, content: args?.content })).text,
+      }),
+      sdkModule!.defineTool('delete_app_skill_file', {
+        description: APP_SKILL_DELETE_FILE_DESC,
+        parameters: { type: 'object', properties: { name: { type: 'string', description: 'skill folder name' }, path: { type: 'string', description: 'folder-relative aux-file path' } }, required: ['name', 'path'], additionalProperties: false },
+        handler: async (args: any) => (await runBridgeTool('app_skill.delete_file', { name: args?.name, path: args?.path })).text,
       }),
       // skipPermission: the gate lives downstream in main's handleAppTool (a
       // generic per-origin web-permission popup, provider-agnostic). Skipping the

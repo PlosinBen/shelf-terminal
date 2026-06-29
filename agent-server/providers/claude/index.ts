@@ -1,7 +1,7 @@
 import { query as sdkQuery, tool, createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk';
 import type { Query, Options, SDKMessage, SDKUserMessage, CanUseTool } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
-import { runBridgeTool, APP_SKILL_LIST_DESC, APP_SKILL_GET_DESC, APP_SKILL_CREATE_DESC, APP_SKILL_UPDATE_DESC, WEB_FETCH_DESC } from '../../app-tool-tools';
+import { runBridgeTool, APP_SKILL_LIST_DESC, APP_SKILL_GET_DESC, APP_SKILL_CREATE_DESC, APP_SKILL_UPDATE_DESC, APP_SKILL_READ_FILE_DESC, APP_SKILL_WRITE_FILE_DESC, APP_SKILL_DELETE_FILE_DESC, WEB_FETCH_DESC } from '../../app-tool-tools';
 import { isWebFetchTool, WEB_FETCH_TOOL } from '@shared/web-session';
 import { serverLog } from '../../server-logger';
 import { createRouterState, notePush, routeMessage } from './turn-router';
@@ -227,6 +227,18 @@ function getShelfMcpServer() {
         }),
         tool('update_app_skill', APP_SKILL_UPDATE_DESC, { name: z.string().describe('current skill folder name'), content: z.string().describe('full new SKILL.md') }, async ({ name, content }) => {
           const { text, isError } = await runBridgeTool('app_skill.update', { name, content });
+          return { content: [{ type: 'text' as const, text }], ...(isError ? { isError: true } : {}) };
+        }),
+        tool('read_app_skill_file', APP_SKILL_READ_FILE_DESC, { name: z.string().describe('skill folder name'), path: z.string().describe('folder-relative aux-file path from get_app_skill `files`') }, async ({ name, path }) => {
+          const { text, isError } = await runBridgeTool('app_skill.read_file', { name, path });
+          return { content: [{ type: 'text' as const, text }], ...(isError ? { isError: true } : {}) };
+        }),
+        tool('write_app_skill_file', APP_SKILL_WRITE_FILE_DESC, { name: z.string().describe('skill folder name'), path: z.string().describe('folder-relative aux-file path (no leading slash, no ..)'), content: z.string().describe('file content') }, async ({ name, path, content }) => {
+          const { text, isError } = await runBridgeTool('app_skill.write_file', { name, path, content });
+          return { content: [{ type: 'text' as const, text }], ...(isError ? { isError: true } : {}) };
+        }),
+        tool('delete_app_skill_file', APP_SKILL_DELETE_FILE_DESC, { name: z.string().describe('skill folder name'), path: z.string().describe('folder-relative aux-file path') }, async ({ name, path }) => {
+          const { text, isError } = await runBridgeTool('app_skill.delete_file', { name, path });
           return { content: [{ type: 'text' as const, text }], ...(isError ? { isError: true } : {}) };
         }),
         tool(WEB_FETCH_TOOL, WEB_FETCH_DESC, {
