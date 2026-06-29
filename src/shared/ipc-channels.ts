@@ -72,6 +72,16 @@ export const IPC = {
   // bridge) — the SkillsView refetches its list. See skills-sync.ts.
   SKILLS_CHANGED: 'skills:changed',
 
+  // MCP (app-level external MCP servers — single mcp-servers.json under userData)
+  MCP_LIST: 'mcp:list',
+  MCP_GET: 'mcp:get',
+  MCP_ADD: 'mcp:add',
+  MCP_UPDATE: 'mcp:update',
+  MCP_REMOVE: 'mcp:remove',
+  // main→renderer: app-level MCP config changed — the settings view refetches.
+  // Sibling of SKILLS_CHANGED; see mcp-sync.ts.
+  MCP_CHANGED: 'mcp:changed',
+
   // Logs
   LOGS_CLEAR: 'logs:clear',
   LOGS_SIZE: 'logs:size',

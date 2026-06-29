@@ -9,6 +9,7 @@ import { registerLogsHandlers } from './logs';
 import { registerWebHandlers } from './web';
 import { registerNotesHandlers } from './notes';
 import { registerSkillsHandlers } from './skills';
+import { registerMcpHandlers } from './mcp';
 import { registerUpdaterHandlers } from './updater';
 import { registerPmHandlers } from './pm';
 
@@ -29,6 +30,7 @@ export function registerAllIpcHandlers(): void {
   registerWebHandlers();
   registerNotesHandlers();
   registerSkillsHandlers();
+  registerMcpHandlers();
   registerUpdaterHandlers();
   registerPmHandlers();
 }

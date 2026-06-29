@@ -6,6 +6,7 @@ import type { AgentSessionState, AgentEvent, AgentBackend, PermissionResult } fr
 import { createRemoteBackend, syncSkillsForConnection } from './remote';
 import { loadSettings } from '../settings-store';
 import { projectSkillsLocal } from '../skills-projection';
+import { projectMcpLocal } from '../mcp-projection';
 import { getAppInstanceId } from '../app-instance-id';
 import { subscribeSkillsChanged } from '../skills-sync';
 
@@ -217,6 +218,7 @@ async function startSession(
   // See deployment#1 / feature §5.4.
   if (connection.type === 'local') {
     projectSkillsLocal(getAppInstanceId());
+    projectMcpLocal(getAppInstanceId());
   }
 
   const sessionId = opts?.sessionId as string | undefined;
