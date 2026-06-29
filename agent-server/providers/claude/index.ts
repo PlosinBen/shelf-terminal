@@ -346,6 +346,12 @@ export function createClaudeBackend(): ServerBackend {
   // Most-recent foreground turn's send — base for server turns (same session →
   // context-patch interception is correct) and out-of-turn capabilities emits.
   let lastTurnSend: SendFn | null = null;
+  // For content the router drops with no active turn (drift): emit it session-
+  // scoped via lastTurnSend rather than lose it. Status is suppressed there (no
+  // turn to attribute), and content needs its OWN blockMsgIds (no turn's to use).
+  // See turnId-scoping (Phase 3).
+  const NOOP_SEND: SendFn = () => {};
+  const driftBlockMsgIds = createBlockMsgIdState();
 
   /** The send fn to route an inbound permission/picker request to: the turn
    *  the SDK is currently working (server turn takes precedence during an
@@ -830,19 +836,29 @@ export function createClaudeBackend(): ServerBackend {
     switch (action.lane) {
       case 'task': routeTask(msg); return;
       case 'ignore':
-        // Diagnostic: a content-bearing message with NO active turn is being
-        // dropped here. In steady state this never fires — if it does, a turn
-        // boundary (init/result) was mis-attributed (router drift) or the SDK
-        // emitted assistant/tool content after the turn's `result` (active is
-        // already null). This is the otherwise-SILENT drop path for foreground
-        // replies / tool results ("tool use result not showing"). See #75.
+        // A content-bearing message arrived with NO active turn. In steady state
+        // this never fires — if it does, a turn boundary (init/result) was
+        // mis-attributed (router drift), or the SDK emitted assistant/tool content
+        // after the turn's `result` (active already null). This WAS the silent
+        // drop path ("tool use result not showing"). Now: emit the CONTENT
+        // session-scoped via lastTurnSend (Phase 2 routes content by type, not
+        // turnId, so a stale turnId is fine), with status suppressed (no turn to
+        // attribute busy/idle to) and its own blockMsgIds. The drift is still
+        // logged (warn) so it stays observable. See turnId-scoping (Phase 3).
         if (msg.type === 'assistant' || msg.type === 'stream_event' || msg.type === 'user') {
-          serverLog('error', 'claude', 'router dropped content with no active turn', {
+          serverLog('warn', 'claude', 'content with no active turn — emitting session-scoped (router drift)', {
             type: msg.type,
             subtype: any.subtype,
             pendingPush: router.pendingPush,
             active: router.active,
           });
+          if (lastTurnSend) {
+            processMessage(msg, NOOP_SEND, sessionCwd, driftBlockMsgIds, lastTurnSend);
+          } else {
+            // No turn has ever run → no session send captured → nothing to emit
+            // into. Genuinely lost, but there is no conversation to show it in.
+            serverLog('error', 'claude', 'content dropped — no session send yet (no turn has run)', { type: msg.type });
+          }
         }
         return;
       case 'server':

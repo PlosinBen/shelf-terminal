@@ -908,3 +908,42 @@ describe('Claude reloadSkills (live skill hot-reload)', () => {
     backend.dispose();
   });
 });
+
+describe('processMessage — content/status send split (Phase 3 turnId-scoping)', () => {
+  const map = () => createBlockMsgIdState();
+
+  it('routes display content to contentSend and status to the (turn) send', () => {
+    const status: any[] = [];
+    const content: any[] = [];
+    processMessage(
+      { type: 'assistant', message: { content: [{ type: 'text', text: 'hi' }], usage: { input_tokens: 1, output_tokens: 2 } }, session_id: 's' } as any,
+      (m: any) => status.push(m), '/x', map(), (m: any) => content.push(m),
+    );
+    // text reply → contentSend; streaming status → the (turn) send.
+    expect(content.some((m) => m.type === 'message' && m.msgType === 'reply' && m.content === 'hi')).toBe(true);
+    expect(content.some((m) => m.type === 'status')).toBe(false);
+    expect(status.some((m) => m.type === 'status' && m.state === 'streaming')).toBe(true);
+    expect(status.some((m) => m.type === 'message')).toBe(false);
+  });
+
+  it('routes a tool_result fold card to contentSend (the drift-recovered case)', () => {
+    const status: any[] = [];
+    const content: any[] = [];
+    processMessage(
+      { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't1', content: 'output', is_error: false }] } } as any,
+      (m: any) => status.push(m), '/x', map(), (m: any) => content.push(m),
+    );
+    expect(content.some((m) => m.type === 'message')).toBe(true);  // the fold card
+    expect(status.some((m) => m.type === 'message')).toBe(false);
+  });
+
+  it('without contentSend, content + status both go via send (legacy default — unchanged)', () => {
+    const sent: any[] = [];
+    processMessage(
+      { type: 'assistant', message: { content: [{ type: 'text', text: 'hi' }], usage: { input_tokens: 1, output_tokens: 2 } }, session_id: 's' } as any,
+      (m: any) => sent.push(m), '/x', map(),
+    );
+    expect(sent.some((m) => m.type === 'message' && m.content === 'hi')).toBe(true);
+    expect(sent.some((m) => m.type === 'status')).toBe(true);
+  });
+});
