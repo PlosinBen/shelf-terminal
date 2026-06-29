@@ -342,4 +342,24 @@ describe('createTurnDispatcher', () => {
     for await (const e of gen) events.push(e);
     expect(events.some((e) => e.type === 'error' && (e as any).error === 'oops')).toBe(true);
   });
+
+  it('with a sink, message + stream are delivered session-scoped (in wire order), status stays on the generator', async () => {
+    const seen: AgentEvent[] = [];
+    const d = createTurnDispatcher(parse, undefined, undefined, undefined, undefined, (ev) => seen.push(ev));
+    const gen = d.registerTurn('t-1', noopPerm);
+    // Interleave content (→ sink) with status (→ generator), all tagged t-1.
+    d.feed({ type: 'stream', streamType: 'text', content: 'he', msgId: 'm1', turnId: 't-1' });
+    d.feed({ type: 'message', msgType: 'reply', content: 'hello', msgId: 'm1', turnId: 't-1' });
+    d.feed({ type: 'status', state: 'idle', turnId: 't-1' });
+    // A LATE message after the turn closed — legacy path would drop it; the sink delivers it.
+    d.feed({ type: 'message', msgType: 'reply', content: 'tail', msgId: 'm2', turnId: 't-1' });
+
+    const genEvents: AgentEvent[] = [];
+    for await (const e of gen) genEvents.push(e);
+
+    // Content went to the sink in wire order (incl. the post-idle tail).
+    expect(seen.map((e) => (e as any).payload.content)).toEqual(['he', 'hello', 'tail']);
+    // The generator carried ONLY status (no message/stream).
+    expect(genEvents.every((e) => e.type === 'status')).toBe(true);
+  });
 });

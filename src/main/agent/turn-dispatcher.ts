@@ -118,10 +118,13 @@ export function createTurnDispatcher(
 
     // DISPLAY events delivered session-scoped (Phase 2 turnId-scoping): route
     // by tabId via the sink, BEFORE the turnId check, so late-at-the-seam content
-    // is never dropped as "unknown turn". turnId stays only for status/control.
-    // Only diverts when a sink is wired — callers without one (tests) keep the
-    // legacy per-turn-generator path. Migrated type-by-type: `error` first.
-    if (onSessionEvent && m?.type === 'error') {
+    // is never dropped as "unknown turn". turnId stays only for status/control
+    // (the per-turn generator now carries only status/plan/capabilities/picker/
+    // auth + permission routing). Only diverts when a sink is wired — callers
+    // without one (tests) keep the legacy per-turn-generator path. `message` and
+    // `stream` move together so a stream chunk and its msgId-paired finalize are
+    // never split across the two delivery paths.
+    if (onSessionEvent && (m?.type === 'error' || m?.type === 'message' || m?.type === 'stream')) {
       const ev = parseRemoteMessage(m);
       if (ev) onSessionEvent(ev);
       return;
