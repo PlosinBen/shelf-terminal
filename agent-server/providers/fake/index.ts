@@ -160,6 +160,9 @@ export function createFakeBackend(): ServerBackend {
   // 'stopped' echo from stopTask), mirroring how the claude backend routes
   // task_notifications through its persistent session. See background-tasks#2.
   let lastSend: SendFn | null = null;
+  // Test hook: the `reloadfail` scenario arms this so the NEXT reloadSkills
+  // reports a failure (exercises the agent-view error line). Consumed once.
+  let failNextReload = false;
 
   async function runStep(
     step: string,
@@ -167,6 +170,14 @@ export function createFakeBackend(): ServerBackend {
     signal: AbortSignal,
   ): Promise<void> {
     if (signal.aborted) return;
+
+    // reloadfail — arm the next reloadSkills to fail; echo a reply so the e2e can
+    // await the turn before triggering a skill change.
+    if (step === 'reloadfail') {
+      failNextReload = true;
+      send({ type: 'message', msgId: mintId('m'), msgType: 'reply', content: 'reload armed to fail' });
+      return;
+    }
 
     // text:<msg> — streaming chunks + finalize (renderer-side: reply)
     if (step.startsWith('text:')) {
@@ -418,9 +429,15 @@ export function createFakeBackend(): ServerBackend {
 
     async reloadSkills() {
       // Mirror the real providers: no-op (reloaded:false) until a turn has run
-      // (lastSend captured = a "live session"), then report a successful re-scan
-      // so the agent-server emits a `skills_reloaded` line. Drives the e2e.
-      return lastSend ? { reloaded: true, ok: true } : { reloaded: false, ok: true };
+      // (lastSend captured = a "live session"), then report a re-scan so the
+      // agent-server emits a `skills_reloaded` line. The `reloadfail` scenario
+      // forces an ok:false outcome to exercise the error line. Drives the e2e.
+      if (!lastSend) return { reloaded: false, ok: true };
+      if (failNextReload) {
+        failNextReload = false;
+        return { reloaded: true, ok: false, error: 'fake reload failure' };
+      }
+      return { reloaded: true, ok: true };
     },
 
     async gatherCapabilities(): Promise<ProviderCapabilities> {

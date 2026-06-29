@@ -82,4 +82,31 @@ test.describe('skill reload feedback via fake provider', () => {
     await expect(page.locator('.agent-msg-system', { hasText: 'Skills reloaded' }))
       .toBeVisible({ timeout: 8_000 });
   });
+
+  test('a failed reload surfaces an error line (fail-loud)', async ({ shelfApp: { page } }) => {
+    await setupProject(page);
+    await openAgentTab(page);
+
+    // Run a turn that arms the next reload to fail (also makes the session live).
+    await sendAgentPrompt(page, 'reloadfail');
+    await expect(page.locator('.agent-turn-response')).toContainText('reload armed to fail', { timeout: 8_000 });
+
+    await page.locator('.right-tab-btn', { hasText: 'Skills' }).click();
+    await page.locator('.skills-view .notes-new-btn').click();
+
+    await expect(page.locator('.agent-msg-error', { hasText: 'Skills reload failed' }))
+      .toBeVisible({ timeout: 8_000 });
+  });
+
+  test('a reload with no live session emits no line', async ({ shelfApp: { page } }) => {
+    await setupProject(page);
+    await openAgentTab(page);
+
+    // No turn was ever run → reloadSkills is a no-op (reloaded:false) → no line.
+    await page.locator('.right-tab-btn', { hasText: 'Skills' }).click();
+    await page.locator('.skills-view .notes-new-btn').click();
+    await page.waitForTimeout(1_500);
+
+    await expect(page.locator('.agent-msg-system', { hasText: 'Skills reloaded' })).toHaveCount(0);
+  });
 });
