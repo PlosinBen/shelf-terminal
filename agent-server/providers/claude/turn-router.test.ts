@@ -119,3 +119,24 @@ describe('turn-router: defensive edges', () => {
     expect(r.state.active).toBe('server');
   });
 });
+
+// The "tool result not showing" seam: when a turn's `result` arrives BEFORE all
+// of its content (router drift, e.g. a mis-attributed boundary under bg-task /
+// auto-resume), `active` is already null, so the trailing content routes to
+// `'ignore'` and is SILENTLY DROPPED (logged as `router dropped content with no
+// active turn`, claude #828). This characterizes the current drop locus — the
+// thing Phase 2 must change so late content is no longer lost. See
+// .agent/features/skill-reload-feedback.md (Phase 2, drop-site #1).
+describe('turn-router: late-content-after-result seam (res-loss locus)', () => {
+  it('CURRENT: a tool_result arriving after the turn result is dropped to ignore', () => {
+    const userToolResult = { type: 'user' } as const; // SDK tool_result carrier
+    const r = run().push().feed(init).feed(assistant).feed(result).feed(userToolResult);
+    expect(r.state.active).toBeNull();             // result already closed the turn
+    expect(r.last()).toEqual({ lane: 'ignore' });  // ← the silent drop (the bug)
+  });
+
+  it('CURRENT: trailing assistant content after result is likewise dropped', () => {
+    const r = run().push().feed(init).feed(assistant).feed(result).feed(assistant);
+    expect(r.last()).toEqual({ lane: 'ignore' });
+  });
+});
