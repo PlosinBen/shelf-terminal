@@ -202,6 +202,10 @@ export interface TabTemplate {
   name: string;
   cmd?: string;
   color?: string;
+  /** Tab kind. Absent = terminal (back-compat with pre-existing configs). */
+  kind?: 'terminal' | 'web';
+  /** Web tabs only: optional starting URL to open on connect. */
+  url?: string;
 }
 
 export interface QuickCommand {

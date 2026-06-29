@@ -136,7 +136,7 @@ test('project edit default tabs can add and remove', async ({ shelfApp: { page }
   const initialCount = await page.locator('.default-tab-row').count();
 
   // Add tab
-  await page.locator('.default-tab-add', { hasText: 'Add Tab' }).click();
+  await page.locator('.default-tab-add', { hasText: 'Add Terminal' }).click();
   await expect(page.locator('.default-tab-row')).toHaveCount(initialCount + 1);
 
   // Remove last tab
@@ -145,6 +145,49 @@ test('project edit default tabs can add and remove', async ({ shelfApp: { page }
   await expect(page.locator('.default-tab-row')).toHaveCount(initialCount);
 
   await page.locator('.settings-close').click();
+});
+
+test('project edit: a web default tab is added, persists, and opens as a web tab on connect', async ({ shelfApp: { page } }) => {
+  await ensureConnected(page);
+
+  const item = page.locator('.sidebar-item').first();
+  await item.click({ button: 'right' });
+  await page.locator('.context-menu-item', { hasText: 'Edit' }).click();
+
+  const editPanel = page.locator('.project-edit-panel');
+  await expect(editPanel).toBeVisible({ timeout: 3_000 });
+  await expect(page.locator('.default-tab-row').first()).toBeVisible({ timeout: 3_000 });
+
+  // Add a Web default tab via the dedicated button → a row tagged "web".
+  await page.locator('.default-tab-add', { hasText: 'Add Web' }).click();
+  const webRow = page.locator('.default-tab-row', { has: page.locator('.default-tab-kind-web') });
+  await expect(webRow).toHaveCount(1);
+  // Its second field is a URL input (not a command) — set a starting URL.
+  await webRow.locator('.default-tab-cmd').fill('https://example.com');
+  await page.locator('.project-edit-footer .conn-btn-next').click();
+  await expect(editPanel).not.toBeVisible({ timeout: 3_000 });
+
+  // Reopen → the web row + its URL round-tripped through persistence.
+  await item.click({ button: 'right' });
+  await page.locator('.context-menu-item', { hasText: 'Edit' }).click();
+  await expect(editPanel).toBeVisible({ timeout: 3_000 });
+  const reopenedWebRow = page.locator('.default-tab-row', { has: page.locator('.default-tab-kind-web') });
+  await expect(reopenedWebRow).toHaveCount(1);
+  await expect(reopenedWebRow.locator('.default-tab-cmd')).toHaveValue('https://example.com');
+  await page.locator('.settings-close').click();
+
+  // Disconnect + reconnect → the web default tab opens alongside the terminal.
+  await item.click({ button: 'right' });
+  await page.locator('.context-menu-item', { hasText: 'Disconnect' }).click();
+  const prompt = page.locator('.connect-prompt');
+  await expect(prompt).toBeVisible({ timeout: 5_000 });
+  await prompt.click();
+  // Two tabs now open on connect (terminal + the web default); the web one is
+  // labelled "Web". Activating it shows the web tab's toolbar/address bar.
+  const webTab = page.locator('.tab-bar .tab', { hasText: 'Web' });
+  await expect(webTab).toBeVisible({ timeout: 5_000 });
+  await webTab.click();
+  await expect(page.locator('.web-tab-toolbar:visible')).toBeVisible({ timeout: 5_000 });
 });
 
 // ── Sidebar ──

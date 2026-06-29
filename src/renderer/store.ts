@@ -178,6 +178,7 @@ export function addTab(
   color?: string,
   type: TabType = 'terminal',
   provider?: AgentProvider,
+  url?: string,
 ): Tab | null {
   const proj = projects[projectIndex];
   if (!proj || proj.tabs.length >= proj.config.maxTabs) return null;
@@ -201,6 +202,10 @@ export function addTab(
     muted: false,
     type,
     provider,
+    // Web tabs only: carry the optional starting URL. An explicitly-named web
+    // tab (e.g. a "Kibana" default tab) pins its label so navigation doesn't
+    // overwrite it with the page host — an unnamed one keeps following the host.
+    ...(type === 'web' ? { url: url || undefined, labelPinned: !!name } : {}),
   };
 
   const updated = { ...proj, tabs: [...proj.tabs, tab], activeTabIndex: proj.tabs.length };

@@ -1185,6 +1185,11 @@ button {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
 }
 
+.default-tab-add-row {
+  display: flex;
+  gap: 16px;
+}
+
 .default-tab-add {
   font-size: 12px;
   color: var(--text-muted);
@@ -1193,6 +1198,29 @@ button {
 
 .default-tab-add:hover {
   color: var(--accent);
+}
+
+/* Read-only kind chip per default-tab row: distinguishes a terminal ("sh") from
+   a web ("web") tab at a glance, since their second field differs (command vs
+   URL). */
+.default-tab-kind {
+  flex-shrink: 0;
+  width: 30px;
+  text-align: center;
+  font-size: 10px;
+  font-family: Menlo, Monaco, 'Courier New', monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 2px 0;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  user-select: none;
+}
+
+.default-tab-kind-web {
+  color: var(--accent);
+  border-color: var(--accent);
 }
 
 .project-edit-footer {

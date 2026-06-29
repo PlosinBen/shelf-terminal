@@ -99,3 +99,17 @@ related:
 **Decision（刻意不做）**：**不**實作「跨重啟還原 session cookie」。服務把 cookie 設成 session（關閉即失效）是它**刻意的安全意圖**;我們主動把它撐過重啟 = 替使用者延長別人設計的短命 session = 越權。尊重來源服務的生命週期,讓使用者重新登入即可。用 persistent cookie 的服務本來就跨重啟存活,不受影響。
 
 **Do not change casually because**：別為了「方便」加回 session-cookie 還原機制——那是越權延長敏感 session,不是 bug。`useSessionCookies` 則相反,是必要的、不可拿掉。
+
+## web-tab#7 — default tab 可指定 web kind（連線時自動開 web 分頁） · [Decision]
+
+**Background**：`defaultTabs`（project config）原本只開 terminal。要讓 project 連線時自動帶起常用的 web 分頁（如 Kibana）。
+
+**Decision**：`TabTemplate` 加 `kind?: 'terminal' | 'web'`（**absent = terminal**，舊 config 不動）+ `url?`（web 起始網址，optional）。
+- **持久化形狀刻意 disjoint**：terminal template 帶 `cmd`、**不寫 `kind`**（與既有 config byte-identical，零 migration）；web template 帶 `kind:'web'` + optional `url`、**永不帶 `cmd`**（`ProjectEditPanel.handleSave` 正規化）。
+- **連線開 tab**（`App.tsx`）：`t.kind === 'web'` → `addTab(..., 'web', undefined, t.url)`，否則照舊開 terminal。
+- **label pin**：`addTab` 對**有具名的 web tab** 設 `labelPinned`（使用者在 default tab 取的名字不被導航的 host 蓋掉）；手動 `+ Web`（無名）仍跟 host 走。
+- **UI**：`+ Add Tab` 拆成 `+ Add Terminal` / `+ Add Web` 兩顆；每列一個唯讀 kind chip（`sh`/`web`）區分；web 列第二欄是 URL input 而非 command。Quick command target 下拉**排除 web tab**（web 不能跑 shell command）。
+
+**Do not change casually because**：別給 terminal template 補寫 `kind:'terminal'`（會讓所有舊 config 無謂 churn）；kind 缺省即 terminal 是刻意的 back-compat 契約。
+
+**Related**：`src/shared/types.ts`（`TabTemplate`）、`src/renderer/store.ts`（`addTab` url/labelPinned）、`src/renderer/App.tsx`（連線分流）、`src/renderer/components/ProjectEditPanel.tsx`。
