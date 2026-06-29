@@ -57,6 +57,8 @@ Where each surface fits in:
 - **Project-based** — each project binds to a folder, with multiple terminal tabs
 - **Lazy connect** — projects load without auto-connecting; click or press Enter to open terminal
 - **Terminal tabs** — per-project tabs backed by real pty processes (node-pty + xterm.js)
+- **Agent tabs** — run Claude Code / Copilot CLI in a dedicated tab with an editor-grade input (multi-line editing, easy fixes, long-prompt paste); behaves the same over SSH
+- **Web tabs** — open web pages in a tab alongside your terminals
 - **Split pane** — left/right split within a project (mod+\\)
 - **SSH / WSL** — connect to remote hosts via SSH (ControlMaster multiplexing, password auth) or WSL (distro dropdown)
 - **Themes** — 5 built-in themes (Catppuccin Mocha/Latte, Dracula, Nord, Tokyo Night)
@@ -72,6 +74,7 @@ Where each surface fits in:
 - **Settings** — font, theme, scrollback, keybindings, log level, persisted to `settings.json`
 - **Logging** — date-based log files, configurable level (off/error/info/debug), `LOG_LEVEL` env override
 - **Auto-updater** — checks GitHub Releases, user confirms before downloading
+- **Skills** — app-level skills the agents can use, edited in-app and projected to both local and remote (SSH) agents
 - **PM Agent** — AI assistant that observes terminal tabs and can interact with CLI agents (Claude Code, Copilot, etc.). Supports Away Mode for autonomous operation, Telegram bridge for remote monitoring, and per-project notes
 
 ## Tech Stack
@@ -196,7 +199,7 @@ src/
   main/           # Electron main process, pty management, IPC handlers
   renderer/       # React UI, xterm.js, store, themes, event bus
   shared/         # Type definitions, IPC channels, defaults
-e2e/              # Playwright E2E tests (25 tests)
+e2e/              # Playwright E2E tests
 ```
 
 ## Testing
