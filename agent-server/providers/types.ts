@@ -176,6 +176,14 @@ export type OutgoingMessage = WireEnvelope & (
   // See background-tasks#2.
   | ({ type: 'task_event' } & TaskEvent)
 
+  // ── Skill reload result (NO turnId) ──────────────────────────────────────
+  // Session-level, like task_event/queue. Emitted by the agent-server
+  // `reload_skills` handler via the BASE send after a provider re-scan — so it
+  // never passes through `wrapSendForTurn` and is turnId-less by construction.
+  // Main surfaces it as a system (ok) / error (!ok) line in the agent view.
+  // See skills#4 / skill-reload feedback.
+  | { type: 'skills_reloaded'; ok: boolean; error?: string }
+
   // ── Streaming (incremental reply/fold_text chunks) ───────────────────────
   // `msgId` ties each chunk to the eventual `type: 'message'` finalize event
   // with the same id. Renderer upserts by msgId — stream chunks append to a
@@ -407,6 +415,18 @@ export interface ServerBackend {
    * the call so a reload failure logs and falls back to today's behaviour
    * (change picked up on next session init). Effective from the session's next
    * turn — an in-flight turn keeps its init-time skill snapshot. See DECISIONS.
+   *
+   * Returns the outcome so the agent-server can surface a `skills_reloaded` line:
+   * `reloaded:false` = no live session (nothing re-scanned → no line); else
+   * `ok`/`error` reflect the SDK reload. Omitting (void) is treated as no-op.
    */
-  reloadSkills?(): Promise<void>;
+  reloadSkills?(): Promise<SkillsReloadOutcome | void>;
+}
+
+/** Result of a {@link ServerBackend.reloadSkills} call. */
+export interface SkillsReloadOutcome {
+  /** false = no live session to reload (no user-facing line is emitted). */
+  reloaded: boolean;
+  ok: boolean;
+  error?: string;
 }

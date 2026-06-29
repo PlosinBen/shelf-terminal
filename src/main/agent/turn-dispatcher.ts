@@ -62,6 +62,9 @@ export function createTurnDispatcher(
   // task_event, these carry NO turnId (the queue is session-scoped) so they're
   // routed here BEFORE the per-turn turnId check. See message-queue-ownership.
   onQueue?: (items: AgentQueueItem[]) => void,
+  // Session-level sink for an app-skill reload result (turnId-less, like
+  // task_event/queue). Routed before the turnId check. See skill-reload feedback.
+  onSkillsReloaded?: (ok: boolean, error?: string) => void,
 ): TurnDispatcher {
   const turns = new Map<string, TurnState>();
   const responseHandlers = new Map<string, (payload: any) => void>();
@@ -97,6 +100,13 @@ export function createTurnDispatcher(
     // model backgrounds work mid-turn. See background-tasks#2.
     if (m?.type === 'task_event') {
       onTaskEvent?.({ kind: m.kind, task: m.task, tasks: m.tasks });
+      return;
+    }
+
+    // App-skill reload result: session-level (turnId-less), like task_event.
+    // Route to the session sink before the turnId check below.
+    if (m?.type === 'skills_reloaded') {
+      onSkillsReloaded?.(!!m.ok, typeof m.error === 'string' ? m.error : undefined);
       return;
     }
 

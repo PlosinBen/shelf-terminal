@@ -310,4 +310,17 @@ describe('createTurnDispatcher', () => {
     d.feed({ type: 'turn_started', turnId: 't-srv' });
     expect(handed).toEqual(['t-srv']);
   });
+
+  it('routes skills_reloaded to the session sink (turnId-less, before the turn check)', () => {
+    const seen: Array<{ ok: boolean; error?: string }> = [];
+    const d = createTurnDispatcher(parse, undefined, undefined, undefined, (ok, error) => seen.push({ ok, error }));
+    d.feed({ type: 'skills_reloaded', ok: true });
+    d.feed({ type: 'skills_reloaded', ok: false, error: 'rpc down' });
+    expect(seen).toEqual([{ ok: true, error: undefined }, { ok: false, error: 'rpc down' }]);
+  });
+
+  it('skills_reloaded without a sink is a harmless no-op (not dropped as unknown turn)', () => {
+    const d = createTurnDispatcher(parse);
+    expect(() => d.feed({ type: 'skills_reloaded', ok: true })).not.toThrow();
+  });
 });

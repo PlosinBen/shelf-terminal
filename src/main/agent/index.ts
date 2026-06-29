@@ -260,6 +260,13 @@ async function startSession(
     // which mirrors it (optimistic chips reconciled against this authoritative
     // list). Session-level (turnId-less). See message-queue-ownership.
     (items) => send(IPC.AGENT_QUEUE, tabId, items),
+    // App-skill reload result → a system/error line in THIS tab's agent view
+    // (reuses AGENT_MESSAGE rendering). Session-level (turnId-less); the agent-
+    // server emits it after a live re-scan, no-op sessions emit nothing. See
+    // skill-reload feedback.
+    (ok, error) => send(IPC.AGENT_MESSAGE, tabId, ok
+      ? { type: 'system', content: 'Skills reloaded' }
+      : { type: 'error', content: `Skills reload failed: ${error ?? 'unknown error'}` }),
     // Owning project — the app_tool bridge keys the web.fetch grant on it.
     typeof opts?.projectId === 'string' ? opts.projectId : undefined,
   );

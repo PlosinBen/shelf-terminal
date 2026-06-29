@@ -84,6 +84,10 @@ export function createRemoteBackend(
   // wires it to IPC.AGENT_QUEUE. Session-scoped (turnId-less), like onTaskEvent.
   // See message-queue-ownership.
   onQueue?: (items: AgentQueueItem[]) => void,
+  // Optional session-level sink for an app-skill reload result. Main wires it to
+  // a system/error AGENT_MESSAGE in this tab's view. turnId-less, like onQueue.
+  // See skill-reload feedback.
+  onSkillsReloaded?: (ok: boolean, error?: string) => void,
   // Owning project id — threaded into the app_tool bridge so the web.fetch gate
   // can key its grant on (projectId, origin). Connection-agnostic; defaults empty.
   projectId?: string,
@@ -110,7 +114,7 @@ export function createRemoteBackend(
           deployed = true;
         }
         onPhase?.('connecting');
-        const proc = await spawnAgentServer(connection, cwd, deployResult!, initScript, onTaskEvent, onServerTurn, onHealth, onQueue, projectId);
+        const proc = await spawnAgentServer(connection, cwd, deployResult!, initScript, onTaskEvent, onServerTurn, onHealth, onQueue, onSkillsReloaded, projectId);
         if (!proc) return null;
         const ready = await proc.awaitReady();
         if (!ready) {
@@ -585,6 +589,7 @@ async function spawnAgentServer(
   onServerTurn?: (turnId: string, events: AsyncGenerator<AgentEvent>) => void,
   onHealth?: (health: ConnectionHealth) => void,
   onQueue?: (items: AgentQueueItem[]) => void,
+  onSkillsReloaded?: (ok: boolean, error?: string) => void,
   projectId?: string,
 ): Promise<RemoteProcess | null> {
   const { nodeBin, indexPath } = deploy;
@@ -601,7 +606,7 @@ async function spawnAgentServer(
         `spawnAgentServer local: cwd=${cwd} indexPath=${indexPath} fileExists=${fs.existsSync(indexPath)} PATH=${env.PATH ?? '<missing>'}`,
       );
       const proc = spawn(nodeBin, [indexPath], { cwd, env, stdio: ['pipe', 'pipe', 'pipe'] });
-      return wrapProcess(proc, onTaskEvent, onServerTurn, onHealth, onQueue, projectId);
+      return wrapProcess(proc, onTaskEvent, onServerTurn, onHealth, onQueue, onSkillsReloaded, projectId);
     } catch (err: any) {
       log.error('agent-remote', `Local spawn failed: ${err.message}`);
       return null;
@@ -628,7 +633,7 @@ async function spawnAgentServer(
       cmd,
     ];
     const proc = spawn('ssh', args, { stdio: ['pipe', 'pipe', 'pipe'] });
-    return wrapProcess(proc, onTaskEvent, onServerTurn, onHealth, onQueue, projectId);
+    return wrapProcess(proc, onTaskEvent, onServerTurn, onHealth, onQueue, onSkillsReloaded, projectId);
   }
 
   if (connection.type === 'docker') {
@@ -636,14 +641,14 @@ async function spawnAgentServer(
     const proc = spawn('docker', ['exec', '-i', connection.container, 'sh', '-c', cmd], {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
-    return wrapProcess(proc, onTaskEvent, onServerTurn, onHealth, onQueue, projectId);
+    return wrapProcess(proc, onTaskEvent, onServerTurn, onHealth, onQueue, onSkillsReloaded, projectId);
   }
 
   if (connection.type === 'wsl') {
     const proc = spawn('wsl.exe', ['-d', connection.distro, '--', 'sh', '-lc', `${testEnv}exec ${nodeBin} ${indexPath}`], {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
-    return wrapProcess(proc, onTaskEvent, onServerTurn, onHealth, onQueue, projectId);
+    return wrapProcess(proc, onTaskEvent, onServerTurn, onHealth, onQueue, onSkillsReloaded, projectId);
   }
 
   return null;
@@ -659,9 +664,10 @@ function wrapProcess(
   onServerTurn?: (turnId: string, events: AsyncGenerator<AgentEvent>) => void,
   onHealth?: (health: ConnectionHealth) => void,
   onQueue?: (items: AgentQueueItem[]) => void,
+  onSkillsReloaded?: (ok: boolean, error?: string) => void,
   projectId?: string,
 ): RemoteProcess {
-  const dispatcher = createTurnDispatcher(parseRemoteMessage, onTaskEvent, onServerTurn, onQueue);
+  const dispatcher = createTurnDispatcher(parseRemoteMessage, onTaskEvent, onServerTurn, onQueue, onSkillsReloaded);
   let buffer = '';
 
   // ── Heartbeat: app→agent-server liveness + RTT (see §5.9 / connection-health.ts).
