@@ -323,4 +323,23 @@ describe('createTurnDispatcher', () => {
     const d = createTurnDispatcher(parse);
     expect(() => d.feed({ type: 'skills_reloaded', ok: true })).not.toThrow();
   });
+
+  it('with a session sink, an error event is delivered session-scoped even on a stale/absent turnId', () => {
+    const seen: AgentEvent[] = [];
+    const d = createTurnDispatcher(parse, undefined, undefined, undefined, undefined, (ev) => seen.push(ev));
+    // No registered turn, and a stale turnId — the legacy path would drop these.
+    d.feed({ type: 'error', error: 'boom' });
+    d.feed({ type: 'error', error: 'late', turnId: 't-gone' });
+    expect(seen).toEqual([{ type: 'error', error: 'boom' }, { type: 'error', error: 'late' }]);
+  });
+
+  it('without a session sink, error still routes through the per-turn generator (legacy fallback)', async () => {
+    const d = createTurnDispatcher(parse);
+    const gen = d.registerTurn('t-x', noopPerm);
+    d.feed({ type: 'error', error: 'oops', turnId: 't-x' });
+    d.feed({ type: 'status', state: 'idle', turnId: 't-x' });
+    const events: AgentEvent[] = [];
+    for await (const e of gen) events.push(e);
+    expect(events.some((e) => e.type === 'error' && (e as any).error === 'oops')).toBe(true);
+  });
 });
