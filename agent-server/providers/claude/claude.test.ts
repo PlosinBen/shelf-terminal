@@ -899,11 +899,12 @@ describe('Claude reloadSkills (live skill hot-reload)', () => {
     backend.dispose();
   });
 
-  it('is a best-effort no-op (resolves, never throws) when there is no live session', async () => {
+  it('reports reloaded:false (no live session) without touching the SDK or throwing', async () => {
     const backend = createClaudeBackend();
     // No session yet → query is null. reloadSkills must short-circuit without
-    // touching the SDK and without throwing into the dispatch loop.
-    await expect(backend.reloadSkills!()).resolves.toBeUndefined();
+    // touching the SDK and without throwing into the dispatch loop, returning a
+    // no-op outcome so the agent-server emits no `skills_reloaded` line.
+    await expect(backend.reloadSkills!()).resolves.toEqual({ reloaded: false, ok: true });
     backend.dispose();
   });
 });

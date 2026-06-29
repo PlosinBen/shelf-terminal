@@ -1283,7 +1283,7 @@ export function createClaudeBackend(): ServerBackend {
       const q = session?.query;
       if (!q) {
         serverLog('warn', 'claude', 'reloadSkills: no live session — app-skill edit will apply on next session init');
-        return;
+        return { reloaded: false, ok: true };
       }
       try {
         const refreshed = await q.reloadPlugins();
@@ -1294,8 +1294,10 @@ export function createClaudeBackend(): ServerBackend {
         // that our app-skill local plugin is present. See skills#4.
         serverLog('warn', 'claude', 'reloadPlugins() applied — app-skill edit now live (effective next turn) '
           + JSON.stringify({ plugins: refreshed.plugins?.length ?? 0, commands: cache.skills.length }));
+        return { reloaded: true, ok: true };
       } catch (err: any) {
         serverLog('warn', 'claude', 'reloadPlugins() failed; app-skill edit will apply on next session init instead', err?.message ?? err);
+        return { reloaded: true, ok: false, error: err?.message ?? String(err) };
       }
     },
 

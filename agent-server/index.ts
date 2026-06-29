@@ -428,9 +428,14 @@ rl.on('line', (line) => {
       // App-level skills changed on disk (main already projected/synced them to
       // the consumption path). App skills are app-global, not per-session, so
       // tell EVERY instantiated provider to re-scan on its live session. Each is
-      // best-effort + no-op without a live session. Fire-and-forget — effect
-      // lands on the session's next turn.
-      for (const b of backends.values()) void b.reloadSkills?.();
+      // best-effort + no-op without a live session. Effect lands next turn.
+      // Emit a `skills_reloaded` result (system/error line in the agent view)
+      // via the BASE send — turnId-less by construction. Skip no-op reloads.
+      for (const b of backends.values()) {
+        void b.reloadSkills?.().then((r) => {
+          if (r && r.reloaded) send({ type: 'skills_reloaded', ok: r.ok, ...(r.error ? { error: r.error } : {}) });
+        });
+      }
       break;
     case 'clear_context': {
       if (msg.sessionId) {

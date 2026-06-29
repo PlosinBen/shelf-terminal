@@ -1427,7 +1427,7 @@ export function createCopilotBackend(): ServerBackend {
       const session = state.session;
       if (!session) {
         serverLog('warn', 'copilot', 'reloadSkills: no live session — app-skill edit will apply on next session init');
-        return;
+        return { reloaded: false, ok: true };
       }
       try {
         await (session as any).rpc.skills.reload();
@@ -1435,8 +1435,10 @@ export function createCopilotBackend(): ServerBackend {
         // reload actually fired (and re-scanned our skillDirectories) for the
         // live session, not just that we called it. See skills#4.
         serverLog('warn', 'copilot', 'skills.reload() applied — app-skill edit now live for this session (effective next turn)');
+        return { reloaded: true, ok: true };
       } catch (err: any) {
         serverLog('warn', 'copilot', 'skills.reload() failed; app-skill edit will apply on next session init instead', err?.message ?? err);
+        return { reloaded: true, ok: false, error: err?.message ?? String(err) };
       }
     },
 
