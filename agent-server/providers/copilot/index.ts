@@ -798,6 +798,12 @@ export function createCopilotBackend(): ServerBackend {
           // Snapshot the loaded MCP servers for /mcp (init-once; reconnect re-emits).
           loadedMcpServers = Array.isArray(event.data?.servers) ? event.data.servers : [];
           break;
+        case 'session.mcp_server_status_changed':
+          // A server's connection status changed (connected/failed/disconnected)
+          // AFTER the initial load — re-fetch the authoritative list (debounced)
+          // so a later /mcp shows current status instead of the stale snapshot.
+          scheduleMcpRead();
+          break;
         case 'session.plan_changed':
           // Debounced fetch — multiple rapid changes coalesce into one read.
           schedulePlanRead();
@@ -935,6 +941,26 @@ export function createCopilotBackend(): ServerBackend {
         currentSend({ type: 'task_event', kind: 'snapshot', tasks });
       } catch (err: any) {
         serverLog('error', 'copilot', 'rpc.tasks.list failed; task panel may be stale', err?.message ?? err);
+      }
+    }, 150);
+  }
+
+  // MCP server status: copilot signals connection-status changes via
+  // `session.mcp_server_status_changed` (after the initial mcp_servers_loaded).
+  // Re-fetch the authoritative list (debounced) into the /mcp snapshot so a
+  // later slash reflects the live status. Snapshot-only — no live MCP panel, so
+  // nothing is pushed to the renderer here; the refreshed value is read on /mcp.
+  let mcpReadTimer: NodeJS.Timeout | null = null;
+  function scheduleMcpRead() {
+    if (mcpReadTimer) return;
+    mcpReadTimer = setTimeout(async () => {
+      mcpReadTimer = null;
+      if (!state.session) return;
+      try {
+        const res = await (state.session as any).rpc.mcp.list();
+        loadedMcpServers = Array.isArray(res?.servers) ? res.servers : [];
+      } catch (err: any) {
+        serverLog('error', 'copilot', 'rpc.mcp.list failed; /mcp snapshot may be stale', err?.message ?? err);
       }
     }, 150);
   }
