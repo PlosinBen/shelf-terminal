@@ -267,6 +267,11 @@ async function startSession(
     (ok, error) => send(IPC.AGENT_MESSAGE, tabId, ok
       ? { type: 'system', content: 'Skills reloaded' }
       : { type: 'error', content: `Skills reload failed: ${error ?? 'unknown error'}` }),
+    // Session-scoped DISPLAY events (Phase 2 turnId-scoping): the dispatcher
+    // delivers message/stream/error here by tabId instead of via the per-turn
+    // generator, so late-at-the-seam content is never dropped as "unknown turn".
+    // Same sink dispatchEvent the per-turn drain uses. Wired type-by-type.
+    (ev) => dispatchEvent(tabId, ev),
     // Owning project — the app_tool bridge keys the web.fetch grant on it.
     typeof opts?.projectId === 'string' ? opts.projectId : undefined,
   );

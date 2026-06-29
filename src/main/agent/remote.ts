@@ -88,6 +88,10 @@ export function createRemoteBackend(
   // a system/error AGENT_MESSAGE in this tab's view. turnId-less, like onQueue.
   // See skill-reload feedback.
   onSkillsReloaded?: (ok: boolean, error?: string) => void,
+  // Optional session-level sink for DISPLAY events delivered by tabId instead of
+  // the per-turn generator (Phase 2 turnId-scoping). Main wires it to
+  // dispatchEvent. See turnId-scoping.
+  onSessionEvent?: (event: AgentEvent) => void,
   // Owning project id — threaded into the app_tool bridge so the web.fetch gate
   // can key its grant on (projectId, origin). Connection-agnostic; defaults empty.
   projectId?: string,
@@ -114,7 +118,7 @@ export function createRemoteBackend(
           deployed = true;
         }
         onPhase?.('connecting');
-        const proc = await spawnAgentServer(connection, cwd, deployResult!, initScript, onTaskEvent, onServerTurn, onHealth, onQueue, onSkillsReloaded, projectId);
+        const proc = await spawnAgentServer(connection, cwd, deployResult!, initScript, onTaskEvent, onServerTurn, onHealth, onQueue, onSkillsReloaded, onSessionEvent, projectId);
         if (!proc) return null;
         const ready = await proc.awaitReady();
         if (!ready) {
@@ -590,6 +594,7 @@ async function spawnAgentServer(
   onHealth?: (health: ConnectionHealth) => void,
   onQueue?: (items: AgentQueueItem[]) => void,
   onSkillsReloaded?: (ok: boolean, error?: string) => void,
+  onSessionEvent?: (event: AgentEvent) => void,
   projectId?: string,
 ): Promise<RemoteProcess | null> {
   const { nodeBin, indexPath } = deploy;
@@ -606,7 +611,7 @@ async function spawnAgentServer(
         `spawnAgentServer local: cwd=${cwd} indexPath=${indexPath} fileExists=${fs.existsSync(indexPath)} PATH=${env.PATH ?? '<missing>'}`,
       );
       const proc = spawn(nodeBin, [indexPath], { cwd, env, stdio: ['pipe', 'pipe', 'pipe'] });
-      return wrapProcess(proc, onTaskEvent, onServerTurn, onHealth, onQueue, onSkillsReloaded, projectId);
+      return wrapProcess(proc, onTaskEvent, onServerTurn, onHealth, onQueue, onSkillsReloaded, onSessionEvent, projectId);
     } catch (err: any) {
       log.error('agent-remote', `Local spawn failed: ${err.message}`);
       return null;
@@ -633,7 +638,7 @@ async function spawnAgentServer(
       cmd,
     ];
     const proc = spawn('ssh', args, { stdio: ['pipe', 'pipe', 'pipe'] });
-    return wrapProcess(proc, onTaskEvent, onServerTurn, onHealth, onQueue, onSkillsReloaded, projectId);
+    return wrapProcess(proc, onTaskEvent, onServerTurn, onHealth, onQueue, onSkillsReloaded, onSessionEvent, projectId);
   }
 
   if (connection.type === 'docker') {
@@ -641,14 +646,14 @@ async function spawnAgentServer(
     const proc = spawn('docker', ['exec', '-i', connection.container, 'sh', '-c', cmd], {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
-    return wrapProcess(proc, onTaskEvent, onServerTurn, onHealth, onQueue, onSkillsReloaded, projectId);
+    return wrapProcess(proc, onTaskEvent, onServerTurn, onHealth, onQueue, onSkillsReloaded, onSessionEvent, projectId);
   }
 
   if (connection.type === 'wsl') {
     const proc = spawn('wsl.exe', ['-d', connection.distro, '--', 'sh', '-lc', `${testEnv}exec ${nodeBin} ${indexPath}`], {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
-    return wrapProcess(proc, onTaskEvent, onServerTurn, onHealth, onQueue, onSkillsReloaded, projectId);
+    return wrapProcess(proc, onTaskEvent, onServerTurn, onHealth, onQueue, onSkillsReloaded, onSessionEvent, projectId);
   }
 
   return null;
@@ -665,9 +670,10 @@ function wrapProcess(
   onHealth?: (health: ConnectionHealth) => void,
   onQueue?: (items: AgentQueueItem[]) => void,
   onSkillsReloaded?: (ok: boolean, error?: string) => void,
+  onSessionEvent?: (event: AgentEvent) => void,
   projectId?: string,
 ): RemoteProcess {
-  const dispatcher = createTurnDispatcher(parseRemoteMessage, onTaskEvent, onServerTurn, onQueue, onSkillsReloaded);
+  const dispatcher = createTurnDispatcher(parseRemoteMessage, onTaskEvent, onServerTurn, onQueue, onSkillsReloaded, onSessionEvent);
   let buffer = '';
 
   // ── Heartbeat: app→agent-server liveness + RTT (see §5.9 / connection-health.ts).

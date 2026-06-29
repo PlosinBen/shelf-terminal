@@ -65,6 +65,12 @@ export function createTurnDispatcher(
   // Session-level sink for an app-skill reload result (turnId-less, like
   // task_event/queue). Routed before the turnId check. See skill-reload feedback.
   onSkillsReloaded?: (ok: boolean, error?: string) => void,
+  // Session-level sink for DISPLAY events (message/stream/error) that we deliver
+  // by tabId instead of through the per-turn generator — so late-at-the-seam
+  // content is never dropped as "unknown turn". turnId stays only for status /
+  // control. Routed before the turnId check. Wired type-by-type (Phase 2);
+  // unused until a feed() branch calls it. See turnId-scoping.
+  onSessionEvent?: (event: AgentEvent) => void,
 ): TurnDispatcher {
   const turns = new Map<string, TurnState>();
   const responseHandlers = new Map<string, (payload: any) => void>();
