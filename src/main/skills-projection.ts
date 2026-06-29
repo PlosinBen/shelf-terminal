@@ -22,6 +22,13 @@ export function skillsSourceRoot(): string {
   return path.join(app.getPath('userData'), 'skills');
 }
 
+// The per-skill `.locked` marker is a MAIN-only control file: lock enforcement
+// reads the source folder (skills-store `isSkillLocked`), never the projection.
+// So it must NOT travel into the consumption tree — excluding it keeps the
+// projected/synced bytes (and the tree hash) invariant under lock/unlock, so a
+// pure lock toggle never perturbs the hash or triggers a re-sync.
+const LOCK_MARKER = '.locked';
+
 /** All files under `root`, as POSIX-relative paths (sorted) — ready to mirror
  *  onto a remote. POSIX separators so remote paths are correct from any host. */
 export function listSkillFilesRel(root: string): string[] {
@@ -36,7 +43,7 @@ export function listSkillFilesRel(root: string): string[] {
     for (const e of entries) {
       const childRel = rel ? `${rel}/${e.name}` : e.name;
       if (e.isDirectory()) walk(path.join(dir, e.name), childRel);
-      else if (e.isFile()) out.push(childRel);
+      else if (e.isFile() && e.name !== LOCK_MARKER) out.push(childRel);
     }
   };
   walk(root, '');
@@ -77,7 +84,8 @@ export function projectSkillsLocal(appId: string): void {
     if (!fs.existsSync(src)) return;
     fs.rmSync(dst, { recursive: true, force: true });
     fs.mkdirSync(path.dirname(dst), { recursive: true });
-    fs.cpSync(src, dst, { recursive: true });
+    // Exclude `.locked` markers (main-only control files — see LOCK_MARKER).
+    fs.cpSync(src, dst, { recursive: true, filter: (s) => path.basename(s) !== LOCK_MARKER });
     // Touch the app's lease so the agent-server startup sweep (which may run
     // before the first heartbeat) doesn't reclaim a just-projected dir as an
     // orphan. The projection IS a liveness signal. See cleanup.ts / §5.9.

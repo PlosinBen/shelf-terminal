@@ -32,6 +32,21 @@ export function subscribeSkillsChanged(fn: SkillsChangedSubscriber): void {
   subscribers.add(fn);
 }
 
+/**
+ * Tell the renderer a skill's metadata changed so the open SkillsView refetches
+ * its list. This is the ONLY reaction a pure lock/unlock needs: the lock badge
+ * comes from listSkills()'s `locked`, while the lock itself is enforced in main —
+ * agents never read it, so there's nothing to re-project, re-mirror, or reload.
+ * Content mutations call the full onSkillsChanged() (which ends here too).
+ */
+export function notifyRendererSkillsChanged(): void {
+  try {
+    getMainWindow()?.webContents.send(IPC.SKILLS_CHANGED);
+  } catch {
+    /* renderer may be gone — nothing to refresh */
+  }
+}
+
 export function onSkillsChanged(): void {
   try {
     projectSkillsLocal(getAppInstanceId());
@@ -47,9 +62,5 @@ export function onSkillsChanged(): void {
     }
   }
 
-  try {
-    getMainWindow()?.webContents.send(IPC.SKILLS_CHANGED);
-  } catch {
-    /* renderer may be gone — nothing to refresh */
-  }
+  notifyRendererSkillsChanged();
 }

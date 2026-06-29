@@ -33,6 +33,10 @@ function seedSourceSkill(name: string, body: string) {
   fs.writeFileSync(path.join(userDataDir, 'skills', '.claude-plugin', 'plugin.json'), '{"name":"shelf-skills"}');
 }
 
+function lockSourceSkill(name: string) {
+  fs.writeFileSync(path.join(userDataDir, 'skills', 'skills', name, '.locked'), '');
+}
+
 describe('getAppInstanceId', () => {
   it('generates a stable UUID persisted in userData', () => {
     const a = getAppInstanceId();
@@ -72,6 +76,15 @@ describe('projectSkillsLocal', () => {
     expect(() => projectSkillsLocal('app-x')).not.toThrow();
     expect(fs.existsSync(localSkillsTarget('app-x'))).toBe(false);
   });
+
+  it('excludes the main-only `.locked` marker from the projection', () => {
+    seedSourceSkill('a', 'A');
+    lockSourceSkill('a');
+    projectSkillsLocal('app-1');
+    const dst = localSkillsTarget('app-1');
+    expect(fs.existsSync(path.join(dst, 'skills', 'a', 'SKILL.md'))).toBe(true);
+    expect(fs.existsSync(path.join(dst, 'skills', 'a', '.locked'))).toBe(false);
+  });
 });
 
 describe('listSkillFilesRel + hashSkillsTree', () => {
@@ -91,5 +104,17 @@ describe('listSkillFilesRel + hashSkillsTree', () => {
     expect(hashSkillsTree(skillsSourceRoot())).toBe(h1); // stable
     seedSourceSkill('a', 'A-edited');
     expect(hashSkillsTree(skillsSourceRoot())).not.toBe(h1); // content change perturbs
+  });
+
+  it('ignores the `.locked` marker — lock/unlock leaves the file list and hash invariant', () => {
+    seedSourceSkill('a', 'A');
+    const relsBefore = listSkillFilesRel(skillsSourceRoot());
+    const h1 = hashSkillsTree(skillsSourceRoot());
+    lockSourceSkill('a');
+    // The marker must not appear in the listing (so it never transfers to a remote)
+    expect(listSkillFilesRel(skillsSourceRoot())).toEqual(relsBefore);
+    expect(listSkillFilesRel(skillsSourceRoot())).not.toContain('skills/a/.locked');
+    // ...and must not perturb the content hash → no incidental remote re-sync.
+    expect(hashSkillsTree(skillsSourceRoot())).toBe(h1);
   });
 });

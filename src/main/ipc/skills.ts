@@ -4,7 +4,7 @@ import {
   listSkills, getSkill, createSkill, updateSkill, deleteSkill, setSkillLocked,
   listSkillAuxFiles, readSkillFile, writeSkillFile, deleteSkillFile,
 } from '../skills-store';
-import { onSkillsChanged } from '../skills-sync';
+import { onSkillsChanged, notifyRendererSkillsChanged } from '../skills-sync';
 
 // The manager UI is just one TRIGGER of a skill mutation — like the agent
 // bridge. Both funnel into the single onSkillsChanged() pipeline (re-project
@@ -37,9 +37,13 @@ export function registerSkillsHandlers(): void {
     onSkillsChanged();
   });
 
+  // Lock/unlock is metadata-only: enforced in main against the source folder,
+  // never read by agents. So it just repaints the renderer badge — it must NOT
+  // re-project, re-sync to remotes, or hot-reload live sessions (which would
+  // inject a stray "Skills reloaded" line into unrelated agent tabs).
   ipcMain.handle(IPC.SKILLS_SET_LOCKED, async (_event, payload: { name: string; locked: boolean }) => {
     await setSkillLocked(payload.name, payload.locked);
-    onSkillsChanged();
+    notifyRendererSkillsChanged();
   });
 
   // Aux files: the manager is, like the agent bridge, just a TRIGGER — writes
