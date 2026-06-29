@@ -87,7 +87,15 @@ export function ProjectEditPanel() {
   const handleSave = () => {
     const tabs = defaultTabs
       .filter((t) => t.name.trim())
-      .map((t) => ({ ...t, color: t.color || undefined }));
+      .map((t): TabTemplate => {
+        const base = { name: t.name.trim(), color: t.color || undefined };
+        // Keep the two kinds' payloads disjoint: a terminal carries `cmd` and no
+        // `kind` (back-compat — existing configs stay byte-identical); a web tab
+        // carries `kind:'web'` + an optional `url` and never a `cmd`.
+        return t.kind === 'web'
+          ? { ...base, kind: 'web', url: t.url?.trim() || undefined }
+          : { ...base, cmd: t.cmd?.trim() || undefined };
+      });
     const cmds = quickCommands.filter((c) => c.label.trim() && c.command.trim());
     updateProjectConfig(editingProjectIndex, {
       name: name.trim() || project.config.name,
@@ -112,6 +120,10 @@ export function ProjectEditPanel() {
 
   const addTab = () => {
     setDefaultTabs((tabs) => [...tabs, { name: `Terminal ${tabs.length + 1}` }]);
+  };
+
+  const addWebTab = () => {
+    setDefaultTabs((tabs) => [...tabs, { name: 'Web', kind: 'web' }]);
   };
 
   const removeTab = (index: number) => {
@@ -294,6 +306,12 @@ export function ProjectEditPanel() {
                       </div>
                     )}
                   </div>
+                  <span
+                    className={`default-tab-kind default-tab-kind-${tab.kind === 'web' ? 'web' : 'terminal'}`}
+                    title={tab.kind === 'web' ? 'Web tab' : 'Terminal tab'}
+                  >
+                    {tab.kind === 'web' ? 'web' : 'sh'}
+                  </span>
                   <input
                     className="default-tab-name"
                     type="text"
@@ -301,13 +319,23 @@ export function ProjectEditPanel() {
                     onChange={(e) => updateTab(i, 'name', e.target.value)}
                     placeholder="Tab name"
                   />
-                  <input
-                    className="default-tab-cmd"
-                    type="text"
-                    value={tab.cmd || ''}
-                    onChange={(e) => updateTab(i, 'cmd', e.target.value)}
-                    placeholder="command (optional)"
-                  />
+                  {tab.kind === 'web' ? (
+                    <input
+                      className="default-tab-cmd"
+                      type="text"
+                      value={tab.url || ''}
+                      onChange={(e) => updateTab(i, 'url', e.target.value)}
+                      placeholder="https://… (optional)"
+                    />
+                  ) : (
+                    <input
+                      className="default-tab-cmd"
+                      type="text"
+                      value={tab.cmd || ''}
+                      onChange={(e) => updateTab(i, 'cmd', e.target.value)}
+                      placeholder="command (optional)"
+                    />
+                  )}
                   <button
                     className="default-tab-remove"
                     onClick={() => removeTab(i)}
@@ -319,7 +347,10 @@ export function ProjectEditPanel() {
                 </div>
               ))}
             </div>
-            <button className="default-tab-add" onClick={addTab}>+ Add Tab</button>
+            <div className="default-tab-add-row">
+              <button className="default-tab-add" onClick={addTab}>+ Add Terminal</button>
+              <button className="default-tab-add" onClick={addWebTab}>+ Add Web</button>
+            </div>
           </div>
 
           <div className="project-edit-field">
@@ -362,7 +393,7 @@ export function ProjectEditPanel() {
                     }
                   >
                     <option value="current">Current tab</option>
-                    {defaultTabs.filter((t) => t.name.trim()).map((t) => (
+                    {defaultTabs.filter((t) => t.name.trim() && t.kind !== 'web').map((t) => (
                       <option key={t.name} value={t.name}>{t.name}</option>
                     ))}
                   </select>
