@@ -11,10 +11,18 @@ import type { AgentEvent } from './types';
 export type PermissionHandler = (toolUseId: string, toolName: string, input: Record<string, unknown>) => void;
 
 /**
- * Pure event dispatcher — no I/O. Feeds raw parsed events from agent-server
- * stdout into per-turn AsyncGenerators by `turnId` envelope. Splitting this
- * out of the ChildProcess wrapper makes it unit-testable without mocking the
- * subprocess boundary.
+ * Pure event dispatcher — no I/O. Routes raw parsed events from agent-server
+ * stdout to one of two destinations, by type:
+ *   - **Display content** (message / stream / error) → the session-level
+ *     `onSessionEvent` sink, delivered by tabId, NOT through the per-turn
+ *     generator — so late-at-the-seam content is never dropped as "unknown turn".
+ *   - **Status / control** (status, permission_request, plan, capabilities,
+ *     picker, auth) → the per-turn AsyncGenerator by `turnId` envelope (drives
+ *     turn-end / busy-idle / `query()` resolution).
+ * So `turnId` is the seam token for STATUS/lifecycle, not for content. Session-
+ * scoped sidebands (task_event / queue / skills_reloaded) are routed by type
+ * before the turnId check. Splitting this out of the ChildProcess wrapper makes
+ * it unit-testable without mocking the subprocess boundary. See turnId-scoping.
  */
 export interface TurnDispatcher {
   /** Feed one already-JSON-parsed wire message into the dispatcher. */
@@ -155,7 +163,11 @@ export function createTurnDispatcher(
       return;
     }
 
-    // Per-turn events: route by turnId envelope.
+    // Per-turn events: route by turnId envelope. With a session sink wired,
+    // ONLY status / control reaches here — display content (message/stream/error)
+    // was already delivered session-scoped above, so it can never be dropped by
+    // the turnId guards below. turnId is thus the seam token for STATUS/lifecycle
+    // (turn-end, busy/idle, query() resolution), not for content. See turnId-scoping.
     const turnId: string | undefined = m?.turnId;
     if (!turnId) {
       log.info('agent-remote', `non-lifecycle event missing turnId, dropping: type=${m?.type}`);
@@ -164,10 +176,10 @@ export function createTurnDispatcher(
     const turn = turns.get(turnId);
     if (!turn) {
       // Event for a turn that's already been deregistered. Most commonly a
-      // tail event after the first `state:'idle'` (e.g. provider's finally
-      // block emits a second idle). Harmless — log at info level so it
-      // shows up if debugging cross-turn leaks but doesn't spam in normal
-      // operation.
+      // tail `status:'idle'` (the provider's finally block emits a second idle).
+      // Harmless — log at info level so it shows up if debugging cross-turn
+      // leaks but doesn't spam in normal operation. (Display content no longer
+      // reaches here, so this is never a lost reply/tool-result.)
       log.info('agent-remote', `event for unknown turn ${turnId}, dropping: type=${m?.type}`);
       return;
     }
