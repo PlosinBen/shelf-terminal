@@ -29,6 +29,7 @@
 ## Rules
 
 - Bug fix 必須包含迴歸測試 — 先寫測試重現問題，再修 code
+- **UI / 行為變更：E2E 是主動預設交付項，跟 unit test 同級** — 動到 renderer 行為（新元件、新流程、CRUD、互動）就在**同一步**補 E2E，不要標「deferred / 之後再寫」等被提醒。build 慢不是不做的理由：用 Bash `run_in_background` 跑 `npm run test:e2e -- <spec>`。core/非 UI 邏輯沒 surface 可 E2E 時才以 unit 為主。
 - 不要啟動 dev server 或 Electron（`npm run dev` / `npx electron`）— AI 看不到畫面，只會干擾使用者。驗證用 `npm run typecheck` + `npm run test:unit`；需要驗 UI 行為就寫 E2E test
 - 優先使用 `package.json` 定義的 npm scripts（如 `npm run typecheck`、`npm run test:unit`、`npm run test:e2e`），不要直接組底層指令（如 `tsc --noEmit`、`vitest run`）— 使用者開了 bypass permission，直接組指令會增加審閱負擔
 - Commit 前確認 `.agent/` 是否需要更新（規範見上方「Documentation maintenance」）— 有新增功能、改變架構、或發現 gotcha 時一併更新
