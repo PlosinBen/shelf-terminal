@@ -33,6 +33,7 @@ export interface ShelfPlacement {
 // declares a payload (`transportPut({ type: ShelfFileTypeMcp })`) and the
 // consumption side when it resolves a path (`shelfPlacement(ShelfFileTypeMcp)`).
 export const ShelfFileTypeMcp = 'mcp';
+export const ShelfFileTypeSkill = 'skill';
 export const ShelfFileTypeTest = 'test';
 
 /**
@@ -44,6 +45,14 @@ const SHELF_PLACEMENTS = {
   [ShelfFileTypeMcp]: (ctx: ShelfPathContext): ShelfPlacement => {
     if (!ctx.appId) throw new Error('shelf placement "mcp" requires context.appId');
     return { base: 'home', rel: `.shelf/apps/${ctx.appId}/mcp-servers.json` };
+  },
+  // The app-level skills tree (a DIRECTORY rel — the worker's agent-server reads
+  // `~/.shelf/apps/<appId>/skills`, see deployment#1). Files are placed under it
+  // one-by-one via transportPutDir; this is the single source for that layout,
+  // mirrored locally by skills-projection `localSkillsTarget`.
+  [ShelfFileTypeSkill]: (ctx: ShelfPathContext): ShelfPlacement => {
+    if (!ctx.appId) throw new Error('shelf placement "skill" requires context.appId');
+    return { base: 'home', rel: `.shelf/apps/${ctx.appId}/skills` };
   },
   // Verification-only: a neutral payload to confirm a connection's transport
   // CHANNEL moves bytes (ssh/docker/wsl putFile), decoupled from any real
