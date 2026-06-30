@@ -1907,6 +1907,7 @@ button {
 .bottom-bar-version {
   color: var(--text-muted);
   font-size: 12px;
+  margin-right: 4px;
 }
 
 .bottom-bar-update-btn {
@@ -1941,11 +1942,21 @@ button {
   transition: width 0.15s linear;
 }
 
-.bottom-bar-toggles {
+/* The right cluster is split into three groups — version | left sidebar |
+   right sidebar — separated by .bottom-bar-vsep dividers. Icons within a group
+   stay tight (their own padding spaces them); the parent .bottom-bar-right gap
+   sets the breathing room around each divider. */
+.bottom-bar-group {
   display: inline-flex;
   align-items: center;
   height: 100%;
-  margin-left: 2px;
+}
+
+.bottom-bar-vsep {
+  width: 1px;
+  height: 16px;
+  background: var(--border);
+  flex-shrink: 0;
 }
 
 /* ── Worktree Dialog ── */

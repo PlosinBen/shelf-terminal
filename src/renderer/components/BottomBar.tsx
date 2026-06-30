@@ -52,6 +52,8 @@ export function BottomBar() {
         )}
       </div>
       <div className="bottom-bar-right">
+        {/* Group 1 — version + updater */}
+        <span className="bottom-bar-group">
         <span className="bottom-bar-version">v{version}</span>
         {updateStatus.state === 'idle' && (
           <button
@@ -94,8 +96,12 @@ export function BottomBar() {
             &#x21BB;
           </button>
         )}
+        </span>
 
-        <span className="bottom-bar-toggles">
+        <span className="bottom-bar-vsep" aria-hidden="true" />
+
+        {/* Group 2 — left sidebar (project list) */}
+        <span className="bottom-bar-group">
           <button
             className={`right-tab-btn${sidebarVisible ? ' active' : ''}`}
             tabIndex={-1}
@@ -105,6 +111,12 @@ export function BottomBar() {
             <PanelLeftIcon />
             <span className="sr-only">Projects</span>
           </button>
+        </span>
+
+        <span className="bottom-bar-vsep" aria-hidden="true" />
+
+        {/* Group 3 — right sidebar features */}
+        <span className="bottom-bar-group">
           <button
             className={`right-tab-btn${pmVisible ? ' active' : ''}${awayMode ? ' pm-away' : ''}`}
             tabIndex={-1}
