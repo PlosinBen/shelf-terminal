@@ -602,3 +602,44 @@ test('close project via context menu removes it', async ({ shelfApp: { page } })
 
   await expect(items).toHaveCount(before - 1, { timeout: 5_000 });
 });
+
+// ── BottomBar grouping ──
+
+// The right cluster is split into three divider-separated groups —
+// version | left sidebar (Projects) | right sidebar (PM/Notes/Skills/MCP/DevTools).
+// No project needed: the bottom bar is always mounted.
+test('bottom bar groups the right cluster with dividers', async ({ shelfApp: { page } }) => {
+  const groups = page.locator('.bottom-bar-right > .bottom-bar-group');
+  const seps = page.locator('.bottom-bar-right > .bottom-bar-vsep');
+  await expect(groups).toHaveCount(3);
+  await expect(seps).toHaveCount(2);
+
+  // Group 2 = the left-sidebar toggle (Projects) on its own.
+  const leftGroup = groups.nth(1);
+  await expect(leftGroup.locator('.right-tab-btn')).toHaveCount(1);
+  await expect(leftGroup.locator('.sr-only', { hasText: 'Projects' })).toHaveCount(1);
+
+  // Group 3 = the five right-sidebar features, MCP sitting after Skills.
+  const rightGroup = groups.nth(2);
+  await expect(rightGroup.locator('.right-tab-btn .sr-only'))
+    .toHaveText(['PM', 'Notes', 'Skills', 'MCP', 'Dev Tools']);
+});
+
+// The grouped MCP icon opens the MCP right-sidebar view (it lives in group 3).
+test('bottom bar MCP icon toggles the MCP view', async ({ shelfApp: { page } }) => {
+  const mcpBtn = page.locator('.bottom-bar-right .right-tab-btn', { hasText: 'MCP' });
+  const view = page.locator('.mcp-view');
+
+  await expect(mcpBtn).toBeVisible({ timeout: 3_000 });
+  await expect(mcpBtn).not.toHaveClass(/active/);
+  await expect(view).not.toBeVisible();
+
+  await mcpBtn.click();
+  await expect(view).toBeVisible({ timeout: 3_000 });
+  await expect(mcpBtn).toHaveClass(/active/);
+
+  // Close via the panel's × — toggle goes inactive.
+  await view.locator('.notes-close').click();
+  await expect(view).not.toBeVisible();
+  await expect(mcpBtn).not.toHaveClass(/active/);
+});
