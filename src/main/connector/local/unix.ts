@@ -102,13 +102,12 @@ export class LocalUnixConnector implements Connector {
     return Promise.resolve(os.homedir());
   }
 
-  uploadFile(cwd: string, filename: string, buffer: Buffer): Promise<string> {
+  async uploadFile(cwd: string, filename: string, buffer: Buffer): Promise<string> {
     assertSafeCwd(cwd);
-    const { remoteDir, remotePath } = buildPaths(cwd, filename);
-    fs.mkdirSync(remoteDir, { recursive: true });
-    ensureLocalGitignore(cwd);
-    fs.writeFileSync(remotePath, buffer);
-    return Promise.resolve(remotePath);
+    const { remotePath } = buildPaths(cwd, filename);
+    await this.putFile(remotePath, buffer); // the ONE byte primitive — mkdir-p's .tmp/shelf
+    ensureLocalGitignore(cwd); // .tmp now exists; non-clobber guard
+    return remotePath;
   }
 
   putFile(remotePath: string, buffer: Buffer): Promise<void> {

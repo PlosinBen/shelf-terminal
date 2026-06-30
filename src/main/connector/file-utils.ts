@@ -69,18 +69,38 @@ export function buildPaths(cwd: string, filename: string): PathParts {
 }
 
 /**
- * Build the remote shell snippet that mkdir's the upload dir, drops a
- * `.tmp/.gitignore` (if missing), then `cat`s stdin into the destination.
+ * Build the remote shell snippet that ensures `<cwd>/.tmp/.gitignore` exists
+ * (NON-clobbering — only writes when absent). The upload-specific concern that
+ * can't ride inside the content-agnostic byte-mover (`putFile`), so it runs as a
+ * separate step before the put. mkdir's `.tmp` so the guard works on a fresh cwd.
  */
-export function buildRemoteUploadCmd(cwd: string, remoteDir: string, remotePath: string): string {
+export function buildGitignoreGuardCmd(cwd: string): string {
   const tmpDir = `${normalizeCwd(cwd)}/.tmp`;
-  const gitignorePath = `${tmpDir}/.gitignore`;
-  const gitignoreGuard = `{ [ -f ${shellSingleQuote(gitignorePath)} ] || printf '*\\n' > ${shellSingleQuote(gitignorePath)}; }`;
-  return [
-    `mkdir -p ${shellSingleQuote(remoteDir)}`,
-    gitignoreGuard,
-    `cat > ${shellSingleQuote(remotePath)}`,
-  ].join(' && ');
+  const gitignorePath = `${normalizeCwd(cwd)}/${GITIGNORE_REL}`;
+  const guard = `{ [ -f ${shellSingleQuote(gitignorePath)} ] || printf '*\\n' > ${shellSingleQuote(gitignorePath)}; }`;
+  return `mkdir -p ${shellSingleQuote(tmpDir)} && ${guard}`;
+}
+
+/**
+ * Shared remote upload: ensure the gitignore guard, then place the bytes through
+ * the connector's ONE byte primitive (`putFile`) — no upload-specific write
+ * command. The path comes from `buildPaths` (single-sourced `.tmp/shelf` layout).
+ * Each remote connector supplies its `bin`, an `execArgs` wrapper, and its own
+ * `putFile`, so the per-connection branching stays in `putFile` alone.
+ */
+export async function remoteUploadFile(
+  bin: string,
+  execArgs: (cmd: string) => string[],
+  putFile: (remotePath: string, buffer: Buffer) => Promise<void>,
+  cwd: string,
+  filename: string,
+  buffer: Buffer,
+): Promise<string> {
+  assertSafeCwd(cwd);
+  const { remotePath } = buildPaths(cwd, filename);
+  await spawnRemoteCmd(bin, execArgs(buildGitignoreGuardCmd(cwd)), `${bin} gitignore`);
+  await putFile(remotePath, buffer);
+  return remotePath;
 }
 
 /**

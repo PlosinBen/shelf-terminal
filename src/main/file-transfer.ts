@@ -79,7 +79,7 @@ import {
   makePrefix,
   parseUploadPrefix,
   assertSafeCwd,
-  buildRemoteUploadCmd,
+  buildGitignoreGuardCmd,
 } from './connector/file-utils';
 
 export const __test__ = {
@@ -89,5 +89,5 @@ export const __test__ = {
   makePrefix,
   parseUploadPrefix,
   assertSafeCwd,
-  buildRemoteUploadCmd,
+  buildGitignoreGuardCmd,
 };

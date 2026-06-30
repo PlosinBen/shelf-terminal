@@ -14,7 +14,7 @@ vi.mock('node-pty', () => ({
 }));
 import {
   makePrefix, parseUploadPrefix, sanitizeFilename, shellSingleQuote,
-  assertSafeCwd, buildPaths, buildRemoteUploadCmd, normalizeCwd,
+  assertSafeCwd, buildPaths, buildGitignoreGuardCmd, normalizeCwd,
 } from './file-utils';
 
 // ── getAvailableTypes ──
@@ -204,12 +204,12 @@ describe('file-utils', () => {
     });
   });
 
-  describe('buildRemoteUploadCmd', () => {
-    it('includes mkdir, gitignore guard, and cat', () => {
-      const cmd = buildRemoteUploadCmd('/home/u', '/home/u/.tmp/shelf', '/home/u/.tmp/shelf/abc-f.txt');
+  describe('buildGitignoreGuardCmd', () => {
+    it('includes mkdir and the non-clobber gitignore guard', () => {
+      const cmd = buildGitignoreGuardCmd('/home/u');
       expect(cmd).toContain('mkdir -p');
       expect(cmd).toContain('.gitignore');
-      expect(cmd).toContain('cat >');
+      expect(cmd).toContain('[ -f');
     });
   });
 
