@@ -156,6 +156,16 @@ contextBridge.exposeInMainWorld('shelfApi', {
     logsPath: (): Promise<string> => ipcRenderer.invoke(IPC.APP_LOGS_PATH),
     debugLog: (tag: string, msg: string): void => ipcRenderer.send(IPC.APP_DEBUG_LOG, tag, msg),
   },
+  find: {
+    query: (text: string, opts: { forward: boolean; findNext: boolean }): void =>
+      ipcRenderer.send(IPC.WINDOW_FIND, { text, forward: opts.forward, findNext: opts.findNext }),
+    stop: (): void => ipcRenderer.send(IPC.WINDOW_STOP_FIND),
+    onResult: (callback: (result: { activeMatchOrdinal: number; matches: number; finalUpdate: boolean }) => void) => {
+      const listener = (_e: Electron.IpcRendererEvent, result: { activeMatchOrdinal: number; matches: number; finalUpdate: boolean }) => callback(result);
+      ipcRenderer.on(IPC.WINDOW_FIND_RESULT, listener);
+      return () => ipcRenderer.removeListener(IPC.WINDOW_FIND_RESULT, listener);
+    },
+  },
   web: {
     listSessions: () => ipcRenderer.invoke(IPC.WEB_LIST_SESSIONS),
     deleteSession: (domain: string) => ipcRenderer.invoke(IPC.WEB_DELETE_SESSION, domain),

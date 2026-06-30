@@ -86,6 +86,14 @@ export const IPC = {
   LOGS_CLEAR: 'logs:clear',
   LOGS_SIZE: 'logs:size',
 
+  // In-page find (renderer→main: drive webContents.findInPage for DOM-based
+  // tabs — agent / web — where there's no xterm SearchAddon). Terminal tabs
+  // keep using the xterm addon. See SearchBar.
+  WINDOW_FIND: 'window:find',
+  WINDOW_STOP_FIND: 'window:stop-find',
+  // main→renderer: forwarded 'found-in-page' result (active ordinal + match count)
+  WINDOW_FIND_RESULT: 'window:find-result',
+
   // Web session (login surface + agent web.fetch management)
   WEB_LIST_SESSIONS: 'web:list-sessions',
   WEB_DELETE_SESSION: 'web:delete-session',

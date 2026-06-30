@@ -92,6 +92,16 @@ Surfaced through `shelfApi.connector` (`uploadFile` / `clearUploads` / `getUploa
 | `app.logsPath()` | invoke `app:logs-path` → `string` |
 | `app.debugLog(tag, msg)` | send `app:debug-log` (fire-and-forget diagnostic log → main log file) |
 
+## find (`shelfApi.find`)
+
+In-page text search for DOM-based tabs (agent / web), which have no xterm `SearchAddon`. Drives Chromium's native `webContents.findInPage` in main; terminal tabs keep searching through the xterm addon in the renderer. `SearchBar` picks the path by active tab type.
+
+| Method | Shape |
+|--------|-------|
+| `query(text, { forward: boolean, findNext: boolean })` | send `window:find` (`findNext:false` = fresh search, `true` = step to next/prev) |
+| `stop()` | send `window:stop-find` (clears highlight + selection) |
+| `onResult(cb({ activeMatchOrdinal, matches, finalUpdate }))` | recv `window:find-result` → unsubscribe fn (forwarded `found-in-page` for the match counter) |
+
 ## notes (`shelfApi.notes`)
 
 Per-project markdown notes; `images` are filenames resolved via `shelf-image://` protocol.

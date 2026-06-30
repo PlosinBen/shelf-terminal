@@ -109,6 +109,13 @@ interface ShelfApi {
     logsPath: () => Promise<string>;
     debugLog: (tag: string, msg: string) => void;
   };
+  find: {
+    query: (text: string, opts: { forward: boolean; findNext: boolean }) => void;
+    stop: () => void;
+    onResult: (
+      callback: (result: { activeMatchOrdinal: number; matches: number; finalUpdate: boolean }) => void,
+    ) => () => void;
+  };
   web: {
     listSessions: () => Promise<import('../shared/web-session').WebSessionEntry[]>;
     deleteSession: (domain: string) => Promise<void>;

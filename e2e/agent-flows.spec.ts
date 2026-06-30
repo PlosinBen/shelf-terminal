@@ -241,6 +241,54 @@ test.describe('agent flows via fake provider', () => {
     });
   });
 
+  // Agent tabs are plain DOM (no xterm SearchAddon), so the SearchBar routes
+  // through Chromium's native findInPage via IPC and shows a match counter.
+  // Covers the wiring a unit test can't reach: SearchBar → window:find →
+  // main forwarder → window:find-result → counter render.
+  //
+  // Harness note: NODE_ENV=test launches the window hidden (show:false), and a
+  // hidden window doesn't emit 'found-in-page' for the fire-and-forget find the
+  // keystroke issues. The find request still binds the main forwarder; we then
+  // nudge Chromium to actually emit by showing the window inactively and
+  // re-issuing the *same* find from main. Our bound forwarder relays that event
+  // to the renderer exactly as it would in a real, visible window — so this
+  // asserts our relay + counter, not Chromium's emission (which isn't our code).
+  test.describe('in-page search', () => {
+    const emit = (app: import('@playwright/test').ElectronApplication, text: string) =>
+      app.evaluate(({ BrowserWindow }, t) => {
+        const win = BrowserWindow.getAllWindows()[0];
+        win.showInactive();
+        win.webContents.findInPage(t);
+      }, text);
+
+    test('finds conversation text and shows a match count', async ({ shelfApp: { app, page } }) => {
+      await setupProject(page);
+      await openAgentTab(page);
+      // 'zumwaltberry' renders in the DOM (user echo bubble + agent reply).
+      await sendAgentPrompt(page, 'text:zumwaltberry');
+      await expect(page.locator('.agent-messages:visible')).toContainText('zumwaltberry', { timeout: 5_000 });
+
+      // mod+f opens the find bar (default 'search' keybinding).
+      await page.keyboard.press(`${modifier}+f`);
+      const bar = page.locator('.search-bar');
+      await expect(bar).toBeVisible({ timeout: 3_000 });
+
+      // Type → routes through findInPage IPC (agent tab, no xterm addon) and
+      // binds the main forwarder. Then nudge the emission.
+      await bar.locator('.search-input').fill('zumwaltberry');
+      await emit(app, 'zumwaltberry');
+      // Counter shows "<active>/<total>" with a non-zero total — proves the full
+      // relay: SearchBar → window:find → main forwarder → window:find-result →
+      // counter render.
+      await expect(page.locator('.search-count')).toHaveText(/^\d+\/[1-9]\d*$/, { timeout: 5_000 });
+
+      // Close button hides the bar (× avoids depending on input focus, which
+      // the find-nudge above moves).
+      await bar.locator('.search-btn', { hasText: '×' }).click();
+      await expect(bar).not.toBeVisible({ timeout: 3_000 });
+    });
+  });
+
   // /mcp and /skills are interactive-TUI-only in the real CLIs (not SDK-
   // dispatchable), so the provider intercepts them and prints a read-only
   // fold_markdown card from normalized data. The fake provider mirrors this with

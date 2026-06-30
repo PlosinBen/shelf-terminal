@@ -12,6 +12,7 @@ import { registerSkillsHandlers } from './skills';
 import { registerMcpHandlers } from './mcp';
 import { registerUpdaterHandlers } from './updater';
 import { registerPmHandlers } from './pm';
+import { registerFindHandlers } from './find';
 
 /**
  * Registers every domain's IPC handlers. Agent handlers are registered
@@ -33,4 +34,5 @@ export function registerAllIpcHandlers(): void {
   registerMcpHandlers();
   registerUpdaterHandlers();
   registerPmHandlers();
+  registerFindHandlers();
 }

@@ -514,6 +514,14 @@ button {
   opacity: 0.5;
 }
 
+.search-count {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  padding: 0 4px;
+}
+
 .search-btn {
   width: 24px;
   height: 24px;
