@@ -1,12 +1,16 @@
 import { spawn } from 'child_process';
+import { SHELF_UPLOAD_DIR_REL, SHELF_UPLOAD_GITIGNORE_REL } from '@shared/shelf-paths';
 
 /**
  * Shared file-transfer utilities for all connectors.
  * Upload prefix parsing, path building, and remote pipe writing.
  */
 
-const REL_DIR = '.tmp/shelf';
-const GITIGNORE_REL = '.tmp/.gitignore';
+// The upload dir layout lives in @shared/shelf-paths (single source — the
+// `upload` placement uses the same constant). Re-aliased here for the sibling
+// ops (list/size/clear/cleanup) that key off `<cwd>/.tmp/shelf`.
+const REL_DIR = SHELF_UPLOAD_DIR_REL;
+const GITIGNORE_REL = SHELF_UPLOAD_GITIGNORE_REL;
 
 const MIN_PREFIX_LEN = 9;
 const TS_FLOOR_MS = 1_577_836_800_000; // 2020-01-01

@@ -19,7 +19,18 @@ export interface ShelfPathContext {
   appId?: string;
   /** Project working dir — required for cwd-relative types (e.g. uploads). */
   cwd?: string;
+  /** Leaf file name under a cwd-relative type's dir (e.g. an upload's
+   *  prefixed/sanitised filename). The caller owns naming policy (prefix,
+   *  sanitisation) so this module stays a pure, deterministic path rule. */
+  name?: string;
 }
+
+/** The upload dir, relative to a project cwd. SINGLE SOURCE for the `.tmp/shelf`
+ *  layout — the `upload` placement and `connector/file-utils` (buildPaths +
+ *  list/size/clear) both derive from this, so the literal lives in one place. */
+export const SHELF_UPLOAD_DIR_REL = '.tmp/shelf';
+/** The gitignore that hides the upload scratch dir from the project's repo. */
+export const SHELF_UPLOAD_GITIGNORE_REL = '.tmp/.gitignore';
 
 export interface ShelfPlacement {
   /** Which base `rel` hangs off: the worker's home, or the project cwd. */
@@ -34,6 +45,7 @@ export interface ShelfPlacement {
 // consumption side when it resolves a path (`shelfPlacement(ShelfFileTypeMcp)`).
 export const ShelfFileTypeMcp = 'mcp';
 export const ShelfFileTypeSkill = 'skill';
+export const ShelfFileTypeUpload = 'upload';
 export const ShelfFileTypeTest = 'test';
 
 /**
@@ -53,6 +65,13 @@ const SHELF_PLACEMENTS = {
   [ShelfFileTypeSkill]: (ctx: ShelfPathContext): ShelfPlacement => {
     if (!ctx.appId) throw new Error('shelf placement "skill" requires context.appId');
     return { base: 'home', rel: `.shelf/apps/${ctx.appId}/skills` };
+  },
+  // A user upload (paste/drag) under the project's cwd-relative scratch dir. The
+  // caller supplies the already-prefixed/sanitised leaf `name`; this maps it
+  // under the single-source upload dir. cwd-relative, so base is 'cwd'.
+  [ShelfFileTypeUpload]: (ctx: ShelfPathContext): ShelfPlacement => {
+    if (!ctx.name) throw new Error('shelf placement "upload" requires context.name');
+    return { base: 'cwd', rel: `${SHELF_UPLOAD_DIR_REL}/${ctx.name}` };
   },
   // Verification-only: a neutral payload to confirm a connection's transport
   // CHANNEL moves bytes (ssh/docker/wsl putFile), decoupled from any real
