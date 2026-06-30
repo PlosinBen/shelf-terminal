@@ -7,6 +7,8 @@ import { parseSlashPrefix } from '@shared/slash-prefix';
 import { formatConfigAck, type ConfigEditKey } from '@shared/config-ack';
 import type { ProviderModel } from '@shared/types';
 import { stripCwd, resolveSkillsPluginRoot } from '../shared';
+import { loadProjectedMcpServers } from '../mcp-config';
+import type { McpServerBlock } from '@shared/mcp';
 import { runBridgeTool, APP_SKILL_LIST_DESC, APP_SKILL_GET_DESC, APP_SKILL_CREATE_DESC, APP_SKILL_UPDATE_DESC, APP_SKILL_READ_FILE_DESC, APP_SKILL_WRITE_FILE_DESC, APP_SKILL_DELETE_FILE_DESC, WEB_FETCH_DESC, SHELF_BRIDGE_TOOLS } from '../../app-tool-tools';
 import { WEB_FETCH_TOOL } from '@shared/web-session';
 import { serverLog } from '../../server-logger';
@@ -28,6 +30,16 @@ import {
 } from './helpers';
 
 const execFileP = promisify(execFile);
+
+/** Map our (provider-neutral) MCP block onto Copilot's MCPServerConfig: `tools`
+ *  is required (`['*']` = expose all from the server), and stdio `args` is
+ *  required (default `[]`). See features/app-level-mcps T2.2. */
+function toCopilotMcpConfig(block: McpServerBlock): Record<string, any> {
+  if (block.type === 'stdio') {
+    return { type: 'stdio', command: block.command, args: block.args ?? [], env: block.env, tools: ['*'] };
+  }
+  return { type: 'http', url: block.url, headers: block.headers, tools: ['*'] };
+}
 
 /**
  * Transitional: read a GitHub token from the `gh` CLI if it's installed AND
@@ -422,6 +434,19 @@ export function createCopilotBackend(): ServerBackend {
     // mid-session may need `/skills reload`.
     const skillsRoot = resolveSkillsPluginRoot(currentAppId);
     if (skillsRoot) config.skillDirectories = [path.join(skillsRoot, 'skills')];
+
+    // App-level user MCP servers. Copilot keeps these in `config.mcpServers` —
+    // SEPARATE from the in-process `shelf` bridge (which is `config.tools` below),
+    // so there's no merge/clobber concern here. Copilot's shape differs from ours:
+    // `tools` is required (`['*']` = expose all) and stdio `args` is required.
+    // Fail-loud: surface load problems. Host-native MCP is NOT loaded (run clean).
+    const userMcp = loadProjectedMcpServers(currentAppId);
+    for (const e of userMcp.errors) serverLog('warn', 'copilot', `MCP config: ${e}`);
+    const mappedMcp: Record<string, any> = {};
+    for (const [name, block] of Object.entries(userMcp.servers)) {
+      mappedMcp[name] = toCopilotMcpConfig(block);
+    }
+    if (Object.keys(mappedMcp).length > 0) config.mcpServers = mappedMcp;
 
     // In-process app-level bridge tools. As of copilot-sdk 1.0.56 tools are
     // passed in the session CONFIG (`config.tools`, the typed/documented API) —

@@ -15,6 +15,7 @@ import { parseSlashPrefix } from '@shared/slash-prefix';
 import { formatConfigAck, type ConfigEditKey } from '@shared/config-ack';
 import type { ProviderModel, NormalizedTask } from '@shared/types';
 import { stripCwd, resolveSkillsPluginRoot } from '../shared';
+import { loadProjectedMcpServers } from '../mcp-config';
 import {
   formatClaudeMcpCard,
   formatClaudeSkillsCard,
@@ -648,9 +649,13 @@ export function createClaudeBackend(): ServerBackend {
     if (currentEffort) (options as any).effort = currentEffort;
     const skillsPluginRoot = resolveSkillsPluginRoot(appId);
     if (skillsPluginRoot) (options as any).plugins = [{ type: 'local', path: skillsPluginRoot }];
-    // In-process bridge tools for app-level capabilities (read ops). Additive —
-    // merged with any existing mcpServers so it can't clobber other config.
-    (options as any).mcpServers = { ...(options as any).mcpServers, shelf: getShelfMcpServer() };
+    // App-level user MCP servers (our blocks map 1:1 onto Claude's McpServerConfig
+    // stdio/http shapes). Fail-loud: surface load problems, don't swallow. The
+    // in-process `shelf` bridge is added LAST so a user-named "shelf" can't clobber
+    // it. Host-native MCP is intentionally NOT loaded (run clean).
+    const userMcp = loadProjectedMcpServers(appId);
+    for (const e of userMcp.errors) serverLog('warn', 'claude', `MCP config: ${e}`);
+    (options as any).mcpServers = { ...userMcp.servers, shelf: getShelfMcpServer() };
 
     const q = sdkQuery({ prompt: inputStream(), options }) as Query;
     sessionCwd = cwd;
@@ -737,7 +742,9 @@ export function createClaudeBackend(): ServerBackend {
         };
         const skillsPluginRoot = resolveSkillsPluginRoot(appId);
         if (skillsPluginRoot) (options as any).plugins = [{ type: 'local', path: skillsPluginRoot }];
-        (options as any).mcpServers = { shelf: getShelfMcpServer() };
+        // Same merge as createSession so the cold-start /mcp card lists user
+        // servers too (shelf last, can't be clobbered).
+        (options as any).mcpServers = { ...loadProjectedMcpServers(appId).servers, shelf: getShelfMcpServer() };
         const gen = sdkQuery({ prompt: ' ', options }) as Query;
         for await (const msg of gen) {
           if (msg.type === 'system' && (msg as any).subtype === 'init') {

@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type { Connection } from '@shared/types';
 
-const transportPut = vi.fn(async () => {});
+const transportPut = vi.fn(async (_c: unknown, _args: unknown) => {});
 vi.mock('./connector/transport', () => ({
-  transportPut: (...a: unknown[]) => transportPut(...a),
+  transportPut: (c: unknown, args: unknown) => transportPut(c, args),
 }));
 
 let sourceExists = true;
