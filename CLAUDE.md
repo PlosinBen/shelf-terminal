@@ -55,3 +55,4 @@
 - Wire payload 給 renderer 是渲染原語 (reply / fold_code / fold_markdown / fold_diff / note / system / error)，不是 provider 語意 (thinking / tool_use / slash_response)
 - Config source-of-truth 單向流動：renderer 持有 prefs → backend imperative apply 不 cache；backend 持有 status / capabilities → renderer 純展示
 - 有參數的 keybinding action 用 `action_param` pattern (例: `switchTab_3`)
+- **跨檔 / 重複使用的字串值用具名 const，不散落 magic string** — type 標籤、wire kind、事件名、IPC channel、固定路徑片段之類，在單一 source-of-truth 用 `const` / `as const` 物件定義一次，call site(設值端 + 判斷/消費端)一律引用常數,不直接寫字面值。型別盡量從常數 derive（`keyof typeof` / `typeof X`），新增值＝加一筆常數，不用同時改 union 與各處 case。既有範例：`IPC`（`ipc-channels.ts`）、`ShelfFileTypeMcp`/`SHELF_PLACEMENTS`（`shared/shelf-paths.ts`）。一次性、單檔內的字串不必硬抽。
