@@ -20,6 +20,13 @@ export default defineConfig({
       testMatch: 'docker.spec.ts',
     },
     {
+      // Windows-host-only: connector uploads against a real WSL distro via
+      // wsl.exe (no container to start). Run standalone: npm run test:wsl
+      name: 'wsl',
+      testDir: './e2e/connector',
+      testMatch: 'wsl.spec.ts',
+    },
+    {
       name: 'ssh',
       testDir: './e2e/connector',
       testMatch: 'ssh.spec.ts',

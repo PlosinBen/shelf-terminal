@@ -13,7 +13,7 @@ related:
 
 ## file-transfer#1 — 檔案上傳統一走 `<cwd>/.tmp/shelf/`，不用 `/tmp/shelf-paste`  ·  [Decision]
 
-**Decision**：所有 paste / drag-drop 上傳的目的地都是 `<projectCwd>/.tmp/shelf/<prefix>-<filename>`，而不是過去的 `/tmp/shelf-paste/`。Local / SSH / Docker / WSL 共用同一個 `connector.uploadFile` 入口。
+**Decision**：所有 paste / drag-drop 上傳的目的地都是 `<projectCwd>/.tmp/shelf/<prefix>-<filename>`，而不是過去的 `/tmp/shelf-paste/`。Local / SSH / Docker / WSL 共用同一個 `connector.uploadFile` 入口。`.tmp/shelf` 的 layout 由 `@shared/shelf-paths` 的 `upload` placement(`SHELF_UPLOAD_DIR_REL`)單一定義，`file-utils` 的 list/size/clear 也從它 derive（不再硬編在 main 層）。
 
 **Reason**：
 - 沙盒過的 agent CLI（Claude Code、Gemini、Codex）只能讀 project 內的檔案，丟到 `/tmp` 它會回 permission denied。
@@ -22,17 +22,16 @@ related:
 
 **Do not change casually because**：換回 `/tmp` 會直接打破 sandboxed agent 的使用情境。
 
-## file-transfer#2 — 上傳一律 cat-via-stdin，不用 scp / docker cp  ·  [Decision]
+## file-transfer#2 — 上傳一律 cat-via-stdin，不用 scp / docker cp；且收斂到單一 byte primitive `putFile`  ·  [Decision]
 
-**Decision**：SSH / Docker / WSL 三種 transport 在 `file-transfer.ts` 都用同一個 pattern：
-`spawn('<bin>', [...args, 'sh', '-c', "mkdir -p '<dir>' && cat > '<path>'"])` 然後把 buffer 灌進 stdin。
+**Decision**：SSH / Docker / WSL 上傳走 `spawn('<bin>', [...args, 'sh', '-c', "mkdir -p '<parent>' && cat > '<path>'"])` 把 buffer 灌進 stdin —— 這個 cat-via-stdin 機制現在收斂在 **`connector.putFile`**（`buildRemotePutCmd` + `spawnPipeWrite`）。`uploadFile` **疊在 `putFile` 上**：gitignore guard 一步 + `putFile` 一步，不再自帶 `buildRemoteUploadCmd`（已刪）。每個 connector 因此只剩**一套** byte-write（`putFile`）。3 個 remote connector 共用 `remoteUploadFile`；local 走 fs（`putFile` + `ensureLocalGitignore`）。
 
 **Reason**：
-- **不用 staging file** — 不再需要先寫 `os.tmpdir()/shelf-paste/xxx` 再傳出去，也不會有 staging 漏掉沒清的問題。
-- **不用 scp 的 remote-shell 解析** — scp 在遠端會把路徑跑過一次 shell，filename 含空白／引號就會炸；改用 `cat >` 後路徑只經 single-quote 一層。
-- **三種 transport 對稱** — 同一個 helper（`spawnPipeWrite`）三邊複用，新增 transport 只要再寫一個 wrapper。
+- **不用 staging file** — buffer 直接灌 stdin，不留 `os.tmpdir()/shelf-paste` 孤兒。
+- **不用 scp 的 remote-shell 解析** — `cat >` 後路徑只經 single-quote 一層（scp 會在遠端再跑一次 shell，filename 含空白/引號就炸）。
+- **單一 byte primitive** — uploads 與型別宣告傳輸（MCP/skills）共用 `putFile`，per-connection 分流只在這一處（見 `architecture/transport`）。
 
-**Do not change casually because**：退回 scp 會把 staging cleanup、cross-shell quoting、binary safety 三個雷一次踩回來。
+**Do not change casually because**：退回 scp 會把 staging cleanup、cross-shell quoting、binary safety 三個雷踩回來；把 `uploadFile` 改回自帶 write command 會再長出第二套 per-connection byte-write 堆疊。
 
 ## file-transfer#3 — 上傳清理：session-based、cutoff 從檔名解出來  ·  [Decision]
 
@@ -53,13 +52,13 @@ related:
 - Cleanup `await` 在 spawn 之前 → 遠端 exec 延遲直接打到開 tab 時間
 - 拿掉 dedupe → 每次 spawn 都重跑 cleanup，浪費 SSH/docker exec
 
-## file-transfer#4 — 檔案上傳 mkdir + cat 串在同一個 sh -c  ·  [Gotcha]
+## file-transfer#4 — 寫檔的 mkdir + cat 必須串在同一個 sh -c（gitignore guard 才可分開）  ·  [Gotcha]
 
-**Symptom**：在 `file-transfer.ts` 把 `mkdir -p` 和 `cat >` 拆成兩次 ssh / docker exec 呼叫時，有時候 race 到 cat 看不到目錄。
+**Symptom**：把寫檔的 `mkdir -p` 和 `cat >` 拆成兩次 ssh / docker exec 時，有時 race 到 cat 看不到目錄。
 
 **Root cause**：兩次獨立的遠端 exec 不保證順序，cat 可能在 mkdir 之前抵達遠端。
 
-**Fix**：一律用 `sh -c "mkdir -p '<dir>' && cat > '<path>'"`，目錄建立和寫入在同一個遠端 shell 內順序執行。`mkdir -p` 本身就 idempotent，目錄已存在不會錯。路徑用 `shellSingleQuote` 包起來，遠端 shell 不會二次解析任何字元；若改回呼叫 `execFile` 走 scp/docker cp，就要重新處理跨 shell 的 quoting。
+**Fix**：寫檔一律走 `connector.putFile`，其 `buildRemotePutCmd` 把 `mkdir -p '<parent>' && cat > '<path>'` 串在同一個 `sh -c`，建目錄與寫入順序執行（`mkdir -p` idempotent）。路徑用 `shellSingleQuote` 包，遠端不二次解析。**注意分層**：`.tmp/.gitignore` 的 non-clobber guard 現在是**獨立一步**（`buildGitignoreGuardCmd`，多一次 exec）—— 這不踩這個雷，因為 `putFile` 自己 `mkdir -p` 寫檔的父目錄，guard 只負責 `.tmp/.gitignore`、不 gate 檔案寫入。別把寫檔的 mkdir+cat 再拆開。
 
 ## file-transfer#5 — Paste 使用 Capture Phase 攔截，Drop 使用 Bubble Phase  ·  [Gotcha]
 

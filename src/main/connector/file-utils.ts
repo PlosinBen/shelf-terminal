@@ -1,12 +1,16 @@
 import { spawn } from 'child_process';
+import { SHELF_UPLOAD_DIR_REL, SHELF_UPLOAD_GITIGNORE_REL } from '@shared/shelf-paths';
 
 /**
  * Shared file-transfer utilities for all connectors.
  * Upload prefix parsing, path building, and remote pipe writing.
  */
 
-const REL_DIR = '.tmp/shelf';
-const GITIGNORE_REL = '.tmp/.gitignore';
+// The upload dir layout lives in @shared/shelf-paths (single source — the
+// `upload` placement uses the same constant). Re-aliased here for the sibling
+// ops (list/size/clear/cleanup) that key off `<cwd>/.tmp/shelf`.
+const REL_DIR = SHELF_UPLOAD_DIR_REL;
+const GITIGNORE_REL = SHELF_UPLOAD_GITIGNORE_REL;
 
 const MIN_PREFIX_LEN = 9;
 const TS_FLOOR_MS = 1_577_836_800_000; // 2020-01-01
@@ -65,18 +69,38 @@ export function buildPaths(cwd: string, filename: string): PathParts {
 }
 
 /**
- * Build the remote shell snippet that mkdir's the upload dir, drops a
- * `.tmp/.gitignore` (if missing), then `cat`s stdin into the destination.
+ * Build the remote shell snippet that ensures `<cwd>/.tmp/.gitignore` exists
+ * (NON-clobbering — only writes when absent). The upload-specific concern that
+ * can't ride inside the content-agnostic byte-mover (`putFile`), so it runs as a
+ * separate step before the put. mkdir's `.tmp` so the guard works on a fresh cwd.
  */
-export function buildRemoteUploadCmd(cwd: string, remoteDir: string, remotePath: string): string {
+export function buildGitignoreGuardCmd(cwd: string): string {
   const tmpDir = `${normalizeCwd(cwd)}/.tmp`;
-  const gitignorePath = `${tmpDir}/.gitignore`;
-  const gitignoreGuard = `{ [ -f ${shellSingleQuote(gitignorePath)} ] || printf '*\\n' > ${shellSingleQuote(gitignorePath)}; }`;
-  return [
-    `mkdir -p ${shellSingleQuote(remoteDir)}`,
-    gitignoreGuard,
-    `cat > ${shellSingleQuote(remotePath)}`,
-  ].join(' && ');
+  const gitignorePath = `${normalizeCwd(cwd)}/${GITIGNORE_REL}`;
+  const guard = `{ [ -f ${shellSingleQuote(gitignorePath)} ] || printf '*\\n' > ${shellSingleQuote(gitignorePath)}; }`;
+  return `mkdir -p ${shellSingleQuote(tmpDir)} && ${guard}`;
+}
+
+/**
+ * Shared remote upload: ensure the gitignore guard, then place the bytes through
+ * the connector's ONE byte primitive (`putFile`) — no upload-specific write
+ * command. The path comes from `buildPaths` (single-sourced `.tmp/shelf` layout).
+ * Each remote connector supplies its `bin`, an `execArgs` wrapper, and its own
+ * `putFile`, so the per-connection branching stays in `putFile` alone.
+ */
+export async function remoteUploadFile(
+  bin: string,
+  execArgs: (cmd: string) => string[],
+  putFile: (remotePath: string, buffer: Buffer) => Promise<void>,
+  cwd: string,
+  filename: string,
+  buffer: Buffer,
+): Promise<string> {
+  assertSafeCwd(cwd);
+  const { remotePath } = buildPaths(cwd, filename);
+  await spawnRemoteCmd(bin, execArgs(buildGitignoreGuardCmd(cwd)), `${bin} gitignore`);
+  await putFile(remotePath, buffer);
+  return remotePath;
 }
 
 /**

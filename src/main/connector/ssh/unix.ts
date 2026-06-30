@@ -8,8 +8,8 @@ import { wrapPty } from '../wrap-pty';
 import { getShellEnv, shellEscape } from '../shell-env';
 import { getControlPath, checkConnection, getKnownHostsPath } from '../../ssh-control';
 import {
-  assertSafeCwd, buildPaths, parseUploadPrefix, normalizeCwd, REL_DIR,
-  shellSingleQuote, buildRemoteUploadCmd, buildRemotePutCmd, spawnPipeWrite,
+  assertSafeCwd, parseUploadPrefix, normalizeCwd, REL_DIR,
+  shellSingleQuote, remoteUploadFile, buildRemotePutCmd, spawnPipeWrite,
   listRemoteShelfDir, removeRemoteFiles, sizeRemoteShelfDir,
 } from '../file-utils';
 
@@ -194,16 +194,7 @@ export class SSHUnixConnector implements Connector {
   // ── File transfer ──
 
   uploadFile(cwd: string, filename: string, buffer: Buffer): Promise<string> {
-    assertSafeCwd(cwd);
-    const { remoteDir, remotePath } = buildPaths(cwd, filename);
-    const cmd = buildRemoteUploadCmd(cwd, remoteDir, remotePath);
-    return spawnPipeWrite(
-      'ssh',
-      this.sshExecArgs([cmd]),
-      buffer,
-      remotePath,
-      'ssh upload',
-    );
+    return remoteUploadFile('ssh', (cmd) => this.sshExecArgs([cmd]), (p, b) => this.putFile(p, b), cwd, filename, buffer);
   }
 
   async putFile(remotePath: string, buffer: Buffer): Promise<void> {

@@ -12,7 +12,7 @@ vi.mock('./index', () => ({
   createConnector: () => ({ homePath, putFile }),
 }));
 
-const { transportPut, composeRemotePath } = await import('./transport');
+const { transportPut, transportPutDir, composeRemotePath } = await import('./transport');
 
 const conn = { type: 'ssh' } as unknown as Connection;
 let tmpDir: string;
@@ -50,6 +50,47 @@ describe('transportPut', () => {
   it('throws on an unknown type (closed allowlist) before any transfer', async () => {
     await expect(
       transportPut(conn, { type: 'bogus' as any, context: { appId: 'a' }, source: { localPath: srcFile } }),
+    ).rejects.toThrow(/Unknown shelf file type/);
+    expect(putFile).not.toHaveBeenCalled();
+  });
+
+  it('accepts an in-memory buffer source (no temp file)', async () => {
+    await transportPut(conn, { type: 'mcp', context: { appId: 'app-1' }, source: { buffer: Buffer.from('inline') } });
+    const [dest, buffer] = putFile.mock.calls[0] as unknown as [string, Buffer];
+    expect(dest).toBe('/home/worker/.shelf/apps/app-1/mcp-servers.json');
+    expect(buffer.toString()).toBe('inline');
+  });
+});
+
+describe('transportPutDir', () => {
+  it('resolves home ONCE then putFiles each file under the type dir', async () => {
+    fs.mkdirSync(path.join(tmpDir, 'sub'));
+    const a = path.join(tmpDir, 'SKILL.md');
+    const b = path.join(tmpDir, 'sub', 'script.sh');
+    fs.writeFileSync(a, 'skill-a');
+    fs.writeFileSync(b, 'script-b');
+
+    await transportPutDir(conn, {
+      type: 'skill',
+      context: { appId: 'app-1' },
+      files: [
+        { rel: 'SKILL.md', localPath: a },
+        { rel: 'sub/script.sh', localPath: b },
+      ],
+    });
+
+    expect(homePath).toHaveBeenCalledTimes(1); // base resolved once, not per file
+    expect(putFile).toHaveBeenCalledTimes(2);
+    const calls = putFile.mock.calls as unknown as Array<[string, Buffer]>;
+    expect(calls[0][0]).toBe('/home/worker/.shelf/apps/app-1/skills/SKILL.md');
+    expect(calls[0][1].toString()).toBe('skill-a');
+    expect(calls[1][0]).toBe('/home/worker/.shelf/apps/app-1/skills/sub/script.sh');
+    expect(calls[1][1].toString()).toBe('script-b');
+  });
+
+  it('throws on an unknown type before any transfer', async () => {
+    await expect(
+      transportPutDir(conn, { type: 'bogus' as any, context: { appId: 'a' }, files: [] }),
     ).rejects.toThrow(/Unknown shelf file type/);
     expect(putFile).not.toHaveBeenCalled();
   });

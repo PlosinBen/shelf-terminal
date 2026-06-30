@@ -19,7 +19,7 @@ const {
   makePrefix,
   parseUploadPrefix,
   assertSafeCwd,
-  buildRemoteUploadCmd,
+  buildGitignoreGuardCmd,
 } = __test__;
 
 const LOCAL = { type: 'local' as const };
@@ -186,34 +186,26 @@ describe('assertSafeCwd', () => {
   });
 });
 
-describe('buildRemoteUploadCmd', () => {
-  it('chains mkdir, gitignore guard, and cat with single-quoted paths', () => {
-    const cmd = buildRemoteUploadCmd(
-      '/srv/proj',
-      '/srv/proj/.tmp/shelf',
-      '/srv/proj/.tmp/shelf/abc-x.txt',
-    );
+describe('buildGitignoreGuardCmd', () => {
+  it('mkdirs .tmp and writes the non-clobber gitignore guard with single-quoted paths', () => {
+    const cmd = buildGitignoreGuardCmd('/srv/proj');
     expect(cmd).toBe(
-      `mkdir -p '/srv/proj/.tmp/shelf' && { [ -f '/srv/proj/.tmp/.gitignore' ] || printf '*\\n' > '/srv/proj/.tmp/.gitignore'; } && cat > '/srv/proj/.tmp/shelf/abc-x.txt'`,
+      `mkdir -p '/srv/proj/.tmp' && { [ -f '/srv/proj/.tmp/.gitignore' ] || printf '*\\n' > '/srv/proj/.tmp/.gitignore'; }`,
     );
   });
 
-  it('groups the gitignore guard so mkdir failure does not still run printf', () => {
-    // The brace group { ... } turns "mkdir && [ -f ] || printf && cat" into
-    // "mkdir && (gitignore-stuff) && cat" — without it the `||` breaks the chain.
-    const cmd = buildRemoteUploadCmd('/x', '/x/.tmp/shelf', '/x/.tmp/shelf/a-b.txt');
-    expect(cmd).toMatch(/&& \{ \[ -f .+ \] \|\| printf .+; \} && cat /);
+  it('groups the guard so mkdir failure does not still run printf', () => {
+    // The brace group { ... } turns "mkdir && [ -f ] || printf" into
+    // "mkdir && (gitignore-stuff)" — without it the `||` breaks the chain.
+    const cmd = buildGitignoreGuardCmd('/x');
+    expect(cmd).toMatch(/^mkdir -p .+ && \{ \[ -f .+ \] \|\| printf .+; \}$/);
   });
 
   it('quotes paths that contain spaces and apostrophes', () => {
-    const cmd = buildRemoteUploadCmd(
-      `/home/user/My Proj's`,
-      `/home/user/My Proj's/.tmp/shelf`,
-      `/home/user/My Proj's/.tmp/shelf/abc-x.txt`,
-    );
+    const cmd = buildGitignoreGuardCmd(`/home/user/My Proj's`);
     // POSIX single-quote escape pattern: ' → '\''
-    expect(cmd).toContain(`mkdir -p '/home/user/My Proj'\\''s/.tmp/shelf'`);
-    expect(cmd).toContain(`cat > '/home/user/My Proj'\\''s/.tmp/shelf/abc-x.txt'`);
+    expect(cmd).toContain(`mkdir -p '/home/user/My Proj'\\''s/.tmp'`);
+    expect(cmd).toContain(`'/home/user/My Proj'\\''s/.tmp/.gitignore'`);
   });
 });
 

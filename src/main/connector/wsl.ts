@@ -7,7 +7,7 @@ import type { Connector, Shell, ExecResult } from './types';
 import { wrapPty } from './wrap-pty';
 import { shellEscape } from './shell-env';
 import {
-  assertSafeCwd, buildPaths, parseUploadPrefix, buildRemoteUploadCmd, buildRemotePutCmd,
+  assertSafeCwd, parseUploadPrefix, remoteUploadFile, buildRemotePutCmd,
   spawnPipeWrite, listRemoteShelfDir, removeRemoteFiles, sizeRemoteShelfDir,
 } from './file-utils';
 
@@ -99,12 +99,7 @@ export class WSLConnector implements Connector {
   }
 
   uploadFile(cwd: string, filename: string, buffer: Buffer): Promise<string> {
-    assertSafeCwd(cwd);
-    const { remoteDir, remotePath } = buildPaths(cwd, filename);
-    const cmd = buildRemoteUploadCmd(cwd, remoteDir, remotePath);
-    return spawnPipeWrite(
-      'wsl.exe', this.wslExecArgs(cmd), buffer, remotePath, 'wsl upload',
-    );
+    return remoteUploadFile('wsl.exe', (cmd) => this.wslExecArgs(cmd), (p, b) => this.putFile(p, b), cwd, filename, buffer);
   }
 
   async putFile(remotePath: string, buffer: Buffer): Promise<void> {

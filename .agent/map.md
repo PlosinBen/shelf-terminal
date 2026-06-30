@@ -55,10 +55,10 @@ title: shelf-terminal — Intent → File Index
 |--------|------|------|
 | Factory + 匯出 | `index.ts` | `createConnector(connection)` factory + type 列舉 + cleanup |
 | 介面定義 | `types.ts` | `Connector`（含 `putFile`）/ `Shell` / `Disposable` / `ExecResult` 介面 |
-| 型別宣告傳輸 | `transport.ts` | `transportPut`：宣告 type → `shelfPlacement` → worker `homePath()` → `connector.putFile`（見 `architecture/transport`） |
+| 型別宣告傳輸 | `transport.ts` | `transportPut`（單檔，source = localPath/buffer）+ `transportPutDir`（多檔樹，解析 home 一次）→ `shelfPlacement` → worker `homePath()` → `connector.putFile`（見 `architecture/transport`） |
 | PTY wrapper | `wrap-pty.ts` | 將 node-pty 包成 `Shell` 介面 |
 | Shell 環境解析 | `shell-env.ts` | macOS/Linux GUI app 的 login shell env 修正 |
-| 檔案操作工具 | `file-utils.ts` | 跨 connector 共用的上傳/清理/目錄操作 + `buildRemotePutCmd`（generic placement） |
+| 檔案操作工具 | `file-utils.ts` | 跨 connector 共用的清理/目錄操作 + `buildRemotePutCmd`（generic placement）+ `remoteUploadFile`/`buildGitignoreGuardCmd`（upload 疊在 `putFile` 上）|
 | Local (Unix) | `local/unix.ts` | macOS/Linux 本機 connector |
 | Local (Win32) | `local/win32.ts` | Windows 本機 connector |
 | SSH (Unix) | `ssh/unix.ts` | macOS/Linux SSH connector（ControlMaster） |
@@ -72,7 +72,7 @@ title: shelf-terminal — Intent → File Index
 | Intent | File | Role |
 |--------|------|------|
 | Session manager + IPC handlers | `index.ts` | `initAgentManager()`：註冊 agent IPC、管理 tab→session、permission bridging |
-| Remote backend | `remote.ts` | `createRemoteBackend()`：JSON line protocol 跟 agent-server 通訊 + 自帶 node/provider 部署 |
+| Remote backend | `remote.ts` | `createRemoteBackend()`：JSON line protocol 跟 agent-server 通訊 + 自帶 node/provider 部署；`syncSkillsToRemote` 走 transport `transportPutDir`（ssh tilde gotcha 見 `context/connector` connector#6）；bundle deploy 仍走 `RemoteOps.copyIn` |
 | Turn dispatcher | `turn-dispatcher.ts` | 純邏輯 event router，按 turnId 路由 wire events 到對應 turn 的 generator |
 | Type 定義 | `types.ts` | `AgentBackend` / `AgentEvent` / `AgentSessionState` 等系統型別 |
 | 連線健康（heartbeat RTT） | `connection-health.ts` | `ConnectionHealthTracker` 純狀態機：心跳 RTT → healthy/slow/unstable/dead |
@@ -208,6 +208,7 @@ title: shelf-terminal — Intent → File Index
 | `test:e2e` | Playwright E2E 測試（自動 build，NODE_ENV=test 隔離 userData） |
 | `test:docker` | Docker connector E2E 測試 |
 | `test:ssh` | SSH connector E2E 測試 |
+| `test:wsl` | WSL connector E2E 測試（Windows-host-only；起 `wsl` project，需 wsl.exe） |
 | `pack` | build + `electron-builder --dir`，產出 unpackaged app |
 | `dist` | build + `electron-builder`，產出 packaged installer |
 | `dist:mac` | 同 `dist`，限 macOS |
@@ -229,6 +230,8 @@ title: shelf-terminal — Intent → File Index
 | E2E 測試 | `e2e/init-script.spec.ts` | Init script 不重複顯示 |
 | Connector 測試 | `e2e/connector/ssh.spec.ts` | SSH connect/multiplex/file upload + clearUploads |
 | Connector 測試 | `e2e/connector/docker.spec.ts` | Docker exec spawn / file upload / clearUploads |
+| Connector 測試 | `e2e/connector/wsl.spec.ts` | WSL file upload + clearUploads（Windows-only `wsl` project，`test.skip` 非 win32）|
+| Connector 測試 | `e2e/local-upload.spec.ts` | Local connector upload：落地 `.tmp/shelf` + non-clobber `.gitignore`（預設 `e2e` project，到處跑）|
 | 單元測試 | `src/main/updater-state.test.ts` | Updater reducer 21 個 transition 測試 |
 | 單元測試 | `src/main/file-transfer.test.ts` | 純函式 + local fs 行為 |
 | 單元測試 | `src/main/user-data-path.test.ts` | `applyUserDataIsolation()` 五個分支 |

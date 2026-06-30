@@ -102,14 +102,17 @@ export function initAgentManager(windowGetter: () => BrowserWindow | null): void
     // sessions. Skip reload when the file sync failed — we'd only reload stale.
     const remote = live.filter((s) => s.connection.type !== 'local');
     if (remote.length === 0) return;
-    setImmediate(() => {
+    setImmediate(async () => {
       const syncOk = new Map<string, boolean>();
       for (const s of remote) {
         const key = JSON.stringify(s.connection);
         if (!syncOk.has(key)) {
           let ok = true;
           try {
-            syncSkillsForConnection(s.connection);
+            // Await: syncSkillsForConnection now places bytes via the async
+            // transport. The reload below must not fire before the sync lands
+            // (skills#9 — reloading stale files defeats the purpose).
+            await syncSkillsForConnection(s.connection);
           } catch (err: any) {
             ok = false;
             log.error('agent', `skills resync failed for ${s.connection.type}: ${err?.message ?? err}`);
