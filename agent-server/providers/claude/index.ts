@@ -652,7 +652,8 @@ export function createClaudeBackend(): ServerBackend {
     // App-level user MCP servers (our blocks map 1:1 onto Claude's McpServerConfig
     // stdio/http shapes). Fail-loud: surface load problems, don't swallow. The
     // in-process `shelf` bridge is added LAST so a user-named "shelf" can't clobber
-    // it. Host-native MCP is intentionally NOT loaded (run clean).
+    // it. Native MCP is NOT in this map — the SDK loads it independently via
+    // settingSources-omitted (raw-CLI parity, PRODUCT.md #5); app-level is additive.
     const userMcp = loadProjectedMcpServers(appId);
     for (const e of userMcp.errors) serverLog('warn', 'claude', `MCP config: ${e}`);
     (options as any).mcpServers = { ...userMcp.servers, shelf: getShelfMcpServer() };

@@ -439,7 +439,8 @@ export function createCopilotBackend(): ServerBackend {
     // SEPARATE from the in-process `shelf` bridge (which is `config.tools` below),
     // so there's no merge/clobber concern here. Copilot's shape differs from ours:
     // `tools` is required (`['*']` = expose all) and stdio `args` is required.
-    // Fail-loud: surface load problems. Host-native MCP is NOT loaded (run clean).
+    // Fail-loud: surface load problems. Native MCP coexists (additive — Copilot
+    // discovers it via enableConfigDiscovery; app-level does not suppress it).
     const userMcp = loadProjectedMcpServers(currentAppId);
     for (const e of userMcp.errors) serverLog('warn', 'copilot', `MCP config: ${e}`);
     const mappedMcp: Record<string, any> = {};
