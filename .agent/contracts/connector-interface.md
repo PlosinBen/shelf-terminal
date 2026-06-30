@@ -38,6 +38,7 @@ Every connector implements the `Connector` interface (`src/main/connector/types.
 | `listDir` | `(dirPath: string): Promise<FolderListResult>` | List directory entries for the folder picker. |
 | `homePath` | `(): Promise<string>` | Resolve the target user's home directory. |
 | `uploadFile` | `(cwd: string, filename: string, buffer: Buffer): Promise<string>` | Write `buffer` into `<cwd>/.tmp/shelf/`; returns the target-side path. |
+| `putFile` | `(remotePath: string, buffer: Buffer): Promise<void>` | Write `buffer` to an ABSOLUTE target path (mkdir parents). Generic placement for control-plane files (e.g. `~/.shelf/apps/<id>/mcp-servers.json`); used by the type-declared transport (`architecture/transport`). Distinct from `uploadFile` (hardwired to `.tmp/shelf/`). Not exposed over IPC. |
 | `cleanupSession` | `(cwd: string, cutoffMs: number): Promise<number>` | Remove staged uploads older than `cutoffMs`; returns count removed. |
 | `clearUploads` | `(cwd: string): Promise<number>` | Remove all staged uploads under `cwd`; returns count removed. |
 | `getUploadsSize` | `(cwd: string): Promise<{ totalBytes: number; fileCount: number }>` | Size/count of `<cwd>/.tmp/shelf/` for Project Edit display; returns zeros on any failure (no error distinction). |

@@ -13,11 +13,15 @@ title: shelf-terminal — Intent → File Index
 |--------|------|------|
 | App lifecycle, IPC wiring | `index.ts` | app/window 啟動、`registerAllIpcHandlers()` 一次註冊、PM/Agent/updater 接線與 quit cleanup 的中樞 |
 | 共享 app 狀態 | `app-state.ts` | `mainWindow` / `cachedProjects` / `cachedSettings` 的 getter/setter，index 與 ipc 共用單一來源 |
-| IPC handler（按領域分檔） | `ipc/` (`index.ts` + `pty`/`project`/`connector`/`git`/`file-transfer`/`dialog`/`settings`/`logs`/`web`/`notes`/`skills`/`updater`/`pm`) | 各檔 export `registerXxxHandlers()`，`ipc/index.ts` 匯總註冊 |
+| IPC handler（按領域分檔） | `ipc/` (`index.ts` + `pty`/`project`/`connector`/`git`/`file-transfer`/`dialog`/`settings`/`logs`/`web`/`notes`/`skills`/`mcp`/`updater`/`pm`) | 各檔 export `registerXxxHandlers()`，`ipc/index.ts` 匯總註冊 |
 | App 層 Agent Skills（CRUD + lock） | `skills-store.ts` | `<userData>/skills/` 下 app 層 skill 的檔案 CRUD + frontmatter 驗證 + lock marker |
 | Skills 變更後處理（統一 pipeline） | `skills-sync.ts` | `onSkillsChanged()`：任何 skill mutation 後的單一出口（re-project + subscribers + 通知 renderer） |
 | App-tool bridge（main 端 dispatcher） | `agent/app-tool.ts` | `handleAppTool(op,args)` 把 agent-server 的 `app_tool` 請求轉成 client-owned 資源動作的純 dispatcher |
 | Skills 投影（local + hash） | `skills-projection.ts` | `projectSkillsLocal` mirror skills 到 `~/.shelf/apps/<appId>/skills` + hash helper |
+| App 層 MCP config store | `mcp-store.ts` | `<userData>/mcp-servers.json`（keyed object）的同步 CRUD + 驗證（web-grants 風格，opaque 不碰 secret） |
+| MCP 變更後處理（sibling pipeline） | `mcp-sync.ts` | `onMcpChanged()`：re-project + subscribers + `MCP_CHANGED`；**不**呼叫 `onSkillsChanged()` |
+| MCP 投影（local + hash） | `mcp-projection.ts` | `projectMcpLocal` 寫單一 `mcp-servers.json` 到 `~/.shelf/apps/<appId>/` + touch heartbeat + `hashMcpConfig` |
+| MCP 遠端同步 | `mcp-remote.ts` | `syncMcpForConnection`：client-side hash-gate + transport 放到 worker（local no-op） |
 | App-instance id | `app-instance-id.ts` | `getAppInstanceId()`：`<userData>/app-instance-id` 的 generate-once 穩定 UUID |
 | 自訂 application menu (wiring) | `app-menu.ts` | `buildAppMenu()` 串 electron `Menu.buildFromTemplate`（mac only） |
 | Application menu template | `app-menu-template.ts` | 純函式回傳 `MenuItemConstructorOptions[]` 的選單資料 |
@@ -50,10 +54,11 @@ title: shelf-terminal — Intent → File Index
 | Intent | File | Role |
 |--------|------|------|
 | Factory + 匯出 | `index.ts` | `createConnector(connection)` factory + type 列舉 + cleanup |
-| 介面定義 | `types.ts` | `Connector` / `Shell` / `Disposable` / `ExecResult` 介面 |
+| 介面定義 | `types.ts` | `Connector`（含 `putFile`）/ `Shell` / `Disposable` / `ExecResult` 介面 |
+| 型別宣告傳輸 | `transport.ts` | `transportPut`：宣告 type → `shelfPlacement` → worker `homePath()` → `connector.putFile`（見 `architecture/transport`） |
 | PTY wrapper | `wrap-pty.ts` | 將 node-pty 包成 `Shell` 介面 |
 | Shell 環境解析 | `shell-env.ts` | macOS/Linux GUI app 的 login shell env 修正 |
-| 檔案操作工具 | `file-utils.ts` | 跨 connector 共用的上傳/清理/目錄操作 |
+| 檔案操作工具 | `file-utils.ts` | 跨 connector 共用的上傳/清理/目錄操作 + `buildRemotePutCmd`（generic placement） |
 | Local (Unix) | `local/unix.ts` | macOS/Linux 本機 connector |
 | Local (Win32) | `local/win32.ts` | Windows 本機 connector |
 | SSH (Unix) | `ssh/unix.ts` | macOS/Linux SSH connector（ControlMaster） |
@@ -86,6 +91,7 @@ title: shelf-terminal — Intent → File Index
 | Turn 路由（claude） | `providers/claude/turn-router.ts` | 純 attribution 狀態機，按順序把 message 分 foreground/server/task lane |
 | Provider 純 helper（copilot） | `providers/copilot/helpers.ts` | copilot/index 抽出的純函式 + types（只被 copilot/ 引用） |
 | Provider 共用 helper | `providers/shared.ts` | `stripCwd` / `resolveSkillsPluginRoot` — 跨 provider 共用純函式 |
+| MCP config 消費（解析 + ${VAR}） | `providers/mcp-config.ts` | `loadProjectedMcpServers`：讀 projected `mcp-servers.json` → 驗證 → 對 worker env 展開 `${VAR}` → fail-loud（兩 provider 共用） |
 | App-tool bridge（agent-server 端） | `app-tool-client.ts` + `app-tool-tools.ts` | in-process MCP 工具的共用 body：`callMain` + `runBridgeTool` + 描述常數 |
 | Log proxy → main | `server-logger.ts` | `serverLog(level,tag,msg,...args)`：args 源頭 flatten 後走 wire `log` 訊息回 main（agent-server 無獨立 observability，見 `contracts/agent-wire-protocol`） |
 | ~/.shelf 清理（heartbeat-lease） | `cleanup.ts` | `runCleanupSweep()` 啟動時按 `.heartbeat` lease 回收 version/appId 殘留 |
@@ -135,6 +141,7 @@ title: shelf-terminal — Intent → File Index
 | Web tab（登入 surface + 瀏覽） | `components/WebTabView.tsx` | `<webview partition=persist:web>` + 網址列 + identity chip；人在這登入內網服務 |
 | Web.fetch 授權 popup | `components/WebPermissionPrompt.tsx` | app 層全域 popup，防偽 origin 顯示 + allow once/always/deny（由 `web:permission-request` 驅動） |
 | Web session/grant 管理 | `components/settings/WebSettingsTab.tsx` | Settings → Web 分頁：已登入 session 清單(刪) + grant whitelist(per-project 分組、revoke) |
+| App 層 MCP server 管理 | `components/settings/McpSettingsTab.tsx` | Settings → MCP 分頁：list + per-transport 新增/編輯(stdio/http)、rename、`?` scope help |
 | 選擇面板 | `components/SelectionPanel.tsx` | Bottom-anchored 單題 N-way 選單，permission popup + config picker 共用 |
 | Picker 面板 | `components/PickerPanel.tsx` | Bottom-anchored 多題互動 form（AskUserQuestion / elicitation 共用） |
 | Bottom bar（全寬 app footer） | `components/BottomBar.tsx` | App 層全寬狀態列：service type/cwd + 版號更新 widget + Projects/PM/Notes/DevTools toggle |
@@ -171,6 +178,8 @@ title: shelf-terminal — Intent → File Index
 |--------|------|------|
 | Type 定義 | `types.ts` | Connection / ProjectConfig / AppSettings / PM types / IPC payloads |
 | IPC channel 常數 | `ipc-channels.ts` | 所有 IPC channel name 常數 |
+| App 層 MCP 型別 + 驗證 | `mcp.ts` | `McpServerBlock`/`McpServersFile` + 純 validator(main store 與 agent-server loader 共用，不 pull electron） |
+| Shelf 檔案 placement 規則 | `shelf-paths.ts` | `shelfPlacement(type,ctx)` closed allowlist + `ShelfFileType*` 常數(transport 與 agent-server 共用單一路徑規則） |
 | Logger | `logger.ts` | 統一 log 模組，支援 file writer / log level / env override |
 | 預設值 | `defaults.ts` | DEFAULT_SETTINGS, DEFAULT_KEYBINDINGS |
 | Slash prefix parser | `slash-prefix.ts` | `parseSlashPrefix(prompt)`，provider + renderer 同份 |

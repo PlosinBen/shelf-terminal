@@ -20,4 +20,5 @@ Decisions + gotchas grouped by topic. Cited from code as `<topic>#N`.
 | 連線健康 | [connection-health](connection-health.md) | ping/pong heartbeat、idle-shutdown watchdog |
 | 部署 / 投影 | [deployment](deployment.md) | `~/.shelf/` taxonomy、cp-to-remote 投影、agent-server bundle |
 | app 層 skills | [skills](skills.md) | 開放標準 + 投影、bridge、hot-reload、lock |
+| app 層 MCP servers | [mcp](mcp.md) | additive-on-native、keyed-object opaque、sibling pipeline、reconnect 通知、heartbeat lease、scope 傳達 |
 | Web tab + agent web.fetch | [web-tab](web-tab.md) | 網路身分跟 connection、per-origin grant gate、webview hardening、away/timeout |

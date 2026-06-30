@@ -122,6 +122,19 @@ App-level Agent Skills (one folder per skill under userData).
 | `setLocked(name, locked: boolean)` | invoke `skills:set-locked` |
 | `onChanged(cb())` | recv `skills:changed` → unsubscribe fn (manager UI or agent bridge mutated skills) |
 
+## mcp (`shelfApi.mcp`)
+
+App-level MCP servers (`<userData>/mcp-servers.json`, keyed object). See `context/mcp`. `McpServerBlock` types in `src/shared/mcp.ts`.
+
+| Method | Shape |
+|--------|-------|
+| `list()` | invoke `mcp:list` → `Record<name, McpServerBlock>` |
+| `get(name)` | invoke `mcp:get` → `McpServerBlock \| null` |
+| `add(name, block)` | invoke `mcp:add` → `{ ok, name?, error? }` |
+| `update(name, block, nextName?)` | invoke `mcp:update` → `{ ok, name?, error? }` (`nextName` renames) |
+| `remove(name)` | invoke `mcp:remove` |
+| `onChanged(cb())` | recv `mcp:changed` → unsubscribe fn (config mutated) |
+
 ## web (`shelfApi.web`)
 
 Manage the shared web session + the app-global `web.fetch` permission popup. See `context/web-tab`. The `<webview>` itself uses the `persist:web` partition directly (it is not an IPC channel); these methods are the management + permission surface only.

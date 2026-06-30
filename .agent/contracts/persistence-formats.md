@@ -80,12 +80,19 @@ The on-disk artifacts Shelf persists and their layout. Two roots: `<userData>` (
 - `pm-history.json` — JSON `{ chat: ChatMessage[], display: PmMessage[] }`. Source: `src/main/pm/history-store.ts`.
 - `pm-global-note.md` — plain markdown (global PM note). Source: `src/main/pm/note-store.ts` (`readGlobalNote` / `writeGlobalNote`).
 - `runtime-cache/<targetId>/…` — host-side cache of extracted Node + CLI binaries per arch×libc target. Source: `src/main/agent/deploy-layout.ts` (`cacheDir` / `cachedNodeBin` / `cachedClaudeBin` / `cachedCopilotBin`).
+- `mcp-servers.json` — app-level MCP servers. **Keyed object** `Record<name, McpServerBlock>` (NOT an array, NOT wrapped in `mcpServers`): `{ "<name>": {type:'stdio',command,args?,env?} | {type:'http',url,headers?} }`. Name is the key. Stored opaque — `env`/`headers` may hold literal tokens or `${VAR}` refs (resolved later on the worker). Types + validators: `src/shared/mcp.ts`. CRUD: `src/main/mcp-store.ts`. See `context/mcp` (mcp#3).
 
 ## `~/.shelf/apps/<appId>/skills/` — per-app skills projection
 
 - **Path**: `os.homedir()/.shelf/apps/<appId>/skills/` (`<appId>` = `app-instance-id`)
 - **Format**: a **whole-tree mirror** of `<userData>/skills/` (same plugin layout above). Projection is wipe-and-copy (covers deletes/renames for free); the projection is disposable, the `<userData>` source is the only truth. A sibling `~/.shelf/apps/<appId>/.heartbeat` lease file is touched on projection so the agent-server cleanup sweep doesn't reclaim a just-projected dir.
 - **Source of truth**: `src/main/skills-projection.ts` (`localSkillsTarget` / `projectSkillsLocal`). This is the L2 (local) transport; L3 swaps the fs copy for scp/docker cp/wsl, with a content-hash `.synced` sentinel gating remote re-sync (`hashSkillsTree`). The agent-server always reads this path with zero local/remote branching (see `context/deployment` deployment#1).
+
+## `~/.shelf/apps/<appId>/mcp-servers.json` — per-app MCP config projection
+
+- **Path**: `os.homedir()/.shelf/apps/<appId>/mcp-servers.json` — the落點由 SHARED `shelfPlacement('mcp', {appId})` 決定(`src/shared/shelf-paths.ts`),placement 端與讀取端共用同一規則。
+- **Format**: a copy of `<userData>/mcp-servers.json` (same keyed-object schema above). **UNLIKE skills 投影樹**:agent-server 不讓 SDK 自動讀,而是 session-create 時**讀+解析**這份檔組成 SDK `mcpServers` 參數(`agent-server/providers/mcp-config.ts`)。`${VAR}` 在此對 worker env 展開。
+- **Source of truth**: local = `src/main/mcp-projection.ts` (`projectMcpLocal`);remote = `src/main/mcp-remote.ts` (`syncMcpForConnection`) 經 type-declared transport(`architecture/transport`)。app-dir `.heartbeat` lease 由 deploy 持有(`context/mcp` mcp#6)。
 
 ## `~/.shelf/agent-context/<sessionId>.json` — agent session context
 
