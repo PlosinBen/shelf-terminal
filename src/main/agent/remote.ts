@@ -581,6 +581,12 @@ async function deployAgentServer(connection: Connection, provider: AgentProvider
   else throw new Error(`Unsupported connection type for deploy: ${(connection as any).type}`);
 
   const result = await deploySelfContained(connection, ops, providerBin);
+  // Hold the app-dir lease up front so the agent-server startup sweep doesn't
+  // reclaim it before the first heartbeat — UNCONDITIONALLY, not contingent on
+  // skills existing (syncSkillsToRemote only touches it when there are skills, so
+  // an MCP-only app would otherwise lose its just-placed config to the sweep).
+  const appDir = `${ops.base}/.shelf/apps/${getAppInstanceId()}`;
+  try { ops.exec(`mkdir -p "${appDir}"; touch "${appDir}/.heartbeat"`); } catch { /* best-effort */ }
   syncSkillsToRemote(ops, getAppInstanceId());
   // Place the app-level MCP config too (new type-declared transport, not RemoteOps).
   // The link is established here, so the transport's ssh calls reuse the
