@@ -17,6 +17,7 @@ import { DevToolsPanel } from './components/DevToolsPanel';
 import { PmView } from './components/PmView';
 import { NotesView } from './components/NotesView';
 import { SkillsView } from './components/SkillsView';
+import { McpView } from './components/McpView';
 import { QuickNoteOverlay } from './components/QuickNoteOverlay';
 import { useKeybindings } from './hooks/useKeybindings';
 import { useStore, setProjects, setSettings, setUpdateStatus, addProject, addTab, setActiveTab, removeTab, removeProject, setSplitTab, clearUnread, setInvalidProjects, setPmActive, setConnectionHealth } from './store';
@@ -32,7 +33,7 @@ import { clearAgentSession } from './storage/agent-history';
 import './styles/global.css';
 
 export function App() {
-  const { projects, activeProjectIndex, sidebarVisible, settingsVisible, commandPickerVisible, devToolsVisible, notesVisible, skillsVisible, editingProjectIndex, settings, pmVisible, awayMode } = useStore();
+  const { projects, activeProjectIndex, sidebarVisible, settingsVisible, commandPickerVisible, devToolsVisible, notesVisible, skillsVisible, mcpVisible, editingProjectIndex, settings, pmVisible, awayMode } = useStore();
   useKeybindings();
 
   useEffect(() => {
@@ -394,6 +395,7 @@ export function App() {
         {pmVisible && <PmView />}
         {notesVisible && <NotesView />}
         {skillsVisible && <SkillsView />}
+        {mcpVisible && <McpView />}
         {devToolsVisible && <DevToolsPanel />}
       </main>
       </div>

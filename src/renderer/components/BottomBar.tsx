@@ -2,7 +2,7 @@ import React from 'react';
 import { useStore, toggleProjectList, toggleRightSidebar } from '../store';
 import { tooltipWithShortcut } from '../utils/format-keybinding';
 import { isMac } from '../hooks/useKeybindings';
-import { PanelLeftIcon, PaperPlaneIcon, NoteIcon, CodeIcon, SkillIcon } from './icons';
+import { PanelLeftIcon, PaperPlaneIcon, NoteIcon, CodeIcon, SkillIcon, McpIcon } from './icons';
 import type { Connection } from '@shared/types';
 
 const version = __APP_VERSION__;
@@ -31,6 +31,7 @@ export function BottomBar() {
     pmVisible,
     notesVisible,
     skillsVisible,
+    mcpVisible,
     devToolsVisible,
     awayMode,
     updateStatus,
@@ -51,6 +52,8 @@ export function BottomBar() {
         )}
       </div>
       <div className="bottom-bar-right">
+        {/* Group 1 — version + updater */}
+        <span className="bottom-bar-group">
         <span className="bottom-bar-version">v{version}</span>
         {updateStatus.state === 'idle' && (
           <button
@@ -93,8 +96,12 @@ export function BottomBar() {
             &#x21BB;
           </button>
         )}
+        </span>
 
-        <span className="bottom-bar-toggles">
+        <span className="bottom-bar-vsep" aria-hidden="true" />
+
+        {/* Group 2 — left sidebar (project list) */}
+        <span className="bottom-bar-group">
           <button
             className={`right-tab-btn${sidebarVisible ? ' active' : ''}`}
             tabIndex={-1}
@@ -104,6 +111,12 @@ export function BottomBar() {
             <PanelLeftIcon />
             <span className="sr-only">Projects</span>
           </button>
+        </span>
+
+        <span className="bottom-bar-vsep" aria-hidden="true" />
+
+        {/* Group 3 — right sidebar features */}
+        <span className="bottom-bar-group">
           <button
             className={`right-tab-btn${pmVisible ? ' active' : ''}${awayMode ? ' pm-away' : ''}`}
             tabIndex={-1}
@@ -130,6 +143,15 @@ export function BottomBar() {
           >
             <SkillIcon />
             <span className="sr-only">Skills</span>
+          </button>
+          <button
+            className={`right-tab-btn${mcpVisible ? ' active' : ''}`}
+            tabIndex={-1}
+            onClick={() => toggleRightSidebar('mcp')}
+            title="MCP"
+          >
+            <McpIcon />
+            <span className="sr-only">MCP</span>
           </button>
           <button
             className={`right-tab-btn${devToolsVisible ? ' active' : ''}`}

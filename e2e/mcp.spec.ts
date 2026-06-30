@@ -17,33 +17,34 @@ async function setupProject(page: Page) {
   await page.waitForTimeout(500);
 }
 
-async function addMcpServerViaSettings(page: Page, name: string) {
-  await page.locator('.sidebar-btn[title*="Settings"]').click();
-  await page.locator('.settings-tab', { hasText: 'MCP' }).click();
+async function addMcpServerViaView(page: Page, name: string) {
+  await page.locator('.right-tab-btn', { hasText: 'MCP' }).click();
+  await expect(page.locator('.mcp-view')).toBeVisible();
   await page.locator('.mcp-add-btn').click();
   await page.locator('.mcp-form-row', { hasText: 'Name' }).locator('input').fill(name);
   await page.locator('.mcp-form-row', { hasText: 'Command' }).locator('input').fill('npx');
   await page.locator('.mcp-form-save').click();
   await expect(page.locator('.web-list-item', { hasText: name })).toBeVisible();
-  await page.locator('.settings-close').click();
+  // Close the panel (toggle off) so it doesn't sit over the agent view assertions.
+  await page.locator('.mcp-view .notes-close').click();
 }
 
-// Settings → MCP tab: the app-level MCP manager (T1.2). Pure renderer/IPC/store
-// CRUD — no agent needed. Verifies add → list → edit(rename) → remove round-trips
-// through the real mcp-store (writes the test userDataDir's mcp-servers.json).
+// The app-level MCP manager, now a right-sidebar view (opened from the BottomBar,
+// sibling to Skills). Pure renderer/IPC/store CRUD — no agent needed. Verifies
+// add → list → edit(rename) → remove round-trips through the real mcp-store
+// (writes the test userDataDir's mcp-servers.json).
 //
 // Server names are kept distinct from the args summary (and from each other) so
 // `.web-list-item` hasText filters match on the NAME, not the command string.
 
-test('mcp: add, edit (rename), and remove a server via Settings → MCP', async ({ shelfApp }) => {
+test('mcp: add, edit (rename), and remove a server via the MCP view', async ({ shelfApp }) => {
   const { page } = shelfApp;
 
-  // Open Settings → MCP.
-  await page.locator('.sidebar-btn[title*="Settings"]').click();
-  await expect(page.locator('.settings-panel')).toBeVisible();
-  await page.locator('.settings-tab', { hasText: 'MCP' }).click();
-  await expect(page.locator('.web-settings-title', { hasText: 'MCP servers' })).toBeVisible();
-  await expect(page.locator('.web-settings-hint', { hasText: 'No MCP servers configured' })).toBeVisible();
+  // Open the MCP view from the BottomBar.
+  await page.locator('.right-tab-btn', { hasText: 'MCP' }).click();
+  await expect(page.locator('.mcp-view')).toBeVisible();
+  await expect(page.locator('.mcp-view .right-panel-title', { hasText: 'MCP' })).toBeVisible();
+  await expect(page.locator('.mcp-view .web-settings-hint', { hasText: 'No MCP servers configured' })).toBeVisible();
 
   // Add a stdio server named "alpha".
   await page.locator('.mcp-add-btn').click();
@@ -94,7 +95,7 @@ test('mcp: a config change surfaces a "reconnect to apply" line in the live agen
   await expect(page.locator('.agent-turn-response')).toContainText('hello', { timeout: 8_000 });
 
   // Add an MCP server → onMcpChanged → subscriber emits the notice to this tab.
-  await addMcpServerViaSettings(page, 'gamma');
+  await addMcpServerViaView(page, 'gamma');
 
   await expect(page.locator('.agent-msg-system', { hasText: 'reconnect this project to apply' }))
     .toBeVisible({ timeout: 8_000 });

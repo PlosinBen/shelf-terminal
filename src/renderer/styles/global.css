@@ -1907,6 +1907,7 @@ button {
 .bottom-bar-version {
   color: var(--text-muted);
   font-size: 12px;
+  margin-right: 4px;
 }
 
 .bottom-bar-update-btn {
@@ -1941,11 +1942,21 @@ button {
   transition: width 0.15s linear;
 }
 
-.bottom-bar-toggles {
+/* The right cluster is split into three groups — version | left sidebar |
+   right sidebar — separated by .bottom-bar-vsep dividers. Icons within a group
+   stay tight (their own padding spaces them); the parent .bottom-bar-right gap
+   sets the breathing room around each divider. */
+.bottom-bar-group {
   display: inline-flex;
   align-items: center;
   height: 100%;
-  margin-left: 2px;
+}
+
+.bottom-bar-vsep {
+  width: 1px;
+  height: 16px;
+  background: var(--border);
+  flex-shrink: 0;
 }
 
 /* ── Worktree Dialog ── */
@@ -4499,6 +4510,17 @@ button {
   padding: 2px 8px;
 }
 .web-list-action:hover { background: var(--surface); color: var(--text); }
+
+/* ── MCP (right-sidebar view) ── */
+/* The panel shell is shared (.right-panel); this is the scrollable body that
+   hosts the MCP list + add/edit form (the inner .web-list / .mcp-form styles
+   below are reused as-is from when MCP lived in Settings). */
+.mcp-view-body {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+  padding: 12px 16px;
+}
 
 /* ── MCP settings ── */
 .mcp-help-btn {

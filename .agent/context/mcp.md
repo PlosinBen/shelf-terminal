@@ -87,4 +87,14 @@ related:
 - **per-worker fail-loud status**(`/mcp` 卡)是最好的老師:server 在某 worker 起不來就在那個 tab 的 `/mcp` 顯示 failed + 原因。每個 tab 的 `/mcp` 反映它自己 worker 的狀態 → 天然的 per-worker status(`skills#3` 既有的卡片,T2.2 讓 user server 流進去後即成立)。
 - 推論:**不做 per-server「where it runs」override** —— 統一規則「全部在 worker 跑,跟 bash/read/edit 一樣」比 per-server locale 旋鈕好傳達。
 
-**Related**：`skills#3`(`/mcp` 卡)、PRODUCT.md、`src/renderer/components/settings/McpSettingsTab.tsx`。
+**Related**：`skills#3`(`/mcp` 卡)、PRODUCT.md、`src/renderer/components/McpView.tsx`。
+
+## mcp#8 — MCP 管理是「右側欄 view」(Skills 的姊妹)，不是 Settings 分頁  ·  [Decision]
+
+**Background**：MCP 管理 UI 原本埋在 Settings → MCP 分頁，但 app-level MCP 與 app-level skills 是產品心智上的同類(PRODUCT.md #5：兩者都是「App 層、Shelf 加值、跨 project/provider/worker、餵給 agent」)。Skills 在 BottomBar 有獨立右側 view，MCP 卻在 settings —— 同類東西放兩個地方，使用者覺得不一致、不好找。
+
+**Decision**：MCP 管理是 **right-sidebar view**(`McpView`，走既有「右側欄 feature」機制：`RightSidebarFeature` 的 `'mcp'` + `mcpVisible` + `toggleRightSidebar`，跟 PM/Notes/Skills/DevTools 同一套)，從 **BottomBar 插頭 icon** 開，排在 Skills 旁(姊妹相鄰)。**唯一入口** —— Settings 不再有 MCP 分頁(source-of-truth 單一，不留兩個入口)。CRUD 邏輯與 mcp-store/IPC 行為**未變**，只是 host shell 從 settings-body 換成 `.right-panel` 殼(resize/header/close，鏡射 SkillsView)。BottomBar 右側順帶分三組(version｜左側欄｜右側欄)用分隔線區隔，降低一排 icon 的認知負擔。
+
+**Do not change casually because**：別把 MCP 搬回 Settings 分頁、也別讓它同時存在於兩處 —— 一致性(App 層姊妹同處)是使用者主動提的痛點，分裂入口正是要修的問題。判別準則:「使用者會瀏覽/管理、跟 agent 工作流綁的 App 層內容」走 BottomBar 右側 view；純設定才進 Settings。(連線狀態 indicator 仍走 per-tab `/mcp` 卡，見 mcp#7，不在 BottomBar 加 status badge，等真有痛點再說。)
+
+**Related**：`skills`(SkillsView 範本)、PRODUCT.md #1/#2/#5、`src/renderer/components/{McpView,BottomBar}.tsx`、`src/renderer/store.ts`(`RightSidebarFeature`)。
