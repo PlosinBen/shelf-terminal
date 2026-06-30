@@ -1,6 +1,6 @@
 import { ipcMain } from 'electron';
 import { IPC } from '@shared/ipc-channels';
-import type { McpServerConfig } from '@shared/mcp';
+import type { McpServerBlock } from '@shared/mcp';
 import {
   listMcpServers, getMcpServer, addMcpServer, updateMcpServer, removeMcpServer,
 } from '../mcp-store';
@@ -20,14 +20,14 @@ export function registerMcpHandlers(): void {
     return getMcpServer(name);
   });
 
-  ipcMain.handle(IPC.MCP_ADD, async (_event, cfg: McpServerConfig) => {
-    const res = addMcpServer(cfg);
+  ipcMain.handle(IPC.MCP_ADD, async (_event, payload: { name: string; block: McpServerBlock }) => {
+    const res = addMcpServer(payload.name, payload.block);
     if (res.ok) onMcpChanged();
     return res;
   });
 
-  ipcMain.handle(IPC.MCP_UPDATE, async (_event, payload: { name: string; config: McpServerConfig }) => {
-    const res = updateMcpServer(payload.name, payload.config);
+  ipcMain.handle(IPC.MCP_UPDATE, async (_event, payload: { name: string; block: McpServerBlock; nextName?: string }) => {
+    const res = updateMcpServer(payload.name, payload.block, payload.nextName);
     if (res.ok) onMcpChanged();
     return res;
   });

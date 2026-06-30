@@ -1,8 +1,8 @@
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
-import type { McpServerConfig } from '@shared/mcp';
-import { validateMcpServer } from '@shared/mcp';
+import type { McpServerBlock, McpServersFile } from '@shared/mcp';
+import { validateMcpEntry } from '@shared/mcp';
 import { shelfPlacement } from '@shared/shelf-paths';
 
 /**
@@ -69,25 +69,26 @@ function resolveMap(
   return out;
 }
 
-/** Resolve a single server's `${VAR}` refs (in env / headers). Returns the
- *  resolved config + the set of missing var names. Pure. */
+/** Resolve a single server block's `${VAR}` refs (in env / headers). Returns the
+ *  resolved block + the set of missing var names. Pure. */
 export function resolveServerVars(
-  server: McpServerConfig,
+  block: McpServerBlock,
   env: Record<string, string | undefined>,
-): { server: McpServerConfig; missing: string[] } {
+): { block: McpServerBlock; missing: string[] } {
   const missing = new Set<string>();
-  let resolved: McpServerConfig;
-  if (server.type === 'stdio') {
-    resolved = { ...server, env: resolveMap(server.env, env, missing) };
+  let resolved: McpServerBlock;
+  if (block.type === 'stdio') {
+    resolved = { ...block, env: resolveMap(block.env, env, missing) };
   } else {
-    resolved = { ...server, headers: resolveMap(server.headers, env, missing) };
+    resolved = { ...block, headers: resolveMap(block.headers, env, missing) };
   }
-  return { server: resolved, missing: [...missing] };
+  return { block: resolved, missing: [...missing] };
 }
 
 export interface ParsedMcpConfig {
-  /** Validated + `${VAR}`-resolved servers, ready for the provider to shape. */
-  servers: McpServerConfig[];
+  /** Validated + `${VAR}`-resolved servers (name → block), ready for the provider
+   *  to hand to the SDK `mcpServers` record. */
+  servers: McpServersFile;
   /** Human-readable problems (bad JSON, invalid shape, missing env var). Caller
    *  surfaces these fail-loud; servers with missing vars are EXCLUDED. */
   errors: string[];
@@ -102,24 +103,24 @@ export function parseMcpConfig(raw: string, env: Record<string, string | undefin
   try {
     parsed = JSON.parse(raw);
   } catch (err: any) {
-    return { servers: [], errors: [`mcp-servers.json is not valid JSON: ${err?.message ?? err}`] };
+    return { servers: {}, errors: [`mcp-servers.json is not valid JSON: ${err?.message ?? err}`] };
   }
-  if (!Array.isArray(parsed)) {
-    return { servers: [], errors: ['mcp-servers.json is not an array'] };
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return { servers: {}, errors: ['mcp-servers.json is not a keyed object'] };
   }
-  const servers: McpServerConfig[] = [];
-  for (const entry of parsed) {
-    const shapeError = validateMcpServer(entry);
+  const servers: McpServersFile = {};
+  for (const [name, block] of Object.entries(parsed as Record<string, unknown>)) {
+    const shapeError = validateMcpEntry(name, block);
     if (shapeError) {
       errors.push(`Skipping invalid MCP server: ${shapeError}`);
       continue;
     }
-    const { server, missing } = resolveServerVars(entry as McpServerConfig, env);
+    const { block: resolved, missing } = resolveServerVars(block as McpServerBlock, env);
     if (missing.length) {
-      errors.push(`MCP server "${server.name}" references env var(s) not set on this host: ${missing.join(', ')}`);
+      errors.push(`MCP server "${name}" references env var(s) not set on this host: ${missing.join(', ')}`);
       continue;
     }
-    servers.push(server);
+    servers[name] = resolved;
   }
   return { servers, errors };
 }
@@ -131,12 +132,12 @@ export function loadProjectedMcpServers(
   env: Record<string, string | undefined> = process.env,
 ): ParsedMcpConfig {
   const p = resolveMcpConfigPath(appId);
-  if (!p) return { servers: [], errors: [] };
+  if (!p) return { servers: {}, errors: [] };
   let raw: string;
   try {
     raw = fs.readFileSync(p, 'utf-8');
   } catch (err: any) {
-    return { servers: [], errors: [`Failed to read ${p}: ${err?.message ?? err}`] };
+    return { servers: {}, errors: [`Failed to read ${p}: ${err?.message ?? err}`] };
   }
   return parseMcpConfig(raw, env);
 }

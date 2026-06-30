@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import type { McpServerConfig } from '@shared/mcp';
+import type { McpServerBlock } from '@shared/mcp';
 
 // Capture the handlers registered via ipcMain.handle so we can invoke them.
 const handlers = new Map<string, (...a: any[]) => any>();
@@ -26,7 +26,7 @@ vi.mock('../mcp-sync', () => ({
 const { registerMcpHandlers } = await import('./mcp');
 const { IPC } = await import('@shared/ipc-channels');
 
-const cfg: McpServerConfig = { type: 'stdio', name: 'a', command: 'node' };
+const block: McpServerBlock = { type: 'stdio', command: 'node' };
 
 beforeEach(() => {
   handlers.clear();
@@ -40,22 +40,22 @@ beforeEach(() => {
 describe('MCP mutation handlers run the onMcpChanged pipeline on success', () => {
   it('MCP_ADD fires onMcpChanged when the store accepts', async () => {
     addMcpServer.mockReturnValue({ ok: true, name: 'a' });
-    const res = await handlers.get(IPC.MCP_ADD)!({}, cfg);
-    expect(addMcpServer).toHaveBeenCalledWith(cfg);
+    const res = await handlers.get(IPC.MCP_ADD)!({}, { name: 'a', block });
+    expect(addMcpServer).toHaveBeenCalledWith('a', block);
     expect(res.ok).toBe(true);
     expect(onMcpChanged).toHaveBeenCalledTimes(1);
   });
 
   it('MCP_ADD does NOT fire onMcpChanged when the store rejects', async () => {
     addMcpServer.mockReturnValue({ ok: false, error: 'dup' });
-    await handlers.get(IPC.MCP_ADD)!({}, cfg);
+    await handlers.get(IPC.MCP_ADD)!({}, { name: 'a', block });
     expect(onMcpChanged).not.toHaveBeenCalled();
   });
 
-  it('MCP_UPDATE passes name+config and fires on success', async () => {
+  it('MCP_UPDATE passes name+block+nextName and fires on success', async () => {
     updateMcpServer.mockReturnValue({ ok: true, name: 'b' });
-    await handlers.get(IPC.MCP_UPDATE)!({}, { name: 'a', config: { ...cfg, name: 'b' } });
-    expect(updateMcpServer).toHaveBeenCalledWith('a', { ...cfg, name: 'b' });
+    await handlers.get(IPC.MCP_UPDATE)!({}, { name: 'a', block, nextName: 'b' });
+    expect(updateMcpServer).toHaveBeenCalledWith('a', block, 'b');
     expect(onMcpChanged).toHaveBeenCalledTimes(1);
   });
 
