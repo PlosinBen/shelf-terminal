@@ -2,6 +2,7 @@ import fs from 'fs';
 import type { Connection } from '@shared/types';
 import { log } from '@shared/logger';
 import { transportPut } from './connector/transport';
+import { ShelfFileTypeMcp } from '@shared/shelf-paths';
 import { mcpConfigSourcePath, hashMcpConfig } from './mcp-projection';
 import { getAppInstanceId } from './app-instance-id';
 
@@ -33,7 +34,7 @@ export async function syncMcpForConnection(connection: Connection): Promise<void
   const hash = hashMcpConfig(src);
   if (lastSyncHash.get(key) === hash) return; // unchanged since this connection's last sync
   await transportPut(connection, {
-    type: 'mcp',
+    type: ShelfFileTypeMcp,
     context: { appId: getAppInstanceId() },
     source: { localPath: src },
   });

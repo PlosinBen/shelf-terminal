@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { execFileSync, spawnSync } from 'child_process';
 import { spawnPipeWrite, buildRemotePutCmd } from './file-utils';
-import { shelfPlacement } from '@shared/shelf-paths';
+import { shelfPlacement, ShelfFileTypeTest } from '@shared/shelf-paths';
 
 /**
  * Real-container verification of the transport CHANNEL (features/app-level-mcps).
@@ -41,7 +41,7 @@ describe.skipIf(!enabled)('transport channel (docker, real container)', () => {
   it('resolves home on the container, composes the type path, and round-trips bytes', async () => {
     // Home resolved ON the worker — exactly what transportPut does via homePath().
     const home = execFileSync('docker', ['exec', CONTAINER, 'sh', '-c', 'echo $HOME'], { encoding: 'utf8' }).trim();
-    const { base, rel } = shelfPlacement('test', {});
+    const { base, rel } = shelfPlacement(ShelfFileTypeTest, {});
     expect(base).toBe('home');
     const dest = `${home}/${rel}`;
     const payload = Buffer.from('shelf-transport-ok\n');

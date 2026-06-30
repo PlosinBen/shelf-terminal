@@ -3,7 +3,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import type { McpServerBlock, McpServersFile } from '@shared/mcp';
 import { validateMcpEntry } from '@shared/mcp';
-import { shelfPlacement } from '@shared/shelf-paths';
+import { shelfPlacement, ShelfFileTypeMcp } from '@shared/shelf-paths';
 
 /**
  * Agent-server consumption of the projected app-level MCP config (see
@@ -27,7 +27,7 @@ import { shelfPlacement } from '@shared/shelf-paths';
  *  uses to place the file) so the write and read sides can't drift. */
 export function resolveMcpConfigPath(appId: string | undefined): string | null {
   if (!appId) return null;
-  const { rel } = shelfPlacement('mcp', { appId });
+  const { rel } = shelfPlacement(ShelfFileTypeMcp, { appId });
   const p = path.join(os.homedir(), ...rel.split('/'));
   try {
     return fs.existsSync(p) ? p : null;

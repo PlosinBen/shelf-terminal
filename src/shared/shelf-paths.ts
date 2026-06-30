@@ -14,8 +14,6 @@
  * (`skill`, `upload`) are added here as they migrate onto the transport.
  */
 
-export type ShelfFileType = 'mcp' | 'test';
-
 export interface ShelfPathContext {
   /** App instance id — required for fixed-layout types under `~/.shelf/apps/<appId>`. */
   appId?: string;
@@ -30,19 +28,33 @@ export interface ShelfPlacement {
   rel: string;
 }
 
+// Named type constants — the ONLY place each type string literal is written.
+// Both ends reference these instead of a bare 'mcp' / 'test': the client when it
+// declares a payload (`transportPut({ type: ShelfFileTypeMcp })`) and the
+// consumption side when it resolves a path (`shelfPlacement(ShelfFileTypeMcp)`).
+export const ShelfFileTypeMcp = 'mcp';
+export const ShelfFileTypeTest = 'test';
+
+/**
+ * The closed allowlist: each type maps to a placement builder. `ShelfFileType`
+ * derives from the keys and `shelfPlacement` dispatches through it, so adding a
+ * type is one constant + one entry here (no union edit, no switch case).
+ */
+const SHELF_PLACEMENTS = {
+  [ShelfFileTypeMcp]: (ctx: ShelfPathContext): ShelfPlacement => {
+    if (!ctx.appId) throw new Error('shelf placement "mcp" requires context.appId');
+    return { base: 'home', rel: `.shelf/apps/${ctx.appId}/mcp-servers.json` };
+  },
+  // Verification-only: a neutral payload to confirm a connection's transport
+  // CHANNEL moves bytes (ssh/docker/wsl putFile), decoupled from any real
+  // consumption path. See transport-channel.docker.test.ts.
+  [ShelfFileTypeTest]: (_ctx: ShelfPathContext): ShelfPlacement => ({ base: 'home', rel: '.shelf/test/transport-check' }),
+} as const satisfies Record<string, (ctx: ShelfPathContext) => ShelfPlacement>;
+
+export type ShelfFileType = keyof typeof SHELF_PLACEMENTS;
+
 export function shelfPlacement(type: ShelfFileType, ctx: ShelfPathContext): ShelfPlacement {
-  switch (type) {
-    case 'mcp': {
-      if (!ctx.appId) throw new Error('shelf placement "mcp" requires context.appId');
-      return { base: 'home', rel: `.shelf/apps/${ctx.appId}/mcp-servers.json` };
-    }
-    case 'test':
-      // Verification-only: a neutral payload to confirm a connection's transport
-      // CHANNEL moves bytes correctly (ssh/docker/wsl putFile), decoupled from any
-      // real consumption path. The type→path mapping is the only MCP-specific part
-      // and is unit-tested separately, so a single channel check covers the rest.
-      return { base: 'home', rel: '.shelf/test/transport-check' };
-    default:
-      throw new Error(`Unknown shelf file type: ${String(type)}`);
-  }
+  const build = SHELF_PLACEMENTS[type];
+  if (!build) throw new Error(`Unknown shelf file type: ${String(type)}`);
+  return build(ctx);
 }
