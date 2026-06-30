@@ -12,6 +12,8 @@ import { createTurnDispatcher, type PermissionHandler } from './turn-dispatcher'
 import { getAppInstanceId } from '../app-instance-id';
 import { skillsSourceRoot, listSkillFilesRel, hashSkillsTree } from '../skills-projection';
 import { syncMcpForConnection } from '../mcp-remote';
+import { transportPutDir, composeRemotePath } from '../connector/transport';
+import { shelfPlacement, ShelfFileTypeSkill } from '@shared/shelf-paths';
 import { handleAppTool } from './app-tool';
 import {
   detectTargetFromProbe,
@@ -362,13 +364,20 @@ function sshOps(c: Extract<Connection, { type: 'ssh' }>): RemoteOps {
   const target = `${c.user}@${c.host}`;
   const opts = ['-o', 'ControlMaster=auto', '-o', `ControlPath=/tmp/shelf-ssh-${c.host}-${c.port}-${c.user}`, '-o', 'ControlPersist=600', '-p', String(c.port)];
   const optStr = opts.map((o) => `'${o}'`).join(' ');
-  return {
-    base: '~',
-    exec: (cmd, t = 15000) => execSync(`ssh ${optStr} ${target} '${sq(cmd)}'`, { timeout: t, encoding: 'utf8' }),
-    copyIn: (local, remote, t = 180000) => {
-      execSync(`scp ${optStr} '${local}' ${target}:'${sq(remote)}'`, { timeout: t });
-    },
+  const exec = (cmd: string, t = 15000): string =>
+    execSync(`ssh ${optStr} ${target} '${sq(cmd)}'`, { timeout: t, encoding: 'utf8' });
+  const copyIn = (local: string, remote: string, t = 180000): void => {
+    execSync(`scp ${optStr} '${local}' ${target}:'${sq(remote)}'`, { timeout: t });
   };
+  // Resolve an ABSOLUTE $HOME up front (mirroring wslOps), NOT `base:'~'`. The
+  // exec-built control commands embed the base inside DOUBLE quotes (e.g.
+  // `mkdir -p "<base>/.shelf/..."`), and a `~` inside double quotes does NOT
+  // expand in POSIX sh — it would target a literal `~` dir, diverging from the
+  // byte path (the connector resolves an absolute home via homePath()). scp gets
+  // away with `~` only because it expands it remotely; the exec cmds do not.
+  const home = exec('echo "$HOME"').trim();
+  if (!home) throw new Error(`SSH ${target}: could not resolve $HOME`);
+  return { base: home, exec, copyIn };
 }
 
 function dockerOps(c: Extract<Connection, { type: 'docker' }>): RemoteOps {
@@ -522,25 +531,35 @@ async function deploySelfContained(connection: Connection, ops: RemoteOps, provi
  * deploy. Re-runs each time a remote agent tab opens (deploy is per-backend), so
  * reopening the tab picks up skill edits.
  */
-function syncSkillsToRemote(ops: RemoteOps, appId: string): void {
+async function syncSkillsToRemote(connection: Connection, ops: RemoteOps, appId: string): Promise<void> {
   try {
     const src = skillsSourceRoot();
     if (!fs.existsSync(src)) return;
     const files = listSkillFilesRel(src);
     if (files.length === 0) return;
     const hash = hashSkillsTree(src);
-    const target = `${ops.base}/.shelf/apps/${appId}/skills`;
+    // Path layout comes from the single source of truth (shelfPlacement), not a
+    // hardcoded literal. ops.base is absolute (see sshOps/wslOps), so it agrees
+    // with the connector's homePath() that the transport resolves.
+    const target = composeRemotePath(ops.base, shelfPlacement(ShelfFileTypeSkill, { appId }).rel);
     const synced = ops.exec(`cat "${target}/.synced" 2>/dev/null || true`).trim();
     if (synced === hash) return; // up to date
 
-    const dirs = [...new Set(files.map((f) => path.posix.dirname(f)).filter((d) => d && d !== '.'))];
-    const mkdirs = dirs.length ? ` && cd "${target}" && mkdir -p ${dirs.map((d) => `"${d}"`).join(' ')}` : '';
-    ops.exec(`rm -rf "${target}"; mkdir -p "${target}"${mkdirs}`);
-    for (const f of files) ops.copyIn(path.join(src, f), `${target}/${f}`);
+    // Mirror semantics: wipe then re-place. Per-file parent mkdir is handled by
+    // the transport's putFile, so no subdir pre-creation is needed here.
+    ops.exec(`rm -rf "${target}"; mkdir -p "${target}"`);
+    // BYTES go through the type-declared transport (one homePath round-trip, then
+    // putFile per file) — NOT ops.copyIn. The deploy-plane extras below (.synced
+    // hash-gate, .heartbeat lease) stay on ops.exec, layered on top of the put.
+    await transportPutDir(connection, {
+      type: ShelfFileTypeSkill,
+      context: { appId },
+      files: files.map((f) => ({ rel: f, localPath: path.join(src, f) })),
+    });
     // `.synced` = content-hash gate; `.heartbeat` = freshness lease so the
     // remote agent-server's startup sweep doesn't reclaim this just-synced dir
     // before the first heartbeat (cleanup.ts / §5.9). appDir = parent of skills.
-    const appDir = `${ops.base}/.shelf/apps/${appId}`;
+    const appDir = composeRemotePath(ops.base, `.shelf/apps/${appId}`);
     ops.exec(`printf %s '${hash}' > "${target}/.synced"; touch "${appDir}/.heartbeat"`);
     log.info('agent-remote', `Synced ${files.length} skill file(s) to ${target}`);
   } catch (err: any) {
@@ -555,14 +574,14 @@ function syncSkillsToRemote(ops: RemoteOps, appId: string): void {
  * remote agents without reopening the tab. Hash-gated + best-effort inside
  * syncSkillsToRemote; local is a no-op (it re-projects via projectSkillsLocal).
  */
-export function syncSkillsForConnection(connection: Connection): void {
+export async function syncSkillsForConnection(connection: Connection): Promise<void> {
   if (connection.type === 'local') return;
   let ops: RemoteOps;
   if (connection.type === 'ssh') ops = sshOps(connection);
   else if (connection.type === 'docker') ops = dockerOps(connection);
   else if (connection.type === 'wsl') ops = wslOps(connection);
   else return;
-  syncSkillsToRemote(ops, getAppInstanceId());
+  await syncSkillsToRemote(connection, ops, getAppInstanceId());
 }
 
 async function deployAgentServer(connection: Connection, provider: AgentProvider): Promise<DeployResult> {
@@ -587,7 +606,7 @@ async function deployAgentServer(connection: Connection, provider: AgentProvider
   // an MCP-only app would otherwise lose its just-placed config to the sweep).
   const appDir = `${ops.base}/.shelf/apps/${getAppInstanceId()}`;
   try { ops.exec(`mkdir -p "${appDir}"; touch "${appDir}/.heartbeat"`); } catch { /* best-effort */ }
-  syncSkillsToRemote(ops, getAppInstanceId());
+  await syncSkillsToRemote(connection, ops, getAppInstanceId());
   // Place the app-level MCP config too (new type-declared transport, not RemoteOps).
   // The link is established here, so the transport's ssh calls reuse the
   // ControlMaster. Best-effort — never fails the deploy.
