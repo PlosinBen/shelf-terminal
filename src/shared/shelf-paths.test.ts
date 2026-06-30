@@ -13,6 +13,10 @@ describe('shelfPlacement', () => {
     expect(() => shelfPlacement('mcp', {})).toThrow(/appId/);
   });
 
+  it('maps the verification-only `test` type to a neutral home-relative path', () => {
+    expect(shelfPlacement('test', {})).toEqual({ base: 'home', rel: '.shelf/test/transport-check' });
+  });
+
   it('throws on an unknown type (closed allowlist)', () => {
     expect(() => shelfPlacement('bogus' as any, { appId: 'x' })).toThrow(/Unknown shelf file type/);
   });

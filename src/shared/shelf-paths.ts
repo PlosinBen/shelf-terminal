@@ -14,7 +14,7 @@
  * (`skill`, `upload`) are added here as they migrate onto the transport.
  */
 
-export type ShelfFileType = 'mcp';
+export type ShelfFileType = 'mcp' | 'test';
 
 export interface ShelfPathContext {
   /** App instance id — required for fixed-layout types under `~/.shelf/apps/<appId>`. */
@@ -36,6 +36,12 @@ export function shelfPlacement(type: ShelfFileType, ctx: ShelfPathContext): Shel
       if (!ctx.appId) throw new Error('shelf placement "mcp" requires context.appId');
       return { base: 'home', rel: `.shelf/apps/${ctx.appId}/mcp-servers.json` };
     }
+    case 'test':
+      // Verification-only: a neutral payload to confirm a connection's transport
+      // CHANNEL moves bytes correctly (ssh/docker/wsl putFile), decoupled from any
+      // real consumption path. The type→path mapping is the only MCP-specific part
+      // and is unit-tested separately, so a single channel check covers the rest.
+      return { base: 'home', rel: '.shelf/test/transport-check' };
     default:
       throw new Error(`Unknown shelf file type: ${String(type)}`);
   }
