@@ -37,8 +37,8 @@ Every connector implements the `Connector` interface (`src/main/connector/types.
 | `exec` | `(cwd: string, cmd: string): Promise<ExecResult>` | Run a non-interactive command in the target env (e.g. git ops); returns `{ stdout, stderr }`. Not exposed as a generic IPC channel. |
 | `listDir` | `(dirPath: string): Promise<FolderListResult>` | List directory entries for the folder picker. |
 | `homePath` | `(): Promise<string>` | Resolve the target user's home directory. |
-| `uploadFile` | `(cwd: string, filename: string, buffer: Buffer): Promise<string>` | Write `buffer` into `<cwd>/.tmp/shelf/`; returns the target-side path. |
-| `putFile` | `(remotePath: string, buffer: Buffer): Promise<void>` | Write `buffer` to an ABSOLUTE target path (mkdir parents). Generic placement for control-plane files (e.g. `~/.shelf/apps/<id>/mcp-servers.json`); used by the type-declared transport (`architecture/transport`). Distinct from `uploadFile` (hardwired to `.tmp/shelf/`). Not exposed over IPC. |
+| `uploadFile` | `(cwd: string, filename: string, buffer: Buffer): Promise<string>` | Write `buffer` into `<cwd>/.tmp/shelf/<prefix>-<filename>` (layout from the `upload` placement in `@shared/shelf-paths`); returns the target-side path. Implemented ON TOP of `putFile` + a separate non-clobber `.tmp/.gitignore` guard — not its own write command (`architecture/transport`). |
+| `putFile` | `(remotePath: string, buffer: Buffer): Promise<void>` | Write `buffer` to an ABSOLUTE target path (mkdir parents). The connector's ONE byte primitive: used by the type-declared transport (`transportPut`/`transportPutDir`) for control-plane files (MCP config, skills tree) AND by `uploadFile`. Not exposed over IPC. |
 | `cleanupSession` | `(cwd: string, cutoffMs: number): Promise<number>` | Remove staged uploads older than `cutoffMs`; returns count removed. |
 | `clearUploads` | `(cwd: string): Promise<number>` | Remove all staged uploads under `cwd`; returns count removed. |
 | `getUploadsSize` | `(cwd: string): Promise<{ totalBytes: number; fileCount: number }>` | Size/count of `<cwd>/.tmp/shelf/` for Project Edit display; returns zeros on any failure (no error distinction). |
