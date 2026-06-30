@@ -2,7 +2,7 @@ import React from 'react';
 import { useStore, toggleProjectList, toggleRightSidebar } from '../store';
 import { tooltipWithShortcut } from '../utils/format-keybinding';
 import { isMac } from '../hooks/useKeybindings';
-import { PanelLeftIcon, PaperPlaneIcon, NoteIcon, CodeIcon, SkillIcon } from './icons';
+import { PanelLeftIcon, PaperPlaneIcon, NoteIcon, CodeIcon, SkillIcon, McpIcon } from './icons';
 import type { Connection } from '@shared/types';
 
 const version = __APP_VERSION__;
@@ -31,6 +31,7 @@ export function BottomBar() {
     pmVisible,
     notesVisible,
     skillsVisible,
+    mcpVisible,
     devToolsVisible,
     awayMode,
     updateStatus,
@@ -130,6 +131,15 @@ export function BottomBar() {
           >
             <SkillIcon />
             <span className="sr-only">Skills</span>
+          </button>
+          <button
+            className={`right-tab-btn${mcpVisible ? ' active' : ''}`}
+            tabIndex={-1}
+            onClick={() => toggleRightSidebar('mcp')}
+            title="MCP"
+          >
+            <McpIcon />
+            <span className="sr-only">MCP</span>
           </button>
           <button
             className={`right-tab-btn${devToolsVisible ? ' active' : ''}`}

@@ -4500,6 +4500,17 @@ button {
 }
 .web-list-action:hover { background: var(--surface); color: var(--text); }
 
+/* ── MCP (right-sidebar view) ── */
+/* The panel shell is shared (.right-panel); this is the scrollable body that
+   hosts the MCP list + add/edit form (the inner .web-list / .mcp-form styles
+   below are reused as-is from when MCP lived in Settings). */
+.mcp-view-body {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+  padding: 12px 16px;
+}
+
 /* ── MCP settings ── */
 .mcp-help-btn {
   margin-left: 8px;
