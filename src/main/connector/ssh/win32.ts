@@ -8,7 +8,7 @@ import { wrapPty } from '../wrap-pty';
 import { shellEscape } from '../shell-env';
 import { getKnownHostsPath } from '../../ssh-control';
 import {
-  assertSafeCwd, buildPaths, parseUploadPrefix, buildRemoteUploadCmd,
+  assertSafeCwd, buildPaths, parseUploadPrefix, buildRemoteUploadCmd, buildRemotePutCmd,
   spawnPipeWrite, listRemoteShelfDir, removeRemoteFiles, sizeRemoteShelfDir,
 } from '../file-utils';
 
@@ -190,6 +190,10 @@ export class SSHWin32Connector implements Connector {
     return spawnPipeWrite(
       'ssh', this.sshExecArgs([cmd]), buffer, remotePath, 'ssh upload',
     );
+  }
+
+  async putFile(remotePath: string, buffer: Buffer): Promise<void> {
+    await spawnPipeWrite('ssh', this.sshExecArgs([buildRemotePutCmd(remotePath)]), buffer, remotePath, 'ssh putFile');
   }
 
   async cleanupSession(cwd: string, cutoffMs: number): Promise<number> {

@@ -80,6 +80,19 @@ export function buildRemoteUploadCmd(cwd: string, remoteDir: string, remotePath:
 }
 
 /**
+ * Build the remote shell snippet for a GENERIC file placement (the transport's
+ * `putFile`): `mkdir -p <parent> && cat > <path>`. Unlike buildRemoteUploadCmd
+ * this drops the upload-specific `.tmp/.gitignore` guard — it writes to an
+ * arbitrary absolute remote path (e.g. `~/.shelf/apps/<id>/mcp-servers.json`).
+ * `remotePath` is POSIX (it's a path on the remote).
+ */
+export function buildRemotePutCmd(remotePath: string): string {
+  const slash = remotePath.lastIndexOf('/');
+  const parent = slash > 0 ? remotePath.slice(0, slash) : '/';
+  return `mkdir -p ${shellSingleQuote(parent)} && cat > ${shellSingleQuote(remotePath)}`;
+}
+
+/**
  * Spawn a process, pipe `buffer` to stdin, resolve with `remotePath` on
  * success. Used by SSH, Docker, and WSL upload paths.
  */

@@ -7,7 +7,7 @@ import type { Connector, Shell, ExecResult } from './types';
 import { wrapPty } from './wrap-pty';
 import { getShellEnv, shellEscape } from './shell-env';
 import {
-  assertSafeCwd, buildPaths, parseUploadPrefix, buildRemoteUploadCmd,
+  assertSafeCwd, buildPaths, parseUploadPrefix, buildRemoteUploadCmd, buildRemotePutCmd,
   spawnPipeWrite, listRemoteShelfDir, removeRemoteFiles, sizeRemoteShelfDir,
 } from './file-utils';
 
@@ -95,6 +95,13 @@ export class DockerConnector implements Connector {
     return spawnPipeWrite(
       bin, ['exec', '-i', this.container, 'sh', '-c', cmd],
       buffer, remotePath, 'docker upload',
+    );
+  }
+
+  async putFile(remotePath: string, buffer: Buffer): Promise<void> {
+    await spawnPipeWrite(
+      'docker', ['exec', '-i', this.container, 'sh', '-c', buildRemotePutCmd(remotePath)],
+      buffer, remotePath, 'docker putFile',
     );
   }
 

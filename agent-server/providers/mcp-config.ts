@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import type { McpServerConfig } from '@shared/mcp';
 import { validateMcpServer } from '@shared/mcp';
+import { shelfPlacement } from '@shared/shelf-paths';
 
 /**
  * Agent-server consumption of the projected app-level MCP config (see
@@ -21,10 +22,13 @@ import { validateMcpServer } from '@shared/mcp';
  * server quietly missing (cf the skills#6 silent-skip lesson).
  */
 
-/** This app's projected MCP config path on THIS machine, or null if absent. */
+/** This app's projected MCP config path on THIS machine, or null if absent. The
+ *  layout comes from the SHARED `shelfPlacement` rule (same one the transport
+ *  uses to place the file) so the write and read sides can't drift. */
 export function resolveMcpConfigPath(appId: string | undefined): string | null {
   if (!appId) return null;
-  const p = path.join(os.homedir(), '.shelf', 'apps', appId, 'mcp-servers.json');
+  const { rel } = shelfPlacement('mcp', { appId });
+  const p = path.join(os.homedir(), ...rel.split('/'));
   try {
     return fs.existsSync(p) ? p : null;
   } catch {

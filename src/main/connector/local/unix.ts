@@ -111,6 +111,13 @@ export class LocalUnixConnector implements Connector {
     return Promise.resolve(remotePath);
   }
 
+  putFile(remotePath: string, buffer: Buffer): Promise<void> {
+    const abs = path.resolve(remotePath);
+    fs.mkdirSync(path.dirname(abs), { recursive: true });
+    fs.writeFileSync(abs, buffer);
+    return Promise.resolve();
+  }
+
   async cleanupSession(cwd: string, cutoffMs: number): Promise<number> {
     assertSafeCwd(cwd);
     const dir = `${normalizeCwd(cwd)}/${REL_DIR}`;

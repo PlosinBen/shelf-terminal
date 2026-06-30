@@ -9,7 +9,7 @@ import { getShellEnv, shellEscape } from '../shell-env';
 import { getControlPath, checkConnection, getKnownHostsPath } from '../../ssh-control';
 import {
   assertSafeCwd, buildPaths, parseUploadPrefix, normalizeCwd, REL_DIR,
-  shellSingleQuote, buildRemoteUploadCmd, spawnPipeWrite,
+  shellSingleQuote, buildRemoteUploadCmd, buildRemotePutCmd, spawnPipeWrite,
   listRemoteShelfDir, removeRemoteFiles, sizeRemoteShelfDir,
 } from '../file-utils';
 
@@ -204,6 +204,10 @@ export class SSHUnixConnector implements Connector {
       remotePath,
       'ssh upload',
     );
+  }
+
+  async putFile(remotePath: string, buffer: Buffer): Promise<void> {
+    await spawnPipeWrite('ssh', this.sshExecArgs([buildRemotePutCmd(remotePath)]), buffer, remotePath, 'ssh putFile');
   }
 
   async cleanupSession(cwd: string, cutoffMs: number): Promise<number> {

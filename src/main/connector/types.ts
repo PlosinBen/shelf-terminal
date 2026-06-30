@@ -35,6 +35,14 @@ export interface Connector {
 
   // ── File transfer ──
   uploadFile(cwd: string, filename: string, buffer: Buffer): Promise<string>;
+  /**
+   * Generic placement: write `buffer` to an ABSOLUTE path on the target,
+   * mkdir-ing parents. Used by the transport primitive (type-declared placement)
+   * for control-plane files like `~/.shelf/apps/<id>/mcp-servers.json` — distinct
+   * from uploadFile, which is hardwired to `<cwd>/.tmp/shelf/`. See
+   * features/app-level-mcps.
+   */
+  putFile(remotePath: string, buffer: Buffer): Promise<void>;
   cleanupSession(cwd: string, cutoffMs: number): Promise<number>;
   clearUploads(cwd: string): Promise<number>;
   /**
