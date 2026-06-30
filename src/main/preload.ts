@@ -139,6 +139,19 @@ contextBridge.exposeInMainWorld('shelfApi', {
       return () => ipcRenderer.removeListener(IPC.SKILLS_CHANGED, listener);
     },
   },
+  mcp: {
+    list: () => ipcRenderer.invoke(IPC.MCP_LIST),
+    get: (name: string) => ipcRenderer.invoke(IPC.MCP_GET, name),
+    add: (name: string, block: unknown) => ipcRenderer.invoke(IPC.MCP_ADD, { name, block }),
+    update: (name: string, block: unknown, nextName?: string) =>
+      ipcRenderer.invoke(IPC.MCP_UPDATE, { name, block, nextName }),
+    remove: (name: string) => ipcRenderer.invoke(IPC.MCP_REMOVE, name),
+    onChanged: (callback: () => void) => {
+      const listener = () => callback();
+      ipcRenderer.on(IPC.MCP_CHANGED, listener);
+      return () => ipcRenderer.removeListener(IPC.MCP_CHANGED, listener);
+    },
+  },
   app: {
     logsPath: (): Promise<string> => ipcRenderer.invoke(IPC.APP_LOGS_PATH),
     debugLog: (tag: string, msg: string): void => ipcRenderer.send(IPC.APP_DEBUG_LOG, tag, msg),

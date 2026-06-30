@@ -10,8 +10,9 @@ import { ModelsSettingsTab } from './settings/ModelsSettingsTab';
 import { PmAgentSettingsTab } from './settings/PmAgentSettingsTab';
 import { ShortcutsSettingsTab } from './settings/ShortcutsSettingsTab';
 import { WebSettingsTab } from './settings/WebSettingsTab';
+import { McpSettingsTab } from './settings/McpSettingsTab';
 
-type SettingsTab = 'terminal' | 'agent' | 'models' | 'pm' | 'web' | 'shortcuts';
+type SettingsTab = 'terminal' | 'agent' | 'models' | 'pm' | 'web' | 'mcp' | 'shortcuts';
 
 export function SettingsPanel() {
   const { settingsVisible, settings } = useStore();
@@ -154,6 +155,7 @@ export function SettingsPanel() {
             <button className={`settings-tab ${activeTab === 'models' ? 'active' : ''}`} onClick={() => setActiveTab('models')}>Models</button>
             <button className={`settings-tab ${activeTab === 'pm' ? 'active' : ''}`} onClick={() => setActiveTab('pm')}>PM Agent</button>
             <button className={`settings-tab ${activeTab === 'web' ? 'active' : ''}`} onClick={() => setActiveTab('web')}>Web</button>
+            <button className={`settings-tab ${activeTab === 'mcp' ? 'active' : ''}`} onClick={() => setActiveTab('mcp')}>MCP</button>
             <button className={`settings-tab ${activeTab === 'shortcuts' ? 'active' : ''}`} onClick={() => setActiveTab('shortcuts')}>Shortcuts</button>
           </div>
           <div className="settings-body">
@@ -189,6 +191,8 @@ export function SettingsPanel() {
             )}
 
             {activeTab === 'web' && <WebSettingsTab />}
+
+            {activeTab === 'mcp' && <McpSettingsTab />}
 
             {activeTab === 'shortcuts' && (
               <ShortcutsSettingsTab

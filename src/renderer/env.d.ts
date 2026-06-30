@@ -96,6 +96,15 @@ interface ShelfApi {
     /** Subscribe to "skills changed" (any trigger). Returns an unsubscribe fn. */
     onChanged: (callback: () => void) => () => void;
   };
+  mcp: {
+    list: () => Promise<Record<string, import('../shared/mcp').McpServerBlock>>;
+    get: (name: string) => Promise<import('../shared/mcp').McpServerBlock | null>;
+    add: (name: string, block: import('../shared/mcp').McpServerBlock) => Promise<{ ok: boolean; name?: string; error?: string }>;
+    update: (name: string, block: import('../shared/mcp').McpServerBlock, nextName?: string) => Promise<{ ok: boolean; name?: string; error?: string }>;
+    remove: (name: string) => Promise<void>;
+    /** Subscribe to "MCP config changed". Returns an unsubscribe fn. */
+    onChanged: (callback: () => void) => () => void;
+  };
   app: {
     logsPath: () => Promise<string>;
     debugLog: (tag: string, msg: string) => void;
