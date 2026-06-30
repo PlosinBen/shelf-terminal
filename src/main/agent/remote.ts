@@ -11,6 +11,7 @@ import { getShellEnv } from '../connector/shell-env';
 import { createTurnDispatcher, type PermissionHandler } from './turn-dispatcher';
 import { getAppInstanceId } from '../app-instance-id';
 import { skillsSourceRoot, listSkillFilesRel, hashSkillsTree } from '../skills-projection';
+import { syncMcpForConnection } from '../mcp-remote';
 import { handleAppTool } from './app-tool';
 import {
   detectTargetFromProbe,
@@ -581,6 +582,14 @@ async function deployAgentServer(connection: Connection, provider: AgentProvider
 
   const result = await deploySelfContained(connection, ops, providerBin);
   syncSkillsToRemote(ops, getAppInstanceId());
+  // Place the app-level MCP config too (new type-declared transport, not RemoteOps).
+  // The link is established here, so the transport's ssh calls reuse the
+  // ControlMaster. Best-effort — never fails the deploy.
+  try {
+    await syncMcpForConnection(connection);
+  } catch (err: any) {
+    log.info('agent-remote', `mcp sync skipped: ${err?.message ?? err}`);
+  }
   return result;
 }
 

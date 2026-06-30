@@ -9,6 +9,8 @@ import { projectSkillsLocal } from '../skills-projection';
 import { projectMcpLocal } from '../mcp-projection';
 import { getAppInstanceId } from '../app-instance-id';
 import { subscribeSkillsChanged } from '../skills-sync';
+import { subscribeMcpChanged } from '../mcp-sync';
+import { syncMcpForConnection } from '../mcp-remote';
 
 interface SessionInstance {
   tabId: string;
@@ -120,6 +122,26 @@ export function initAgentManager(windowGetter: () => BrowserWindow | null): void
         } catch (err: any) {
           log.error('agent', `remote skills reload failed: ${err?.message ?? err}`);
         }
+      }
+    });
+  });
+
+  // After ANY MCP config mutation: re-mirror onto each live REMOTE connection via
+  // the transport (deduped). No hot-reload (MCP can't be live-set uniformly) —
+  // the change lands on the worker so the session's NEXT connect picks it up; the
+  // "reconnect to apply" notice (T2.3) is emitted here later. Local needs nothing:
+  // onMcpChanged already re-projected to the local consumption path.
+  subscribeMcpChanged(() => {
+    const remote = [...sessions.values()].filter((s) => s.connection.type !== 'local');
+    if (remote.length === 0) return;
+    setImmediate(() => {
+      const done = new Set<string>();
+      for (const s of remote) {
+        const key = JSON.stringify(s.connection);
+        if (done.has(key)) continue;
+        done.add(key);
+        syncMcpForConnection(s.connection).catch((err: any) =>
+          log.error('agent', `mcp resync failed for ${s.connection.type}: ${err?.message ?? err}`));
       }
     });
   });
