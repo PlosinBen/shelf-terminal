@@ -126,24 +126,37 @@ export function initAgentManager(windowGetter: () => BrowserWindow | null): void
     });
   });
 
-  // After ANY MCP config mutation: re-mirror onto each live REMOTE connection via
-  // the transport (deduped). No hot-reload (MCP can't be live-set uniformly) —
-  // the change lands on the worker so the session's NEXT connect picks it up; the
-  // "reconnect to apply" notice (T2.3) is emitted here later. Local needs nothing:
-  // onMcpChanged already re-projected to the local consumption path.
+  // After ANY MCP config mutation: (1) re-mirror onto each live REMOTE connection
+  // via the transport (deduped) so a reconnect picks it up; (2) tell EVERY live
+  // session to reconnect. MCP can't be live-set uniformly (no hot-reload), so the
+  // change only lands on the next session create — mirror skills#9's feedback,
+  // inverted: instead of "reloaded", a per-tab "reconnect to apply" system line so
+  // the user isn't left guessing. No live session → nothing. Local needs no sync
+  // (onMcpChanged already re-projected) but still gets the notice.
   subscribeMcpChanged(() => {
-    const remote = [...sessions.values()].filter((s) => s.connection.type !== 'local');
-    if (remote.length === 0) return;
-    setImmediate(() => {
-      const done = new Set<string>();
-      for (const s of remote) {
-        const key = JSON.stringify(s.connection);
-        if (done.has(key)) continue;
-        done.add(key);
-        syncMcpForConnection(s.connection).catch((err: any) =>
-          log.error('agent', `mcp resync failed for ${s.connection.type}: ${err?.message ?? err}`));
-      }
-    });
+    const live = [...sessions.values()];
+    if (live.length === 0) return;
+
+    const remote = live.filter((s) => s.connection.type !== 'local');
+    if (remote.length > 0) {
+      setImmediate(() => {
+        const done = new Set<string>();
+        for (const s of remote) {
+          const key = JSON.stringify(s.connection);
+          if (done.has(key)) continue;
+          done.add(key);
+          syncMcpForConnection(s.connection).catch((err: any) =>
+            log.error('agent', `mcp resync failed for ${s.connection.type}: ${err?.message ?? err}`));
+        }
+      });
+    }
+
+    for (const s of live) {
+      send(IPC.AGENT_MESSAGE, s.tabId, {
+        type: 'system',
+        content: 'MCP servers updated — reconnect this project to apply.',
+      });
+    }
   });
 
   ipcMain.handle(IPC.AGENT_INIT, async (_e, payload) => {
