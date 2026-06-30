@@ -41,6 +41,7 @@ let commandPickerVisible = false;
 let devToolsVisible = false;
 let notesVisible = false;
 let skillsVisible = false;
+let mcpVisible = false;
 let editingProjectIndex: number | null = null;
 let settings: AppSettings = { ...DEFAULT_SETTINGS };
 let updateStatus: UpdateStatus = { state: 'idle' };
@@ -78,7 +79,7 @@ function subscribe(l: Listener) {
 }
 
 function getSnapshot() {
-  return { projects, activeProjectIndex, sidebarVisible, settingsVisible, searchVisible, commandPickerVisible, devToolsVisible, notesVisible, skillsVisible, editingProjectIndex, settings, updateStatus, pmVisible, awayMode, pmActive, quickNoteVisible, layoutGeneration, chatStage, connectionHealth };
+  return { projects, activeProjectIndex, sidebarVisible, settingsVisible, searchVisible, commandPickerVisible, devToolsVisible, notesVisible, skillsVisible, mcpVisible, editingProjectIndex, settings, updateStatus, pmVisible, awayMode, pmActive, quickNoteVisible, layoutGeneration, chatStage, connectionHealth };
 }
 
 let snapshotRef = getSnapshot();
@@ -363,7 +364,7 @@ export function closeCommandPicker() {
 
 // ── Right sidebar actions ──
 
-export type RightSidebarFeature = 'pm' | 'notes' | 'devtools' | 'skills';
+export type RightSidebarFeature = 'pm' | 'notes' | 'devtools' | 'skills' | 'mcp';
 
 export function toggleRightSidebar(feature: RightSidebarFeature) {
   switch (feature) {
@@ -378,6 +379,9 @@ export function toggleRightSidebar(feature: RightSidebarFeature) {
       break;
     case 'skills':
       skillsVisible = !skillsVisible;
+      break;
+    case 'mcp':
+      mcpVisible = !mcpVisible;
       break;
   }
   updateSnapshot();
