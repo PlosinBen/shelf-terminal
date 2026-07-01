@@ -34,6 +34,7 @@ import {
   formatClaudeToolInput,
   normalizeTaskMessage,
   isForegroundBashTaskStart,
+  isSubagentTaskStart,
   pickSessionTasksDir,
   type TaskRecord,
 } from './helpers';
@@ -1017,6 +1018,15 @@ export function createClaudeBackend(): ServerBackend {
     }
     if (ambientTaskIds.has(id)) return; // known ambient/housekeeping task — intentionally hidden
     if (foregroundBashTaskIds.has(id)) return; // foreground Bash — never a background card
+    if (subagentTaskIds.has(id)) return; // subagent — lives in the message list, never a panel card
+    // Subagent (Task/Agent tool) classifies at task_started via task_type; drop it
+    // and every later event for that id. Its activity surfaces nested under the
+    // Agent card in the transcript, not in the background panel. See subagent-display.
+    if (isSubagentTaskStart(any)) {
+      subagentTaskIds.add(id);
+      serverLog('debug', 'claude', 'dropped subagent task_started ' + JSON.stringify({ task_id: id, task_type: any.task_type }));
+      return;
+    }
     // Foreground (sync) Bash also emits task_started (slow ones do) but isn't a
     // background task. Classify at task_started via the spawning tool_use's
     // run_in_background flag, then drop this + every later event for that id.
@@ -1239,6 +1249,7 @@ export function createClaudeBackend(): ServerBackend {
         ambientTaskIds.clear();
         bashToolUseBg.clear();
         foregroundBashTaskIds.clear();
+        subagentTaskIds.clear();
         lastSessionId = null;
         send({ type: 'context_patch', patch: { lastSdkSessionId: null } });
       }
@@ -1310,6 +1321,7 @@ export function createClaudeBackend(): ServerBackend {
       ambientTaskIds.clear();
       bashToolUseBg.clear();
       foregroundBashTaskIds.clear();
+      subagentTaskIds.clear();
     },
 
     resetSession(_sessionId: string) {
@@ -1444,9 +1456,14 @@ let lastTurnModel: string | null = null;
  *
  * Module-level is fine: one createClaudeBackend per agent-server process.
  */
-type InflightToolUseEntry =
+type InflightToolUseEntry = (
   | { kind: 'tool_use'; toolName: string; input: string }
-  | { kind: 'file_edit'; filePath: string; diff?: { oldString: string; newString: string }; content?: string };
+  | { kind: 'file_edit'; filePath: string; diff?: { oldString: string; newString: string }; content?: string }
+) & {
+  // Set when this tool_use was emitted BY A SUBAGENT (SDK parent_tool_use_id).
+  // Re-applied at tool_result time so the completed card keeps its nesting link.
+  parentId?: string;
+};
 const inflightToolUses = new Map<string, InflightToolUseEntry>();
 
 /**
@@ -1501,6 +1518,11 @@ const bashToolUseBg = new Map<string, boolean>();
 // task_ids classified as foreground Bash → all their subsequent task_ events
 // (updated / notification) are dropped too, so no card ever appears for them.
 const foregroundBashTaskIds = new Set<string>();
+// task_ids classified as subagent (Task/Agent tool, task_type subagent/local_agent)
+// → dropped from the background panel: a subagent has a single home in the message
+// list (its outer Agent card, with inner steps nested under it), not the panel,
+// which is reserved for fire-and-forget Bash run_in_background. See subagent-display.
+const subagentTaskIds = new Set<string>();
 
 
 
@@ -1571,18 +1593,23 @@ function emitClaudeToolUse(
   send: SendFn,
   block: { id: string; name: string; input: Record<string, unknown> },
   cwd: string,
+  parentToolUseId?: string,
 ): void {
+  // When set (subagent inner tool_use), nest under the outer Agent card and keep
+  // the link on the inflight entry so the tool_result re-emit stays nested too.
+  const parent = parentToolUseId ? { parentToolUseId } : {};
   if (block.name === 'Edit') {
     const input = block.input as { file_path?: string; old_string?: string; new_string?: string };
     if (typeof input.file_path === 'string'
       && typeof input.old_string === 'string'
       && typeof input.new_string === 'string') {
       const diff = { oldString: input.old_string, newString: input.new_string };
-      inflightToolUses.set(block.id, { kind: 'file_edit', filePath: input.file_path, diff });
+      inflightToolUses.set(block.id, { kind: 'file_edit', filePath: input.file_path, diff, parentId: parentToolUseId });
       send({
         type: 'message', msgId: block.id, msgType: 'fold_diff',
         label: 'Edit',
         subtitle: stripCwd(input.file_path, cwd),
+        ...parent,
       });
       return;
     }
@@ -1592,12 +1619,13 @@ function emitClaudeToolUse(
     const input = block.input as { file_path?: string; content?: string };
     if (typeof input.file_path === 'string' && typeof input.content === 'string') {
       inflightToolUses.set(block.id, {
-        kind: 'file_edit', filePath: input.file_path, content: input.content,
+        kind: 'file_edit', filePath: input.file_path, content: input.content, parentId: parentToolUseId,
       });
       send({
         type: 'message', msgId: block.id, msgType: 'fold_code',
         label: 'Write',
         subtitle: stripCwd(input.file_path, cwd),
+        ...parent,
       });
       return;
     }
@@ -1605,12 +1633,13 @@ function emitClaudeToolUse(
   }
   const input = formatClaudeToolInput(block.name, block.input, cwd);
   inflightToolUses.set(block.id, {
-    kind: 'tool_use', toolName: block.name, input,
+    kind: 'tool_use', toolName: block.name, input, parentId: parentToolUseId,
   });
   send({
     type: 'message', msgId: block.id, msgType: 'fold_code',
     label: block.name,
     subtitle: input,
+    ...parent,
   });
 }
 
@@ -1626,6 +1655,10 @@ function emitClaudeToolResult(
   const entry = inflightToolUses.get(toolUseId);
   if (!entry) return;
   inflightToolUses.delete(toolUseId);
+  // Preserve subagent nesting across the pending→completed upsert (same msgId):
+  // the result re-emit must carry the same parentToolUseId or the renderer drops
+  // the child back to the top level.
+  const parent = entry.parentId ? { parentToolUseId: entry.parentId } : {};
   // Strip the SDK's <tool_use_error> wrapper once for all error branches below.
   // No-op on non-error content (and on AskUserQuestion's smuggled JSON, which
   // carries no wrapper).
@@ -1639,6 +1672,7 @@ function emitClaudeToolResult(
         label: 'Edit',
         subtitle: stripCwd(entry.filePath, cwd),
         ...(isError ? { errorMessage: content } : { body: { diff: entry.diff } }),
+        ...parent,
       });
     } else {
       // Write — fold_code with the new content as the body. On failure, attach
@@ -1649,6 +1683,7 @@ function emitClaudeToolResult(
         subtitle: stripCwd(entry.filePath, cwd),
         ...(entry.content !== undefined ? { body: { content: entry.content } } : {}),
         ...(isError ? { errorMessage: content } : {}),
+        ...parent,
       });
     }
   } else {
@@ -1666,6 +1701,7 @@ function emitClaudeToolResult(
       ...(isError && !suppressError
         ? { body: { content }, errorMessage: 'Tool returned an error' }
         : { body: { content } }),
+      ...parent,
     });
   }
 }
@@ -1688,6 +1724,10 @@ export function processMessage(msg: SDKMessage, send: SendFn, cwd: string, block
       // why this works across delta / growing-partial / cumulative shapes.
       const N = msg.message.content.length;
       const baseIdx = blockMsgIds.lastBlockStartIdx - N + 1;
+      // Set on messages EMITTED BY A SUBAGENT — the renderer nests them under the
+      // outer Agent/Task card (whose msgId === this id) instead of the main list.
+      const parentId = msg.parent_tool_use_id ?? undefined;
+      const parent = parentId ? { parentToolUseId: parentId } : {};
       msg.message.content.forEach((block, i) => {
         const idx = baseIdx + i;
         if (block.type === 'thinking') {
@@ -1697,14 +1737,16 @@ export function processMessage(msg: SDKMessage, send: SendFn, cwd: string, block
             type: 'message', msgId: getOrMintBlockMsgId(blockMsgIds, idx), msgType: 'fold_text',
             label: 'Thinking',
             body: { content: block.thinking, tone: 'muted' },
+            ...parent,
           });
         } else if (block.type === 'text') {
           content({
             type: 'message', msgId: getOrMintBlockMsgId(blockMsgIds, idx), msgType: 'reply',
             content: block.text,
+            ...parent,
           });
         } else if (block.type === 'tool_use') {
-          emitClaudeToolUse(content, { id: block.id, name: block.name, input: block.input as Record<string, unknown> }, cwd);
+          emitClaudeToolUse(content, { id: block.id, name: block.name, input: block.input as Record<string, unknown> }, cwd, parentId);
           // Mirror plan-style tools into the sticky panel for parity with Copilot's plan API.
           // ExitPlanMode: initial plan submission.
           // TaskCreate / TaskUpdate: ongoing task list (replaces TodoWrite as of SDK 0.3.142).
