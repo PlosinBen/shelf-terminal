@@ -184,6 +184,25 @@ contextBridge.exposeInMainWorld('shelfApi', {
       ipcRenderer.on(IPC.WEB_PERMISSION_CLOSE, listener);
       return () => ipcRenderer.removeListener(IPC.WEB_PERMISSION_CLOSE, listener);
     },
+    // browser_open: per-call Open/Deny confirm (never remembered).
+    onBrowserOpenRequest: (callback: (req: { requestId: string; url: string; origin: string; registrableDomain: string | null }) => void) => {
+      const listener = (_e: Electron.IpcRendererEvent, req: any) => callback(req);
+      ipcRenderer.on(IPC.WEB_BROWSER_OPEN_REQUEST, listener);
+      return () => ipcRenderer.removeListener(IPC.WEB_BROWSER_OPEN_REQUEST, listener);
+    },
+    resolveBrowserOpen: (requestId: string, decision: 'open' | 'deny') =>
+      ipcRenderer.invoke(IPC.WEB_BROWSER_OPEN_RESOLVE, { requestId, decision }),
+    onBrowserOpenClose: (callback: (requestId: string) => void) => {
+      const listener = (_e: Electron.IpcRendererEvent, payload: { requestId: string }) => callback(payload.requestId);
+      ipcRenderer.on(IPC.WEB_BROWSER_OPEN_CLOSE, listener);
+      return () => ipcRenderer.removeListener(IPC.WEB_BROWSER_OPEN_CLOSE, listener);
+    },
+    // main→renderer: open a Web tab (in projectId) navigated to url (post-approval).
+    onOpenTab: (callback: (projectId: string, url: string) => void) => {
+      const listener = (_e: Electron.IpcRendererEvent, payload: { projectId: string; url: string }) => callback(payload.projectId, payload.url);
+      ipcRenderer.on(IPC.WEB_OPEN_TAB, listener);
+      return () => ipcRenderer.removeListener(IPC.WEB_OPEN_TAB, listener);
+    },
   },
   pm: {
     send: (message: string) => ipcRenderer.invoke(IPC.PM_SEND, message),

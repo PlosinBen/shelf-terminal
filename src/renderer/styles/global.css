@@ -4641,3 +4641,5 @@ button {
 .web-perm-origin strong { color: var(--accent); }
 .web-perm-domain { font-size: 11px; color: var(--text-muted); }
 .web-perm-note { font-size: 11px; color: var(--text-muted); }
+/* browser_open popup: full target URL under the highlighted origin. */
+.browser-open-url { word-break: break-all; }
