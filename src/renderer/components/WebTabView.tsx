@@ -39,6 +39,16 @@ export function WebTabView({ tabId, initialUrl, visible }: Props) {
   const addressRef = useRef<HTMLInputElement | null>(null);
   const [address, setAddress] = useState(initialUrl ?? '');
   const [loadError, setLoadError] = useState<string | null>(null);
+  // Freeze the webview `src` at mount. After mount the webview owns its own
+  // navigation — server redirects and go()'s explicit loadURL(); `tab.url` in
+  // the store (written by did-navigate below) is display/persist ONLY.
+  //
+  // Binding `src` to the live `tab.url` (via the initialUrl prop) created a
+  // feedback loop: every did-navigate wrote tab.url → App re-rendered with a new
+  // initialUrl → React rewrote the `src` attribute → the webview re-issued a
+  // FRESH top-level GET, aborting the in-flight redirect (ERR_ABORTED loop) and
+  // dropping SAML POST-binding params (Azure AADSTS750054). See web-tab#9.
+  const initialSrc = useRef(initialUrl || 'about:blank').current;
 
   useEffect(() => {
     const el = webviewRef.current;
@@ -121,7 +131,7 @@ export function WebTabView({ tabId, initialUrl, visible }: Props) {
       )}
       <webview
         ref={webviewRef as React.Ref<HTMLElement>}
-        src={initialUrl || 'about:blank'}
+        src={initialSrc}
         partition={WEB_SESSION_PARTITION}
         style={{ flex: 1, border: 'none' }}
       />

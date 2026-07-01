@@ -130,3 +130,13 @@ related:
 **Do not change casually because**：別給 `browser_open` 加「記住/always」選項或複用 web-perm/tool-perm 的 prompt——那正是使用者要避免的「核可一次就能背景開」。別加 Telegram 路由（登入本質要人在場）。
 
 **Related**：`web-tab#2`、`src/main/browser-open.ts`、`src/main/agent/app-tool.ts`（`web.open`）、`src/renderer/components/BrowserOpenPrompt.tsx`、`src/renderer/App.tsx`（`onOpenTab`）、`agent-server/{app-tool-tools.ts,providers/{claude,copilot,fake}/index.ts}`、`contracts/app-tool-bridge`（`web.open`）。
+
+## web-tab#9 — webview `src` 在 mount 凍結，navigation 由 webview 自持（不回授） · [Gotcha]
+
+**Gotcha（會壞 SSO）**：`<webview src>` **只能綁 mount 當下的初始 URL**，**不可**綁到會變動的 `tab.url`。`WebTabView` 的 `did-navigate` 會把當前 URL 寫回 store（`setWebTabUrl` → `tab.url`），而 `App.tsx` 又把 `tab.url` 當 `initialUrl` 傳回 → 若 `src` 綁 `initialUrl`，就形成**回授迴圈**：每次導航 → 改 `tab.url` → React 重寫 `src` 屬性 → webview 以**全新 top-level GET 重導**，打斷正在進行的 redirect（畫面看到 `ERR_ABORTED (-3)` loop），並在 SAML **POST binding** 時把參數在 body 的請求降級成裸 GET → Azure 回 `AADSTS750054`（Redirect binding 缺 `SAMLRequest` query param）。一般瀏覽器沒有這條「網址列寫回 → 重新導航」迴圈，所以只在本 app 重現（ArgoCD/Azure SSO 實測）。
+
+**現況**：`src={initialSrc}`（`useRef(initialUrl || 'about:blank').current`，mount 凍結）。webview 之後**自持導航** —— server redirect 由 webview 內部跟隨、使用者輸入走 `go()` 的 `loadURL()`。`tab.url` 純粹是**顯示（網址列 / tab label）+ 持久化（跨重啟還原起始頁）**，**不回饋**成導航來源。`browser_open` 開登入頁是 `addTab('web', url)` 開**新分頁**（mount 帶 initialUrl），不靠改既有 `tab.url` 導航，故不受影響。
+
+**Do not change casually because**：別把 `src` 改回綁 `initialUrl` / `tab.url`「讓外部能導航既有分頁」——那正是回授迴圈的成因，會打斷所有 redirect 鏈（SSO 首當其衝）。要程式化導航既有 webview 就呼叫 `loadURL()`，不要動 `src`。
+
+**Related**：`src/renderer/components/WebTabView.tsx`、`src/renderer/App.tsx`（`initialUrl={tab.url}`）、`src/renderer/store.ts`（`setWebTabUrl`）、`e2e/webview-src-freeze.spec.ts`。
