@@ -25,6 +25,35 @@ export function isWebFetchTool(toolName: string): boolean {
   return toolName === WEB_FETCH_TOOL || toolName.endsWith('__browser_fetch');
 }
 
+/**
+ * Bare bridge-tool name the agent calls to OPEN a visible Web tab for the user
+ * to log in (sibling of browser_fetch). Reaches canUseTool as
+ * `mcp__shelf__browser_open` (real providers) or bare `browser_open` (fake).
+ * Match with isBrowserOpenTool().
+ */
+export const BROWSER_OPEN_TOOL = 'browser_open';
+
+export function isBrowserOpenTool(toolName: string): boolean {
+  return toolName === BROWSER_OPEN_TOOL || toolName.endsWith('__browser_open');
+}
+
+/**
+ * Metadata attached to a browser_open confirm popup. `origin` is parsed
+ * authoritatively (anti-spoof); `url` is the full target shown to the user so
+ * they see the exact login/service page before approving.
+ */
+export interface BrowserOpenMeta {
+  /** Full absolute http(s) URL the tab will navigate to. */
+  url: string;
+  /** Canonical scheme://host[:port], parsed authoritatively (never the raw URL). */
+  origin: string;
+  /** eTLD+1 for display highlight (null if unknown). */
+  registrableDomain: string | null;
+}
+
+/** Open/Deny — deliberately NO "remember" option (per-call confirm only). */
+export type BrowserOpenDecision = 'open' | 'deny';
+
 /** Anti-spoof origin metadata attached to a web.fetch permission request. */
 export interface WebPermissionMeta {
   /** Canonical scheme://host[:port] — the grant key, parsed authoritatively. */
