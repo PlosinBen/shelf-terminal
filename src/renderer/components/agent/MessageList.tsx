@@ -159,7 +159,9 @@ export function MessageList({ tabId, visible, onRetryInit }: Props) {
               {turn.user && <AgentMessage message={turn.user} />}
               {hasResponseContent && (
                 <div className="agent-turn-response">
-                  {turn.agent.map((msg) => <AgentMessage key={msg.id} message={msg} />)}
+                  {turn.agent.map((msg) => (
+                    <AgentMessage key={msg.id} message={msg} nested={turn.children[msg.id]} />
+                  ))}
                 </div>
               )}
             </div>

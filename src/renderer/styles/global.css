@@ -2874,6 +2874,14 @@ button {
   margin-top: 4px;
 }
 
+/* Subagent activity nested inside its Agent/Task card — indented with a rail so
+   it reads as "inside this tool call", not the main timeline. See subagent-display. */
+.agent-subagent-nested {
+  margin: 4px 0 4px 8px;
+  padding-left: 10px;
+  border-left: 2px solid var(--border, #3a3f4b);
+}
+
 .fold-body-text {
   padding: 6px 0 6px 18px;
   font-size: 12px;
