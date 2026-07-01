@@ -239,6 +239,42 @@ test.describe('agent flows via fake provider', () => {
       await expect(messages).toContainText('T3', { timeout: 10_000 });
       await expect(page.locator('.agent-msg-queued')).toHaveCount(0, { timeout: 10_000 });
     });
+
+    // Regression: cancelling a QUEUED send must not disturb the RUNNING turn's
+    // status. agent-server emits a bare `idle` on the cancelled send's turnId
+    // (to release its per-turn generator); that per-turn idle must NOT flip the
+    // tab-wide streaming flag to idle while a foreground turn is still running
+    // (session idle is owned by main's activeTurns, emitted only when the LAST
+    // turn ends). Before the fix, cancelling the chip cleared the spinner mid-run.
+    test('cancelling a queued send leaves the running turn streaming', async ({ shelfApp: { page } }) => {
+      await setupProject(page);
+      await openAgentTab(page);
+
+      // T1 holds the turn open (long delay, no text yet → spinner stays up).
+      await sendAgentPrompt(page, 'delay:4000|text:T1');
+      await expect(page.locator('.agent-loading')).toBeVisible({ timeout: 5_000 });
+
+      // T2 is submitted while T1 streams → enqueued as a chip.
+      await sendAgentPrompt(page, 'text:T2');
+      const queued = page.locator('.agent-msg-queued');
+      await expect(queued).toHaveCount(1, { timeout: 5_000 });
+
+      // Cancel the queued chip. Its terminateTurn idle must not clear the spinner.
+      await queued.locator('.agent-queued-cancel').click();
+      await expect(queued).toHaveCount(0, { timeout: 5_000 });
+
+      // The running turn (T1) is still going: spinner stays visible. Wait past the
+      // cancel's IPC round-trip so the (previously bug-inducing) idle has arrived.
+      await expect(page.locator('.agent-loading')).toBeVisible();
+      await page.waitForTimeout(1000);
+      await expect(page.locator('.agent-loading')).toBeVisible();
+
+      // T1 still completes normally; T2 was cancelled and never runs.
+      const messages = page.locator('.agent-messages:visible');
+      await expect(messages).toContainText('T1', { timeout: 10_000 });
+      await expect(page.locator('.agent-loading')).toHaveCount(0, { timeout: 5_000 });
+      await expect(messages).not.toContainText('T2');
+    });
   });
 
   // Agent tabs are plain DOM (no xterm SearchAddon), so the SearchBar routes

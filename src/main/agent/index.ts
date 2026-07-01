@@ -403,6 +403,25 @@ async function sendMessage(
       configEdit: prefs?.configEdit,
       clientMsgId: prefs?.clientMsgId,
     })) {
+      // A per-turn `status` event is turn-lifecycle plumbing (it closes THIS
+      // turn's generator), NOT a session-level signal. The renderer's streaming
+      // flag is a SESSION fact owned here via `activeTurns` — so we must not let
+      // one turn's idle flip the whole tab to idle. Concretely: cancelling a
+      // QUEUED send makes agent-server emit a bare `idle` on that send's turnId
+      // (to release its generator); forwarding it verbatim used to clear the
+      // spinner while a foreground turn was still streaming. So intercept status:
+      // forward its cost/usage metrics (idempotent, must not be lost — a real
+      // turn's terminal idle carries them) but strip `state`, and emit the
+      // session-level idle exclusively from `finally` (post-decrement → race-free
+      // vs. multiple idles arriving together). Observers still see the raw event.
+      if (event.type === 'status') {
+        notifyObservers(tabId, event);
+        const { state: turnState, ...metrics } = event.payload;
+        // `streaming` was already broadcast at send start (above the try); only a
+        // terminal idle needs its metrics relayed here.
+        if (turnState !== 'streaming') send(IPC.AGENT_STATUS, tabId, metrics);
+        continue;
+      }
       dispatchEvent(tabId, event);
     }
   } catch (err: any) {
@@ -412,9 +431,17 @@ async function sendMessage(
   } finally {
     // Only the LAST in-flight turn flips the session back to idle — earlier
     // turns finishing while later queued turns still drain must keep it
-    // streaming (see activeTurns doc on SessionInstance).
+    // streaming (see activeTurns doc on SessionInstance). This is the ONLY place
+    // a foreground idle reaches the renderer, so a cancelled queued turn (which
+    // leaves other turns running) never emits it.
     session.activeTurns = Math.max(0, session.activeTurns - 1);
-    if (session.activeTurns === 0) session.state = 'idle';
+    if (session.activeTurns === 0) {
+      session.state = 'idle';
+      // Renderer-only: observers already saw the raw per-turn idle in the loop
+      // above (unchanged telegram-bridge behavior); this is the session-level
+      // idle the renderer's tab-wide streaming flag consumes.
+      send(IPC.AGENT_STATUS, tabId, { state: 'idle' });
+    }
     for (const resolve of session.pendingPermissions.values()) {
       resolve({ behavior: 'deny', message: 'Turn ended' });
     }
