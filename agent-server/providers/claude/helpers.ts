@@ -495,6 +495,19 @@ export function isForegroundBashTaskStart(
 }
 
 /**
+ * True for the `task_started` of a SUBAGENT (Task/Agent tool). The SDK reports
+ * such a task as `task_type: 'local_agent'` (live-confirmed) or `'subagent'`.
+ * routeTask uses this to keep subagents OUT of the background-tasks panel: a
+ * subagent has a single home in the message list (its Agent card, inner steps
+ * nested under it), while the panel is reserved for fire-and-forget Bash
+ * run_in_background. See subagent-display.
+ */
+export function isSubagentTaskStart(msg: any): boolean {
+  return msg?.subtype === 'task_started'
+    && (msg?.task_type === 'subagent' || msg?.task_type === 'local_agent');
+}
+
+/**
  * Map one claude SDK background-task system message into a NormalizedTask + event
  * kind, merging onto `prev` (previously-known state for this task_id, or
  * undefined). Returns null if `msg` isn't a task_* system message. PURE — the

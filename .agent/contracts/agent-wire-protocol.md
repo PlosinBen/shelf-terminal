@@ -19,6 +19,7 @@ Source: `WireEnvelope` in `agent-server/providers/types.ts`. Stamped onto every 
 |-------|------|-------|
 | `turnId` | `string?` | Routing key. Main's `createTurnDispatcher` (`src/main/agent/turn-dispatcher.ts`) routes the message to the per-turn `AsyncGenerator` registered under this id. Lifecycle messages and session-level lanes omit it intentionally. A non-lifecycle message missing `turnId` is logged and dropped. |
 | `startsTurn` | `boolean?` | Only meaningful on `type: 'message'`. Marks the first message of a server-initiated (auto-resume) turn so the renderer's `buildTurns` opens a fresh turn block (these turns have no anchoring `user` message). See agent-config-flow#1, DECISIONS #69. |
+| `parentToolUseId` | `string?` | Only on `type: 'message'` (msgType `reply` \| `fold_*`). Set when the message was emitted BY A SUBAGENT (Task/Agent tool); value is the outer Agent tool_use's `msgId`. `buildTurns` nests the message under that card instead of the main list (absent = top-level / main agent). claude threads the SDK `parent_tool_use_id` (incl. the tool_result re-emit); a subagent is also dropped from the background-tasks panel. See background-tasks#7. |
 
 Main mints `turnId` (`t-${randomUUID().slice(0,8)}`) at `query()` entry and registers the turn **before** the `send` reaches agent-server, so early events have a destination. Generator ends after the first `status` with `state:'idle'` (plus buffered tail events).
 

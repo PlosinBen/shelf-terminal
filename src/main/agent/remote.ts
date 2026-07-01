@@ -988,12 +988,15 @@ function buildAgentMessagePayload(msg: any): import('./types').AgentMessage | nu
   const t = msg.msgType;
   // msgId is the universal upsert key (provider-minted).
   const msgId: string = msg.msgId ?? `legacy-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  // Subagent nesting link (reply + fold_*). Passed through so the renderer can
+  // nest the message under its outer Agent card. See subagent-display.
+  const parent = typeof msg.parentToolUseId === 'string' ? { parentToolUseId: msg.parentToolUseId } : {};
   switch (t) {
     case 'reply':
     case 'note':
     case 'system':
     case 'error':
-      return { msgId, type: t, content: msg.content ?? '' };
+      return { msgId, type: t, content: msg.content ?? '', ...parent };
     case 'fold_text': {
       if (typeof msg.label !== 'string') return null;
       return {
@@ -1005,6 +1008,7 @@ function buildAgentMessagePayload(msg: any): import('./types').AgentMessage | nu
         ...(msg.body && typeof msg.body.content === 'string'
           ? { body: { content: msg.body.content, ...(msg.body.tone === 'muted' ? { tone: 'muted' as const } : {}) } }
           : {}),
+        ...parent,
       };
     }
     case 'fold_code': {
@@ -1016,6 +1020,7 @@ function buildAgentMessagePayload(msg: any): import('./types').AgentMessage | nu
         ...(typeof msg.subtitle === 'string' ? { subtitle: msg.subtitle } : {}),
         ...(typeof msg.errorMessage === 'string' ? { errorMessage: msg.errorMessage } : {}),
         ...(msg.body && typeof msg.body.content === 'string' ? { body: { content: msg.body.content } } : {}),
+        ...parent,
       };
     }
     case 'fold_markdown': {
@@ -1027,6 +1032,7 @@ function buildAgentMessagePayload(msg: any): import('./types').AgentMessage | nu
         ...(typeof msg.subtitle === 'string' ? { subtitle: msg.subtitle } : {}),
         ...(typeof msg.errorMessage === 'string' ? { errorMessage: msg.errorMessage } : {}),
         ...(msg.body && typeof msg.body.content === 'string' ? { body: { content: msg.body.content } } : {}),
+        ...parent,
       };
     }
     case 'fold_diff': {
@@ -1037,6 +1043,7 @@ function buildAgentMessagePayload(msg: any): import('./types').AgentMessage | nu
         label: msg.label,
         ...(typeof msg.subtitle === 'string' ? { subtitle: msg.subtitle } : {}),
         ...(typeof msg.errorMessage === 'string' ? { errorMessage: msg.errorMessage } : {}),
+        ...parent,
         ...(msg.body && msg.body.diff
           && typeof msg.body.diff.oldString === 'string'
           && typeof msg.body.diff.newString === 'string'

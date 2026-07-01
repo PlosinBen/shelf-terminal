@@ -216,29 +216,33 @@ export type OutgoingMessage = WireEnvelope & (
   // `user` is NOT a wire msgType — `user` messages are renderer-only, minted
   // when the user types into the input. Reflecting that on the wire keeps
   // the agent-server → renderer contract honest about provider authorship.
-  | { type: 'message'; msgId: string; msgType: 'reply';   content: string }
+  // `parentToolUseId` (optional): links a message EMITTED BY A SUBAGENT to its
+  // outer Agent/Task tool_use card (whose msgId === this value). Absent = top-level
+  // (the main agent). The renderer nests these under the parent card instead of
+  // showing them flat. Only the msgTypes a subagent emits carry it (reply + fold_*).
+  | { type: 'message'; msgId: string; msgType: 'reply';   content: string; parentToolUseId?: string }
   | { type: 'message'; msgId: string; msgType: 'note';    content: string }
   | { type: 'message'; msgId: string; msgType: 'system';  content: string }
   | { type: 'message'; msgId: string; msgType: 'error';   content: string }
   | {
       type: 'message'; msgId: string; msgType: 'fold_text';
       label: string; subtitle?: string; errorMessage?: string;
-      body?: { content: string; tone?: 'muted' };
+      body?: { content: string; tone?: 'muted' }; parentToolUseId?: string;
     }
   | {
       type: 'message'; msgId: string; msgType: 'fold_code';
       label: string; subtitle?: string; errorMessage?: string;
-      body?: { content: string };
+      body?: { content: string }; parentToolUseId?: string;
     }
   | {
       type: 'message'; msgId: string; msgType: 'fold_markdown';
       label: string; subtitle?: string; errorMessage?: string;
-      body?: { content: string };
+      body?: { content: string }; parentToolUseId?: string;
     }
   | {
       type: 'message'; msgId: string; msgType: 'fold_diff';
       label: string; subtitle?: string; errorMessage?: string;
-      body?: { diff: { oldString: string; newString: string } };
+      body?: { diff: { oldString: string; newString: string } }; parentToolUseId?: string;
     }
 );
 

@@ -856,7 +856,15 @@ export function setInitStatus(
 
 // ── Selectors ──
 
-export interface Turn { user?: AgentMsg; agent: AgentMsg[] }
+export interface Turn {
+  user?: AgentMsg;
+  /** Top-level agent messages (main agent). Subagent-emitted messages are NOT
+   *  here — they live under `children`, keyed by their outer Agent card's id. */
+  agent: AgentMsg[];
+  /** Subagent activity, grouped by the outer Agent tool_use id it nests under.
+   *  MessageList renders `children[card.id]` inside that card. See subagent-display. */
+  children: Record<string, AgentMsg[]>;
+}
 
 /**
  * Turn grouping selector — pure derivation from messages. Not memoized here;
@@ -866,13 +874,28 @@ export function buildTurns(messages: AgentMsg[]): Turn[] {
   const result: Turn[] = [];
   for (const msg of messages) {
     if (msg.type === 'user') {
-      result.push({ user: msg, agent: [] });
-    } else if (msg.startsTurn || result.length === 0) {
+      result.push({ user: msg, agent: [], children: {} });
+      continue;
+    }
+    // Subagent-emitted message → nest under its outer Agent card (parentToolUseId
+    // === that card's msgId) instead of the main list. Fall back to top-level if
+    // the parent isn't in the current turn (fail-visible: never drop the message).
+    const parentId = msg.parentToolUseId;
+    if (parentId) {
+      const turn = result[result.length - 1];
+      const parentSeen = turn && (turn.children[parentId] || turn.agent.some((m) => m.id === parentId));
+      if (parentSeen) {
+        (turn.children[parentId] ??= []).push(msg);
+        continue;
+      }
+      // parent not found — fall through to top-level placement below.
+    }
+    if (msg.startsTurn || result.length === 0) {
       // `startsTurn`: first message of a server-initiated turn (auto-resume
       // prose after a background task). It has no `user` message to anchor a
       // block, so open one explicitly — otherwise it'd glue onto the previous
       // (possibly unrelated) turn. See background-tasks#2.
-      result.push({ agent: [msg] });
+      result.push({ agent: [msg], children: {} });
     } else {
       result[result.length - 1].agent.push(msg);
     }

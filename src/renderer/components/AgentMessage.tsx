@@ -28,6 +28,12 @@ export type AgentMsg = {
    * have no `user` message to anchor one. See background-tasks#2.
    */
   startsTurn?: boolean;
+  /**
+   * Set when this message was emitted BY A SUBAGENT — value is the outer Agent
+   * tool_use's id. buildTurns nests it under that card instead of the main list.
+   * Only reply + fold_* carry it. See subagent-display.
+   */
+  parentToolUseId?: string;
 } & (
   | { type: 'reply'; content: string; streaming?: boolean }
   | { type: 'note'; content: string }
@@ -105,9 +111,13 @@ function FoldHeader({ label, subtitle, isExpanded, onToggle }: FoldHeaderProps) 
 interface Props {
   message: AgentMsg;
   cwd?: string;
+  /** Subagent activity emitted under this message's tool_use (Agent/Task card).
+   *  Rendered inside the card's expand area so a subagent has one nested home
+   *  instead of flat rows in the main list. See subagent-display. */
+  nested?: AgentMsg[];
 }
 
-export function AgentMessage({ message, cwd: _cwd }: Props) {
+export function AgentMessage({ message, cwd: _cwd, nested }: Props) {
   const [userToggled, setUserToggled] = useState<boolean | null>(null);
   const agentDisplay = useContext(AgentDisplayContext);
 
@@ -213,6 +223,12 @@ export function AgentMessage({ message, cwd: _cwd }: Props) {
           />
           {hasError && (
             <div className="fold-error-banner">{message.errorMessage}</div>
+          )}
+          {/* Subagent activity nests inside this (Agent/Task) card's expand area. */}
+          {isExpanded && nested && nested.length > 0 && (
+            <div className="agent-subagent-nested">
+              {nested.map((child) => <AgentMessage key={child.id} message={child} />)}
+            </div>
           )}
           {isExpanded && message.body && (() => {
             const { lines, remaining } = truncateLines(message.body.content, 30);

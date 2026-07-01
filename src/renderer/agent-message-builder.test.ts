@@ -17,6 +17,16 @@ describe('buildAgentMsg', () => {
     expect(out).toBeNull();
   });
 
+  it('carries parentToolUseId through for a nested subagent message', () => {
+    const out = buildAgentMsg({ type: 'fold_code', msgId: 't1', label: 'Read', parentToolUseId: 'outer-1' }, 'claude') as any;
+    expect(out.parentToolUseId).toBe('outer-1');
+  });
+
+  it('omits parentToolUseId for a top-level message', () => {
+    const out = buildAgentMsg({ type: 'reply', msgId: 'm1', content: 'hi' }, 'claude') as any;
+    expect(out.parentToolUseId).toBeUndefined();
+  });
+
   /**
    * Regression: Telegram bridge → agent view used to silently swallow the
    * user's message (the renderer's history showed only the agent reply, not

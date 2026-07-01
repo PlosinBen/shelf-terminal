@@ -542,6 +542,32 @@ describe('agentTabStore — buildTurns selector', () => {
     expect(turns[1].user).toBeUndefined();
     expect(turns[1].agent.map((m) => m.id)).toEqual(['m2']);
   });
+
+  it('nests subagent messages under their outer Agent card (parentToolUseId), not the main list', () => {
+    const outer: AgentMsg = { id: 'outer-1', type: 'fold_code', label: 'Task', timestamp: 1000, provider: 'claude' };
+    const innerTool: AgentMsg = { id: 'inner-1', type: 'fold_code', label: 'Read', timestamp: 1000, provider: 'claude', parentToolUseId: 'outer-1' };
+    const innerReply: AgentMsg = { ...textMsg('inner-2', 'subagent step'), parentToolUseId: 'outer-1' };
+    const msgs: AgentMsg[] = [
+      userMsg('u1', 'do research'),
+      outer,
+      innerTool,
+      innerReply,
+      textMsg('m-after', 'main agent resumes'),
+    ];
+    const turns = buildTurns(msgs);
+    expect(turns.length).toBe(1);
+    // Main list holds the outer card + the main-agent reply, NOT the inner steps.
+    expect(turns[0].agent.map((m) => m.id)).toEqual(['outer-1', 'm-after']);
+    // Inner steps nested under the outer card's id, in order.
+    expect(turns[0].children['outer-1']?.map((m) => m.id)).toEqual(['inner-1', 'inner-2']);
+  });
+
+  it('falls back to top-level when a parentToolUseId has no matching card in the turn (never drops)', () => {
+    const orphan: AgentMsg = { ...textMsg('orphan-1', 'stray subagent msg'), parentToolUseId: 'missing-parent' };
+    const turns = buildTurns([userMsg('u1', 'hi'), orphan]);
+    expect(turns[0].agent.map((m) => m.id)).toEqual(['orphan-1']);
+    expect(turns[0].children['missing-parent']).toBeUndefined();
+  });
 });
 
 describe('agentTabStore — decisions / auth / init', () => {

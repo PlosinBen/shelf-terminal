@@ -975,7 +975,11 @@ export function createCopilotBackend(): ServerBackend {
         const tasks = (list?.tasks ?? [])
           .filter(isBackgroundedCopilotTask)
           .map(normalizeCopilotTask)
-          .filter((t: unknown): t is NonNullable<typeof t> => t !== null);
+          .filter((t: unknown): t is NonNullable<typeof t> => t !== null)
+          // Subagents (type 'agent') live in the message list, not the background
+          // panel — parity with claude. The panel is for fire-and-forget shell work.
+          // See subagent-display.
+          .filter((t: NonNullable<ReturnType<typeof normalizeCopilotTask>>) => t.type !== 'agent');
         currentSend({ type: 'task_event', kind: 'snapshot', tasks });
       } catch (err: any) {
         serverLog('error', 'copilot', 'rpc.tasks.list failed; task panel may be stale', err?.message ?? err);

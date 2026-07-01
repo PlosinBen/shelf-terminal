@@ -45,6 +45,13 @@ type WithMsgId = {
    * background-tasks#2.
    */
   startsTurn?: boolean;
+  /**
+   * Set when this message was emitted BY A SUBAGENT (Task/Agent tool). Its value
+   * is the outer Agent tool_use's msgId. The renderer nests the message UNDER
+   * that card instead of showing it flat in the main list. Absent = top-level
+   * (the main agent). Only reply + fold_* actually carry it. See subagent-display.
+   */
+  parentToolUseId?: string;
 };
 
 /**

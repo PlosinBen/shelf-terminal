@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { processMessage, createBlockMsgIdState, createClaudeBackend } from './index';
-import { mergeClaudeModels, rateLimitInfoToSegment, formatClaudeToolInput, extractToolResultText, askUserQuestionToPrompts, buildAskUserQuestionAnswerJson, parseTaskCreateOutput, parseTaskListOutput, reconcileTasks, renderPlan, shouldAdoptResolvedModel, stripToolErrorWrapper, normalizeTaskMessage, isForegroundBashTaskStart, pickSessionTasksDir } from './helpers';
+import { mergeClaudeModels, rateLimitInfoToSegment, formatClaudeToolInput, extractToolResultText, askUserQuestionToPrompts, buildAskUserQuestionAnswerJson, parseTaskCreateOutput, parseTaskListOutput, reconcileTasks, renderPlan, shouldAdoptResolvedModel, stripToolErrorWrapper, normalizeTaskMessage, isForegroundBashTaskStart, isSubagentTaskStart, pickSessionTasksDir } from './helpers';
 import type { OutgoingMessage } from '../types';
 import type { ProviderModel, NormalizedTask } from '@shared/types';
 
@@ -841,6 +841,41 @@ describe('reconcileTasks', () => {
   });
 });
 
+describe('processMessage — subagent parentToolUseId nesting', () => {
+  const makeSink = () => {
+    const sent: OutgoingMessage[] = [];
+    return { send: (m: OutgoingMessage) => sent.push(m), sent };
+  };
+
+  it('tags a subagent message (parent_tool_use_id) reply + tool_use with parentToolUseId', () => {
+    const { send, sent } = makeSink();
+    const map = createBlockMsgIdState();
+    processMessage({
+      type: 'assistant',
+      parent_tool_use_id: 'outer-1',
+      message: { content: [
+        { type: 'text', text: 'inner prose' },
+        { type: 'tool_use', id: 'inner-t1', name: 'Read', input: { file_path: '/x/a.ts' } },
+      ] },
+    } as any, send, '/x', map);
+    const reply = sent.find((m: any) => m.msgType === 'reply') as any;
+    const tool = sent.find((m: any) => m.msgType === 'fold_code') as any;
+    expect(reply?.parentToolUseId).toBe('outer-1');
+    expect(tool?.parentToolUseId).toBe('outer-1');
+  });
+
+  it('leaves a top-level (main agent) message without parentToolUseId', () => {
+    const { send, sent } = makeSink();
+    const map = createBlockMsgIdState();
+    processMessage({
+      type: 'assistant',
+      message: { content: [{ type: 'text', text: 'main prose' }] },
+    } as any, send, '/x', map);
+    const reply = sent.find((m: any) => m.msgType === 'reply') as any;
+    expect(reply?.parentToolUseId).toBeUndefined();
+  });
+});
+
 describe('isForegroundBashTaskStart', () => {
   const started = (over: Record<string, unknown> = {}) =>
     ({ type: 'system', subtype: 'task_started', task_id: 't1', task_type: 'local_bash', tool_use_id: 'tu1', ...over });
@@ -867,6 +902,31 @@ describe('isForegroundBashTaskStart', () => {
   it('false for non-task_started subtypes (only classify at start)', () => {
     const bg = new Map([['tu1', false]]);
     expect(isForegroundBashTaskStart(started({ subtype: 'task_notification' }), bg)).toBe(false);
+  });
+});
+
+describe('isSubagentTaskStart', () => {
+  const started = (over: Record<string, unknown> = {}) =>
+    ({ type: 'system', subtype: 'task_started', task_id: 'a1', task_type: 'local_agent', ...over });
+
+  it('true for a subagent task_started (task_type local_agent)', () => {
+    expect(isSubagentTaskStart(started())).toBe(true);
+  });
+
+  it('true for the legacy subagent task_type', () => {
+    expect(isSubagentTaskStart(started({ task_type: 'subagent' }))).toBe(true);
+  });
+
+  it('false for a Bash task (task_type local_bash) — stays in the panel', () => {
+    expect(isSubagentTaskStart(started({ task_type: 'local_bash' }))).toBe(false);
+  });
+
+  it('false for a workflow task', () => {
+    expect(isSubagentTaskStart(started({ task_type: 'local_workflow' }))).toBe(false);
+  });
+
+  it('false for non-task_started subtypes (only classify at start)', () => {
+    expect(isSubagentTaskStart(started({ subtype: 'task_updated' }))).toBe(false);
   });
 });
 

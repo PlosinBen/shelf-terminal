@@ -21,6 +21,9 @@ export function buildAgentMsg(msg: any, provider: string): AgentMsg | null {
   // Server-initiated turn marker (auto-resume prose) — carry through so
   // buildTurns opens a fresh turn block for it. See background-tasks#2.
   if (built && msg.startsTurn) built.startsTurn = true;
+  // Subagent nesting link — carry through so buildTurns nests it under the
+  // outer Agent card instead of the main list. See subagent-display.
+  if (built && typeof msg.parentToolUseId === 'string') built.parentToolUseId = msg.parentToolUseId;
   return built;
 }
 
