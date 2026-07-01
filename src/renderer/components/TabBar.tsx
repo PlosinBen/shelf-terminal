@@ -52,8 +52,22 @@ export function TabBar() {
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const [contextMenu, setContextMenu] = useState<{ index: number; x: number; y: number } | null>(null);
   const [addMenu, setAddMenu] = useState<{ x: number; y: number } | null>(null);
+  // Granted origins for THE ACTIVE PROJECT only (web-grants.json), surfaced as
+  // one-click "reopen this internal service to log in" shortcuts under Web.
+  // Fetched fresh each time the + menu opens (grants change out-of-band when the
+  // user approves a web.fetch). Scoped by project id — never app-wide grants.
+  const [webShortcuts, setWebShortcuts] = useState<string[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+
+  const openAddMenu = (x: number, y: number) => {
+    setAddMenu({ x, y });
+    const projectId = project?.config.id;
+    if (!projectId) { setWebShortcuts([]); return; }
+    window.shelfApi.web.listGrants()
+      .then((byProject) => setWebShortcuts(byProject[projectId] ?? []))
+      .catch(() => setWebShortcuts([]));
+  };
 
   useEffect(() => {
     if (editingIndex !== null && inputRef.current) {
@@ -193,8 +207,8 @@ export function TabBar() {
       <button
         className="tab-add"
         tabIndex={-1}
-        onClick={(e) => { e.preventDefault(); setAddMenu({ x: e.clientX, y: e.clientY }); }}
-        onContextMenu={(e) => { e.preventDefault(); setAddMenu({ x: e.clientX, y: e.clientY }); }}
+        onClick={(e) => { e.preventDefault(); openAddMenu(e.clientX, e.clientY); }}
+        onContextMenu={(e) => { e.preventDefault(); openAddMenu(e.clientX, e.clientY); }}
         title="New tab"
         disabled={project.tabs.length >= project.config.maxTabs}
       >
@@ -295,6 +309,16 @@ export function TabBar() {
           >
             Web
           </button>
+          {webShortcuts.map((origin) => (
+            <button
+              key={origin}
+              className="context-menu-item context-menu-item-web-origin"
+              title={origin}
+              onClick={() => { emit(Events.NEW_WEB_TAB, activeProjectIndex, origin); setAddMenu(null); }}
+            >
+              Web ({origin})
+            </button>
+          ))}
         </div>
       )}
     </div>

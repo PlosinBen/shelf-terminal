@@ -35,7 +35,7 @@ export const Events = {
   CREATE_WORKTREE: 'create-worktree', // (projectIndex)
   OPEN_PM: 'open-pm',                 // ()
   NEW_AGENT_TAB: 'new-agent-tab',     // (projectIndex, provider?)
-  NEW_WEB_TAB: 'new-web-tab',         // (projectIndex)
+  NEW_WEB_TAB: 'new-web-tab',         // (projectIndex, url?) — url pre-navigates the tab
 } as const;
 
 // Test helper — clears every registered handler. Tests run in shared
