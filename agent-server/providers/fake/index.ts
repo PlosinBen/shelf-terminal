@@ -252,6 +252,16 @@ export function createFakeBackend(): ServerBackend {
       return;
     }
 
+    // browser_open:<url> — call the real web.open app-tool op so the per-call
+    // Open/Deny popup (main handleAppTool → browser-open) and the open-Web-tab
+    // path are exercised E2E. Echo the result for the spec to assert.
+    if (step.startsWith('browser_open:')) {
+      const url = step.slice('browser_open:'.length);
+      const res = await callMain('web.open', { url });
+      send({ type: 'message', msgId: mintId('m'), msgType: 'reply', content: `browser_open ${JSON.stringify(res)}` });
+      return;
+    }
+
     if (step === 'picker_single' || step === 'picker_combo' || step === 'picker_multi' || step === 'picker_input' || step === 'picker_number') {
       const id = mintId('p');
       const prompts =
