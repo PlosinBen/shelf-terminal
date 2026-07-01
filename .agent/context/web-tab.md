@@ -122,6 +122,7 @@ related:
 - **權限 = 每次確認、阻塞、絕不記住**（使用者硬需求「每次都問、不可能背景開 N 個窗」）：**不**重用既有兩個 prompt——tool-perm 有「Allow for session」、web-perm 有「Always allow this origin」+ 寫 `web-grants.json`，兩者都讓「核可一次」之後能**背景**開。所以 `browser_open` 有**自己的 popup（`BrowserOpenPrompt.tsx`），只有 Open / Deny**，無記住選項、無持久化 grant。阻塞 + 每次要人點 → agent 到不了第 2 個 `browser_open` 直到第 1 個 resolve → 「一次爆開 N 窗」結構上不可能，不需額外 rate-limit。
 - **沿用 `browser_fetch` 的自帶 gate 模式**（web-tab#2）：SDK 端跳過 tool 提示（claude `canUseTool` 對 `isBrowserOpenTool` 直接 allow、copilot `skipPermission:true`），真 gate 在 main `handleAppTool('web.open')` → `requestBrowserOpen`（`src/main/browser-open.ts`，自有 `web:browser-open-request/-resolve/-close` IPC，跟 agent timeline 脫鉤）。bypass 模式照樣 gate（tool 仍執行到 handleAppTool）。
 - **無 Telegram / away 路由**（跟 web-permission 的 web-tab#5 不同）：登入必須人在鍵盤前，away 使用者無法登入。桌面 popup only + 5 分鐘 timeout → fail-closed deny（backstop）。
+- **optional `reason` 顯示在 popup**：popup **蓋住 agent view**，agent 在 chat 裡解釋「為什麼要開這頁」使用者當下看不到 → 在資訊缺失下做決定。所以 `browser_open(url, reason?)` 把 agent 的說明帶進 popup 顯示（引號標示是 agent 的話）。`reason` 是**非權威**字串（跟 raw URL 一樣，main 端 trim + 截 300 字），只當 context，**不取代**防偽解析的 origin 顯示。
 - **deny 要 fail-loud**：tool 回錯（`browser_open denied by user for <origin>`），agent 才知道別 retry。
 - **開在 agent 的 project**（`ctx.projectId`，跟 web.fetch grant key 同源）：核可後 main 送 `web:open-tab` → `App.tsx` 用 `projectId` 解出 projectIndex → `addTab('web', url)`（`addTab` 自動 activate，登入頁直接在眼前）。
 - **不做**：登入完成偵測（agent 只叫使用者登入、等下一則訊息再 retry）、複用既有 web 分頁（每次核可開新分頁，反正有人為 gate 擋著）、通用瀏覽器控制。都是 YAGNI，等真痛點再說。

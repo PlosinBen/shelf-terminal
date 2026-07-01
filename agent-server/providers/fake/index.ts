@@ -256,8 +256,14 @@ export function createFakeBackend(): ServerBackend {
     // Open/Deny popup (main handleAppTool → browser-open) and the open-Web-tab
     // path are exercised E2E. Echo the result for the spec to assert.
     if (step.startsWith('browser_open:')) {
-      const url = step.slice('browser_open:'.length);
-      const res = await callMain('web.open', { url });
+      // `browser_open:<url>` or `browser_open:<url> <reason>` (optional reason,
+      // space-separated — `|` can't be used, it's the chain separator). URLs
+      // carry no spaces, so the first space cleanly delimits the reason.
+      const rest = step.slice('browser_open:'.length);
+      const sp = rest.indexOf(' ');
+      const url = sp === -1 ? rest : rest.slice(0, sp);
+      const reason = sp === -1 ? undefined : rest.slice(sp + 1);
+      const res = await callMain('web.open', { url, reason });
       send({ type: 'message', msgId: mintId('m'), msgType: 'reply', content: `browser_open ${JSON.stringify(res)}` });
       return;
     }

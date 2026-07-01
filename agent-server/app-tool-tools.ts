@@ -62,7 +62,9 @@ export const BROWSER_OPEN_DESC =
   + 'approve each open (a visible tab appears — nothing opens in the background), then signs in. '
   + 'After they confirm they are logged in, retry browser_fetch. This tool only OPENS the tab — it '
   + 'returns no page content and does not wait for login to finish. Args: url (required, absolute '
-  + 'http(s) URL).';
+  + 'http(s) URL); reason (optional, a short human-readable explanation of WHY you need this page '
+  + "opened — shown in the approval popup, since the popup hides your chat message while the user "
+  + 'decides).';
 
 /**
  * Canonical inventory of the in-process Shelf bridge tools (name + description).

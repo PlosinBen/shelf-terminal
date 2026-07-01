@@ -39,6 +39,12 @@ export function BrowserOpenPrompt() {
         title={<>Let the agent open a <strong>Web tab</strong> for you to log in?</>}
         description={
           <div className="web-perm-desc">
+            {/* Agent's (non-authoritative) explanation — shown FIRST because the
+                popup hides the chat where it would otherwise say why. Quoted so
+                it reads as the agent's words, not a system statement. */}
+            {current.reason && (
+              <div className="browser-open-reason">“{current.reason}”</div>
+            )}
             {/* Authoritatively-parsed origin highlighted; full URL shown muted so
                 the user sees the exact page (and a spoofed host can't hide). */}
             <div className="web-perm-origin">

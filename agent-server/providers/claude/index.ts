@@ -253,8 +253,9 @@ function getShelfMcpServer() {
         }),
         tool(BROWSER_OPEN_TOOL, BROWSER_OPEN_DESC, {
           url: z.string().describe('absolute http(s) URL to open in a visible Web tab for the user to log in'),
-        }, async ({ url }) => {
-          const { text, isError } = await runBridgeTool('web.open', { url });
+          reason: z.string().optional().describe('short explanation of why this page must be opened (shown in the approval popup)'),
+        }, async ({ url, reason }) => {
+          const { text, isError } = await runBridgeTool('web.open', { url, reason });
           return { content: [{ type: 'text' as const, text }], ...(isError ? { isError: true } : {}) };
         }),
       ],

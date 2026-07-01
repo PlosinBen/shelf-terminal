@@ -49,6 +49,14 @@ export interface BrowserOpenMeta {
   origin: string;
   /** eTLD+1 for display highlight (null if unknown). */
   registrableDomain: string | null;
+  /**
+   * Optional agent-supplied explanation of WHY it wants to open this page,
+   * shown in the popup. The popup blocks the agent view, so any reason the
+   * agent gave in chat is hidden while the user decides — surface it here.
+   * NON-authoritative (agent's words, like the raw URL) → shown as context,
+   * never a substitute for the parsed `origin`.
+   */
+  reason?: string;
 }
 
 /** Open/Deny — deliberately NO "remember" option (per-call confirm only). */

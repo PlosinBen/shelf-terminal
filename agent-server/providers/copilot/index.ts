@@ -515,8 +515,9 @@ export function createCopilotBackend(): ServerBackend {
         description: BROWSER_OPEN_DESC,
         parameters: { type: 'object', properties: {
           url: { type: 'string', description: 'absolute http(s) URL to open in a visible Web tab for the user to log in' },
+          reason: { type: 'string', description: 'short explanation of why this page must be opened (shown in the approval popup)' },
         }, required: ['url'], additionalProperties: false },
-        handler: async (args: any) => (await runBridgeTool('web.open', { url: args?.url })).text,
+        handler: async (args: any) => (await runBridgeTool('web.open', { url: args?.url, reason: args?.reason })).text,
         skipPermission: true,
       }),
     ];

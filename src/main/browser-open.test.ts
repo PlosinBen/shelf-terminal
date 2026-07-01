@@ -18,7 +18,7 @@ vi.mock('./app-state', () => ({ getMainWindow: () => (hasWindow ? fakeWin : null
 
 const { requestBrowserOpen, openWebTab, registerBrowserOpenHandlers } = await import('./browser-open');
 
-const META = { url: 'https://kibana.corp.com/login', origin: 'https://kibana.corp.com', registrableDomain: 'corp.com' };
+const META = { url: 'https://kibana.corp.com/login', origin: 'https://kibana.corp.com', registrableDomain: 'corp.com', reason: 'need to read the deploy dashboard' };
 
 function lastRequestId(): string {
   const req = [...sentIpc].reverse().find((m) => m.channel === IPC.WEB_BROWSER_OPEN_REQUEST);
@@ -38,6 +38,7 @@ describe('browser-open', () => {
     const req = sentIpc.find((m) => m.channel === IPC.WEB_BROWSER_OPEN_REQUEST)?.payload;
     expect(req.origin).toBe(META.origin);
     expect(req.url).toBe(META.url);
+    expect(req.reason).toBe(META.reason);
 
     const requestId = lastRequestId();
     ipcHandlers[IPC.WEB_BROWSER_OPEN_RESOLVE](null, { requestId, decision: 'open' });

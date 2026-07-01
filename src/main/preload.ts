@@ -185,7 +185,7 @@ contextBridge.exposeInMainWorld('shelfApi', {
       return () => ipcRenderer.removeListener(IPC.WEB_PERMISSION_CLOSE, listener);
     },
     // browser_open: per-call Open/Deny confirm (never remembered).
-    onBrowserOpenRequest: (callback: (req: { requestId: string; url: string; origin: string; registrableDomain: string | null }) => void) => {
+    onBrowserOpenRequest: (callback: (req: { requestId: string; url: string; origin: string; registrableDomain: string | null; reason?: string }) => void) => {
       const listener = (_e: Electron.IpcRendererEvent, req: any) => callback(req);
       ipcRenderer.on(IPC.WEB_BROWSER_OPEN_REQUEST, listener);
       return () => ipcRenderer.removeListener(IPC.WEB_BROWSER_OPEN_REQUEST, listener);

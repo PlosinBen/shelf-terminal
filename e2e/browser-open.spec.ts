@@ -39,13 +39,15 @@ test.describe('browser_open', () => {
     // setup terminal (1) + agent (2)
     await expect(page.locator('.tab-bar .tab')).toHaveCount(2, { timeout: 5_000 });
 
-    await sendAgentPrompt(page, 'browser_open:https://kibana.corp.com/login');
+    await sendAgentPrompt(page, 'browser_open:https://kibana.corp.com/login log in to read the deploy dashboard');
 
     const popup = page.locator('.web-perm-overlay');
     await expect(popup).toBeVisible({ timeout: 5_000 });
     // Anti-spoof: the authoritatively-parsed origin is highlighted; the full URL is shown.
     await expect(popup.locator('.web-perm-origin')).toContainText('https://kibana.corp.com');
     await expect(popup.locator('.browser-open-url')).toContainText('https://kibana.corp.com/login');
+    // The agent's reason is surfaced (the popup hides the chat where it was said).
+    await expect(popup.locator('.browser-open-reason')).toContainText('log in to read the deploy dashboard');
 
     // ONLY Open + Deny — never a "remember"/"always"/"session" option.
     const options = popup.locator('.agent-perm-option');

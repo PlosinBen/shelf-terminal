@@ -180,11 +180,16 @@ const REGISTRY: Record<string, AppToolDef> = {
       if (!url) throw new Error('web.open requires a "url"');
       const parsed = parseHttpOrigin(url);
       if (!parsed) throw new Error(`web.open: invalid or non-http(s) URL: ${url}`);
+      // Agent-supplied, non-authoritative — trimmed + length-capped so a runaway
+      // string can't blow up the popup; shown as context, never trusted.
+      const rawReason = typeof args.reason === 'string' ? args.reason.trim() : '';
+      const reason = rawReason ? rawReason.slice(0, 300) : undefined;
 
       const decision = await requestBrowserOpen({
         url,
         origin: parsed.origin,
         registrableDomain: parsed.registrableDomain,
+        reason,
       });
       if (decision === 'deny') {
         // Fail-loud: the agent must know not to retry (no silent swallow).

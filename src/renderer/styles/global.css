@@ -4643,3 +4643,5 @@ button {
 .web-perm-note { font-size: 11px; color: var(--text-muted); }
 /* browser_open popup: full target URL under the highlighted origin. */
 .browser-open-url { word-break: break-all; }
+/* browser_open popup: the agent's (non-authoritative) reason, shown first. */
+.browser-open-reason { font-size: 12px; color: var(--text); font-style: italic; margin-bottom: 2px; }
