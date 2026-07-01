@@ -150,10 +150,12 @@ export function App() {
       addTab(projectIndex, undefined, undefined, undefined, 'agent', resolvedProvider);
     });
 
-    const offNewWebTab = on(Events.NEW_WEB_TAB, (projectIndex: number) => {
+    const offNewWebTab = on(Events.NEW_WEB_TAB, (projectIndex: number, url?: string) => {
       const proj = projects[projectIndex];
       if (!proj) return;
-      addTab(projectIndex, undefined, undefined, undefined, 'web');
+      // `url` (from the + menu's granted-origin shortcuts) pre-navigates the tab;
+      // absent = a blank web tab. Unnamed either way → label follows the host.
+      addTab(projectIndex, undefined, undefined, undefined, 'web', undefined, url);
     });
 
     // browser_open (agent tool): main asks to open a Web tab navigated to `url`

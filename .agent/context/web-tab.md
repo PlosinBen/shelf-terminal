@@ -140,3 +140,17 @@ related:
 **Do not change casually because**：別把 `src` 改回綁 `initialUrl` / `tab.url`「讓外部能導航既有分頁」——那正是回授迴圈的成因，會打斷所有 redirect 鏈（SSO 首當其衝）。要程式化導航既有 webview 就呼叫 `loadURL()`，不要動 `src`。
 
 **Related**：`src/renderer/components/WebTabView.tsx`、`src/renderer/App.tsx`（`initialUrl={tab.url}`）、`src/renderer/store.ts`（`setWebTabUrl`）、`e2e/webview-src-freeze.spec.ts`。
+
+## web-tab#10 — `+` menu 用「本專案已授權 origin」當快速重登入捷徑 · [Decision]
+
+**Problem**：內網服務的 session cookie 不跨重啟（web-tab#6），使用者常要重新登入 —— 現在得自己找 domain → 複製 → `+ Web`（空白分頁）→ 貼上 → Enter。摩擦在「重開一個已知內網服務去登入」。
+
+**Decision**：`+` tab menu 的 Web 區塊，在空白「Web」下方列出**本專案 `web.fetch` 已授權的 origin**（`web-grants.json`），每個 = 一鍵開一個導到該 origin 的 web 分頁（`Web (https://…)`）。
+- **來源 = grants，不是 default web tabs / sessions**：grants 剛好就是「這 project 在用的內網服務」且**零設定**（agent 用過就有）、**不 auto-open**（正好符合「要用才開」的重登入情境）。default web tabs 會在連線時強制 auto-open、sessions 會混入 google/github 雜訊且 session expire 時正好不在清單裡（重登入當下最沒用）。
+- **嚴格 per-project**：讀 `listGrants()`（`WEB_LIST_GRANTS`，回 `WebGrantsByProject`）後**只取 `[activeProjectId]`**，**絕不**攤平成跨 app 全域清單 —— 對齊 grant 的 per-project least-privilege（web-tab#3），A 專案授權的 origin 不出現在 B 專案的選單。
+- **開選單時即時抓**（grants 會因使用者核可 web.fetch 而 out-of-band 變動），不快取。
+- **read-only 複用**：只是把 grant 清單當**便利捷徑**顯示，**不改動存取控制語意** —— 不新增/移除 grant、不放寬 gate。grant 仍是 access control 的 source of truth（web-tab#3），這裡只多一個唯讀 consumer。
+
+**Do not change casually because**：別把來源改成 `listAllGrants()` 全域攤平（會跨專案洩漏授權清單、破壞 per-project 界線）；別因為「順便」就在這裡加開/改 grant（存取控制只在 permission gate 動）。
+
+**Related**：`web-tab#3`、`web-tab#6`、`src/renderer/components/TabBar.tsx`（`openAddMenu` + web-origin 捷徑）、`src/renderer/App.tsx`（`NEW_WEB_TAB` 帶 url）、`src/main/web-grants.ts`（`listGrants`）、`e2e/web-quicklinks.spec.ts`。

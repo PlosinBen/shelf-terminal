@@ -222,6 +222,20 @@ button {
   color: #f38ba8;
 }
 
+/* Granted-origin web shortcut: a secondary, dimmer row; long origins truncate
+   with ellipsis (full value in the title tooltip) so the menu stays narrow. */
+.context-menu-item-web-origin {
+  color: var(--text-muted);
+  font-size: 12px;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.context-menu-item-web-origin:hover:not(:disabled) {
+  color: var(--text);
+}
+
 .context-menu-section {
   padding: 6px 12px;
 }
