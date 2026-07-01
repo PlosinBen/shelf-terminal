@@ -158,8 +158,14 @@ Manage the shared web session + the app-global `web.fetch` permission popup. See
 | `onPermissionRequest(cb(req))` | recv `web:permission-request` → unsubscribe fn. `req`: `WebPermissionMeta & { requestId }` (`{ requestId, origin, registrableDomain, method }`) |
 | `resolvePermission(requestId, decision: 'once'|'always'|'deny')` | invoke `web:permission-resolve` |
 | `onPermissionClose(cb(requestId))` | recv `web:permission-close` → unsubscribe fn (resolved elsewhere — Telegram / timeout — dismiss the local popup) |
+| `onBrowserOpenRequest(cb(req))` | recv `web:browser-open-request` → unsubscribe fn. `req`: `BrowserOpenMeta & { requestId }` (`{ requestId, url, origin, registrableDomain }`) |
+| `resolveBrowserOpen(requestId, decision: 'open'|'deny')` | invoke `web:browser-open-resolve` |
+| `onBrowserOpenClose(cb(requestId))` | recv `web:browser-open-close` → unsubscribe fn (resolved elsewhere — timeout — dismiss the local popup) |
+| `onOpenTab(cb(projectId, url))` | recv `web:open-tab` → unsubscribe fn. Post-approval: open a Web tab in `projectId` navigated to `url` |
 
 > The permission round-trip is **decoupled from the agent path** (`shelfApi.agent.resolvePermission` / `agent:permission-request`): `web.fetch` is gated at the resource layer in main, not the provider tool-confirm. See `contracts/app-tool-bridge` (`web.fetch`) and `context/web-tab` web-tab#2.
+>
+> `browser_open` (`web:browser-open-*`) is the agent-opens-a-login-tab tool: a per-call **Open/Deny** popup (never remembered — a separate, stricter round-trip than the `web:permission-*` grant path), then `web:open-tab` opens the tab. See `contracts/app-tool-bridge` (`web.open`) and `context/web-tab` web-tab#8.
 
 ## updater (`shelfApi.updater`)
 
