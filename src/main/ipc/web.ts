@@ -4,6 +4,7 @@ import type { WebSessionEntry, WebGrantsByProject } from '@shared/web-session';
 import { listSessions, deleteSession } from '../web-session';
 import { listAllGrants, revoke } from '../web-grants';
 import { registerWebPermissionHandlers } from '../web-permission';
+import { registerBrowserOpenHandlers } from '../browser-open';
 
 // IPC for the "manage web sessions & grants" UI (Settings → Web). Read-only
 // listing plus destructive delete/revoke. The web.fetch op itself + its
@@ -25,4 +26,5 @@ export function registerWebHandlers(): void {
   });
 
   registerWebPermissionHandlers();
+  registerBrowserOpenHandlers();
 }

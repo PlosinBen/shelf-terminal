@@ -5,6 +5,7 @@ import { TerminalView } from './components/TerminalView';
 import { AgentView } from './components/AgentView';
 import { WebTabView } from './components/WebTabView';
 import { WebPermissionPrompt } from './components/WebPermissionPrompt';
+import { BrowserOpenPrompt } from './components/BrowserOpenPrompt';
 import { FolderPicker } from './components/FolderPicker';
 import { SettingsPanel } from './components/SettingsPanel';
 import { SearchBar } from './components/SearchBar';
@@ -155,6 +156,20 @@ export function App() {
       addTab(projectIndex, undefined, undefined, undefined, 'web');
     });
 
+    // browser_open (agent tool): main asks to open a Web tab navigated to `url`
+    // in the agent's project, AFTER the user approved the per-call popup. addTab
+    // auto-activates the new tab so the login page is front-and-center.
+    const offOpenWebTab = window.shelfApi.web.onOpenTab((projectId: string, url: string) => {
+      const projectIndex = projects.findIndex((p) => p.config.id === projectId);
+      if (projectIndex === -1) {
+        // Fail-loud: the target project vanished (closed mid-turn) — don't
+        // silently drop the user's login request.
+        console.warn(`[browser_open] open-tab for unknown project ${projectId} (${url})`);
+        return;
+      }
+      addTab(projectIndex, undefined, undefined, undefined, 'web', undefined, url);
+    });
+
     const offConnectProject = on(Events.CONNECT_PROJECT, async (projectIndex: number) => {
       const proj = projects[projectIndex];
       if (!proj || proj.tabs.length > 0) return;
@@ -268,7 +283,7 @@ export function App() {
       }
     });
 
-    return () => { offCloseTab(); offRemoveProject(); offNewTab(); offNewAgentTab(); offNewWebTab(); offConnectProject(); offDisconnectProject(); offAddProject(); offToggleSplit(); offSwitchBranch(); };
+    return () => { offCloseTab(); offRemoveProject(); offNewTab(); offNewAgentTab(); offNewWebTab(); offOpenWebTab(); offConnectProject(); offDisconnectProject(); offAddProject(); offToggleSplit(); offSwitchBranch(); };
   }, [projects]);
 
   useEffect(() => {
@@ -408,6 +423,7 @@ export function App() {
       <WorktreeDialog />
       <RemoveConfirmDialog />
       <WebPermissionPrompt />
+      <BrowserOpenPrompt />
     </div>
   );
 }

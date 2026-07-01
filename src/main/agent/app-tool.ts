@@ -22,6 +22,7 @@ import { webFetch } from '../web-session';
 import { parseHttpOrigin } from '../web-session-helpers';
 import { isGranted, grant } from '../web-grants';
 import { requestWebPermission } from '../web-permission';
+import { requestBrowserOpen, openWebTab } from '../browser-open';
 
 /** Per-call context the bridge threads in (which tab/project asked). */
 export interface AppToolContext {
@@ -165,6 +166,39 @@ const REGISTRY: Record<string, AppToolDef> = {
       // the agent/user judges from the actual response (a login page or 401/400
       // is not reliably distinguishable from real data on the wire).
       return await webFetch({ url, method, headers, body });
+    },
+  },
+  'web.open': {
+    // Open a visible Web tab for the user to log in. Carries its OWN per-call
+    // confirm popup (browser-open.ts) — Open/Deny only, never remembered, so a
+    // single approval can't enable background opens. safe:false + the provider
+    // skips the SDK tool prompt (canUseTool/skipPermission), so this gate is the
+    // single choke point (runs even in bypass mode — the tool still executes).
+    safe: false,
+    run: async (args, ctx) => {
+      const url = typeof args.url === 'string' ? args.url : '';
+      if (!url) throw new Error('web.open requires a "url"');
+      const parsed = parseHttpOrigin(url);
+      if (!parsed) throw new Error(`web.open: invalid or non-http(s) URL: ${url}`);
+      // Agent-supplied, non-authoritative — trimmed + length-capped so a runaway
+      // string can't blow up the popup; shown as context, never trusted.
+      const rawReason = typeof args.reason === 'string' ? args.reason.trim() : '';
+      const reason = rawReason ? rawReason.slice(0, 300) : undefined;
+
+      const decision = await requestBrowserOpen({
+        url,
+        origin: parsed.origin,
+        registrableDomain: parsed.registrableDomain,
+        reason,
+      });
+      if (decision === 'deny') {
+        // Fail-loud: the agent must know not to retry (no silent swallow).
+        throw new Error(`browser_open denied by user for ${parsed.origin}`);
+      }
+
+      openWebTab(ctx.projectId ?? '', url);
+      return { opened: true, url: parsed.origin,
+        message: `Opened ${url} in a Web tab. Ask the user to log in there, then retry browser_fetch.` };
     },
   },
   'app_skill.update': {

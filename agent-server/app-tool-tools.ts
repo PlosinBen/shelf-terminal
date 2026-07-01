@@ -6,7 +6,7 @@
  * See context/skills (`skills#2`, the app-skill bridge).
  */
 import { callMain } from './app-tool-client';
-import { WEB_FETCH_TOOL } from '@shared/web-session';
+import { WEB_FETCH_TOOL, BROWSER_OPEN_TOOL } from '@shared/web-session';
 
 export const APP_SKILL_LIST_DESC =
   'List the app-level Agent Skills available in this app (each skill\'s name and description). '
@@ -54,6 +54,18 @@ export const WEB_FETCH_DESC =
   + 'tell the user to log in to that service in a Web tab, then retry. '
   + 'Args: url (required), method (default GET), headers (object), body (string, e.g. a JSON query).';
 
+export const BROWSER_OPEN_DESC =
+  "Open a URL in a visible Web tab so the USER can interact with it — primarily to LOG IN to "
+  + 'an internal/SSO service so a later browser_fetch can use their authenticated session. Use '
+  + 'this when browser_fetch returns a login page or an auth error (401/400, or a 3xx redirect to '
+  + 'a login/SSO URL): call browser_open with the login or service URL. The user is prompted to '
+  + 'approve each open (a visible tab appears — nothing opens in the background), then signs in. '
+  + 'After they confirm they are logged in, retry browser_fetch. This tool only OPENS the tab — it '
+  + 'returns no page content and does not wait for login to finish. Args: url (required, absolute '
+  + 'http(s) URL); reason (optional, a short human-readable explanation of WHY you need this page '
+  + "opened — shown in the approval popup, since the popup hides your chat message while the user "
+  + 'decides).';
+
 /**
  * Canonical inventory of the in-process Shelf bridge tools (name + description).
  * Single source for the `/mcp` card's `shelf` entry. The bridge is registered
@@ -73,6 +85,7 @@ export const SHELF_BRIDGE_TOOLS: BridgeToolSpec[] = [
   { name: 'write_app_skill_file', description: APP_SKILL_WRITE_FILE_DESC },
   { name: 'delete_app_skill_file', description: APP_SKILL_DELETE_FILE_DESC },
   { name: WEB_FETCH_TOOL, description: WEB_FETCH_DESC },
+  { name: BROWSER_OPEN_TOOL, description: BROWSER_OPEN_DESC },
 ];
 
 export interface BridgeToolText {

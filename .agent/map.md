@@ -47,6 +47,7 @@ title: shelf-terminal — Intent → File Index
 | Web session 純 helper | `web-session-helpers.ts` | `parseHttpOrigin()`：`new URL()` 防偽解析 origin + tldts 取 registrable domain（grant key / 提示顯示） |
 | Web.fetch grant 持久化 | `web-grants.ts` | per-`(projectId, origin)` grant CRUD（`projects/<id>/web-grants.json`）+ `listAllGrants` |
 | Web.fetch permission channel | `web-permission.ts` | `requestWebPermission()`：app 層全域 popup + away→Telegram + first-wins + timeout backstop |
+| browser_open gate + 開分頁 | `browser-open.ts` | `requestBrowserOpen()`：Open/Deny popup（不記住、無 Telegram、timeout backstop）+ `openWebTab()` 送 `web:open-tab`（agent 開登入分頁的 `web.open` op 用） |
 | Webview hardening | `web-session-harden.ts` | 強制安全 webPreferences、彈窗/導航/權限/下載鎖定（全在 main） |
 
 ## Connector (src/main/connector/)
@@ -140,6 +141,7 @@ title: shelf-terminal — Intent → File Index
 | Agent 對話 UI | `components/AgentView.tsx` + `components/agent/{MessageList,InputZone,StatusBar,DecisionPanel,PlanPanel,AuthPane}.tsx` + `agentTabStore.ts` + `agentTabSubscriptions.ts` + `agent-message-builder.ts` | AgentView 是 layout coordinator，domain state 在 per-tab `agentTabStore`，子 component 各自 subscribe |
 | Web tab（登入 surface + 瀏覽） | `components/WebTabView.tsx` | `<webview partition=persist:web>` + 網址列 + identity chip；人在這登入內網服務 |
 | Web.fetch 授權 popup | `components/WebPermissionPrompt.tsx` | app 層全域 popup，防偽 origin 顯示 + allow once/always/deny（由 `web:permission-request` 驅動） |
+| browser_open 確認 popup | `components/BrowserOpenPrompt.tsx` | app 層全域 popup，只有 Open/Deny（不記住），由 `web:browser-open-request` 驅動；核可後 `web:open-tab` 由 `App.tsx` 開分頁 |
 | Web session/grant 管理 | `components/settings/WebSettingsTab.tsx` | Settings → Web 分頁：已登入 session 清單(刪) + grant whitelist(per-project 分組、revoke) |
 | App 層 MCP server 管理 | `components/McpView.tsx` | 右側欄 view（BottomBar 插頭 icon 開、Skills 的姊妹）：list + per-transport 新增/編輯(stdio/http)、rename、`?` scope help。沿用 `.right-panel` 殼 |
 | 選擇面板 | `components/SelectionPanel.tsx` | Bottom-anchored 單題 N-way 選單，permission popup + config picker 共用 |
@@ -183,7 +185,7 @@ title: shelf-terminal — Intent → File Index
 | Logger | `logger.ts` | 統一 log 模組，支援 file writer / log level / env override |
 | 預設值 | `defaults.ts` | DEFAULT_SETTINGS, DEFAULT_KEYBINDINGS |
 | Slash prefix parser | `slash-prefix.ts` | `parseSlashPrefix(prompt)`，provider + renderer 同份 |
-| Web session 常數/型別 | `web-session.ts` | `WEB_SESSION_PARTITION`、`WEB_FETCH_TOOL`/`isWebFetchTool`、`WebFetchRequest/Result`、`WebPermissionMeta` |
+| Web session 常數/型別 | `web-session.ts` | `WEB_SESSION_PARTITION`、`WEB_FETCH_TOOL`/`isWebFetchTool`、`BROWSER_OPEN_TOOL`/`isBrowserOpenTool`、`WebFetchRequest/Result`、`WebPermissionMeta`、`BrowserOpenMeta`/`BrowserOpenDecision` |
 | 單元測試 | `slash-prefix.test.ts` | `parseSlashPrefix` 邊界 case 覆蓋 |
 
 ## Config / CI

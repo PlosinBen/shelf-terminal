@@ -9,8 +9,8 @@ import type { ProviderModel } from '@shared/types';
 import { stripCwd, resolveSkillsPluginRoot } from '../shared';
 import { loadProjectedMcpServers } from '../mcp-config';
 import type { McpServerBlock } from '@shared/mcp';
-import { runBridgeTool, APP_SKILL_LIST_DESC, APP_SKILL_GET_DESC, APP_SKILL_CREATE_DESC, APP_SKILL_UPDATE_DESC, APP_SKILL_READ_FILE_DESC, APP_SKILL_WRITE_FILE_DESC, APP_SKILL_DELETE_FILE_DESC, WEB_FETCH_DESC, SHELF_BRIDGE_TOOLS } from '../../app-tool-tools';
-import { WEB_FETCH_TOOL } from '@shared/web-session';
+import { runBridgeTool, APP_SKILL_LIST_DESC, APP_SKILL_GET_DESC, APP_SKILL_CREATE_DESC, APP_SKILL_UPDATE_DESC, APP_SKILL_READ_FILE_DESC, APP_SKILL_WRITE_FILE_DESC, APP_SKILL_DELETE_FILE_DESC, WEB_FETCH_DESC, BROWSER_OPEN_DESC, SHELF_BRIDGE_TOOLS } from '../../app-tool-tools';
+import { WEB_FETCH_TOOL, BROWSER_OPEN_TOOL } from '@shared/web-session';
 import { serverLog } from '../../server-logger';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -506,6 +506,18 @@ export function createCopilotBackend(): ServerBackend {
           body: { type: 'string', description: 'request body, e.g. a JSON query string' },
         }, required: ['url'], additionalProperties: false },
         handler: async (args: any) => (await runBridgeTool('web.fetch', { url: args?.url, method: args?.method, headers: args?.headers, body: args?.body })).text,
+        skipPermission: true,
+      }),
+      // skipPermission: browser_open carries its OWN per-call Open/Deny popup
+      // downstream in main's handleAppTool (never remembered). Skip the copilot
+      // tool prompt to avoid a double prompt; the downstream gate still runs.
+      sdkModule!.defineTool(BROWSER_OPEN_TOOL, {
+        description: BROWSER_OPEN_DESC,
+        parameters: { type: 'object', properties: {
+          url: { type: 'string', description: 'absolute http(s) URL to open in a visible Web tab for the user to log in' },
+          reason: { type: 'string', description: 'short explanation of why this page must be opened (shown in the approval popup)' },
+        }, required: ['url'], additionalProperties: false },
+        handler: async (args: any) => (await runBridgeTool('web.open', { url: args?.url, reason: args?.reason })).text,
         skipPermission: true,
       }),
     ];

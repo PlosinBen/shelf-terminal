@@ -126,6 +126,12 @@ interface ShelfApi {
     ) => () => void;
     resolvePermission: (requestId: string, decision: 'once' | 'always' | 'deny') => Promise<void>;
     onPermissionClose: (callback: (requestId: string) => void) => () => void;
+    onBrowserOpenRequest: (
+      callback: (req: import('../shared/web-session').BrowserOpenMeta & { requestId: string }) => void,
+    ) => () => void;
+    resolveBrowserOpen: (requestId: string, decision: 'open' | 'deny') => Promise<void>;
+    onBrowserOpenClose: (callback: (requestId: string) => void) => () => void;
+    onOpenTab: (callback: (projectId: string, url: string) => void) => () => void;
   };
   pm: {
     send: (message: string) => Promise<void>;

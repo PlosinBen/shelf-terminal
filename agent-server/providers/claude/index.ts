@@ -1,8 +1,8 @@
 import { query as sdkQuery, tool, createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk';
 import type { Query, Options, SDKMessage, SDKUserMessage, CanUseTool } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
-import { runBridgeTool, APP_SKILL_LIST_DESC, APP_SKILL_GET_DESC, APP_SKILL_CREATE_DESC, APP_SKILL_UPDATE_DESC, APP_SKILL_READ_FILE_DESC, APP_SKILL_WRITE_FILE_DESC, APP_SKILL_DELETE_FILE_DESC, WEB_FETCH_DESC } from '../../app-tool-tools';
-import { isWebFetchTool, WEB_FETCH_TOOL } from '@shared/web-session';
+import { runBridgeTool, APP_SKILL_LIST_DESC, APP_SKILL_GET_DESC, APP_SKILL_CREATE_DESC, APP_SKILL_UPDATE_DESC, APP_SKILL_READ_FILE_DESC, APP_SKILL_WRITE_FILE_DESC, APP_SKILL_DELETE_FILE_DESC, WEB_FETCH_DESC, BROWSER_OPEN_DESC } from '../../app-tool-tools';
+import { isWebFetchTool, WEB_FETCH_TOOL, isBrowserOpenTool, BROWSER_OPEN_TOOL } from '@shared/web-session';
 import { serverLog } from '../../server-logger';
 import { createRouterState, notePush, routeMessage } from './turn-router';
 import { randomUUID } from 'node:crypto';
@@ -251,6 +251,13 @@ function getShelfMcpServer() {
           const { text, isError } = await runBridgeTool('web.fetch', { url, method, headers, body });
           return { content: [{ type: 'text' as const, text }], ...(isError ? { isError: true } : {}) };
         }),
+        tool(BROWSER_OPEN_TOOL, BROWSER_OPEN_DESC, {
+          url: z.string().describe('absolute http(s) URL to open in a visible Web tab for the user to log in'),
+          reason: z.string().optional().describe('short explanation of why this page must be opened (shown in the approval popup)'),
+        }, async ({ url, reason }) => {
+          const { text, isError } = await runBridgeTool('web.open', { url, reason });
+          return { content: [{ type: 'text' as const, text }], ...(isError ? { isError: true } : {}) };
+        }),
       ],
     });
   }
@@ -382,6 +389,14 @@ export function createClaudeBackend(): ServerBackend {
     // prompt here so the user isn't asked twice. The downstream gate runs even in
     // bypass mode (the tool still executes), so credential use stays authorized.
     if (isWebFetchTool(toolName)) {
+      return { behavior: 'allow', updatedInput: input };
+    }
+
+    // browser_open likewise carries its OWN downstream gate (main handleAppTool:
+    // a per-call Open/Deny popup, never remembered). Skip the provider tool
+    // prompt so the user isn't asked twice; the downstream gate still runs
+    // (even in bypass mode — the tool still executes).
+    if (isBrowserOpenTool(toolName)) {
       return { behavior: 'allow', updatedInput: input };
     }
 

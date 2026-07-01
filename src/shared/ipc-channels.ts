@@ -105,6 +105,14 @@ export const IPC = {
   // main→renderer: a pending web-permission was resolved elsewhere (Telegram /
   // timeout) → dismiss the local popup.
   WEB_PERMISSION_CLOSE: 'web:permission-close',
+  // browser_open per-call confirm popup (Open/Deny only — never remembered).
+  WEB_BROWSER_OPEN_REQUEST: 'web:browser-open-request',
+  WEB_BROWSER_OPEN_RESOLVE: 'web:browser-open-resolve',
+  // main→renderer: a pending browser-open was resolved elsewhere (timeout) →
+  // dismiss the local popup.
+  WEB_BROWSER_OPEN_CLOSE: 'web:browser-open-close',
+  // main→renderer: open a Web tab navigated to a URL (post-approval).
+  WEB_OPEN_TAB: 'web:open-tab',
 
   // App info
   APP_LOGS_PATH: 'app:logs-path',
