@@ -28,6 +28,11 @@ import type {
  *   thinking:<msg>      thinking message
  *   tool:<name>         tool_use + tool_result success
  *   tool_err:<name>     tool_use + tool_result error
+ *   subagent:<label>    outer Agent/Task tool_use card + inner steps tagged with
+ *                       parentToolUseId (nested under it in the renderer) + the
+ *                       outer card's completion. Emits NO task_event — mirrors a
+ *                       real subagent post-filter (routeTask drops it from the
+ *                       panel), so the panel stays empty. See subagent-display.
  *   permission:<tool>   permission_request, await resolve, follow-up system msg
  *   picker_single       1-prompt single-select picker (3 options)
  *   picker_combo        1-prompt picker with options AND free-text (real
@@ -215,6 +220,33 @@ export function createFakeBackend(): ServerBackend {
         subtitle: '{}',
         body: { content: isErr ? `${toolName} failed` : `${toolName} ok` },
         ...(isErr ? { errorMessage: 'Tool returned an error' } : {}),
+      });
+      return;
+    }
+
+    // subagent:<label> — a Task/Agent subagent. The outer tool_use is a top-level
+    // card; the subagent's inner activity carries parentToolUseId so the renderer
+    // nests it UNDER that card. NO task_event is emitted (a real subagent is
+    // dropped from the panel by routeTask before the wire). See subagent-display.
+    if (step.startsWith('subagent:')) {
+      const label = step.slice('subagent:'.length) || 'research';
+      const outerId = mintId('t');
+      // Outer Agent/Task tool_use — pending card in the message list.
+      send({ type: 'message', msgId: outerId, msgType: 'fold_code', label: 'Task', subtitle: label });
+      // Inner subagent step: a nested tool_use card.
+      send({
+        type: 'message', msgId: mintId('t'), msgType: 'fold_code',
+        label: 'Read', subtitle: 'inner.ts',
+        body: { content: 'inner read ok' },
+        parentToolUseId: outerId,
+      });
+      // Inner subagent step: nested prose.
+      send({ type: 'message', msgId: mintId('m'), msgType: 'reply', content: `subagent step: ${label}`, parentToolUseId: outerId });
+      // Outer tool_result — completes the Agent card (same msgId upsert, top-level).
+      send({
+        type: 'message', msgId: outerId, msgType: 'fold_code',
+        label: 'Task', subtitle: label,
+        body: { content: `subagent done: ${label}` },
       });
       return;
     }
