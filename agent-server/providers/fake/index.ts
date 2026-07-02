@@ -517,6 +517,15 @@ export function createFakeBackend(): ServerBackend {
     },
 
     async gatherCapabilities(): Promise<ProviderCapabilities> {
+      // Test hook: a spec launches with SHELF_TEST_CAPS_FAIL=1 to drive the
+      // init-failed path — the caps RPC throws → agent-server replies with an
+      // `error` payload → remote.ts rejects → startSession marks init 'failed'.
+      // Lets an E2E assert the init-readiness gate (locked input, no send, Retry
+      // pane) deterministically. Scoped to that spec's own app instance, so it
+      // never affects other SHELF_TEST_MODE specs.
+      if (process.env.SHELF_TEST_CAPS_FAIL === '1') {
+        throw new Error('fake init failure (SHELF_TEST_CAPS_FAIL)');
+      }
       return {
         models: [{ value: 'fake-model', displayName: 'fake-model' }],
         permissionModes: [{ value: 'default', displayName: 'ask' }],

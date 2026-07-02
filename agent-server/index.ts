@@ -393,6 +393,10 @@ rl.on('line', (line) => {
           const caps = await backend.gatherCapabilities?.(msg.cwd ?? process.cwd(), msg.sessionId, msg.customModels, msg.intent);
           send({ type: 'capabilities', requestId: msg.requestId ?? '', ...(caps ?? {}) });
         } catch (err: any) {
+          // Real data loss: gatherCapabilities threw → response carries only
+          // `error`, and remote.ts resolves an all-empty caps (perm modes vanish).
+          // Loud so the true cause (e.g. Copilot listModels network throw) is visible.
+          serverLog('error', 'caps', `${provider} gatherCapabilities threw: ${err?.message ?? err} reqId=${msg.requestId ?? ''}`);
           send({ type: 'capabilities', requestId: msg.requestId ?? '', error: err?.message ?? String(err) });
         }
       })();

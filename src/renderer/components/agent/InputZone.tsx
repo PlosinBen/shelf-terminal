@@ -59,6 +59,14 @@ export function InputZone({ tabId, projectId, cwd, connection, visible, rootRef,
   // and the streaming→idle reset so ESC keeps working across the brief inter-turn
   // idle gap while the server drains the queue.
   const busy = isStreaming || pendingCount > 0;
+  // Init readiness gate. The agent is usable only once the backend reports
+  // init 'ready' (capabilities gathered). While 'starting' — or 'failed' (e.g.
+  // the caps RPC timed out, meaning the SDK/CLI link is unhealthy) — the input
+  // is locked: no send is emitted and nothing is queued (a queued send implies
+  // eventual delivery we can't promise before init succeeds). 'failed' surfaces
+  // the Retry affordance in the message list above. See agent-config-flow.
+  const initStatus = tab?.initStatus ?? 'starting';
+  const initReady = initStatus === 'ready';
   const capabilities = tab?.capabilities ?? null;
   // store.actual* reads stay — they're used for the vision-capability
   // check (matches model in capabilities.models list) and as the
@@ -155,6 +163,9 @@ export function InputZone({ tabId, projectId, cwd, connection, visible, rootRef,
   const handleSend = useCallback(() => {
     const text = input.trim();
     if (!text && pendingFiles.length === 0 && pendingImages.length === 0) return;
+    // Locked until init 'ready' — don't emit, don't queue. Belt-and-suspenders:
+    // the textarea is also disabled when !initReady, so Enter can't reach here.
+    if (!initReady) return;
 
     // Inline picker shortcut: `/model` / `/effort` / `/permission` without
     // args opens a renderer-side picker (options come from capabilities,
@@ -203,7 +214,7 @@ export function InputZone({ tabId, projectId, cwd, connection, visible, rootRef,
       },
       clientMsgId,
     });
-  }, [tabId, input, pendingFiles, pendingImages, intent]);
+  }, [tabId, input, pendingFiles, pendingImages, intent, initReady]);
 
   const handleStop = useCallback(() => {
     // ESC-twice (stop) means "abort this turn AND drop everything I queued up
@@ -306,7 +317,14 @@ export function InputZone({ tabId, projectId, cwd, connection, visible, rootRef,
           value={input}
           onChange={handleInputChange}
           onKeyDown={handleKeyDown}
-          placeholder="Ask something..."
+          disabled={!initReady}
+          placeholder={
+            initReady
+              ? 'Ask something...'
+              : initStatus === 'failed'
+                ? 'Agent unavailable — retry above'
+                : 'Starting agent…'
+          }
           rows={1}
         />
         {escPending && <span className="agent-esc-hint">Press Esc again to stop</span>}

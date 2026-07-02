@@ -279,12 +279,27 @@ export function createRemoteBackend(
       // 「真的沒能力」跟「啟動失敗」，並對應送 init_status=failed 給 renderer。
       if (!proc) throw new Error('Failed to start agent-server');
       const requestId = `cap-${Date.now()}`;
-      return new Promise<import('./types').ProviderCapabilities>((resolve) => {
+      return new Promise<import('./types').ProviderCapabilities>((resolve, reject) => {
         const timeout = setTimeout(() => {
-          resolve({ models: [], permissionModes: [], effortLevels: [], slashCommands: [] });
+          // Fail-loud + fail-closed. A caps RPC that never answers means the
+          // agent-server ↔ Copilot CLI/SDK link is unhealthy — and we can't tell
+          // "slow listModels" (turns would still work) from "CLI spawn hung"
+          // (turns dead too), because ensureClient is shared. REJECT instead of
+          // resolving empty caps: startSession's .catch marks init 'failed' →
+          // the input stays locked + Retry shows, rather than faking a 'ready'
+          // pane the user can send into. See agent-config-flow (init readiness).
+          log.warn('agent-remote', `getCapabilities RPC timed out after 30s (${provider}) reqId=${requestId} — failing init (SDK link unhealthy)`);
+          reject(new Error('getCapabilities timed out after 30s — agent-server did not respond'));
         }, 30000);
         proc.onResponse(requestId, 'capabilities', (payload) => {
           clearTimeout(timeout);
+          // Same rule for an explicit error payload (gatherCapabilities threw in
+          // the child): reject, don't swallow into empty caps.
+          if ((payload as any).error) {
+            log.warn('agent-remote', `getCapabilities RPC returned error (${provider}) reqId=${requestId}: ${(payload as any).error} — failing init`);
+            reject(new Error((payload as any).error));
+            return;
+          }
           resolve({
             models: payload.models ?? [],
             permissionModes: payload.permissionModes ?? [],
