@@ -435,7 +435,12 @@ async function sendMessage(
     // a foreground idle reaches the renderer, so a cancelled queued turn (which
     // leaves other turns running) never emits it.
     session.activeTurns = Math.max(0, session.activeTurns - 1);
-    if (session.activeTurns === 0) {
+    const sessionIdle = session.activeTurns === 0;
+    // Turn-end trace (debug). Shows whether a turn's generator actually ended
+    // (vs. wedged mid-turn after a stall, leaving activeTurns > 0 forever) and
+    // whether this was the transition that released the renderer spinner.
+    log.debug('agent', `${tag} turn end activeTurns=${session.activeTurns} sessionIdle=${sessionIdle}`);
+    if (sessionIdle) {
       session.state = 'idle';
       // Renderer-only: observers already saw the raw per-turn idle in the loop
       // above (unchanged telegram-bridge behavior); this is the session-level

@@ -1,5 +1,6 @@
 import { onAgent, emitAgent } from './events';
 import { buildAgentMsg } from './agent-message-builder';
+import { debugLog } from './debugLog';
 import {
   peekAgentTab,
   appendChunk,
@@ -29,9 +30,16 @@ import {
 // symmetric.
 export function bindAgentStoreSubscriptions(): () => void {
   const offMessage = onAgent('agent:onMessage', ({ tabId, msg }) => {
+    const mt = (msg as any)?.msgType;
+    // Renderer receive-hop trace (→ main log at info/debug). The last leg of the
+    // chain: an event in main's wire-rx / session-event trace but NOT here means
+    // it never crossed IPC; here-but-not-rendered narrows it to buildAgentMsg /
+    // store. See connection-wedge trace.
+    debugLog('agent-rx', `msg tab=${tabId.slice(0, 8)} msgType=${mt}`);
     const tab = peekAgentTab(tabId);
     if (!tab) {
-      console.warn('[agent] message for uninitialized tab — dropping', { tabId, msgType: (msg as any)?.msgType });
+      debugLog('agent-rx', `DROP uninitialized tab=${tabId.slice(0, 8)} msgType=${mt}`);
+      console.warn('[agent] message for uninitialized tab — dropping', { tabId, msgType: mt });
       return;
     }
     const built = buildAgentMsg(msg, tab.provider);
@@ -39,7 +47,8 @@ export function bindAgentStoreSubscriptions(): () => void {
       // Unknown msgType (buildAgentMsg default → null). Real content being
       // dropped on the renderer side — log so an unhandled render primitive is
       // visible instead of a message silently not showing. See background-tasks#5.
-      console.warn('[agent] unhandled msgType — message dropped, not rendered', { tabId, msgType: (msg as any)?.msgType });
+      debugLog('agent-rx', `DROP unhandled msgType tab=${tabId.slice(0, 8)} msgType=${mt}`);
+      console.warn('[agent] unhandled msgType — message dropped, not rendered', { tabId, msgType: mt });
       return;
     }
     upsertMessage(tabId, built);

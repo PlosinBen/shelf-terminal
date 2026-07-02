@@ -134,7 +134,19 @@ export function createTurnDispatcher(
     // never split across the two delivery paths.
     if (onSessionEvent && (m?.type === 'error' || m?.type === 'message' || m?.type === 'stream')) {
       const ev = parseRemoteMessage(m);
-      if (ev) onSessionEvent(ev);
+      if (ev) {
+        // Session-scoped display delivery (tool results / replies / streams land
+        // here, NOT via the per-turn generator). Debug trace closes the gap
+        // between wire-rx and the renderer: if a tool result shows in wire-rx but
+        // never here, it's being dropped at parse; if here but not rendered, the
+        // renderer dropped it. See connection-wedge trace.
+        log.debug('agent-remote', `session-event type=${m.type}${m.msgType ? ` msgType=${m.msgType}` : ''}`);
+        onSessionEvent(ev);
+      } else {
+        // Display content that parseRemoteMessage couldn't build (unknown
+        // msgType / malformed) — real content vanishing. Never silent.
+        log.info('agent-remote', `session display event unparseable, dropped: type=${m.type}${m.msgType ? `/${m.msgType}` : ''}`);
+      }
       return;
     }
 
@@ -203,6 +215,7 @@ export function createTurnDispatcher(
     turn.events.push(event);
     if (event.type === 'status' && (event.payload as any).state === 'idle') {
       turn.done = true;
+      log.debug('agent-remote', `turn ${turnId} got idle → ending`);
     }
     turn.resolve?.();
   }
@@ -218,6 +231,7 @@ export function createTurnDispatcher(
     // agent-server's early events get dropped as "unknown turn".
     const state: TurnState = { events: [], done: false, permissionHandler };
     turns.set(turnId, state);
+    log.debug('agent-remote', `turn registered ${turnId} (live turns=${turns.size})`);
 
     async function* drain(): AsyncGenerator<AgentEvent> {
       try {

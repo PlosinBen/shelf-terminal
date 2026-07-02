@@ -53,3 +53,21 @@ related:
 **Root cause**：agent-server **啟動時** sweep 跑在第一拍心跳**之前**，且當下 `lastAppId` 未知 → 把沒 `.heartbeat` 的 `apps/<appId>` 當 orphan 回收。
 
 **Fix**：**投影/sync 時就 touch `apps/<appId>/.heartbeat`**（投影本身就是 liveness 訊號，不必等第一拍 ping）。docker E2E `agent-deploy-skills.spec.ts` 涵蓋此 case。（version dir 無此問題：有 fresh `.deployed` fallback + current/floor 保護。）
+
+## connection-health#4 — 連線 wedge 後無自動復原；沿 wire-tx→wire-rx→session-event→agent-rx trace 定位  ·  [Gotcha]
+
+**Symptom**：agent 執行中筆電闔蓋 + 斷網 → 醒來顯示錯誤；發 `Continue` 後 tool **實際有跑成功**，但 result 一直到不了 renderer，直到手動 disconnect→connect 才正常。
+
+**Root cause（已確認的架構缺口）**：斷線後**沒有任何偵測/自動復原**。health tracker 算得出 `dead`（`connection-health#1`）卻只拿去畫狀態燈（`Sidebar.tsx`）；`proc.on('exit')` 只記 log；`sendLine` 對死掉的 stdin 照寫。所以連線一旦 wedge，只有手動 disconnect→connect（`destroySession` → 全新 `wrapProcess`：重建 stdout `buffer` + `dispatcher` + provider SDK 狀態）能清掉。**local 尤其要注意**：app↔agent-server 是同機 OS pipe，會撐過睡眠；斷網打到的是 agent-server 子行程「裡面」provider SDK 的對外 API 呼叫 → 那條 in-flight streaming 壞掉可能讓 provider/pipe 進 wedged 態，pipe 撐過但事件不流。
+
+**如何定位（不猜；把 logLevel 設 `debug` 重現一次）**：event 走 provider→pipe→main→renderer，每一跳都有 trace（預設關）：
+- `wire-tx`（`agent-server/index.ts` `send`）— provider 到底有沒有把該 event 寫出 stdout。
+- `wire-rx`（`remote.ts` stdout loop）— main 有沒有從 pipe 收到；配 `stdout buffer residual`（截斷/desync）。
+- `pong` / `ping` — 醒來後 pong 有沒有恢復 → 區分「pipe 活、provider wedge」vs「pipe/transport 死」。
+- `session-event`（`turn-dispatcher.ts`）— 顯示內容（tool result / reply / stream）有沒有走到 session sink（顯示內容是 session-scoped、不經 per-turn generator）。
+- `agent-rx`（`agentTabSubscriptions.ts`，經 `debugLog`→main log，info 即現）— 有沒有跨過 IPC 到 renderer store。
+- 判讀：`wire-tx` 有、`wire-rx` 無 = 傳輸中掉（pipe/睡眠）；`wire-rx`/`session-event` 有、`agent-rx` 無 = IPC 沒過；`agent-rx` 有卻沒渲染 = renderer 端（`buildAgentMsg`/store）。`sendLine to non-writable stdin` warn = 送到死 pipe。
+
+**現況**：復原策略（自動 respawn vs 明示 reconnect 提示）與確切 wedge 點**待這輪 trace 重現後再定**。此條先記缺口 + 診斷路徑。
+
+**Related**：`connection-health#1`（heartbeat / dead 偵測）、`connection-health#2`（跨睡眠：不做 client auto-kill）、`agent-core#8`（每個 send 必以 idle 收尾）、`src/main/agent/{remote,index,turn-dispatcher}.ts`、`agent-server/index.ts`、`src/renderer/agentTabSubscriptions.ts`。
