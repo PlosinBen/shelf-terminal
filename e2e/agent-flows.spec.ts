@@ -79,6 +79,25 @@ test.describe('agent flows via fake provider', () => {
       // Status should drop to idle after the turn completes.
       await expect(page.locator('.agent-status-label:visible')).toHaveText('idle', { timeout: 5_000 });
     });
+
+    // Regression: providers piggyback mid-turn usage/quota on `state:'streaming'`
+    // status events (copilot: rateLimits / contextUsage). The queued-cancel fix
+    // (agent-core#10) must strip `state` only on the TERMINAL idle — dropping
+    // streaming-status metrics wholesale blanks the status-bar quota.
+    test('mid-turn streaming usage/quota reaches the status bar', async ({ shelfApp: { page } }) => {
+      await setupProject(page);
+      await openAgentTab(page);
+      // `usage` emits a streaming status with contextUsage + rateLimits, then the
+      // turn produces its reply. Segments are sticky, so they persist post-turn.
+      await sendAgentPrompt(page, 'usage|text:done');
+
+      const messages = page.locator('.agent-messages:visible');
+      await expect(messages).toContainText('done', { timeout: 5_000 });
+
+      const statusBar = page.locator('.agent-status-bar:visible');
+      await expect(statusBar).toContainText('ctx: 42%', { timeout: 5_000 });
+      await expect(statusBar).toContainText('quota: 7%', { timeout: 5_000 });
+    });
   });
 
   test.describe('fold (tool_use)', () => {

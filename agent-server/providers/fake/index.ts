@@ -360,6 +360,21 @@ export function createFakeBackend(): ServerBackend {
       return;
     }
 
+    // usage — emit a MID-TURN `state:'streaming'` status carrying usage/quota
+    // (contextUsage + rateLimits), the way copilot piggybacks quotaSnapshots on
+    // assistant.usage / session.usage_info. Lets an E2E assert the status bar
+    // surfaces mid-turn quota — and guards the regression where main dropped
+    // streaming-status metrics (only terminal idle must be stripped). See agent-core#10.
+    if (step === 'usage') {
+      send({
+        type: 'status',
+        state: 'streaming',
+        contextUsage: { text: 'ctx: 42%', severity: 'normal' },
+        rateLimits: [{ text: 'quota: 7%', severity: 'normal' }],
+      });
+      return;
+    }
+
     // plan:<markdown> — emit a plan / todo-list side-channel update. Routed to
     // PlanPanel (tab.currentPlan), NOT the timeline and NOT the background-tasks
     // panel — lets an E2E assert the plan/todo surface renders independently of
