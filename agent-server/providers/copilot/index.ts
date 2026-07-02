@@ -1314,7 +1314,17 @@ export function createCopilotBackend(): ServerBackend {
       }
       // listModels hits the GitHub model API — only fetch when authed. Logged
       // out it would throw/hang, and AuthPane covers the pane anyway.
-      if (!authRequired) await listModelsCached();
+      // Fail-loud + rethrow: if this network call throws, gatherCapabilities
+      // throws → remote.ts rejects the caps RPC → init 'failed' (agent-config-flow#7).
+      // The loud log names the cause instead of it vanishing into a caps failure.
+      if (!authRequired) {
+        try {
+          await listModelsCached();
+        } catch (err: any) {
+          serverLog('error', 'caps', `copilot listModels threw (caps RPC will fail → init failed): ${err?.message ?? err}`);
+          throw err;
+        }
+      }
       // Seed closures from renderer's saved intent BEFORE buildCapabilities so
       // the first `currentPermissionMode` (and model/effort) the renderer sees
       // after a reconnect matches projectConfig.agentPrefs instead of the

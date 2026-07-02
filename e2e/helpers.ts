@@ -45,9 +45,15 @@ function cleanupTestDirectories() {
  * the full wire chain without real Claude/Copilot SDKs.
  */
 export const test = base.extend<{
+  // Opt-in: when a spec does `test.use({ capsFail: true })`, the agent-server
+  // fake provider's gatherCapabilities throws (SHELF_TEST_CAPS_FAIL=1), driving
+  // the init-'failed' path so a spec can assert the input-readiness gate. Default
+  // false leaves every other spec's launch env unchanged.
+  capsFail: boolean;
   shelfApp: { app: ElectronApplication; page: Page; userDataDir: string };
 }>({
-  shelfApp: async ({}, use) => {
+  capsFail: [false, { option: true }],
+  shelfApp: async ({ capsFail }, use) => {
     const userDataDir = createTempUserDataDir();
     seedProjectsData(userDataDir);
     ensureTestDirectories();
@@ -58,7 +64,7 @@ export const test = base.extend<{
       // !== 'test'`) so e2e launches don't steal macOS foreground focus. Set it
       // HERE (not only via the `NODE_ENV=test npx playwright` npm script) so a
       // bare `npx playwright test` invocation still gets hidden windows.
-      env: { ...process.env, SHELF_TEST_MODE: '1', NODE_ENV: 'test' },
+      env: { ...process.env, SHELF_TEST_MODE: '1', NODE_ENV: 'test', ...(capsFail ? { SHELF_TEST_CAPS_FAIL: '1' } : {}) },
     });
 
     let page: Page;
