@@ -346,6 +346,34 @@ export interface ProviderCapabilities {
   authRequired?: boolean;
 }
 
+/**
+ * A background task the provider spawned that MAY have escaped the process tree
+ * (detached `setsid` shell), so the stdin-EOF teardown cascade can't reach it.
+ * Enumerated by {@link ServerBackend.listReapableTasks} and killed via
+ * {@link ServerBackend.stopTask} by the centralized reaper on an INTENTIONAL
+ * teardown. See the `detached-task-reaping` design.
+ */
+export interface ReapableTask {
+  /** Provider-native task id — hand back to `stopTask(id)`. */
+  id: string;
+  /** Only `'shell'` truly escapes the tree today; agent/subagent tasks are inline. */
+  kind: 'shell' | 'agent';
+  /** `'running'` = still alive (reap candidate); `'done'` = already terminal. */
+  status: 'running' | 'done';
+  /**
+   * Reserved hint — NOT gated on in Phase 1 (an intentional teardown reaps ALL
+   * running shell tasks; the session is ending). Left for a future finer policy.
+   */
+  longLived?: boolean;
+  /**
+   * OPTIONAL capability difference — a provider that exposes its detached pid MAY
+   * set it (Copilot's `.pid` file), a provider that doesn't (Claude) omits it. The
+   * live reaper does NOT branch on it (kill goes through `stopTask`); it exists for
+   * the Phase-2 crash net that reads pids off disk cross-session.
+   */
+  pid?: number;
+}
+
 export interface ServerBackend {
   query(input: QueryInput, send: SendFn): Promise<void>;
   stop(): Promise<void>;
@@ -403,6 +431,15 @@ export interface ServerBackend {
    * providers without a stop-task API. See background-tasks#3.
    */
   stopTask?(taskId: string): Promise<void>;
+  /**
+   * Enumerate the provider's background tasks that a teardown should consider
+   * reaping — the detached shell tasks that may have escaped the process tree.
+   * Read-only snapshot; the centralized reaper (`agent-server/reaper.ts`) filters
+   * to `status:'running'` and kills each via `stopTask(id)` on an INTENTIONAL
+   * teardown. Omitted by providers with no background-task surface (no-op → the
+   * reaper skips them). See the `detached-task-reaping` design.
+   */
+  listReapableTasks?(): Promise<ReapableTask[]>;
   /**
    * Drop any in-memory session state tied to `sessionId`. Called by the
    * orchestrator when persisted context is deleted (IPC `clear_context`),
