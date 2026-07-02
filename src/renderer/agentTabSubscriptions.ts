@@ -30,25 +30,28 @@ import {
 // symmetric.
 export function bindAgentStoreSubscriptions(): () => void {
   const offMessage = onAgent('agent:onMessage', ({ tabId, msg }) => {
-    const mt = (msg as any)?.msgType;
+    // The renderer-side payload is already the canonical AgentMessage: its
+    // discriminant is `type` (reply / fold_code / system / error / user …), NOT
+    // the wire's `msgType` (that name only exists upstream in wire-tx / wire-rx).
+    const kind = (msg as any)?.type;
     // Renderer receive-hop trace (→ main log at info/debug). The last leg of the
     // chain: an event in main's wire-rx / session-event trace but NOT here means
     // it never crossed IPC; here-but-not-rendered narrows it to buildAgentMsg /
     // store. See connection-wedge trace.
-    debugLog('agent-rx', `msg tab=${tabId.slice(0, 8)} msgType=${mt}`);
+    debugLog('agent-rx', `msg tab=${tabId.slice(0, 8)} type=${kind}`);
     const tab = peekAgentTab(tabId);
     if (!tab) {
-      debugLog('agent-rx', `DROP uninitialized tab=${tabId.slice(0, 8)} msgType=${mt}`);
-      console.warn('[agent] message for uninitialized tab — dropping', { tabId, msgType: mt });
+      debugLog('agent-rx', `DROP uninitialized tab=${tabId.slice(0, 8)} type=${kind}`);
+      console.warn('[agent] message for uninitialized tab — dropping', { tabId, type: kind });
       return;
     }
     const built = buildAgentMsg(msg, tab.provider);
     if (!built) {
-      // Unknown msgType (buildAgentMsg default → null). Real content being
-      // dropped on the renderer side — log so an unhandled render primitive is
-      // visible instead of a message silently not showing. See background-tasks#5.
-      debugLog('agent-rx', `DROP unhandled msgType tab=${tabId.slice(0, 8)} msgType=${mt}`);
-      console.warn('[agent] unhandled msgType — message dropped, not rendered', { tabId, msgType: mt });
+      // Unknown type (buildAgentMsg default → null). Real content being dropped
+      // on the renderer side — log so an unhandled render primitive is visible
+      // instead of a message silently not showing. See background-tasks#5.
+      debugLog('agent-rx', `DROP unhandled type tab=${tabId.slice(0, 8)} type=${kind}`);
+      console.warn('[agent] unhandled type — message dropped, not rendered', { tabId, type: kind });
       return;
     }
     upsertMessage(tabId, built);
