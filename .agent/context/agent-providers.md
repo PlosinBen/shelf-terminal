@@ -106,3 +106,13 @@ related:
 **Do not change casually because**:不要「為了一致」再把這類輸出抽回共通 normalized struct —— 那會重新把各家差異上收到共通層,造成權責倒置、卡住新 provider。要共用就只共用 `md-table` 這種無語意工具。判準:**跨 provider 共用「無語意工具」可以,共用「帶語意的結果型別」不行**。
 
 **Related**:`agent-providers#1`、`skills#3`、CLAUDE.md Conventions(渲染原語)、`agent-server/providers/{md-table,claude/helpers,copilot/helpers,fake/index}.ts`。
+
+## agent-providers#7 — Claude SDK `rate_limit_event` 在 `status:'allowed'` 不帶 `utilization` —— status bar quota 平常只能顯示 bucket+reset  ·  [Gotcha]
+
+**Symptom**:Claude 的 status bar quota 段平常長 `5h: — ↻3h`(bucket 名稱 + reset 倒數，但百分比是 `—`),只有配額快爆或已擋時才會冒出真正的 `%`。看起來像我們算漏了 utilization。
+
+**Root cause**:SDK 的 `SDKRateLimitInfo.utilization` **只在 `status === 'allowed_warning' | 'rejected'` 才有值**;正常的 `'allowed'` 態被 SDK 靜默丟掉 —— 即使底層 `anthropic-ratelimit-unified-*-utilization` HTTP header 一直帶著這個數字。這是上游限制,不是我們的 bug。(另 `resetsAt` 是 Unix 秒、`formatResetCountdown` 吃毫秒,故 `*1000`。)
+
+**Fix / workaround**:`claude/helpers.ts` 的 `rateLimitInfoToSegment` 在沒有 `utilization` 時 render `—` fallback(保留 bucket + reset countdown),有值才算 severity。`claude/index.ts` 的 `rate_limit_event` case 把段落累進 `rateLimitBuckets` 後掛在 streaming status 上送出。**別把 `—` fallback 或 `*1000` 當多餘 code 拿掉 —— 它們是刻意繞 SDK 的。** 上游追蹤見 `UPSTREAM_ISSUE.md`(claude-code #50518,落地後可移除 `—` fallback、改讀真值)。
+
+**Related**:`agent-providers#1`、`agent-core#10`(Copilot 把 quota 掛在 mid-turn streaming status 上)、`agent-server/providers/claude/{helpers,index}.ts`、`UPSTREAM_ISSUE.md`。
