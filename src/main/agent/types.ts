@@ -152,7 +152,13 @@ export type AgentEvent =
 export interface AgentBackend {
   query(prompt: string, cwd: string, opts?: AgentQueryOptions): AsyncGenerator<AgentEvent>;
   stop(): Promise<void>;
-  dispose(): void;
+  /**
+   * Tear down the backend. `reap:true` marks an INTENTIONAL teardown (tab close /
+   * session end / app quit) → the agent-server reaps escaped detached background
+   * tasks before disposing. A transient disconnect must NOT pass reap (leave the
+   * tasks running; reconnect re-attaches). See the `detached-task-reaping` design.
+   */
+  dispose(reap?: boolean): void;
   /**
    * Re-run the provider's auth probe and report whether credentials are now
    * valid. `cwd` is required because the probe spins up (or reuses) the remote

@@ -520,7 +520,8 @@ async function stopSession(tabId: string): Promise<boolean> {
 async function destroySession(tabId: string): Promise<boolean> {
   const session = sessions.get(tabId);
   if (!session) return false;
-  session.backend.dispose();
+  // Intentional teardown (user closed the tab) → reap escaped detached tasks.
+  session.backend.dispose(true);
   sessions.delete(tabId);
   return true;
 }
@@ -617,8 +618,9 @@ export function getAgentProvider(tabId: string): AgentProvider | null {
 }
 
 export function disposeAllAgents(): void {
+  // App quit / window-all-closed — intentional teardown → reap detached tasks.
   for (const session of sessions.values()) {
-    session.backend.dispose();
+    session.backend.dispose(true);
   }
   sessions.clear();
 }
