@@ -10,3 +10,4 @@ Optimize.md
 release/
 .claude/settings.local.json
 .agent/features/
+.DS_Store
