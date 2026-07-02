@@ -72,7 +72,23 @@ interface IncomingMessage {
 }
 
 function send(msg: OutgoingMessage) {
+  // Wire-TX diagnostic trace (debug level → off by default; flip logLevel=debug
+  // to capture). Proves which events the provider actually emitted over stdout —
+  // the top of the chain when tracing a sleep/network wedge where tool results
+  // never reach the renderer. Skip `type:'log'` to avoid recursion (serverLog
+  // routes back through this same send) and log spam. See connection-wedge trace.
+  const m = msg as unknown as Record<string, unknown>;
+  if (m.type !== 'log') {
+    serverLog('debug', 'wire-tx', wireSummary(m));
+  }
   process.stdout.write(JSON.stringify(msg) + '\n');
+}
+
+/** Compact one-line summary of a wire message for the wire-tx/wire-rx traces. */
+function wireSummary(m: Record<string, unknown>): string {
+  const bit = (k: string, v: unknown) => (v == null ? '' : ` ${k}=${String(v).slice(0, 12)}`);
+  return `type=${String(m.type)}${bit('turn', m.turnId)}${bit('msgType', m.msgType)}${bit('msgId', m.msgId)}`
+    + (typeof m.content === 'string' ? ` len=${m.content.length}` : '');
 }
 
 // Route all agent-server diagnostics back to main over the wire (see

@@ -762,6 +762,7 @@ function wrapProcess(
     heartbeatSeq += 1;
     health.onSent(heartbeatSeq, now);
     win.sent += 1;
+    log.debug('agent-remote', `ping seq=${heartbeatSeq}`);
     try {
       proc.stdin?.write(JSON.stringify({ type: 'ping', seq: heartbeatSeq }) + '\n');
     } catch {
@@ -776,6 +777,12 @@ function wrapProcess(
     buffer += chunk.toString();
     const lines = buffer.split('\n');
     buffer = lines.pop() ?? '';
+    // A large residual means a wire frame is still mid-arrival (or, after a
+    // sleep/network stall, that the stream desynced and no newline is closing
+    // the frame). Debug-gated so it's silent unless a wedge repro turns it on.
+    if (buffer.length > 16384) {
+      log.debug('agent-remote', `stdout buffer residual len=${buffer.length} (frame mid-arrival or desync)`);
+    }
     for (const line of lines) {
       const trimmed = line.trim();
       if (!trimmed) continue;
@@ -785,6 +792,15 @@ function wrapProcess(
       } catch {
         log.info('agent-remote', `non-json line from agent-server, dropping: ${trimmed.slice(0, 100)}`);
         continue;
+      }
+      // Wire-RX trace (debug; off by default). Pairs with agent-server's wire-tx:
+      // an event present in wire-tx but missing here = lost in transit (pipe /
+      // sleep stall); present here but never rendered = dropped downstream
+      // (dispatcher turnId / renderer). Exclude `log` (already routed below) and
+      // `pong` (has its own trace) to keep the signal on turn/content events.
+      if (parsed?.type !== 'log' && parsed?.type !== 'pong') {
+        const bit = (k: string, v: unknown) => (v == null ? '' : ` ${k}=${String(v).slice(0, 12)}`);
+        log.debug('agent-remote', `wire-rx type=${parsed?.type}${bit('turn', parsed?.turnId)}${bit('msgType', parsed?.msgType)}${bit('msgId', parsed?.msgId)}`);
       }
       // Heartbeat ack — transport-level, never reaches the turn dispatcher.
       if (parsed?.type === 'pong') {
@@ -802,6 +818,11 @@ function wrapProcess(
             established = true;
             log.info('agent-remote', `heartbeat established${typeof r === 'number' ? ` rtt=${r}ms` : ''}`);
           }
+          // Pong liveness trace (debug). After a wake, whether pongs resume
+          // distinguishes "pipe is fine, provider wedged" (pongs flow, no turn
+          // events) from "pipe/transport dead" (no pongs) — the first fork to
+          // check in a connection-wedge repro.
+          log.debug('agent-remote', `pong seq=${parsed.seq}${typeof r === 'number' ? ` rtt=${r}ms` : ''}`);
         }
         emitHealth();
         continue;
@@ -840,8 +861,13 @@ function wrapProcess(
     log.error('agent-remote', 'stderr:', chunk.toString());
   });
 
-  proc.on('exit', (code) => {
-    log.info('agent-remote', `Process exited with code ${code}`);
+  proc.on('exit', (code, signal) => {
+    // Transport is gone. Nothing auto-recovers this — the session stays wedged
+    // (sends write to a dead stdin, no events flow) until the user manually
+    // disconnect→connect (respawn). Warn (not info) so it surfaces at the
+    // default log level: an unexpected exit here is the likely culprit behind
+    // "agent stuck after sleep". See connection-wedge trace.
+    log.warn('agent-remote', `agent-server process exited code=${code} signal=${signal} — transport down until reconnect`);
   });
 
   // spawn() 對 ENOENT 等失敗是非同步 emit 'error' event，try/catch 抓不到；
@@ -854,7 +880,18 @@ function wrapProcess(
 
   return {
     sendLine: (msg) => {
-      proc.stdin?.write(JSON.stringify(msg) + '\n');
+      const w = proc.stdin;
+      // Fail-loud on a write to a dead pipe: after a sleep/crash the stdin can be
+      // ended/destroyed while the session still thinks it's live, so the send is
+      // silently swallowed (a prime "Continue does nothing" suspect). Still write
+      // (no behavior change) — but WARN so the drop is visible; else debug-trace
+      // the normal send. See connection-wedge trace.
+      if (!w || w.writableEnded || w.destroyed) {
+        log.warn('agent-remote', `sendLine to non-writable stdin (ended=${w?.writableEnded} destroyed=${w?.destroyed}) type=${(msg as any)?.type}`);
+      } else {
+        log.debug('agent-remote', `wire-tx-stdin type=${(msg as any)?.type}`);
+      }
+      w?.write(JSON.stringify(msg) + '\n');
     },
     registerTurn: dispatcher.registerTurn,
     awaitReady: dispatcher.awaitReady,
