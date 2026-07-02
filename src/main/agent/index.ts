@@ -416,10 +416,20 @@ async function sendMessage(
       // vs. multiple idles arriving together). Observers still see the raw event.
       if (event.type === 'status') {
         notifyObservers(tabId, event);
-        const { state: turnState, ...metrics } = event.payload;
-        // `streaming` was already broadcast at send start (above the try); only a
-        // terminal idle needs its metrics relayed here.
-        if (turnState !== 'streaming') send(IPC.AGENT_STATUS, tabId, metrics);
+        const turnState = (event.payload as { state?: string }).state;
+        if (turnState === 'idle' || turnState === 'done') {
+          // Terminal per-turn idle: relay its metrics but STRIP `state`, so a
+          // cancelled queued turn's idle can't flip the whole tab to idle — the
+          // session-level idle is emitted from `finally` (activeTurns → 0).
+          const { state: _terminal, ...metrics } = event.payload;
+          send(IPC.AGENT_STATUS, tabId, metrics);
+        } else {
+          // Streaming (non-terminal): forward as-is. Providers piggyback mid-turn
+          // usage on `state:'streaming'` events (copilot: rateLimits / contextUsage
+          // / token counts) — dropping it blanks the status-bar quota. Re-flagging
+          // streaming is idempotent in the renderer.
+          send(IPC.AGENT_STATUS, tabId, event.payload);
+        }
         continue;
       }
       dispatchEvent(tabId, event);
