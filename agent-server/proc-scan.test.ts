@@ -4,7 +4,7 @@ import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
-import { readProcEnviron, procEnvHas, findPidsByEnv, hasProcFs, killProcessGroup } from './proc-scan';
+import { readProcEnviron, procEnvHas, findPidsByEnv, hasProcFs, killProcessGroup, readProcStartTime } from './proc-scan';
 
 // Build a fake /proc: <root>/<pid>/environ with NUL-delimited KEY=VALUE entries.
 function writeEnviron(root: string, pid: number, env: Record<string, string>): void {
@@ -62,6 +62,17 @@ describe('proc-scan (fake /proc)', () => {
   it('hasProcFs reflects existence', () => {
     expect(hasProcFs(root)).toBe(true);
     expect(hasProcFs(join(root, 'nope'))).toBe(false);
+  });
+
+  it('readProcStartTime parses field 22, even when comm contains spaces/parens', () => {
+    const post = ['S', ...Array(18).fill('0'), '778899']; // index 19 = starttime
+    fs.mkdirSync(join(root, '100'), { recursive: true });
+    fs.writeFileSync(join(root, '100', 'stat'), `100 (weird (comm) name) ${post.join(' ')} 0 0`);
+    expect(readProcStartTime(100, root)).toBe(778899);
+  });
+
+  it('readProcStartTime returns null when unreadable', () => {
+    expect(readProcStartTime(999, root)).toBeNull();
   });
 });
 

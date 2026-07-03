@@ -43,6 +43,32 @@ export function findPidsByEnv(key: string, value: string, procRoot = '/proc'): n
   return out;
 }
 
+/**
+ * A process's start-time (field 22 of /proc/<pid>/stat, in clock ticks since
+ * boot), or null if unreadable. Used as a pid-reuse-safe identity: a reused pid
+ * has a different start-time. NOTE: env vars set at RUNTIME (Node
+ * `process.env.X = …`) do NOT appear in /proc/<pid>/environ (a snapshot of the
+ * initial exec env), so the owner's own tag can't be used for liveness — hence
+ * start-time. (Spawned children DO inherit the runtime env, so `findPidsByEnv`
+ * still works for orphan tasks.)
+ */
+export function readProcStartTime(pid: number, procRoot = '/proc'): number | null {
+  let raw: string;
+  try {
+    raw = fs.readFileSync(join(procRoot, String(pid), 'stat'), 'utf8');
+  } catch {
+    return null;
+  }
+  // comm (field 2) is wrapped in parens and may itself contain spaces/parens;
+  // skip past the LAST ')'. The remaining whitespace-split fields start at field
+  // 3 (state), so starttime (field 22) is index 22 - 3 = 19.
+  const rparen = raw.lastIndexOf(')');
+  if (rparen < 0) return null;
+  const rest = raw.slice(rparen + 1).trim().split(/\s+/);
+  const st = Number(rest[19]);
+  return Number.isFinite(st) ? st : null;
+}
+
 /** Does a `/proc` filesystem exist here (≈ "are we on Linux")? */
 export function hasProcFs(procRoot = '/proc'): boolean {
   try {

@@ -10,6 +10,7 @@ import { deleteContext, cleanupOldContexts } from './context-store';
 import { runCleanupSweep } from './cleanup';
 import { performShutdown } from './shutdown';
 import { SESSION_ENV_KEY, writeLease, removeLease as removeSessionLease, sweepDeadSessions } from './session-sweep';
+import { readProcStartTime } from './proc-scan';
 import { loadRestoreContextFor, newTurnId, wrapSendForContext, wrapSendForTurn } from './orchestrator';
 import { initAppToolClient, resolveAppToolResult } from './app-tool-client';
 import { setLogSink, serverLog } from './server-logger';
@@ -526,5 +527,5 @@ try {
 } catch (err: any) {
   serverLog('warn', 'session-sweep', `startup sweep failed: ${err?.message ?? err}`);
 }
-writeLease({ session: SHELF_SESSION, ownerPid: process.pid, createdAt: Date.now() });
+writeLease({ session: SHELF_SESSION, ownerPid: process.pid, ownerStartTime: readProcStartTime(process.pid), createdAt: Date.now() });
 send({ type: 'ready' });

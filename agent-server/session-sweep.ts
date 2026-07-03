@@ -12,15 +12,17 @@
 import * as fs from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
-import { findPidsByEnv, procEnvHas, hasProcFs, killProcessGroup } from './proc-scan';
+import { findPidsByEnv, readProcStartTime, hasProcFs, killProcessGroup } from './proc-scan';
 
 export const SESSION_ENV_KEY = 'SHELF_SESSION';
 
 export interface SessionLease {
   /** The SHELF_SESSION uuid this agent-server stamped into its env. */
   session: string;
-  /** The agent-server process that owns this session (liveness check). */
+  /** The agent-server process that owns this session. */
   ownerPid: number;
+  /** Owner's /proc start-time (Linux) — pid-reuse-safe liveness; null off-Linux. */
+  ownerStartTime: number | null;
   createdAt: number;
 }
 
@@ -58,7 +60,12 @@ export function readLeases(dir = sessionsDir()): SessionLease[] {
     try {
       const l = JSON.parse(fs.readFileSync(join(dir, name), 'utf8'));
       if (l && typeof l.session === 'string' && typeof l.ownerPid === 'number') {
-        out.push({ session: l.session, ownerPid: l.ownerPid, createdAt: Number(l.createdAt) || 0 });
+        out.push({
+          session: l.session,
+          ownerPid: l.ownerPid,
+          ownerStartTime: typeof l.ownerStartTime === 'number' ? l.ownerStartTime : null,
+          createdAt: Number(l.createdAt) || 0,
+        });
       }
     } catch {
       /* skip malformed lease */
@@ -69,13 +76,17 @@ export function readLeases(dir = sessionsDir()): SessionLease[] {
 
 /**
  * Is the lease's owning agent-server still alive? On Linux, precise +
- * pid-reuse-safe: the owner pid must STILL carry this exact session tag in its
- * environ (a reused pid won't). Off-Linux, coarse liveness via `process.kill(0)`
- * (no kill happens there anyway, so a false-positive only defers lease tidy-up).
+ * pid-reuse-safe: the owner pid must still exist AND its /proc start-time must
+ * match the recorded one (a reused pid has a different start-time). We can NOT
+ * use the owner's own env tag — a runtime-set env var never reaches
+ * /proc/<pid>/environ (see readProcStartTime). Off-Linux, coarse liveness via
+ * `process.kill(0)` (no kill happens there anyway, so a false-positive only
+ * defers lease tidy-up).
  */
 export function isOwnerAlive(lease: SessionLease, procRoot = '/proc'): boolean {
-  if (hasProcFs(procRoot)) {
-    return procEnvHas(lease.ownerPid, SESSION_ENV_KEY, lease.session, procRoot);
+  if (hasProcFs(procRoot) && lease.ownerStartTime != null) {
+    const st = readProcStartTime(lease.ownerPid, procRoot);
+    return st != null && st === lease.ownerStartTime;
   }
   try {
     process.kill(lease.ownerPid, 0);
