@@ -743,9 +743,13 @@ function dispatcherKeyFor(c: Connection): string {
   }
 }
 
-// Shared per-host dispatcher connections, ref-counted: the last session's close
-// fires onEmpty → kill the proc + drop it here.
-const dispatchers = new Map<string, DispatcherConnection>();
+// Shared per-host dispatcher connections. Ref-counted: the last session's close
+// fires onEmpty → arm an idle-teardown GRACE window; a reopen within it reuses the
+// warm dispatcher + its model cache (F-b, ControlPersist-style). 120s << the 24h
+// cleanup-reclaim threshold, so no dispatcher lease-touch is needed.
+interface DispEntry { conn: DispatcherConnection; grace?: NodeJS.Timeout; }
+const dispatchers = new Map<string, DispEntry>();
+const DISPATCHER_GRACE_MS = Number(process.env.SHELF_DISPATCHER_GRACE_MS) || 120_000;
 
 /** Adapt a spawned child process to the DispatcherProc the connection drives. */
 function childToDispatcherProc(child: ChildProcess): DispatcherProc {
@@ -804,20 +808,31 @@ function spawnDispatcherProc(connection: Connection, cwd: string, deploy: Deploy
 function ensureDispatcher(connection: Connection, cwd: string, deploy: DeployResult, initScript?: string): DispatcherConnection | null {
   const key = dispatcherKeyFor(connection);
   const existing = dispatchers.get(key);
-  if (existing) return existing;
+  if (existing) {
+    // Reopen within the grace window → cancel teardown, reuse the warm dispatcher.
+    if (existing.grace) { clearTimeout(existing.grace); existing.grace = undefined; }
+    return existing.conn;
+  }
   const child = spawnDispatcherProc(connection, cwd, deploy, initScript);
   if (!child) return null;
   child.stderr?.on('data', (c: Buffer) => log.error('agent-remote', 'dispatcher stderr:', c.toString()));
   child.on('error', (err) => log.error('agent-remote', `dispatcher proc error: ${err.message}`));
-  const dc = createDispatcherConnection({
+  const conn = createDispatcherConnection({
     proc: childToDispatcherProc(child),
     parseRemoteMessage,
     handleAppTool,
     heartbeatIntervalMs: HEARTBEAT_INTERVAL_MS,
-    onEmpty: () => { dispatchers.delete(key); dc.kill(); },
+    onEmpty: () => {
+      const e = dispatchers.get(key);
+      if (!e || e.conn !== conn || e.grace) return;
+      e.grace = setTimeout(() => {
+        if (dispatchers.get(key)?.conn === conn) { dispatchers.delete(key); conn.kill(); }
+      }, DISPATCHER_GRACE_MS);
+      e.grace.unref?.();
+    },
   });
-  dispatchers.set(key, dc);
-  return dc;
+  dispatchers.set(key, { conn });
+  return conn;
 }
 
 function wrapProcess(
