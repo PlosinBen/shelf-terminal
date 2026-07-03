@@ -52,6 +52,9 @@ export interface DispatcherConnectionDeps {
   heartbeatIntervalMs?: number;
   /** Called when the last session closes → owner tears the connection down. */
   onEmpty?: () => void;
+  /** Called when the dispatcher proc EXITS (crash / kill) → owner evicts this dead
+   *  connection so the next connect spawns a fresh dispatcher. */
+  onDown?: () => void;
 }
 
 export interface DispatcherConnection {
@@ -180,6 +183,7 @@ export function createDispatcherConnection(deps: DispatcherConnectionDeps): Disp
     clearInterval(timer);
     for (const ch of channels.values()) ch.sinks.onHealth?.({ state: 'dead' } as ConnectionHealth);
     channels.clear();
+    deps.onDown?.(); // owner evicts this dead conn → next connect spawns fresh
   });
 
   function openSession(sid: string, cwd: string | undefined, sinks: SessionSinks): SessionChannel {

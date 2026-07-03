@@ -849,6 +849,17 @@ function ensureDispatcher(connection: Connection, cwd: string, deploy: DeployRes
       }, DISPATCHER_GRACE_MS);
       e.grace.unref?.();
     },
+    // Dispatcher proc exited (crash / external kill). EVICT the dead conn from the
+    // map — else the next ensureDispatcher "reuses" a corpse and openSession writes
+    // to a closed stdin → caps init fails ("Failed to start agent-server") instead
+    // of the intended "first reconnect re-spawns a fresh dispatcher".
+    onDown: () => {
+      const e = dispatchers.get(key);
+      if (e?.conn !== conn) return; // a grace teardown / newer conn already replaced us
+      if (e.grace) clearTimeout(e.grace);
+      dispatchers.delete(key);
+      log.warn('agent-remote', `dispatcher for ${key} exited — evicted; next connect spawns fresh`);
+    },
   });
   dispatchers.set(key, { conn });
   return conn;

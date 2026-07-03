@@ -131,6 +131,20 @@ describe('dispatcher-connection (per-host demux by sid)', () => {
     expect(conn.size()).toBe(0);
   });
 
+  it('fires onDown when the dispatcher proc exits (owner evicts the dead conn) — regression', () => {
+    // Bug: on a dispatcher crash the dead conn lingered in the owner's per-host map,
+    // so the next connect "reused" the corpse → openSession wrote to a closed stdin
+    // → caps init failed ("Failed to start agent-server") instead of spawning fresh.
+    const onDown = vi.fn();
+    const onHealth = vi.fn();
+    const { f, conn } = make({ onDown });
+    conn.openSession('s1', undefined, { onHealth });
+    f.exit(null); // dispatcher proc killed
+    expect(onDown).toHaveBeenCalledTimes(1);
+    expect(onHealth).toHaveBeenCalledWith({ state: 'dead' }); // the tab also goes dead
+    expect(conn.size()).toBe(0);
+  });
+
   it('ignores the dispatcher-level ready (no sid)', () => {
     const q1: any[] = [];
     const { f, conn } = make();
