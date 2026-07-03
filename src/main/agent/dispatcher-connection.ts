@@ -154,20 +154,19 @@ export function createDispatcherConnection(deps: DispatcherConnectionDeps): Disp
       });
       return;
     }
-    // An exec went down. willRespawn:false = terminal (crash-loop gave up) → dead
-    // health for that one tab (session-level, not host-wide). willRespawn:true =
-    // the supervisor is bringing a fresh exec up; don't flap the tab to dead — the
-    // host heartbeat still reflects liveness, and the respawned exec's ready{sid}
-    // resumes it. (Per-sid recovery health + in-flight-turn release + open-prompt
-    // cancel (#6) are the inner-ping refinement, still TODO before the flip.)
+    // The session's provider execution went down (crashed or unresponsive). The
+    // dispatcher will RECONNECT it (open a fresh exec + resume the persisted
+    // conversation) — but FIRST, fail-loud: end this sid's in-flight turn(s) with
+    // an error so the renderer tells the user the turn was interrupted, the spinner
+    // unsticks, and main's sendMessage `finally` clears its pending permissions.
     if (type === 'session_down') {
-      if (parsed.willRespawn === false) ch.sinks.onHealth?.({ state: 'dead' } as ConnectionHealth);
-      return;
-    }
-    // Inner-heartbeat verdict for one exec (hung / recovered) — session-level
-    // health, routed to that one tab (not host-wide).
-    if (type === 'session_health') {
-      if (parsed.health) ch.sinks.onHealth?.(parsed.health as ConnectionHealth);
+      const why = typeof parsed.reason === 'string' ? parsed.reason : 'process error';
+      ch.dispatcher.failAllTurns(`Session process ${why} — this turn was interrupted; the conversation resumes from the last message.`);
+      // willReconnect:false = terminal (reconnect attempts exhausted) → dead health
+      // for this one tab (session-level, not host-wide). willReconnect:true = a
+      // fresh exec is coming; don't flap to dead — the host heartbeat stands and the
+      // reconnected exec's ready{sid} resumes the session.
+      if (parsed.willReconnect === false) ch.sinks.onHealth?.({ state: 'dead' } as ConnectionHealth);
       return;
     }
 

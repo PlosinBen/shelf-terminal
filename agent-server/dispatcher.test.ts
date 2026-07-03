@@ -13,12 +13,17 @@ function harness(opts: { now?: () => number; cache?: any; onMainPing?: () => voi
     hooks: { onLine: (l: string) => void; onExit: (c: number | null) => void };
     written: string[];
     killed: number;
+    forceKilled: number;
   }> = [];
 
   const spawnExec = vi.fn((sid: string, cwd: string | undefined, hooks: any): ExecProc => {
-    const rec = { sid, cwd, hooks, written: [] as string[], killed: 0 };
+    const rec = { sid, cwd, hooks, written: [] as string[], killed: 0, forceKilled: 0 };
     spawned.push(rec);
-    return { writeLine: (l: string) => rec.written.push(l), kill: () => { rec.killed++; } };
+    return {
+      writeLine: (l: string) => rec.written.push(l),
+      kill: () => { rec.killed++; },
+      forceKill: () => { rec.forceKilled++; },
+    };
   });
 
   const d = createDispatcher({
@@ -89,35 +94,36 @@ describe('dispatcher core', () => {
     expect(onMainPing).toHaveBeenCalledTimes(1);
   });
 
-  it('exec exit auto-respawns (willRespawn:true) and starts a fresh exec', () => {
+  it('on exec down: emits session_down FIRST (willReconnect:true), THEN reconnects', () => {
     const h = harness();
     h.d.onMainLine(JSON.stringify({ type: 'open_session', sid: 's1', cwd: '/w' }));
     expect(h.spawnExec).toHaveBeenCalledTimes(1);
     h.spawned[0].hooks.onExit(1);
+    // session_down (error trigger) is emitted before the reconnect spawn.
     const down = h.parsedToMain().find((m) => m.type === 'session_down');
-    expect(down).toMatchObject({ sid: 's1', willRespawn: true });
-    expect(h.spawnExec).toHaveBeenCalledTimes(2); // respawned with the same cwd
+    expect(down).toMatchObject({ sid: 's1', willReconnect: true });
+    expect(h.spawnExec).toHaveBeenCalledTimes(2); // reconnected with the same cwd
     expect(h.spawned[1]).toMatchObject({ sid: 's1', cwd: '/w' });
   });
 
-  it('gives up (willRespawn:false) when an exec crash-loops past the backoff cap', () => {
+  it('gives up (willReconnect:false) when an exec down-loops past the backoff cap', () => {
     let t = 0;
     const h = harness({ now: () => t });
     h.d.onMainLine(JSON.stringify({ type: 'open_session', sid: 's1' }));
     for (let i = 0; i < 6; i++) {
-      h.spawned[h.spawned.length - 1].hooks.onExit(1); // crash the latest exec
-      t += 100; // all within RESPAWN_WINDOW_MS
+      h.spawned[h.spawned.length - 1].hooks.onExit(1); // fail the latest exec
+      t += 100; // all within RECONNECT_WINDOW_MS
     }
     const downs = h.parsedToMain().filter((m) => m.type === 'session_down');
-    expect(downs.filter((d) => d.willRespawn === true)).toHaveLength(5); // 5 respawns
-    expect(downs[downs.length - 1]).toMatchObject({ willRespawn: false }); // then give up
+    expect(downs.filter((d) => d.willReconnect === true)).toHaveLength(5); // 5 reconnects
+    expect(downs[downs.length - 1]).toMatchObject({ willReconnect: false }); // then give up
   });
 
-  it('does NOT respawn after an intentional close_session', () => {
+  it('does NOT reconnect after an intentional close_session', () => {
     const h = harness();
     h.d.onMainLine(JSON.stringify({ type: 'open_session', sid: 's1' }));
     h.d.onMainLine(JSON.stringify({ type: 'close_session', sid: 's1' }));
-    // kill() fired; a stale exit for a closed sid must not respawn.
+    // kill() fired; a stale exit for a closed sid must not reconnect.
     h.spawned[0].hooks.onExit(0);
     expect(h.spawnExec).toHaveBeenCalledTimes(1);
   });
@@ -156,21 +162,23 @@ describe('dispatcher inner heartbeat (hung-detection)', () => {
     expect(h.toMain.some((l) => l.includes('pong'))).toBe(false);
   });
 
-  it('flags a hung exec dead after 3 pong-less ticks (once)', () => {
+  it('force-kills an unresponsive exec after 3 pong-less ticks (→ reconnect via its exit)', () => {
     const h = harness();
     h.d.onMainLine(JSON.stringify({ type: 'open_session', sid: 's1' }));
     h.d.tick(); h.d.tick(); h.d.tick();
-    const health = h.parsedToMain().filter((m) => m.type === 'session_health');
-    expect(health).toEqual([{ type: 'session_health', sid: 's1', health: { state: 'dead' } }]);
+    expect(h.spawned[0].forceKilled).toBe(1);
+    // once only, even if more ticks pass while it hasn't exited yet
+    h.d.tick();
+    expect(h.spawned[0].forceKilled).toBe(1);
   });
 
-  it('recovers to healthy when the exec pong resumes', () => {
+  it('a pong resets the miss counter — a responsive exec is never force-killed', () => {
     const h = harness();
     h.d.onMainLine(JSON.stringify({ type: 'open_session', sid: 's1' }));
-    h.d.tick(); h.d.tick(); h.d.tick(); // → dead
-    h.spawned[0].hooks.onLine('{"type":"pong","seq":9,"sid":"s1"}');
-    const health = h.parsedToMain().filter((m) => m.type === 'session_health');
-    expect(health[health.length - 1]).toMatchObject({ health: { state: 'healthy' } });
+    h.d.tick(); h.d.tick(); // missed=2
+    h.spawned[0].hooks.onLine('{"type":"pong","seq":2,"sid":"s1"}'); // → missed=0
+    h.d.tick(); h.d.tick(); // missed=2 again, still < 3
+    expect(h.spawned[0].forceKilled).toBe(0);
   });
 
   it('relays a normal exec line raw (only pong is peeked out)', () => {

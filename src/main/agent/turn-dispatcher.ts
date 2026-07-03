@@ -43,6 +43,14 @@ export interface TurnDispatcher {
    * (capabilities / credential_* / slash_result).
    */
   onResponse(requestId: string, expectedType: string, handler: (payload: any) => void): void;
+  /**
+   * Fail-loud on a lost provider execution (dispatch-layering): the session's
+   * exec died / went unresponsive, so every in-flight turn is dropped. Each
+   * turn's generator yields a terminal `error` then ends (idle) — so main's
+   * sendMessage surfaces the error to the renderer, unsticks the spinner, and its
+   * `finally` clears pending permissions. Called before the dispatcher reconnects.
+   */
+  failAllTurns(errorMessage: string): void;
 }
 
 interface TurnState {
@@ -269,5 +277,15 @@ export function createTurnDispatcher(
     responseHandlers.set(`${expectedType}:${requestId}`, handler);
   }
 
-  return { feed, registerTurn, awaitReady, onResponse };
+  function failAllTurns(errorMessage: string): void {
+    for (const state of turns.values()) {
+      // Error first (rendered as an error line), then idle so the generator ends.
+      state.events.push({ type: 'error', error: errorMessage } as AgentEvent);
+      state.events.push({ type: 'status', payload: { state: 'idle' } } as AgentEvent);
+      state.done = true;
+      state.resolve?.();
+    }
+  }
+
+  return { feed, registerTurn, awaitReady, onResponse, failAllTurns };
 }

@@ -19,6 +19,9 @@ export interface ExecProc {
   writeLine(line: string): void;
   /** Graceful teardown (stdin EOF → the exec self-exits, verified cascade). */
   kill(): void;
+  /** Hard kill (SIGKILL) — an UNRESPONSIVE exec won't process stdin EOF, so the
+   *  inner heartbeat force-kills it to trigger a reconnect. */
+  forceKill(): void;
 }
 
 export interface DispatcherDeps {
@@ -32,7 +35,7 @@ export interface DispatcherDeps {
   /** Write one raw line to main (the dispatcher's stdout). */
   sendToMain: (line: string) => void;
   log: (level: 'info' | 'warn' | 'error', msg: string) => void;
-  /** Injectable clock (respawn backoff window); defaults to Date.now. */
+  /** Injectable clock (reconnect backoff window); defaults to Date.now. */
   now?: () => number;
   /** Per-host model/caps cache (group E). Serviced on the exec side-channel
    *  (cache_get/cache_put); absent → the side-channel no-ops (every exec fetches). */
@@ -42,10 +45,11 @@ export interface DispatcherDeps {
   onMainPing?: () => void;
 }
 
-/** Restart-storm backoff: at most MAX respawns within WINDOW before giving up. */
-const MAX_RESPAWNS = 5;
-const RESPAWN_WINDOW_MS = 10_000;
-/** Inner heartbeat: an exec that misses this many consecutive pings is HUNG. */
+/** Reconnect backoff: at most MAX reconnects within WINDOW before giving up. */
+const MAX_RECONNECTS = 5;
+const RECONNECT_WINDOW_MS = 10_000;
+/** Inner heartbeat: an exec that misses this many consecutive pings is judged
+ *  UNRESPONSIVE (force-killed → reconnected). */
 const INNER_DEAD_MISSES = 3;
 
 export interface Dispatcher {
@@ -65,15 +69,17 @@ export interface Dispatcher {
  * proc. Exec→main traffic is relayed raw by the spawn hooks, never touched here.
  */
 export function createDispatcher(deps: DispatcherDeps): Dispatcher {
-  interface ExecEntry { proc: ExecProc; cwd: string | undefined; respawnAt: number[]; missed: number; hung: boolean; }
+  // Per session: the current exec connection + its cwd (to reconnect) + inner-
+  // heartbeat state + the timestamps of recent reconnects (backoff window).
+  interface ExecEntry { proc: ExecProc; cwd: string | undefined; reconnectAt: number[]; missed: number; unresponsive: boolean; }
   const execs = new Map<string, ExecEntry>();
   const now = deps.now ?? (() => Date.now());
 
-  /** Spawn an exec for `sid` and wire its relay + supervised exit. */
+  /** Open an exec execution for `sid` and wire its relay + down-handling. */
   function startExec(sid: string, cwd: string | undefined): ExecProc {
     return deps.spawnExec(sid, cwd, {
       onLine: (l) => handleExecLine(sid, l),
-      onExit: (code) => handleExecExit(sid, code),
+      onExit: (code) => handleExecDown(sid, `exited (code ${code})`),
     });
   }
 
@@ -89,10 +95,7 @@ export function createDispatcher(deps: DispatcherDeps): Dispatcher {
       try { p = JSON.parse(line); } catch { /* not really pong */ }
       if (p?.type === 'pong') {
         const entry = execs.get(sid);
-        if (entry) {
-          entry.missed = 0;
-          if (entry.hung) { entry.hung = false; deps.sendToMain(JSON.stringify({ type: 'session_health', sid, health: { state: 'healthy' } })); }
-        }
+        if (entry) { entry.missed = 0; entry.unresponsive = false; } // alive → reset
         return; // consume: the inner pong is dispatcher-internal, never relayed
       }
     }
@@ -113,26 +116,32 @@ export function createDispatcher(deps: DispatcherDeps): Dispatcher {
     deps.sendToMain(line); // relay raw (exec already stamped sid)
   }
 
-  /** Supervisor: on an exec exit, auto-respawn (replacing today's crash→wedge)
-   *  unless it is crash-looping, in which case give up with a terminal down. */
-  function handleExecExit(sid: string, code: number | null): void {
+  /**
+   * The session's exec execution went DOWN (exited/crashed, or force-killed for
+   * being unresponsive). There is no "respawn" in the worker-pool sense: the
+   * dispatcher RECONNECTS the session to a fresh exec (which resumes the persisted
+   * conversation via lastSdkSessionId). ORDER matters, per the intended UX:
+   *   (1) FIRST emit session_down → main fails the in-flight turn LOUD (the user
+   *       sees "this turn was interrupted"), then
+   *   (2) open a fresh exec + update the mapping.
+   * A reconnect storm (repeated immediate failures) gives up → disconnected.
+   */
+  function handleExecDown(sid: string, reason: string): void {
     const entry = execs.get(sid);
     if (!entry) return; // already closed intentionally (close_session)
     const t = now();
-    entry.respawnAt = entry.respawnAt.filter((ts) => t - ts < RESPAWN_WINDOW_MS);
-    if (entry.respawnAt.length >= MAX_RESPAWNS) {
+    entry.reconnectAt = entry.reconnectAt.filter((ts) => t - ts < RECONNECT_WINDOW_MS);
+    if (entry.reconnectAt.length >= MAX_RECONNECTS) {
       execs.delete(sid);
-      deps.log('error', `exec ${sid} crash-looping (${MAX_RESPAWNS}/${RESPAWN_WINDOW_MS}ms) — giving up`);
-      deps.sendToMain(JSON.stringify({ type: 'session_down', sid, reason: `crash-loop (code ${code})`, willRespawn: false }));
+      deps.log('error', `exec ${sid} down-looping (${MAX_RECONNECTS}/${RECONNECT_WINDOW_MS}ms) — giving up`);
+      deps.sendToMain(JSON.stringify({ type: 'session_down', sid, reason: `${reason}; reconnect gave up`, willReconnect: false }));
       return;
     }
-    // Fail-loud: main is told the in-flight turn was lost + a respawn is coming
-    // (willRespawn:true → recovering, not disconnected); the new exec's relayed
-    // ready{sid} then signals recovery. Main surfaces the lost-turn error + cancels
-    // that sid's open prompts (dispatcher-connection, #6).
-    entry.respawnAt.push(t);
-    entry.missed = 0; entry.hung = false; // fresh exec — reset inner-heartbeat state
-    deps.sendToMain(JSON.stringify({ type: 'session_down', sid, reason: `exec exited (code ${code})`, willRespawn: true }));
+    // (1) tell main the execution is down FIRST (→ fail-loud turn interruption)…
+    deps.sendToMain(JSON.stringify({ type: 'session_down', sid, reason, willReconnect: true }));
+    // (2) …then reconnect: fresh exec + updated mapping.
+    entry.reconnectAt.push(t);
+    entry.missed = 0; entry.unresponsive = false;
     entry.proc = startExec(sid, entry.cwd);
   }
 
@@ -158,7 +167,7 @@ export function createDispatcher(deps: DispatcherDeps): Dispatcher {
         return;
       }
       const cwd = typeof msg.cwd === 'string' ? msg.cwd : undefined;
-      execs.set(sid, { proc: startExec(sid, cwd), cwd, respawnAt: [], missed: 0, hung: false });
+      execs.set(sid, { proc: startExec(sid, cwd), cwd, reconnectAt: [], missed: 0, unresponsive: false });
       return;
     }
 
@@ -166,7 +175,7 @@ export function createDispatcher(deps: DispatcherDeps): Dispatcher {
       if (typeof sid !== 'string') return;
       const entry = execs.get(sid);
       if (entry) {
-        execs.delete(sid); // delete BEFORE kill so handleExecExit sees no entry → no respawn
+        execs.delete(sid); // delete BEFORE kill so handleExecDown sees no entry → no reconnect
         entry.proc.kill();
       }
       return;
@@ -193,19 +202,21 @@ export function createDispatcher(deps: DispatcherDeps): Dispatcher {
     entry.proc.writeLine(line); // exec ignores the extra sid; reads its own fields
   }
 
-  // Inner heartbeat: ping every exec; an exec that misses INNER_DEAD_MISSES
-  // consecutive pings is HUNG (alive but event-loop-blocked — the post-sleep
+  // Inner heartbeat: ping every exec; one that misses INNER_DEAD_MISSES consecutive
+  // pings is UNRESPONSIVE (alive but event-loop-blocked — the post-sleep/netdrop
   // wedge the outer heartbeat can't see, since the dispatcher itself still pongs
-  // main). Flagged per-sid via session_health → main severs only that tab.
+  // main). "No response" is a down just like "gone": force-kill it → its exit
+  // routes through handleExecDown → fail-loud + reconnect. force-kill (not graceful
+  // kill) because a wedged exec won't process a stdin EOF.
   let tickSeq = 0;
   function tick(): void {
     tickSeq += 1;
-    for (const [sid, entry] of execs) {
+    for (const entry of execs.values()) {
       entry.missed += 1;
       try { entry.proc.writeLine(JSON.stringify({ type: 'ping', seq: tickSeq })); } catch { /* stdin closed */ }
-      if (entry.missed >= INNER_DEAD_MISSES && !entry.hung) {
-        entry.hung = true;
-        deps.sendToMain(JSON.stringify({ type: 'session_health', sid, health: { state: 'dead' } }));
+      if (entry.missed >= INNER_DEAD_MISSES && !entry.unresponsive) {
+        entry.unresponsive = true;
+        entry.proc.forceKill();
       }
     }
   }
@@ -258,6 +269,7 @@ export function runDispatcher(): void {
       return {
         writeLine: (line) => child.stdin?.write(line + '\n'),
         kill: () => child.stdin?.end(),
+        forceKill: () => child.kill('SIGKILL'),
       };
     },
     sendToMain: (line) => process.stdout.write(line + '\n'),

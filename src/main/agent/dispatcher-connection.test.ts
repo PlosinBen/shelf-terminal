@@ -76,22 +76,37 @@ describe('dispatcher-connection (per-host demux by sid)', () => {
     expect(f.parsedWritten()).toContainEqual({ type: 'app_tool_result', sid: 's1', requestId: 'r1', ok: true, data: 'R' });
   });
 
-  it('marks a sid dead only on a TERMINAL session_down (willRespawn:false)', () => {
+  it('marks a sid dead only on a TERMINAL session_down (willReconnect:false)', () => {
     const h1: any[] = []; const h2: any[] = [];
     const { f, conn } = make();
     conn.openSession('s1', undefined, { onHealth: (h) => h1.push(h) });
     conn.openSession('s2', undefined, { onHealth: (h) => h2.push(h) });
-    f.emit({ type: 'session_down', sid: 's1', reason: 'x', willRespawn: false });
+    f.emit({ type: 'session_down', sid: 's1', reason: 'x', willReconnect: false });
     expect(h1).toEqual([{ state: 'dead' }]);
     expect(h2).toHaveLength(0);
   });
 
-  it('does NOT flap a sid to dead on a respawning session_down (willRespawn:true)', () => {
+  it('does NOT flap a sid to dead while it is reconnecting (willReconnect:true)', () => {
     const h1: any[] = [];
     const { f, conn } = make();
     conn.openSession('s1', undefined, { onHealth: (h) => h1.push(h) });
-    f.emit({ type: 'session_down', sid: 's1', reason: 'crash', willRespawn: true });
-    expect(h1).toHaveLength(0); // supervisor is recovering it; host heartbeat stands
+    f.emit({ type: 'session_down', sid: 's1', reason: 'crash', willReconnect: true });
+    expect(h1).toHaveLength(0); // reconnecting; host heartbeat stands
+  });
+
+  it('fails in-flight turns loud on session_down (error then idle end the generator)', async () => {
+    const { f, conn } = make();
+    const ch = conn.openSession('s1', undefined, {});
+    const gen = ch.registerTurn('t1', () => {});
+    f.emit({ type: 'session_down', sid: 's1', reason: 'exited (code 1)', willReconnect: true });
+    // The turn generator yields the fail-loud error, then ends (idle).
+    const first = await gen.next();
+    expect(first.value).toMatchObject({ type: 'error' });
+    expect(String((first.value as any).error)).toContain('interrupted');
+    // drains to completion (idle ended it)
+    let done = false;
+    for (let i = 0; i < 5 && !done; i++) { const r = await gen.next(); done = !!r.done; }
+    expect(done).toBe(true);
   });
 
   it('proc exit marks every session dead and clears channels', () => {
