@@ -322,7 +322,7 @@ export function InputZone({ tabId, projectId, cwd, connection, visible, rootRef,
             initReady
               ? 'Ask something...'
               : initStatus === 'failed'
-                ? 'Agent unavailable — retry above'
+                ? 'Agent unavailable — retry to reconnect'
                 : 'Starting agent…'
           }
           rows={1}

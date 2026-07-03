@@ -6,6 +6,7 @@ import { StatusBar } from './agent/StatusBar';
 import { DecisionPanel } from './agent/DecisionPanel';
 import { PlanPanel } from './agent/PlanPanel';
 import { BackgroundTasksPanel } from './agent/BackgroundTasksPanel';
+import { ConnectionOverlay } from './agent/ConnectionOverlay';
 import { AuthPane } from './agent/AuthPane';
 import {
   initTab as initTabStore,
@@ -154,7 +155,6 @@ export function AgentView({ tabId, cwd, connection, provider, projectId, visible
       <MessageList
         tabId={tabId}
         visible={visible}
-        onRetryInit={handleRetryInit}
       />
       <DecisionPanel tabId={tabId} />
       <PlanPanel tabId={tabId} />
@@ -172,6 +172,7 @@ export function AgentView({ tabId, cwd, connection, provider, projectId, visible
         tabId={tabId}
         provider={provider}
       />
+      <ConnectionOverlay tabId={tabId} onRetry={handleRetryInit} />
     </div>
   );
 }
