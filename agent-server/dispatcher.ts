@@ -140,6 +140,7 @@ export function createDispatcher(deps: DispatcherDeps): Dispatcher {
       return;
     }
     // (1) tell main the execution is down FIRST (→ fail-loud turn interruption)…
+    deps.log('warn', `exec ${sid} down: ${reason} — reconnecting (${entry.reconnectAt.length + 1}/${MAX_RECONNECTS} within ${RECONNECT_WINDOW_MS}ms)`);
     deps.sendToMain(JSON.stringify({ type: 'session_down', sid, reason, willReconnect: true }));
     // (2) …then reconnect: fresh exec + updated mapping.
     entry.reconnectAt.push(t);
@@ -170,6 +171,7 @@ export function createDispatcher(deps: DispatcherDeps): Dispatcher {
       }
       const cwd = typeof msg.cwd === 'string' ? msg.cwd : undefined;
       execs.set(sid, { proc: startExec(sid, cwd), cwd, reconnectAt: [], missed: 0, unresponsive: false });
+      deps.log('info', `open_session ${sid} → spawned exec (cwd=${cwd ?? 'default'})`);
       return;
     }
 
@@ -179,6 +181,7 @@ export function createDispatcher(deps: DispatcherDeps): Dispatcher {
       if (entry) {
         execs.delete(sid); // delete BEFORE kill so handleExecDown sees no entry → no reconnect
         entry.proc.kill();
+        deps.log('info', `close_session ${sid} → killed exec`);
       }
       return;
     }
@@ -213,11 +216,12 @@ export function createDispatcher(deps: DispatcherDeps): Dispatcher {
   let tickSeq = 0;
   function tick(): void {
     tickSeq += 1;
-    for (const entry of execs.values()) {
+    for (const [sid, entry] of execs) {
       entry.missed += 1;
       try { entry.proc.writeLine(JSON.stringify({ type: 'ping', seq: tickSeq })); } catch { /* stdin closed */ }
       if (entry.missed >= INNER_DEAD_MISSES && !entry.unresponsive) {
         entry.unresponsive = true;
+        deps.log('warn', `exec ${sid} unresponsive (missed ${entry.missed} inner-pings) — force-killing → reconnect`);
         entry.proc.forceKill();
       }
     }

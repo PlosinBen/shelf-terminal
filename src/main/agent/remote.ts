@@ -810,9 +810,12 @@ function ensureDispatcher(connection: Connection, cwd: string, deploy: DeployRes
   const existing = dispatchers.get(key);
   if (existing) {
     // Reopen within the grace window → cancel teardown, reuse the warm dispatcher.
+    const hadGrace = !!existing.grace;
     if (existing.grace) { clearTimeout(existing.grace); existing.grace = undefined; }
+    log.info('agent-remote', `dispatcher: reusing warm connection ${key}${hadGrace ? ' (cancelled idle-teardown grace)' : ''} — model cache stays warm`);
     return existing.conn;
   }
+  log.info('agent-remote', `dispatcher: spawning new for ${key}`);
   const child = spawnDispatcherProc(connection, cwd, deploy, initScript);
   if (!child) return null;
   child.stderr?.on('data', (c: Buffer) => log.error('agent-remote', 'dispatcher stderr:', c.toString()));
@@ -825,8 +828,12 @@ function ensureDispatcher(connection: Connection, cwd: string, deploy: DeployRes
     onEmpty: () => {
       const e = dispatchers.get(key);
       if (!e || e.conn !== conn || e.grace) return;
+      log.info('agent-remote', `dispatcher: last session closed for ${key} — arming ${DISPATCHER_GRACE_MS}ms idle-teardown grace`);
       e.grace = setTimeout(() => {
-        if (dispatchers.get(key)?.conn === conn) { dispatchers.delete(key); conn.kill(); }
+        if (dispatchers.get(key)?.conn === conn) {
+          log.info('agent-remote', `dispatcher: grace expired for ${key} — tearing down`);
+          dispatchers.delete(key); conn.kill();
+        }
       }, DISPATCHER_GRACE_MS);
       e.grace.unref?.();
     },

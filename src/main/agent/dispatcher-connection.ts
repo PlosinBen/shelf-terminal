@@ -161,6 +161,7 @@ export function createDispatcherConnection(deps: DispatcherConnectionDeps): Disp
     // unsticks, and main's sendMessage `finally` clears its pending permissions.
     if (type === 'session_down') {
       const why = typeof parsed.reason === 'string' ? parsed.reason : 'process error';
+      log.warn('dispatcher-conn', `session ${sid} down: ${why} (willReconnect=${parsed.willReconnect !== false}) — failing in-flight turns`);
       ch.dispatcher.failAllTurns(`Session process ${why} — this turn was interrupted; the conversation resumes from the last message.`);
       // willReconnect:false = terminal (reconnect attempts exhausted) → dead health
       // for this one tab (session-level, not host-wide). willReconnect:true = a
