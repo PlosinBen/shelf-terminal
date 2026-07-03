@@ -173,12 +173,13 @@ export function createRemoteBackend(
         // dispatcher which delivers the canUseTool answer asynchronously.
         (async () => {
           if (!userCallback) {
-            proc.sendLine({ type: 'resolve_permission', toolUseId, allow: true });
+            proc.sendLine({ type: 'resolve_permission', sid: sessionId, toolUseId, allow: true });
             return;
           }
           const result = await userCallback(toolUseId, toolName, input);
           proc.sendLine({
             type: 'resolve_permission',
+            sid: sessionId,
             toolUseId,
             allow: result.behavior === 'allow',
             message: result.behavior === 'deny' ? result.message : undefined,
@@ -229,7 +230,7 @@ export function createRemoteBackend(
       // Fire-and-forget: agent-server forwards to the provider; the resulting
       // 'stopped' task_notification flows back over the task_event lane.
       if (remoteProc) {
-        remoteProc.sendLine({ type: 'stop_task', taskId });
+        remoteProc.sendLine({ type: 'stop_task', sid: sessionId, taskId });
       }
     },
 
@@ -266,7 +267,7 @@ export function createRemoteBackend(
 
     resolvePicker(pickerId: string, payload: PickerResolvePayload) {
       if (!remoteProc) return;
-      remoteProc.sendLine({ type: 'resolve_picker', pickerId, payload });
+      remoteProc.sendLine({ type: 'resolve_picker', sid: sessionId, pickerId, payload });
     },
 
     async getCapabilities(

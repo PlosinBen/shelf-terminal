@@ -34,6 +34,14 @@ interface IncomingMessage {
   effort?: string;
   images?: string[];
   sessionId?: string;
+  /**
+   * App/tab SESSION routing key (dispatch-layering) — the demux dimension for
+   * the out-of-turn messages (`resolve_permission`/`resolve_picker`/`stop_task`)
+   * that today route via `activeBackend` ("whoever sent last"). DISTINCT from
+   * `sessionId` (the context-store / SDK key). Populated by main now; consumed
+   * once the harness routes by sid (group C). Forward-compat seam until then.
+   */
+  sid?: string;
   /** For `type: 'send'`: a structured config edit (picker / status-bar). When
    *  present, the provider applies it + emits a divider instead of running a
    *  query — prompt is empty for these turns. */

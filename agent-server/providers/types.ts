@@ -46,6 +46,17 @@ export type PickerResolvePayload =
 export interface WireEnvelope {
   turnId?: string;
   /**
+   * App/tab SESSION routing key — the dimension that lets one dispatcher
+   * multiplex N tabs (dispatch-layering). DISTINCT from the payload `sessionId`
+   * on `status` (which is the provider's SDK session id) and from the
+   * context-store `sessionId` on inbound `send` — those stay provider/persistence
+   * concerns; `sid` is purely the wire ROUTING key. Value = the same app session
+   * key main mints per tab. In the 3-tier end state the dispatcher stamps this on
+   * relayed exec→main events; today (pre-dispatcher) it rides as a forward-compat
+   * seam and nothing consumes it yet.
+   */
+  sid?: string;
+  /**
    * Marks a `message` as the first of a new render turn so the renderer's
    * buildTurns opens a fresh turn block for it. Needed for server-initiated
    * (auto-resume) turns: they have no `user` message to anchor a new block, so
