@@ -7,8 +7,8 @@
 // lease (it already reaped), so only crashes leave a lease behind.
 //
 // Linux-only in effect (needs `/proc` to find/verify tagged processes); elsewhere
-// the sweep still tidies stale lease files but kills nothing. See the
-// `detached-task-reaping` design.
+// the sweep still tidies stale lease files but kills nothing. See
+// `connection-health#6`.
 import * as fs from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';

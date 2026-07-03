@@ -351,7 +351,7 @@ export interface ProviderCapabilities {
  * (detached `setsid` shell), so the stdin-EOF teardown cascade can't reach it.
  * Enumerated by {@link ServerBackend.listReapableTasks} and killed via
  * {@link ServerBackend.stopTask} by the centralized reaper on any NORMAL
- * agent-server closure. See the `detached-task-reaping` design.
+ * agent-server closure. See `connection-health#5`.
  */
 export interface ReapableTask {
   /** Provider-native task id — hand back to `stopTask(id)`. */
@@ -437,7 +437,7 @@ export interface ServerBackend {
    * Read-only snapshot; the centralized reaper (`agent-server/reaper.ts`) filters
    * to `status:'running'` and kills each via `stopTask(id)` on any NORMAL
    * agent-server closure. Omitted by providers with no background-task surface
-   * (no-op → the reaper skips them). See the `detached-task-reaping` design.
+   * (no-op → the reaper skips them). See `connection-health#5`.
    */
   listReapableTasks?(): Promise<ReapableTask[]>;
   /**

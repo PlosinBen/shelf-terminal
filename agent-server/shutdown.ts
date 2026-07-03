@@ -6,8 +6,7 @@
 // so a surviving detached task would be a permanently invisible orphan. The only
 // closure that never reaches here is ABNORMAL (agent-server itself died) → that
 // case is the crash net's job (a future launch's startup sweep). Extracted from
-// index.ts so it's unit-testable (index.ts runs on import). See the
-// `detached-task-reaping` design.
+// index.ts so it's unit-testable (index.ts runs on import). See `connection-health#5`.
 import type { ServerBackend } from './providers/types';
 import { reapDetachedTasks } from './reaper';
 

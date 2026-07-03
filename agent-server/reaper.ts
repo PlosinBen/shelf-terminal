@@ -3,7 +3,7 @@
 // provider's escaped-tree background tasks and killing the still-running ones
 // through the uniform `stopTask` contract. Kept out of each provider's `dispose()`
 // so the enumerate→kill policy lives in one place and `dispose()` stays a plain
-// resource-close. See the `detached-task-reaping` design.
+// resource-close. See `connection-health#5`.
 import type { ServerBackend } from './providers/types';
 
 export interface ReapSummary {

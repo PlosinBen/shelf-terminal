@@ -3,7 +3,7 @@
 // group leader). So the only way to reap such an escaped task while the session
 // is alive is to read that pid file and signal the process. Kept in its own tiny
 // module (I/O + process.kill — NOT pure) so it stays out of the pure `helpers.ts`
-// and is unit-testable in isolation. See the `detached-task-reaping` design.
+// and is unit-testable in isolation. See `connection-health#5`.
 import { promises as fs } from 'node:fs';
 import { serverLog, type ServerLogLevel } from '../../server-logger';
 

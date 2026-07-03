@@ -43,9 +43,10 @@ A project connection is established through one uniform pathway regardless of wh
       ▼
 [Idle-shutdown watchdog]  ── lives inside the agent-server, armed ONLY when the target is an
                               independent remote host (one not co-suspended with the app) ──
-          each beat resets it; on timeout it disposes its backends and exits, so an idle
-          remote stops burning resources while the app sleeps. Co-located targets
-          (same-machine / subsystem / container) are never armed — they sleep with the app.
+          each beat resets it; on timeout it reaps its escaped background tasks (below),
+          disposes its backends, and exits, so an idle remote stops burning resources
+          while the app sleeps. Co-located targets (same-machine / subsystem / container)
+          are never armed — they sleep with the app.
 ```
 
 ## Boundaries
@@ -59,3 +60,5 @@ A project connection is established through one uniform pathway regardless of wh
 - **Heartbeat timing is single-clocked.** Round-trip health is computed entirely on the app side; the two endpoints' clocks are never compared, because there is no clock synchronization between them.
 
 - **Dead is not death.** A connection flagged dead from missed beats is surfaced to the UI but never auto-killed by the app: a sleeping laptop produces frequent false "dead → instantly healthy" flaps, so killing on dead would destroy healthy sessions wholesale. The only autonomous teardown is the agent-server's own idle-shutdown watchdog, and it is gated on whether the host is co-suspended with the app — armed for an independent remote host, deliberately absent for co-located targets. The cost is that a long idle remote will self-exit; surviving background work is opt-in by disabling the watchdog for that host, and otherwise the connection is re-spawned and resumed on wake.
+
+- **Teardown reaps the background work the agent left running.** An agent can start background shell tasks that detach out of its own process tree, so the ordinary teardown cascade cannot reach them. The classification is normal-vs-abnormal closure, owned by the agent-server itself: on any NORMAL closure — for any reason, including a disconnect it detects (its input closing, or the idle watchdog firing) — it is still alive, so it first reaps those escaped tasks (enumerate them, then have each provider stop its own) before disposing. This is unconditional, because there is no reconnect: a reconnect is a fresh connection, and any task left running would be permanently invisible and uncontrollable, so it is cleaned up rather than orphaned. The one case it cannot cover — the agent-server dying ABNORMALLY (a hard crash), before it can run that path — is caught by the same startup lease sweep that reclaims stale dirs: each server stamps its spawned processes with a per-session marker and records a liveness lease; the next server to start reaps any still-alive marked processes whose owning session is provably gone (a normal shutdown drops its own lease, so a lingering one means a crash). That process-level sweep only works where the host exposes a process table for it; where it does not, an abnormally-orphaned local task is left for the user — low-severity and visible locally.

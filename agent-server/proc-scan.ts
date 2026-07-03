@@ -3,7 +3,7 @@
 // (SHELF_SESSION). Linux-only in practice — `/proc/<pid>/environ` exposes a
 // process's env, same-uid readable, no privilege. On macOS/Windows there is no
 // `/proc`, so the readers return empty and the whole crash net no-ops (documented
-// limitation — see the `detached-task-reaping` design). `procRoot` is injectable
+// limitation — see `connection-health#6`). `procRoot` is injectable
 // so the parsing/matching is unit-testable off-Linux against a fake tree.
 import * as fs from 'node:fs';
 import { join } from 'node:path';
