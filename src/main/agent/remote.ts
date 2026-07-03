@@ -818,7 +818,19 @@ function ensureDispatcher(connection: Connection, cwd: string, deploy: DeployRes
   log.info('agent-remote', `dispatcher: spawning new for ${key}`);
   const child = spawnDispatcherProc(connection, cwd, deploy, initScript);
   if (!child) return null;
-  child.stderr?.on('data', (c: Buffer) => log.error('agent-remote', 'dispatcher stderr:', c.toString()));
+  // The dispatcher writes ALL its logs to stderr as `[dispatcher] <level>: <msg>`.
+  // Route each line to the matching main log level so a real dispatcher error
+  // stands out instead of being buried under info noise (fail-loud). Unstructured
+  // lines (e.g. a relayed exec crash trace with no prefix) stay as error.
+  child.stderr?.on('data', (c: Buffer) => {
+    for (const raw of c.toString().split('\n')) {
+      const line = raw.trim();
+      if (!line) continue;
+      const m = /^\[dispatcher\]\s+(error|warn|info|debug):\s*(.*)$/.exec(line);
+      if (m) log[m[1] as 'error' | 'warn' | 'info' | 'debug']('agent-remote', `dispatcher: ${m[2]}`);
+      else log.error('agent-remote', `dispatcher stderr: ${line}`);
+    }
+  });
   child.on('error', (err) => log.error('agent-remote', `dispatcher proc error: ${err.message}`));
   const conn = createDispatcherConnection({
     proc: childToDispatcherProc(child),
