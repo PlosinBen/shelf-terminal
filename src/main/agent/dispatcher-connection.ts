@@ -187,6 +187,19 @@ export function createDispatcherConnection(deps: DispatcherConnectionDeps): Disp
   });
 
   function openSession(sid: string, cwd: string | undefined, sinks: SessionSinks): SessionChannel {
+    // Re-init of an already-open sid (a tab restarted / reconnected before its old
+    // session's teardown fired — sids are per-project persistent, so the same project
+    // reuses one). Close the STALE channel first so the dispatcher tears down the old
+    // exec, then open fresh. Otherwise the dispatcher drops the duplicate open_session
+    // ("already-open") → the restarted tab never readies, and the orphaned old channel's
+    // later kill would close the NEW session's exec (Map<sid> collision → "Failed to
+    // start agent-server"). The dispatcher processes close→open in order (kill old exec,
+    // spawn fresh); the old exec's late exit is ignored via handleExecDown's proc guard.
+    if (channels.has(sid)) {
+      log.warn('dispatcher-conn', `openSession for already-open sid ${sid} — replacing (close old → open fresh)`);
+      channels.delete(sid);
+      writeToProc({ type: 'close_session', sid });
+    }
     const dispatcher = createTurnDispatcher(
       deps.parseRemoteMessage,
       sinks.onTaskEvent,
@@ -195,7 +208,8 @@ export function createDispatcherConnection(deps: DispatcherConnectionDeps): Disp
       sinks.onSkillsReloaded,
       sinks.onSessionEvent,
     );
-    channels.set(sid, { sid, sinks, dispatcher });
+    const state: ChannelState = { sid, sinks, dispatcher };
+    channels.set(sid, state);
     writeToProc({ type: 'open_session', sid, cwd });
     // Seed this session's health immediately. The heartbeat only emits onHealth on
     // a CHANGE from 'healthy', so a fresh/reconnected connection would otherwise
@@ -210,10 +224,13 @@ export function createDispatcherConnection(deps: DispatcherConnectionDeps): Disp
       awaitReady: dispatcher.awaitReady,
       onResponse: dispatcher.onResponse,
       kill: () => {
-        if (channels.delete(sid)) {
-          writeToProc({ type: 'close_session', sid });
-          if (channels.size === 0) deps.onEmpty?.();
-        }
+        // Identity guard: only close if THIS channel is still the current one for the
+        // sid. An orphaned channel (replaced by a re-open) must not close the newer
+        // session's exec.
+        if (channels.get(sid) !== state) return;
+        channels.delete(sid);
+        writeToProc({ type: 'close_session', sid });
+        if (channels.size === 0) deps.onEmpty?.();
       },
     };
   }

@@ -132,6 +132,27 @@ describe('dispatcher-connection (per-host demux by sid)', () => {
     expect(conn.size()).toBe(0);
   });
 
+  it('re-opening an already-open sid replaces cleanly (close old → open fresh); stale kill is a no-op — regression', () => {
+    // Close/reopen race on a per-project persistent sid: the restart must send
+    // close_session THEN open_session, and the orphaned old channel's kill must NOT
+    // close the new session's exec (Map<sid> collision → "Failed to start agent-server").
+    const { f, conn } = make();
+    const ch1 = conn.openSession('s1', '/p', {});
+    f.written.length = 0;
+    const ch2 = conn.openSession('s1', '/p', {}); // re-init same sid
+    expect(f.parsedWritten()).toEqual([
+      { type: 'close_session', sid: 's1' },
+      { type: 'open_session', sid: 's1', cwd: '/p' },
+    ]);
+    // The STALE channel's kill is a no-op (ch2 owns the sid now).
+    f.written.length = 0;
+    ch1.kill();
+    expect(f.parsedWritten()).toHaveLength(0);
+    // ch2's kill DOES close.
+    ch2.kill();
+    expect(f.parsedWritten()).toContainEqual({ type: 'close_session', sid: 's1' });
+  });
+
   it('seeds a healthy status on openSession so a reconnect clears a stale red — regression', () => {
     // Bug: after a dispatcher crash the tab sat at 'dead' (red). On reconnect the
     // new connection never emitted 'healthy' (heartbeat only emits on change from

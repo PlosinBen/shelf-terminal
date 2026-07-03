@@ -119,6 +119,22 @@ describe('dispatcher core', () => {
     expect(downs[downs.length - 1]).toMatchObject({ willReconnect: false }); // then give up
   });
 
+  it('ignores a STALE exec exit after a close→reopen replace (proc-identity guard) — regression', () => {
+    // Reopen race: main sends close_session then open_session for the same sid. The
+    // OLD exec's late exit must not be read as the NEW exec going down (which would
+    // wrongly reconnect the healthy new exec).
+    const h = harness();
+    h.d.onMainLine(JSON.stringify({ type: 'open_session', sid: 's1' }));
+    const oldExec = h.spawned[0];
+    h.d.onMainLine(JSON.stringify({ type: 'close_session', sid: 's1' })); // kill exec1
+    h.d.onMainLine(JSON.stringify({ type: 'open_session', sid: 's1' }));  // spawn exec2
+    expect(h.spawnExec).toHaveBeenCalledTimes(2);
+    h.toMain.length = 0;
+    oldExec.hooks.onExit(0); // exec1's late exit — must be ignored
+    expect(h.parsedToMain().some((m) => m.type === 'session_down')).toBe(false);
+    expect(h.spawnExec).toHaveBeenCalledTimes(2); // exec2 NOT reconnected
+  });
+
   it('does NOT reconnect after an intentional close_session', () => {
     const h = harness();
     h.d.onMainLine(JSON.stringify({ type: 'open_session', sid: 's1' }));

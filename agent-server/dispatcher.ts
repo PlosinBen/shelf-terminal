@@ -77,10 +77,15 @@ export function createDispatcher(deps: DispatcherDeps): Dispatcher {
 
   /** Open an exec execution for `sid` and wire its relay + down-handling. */
   function startExec(sid: string, cwd: string | undefined): ExecProc {
-    return deps.spawnExec(sid, cwd, {
+    // eslint-disable-next-line prefer-const -- referenced (lazily) in the onExit closure
+    let proc: ExecProc;
+    proc = deps.spawnExec(sid, cwd, {
       onLine: (l) => handleExecLine(sid, l),
-      onExit: (code) => handleExecDown(sid, `exited (code ${code})`),
+      // Pass THIS proc so handleExecDown can ignore a stale exec's late exit after a
+      // reconnect/replace (its sid now maps to a newer proc). See handleExecDown.
+      onExit: (code) => handleExecDown(sid, `exited (code ${code})`, proc),
     });
+    return proc;
   }
 
   /**
@@ -128,9 +133,13 @@ export function createDispatcher(deps: DispatcherDeps): Dispatcher {
    *   (2) open a fresh exec + update the mapping.
    * A reconnect storm (repeated immediate failures) gives up → disconnected.
    */
-  function handleExecDown(sid: string, reason: string): void {
+  function handleExecDown(sid: string, reason: string, proc?: ExecProc): void {
     const entry = execs.get(sid);
     if (!entry) return; // already closed intentionally (close_session)
+    // A stale exec's late exit: after a reconnect/replace this sid maps to a NEWER
+    // proc. The old proc exiting must NOT be read as the current one going down
+    // (that would wrongly reconnect the healthy new exec).
+    if (proc && entry.proc !== proc) return;
     const t = now();
     entry.reconnectAt = entry.reconnectAt.filter((ts) => t - ts < RECONNECT_WINDOW_MS);
     if (entry.reconnectAt.length >= MAX_RECONNECTS) {
