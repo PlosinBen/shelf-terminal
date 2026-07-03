@@ -11,6 +11,7 @@
 // supervisor. See the feature note.
 import * as readline from 'readline';
 import { spawn } from 'child_process';
+import { createModelCache, type ModelCache } from './model-cache';
 
 /** A spawned per-session exec proc, from the dispatcher's side. */
 export interface ExecProc {
@@ -33,6 +34,9 @@ export interface DispatcherDeps {
   log: (level: 'info' | 'warn' | 'error', msg: string) => void;
   /** Injectable clock (respawn backoff window); defaults to Date.now. */
   now?: () => number;
+  /** Per-host model/caps cache (group E). Serviced on the exec side-channel
+   *  (cache_get/cache_put); absent → the side-channel no-ops (every exec fetches). */
+  cache?: ModelCache;
 }
 
 /** Restart-storm backoff: at most MAX respawns within WINDOW before giving up. */
@@ -87,6 +91,20 @@ export function createDispatcher(deps: DispatcherDeps): Dispatcher {
           if (entry.hung) { entry.hung = false; deps.sendToMain(JSON.stringify({ type: 'session_health', sid, health: { state: 'healthy' } })); }
         }
         return; // consume: the inner pong is dispatcher-internal, never relayed
+      }
+    }
+    // Cache-aside side-channel (group E): serviced locally, never relayed to main.
+    if (line.includes('"type":"cache_')) {
+      let m: any;
+      try { m = JSON.parse(line); } catch { /* not a cache message */ }
+      if (m?.type === 'cache_get') {
+        const value = deps.cache?.get(`${m.key}:${m.provider}`);
+        execs.get(sid)?.proc.writeLine(JSON.stringify({ type: 'cache_reply', requestId: m.requestId, hit: value !== undefined, value }));
+        return;
+      }
+      if (m?.type === 'cache_put') {
+        deps.cache?.put(`${m.key}:${m.provider}`, m.value);
+        return;
       }
     }
     deps.sendToMain(line); // relay raw (exec already stamped sid)
@@ -218,6 +236,9 @@ export function runDispatcher(): void {
     },
     sendToMain: (line) => process.stdout.write(line + '\n'),
     log: (level, msg) => process.stderr.write(`[dispatcher] ${level}: ${msg}\n`),
+    // Per-host model cache. Coarse TTL (default 30min; env override for tests) —
+    // the sole freshness mechanism (no account-guard; see model-cache.ts).
+    cache: createModelCache({ ttlMs: Number(process.env.SHELF_MODEL_CACHE_TTL_MS) || 1_800_000 }),
   });
 
   const rl = readline.createInterface({ input: process.stdin, terminal: false });

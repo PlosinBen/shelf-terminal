@@ -1,9 +1,10 @@
 import { describe, it, expect, vi } from 'vitest';
 import { createDispatcher, type ExecProc } from './dispatcher';
+import { createModelCache } from './model-cache';
 
 // A fake exec proc that records forwarded lines / kills and exposes the hooks the
 // dispatcher wired, so tests can drive exec→main (onLine) and exit (onExit).
-function harness(opts: { now?: () => number } = {}) {
+function harness(opts: { now?: () => number; cache?: any } = {}) {
   const toMain: string[] = [];
   const logs: Array<[string, string]> = [];
   const spawned: Array<{
@@ -25,6 +26,7 @@ function harness(opts: { now?: () => number } = {}) {
     sendToMain: (l) => toMain.push(l),
     log: (lvl, m) => logs.push([lvl, m]),
     now: opts.now,
+    cache: opts.cache,
   });
   const parsedToMain = () => toMain.map((l) => JSON.parse(l));
   return { d, toMain, parsedToMain, logs, spawned, spawnExec };
@@ -169,5 +171,28 @@ describe('dispatcher inner heartbeat (hung-detection)', () => {
     const raw = '{"type":"message","sid":"s1","content":"hi"}';
     h.spawned[0].hooks.onLine(raw);
     expect(h.toMain).toContain(raw);
+  });
+});
+
+describe('dispatcher cache side-channel (group E)', () => {
+  it('services cache_get/cache_put on the side-channel, never relaying them to main', () => {
+    const cache = createModelCache({ ttlMs: 10_000, now: () => 0 });
+    const h = harness({ cache });
+    h.d.onMainLine(JSON.stringify({ type: 'open_session', sid: 's1' }));
+    const exec = h.spawned[0];
+
+    // MISS → cache_reply hit:false, written back to the exec (not relayed to main)
+    exec.hooks.onLine(JSON.stringify({ type: 'cache_get', sid: 's1', requestId: 'r1', key: 'models', provider: 'copilot' }));
+    const reply1 = JSON.parse(exec.written.find((l) => l.includes('cache_reply'))!);
+    expect(reply1).toMatchObject({ type: 'cache_reply', requestId: 'r1', hit: false });
+
+    // PUT then GET → hit with the value
+    exec.hooks.onLine(JSON.stringify({ type: 'cache_put', sid: 's1', key: 'models', provider: 'copilot', value: [{ id: 'gpt' }] }));
+    exec.hooks.onLine(JSON.stringify({ type: 'cache_get', sid: 's1', requestId: 'r2', key: 'models', provider: 'copilot' }));
+    const reply2 = JSON.parse([...exec.written].reverse().find((l) => l.includes('"requestId":"r2"'))!);
+    expect(reply2).toMatchObject({ requestId: 'r2', hit: true, value: [{ id: 'gpt' }] });
+
+    // never relayed to main
+    expect(h.toMain.some((l) => l.includes('cache_'))).toBe(false);
   });
 });
