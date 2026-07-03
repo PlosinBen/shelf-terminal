@@ -9,6 +9,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { getShellEnv } from '../connector/shell-env';
 import { createTurnDispatcher, type PermissionHandler } from './turn-dispatcher';
+import { createDispatcherConnection, type DispatcherConnection, type DispatcherProc } from './dispatcher-connection';
 import { getAppInstanceId } from '../app-instance-id';
 import { skillsSourceRoot, listSkillFilesRel, hashSkillsTree } from '../skills-projection';
 import { syncMcpForConnection } from '../mcp-remote';
@@ -121,7 +122,17 @@ export function createRemoteBackend(
           deployed = true;
         }
         onPhase?.('connecting');
-        const proc = await spawnAgentServer(connection, cwd, deployResult!, initScript, onTaskEvent, onServerTurn, onHealth, onQueue, onSkillsReloaded, onSessionEvent, projectId);
+        let proc: RemoteProcess | null;
+        if (USE_DISPATCHER) {
+          // Shared per-host dispatcher: open a session on it (drop-in RemoteProcess).
+          const dc = ensureDispatcher(connection, cwd, deployResult!, initScript);
+          const sid = sessionId ?? randomUUID();
+          proc = dc
+            ? dc.openSession(sid, cwd, { onTaskEvent, onServerTurn, onHealth, onQueue, onSkillsReloaded, onSessionEvent, projectId })
+            : null;
+        } else {
+          proc = await spawnAgentServer(connection, cwd, deployResult!, initScript, onTaskEvent, onServerTurn, onHealth, onQueue, onSkillsReloaded, onSessionEvent, projectId);
+        }
         if (!proc) return null;
         const ready = await proc.awaitReady();
         if (!ready) {
@@ -712,6 +723,102 @@ async function spawnAgentServer(
 // Heartbeat send interval. Env override (ms) lets E2E drive the lease/health
 // loop fast without waiting a real minute; prod uses the §5.9 default (1m).
 const HEARTBEAT_INTERVAL_MS = Number(process.env.SHELF_HEARTBEAT_INTERVAL_MS) || DEFAULT_HEALTH_THRESHOLDS.intervalMs;
+
+// ── Dispatch-layering (group D3): shared per-host dispatcher path ────────────
+// FLAG-GUARDED, default OFF → today's per-tab path (spawnAgentServer/wrapProcess)
+// is the untouched fallback. Flip `SHELF_USE_DISPATCHER=1` to route through ONE
+// per-host dispatcher process that multiplexes N tabs. Flipped to default once
+// E2E-proven (a later step). See the feature note.
+const USE_DISPATCHER = process.env.SHELF_USE_DISPATCHER === '1';
+
+/** Per-transport connection identity — the dispatcher scope key (#3). NOT
+ *  "the ControlPath" (that's ssh-unix only). */
+function dispatcherKeyFor(c: Connection): string {
+  switch (c.type) {
+    case 'ssh': return `ssh:${c.host}:${c.port}:${c.user}`;
+    case 'docker': return `docker:${c.container}`;
+    case 'wsl': return `wsl:${c.distro}`;
+    case 'local': return 'local';
+    default: return JSON.stringify(c);
+  }
+}
+
+// Shared per-host dispatcher connections, ref-counted: the last session's close
+// fires onEmpty → kill the proc + drop it here.
+const dispatchers = new Map<string, DispatcherConnection>();
+
+/** Adapt a spawned child process to the DispatcherProc the connection drives. */
+function childToDispatcherProc(child: ChildProcess): DispatcherProc {
+  let buf = '';
+  return {
+    writeLine: (line) => { child.stdin?.write(line + '\n'); },
+    onLine: (cb) => {
+      child.stdout?.on('data', (chunk: Buffer) => {
+        buf += chunk.toString();
+        const lines = buf.split('\n');
+        buf = lines.pop() ?? '';
+        for (const l of lines) if (l.trim()) cb(l);
+      });
+    },
+    onExit: (cb) => { child.on('exit', (code) => cb(code)); },
+    kill: () => { child.stdin?.end(); child.kill(); },
+  };
+}
+
+/** Spawn the deployed bundle in `--role=dispatcher` over the transport. Mirrors
+ *  spawnAgentServer's transport branches (kept separate so the per-tab path stays
+ *  byte-untouched); the dispatcher gets the ssh idle-shutdown watchdog (it owns
+ *  it now) while the exec procs it spawns do NOT (#8). */
+function spawnDispatcherProc(connection: Connection, cwd: string, deploy: DeployResult, initScript?: string): ChildProcess | null {
+  const { nodeBin, indexPath } = deploy;
+  const testEnv = process.env.SHELF_TEST_MODE ? `SHELF_TEST_MODE=${process.env.SHELF_TEST_MODE} ` : '';
+  if (connection.type === 'local') {
+    const env: Record<string, string> = { ...getShellEnv() };
+    if (process.env.SHELF_TEST_MODE) env.SHELF_TEST_MODE = process.env.SHELF_TEST_MODE;
+    return spawn(nodeBin, [indexPath, '--role=dispatcher'], { cwd, env, stdio: ['pipe', 'pipe', 'pipe'] });
+  }
+  if (connection.type === 'ssh') {
+    const shellPrefix = initScript ? `eval '${initScript.replace(/'/g, "'\\''")}' >/dev/null 2>&1; ` : '';
+    const idleMin = connection.idleShutdownMinutes ?? 5;
+    const idleArg = idleMin > 0 ? ` --idle-shutdown-min=${idleMin}` : '';
+    const cmd = `${shellPrefix}${testEnv}exec ${nodeBin} ${indexPath} --role=dispatcher${idleArg}`;
+    return spawn('ssh', [
+      '-o', 'ControlMaster=auto',
+      '-o', `ControlPath=/tmp/shelf-ssh-${connection.host}-${connection.port}-${connection.user}`,
+      '-o', 'ControlPersist=600',
+      '-p', String(connection.port),
+      `${connection.user}@${connection.host}`,
+      cmd,
+    ], { stdio: ['pipe', 'pipe', 'pipe'] });
+  }
+  if (connection.type === 'docker') {
+    return spawn('docker', ['exec', '-i', connection.container, 'sh', '-c', `${testEnv}exec ${nodeBin} ${indexPath} --role=dispatcher`], { stdio: ['pipe', 'pipe', 'pipe'] });
+  }
+  if (connection.type === 'wsl') {
+    return spawn('wsl.exe', ['-d', connection.distro, '--', 'sh', '-lc', `${testEnv}exec ${nodeBin} ${indexPath} --role=dispatcher`], { stdio: ['pipe', 'pipe', 'pipe'] });
+  }
+  return null;
+}
+
+/** Get (or spawn) the shared dispatcher for this host. */
+function ensureDispatcher(connection: Connection, cwd: string, deploy: DeployResult, initScript?: string): DispatcherConnection | null {
+  const key = dispatcherKeyFor(connection);
+  const existing = dispatchers.get(key);
+  if (existing) return existing;
+  const child = spawnDispatcherProc(connection, cwd, deploy, initScript);
+  if (!child) return null;
+  child.stderr?.on('data', (c: Buffer) => log.error('agent-remote', 'dispatcher stderr:', c.toString()));
+  child.on('error', (err) => log.error('agent-remote', `dispatcher proc error: ${err.message}`));
+  const dc = createDispatcherConnection({
+    proc: childToDispatcherProc(child),
+    parseRemoteMessage,
+    handleAppTool,
+    heartbeatIntervalMs: HEARTBEAT_INTERVAL_MS,
+    onEmpty: () => { dispatchers.delete(key); dc.kill(); },
+  });
+  dispatchers.set(key, dc);
+  return dc;
+}
 
 function wrapProcess(
   proc: ChildProcess,
