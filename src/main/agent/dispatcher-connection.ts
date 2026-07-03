@@ -197,6 +197,12 @@ export function createDispatcherConnection(deps: DispatcherConnectionDeps): Disp
     );
     channels.set(sid, { sid, sinks, dispatcher });
     writeToProc({ type: 'open_session', sid, cwd });
+    // Seed this session's health immediately. The heartbeat only emits onHealth on
+    // a CHANGE from 'healthy', so a fresh/reconnected connection would otherwise
+    // never push a 'healthy' — leaving a tab that just RECONNECTED after a dispatcher
+    // crash stuck on its stale 'dead' (red) status even though it's fine now. The
+    // per-host tracker is optimistic-healthy at connect, so this clears the red.
+    sinks.onHealth?.(health.evaluate(Date.now()));
 
     return {
       sendLine: (msg) => writeToProc({ ...msg, sid }),

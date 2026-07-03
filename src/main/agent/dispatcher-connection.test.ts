@@ -82,8 +82,9 @@ describe('dispatcher-connection (per-host demux by sid)', () => {
     conn.openSession('s1', undefined, { onHealth: (h) => h1.push(h) });
     conn.openSession('s2', undefined, { onHealth: (h) => h2.push(h) });
     f.emit({ type: 'session_down', sid: 's1', reason: 'x', willReconnect: false });
-    expect(h1).toEqual([{ state: 'dead' }]);
-    expect(h2).toHaveLength(0);
+    // openSession seeds an initial 'healthy'; the terminal down then flips s1 to dead.
+    expect(h1.at(-1)).toEqual({ state: 'dead' });
+    expect(h2).not.toContainEqual({ state: 'dead' }); // sibling untouched
   });
 
   it('does NOT flap a sid to dead while it is reconnecting (willReconnect:true)', () => {
@@ -91,7 +92,7 @@ describe('dispatcher-connection (per-host demux by sid)', () => {
     const { f, conn } = make();
     conn.openSession('s1', undefined, { onHealth: (h) => h1.push(h) });
     f.emit({ type: 'session_down', sid: 's1', reason: 'crash', willReconnect: true });
-    expect(h1).toHaveLength(0); // reconnecting; host heartbeat stands
+    expect(h1).not.toContainEqual({ state: 'dead' }); // reconnecting; host heartbeat stands
   });
 
   it('fails in-flight turns loud on session_down (error then idle end the generator)', async () => {
@@ -129,6 +130,16 @@ describe('dispatcher-connection (per-host demux by sid)', () => {
     b.kill();
     expect(onEmpty).toHaveBeenCalledTimes(1);
     expect(conn.size()).toBe(0);
+  });
+
+  it('seeds a healthy status on openSession so a reconnect clears a stale red — regression', () => {
+    // Bug: after a dispatcher crash the tab sat at 'dead' (red). On reconnect the
+    // new connection never emitted 'healthy' (heartbeat only emits on change from
+    // healthy), so the red never cleared even though caps re-init succeeded.
+    const onHealth = vi.fn();
+    const { conn } = make();
+    conn.openSession('s1', undefined, { onHealth });
+    expect(onHealth).toHaveBeenCalledWith(expect.objectContaining({ state: 'healthy' }));
   });
 
   it('fires onDown when the dispatcher proc exits (owner evicts the dead conn) — regression', () => {
