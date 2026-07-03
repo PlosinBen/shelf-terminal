@@ -154,10 +154,14 @@ export function createDispatcherConnection(deps: DispatcherConnectionDeps): Disp
       });
       return;
     }
-    // An exec exited (D2 emits this; D4 turns it into supervised respawn). Surface
-    // dead health for that one tab — session-level failure, not host-wide.
+    // An exec went down. willRespawn:false = terminal (crash-loop gave up) → dead
+    // health for that one tab (session-level, not host-wide). willRespawn:true =
+    // the supervisor is bringing a fresh exec up; don't flap the tab to dead — the
+    // host heartbeat still reflects liveness, and the respawned exec's ready{sid}
+    // resumes it. (Per-sid recovery health + in-flight-turn release + open-prompt
+    // cancel (#6) are the inner-ping refinement, still TODO before the flip.)
     if (type === 'session_down') {
-      ch.sinks.onHealth?.({ state: 'dead' } as ConnectionHealth);
+      if (parsed.willRespawn === false) ch.sinks.onHealth?.({ state: 'dead' } as ConnectionHealth);
       return;
     }
 

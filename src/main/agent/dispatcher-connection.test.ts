@@ -76,7 +76,7 @@ describe('dispatcher-connection (per-host demux by sid)', () => {
     expect(f.parsedWritten()).toContainEqual({ type: 'app_tool_result', sid: 's1', requestId: 'r1', ok: true, data: 'R' });
   });
 
-  it('surfaces dead health to only that sid on session_down', () => {
+  it('marks a sid dead only on a TERMINAL session_down (willRespawn:false)', () => {
     const h1: any[] = []; const h2: any[] = [];
     const { f, conn } = make();
     conn.openSession('s1', undefined, { onHealth: (h) => h1.push(h) });
@@ -84,6 +84,14 @@ describe('dispatcher-connection (per-host demux by sid)', () => {
     f.emit({ type: 'session_down', sid: 's1', reason: 'x', willRespawn: false });
     expect(h1).toEqual([{ state: 'dead' }]);
     expect(h2).toHaveLength(0);
+  });
+
+  it('does NOT flap a sid to dead on a respawning session_down (willRespawn:true)', () => {
+    const h1: any[] = [];
+    const { f, conn } = make();
+    conn.openSession('s1', undefined, { onHealth: (h) => h1.push(h) });
+    f.emit({ type: 'session_down', sid: 's1', reason: 'crash', willRespawn: true });
+    expect(h1).toHaveLength(0); // supervisor is recovering it; host heartbeat stands
   });
 
   it('proc exit marks every session dead and clears channels', () => {

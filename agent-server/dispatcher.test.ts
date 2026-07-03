@@ -3,7 +3,7 @@ import { createDispatcher, type ExecProc } from './dispatcher';
 
 // A fake exec proc that records forwarded lines / kills and exposes the hooks the
 // dispatcher wired, so tests can drive exec→main (onLine) and exit (onExit).
-function harness() {
+function harness(opts: { now?: () => number } = {}) {
   const toMain: string[] = [];
   const logs: Array<[string, string]> = [];
   const spawned: Array<{
@@ -24,6 +24,7 @@ function harness() {
     spawnExec,
     sendToMain: (l) => toMain.push(l),
     log: (lvl, m) => logs.push([lvl, m]),
+    now: opts.now,
   });
   const parsedToMain = () => toMain.map((l) => JSON.parse(l));
   return { d, toMain, parsedToMain, logs, spawned, spawnExec };
@@ -78,12 +79,37 @@ describe('dispatcher core', () => {
     expect(h.parsedToMain()).toContainEqual({ type: 'pong', seq: 7 });
   });
 
-  it('exec exit emits session_down to main and forgets the sid (D2: no respawn)', () => {
+  it('exec exit auto-respawns (willRespawn:true) and starts a fresh exec', () => {
     const h = harness();
-    h.d.onMainLine(JSON.stringify({ type: 'open_session', sid: 's1' }));
+    h.d.onMainLine(JSON.stringify({ type: 'open_session', sid: 's1', cwd: '/w' }));
+    expect(h.spawnExec).toHaveBeenCalledTimes(1);
     h.spawned[0].hooks.onExit(1);
     const down = h.parsedToMain().find((m) => m.type === 'session_down');
-    expect(down).toMatchObject({ sid: 's1', willRespawn: false });
+    expect(down).toMatchObject({ sid: 's1', willRespawn: true });
+    expect(h.spawnExec).toHaveBeenCalledTimes(2); // respawned with the same cwd
+    expect(h.spawned[1]).toMatchObject({ sid: 's1', cwd: '/w' });
+  });
+
+  it('gives up (willRespawn:false) when an exec crash-loops past the backoff cap', () => {
+    let t = 0;
+    const h = harness({ now: () => t });
+    h.d.onMainLine(JSON.stringify({ type: 'open_session', sid: 's1' }));
+    for (let i = 0; i < 6; i++) {
+      h.spawned[h.spawned.length - 1].hooks.onExit(1); // crash the latest exec
+      t += 100; // all within RESPAWN_WINDOW_MS
+    }
+    const downs = h.parsedToMain().filter((m) => m.type === 'session_down');
+    expect(downs.filter((d) => d.willRespawn === true)).toHaveLength(5); // 5 respawns
+    expect(downs[downs.length - 1]).toMatchObject({ willRespawn: false }); // then give up
+  });
+
+  it('does NOT respawn after an intentional close_session', () => {
+    const h = harness();
+    h.d.onMainLine(JSON.stringify({ type: 'open_session', sid: 's1' }));
+    h.d.onMainLine(JSON.stringify({ type: 'close_session', sid: 's1' }));
+    // kill() fired; a stale exit for a closed sid must not respawn.
+    h.spawned[0].hooks.onExit(0);
+    expect(h.spawnExec).toHaveBeenCalledTimes(1);
   });
 
   it('drops non-JSON lines from main', () => {

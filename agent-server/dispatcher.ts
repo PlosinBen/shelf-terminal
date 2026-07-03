@@ -31,7 +31,13 @@ export interface DispatcherDeps {
   /** Write one raw line to main (the dispatcher's stdout). */
   sendToMain: (line: string) => void;
   log: (level: 'info' | 'warn' | 'error', msg: string) => void;
+  /** Injectable clock (respawn backoff window); defaults to Date.now. */
+  now?: () => number;
 }
+
+/** Restart-storm backoff: at most MAX respawns within WINDOW before giving up. */
+const MAX_RESPAWNS = 5;
+const RESPAWN_WINDOW_MS = 10_000;
 
 export interface Dispatcher {
   /** Handle one inbound line from main. */
@@ -47,7 +53,39 @@ export interface Dispatcher {
  * proc. Exec→main traffic is relayed raw by the spawn hooks, never touched here.
  */
 export function createDispatcher(deps: DispatcherDeps): Dispatcher {
-  const execs = new Map<string, ExecProc>();
+  interface ExecEntry { proc: ExecProc; cwd: string | undefined; respawnAt: number[]; }
+  const execs = new Map<string, ExecEntry>();
+  const now = deps.now ?? (() => Date.now());
+
+  /** Spawn an exec for `sid` and wire its relay + supervised exit. */
+  function startExec(sid: string, cwd: string | undefined): ExecProc {
+    return deps.spawnExec(sid, cwd, {
+      onLine: (l) => deps.sendToMain(l), // raw relay (exec already stamped sid)
+      onExit: (code) => handleExecExit(sid, code),
+    });
+  }
+
+  /** Supervisor: on an exec exit, auto-respawn (replacing today's crash→wedge)
+   *  unless it is crash-looping, in which case give up with a terminal down. */
+  function handleExecExit(sid: string, code: number | null): void {
+    const entry = execs.get(sid);
+    if (!entry) return; // already closed intentionally (close_session)
+    const t = now();
+    entry.respawnAt = entry.respawnAt.filter((ts) => t - ts < RESPAWN_WINDOW_MS);
+    if (entry.respawnAt.length >= MAX_RESPAWNS) {
+      execs.delete(sid);
+      deps.log('error', `exec ${sid} crash-looping (${MAX_RESPAWNS}/${RESPAWN_WINDOW_MS}ms) — giving up`);
+      deps.sendToMain(JSON.stringify({ type: 'session_down', sid, reason: `crash-loop (code ${code})`, willRespawn: false }));
+      return;
+    }
+    // Fail-loud: main is told the in-flight turn was lost + a respawn is coming
+    // (willRespawn:true → recovering, not disconnected); the new exec's relayed
+    // ready{sid} then signals recovery. Main surfaces the lost-turn error + cancels
+    // that sid's open prompts (dispatcher-connection, #6).
+    entry.respawnAt.push(t);
+    deps.sendToMain(JSON.stringify({ type: 'session_down', sid, reason: `exec exited (code ${code})`, willRespawn: true }));
+    entry.proc = startExec(sid, entry.cwd);
+  }
 
   function onMainLine(line: string): void {
     let msg: any;
@@ -70,25 +108,17 @@ export function createDispatcher(deps: DispatcherDeps): Dispatcher {
         deps.log('warn', `open_session for already-open sid ${sid}`);
         return;
       }
-      const proc = deps.spawnExec(sid, typeof msg.cwd === 'string' ? msg.cwd : undefined, {
-        onLine: (l) => deps.sendToMain(l), // raw relay (exec already stamped sid)
-        onExit: (code) => {
-          execs.delete(sid);
-          // D2: no respawn yet — tell main the session is gone (fail-loud, not
-          // silent). D4 turns this into supervised auto-respawn (willRespawn:true).
-          deps.sendToMain(JSON.stringify({ type: 'session_down', sid, reason: `exec exited (code ${code})`, willRespawn: false }));
-        },
-      });
-      execs.set(sid, proc);
+      const cwd = typeof msg.cwd === 'string' ? msg.cwd : undefined;
+      execs.set(sid, { proc: startExec(sid, cwd), cwd, respawnAt: [] });
       return;
     }
 
     if (type === 'close_session') {
       if (typeof sid !== 'string') return;
-      const proc = execs.get(sid);
-      if (proc) {
-        execs.delete(sid);
-        proc.kill();
+      const entry = execs.get(sid);
+      if (entry) {
+        execs.delete(sid); // delete BEFORE kill so handleExecExit sees no entry → no respawn
+        entry.proc.kill();
       }
       return;
     }
@@ -104,16 +134,16 @@ export function createDispatcher(deps: DispatcherDeps): Dispatcher {
       deps.log('warn', `inbound ${type} without sid — dropped`);
       return;
     }
-    const proc = execs.get(sid);
-    if (!proc) {
+    const entry = execs.get(sid);
+    if (!entry) {
       deps.log('warn', `inbound ${type} for unknown sid ${sid} — dropped`);
       return;
     }
-    proc.writeLine(line); // exec ignores the extra sid; reads its own fields
+    entry.proc.writeLine(line); // exec ignores the extra sid; reads its own fields
   }
 
   function shutdown(): void {
-    for (const proc of execs.values()) proc.kill();
+    for (const entry of execs.values()) entry.proc.kill();
     execs.clear();
   }
 
