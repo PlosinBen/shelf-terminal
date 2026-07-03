@@ -38,10 +38,15 @@ export interface DispatcherDeps {
 /** Restart-storm backoff: at most MAX respawns within WINDOW before giving up. */
 const MAX_RESPAWNS = 5;
 const RESPAWN_WINDOW_MS = 10_000;
+/** Inner heartbeat: an exec that misses this many consecutive pings is HUNG. */
+const INNER_DEAD_MISSES = 3;
 
 export interface Dispatcher {
   /** Handle one inbound line from main. */
   onMainLine(line: string): void;
+  /** Inner heartbeat cycle: ping every exec + flag the hung ones. Called on a
+   *  timer by runDispatcher; exposed so tests can drive it deterministically. */
+  tick(): void;
   /** Tear down all exec procs (main disconnected / dispatcher shutting down). */
   shutdown(): void;
 }
@@ -53,16 +58,38 @@ export interface Dispatcher {
  * proc. Exec→main traffic is relayed raw by the spawn hooks, never touched here.
  */
 export function createDispatcher(deps: DispatcherDeps): Dispatcher {
-  interface ExecEntry { proc: ExecProc; cwd: string | undefined; respawnAt: number[]; }
+  interface ExecEntry { proc: ExecProc; cwd: string | undefined; respawnAt: number[]; missed: number; hung: boolean; }
   const execs = new Map<string, ExecEntry>();
   const now = deps.now ?? (() => Date.now());
 
   /** Spawn an exec for `sid` and wire its relay + supervised exit. */
   function startExec(sid: string, cwd: string | undefined): ExecProc {
     return deps.spawnExec(sid, cwd, {
-      onLine: (l) => deps.sendToMain(l), // raw relay (exec already stamped sid)
+      onLine: (l) => handleExecLine(sid, l),
       onExit: (code) => handleExecExit(sid, code),
     });
+  }
+
+  /**
+   * Exec stdout: relayed RAW to main, EXCEPT dispatcher-serviced messages we peek
+   * out. The peek is a cheap substring pre-filter so ordinary stream tokens stay
+   * parse-free (they don't contain the marker) — only rare candidates are parsed.
+   * Today only the inner-heartbeat `pong` is serviced here (E adds cache_get/put).
+   */
+  function handleExecLine(sid: string, line: string): void {
+    if (line.includes('"type":"pong"')) {
+      let p: any;
+      try { p = JSON.parse(line); } catch { /* not really pong */ }
+      if (p?.type === 'pong') {
+        const entry = execs.get(sid);
+        if (entry) {
+          entry.missed = 0;
+          if (entry.hung) { entry.hung = false; deps.sendToMain(JSON.stringify({ type: 'session_health', sid, health: { state: 'healthy' } })); }
+        }
+        return; // consume: the inner pong is dispatcher-internal, never relayed
+      }
+    }
+    deps.sendToMain(line); // relay raw (exec already stamped sid)
   }
 
   /** Supervisor: on an exec exit, auto-respawn (replacing today's crash→wedge)
@@ -83,6 +110,7 @@ export function createDispatcher(deps: DispatcherDeps): Dispatcher {
     // ready{sid} then signals recovery. Main surfaces the lost-turn error + cancels
     // that sid's open prompts (dispatcher-connection, #6).
     entry.respawnAt.push(t);
+    entry.missed = 0; entry.hung = false; // fresh exec — reset inner-heartbeat state
     deps.sendToMain(JSON.stringify({ type: 'session_down', sid, reason: `exec exited (code ${code})`, willRespawn: true }));
     entry.proc = startExec(sid, entry.cwd);
   }
@@ -109,7 +137,7 @@ export function createDispatcher(deps: DispatcherDeps): Dispatcher {
         return;
       }
       const cwd = typeof msg.cwd === 'string' ? msg.cwd : undefined;
-      execs.set(sid, { proc: startExec(sid, cwd), cwd, respawnAt: [] });
+      execs.set(sid, { proc: startExec(sid, cwd), cwd, respawnAt: [], missed: 0, hung: false });
       return;
     }
 
@@ -142,12 +170,29 @@ export function createDispatcher(deps: DispatcherDeps): Dispatcher {
     entry.proc.writeLine(line); // exec ignores the extra sid; reads its own fields
   }
 
+  // Inner heartbeat: ping every exec; an exec that misses INNER_DEAD_MISSES
+  // consecutive pings is HUNG (alive but event-loop-blocked — the post-sleep
+  // wedge the outer heartbeat can't see, since the dispatcher itself still pongs
+  // main). Flagged per-sid via session_health → main severs only that tab.
+  let tickSeq = 0;
+  function tick(): void {
+    tickSeq += 1;
+    for (const [sid, entry] of execs) {
+      entry.missed += 1;
+      try { entry.proc.writeLine(JSON.stringify({ type: 'ping', seq: tickSeq })); } catch { /* stdin closed */ }
+      if (entry.missed >= INNER_DEAD_MISSES && !entry.hung) {
+        entry.hung = true;
+        deps.sendToMain(JSON.stringify({ type: 'session_health', sid, health: { state: 'dead' } }));
+      }
+    }
+  }
+
   function shutdown(): void {
     for (const entry of execs.values()) entry.proc.kill();
     execs.clear();
   }
 
-  return { onMainLine, shutdown };
+  return { onMainLine, tick, shutdown };
 }
 
 /** Boot entry: wire the real stdin/stdout + child_process spawn and run. */
@@ -177,9 +222,16 @@ export function runDispatcher(): void {
 
   const rl = readline.createInterface({ input: process.stdin, terminal: false });
   rl.on('line', (line) => dispatcher.onMainLine(line));
+
+  // Inner heartbeat timer (dispatcher→exec hung-detection). Env override for E2E.
+  const innerMs = Number(process.env.SHELF_INNER_PING_MS) || 15_000;
+  const innerTimer = setInterval(() => dispatcher.tick(), innerMs);
+  innerTimer.unref?.();
+
   rl.on('close', () => {
     // Main's write-end closed → tear down all exec procs (their stdin EOF cascades
-    // to their CLIs) and exit. D4 adds the normal-closure reap + lease handling.
+    // to their CLIs) and exit. F adds the normal-closure reap + lease handling.
+    clearInterval(innerTimer);
     dispatcher.shutdown();
     process.exit(0);
   });

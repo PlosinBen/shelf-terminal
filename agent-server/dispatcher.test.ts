@@ -128,3 +128,46 @@ describe('dispatcher core', () => {
     expect(h.spawned[1].killed).toBe(1);
   });
 });
+
+describe('dispatcher inner heartbeat (hung-detection)', () => {
+  it('tick pings every exec proc', () => {
+    const h = harness();
+    h.d.onMainLine(JSON.stringify({ type: 'open_session', sid: 's1' }));
+    h.d.onMainLine(JSON.stringify({ type: 'open_session', sid: 's2' }));
+    h.d.tick();
+    expect(h.spawned[0].written.some((l) => JSON.parse(l).type === 'ping')).toBe(true);
+    expect(h.spawned[1].written.some((l) => JSON.parse(l).type === 'ping')).toBe(true);
+  });
+
+  it('consumes an exec pong — never relayed to main', () => {
+    const h = harness();
+    h.d.onMainLine(JSON.stringify({ type: 'open_session', sid: 's1' }));
+    h.spawned[0].hooks.onLine('{"type":"pong","seq":1,"sid":"s1"}');
+    expect(h.toMain.some((l) => l.includes('pong'))).toBe(false);
+  });
+
+  it('flags a hung exec dead after 3 pong-less ticks (once)', () => {
+    const h = harness();
+    h.d.onMainLine(JSON.stringify({ type: 'open_session', sid: 's1' }));
+    h.d.tick(); h.d.tick(); h.d.tick();
+    const health = h.parsedToMain().filter((m) => m.type === 'session_health');
+    expect(health).toEqual([{ type: 'session_health', sid: 's1', health: { state: 'dead' } }]);
+  });
+
+  it('recovers to healthy when the exec pong resumes', () => {
+    const h = harness();
+    h.d.onMainLine(JSON.stringify({ type: 'open_session', sid: 's1' }));
+    h.d.tick(); h.d.tick(); h.d.tick(); // → dead
+    h.spawned[0].hooks.onLine('{"type":"pong","seq":9,"sid":"s1"}');
+    const health = h.parsedToMain().filter((m) => m.type === 'session_health');
+    expect(health[health.length - 1]).toMatchObject({ health: { state: 'healthy' } });
+  });
+
+  it('relays a normal exec line raw (only pong is peeked out)', () => {
+    const h = harness();
+    h.d.onMainLine(JSON.stringify({ type: 'open_session', sid: 's1' }));
+    const raw = '{"type":"message","sid":"s1","content":"hi"}';
+    h.spawned[0].hooks.onLine(raw);
+    expect(h.toMain).toContain(raw);
+  });
+});

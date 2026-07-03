@@ -164,6 +164,12 @@ export function createDispatcherConnection(deps: DispatcherConnectionDeps): Disp
       if (parsed.willRespawn === false) ch.sinks.onHealth?.({ state: 'dead' } as ConnectionHealth);
       return;
     }
+    // Inner-heartbeat verdict for one exec (hung / recovered) — session-level
+    // health, routed to that one tab (not host-wide).
+    if (type === 'session_health') {
+      if (parsed.health) ch.sinks.onHealth?.(parsed.health as ConnectionHealth);
+      return;
+    }
 
     // Everything else is a turn / session event → the sid's turn-dispatcher.
     ch.dispatcher.feed(parsed);
