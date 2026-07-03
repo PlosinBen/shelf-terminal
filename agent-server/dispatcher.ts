@@ -37,6 +37,9 @@ export interface DispatcherDeps {
   /** Per-host model/caps cache (group E). Serviced on the exec side-channel
    *  (cache_get/cache_put); absent → the side-channel no-ops (every exec fetches). */
   cache?: ModelCache;
+  /** Called on each main heartbeat ping — runDispatcher resets its idle watchdog
+   *  (ssh remote self-exit when main goes quiet). See F-a / connection-health#2. */
+  onMainPing?: () => void;
 }
 
 /** Restart-storm backoff: at most MAX respawns within WINDOW before giving up. */
@@ -170,7 +173,9 @@ export function createDispatcher(deps: DispatcherDeps): Dispatcher {
     }
 
     if (type === 'ping') {
-      // Host-level heartbeat (dispatcher-owned; no sid). D4 adds the inner tier.
+      // Host-level heartbeat (dispatcher-owned; no sid). Reset the idle watchdog
+      // (main is alive) + pong.
+      deps.onMainPing?.();
       deps.sendToMain(JSON.stringify({ type: 'pong', seq: msg.seq }));
       return;
     }
@@ -215,7 +220,28 @@ export function createDispatcher(deps: DispatcherDeps): Dispatcher {
 
 /** Boot entry: wire the real stdin/stdout + child_process spawn and run. */
 export function runDispatcher(): void {
-  const dispatcher = createDispatcher({
+  // Idle-shutdown watchdog (ssh only — main passes --idle-shutdown-min=N; the
+  // remote host isn't fate-shared, so a wedged/gone main must not leave the
+  // dispatcher + its exec procs burning resources). The exec role no longer arms
+  // this (#8) — the dispatcher owns it. See connection-health#2.
+  const idleArg = process.argv.find((a) => a.startsWith('--idle-shutdown-min='));
+  const IDLE_MS = idleArg ? Math.max(0, Number(idleArg.split('=')[1]) || 0) * 60_000 : 0;
+  let watchdog: NodeJS.Timeout | undefined;
+  let innerTimer: NodeJS.Timeout | undefined;
+  let dispatcher: Dispatcher;
+  function resetWatchdog(): void {
+    if (!IDLE_MS) return;
+    if (watchdog) clearTimeout(watchdog);
+    watchdog = setTimeout(() => {
+      process.stderr.write(`[dispatcher] idle-shutdown: no ping for ${IDLE_MS / 60_000}min — self-exiting\n`);
+      if (innerTimer) clearInterval(innerTimer);
+      dispatcher.shutdown();
+      process.exit(0);
+    }, IDLE_MS);
+    watchdog.unref?.();
+  }
+
+  dispatcher = createDispatcher({
     spawnExec: (sid, cwd, hooks) => {
       // Same node + same bundle, exec role, told its sid. Inherits our env — the
       // shell/initScript setup already ran when main spawned THIS dispatcher.
@@ -239,6 +265,7 @@ export function runDispatcher(): void {
     // Per-host model cache. Coarse TTL (default 30min; env override for tests) —
     // the sole freshness mechanism (no account-guard; see model-cache.ts).
     cache: createModelCache({ ttlMs: Number(process.env.SHELF_MODEL_CACHE_TTL_MS) || 1_800_000 }),
+    onMainPing: resetWatchdog,
   });
 
   const rl = readline.createInterface({ input: process.stdin, terminal: false });
@@ -246,8 +273,9 @@ export function runDispatcher(): void {
 
   // Inner heartbeat timer (dispatcher→exec hung-detection). Env override for E2E.
   const innerMs = Number(process.env.SHELF_INNER_PING_MS) || 15_000;
-  const innerTimer = setInterval(() => dispatcher.tick(), innerMs);
+  innerTimer = setInterval(() => dispatcher.tick(), innerMs);
   innerTimer.unref?.();
+  resetWatchdog(); // arm from boot — if main never pings, it's already gone
 
   rl.on('close', () => {
     // Main's write-end closed → tear down all exec procs (their stdin EOF cascades

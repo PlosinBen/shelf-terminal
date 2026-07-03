@@ -4,7 +4,7 @@ import { createModelCache } from './model-cache';
 
 // A fake exec proc that records forwarded lines / kills and exposes the hooks the
 // dispatcher wired, so tests can drive exec→main (onLine) and exit (onExit).
-function harness(opts: { now?: () => number; cache?: any } = {}) {
+function harness(opts: { now?: () => number; cache?: any; onMainPing?: () => void } = {}) {
   const toMain: string[] = [];
   const logs: Array<[string, string]> = [];
   const spawned: Array<{
@@ -27,6 +27,7 @@ function harness(opts: { now?: () => number; cache?: any } = {}) {
     log: (lvl, m) => logs.push([lvl, m]),
     now: opts.now,
     cache: opts.cache,
+    onMainPing: opts.onMainPing,
   });
   const parsedToMain = () => toMain.map((l) => JSON.parse(l));
   return { d, toMain, parsedToMain, logs, spawned, spawnExec };
@@ -79,6 +80,13 @@ describe('dispatcher core', () => {
     const h = harness();
     h.d.onMainLine(JSON.stringify({ type: 'ping', seq: 7 }));
     expect(h.parsedToMain()).toContainEqual({ type: 'pong', seq: 7 });
+  });
+
+  it('fires onMainPing on a main ping (idle-watchdog reset hook, F-a)', () => {
+    const onMainPing = vi.fn();
+    const h = harness({ onMainPing });
+    h.d.onMainLine(JSON.stringify({ type: 'ping', seq: 1 }));
+    expect(onMainPing).toHaveBeenCalledTimes(1);
   });
 
   it('exec exit auto-respawns (willRespawn:true) and starts a fresh exec', () => {
