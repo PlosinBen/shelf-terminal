@@ -350,8 +350,8 @@ export interface ProviderCapabilities {
  * A background task the provider spawned that MAY have escaped the process tree
  * (detached `setsid` shell), so the stdin-EOF teardown cascade can't reach it.
  * Enumerated by {@link ServerBackend.listReapableTasks} and killed via
- * {@link ServerBackend.stopTask} by the centralized reaper on an INTENTIONAL
- * teardown. See the `detached-task-reaping` design.
+ * {@link ServerBackend.stopTask} by the centralized reaper on any NORMAL
+ * agent-server closure. See the `detached-task-reaping` design.
  */
 export interface ReapableTask {
   /** Provider-native task id — hand back to `stopTask(id)`. */
@@ -361,8 +361,8 @@ export interface ReapableTask {
   /** `'running'` = still alive (reap candidate); `'done'` = already terminal. */
   status: 'running' | 'done';
   /**
-   * Reserved hint — NOT gated on in Phase 1 (an intentional teardown reaps ALL
-   * running shell tasks; the session is ending). Left for a future finer policy.
+   * Reserved hint — NOT gated on in Phase 1 (any normal closure reaps ALL running
+   * shell tasks; the session is ending for good). Left for a future finer policy.
    */
   longLived?: boolean;
   /**
@@ -435,9 +435,9 @@ export interface ServerBackend {
    * Enumerate the provider's background tasks that a teardown should consider
    * reaping — the detached shell tasks that may have escaped the process tree.
    * Read-only snapshot; the centralized reaper (`agent-server/reaper.ts`) filters
-   * to `status:'running'` and kills each via `stopTask(id)` on an INTENTIONAL
-   * teardown. Omitted by providers with no background-task surface (no-op → the
-   * reaper skips them). See the `detached-task-reaping` design.
+   * to `status:'running'` and kills each via `stopTask(id)` on any NORMAL
+   * agent-server closure. Omitted by providers with no background-task surface
+   * (no-op → the reaper skips them). See the `detached-task-reaping` design.
    */
   listReapableTasks?(): Promise<ReapableTask[]>;
   /**

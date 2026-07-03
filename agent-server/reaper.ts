@@ -1,9 +1,9 @@
-// Centralized detached-task reaper. Runs ONCE over all live backends on an
-// INTENTIONAL teardown (main signals `reap` — see the wire `teardown` message),
-// enumerating each provider's escaped-tree background tasks and killing the
-// still-running ones through the uniform `stopTask` contract. Kept out of each
-// provider's `dispose()` so the enumerate→kill policy lives in one place and
-// `dispose()` stays a plain resource-close. See the `detached-task-reaping` design.
+// Centralized detached-task reaper. Runs ONCE over all live backends on any
+// NORMAL agent-server closure (see shutdown.ts — no main signal), enumerating each
+// provider's escaped-tree background tasks and killing the still-running ones
+// through the uniform `stopTask` contract. Kept out of each provider's `dispose()`
+// so the enumerate→kill policy lives in one place and `dispose()` stays a plain
+// resource-close. See the `detached-task-reaping` design.
 import type { ServerBackend } from './providers/types';
 
 export interface ReapSummary {
