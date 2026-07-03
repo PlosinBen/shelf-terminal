@@ -1,0 +1,104 @@
+import { describe, it, expect, vi } from 'vitest';
+import { createDispatcher, type ExecProc } from './dispatcher';
+
+// A fake exec proc that records forwarded lines / kills and exposes the hooks the
+// dispatcher wired, so tests can drive exec→main (onLine) and exit (onExit).
+function harness() {
+  const toMain: string[] = [];
+  const logs: Array<[string, string]> = [];
+  const spawned: Array<{
+    sid: string;
+    cwd: string | undefined;
+    hooks: { onLine: (l: string) => void; onExit: (c: number | null) => void };
+    written: string[];
+    killed: number;
+  }> = [];
+
+  const spawnExec = vi.fn((sid: string, cwd: string | undefined, hooks: any): ExecProc => {
+    const rec = { sid, cwd, hooks, written: [] as string[], killed: 0 };
+    spawned.push(rec);
+    return { writeLine: (l: string) => rec.written.push(l), kill: () => { rec.killed++; } };
+  });
+
+  const d = createDispatcher({
+    spawnExec,
+    sendToMain: (l) => toMain.push(l),
+    log: (lvl, m) => logs.push([lvl, m]),
+  });
+  const parsedToMain = () => toMain.map((l) => JSON.parse(l));
+  return { d, toMain, parsedToMain, logs, spawned, spawnExec };
+}
+
+describe('dispatcher core', () => {
+  it('open_session spawns an exec proc with sid + cwd', () => {
+    const h = harness();
+    h.d.onMainLine(JSON.stringify({ type: 'open_session', sid: 's1', cwd: '/tmp/p' }));
+    expect(h.spawnExec).toHaveBeenCalledTimes(1);
+    expect(h.spawned[0]).toMatchObject({ sid: 's1', cwd: '/tmp/p' });
+  });
+
+  it('relays exec stdout lines to main RAW (exec already stamped sid)', () => {
+    const h = harness();
+    h.d.onMainLine(JSON.stringify({ type: 'open_session', sid: 's1' }));
+    const raw = '{"type":"message","sid":"s1","msgType":"reply","content":"hi"}';
+    h.spawned[0].hooks.onLine(raw);
+    expect(h.toMain).toContain(raw); // byte-identical, not re-serialized
+  });
+
+  it('routes a session message to the matching exec, forwarding the original line', () => {
+    const h = harness();
+    h.d.onMainLine(JSON.stringify({ type: 'open_session', sid: 's1' }));
+    h.d.onMainLine(JSON.stringify({ type: 'open_session', sid: 's2' }));
+    const sendLine = JSON.stringify({ type: 'send', sid: 's2', prompt: 'go', cwd: '/x' });
+    h.d.onMainLine(sendLine);
+    expect(h.spawned[0].written).toHaveLength(0); // s1 untouched
+    expect(h.spawned[1].written).toEqual([sendLine]); // s2 got it verbatim
+  });
+
+  it('drops a session message for an unknown sid (fail-loud log, nothing forwarded)', () => {
+    const h = harness();
+    h.d.onMainLine(JSON.stringify({ type: 'stop_task', sid: 'ghost', taskId: 't' }));
+    expect(h.logs.some(([lvl]) => lvl === 'warn')).toBe(true);
+    expect(h.toMain).toHaveLength(0);
+  });
+
+  it('close_session kills and forgets the exec proc', () => {
+    const h = harness();
+    h.d.onMainLine(JSON.stringify({ type: 'open_session', sid: 's1' }));
+    h.d.onMainLine(JSON.stringify({ type: 'close_session', sid: 's1' }));
+    expect(h.spawned[0].killed).toBe(1);
+    // a subsequent message for s1 is now unknown → dropped
+    h.d.onMainLine(JSON.stringify({ type: 'send', sid: 's1', prompt: 'x' }));
+    expect(h.spawned[0].written).toHaveLength(0);
+  });
+
+  it('ping → pong (dispatcher-level, no sid)', () => {
+    const h = harness();
+    h.d.onMainLine(JSON.stringify({ type: 'ping', seq: 7 }));
+    expect(h.parsedToMain()).toContainEqual({ type: 'pong', seq: 7 });
+  });
+
+  it('exec exit emits session_down to main and forgets the sid (D2: no respawn)', () => {
+    const h = harness();
+    h.d.onMainLine(JSON.stringify({ type: 'open_session', sid: 's1' }));
+    h.spawned[0].hooks.onExit(1);
+    const down = h.parsedToMain().find((m) => m.type === 'session_down');
+    expect(down).toMatchObject({ sid: 's1', willRespawn: false });
+  });
+
+  it('drops non-JSON lines from main', () => {
+    const h = harness();
+    h.d.onMainLine('not json');
+    expect(h.logs.some(([lvl]) => lvl === 'warn')).toBe(true);
+    expect(h.spawnExec).not.toHaveBeenCalled();
+  });
+
+  it('shutdown kills all exec procs', () => {
+    const h = harness();
+    h.d.onMainLine(JSON.stringify({ type: 'open_session', sid: 's1' }));
+    h.d.onMainLine(JSON.stringify({ type: 'open_session', sid: 's2' }));
+    h.d.shutdown();
+    expect(h.spawned[0].killed).toBe(1);
+    expect(h.spawned[1].killed).toBe(1);
+  });
+});

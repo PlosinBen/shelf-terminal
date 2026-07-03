@@ -79,17 +79,26 @@ interface IncomingMessage {
   intent?: { model?: string; effort?: string; permissionMode?: string };
 }
 
+// Session id assigned by the dispatcher at spawn (`--sid=<sid>`); undefined when
+// main spawns this exec proc directly (pre-dispatcher / today's path). See send().
+const EXEC_SID = process.argv.find((a) => a.startsWith('--sid='))?.split('=')[1];
+
 function send(msg: OutgoingMessage) {
+  // Under the dispatcher (dispatch-layering, option B), the exec proc stamps its
+  // own `sid` on EVERY outbound message so the dispatcher can relay exec→main RAW
+  // — opaque line-forwarding, never parsing the hot token stream — and main demuxes
+  // by sid. Spawned directly by main (no --sid), this is a no-op → today's wire.
+  const stamped = EXEC_SID ? ({ ...msg, sid: EXEC_SID } as OutgoingMessage) : msg;
   // Wire-TX diagnostic trace (debug level → off by default; flip logLevel=debug
   // to capture). Proves which events the provider actually emitted over stdout —
   // the top of the chain when tracing a sleep/network wedge where tool results
   // never reach the renderer. Skip `type:'log'` to avoid recursion (serverLog
   // routes back through this same send) and log spam. See connection-wedge trace.
-  const m = msg as unknown as Record<string, unknown>;
+  const m = stamped as unknown as Record<string, unknown>;
   if (m.type !== 'log') {
     serverLog('debug', 'wire-tx', wireSummary(m));
   }
-  process.stdout.write(JSON.stringify(msg) + '\n');
+  process.stdout.write(JSON.stringify(stamped) + '\n');
 }
 
 /** Compact one-line summary of a wire message for the wire-tx/wire-rx traces. */
