@@ -59,9 +59,7 @@ interface RemoteProcess {
   /** Wait for agent-server's `{type:'ready'}` signal. Resolves false on timeout. */
   awaitReady: (timeoutMs?: number) => Promise<boolean>;
   onResponse: (requestId: string, expectedType: string, handler: (payload: any) => void) => void;
-  /** `reap:true` = intentional teardown → send the agent-server a `teardown`
-   *  reap intent + grace-exit before force-kill; falsy = today's immediate kill. */
-  kill: (reap?: boolean) => void;
+  kill: () => void;
 }
 
 export function createRemoteBackend(
@@ -252,11 +250,9 @@ export function createRemoteBackend(
       }
     },
 
-    dispose(reap?: boolean) {
+    dispose() {
       if (remoteProc) {
-        // `reap` (intentional teardown: tab close / app quit) flows to the wire
-        // `teardown` intent so agent-server reaps escaped detached tasks first.
-        remoteProc.kill(reap);
+        remoteProc.kill();
         remoteProc = null;
       }
       initInFlight = null; // so a later ensureProcReady re-spawns instead of returning the dead proc
@@ -715,10 +711,10 @@ async function spawnAgentServer(
 // Heartbeat send interval. Env override (ms) lets E2E drive the lease/health
 // loop fast without waiting a real minute; prod uses the §5.9 default (1m).
 const HEARTBEAT_INTERVAL_MS = Number(process.env.SHELF_HEARTBEAT_INTERVAL_MS) || DEFAULT_HEALTH_THRESHOLDS.intervalMs;
-// Grace given to agent-server to reap escaped detached tasks + self-exit on an
-// intentional teardown before we force-kill. Kept slightly longer than the
-// agent-server reap timeout (REAP_TIMEOUT_MS) so it normally exits on its own.
-const REAP_GRACE_MS = 3000;
+// Grace for agent-server to run its async normal-closure shutdown (reap detached
+// tasks → dispose → self-exit) before we force-kill. Longer than the agent-server
+// reap timeout (REAP_TIMEOUT_MS) so it normally exits on its own first.
+const SHUTDOWN_GRACE_MS = 3000;
 
 function wrapProcess(
   proc: ChildProcess,
@@ -919,23 +915,17 @@ function wrapProcess(
     registerTurn: dispatcher.registerTurn,
     awaitReady: dispatcher.awaitReady,
     onResponse: dispatcher.onResponse,
-    kill: (reap?: boolean) => {
+    kill: () => {
+      // Ending stdin triggers agent-server's normal-closure path (rl.on('close') →
+      // reap escaped detached tasks → dispose → exit). Because that reap is ASYNC,
+      // give it a grace window to self-exit before force-killing — an immediate
+      // proc.kill() (SIGTERM) would cut the reap off. unref'd so it can't delay
+      // app-quit; the CLI self-exits on its own stdin-EOF regardless.
       clearInterval(heartbeatTimer);
-      if (reap && proc.stdin && !proc.stdin.writableEnded && !proc.stdin.destroyed) {
-        // Intentional teardown: signal agent-server to reap escaped detached
-        // tasks before it disposes, then let it self-exit (it calls process.exit
-        // after reaping). Force-kill only if it overruns the grace window.
-        try { proc.stdin.write(JSON.stringify({ type: 'teardown', reap: true }) + '\n'); } catch { /* pipe raced closed */ }
-        proc.stdin.end();
-        const forceKill = setTimeout(() => { try { proc.kill(); } catch { /* already exited */ } }, REAP_GRACE_MS);
-        // Don't let the grace timer hold the event loop open at app-quit; while
-        // the app keeps running (tab close) the loop is alive so it still fires.
-        forceKill.unref();
-        proc.once('exit', () => clearTimeout(forceKill));
-      } else {
-        proc.stdin?.end();
-        proc.kill();
-      }
+      proc.stdin?.end();
+      const forceKill = setTimeout(() => { try { proc.kill(); } catch { /* already exited */ } }, SHUTDOWN_GRACE_MS);
+      forceKill.unref();
+      proc.once('exit', () => clearTimeout(forceKill));
     },
   };
 }
