@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { randomUUID } from 'node:crypto';
-import type { QueryInput, SendFn, ServerBackend, ProviderCapabilities, StatusSegment, PickerResolvePayload } from '../types';
+import type { QueryInput, SendFn, ServerBackend, ProviderCapabilities, StatusSegment, PickerResolvePayload, ModelCacheClient } from '../types';
 import { severityFromUtilization, pickPermissionModes, pickEffortLevels } from '../types';
 import { parseSlashPrefix } from '@shared/slash-prefix';
 import { formatConfigAck, type ConfigEditKey } from '@shared/config-ack';
@@ -1294,6 +1294,7 @@ export function createCopilotBackend(): ServerBackend {
       sessionId?: string,
       _customModels?: ProviderModel[],
       intent?: { model?: string; effort?: string; permissionMode?: string },
+      cache?: ModelCacheClient,
     ): Promise<ProviderCapabilities> {
       // Copilot SDK validates model names against GitHub's model API; user-provided
       // custom IDs would be rejected at runtime, so we ignore customModels here.
@@ -1318,11 +1319,26 @@ export function createCopilotBackend(): ServerBackend {
       // throws → remote.ts rejects the caps RPC → init 'failed' (agent-config-flow#7).
       // The loud log names the cause instead of it vanishing into a caps failure.
       if (!authRequired) {
-        try {
-          await listModelsCached();
-        } catch (err: any) {
-          serverLog('error', 'caps', `copilot listModels threw (caps RPC will fail → init failed): ${err?.message ?? err}`);
-          throw err;
+        // Cache-aside (group E): a per-host dispatcher cache lets `listModels`
+        // (~1.3s network) be fetched ONCE per host and shared across its tabs.
+        // HIT → use the cached blob (skip the fetch); MISS → fetch + write back.
+        // Best-effort: any cache error falls through to a normal fetch. Freshness
+        // is TTL-only (no account-guard — see model-cache.ts).
+        let usedCache = false;
+        if (cache) {
+          try {
+            const c = await cache.get('models', 'copilot');
+            if (c.hit && Array.isArray(c.value)) { state.models = c.value as CachedModel[]; usedCache = true; }
+          } catch { /* cache miss/error → fetch */ }
+        }
+        if (!usedCache) {
+          try {
+            await listModelsCached();
+          } catch (err: any) {
+            serverLog('error', 'caps', `copilot listModels threw (caps RPC will fail → init failed): ${err?.message ?? err}`);
+            throw err;
+          }
+          cache?.put('models', 'copilot', state.models);
         }
       }
       // Seed closures from renderer's saved intent BEFORE buildCapabilities so
