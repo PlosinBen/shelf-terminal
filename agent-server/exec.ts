@@ -117,7 +117,13 @@ const modelCacheClient: ModelCacheClient | undefined = EXEC_SID ? {
     pendingCacheGets.set(requestId, resolve);
     send({ type: 'cache_get', requestId, key, provider } as unknown as OutgoingMessage);
     // Safety net: a slow/absent dispatcher must not hang init → resolve a miss.
-    setTimeout(() => { if (pendingCacheGets.delete(requestId)) resolve({ hit: false }); }, 2000).unref?.();
+    // A timeout is a real anomaly (the dispatcher should always reply) → fail-loud.
+    setTimeout(() => {
+      if (pendingCacheGets.delete(requestId)) {
+        serverLog('warn', 'cache', `cache_get ${key}:${provider} timed out (no dispatcher reply in 2s) — treating as miss`);
+        resolve({ hit: false });
+      }
+    }, 2000).unref?.();
   }),
   put: (key, provider, value) => { send({ type: 'cache_put', key, provider, value } as unknown as OutgoingMessage); },
 } : undefined;

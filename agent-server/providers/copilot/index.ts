@@ -1328,8 +1328,20 @@ export function createCopilotBackend(): ServerBackend {
         if (cache) {
           try {
             const c = await cache.get('models', 'copilot');
-            if (c.hit && Array.isArray(c.value)) { state.models = c.value as CachedModel[]; usedCache = true; }
-          } catch { /* cache miss/error → fetch */ }
+            if (c.hit && Array.isArray(c.value)) {
+              state.models = c.value as CachedModel[];
+              usedCache = true;
+              // Verification log (group E): a HIT means listModels was SKIPPED —
+              // the whole point of the dispatcher cache (2nd+ tab on a host).
+              serverLog('info', 'caps', `copilot models cache HIT (${state.models.length} models) — SKIPPED listModels`);
+            } else {
+              serverLog('info', 'caps', 'copilot models cache MISS — will fetch listModels');
+            }
+          } catch (err: any) {
+            serverLog('warn', 'caps', `copilot models cache get failed (will fetch): ${err?.message ?? err}`);
+          }
+        } else {
+          serverLog('debug', 'caps', 'copilot models: no dispatcher cache (direct spawn) — fetching listModels');
         }
         if (!usedCache) {
           try {
@@ -1338,7 +1350,10 @@ export function createCopilotBackend(): ServerBackend {
             serverLog('error', 'caps', `copilot listModels threw (caps RPC will fail → init failed): ${err?.message ?? err}`);
             throw err;
           }
-          cache?.put('models', 'copilot', state.models);
+          if (cache) {
+            cache.put('models', 'copilot', state.models);
+            serverLog('info', 'caps', `copilot models fetched (${state.models.length}) → wrote back to dispatcher cache`);
+          }
         }
       }
       // Seed closures from renderer's saved intent BEFORE buildCapabilities so

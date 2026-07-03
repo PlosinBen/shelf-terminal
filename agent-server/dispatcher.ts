@@ -105,11 +105,13 @@ export function createDispatcher(deps: DispatcherDeps): Dispatcher {
       try { m = JSON.parse(line); } catch { /* not a cache message */ }
       if (m?.type === 'cache_get') {
         const value = deps.cache?.get(`${m.key}:${m.provider}`);
+        deps.log('info', `cache_get ${m.key}:${m.provider} → ${value !== undefined ? 'HIT' : 'MISS'}`);
         execs.get(sid)?.proc.writeLine(JSON.stringify({ type: 'cache_reply', requestId: m.requestId, hit: value !== undefined, value }));
         return;
       }
       if (m?.type === 'cache_put') {
         deps.cache?.put(`${m.key}:${m.provider}`, m.value);
+        deps.log('info', `cache_put ${m.key}:${m.provider} — stored`);
         return;
       }
     }
