@@ -45,6 +45,27 @@ describe('toWslPath', () => {
   });
 });
 
+describe('sshDeployOptStrings — ssh -p vs scp -P (regression)', () => {
+  // Regression: the deploy reused one opts string with `-p <port>` for BOTH ssh
+  // and scp. scp's port flag is `-P` (capital) — `-p` means preserve-times, so
+  // scp swallowed the port as a source operand ("scp: stat local 2222: No such
+  // file") → ssh agent deploy broke on any non-default port (found via a real
+  // ssh-container agent-deploy run, which had no automated coverage before).
+  it('uses lowercase -p for ssh and uppercase -P for scp', async () => {
+    const { sshDeployOptStrings } = await import('./remote');
+    const { ssh, scp } = sshDeployOptStrings({ host: 'h', port: 2222, user: 'u' });
+    expect(ssh).toContain(`'-p' '2222'`);
+    expect(ssh).not.toContain(`'-P'`);
+    expect(scp).toContain(`'-P' '2222'`);
+    expect(scp).not.toContain(`'-p'`);
+    // Both still carry the shared ControlMaster opts.
+    for (const s of [ssh, scp]) {
+      expect(s).toContain(`'ControlMaster=auto'`);
+      expect(s).toContain(`'ControlPath=/tmp/shelf-ssh-h-2222-u'`);
+    }
+  });
+});
+
 describe('remote backend', () => {
   beforeEach(() => {
     vi.clearAllMocks();

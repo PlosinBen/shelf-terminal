@@ -387,14 +387,29 @@ function sq(s: string): string {
   return s.replace(/'/g, `'\\''`);
 }
 
+/**
+ * Build the quoted `ssh` and `scp` option strings for the deploy commands.
+ * Shared ControlMaster opts + the port — but the port flag DIFFERS by tool:
+ * `ssh -p <port>` vs `scp -P <port>`. `scp -p` means "preserve times" and would
+ * swallow the port as a source operand (`scp: stat local "2222": No such file`),
+ * breaking the deploy on any non-default port. Exported for a regression test.
+ */
+export function sshDeployOptStrings(c: { host: string; port: number; user: string }): { ssh: string; scp: string } {
+  const base = ['-o', 'ControlMaster=auto', '-o', `ControlPath=/tmp/shelf-ssh-${c.host}-${c.port}-${c.user}`, '-o', 'ControlPersist=600'];
+  const quote = (arr: string[]) => arr.map((o) => `'${o}'`).join(' ');
+  return {
+    ssh: quote([...base, '-p', String(c.port)]),
+    scp: quote([...base, '-P', String(c.port)]),
+  };
+}
+
 function sshOps(c: Extract<Connection, { type: 'ssh' }>): RemoteOps {
   const target = `${c.user}@${c.host}`;
-  const opts = ['-o', 'ControlMaster=auto', '-o', `ControlPath=/tmp/shelf-ssh-${c.host}-${c.port}-${c.user}`, '-o', 'ControlPersist=600', '-p', String(c.port)];
-  const optStr = opts.map((o) => `'${o}'`).join(' ');
+  const { ssh: sshOptStr, scp: scpOptStr } = sshDeployOptStrings(c);
   const exec = (cmd: string, t = 15000): string =>
-    execSync(`ssh ${optStr} ${target} '${sq(cmd)}'`, { timeout: t, encoding: 'utf8' });
+    execSync(`ssh ${sshOptStr} ${target} '${sq(cmd)}'`, { timeout: t, encoding: 'utf8' });
   const copyIn = (local: string, remote: string, t = 180000): void => {
-    execSync(`scp ${optStr} '${local}' ${target}:'${sq(remote)}'`, { timeout: t });
+    execSync(`scp ${scpOptStr} '${local}' ${target}:'${sq(remote)}'`, { timeout: t });
   };
   // Resolve an ABSOLUTE $HOME up front (mirroring wslOps), NOT `base:'~'`. The
   // exec-built control commands embed the base inside DOUBLE quotes (e.g.
