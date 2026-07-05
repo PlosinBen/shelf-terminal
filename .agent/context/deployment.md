@@ -56,3 +56,15 @@ related:
 **Do not change casually because**：不要在遠端跑 npm install —— 會拖慢啟動且需要 network。
 
 **Related**：`deployment#1`（`~/.shelf/` taxonomy，bundle = version-keyed 共享 payload）、`src/main/agent/remote.ts`。
+
+## deployment#3 — SSH deploy 的 port flag：scp 用 `-P`（大寫），不是 `-p`  ·  [Gotcha]
+
+**Symptom**：非預設 port 的 ssh host 上，agent deploy 壞掉（bundle 傳不過去）。
+
+**Root cause**：ssh 與 scp 的 port flag **不同**：`ssh -p <port>` 指定 port，但 `scp` 的 port flag 是**大寫 `-P`**；`scp -p` 意思是 **preserve-times**。曾共用同一組 opts 字串把 `-p <port>` 同時餵給 ssh 與 scp → `scp -p 2222` 把 `-p` 當 preserve-times、把 `2222` 當**來源檔**（source operand）吞掉 → deploy 到非預設 port 的 ssh host 直接爛。長期沒被抓到是因為**沒有 ssh-agent-deploy 的自動化覆蓋**（connector `ssh.spec` 只測 terminal）。
+
+**Fix**：ssh 與 scp 各自組 opts —— ssh 用 `-p <port>`、scp 用 `-P <port>`（其餘 ControlMaster/ControlPath 等相同）。有 unit 迴歸（`sshDeployOptStrings`）。
+
+**Do not change casually because**：別把 ssh/scp 的 opts 字串合併回同一份 —— port flag 大小寫不同（`-p` vs `-P`），共用一定會其中一邊壞。
+
+**Related**：`deployment#2`（bundle deploy via scp）、`src/main/agent/remote.ts`（`sshDeployOptStrings`）。

@@ -73,19 +73,25 @@ title: shelf-terminal — Intent → File Index
 | Intent | File | Role |
 |--------|------|------|
 | Session manager + IPC handlers | `index.ts` | `initAgentManager()`：註冊 agent IPC、管理 tab→session、permission bridging |
-| Remote backend | `remote.ts` | `createRemoteBackend()`：JSON line protocol 跟 agent-server 通訊 + 自帶 node/provider 部署；`syncSkillsToRemote` 走 transport `transportPutDir`（ssh tilde gotcha 見 `context/connector` connector#6）；bundle deploy 仍走 `RemoteOps.copyIn` |
-| Turn dispatcher | `turn-dispatcher.ts` | 純邏輯 event router，按 turnId 路由 wire events 到對應 turn 的 generator |
+| Remote backend | `remote.ts` | `createRemoteBackend()`：JSON line protocol 跟 agent-server 通訊 + 自帶 node/provider 部署；`syncSkillsToRemote` 走 transport `transportPutDir`（ssh tilde gotcha 見 `context/connector` connector#6）；bundle deploy 仍走 `RemoteOps.copyIn`。`USE_DISPATCHER`（`SHELF_USE_DISPATCHER!=='0'`，**預設 ON**）分支走 `ensureDispatcher()`（per-host 共用 dispatcher，`dispatcherKeyFor` 為 key、ref-counted + idle-teardown grace）；`=0` 退回 per-tab `spawnAgentServer`/`wrapProcess`（**暫時 fallback，cleanup 待移除**） |
+| 主機 dispatcher 連線（main 端） | `dispatcher-connection.ts` | `createDispatcherConnection()`：一台 host 一個 dispatcher process 的 main 端擁有者。依 `sid` demux dispatcher stdout 到 per-sid `SessionChannel`（`RemoteProcess` drop-in）、單一 per-host heartbeat/health、`session_down`→`failAllTurns` fail-loud、`onDown` 驱逐、app_tool reply 路由 |
+| Turn dispatcher | `turn-dispatcher.ts` | 純邏輯 event router，按 turnId 路由 wire events 到對應 turn 的 generator；`failAllTurns()` 在 session 掛掉時讓所有 in-flight turn fail-loud（error→idle） |
 | Type 定義 | `types.ts` | `AgentBackend` / `AgentEvent` / `AgentSessionState` 等系統型別 |
 | 連線健康（heartbeat RTT） | `connection-health.ts` | `ConnectionHealthTracker` 純狀態機：心跳 RTT → healthy/slow/unstable/dead |
 | 單元測試 | `connection-health.test.ts` | RTT/狀態機 7 case |
 | 單元測試 | `remote.test.ts` | Remote backend 介面、lifecycle 測試 |
-| Dispatcher 單元測試 | `turn-dispatcher.test.ts` | turnId 路由 / unknown drop / lifecycle / permission isolation — 9 case |
+| Dispatcher 單元測試 | `turn-dispatcher.test.ts` | turnId 路由 / unknown drop / lifecycle / permission isolation / `failAllTurns` |
+| Dispatcher-connection 測試 | `dispatcher-connection.test.ts` | sid demux / 一台 host 一 heartbeat / session_down fail-loud / onDown 驱逐 / openSession 健康 seed + already-open replace |
 
 ## Agent Server (agent-server/)
 
 | Intent | File | Role |
 |--------|------|------|
-| Entry point | `index.ts` | stdin/stdout JSON line protocol server + dispatch to Claude/Copilot + context persistence 統一處理 |
+| Role-split entry point | `index.ts` | 薄 entrypoint：讀 `--role`，dynamic-import `./exec`（預設）或 `./dispatcher`。lazy import → dispatcher role 永不載入 provider/SDK（保持 thin） |
+| Execution proc（per session） | `exec.ts` | 原 agent-server 主體：stdin/stdout JSON line protocol + dispatch to Claude/Copilot + context persistence。在 dispatcher 下以 `--sid` spawn，outbound 全蓋自己的 `sid`；含 model-cache client（cache_get/put 側通道） |
+| 主機 dispatcher（per host broker） | `dispatcher.ts` | 薄 per-host broker：`sid` 路由/relay（串流 opaque pass-through，只 peek pong/cache_）、open/close_session、兩層 health 的 inner-ping、supervisor（exec 死→reconnect + backoff）、per-host model cache 側通道。**不 import provider/SDK** |
+| Model/caps cache（泛型 TTL） | `model-cache.ts` | `createModelCache({ttlMs})`：泛型 TTL 儲存，過期即 evict（cache-aside 的被動 store，見 `context/agent-config-flow`） |
+| Session hosting 抽象（兩張 map） | `session-registry.ts` | `createSessionRegistry()`：`sessions: Map<sid, runtimeKey>` + `runtimes: Map<runtimeKey, T>`，`runtimeKeyFor` 決定 isolated（sid）/shared（provider:account）。為 shared 部署預備（isolated milestone 未用） |
 | Claude provider | `providers/claude/index.ts` | `@anthropic-ai/claude-agent-sdk` wrapper：持久 streaming-input session、emit 渲染原語、auth 偵測 |
 | Copilot provider | `providers/copilot/index.ts` | `@github/copilot-sdk` wrapper：spawn bundled CLI、emit 渲染原語、auth 偵測、elicitation handler |
 | Provider 純 helper（claude） | `providers/claude/helpers.ts` | claude/index 抽出的 side-effect-free 函式 + types（封閉邊界，只被 claude/ 引用） |
@@ -102,8 +108,11 @@ title: shelf-terminal — Intent → File Index
 | Slash prefix detection | `src/shared/slash-prefix.ts` | `parseSlashPrefix(prompt)` 共用 helper（provider + renderer 同份） |
 | Fake provider | `providers/fake/index.ts` | E2E-only backend，`SHELF_TEST_MODE=1` 時回它，prompt 走 prefix-matched scenario |
 | Fake provider 測試 | `providers/fake/fake.test.ts` | 每個 scenario 的 wire-shape 驗證 + stop/abort 行為 |
-| Bundle build | `build.mjs` | esbuild → `dist/agent-server/<version>/index.js` 單一 ESM bundle |
+| Bundle build | `build.mjs` | esbuild → `dist/agent-server/<version>/index.js` 單一 ESM bundle（index/exec/dispatcher 同一 bundle，role 由 argv 選） |
 | 單元測試 | `providers/copilot/slash-commands.test.ts` | slash dispatch + streaming/idle status pair 測試 |
+| Dispatcher 單元測試 | `dispatcher.test.ts` | open/close_session / raw relay / reconnect + backoff / inner-ping hung / proc-identity guard / cache 側通道 |
+| Model-cache 單元測試 | `model-cache.test.ts` | TTL hit/miss/expiry evict |
+| Session-registry 單元測試 | `session-registry.test.ts` | open/get/close + runtimeKey 共享/隔離 |
 
 ## PM Agent (src/main/pm/)
 
@@ -138,7 +147,7 @@ title: shelf-terminal — Intent → File Index
 | 快捷鍵系統 | `hooks/useKeybindings.ts` | combo string 對應 action，支援參數化 action |
 | Paste/drop 上傳 hook | `hooks/useAttachmentPaste.ts` | paste/drop/upload pipeline + file size check |
 | Terminal 渲染 | `components/TerminalView.tsx` | xterm.js instance cache + PTY I/O + paste hook + unread badge |
-| Agent 對話 UI | `components/AgentView.tsx` + `components/agent/{MessageList,InputZone,StatusBar,DecisionPanel,PlanPanel,AuthPane}.tsx` + `agentTabStore.ts` + `agentTabSubscriptions.ts` + `agent-message-builder.ts` | AgentView 是 layout coordinator，domain state 在 per-tab `agentTabStore`，子 component 各自 subscribe |
+| Agent 對話 UI | `components/AgentView.tsx` + `components/agent/{MessageList,InputZone,StatusBar,DecisionPanel,PlanPanel,AuthPane,ConnectionOverlay}.tsx` + `agentTabStore.ts` + `agentTabSubscriptions.ts` + `agent-message-builder.ts` | AgentView 是 layout coordinator，domain state 在 per-tab `agentTabStore`，子 component 各自 subscribe。`ConnectionOverlay` 是 pane-scoped（`absolute` 非 `fixed`）dim+blur 恢復遮罩，統一 init-`failed`（Retry）/ health-`dead`（Reconnect）/ reconnecting 三態 |
 | Web tab（登入 surface + 瀏覽） | `components/WebTabView.tsx` | `<webview partition=persist:web>` + 網址列 + identity chip；人在這登入內網服務 |
 | Web.fetch 授權 popup | `components/WebPermissionPrompt.tsx` | app 層全域 popup，防偽 origin 顯示 + allow once/always/deny（由 `web:permission-request` 驅動） |
 | browser_open 確認 popup | `components/BrowserOpenPrompt.tsx` | app 層全域 popup，只有 Open/Deny（不記住），由 `web:browser-open-request` 驅動；核可後 `web:open-tab` 由 `App.tsx` 開分頁 |
