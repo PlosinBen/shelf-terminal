@@ -6,7 +6,9 @@ import type { Page } from '@playwright/test';
  * 'ready' (capabilities gathered). When the caps RPC fails — here forced via the
  * fake provider's SHELF_TEST_CAPS_FAIL hook, mirroring a real Copilot caps-RPC
  * timeout / SDK-link failure — init lands 'failed', and the textarea must be
- * locked (disabled, no send, no queued chip) with the Retry pane shown instead.
+ * locked (disabled, no send, no queued chip) with the recovery overlay shown
+ * instead (a pane-scoped, dim+blur overlay with a centered Retry — see
+ * ConnectionOverlay; unifies init-failed + connection-dead recovery).
  *
  * A caps failure is deliberately NOT recoverable by "just send anyway": a
  * timeout means the shared agent-server ↔ CLI link is unhealthy, so pretending
@@ -36,22 +38,29 @@ test.describe('agent init-readiness gate', () => {
   test.describe('caps RPC fails → init locked', () => {
     test.use({ capsFail: true });
 
-    test('failed init locks the input (disabled, no send) and shows Retry', async ({ shelfApp: { page } }) => {
+    test('failed init locks the input (disabled, no send) and shows the recovery overlay', async ({ shelfApp: { page } }) => {
       await setupProject(page);
       await openAgentTab(page);
 
-      // Failed pane + Retry affordance (MessageList init-failed branch).
-      await expect(page.locator('.agent-init-failed')).toBeVisible({ timeout: 10_000 });
-      await expect(page.locator('.agent-init-failed')).toContainText('Failed to start agent');
-      await expect(page.locator('.agent-init-failed button', { hasText: 'Retry' })).toBeVisible();
+      // Recovery overlay + centered Retry affordance (ConnectionOverlay).
+      const overlay = page.locator('.agent-conn-overlay');
+      await expect(overlay).toBeVisible({ timeout: 10_000 });
+      await expect(overlay).toContainText('Failed to start agent');
+      await expect(overlay.locator('button', { hasText: 'Retry' })).toBeVisible();
 
       // The gate: textarea disabled + honest placeholder, so no send can be typed.
       const ta = page.locator('.agent-textarea:visible');
       await expect(ta).toBeDisabled();
-      await expect(ta).toHaveAttribute('placeholder', 'Agent unavailable — retry above');
+      await expect(ta).toHaveAttribute('placeholder', 'Agent unavailable — retry to reconnect');
 
       // And nothing was optimistically queued: no pending chip in the timeline.
       await expect(page.locator('.agent-msg-queued')).toHaveCount(0);
+
+      // Clicking Retry re-arms init: overlay flips to the 'Reconnecting…' state
+      // (caps still fails here, so it settles back to failed — proves the button
+      // drives the retry-init path, not a dead control).
+      await overlay.locator('button', { hasText: 'Retry' }).click();
+      await expect(overlay).toContainText(/Reconnecting|Failed to start agent/, { timeout: 10_000 });
     });
   });
 
@@ -63,6 +72,6 @@ test.describe('agent init-readiness gate', () => {
     const ta = page.locator('.agent-textarea:visible');
     await expect(ta).toBeEnabled();
     await expect(ta).toHaveAttribute('placeholder', 'Ask something...');
-    await expect(page.locator('.agent-init-failed')).toHaveCount(0);
+    await expect(page.locator('.agent-conn-overlay')).toHaveCount(0);
   });
 });

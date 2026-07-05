@@ -9,7 +9,6 @@ import { nextForceFollow } from './scroll-follow';
 interface Props {
   tabId: string;
   visible: boolean;
-  onRetryInit: () => void;
 }
 
 /**
@@ -24,7 +23,7 @@ interface Props {
  * Display prefs flow to `AgentMessage` children via `AgentDisplayContext`
  * (the list owns the config; messages don't reach into the global store).
  */
-export function MessageList({ tabId, visible, onRetryInit }: Props) {
+export function MessageList({ tabId, visible }: Props) {
   const tab = useAgentTab(tabId);
   const { settings } = useStore();
 
@@ -33,7 +32,6 @@ export function MessageList({ tabId, visible, onRetryInit }: Props) {
   const pendingSends = tab?.pendingSends ?? [];
   const initStatus = tab?.initStatus ?? 'starting';
   const initPhase = tab?.initPhase ?? null;
-  const initError = tab?.initError ?? null;
   const agentDisplay = settings.agentDisplay ?? {};
   const startingText =
     initPhase === 'deploying' ? 'Deploying runtime…' :
@@ -139,13 +137,6 @@ export function MessageList({ tabId, visible, onRetryInit }: Props) {
           <div className="agent-init-pane">
             <span className="agent-loading-spinner" />
             <span className="agent-loading-text">{startingText}</span>
-          </div>
-        )}
-        {initStatus === 'failed' && (
-          <div className="agent-init-pane agent-init-failed">
-            <div className="agent-init-failed-title">Failed to start agent</div>
-            {initError && <div className="agent-init-failed-reason">{initError}</div>}
-            <button className="conn-btn conn-btn-next" onClick={onRetryInit}>Retry</button>
           </div>
         )}
         {initStatus === 'ready' && messages.length === 0 && !isStreaming && (

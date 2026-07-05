@@ -9,6 +9,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { getShellEnv } from '../connector/shell-env';
 import { createTurnDispatcher, type PermissionHandler } from './turn-dispatcher';
+import { createDispatcherConnection, type DispatcherConnection, type DispatcherProc } from './dispatcher-connection';
 import { getAppInstanceId } from '../app-instance-id';
 import { skillsSourceRoot, listSkillFilesRel, hashSkillsTree } from '../skills-projection';
 import { syncMcpForConnection } from '../mcp-remote';
@@ -121,7 +122,17 @@ export function createRemoteBackend(
           deployed = true;
         }
         onPhase?.('connecting');
-        const proc = await spawnAgentServer(connection, cwd, deployResult!, initScript, onTaskEvent, onServerTurn, onHealth, onQueue, onSkillsReloaded, onSessionEvent, projectId);
+        let proc: RemoteProcess | null;
+        if (USE_DISPATCHER) {
+          // Shared per-host dispatcher: open a session on it (drop-in RemoteProcess).
+          const dc = ensureDispatcher(connection, cwd, deployResult!, initScript);
+          const sid = sessionId ?? randomUUID();
+          proc = dc
+            ? dc.openSession(sid, cwd, { onTaskEvent, onServerTurn, onHealth, onQueue, onSkillsReloaded, onSessionEvent, projectId })
+            : null;
+        } else {
+          proc = await spawnAgentServer(connection, cwd, deployResult!, initScript, onTaskEvent, onServerTurn, onHealth, onQueue, onSkillsReloaded, onSessionEvent, projectId);
+        }
         if (!proc) return null;
         const ready = await proc.awaitReady();
         if (!ready) {
@@ -173,12 +184,13 @@ export function createRemoteBackend(
         // dispatcher which delivers the canUseTool answer asynchronously.
         (async () => {
           if (!userCallback) {
-            proc.sendLine({ type: 'resolve_permission', toolUseId, allow: true });
+            proc.sendLine({ type: 'resolve_permission', sid: sessionId, toolUseId, allow: true });
             return;
           }
           const result = await userCallback(toolUseId, toolName, input);
           proc.sendLine({
             type: 'resolve_permission',
+            sid: sessionId,
             toolUseId,
             allow: result.behavior === 'allow',
             message: result.behavior === 'deny' ? result.message : undefined,
@@ -229,7 +241,7 @@ export function createRemoteBackend(
       // Fire-and-forget: agent-server forwards to the provider; the resulting
       // 'stopped' task_notification flows back over the task_event lane.
       if (remoteProc) {
-        remoteProc.sendLine({ type: 'stop_task', taskId });
+        remoteProc.sendLine({ type: 'stop_task', sid: sessionId, taskId });
       }
     },
 
@@ -266,7 +278,7 @@ export function createRemoteBackend(
 
     resolvePicker(pickerId: string, payload: PickerResolvePayload) {
       if (!remoteProc) return;
-      remoteProc.sendLine({ type: 'resolve_picker', pickerId, payload });
+      remoteProc.sendLine({ type: 'resolve_picker', sid: sessionId, pickerId, payload });
     },
 
     async getCapabilities(
@@ -375,14 +387,29 @@ function sq(s: string): string {
   return s.replace(/'/g, `'\\''`);
 }
 
+/**
+ * Build the quoted `ssh` and `scp` option strings for the deploy commands.
+ * Shared ControlMaster opts + the port — but the port flag DIFFERS by tool:
+ * `ssh -p <port>` vs `scp -P <port>`. `scp -p` means "preserve times" and would
+ * swallow the port as a source operand (`scp: stat local "2222": No such file`),
+ * breaking the deploy on any non-default port. Exported for a regression test.
+ */
+export function sshDeployOptStrings(c: { host: string; port: number; user: string }): { ssh: string; scp: string } {
+  const base = ['-o', 'ControlMaster=auto', '-o', `ControlPath=/tmp/shelf-ssh-${c.host}-${c.port}-${c.user}`, '-o', 'ControlPersist=600'];
+  const quote = (arr: string[]) => arr.map((o) => `'${o}'`).join(' ');
+  return {
+    ssh: quote([...base, '-p', String(c.port)]),
+    scp: quote([...base, '-P', String(c.port)]),
+  };
+}
+
 function sshOps(c: Extract<Connection, { type: 'ssh' }>): RemoteOps {
   const target = `${c.user}@${c.host}`;
-  const opts = ['-o', 'ControlMaster=auto', '-o', `ControlPath=/tmp/shelf-ssh-${c.host}-${c.port}-${c.user}`, '-o', 'ControlPersist=600', '-p', String(c.port)];
-  const optStr = opts.map((o) => `'${o}'`).join(' ');
+  const { ssh: sshOptStr, scp: scpOptStr } = sshDeployOptStrings(c);
   const exec = (cmd: string, t = 15000): string =>
-    execSync(`ssh ${optStr} ${target} '${sq(cmd)}'`, { timeout: t, encoding: 'utf8' });
+    execSync(`ssh ${sshOptStr} ${target} '${sq(cmd)}'`, { timeout: t, encoding: 'utf8' });
   const copyIn = (local: string, remote: string, t = 180000): void => {
-    execSync(`scp ${optStr} '${local}' ${target}:'${sq(remote)}'`, { timeout: t });
+    execSync(`scp ${scpOptStr} '${local}' ${target}:'${sq(remote)}'`, { timeout: t });
   };
   // Resolve an ABSOLUTE $HOME up front (mirroring wslOps), NOT `base:'~'`. The
   // exec-built control commands embed the base inside DOUBLE quotes (e.g.
@@ -711,6 +738,150 @@ async function spawnAgentServer(
 // Heartbeat send interval. Env override (ms) lets E2E drive the lease/health
 // loop fast without waiting a real minute; prod uses the §5.9 default (1m).
 const HEARTBEAT_INTERVAL_MS = Number(process.env.SHELF_HEARTBEAT_INTERVAL_MS) || DEFAULT_HEALTH_THRESHOLDS.intervalMs;
+
+// ── Dispatch-layering (group D3): shared per-host dispatcher path ────────────
+// DEFAULT ON. Flipped after E2E + real-dev verification on the LOCAL transport
+// with BOTH providers (Copilot + Claude) across all robustness paths (reconnect,
+// hung-detection, close/reopen, dispatcher-death recovery). `SHELF_USE_DISPATCHER=0`
+// is the escape hatch back to the per-tab path (spawnAgentServer/wrapProcess), kept
+// until a later cleanup removes it. CAVEAT: ssh/docker/wsl transports have NOT yet
+// been exercised on this path (E2E is fake+local) — the `=0` fallback is the safety
+// net if a remote-transport issue surfaces. See the feature note.
+const USE_DISPATCHER = process.env.SHELF_USE_DISPATCHER !== '0';
+
+/** Per-transport connection identity — the dispatcher scope key (#3). NOT
+ *  "the ControlPath" (that's ssh-unix only). */
+function dispatcherKeyFor(c: Connection): string {
+  switch (c.type) {
+    case 'ssh': return `ssh:${c.host}:${c.port}:${c.user}`;
+    case 'docker': return `docker:${c.container}`;
+    case 'wsl': return `wsl:${c.distro}`;
+    case 'local': return 'local';
+    default: return JSON.stringify(c);
+  }
+}
+
+// Shared per-host dispatcher connections. Ref-counted: the last session's close
+// fires onEmpty → arm an idle-teardown GRACE window; a reopen within it reuses the
+// warm dispatcher + its model cache (F-b, ControlPersist-style). 120s << the 24h
+// cleanup-reclaim threshold, so no dispatcher lease-touch is needed.
+interface DispEntry { conn: DispatcherConnection; grace?: NodeJS.Timeout; }
+const dispatchers = new Map<string, DispEntry>();
+const DISPATCHER_GRACE_MS = Number(process.env.SHELF_DISPATCHER_GRACE_MS) || 120_000;
+
+/** Adapt a spawned child process to the DispatcherProc the connection drives. */
+function childToDispatcherProc(child: ChildProcess): DispatcherProc {
+  let buf = '';
+  return {
+    writeLine: (line) => { child.stdin?.write(line + '\n'); },
+    onLine: (cb) => {
+      child.stdout?.on('data', (chunk: Buffer) => {
+        buf += chunk.toString();
+        const lines = buf.split('\n');
+        buf = lines.pop() ?? '';
+        for (const l of lines) if (l.trim()) cb(l);
+      });
+    },
+    onExit: (cb) => { child.on('exit', (code) => cb(code)); },
+    kill: () => { child.stdin?.end(); child.kill(); },
+  };
+}
+
+/** Spawn the deployed bundle in `--role=dispatcher` over the transport. Mirrors
+ *  spawnAgentServer's transport branches (kept separate so the per-tab path stays
+ *  byte-untouched); the dispatcher gets the ssh idle-shutdown watchdog (it owns
+ *  it now) while the exec procs it spawns do NOT (#8). */
+function spawnDispatcherProc(connection: Connection, cwd: string, deploy: DeployResult, initScript?: string): ChildProcess | null {
+  const { nodeBin, indexPath } = deploy;
+  const testEnv = process.env.SHELF_TEST_MODE ? `SHELF_TEST_MODE=${process.env.SHELF_TEST_MODE} ` : '';
+  if (connection.type === 'local') {
+    const env: Record<string, string> = { ...getShellEnv() };
+    if (process.env.SHELF_TEST_MODE) env.SHELF_TEST_MODE = process.env.SHELF_TEST_MODE;
+    return spawn(nodeBin, [indexPath, '--role=dispatcher'], { cwd, env, stdio: ['pipe', 'pipe', 'pipe'] });
+  }
+  if (connection.type === 'ssh') {
+    const shellPrefix = initScript ? `eval '${initScript.replace(/'/g, "'\\''")}' >/dev/null 2>&1; ` : '';
+    const idleMin = connection.idleShutdownMinutes ?? 5;
+    const idleArg = idleMin > 0 ? ` --idle-shutdown-min=${idleMin}` : '';
+    const cmd = `${shellPrefix}${testEnv}exec ${nodeBin} ${indexPath} --role=dispatcher${idleArg}`;
+    return spawn('ssh', [
+      '-o', 'ControlMaster=auto',
+      '-o', `ControlPath=/tmp/shelf-ssh-${connection.host}-${connection.port}-${connection.user}`,
+      '-o', 'ControlPersist=600',
+      '-p', String(connection.port),
+      `${connection.user}@${connection.host}`,
+      cmd,
+    ], { stdio: ['pipe', 'pipe', 'pipe'] });
+  }
+  if (connection.type === 'docker') {
+    return spawn('docker', ['exec', '-i', connection.container, 'sh', '-c', `${testEnv}exec ${nodeBin} ${indexPath} --role=dispatcher`], { stdio: ['pipe', 'pipe', 'pipe'] });
+  }
+  if (connection.type === 'wsl') {
+    return spawn('wsl.exe', ['-d', connection.distro, '--', 'sh', '-lc', `${testEnv}exec ${nodeBin} ${indexPath} --role=dispatcher`], { stdio: ['pipe', 'pipe', 'pipe'] });
+  }
+  return null;
+}
+
+/** Get (or spawn) the shared dispatcher for this host. */
+function ensureDispatcher(connection: Connection, cwd: string, deploy: DeployResult, initScript?: string): DispatcherConnection | null {
+  const key = dispatcherKeyFor(connection);
+  const existing = dispatchers.get(key);
+  if (existing) {
+    // Reopen within the grace window → cancel teardown, reuse the warm dispatcher.
+    const hadGrace = !!existing.grace;
+    if (existing.grace) { clearTimeout(existing.grace); existing.grace = undefined; }
+    log.info('agent-remote', `dispatcher: reusing warm connection ${key}${hadGrace ? ' (cancelled idle-teardown grace)' : ''} — model cache stays warm`);
+    return existing.conn;
+  }
+  log.info('agent-remote', `dispatcher: spawning new for ${key}`);
+  const child = spawnDispatcherProc(connection, cwd, deploy, initScript);
+  if (!child) return null;
+  // The dispatcher writes ALL its logs to stderr as `[dispatcher] <level>: <msg>`.
+  // Route each line to the matching main log level so a real dispatcher error
+  // stands out instead of being buried under info noise (fail-loud). Unstructured
+  // lines (e.g. a relayed exec crash trace with no prefix) stay as error.
+  child.stderr?.on('data', (c: Buffer) => {
+    for (const raw of c.toString().split('\n')) {
+      const line = raw.trim();
+      if (!line) continue;
+      const m = /^\[dispatcher\]\s+(error|warn|info|debug):\s*(.*)$/.exec(line);
+      if (m) log[m[1] as 'error' | 'warn' | 'info' | 'debug']('agent-remote', `dispatcher: ${m[2]}`);
+      else log.error('agent-remote', `dispatcher stderr: ${line}`);
+    }
+  });
+  child.on('error', (err) => log.error('agent-remote', `dispatcher proc error: ${err.message}`));
+  const conn = createDispatcherConnection({
+    proc: childToDispatcherProc(child),
+    parseRemoteMessage,
+    handleAppTool,
+    heartbeatIntervalMs: HEARTBEAT_INTERVAL_MS,
+    onEmpty: () => {
+      const e = dispatchers.get(key);
+      if (!e || e.conn !== conn || e.grace) return;
+      log.info('agent-remote', `dispatcher: last session closed for ${key} — arming ${DISPATCHER_GRACE_MS}ms idle-teardown grace`);
+      e.grace = setTimeout(() => {
+        if (dispatchers.get(key)?.conn === conn) {
+          log.info('agent-remote', `dispatcher: grace expired for ${key} — tearing down`);
+          dispatchers.delete(key); conn.kill();
+        }
+      }, DISPATCHER_GRACE_MS);
+      e.grace.unref?.();
+    },
+    // Dispatcher proc exited (crash / external kill). EVICT the dead conn from the
+    // map — else the next ensureDispatcher "reuses" a corpse and openSession writes
+    // to a closed stdin → caps init fails ("Failed to start agent-server") instead
+    // of the intended "first reconnect re-spawns a fresh dispatcher".
+    onDown: () => {
+      const e = dispatchers.get(key);
+      if (e?.conn !== conn) return; // a grace teardown / newer conn already replaced us
+      if (e.grace) clearTimeout(e.grace);
+      dispatchers.delete(key);
+      log.warn('agent-remote', `dispatcher for ${key} exited — evicted; next connect spawns fresh`);
+    },
+  });
+  dispatchers.set(key, { conn });
+  return conn;
+}
 
 function wrapProcess(
   proc: ChildProcess,

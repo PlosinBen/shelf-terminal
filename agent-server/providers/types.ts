@@ -46,6 +46,17 @@ export type PickerResolvePayload =
 export interface WireEnvelope {
   turnId?: string;
   /**
+   * App/tab SESSION routing key — the dimension that lets one dispatcher
+   * multiplex N tabs (dispatch-layering). DISTINCT from the payload `sessionId`
+   * on `status` (which is the provider's SDK session id) and from the
+   * context-store `sessionId` on inbound `send` — those stay provider/persistence
+   * concerns; `sid` is purely the wire ROUTING key. Value = the same app session
+   * key main mints per tab. In the 3-tier end state the dispatcher stamps this on
+   * relayed exec→main events; today (pre-dispatcher) it rides as a forward-compat
+   * seam and nothing consumes it yet.
+   */
+  sid?: string;
+  /**
    * Marks a `message` as the first of a new render turn so the renderer's
    * buildTurns opens a fresh turn block for it. Needed for server-initiated
    * (auto-resume) turns: they have no `user` message to anchor a new block, so
@@ -346,6 +357,17 @@ export interface ProviderCapabilities {
   authRequired?: boolean;
 }
 
+/**
+ * Cache-aside client a provider uses for its expensive model fetch (group E).
+ * Backed by the per-host dispatcher's TTL cache over the exec side-channel;
+ * `get` resolves a miss when there is no dispatcher. `value` is an opaque,
+ * provider-private blob (the raw model list).
+ */
+export interface ModelCacheClient {
+  get(key: string, provider: string): Promise<{ hit: boolean; value?: unknown }>;
+  put(key: string, provider: string, value: unknown): void;
+}
+
 export interface ServerBackend {
   query(input: QueryInput, send: SendFn): Promise<void>;
   stop(): Promise<void>;
@@ -364,6 +386,14 @@ export interface ServerBackend {
     sessionId?: string,
     customModels?: ProviderModel[],
     intent?: { model?: string; effort?: string; permissionMode?: string },
+    /**
+     * Per-host model cache (dispatch-layering group E). A provider whose caps
+     * include an expensive network model fetch (Copilot's `listModels`) consults
+     * this cache-aside: `get` on entry (hit → skip the fetch, use the cached
+     * blob), `put` after a real fetch. Present only under a dispatcher; providers
+     * with no network fetch (Claude) ignore it. The blob shape is provider-private.
+     */
+    cache?: ModelCacheClient,
   ): Promise<ProviderCapabilities>;
   resolvePermission?(toolUseId: string, allow: boolean, message?: string, scope?: 'once' | 'session'): void;
   /**

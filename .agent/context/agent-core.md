@@ -177,3 +177,23 @@ observers（telegram bridge）仍收原始 per-turn idle（維持逐 turn flush 
 **Do not change casually because**：別把 per-turn `status` event 直接轉回 renderer（會重蹈 idle 翻 tab 的 bug）；但也**別反向把 streaming status 一起濾掉**（會吞掉 mid-turn quota）。要剝的**只有 terminal idle 的 `state` 欄位**，metrics 與 streaming status 一律留。renderer 是 session 層級狀態的純消費者；turn 的存在與否是 main↔agent-server 內部帳。server-turn（auto-resume）路徑是**另一條**且不進 `activeTurns`，它的 idle 仍該經 `dispatchEvent` 轉發（靠 `session.state==='streaming'` skip 避免蓋掉前景 spinner，`#69/#76`）—— 別把兩條路徑的 status 處理混為一談。
 
 **Related**：`agent-core#7`（server-owned queue + `activeTurns`）、`agent-core#8`（每個 send 必須以 idle 收尾）、`architecture/agent-turn`（turnId stays internal 邊界）、`src/main/agent/index.ts`（`sendMessage`/`dispatchEvent`）、`agent-server/providers/copilot/index.ts`（mid-turn usage on streaming status）、`src/renderer/agentTabSubscriptions.ts`、`e2e/agent-flows.spec.ts`（cancelling a queued send leaves the running turn streaming／mid-turn streaming usage 到 status bar）。
+
+## agent-core#11 — Dispatcher 生命週期：thin-by-construction、崩潰要逐出、close/reopen 同-sid race 的三道 identity guard  ·  [Gotcha]
+
+> 適用於 dispatcher 路徑（`architecture/agent-dispatch`），現為預設。舊 per-session 直連 path（`spawnAgentServer`/`wrapProcess`）以 flag 保留為**過渡 fallback**（移除已列管）。
+
+**Thin-by-construction：dispatcher 絕不可 static-import provider / SDK 模組**。entrypoint 先 branch role（`--role=dispatcher` vs `--role=exec`，同一份 deployed bundle），provider 模組（`./providers/*`、Copilot/Claude SDK）**只在 exec role 內用 dynamic `import()` 載入**。dispatcher role 因此永遠不 load 重 SDK → 啟動快、runtime footprint / crash surface 小。static-import 會 eager 載入即使從不執行 → 所以這裡 lazy import 是**必要**、非優化。
+
+**崩潰的 dispatcher 必須從 per-host map 逐出**：dispatcher proc exit 後，死掉的 `DispatcherConnection` 若賴在 `remote.ts` 的 `dispatchers` map（原本只有 grace-teardown 路徑刪它）→ 下個 `ensureDispatcher` 會「重用屍體」→ `openSession` 寫進已關的 stdin → `getCapabilities` 30s timeout /「Failed to start agent-server」，而非「首次 reconnect spawn 全新」。**Fix**：對稱的 `onDown` callback（在 `proc.onExit` handler 內、與 `onEmpty` 並列）逐出該 entry（guard 在仍是 current conn 才刪）。dispatcher death **不自動復原** —— 退回既有 host-disconnect 狀態，使用者 Retry 才 spawn 全新（見 `connection-health#8`）。
+
+**Close/reopen 同-sid race + 三道 identity guard**（最尖銳的一個）：sid 是 **per-project 持久**（同 project 永遠復用同一 sid），所以一個 tab 在**舊 session teardown 尚未 fire 前**就 re-init，會撞在同一 sid 上：(a) main 的 `channels: Map<sid,…>` 被覆寫 → 孤兒舊 channel 稍後的 `kill()` 刪掉了**新** channel 的 entry 並送 `close_session`，殺掉了 reopened tab 依賴的 exec；(b) dispatcher 把重複的 `open_session` 當「already-open」丟掉 → 重啟的 tab 永遠 ready 不了。Net：reopened tab → 死 exec →「Failed to start agent-server」。**Fix = 三道 identity guard**：
+1. **main `openSession` 對已開的 sid：先關舊 channel 再開新的**（replace → dispatcher 收到乾淨的 close→open）；
+2. **main `kill` identity-guarded**（孤兒 channel 的 kill 變 no-op，不誤刪 current entry）；
+3. **dispatcher `handleExecDown` proc-identity guard**（舊 exec 在 replace 後遲來的 exit 被忽略，不誤讀成 current exec 掛掉 → 不會亂觸發 reconnect）。
+
+**Do not change casually because**：
+- 別讓 dispatcher static-import provider/SDK —— 破壞 thin-by-construction（啟動變慢、crash surface 變大）。
+- 別漏 dispatcher 崩潰的逐出 —— 賴著的屍體會讓下次連線寫進死 stdin、假性 timeout 而非乾淨重生。
+- 別拿掉任一道 identity guard —— per-project 持久 sid 的 close/reopen race 會回來，孤兒 channel 誤殺新 exec。
+
+**Related**：`connection-health#7`（reconnect：`handleExecDown` 的 fail-loud ordering）、`connection-health#8`（dispatcher death = host disconnect + Retry）、`architecture/agent-dispatch`（role-split、two-map hosting）、`src/main/agent/{remote,dispatcher-connection}.ts`、`agent-server/{index,dispatcher,exec}.ts`。

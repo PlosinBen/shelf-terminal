@@ -172,3 +172,25 @@ InputZone ──emit('agent:send', ...)──▶ EventBus
 **Root cause**：`const { projects, activeProjectIndex, sidebarVisible } = useStore()` 漏了 `settings`，但後面直接用 `settings.themeName`。在 minified bundle 中變成未宣告的變數。
 
 **Fix**：確保 `useStore()` 解構包含所有後續使用的欄位。
+
+## agent-ui#7 — Recovery overlay：pane-scoped `absolute`（非 `fixed`）、統一 init-failed / health-dead / reconnecting  ·  [Decision]
+
+**Decision**：連線失敗 / 中斷的復原 affordance 是一個**蓋在 agent pane 上的 dim+blur overlay + 置中 recovery card**（`ConnectionOverlay`），取代原本「list 頂端一小塊 + `dead` 只在 sidebar 亮個點」的易錯過設計。
+
+**三態統一**：一個 overlay 收編三種需要使用者出手的情況 ——
+- init `failed`（「Failed to start」+ Retry）
+- health `dead`（「Connection lost」+ Reconnect）
+- 進行中的 (re)connect（「Reconnecting…」spinner）
+
+兩個動作都走既有的 `handleRetryInit`；init ready + health 復原後 overlay **自清**（依賴 reconnect 的 health-seed，見 `connection-health#8` —— 沒 seed 紅燈不清、overlay 不會消失）。
+
+**為何 `absolute` 不是 `fixed`**：overlay 定位在 agent pane 內（`position:absolute` inside `.agent-view`），**不是** viewport-`fixed`。`fixed` 會蓋住 sidebar 或 split 的**兄弟 pane** —— 一個 pane 斷線不該遮住整個 app 或旁邊還活著的 pane。pane-scoped 讓失敗視覺被關在自己的 pane 裡。
+
+**為何 dim+blur 不是 opaque**：blur 讓對話**仍可讀** —— 斷線**不該藏掉歷史**；使用者要能一邊看之前的內容一邊決定 Retry。
+
+**Do not change casually because**：
+- 別把 overlay 改成 `fixed` —— 會蓋住 sidebar / sibling split pane（一個 pane 的失敗不該波及全 app）。
+- 別把三態拆回各自的小 affordance —— 統一一個 overlay 才不會像舊版那樣被錯過。
+- 別把 overlay 改成 opaque / 藏掉對話 —— 斷線時歷史仍要可讀。
+
+**Related**：`connection-health#8`（reconnect health-seed —— overlay 自清的前提）、`connection-health#7`（兩層 health / reconnect 的失敗來源）、`architecture/agent-dispatch`、`src/renderer/components/agent/ConnectionOverlay.tsx`。

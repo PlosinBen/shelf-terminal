@@ -248,3 +248,55 @@ agent-server can't use `@shared/logger` (it writes a file via electron `app.getP
 The ONLY things still on the child's **stderr**: a log emitted before the sink is wired (early boot fallback) and a fatal/death path (Node's default uncaught dump; the idle-shutdown self-exit). main logs raw stderr at `error` — now rare and meaningful, since routine diagnostics no longer go there. See `context/agent-core` agent-core#9.
 
 (`capabilities` is also requestId-keyed when used as an RPC response — documented above under its render section since it doubles as a mid-turn broadcast.)
+
+---
+
+## Dispatch addressing — `sid` vs `turnId` vs payload `sessionId`
+
+When a single per-host dispatcher multiplexes many sessions (see `architecture/agent-dispatch`), the wire gains one new routing dimension. THREE distinct identifiers now coexist and MUST keep distinct names — they are not interchangeable:
+
+| Name | Scope | Meaning |
+|------|-------|---------|
+| `turnId` | per turn | Routes per-turn events to their turn reader (unchanged; see the Envelope above). Main mints it per `send`. |
+| `sid` | per session | **NEW envelope field.** The app/tab session key = the routing dimension the dispatcher demuxes on. Its value is the same app session key that already rides as `send.sessionId`. A distinct NAME so it can never collide with a payload `sessionId`. |
+| `sessionId` | payload-internal, provider-owned | The provider's SDK session id (e.g. Claude `msg.session_id`) inside `status`, and the context-store key inside `send` / `clear_context`. NEVER an envelope routing key — the dispatcher never routes on it. |
+
+`sid` is added ONLY as an envelope/routing field; it never replaces or renames the payload `sessionId`. A message can legitimately carry both (its routing `sid` and, inside, a provider `sessionId`).
+
+## Boundary 1 — main ↔ dispatcher
+
+Over the transport (secure channel / subsystem / container / same-machine stdio). Same line-delimited JSON framing as the single-tier protocol above, plus a `sid` dimension, session lifecycle, and a **host-level** heartbeat (one per host, not per session).
+
+**main → dispatcher**
+
+| `type` | Key fields | Meaning |
+|--------|-----------|---------|
+| `open_session` | `sid; provider; cwd; initScript?; projectId?` | Ensure an execution unit for `sid`. Answered by a relayed `ready{sid}` (= `session_ready`) or `session_down`. Opening an already-open `sid` replaces the stale channel first (see `agent-core#11`). |
+| `close_session` | `sid` | Session closed → dispatcher disposes that execution unit (a NORMAL closure → it self-reaps escaped detached tasks). |
+| `ping` | `seq` | Host-level heartbeat, ONE per host (no `sid`); replaces the per-session ping. |
+| per-session commands | + `sid` | `send`, `stop`, `cancel_queued`, `resolve_permission`, `resolve_picker`, `stop_task`, `get_capabilities`, `store_credential`, `clear_credential`, `clear_context`, `read_task_output`, `reload_skills`, `app_tool_result` — each gains `sid`, routed to that session's execution unit, payloads otherwise UNCHANGED. |
+
+**dispatcher → main**
+
+| `type` | Key fields | Meaning |
+|--------|-----------|---------|
+| `ready` | — | Dispatcher process up (no `sid`); gates nothing per-session. |
+| `session_down` | `sid; reason; willReconnect` | Execution unit for `sid` exited (crash / hang / normal). Main fails that session's in-flight turns loudly, then marks it recovering if `willReconnect` (a relayed `ready{sid}` follows once reconnected) or disconnected if not (backoff exhausted). |
+| `pong` | `seq` | Host heartbeat ack (no `sid`). Host-level health = RTT / miss on THIS. |
+| existing per-turn / session events | + `sid` | Every existing `OutgoingMessage` (stream, message, status, queue, task_event, skills_reloaded, capabilities, credential_*, task_output, permission_request, picker_request, plan, auth_required, turn_started, error, log) is stamped with `sid` and **passed through OPAQUELY** — the dispatcher forwards without parsing. |
+
+`session_ready` is not a separate message: the execution unit stamps its own `ready` with its `sid`, and the dispatcher relays it. `get_capabilities` is per-`sid` and comes AFTER the session is ready (`open_session` → ready → `get_capabilities(sid)`); it is answered by the execution unit's runtime, keeping the dispatcher thin.
+
+## Boundary 2 — dispatcher ↔ execution unit
+
+Local stdio on the host. The execution unit is a session-addressed harness (see `architecture/agent-dispatch`), so this boundary ALSO carries `sid`: every per-session command/event carries it, the unit routes inbound to its session map and stamps outbound events with their `sid`, and the dispatcher relays to/from main. In the currently deployed isolated shape the map holds one entry, so `sid` is redundant-but-harmless there; the point is the harness is uniformly session-addressed.
+
+This boundary additionally carries the **cache side-channel** — serviced locally by the dispatcher, NOT relayed to main (peeked like the health pong):
+
+| `type` | Direction | Key fields |
+|--------|-----------|-----------|
+| `cache_get` | exec → dispatcher | `requestId; key; provider` |
+| `cache_reply` | dispatcher → exec | `requestId; hit; ...value?` |
+| `cache_put` | exec → dispatcher | `key; provider; ...value` |
+
+Cache-aside semantics: the execution unit asks the dispatcher on a miss, fetches via its own provider capability, and writes the result back. The dispatcher stores each value as an opaque, TTL-stamped blob it never parses (see `agent-config-flow#8`).

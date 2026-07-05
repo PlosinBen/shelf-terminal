@@ -70,4 +70,40 @@ related:
 
 **現況**：復原策略（自動 respawn vs 明示 reconnect 提示）與確切 wedge 點**待這輪 trace 重現後再定**。此條先記缺口 + 診斷路徑。
 
-**Related**：`connection-health#1`（heartbeat / dead 偵測）、`connection-health#2`（跨睡眠：不做 client auto-kill）、`agent-core#8`（每個 send 必以 idle 收尾）、`src/main/agent/{remote,index,turn-dispatcher}.ts`、`agent-server/index.ts`、`src/renderer/agentTabSubscriptions.ts`。
+**Related**：`connection-health#1`（heartbeat / dead 偵測）、`connection-health#2`（跨睡眠：不做 client auto-kill）、`connection-health#7`（dispatcher 路徑的兩層 health + connection-centric reconnect，取代此條缺口）、`agent-core#8`（每個 send 必以 idle 收尾）、`src/main/agent/{remote,index,turn-dispatcher}.ts`、`agent-server/index.ts`、`src/renderer/agentTabSubscriptions.ts`。
+
+## connection-health#7 — Dispatcher 路徑：兩層 health + connection-centric reconnect（fail-loud 先於重連）  ·  [Decision]
+
+> 適用於 dispatcher 路徑（`architecture/agent-dispatch`），現為預設。舊的 per-session 直連 path 仍以 flag 保留為**過渡 fallback**（移除已列管）——此條描述的是預設現況，fallback 移除時只需刪掉對它的提及。
+
+**兩層 health（取代 `connection-health#4` 記的「wedge 後無自動復原」缺口）**：
+- **OUTER（host 層）**：app ↔ per-host dispatcher 一拍 heartbeat（一 host 一拍，非 per-session）。漏拍 = 整台 host 不可達 → **一次砍掉該 host 所有 session**（它們共用一條 channel，砍整台是正確粒度）。取代舊的 per-session heartbeat。
+- **INNER（per exec）**：dispatcher ↔ 每個 exec 在遠端本機一拍 heartbeat。漏拍 = 該 exec **hung**（活著但 event loop 卡死 —— 睡眠/斷網 wedge）→ **只砍那一個 session**，dispatcher 與 sibling 不動。
+- **INNER 為何必要（非可選）**：少了它，wedged exec 仍騎在一個對 outer 照樣回 pong 的 dispatcher 下 → app 看到 host healthy 卻有一 tab 靜默卡死，正是 `connection-health#4` 的舊缺口。stream-silence 不能替代 probe（idle tab 本來就靜默）。
+
+**Connection-centric reconnect（不是 respawn）**：dispatcher 對**每個 session** 維持一條到 provider execution 的活連線；isolated 下 exec process 只是這條連線當下的化身。連線斷（exit=「gone」/ inner-probe 無回=「no response」）→ dispatcher 把該 session **reconnect 到一個全新 exec**；因對話已持久化（provider 自身的 resume id），重連的 exec **resume 同一個邏輯 session**，非重生。此框架能推廣到 shared（reconnect 到 client），「respawn 一個 worker」不能。
+
+**Ordering：fail-loud 先，reconnect 後**（order-critical）。exec down 時 dispatcher **先** 把該 session 所有 in-flight turn 大聲失敗掉（renderer 顯示 turn interrupted、spinner 解卡、清掉任何開著的 permission prompt），**才** 拉起新 exec 並更新 mapping。mid-turn work 一定丟 —— 從上一個 committed turn 邊界 resume，**絕不靜默留白**。無回應的 exec 直接 SIGKILL（它不會處理 stdin-EOF）。反覆重連失敗 → backoff 遞增到 cap；超過 cap 停手、host 退回既有 disconnected 狀態。
+
+**Do not change casually because**：
+- INNER ping 只是 liveness probe —— 別把 heartbeat 的 side-effect（idle watchdog reset / lease touch）留在 exec；那些上移到 dispatcher（見 `deployment#1` lease、`architecture/agent-dispatch`）。
+- reconnect 一定 **fail-loud 先於重連** —— 顛倒順序會讓 renderer 把 in-flight turn 的失敗誤當新 exec 的事件，或漏掉「turn 已丟」的通知（回到 `connection-health#4` 的靜默 wedge）。
+- 別把 dispatcher 的 outer 漏拍改成只砍單一 tab —— 共用 channel 死掉時整台 host 都不可達，砍整台才對。
+
+**Related**：`connection-health#1`（heartbeat 基礎）、`connection-health#4`（此條修掉的舊缺口）、`connection-health#8`（reconnect 的 health-seed gotcha + dispatcher death）、`contracts/agent-wire-protocol`（Boundary 1 `session_down{sid,reason,willReconnect}` + host-level ping/pong）、`architecture/agent-dispatch`。
+
+## connection-health#8 — Reconnect 必須 SEED 'healthy'，否則舊的紅燈永不清；dispatcher death = host disconnect + Retry  ·  [Gotcha]
+
+**Symptom**：exec/dispatcher 崩潰讓某 tab 轉 `dead`（紅），重新 init 成功後 tab **仍是紅的**，健康度回不來。
+
+**Root cause**：health model 是「**沒 entry = healthy**」，且 heartbeat **只在「從 healthy 變壞」時 emit `onHealth`**。一條剛 reconnect 的連線因此**從沒推過 'healthy'** → 之前在崩潰時被標 'dead' 的 tab 就永遠停在紅色，即使 re-init 已成功。
+
+**Fix**：`DispatcherConnection.openSession` 在（re)connect 時，用 tracker 當下（樂觀 healthy）的讀數 **seed 該 session 的 `onHealth`**，主動推一次 'healthy' 把陳舊紅燈清掉。（per-session 直連 fallback 有同樣的潛在形狀，但 store 預設值遮住了它，範圍最小化不動它。）此 seed 是 recovery overlay 能自清的前提（見 `agent-ui#7`）。
+
+**Dispatcher death = host-level disconnect（非新失敗模式）**：dispatcher 崩潰**不是**嚇人的新 blast radius —— 它退回**既有的 disconnected 狀態**，只是粒度更粗（該 host 所有 session 一起 disconnect，對共用一條連線的 session 是正確的）。**不自動復原**（設計如此：遠端沒有東西 supervise dispatcher，它本就隨 owning app 的 channel 而生滅，見 `architecture/agent-dispatch`）→ 使用者按 **Retry**（或開一個 tab）就 spawn 全新的。Retry-not-auto 是刻意的，對齊今日 per-session 崩潰的 UX。
+
+**Do not change casually because**：
+- 別移除 reconnect 的 health-seed —— 少了它，成功重連後紅燈永不清（heartbeat 不會為「沒變壞」補發 healthy）。
+- 別給 dispatcher 加 daemon self-respawn —— 遠端無人 supervise 它，death=host disconnect 是**既有**可復原狀態，Retry 即重生；自動重生只會多一層無人看管的生命週期。
+
+**Related**：`connection-health#7`（兩層 health + reconnect）、`agent-ui#7`（recovery overlay 靠此 seed 自清）、`src/main/agent/dispatcher-connection.ts`。
