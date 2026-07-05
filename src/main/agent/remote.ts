@@ -725,11 +725,14 @@ async function spawnAgentServer(
 const HEARTBEAT_INTERVAL_MS = Number(process.env.SHELF_HEARTBEAT_INTERVAL_MS) || DEFAULT_HEALTH_THRESHOLDS.intervalMs;
 
 // ── Dispatch-layering (group D3): shared per-host dispatcher path ────────────
-// FLAG-GUARDED, default OFF → today's per-tab path (spawnAgentServer/wrapProcess)
-// is the untouched fallback. Flip `SHELF_USE_DISPATCHER=1` to route through ONE
-// per-host dispatcher process that multiplexes N tabs. Flipped to default once
-// E2E-proven (a later step). See the feature note.
-const USE_DISPATCHER = process.env.SHELF_USE_DISPATCHER === '1';
+// DEFAULT ON. Flipped after E2E + real-dev verification on the LOCAL transport
+// with BOTH providers (Copilot + Claude) across all robustness paths (reconnect,
+// hung-detection, close/reopen, dispatcher-death recovery). `SHELF_USE_DISPATCHER=0`
+// is the escape hatch back to the per-tab path (spawnAgentServer/wrapProcess), kept
+// until a later cleanup removes it. CAVEAT: ssh/docker/wsl transports have NOT yet
+// been exercised on this path (E2E is fake+local) — the `=0` fallback is the safety
+// net if a remote-transport issue surfaces. See the feature note.
+const USE_DISPATCHER = process.env.SHELF_USE_DISPATCHER !== '0';
 
 /** Per-transport connection identity — the dispatcher scope key (#3). NOT
  *  "the ControlPath" (that's ssh-unix only). */
