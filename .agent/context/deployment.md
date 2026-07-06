@@ -88,3 +88,13 @@ related:
 - musl 別為了「一致」硬塞非官方 musl node;維持現狀(遠端自備 + version gate),Alpine 使用者較少且較技術。
 
 **Related**：`deployment#2`(bundle deploy)、`agent-providers#1`(provider 差異封裝)、`src/main/agent/{remote.ts(`localNodeExec`/`deployAgentServer`/`spawnAgentServer`),runtime-cache.ts,agent-runtime-versions.ts}`。
+
+## deployment#5 — bundle 路徑帶版本號 → stale package 版號打架要 pre-flight fail-loud，不能等 spawn 才 MODULE_NOT_FOUND  ·  [Gotcha]
+
+**Symptom**：packaged app 開 agent tab 報籠統「Failed to start agent-server」,logger 裡才看到 node `MODULE_NOT_FOUND: …/agent-server/<version>/index.mjs`。
+
+**Root cause**：`getLocalBundlePath()` 用 `getAppVersion()`(app 內 `package.json`)組出 `agent-server/<version>/index.mjs`。**版號 bump 了但 app 沒重打包**時,baked 版本指向一個磁碟上不存在的版本目錄 → bundle 找不到。remote 部署路徑(`deploySelfContained`)本來就有 `fs.existsSync` 預檢,但 **local 分支沒有** → 缺檔不在 deploy 期被抓,拖到 node spawn 才丟 `MODULE_NOT_FOUND`。而且 `ensureProcReady` 的 `.catch` 把任何 init 錯誤壓成 null → UI 只剩通用字串,真因埋在 log。
+
+**Fix**：① `deployAgentServer` 的 **local 分支也 pre-flight `fs.existsSync(indexPath)`**,缺檔丟 `agentBundleMissingMessage()`(帶版本 + 解析路徑 + 「重裝/`npm run dist`」或 dev 的 `node agent-server/build.mjs`),與 remote 分支共用同一 helper。② `ensureProcReady` 記 `lastInitError`,query/getCapabilities 的錯誤用它取代通用「Failed to start agent-server」→ **所有** init 失敗的真因都上得了 UI,不必看 logger。**別**把 local 分支的預檢拿掉(這正是 stale-package 版號打架的唯一早期攔截點)。迴歸測試在 `remote.test.ts`。
+
+**Related**：`deployment#4`(local 用 Electron node 那條也提到「錯誤被吞成通用訊息」)、`RELEASE_FLOW`(版號一致性)、`src/main/agent/remote.ts`(`agentBundleMissingMessage`/`ensureProcReady`)。

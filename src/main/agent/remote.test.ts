@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { spawn } from 'child_process';
+import * as fs from 'fs';
 
 // Mock electron
 vi.mock('electron', () => ({
@@ -65,6 +66,28 @@ describe('localNodeExec — local runs on Electron embedded Node (regression)', 
   it('sets ELECTRON_RUN_AS_NODE so the app binary behaves as plain Node', async () => {
     const { localNodeExec } = await import('./remote');
     expect(localNodeExec().env.ELECTRON_RUN_AS_NODE).toBe('1');
+  });
+});
+
+describe('missing agent-server bundle → clear, surfaced error (regression)', () => {
+  // Regression: a stale packaged app (version bumped, app not repackaged) resolves
+  // agent-server/<newVersion>/index.mjs which doesn't exist. Before this, the local
+  // path had no pre-flight check → node threw MODULE_NOT_FOUND at spawn and the UI
+  // showed only the generic "Failed to start agent-server", forcing a logger dive.
+  it('agentBundleMissingMessage names the version, the resolved path, and the fix step', async () => {
+    const { agentBundleMissingMessage } = await import('./remote');
+    const msg = agentBundleMissingMessage('/x/agent-server/9.9.9/index.mjs');
+    expect(msg).toContain('/x/agent-server/9.9.9/index.mjs');
+    expect(msg).toContain('1.0.0'); // version from the mocked package.json
+    expect(msg).toContain('node agent-server/build.mjs'); // isPackaged:false in the mock
+  });
+
+  it('local getCapabilities surfaces the bundle-missing cause, not the generic error', async () => {
+    // First existsSync call in the local deploy path is the bundle pre-flight → false.
+    vi.mocked(fs.existsSync).mockReturnValueOnce(false);
+    const { createRemoteBackend } = await import('./remote');
+    const backend = createRemoteBackend({ type: 'local' } as any);
+    await expect(backend.getCapabilities!('/tmp')).rejects.toThrow(/bundle not found/);
   });
 });
 
