@@ -45,6 +45,22 @@ describe('toWslPath', () => {
   });
 });
 
+describe('localNodeExec — local runs on Electron embedded Node (regression)', () => {
+  it('uses process.execPath, not a system "node"', async () => {
+    const { localNodeExec } = await import('./remote');
+    const { nodeBin } = localNodeExec();
+    // Regression: local must not fall back to a bare `node` from PATH — that
+    // reintroduced a system-node dependency (Windows users without node).
+    expect(nodeBin).not.toBe('node');
+    expect(nodeBin).toBe(process.execPath);
+  });
+
+  it('sets ELECTRON_RUN_AS_NODE so the app binary behaves as plain Node', async () => {
+    const { localNodeExec } = await import('./remote');
+    expect(localNodeExec().env.ELECTRON_RUN_AS_NODE).toBe('1');
+  });
+});
+
 describe('sshDeployOptStrings — ssh -p vs scp -P (regression)', () => {
   // Regression: the deploy reused one opts string with `-p <port>` for BOTH ssh
   // and scp. scp's port flag is `-P` (capital) — `-p` means preserve-times, so

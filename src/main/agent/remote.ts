@@ -626,11 +626,23 @@ export async function syncSkillsForConnection(connection: Connection): Promise<v
   await syncSkillsToRemote(connection, ops, getAppInstanceId());
 }
 
+/**
+ * Local agent-server runs on ELECTRON's OWN embedded Node — spawn the app
+ * binary (`process.execPath`) with `ELECTRON_RUN_AS_NODE=1`, which makes it
+ * behave as a plain Node process. This removes any dependency on a system
+ * `node` (Windows users needn't install one) and pins the runtime version to
+ * Electron's bundled Node, not the user's box. See deployment#4.
+ */
+export function localNodeExec(): { nodeBin: string; env: Record<string, string> } {
+  return { nodeBin: process.execPath, env: { ELECTRON_RUN_AS_NODE: '1' } };
+}
+
 async function deployAgentServer(connection: Connection, provider: AgentProvider): Promise<DeployResult> {
-  // local: use the host's own node (no version-drift problem on your own box).
-  // Local skills go through projectSkillsLocal (agent/index.ts), not here.
+  // local: run on Electron's embedded Node (see localNodeExec) — no system-node
+  // dependency, version pinned to Electron. Local skills go through
+  // projectSkillsLocal (agent/index.ts), not here.
   if (connection.type === 'local') {
-    return { nodeBin: 'node', indexPath: getLocalBundlePath() };
+    return { nodeBin: localNodeExec().nodeBin, indexPath: getLocalBundlePath() };
   }
   const providerBin: ProviderBin = provider === 'copilot' ? 'copilot' : 'claude';
   // ssh / docker / wsl: ship our own runtime + provider binary, then mirror the
@@ -680,7 +692,8 @@ async function spawnAgentServer(
 
   if (connection.type === 'local') {
     try {
-      const env: Record<string, string> = { ...getShellEnv() };
+      // ELECTRON_RUN_AS_NODE makes process.execPath (nodeBin) run as plain Node.
+      const env: Record<string, string> = { ...getShellEnv(), ...localNodeExec().env };
       if (process.env.SHELF_TEST_MODE) env.SHELF_TEST_MODE = process.env.SHELF_TEST_MODE;
       log.trace(
         'agent-remote',

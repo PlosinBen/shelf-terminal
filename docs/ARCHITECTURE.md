@@ -229,6 +229,10 @@ The whole system is shaped by a few non-negotiables:
    identically; remote execution is the normal case, not an edge case.
 3. **Zero setup for you.** Install and go — no requirement to install Node,
    Python, or extra CLIs yourself (only provider sign-in, e.g. Claude / GitHub).
+   Locally, Shelf runs on the Node runtime embedded in the app itself; on a
+   remote it ships its own pinned Node. The one exception is a musl-based
+   remote (e.g. Alpine Linux), which must already have Node installed because
+   no official musl Node build exists to ship.
 4. **Native stays native.** Where Claude / Copilot support something natively
    (skills, MCP, slash commands), Shelf opens it up and follows native behaviour
    rather than shipping a degraded copy.
