@@ -271,10 +271,15 @@ export function runDispatcher(): void {
     spawnExec: (sid, cwd, hooks) => {
       // Same node + same bundle, exec role, told its sid. Inherits our env — the
       // shell/initScript setup already ran when main spawned THIS dispatcher.
+      // ELECTRON_RUN_AS_NODE is set EXPLICITLY (not left to inheritance): when the
+      // dispatcher runs on Electron's embedded Node, process.execPath is the app
+      // binary, and without this flag the exec child would boot a second Electron
+      // window instead of running as plain Node. This bundle can't import the
+      // main-process spawnLocalNode helper, so the flag is inlined here.
       const child = spawn(process.execPath, [process.argv[1], '--role=exec', `--sid=${sid}`], {
         cwd: cwd || process.cwd(),
         stdio: ['pipe', 'pipe', 'pipe'],
-        env: process.env,
+        env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
       });
       const out = readline.createInterface({ input: child.stdout!, terminal: false });
       out.on('line', hooks.onLine);
