@@ -12,7 +12,7 @@ export const DEFAULT_KEYBINDINGS: KeybindingConfig = {
   openSettings: 'mod+,',
   search: 'mod+f',
   toggleSplitRight: 'mod+shift+\\',
-  openCommandPicker: 'mod+e',
+  openCommandPicker: 'mod+p',
   toggleDevTools: 'mod+shift+d',
   toggleNotes: 'mod+shift+n',
   togglePm: 'mod+shift+m',

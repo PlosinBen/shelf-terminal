@@ -158,7 +158,7 @@ title: shelf-terminal — Intent → File Index
 | Bottom bar（全寬 app footer） | `components/BottomBar.tsx` | App 層全寬狀態列：service type/cwd + 右側分三組（分隔線）：version｜左側欄(Projects)｜右側欄(PM/Notes/Skills/MCP/DevTools) toggle |
 | Sidebar | `components/Sidebar.tsx` | Project 列表、拖曳排序、右鍵選單、worktree branch、連線健康 status-dot |
 | Tab bar | `components/TabBar.tsx` | Tab 列表、拖曳排序、雙擊重命名、unread badge、PM Active badge |
-| 快速指令選擇器 | `components/CommandPicker.tsx` | ⌘E overlay，過濾 + 執行 per-project 快速指令 |
+| 快速指令選擇器 | `components/CommandPicker.tsx` | ⌘P overlay，過濾 + 執行 per-project 快速指令 |
 | 開發工具面板 | `components/DevToolsPanel.tsx` | ⌘D 右側 panel，Base64/JSON/URL/UUID/Timestamp/Hash 工具 |
 | 資料夾選擇器 | `components/FolderPicker.tsx` | 兩步驟（connection type → browse）選資料夾 |
 | 資料夾瀏覽器 | `components/FolderBrowser.tsx` | 純展示元件，顯示目錄清單和 keyboard hints |

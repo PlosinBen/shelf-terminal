@@ -500,13 +500,13 @@ test('dev tools accordion expands and collapses', async ({ shelfApp: { page } })
 
 // ── Command Picker ──
 
-test('mod+E toggles command picker', async ({ shelfApp: { page } }) => {
+test('mod+P toggles command picker', async ({ shelfApp: { page } }) => {
   await ensureConnected(page);
 
   const picker = page.locator('.command-picker-overlay');
   await expect(picker).not.toBeVisible();
 
-  await page.keyboard.press(`${modifier}+e`);
+  await page.keyboard.press(`${modifier}+p`);
   await expect(picker).toBeVisible({ timeout: 3_000 });
 
   await page.keyboard.press('Escape');

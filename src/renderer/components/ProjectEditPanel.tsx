@@ -356,7 +356,7 @@ export function ProjectEditPanel() {
           <div className="project-edit-field">
             <label className="settings-label">Quick Commands</label>
             <div className="project-edit-hint">
-              Commands available via {navigator.platform.toUpperCase().includes('MAC') ? '⌘E' : 'Ctrl+E'}. Target a specific tab by name or use current tab.
+              Commands available via {navigator.platform.toUpperCase().includes('MAC') ? '⌘P' : 'Ctrl+P'}. Target a specific tab by name or use current tab.
             </div>
             <div className="quick-commands-list">
               {quickCommands.map((cmd, i) => (
