@@ -32,6 +32,7 @@ vi.mock('@github/copilot-sdk', () => ({
     }
     async stop() { /* noop */ }
   },
+  RuntimeConnection: { forStdio: (opts: any) => ({ kind: 'stdio', ...opts }) },
 }));
 
 import { createCopilotBackend } from './index';

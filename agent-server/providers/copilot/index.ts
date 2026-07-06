@@ -68,14 +68,14 @@ const inflightToolUses = new Map<string, InflightToolUseEntry>();
 // the switch default only warns for a genuinely NEW/unknown type instead of
 // spamming these benign ones on every turn. Notes on the non-obvious ones:
 //   permission.requested/completed → handled via registered onPermissionRequest
-//   session.idle / assistant.turn_end → idle is driven by sendAndWait() resolving
+//   session.idle / assistant.idle / assistant.turn_end → idle is driven by sendAndWait() resolving
 //   session.task_complete → final reply handled via tool.execution_start(task_complete)
 const KNOWN_IGNORED_COPILOT_EVENTS = new Set<string>([
   'pending_messages.modified', 'system.message',
   'session.tools_updated', 'user.message', 'assistant.turn_start',
   'assistant.turn_end', 'assistant.intent', 'hook.start', 'hook.end',
   'permission.requested', 'permission.completed', 'tool.execution_partial_result',
-  'session.task_complete', 'session.idle',
+  'session.task_complete', 'session.idle', 'assistant.idle',
 ]);
 // Genuinely-unexpected types we've warned about once (dedup so a new type that
 // SHOULD be handled is visible without spamming).
@@ -187,21 +187,30 @@ async function getSdk() {
  * `require()`-able library — extraResources is the right pattern for that.
  */
 function resolveCopilotCliPath(): string | undefined {
-  // R1: on a remote deploy we ship the standalone Copilot binary next to
-  // index.mjs (`<__dirname>/copilot`); copilot-sdk spawns it directly (non-.js
-  // cliPath → no node, no node-24 requirement). Dev/packaged keep the
-  // @github/copilot dispatcher (JS path). We deliberately do NOT fall back to a
-  // remote-global install (~/.nvm, /usr/local) — the remote's CLI is never used
-  // (R1: ship our own, ignore what's installed).
+  // The real runtime is the STANDALONE `copilot` binary inside the per-platform
+  // package `@github/copilot-<platform>-<arch>` (alongside its `builtin/`,
+  // `tree-sitter.wasm`, … resources). copilot-sdk spawns it directly over stdio
+  // (non-.js → no node needed). This is what remote R1 already ships.
+  //
+  // As of `@github/copilot` ≥1.0.67 the META package is a thin `npm-loader.js`
+  // ONLY (no `index.js`), delegating to the platform package — so the old
+  // "point at @github/copilot/index.js" candidates are dead. We resolve the
+  // platform package's binary in all three locations. We deliberately do NOT
+  // fall back to a remote-global install (~/.nvm, /usr/local) — R1: ship our
+  // own, ignore what's installed.
+  const bin = process.platform === 'win32' ? 'copilot.exe' : 'copilot';
+  const pkgBin = path.join('@github', `copilot-${process.platform}-${process.arch}`, bin);
   const candidates = [
-    // Remote self-contained deploy: standalone Copilot binary.
+    // Remote self-contained deploy: standalone binary shipped next to index.mjs.
     path.resolve(__dirname, 'copilot'),
-    // Dev: relative to agent-server bundle output (dist/agent-server/<v>/index.mjs)
-    path.resolve(__dirname, '..', '..', '..', 'node_modules', '@github', 'copilot', 'index.js'),
-    // Dev: relative to project root (when running unbundled via tsx/ts-node)
-    path.resolve(__dirname, '..', '..', 'node_modules', '@github', 'copilot', 'index.js'),
-    // Packaged: extraResources/copilot-cli/ (sibling of agent-server bundle dir).
-    path.resolve(__dirname, '..', '..', 'copilot-cli', 'index.js'),
+    // Packaged: extraResources/copilot-cli/@github/copilot-<plat>-<arch>/copilot
+    // (sibling of the agent-server bundle dir).
+    path.resolve(__dirname, '..', '..', 'copilot-cli', pkgBin),
+    // Dev: platform package under node_modules, relative to the agent-server
+    // bundle output (dist/agent-server/<v>/index.mjs).
+    path.resolve(__dirname, '..', '..', '..', 'node_modules', pkgBin),
+    // Dev: relative to project root (running unbundled via tsx/ts-node).
+    path.resolve(__dirname, '..', '..', 'node_modules', pkgBin),
   ];
 
   for (const p of candidates) {
@@ -381,7 +390,7 @@ export function createCopilotBackend(): ServerBackend {
 
   async function ensureClient(): Promise<import('@github/copilot-sdk').CopilotClient> {
     if (state.client) return state.client;
-    const { CopilotClient } = await getSdk();
+    const { CopilotClient, RuntimeConnection } = await getSdk();
     const cliPath = resolveCopilotCliPath();
     if (!cliPath) {
       throw new Error('GitHub Copilot CLI not found. Install with: npm install -g @github/copilot');
@@ -398,8 +407,12 @@ export function createCopilotBackend(): ServerBackend {
     // back as an opt-in shortcut while a permanent fix (signing) is decided.
     const ghToken = await readGhToken();
     state.client = new CopilotClient({
-      cliPath,
-      useStdio: true,
+      // SDK ≥1.0 replaced the flat `cliPath` + `useStdio` options with a
+      // `connection` descriptor. `forStdio({ path })` spawns our resolved CLI
+      // over stdio (the default transport) — using the old options against the
+      // 1.0.x CLI made it reject the launch ("Expected 0 arguments but got 1"),
+      // which is the whole reason for the SDK bump. See agent-providers.
+      connection: RuntimeConnection.forStdio({ path: cliPath }),
       ...buildCopilotAuthConfig(ghToken),
       logLevel: 'warning',
       // Suppress Node's "SQLite is experimental" warning the CLI emits on stdout/stderr.
@@ -522,31 +535,12 @@ export function createCopilotBackend(): ServerBackend {
       }),
     ];
 
-    let session: import('@github/copilot-sdk').CopilotSession;
-    if (state.cliSessionId) {
-      try {
-        session = await client.resumeSession(state.cliSessionId, config);
-      } catch (err: any) {
-        // Stale / expired sessionId is expected; SDK auth or RPC errors are not.
-        // Log so we can tell the difference when the user reports "no history
-        // restored after restart".
-        serverLog('error', 'copilot', 'resumeSession failed; falling back to createSession', { sessionId: state.cliSessionId, message: err?.message ?? err });
-        session = await client.createSession(config);
-      }
-    } else {
-      session = await client.createSession(config);
-    }
-    state.session = session;
-    state.cliSessionId = session.sessionId;
-    // Tell orchestrator to persist this so the next process can resume the
-    // same Copilot CLI session (CLI keeps session state on disk by sessionId).
-    currentSend?.({ type: 'context_patch', patch: { lastSdkSessionId: session.sessionId } });
-
-    // Elicitation handler: bridge Copilot SDK's session.ui.* /
-    // session.ui.elicitation requests to our picker_request channel. URL
-    // mode (OAuth-style external auth) is not wired in v1 — declined with
-    // a console warning. See agent-ui#3 for the design.
-    session.registerElicitationHandler(async (ctx) => {
+    // Elicitation handler: bridge Copilot SDK's elicitation requests to our
+    // picker_request channel. As of copilot-sdk 1.0.x this is a SESSION CONFIG
+    // field (`onElicitationRequest`) — the old post-create
+    // `session.registerElicitationHandler()` was removed. URL mode (OAuth-style
+    // external auth) is not wired in v1 — declined with a warning. See agent-ui#3.
+    config.onElicitationRequest = async (ctx: import('@github/copilot-sdk').ElicitationContext) => {
       if (ctx.mode === 'url') {
         serverLog('warn', 'copilot', 'URL-mode elicitation not supported; declining', {
           url: ctx.url, source: ctx.elicitationSource,
@@ -566,7 +560,27 @@ export function createCopilotBackend(): ServerBackend {
       });
       if ('cancelled' in resolved) return { action: 'cancel' };
       return { action: 'accept', content: picksToElicitationContent(mapped.fields, resolved.answers) };
-    });
+    };
+
+    let session: import('@github/copilot-sdk').CopilotSession;
+    if (state.cliSessionId) {
+      try {
+        session = await client.resumeSession(state.cliSessionId, config);
+      } catch (err: any) {
+        // Stale / expired sessionId is expected; SDK auth or RPC errors are not.
+        // Log so we can tell the difference when the user reports "no history
+        // restored after restart".
+        serverLog('error', 'copilot', 'resumeSession failed; falling back to createSession', { sessionId: state.cliSessionId, message: err?.message ?? err });
+        session = await client.createSession(config);
+      }
+    } else {
+      session = await client.createSession(config);
+    }
+    state.session = session;
+    state.cliSessionId = session.sessionId;
+    // Tell orchestrator to persist this so the next process can resume the
+    // same Copilot CLI session (CLI keeps session state on disk by sessionId).
+    currentSend?.({ type: 'context_patch', patch: { lastSdkSessionId: session.sessionId } });
 
     // If user already picked a non-default mode before this session existed, apply it.
     // Note: bypassPermissions has its own short-circuit in onPermissionRequest,
