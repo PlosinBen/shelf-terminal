@@ -116,3 +116,9 @@ related:
 **Fix / workaround**:`claude/helpers.ts` 的 `rateLimitInfoToSegment` 在沒有 `utilization` 時 render `—` fallback(保留 bucket + reset countdown),有值才算 severity。`claude/index.ts` 的 `rate_limit_event` case 把段落累進 `rateLimitBuckets` 後掛在 streaming status 上送出。**別把 `—` fallback 或 `*1000` 當多餘 code 拿掉 —— 它們是刻意繞 SDK 的。** 上游追蹤見 `UPSTREAM_ISSUE.md`(claude-code #50518,落地後可移除 `—` fallback、改讀真值)。
 
 **Related**:`agent-providers#1`、`agent-core#10`(Copilot 把 quota 掛在 mid-turn streaming status 上)、`agent-server/providers/claude/{helpers,index}.ts`、`UPSTREAM_ISSUE.md`。
+
+## agent-providers#8 — streaming-input session 下 `/compact` 完成訊號是 `compact_boundary`,不是 `compact_result`  ·  [Gotcha]
+
+SDK 0.3.159 **並存**兩種 compact 完成訊號:`status` 形狀(`subtype:'status'` + `compact_result` + `compact_error`,`sdk.d.ts:3585`)與 `SDKCompactBoundaryMessage`(`subtype:'compact_boundary'` + `compact_metadata`,`sdk.d.ts:2646`)。但**現行 streaming-input persistent-session 模式只發 `compact_boundary`、不發 `status`+`compact_result`**。所以偵測 `/compact` 完成一律判 `subtype === 'compact_boundary'`(純函式 `isCompactBoundary(msg)`)。**別改回 `compact_result`** —— 它雖仍在 SDK 型別裡,但這個 session 模式不會發它,選了就每次卡「Compaction did not complete」(靠 `closeForegroundTurn` fallback)。失敗沒有獨立訊號:boundary 不來就是失敗,無 `compact_error` 明細。若日後 session 模式或 boundary 形狀再變,先看 `sdk.d.ts` 的 `SDKCompactBoundaryMessage` 真實定義再改。
+
+**Related**:`agent-config-flow#2`(`/compact` 走真 SDK turn + `stoppable=false`)、`background-tasks#1`(`pendingCompactMsgId` per-turn 狀態)、`agent-server/providers/claude/index.ts` 的 `isCompactBoundary`/`routeForeground`。

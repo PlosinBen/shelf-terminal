@@ -83,6 +83,17 @@ type PermissionResult =
   | { behavior: 'allow'; scope?: 'once' | 'session' }
   | { behavior: 'deny'; message?: string };
 
+// The SDK's terminal signal for a completed `/compact`. Newer SDKs emit a
+// `compact_boundary` system message (SDKCompactBoundaryMessage) once the
+// compaction summary is spliced in; there is NO separate success/failed result
+// message. A failed compaction simply never emits the boundary — the foreground
+// turn ends and closeForegroundTurn's fallback surfaces the error. (The old
+// `subtype: 'status'` + `compact_result` shape no longer exists, which is why
+// every /compact used to report "Compaction did not complete".)
+export function isCompactBoundary(msg: SDKMessage): boolean {
+  return msg.type === 'system' && (msg as { subtype?: string }).subtype === 'compact_boundary';
+}
+
 const CLAUDE_AUTH_METHOD = {
   kind: 'sdk-managed' as const,
   // Option A: the user signs in ON the remote host in a real terminal — the
@@ -940,20 +951,14 @@ export function createClaudeBackend(): ServerBackend {
     // Mid-turn auth failure → AuthPane takeover (mirrors copilot).
     if (isClaudeAuthFailure(msg)) turn.send({ type: 'auth_required', provider: 'claude' });
 
-    // /compact completion detection (terminal compact_result status).
-    if (turn.pendingCompactMsgId && msg.type === 'system') {
-      const subtype = any.subtype;
-      if (subtype === 'status' && any.compact_result) {
-        const result = any.compact_result as 'success' | 'failed';
-        if (result === 'success') {
-          turn.send({ type: 'message', msgId: turn.pendingCompactMsgId, msgType: 'fold_markdown', label: '/compact', body: { content: 'Compact completed' } });
-        } else {
-          const errMsg = any.compact_error ?? 'Compaction failed';
-          turn.send({ type: 'message', msgId: turn.pendingCompactMsgId, msgType: 'fold_markdown', label: '/compact', errorMessage: `Compact failed: ${errMsg}` });
-        }
-        turn.pendingCompactMsgId = null;
-        stoppable = true;
-      }
+    // /compact completion detection. The SDK marks a finished compaction with a
+    // `compact_boundary` system message (see isCompactBoundary). Failure has no
+    // distinct signal — the boundary just never arrives and closeForegroundTurn
+    // surfaces "Compaction did not complete".
+    if (turn.pendingCompactMsgId && isCompactBoundary(msg)) {
+      turn.send({ type: 'message', msgId: turn.pendingCompactMsgId, msgType: 'fold_markdown', label: '/compact', body: { content: 'Compact completed' } });
+      turn.pendingCompactMsgId = null;
+      stoppable = true;
     }
 
     processMessage(msg, turn.turnSend, turn.cwd, turn.blockMsgIds);

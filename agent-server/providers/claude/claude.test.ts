@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { processMessage, createBlockMsgIdState, createClaudeBackend } from './index';
+import { processMessage, createBlockMsgIdState, createClaudeBackend, isCompactBoundary } from './index';
 import { mergeClaudeModels, rateLimitInfoToSegment, formatClaudeToolInput, extractToolResultText, askUserQuestionToPrompts, buildAskUserQuestionAnswerJson, parseTaskCreateOutput, parseTaskListOutput, reconcileTasks, renderPlan, shouldAdoptResolvedModel, stripToolErrorWrapper, normalizeTaskMessage, isForegroundBashTaskStart, isSubagentTaskStart, pickSessionTasksDir } from './helpers';
 import type { OutgoingMessage } from '../types';
 import type { ProviderModel, NormalizedTask } from '@shared/types';
@@ -1005,5 +1005,30 @@ describe('processMessage — content/status send split (Phase 3 turnId-scoping)'
     );
     expect(sent.some((m) => m.type === 'message' && m.content === 'hi')).toBe(true);
     expect(sent.some((m) => m.type === 'status')).toBe(true);
+  });
+});
+
+describe('isCompactBoundary — /compact completion detection', () => {
+  it('recognizes the SDK compact_boundary system message', () => {
+    // Shape per SDKCompactBoundaryMessage (claude-agent-sdk >= 0.3.x).
+    expect(isCompactBoundary({
+      type: 'system',
+      subtype: 'compact_boundary',
+      compact_metadata: { trigger: 'manual', pre_tokens: 1000 },
+      uuid: 'u1',
+      session_id: 's1',
+    } as any)).toBe(true);
+  });
+
+  it('ignores the retired status/compact_result shape (regression: every /compact reported "not completed")', () => {
+    // The old detection matched this; the SDK no longer emits it, so relying on
+    // it made compaction always fall through to the failure fallback.
+    expect(isCompactBoundary({ type: 'system', subtype: 'status', compact_result: 'success' } as any)).toBe(false);
+  });
+
+  it('ignores other system subtypes and non-system messages', () => {
+    expect(isCompactBoundary({ type: 'system', subtype: 'init' } as any)).toBe(false);
+    expect(isCompactBoundary({ type: 'assistant', message: { content: [] } } as any)).toBe(false);
+    expect(isCompactBoundary({ type: 'result', subtype: 'success' } as any)).toBe(false);
   });
 });
