@@ -4,6 +4,13 @@
 
 ## Steps
 
+0. **先同步 + 核對 origin 狀態(commit + tag),再決定範圍**。本機 tag / branch 可能落後 origin —— 若漏了某個 tag,`git describe` 會抓到**更舊的 last-tag**,release note 範圍就會多含已發布的內容(2.11.0 就這樣多列了 2.10.0 的功能)。發版前一律:
+   ```bash
+   git fetch origin --tags        # 補齊 origin 上但本機沒有的 tag
+   git tag --sort=-v:refname | head -3           # 確認最新 tag 真的是 last-tag
+   git log --oneline origin/main..HEAD           # 確認要發的 commit 都在、且 main 領先 origin（不是落後）
+   ```
+   `git describe --tags --abbrev=0` 抓到的 last-tag 必須跟「origin 上真正最新的 release tag」一致才往下走。
 1. Run `git log <last-tag>..HEAD --oneline` to get actual changes since last release
 2. Update `version` in `package.json`
 3. Write commit message based on the git log output (not memory), listing only changes in this release
