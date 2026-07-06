@@ -111,6 +111,9 @@ export function createRemoteBackend(
   // "Text file busy", failing one turn nondeterministically). Reset on failure
   // so a later call can retry (e.g. after the user authenticates on the remote).
   let initInFlight: Promise<RemoteProcess | null> | null = null;
+  // Last init failure message, so the UI shows the real cause (e.g. a stale-package
+  // bundle-missing error) instead of the generic "Failed to start agent-server".
+  let lastInitError: string | null = null;
 
   function ensureProcReady(cwd: string): Promise<RemoteProcess | null> {
     if (remoteProc) return Promise.resolve(remoteProc);
@@ -140,9 +143,11 @@ export function createRemoteBackend(
           return null;
         }
         remoteProc = proc;
+        lastInitError = null;
         return proc;
       })().catch((err: any) => {
-        log.error('agent-remote', `Init failed: ${err.message}`);
+        lastInitError = err?.message ?? String(err);
+        log.error('agent-remote', `Init failed: ${lastInitError}`);
         return null;
       });
     }
@@ -169,7 +174,7 @@ export function createRemoteBackend(
     async *query(prompt: string, cwd: string, opts?: AgentQueryOptions): AsyncGenerator<AgentEvent> {
       const proc = await ensureProcReady(cwd);
       if (!proc) {
-        yield { type: 'error', error: 'Failed to start agent-server' };
+        yield { type: 'error', error: lastInitError ?? 'Failed to start agent-server' };
         return;
       }
 
@@ -289,7 +294,7 @@ export function createRemoteBackend(
       const proc = await ensureProcReady(cwd);
       // 失敗時 throw 而非回空 capabilities — 讓 startSession 的 .catch 能區分
       // 「真的沒能力」跟「啟動失敗」，並對應送 init_status=failed 給 renderer。
-      if (!proc) throw new Error('Failed to start agent-server');
+      if (!proc) throw new Error(lastInitError ?? 'Failed to start agent-server');
       const requestId = `cap-${Date.now()}`;
       return new Promise<import('./types').ProviderCapabilities>((resolve, reject) => {
         const timeout = setTimeout(() => {
@@ -368,6 +373,24 @@ function getLocalBundlePath(): string {
     return path.join(process.resourcesPath, 'agent-server', version, 'index.mjs');
   }
   return path.join(app.getAppPath(), 'dist', 'agent-server', version, 'index.mjs');
+}
+
+/**
+ * The local agent-server bundle is required both to spawn (local run) and to
+ * ship (remote deploy). When it's missing the raw failure is a cryptic node
+ * MODULE_NOT_FOUND deep inside a spawned process, surfaced to the user only as
+ * a generic "Failed to start agent-server". The commonest cause is a STALE
+ * PACKAGED APP: the version was bumped but the app wasn't repackaged, so
+ * `agent-server/<newVersion>/index.mjs` doesn't exist next to the old binary.
+ * fail-loud with the version, the resolved path, and the concrete next step so
+ * nobody has to read the logger to understand it.
+ */
+export function agentBundleMissingMessage(indexPath: string): string {
+  const version = getAppVersion();
+  const hint = app.isPackaged
+    ? 'the app package is out of date — reinstall or rebuild it (npm run dist)'
+    : 'run: node agent-server/build.mjs';
+  return `Agent-server ${version} bundle not found at ${indexPath} — ${hint}`;
 }
 
 /**
@@ -526,9 +549,7 @@ async function deploySelfContained(connection: Connection, ops: RemoteOps, provi
   // uses a throwaway userData per run) reuse downloads across runs.
   const cacheRoot = process.env.SHELF_RUNTIME_CACHE_DIR || app.getPath('userData');
   const indexLocal = getLocalBundlePath();
-  if (!fs.existsSync(indexLocal)) {
-    throw new Error(`Agent-server bundle not found at ${indexLocal}. Run: node agent-server/build.mjs`);
-  }
+  if (!fs.existsSync(indexLocal)) throw new Error(agentBundleMissingMessage(indexLocal));
   // Only the files this target+provider ships (musl omits node; binary = provider).
   const sources: Partial<Record<DeployFile, string>> = { 'index.mjs': indexLocal };
   if (!isMusl) sources.node = await ensureNodeCached(cacheRoot, target);
@@ -662,7 +683,12 @@ async function deployAgentServer(connection: Connection, provider: AgentProvider
   // dependency, version pinned to Electron. Local skills go through
   // projectSkillsLocal (agent/index.ts), not here.
   if (connection.type === 'local') {
-    return { nodeBin: localNodeExec().nodeBin, indexPath: getLocalBundlePath() };
+    const indexPath = getLocalBundlePath();
+    // Pre-flight the bundle (the remote path already does — see deploySelfContained).
+    // Without this, a stale package's missing bundle only shows up as node's
+    // MODULE_NOT_FOUND at spawn → generic "Failed to start agent-server" (deployment#5).
+    if (!fs.existsSync(indexPath)) throw new Error(agentBundleMissingMessage(indexPath));
+    return { nodeBin: localNodeExec().nodeBin, indexPath };
   }
   const providerBin: ProviderBin = provider === 'copilot' ? 'copilot' : 'claude';
   // ssh / docker / wsl: ship our own runtime + provider binary, then mirror the
