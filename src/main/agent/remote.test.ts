@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { spawn } from 'child_process';
 
 // Mock electron
 vi.mock('electron', () => ({
@@ -25,6 +26,12 @@ vi.mock('child_process', () => ({
 // Mock logger
 vi.mock('@shared/logger', () => ({
   log: { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn(), trace: vi.fn(), flushTrace: vi.fn() },
+}));
+
+// Mock shell-env so spawnLocalNode's env is deterministic (no real login-shell
+// resolution) and we can assert the merge keeps our flag on top.
+vi.mock('../connector/shell-env', () => ({
+  getShellEnv: () => ({ PATH: '/usr/bin', SHELL_ENV_MARKER: 'yes' }),
 }));
 
 describe('toWslPath', () => {
@@ -58,6 +65,44 @@ describe('localNodeExec — local runs on Electron embedded Node (regression)', 
   it('sets ELECTRON_RUN_AS_NODE so the app binary behaves as plain Node', async () => {
     const { localNodeExec } = await import('./remote');
     expect(localNodeExec().env.ELECTRON_RUN_AS_NODE).toBe('1');
+  });
+});
+
+describe('local process.execPath spawns carry ELECTRON_RUN_AS_NODE (regression: no 2nd window)', () => {
+  // A local spawn of process.execPath WITHOUT ELECTRON_RUN_AS_NODE=1 boots a full
+  // second Electron app window instead of a plain-Node child. The dispatcher path
+  // once forgot the flag; these guard both local spawn sites via the shared
+  // spawnLocalNode choke point.
+  beforeEach(() => {
+    vi.mocked(spawn).mockReset();
+    vi.mocked(spawn).mockReturnValue({ pid: 123 } as any);
+  });
+
+  it('spawnLocalNode always sets the flag and keeps the login-shell env', async () => {
+    const { spawnLocalNode } = await import('./remote');
+    spawnLocalNode(process.execPath, ['/bundle/index.mjs'], '/work');
+    expect(spawn).toHaveBeenCalledTimes(1);
+    const [bin, args, opts] = vi.mocked(spawn).mock.calls[0] as any;
+    expect(bin).toBe(process.execPath);
+    expect(args).toEqual(['/bundle/index.mjs']);
+    expect(opts.env.ELECTRON_RUN_AS_NODE).toBe('1');
+    // the flag is merged ON TOP of the login-shell env, not instead of it
+    expect(opts.env.SHELL_ENV_MARKER).toBe('yes');
+    expect(opts.cwd).toBe('/work');
+  });
+
+  it('spawnDispatcherProc local routes through the flagged spawn (THE regression)', async () => {
+    const { spawnDispatcherProc } = await import('./remote');
+    spawnDispatcherProc(
+      { type: 'local' } as any,
+      '/work',
+      { nodeBin: process.execPath, indexPath: '/bundle/index.mjs' } as any,
+    );
+    expect(spawn).toHaveBeenCalledTimes(1);
+    const [bin, args, opts] = vi.mocked(spawn).mock.calls[0] as any;
+    expect(bin).toBe(process.execPath);
+    expect(args).toEqual(['/bundle/index.mjs', '--role=dispatcher']);
+    expect(opts.env.ELECTRON_RUN_AS_NODE).toBe('1');
   });
 });
 

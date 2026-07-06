@@ -637,6 +637,26 @@ export function localNodeExec(): { nodeBin: string; env: Record<string, string> 
   return { nodeBin: process.execPath, env: { ELECTRON_RUN_AS_NODE: '1' } };
 }
 
+/**
+ * The SINGLE choke point for every LOCAL `process.execPath` spawn in the main
+ * process. It always merges `localNodeExec().env` (ELECTRON_RUN_AS_NODE=1) so the
+ * app binary runs as plain Node instead of booting a SECOND Electron window.
+ *
+ * Both local spawn paths — the per-tab agent-server (spawnAgentServer) and the
+ * shared dispatcher (spawnDispatcherProc) — MUST route through here. Regression:
+ * the dispatcher path once set its env from `getShellEnv()` alone and forgot the
+ * flag, which spawned a duplicate app window on connect. Centralizing makes that
+ * class of bug unrepresentable. Guarded by remote.test.ts. (ssh/docker/wsl never
+ * spawn process.execPath — they run a deployed remote node — so they must NOT and
+ * do NOT go through here.)
+ */
+export function spawnLocalNode(nodeBin: string, args: string[], cwd: string): ChildProcess {
+  const env: Record<string, string> = { ...getShellEnv(), ...localNodeExec().env };
+  if (process.env.SHELF_TEST_MODE) env.SHELF_TEST_MODE = process.env.SHELF_TEST_MODE;
+  log.trace('agent-remote', `spawnLocalNode: args=[${args.join(' ')}] cwd=${cwd} PATH=${env.PATH ?? '<missing>'}`);
+  return spawn(nodeBin, args, { cwd, env, stdio: ['pipe', 'pipe', 'pipe'] });
+}
+
 async function deployAgentServer(connection: Connection, provider: AgentProvider): Promise<DeployResult> {
   // local: run on Electron's embedded Node (see localNodeExec) — no system-node
   // dependency, version pinned to Electron. Local skills go through
@@ -692,14 +712,13 @@ async function spawnAgentServer(
 
   if (connection.type === 'local') {
     try {
-      // ELECTRON_RUN_AS_NODE makes process.execPath (nodeBin) run as plain Node.
-      const env: Record<string, string> = { ...getShellEnv(), ...localNodeExec().env };
-      if (process.env.SHELF_TEST_MODE) env.SHELF_TEST_MODE = process.env.SHELF_TEST_MODE;
       log.trace(
         'agent-remote',
-        `spawnAgentServer local: cwd=${cwd} indexPath=${indexPath} fileExists=${fs.existsSync(indexPath)} PATH=${env.PATH ?? '<missing>'}`,
+        `spawnAgentServer local: cwd=${cwd} indexPath=${indexPath} fileExists=${fs.existsSync(indexPath)}`,
       );
-      const proc = spawn(nodeBin, [indexPath], { cwd, env, stdio: ['pipe', 'pipe', 'pipe'] });
+      // spawnLocalNode applies ELECTRON_RUN_AS_NODE so the app binary runs as
+      // plain Node (never a second Electron window).
+      const proc = spawnLocalNode(nodeBin, [indexPath], cwd);
       return wrapProcess(proc, onTaskEvent, onServerTurn, onHealth, onQueue, onSkillsReloaded, onSessionEvent, projectId);
     } catch (err: any) {
       log.error('agent-remote', `Local spawn failed: ${err.message}`);
@@ -804,13 +823,14 @@ function childToDispatcherProc(child: ChildProcess): DispatcherProc {
  *  spawnAgentServer's transport branches (kept separate so the per-tab path stays
  *  byte-untouched); the dispatcher gets the ssh idle-shutdown watchdog (it owns
  *  it now) while the exec procs it spawns do NOT (#8). */
-function spawnDispatcherProc(connection: Connection, cwd: string, deploy: DeployResult, initScript?: string): ChildProcess | null {
+export function spawnDispatcherProc(connection: Connection, cwd: string, deploy: DeployResult, initScript?: string): ChildProcess | null {
   const { nodeBin, indexPath } = deploy;
   const testEnv = process.env.SHELF_TEST_MODE ? `SHELF_TEST_MODE=${process.env.SHELF_TEST_MODE} ` : '';
   if (connection.type === 'local') {
-    const env: Record<string, string> = { ...getShellEnv() };
-    if (process.env.SHELF_TEST_MODE) env.SHELF_TEST_MODE = process.env.SHELF_TEST_MODE;
-    return spawn(nodeBin, [indexPath, '--role=dispatcher'], { cwd, env, stdio: ['pipe', 'pipe', 'pipe'] });
+    // Route through spawnLocalNode so ELECTRON_RUN_AS_NODE=1 is applied — without
+    // it, spawning process.execPath (nodeBin) boots a SECOND Electron window
+    // instead of the dispatcher (regression; see spawnLocalNode).
+    return spawnLocalNode(nodeBin, [indexPath, '--role=dispatcher'], cwd);
   }
   if (connection.type === 'ssh') {
     const shellPrefix = initScript ? `eval '${initScript.replace(/'/g, "'\\''")}' >/dev/null 2>&1; ` : '';
