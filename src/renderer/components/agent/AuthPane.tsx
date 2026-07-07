@@ -83,7 +83,13 @@ export function AuthPane({ tabId }: Props) {
               {loginPrompt ? (
                 <>
                   <div className="agent-auth-instructions">
-                    A browser was opened to authorize. If it didn’t, visit <code>{loginPrompt.verificationUri}</code> and enter this code:
+                    A browser was opened to authorize. If it didn’t, open this link:
+                  </div>
+                  <a className="agent-auth-link" href={loginPrompt.prefilledUri} target="_blank" rel="noreferrer">
+                    {loginPrompt.prefilledUri}
+                  </a>
+                  <div className="agent-auth-instructions">
+                    or visit <code>{loginPrompt.verificationUri}</code> and enter this code:
                   </div>
                   <div className="agent-auth-code">{loginPrompt.userCode}</div>
                 </>

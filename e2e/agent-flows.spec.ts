@@ -152,6 +152,9 @@ test.describe('agent flows via fake provider', () => {
     // auth_login_prompt flowed back → device code + waiting state shown.
     await expect(pane.locator('.agent-auth-code')).toHaveText('FAKE-CODE', { timeout: 5_000 });
     await expect(pane.locator('.agent-auth-waiting')).toBeVisible();
+    // The prefilled URL is always surfaced as a clickable link (opens the system
+    // browser via setWindowOpenHandler), regardless of auto-open.
+    await expect(pane.locator('a.agent-auth-link')).toHaveAttribute('href', 'https://github.com/login/device?user_code=FAKE-CODE');
 
     // Cancel → cancel_login → auth_login_done{cancelled} → back to the button.
     await pane.locator('.agent-reset-btn', { hasText: 'Cancel' }).click();

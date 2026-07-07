@@ -2552,6 +2552,15 @@ button {
   align-self: stretch;
 }
 
+.agent-auth-link {
+  color: var(--accent);
+  text-decoration: underline;
+  font-size: 12px;
+  word-break: break-all;
+  text-align: center;
+  max-width: 100%;
+}
+
 .agent-auth-code {
   font-family: monospace;
   font-size: 22px;
