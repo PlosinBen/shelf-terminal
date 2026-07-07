@@ -15,6 +15,9 @@ export function ImportSection() {
   const [decisions, setDecisions] = useState<Record<string, boolean>>({});
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
+  // Per-session (never persisted): overwrite all ticked items without the
+  // per-item diff review. Bypasses the overwrite-confirm protection → default OFF.
+  const [replaceAll, setReplaceAll] = useState(false);
 
   useEffect(() => {
     window.shelfApi.configBackup.listSources().then(setSources).catch(() => setSources([]));
@@ -56,12 +59,10 @@ export function ImportSection() {
     }
   };
 
-  const onApply = async () => {
-    if (!plan) return;
+  const applyWith = async (decisionList: { id: string; replaceConflicts: boolean }[]) => {
     setBusy(true);
     setStatus(null);
     try {
-      const decisionList = plan.map((p) => ({ id: p.id, replaceConflicts: decisions[p.id] ?? true }));
       const res = await window.shelfApi.configBackup.applyImport(ref, decisionList);
       setStatus({
         kind: 'ok',
@@ -77,6 +78,14 @@ export function ImportSection() {
       setBusy(false);
     }
   };
+
+  const onApply = () => {
+    if (!plan) return;
+    applyWith(plan.map((p) => ({ id: p.id, replaceConflicts: decisions[p.id] ?? true })));
+  };
+
+  // Bulk path: overwrite every ticked item, skipping the diff review.
+  const onReplaceAll = () => applyWith([...selected].map((id) => ({ id, replaceConflicts: true })));
 
   if (sources === null) {
     return <p className="web-settings-hint">Loading backups…</p>;
@@ -115,10 +124,20 @@ export function ImportSection() {
               </li>
             ))}
           </ul>
+          <label className="import-replaceall">
+            <input type="checkbox" checked={replaceAll} onChange={(e) => setReplaceAll(e.target.checked)} />
+            Replace all existing (overwrite without reviewing)
+          </label>
           <div className="backup-actions">
-            <button className="conn-btn conn-btn-next" disabled={busy || selected.size === 0} onClick={onReview}>
-              {busy ? 'Reviewing…' : 'Review changes'}
-            </button>
+            {replaceAll ? (
+              <button className="conn-btn conn-btn-next" disabled={busy || selected.size === 0} onClick={onReplaceAll}>
+                {busy ? 'Importing…' : 'Import (replace all)'}
+              </button>
+            ) : (
+              <button className="conn-btn conn-btn-next" disabled={busy || selected.size === 0} onClick={onReview}>
+                {busy ? 'Reviewing…' : 'Review changes'}
+              </button>
+            )}
           </div>
         </>
       )}

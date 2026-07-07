@@ -4699,6 +4699,15 @@ button {
   word-break: break-all;
 }
 .import-diff-backup { border-color: var(--accent, var(--border)); }
+.import-replaceall {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 8px 0;
+  cursor: pointer;
+}
 
 /* ── MCP (right-sidebar view) ── */
 /* The panel shell is shared (.right-panel); this is the scrollable body that

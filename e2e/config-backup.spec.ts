@@ -118,3 +118,54 @@ test('config backup: import a skill from another machine branch into live', asyn
 
   fs.rmSync(remoteDir, { recursive: true, force: true });
 });
+
+test('config backup: replace-all imports overwrite a conflicting skill without reviewing', async ({ shelfApp }) => {
+  const { page, userDataDir } = shelfApp;
+
+  const remoteDir = fs.mkdtempSync(path.join(os.tmpdir(), 'shelf-replaceall-remote-'));
+  const bare = path.join(remoteDir, 'backups.git');
+  execFileSync('git', ['init', '--bare', bare]);
+
+  // Other machine's branch: skill "shared" with NEW content.
+  const wt = path.join(remoteDir, 'wt');
+  execFileSync('git', ['clone', bare, wt]);
+  execFileSync('git', ['-C', wt, 'config', 'user.email', 't@t']);
+  execFileSync('git', ['-C', wt, 'config', 'user.name', 't']);
+  execFileSync('git', ['-C', wt, 'checkout', '-b', 'backup/otherid']);
+  fs.mkdirSync(path.join(wt, 'skills', 'shared'), { recursive: true });
+  fs.writeFileSync(path.join(wt, 'skills', 'shared', 'SKILL.md'), '---\nname: shared\n---\nNEW from laptop\n');
+  fs.writeFileSync(path.join(wt, 'machine.json'), JSON.stringify({ appInstanceId: 'otherid', machineLabel: 'laptop' }));
+  execFileSync('git', ['-C', wt, 'add', '-A']);
+  execFileSync('git', ['-C', wt, 'commit', '-m', 'seed']);
+  execFileSync('git', ['-C', wt, 'push', '-u', 'origin', 'backup/otherid']);
+
+  // Live already has "shared" with OLD content → a conflict.
+  const liveShared = path.join(userDataDir, 'skills', 'skills', 'shared');
+  fs.mkdirSync(liveShared, { recursive: true });
+  fs.writeFileSync(path.join(liveShared, 'SKILL.md'), '---\nname: shared\n---\nOLD local\n');
+
+  fs.writeFileSync(
+    path.join(userDataDir, 'config-backup.json'),
+    JSON.stringify({ remoteUrl: bare, machineLabel: 'e2e' }),
+  );
+
+  await page.keyboard.press(`${modifier}+,`);
+  await page.locator('.settings-tab', { hasText: 'Backup' }).click();
+  await page.locator('.backup-mode-btn', { hasText: 'Import' }).click();
+  await page.locator('.backup-input').selectOption({ label: 'laptop' });
+
+  const row = page.locator('.backup-check', { hasText: 'shared' });
+  await expect(row).toBeVisible({ timeout: 15_000 });
+  await row.locator('input[type=checkbox]').check();
+
+  // Tick replace-all → the primary button becomes a direct bulk import.
+  await page.locator('.import-replaceall input[type=checkbox]').check();
+  await page.locator('.conn-btn-next', { hasText: 'Import (replace all)' }).click();
+  await expect(page.locator('.backup-status-ok')).toContainText(/Imported/i, { timeout: 20_000 });
+
+  // No review step was shown, and live was overwritten with the backup version.
+  await expect(page.locator('.import-review-item')).toHaveCount(0);
+  expect(fs.readFileSync(path.join(liveShared, 'SKILL.md'), 'utf-8')).toContain('NEW from laptop');
+
+  fs.rmSync(remoteDir, { recursive: true, force: true });
+});
