@@ -103,6 +103,11 @@ title: shelf-terminal — Intent → File Index
 | App-tool bridge（agent-server 端） | `app-tool-client.ts` + `app-tool-tools.ts` | in-process MCP 工具的共用 body：`callMain` + `runBridgeTool` + 描述常數 |
 | Log proxy → main | `server-logger.ts` | `serverLog(level,tag,msg,...args)`：args 源頭 flatten 後走 wire `log` 訊息回 main（agent-server 無獨立 observability，見 `contracts/agent-wire-protocol`） |
 | ~/.shelf 清理（heartbeat-lease） | `cleanup.ts` | `runCleanupSweep()` 啟動時按 `.heartbeat` lease 回收 version/appId 殘留 |
+| 正常關閉單一路徑（reap→dispose→exit） | `shutdown.ts` | `performShutdown()`：由 `rl.on('close')` 與 idle watchdog 共用，先收屍再 dispose 再 exit（見 `context/connection-health` #5） |
+| Detached 任務集中收屍 | `reaper.ts` | `reapDetachedTasks()`：enumerate `listReapableTasks()` → 對 running shell 任務呼 `stopTask()`，resilient + 不放 provider dispose |
+| Crash-net：Linux `/proc` 原語 | `proc-scan.ts` | 讀 `/proc/<pid>/environ`（env-tag 找孤兒）+ `/proc/<pid>/stat` start-time（owner 生死）+ group-kill；非 Linux no-op（見 `context/connection-health` #6） |
+| Crash-net：session lease + 啟動 sweep | `session-sweep.ts` | `SHELF_SESSION` lease 讀寫 + `sweepDeadSessions()`：對 owner 已死的 lease 用 tag 找活著的孤兒 → group-kill |
+| Copilot detached 任務 pid-kill | `providers/copilot/pid-kill.ts` | Copilot 無 stop-task RPC → 讀 detached bash 寫的 `.pid` 檔 group-kill（`stopTask` 用） |
 | Context persistence | `context-store.ts` | `loadContext`/`saveContext`/`deleteContext`/`cleanupOldContexts`，atomic write 到 `~/.shelf/agent-context/` |
 | Context persistence 測試 | `context-store.test.ts` | round-trip + Claude resume / Copilot chain |
 | Provider types | `providers/types.ts` | `ServerBackend` / `SendFn` / `QueryInput` / `OutgoingMessage` / `ProviderCapabilities` 等 |

@@ -1,7 +1,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { randomUUID } from 'node:crypto';
-import type { QueryInput, SendFn, ServerBackend, ProviderCapabilities, StatusSegment, PickerResolvePayload, ModelCacheClient } from '../types';
+import type { QueryInput, SendFn, ServerBackend, ProviderCapabilities, StatusSegment, PickerResolvePayload, ModelCacheClient, ReapableTask } from '../types';
+import { killDetachedByPidFile, pidPathForLog } from './pid-kill';
 import { severityFromUtilization, pickPermissionModes, pickEffortLevels } from '../types';
 import { parseSlashPrefix } from '@shared/slash-prefix';
 import { formatConfigAck, type ConfigEditKey } from '@shared/config-ack';
@@ -1562,6 +1563,54 @@ export function createCopilotBackend(): ServerBackend {
         serverLog('warn', 'copilot', 'readTaskOutput: non-shell task has no inline result ' + JSON.stringify({ task_id: taskId, type: task.type, status: task.status }));
       }
       return task.result ?? task.latestResponse ?? '(no output)';
+    },
+
+    /**
+     * Enumerate backgrounded SHELL tasks for the reaper. Only shell tasks detach
+     * (`setsid`) out of the tree; agent tasks live inline. Read-only snapshot.
+     */
+    async listReapableTasks(): Promise<ReapableTask[]> {
+      if (!state.session) return [];
+      try {
+        const list = await (state.session as any).rpc.tasks.list();
+        return (list?.tasks ?? [])
+          .filter(isBackgroundedCopilotTask)
+          .filter((t: any) => t?.type === 'shell' && typeof t?.id === 'string' && t.id)
+          .map((t: any): ReapableTask => ({
+            id: t.id,
+            kind: 'shell',
+            status: (t.status === 'completed' || t.status === 'failed' || t.status === 'cancelled')
+              ? 'done'
+              : 'running',
+          }));
+      } catch (err: any) {
+        serverLog('error', 'copilot', 'listReapableTasks: rpc.tasks.list failed', err?.message ?? err);
+        return [];
+      }
+    },
+
+    /**
+     * Stop a background task. Copilot's SDK has NO stop-task RPC, so we reap the
+     * detached shell task via the PID it wrote to its sibling `.pid` file (see
+     * pid-kill.ts). Fire-and-forget + best-effort — a task with no live logPath
+     * (already gone / agent task) is a no-op.
+     */
+    async stopTask(taskId: string): Promise<void> {
+      if (!state.session) return;
+      let logPath: string | undefined;
+      try {
+        const list = await (state.session as any).rpc.tasks.list();
+        const task = (list?.tasks ?? []).find((t: any) => t?.id === taskId);
+        logPath = typeof task?.logPath === 'string' && task.logPath ? task.logPath : undefined;
+      } catch (err: any) {
+        serverLog('error', 'copilot', 'stopTask: rpc.tasks.list failed', err?.message ?? err);
+        return;
+      }
+      if (!logPath) {
+        serverLog('warn', 'copilot', `stopTask: no logPath for task ${taskId} (nothing to reap)`);
+        return;
+      }
+      await killDetachedByPidFile(pidPathForLog(logPath));
     },
 
     resolvePermission(toolUseId: string, allow: boolean, message?: string, scope?: 'once' | 'session') {

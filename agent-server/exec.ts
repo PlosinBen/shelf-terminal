@@ -2,11 +2,15 @@ import * as readline from 'readline';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { randomUUID } from 'node:crypto';
 import { createClaudeBackend } from './providers/claude';
 import { createCopilotBackend } from './providers/copilot';
 import { createFakeBackend } from './providers/fake';
 import { deleteContext, cleanupOldContexts } from './context-store';
 import { runCleanupSweep } from './cleanup';
+import { performShutdown } from './shutdown';
+import { SESSION_ENV_KEY, writeLease, removeLease as removeSessionLease, sweepDeadSessions } from './session-sweep';
+import { readProcStartTime } from './proc-scan';
 import { loadRestoreContextFor, newTurnId, wrapSendForContext, wrapSendForTurn } from './orchestrator';
 import { initAppToolClient, resolveAppToolResult } from './app-tool-client';
 import { setLogSink, serverLog } from './server-logger';
@@ -163,6 +167,14 @@ function touchHeartbeats(): void {
     }
   } catch { /* app lease best-effort */ }
 }
+
+// Phase-2 crash net: tag THIS agent-server's process env so every provider CLI +
+// detached task it spawns inherits SHELF_SESSION=<uuid> (set before any CLI spawns
+// — spawns happen on message handling, well after boot). If we ever die abnormally
+// (hard crash / force-kill, skipping the normal-closure reap), the NEXT launch's
+// startup sweep finds still-alive tagged orphans and kills them. See session-sweep.ts.
+const SHELF_SESSION = randomUUID();
+process.env[SESSION_ENV_KEY] = SHELF_SESSION;
 
 const backends = new Map<Provider, ServerBackend>();
 let activeBackend: ServerBackend | null = null;
@@ -335,11 +347,12 @@ function resetWatchdog() {
   if (!IDLE_SHUTDOWN_MS) return;
   if (watchdogTimer) clearTimeout(watchdogTimer);
   watchdogTimer = setTimeout(() => {
-    // Death path → stderr (NOT serverLog): we're about to process.exit, and main
-    // stopped pinging (likely gone), so a wire log wouldn't deliver/flush anyway.
+    // Death path → stderr (NOT serverLog): main stopped pinging (likely gone), so a
+    // wire log wouldn't deliver/flush anyway.
     console.error(`[agent-server] idle-shutdown: no ping for ${IDLE_SHUTDOWN_MS / 60_000}min — self-exiting`);
-    for (const b of backends.values()) b.dispose();
-    process.exit(0);
+    // This IS a normal closure (a disconnect) — agent-server is alive, so run the
+    // full shutdown (reap escaped detached tasks → dispose → exit), not a bare exit.
+    void shutdown();
   }, IDLE_SHUTDOWN_MS);
 }
 resetWatchdog(); // arm from boot — if the client never pings, it's already gone
@@ -526,9 +539,33 @@ rl.on('line', (line) => {
   }
 });
 
+// Every NORMAL agent-server closure funnels through shutdown(): reap escaped
+// detached tasks, dispose backends, exit. Called from BOTH the stdin-close handler
+// and the idle watchdog; `shuttingDown` makes it idempotent (both can fire). It
+// ALWAYS reaps — a closure while we're alive is a real end of session (no
+// reconnect). Only an ABNORMAL closure (agent-server itself died) skips this →
+// crash net (Phase 2). Reap timeout is bounded so a hung provider RPC can't stall.
+let shuttingDown = false;
+const REAP_TIMEOUT_MS = 2000;
+
+async function shutdown(): Promise<void> {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  await performShutdown({
+    backends: [...backends.values()],
+    reapTimeoutMs: REAP_TIMEOUT_MS,
+    log: (level, msg) => serverLog(level, 'reaper', msg),
+    // Normal closure: we just reaped our own detached tasks, so drop our crash-net
+    // lease — next launch must NOT sweep a session that shut down cleanly.
+    exit: () => {
+      removeSessionLease(SHELF_SESSION);
+      process.exit(0);
+    },
+  });
+}
+
 rl.on('close', () => {
-  for (const b of backends.values()) b.dispose();
-  process.exit(0);
+  void shutdown();
 });
 
 cleanupOldContexts();
@@ -537,4 +574,14 @@ cleanupOldContexts();
 // #70 / §5.9). currentVersion = our own deploy dir name. lastAppId is unknown
 // until the first send, so the apps sweep keeps any fresh-lease dir this pass.
 runCleanupSweep(path.basename(__dirname), lastAppId);
+// Phase-2 crash net: reap detached tasks left by a PRIOR agent-server that died
+// abnormally (Linux only — no-op where /proc is absent). Best-effort + BEFORE
+// registering our own lease, so we never sweep ourselves. A normal shutdown
+// removes its own lease (it already reaped), so a lingering lease ⇒ a crash.
+try {
+  sweepDeadSessions((level, msg) => serverLog(level, 'session-sweep', msg));
+} catch (err: any) {
+  serverLog('warn', 'session-sweep', `startup sweep failed: ${err?.message ?? err}`);
+}
+writeLease({ session: SHELF_SESSION, ownerPid: process.pid, ownerStartTime: readProcStartTime(process.pid), createdAt: Date.now() });
 send({ type: 'ready' });

@@ -796,6 +796,10 @@ async function spawnAgentServer(
 // Heartbeat send interval. Env override (ms) lets E2E drive the lease/health
 // loop fast without waiting a real minute; prod uses the §5.9 default (1m).
 const HEARTBEAT_INTERVAL_MS = Number(process.env.SHELF_HEARTBEAT_INTERVAL_MS) || DEFAULT_HEALTH_THRESHOLDS.intervalMs;
+// Grace for agent-server to run its async normal-closure shutdown (reap detached
+// tasks → dispose → self-exit) before we force-kill. Longer than the agent-server
+// reap timeout (REAP_TIMEOUT_MS) so it normally exits on its own first.
+const SHUTDOWN_GRACE_MS = 3000;
 
 // ── Dispatch-layering (group D3): shared per-host dispatcher path ────────────
 // DEFAULT ON. Flipped after E2E + real-dev verification on the LOCAL transport
@@ -1142,9 +1146,16 @@ function wrapProcess(
     awaitReady: dispatcher.awaitReady,
     onResponse: dispatcher.onResponse,
     kill: () => {
+      // Ending stdin triggers agent-server's normal-closure path (rl.on('close') →
+      // reap escaped detached tasks → dispose → exit). Because that reap is ASYNC,
+      // give it a grace window to self-exit before force-killing — an immediate
+      // proc.kill() (SIGTERM) would cut the reap off. unref'd so it can't delay
+      // app-quit; the CLI self-exits on its own stdin-EOF regardless.
       clearInterval(heartbeatTimer);
       proc.stdin?.end();
-      proc.kill();
+      const forceKill = setTimeout(() => { try { proc.kill(); } catch { /* already exited */ } }, SHUTDOWN_GRACE_MS);
+      forceKill.unref();
+      proc.once('exit', () => clearTimeout(forceKill));
     },
   };
 }

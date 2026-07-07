@@ -9,7 +9,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, readdirSync } from 'fs';
 import { readFile } from 'fs/promises';
 import { resolve, join, dirname } from 'path';
-import type { QueryInput, SendFn, ServerBackend, ProviderCapabilities, StatusSegment, PickerResolvePayload } from '../types';
+import type { QueryInput, SendFn, ServerBackend, ProviderCapabilities, StatusSegment, PickerResolvePayload, ReapableTask } from '../types';
 import { severityFromUtilization, pickPermissionModes, pickEffortLevels } from '../types';
 import { parseSlashPrefix } from '@shared/slash-prefix';
 import { formatConfigAck, type ConfigEditKey } from '@shared/config-ack';
@@ -1379,6 +1379,21 @@ export function createClaudeBackend(): ServerBackend {
       } catch (err: any) {
         serverLog('error', 'claude', 'stopTask failed', { taskId, message: err?.message ?? err });
       }
+    },
+
+    /**
+     * Enumerate backgrounded SHELL tasks for the reaper (the detached bg bash —
+     * the only kind that escapes the tree; subagents/monitors/workflows are
+     * inline). Claude exposes no pid, so `pid` is omitted; the reaper kills via
+     * `stopTask` (KillShell by shell_id) above. Read-only snapshot.
+     */
+    async listReapableTasks(): Promise<ReapableTask[]> {
+      const out: ReapableTask[] = [];
+      for (const t of backgroundTasks.values()) {
+        if (t.type !== 'shell') continue;
+        out.push({ id: t.id, kind: 'shell', status: t.done ? 'done' : 'running' });
+      }
+      return out;
     },
 
     async readTaskOutput(taskId: string): Promise<string> {
