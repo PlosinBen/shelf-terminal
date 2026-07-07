@@ -517,6 +517,12 @@ rl.on('line', (line) => {
       }
       break;
     }
+    default: {
+      // Fail-loud on an unknown wire command instead of silently dropping it —
+      // a main↔agent-server protocol drift must leave a trace, not vanish.
+      serverLog('warn', 'exec', 'unknown incoming message type — ignored', { type: (msg as any)?.type });
+      break;
+    }
   }
 });
 

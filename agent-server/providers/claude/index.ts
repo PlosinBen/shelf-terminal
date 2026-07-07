@@ -1471,6 +1471,17 @@ type InflightToolUseEntry = (
 };
 const inflightToolUses = new Map<string, InflightToolUseEntry>();
 
+// Fail-loud policy (context/agent-observability): an incoming event must never
+// vanish without a trace. This dedups "unknown wire type" warns so SDK drift is
+// observable without flooding the log when a new type recurs every chunk/message.
+const seenUnknownWire = new Set<string>();
+function warnUnknownWireOnce(kind: string, detail: string): void {
+  const key = `${kind}:${detail}`;
+  if (seenUnknownWire.has(key)) return;
+  seenUnknownWire.add(key);
+  serverLog('warn', 'claude', `unhandled ${kind} — not rendered (SDK drift?)`, { detail });
+}
+
 /**
  * Plan-panel task mirror (replaces TodoWrite mirror as of SDK 0.3.142).
  *
@@ -1658,7 +1669,26 @@ function emitClaudeToolResult(
   cwd: string,
 ): void {
   const entry = inflightToolUses.get(toolUseId);
-  if (!entry) return;
+  if (!entry) {
+    // The tool_use that registered this id is gone from the process-local
+    // inflight map — its entry was set in a PRIOR agent-server process/state
+    // (e.g. the session got re-hosted onto a new process, whose map starts
+    // empty). Do NOT silently drop the result: that leaves the card blank
+    // forever AND erases the only evidence of the anomaly (which is why it was
+    // undiagnosable). Fail loud — log the id so the triggering lifecycle event
+    // is visible next time — and surface it to the renderer as an error card,
+    // keeping the raw output as the body so no data is lost.
+    serverLog('warn', 'claude', 'orphan tool_result: no inflight entry (map lost the tool_use — likely a session re-host)', {
+      toolUseId, isError, contentPreview: content.slice(0, 200),
+    });
+    send({
+      type: 'message', msgId: toolUseId, msgType: 'fold_code',
+      label: 'Tool result',
+      body: { content: isError ? stripToolErrorWrapper(content) : content },
+      errorMessage: 'Tool result arrived with no matching call (orphaned — see agent-server log).',
+    });
+    return;
+  }
   inflightToolUses.delete(toolUseId);
   // Preserve subagent nesting across the pending→completed upsert (same msgId):
   // the result re-emit must carry the same parentToolUseId or the renderer drops
@@ -1886,6 +1916,10 @@ export function processMessage(msg: SDKMessage, send: SendFn, cwd: string, block
           content({ type: 'stream', msgId, streamType: 'text', content: delta.text });
         } else if (delta.type === 'thinking_delta' && typeof delta.thinking === 'string' && delta.thinking.length > 0) {
           content({ type: 'stream', msgId, streamType: 'thinking', content: delta.thinking });
+        } else if (delta.type !== 'text_delta' && delta.type !== 'thinking_delta') {
+          // Unknown delta type (SDK drift) — empty text/thinking deltas are
+          // benign noise, but a NEW delta type carrying content must not vanish.
+          warnUnknownWireOnce('stream delta type', String((delta as any).type));
         }
       }
       break;
@@ -1991,6 +2025,13 @@ export function processMessage(msg: SDKMessage, send: SendFn, cwd: string, block
           rateLimits: [...rateLimitBuckets.values()],
         });
       }
+      break;
+    }
+    default: {
+      // Fail-loud on an unrecognized SDK message type instead of silently
+      // dropping it — SDK drift (a new type carrying real content) must leave a
+      // trace. See fail-loud policy (context/agent-observability).
+      warnUnknownWireOnce('SDK message type', String((msg as any).type));
       break;
     }
   }

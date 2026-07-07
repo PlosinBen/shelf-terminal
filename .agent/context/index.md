@@ -13,6 +13,7 @@ Decisions + gotchas grouped by topic. Cited from code as `<topic>#N`.
 | 打包 / CI / 簽章 | [build-packaging](build-packaging.md) | electron-builder、code signing、E2E build |
 | PM agent | [pm-agent](pm-agent.md) | Telegram 遙控、away/active、雙層 prompt、rolling note |
 | agent 核心架構 | [agent-core](agent-core.md) | provider SDK、tab state、持久化、send queue |
+| agent 事件不靜默丟棄 | [agent-observability](agent-observability.md) | 每個事件都要留痕(renderer/logger)、default/else 守門、orphan tool card 兩方向 fail-loud |
 | Claude/Copilot provider 差異 | [agent-providers](agent-providers.md) | 行為一致差異封裝、登入、model registry、permission |
 | agent UI 渲染 | [agent-ui](agent-ui.md) | plan panel、status bar、picker、event/store、渲染原語 |
 | slash / config / model 流 | [agent-config-flow](agent-config-flow.md) | turnId envelope、slash dispatch、applyConfigEdit |

@@ -63,6 +63,12 @@ async function readGhToken(): Promise<string | undefined> {
 // toolCallId). Mirrors the Claude provider's pattern. Type + the orphan-card
 // builder live in helpers.ts. See InflightToolUseEntry there.
 const inflightToolUses = new Map<string, InflightToolUseEntry>();
+// task_complete / report_intent suppress their tool_use on purpose (rendered as
+// reply/note), so their tool.execution_complete legitimately has no inflight
+// entry. Track those ids so a MISSING entry can be told apart from a re-host
+// orphan (which must fail loud, not skip silently). See fail-loud policy
+// (context/agent-observability).
+const suppressedToolIds = new Set<string>();
 // Copilot SDK `session.on` event types we KNOWINGLY don't render — pure
 // lifecycle / already-covered-elsewhere. Enumerated (observed live, 2026-06) so
 // the switch default only warns for a genuinely NEW/unknown type instead of
@@ -646,6 +652,7 @@ export function createCopilotBackend(): ServerBackend {
           if (toolName === 'task_complete') {
             const text = args.summary ?? args.text ?? args.message ?? args.content ?? '';
             if (text) currentSend({ type: 'message', msgId: mintMsgId(), msgType: 'reply', content: text });
+            if (toolUseId) suppressedToolIds.add(toolUseId); // its complete has no entry — expected
             break;
           }
 
@@ -655,6 +662,7 @@ export function createCopilotBackend(): ServerBackend {
             if (typeof args.intent === 'string' && args.intent.length > 0) {
               currentSend({ type: 'message', msgId: mintMsgId(), msgType: 'note', content: args.intent });
             }
+            if (toolUseId) suppressedToolIds.add(toolUseId); // its complete has no entry — expected
             break;
           }
 
@@ -721,10 +729,26 @@ export function createCopilotBackend(): ServerBackend {
         case 'tool.execution_complete': {
           const data = event.data ?? {};
           const toolUseId = data.toolCallId ?? '';
-          // task_complete / report_intent had their tool_use suppressed (rendered
-          // as text/intent), so no inflight entry — skip silently.
           const entry = inflightToolUses.get(toolUseId);
-          if (!entry) break;
+          if (!entry) {
+            // task_complete / report_intent suppressed their tool_use on purpose
+            // → no entry expected (tracked in suppressedToolIds). ANY OTHER
+            // missing entry is an orphan: the tool_use was registered in a prior
+            // agent-server process/state (a session re-host emptied the map).
+            // Don't silently skip — fail loud + surface an error card so it's
+            // visible + diagnosable (Copilot's complete event carries no output,
+            // so we can only surface the error, not the result body).
+            if (suppressedToolIds.delete(toolUseId)) break;
+            serverLog('warn', 'copilot', 'orphan tool result: no inflight entry (map lost the tool_use — likely a session re-host)', {
+              toolUseId, isError: data.success === false,
+            });
+            currentSend({
+              type: 'message', msgId: toolUseId, msgType: 'fold_code',
+              label: 'Tool result',
+              errorMessage: 'Tool result arrived with no matching call (orphaned — see agent-server log).',
+            });
+            break;
+          }
           inflightToolUses.delete(toolUseId);
 
           const isError = data.success === false;
@@ -1195,6 +1219,7 @@ export function createCopilotBackend(): ServerBackend {
             state.cliSessionId = null;
             latestUsage = null;
             inflightToolUses.clear();
+            suppressedToolIds.clear();
             send({ type: 'context_patch', patch: { lastSdkSessionId: null } });
             send({ type: 'plan', content: '' });
             if (hadSession) {
@@ -1504,6 +1529,7 @@ export function createCopilotBackend(): ServerBackend {
       state.cliSessionId = null;
       latestUsage = null;
       inflightToolUses.clear();
+      suppressedToolIds.clear();
     },
 
     async readTaskOutput(taskId: string): Promise<string> {
