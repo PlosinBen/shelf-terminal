@@ -43,6 +43,7 @@ vi.mock('@github/copilot-sdk', () => {
       async stop() { /* noop */ }
     },
     defineTool: (name: string) => ({ name }),
+    RuntimeConnection: { forStdio: (opts: any) => ({ kind: 'stdio', ...opts }) },
   };
 });
 

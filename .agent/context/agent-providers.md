@@ -122,3 +122,17 @@ related:
 SDK 0.3.159 **並存**兩種 compact 完成訊號:`status` 形狀(`subtype:'status'` + `compact_result` + `compact_error`,`sdk.d.ts:3585`)與 `SDKCompactBoundaryMessage`(`subtype:'compact_boundary'` + `compact_metadata`,`sdk.d.ts:2646`)。但**現行 streaming-input persistent-session 模式只發 `compact_boundary`、不發 `status`+`compact_result`**。所以偵測 `/compact` 完成一律判 `subtype === 'compact_boundary'`(純函式 `isCompactBoundary(msg)`)。**別改回 `compact_result`** —— 它雖仍在 SDK 型別裡,但這個 session 模式不會發它,選了就每次卡「Compaction did not complete」(靠 `closeForegroundTurn` fallback)。失敗沒有獨立訊號:boundary 不來就是失敗,無 `compact_error` 明細。若日後 session 模式或 boundary 形狀再變,先看 `sdk.d.ts` 的 `SDKCompactBoundaryMessage` 真實定義再改。
 
 **Related**:`agent-config-flow#2`(`/compact` 走真 SDK turn + `stoppable=false`)、`background-tasks#1`(`pendingCompactMsgId` per-turn 狀態)、`agent-server/providers/claude/index.ts` 的 `isCompactBoundary`/`routeForeground`。
+
+## agent-providers#9 — `@github/copilot-sdk` 與 `@github/copilot` CLI 必須配成「同步發佈的一對」，別各自 pin  ·  [Gotcha]
+
+**Symptom**：copilot 啟動失敗 —— dispatcher stderr `[CLI subprocess] error: too many arguments. Expected 0 arguments but got 1.` → CLI server exit code 1 → `getAuthStatus`/`listModels` 全回「Connection is closed」→ caps init failed。Claude 正常,只有 copilot 掛。
+
+**Root cause**：SDK 與 CLI 是**綁定發佈的一對**(官方 SDK 的 `dependencies` 直接釘 `@github/copilot` 版本,如 sdk `1.0.5` → `^1.0.67`)。我們曾**分開 pin**:`@github/copilot-sdk@1.0.0-beta.1`(很舊)+ CLI `1.0.56`。beta.1 宣告範圍 `^1.0.41-0` 雖含 1.0.56(semver 不報),但 CLI 在 1.0.41→1.0.56 間**改了 SDK spawn CLI server 的引數契約** → 舊 SDK 用 `cliPath`+`useStdio` 起新 CLI 就被拒。且我們的 copilot unit test **mock 掉 `@github/copilot-sdk`**,真實 CLI spawn 的引數不相容**測不到**,所以沒被擋。
+
+**Fix / 現況**：升成相容對 **sdk `1.0.5` + CLI `1.0.68`**(transitive,`@github/copilot` 非直接 dep;`COPILOT_CLI_VERSION` 常數必須 = 實裝版本,有 drift-guard 測試)。API 變更兩處:① client 建構子 `cliPath`+`useStdio` → `connection: RuntimeConnection.forStdio({ path })`(**這就是修 bug 的關鍵**)② elicitation handler 從 post-create `session.registerElicitationHandler()` 改成 session config 欄位 `onElicitationRequest`(ctx/result 形狀不變)。auth(`gitHubToken`/`useLoggedInUser`)、SessionConfig 欄位、`session.on`/`sendAndWait`/`listModels`/`getAuthStatus`、`ModeSetRequest` 的 `interactive|plan|autopilot` 值 —— 都不變。
+
+**CLI 套件佈局也變了(≥1.0.67)**:meta 套件 `@github/copilot` 從「內含可跑的 `index.js` dispatcher」瘦成**只剩 `npm-loader.js`**(`bin.copilot`,ESM),真正執行檔搬進**平台套件** `@github/copilot-<platform>-<arch>`(裡面有 standalone `copilot` binary + `builtin/`/`tree-sitter.wasm` 等資源)。所以 local 不能再指 meta 的 `index.js`(不存在了)—— `resolveCopilotCliPath()` 改指**平台套件的 standalone `copilot` binary**(dev = `node_modules/@github/copilot-<plat>-<arch>/copilot`;packaged = extraResources `copilot-cli/@github/copilot-<plat>-<arch>/`,electron-builder filter `copilot-*-*/**/*` 只會抓到建置機當前平台那顆;remote R1 本就指 standalone binary,未受影響)。這也統一了三環境:全部指 standalone binary、直接 spawn 不經 node。
+
+**Do not change casually because**：升 SDK 或 CLI **只能成對升**,升一邊就對照官方 SDK 該版 `dependencies` 釘的 CLL 版本、同步改 `COPILOT_CLI_VERSION`(+ 確認 `@github/copilot-<platform>` 平台套件該版存在,remote deploy 要抓)。**別**倚賴 unit test 擋相容性 —— 它 mock SDK,只有真機登入 copilot 起 session 才驗得到 rpc method / event 欄位有沒有被改名(`(session as any).rpc.*` 是 untyped)。
+
+**Related**:`deployment#4`(copilot CLI 是 node app、走 CLI 版本)、`agent-providers#2`(gh token 走 `gitHubToken`)、`src/main/agent/agent-runtime-versions.ts`(`COPILOT_CLI_VERSION` + drift-guard 測試)、`agent-server/providers/copilot/index.ts`(`ensureClient` 建構子 / `ensureSession` 的 `onElicitationRequest`)。

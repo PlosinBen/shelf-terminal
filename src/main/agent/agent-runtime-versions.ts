@@ -84,7 +84,7 @@ export function claudeTarballUrl(t: RuntimeTarget, version: string): string {
  * copilot-sdk drives. Pinned (same reasoning as CLAUDE_SDK_VERSION); a unit
  * test asserts it equals the installed dependency.
  */
-export const COPILOT_CLI_VERSION = '1.0.56';
+export const COPILOT_CLI_VERSION = '1.0.68';
 
 /**
  * Scoped npm package shipping the standalone Copilot CLI binary for a target.
