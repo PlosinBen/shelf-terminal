@@ -363,6 +363,22 @@ export function createClaudeBackend(): ServerBackend {
   let activeForeground: ForegroundTurn | null = null;
   let activeServer: ServerTurn | null = null;
   const router = createRouterState();
+  // ── Busy/idle as a single active-cycle COUNTER (see features/claude-content-turn-unify) ──
+  // Every SDK turn opens with `init` and closes with `result` (spike-confirmed;
+  // SDKResultMessage carries no per-turn id, so we COUNT rather than match). Busy
+  // = counter > 0; idle is emitted ONLY when the counter drains to 0. This makes
+  // foreground + auto-resume a single spinner signal and removes the old
+  // per-turn idle bookkeeping + main-side background-tasks#6 suppression. A
+  // COUNTER (not a single-slot flag) is correct whether turns are serial or
+  // overlap. `clamp at 0` absorbs a stray `result` with no matching `init` (the
+  // task-notification result after a background drain with no auto-resume prose).
+  let activeCycles = 0;
+  function noteCycleOpen() { activeCycles++; }
+  /** Close one cycle; emit idle via `send` ONLY when the counter reaches 0. */
+  function emitIdleIfSettled(send: SendFn) {
+    activeCycles = Math.max(0, activeCycles - 1);
+    if (activeCycles === 0) send({ type: 'status', state: 'idle' });
+  }
   // Most-recent foreground turn's send — base for server turns (same session →
   // context-patch interception is correct) and out-of-turn capabilities emits.
   let lastTurnSend: SendFn | null = null;
@@ -806,6 +822,7 @@ export function createClaudeBackend(): ServerBackend {
     if (activeForeground) stuck.unshift(activeForeground);
     activeForeground = null;
     activeServer = null;
+    activeCycles = 0; // session ending — force the counter to settled
     stoppable = true;
     for (const t of stuck) {
       t.turnSend({ type: 'status', state: 'idle' });
@@ -837,6 +854,7 @@ export function createClaudeBackend(): ServerBackend {
       activeServer.send({ type: 'status', state: 'idle' });
       activeServer = null;
     }
+    activeCycles = 0; // ESC force-settle — unconditional idle above already sent
     router.active = null;
     router.pendingPush = 0;
   }
@@ -908,6 +926,7 @@ export function createClaudeBackend(): ServerBackend {
   }
 
   function startForegroundTurn() {
+    noteCycleOpen();
     const turn = pendingPush.shift();
     // lastTurnSend is the RAW (non-idle-deduped) send: server turns + capability
     // + task_event emits base off it and must NOT be swallowed by this turn's
@@ -939,7 +958,11 @@ export function createClaudeBackend(): ServerBackend {
       turn.pendingCompactMsgId = null;
     }
     stoppable = true;
-    turn.turnSend({ type: 'status', state: 'idle' }); // deduped — result case already emitted it
+    // Gate the spinner-clearing idle on the active-cycle counter: if an
+    // auto-resume (or any other cycle) is still running, this close decrements
+    // but does NOT emit idle. The `result` handler already sent this turn's final
+    // cost/usage (as a streaming-state status the renderer applies regardless).
+    emitIdleIfSettled(turn.turnSend);
     turn.resolve();
   }
 
@@ -980,6 +1003,7 @@ export function createClaudeBackend(): ServerBackend {
   function startServerTurn() {
     const base = lastTurnSend;
     if (!base) { activeServer = null; return; }
+    noteCycleOpen();
     const turnId = `t-${randomUUID().slice(0, 8)}`;
     base({ type: 'turn_started', turnId });
     // Drive busy state for the auto-resume: streaming on open, idle on close
@@ -1003,12 +1027,30 @@ export function createClaudeBackend(): ServerBackend {
   function routeServer(msg: SDKMessage, close: boolean) {
     const st = activeServer;
     if (!st) return;
-    // Route ONLY the assistant prose (skip stream_event to avoid the
-    // streaming-placeholder grouping path). Tool calls during auto-resume use
-    // the active send (pre-existing limitation — see background-tasks#2).
-    if (msg.type === 'assistant') processMessage(msg, st.send, sessionCwd, st.blockMsgIds);
+    // Content in an auto-resume turn goes through the SAME processMessage as a
+    // foreground turn — assistant prose, tool_use cards AND their tool_results
+    // (which ride on `user` messages). Previously this handled ONLY `assistant`,
+    // so every tool_result during auto-resume was silently dropped → the tool
+    // card opened but never completed (the "整排 tool 卡沒 result" bug). We still
+    // skip `stream_event` (whole-reply, no incremental streaming placeholder) for
+    // the auto-resume lane. See features/claude-content-turn-unify.
+    if (msg.type === 'assistant' || msg.type === 'user') {
+      processMessage(msg, st.send, sessionCwd, st.blockMsgIds);
+    } else if (msg.type === 'stream_event') {
+      // Forward ONLY the block-boundary stream events (message_start resets the
+      // per-index→msgId map; content_block_start advances the index). Without
+      // them, every assistant message in a multi-round auto-resume turn computes
+      // the same block index → getOrMintBlockMsgId returns ONE cached id → all
+      // replies/thinking collapse onto a single msgId (overwriting each other).
+      // We deliberately do NOT forward content_block_delta, so auto-resume keeps
+      // its whole-reply (non-streaming) delivery. See features/claude-content-turn-unify.
+      const ev = (msg as any).event;
+      if (ev?.type === 'message_start' || ev?.type === 'content_block_start') {
+        processMessage(msg, st.send, sessionCwd, st.blockMsgIds);
+      }
+    }
     if (close) {
-      st.send({ type: 'status', state: 'idle' });
+      emitIdleIfSettled(st.send);
       activeServer = null;
     }
   }
@@ -2006,10 +2048,15 @@ export function processMessage(msg: SDKMessage, send: SendFn, cwd: string, block
         }
       }
       lastTurnUsage = null;
-      // `result` msgType was a dead channel — token/cost data is sent via the
-      // status payload below; renderer never used the message form. Drop it.
+      // Emit this turn's final cost/usage but DON'T flip the spinner to idle here.
+      // The busy/idle transition is owned by the active-cycle counter: the router's
+      // close (emitIdleIfSettled) sends idle only when ALL cycles have drained, so
+      // an overlapping auto-resume can't clear the spinner mid-flight. `state:
+      // 'streaming'` keeps the spinner up; the renderer's setStatus applies the
+      // cost/usage fields regardless of state (agentTabStore.setStatus). See
+      // features/claude-content-turn-unify.
       send({
-        type: 'status', state: 'idle',
+        type: 'status', state: 'streaming',
         costUsd: isSuccess ? msg.total_cost_usd : undefined,
         inputTokens: isSuccess ? msg.usage?.input_tokens : undefined,
         outputTokens: isSuccess ? msg.usage?.output_tokens : undefined,

@@ -245,6 +245,103 @@ describe('claude detached-loop background tasks', () => {
       && !(m as any).turnId)).toHaveLength(1); // foreground idle untouched
   });
 
+  it('REPRO: tool_result inside an auto-resume turn completes its fold card (not dropped)', async () => {
+    // The "整排 tool 卡沒 result" bug: routeServer (the auto-resume/server-turn
+    // content path) only processes `assistant` messages and IGNORES `user`
+    // messages — but tool_results ride on `user` messages. So every tool called
+    // during an auto-resume turn opens a pending fold card that NEVER completes.
+    // No orphan warning fires because emitClaudeToolResult is never even reached.
+    // Live-confirmed in the 2026-07-07 log (turn t-80885496: 32 tool cards, 0
+    // completions). See features/claude-content-turn-unify.
+    const RESUME_TOOL_USE = {
+      type: 'assistant', parent_tool_use_id: null,
+      message: { content: [{ type: 'tool_use', id: 'toolu_resume1', name: 'Read', input: { file_path: '/tmp/foo' } }] },
+    };
+    const RESUME_TOOL_RESULT = {
+      type: 'user',
+      message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_resume1', content: 'FILE-BODY-XYZ', is_error: false }] },
+    };
+    const { it, release } = controllableQuery(
+      [INIT, FG_REPLY, TASK_STARTED, FG_RESULT],
+      [TASK_DONE, RESUME_INIT, RESUME_TOOL_USE, RESUME_TOOL_RESULT, RESUME_RESULT],
+    );
+    sdkQueryMock.mockImplementation(() => it);
+
+    const sent: OutgoingMessage[] = [];
+    const backend = createClaudeBackend();
+    disposer = () => backend.dispose();
+
+    await backend.query({ prompt: 'go', cwd: '/tmp' } as any, (m) => sent.push(m));
+    release();
+    await flush();
+
+    // The tool card opened (pending fold_code, no body) — this already works.
+    const foldsForTool = sent.filter((m) => m.type === 'message'
+      && (m as any).msgType === 'fold_code' && (m as any).msgId === 'toolu_resume1') as any[];
+    expect(foldsForTool.length).toBeGreaterThan(0);
+
+    // The card must also COMPLETE: a fold_code carrying the result body. This is
+    // what routeServer drops today → FAILS until the content path is unified.
+    const completed = foldsForTool.find((m) => m.body && typeof m.body.content === 'string');
+    expect(completed, 'auto-resume tool_result should complete the fold card').toBeTruthy();
+    expect(completed.body.content).toContain('FILE-BODY-XYZ');
+  });
+
+  it('REPRO: multi-round auto-resume gives each reply a DISTINCT msgId (no collapse)', async () => {
+    // Second facet of the same bug: routeServer skipped stream_events, so the
+    // per-index→msgId map never reset (message_start) or advanced
+    // (content_block_start) → every assistant message in one auto-resume turn
+    // computed the same block index → one cached msgId → all replies/thinking
+    // overwrote each other (live: 16 replies all on m-a2ba19b0). Forwarding the
+    // block-boundary stream events fixes it. See features/claude-content-turn-unify.
+    const msgStart = { type: 'stream_event', event: { type: 'message_start' } };
+    const blockStart = { type: 'stream_event', event: { type: 'content_block_start', index: 0, content_block: { type: 'text' } } };
+    const reply1 = { type: 'assistant', parent_tool_use_id: null, message: { content: [{ type: 'text', text: 'auto-resume line ONE' }] } };
+    const reply2 = { type: 'assistant', parent_tool_use_id: null, message: { content: [{ type: 'text', text: 'auto-resume line TWO' }] } };
+    const { it, release } = controllableQuery(
+      [INIT, FG_REPLY, TASK_STARTED, FG_RESULT],
+      [TASK_DONE, RESUME_INIT, msgStart, blockStart, reply1, msgStart, blockStart, reply2, RESUME_RESULT],
+    );
+    sdkQueryMock.mockImplementation(() => it);
+
+    const sent: OutgoingMessage[] = [];
+    const backend = createClaudeBackend();
+    disposer = () => backend.dispose();
+
+    await backend.query({ prompt: 'go', cwd: '/tmp' } as any, (m) => sent.push(m));
+    release();
+    await flush();
+
+    const replies = sent.filter((m) => m.type === 'message' && (m as any).msgType === 'reply'
+      && /auto-resume line (ONE|TWO)/.test((m as any).content)) as any[];
+    expect(replies).toHaveLength(2);
+    expect(replies[0].msgId).not.toBe(replies[1].msgId); // distinct — not collapsed onto one id
+  });
+
+  it('counter-gated idle: foreground turn emits its final cost AND exactly one idle', async () => {
+    // Phase 2: busy/idle is a single active-cycle counter; the `result` handler
+    // now emits the final cost/usage on a streaming-state status (renderer applies
+    // cost regardless of state) and the router's close emits the ONE idle when the
+    // counter drains. This pins: cost isn't lost and idle fires exactly once.
+    const RESULT_WITH_COST = { type: 'result', subtype: 'success', session_id: 's1', total_cost_usd: 0.42, num_turns: 3, usage: { input_tokens: 100, output_tokens: 50 } };
+    const { it, release } = controllableQuery([INIT, FG_REPLY, RESULT_WITH_COST], []);
+    sdkQueryMock.mockImplementation(() => it);
+
+    const sent: OutgoingMessage[] = [];
+    const backend = createClaudeBackend();
+    disposer = () => backend.dispose();
+
+    await backend.query({ prompt: 'go', cwd: '/tmp' } as any, (m) => sent.push(m));
+    release();
+    await flush();
+
+    // Exactly one idle (spinner clears once).
+    expect(sent.filter((m) => m.type === 'status' && (m as any).state === 'idle')).toHaveLength(1);
+    // Final cost is emitted on SOME status event (renderer's setStatus applies it
+    // regardless of state) — not dropped by moving the idle to the gated close.
+    expect(sent.find((m) => m.type === 'status' && (m as any).costUsd === 0.42)).toBeTruthy();
+  });
+
   it('a turn with no backgrounded task emits no task_event and resolves normally', async () => {
     const { it, release } = controllableQuery([INIT, FG_REPLY, FG_RESULT], []);
     sdkQueryMock.mockImplementation(() => it);
