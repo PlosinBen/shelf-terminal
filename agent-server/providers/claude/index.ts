@@ -1003,10 +1003,16 @@ export function createClaudeBackend(): ServerBackend {
   function routeServer(msg: SDKMessage, close: boolean) {
     const st = activeServer;
     if (!st) return;
-    // Route ONLY the assistant prose (skip stream_event to avoid the
-    // streaming-placeholder grouping path). Tool calls during auto-resume use
-    // the active send (pre-existing limitation — see background-tasks#2).
-    if (msg.type === 'assistant') processMessage(msg, st.send, sessionCwd, st.blockMsgIds);
+    // Content in an auto-resume turn goes through the SAME processMessage as a
+    // foreground turn — assistant prose, tool_use cards AND their tool_results
+    // (which ride on `user` messages). Previously this handled ONLY `assistant`,
+    // so every tool_result during auto-resume was silently dropped → the tool
+    // card opened but never completed (the "整排 tool 卡沒 result" bug). We still
+    // skip `stream_event` (whole-reply, no incremental streaming placeholder) for
+    // the auto-resume lane. See features/claude-content-turn-unify.
+    if (msg.type === 'assistant' || msg.type === 'user') {
+      processMessage(msg, st.send, sessionCwd, st.blockMsgIds);
+    }
     if (close) {
       st.send({ type: 'status', state: 'idle' });
       activeServer = null;

@@ -245,6 +245,48 @@ describe('claude detached-loop background tasks', () => {
       && !(m as any).turnId)).toHaveLength(1); // foreground idle untouched
   });
 
+  it('REPRO: tool_result inside an auto-resume turn completes its fold card (not dropped)', async () => {
+    // The "整排 tool 卡沒 result" bug: routeServer (the auto-resume/server-turn
+    // content path) only processes `assistant` messages and IGNORES `user`
+    // messages — but tool_results ride on `user` messages. So every tool called
+    // during an auto-resume turn opens a pending fold card that NEVER completes.
+    // No orphan warning fires because emitClaudeToolResult is never even reached.
+    // Live-confirmed in the 2026-07-07 log (turn t-80885496: 32 tool cards, 0
+    // completions). See features/claude-content-turn-unify.
+    const RESUME_TOOL_USE = {
+      type: 'assistant', parent_tool_use_id: null,
+      message: { content: [{ type: 'tool_use', id: 'toolu_resume1', name: 'Read', input: { file_path: '/tmp/foo' } }] },
+    };
+    const RESUME_TOOL_RESULT = {
+      type: 'user',
+      message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_resume1', content: 'FILE-BODY-XYZ', is_error: false }] },
+    };
+    const { it, release } = controllableQuery(
+      [INIT, FG_REPLY, TASK_STARTED, FG_RESULT],
+      [TASK_DONE, RESUME_INIT, RESUME_TOOL_USE, RESUME_TOOL_RESULT, RESUME_RESULT],
+    );
+    sdkQueryMock.mockImplementation(() => it);
+
+    const sent: OutgoingMessage[] = [];
+    const backend = createClaudeBackend();
+    disposer = () => backend.dispose();
+
+    await backend.query({ prompt: 'go', cwd: '/tmp' } as any, (m) => sent.push(m));
+    release();
+    await flush();
+
+    // The tool card opened (pending fold_code, no body) — this already works.
+    const foldsForTool = sent.filter((m) => m.type === 'message'
+      && (m as any).msgType === 'fold_code' && (m as any).msgId === 'toolu_resume1') as any[];
+    expect(foldsForTool.length).toBeGreaterThan(0);
+
+    // The card must also COMPLETE: a fold_code carrying the result body. This is
+    // what routeServer drops today → FAILS until the content path is unified.
+    const completed = foldsForTool.find((m) => m.body && typeof m.body.content === 'string');
+    expect(completed, 'auto-resume tool_result should complete the fold card').toBeTruthy();
+    expect(completed.body.content).toContain('FILE-BODY-XYZ');
+  });
+
   it('a turn with no backgrounded task emits no task_event and resolves normally', async () => {
     const { it, release } = controllableQuery([INIT, FG_REPLY, FG_RESULT], []);
     sdkQueryMock.mockImplementation(() => it);
