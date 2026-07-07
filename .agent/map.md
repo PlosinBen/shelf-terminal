@@ -13,13 +13,14 @@ title: shelf-terminal — Intent → File Index
 |--------|------|------|
 | App lifecycle, IPC wiring | `index.ts` | app/window 啟動、`registerAllIpcHandlers()` 一次註冊、PM/Agent/updater 接線與 quit cleanup 的中樞 |
 | 共享 app 狀態 | `app-state.ts` | `mainWindow` / `cachedProjects` / `cachedSettings` 的 getter/setter，index 與 ipc 共用單一來源 |
-| IPC handler（按領域分檔） | `ipc/` (`index.ts` + `pty`/`project`/`connector`/`git`/`file-transfer`/`dialog`/`settings`/`logs`/`web`/`notes`/`skills`/`mcp`/`updater`/`pm`) | 各檔 export `registerXxxHandlers()`，`ipc/index.ts` 匯總註冊 |
+| IPC handler（按領域分檔） | `ipc/` (`index.ts` + `pty`/`project`/`connector`/`git`/`file-transfer`/`dialog`/`settings`/`logs`/`web`/`notes`/`skills`/`mcp`/`config-backup`/`updater`/`pm`) | 各檔 export `registerXxxHandlers()`，`ipc/index.ts` 匯總註冊 |
 | App 層 Agent Skills（CRUD + lock） | `skills-store.ts` | `<userData>/skills/` 下 app 層 skill 的檔案 CRUD + frontmatter 驗證 + lock marker |
 | Skills 變更後處理（統一 pipeline） | `skills-sync.ts` | `onSkillsChanged()`：任何 skill mutation 後的單一出口（re-project + subscribers + 通知 renderer） |
 | App-tool bridge（main 端 dispatcher） | `agent/app-tool.ts` | `handleAppTool(op,args)` 把 agent-server 的 `app_tool` 請求轉成 client-owned 資源動作的純 dispatcher |
 | Skills 投影（local + hash） | `skills-projection.ts` | `projectSkillsLocal` mirror skills 到 `~/.shelf/apps/<appId>/skills` + hash helper |
 | App 層 MCP config store | `mcp-store.ts` | `<userData>/mcp-servers.json`（keyed object）的同步 CRUD + 驗證（web-grants 風格，opaque 不碰 secret） |
 | MCP 變更後處理（sibling pipeline） | `mcp-sync.ts` | `onMcpChanged()`：re-project + subscribers + `MCP_CHANGED`；**不**呼叫 `onSkillsChanged()` |
+| Config 備份/複製（App-Level Config Backup & Copy） | `config-backup/` (`binding-store`/`side-car`/`preflight`/`enumerate`/`backup`/`bind`/`import`) | backup+copy 非 sync；`side-car` 是 `simple-git` transport（clone/fetch/commit/push/diff）；`backup.ts` 快照 live→my branch；`import.ts` list sources / plan vs live / apply into live。見 `context/config-backup` |
 | MCP 投影（local + hash） | `mcp-projection.ts` | `projectMcpLocal` 寫單一 `mcp-servers.json` 到 `~/.shelf/apps/<appId>/` + touch heartbeat + `hashMcpConfig` |
 | MCP 遠端同步 | `mcp-remote.ts` | `syncMcpForConnection`：client-side hash-gate + transport 放到 worker（local no-op） |
 | App-instance id | `app-instance-id.ts` | `getAppInstanceId()`：`<userData>/app-instance-id` 的 generate-once 穩定 UUID |
@@ -152,6 +153,7 @@ title: shelf-terminal — Intent → File Index
 | Web.fetch 授權 popup | `components/WebPermissionPrompt.tsx` | app 層全域 popup，防偽 origin 顯示 + allow once/always/deny（由 `web:permission-request` 驅動） |
 | browser_open 確認 popup | `components/BrowserOpenPrompt.tsx` | app 層全域 popup，只有 Open/Deny（不記住），由 `web:browser-open-request` 驅動；核可後 `web:open-tab` 由 `App.tsx` 開分頁 |
 | Web session/grant 管理 | `components/settings/WebSettingsTab.tsx` | Settings → Web 分頁：已登入 session 清單(刪) + grant whitelist(per-project 分組、revoke) |
+| Config 備份/複製 UI | `components/settings/BackupSettingsTab.tsx` + `ImportSection.tsx` | Settings → Backup 分頁：未綁 remote 顯示綁定表單；綁了則 Back up \| Import 切換。Backup=per-item checklist（預勾已備份項）；Import=選來源分支→勾項目→review diff（replace/keep）→apply，含 replace-all bulk |
 | App 層 MCP server 管理 | `components/McpView.tsx` | 右側欄 view（BottomBar 插頭 icon 開、Skills 的姊妹）：list + per-transport 新增/編輯(stdio/http)、rename、`?` scope help。沿用 `.right-panel` 殼 |
 | 選擇面板 | `components/SelectionPanel.tsx` | Bottom-anchored 單題 N-way 選單，permission popup + config picker 共用 |
 | Picker 面板 | `components/PickerPanel.tsx` | Bottom-anchored 多題互動 form（AskUserQuestion / elicitation 共用） |
@@ -163,7 +165,7 @@ title: shelf-terminal — Intent → File Index
 | 資料夾選擇器 | `components/FolderPicker.tsx` | 兩步驟（connection type → browse）選資料夾 |
 | 資料夾瀏覽器 | `components/FolderBrowser.tsx` | 純展示元件，顯示目錄清單和 keyboard hints |
 | 頁內搜尋 | `components/SearchBar.tsx` | terminal tab 走 xterm SearchAddon；agent/web tab 走 main findInPage（`shelfApi.find`）+ 命中計數 |
-| Settings 面板 | `components/SettingsPanel.tsx` | 左側 tab 分頁（Terminal / Models / PM Agent / Shortcuts） |
+| Settings 面板 | `components/SettingsPanel.tsx` | 左側 tab 分頁（Terminal / Agent / Models / PM Agent / Web / Backup / Shortcuts） |
 | Worktree 建立 | `components/WorktreeDialog.tsx` | 輸入 branch name 建 git worktree，產生 sub-project |
 | 刪除確認 | `components/RemoveConfirmDialog.tsx` | Remove project 確認 modal，可勾選清理 worktree files |
 | PM 狀態面板（read-only） | `components/PmView.tsx` | 右側可拖拉 panel，read-only 訊息列表 + markdown，header 含 PM Active/Away/Clear toggle |

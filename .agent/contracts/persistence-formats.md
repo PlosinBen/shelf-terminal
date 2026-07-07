@@ -82,6 +82,27 @@ The on-disk artifacts Shelf persists and their layout. Two roots: `<userData>` (
 - `runtime-cache/<targetId>/…` — host-side cache of extracted Node + CLI binaries per arch×libc target. Source: `src/main/agent/deploy-layout.ts` (`cacheDir` / `cachedNodeBin` / `cachedClaudeBin` / `cachedCopilotBin`).
 - `mcp-servers.json` — app-level MCP servers. **Keyed object** `Record<name, McpServerBlock>` (NOT an array, NOT wrapped in `mcpServers`): `{ "<name>": {type:'stdio',command,args?,env?} | {type:'http',url,headers?} }`. Name is the key. Stored opaque — `env`/`headers` may hold literal tokens or `${VAR}` refs (resolved later on the worker). Types + validators: `src/shared/mcp.ts`. CRUD: `src/main/mcp-store.ts`. See `context/mcp` (mcp#3).
 
+## `<userData>/config-backup.json` — config-backup binding
+
+- **Path**: `<userData>/config-backup.json`
+- **Format**: JSON object `{ remoteUrl: string, machineLabel: string }` (`ConfigBackupBinding`, `src/shared/config-backup.ts`). `remoteUrl` 是使用者的 git remote（https 或 ssh，Shelf 不解析也不認證 —— 交給機器的 git 憑證）；`machineLabel` 是這台機器分支的顯示名。
+- **Source of truth**: `src/main/config-backup/binding-store.ts`。**機器本地、永不進任何備份 payload**（描述「本機備份去哪」，是機器特定的，備份它會循環且洩漏 remote URL）。缺檔 = 未綁定。見 `context/config-backup` config-backup#1/#3。
+
+## `<userData>/config-backup-repo/` — side-car git clone
+
+- **Path**: `<userData>/config-backup-repo/`（一個一般 git clone，非 bare）
+- **用途**：config-backup 的 transport + durable store。git **只**在這裡操作，永不包住 live 資料夾。可丟棄、隨時可刪（下次 Backup 會重新 clone/snapshot）。
+- **Source of truth**: `src/main/config-backup/side-car.ts`（`simple-git`）。每台機器一個 `backup/<app-instance-id>` 分支，分支的 working-tree payload layout：
+
+  ```
+  <repo root>@backup/<app-instance-id>/
+  ├── skills/<name>/…            ← 鏡射 <userData>/skills/skills/<name>/（整包，binary-safe）
+  ├── mcp-servers.json           ← keyed object，只含備份時勾選的 server（verbatim block）
+  └── machine.json               ← { appInstanceId, machineLabel }（BackupMachineManifest）— 給 Import 來源選單顯示 label
+  ```
+
+  layout 常數是 skills/MCP 兩端共用的單一真相源（`REPO_SKILLS_DIR` / `REPO_MCP_FILE` / `REPO_MACHINE_MANIFEST`，`src/shared/config-backup.ts`）。Backup 寫「勾選集的完整快照」，Import 唯讀。見 `context/config-backup`、`architecture/config-backup`。
+
 ## `~/.shelf/apps/<appId>/skills/` — per-app skills projection
 
 - **Path**: `os.homedir()/.shelf/apps/<appId>/skills/` (`<appId>` = `app-instance-id`)

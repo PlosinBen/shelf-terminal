@@ -22,3 +22,4 @@ Decisions + gotchas grouped by topic. Cited from code as `<topic>#N`.
 | app 層 skills | [skills](skills.md) | 開放標準 + 投影、bridge、hot-reload、lock |
 | app 層 MCP servers | [mcp](mcp.md) | additive-on-native、keyed-object opaque、sibling pipeline、reconnect 通知、heartbeat lease、scope 傳達 |
 | Web tab + agent web.fetch | [web-tab](web-tab.md) | 網路身分跟 connection、per-origin grant gate、webview hardening、away/timeout |
+| app 層 config 備份 / 複製 | [config-backup](config-backup.md) | backup+copy 非 sync、per-machine branch（fast-forward only）、系統 git+環境憑證、leak gate、快照語意、Import 覆蓋處理 |
