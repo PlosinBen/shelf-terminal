@@ -18,7 +18,7 @@ vi.mock('electron', () => ({
 
 const { runBackup } = await import('./backup');
 const { saveBinding } = await import('./binding-store');
-const { listBackupSources, listImportItems } = await import('./import');
+const { listBackupSources, listImportItems, planImport } = await import('./import');
 
 let root: string;
 let bareRemote: string;
@@ -49,6 +49,24 @@ async function pushOtherMachineBranch(): Promise<void> {
   await git.add(['-A']);
   await git.commit('other machine backup');
   await git.push(['-u', 'origin', 'backup/other-id']);
+}
+
+/** Push an arbitrary branch to the bare with the given repo-relative files. */
+async function pushBranch(branch: string, files: Record<string, string>): Promise<void> {
+  const work = path.join(root, `clone-${branch.replace(/\//g, '-')}`);
+  await simpleGit().clone(bareRemote, work);
+  const git = simpleGit(work);
+  await git.addConfig('user.name', 't', false, 'local');
+  await git.addConfig('user.email', 't@t', false, 'local');
+  await git.checkout(['-b', branch]);
+  for (const [rel, content] of Object.entries(files)) {
+    const abs = path.join(work, rel);
+    fs.mkdirSync(path.dirname(abs), { recursive: true });
+    fs.writeFileSync(abs, content);
+  }
+  await git.add(['-A']);
+  await git.commit('seed');
+  await git.push(['-u', 'origin', branch]);
 }
 
 beforeEach(async () => {
@@ -107,5 +125,42 @@ describe('config-backup import (read side)', () => {
 
   it('unbound machine → no sources', async () => {
     expect(await listBackupSources()).toEqual([]);
+  });
+
+  it('planImport classifies each entry new / identical / differs vs live', async () => {
+    // Live: skill "shared" with SKILL.md = X, and mcp "fs".
+    const sharedDir = path.join(userDataDir, 'skills', 'skills', 'shared');
+    fs.mkdirSync(sharedDir, { recursive: true });
+    fs.writeFileSync(path.join(sharedDir, 'SKILL.md'), 'X');
+    seedMcp({ fs: { type: 'stdio', command: 'node' } });
+    saveBinding({ remoteUrl: bareRemote, machineLabel: 'work-mac' });
+
+    // A branch that differs from live in every way.
+    await pushBranch('backup/src', {
+      'skills/shared/SKILL.md': 'Y',                        // differs
+      'skills/shared/extra.txt': 'e',                       // new (live lacks it)
+      'skills/beta/SKILL.md': '---\nname: beta\n---\n',     // new skill
+      'mcp-servers.json': JSON.stringify({
+        fs: { type: 'stdio', command: 'node' },             // identical to live
+        git: { type: 'stdio', command: 'git-mcp' },         // new server
+      }),
+    });
+
+    await listBackupSources(); // clone + fetch
+    const ref = 'origin/backup/src';
+    const plan = await planImport(ref, ['skill:shared', 'skill:beta', 'mcp:fs', 'mcp:git']);
+
+    const shared = plan.find((p) => p.id === 'skill:shared')!;
+    expect(shared.hasConflict).toBe(true);
+    const sharedByPath = Object.fromEntries(shared.entries.map((e) => [e.path, e.change]));
+    expect(sharedByPath['SKILL.md']).toBe('differs');
+    expect(sharedByPath['extra.txt']).toBe('new');
+    const skillMd = shared.entries.find((e) => e.path === 'SKILL.md')!;
+    expect(skillMd.live).toBe('X');
+    expect(skillMd.backup).toBe('Y');
+
+    expect(plan.find((p) => p.id === 'skill:beta')!.hasConflict).toBe(false);
+    expect(plan.find((p) => p.id === 'mcp:fs')!.entries[0].change).toBe('identical');
+    expect(plan.find((p) => p.id === 'mcp:git')!.entries[0].change).toBe('new');
   });
 });

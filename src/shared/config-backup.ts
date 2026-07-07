@@ -73,6 +73,39 @@ export interface BackupItemSummary {
   detail?: string;
 }
 
+// ── Import plan (per-item overwrite status vs live) ─────────────────────────
+
+export type ImportEntryChange = 'new' | 'identical' | 'differs';
+
+/** One comparable unit: a file inside a skill, or an MCP server block (path=''). */
+export interface ImportEntry {
+  /** Skill-relative file path (e.g. `SKILL.md`), or `''` for an MCP server block. */
+  path: string;
+  change: ImportEntryChange;
+  /** Present only when `differs`: current live text (diff left). */
+  live?: string;
+  /** Present only when `differs`: backup text (diff right). */
+  backup?: string;
+  /** Non-text file — the diff view is suppressed (still copied on apply). */
+  binary?: boolean;
+}
+
+export interface ImportItemPlan {
+  id: string;
+  kind: BackupItemKind;
+  name: string;
+  entries: ImportEntry[];
+  /** True if any entry differs → needs a replace/keep confirm before apply. */
+  hasConflict: boolean;
+}
+
+/** Per-item apply decision: for a conflicted item, whether to overwrite the
+ *  differing files (new files are always copied; identical are always skipped). */
+export interface ImportDecision {
+  id: string;
+  replaceConflicts: boolean;
+}
+
 /** Response for the Backup tab: current binding + live items + which to pre-tick. */
 export interface BackupListResult {
   binding: ConfigBackupBinding | null;

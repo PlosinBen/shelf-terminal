@@ -1,16 +1,33 @@
+import fs from 'fs';
+import path from 'path';
 import {
   REPO_SKILLS_DIR,
   REPO_MCP_FILE,
   REPO_MACHINE_MANIFEST,
   backupItemId,
   type BackupItemSummary,
+  type BackupItemKind,
   type BackupMachineManifest,
+  type ImportEntry,
+  type ImportItemPlan,
 } from '@shared/config-backup';
 import { log } from '@shared/logger';
 import { getAppInstanceId } from '../app-instance-id';
-import { parseSkillMeta } from '../skills-store';
+import { parseSkillMeta, skillDirPath } from '../skills-store';
+import { listMcpServers } from '../mcp-store';
 import { loadBinding } from './binding-store';
 import { createSideCar, type SideCar } from './side-car';
+
+/** Split `kind:name` into a kind + name (names carry no colon). */
+function parseId(id: string): { kind: string; name: string } | null {
+  const idx = id.indexOf(':');
+  if (idx < 0) return null;
+  const name = id.slice(idx + 1);
+  if (!name) return null;
+  return { kind: id.slice(0, idx), name };
+}
+
+const hasNul = (s: string) => s.includes('\u0000');
 
 /**
  * Import (copy) — READ side. Browse a chosen backup branch (another machine's or
@@ -101,5 +118,84 @@ export async function listImportItems(ref: string, sideCar: SideCar = createSide
     }
   }
 
+  return out;
+}
+
+// ── Import plan: per-item overwrite status vs live (NOT a conflict — just an
+//    honest "you already have this; here's what changes; replace or keep") ────
+
+/** Per-file status of a backup skill vs live. Live-only files are ignored
+ *  (Import never deletes — no-orphan invariant `skills#8`). */
+async function planSkill(ref: string, name: string, sideCar: SideCar): Promise<ImportEntry[]> {
+  const prefix = `${REPO_SKILLS_DIR}/${name}/`;
+  const files = (await sideCar.listFilesAtRef(ref)).filter((f) => f.startsWith(prefix));
+  const liveDir = skillDirPath(name);
+  const entries: ImportEntry[] = [];
+  for (const f of files) {
+    const rel = f.slice(prefix.length);
+    const backup = (await sideCar.readFileAtRef(ref, f)) ?? '';
+    const liveFile = path.join(liveDir, rel);
+    if (!fs.existsSync(liveFile)) {
+      entries.push({ path: rel, change: 'new' });
+      continue;
+    }
+    const live = fs.readFileSync(liveFile, 'utf-8');
+    if (live === backup) {
+      entries.push({ path: rel, change: 'identical' });
+      continue;
+    }
+    const binary = hasNul(backup) || hasNul(live);
+    entries.push({ path: rel, change: 'differs', ...(binary ? { binary: true } : { live, backup }) });
+  }
+  return entries;
+}
+
+/** Status of a backup MCP server block vs live (per-server, never whole-file). */
+async function planMcp(ref: string, name: string, sideCar: SideCar): Promise<ImportEntry[]> {
+  const raw = await sideCar.readFileAtRef(ref, REPO_MCP_FILE);
+  if (!raw) return [];
+  let servers: Record<string, unknown>;
+  try {
+    servers = JSON.parse(raw);
+  } catch {
+    return [];
+  }
+  if (!(name in servers)) return [];
+  const backup = JSON.stringify(servers[name], null, 2);
+  const liveAll = listMcpServers();
+  if (!(name in liveAll)) return [{ path: '', change: 'new' }];
+  const live = JSON.stringify(liveAll[name], null, 2);
+  if (live === backup) return [{ path: '', change: 'identical' }];
+  return [{ path: '', change: 'differs', live, backup }];
+}
+
+/**
+ * Compute the per-item import plan for a chosen branch + selected items: for each
+ * item, the file/block-level status (new / identical / differs) and whether it
+ * conflicts (any differs → needs a replace/keep confirm). Read-only; the caller
+ * must have fetched (via listBackupSources). Items absent from the branch drop.
+ */
+export async function planImport(
+  ref: string,
+  selectedIds: string[],
+  sideCar: SideCar = createSideCar(),
+): Promise<ImportItemPlan[]> {
+  const out: ImportItemPlan[] = [];
+  for (const id of selectedIds) {
+    const parsed = parseId(id);
+    if (!parsed) continue;
+    let entries: ImportEntry[] = [];
+    if (parsed.kind === 'skill') entries = await planSkill(ref, parsed.name, sideCar);
+    else if (parsed.kind === 'mcp') entries = await planMcp(ref, parsed.name, sideCar);
+    else continue;
+    if (entries.length === 0) continue; // not present in this branch
+    out.push({
+      id,
+      kind: parsed.kind as BackupItemKind,
+      name: parsed.name,
+      entries,
+      hasConflict: entries.some((e) => e.change === 'differs'),
+    });
+  }
   return out;
 }
