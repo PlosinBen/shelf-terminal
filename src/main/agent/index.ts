@@ -273,18 +273,16 @@ async function startSession(
     // never touch the turn's busy/idle state here. See background-tasks#2.
     (ev) => send(IPC.AGENT_BACKGROUND_TASKS, tabId, ev),
     // Server-initiated turn (auto-resume prose after a background task). Drain
-    // the turn's events into the renderer like a normal turn. Its status
-    // (streaming on open, idle on close) drives the spinner ONLY when no
-    // foreground turn is in flight (session.state !== 'streaming') — so a pure
-    // auto-resume shows busy while the agent writes instead of a frozen "idle".
-    // If a foreground turn IS active (user sent a new prompt mid-auto-resume),
-    // skip the status so this turn's idle doesn't clear the foreground spinner.
-    // The dispatcher still ends the generator on idle independently. See #69/#76.
+    // the turn's events into the renderer like a normal turn. Busy/idle is now a
+    // single active-cycle counter in the claude provider: it emits idle ONLY when
+    // ALL cycles (foreground + auto-resume) have drained, so an auto-resume close
+    // can no longer clear a live foreground spinner. The old suppression here
+    // (skip server status while a foreground turn streams) is therefore redundant
+    // and removed. See features/claude-content-turn-unify.
     (turnId, events) => {
       void (async () => {
         try {
           for await (const ev of events) {
-            if (ev.type === 'status' && sessions.get(tabId)?.state === 'streaming') continue;
             dispatchEvent(tabId, ev);
           }
         } catch (err: any) {

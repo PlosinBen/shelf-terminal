@@ -318,6 +318,30 @@ describe('claude detached-loop background tasks', () => {
     expect(replies[0].msgId).not.toBe(replies[1].msgId); // distinct — not collapsed onto one id
   });
 
+  it('counter-gated idle: foreground turn emits its final cost AND exactly one idle', async () => {
+    // Phase 2: busy/idle is a single active-cycle counter; the `result` handler
+    // now emits the final cost/usage on a streaming-state status (renderer applies
+    // cost regardless of state) and the router's close emits the ONE idle when the
+    // counter drains. This pins: cost isn't lost and idle fires exactly once.
+    const RESULT_WITH_COST = { type: 'result', subtype: 'success', session_id: 's1', total_cost_usd: 0.42, num_turns: 3, usage: { input_tokens: 100, output_tokens: 50 } };
+    const { it, release } = controllableQuery([INIT, FG_REPLY, RESULT_WITH_COST], []);
+    sdkQueryMock.mockImplementation(() => it);
+
+    const sent: OutgoingMessage[] = [];
+    const backend = createClaudeBackend();
+    disposer = () => backend.dispose();
+
+    await backend.query({ prompt: 'go', cwd: '/tmp' } as any, (m) => sent.push(m));
+    release();
+    await flush();
+
+    // Exactly one idle (spinner clears once).
+    expect(sent.filter((m) => m.type === 'status' && (m as any).state === 'idle')).toHaveLength(1);
+    // Final cost is emitted on SOME status event (renderer's setStatus applies it
+    // regardless of state) — not dropped by moving the idle to the gated close.
+    expect(sent.find((m) => m.type === 'status' && (m as any).costUsd === 0.42)).toBeTruthy();
+  });
+
   it('a turn with no backgrounded task emits no task_event and resolves normally', async () => {
     const { it, release } = controllableQuery([INIT, FG_REPLY, FG_RESULT], []);
     sdkQueryMock.mockImplementation(() => it);
