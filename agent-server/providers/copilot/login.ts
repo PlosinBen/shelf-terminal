@@ -16,6 +16,8 @@
  * process exiting 0 (credential written to the machine the CLI runs on).
  */
 
+import { spawn as nodeSpawn, type ChildProcess } from 'node:child_process';
+
 /** The verification prompt extracted from `copilot login` stdout. */
 export interface LoginPrompt {
   /** GitHub device-activation page, e.g. `https://github.com/login/device`. */
@@ -48,6 +50,133 @@ export function parseLoginPrompt(line: string): LoginPrompt | null {
   return {
     verificationUri: trimUrl(urlMatch[1]),
     userCode: codeMatch[1],
+  };
+}
+
+/**
+ * Env vars that make `copilot login` SHORT-CIRCUIT the browser device flow and
+ * use a token instead (checked in this precedence order per `copilot help
+ * environment`). For INTERACTIVE login we must strip all of them, or the CLI
+ * silently reuses a stale/ambient token and never opens the browser.
+ */
+export const LOGIN_TOKEN_ENV_KEYS = ['COPILOT_GITHUB_TOKEN', 'GH_TOKEN', 'GITHUB_TOKEN'] as const;
+
+/** Return a copy of `env` with the device-flow-short-circuiting token vars removed. */
+export function scrubLoginEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const out: NodeJS.ProcessEnv = { ...env };
+  for (const k of LOGIN_TOKEN_ENV_KEYS) delete out[k];
+  return out;
+}
+
+/** Terminal outcome of a login run. */
+export interface LoginResult {
+  ok: boolean;
+  /** true when we killed the process via {@link LoginRunner.cancel}. */
+  cancelled?: boolean;
+  error?: string;
+}
+
+/** Handle over a running `copilot login` child. */
+export interface LoginRunner {
+  /** Kill the login child; `done` then resolves `{ ok:false, cancelled:true }`. */
+  cancel(): void;
+  /** Resolves when the child exits: `ok` on exit 0, else an error/cancel result. */
+  done: Promise<LoginResult>;
+}
+
+export interface StartLoginOpts {
+  /** Resolved `copilot` binary path (from resolveCopilotCliPath). */
+  cliPath: string;
+  /** Called ONCE with the verification URL + code parsed out of the CLI output. */
+  onPrompt: (p: LoginPrompt) => void;
+  /** GitHub host (GHE data-residency). Omitted → CLI defaults to github.com. */
+  host?: string;
+  /** Base env (default `process.env`); token vars are scrubbed regardless. */
+  env?: NodeJS.ProcessEnv;
+  /** Injected for tests; defaults to node's `spawn`. */
+  spawnFn?: typeof nodeSpawn;
+  /** Diagnostic sink (fail-loud). */
+  log?: (level: 'debug' | 'info' | 'warn' | 'error', msg: string) => void;
+}
+
+/** Split a chunked byte stream into complete lines, invoking `onLine` per line. */
+function lineSplitter(onLine: (line: string) => void): (chunk: Buffer | string) => void {
+  let buf = '';
+  return (chunk) => {
+    buf += chunk.toString();
+    let nl: number;
+    while ((nl = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, nl).replace(/\r$/, '');
+      buf = buf.slice(nl + 1);
+      if (line) onLine(line);
+    }
+  };
+}
+
+/**
+ * Spawn `copilot login` and drive the device flow. Parses the verification
+ * prompt out of BOTH stdout and stderr (headless CLI may print to either),
+ * fires `onPrompt` once, and resolves `done` on process exit. The CLI keeps
+ * polling and writes the credential to the machine it runs on (local or remote)
+ * — so a successful authorization ends with exit 0.
+ */
+export function startLogin(opts: StartLoginOpts): LoginRunner {
+  const spawnFn = opts.spawnFn ?? nodeSpawn;
+  const log = opts.log ?? (() => {});
+  const args = ['login', ...(opts.host ? ['--host', opts.host] : [])];
+  let child: ChildProcess;
+  try {
+    child = spawnFn(opts.cliPath, args, {
+      env: scrubLoginEnv(opts.env ?? process.env),
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  } catch (err: any) {
+    // Spawn threw synchronously (bad path / EACCES). Fail loud, resolve error.
+    log('error', `copilot login spawn threw: ${err?.message ?? err}`);
+    return { cancel() {}, done: Promise.resolve({ ok: false, error: String(err?.message ?? err) }) };
+  }
+
+  let cancelled = false;
+  let promptSeen = false;
+  const handleLine = (line: string) => {
+    if (!promptSeen) {
+      const parsed = parseLoginPrompt(line);
+      if (parsed) {
+        promptSeen = true;
+        log('info', `copilot login prompt: code=${parsed.userCode} uri=${parsed.verificationUri}`);
+        opts.onPrompt(parsed);
+      }
+    }
+  };
+  child.stdout?.on('data', lineSplitter(handleLine));
+  child.stderr?.on('data', lineSplitter(handleLine));
+
+  const done = new Promise<LoginResult>((resolve) => {
+    child.on('error', (err) => {
+      log('error', `copilot login process error: ${err?.message ?? err}`);
+      resolve({ ok: false, error: String(err?.message ?? err) });
+    });
+    child.on('close', (code) => {
+      if (cancelled) {
+        resolve({ ok: false, cancelled: true });
+      } else if (code === 0) {
+        resolve({ ok: true });
+      } else {
+        // Non-zero without a prompt usually means an env/network failure BEFORE
+        // the device flow (fail loud so the UI shows something actionable).
+        const detail = promptSeen ? '' : ' (no verification prompt was emitted)';
+        log('error', `copilot login exited ${code}${detail}`);
+        resolve({ ok: false, error: `copilot login exited with code ${code}${detail}` });
+      }
+    });
+  });
+
+  return {
+    cancel() {
+      cancelled = true;
+      child.kill('SIGTERM');
+    },
+    done,
   };
 }
 

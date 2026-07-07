@@ -137,6 +137,16 @@ export type OutgoingMessage = WireEnvelope & (
    */
   | { type: 'turn_started' }
   | { type: 'auth_required'; provider: string }
+  // ── Interactive device-flow login (NO turnId — session-level, like auth_required) ──
+  // Emitted while an interactive `copilot login` runs. `auth_login_prompt`
+  // carries the verification URL + user code parsed from the CLI so the LOCAL
+  // Shelf can open the browser (essential for the remote case: the CLI runs on
+  // the remote, the user's browser is local). `prefilledUri` is the same URL
+  // with `?user_code=` appended so the user need not type the code.
+  // `auth_login_done` reports the terminal outcome (exit 0 = ok). See
+  // features copilot-device-login.
+  | { type: 'auth_login_prompt'; provider: string; verificationUri: string; userCode: string; prefilledUri: string }
+  | { type: 'auth_login_done'; provider: string; ok: boolean; cancelled?: boolean; error?: string }
   | { type: 'permission_request'; toolUseId: string; toolName: string; input: Record<string, unknown> }
   /**
    * Multi-question interactive form. Provider asks renderer to display a
@@ -447,6 +457,17 @@ export interface ServerBackend {
   setPermissionMode?(mode: string): Promise<void> | void;
   storeCredential?(key: string): Promise<void>;
   clearCredential?(): Promise<void>;
+  /**
+   * Start an interactive OAuth device-flow login (fire-and-forget). The provider
+   * spawns its CLI's login command, forwards the parsed `auth_login_prompt`
+   * (verification URL + user code) via `send` so the LOCAL Shelf can open the
+   * browser, and emits `auth_login_done` when the login process exits. Only
+   * providers with a CLI device flow implement it (Copilot); others omit it.
+   * See features copilot-device-login.
+   */
+  startLogin?(cwd: string, send: SendFn): void;
+  /** Cancel a running interactive login (kills the child). No-op if none. */
+  cancelLogin?(): void;
   /**
    * Read the full output of a background task from its remote `output_file`
    * (captured at task_notification). Runs on the agent-server — i.e. ON the
