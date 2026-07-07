@@ -4621,6 +4621,84 @@ button {
 }
 .backup-status-ok { color: var(--success, #5fb37a); }
 .backup-status-err { color: var(--error, #e06c6c); }
+.backup-mode-toggle {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+.backup-mode-btn {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 4px 12px;
+}
+.backup-mode-btn.active {
+  background: var(--surface);
+  color: var(--text);
+  border-color: var(--accent, var(--text-muted));
+}
+.backup-actions { gap: 8px; }
+/* Import review */
+.import-review-item {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px;
+  margin-bottom: 8px;
+}
+.import-review-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.import-replace-toggle {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.import-entry-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+}
+.import-entry {
+  font-size: 12px;
+  padding: 3px 0;
+}
+.import-entry-path { font-family: var(--mono, monospace); }
+.import-entry-change {
+  margin-left: 8px;
+  font-size: 10px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.import-entry-new .import-entry-change { color: var(--success, #5fb37a); }
+.import-entry-differs .import-entry-change { color: var(--error, #e06c6c); }
+.import-diff {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-top: 4px;
+}
+.import-diff pre {
+  margin: 0;
+  padding: 6px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 11px;
+  max-height: 160px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.import-diff-backup { border-color: var(--accent, var(--border)); }
 
 /* ── MCP (right-sidebar view) ── */
 /* The panel shell is shared (.right-panel); this is the scrollable body that

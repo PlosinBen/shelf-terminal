@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import type { BackupListResult, BackupItemSummary } from '@shared/config-backup';
+import { ImportSection } from './ImportSection';
 
 // Settings → Backup: App-Level Config Backup & Copy (Backup half).
 //   Backup = snapshot the ticked live items → THIS machine's remote branch.
@@ -19,6 +20,7 @@ export function BackupSettingsTab() {
   const [remoteUrl, setRemoteUrl] = useState('');
   const [machineLabel, setMachineLabel] = useState('');
   const [bindError, setBindError] = useState<string | null>(null);
+  const [mode, setMode] = useState<'backup' | 'import'>('backup');
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -176,6 +178,28 @@ export function BackupSettingsTab() {
         <button className="web-list-action" onClick={onUnbind}>Unbind</button>
       </div>
 
+      <div className="backup-mode-toggle">
+        <button
+          className={`backup-mode-btn ${mode === 'backup' ? 'active' : ''}`}
+          onClick={() => setMode('backup')}
+        >
+          Back up
+        </button>
+        <button
+          className={`backup-mode-btn ${mode === 'import' ? 'active' : ''}`}
+          onClick={() => setMode('import')}
+        >
+          Import
+        </button>
+      </div>
+
+      {mode === 'import' ? <ImportSection /> : BackupBody()}
+    </div>
+  );
+
+  function BackupBody() {
+    return (
+      <>
       {data && !data.remoteReadOk && (
         <p className="backup-status backup-status-err">
           Couldn't read your existing backup (offline?). Ticking here will define a fresh snapshot —
@@ -202,6 +226,7 @@ export function BackupSettingsTab() {
           {busy ? 'Backing up…' : `Back up ${selected.size} item(s)`}
         </button>
       </div>
-    </div>
-  );
+      </>
+    );
+  }
 }

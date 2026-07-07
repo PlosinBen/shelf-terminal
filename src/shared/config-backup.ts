@@ -106,6 +106,28 @@ export interface ImportDecision {
   replaceConflicts: boolean;
 }
 
+/** A backup branch available to import from (all machines, incl. own). */
+export interface BackupSource {
+  /** Readable git ref, e.g. `origin/backup/<id>`. */
+  ref: string;
+  branch: string;
+  appInstanceId: string;
+  /** Human label from the branch's machine.json (falls back to the id). */
+  machineLabel: string;
+  /** True for this machine's own branch (self-restore). */
+  isSelf: boolean;
+}
+
+export interface ImportApplyResult {
+  ok: true;
+  /** Skill files copied into live. */
+  skillsWritten: number;
+  /** MCP servers added/updated in live. */
+  mcpWritten: number;
+  /** Ids that wrote at least one change. */
+  itemsChanged: string[];
+}
+
 /** Response for the Backup tab: current binding + live items + which to pre-tick. */
 export interface BackupListResult {
   binding: ConfigBackupBinding | null;

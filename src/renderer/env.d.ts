@@ -118,6 +118,16 @@ interface ShelfApi {
       | { ok: true; pushed: boolean; branch: string; itemCount: number }
       | { ok: false; reason: 'not-bound' | 'no-git' | 'remote'; message: string }
     >;
+    listSources: () => Promise<import('../shared/config-backup').BackupSource[]>;
+    listImportItems: (ref: string) => Promise<import('../shared/config-backup').BackupItemSummary[]>;
+    planImport: (
+      ref: string,
+      ids: string[],
+    ) => Promise<import('../shared/config-backup').ImportItemPlan[]>;
+    applyImport: (
+      ref: string,
+      decisions: import('../shared/config-backup').ImportDecision[],
+    ) => Promise<import('../shared/config-backup').ImportApplyResult>;
   };
   app: {
     logsPath: () => Promise<string>;

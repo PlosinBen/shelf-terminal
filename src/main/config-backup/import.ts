@@ -11,6 +11,8 @@ import {
   type ImportEntry,
   type ImportItemPlan,
   type ImportDecision,
+  type BackupSource,
+  type ImportApplyResult,
 } from '@shared/config-backup';
 import { log } from '@shared/logger';
 import { getAppInstanceId } from '../app-instance-id';
@@ -38,17 +40,6 @@ const hasNul = (s: string) => s.includes('\u0000');
  * my own) and list its items, entirely read-only against the source branch (zero
  * contention). Writing into live is a later step; nothing here touches live.
  */
-
-export interface BackupSource {
-  /** Readable git ref, e.g. `origin/backup/<id>`. */
-  ref: string;
-  branch: string;
-  appInstanceId: string;
-  /** Human label from the branch's machine.json (falls back to the id). */
-  machineLabel: string;
-  /** True for this machine's own branch (self-restore). */
-  isSelf: boolean;
-}
 
 /** Unique skill folder names present under `skills/` at a ref. */
 function skillNamesFromFiles(files: string[]): string[] {
@@ -206,16 +197,6 @@ export async function planImport(
 
 // ── Apply: the ONLY writer of live. Per item: new files always copied, identical
 //    skipped, differing files copied iff replaceConflicts. Never deletes. ──────
-
-export interface ImportApplyResult {
-  ok: true;
-  /** Skill files copied into live. */
-  skillsWritten: number;
-  /** MCP servers added/updated in live. */
-  mcpWritten: number;
-  /** Ids that wrote at least one change. */
-  itemsChanged: string[];
-}
 
 /** Recursively list file paths under `dir`, relative to it. */
 function walkFiles(dir: string, base = dir): string[] {
