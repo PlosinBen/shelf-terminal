@@ -234,6 +234,8 @@ Renderer → main (invoke / send):
 | `storeCredential(tabId, key)` | invoke `agent:store-credential` |
 | `clearCredential(tabId)` | invoke `agent:clear-credential` |
 | `checkAuth(tabId)` | invoke `agent:check-auth` |
+| `startLogin(tabId)` | invoke `agent:start-login` — start interactive device-flow login (Copilot). Prompt/result arrive via `onLoginPrompt`/`onLoginDone`. See `context/agent-providers` #10 |
+| `cancelLogin(tabId)` | invoke `agent:cancel-login` — kill a running interactive login |
 | `fetchTaskOutput(tabId, taskId)` | invoke `agent:read-task-output` → background task's full remote output |
 | `stopTask(tabId, taskId)` | invoke `agent:stop-task` |
 
@@ -252,4 +254,6 @@ Main → renderer (push; all return an unsubscribe fn):
 | `onPickerRequest(cb(tabId, req))` | `agent:picker-request` |
 | `onCapabilities(cb(tabId, caps))` | `agent:capabilities` — provider capabilities |
 | `onAuthRequired(cb(tabId, provider: string))` | `agent:auth-required` |
+| `onLoginPrompt(cb(tabId, prompt))` | `agent:login-prompt` — device-flow `{ provider, verificationUri, userCode, prefilledUri }` (session-level). Main also opens the URL locally |
+| `onLoginDone(cb(tabId, result))` | `agent:login-done` — `{ provider, ok, cancelled?, error? }` |
 | `onInitStatus(cb(tabId, status))` | `agent:init-status` |

@@ -189,6 +189,14 @@ export const IPC = {
   AGENT_PICKER_REQUEST: 'agent:picker-request',
   AGENT_CAPABILITIES: 'agent:capabilities',
   AGENT_AUTH_REQUIRED: 'agent:auth-required',
+  /** Renderer → main: start / cancel an interactive device-flow login (Copilot).
+   *  See features copilot-device-login. */
+  AGENT_START_LOGIN: 'agent:start-login',
+  AGENT_CANCEL_LOGIN: 'agent:cancel-login',
+  /** Main → renderer: device-flow verification prompt (URL + user code) while an
+   *  interactive login runs, and the terminal result. Session-level (turnId-less). */
+  AGENT_LOGIN_PROMPT: 'agent:login-prompt',
+  AGENT_LOGIN_DONE: 'agent:login-done',
   AGENT_INIT_STATUS: 'agent:init-status',
   /** Background task updates (turnId-less; see background-tasks#2). Carries a TaskEvent. */
   AGENT_BACKGROUND_TASKS: 'agent:background-tasks',

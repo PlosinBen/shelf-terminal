@@ -281,6 +281,26 @@ export function createRemoteBackend(
       }
     },
 
+    startLogin(cwd: string) {
+      // Ensure the agent-server is up (login may be the FIRST thing the user does
+      // on a fresh, unauthenticated tab), then fire the command. The resulting
+      // auth_login_prompt / auth_login_done flow back via onSessionEvent. On init
+      // failure, surface a done(ok:false) so the UI doesn't hang on "waiting".
+      void ensureProcReady(cwd).then((proc) => {
+        if (!proc) {
+          onSessionEvent?.({ type: 'auth_login_done', provider, ok: false, error: lastInitError ?? 'Failed to start agent-server' });
+          return;
+        }
+        proc.sendLine({ type: 'start_login', provider, cwd, sid: sessionId });
+      });
+    },
+
+    cancelLogin() {
+      if (remoteProc) {
+        remoteProc.sendLine({ type: 'cancel_login', provider, sid: sessionId });
+      }
+    },
+
     resolvePicker(pickerId: string, payload: PickerResolvePayload) {
       if (!remoteProc) return;
       remoteProc.sendLine({ type: 'resolve_picker', sid: sessionId, pickerId, payload });
@@ -1227,6 +1247,27 @@ export function parseRemoteMessage(msg: any): AgentEvent | null {
 
   if (msg.type === 'auth_required') {
     return { type: 'auth_required', provider: msg.provider ?? 'copilot' };
+  }
+
+  if (msg.type === 'auth_login_prompt') {
+    if (typeof msg.verificationUri !== 'string' || typeof msg.userCode !== 'string') return null;
+    return {
+      type: 'auth_login_prompt',
+      provider: msg.provider ?? 'copilot',
+      verificationUri: msg.verificationUri,
+      userCode: msg.userCode,
+      prefilledUri: typeof msg.prefilledUri === 'string' ? msg.prefilledUri : msg.verificationUri,
+    };
+  }
+
+  if (msg.type === 'auth_login_done') {
+    return {
+      type: 'auth_login_done',
+      provider: msg.provider ?? 'copilot',
+      ok: !!msg.ok,
+      cancelled: msg.cancelled === true ? true : undefined,
+      error: typeof msg.error === 'string' ? msg.error : undefined,
+    };
   }
 
   if (msg.type === 'picker_request') {

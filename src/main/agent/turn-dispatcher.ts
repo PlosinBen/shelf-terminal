@@ -158,6 +158,17 @@ export function createTurnDispatcher(
       return;
     }
 
+    // Interactive login events: session-level (turnId-less) — the login runs
+    // outside any turn (triggered by an IPC command, not a `send`). Route to the
+    // session sink before the turnId check so they aren't dropped as "unknown
+    // turn". See features copilot-device-login.
+    if (m?.type === 'auth_login_prompt' || m?.type === 'auth_login_done') {
+      const ev = parseRemoteMessage(m);
+      if (ev) onSessionEvent?.(ev);
+      else log.info('agent-remote', `login event unparseable, dropped: type=${m.type}`);
+      return;
+    }
+
     // Send-queue snapshot: session-level (turnId-less), like task_event. Route
     // to the session sink before the turnId check below.
     if (m?.type === 'queue') {

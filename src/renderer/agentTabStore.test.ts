@@ -33,6 +33,9 @@ import {
   setPendingPicker,
   setLocalPicker,
   setAuthRequired,
+  beginLogin,
+  setLoginPrompt,
+  finishLogin,
   setInitStatus,
   setInMemoryMax,
   setSaveThrottleMs,
@@ -594,6 +597,40 @@ describe('agentTabStore — decisions / auth / init', () => {
     expect(__getTabForTests(TAB)!.initStatus).toBe('starting');
     expect(__getTabForTests(TAB)!.initPhase).toBe('checking-auth');
     expect(__getTabForTests(TAB)!.initError).toBe(null);
+  });
+
+  it('device-flow login: beginLogin / setLoginPrompt / finishLogin(ok) clears the pane', () => {
+    setAuthRequired(TAB, { provider: 'copilot' });
+    beginLogin(TAB);
+    expect(__getTabForTests(TAB)!.loginBusy).toBe(true);
+    expect(__getTabForTests(TAB)!.loginPrompt).toBe(null);
+
+    const prompt = { provider: 'copilot', verificationUri: 'https://github.com/login/device', userCode: '1E5E-903B', prefilledUri: 'https://github.com/login/device?user_code=1E5E-903B' };
+    setLoginPrompt(TAB, prompt);
+    expect(__getTabForTests(TAB)!.loginPrompt).toEqual(prompt);
+
+    finishLogin(TAB, { provider: 'copilot', ok: true });
+    expect(__getTabForTests(TAB)!.loginBusy).toBe(false);
+    expect(__getTabForTests(TAB)!.loginPrompt).toBe(null);
+    expect(__getTabForTests(TAB)!.authRequired).toBe(null); // success clears AuthPane
+    expect(__getTabForTests(TAB)!.authError).toBe(null);
+  });
+
+  it('device-flow login: finishLogin(cancelled) keeps the pane, no error', () => {
+    setAuthRequired(TAB, { provider: 'copilot' });
+    beginLogin(TAB);
+    finishLogin(TAB, { provider: 'copilot', ok: false, cancelled: true });
+    expect(__getTabForTests(TAB)!.loginBusy).toBe(false);
+    expect(__getTabForTests(TAB)!.authRequired?.provider).toBe('copilot'); // still needs auth
+    expect(__getTabForTests(TAB)!.authError).toBe(null); // cancel is not an error
+  });
+
+  it('device-flow login: finishLogin(fail) surfaces the error, keeps the pane', () => {
+    setAuthRequired(TAB, { provider: 'copilot' });
+    beginLogin(TAB);
+    finishLogin(TAB, { provider: 'copilot', ok: false, error: 'copilot login exited with code 1' });
+    expect(__getTabForTests(TAB)!.authRequired?.provider).toBe('copilot');
+    expect(__getTabForTests(TAB)!.authError).toBe('copilot login exited with code 1');
   });
 
   it('setPlan / setActual*', () => {

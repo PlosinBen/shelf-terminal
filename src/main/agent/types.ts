@@ -147,6 +147,14 @@ export type AgentEvent =
       }>;
     }
   | { type: 'auth_required'; provider: string }
+  /**
+   * Interactive device-flow login events (session-level, turnId-less). The
+   * prompt carries the verification URL + user code so main can open the LOCAL
+   * browser (essential when the agent-server runs on a remote host). `done`
+   * reports the terminal outcome. See features copilot-device-login.
+   */
+  | { type: 'auth_login_prompt'; provider: string; verificationUri: string; userCode: string; prefilledUri: string }
+  | { type: 'auth_login_done'; provider: string; ok: boolean; cancelled?: boolean; error?: string }
   | { type: 'error'; error: string };
 
 export interface AgentBackend {
@@ -174,6 +182,15 @@ export interface AgentBackend {
   ): Promise<ProviderCapabilities>;
   storeCredential?(key: string): Promise<void>;
   clearCredential?(): Promise<void>;
+  /**
+   * Start an interactive OAuth device-flow login (fire-and-forget). Forwards the
+   * command to agent-server; the resulting `auth_login_prompt` / `auth_login_done`
+   * events flow back over the session-level sink. Only providers with a CLI
+   * device flow (Copilot) implement it. See features copilot-device-login.
+   */
+  startLogin?(cwd: string): void;
+  /** Cancel a running interactive login (fire-and-forget). */
+  cancelLogin?(): void;
   clearContext?(): void;
   /**
    * Read a background task's full output from its remote `output_file`. The

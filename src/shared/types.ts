@@ -129,6 +129,28 @@ export type AgentInitStatus =
   | { state: 'failed'; reason: string };
 
 /**
+ * Interactive device-flow login (Copilot). `AgentLoginPrompt` is the
+ * verification info surfaced while login is in progress; `AgentLoginResult` is
+ * the terminal outcome. See features copilot-device-login.
+ */
+export interface AgentLoginPrompt {
+  provider: string;
+  /** GitHub device-activation page, e.g. `https://github.com/login/device`. */
+  verificationUri: string;
+  /** One-time user code, e.g. `1E5E-903B`. */
+  userCode: string;
+  /** `verificationUri` with `?user_code=` appended (opened in the browser). */
+  prefilledUri: string;
+}
+
+export interface AgentLoginResult {
+  provider: string;
+  ok: boolean;
+  cancelled?: boolean;
+  error?: string;
+}
+
+/**
  * Per-agent-server connection health, derived from the heartbeat round-trip
  * (see agent feature `skills-workflows` §5.9). `healthy → slow → unstable →
  * dead` is a degradation gradient; the renderer carries the steady state in the

@@ -1,5 +1,6 @@
 import React from 'react';
 import {
+  beginLogin,
   setAuthBusy,
   setAuthError,
   setAuthRequired,
@@ -27,10 +28,23 @@ export function AuthPane({ tabId }: Props) {
   const authBusy = tab?.authBusy ?? false;
   const authError = tab?.authError ?? null;
   const authMethod = tab?.capabilities?.authMethod;
+  const loginPrompt = tab?.loginPrompt ?? null;
+  const loginBusy = tab?.loginBusy ?? false;
 
   if (!authRequired) return null;
 
   const providerLabel = authRequired.provider.charAt(0).toUpperCase() + authRequired.provider.slice(1);
+
+  // Interactive device-flow login (oauth providers, e.g. Copilot). Spawns
+  // `copilot login` on the agent-server; main opens the LOCAL browser to the
+  // verification URL and the code shows here. See features copilot-device-login.
+  const startLogin = () => {
+    beginLogin(tabId);
+    void window.shelfApi.agent.startLogin(tabId);
+  };
+  const cancelLogin = () => {
+    void window.shelfApi.agent.cancelLogin(tabId);
+  };
 
   const retry = async () => {
     setAuthBusy(tabId, true);
@@ -62,7 +76,38 @@ export function AuthPane({ tabId }: Props) {
           {authMethod.setupUrl && <> Get one at <code>{authMethod.setupUrl}</code>.</>}
         </div>
       )}
-      {(authMethod?.kind === 'sdk-managed' || authMethod?.kind === 'oauth') && (
+      {authMethod?.kind === 'oauth' && (
+        <>
+          {loginBusy ? (
+            <div className="agent-auth-login-progress">
+              {loginPrompt ? (
+                <>
+                  <div className="agent-auth-instructions">
+                    A browser was opened to authorize. If it didn’t, open this link:
+                  </div>
+                  <a className="agent-auth-link" href={loginPrompt.prefilledUri} target="_blank" rel="noreferrer">
+                    {loginPrompt.prefilledUri}
+                  </a>
+                  <div className="agent-auth-instructions">
+                    or visit <code>{loginPrompt.verificationUri}</code> and enter this code:
+                  </div>
+                  <div className="agent-auth-code">{loginPrompt.userCode}</div>
+                </>
+              ) : (
+                <div className="agent-auth-instructions">Starting login…</div>
+              )}
+              <div className="agent-auth-waiting">Waiting for authorization…</div>
+              <button className="agent-reset-btn" onClick={cancelLogin}>Cancel</button>
+            </div>
+          ) : (
+            <>
+              <div className="agent-auth-instructions">Sign in to {providerLabel} with your GitHub account:</div>
+              <button className="agent-reset-btn" onClick={startLogin}>Login with GitHub</button>
+            </>
+          )}
+        </>
+      )}
+      {authMethod?.kind === 'sdk-managed' && (
         <>
           <div className="agent-auth-instructions">Run the following, then click Retry:</div>
           <ul className="agent-auth-list">
@@ -72,9 +117,11 @@ export function AuthPane({ tabId }: Props) {
           </ul>
         </>
       )}
-      <button className="agent-reset-btn" disabled={authBusy} onClick={retry}>
-        {authBusy ? 'Checking…' : 'Retry'}
-      </button>
+      {!loginBusy && (
+        <button className="agent-reset-btn" disabled={authBusy} onClick={retry}>
+          {authBusy ? 'Checking…' : 'Retry'}
+        </button>
+      )}
       {authError && <div className="agent-auth-error">{authError}</div>}
     </div>
   );

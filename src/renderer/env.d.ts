@@ -189,6 +189,8 @@ interface ShelfApi {
     storeCredential: (tabId: string, key: string) => Promise<boolean>;
     clearCredential: (tabId: string) => Promise<boolean>;
     checkAuth: (tabId: string) => Promise<boolean>;
+    startLogin: (tabId: string) => Promise<boolean>;
+    cancelLogin: (tabId: string) => Promise<void>;
     fetchTaskOutput: (tabId: string, taskId: string) => Promise<string>;
     stopTask: (tabId: string, taskId: string) => Promise<void>;
     onMessage: (callback: (tabId: string, msg: unknown) => void) => () => void;
@@ -203,6 +205,8 @@ interface ShelfApi {
     onCapabilities: (callback: (tabId: string, caps: unknown) => void) => () => void;
     onAuthRequired: (callback: (tabId: string, provider: string) => void) => () => void;
     onInitStatus: (callback: (tabId: string, status: import('../shared/types').AgentInitStatus) => void) => () => void;
+    onLoginPrompt: (callback: (tabId: string, prompt: import('../shared/types').AgentLoginPrompt) => void) => () => void;
+    onLoginDone: (callback: (tabId: string, result: import('../shared/types').AgentLoginResult) => void) => () => void;
   };
   updater: {
     check: () => Promise<void>;

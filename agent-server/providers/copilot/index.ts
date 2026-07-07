@@ -3,6 +3,7 @@ import * as path from 'path';
 import { randomUUID } from 'node:crypto';
 import type { QueryInput, SendFn, ServerBackend, ProviderCapabilities, StatusSegment, PickerResolvePayload, ModelCacheClient, ReapableTask } from '../types';
 import { killDetachedByPidFile, pidPathForLog } from './pid-kill';
+import { startLogin as runLogin, prefillLoginUrl, type LoginRunner } from './login';
 import { severityFromUtilization, pickPermissionModes, pickEffortLevels } from '../types';
 import { parseSlashPrefix } from '@shared/slash-prefix';
 import { formatConfigAck, type ConfigEditKey } from '@shared/config-ack';
@@ -257,6 +258,9 @@ export function createCopilotBackend(): ServerBackend {
   let currentEffort: string | undefined;
   let currentPermissionMode = 'default';
   let currentSessionId: string | null = null;
+  // Live interactive-login child (device flow), if one is running. At most one
+  // at a time; a new startLogin cancels the previous. See features copilot-device-login.
+  let loginRunner: LoginRunner | null = null;
   // Per-turn streaming msgId trackers. Copilot SDK doesn't emit explicit
   // block-start events; we mint on the first delta of a channel and reuse
   // until the matching finalize message lands. Reset to null when finalize
@@ -1502,7 +1506,61 @@ export function createCopilotBackend(): ServerBackend {
       }
     },
 
+    /**
+     * Start the interactive OAuth device flow by spawning `copilot login`. The
+     * CLI prints a verification URL + user code (parsed out and forwarded as
+     * `auth_login_prompt` so the LOCAL Shelf can open the browser — necessary for
+     * the remote case) then polls; on authorization it writes the credential to
+     * the machine it runs on and exits 0, which we report as `auth_login_done`.
+     * Fire-and-forget: resolution is delivered via `send`, not the return value.
+     */
+    startLogin(cwd: string, send: SendFn) {
+      const cliPath = resolveCopilotCliPath();
+      if (!cliPath) {
+        send({ type: 'auth_login_done', provider: 'copilot', ok: false, error: 'GitHub Copilot CLI not found.' });
+        return;
+      }
+      // Only one login at a time — cancel any stale runner first.
+      if (loginRunner) {
+        loginRunner.cancel();
+        loginRunner = null;
+      }
+      const runner = runLogin({
+        cliPath,
+        onPrompt: (p) => {
+          send({
+            type: 'auth_login_prompt',
+            provider: 'copilot',
+            verificationUri: p.verificationUri,
+            userCode: p.userCode,
+            prefilledUri: prefillLoginUrl(p),
+          });
+        },
+        log: (level, msg) => serverLog(level, 'copilot-login', msg),
+      });
+      loginRunner = runner;
+      void runner.done.then((res) => {
+        // Ignore a stale runner's result if a newer login superseded it.
+        if (loginRunner !== runner) return;
+        loginRunner = null;
+        send({ type: 'auth_login_done', provider: 'copilot', ok: res.ok, cancelled: res.cancelled, error: res.error });
+      });
+    },
+
+    /** Cancel a running interactive login (kills the child). No-op if none. */
+    cancelLogin() {
+      loginRunner?.cancel();
+    },
+
     dispose() {
+      // A login child is NOT reaped by the task reaper (it's not an SDK task) —
+      // kill it here so a pending device flow doesn't outlive the backend.
+      try {
+        loginRunner?.cancel();
+      } catch (err: any) {
+        serverLog('error', 'copilot', 'loginRunner.cancel() failed during dispose()', err?.message ?? err);
+      }
+      loginRunner = null;
       try {
         state.session?.disconnect();
       } catch (err: any) {

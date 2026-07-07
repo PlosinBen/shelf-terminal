@@ -53,6 +53,12 @@ export function bindAgentIPCGroup(): () => void {
   const offInit = api.onInitStatus((tabId, status: AgentInitStatus) => {
     emitAgent('agent:onInitStatus', { tabId, status });
   });
+  const offLoginPrompt = api.onLoginPrompt((tabId, prompt) => {
+    emitAgent('agent:onLoginPrompt', { tabId, prompt });
+  });
+  const offLoginDone = api.onLoginDone((tabId, result) => {
+    emitAgent('agent:onLoginDone', { tabId, result });
+  });
 
   // -------- Outbound: bus → IPC --------
   const offInitEvt = onAgent('agent:init', ({ tabId, cwd, connection, provider, sessionId, opts }) => {
@@ -89,6 +95,8 @@ export function bindAgentIPCGroup(): () => void {
     offPicker();
     offAuth();
     offInit();
+    offLoginPrompt();
+    offLoginDone();
     offInitEvt();
     offSendEvt();
     offStopEvt();

@@ -6,6 +6,8 @@ import {
   appendChunk,
   applyQueueSnapshot,
   setAuthRequired,
+  setLoginPrompt,
+  finishLogin,
   setCapabilities,
   setInitStatus,
   setPendingPermission,
@@ -140,6 +142,14 @@ export function bindAgentStoreSubscriptions(): () => void {
     setAuthRequired(tabId, { provider });
   });
 
+  const offLoginPrompt = onAgent('agent:onLoginPrompt', ({ tabId, prompt }) => {
+    setLoginPrompt(tabId, prompt);
+  });
+
+  const offLoginDone = onAgent('agent:onLoginDone', ({ tabId, result }) => {
+    finishLogin(tabId, result);
+  });
+
   const offInit = onAgent('agent:onInitStatus', ({ tabId, status }) => {
     setInitStatus(
       tabId,
@@ -160,6 +170,8 @@ export function bindAgentStoreSubscriptions(): () => void {
     offPermission();
     offPicker();
     offAuth();
+    offLoginPrompt();
+    offLoginDone();
     offInit();
   };
 }
