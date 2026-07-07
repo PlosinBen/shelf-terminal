@@ -1012,6 +1012,18 @@ export function createClaudeBackend(): ServerBackend {
     // the auto-resume lane. See features/claude-content-turn-unify.
     if (msg.type === 'assistant' || msg.type === 'user') {
       processMessage(msg, st.send, sessionCwd, st.blockMsgIds);
+    } else if (msg.type === 'stream_event') {
+      // Forward ONLY the block-boundary stream events (message_start resets the
+      // per-index→msgId map; content_block_start advances the index). Without
+      // them, every assistant message in a multi-round auto-resume turn computes
+      // the same block index → getOrMintBlockMsgId returns ONE cached id → all
+      // replies/thinking collapse onto a single msgId (overwriting each other).
+      // We deliberately do NOT forward content_block_delta, so auto-resume keeps
+      // its whole-reply (non-streaming) delivery. See features/claude-content-turn-unify.
+      const ev = (msg as any).event;
+      if (ev?.type === 'message_start' || ev?.type === 'content_block_start') {
+        processMessage(msg, st.send, sessionCwd, st.blockMsgIds);
+      }
     }
     if (close) {
       st.send({ type: 'status', state: 'idle' });

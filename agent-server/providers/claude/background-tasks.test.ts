@@ -287,6 +287,37 @@ describe('claude detached-loop background tasks', () => {
     expect(completed.body.content).toContain('FILE-BODY-XYZ');
   });
 
+  it('REPRO: multi-round auto-resume gives each reply a DISTINCT msgId (no collapse)', async () => {
+    // Second facet of the same bug: routeServer skipped stream_events, so the
+    // per-index→msgId map never reset (message_start) or advanced
+    // (content_block_start) → every assistant message in one auto-resume turn
+    // computed the same block index → one cached msgId → all replies/thinking
+    // overwrote each other (live: 16 replies all on m-a2ba19b0). Forwarding the
+    // block-boundary stream events fixes it. See features/claude-content-turn-unify.
+    const msgStart = { type: 'stream_event', event: { type: 'message_start' } };
+    const blockStart = { type: 'stream_event', event: { type: 'content_block_start', index: 0, content_block: { type: 'text' } } };
+    const reply1 = { type: 'assistant', parent_tool_use_id: null, message: { content: [{ type: 'text', text: 'auto-resume line ONE' }] } };
+    const reply2 = { type: 'assistant', parent_tool_use_id: null, message: { content: [{ type: 'text', text: 'auto-resume line TWO' }] } };
+    const { it, release } = controllableQuery(
+      [INIT, FG_REPLY, TASK_STARTED, FG_RESULT],
+      [TASK_DONE, RESUME_INIT, msgStart, blockStart, reply1, msgStart, blockStart, reply2, RESUME_RESULT],
+    );
+    sdkQueryMock.mockImplementation(() => it);
+
+    const sent: OutgoingMessage[] = [];
+    const backend = createClaudeBackend();
+    disposer = () => backend.dispose();
+
+    await backend.query({ prompt: 'go', cwd: '/tmp' } as any, (m) => sent.push(m));
+    release();
+    await flush();
+
+    const replies = sent.filter((m) => m.type === 'message' && (m as any).msgType === 'reply'
+      && /auto-resume line (ONE|TWO)/.test((m as any).content)) as any[];
+    expect(replies).toHaveLength(2);
+    expect(replies[0].msgId).not.toBe(replies[1].msgId); // distinct — not collapsed onto one id
+  });
+
   it('a turn with no backgrounded task emits no task_event and resolves normally', async () => {
     const { it, release } = controllableQuery([INIT, FG_REPLY, FG_RESULT], []);
     sdkQueryMock.mockImplementation(() => it);
