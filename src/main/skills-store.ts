@@ -57,6 +57,17 @@ function skillDir(name: string): string {
 function skillFile(name: string): string {
   return path.join(skillDir(name), 'SKILL.md');
 }
+
+/** Absolute path to the skills collection dir (`<userData>/skills/skills`).
+ *  Exposed so config-backup can copy whole skill folders in/out without
+ *  duplicating the on-disk layout. */
+export function skillsCollectionDir(): string {
+  return collectionDir();
+}
+/** Absolute path to one skill's folder. See skillsCollectionDir(). */
+export function skillDirPath(name: string): string {
+  return skillDir(name);
+}
 /** Lock marker: a `.locked` file inside the skill folder. In-folder so a rename
  *  carries it for free; a stray dotfile is ignored by the skill loaders. */
 function lockMarkerPath(name: string): string {

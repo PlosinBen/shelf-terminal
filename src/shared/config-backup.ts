@@ -39,3 +39,36 @@ export interface ConfigBackupBinding {
   remoteUrl: string;
   machineLabel: string;
 }
+
+// ── Payload layout inside a backup branch's working tree ────────────────────
+// Single source of truth for both Backup (copy in) and Import (read out).
+
+/** Skills live under `<repo>/skills/<name>/…` (mirrors the live folder shape). */
+export const REPO_SKILLS_DIR = 'skills';
+/** MCP servers are one keyed-object JSON at the repo root. */
+export const REPO_MCP_FILE = 'mcp-servers.json';
+/** Per-branch manifest so the Import picker can show a human machine label. */
+export const REPO_MACHINE_MANIFEST = 'machine.json';
+
+/** Written at the root of each machine's branch; read by the Import source picker. */
+export interface BackupMachineManifest {
+  appInstanceId: string;
+  machineLabel: string;
+}
+
+// ── Enumerated backup-able items (the per-item checklist unit) ───────────────
+
+export type BackupItemKind = 'skill' | 'mcp';
+
+/** Stable per-item id used by the checklist + IPC selection. */
+export function backupItemId(kind: BackupItemKind, name: string): string {
+  return `${kind}:${name}`;
+}
+
+export interface BackupItemSummary {
+  id: string;
+  kind: BackupItemKind;
+  name: string;
+  /** Skill description / MCP transport type — a one-line hint for the checklist. */
+  detail?: string;
+}
