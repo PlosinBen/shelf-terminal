@@ -136,3 +136,20 @@ SDK 0.3.159 **並存**兩種 compact 完成訊號:`status` 形狀(`subtype:'stat
 **Do not change casually because**：升 SDK 或 CLI **只能成對升**,升一邊就對照官方 SDK 該版 `dependencies` 釘的 CLL 版本、同步改 `COPILOT_CLI_VERSION`(+ 確認 `@github/copilot-<platform>` 平台套件該版存在,remote deploy 要抓)。**別**倚賴 unit test 擋相容性 —— 它 mock SDK,只有真機登入 copilot 起 session 才驗得到 rpc method / event 欄位有沒有被改名(`(session as any).rpc.*` 是 untyped)。
 
 **Related**:`deployment#4`(copilot CLI 是 node app、走 CLI 版本)、`agent-providers#2`(gh token 走 `gitHubToken`)、`src/main/agent/agent-runtime-versions.ts`(`COPILOT_CLI_VERSION` + drift-guard 測試)、`agent-server/providers/copilot/index.ts`(`ensureClient` 建構子 / `ensureSession` 的 `onElicitationRequest`)。
+
+## agent-providers#10 — Copilot 互動式登入靠 CLI `copilot login` device flow，不靠 SDK、不自刻 client_id  ·  [Decision]
+
+**背景**：Copilot auth 會過期，需要 app 內一鍵重新登入。`@github/copilot-sdk` **不提供互動式帳號登入**：SDK↔CLI 是 headless stdio-RPC（無 TTY，不吐 device URL），唯一帳號 auth RPC `account.login` 只把「已拿到的 `{host,login,token}`」存進 keychain，**不發起** device flow（沒有回 `verification_uri`/`user_code` 的 RPC；會回 URL 的只有 MCP oauth，與帳號無關）。
+
+**Decision**：由 agent-server spawn CLI 的 `copilot login`（OAuth device flow）驅動登入。實測（Docker headless）確認：無瀏覽器/無 TTY 下它**印出 `To authenticate, visit <url> and enter code <XXXX-XXXX>` 後持續輪詢**，格式穩定；local（有瀏覽器）時 CLI 還會自動開瀏覽器。所以：
+- **CLI 擁有 OAuth client_id**，我們不碰未公開的 client_id（自刻 device flow 會被迫拿它 → 破裂風險）。
+- agent-server `parseLoginPrompt` 抽 stdout 的 `{verificationUri,userCode}`（純函式，`copilot/login.ts`），走 wire `auth_login_prompt` 回 main；**main 端用 `shell.openExternal` 開「本機」系統瀏覽器**（`openLoginUrl`，預填 `?user_code=`）。這對 **remote 是必要的**：CLI 跑遠端、輪詢與 credential 寫在遠端（正確，SDK 也在那讀），但人在本機 → URL 必須開在本機瀏覽器。
+- **成功 = login 進程 exit 0**（不靠 parse 判成敗，只靠 parse 取 URL/code）；取消 = kill；失敗 = 非 0（`auth_login_done{ok,cancelled,error}`）。
+- **spawn env 必須剝除 `COPILOT_GITHUB_TOKEN`/`GH_TOKEN`/`GITHUB_TOKEN`**（`scrubLoginEnv`）—— 否則 CLI 依 `copilot help environment` 的優先序直接吃 token 短路、不走瀏覽器。
+- login child 是 agent-server **直接子進程**（非 `setsid` detached）→ 不進 reaper（那是給逃離 process tree 的 detached shell），改在 `dispose()` kill。
+
+**AuthPane**：oauth kind 顯示「Login with GitHub」按鈕（呼叫 `agent.startLogin` 直接 IPC，像 `checkAuth`）；輪詢中顯示 `userCode` + Waiting + Cancel；`auth_login_done{ok}` → `finishLogin` 清 pane（authRequired→null），cancel 不視為 error，fail 顯示 error。
+
+**Do not change casually because**：① 別改成自刻 GitHub device flow（B 案）—— 要拿未公開的 Copilot client_id，破裂/維護風險高，除非官方提供穩定 SDK 登入 API。② 別把開瀏覽器改成在 agent-server 端（remote 沒有可用瀏覽器）—— 一律回 main 用 `shell.openExternal`。③ 別忘了 env 剝 token，否則互動登入會被既有 token 短路。
+
+**Related**：`contracts/agent-wire-protocol`（`auth_login_prompt`/`auth_login_done`）、`contracts/ipc-channels`（`agent:start-login`/`cancel-login`/`login-prompt`/`login-done`）、`agent-providers#2`（gh token 路徑，與互動登入正交並存）、`agent-server/providers/copilot/login.ts`、`src/main/agent/index.ts`（`openLoginUrl`）、`src/renderer/components/agent/AuthPane.tsx`。

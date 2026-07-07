@@ -215,6 +215,28 @@ Server-owned send-queue snapshot (agent-server serializes turns and owns the que
 | `type` | `'queue'` | |
 | `items` | `AgentQueueItem[]` | each `{ clientMsgId: string; state: 'queued' \| 'running' }` (`src/shared/types.ts`) |
 
+### auth_login_prompt / auth_login_done — interactive device-flow login
+
+Emitted while an interactive `copilot login` (OAuth device flow) runs. Session-level because login is triggered by an IPC command (`agent:start-login`), NOT a `send` — it runs outside any turn. Routed by the dispatcher to `onSessionEvent` → main → `IPC.AGENT_LOGIN_PROMPT` / `IPC.AGENT_LOGIN_DONE`. On `auth_login_prompt`, main ALSO opens the URL in the user's LOCAL system browser (`shell.openExternal`) — essential when the agent-server runs on a remote host. Provider-side: `agent-server/providers/copilot/login.ts`. See `context/agent-providers` agent-providers#10.
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `type` | `'auth_login_prompt'` | |
+| `provider` | `string` | |
+| `verificationUri` | `string` | e.g. `https://github.com/login/device` |
+| `userCode` | `string` | e.g. `1E5E-903B` |
+| `prefilledUri` | `string` | `verificationUri` + `?user_code=` (what main opens) |
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `type` | `'auth_login_done'` | terminal outcome; success = login process exit 0 |
+| `provider` | `string` | |
+| `ok` | `boolean` | |
+| `cancelled` | `boolean?` | true when killed via `agent:cancel-login` |
+| `error` | `string?` | present on `ok:false` (non-cancel) |
+
+Inbound commands: `start_login` (`{ provider, cwd, sid }`) and `cancel_login` (`{ provider, sid }`) — see `agent-server/exec.ts`.
+
 ### turn_started — `type: 'turn_started'`
 
 Server-initiated turn announcement carrying a provider-minted `turnId` (via the envelope). The dispatcher registers that turnId **synchronously** on receipt (permissionless handler) and hands the turn's generator to the `onServerTurn` sink — used when a backgrounded task finishes and the SDK auto-resumes to write a real reply that has no live foreground turn. The subsequent `message` carries `startsTurn:true`. See agent-config-flow#1, DECISIONS #69.

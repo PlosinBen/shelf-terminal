@@ -98,6 +98,7 @@ title: shelf-terminal — Intent → File Index
 | Provider 純 helper（claude） | `providers/claude/helpers.ts` | claude/index 抽出的 side-effect-free 函式 + types（封閉邊界，只被 claude/ 引用） |
 | Turn 路由（claude） | `providers/claude/turn-router.ts` | 純 attribution 狀態機，按順序把 message 分 foreground/server/task lane |
 | Provider 純 helper（copilot） | `providers/copilot/helpers.ts` | copilot/index 抽出的純函式 + types（只被 copilot/ 引用） |
+| Copilot 互動登入（device flow） | `providers/copilot/login.ts` | `parseLoginPrompt`（stdout 抽 URL+code 純函式）+ `startLogin`（spawn `copilot login`、env 剝 token、cancel）+ `prefillLoginUrl`（見 `context/agent-providers` #10） |
 | Provider 共用 helper | `providers/shared.ts` | `stripCwd` / `resolveSkillsPluginRoot` — 跨 provider 共用純函式 |
 | MCP config 消費（解析 + ${VAR}） | `providers/mcp-config.ts` | `loadProjectedMcpServers`：讀 projected `mcp-servers.json` → 驗證 → 對 worker env 展開 `${VAR}` → fail-loud（兩 provider 共用） |
 | App-tool bridge（agent-server 端） | `app-tool-client.ts` + `app-tool-tools.ts` | in-process MCP 工具的共用 body：`callMain` + `runBridgeTool` + 描述常數 |
@@ -239,7 +240,7 @@ title: shelf-terminal — Intent → File Index
 |--------|------|------|
 | E2E helpers | `e2e/helpers.ts` | Playwright fixture、per-worker tempdir userData 隔離、agent helper（預設 `SHELF_TEST_MODE=1`） |
 | E2E 測試 | `e2e/agent-picker.spec.ts` | Picker_request 全鏈（single/multi/cancel/free-text），fake provider |
-| E2E 測試 | `e2e/agent-flows.spec.ts` | permission / stream / fold 卡片 / auth_required / error / Esc stop，fake provider |
+| E2E 測試 | `e2e/agent-flows.spec.ts` | permission / stream / fold 卡片 / auth_required / 互動 device-flow 登入（button→code→cancel）/ error / Esc stop，fake provider |
 | E2E 測試 | `e2e/app-startup.spec.ts` | App 啟動、sidebar 驗證 |
 | E2E 測試 | `e2e/project-creation.spec.ts` | 建立 project、connect、tab、terminal output |
 | E2E 測試 | `e2e/features.spec.ts` | Search、settings、project edit、dev tools、快捷鍵 |
