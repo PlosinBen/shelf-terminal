@@ -136,6 +136,29 @@ test.describe('agent flows via fake provider', () => {
     await expect(page.locator('.agent-auth-title:visible')).toContainText('Fake');
   });
 
+  test('interactive login: button → device code → cancel → back to button', async ({ shelfApp: { page } }) => {
+    await setupProject(page);
+    await openAgentTab(page);
+    await sendAgentPrompt(page, 'auth_required');
+
+    const pane = page.locator('.agent-auth-pane:visible');
+    await expect(pane).toBeVisible({ timeout: 5_000 });
+
+    // oauth method → interactive Login button (start_login round-trip).
+    const loginBtn = pane.locator('.agent-reset-btn', { hasText: 'Login with GitHub' });
+    await expect(loginBtn).toBeVisible({ timeout: 5_000 });
+    await loginBtn.click();
+
+    // auth_login_prompt flowed back → device code + waiting state shown.
+    await expect(pane.locator('.agent-auth-code')).toHaveText('FAKE-CODE', { timeout: 5_000 });
+    await expect(pane.locator('.agent-auth-waiting')).toBeVisible();
+
+    // Cancel → cancel_login → auth_login_done{cancelled} → back to the button.
+    await pane.locator('.agent-reset-btn', { hasText: 'Cancel' }).click();
+    await expect(pane.locator('.agent-auth-code')).toHaveCount(0, { timeout: 5_000 });
+    await expect(pane.locator('.agent-reset-btn', { hasText: 'Login with GitHub' })).toBeVisible();
+  });
+
   test('thinking: renders as a fold_text card', async ({ shelfApp: { page } }) => {
     await setupProject(page);
     await openAgentTab(page);

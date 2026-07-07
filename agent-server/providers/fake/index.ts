@@ -166,6 +166,8 @@ export function createFakeBackend(): ServerBackend {
   // 'stopped' echo from stopTask), mirroring how the claude backend routes
   // task_notifications through its persistent session. See background-tasks#2.
   let lastSend: SendFn | null = null;
+  // Live device-flow login send (see startLogin/cancelLogin + the `login_ok` step).
+  let fakeLoginSend: SendFn | null = null;
   // Test hook: the `reloadfail` scenario arms this so the NEXT reloadSkills
   // reports a failure (exercises the agent-view error line). Consumed once.
   let failNextReload = false;
@@ -534,7 +536,34 @@ export function createFakeBackend(): ServerBackend {
           { name: 'mcp', description: 'List loaded MCP servers' },
           { name: 'skills', description: 'List loaded skills' },
         ],
+        // Declare an oauth method so the AuthPane shows the interactive "Login
+        // with GitHub" button (device-flow) when auth_required fires. See
+        // features copilot-device-login.
+        authMethod: { kind: 'oauth', instructions: [{ command: 'fake login', label: 'fake device flow' }] },
       };
+    },
+
+    // Interactive device-flow login (deterministic fake for E2E). startLogin
+    // emits a verification prompt immediately, then stays pending until
+    // cancelLogin resolves it as cancelled — exercising the full round-trip
+    // (start_login → auth_login_prompt → UI → cancel_login → auth_login_done).
+    // The success state transition (finishLogin clearing the pane) is covered by
+    // agentTabStore unit tests, since the AuthPane hides the input so a UI-driven
+    // success can't be triggered mid-login.
+    startLogin(_cwd, send) {
+      fakeLoginSend = send;
+      send({
+        type: 'auth_login_prompt',
+        provider: 'fake',
+        verificationUri: 'https://github.com/login/device',
+        userCode: 'FAKE-CODE',
+        prefilledUri: 'https://github.com/login/device?user_code=FAKE-CODE',
+      });
+    },
+
+    cancelLogin() {
+      fakeLoginSend?.({ type: 'auth_login_done', provider: 'fake', ok: false, cancelled: true });
+      fakeLoginSend = null;
     },
 
     resolvePermission(toolUseId, allow, message) {

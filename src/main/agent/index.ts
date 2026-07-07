@@ -258,6 +258,11 @@ function openLoginUrl(url: string): void {
       log.warn('agent', `openLoginUrl: refusing non-http(s) URL: ${url}`);
       return;
     }
+    // E2E drives this with a fake URL — don't actually pop a system browser.
+    if (process.env.SHELF_TEST_MODE === '1') {
+      log.debug('agent', `openLoginUrl: test mode, skipping shell.openExternal(${url})`);
+      return;
+    }
     void shell.openExternal(url);
   } catch (err: any) {
     log.warn('agent', `openLoginUrl: invalid URL ${JSON.stringify(url)}: ${err?.message ?? err}`);
