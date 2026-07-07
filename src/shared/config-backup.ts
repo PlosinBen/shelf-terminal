@@ -72,3 +72,15 @@ export interface BackupItemSummary {
   /** Skill description / MCP transport type — a one-line hint for the checklist. */
   detail?: string;
 }
+
+/** Response for the Backup tab: current binding + live items + which to pre-tick. */
+export interface BackupListResult {
+  binding: ConfigBackupBinding | null;
+  items: BackupItemSummary[];
+  /** Item ids already in this machine's branch → default-ticked (new = unticked). */
+  backedUp: string[];
+  /** False if bound but the branch couldn't be read (e.g. offline) — UI warns
+   *  that ticking will define a fresh snapshot. */
+  remoteReadOk: boolean;
+  readError?: string;
+}

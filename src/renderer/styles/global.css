@@ -4574,6 +4574,54 @@ button {
 }
 .web-list-action:hover { background: var(--surface); color: var(--text); }
 
+/* ── Config Backup settings tab ── */
+.backup-field {
+  display: block;
+  margin: 0 0 10px;
+}
+.backup-field-label {
+  display: block;
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+.backup-input {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 12px;
+  padding: 6px 8px;
+}
+.backup-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  cursor: pointer;
+}
+.backup-check input { cursor: pointer; }
+.backup-bound-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.backup-bound-header .web-settings-hint { flex: 1; word-break: break-all; }
+.backup-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+.backup-status {
+  font-size: 12px;
+  margin: 8px 0;
+}
+.backup-status-ok { color: var(--success, #5fb37a); }
+.backup-status-err { color: var(--error, #e06c6c); }
+
 /* ── MCP (right-sidebar view) ── */
 /* The panel shell is shared (.right-panel); this is the scrollable body that
    hosts the MCP list + add/edit form (the inner .web-list / .mcp-form styles

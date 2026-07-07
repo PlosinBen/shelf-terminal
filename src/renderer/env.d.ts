@@ -105,6 +105,20 @@ interface ShelfApi {
     /** Subscribe to "MCP config changed". Returns an unsubscribe fn. */
     onChanged: (callback: () => void) => () => void;
   };
+  configBackup: {
+    getBinding: () => Promise<import('../shared/config-backup').ConfigBackupBinding | null>;
+    bind: (
+      binding: import('../shared/config-backup').ConfigBackupBinding,
+    ) => Promise<{ ok: true } | { ok: false; reason: 'invalid' | 'no-git' | 'remote'; message: string }>;
+    unbind: () => Promise<void>;
+    list: () => Promise<import('../shared/config-backup').BackupListResult>;
+    run: (
+      selectedIds: string[],
+    ) => Promise<
+      | { ok: true; pushed: boolean; branch: string; itemCount: number }
+      | { ok: false; reason: 'not-bound' | 'no-git' | 'remote'; message: string }
+    >;
+  };
   app: {
     logsPath: () => Promise<string>;
     debugLog: (tag: string, msg: string) => void;

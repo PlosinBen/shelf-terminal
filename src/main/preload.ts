@@ -152,6 +152,14 @@ contextBridge.exposeInMainWorld('shelfApi', {
       return () => ipcRenderer.removeListener(IPC.MCP_CHANGED, listener);
     },
   },
+  configBackup: {
+    getBinding: () => ipcRenderer.invoke(IPC.CONFIG_BACKUP_GET_BINDING),
+    bind: (binding: { remoteUrl: string; machineLabel: string }) =>
+      ipcRenderer.invoke(IPC.CONFIG_BACKUP_BIND, binding),
+    unbind: () => ipcRenderer.invoke(IPC.CONFIG_BACKUP_UNBIND),
+    list: () => ipcRenderer.invoke(IPC.CONFIG_BACKUP_LIST),
+    run: (selectedIds: string[]) => ipcRenderer.invoke(IPC.CONFIG_BACKUP_RUN, selectedIds),
+  },
   app: {
     logsPath: (): Promise<string> => ipcRenderer.invoke(IPC.APP_LOGS_PATH),
     debugLog: (tag: string, msg: string): void => ipcRenderer.send(IPC.APP_DEBUG_LOG, tag, msg),
