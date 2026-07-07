@@ -1658,7 +1658,26 @@ function emitClaudeToolResult(
   cwd: string,
 ): void {
   const entry = inflightToolUses.get(toolUseId);
-  if (!entry) return;
+  if (!entry) {
+    // The tool_use that registered this id is gone from the process-local
+    // inflight map — its entry was set in a PRIOR agent-server process/state
+    // (e.g. the session got re-hosted onto a new process, whose map starts
+    // empty). Do NOT silently drop the result: that leaves the card blank
+    // forever AND erases the only evidence of the anomaly (which is why it was
+    // undiagnosable). Fail loud — log the id so the triggering lifecycle event
+    // is visible next time — and surface it to the renderer as an error card,
+    // keeping the raw output as the body so no data is lost.
+    serverLog('warn', 'claude', 'orphan tool_result: no inflight entry (map lost the tool_use — likely a session re-host)', {
+      toolUseId, isError, contentPreview: content.slice(0, 200),
+    });
+    send({
+      type: 'message', msgId: toolUseId, msgType: 'fold_code',
+      label: 'Tool result',
+      body: { content: isError ? stripToolErrorWrapper(content) : content },
+      errorMessage: 'Tool result arrived with no matching call (orphaned — see agent-server log).',
+    });
+    return;
+  }
   inflightToolUses.delete(toolUseId);
   // Preserve subagent nesting across the pending→completed upsert (same msgId):
   // the result re-emit must carry the same parentToolUseId or the renderer drops

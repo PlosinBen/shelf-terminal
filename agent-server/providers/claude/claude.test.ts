@@ -245,6 +245,35 @@ describe('stripToolErrorWrapper', () => {
   });
 });
 
+describe('processMessage — orphan tool_result (no inflight tool_use)', () => {
+  function makeSink() {
+    const sent: any[] = [];
+    const send = (m: OutgoingMessage) => { sent.push(m); };
+    return { send, sent };
+  }
+
+  // Regression: a tool_result whose tool_use is missing from this process's
+  // inflight map (e.g. the session was re-hosted onto a fresh process) used to
+  // hit `if (!entry) return` and be silently dropped — the card stayed blank
+  // forever and the anomaly left no trace. Now it must fail loud + surface an
+  // error card that still carries the raw output (no data loss).
+  it('surfaces an orphan tool_result as an error card WITH the output — never silently dropped', () => {
+    const { send, sent } = makeSink();
+    const map = createBlockMsgIdState();
+    processMessage(
+      { type: 'user', message: { content: [
+        { type: 'tool_result', tool_use_id: 'tu_orphan', content: 'the real output', is_error: false },
+      ] } } as any,
+      send, '/x', map,
+    );
+    const card = sent.find((m: any) => m.type === 'message' && m.msgId === 'tu_orphan');
+    expect(card).toBeDefined();                          // NOT dropped
+    expect(card.msgType).toBe('fold_code');
+    expect(card.errorMessage).toBeTruthy();              // surfaced as an error
+    expect(card.body?.content).toBe('the real output');  // output preserved
+  });
+});
+
 describe('processMessage — text msgId stability across SDK quirks', () => {
   // Helpers to drive processMessage like the real for-await loop does.
   function makeSink() {
