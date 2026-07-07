@@ -18,7 +18,12 @@ vi.mock('electron', () => ({
 
 const { runBackup } = await import('./backup');
 const { saveBinding } = await import('./binding-store');
-const { listBackupSources, listImportItems, planImport } = await import('./import');
+const { listBackupSources, listImportItems, planImport, applyImport } = await import('./import');
+
+const liveSkillFile = (name: string, rel: string) =>
+  path.join(userDataDir, 'skills', 'skills', name, rel);
+const readLive = (name: string, rel: string) => fs.readFileSync(liveSkillFile(name, rel), 'utf-8');
+const readLiveMcp = () => JSON.parse(fs.readFileSync(path.join(userDataDir, 'mcp-servers.json'), 'utf-8'));
 
 let root: string;
 let bareRemote: string;
@@ -162,5 +167,65 @@ describe('config-backup import (read side)', () => {
     expect(plan.find((p) => p.id === 'skill:beta')!.hasConflict).toBe(false);
     expect(plan.find((p) => p.id === 'mcp:fs')!.entries[0].change).toBe('identical');
     expect(plan.find((p) => p.id === 'mcp:git')!.entries[0].change).toBe('new');
+  });
+
+  it('applyImport: new always copied, replace overwrites, keep preserves, never deletes', async () => {
+    // Live: skill "shared" (SKILL.md=X + a live-only notes.md) and mcp "existing".
+    const sharedDir = path.join(userDataDir, 'skills', 'skills', 'shared');
+    fs.mkdirSync(sharedDir, { recursive: true });
+    fs.writeFileSync(path.join(sharedDir, 'SKILL.md'), 'X');
+    fs.writeFileSync(path.join(sharedDir, 'notes.md'), 'keep-me'); // live-only
+    seedMcp({ existing: { type: 'stdio', command: 'old' } });
+    saveBinding({ remoteUrl: bareRemote, machineLabel: 'work-mac' });
+
+    await pushBranch('backup/src', {
+      'skills/shared/SKILL.md': 'Y',                              // differs
+      'skills/shared/extra.txt': 'e',                            // new
+      'skills/beta/SKILL.md': '---\nname: beta\n---\n',          // new skill
+      'mcp-servers.json': JSON.stringify({
+        existing: { type: 'stdio', command: 'new' },             // differs
+        git: { type: 'stdio', command: 'g' },                    // new
+      }),
+    });
+
+    await listBackupSources();
+    const res = await applyImport('origin/backup/src', [
+      { id: 'skill:shared', replaceConflicts: true },
+      { id: 'skill:beta', replaceConflicts: false },
+      { id: 'mcp:git', replaceConflicts: false },
+      { id: 'mcp:existing', replaceConflicts: false }, // differs + keep
+    ]);
+
+    // skills: SKILL.md replaced, extra.txt added, live-only notes.md untouched.
+    expect(readLive('shared', 'SKILL.md')).toBe('Y');
+    expect(readLive('shared', 'extra.txt')).toBe('e');
+    expect(readLive('shared', 'notes.md')).toBe('keep-me');
+    expect(fs.existsSync(liveSkillFile('beta', 'SKILL.md'))).toBe(true);
+
+    // mcp: git added; existing kept (differs + keep) — per-server, not whole-file.
+    const mcp = readLiveMcp();
+    expect(mcp.git).toBeDefined();
+    expect(mcp.existing.command).toBe('old');
+
+    expect(res).toMatchObject({ ok: true, skillsWritten: 3, mcpWritten: 1 });
+    expect(res.itemsChanged.sort()).toEqual(['mcp:git', 'skill:beta', 'skill:shared']);
+  });
+
+  it('applyImport keep: differing file preserved but new files still copied', async () => {
+    const sharedDir = path.join(userDataDir, 'skills', 'skills', 'shared');
+    fs.mkdirSync(sharedDir, { recursive: true });
+    fs.writeFileSync(path.join(sharedDir, 'SKILL.md'), 'X');
+    saveBinding({ remoteUrl: bareRemote, machineLabel: 'm' });
+    await pushBranch('backup/src', {
+      'skills/shared/SKILL.md': 'Y',      // differs → keep
+      'skills/shared/extra.txt': 'e',     // new → still copied
+    });
+
+    await listBackupSources();
+    const res = await applyImport('origin/backup/src', [{ id: 'skill:shared', replaceConflicts: false }]);
+
+    expect(readLive('shared', 'SKILL.md')).toBe('X');   // kept
+    expect(readLive('shared', 'extra.txt')).toBe('e');  // new copied
+    expect(res.skillsWritten).toBe(1);
   });
 });

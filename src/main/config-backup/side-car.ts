@@ -61,6 +61,9 @@ export interface SideCar {
   listFilesAtRef(ref: string): Promise<string[]>;
   /** File content at a ref, or null if the path does not exist there. */
   readFileAtRef(ref: string, relPath: string): Promise<string | null>;
+  /** Materialize paths from a ref into the working tree (real bytes on disk),
+   *  so Import can fs-copy them into live binary-safe. Does not move HEAD. */
+  checkoutPathsFromRef(ref: string, paths: string[]): Promise<void>;
 }
 
 export function createSideCar(): SideCar {
@@ -164,6 +167,12 @@ export function createSideCar(): SideCar {
       } catch {
         return null; // path absent at this ref
       }
+    },
+
+    async checkoutPathsFromRef(ref: string, paths: string[]): Promise<void> {
+      if (paths.length === 0) return;
+      const git = await repo();
+      await git.checkout([ref, '--', ...paths]);
     },
   };
 }

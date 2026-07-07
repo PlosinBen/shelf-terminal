@@ -10,11 +10,15 @@ import {
   type BackupMachineManifest,
   type ImportEntry,
   type ImportItemPlan,
+  type ImportDecision,
 } from '@shared/config-backup';
 import { log } from '@shared/logger';
 import { getAppInstanceId } from '../app-instance-id';
 import { parseSkillMeta, skillDirPath } from '../skills-store';
-import { listMcpServers } from '../mcp-store';
+import { listMcpServers, addMcpServer, updateMcpServer } from '../mcp-store';
+import { onSkillsChanged } from '../skills-sync';
+import { onMcpChanged } from '../mcp-sync';
+import type { McpServerBlock } from '@shared/mcp';
 import { loadBinding } from './binding-store';
 import { createSideCar, type SideCar } from './side-car';
 
@@ -198,4 +202,127 @@ export async function planImport(
     });
   }
   return out;
+}
+
+// ── Apply: the ONLY writer of live. Per item: new files always copied, identical
+//    skipped, differing files copied iff replaceConflicts. Never deletes. ──────
+
+export interface ImportApplyResult {
+  ok: true;
+  /** Skill files copied into live. */
+  skillsWritten: number;
+  /** MCP servers added/updated in live. */
+  mcpWritten: number;
+  /** Ids that wrote at least one change. */
+  itemsChanged: string[];
+}
+
+/** Recursively list file paths under `dir`, relative to it. */
+function walkFiles(dir: string, base = dir): string[] {
+  const out: string[] = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const abs = path.join(dir, entry.name);
+    if (entry.isDirectory()) out.push(...walkFiles(abs, base));
+    else out.push(path.relative(base, abs));
+  }
+  return out;
+}
+
+function bytesEqual(a: string, b: string): boolean {
+  return fs.readFileSync(a).equals(fs.readFileSync(b));
+}
+
+function copyFile(src: string, dest: string): void {
+  fs.mkdirSync(path.dirname(dest), { recursive: true });
+  fs.copyFileSync(src, dest);
+}
+
+/** Copy a backup skill's files into live (binary-safe). Returns files written. */
+async function applySkill(ref: string, name: string, replace: boolean, sideCar: SideCar): Promise<number> {
+  const repoRel = `${REPO_SKILLS_DIR}/${name}`;
+  await sideCar.checkoutPathsFromRef(ref, [repoRel]); // materialize real bytes
+  const srcDir = path.join(sideCar.dir, repoRel);
+  if (!fs.existsSync(srcDir)) return 0;
+  const liveDir = skillDirPath(name);
+  let written = 0;
+  for (const rel of walkFiles(srcDir)) {
+    const src = path.join(srcDir, rel);
+    const dest = path.join(liveDir, rel);
+    if (!fs.existsSync(dest)) {
+      copyFile(src, dest); // new file — additive
+      written++;
+    } else if (bytesEqual(src, dest)) {
+      // identical — skip
+    } else if (replace) {
+      copyFile(src, dest); // differs + replace
+      written++;
+    }
+    // differs + keep → leave live untouched
+  }
+  return written;
+}
+
+/** Merge one backup MCP server block into live (per-server, never whole-file). */
+async function applyMcp(ref: string, name: string, replace: boolean, sideCar: SideCar): Promise<boolean> {
+  const raw = await sideCar.readFileAtRef(ref, REPO_MCP_FILE);
+  if (!raw) return false;
+  let servers: Record<string, unknown>;
+  try {
+    servers = JSON.parse(raw);
+  } catch {
+    return false;
+  }
+  if (!(name in servers)) return false;
+  const block = servers[name] as McpServerBlock;
+  const live = listMcpServers();
+  if (!(name in live)) {
+    return addMcpServer(name, block).ok;
+  }
+  if (JSON.stringify(live[name]) === JSON.stringify(block)) return false; // identical
+  if (!replace) return false; // keep live
+  return updateMcpServer(name, block).ok;
+}
+
+/**
+ * Apply an import into live — the ONLY writer of live config. For each decision:
+ * new files/servers are always copied (additive), identical skipped, and
+ * differing ones overwritten only when replaceConflicts is set. Live-only skill
+ * files are never removed (no-orphan `skills#8`). Writes route through the normal
+ * re-projection pipelines (onSkillsChanged / onMcpChanged).
+ */
+export async function applyImport(
+  ref: string,
+  decisions: ImportDecision[],
+  sideCar: SideCar = createSideCar(),
+): Promise<ImportApplyResult> {
+  let skillsWritten = 0;
+  let mcpWritten = 0;
+  const itemsChanged: string[] = [];
+  let anySkill = false;
+  let anyMcp = false;
+
+  for (const { id, replaceConflicts } of decisions) {
+    const parsed = parseId(id);
+    if (!parsed) continue;
+    if (parsed.kind === 'skill') {
+      const n = await applySkill(ref, parsed.name, replaceConflicts, sideCar);
+      if (n > 0) {
+        skillsWritten += n;
+        itemsChanged.push(id);
+        anySkill = true;
+      }
+    } else if (parsed.kind === 'mcp') {
+      const wrote = await applyMcp(ref, parsed.name, replaceConflicts, sideCar);
+      if (wrote) {
+        mcpWritten++;
+        itemsChanged.push(id);
+        anyMcp = true;
+      }
+    }
+  }
+
+  if (anySkill) onSkillsChanged();
+  if (anyMcp) onMcpChanged();
+  log.info('config-backup', `import applied: ${skillsWritten} skill file(s), ${mcpWritten} mcp server(s)`);
+  return { ok: true, skillsWritten, mcpWritten, itemsChanged };
 }
