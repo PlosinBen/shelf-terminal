@@ -1471,6 +1471,17 @@ type InflightToolUseEntry = (
 };
 const inflightToolUses = new Map<string, InflightToolUseEntry>();
 
+// Fail-loud policy (context/agent-observability): an incoming event must never
+// vanish without a trace. This dedups "unknown wire type" warns so SDK drift is
+// observable without flooding the log when a new type recurs every chunk/message.
+const seenUnknownWire = new Set<string>();
+function warnUnknownWireOnce(kind: string, detail: string): void {
+  const key = `${kind}:${detail}`;
+  if (seenUnknownWire.has(key)) return;
+  seenUnknownWire.add(key);
+  serverLog('warn', 'claude', `unhandled ${kind} — not rendered (SDK drift?)`, { detail });
+}
+
 /**
  * Plan-panel task mirror (replaces TodoWrite mirror as of SDK 0.3.142).
  *
@@ -1905,6 +1916,10 @@ export function processMessage(msg: SDKMessage, send: SendFn, cwd: string, block
           content({ type: 'stream', msgId, streamType: 'text', content: delta.text });
         } else if (delta.type === 'thinking_delta' && typeof delta.thinking === 'string' && delta.thinking.length > 0) {
           content({ type: 'stream', msgId, streamType: 'thinking', content: delta.thinking });
+        } else if (delta.type !== 'text_delta' && delta.type !== 'thinking_delta') {
+          // Unknown delta type (SDK drift) — empty text/thinking deltas are
+          // benign noise, but a NEW delta type carrying content must not vanish.
+          warnUnknownWireOnce('stream delta type', String((delta as any).type));
         }
       }
       break;
@@ -2010,6 +2025,13 @@ export function processMessage(msg: SDKMessage, send: SendFn, cwd: string, block
           rateLimits: [...rateLimitBuckets.values()],
         });
       }
+      break;
+    }
+    default: {
+      // Fail-loud on an unrecognized SDK message type instead of silently
+      // dropping it — SDK drift (a new type carrying real content) must leave a
+      // trace. See fail-loud policy (context/agent-observability).
+      warnUnknownWireOnce('SDK message type', String((msg as any).type));
       break;
     }
   }
