@@ -10,6 +10,7 @@ import { registerWebHandlers } from './web';
 import { registerNotesHandlers } from './notes';
 import { registerSkillsHandlers } from './skills';
 import { registerMcpHandlers } from './mcp';
+import { registerConfigBackupHandlers } from './config-backup';
 import { registerUpdaterHandlers } from './updater';
 import { registerPmHandlers } from './pm';
 import { registerFindHandlers } from './find';
@@ -32,6 +33,7 @@ export function registerAllIpcHandlers(): void {
   registerNotesHandlers();
   registerSkillsHandlers();
   registerMcpHandlers();
+  registerConfigBackupHandlers();
   registerUpdaterHandlers();
   registerPmHandlers();
   registerFindHandlers();

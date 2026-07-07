@@ -82,6 +82,17 @@ export const IPC = {
   // Sibling of SKILLS_CHANGED; see mcp-sync.ts.
   MCP_CHANGED: 'mcp:changed',
 
+  // Config Backup (App-Level Config Backup & Copy — per-machine git branch)
+  CONFIG_BACKUP_GET_BINDING: 'config-backup:get-binding',
+  CONFIG_BACKUP_BIND: 'config-backup:bind',
+  CONFIG_BACKUP_UNBIND: 'config-backup:unbind',
+  CONFIG_BACKUP_LIST: 'config-backup:list',
+  CONFIG_BACKUP_RUN: 'config-backup:run',
+  CONFIG_BACKUP_LIST_SOURCES: 'config-backup:list-sources',
+  CONFIG_BACKUP_LIST_IMPORT_ITEMS: 'config-backup:list-import-items',
+  CONFIG_BACKUP_PLAN_IMPORT: 'config-backup:plan-import',
+  CONFIG_BACKUP_APPLY_IMPORT: 'config-backup:apply-import',
+
   // Logs
   LOGS_CLEAR: 'logs:clear',
   LOGS_SIZE: 'logs:size',

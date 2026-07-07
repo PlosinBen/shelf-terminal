@@ -145,6 +145,22 @@ App-level MCP servers (`<userData>/mcp-servers.json`, keyed object). See `contex
 | `remove(name)` | invoke `mcp:remove` |
 | `onChanged(cb())` | recv `mcp:changed` → unsubscribe fn (config mutated) |
 
+## configBackup (`shelfApi.configBackup`)
+
+App-Level Config Backup & Copy（skills + MCP）。Backup = 快照 live → 本機的 `backup/<app-instance-id>` 分支；Import = 從某分支複製進 live。See `context/config-backup`、`architecture/config-backup`。型別在 `src/shared/config-backup.ts`。
+
+| Method | Shape |
+|--------|-------|
+| `getBinding()` | invoke `config-backup:get-binding` → `ConfigBackupBinding \| null` |
+| `bind({ remoteUrl, machineLabel })` | invoke `config-backup:bind` → `{ ok:true } \| { ok:false, reason:'invalid'\|'no-git'\|'remote', message }`（先 preflight 才存）|
+| `unbind()` | invoke `config-backup:unbind` |
+| `list()` | invoke `config-backup:list` → `BackupListResult`（binding + live items + `backedUp` 預勾 + `remoteReadOk`）|
+| `run(selectedIds)` | invoke `config-backup:run` → `{ ok:true, pushed, branch, itemCount } \| { ok:false, reason:'not-bound'\|'no-git'\|'remote', message }`（Backup：勾選集完整快照 → push）|
+| `listSources()` | invoke `config-backup:list-sources` → `BackupSource[]`（所有備份分支，含自己，own 優先）|
+| `listImportItems(ref)` | invoke `config-backup:list-import-items` → `BackupItemSummary[]`（某分支的項目，唯讀）|
+| `planImport(ref, ids)` | invoke `config-backup:plan-import` → `ImportItemPlan[]`（逐項 new/identical/differs + diff）|
+| `applyImport(ref, decisions)` | invoke `config-backup:apply-import` → `ImportApplyResult`（唯一寫 live 者；`decisions: ImportDecision[]`）|
+
 ## web (`shelfApi.web`)
 
 Manage the shared web session + the app-global `web.fetch` permission popup. See `context/web-tab`. The `<webview>` itself uses the `persist:web` partition directly (it is not an IPC channel); these methods are the management + permission surface only.
