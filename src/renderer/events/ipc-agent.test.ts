@@ -29,6 +29,8 @@ function makeMockAgentApi() {
       storeCredential: record('storeCredential'),
       clearCredential: record('clearCredential'),
       checkAuth: record('checkAuth'),
+      startLogin: record('startLogin'),
+      cancelLogin: record('cancelLogin'),
       onMessage: listener('onMessage'),
       onStream: listener('onStream'),
       onStatus: listener('onStatus'),
@@ -39,6 +41,8 @@ function makeMockAgentApi() {
       onPickerRequest: listener('onPickerRequest'),
       onCapabilities: listener('onCapabilities'),
       onAuthRequired: listener('onAuthRequired'),
+      onLoginPrompt: listener('onLoginPrompt'),
+      onLoginDone: listener('onLoginDone'),
       onInitStatus: listener('onInitStatus'),
     },
     callbacks,
@@ -119,6 +123,22 @@ describe('bindAgentIPCGroup', () => {
       onAgent('agent:onAuthRequired', handler);
       mock.callbacks.onAuthRequired('tab-1', 'claude');
       expect(handler).toHaveBeenCalledWith({ tabId: 'tab-1', provider: 'claude' });
+    });
+
+    it('forwards onLoginPrompt', () => {
+      const handler = vi.fn();
+      onAgent('agent:onLoginPrompt', handler);
+      const prompt = { provider: 'copilot', verificationUri: 'https://github.com/login/device', userCode: '1E5E-903B', prefilledUri: 'https://github.com/login/device?user_code=1E5E-903B' };
+      mock.callbacks.onLoginPrompt('tab-1', prompt);
+      expect(handler).toHaveBeenCalledWith({ tabId: 'tab-1', prompt });
+    });
+
+    it('forwards onLoginDone', () => {
+      const handler = vi.fn();
+      onAgent('agent:onLoginDone', handler);
+      const result = { provider: 'copilot', ok: true };
+      mock.callbacks.onLoginDone('tab-1', result);
+      expect(handler).toHaveBeenCalledWith({ tabId: 'tab-1', result });
     });
 
     it('forwards onInitStatus', () => {

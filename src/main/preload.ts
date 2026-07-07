@@ -277,6 +277,10 @@ contextBridge.exposeInMainWorld('shelfApi', {
       ipcRenderer.invoke(IPC.AGENT_CLEAR_CREDENTIAL, { tabId }),
     checkAuth: (tabId: string) =>
       ipcRenderer.invoke(IPC.AGENT_CHECK_AUTH, { tabId }),
+    startLogin: (tabId: string) =>
+      ipcRenderer.invoke(IPC.AGENT_START_LOGIN, { tabId }),
+    cancelLogin: (tabId: string) =>
+      ipcRenderer.invoke(IPC.AGENT_CANCEL_LOGIN, { tabId }),
     fetchTaskOutput: (tabId: string, taskId: string) =>
       ipcRenderer.invoke(IPC.AGENT_READ_TASK_OUTPUT, { tabId, taskId }),
     stopTask: (tabId: string, taskId: string) =>
@@ -340,6 +344,16 @@ contextBridge.exposeInMainWorld('shelfApi', {
       const listener = (_event: Electron.IpcRendererEvent, tabId: string, status: unknown) => callback(tabId, status);
       ipcRenderer.on(IPC.AGENT_INIT_STATUS, listener);
       return () => ipcRenderer.removeListener(IPC.AGENT_INIT_STATUS, listener);
+    },
+    onLoginPrompt: (callback: (tabId: string, prompt: unknown) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, tabId: string, prompt: unknown) => callback(tabId, prompt);
+      ipcRenderer.on(IPC.AGENT_LOGIN_PROMPT, listener);
+      return () => ipcRenderer.removeListener(IPC.AGENT_LOGIN_PROMPT, listener);
+    },
+    onLoginDone: (callback: (tabId: string, result: unknown) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, tabId: string, result: unknown) => callback(tabId, result);
+      ipcRenderer.on(IPC.AGENT_LOGIN_DONE, listener);
+      return () => ipcRenderer.removeListener(IPC.AGENT_LOGIN_DONE, listener);
     },
   },
   updater: {

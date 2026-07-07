@@ -1,4 +1,4 @@
-import type { AgentInitStatus, AgentPrefs, AgentQueueItem, Connection, TaskEvent } from '../../shared/types';
+import type { AgentInitStatus, AgentLoginPrompt, AgentLoginResult, AgentPrefs, AgentQueueItem, Connection, TaskEvent } from '../../shared/types';
 import { on, emit } from './bus';
 
 // Typed agent event vocabulary. Names prefixed 'agent:' to coexist with
@@ -26,6 +26,8 @@ export interface AgentEventMap {
   'agent:onPermissionRequest': { tabId: string; req: unknown };
   'agent:onPickerRequest': { tabId: string; req: unknown };
   'agent:onAuthRequired': { tabId: string; provider: string };
+  'agent:onLoginPrompt': { tabId: string; prompt: AgentLoginPrompt };
+  'agent:onLoginDone': { tabId: string; result: AgentLoginResult };
   'agent:onInitStatus': { tabId: string; status: AgentInitStatus };
 
   // -------- Outbound (bus → IPC) --------

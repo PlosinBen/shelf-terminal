@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import type { AgentMsg } from './components/AgentMessage';
-import type { AgentFile, AgentInitPhase, AgentPrefs, AgentProvider, AgentQueueItem, AuthMethod, NormalizedTask, TaskEvent } from '../shared/types';
+import type { AgentFile, AgentInitPhase, AgentLoginPrompt, AgentLoginResult, AgentPrefs, AgentProvider, AgentQueueItem, AuthMethod, NormalizedTask, TaskEvent } from '../shared/types';
 import { loadAgentMessagesLatest, saveAgentMessagesDelta, clearAgentSession } from './storage/agent-history';
 import { reconcileQueueSnapshot, type PendingSend } from './queue-reconcile';
 import { debugLog } from './debugLog';
@@ -107,6 +107,11 @@ export interface AgentTabState {
   authRequired: { provider: string } | null;
   authBusy: boolean;
   authError: string | null;
+  // Interactive device-flow login (Copilot). `loginPrompt` holds the
+  // verification URL + code while login is in progress; `loginBusy` gates the
+  // button (true from click until auth_login_done). See features copilot-device-login.
+  loginPrompt: AgentLoginPrompt | null;
+  loginBusy: boolean;
 
   // init
   initStatus: 'starting' | 'ready' | 'failed';
@@ -342,6 +347,8 @@ export function initTab(tabId: string, opts: InitTabOpts) {
     authRequired: null,
     authBusy: false,
     authError: null,
+    loginPrompt: null,
+    loginBusy: false,
     initStatus: 'starting',
     initPhase: null,
     initError: null,
@@ -843,6 +850,33 @@ export function setAuthBusy(tabId: string, busy: boolean) {
 
 export function setAuthError(tabId: string, err: string | null) {
   update(tabId, (prev) => ({ ...prev, authError: err }));
+}
+
+// ── Interactive device-flow login actions (see features copilot-device-login) ──
+
+/** Mark login as started (button click). Clears any prior prompt/error. */
+export function beginLogin(tabId: string) {
+  update(tabId, (prev) => ({ ...prev, loginBusy: true, loginPrompt: null, authError: null }));
+}
+
+/** Store the verification URL + code emitted while login polls. */
+export function setLoginPrompt(tabId: string, prompt: AgentLoginPrompt) {
+  update(tabId, (prev) => ({ ...prev, loginPrompt: prompt }));
+}
+
+/**
+ * Apply the terminal login result. On success clears the AuthPane (authRequired
+ * → null); on cancel just resets; on failure surfaces the error. Always clears
+ * loginBusy + loginPrompt.
+ */
+export function finishLogin(tabId: string, result: AgentLoginResult) {
+  update(tabId, (prev) => ({
+    ...prev,
+    loginBusy: false,
+    loginPrompt: null,
+    authRequired: result.ok ? null : prev.authRequired,
+    authError: result.ok || result.cancelled ? null : (result.error ?? 'Login failed.'),
+  }));
 }
 
 export function setInitStatus(

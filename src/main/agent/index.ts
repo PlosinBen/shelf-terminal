@@ -1,4 +1,4 @@
-import { BrowserWindow, ipcMain } from 'electron';
+import { BrowserWindow, ipcMain, shell } from 'electron';
 import { IPC } from '@shared/ipc-channels';
 import { log } from '@shared/logger';
 import type { Connection, AgentProvider } from '@shared/types';
@@ -213,6 +213,18 @@ export function initAgentManager(windowGetter: () => BrowserWindow | null): void
     return session.backend.checkAuth(session.cwd);
   });
 
+  ipcMain.handle(IPC.AGENT_START_LOGIN, async (_e, payload) => {
+    const session = sessions.get(payload.tabId);
+    if (!session?.backend.startLogin) return false;
+    session.backend.startLogin(session.cwd);
+    return true;
+  });
+
+  ipcMain.handle(IPC.AGENT_CANCEL_LOGIN, async (_e, payload) => {
+    const session = sessions.get(payload.tabId);
+    session?.backend.cancelLogin?.();
+  });
+
   ipcMain.handle(IPC.AGENT_READ_TASK_OUTPUT, async (_e, payload) => {
     const session = sessions.get(payload.tabId);
     if (!session?.backend.readTaskOutput) throw new Error('No session for task output');
@@ -229,6 +241,27 @@ export function initAgentManager(windowGetter: () => BrowserWindow | null): void
     session?.backend.cancelQueued?.(payload.clientMsgId);
   });
 
+}
+
+/**
+ * Open the device-flow verification URL in the user's LOCAL system browser.
+ * Deliberately the system browser (not an in-app web tab): the user authorizes
+ * with their own logged-in GitHub session, and this works identically whether
+ * the agent-server ran locally or on a remote host. Fail-loud on a bad URL —
+ * the renderer still shows the code as a manual fallback. See
+ * features copilot-device-login.
+ */
+function openLoginUrl(url: string): void {
+  try {
+    const u = new URL(url);
+    if (u.protocol !== 'https:' && u.protocol !== 'http:') {
+      log.warn('agent', `openLoginUrl: refusing non-http(s) URL: ${url}`);
+      return;
+    }
+    void shell.openExternal(url);
+  } catch (err: any) {
+    log.warn('agent', `openLoginUrl: invalid URL ${JSON.stringify(url)}: ${err?.message ?? err}`);
+  }
 }
 
 function send(channel: string, tabId: string, ...args: unknown[]) {
@@ -498,6 +531,26 @@ function dispatchEvent(tabId: string, event: AgentEvent) {
       break;
     case 'auth_required':
       send(IPC.AGENT_AUTH_REQUIRED, tabId, event.provider);
+      break;
+    case 'auth_login_prompt':
+      // Open the LOCAL browser for the device-flow URL (essential when the
+      // agent-server runs on a remote host — the CLI can't reach the user's
+      // browser) and hand the code to the renderer's AuthPane.
+      openLoginUrl(event.prefilledUri);
+      send(IPC.AGENT_LOGIN_PROMPT, tabId, {
+        provider: event.provider,
+        verificationUri: event.verificationUri,
+        userCode: event.userCode,
+        prefilledUri: event.prefilledUri,
+      });
+      break;
+    case 'auth_login_done':
+      send(IPC.AGENT_LOGIN_DONE, tabId, {
+        provider: event.provider,
+        ok: event.ok,
+        cancelled: event.cancelled,
+        error: event.error,
+      });
       break;
     case 'error':
       send(IPC.AGENT_MESSAGE, tabId, { type: 'error', content: event.error });
