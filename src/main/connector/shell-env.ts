@@ -100,10 +100,37 @@ function ensureUtf8Locale(env: Record<string, string>): void {
   }
 }
 
+/**
+ * Union two `:`-separated PATH strings, `primary` first, dropping duplicates.
+ * PURE (testable). POSIX-only separator — applyResolved never runs on win32.
+ */
+export function mergePathDirs(primary: string | undefined, secondary: string | undefined): string {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const part of [primary, secondary]) {
+    if (!part) continue;
+    for (const dir of part.split(':')) {
+      if (dir && !seen.has(dir)) { seen.add(dir); out.push(dir); }
+    }
+  }
+  return out.join(':');
+}
+
 function applyResolved(env: Record<string, string>, dt: number, mode: string): void {
   if (env.PATH) {
     ensureUtf8Locale(env);
     resolvedEnv = env;
+    // Publish the login-shell PATH into THIS process's own env. GUI launch
+    // (Dock/Finder) gives the main process a minimal PATH (no /usr/local/bin,
+    // /opt/homebrew/bin…), so every LOCAL child that inherits the default env —
+    // `execFile('docker'|'ssh'|'git', …)` with no explicit env, across the docker
+    // connector and others — can't find the binary (spawn ENOENT). Correcting
+    // process.env.PATH here, once, fixes them all with zero per-call-site
+    // injection. Merge (resolved first, keep any process.env-only dir) rather
+    // than replace, so we never drop a dir Electron added. Explicit getShellEnv()
+    // consumers (interactive pty / agent-server) still get the FULL login env
+    // (incl. LANG) — this only backfills the shared default env.
+    process.env.PATH = mergePathDirs(env.PATH, process.env.PATH);
     log.info('connector', `resolved shell env (${Object.keys(env).length} vars) in ${dt}ms [${mode}]`);
   } else {
     log.trace('shell-env', `resolve(${mode}) WARNING: env.PATH missing, NOT caching`);

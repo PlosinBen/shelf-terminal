@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 /**
  * Regression for the ~6s startup stall: resolving the login-shell env used to
@@ -21,10 +21,18 @@ vi.mock('@shared/logger', () => ({
 
 const ENV_OUTPUT = 'PATH=/opt/homebrew/bin:/usr/bin\nLANG=en_US.UTF-8\n';
 
+// applyResolved now mutates the real process.env.PATH (that's the production
+// behavior under test). Snapshot + restore around every test so this global
+// side effect never leaks across tests / files.
+let ORIG_PATH: string | undefined;
 beforeEach(() => {
   vi.resetModules();
   execFileSync.mockReset();
   execFile.mockReset();
+  ORIG_PATH = process.env.PATH;
+});
+afterEach(() => {
+  process.env.PATH = ORIG_PATH;
 });
 
 describe('shell-env resolution timing', () => {
@@ -58,6 +66,24 @@ describe('shell-env resolution timing', () => {
     const env = m.getShellEnv();
     expect(execFileSync).not.toHaveBeenCalled(); // prime already filled the cache
     expect(env.PATH).toContain('/opt/homebrew/bin');
+  });
+
+  it('backfills process.env.PATH with the resolved login PATH (so default-env execFile finds binaries)', async () => {
+    const origPath = process.env.PATH;
+    // Minimal GUI PATH — the login shell adds /opt/homebrew/bin (missing here).
+    process.env.PATH = '/usr/bin:/bin';
+    execFileSync.mockReturnValue(ENV_OUTPUT); // PATH=/opt/homebrew/bin:/usr/bin
+    try {
+      const m = await import('./shell-env');
+      m.getShellEnv(); // forces resolve → applyResolved patches process.env
+      const dirs = (process.env.PATH ?? '').split(':');
+      expect(dirs).toContain('/opt/homebrew/bin'); // resolved dir backfilled
+      expect(dirs).toContain('/bin');              // pre-existing dir kept
+      expect(dirs.filter((d) => d === '/usr/bin')).toHaveLength(1); // no dupes
+      expect(dirs.indexOf('/opt/homebrew/bin')).toBeLessThan(dirs.indexOf('/bin')); // resolved first
+    } finally {
+      process.env.PATH = origPath;
+    }
   });
 
   it('is a no-op on win32 (returns process.env, never spawns)', async () => {
@@ -146,5 +172,30 @@ describe('shell-env locale injection wiring', () => {
     const env = m.getShellEnv();
     expect(env.LANG).toBe('en_US.UTF-8');
     expect(execFileSync).toHaveBeenCalledTimes(1); // only `zsh -ilc env`, no defaults/locale probes
+  });
+});
+
+describe('mergePathDirs (PATH union used to backfill process.env.PATH)', () => {
+  it('puts primary dirs first, then secondary-only dirs', async () => {
+    const { mergePathDirs } = await import('./shell-env');
+    expect(mergePathDirs('/opt/homebrew/bin:/usr/bin', '/usr/bin:/bin'))
+      .toBe('/opt/homebrew/bin:/usr/bin:/bin');
+  });
+
+  it('dedupes overlapping dirs (keeps first occurrence)', async () => {
+    const { mergePathDirs } = await import('./shell-env');
+    expect(mergePathDirs('/usr/bin:/bin', '/bin:/usr/bin')).toBe('/usr/bin:/bin');
+  });
+
+  it('handles an empty/undefined side', async () => {
+    const { mergePathDirs } = await import('./shell-env');
+    expect(mergePathDirs('/usr/bin', undefined)).toBe('/usr/bin');
+    expect(mergePathDirs(undefined, '/bin')).toBe('/bin');
+    expect(mergePathDirs('', '/bin')).toBe('/bin');
+  });
+
+  it('drops empty segments', async () => {
+    const { mergePathDirs } = await import('./shell-env');
+    expect(mergePathDirs('/usr/bin::/bin', '')).toBe('/usr/bin:/bin');
   });
 });
