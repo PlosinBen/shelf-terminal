@@ -154,7 +154,7 @@ title: shelf-terminal — Intent → File Index
 | 快捷鍵系統 | `hooks/useKeybindings.ts` | combo string 對應 action，支援參數化 action |
 | Paste/drop 上傳 hook | `hooks/useAttachmentPaste.ts` | paste/drop/upload pipeline + file size check |
 | Terminal 渲染 | `components/TerminalView.tsx` | xterm.js instance cache + PTY I/O + paste hook + unread badge |
-| Agent 對話 UI | `components/AgentView.tsx` + `components/agent/{MessageList,InputZone,StatusBar,DecisionPanel,PlanPanel,AuthPane,ConnectionOverlay}.tsx` + `agentTabStore.ts` + `agentTabSubscriptions.ts` + `agent-message-builder.ts` | AgentView 是 layout coordinator，domain state 在 per-tab `agentTabStore`，子 component 各自 subscribe。`ConnectionOverlay` 是 pane-scoped（`absolute` 非 `fixed`）dim+blur 恢復遮罩，統一 init-`failed`（Retry）/ health-`dead`（Reconnect）/ reconnecting 三態 |
+| Agent 對話 UI | `components/AgentView.tsx` + `components/agent/{MessageList,InputZone,StatusBar,DecisionPanel,PlanPanel,AuthPane,ConnectionOverlay}.tsx` + `agentTabStore.ts` + `agentTabSubscriptions.ts` + `agent-message-builder.ts` | AgentView 是 layout coordinator，domain state 在 per-tab `agentTabStore`，子 component 各自 subscribe。`ConnectionOverlay` 是 pane-scoped（`absolute` 非 `fixed`）dim+blur「未 ready」遮罩，統一 init-`starting`（first-open/reconnect，phase 文字由 `agent/init-phase.ts` 提供）/ init-`failed`（Retry）/ health-`dead`（Reconnect）四態 |
 | Web tab（登入 surface + 瀏覽） | `components/WebTabView.tsx` | `<webview partition=persist:web>` + 網址列 + identity chip；人在這登入內網服務 |
 | Web.fetch 授權 popup | `components/WebPermissionPrompt.tsx` | app 層全域 popup，防偽 origin 顯示 + allow once/always/deny（由 `web:permission-request` 驅動） |
 | browser_open 確認 popup | `components/BrowserOpenPrompt.tsx` | app 層全域 popup，只有 Open/Deny（不記住），由 `web:browser-open-request` 驅動；核可後 `web:open-tab` 由 `App.tsx` 開分頁 |

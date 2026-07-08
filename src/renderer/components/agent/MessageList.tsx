@@ -31,13 +31,7 @@ export function MessageList({ tabId, visible }: Props) {
   const isStreaming = tab?.isStreaming ?? false;
   const pendingSends = tab?.pendingSends ?? [];
   const initStatus = tab?.initStatus ?? 'starting';
-  const initPhase = tab?.initPhase ?? null;
   const agentDisplay = settings.agentDisplay ?? {};
-  const startingText =
-    initPhase === 'deploying' ? 'Deploying runtime…' :
-    initPhase === 'connecting' ? 'Connecting…' :
-    initPhase === 'checking-auth' ? 'Checking sign-in…' :
-    'Starting agent…';
 
   const turns = useMemo(() => buildTurns(messages), [messages]);
 
@@ -133,12 +127,8 @@ export function MessageList({ tabId, visible }: Props) {
   return (
     <AgentDisplayContext.Provider value={agentDisplay}>
       <div className="agent-messages" ref={listRef}>
-        {initStatus === 'starting' && messages.length === 0 && (
-          <div className="agent-init-pane">
-            <span className="agent-loading-spinner" />
-            <span className="agent-loading-text">{startingText}</span>
-          </div>
-        )}
+        {/* 'starting' has no in-list pane — ConnectionOverlay covers the whole
+            pane with a spinner + phase text (see ConnectionOverlay). */}
         {initStatus === 'ready' && messages.length === 0 && !isStreaming && (
           <div className="agent-empty">Send a message to start</div>
         )}

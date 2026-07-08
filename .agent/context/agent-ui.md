@@ -173,16 +173,16 @@ InputZone ──emit('agent:send', ...)──▶ EventBus
 
 **Fix**：確保 `useStore()` 解構包含所有後續使用的欄位。
 
-## agent-ui#7 — Recovery overlay：pane-scoped `absolute`（非 `fixed`）、統一 init-failed / health-dead / reconnecting  ·  [Decision]
+## agent-ui#7 — Not-ready overlay：pane-scoped `absolute`（非 `fixed`）、統一 starting / init-failed / health-dead  ·  [Decision]
 
-**Decision**：連線失敗 / 中斷的復原 affordance 是一個**蓋在 agent pane 上的 dim+blur overlay + 置中 recovery card**（`ConnectionOverlay`），取代原本「list 頂端一小塊 + `dead` 只在 sidebar 亮個點」的易錯過設計。
+**Decision**：pane「還沒 ready」的呈現是一個**蓋在 agent pane 上的 dim+blur overlay + 置中 card**（`ConnectionOverlay`），取代原本「list 頂端一小塊 + `dead` 只在 sidebar 亮個點」的易錯過設計。
 
-**三態統一**：一個 overlay 收編三種需要使用者出手的情況 ——
+**四態統一**：一個 overlay 收編所有 pane 不可用的情況 ——
+- init `starting`（first-open **或** reconnect 中）：spinner + phase 文字（`initPhaseLabel(initPhase)` → Deploying / Connecting / Checking sign-in / Starting；dead+starting 時顯示「Reconnecting…」）。first-open init **也蓋**（不再只是 list 內的輕量 spinner —— 那太隱晦，pane 該明確讀作「還沒好」且 input 明顯被擋）
 - init `failed`（「Failed to start」+ Retry）
 - health `dead`（「Connection lost」+ Reconnect）
-- 進行中的 (re)connect（「Reconnecting…」spinner）
 
-兩個動作都走既有的 `handleRetryInit`；init ready + health 復原後 overlay **自清**（依賴 reconnect 的 health-seed，見 `connection-health#8` —— 沒 seed 紅燈不清、overlay 不會消失）。
+guard：只有 `ready` + healthy 才不蓋。phase 文字的單一 source 是 `components/agent/init-phase.ts` 的 `initPhaseLabel`（overlay 用它；MessageList 已無獨立 init-pane）。Retry/Reconnect 走既有 `handleRetryInit`；init ready + health 復原後 overlay **自清**（依賴 reconnect 的 health-seed，見 `connection-health#8` —— 沒 seed 紅燈不清、overlay 不會消失）。
 
 **為何 `absolute` 不是 `fixed`**：overlay 定位在 agent pane 內（`position:absolute` inside `.agent-view`），**不是** viewport-`fixed`。`fixed` 會蓋住 sidebar 或 split 的**兄弟 pane** —— 一個 pane 斷線不該遮住整個 app 或旁邊還活著的 pane。pane-scoped 讓失敗視覺被關在自己的 pane 裡。
 
@@ -190,7 +190,7 @@ InputZone ──emit('agent:send', ...)──▶ EventBus
 
 **Do not change casually because**：
 - 別把 overlay 改成 `fixed` —— 會蓋住 sidebar / sibling split pane（一個 pane 的失敗不該波及全 app）。
-- 別把三態拆回各自的小 affordance —— 統一一個 overlay 才不會像舊版那樣被錯過。
-- 別把 overlay 改成 opaque / 藏掉對話 —— 斷線時歷史仍要可讀。
+- 別把四態拆回各自的小 affordance —— 統一一個 overlay 才不會像舊版那樣被錯過（first-open starting 曾經只有 list 內 spinner，太隱晦）。
+- 別把 overlay 改成 opaque / 藏掉對話 —— 斷線 / reconnect 時歷史仍要可讀。
 
 **Related**：`connection-health#8`（reconnect health-seed —— overlay 自清的前提）、`connection-health#7`（兩層 health / reconnect 的失敗來源）、`architecture/agent-dispatch`、`src/renderer/components/agent/ConnectionOverlay.tsx`。

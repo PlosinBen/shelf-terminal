@@ -3173,19 +3173,10 @@ button {
   to { transform: rotate(360deg); }
 }
 
-.agent-init-pane {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  padding: 48px 24px;
-  color: var(--text-muted);
-}
-
-/* Recovery overlay — a broken agent pane (init failed / connection dead).
-   Scoped to the pane (absolute inside .agent-view), dim + blur so the
-   conversation behind stays readable while the pane is clearly unusable. */
+/* Not-ready overlay — covers the agent pane while starting (init / reconnect),
+   init failed, or connection dead. Scoped to the pane (absolute inside
+   .agent-view), dim + blur so the conversation behind stays readable while the
+   pane is clearly unusable. */
 .agent-conn-overlay {
   position: absolute;
   inset: 0;
