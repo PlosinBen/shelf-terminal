@@ -675,6 +675,13 @@ export function createClaudeBackend(): ServerBackend {
    * the orchestrator's silent per-message pref-diff apply (no divider).
    */
   function applyConfigEdit(key: ConfigEditKey, value: string, send: SendFn) {
+    // No-op guard: submitting the value that's already live (re-picking the
+    // selected model/effort/permission, or `/model <current>`) isn't a change —
+    // don't flash a status cycle or drop a divider for something that didn't
+    // move. On a config-edit turn no prior setter mutates the closure first, so
+    // the closure still holds the true prior value here.
+    const current = key === 'model' ? currentModel : key === 'effort' ? currentEffort : currentPermissionMode;
+    if (value === current) return;
     send({ type: 'status', state: 'streaming' });
     if (key === 'model') currentModel = value;
     else if (key === 'effort') currentEffort = value;
