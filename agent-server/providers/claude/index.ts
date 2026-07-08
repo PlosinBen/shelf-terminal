@@ -87,7 +87,7 @@ type PermissionResult =
 // `compact_boundary` system message (SDKCompactBoundaryMessage) once the
 // compaction summary is spliced in; there is NO separate success/failed result
 // message. A failed compaction simply never emits the boundary — the foreground
-// turn ends and closeForegroundTurn's fallback surfaces the error. (The old
+// turn ends and closeFrame's fallback surfaces the error. (The old
 // `subtype: 'status'` + `compact_result` shape no longer exists, which is why
 // every /compact used to report "Compaction did not complete".)
 export function isCompactBoundary(msg: SDKMessage): boolean {
@@ -332,6 +332,8 @@ export function createClaudeBackend(): ServerBackend {
   // generator and the pure turn-router (turn-router.ts) attributes each
   // message to a foreground turn or a server (auto-resume) turn. Replaces the
   // old per-turn sdkQuery + detached-drain. See DECISIONS / streaming-input.
+  // A user prompt waiting in the queue for its `system/init` to arrive. On init
+  // it is turned into an active foreground TurnFrame (openForegroundFrame).
   interface ForegroundTurn {
     /** Turn-bound send (orchestrator already wrapped it with turnId+context). */
     send: SendFn;
@@ -343,12 +345,30 @@ export function createClaudeBackend(): ServerBackend {
     /** Resolves this turn's `query()` promise (consumer calls on foreground result). */
     resolve: () => void;
   }
-  interface ServerTurn {
-    turnId: string;
-    /** Base session send pre-stamped with `turnId` + `startsTurn` on first message. */
+  // The active turn's unified representation. ONE content path (routeContent)
+  // drives BOTH a user foreground turn and an SDK auto-resume (server) turn —
+  // their only differences are DATA on this frame, not separate code paths.
+  // Previously foreground/server had near-duplicate route*/start* fns; the copy
+  // drifted (server forgot `user` tool_results → the "整排 tool 卡沒 result" bug).
+  // See features/claude-content-turn-unify.
+  interface TurnFrame {
+    kind: 'foreground' | 'server';
+    /** Content + status sink. FG: idle-deduped `turnSend`. Server: base send
+     *  pre-stamped with `turnId` + `startsTurn` on its first message. */
     send: SendFn;
     blockMsgIds: BlockMsgIdState;
-    started: boolean;
+    /** FG: forward EVERY SDK message to processMessage (live stream deltas +
+     *  the result's cost/usage). Server: only assistant/user + block-boundary
+     *  stream_event (whole-reply delivery, no per-turn cost echo). */
+    forwardAll: boolean;
+    // ── foreground-only ──
+    /** RAW (non-idle-deduped) session send — cost / context_patch / compact
+     *  fallback / auth / model-alias emits that must bypass idle dedup. */
+    rawSend?: SendFn;
+    cwd?: string;
+    pendingCompactMsgId?: string | null;
+    /** Resolves this turn's `query()` promise (called at the foreground close). */
+    resolve?: () => void;
   }
   interface Session {
     query: Query;
@@ -360,8 +380,10 @@ export function createClaudeBackend(): ServerBackend {
   let creatingSession: Promise<Session> | null = null;
   let sessionCwd = '';
   const pendingPush: ForegroundTurn[] = [];
-  let activeForeground: ForegroundTurn | null = null;
-  let activeServer: ServerTurn | null = null;
+  // The single active turn (foreground OR server). Turns are strictly serial
+  // (turn-router.ts), so one slot suffices; the `activeCycles` counter below
+  // tracks cardinality for busy/idle independently.
+  let activeFrame: TurnFrame | null = null;
   const router = createRouterState();
   // ── Busy/idle as a single active-cycle COUNTER (see features/claude-content-turn-unify) ──
   // Every SDK turn opens with `init` and closes with `result` (spike-confirmed;
@@ -389,11 +411,10 @@ export function createClaudeBackend(): ServerBackend {
   const NOOP_SEND: SendFn = () => {};
   const driftBlockMsgIds = createBlockMsgIdState();
 
-  /** The send fn to route an inbound permission/picker request to: the turn
-   *  the SDK is currently working (server turn takes precedence during an
-   *  auto-resume; else the active foreground turn; else most-recent). */
-  const activeSend = (): SendFn | null =>
-    (activeServer?.send ?? activeForeground?.turnSend ?? lastTurnSend);
+  /** The send fn to route an inbound permission/picker request to: the turn the
+   *  SDK is currently working (the single active frame), else the most-recent
+   *  session send. */
+  const activeSend = (): SendFn | null => (activeFrame?.send ?? lastTurnSend);
 
   const canUseTool: CanUseTool = (async (toolName, input, canUseOpts) => {
     const toolUseId = (canUseOpts as any)?.toolUseID ?? `sdk-${Date.now()}`;
@@ -819,15 +840,20 @@ export function createClaudeBackend(): ServerBackend {
     pendingPermissions.clear();
     const stuck = [...pendingPush];
     pendingPush.length = 0;
-    if (activeForeground) stuck.unshift(activeForeground);
-    activeForeground = null;
-    activeServer = null;
     activeCycles = 0; // session ending — force the counter to settled
     stoppable = true;
     for (const t of stuck) {
       t.turnSend({ type: 'status', state: 'idle' });
       t.resolve();
     }
+    // Active frame: a foreground turn idles + resolves its query(); a server
+    // (auto-resume) frame is just dropped (no query to resolve) — mirrors the
+    // pre-unify behavior where activeServer was nulled without an idle.
+    if (activeFrame && activeFrame.kind === 'foreground') {
+      activeFrame.send({ type: 'status', state: 'idle' });
+      activeFrame.resolve?.();
+    }
+    activeFrame = null;
   }
 
   /**
@@ -844,15 +870,16 @@ export function createClaudeBackend(): ServerBackend {
   function cancelActiveTurns() {
     const stuck = [...pendingPush];
     pendingPush.length = 0;
-    if (activeForeground) stuck.unshift(activeForeground);
-    activeForeground = null;
     for (const t of stuck) {
       t.turnSend({ type: 'status', state: 'idle' });
       t.resolve();
     }
-    if (activeServer) {
-      activeServer.send({ type: 'status', state: 'idle' });
-      activeServer = null;
+    // Active frame — BOTH kinds emit idle (spinner clears); only a foreground
+    // frame has a query() promise to resolve.
+    if (activeFrame) {
+      activeFrame.send({ type: 'status', state: 'idle' });
+      activeFrame.resolve?.();
+      activeFrame = null;
     }
     activeCycles = 0; // ESC force-settle — unconditional idle above already sent
     router.active = null;
@@ -915,144 +942,147 @@ export function createClaudeBackend(): ServerBackend {
         }
         return;
       case 'server':
-        if (action.start) startServerTurn();
-        routeServer(msg, !!action.close);
+        if (action.start) openServerFrame();
+        routeContent(msg, !!action.close);
         return;
       case 'foreground':
-        if (action.start) startForegroundTurn();
-        routeForeground(msg, !!action.close);
+        if (action.start) openForegroundFrame();
+        routeContent(msg, !!action.close);
         return;
     }
   }
 
-  function startForegroundTurn() {
+  function openForegroundFrame() {
     noteCycleOpen();
     const turn = pendingPush.shift();
-    // lastTurnSend is the RAW (non-idle-deduped) send: server turns + capability
-    // + task_event emits base off it and must NOT be swallowed by this turn's
-    // idle dedup. The foreground idle itself goes via turn.turnSend.
-    if (turn) { activeForeground = turn; lastTurnSend = turn.send; }
-    else {
+    if (turn) {
+      // lastTurnSend is the RAW (non-idle-deduped) send: server turns + capability
+      // + task_event emits base off it and must NOT be swallowed by this turn's
+      // idle dedup. The foreground idle itself goes via `send` (= turnSend).
+      lastTurnSend = turn.send;
+      activeFrame = {
+        kind: 'foreground', send: turn.turnSend, blockMsgIds: turn.blockMsgIds,
+        forwardAll: true, rawSend: turn.send, cwd: turn.cwd,
+        pendingCompactMsgId: turn.pendingCompactMsgId, resolve: turn.resolve,
+      };
+    } else {
       // Stray init with no pending push — synthesize so content isn't dropped.
       const s = lastTurnSend ?? (() => {});
-      activeForeground = { send: s, turnSend: s, blockMsgIds: createBlockMsgIdState(), cwd: sessionCwd, pendingCompactMsgId: null, resolve: () => {} };
+      activeFrame = {
+        kind: 'foreground', send: s, blockMsgIds: createBlockMsgIdState(),
+        forwardAll: true, rawSend: s, cwd: sessionCwd, pendingCompactMsgId: null, resolve: () => {},
+      };
     }
-  }
-
-  function closeForegroundTurn() {
-    const turn = activeForeground;
-    if (!turn) return;
-    activeForeground = null;
-    // Snapshot the still-running background tasks for reconciliation at the turn
-    // boundary. Each task was already emitted live in routeTask; this is a
-    // belt-and-braces authoritative running-set, idempotently upserted by the
-    // renderer. See #75.
-    const running = [...backgroundTasks.values()].filter((t) => !t.done);
-    if (running.length > 0 && lastTurnSend) lastTurnSend({ type: 'task_event', kind: 'snapshot', tasks: running });
-    // Persist the latest SDK session id once per turn.
-    if (lastSessionId) turn.send({ type: 'context_patch', patch: { lastSdkSessionId: lastSessionId } });
-    // Compact turn ended without a terminal compact_result — surface a note so
-    // the pending card doesn't sit forever (error / abort path).
-    if (turn.pendingCompactMsgId) {
-      turn.send({ type: 'message', msgId: turn.pendingCompactMsgId, msgType: 'fold_markdown', label: '/compact', errorMessage: 'Compaction did not complete' });
-      turn.pendingCompactMsgId = null;
-    }
-    stoppable = true;
-    // Gate the spinner-clearing idle on the active-cycle counter: if an
-    // auto-resume (or any other cycle) is still running, this close decrements
-    // but does NOT emit idle. The `result` handler already sent this turn's final
-    // cost/usage (as a streaming-state status the renderer applies regardless).
-    emitIdleIfSettled(turn.turnSend);
-    turn.resolve();
-  }
-
-  function routeForeground(msg: SDKMessage, close: boolean) {
-    const turn = activeForeground;
-    if (!turn) return;
-    const any = msg as any;
-
-    // Mid-turn auth failure → AuthPane takeover (mirrors copilot).
-    if (isClaudeAuthFailure(msg)) turn.send({ type: 'auth_required', provider: 'claude' });
-
-    // /compact completion detection. The SDK marks a finished compaction with a
-    // `compact_boundary` system message (see isCompactBoundary). Failure has no
-    // distinct signal — the boundary just never arrives and closeForegroundTurn
-    // surfaces "Compaction did not complete".
-    if (turn.pendingCompactMsgId && isCompactBoundary(msg)) {
-      turn.send({ type: 'message', msgId: turn.pendingCompactMsgId, msgType: 'fold_markdown', label: '/compact', body: { content: 'Compact completed' } });
-      turn.pendingCompactMsgId = null;
-      stoppable = true;
-    }
-
-    processMessage(msg, turn.turnSend, turn.cwd, turn.blockMsgIds);
-
-    // Alias resolution → pin concrete model (see agent-config-flow#4).
-    if (msg.type === 'assistant' && any.parent_tool_use_id == null) {
-      const resolved = any.message?.model;
-      if (shouldAdoptResolvedModel(resolved, currentModel, cache.models ?? [])) {
-        currentModel = resolved;
-        turn.send({ type: 'capabilities', ...buildCapabilities() });
-      }
-    }
-
-    if (close) closeForegroundTurn();
   }
 
   /** Open a server-initiated (auto-resume) turn: mint a turnId the main side
    *  registers via `turn_started`, so the prose renders as a normal reply. */
-  function startServerTurn() {
+  function openServerFrame() {
     const base = lastTurnSend;
-    if (!base) { activeServer = null; return; }
+    if (!base) { activeFrame = null; return; }
     noteCycleOpen();
     const turnId = `t-${randomUUID().slice(0, 8)}`;
     base({ type: 'turn_started', turnId });
-    // Drive busy state for the auto-resume: streaming on open, idle on close
-    // (routeServer). main forwards these ONLY when no foreground turn is in
-    // flight, so the spinner reflects the agent actively writing instead of a
-    // frozen "idle". See background-tasks#6.
+    // Drive busy state for the auto-resume: streaming on open, idle on close.
+    // main forwards these ONLY when no foreground turn is in flight, so the
+    // spinner reflects the agent actively writing. See background-tasks#6.
     base({ type: 'status', state: 'streaming', turnId });
-    const st: ServerTurn = {
-      turnId,
-      blockMsgIds: createBlockMsgIdState(),
-      started: false,
-      send: (m) => {
-        const tagged: any = { ...m, turnId };
-        if (!st.started && m.type === 'message') { tagged.startsTurn = true; st.started = true; }
-        base(tagged);
-      },
+    let started = false;
+    const send: SendFn = (m) => {
+      const tagged: any = { ...m, turnId };
+      if (!started && m.type === 'message') { tagged.startsTurn = true; started = true; }
+      base(tagged);
     };
-    activeServer = st;
+    activeFrame = { kind: 'server', send, blockMsgIds: createBlockMsgIdState(), forwardAll: false };
   }
 
-  function routeServer(msg: SDKMessage, close: boolean) {
-    const st = activeServer;
-    if (!st) return;
-    // Content in an auto-resume turn goes through the SAME processMessage as a
-    // foreground turn — assistant prose, tool_use cards AND their tool_results
-    // (which ride on `user` messages). Previously this handled ONLY `assistant`,
-    // so every tool_result during auto-resume was silently dropped → the tool
-    // card opened but never completed (the "整排 tool 卡沒 result" bug). We still
-    // skip `stream_event` (whole-reply, no incremental streaming placeholder) for
-    // the auto-resume lane. See features/claude-content-turn-unify.
-    if (msg.type === 'assistant' || msg.type === 'user') {
-      processMessage(msg, st.send, sessionCwd, st.blockMsgIds);
-    } else if (msg.type === 'stream_event') {
-      // Forward ONLY the block-boundary stream events (message_start resets the
-      // per-index→msgId map; content_block_start advances the index). Without
-      // them, every assistant message in a multi-round auto-resume turn computes
-      // the same block index → getOrMintBlockMsgId returns ONE cached id → all
-      // replies/thinking collapse onto a single msgId (overwriting each other).
-      // We deliberately do NOT forward content_block_delta, so auto-resume keeps
-      // its whole-reply (non-streaming) delivery. See features/claude-content-turn-unify.
-      const ev = (msg as any).event;
-      if (ev?.type === 'message_start' || ev?.type === 'content_block_start') {
-        processMessage(msg, st.send, sessionCwd, st.blockMsgIds);
+  /**
+   * The SINGLE content path for BOTH foreground and auto-resume turns. What a
+   * frame forwards is DATA (`forwardAll`), not a separate function — so a new
+   * content handler is added in ONE place and can never again be forgotten on
+   * one lane (that omission was the dropped-tool_result bug). See
+   * features/claude-content-turn-unify.
+   */
+  function routeContent(msg: SDKMessage, close: boolean) {
+    const frame = activeFrame;
+    if (!frame) return;
+    const any = msg as any;
+    const cwd = frame.cwd ?? sessionCwd;
+
+    // ── foreground-only pre-hooks ──
+    if (frame.kind === 'foreground') {
+      // Mid-turn auth failure → AuthPane takeover (mirrors copilot).
+      if (isClaudeAuthFailure(msg)) frame.rawSend!({ type: 'auth_required', provider: 'claude' });
+      // /compact completion. The SDK marks a finished compaction with a
+      // `compact_boundary` system message (see isCompactBoundary). Failure has
+      // no distinct signal — the boundary just never arrives and closeFrame
+      // surfaces "Compaction did not complete".
+      if (frame.pendingCompactMsgId && isCompactBoundary(msg)) {
+        frame.rawSend!({ type: 'message', msgId: frame.pendingCompactMsgId, msgType: 'fold_markdown', label: '/compact', body: { content: 'Compact completed' } });
+        frame.pendingCompactMsgId = null;
+        stoppable = true;
       }
     }
-    if (close) {
-      emitIdleIfSettled(st.send);
-      activeServer = null;
+
+    // ── content ──
+    // FG forwards EVERY message (live stream deltas + the result's cost/usage).
+    // Server forwards only assistant/user (prose + tool_results — the latter
+    // ride on `user` messages; dropping them was the "整排 tool 卡沒 result" bug)
+    // AND the block-boundary stream events: message_start resets the per-index→
+    // msgId map, content_block_start advances the index — without them a multi-
+    // round auto-resume collapses every reply onto one cached msgId. Server does
+    // NOT forward content_block_delta (keeps whole-reply, non-streaming delivery)
+    // nor the result (no per-turn cost echo). See features/claude-content-turn-unify.
+    if (frame.forwardAll) {
+      processMessage(msg, frame.send, cwd, frame.blockMsgIds);
+    } else if (msg.type === 'assistant' || msg.type === 'user') {
+      processMessage(msg, frame.send, cwd, frame.blockMsgIds);
+    } else if (msg.type === 'stream_event') {
+      const ev = any.event;
+      if (ev?.type === 'message_start' || ev?.type === 'content_block_start') {
+        processMessage(msg, frame.send, cwd, frame.blockMsgIds);
+      }
     }
+
+    // ── foreground-only post-hook ──
+    // Alias resolution → pin concrete model (see agent-config-flow#4).
+    if (frame.kind === 'foreground' && msg.type === 'assistant' && any.parent_tool_use_id == null) {
+      const resolved = any.message?.model;
+      if (shouldAdoptResolvedModel(resolved, currentModel, cache.models ?? [])) {
+        currentModel = resolved;
+        frame.rawSend!({ type: 'capabilities', ...buildCapabilities() });
+      }
+    }
+
+    if (close) closeFrame();
+  }
+
+  function closeFrame() {
+    const frame = activeFrame;
+    if (!frame) return;
+    activeFrame = null;
+    if (frame.kind === 'foreground') {
+      // Snapshot the still-running background tasks for reconciliation at the
+      // turn boundary. Each was emitted live in routeTask; this is a belt-and-
+      // braces authoritative running-set, idempotently upserted. See #75.
+      const running = [...backgroundTasks.values()].filter((t) => !t.done);
+      if (running.length > 0 && lastTurnSend) lastTurnSend({ type: 'task_event', kind: 'snapshot', tasks: running });
+      // Persist the latest SDK session id once per turn.
+      if (lastSessionId) frame.rawSend!({ type: 'context_patch', patch: { lastSdkSessionId: lastSessionId } });
+      // Compact turn ended without a terminal compact_result — surface a note so
+      // the pending card doesn't sit forever (error / abort path).
+      if (frame.pendingCompactMsgId) {
+        frame.rawSend!({ type: 'message', msgId: frame.pendingCompactMsgId, msgType: 'fold_markdown', label: '/compact', errorMessage: 'Compaction did not complete' });
+        frame.pendingCompactMsgId = null;
+      }
+      stoppable = true;
+    }
+    // Gate the spinner-clearing idle on the active-cycle counter: if another
+    // cycle is still running, this close decrements but does NOT emit idle. For a
+    // foreground turn the `result` (forwarded above) already sent the final
+    // cost/usage on a streaming-state status the renderer applies regardless.
+    emitIdleIfSettled(frame.send);
+    frame.resolve?.();
   }
 
   function routeTask(msg: SDKMessage) {
