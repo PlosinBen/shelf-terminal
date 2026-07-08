@@ -56,11 +56,37 @@ test.describe('agent init-readiness gate', () => {
       // And nothing was optimistically queued: no pending chip in the timeline.
       await expect(page.locator('.agent-msg-queued')).toHaveCount(0);
 
-      // Clicking Retry re-arms init: overlay flips to the 'Reconnecting…' state
+      // Clicking Retry re-arms init: overlay flips to the starting cover
       // (caps still fails here, so it settles back to failed — proves the button
       // drives the retry-init path, not a dead control).
       await overlay.locator('button', { hasText: 'Retry' }).click();
-      await expect(overlay).toContainText(/Reconnecting|Failed to start agent/, { timeout: 10_000 });
+      await expect(overlay).toContainText(/Starting agent|Reconnecting|Failed to start agent/, { timeout: 10_000 });
+    });
+  });
+
+  // First-open init is not ready yet → the pane is covered by a prominent
+  // dim+blur overlay (spinner + phase text), NOT just a subtle in-list hint, and
+  // clears once init reports 'ready'.
+  test.describe('first-open starting → not-ready overlay', () => {
+    test.use({ capsDelayMs: 1500 });
+
+    test('starting covers the pane with the overlay, then clears on ready', async ({ shelfApp: { page } }) => {
+      await setupProject(page);
+      await openAgentTab(page);
+
+      // While caps are delayed (init 'starting') the overlay covers the pane
+      // with a phase label — which phase depends on where init is (the caps
+      // delay lands in 'checking-auth'), so match any not-ready phase text.
+      const overlay = page.locator('.agent-conn-overlay');
+      await expect(overlay).toBeVisible({ timeout: 5_000 });
+      await expect(overlay).toContainText(/Starting agent|Deploying runtime|Connecting|Checking sign-in/);
+      await expect(overlay.locator('.agent-loading-spinner')).toBeVisible();
+      // Input is visibly blocked while covered.
+      await expect(page.locator('.agent-textarea:visible')).toBeDisabled();
+
+      // Once caps resolve → init 'ready' → overlay clears and input unlocks.
+      await expect(overlay).toHaveCount(0, { timeout: 10_000 });
+      await expect(page.locator('.agent-textarea:visible')).toBeEnabled();
     });
   });
 

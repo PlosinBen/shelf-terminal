@@ -1,6 +1,7 @@
 import React from 'react';
 import { useAgentTab } from '../../agentTabStore';
 import { useStore } from '../../store';
+import { initPhaseLabel } from './init-phase';
 
 interface Props {
   tabId: string;
@@ -13,14 +14,15 @@ interface Props {
  * scoped to THIS pane via position:absolute inside `.agent-view` (never
  * `fixed` — that would cover the sidebar and any sibling split pane).
  *
- * Unifies the two failure sources into one clear recovery point:
+ * Covers the pane for every not-ready state, unified into one surface:
+ *  - initStatus 'starting'        → spinner + phase text (first-open init, OR a
+ *    (re)connect in flight). Prominent cover, NOT a subtle in-list hint, so the
+ *    pane clearly reads "not ready yet" and the input is visibly blocked.
  *  - initStatus 'failed'          → "Failed to start agent" + Retry
  *  - connection health 'dead'     → "Connection lost" + Reconnect
  *    (heartbeat lost — e.g. the dispatcher/host went down)
- * While a (re)connect is in flight (initStatus 'starting') it shows a spinner
- * so the pane never flashes blank. It clears itself once init is ready AND
- * health recovers — a reconnect seeds 'healthy' (see dispatcher-connection),
- * so no stale overlay lingers.
+ * Clears itself once init is ready AND health recovers — a reconnect seeds
+ * 'healthy' (see dispatcher-connection), so no stale overlay lingers.
  */
 export function ConnectionOverlay({ tabId, onRetry }: Props) {
   const tab = useAgentTab(tabId);
@@ -30,9 +32,9 @@ export function ConnectionOverlay({ tabId, onRetry }: Props) {
   const failed = initStatus === 'failed';
   const starting = initStatus === 'starting';
 
-  // Only a genuinely broken pane gets the overlay. A first-open 'starting'
-  // (neither dead nor failed) keeps the lightweight in-list spinner.
-  if (!failed && !dead) return null;
+  // Cover the pane whenever it isn't usable: starting (init / reconnect),
+  // failed, or connection dead. Only a ready + healthy pane shows no overlay.
+  if (!starting && !failed && !dead) return null;
 
   return (
     <div className="agent-conn-overlay" role="alert">
@@ -40,7 +42,8 @@ export function ConnectionOverlay({ tabId, onRetry }: Props) {
         {starting ? (
           <>
             <span className="agent-loading-spinner" />
-            <div className="agent-conn-title">Reconnecting…</div>
+            {/* dead+starting = a reconnect in flight; otherwise first-open init. */}
+            <div className="agent-conn-title">{dead ? 'Reconnecting…' : initPhaseLabel(tab?.initPhase ?? null)}</div>
           </>
         ) : failed ? (
           <>

@@ -528,6 +528,11 @@ export function createFakeBackend(): ServerBackend {
       if (process.env.SHELF_TEST_CAPS_FAIL === '1') {
         throw new Error('fake init failure (SHELF_TEST_CAPS_FAIL)');
       }
+      // Test hook: SHELF_TEST_CAPS_DELAY=<ms> holds init in 'starting' long
+      // enough for an E2E to observe the not-ready overlay before it clears to
+      // 'ready'. Same scoping as CAPS_FAIL (that spec's own app instance).
+      const capsDelay = Number(process.env.SHELF_TEST_CAPS_DELAY);
+      if (Number.isFinite(capsDelay) && capsDelay > 0) await sleep(capsDelay);
       return {
         models: [{ value: 'fake-model', displayName: 'fake-model' }],
         permissionModes: [{ value: 'default', displayName: 'ask' }],

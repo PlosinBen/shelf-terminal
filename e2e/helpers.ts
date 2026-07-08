@@ -50,10 +50,15 @@ export const test = base.extend<{
   // the init-'failed' path so a spec can assert the input-readiness gate. Default
   // false leaves every other spec's launch env unchanged.
   capsFail: boolean;
+  // Opt-in: `test.use({ capsDelayMs: N })` holds the fake provider's
+  // gatherCapabilities for N ms (SHELF_TEST_CAPS_DELAY), keeping init in
+  // 'starting' long enough to assert the not-ready overlay before it clears.
+  capsDelayMs: number;
   shelfApp: { app: ElectronApplication; page: Page; userDataDir: string };
 }>({
   capsFail: [false, { option: true }],
-  shelfApp: async ({ capsFail }, use) => {
+  capsDelayMs: [0, { option: true }],
+  shelfApp: async ({ capsFail, capsDelayMs }, use) => {
     const userDataDir = createTempUserDataDir();
     seedProjectsData(userDataDir);
     ensureTestDirectories();
@@ -64,7 +69,7 @@ export const test = base.extend<{
       // !== 'test'`) so e2e launches don't steal macOS foreground focus. Set it
       // HERE (not only via the `NODE_ENV=test npx playwright` npm script) so a
       // bare `npx playwright test` invocation still gets hidden windows.
-      env: { ...process.env, SHELF_TEST_MODE: '1', NODE_ENV: 'test', ...(capsFail ? { SHELF_TEST_CAPS_FAIL: '1' } : {}) },
+      env: { ...process.env, SHELF_TEST_MODE: '1', NODE_ENV: 'test', ...(capsFail ? { SHELF_TEST_CAPS_FAIL: '1' } : {}), ...(capsDelayMs > 0 ? { SHELF_TEST_CAPS_DELAY: String(capsDelayMs) } : {}) },
     });
 
     let page: Page;
