@@ -998,6 +998,38 @@ describe('Claude reloadSkills (live skill hot-reload)', () => {
   });
 });
 
+describe('Claude config-edit (model / effort / permission)', () => {
+  const pickSystem = (emitted: OutgoingMessage[]) =>
+    emitted.filter((m): m is Extract<OutgoingMessage, { type: 'message' }> =>
+      m.type === 'message' && (m as any).msgType === 'system');
+
+  it('config-edit to a new value emits a system divider + capabilities', async () => {
+    const backend = createClaudeBackend();
+    const emitted: OutgoingMessage[] = [];
+    await backend.query({ prompt: '', cwd: '/tmp', configEdit: { key: 'model', value: 'opus' } }, (m) => emitted.push(m));
+    expect(pickSystem(emitted).length).toBe(1);
+    expect((pickSystem(emitted).at(-1) as any)?.content).toMatch(/opus/);
+    expect(emitted.some((m) => m.type === 'capabilities')).toBe(true);
+    backend.dispose();
+  });
+
+  // Re-submitting the value that's already live (re-picking the selected option,
+  // or `/model <current>`) is a no-op: no divider, no capabilities, no status cycle.
+  it('config-edit with the current value emits nothing', async () => {
+    const backend = createClaudeBackend();
+    const emitted: OutgoingMessage[] = [];
+    await backend.query({ prompt: '', cwd: '/tmp', configEdit: { key: 'model', value: 'opus' } }, (m) => emitted.push(m));
+    expect(pickSystem(emitted).length).toBe(1);
+
+    emitted.length = 0;
+    await backend.query({ prompt: '', cwd: '/tmp', configEdit: { key: 'model', value: 'opus' } }, (m) => emitted.push(m));
+    expect(pickSystem(emitted).length).toBe(0);
+    expect(emitted.some((m) => m.type === 'capabilities')).toBe(false);
+    expect(emitted.filter((m) => m.type === 'status').length).toBe(0);
+    backend.dispose();
+  });
+});
+
 describe('processMessage — content/status send split (Phase 3 turnId-scoping)', () => {
   const map = () => createBlockMsgIdState();
 

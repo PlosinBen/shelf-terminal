@@ -105,13 +105,15 @@ describe('Copilot slash dispatch via query()', () => {
   it('config-edit model turn applies the change and emits a system divider, no SDK send', async () => {
     const backend = createCopilotBackend();
     const { send, emitted } = makeSendCapture();
-    await backend.query({ prompt: '', cwd: '/tmp', configEdit: { key: 'model', value: 'gpt-5.5' } }, send);
+    // Use a value != DEFAULT_MODEL so it's a real change (re-picking the default
+    // is a no-op — covered separately below).
+    await backend.query({ prompt: '', cwd: '/tmp', configEdit: { key: 'model', value: 'claude-sonnet-4.5' } }, send);
 
     expect(pickFoldMarkdown(emitted).length).toBe(0); // not a slash-style card
-    expect((pickSystem(emitted).at(-1) as any)?.content).toMatch(/gpt-5\.5/);
+    expect((pickSystem(emitted).at(-1) as any)?.content).toMatch(/claude-sonnet-4\.5/);
 
     const caps = emitted.find((m) => m.type === 'capabilities') as any;
-    expect(caps?.currentModel).toBe('gpt-5.5');
+    expect(caps?.currentModel).toBe('claude-sonnet-4.5');
     // No SDK round-trip: a normal send would surface auth/error from ensureSession.
     expect(emitted.some((m) => m.type === 'auth_required')).toBe(false);
     backend.dispose();
@@ -124,6 +126,24 @@ describe('Copilot slash dispatch via query()', () => {
 
     expect(pickFoldMarkdown(emitted).length).toBe(0);
     expect((pickSystem(emitted).at(-1) as any)?.content).toMatch(/bypassPermissions/);
+    backend.dispose();
+  });
+
+  // Re-submitting the value that's already live (re-picking the selected option,
+  // or `/model <current>`) is a no-op: no divider, no status flicker.
+  it('config-edit with the current value emits nothing (no divider, no status cycle)', async () => {
+    const backend = createCopilotBackend();
+    const { send, emitted } = makeSendCapture();
+    // First edit to a non-default value takes effect (divider + status cycle).
+    await backend.query({ prompt: '', cwd: '/tmp', configEdit: { key: 'model', value: 'claude-sonnet-4.5' } }, send);
+    expect(pickSystem(emitted).length).toBe(1);
+
+    // Second edit to the SAME value is a no-op.
+    emitted.length = 0;
+    await backend.query({ prompt: '', cwd: '/tmp', configEdit: { key: 'model', value: 'claude-sonnet-4.5' } }, send);
+    expect(pickSystem(emitted).length).toBe(0);
+    expect(emitted.filter((m) => m.type === 'status').length).toBe(0);
+    expect(emitted.some((m) => m.type === 'capabilities')).toBe(false);
     backend.dispose();
   });
 

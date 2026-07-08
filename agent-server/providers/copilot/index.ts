@@ -1438,6 +1438,15 @@ export function createCopilotBackend(): ServerBackend {
       const slash = input.configEdit
         ? { cmd: input.configEdit.key === 'permissionMode' ? 'permission' : input.configEdit.key, args: input.configEdit.value }
         : parseSlashPrefix(input.prompt);
+      // No-op guard: a config edit whose value already equals the live setting
+      // (re-picking the selected model/effort/permission, or `/model <current>`)
+      // isn't a change — skip the status flicker + divider for something that
+      // didn't move. Closure holds the true prior value at this point.
+      if (slash && (
+        (slash.cmd === 'model' && slash.args === currentModel) ||
+        (slash.cmd === 'effort' && slash.args === currentEffort) ||
+        (slash.cmd === 'permission' && slash.args === currentPermissionMode)
+      )) return;
       if (slash) {
         send({ type: 'status', state: 'streaming', model: currentModel });
         try {
