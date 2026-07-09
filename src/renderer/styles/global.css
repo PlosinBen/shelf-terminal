@@ -1660,6 +1660,33 @@ button {
   padding: 2px 0 2px 4px;
 }
 
+.env-secret-existing-key {
+  display: flex;
+  align-items: center;
+  opacity: 0.85;
+}
+
+.env-secret-masked {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  color: var(--text-muted, #888);
+  font-size: 12px;
+  font-family: monospace;
+  padding: 4px 6px;
+  letter-spacing: 1px;
+}
+
+.env-secret-tier {
+  margin-top: 4px;
+  font-size: 11px;
+  opacity: 0.9;
+}
+
+.env-secret-tier-local-key {
+  color: var(--warning, #d0a215);
+}
+
 /* ── Command Picker ── */
 
 .command-picker-overlay {

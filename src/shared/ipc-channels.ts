@@ -6,6 +6,12 @@ export const IPC = {
   PROJECT_SAVE: 'project:save',
   PROJECT_VALIDATE_DIRS: 'project:validate-dirs',
 
+  // Project SECRET env vars (encrypted side-car; renderer never sees values)
+  PROJECT_SECRETS_LIST: 'project:secrets-list',   // (projectId) → string[] KEY names
+  PROJECT_SECRET_SET: 'project:secret-set',       // (projectId, key, value) → void
+  PROJECT_SECRET_DELETE: 'project:secret-delete', // (projectId, key) → void
+  SECRET_KEY_TIER: 'secret:key-tier',             // () → 'os-backed' | 'local-key'
+
   // File upload (paste/drag) — generic across local/SSH/WSL/Docker
   FILE_UPLOAD: 'file:upload',
   FILE_CLEAR_UPLOADS: 'file:clear-uploads',
