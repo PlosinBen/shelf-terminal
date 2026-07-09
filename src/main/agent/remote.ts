@@ -1046,7 +1046,6 @@ function wrapProcess(
     heartbeatSeq += 1;
     health.onSent(heartbeatSeq, now);
     win.sent += 1;
-    log.debug('agent-remote', `ping seq=${heartbeatSeq}`);
     try {
       proc.stdin?.write(JSON.stringify({ type: 'ping', seq: heartbeatSeq }) + '\n');
     } catch {
@@ -1081,7 +1080,7 @@ function wrapProcess(
       // an event present in wire-tx but missing here = lost in transit (pipe /
       // sleep stall); present here but never rendered = dropped downstream
       // (dispatcher turnId / renderer). Exclude `log` (already routed below) and
-      // `pong` (has its own trace) to keep the signal on turn/content events.
+      // `pong` (transport-level, handled below) to keep the signal on turn/content events.
       if (parsed?.type !== 'log' && parsed?.type !== 'pong') {
         const bit = (k: string, v: unknown) => (v == null ? '' : ` ${k}=${String(v).slice(0, 12)}`);
         log.debug('agent-remote', `wire-rx type=${parsed?.type}${bit('turn', parsed?.turnId)}${bit('msgType', parsed?.msgType)}${bit('msgId', parsed?.msgId)}`);
@@ -1102,11 +1101,10 @@ function wrapProcess(
             established = true;
             log.info('agent-remote', `heartbeat established${typeof r === 'number' ? ` rtt=${r}ms` : ''}`);
           }
-          // Pong liveness trace (debug). After a wake, whether pongs resume
-          // distinguishes "pipe is fine, provider wedged" (pongs flow, no turn
-          // events) from "pipe/transport dead" (no pongs) — the first fork to
-          // check in a connection-wedge repro.
-          log.debug('agent-remote', `pong seq=${parsed.seq}${typeof r === 'number' ? ` rtt=${r}ms` : ''}`);
+          // No per-beat pong trace: normal heartbeats are silent to keep the log
+          // readable. Liveness after a wake is still visible via health-state
+          // transitions + the periodic summary; a wedge (pongs stop) surfaces as
+          // an unstable/dead health line.
         }
         emitHealth();
         continue;
