@@ -12,7 +12,7 @@ import { sanitizeEnvMap, type EnvMap } from '@shared/project-env';
  * callers never learn whether a value was plain or secret. A same-named plain +
  * secret is blocked at input; if one slips through, secret wins here (last
  * write). Reserved keys / malformed names / non-string values are dropped as a
- * defensive backstop. Unknown projectId → empty map.
+ * defensive backstop. Unknown projectId → empty map. See context/project-env#1.
  */
 export function resolveProjectEnv(projectId: string | undefined): EnvMap {
   if (!projectId) return {};

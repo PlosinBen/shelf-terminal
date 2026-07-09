@@ -127,10 +127,10 @@ export function createRemoteBackend(
           deployed = true;
         }
         onPhase?.('connecting');
-        // Project-level env (plain now; + decrypted secrets later), injected into
-        // the agent-server (+ the CLIs it spawns). Resolved per-session: the
+        // Project-level env (plain + decrypted secrets), injected into the
+        // agent-server (+ the CLIs it spawns). Resolved per-session: the
         // dispatcher is shared per-host, so this rides open_session, not the
-        // dispatcher's own env. See project-env.ts.
+        // dispatcher's own env. See context/project-env#2.
         const projectEnv = resolveProjectEnv(projectId);
         let proc: RemoteProcess | null;
         if (USE_DISPATCHER) {

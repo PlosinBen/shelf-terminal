@@ -29,6 +29,8 @@ import { sanitizeEnvMap, isReservedEnvKey, type EnvMap } from '@shared/project-e
  * code-signing identity; an unsigned build's ad-hoc cdhash changes every update,
  * so a Keychain-stored key becomes inaccessible after an update (data loss).
  * Flip SHELF_MAC_SIGNED=1 only for a signed+notarized release.
+ *
+ * See context/project-env#4 (crypto + tier seam) and #5 (unsigned-mac durability).
  */
 
 export type KeyTier = 'os-backed' | 'local-key';

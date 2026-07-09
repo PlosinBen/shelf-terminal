@@ -83,4 +83,6 @@ related:
 
 **Decision**：v1 的 payload 只有 **skills + MCP servers**。`settings.json` 的 portable subset **刻意延後** —— 需要逐 key 的可攜性審計（哪些 key 跨機器有意義、未知 key 預設 OUT，且不能帶 `logLevel` / telegram token / `pmActive` 之類機器本地 key）。credentials（`~/.claude`）、`projects.json`（本地路徑）、`app-instance-id`（每機唯一）永遠不入 payload。
 
-**Related**：`contracts/persistence-formats`（config-backup.json + branch payload layout）。
+**專案 secret env**（`project-secrets.json`）也**永不入 payload**：backup 用 allowlist（只 enumerate 得到的 skill/mcp 能被選+複製），secret 從沒被 enumerate → 天生不可同步（`enumerate.test.ts` 鎖住此 invariant）。詳見 `context/project-env#7`。
+
+**Related**：`contracts/persistence-formats`（config-backup.json + branch payload layout）、`context/project-env#7`（secret side-car 不同步）。

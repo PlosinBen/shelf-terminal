@@ -28,8 +28,12 @@ The renderer↔main bridge surface — `window.shelfApi.*` methods (RPC over `ip
 | Method | Shape |
 |--------|-------|
 | `load()` | invoke `project:load` → `ProjectConfig[]` (see `src/shared/types.ts`) |
-| `save(projects)` | invoke `project:save` |
+| `save(projects)` | invoke `project:save` (also prunes a removed project's storage + secrets) |
 | `validateDirs(projects)` | invoke `project:validate-dirs` → per-project dir-existence result |
+| `listSecretKeys(projectId)` | invoke `project:secrets-list` → `string[]` KEY names (values NEVER cross back to renderer) |
+| `setSecret(projectId, key, value)` | invoke `project:secret-set` (encrypt + persist to the side-car; rejects reserved keys) |
+| `deleteSecret(projectId, key)` | invoke `project:secret-delete` |
+| `secretKeyTier()` | invoke `secret:key-tier` → `'os-backed' \| 'local-key'` (drives honest disclosure copy) |
 
 ## connector (`shelfApi.connector`)
 

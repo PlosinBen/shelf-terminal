@@ -167,3 +167,13 @@ SDK 0.3.159 **並存**兩種 compact 完成訊號:`status` 形狀(`subtype:'stat
 - 環境面（headless 容器要有可用 Secret Service 才存得了憑證，見容器測試設定）與這條**正交**：憑證存得了之後，才輪到這個 client-rebuild 問題。
 
 **Related**：`agent-providers#10`（device-flow 登入主流程）、`agent-providers#2`（gh token 路徑）、`agent-server/providers/copilot/index.ts`（`startLogin` done handler / `ensureClient`）。
+
+## agent-providers#12 — Headless remote：貼 `GH_TOKEN` secret env 就能認證 Copilot（不靠 `copilot login`）  ·  [Decision]
+
+**背景**：無瀏覽器/無 OS credential store 的 headless remote 上，`copilot login`（device flow）存不了憑證（沒有 Secret Service），`gh` 也常沒裝 → device-flow 這條走不通。
+
+**Decision**：`readGhToken()` 先看 `process.env` 的 `GH_TOKEN`/`GITHUB_TOKEN`（`copilotTokenFromEnv`，`GH_TOKEN` 優先，比照 gh 慣例），有就當 `gitHubToken` 餵 `buildCopilotAuthConfig` → `useLoggedInUser:false`；沒有才 fallback `gh auth token`。使用者把 token 貼成**專案 Secret env var**（見 `context/project-env`），Shelf 注入到 agent-server env，Copilot 就認得。AuthPane 的 oauth pane 在登入按鈕下方顯示 `authMethod.instructions` 當 fallback 提示，指向這條路。
+
+**Reason**：官方 CLI 文件明講 headless 用 token env var。這把「remote 存不了憑證」從死路變成「貼個 secret token」，且復用剛做好的 project secret env（加密、不同步），不需自刻 refresh（仍守 `agent-providers#2`：只注入使用者自管的靜態值）。
+
+**Related**：`context/project-env`（secret env 儲存/注入）、`agent-server/providers/copilot/helpers.ts`（`copilotTokenFromEnv`）。
