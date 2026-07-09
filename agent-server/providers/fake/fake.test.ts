@@ -42,6 +42,26 @@ describe('createFakeBackend — scenarios', () => {
     expect((msgs[msgs.length - 1] as any).state).toBe('idle');
   });
 
+  it('env: echoes the exec process env var as a reply', async () => {
+    process.env.FAKE_ENV_PROBE = 'probe-value';
+    try {
+      const { send, msgs } = collect();
+      await createFakeBackend().query(makeInput('env:FAKE_ENV_PROBE'), send);
+      const m = msgs.find((x) => x.type === 'message') as any;
+      expect(m.msgType).toBe('reply');
+      expect(m.content).toBe('env FAKE_ENV_PROBE=probe-value');
+    } finally {
+      delete process.env.FAKE_ENV_PROBE;
+    }
+  });
+
+  it('env: echoes an empty value for an unset var', async () => {
+    const { send, msgs } = collect();
+    await createFakeBackend().query(makeInput('env:DEFINITELY_UNSET_VAR'), send);
+    const m = msgs.find((x) => x.type === 'message') as any;
+    expect(m.content).toBe('env DEFINITELY_UNSET_VAR=');
+  });
+
   it('thinking: emits one fold_text message labeled Thinking', async () => {
     const { send, msgs } = collect();
     await createFakeBackend().query(makeInput('thinking:reasoning'), send);
