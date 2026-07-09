@@ -3,6 +3,9 @@ import { useStore, setEditingProject, updateProjectConfig } from '../store';
 import type { TabTemplate, QuickCommand, AgentProvider } from '@shared/types';
 import { TAB_COLORS } from './TabBar';
 import { formatBytes } from '../utils/format-bytes';
+import { validateEnvKey } from '@shared/project-env';
+
+interface EnvRow { key: string; value: string; }
 
 export function ProjectEditPanel() {
   const { editingProjectIndex, projects } = useStore();
@@ -12,6 +15,7 @@ export function ProjectEditPanel() {
   const [initScript, setInitScript] = useState('');
   const [defaultTabs, setDefaultTabs] = useState<TabTemplate[]>([]);
   const [quickCommands, setQuickCommands] = useState<QuickCommand[]>([]);
+  const [envRows, setEnvRows] = useState<EnvRow[]>([]);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const dragFromHandle = useRef(false);
@@ -28,6 +32,7 @@ export function ProjectEditPanel() {
       setInitScript(project.config.initScript || '');
       setDefaultTabs(project.config.defaultTabs || [{ name: 'Terminal' }]);
       setQuickCommands(project.config.quickCommands || []);
+      setEnvRows(Object.entries(project.config.envPlain || {}).map(([key, value]) => ({ key, value })));
       setDefaultAgentProvider(project.config.defaultAgentProvider || '');
       setOpenAgentOnConnect(project.config.openAgentOnConnect || false);
     }
@@ -97,16 +102,31 @@ export function ProjectEditPanel() {
           : { ...base, cmd: t.cmd?.trim() || undefined };
       });
     const cmds = quickCommands.filter((c) => c.label.trim() && c.command.trim());
+    // Keep only valid, uniquely-keyed rows; last write wins on an accidental
+    // duplicate (the UI flags it, but never silently persist an ambiguous pair).
+    const envPlain: Record<string, string> = {};
+    for (const row of envRows) {
+      const key = row.key.trim();
+      if (!key || validateEnvKey(key, Object.keys(envPlain)) !== null) continue;
+      envPlain[key] = row.value;
+    }
     updateProjectConfig(editingProjectIndex, {
       name: name.trim() || project.config.name,
       initScript: initScript.trim() || undefined,
       defaultTabs: tabs.length > 0 ? tabs : undefined,
       quickCommands: cmds.length > 0 ? cmds : undefined,
+      envPlain: Object.keys(envPlain).length > 0 ? envPlain : undefined,
       defaultAgentProvider: defaultAgentProvider || undefined,
       openAgentOnConnect: openAgentOnConnect || undefined,
     });
     handleClose();
   };
+
+  const updateEnvRow = (index: number, field: keyof EnvRow, value: string) => {
+    setEnvRows((rows) => rows.map((r, i) => (i === index ? { ...r, [field]: value } : r)));
+  };
+  const addEnvRow = () => setEnvRows((rows) => [...rows, { key: '', value: '' }]);
+  const removeEnvRow = (index: number) => setEnvRows((rows) => rows.filter((_, i) => i !== index));
 
   const handleOverlayClick = (e: React.MouseEvent) => {
     if (e.target === e.currentTarget) handleClose();
@@ -236,6 +256,56 @@ export function ProjectEditPanel() {
               placeholder="e.g. nvm use 22.22&#10;source .env"
               rows={3}
             />
+          </div>
+
+          <div className="project-edit-field">
+            <label className="settings-label">Environment Variables</label>
+            <div className="project-edit-hint">
+              Provided to all of this project's connections — the agent and every
+              terminal (readable via <code>env</code> in an interactive shell).
+              <code>PATH</code> is merged, not replaced.
+            </div>
+            <div className="env-vars-list">
+              {envRows.map((row, i) => {
+                const otherKeys = envRows.filter((_, j) => j !== i).map((r) => r.key.trim());
+                const error = validateEnvKey(row.key.trim(), otherKeys);
+                return (
+                  <div key={i} className="env-var-row-wrapper">
+                    <div className="env-var-row">
+                      <input
+                        className={`env-var-key${error ? ' env-var-invalid' : ''}`}
+                        type="text"
+                        value={row.key}
+                        onChange={(e) => updateEnvRow(i, 'key', e.target.value)}
+                        placeholder="NAME"
+                        spellCheck={false}
+                        autoCapitalize="off"
+                        autoCorrect="off"
+                      />
+                      <input
+                        className="env-var-value"
+                        type="text"
+                        value={row.value}
+                        onChange={(e) => updateEnvRow(i, 'value', e.target.value)}
+                        placeholder="value"
+                        spellCheck={false}
+                        autoCapitalize="off"
+                        autoCorrect="off"
+                      />
+                      <button
+                        className="default-tab-remove"
+                        onClick={() => removeEnvRow(i)}
+                        title="Remove variable"
+                      >
+                        ×
+                      </button>
+                    </div>
+                    {error && <div className="env-var-error">{error}</div>}
+                  </div>
+                );
+              })}
+            </div>
+            <button className="default-tab-add" onClick={addEnvRow}>+ Add Variable</button>
           </div>
 
           <div className="project-edit-field">

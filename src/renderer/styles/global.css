@@ -1612,6 +1612,54 @@ button {
   outline: none;
 }
 
+/* ── Project env vars ── */
+
+.env-vars-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.env-var-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.env-var-key {
+  width: 160px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 12px;
+  font-family: monospace;
+  padding: 4px 6px;
+  outline: none;
+}
+
+.env-var-value {
+  flex: 1;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 12px;
+  font-family: monospace;
+  padding: 4px 6px;
+  outline: none;
+}
+
+.env-var-key.env-var-invalid {
+  border-color: var(--error, #e5534b);
+}
+
+.env-var-error {
+  color: var(--error, #e5534b);
+  font-size: 11px;
+  padding: 2px 0 2px 4px;
+}
+
 /* ── Command Picker ── */
 
 .command-picker-overlay {

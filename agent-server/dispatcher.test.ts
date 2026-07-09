@@ -11,6 +11,7 @@ function harness(opts: { now?: () => number; cache?: any; onMainPing?: () => voi
     sid: string;
     cwd: string | undefined;
     hooks: { onLine: (l: string) => void; onExit: (c: number | null) => void };
+    env: Record<string, string> | undefined;
     written: string[];
     killed: number;
     forceKilled: number;
