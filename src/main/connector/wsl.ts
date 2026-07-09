@@ -6,6 +6,7 @@ import { log } from '@shared/logger';
 import type { Connector, Shell, ExecResult } from './types';
 import { wrapPty } from './wrap-pty';
 import { shellEscape } from './shell-env';
+import { buildEnvExportPrefix } from '@shared/project-env';
 import {
   assertSafeCwd, parseUploadPrefix, remoteUploadFile, buildRemotePutCmd,
   spawnPipeWrite, listRemoteShelfDir, removeRemoteFiles, sizeRemoteShelfDir,
@@ -31,8 +32,8 @@ export class WSLConnector implements Connector {
     });
   }
 
-  createShell(cwd: string): Shell {
-    const args = ['-d', this.distro, '--', 'sh', '-c', `cd ${shellEscape(cwd)} && exec $SHELL`];
+  createShell(cwd: string, env?: Record<string, string>): Shell {
+    const args = ['-d', this.distro, '--', 'sh', '-c', `${buildEnvExportPrefix(env ?? {})}cd ${shellEscape(cwd)} && exec $SHELL`];
     log.info('connector', `wsl spawn: distro=${this.distro} cwd=${cwd}`);
     const p = pty.spawn('wsl.exe', args, {
       name: 'xterm-256color',

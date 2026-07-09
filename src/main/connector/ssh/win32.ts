@@ -6,6 +6,7 @@ import { log } from '@shared/logger';
 import type { Connector, Shell, ExecResult } from '../types';
 import { wrapPty } from '../wrap-pty';
 import { shellEscape } from '../shell-env';
+import { buildEnvExportPrefix } from '@shared/project-env';
 import { getKnownHostsPath } from '../../ssh-control';
 import {
   assertSafeCwd, parseUploadPrefix, remoteUploadFile, buildRemotePutCmd,
@@ -44,10 +45,10 @@ export class SSHWin32Connector implements Connector {
     ];
   }
 
-  createShell(cwd: string): Shell {
+  createShell(cwd: string, env?: Record<string, string>): Shell {
     const args = this.sshArgs([
       '-t',
-      `cd ${shellEscape(cwd)} && exec $SHELL -l`,
+      `${buildEnvExportPrefix(env ?? {})}cd ${shellEscape(cwd)} && exec $SHELL -l`,
     ]);
     log.info('connector', `ssh/win32 spawn: ${this.user}@${this.host}:${this.port} cwd=${cwd}`);
     const p = pty.spawn('ssh', args, {

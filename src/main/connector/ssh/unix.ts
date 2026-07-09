@@ -6,6 +6,7 @@ import { log } from '@shared/logger';
 import type { Connector, Shell, ExecResult } from '../types';
 import { wrapPty } from '../wrap-pty';
 import { getShellEnv, shellEscape } from '../shell-env';
+import { buildEnvExportPrefix } from '@shared/project-env';
 import { getControlPath, checkConnection, getKnownHostsPath } from '../../ssh-control';
 import {
   assertSafeCwd, parseUploadPrefix, normalizeCwd, REL_DIR,
@@ -51,10 +52,10 @@ export class SSHUnixConnector implements Connector {
     ];
   }
 
-  createShell(cwd: string): Shell {
+  createShell(cwd: string, env?: Record<string, string>): Shell {
     const args = this.sshArgs([
       '-t',
-      `cd ${shellEscape(cwd)} && exec $SHELL -l`,
+      `${buildEnvExportPrefix(env ?? {})}cd ${shellEscape(cwd)} && exec $SHELL -l`,
     ]);
     log.info('connector', `ssh/unix spawn: ${this.user}@${this.host}:${this.port} cwd=${cwd}`);
     const p = pty.spawn('ssh', args, {

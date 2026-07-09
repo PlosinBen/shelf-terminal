@@ -20,7 +20,14 @@ export interface ExecResult {
 
 export interface Connector {
   // ── Shell ──
-  createShell(cwd: string): Shell;
+  /**
+   * Spawn an interactive shell. `env` is the project-level env map (plain, later
+   * + secret) to inject: local connectors merge it into the pty's `env` (PATH
+   * merges); remote connectors (docker/ssh/wsl) prepend an `export …` prefix to
+   * the launched command, since the pty `env` only reaches the local ssh/docker
+   * client, not the remote shell. Reserved keys are dropped. Absent → no injection.
+   */
+  createShell(cwd: string, env?: Record<string, string>): Shell;
 
   // ── Connection lifecycle ──
   isConnected(): Promise<boolean>;

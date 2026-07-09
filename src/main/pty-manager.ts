@@ -58,9 +58,10 @@ export function spawnPty(
   win: BrowserWindow,
   initScript?: string,
   tabCmd?: string,
+  env?: Record<string, string>,
 ): void {
   const connector = createConnector(connection);
-  const shell = connector.createShell(cwd);
+  const shell = connector.createShell(cwd, env);
 
   shells.set(tabId, shell);
 

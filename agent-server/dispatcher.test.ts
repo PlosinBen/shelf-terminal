@@ -16,8 +16,8 @@ function harness(opts: { now?: () => number; cache?: any; onMainPing?: () => voi
     forceKilled: number;
   }> = [];
 
-  const spawnExec = vi.fn((sid: string, cwd: string | undefined, hooks: any): ExecProc => {
-    const rec = { sid, cwd, hooks, written: [] as string[], killed: 0, forceKilled: 0 };
+  const spawnExec = vi.fn((sid: string, cwd: string | undefined, hooks: any, env?: Record<string, string>): ExecProc => {
+    const rec = { sid, cwd, hooks, env, written: [] as string[], killed: 0, forceKilled: 0 };
     spawned.push(rec);
     return {
       writeLine: (l: string) => rec.written.push(l),
@@ -44,6 +44,22 @@ describe('dispatcher core', () => {
     h.d.onMainLine(JSON.stringify({ type: 'open_session', sid: 's1', cwd: '/tmp/p' }));
     expect(h.spawnExec).toHaveBeenCalledTimes(1);
     expect(h.spawned[0]).toMatchObject({ sid: 's1', cwd: '/tmp/p' });
+  });
+
+  it('open_session forwards the per-session env to spawnExec, and re-applies it on reconnect', () => {
+    const h = harness();
+    h.d.onMainLine(JSON.stringify({ type: 'open_session', sid: 's1', cwd: '/w', env: { GH_TOKEN: 'abc' } }));
+    expect(h.spawned[0].env).toEqual({ GH_TOKEN: 'abc' });
+    // Exec crashes → reconnect must carry the SAME env (not lose the injection).
+    h.spawned[0].hooks.onExit(1);
+    expect(h.spawnExec).toHaveBeenCalledTimes(2);
+    expect(h.spawned[1].env).toEqual({ GH_TOKEN: 'abc' });
+  });
+
+  it('open_session without env passes undefined (exec just inherits dispatcher env)', () => {
+    const h = harness();
+    h.d.onMainLine(JSON.stringify({ type: 'open_session', sid: 's1' }));
+    expect(h.spawned[0].env).toBeUndefined();
   });
 
   it('relays exec stdout lines to main RAW (exec already stamped sid)', () => {
