@@ -1,5 +1,7 @@
 import { test, expect, readActiveTerminalText, openAgentTab, sendAgentPrompt } from './helpers';
 import type { Page } from '@playwright/test';
+import fs from 'fs';
+import path from 'path';
 
 /**
  * Project plain env vars — set in Project Edit → injected into EVERY process
@@ -17,6 +19,8 @@ import type { Page } from '@playwright/test';
 const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
 const VAR = 'PROJ_E2E_VAR';
 const VALUE = 'e2e-injected';
+const SVAR = 'SECRET_E2E_VAR';
+const SVALUE = 'secret-injected-xyz';
 
 async function setupProject(page: Page) {
   await page.locator('.sidebar-btn', { hasText: '+' }).click();
@@ -83,4 +87,51 @@ test('plain env var reaches the agent-server (exec process env)', async ({ shelf
 
   await expect(page.locator('.agent-messages:visible'))
     .toContainText(`env ${VAR}=${VALUE}`, { timeout: 8_000 });
+});
+
+/** Open Project Edit, add a SECRET env var (write-only), and save. */
+async function addProjectSecretVar(page: Page) {
+  await page.locator('.sidebar-item').first().click({ button: 'right' });
+  await page.locator('.context-menu-item', { hasText: 'Edit' }).click();
+  const panel = page.locator('.project-edit-panel');
+  await expect(panel).toBeVisible({ timeout: 3_000 });
+
+  await panel.locator('.default-tab-add', { hasText: 'Add Secret' }).click();
+  // The secret value field is a password input — the clean discriminator from
+  // the plain (text) value fields above it.
+  const secretRow = panel.locator('.env-var-row', { has: page.locator('input.env-var-value[type="password"]') });
+  await secretRow.locator('.env-var-key').fill(SVAR);
+  await secretRow.locator('input[type="password"]').fill(SVALUE);
+  await expect(panel.locator('.env-var-error')).toHaveCount(0);
+
+  await panel.locator('.project-edit-footer .conn-btn-next').click();
+  await expect(panel).not.toBeVisible({ timeout: 3_000 });
+}
+
+test('secret env var is injected but stored encrypted (never plaintext on disk)', async ({ shelfApp: { page, userDataDir } }) => {
+  await setupProject(page);
+  await addProjectSecretVar(page);
+
+  // The Save flush is async → wait for the encrypted side-car to materialize
+  // before spawning anything that reads it.
+  const secretsFile = path.join(userDataDir, 'project-secrets.json');
+  await expect.poll(() => fs.existsSync(secretsFile), { timeout: 5_000 }).toBe(true);
+  await expect.poll(() => fs.readFileSync(secretsFile, 'utf8'), { timeout: 5_000 }).toContain('v1:');
+
+  // Encryption at rest: the plaintext value must NOT appear on disk.
+  expect(fs.readFileSync(secretsFile, 'utf8')).not.toContain(SVALUE);
+
+  // …yet a newly-spawned terminal receives the decrypted value.
+  await page.keyboard.press(`${modifier}+t`);
+  await expect(page.locator('.tab-bar .tab')).toHaveCount(2, { timeout: 5_000 });
+  const terminal = page.locator('.terminal-container:visible');
+  await expect(terminal).toBeVisible({ timeout: 5_000 });
+  await page.waitForTimeout(1000);
+  await terminal.click();
+  await page.keyboard.type(`echo "s=$${SVAR}"`);
+  await page.keyboard.press('Enter');
+
+  await expect
+    .poll(async () => readActiveTerminalText(page), { timeout: 8_000 })
+    .toContain(`s=${SVALUE}`);
 });
