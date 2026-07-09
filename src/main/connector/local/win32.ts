@@ -7,13 +7,14 @@ import type { FolderListResult } from '@shared/types';
 import { log } from '@shared/logger';
 import type { Connector, Shell, ExecResult } from '../types';
 import { wrapPty } from '../wrap-pty';
+import { applyEnvMap } from '@shared/project-env';
 import {
   REL_DIR, GITIGNORE_REL,
   normalizeCwd, assertSafeCwd, buildPaths, parseUploadPrefix,
 } from '../file-utils';
 
 export class LocalWin32Connector implements Connector {
-  createShell(cwd: string): Shell {
+  createShell(cwd: string, env?: Record<string, string>): Shell {
     const resolvedCwd = fs.existsSync(cwd) ? cwd : os.homedir();
     log.info('connector', `local/win32 spawn: shell=powershell.exe cwd=${resolvedCwd}`);
     const p = pty.spawn('powershell.exe', [], {
@@ -21,7 +22,7 @@ export class LocalWin32Connector implements Connector {
       cols: 80,
       rows: 24,
       cwd: resolvedCwd,
-      env: process.env as Record<string, string>,
+      env: applyEnvMap(process.env, env ?? {}),
     });
     return wrapPty(p);
   }

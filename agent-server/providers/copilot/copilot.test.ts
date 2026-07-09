@@ -1,5 +1,25 @@
 import { describe, it, expect } from 'vitest';
-import { quotaSnapshotToSegment, parseApplyPatch, formatCopilotToolInput, elicitationSchemaToPrompts, picksToElicitationContent, normalizeCopilotTask, isBackgroundedCopilotTask, buildCopilotAuthConfig, buildOrphanFinalizeMessages, type InflightToolUseEntry } from './helpers';
+import { quotaSnapshotToSegment, parseApplyPatch, formatCopilotToolInput, elicitationSchemaToPrompts, picksToElicitationContent, normalizeCopilotTask, isBackgroundedCopilotTask, buildCopilotAuthConfig, copilotTokenFromEnv, buildOrphanFinalizeMessages, type InflightToolUseEntry } from './helpers';
+
+describe('copilotTokenFromEnv (headless-remote token via project Secret env)', () => {
+  it('prefers GH_TOKEN over GITHUB_TOKEN (gh precedence)', () => {
+    expect(copilotTokenFromEnv({ GH_TOKEN: 'a', GITHUB_TOKEN: 'b' } as any)).toBe('a');
+  });
+  it('falls back to GITHUB_TOKEN when GH_TOKEN is absent', () => {
+    expect(copilotTokenFromEnv({ GITHUB_TOKEN: 'b' } as any)).toBe('b');
+  });
+  it('trims and treats blank as absent', () => {
+    expect(copilotTokenFromEnv({ GH_TOKEN: '  tok  ' } as any)).toBe('tok');
+    expect(copilotTokenFromEnv({ GH_TOKEN: '   ', GITHUB_TOKEN: 'b' } as any)).toBe('b');
+  });
+  it('returns undefined when neither is set', () => {
+    expect(copilotTokenFromEnv({} as any)).toBeUndefined();
+  });
+  it('feeds buildCopilotAuthConfig → gitHubToken auth', () => {
+    const tok = copilotTokenFromEnv({ GH_TOKEN: 'gho_env' } as any);
+    expect(buildCopilotAuthConfig(tok)).toEqual({ gitHubToken: 'gho_env', useLoggedInUser: false });
+  });
+});
 
 describe('buildCopilotAuthConfig (transitional gh-or-loggedInUser)', () => {
   it('uses gitHubToken + useLoggedInUser:false when a gh token is present', () => {

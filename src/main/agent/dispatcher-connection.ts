@@ -58,8 +58,12 @@ export interface DispatcherConnectionDeps {
 }
 
 export interface DispatcherConnection {
-  /** Register a session and send `open_session`; returns its RemoteProcess-shaped channel. */
-  openSession(sid: string, cwd: string | undefined, sinks: SessionSinks): SessionChannel;
+  /** Register a session and send `open_session`; returns its RemoteProcess-shaped
+   *  channel. `env` = this project's injected env map (plain, later + secret) — the
+   *  dispatcher is shared per-HOST, so per-PROJECT env can't ride its own process
+   *  env; it travels in `open_session` and the dispatcher applies it to the
+   *  per-session exec proc it spawns. */
+  openSession(sid: string, cwd: string | undefined, sinks: SessionSinks, env?: Record<string, string>): SessionChannel;
   /** Live session count (for ref-counted teardown). */
   size(): number;
   /** Kill the dispatcher proc + all sessions. */
@@ -186,7 +190,7 @@ export function createDispatcherConnection(deps: DispatcherConnectionDeps): Disp
     deps.onDown?.(); // owner evicts this dead conn → next connect spawns fresh
   });
 
-  function openSession(sid: string, cwd: string | undefined, sinks: SessionSinks): SessionChannel {
+  function openSession(sid: string, cwd: string | undefined, sinks: SessionSinks, env?: Record<string, string>): SessionChannel {
     // Re-init of an already-open sid (a tab restarted / reconnected before its old
     // session's teardown fired — sids are per-project persistent, so the same project
     // reuses one). Close the STALE channel first so the dispatcher tears down the old
@@ -210,7 +214,7 @@ export function createDispatcherConnection(deps: DispatcherConnectionDeps): Disp
     );
     const state: ChannelState = { sid, sinks, dispatcher };
     channels.set(sid, state);
-    writeToProc({ type: 'open_session', sid, cwd });
+    writeToProc({ type: 'open_session', sid, cwd, env });
     // Seed this session's health immediately. The heartbeat only emits onHealth on
     // a CHANGE from 'healthy', so a fresh/reconnected connection would otherwise
     // never push a 'healthy' — leaving a tab that just RECONNECTED after a dispatcher

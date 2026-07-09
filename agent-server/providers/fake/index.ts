@@ -41,6 +41,8 @@ import type {
  *   picker_input        free-text only (options=[], inputType=text)
  *   picker_number       free-text only (options=[], inputType=integer)
  *   auth_required       emit auth_required
+ *   env:<NAME>          echo the exec process env var <NAME> as a reply (proves
+ *                       project-env injection reached the agent-server)
  *   error:<msg>         emit error
  *   delay:<ms>          sleep before next step
  *   task:<id>           emit a running background task_event (turnId-less)
@@ -408,6 +410,15 @@ export function createFakeBackend(): ServerBackend {
       send({ type: 'status', state: 'streaming', turnId });
       send({ type: 'message', msgId: mintId('m'), msgType: 'reply', content, turnId, startsTurn: true });
       send({ type: 'status', state: 'idle', turnId });
+      return;
+    }
+
+    // env:<NAME> — echo the exec process's env var as a plain reply, so an E2E
+    // can prove project-env injection reached the agent-server (the exec proc
+    // inherits the injected map). Normal wire shape (reply), not a test-only event.
+    if (step.startsWith('env:')) {
+      const name = step.slice('env:'.length);
+      send({ type: 'message', msgId: mintId('m'), msgType: 'reply', content: `env ${name}=${process.env[name] ?? ''}` });
       return;
     }
 

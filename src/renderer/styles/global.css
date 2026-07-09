@@ -1612,6 +1612,81 @@ button {
   outline: none;
 }
 
+/* ── Project env vars ── */
+
+.env-vars-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.env-var-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.env-var-key {
+  width: 160px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 12px;
+  font-family: monospace;
+  padding: 4px 6px;
+  outline: none;
+}
+
+.env-var-value {
+  flex: 1;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 12px;
+  font-family: monospace;
+  padding: 4px 6px;
+  outline: none;
+}
+
+.env-var-key.env-var-invalid {
+  border-color: var(--error, #e5534b);
+}
+
+.env-var-error {
+  color: var(--error, #e5534b);
+  font-size: 11px;
+  padding: 2px 0 2px 4px;
+}
+
+.env-secret-existing-key {
+  display: flex;
+  align-items: center;
+  opacity: 0.85;
+}
+
+.env-secret-masked {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  color: var(--text-muted, #888);
+  font-size: 12px;
+  font-family: monospace;
+  padding: 4px 6px;
+  letter-spacing: 1px;
+}
+
+.env-secret-tier {
+  margin-top: 4px;
+  font-size: 11px;
+  opacity: 0.9;
+}
+
+.env-secret-tier-local-key {
+  color: var(--warning, #d0a215);
+}
+
 /* ── Command Picker ── */
 
 .command-picker-overlay {
@@ -2535,6 +2610,13 @@ button {
   border-radius: 3px;
   font-family: monospace;
   font-size: 12px;
+}
+
+/* Secondary, muted fallback hints under the primary OAuth login button. */
+.agent-auth-hints {
+  margin-top: 10px;
+  font-size: 12px;
+  opacity: 0.75;
 }
 
 .agent-auth-error {

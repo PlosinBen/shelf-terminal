@@ -31,7 +31,7 @@ Every connector implements the `Connector` interface (`src/main/connector/types.
 
 | Method | Signature | Purpose |
 |--------|-----------|---------|
-| `createShell` | `(cwd: string): Shell` | Spawn an interactive PTY shell rooted at `cwd`; returns a `Shell` (consumers never import node-pty). |
+| `createShell` | `(cwd: string, env?: Record<string,string>): Shell` | Spawn an interactive PTY shell rooted at `cwd`; returns a `Shell` (consumers never import node-pty). `env` = the project's injected env map (plain + secret): local connectors merge it into the pty `env` (PATH merges); remote connectors (docker/ssh/wsl) prepend an `export …` prefix since the pty `env` only reaches the local ssh/docker client, not the remote shell. |
 | `isConnected` | `(): Promise<boolean>` | Probe whether the link is currently reachable. |
 | `connect` | `(password?: string): Promise<void>` | Establish/authenticate the link (e.g. SSH ControlMaster); `password` is used for SSH first-connect. |
 | `exec` | `(cwd: string, cmd: string): Promise<ExecResult>` | Run a non-interactive command in the target env (e.g. git ops); returns `{ stdout, stderr }`. Not exposed as a generic IPC channel. |

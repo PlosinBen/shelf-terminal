@@ -250,6 +250,15 @@ export interface ProjectConfig {
   connection: Connection;
   maxTabs: number;
   initScript?: string;
+  /**
+   * Project-level PLAIN environment variables (KEY → value), injected into every
+   * process Shelf launches for this project — the agent-server (+ the CLIs it
+   * spawns) and the project's interactive terminals. Stored in the clear and
+   * synced with the rest of projectConfig. Secret env vars live in a separate
+   * encrypted side-car (never here, never synced). Reserved `SHELF_*` /
+   * `ELECTRON_RUN_AS_NODE` keys are blocked at input. See src/shared/project-env.ts.
+   */
+  envPlain?: Record<string, string>;
   defaultTabs?: TabTemplate[];
   quickCommands?: QuickCommand[];
   parentProjectId?: string;

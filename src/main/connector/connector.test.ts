@@ -131,6 +131,51 @@ describe('LocalUnixConnector createShell', () => {
     const env = spawnArgs[2].env as Record<string, string>;
     expect(env.HISTFILE).toBe('/dev/null');
   });
+
+  it('merges project env into the pty env, HISTFILE staying Shelf-owned', async () => {
+    if (process.platform === 'win32') return;
+    const pty = await import('node-pty');
+    const { LocalUnixConnector } = await import('./local/unix');
+    new LocalUnixConnector().createShell('/tmp', { GH_TOKEN: 'abc' });
+    const env = (pty.spawn as any).mock.calls[0][2].env as Record<string, string>;
+    expect(env.GH_TOKEN).toBe('abc');
+    expect(env.HISTFILE).toBe('/dev/null');
+  });
+});
+
+// ── Project-env injection into remote createShell commands ──
+// docker/ssh/wsl inject via an `export …` prefix on the launched command,
+// because the pty `env` only reaches the LOCAL ssh/docker client, not the
+// remote shell.
+
+describe('remote connector createShell env injection', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('docker prepends an export prefix inside the container command', async () => {
+    const pty = await import('node-pty');
+    const { DockerConnector } = await import('./docker');
+    new DockerConnector('c1').createShell('/work', { GH_TOKEN: 'abc' });
+    const args = (pty.spawn as any).mock.calls[0][1] as string[];
+    const cmd = args[args.length - 1];
+    expect(cmd).toContain("export GH_TOKEN='abc'; ");
+    expect(cmd).toContain('cd '); // env prefix precedes the cd/exec
+  });
+
+  it('docker with no project env leaves the command prefix-free', async () => {
+    const pty = await import('node-pty');
+    const { DockerConnector } = await import('./docker');
+    new DockerConnector('c1').createShell('/work');
+    const args = (pty.spawn as any).mock.calls[0][1] as string[];
+    expect(args[args.length - 1]).not.toContain('export ');
+  });
+
+  it('wsl prepends an export prefix', async () => {
+    const pty = await import('node-pty');
+    const { WSLConnector } = await import('./wsl');
+    new WSLConnector('Ubuntu').createShell('/work', { FOO: 'bar' });
+    const args = (pty.spawn as any).mock.calls[0][1] as string[];
+    expect(args[args.length - 1]).toContain("export FOO='bar'; ");
+  });
 });
 
 // ── file-utils (these duplicate some file-transfer.test.ts coverage but ──

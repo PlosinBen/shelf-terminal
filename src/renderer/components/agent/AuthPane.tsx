@@ -103,6 +103,13 @@ export function AuthPane({ tabId }: Props) {
             <>
               <div className="agent-auth-instructions">Sign in to {providerLabel} with your GitHub account:</div>
               <button className="agent-reset-btn" onClick={startLogin}>Login with GitHub</button>
+              {authMethod.instructions && authMethod.instructions.length > 0 && (
+                <ul className="agent-auth-list agent-auth-hints">
+                  {authMethod.instructions.map((ins, i) => (
+                    <li key={i}>{ins.command && <code>{ins.command}</code>}{ins.label && ` — ${ins.label}`}</li>
+                  ))}
+                </ul>
+              )}
             </>
           )}
         </>

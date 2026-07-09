@@ -8,6 +8,8 @@ import { app } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
 import { getShellEnv } from '../connector/shell-env';
+import { resolveProjectEnv } from '../project-env';
+import { buildEnvExportPrefix, applyEnvMap, type EnvMap } from '@shared/project-env';
 import { createTurnDispatcher, type PermissionHandler } from './turn-dispatcher';
 import { createDispatcherConnection, type DispatcherConnection, type DispatcherProc } from './dispatcher-connection';
 import { getAppInstanceId } from '../app-instance-id';
@@ -125,16 +127,21 @@ export function createRemoteBackend(
           deployed = true;
         }
         onPhase?.('connecting');
+        // Project-level env (plain + decrypted secrets), injected into the
+        // agent-server (+ the CLIs it spawns). Resolved per-session: the
+        // dispatcher is shared per-host, so this rides open_session, not the
+        // dispatcher's own env. See context/project-env#2.
+        const projectEnv = resolveProjectEnv(projectId);
         let proc: RemoteProcess | null;
         if (USE_DISPATCHER) {
           // Shared per-host dispatcher: open a session on it (drop-in RemoteProcess).
           const dc = ensureDispatcher(connection, cwd, deployResult!, initScript);
           const sid = sessionId ?? randomUUID();
           proc = dc
-            ? dc.openSession(sid, cwd, { onTaskEvent, onServerTurn, onHealth, onQueue, onSkillsReloaded, onSessionEvent, projectId })
+            ? dc.openSession(sid, cwd, { onTaskEvent, onServerTurn, onHealth, onQueue, onSkillsReloaded, onSessionEvent, projectId }, projectEnv)
             : null;
         } else {
-          proc = await spawnAgentServer(connection, cwd, deployResult!, initScript, onTaskEvent, onServerTurn, onHealth, onQueue, onSkillsReloaded, onSessionEvent, projectId);
+          proc = await spawnAgentServer(connection, cwd, deployResult!, initScript, projectEnv, onTaskEvent, onServerTurn, onHealth, onQueue, onSkillsReloaded, onSessionEvent, projectId);
         }
         if (!proc) return null;
         const ready = await proc.awaitReady();
@@ -691,8 +698,12 @@ export function localNodeExec(): { nodeBin: string; env: Record<string, string> 
  * spawn process.execPath — they run a deployed remote node — so they must NOT and
  * do NOT go through here.)
  */
-export function spawnLocalNode(nodeBin: string, args: string[], cwd: string): ChildProcess {
-  const env: Record<string, string> = { ...getShellEnv(), ...localNodeExec().env };
+export function spawnLocalNode(nodeBin: string, args: string[], cwd: string, projectEnv: EnvMap = {}): ChildProcess {
+  // Project env merges onto the login-shell env (PATH-merge, reserved dropped);
+  // localNodeExec().env is applied LAST so ELECTRON_RUN_AS_NODE can't be overridden.
+  // Only the per-tab agent-server passes projectEnv — the shared local dispatcher
+  // is per-HOST, so its per-session env rides open_session (applied in dispatcher.ts).
+  const env: Record<string, string> = { ...applyEnvMap(getShellEnv(), projectEnv), ...localNodeExec().env };
   if (process.env.SHELF_TEST_MODE) env.SHELF_TEST_MODE = process.env.SHELF_TEST_MODE;
   log.trace('agent-remote', `spawnLocalNode: args=[${args.join(' ')}] cwd=${cwd} PATH=${env.PATH ?? '<missing>'}`);
   return spawn(nodeBin, args, { cwd, env, stdio: ['pipe', 'pipe', 'pipe'] });
@@ -743,6 +754,7 @@ async function spawnAgentServer(
   cwd: string,
   deploy: DeployResult,
   initScript?: string,
+  projectEnv: EnvMap = {},
   onTaskEvent?: (ev: TaskEvent) => void,
   onServerTurn?: (turnId: string, events: AsyncGenerator<AgentEvent>) => void,
   onHealth?: (health: ConnectionHealth) => void,
@@ -763,8 +775,8 @@ async function spawnAgentServer(
         `spawnAgentServer local: cwd=${cwd} indexPath=${indexPath} fileExists=${fs.existsSync(indexPath)}`,
       );
       // spawnLocalNode applies ELECTRON_RUN_AS_NODE so the app binary runs as
-      // plain Node (never a second Electron window).
-      const proc = spawnLocalNode(nodeBin, [indexPath], cwd);
+      // plain Node (never a second Electron window), and merges the project env.
+      const proc = spawnLocalNode(nodeBin, [indexPath], cwd, projectEnv);
       return wrapProcess(proc, onTaskEvent, onServerTurn, onHealth, onQueue, onSkillsReloaded, onSessionEvent, projectId);
     } catch (err: any) {
       log.error('agent-remote', `Local spawn failed: ${err.message}`);
@@ -782,7 +794,10 @@ async function spawnAgentServer(
     // alive. See connection-health#2.
     const idleMin = connection.idleShutdownMinutes ?? 5;
     const idleArg = idleMin > 0 ? ` --idle-shutdown-min=${idleMin}` : '';
-    const cmd = `${shellPrefix}${testEnv}exec ${nodeBin} ${indexPath}${idleArg}`;
+    // Project env after initScript (so it wins) and before exec, PATH-merged
+    // against the target's own $PATH. See buildEnvExportPrefix.
+    const envPrefix = buildEnvExportPrefix(projectEnv);
+    const cmd = `${shellPrefix}${envPrefix}${testEnv}exec ${nodeBin} ${indexPath}${idleArg}`;
     const args = [
       '-o', 'ControlMaster=auto',
       '-o', `ControlPath=/tmp/shelf-ssh-${connection.host}-${connection.port}-${connection.user}`,
@@ -796,7 +811,7 @@ async function spawnAgentServer(
   }
 
   if (connection.type === 'docker') {
-    const cmd = `${testEnv}exec ${nodeBin} ${indexPath}`;
+    const cmd = `${buildEnvExportPrefix(projectEnv)}${testEnv}exec ${nodeBin} ${indexPath}`;
     const proc = spawn('docker', ['exec', '-i', connection.container, 'sh', '-c', cmd], {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
@@ -804,7 +819,7 @@ async function spawnAgentServer(
   }
 
   if (connection.type === 'wsl') {
-    const proc = spawn('wsl.exe', ['-d', connection.distro, '--', 'sh', '-lc', `${testEnv}exec ${nodeBin} ${indexPath}`], {
+    const proc = spawn('wsl.exe', ['-d', connection.distro, '--', 'sh', '-lc', `${buildEnvExportPrefix(projectEnv)}${testEnv}exec ${nodeBin} ${indexPath}`], {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     return wrapProcess(proc, onTaskEvent, onServerTurn, onHealth, onQueue, onSkillsReloaded, onSessionEvent, projectId);

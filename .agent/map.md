@@ -32,6 +32,9 @@ title: shelf-terminal — Intent → File Index
 | PTY spawn/kill/resize | `pty-manager.ts` | 透過 connector spawn shell、idle notification、輸出經注入的 `PtyObserver` 回報 |
 | Preload bridge | `preload.ts` | contextBridge 暴露 `window.shelfApi`，純 RPC bridge 到 main |
 | Project 持久化 | `project-store.ts` | 讀寫 `projects.json`（userData 路徑） |
+| 專案 env 解析（plain+secret 合併） | `project-env.ts` | `resolveProjectEnv(projectId)`：合併 plain（projectConfig）+ 解密 secret 成單一注入 EnvMap，兩個 spawn 面共用的唯一出口 |
+| Secret 值加密核心（純） | `secret-crypto.ts` | AES-256-GCM `encryptWithKey`/`decryptWithKey`，versioned+authenticated blob，無 electron、可測 |
+| Secret master-key seam + 加密 store | `secret-store.ts` | key-storage tier（os-backed/local-key/永不明碼）依 runtime backend 選；單一 project-keyed 加密 side-car 的 CRUD + decrypt-scope-by-project |
 | Settings 持久化 | `settings-store.ts` | 讀寫 `settings.json`，merge defaults |
 | SSH ControlMaster 管理 | `ssh-control.ts` | socket 路徑產生、app quit 時清理 |
 | SSH 伺服器列表 | `ssh-server-store.ts` | 儲存已知 SSH server 列表 |
@@ -199,6 +202,7 @@ title: shelf-terminal — Intent → File Index
 | IPC channel 常數 | `ipc-channels.ts` | 所有 IPC channel name 常數 |
 | App 層 MCP 型別 + 驗證 | `mcp.ts` | `McpServerBlock`/`McpServersFile` + 純 validator(main store 與 agent-server loader 共用，不 pull electron） |
 | Shelf 檔案 placement 規則 | `shelf-paths.ts` | `shelfPlacement(type,ctx)` closed allowlist + `ShelfFileType*` 常數(transport 與 agent-server 共用單一路徑規則） |
+| 專案 env 純 helper | `project-env.ts` | `EnvMap`、`SHELF_RESERVED_ENV`、`isReservedEnvKey`/`validateEnvKey`、`applyEnvMap`（本機 merge、PATH-merge）、`buildEnvExportPrefix`（遠端 export 前綴）；main + renderer 共用 |
 | Logger | `logger.ts` | 統一 log 模組，支援 file writer / log level / env override |
 | 預設值 | `defaults.ts` | DEFAULT_SETTINGS, DEFAULT_KEYBINDINGS |
 | Slash prefix parser | `slash-prefix.ts` | `parseSlashPrefix(prompt)`，provider + renderer 同份 |

@@ -57,6 +57,11 @@ contextBridge.exposeInMainWorld('shelfApi', {
     load: () => ipcRenderer.invoke(IPC.PROJECT_LOAD),
     save: (projects: unknown) => ipcRenderer.invoke(IPC.PROJECT_SAVE, projects),
     validateDirs: (projects: unknown) => ipcRenderer.invoke(IPC.PROJECT_VALIDATE_DIRS, projects),
+    // Secret env: renderer sends key/value to set, only ever reads back KEY names.
+    listSecretKeys: (projectId: string) => ipcRenderer.invoke(IPC.PROJECT_SECRETS_LIST, projectId),
+    setSecret: (projectId: string, key: string, value: string) => ipcRenderer.invoke(IPC.PROJECT_SECRET_SET, projectId, key, value),
+    deleteSecret: (projectId: string, key: string) => ipcRenderer.invoke(IPC.PROJECT_SECRET_DELETE, projectId, key),
+    secretKeyTier: () => ipcRenderer.invoke(IPC.SECRET_KEY_TIER),
   },
   dialog: {
     warn: (title: string, message: string) =>

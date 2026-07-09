@@ -134,6 +134,9 @@ test.describe('agent flows via fake provider', () => {
     // The entire agent view flips to the auth pane on auth_required.
     await expect(page.locator('.agent-auth-pane:visible')).toBeVisible({ timeout: 5_000 });
     await expect(page.locator('.agent-auth-title:visible')).toContainText('Fake');
+    // OAuth pane renders the method's fallback hints under the login button
+    // (Copilot uses this to point headless remotes at a token env var).
+    await expect(page.locator('.agent-auth-hints:visible')).toBeVisible();
   });
 
   test('interactive login: button → device code → cancel → back to button', async ({ shelfApp: { page } }) => {

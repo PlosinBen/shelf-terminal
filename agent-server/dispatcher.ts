@@ -11,6 +11,7 @@
 // supervisor. See the feature note.
 import * as readline from 'readline';
 import { spawn } from 'child_process';
+import { applyEnvMap } from '@shared/project-env';
 import { createModelCache, type ModelCache } from './model-cache';
 
 /** A spawned per-session exec proc, from the dispatcher's side. */
@@ -31,6 +32,10 @@ export interface DispatcherDeps {
     sid: string,
     cwd: string | undefined,
     hooks: { onLine: (line: string) => void; onExit: (code: number | null) => void },
+    /** This session's project env map (from `open_session`) — applied to the exec
+     *  child's env (PATH merges, Shelf-required vars stay last). Undefined/empty →
+     *  the exec just inherits the dispatcher's env. */
+    env?: Record<string, string>,
   ) => ExecProc;
   /** Write one raw line to main (the dispatcher's stdout). */
   sendToMain: (line: string) => void;
@@ -71,12 +76,14 @@ export interface Dispatcher {
 export function createDispatcher(deps: DispatcherDeps): Dispatcher {
   // Per session: the current exec connection + its cwd (to reconnect) + inner-
   // heartbeat state + the timestamps of recent reconnects (backoff window).
-  interface ExecEntry { proc: ExecProc; cwd: string | undefined; reconnectAt: number[]; missed: number; unresponsive: boolean; }
+  interface ExecEntry { proc: ExecProc; cwd: string | undefined; env: Record<string, string> | undefined; reconnectAt: number[]; missed: number; unresponsive: boolean; }
   const execs = new Map<string, ExecEntry>();
   const now = deps.now ?? (() => Date.now());
 
-  /** Open an exec execution for `sid` and wire its relay + down-handling. */
-  function startExec(sid: string, cwd: string | undefined): ExecProc {
+  /** Open an exec execution for `sid` and wire its relay + down-handling. `env` is
+   *  this session's project env, re-applied on every (re)spawn so a reconnected
+   *  exec keeps the same injected environment. */
+  function startExec(sid: string, cwd: string | undefined, env: Record<string, string> | undefined): ExecProc {
     // eslint-disable-next-line prefer-const -- referenced (lazily) in the onExit closure
     let proc: ExecProc;
     proc = deps.spawnExec(sid, cwd, {
@@ -84,7 +91,7 @@ export function createDispatcher(deps: DispatcherDeps): Dispatcher {
       // Pass THIS proc so handleExecDown can ignore a stale exec's late exit after a
       // reconnect/replace (its sid now maps to a newer proc). See handleExecDown.
       onExit: (code) => handleExecDown(sid, `exited (code ${code})`, proc),
-    });
+    }, env);
     return proc;
   }
 
@@ -154,7 +161,7 @@ export function createDispatcher(deps: DispatcherDeps): Dispatcher {
     // (2) …then reconnect: fresh exec + updated mapping.
     entry.reconnectAt.push(t);
     entry.missed = 0; entry.unresponsive = false;
-    entry.proc = startExec(sid, entry.cwd);
+    entry.proc = startExec(sid, entry.cwd, entry.env);
   }
 
   function onMainLine(line: string): void {
@@ -179,8 +186,9 @@ export function createDispatcher(deps: DispatcherDeps): Dispatcher {
         return;
       }
       const cwd = typeof msg.cwd === 'string' ? msg.cwd : undefined;
-      execs.set(sid, { proc: startExec(sid, cwd), cwd, reconnectAt: [], missed: 0, unresponsive: false });
-      deps.log('info', `open_session ${sid} → spawned exec (cwd=${cwd ?? 'default'})`);
+      const env = msg.env && typeof msg.env === 'object' ? msg.env as Record<string, string> : undefined;
+      execs.set(sid, { proc: startExec(sid, cwd, env), cwd, env, reconnectAt: [], missed: 0, unresponsive: false });
+      deps.log('info', `open_session ${sid} → spawned exec (cwd=${cwd ?? 'default'}${env ? `, +${Object.keys(env).length} env` : ''})`);
       return;
     }
 
@@ -268,10 +276,12 @@ export function runDispatcher(): void {
   }
 
   dispatcher = createDispatcher({
-    spawnExec: (sid, cwd, hooks) => {
+    spawnExec: (sid, cwd, hooks, env) => {
       // Same node + same bundle, exec role, told its sid. Inherits our env — the
-      // shell/initScript setup already ran when main spawned THIS dispatcher.
-      // ELECTRON_RUN_AS_NODE is set EXPLICITLY (not left to inheritance): when the
+      // shell/initScript setup already ran when main spawned THIS dispatcher — with
+      // the per-project env map (open_session) merged on top (PATH merges against
+      // the target's own PATH). ELECTRON_RUN_AS_NODE is set EXPLICITLY LAST (not
+      // left to inheritance, and never overridable by project env): when the
       // dispatcher runs on Electron's embedded Node, process.execPath is the app
       // binary, and without this flag the exec child would boot a second Electron
       // window instead of running as plain Node. This bundle can't import the
@@ -279,7 +289,7 @@ export function runDispatcher(): void {
       const child = spawn(process.execPath, [process.argv[1], '--role=exec', `--sid=${sid}`], {
         cwd: cwd || process.cwd(),
         stdio: ['pipe', 'pipe', 'pipe'],
-        env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+        env: { ...applyEnvMap(process.env, env ?? {}), ELECTRON_RUN_AS_NODE: '1' },
       });
       const out = readline.createInterface({ input: child.stdout!, terminal: false });
       out.on('line', hooks.onLine);

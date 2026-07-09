@@ -25,4 +25,13 @@ describe('config-backup enumerate live items', () => {
       { id: 'mcp:playwright', kind: 'mcp', name: 'playwright', detail: 'http' },
     ]);
   });
+
+  // Backup uses an ALLOWLIST (only enumerated skill/mcp ids can be selected +
+  // copied to the git remote). Project SECRET env vars are a userData side-car
+  // that must NEVER become syncable — this locks the invariant so adding a new
+  // enumerated kind is a conscious decision, not an accidental secret leak.
+  it('never enumerates any kind beyond skill/mcp (secrets stay unsyncable)', async () => {
+    const kinds = new Set((await enumerateLiveItems()).map((i) => i.kind));
+    expect([...kinds].sort()).toEqual(['mcp', 'skill']);
+  });
 });

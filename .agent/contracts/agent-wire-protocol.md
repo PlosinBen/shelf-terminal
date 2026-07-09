@@ -293,7 +293,7 @@ Over the transport (secure channel / subsystem / container / same-machine stdio)
 
 | `type` | Key fields | Meaning |
 |--------|-----------|---------|
-| `open_session` | `sid; provider; cwd; initScript?; projectId?` | Ensure an execution unit for `sid`. Answered by a relayed `ready{sid}` (= `session_ready`) or `session_down`. Opening an already-open `sid` replaces the stale channel first (see `agent-core#11`). |
+| `open_session` | `sid; provider; cwd; initScript?; projectId?; env?` | Ensure an execution unit for `sid`. Answered by a relayed `ready{sid}` (= `session_ready`) or `session_down`. Opening an already-open `sid` replaces the stale channel first (see `agent-core#11`). `env` = the project's resolved env map (plain + decrypted secret): the dispatcher is per-HOST so per-project env can't ride its own process env — it travels here and is applied to the per-session exec proc (re-applied on reconnect). See `context/project-env#2`. |
 | `close_session` | `sid` | Session closed → dispatcher disposes that execution unit (a NORMAL closure → it self-reaps escaped detached tasks). |
 | `ping` | `seq` | Host-level heartbeat, ONE per host (no `sid`); replaces the per-session ping. |
 | per-session commands | + `sid` | `send`, `stop`, `cancel_queued`, `resolve_permission`, `resolve_picker`, `stop_task`, `get_capabilities`, `store_credential`, `clear_credential`, `clear_context`, `read_task_output`, `reload_skills`, `app_tool_result` — each gains `sid`, routed to that session's execution unit, payloads otherwise UNCHANGED. |
