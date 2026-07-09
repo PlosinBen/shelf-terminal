@@ -2612,6 +2612,13 @@ button {
   font-size: 12px;
 }
 
+/* Secondary, muted fallback hints under the primary OAuth login button. */
+.agent-auth-hints {
+  margin-top: 10px;
+  font-size: 12px;
+  opacity: 0.75;
+}
+
 .agent-auth-error {
   color: var(--agent-error, #e06c75);
   font-size: 12px;

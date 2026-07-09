@@ -25,6 +25,7 @@ import {
   normalizeCopilotTask,
   isBackgroundedCopilotTask,
   buildCopilotAuthConfig,
+  copilotTokenFromEnv,
   buildOrphanFinalizeMessages,
   formatCopilotMcpCard,
   formatCopilotSkillsCard,
@@ -53,6 +54,11 @@ function toCopilotMcpConfig(block: McpServerBlock): Record<string, any> {
  * with where Copilot itself runs. See agent-providers#2.
  */
 async function readGhToken(): Promise<string | undefined> {
+  // A user-provided token (project SECRET env var GH_TOKEN/GITHUB_TOKEN) wins:
+  // this is the headless-remote path where `copilot login` can't persist (no OS
+  // credential store) and `gh` may be absent. See copilotTokenFromEnv.
+  const envToken = copilotTokenFromEnv(process.env);
+  if (envToken) return envToken;
   try {
     const { stdout } = await execFileP('gh', ['auth', 'token'], { timeout: 3000 });
     return stdout.trim() || undefined;
@@ -357,6 +363,10 @@ export function createCopilotBackend(): ServerBackend {
         kind: 'oauth' as const,
         instructions: [
           { label: 'Run this in a terminal on the remote host, then click Retry', command: 'copilot login' },
+          // Headless-remote fallback: where `copilot login` can't persist (no OS
+          // credential store) and `gh` is absent, paste a GitHub token as a
+          // project Secret env var (readGhToken reads it → gitHubToken auth).
+          { label: 'Headless remote (no browser/keychain): set a GitHub token as a project Secret env var, then Retry', command: 'GH_TOKEN' },
         ],
       },
     };

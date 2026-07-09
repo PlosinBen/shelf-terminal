@@ -554,6 +554,17 @@ export function buildCopilotAuthConfig(
     : { useLoggedInUser: true };
 }
 
+/**
+ * A user-provided GitHub token from the environment — the headless-remote auth
+ * path. On a remote with no browser / OS credential store, `copilot login` can't
+ * persist and `gh` may be absent; the user instead pastes a token as a project
+ * SECRET env var, which Shelf injects into the agent-server env. Prefer `GH_TOKEN`
+ * over `GITHUB_TOKEN` (matching gh's own precedence). Pure — takes the env in.
+ */
+export function copilotTokenFromEnv(env: NodeJS.ProcessEnv): string | undefined {
+  return env.GH_TOKEN?.trim() || env.GITHUB_TOKEN?.trim() || undefined;
+}
+
 
 // ── /mcp /skills cards (provider-composed markdown) ──────────────────────────
 // Copilot builds these from its OWN raw session-event shapes (skills_loaded /
