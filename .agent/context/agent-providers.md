@@ -153,3 +153,17 @@ SDK 0.3.159 **並存**兩種 compact 完成訊號:`status` 形狀(`subtype:'stat
 **Do not change casually because**：① 別改成自刻 GitHub device flow（B 案）—— 要拿未公開的 Copilot client_id，破裂/維護風險高，除非官方提供穩定 SDK 登入 API。② 別把開瀏覽器改成在 agent-server 端（remote 沒有可用瀏覽器）—— 一律回 main 用 `shell.openExternal`。③ 別忘了 env 剝 token，否則互動登入會被既有 token 短路。
 
 **Related**：`contracts/agent-wire-protocol`（`auth_login_prompt`/`auth_login_done`）、`contracts/ipc-channels`（`agent:start-login`/`cancel-login`/`login-prompt`/`login-done`）、`agent-providers#2`（gh token 路徑，與互動登入正交並存）、`agent-server/providers/copilot/login.ts`、`src/main/agent/index.ts`（`openLoginUrl`）、`src/renderer/components/agent/AuthPane.tsx`。
+
+## agent-providers#11 — Copilot 登入成功後必須丟棄 cached SDK client，否則沿用「登入前」的未認證 runtime  ·  [Gotcha]
+
+**Symptom**：device-flow 登入成功（token 落地、AuthPane 消失），但第一次送訊息回 `[authentication] Session was not created with authentication info or custom provider` + `Session process exited (code 1)`。**手動 reconnect 後就正常**。
+
+**Root cause**：`@github/copilot-sdk` 的 `CopilotClient` 在 `ensureClient()` 第一次被呼叫時就 spawn 一顆**常駐**的 copilot CLI runtime（`--stdio` server 模式）。而 tab 開啟的 auth 探測（`gatherCapabilities` → `getAuthStatus()`）就會觸發 `ensureClient()` —— 此刻**尚未登入** → 這顆 runtime 起來即「無 auth」，且**不會**中途重讀 keychain/keyring 憑證（`useLoggedInUser:true` 只在 spawn 時決定 auto-login，之後不重試）。`startLogin` 只把憑證寫進 credential store，不動 `state.client` → 後續 turn 沿用那顆 stale runtime → 認證失敗。reconnect 之所以好，是因為 `dispose()` 把 `state.client` 清掉、重連時 spawn 全新 runtime 才讀得到憑證。對照：standalone `copilot -p` 每次全新 spawn、開機即讀憑證，所以永遠正常。
+
+**Fix**：`startLogin` 的 `runner.done` handler 在 `res.ok` 時 `state.session?.disconnect()` + `state.client?.stop()` 並設 null（包在 `critical()` 避免與並行 turn 競態），send `auth_login_done` 之前做完。下一個 `ensureClient()`/`ensureSession()` 就 spawn 一顆讀得到新憑證的 runtime，免手動 reconnect。
+
+**Do not change casually because**：
+- 別以為「login 進程 exit 0 + 憑證落地」就等於「當前 session 能用」—— 建 session 的是**另一顆**登入前就開著的 runtime，兩者不共享 auth 狀態。
+- 環境面（headless 容器要有可用 Secret Service 才存得了憑證，見容器測試設定）與這條**正交**：憑證存得了之後，才輪到這個 client-rebuild 問題。
+
+**Related**：`agent-providers#10`（device-flow 登入主流程）、`agent-providers#2`（gh token 路徑）、`agent-server/providers/copilot/index.ts`（`startLogin` done handler / `ensureClient`）。

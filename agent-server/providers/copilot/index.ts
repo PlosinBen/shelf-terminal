@@ -1548,10 +1548,27 @@ export function createCopilotBackend(): ServerBackend {
         log: (level, msg) => serverLog(level, 'copilot-login', msg),
       });
       loginRunner = runner;
-      void runner.done.then((res) => {
+      void runner.done.then(async (res) => {
         // Ignore a stale runner's result if a newer login superseded it.
         if (loginRunner !== runner) return;
         loginRunner = null;
+        // On success, tear down the cached SDK client + session. The runtime was
+        // spawned UNAUTHENTICATED at the first ensureClient (the tab-open auth
+        // probe, before this login) and never re-reads the credential — so the
+        // next turn would keep using it and fail with "No authentication info
+        // available" until a manual reconnect. Dropping it here makes the next
+        // ensureSession() spawn a fresh runtime that picks up the just-stored
+        // login. critical() so a concurrent turn can't interleave the rebuild.
+        if (res.ok) {
+          await critical(async () => {
+            try { await state.session?.disconnect(); }
+            catch (err: any) { serverLog('error', 'copilot', 'session.disconnect() after login failed', err?.message ?? err); }
+            try { await state.client?.stop(); }
+            catch (err: any) { serverLog('error', 'copilot', 'client.stop() after login failed', err?.message ?? err); }
+            state.session = null;
+            state.client = null;
+          });
+        }
         send({ type: 'auth_login_done', provider: 'copilot', ok: res.ok, cancelled: res.cancelled, error: res.error });
       });
     },

@@ -54,8 +54,10 @@ describe('copilot backend startLogin', () => {
     });
 
     h.resolveDone!({ ok: true });
-    await Promise.resolve(); await Promise.resolve();
-    expect(sent).toContainEqual({ type: 'auth_login_done', provider: 'copilot', ok: true, cancelled: undefined, error: undefined });
+    // ok:true now runs an async client/session teardown (re-auth rebuild) before
+    // emitting done — wait for it rather than assuming a fixed microtask count.
+    await vi.waitFor(() =>
+      expect(sent).toContainEqual({ type: 'auth_login_done', provider: 'copilot', ok: true, cancelled: undefined, error: undefined }));
   });
 
   it('emits auth_login_done ok:false when the CLI is not found', () => {
