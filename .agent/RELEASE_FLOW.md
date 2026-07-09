@@ -11,6 +11,10 @@
    git log --oneline origin/main..HEAD           # 確認要發的 commit 都在、且 main 領先 origin（不是落後）
    ```
    `git describe --tags --abbrev=0` 抓到的 last-tag 必須跟「origin 上真正最新的 release tag」一致才往下走。
+0.5. **每天第一次發版時，先跑一次 `npm audit`**（安全掃描）。頻率綁「當天第一次」而非每次發版：同一天內依賴版本不會變，後續發版可略過；有跨天再查。
+   - **high / critical**（尤其打包進 app 的 runtime 依賴）→ 先處理（升版 / `npm audit fix` / 必要時 `overrides`）再往下發，不要帶著已知漏洞出貨。
+   - 無，或只剩 low / moderate 且僅影響 build/dev 工具鏈 → 記錄後放行。
+   - ⚠️ `npm audit` 只涵蓋「有登記 advisory」的漏洞。**Electron 的 Chromium-CVE 安全版通常不在其內**（CVE 掛在 Chromium tracker、發在 Electron blog，不以 npm advisory 形式掛在 `electron` 上）；要確認 Electron 是否有安全 patch，需另行看 Electron releases（同 major 的新 patch ≈ CVE backport）。
 1. Run `git log <last-tag>..HEAD --oneline` to get actual changes since last release
 2. Update `version` in `package.json`
 3. Write commit message based on the git log output (not memory), listing only changes in this release
