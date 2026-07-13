@@ -68,6 +68,7 @@ Shelf 不是針對某個角色設計（前端 / 後端 / SRE 都可能），而�
 - **Tab badge** — 背景 tab 有新輸出時顯示未讀指示
 - **Project 管理** — 拖拉排序、右鍵選單（Edit、Connect/Disconnect、Close）
 - **Init script** — 每個 project 啟動指令（例如 `conda activate`、`source .venv/bin/activate`）
+- **環境變數** — per-project env vars，注入 Shelf 為該專案啟動的每個 process（agent CLI + terminal，橫跨 local/SSH/WSL/Docker）。分 **Plain**（存在 project config）與 **Secret**（加密儲存，master key 由 OS keychain / 本地金鑰保管；config-backup 不會同步）
 - **預設 tabs** — 每個 project 可定義啟動時自動開的 tab，各自有啟動指令
 - **自訂快捷鍵** — 所有快捷鍵都可在 Settings 修改
 - **檔案 paste / drag-drop** — 拖放或貼上任何檔案到 terminal；Shelf 上傳到 `<projectCwd>/.tmp/shelf/` 並輸入路徑（支援 local、SSH、WSL、Docker）
@@ -108,6 +109,16 @@ Shelf Terminal 是一個 terminal wrapper — 它不會幫你安裝、設定、�
 預先定義 project 連線後自動打開的 tab，每個 tab 有自己的指令。在 project 右鍵 → Edit 設定。
 
 範例：一個 `dev` tab 跑 `npm run dev`、一個 `test` tab 跑 `npm run test:watch`、一個普通 `shell` tab 不帶指令。
+
+### 環境變數
+
+Per-project 變數，注入 Shelf 為該專案啟動的每個 process — agent CLI（Claude Code / Copilot）與所有 terminal tab，橫跨 local、SSH、WSL、Docker。在 project 右鍵 → Edit 設定。
+
+- **Plain** — 存在 `projects.json`；適合非敏感值（`NODE_ENV`、`HTTPS_PROXY` 等）。`PATH` 會合併（你的值前置）而不是覆蓋。
+- **Secret** — 適合 token / key；加密儲存（AES-256-GCM），master key 在支援的環境由 OS keychain 保管（Windows DPAPI / 簽名版 macOS Keychain / 真正的 Linux keyring），否則用 `0600` 本地金鑰。renderer 永遠讀不回 secret 值，config-backup 也不會同步。
+- 保留名稱（`SHELF_*`、`ELECTRON_RUN_AS_NODE`）會被擋下。
+
+常見用途：貼一個 `GH_TOKEN` secret，讓 Copilot 在無頭遠端也能認證（免瀏覽器 / keychain）。
 
 ### SSH 共用連線
 
