@@ -67,6 +67,7 @@ Where each surface fits in:
 - **Tab badge** — unread indicator on background tabs with new output
 - **Project management** — drag to reorder, right-click context menu (Edit, Connect/Disconnect, Close)
 - **Init script** — per-project startup commands (e.g. `conda activate`, `source .venv/bin/activate`)
+- **Environment variables** — per-project env vars injected into every process Shelf launches (agent CLIs + terminals, across local/SSH/WSL/Docker). **Plain** (stored in project config) and **Secret** (encrypted at rest via the OS keychain / a local key; never synced by config-backup)
 - **Default tabs** — per-project tab templates with individual commands, auto-opened on connect
 - **Custom keybindings** — all shortcuts configurable via Settings panel
 - **File paste / drag-drop** — drop or paste any file into the terminal; Shelf uploads it to `<projectCwd>/.tmp/shelf/` (works for local, SSH, WSL, Docker) and types the path
@@ -107,6 +108,16 @@ Useful for environment setup that you'd otherwise type every time you open a ter
 Pre-define tabs that auto-open on connect, each with its own command. Set via right-click project → Edit.
 
 Example: a `dev` tab running `npm run dev`, a `test` tab running `npm run test:watch`, and a plain `shell` tab with no command.
+
+### Environment Variables
+
+Per-project variables injected into every process Shelf launches for that project — the agent CLI (Claude Code / Copilot) and all terminal tabs, across local, SSH, WSL, and Docker. Set via right-click project → Edit.
+
+- **Plain** — stored in `projects.json`; for non-sensitive values (`NODE_ENV`, `HTTPS_PROXY`, …). `PATH` merges (your value is prepended) instead of replacing.
+- **Secret** — for tokens / keys; encrypted at rest (AES-256-GCM) with the master key held by the OS keychain where available (Windows DPAPI / macOS Keychain on a signed build / real Linux keyring), else a `0600` local key. The renderer never reads secret values back, and config-backup never syncs them.
+- Reserved names (`SHELF_*`, `ELECTRON_RUN_AS_NODE`) are blocked.
+
+A common use: paste a `GH_TOKEN` secret so Copilot can auth on a headless remote (no browser / keychain).
 
 ### SSH with Shared Connection
 
