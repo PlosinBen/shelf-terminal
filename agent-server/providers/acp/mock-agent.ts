@@ -7,7 +7,15 @@
 // with NO real codex, NO stdio, and NO credentials. This is the test enabler for
 // Phase 1–2 (see acp-provider feature note, T1.0).
 
-import { agent, type AgentApp, type SessionUpdate, type StopReason } from '@agentclientprotocol/sdk';
+import {
+  agent,
+  methods,
+  type AgentApp,
+  type SessionUpdate,
+  type StopReason,
+  type PermissionOption,
+  type RequestPermissionResponse,
+} from '@agentclientprotocol/sdk';
 
 export interface MockAgentScript {
   /** Auth methods advertised at initialize (default: one chatgpt-like method). */
@@ -20,6 +28,12 @@ export interface MockAgentScript {
   stopReason?: StopReason;
   /** Called with each prompt's params — lets a test capture what was sent. */
   onPrompt?: (params: unknown) => void;
+  /**
+   * When set, the prompt handler first calls `session/request_permission` with
+   * these options and reports the client's outcome via `onPermissionOutcome`.
+   */
+  requestPermissionOnPrompt?: { toolCallId: string; title: string; options: PermissionOption[] };
+  onPermissionOutcome?: (outcome: RequestPermissionResponse['outcome']) => void;
 }
 
 /**
@@ -41,6 +55,15 @@ export function createMockAcpAgent(script: MockAgentScript = {}): AgentApp {
     .onRequest('session/new', () => ({ sessionId }))
     .onRequest('session/prompt', async ({ params, client }) => {
       script.onPrompt?.(params);
+      if (script.requestPermissionOnPrompt) {
+        const { toolCallId, title, options } = script.requestPermissionOnPrompt;
+        const res = await client.request(methods.client.session.requestPermission, {
+          sessionId,
+          toolCall: { toolCallId, title },
+          options,
+        });
+        script.onPermissionOutcome?.(res.outcome);
+      }
       for (const update of updates) {
         await client.notify('session/update', { sessionId, update });
       }
