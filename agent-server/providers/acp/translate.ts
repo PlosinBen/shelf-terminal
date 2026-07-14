@@ -1,0 +1,139 @@
+// Pure ACP → Shelf-wire translation.
+//
+// This is the semantics-FREE core of the shared `acp/` toolkit (agent-providers#6):
+// it maps ACP `session/update` variants onto Shelf's render primitives
+// (`stream` / `message` fold_* / `plan`) and knows NOTHING about which agent
+// (codex / gemini / …) produced them. Per-agent semantics (mode names, model
+// format, auth) live in the per-agent backend, never here.
+//
+// Kept PURE (no I/O, no SDK runtime — TYPE-only import) so it is exhaustively
+// unit-testable without a live agent. The stateful lifecycle (accumulating the
+// final reply, emitting turn-end status) is the CLIENT's job, not translate's.
+
+import type {
+  SessionUpdate,
+  ContentBlock,
+  PlanEntry,
+  ToolCallContent,
+  ToolCallStatus,
+} from '@agentclientprotocol/sdk';
+import type { OutgoingMessage } from '../types';
+
+/** Fallback msgId for streamed assistant text when the agent omits `messageId`. */
+const DEFAULT_AGENT_MSG_ID = 'agent-message';
+
+/** Flatten a single ACP ContentBlock to display text (non-text blocks degrade). */
+export function contentBlockToText(block: ContentBlock): string {
+  switch (block.type) {
+    case 'text':
+      return block.text;
+    case 'resource_link':
+      return block.uri ? `[${block.name ?? block.uri}](${block.uri})` : (block.name ?? '');
+    case 'resource':
+      // EmbeddedResource: prefer inline text if present, else nothing renderable.
+      return 'text' in block.resource && typeof (block.resource as { text?: unknown }).text === 'string'
+        ? (block.resource as { text: string }).text
+        : '';
+    case 'image':
+    case 'audio':
+      return '';
+    default:
+      return '';
+  }
+}
+
+/** Render an ACP plan (`entries`) as a markdown checklist for the `plan` side-channel. */
+export function renderPlan(entries: PlanEntry[]): string {
+  return entries
+    .map((e) => {
+      const box = e.status === 'completed' ? '[x]' : e.status === 'in_progress' ? '[~]' : '[ ]';
+      return `- ${box} ${e.content}`;
+    })
+    .join('\n');
+}
+
+/** Concatenate a tool call's textual content blocks (used for fold_code body). */
+function toolContentToText(content: ToolCallContent[] | null | undefined): string {
+  if (!content) return '';
+  const parts: string[] = [];
+  for (const c of content) {
+    if (c.type === 'content') parts.push(contentBlockToText(c.content));
+    // 'diff' handled separately (fold_diff); 'terminal' has no inline text here.
+  }
+  return parts.join('\n');
+}
+
+/** First diff block in a tool call's content, if any (drives fold_diff vs fold_code). */
+function firstDiff(content: ToolCallContent[] | null | undefined): { oldText?: string | null; newText: string } | undefined {
+  if (!content) return undefined;
+  for (const c of content) {
+    if (c.type === 'diff') return { oldText: c.oldText, newText: c.newText };
+  }
+  return undefined;
+}
+
+/** `failed` → surface as an error card; other statuses render normally. */
+function errorFor(status: ToolCallStatus | null | undefined): string | undefined {
+  return status === 'failed' ? 'Tool call failed' : undefined;
+}
+
+/**
+ * Map ONE ACP `SessionUpdate` to zero or more Shelf wire messages (WITHOUT a
+ * turnId — the send wrapper stamps that). Returns `[]` for updates that are not
+ * timeline render primitives (capabilities/mode/config/usage are consumed by the
+ * stateful client, not rendered here).
+ */
+export function translateSessionUpdate(update: SessionUpdate): OutgoingMessage[] {
+  switch (update.sessionUpdate) {
+    case 'agent_message_chunk': {
+      const content = contentBlockToText(update.content);
+      if (!content) return [];
+      return [{ type: 'stream', msgId: update.messageId ?? DEFAULT_AGENT_MSG_ID, streamType: 'text', content }];
+    }
+    case 'agent_thought_chunk': {
+      const content = contentBlockToText(update.content);
+      if (!content) return [];
+      return [{ type: 'stream', msgId: update.messageId ?? DEFAULT_AGENT_MSG_ID, streamType: 'thinking', content }];
+    }
+    case 'plan':
+      return [{ type: 'plan', content: renderPlan(update.entries) }];
+    case 'plan_update':
+      // PlanUpdate carries a full replacement list of entries too.
+      return [{ type: 'plan', content: renderPlan((update as { entries?: PlanEntry[] }).entries ?? []) }];
+    case 'tool_call':
+    case 'tool_call_update': {
+      const msgId = update.toolCallId;
+      const label = ('title' in update && update.title) ? update.title : 'Tool';
+      const kind = 'kind' in update ? update.kind : undefined;
+      const status = 'status' in update ? update.status : undefined;
+      const errorMessage = errorFor(status);
+      const diff = firstDiff('content' in update ? update.content : undefined);
+      if (diff) {
+        return [{
+          type: 'message', msgId, msgType: 'fold_diff', label,
+          ...(kind ? { subtitle: kind } : {}),
+          ...(errorMessage ? { errorMessage } : {}),
+          body: { diff: { oldString: diff.oldText ?? '', newString: diff.newText } },
+        }];
+      }
+      const bodyText = toolContentToText('content' in update ? update.content : undefined);
+      return [{
+        type: 'message', msgId, msgType: 'fold_code', label,
+        ...(kind ? { subtitle: kind } : {}),
+        ...(errorMessage ? { errorMessage } : {}),
+        ...(bodyText ? { body: { content: bodyText } } : {}),
+      }];
+    }
+    // Not timeline render primitives — handled by the stateful client (caps /
+    // status / mode) or intentionally ignored here.
+    case 'user_message_chunk':
+    case 'available_commands_update':
+    case 'current_mode_update':
+    case 'config_option_update':
+    case 'session_info_update':
+    case 'usage_update':
+    case 'plan_removed':
+    default:
+      return [];
+  }
+}
