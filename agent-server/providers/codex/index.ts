@@ -6,10 +6,11 @@
 
 import type { ChildProcess } from 'node:child_process';
 import { methods, type ActiveSession } from '@agentclientprotocol/sdk';
-import type { ServerBackend, QueryInput, SendFn } from '../types';
+import type { ServerBackend, QueryInput, SendFn, ProviderCapabilities } from '../types';
 import { openAcpConnection, spawnAgentStdio, type AcpConnection } from '../acp/connection';
 import { startSession, drivePromptTurn } from '../acp/client';
 import { createPermissionBridge } from '../acp/permission';
+import { mapSessionCapabilities } from '../acp/capabilities';
 import { resolveCodexAcpCommand, codexSkillsRoot } from './helpers';
 
 export function createCodexBackend(): ServerBackend {
@@ -65,6 +66,20 @@ export function createCodexBackend(): ServerBackend {
       } finally {
         currentSend = null;
         send({ type: 'status', state: 'idle' });
+      }
+    },
+
+    async gatherCapabilities(cwd: string): Promise<ProviderCapabilities> {
+      try {
+        const s = await ensureSession(cwd, undefined);
+        const r = s.newSessionResponse;
+        // Model list is DYNAMIC (agent-owned config options) — no Shelf registry.
+        return mapSessionCapabilities({ modes: r.modes, configOptions: r.configOptions });
+      } catch {
+        // A fresh codex session most commonly fails when unauthenticated →
+        // surface the auth pane rather than an empty capability set. (T4.0 will
+        // refine to inspect the ACP auth_required error specifically.)
+        return { models: [], permissionModes: [], effortLevels: [], slashCommands: [], authRequired: true };
       }
     },
 
