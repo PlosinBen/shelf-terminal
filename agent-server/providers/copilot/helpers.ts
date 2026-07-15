@@ -652,3 +652,30 @@ export function formatCopilotSkillsCard(
   const n = skills.length;
   return `${n} skill${n > 1 ? 's' : ''}:\n\n${mdTable(headers, rows)}`;
 }
+
+/**
+ * Parse an image data URL into `{ mimeType, data(base64) }`, or null when it is
+ * not a base64 image or exceeds ~20MB. Same data-URL shape the renderer sends
+ * (`data:image/png;base64,…`).
+ */
+export function parseImageDataUrl(dataUrl: string): { mimeType: string; data: string } | null {
+  const m = dataUrl.match(/^data:(image\/[a-z0-9.+-]+);base64,(.+)$/i);
+  if (!m) return null;
+  if (m[2].length > 20 * 1024 * 1024) return null;
+  return { mimeType: m[1], data: m[2] };
+}
+
+/**
+ * Convert Shelf's image data URLs (`QueryInput.images`) into Copilot SDK `blob`
+ * attachments so pasted/attached images actually reach the model. Invalid or
+ * oversized entries are dropped. Previously these were silently discarded — the
+ * backend only forwarded `prompt`, so Copilot never saw attached images.
+ */
+export function imagesToBlobAttachments(
+  images: string[] | undefined,
+): Array<{ type: 'blob'; data: string; mimeType: string }> {
+  return (images ?? [])
+    .map(parseImageDataUrl)
+    .filter((x): x is { mimeType: string; data: string } => x !== null)
+    .map(({ mimeType, data }) => ({ type: 'blob', data, mimeType }));
+}
