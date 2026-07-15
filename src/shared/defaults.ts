@@ -31,4 +31,5 @@ export const DEFAULT_SETTINGS: AppSettings = {
   agentInMemoryMaxMessages: 500,
   agentHistorySaveThrottleMs: 5000,
   sidebarWidth: 220,
+  agentIdleTeardownMinutes: 0,
 };
