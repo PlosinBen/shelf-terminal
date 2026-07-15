@@ -25,6 +25,7 @@ import { useStore, setProjects, setSettings, setUpdateStatus, addProject, addTab
 import type { ConnectionHealth } from '@shared/types';
 import type { ProjectConfig } from '@shared/types';
 import { disposeTerminal } from './components/TerminalView';
+import { teardownTab } from './tab-teardown';
 import { on, emit, Events } from './events';
 import { bindAgentIPCGroup } from './events';
 import { bindAgentStoreSubscriptions } from './agentTabSubscriptions';
@@ -102,15 +103,7 @@ export function App() {
     const offCloseTab = on(Events.CLOSE_TAB, (projectIndex: number, tabIndex: number) => {
       const proj = projects[projectIndex];
       const tab = proj?.tabs[tabIndex];
-      if (tab) {
-        if (tab.type === 'agent') {
-          window.shelfApi.agent.destroy(tab.id);
-        } else if (tab.type === 'terminal') {
-          window.shelfApi.pty.kill(tab.id);
-          disposeTerminal(tab.id);
-        }
-        // web tabs: the <webview> tears down on unmount — no explicit cleanup.
-      }
+      if (tab) teardownTab(tab);
       removeTab(projectIndex, tabIndex);
     });
 
@@ -122,15 +115,7 @@ export function App() {
         if (sessionIds) {
           Object.values(sessionIds).forEach((id) => { if (id) clearAgentSession(id); });
         }
-        proj.tabs.forEach((tab) => {
-          if (tab.type === 'agent') {
-            window.shelfApi.agent.destroy(tab.id);
-          } else if (tab.type === 'terminal') {
-            window.shelfApi.pty.kill(tab.id);
-            disposeTerminal(tab.id);
-          }
-          // web tabs need no explicit teardown (see CLOSE_TAB).
-        });
+        proj.tabs.forEach(teardownTab);
       }
       removeProject(projectIndex);
       const configs = projects.filter((_, i) => i !== projectIndex).map((p) => p.config);
@@ -228,10 +213,10 @@ export function App() {
     const offDisconnectProject = on(Events.DISCONNECT_PROJECT, (projectIndex: number) => {
       const proj = projects[projectIndex];
       if (!proj || proj.tabs.length === 0) return;
-      proj.tabs.forEach((tab) => {
-        window.shelfApi.pty.kill(tab.id);
-        disposeTerminal(tab.id);
-      });
+      // Was leaking: this only killed PTYs and forgot agent tabs, so an agent
+      // session's exec (+ provider CLI) survived a project disconnect. Route
+      // through teardownTab so agent backends are destroyed too.
+      proj.tabs.forEach(teardownTab);
       // Remove all tabs but keep the project
       for (let t = proj.tabs.length - 1; t >= 0; t--) {
         removeTab(projectIndex, t);
