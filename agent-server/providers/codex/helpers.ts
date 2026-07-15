@@ -12,6 +12,20 @@ export interface CodexAcpCommand {
 }
 
 /**
+ * Resolve how to launch the `codex` CLI itself (for `codex app-server`, used by
+ * the device-code login drive). Dev: the `@openai/codex` package's `bin/codex.js`
+ * shim, run with the current Node. Packaged: `SHELF_CODEX_CLI_PATH` (Phase 3).
+ */
+export function resolveCodexCliCommand(): CodexAcpCommand {
+  const packaged = process.env.SHELF_CODEX_CLI_PATH;
+  if (packaged) return { command: process.execPath, args: [packaged] };
+  const require = createRequire(__filename);
+  const pkgJson = require.resolve('@openai/codex/package.json');
+  const entry = path.join(path.dirname(pkgJson), 'bin', 'codex.js');
+  return { command: process.execPath, args: [entry] };
+}
+
+/**
  * Resolve how to launch `@agentclientprotocol/codex-acp`.
  *
  * Dev / unpacked: run its bundled entry with the current Node. Packaged: Phase 3

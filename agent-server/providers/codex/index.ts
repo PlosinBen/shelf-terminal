@@ -12,6 +12,7 @@ import { createSessionDriver, type AcpSession } from '../acp/client';
 import { createPermissionBridge } from '../acp/permission';
 import { mapSessionCapabilities } from '../acp/capabilities';
 import { resolveCodexAcpCommand, codexSkillsRoot } from './helpers';
+import { driveDeviceCodeLogin, spawnCodexAppServerRpc, type LoginHandle } from './app-server-login';
 
 export function createCodexBackend(): ServerBackend {
   let conn: AcpConnection | null = null;
@@ -21,6 +22,7 @@ export function createCodexBackend(): ServerBackend {
   // The active turn's send — the permission bridge rides this lane so requests
   // reach the renderer on the current turn's id.
   let currentSend: SendFn | null = null;
+  let loginHandle: LoginHandle | null = null;
   const permissions = createPermissionBridge(() => currentSend);
   const driver = createSessionDriver();
 
@@ -106,6 +108,24 @@ export function createCodexBackend(): ServerBackend {
 
     resolvePermission(toolUseId: string, allow: boolean, message?: string, scope?: 'once' | 'session'): void {
       permissions.resolvePermission(toolUseId, allow, message, scope);
+    },
+
+    /**
+     * Subscription auth (device-code), out-of-band from ACP: drive codex's
+     * app-server login, surface the URL + code via `auth_login_prompt`, and
+     * report the outcome via `auth_login_done`. Codex persists its own
+     * credentials to `~/.codex` (Shelf touches no file); the codex-acp session
+     * then reuses that ambient auth on its next turn.
+     */
+    startLogin(_cwd: string, send: SendFn): void {
+      loginHandle?.cancel();
+      const { rpc } = spawnCodexAppServerRpc();
+      loginHandle = driveDeviceCodeLogin(rpc, send);
+    },
+
+    cancelLogin(): void {
+      loginHandle?.cancel();
+      loginHandle = null;
     },
 
     async stop(): Promise<void> {
