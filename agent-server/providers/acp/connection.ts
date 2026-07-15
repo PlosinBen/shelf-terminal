@@ -13,6 +13,7 @@ import {
   type AgentApp,
   type ClientContext,
   type Stream,
+  type SessionNotification,
   type ClientRequestHandlersByMethod,
 } from '@agentclientprotocol/sdk';
 
@@ -35,6 +36,8 @@ export interface OpenAcpConnectionOptions {
   name?: string;
   /** Bridges an agent permission request to the client UI. Omit → default deny. */
   onRequestPermission?: PermissionHandler;
+  /** Routes every session/update notification (the session driver's sink). */
+  onSessionUpdate?: (notification: SessionNotification) => void;
 }
 
 /**
@@ -49,6 +52,10 @@ export function openAcpConnection(
   const app = client({ name: opts.name ?? 'shelf' });
   if (opts.onRequestPermission) {
     app.onRequest(methods.client.session.requestPermission, opts.onRequestPermission);
+  }
+  if (opts.onSessionUpdate) {
+    const onUpdate = opts.onSessionUpdate;
+    app.onNotification(methods.client.session.update, ({ params }) => { onUpdate(params); });
   }
   // Overload resolves by runtime type (Stream vs AgentApp) — the SDK accepts both.
   const conn = app.connect(target as Stream);

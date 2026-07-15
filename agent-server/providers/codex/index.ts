@@ -5,10 +5,10 @@
 // provider identity is 'codex'.
 
 import type { ChildProcess } from 'node:child_process';
-import { methods, type ActiveSession } from '@agentclientprotocol/sdk';
+import { methods } from '@agentclientprotocol/sdk';
 import type { ServerBackend, QueryInput, SendFn, ProviderCapabilities } from '../types';
 import { openAcpConnection, spawnAgentStdio, type AcpConnection } from '../acp/connection';
-import { startSession, drivePromptTurn } from '../acp/client';
+import { createSessionDriver, type AcpSession } from '../acp/client';
 import { createPermissionBridge } from '../acp/permission';
 import { mapSessionCapabilities } from '../acp/capabilities';
 import { resolveCodexAcpCommand, codexSkillsRoot } from './helpers';
@@ -16,12 +16,13 @@ import { resolveCodexAcpCommand, codexSkillsRoot } from './helpers';
 export function createCodexBackend(): ServerBackend {
   let conn: AcpConnection | null = null;
   let child: ChildProcess | null = null;
-  let session: ActiveSession | null = null;
+  let session: AcpSession | null = null;
   let sessionCwd: string | null = null;
   // The active turn's send — the permission bridge rides this lane so requests
   // reach the renderer on the current turn's id.
   let currentSend: SendFn | null = null;
   const permissions = createPermissionBridge(() => currentSend);
+  const driver = createSessionDriver();
 
   /** Spawn codex-acp + open the ACP connection once; reused across turns. */
   function ensureConnection(cwd: string): AcpConnection {
@@ -32,6 +33,7 @@ export function createCodexBackend(): ServerBackend {
     conn = openAcpConnection(spawned.stream, {
       name: 'shelf-codex',
       onRequestPermission: permissions.onRequestPermission,
+      onSessionUpdate: driver.onSessionUpdate,
     });
     // Drop refs when the agent process/connection ends so the next turn respawns.
     conn.closed.finally(() => {
@@ -43,15 +45,31 @@ export function createCodexBackend(): ServerBackend {
     return conn;
   }
 
-  async function ensureSession(cwd: string, appId: string | undefined): Promise<ActiveSession> {
-    if (session && sessionCwd === cwd) return session;
-    const c = ensureConnection(cwd);
-    const root = codexSkillsRoot(appId);
-    session = await startSession(c.agent, {
-      cwd,
-      additionalDirectories: root ? [root] : undefined,
-    });
-    sessionCwd = cwd;
+  /**
+   * Establish the session (once per cwd), preferring RESUME of a persisted
+   * `lastSdkSessionId` so a reconnect continues the conversation; falls back to
+   * a fresh session/new if resume fails. Emits `context_patch` to persist the
+   * (new) session id — Shelf never touches the context store directly.
+   */
+  async function ensureSession(input: { cwd: string; appId?: string; resumeId?: string | null }, send: SendFn | null): Promise<AcpSession> {
+    if (session && sessionCwd === input.cwd) return session;
+    const c = ensureConnection(input.cwd);
+    const root = codexSkillsRoot(input.appId);
+    const opts = { cwd: input.cwd, additionalDirectories: root ? [root] : undefined };
+
+    if (input.resumeId) {
+      try {
+        session = await driver.resume(c.agent, input.resumeId, opts);
+        sessionCwd = input.cwd;
+        return session;
+      } catch {
+        // Resume rejected (session gone / unsupported) → fall through to new.
+      }
+    }
+    session = await driver.startNew(c.agent, opts);
+    sessionCwd = input.cwd;
+    // Persist the SDK session id so the next process can resume it.
+    send?.({ type: 'context_patch', patch: { lastSdkSessionId: session.sessionId } });
     return session;
   }
 
@@ -59,8 +77,11 @@ export function createCodexBackend(): ServerBackend {
     async query(input: QueryInput, send: SendFn): Promise<void> {
       currentSend = send;
       try {
-        const s = await ensureSession(input.cwd, input.appId);
-        await drivePromptTurn(s, input.prompt, send);
+        const s = await ensureSession(
+          { cwd: input.cwd, appId: input.appId, resumeId: input.restoreContext?.lastSdkSessionId },
+          send,
+        );
+        await driver.drivePromptTurn(conn!.agent, s, input.prompt, send);
       } catch (err) {
         send({ type: 'error', error: `codex: ${(err as Error)?.message ?? String(err)}` });
       } finally {
@@ -71,10 +92,10 @@ export function createCodexBackend(): ServerBackend {
 
     async gatherCapabilities(cwd: string): Promise<ProviderCapabilities> {
       try {
-        const s = await ensureSession(cwd, undefined);
+        const s = await ensureSession({ cwd }, null);
         const r = s.newSessionResponse;
         // Model list is DYNAMIC (agent-owned config options) — no Shelf registry.
-        return mapSessionCapabilities({ modes: r.modes, configOptions: r.configOptions });
+        return mapSessionCapabilities({ modes: r?.modes, configOptions: r?.configOptions });
       } catch {
         // A fresh codex session most commonly fails when unauthenticated →
         // surface the auth pane rather than an empty capability set. (T4.0 will
@@ -96,9 +117,15 @@ export function createCodexBackend(): ServerBackend {
       }
     },
 
+    resetSession(): void {
+      if (session) driver.forget(session.sessionId);
+      session = null;
+      sessionCwd = null;
+    },
+
     dispose(): void {
       permissions.cancelAll();
-      try { session?.dispose(); } catch { /* best-effort */ }
+      if (session) driver.forget(session.sessionId);
       try { conn?.close(); } catch { /* best-effort */ }
       try { child?.kill(); } catch { /* best-effort */ }
       conn = null;

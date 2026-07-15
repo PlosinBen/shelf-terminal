@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import type { PermissionOption, RequestPermissionResponse } from '@agentclientprotocol/sdk';
 import { createMockAcpAgent } from './mock-agent';
 import { openAcpConnection } from './connection';
-import { startSession, drivePromptTurn } from './client';
+import { createSessionDriver } from './client';
 import { createPermissionBridge, pickOptionId } from './permission';
 import type { OutgoingMessage, SendFn } from '../types';
 
@@ -46,9 +46,13 @@ describe('permission round-trip (mock agent asks → wire → resolve → agent)
       if (m.type === 'permission_request') bridge.resolvePermission(m.toolUseId, true, undefined, 'once');
     };
 
-    const conn = openAcpConnection(mock, { onRequestPermission: bridge.onRequestPermission });
-    const session = await startSession(conn.agent, { cwd: '/tmp/p' });
-    await drivePromptTurn(session, 'edit please', currentSend);
+    const driver = createSessionDriver();
+    const conn = openAcpConnection(mock, {
+      onRequestPermission: bridge.onRequestPermission,
+      onSessionUpdate: driver.onSessionUpdate,
+    });
+    const session = await driver.startNew(conn.agent, { cwd: '/tmp/p' });
+    await driver.drivePromptTurn(conn.agent, session, 'edit please', currentSend);
     conn.close();
 
     expect(outcome).toEqual({ outcome: 'selected', optionId: 'ao' });

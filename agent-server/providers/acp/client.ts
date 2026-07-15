@@ -1,12 +1,50 @@
 // ACP session drive — the runtime half of the shared acp/ toolkit.
 //
-// Semantics-free helpers that start a session and pump a prompt turn's
-// session/update stream through the pure `translate` layer onto Shelf's wire
-// `send`. No codex specifics; reused by every ACP-backed provider.
+// Semantics-free session driver: starts NEW or RESUMES sessions uniformly (the
+// SDK's convenience ActiveSession is new-only, so we route session/update
+// notifications ourselves into per-session queues) and pumps each prompt turn's
+// stream through the pure `translate` layer onto Shelf's wire. No codex specifics.
 
-import type { ActiveSession, ClientContext, StopReason } from '@agentclientprotocol/sdk';
+import {
+  methods,
+  type ClientContext,
+  type SessionNotification,
+  type SessionUpdate,
+  type NewSessionResponse,
+  type StopReason,
+} from '@agentclientprotocol/sdk';
 import type { OutgoingMessage } from '../types';
 import { translateSessionUpdate } from './translate';
+
+/** An async FIFO of session updates that unblocks readers on push or done. */
+interface UpdateQueue {
+  push(u: SessionUpdate): void;
+  wake(): void;
+  /** Next update, or null once `isDone()` is true and the buffer is drained. */
+  next(isDone: () => boolean): Promise<SessionUpdate | null>;
+}
+
+function createUpdateQueue(): UpdateQueue {
+  const items: SessionUpdate[] = [];
+  let waiter: (() => void) | null = null;
+  return {
+    push(u) { items.push(u); const w = waiter; waiter = null; w?.(); },
+    wake() { const w = waiter; waiter = null; w?.(); },
+    async next(isDone) {
+      for (;;) {
+        if (items.length) return items.shift()!;
+        if (isDone()) return null;
+        await new Promise<void>((r) => { waiter = r; });
+      }
+    },
+  };
+}
+
+export interface AcpSession {
+  sessionId: string;
+  /** Present for NEW sessions (drives capability mapping); absent on resume. */
+  newSessionResponse?: NewSessionResponse;
+}
 
 export interface StartSessionOptions {
   cwd: string;
@@ -14,53 +52,83 @@ export interface StartSessionOptions {
   additionalDirectories?: string[];
 }
 
-/**
- * Start a NEW ACP session. (Resume is a separate concern — see T2.3.) Returns
- * the `ActiveSession`, which routes this session's `session/update` stream into
- * a queue read by {@link drivePromptTurn}.
- */
-export async function startSession(agent: ClientContext, opts: StartSessionOptions): Promise<ActiveSession> {
-  let builder = agent.buildSession(opts.cwd);
-  if (opts.additionalDirectories?.length) {
-    builder = builder.withAdditionalDirectories(opts.additionalDirectories);
-  }
-  return builder.start();
+export interface SessionDriver {
+  /** Register on the ACP connection: routes session/update into per-session queues. */
+  onSessionUpdate(notification: SessionNotification): void;
+  startNew(agent: ClientContext, opts: StartSessionOptions): Promise<AcpSession>;
+  resume(agent: ClientContext, sessionId: string, opts: StartSessionOptions): Promise<AcpSession>;
+  drivePromptTurn(
+    agent: ClientContext,
+    session: AcpSession,
+    prompt: string,
+    send: (msg: OutgoingMessage) => void,
+  ): Promise<StopReason>;
+  /** Drop a session's queue (session ended / reset). */
+  forget(sessionId: string): void;
 }
 
-/**
- * Drive one prompt turn to completion: send `prompt`, translate each
- * `session/update` to wire primitives via `send`, accumulate streamed assistant
- * text, and on turn end emit a finalize `reply` message per streamed message id.
- * Returns the ACP stop reason. Caller emits the terminal `status: idle`.
- */
-export async function drivePromptTurn(
-  session: ActiveSession,
-  prompt: string,
-  send: (msg: OutgoingMessage) => void,
-): Promise<StopReason> {
-  // Kick the turn; its completion is also surfaced as a `stop` message below.
-  const promptDone = session.prompt(prompt);
-  // Accumulate streamed assistant text per message id so we can emit a finalize
-  // `reply` that the renderer upserts over the streamed placeholder.
-  const textByMsg = new Map<string, string>();
+export function createSessionDriver(): SessionDriver {
+  const queues = new Map<string, UpdateQueue>();
 
-  for (;;) {
-    const m = await session.nextUpdate();
-    if (m.kind === 'stop') {
+  return {
+    onSessionUpdate(n) {
+      queues.get(n.sessionId)?.push(n.update);
+    },
+
+    async startNew(agent, opts) {
+      const res = await agent.request(methods.agent.session.new, {
+        cwd: opts.cwd,
+        mcpServers: [],
+        ...(opts.additionalDirectories?.length ? { additionalDirectories: opts.additionalDirectories } : {}),
+      });
+      queues.set(res.sessionId, createUpdateQueue());
+      return { sessionId: res.sessionId, newSessionResponse: res };
+    },
+
+    async resume(agent, sessionId, opts) {
+      await agent.request(methods.agent.session.resume, {
+        sessionId,
+        cwd: opts.cwd,
+        ...(opts.additionalDirectories?.length ? { additionalDirectories: opts.additionalDirectories } : {}),
+      });
+      queues.set(sessionId, createUpdateQueue());
+      return { sessionId };
+    },
+
+    async drivePromptTurn(agent, session, prompt, send) {
+      const q = queues.get(session.sessionId);
+      if (!q) throw new Error(`drivePromptTurn: no queue for session ${session.sessionId}`);
+
+      let done = false;
+      const promptDone = agent
+        .request(methods.agent.session.prompt, { sessionId: session.sessionId, prompt: [{ type: 'text', text: prompt }] })
+        .finally(() => { done = true; q.wake(); });
+
+      const textByMsg = new Map<string, string>();
+      for (;;) {
+        const update = await q.next(() => done);
+        if (!update) break;
+        for (const wire of translateSessionUpdate(update)) {
+          if (wire.type === 'stream' && wire.streamType === 'text') {
+            textByMsg.set(wire.msgId, (textByMsg.get(wire.msgId) ?? '') + wire.content);
+          }
+          send(wire);
+        }
+      }
       for (const [msgId, content] of textByMsg) {
         send({ type: 'message', msgId, msgType: 'reply', content });
       }
-      // Surface any prompt-level rejection loudly rather than swallowing it.
-      await promptDone.catch((err) => {
+      try {
+        const res = await promptDone;
+        return res.stopReason;
+      } catch (err) {
         send({ type: 'error', error: `ACP prompt failed: ${(err as Error)?.message ?? String(err)}` });
-      });
-      return m.stopReason;
-    }
-    for (const wire of translateSessionUpdate(m.update)) {
-      if (wire.type === 'stream' && wire.streamType === 'text') {
-        textByMsg.set(wire.msgId, (textByMsg.get(wire.msgId) ?? '') + wire.content);
+        return 'refusal';
       }
-      send(wire);
-    }
-  }
+    },
+
+    forget(sessionId) {
+      queues.delete(sessionId);
+    },
+  };
 }

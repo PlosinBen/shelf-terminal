@@ -28,6 +28,8 @@ export interface MockAgentScript {
   stopReason?: StopReason;
   /** Called with each prompt's params — lets a test capture what was sent. */
   onPrompt?: (params: unknown) => void;
+  /** Called with session/new params (e.g. to assert additionalDirectories). */
+  onNewSession?: (params: unknown) => void;
   /**
    * When set, the prompt handler first calls `session/request_permission` with
    * these options and reports the client's outcome via `onPermissionOutcome`.
@@ -52,7 +54,8 @@ export function createMockAcpAgent(script: MockAgentScript = {}): AgentApp {
       agentCapabilities: { loadSession: true, promptCapabilities: { image: true } },
       authMethods,
     }))
-    .onRequest('session/new', () => ({ sessionId }))
+    .onRequest('session/new', ({ params }) => { script.onNewSession?.(params); return { sessionId }; })
+    .onRequest('session/resume', () => ({}))
     .onRequest('session/prompt', async ({ params, client }) => {
       script.onPrompt?.(params);
       if (script.requestPermissionOnPrompt) {
