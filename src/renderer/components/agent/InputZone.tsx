@@ -108,11 +108,10 @@ export function InputZone({ tabId, projectId, cwd, connection, visible, rootRef,
       ]);
     },
     onImages: (urls) => {
-      const currentModel = capabilities?.models.find((m) => m.value === statusModel);
-      if (currentModel && currentModel.vision === false) {
-        window.shelfApi.dialog.warn('Images not supported', `The current model does not accept image input.`);
-        return;
-      }
+      // No vision pre-gate: always accept images and let the agent report an
+      // error if the model can't take them. A `vision` capability flag is hard
+      // to keep accurate per model/provider, and pre-blocking on a stale/absent
+      // flag wrongly drops images a capable model would accept.
       const accepted = urls.filter((u) => u.length < 20 * 1024 * 1024);
       if (accepted.length < urls.length) {
         window.shelfApi.dialog.warn('Image too large', 'Images over ~20MB were skipped.');

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { quotaSnapshotToSegment, parseApplyPatch, formatCopilotToolInput, elicitationSchemaToPrompts, picksToElicitationContent, normalizeCopilotTask, isBackgroundedCopilotTask, buildCopilotAuthConfig, copilotTokenFromEnv, buildOrphanFinalizeMessages, type InflightToolUseEntry } from './helpers';
+import { quotaSnapshotToSegment, parseApplyPatch, formatCopilotToolInput, elicitationSchemaToPrompts, picksToElicitationContent, normalizeCopilotTask, isBackgroundedCopilotTask, buildCopilotAuthConfig, copilotTokenFromEnv, buildOrphanFinalizeMessages, parseImageDataUrl, imagesToBlobAttachments, type InflightToolUseEntry } from './helpers';
 
 describe('copilotTokenFromEnv (headless-remote token via project Secret env)', () => {
   it('prefers GH_TOKEN over GITHUB_TOKEN (gh precedence)', () => {
@@ -568,5 +568,36 @@ describe('buildOrphanFinalizeMessages', () => {
       { msgId: 'call_edit', msgType: 'fold_diff', label: 'Edit', subtitle: 'c.ts', errorMessage: ERR },
       { msgId: 'call_write', msgType: 'fold_code', label: 'Write', subtitle: 'd.ts', errorMessage: ERR },
     ]);
+  });
+});
+
+describe('imagesToBlobAttachments (image input forwarding — regression)', () => {
+  // Regression: Copilot previously dropped attached images entirely — query()
+  // sent only { prompt } to the SDK, so the model replied "no image attached".
+  const png = 'data:image/png;base64,iVBORw0KGgoAAAA';
+  const jpg = 'data:image/jpeg;base64,/9j/4AAQSkZJRg';
+
+  it('parses an image data URL into { mimeType, data }', () => {
+    expect(parseImageDataUrl(png)).toEqual({ mimeType: 'image/png', data: 'iVBORw0KGgoAAAA' });
+  });
+
+  it('rejects non-image or malformed data URLs', () => {
+    expect(parseImageDataUrl('data:text/plain;base64,aGk=')).toBeNull();
+    expect(parseImageDataUrl('not-a-data-url')).toBeNull();
+  });
+
+  it('converts image data URLs into SDK blob attachments', () => {
+    expect(imagesToBlobAttachments([png, jpg])).toEqual([
+      { type: 'blob', data: 'iVBORw0KGgoAAAA', mimeType: 'image/png' },
+      { type: 'blob', data: '/9j/4AAQSkZJRg', mimeType: 'image/jpeg' },
+    ]);
+  });
+
+  it('drops invalid entries and returns [] for none', () => {
+    expect(imagesToBlobAttachments([png, 'garbage'])).toEqual([
+      { type: 'blob', data: 'iVBORw0KGgoAAAA', mimeType: 'image/png' },
+    ]);
+    expect(imagesToBlobAttachments(undefined)).toEqual([]);
+    expect(imagesToBlobAttachments([])).toEqual([]);
   });
 });
