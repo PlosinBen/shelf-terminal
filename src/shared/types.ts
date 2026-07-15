@@ -1,6 +1,6 @@
 // ── Agent types ──
 
-export type AgentProvider = 'claude' | 'copilot';
+export type AgentProvider = 'claude' | 'copilot' | 'codex';
 export type TabType = 'terminal' | 'agent' | 'web';
 
 export type AuthMethod =
