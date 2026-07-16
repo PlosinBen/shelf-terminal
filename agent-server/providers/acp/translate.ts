@@ -47,6 +47,25 @@ export function contentBlockToText(block: ContentBlock): string {
   }
 }
 
+/** Parse a `data:<mime>;base64,<data>` URL into its parts (null if not one). */
+function parseImageDataUrl(url: string): { mimeType: string; data: string } | null {
+  const m = /^data:([^;]+);base64,(.*)$/s.exec(url);
+  return m ? { mimeType: m[1], data: m[2] } : null;
+}
+
+/**
+ * Build ACP image ContentBlocks from renderer data-URL images (for a prompt's
+ * content array). Non-data-URL / unparseable entries are dropped. Pure — the
+ * agent's promptCapabilities.image gates actual support; we forward regardless
+ * (matches native copilot) and let the agent error if it can't.
+ */
+export function imageContentBlocks(images: string[] | undefined): ContentBlock[] {
+  return (images ?? [])
+    .map(parseImageDataUrl)
+    .filter((x): x is { mimeType: string; data: string } => x !== null)
+    .map(({ mimeType, data }) => ({ type: 'image', data, mimeType }));
+}
+
 /** Render an ACP plan (`entries`) as a markdown checklist for the `plan` side-channel. */
 export function renderPlan(entries: PlanEntry[]): string {
   return entries

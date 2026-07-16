@@ -14,7 +14,7 @@ import {
   type StopReason,
 } from '@agentclientprotocol/sdk';
 import type { OutgoingMessage } from '../types';
-import { translateSessionUpdate, DEFAULT_AGENT_MSG_ID } from './translate';
+import { translateSessionUpdate, imageContentBlocks, DEFAULT_AGENT_MSG_ID } from './translate';
 
 /** An async FIFO of session updates that unblocks readers on push or done. */
 interface UpdateQueue {
@@ -62,6 +62,7 @@ export interface SessionDriver {
     session: AcpSession,
     prompt: string,
     send: (msg: OutgoingMessage) => void,
+    images?: string[],
   ): Promise<StopReason>;
   /** Set the session's mode (`session/set_mode`). Mode-id semantics are the agent's. */
   setMode(agent: ClientContext, session: AcpSession, modeId: string): Promise<void>;
@@ -104,13 +105,15 @@ export function createSessionDriver(): SessionDriver {
       return { sessionId };
     },
 
-    async drivePromptTurn(agent, session, prompt, send) {
+    async drivePromptTurn(agent, session, prompt, send, images) {
       const q = queues.get(session.sessionId);
       if (!q) throw new Error(`drivePromptTurn: no queue for session ${session.sessionId}`);
 
+      // Text block + any attached images (data URLs → ACP image ContentBlocks).
+      const content = [{ type: 'text' as const, text: prompt }, ...imageContentBlocks(images)];
       let done = false;
       const promptDone = agent
-        .request(methods.agent.session.prompt, { sessionId: session.sessionId, prompt: [{ type: 'text', text: prompt }] })
+        .request(methods.agent.session.prompt, { sessionId: session.sessionId, prompt: content })
         .finally(() => { done = true; q.wake(); });
 
       // Per-turn namespace for the messageId-less sentinel. Streams keep their

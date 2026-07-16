@@ -61,6 +61,23 @@ describe('acp session driver (connection + new/resume + turn)', () => {
     expect(stream(w1).msgId).toBe(reply(w1).msgId);
   });
 
+  it('forwards attached images as ACP image content blocks (drops non-data-urls)', async () => {
+    let promptParams: { prompt?: unknown } | undefined;
+    const mock = createMockAcpAgent({ onPrompt: (p) => { promptParams = p as typeof promptParams; } });
+    const driver = createSessionDriver();
+    const conn = openAcpConnection(mock, { onSessionUpdate: driver.onSessionUpdate });
+    const session = await driver.startNew(conn.agent, { cwd: '/tmp/p' });
+    await driver.drivePromptTurn(conn.agent, session, 'look at this', () => {}, [
+      'data:image/png;base64,QUJD',
+      'not-a-data-url',
+    ]);
+    conn.close();
+    expect(promptParams?.prompt).toEqual([
+      { type: 'text', text: 'look at this' },
+      { type: 'image', data: 'QUJD', mimeType: 'image/png' },
+    ]);
+  });
+
   it('sends session/set_mode and session/set_config_option', async () => {
     let modeParams: { modeId?: string } | undefined;
     let configParams: { configId?: string; value?: string } | undefined;
