@@ -15,6 +15,8 @@ import {
   type StopReason,
   type PermissionOption,
   type RequestPermissionResponse,
+  type SessionModeState,
+  type SessionConfigOption,
 } from '@agentclientprotocol/sdk';
 
 export interface MockAgentScript {
@@ -22,6 +24,10 @@ export interface MockAgentScript {
   authMethods?: Array<{ id: string; name: string; description?: string | null }>;
   /** Session id handed back from session/new (default: 'mock-session'). */
   sessionId?: string;
+  /** Modes advertised in the session/new response (drives permission-mode caps). */
+  modes?: SessionModeState;
+  /** Config options in the session/new response (drives model/effort caps). */
+  configOptions?: SessionConfigOption[];
   /** Updates emitted (in order) while handling each session/prompt. */
   updatesOnPrompt?: SessionUpdate[];
   /** Stop reason returned by session/prompt (default: 'end_turn'). */
@@ -54,7 +60,14 @@ export function createMockAcpAgent(script: MockAgentScript = {}): AgentApp {
       agentCapabilities: { loadSession: true, promptCapabilities: { image: true } },
       authMethods,
     }))
-    .onRequest('session/new', ({ params }) => { script.onNewSession?.(params); return { sessionId }; })
+    .onRequest('session/new', ({ params }) => {
+      script.onNewSession?.(params);
+      return {
+        sessionId,
+        ...(script.modes ? { modes: script.modes } : {}),
+        ...(script.configOptions ? { configOptions: script.configOptions } : {}),
+      };
+    })
     .onRequest('session/resume', () => ({}))
     .onRequest('session/prompt', async ({ params, client }) => {
       script.onPrompt?.(params);
