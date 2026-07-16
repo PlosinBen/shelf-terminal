@@ -34,6 +34,33 @@ describe('acp session driver (connection + new/resume + turn)', () => {
     ]);
   });
 
+  it('namespaces messageId-less replies per turn so they do not collide (copilot --acp case)', async () => {
+    // copilot --acp omits `messageId` on agent_message_chunk → translate falls back
+    // to the DEFAULT_AGENT_MSG_ID constant. Without per-turn namespacing, every
+    // turn's reply reuses that id and the renderer upserts them onto one entry.
+    const mock = createMockAcpAgent({
+      updatesOnPrompt: [{ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'hi' } } as SessionUpdate],
+    });
+    const driver = createSessionDriver();
+    const conn = openAcpConnection(mock, { onSessionUpdate: driver.onSessionUpdate });
+    const session = await driver.startNew(conn.agent, { cwd: '/tmp/p' });
+
+    const w1: OutgoingMessage[] = [];
+    await driver.drivePromptTurn(conn.agent, session, 'a', (m) => w1.push(m));
+    const w2: OutgoingMessage[] = [];
+    await driver.drivePromptTurn(conn.agent, session, 'b', (m) => w2.push(m));
+    conn.close();
+
+    const reply = (w: OutgoingMessage[]) => w.find((m) => m.type === 'message' && m.msgType === 'reply') as Extract<OutgoingMessage, { msgType: 'reply' }>;
+    const stream = (w: OutgoingMessage[]) => w.find((m) => m.type === 'stream') as Extract<OutgoingMessage, { type: 'stream' }>;
+    expect(reply(w1).content).toBe('hi');
+    expect(reply(w2).content).toBe('hi');
+    // Distinct per turn → renderer keeps them as separate bubbles.
+    expect(reply(w1).msgId).not.toBe(reply(w2).msgId);
+    // A turn's stream chunk and its finalized reply share the turn's id.
+    expect(stream(w1).msgId).toBe(reply(w1).msgId);
+  });
+
   it('passes additionalDirectories to session/new', async () => {
     let newParams: { additionalDirectories?: string[] } | undefined;
     const mock = createMockAcpAgent({ onNewSession: (p) => { newParams = p as typeof newParams; } });

@@ -14,7 +14,7 @@ import {
   type StopReason,
 } from '@agentclientprotocol/sdk';
 import type { OutgoingMessage } from '../types';
-import { translateSessionUpdate } from './translate';
+import { translateSessionUpdate, DEFAULT_AGENT_MSG_ID } from './translate';
 
 /** An async FIFO of session updates that unblocks readers on push or done. */
 interface UpdateQueue {
@@ -69,6 +69,11 @@ export interface SessionDriver {
 
 export function createSessionDriver(): SessionDriver {
   const queues = new Map<string, UpdateQueue>();
+  // Monotonic across turns so a per-turn namespace for messageId-less agents
+  // (copilot --acp omits `messageId`) stays unique — otherwise every turn's reply
+  // collapses onto the constant DEFAULT_AGENT_MSG_ID and the renderer upserts them
+  // all onto one entry (reply shows above the wrong turn).
+  let turnSeq = 0;
 
   return {
     onSessionUpdate(n) {
@@ -104,11 +109,25 @@ export function createSessionDriver(): SessionDriver {
         .request(methods.agent.session.prompt, { sessionId: session.sessionId, prompt: [{ type: 'text', text: prompt }] })
         .finally(() => { done = true; q.wake(); });
 
+      // Per-turn namespace for the messageId-less sentinel. Streams keep their
+      // streamType so a turn's reply text and thinking don't collide with each
+      // other (both would otherwise be DEFAULT_AGENT_MSG_ID). Agents that DO send
+      // a real messageId (codex) are untouched.
+      const turnBase = `${session.sessionId}#${++turnSeq}`;
+      const namespaced = (msgId: string, streamType?: string): string =>
+        msgId === DEFAULT_AGENT_MSG_ID ? `${turnBase}:${streamType ?? 'msg'}` : msgId;
+
       const textByMsg = new Map<string, string>();
       for (;;) {
         const update = await q.next(() => done);
         if (!update) break;
-        for (const wire of translateSessionUpdate(update)) {
+        for (const raw of translateSessionUpdate(update)) {
+          let wire = raw;
+          if (wire.type === 'stream') {
+            wire = { ...wire, msgId: namespaced(wire.msgId, wire.streamType) };
+          } else if (wire.type === 'message') {
+            wire = { ...wire, msgId: namespaced(wire.msgId) };
+          }
           if (wire.type === 'stream' && wire.streamType === 'text') {
             textByMsg.set(wire.msgId, (textByMsg.get(wire.msgId) ?? '') + wire.content);
           }

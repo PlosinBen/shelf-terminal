@@ -19,8 +19,13 @@ import type {
 } from '@agentclientprotocol/sdk';
 import type { OutgoingMessage } from '../types';
 
-/** Fallback msgId for streamed assistant text when the agent omits `messageId`. */
-const DEFAULT_AGENT_MSG_ID = 'agent-message';
+/**
+ * Fallback msgId for streamed assistant text when the agent omits `messageId`.
+ * Agents that DO omit it (e.g. copilot --acp) would otherwise reuse this constant
+ * across turns → the renderer upserts every turn's reply onto ONE entry. The
+ * session driver detects this sentinel and namespaces it per-turn (see client.ts).
+ */
+export const DEFAULT_AGENT_MSG_ID = 'agent-message';
 
 /** Flatten a single ACP ContentBlock to display text (non-text blocks degrade). */
 export function contentBlockToText(block: ContentBlock): string {
