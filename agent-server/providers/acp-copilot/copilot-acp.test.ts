@@ -19,6 +19,7 @@ const COPILOT_MODES = {
 
 const COPILOT_CONFIG = [
   {
+    id: 'model',
     category: 'model',
     type: 'select',
     currentValue: 'claude-sonnet-5',
@@ -28,6 +29,7 @@ const COPILOT_CONFIG = [
     ],
   },
   {
+    id: 'reasoning_effort',
     category: 'thought_level',
     type: 'select',
     currentValue: 'medium',
@@ -72,20 +74,25 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
 
     expect(caps.models.map((m) => m.value)).toEqual(['claude-sonnet-5', 'gpt-5.4']);
     expect(caps.effortLevels.map((e) => e.value)).toEqual(['low', 'medium', 'high']);
-    expect(caps.permissionModes.map((p) => p.value)).toEqual(['agent', 'plan', 'autopilot']);
+    // Permission modes are the SHELF-standard set (matches native copilot), NOT
+    // copilot's raw agent/plan/autopilot — parity + clean cutover.
+    expect(caps.permissionModes.map((p) => p.value)).toEqual(['default', 'bypassPermissions', 'plan']);
     expect(caps.authRequired).toBeUndefined();
-    // Current selections MUST ride along so the status bar shows the active
-    // model/effort/mode (regression: without these only option lists arrive and
-    // the status bar renders empty model/permission slots).
+    // Current selections ride along so the status bar shows the active values;
+    // the permission mode is mapped copilot#agent → Shelf 'default'.
     expect((caps as unknown as Record<string, unknown>).currentModel).toBe('claude-sonnet-5');
     expect((caps as unknown as Record<string, unknown>).currentEffort).toBe('medium');
-    expect((caps as unknown as Record<string, unknown>).currentPermissionMode).toBe('agent');
+    expect((caps as unknown as Record<string, unknown>).currentPermissionMode).toBe('default');
 
     backend.dispose();
   });
 
-  it('acknowledges (does not drive) a config-edit turn and stays idle', async () => {
-    const mock = createMockAcpAgent();
+  it('applies a model config-edit via session/set_config_option + acks', async () => {
+    let setConfig: { configId?: string; value?: string } | undefined;
+    const mock = createMockAcpAgent({
+      modes: COPILOT_MODES, configOptions: COPILOT_CONFIG,
+      onSetConfigOption: (p) => { setConfig = p as typeof setConfig; },
+    });
     const backend = createCopilotAcpBackend({ openAgent: () => ({ target: mock }) });
 
     const out: OutgoingMessage[] = [];
@@ -94,8 +101,53 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
       (m) => out.push(m),
     );
 
+    // Applied through ACP with the right option id + value.
+    expect(setConfig?.configId).toBe('model');
+    expect(setConfig?.value).toBe('gpt-5.4');
+    // Updated capabilities + an ack divider, then idle.
+    expect(out.some((m) => m.type === 'capabilities')).toBe(true);
     expect(out.some((m) => m.type === 'message' && m.msgType === 'system')).toBe(true);
     expect(out.at(-1)).toEqual({ type: 'status', state: 'idle' });
+
+    backend.dispose();
+  });
+
+  it('applies a permission-mode config-edit via session/set_mode (Shelf → copilot id)', async () => {
+    let setMode: { modeId?: string } | undefined;
+    const mock = createMockAcpAgent({
+      modes: COPILOT_MODES, configOptions: COPILOT_CONFIG,
+      onSetMode: (p) => { setMode = p as typeof setMode; },
+    });
+    const backend = createCopilotAcpBackend({ openAgent: () => ({ target: mock }) });
+
+    const out: OutgoingMessage[] = [];
+    await backend.query(
+      { prompt: '', cwd: '/tmp/project', configEdit: { key: 'permissionMode', value: 'bypassPermissions' } },
+      (m) => out.push(m),
+    );
+
+    // Shelf 'bypassPermissions' → copilot 'autopilot' mode id.
+    expect(setMode?.modeId).toBe('autopilot');
+    expect(out.at(-1)).toEqual({ type: 'status', state: 'idle' });
+
+    backend.dispose();
+  });
+
+  it('no-ops a config-edit that re-picks the current value', async () => {
+    const mock = createMockAcpAgent({ modes: COPILOT_MODES, configOptions: COPILOT_CONFIG });
+    const backend = createCopilotAcpBackend({ openAgent: () => ({ target: mock }) });
+    // Seed current model = claude-sonnet-5 via gatherCapabilities.
+    await backend.gatherCapabilities!('/tmp/project');
+
+    const out: OutgoingMessage[] = [];
+    await backend.query(
+      { prompt: '', cwd: '/tmp/project', configEdit: { key: 'model', value: 'claude-sonnet-5' } },
+      (m) => out.push(m),
+    );
+
+    // No capabilities / ack (nothing changed) — only the terminal idle.
+    expect(out.some((m) => m.type === 'capabilities')).toBe(false);
+    expect(out).toEqual([{ type: 'status', state: 'idle' }]);
 
     backend.dispose();
   });

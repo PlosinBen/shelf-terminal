@@ -33,6 +33,16 @@ function flattenSelectOptions(
   return out;
 }
 
+/** The config option `id` for the first select option in a category (for
+ *  `session/set_config_option`). e.g. category 'model' → 'model', 'thought_level'
+ *  → 'reasoning_effort' (copilot). Undefined if the agent advertises none. */
+export function configOptionIdForCategory(
+  configOptions: SessionConfigOption[] | null | undefined,
+  category: string,
+): string | undefined {
+  return configOptions?.find((c) => c.category === category && c.type === 'select')?.id;
+}
+
 /** Cycle options for the first select config option in a given category. */
 function selectOptionsForCategory(
   configOptions: SessionConfigOption[] | null | undefined,

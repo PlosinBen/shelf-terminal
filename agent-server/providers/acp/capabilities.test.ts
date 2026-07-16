@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { SessionConfigOption, SessionModeState, AvailableCommand } from '@agentclientprotocol/sdk';
-import { mapSessionCapabilities, currentSelections, mapSessionCapabilitiesWithCurrent } from './capabilities';
+import { mapSessionCapabilities, currentSelections, mapSessionCapabilitiesWithCurrent, configOptionIdForCategory } from './capabilities';
 
 const configOptions: SessionConfigOption[] = [
   {
@@ -74,5 +74,12 @@ describe('mapSessionCapabilities', () => {
     const caps = mapSessionCapabilitiesWithCurrent({}) as unknown as Record<string, unknown>;
     expect('currentModel' in caps).toBe(false);
     expect('currentPermissionMode' in caps).toBe(false);
+  });
+
+  it('resolves the config option id for a category (for set_config_option)', () => {
+    expect(configOptionIdForCategory(configOptions, 'model')).toBe('model');
+    expect(configOptionIdForCategory(configOptions, 'thought_level')).toBe('thought');
+    expect(configOptionIdForCategory(configOptions, 'nonexistent')).toBeUndefined();
+    expect(configOptionIdForCategory(undefined, 'model')).toBeUndefined();
   });
 });

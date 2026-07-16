@@ -63,6 +63,10 @@ export interface SessionDriver {
     prompt: string,
     send: (msg: OutgoingMessage) => void,
   ): Promise<StopReason>;
+  /** Set the session's mode (`session/set_mode`). Mode-id semantics are the agent's. */
+  setMode(agent: ClientContext, session: AcpSession, modeId: string): Promise<void>;
+  /** Set a session config option value (`session/set_config_option`, select variant). */
+  setConfigOption(agent: ClientContext, session: AcpSession, configId: string, value: string): Promise<void>;
   /** Drop a session's queue (session ended / reset). */
   forget(sessionId: string): void;
 }
@@ -144,6 +148,14 @@ export function createSessionDriver(): SessionDriver {
         send({ type: 'error', error: `ACP prompt failed: ${(err as Error)?.message ?? String(err)}` });
         return 'refusal';
       }
+    },
+
+    async setMode(agent, session, modeId) {
+      await agent.request(methods.agent.session.setMode, { sessionId: session.sessionId, modeId });
+    },
+
+    async setConfigOption(agent, session, configId, value) {
+      await agent.request(methods.agent.session.setConfigOption, { sessionId: session.sessionId, configId, value });
     },
 
     forget(sessionId) {

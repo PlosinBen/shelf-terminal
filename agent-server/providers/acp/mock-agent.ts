@@ -36,6 +36,10 @@ export interface MockAgentScript {
   onPrompt?: (params: unknown) => void;
   /** Called with session/new params (e.g. to assert additionalDirectories). */
   onNewSession?: (params: unknown) => void;
+  /** Called with session/set_mode params (assert modeId). */
+  onSetMode?: (params: unknown) => void;
+  /** Called with session/set_config_option params (assert configId + value). */
+  onSetConfigOption?: (params: unknown) => void;
   /**
    * When set, the prompt handler first calls `session/request_permission` with
    * these options and reports the client's outcome via `onPermissionOutcome`.
@@ -69,6 +73,12 @@ export function createMockAcpAgent(script: MockAgentScript = {}): AgentApp {
       };
     })
     .onRequest('session/resume', () => ({}))
+    .onRequest('session/set_mode', ({ params }) => { script.onSetMode?.(params); return {}; })
+    .onRequest('session/set_config_option', ({ params }) => {
+      script.onSetConfigOption?.(params);
+      // Response echoes the full config set (real agents return updated values).
+      return { configOptions: script.configOptions ?? [] };
+    })
     .onRequest('session/prompt', async ({ params, client }) => {
       script.onPrompt?.(params);
       if (script.requestPermissionOnPrompt) {

@@ -61,6 +61,25 @@ describe('acp session driver (connection + new/resume + turn)', () => {
     expect(stream(w1).msgId).toBe(reply(w1).msgId);
   });
 
+  it('sends session/set_mode and session/set_config_option', async () => {
+    let modeParams: { modeId?: string } | undefined;
+    let configParams: { configId?: string; value?: string } | undefined;
+    const mock = createMockAcpAgent({
+      onSetMode: (p) => { modeParams = p as typeof modeParams; },
+      onSetConfigOption: (p) => { configParams = p as typeof configParams; },
+    });
+    const driver = createSessionDriver();
+    const conn = openAcpConnection(mock, { onSessionUpdate: driver.onSessionUpdate });
+    const session = await driver.startNew(conn.agent, { cwd: '/tmp/p' });
+
+    await driver.setMode(conn.agent, session, 'mode-x');
+    await driver.setConfigOption(conn.agent, session, 'model', 'gpt-5.4');
+    conn.close();
+
+    expect(modeParams).toMatchObject({ sessionId: 'mock-session', modeId: 'mode-x' });
+    expect(configParams).toMatchObject({ sessionId: 'mock-session', configId: 'model', value: 'gpt-5.4' });
+  });
+
   it('passes additionalDirectories to session/new', async () => {
     let newParams: { additionalDirectories?: string[] } | undefined;
     const mock = createMockAcpAgent({ onNewSession: (p) => { newParams = p as typeof newParams; } });

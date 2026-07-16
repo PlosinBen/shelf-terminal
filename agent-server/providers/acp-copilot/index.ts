@@ -7,14 +7,22 @@
 
 import { randomUUID } from 'node:crypto';
 import type { ChildProcess } from 'node:child_process';
-import { methods, type Stream, type AgentApp } from '@agentclientprotocol/sdk';
+import { methods, type Stream, type AgentApp, type SessionModeState, type SessionConfigOption } from '@agentclientprotocol/sdk';
+import { formatConfigAck, type ConfigEditKey } from '@shared/config-ack';
 import type { ServerBackend, QueryInput, SendFn, ProviderCapabilities } from '../types';
+import { serverLog } from '../../server-logger';
 import { openAcpConnection, spawnAgentStdio, type AcpConnection } from '../acp/connection';
 import { createSessionDriver, type AcpSession } from '../acp/client';
 import { createPermissionBridge } from '../acp/permission';
-import { mapSessionCapabilitiesWithCurrent } from '../acp/capabilities';
+import { mapSessionCapabilities, currentSelections, configOptionIdForCategory } from '../acp/capabilities';
 import { resolveCopilotAcpCommand, copilotAcpSkillsRoot } from './helpers';
+import { copilotPermissionModes, copilotModeIdToShelf, shelfToCopilotModeId } from './mode-map';
 import { startLogin as startCopilotLogin, prefillLoginUrl, type LoginRunner } from '../copilot/login';
+
+// Category names for copilot's dynamic config options (agent-owned), used to
+// resolve the option id for session/set_config_option.
+const MODEL_CATEGORY = 'model';
+const EFFORT_CATEGORY = 'thought_level';
 
 export const COPILOT_ACP_PROVIDER = 'acp-copilot';
 
@@ -49,6 +57,67 @@ export function createCopilotAcpBackend(deps: CopilotAcpDeps = {}): ServerBacken
   let loginRunner: LoginRunner | null = null;
   const permissions = createPermissionBridge(() => currentSend);
   const driver = createSessionDriver();
+
+  // Live session config (cached from the last new-session response) + the active
+  // selections in SHELF vocabulary. Seeded from the renderer's saved prefs (intent)
+  // and the agent's advertised current values; kept in sync as edits apply.
+  let sessionModes: SessionModeState | undefined;
+  let sessionConfigOptions: SessionConfigOption[] | undefined;
+  let currentModel: string | undefined;
+  let currentEffort: string | undefined;
+  let currentPermissionMode: string | undefined; // Shelf id (default/plan/bypassPermissions)
+
+  /** Caps from the live session config + the active current* selections, ready to
+   *  spread into a `capabilities` wire message. permissionModes are the Shelf-
+   *  standard set (matches native copilot), NOT copilot's raw agent/plan/autopilot. */
+  function buildCapabilities(): ProviderCapabilities {
+    const input = { modes: sessionModes, configOptions: sessionConfigOptions };
+    const base = mapSessionCapabilities(input);
+    return {
+      ...base,
+      permissionModes: copilotPermissionModes(),
+      ...(currentModel ? { currentModel } : {}),
+      ...(currentEffort ? { currentEffort } : {}),
+      ...(currentPermissionMode ? { currentPermissionMode } : {}),
+    };
+  }
+
+  async function applyModel(model: string): Promise<void> {
+    currentModel = model;
+    const configId = configOptionIdForCategory(sessionConfigOptions, MODEL_CATEGORY);
+    if (conn && session && configId) await driver.setConfigOption(conn.agent, session, configId, model);
+    else if (conn && session) serverLog('warn', 'acp-copilot', `setModel: no model config option on session ${session.sessionId}`);
+  }
+
+  async function applyEffort(effort: string): Promise<void> {
+    currentEffort = effort;
+    const configId = configOptionIdForCategory(sessionConfigOptions, EFFORT_CATEGORY);
+    if (conn && session && configId) await driver.setConfigOption(conn.agent, session, configId, effort);
+    else if (conn && session) serverLog('warn', 'acp-copilot', `setEffort: no thought_level config option on session ${session.sessionId}`);
+  }
+
+  async function applyPermissionMode(mode: string): Promise<void> {
+    currentPermissionMode = mode;
+    const modeId = shelfToCopilotModeId(mode, sessionModes);
+    if (conn && session && modeId) await driver.setMode(conn.agent, session, modeId);
+    else if (conn && session) serverLog('warn', 'acp-copilot', `setPermissionMode: copilot has no mode for "${mode}"`);
+  }
+
+  /** Apply a config-edit turn (picker / status-bar): imperative apply + updated
+   *  capabilities + an ack divider. No-op guard skips a re-pick of the live value. */
+  async function applyConfigEdit(key: ConfigEditKey, value: string, send: SendFn): Promise<void> {
+    const cur = key === 'model' ? currentModel : key === 'effort' ? currentEffort : currentPermissionMode;
+    if (cur === value) return;
+    try {
+      if (key === 'model') await applyModel(value);
+      else if (key === 'effort') await applyEffort(value);
+      else await applyPermissionMode(value);
+      send({ type: 'capabilities', ...buildCapabilities() });
+      send({ type: 'message', msgId: `m-${randomUUID().slice(0, 8)}`, msgType: 'system', content: formatConfigAck(key, value) });
+    } catch (err) {
+      send({ type: 'message', msgId: `m-${randomUUID().slice(0, 8)}`, msgType: 'error', content: `Failed to set ${key}: ${(err as Error)?.message ?? String(err)}` });
+    }
+  }
 
   /** Spawn `copilot --acp` + open the ACP connection once; reused across turns. */
   function ensureConnection(cwd: string): AcpConnection {
@@ -96,6 +165,10 @@ export function createCopilotAcpBackend(deps: CopilotAcpDeps = {}): ServerBacken
     }
     session = await driver.startNew(c.agent, opts);
     sessionCwd = input.cwd;
+    // Cache the advertised config so set-mode / set-config-option can resolve ids
+    // and buildCapabilities() has the option lists.
+    sessionModes = session.newSessionResponse?.modes ?? undefined;
+    sessionConfigOptions = session.newSessionResponse?.configOptions ?? undefined;
     send?.({ type: 'context_patch', patch: { lastSdkSessionId: session.sessionId } });
     return session;
   }
@@ -104,16 +177,13 @@ export function createCopilotAcpBackend(deps: CopilotAcpDeps = {}): ServerBacken
     async query(input: QueryInput, send: SendFn): Promise<void> {
       currentSend = send;
       try {
-        // Phase 1 skeleton: config edits (model/effort/mode) are a Phase-2 parity
-        // item (apply via ACP set-config/set-mode). A config-edit turn carries no
-        // prompt, so acknowledge and return rather than drive an empty prompt.
+        // A config-edit turn (picker / status-bar) carries no prompt — apply it
+        // imperatively (set-mode / set-config-option) and return, rather than
+        // driving an empty prompt. Prompt-turn pref changes go via the imperative
+        // setters (orchestrator applyPrefDiff), not here.
         if (input.configEdit) {
-          send({
-            type: 'message',
-            msgId: `m-${randomUUID().slice(0, 8)}`,
-            msgType: 'system',
-            content: `acp-copilot: config edit (${input.configEdit.key}) not yet applied (Phase 2)`,
-          });
+          await ensureSession({ cwd: input.cwd, appId: input.appId, resumeId: input.restoreContext?.lastSdkSessionId }, send);
+          await applyConfigEdit(input.configEdit.key, input.configEdit.value, send);
           return;
         }
         const s = await ensureSession(
@@ -129,21 +199,36 @@ export function createCopilotAcpBackend(deps: CopilotAcpDeps = {}): ServerBacken
       }
     },
 
-    async gatherCapabilities(cwd: string): Promise<ProviderCapabilities> {
+    async gatherCapabilities(
+      cwd: string,
+      _sessionId?: string,
+      _customModels?: unknown,
+      intent?: { model?: string; effort?: string; permissionMode?: string },
+    ): Promise<ProviderCapabilities> {
+      // Seed current* from the renderer's saved prefs BEFORE building caps, so the
+      // first reported values reflect the user's choice rather than the agent's
+      // default (matches the ServerBackend `intent` contract).
+      if (intent?.model) currentModel = intent.model;
+      if (intent?.effort) currentEffort = intent.effort;
+      if (intent?.permissionMode) currentPermissionMode = intent.permissionMode;
       try {
-        const s = await ensureSession({ cwd }, null);
-        const r = s.newSessionResponse;
-        // Model/effort/mode are DYNAMIC (agent-owned config options) — mapped by
-        // the shared toolkit, same as codex; copilot needs no bespoke mapping.
-        // WithCurrent = also carry the active selections so the status bar renders
-        // the current model/permission-mode (not just the option lists).
-        return mapSessionCapabilitiesWithCurrent({ modes: r?.modes, configOptions: r?.configOptions });
+        await ensureSession({ cwd }, null);
+        // Fill any current* the renderer didn't pin from the agent's live values.
+        const cur = currentSelections({ modes: sessionModes, configOptions: sessionConfigOptions });
+        currentModel ??= cur.currentModel;
+        currentEffort ??= cur.currentEffort;
+        currentPermissionMode ??= copilotModeIdToShelf(sessionModes?.currentModeId);
+        return buildCapabilities();
       } catch {
         // A fresh session most commonly fails when unauthenticated → surface the
         // auth pane rather than an empty capability set.
         return { models: [], permissionModes: [], effortLevels: [], slashCommands: [], authRequired: true };
       }
     },
+
+    setModel(model: string): Promise<void> { return applyModel(model); },
+    setEffort(effort: string): Promise<void> { return applyEffort(effort); },
+    setPermissionMode(mode: string): Promise<void> { return applyPermissionMode(mode); },
 
     resolvePermission(toolUseId: string, allow: boolean, message?: string, scope?: 'once' | 'session'): void {
       permissions.resolvePermission(toolUseId, allow, message, scope);
