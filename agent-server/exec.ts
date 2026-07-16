@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { createClaudeBackend } from './providers/claude';
 import { createCopilotBackend } from './providers/copilot';
 import { createCodexBackend } from './providers/codex';
+import { createCopilotAcpBackend } from './providers/acp-copilot';
 import { createFakeBackend } from './providers/fake';
 import { deleteContext, cleanupOldContexts } from './context-store';
 import { runCleanupSweep } from './cleanup';
@@ -19,7 +20,7 @@ import { createSendQueue } from './send-queue';
 import type { OutgoingMessage, QueryInput, ServerBackend, PickerResolvePayload, ModelCacheClient } from './providers/types';
 import type { ProviderModel } from '@shared/types';
 
-type Provider = 'claude' | 'copilot' | 'codex';
+type Provider = 'claude' | 'copilot' | 'codex' | 'acp-copilot';
 
 interface IncomingMessage {
   type: 'send' | 'stop' | 'cancel_queued' | 'ping' | 'resolve_permission' | 'resolve_picker' | 'get_capabilities' | 'store_credential' | 'clear_credential' | 'clear_context' | 'read_task_output' | 'stop_task' | 'reload_skills' | 'app_tool_result' | 'cache_reply' | 'start_login' | 'cancel_login';
@@ -252,6 +253,9 @@ function getBackend(provider: Provider): ServerBackend {
         break;
       case 'codex':
         b = createCodexBackend();
+        break;
+      case 'acp-copilot':
+        b = createCopilotAcpBackend();
         break;
     }
   }

@@ -1,6 +1,9 @@
 // ── Agent types ──
 
-export type AgentProvider = 'claude' | 'copilot' | 'codex';
+// 'acp-copilot' is a PARALLEL, dev-gated backend that drives Copilot over ACP
+// (`copilot --acp`) alongside native 'copilot'; at cutover it replaces 'copilot'.
+// See .agent/features/copilot-acp-provider.md.
+export type AgentProvider = 'claude' | 'copilot' | 'codex' | 'acp-copilot';
 export type TabType = 'terminal' | 'agent' | 'web';
 
 export type AuthMethod =
