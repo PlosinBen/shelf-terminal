@@ -74,6 +74,12 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
     expect(caps.effortLevels.map((e) => e.value)).toEqual(['low', 'medium', 'high']);
     expect(caps.permissionModes.map((p) => p.value)).toEqual(['agent', 'plan', 'autopilot']);
     expect(caps.authRequired).toBeUndefined();
+    // Current selections MUST ride along so the status bar shows the active
+    // model/effort/mode (regression: without these only option lists arrive and
+    // the status bar renders empty model/permission slots).
+    expect((caps as unknown as Record<string, unknown>).currentModel).toBe('claude-sonnet-5');
+    expect((caps as unknown as Record<string, unknown>).currentEffort).toBe('medium');
+    expect((caps as unknown as Record<string, unknown>).currentPermissionMode).toBe('agent');
 
     backend.dispose();
   });

@@ -61,6 +61,24 @@ export function mapSessionCapabilities(input: AcpSessionCapabilitiesInput): Prov
   return { models, permissionModes, effortLevels, slashCommands };
 }
 
+/**
+ * Capabilities PLUS the agent's current model/effort/mode selections, ready to
+ * spread into the `capabilities` wire message. The status bar needs the current
+ * values to display the active model/permission-mode — without them it shows an
+ * empty slot even though the option lists are populated. Both ACP backends need
+ * this glue (shared-layer concern, not per-provider).
+ */
+export function mapSessionCapabilitiesWithCurrent(input: AcpSessionCapabilitiesInput): ProviderCapabilities {
+  const caps = mapSessionCapabilities(input);
+  const cur = currentSelections(input);
+  return {
+    ...caps,
+    ...(cur.currentModel ? { currentModel: cur.currentModel } : {}),
+    ...(cur.currentEffort ? { currentEffort: cur.currentEffort } : {}),
+    ...(cur.currentPermissionMode ? { currentPermissionMode: cur.currentPermissionMode } : {}),
+  };
+}
+
 /** Current selections (for seeding the renderer's active model/effort/mode). */
 export function currentSelections(input: AcpSessionCapabilitiesInput): {
   currentModel?: string;

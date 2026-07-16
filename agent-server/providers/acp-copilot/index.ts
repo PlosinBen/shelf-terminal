@@ -12,7 +12,7 @@ import type { ServerBackend, QueryInput, SendFn, ProviderCapabilities } from '..
 import { openAcpConnection, spawnAgentStdio, type AcpConnection } from '../acp/connection';
 import { createSessionDriver, type AcpSession } from '../acp/client';
 import { createPermissionBridge } from '../acp/permission';
-import { mapSessionCapabilities } from '../acp/capabilities';
+import { mapSessionCapabilitiesWithCurrent } from '../acp/capabilities';
 import { resolveCopilotAcpCommand, copilotAcpSkillsRoot } from './helpers';
 import { startLogin as startCopilotLogin, prefillLoginUrl, type LoginRunner } from '../copilot/login';
 
@@ -135,7 +135,9 @@ export function createCopilotAcpBackend(deps: CopilotAcpDeps = {}): ServerBacken
         const r = s.newSessionResponse;
         // Model/effort/mode are DYNAMIC (agent-owned config options) — mapped by
         // the shared toolkit, same as codex; copilot needs no bespoke mapping.
-        return mapSessionCapabilities({ modes: r?.modes, configOptions: r?.configOptions });
+        // WithCurrent = also carry the active selections so the status bar renders
+        // the current model/permission-mode (not just the option lists).
+        return mapSessionCapabilitiesWithCurrent({ modes: r?.modes, configOptions: r?.configOptions });
       } catch {
         // A fresh session most commonly fails when unauthenticated → surface the
         // auth pane rather than an empty capability set.
