@@ -302,6 +302,17 @@ export function TabBar() {
           >
             Agent (Copilot)
           </button>
+          {/* Dev-only: the parallel ACP-backed Copilot backend (copilot-acp feature).
+              Hidden from production builds until cutover. */}
+          {import.meta.env.DEV && (
+            <button
+              className="context-menu-item"
+              disabled={project?.tabs.some((t) => t.type === 'agent' && t.provider === 'acp-copilot')}
+              onClick={() => { emit(Events.NEW_AGENT_TAB, activeProjectIndex, 'acp-copilot'); setAddMenu(null); }}
+            >
+              Agent (Copilot ACP · dev)
+            </button>
+          )}
           <div className="context-menu-divider" />
           <button
             className="context-menu-item"
