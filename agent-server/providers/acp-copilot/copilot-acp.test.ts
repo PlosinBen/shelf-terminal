@@ -87,6 +87,24 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
     backend.dispose();
   });
 
+  it('recreates the session when appId is first learned (so MCP/skills take effect)', async () => {
+    let newSessions = 0;
+    const mock = createMockAcpAgent({ onNewSession: () => { newSessions += 1; } });
+    const backend = createCopilotAcpBackend({ openAgent: () => ({ target: mock }) });
+
+    // gatherCapabilities has NO appId → first session.
+    await backend.gatherCapabilities!('/tmp/project');
+    expect(newSessions).toBe(1);
+    // First real turn carries appId → session recreated with the MCP/skills context.
+    await backend.query({ prompt: 'hi', cwd: '/tmp/project', appId: 'app-1' }, () => {});
+    expect(newSessions).toBe(2);
+    // Second turn (same appId) reuses — no further recreation.
+    await backend.query({ prompt: 'again', cwd: '/tmp/project', appId: 'app-1' }, () => {});
+    expect(newSessions).toBe(2);
+
+    backend.dispose();
+  });
+
   it('applies a model config-edit via session/set_config_option + acks', async () => {
     let setConfig: { configId?: string; value?: string } | undefined;
     const mock = createMockAcpAgent({

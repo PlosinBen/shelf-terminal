@@ -15,6 +15,8 @@ import { openAcpConnection, spawnAgentStdio, type AcpConnection } from '../acp/c
 import { createSessionDriver, type AcpSession } from '../acp/client';
 import { createPermissionBridge } from '../acp/permission';
 import { mapSessionCapabilities, currentSelections, configOptionIdForCategory } from '../acp/capabilities';
+import { toAcpMcpServers } from '../acp/mcp';
+import { loadProjectedMcpServers } from '../mcp-config';
 import { resolveCopilotAcpCommand, copilotAcpSkillsRoot } from './helpers';
 import { copilotPermissionModes, copilotModeIdToShelf, shelfToCopilotModeId } from './mode-map';
 import { startLogin as startCopilotLogin, prefillLoginUrl, type LoginRunner } from '../copilot/login';
@@ -51,6 +53,12 @@ export function createCopilotAcpBackend(deps: CopilotAcpDeps = {}): ServerBacken
   let child: ChildProcess | null = null;
   let session: AcpSession | null = null;
   let sessionCwd: string | null = null;
+  // The appId the live session was created with — MCP servers + skills root are
+  // fixed at session/new, so if appId is only learned later (gatherCapabilities
+  // has no appId; the first `send` does), the session is recreated to pick them
+  // up. undefined until known. Stable per app instance (getAppInstanceId).
+  let sessionAppId: string | undefined;
+  let lastAppId: string | undefined;
   // The active turn's send — the permission bridge rides this lane so requests
   // reach the renderer on the current turn's id.
   let currentSend: SendFn | null = null;
@@ -149,15 +157,31 @@ export function createCopilotAcpBackend(deps: CopilotAcpDeps = {}): ServerBacken
     input: { cwd: string; appId?: string; resumeId?: string | null },
     send: SendFn | null,
   ): Promise<AcpSession> {
-    if (session && sessionCwd === input.cwd) return session;
+    // appId is stable per app instance; gatherCapabilities lacks it, the first
+    // send carries it. Resolve against the last-seen value.
+    if (input.appId) lastAppId = input.appId;
+    const appId = input.appId ?? lastAppId;
+    // Reuse only if cwd AND the MCP/skills context (appId) are unchanged — else
+    // recreate so app-level MCP servers + skills root take effect at session/new.
+    if (session && sessionCwd === input.cwd && sessionAppId === appId) return session;
+    if (session) driver.forget(session.sessionId);
+
     const c = ensureConnection(input.cwd);
-    const root = copilotAcpSkillsRoot(input.appId);
-    const opts = { cwd: input.cwd, additionalDirectories: root ? [root] : undefined };
+    const root = copilotAcpSkillsRoot(appId);
+    const mcp = loadProjectedMcpServers(appId);
+    // Fail-loud: a bad/incomplete MCP entry is logged, not silently dropped.
+    for (const e of mcp.errors) serverLog('warn', 'acp-copilot', `MCP config: ${e}`);
+    const opts = {
+      cwd: input.cwd,
+      additionalDirectories: root ? [root] : undefined,
+      mcpServers: toAcpMcpServers(mcp.servers),
+    };
 
     if (input.resumeId) {
       try {
         session = await driver.resume(c.agent, input.resumeId, opts);
         sessionCwd = input.cwd;
+        sessionAppId = appId;
         return session;
       } catch {
         // Resume rejected (session gone / unsupported) → fall through to new.
@@ -165,6 +189,7 @@ export function createCopilotAcpBackend(deps: CopilotAcpDeps = {}): ServerBacken
     }
     session = await driver.startNew(c.agent, opts);
     sessionCwd = input.cwd;
+    sessionAppId = appId;
     // Cache the advertised config so set-mode / set-config-option can resolve ids
     // and buildCapabilities() has the option lists.
     sessionModes = session.newSessionResponse?.modes ?? undefined;

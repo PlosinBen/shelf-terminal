@@ -97,14 +97,19 @@ describe('acp session driver (connection + new/resume + turn)', () => {
     expect(configParams).toMatchObject({ sessionId: 'mock-session', configId: 'model', value: 'gpt-5.4' });
   });
 
-  it('passes additionalDirectories to session/new', async () => {
-    let newParams: { additionalDirectories?: string[] } | undefined;
+  it('passes additionalDirectories + mcpServers to session/new', async () => {
+    let newParams: { additionalDirectories?: string[]; mcpServers?: unknown } | undefined;
     const mock = createMockAcpAgent({ onNewSession: (p) => { newParams = p as typeof newParams; } });
     const driver = createSessionDriver();
     const conn = openAcpConnection(mock, { onSessionUpdate: driver.onSessionUpdate });
-    const session = await driver.startNew(conn.agent, { cwd: '/tmp/p', additionalDirectories: ['/tmp/p/codex'] });
+    const session = await driver.startNew(conn.agent, {
+      cwd: '/tmp/p',
+      additionalDirectories: ['/tmp/p/codex'],
+      mcpServers: [{ name: 'fs', command: 'x', args: [], env: [] }],
+    });
     expect(session.sessionId).toBe('mock-session');
     expect(newParams?.additionalDirectories).toEqual(['/tmp/p/codex']);
+    expect(newParams?.mcpServers).toEqual([{ name: 'fs', command: 'x', args: [], env: [] }]);
     conn.close();
   });
 

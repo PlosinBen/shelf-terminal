@@ -12,6 +12,7 @@ import {
   type SessionUpdate,
   type NewSessionResponse,
   type StopReason,
+  type McpServer,
 } from '@agentclientprotocol/sdk';
 import type { OutgoingMessage } from '../types';
 import { translateSessionUpdate, imageContentBlocks, DEFAULT_AGENT_MSG_ID } from './translate';
@@ -50,6 +51,8 @@ export interface StartSessionOptions {
   cwd: string;
   /** Extra workspace roots (e.g. the projected skills root → codex extraRoots). */
   additionalDirectories?: string[];
+  /** App-level MCP servers to hand the agent at session/new (already shaped to ACP). */
+  mcpServers?: McpServer[];
 }
 
 export interface SessionDriver {
@@ -88,7 +91,7 @@ export function createSessionDriver(): SessionDriver {
     async startNew(agent, opts) {
       const res = await agent.request(methods.agent.session.new, {
         cwd: opts.cwd,
-        mcpServers: [],
+        mcpServers: opts.mcpServers ?? [],
         ...(opts.additionalDirectories?.length ? { additionalDirectories: opts.additionalDirectories } : {}),
       });
       queues.set(res.sessionId, createUpdateQueue());

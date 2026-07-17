@@ -11,6 +11,9 @@ import { openAcpConnection, spawnAgentStdio, type AcpConnection } from '../acp/c
 import { createSessionDriver, type AcpSession } from '../acp/client';
 import { createPermissionBridge } from '../acp/permission';
 import { mapSessionCapabilities } from '../acp/capabilities';
+import { toAcpMcpServers } from '../acp/mcp';
+import { loadProjectedMcpServers } from '../mcp-config';
+import { serverLog } from '../../server-logger';
 import { resolveCodexAcpCommand, codexSkillsRoot } from './helpers';
 import { driveDeviceCodeLogin, spawnCodexAppServerRpc, type LoginHandle } from './app-server-login';
 
@@ -19,6 +22,11 @@ export function createCodexBackend(): ServerBackend {
   let child: ChildProcess | null = null;
   let session: AcpSession | null = null;
   let sessionCwd: string | null = null;
+  // The appId the live session was created with — MCP servers + skills root are
+  // fixed at session/new; gatherCapabilities has no appId, the first send does,
+  // so the session is recreated once appId is learned. Stable per app instance.
+  let sessionAppId: string | undefined;
+  let lastAppId: string | undefined;
   // The active turn's send — the permission bridge rides this lane so requests
   // reach the renderer on the current turn's id.
   let currentSend: SendFn | null = null;
@@ -54,15 +62,29 @@ export function createCodexBackend(): ServerBackend {
    * (new) session id — Shelf never touches the context store directly.
    */
   async function ensureSession(input: { cwd: string; appId?: string; resumeId?: string | null }, send: SendFn | null): Promise<AcpSession> {
-    if (session && sessionCwd === input.cwd) return session;
+    // appId is stable per app instance; gatherCapabilities lacks it, the first
+    // send carries it. Resolve against the last-seen value and recreate the
+    // session when it changes so app-level MCP servers + skills root take effect.
+    if (input.appId) lastAppId = input.appId;
+    const appId = input.appId ?? lastAppId;
+    if (session && sessionCwd === input.cwd && sessionAppId === appId) return session;
+    if (session) driver.forget(session.sessionId);
+
     const c = ensureConnection(input.cwd);
-    const root = codexSkillsRoot(input.appId);
-    const opts = { cwd: input.cwd, additionalDirectories: root ? [root] : undefined };
+    const root = codexSkillsRoot(appId);
+    const mcp = loadProjectedMcpServers(appId);
+    for (const e of mcp.errors) serverLog('warn', 'codex', `MCP config: ${e}`);
+    const opts = {
+      cwd: input.cwd,
+      additionalDirectories: root ? [root] : undefined,
+      mcpServers: toAcpMcpServers(mcp.servers),
+    };
 
     if (input.resumeId) {
       try {
         session = await driver.resume(c.agent, input.resumeId, opts);
         sessionCwd = input.cwd;
+        sessionAppId = appId;
         return session;
       } catch {
         // Resume rejected (session gone / unsupported) → fall through to new.
@@ -70,6 +92,7 @@ export function createCodexBackend(): ServerBackend {
     }
     session = await driver.startNew(c.agent, opts);
     sessionCwd = input.cwd;
+    sessionAppId = appId;
     // Persist the SDK session id so the next process can resume it.
     send?.({ type: 'context_patch', patch: { lastSdkSessionId: session.sessionId } });
     return session;
