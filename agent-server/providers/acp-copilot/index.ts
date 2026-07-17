@@ -16,6 +16,7 @@ import { createSessionDriver, type AcpSession } from '../acp/client';
 import { createPermissionBridge } from '../acp/permission';
 import { mapSessionCapabilities, currentSelections, configOptionIdForCategory } from '../acp/capabilities';
 import { toAcpMcpServers } from '../acp/mcp';
+import { getSharedShelfMcp } from '../acp/shelf-mcp';
 import { loadProjectedMcpServers } from '../mcp-config';
 import { resolveCopilotAcpCommand, copilotAcpSkillsRoot } from './helpers';
 import { copilotPermissionModes, copilotModeIdToShelf, shelfToCopilotModeId } from './mode-map';
@@ -38,6 +39,9 @@ export interface CopilotAgentTarget {
 export interface CopilotAcpDeps {
   /** Open the agent transport for `cwd`. Default: spawn `copilot --acp`. */
   openAgent?: (cwd: string) => CopilotAgentTarget;
+  /** Resolve the in-process Shelf MCP bridge (level 1). Default: the shared HTTP
+   *  server. Return null to omit it (tests skip starting a real HTTP server). */
+  getShelfMcp?: () => Promise<{ url: string } | null>;
 }
 
 function defaultOpenAgent(cwd: string): CopilotAgentTarget {
@@ -48,6 +52,7 @@ function defaultOpenAgent(cwd: string): CopilotAgentTarget {
 
 export function createCopilotAcpBackend(deps: CopilotAcpDeps = {}): ServerBackend {
   const openAgent = deps.openAgent ?? defaultOpenAgent;
+  const getShelfMcp = deps.getShelfMcp ?? getSharedShelfMcp;
 
   let conn: AcpConnection | null = null;
   let child: ChildProcess | null = null;
@@ -172,10 +177,16 @@ export function createCopilotAcpBackend(deps: CopilotAcpDeps = {}): ServerBacken
     const mcp = loadProjectedMcpServers(appId);
     // Fail-loud: a bad/incomplete MCP entry is logged, not silently dropped.
     for (const e of mcp.errors) serverLog('warn', 'acp-copilot', `MCP config: ${e}`);
+    // Level 1 (Shelf built-in bridge) + level 2 (user MCP) coexist as mcpServers
+    // entries. The shelf bridge is an in-process HTTP MCP server (see shelf-mcp.ts).
+    const shelf = await getShelfMcp();
     const opts = {
       cwd: input.cwd,
       additionalDirectories: root ? [root] : undefined,
-      mcpServers: toAcpMcpServers(mcp.servers),
+      mcpServers: [
+        ...toAcpMcpServers(mcp.servers),
+        ...(shelf ? [{ type: 'http' as const, name: 'shelf', url: shelf.url, headers: [] }] : []),
+      ],
     };
 
     if (input.resumeId) {
