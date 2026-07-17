@@ -73,6 +73,13 @@ describe('translateSessionUpdate', () => {
     ];
     for (const u of updates) expect(translateSessionUpdate(u)).toEqual([]);
   });
+
+  it('maps usage_update to a live context-usage status segment', () => {
+    const out = translateSessionUpdate({ sessionUpdate: 'usage_update', used: 60, size: 100 } as SessionUpdate);
+    expect(out).toEqual([
+      { type: 'status', state: 'streaming', contextUsage: { text: 'ctx: 60%', severity: 'warning' } },
+    ]);
+  });
 });
 
 describe('contentBlockToText / renderPlan helpers', () => {

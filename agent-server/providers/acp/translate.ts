@@ -18,6 +18,7 @@ import type {
   ToolCallStatus,
 } from '@agentclientprotocol/sdk';
 import type { OutgoingMessage } from '../types';
+import { severityFromUtilization } from '../types';
 
 /**
  * Fallback msgId for streamed assistant text when the agent omits `messageId`.
@@ -148,14 +149,25 @@ export function translateSessionUpdate(update: SessionUpdate): OutgoingMessage[]
         ...(bodyText ? { body: { content: bodyText } } : {}),
       }];
     }
+    case 'usage_update': {
+      // Context-window usage → a live status segment. The renderer retains the
+      // last contextUsage across the turn-end idle, so emitting it mid-turn on the
+      // streaming status is enough (matches native copilot's `ctx: NN%`).
+      const size = (update as { size?: number }).size ?? 0;
+      const used = (update as { used?: number }).used ?? 0;
+      const ratio = size > 0 ? used / size : 0;
+      return [{
+        type: 'status', state: 'streaming',
+        contextUsage: { text: `ctx: ${Math.round(ratio * 100)}%`, severity: severityFromUtilization(ratio) },
+      }];
+    }
     // Not timeline render primitives — handled by the stateful client (caps /
-    // status / mode) or intentionally ignored here.
+    // mode) or intentionally ignored here.
     case 'user_message_chunk':
     case 'available_commands_update':
     case 'current_mode_update':
     case 'config_option_update':
     case 'session_info_update':
-    case 'usage_update':
     case 'plan_removed':
     default:
       return [];
