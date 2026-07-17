@@ -548,9 +548,25 @@ export function createFakeBackend(): ServerBackend {
         models: [{ value: 'fake-model', displayName: 'fake-model' }],
         permissionModes: [{ value: 'default', displayName: 'ask' }],
         effortLevels: [],
+        // Enough entries to OVERFLOW the slash-menu fold (max-height scroll) so
+        // e2e can exercise render-all + scroll-into-view. mcp/skills stay first
+        // for the dispatch tests; the rest are inert autocomplete-only fillers.
         slashCommands: [
           { name: 'mcp', description: 'List loaded MCP servers' },
           { name: 'skills', description: 'List loaded skills' },
+          { name: 'alpha', description: 'Filler command alpha' },
+          { name: 'bravo', description: 'Filler command bravo' },
+          { name: 'charlie', description: 'Filler command charlie' },
+          { name: 'delta', description: 'Filler command delta' },
+          { name: 'echo', description: 'Filler command echo' },
+          { name: 'foxtrot', description: 'Filler command foxtrot' },
+          { name: 'golf', description: 'Filler command golf' },
+          { name: 'hotel', description: 'Filler command hotel' },
+          { name: 'india', description: 'Filler command india' },
+          { name: 'juliet', description: 'Filler command juliet' },
+          { name: 'kilo', description: 'Filler command kilo' },
+          { name: 'lima', description: 'Filler command lima' },
+          { name: 'zulu', description: 'Filler command zulu (last)' },
         ],
         // Declare an oauth method so the AuthPane shows the interactive "Login
         // with GitHub" button (device-flow) when auth_required fires. See

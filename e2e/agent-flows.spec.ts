@@ -405,4 +405,33 @@ test.describe('agent flows via fake provider', () => {
       await expect(table).toContainText('app'); // normalized source tag
     });
   });
+
+  // Long slash lists (e.g. ACP's 32 commands) overflow the menu's max-height
+  // scroll. The dropdown must render ALL matches (not a hard cap) and keep the
+  // keyboard-selected row scrolled into view. See SlashMenu.
+  test('slash menu renders all commands and scrolls the selection into view', async ({ shelfApp: { page } }) => {
+    await setupProject(page);
+    await openAgentTab(page);
+    const ta = page.locator('.agent-textarea:visible');
+    await ta.click();
+    await ta.type('/');
+
+    const menu = page.locator('.agent-slash-menu:visible');
+    await expect(menu).toBeVisible();
+    const items = menu.locator('.agent-slash-item');
+    const count = await items.count();
+    // Regression: the old `.slice(0, 10)` capped rendering — a long list must
+    // render every entry so the tail is reachable at all.
+    expect(count).toBeGreaterThan(10);
+
+    // Arrow to the LAST entry — past the visible fold. (Order is provider list +
+    // renderer-local commands, so don't assume which name is last — assert by
+    // position instead.)
+    for (let i = 0; i < count - 1; i++) await ta.press('ArrowDown');
+    await expect(items.last()).toHaveClass(/agent-slash-item-selected/);
+    // Regression: without scroll-into-view the menu stays at scrollTop 0 and the
+    // selected tail row is clipped out of the scroll viewport.
+    const scrollTop = await menu.evaluate((el) => el.scrollTop);
+    expect(scrollTop).toBeGreaterThan(0);
+  });
 });
