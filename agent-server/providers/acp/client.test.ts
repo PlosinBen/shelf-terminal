@@ -78,6 +78,18 @@ describe('acp session driver (connection + new/resume + turn)', () => {
     ]);
   });
 
+  it('captures available_commands_update per session', () => {
+    const driver = createSessionDriver();
+    expect(driver.getAvailableCommands('s1')).toBeUndefined();
+    driver.onSessionUpdate({
+      sessionId: 's1',
+      update: { sessionUpdate: 'available_commands_update', availableCommands: [{ name: 'compact', description: 'x' }] },
+    } as Parameters<typeof driver.onSessionUpdate>[0]);
+    expect(driver.getAvailableCommands('s1')).toEqual([{ name: 'compact', description: 'x' }]);
+    driver.forget('s1');
+    expect(driver.getAvailableCommands('s1')).toBeUndefined();
+  });
+
   it('sends session/set_mode and session/set_config_option', async () => {
     let modeParams: { modeId?: string } | undefined;
     let configParams: { configId?: string; value?: string } | undefined;

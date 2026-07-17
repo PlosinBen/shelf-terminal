@@ -13,6 +13,7 @@ import {
   type NewSessionResponse,
   type StopReason,
   type McpServer,
+  type AvailableCommand,
 } from '@agentclientprotocol/sdk';
 import type { OutgoingMessage } from '../types';
 import { translateSessionUpdate, imageContentBlocks, DEFAULT_AGENT_MSG_ID } from './translate';
@@ -71,12 +72,19 @@ export interface SessionDriver {
   setMode(agent: ClientContext, session: AcpSession, modeId: string): Promise<void>;
   /** Set a session config option value (`session/set_config_option`, select variant). */
   setConfigOption(agent: ClientContext, session: AcpSession, configId: string, value: string): Promise<void>;
+  /** The agent's advertised slash commands for a session (captured from
+   *  `available_commands_update`, which arrives out-of-turn near session start).
+   *  Undefined until the first such update lands. */
+  getAvailableCommands(sessionId: string): AvailableCommand[] | undefined;
   /** Drop a session's queue (session ended / reset). */
   forget(sessionId: string): void;
 }
 
 export function createSessionDriver(): SessionDriver {
   const queues = new Map<string, UpdateQueue>();
+  // Per-session slash commands captured from `available_commands_update` (arrives
+  // out-of-turn near session start; the backend reads it at gatherCapabilities).
+  const commandsBySession = new Map<string, AvailableCommand[]>();
   // Monotonic across turns so a per-turn namespace for messageId-less agents
   // (copilot --acp omits `messageId`) stays unique — otherwise every turn's reply
   // collapses onto the constant DEFAULT_AGENT_MSG_ID and the renderer upserts them
@@ -85,7 +93,14 @@ export function createSessionDriver(): SessionDriver {
 
   return {
     onSessionUpdate(n) {
+      if (n.update.sessionUpdate === 'available_commands_update') {
+        commandsBySession.set(n.sessionId, n.update.availableCommands);
+      }
       queues.get(n.sessionId)?.push(n.update);
+    },
+
+    getAvailableCommands(sessionId) {
+      return commandsBySession.get(sessionId);
     },
 
     async startNew(agent, opts) {
@@ -166,6 +181,7 @@ export function createSessionDriver(): SessionDriver {
 
     forget(sessionId) {
       queues.delete(sessionId);
+      commandsBySession.delete(sessionId);
     },
   };
 }

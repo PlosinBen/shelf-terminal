@@ -79,7 +79,8 @@ export function createCopilotAcpBackend(deps: CopilotAcpDeps = {}): ServerBacken
    *  spread into a `capabilities` wire message. permissionModes are the Shelf-
    *  standard set (matches native copilot), NOT copilot's raw agent/plan/autopilot. */
   function buildCapabilities(): ProviderCapabilities {
-    const input = { modes: sessionModes, configOptions: sessionConfigOptions };
+    const availableCommands = session ? driver.getAvailableCommands(session.sessionId) : undefined;
+    const input = { modes: sessionModes, configOptions: sessionConfigOptions, availableCommands };
     const base = mapSessionCapabilities(input);
     return {
       ...base,
@@ -237,7 +238,14 @@ export function createCopilotAcpBackend(deps: CopilotAcpDeps = {}): ServerBacken
       if (intent?.effort) currentEffort = intent.effort;
       if (intent?.permissionMode) currentPermissionMode = intent.permissionMode;
       try {
-        await ensureSession({ cwd }, null);
+        const s = await ensureSession({ cwd }, null);
+        // `available_commands_update` arrives out-of-turn just AFTER session/new,
+        // so it may not be captured yet. Briefly wait for it (bounded) so the
+        // slash-command autocomplete isn't empty on the first caps fetch. Resolves
+        // as soon as it lands (~a few ms); caps have no requestId to push later.
+        for (let i = 0; i < 20 && !driver.getAvailableCommands(s.sessionId); i++) {
+          await new Promise((r) => setTimeout(r, 10));
+        }
         // Fill any current* the renderer didn't pin from the agent's live values.
         const cur = currentSelections({ modes: sessionModes, configOptions: sessionConfigOptions });
         currentModel ??= cur.currentModel;

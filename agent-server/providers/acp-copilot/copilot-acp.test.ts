@@ -87,6 +87,24 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
     backend.dispose();
   });
 
+  it('surfaces slash commands from available_commands_update in capabilities', async () => {
+    const mock = createMockAcpAgent({
+      commandsOnNewSession: [
+        { name: 'compact', description: 'Summarize conversation' },
+        { name: 'review', description: 'Review changes' },
+      ],
+    });
+    const backend = createCopilotAcpBackend({ openAgent: () => ({ target: mock }) });
+
+    const caps = await backend.gatherCapabilities!('/tmp/project');
+    expect(caps.slashCommands).toEqual([
+      { name: 'compact', description: 'Summarize conversation' },
+      { name: 'review', description: 'Review changes' },
+    ]);
+
+    backend.dispose();
+  });
+
   it('recreates the session when appId is first learned (so MCP/skills take effect)', async () => {
     let newSessions = 0;
     const mock = createMockAcpAgent({ onNewSession: () => { newSessions += 1; } });

@@ -17,6 +17,7 @@ import {
   type RequestPermissionResponse,
   type SessionModeState,
   type SessionConfigOption,
+  type AvailableCommand,
 } from '@agentclientprotocol/sdk';
 
 export interface MockAgentScript {
@@ -28,6 +29,9 @@ export interface MockAgentScript {
   modes?: SessionModeState;
   /** Config options in the session/new response (drives model/effort caps). */
   configOptions?: SessionConfigOption[];
+  /** Slash commands emitted as an `available_commands_update` right after
+   *  session/new (mirrors copilot, which sends them out-of-turn near session start). */
+  commandsOnNewSession?: AvailableCommand[];
   /** Updates emitted (in order) while handling each session/prompt. */
   updatesOnPrompt?: SessionUpdate[];
   /** Stop reason returned by session/prompt (default: 'end_turn'). */
@@ -64,8 +68,14 @@ export function createMockAcpAgent(script: MockAgentScript = {}): AgentApp {
       agentCapabilities: { loadSession: true, promptCapabilities: { image: true } },
       authMethods,
     }))
-    .onRequest('session/new', ({ params }) => {
+    .onRequest('session/new', async ({ params, client }) => {
       script.onNewSession?.(params);
+      if (script.commandsOnNewSession) {
+        await client.notify('session/update', {
+          sessionId,
+          update: { sessionUpdate: 'available_commands_update', availableCommands: script.commandsOnNewSession },
+        });
+      }
       return {
         sessionId,
         ...(script.modes ? { modes: script.modes } : {}),
