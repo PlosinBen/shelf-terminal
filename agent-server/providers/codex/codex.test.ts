@@ -12,8 +12,9 @@ import type { OutgoingMessage } from '../types';
 const CODEX_MODES = {
   currentModeId: 'agent',
   availableModes: [
+    { id: 'read-only', name: 'Read-only' },
     { id: 'agent', name: 'Agent' },
-    { id: 'read-only', name: 'Read Only' },
+    { id: 'agent-full-access', name: 'Agent (full access)' },
   ],
 } as unknown as SessionModeState;
 
@@ -62,12 +63,75 @@ describe('codex backend (via mock ACP agent)', () => {
 
     expect(caps.models.map((m) => m.value)).toEqual(['gpt-5-codex', 'o4-mini']);
     expect(caps.effortLevels.map((e) => e.value)).toEqual(['low', 'medium', 'high']);
-    // The gap this closes: current-selection is now reported so the status bar
-    // shows the active model/effort/mode (was empty with plain mapSessionCapabilities).
-    // Permission mode is codex's RAW mode id for now (Shelf-semantic mapping = T4.1-A).
+    // Permission modes are codex's 3 native modes MAPPED to Shelf vocabulary in
+    // canonical order (read-only→plan, agent→default, agent-full-access→bypass).
+    expect(caps.permissionModes.map((p) => p.value)).toEqual(['default', 'plan', 'bypassPermissions']);
+    // current-selection reported so the status bar shows the active values; the
+    // permission mode is mapped codex#agent → Shelf 'default'.
     expect((caps as unknown as Record<string, unknown>).currentModel).toBe('gpt-5-codex');
     expect((caps as unknown as Record<string, unknown>).currentEffort).toBe('medium');
-    expect((caps as unknown as Record<string, unknown>).currentPermissionMode).toBe('agent');
+    expect((caps as unknown as Record<string, unknown>).currentPermissionMode).toBe('default');
+
+    backend.dispose();
+  });
+
+  it('applies a model config-edit via session/set_config_option + acks', async () => {
+    let setConfig: { configId?: string; value?: string } | undefined;
+    const mock = createMockAcpAgent({
+      modes: CODEX_MODES, configOptions: CODEX_CONFIG,
+      onSetConfigOption: (p) => { setConfig = p as typeof setConfig; },
+    });
+    const backend = createCodexBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
+
+    const out: OutgoingMessage[] = [];
+    await backend.query(
+      { prompt: '', cwd: '/tmp/project', configEdit: { key: 'model', value: 'o4-mini' } },
+      (m) => out.push(m),
+    );
+
+    expect(setConfig?.configId).toBe('model');
+    expect(setConfig?.value).toBe('o4-mini');
+    expect(out.some((m) => m.type === 'capabilities')).toBe(true);
+    expect(out.some((m) => m.type === 'message' && m.msgType === 'system')).toBe(true);
+    expect(out.at(-1)).toEqual({ type: 'status', state: 'idle' });
+
+    backend.dispose();
+  });
+
+  it('applies a permission-mode config-edit via session/set_mode (Shelf → codex id)', async () => {
+    let setMode: { modeId?: string } | undefined;
+    const mock = createMockAcpAgent({
+      modes: CODEX_MODES, configOptions: CODEX_CONFIG,
+      onSetMode: (p) => { setMode = p as typeof setMode; },
+    });
+    const backend = createCodexBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
+
+    const out: OutgoingMessage[] = [];
+    await backend.query(
+      { prompt: '', cwd: '/tmp/project', configEdit: { key: 'permissionMode', value: 'bypassPermissions' } },
+      (m) => out.push(m),
+    );
+
+    // Shelf 'bypassPermissions' → codex 'agent-full-access' mode id.
+    expect(setMode?.modeId).toBe('agent-full-access');
+    expect(out.at(-1)).toEqual({ type: 'status', state: 'idle' });
+
+    backend.dispose();
+  });
+
+  it('no-ops a config-edit that re-picks the current value', async () => {
+    const mock = createMockAcpAgent({ modes: CODEX_MODES, configOptions: CODEX_CONFIG });
+    const backend = createCodexBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
+    await backend.gatherCapabilities!('/tmp/project'); // seeds current model = gpt-5-codex
+
+    const out: OutgoingMessage[] = [];
+    await backend.query(
+      { prompt: '', cwd: '/tmp/project', configEdit: { key: 'model', value: 'gpt-5-codex' } },
+      (m) => out.push(m),
+    );
+
+    expect(out.some((m) => m.type === 'capabilities')).toBe(false);
+    expect(out).toEqual([{ type: 'status', state: 'idle' }]);
 
     backend.dispose();
   });

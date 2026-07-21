@@ -4,19 +4,27 @@
 // modes, model format, device-code auth). ACP is an internal detail; the
 // provider identity is 'codex'.
 
+import { randomUUID } from 'node:crypto';
 import type { ChildProcess } from 'node:child_process';
-import { methods, type Stream, type AgentApp } from '@agentclientprotocol/sdk';
+import { methods, type Stream, type AgentApp, type SessionModeState, type SessionConfigOption } from '@agentclientprotocol/sdk';
+import { formatConfigAck, type ConfigEditKey } from '@shared/config-ack';
 import type { ServerBackend, QueryInput, SendFn, ProviderCapabilities } from '../types';
 import { openAcpConnection, spawnAgentStdio, type AcpConnection } from '../acp/connection';
 import { createSessionDriver, type AcpSession } from '../acp/client';
 import { createPermissionBridge } from '../acp/permission';
-import { mapSessionCapabilitiesWithCurrent } from '../acp/capabilities';
+import { mapSessionCapabilities, currentSelections, configOptionIdForCategory } from '../acp/capabilities';
 import { toAcpMcpServers } from '../acp/mcp';
 import { getSharedShelfMcp } from '../acp/shelf-mcp';
 import { loadProjectedMcpServers } from '../mcp-config';
 import { serverLog } from '../../server-logger';
 import { resolveCodexAcpCommand, codexSkillsRoot, codexSkillTarget } from './helpers';
+import { codexPermissionModes, codexModeIdToShelf, shelfToCodexModeId, codexUnmappedModeIds } from './mode-map';
 import { driveDeviceCodeLogin, spawnCodexAppServerRpc, type LoginHandle } from './app-server-login';
+
+// Category names for codex's dynamic config options (agent-owned) — SAME as
+// copilot (verified from codex-acp: category `model` / `thought_level`).
+const MODEL_CATEGORY = 'model';
+const EFFORT_CATEGORY = 'thought_level';
 
 /** What to connect the ACP client to + the child to reap (production spawns a
  *  codex-acp process; tests inject an in-process mock AgentApp). Mirrors the
@@ -59,6 +67,70 @@ export function createCodexBackend(deps: CodexDeps = {}): ServerBackend {
   let loginHandle: LoginHandle | null = null;
   const permissions = createPermissionBridge(() => currentSend);
   const driver = createSessionDriver();
+
+  // Live session config (cached from the last new-session response) + the active
+  // selections in SHELF vocabulary, kept in sync as edits apply (mirrors copilot-acp).
+  let sessionModes: SessionModeState | undefined;
+  let sessionConfigOptions: SessionConfigOption[] | undefined;
+  let currentModel: string | undefined;
+  let currentEffort: string | undefined;
+  let currentPermissionMode: string | undefined; // Shelf id (default/plan/bypassPermissions)
+
+  /** Caps from the live session config + current* selections. permissionModes are
+   *  codex's advertised modes mapped to Shelf vocabulary (see mode-map). */
+  function buildCapabilities(): ProviderCapabilities {
+    const availableCommands = session ? driver.getAvailableCommands(session.sessionId) : undefined;
+    const base = mapSessionCapabilities({ modes: sessionModes, configOptions: sessionConfigOptions, availableCommands });
+    // Fail-loud: a codex mode we can't map is dropped from the picker — log it as a
+    // candidate for a new Shelf permission mode (integration policy).
+    for (const id of codexUnmappedModeIds(sessionModes)) {
+      serverLog('warn', 'codex', `unmapped permission mode "${id}" — hidden from the picker (candidate for a new Shelf mode)`);
+    }
+    return {
+      ...base,
+      permissionModes: codexPermissionModes(sessionModes),
+      ...(currentModel ? { currentModel } : {}),
+      ...(currentEffort ? { currentEffort } : {}),
+      ...(currentPermissionMode ? { currentPermissionMode } : {}),
+    };
+  }
+
+  async function applyModel(model: string): Promise<void> {
+    currentModel = model;
+    const configId = configOptionIdForCategory(sessionConfigOptions, MODEL_CATEGORY);
+    if (conn && session && configId) await driver.setConfigOption(conn.agent, session, configId, model);
+    else if (conn && session) serverLog('warn', 'codex', `setModel: no model config option on session ${session.sessionId}`);
+  }
+
+  async function applyEffort(effort: string): Promise<void> {
+    currentEffort = effort;
+    const configId = configOptionIdForCategory(sessionConfigOptions, EFFORT_CATEGORY);
+    if (conn && session && configId) await driver.setConfigOption(conn.agent, session, configId, effort);
+    else if (conn && session) serverLog('warn', 'codex', `setEffort: no thought_level config option on session ${session.sessionId}`);
+  }
+
+  async function applyPermissionMode(mode: string): Promise<void> {
+    currentPermissionMode = mode;
+    const modeId = shelfToCodexModeId(mode, sessionModes);
+    if (conn && session && modeId) await driver.setMode(conn.agent, session, modeId);
+    else if (conn && session) serverLog('warn', 'codex', `setPermissionMode: codex has no mode for "${mode}"`);
+  }
+
+  /** Apply a config-edit turn (picker / status-bar): imperative apply + updated
+   *  capabilities + an ack divider. No-op guard skips a re-pick of the live value. */
+  async function applyConfigEdit(key: ConfigEditKey, value: string, send: SendFn): Promise<void> {
+    const cur = key === 'model' ? currentModel : key === 'effort' ? currentEffort : currentPermissionMode;
+    if (cur === value) return;
+    try {
+      if (key === 'model') await applyModel(value);
+      else if (key === 'effort') await applyEffort(value);
+      else await applyPermissionMode(value);
+      send({ type: 'capabilities', ...buildCapabilities() });
+      send({ type: 'message', msgId: `m-${randomUUID().slice(0, 8)}`, msgType: 'system', content: formatConfigAck(key, value) });
+    } catch (err) {
+      send({ type: 'message', msgId: `m-${randomUUID().slice(0, 8)}`, msgType: 'error', content: `Failed to set ${key}: ${(err as Error)?.message ?? String(err)}` });
+    }
+  }
 
   /** Spawn codex-acp + open the ACP connection once; reused across turns. */
   function ensureConnection(cwd: string): AcpConnection {
@@ -126,6 +198,10 @@ export function createCodexBackend(deps: CodexDeps = {}): ServerBackend {
     session = await driver.startNew(c.agent, opts);
     sessionCwd = input.cwd;
     sessionAppId = appId;
+    // Cache advertised config so set-mode / set-config-option can resolve ids and
+    // buildCapabilities() has the option lists.
+    sessionModes = session.newSessionResponse?.modes ?? undefined;
+    sessionConfigOptions = session.newSessionResponse?.configOptions ?? undefined;
     // Persist the SDK session id so the next process can resume it.
     send?.({ type: 'context_patch', patch: { lastSdkSessionId: session.sessionId } });
     return session;
@@ -135,6 +211,13 @@ export function createCodexBackend(deps: CodexDeps = {}): ServerBackend {
     async query(input: QueryInput, send: SendFn): Promise<void> {
       currentSend = send;
       try {
+        // A config-edit turn (picker / status-bar) carries no prompt — apply it
+        // imperatively and return, rather than driving an empty prompt.
+        if (input.configEdit) {
+          await ensureSession({ cwd: input.cwd, appId: input.appId, resumeId: input.restoreContext?.lastSdkSessionId }, send);
+          await applyConfigEdit(input.configEdit.key, input.configEdit.value, send);
+          return;
+        }
         const s = await ensureSession(
           { cwd: input.cwd, appId: input.appId, resumeId: input.restoreContext?.lastSdkSessionId },
           send,
@@ -148,26 +231,32 @@ export function createCodexBackend(deps: CodexDeps = {}): ServerBackend {
       }
     },
 
-    async gatherCapabilities(cwd: string): Promise<ProviderCapabilities> {
+    async gatherCapabilities(
+      cwd: string,
+      _sessionId?: string,
+      _customModels?: unknown,
+      intent?: { model?: string; effort?: string; permissionMode?: string },
+    ): Promise<ProviderCapabilities> {
+      // Seed current* from the renderer's saved prefs BEFORE building caps, so the
+      // first reported values reflect the user's choice, not the agent default.
+      if (intent?.model) currentModel = intent.model;
+      if (intent?.effort) currentEffort = intent.effort;
+      if (intent?.permissionMode) currentPermissionMode = intent.permissionMode;
       try {
         const s = await ensureSession({ cwd }, null);
         // `available_commands_update` arrives out-of-turn just AFTER session/new,
         // so briefly wait (bounded) for it — else slash autocomplete is empty on
-        // the first caps fetch. Resolves as soon as it lands (~a few ms). Mirrors
-        // copilot-acp.
+        // the first caps fetch. Mirrors copilot-acp.
         for (let i = 0; i < 20 && !driver.getAvailableCommands(s.sessionId); i++) {
           await new Promise((r) => setTimeout(r, 10));
         }
-        const r = s.newSessionResponse;
-        // Model list is DYNAMIC (agent-owned config options) — no Shelf registry.
-        // WithCurrent so the status bar shows the active model/effort/mode (not
-        // just the option lists). Permission modes are codex's raw advertised
-        // modes for now — a Shelf-semantic mapping is the config-edit task (T4.1-A).
-        return mapSessionCapabilitiesWithCurrent({
-          modes: r?.modes,
-          configOptions: r?.configOptions,
-          availableCommands: driver.getAvailableCommands(s.sessionId),
-        });
+        // Fill any current* the renderer didn't pin from the agent's live values;
+        // the permission mode is mapped codex → Shelf vocabulary.
+        const cur = currentSelections({ modes: sessionModes, configOptions: sessionConfigOptions });
+        currentModel ??= cur.currentModel;
+        currentEffort ??= cur.currentEffort;
+        currentPermissionMode ??= codexModeIdToShelf(sessionModes?.currentModeId);
+        return buildCapabilities();
       } catch {
         // A fresh codex session most commonly fails when unauthenticated →
         // surface the auth pane rather than an empty capability set. (T4.0 will
@@ -175,6 +264,10 @@ export function createCodexBackend(deps: CodexDeps = {}): ServerBackend {
         return { models: [], permissionModes: [], effortLevels: [], slashCommands: [], authRequired: true };
       }
     },
+
+    setModel(model: string): Promise<void> { return applyModel(model); },
+    setEffort(effort: string): Promise<void> { return applyEffort(effort); },
+    setPermissionMode(mode: string): Promise<void> { return applyPermissionMode(mode); },
 
     resolvePermission(toolUseId: string, allow: boolean, message?: string, scope?: 'once' | 'session'): void {
       permissions.resolvePermission(toolUseId, allow, message, scope);
