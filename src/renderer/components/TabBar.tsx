@@ -302,16 +302,26 @@ export function TabBar() {
           >
             Agent (Copilot)
           </button>
-          {/* Dev-only: the parallel ACP-backed Copilot backend (copilot-acp feature).
-              Hidden from production builds until cutover. */}
+          {/* Dev-only: the ACP-backed providers not yet surfaced in production.
+              copilot-acp = the parallel Copilot backend (hidden until cutover);
+              codex = not yet GA. See the copilot-acp / acp-provider feature notes. */}
           {import.meta.env.DEV && (
-            <button
-              className="context-menu-item"
-              disabled={project?.tabs.some((t) => t.type === 'agent' && t.provider === 'acp-copilot')}
-              onClick={() => { emit(Events.NEW_AGENT_TAB, activeProjectIndex, 'acp-copilot'); setAddMenu(null); }}
-            >
-              Agent (Copilot ACP · dev)
-            </button>
+            <>
+              <button
+                className="context-menu-item"
+                disabled={project?.tabs.some((t) => t.type === 'agent' && t.provider === 'acp-copilot')}
+                onClick={() => { emit(Events.NEW_AGENT_TAB, activeProjectIndex, 'acp-copilot'); setAddMenu(null); }}
+              >
+                Agent (Copilot ACP · dev)
+              </button>
+              <button
+                className="context-menu-item"
+                disabled={project?.tabs.some((t) => t.type === 'agent' && t.provider === 'codex')}
+                onClick={() => { emit(Events.NEW_AGENT_TAB, activeProjectIndex, 'codex'); setAddMenu(null); }}
+              >
+                Agent (Codex · dev)
+              </button>
+            </>
           )}
           <div className="context-menu-divider" />
           <button
