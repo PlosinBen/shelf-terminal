@@ -17,7 +17,7 @@ import { toAcpMcpServers } from '../acp/mcp';
 import { getSharedShelfMcp } from '../acp/shelf-mcp';
 import { loadProjectedMcpServers } from '../mcp-config';
 import { serverLog } from '../../server-logger';
-import { resolveCodexAcpCommand, codexSkillsRoot, codexSkillTarget } from './helpers';
+import { resolveCodexAcpCommand, codexSkillsRoot, codexSkillTarget, codexAcpEnv } from './helpers';
 import { codexPermissionModes, codexModeIdToShelf, shelfToCodexModeId, codexUnmappedModeIds } from './mode-map';
 import { driveDeviceCodeLogin, spawnCodexAppServerRpc, type LoginHandle } from './app-server-login';
 
@@ -35,16 +35,19 @@ export interface CodexAgentTarget {
 }
 
 export interface CodexDeps {
-  /** Open the agent transport for `cwd`. Default: spawn codex-acp. */
-  openAgent?: (cwd: string) => CodexAgentTarget;
+  /** Open the agent transport for `cwd`. `appId` selects the per-app `CODEX_HOME`
+   *  (device-scoped auth isolation). Default: spawn codex-acp. */
+  openAgent?: (cwd: string, appId?: string) => CodexAgentTarget;
   /** Resolve the in-process Shelf MCP bridge (level 1). Default: the shared HTTP
    *  server. Return null to omit it (tests skip starting a real HTTP server). */
   getShelfMcp?: () => Promise<{ url: string } | null>;
 }
 
-function defaultOpenAgent(cwd: string): CodexAgentTarget {
+function defaultOpenAgent(cwd: string, appId?: string): CodexAgentTarget {
   const { command, args } = resolveCodexAcpCommand();
-  const spawned = spawnAgentStdio(command, args, { cwd });
+  // CODEX_HOME (per-app config-home) is set at SPAWN — process env, so it must be
+  // right from the start (auth lives under it). appId is known by caps-time.
+  const spawned = spawnAgentStdio(command, args, { cwd, env: codexAcpEnv(appId) });
   return { target: spawned.stream, child: spawned.child };
 }
 
@@ -61,6 +64,9 @@ export function createCodexBackend(deps: CodexDeps = {}): ServerBackend {
   // so the session is recreated once appId is learned. Stable per app instance.
   let sessionAppId: string | undefined;
   let lastAppId: string | undefined;
+  // The appId the live CONNECTION (process) was spawned for. CODEX_HOME is fixed at
+  // spawn, so a change here forces a process respawn (not just a new session).
+  let connAppId: string | undefined;
   // The active turn's send — the permission bridge rides this lane so requests
   // reach the renderer on the current turn's id.
   let currentSend: SendFn | null = null;
@@ -132,11 +138,12 @@ export function createCodexBackend(deps: CodexDeps = {}): ServerBackend {
     }
   }
 
-  /** Spawn codex-acp + open the ACP connection once; reused across turns. */
-  function ensureConnection(cwd: string): AcpConnection {
+  /** Spawn codex-acp (with the per-app CODEX_HOME) + open the ACP connection once. */
+  function ensureConnection(cwd: string, appId: string | undefined): AcpConnection {
     if (conn) return conn;
-    const opened = openAgent(cwd);
+    const opened = openAgent(cwd, appId);
     child = opened.child ?? null;
+    connAppId = appId;
     conn = openAcpConnection(opened.target, {
       name: 'shelf-codex',
       onRequestPermission: permissions.onRequestPermission,
@@ -146,6 +153,7 @@ export function createCodexBackend(deps: CodexDeps = {}): ServerBackend {
     conn.closed.finally(() => {
       conn = null;
       child = null;
+      connAppId = undefined;
       session = null;
       sessionCwd = null;
     });
@@ -164,10 +172,20 @@ export function createCodexBackend(deps: CodexDeps = {}): ServerBackend {
     // session when it changes so app-level MCP servers + skills root take effect.
     if (input.appId) lastAppId = input.appId;
     const appId = input.appId ?? lastAppId;
+
+    // CODEX_HOME is fixed at spawn. If the live connection was spawned for a
+    // DIFFERENT appId (e.g. a legacy caps call that lacked appId), tear it down so
+    // it respawns with the right config-home. Normally a no-op (appId rides caps).
+    if (conn && connAppId !== appId) {
+      serverLog('debug', 'codex', `appId changed (${String(connAppId).slice(0, 8)} → ${String(appId).slice(0, 8)}) — respawning connection for CODEX_HOME`);
+      try { conn.close(); } catch { /* best-effort */ }
+      conn = null; child = null; connAppId = undefined; session = null; sessionCwd = null;
+    }
+
     if (session && sessionCwd === input.cwd && sessionAppId === appId) return session;
     if (session) driver.forget(session.sessionId);
 
-    const c = ensureConnection(input.cwd);
+    const c = ensureConnection(input.cwd, appId);
     const root = codexSkillsRoot(appId);
     const mcp = loadProjectedMcpServers(appId);
     for (const e of mcp.errors) serverLog('warn', 'codex', `MCP config: ${e}`);
@@ -236,14 +254,20 @@ export function createCodexBackend(deps: CodexDeps = {}): ServerBackend {
       _sessionId?: string,
       _customModels?: unknown,
       intent?: { model?: string; effort?: string; permissionMode?: string },
+      _cache?: unknown,
+      appId?: string,
     ): Promise<ProviderCapabilities> {
+      // appId rides caps → the codex-acp spawn below already gets the per-app
+      // CODEX_HOME (device-scoped auth isolation), and login (which follows caps)
+      // reuses it via lastAppId.
+      if (appId) lastAppId = appId;
       // Seed current* from the renderer's saved prefs BEFORE building caps, so the
       // first reported values reflect the user's choice, not the agent default.
       if (intent?.model) currentModel = intent.model;
       if (intent?.effort) currentEffort = intent.effort;
       if (intent?.permissionMode) currentPermissionMode = intent.permissionMode;
       try {
-        const s = await ensureSession({ cwd }, null);
+        const s = await ensureSession({ cwd, appId }, null);
         // `available_commands_update` arrives out-of-turn just AFTER session/new,
         // so briefly wait (bounded) for it — else slash autocomplete is empty on
         // the first caps fetch. Mirrors copilot-acp.
@@ -276,13 +300,15 @@ export function createCodexBackend(deps: CodexDeps = {}): ServerBackend {
     /**
      * Subscription auth (device-code), out-of-band from ACP: drive codex's
      * app-server login, surface the URL + code via `auth_login_prompt`, and
-     * report the outcome via `auth_login_done`. Codex persists its own
-     * credentials to `~/.codex` (Shelf touches no file); the codex-acp session
-     * then reuses that ambient auth on its next turn.
+     * report the outcome via `auth_login_done`. Codex persists its own credentials
+     * (Shelf touches no file) under the per-app `CODEX_HOME` — the SAME config-home
+     * the `--acp` session reads, so the device authorization sticks. lastAppId is
+     * set by the preceding caps call (auth pane only shows after caps).
      */
     startLogin(_cwd: string, send: SendFn): void {
       loginHandle?.cancel();
-      const { rpc } = spawnCodexAppServerRpc();
+      if (!lastAppId) serverLog('warn', 'codex', 'startLogin: appId unknown — login will use the default CODEX_HOME, not the per-app dir');
+      const { rpc } = spawnCodexAppServerRpc(codexAcpEnv(lastAppId));
       loginHandle = driveDeviceCodeLogin(rpc, send);
     },
 

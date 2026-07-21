@@ -183,4 +183,21 @@ describe('codex backend (via mock ACP agent)', () => {
 
     backend.dispose();
   });
+
+  it('respawns the CONNECTION when appId changes (CODEX_HOME is fixed at spawn)', async () => {
+    // Fresh mock per spawn — a respawn = a new process, so count openAgent calls.
+    // CODEX_HOME is process env, so a different appId REQUIRES a new process.
+    let spawns = 0;
+    const openAgent = () => { spawns += 1; return { target: createMockAcpAgent() }; };
+    const backend = createCodexBackend({ openAgent, getShelfMcp: async () => null });
+
+    await backend.gatherCapabilities!('/tmp/project'); // no appId → spawn 1 (default CODEX_HOME)
+    expect(spawns).toBe(1);
+    await backend.query({ prompt: 'hi', cwd: '/tmp/project', appId: 'app-1' }, () => {}); // appId → respawn
+    expect(spawns).toBe(2);
+    await backend.query({ prompt: 'again', cwd: '/tmp/project', appId: 'app-1' }, () => {}); // same → reuse
+    expect(spawns).toBe(2);
+
+    backend.dispose();
+  });
 });
