@@ -37,6 +37,19 @@ async function setupProject(page: Page) {
 }
 
 test.describe('agent flows via fake provider', () => {
+  test.describe('add-tab menu', () => {
+    test('lists every provider from the single-source registry', async ({ shelfApp: { page } }) => {
+      await setupProject(page);
+      await page.locator('.tab-add').click({ button: 'right' });
+      const menu = page.locator('.context-menu');
+      await expect(menu).toBeVisible({ timeout: 5_000 });
+      // One button per registry entry; the "· dev" ones are no longer DEV-gated.
+      for (const label of ['Agent (Claude)', 'Agent (Copilot)', 'Agent (Codex · dev)', 'Agent (Copilot ACP · dev)']) {
+        await expect(menu.locator('.context-menu-item', { hasText: label })).toBeVisible();
+      }
+    });
+  });
+
   test.describe('permission', () => {
     test('Allow once → tool runs, success system message', async ({ shelfApp: { page } }) => {
       await setupProject(page);

@@ -1,9 +1,10 @@
 // ── Agent types ──
 
-// 'acp-copilot' is a PARALLEL, dev-gated backend that drives Copilot over ACP
-// (`copilot --acp`) alongside native 'copilot'; at cutover it replaces 'copilot'.
-// See .agent/features/copilot-acp-provider.md.
-export type AgentProvider = 'claude' | 'copilot' | 'codex' | 'acp-copilot';
+// AgentProvider is DERIVED from the single-source provider registry (label + deploy
+// binary per provider). Re-exported here so the many `@shared/types` importers keep
+// working. To add a provider: edit shared/agent-providers.ts (+ its backend factory).
+import type { AgentProvider } from './agent-providers';
+export type { AgentProvider };
 export type TabType = 'terminal' | 'agent' | 'web';
 
 export type AuthMethod =

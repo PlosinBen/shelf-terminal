@@ -13,6 +13,7 @@ import { buildEnvExportPrefix, applyEnvMap, type EnvMap } from '@shared/project-
 import { createTurnDispatcher, type PermissionHandler } from './turn-dispatcher';
 import { createDispatcherConnection, type DispatcherConnection, type DispatcherProc } from './dispatcher-connection';
 import { getAppInstanceId } from '../app-instance-id';
+import { AGENT_PROVIDERS } from '@shared/agent-providers';
 import { skillsSourceRoot, listSkillFilesRel, hashSkillsTree } from '../skills-projection';
 import { syncMcpForConnection } from '../mcp-remote';
 import { transportPutDir, composeRemotePath } from '../connector/transport';
@@ -724,7 +725,10 @@ async function deployAgentServer(connection: Connection, provider: AgentProvider
     if (!fs.existsSync(indexPath)) throw new Error(agentBundleMissingMessage(indexPath));
     return { nodeBin: localNodeExec().nodeBin, indexPath };
   }
-  const providerBin: ProviderBin = provider === 'copilot' ? 'copilot' : 'claude';
+  // Which self-contained CLI to ship, from the provider registry (fixes the old
+  // `=== 'copilot'` check that shipped the CLAUDE binary for acp-copilot). codex
+  // has no self-contained bin yet (null) → falls back to claude, unchanged.
+  const providerBin: ProviderBin = AGENT_PROVIDERS[provider].bin ?? 'claude';
   // ssh / docker / wsl: ship our own runtime + provider binary, then mirror the
   // app-level skills onto the remote (#70/§5.7) so the remote agent loads them.
   let ops: RemoteOps;

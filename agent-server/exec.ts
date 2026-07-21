@@ -19,9 +19,10 @@ import { setLogSink, serverLog } from './server-logger';
 import { createSendQueue } from './send-queue';
 import { projectAppSkills } from './providers/shared';
 import type { OutgoingMessage, QueryInput, ServerBackend, PickerResolvePayload, ModelCacheClient } from './providers/types';
-import type { ProviderModel } from '@shared/types';
+import type { ProviderModel, AgentProvider } from '@shared/types';
 
-type Provider = 'claude' | 'copilot' | 'codex' | 'acp-copilot';
+// Reuse the shared registry-derived union — no separate list to keep in sync.
+type Provider = AgentProvider;
 
 interface IncomingMessage {
   type: 'send' | 'stop' | 'cancel_queued' | 'ping' | 'resolve_permission' | 'resolve_picker' | 'get_capabilities' | 'store_credential' | 'clear_credential' | 'clear_context' | 'read_task_output' | 'stop_task' | 'reload_skills' | 'app_tool_result' | 'cache_reply' | 'start_login' | 'cancel_login';
@@ -254,28 +255,20 @@ function ensureSkillsProjected(backend: ServerBackend, appId: string | undefined
   if (err) serverLog('warn', 'skills', err);
 }
 
+// Backend factory per provider. `Record<Provider, …>` makes this EXHAUSTIVE —
+// adding a provider to the shared registry is a compile error until wired here.
+const BACKEND_FACTORIES: Record<Provider, () => ServerBackend> = {
+  claude: createClaudeBackend,
+  copilot: createCopilotBackend,
+  codex: createCodexBackend,
+  'acp-copilot': createCopilotAcpBackend,
+};
+
 function getBackend(provider: Provider): ServerBackend {
   const key = (TEST_MODE ? 'fake' : provider) as Provider;
   let b = backends.get(key);
   if (b) return b;
-  if (TEST_MODE) {
-    b = createFakeBackend();
-  } else {
-    switch (provider) {
-      case 'claude':
-        b = createClaudeBackend();
-        break;
-      case 'copilot':
-        b = createCopilotBackend();
-        break;
-      case 'codex':
-        b = createCodexBackend();
-        break;
-      case 'acp-copilot':
-        b = createCopilotAcpBackend();
-        break;
-    }
-  }
+  b = TEST_MODE ? createFakeBackend() : BACKEND_FACTORIES[provider]();
   backends.set(key, b);
   return b;
 }
