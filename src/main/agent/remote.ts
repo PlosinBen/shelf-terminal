@@ -359,7 +359,10 @@ export function createRemoteBackend(
         // `intent` lets agent-server's provider seed session-level closures
         // (e.g. Copilot's currentPermissionMode) before reporting caps back.
         onPhase?.('checking-auth');
-        proc.sendLine({ type: 'get_capabilities', provider, cwd, sessionId, customModels, intent, requestId });
+        // appId (install id) rides caps too — config-home providers (copilot
+        // --acp) spawn their CLI during gatherCapabilities and need the per-app
+        // COPILOT_HOME set at spawn, before the first send carries appId.
+        proc.sendLine({ type: 'get_capabilities', provider, cwd, sessionId, customModels, intent, requestId, appId: getAppInstanceId() });
       });
     },
 

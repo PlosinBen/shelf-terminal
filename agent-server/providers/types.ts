@@ -432,6 +432,15 @@ export interface ServerBackend {
      * with no network fetch (Claude) ignore it. The blob shape is provider-private.
      */
     cache?: ModelCacheClient,
+    /**
+     * App-instance id (`~/.shelf/apps/<appId>/…`). Threaded here — not just on
+     * QueryInput — because config-home providers (copilot --acp) spawn their CLI
+     * DURING gatherCapabilities and must set the per-app config-home env
+     * (`COPILOT_HOME`) at spawn, before the first `send` carries appId. Providers
+     * that inject per-session (claude/native copilot) ignore it. See the
+     * copilot-acp feature note (spawn-timing).
+     */
+    appId?: string,
   ): Promise<ProviderCapabilities>;
   resolvePermission?(toolUseId: string, allow: boolean, message?: string, scope?: 'once' | 'session'): void;
   /**

@@ -59,8 +59,10 @@ interface IncomingMessage {
   allow?: boolean;
   /** For `type: 'ping'`: client heartbeat sequence, echoed back in pong for RTT. */
   seq?: number;
-  /** For `type: 'send'`: app-instance id — names this app's projected skills dir
-   *  at `~/.shelf/apps/<appId>/skills` (see deployment#1). */
+  /** For `type: 'send'` AND `type: 'get_capabilities'`: app-instance id — names
+   *  this app's projected skills dir at `~/.shelf/apps/<appId>/skills` (see
+   *  deployment#1). Carried on caps too so config-home providers (copilot --acp)
+   *  can set COPILOT_HOME at the caps-time CLI spawn. */
   appId?: string;
   /** resolve_picker payload — picker id minted by provider, payload carries
    * index-aligned answers or { cancelled: true } (see PickerResolvePayload). */
@@ -461,7 +463,7 @@ rl.on('line', (line) => {
       (async () => {
         try {
           const backend = getBackend(provider);
-          const caps = await backend.gatherCapabilities?.(msg.cwd ?? process.cwd(), msg.sessionId, msg.customModels, msg.intent, modelCacheClient);
+          const caps = await backend.gatherCapabilities?.(msg.cwd ?? process.cwd(), msg.sessionId, msg.customModels, msg.intent, modelCacheClient, msg.appId);
           send({ type: 'capabilities', requestId: msg.requestId ?? '', ...(caps ?? {}) });
         } catch (err: any) {
           // Real data loss: gatherCapabilities threw → response carries only

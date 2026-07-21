@@ -105,20 +105,38 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
     backend.dispose();
   });
 
-  it('recreates the session when appId is first learned (so MCP/skills take effect)', async () => {
+  it('does NOT recreate the session when appId is already known at caps time', async () => {
     let newSessions = 0;
     const mock = createMockAcpAgent({ onNewSession: () => { newSessions += 1; } });
     const backend = createCopilotAcpBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
 
-    // gatherCapabilities has NO appId → first session.
-    await backend.gatherCapabilities!('/tmp/project');
+    // appId now rides caps (6th arg) → the caps-time spawn already has the right
+    // COPILOT_HOME, so a same-appId turn reuses the session (no wasteful recreate).
+    await backend.gatherCapabilities!('/tmp/project', undefined, undefined, undefined, undefined, 'app-1');
     expect(newSessions).toBe(1);
-    // First real turn carries appId → session recreated with the MCP/skills context.
     await backend.query({ prompt: 'hi', cwd: '/tmp/project', appId: 'app-1' }, () => {});
-    expect(newSessions).toBe(2);
-    // Second turn (same appId) reuses — no further recreation.
+    expect(newSessions).toBe(1);
+
+    backend.dispose();
+  });
+
+  it('respawns the CONNECTION when appId changes (COPILOT_HOME is fixed at spawn)', async () => {
+    // Fresh mock per spawn — a respawn = a brand-new connection, so we count
+    // openAgent calls (process spawns), not session/new. COPILOT_HOME is process
+    // env, so a different appId REQUIRES a new process, not just a new session.
+    let spawns = 0;
+    const openAgent = () => { spawns += 1; return { target: createMockAcpAgent() }; };
+    const backend = createCopilotAcpBackend({ openAgent, getShelfMcp: async () => null });
+
+    // Legacy path: caps with NO appId → spawn 1 (default COPILOT_HOME).
+    await backend.gatherCapabilities!('/tmp/project');
+    expect(spawns).toBe(1);
+    // First turn learns appId → respawn so the process gets the per-app COPILOT_HOME.
+    await backend.query({ prompt: 'hi', cwd: '/tmp/project', appId: 'app-1' }, () => {});
+    expect(spawns).toBe(2);
+    // Same appId → reuse, no further respawn.
     await backend.query({ prompt: 'again', cwd: '/tmp/project', appId: 'app-1' }, () => {});
-    expect(newSessions).toBe(2);
+    expect(spawns).toBe(2);
 
     backend.dispose();
   });

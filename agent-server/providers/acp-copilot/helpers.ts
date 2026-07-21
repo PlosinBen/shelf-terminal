@@ -62,12 +62,29 @@ export function resolveCopilotAcpCommand(
 }
 
 /**
- * The per-app root handed to `copilot --acp` as an ACP `additionalDirectory` so
- * Shelf's projected skills are discoverable. Mirrors the codex contract; the
- * exact sub-path copilot appends is a Phase-2 live detail. Returns undefined when
- * there is no app context.
+ * `COPILOT_HOME` for this app instance: `~/.shelf/apps/<appId>/copilot`. Both
+ * `copilot --acp` and `copilot login` are pointed here so auth + skills are
+ * ISOLATED per app instance (config-home isolation — see the copilot-acp feature
+ * note). ACP's `NewSessionRequest` has no per-session skill field, so config-home
+ * is the only channel for skill injection over ACP. Returns undefined with no app
+ * context (falls back to the CLI's default ~/.copilot). Stable across version
+ * updates (appId is per-install, not per-version).
  */
-export function copilotAcpSkillsRoot(appId: string | undefined): string | undefined {
+export function copilotConfigHome(appId: string | undefined): string | undefined {
   if (!appId) return undefined;
   return path.join(os.homedir(), '.shelf', 'apps', appId, 'copilot');
+}
+
+/**
+ * Spawn env for `copilot --acp` / `copilot login`: the base env plus
+ * `COPILOT_HOME` when an app context exists. Shelf only hands the CLI a PATH; the
+ * CLI owns the opaque credentials + config under it (the "don't parse auth"
+ * principle). Returns `base` unchanged when there's no appId.
+ */
+export function copilotAcpEnv(
+  appId: string | undefined,
+  base: NodeJS.ProcessEnv = process.env,
+): NodeJS.ProcessEnv {
+  const home = copilotConfigHome(appId);
+  return home ? { ...base, COPILOT_HOME: home } : base;
 }
