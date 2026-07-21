@@ -5,19 +5,45 @@
 // provider identity is 'codex'.
 
 import type { ChildProcess } from 'node:child_process';
-import { methods } from '@agentclientprotocol/sdk';
+import { methods, type Stream, type AgentApp } from '@agentclientprotocol/sdk';
 import type { ServerBackend, QueryInput, SendFn, ProviderCapabilities } from '../types';
 import { openAcpConnection, spawnAgentStdio, type AcpConnection } from '../acp/connection';
 import { createSessionDriver, type AcpSession } from '../acp/client';
 import { createPermissionBridge } from '../acp/permission';
-import { mapSessionCapabilities } from '../acp/capabilities';
+import { mapSessionCapabilitiesWithCurrent } from '../acp/capabilities';
 import { toAcpMcpServers } from '../acp/mcp';
+import { getSharedShelfMcp } from '../acp/shelf-mcp';
 import { loadProjectedMcpServers } from '../mcp-config';
 import { serverLog } from '../../server-logger';
 import { resolveCodexAcpCommand, codexSkillsRoot } from './helpers';
 import { driveDeviceCodeLogin, spawnCodexAppServerRpc, type LoginHandle } from './app-server-login';
 
-export function createCodexBackend(): ServerBackend {
+/** What to connect the ACP client to + the child to reap (production spawns a
+ *  codex-acp process; tests inject an in-process mock AgentApp). Mirrors the
+ *  copilot-acp seam so the codex backend is unit-testable with a mock agent. */
+export interface CodexAgentTarget {
+  target: Stream | AgentApp;
+  child?: ChildProcess;
+}
+
+export interface CodexDeps {
+  /** Open the agent transport for `cwd`. Default: spawn codex-acp. */
+  openAgent?: (cwd: string) => CodexAgentTarget;
+  /** Resolve the in-process Shelf MCP bridge (level 1). Default: the shared HTTP
+   *  server. Return null to omit it (tests skip starting a real HTTP server). */
+  getShelfMcp?: () => Promise<{ url: string } | null>;
+}
+
+function defaultOpenAgent(cwd: string): CodexAgentTarget {
+  const { command, args } = resolveCodexAcpCommand();
+  const spawned = spawnAgentStdio(command, args, { cwd });
+  return { target: spawned.stream, child: spawned.child };
+}
+
+export function createCodexBackend(deps: CodexDeps = {}): ServerBackend {
+  const openAgent = deps.openAgent ?? defaultOpenAgent;
+  const getShelfMcp = deps.getShelfMcp ?? getSharedShelfMcp;
+
   let conn: AcpConnection | null = null;
   let child: ChildProcess | null = null;
   let session: AcpSession | null = null;
@@ -37,10 +63,9 @@ export function createCodexBackend(): ServerBackend {
   /** Spawn codex-acp + open the ACP connection once; reused across turns. */
   function ensureConnection(cwd: string): AcpConnection {
     if (conn) return conn;
-    const { command, args } = resolveCodexAcpCommand();
-    const spawned = spawnAgentStdio(command, args, { cwd });
-    child = spawned.child;
-    conn = openAcpConnection(spawned.stream, {
+    const opened = openAgent(cwd);
+    child = opened.child ?? null;
+    conn = openAcpConnection(opened.target, {
       name: 'shelf-codex',
       onRequestPermission: permissions.onRequestPermission,
       onSessionUpdate: driver.onSessionUpdate,
@@ -74,10 +99,18 @@ export function createCodexBackend(): ServerBackend {
     const root = codexSkillsRoot(appId);
     const mcp = loadProjectedMcpServers(appId);
     for (const e of mcp.errors) serverLog('warn', 'codex', `MCP config: ${e}`);
+    // Level 1 (Shelf built-in bridge) + level 2 (user MCP) coexist as mcpServers
+    // entries — same as copilot-acp/claude. The shelf bridge is an in-process HTTP
+    // MCP server (acp/shelf-mcp.ts); without it codex has no app-level bridge tools
+    // (app_skill CRUD, web_fetch, browser_open).
+    const shelf = await getShelfMcp();
     const opts = {
       cwd: input.cwd,
       additionalDirectories: root ? [root] : undefined,
-      mcpServers: toAcpMcpServers(mcp.servers),
+      mcpServers: [
+        ...toAcpMcpServers(mcp.servers),
+        ...(shelf ? [{ type: 'http' as const, name: 'shelf', url: shelf.url, headers: [] }] : []),
+      ],
     };
 
     if (input.resumeId) {
@@ -106,7 +139,7 @@ export function createCodexBackend(): ServerBackend {
           { cwd: input.cwd, appId: input.appId, resumeId: input.restoreContext?.lastSdkSessionId },
           send,
         );
-        await driver.drivePromptTurn(conn!.agent, s, input.prompt, send);
+        await driver.drivePromptTurn(conn!.agent, s, input.prompt, send, input.images);
       } catch (err) {
         send({ type: 'error', error: `codex: ${(err as Error)?.message ?? String(err)}` });
       } finally {
@@ -118,9 +151,23 @@ export function createCodexBackend(): ServerBackend {
     async gatherCapabilities(cwd: string): Promise<ProviderCapabilities> {
       try {
         const s = await ensureSession({ cwd }, null);
+        // `available_commands_update` arrives out-of-turn just AFTER session/new,
+        // so briefly wait (bounded) for it — else slash autocomplete is empty on
+        // the first caps fetch. Resolves as soon as it lands (~a few ms). Mirrors
+        // copilot-acp.
+        for (let i = 0; i < 20 && !driver.getAvailableCommands(s.sessionId); i++) {
+          await new Promise((r) => setTimeout(r, 10));
+        }
         const r = s.newSessionResponse;
         // Model list is DYNAMIC (agent-owned config options) — no Shelf registry.
-        return mapSessionCapabilities({ modes: r?.modes, configOptions: r?.configOptions });
+        // WithCurrent so the status bar shows the active model/effort/mode (not
+        // just the option lists). Permission modes are codex's raw advertised
+        // modes for now — a Shelf-semantic mapping is the config-edit task (T4.1-A).
+        return mapSessionCapabilitiesWithCurrent({
+          modes: r?.modes,
+          configOptions: r?.configOptions,
+          availableCommands: driver.getAvailableCommands(s.sessionId),
+        });
       } catch {
         // A fresh codex session most commonly fails when unauthenticated →
         // surface the auth pane rather than an empty capability set. (T4.0 will
