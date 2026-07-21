@@ -522,6 +522,16 @@ export interface ServerBackend {
    * `ok`/`error` reflect the SDK reload. Omitting (void) is treated as no-op.
    */
   reloadSkills?(): Promise<SkillsReloadOutcome | void>;
+  /**
+   * Where THIS provider's CLI scans for app-level skills, for `appId` — e.g.
+   * copilot --acp: `$COPILOT_HOME/skills`; codex-acp: `<root>/.agents/skills`.
+   * The agent-server projects the canonical skill tree to this path (the provider
+   * does NO filesystem work itself — see the provider-boundary principle). Return
+   * undefined when the provider needs no projection (claude points `plugins` at
+   * the canonical dir directly; native copilot uses `skillDirectories`) or there
+   * is no app context.
+   */
+  skillTarget?(appId: string | undefined): string | undefined;
 }
 
 /** Result of a {@link ServerBackend.reloadSkills} call. */

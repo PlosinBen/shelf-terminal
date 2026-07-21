@@ -17,6 +17,7 @@ import { loadRestoreContextFor, newTurnId, wrapSendForContext, wrapSendForTurn }
 import { initAppToolClient, resolveAppToolResult } from './app-tool-client';
 import { setLogSink, serverLog } from './server-logger';
 import { createSendQueue } from './send-queue';
+import { projectAppSkills } from './providers/shared';
 import type { OutgoingMessage, QueryInput, ServerBackend, PickerResolvePayload, ModelCacheClient } from './providers/types';
 import type { ProviderModel } from '@shared/types';
 
@@ -239,6 +240,20 @@ async function applyPrefDiff(
  */
 const TEST_MODE = process.env.SHELF_TEST_MODE === '1';
 
+/**
+ * Project the app-skill tree to a provider's declared scan path. The provider
+ * declares WHERE (`skillTarget`); the agent-server does the fs (provider-boundary
+ * principle — providers never touch the filesystem). No-op for providers that
+ * need no projection (skillTarget → undefined). Idempotent + atomic, so calling
+ * it on every caps/send/reload is safe and collapses to one real creation.
+ */
+function ensureSkillsProjected(backend: ServerBackend, appId: string | undefined): void {
+  const target = backend.skillTarget?.(appId);
+  if (!target) return;
+  const err = projectAppSkills(appId, target);
+  if (err) serverLog('warn', 'skills', err);
+}
+
 function getBackend(provider: Provider): ServerBackend {
   const key = (TEST_MODE ? 'fake' : provider) as Provider;
   let b = backends.get(key);
@@ -298,6 +313,9 @@ async function handleSend(msg: IncomingMessage) {
     return;
   }
   activeBackend = backend;
+  // Project app skills to the provider's scan path BEFORE the turn spawns/uses
+  // the CLI, so session/new finds them. Central (agent-server owns the fs).
+  ensureSkillsProjected(backend, msg.appId);
 
   // Hydrate persisted context once per turn — providers read fields they care
   // about (e.g. `lastSdkSessionId`) without touching disk themselves.
@@ -463,6 +481,9 @@ rl.on('line', (line) => {
       (async () => {
         try {
           const backend = getBackend(provider);
+          // Project skills before caps — the CLI spawns during gatherCapabilities
+          // (config-home providers), so the projection must exist by then.
+          ensureSkillsProjected(backend, msg.appId);
           const caps = await backend.gatherCapabilities?.(msg.cwd ?? process.cwd(), msg.sessionId, msg.customModels, msg.intent, modelCacheClient, msg.appId);
           send({ type: 'capabilities', requestId: msg.requestId ?? '', ...(caps ?? {}) });
         } catch (err: any) {
@@ -518,12 +539,13 @@ rl.on('line', (line) => {
       break;
     }
     case 'reload_skills':
-      // App-level skills changed on disk (main already projected/synced them to
-      // the consumption path). App skills are app-global, not per-session, so
-      // tell EVERY instantiated provider to re-scan on its live session. Each is
-      // best-effort + no-op without a live session. Effect lands next turn.
-      // Emit a `skills_reloaded` result (system/error line in the agent view)
-      // via the BASE send — turnId-less by construction. Skip no-op reloads.
+      // App-level skills changed: main refreshed the L1 canonical tree. Re-project
+      // each provider's L2 target (central — agent-server owns the fs; a no-op for
+      // symlink providers since the live source is already followed, real work for
+      // copy-mode), THEN tell EVERY provider to re-scan on its live session. App
+      // skills are app-global, not per-session; each reload is best-effort + no-op
+      // without a live session. Emit a `skills_reloaded` result via the BASE send.
+      for (const b of backends.values()) ensureSkillsProjected(b, lastAppId);
       for (const b of backends.values()) {
         void b.reloadSkills?.().then((r) => {
           if (r && r.reloaded) send({ type: 'skills_reloaded', ok: r.ok, ...(r.error ? { error: r.error } : {}) });

@@ -32,3 +32,48 @@ export function resolveSkillsPluginRoot(appId: string | undefined): string | nul
     return null;
   }
 }
+
+/**
+ * Layer-2 skill projection: symlink `target` → the canonical app-skill folders
+ * (`<resolveSkillsPluginRoot>/skills`). The PROVIDER only declares `target` (its
+ * CLI's scan path); this shared mechanic — owned by the agent-server, NOT the
+ * provider (see the provider-boundary principle) — does the fs work.
+ *
+ * IDEMPOTENT (skips when the symlink is already correct) and ATOMIC (creates the
+ * link at a temp name, then `rename`s over `target` — rename(2) is atomic, so N
+ * concurrent cross-process callers, all keyed to the same appId target, collapse
+ * to one real creation with no corruption). With a symlink, skill UPDATES need no
+ * re-projection — the live source is followed.
+ *
+ * Pure-ish: side-effecting on the fs but returns an anomaly string (never throws,
+ * never logs) so the caller fails loud in its own voice. Returns null on success
+ * / benign no-op (no app context, or no skills to project yet).
+ */
+export function projectAppSkills(appId: string | undefined, target: string): string | null {
+  const canonical = resolveSkillsPluginRoot(appId);
+  const source = canonical ? path.join(canonical, 'skills') : null;
+  try {
+    // lstat (NOT existsSync) so a DANGLING symlink is still detected — existsSync
+    // follows the link and would report a broken projection as absent.
+    let isSymlink = false;
+    try { isSymlink = fs.lstatSync(target).isSymbolicLink(); } catch { /* target absent */ }
+    const cur = isSymlink ? fs.readlinkSync(target) : null;
+
+    if (source && fs.existsSync(source)) {
+      if (cur === source) return null; // already projected — idempotent no-op
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      // A real (non-symlink) dir can't be replaced by rename → clear it first.
+      if (!isSymlink && fs.existsSync(target)) fs.rmSync(target, { recursive: true, force: true });
+      const tmp = `${target}.tmp-${process.pid}`;
+      try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* fresh */ }
+      fs.symlinkSync(source, tmp, 'dir');
+      fs.renameSync(tmp, target); // atomic replace of the symlink (or create)
+      return null;
+    }
+    // No skills to project → drop a stale projection so the CLI stops listing them.
+    if (cur !== null) fs.rmSync(target, { recursive: true, force: true });
+    return null;
+  } catch (err) {
+    return `skill projection failed for app ${String(appId).slice(0, 8)} → ${target}: ${(err as Error)?.message ?? String(err)}`;
+  }
+}

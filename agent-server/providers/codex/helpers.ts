@@ -58,3 +58,15 @@ export function codexSkillsRoot(appId: string | undefined): string | undefined {
   if (!appId) return undefined;
   return path.join(os.homedir(), '.shelf', 'apps', appId, 'codex');
 }
+
+/**
+ * Where codex-acp scans for app-level skills, for `appId`:
+ * `<codexSkillsRoot>/.agents/skills`. codex-acp appends `.agents/skills` to each
+ * ACP `additionalDirectory` (verified in its `refreshSkills` source). The provider
+ * declares this; the agent-server projects the canonical skill tree here (the
+ * backend does no fs — provider-boundary principle). Undefined without app context.
+ */
+export function codexSkillTarget(appId: string | undefined): string | undefined {
+  const root = codexSkillsRoot(appId);
+  return root ? path.join(root, '.agents', 'skills') : undefined;
+}

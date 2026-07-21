@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import type { SessionUpdate, SessionConfigOption, SessionModeState } from '@agentclientprotocol/sdk';
 import { createMockAcpAgent } from '../acp/mock-agent';
 import { createCodexBackend } from './index';
@@ -93,6 +95,13 @@ describe('codex backend (via mock ACP agent)', () => {
     await backend.gatherCapabilities!('/tmp/project');
     expect(newParams?.mcpServers).toContainEqual({ type: 'http', name: 'shelf', url: 'http://127.0.0.1:9/mcp', headers: [] });
 
+    backend.dispose();
+  });
+
+  it('declares its skill scan target as <root>/.agents/skills (codex-acp convention)', () => {
+    const backend = createCodexBackend({ openAgent: () => ({ target: createMockAcpAgent() }), getShelfMcp: async () => null });
+    expect(backend.skillTarget!('app-1')).toBe(path.join(os.homedir(), '.shelf', 'apps', 'app-1', 'codex', '.agents', 'skills'));
+    expect(backend.skillTarget!(undefined)).toBeUndefined();
     backend.dispose();
   });
 

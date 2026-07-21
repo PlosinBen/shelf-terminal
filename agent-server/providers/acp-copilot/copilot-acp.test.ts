@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import type { SessionUpdate, SessionConfigOption, SessionModeState } from '@agentclientprotocol/sdk';
 import { createMockAcpAgent } from '../acp/mock-agent';
 import { createCopilotAcpBackend } from './index';
@@ -102,6 +104,13 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
       { name: 'review', description: 'Review changes' },
     ]);
 
+    backend.dispose();
+  });
+
+  it('declares its skill scan target as $COPILOT_HOME/skills (agent-server projects there)', () => {
+    const backend = createCopilotAcpBackend({ openAgent: () => ({ target: createMockAcpAgent() }), getShelfMcp: async () => null });
+    expect(backend.skillTarget!('app-1')).toBe(path.join(os.homedir(), '.shelf', 'apps', 'app-1', 'copilot', 'skills'));
+    expect(backend.skillTarget!(undefined)).toBeUndefined();
     backend.dispose();
   });
 

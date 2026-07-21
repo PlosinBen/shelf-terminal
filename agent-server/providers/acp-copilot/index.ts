@@ -6,7 +6,6 @@
 // cutover replaces native 'copilot' — see the copilot-acp feature note).
 
 import { randomUUID } from 'node:crypto';
-import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { ChildProcess } from 'node:child_process';
 import { methods, type Stream, type AgentApp, type SessionModeState, type SessionConfigOption } from '@agentclientprotocol/sdk';
@@ -21,7 +20,6 @@ import { toAcpMcpServers } from '../acp/mcp';
 import { getSharedShelfMcp } from '../acp/shelf-mcp';
 import { loadProjectedMcpServers } from '../mcp-config';
 import { resolveCopilotAcpCommand, copilotConfigHome, copilotAcpEnv } from './helpers';
-import { resolveSkillsPluginRoot } from '../shared';
 import { copilotPermissionModes, copilotModeIdToShelf, shelfToCopilotModeId } from './mode-map';
 import { startLogin as startCopilotLogin, prefillLoginUrl, type LoginRunner } from '../copilot/login';
 
@@ -58,37 +56,12 @@ function defaultOpenAgent(cwd: string, appId?: string): CopilotAgentTarget {
   return { target: spawned.stream, child: spawned.child };
 }
 
-/**
- * Layer-2 skill projection: symlink `$COPILOT_HOME/skills` → the canonical skill
- * folders (`~/.shelf/apps/<appId>/skills/skills`, the same tree native copilot
- * points `skillDirectories` at). ACP has no per-session skill field, so copilot
- * --acp discovers skills only by scanning its config-home. A symlink means later
- * edits to the canonical tree are reflected live (a new skill may still need
- * `/skills reload`). Best-effort but fail-loud on a real error (skills silently
- * not loading is a degradation, not benign). No-op without app context / skills.
- */
-function projectSkillsIntoConfigHome(appId: string | undefined): void {
+/** Where `copilot --acp` scans for skills, for `appId`: `$COPILOT_HOME/skills`.
+ *  The provider only DECLARES this; the agent-server projects the canonical tree
+ *  here (provider-boundary principle — the backend does no fs). */
+function copilotSkillTarget(appId: string | undefined): string | undefined {
   const home = copilotConfigHome(appId);
-  if (!home) return;
-  const canonical = resolveSkillsPluginRoot(appId); // ~/.shelf/apps/<appId>/skills | null
-  const source = canonical ? path.join(canonical, 'skills') : null;
-  const target = path.join(home, 'skills');
-  try {
-    fs.mkdirSync(home, { recursive: true });
-    const cur = fs.existsSync(target) && fs.lstatSync(target).isSymbolicLink()
-      ? fs.readlinkSync(target)
-      : null;
-    if (source && fs.existsSync(source)) {
-      if (cur === source) return; // already projected
-      try { fs.rmSync(target, { recursive: true, force: true }); } catch { /* fresh */ }
-      fs.symlinkSync(source, target, 'dir');
-    } else if (cur !== null) {
-      // No skills anymore → drop a stale projection.
-      try { fs.rmSync(target, { recursive: true, force: true }); } catch { /* best-effort */ }
-    }
-  } catch (err) {
-    serverLog('warn', 'acp-copilot', `skill projection into COPILOT_HOME failed for app ${String(appId).slice(0, 8)}: ${(err as Error)?.message ?? err}`);
-  }
+  return home ? path.join(home, 'skills') : undefined;
 }
 
 export function createCopilotAcpBackend(deps: CopilotAcpDeps = {}): ServerBackend {
@@ -230,11 +203,9 @@ export function createCopilotAcpBackend(deps: CopilotAcpDeps = {}): ServerBacken
     if (session && sessionCwd === input.cwd && sessionAppId === appId) return session;
     if (session) driver.forget(session.sessionId);
 
-    // Layer-2 skill projection into COPILOT_HOME before session/new — copilot
-    // --acp discovers skills only by scanning its config-home (ACP has no
-    // per-session skill field). See projectSkillsIntoConfigHome.
-    projectSkillsIntoConfigHome(appId);
-
+    // Skills are already projected to `$COPILOT_HOME/skills` by the agent-server
+    // (it calls skillTarget + projectAppSkills before this) — the backend does no
+    // fs. copilot --acp scans config-home for them (ACP has no per-session field).
     const c = ensureConnection(input.cwd, appId);
     const mcp = loadProjectedMcpServers(appId);
     // Fail-loud: a bad/incomplete MCP entry is logged, not silently dropped.
@@ -396,6 +367,10 @@ export function createCopilotAcpBackend(deps: CopilotAcpDeps = {}): ServerBacken
       if (conn && session) {
         await conn.agent.notify(methods.agent.session.cancel, { sessionId: session.sessionId });
       }
+    },
+
+    skillTarget(appId: string | undefined): string | undefined {
+      return copilotSkillTarget(appId);
     },
 
     resetSession(): void {

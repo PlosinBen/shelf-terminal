@@ -15,7 +15,7 @@ import { toAcpMcpServers } from '../acp/mcp';
 import { getSharedShelfMcp } from '../acp/shelf-mcp';
 import { loadProjectedMcpServers } from '../mcp-config';
 import { serverLog } from '../../server-logger';
-import { resolveCodexAcpCommand, codexSkillsRoot } from './helpers';
+import { resolveCodexAcpCommand, codexSkillsRoot, codexSkillTarget } from './helpers';
 import { driveDeviceCodeLogin, spawnCodexAppServerRpc, type LoginHandle } from './app-server-login';
 
 /** What to connect the ACP client to + the child to reap (production spawns a
@@ -205,6 +205,10 @@ export function createCodexBackend(deps: CodexDeps = {}): ServerBackend {
       if (conn && session) {
         await conn.agent.notify(methods.agent.session.cancel, { sessionId: session.sessionId });
       }
+    },
+
+    skillTarget(appId: string | undefined): string | undefined {
+      return codexSkillTarget(appId);
     },
 
     resetSession(): void {
