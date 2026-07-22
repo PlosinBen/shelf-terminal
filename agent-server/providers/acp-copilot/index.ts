@@ -21,7 +21,7 @@ import { getSharedShelfMcp } from '../acp/shelf-mcp';
 import { loadProjectedMcpServers } from '../mcp-config';
 import { resolveCopilotAcpCommand, copilotConfigHome, copilotAcpEnv } from './helpers';
 import { copilotPermissionModes, copilotModeIdToShelf, shelfToCopilotModeId } from './mode-map';
-import { startLogin as startCopilotLogin, prefillLoginUrl, type LoginRunner } from '../copilot/login';
+import { startLogin as startCopilotLogin, prefillLoginUrl, type LoginRunner } from './login';
 
 // Category names for copilot's dynamic config options (agent-owned), used to
 // resolve the option id for session/set_config_option.

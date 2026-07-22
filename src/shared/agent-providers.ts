@@ -20,10 +20,10 @@ export interface AgentProviderMeta {
 }
 
 // CUTOVER (copilot on ACP): `copilot` is now driven by the ACP backend
-// (createCopilotAcpBackend in exec.ts) — there is no separate `acp-copilot` provider
-// anymore. The native SDK backend (providers/copilot/index.ts) is kept UNWIRED in the
-// tree as a one-line rollback lever during field-test, then deleted + the acp-copilot/
-// dir renamed to copilot/ in a follow-up cleanup. See the copilot-acp feature note.
+// (createCopilotAcpBackend, agent-server/providers/acp-copilot/) — there is no separate
+// `acp-copilot` provider, and the native SDK backend was deleted (in git history at the
+// pre-cutover commit). Remaining cosmetic cleanup: rename the acp-copilot/ dir → copilot/
+// + createCopilotAcpBackend → createCopilotBackend. See the copilot-acp feature note.
 export const AGENT_PROVIDERS = {
   claude:  { label: 'Claude',      bin: 'claude'  },
   copilot: { label: 'Copilot',     bin: 'copilot' },

@@ -5,10 +5,8 @@ import * as os from 'os';
 import { randomUUID } from 'node:crypto';
 import { createClaudeBackend } from './providers/claude';
 import { createCodexBackend } from './providers/codex';
-// CUTOVER: `copilot` is driven by the ACP backend. The native SDK backend
-// (providers/copilot/createCopilotBackend) is kept in the tree but UNWIRED — a
-// one-line rollback lever during field-test (re-import + swap the factory below),
-// deleted in the follow-up cleanup.
+// CUTOVER (done): `copilot` is driven by the ACP backend; the native SDK copilot
+// backend was deleted (recoverable from git history at the pre-cutover commit).
 import { createCopilotAcpBackend } from './providers/acp-copilot';
 import { createFakeBackend } from './providers/fake';
 import { deleteContext, cleanupOldContexts } from './context-store';
