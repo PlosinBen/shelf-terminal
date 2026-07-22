@@ -1,7 +1,15 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { codexConfigHome, codexAcpEnv, codexSkillsRoot, codexSkillTarget } from './helpers';
+import {
+  codexConfigHome,
+  codexAcpEnv,
+  codexSkillsRoot,
+  codexSkillTarget,
+  resolveCodexAcpEntry,
+  resolveCodexAcpCommand,
+  resolveCodexCliCommand,
+} from './helpers';
 
 describe('codexConfigHome', () => {
   it('names the per-app CODEX_HOME when an appId is present', () => {
@@ -27,5 +35,44 @@ describe('codexAcpEnv', () => {
     const env = codexAcpEnv(undefined, base);
     expect(env).toBe(base);
     expect(env.CODEX_HOME).toBeUndefined();
+  });
+});
+
+describe('codex entry resolution (packaging)', () => {
+  const origAcp = process.env.SHELF_CODEX_ACP_PATH;
+  afterEach(() => {
+    if (origAcp === undefined) delete process.env.SHELF_CODEX_ACP_PATH;
+    else process.env.SHELF_CODEX_ACP_PATH = origAcp;
+  });
+
+  it('prefers the SHELF_CODEX_ACP_PATH override when it exists', () => {
+    process.env.SHELF_CODEX_ACP_PATH = '/override/codex-acp/dist/index.js';
+    expect(resolveCodexAcpEntry((p) => p === '/override/codex-acp/dist/index.js')).toBe(
+      '/override/codex-acp/dist/index.js',
+    );
+  });
+
+  it('falls to the packaged extraResources codex-cli/ path when no override', () => {
+    delete process.env.SHELF_CODEX_ACP_PATH;
+    const packagedTail = path.join('codex-cli', 'node_modules', '@agentclientprotocol', 'codex-acp', 'dist', 'index.js');
+    const entry = resolveCodexAcpEntry((p) => p.endsWith(packagedTail));
+    expect(entry).toBeDefined();
+    expect(entry!.endsWith(packagedTail)).toBe(true);
+  });
+
+  it('wraps the resolved entry as a node/electron command', () => {
+    expect(resolveCodexAcpCommand(() => '/x/dist/index.js')).toEqual({
+      command: process.execPath,
+      args: ['/x/dist/index.js'],
+    });
+    expect(resolveCodexCliCommand(() => '/x/bin/codex.js')).toEqual({
+      command: process.execPath,
+      args: ['/x/bin/codex.js'],
+    });
+  });
+
+  it('throws loudly when the entry cannot be resolved (no silent fallback)', () => {
+    expect(() => resolveCodexAcpCommand(() => undefined)).toThrow(/codex-acp not found/);
+    expect(() => resolveCodexCliCommand(() => undefined)).toThrow(/codex CLI not found/);
   });
 });

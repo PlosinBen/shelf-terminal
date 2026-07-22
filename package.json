@@ -37,7 +37,10 @@
       "!node_modules/@github/copilot/**/*",
       "!node_modules/@github/copilot-darwin-*/**/*",
       "!node_modules/@github/copilot-linux-*/**/*",
-      "!node_modules/@github/copilot-win32-*/**/*"
+      "!node_modules/@github/copilot-win32-*/**/*",
+      "!node_modules/@agentclientprotocol/codex-acp/**/*",
+      "!node_modules/@openai/codex/**/*",
+      "!node_modules/@openai/codex-*/**/*"
     ],
     "asarUnpack": [
       "node_modules/@anthropic-ai/claude-agent-sdk-*/claude",
@@ -53,6 +56,26 @@
         "to": "copilot-cli/@github",
         "filter": [
           "copilot-*-*/**/*"
+        ]
+      },
+      {
+        "from": "node_modules/@agentclientprotocol/codex-acp",
+        "to": "codex-cli/node_modules/@agentclientprotocol/codex-acp",
+        "filter": [
+          "dist/**/*",
+          "package.json",
+          "LICENSE"
+        ]
+      },
+      {
+        "from": "node_modules/@openai",
+        "to": "codex-cli/node_modules/@openai",
+        "filter": [
+          "codex/bin/**/*",
+          "codex/package.json",
+          "codex/LICENSE",
+          "codex-*-*/vendor/**/*",
+          "codex-*-*/package.json"
         ]
       }
     ],

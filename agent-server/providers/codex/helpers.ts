@@ -3,48 +3,96 @@
 
 import * as path from 'node:path';
 import * as os from 'node:os';
+import * as fs from 'node:fs';
 import { createRequire } from 'node:module';
 
-/** Command + args to launch the codex-acp ACP agent over stdio. */
+/** Command + args to launch a codex JS entry (codex-acp adapter or `codex` CLI). */
 export interface CodexAcpCommand {
   command: string;
   args: string[];
 }
 
+// Both entries are shipped adjacent under a preserved `node_modules` tree so that
+// codex-acp's `require.resolve("@openai/codex/bin/codex.js")` (and, in turn,
+// bin/codex.js's `require.resolve("@openai/codex-<platform>/package.json")`)
+// resolve as sibling packages — see package.json `extraResources` (`codex-cli/`).
+const CODEX_ACP_ENTRY = path.join('node_modules', '@agentclientprotocol', 'codex-acp', 'dist', 'index.js');
+const CODEX_CLI_ENTRY = path.join('node_modules', '@openai', 'codex', 'bin', 'codex.js');
+
 /**
- * Resolve how to launch the `codex` CLI itself (for `codex app-server`, used by
- * the device-code login drive). Dev: the `@openai/codex` package's `bin/codex.js`
- * shim, run with the current Node. Packaged: `SHELF_CODEX_CLI_PATH` (Phase 3).
+ * First existing candidate for a `codex-cli/` JS entry, tried in order:
+ *   env override → packaged extraResources (`<Resources>/codex-cli/…`, relative to
+ *   the agent-server bundle `__dirname`) → remote self-contained deploy
+ *   (`<root>/codex-cli/…` next to index.mjs) → dev `node_modules` via require.resolve.
+ * `exists` + `devResolve` are injectable for tests. Undefined if nothing resolves.
  */
-export function resolveCodexCliCommand(): CodexAcpCommand {
-  const packaged = process.env.SHELF_CODEX_CLI_PATH;
-  if (packaged) return { command: process.execPath, args: [packaged] };
-  const require = createRequire(__filename);
-  const pkgJson = require.resolve('@openai/codex/package.json');
-  const entry = path.join(path.dirname(pkgJson), 'bin', 'codex.js');
+function resolveCodexEntry(
+  rel: string,
+  envOverride: string | undefined,
+  devSpecifier: string,
+  exists: (p: string) => boolean = fs.existsSync,
+): string | undefined {
+  const candidates = [
+    envOverride,
+    // Packaged (Electron): extraResources/codex-cli/… (bundle at agent-server/<version>/).
+    path.resolve(__dirname, '..', '..', 'codex-cli', rel),
+    // Remote self-contained deploy: codex-cli/ sits next to index.mjs.
+    path.resolve(__dirname, 'codex-cli', rel),
+  ].filter((p): p is string => !!p);
+  for (const c of candidates) if (exists(c)) return c;
+  try {
+    // Dev: resolve from node_modules relative to the source tree.
+    return createRequire(__filename).resolve(devSpecifier);
+  } catch {
+    return undefined;
+  }
+}
+
+/** Path to `@openai/codex/bin/codex.js` (dev resolves via package.json → bin). */
+export function resolveCodexCliEntry(exists: (p: string) => boolean = fs.existsSync): string | undefined {
+  const direct = resolveCodexEntry(CODEX_CLI_ENTRY, process.env.SHELF_CODEX_CLI_PATH, '@openai/codex/bin/codex.js', exists);
+  if (direct) return direct;
+  try {
+    const pkgJson = createRequire(__filename).resolve('@openai/codex/package.json');
+    const entry = path.join(path.dirname(pkgJson), 'bin', 'codex.js');
+    return exists(entry) ? entry : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Path to `@agentclientprotocol/codex-acp`'s `dist/index.js`. */
+export function resolveCodexAcpEntry(exists: (p: string) => boolean = fs.existsSync): string | undefined {
+  return resolveCodexEntry(CODEX_ACP_ENTRY, process.env.SHELF_CODEX_ACP_PATH, '@agentclientprotocol/codex-acp', exists);
+}
+
+/**
+ * How to launch the `codex` CLI itself (for `codex app-server`, used by the
+ * device-code login drive) — the JS entry run with the current Node/Electron.
+ * Throws loudly if not found; codex must not silently fall back.
+ */
+export function resolveCodexCliCommand(findEntry: () => string | undefined = resolveCodexCliEntry): CodexAcpCommand {
+  const entry = findEntry();
+  if (!entry) {
+    throw new Error(
+      'codex CLI not found: expected @openai/codex/bin/codex.js (dev) or extraResources/codex-cli (packaged)',
+    );
+  }
   return { command: process.execPath, args: [entry] };
 }
 
 /**
- * Resolve how to launch `@agentclientprotocol/codex-acp`.
- *
- * Dev / unpacked: run its bundled entry with the current Node. Packaged: Phase 3
- * ships it under extraResources (like the Copilot CLI) and sets
- * `SHELF_CODEX_ACP_PATH`. Throws loudly if neither is available — codex must not
- * silently fall back.
+ * How to launch `@agentclientprotocol/codex-acp` (the ACP agent) over stdio — its
+ * bundled entry run with the current Node/Electron. Throws loudly if not found.
  */
-export function resolveCodexAcpCommand(): CodexAcpCommand {
-  const packaged = process.env.SHELF_CODEX_ACP_PATH;
-  if (packaged) return { command: process.execPath, args: [packaged] };
-  try {
-    const require = createRequire(__filename);
-    const entry = require.resolve('@agentclientprotocol/codex-acp');
-    return { command: process.execPath, args: [entry] };
-  } catch {
+export function resolveCodexAcpCommand(findEntry: () => string | undefined = resolveCodexAcpEntry): CodexAcpCommand {
+  const entry = findEntry();
+  if (!entry) {
     throw new Error(
-      'codex-acp not found: install @agentclientprotocol/codex-acp (dev) or set SHELF_CODEX_ACP_PATH (packaged)',
+      'codex-acp not found: expected @agentclientprotocol/codex-acp (dev) or extraResources/codex-cli (packaged)',
     );
   }
+  return { command: process.execPath, args: [entry] };
 }
 
 /**
