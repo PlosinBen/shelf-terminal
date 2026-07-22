@@ -19,7 +19,7 @@ related:
 **Decision**：AgentView 在 input 上方有個固定 panel，顯示當前 plan/todos 狀態。Backend 透過獨立 `AgentEvent::plan` event + `AGENT_PLAN` IPC channel 覆蓋式更新（不進 timeline；見 `agent-ui#5`）。Replace-semantics（每次直接覆蓋整段內容），content 為空字串時 panel 隱藏。
 
 **兩 provider 接法不同**：
-- **Copilot**：`session.plan_changed` 事件 → debounced 呼叫 `session.rpc.plan.read()` → 發 `AgentEvent::plan`
+- **Copilot / Codex（ACP）**：ACP `plan` / `plan_update` SessionUpdate → 共用 toolkit `translate.ts` 的 `renderPlan(entries)` 組 markdown checklist → `{type:'plan'}` 渲染原語（**不再是** native SDK 的 `session.plan_changed` + `session.rpc.plan.read()`，那隨 SDK backend 刪除）
 - **Claude**（SDK 0.2.x）：攔截 `TodoWrite` tool_use，把 `todos` 陣列轉 markdown checkbox
 - **Claude**（SDK 0.3.142+ 起）：`TodoWrite` 被 `TaskCreate / TaskUpdate / TaskGet / TaskList` 取代，是 delta-by-id 不是 snapshot。Provider 內維護 `tasks: Map<taskId, TaskRecord>` 鏡射 SDK task store，每次 Task* 事件處理完都呼叫 `renderPlan()` 整份重發 `{type:'plan', content:md}` — 對 renderer 維持 snapshot 介面不變
 - **Claude**：`ExitPlanMode` 直接用 `input.plan` 字串（兩個 SDK 版本都一樣）
@@ -65,7 +65,7 @@ Severity 是抽象層級：`'normal' | 'info' | 'warning' | 'critical'`，map �
 - Wire shape：`prompts[]`（N 題）+ per-prompt `multiSelect` / `options[]`；`inputType: 'text' | 'number' | 'integer'` 時 renderer render 自填欄（覆蓋 AskUserQuestion 隱含 Other）
 - `PickerResolvePayload`：`{ answers: Array<string | string[]> }` index-aligned 或 `{ cancelled: true }`
 - Claude：`canUseTool` 攔 `toolName === 'AskUserQuestion'`，轉 picker_request，SDK output JSON 塞 `{ behavior: 'deny', message }` 餵回 model（GOTCHAS 有 hack 說明 + 回歸測試）
-- Copilot：`registerElicitationHandler` 接 ElicitationSchema 7 field types → picker_request prompts
+- Copilot / Codex（ACP）：**尚未在 ACP 重建** elicitation → picker（原 native SDK 的 `registerElicitationHandler` 隨 backend 刪除；ACP 端 picker 是 evidence-gated deferred，等真遇到 agent 發 elicitation 再接）。目前只有 Claude 路徑活著。
 
 **Do not change because**：
 - **不要把 permission 跟 picker channel 合併** — permission 的 "Allow/Deny/Allow and remember" 字串是 app-owned 需 i18n、picker label 是 agent-supplied 不能翻譯；resolve shape 也不一樣（`{behavior, scope?}` vs `{answers}`），合併要寫 adapter。Ownership 邊界從 channel 層退到 field-level discriminator 比分兩個 type 還醜

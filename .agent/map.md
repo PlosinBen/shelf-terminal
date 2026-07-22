@@ -97,12 +97,16 @@ title: shelf-terminal — Intent → File Index
 | Model/caps cache（泛型 TTL） | `model-cache.ts` | `createModelCache({ttlMs})`：泛型 TTL 儲存，過期即 evict（cache-aside 的被動 store，見 `context/agent-config-flow`） |
 | Session hosting 抽象（兩張 map） | `session-registry.ts` | `createSessionRegistry()`：`sessions: Map<sid, runtimeKey>` + `runtimes: Map<runtimeKey, T>`，`runtimeKeyFor` 決定 isolated（sid）/shared（provider:account）。為 shared 部署預備（isolated milestone 未用） |
 | Claude provider | `providers/claude/index.ts` | `@anthropic-ai/claude-agent-sdk` wrapper：持久 streaming-input session、emit 渲染原語、auth 偵測 |
-| Copilot provider | `providers/copilot/index.ts` | `@github/copilot-sdk` wrapper：spawn bundled CLI、emit 渲染原語、auth 偵測、elicitation handler |
+| Copilot provider (ACP) | `providers/copilot/index.ts` | `createCopilotBackend`：spawn `copilot --acp`、走共用 `acp/` toolkit runtime、OWN copilot 特有（binary launch、device-flow login、config-home）。ACP 是內部細節、provider identity = `copilot`（cutover 後即 copilot backend，pre-ACP native SDK backend 已刪，見 git 歷史） |
+| Codex provider (ACP) | `providers/codex/index.ts` | `createCodexBackend`：spawn codex-acp、走共用 `acp/` toolkit runtime、OWN codex 特有（launch、app-server login、`CODEX_HOME`） |
+| ACP 共用 toolkit | `providers/acp/` | provider-agnostic ACP runtime：`connection`/`client`/`translate`/`permission`/`capabilities`/`mcp`/`shelf-mcp`（L1 in-process HTTP bridge）+ `mock-agent`（測試）。兩個 ACP provider 共用、無 provider 語意 |
+| Provider registry（單一來源） | `src/shared/agent-providers.ts` | `AGENT_PROVIDERS = { label, bin }` per provider + `AgentProvider = keyof typeof`；consumers 一律 iterate（見 `context/agent-providers` #18） |
 | Provider 純 helper（claude） | `providers/claude/helpers.ts` | claude/index 抽出的 side-effect-free 函式 + types（封閉邊界，只被 claude/ 引用） |
 | Turn 路由（claude） | `providers/claude/turn-router.ts` | 純 attribution 狀態機，按順序把 message 分 foreground/server/task lane |
-| Provider 純 helper（copilot） | `providers/copilot/helpers.ts` | copilot/index 抽出的純函式 + types（只被 copilot/ 引用） |
-| Copilot 互動登入（device flow） | `providers/copilot/login.ts` | `parseLoginPrompt`（stdout 抽 URL+code 純函式）+ `startLogin`（spawn `copilot login`、env 剝 token、cancel）+ `prefillLoginUrl`（見 `context/agent-providers` #10） |
-| Provider 共用 helper | `providers/shared.ts` | `stripCwd` / `resolveSkillsPluginRoot` — 跨 provider 共用純函式 |
+| Provider 純 helper（copilot） | `providers/copilot/helpers.ts` | `resolveCopilotBinary` / `resolveCopilotCommand` / `copilotConfigHome`（`$COPILOT_HOME` per-appId）/ `copilotEnv`（token-env 傳遞）— 只被 copilot/ 引用 |
+| Copilot ACP mode-map | `providers/copilot/mode-map.ts` | copilot session-mode ↔ Shelf permission-mode（agent→default / plan→plan / autopilot→bypassPermissions）；copilot 特有、不在 toolkit |
+| Copilot 互動登入（device flow） | `providers/copilot/login.ts` | `parseLoginPrompt`（stdout 抽 URL+code 純函式）+ `startLogin`（spawn `copilot login`、env 剝 token、cancel）+ `prefillLoginUrl`（見 `context/agent-providers` #10）。移入 copilot/ 保持 provider 目錄隔離 |
+| Provider 共用 helper | `providers/shared.ts` | `stripCwd` / `resolveSkillsPluginRoot` / `projectAppSkills`（idempotent + atomic symlink-to-temp+rename 的 skill projection）— 跨 provider 共用純函式 |
 | MCP config 消費（解析 + ${VAR}） | `providers/mcp-config.ts` | `loadProjectedMcpServers`：讀 projected `mcp-servers.json` → 驗證 → 對 worker env 展開 `${VAR}` → fail-loud（兩 provider 共用） |
 | App-tool bridge（agent-server 端） | `app-tool-client.ts` + `app-tool-tools.ts` | in-process MCP 工具的共用 body：`callMain` + `runBridgeTool` + 描述常數 |
 | Log proxy → main | `server-logger.ts` | `serverLog(level,tag,msg,...args)`：args 源頭 flatten 後走 wire `log` 訊息回 main（agent-server 無獨立 observability，見 `contracts/agent-wire-protocol`） |
@@ -111,7 +115,6 @@ title: shelf-terminal — Intent → File Index
 | Detached 任務集中收屍 | `reaper.ts` | `reapDetachedTasks()`：enumerate `listReapableTasks()` → 對 running shell 任務呼 `stopTask()`，resilient + 不放 provider dispose |
 | Crash-net：Linux `/proc` 原語 | `proc-scan.ts` | 讀 `/proc/<pid>/environ`（env-tag 找孤兒）+ `/proc/<pid>/stat` start-time（owner 生死）+ group-kill；非 Linux no-op（見 `context/connection-health` #6） |
 | Crash-net：session lease + 啟動 sweep | `session-sweep.ts` | `SHELF_SESSION` lease 讀寫 + `sweepDeadSessions()`：對 owner 已死的 lease 用 tag 找活著的孤兒 → group-kill |
-| Copilot detached 任務 pid-kill | `providers/copilot/pid-kill.ts` | Copilot 無 stop-task RPC → 讀 detached bash 寫的 `.pid` 檔 group-kill（`stopTask` 用） |
 | Context persistence | `context-store.ts` | `loadContext`/`saveContext`/`deleteContext`/`cleanupOldContexts`，atomic write 到 `~/.shelf/agent-context/` |
 | Context persistence 測試 | `context-store.test.ts` | round-trip + Claude resume / Copilot chain |
 | Provider types | `providers/types.ts` | `ServerBackend` / `SendFn` / `QueryInput` / `OutgoingMessage` / `ProviderCapabilities` 等 |
@@ -119,7 +122,8 @@ title: shelf-terminal — Intent → File Index
 | Fake provider | `providers/fake/index.ts` | E2E-only backend，`SHELF_TEST_MODE=1` 時回它，prompt 走 prefix-matched scenario |
 | Fake provider 測試 | `providers/fake/fake.test.ts` | 每個 scenario 的 wire-shape 驗證 + stop/abort 行為 |
 | Bundle build | `build.mjs` | esbuild → `dist/agent-server/<version>/index.js` 單一 ESM bundle（index/exec/dispatcher 同一 bundle，role 由 argv 選） |
-| 單元測試 | `providers/copilot/slash-commands.test.ts` | slash dispatch + streaming/idle status pair 測試 |
+| Copilot provider 測試 | `providers/copilot/{copilot,helpers,login,mode-map}.test.ts` | ACP backend wire-shape / helper 純函式 / device-flow login / mode-map 對應 |
+| ACP toolkit 測試 | `providers/acp/*.test.ts` | connection/client/translate/permission/capabilities/mcp/shelf-mcp + mock-agent 驅動的 toolkit 驗證 |
 | Dispatcher 單元測試 | `dispatcher.test.ts` | open/close_session / raw relay / reconnect + backoff / inner-ping hung / proc-identity guard / cache 側通道 |
 | Model-cache 單元測試 | `model-cache.test.ts` | TTL hit/miss/expiry evict |
 | Session-registry 單元測試 | `session-registry.test.ts` | open/get/close + runtimeKey 共享/隔離 |

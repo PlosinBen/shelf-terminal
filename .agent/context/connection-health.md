@@ -78,7 +78,7 @@ related:
 
 **Decision**：以 **provider 視角**分「**正常 vs 不正常關閉**」，判定權在 **agent-server 自己**（不是 main 送意圖）：
 - **正常關閉 = agent-server 還活著、要退出**（不管哪個原因：關 tab / 關 app / main crash 收到 stdin-EOF、或 **idle watchdog**（`connection-health#2`）觸發）。共通點是它跑得動 shutdown → **在每個退出口自我收屍**：`rl.on('close')` 與 watchdog 都路由到單一 `shutdown()`（`agent-server/shutdown.ts` `performShutdown`）→ enumerate `ServerBackend.listReapableTasks()` → 對還 `running` 的 shell 任務呼 `stopTask(id)`（集中在 `agent-server/reaper.ts`，**不**放各 provider `dispose()`，故 `dispose()` 簽名不變、政策單一處）→ dispose → exit。收屍是 host-local（CLI 是 agent-server 本地 child），所以「main↔遠端網路斷了」也收得掉。
-- **kill = `stopTask(id)`，reaper 對所有 provider 一致**：但 **Copilot SDK 沒有 stop-task RPC**（只有 Claude 有 `session.query.stopTask`）。解法：Copilot 的 `stopTask` 走 detached bash 寫的 **`.pid` 檔**（`echo $$ > '<logPath .log→.pid>'`，`detached:true` 使其為 session/group leader）→ `process.kill(-pid, SIGTERM)` 收整個 group。能力差異**藏進 provider**，reaper 不分支。
+- **kill = `stopTask(id)`，reaper 對所有 provider 一致**：能力差異藏進 provider，reaper 不分支。**Claude** 有 `session.query.stopTask`。**Copilot（ACP，cutover 後）目前不實作 `listReapableTasks`/`stopTask`** → 未登記 reapable detached task；`copilot --acp` 只做 **cooperative abort**（`session/cancel` notify 中止當前 turn，`copilot/index.ts`）。逃出 tree 的 copilot detached 背景任務收屍**尚未在 ACP 重建**（native backend 舊有的 `.pid` group-kill 隨 SDK backend 一併刪除）→ 待 field-test 驗證 copilot --acp 是否真的 spawn detached 任務、需要時再補（open item，見 `agent-providers#11`）。
 - **main 端只 `dispose()`**（無 reap 意圖訊號）；`remote.ts` `kill()` 保留一個 **unref'd grace-backstop** 再 force-kill —— 只因 child 的 reap 是 **async**（立即 SIGTERM 會切斷），**不是**用來帶意圖。
 
 **Reason（為何斷線也一律收、不「保留等重連」）**：**沒有重連機制** —— reconnect 是**全新連線 = 新 agent-server = 新 CLI**，舊 session 永遠回不來；且斷線期間 emit 的 agent action **不落紀錄**，就算任務跑完也不可見。所以被保留的 detached 任務 = 永久看不到、控不到的孤兒 → 斷線即收。（推翻早期「intent-driven / reconnect re-attach / reconnect-window」設計。）對照基準：`ssh + CLI` 前景跑，斷線 SIGHUP 也是殺掉 agent 本身，我們只是把它逃出去的孤兒也一起收乾淨。
@@ -87,9 +87,9 @@ related:
 - 別回到 main→child 的 reap 意圖訊號（agent-server 自己就知道自己在正常關閉；main 只 dispose）。
 - 別把 reaper 塞進各 provider `dispose()`（enumerate→kill 政策要單一處）。
 - 斷線別「保留任務等重連」（沒有重連機制）。
-- Copilot 收屍別假設有 stop-task RPC —— 沒有，走 `.pid` group-kill。
+- Copilot（ACP）目前沒有 detached-task 收屍（native `.pid` group-kill 已隨 SDK backend 刪除）—— 只有 cooperative `session/cancel`；要重建先確認 copilot --acp 真有逃出 tree 的 detached 任務。
 
-**Related**：`connection-health#2`（watchdog / 遠端背景任務存活）、`connection-health#6`（crash net）、`background-tasks#3`（`stopTask` 全鏈）、`background-tasks#4`（UI 面板刪除 / 隱形 orphan 的 renderer 對應）、`agent-providers#1`（provider 封裝）、`agent-server/{shutdown,reaper,exec}.ts`、`agent-server/providers/{types,claude/index,copilot/index,copilot/pid-kill}.ts`、`src/main/agent/{index,remote,types}.ts`。
+**Related**：`connection-health#2`（watchdog / 遠端背景任務存活）、`connection-health#6`（crash net）、`background-tasks#3`（`stopTask` 全鏈）、`background-tasks#4`（UI 面板刪除 / 隱形 orphan 的 renderer 對應）、`agent-providers#1`（provider 封裝）、`agent-server/{shutdown,reaper,exec}.ts`、`agent-server/providers/{types,claude/index,copilot/index}.ts`、`src/main/agent/{index,remote,types}.ts`。
 
 ## connection-health#6 — Crash net：agent-server 死掉那種，靠 env-tag + 下次啟動 `/proc` sweep（含 runtime-env gotcha）  ·  [Decision]
 

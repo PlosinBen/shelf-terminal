@@ -38,7 +38,7 @@ related:
 **Decision**：Slash 是 provider 想特別解釋的字串，**不是獨立 channel**：
 
 - Renderer 不偵測 slash — `agent.send(text)` 一條路徑通吃普通 text 跟 `/cmd`（config picker 走 `agent-config-flow#3` / `agent-config-flow#5` 的結構化 config-edit turn，是「按鍵級 config edit」不是 agent command）
-- Provider 在 `query(input, send)` 入口呼叫 `parseSlashPrefix(input.prompt)`，命中走內部 `dispatchSlash(cmd, args, send)`
+- Provider 在 `query(input, send)` 入口呼叫 `parseSlashPrefix(input.prompt)`，命中走內部 `dispatchSlash(cmd, args, send)`（**只剩 claude 走此路**；copilot/codex 走 ACP 後 slash 由 CLI 原生派發，不經 `parseSlashPrefix`/`dispatchSlash`，見 `agent-providers#13`(c)）
 - Slash 輸出走 `fold_markdown` 渲染原語（label 是 `/cmd` 名、失敗用 `errorMessage`；見 `agent-ui#5`）
 - Backend interface 只剩 `query(input, send)`，沒有 `handleSlashCommand`
 
@@ -96,7 +96,7 @@ InputZone parseSlashPrefix
 - Backend 拒絕的值不會被 broadcast → 不會 persist。**Disk 永遠是 backend 確認過的真相**
 
 **Provider 差異**：
-- Copilot：slash handler 內 `await session.setModel(args)` — SDK 驗證即時，失敗就 emit error
+- Copilot（ACP）：`applyConfigEdit` → `setConfigOption`（model/effort）/ `setMode`（permission）直接對 live ACP session 塞 — CLI 驗證即時，失敗就 emit error（原 native SDK 的 slash-handler `session.setModel` 已刪）
 - Claude：per-call options 設計，slash handler 只更新 closure + broadcast（永遠成功；validation 推到下次 query SDK 收到時）
 
 ### 配套 invariants
@@ -161,20 +161,22 @@ model/effort/permission 三個入口（打字 `/model X`、picker、status-bar �
 
 **三個 knob × 兩 provider**：
 
-| knob | Copilot（有 live-session func） | Claude（無，per-call options） |
+| knob | Copilot / Codex（ACP，有 live-session apply） | Claude（無，per-call options） |
 |------|------|------|
-| model | `session.setModel(model)` 直接塞 | 記 closure，下次 query `options.model` 由 SDK 驗 |
-| effort | `session.setModel(model, {reasoningEffort})` 直接塞 | 同上 |
-| permission | `session.rpc.mode.set({mode})` 直接塞 | 記 closure，下次 query `options.permissionMode` 由 SDK 驗 |
+| model | `driver.setConfigOption(configId('model'), value)`（ACP session config option）直接塞 | 記 closure，下次 query `options.model` 由 SDK 驗 |
+| effort | `driver.setConfigOption(configId('thought_level'), value)` 直接塞 | 同上 |
+| permission | `driver.setMode(modeId)`（ACP `session/set_mode`）直接塞 | 記 closure，下次 query `options.permissionMode` 由 SDK 驗 |
+
+（cutover 後 copilot 走 ACP：以上 native SDK 的 `session.setModel`/`session.rpc.mode.set` 已刪。）
 
 **翻譯 adapter ≠ 驗證**：
 - app 對外詞彙（permission list）是**共用單一來源** `PERMISSION_MODES` / `PermissionModeId`（`agent-server/providers/types.ts`）；各 provider 用 `pickPermissionModes(subset)` 宣告自己支援的子集。
-- app→SDK 的**翻譯表是各 provider 自己的**，不共用：Copilot `MODE_TO_SDK`（→ `interactive`/`autopilot`/`plan`）；Claude 不翻譯（app 詞彙 == SDK 詞彙，直接傳 + bypass DIY 特例）。抽成共用 helper 是假複用（每家 target 詞彙不同、Claude 還沒有）。
+- app→provider 的**翻譯表是各 provider 自己的**，不共用：Copilot（ACP）`mode-map.ts` `shelfToCopilotModeId`（default→agent / plan→plan / bypassPermissions→autopilot，且對 session 已 advertise 的 ACP mode id 解析，送出完整 URL id）；Claude 不翻譯（app 詞彙 == SDK 詞彙，直接傳 + bypass DIY 特例）。抽成共用 helper 是假複用（每家 target 詞彙不同、Claude 還沒有）。
 - 翻譯**翻不出來** = 沒有對應的 SDK 動作可做（無效值，或 Copilot 不支援的合法 app 模式如 `acceptEdits`）→ 照實 emit error、不採用。這是「無 SDK action」的誠實回報，不是發明驗證。**踩過的雷**：舊 code `if (sdkMode) { set }` 翻不出來時跳過 SDK 卻照樣 `currentPermissionMode = args` + 回報成功 + persist → silent 假成功。
 
 **Renderer / Backend 分層（回應「picker 兩邊行為是否不同」— 不同只在 backend）**：
 - **Renderer 對 provider 無感、單一路徑**：picker/status-bar/無參數 `/model` → `handleConfigEdit` → `agent:send{configEdit}`；手打 `/model X` → 普通 prompt。送給 claude/copilot 完全一樣，renderer 不分流。
-- **差異只在 backend apply 收斂點**（本質差異，勿為對稱強行統一）：Claude → `applyConfigEdit`（`agent-config-flow#5`，純 set+emit）；Copilot → `query()` 把 `QueryInput.configEdit` 路由進 `dispatchSlash`（`permissionMode`→`/permission`）。**漏路由會 fall through 成空 prompt → 沒卡片、接續上次對話**（曾經的 bug）。
+- **差異只在 backend apply 收斂點**（本質差異，勿為對稱強行統一）：兩邊都在 `query()` 見到 `QueryInput.configEdit` 時走各自 `applyConfigEdit`（`agent-config-flow#5`），依 `key` 分派到 `setModel`/`setEffort`/`setPermissionMode`（Copilot ACP 是 `setConfigOption`/`setMode`；Claude 純 set+emit defer）。**漏路由會 fall through 成空 prompt → 沒卡片、接續上次對話**（曾經的 bug；native copilot 時代靠 `dispatchSlash` 路由，ACP 後改直接 apply func）。
 - 兩邊 config-edit 成功都 emit `system` divider（共用 `formatConfigAck`，「applies on next query」對兩邊都成立）；Copilot 失敗 emit `error`。`/help`/`/clear`/`/context`/`/compact` 仍是 `fold_markdown`（slash 內容輸出，非狀態轉換）。
 
 **Do not change casually because**：
