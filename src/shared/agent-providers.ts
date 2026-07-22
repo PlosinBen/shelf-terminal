@@ -19,11 +19,9 @@ export interface AgentProviderMeta {
   bin: 'claude' | 'copilot' | null;
 }
 
-// CUTOVER (copilot on ACP): `copilot` is now driven by the ACP backend
-// (createCopilotAcpBackend, agent-server/providers/acp-copilot/) — there is no separate
-// `acp-copilot` provider, and the native SDK backend was deleted (in git history at the
-// pre-cutover commit). Remaining cosmetic cleanup: rename the acp-copilot/ dir → copilot/
-// + createCopilotAcpBackend → createCopilotBackend. See the copilot-acp feature note.
+// `copilot` is driven by the ACP backend (agent-server/providers/copilot/,
+// createCopilotBackend launching `copilot --acp`). The pre-ACP native SDK backend
+// was deleted at cutover — recoverable from git history at the pre-cutover commit.
 export const AGENT_PROVIDERS = {
   claude:  { label: 'Claude',      bin: 'claude'  },
   copilot: { label: 'Copilot',     bin: 'copilot' },

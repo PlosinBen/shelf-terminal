@@ -3,10 +3,9 @@
 // full-URL ids like `…/session-modes#agent`); Shelf's canonical permission axis
 // is default/plan/bypassPermissions. autopilot = "enables allow-all" = bypass.
 //
-// This mirrors the NATIVE copilot backend's MODE_TO_SDK mapping + its
+// This preserved the pre-ACP native copilot backend's MODE_TO_SDK mapping + its
 // `pickPermissionModes(['default','bypassPermissions','plan'])` capability surface,
-// so acp-copilot presents IDENTICAL permission semantics — required for parity and
-// a clean cutover (users keep the same ask/plan/bypass vocabulary).
+// so the cutover kept IDENTICAL permission semantics (users keep ask/plan/bypass).
 
 import type { SessionModeState } from '@agentclientprotocol/sdk';
 import { pickPermissionModes, type CycleOption } from '../types';

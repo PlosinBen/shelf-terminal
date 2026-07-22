@@ -5,9 +5,9 @@ import * as os from 'os';
 import { randomUUID } from 'node:crypto';
 import { createClaudeBackend } from './providers/claude';
 import { createCodexBackend } from './providers/codex';
-// CUTOVER (done): `copilot` is driven by the ACP backend; the native SDK copilot
-// backend was deleted (recoverable from git history at the pre-cutover commit).
-import { createCopilotAcpBackend } from './providers/acp-copilot';
+// `copilot` is driven by the ACP backend (the native SDK backend was deleted at
+// cutover — recoverable from git history at the pre-cutover commit).
+import { createCopilotBackend } from './providers/copilot';
 import { createFakeBackend } from './providers/fake';
 import { deleteContext, cleanupOldContexts } from './context-store';
 import { runCleanupSweep } from './cleanup';
@@ -260,7 +260,7 @@ function ensureSkillsProjected(backend: ServerBackend, appId: string | undefined
 // adding a provider to the shared registry is a compile error until wired here.
 const BACKEND_FACTORIES: Record<Provider, () => ServerBackend> = {
   claude: createClaudeBackend,
-  copilot: createCopilotAcpBackend, // CUTOVER: ACP backend (was createCopilotBackend)
+  copilot: createCopilotBackend,
   codex: createCodexBackend,
 };
 

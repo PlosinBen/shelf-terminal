@@ -1,9 +1,8 @@
-// Copilot agent provider over ACP (ServerBackend), peer to createCodexBackend /
-// createCopilotBackend (the native SDK one). Uses the shared, semantics-free
-// acp/ toolkit for the runtime and OWNS copilot specifics (binary launch via
-// `copilot --acp`, device-flow login, skills root). ACP is an internal detail;
-// the provider identity is 'acp-copilot' (a PARALLEL, dev-gated backend that at
-// cutover replaces native 'copilot' — see the copilot-acp feature note).
+// Copilot agent provider over ACP (ServerBackend), peer to createCodexBackend.
+// Uses the shared, semantics-free acp/ toolkit for the runtime and OWNS copilot
+// specifics (binary launch via `copilot --acp`, device-flow login, config-home).
+// ACP is an internal detail; the provider identity is 'copilot'. (This IS the
+// copilot backend post-cutover — the pre-ACP native SDK backend was deleted.)
 
 import { randomUUID } from 'node:crypto';
 import * as path from 'node:path';
@@ -19,7 +18,7 @@ import { mapSessionCapabilities, currentSelections, configOptionIdForCategory } 
 import { toAcpMcpServers } from '../acp/mcp';
 import { getSharedShelfMcp } from '../acp/shelf-mcp';
 import { loadProjectedMcpServers } from '../mcp-config';
-import { resolveCopilotAcpCommand, copilotConfigHome, copilotAcpEnv } from './helpers';
+import { resolveCopilotCommand, copilotConfigHome, copilotEnv } from './helpers';
 import { copilotPermissionModes, copilotModeIdToShelf, shelfToCopilotModeId } from './mode-map';
 import { startLogin as startCopilotLogin, prefillLoginUrl, type LoginRunner } from './login';
 
@@ -28,7 +27,7 @@ import { startLogin as startCopilotLogin, prefillLoginUrl, type LoginRunner } fr
 const MODEL_CATEGORY = 'model';
 const EFFORT_CATEGORY = 'thought_level';
 
-export const COPILOT_ACP_PROVIDER = 'acp-copilot';
+export const COPILOT_PROVIDER = 'copilot';
 
 /** What to connect the ACP client to + the child to reap (production spawns a
  *  `copilot --acp` process; tests inject an in-process mock AgentApp). */
@@ -37,7 +36,7 @@ export interface CopilotAgentTarget {
   child?: ChildProcess;
 }
 
-export interface CopilotAcpDeps {
+export interface CopilotDeps {
   /** Open the agent transport for `cwd`. `appId` selects the per-app
    *  `COPILOT_HOME` (config-home isolation). Default: spawn `copilot --acp`. */
   openAgent?: (cwd: string, appId?: string) => CopilotAgentTarget;
@@ -47,12 +46,12 @@ export interface CopilotAcpDeps {
 }
 
 function defaultOpenAgent(cwd: string, appId?: string): CopilotAgentTarget {
-  const { command, args } = resolveCopilotAcpCommand();
+  const { command, args } = resolveCopilotCommand();
   // COPILOT_HOME (per-app config-home) is set at SPAWN — it's process env, so it
   // must be right from the start (auth + skills live under it). appId is known by
   // caps-time now (threaded into gatherCapabilities), so the first spawn already
   // has it.
-  const spawned = spawnAgentStdio(command, args, { cwd, env: copilotAcpEnv(appId) });
+  const spawned = spawnAgentStdio(command, args, { cwd, env: copilotEnv(appId) });
   return { target: spawned.stream, child: spawned.child };
 }
 
@@ -64,7 +63,7 @@ function copilotSkillTarget(appId: string | undefined): string | undefined {
   return home ? path.join(home, 'skills') : undefined;
 }
 
-export function createCopilotAcpBackend(deps: CopilotAcpDeps = {}): ServerBackend {
+export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
   const openAgent = deps.openAgent ?? defaultOpenAgent;
   const getShelfMcp = deps.getShelfMcp ?? getSharedShelfMcp;
 
@@ -118,21 +117,21 @@ export function createCopilotAcpBackend(deps: CopilotAcpDeps = {}): ServerBacken
     currentModel = model;
     const configId = configOptionIdForCategory(sessionConfigOptions, MODEL_CATEGORY);
     if (conn && session && configId) await driver.setConfigOption(conn.agent, session, configId, model);
-    else if (conn && session) serverLog('warn', 'acp-copilot', `setModel: no model config option on session ${session.sessionId}`);
+    else if (conn && session) serverLog('warn', 'copilot', `setModel: no model config option on session ${session.sessionId}`);
   }
 
   async function applyEffort(effort: string): Promise<void> {
     currentEffort = effort;
     const configId = configOptionIdForCategory(sessionConfigOptions, EFFORT_CATEGORY);
     if (conn && session && configId) await driver.setConfigOption(conn.agent, session, configId, effort);
-    else if (conn && session) serverLog('warn', 'acp-copilot', `setEffort: no thought_level config option on session ${session.sessionId}`);
+    else if (conn && session) serverLog('warn', 'copilot', `setEffort: no thought_level config option on session ${session.sessionId}`);
   }
 
   async function applyPermissionMode(mode: string): Promise<void> {
     currentPermissionMode = mode;
     const modeId = shelfToCopilotModeId(mode, sessionModes);
     if (conn && session && modeId) await driver.setMode(conn.agent, session, modeId);
-    else if (conn && session) serverLog('warn', 'acp-copilot', `setPermissionMode: copilot has no mode for "${mode}"`);
+    else if (conn && session) serverLog('warn', 'copilot', `setPermissionMode: copilot has no mode for "${mode}"`);
   }
 
   /** Apply a config-edit turn (picker / status-bar): imperative apply + updated
@@ -159,7 +158,7 @@ export function createCopilotAcpBackend(deps: CopilotAcpDeps = {}): ServerBacken
     child = opened.child ?? null;
     connAppId = appId;
     conn = openAcpConnection(opened.target, {
-      name: 'shelf-copilot-acp',
+      name: 'shelf-copilot',
       onRequestPermission: permissions.onRequestPermission,
       onSessionUpdate: driver.onSessionUpdate,
     });
@@ -193,7 +192,7 @@ export function createCopilotAcpBackend(deps: CopilotAcpDeps = {}): ServerBacken
     // DIFFERENT appId (e.g. a legacy caps call that lacked appId), tear it down so
     // it respawns with the right config-home. Normally a no-op (appId rides caps).
     if (conn && connAppId !== appId) {
-      serverLog('debug', 'acp-copilot', `appId changed (${String(connAppId).slice(0, 8)} → ${String(appId).slice(0, 8)}) — respawning connection for COPILOT_HOME`);
+      serverLog('debug', 'copilot', `appId changed (${String(connAppId).slice(0, 8)} → ${String(appId).slice(0, 8)}) — respawning connection for COPILOT_HOME`);
       try { conn.close(); } catch { /* best-effort */ }
       conn = null; child = null; connAppId = undefined; session = null; sessionCwd = null;
     }
@@ -209,7 +208,7 @@ export function createCopilotAcpBackend(deps: CopilotAcpDeps = {}): ServerBacken
     const c = ensureConnection(input.cwd, appId);
     const mcp = loadProjectedMcpServers(appId);
     // Fail-loud: a bad/incomplete MCP entry is logged, not silently dropped.
-    for (const e of mcp.errors) serverLog('warn', 'acp-copilot', `MCP config: ${e}`);
+    for (const e of mcp.errors) serverLog('warn', 'copilot', `MCP config: ${e}`);
     // Level 1 (Shelf built-in bridge) + level 2 (user MCP) coexist as mcpServers
     // entries. The shelf bridge is an in-process HTTP MCP server (see shelf-mcp.ts).
     const shelf = await getShelfMcp();
@@ -261,7 +260,7 @@ export function createCopilotAcpBackend(deps: CopilotAcpDeps = {}): ServerBacken
         );
         await driver.drivePromptTurn(conn!.agent, s, input.prompt, send, input.images);
       } catch (err) {
-        send({ type: 'error', error: `acp-copilot: ${(err as Error)?.message ?? String(err)}` });
+        send({ type: 'error', error: `copilot: ${(err as Error)?.message ?? String(err)}` });
       } finally {
         currentSend = null;
         send({ type: 'status', state: 'idle' });
@@ -327,21 +326,21 @@ export function createCopilotAcpBackend(deps: CopilotAcpDeps = {}): ServerBacken
       loginRunner?.cancel();
       let cliPath: string;
       try {
-        cliPath = resolveCopilotAcpCommand().command;
+        cliPath = resolveCopilotCommand().command;
       } catch (err) {
-        send({ type: 'auth_login_done', provider: COPILOT_ACP_PROVIDER, ok: false, error: (err as Error)?.message ?? String(err) });
+        send({ type: 'auth_login_done', provider: COPILOT_PROVIDER, ok: false, error: (err as Error)?.message ?? String(err) });
         return;
       }
       // Log into the per-app COPILOT_HOME so credentials land in the same config-
       // home the `--acp` session reads. lastAppId is set by the preceding caps
       // call (auth pane only shows after gatherCapabilities returns authRequired).
-      if (!lastAppId) serverLog('warn', 'acp-copilot', 'startLogin: appId unknown — login will use the default COPILOT_HOME, not the per-app dir');
+      if (!lastAppId) serverLog('warn', 'copilot', 'startLogin: appId unknown — login will use the default COPILOT_HOME, not the per-app dir');
       loginRunner = startCopilotLogin({
         cliPath,
-        env: copilotAcpEnv(lastAppId),
+        env: copilotEnv(lastAppId),
         onPrompt: (p) => send({
           type: 'auth_login_prompt',
-          provider: COPILOT_ACP_PROVIDER,
+          provider: COPILOT_PROVIDER,
           verificationUri: p.verificationUri,
           userCode: p.userCode,
           prefilledUri: prefillLoginUrl(p),
@@ -349,7 +348,7 @@ export function createCopilotAcpBackend(deps: CopilotAcpDeps = {}): ServerBacken
       });
       loginRunner.done.then((r) => send({
         type: 'auth_login_done',
-        provider: COPILOT_ACP_PROVIDER,
+        provider: COPILOT_PROVIDER,
         ok: r.ok,
         cancelled: r.cancelled,
         error: r.error,

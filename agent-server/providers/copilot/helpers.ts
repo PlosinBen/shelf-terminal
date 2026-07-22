@@ -1,18 +1,14 @@
-// Copilot-ACP specifics (pure / resolution only). Copilot SEMANTICS that differ
-// from the shared acp/ toolkit live here, NOT in the toolkit (mirrors
-// codex/helpers.ts).
-//
-// TEMP scaffolding (copilot-acp feature, parallel phase): duplicates the copilot
-// binary resolution so acp-copilot is self-contained and native `copilot` stays
-// untouched. At cutover this becomes THE copilot resolver and native copilot's
-// private resolveCopilotCliPath is retired.
+// Copilot specifics (pure / resolution only) — copilot SEMANTICS that differ from
+// the shared acp/ toolkit live here, NOT in the toolkit (mirrors codex/helpers.ts).
+// This is THE copilot binary resolver post-cutover (the pre-ACP native backend and
+// its private resolveCopilotCliPath were deleted).
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
 
 /** Command + args to launch the `copilot` CLI in ACP mode over stdio. */
-export interface CopilotAcpCommand {
+export interface CopilotCommand {
   command: string;
   args: string[];
 }
@@ -48,9 +44,9 @@ export function resolveCopilotBinary(): string | undefined {
  * production uses {@link resolveCopilotBinary}. Throws loudly if the binary is
  * missing — copilot must not silently fall back.
  */
-export function resolveCopilotAcpCommand(
+export function resolveCopilotCommand(
   findBinary: () => string | undefined = resolveCopilotBinary,
-): CopilotAcpCommand {
+): CopilotCommand {
   const bin = findBinary();
   if (!bin) {
     throw new Error(
@@ -81,7 +77,7 @@ export function copilotConfigHome(appId: string | undefined): string | undefined
  * CLI owns the opaque credentials + config under it (the "don't parse auth"
  * principle). Returns `base` unchanged when there's no appId.
  */
-export function copilotAcpEnv(
+export function copilotEnv(
   appId: string | undefined,
   base: NodeJS.ProcessEnv = process.env,
 ): NodeJS.ProcessEnv {

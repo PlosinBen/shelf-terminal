@@ -3,7 +3,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import type { SessionUpdate, SessionConfigOption, SessionModeState } from '@agentclientprotocol/sdk';
 import { createMockAcpAgent } from '../acp/mock-agent';
-import { createCopilotAcpBackend } from './index';
+import { createCopilotBackend } from './index';
 import type { OutgoingMessage } from '../types';
 
 // Copilot-shaped session state (matches F5's measured `copilot --acp` catalog):
@@ -51,7 +51,7 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
     ];
     let promptSeen: unknown;
     const mock = createMockAcpAgent({ updatesOnPrompt: updates, onPrompt: (p) => { promptSeen = p; } });
-    const backend = createCopilotAcpBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
+    const backend = createCopilotBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
 
     const out: OutgoingMessage[] = [];
     await backend.query({ prompt: 'hi', cwd: '/tmp/project' }, (m) => out.push(m));
@@ -70,7 +70,7 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
 
   it('maps copilot session state onto capabilities via the shared toolkit', async () => {
     const mock = createMockAcpAgent({ modes: COPILOT_MODES, configOptions: COPILOT_CONFIG });
-    const backend = createCopilotAcpBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
+    const backend = createCopilotBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
 
     const caps = await backend.gatherCapabilities!('/tmp/project');
 
@@ -96,7 +96,7 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
         { name: 'review', description: 'Review changes' },
       ],
     });
-    const backend = createCopilotAcpBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
+    const backend = createCopilotBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
 
     const caps = await backend.gatherCapabilities!('/tmp/project');
     expect(caps.slashCommands).toEqual([
@@ -108,7 +108,7 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
   });
 
   it('declares its skill scan target as $COPILOT_HOME/skills (agent-server projects there)', () => {
-    const backend = createCopilotAcpBackend({ openAgent: () => ({ target: createMockAcpAgent() }), getShelfMcp: async () => null });
+    const backend = createCopilotBackend({ openAgent: () => ({ target: createMockAcpAgent() }), getShelfMcp: async () => null });
     expect(backend.skillTarget!('app-1')).toBe(path.join(os.homedir(), '.shelf', 'apps', 'app-1', 'copilot', 'skills'));
     expect(backend.skillTarget!(undefined)).toBeUndefined();
     backend.dispose();
@@ -117,7 +117,7 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
   it('does NOT recreate the session when appId is already known at caps time', async () => {
     let newSessions = 0;
     const mock = createMockAcpAgent({ onNewSession: () => { newSessions += 1; } });
-    const backend = createCopilotAcpBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
+    const backend = createCopilotBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
 
     // appId now rides caps (6th arg) → the caps-time spawn already has the right
     // COPILOT_HOME, so a same-appId turn reuses the session (no wasteful recreate).
@@ -135,7 +135,7 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
     // env, so a different appId REQUIRES a new process, not just a new session.
     let spawns = 0;
     const openAgent = () => { spawns += 1; return { target: createMockAcpAgent() }; };
-    const backend = createCopilotAcpBackend({ openAgent, getShelfMcp: async () => null });
+    const backend = createCopilotBackend({ openAgent, getShelfMcp: async () => null });
 
     // Legacy path: caps with NO appId → spawn 1 (default COPILOT_HOME).
     await backend.gatherCapabilities!('/tmp/project');
@@ -156,7 +156,7 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
       modes: COPILOT_MODES, configOptions: COPILOT_CONFIG,
       onSetConfigOption: (p) => { setConfig = p as typeof setConfig; },
     });
-    const backend = createCopilotAcpBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
+    const backend = createCopilotBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
 
     const out: OutgoingMessage[] = [];
     await backend.query(
@@ -181,7 +181,7 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
       modes: COPILOT_MODES, configOptions: COPILOT_CONFIG,
       onSetMode: (p) => { setMode = p as typeof setMode; },
     });
-    const backend = createCopilotAcpBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
+    const backend = createCopilotBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
 
     const out: OutgoingMessage[] = [];
     await backend.query(
@@ -198,7 +198,7 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
 
   it('no-ops a config-edit that re-picks the current value', async () => {
     const mock = createMockAcpAgent({ modes: COPILOT_MODES, configOptions: COPILOT_CONFIG });
-    const backend = createCopilotAcpBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
+    const backend = createCopilotBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
     // Seed current model = claude-sonnet-5 via gatherCapabilities.
     await backend.gatherCapabilities!('/tmp/project');
 
