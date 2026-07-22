@@ -43,10 +43,12 @@ test.describe('agent flows via fake provider', () => {
       await page.locator('.tab-add').click({ button: 'right' });
       const menu = page.locator('.context-menu');
       await expect(menu).toBeVisible({ timeout: 5_000 });
-      // One button per registry entry; the "· dev" ones are no longer DEV-gated.
-      for (const label of ['Agent (Claude)', 'Agent (Copilot)', 'Agent (Codex · dev)', 'Agent (Copilot ACP · dev)']) {
+      // One button per registry entry. Post-cutover: `copilot` IS the ACP backend
+      // (no separate "Copilot ACP · dev" entry).
+      for (const label of ['Agent (Claude)', 'Agent (Copilot)', 'Agent (Codex · dev)']) {
         await expect(menu.locator('.context-menu-item', { hasText: label })).toBeVisible();
       }
+      await expect(menu.locator('.context-menu-item', { hasText: 'Copilot ACP' })).toHaveCount(0);
     });
   });
 

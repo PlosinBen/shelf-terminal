@@ -19,11 +19,15 @@ export interface AgentProviderMeta {
   bin: 'claude' | 'copilot' | null;
 }
 
+// CUTOVER (copilot on ACP): `copilot` is now driven by the ACP backend
+// (createCopilotAcpBackend in exec.ts) — there is no separate `acp-copilot` provider
+// anymore. The native SDK backend (providers/copilot/index.ts) is kept UNWIRED in the
+// tree as a one-line rollback lever during field-test, then deleted + the acp-copilot/
+// dir renamed to copilot/ in a follow-up cleanup. See the copilot-acp feature note.
 export const AGENT_PROVIDERS = {
-  claude:        { label: 'Claude',            bin: 'claude'  },
-  copilot:       { label: 'Copilot',           bin: 'copilot' },
-  codex:         { label: 'Codex · dev',       bin: null      },
-  'acp-copilot': { label: 'Copilot ACP · dev', bin: 'copilot' },
+  claude:  { label: 'Claude',      bin: 'claude'  },
+  copilot: { label: 'Copilot',     bin: 'copilot' },
+  codex:   { label: 'Codex · dev', bin: null      },
 } as const satisfies Record<string, AgentProviderMeta>;
 
 export type AgentProvider = keyof typeof AGENT_PROVIDERS;
