@@ -81,7 +81,7 @@ related:
 - local 用 Electron node 讓一般使用者(尤其 Windows)**零安裝**、且版本由我們控制(避免賭使用者系統 node 版本)。`ELECTRON_RUN_AS_NODE` 讓 app binary 退化成純 Node,**stdio JSON-line 契約完全不變**,是最低風險 drop-in(不改 `wrapProcess`)。agent-server bundle 是純 JS(esbuild external 只有 node builtins,不含 node-pty 等 native module),故拿 Electron node 跑**無 native ABI 衝突**。
 - glibc「送我們 pin 的 node」本就是要 remote 版本無關;musl 是官方 build 缺席下的**已知妥協**,非 bug。
 
-**不涵蓋(仍可能碰系統 node)**：Copilot CLI(`@github/copilot` 的 `app.js` 本身是 Node 應用,launch 路徑另計)、使用者自訂 MCP server(`npx`/`node …`)。Claude 則 spawn 各平台 **standalone binary**(SDK optionalDeps),不需 node。
+**不涵蓋(仍可能碰系統 node)**：使用者自訂 MCP server(`npx`/`node …`)。Claude 與 Copilot 都 spawn 各平台 **standalone binary**(claude SDK optionalDeps / copilot 平台套件 `@github/copilot-<plat>-<arch>`),**不需系統 node**(copilot cutover 後改走 standalone binary + `--acp`，見 `agent-providers#9`)。
 
 **Do not change casually because**：
 - local 分支別改回 `nodeBin: 'node'` —— 那會重新引入系統 node 依賴(Windows 沒裝 node 就起不來,且錯誤被吞成通用「Failed to start agent-server」)。有迴歸 `localNodeExec`。

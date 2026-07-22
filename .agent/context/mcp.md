@@ -17,7 +17,7 @@ related:
 
 **Background**：要使用者「設一次 MCP server → 所有 project、兩個 agent、跑在 worker」。三個 MCP 來源並存:① agent 的**原生** MCP(帳號 connector、project `.mcp.json`…)、② in-process `shelf` bridge、③ 本 feature 的 app-user servers。
 
-**Decision**：app-level MCP **疊加**在原生之上,**不排除原生**。① 由 SDK 自己載入(Claude 刻意不設 `settingSources` → native parity with raw CLI,見 PRODUCT.md #5 與 `CLAUDE_QUERY_DEFAULTS` 註解;Copilot 走 `enableConfigDiscovery`)。心智模型:**native = 這台機器/帳號本來就有的(per-machine);app-level = 你要「到處都有」的(Shelf 管,跨 project/provider/worker)**。只有 app level,無 per-project MCP 層。
+**Decision**：app-level MCP **疊加**在原生之上,**不排除原生**。① 由 provider 自己載入(Claude 刻意不設 `settingSources` → native parity with raw CLI,見 PRODUCT.md #5 與 `CLAUDE_QUERY_DEFAULTS` 註解;Copilot 走 ACP 後由 `copilot --acp` CLI 自行 discover 原生 config,不再是 SDK `enableConfigDiscovery` flag)。心智模型:**native = 這台機器/帳號本來就有的(per-machine);app-level = 你要「到處都有」的(Shelf 管,跨 project/provider/worker)**。只有 app level,無 per-project MCP 層。
 
 **Do not change casually because**：**不要**為了「乾淨」去擋原生 MCP —— 唯一的擋法 `settingSources: []` 會**連帶把 native skills / CLAUDE.md 一起關掉**(`skills#1` 那條也靠 settingSources-omitted),且違背 PRODUCT.md #5。`/mcp` 同時列出 native + `shelf` + app-user 是**正確**的。
 
@@ -52,7 +52,7 @@ related:
 **Decision**：agent-server 在 session-create **讀 + 解析** projected `~/.shelf/apps/<appId>/mcp-servers.json` → 組 `mcpServers`(`agent-server/providers/mcp-config.ts` `loadProjectedMcpServers`)。
 - **`${VAR}` 只在這裡 materialize**:agent-server 在 worker 上對 **worker process env** 展開 → transient、in-memory、Shelf 不落地(呼應 mcp#3 的不代管)。
 - **Fail-loud(記取 `skills#6`)**:壞 JSON / `${VAR}` 缺 env / server 起不來 → **surface,不 silent-skip**。解析錯在讀檔步驟報(`serverLog('warn',…)`);起不來靠 SDK 回報 failed 狀態。
-- **Claude bridge merge**:`shelf` bridge 是 sdk-type MCP server,跟 user servers 同在 `options.mcpServers` → merge,`shelf` 放**最後**讓使用者命名的 "shelf" 不能蓋掉。Copilot 不 merge(bridge 在 `config.tools`、app-user 在 `config.mcpServers`,兩欄位並存);Copilot 形狀需 mapper(`tools: ['*']` 必填、stdio `args` 必填)。
+- **Claude bridge merge**:`shelf` bridge 是 sdk-type MCP server,跟 user servers 同在 `options.mcpServers` → merge,`shelf` 放**最後**讓使用者命名的 "shelf" 不能蓋掉。（**Copilot 部分已改 ACP**:bridge/user MCP 都走 `session/new.mcpServers` 兩層,見 `mcp#9`；本條的 copilot-SDK `config.tools`/`config.mcpServers` 細節屬已刪 native backend。）
 
 **Do not change casually because**：路徑用 SHARED `shelfPlacement` 規則(`architecture/transport`),read 端與 placement 端不可漂移。別在 local case 抄捷徑直接讀 `<userData>`(破壞 zero local/remote branch)。
 
@@ -98,3 +98,18 @@ related:
 **Do not change casually because**：別把 MCP 搬回 Settings 分頁、也別讓它同時存在於兩處 —— 一致性(App 層姊妹同處)是使用者主動提的痛點，分裂入口正是要修的問題。判別準則:「使用者會瀏覽/管理、跟 agent 工作流綁的 App 層內容」走 BottomBar 右側 view；純設定才進 Settings。(連線狀態 indicator 仍走 per-tab `/mcp` 卡，見 mcp#7，不在 BottomBar 加 status badge，等真有痛點再說。)
 
 **Related**：`skills`(SkillsView 範本)、PRODUCT.md #1/#2/#5、`src/renderer/components/{McpView,BottomBar}.tsx`、`src/renderer/store.ts`(`RightSidebarFeature`)。
+
+## mcp#9 — ACP provider（copilot/codex）的 MCP:L1 shelf bridge + L2 user MCP,都 per-session 進 `session/new.mcpServers`  ·  [Decision]
+
+**Background**：copilot/codex 走 ACP 後,MCP 不再走各自 SDK 的參數,而是 ACP `session/new` 的 `mcpServers: McpServer[]`。取代 `mcp#4` 裡的 copilot-SDK 細節(「bridge 在 `config.tools`、user 在 `config.mcpServers`、需 mapper」)—— 那是已刪的 native SDK backend。
+
+**Decision**：ACP session 每次 `session/new` 帶 `mcpServers = [...L2 user, L1 shelf bridge]`,**兩層都 per-session**(不進 config-home):
+- **L1 = Shelf built-in bridge**:app-skill CRUD + `web.fetch`/`browser.open`。ACP provider 用 **in-process HTTP MCP server**(`agent-server/providers/acp/shelf-mcp.ts`,官方 `@modelcontextprotocol/sdk`,127.0.0.1 ephemeral port,stateless StreamableHTTP)當一個 `{type:'http', name:'shelf', url, headers:[]}` 條目餵進去。**必須 in-process**(handler 要 `runBridgeTool` 回 main;stdio 子進程做不到)。claude 仍走 `createSdkMcpServer`(`mcp#4`)。
+- **L2 = user custom MCP**:`loadProjectedMcpServers(appId)`(`mcp#4` 不變)→ `toAcpMcpServers()`(`acp/mcp.ts`)轉 ACP `McpServer[]`(stdio 無 `type` tag、http 帶 `type:'http'`,env/headers → `[{name,value}]`)。
+- **兩層 per-session = 天生多租戶隔離**,不需 config-home 的 `mcp-config.json`(那反而會重造 auth/skill 那種共用檔碰撞)。
+
+**KNOWN LIMITATION（已知、接受的 regression)**：**`copilot --acp` 靜默不載入經 `session/new` 傳入的 stdio MCP server**（http 正常 → L1 bridge 連得上,但使用者的 `npx …` stdio server 不出現在 `/mcp`)。上游 bug **github/copilot-cli #1040(open)**,Shelf 側已驗證 config 投影/轉換/傳送皆正確。**DECIDED 接受**(MCP 困擾 < skill;非 cutover blocker)。**追蹤在 `.agent/UPSTREAM_WATCH.md`** —— 上游修了才回收(可省掉備案的「把 stdio server 包成 in-process http」workaround)。codex-acp 是不同實作,未驗是否同 bug。
+
+**Do not change casually because**：L1 一定要 in-process http（stdio 子進程無法回 main 執行 bridge tool);別把 L2 user MCP 挪去 config-home（per-session 已多租戶隔離,config-home 會重造碰撞);stdio MCP 在 copilot 失效是上游 #1040,不是 Shelf bug —— 別在 Shelf 側「修」（絕對路徑也沒用,見 UPSTREAM_WATCH)。
+
+**Related**：`mcp#4`(consumption / claude bridge merge;copilot 部分已被本條取代)、`agent-providers#13`（走 ACP)、`agent-providers#14`（#1040 靠查上游定位）、`.agent/UPSTREAM_WATCH.md`、`agent-server/providers/acp/{shelf-mcp,mcp}.ts`、`agent-server/providers/{copilot,codex}/index.ts`。

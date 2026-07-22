@@ -10,4 +10,5 @@ Read this first, then jump to the category you need.
 | Context | [context/index.md](context/index.md) | Decisions + gotchas grouped by topic; cited from code as `<topic>#N` |
 
 > Citation: code comments reference a decision/gotcha as `<topic>#N` (e.g. `skills#4`) → open `context/<topic>.md`, entry N.
-> Project positioning lives in `PRODUCT.md`; release process in `RELEASE_FLOW.md` (outside the OKF bundle).
+> Project positioning lives in `PRODUCT.md`; release process in `RELEASE_FLOW.md`; upstream issues to re-check each
+> release in `UPSTREAM_WATCH.md` (all outside the OKF bundle).

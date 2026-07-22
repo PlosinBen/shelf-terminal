@@ -1,5 +1,16 @@
 declare const __APP_VERSION__: string;
 
+// Vite-injected build env (subset we use). DEV is true under `vite` dev server,
+// false in production builds.
+interface ImportMetaEnv {
+  readonly DEV: boolean;
+  readonly PROD: boolean;
+  readonly MODE: string;
+}
+interface ImportMeta {
+  readonly env: ImportMetaEnv;
+}
+
 interface ShelfApi {
   pty: {
     spawn: (projectId: string, tabId: string, cwd: string, connection: import('../shared/types').Connection, initScript?: string, tabCmd?: string) => Promise<void>;

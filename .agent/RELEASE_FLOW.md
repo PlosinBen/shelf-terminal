@@ -15,6 +15,7 @@
    - **high / critical**（尤其打包進 app 的 runtime 依賴）→ 先處理（升版 / `npm audit fix` / 必要時 `overrides`）再往下發，不要帶著已知漏洞出貨。
    - 無，或只剩 low / moderate 且僅影響 build/dev 工具鏈 → 記錄後放行。
    - ⚠️ `npm audit` 只涵蓋「有登記 advisory」的漏洞。**Electron 的 Chromium-CVE 安全版通常不在其內**（CVE 掛在 Chromium tracker、發在 Electron blog，不以 npm advisory 形式掛在 `electron` 上）；要確認 Electron 是否有安全 patch，需另行看 Electron releases（同 major 的新 patch ≈ CVE backport）。
+0.6. **回檢 `.agent/UPSTREAM_WATCH.md`**（必要追的上游 issue）。逐條確認上游是否已修:修了 → 執行該條的「WHEN FIXED」（回復能力 / 移除 workaround / 更新註記）並移除該條;未修 → 略過。清單為空則跳過。這步是為了不錯過上游修復的回收時機。
 1. Run `git log <last-tag>..HEAD --oneline` to get actual changes since last release
 2. Update `version` in `package.json`
 3. Write commit message based on the git log output (not memory), listing only changes in this release

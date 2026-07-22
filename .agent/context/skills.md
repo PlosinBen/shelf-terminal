@@ -14,11 +14,11 @@ related:
 
 ## skills#1 — App 層 Agent Skills（開放標準 + 投影）  ·  [Decision]
 
-**Background**：要 app 層、跨 project、Claude/Copilot 都能用的 skill。Agent Skills 是開放標準（`SKILL.md`），兩家原生吃，但沒有共用的自訂目錄機制：Claude SDK 不認 env/settings 自訂路徑（只認寫死 `~/.claude/skills`），Copilot 走 `skillDirectories`。
+**Background**：要 app 層、跨 project、Claude/Copilot 都能用的 skill。Agent Skills 是開放標準（`SKILL.md`），兩家原生吃，但沒有共用的自訂目錄機制：Claude SDK 不認 env/settings 自訂路徑（只認寫死 `~/.claude/skills`）。（**Copilot 消費機制已改**：走 ACP 後由 agent-server 投影到 `$COPILOT_HOME/skills`、provider 只宣告 target，見 `skills#10`；下方「Copilot `skillDirectories`」屬已刪 native SDK backend。）
 
 **Decision**：
 - **Source of truth = `<userData>/skills/`**（Shelf UI 編輯，`skills-store.ts` CRUD）。layout 即 Claude **plugin root**：`.claude-plugin/plugin.json`（`{name:"shelf-skills"}`）+ `skills/<name>/SKILL.md`。SKILL.md 視為使用者 opaque raw md（store 只 parse name/description）；**frontmatter `name` = identity**，存檔 rename folder（kebab 驗證 + 撞名檢查）。
-- **消費端 = 投影 + 兩家各自指**（`deployment#1` 的第一個實例）：投影到 `~/.shelf/apps/<appId>/skills`（local fs cp = `skills-projection.ts`；remote = `remote.ts syncSkillsToRemote`，content-hash `.synced` gate）。Claude `options.plugins=[{type:'local',path:<root>}]`（自訂目錄的唯一官方解法，skill 顯示為 `shelf-skills:<name>`）；Copilot `createSession({skillDirectories:[<root>/skills]})`。renderer 對此無感（守 `agent-providers#1`）。
+- **消費端 = 投影 + 兩家各自指**（`deployment#1` 的第一個實例）：投影到 `~/.shelf/apps/<appId>/skills`（local fs cp = `skills-projection.ts`；remote = `remote.ts syncSkillsToRemote`，content-hash `.synced` gate）。Claude `options.plugins=[{type:'local',path:<root>}]`（自訂目錄的唯一官方解法，skill 顯示為 `shelf-skills:<name>`）；Copilot（ACP）由 agent-server 中央投影到 `$COPILOT_HOME/skills`（`skills#10`，取代原 native SDK 的 `createSession({skillDirectories})`）。renderer 對此無感（守 `agent-providers#1`）。
 - **載入時機 = 持久 session 建立時**（`background-tasks#3`）；skill 改完由 `skills#4` hot-reload 進 live session、免重連。`scripts/verify-skill-loading.mjs` 驗 Claude 載入。
 - **appId = `app-instance-id.ts` 的 userData UUID**（`deployment#1` 隔離 key）。
 
@@ -28,7 +28,7 @@ related:
 - 投影/sync 完**必須** touch `apps/<appId>/.heartbeat`，否則被 agent-server 啟動 sweep 當 orphan 回收（見 `connection-health#3`）。
 - **別把 `skills/skills` 兩層化簡成單層** —— 內層 `skills/` 是 Claude plugin 格式強制（`<root>/skills/<name>`），外層刻意 = source 即 plugin root，換取投影**零路徑改寫**（直接 `cpSync`，Claude 指 root、Copilot 指 `root/skills`）。化簡頂多改外層名（純美觀），代價是動態合成 plugin root + 改寫 relpath + 連動 hash gate / remote sync。
 
-**Open**：Copilot 載入 skills 仍待真機驗（目前無 session 可測）。
+**Open**：Copilot（ACP）從 `$COPILOT_HOME/skills` 載入 skills 仍待 field-test 真機驗（見 `skills#10`）。
 
 **Related**：`deployment#1`（投影母規則）、`connection-health#1`（heartbeat lease）、`skills#2`（bridge）、`skills#4`（hot-reload）、`agent-providers#1`、`src/main/{skills-store,skills-projection,app-instance-id}.ts`、`agent-server/providers/{shared,claude/index,copilot/index}.ts`、`src/renderer/components/SkillsView.tsx`。
 
@@ -36,7 +36,7 @@ related:
 
 **Problem**：讓 agent 自己新增/修改 app 層 skills（`skills#1`）。source-of-truth 在 **client/main**（`<userData>/skills`），但 agent 跑在 **remote / agent-server**。需要跨 provider、不讓 renderer 感知 provider 細節（守 `agent-providers#1`）的路徑，且要防「agent 亂改全域 skill 污染所有 session」。
 
-**Decision A — in-process MCP 當 RPC bridge，不是真 server**：兩 provider 各用自家 SDK 的 in-process 工具機制註冊「shelf」工具（claude `createSdkMcpServer({type:'sdk'})`+`tool()`；copilot `defineTool`+`session.registerTools`），handler **不在 agent-server 做事**，而是 `callMain(op,args)` emit `{type:'app_tool',…}` 經 stdio wire 給 main → main `handleAppTool` 動 `skills-store` → 回 `app_tool_result`。**client 才是真正執行主體**，renderer 完全無感。
+**Decision A — in-process 工具當 RPC bridge，不是真 server**：provider 各用自家機制註冊「shelf」工具（claude `createSdkMcpServer({type:'sdk'})`+`tool()`；**copilot 走 ACP 後 = L1 in-process HTTP MCP server**，見 `mcp#9`——**原 native SDK 的 `defineTool`+`session.registerTools` 已刪**），handler **不在 agent-server 做事**，而是 `callMain(op,args)` emit `{type:'app_tool',…}` 經 stdio wire 給 main → main `handleAppTool` 動 `skills-store` → 回 `app_tool_result`。**client 才是真正執行主體**，renderer 完全無感。
 
 **Decision B — main 端 dispatcher 用 `op=resource.verb` registry**（`agent/app-tool.ts`，純函式可單測）：每筆標 `safe`；read（`app_skill.list/get`）免確認，write（`create/update`）走 provider tool-permission。`create` 用 placeholder+rollback；`update` 先 guard「存在且未 locked」（見 `skills#5`）。**不開 `delete` 給 agent**（高風險，同 UI-only 立場）。
 
@@ -52,7 +52,9 @@ related:
 
 **Problem**：使用者要直觀看到「這個 session 載入了哪些 MCP server / skill」。但 `/mcp` `/skills` 在兩家 CLI 都是**互動式 TUI-only、SDK/headless 不可派發**（Claude 官方：只有非互動指令可經 SDK 派發；`system/init.slash_commands` 只列 clear/compact/context/usage）。轉發給 SDK 會失敗或被當 prompt 餵模型。
 
-**Decision**：**provider 內部攔截 `/mcp` `/skills`（像 `/model`），讀自家 SDK 結構化資料 → 各自組 markdown → 印 `reply`**。renderer / wire / main **零改**。**不建跨 provider 共通 result type** —— 各 provider 用自己的形狀組卡片（`{claude,copilot}/helpers.ts` 的純函式 formatter），只共用無語意排版工具 `md-table.ts`。見 `agent-providers#6`（含為何共通 normalized type 會權責倒置）。
+**Decision**：**provider 內部攔截 `/mcp` `/skills`（像 `/model`），讀自家 SDK 結構化資料 → 各自組 markdown → 印 `reply`**。renderer / wire / main **零改**。**不建跨 provider 共通 result type** —— 各 provider 用自己的形狀組卡片（純函式 formatter），只共用無語意排版工具 `md-table.ts`。見 `agent-providers#6`（含為何共通 normalized type 會權責倒置）。
+
+> **適用範圍（cutover 後）**：本條的攔截 + 自組卡片機制**只適用 claude（SDK）**。**copilot 走 ACP 後改原生派發** —— `/mcp` `/skills` 是 CLI 自己的互動指令、Shelf 不攔截也不組卡片（見 `agent-providers#13`(c)）。以下所有 copilot-SDK 細節（`session.skills_loaded`/`mcp_servers_loaded` event、`session.rpc.mcp.list()`、把 shelf bridge 當 `config.tools` 補進 `/mcp`、冷窗 pull 等）屬**已刪 native backend**，僅存為 claude 對照史。
 - **資料來源（init 抓一次、cache raw、reconnect 刷新）**：Claude `Query.mcpServerStatus()` + `supportedCommands()`，**必須在 REAL persistent session 的 `system/init` 抓**（`refreshLoadedContext()`，full options），不是 cwd-only warmup probe（會漏 app skills + in-process bridge）；Copilot 從 `session.skills_loaded` / `session.mcp_servers_loaded` event 抓。cache 存 **raw SDK 結果**，讀時才 format。
 - **`/mcp` 卡 = 兩張表**：servers 表（Server · Status [· Source]）+ 扁平 tools 表（Tool · Server · Description,跨 server 聚合;無任何 tool 時省略）。兩家同形（各自用 `mdTable` 組,不共用語意型別）。Claude `mcpServerStatus()` 每 server 直接帶 `tools[]`（+`readOnly`/`destructive` annotations,以 `_(…)_` 後綴呈現在 Tool 格）。Copilot 的 `mcp.list()`/event/`mcp.discover()` **都不帶 per-server tools** → 真實外部 server 只進 servers 表;**要補其 tools 得走 client `tools.list()` + `namespacedName`（`server/tool`）前綴 group,未驗證、deferred（等 `app-level-mcps` 有東西可測）**。
 - **in-process `shelf` bridge 兩家都要顯示（可用性）**：bridge（`list_app_skills`/.../`web.fetch`）是 in-process 工具,**Claude SDK 把它包成 MCP server `shelf`**（`mcpServerStatus()` 直接含,帶 tools）；**Copilot 把它註冊成 `config.tools`、不是 MCP server**（`mcp.list()` 不含）。為了兩家一致都看得到,Copilot `/mcp` **主動補一個 `shelf` 條目**,其 tools 取自單一來源 `app-tool-tools.ts` 的 `SHELF_BRIDGE_TOOLS`（與註冊同源、不漂移）。bridge 永遠顯示;真實 server pull 失敗只加 fail-loud 註記、不藏 bridge。
@@ -72,8 +74,9 @@ related:
 
 **Problem**：plugins/skillDirectories 在持久 session 建立時載入一次（`background-tasks#3`），所以 skill 改完預設要下一個 session 才生效。使用者直覺是「改完最多 reconnect 就該吃到新的」，但**連線跨 project 共用**（真重連得 disconnect 所有 project），且 reconnect 走 `resumeSession`/resume pointer **會把舊 skill 快照接回來、根本沒重掃** → 改完怎樣都看不到新的。
 
-**Decision**：兩家 SDK 都有 live-reload API，接成 `ServerBackend.reloadSkills?()`，掛在 `onSkillsChanged()` 下游：skill 改 → 自動 reload 進每個 live session，**免重連、不丟對話歷史**，該 session **下一個 turn** 生效。
-- Copilot `session.rpc.skills.reload()`；Claude `query.reloadPlugins()`（回傳 refreshed `commands`/`mcpServers` → 更新 `/skills` `/mcp` cache）。best-effort：無 live session = no-op，失敗則退回「下次 init 生效」。
+**Decision**：有 live-reload API 的 provider 接成 `ServerBackend.reloadSkills?()`，掛在 `onSkillsChanged()` 下游：skill 改 → 自動 reload 進每個 live session，**免重連、不丟對話歷史**，該 session **下一個 turn** 生效。
+- **Claude** `query.reloadPlugins()`（回傳 refreshed `commands`/`mcpServers` → 更新 `/skills` `/mcp` cache）。best-effort：無 live session = no-op，失敗則退回「下次 init 生效」。
+- **Copilot（ACP，cutover 後）不實作 `reloadSkills`**：skill 經 `$COPILOT_HOME/skills` **symlink** 投影（`skills#10`），canonical 一改 symlink 即反映、免重投影；但 live session 不主動重掃，**新內容下一個 session 生效**（ACP 無 skill reload RPC；原 native SDK 的 `session.rpc.skills.reload()` 已刪）。
 - **觸發鏈**：`onSkillsChanged()` → `subscribeSkillsChanged` → local session 立即 reload；remote session **先 `syncSkillsForConnection` 再 reload**（sync 失敗就不 reload，免重載舊檔）→ `reload_skills` wire → agent-server dispatch 對**所有 backend**（skill 是 app 全域）。
 
 **Do not change casually because**：別把「reconnect 才生效」當解（跨 project 共用 + resume 接回舊快照）；也別為 reload 改走 fresh `createSession`（會丟 CLI 端對話記憶）—— 有 in-place reload API 就用它。Claude 有 slash-index 限制見 `skills#7`。
@@ -102,7 +105,7 @@ related:
 
 **Root cause**：`query.reloadPlugins()` 重掃磁碟、把新 skill 餵進 **model-facing** 能力集，但**不重建 `/` slash 解析索引**。這是 SDK 行為，不是我們的 bug。
 
-**Fix**：認知差異即可。**改既有 skill 內容不受此限**（名稱已在索引），只有「全新 skill 名稱」會這樣，且 model 仍可主動使用；我們 `/skills` 卡用 `reloadPlugins()` 回傳值自己重組、會即時反映。**別**為此把 reload 改成 fresh session（會丟對話歷史）。Copilot `skills.reload()` 無此問題。
+**Fix**：認知差異即可。**改既有 skill 內容不受此限**（名稱已在索引），只有「全新 skill 名稱」會這樣，且 model 仍可主動使用；我們 `/skills` 卡用 `reloadPlugins()` 回傳值自己重組、會即時反映。**別**為此把 reload 改成 fresh session（會丟對話歷史）。（此 gotcha 只涉 claude `reloadPlugins()`；copilot 走 ACP 後不做 in-session skill reload，見 `skills#4`。）
 
 ## skills#8 — 多檔 skill：SKILL.md 維持特權，aux 檔走通用 file ops（agent 經 bridge 管理 scripts）  ·  [Decision]
 
@@ -138,3 +141,21 @@ related:
 **Do not change casually because**：別把回饋掛回 `SKILLS_CHANGED`(那是 sidebar，不分 tab、不知 reload 結果);emit 必須走 base send 而非 turn send(turn-less,且 reload 不在任何 turn 裡 —— 見 `architecture/agent-turn` 的 content session-scoped 投遞)。wire 規格見 `contracts/agent-routing` 的 `skills_reloaded`。
 
 **Related**：`skills#4`(hot-reload)、`contracts/agent-routing`(`skills_reloaded` wire)、`architecture/agent-turn`(turnId-scoping / session-scoped 投遞)、`agent-server/{index,providers/{claude,copilot}/index}.ts`、`src/main/agent/{turn-dispatcher,remote,index}.ts`、e2e `app-tool.spec.ts`。
+
+## skills#10 — Skill 投影權責:provider 宣告 target,agent-server 執行投影;ACP 逼 skill 走 config-home  ·  [Decision]
+
+**Background**：`skills#1` 的原始模型是「投影到 canonical `~/.shelf/apps/<appId>/skills`,各 provider 各自指」—— 但 provider 各自在 backend 內做 fs 投影,違反「provider = 純 SDK/CLI adapter」(`agent-providers#16`),且同一個 appId target 被 N 個 provider instance 各投一次、有 race。且 **copilot 走 ACP 後,原本的 per-session `skillDirectories` 欄位消失**(ACP `NewSessionRequest` 只有 `{cwd, additionalDirectories, mcpServers, _meta}`,無 skill 欄位;`--add-dir` 對 skill 也是死的,copilot #3173)。
+
+**Decision — provider 宣告「投到哪」,agent-server 執行「怎麼投」**：
+- provider 只 export `skillTarget(appId) → <path>`(「我的 CLI 掃哪」,純 SDK/CLI 知識);**不碰 fs**。不需投影的 provider（claude `plugins`、native SDK 走 `skillDirectories` 直接指 canonical)回 undefined。
+- **agent-server（`exec.ts`)執行投影**:session 用前（caps/send）與 `reload_skills` 時,讀各 backend 的 `skillTarget`,呼叫共用 `projectAppSkills(appId, target)`（`providers/shared.ts`)—— 泛用、**冪等 + 原子**（symlink 到暫存名再 `rename`）。source 固定 = canonical `…/skills/skills`。
+- **各 provider 的 target（掃描機制 per-provider,不統一)**:
+  - **copilot（ACP）→ config-home**:`$COPILOT_HOME/skills`（ACP 沒 per-session skill 欄位 → 只能靠 config-home 自動掃。這是 ACP 的退化,見 `agent-providers#13` 反例 b)。
+  - **codex（ACP）→ additionalDirectory**:`<codexSkillsRoot>/.agents/skills`（codex-acp `refreshSkills` 把 `additionalDirectory` 後綴 `.agents/skills` 當 skill root,查證自 codex-acp 原始碼 —— **不是 config-home**,codex skill 不需要 config-home)。
+  - **claude → 無投影**:`options.plugins` 直接指 canonical。
+
+**Reason**：`agent-providers#16`（provider 不碰 fs)+ 中央投影 = 冪等/原子讓 N 個 instance 併發只成一次、無 race;symlink 讓 skill **更新**免重投影（canonical 一改,symlink 自動反映;只有 copy 模式才需重投）。skill 掃描機制天生 per-provider（SDK 欄位 / config-home / additionalDirectory 各不同),所以「投到哪」留 provider、「怎麼投」收中央。
+
+**Do not change casually because**：別把 fs 投影搬回 provider backend（違反 `agent-providers#16` + 重造 race);別假設「copilot 用 `skillDirectories`」（那是已刪 SDK backend 的機制,ACP 走 `$COPILOT_HOME/skills`);codex 別硬套 config-home（它走 `.agents/skills`）。
+
+**Related**：`skills#1`（canonical 投影;其「Copilot `skillDirectories`」已被本條取代)、`agent-providers#13`（ACP skill 退化)、`agent-providers#15`（config-home)、`agent-providers#16`（provider 不碰 fs)、`agent-server/providers/shared.ts`（`projectAppSkills`)、`agent-server/providers/{copilot,codex}/{helpers,index}.ts`（`skillTarget`)、`agent-server/exec.ts`（中央投影)。

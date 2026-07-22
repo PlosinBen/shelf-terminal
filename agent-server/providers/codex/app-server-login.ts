@@ -72,9 +72,11 @@ export function driveDeviceCodeLogin(rpc: LoginRpc, emit: SendFn): LoginHandle {
 }
 
 /** Production transport: spawn `codex app-server` and speak newline JSON-RPC. */
-export function spawnCodexAppServerRpc(): { rpc: LoginRpc; child: ChildProcess } {
+export function spawnCodexAppServerRpc(env: NodeJS.ProcessEnv = process.env): { rpc: LoginRpc; child: ChildProcess } {
   const { command, args } = resolveCodexCliCommand();
-  const child = spawn(command, [...args, 'app-server'], { stdio: ['pipe', 'pipe', 'inherit'] });
+  // env carries CODEX_HOME so the device-code login writes auth to the per-app
+  // config-home (device-scoped auth isolation), matching the --acp run.
+  const child = spawn(command, [...args, 'app-server'], { stdio: ['pipe', 'pipe', 'inherit'], env });
   const rl = readline.createInterface({ input: child.stdout! });
   const pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: unknown) => void }>();
   const notifHandlers = new Map<string, (params: unknown) => void>();

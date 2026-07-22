@@ -49,7 +49,7 @@ Silent per-message prefs (`model` / `effort` / `permissionMode` on every send) a
 
 **Direction**: agent-server → main → renderer.
 
-Provider asks the renderer to show a multi-question interactive form (Claude `AskUserQuestion`, Copilot elicitation — `agent-ui#3`).
+Provider asks the renderer to show a multi-question interactive form (Claude `AskUserQuestion`; the Copilot elicitation path was native-SDK-only and is not yet rebuilt on ACP — deferred, see `agent-ui#3`).
 
 - agent-server → main: `OutgoingMessage` `{ type: 'picker_request', id, prompts: Array<{ question, header?, multiSelect, options: Array<{ label, description?, preview? }>, inputType?: 'text'|'number'|'integer', currentValue?: string | string[] }> }`. `id` is provider-minted (Claude uses the toolUseId; Copilot mints a uuid).
 - main: `parseRemoteMessage` validates + reshapes into `AgentEvent` `{ type: 'picker_request', id, prompts }`, forwarded over `IPC.AGENT_PICKER_REQUEST` to the renderer (drops the whole message if any prompt is malformed — never renders half a form).

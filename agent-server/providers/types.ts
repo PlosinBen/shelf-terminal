@@ -432,6 +432,15 @@ export interface ServerBackend {
      * with no network fetch (Claude) ignore it. The blob shape is provider-private.
      */
     cache?: ModelCacheClient,
+    /**
+     * App-instance id (`~/.shelf/apps/<appId>/…`). Threaded here — not just on
+     * QueryInput — because config-home providers (copilot --acp) spawn their CLI
+     * DURING gatherCapabilities and must set the per-app config-home env
+     * (`COPILOT_HOME`) at spawn, before the first `send` carries appId. Providers
+     * that inject per-session (claude/native copilot) ignore it. See the
+     * copilot-acp feature note (spawn-timing).
+     */
+    appId?: string,
   ): Promise<ProviderCapabilities>;
   resolvePermission?(toolUseId: string, allow: boolean, message?: string, scope?: 'once' | 'session'): void;
   /**
@@ -513,6 +522,16 @@ export interface ServerBackend {
    * `ok`/`error` reflect the SDK reload. Omitting (void) is treated as no-op.
    */
   reloadSkills?(): Promise<SkillsReloadOutcome | void>;
+  /**
+   * Where THIS provider's CLI scans for app-level skills, for `appId` — e.g.
+   * copilot --acp: `$COPILOT_HOME/skills`; codex-acp: `<root>/.agents/skills`.
+   * The agent-server projects the canonical skill tree to this path (the provider
+   * does NO filesystem work itself — see the provider-boundary principle). Return
+   * undefined when the provider needs no projection (claude points `plugins` at
+   * the canonical dir directly; native copilot uses `skillDirectories`) or there
+   * is no app context.
+   */
+  skillTarget?(appId: string | undefined): string | undefined;
 }
 
 /** Result of a {@link ServerBackend.reloadSkills} call. */

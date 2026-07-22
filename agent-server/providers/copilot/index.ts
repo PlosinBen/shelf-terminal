@@ -1,1806 +1,393 @@
-import * as fs from 'fs';
-import * as path from 'path';
+// Copilot agent provider over ACP (ServerBackend), peer to createCodexBackend.
+// Uses the shared, semantics-free acp/ toolkit for the runtime and OWNS copilot
+// specifics (binary launch via `copilot --acp`, device-flow login, config-home).
+// ACP is an internal detail; the provider identity is 'copilot'. (This IS the
+// copilot backend post-cutover — the pre-ACP native SDK backend was deleted.)
+
 import { randomUUID } from 'node:crypto';
-import type { QueryInput, SendFn, ServerBackend, ProviderCapabilities, StatusSegment, PickerResolvePayload, ModelCacheClient, ReapableTask } from '../types';
-import { killDetachedByPidFile, pidPathForLog } from './pid-kill';
-import { startLogin as runLogin, prefillLoginUrl, type LoginRunner } from './login';
-import { severityFromUtilization, pickPermissionModes, pickEffortLevels } from '../types';
-import { parseSlashPrefix } from '@shared/slash-prefix';
+import * as path from 'node:path';
+import type { ChildProcess } from 'node:child_process';
+import { methods, type Stream, type AgentApp, type SessionModeState, type SessionConfigOption } from '@agentclientprotocol/sdk';
 import { formatConfigAck, type ConfigEditKey } from '@shared/config-ack';
-import type { ProviderModel } from '@shared/types';
-import { stripCwd, resolveSkillsPluginRoot } from '../shared';
-import { loadProjectedMcpServers } from '../mcp-config';
-import type { McpServerBlock } from '@shared/mcp';
-import { runBridgeTool, APP_SKILL_LIST_DESC, APP_SKILL_GET_DESC, APP_SKILL_CREATE_DESC, APP_SKILL_UPDATE_DESC, APP_SKILL_READ_FILE_DESC, APP_SKILL_WRITE_FILE_DESC, APP_SKILL_DELETE_FILE_DESC, WEB_FETCH_DESC, BROWSER_OPEN_DESC, SHELF_BRIDGE_TOOLS } from '../../app-tool-tools';
-import { WEB_FETCH_TOOL, BROWSER_OPEN_TOOL } from '@shared/web-session';
+import type { ServerBackend, QueryInput, SendFn, ProviderCapabilities } from '../types';
 import { serverLog } from '../../server-logger';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
-import {
-  quotaSnapshotToSegment,
-  formatCopilotToolInput,
-  parseApplyPatch,
-  elicitationSchemaToPrompts,
-  picksToElicitationContent,
-  normalizeCopilotTask,
-  isBackgroundedCopilotTask,
-  buildCopilotAuthConfig,
-  copilotTokenFromEnv,
-  buildOrphanFinalizeMessages,
-  formatCopilotMcpCard,
-  formatCopilotSkillsCard,
-  imagesToBlobAttachments,
-  type InflightToolUseEntry,
-} from './helpers';
+import { openAcpConnection, spawnAgentStdio, type AcpConnection } from '../acp/connection';
+import { createSessionDriver, type AcpSession } from '../acp/client';
+import { createPermissionBridge } from '../acp/permission';
+import { mapSessionCapabilities, currentSelections, configOptionIdForCategory } from '../acp/capabilities';
+import { toAcpMcpServers } from '../acp/mcp';
+import { getSharedShelfMcp } from '../acp/shelf-mcp';
+import { loadProjectedMcpServers } from '../mcp-config';
+import { resolveCopilotCommand, copilotConfigHome, copilotEnv } from './helpers';
+import { copilotPermissionModes, copilotModeIdToShelf, shelfToCopilotModeId } from './mode-map';
+import { startLogin as startCopilotLogin, prefillLoginUrl, type LoginRunner } from './login';
 
-const execFileP = promisify(execFile);
+// Category names for copilot's dynamic config options (agent-owned), used to
+// resolve the option id for session/set_config_option.
+const MODEL_CATEGORY = 'model';
+const EFFORT_CATEGORY = 'thought_level';
 
-/** Map our (provider-neutral) MCP block onto Copilot's MCPServerConfig: `tools`
- *  is required (`['*']` = expose all from the server), and stdio `args` is
- *  required (default `[]`). See features/app-level-mcps T2.2. */
-function toCopilotMcpConfig(block: McpServerBlock): Record<string, any> {
-  if (block.type === 'stdio') {
-    return { type: 'stdio', command: block.command, args: block.args ?? [], env: block.env, tools: ['*'] };
-  }
-  return { type: 'http', url: block.url, headers: block.headers, tools: ['*'] };
+export const COPILOT_PROVIDER = 'copilot';
+
+/** What to connect the ACP client to + the child to reap (production spawns a
+ *  `copilot --acp` process; tests inject an in-process mock AgentApp). */
+export interface CopilotAgentTarget {
+  target: Stream | AgentApp;
+  child?: ChildProcess;
 }
 
-/**
- * Transitional: read a GitHub token from the `gh` CLI if it's installed AND
- * authed. Used to keep the old gitHubToken auth path (no macOS Keychain prompt)
- * when gh is present, while still working without gh (caller falls back to
- * useLoggedInUser). gh is OPTIONAL: any failure (not installed → ENOENT, not
- * authed, no scope, empty output) resolves to `undefined` and NEVER throws.
- * On remotes this runs remote-side, picking up the remote's own gh — consistent
- * with where Copilot itself runs. See agent-providers#2.
- */
-async function readGhToken(): Promise<string | undefined> {
-  // A user-provided token (project SECRET env var GH_TOKEN/GITHUB_TOKEN) wins:
-  // this is the headless-remote path where `copilot login` can't persist (no OS
-  // credential store) and `gh` may be absent. See copilotTokenFromEnv.
-  const envToken = copilotTokenFromEnv(process.env);
-  if (envToken) return envToken;
-  try {
-    const { stdout } = await execFileP('gh', ['auth', 'token'], { timeout: 3000 });
-    return stdout.trim() || undefined;
-  } catch {
-    return undefined;
-  }
+export interface CopilotDeps {
+  /** Open the agent transport for `cwd`. `appId` selects the per-app
+   *  `COPILOT_HOME` (config-home isolation). Default: spawn `copilot --acp`. */
+  openAgent?: (cwd: string, appId?: string) => CopilotAgentTarget;
+  /** Resolve the in-process Shelf MCP bridge (level 1). Default: the shared HTTP
+   *  server. Return null to omit it (tests skip starting a real HTTP server). */
+  getShelfMcp?: () => Promise<{ url: string } | null>;
 }
 
-// In-flight tool calls awaiting their `tool.execution_complete` event (keyed by
-// toolCallId). Mirrors the Claude provider's pattern. Type + the orphan-card
-// builder live in helpers.ts. See InflightToolUseEntry there.
-const inflightToolUses = new Map<string, InflightToolUseEntry>();
-// task_complete / report_intent suppress their tool_use on purpose (rendered as
-// reply/note), so their tool.execution_complete legitimately has no inflight
-// entry. Track those ids so a MISSING entry can be told apart from a re-host
-// orphan (which must fail loud, not skip silently). See fail-loud policy
-// (context/agent-observability).
-const suppressedToolIds = new Set<string>();
-// Copilot SDK `session.on` event types we KNOWINGLY don't render — pure
-// lifecycle / already-covered-elsewhere. Enumerated (observed live, 2026-06) so
-// the switch default only warns for a genuinely NEW/unknown type instead of
-// spamming these benign ones on every turn. Notes on the non-obvious ones:
-//   permission.requested/completed → handled via registered onPermissionRequest
-//   session.idle / assistant.idle / assistant.turn_end → idle is driven by sendAndWait() resolving
-//   session.task_complete → final reply handled via tool.execution_start(task_complete)
-const KNOWN_IGNORED_COPILOT_EVENTS = new Set<string>([
-  'pending_messages.modified', 'system.message',
-  'session.tools_updated', 'user.message', 'assistant.turn_start',
-  'assistant.turn_end', 'assistant.intent', 'hook.start', 'hook.end',
-  'permission.requested', 'permission.completed', 'tool.execution_partial_result',
-  'session.task_complete', 'session.idle', 'assistant.idle',
-]);
-// Genuinely-unexpected types we've warned about once (dedup so a new type that
-// SHOULD be handled is visible without spamming).
-const seenUnhandledCopilotEvents = new Set<string>();
-
-// TEMP DIAG (copilot big-grep hang): trace the FULL lifecycle of every tool
-// call + system notification straight to stderr → main log, regardless of
-// whether the switch below renders it. Goal: see, for a large `rg`/grep that
-// "hangs with no error", which events actually arrive — does
-// tool.execution_complete ever fire, or does the card stay running until the
-// 30-min turn timeout? Are partial_result/progress streaming (feedback we drop)?
-// Single-line JSON so grep stays sane. partial_result can be high-volume, so we
-// aggregate per toolCallId and only log first + every 50th + the final tally.
-// Remove once root cause is confirmed.
-const diagPartials = new Map<string, { n: number; bytes: number }>();
-function diagTraceCopilotToolEvent(event: any): void {
-  const t = event?.type;
-  const d = event?.data ?? {};
-  const id = d.toolCallId ?? d.shellId ?? d.agentId ?? '';
-  switch (t) {
-    case 'tool.execution_start':
-      serverLog('debug', 'copilot', 'DIAG tool.start ' + JSON.stringify({ id, tool: d.toolName, args: JSON.stringify(d.arguments ?? '').slice(0, 200) }));
-      break;
-    case 'tool.execution_partial_result': {
-      const prev = diagPartials.get(id) ?? { n: 0, bytes: 0 };
-      const next = { n: prev.n + 1, bytes: prev.bytes + (typeof d.partialOutput === 'string' ? d.partialOutput.length : 0) };
-      diagPartials.set(id, next);
-      if (next.n === 1 || next.n % 50 === 0) serverLog('debug', 'copilot', 'DIAG tool.partial ' + JSON.stringify({ id, chunks: next.n, bytes: next.bytes }));
-      break;
-    }
-    case 'tool.execution_progress':
-      serverLog('debug', 'copilot', 'DIAG tool.progress ' + JSON.stringify({ id, msg: String(d.progressMessage ?? '').slice(0, 200) }));
-      break;
-    case 'tool.execution_complete': {
-      const tally = diagPartials.get(id);
-      diagPartials.delete(id);
-      serverLog('debug', 'copilot', 'DIAG tool.complete ' + JSON.stringify({ id, success: d.success, hasResult: d.result != null, resultType: d.result?.type, errType: d.error?.type, partials: tally?.n ?? 0 }));
-      break;
-    }
-    case 'system.notification':
-      serverLog('debug', 'copilot', 'DIAG system.notification ' + JSON.stringify({ kind: d.kind?.type ?? d.kind, content: String(d.content ?? '').slice(0, 160) }));
-      break;
-    case 'session.error':
-    case 'model.call_failure':
-      serverLog('debug', 'copilot', 'DIAG ' + t + ' ' + JSON.stringify({ msg: d.message ?? d.errorMessage, code: d.errorCode ?? d.statusCode }));
-      break;
-  }
+function defaultOpenAgent(cwd: string, appId?: string): CopilotAgentTarget {
+  const { command, args } = resolveCopilotCommand();
+  // COPILOT_HOME (per-app config-home) is set at SPAWN — it's process env, so it
+  // must be right from the start (auth + skills live under it). appId is known by
+  // caps-time now (threaded into gatherCapabilities), so the first spawn already
+  // has it.
+  const spawned = spawnAgentStdio(command, args, { cwd, env: copilotEnv(appId) });
+  return { target: spawned.stream, child: spawned.child };
 }
 
-type PermissionResult =
-  | { behavior: 'allow'; scope?: 'once' | 'session' }
-  | { behavior: 'deny'; message?: string };
-
-// Map Copilot's PermissionRequest.kind to the approve-for-session approval sub-shape
-// it expects back. shell/mcp/custom-tool/url/hook need data we don't have here
-// (commandIdentifiers / serverName / toolName), so omit approval and let the SDK
-// fall back to its default session-allow behavior for those kinds.
-function approvalForKind(kind: string): any | undefined {
-  switch (kind) {
-    case 'read': return { kind: 'read' };
-    case 'write': return { kind: 'write' };
-    case 'memory': return { kind: 'memory' };
-    default: return undefined;
-  }
+/** Where `copilot --acp` scans for skills, for `appId`: `$COPILOT_HOME/skills`.
+ *  The provider only DECLARES this; the agent-server projects the canonical tree
+ *  here (provider-boundary principle — the backend does no fs). */
+function copilotSkillTarget(appId: string | undefined): string | undefined {
+  const home = copilotConfigHome(appId);
+  return home ? path.join(home, 'skills') : undefined;
 }
 
-const DEFAULT_MODEL = 'gpt-5.5';
+export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
+  const openAgent = deps.openAgent ?? defaultOpenAgent;
+  const getShelfMcp = deps.getShelfMcp ?? getSharedShelfMcp;
 
-// /model intentionally not listed — it's a renderer-local config-edit slash
-// (see src/renderer/components/AgentView.tsx RENDERER_LOCAL_SLASHES). The
-// renderer merges its own command list into the autocomplete display.
-const SLASH_COMMANDS = [
-  { name: 'context', description: 'Show context window usage' },
-  { name: 'compact', description: 'Summarize conversation to free up context' },
-  { name: 'clear', description: 'Reset the conversation context' },
-  { name: 'help', description: 'List available slash commands' },
-  // /mcp /skills: provider-intercepted read-only listings (see dispatchSlash).
-  // NOT SDK-dispatchable (interactive-TUI-only) — Shelf prints them from data
-  // captured via the skills_loaded / mcp_servers_loaded session events. Listed
-  // here so they appear in autocomplete + /help (list ↔ dispatch must be paired).
-  { name: 'mcp', description: 'List loaded MCP servers' },
-  { name: 'skills', description: 'List loaded skills' },
-];
-
-let sdkModule: typeof import('@github/copilot-sdk') | null = null;
-async function getSdk() {
-  if (!sdkModule) sdkModule = await import('@github/copilot-sdk');
-  return sdkModule;
-}
-
-/**
- * Resolve the Copilot CLI's entry point. The Copilot SDK spawns this as a
- * subprocess (the CLI does the actual API/auth/state work; SDK is just a
- * JSON-RPC wrapper).
- *
- * **Why packaged path is `extraResources/copilot-cli/`, not
- * `app.asar.unpacked/node_modules/@github/copilot/`:**
- * Copilot CLI's bundled `app.js` does a naive `path.replace("app.asar",
- * "app.asar.unpacked")` when resolving its native `spawn-helper` binary,
- * assuming Electron apps always live under `app.asar/`. If the path already
- * contains `app.asar.unpacked` (as it does when we asarUnpack the package),
- * the replace duplicates the suffix to `app.asar.unpacked.unpacked` and the
- * helper is no longer found → `posix_spawnp failed` on every bash tool call.
- *
- * Putting Copilot under `extraResources` sidesteps the bug entirely — the
- * Resources/copilot-cli/ path contains no `app.asar` substring, so the
- * upstream replace is a no-op. This also aligns better with what Copilot CLI
- * actually is: a bundled subprocess (like ffmpeg shipped with an app), not a
- * `require()`-able library — extraResources is the right pattern for that.
- */
-function resolveCopilotCliPath(): string | undefined {
-  // The real runtime is the STANDALONE `copilot` binary inside the per-platform
-  // package `@github/copilot-<platform>-<arch>` (alongside its `builtin/`,
-  // `tree-sitter.wasm`, … resources). copilot-sdk spawns it directly over stdio
-  // (non-.js → no node needed). This is what remote R1 already ships.
-  //
-  // As of `@github/copilot` ≥1.0.67 the META package is a thin `npm-loader.js`
-  // ONLY (no `index.js`), delegating to the platform package — so the old
-  // "point at @github/copilot/index.js" candidates are dead. We resolve the
-  // platform package's binary in all three locations. We deliberately do NOT
-  // fall back to a remote-global install (~/.nvm, /usr/local) — R1: ship our
-  // own, ignore what's installed.
-  const bin = process.platform === 'win32' ? 'copilot.exe' : 'copilot';
-  const pkgBin = path.join('@github', `copilot-${process.platform}-${process.arch}`, bin);
-  const candidates = [
-    // Remote self-contained deploy: standalone binary shipped next to index.mjs.
-    path.resolve(__dirname, 'copilot'),
-    // Packaged: extraResources/copilot-cli/@github/copilot-<plat>-<arch>/copilot
-    // (sibling of the agent-server bundle dir).
-    path.resolve(__dirname, '..', '..', 'copilot-cli', pkgBin),
-    // Dev: platform package under node_modules, relative to the agent-server
-    // bundle output (dist/agent-server/<v>/index.mjs).
-    path.resolve(__dirname, '..', '..', '..', 'node_modules', pkgBin),
-    // Dev: relative to project root (running unbundled via tsx/ts-node).
-    path.resolve(__dirname, '..', '..', 'node_modules', pkgBin),
-  ];
-
-  for (const p of candidates) {
-    if (fs.existsSync(p)) return p;
-  }
-  return undefined;
-}
-
-interface CachedModel {
-  id: string;
-  name?: string;
-  supportedReasoningEfforts?: string[];
-  defaultReasoningEffort?: string;
-}
-
-interface CopilotState {
-  client: import('@github/copilot-sdk').CopilotClient | null;
-  session: import('@github/copilot-sdk').CopilotSession | null;
-  /** Copilot CLI's session ID (separate from our app's sessionId). */
-  cliSessionId: string | null;
-  /** Cached models from last listModels() call. */
-  models: CachedModel[];
-}
-
-// Mint a unique msgId for a non-tool message (text/thinking/intent/system/
-// error/plan). Tool messages use the SDK-provided toolCallId as their msgId
-// — see file_edit / tool_use emit sites below.
-function mintMsgId(): string {
-  return `m-${randomUUID().slice(0, 8)}`;
-}
-
-
-export function createCopilotBackend(): ServerBackend {
-  const pendingPermissions = new Map<string, (result: PermissionResult) => void>();
+  let conn: AcpConnection | null = null;
+  let child: ChildProcess | null = null;
+  let session: AcpSession | null = null;
+  let sessionCwd: string | null = null;
+  // The appId the live session was created with — MCP servers + skills root are
+  // fixed at session/new, so if appId is only learned later (gatherCapabilities
+  // has no appId; the first `send` does), the session is recreated to pick them
+  // up. undefined until known. Stable per app instance (getAppInstanceId).
+  let sessionAppId: string | undefined;
+  let lastAppId: string | undefined;
+  // The appId the live CONNECTION (process) was spawned for. COPILOT_HOME is
+  // fixed at spawn, so a change here forces a process respawn (not just a new
+  // session). Normally set once from the caps-time spawn.
+  let connAppId: string | undefined;
+  // The active turn's send — the permission bridge rides this lane so requests
+  // reach the renderer on the current turn's id.
   let currentSend: SendFn | null = null;
-  let currentModel = DEFAULT_MODEL;
-  let currentEffort: string | undefined;
-  let currentPermissionMode = 'default';
-  let currentSessionId: string | null = null;
-  // Live interactive-login child (device flow), if one is running. At most one
-  // at a time; a new startLogin cancels the previous. See features copilot-device-login.
   let loginRunner: LoginRunner | null = null;
-  // Per-turn streaming msgId trackers. Copilot SDK doesn't emit explicit
-  // block-start events; we mint on the first delta of a channel and reuse
-  // until the matching finalize message lands. Reset to null when finalize
-  // arrives or a new turn begins.
-  let currentTextMsgId: string | null = null;
-  let currentThinkingMsgId: string | null = null;
-  // workingDirectory must be threaded into createSession/resumeSession config —
-  // omitting it leaves the CLI's bash tool spawning relative to agent-server's
-  // own cwd (which on packaged Electron is something like /), causing
-  // "posix_spawnp failed" when the shell tries to run from a non-existent or
-  // unreadable working directory.
-  let currentCwd: string | null = null;
-  // App-instance id (for the projected skills dir); bound on first query, used
-  // when the session is created. Like currentCwd, first value wins.
-  let currentAppId: string | undefined;
-  // Raw listings (NOT a normalized cross-provider type) for the `/mcp` `/skills`
-  // cards; the markdown is composed on read by formatCopilot*Card. Filled by the
-  // session's skills_loaded / mcp_servers_loaded events (which fire on a TURN /
-  // reconnect — NOT on bare session creation), or pulled via RPC on cold-start
-  // (ensureLoadedContext). `undefined` = not yet loaded → slash says so, never
-  // claims "none".
-  let loadedMcpServers: Array<{ name: string; status?: string; error?: string; source?: string }> | undefined;
-  let loadedSkills: Array<{ name: string; description?: string; enabled?: boolean; source?: string }> | undefined;
-  // External vocabulary (shared with Claude) → Copilot SDK SessionMode.
-  const MODE_TO_SDK: Record<string, 'interactive' | 'plan' | 'autopilot'> = {
-    default: 'interactive',
-    bypassPermissions: 'autopilot',
-    plan: 'plan',
-  };
-  let latestUsage: {
-    currentTokens: number;
-    tokenLimit: number;
-    conversationTokens?: number;
-    systemTokens?: number;
-    toolDefinitionsTokens?: number;
-    messagesLength: number;
-  } | null = null;
-  const state: CopilotState = { client: null, session: null, cliSessionId: null, models: [] };
+  const permissions = createPermissionBridge(() => currentSend);
+  const driver = createSessionDriver();
 
-  // Stoppable flag — provider-internal stop semantics. Set to false during
-  // critical sections (e.g. compact in flight, /clear's dispose+rebuild
-  // window) so stop() silently no-ops. Not surfaced to renderer — Cursor /
-  // Claude Code / Aider all behave the same way (button always present, some
-  // operations just can't be interrupted). If we ever want explicit
-  // "cannot stop" UI feedback, add a `stoppable` field on status events.
-  let stoppable = true;
+  // Live session config (cached from the last new-session response) + the active
+  // selections in SHELF vocabulary. Seeded from the renderer's saved prefs (intent)
+  // and the agent's advertised current values; kept in sync as edits apply.
+  let sessionModes: SessionModeState | undefined;
+  let sessionConfigOptions: SessionConfigOption[] | undefined;
+  let currentModel: string | undefined;
+  let currentEffort: string | undefined;
+  let currentPermissionMode: string | undefined; // Shelf id (default/plan/bypassPermissions)
+
+  /** Caps from the live session config + the active current* selections, ready to
+   *  spread into a `capabilities` wire message. permissionModes are the Shelf-
+   *  standard set (matches native copilot), NOT copilot's raw agent/plan/autopilot. */
+  function buildCapabilities(): ProviderCapabilities {
+    const availableCommands = session ? driver.getAvailableCommands(session.sessionId) : undefined;
+    const input = { modes: sessionModes, configOptions: sessionConfigOptions, availableCommands };
+    const base = mapSessionCapabilities(input);
+    return {
+      ...base,
+      permissionModes: copilotPermissionModes(),
+      ...(currentModel ? { currentModel } : {}),
+      ...(currentEffort ? { currentEffort } : {}),
+      ...(currentPermissionMode ? { currentPermissionMode } : {}),
+    };
+  }
+
+  async function applyModel(model: string): Promise<void> {
+    currentModel = model;
+    const configId = configOptionIdForCategory(sessionConfigOptions, MODEL_CATEGORY);
+    if (conn && session && configId) await driver.setConfigOption(conn.agent, session, configId, model);
+    else if (conn && session) serverLog('warn', 'copilot', `setModel: no model config option on session ${session.sessionId}`);
+  }
+
+  async function applyEffort(effort: string): Promise<void> {
+    currentEffort = effort;
+    const configId = configOptionIdForCategory(sessionConfigOptions, EFFORT_CATEGORY);
+    if (conn && session && configId) await driver.setConfigOption(conn.agent, session, configId, effort);
+    else if (conn && session) serverLog('warn', 'copilot', `setEffort: no thought_level config option on session ${session.sessionId}`);
+  }
+
+  async function applyPermissionMode(mode: string): Promise<void> {
+    currentPermissionMode = mode;
+    const modeId = shelfToCopilotModeId(mode, sessionModes);
+    if (conn && session && modeId) await driver.setMode(conn.agent, session, modeId);
+    else if (conn && session) serverLog('warn', 'copilot', `setPermissionMode: copilot has no mode for "${mode}"`);
+  }
+
+  /** Apply a config-edit turn (picker / status-bar): imperative apply + updated
+   *  capabilities + an ack divider. No-op guard skips a re-pick of the live value. */
+  async function applyConfigEdit(key: ConfigEditKey, value: string, send: SendFn): Promise<void> {
+    const cur = key === 'model' ? currentModel : key === 'effort' ? currentEffort : currentPermissionMode;
+    if (cur === value) return;
+    try {
+      if (key === 'model') await applyModel(value);
+      else if (key === 'effort') await applyEffort(value);
+      else await applyPermissionMode(value);
+      send({ type: 'capabilities', ...buildCapabilities() });
+      send({ type: 'message', msgId: `m-${randomUUID().slice(0, 8)}`, msgType: 'system', content: formatConfigAck(key, value) });
+    } catch (err) {
+      send({ type: 'message', msgId: `m-${randomUUID().slice(0, 8)}`, msgType: 'error', content: `Failed to set ${key}: ${(err as Error)?.message ?? String(err)}` });
+    }
+  }
+
+  /** Spawn `copilot --acp` (with the per-app COPILOT_HOME) + open the ACP
+   *  connection once; reused across turns. */
+  function ensureConnection(cwd: string, appId: string | undefined): AcpConnection {
+    if (conn) return conn;
+    const opened = openAgent(cwd, appId);
+    child = opened.child ?? null;
+    connAppId = appId;
+    conn = openAcpConnection(opened.target, {
+      name: 'shelf-copilot',
+      onRequestPermission: permissions.onRequestPermission,
+      onSessionUpdate: driver.onSessionUpdate,
+    });
+    // Drop refs when the agent process/connection ends so the next turn respawns.
+    conn.closed.finally(() => {
+      conn = null;
+      child = null;
+      connAppId = undefined;
+      session = null;
+      sessionCwd = null;
+    });
+    return conn;
+  }
 
   /**
-   * Marks a code block as non-cancellable. Sets `stoppable = false` for the
-   * duration so concurrent stop() calls are silently ignored, restored in
-   * the finally regardless of throw. Use sparingly — only for sections where
-   * an interrupt would leave session state half-modified (compaction in
-   * flight, session disconnect+rebuild, etc.).
+   * Establish the session (once per cwd), preferring RESUME of a persisted
+   * `lastSdkSessionId` so a reconnect continues the conversation; falls back to
+   * a fresh session/new if resume fails. Emits `context_patch` to persist the
+   * (new) session id — Shelf never touches the context store directly.
    */
-  async function critical<T>(fn: () => Promise<T>): Promise<T> {
-    stoppable = false;
-    try { return await fn(); } finally { stoppable = true; }
-  }
+  async function ensureSession(
+    input: { cwd: string; appId?: string; resumeId?: string | null },
+    send: SendFn | null,
+  ): Promise<AcpSession> {
+    // appId is stable per app instance; now carried on caps too, so it's known
+    // before the first spawn. Resolve against the last-seen value.
+    if (input.appId) lastAppId = input.appId;
+    const appId = input.appId ?? lastAppId;
 
-  // Pending picker promises keyed by picker id (minted when the provider
-  // emits a picker_request). resolvePicker drains the matching entry with
-  // the renderer's PickerResolvePayload (answers or cancelled). Filled in
-  // when Step 4 of picker-request redesign wires the elicitation handler.
-  const pendingPickers = new Map<string, (payload: PickerResolvePayload) => void>();
-
-  function modelMeta(id: string): CachedModel | undefined {
-    return state.models.find((m) => m.id === id);
-  }
-
-  function effortsFor(modelId: string): string[] {
-    return modelMeta(modelId)?.supportedReasoningEfforts ?? [];
-  }
-
-  function buildCapabilities(): ProviderCapabilities & { currentModel: string; currentEffort?: string; currentPermissionMode: string } {
-    return {
-      currentModel,
-      currentEffort,
-      currentPermissionMode,
-      models: state.models.map((m) => ({
-        value: m.id,
-        displayName: m.name ?? m.id,
-        effortLevels: pickEffortLevels(m.supportedReasoningEfforts ?? []),
-      })),
-      // acceptEdits has no Copilot equivalent — omit it (honest capability surface).
-      permissionModes: pickPermissionModes(['default', 'bypassPermissions', 'plan']),
-      effortLevels: pickEffortLevels(effortsFor(currentModel)),
-      slashCommands: SLASH_COMMANDS,
-      // Option A: the user signs in ON the remote host via the Copilot CLI's
-      // own device-flow login (`copilot login` → shows a code, authorize in any
-      // browser). Credential is written to the remote's own ~/.copilot and
-      // NEVER crosses machines. We deliberately do NOT bind `gh` (removed in
-      // 6d5c615) — the Copilot CLI has its own login.
-      authMethod: {
-        kind: 'oauth' as const,
-        instructions: [
-          { label: 'Run this in a terminal on the remote host, then click Retry', command: 'copilot login' },
-          // Headless-remote fallback: where `copilot login` can't persist (no OS
-          // credential store) and `gh` is absent, paste a GitHub token as a
-          // project Secret env var (readGhToken reads it → gitHubToken auth).
-          { label: 'Headless remote (no browser/keychain): set a GitHub token as a project Secret env var, then Retry', command: 'GH_TOKEN' },
-        ],
-      },
-    };
-  }
-
-  // Permission handler: bridge Copilot SDK permission requests to our existing
-  // permission_request IPC contract (UI shows Allow/Deny buttons).
-  // PermissionRequest shape: { kind: "shell"|"write"|"mcp"|"read"|"url"|"custom-tool"|"memory"|"hook", toolCallId? }
-  const onPermissionRequest = async (request: any) => {
-    // bypassPermissions short-circuit: don't trust rpc.mode.set to have
-    // landed (session may have been created before mode was switched, and
-    // SDK silently swallows mode-set failures). Always auto-approve here.
-    if (currentPermissionMode === 'bypassPermissions') {
-      return { kind: 'approve-once' as const };
+    // COPILOT_HOME is fixed at spawn. If the live connection was spawned for a
+    // DIFFERENT appId (e.g. a legacy caps call that lacked appId), tear it down so
+    // it respawns with the right config-home. Normally a no-op (appId rides caps).
+    if (conn && connAppId !== appId) {
+      serverLog('debug', 'copilot', `appId changed (${String(connAppId).slice(0, 8)} → ${String(appId).slice(0, 8)}) — respawning connection for COPILOT_HOME`);
+      try { conn.close(); } catch { /* best-effort */ }
+      conn = null; child = null; connAppId = undefined; session = null; sessionCwd = null;
     }
-    const toolUseId = request.toolCallId ?? `copilot-${Date.now()}`;
-    // PermissionRequest's typed shape is just { kind, toolCallId }, but the
-    // runtime payload carries kind-specific fields (intention, path, command,
-    // commands[], possiblePaths, etc.). Pass everything except kind/toolCallId
-    // through as `input` so the UI can show what's actually being requested.
-    const { kind: _kind, toolCallId: _tcId, ...rest } = request ?? {};
-    currentSend?.({
-      type: 'permission_request',
-      toolUseId,
-      toolName: request?.kind ?? 'unknown',
-      input: rest,
-    });
-    const result = await new Promise<PermissionResult>((resolve) => {
-      pendingPermissions.set(toolUseId, resolve);
-    });
-    if (result.behavior === 'deny') {
-      return { kind: 'reject' as const, feedback: result.message };
-    }
-    if (result.scope === 'session') {
-      const approval = approvalForKind(request.kind);
-      return approval
-        ? { kind: 'approve-for-session' as const, approval }
-        : { kind: 'approve-for-session' as const };
-    }
-    return { kind: 'approve-once' as const };
-  };
 
-  async function ensureClient(): Promise<import('@github/copilot-sdk').CopilotClient> {
-    if (state.client) return state.client;
-    const { CopilotClient, RuntimeConnection } = await getSdk();
-    const cliPath = resolveCopilotCliPath();
-    if (!cliPath) {
-      throw new Error('GitHub Copilot CLI not found. Install with: npm install -g @github/copilot');
-    }
-    // Auth (transitional dual-path):
-    //  - gh present+authed → pass its token as `gitHubToken` (forces
-    //    useLoggedInUser:false). The CLI then uses that token and never reads its
-    //    own keychain login → no macOS Keychain prompt (gh stores its token in a
-    //    plaintext file). This restores the pre-6d5c615 behaviour, but gh is now
-    //    OPTIONAL (only used if present), not a hard dependency.
-    //  - no gh → fall back to `useLoggedInUser: true` (Copilot's own login; on
-    //    macOS that lives in the keychain and may prompt on unsigned builds).
-    // See agent-providers#2. The keychain tradeoff is the reason gh is offered
-    // back as an opt-in shortcut while a permanent fix (signing) is decided.
-    const ghToken = await readGhToken();
-    state.client = new CopilotClient({
-      // SDK ≥1.0 replaced the flat `cliPath` + `useStdio` options with a
-      // `connection` descriptor. `forStdio({ path })` spawns our resolved CLI
-      // over stdio (the default transport) — using the old options against the
-      // 1.0.x CLI made it reject the launch ("Expected 0 arguments but got 1"),
-      // which is the whole reason for the SDK bump. See agent-providers.
-      connection: RuntimeConnection.forStdio({ path: cliPath }),
-      ...buildCopilotAuthConfig(ghToken),
-      logLevel: 'warning',
-      // Suppress Node's "SQLite is experimental" warning the CLI emits on stdout/stderr.
-      env: { ...process.env, NODE_NO_WARNINGS: '1' },
-    });
-    await state.client.start();
-    return state.client;
-  }
+    // Reuse only if cwd AND the MCP/skills context (appId) are unchanged — else
+    // recreate so app-level MCP servers + skills take effect at session/new.
+    if (session && sessionCwd === input.cwd && sessionAppId === appId) return session;
+    if (session) driver.forget(session.sessionId);
 
-  async function ensureSession(): Promise<import('@github/copilot-sdk').CopilotSession> {
-    if (state.session) return state.session;
-    const client = await ensureClient();
-    const config: any = {
-      model: currentModel,
-      onPermissionRequest,
-    };
-    if (currentEffort) config.reasoningEffort = currentEffort;
-    if (currentCwd) config.workingDirectory = currentCwd;
-    // Match the native Copilot CLI: auto-discover the project's own skill dirs
-    // (`.github/skills`, `.agents/skills`, `.claude/skills` — Copilot reads
-    // Claude's dir cross-tool; verified against copilot CLI 1.0.56's own
-    // "Skills are loaded from: Project:" help text) + MCP configs (`.mcp.json`,
-    // `.vscode/mcp.json`) from the working directory. Project-level config is the
-    // official tools' domain — Shelf just turns native discovery on so the agent
-    // view matches the raw CLI, and does NOT bridge/rewrite it. See PRODUCT.md #5.
-    // Discovered dirs merge with the explicit app-skill `skillDirectories` below
-    // (explicit wins on name collision).
-    config.enableConfigDiscovery = true;
-    // App-level skills (Shelf's domain, NOT native): point Copilot at this app's
-    // projected skills collection (the inner `skills/` dir, parent of the skill
-    // folders) when it exists. See #2.5/#70. Session-cached — new skills
-    // mid-session may need `/skills reload`.
-    const skillsRoot = resolveSkillsPluginRoot(currentAppId);
-    if (skillsRoot) config.skillDirectories = [path.join(skillsRoot, 'skills')];
-
-    // App-level user MCP servers. Copilot keeps these in `config.mcpServers` —
-    // SEPARATE from the in-process `shelf` bridge (which is `config.tools` below),
-    // so there's no merge/clobber concern here. Copilot's shape differs from ours:
-    // `tools` is required (`['*']` = expose all) and stdio `args` is required.
-    // Fail-loud: surface load problems. Native MCP coexists (additive — Copilot
-    // discovers it via enableConfigDiscovery; app-level does not suppress it).
-    const userMcp = loadProjectedMcpServers(currentAppId);
-    for (const e of userMcp.errors) serverLog('warn', 'copilot', `MCP config: ${e}`);
-    const mappedMcp: Record<string, any> = {};
-    for (const [name, block] of Object.entries(userMcp.servers)) {
-      mappedMcp[name] = toCopilotMcpConfig(block);
-    }
-    if (Object.keys(mappedMcp).length > 0) config.mcpServers = mappedMcp;
-
-    // In-process app-level bridge tools. As of copilot-sdk 1.0.56 tools are
-    // passed in the session CONFIG (`config.tools`, the typed/documented API) —
-    // NOT via a post-create `session.registerTools()` (removed from the public
-    // API). That's why config-based skillDirectories load but the bridge didn't:
-    // registering after createSession no longer surfaces the tools to the model.
-    // skipPermission on the read ops (safe); mutations omit it → user confirms.
-    config.tools = [
-      sdkModule!.defineTool('list_app_skills', {
-        description: APP_SKILL_LIST_DESC,
-        parameters: { type: 'object', properties: {}, additionalProperties: false },
-        handler: async () => (await runBridgeTool('app_skill.list', {})).text,
-        skipPermission: true,
-      }),
-      sdkModule!.defineTool('get_app_skill', {
-        description: APP_SKILL_GET_DESC,
-        parameters: { type: 'object', properties: { name: { type: 'string', description: 'skill folder name from list_app_skills' } }, required: ['name'], additionalProperties: false },
-        handler: async (args: any) => (await runBridgeTool('app_skill.get', { name: args?.name })).text,
-        skipPermission: true,
-      }),
-      sdkModule!.defineTool('create_app_skill', {
-        description: APP_SKILL_CREATE_DESC,
-        parameters: { type: 'object', properties: { content: { type: 'string', description: 'full SKILL.md (frontmatter name+description + body)' } }, required: ['content'], additionalProperties: false },
-        handler: async (args: any) => (await runBridgeTool('app_skill.create', { content: args?.content })).text,
-      }),
-      sdkModule!.defineTool('update_app_skill', {
-        description: APP_SKILL_UPDATE_DESC,
-        parameters: { type: 'object', properties: { name: { type: 'string', description: 'current skill folder name' }, content: { type: 'string', description: 'full new SKILL.md' } }, required: ['name', 'content'], additionalProperties: false },
-        handler: async (args: any) => (await runBridgeTool('app_skill.update', { name: args?.name, content: args?.content })).text,
-      }),
-      sdkModule!.defineTool('read_app_skill_file', {
-        description: APP_SKILL_READ_FILE_DESC,
-        parameters: { type: 'object', properties: { name: { type: 'string', description: 'skill folder name' }, path: { type: 'string', description: 'folder-relative aux-file path from get_app_skill files' } }, required: ['name', 'path'], additionalProperties: false },
-        handler: async (args: any) => (await runBridgeTool('app_skill.read_file', { name: args?.name, path: args?.path })).text,
-        skipPermission: true,
-      }),
-      sdkModule!.defineTool('write_app_skill_file', {
-        description: APP_SKILL_WRITE_FILE_DESC,
-        parameters: { type: 'object', properties: { name: { type: 'string', description: 'skill folder name' }, path: { type: 'string', description: 'folder-relative aux-file path (no leading slash, no ..)' }, content: { type: 'string', description: 'file content' } }, required: ['name', 'path', 'content'], additionalProperties: false },
-        handler: async (args: any) => (await runBridgeTool('app_skill.write_file', { name: args?.name, path: args?.path, content: args?.content })).text,
-      }),
-      sdkModule!.defineTool('delete_app_skill_file', {
-        description: APP_SKILL_DELETE_FILE_DESC,
-        parameters: { type: 'object', properties: { name: { type: 'string', description: 'skill folder name' }, path: { type: 'string', description: 'folder-relative aux-file path' } }, required: ['name', 'path'], additionalProperties: false },
-        handler: async (args: any) => (await runBridgeTool('app_skill.delete_file', { name: args?.name, path: args?.path })).text,
-      }),
-      // skipPermission: the gate lives downstream in main's handleAppTool (a
-      // generic per-origin web-permission popup, provider-agnostic). Skipping the
-      // copilot tool prompt avoids a double prompt; the downstream gate still runs.
-      sdkModule!.defineTool(WEB_FETCH_TOOL, {
-        description: WEB_FETCH_DESC,
-        parameters: { type: 'object', properties: {
-          url: { type: 'string', description: 'absolute http(s) URL of the internal service' },
-          method: { type: 'string', description: 'HTTP method (default GET)' },
-          headers: { type: 'object', description: 'extra request headers, e.g. {"kbn-xsrf":"true"}' },
-          body: { type: 'string', description: 'request body, e.g. a JSON query string' },
-        }, required: ['url'], additionalProperties: false },
-        handler: async (args: any) => (await runBridgeTool('web.fetch', { url: args?.url, method: args?.method, headers: args?.headers, body: args?.body })).text,
-        skipPermission: true,
-      }),
-      // skipPermission: browser_open carries its OWN per-call Open/Deny popup
-      // downstream in main's handleAppTool (never remembered). Skip the copilot
-      // tool prompt to avoid a double prompt; the downstream gate still runs.
-      sdkModule!.defineTool(BROWSER_OPEN_TOOL, {
-        description: BROWSER_OPEN_DESC,
-        parameters: { type: 'object', properties: {
-          url: { type: 'string', description: 'absolute http(s) URL to open in a visible Web tab for the user to log in' },
-          reason: { type: 'string', description: 'short explanation of why this page must be opened (shown in the approval popup)' },
-        }, required: ['url'], additionalProperties: false },
-        handler: async (args: any) => (await runBridgeTool('web.open', { url: args?.url, reason: args?.reason })).text,
-        skipPermission: true,
-      }),
-    ];
-
-    // Elicitation handler: bridge Copilot SDK's elicitation requests to our
-    // picker_request channel. As of copilot-sdk 1.0.x this is a SESSION CONFIG
-    // field (`onElicitationRequest`) — the old post-create
-    // `session.registerElicitationHandler()` was removed. URL mode (OAuth-style
-    // external auth) is not wired in v1 — declined with a warning. See agent-ui#3.
-    config.onElicitationRequest = async (ctx: import('@github/copilot-sdk').ElicitationContext) => {
-      if (ctx.mode === 'url') {
-        serverLog('warn', 'copilot', 'URL-mode elicitation not supported; declining', {
-          url: ctx.url, source: ctx.elicitationSource,
-        });
-        return { action: 'decline' };
-      }
-      const schema = ctx.requestedSchema;
-      const mapped = schema ? elicitationSchemaToPrompts(schema) : null;
-      if (!mapped) {
-        serverLog('warn', 'copilot', 'elicitation has no usable schema; declining', { message: ctx.message });
-        return { action: 'decline' };
-      }
-      const pickerId = `pk-${randomUUID().slice(0, 8)}`;
-      currentSend?.({ type: 'picker_request', id: pickerId, prompts: mapped.prompts });
-      const resolved = await new Promise<PickerResolvePayload>((resolve) => {
-        pendingPickers.set(pickerId, resolve);
-      });
-      if ('cancelled' in resolved) return { action: 'cancel' };
-      return { action: 'accept', content: picksToElicitationContent(mapped.fields, resolved.answers) };
+    // Skills are already projected to `$COPILOT_HOME/skills` by the agent-server
+    // (it calls skillTarget + projectAppSkills before this) — the backend does no
+    // fs. copilot --acp scans config-home for them (ACP has no per-session field).
+    const c = ensureConnection(input.cwd, appId);
+    const mcp = loadProjectedMcpServers(appId);
+    // Fail-loud: a bad/incomplete MCP entry is logged, not silently dropped.
+    for (const e of mcp.errors) serverLog('warn', 'copilot', `MCP config: ${e}`);
+    // Level 1 (Shelf built-in bridge) + level 2 (user MCP) coexist as mcpServers
+    // entries. The shelf bridge is an in-process HTTP MCP server (see shelf-mcp.ts).
+    const shelf = await getShelfMcp();
+    const opts = {
+      cwd: input.cwd,
+      mcpServers: [
+        ...toAcpMcpServers(mcp.servers),
+        ...(shelf ? [{ type: 'http' as const, name: 'shelf', url: shelf.url, headers: [] }] : []),
+      ],
     };
 
-    let session: import('@github/copilot-sdk').CopilotSession;
-    if (state.cliSessionId) {
+    if (input.resumeId) {
       try {
-        session = await client.resumeSession(state.cliSessionId, config);
-      } catch (err: any) {
-        // Stale / expired sessionId is expected; SDK auth or RPC errors are not.
-        // Log so we can tell the difference when the user reports "no history
-        // restored after restart".
-        serverLog('error', 'copilot', 'resumeSession failed; falling back to createSession', { sessionId: state.cliSessionId, message: err?.message ?? err });
-        session = await client.createSession(config);
-      }
-    } else {
-      session = await client.createSession(config);
-    }
-    state.session = session;
-    state.cliSessionId = session.sessionId;
-    // Tell orchestrator to persist this so the next process can resume the
-    // same Copilot CLI session (CLI keeps session state on disk by sessionId).
-    currentSend?.({ type: 'context_patch', patch: { lastSdkSessionId: session.sessionId } });
-
-    // If user already picked a non-default mode before this session existed, apply it.
-    // Note: bypassPermissions has its own short-circuit in onPermissionRequest,
-    // so even if this rpc.mode.set silently fails, bypass still works.
-    const sdkMode = MODE_TO_SDK[currentPermissionMode];
-    if (sdkMode && sdkMode !== 'interactive') {
-      try {
-        await (session as any).rpc.mode.set({ mode: sdkMode });
-      } catch (err: any) {
-        // For bypass mode our onPermissionRequest short-circuit makes this
-        // failure harmless. For plan/default we'd silently be in interactive,
-        // which IS user-visible — log so we know.
-        serverLog('error', 'copilot', 'rpc.mode.set failed; user may be in interactive mode despite picked', { sdkMode, message: err?.message ?? err });
+        session = await driver.resume(c.agent, input.resumeId, opts);
+        sessionCwd = input.cwd;
+        sessionAppId = appId;
+        return session;
+      } catch {
+        // Resume rejected (session gone / unsupported) → fall through to new.
       }
     }
-
-    // Wire events to send fn. Copilot CLI's built-in tools (read_file, edit, bash, etc.)
-    // are used directly; we don't register custom tools.
-    session.on((event: any) => {
-      if (!currentSend) return;
-      diagTraceCopilotToolEvent(event);
-      switch (event.type) {
-        case 'assistant.message_delta':
-          if (event.data?.deltaContent) {
-            // Mint msgId on first delta of this text block; reuse until finalize.
-            if (currentTextMsgId === null) currentTextMsgId = mintMsgId();
-            currentSend({ type: 'stream', msgId: currentTextMsgId, streamType: 'text', content: event.data.deltaContent });
-          }
-          break;
-        case 'assistant.reasoning_delta':
-          if (event.data?.deltaContent) {
-            if (currentThinkingMsgId === null) currentThinkingMsgId = mintMsgId();
-            currentSend({ type: 'stream', msgId: currentThinkingMsgId, streamType: 'thinking', content: event.data.deltaContent });
-          }
-          break;
-        case 'assistant.message':
-          if (event.data?.content) {
-            // Use the streaming msgId if there was one; otherwise mint
-            // (covers the case where SDK skips deltas and sends final only).
-            const msgId = currentTextMsgId ?? mintMsgId();
-            currentSend({ type: 'message', msgId, msgType: 'reply', content: event.data.content });
-            currentTextMsgId = null;  // Reset for the next text block in this turn.
-          }
-          break;
-        case 'assistant.reasoning':
-          if (event.data?.content) {
-            const msgId = currentThinkingMsgId ?? mintMsgId();
-            currentSend({
-              type: 'message', msgId, msgType: 'fold_text',
-              label: 'Thinking',
-              body: { content: event.data.content, tone: 'muted' },
-            });
-            currentThinkingMsgId = null;
-          }
-          break;
-        case 'tool.execution_start': {
-          const toolName = event.data?.toolName ?? 'unknown';
-          const args = event.data?.arguments ?? {};
-          const toolUseId = event.data?.toolCallId ?? '';
-
-          // `task_complete` is end-of-turn signal — args.summary carries the
-          // assistant's final reply. Render as reply, skip matching result.
-          if (toolName === 'task_complete') {
-            const text = args.summary ?? args.text ?? args.message ?? args.content ?? '';
-            if (text) currentSend({ type: 'message', msgId: mintMsgId(), msgType: 'reply', content: text });
-            if (toolUseId) suppressedToolIds.add(toolUseId); // its complete has no entry — expected
-            break;
-          }
-
-          // `report_intent` announces "I'm about to do X" — render as `note`.
-          // Renderer adds the leading `▸` marker; provider sends pure content.
-          if (toolName === 'report_intent') {
-            if (typeof args.intent === 'string' && args.intent.length > 0) {
-              currentSend({ type: 'message', msgId: mintMsgId(), msgType: 'note', content: args.intent });
-            }
-            if (toolUseId) suppressedToolIds.add(toolUseId); // its complete has no entry — expected
-            break;
-          }
-
-          // `apply_patch` carries a raw unified-diff string (NOT object args).
-          // Try to normalize into one or more canonical file_edit cards (one
-          // per file, plus one per hunk in multi-hunk updates). Fall through
-          // to generic tool_use only when parser returns null (Delete /
-          // malformed / no parseable sections).
-          if (toolName === 'apply_patch' && typeof args === 'string') {
-            const parsed = parseApplyPatch(args);
-            if (parsed) {
-              // Each sub-card gets a distinct msgId so renderer's upsert
-              // doesn't collapse them. Prefix with toolUseId so the
-              // relationship is recoverable in logs.
-              const subs = parsed.map((spec, i) => ({
-                msgId: `${toolUseId}:f${i}`,
-                spec,
-              }));
-              inflightToolUses.set(toolUseId, { kind: 'apply_patch', subs });
-              for (const { msgId, spec } of subs) {
-                if (spec.kind === 'update') {
-                  currentSend({
-                    type: 'message', msgId, msgType: 'fold_diff',
-                    label: 'Edit',
-                    subtitle: stripCwd(spec.filePath, currentCwd ?? ''),
-                  });
-                } else {
-                  currentSend({
-                    type: 'message', msgId, msgType: 'fold_code',
-                    label: 'Add',
-                    subtitle: stripCwd(spec.filePath, currentCwd ?? ''),
-                  });
-                }
-              }
-              break;
-            }
-            // Parser refused. Two known-OK cases: Delete File (we don't
-            // support yet — see parseApplyPatch:164) and missing Begin/End
-            // markers in totally unrelated content. Anything else is a
-            // format drift worth diagnosing. Log so the raw preview tells us
-            // which case we hit without having to repro live.
-            if (!/\*\*\*\s+Delete\s+File:/.test(args)) {
-              serverLog('error', 'copilot', 'parseApplyPatch refused non-Delete content; falling back to raw display', { argsPreview: args.slice(0, 300) });
-            }
-          }
-
-          // Generic tool_use path → fold_code. For apply_patch fallback
-          // (multi-hunk / multi-file / Delete that parseApplyPatch refused),
-          // wrap the raw string into a one-shot `{ patch }` object so the
-          // formatter has something to chew on — output will be the raw patch
-          // text, ugly but not lost.
-          const argObj: Record<string, unknown> = typeof args === 'string'
-            ? { patch: args }
-            : args;
-          const input = formatCopilotToolInput(toolName, argObj, currentCwd ?? '');
-          inflightToolUses.set(toolUseId, { kind: 'tool_use', toolName, input });
-          currentSend({
-            type: 'message', msgId: toolUseId, msgType: 'fold_code',
-            label: toolName,
-            subtitle: input,
-          });
-          break;
-        }
-        case 'tool.execution_complete': {
-          const data = event.data ?? {};
-          const toolUseId = data.toolCallId ?? '';
-          const entry = inflightToolUses.get(toolUseId);
-          if (!entry) {
-            // task_complete / report_intent suppressed their tool_use on purpose
-            // → no entry expected (tracked in suppressedToolIds). ANY OTHER
-            // missing entry is an orphan: the tool_use was registered in a prior
-            // agent-server process/state (a session re-host emptied the map).
-            // Don't silently skip — fail loud + surface an error card so it's
-            // visible + diagnosable (Copilot's complete event carries no output,
-            // so we can only surface the error, not the result body).
-            if (suppressedToolIds.delete(toolUseId)) break;
-            serverLog('warn', 'copilot', 'orphan tool result: no inflight entry (map lost the tool_use — likely a session re-host)', {
-              toolUseId, isError: data.success === false,
-            });
-            currentSend({
-              type: 'message', msgId: toolUseId, msgType: 'fold_code',
-              label: 'Tool result',
-              errorMessage: 'Tool result arrived with no matching call (orphaned — see agent-server log).',
-            });
-            break;
-          }
-          inflightToolUses.delete(toolUseId);
-
-          const isError = data.success === false;
-          const cwd = currentCwd ?? '';
-          if (entry.kind === 'file_edit') {
-            if (entry.diff) {
-              currentSend({
-                type: 'message', msgId: toolUseId, msgType: 'fold_diff',
-                label: 'Edit',
-                subtitle: stripCwd(entry.filePath, cwd),
-                ...(isError
-                  ? { errorMessage: data.error?.message ?? 'edit failed' }
-                  : { body: { diff: entry.diff } }),
-              });
-            } else {
-              currentSend({
-                type: 'message', msgId: toolUseId, msgType: 'fold_code',
-                label: 'Write',
-                subtitle: stripCwd(entry.filePath, cwd),
-                ...(entry.content !== undefined ? { body: { content: entry.content } } : {}),
-                ...(isError ? { errorMessage: data.error?.message ?? 'edit failed' } : {}),
-              });
-            }
-          } else if (entry.kind === 'apply_patch') {
-            // Patch-level success/failure applies to every sub-card. SDK
-            // doesn't tell us which file caused failure (and apply_patch is
-            // typically all-or-nothing — validation fails before any write),
-            // so we mark every sub-card with the same result.
-            //
-            // Per-card error text intentionally stays generic ("apply_patch
-            // failed") — repeating the detailed SDK reason on N cards is
-            // visual noise; the top-level error message below carries the
-            // patch-level reason in detail.
-            const detailMsg = data.error?.message ?? 'unknown error';
-            for (const { msgId, spec } of entry.subs) {
-              if (spec.kind === 'update') {
-                currentSend({
-                  type: 'message', msgId, msgType: 'fold_diff',
-                  label: 'Edit',
-                  subtitle: stripCwd(spec.filePath, cwd),
-                  ...(isError
-                    ? { errorMessage: 'apply_patch failed' }
-                    : { body: { diff: spec.diff } }),
-                });
-              } else {
-                currentSend({
-                  type: 'message', msgId, msgType: 'fold_code',
-                  label: 'Add',
-                  subtitle: stripCwd(spec.filePath, cwd),
-                  body: { content: spec.content },
-                  ...(isError ? { errorMessage: 'apply_patch failed' } : {}),
-                });
-              }
-            }
-            if (isError) {
-              currentSend({
-                type: 'message', msgId: mintMsgId(), msgType: 'error',
-                content: `Patch operation failed: ${detailMsg}`,
-              });
-            }
-          } else {
-            // Use `content` (concise, what the LLM sees) over `detailedContent`
-            // (SDK-side rich UI returning reads as fake unified diffs).
-            const text = isError
-              ? (data.error?.message ?? 'tool failed')
-              : (data.result?.content ?? '');
-            currentSend({
-              type: 'message', msgId: toolUseId, msgType: 'fold_code',
-              label: entry.toolName,
-              subtitle: entry.input,
-              body: { content: String(text).slice(0, 8000) },
-              ...(isError ? { errorMessage: 'Tool returned an error' } : {}),
-            });
-          }
-          break;
-        }
-        case 'assistant.usage': {
-          const quotaSnapshots = event.data?.quotaSnapshots as Record<string, any> | undefined;
-          const rateLimits: StatusSegment[] = [];
-          if (quotaSnapshots) {
-            for (const [key, snap] of Object.entries(quotaSnapshots)) {
-              const seg = quotaSnapshotToSegment(key, snap);
-              if (seg) rateLimits.push(seg);
-            }
-          }
-          currentSend({
-            type: 'status', state: 'streaming',
-            model: currentModel,
-            inputTokens: event.data?.inputTokens,
-            outputTokens: event.data?.outputTokens,
-            ...(rateLimits.length > 0 ? { rateLimits } : {}),
-          });
-          break;
-        }
-        case 'session.usage_info': {
-          const cur = event.data?.currentTokens ?? 0;
-          const limit = event.data?.tokenLimit ?? 0;
-          latestUsage = {
-            currentTokens: cur,
-            tokenLimit: limit,
-            conversationTokens: event.data?.conversationTokens,
-            systemTokens: event.data?.systemTokens,
-            toolDefinitionsTokens: event.data?.toolDefinitionsTokens,
-            messagesLength: event.data?.messagesLength ?? 0,
-          };
-          if (limit > 0) {
-            const ratio = cur / limit;
-            currentSend({
-              type: 'status', state: 'streaming',
-              contextUsage: {
-                text: `ctx: ${Math.round(ratio * 100)}%`,
-                severity: severityFromUtilization(ratio),
-              },
-            });
-          }
-          break;
-        }
-        case 'session.skills_loaded':
-          // Snapshot the loaded skills for /skills (init-once; reconnect re-emits).
-          loadedSkills = Array.isArray(event.data?.skills) ? event.data.skills : [];
-          break;
-        case 'session.mcp_servers_loaded':
-          // Snapshot the loaded MCP servers for /mcp (init-once; reconnect re-emits).
-          loadedMcpServers = Array.isArray(event.data?.servers) ? event.data.servers : [];
-          break;
-        case 'session.mcp_server_status_changed':
-          // A server's connection status changed (connected/failed/disconnected)
-          // AFTER the initial load — re-fetch the authoritative list (debounced)
-          // so a later /mcp shows current status instead of the stale snapshot.
-          scheduleMcpRead();
-          break;
-        case 'session.plan_changed':
-          // Debounced fetch — multiple rapid changes coalesce into one read.
-          schedulePlanRead();
-          break;
-        case 'session.background_tasks_changed':
-          // Empty-payload ping → re-fetch the authoritative task list (debounced).
-          scheduleTaskRead();
-          break;
-        case 'system.notification':
-          // agent_completed / agent_idle / shell_completed / shell_detached_completed
-          // change task state without a background_tasks_changed — refresh the list
-          // so completion lands. Other kinds (inbox/instruction) are harmless no-ops.
-          scheduleTaskRead();
-          break;
-        case 'session.error': {
-          // ErrorData fields: message, errorType, errorCode, httpStatus,
-          // providerCallId, stack. Compose a human-readable string from
-          // whatever's present so the UI never shows "Unknown error".
-          const data = event.data ?? {};
-          const parts: string[] = [];
-          if (data.errorType) parts.push(`[${data.errorType}]`);
-          parts.push(data.message ?? 'Session error');
-          if (data.httpStatus) parts.push(`(HTTP ${data.httpStatus})`);
-          if (data.errorCode) parts.push(`code=${data.errorCode}`);
-          currentSend({ type: 'error', error: parts.join(' ') });
-          break;
-        }
-        case 'model.call_failure': {
-          // ModelCallFailureData uses `errorMessage` (NOT `message`); previous
-          // code looked for `message`/`error` and always fell through to
-          // "Unknown error". Surface statusCode + model to make these useful
-          // for debugging.
-          const data = event.data ?? {};
-          const parts: string[] = ['Model call failed'];
-          if (data.errorMessage) parts.push(`— ${data.errorMessage}`);
-          if (data.statusCode) parts.push(`(HTTP ${data.statusCode})`);
-          if (data.model) parts.push(`[${data.model}]`);
-          currentSend({ type: 'error', error: parts.join(' ') });
-          break;
-        }
-        default:
-          // Known-benign lifecycle types are knowingly ignored (see the set
-          // above). Only a genuinely NEW/unknown type warns — once — so real
-          // SDK drift (an event we ought to render) is visible without spamming
-          // the benign ones every turn. See background-tasks#5.
-          if (typeof event?.type === 'string'
-            && !KNOWN_IGNORED_COPILOT_EVENTS.has(event.type)
-            && !seenUnhandledCopilotEvents.has(event.type)) {
-            seenUnhandledCopilotEvents.add(event.type);
-            serverLog('warn', 'copilot', 'unrecognized session event type — not rendered (first occurrence)', { type: event.type });
-          }
-      }
-    });
+    session = await driver.startNew(c.agent, opts);
+    sessionCwd = input.cwd;
+    sessionAppId = appId;
+    // Cache the advertised config so set-mode / set-config-option can resolve ids
+    // and buildCapabilities() has the option lists.
+    sessionModes = session.newSessionResponse?.modes ?? undefined;
+    sessionConfigOptions = session.newSessionResponse?.configOptions ?? undefined;
+    send?.({ type: 'context_patch', patch: { lastSdkSessionId: session.sessionId } });
     return session;
   }
 
-  /**
-   * Cold-start fill of the /mcp /skills snapshot when the user runs the slash
-   * before sending any message. The skills_loaded / mcp_servers_loaded events
-   * fire on the first TURN, not on bare session creation — so in the cold-start
-   * window (no message sent yet) they never arrive. Instead of waiting on events,
-   * PULL the listings directly via the session RPC (`mcp.list()` / `skills.list()`,
-   * deterministic). The events still keep the snapshot fresh on later turns /
-   * reconnect. Idempotent — no-op once both snapshots are in; per-listing so a
-   * partial event fill is completed. Best-effort: a failed pull leaves the
-   * snapshot unset and the slash reports a load failure (fail-loud).
-   */
-  async function ensureLoadedContext(): Promise<void> {
-    if (loadedSkills !== undefined && loadedMcpServers !== undefined) return;
-    let session: import('@github/copilot-sdk').CopilotSession;
-    try {
-      session = await ensureSession();
-    } catch (err: any) {
-      serverLog('error', 'copilot', 'ensureLoadedContext: ensureSession failed', err?.message ?? err);
-      return;
-    }
-    const rpc = (session as any).rpc;
-    if (loadedMcpServers === undefined) {
-      try {
-        const res = await rpc.mcp.list();
-        loadedMcpServers = Array.isArray(res?.servers) ? res.servers : [];
-      } catch (err: any) {
-        serverLog('error', 'copilot', 'ensureLoadedContext: mcp.list() failed', err?.message ?? err);
-      }
-    }
-    if (loadedSkills === undefined) {
-      try {
-        const res = await rpc.skills.list();
-        loadedSkills = Array.isArray(res?.skills) ? res.skills : [];
-      } catch (err: any) {
-        serverLog('error', 'copilot', 'ensureLoadedContext: skills.list() failed', err?.message ?? err);
-      }
-    }
-  }
-
-  let planReadTimer: NodeJS.Timeout | null = null;
-  function schedulePlanRead() {
-    if (planReadTimer) return;
-    planReadTimer = setTimeout(async () => {
-      planReadTimer = null;
-      if (!state.session || !currentSend) return;
-      try {
-        const result = await (state.session as any).rpc.plan.read();
-        currentSend({
-          type: 'plan',
-          content: result?.exists ? (result.content ?? '') : '',
-        });
-      } catch (err: any) {
-        // Polled on every plan_changed event (debounced 150ms). Failure means
-        // plan panel won't update — could be transient (mid-rebuild) or a
-        // breaking SDK change. Logging gives us the diagnosis path.
-        serverLog('error', 'copilot', 'rpc.plan.read failed; plan panel may be stale', err?.message ?? err);
-      }
-    }, 150);
-  }
-
-  // Background tasks (background-tasks#2). Unlike claude (task_* system messages in
-  // the turn stream), copilot signals list changes via `session.background_tasks_changed`
-  // and `system.notification` events — we (debounced) re-fetch the authoritative
-  // list via rpc.tasks.list() and emit a turnId-less `task_event` snapshot.
-  // currentSend is never nulled, so this works even when a backgrounded task
-  // settles between turns; task_event is turnId-exempt → routed via onTaskEvent.
-  let taskReadTimer: NodeJS.Timeout | null = null;
-  function scheduleTaskRead() {
-    if (taskReadTimer) return;
-    taskReadTimer = setTimeout(async () => {
-      taskReadTimer = null;
-      if (!state.session || !currentSend) return;
-      try {
-        const list = await (state.session as any).rpc.tasks.list();
-        const tasks = (list?.tasks ?? [])
-          .filter(isBackgroundedCopilotTask)
-          .map(normalizeCopilotTask)
-          .filter((t: unknown): t is NonNullable<typeof t> => t !== null)
-          // Subagents (type 'agent') live in the message list, not the background
-          // panel — parity with claude. The panel is for fire-and-forget shell work.
-          // See subagent-display.
-          .filter((t: NonNullable<ReturnType<typeof normalizeCopilotTask>>) => t.type !== 'agent');
-        currentSend({ type: 'task_event', kind: 'snapshot', tasks });
-      } catch (err: any) {
-        serverLog('error', 'copilot', 'rpc.tasks.list failed; task panel may be stale', err?.message ?? err);
-      }
-    }, 150);
-  }
-
-  // MCP server status: copilot signals connection-status changes via
-  // `session.mcp_server_status_changed` (after the initial mcp_servers_loaded).
-  // Re-fetch the authoritative list (debounced) into the /mcp snapshot so a
-  // later slash reflects the live status. Snapshot-only — no live MCP panel, so
-  // nothing is pushed to the renderer here; the refreshed value is read on /mcp.
-  let mcpReadTimer: NodeJS.Timeout | null = null;
-  function scheduleMcpRead() {
-    if (mcpReadTimer) return;
-    mcpReadTimer = setTimeout(async () => {
-      mcpReadTimer = null;
-      if (!state.session) return;
-      try {
-        const res = await (state.session as any).rpc.mcp.list();
-        loadedMcpServers = Array.isArray(res?.servers) ? res.servers : [];
-      } catch (err: any) {
-        serverLog('error', 'copilot', 'rpc.mcp.list failed; /mcp snapshot may be stale', err?.message ?? err);
-      }
-    }, 150);
-  }
-
-  // Turn-end safety net: finalize any tool cards still in-flight when the turn
-  // settled (idle / error / abort). Their `tool.execution_complete` never came
-  // — the Copilot CLI's rg/grep tool can hang internally and never return,
-  // leaving the card spinning forever with no error (fail-silent). Emit a loud
-  // terminal card per orphan so the spinner resolves, then clear the map. No-op
-  // when nothing is in flight (the common case).
-  function finalizeOrphanedToolCards(send: SendFn): void {
-    if (inflightToolUses.size === 0) return;
-    const entries = [...inflightToolUses];
-    inflightToolUses.clear();
-    serverLog('warn', 'copilot', 'finalizing orphaned tool cards (turn ended, no tool.execution_complete) '
-      + JSON.stringify({ count: entries.length, ids: entries.map(([id]) => id) }));
-    const msgs = buildOrphanFinalizeMessages(
-      entries,
-      currentCwd ?? '',
-      'Tool did not complete — the turn ended while it was still running (it may have hung).',
-    );
-    for (const m of msgs) send({ type: 'message', ...m });
-  }
-
-  async function listModelsCached(): Promise<CachedModel[]> {
-    const client = await ensureClient();
-    const list = await client.listModels();
-    state.models = list.map((m: any) => ({
-      id: m.id ?? m.name ?? String(m),
-      name: m.name ?? m.id,
-      supportedReasoningEfforts: m.supportedReasoningEfforts,
-      defaultReasoningEffort: m.defaultReasoningEffort,
-    }));
-    return state.models;
-  }
-
-  /**
-   * Internal slash dispatcher. Sole entry point is `query()` — when the
-   * prompt parses as `/cmd args`, query() routes here before any SDK call.
-   *
-   * Slash output is emitted as `slash_response` messages (pending → terminal
-   * status, same msgId for upsert). For slashes that touch session state
-   * (compact, clear), the critical-section is wrapped in `critical()` so
-   * concurrent stop() calls don't leave the session half-modified.
-   *
-   * `/model` is intentionally NOT handled here — it's a renderer-local
-   * config-edit slash (see src/renderer/components/AgentView.tsx
-   * RENDERER_LOCAL_SLASHES). Renderer intercepts before send IPC fires;
-   * if a /model slash somehow reaches this dispatcher, it falls into the
-   * default "unknown command" branch — that's intentional, signals the
-   * routing layer above failed.
-   */
-  async function dispatchSlash(cmd: string, args: string, send: SendFn): Promise<void> {
-    const label = `/${cmd}`;
-    // Provider-side helpers — wire shape uses fold_markdown:
-    //  - pending: no body, no errorMessage (renderer shows running indicator)
-    //  - success: body present (markdown content)
-    //  - error:   errorMessage present; body optional when there's extra detail
-    const emitPending = (msgId: string) => {
-      send({ type: 'message', msgId, msgType: 'fold_markdown', label });
-    };
-    const emitSuccess = (msgId: string, content: string) => {
-      send({ type: 'message', msgId, msgType: 'fold_markdown', label, body: { content } });
-    };
-    const emitError = (msgId: string, errorMessage: string, content?: string) => {
-      send({
-        type: 'message', msgId, msgType: 'fold_markdown', label,
-        errorMessage,
-        ...(content ? { body: { content } } : {}),
-      });
-    };
-    // Config edits (model/effort/permission) are status transitions, not slash
-    // content — render them as a centered `system` divider via the shared
-    // formatConfigAck, matching Claude's applyConfigEdit. Failures still surface
-    // as a plain `error` message with the SDK's reason.
-    const emitConfigAck = (key: ConfigEditKey, value: string) => {
-      send({ type: 'message', msgId: mintMsgId(), msgType: 'system', content: formatConfigAck(key, value) });
-    };
-    const emitConfigError = (reason: string) => {
-      send({ type: 'message', msgId: mintMsgId(), msgType: 'error', content: reason });
-    };
-
-    switch (cmd) {
-      case 'help': {
-        const msgId = mintMsgId();
-        const lines = SLASH_COMMANDS.map((c) => `- /${c.name} — ${c.description}`).join('\n');
-        emitSuccess(msgId, `Available commands:\n${lines}`);
-        return;
-      }
-
-      // /mcp /skills: read-only listing, emitted as a plain `reply`. Snapshot is
-      // filled by the loaded events (later turns) or pulled on cold-start via
-      // ensureLoadedContext.
-      //
-      // The in-process Shelf bridge is registered as `config.tools` (NOT an MCP
-      // server in Copilot's model), so it never appears in `mcp.list()`. Surface
-      // it explicitly — with its tools — for usability + parity with Claude
-      // (where the SDK reports it as the in-process `shelf` MCP server). Always
-      // shown; a failed real-server pull adds a fail-loud note but never hides
-      // the bridge. See skills#3 / agent-providers#6.
-      case 'mcp': {
-        await ensureLoadedContext();
-        const shelf = { name: 'shelf', status: 'connected', source: 'in-process', tools: SHELF_BRIDGE_TOOLS };
-        const servers = [...(loadedMcpServers ?? []), shelf];
-        let content = formatCopilotMcpCard(servers);
-        if (loadedMcpServers === undefined) content += '\n\n_Could not load configured MCP servers (showing the built-in bridge only)._';
-        send({ type: 'message', msgId: mintMsgId(), msgType: 'reply', content });
-        return;
-      }
-      case 'skills': {
-        await ensureLoadedContext();
-        const content = loadedSkills === undefined
-          ? 'Could not load the skills list — the session failed to initialize.'
-          : formatCopilotSkillsCard(loadedSkills);
-        send({ type: 'message', msgId: mintMsgId(), msgType: 'reply', content });
-        return;
-      }
-
-      case 'context': {
-        const msgId = mintMsgId();
-        emitPending(msgId);
-        if (!latestUsage) {
-          emitError(msgId, 'No context info yet. Send a message first.');
-          return;
-        }
-        const u = latestUsage;
-        const pct = u.tokenLimit > 0 ? Math.round((u.currentTokens / u.tokenLimit) * 100) : 0;
-        const fmt = (n?: number) => n != null ? n.toLocaleString() : '-';
-        const lines = [
-          `Context: ${fmt(u.currentTokens)} / ${fmt(u.tokenLimit)} tokens (${pct}%)`,
-          `Messages: ${u.messagesLength}`,
-          `  - Conversation: ${fmt(u.conversationTokens)}`,
-          `  - System: ${fmt(u.systemTokens)}`,
-          `  - Tools: ${fmt(u.toolDefinitionsTokens)}`,
-        ];
-        emitSuccess(msgId, lines.join('\n'));
-        return;
-      }
-
-      case 'compact': {
-        const msgId = mintMsgId();
-        emitPending(msgId);
-        if (!state.session) {
-          emitError(msgId, 'No active session to compact.');
-          return;
-        }
-        try {
-          await critical(async () => {
-            const result = await (state.session as any).rpc.history.compact();
-            if (!result?.success) {
-              emitError(msgId, 'Compaction failed');
-              return;
-            }
-            const removed = result.tokensRemoved?.toLocaleString() ?? '?';
-            const msgs = result.messagesRemoved ?? 0;
-            emitSuccess(msgId, `Compacted: freed ${removed} tokens across ${msgs} messages.`);
-          });
-        } catch (err: any) {
-          emitError(msgId, `Compact failed: ${err?.message ?? err}`);
-        }
-        return;
-      }
-
-      case 'clear': {
-        const msgId = mintMsgId();
-        emitPending(msgId);
-        try {
-          await critical(async () => {
-            const hadSession = !!state.session || !!state.cliSessionId;
-            try {
-              await state.session?.disconnect();
-            } catch (err: any) {
-              serverLog('error', 'copilot', 'session.disconnect() failed during /clear rebuild', err?.message ?? err);
-            }
-            state.session = null;
-            state.cliSessionId = null;
-            latestUsage = null;
-            inflightToolUses.clear();
-            suppressedToolIds.clear();
-            send({ type: 'context_patch', patch: { lastSdkSessionId: null } });
-            send({ type: 'plan', content: '' });
-            if (hadSession) {
-              try {
-                await ensureSession();
-              } catch (err: any) {
-                emitError(msgId, `Cleared, but failed to start new session: ${err?.message ?? err}`);
-                return;
-              }
-            }
-            emitSuccess(msgId, 'Context cleared');
-          });
-        } catch (err: any) {
-          emitError(msgId, `Clear failed: ${err?.message ?? err}`);
-        }
-        return;
-      }
-
-      // Renderer dispatches /model /effort /permission here when the user
-      // types them with args (without args opens a renderer-side picker
-      // from capabilities). Provider is the single source of truth for
-      // whether the switch took effect — we apply imperatively against
-      // the session and emit a fold_markdown pending → success/error
-      // card just like /help, /clear, etc. After success we also
-      // re-broadcast capabilities so the renderer's actualModel updates
-      // (and its capability-driven persist effect saves to projectConfig).
-      case 'model': {
-        if (!args) {
-          emitConfigError('Usage: /model <model-id>');
-          return;
-        }
-        try {
-          if (state.session) {
-            const supported = effortsFor(args);
-            const nextEffort = currentEffort && supported.includes(currentEffort)
-              ? currentEffort
-              : modelMeta(args)?.defaultReasoningEffort;
-            await state.session.setModel(
-              args,
-              nextEffort ? { reasoningEffort: nextEffort as any } : undefined,
-            );
-            currentEffort = nextEffort;
-          }
-          // closure update only after SDK accepted — if setModel throws,
-          // currentModel stays consistent with the active session.
-          currentModel = args;
-          currentSend?.({ type: 'capabilities', ...buildCapabilities() });
-          emitConfigAck('model', args);
-        } catch (err: any) {
-          emitConfigError(`Failed to switch model: ${err?.message ?? err}`);
-        }
-        return;
-      }
-
-      case 'effort': {
-        if (!args) {
-          emitConfigError('Usage: /effort <level>');
-          return;
-        }
-        try {
-          if (state.session) {
-            await state.session.setModel(currentModel, { reasoningEffort: args as any });
-          }
-          currentEffort = args;
-          currentSend?.({ type: 'capabilities', ...buildCapabilities() });
-          emitConfigAck('effort', args);
-        } catch (err: any) {
-          emitConfigError(`Failed to set effort: ${err?.message ?? err}`);
-        }
-        return;
-      }
-
-      case 'permission': {
-        if (!args) {
-          emitConfigError('Usage: /permission <mode>');
-          return;
-        }
-        // Translate our shared app vocab (PermissionModeId) → Copilot SDK's
-        // session mode. No mapping = no SDK action we can take for this value
-        // (invalid, or a valid app mode Copilot doesn't support e.g.
-        // acceptEdits) — report it rather than silently claiming success.
-        const sdkMode = MODE_TO_SDK[args];
-        if (!sdkMode) {
-          emitConfigError(`Unknown permission mode "${args}". Valid: ${Object.keys(MODE_TO_SDK).join(', ')}`);
-          return;
-        }
-        try {
-          if (state.session) {
-            await (state.session as any).rpc.mode.set({ mode: sdkMode });
-          }
-          currentPermissionMode = args;
-          currentSend?.({ type: 'capabilities', ...buildCapabilities() });
-          emitConfigAck('permissionMode', args);
-        } catch (err: any) {
-          emitConfigError(`Failed to set permission mode: ${err?.message ?? err}`);
-        }
-        return;
-      }
-
-      default: {
-        const msgId = mintMsgId();
-        emitError(msgId, `Unknown command: /${cmd}`);
-        return;
-      }
-    }
-  }
-
   return {
-    async gatherCapabilities(
-      _cwd: string,
-      sessionId?: string,
-      _customModels?: ProviderModel[],
-      intent?: { model?: string; effort?: string; permissionMode?: string },
-      cache?: ModelCacheClient,
-    ): Promise<ProviderCapabilities> {
-      // Copilot SDK validates model names against GitHub's model API; user-provided
-      // custom IDs would be rejected at runtime, so we ignore customModels here.
-      if (sessionId) currentSessionId = sessionId;
-      // Auth probe (provider-internal detail). Copilot exposes a first-class
-      // getAuthStatus() → { isAuthenticated }, so unlike Claude we need no
-      // warmup/heuristic — but the SHARED contract is still just `authRequired`
-      // on caps; main/renderer stay provider-agnostic. A probe error is treated
-      // as unknown (don't block the pane); a real failure still surfaces
-      // mid-turn via query()'s auth_required emit.
-      let authRequired = false;
+    async query(input: QueryInput, send: SendFn): Promise<void> {
+      currentSend = send;
       try {
-        const client = await ensureClient();
-        const status = await client.getAuthStatus();
-        authRequired = !status.isAuthenticated;
-      } catch (err: any) {
-        serverLog('error', 'copilot', 'getAuthStatus failed; treating as unknown (not blocking)', err?.message ?? err);
-      }
-      // listModels hits the GitHub model API — only fetch when authed. Logged
-      // out it would throw/hang, and AuthPane covers the pane anyway.
-      // Fail-loud + rethrow: if this network call throws, gatherCapabilities
-      // throws → remote.ts rejects the caps RPC → init 'failed' (agent-config-flow#7).
-      // The loud log names the cause instead of it vanishing into a caps failure.
-      if (!authRequired) {
-        // Cache-aside (group E): a per-host dispatcher cache lets `listModels`
-        // (~1.3s network) be fetched ONCE per host and shared across its tabs.
-        // HIT → use the cached blob (skip the fetch); MISS → fetch + write back.
-        // Best-effort: any cache error falls through to a normal fetch. Freshness
-        // is TTL-only (no account-guard — see model-cache.ts).
-        let usedCache = false;
-        if (cache) {
-          try {
-            const c = await cache.get('models', 'copilot');
-            if (c.hit && Array.isArray(c.value)) {
-              state.models = c.value as CachedModel[];
-              usedCache = true;
-              // Verification log (group E): a HIT means listModels was SKIPPED —
-              // the whole point of the dispatcher cache (2nd+ tab on a host).
-              serverLog('info', 'caps', `copilot models cache HIT (${state.models.length} models) — SKIPPED listModels`);
-            } else {
-              serverLog('info', 'caps', 'copilot models cache MISS — will fetch listModels');
-            }
-          } catch (err: any) {
-            serverLog('warn', 'caps', `copilot models cache get failed (will fetch): ${err?.message ?? err}`);
-          }
-        } else {
-          serverLog('debug', 'caps', 'copilot models: no dispatcher cache (direct spawn) — fetching listModels');
+        // A config-edit turn (picker / status-bar) carries no prompt — apply it
+        // imperatively (set-mode / set-config-option) and return, rather than
+        // driving an empty prompt. Prompt-turn pref changes go via the imperative
+        // setters (orchestrator applyPrefDiff), not here.
+        if (input.configEdit) {
+          await ensureSession({ cwd: input.cwd, appId: input.appId, resumeId: input.restoreContext?.lastSdkSessionId }, send);
+          await applyConfigEdit(input.configEdit.key, input.configEdit.value, send);
+          return;
         }
-        if (!usedCache) {
-          try {
-            await listModelsCached();
-          } catch (err: any) {
-            serverLog('error', 'caps', `copilot listModels threw (caps RPC will fail → init failed): ${err?.message ?? err}`);
-            throw err;
-          }
-          if (cache) {
-            cache.put('models', 'copilot', state.models);
-            serverLog('info', 'caps', `copilot models fetched (${state.models.length}) → wrote back to dispatcher cache`);
-          }
-        }
+        const s = await ensureSession(
+          { cwd: input.cwd, appId: input.appId, resumeId: input.restoreContext?.lastSdkSessionId },
+          send,
+        );
+        await driver.drivePromptTurn(conn!.agent, s, input.prompt, send, input.images);
+      } catch (err) {
+        send({ type: 'error', error: `copilot: ${(err as Error)?.message ?? String(err)}` });
+      } finally {
+        currentSend = null;
+        send({ type: 'status', state: 'idle' });
       }
-      // Seed closures from renderer's saved intent BEFORE buildCapabilities so
-      // the first `currentPermissionMode` (and model/effort) the renderer sees
-      // after a reconnect matches projectConfig.agentPrefs instead of the
-      // hardcoded provider defaults. No `session.setX` calls — state.session
-      // doesn't exist yet at this point; the closure values flow into
-      // createSession config on the next query() turn.
+    },
+
+    async gatherCapabilities(
+      cwd: string,
+      _sessionId?: string,
+      _customModels?: unknown,
+      intent?: { model?: string; effort?: string; permissionMode?: string },
+      _cache?: unknown,
+      appId?: string,
+    ): Promise<ProviderCapabilities> {
+      // appId now rides caps → the CLI spawn below already gets the per-app
+      // COPILOT_HOME (config-home isolation), and login (which follows caps) can
+      // reuse it via lastAppId.
+      if (appId) lastAppId = appId;
+      // Seed current* from the renderer's saved prefs BEFORE building caps, so the
+      // first reported values reflect the user's choice rather than the agent's
+      // default (matches the ServerBackend `intent` contract).
       if (intent?.model) currentModel = intent.model;
       if (intent?.effort) currentEffort = intent.effort;
       if (intent?.permissionMode) currentPermissionMode = intent.permissionMode;
-      if (!currentEffort) currentEffort = modelMeta(currentModel)?.defaultReasoningEffort;
-      return { ...buildCapabilities(), authRequired };
-    },
-
-    async query(input: QueryInput, send: SendFn) {
-      currentSend = send;
-      // Reset per-turn streaming msgId state — prior turn's leftover would
-      // otherwise let chunks from this turn attach to a stale msgId.
-      currentTextMsgId = null;
-      currentThinkingMsgId = null;
-
-      // Capture cwd / appId up front (first value wins) so they land in the
-      // createSession config — including when a cold-start /mcp /skills slash
-      // calls ensureSession via ensureLoadedContext below, BEFORE any real turn.
-      if (input.cwd && !currentCwd) currentCwd = input.cwd;
-      if (input.appId && !currentAppId) currentAppId = input.appId;
-
-      // Slash / config-edit detection. Both bypass normal SDK setup and route
-      // to dispatchSlash:
-      //   - typed `/model X` etc. → parseSlashPrefix(prompt)
-      //   - structured config-edit turn (picker / status-bar) → input.configEdit
-      //     with an empty prompt. Without handling this explicitly the empty
-      //     prompt falls through to a normal SDK send, silently continuing the
-      //     conversation and never applying the change or emitting a card.
-      // Converges both entry points onto one imperative apply (agent-config-flow#5).
-      // configEdit.key 'permissionMode' maps to the '/permission' slash.
-      const slash = input.configEdit
-        ? { cmd: input.configEdit.key === 'permissionMode' ? 'permission' : input.configEdit.key, args: input.configEdit.value }
-        : parseSlashPrefix(input.prompt);
-      // No-op guard: a config edit whose value already equals the live setting
-      // (re-picking the selected model/effort/permission, or `/model <current>`)
-      // isn't a change — skip the status flicker + divider for something that
-      // didn't move. Closure holds the true prior value at this point.
-      if (slash && (
-        (slash.cmd === 'model' && slash.args === currentModel) ||
-        (slash.cmd === 'effort' && slash.args === currentEffort) ||
-        (slash.cmd === 'permission' && slash.args === currentPermissionMode)
-      )) return;
-      if (slash) {
-        send({ type: 'status', state: 'streaming', model: currentModel });
-        try {
-          await dispatchSlash(slash.cmd, slash.args, send);
-        } finally {
-          // Slash idle deliberately omits cost / tokens / numTurns /
-          // contextUsage — renderer keeps last real turn's metric values.
-          send({ type: 'status', state: 'idle' });
-        }
-        return;
-      }
-      // Hydrate cliSessionId from orchestrator-provided context. Only the
-      // first turn after a process restart needs this — once we've created
-      // or resumed a session in-memory, we don't clobber.
-      if (!state.cliSessionId && input.restoreContext?.lastSdkSessionId) {
-        state.cliSessionId = input.restoreContext.lastSdkSessionId;
-      }
-      // Pref sync (model / effort / permissionMode) is handled by the
-      // orchestrator's applyPrefDiff before query() runs — see
-      // agent-server/index.ts. By this point closure currentModel /
-      // currentEffort / currentPermissionMode already match input, so we
-      // don't need to do the diff here anymore.
-      if (input.sessionId) currentSessionId = input.sessionId;
-      // cwd / appId already captured at the top of query() (first value wins).
-      // Copilot CLI has no rpc.cwd.set, so a mid-session cwd change doesn't
-      // recreate the session — most users stay in one project per session.
-
-      send({ type: 'status', state: 'streaming', model: currentModel });
-
       try {
-        const session = await ensureSession();
-        // Forward attached images as SDK `blob` attachments — without this the
-        // model never sees pasted/attached images (previously only `prompt` was
-        // sent). Unconditional: if the model can't do vision the agent errors
-        // itself; Shelf does not pre-gate on a `vision` flag.
-        const attachments = imagesToBlobAttachments(input.images);
-        // SDK default timeout is 60s, way too short for agent turns that
-        // chain tool calls (file reads, greps, shell). 30 min is a generous
-        // upper bound that still catches genuinely-stuck sessions.
-        await session.sendAndWait(
-          { prompt: input.prompt, ...(attachments.length ? { attachments } : {}) },
-          30 * 60 * 1000,
-        );
-        send({ type: 'status', state: 'idle', model: currentModel });
-      } catch (err: any) {
-        const msg = err?.message ?? String(err);
-        if (msg.includes('not authenticated') || msg.includes('auth')) {
-          send({ type: 'auth_required', provider: 'copilot' });
-        } else {
-          send({ type: 'error', error: `Copilot error: ${msg}` });
+        const s = await ensureSession({ cwd, appId }, null);
+        // `available_commands_update` arrives out-of-turn just AFTER session/new,
+        // so it may not be captured yet. Briefly wait for it (bounded) so the
+        // slash-command autocomplete isn't empty on the first caps fetch. Resolves
+        // as soon as it lands (~a few ms); caps have no requestId to push later.
+        for (let i = 0; i < 20 && !driver.getAvailableCommands(s.sessionId); i++) {
+          await new Promise((r) => setTimeout(r, 10));
         }
-        send({ type: 'status', state: 'idle' });
-      } finally {
-        // Runs on every turn-end path (success / error / timeout / abort): any
-        // tool card still in-flight here never got its completion → finalize it
-        // so the UI never shows an eternal spinner.
-        finalizeOrphanedToolCards(send);
+        // Fill any current* the renderer didn't pin from the agent's live values.
+        const cur = currentSelections({ modes: sessionModes, configOptions: sessionConfigOptions });
+        currentModel ??= cur.currentModel;
+        currentEffort ??= cur.currentEffort;
+        currentPermissionMode ??= copilotModeIdToShelf(sessionModes?.currentModeId);
+        return buildCapabilities();
+      } catch {
+        // A fresh session most commonly fails when unauthenticated → surface the
+        // auth pane rather than an empty capability set.
+        return { models: [], permissionModes: [], effortLevels: [], slashCommands: [], authRequired: true };
       }
     },
 
-    async stop() {
-      // Silently ignore while provider is in a non-cancellable critical
-      // section (compact in flight, /clear's dispose+rebuild window).
-      // Interrupting mid-way would leave session state half-modified.
-      if (!stoppable) return;
-      for (const resolve of pendingPermissions.values()) {
-        resolve({ behavior: 'deny', message: 'Stopped by user' });
-      }
-      pendingPermissions.clear();
-      try {
-        await state.session?.abort();
-      } catch (err: any) {
-        serverLog('error', 'copilot', 'session.abort() failed during stop()', err?.message ?? err);
-      }
+    setModel(model: string): Promise<void> { return applyModel(model); },
+    setEffort(effort: string): Promise<void> { return applyEffort(effort); },
+    setPermissionMode(mode: string): Promise<void> { return applyPermissionMode(mode); },
+
+    resolvePermission(toolUseId: string, allow: boolean, message?: string, scope?: 'once' | 'session'): void {
+      permissions.resolvePermission(toolUseId, allow, message, scope);
     },
 
     /**
-     * Start the interactive OAuth device flow by spawning `copilot login`. The
-     * CLI prints a verification URL + user code (parsed out and forwarded as
-     * `auth_login_prompt` so the LOCAL Shelf can open the browser — necessary for
-     * the remote case) then polls; on authorization it writes the credential to
-     * the machine it runs on and exits 0, which we report as `auth_login_done`.
-     * Fire-and-forget: resolution is delivered via `send`, not the return value.
+     * Device-flow login, out-of-band from ACP: drive `copilot login` (same binary
+     * as `copilot --acp`), surface the verification URL + code via
+     * `auth_login_prompt`, and report the outcome via `auth_login_done`. The CLI
+     * persists its own credentials; the ACP session reuses that ambient auth on
+     * its next turn. Reuses native copilot's login drive (same CLI).
      */
-    startLogin(cwd: string, send: SendFn) {
-      const cliPath = resolveCopilotCliPath();
-      if (!cliPath) {
-        send({ type: 'auth_login_done', provider: 'copilot', ok: false, error: 'GitHub Copilot CLI not found.' });
-        return;
-      }
-      // Only one login at a time — cancel any stale runner first.
-      if (loginRunner) {
-        loginRunner.cancel();
-        loginRunner = null;
-      }
-      const runner = runLogin({
-        cliPath,
-        onPrompt: (p) => {
-          send({
-            type: 'auth_login_prompt',
-            provider: 'copilot',
-            verificationUri: p.verificationUri,
-            userCode: p.userCode,
-            prefilledUri: prefillLoginUrl(p),
-          });
-        },
-        log: (level, msg) => serverLog(level, 'copilot-login', msg),
-      });
-      loginRunner = runner;
-      void runner.done.then(async (res) => {
-        // Ignore a stale runner's result if a newer login superseded it.
-        if (loginRunner !== runner) return;
-        loginRunner = null;
-        // On success, tear down the cached SDK client + session. The runtime was
-        // spawned UNAUTHENTICATED at the first ensureClient (the tab-open auth
-        // probe, before this login) and never re-reads the credential — so the
-        // next turn would keep using it and fail with "No authentication info
-        // available" until a manual reconnect. Dropping it here makes the next
-        // ensureSession() spawn a fresh runtime that picks up the just-stored
-        // login. critical() so a concurrent turn can't interleave the rebuild.
-        if (res.ok) {
-          await critical(async () => {
-            try { await state.session?.disconnect(); }
-            catch (err: any) { serverLog('error', 'copilot', 'session.disconnect() after login failed', err?.message ?? err); }
-            try { await state.client?.stop(); }
-            catch (err: any) { serverLog('error', 'copilot', 'client.stop() after login failed', err?.message ?? err); }
-            state.session = null;
-            state.client = null;
-          });
-        }
-        send({ type: 'auth_login_done', provider: 'copilot', ok: res.ok, cancelled: res.cancelled, error: res.error });
-      });
-    },
-
-    /** Cancel a running interactive login (kills the child). No-op if none. */
-    cancelLogin() {
+    startLogin(_cwd: string, send: SendFn): void {
       loginRunner?.cancel();
+      let cliPath: string;
+      try {
+        cliPath = resolveCopilotCommand().command;
+      } catch (err) {
+        send({ type: 'auth_login_done', provider: COPILOT_PROVIDER, ok: false, error: (err as Error)?.message ?? String(err) });
+        return;
+      }
+      // Log into the per-app COPILOT_HOME so credentials land in the same config-
+      // home the `--acp` session reads. lastAppId is set by the preceding caps
+      // call (auth pane only shows after gatherCapabilities returns authRequired).
+      if (!lastAppId) serverLog('warn', 'copilot', 'startLogin: appId unknown — login will use the default COPILOT_HOME, not the per-app dir');
+      loginRunner = startCopilotLogin({
+        cliPath,
+        env: copilotEnv(lastAppId),
+        onPrompt: (p) => send({
+          type: 'auth_login_prompt',
+          provider: COPILOT_PROVIDER,
+          verificationUri: p.verificationUri,
+          userCode: p.userCode,
+          prefilledUri: prefillLoginUrl(p),
+        }),
+      });
+      loginRunner.done.then((r) => send({
+        type: 'auth_login_done',
+        provider: COPILOT_PROVIDER,
+        ok: r.ok,
+        cancelled: r.cancelled,
+        error: r.error,
+      }));
     },
 
-    dispose() {
-      // A login child is NOT reaped by the task reaper (it's not an SDK task) —
-      // kill it here so a pending device flow doesn't outlive the backend.
-      try {
-        loginRunner?.cancel();
-      } catch (err: any) {
-        serverLog('error', 'copilot', 'loginRunner.cancel() failed during dispose()', err?.message ?? err);
-      }
+    cancelLogin(): void {
+      loginRunner?.cancel();
       loginRunner = null;
-      try {
-        state.session?.disconnect();
-      } catch (err: any) {
-        serverLog('error', 'copilot', 'session.disconnect() failed during dispose()', err?.message ?? err);
-      }
-      try {
-        state.client?.stop();
-      } catch (err: any) {
-        serverLog('error', 'copilot', 'client.stop() failed during dispose()', err?.message ?? err);
-      }
-      state.session = null;
-      state.client = null;
     },
 
-    resetSession(_sessionId: string) {
-      // Drop in-memory session refs so the next query() starts a fresh CLI
-      // session instead of trying to resume from a now-deleted lastSdkSessionId.
-      // Disconnect best-effort; the live session is being abandoned anyway.
-      try {
-        state.session?.disconnect();
-      } catch (err: any) {
-        serverLog('error', 'copilot', 'session.disconnect() failed during resetSession', err?.message ?? err);
-      }
-      state.session = null;
-      state.cliSessionId = null;
-      latestUsage = null;
-      inflightToolUses.clear();
-      suppressedToolIds.clear();
-    },
-
-    async readTaskOutput(taskId: string): Promise<string> {
-      if (!state.session) throw new Error('No active Copilot session');
-      const list = await (state.session as any).rpc.tasks.list();
-      const task = (list?.tasks ?? []).find((t: any) => t?.id === taskId);
-      if (!task) {
-        // DIAGNOSTIC: a carded task can't be found in the live task list. Likely a
-        // stale card from a previous session / provider switch, or an id mismatch.
-        // Log the known ids so we can see what the list DID contain.
-        serverLog('warn', 'copilot', 'readTaskOutput: task not found ' + JSON.stringify({ task_id: taskId, known_ids: (list?.tasks ?? []).map((t: any) => t?.id) }));
-        throw new Error(`No task ${taskId}`);
-      }
-      // Shell tasks write a detached log file (read it ON the remote — main/
-      // renderer never touch remote fs). Agent tasks carry their output inline.
-      if (task.type === 'shell') {
-        if (typeof task.logPath !== 'string' || !task.logPath) {
-          serverLog('warn', 'copilot', 'readTaskOutput: shell task has no logPath ' + JSON.stringify({ task_id: taskId, status: task.status }));
-          throw new Error('Task has no log file');
-        }
-        const MAX = 256 * 1024;
-        const buf = await fs.promises.readFile(task.logPath);
-        if (buf.length > MAX) {
-          return buf.subarray(buf.length - MAX).toString('utf8')
-            + `\n\n… (truncated — showing last ${MAX / 1024}KB of ${Math.round(buf.length / 1024)}KB)`;
-        }
-        return buf.toString('utf8');
-      }
-      if (task.result == null && task.latestResponse == null) {
-        serverLog('warn', 'copilot', 'readTaskOutput: non-shell task has no inline result ' + JSON.stringify({ task_id: taskId, type: task.type, status: task.status }));
-      }
-      return task.result ?? task.latestResponse ?? '(no output)';
-    },
-
-    /**
-     * Enumerate backgrounded SHELL tasks for the reaper. Only shell tasks detach
-     * (`setsid`) out of the tree; agent tasks live inline. Read-only snapshot.
-     */
-    async listReapableTasks(): Promise<ReapableTask[]> {
-      if (!state.session) return [];
-      try {
-        const list = await (state.session as any).rpc.tasks.list();
-        return (list?.tasks ?? [])
-          .filter(isBackgroundedCopilotTask)
-          .filter((t: any) => t?.type === 'shell' && typeof t?.id === 'string' && t.id)
-          .map((t: any): ReapableTask => ({
-            id: t.id,
-            kind: 'shell',
-            status: (t.status === 'completed' || t.status === 'failed' || t.status === 'cancelled')
-              ? 'done'
-              : 'running',
-          }));
-      } catch (err: any) {
-        serverLog('error', 'copilot', 'listReapableTasks: rpc.tasks.list failed', err?.message ?? err);
-        return [];
+    async stop(): Promise<void> {
+      // Cooperative cancel: tell the agent to abort the active turn.
+      permissions.cancelAll();
+      if (conn && session) {
+        await conn.agent.notify(methods.agent.session.cancel, { sessionId: session.sessionId });
       }
     },
 
-    /**
-     * Stop a background task. Copilot's SDK has NO stop-task RPC, so we reap the
-     * detached shell task via the PID it wrote to its sibling `.pid` file (see
-     * pid-kill.ts). Fire-and-forget + best-effort — a task with no live logPath
-     * (already gone / agent task) is a no-op.
-     */
-    async stopTask(taskId: string): Promise<void> {
-      if (!state.session) return;
-      let logPath: string | undefined;
-      try {
-        const list = await (state.session as any).rpc.tasks.list();
-        const task = (list?.tasks ?? []).find((t: any) => t?.id === taskId);
-        logPath = typeof task?.logPath === 'string' && task.logPath ? task.logPath : undefined;
-      } catch (err: any) {
-        serverLog('error', 'copilot', 'stopTask: rpc.tasks.list failed', err?.message ?? err);
-        return;
-      }
-      if (!logPath) {
-        serverLog('warn', 'copilot', `stopTask: no logPath for task ${taskId} (nothing to reap)`);
-        return;
-      }
-      await killDetachedByPidFile(pidPathForLog(logPath));
+    skillTarget(appId: string | undefined): string | undefined {
+      return copilotSkillTarget(appId);
     },
 
-    resolvePermission(toolUseId: string, allow: boolean, message?: string, scope?: 'once' | 'session') {
-      const resolve = pendingPermissions.get(toolUseId);
-      if (resolve) {
-        pendingPermissions.delete(toolUseId);
-        resolve(allow ? { behavior: 'allow', scope } : { behavior: 'deny', message: message ?? 'Denied' });
-      }
+    resetSession(): void {
+      if (session) driver.forget(session.sessionId);
+      session = null;
+      sessionCwd = null;
     },
 
-    resolvePicker(id: string, payload: PickerResolvePayload) {
-      const resolve = pendingPickers.get(id);
-      if (resolve) {
-        pendingPickers.delete(id);
-        resolve(payload);
-      }
-    },
-
-    /**
-     * Re-scan the session's configured skillDirectories (our projected app-skill
-     * dir among them) so an app-level skill edit is live without re-init. Uses
-     * the SDK's experimental `rpc.skills.reload()` — the programmatic twin of the
-     * CLI `/skills reload`. Best-effort: no live session → nothing to reload; an
-     * SDK/RPC failure logs and leaves the current snapshot (change still lands on
-     * next session init). Takes effect from the session's next turn.
-     */
-    async reloadSkills() {
-      const session = state.session;
-      if (!session) {
-        serverLog('warn', 'copilot', 'reloadSkills: no live session — app-skill edit will apply on next session init');
-        return { reloaded: false, ok: true };
-      }
-      try {
-        await (session as any).rpc.skills.reload();
-        // Experimental SDK API — log success so a dev build can confirm the
-        // reload actually fired (and re-scanned our skillDirectories) for the
-        // live session, not just that we called it. See skills#4.
-        serverLog('warn', 'copilot', 'skills.reload() applied — app-skill edit now live for this session (effective next turn)');
-        return { reloaded: true, ok: true };
-      } catch (err: any) {
-        serverLog('warn', 'copilot', 'skills.reload() failed; app-skill edit will apply on next session init instead', err?.message ?? err);
-        return { reloaded: true, ok: false, error: err?.message ?? String(err) };
-      }
-    },
-
-    /**
-     * Apply model to the current Copilot session. Imperative — orchestrator
-     * decides when to call (only on diff). Effort comes along because
-     * `session.setModel` takes it as the second-arg config; effort fallback
-     * to model's default if currently unsupported.
-     *
-     * Closure mutation is deferred until after the SDK accepts the change.
-     * If `session.setModel` throws (invalid model id, etc.), `currentModel`
-     * and `currentEffort` stay consistent with the active session — otherwise
-     * later status / capabilities events would broadcast a model that's
-     * different from what the session actually runs.
-     */
-    async setModel(model: string) {
-      const supported = effortsFor(model);
-      const nextEffort = currentEffort && supported.includes(currentEffort)
-        ? currentEffort
-        : modelMeta(model)?.defaultReasoningEffort;
-      if (state.session) {
-        await state.session.setModel(model, nextEffort ? { reasoningEffort: nextEffort as any } : undefined);
-      }
-      currentModel = model;
-      currentEffort = nextEffort;
-      // Capabilities re-broadcast for renderer status bar — capability list
-      // itself didn't change, but currentModel did.
-      currentSend?.({ type: 'capabilities', ...buildCapabilities() });
-    },
-
-    async setEffort(effort: string) {
-      currentEffort = effort;
-      if (state.session) {
-        await state.session.setModel(currentModel, { reasoningEffort: effort as any });
-      }
-    },
-
-    async setPermissionMode(mode: string) {
-      currentPermissionMode = mode;
-      if (state.session) {
-        const sdkMode = MODE_TO_SDK[mode];
-        if (sdkMode) {
-          await (state.session as any).rpc.mode.set({ mode: sdkMode });
-        }
-      }
+    dispose(): void {
+      loginRunner?.cancel();
+      permissions.cancelAll();
+      if (session) driver.forget(session.sessionId);
+      try { conn?.close(); } catch { /* best-effort */ }
+      try { child?.kill(); } catch { /* best-effort */ }
+      conn = null;
+      child = null;
+      session = null;
+      sessionCwd = null;
     },
   };
 }

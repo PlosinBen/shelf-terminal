@@ -11,6 +11,7 @@ import {
   toggleRightSidebar,
 } from '../store';
 import { emit, Events } from '../events';
+import { agentProviderEntries } from '@shared/agent-providers';
 import { PaperPlaneIcon } from './icons';
 
 // PM Active (telegram listener) live badge — shown in the tab bar's top-right
@@ -288,20 +289,18 @@ export function TabBar() {
             Terminal
           </button>
           <div className="context-menu-divider" />
-          <button
-            className="context-menu-item"
-            disabled={project?.tabs.some((t) => t.type === 'agent' && t.provider === 'claude')}
-            onClick={() => { emit(Events.NEW_AGENT_TAB, activeProjectIndex, 'claude'); setAddMenu(null); }}
-          >
-            Agent (Claude)
-          </button>
-          <button
-            className="context-menu-item"
-            disabled={project?.tabs.some((t) => t.type === 'agent' && t.provider === 'copilot')}
-            onClick={() => { emit(Events.NEW_AGENT_TAB, activeProjectIndex, 'copilot'); setAddMenu(null); }}
-          >
-            Agent (Copilot)
-          </button>
+          {/* One button per provider, from the single-source registry (a "· dev"
+              label marks a not-yet-GA provider). Add a provider = one registry entry. */}
+          {agentProviderEntries().map(([id, meta]) => (
+            <button
+              key={id}
+              className="context-menu-item"
+              disabled={project?.tabs.some((t) => t.type === 'agent' && t.provider === id)}
+              onClick={() => { emit(Events.NEW_AGENT_TAB, activeProjectIndex, id); setAddMenu(null); }}
+            >
+              Agent ({meta.label})
+            </button>
+          ))}
           <div className="context-menu-divider" />
           <button
             className="context-menu-item"

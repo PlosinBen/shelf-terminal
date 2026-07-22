@@ -12,9 +12,11 @@ import {
   type SessionUpdate,
   type NewSessionResponse,
   type StopReason,
+  type McpServer,
+  type AvailableCommand,
 } from '@agentclientprotocol/sdk';
 import type { OutgoingMessage } from '../types';
-import { translateSessionUpdate } from './translate';
+import { translateSessionUpdate, imageContentBlocks, DEFAULT_AGENT_MSG_ID } from './translate';
 
 /** An async FIFO of session updates that unblocks readers on push or done. */
 interface UpdateQueue {
@@ -50,6 +52,8 @@ export interface StartSessionOptions {
   cwd: string;
   /** Extra workspace roots (e.g. the projected skills root → codex extraRoots). */
   additionalDirectories?: string[];
+  /** App-level MCP servers to hand the agent at session/new (already shaped to ACP). */
+  mcpServers?: McpServer[];
 }
 
 export interface SessionDriver {
@@ -62,23 +66,47 @@ export interface SessionDriver {
     session: AcpSession,
     prompt: string,
     send: (msg: OutgoingMessage) => void,
+    images?: string[],
   ): Promise<StopReason>;
+  /** Set the session's mode (`session/set_mode`). Mode-id semantics are the agent's. */
+  setMode(agent: ClientContext, session: AcpSession, modeId: string): Promise<void>;
+  /** Set a session config option value (`session/set_config_option`, select variant). */
+  setConfigOption(agent: ClientContext, session: AcpSession, configId: string, value: string): Promise<void>;
+  /** The agent's advertised slash commands for a session (captured from
+   *  `available_commands_update`, which arrives out-of-turn near session start).
+   *  Undefined until the first such update lands. */
+  getAvailableCommands(sessionId: string): AvailableCommand[] | undefined;
   /** Drop a session's queue (session ended / reset). */
   forget(sessionId: string): void;
 }
 
 export function createSessionDriver(): SessionDriver {
   const queues = new Map<string, UpdateQueue>();
+  // Per-session slash commands captured from `available_commands_update` (arrives
+  // out-of-turn near session start; the backend reads it at gatherCapabilities).
+  const commandsBySession = new Map<string, AvailableCommand[]>();
+  // Monotonic across turns so a per-turn namespace for messageId-less agents
+  // (copilot --acp omits `messageId`) stays unique — otherwise every turn's reply
+  // collapses onto the constant DEFAULT_AGENT_MSG_ID and the renderer upserts them
+  // all onto one entry (reply shows above the wrong turn).
+  let turnSeq = 0;
 
   return {
     onSessionUpdate(n) {
+      if (n.update.sessionUpdate === 'available_commands_update') {
+        commandsBySession.set(n.sessionId, n.update.availableCommands);
+      }
       queues.get(n.sessionId)?.push(n.update);
+    },
+
+    getAvailableCommands(sessionId) {
+      return commandsBySession.get(sessionId);
     },
 
     async startNew(agent, opts) {
       const res = await agent.request(methods.agent.session.new, {
         cwd: opts.cwd,
-        mcpServers: [],
+        mcpServers: opts.mcpServers ?? [],
         ...(opts.additionalDirectories?.length ? { additionalDirectories: opts.additionalDirectories } : {}),
       });
       queues.set(res.sessionId, createUpdateQueue());
@@ -95,20 +123,36 @@ export function createSessionDriver(): SessionDriver {
       return { sessionId };
     },
 
-    async drivePromptTurn(agent, session, prompt, send) {
+    async drivePromptTurn(agent, session, prompt, send, images) {
       const q = queues.get(session.sessionId);
       if (!q) throw new Error(`drivePromptTurn: no queue for session ${session.sessionId}`);
 
+      // Text block + any attached images (data URLs → ACP image ContentBlocks).
+      const content = [{ type: 'text' as const, text: prompt }, ...imageContentBlocks(images)];
       let done = false;
       const promptDone = agent
-        .request(methods.agent.session.prompt, { sessionId: session.sessionId, prompt: [{ type: 'text', text: prompt }] })
+        .request(methods.agent.session.prompt, { sessionId: session.sessionId, prompt: content })
         .finally(() => { done = true; q.wake(); });
+
+      // Per-turn namespace for the messageId-less sentinel. Streams keep their
+      // streamType so a turn's reply text and thinking don't collide with each
+      // other (both would otherwise be DEFAULT_AGENT_MSG_ID). Agents that DO send
+      // a real messageId (codex) are untouched.
+      const turnBase = `${session.sessionId}#${++turnSeq}`;
+      const namespaced = (msgId: string, streamType?: string): string =>
+        msgId === DEFAULT_AGENT_MSG_ID ? `${turnBase}:${streamType ?? 'msg'}` : msgId;
 
       const textByMsg = new Map<string, string>();
       for (;;) {
         const update = await q.next(() => done);
         if (!update) break;
-        for (const wire of translateSessionUpdate(update)) {
+        for (const raw of translateSessionUpdate(update)) {
+          let wire = raw;
+          if (wire.type === 'stream') {
+            wire = { ...wire, msgId: namespaced(wire.msgId, wire.streamType) };
+          } else if (wire.type === 'message') {
+            wire = { ...wire, msgId: namespaced(wire.msgId) };
+          }
           if (wire.type === 'stream' && wire.streamType === 'text') {
             textByMsg.set(wire.msgId, (textByMsg.get(wire.msgId) ?? '') + wire.content);
           }
@@ -127,8 +171,17 @@ export function createSessionDriver(): SessionDriver {
       }
     },
 
+    async setMode(agent, session, modeId) {
+      await agent.request(methods.agent.session.setMode, { sessionId: session.sessionId, modeId });
+    },
+
+    async setConfigOption(agent, session, configId, value) {
+      await agent.request(methods.agent.session.setConfigOption, { sessionId: session.sessionId, configId, value });
+    },
+
     forget(sessionId) {
       queues.delete(sessionId);
+      commandsBySession.delete(sessionId);
     },
   };
 }

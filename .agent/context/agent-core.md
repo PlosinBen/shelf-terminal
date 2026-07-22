@@ -18,13 +18,13 @@ related:
 
 **Decision**: Agent tab 直接呼叫 AI provider SDK（不是解析 terminal scrollback）：
 - Claude → `@anthropic-ai/claude-agent-sdk`，spawn bundled `claude` binary
-- Copilot → `@github/copilot-sdk`，spawn bundled `@github/copilot` CLI（SDK 是 JSON-RPC wrapper，CLI 才是實際執行體）
+- Copilot → spawn standalone `copilot` CLI binary + `--acp`（ACP over stdio），不再用 `@github/copilot-sdk`（cutover 後細節見 `agent-providers#9`）
 
 兩者都在 `agent-server` bundle 裡執行，透過 stdin/stdout JSON line protocol 跟 main process 通訊。Binary 透過 `electron-builder` 的 `files` + `asarUnpack` 打包進 app（per-platform：claude-agent-sdk-{darwin|linux|win32}-{arch}、copilot-{darwin|linux|win32}-{arch}）。**Windows build 額外 force-install `claude-agent-sdk-linux-x64`**（CI step，因為 WSL agent-server 跑在 Linux）；npm `os` 限制用 `--force --no-save` 繞過。
 
 **Reason**:
 - 之前用 terminal scrollback parsing 偵測 agent 狀態，TUI rendering 讓 stripped text 不可識別，永遠回傳 `cli_running`。直接用 SDK 拿到 structured state（idle/streaming/waiting_permission）。
-- Copilot 試過 Vercel AI SDK（直打 `/chat/completions` + `/responses`）但 multi-turn 死路：Copilot 不支援 `store: true`、`previous_response_id`，replay history 又因 tool_call ID server 不認 404。Copilot CLI 本身解決了 stateful 對話，SDK 只是 wrap 它。
+- Copilot 試過 Vercel AI SDK（直打 `/chat/completions` + `/responses`）但 multi-turn 死路：Copilot 不支援 `store: true`、`previous_response_id`，replay history 又因 tool_call ID server 不認 404。Copilot CLI 本身解決了 stateful 對話（現在直接走 CLI 的 ACP 協定，不經 SDK）。
 - 兩條路徑現在對稱：spawn bundled CLI binary、依賴使用者已有的官方 CLI 登入狀態（不經手 token）。
 
 **Do not change casually because**:

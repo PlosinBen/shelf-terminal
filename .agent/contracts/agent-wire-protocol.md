@@ -140,7 +140,7 @@ State update ("current plan = X"), NOT a timeline entry. Replace-semantics; empt
 
 ## picker_request — `type: 'picker_request'`
 
-Agent-initiated multi-question structured form (Claude `AskUserQuestion`, Copilot elicitation). Forwarded to `IPC.AGENT_PICKER_REQUEST`. Renderer resolves via `AGENT_RESOLVE_PICKER` IPC with a `PickerResolvePayload` (`{ answers: Array<string | string[]> }` index-aligned with `prompts[]`, or `{ cancelled: true }`). Full shape in `agent-server/providers/types.ts`; main validates each prompt in `parseRemoteMessage` (drops the whole message on a malformed prompt).
+Agent-initiated multi-question structured form (Claude `AskUserQuestion`; the Copilot elicitation path was native-SDK-only, not yet rebuilt on ACP — deferred). Forwarded to `IPC.AGENT_PICKER_REQUEST`. Renderer resolves via `AGENT_RESOLVE_PICKER` IPC with a `PickerResolvePayload` (`{ answers: Array<string | string[]> }` index-aligned with `prompts[]`, or `{ cancelled: true }`). Full shape in `agent-server/providers/types.ts`; main validates each prompt in `parseRemoteMessage` (drops the whole message on a malformed prompt).
 
 | Field | Type | Notes |
 |-------|------|-------|

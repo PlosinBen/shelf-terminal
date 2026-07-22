@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { SessionConfigOption, SessionModeState, AvailableCommand } from '@agentclientprotocol/sdk';
-import { mapSessionCapabilities, currentSelections } from './capabilities';
+import { mapSessionCapabilities, currentSelections, mapSessionCapabilitiesWithCurrent, configOptionIdForCategory } from './capabilities';
 
 const configOptions: SessionConfigOption[] = [
   {
@@ -60,5 +60,26 @@ describe('mapSessionCapabilities', () => {
     expect(currentSelections({ configOptions, modes })).toEqual({
       currentModel: 'gpt-5', currentEffort: 'high', currentPermissionMode: 'agent',
     });
+  });
+
+  it('merges option lists AND current selections for the capabilities message', () => {
+    const caps = mapSessionCapabilitiesWithCurrent({ configOptions, modes, availableCommands: commands }) as unknown as Record<string, unknown>;
+    expect((caps.models as unknown[]).length).toBe(2);
+    expect(caps.currentModel).toBe('gpt-5');
+    expect(caps.currentEffort).toBe('high');
+    expect(caps.currentPermissionMode).toBe('agent');
+  });
+
+  it('omits current selections that are absent (no empty keys)', () => {
+    const caps = mapSessionCapabilitiesWithCurrent({}) as unknown as Record<string, unknown>;
+    expect('currentModel' in caps).toBe(false);
+    expect('currentPermissionMode' in caps).toBe(false);
+  });
+
+  it('resolves the config option id for a category (for set_config_option)', () => {
+    expect(configOptionIdForCategory(configOptions, 'model')).toBe('model');
+    expect(configOptionIdForCategory(configOptions, 'thought_level')).toBe('thought');
+    expect(configOptionIdForCategory(configOptions, 'nonexistent')).toBeUndefined();
+    expect(configOptionIdForCategory(undefined, 'model')).toBeUndefined();
   });
 });

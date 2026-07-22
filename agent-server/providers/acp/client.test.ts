@@ -34,14 +34,94 @@ describe('acp session driver (connection + new/resume + turn)', () => {
     ]);
   });
 
-  it('passes additionalDirectories to session/new', async () => {
-    let newParams: { additionalDirectories?: string[] } | undefined;
+  it('namespaces messageId-less replies per turn so they do not collide (copilot --acp case)', async () => {
+    // copilot --acp omits `messageId` on agent_message_chunk → translate falls back
+    // to the DEFAULT_AGENT_MSG_ID constant. Without per-turn namespacing, every
+    // turn's reply reuses that id and the renderer upserts them onto one entry.
+    const mock = createMockAcpAgent({
+      updatesOnPrompt: [{ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'hi' } } as SessionUpdate],
+    });
+    const driver = createSessionDriver();
+    const conn = openAcpConnection(mock, { onSessionUpdate: driver.onSessionUpdate });
+    const session = await driver.startNew(conn.agent, { cwd: '/tmp/p' });
+
+    const w1: OutgoingMessage[] = [];
+    await driver.drivePromptTurn(conn.agent, session, 'a', (m) => w1.push(m));
+    const w2: OutgoingMessage[] = [];
+    await driver.drivePromptTurn(conn.agent, session, 'b', (m) => w2.push(m));
+    conn.close();
+
+    const reply = (w: OutgoingMessage[]) => w.find((m) => m.type === 'message' && m.msgType === 'reply') as Extract<OutgoingMessage, { msgType: 'reply' }>;
+    const stream = (w: OutgoingMessage[]) => w.find((m) => m.type === 'stream') as Extract<OutgoingMessage, { type: 'stream' }>;
+    expect(reply(w1).content).toBe('hi');
+    expect(reply(w2).content).toBe('hi');
+    // Distinct per turn → renderer keeps them as separate bubbles.
+    expect(reply(w1).msgId).not.toBe(reply(w2).msgId);
+    // A turn's stream chunk and its finalized reply share the turn's id.
+    expect(stream(w1).msgId).toBe(reply(w1).msgId);
+  });
+
+  it('forwards attached images as ACP image content blocks (drops non-data-urls)', async () => {
+    let promptParams: { prompt?: unknown } | undefined;
+    const mock = createMockAcpAgent({ onPrompt: (p) => { promptParams = p as typeof promptParams; } });
+    const driver = createSessionDriver();
+    const conn = openAcpConnection(mock, { onSessionUpdate: driver.onSessionUpdate });
+    const session = await driver.startNew(conn.agent, { cwd: '/tmp/p' });
+    await driver.drivePromptTurn(conn.agent, session, 'look at this', () => {}, [
+      'data:image/png;base64,QUJD',
+      'not-a-data-url',
+    ]);
+    conn.close();
+    expect(promptParams?.prompt).toEqual([
+      { type: 'text', text: 'look at this' },
+      { type: 'image', data: 'QUJD', mimeType: 'image/png' },
+    ]);
+  });
+
+  it('captures available_commands_update per session', () => {
+    const driver = createSessionDriver();
+    expect(driver.getAvailableCommands('s1')).toBeUndefined();
+    driver.onSessionUpdate({
+      sessionId: 's1',
+      update: { sessionUpdate: 'available_commands_update', availableCommands: [{ name: 'compact', description: 'x' }] },
+    } as Parameters<typeof driver.onSessionUpdate>[0]);
+    expect(driver.getAvailableCommands('s1')).toEqual([{ name: 'compact', description: 'x' }]);
+    driver.forget('s1');
+    expect(driver.getAvailableCommands('s1')).toBeUndefined();
+  });
+
+  it('sends session/set_mode and session/set_config_option', async () => {
+    let modeParams: { modeId?: string } | undefined;
+    let configParams: { configId?: string; value?: string } | undefined;
+    const mock = createMockAcpAgent({
+      onSetMode: (p) => { modeParams = p as typeof modeParams; },
+      onSetConfigOption: (p) => { configParams = p as typeof configParams; },
+    });
+    const driver = createSessionDriver();
+    const conn = openAcpConnection(mock, { onSessionUpdate: driver.onSessionUpdate });
+    const session = await driver.startNew(conn.agent, { cwd: '/tmp/p' });
+
+    await driver.setMode(conn.agent, session, 'mode-x');
+    await driver.setConfigOption(conn.agent, session, 'model', 'gpt-5.4');
+    conn.close();
+
+    expect(modeParams).toMatchObject({ sessionId: 'mock-session', modeId: 'mode-x' });
+    expect(configParams).toMatchObject({ sessionId: 'mock-session', configId: 'model', value: 'gpt-5.4' });
+  });
+
+  it('passes additionalDirectories + mcpServers to session/new', async () => {
+    let newParams: { additionalDirectories?: string[]; mcpServers?: unknown } | undefined;
     const mock = createMockAcpAgent({ onNewSession: (p) => { newParams = p as typeof newParams; } });
     const driver = createSessionDriver();
     const conn = openAcpConnection(mock, { onSessionUpdate: driver.onSessionUpdate });
-    const session = await driver.startNew(conn.agent, { cwd: '/tmp/p', additionalDirectories: ['/tmp/p/codex'] });
+    const session = await driver.startNew(conn.agent, {
+      cwd: '/tmp/p',
+      additionalDirectories: ['/tmp/p/codex'],
+      mcpServers: [{ name: 'fs', command: 'x', args: [], env: [] }],
+    });
     expect(session.sessionId).toBe('mock-session');
     expect(newParams?.additionalDirectories).toEqual(['/tmp/p/codex']);
+    expect(newParams?.mcpServers).toEqual([{ name: 'fs', command: 'x', args: [], env: [] }]);
     conn.close();
   });
 

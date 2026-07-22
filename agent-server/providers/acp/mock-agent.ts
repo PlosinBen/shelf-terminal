@@ -15,6 +15,9 @@ import {
   type StopReason,
   type PermissionOption,
   type RequestPermissionResponse,
+  type SessionModeState,
+  type SessionConfigOption,
+  type AvailableCommand,
 } from '@agentclientprotocol/sdk';
 
 export interface MockAgentScript {
@@ -22,6 +25,13 @@ export interface MockAgentScript {
   authMethods?: Array<{ id: string; name: string; description?: string | null }>;
   /** Session id handed back from session/new (default: 'mock-session'). */
   sessionId?: string;
+  /** Modes advertised in the session/new response (drives permission-mode caps). */
+  modes?: SessionModeState;
+  /** Config options in the session/new response (drives model/effort caps). */
+  configOptions?: SessionConfigOption[];
+  /** Slash commands emitted as an `available_commands_update` right after
+   *  session/new (mirrors copilot, which sends them out-of-turn near session start). */
+  commandsOnNewSession?: AvailableCommand[];
   /** Updates emitted (in order) while handling each session/prompt. */
   updatesOnPrompt?: SessionUpdate[];
   /** Stop reason returned by session/prompt (default: 'end_turn'). */
@@ -30,6 +40,10 @@ export interface MockAgentScript {
   onPrompt?: (params: unknown) => void;
   /** Called with session/new params (e.g. to assert additionalDirectories). */
   onNewSession?: (params: unknown) => void;
+  /** Called with session/set_mode params (assert modeId). */
+  onSetMode?: (params: unknown) => void;
+  /** Called with session/set_config_option params (assert configId + value). */
+  onSetConfigOption?: (params: unknown) => void;
   /**
    * When set, the prompt handler first calls `session/request_permission` with
    * these options and reports the client's outcome via `onPermissionOutcome`.
@@ -54,8 +68,27 @@ export function createMockAcpAgent(script: MockAgentScript = {}): AgentApp {
       agentCapabilities: { loadSession: true, promptCapabilities: { image: true } },
       authMethods,
     }))
-    .onRequest('session/new', ({ params }) => { script.onNewSession?.(params); return { sessionId }; })
+    .onRequest('session/new', async ({ params, client }) => {
+      script.onNewSession?.(params);
+      if (script.commandsOnNewSession) {
+        await client.notify('session/update', {
+          sessionId,
+          update: { sessionUpdate: 'available_commands_update', availableCommands: script.commandsOnNewSession },
+        });
+      }
+      return {
+        sessionId,
+        ...(script.modes ? { modes: script.modes } : {}),
+        ...(script.configOptions ? { configOptions: script.configOptions } : {}),
+      };
+    })
     .onRequest('session/resume', () => ({}))
+    .onRequest('session/set_mode', ({ params }) => { script.onSetMode?.(params); return {}; })
+    .onRequest('session/set_config_option', ({ params }) => {
+      script.onSetConfigOption?.(params);
+      // Response echoes the full config set (real agents return updated values).
+      return { configOptions: script.configOptions ?? [] };
+    })
     .onRequest('session/prompt', async ({ params, client }) => {
       script.onPrompt?.(params);
       if (script.requestPermissionOnPrompt) {

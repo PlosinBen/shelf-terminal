@@ -4,8 +4,10 @@ import * as path from 'path';
 import * as os from 'os';
 import { randomUUID } from 'node:crypto';
 import { createClaudeBackend } from './providers/claude';
-import { createCopilotBackend } from './providers/copilot';
 import { createCodexBackend } from './providers/codex';
+// `copilot` is driven by the ACP backend (the native SDK backend was deleted at
+// cutover — recoverable from git history at the pre-cutover commit).
+import { createCopilotBackend } from './providers/copilot';
 import { createFakeBackend } from './providers/fake';
 import { deleteContext, cleanupOldContexts } from './context-store';
 import { runCleanupSweep } from './cleanup';
@@ -16,10 +18,12 @@ import { loadRestoreContextFor, newTurnId, wrapSendForContext, wrapSendForTurn }
 import { initAppToolClient, resolveAppToolResult } from './app-tool-client';
 import { setLogSink, serverLog } from './server-logger';
 import { createSendQueue } from './send-queue';
+import { projectAppSkills } from './providers/shared';
 import type { OutgoingMessage, QueryInput, ServerBackend, PickerResolvePayload, ModelCacheClient } from './providers/types';
-import type { ProviderModel } from '@shared/types';
+import type { ProviderModel, AgentProvider } from '@shared/types';
 
-type Provider = 'claude' | 'copilot' | 'codex';
+// Reuse the shared registry-derived union — no separate list to keep in sync.
+type Provider = AgentProvider;
 
 interface IncomingMessage {
   type: 'send' | 'stop' | 'cancel_queued' | 'ping' | 'resolve_permission' | 'resolve_picker' | 'get_capabilities' | 'store_credential' | 'clear_credential' | 'clear_context' | 'read_task_output' | 'stop_task' | 'reload_skills' | 'app_tool_result' | 'cache_reply' | 'start_login' | 'cancel_login';
@@ -58,8 +62,10 @@ interface IncomingMessage {
   allow?: boolean;
   /** For `type: 'ping'`: client heartbeat sequence, echoed back in pong for RTT. */
   seq?: number;
-  /** For `type: 'send'`: app-instance id — names this app's projected skills dir
-   *  at `~/.shelf/apps/<appId>/skills` (see deployment#1). */
+  /** For `type: 'send'` AND `type: 'get_capabilities'`: app-instance id — names
+   *  this app's projected skills dir at `~/.shelf/apps/<appId>/skills` (see
+   *  deployment#1). Carried on caps too so config-home providers (copilot --acp)
+   *  can set COPILOT_HOME at the caps-time CLI spawn. */
   appId?: string;
   /** resolve_picker payload — picker id minted by provider, payload carries
    * index-aligned answers or { cancelled: true } (see PickerResolvePayload). */
@@ -236,25 +242,33 @@ async function applyPrefDiff(
  */
 const TEST_MODE = process.env.SHELF_TEST_MODE === '1';
 
+/**
+ * Project the app-skill tree to a provider's declared scan path. The provider
+ * declares WHERE (`skillTarget`); the agent-server does the fs (provider-boundary
+ * principle — providers never touch the filesystem). No-op for providers that
+ * need no projection (skillTarget → undefined). Idempotent + atomic, so calling
+ * it on every caps/send/reload is safe and collapses to one real creation.
+ */
+function ensureSkillsProjected(backend: ServerBackend, appId: string | undefined): void {
+  const target = backend.skillTarget?.(appId);
+  if (!target) return;
+  const err = projectAppSkills(appId, target);
+  if (err) serverLog('warn', 'skills', err);
+}
+
+// Backend factory per provider. `Record<Provider, …>` makes this EXHAUSTIVE —
+// adding a provider to the shared registry is a compile error until wired here.
+const BACKEND_FACTORIES: Record<Provider, () => ServerBackend> = {
+  claude: createClaudeBackend,
+  copilot: createCopilotBackend,
+  codex: createCodexBackend,
+};
+
 function getBackend(provider: Provider): ServerBackend {
   const key = (TEST_MODE ? 'fake' : provider) as Provider;
   let b = backends.get(key);
   if (b) return b;
-  if (TEST_MODE) {
-    b = createFakeBackend();
-  } else {
-    switch (provider) {
-      case 'claude':
-        b = createClaudeBackend();
-        break;
-      case 'copilot':
-        b = createCopilotBackend();
-        break;
-      case 'codex':
-        b = createCodexBackend();
-        break;
-    }
-  }
+  b = TEST_MODE ? createFakeBackend() : BACKEND_FACTORIES[provider]();
   backends.set(key, b);
   return b;
 }
@@ -292,6 +306,9 @@ async function handleSend(msg: IncomingMessage) {
     return;
   }
   activeBackend = backend;
+  // Project app skills to the provider's scan path BEFORE the turn spawns/uses
+  // the CLI, so session/new finds them. Central (agent-server owns the fs).
+  ensureSkillsProjected(backend, msg.appId);
 
   // Hydrate persisted context once per turn — providers read fields they care
   // about (e.g. `lastSdkSessionId`) without touching disk themselves.
@@ -457,7 +474,10 @@ rl.on('line', (line) => {
       (async () => {
         try {
           const backend = getBackend(provider);
-          const caps = await backend.gatherCapabilities?.(msg.cwd ?? process.cwd(), msg.sessionId, msg.customModels, msg.intent, modelCacheClient);
+          // Project skills before caps — the CLI spawns during gatherCapabilities
+          // (config-home providers), so the projection must exist by then.
+          ensureSkillsProjected(backend, msg.appId);
+          const caps = await backend.gatherCapabilities?.(msg.cwd ?? process.cwd(), msg.sessionId, msg.customModels, msg.intent, modelCacheClient, msg.appId);
           send({ type: 'capabilities', requestId: msg.requestId ?? '', ...(caps ?? {}) });
         } catch (err: any) {
           // Real data loss: gatherCapabilities threw → response carries only
@@ -512,12 +532,13 @@ rl.on('line', (line) => {
       break;
     }
     case 'reload_skills':
-      // App-level skills changed on disk (main already projected/synced them to
-      // the consumption path). App skills are app-global, not per-session, so
-      // tell EVERY instantiated provider to re-scan on its live session. Each is
-      // best-effort + no-op without a live session. Effect lands next turn.
-      // Emit a `skills_reloaded` result (system/error line in the agent view)
-      // via the BASE send — turnId-less by construction. Skip no-op reloads.
+      // App-level skills changed: main refreshed the L1 canonical tree. Re-project
+      // each provider's L2 target (central — agent-server owns the fs; a no-op for
+      // symlink providers since the live source is already followed, real work for
+      // copy-mode), THEN tell EVERY provider to re-scan on its live session. App
+      // skills are app-global, not per-session; each reload is best-effort + no-op
+      // without a live session. Emit a `skills_reloaded` result via the BASE send.
+      for (const b of backends.values()) ensureSkillsProjected(b, lastAppId);
       for (const b of backends.values()) {
         void b.reloadSkills?.().then((r) => {
           if (r && r.reloaded) send({ type: 'skills_reloaded', ok: r.ok, ...(r.error ? { error: r.error } : {}) });

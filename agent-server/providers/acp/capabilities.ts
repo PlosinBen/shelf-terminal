@@ -33,6 +33,16 @@ function flattenSelectOptions(
   return out;
 }
 
+/** The config option `id` for the first select option in a category (for
+ *  `session/set_config_option`). e.g. category 'model' → 'model', 'thought_level'
+ *  → 'reasoning_effort' (copilot). Undefined if the agent advertises none. */
+export function configOptionIdForCategory(
+  configOptions: SessionConfigOption[] | null | undefined,
+  category: string,
+): string | undefined {
+  return configOptions?.find((c) => c.category === category && c.type === 'select')?.id;
+}
+
 /** Cycle options for the first select config option in a given category. */
 function selectOptionsForCategory(
   configOptions: SessionConfigOption[] | null | undefined,
@@ -59,6 +69,24 @@ export function mapSessionCapabilities(input: AcpSessionCapabilitiesInput): Prov
     description: c.description,
   }));
   return { models, permissionModes, effortLevels, slashCommands };
+}
+
+/**
+ * Capabilities PLUS the agent's current model/effort/mode selections, ready to
+ * spread into the `capabilities` wire message. The status bar needs the current
+ * values to display the active model/permission-mode — without them it shows an
+ * empty slot even though the option lists are populated. Both ACP backends need
+ * this glue (shared-layer concern, not per-provider).
+ */
+export function mapSessionCapabilitiesWithCurrent(input: AcpSessionCapabilitiesInput): ProviderCapabilities {
+  const caps = mapSessionCapabilities(input);
+  const cur = currentSelections(input);
+  return {
+    ...caps,
+    ...(cur.currentModel ? { currentModel: cur.currentModel } : {}),
+    ...(cur.currentEffort ? { currentEffort: cur.currentEffort } : {}),
+    ...(cur.currentPermissionMode ? { currentPermissionMode: cur.currentPermissionMode } : {}),
+  };
 }
 
 /** Current selections (for seeding the renderer's active model/effort/mode). */

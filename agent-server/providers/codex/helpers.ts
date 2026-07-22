@@ -54,7 +54,45 @@ export function resolveCodexAcpCommand(): CodexAcpCommand {
  * undefined when there is no app context. (Projection itself is a later task;
  * this only computes the path contract.)
  */
-export function codexSkillsRoot(appId: string | undefined): string | undefined {
+/**
+ * `CODEX_HOME` for this app instance: `~/.shelf/apps/<appId>/codex`. codex reads
+ * auth / config / sessions here → per-app = per-device auth isolation (AUTH =
+ * DEVICE-SCOPED; see the copilot-acp feature note). This SAME dir is also the ACP
+ * `additionalDirectory` whose `.agents/skills` codex-acp scans (see codexSkillTarget)
+ * — the two roles don't collide (different subpaths). Undefined without app context.
+ */
+export function codexConfigHome(appId: string | undefined): string | undefined {
   if (!appId) return undefined;
   return path.join(os.homedir(), '.shelf', 'apps', appId, 'codex');
+}
+
+/**
+ * Spawn env for codex-acp / `codex app-server` login: base env + `CODEX_HOME` when
+ * an app context exists (device-scoped auth isolation — Shelf hands only a PATH; the
+ * CLI owns its opaque credentials there). Returns `base` unchanged without appId.
+ */
+export function codexAcpEnv(
+  appId: string | undefined,
+  base: NodeJS.ProcessEnv = process.env,
+): NodeJS.ProcessEnv {
+  const home = codexConfigHome(appId);
+  return home ? { ...base, CODEX_HOME: home } : base;
+}
+
+/** The per-app codex home, doubling as the ACP additionalDirectory root whose
+ *  `.agents/skills` codex-acp scans. Same path as {@link codexConfigHome}. */
+export function codexSkillsRoot(appId: string | undefined): string | undefined {
+  return codexConfigHome(appId);
+}
+
+/**
+ * Where codex-acp scans for app-level skills, for `appId`:
+ * `<codexSkillsRoot>/.agents/skills`. codex-acp appends `.agents/skills` to each
+ * ACP `additionalDirectory` (verified in its `refreshSkills` source). The provider
+ * declares this; the agent-server projects the canonical skill tree here (the
+ * backend does no fs — provider-boundary principle). Undefined without app context.
+ */
+export function codexSkillTarget(appId: string | undefined): string | undefined {
+  const root = codexSkillsRoot(appId);
+  return root ? path.join(root, '.agents', 'skills') : undefined;
 }

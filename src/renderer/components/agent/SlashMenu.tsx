@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import type { SlashCommand } from './slash-commands';
 
 interface Props {
@@ -8,13 +9,21 @@ interface Props {
 }
 
 /** Slash-command autocomplete dropdown. Rendered only when open + non-empty;
- *  the parent owns open/selection state and the actual dispatch. */
+ *  the parent owns open/selection state and the actual dispatch. The container
+ *  scrolls (CSS max-height + overflow-y); render ALL matches and keep the
+ *  keyboard-selected row scrolled into view (long lists — e.g. ACP's 32
+ *  commands — overflow the fold). */
 export function SlashMenu({ commands, selection, onSelect, onHover }: Props) {
+  const selectedRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    selectedRef.current?.scrollIntoView({ block: 'nearest' });
+  }, [selection]);
   return (
     <div className="agent-slash-menu">
-      {commands.slice(0, 10).map((cmd, i) => (
+      {commands.map((cmd, i) => (
         <div
           key={cmd.name}
+          ref={i === selection ? selectedRef : undefined}
           className={`agent-slash-item${i === selection ? ' agent-slash-item-selected' : ''}`}
           onMouseDown={(e) => { e.preventDefault(); onSelect(cmd); }}
           onMouseEnter={() => onHover(i)}
