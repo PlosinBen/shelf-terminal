@@ -19,6 +19,7 @@ import { toAcpMcpServers } from '../acp/mcp';
 import { getSharedShelfMcp } from '../acp/shelf-mcp';
 import { loadProjectedMcpServers } from '../mcp-config';
 import { resolveCopilotCommand, copilotConfigHome, copilotEnv } from './helpers';
+import { refreshCopilotCredit } from './credit';
 import { copilotPermissionModes, copilotModeIdToShelf, shelfToCopilotModeId } from './mode-map';
 import { startLogin as startCopilotLogin, prefillLoginUrl, type LoginRunner } from './login';
 
@@ -265,6 +266,13 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
         currentSend = null;
         send({ type: 'status', state: 'idle' });
       }
+    },
+
+    // Post-turn: refresh the account-level premium-request credit via the SDK,
+    // cache-aside on the per-host cache (see credit.ts). copilot --acp doesn't emit
+    // ACP usage_update (upstream #4233), so this is the only channel for it.
+    refreshAccountStatus(cache, send, appId) {
+      return refreshCopilotCredit(cache, send, appId);
     },
 
     async gatherCapabilities(

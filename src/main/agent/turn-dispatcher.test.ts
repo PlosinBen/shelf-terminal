@@ -333,6 +333,22 @@ describe('createTurnDispatcher', () => {
     expect(seen).toEqual([{ type: 'error', error: 'boom' }, { type: 'error', error: 'late' }]);
   });
 
+  it('a turnId-less status (account credit) is delivered session-scoped, not to any turn generator', async () => {
+    const seen: AgentEvent[] = [];
+    const d = createTurnDispatcher(parse, undefined, undefined, undefined, undefined, (ev) => seen.push(ev));
+    const gen = d.registerTurn('t-1', noopPerm);
+    // Credit status carries no turnId → must reach the session sink so the
+    // status bar updates outside any turn. A turn-scoped status still goes
+    // to that turn's generator (the credit path must not steal it).
+    d.feed({ type: 'status', turnId: 't-1', state: 'idle' });
+    d.feed({ type: 'status' }); // turnId-less → session sink
+    expect(seen).toEqual([{ type: 'status', payload: { state: undefined } }]);
+
+    const genEvents: AgentEvent[] = [];
+    for await (const e of gen) genEvents.push(e);
+    expect(genEvents).toContainEqual({ type: 'status', payload: { state: 'idle' } });
+  });
+
   it('without a session sink, error still routes through the per-turn generator (legacy fallback)', async () => {
     const d = createTurnDispatcher(parse);
     const gen = d.registerTurn('t-x', noopPerm);

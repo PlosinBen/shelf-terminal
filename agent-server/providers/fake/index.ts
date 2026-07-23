@@ -173,6 +173,10 @@ export function createFakeBackend(): ServerBackend {
   // Test hook: the `reloadfail` scenario arms this so the NEXT reloadSkills
   // reports a failure (exercises the agent-view error line). Consumed once.
   let failNextReload = false;
+  // Test hook: the `credit` step arms this so the NEXT post-turn
+  // refreshAccountStatus emits an account-credit status (turnId-less), mirroring
+  // how copilot fetches premium-request credit at turn end. Consumed once.
+  let emitCreditNext = false;
 
   async function runStep(
     step: string,
@@ -422,6 +426,16 @@ export function createFakeBackend(): ServerBackend {
       return;
     }
 
+    // credit — arm the post-turn account-status refresh. The credit segment is
+    // NOT emitted inline (it's account-level, turnId-less); refreshAccountStatus
+    // fires it after the turn closes, exercising the real delivery path
+    // (post-turn fire → session sink → status bar). See agent-providers#26.
+    if (step === 'credit') {
+      emitCreditNext = true;
+      send({ type: 'message', msgId: mintId('m'), msgType: 'reply', content: 'credit armed' });
+      return;
+    }
+
     if (step === 'auth_required') {
       send({ type: 'auth_required', provider: 'fake' });
       return;
@@ -503,6 +517,14 @@ export function createFakeBackend(): ServerBackend {
         send({ type: 'status', state: 'idle' });
         abortController = null;
       }
+    },
+
+    async refreshAccountStatus(_cache, send): Promise<void> {
+      // Mirror copilot: emit an account-level credit segment (turnId-less) after
+      // a turn, only when the `credit` step armed it. Consumed once.
+      if (!emitCreditNext) return;
+      emitCreditNext = false;
+      send({ type: 'status', credits: { text: 'premium: 3/10 (30%)', severity: 'normal' } });
     },
 
     async stop(): Promise<void> {

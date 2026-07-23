@@ -56,7 +56,9 @@ export interface StatusSegment {
 }
 
 export interface AgentStatusPayload {
-  state: AgentSessionState;
+  /** OPTIONAL: a pure account-status refresh (credits) omits it so the renderer
+   *  doesn't run streaming/turn-end side effects for a non-turn update. */
+  state?: AgentSessionState;
   model?: string;
   costUsd?: number;
   inputTokens?: number;
@@ -65,6 +67,8 @@ export interface AgentStatusPayload {
   sessionId?: string;
   contextUsage?: StatusSegment;
   rateLimits?: StatusSegment[];
+  /** Account-level usage (copilot premium-request quota, session-scoped delivery). */
+  credits?: StatusSegment;
 }
 
 export interface ProviderCapabilities {

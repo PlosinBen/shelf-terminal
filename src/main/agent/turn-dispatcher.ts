@@ -158,6 +158,17 @@ export function createTurnDispatcher(
       return;
     }
 
+    // Account-status refresh: a `status` with NO turnId is session-scoped (e.g.
+    // copilot's post-turn premium-credit update, fetched out-of-band since ACP has
+    // no usage_update). Route to the session sink BEFORE the turnId check — a normal
+    // turn status carries a turnId and still flows to its per-turn generator below.
+    if (onSessionEvent && m?.type === 'status' && !m?.turnId) {
+      const ev = parseRemoteMessage(m);
+      if (ev) onSessionEvent(ev);
+      else log.info('agent-remote', 'session status event unparseable, dropped');
+      return;
+    }
+
     // Interactive login events: session-level (turnId-less) — the login runs
     // outside any turn (triggered by an IPC command, not a `send`). Route to the
     // session sink before the turnId check so they aren't dropped as "unknown

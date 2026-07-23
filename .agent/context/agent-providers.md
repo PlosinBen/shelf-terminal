@@ -291,6 +291,21 @@ SDK 0.3.159 **並存**兩種 compact 完成訊號:`status` 形狀(`subtype:'stat
 
 **Root cause**：`ctx`(context usage)來自 ACP `usage_update`（`translate.ts` 已有 handler,讀 `used`/`size`）。但 **`copilot --acp` 從不 emit `usage_update`**——它認得這個 type（在自己的 ACP schema 裡）卻不送。資料其實存在於 copilot CLI 內部（`/context`、`/usage`、experimental `statusLine.command` 的 `context_window.*`、`aiCreditsUsed/Remaining` 都算好了),只是沒透過 ACP 轉發（parity gap）。`numTurns`/`rateLimits` 則是 **Claude SDK 專屬**、ACP 標準沒有,copilot 本就給不出。
 
-**Fix / note**：**不自己估**——Zed 對 copilot 硬編 128k context window、估錯（[zed#44909](https://github.com/zed-industries/zed/issues/44909)）。已開上游票 [copilot-cli #4233](https://github.com/github/copilot-cli/issues/4233) 要 ACP emit `usage_update`（ctx 走標準 `used`/`size`/`cost`；AI-credit 走 `usage_update._meta`）。**上游修好前 copilot 不顯示 ctx/credit**;修好後 ctx 自動亮(handler 現成),credit 加一段讀 `_meta`。回檢綁 `UPSTREAM_WATCH`。
+**Fix / note**：**不自己估**——Zed 對 copilot 硬編 128k context window、估錯（[zed#44909](https://github.com/zed-industries/zed/issues/44909)）。已開上游票 [copilot-cli #4233](https://github.com/github/copilot-cli/issues/4233) 要 ACP emit `usage_update`（ctx 走標準 `used`/`size`/`cost`；AI-credit 走 `usage_update._meta`）。**ctx 仍等上游**（修好後自動亮,handler 現成）。**AI-credit 已不等 ACP**：改走 SDK `account.getQuota` 取 account-level premium 額度（見 `#26`）——這是 account 級、跟 session ctx 無關,不需要 #4233。`numTurns`/`rateLimits` 是 Claude SDK 專屬,copilot 給不出。
 
-**Related**：`agent-server/providers/acp/translate.ts`（`usage_update` handler）、`src/renderer/components/agent/StatusBar.tsx`（欄位:contextUsage/costUsd/numTurns/rateLimits）、`UPSTREAM_WATCH.md`。
+**Related**：`agent-server/providers/acp/translate.ts`（`usage_update` handler）、`agent-providers#26`（credit via SDK）、`src/renderer/components/agent/StatusBar.tsx`、`UPSTREAM_WATCH.md`。
+
+## agent-providers#26 — copilot account credit 走 SDK `account.getQuota`（config-home auth）+ 每 host cache-aside(15min)+ turn-end 觸發,turnId-less status 送渲染  ·  [Decision]
+
+**Decision**：copilot 的 **account-level AI-credit**（premium requests 用量）不走 ACP,改用 `@github/copilot-sdk` 的 `account.getQuota`。封裝在 `agent-server/providers/copilot/credit.ts`:
+- **Fetch**：`new CopilotClient({ connection: RuntimeConnection.forStdio({ path: <shipped copilot bin> }), env: copilotEnv(appId), useLoggedInUser: true })` → `start()` → `rpc.account.getQuota({})` → `stop()`。`normalizeCredit` 取 `quotaSnapshots.premium_interactions` → `StatusSegment`（`premium: used/total (pct%)`,severity 隨剩餘 %;`isUnlimitedEntitlement`/缺欄位 → `null` 不顯示）。
+- **Auth = config-home,不碰 token 檔**：`useLoggedInUser:true` + `env.COPILOT_HOME = ~/.shelf/apps/<appId>/copilot`（ACP session 用的同一個 per-app config-home）→ SDK 用 CLI 既有登入態認證,不讀 copilot 私有 token 檔。守住 device-scoped-auth / provider-boundary（`#15`/`#16`）。
+- **Cache-aside**：`refreshCopilotCredit` 打 dispatcher 的 per-host cache（`agent-dispatch.md` 的 `ModelCacheClient`）,**TTL 15min**。key = 單一 `account-credit`（**不帶 appId**:一個 host = 一個 config-home = 一個 user)。沒有 dispatcher cache 時退化用 process-local fallback（仍受 TTL 節流）。任何 error → fail-quiet 不顯示。
+- **觸發 = turn-end**（無開場 fetch,對齊 claude 首輪後才有 status）。`exec.ts` 在 `backend.query` 後 fire-and-forget `backend.refreshAccountStatus?.(cache, send, appId)`（`ServerBackend` 選配 hook）,用 **base send（turnId-less）**。
+- **送渲染**：credit status **不帶 `state`**（status wire `state?` 因此設為選配,避免 credit-only status 誤翻 streaming）。`turn-dispatcher` 特判「turnId-less 的 `status`」→ 走 `onSessionEvent`（session-scoped）→ IPC → store `setStatus` 合併 `credits` → `StatusBar.tsx` 渲染,不進 per-turn generator。
+
+**Reason**：credit 是 account 級、ACP 無標準欄位且 `copilot --acp` 不 emit usage（`#25`）,SDK 是今天唯一乾淨路徑。spawn copilot binary 有成本 → 每 host 15min 一次、turn-end 才查、cache 共用,把 spawn 頻率壓到最低。
+
+**Do not change casually because**：(1) 拿掉「turnId-less status → onSessionEvent」特判,credit status 會因無對應 turn 被丟棄。(2) 把 `state?` 改回必填,credit-only status 會誤觸發 streaming 旁效。(3) cache key 加回 appId 會讓同 host 多 tab 各自 spawn,失去共用。(4) `account.getQuota` 是 `@experimental` → 一定 fail-quiet,別讓它 block turn 或 crash。
+
+**Related**：`agent-server/providers/copilot/credit.ts`、`agent-server/providers/copilot/helpers.ts`（`resolveCopilotBinary`/`copilotEnv`）、`agent-server/exec.ts`、`agent-server/providers/types.ts`（`refreshAccountStatus` hook + `credits`）、`src/main/agent/turn-dispatcher.ts`、`src/renderer/components/agent/StatusBar.tsx`、`architecture/agent-dispatch.md`（per-host cache）。

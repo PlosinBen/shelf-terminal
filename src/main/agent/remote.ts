@@ -1250,6 +1250,7 @@ export function parseRemoteMessage(msg: any): AgentEvent | null {
         sessionId: msg.sessionId,
         contextUsage: msg.contextUsage,
         rateLimits: msg.rateLimits,
+        credits: msg.credits,
       },
     };
   }

@@ -31,6 +31,7 @@ export function StatusBar({ tabId, provider }: Props) {
   const numTurns = tab?.numTurns;
   const contextUsage = tab?.contextUsage ?? null;
   const rateLimits = tab?.rateLimits ?? [];
+  const credits = tab?.credits ?? null;
 
   const handleOpenModelPicker = useCallback(() => {
     if (!capabilities || capabilities.models.length === 0) return;
@@ -98,6 +99,12 @@ export function StatusBar({ tabId, provider }: Props) {
         <>
           <span className="agent-status-sep">|</span>
           <span className="agent-status-seg" data-severity={contextUsage.severity ?? 'normal'}>{contextUsage.text}</span>
+        </>
+      )}
+      {credits && (
+        <>
+          <span className="agent-status-sep">|</span>
+          <span className="agent-status-seg" data-severity={credits.severity ?? 'normal'}>{credits.text}</span>
         </>
       )}
       {costUsd !== undefined && (

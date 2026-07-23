@@ -346,6 +346,11 @@ async function handleSend(msg: IncomingMessage) {
 
   const contextAware = wrapSendForContext(provider, msg.sessionId, turnSend);
   await backend.query(input, contextAware);
+
+  // Post-turn: refresh account-level status (e.g. copilot credit) via the per-host
+  // cache. Fire-and-forget + fail-quiet inside — must not delay readiness for the
+  // next turn. Uses the base `send` (session-scoped status, turnId-less).
+  void backend.refreshAccountStatus?.(modelCacheClient, send, input.appId);
 }
 
 async function handleStop() {
