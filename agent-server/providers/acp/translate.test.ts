@@ -40,9 +40,27 @@ describe('translateSessionUpdate', () => {
       content: [{ type: 'diff', path: '/x/file.ts', oldText: 'a', newText: 'b' }],
     };
     expect(translateSessionUpdate(u)).toEqual([{
-      type: 'message', msgId: 't1', msgType: 'fold_diff', label: 'Edit', subtitle: 'Edit file.ts',
+      // subtitle = the diff's file path (not the title), matching claude's Edit card.
+      type: 'message', msgId: 't1', msgType: 'fold_diff', label: 'Edit', subtitle: '/x/file.ts',
       body: { diff: { oldString: 'a', newString: 'b' } },
     }]);
+  });
+
+  it('uses the file PATH as subtitle for copilot apply_patch (generic title), from the diff block', () => {
+    const u: SessionUpdate = {
+      sessionUpdate: 'tool_call', toolCallId: 'e1', title: 'apply_patch', kind: 'edit', status: 'completed',
+      content: [{ type: 'diff', path: '/repo/src/x.php', oldText: 'a', newText: 'b' }],
+    };
+    expect(translateSessionUpdate(u)[0]).toMatchObject({ msgType: 'fold_diff', label: 'Edit', subtitle: '/repo/src/x.php' });
+  });
+
+  it('uses ACP `locations[0].path` as subtitle when present (over the title)', () => {
+    const u = {
+      sessionUpdate: 'tool_call', toolCallId: 'e2', title: 'apply_patch', kind: 'edit', status: 'completed',
+      locations: [{ path: '/repo/a.go' }],
+      content: [{ type: 'content', content: { type: 'text', text: 'ok' } }],
+    } as unknown as SessionUpdate;
+    expect(translateSessionUpdate(u)[0]).toMatchObject({ msgType: 'fold_code', label: 'Edit', subtitle: '/repo/a.go' });
   });
 
   it('maps a non-diff tool_call → fold_code with concatenated text content', () => {

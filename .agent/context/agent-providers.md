@@ -240,7 +240,9 @@ SDK 0.3.159 **並存**兩種 compact 完成訊號:`status` 形狀(`subtype:'stat
 
 ## agent-providers#20 — ACP 工具卡片:`kind` → 短 label(粉紅工具名)、`title` → subtitle(灰色描述),對齊 claude 的 label/subtitle 語意  ·  [Decision]
 
-**Decision**：ACP tool_call 的 wire 卡片 **`label` = `kind` 對應的短工具名**（`read`→`Read`、`search`→`Search`、`execute`→`Execute`…；`other`/缺 → 泛用 `Tool`），**`subtitle` = `title`（copilot 的描述句，如「Viewing …file」「Searching for '…'」）**。對應 `translate.ts` 的 `TOOL_KIND_LABELS` / `toolKindLabel()`。
+**Decision**：ACP tool_call 的 wire 卡片 **`label` = `kind` 對應的短工具名**（`read`→`Read`、`search`→`Search`、`execute`→`Execute`…；`other`/缺 → 泛用 `Tool`），**`subtitle` = 影響的檔案路徑（ACP `locations[0].path`,否則 diff block 的 `path`),沒有路徑才退回 `title`**。對應 `translate.ts` 的 `TOOL_KIND_LABELS`/`toolKindLabel()` + `firstDiff().path`/`locations`。
+
+- 檔案路徑優先的原因:copilot 的 edit 工具 `title` 是泛用的 **`apply_patch`**（沒帶檔案),但 ACP 標準欄位 `locations`/diff `path` 有絕對路徑 → 拿它當 subtitle 才對齊 claude（`Edit` → subtitle=`<file path>`）。無檔案的工具（execute/search）沒有 locations → subtitle 退回 `title`（命令/pattern）。
 
 **Reason**：這對齊 claude provider 的槽位語意——`label`（渲染成**粉紅**的主標）= **短工具名**（`Read`/`Edit`/`Bash`）、`subtitle`（灰色副標）= **目標/描述**（`stripCwd(file_path)` / input args）。copilot 的 `title` 是「動作＋目標」揉成的**長句**;若把整句塞進 `label`,一整欄粉紅長字**難以聚焦閱讀**。改用短 `kind` 當 label、長 `title` 退到 subtitle,一欄短標籤好掃視,細節在灰字。
 

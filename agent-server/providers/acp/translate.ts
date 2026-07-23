@@ -107,10 +107,10 @@ function rawOutputToText(rawOutput: unknown): string {
 }
 
 /** First diff block in a tool call's content, if any (drives fold_diff vs fold_code). */
-function firstDiff(content: ToolCallContent[] | null | undefined): { oldText?: string | null; newText: string } | undefined {
+function firstDiff(content: ToolCallContent[] | null | undefined): { oldText?: string | null; newText: string; path?: string } | undefined {
   if (!content) return undefined;
   for (const c of content) {
-    if (c.type === 'diff') return { oldText: c.oldText, newText: c.newText };
+    if (c.type === 'diff') return { oldText: c.oldText, newText: c.newText, path: c.path };
   }
   return undefined;
 }
@@ -193,15 +193,15 @@ export function translateSessionUpdate(update: SessionUpdate): OutgoingMessage[]
       // subtitle=<target>) — a column of short labels reads far better than a wall
       // of copilot's long titles. Both survive partial updates via createToolMetaCarry.
       const msgId = update.toolCallId;
-      const subtitle = ('title' in update && update.title) ? update.title : undefined;
+      const title = ('title' in update && update.title) ? update.title : undefined;
       // copilot delivers its FINAL SUMMARY via a `task_complete` signal tool (not
       // plain assistant text; ACP's turn-completion signal is the turn-level
       // stopReason, so agents lean on a tool for the closing message). Surface that
       // summary as the turn's closing `reply` (it's markdown) instead of a buried
       // "Tool" card. A bare signal (initial pending call, no content) emits nothing.
       // Copilot-specific title match — no ACP standard marker exists; revisit if it
-      // is renamed. `subtitle` = the carried title (createToolMetaCarry).
-      if (subtitle === 'task_complete') {
+      // is renamed. `title` is carried across partial updates (createToolMetaCarry).
+      if (title === 'task_complete') {
         const summary = toolContentToText('content' in update ? update.content : undefined)
           || rawOutputToText('rawOutput' in update ? update.rawOutput : undefined);
         return summary ? [{ type: 'message', msgId, msgType: 'reply', content: summary }] : [];
@@ -210,6 +210,12 @@ export function translateSessionUpdate(update: SessionUpdate): OutgoingMessage[]
       const status = 'status' in update ? update.status : undefined;
       const errorMessage = errorFor(status);
       const diff = firstDiff('content' in update ? update.content : undefined);
+      // subtitle = the affected file PATH (ACP `locations`, else the diff block's
+      // path), matching claude (`Edit` → subtitle=<path>). copilot's edit/apply_patch
+      // `title` is a generic "apply_patch" — the path is what's useful. Falls back to
+      // the title for tools with no file (execute/search) or no locations.
+      const filePath = ('locations' in update ? update.locations?.[0]?.path : undefined) || diff?.path;
+      const subtitle = filePath || title;
       if (diff) {
         return [{
           type: 'message', msgId, msgType: 'fold_diff', label,
