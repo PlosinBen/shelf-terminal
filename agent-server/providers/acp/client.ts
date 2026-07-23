@@ -16,7 +16,7 @@ import {
   type AvailableCommand,
 } from '@agentclientprotocol/sdk';
 import type { OutgoingMessage } from '../types';
-import { translateSessionUpdate, imageContentBlocks, DEFAULT_AGENT_MSG_ID } from './translate';
+import { translateSessionUpdate, createToolMetaCarry, imageContentBlocks, DEFAULT_AGENT_MSG_ID } from './translate';
 
 /** An async FIFO of session updates that unblocks readers on push or done. */
 interface UpdateQueue {
@@ -138,20 +138,39 @@ export function createSessionDriver(): SessionDriver {
       // streamType so a turn's reply text and thinking don't collide with each
       // other (both would otherwise be DEFAULT_AGENT_MSG_ID). Agents that DO send
       // a real messageId (codex) are untouched.
+      //
+      // `seg` splits messageId-less text at TOOL boundaries. ACP's only message
+      // boundary signal is `messageId`, which copilot --acp omits; the spec has no
+      // fallback (see the message-id RFD). Mirror Zed's reference client: text
+      // arriving AFTER a tool card is a NEW assistant message. Without this, a
+      // turn's opening remark and its post-tool closing summary collapse onto one
+      // `turnBase:text` card anchored at the FIRST chunk's position — so the
+      // closing text is merged up top, above the tool cards, and the turn appears
+      // to end with no reply. Bumping `seg` when a tool card follows streamed text
+      // gives the later text a fresh msgId → its own card at the right position.
       const turnBase = `${session.sessionId}#${++turnSeq}`;
+      let seg = 0;
+      let streamedSinceTool = false;
       const namespaced = (msgId: string, streamType?: string): string =>
-        msgId === DEFAULT_AGENT_MSG_ID ? `${turnBase}:${streamType ?? 'msg'}` : msgId;
+        msgId === DEFAULT_AGENT_MSG_ID ? `${turnBase}:${streamType ?? 'msg'}:${seg}` : msgId;
 
       const textByMsg = new Map<string, string>();
+      // Carry tool-call title/kind across their partial updates (see
+      // createToolMetaCarry) — one carry per turn, tool calls live within a turn.
+      const carryToolMeta = createToolMetaCarry();
       for (;;) {
         const update = await q.next(() => done);
         if (!update) break;
-        for (const raw of translateSessionUpdate(update)) {
+        for (const raw of translateSessionUpdate(carryToolMeta(update))) {
           let wire = raw;
-          if (wire.type === 'stream') {
-            wire = { ...wire, msgId: namespaced(wire.msgId, wire.streamType) };
-          } else if (wire.type === 'message') {
+          if (wire.type === 'message') {
+            // Tool/other card after streamed text = message boundary → next text
+            // is a new segment. (Consecutive tools don't over-bump: flag is reset.)
+            if (streamedSinceTool) { seg++; streamedSinceTool = false; }
             wire = { ...wire, msgId: namespaced(wire.msgId) };
+          } else if (wire.type === 'stream') {
+            wire = { ...wire, msgId: namespaced(wire.msgId, wire.streamType) };
+            streamedSinceTool = true;
           }
           if (wire.type === 'stream' && wire.streamType === 'text') {
             textByMsg.set(wire.msgId, (textByMsg.get(wire.msgId) ?? '') + wire.content);

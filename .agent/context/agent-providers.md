@@ -229,3 +229,56 @@ SDK 0.3.159 **並存**兩種 compact 完成訊號:`status` 形狀(`subtype:'stat
 **Do not change casually because**：別再在別處硬編 provider 清單或 `provider === 'x'` 的分支去做 dispatch/選單/部署 —— 一律從 registry 來,否則又會 diverge。
 
 **Related**：CLAUDE.md Conventions、`agent-providers#1`、`src/shared/agent-providers.ts`、`agent-server/exec.ts`、`src/main/agent/remote.ts`、`src/renderer/components/{TabBar,ProjectEditPanel}.tsx`。
+
+## agent-providers#19 — ACP tool-call update 是 partial:title 要在 provider 層 carry-forward,別讓 title-less update 覆蓋成 `Tool`  ·  [Gotcha]
+
+**Symptom**：Copilot（及任何 ACP provider）的工具卡片全部顯示成無意義的 `Tool`,原本的工具標題（如 `Grep`/`Edit file.ts`）不見了。
+
+**Root cause**：ACP 的 `tool_call`（初次）`title` **必填**,但 `tool_call_update`（帶 status/結果的後續）是 **partial update** —— `title` optional,未給即「不變」。而 Shelf wire 的 `message` 是 **full upsert-by-msgId**(renderer `agentTabStore.upsertById` 依 `msgId=toolCallId` **整個覆蓋** card)。所以帶結果卻沒 title 的 update 一旦 translate 落到 `label:'Tool'` fallback,就把初次的好標題蓋掉。
+
+**Fix / note**：在 **agent-server 的 ACP 層**還原 partial 語意(provider 封裝 provider 語意,renderer 維持 dumb full-replace)——`translate.ts` 的 `createToolMetaCarry()` 每個 turn 建一次,記住每個 `toolCallId` 最後看到的 title,對後續 update 重新注入;`client.ts drivePromptTurn` 在 `translateSessionUpdate` 前先過這個 carry。**不要**改成讓 renderer store 做 partial merge —— 那會把 ACP 語意洩漏進 renderer、且動到所有 provider/訊息型別的 upsert。
+
+## agent-providers#20 — ACP 工具卡片:`kind` → 短 label(粉紅工具名)、`title` → subtitle(灰色描述),對齊 claude 的 label/subtitle 語意  ·  [Decision]
+
+**Decision**：ACP tool_call 的 wire 卡片 **`label` = `kind` 對應的短工具名**（`read`→`Read`、`search`→`Search`、`execute`→`Execute`…；`other`/缺 → 泛用 `Tool`），**`subtitle` = `title`（copilot 的描述句，如「Viewing …file」「Searching for '…'」）**。對應 `translate.ts` 的 `TOOL_KIND_LABELS` / `toolKindLabel()`。
+
+**Reason**：這對齊 claude provider 的槽位語意——`label`（渲染成**粉紅**的主標）= **短工具名**（`Read`/`Edit`/`Bash`）、`subtitle`（灰色副標）= **目標/描述**（`stripCwd(file_path)` / input args）。copilot 的 `title` 是「動作＋目標」揉成的**長句**;若把整句塞進 `label`,一整欄粉紅長字**難以聚焦閱讀**。改用短 `kind` 當 label、長 `title` 退到 subtitle,一欄短標籤好掃視,細節在灰字。
+
+**Do not change casually because**：(a) 別把 `title` 放回 `label`——會回到「一片粉紅長句」的難讀狀態。(b) copilot 的 `kind` **不可靠**（它把 search 標成 `other`），所以 `other`/缺一律落 `Tool`,不要假設 kind 一定精準。(c) `kind` 純驅動 label 文字,**不決定** fold_diff/fold_code（那由 `firstDiff(content)` 判）。
+
+### Gotchas
+- ACP `tool_call_update` 是 **partial**（省略 title/kind = 不變），但 wire `message` 是 full upsert（renderer 依 msgId 整個覆蓋 card）→ 沒 carry 就會把 label/subtitle 清成預設。`createToolMetaCarry()` 每 turn 記住 `toolCallId` 的 title+kind 並回填後續 update（見 `#19`）。
+
+**Related**：`agent-server/providers/acp/{translate,client}.ts`、`agent-server/providers/claude/index.ts`（`subtitle` 慣例）、`src/renderer/components/AgentMessage.tsx`（`FoldHeader` label+subtitle）、`contracts/agent-wire-protocol`。
+
+## agent-providers#21 — messageId-less ACP 文字用「工具邊界」切段(mirror Zed),否則一個 turn 的文字折疊成一張早期卡  ·  [Decision]
+
+**Background/Symptom**：copilot `--acp` **省略 `agent_message_chunk.messageId`**（ACP 唯一的訊息邊界訊號;spec 對「省略時」無 fallback,見官方 message-id RFD）。原本 Shelf 把 messageId-less 文字整個 turn namespace 成單一 `sessionId#turnSeq:text` → 一個 turn 內**所有**助理文字(開場 + 工具後的收尾)全落同一張卡、釘在最早位置 → 收尾摘要被併到頂端,底部只剩工具卡,像「沒有結尾訊息」。
+
+**Decision**：在 `client.ts drivePromptTurn` 用 **tool 邊界切段**——文字之後出現 `tool_call`(wire `message`)就 `seg++`,下一段文字換新 id `sessionId#turnSeq:text:<seg>`(text/thinking 共用 seg)。**Mirror Zed 參考 client** 的 `push_assistant_content_block`:上一筆是 assistant message 才 append、是 ToolCall 就開新 entry。每段文字各自成卡、落在自己的時序位置。
+
+**Do not change casually because**：ACP 沒有「訊息完成」旗標(`ContentChunk` 只有 content/messageId/_meta;`stopReason` 是 turn 級),tool 邊界是唯一可靠的推斷。agent 若**有**送 messageId(codex)則 `namespaced` 直接用真 id、不套切段,別破壞那條路徑。
+
+## agent-providers#22 — reconnect 排序用「發起時間」:`upsertMessage` 必須持久化 upsertById 保留後的 timestamp,不是原始 msg  ·  [Gotcha]
+
+**Symptom**：live 順序正確,但 disconnect→reconnect 後,一個 turn 的所有 reply **全擠到最後**(過了交錯的工具卡),時序跑掉。
+
+**Root cause**：卡片的正確排序時間是**發起時間**(工具 = 初次 `tool_call`;文字 = 初次串流,`flushChunkBuffer` 建卡時 `Date.now()`)。`upsertById` 在**記憶體**保留這個早 timestamp(finalize/completed 替換時 `next[i]={...built, timestamp: prev[i].timestamp}`)→ live 正確。但 `upsertMessage` 的 `markDirty` 原本存的是**原始 `msg`**(buildAgentMsg 的 finalize-time `Date.now()`,晚)→ IDB 存成「結束時間」→ reload 依 `by-session-time` 重排就用了結束時間。
+
+**Fix / note**：`upsertMessage` 改成 `markDirty(tabId, tabs.get(tabId).messages.find(id))`——持久化**記憶體裡保留後(發起)的** timestamp。原則:**訊息/工具一律以發起時間排序**;任何「替換既有卡」的持久化都要存保留後的版本,別存新 msg 的時間。
+
+## agent-providers#23 — copilot read/view 內容在 `rawOutput`(非 `content`);完成但無輸出的工具要標 settled,避免 reload 誤判 orphan  ·  [Gotcha]
+
+**Symptom**：(a) Read/Viewing 工具卡片內容空白;(b) reconnect 後這些卡片被標紅 `Session ended before completion`。
+
+**Root cause**：copilot 的 read/view 把檔案內容放 **`rawOutput`**(`{content: "..."}`),**不是** ACP 標準 `content` 陣列;translate 原本只讀 `content` → 內容被丟掉、卡片無 body。而 renderer reload 的 `reviveOrphanPending`(`storage/agent-history.ts`)把「無 body 且無 errorMessage」的 fold 卡片當成**崩潰在半途的 in-flight 工具** → 補 `Session ended before completion`。
+
+**Fix / note**：`translate.ts` `rawOutputToText()` —— `content` 為空時 fallback 抓 `rawOutput`(handle `{content}` copilot / `{formatted_output}` codex / 純字串)。另:`status==='completed'` 但仍無文字的工具,**送空 body `{content:''}`** 標記 settled(reload 就不誤判);renderer `AgentMessage` fold_code 對**空 content 不渲染空灰條**。in-flight(pending/in_progress)仍保持無 body → 真崩潰照樣被 reload 標出。
+
+## agent-providers#24 — copilot 用 `task_complete` 工具送最終總結:translate 特判成結尾 `reply`,不是埋在工具卡  ·  [Decision]
+
+**Decision**：`translate.ts` 特判 `title==='task_complete'`(靠 `createToolMetaCarry` 帶過來的 title)—— 有內容 → 渲染成 `reply`(markdown 結尾發言,因是該 turn 最後動作故落在最底);裸訊號(無內容)→ 不顯示。
+
+**Reason**：copilot 的 agent 用 `task_complete` 工具自我宣告完成、把**最終總結放在它的 content/rawOutput**,而非純文字(ACP 的完成訊號是 turn 級 `stopReason`,agent 只好借工具送結尾訊息)。若當普通工具渲染,總結會埋在收合的「Tool」卡裡。
+
+**Do not change casually because**：這是 **copilot title 慣例的特判、非 ACP 標準**(Zed 等參考 client 不特判,一律當普通工具);copilot 改名就失效。屬 Shelf 專屬加值,發現顯示問題(如與前面文字重複)再議。

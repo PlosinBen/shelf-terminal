@@ -16,6 +16,7 @@ import type {
   PlanEntry,
   ToolCallContent,
   ToolCallStatus,
+  ToolKind,
 } from '@agentclientprotocol/sdk';
 import type { OutgoingMessage } from '../types';
 import { severityFromUtilization } from '../types';
@@ -88,6 +89,23 @@ function toolContentToText(content: ToolCallContent[] | null | undefined): strin
   return parts.join('\n');
 }
 
+/**
+ * Displayable text from a tool's `rawOutput` — a FALLBACK when the ACP `content`
+ * array is empty. copilot puts read/view file text ONLY in `rawOutput.content`
+ * (never the standard `content` array), so without this the read card is blank.
+ * `rawOutput` is agent-defined (`unknown`); handle the common shapes: a bare
+ * string, `{content}` (copilot), or `{formatted_output}` (codex shell).
+ */
+function rawOutputToText(rawOutput: unknown): string {
+  if (typeof rawOutput === 'string') return rawOutput;
+  if (rawOutput && typeof rawOutput === 'object') {
+    const o = rawOutput as Record<string, unknown>;
+    if (typeof o.content === 'string') return o.content;
+    if (typeof o.formatted_output === 'string') return o.formatted_output;
+  }
+  return '';
+}
+
 /** First diff block in a tool call's content, if any (drives fold_diff vs fold_code). */
 function firstDiff(content: ToolCallContent[] | null | undefined): { oldText?: string | null; newText: string } | undefined {
   if (!content) return undefined;
@@ -103,10 +121,53 @@ function errorFor(status: ToolCallStatus | null | undefined): string | undefined
 }
 
 /**
+ * Carry a tool call's title + kind forward across its updates, for ONE turn.
+ *
+ * ACP tool-call updates are PARTIAL: only the initial `tool_call` carries a
+ * REQUIRED `title`; a `tool_call_update` (status/content change) usually omits
+ * title AND kind ("unchanged"). Shelf's wire `message` is a full upsert-by-msgId —
+ * the renderer REPLACES the card by msgId — so a title/kind-less update would
+ * clobber the card back to defaults. Resolve ACP's partial semantics HERE (the
+ * provider owns provider semantics; the renderer stays a dumb full-replace):
+ * remember the last-seen title + kind per `toolCallId` and re-inject them into
+ * later updates. Create one carry per turn (tool calls live within a turn).
+ */
+export function createToolMetaCarry(): (update: SessionUpdate) => SessionUpdate {
+  const metaByToolCall = new Map<string, { title?: string; kind?: ToolKind }>();
+  return (update) => {
+    if (update.sessionUpdate !== 'tool_call' && update.sessionUpdate !== 'tool_call_update') {
+      return update;
+    }
+    const prev = metaByToolCall.get(update.toolCallId) ?? {};
+    const title = (update.title || prev.title) ?? undefined;
+    const kind = (update.kind || prev.kind) ?? undefined;
+    metaByToolCall.set(update.toolCallId, { title, kind });
+    return { ...update, ...(title ? { title } : {}), ...(kind ? { kind } : {}) } as SessionUpdate;
+  };
+}
+
+/**
+ * ACP `ToolKind` → a short, scannable tool-name for the card LABEL (pink), matching
+ * the claude provider's "label = tool name, subtitle = target" convention. Keeping
+ * the label short + repetitive (vs copilot's long descriptive `title`) is what makes
+ * a column of tool cards readable — the descriptive `title` goes to the subtitle.
+ * `other` (copilot's catch-all — it tags search as `other`) and missing kind fall to
+ * a generic 'Tool'.
+ */
+const TOOL_KIND_LABELS: Record<ToolKind, string> = {
+  read: 'Read', edit: 'Edit', delete: 'Delete', move: 'Move', search: 'Search',
+  execute: 'Execute', think: 'Think', fetch: 'Fetch', switch_mode: 'Switch', other: 'Tool',
+};
+function toolKindLabel(kind: ToolKind | null | undefined): string {
+  return (kind && TOOL_KIND_LABELS[kind]) || 'Tool';
+}
+
+/**
  * Map ONE ACP `SessionUpdate` to zero or more Shelf wire messages (WITHOUT a
  * turnId — the send wrapper stamps that). Returns `[]` for updates that are not
  * timeline render primitives (capabilities/mode/config/usage are consumed by the
- * stateful client, not rendered here).
+ * stateful client, not rendered here). Tool-call updates should be run through a
+ * per-turn {@link createToolMetaCarry} first so title/kind survive partial updates.
  */
 export function translateSessionUpdate(update: SessionUpdate): OutgoingMessage[] {
   switch (update.sessionUpdate) {
@@ -127,26 +188,52 @@ export function translateSessionUpdate(update: SessionUpdate): OutgoingMessage[]
       return [{ type: 'plan', content: renderPlan((update as { entries?: PlanEntry[] }).entries ?? []) }];
     case 'tool_call':
     case 'tool_call_update': {
+      // label = short `kind` name (pink, scannable); subtitle = the descriptive
+      // `title` (gray detail). Mirrors the claude provider (label='Read',
+      // subtitle=<target>) — a column of short labels reads far better than a wall
+      // of copilot's long titles. Both survive partial updates via createToolMetaCarry.
       const msgId = update.toolCallId;
-      const label = ('title' in update && update.title) ? update.title : 'Tool';
-      const kind = 'kind' in update ? update.kind : undefined;
+      const subtitle = ('title' in update && update.title) ? update.title : undefined;
+      // copilot delivers its FINAL SUMMARY via a `task_complete` signal tool (not
+      // plain assistant text; ACP's turn-completion signal is the turn-level
+      // stopReason, so agents lean on a tool for the closing message). Surface that
+      // summary as the turn's closing `reply` (it's markdown) instead of a buried
+      // "Tool" card. A bare signal (initial pending call, no content) emits nothing.
+      // Copilot-specific title match — no ACP standard marker exists; revisit if it
+      // is renamed. `subtitle` = the carried title (createToolMetaCarry).
+      if (subtitle === 'task_complete') {
+        const summary = toolContentToText('content' in update ? update.content : undefined)
+          || rawOutputToText('rawOutput' in update ? update.rawOutput : undefined);
+        return summary ? [{ type: 'message', msgId, msgType: 'reply', content: summary }] : [];
+      }
+      const label = toolKindLabel('kind' in update ? update.kind : undefined);
       const status = 'status' in update ? update.status : undefined;
       const errorMessage = errorFor(status);
       const diff = firstDiff('content' in update ? update.content : undefined);
       if (diff) {
         return [{
           type: 'message', msgId, msgType: 'fold_diff', label,
-          ...(kind ? { subtitle: kind } : {}),
+          ...(subtitle ? { subtitle } : {}),
           ...(errorMessage ? { errorMessage } : {}),
           body: { diff: { oldString: diff.oldText ?? '', newString: diff.newText } },
         }];
       }
-      const bodyText = toolContentToText('content' in update ? update.content : undefined);
+      // `content` is the ACP-standard display array; fall back to `rawOutput` when
+      // it's empty — copilot ships read/view file text ONLY in rawOutput.
+      const bodyText = toolContentToText('content' in update ? update.content : undefined)
+        || rawOutputToText('rawOutput' in update ? update.rawOutput : undefined);
+      // Emit a body for a COMPLETED tool even when it produced no text at all.
+      // Otherwise the card is body-less AND error-less, which the renderer's reload
+      // path (reviveOrphanPending in agent-history) misreads as a crashed in-flight
+      // tool and stamps "Session ended before completion". A settled empty body
+      // marks it as done-with-no-output; an in-flight card stays body-less so a
+      // genuine mid-call crash is still surfaced on reload.
+      const settled = status === 'completed';
       return [{
         type: 'message', msgId, msgType: 'fold_code', label,
-        ...(kind ? { subtitle: kind } : {}),
+        ...(subtitle ? { subtitle } : {}),
         ...(errorMessage ? { errorMessage } : {}),
-        ...(bodyText ? { body: { content: bodyText } } : {}),
+        ...((bodyText || settled) ? { body: { content: bodyText } } : {}),
       }];
     }
     case 'usage_update': {

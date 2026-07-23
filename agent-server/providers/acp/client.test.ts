@@ -29,7 +29,7 @@ describe('acp session driver (connection + new/resume + turn)', () => {
     expect(wire).toEqual([
       { type: 'stream', msgId: 'm1', streamType: 'text', content: 'Hel' },
       { type: 'stream', msgId: 'm1', streamType: 'text', content: 'lo' },
-      { type: 'message', msgId: 't1', msgType: 'fold_code', label: 'Read', subtitle: 'read' },
+      { type: 'message', msgId: 't1', msgType: 'fold_code', label: 'Read', subtitle: 'Read', body: { content: '' } },
       { type: 'message', msgId: 'm1', msgType: 'reply', content: 'Hello' },
     ]);
   });
@@ -59,6 +59,28 @@ describe('acp session driver (connection + new/resume + turn)', () => {
     expect(reply(w1).msgId).not.toBe(reply(w2).msgId);
     // A turn's stream chunk and its finalized reply share the turn's id.
     expect(stream(w1).msgId).toBe(reply(w1).msgId);
+  });
+
+  it('splits messageId-less text at TOOL boundaries → separate reply cards (copilot interleaving)', async () => {
+    // text → tool → text with no messageId: mirrors Zed (text after a tool is a
+    // NEW message). Without segmenting, both texts collapse onto one early card.
+    const updates: SessionUpdate[] = [
+      { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'before' } } as SessionUpdate,
+      { sessionUpdate: 'tool_call', toolCallId: 'x1', title: 'Do', kind: 'execute', status: 'completed' },
+      { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'after' } } as SessionUpdate,
+    ];
+    const mock = createMockAcpAgent({ updatesOnPrompt: updates });
+    const driver = createSessionDriver();
+    const conn = openAcpConnection(mock, { onSessionUpdate: driver.onSessionUpdate });
+    const session = await driver.startNew(conn.agent, { cwd: '/tmp/p' });
+    const wire: OutgoingMessage[] = [];
+    await driver.drivePromptTurn(conn.agent, session, 'go', (m) => wire.push(m));
+    conn.close();
+
+    const replies = wire.filter((m) => m.type === 'message' && m.msgType === 'reply') as Array<Extract<OutgoingMessage, { msgType: 'reply' }>>;
+    expect(replies.map((r) => r.content)).toEqual(['before', 'after']);
+    // Distinct ids → two cards at their own positions (closing text not merged up top).
+    expect(replies[0].msgId).not.toBe(replies[1].msgId);
   });
 
   it('forwards attached images as ACP image content blocks (drops non-data-urls)', async () => {
