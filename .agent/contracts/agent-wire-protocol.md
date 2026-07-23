@@ -105,17 +105,18 @@ Incremental delta chunks for a streaming `reply` / `fold_text`. Per-turn (carrie
 
 ## status — `type: 'status'`
 
-Per-turn busy-state + cost/usage. `state:'idle'` closes the turn generator. Forwarded to `IPC.AGENT_STATUS`.
+Per-turn busy-state + cost/usage. `state:'idle'` closes the turn generator. Forwarded to `IPC.AGENT_STATUS`. **Also carries turnId-less account-level status** (`credits`): emitted post-turn without a turnId → main's `turn-dispatcher` routes it session-scoped (not to any turn generator); such a status omits `state` (so it doesn't flip streaming). See `context/agent-providers#26`.
 
 | Field | Type | Notes |
 |-------|------|-------|
 | `type` | `'status'` | |
-| `state` | `'streaming'` \| `'idle'` | |
+| `state` | `'streaming'` \| `'idle'` **?** | Optional — a turnId-less credit-only status omits it. |
 | `model` | `string?` | Per-turn resolved model — display is intent-driven via capabilities, not this (agent-config-flow#4). |
 | `sessionId` | `string?` | |
 | `costUsd` / `inputTokens` / `outputTokens` / `numTurns` | `number?` | |
 | `contextUsage` | `StatusSegment?` | `{ text, severity? }` — see `agent-server/providers/types.ts`. |
 | `rateLimits` | `StatusSegment[]?` | |
+| `credits` | `StatusSegment?` | Account-level credit (copilot premium requests, via SDK `account.getQuota`). TurnId-less, refreshed post-turn. |
 
 ## capabilities — `type: 'capabilities'`
 

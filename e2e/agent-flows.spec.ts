@@ -113,6 +113,22 @@ test.describe('agent flows via fake provider', () => {
       await expect(statusBar).toContainText('ctx: 42%', { timeout: 5_000 });
       await expect(statusBar).toContainText('quota: 7%', { timeout: 5_000 });
     });
+
+    // Account-level credit (copilot premium requests) is fetched AFTER the turn
+    // via backend.refreshAccountStatus and delivered turnId-less through the
+    // session sink — not on the turn's status. Proves the full post-turn path
+    // (fire-and-forget refresh → session-scoped status → status bar). agent-providers#26.
+    test('post-turn account credit reaches the status bar', async ({ shelfApp: { page } }) => {
+      await setupProject(page);
+      await openAgentTab(page);
+      await sendAgentPrompt(page, 'credit');
+
+      const messages = page.locator('.agent-messages:visible');
+      await expect(messages).toContainText('credit armed', { timeout: 5_000 });
+
+      const statusBar = page.locator('.agent-status-bar:visible');
+      await expect(statusBar).toContainText('premium: 3/10 (30%)', { timeout: 5_000 });
+    });
   });
 
   test.describe('fold (tool_use)', () => {

@@ -105,6 +105,7 @@ title: shelf-terminal — Intent → File Index
 | Turn 路由（claude） | `providers/claude/turn-router.ts` | 純 attribution 狀態機，按順序把 message 分 foreground/server/task lane |
 | Provider 純 helper（copilot） | `providers/copilot/helpers.ts` | `resolveCopilotBinary` / `resolveCopilotCommand` / `copilotConfigHome`（`$COPILOT_HOME` per-appId）/ `copilotEnv`（token-env 傳遞）— 只被 copilot/ 引用 |
 | Copilot ACP mode-map | `providers/copilot/mode-map.ts` | copilot session-mode ↔ Shelf permission-mode（agent→default / plan→plan / autopilot→bypassPermissions）；copilot 特有、不在 toolkit |
+| Copilot account credit | `providers/copilot/credit.ts` | `fetchCopilotCredit`（SDK `account.getQuota`、config-home auth）+ `normalizeCredit` + `refreshCopilotCredit`（per-host cache-aside、15min TTL、fail-quiet）；turn-end 經 `refreshAccountStatus` hook 觸發，見 `context/agent-providers#26` |
 | Copilot 互動登入（device flow） | `providers/copilot/login.ts` | `parseLoginPrompt`（stdout 抽 URL+code 純函式）+ `startLogin`（spawn `copilot login`、env 剝 token、cancel）+ `prefillLoginUrl`（見 `context/agent-providers` #10）。移入 copilot/ 保持 provider 目錄隔離 |
 | Provider 共用 helper | `providers/shared.ts` | `stripCwd` / `resolveSkillsPluginRoot` / `projectAppSkills`（idempotent + atomic symlink-to-temp+rename 的 skill projection）— 跨 provider 共用純函式 |
 | MCP config 消費（解析 + ${VAR}） | `providers/mcp-config.ts` | `loadProjectedMcpServers`：讀 projected `mcp-servers.json` → 驗證 → 對 worker env 展開 `${VAR}` → fail-loud（兩 provider 共用） |
@@ -122,7 +123,7 @@ title: shelf-terminal — Intent → File Index
 | Fake provider | `providers/fake/index.ts` | E2E-only backend，`SHELF_TEST_MODE=1` 時回它，prompt 走 prefix-matched scenario |
 | Fake provider 測試 | `providers/fake/fake.test.ts` | 每個 scenario 的 wire-shape 驗證 + stop/abort 行為 |
 | Bundle build | `build.mjs` | esbuild → `dist/agent-server/<version>/index.js` 單一 ESM bundle（index/exec/dispatcher 同一 bundle，role 由 argv 選） |
-| Copilot provider 測試 | `providers/copilot/{copilot,helpers,login,mode-map}.test.ts` | ACP backend wire-shape / helper 純函式 / device-flow login / mode-map 對應 |
+| Copilot provider 測試 | `providers/copilot/{copilot,helpers,login,mode-map,credit}.test.ts` | ACP backend wire-shape / helper 純函式 / device-flow login / mode-map 對應 / credit normalize + cache-aside |
 | ACP toolkit 測試 | `providers/acp/*.test.ts` | connection/client/translate/permission/capabilities/mcp/shelf-mcp + mock-agent 驅動的 toolkit 驗證 |
 | Dispatcher 單元測試 | `dispatcher.test.ts` | open/close_session / raw relay / reconnect + backoff / inner-ping hung / proc-identity guard / cache 側通道 |
 | Model-cache 單元測試 | `model-cache.test.ts` | TTL hit/miss/expiry evict |

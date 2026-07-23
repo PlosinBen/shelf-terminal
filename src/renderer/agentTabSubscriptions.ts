@@ -104,6 +104,7 @@ export function bindAgentStoreSubscriptions(): () => void {
       numTurns: s.numTurns,
       contextUsage: s.contextUsage,
       rateLimits: s.rateLimits,
+      credits: s.credits,
     });
   });
 

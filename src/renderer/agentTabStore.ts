@@ -94,6 +94,8 @@ export interface AgentTabState {
   numTurns: number | undefined;
   contextUsage: StatusSegment | null;
   rateLimits: StatusSegment[];
+  /** Account-level usage (copilot premium-request quota). Shared per host/account. */
+  credits: StatusSegment | null;
 
   // capabilities
   capabilities: Capabilities | null;
@@ -340,6 +342,7 @@ export function initTab(tabId: string, opts: InitTabOpts) {
     numTurns: undefined,
     contextUsage: null,
     rateLimits: [],
+    credits: null,
     capabilities: null,
     pendingPermission: null,
     pendingPicker: null,
@@ -732,6 +735,7 @@ export interface StatusPartial {
   numTurns?: number;
   contextUsage?: StatusSegment;
   rateLimits?: StatusSegment[];
+  credits?: StatusSegment;
 }
 
 export function setStatus(tabId: string, partial: StatusPartial) {
@@ -748,6 +752,7 @@ export function setStatus(tabId: string, partial: StatusPartial) {
     if (Array.isArray(partial.rateLimits) && partial.rateLimits.length > 0) {
       next.rateLimits = partial.rateLimits;
     }
+    if (partial.credits) next.credits = partial.credits;
     return next;
   });
   // Streaming flag transition is handled separately via setStreaming —

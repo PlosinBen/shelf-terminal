@@ -116,7 +116,9 @@ export type OutgoingMessage = WireEnvelope & (
   // ── Per-turn control / status (turnId expected) ──────────────────────────
   | {
       type: 'status';
-      state: 'streaming' | 'idle';
+      /** Turn state. OPTIONAL: an account-status refresh (credits) omits it so the
+       *  renderer doesn't run turn-end/streaming side effects for a pure usage update. */
+      state?: 'streaming' | 'idle';
       model?: string;
       sessionId?: string;
       costUsd?: number;
@@ -125,6 +127,9 @@ export type OutgoingMessage = WireEnvelope & (
       numTurns?: number;
       contextUsage?: StatusSegment;
       rateLimits?: StatusSegment[];
+      /** Account-level usage (e.g. copilot premium-request quota). Provider-agnostic
+       *  segment; copilot fills it post-turn via `refreshAccountStatus`. */
+      credits?: StatusSegment;
     }
   | { type: 'error'; error: string }
   /**
@@ -410,6 +415,15 @@ export interface ServerBackend {
   query(input: QueryInput, send: SendFn): Promise<void>;
   stop(): Promise<void>;
   dispose(): void;
+  /**
+   * Post-turn account-level status refresh (optional). exec.ts fires this
+   * fire-and-forget AFTER a turn ends. Providers that expose ACCOUNT-scoped usage
+   * NOT carried in the turn's status stream (copilot's premium-request quota, which
+   * ACP `--acp` never emits) fetch it here and `send` a `status` with the segment.
+   * Cache-aside via the per-host `cache` (shared across the host's sessions → one
+   * fetch serves all). MUST be fail-quiet — never throw / block the next turn.
+   */
+  refreshAccountStatus?(cache: ModelCacheClient | undefined, send: SendFn, appId?: string): Promise<void>;
   /**
    * `intent` carries the renderer's saved prefs (projectConfig.agentPrefs) so
    * providers that track session-level state (Copilot's currentPermissionMode,
