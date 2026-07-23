@@ -284,3 +284,13 @@ SDK 0.3.159 **並存**兩種 compact 完成訊號:`status` 形狀(`subtype:'stat
 **Reason**：copilot 的 agent 用 `task_complete` 工具自我宣告完成、把**最終總結放在它的 content/rawOutput**,而非純文字(ACP 的完成訊號是 turn 級 `stopReason`,agent 只好借工具送結尾訊息)。若當普通工具渲染,總結會埋在收合的「Tool」卡裡。
 
 **Do not change casually because**：這是 **copilot title 慣例的特判、非 ACP 標準**(Zed 等參考 client 不特判,一律當普通工具);copilot 改名就失效。屬 Shelf 專屬加值,發現顯示問題(如與前面文字重複)再議。
+
+## agent-providers#25 — copilot ACP 不 emit `usage_update` → status bar 對 copilot 沒有 ctx / cost / AI-credit（等上游 #4233）  ·  [Gotcha]
+
+**Symptom**：copilot 的 agent status bar 只有 `state | provider | model | mode | effort`,缺 `ctx: NN%` 及其後的 cost / turns / credit（claude 有）。
+
+**Root cause**：`ctx`(context usage)來自 ACP `usage_update`（`translate.ts` 已有 handler,讀 `used`/`size`）。但 **`copilot --acp` 從不 emit `usage_update`**——它認得這個 type（在自己的 ACP schema 裡）卻不送。資料其實存在於 copilot CLI 內部（`/context`、`/usage`、experimental `statusLine.command` 的 `context_window.*`、`aiCreditsUsed/Remaining` 都算好了),只是沒透過 ACP 轉發（parity gap）。`numTurns`/`rateLimits` 則是 **Claude SDK 專屬**、ACP 標準沒有,copilot 本就給不出。
+
+**Fix / note**：**不自己估**——Zed 對 copilot 硬編 128k context window、估錯（[zed#44909](https://github.com/zed-industries/zed/issues/44909)）。已開上游票 [copilot-cli #4233](https://github.com/github/copilot-cli/issues/4233) 要 ACP emit `usage_update`（ctx 走標準 `used`/`size`/`cost`；AI-credit 走 `usage_update._meta`）。**上游修好前 copilot 不顯示 ctx/credit**;修好後 ctx 自動亮(handler 現成),credit 加一段讀 `_meta`。回檢綁 `UPSTREAM_WATCH`。
+
+**Related**：`agent-server/providers/acp/translate.ts`（`usage_update` handler）、`src/renderer/components/agent/StatusBar.tsx`（欄位:contextUsage/costUsd/numTurns/rateLimits）、`UPSTREAM_WATCH.md`。
