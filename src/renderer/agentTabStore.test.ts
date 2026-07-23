@@ -279,6 +279,26 @@ describe('agentTabStore — message actions', () => {
     expect(msgs.find((m) => m.id === 'm2')).toBeDefined();
   });
 
+  it('boundary-split: minting a new streaming segment settles the previous one (single caret)', () => {
+    // Regression: copilot ACP splits a turn's text into one reply per tool
+    // boundary (agent-providers#27). Each segment is a distinct msgId. The
+    // caret (message.streaming) must live on ONLY the segment currently
+    // receiving chunks — earlier segments must settle at the boundary, not
+    // linger with a blinking caret until turn-end idle.
+    appendChunk(TAB, 'segA', 'first answer', 'text');
+    vi.advanceTimersByTime(33);
+    expect((__getTabForTests(TAB)!.messages.find((m) => m.id === 'segA') as any).streaming).toBe(true);
+
+    // Tool boundary passes; a later window brings segment B's first chunk.
+    appendChunk(TAB, 'segB', 'second answer', 'text');
+    vi.advanceTimersByTime(33);
+    const msgs = __getTabForTests(TAB)!.messages;
+    expect((msgs.find((m) => m.id === 'segA') as any).streaming).toBe(false); // settled
+    expect((msgs.find((m) => m.id === 'segB') as any).streaming).toBe(true);  // live
+    // The settled segment is queued for persistence at the boundary (not only at idle).
+    expect(__getPendingSaveForTests(TAB)).toBeDefined();
+  });
+
   it('appendChunk does NOT requestSave (skips during streaming)', () => {
     appendChunk(TAB, 'chunk-1', 'hi', 'text');
     vi.advanceTimersByTime(33);

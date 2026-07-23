@@ -25,6 +25,8 @@ import type {
  *
  * Scenario syntax (prefix-matched against `input.prompt`):
  *   text:<msg>          stream chunks then finalize as text message
+ *   chunk:<msg>         stream chunks under a fresh msgId, NO finalize (copilot
+ *                       boundary-split segment — settles only at turn-end idle)
  *   thinking:<msg>      thinking message
  *   tool:<name>         tool_use + tool_result success
  *   tool_err:<name>     tool_use + tool_result error
@@ -202,6 +204,20 @@ export function createFakeBackend(): ServerBackend {
       send({ type: 'stream', msgId, streamType: 'text', content: content.slice(0, mid) });
       send({ type: 'stream', msgId, streamType: 'text', content: content.slice(mid) });
       send({ type: 'message', msgId, msgType: 'reply', content });
+      return;
+    }
+
+    // chunk:<msg> — stream text chunks under a FRESH msgId with NO finalize
+    // message, mirroring copilot ACP boundary-split segments (chunk-only, they
+    // settle only at turn-end idle — no per-segment finalize). Lets an E2E assert
+    // the single-caret invariant: chaining `chunk:A|tool:x|chunk:B` must leave the
+    // caret on ONLY the live segment, not every prior one. See agent-providers#27.
+    if (step.startsWith('chunk:')) {
+      const content = step.slice('chunk:'.length);
+      const msgId = mintId('m');
+      const mid = Math.ceil(content.length / 2);
+      send({ type: 'stream', msgId, streamType: 'text', content: content.slice(0, mid) });
+      send({ type: 'stream', msgId, streamType: 'text', content: content.slice(mid) });
       return;
     }
 

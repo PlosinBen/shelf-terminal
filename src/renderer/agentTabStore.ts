@@ -457,7 +457,13 @@ function flushChunkBuffer(tabId: string) {
   // array. One reducer pass, one notify — even if 200 chunks landed
   // in the 33 ms window for the same msgId, MessageList commits once.
   let messages = tab.messages;
+  // The msgId that received the most recent chunk in this flush — the single
+  // "live" stream. Any earlier message still flagged streaming is a completed
+  // segment (boundary-split mints a fresh message per tool boundary), so it is
+  // settled below. Buffer is insertion-ordered → last key = most recent.
+  let activeMsgId: string | undefined;
   for (const [msgId, { type, delta }] of buffer) {
+    activeMsgId = msgId;
     let found = false;
     // Wire streamType ('text' | 'thinking') maps to renderer-side variants:
     //   'text'     → reply       (assistant markdown reply)
@@ -515,6 +521,23 @@ function flushChunkBuffer(tabId: string) {
       }
     }
   }
+  // Single active caret: settle any message still flagged streaming that ISN'T
+  // the live stream. Without this, boundary-split (a new reply per tool boundary,
+  // agent-providers#27) leaves every prior segment's caret blinking until turn-end
+  // idle. Persist the settled text now (markDirty) so its final content lands in
+  // IDB at the boundary, matching setStreaming(false)'s clear path — appendChunk
+  // itself skips markDirty (partials shouldn't persist), so this is the write.
+  let settled = false;
+  const cleared = messages.map((m) => {
+    if ((m.type === 'reply' || m.type === 'fold_text') && m.streaming && m.id !== activeMsgId) {
+      settled = true;
+      const s = { ...m, streaming: false } as AgentMsg;
+      markDirty(tabId, s);
+      return s;
+    }
+    return m;
+  });
+  if (settled) messages = cleared;
   tabs.set(tabId, { ...tab, messages });
   notify(tabId);
 }

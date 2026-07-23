@@ -309,3 +309,13 @@ SDK 0.3.159 **並存**兩種 compact 完成訊號:`status` 形狀(`subtype:'stat
 **Do not change casually because**：(1) 拿掉「turnId-less status → onSessionEvent」特判,credit status 會因無對應 turn 被丟棄。(2) 把 `state?` 改回必填,credit-only status 會誤觸發 streaming 旁效。(3) cache key 加回 appId 會讓同 host 多 tab 各自 spawn,失去共用。(4) `account.getQuota` 是 `@experimental` → 一定 fail-quiet,別讓它 block turn 或 crash。
 
 **Related**：`agent-server/providers/copilot/credit.ts`、`agent-server/providers/copilot/helpers.ts`（`resolveCopilotBinary`/`copilotEnv`）、`agent-server/exec.ts`、`agent-server/providers/types.ts`（`refreshAccountStatus` hook + `credits`）、`src/main/agent/turn-dispatcher.ts`、`src/renderer/components/agent/StatusBar.tsx`、`architecture/agent-dispatch.md`（per-host cache）。
+
+## agent-providers#27 — streaming caret 維持「單一 active」不變式:flush 時 settle 非當前段,別等 turn-end idle  ·  [Gotcha]
+
+**Symptom**：copilot 一個 turn 內出現多個閃爍光標——每則助理 reply 卡都掛著 caret,而不是只有正在輸出的那則。
+
+**Root cause**：caret 就是 `message.streaming === true` 時渲染的 `.agent-cursor`（`AgentMessage.tsx`）。`streaming` flag 由 `appendChunk`/flush 設 true,但**原本只有 `setStreaming(false)`（turn-end idle）一條路清它,且一次清光**。boundary-split（`#21`）把一個 turn 的文字切成多則各自 msgId 的 chunk-only reply(無 per-segment finalize),中途沒有任何地方 settle 前一段 → 全部撐到 idle 才清 → 多 caret 併存。claude 因單一 msgId 全程同一則、不觸發。
+
+**Fix / note**：在 `flushChunkBuffer`（`agentTabStore.ts`）維持**單一 active caret 不變式**:記住這次 flush 最後寫入的 msgId（buffer 為插入序,末筆＝最新＝ live），迴圈後把其餘仍 `streaming:true` 的 reply/fold_text 就地 `streaming:false` + `markDirty`（在段落邊界就落 IDB,對齊 `setStreaming(false)` 的清理與持久化語意;`appendChunk` 本身刻意不 markDirty,partial 不落盤,所以這裡是唯一寫入點)。**別改回「只在 idle 清」**——會讓 boundary-split 的每段殘留 caret。前提:ACP 邊界只往前走,不回填前一個 msgId(若某 provider 會回填,單一 active 假設要重審)。
+
+**Related**：`src/renderer/agentTabStore.ts`（`flushChunkBuffer` / `setStreaming`）、`src/renderer/components/AgentMessage.tsx`（`.agent-cursor`）、`agent-providers#21`（boundary-split 是成因）。
