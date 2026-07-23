@@ -230,7 +230,11 @@ export function AgentMessage({ message, cwd: _cwd, nested }: Props) {
               {nested.map((child) => <AgentMessage key={child.id} message={child} />)}
             </div>
           )}
-          {isExpanded && message.body && (() => {
+          {/* Empty body.content = a completed tool with no output (e.g. copilot's
+              read/view tools). The empty body exists only to mark the card settled
+              for reload (see translate.ts / reviveOrphanPending) — don't render an
+              empty grey bar for it. */}
+          {isExpanded && message.body && message.body.content && (() => {
             const { lines, remaining } = truncateLines(message.body.content, 30);
             return (
               <pre className="fold-body fold-body-code">

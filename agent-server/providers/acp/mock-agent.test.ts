@@ -34,7 +34,7 @@ describe('mock ACP agent (runtime SDK integration)', () => {
     expect(wire).toEqual([
       { type: 'stream', msgId: 'm1', streamType: 'text', content: 'Hello ' },
       { type: 'stream', msgId: 'm1', streamType: 'text', content: 'world' },
-      { type: 'message', msgId: 't1', msgType: 'fold_code', label: 'Read file', subtitle: 'read' },
+      { type: 'message', msgId: 't1', msgType: 'fold_code', label: 'Read', subtitle: 'Read file', body: { content: '' } },
     ]);
   });
 

@@ -230,6 +230,20 @@ describe('agentTabStore — message actions', () => {
     expect((msgs[0] as any).content).toBe('v1-updated');
   });
 
+  it('persists the position-stable timestamp on upsert-replace, not the fresh finalize stamp', () => {
+    const early = { id: 'm1', type: 'reply', content: 'streaming', streaming: true, provider: 'claude', timestamp: 1000 } as AgentMsg;
+    const late = { id: 'm1', type: 'reply', content: 'final', streaming: false, provider: 'claude', timestamp: 9000 } as AgentMsg;
+    upsertMessage(TAB, early);   // streaming card at t=1000
+    upsertMessage(TAB, late);    // finalize at t=9000 — replaces in place
+    // in-memory keeps the early (position-stable) stamp
+    expect(__getTabForTests(TAB)!.messages.find((m) => m.id === 'm1')!.timestamp).toBe(1000);
+    // and the PERSISTED copy must match — otherwise reload's by-session-time sort
+    // clumps finalized replies at turn-end, past the interleaved tool cards.
+    removeTab(TAB);  // flushSave fires synchronously
+    const dirty = mockedStorage.saveAgentMessagesDelta.mock.calls.at(-1)![1];
+    expect(dirty.find((m) => m.id === 'm1')!.timestamp).toBe(1000);
+  });
+
   it('appendChunk buffers deltas and flushes after the 33ms window', () => {
     appendChunk(TAB, 'chunk-1', 'Hello ', 'text');
     appendChunk(TAB, 'chunk-1', 'world', 'text');

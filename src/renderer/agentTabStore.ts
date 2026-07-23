@@ -400,7 +400,13 @@ export function upsertMessage(tabId: string, msg: AgentMsg) {
     if (buffer.size === 0) clearChunkBuffer(tabId);
   }
   update(tabId, (prev) => ({ ...prev, messages: upsertById(prev.messages, msg) }));
-  markDirty(tabId, msg);
+  // Persist the position-stable timestamp upsertById kept in-memory — when a
+  // finalize `reply` replaces an earlier streaming card, upsertById preserves the
+  // EARLY (streaming) timestamp, but `msg` still carries buildAgentMsg's fresh
+  // finalize-time stamp. Persisting `msg` would make reload's by-session-time sort
+  // clump every finalized reply at turn-end, breaking interleaving with tool cards.
+  const stored = tabs.get(tabId)?.messages.find((m) => m.id === msg.id) ?? msg;
+  markDirty(tabId, stored);
 }
 
 // ── Stream chunk batching ──
