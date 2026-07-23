@@ -129,6 +129,27 @@ test.describe('agent flows via fake provider', () => {
       const statusBar = page.locator('.agent-status-bar:visible');
       await expect(statusBar).toContainText('premium: 3/10 (30%)', { timeout: 5_000 });
     });
+
+    // Regression: copilot ACP boundary-split makes one reply per tool boundary,
+    // each a chunk-only segment that settles only at turn-end idle. The streaming
+    // caret (`.agent-cursor`) must live on ONLY the live segment — earlier ones
+    // must settle when the next starts, not blink until idle. See agent-providers#27.
+    test('boundary-split: only the live segment shows a streaming caret', async ({ shelfApp: { page } }) => {
+      await setupProject(page);
+      await openAgentTab(page);
+      // Two chunk-only segments split by a tool, then a trailing delay so the turn
+      // is STILL streaming when we assert (the bug is a mid-turn state).
+      await sendAgentPrompt(page, 'chunk:first-answer|tool:Read|chunk:second-answer|delay:2000');
+
+      const messages = page.locator('.agent-messages:visible');
+      await expect(messages).toContainText('second-answer', { timeout: 5_000 });
+      // Both segments are on screen and the turn is mid-stream → exactly ONE caret.
+      await expect(page.locator('.agent-cursor:visible')).toHaveCount(1, { timeout: 2_000 });
+
+      // After idle, no caret remains anywhere.
+      await expect(page.locator('.agent-status-label:visible')).toHaveText('idle', { timeout: 5_000 });
+      await expect(page.locator('.agent-cursor:visible')).toHaveCount(0, { timeout: 5_000 });
+    });
   });
 
   test.describe('fold (tool_use)', () => {
