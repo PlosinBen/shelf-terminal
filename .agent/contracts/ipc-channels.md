@@ -157,8 +157,8 @@ App-Level Config Backup & Copy（skills + MCP）。Backup = 快照 live → 本�
 |--------|-------|
 | `getBinding()` | invoke `config-backup:get-binding` → `ConfigBackupBinding \| null` |
 | `bind({ remoteUrl, machineLabel })` | invoke `config-backup:bind` → `{ ok:true } \| { ok:false, reason:'invalid'\|'no-git'\|'remote', message }`（先 preflight 才存）|
-| `unbind()` | invoke `config-backup:unbind` |
-| `list()` | invoke `config-backup:list` → `BackupListResult`（binding + live items + `backedUp` 預勾 + `remoteReadOk`）|
+| `unbind()` | invoke `config-backup:unbind`（清 binding + 本機 intent）|
+| `list()` | invoke `config-backup:list` → `BackupListResult`（binding + live items + `intent` 預勾）。只讀本機 intent，不碰 git/網路 → 秒開、離線可用 |
 | `run(selectedIds)` | invoke `config-backup:run` → `{ ok:true, pushed, branch, itemCount } \| { ok:false, reason:'not-bound'\|'no-git'\|'remote', message }`（Backup：勾選集完整快照 → push）|
 | `listSources()` | invoke `config-backup:list-sources` → `BackupSource[]`（所有備份分支，含自己，own 優先）|
 | `listImportItems(ref)` | invoke `config-backup:list-import-items` → `BackupItemSummary[]`（某分支的項目，唯讀）|

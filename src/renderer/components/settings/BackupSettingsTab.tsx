@@ -27,7 +27,7 @@ export function BackupSettingsTab() {
     try {
       const res = await window.shelfApi.configBackup.list();
       setData(res);
-      setSelected(new Set(res.backedUp));
+      setSelected(new Set(res.intent));
     } catch {
       setData(null);
     } finally {
@@ -202,13 +202,6 @@ export function BackupSettingsTab() {
   function BackupBody() {
     return (
       <>
-      {data && !data.remoteReadOk && (
-        <p className="backup-status backup-status-err">
-          Couldn't read your existing backup (offline?). Ticking here will define a fresh snapshot —
-          items you leave unticked will be removed from your backup branch.
-        </p>
-      )}
-
       <p className="web-settings-hint">
         Ticked items are published as a snapshot to your branch. Unticking a previously backed-up
         item removes it on the next backup. Nothing here ever changes your live config.

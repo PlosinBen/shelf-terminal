@@ -57,13 +57,17 @@ related:
 
 **Related**：`config-backup#1`、`context/mcp` mcp#4。
 
-## config-backup#5 — Backup 是「勾選集的完整快照」→ checklist 預勾已備份項  ·  [Gotcha]
+## config-backup#5 — Backup 是「勾選集的完整快照」→ checklist 預勾靠本機 intent  ·  [Gotcha]
 
 **Background**：Backup 每次把 payload 區清空再依勾選重寫（`git add -A` 會 stage 刪除），所以分支永遠等於「我最新發佈的那一份」。
 
-**Gotcha**：因為是完整快照，**取消勾選會在下次 Backup 時把該項從分支移除**。若 checklist 預設全不勾，使用者只勾一個新 skill 就會**清掉整個備份** → 資料遺失。所以 Backup checklist **預勾「分支裡已存在的項目」**（`readBackedUpItemIds()` 讀本機分支），新項目才預設不勾（＝leak gate）。讀不到分支（離線）時 UI 要警告「勾選將定義一份全新快照」。
+**Gotcha**：因為是完整快照，**取消勾選會在下次 Backup 時把該項從分支移除**。若 checklist 預設全不勾，使用者只勾一個新 skill 就會**清掉整個備份** → 資料遺失。所以 checklist 要**預勾我上次備份的項目**，新項目才預設不勾（＝leak gate）。
 
-**Related**：`config-backup#2`、`config-backup#4`、`src/main/config-backup/backup.ts`。
+**預勾來源 = 本機 intent，不是 remote**：預勾集存在 `<userData>/config-backup-intent.json`（`intent-store.ts`），是「我這台機器選了要備份什麼」的 prefs——`runBackup` 成功時寫入勾選集、`unbind` 時清除。開 checklist（`config-backup:list`）**只讀本機 intent，完全不碰 git／網路**，所以秒開、離線一樣正常。remote 只在**按下 Back up 當下**（`runBackup` 自己的 fetch）才碰。
+
+**Do not change casually because**：「備份意圖」是本機的選擇，刻意跟 remote 狀態解耦——不要為了預勾而回去讀分支（那會逼 `list` 每次同步等一次 `git fetch`，就是先前每次進頁面都 loading 的原因）。取捨：重裝／清掉 userData 後 intent 遺失 → 首次進來全不勾（使用者重選即可），換來的是「意圖即本機 prefs、單向不依賴 remote」這條乾淨模型。intent 跟 binding 一樣**永不進備份 payload**。
+
+**Related**：`config-backup#2`、`config-backup#4`、`src/main/config-backup/intent-store.ts`。
 
 ## config-backup#6 — Import 覆蓋處理：new/identical/differs，永不刪 live  ·  [Decision]
 

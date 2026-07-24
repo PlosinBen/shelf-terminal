@@ -5,7 +5,6 @@ import {
   REPO_SKILLS_DIR,
   REPO_MCP_FILE,
   REPO_MACHINE_MANIFEST,
-  backupItemId,
   type BackupMachineManifest,
 } from '@shared/config-backup';
 import type { McpServersFile } from '@shared/mcp';
@@ -13,6 +12,7 @@ import { getAppInstanceId } from '../app-instance-id';
 import { skillDirPath } from '../skills-store';
 import { listMcpServers } from '../mcp-store';
 import { loadBinding, thisMachineBranchRef } from './binding-store';
+import { saveIntent } from './intent-store';
 import { createSideCar } from './side-car';
 import { preflight } from './preflight';
 
@@ -131,48 +131,9 @@ export async function runBackup(selectedIds: string[]): Promise<BackupRunResult>
     log.info('config-backup', `${branch} already up to date — nothing to push`);
   }
 
+  // Remember what this machine chose to back up → seeds the checklist pre-tick
+  // next time (machine-local intent, decoupled from the remote branch).
+  saveIntent(selectedIds);
+
   return { ok: true, pushed: changed, branch, itemCount };
-}
-
-/**
- * Item ids already present in THIS machine's backup branch. Used to pre-tick the
- * Backup checklist: because a Backup writes a full snapshot (unticking removes),
- * defaulting existing items to ticked prevents accidentally dropping them, while
- * new/never-backed-up items stay unticked (the leak gate).
- *
- * Best-effort: throws only if the remote can't be reached (caller decides how to
- * degrade); an as-yet-unpushed branch simply yields [].
- */
-export async function readBackedUpItemIds(): Promise<string[]> {
-  const binding = loadBinding();
-  if (!binding) return [];
-
-  const sideCar = createSideCar();
-  await sideCar.ensureClone(binding.remoteUrl);
-  await sideCar.fetch();
-  const ref = `origin/${thisMachineBranchRef()}`;
-
-  let files: string[];
-  try {
-    files = await sideCar.listFilesAtRef(ref);
-  } catch {
-    return []; // branch not pushed yet
-  }
-
-  const ids = new Set<string>();
-  for (const f of files) {
-    if (f.startsWith(REPO_SKILLS_DIR + '/')) {
-      const name = f.slice(REPO_SKILLS_DIR.length + 1).split('/')[0];
-      if (name) ids.add(backupItemId('skill', name));
-    }
-  }
-  const mcpRaw = await sideCar.readFileAtRef(ref, REPO_MCP_FILE);
-  if (mcpRaw) {
-    try {
-      for (const name of Object.keys(JSON.parse(mcpRaw))) ids.add(backupItemId('mcp', name));
-    } catch {
-      log.warn('config-backup', 'backup branch mcp-servers.json is not valid JSON — ignoring for defaults');
-    }
-  }
-  return [...ids];
 }

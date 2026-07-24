@@ -17,6 +17,10 @@
 /** Machine-local binding file under `<userData>` — never part of any backup payload. */
 export const CONFIG_BACKUP_FILE = 'config-backup.json';
 
+/** Machine-local backup-intent file under `<userData>` — the item ids this machine
+ *  last chose to back up (drives the checklist pre-tick). Local prefs, never backed up. */
+export const CONFIG_BACKUP_INTENT_FILE = 'config-backup-intent.json';
+
 /** Per-machine backup branches share this ref prefix (ref keyed by app-instance-id). */
 export const BACKUP_BRANCH_PREFIX = 'backup/';
 
@@ -132,10 +136,7 @@ export interface ImportApplyResult {
 export interface BackupListResult {
   binding: ConfigBackupBinding | null;
   items: BackupItemSummary[];
-  /** Item ids already in this machine's branch → default-ticked (new = unticked). */
-  backedUp: string[];
-  /** False if bound but the branch couldn't be read (e.g. offline) — UI warns
-   *  that ticking will define a fresh snapshot. */
-  remoteReadOk: boolean;
-  readError?: string;
+  /** Item ids this machine last chose to back up → default-ticked. Read from
+   *  machine-local intent (no remote/network); new items start unticked. */
+  intent: string[];
 }

@@ -75,6 +75,16 @@ test('config backup: bind remote, tick a skill, back up to my branch', async ({ 
   expect(files).toContain('skills/demo/SKILL.md');
   expect(files).toContain('machine.json');
 
+  // Pre-tick persists from machine-local intent: reopen the tab and the item is
+  // still ticked — no remote read needed to remember what I chose to back up.
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.settings-panel')).toBeHidden({ timeout: 3_000 });
+  await page.keyboard.press(`${modifier}+,`);
+  await page.locator('.settings-tab', { hasText: 'Backup' }).click();
+  const reopened = page.locator('.backup-check', { hasText: 'demo' });
+  await expect(reopened).toBeVisible({ timeout: 15_000 });
+  await expect(reopened.locator('input[type=checkbox]')).toBeChecked();
+
   fs.rmSync(remoteDir, { recursive: true, force: true });
 });
 
