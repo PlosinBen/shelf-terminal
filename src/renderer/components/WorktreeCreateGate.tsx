@@ -17,6 +17,7 @@ export function WorktreeCreateGate() {
   const [queue, setQueue] = useState<WorktreeCreateRequest[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [baseBranch, setBaseBranch] = useState<string | null>(null);
 
   useEffect(() => {
     const offReq = window.shelfApi.worktree.onCreateRequest((req) => {
@@ -30,9 +31,26 @@ export function WorktreeCreateGate() {
   }, []);
 
   const current = queue[0];
-  if (!current) return null;
+  const parent = current ? projects.find((p) => p.config.id === current.parentProjectId) : undefined;
 
-  const parent = projects.find((p) => p.config.id === current.parentProjectId);
+  // Fetch the parent's current branch to show the fork point ("from <baseBranch>")
+  // — the branch this worktree is cut from AND the branch finish merges back into.
+  // Best-effort/display only: the authoritative baseBranch is captured by
+  // worktreeAdd on approve. Cleared + refetched whenever the front request changes.
+  useEffect(() => {
+    setBaseBranch(null);
+    if (!current || !parent) return;
+    let cancelled = false;
+    window.shelfApi.git
+      .branchList(parent.config.connection, parent.config.cwd)
+      .then((branches) => {
+        if (!cancelled) setBaseBranch(branches.find((b) => b.current)?.name ?? null);
+      })
+      .catch(() => { /* display-only; leave it out if git can't answer */ });
+    return () => { cancelled = true; };
+  }, [current?.requestId, parent?.config.id]);
+
+  if (!current) return null;
 
   const dequeue = () => {
     setQueue((q) => q.slice(1));
@@ -119,7 +137,8 @@ export function WorktreeCreateGate() {
         <div className="remove-confirm-body">
           <p>
             Cut a new worktree on branch <strong>{current.branch}</strong>
-            {parent ? <> from <strong>{parent.config.name}</strong></> : null}?
+            {baseBranch ? <> from <strong>{baseBranch}</strong></> : null}
+            {parent ? <> in <strong>{parent.config.name}</strong></> : null}?
           </p>
           {current.notePath && (
             <p className="worktree-gate-note">Feature note <code>{current.notePath}</code> will move into the worktree.</p>

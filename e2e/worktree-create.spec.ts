@@ -98,10 +98,12 @@ test.describe('worktree_project_create gate', () => {
 
     await sendAgentPrompt(page, 'apptool:worktree_project.create:{"branch":"feature/x"}');
 
-    // The confirm popup surfaces the agent-supplied branch + the parent name.
+    // The confirm popup surfaces the agent-supplied branch, the fork branch
+    // (parent's current branch) and the parent name.
     const popup = page.locator('.worktree-dialog', { hasText: 'Create Worktree' });
     await expect(popup).toBeVisible({ timeout: 5_000 });
     await expect(popup).toContainText('feature/x');
+    await expect(popup).toContainText('from main'); // fork point
     await expect(popup).toContainText('WT Base');
 
     await popup.locator('.conn-btn-next').click();
