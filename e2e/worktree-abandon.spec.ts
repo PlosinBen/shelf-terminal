@@ -54,7 +54,7 @@ function seed(userDataDir: string, base: string, feature: string) {
 }
 
 async function openAgentInSub(page: Page) {
-  const subItem = page.locator('.sidebar-item', { has: page.locator('.project-branch', { hasText: 'feature' }) });
+  const subItem = page.locator('.sidebar-item.worktree-child', { hasText: 'feature' });
   await subItem.click();
   const prompt = page.locator('.connect-prompt');
   if (await prompt.isVisible({ timeout: 3_000 }).catch(() => false)) {
@@ -104,7 +104,7 @@ test.describe('worktree_project_abandon gate', () => {
     await expect(popup).not.toBeVisible({ timeout: 8_000 });
 
     // Sub-project gone; base untouched; worktree + branch removed.
-    await expect(page.locator('.project-branch', { hasText: 'feature' })).toHaveCount(0, { timeout: 8_000 });
+    await expect(page.locator('.sidebar-item.worktree-child', { hasText: 'feature' })).toHaveCount(0, { timeout: 8_000 });
     expect(git(base, ['rev-parse', 'main']).trim()).toBe(mainBefore); // base NOT moved
     expect(fs.existsSync(feature)).toBe(false);
     expect(git(base, ['branch', '--list', 'feature']).trim()).toBe('');

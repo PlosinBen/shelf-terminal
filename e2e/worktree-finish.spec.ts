@@ -59,7 +59,7 @@ function seed(userDataDir: string, base: string, feature: string) {
 }
 
 async function openAgentInSub(page: Page) {
-  const subItem = page.locator('.sidebar-item', { has: page.locator('.project-branch', { hasText: 'feature' }) });
+  const subItem = page.locator('.sidebar-item.worktree-child', { hasText: 'feature' });
   await subItem.click();
   const prompt = page.locator('.connect-prompt');
   if (await prompt.isVisible({ timeout: 3_000 }).catch(() => false)) {
@@ -109,7 +109,7 @@ test.describe('worktree_project_finish gate', () => {
     await expect(popup).not.toBeVisible({ timeout: 8_000 });
 
     // The worktree sub-project disappeared (success = disappearance).
-    await expect(page.locator('.project-branch', { hasText: 'feature' })).toHaveCount(0, { timeout: 8_000 });
+    await expect(page.locator('.sidebar-item.worktree-child', { hasText: 'feature' })).toHaveCount(0, { timeout: 8_000 });
     // base `main` fast-forwarded to the feature tip.
     expect(git(base, ['rev-parse', 'main']).trim()).toBe(featureTip);
     // The worktree dir is gone and the branch was deleted.

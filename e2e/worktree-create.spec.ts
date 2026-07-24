@@ -118,8 +118,13 @@ test.describe('worktree_project_create gate', () => {
     await popup.locator('.conn-btn-next').click();
     await expect(popup).not.toBeVisible({ timeout: 8_000 });
 
-    // A worktree sub-project appeared in the sidebar (branch label rendered).
-    await expect(page.locator('.project-branch', { hasText: 'feature/x' })).toBeVisible({ timeout: 8_000 });
+    // A worktree sub-project appeared as an indented child directly under its
+    // parent, labelled by branch only (parent name not repeated).
+    const items = page.locator('.sidebar-item');
+    await expect(items.nth(1)).toHaveClass(/worktree-child/, { timeout: 8_000 });
+    await expect(items.nth(0)).toContainText('WT Base');
+    await expect(items.nth(1)).toContainText('feature/x');
+    await expect(items.nth(1)).not.toContainText('WT Base');
     // The worktree dir was actually cut on disk (sibling of the base repo).
     expect(fs.existsSync(`${repo}-feature-x`)).toBe(true);
     // The agent got a calm success result carrying created:true.
@@ -150,7 +155,7 @@ test.describe('worktree_project_create gate', () => {
     await expect(popup).not.toBeVisible({ timeout: 5_000 });
 
     // No worktree sub-project, no worktree dir, and the agent sees a calm decline.
-    await expect(page.locator('.project-branch', { hasText: 'feature/y' })).toHaveCount(0);
+    await expect(page.locator('.sidebar-item.worktree-child', { hasText: 'feature/y' })).toHaveCount(0);
     expect(fs.existsSync(`${repo}-feature-y`)).toBe(false);
     await expect(page.locator('.agent-turn-response')).toContainText('"created":false', { timeout: 8_000 });
   });
