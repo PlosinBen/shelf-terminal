@@ -179,6 +179,21 @@ button {
   border-top: 2px solid var(--accent);
 }
 
+/* A worktree child reads as a group member under its parent: indented, shorter,
+   muted, and not a drag handle (the whole group moves via the parent row). */
+.sidebar-item.worktree-child {
+  padding-left: 34px;
+  height: 36px;
+}
+
+.sidebar-item.worktree-child .project-name {
+  color: var(--text-muted);
+}
+
+.sidebar-item.worktree-child.active .project-name {
+  color: var(--text);
+}
+
 /* ── Context Menu ── */
 
 .context-menu {

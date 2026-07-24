@@ -156,14 +156,19 @@ export function Sidebar() {
             ? `Connection: ${health.state}${health.rttMs != null ? ` · ${Math.round(health.rttMs)}ms` : ''}`
             : undefined;
           const isFlashing = flashingIds.has(proj.config.id);
+          // A worktree child renders as an indented group member showing just its
+          // branch (the parent project name is redundant — the group conveys it),
+          // and it cannot start a drag: the whole group moves via its parent.
+          const isWorktreeChild = !!proj.config.parentProjectId;
+          const label = isWorktreeChild ? proj.config.worktreeBranch : proj.config.name;
 
           return (
             <div
               key={proj.config.id}
-              className={`sidebar-item ${i === activeProjectIndex ? 'active' : ''} ${isDragging ? 'dragging' : ''} ${isDragOver ? 'drag-over' : ''}${isFlashing ? ' health-flash' : ''}`}
+              className={`sidebar-item ${i === activeProjectIndex ? 'active' : ''} ${isDragging ? 'dragging' : ''} ${isDragOver ? 'drag-over' : ''}${isFlashing ? ' health-flash' : ''}${isWorktreeChild ? ' worktree-child' : ''}`}
               onClick={() => setActiveProject(i)}
               onContextMenu={(e) => { setActiveProject(i); handleContextMenu(e, i); }}
-              draggable
+              draggable={!isWorktreeChild}
               onDragStart={(e) => handleDragStart(e, i)}
               onDragOver={(e) => handleDragOver(e, i)}
               onDrop={(e) => handleDrop(e, i)}
@@ -171,10 +176,7 @@ export function Sidebar() {
             >
               <span className={`status-dot ${hasAlive ? 'alive' : 'dead'}${healthClass}`} title={healthTitle} />
               <span className="project-name-group">
-                <span className="project-name">{proj.config.name}</span>
-                {proj.config.worktreeBranch && (
-                  <span className="project-branch">{proj.config.worktreeBranch}</span>
-                )}
+                <span className="project-name">{label}</span>
               </span>
             </div>
           );
