@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useStore } from '../store';
 import { on, emit, Events } from '../events';
+import { buildWorktreeChildConfig } from '../worktree-child-config';
 
 export function WorktreeDialog() {
   const { projects } = useStore();
@@ -51,17 +52,14 @@ export function WorktreeDialog() {
       return;
     }
 
-    emit(Events.ADD_PROJECT, {
-      id: `wt-${Date.now()}`,
-      name: proj.config.name,
+    const projectId = `wt-${Date.now()}`;
+    await window.shelfApi.project.copySecrets(proj.config.id, projectId);
+    emit(Events.ADD_PROJECT, buildWorktreeChildConfig(proj.config, {
+      id: projectId,
       cwd: result.path!,
-      connection: proj.config.connection,
-      maxTabs: proj.config.maxTabs,
-      initScript: proj.config.initScript,
-      parentProjectId: proj.config.id,
       worktreeBranch: branch,
       baseBranch: result.baseBranch,
-    });
+    }));
 
     setOpen(false);
   }, [input, projectIndex, projects, creating]);

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useStore } from '../store';
 import { emit, Events } from '../events';
+import { buildWorktreeChildConfig } from '../worktree-child-config';
 import type { WorktreeCreateRequest } from '@shared/types';
 
 // App-global confirm popup for the agent-driven `worktree_project_create` tool.
@@ -104,19 +105,20 @@ export function WorktreeCreateGate() {
       }
     }
 
-    // 3. Add the sub-project (base is freed; focus jumps; the new agent can boot).
+    // 3. Copy the parent's secrets under the new id BEFORE the sub-project (and its
+    //    processes) exist, so the worktree's first agent/terminal sees them. Encrypted
+    //    blobs reused under one master key; pruned automatically on close.
     const projectId = `wt-${Date.now()}`;
-    emit(Events.ADD_PROJECT, {
+    await window.shelfApi.project.copySecrets(parent.config.id, projectId);
+
+    // 4. Add the sub-project (inherits the parent's setup; base is freed; focus jumps).
+    const childConfig = buildWorktreeChildConfig(parent.config, {
       id: projectId,
-      name: parent.config.name,
       cwd: add.path,
-      connection,
-      maxTabs: parent.config.maxTabs,
-      initScript: parent.config.initScript,
-      parentProjectId: parent.config.id,
       worktreeBranch: current.branch,
       baseBranch: add.baseBranch,
     });
+    emit(Events.ADD_PROJECT, childConfig);
 
     window.shelfApi.worktree.resolveCreate({
       requestId: current.requestId,
@@ -124,6 +126,10 @@ export function WorktreeCreateGate() {
       projectId,
       baseBranch: add.baseBranch,
     });
+    // 5. Auto-connect the fresh worktree so its agent boots and reads the note (the
+    //    flow's whole point). Deterministic post-store connect lives in App (keyed on
+    //    the store), avoiding the bus handlers' stale-projects closure.
+    emit(Events.AUTO_CONNECT_PROJECT, projectId);
     dequeue();
   };
 

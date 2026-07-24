@@ -10,6 +10,7 @@ export const IPC = {
   PROJECT_SECRETS_LIST: 'project:secrets-list',   // (projectId) → string[] KEY names
   PROJECT_SECRET_SET: 'project:secret-set',       // (projectId, key, value) → void
   PROJECT_SECRET_DELETE: 'project:secret-delete', // (projectId, key) → void
+  PROJECT_SECRETS_COPY: 'project:secrets-copy',   // (fromId, toId) → void (worktree inherits parent secrets)
   SECRET_KEY_TIER: 'secret:key-tier',             // () → 'os-backed' | 'local-key'
 
   // File upload (paste/drag) — generic across local/SSH/WSL/Docker

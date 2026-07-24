@@ -48,8 +48,17 @@ function seedProject(userDataDir: string, repo: string) {
     cwd: repo,
     connection: { type: 'local' },
     maxTabs: 5,
+    // Setup fields a worktree should inherit.
+    envPlain: { WT_INHERIT: 'yes' },
+    quickCommands: [{ label: 'build', command: 'npm run build', target: 'current' }],
+    // A session id that must NOT be inherited (worktree boots a fresh agent).
+    agentSessionIds: { claude: 'parent-session' },
   };
   fs.writeFileSync(path.join(userDataDir, 'projects.json'), JSON.stringify([project]), 'utf-8');
+}
+
+function readProjects(userDataDir: string): any[] {
+  return JSON.parse(fs.readFileSync(path.join(userDataDir, 'projects.json'), 'utf-8'));
 }
 
 async function connectAndOpenAgent(page: Page) {
@@ -115,6 +124,19 @@ test.describe('worktree_project_create gate', () => {
     expect(fs.existsSync(`${repo}-feature-x`)).toBe(true);
     // The agent got a calm success result carrying created:true.
     await expect(page.locator('.agent-turn-response')).toContainText('"created":true', { timeout: 8_000 });
+
+    // The worktree auto-connected (no lingering connect prompt for the active project).
+    await expect(page.locator('.connect-prompt')).toHaveCount(0, { timeout: 8_000 });
+
+    // The child inherited the parent's setup but got a fresh identity.
+    const child = readProjects(userDataDir).find((p) => p.parentProjectId === PROJECT_ID);
+    expect(child).toBeTruthy();
+    expect(child.envPlain).toEqual({ WT_INHERIT: 'yes' });
+    expect(child.quickCommands).toEqual([{ label: 'build', command: 'npm run build', target: 'current' }]);
+    expect(child.worktreeBranch).toBe('feature/x');
+    expect(child.baseBranch).toBe('main');
+    // NEVER inherit the parent's agent session — the worktree boots fresh.
+    expect(child.agentSessionIds).toBeUndefined();
   });
 
   test('cancel creates nothing and reports created:false', async () => {
