@@ -4706,12 +4706,24 @@ button {
 }
 .backup-check {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
   flex: 1;
+  min-width: 0;
   cursor: pointer;
 }
-.backup-check input { cursor: pointer; }
+.backup-check input { cursor: pointer; flex: none; margin-top: 2px; }
+/* Stack name over detail; let a long skill description wrap instead of
+   squeezing the name column to one-char-per-line (min-width:0 lets it shrink). */
+.backup-check-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+.backup-check-text .web-list-main { word-break: break-word; }
+.backup-check-text .web-list-sub { white-space: normal; }
 .backup-bound-header {
   display: flex;
   align-items: center;

@@ -23,9 +23,14 @@ test('config backup: bind remote, tick a skill, back up to my branch', async ({ 
   // Seed a live skill — listSkills() reads live, so post-launch is fine.
   const skillDir = path.join(userDataDir, 'skills', 'skills', 'demo');
   fs.mkdirSync(skillDir, { recursive: true });
+  // A deliberately long description: this used to force the name column to
+  // collapse to one-char-per-line (the nowrap detail ate all the width). The
+  // layout assertion below guards that regression.
+  const longDesc =
+    'Drive an in-flight feature or spike from orientation to wrap-up using a single transient note that captures requirements, design, and a phased plan.';
   fs.writeFileSync(
     path.join(skillDir, 'SKILL.md'),
-    '---\nname: demo\ndescription: demo skill\n---\n# demo\n',
+    `---\nname: demo\ndescription: ${longDesc}\n---\n# demo\n`,
     'utf-8',
   );
 
@@ -46,6 +51,13 @@ test('config backup: bind remote, tick a skill, back up to my branch', async ({ 
   await expect(demoRow).toBeVisible({ timeout: 15_000 });
   const demoCheck = demoRow.locator('input[type=checkbox]');
   await expect(demoCheck).not.toBeChecked();
+
+  // Layout regression: the name must render on a single line, not collapse to
+  // one-char-per-line (which produced a tall, ~1-char-wide column).
+  const nameBox = await demoRow.locator('.web-list-main').boundingBox();
+  expect(nameBox).toBeTruthy();
+  expect(nameBox!.height).toBeLessThan(30);
+  expect(nameBox!.width).toBeGreaterThan(30);
 
   // Tick it and back up.
   await demoCheck.check();

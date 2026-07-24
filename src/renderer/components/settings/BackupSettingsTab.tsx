@@ -159,8 +159,10 @@ export function BackupSettingsTab() {
             <li key={it.id} className="web-list-item">
               <label className="backup-check">
                 <input type="checkbox" checked={selected.has(it.id)} onChange={() => toggle(it.id)} />
-                <span className="web-list-main">{it.name}</span>
-                {it.detail && <span className="web-list-sub">{it.detail}</span>}
+                <span className="backup-check-text">
+                  <span className="web-list-main">{it.name}</span>
+                  {it.detail && <span className="web-list-sub">{it.detail}</span>}
+                </span>
               </label>
             </li>
           ))}
