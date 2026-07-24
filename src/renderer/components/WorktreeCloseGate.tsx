@@ -126,7 +126,7 @@ export function WorktreeCloseGate() {
           <span>{title}</span>
           <button className="settings-close" onClick={cancel} disabled={busy}>×</button>
         </div>
-        <div className="remove-confirm-body">
+        <div className="worktree-gate-body">
           {isAbandon ? (
             <p>
               Abandon worktree {branch ? <strong>{branch}</strong> : null} and delete its branch?

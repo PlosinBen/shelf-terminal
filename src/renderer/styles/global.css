@@ -2129,6 +2129,28 @@ button {
   text-align: center;
 }
 
+/* Agent-driven create/finish/abandon confirm gates. Matches the dialog language:
+   13px body, 16px symmetric padding aligned with the header/footer horizontals,
+   and reset <p> margins so vertical rhythm comes from padding + gap alone. */
+.worktree-gate-body {
+  padding: 16px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.worktree-gate-body p {
+  margin: 0;
+}
+
+.worktree-gate-note {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
 /* ── Remove Confirm Dialog ── */
 
 .remove-confirm-body {

@@ -134,7 +134,7 @@ export function WorktreeCreateGate() {
           <span>Create Worktree</span>
           <button className="settings-close" onClick={cancel} disabled={busy}>×</button>
         </div>
-        <div className="remove-confirm-body">
+        <div className="worktree-gate-body">
           <p>
             Cut a new worktree on branch <strong>{current.branch}</strong>
             {baseBranch ? <> from <strong>{baseBranch}</strong></> : null}
