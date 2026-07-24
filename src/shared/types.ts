@@ -267,6 +267,13 @@ export interface ProjectConfig {
   quickCommands?: QuickCommand[];
   parentProjectId?: string;
   worktreeBranch?: string;
+  /**
+   * Worktree sub-projects only: the parent project's checked-out branch captured
+   * at create time — the objective divergence point ("从哪里切出去就合并回哪里").
+   * `finish` uses this as the fixed ff merge-back target and never re-detects it,
+   * because the parent's live checkout may have moved on since the worktree was cut.
+   */
+  baseBranch?: string;
   defaultAgentProvider?: AgentProvider;
   openAgentOnConnect?: boolean;
   agentSessionIds?: Partial<Record<AgentProvider, string>>;
@@ -394,6 +401,12 @@ export interface GitBranchInfo {
 export interface WorktreeAddResult {
   ok: boolean;
   path?: string;
+  /**
+   * The parent worktree's checked-out branch at the moment the worktree was cut —
+   * captured atomically alongside creation and stored as the sub-project's
+   * `baseBranch` (the fixed ff merge-back target for `finish`).
+   */
+  baseBranch?: string;
   error?: string;
 }
 

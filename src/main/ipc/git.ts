@@ -66,13 +66,23 @@ export function registerGitHandlers(): void {
         const dirName = `${payload.cwd.replace(/\/+$/, '').split('/').pop()}-${payload.branch.replace(/\//g, '-')}`;
         const worktreePath = `${parentDir}/${dirName}`;
 
+        // Capture the parent's checked-out branch BEFORE creating the worktree —
+        // this is the objective divergence point ("从哪里切出去就合并回哪里") that
+        // `finish` later uses as its fixed ff merge-back target. Detached HEAD →
+        // empty string (finish will fail-loud on merge-back rather than guess).
+        const headResult = await connector
+          .exec(payload.cwd, 'git rev-parse --abbrev-ref HEAD 2>/dev/null')
+          .catch(() => ({ stdout: '', stderr: '' }));
+        const rawHead = headResult.stdout.trim();
+        const baseBranch = rawHead && rawHead !== 'HEAD' ? rawHead : undefined;
+
         const branchFlag = payload.newBranch ? '-b' : '';
         const cmd = branchFlag
           ? `git worktree add ${branchFlag} ${JSON.stringify(payload.branch)} ${JSON.stringify(worktreePath)}`
           : `git worktree add ${JSON.stringify(worktreePath)} ${JSON.stringify(payload.branch)}`;
 
         await connector.exec(payload.cwd, cmd);
-        return { ok: true, path: worktreePath };
+        return { ok: true, path: worktreePath, baseBranch };
       } catch (err: any) {
         return { ok: false, error: err?.message ?? String(err) };
       }

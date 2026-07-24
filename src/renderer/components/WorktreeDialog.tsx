@@ -60,6 +60,7 @@ export function WorktreeDialog() {
       initScript: proj.config.initScript,
       parentProjectId: proj.config.id,
       worktreeBranch: branch,
+      baseBranch: result.baseBranch,
     });
 
     setOpen(false);
