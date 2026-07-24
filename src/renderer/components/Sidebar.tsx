@@ -161,11 +161,16 @@ export function Sidebar() {
           // and it cannot start a drag: the whole group moves via its parent.
           const isWorktreeChild = !!proj.config.parentProjectId;
           const label = isWorktreeChild ? proj.config.worktreeBranch : proj.config.name;
+          // Another worktree of the same parent follows → the guide line keeps
+          // running past this child instead of ending at its elbow.
+          const nextProj = projects[i + 1];
+          const hasSiblingBelow =
+            isWorktreeChild && !!nextProj && nextProj.config.parentProjectId === proj.config.parentProjectId;
 
           return (
             <div
               key={proj.config.id}
-              className={`sidebar-item ${i === activeProjectIndex ? 'active' : ''} ${isDragging ? 'dragging' : ''} ${isDragOver ? 'drag-over' : ''}${isFlashing ? ' health-flash' : ''}${isWorktreeChild ? ' worktree-child' : ''}`}
+              className={`sidebar-item ${i === activeProjectIndex ? 'active' : ''} ${isDragging ? 'dragging' : ''} ${isDragOver ? 'drag-over' : ''}${isFlashing ? ' health-flash' : ''}${isWorktreeChild ? ' worktree-child' : ''}${hasSiblingBelow ? ' has-sibling-below' : ''}`}
               onClick={() => setActiveProject(i)}
               onContextMenu={(e) => { setActiveProject(i); handleContextMenu(e, i); }}
               draggable={!isWorktreeChild}

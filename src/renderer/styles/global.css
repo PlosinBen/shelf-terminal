@@ -179,11 +179,40 @@ button {
   border-top: 2px solid var(--accent);
 }
 
-/* A worktree child reads as a group member under its parent: indented, shorter,
-   muted, and not a drag handle (the whole group moves via the parent row). */
+/* A worktree child hangs off its parent by a tree connector (an elbow) rather
+   than a big left pad — the elbow occupies the offset, so the indent stays small
+   and the child's dot sits just under the parent's. It reads as a sub-item, not a
+   nudged peer. Line colour is a muted mix so it survives the active-row surface
+   (which equals --border). The guide continues past a child with a sibling below. */
 .sidebar-item.worktree-child {
-  padding-left: 34px;
+  position: relative;
+  padding-left: 30px;
   height: 36px;
+}
+
+/* vertical guide: drops to the elbow (last child), or full-height when another
+   worktree sibling follows. */
+.sidebar-item.worktree-child::before {
+  content: '';
+  position: absolute;
+  left: 20px;
+  top: 0;
+  bottom: 50%;
+  border-left: 1px solid color-mix(in srgb, var(--text-muted) 40%, transparent);
+}
+
+.sidebar-item.worktree-child.has-sibling-below::before {
+  bottom: 0;
+}
+
+/* horizontal stub joining the guide to the child's dot (the elbow corner). */
+.sidebar-item.worktree-child::after {
+  content: '';
+  position: absolute;
+  left: 20px;
+  top: 50%;
+  width: 7px;
+  border-top: 1px solid color-mix(in srgb, var(--text-muted) 40%, transparent);
 }
 
 .sidebar-item.worktree-child .project-name {
