@@ -20,7 +20,7 @@ title: shelf-terminal — Intent → File Index
 | Skills 投影（local + hash） | `skills-projection.ts` | `projectSkillsLocal` mirror skills 到 `~/.shelf/apps/<appId>/skills` + hash helper |
 | App 層 MCP config store | `mcp-store.ts` | `<userData>/mcp-servers.json`（keyed object）的同步 CRUD + 驗證（web-grants 風格，opaque 不碰 secret） |
 | MCP 變更後處理（sibling pipeline） | `mcp-sync.ts` | `onMcpChanged()`：re-project + subscribers + `MCP_CHANGED`；**不**呼叫 `onSkillsChanged()` |
-| Config 備份/複製（App-Level Config Backup & Copy） | `config-backup/` (`binding-store`/`intent-store`/`side-car`/`preflight`/`enumerate`/`backup`/`bind`/`import`) | backup+copy 非 sync；`side-car` 是 `simple-git` transport（clone/fetch/commit/push/diff）；`backup.ts` 快照 live→my branch；`intent-store` 存本機預勾意圖（checklist pre-tick，不碰 remote）；`import.ts` list sources / plan vs live / apply into live。見 `context/config-backup` |
+| Config 備份/複製（App-Level Config Backup & Copy） | `config-backup/` (`binding-store`/`intent-store`/`side-car`/`enumerate`/`backup`/`import`) | backup+copy 非 sync；`binding-store` 存 remote 設定（純寫檔無驗證）；`side-car` 是 `simple-git` transport（clone/fetch/commit/push/diff）；`backup.ts` 快照 live→my branch（不預檢，git 錯直接攤回）；`intent-store` 存本機預勾意圖（checklist pre-tick，不碰 remote）；`import.ts` list sources / plan vs live / apply into live。見 `context/config-backup` |
 | MCP 投影（local + hash） | `mcp-projection.ts` | `projectMcpLocal` 寫單一 `mcp-servers.json` 到 `~/.shelf/apps/<appId>/` + touch heartbeat + `hashMcpConfig` |
 | MCP 遠端同步 | `mcp-remote.ts` | `syncMcpForConnection`：client-side hash-gate + transport 放到 worker（local no-op） |
 | App-instance id | `app-instance-id.ts` | `getAppInstanceId()`：`<userData>/app-instance-id` 的 generate-once 穩定 UUID |

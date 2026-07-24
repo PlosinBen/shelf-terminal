@@ -36,9 +36,15 @@ describe('config-backup binding store', () => {
     expect(loadBinding()).toEqual({ remoteUrl: 'https://x/y.git', machineLabel: 'home' });
   });
 
-  it('rejects empty remoteUrl / machineLabel (fail-loud, no half-written binding)', () => {
-    expect(() => saveBinding({ remoteUrl: '   ', machineLabel: 'x' })).toThrow(/remoteUrl/);
-    expect(() => saveBinding({ remoteUrl: 'x', machineLabel: '  ' })).toThrow(/machineLabel/);
+  it('persists a partial setting verbatim (no validation — errors surface at Back up)', () => {
+    saveBinding({ remoteUrl: 'x', machineLabel: '  ' });
+    expect(loadBinding()).toEqual({ remoteUrl: 'x', machineLabel: '' });
+  });
+
+  it('both fields blank → clears the file (= no remote configured)', () => {
+    saveBinding({ remoteUrl: 'x', machineLabel: 'y' });
+    saveBinding({ remoteUrl: '   ', machineLabel: '' });
+    expect(loadBinding()).toBeNull();
     expect(fs.existsSync(bindingFile())).toBe(false);
   });
 

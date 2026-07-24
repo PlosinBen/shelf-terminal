@@ -1,10 +1,11 @@
+import os from 'os';
 import { ipcMain } from 'electron';
 import { IPC } from '@shared/ipc-channels';
 import type { BackupListResult, ConfigBackupBinding } from '@shared/config-backup';
 import type { ImportDecision } from '@shared/config-backup';
-import { loadBinding, clearBinding } from '../config-backup/binding-store';
-import { loadIntent, clearIntent } from '../config-backup/intent-store';
-import { bindRemote } from '../config-backup/bind';
+import { sanitizeMachineLabel } from '@shared/config-backup';
+import { loadBinding, saveBinding } from '../config-backup/binding-store';
+import { loadIntent } from '../config-backup/intent-store';
 import { enumerateLiveItems } from '../config-backup/enumerate';
 import { runBackup } from '../config-backup/backup';
 import { listBackupSources, listImportItems, planImport, applyImport } from '../config-backup/import';
@@ -18,13 +19,10 @@ export function registerConfigBackupHandlers(): void {
     return loadBinding();
   });
 
-  ipcMain.handle(IPC.CONFIG_BACKUP_BIND, async (_event, payload: ConfigBackupBinding) => {
-    return bindRemote(payload);
-  });
-
-  ipcMain.handle(IPC.CONFIG_BACKUP_UNBIND, async () => {
-    clearBinding();
-    clearIntent();
+  // Save the remote settings verbatim — no preflight, no validation. Any real
+  // problem surfaces when Back up runs (config is just config).
+  ipcMain.handle(IPC.CONFIG_BACKUP_SAVE_SETTINGS, async (_event, payload: ConfigBackupBinding) => {
+    saveBinding(payload);
   });
 
   ipcMain.handle(IPC.CONFIG_BACKUP_LIST, async (): Promise<BackupListResult> => {
@@ -33,7 +31,12 @@ export function registerConfigBackupHandlers(): void {
     // when the user actually presses Back up (runBackup).
     const binding = loadBinding();
     const items = await enumerateLiveItems();
-    return { binding, items, intent: binding ? loadIntent() : [] };
+    return {
+      binding,
+      items,
+      intent: binding ? loadIntent() : [],
+      suggestedLabel: sanitizeMachineLabel(os.hostname()),
+    };
   });
 
   ipcMain.handle(IPC.CONFIG_BACKUP_RUN, async (_event, selectedIds: string[]) => {

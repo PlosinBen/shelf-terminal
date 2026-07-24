@@ -122,16 +122,15 @@ interface ShelfApi {
   };
   configBackup: {
     getBinding: () => Promise<import('../shared/config-backup').ConfigBackupBinding | null>;
-    bind: (
-      binding: import('../shared/config-backup').ConfigBackupBinding,
-    ) => Promise<{ ok: true } | { ok: false; reason: 'invalid' | 'no-git' | 'remote'; message: string }>;
-    unbind: () => Promise<void>;
+    saveSettings: (
+      settings: import('../shared/config-backup').ConfigBackupBinding,
+    ) => Promise<void>;
     list: () => Promise<import('../shared/config-backup').BackupListResult>;
     run: (
       selectedIds: string[],
     ) => Promise<
       | { ok: true; pushed: boolean; branch: string; itemCount: number }
-      | { ok: false; reason: 'not-bound' | 'no-git' | 'remote'; message: string }
+      | { ok: false; reason: 'not-bound' | 'remote'; message: string }
     >;
     listSources: () => Promise<import('../shared/config-backup').BackupSource[]>;
     listImportItems: (ref: string) => Promise<import('../shared/config-backup').BackupItemSummary[]>;

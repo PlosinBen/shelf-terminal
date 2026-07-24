@@ -51,12 +51,19 @@ export function loadBinding(): ConfigBackupBinding | null {
   return { remoteUrl, machineLabel };
 }
 
-/** Persist the binding. Trims inputs; both fields are required and non-empty. */
+/**
+ * Persist the remote settings verbatim (trimmed) — NO validation. Settings are
+ * just settings: whatever the user typed is saved, and any real problem (git
+ * missing, remote unreachable, blank URL) surfaces when Back up actually runs.
+ * Both fields blank = "no remote configured" → the file is removed.
+ */
 export function saveBinding(binding: ConfigBackupBinding): void {
   const remoteUrl = binding.remoteUrl.trim();
   const machineLabel = binding.machineLabel.trim();
-  if (!remoteUrl) throw new Error('config-backup: remoteUrl is required');
-  if (!machineLabel) throw new Error('config-backup: machineLabel is required');
+  if (!remoteUrl && !machineLabel) {
+    clearBinding();
+    return;
+  }
   const out: ConfigBackupBinding = { remoteUrl, machineLabel };
   fs.mkdirSync(path.dirname(bindingPath()), { recursive: true });
   fs.writeFileSync(bindingPath(), JSON.stringify(out, null, 2) + '\n', 'utf-8');

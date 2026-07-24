@@ -11,7 +11,7 @@
  *
  * git engine = the machine's own `git` (via simple-git); auth = the machine's
  * existing git credentials (Shelf holds no secret). See binding-store /
- * side-car / preflight in src/main/config-backup/.
+ * side-car in src/main/config-backup/.
  */
 
 /** Machine-local binding file under `<userData>` — never part of any backup payload. */
@@ -42,6 +42,17 @@ export function backupBranchRef(appInstanceId: string): string {
 export interface ConfigBackupBinding {
   remoteUrl: string;
   machineLabel: string;
+}
+
+/**
+ * Turn a raw hostname (or any string) into a tidy machine label: keep letters,
+ * digits, `.`, `_`, `-`; replace every other character with `-`. Deliberately
+ * does NOT strip a domain suffix — `Ben's MBP.local` → `Ben-s-MBP.local`.
+ * The label is display-only (branch id is the app-instance-id), so this is
+ * cosmetic, not a validity constraint.
+ */
+export function sanitizeMachineLabel(raw: string): string {
+  return raw.replace(/[^A-Za-z0-9._-]/g, '-');
 }
 
 // ── Payload layout inside a backup branch's working tree ────────────────────
@@ -132,11 +143,13 @@ export interface ImportApplyResult {
   itemsChanged: string[];
 }
 
-/** Response for the Backup tab: current binding + live items + which to pre-tick. */
+/** Response for the Backup tab: saved remote settings + live items + pre-tick. */
 export interface BackupListResult {
   binding: ConfigBackupBinding | null;
   items: BackupItemSummary[];
   /** Item ids this machine last chose to back up → default-ticked. Read from
    *  machine-local intent (no remote/network); new items start unticked. */
   intent: string[];
+  /** Default label for a machine that hasn't set one yet (sanitized hostname). */
+  suggestedLabel: string;
 }

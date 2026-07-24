@@ -18,8 +18,9 @@ import { BACKUP_BRANCH_PREFIX } from '@shared/config-backup';
  * MCP map onto paths) is decided by the Backup/Import layers, not here.
  *
  * All operations fail-loud: simple-git rejects on any git error and we let it
- * propagate. The `git`-present / auth preflight runs before these (see
- * preflight.ts), so reaching here means git exists.
+ * propagate. There is no preflight — callers (e.g. runBackup) wrap these in
+ * try/catch and surface the raw git error, so a missing `git` or an unreachable
+ * remote shows up here as a rejected promise.
  */
 
 const CLONE_DIR_NAME = 'config-backup-repo';

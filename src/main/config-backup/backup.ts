@@ -14,7 +14,6 @@ import { listMcpServers } from '../mcp-store';
 import { loadBinding, thisMachineBranchRef } from './binding-store';
 import { saveIntent } from './intent-store';
 import { createSideCar } from './side-car';
-import { preflight } from './preflight';
 
 /**
  * Backup (Publish): snapshot the ticked live items → this machine's branch →
@@ -30,7 +29,7 @@ import { preflight } from './preflight';
 
 export type BackupRunResult =
   | { ok: true; pushed: boolean; branch: string; itemCount: number }
-  | { ok: false; reason: 'not-bound' | 'no-git' | 'remote'; message: string };
+  | { ok: false; reason: 'not-bound' | 'remote'; message: string };
 
 interface Selection {
   skills: string[];
@@ -104,32 +103,39 @@ function writeManifest(repoDir: string, machineLabel: string): void {
 
 export async function runBackup(selectedIds: string[]): Promise<BackupRunResult> {
   const binding = loadBinding();
-  if (!binding) {
-    return { ok: false, reason: 'not-bound', message: 'This machine is not bound to a backup remote yet.' };
+  if (!binding || !binding.remoteUrl) {
+    return { ok: false, reason: 'not-bound', message: 'Set a backup remote URL in the settings above first.' };
   }
-
-  const pf = await preflight(binding.remoteUrl);
-  if (!pf.ok) return { ok: false, reason: pf.reason, message: pf.message };
 
   const sel = parseSelection(selectedIds);
   const branch = thisMachineBranchRef();
   const sideCar = createSideCar();
 
-  await sideCar.ensureClone(binding.remoteUrl);
-  await sideCar.fetch();
-  await sideCar.checkoutBranch(branch);
+  // No preflight — just run git. Whatever git (local) or the remote (GitHub, …)
+  // rejects is surfaced verbatim as the error; we never pre-validate.
+  let changed: boolean;
+  let itemCount: number;
+  try {
+    await sideCar.ensureClone(binding.remoteUrl);
+    await sideCar.fetch();
+    await sideCar.checkoutBranch(branch);
 
-  const itemCount = writeSnapshot(sideCar.dir, sel);
-  writeManifest(sideCar.dir, binding.machineLabel);
+    itemCount = writeSnapshot(sideCar.dir, sel);
+    writeManifest(sideCar.dir, binding.machineLabel);
 
-  const stamp = `backup: ${sel.skills.length} skill(s), ${sel.mcp.length} mcp server(s)`;
-  const changed = await sideCar.stageAllAndCommit(stamp);
-  if (changed) {
-    await sideCar.push(branch);
-    log.info('config-backup', `pushed ${branch} (${itemCount} item(s))`);
-  } else {
-    log.info('config-backup', `${branch} already up to date — nothing to push`);
+    const stamp = `backup: ${sel.skills.length} skill(s), ${sel.mcp.length} mcp server(s)`;
+    changed = await sideCar.stageAllAndCommit(stamp);
+    if (changed) await sideCar.push(branch);
+  } catch (err: any) {
+    const message = err?.message ?? String(err);
+    log.warn('config-backup', `backup to ${branch} failed: ${message}`);
+    return { ok: false, reason: 'remote', message };
   }
+
+  log.info(
+    'config-backup',
+    changed ? `pushed ${branch} (${itemCount} item(s))` : `${branch} already up to date — nothing to push`,
+  );
 
   // Remember what this machine chose to back up → seeds the checklist pre-tick
   // next time (machine-local intent, decoupled from the remote branch).

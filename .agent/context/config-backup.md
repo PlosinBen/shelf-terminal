@@ -41,11 +41,11 @@ related:
 
 **Background**：side-car 需要 git 能力（clone/fetch/commit/push/diff）。選項：自帶 isomorphic-git，或用機器的系統 git。
 
-**Decision**：**引擎 = 系統 git（`simple-git` 薄封裝）；認證 = 機器既有的 git 憑證（SSH key / credential helper / keychain），跟使用者平常 `git push` 一樣。Shelf 不存任何 token、不碰 secret** → 零認證洩漏面。前提：綁定/首次 Backup 前有 **fail-loud preflight** 檢查 (a) `git` 在 PATH、(b) remote 認證得過（`git ls-remote`，不 clone），任一不過就明確擋下說原因。
+**Decision**：**引擎 = 系統 git（`simple-git` 薄封裝）；認證 = 機器既有的 git 憑證（SSH key / credential helper / keychain），跟使用者平常 `git push` 一樣。Shelf 不存任何 token、不碰 secret** → 零認證洩漏面。**不做任何預檢**：`git`（local）或 remote（GitHub…）真的丟錯,才在 `runBackup` 的 try/catch 原樣攤回 UI（reason `remote` + git stderr）。
 
-**Do not change casually because**：不選 isomorphic-git 是因為它**沒有 SSH、也不讀環境的 credential helper / keychain**，會逼 Shelf 自己保管 PAT。既然 auth 是使用者責任，沿用環境 git 最簡也最安全，而「沿用環境憑證」只有系統 git 辦得到。代價是硬依賴機器有裝 git（用 preflight 補）。`simple-git` 打包進 main bundle（rollup），不是 external。
+**Do not change casually because**：不選 isomorphic-git 是因為它**沒有 SSH、也不讀環境的 credential helper / keychain**，會逼 Shelf 自己保管 PAT。既然 auth 是使用者責任，沿用環境 git 最簡也最安全，而「沿用環境憑證」只有系統 git 辦得到。代價是硬依賴機器有裝 git（缺 git 就是 git spawn 失敗,同樣走 try/catch 攤回,不另外 preflight）。`simple-git` 打包進 main bundle（rollup），不是 external。
 
-**Related**：`src/main/config-backup/{side-car,preflight,bind}.ts`。
+**Related**：`src/main/config-backup/side-car.ts`、`config-backup#8`。
 
 ## config-backup#4 — Leak gate = Backup per-item opt-in；不寫 committed .gitignore  ·  [Decision]
 
@@ -63,7 +63,7 @@ related:
 
 **Gotcha**：因為是完整快照，**取消勾選會在下次 Backup 時把該項從分支移除**。若 checklist 預設全不勾，使用者只勾一個新 skill 就會**清掉整個備份** → 資料遺失。所以 checklist 要**預勾我上次備份的項目**，新項目才預設不勾（＝leak gate）。
 
-**預勾來源 = 本機 intent，不是 remote**：預勾集存在 `<userData>/config-backup-intent.json`（`intent-store.ts`），是「我這台機器選了要備份什麼」的 prefs——`runBackup` 成功時寫入勾選集、`unbind` 時清除。開 checklist（`config-backup:list`）**只讀本機 intent，完全不碰 git／網路**，所以秒開、離線一樣正常。remote 只在**按下 Back up 當下**（`runBackup` 自己的 fetch）才碰。
+**預勾來源 = 本機 intent，不是 remote**：預勾集存在 `<userData>/config-backup-intent.json`（`intent-store.ts`），是「我這台機器選了要備份什麼」的 prefs——只在 `runBackup` 成功時覆寫，其餘一律不動（改／清 remote 都不波及）。開 checklist（`config-backup:list`）**只讀本機 intent，完全不碰 git／網路**，所以秒開、離線一樣正常。remote 只在**按下 Back up 當下**（`runBackup` 的 git ops）才碰。
 
 **Do not change casually because**：「備份意圖」是本機的選擇，刻意跟 remote 狀態解耦——不要為了預勾而回去讀分支（那會逼 `list` 每次同步等一次 `git fetch`，就是先前每次進頁面都 loading 的原因）。取捨：重裝／清掉 userData 後 intent 遺失 → 首次進來全不勾（使用者重選即可），換來的是「意圖即本機 prefs、單向不依賴 remote」這條乾淨模型。intent 跟 binding 一樣**永不進備份 payload**。
 
@@ -90,3 +90,16 @@ related:
 **專案 secret env**（`project-secrets.json`）也**永不入 payload**：backup 用 allowlist（只 enumerate 得到的 skill/mcp 能被選+複製），secret 從沒被 enumerate → 天生不可同步（`enumerate.test.ts` 鎖住此 invariant）。詳見 `context/project-env#7`。
 
 **Related**：`contracts/persistence-formats`（config-backup.json + branch payload layout）、`context/project-env#7`（secret side-car 不同步）。
+
+## config-backup#8 — 沒有 binding 儀式：設定歸設定、backup 歸 backup  ·  [Decision]
+
+**Background**：早期把「設定 remote」做成綁定/解綁的儀式（未綁 → bind 表單；已綁 → 只剩摘要 + Unbind）。結果 remote URL/label 綁了就改不了（只能 Unbind 重來），且 bind 前的 preflight 讓「設定」這件事卡在網路驗證上。
+
+**Decision**：Backup tab 是**單一頁面**、兩個獨立區塊：
+- **Remote 設定**（remoteUrl + machineLabel）永遠可編輯，**唯一持久化入口 = Save**（`config-backup:save-settings`）。Save **純寫檔、零驗證**（`saveBinding` verbatim）；**兩欄全空 = 清除**（刪掉 `config-backup.json`）。
+- **Back up / Import** 永遠顯示。**完全不預檢**：按 Back up 才跑 git，`git`/remote 真的丟錯就地攤成 `backup-status-err`（`config-backup#3`）。沒設 remoteUrl → `runBackup` 回 `not-bound`。
+- **machineLabel 預設 = sanitize 過的 hostname**（`sanitizeMachineLabel`：`[^A-Za-z0-9._-]→-`，**不去網域尾碼**；main 端 `os.hostname()` 算好經 `list().suggestedLabel` 給 renderer 當可編輯預設值）。label 只是顯示名，**不決定分支**（分支＝app-instance-id，`config-backup#2`）。
+
+**Do not change casually because**：「設定歸設定、backup 歸 backup」是刻意的——設定只是設定，錯誤延到動作當下才報，不要重新引入 bind 儀式或 Save 前 preflight（那正是先前 URL 改不了、設定卡網路的來源）。Save 是唯一寫入點：不要加會立刻動 config 的旁路動作（例如即時 Clear），會破壞「改草稿 → Save 才落地」的一致性——清除就是清空兩欄再 Save。intent 與此解耦（`config-backup#5`）。
+
+**Related**：`config-backup#3`、`config-backup#5`、`contracts/ipc-channels`、`src/renderer/components/settings/BackupSettingsTab.tsx`。

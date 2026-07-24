@@ -16,20 +16,20 @@ related:
 - **Live config**：本機的真相源（skills 資料夾 + MCP 設定）。永遠不是 git repo，任何動作都不會自動覆蓋它。
 - **Side-car repo**：`<userData>` 下一個獨立的 git clone，git **只**在這裡操作，永不包住 live。Backup/Import 是 live 與 side-car working tree 之間的檔案複製。
 - **Remote**：使用者自己的 git remote，每台機器一個 `backup/<app-instance-id>` 分支。
-- **Binding**：本機專屬設定（remote URL + 機器 label），機器本地、永不進 payload。
-- **Preflight**：綁定/Backup 前的 fail-loud 檢查（git 在不在、remote 認不認得過）。
+- **Settings**：本機專屬設定（remote URL + 機器 label），機器本地、永不進 payload。純設定，無綁定儀式、無預檢——存就是存，錯誤延到 Backup 動作當下才報。
 
 ## Backup（Publish）— live → my branch，單向
 
 ```
-勾選 live 項目 → preflight → ensureClone + fetch → checkout 我的分支
-  → 把 payload 區清空、依勾選重寫（skills 整包 copy、MCP 濾成勾選的 server）+ machine манifest
+勾選 live 項目 → ensureClone + fetch → checkout 我的分支
+  → 把 payload 區清空、依勾選重寫（skills 整包 copy、MCP 濾成勾選的 server）+ machine manifest
   → commit → push 我的分支（永遠 fast-forward）
 ```
 
+- **不預檢**：直接跑 git，`git`/remote 真的丟錯才 try/catch 攤回 UI。
 - 每次 Backup 寫「勾選集的**完整快照**」：取消勾選 = 該項從分支移除（`git add -A` stage 刪除）。
 - 只有本機寫自己的分支 → 無 merge / 無 conflict。
-- 沒勾的項目永不離開機器（leak gate）。checklist 預勾「分支裡已有的項目」以免快照語意誤刪。
+- 沒勾的項目永不離開機器（leak gate）。checklist 預勾靠本機 intent（不讀分支）以免快照語意誤刪。
 
 ## Import（Copy）— chosen branch → live，唯一寫 live 者
 

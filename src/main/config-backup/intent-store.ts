@@ -12,8 +12,9 @@ import { CONFIG_BACKUP_INTENT_FILE } from '@shared/config-backup';
  * remote branch: which items I want backed up is MY choice, not something to
  * re-derive from the remote (that forced a network fetch just to open the
  * checklist). It seeds the checklist pre-tick; it is written when a Backup
- * succeeds (the committed set). Like the binding, it is NEVER part of any
- * backup payload.
+ * succeeds (the committed set) and is otherwise left untouched — changing or
+ * clearing the remote never affects it. Like the settings, it is NEVER part of
+ * any backup payload.
  */
 
 function intentPath(): string {
@@ -50,15 +51,4 @@ export function saveIntent(ids: string[]): void {
   const out = [...new Set(ids)].sort();
   fs.mkdirSync(path.dirname(intentPath()), { recursive: true });
   fs.writeFileSync(intentPath(), JSON.stringify(out, null, 2) + '\n', 'utf-8');
-}
-
-/** Remove the intent (on unbind). Missing = no-op. */
-export function clearIntent(): void {
-  try {
-    fs.rmSync(intentPath());
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException)?.code !== 'ENOENT') {
-      log.error('config-backup', `failed to remove ${intentPath()}`, err);
-    }
-  }
 }

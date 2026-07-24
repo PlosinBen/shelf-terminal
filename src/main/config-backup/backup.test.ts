@@ -68,9 +68,20 @@ afterEach(() => {
 });
 
 describe('config-backup runBackup', () => {
-  it('not bound → typed not-bound result (never touches git)', async () => {
+  it('no remote configured → typed not-bound result (never touches git)', async () => {
     const res = await runBackup(['skill:alpha']);
     expect(res).toMatchObject({ ok: false, reason: 'not-bound' });
+  });
+
+  it('unreachable remote → surfaces the raw git error (no preflight)', async () => {
+    seedSkill('alpha');
+    saveBinding({ remoteUrl: path.join(root, 'does-not-exist.git'), machineLabel: 'm' });
+    const res = await runBackup(['skill:alpha']);
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.reason).toBe('remote');
+      expect(res.message).toBeTruthy();
+    }
   });
 
   it('pushes exactly the ticked items; unticked never leave (leak gate)', async () => {

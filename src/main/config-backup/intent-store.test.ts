@@ -14,7 +14,7 @@ vi.mock('electron', () => ({
   app: { getPath: () => userDataDir },
 }));
 
-const { loadIntent, saveIntent, clearIntent } = await import('./intent-store');
+const { loadIntent, saveIntent } = await import('./intent-store');
 
 const intentFile = () => path.join(userDataDir, 'config-backup-intent.json');
 
@@ -33,13 +33,6 @@ describe('config-backup intent-store', () => {
   it('round-trips the chosen ids (deduped + sorted)', () => {
     saveIntent(['skill:beta', 'mcp:fs', 'skill:beta', 'skill:alpha']);
     expect(loadIntent()).toEqual(['mcp:fs', 'skill:alpha', 'skill:beta']);
-  });
-
-  it('clear removes the intent (missing = no-op)', () => {
-    saveIntent(['skill:alpha']);
-    clearIntent();
-    expect(loadIntent()).toEqual([]);
-    expect(() => clearIntent()).not.toThrow();
   });
 
   it('corrupt file → [] (fail-loud, no crash)', () => {

@@ -4704,6 +4704,12 @@ button {
   font-size: 12px;
   padding: 6px 8px;
 }
+.backup-field-hint {
+  display: block;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
 .backup-check {
   display: flex;
   align-items: flex-start;
@@ -4724,13 +4730,6 @@ button {
 }
 .backup-check-text .web-list-main { word-break: break-word; }
 .backup-check-text .web-list-sub { white-space: normal; }
-.backup-bound-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 12px;
-}
-.backup-bound-header .web-settings-hint { flex: 1; word-break: break-all; }
 .backup-actions {
   display: flex;
   justify-content: flex-end;
@@ -4746,7 +4745,11 @@ button {
   display: flex;
   gap: 4px;
   margin-bottom: 12px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
 }
+.backup-actions .backup-status { margin: 0; align-self: center; }
 .backup-mode-btn {
   background: none;
   border: 1px solid var(--border);
