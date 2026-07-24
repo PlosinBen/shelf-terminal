@@ -369,6 +369,9 @@ export interface AppSettings {
    *  Lower = less data lost on crash, higher = fewer IDB transactions. */
   agentHistorySaveThrottleMs: number;
   providerModels?: Partial<Record<PmProviderType | 'claude', ProviderModel[]>>;
+  /** Persisted width (px) of the left project sidebar. Restored at launch;
+   *  clamped to a usable range when applied. */
+  sidebarWidth?: number;
 }
 
 

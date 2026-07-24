@@ -5,6 +5,7 @@ import {
   setEditingProject,
   toggleSettings,
   reorderProjects,
+  updateSettings,
   projectHealth,
   HEALTH_RANK,
 } from '../store';
@@ -36,10 +37,20 @@ export function clampMenuPosition(
   };
 }
 
+// Usable clamp for the draggable sidebar width (px): narrow enough to reclaim
+// workspace, wide enough to still read project names.
+const SIDEBAR_MIN_WIDTH = 160;
+const SIDEBAR_MAX_WIDTH = 480;
+const SIDEBAR_DEFAULT_WIDTH = 220;
+
 export function Sidebar() {
   const { projects, activeProjectIndex, settings, connectionHealth } = useStore();
   const kb = settings.keybindings;
   const [dragIndex, setDragIndex] = useState<number | null>(null);
+  // Live width while dragging the resize handle; null when not resizing (then the
+  // persisted settings width applies). Committed to settings on mouse-up.
+  const [resizeWidth, setResizeWidth] = useState<number | null>(null);
+  const sidebarWidth = resizeWidth ?? settings.sidebarWidth ?? SIDEBAR_DEFAULT_WIDTH;
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const [contextMenu, setContextMenu] = useState<{ index: number; x: number; y: number } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -107,6 +118,23 @@ export function Sidebar() {
     emit(Events.OPEN_FOLDER_PICKER);
   };
 
+  // Drag the right edge to resize. The sidebar is the leftmost pane, so the
+  // cursor's clientX is the width. Track live via document listeners (the pointer
+  // may leave the thin handle mid-drag) and persist once on release.
+  const startResize = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const clamp = (x: number) => Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, x));
+    const onMove = (ev: MouseEvent) => setResizeWidth(clamp(ev.clientX));
+    const onUp = (ev: MouseEvent) => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      setResizeWidth(null);
+      updateSettings({ sidebarWidth: clamp(ev.clientX) });
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  };
+
   const handleDragStart = (e: React.DragEvent, index: number) => {
     setDragIndex(index);
     e.dataTransfer.effectAllowed = 'move';
@@ -134,7 +162,7 @@ export function Sidebar() {
   };
 
   return (
-    <aside className="sidebar">
+    <aside className="sidebar" style={{ width: sidebarWidth }}>
       <div className="sidebar-header">
         <span>Shelf</span>
         <span className="sidebar-header-actions">
@@ -187,6 +215,12 @@ export function Sidebar() {
           );
         })}
       </div>
+
+      <div
+        className={`sidebar-resize-handle${resizeWidth !== null ? ' resizing' : ''}`}
+        onMouseDown={startResize}
+        title="Drag to resize"
+      />
 
       {contextMenu && (() => {
         const proj = projects[contextMenu.index];

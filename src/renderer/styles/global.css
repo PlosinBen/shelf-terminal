@@ -88,12 +88,32 @@ button {
 /* ── Sidebar ── */
 
 .sidebar {
+  position: relative;
+  /* width is set inline from the persisted (draggable) sidebarWidth; this is a
+     fallback for the first paint before settings hydrate. */
   width: 220px;
   background: var(--bg-secondary);
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
+}
+
+/* Drag handle straddling the right border to resize the sidebar. */
+.sidebar-resize-handle {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 50;
+}
+
+.sidebar-resize-handle:hover,
+.sidebar-resize-handle.resizing {
+  background: var(--accent);
+  opacity: 0.4;
 }
 
 .sidebar-header {
