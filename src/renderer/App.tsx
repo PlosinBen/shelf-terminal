@@ -13,6 +13,7 @@ import { ProjectEditPanel } from './components/ProjectEditPanel';
 import { CommandPicker } from './components/CommandPicker';
 import { WorktreeDialog } from './components/WorktreeDialog';
 import { WorktreeCreateGate } from './components/WorktreeCreateGate';
+import { WorktreeCloseGate } from './components/WorktreeCloseGate';
 import { RemoveConfirmDialog } from './components/RemoveConfirmDialog';
 import { BottomBar, SWITCH_BRANCH_EVENT } from './components/BottomBar';
 import { DevToolsPanel } from './components/DevToolsPanel';
@@ -410,6 +411,7 @@ export function App() {
       <QuickNoteOverlay />
       <WorktreeDialog />
       <WorktreeCreateGate />
+      <WorktreeCloseGate />
       <RemoveConfirmDialog />
       <WebPermissionPrompt />
       <BrowserOpenPrompt />
