@@ -50,6 +50,7 @@ export const IPC = {
   GIT_WORKTREE_ADD: 'git:worktree-add',
   GIT_WORKTREE_REMOVE: 'git:worktree-remove',
   GIT_MIGRATE_NOTE: 'git:migrate-note',
+  GIT_DELETE_BRANCH: 'git:delete-branch',
 
   // Worktree-dev-flow create gate (main→renderer confirm popup, renderer→main resolve).
   // Modelled on the browser-open gate: an agent-driven worktree_project_create is
@@ -57,6 +58,13 @@ export const IPC = {
   WORKTREE_CREATE_REQUEST: 'worktree:create-request',
   WORKTREE_CREATE_RESOLVE: 'worktree:create-resolve',
   WORKTREE_CREATE_CLOSE: 'worktree:create-close',
+
+  // Worktree-dev-flow close gate (finish / abandon). Same popup-await shape.
+  WORKTREE_CLOSE_REQUEST: 'worktree:close-request',
+  WORKTREE_CLOSE_RESOLVE: 'worktree:close-resolve',
+  WORKTREE_CLOSE_CLOSE: 'worktree:close-dismiss',
+  // renderer→main: lock + ff-only merge-back (the atomic "check main → ff" step).
+  WORKTREE_FINISH_MERGE_BACK: 'worktree:finish-merge-back',
 
   // Notes (per-project markdown scratch pad — multiple notes per project)
   NOTES_LIST: 'notes:list',

@@ -24,6 +24,7 @@ import { isGranted, grant } from '../web-grants';
 import { requestWebPermission } from '../web-permission';
 import { requestBrowserOpen, openWebTab } from '../browser-open';
 import { requestWorktreeCreate } from '../worktree/create-gate';
+import { requestWorktreeClose } from '../worktree/close-gate';
 
 /** Per-call context the bridge threads in (which tab/project asked). */
 export interface AppToolContext {
@@ -231,6 +232,20 @@ const REGISTRY: Record<string, AppToolDef> = {
       return { created: true, projectId: res.projectId, baseBranch: res.baseBranch };
     },
   },
+  'worktree_project.finish': {
+    // Self-close only: the feature's OWN agent finishes its OWN worktree (it has
+    // the case context for the two-layer confirm's explanation). Gated by a
+    // client-owned confirm popup; the renderer runs ff merge-back → teardown →
+    // delete branch and reports the outcome.
+    safe: false,
+    run: (_args, ctx) => runWorktreeClose('finish', ctx),
+  },
+  'worktree_project.abandon': {
+    // Like finish but no merge-back — the branch is discarded (force delete,
+    // permanent commit loss), guarded by the popup's loss warning.
+    safe: false,
+    run: (_args, ctx) => runWorktreeClose('abandon', ctx),
+  },
   'app_skill.update': {
     safe: false,
     run: async (args) => {
@@ -254,6 +269,38 @@ const REGISTRY: Record<string, AppToolDef> = {
     },
   },
 };
+
+/**
+ * Shared finish/abandon op body. Self-close: ctx.projectId is the worktree
+ * sub-project being closed. Maps the popup outcome onto the tool result —
+ * genuine failure (error) throws (ok:false); every other non-close outcome is a
+ * CALM actionable result (closed:false + reason), so the agent adapts (retry on
+ * busy, re-sync on non-ff, point the user at the base on base-dirty) instead of
+ * treating it as a crash.
+ */
+async function runWorktreeClose(
+  kind: 'finish' | 'abandon',
+  ctx: AppToolContext,
+): Promise<unknown> {
+  const subProjectId = ctx.projectId ?? '';
+  if (!subProjectId) throw new Error(`worktree_project.${kind}: no calling project context`);
+
+  const res = await requestWorktreeClose({ kind, subProjectId });
+  switch (res.outcome) {
+    case 'closed':
+      return { closed: true };
+    case 'cancelled':
+      return { closed: false, cancelled: true };
+    case 'busy':
+      return { closed: false, reason: 'busy', message: 'another finish is in progress for this repo — retry shortly' };
+    case 'non-ff':
+      return { closed: false, reason: 'non-ff', message: 'the base branch advanced — re-sync (merge base into the worktree) and retry' };
+    case 'base-dirty':
+      return { closed: false, reason: 'base-dirty', message: 'the base worktree has uncommitted changes — resolve them there, then retry' };
+    default:
+      throw new Error(res.error ?? `worktree ${kind} failed`);
+  }
+}
 
 async function deleteSkillSafe(name: string): Promise<void> {
   try {

@@ -96,6 +96,8 @@ contextBridge.exposeInMainWorld('shelfApi', {
       ipcRenderer.invoke(IPC.GIT_WORKTREE_REMOVE, { connection, cwd, worktreePath }),
     migrateNote: (connection: any, baseCwd: string, worktreeCwd: string, notePath?: string) =>
       ipcRenderer.invoke(IPC.GIT_MIGRATE_NOTE, { connection, baseCwd, worktreeCwd, notePath }),
+    deleteBranch: (connection: any, cwd: string, branch: string, force?: boolean) =>
+      ipcRenderer.invoke(IPC.GIT_DELETE_BRANCH, { connection, cwd, branch, force }),
   },
   worktree: {
     // main→renderer: open the agent-driven create confirm popup.
@@ -113,6 +115,24 @@ contextBridge.exposeInMainWorld('shelfApi', {
       ipcRenderer.on(IPC.WORKTREE_CREATE_CLOSE, listener);
       return () => ipcRenderer.removeListener(IPC.WORKTREE_CREATE_CLOSE, listener);
     },
+    // main→renderer: open the finish/abandon confirm popup.
+    onCloseRequest: (callback: (req: { requestId: string; kind: 'finish' | 'abandon'; subProjectId: string }) => void) => {
+      const listener = (_e: Electron.IpcRendererEvent, req: any) => callback(req);
+      ipcRenderer.on(IPC.WORKTREE_CLOSE_REQUEST, listener);
+      return () => ipcRenderer.removeListener(IPC.WORKTREE_CLOSE_REQUEST, listener);
+    },
+    // renderer→main: report the close outcome.
+    resolveClose: (resolution: { requestId: string; outcome: 'closed' | 'cancelled' | 'busy' | 'non-ff' | 'base-dirty' | 'error'; error?: string }) =>
+      ipcRenderer.invoke(IPC.WORKTREE_CLOSE_RESOLVE, resolution),
+    // main→renderer: a pending close was resolved elsewhere (timeout) → dismiss.
+    onCloseClose: (callback: (requestId: string) => void) => {
+      const listener = (_e: Electron.IpcRendererEvent, payload: { requestId: string }) => callback(payload.requestId);
+      ipcRenderer.on(IPC.WORKTREE_CLOSE_CLOSE, listener);
+      return () => ipcRenderer.removeListener(IPC.WORKTREE_CLOSE_CLOSE, listener);
+    },
+    // renderer→main: lock + ff-only merge-back step.
+    finishMergeBack: (payload: { connection: any; featureCwd: string; baseCwd: string; baseBranch: string; featureBranch: string }) =>
+      ipcRenderer.invoke(IPC.WORKTREE_FINISH_MERGE_BACK, payload),
   },
   settings: {
     load: () => ipcRenderer.invoke(IPC.SETTINGS_LOAD),

@@ -3,7 +3,14 @@ import { IPC } from '@shared/ipc-channels';
 import { createConnector } from '../connector';
 import { migrateFeatureNote } from '../worktree/note-migration';
 import { registerWorktreeCreateHandlers } from '../worktree/create-gate';
-import type { Connection, GitBranchInfo, MigrateNoteResult, WorktreeAddResult, WorktreeRemoveResult } from '@shared/types';
+import { registerWorktreeCloseHandlers } from '../worktree/close-gate';
+import { mergeBackFastForward } from '../worktree/merge-back';
+import { repoLockKey, tryAcquireRepoLock } from '../worktree/repo-lock';
+import { shellSingleQuote } from '../connector/file-utils';
+import type {
+  Connection, GitBranchInfo, MigrateNoteResult, WorktreeAddResult, WorktreeRemoveResult,
+  DeleteBranchResult, FinishMergeBackResult,
+} from '@shared/types';
 
 export function registerGitHandlers(): void {
   ipcMain.handle(IPC.GIT_BRANCH_LIST, async (_event, payload: { connection: Connection; cwd: string }): Promise<GitBranchInfo[]> => {
@@ -122,6 +129,53 @@ export function registerGitHandlers(): void {
     },
   );
 
-  // main→renderer create-gate resolve channel (sibling of the git worktree IPCs).
+  ipcMain.handle(
+    IPC.GIT_DELETE_BRANCH,
+    async (
+      _event,
+      payload: { connection: Connection; cwd: string; branch: string; force?: boolean },
+    ): Promise<DeleteBranchResult> => {
+      try {
+        const connector = createConnector(payload.connection);
+        const flag = payload.force ? '-D' : '-d';
+        await connector.exec(payload.cwd, `git branch ${flag} ${shellSingleQuote(payload.branch)}`);
+        return { ok: true };
+      } catch (err: any) {
+        const msg = (err?.message ?? String(err)).replace(/^Error:\s*/, '');
+        return { ok: false, error: msg };
+      }
+    },
+  );
+
+  ipcMain.handle(
+    IPC.WORKTREE_FINISH_MERGE_BACK,
+    async (
+      _event,
+      payload: { connection: Connection; featureCwd: string; baseCwd: string; baseBranch: string; featureBranch: string },
+    ): Promise<FinishMergeBackResult> => {
+      // The repo lock wraps ONLY the "check main → ff" step: once the ff lands,
+      // baseBranch has advanced and the subsequent teardown/branch-delete (this
+      // feature's own cleanup) don't touch baseBranch, so another feature may
+      // proceed. Losing the race → immediate busy (non-blocking).
+      const key = repoLockKey(payload.connection, payload.baseCwd);
+      const release = tryAcquireRepoLock(key);
+      if (!release) return { outcome: 'busy' };
+      try {
+        const connector = createConnector(payload.connection);
+        return await mergeBackFastForward({
+          connector,
+          featureCwd: payload.featureCwd,
+          baseCwd: payload.baseCwd,
+          baseBranch: payload.baseBranch,
+          featureBranch: payload.featureBranch,
+        });
+      } finally {
+        release();
+      }
+    },
+  );
+
+  // main→renderer create/close gate resolve channels (siblings of the git IPCs).
   registerWorktreeCreateHandlers();
+  registerWorktreeCloseHandlers();
 }

@@ -442,6 +442,42 @@ export interface WorktreeCreateResolution {
   error?: string;
 }
 
+export type WorktreeCloseKind = 'finish' | 'abandon';
+
+/** main→renderer: open the finish/abandon confirm popup for a worktree sub-project. */
+export interface WorktreeCloseRequest {
+  requestId: string;
+  kind: WorktreeCloseKind;
+  /** The worktree sub-project being closed (ctx.projectId of the calling tab). */
+  subProjectId: string;
+}
+
+/**
+ * renderer→main: the close popup's outcome.
+ * - closed = teardown done (+ merged, for finish)
+ * - cancelled = user declined (calm)
+ * - busy = another finish holds the repo lock (calm, retry)
+ * - non-ff = main advanced; agent must re-sync then retry (calm)
+ * - base-dirty = base worktree has uncommitted changes; user resolves (calm)
+ * - error = fail-loud
+ */
+export interface WorktreeCloseResolution {
+  requestId: string;
+  outcome: 'closed' | 'cancelled' | 'busy' | 'non-ff' | 'base-dirty' | 'error';
+  error?: string;
+}
+
+/** renderer→main result of the lock + ff-only merge-back step. */
+export interface FinishMergeBackResult {
+  outcome: 'merged' | 'busy' | 'non-ff' | 'base-dirty' | 'error';
+  error?: string;
+}
+
+export interface DeleteBranchResult {
+  ok: boolean;
+  error?: string;
+}
+
 // ── PM Agent ──
 
 export type PmProviderType = 'openai' | 'gemini' | 'ollama';
