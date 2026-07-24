@@ -1,7 +1,9 @@
 import { ipcMain } from 'electron';
 import { IPC } from '@shared/ipc-channels';
 import { createConnector } from '../connector';
-import type { Connection, GitBranchInfo, WorktreeAddResult, WorktreeRemoveResult } from '@shared/types';
+import { migrateFeatureNote } from '../worktree/note-migration';
+import { registerWorktreeCreateHandlers } from '../worktree/create-gate';
+import type { Connection, GitBranchInfo, MigrateNoteResult, WorktreeAddResult, WorktreeRemoveResult } from '@shared/types';
 
 export function registerGitHandlers(): void {
   ipcMain.handle(IPC.GIT_BRANCH_LIST, async (_event, payload: { connection: Connection; cwd: string }): Promise<GitBranchInfo[]> => {
@@ -101,4 +103,25 @@ export function registerGitHandlers(): void {
       }
     },
   );
+
+  ipcMain.handle(
+    IPC.GIT_MIGRATE_NOTE,
+    async (
+      _event,
+      payload: { connection: Connection; baseCwd: string; worktreeCwd: string; notePath?: string },
+    ): Promise<MigrateNoteResult> => {
+      try {
+        const connector = createConnector(payload.connection);
+        const res = await migrateFeatureNote(connector, payload.baseCwd, payload.worktreeCwd, payload.notePath);
+        return { ok: true, migrated: res.migrated };
+      } catch (err: any) {
+        // Fail-loud: given-but-missing / copy-failed surface to the caller, which
+        // rolls back the just-created worktree rather than booting a broken one.
+        return { ok: false, error: err?.message ?? String(err) };
+      }
+    },
+  );
+
+  // main→renderer create-gate resolve channel (sibling of the git worktree IPCs).
+  registerWorktreeCreateHandlers();
 }

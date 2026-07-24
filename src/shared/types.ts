@@ -415,6 +415,33 @@ export interface WorktreeRemoveResult {
   error?: string;
 }
 
+export interface MigrateNoteResult {
+  ok: boolean;
+  /** true = a note was actually moved; false = none was bound (degenerate). */
+  migrated?: boolean;
+  error?: string;
+}
+
+/** main→renderer: open the agent-driven worktree-create confirm popup. */
+export interface WorktreeCreateRequest {
+  requestId: string;
+  /** The base project the worktree is cut from (ctx.projectId of the calling tab). */
+  parentProjectId: string;
+  /** Branch name the agent supplied (pre-filled into the confirm popup). */
+  branch: string;
+  /** Optional Phase-0 note to migrate into the worktree, relative to the base cwd. */
+  notePath?: string;
+}
+
+/** renderer→main: the create popup's outcome. Cancel is a NORMAL result, not a failure. */
+export interface WorktreeCreateResolution {
+  requestId: string;
+  outcome: 'created' | 'cancelled' | 'error';
+  projectId?: string;
+  baseBranch?: string;
+  error?: string;
+}
+
 // ── PM Agent ──
 
 export type PmProviderType = 'openai' | 'gemini' | 'ollama';

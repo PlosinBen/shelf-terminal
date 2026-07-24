@@ -94,6 +94,25 @@ contextBridge.exposeInMainWorld('shelfApi', {
       ipcRenderer.invoke(IPC.GIT_WORKTREE_ADD, { connection, cwd, branch, newBranch }),
     worktreeRemove: (connection: any, cwd: string, worktreePath: string) =>
       ipcRenderer.invoke(IPC.GIT_WORKTREE_REMOVE, { connection, cwd, worktreePath }),
+    migrateNote: (connection: any, baseCwd: string, worktreeCwd: string, notePath?: string) =>
+      ipcRenderer.invoke(IPC.GIT_MIGRATE_NOTE, { connection, baseCwd, worktreeCwd, notePath }),
+  },
+  worktree: {
+    // main→renderer: open the agent-driven create confirm popup.
+    onCreateRequest: (callback: (req: { requestId: string; parentProjectId: string; branch: string; notePath?: string }) => void) => {
+      const listener = (_e: Electron.IpcRendererEvent, req: any) => callback(req);
+      ipcRenderer.on(IPC.WORKTREE_CREATE_REQUEST, listener);
+      return () => ipcRenderer.removeListener(IPC.WORKTREE_CREATE_REQUEST, listener);
+    },
+    // renderer→main: report the popup outcome (created / cancelled / error).
+    resolveCreate: (resolution: { requestId: string; outcome: 'created' | 'cancelled' | 'error'; projectId?: string; baseBranch?: string; error?: string }) =>
+      ipcRenderer.invoke(IPC.WORKTREE_CREATE_RESOLVE, resolution),
+    // main→renderer: a pending create was resolved elsewhere (timeout) → dismiss.
+    onCreateClose: (callback: (requestId: string) => void) => {
+      const listener = (_e: Electron.IpcRendererEvent, payload: { requestId: string }) => callback(payload.requestId);
+      ipcRenderer.on(IPC.WORKTREE_CREATE_CLOSE, listener);
+      return () => ipcRenderer.removeListener(IPC.WORKTREE_CREATE_CLOSE, listener);
+    },
   },
   settings: {
     load: () => ipcRenderer.invoke(IPC.SETTINGS_LOAD),

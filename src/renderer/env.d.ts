@@ -72,6 +72,12 @@ interface ShelfApi {
     checkout: (connection: import('../shared/types').Connection, cwd: string, branch: string) => Promise<{ ok: boolean; error?: string }>;
     worktreeAdd: (connection: import('../shared/types').Connection, cwd: string, branch: string, newBranch: boolean) => Promise<import('../shared/types').WorktreeAddResult>;
     worktreeRemove: (connection: import('../shared/types').Connection, cwd: string, worktreePath: string) => Promise<import('../shared/types').WorktreeRemoveResult>;
+    migrateNote: (connection: import('../shared/types').Connection, baseCwd: string, worktreeCwd: string, notePath?: string) => Promise<import('../shared/types').MigrateNoteResult>;
+  };
+  worktree: {
+    onCreateRequest: (callback: (req: import('../shared/types').WorktreeCreateRequest) => void) => () => void;
+    resolveCreate: (resolution: import('../shared/types').WorktreeCreateResolution) => Promise<void>;
+    onCreateClose: (callback: (requestId: string) => void) => () => void;
   };
   settings: {
     load: () => Promise<import('../shared/types').AppSettings>;

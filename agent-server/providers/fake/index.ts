@@ -411,9 +411,25 @@ export function createFakeBackend(): ServerBackend {
     // apptool:<op> — exercise the app-tool bridge end-to-end: call main via
     // callMain(op) and render the result as a reply so an E2E can assert the
     // round-trip (agent-server → main handler → skills-store → reply).
+    // `apptool:<op>` or `apptool:<op>:<jsonArgs>` — op names are `resource.verb`
+    // (a dot, never a colon), so the FIRST colon after the op cleanly separates
+    // optional JSON args. Args let an E2E drive ops that need input (e.g. a
+    // worktree branch) without a dedicated per-op scenario.
     if (step.startsWith('apptool:')) {
-      const op = step.slice('apptool:'.length);
-      const res = await callMain(op);
+      const rest = step.slice('apptool:'.length);
+      const colonIdx = rest.indexOf(':');
+      const op = colonIdx >= 0 ? rest.slice(0, colonIdx) : rest;
+      let args: Record<string, unknown> = {};
+      if (colonIdx >= 0) {
+        const argStr = rest.slice(colonIdx + 1);
+        try {
+          args = JSON.parse(argStr) as Record<string, unknown>;
+        } catch {
+          send({ type: 'message', msgId: mintId('m'), msgType: 'reply', content: `apptool ${op} bad-args ${argStr}` });
+          return;
+        }
+      }
+      const res = await callMain(op, args);
       send({ type: 'message', msgId: mintId('m'), msgType: 'reply', content: `apptool ${op} ${JSON.stringify(res)}` });
       return;
     }
