@@ -52,6 +52,7 @@ export const IPC = {
   GIT_WORKTREE_REMOVE: 'git:worktree-remove',
   GIT_MIGRATE_NOTE: 'git:migrate-note',
   GIT_DELETE_BRANCH: 'git:delete-branch',
+  GIT_LIST_FEATURE_NOTES: 'git:list-feature-notes',
 
   // Worktree-dev-flow create gate (main→renderer confirm popup, renderer→main resolve).
   // Modelled on the browser-open gate: an agent-driven worktree_project_create is

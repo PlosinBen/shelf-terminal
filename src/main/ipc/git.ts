@@ -2,6 +2,7 @@ import { ipcMain } from 'electron';
 import { IPC } from '@shared/ipc-channels';
 import { createConnector } from '../connector';
 import { migrateFeatureNote } from '../worktree/note-migration';
+import { listFeatureNotes } from '../worktree/feature-notes';
 import { registerWorktreeCreateHandlers } from '../worktree/create-gate';
 import { registerWorktreeCloseHandlers } from '../worktree/close-gate';
 import { mergeBackFastForward } from '../worktree/merge-back';
@@ -9,7 +10,7 @@ import { repoLockKey, tryAcquireRepoLock } from '../worktree/repo-lock';
 import { shellSingleQuote } from '../connector/file-utils';
 import type {
   Connection, GitBranchInfo, MigrateNoteResult, WorktreeAddResult, WorktreeRemoveResult,
-  DeleteBranchResult, FinishMergeBackResult,
+  DeleteBranchResult, FinishMergeBackResult, FeatureNoteInfo,
 } from '@shared/types';
 
 export function registerGitHandlers(): void {
@@ -125,6 +126,20 @@ export function registerGitHandlers(): void {
         // Fail-loud: given-but-missing / copy-failed surface to the caller, which
         // rolls back the just-created worktree rather than booting a broken one.
         return { ok: false, error: err?.message ?? String(err) };
+      }
+    },
+  );
+
+  ipcMain.handle(
+    IPC.GIT_LIST_FEATURE_NOTES,
+    async (_event, payload: { connection: Connection; cwd: string }): Promise<FeatureNoteInfo[]> => {
+      try {
+        const connector = createConnector(payload.connection);
+        return await listFeatureNotes(connector, payload.cwd);
+      } catch {
+        // A missing `.agent/features/` or a listing hiccup is not fatal — the
+        // picker just shows no notes (user can still create without one).
+        return [];
       }
     },
   );

@@ -75,6 +75,7 @@ interface ShelfApi {
     worktreeRemove: (connection: import('../shared/types').Connection, cwd: string, worktreePath: string) => Promise<import('../shared/types').WorktreeRemoveResult>;
     migrateNote: (connection: import('../shared/types').Connection, baseCwd: string, worktreeCwd: string, notePath?: string) => Promise<import('../shared/types').MigrateNoteResult>;
     deleteBranch: (connection: import('../shared/types').Connection, cwd: string, branch: string, force?: boolean) => Promise<import('../shared/types').DeleteBranchResult>;
+    listFeatureNotes: (connection: import('../shared/types').Connection, cwd: string) => Promise<import('../shared/types').FeatureNoteInfo[]>;
   };
   worktree: {
     onCreateRequest: (callback: (req: import('../shared/types').WorktreeCreateRequest) => void) => () => void;

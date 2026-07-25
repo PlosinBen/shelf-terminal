@@ -481,6 +481,20 @@ export interface DeleteBranchResult {
   error?: string;
 }
 
+/**
+ * A feature note discovered under a repo's `.agent/features/` (the transient
+ * working notes owned by the feature-dev-flow skill). Surfaced in the worktree
+ * create dialog's note-picker so the user picks which note seeds the new
+ * worktree. `path` is relative to the base cwd (connection-agnostic, feeds
+ * `migrateNote` directly).
+ */
+export interface FeatureNoteInfo {
+  /** Path relative to the base repo cwd, e.g. `.agent/features/foo.md`. */
+  path: string;
+  /** Frontmatter `title`, if present. */
+  title?: string;
+}
+
 // ── PM Agent ──
 
 export type PmProviderType = 'openai' | 'gemini' | 'ollama';
