@@ -238,11 +238,18 @@ const REGISTRY: Record<string, AppToolDef> = {
     // client-owned confirm popup; the renderer runs ff merge-back → teardown →
     // delete branch and reports the outcome.
     safe: false,
-    run: (_args, ctx) => runWorktreeClose('finish', ctx),
+    run: (args, ctx) => {
+      // Optional agent-supplied merge-back target (#target). The agent controls
+      // which branch it synced/resolved against in the worktree, so it also names
+      // where finish ff-pushes; undefined → the captured baseBranch (fork point).
+      const target = typeof args.target === 'string' && args.target.trim()
+        ? args.target.trim() : undefined;
+      return runWorktreeClose('finish', ctx, target);
+    },
   },
   'worktree_project.abandon': {
     // Like finish but no merge-back — the branch is discarded (force delete,
-    // permanent commit loss), guarded by the popup's loss warning.
+    // permanent commit loss), guarded by the popup's loss warning. No target.
     safe: false,
     run: (_args, ctx) => runWorktreeClose('abandon', ctx),
   },
@@ -281,11 +288,12 @@ const REGISTRY: Record<string, AppToolDef> = {
 async function runWorktreeClose(
   kind: 'finish' | 'abandon',
   ctx: AppToolContext,
+  target?: string,
 ): Promise<unknown> {
   const subProjectId = ctx.projectId ?? '';
   if (!subProjectId) throw new Error(`worktree_project.${kind}: no calling project context`);
 
-  const res = await requestWorktreeClose({ kind, subProjectId });
+  const res = await requestWorktreeClose({ kind, subProjectId, target });
   switch (res.outcome) {
     case 'closed':
       return { closed: true };

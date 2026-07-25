@@ -39,6 +39,8 @@ const pending = new Map<string, Pending>();
 export function requestWorktreeClose(meta: {
   kind: WorktreeCloseKind;
   subProjectId: string;
+  /** finish only — agent-supplied ff merge-back target (#target); undefined → baseBranch. */
+  target?: string;
 }): Promise<WorktreeCloseResult> {
   seq += 1;
   const requestId = `wx-${seq}`;

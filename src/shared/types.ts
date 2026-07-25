@@ -453,6 +453,13 @@ export interface WorktreeCloseRequest {
   kind: WorktreeCloseKind;
   /** The worktree sub-project being closed (ctx.projectId of the calling tab). */
   subProjectId: string;
+  /**
+   * finish only — the branch to ff merge-back into, supplied by the agent
+   * (#target). Undefined = fall back to the worktree's captured `baseBranch`
+   * (the fork point). ff-only guards a wrong/stale target (clean non-ff fail);
+   * the popup shows it so the user can catch a wrong-but-ff-able target.
+   */
+  target?: string;
 }
 
 /**
