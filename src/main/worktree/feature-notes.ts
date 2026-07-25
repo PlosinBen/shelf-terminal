@@ -2,14 +2,16 @@ import type { Connector } from '../connector/types';
 import type { FeatureNoteInfo } from '@shared/types';
 
 /**
- * List the in-progress feature notes under a repo's `.agent/features/` so the
- * worktree create dialog can offer them in a note-picker.
+ * List the feature notes under a repo's `.agent/features/` so the worktree
+ * create dialog can offer them in a note-picker.
  *
- * Only notes whose frontmatter `status` is `in-progress` are surfaced — the
- * resumable set, matching feature-dev-flow (cancelled / malformed / the reserved
- * `index.md` which has no frontmatter are all dropped). Goes through the
- * connector shell (not node fs) so it works across local / SSH / Docker / WSL;
- * paths come back relative to the base cwd so they feed `migrateNote` directly.
+ * ALL notes are surfaced regardless of frontmatter `status` — the user picks
+ * which note seeds the worktree, so the app must not gatekeep (a paused/pending
+ * note is just as pickable as an in-progress one). `status` (and `title`) are
+ * parsed only to SHOW alongside each note, not to filter. The one exclusion is
+ * the reserved `index.md`. Goes through the connector shell (not node fs) so it
+ * works across local / SSH / Docker / WSL; paths come back relative to the base
+ * cwd so they feed `migrateNote` directly.
  */
 
 const MARKER = /^===SHELF_NOTE:(.*)===$/;
@@ -60,8 +62,8 @@ function parseFrontmatter(lines: string[]): ParsedFrontmatter {
 }
 
 /**
- * Pure: turn the delimited shell dump into the in-progress feature notes.
- * Exported for unit testing without a connector.
+ * Pure: turn the delimited shell dump into the feature notes (ALL of them, with
+ * their title/status for display). Exported for unit testing without a connector.
  */
 export function parseFeatureNoteList(raw: string): FeatureNoteInfo[] {
   const notes: FeatureNoteInfo[] = [];
@@ -71,9 +73,10 @@ export function parseFeatureNoteList(raw: string): FeatureNoteInfo[] {
   const flush = () => {
     if (current === null) return;
     const fm = parseFrontmatter(block);
-    if (fm.status === 'in-progress') {
-      notes.push(fm.title ? { path: current, title: fm.title } : { path: current });
-    }
+    const note: FeatureNoteInfo = { path: current };
+    if (fm.title) note.title = fm.title;
+    if (fm.status) note.status = fm.status;
+    notes.push(note);
   };
 
   for (const line of raw.split('\n')) {

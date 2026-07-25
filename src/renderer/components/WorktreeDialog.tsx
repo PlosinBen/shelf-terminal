@@ -144,9 +144,14 @@ export function WorktreeDialog() {
                 disabled={creating}
               >
                 <option value={NO_NOTE}>No note</option>
-                {notes.map((n) => (
-                  <option key={n.path} value={n.path}>{n.title ?? n.path}</option>
-                ))}
+                {notes.map((n) => {
+                  const name = n.title ?? (n.path.split('/').pop() ?? n.path);
+                  return (
+                    <option key={n.path} value={n.path}>
+                      {n.status ? `${name} — ${n.status}` : name}
+                    </option>
+                  );
+                })}
               </select>
             </label>
           )}

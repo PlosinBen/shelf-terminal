@@ -479,8 +479,11 @@ export interface DeleteBranchResult {
 export interface FeatureNoteInfo {
   /** Path relative to the base repo cwd, e.g. `.agent/features/foo.md`. */
   path: string;
-  /** Frontmatter `title`, if present. */
+  /** Frontmatter `title`, if present (else the picker falls back to the filename). */
   title?: string;
+  /** Frontmatter `status` (e.g. in-progress / pending / cancelled), shown in the
+   *  picker as info — NOT a filter. The user picks; the app doesn't gatekeep. */
+  status?: string;
 }
 
 // ── PM Agent ──

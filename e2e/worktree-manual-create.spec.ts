@@ -69,7 +69,8 @@ test.describe('user-initiated worktree create', () => {
   test.beforeEach(async () => {
     userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'shelf-wtm-e2e-'));
     repo = makeRepo();
-    // One in-progress note (should appear) + one cancelled (should be filtered out).
+    // Two notes of different status — BOTH must be pickable (status is shown, not
+    // filtered): one in-progress + one cancelled.
     seedNote(repo, '.agent/features/demo.md', '---\ntype: feature\ntitle: Demo Feature\nstatus: in-progress\n---\n\n# Demo\n');
     seedNote(repo, '.agent/features/old.md', '---\ntype: feature\ntitle: Old Feature\nstatus: cancelled\n---\n');
     seedProject(userDataDir, repo);
@@ -92,16 +93,20 @@ test.describe('user-initiated worktree create', () => {
     }
   });
 
-  test('picker lists only in-progress notes; selecting one migrates it and auto-connects', async () => {
+  test('picker lists all notes with status; selecting one migrates it and auto-connects', async () => {
     const dialog = await openNewWorktreeDialog(page);
 
-    // The picker shows the in-progress note (by title) and NOT the cancelled one.
+    // Every note is pickable regardless of status; each shows its name + status.
     const options = dialog.locator('.worktree-select option');
-    await expect(options).toHaveCount(2); // "No note" + Demo Feature
-    await expect(dialog.locator('.worktree-select')).toContainText('Demo Feature');
-    await expect(dialog.locator('.worktree-select')).not.toContainText('Old Feature');
+    await expect(options).toHaveCount(3); // "No note" + Demo (in-progress) + Old (cancelled)
+    const select = dialog.locator('.worktree-select');
+    await expect(select).toContainText('Demo Feature');
+    await expect(select).toContainText('in-progress');
+    await expect(select).toContainText('Old Feature');
+    await expect(select).toContainText('cancelled');
 
-    // A single in-progress note is pre-selected. Cut the worktree.
+    // Multiple notes → nothing pre-selected; pick the one to seed the worktree.
+    await select.selectOption('.agent/features/demo.md');
     await dialog.locator('.worktree-input').fill('feature/m');
     await dialog.locator('.conn-btn-next').click();
     await expect(dialog).not.toBeVisible({ timeout: 8_000 });
