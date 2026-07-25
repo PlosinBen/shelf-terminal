@@ -27,11 +27,6 @@ vi.mock('../skills-store', () => ({
 const onSkillsChanged = vi.fn();
 vi.mock('../skills-sync', () => ({ onSkillsChanged: () => onSkillsChanged() }));
 
-const requestWorktreeClose = vi.fn();
-vi.mock('../worktree/close-gate', () => ({
-  requestWorktreeClose: (...a: unknown[]) => requestWorktreeClose(...a),
-}));
-
 import { handleAppTool, isSafeAppToolOp, isKnownAppToolOp } from './app-tool';
 
 beforeEach(() => {
@@ -47,68 +42,11 @@ beforeEach(() => {
   deleteSkillFile.mockReset();
   resolveAuxPath.mockReset();
   onSkillsChanged.mockReset();
-  requestWorktreeClose.mockReset();
 });
 
-describe('worktree_project.finish / .abandon ops', () => {
-  it('both are known, non-safe (gated) ops', () => {
-    expect(isKnownAppToolOp('worktree_project.finish')).toBe(true);
-    expect(isKnownAppToolOp('worktree_project.abandon')).toBe(true);
-    expect(isSafeAppToolOp('worktree_project.finish')).toBe(false);
-    expect(isSafeAppToolOp('worktree_project.abandon')).toBe(false);
-  });
-
-  it('finish passes kind + the calling sub-project id', async () => {
-    requestWorktreeClose.mockResolvedValue({ outcome: 'closed' });
-    const r = await handleAppTool('worktree_project.finish', {}, { projectId: 'wt-1' });
-    expect(requestWorktreeClose).toHaveBeenCalledWith({ kind: 'finish', subProjectId: 'wt-1', target: undefined });
-    expect(r).toEqual({ ok: true, data: { closed: true } });
-  });
-
-  it('finish forwards an agent-supplied target (trimmed)', async () => {
-    requestWorktreeClose.mockResolvedValue({ outcome: 'closed' });
-    await handleAppTool('worktree_project.finish', { target: '  develop ' }, { projectId: 'wt-1' });
-    expect(requestWorktreeClose).toHaveBeenCalledWith({ kind: 'finish', subProjectId: 'wt-1', target: 'develop' });
-  });
-
-  it('abandon passes kind abandon', async () => {
-    requestWorktreeClose.mockResolvedValue({ outcome: 'closed' });
-    await handleAppTool('worktree_project.abandon', {}, { projectId: 'wt-1' });
-    expect(requestWorktreeClose).toHaveBeenCalledWith({ kind: 'abandon', subProjectId: 'wt-1' });
-  });
-
-  it('cancel / busy / non-ff / base-dirty are calm results (ok:true, closed:false + reason)', async () => {
-    for (const [outcome, reason] of [['cancelled', undefined], ['busy', 'busy'], ['non-ff', 'non-ff'], ['base-dirty', 'base-dirty']] as const) {
-      requestWorktreeClose.mockResolvedValue({ outcome });
-      const r = await handleAppTool('worktree_project.finish', {}, { projectId: 'wt-1' });
-      expect(r.ok).toBe(true);
-      expect((r.data as any).closed).toBe(false);
-      if (reason) expect((r.data as any).reason).toBe(reason);
-    }
-  });
-
-  it('non-ff surfaces the merge-back error (target + command) as the message', async () => {
-    const richError = "merge-back into 'develop' is not a fast-forward (attempted `git push . HEAD:develop`): rejected. Merge 'develop' into this worktree, then finish again.";
-    requestWorktreeClose.mockResolvedValue({ outcome: 'non-ff', error: richError });
-    const r = await handleAppTool('worktree_project.finish', {}, { projectId: 'wt-1' });
-    expect((r.data as any).reason).toBe('non-ff');
-    // The agent gets WHICH branch + the command it tried, not a generic message.
-    expect((r.data as any).message).toContain('develop');
-    expect((r.data as any).message).toContain('git push . HEAD:develop');
-  });
-
-  it('error outcome → fail-loud ok:false', async () => {
-    requestWorktreeClose.mockResolvedValue({ outcome: 'error', error: 'boom' });
-    const r = await handleAppTool('worktree_project.finish', {}, { projectId: 'wt-1' });
-    expect(r).toEqual({ ok: false, error: 'boom' });
-  });
-
-  it('no calling project context → ok:false, popup never opened', async () => {
-    const r = await handleAppTool('worktree_project.finish', {}, {});
-    expect(r.ok).toBe(false);
-    expect(requestWorktreeClose).not.toHaveBeenCalled();
-  });
-});
+// worktree_project ops removed (#lifecycle): finish/abandon are user-initiated
+// UI (sidebar right-click), no longer agent tools. See WorktreeCloseGate + the
+// menu-driven E2E specs (e2e/worktree-finish|abandon|finish-target).
 
 describe('app-tool dispatcher (read ops)', () => {
   it('app_skill.list → { skills } from skills-store', async () => {

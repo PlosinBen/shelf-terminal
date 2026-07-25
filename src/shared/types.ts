@@ -425,38 +425,8 @@ export interface MigrateNoteResult {
   error?: string;
 }
 
-/** main→renderer: open the agent-driven worktree-create confirm popup. */
+/** Which user-initiated worktree close the sidebar menu triggered (#lifecycle). */
 export type WorktreeCloseKind = 'finish' | 'abandon';
-
-/** main→renderer: open the finish/abandon confirm popup for a worktree sub-project. */
-export interface WorktreeCloseRequest {
-  requestId: string;
-  kind: WorktreeCloseKind;
-  /** The worktree sub-project being closed (ctx.projectId of the calling tab). */
-  subProjectId: string;
-  /**
-   * finish only — the branch to ff merge-back into, supplied by the agent
-   * (#target). Undefined = fall back to the worktree's captured `baseBranch`
-   * (the fork point). ff-only guards a wrong/stale target (clean non-ff fail);
-   * the popup shows it so the user can catch a wrong-but-ff-able target.
-   */
-  target?: string;
-}
-
-/**
- * renderer→main: the close popup's outcome.
- * - closed = teardown done (+ merged, for finish)
- * - cancelled = user declined (calm)
- * - busy = another finish holds the repo lock (calm, retry)
- * - non-ff = main advanced; agent must re-sync then retry (calm)
- * - base-dirty = base worktree has uncommitted changes; user resolves (calm)
- * - error = fail-loud
- */
-export interface WorktreeCloseResolution {
-  requestId: string;
-  outcome: 'closed' | 'cancelled' | 'busy' | 'non-ff' | 'base-dirty' | 'error';
-  error?: string;
-}
 
 /** renderer→main result of the lock + ff-only merge-back step. */
 export interface FinishMergeBackResult {

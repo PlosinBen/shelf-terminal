@@ -55,11 +55,9 @@ export const IPC = {
   GIT_BRANCH_MERGED: 'git:branch-merged',
   GIT_LIST_FEATURE_NOTES: 'git:list-feature-notes',
 
-  // Worktree-dev-flow close gate (finish / abandon). Same popup-await shape.
-  WORKTREE_CLOSE_REQUEST: 'worktree:close-request',
-  WORKTREE_CLOSE_RESOLVE: 'worktree:close-resolve',
-  WORKTREE_CLOSE_CLOSE: 'worktree:close-dismiss',
   // renderer→main: lock + ff-only merge-back (the atomic "check main → ff" step).
+  // Finish/abandon are user-initiated in the renderer (#lifecycle); only this
+  // git step crosses to main.
   WORKTREE_FINISH_MERGE_BACK: 'worktree:finish-merge-back',
 
   // Notes (per-project markdown scratch pad — multiple notes per project)

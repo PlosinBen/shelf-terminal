@@ -23,7 +23,6 @@ import { parseHttpOrigin } from '../web-session-helpers';
 import { isGranted, grant } from '../web-grants';
 import { requestWebPermission } from '../web-permission';
 import { requestBrowserOpen, openWebTab } from '../browser-open';
-import { requestWorktreeClose } from '../worktree/close-gate';
 
 /** Per-call context the bridge threads in (which tab/project asked). */
 export interface AppToolContext {
@@ -202,29 +201,10 @@ const REGISTRY: Record<string, AppToolDef> = {
         message: `Opened ${url} in a Web tab. Ask the user to log in there, then retry browser_fetch.` };
     },
   },
-  // NOTE: there is no `worktree_project.create` op — cutting a worktree is a
-  // user-initiated UI action (sidebar New Worktree), not an agent tool (#entry).
-  'worktree_project.finish': {
-    // Self-close only: the feature's OWN agent finishes its OWN worktree (it has
-    // the case context for the two-layer confirm's explanation). Gated by a
-    // client-owned confirm popup; the renderer runs ff merge-back → teardown →
-    // delete branch and reports the outcome.
-    safe: false,
-    run: (args, ctx) => {
-      // Optional agent-supplied merge-back target (#target). The agent controls
-      // which branch it synced/resolved against in the worktree, so it also names
-      // where finish ff-pushes; undefined → the captured baseBranch (fork point).
-      const target = typeof args.target === 'string' && args.target.trim()
-        ? args.target.trim() : undefined;
-      return runWorktreeClose('finish', ctx, target);
-    },
-  },
-  'worktree_project.abandon': {
-    // Like finish but no merge-back — the branch is discarded (force delete,
-    // permanent commit loss), guarded by the popup's loss warning. No target.
-    safe: false,
-    run: (_args, ctx) => runWorktreeClose('abandon', ctx),
-  },
+  // NOTE: the agent has no worktree_project ops. The whole worktree lifecycle —
+  // create AND finish/abandon — is user-initiated UI (sidebar right-click menu),
+  // not agent tools (#lifecycle). Integration is consequential + environment-
+  // specific, so the human drives it; the agent only develops in the worktree.
   'app_skill.update': {
     safe: false,
     run: async (args) => {
@@ -248,41 +228,6 @@ const REGISTRY: Record<string, AppToolDef> = {
     },
   },
 };
-
-/**
- * Shared finish/abandon op body. Self-close: ctx.projectId is the worktree
- * sub-project being closed. Maps the popup outcome onto the tool result —
- * genuine failure (error) throws (ok:false); every other non-close outcome is a
- * CALM actionable result (closed:false + reason), so the agent adapts (retry on
- * busy, re-sync on non-ff, point the user at the base on base-dirty) instead of
- * treating it as a crash.
- */
-async function runWorktreeClose(
-  kind: 'finish' | 'abandon',
-  ctx: AppToolContext,
-  target?: string,
-): Promise<unknown> {
-  const subProjectId = ctx.projectId ?? '';
-  if (!subProjectId) throw new Error(`worktree_project.${kind}: no calling project context`);
-
-  const res = await requestWorktreeClose({ kind, subProjectId, target });
-  switch (res.outcome) {
-    case 'closed':
-      return { closed: true };
-    case 'cancelled':
-      return { closed: false, cancelled: true };
-    case 'busy':
-      return { closed: false, reason: 'busy', message: 'another finish is in progress for this repo — retry shortly' };
-    case 'non-ff':
-      // res.error names the target branch + the git command attempted, so the
-      // agent knows WHICH branch to re-sync (not guess the base).
-      return { closed: false, reason: 'non-ff', message: res.error ?? 'the merge-back target advanced since your sync — re-sync it into the worktree and retry' };
-    case 'base-dirty':
-      return { closed: false, reason: 'base-dirty', message: res.error ?? 'the base worktree has uncommitted changes — resolve them there, then retry' };
-    default:
-      throw new Error(res.error ?? `worktree ${kind} failed`);
-  }
-}
 
 async function deleteSkillSafe(name: string): Promise<void> {
   try {

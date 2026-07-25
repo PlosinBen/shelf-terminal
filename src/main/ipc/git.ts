@@ -4,7 +4,6 @@ import { createConnector } from '../connector';
 import { migrateFeatureNote } from '../worktree/note-migration';
 import { listFeatureNotes } from '../worktree/feature-notes';
 import { checkBranchMerged } from '../worktree/branch-merged';
-import { registerWorktreeCloseHandlers } from '../worktree/close-gate';
 import { mergeBackFastForward } from '../worktree/merge-back';
 import { repoLockKey, tryAcquireRepoLock } from '../worktree/repo-lock';
 import { shellSingleQuote } from '../connector/file-utils';
@@ -206,7 +205,4 @@ export function registerGitHandlers(): void {
       }
     },
   );
-
-  // main→renderer close gate resolve channels (sibling of the git IPCs).
-  registerWorktreeCloseHandlers();
 }
