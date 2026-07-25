@@ -40,6 +40,9 @@ export function WorktreeCloseGate() {
   const sub = subIndex >= 0 ? projects[subIndex] : undefined;
   const parent = sub ? projects.find((p) => p.config.id === sub.config.parentProjectId) : undefined;
   const isAbandon = current.kind === 'abandon';
+  // The ff merge-back target: agent-supplied (#target) or the captured baseBranch
+  // (fork point). Shown in the popup so the user can veto a wrong-but-ff-able target.
+  const mergeTarget = current.target?.trim() || (sub?.config.baseBranch ?? '');
 
   const dequeue = () => {
     setQueue((q) => q.slice(1));
@@ -77,7 +80,7 @@ export function WorktreeCloseGate() {
         connection: parentConn,
         featureCwd,
         baseCwd: parentCwd,
-        baseBranch: sub.config.baseBranch ?? '',
+        baseBranch: mergeTarget,
         featureBranch,
       });
       if (mb.outcome !== 'merged') {
@@ -135,7 +138,7 @@ export function WorktreeCloseGate() {
           ) : (
             <p>
               Merge {branch ? <strong>{branch}</strong> : 'this worktree'} back into{' '}
-              <strong>{sub?.config.baseBranch ?? 'the base branch'}</strong> and close it?
+              <strong>{mergeTarget || 'the base branch'}</strong> and close it?
             </p>
           )}
           {error && <div className="worktree-error">{error}</div>}
