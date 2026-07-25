@@ -3,13 +3,14 @@ import { IPC } from '@shared/ipc-channels';
 import { createConnector } from '../connector';
 import { migrateFeatureNote } from '../worktree/note-migration';
 import { listFeatureNotes } from '../worktree/feature-notes';
+import { checkBranchMerged } from '../worktree/branch-merged';
 import { registerWorktreeCloseHandlers } from '../worktree/close-gate';
 import { mergeBackFastForward } from '../worktree/merge-back';
 import { repoLockKey, tryAcquireRepoLock } from '../worktree/repo-lock';
 import { shellSingleQuote } from '../connector/file-utils';
 import type {
   Connection, GitBranchInfo, MigrateNoteResult, WorktreeAddResult, WorktreeRemoveResult,
-  DeleteBranchResult, FinishMergeBackResult, FeatureNoteInfo,
+  DeleteBranchResult, FinishMergeBackResult, FeatureNoteInfo, BranchMergedInfo,
 } from '@shared/types';
 
 export function registerGitHandlers(): void {
@@ -157,6 +158,23 @@ export function registerGitHandlers(): void {
       } catch (err: any) {
         const msg = (err?.message ?? String(err)).replace(/^Error:\s*/, '');
         return { ok: false, error: msg };
+      }
+    },
+  );
+
+  ipcMain.handle(
+    IPC.GIT_BRANCH_MERGED,
+    async (
+      _event,
+      payload: { connection: Connection; cwd: string; target: string; branch: string },
+    ): Promise<BranchMergedInfo> => {
+      try {
+        const connector = createConnector(payload.connection);
+        return await checkBranchMerged(connector, payload.cwd, payload.target, payload.branch);
+      } catch {
+        // Adaptive-warning input only — a hiccup falls back to the cautious
+        // "unmerged" default (loud force-delete warning), never silently "safe".
+        return { merged: false, aheadCount: 0 };
       }
     },
   );

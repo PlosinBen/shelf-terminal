@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useStore } from '../store';
 import { on, emit, emitAgent, Events } from '../events';
 import { enqueuePendingSend } from '../agentTabStore';
-import type { GitBranchInfo, WorktreeCloseKind } from '@shared/types';
+import type { BranchMergedInfo, GitBranchInfo, WorktreeCloseKind } from '@shared/types';
 
 // User-initiated finish/abandon popup for a worktree sub-project (#lifecycle).
 // Opened from the sidebar right-click menu (Events.WORKTREE_CLOSE) — NOT the
@@ -31,6 +31,9 @@ export function WorktreeCloseGate() {
   const [target, setTarget] = useState('');
   // Delete the feature branch as part of the close (default on).
   const [deleteBranch, setDeleteBranch] = useState(true);
+  // abandon only: is the branch already merged into base (→ safe delete) or would
+  // a force-delete discard commits (→ loud warning). null until the check returns.
+  const [mergeInfo, setMergeInfo] = useState<BranchMergedInfo | null>(null);
 
   const sub = state ? projects.find((p) => p.config.id === state.subProjectId) : undefined;
   const parent = sub ? projects.find((p) => p.config.id === sub.config.parentProjectId) : undefined;
@@ -44,24 +47,31 @@ export function WorktreeCloseGate() {
       setError(null);
       setDeleteBranch(true);
       setBranches([]);
+      setMergeInfo(null);
       const base = proj.config.baseBranch ?? '';
       setTarget(base);
 
+      const par = projects.find((p) => p.config.id === proj.config.parentProjectId);
       // finish: load the parent's local branches for the target selector (the
       // user's latch on WHERE the ff lands; default = captured fork point).
-      if (kind === 'finish') {
-        const par = projects.find((p) => p.config.id === proj.config.parentProjectId);
-        if (par) {
-          window.shelfApi.git
-            .branchList(par.config.connection, par.config.cwd)
-            .then((found) => {
-              setBranches(found.filter((b) => b.name !== proj.config.worktreeBranch));
-              if (base && !found.some((b) => b.name === base) && found.length > 0) {
-                setTarget(found[0].name);
-              }
-            })
-            .catch(() => { /* selector just falls back to the text default */ });
-        }
+      if (kind === 'finish' && par) {
+        window.shelfApi.git
+          .branchList(par.config.connection, par.config.cwd)
+          .then((found) => {
+            setBranches(found.filter((b) => b.name !== proj.config.worktreeBranch));
+            if (base && !found.some((b) => b.name === base) && found.length > 0) {
+              setTarget(found[0].name);
+            }
+          })
+          .catch(() => { /* selector just falls back to the text default */ });
+      }
+      // abandon: is the branch already merged into base → drives the adaptive
+      // warning + whether the delete is safe (-d) or a forced discard (-D).
+      if (kind === 'abandon' && par && base && proj.config.worktreeBranch) {
+        window.shelfApi.git
+          .branchMerged(par.config.connection, par.config.cwd, base, proj.config.worktreeBranch)
+          .then(setMergeInfo)
+          .catch(() => { /* stays null → cautious unmerged-style warning */ });
       }
     });
     return () => { off(); };
@@ -129,9 +139,11 @@ export function WorktreeCloseGate() {
       return;
     }
     if (featureBranch && deleteBranch) {
-      // finish → force is safe (commits live on target after the ff); abandon →
-      // force is intentional discard.
-      const del = await window.shelfApi.git.deleteBranch(parentConn, parentCwd, featureBranch, true);
+      // finish → force is safe (commits live on target after the ff). abandon →
+      // force ONLY when the branch is unmerged (an intentional discard); a merged
+      // branch uses a safe -d so a wrong "merged" verdict fails loud, not silently.
+      const force = isAbandon ? !(mergeInfo?.merged ?? false) : true;
+      const del = await window.shelfApi.git.deleteBranch(parentConn, parentCwd, featureBranch, force);
       if (!del.ok) {
         // Worktree already gone; a leftover branch is a loud anomaly, not data loss.
         setError(del.error ?? 'worktree removed but branch delete failed');
@@ -158,7 +170,15 @@ export function WorktreeCloseGate() {
           {isAbandon ? (
             <p>
               Abandon worktree {branch ? <strong>{branch}</strong> : 'this worktree'} without merging?
-              {deleteBranch && <> This <strong>permanently discards</strong> any unmerged commits.</>}
+              {deleteBranch && mergeInfo?.merged && (
+                <> The branch is <strong>already merged</strong> into {target || 'the base branch'} — deleting it is safe.</>
+              )}
+              {deleteBranch && mergeInfo && !mergeInfo.merged && (
+                <> This <strong>permanently discards</strong> {mergeInfo.aheadCount} unmerged commit{mergeInfo.aheadCount === 1 ? '' : 's'}.</>
+              )}
+              {deleteBranch && !mergeInfo && (
+                <> This <strong>permanently discards</strong> any unmerged commits.</>
+              )}
             </p>
           ) : (
             <>

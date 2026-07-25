@@ -52,6 +52,7 @@ export const IPC = {
   GIT_WORKTREE_REMOVE: 'git:worktree-remove',
   GIT_MIGRATE_NOTE: 'git:migrate-note',
   GIT_DELETE_BRANCH: 'git:delete-branch',
+  GIT_BRANCH_MERGED: 'git:branch-merged',
   GIT_LIST_FEATURE_NOTES: 'git:list-feature-notes',
 
   // Worktree-dev-flow close gate (finish / abandon). Same popup-await shape.

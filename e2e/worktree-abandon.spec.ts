@@ -104,6 +104,26 @@ test.describe('abandon worktree gate', () => {
     expect(git(base, ['branch', '--list', 'feature']).trim()).toBe('');
   });
 
+  test('already-merged branch → popup shows the safe-delete notice, deletes cleanly', async () => {
+    // Fast-forward main up to the feature so its commits are merged. Base is on
+    // main → the ff lands in the base worktree.
+    git(base, ['merge', '--ff-only', 'feature']);
+
+    await openCloseMenu(page, 'Abandon');
+
+    const popup = page.locator('.worktree-dialog', { hasText: 'Abandon Worktree' });
+    await expect(popup).toBeVisible({ timeout: 5_000 });
+    // Adaptive: merged → reassuring "already merged", NOT the discard warning.
+    await expect(popup).toContainText('already merged');
+    await expect(popup).not.toContainText('permanently discards');
+    await popup.locator('.conn-btn-danger').click();
+    await expect(popup).not.toBeVisible({ timeout: 8_000 });
+
+    await expect(page.locator('.sidebar-item.worktree-child', { hasText: 'feature' })).toHaveCount(0, { timeout: 8_000 });
+    expect(fs.existsSync(feature)).toBe(false);
+    expect(git(base, ['branch', '--list', 'feature']).trim()).toBe('');
+  });
+
   test('cancel keeps everything', async () => {
     await openCloseMenu(page, 'Abandon');
 

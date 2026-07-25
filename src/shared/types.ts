@@ -469,6 +469,13 @@ export interface DeleteBranchResult {
   error?: string;
 }
 
+/** Adaptive Abandon-warning input: is the feature branch merged into the target,
+ *  and how many commits would a force-delete discard. */
+export interface BranchMergedInfo {
+  merged: boolean;
+  aheadCount: number;
+}
+
 /**
  * A feature note discovered under a repo's `.agent/features/` (the transient
  * working notes owned by the feature-dev-flow skill). Surfaced in the worktree
