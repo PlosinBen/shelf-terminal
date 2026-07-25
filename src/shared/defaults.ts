@@ -30,4 +30,5 @@ export const DEFAULT_SETTINGS: AppSettings = {
   maxUploadSizeMB: 50,
   agentInMemoryMaxMessages: 500,
   agentHistorySaveThrottleMs: 5000,
+  sidebarWidth: 220,
 };

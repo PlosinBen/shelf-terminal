@@ -104,6 +104,23 @@ describe('secret-store persistence (local-key tier)', () => {
     expect(store.listProjectSecretKeys('p1')).toEqual([]);
   });
 
+  it('copyProjectSecrets duplicates a section under a new id, values decryptable', () => {
+    store.setProjectSecret('base', 'API_KEY', 'sekret');
+    store.setProjectSecret('base', 'TOKEN', 'tok');
+    store.copyProjectSecrets('base', 'wt-1');
+    expect(store.listProjectSecretKeys('wt-1')).toEqual(['API_KEY', 'TOKEN']);
+    // Reused blobs decrypt with the same master key.
+    expect(store.resolveProjectSecrets('wt-1')).toEqual({ API_KEY: 'sekret', TOKEN: 'tok' });
+    // Independent copy: deleting the source leaves the worktree's secrets intact.
+    store.deleteProjectSecrets('base');
+    expect(store.resolveProjectSecrets('wt-1')).toEqual({ API_KEY: 'sekret', TOKEN: 'tok' });
+  });
+
+  it('copyProjectSecrets is a no-op when the source has none', () => {
+    store.copyProjectSecrets('nobody', 'wt-2');
+    expect(store.listProjectSecretKeys('wt-2')).toEqual([]);
+  });
+
   it('fail-loud SKIPS a corrupt/undecryptable entry instead of injecting stale/empty', () => {
     store.setProjectSecret('p1', 'GOOD', 'ok');
     // Corrupt one entry directly on disk.

@@ -267,6 +267,13 @@ export interface ProjectConfig {
   quickCommands?: QuickCommand[];
   parentProjectId?: string;
   worktreeBranch?: string;
+  /**
+   * Worktree sub-projects only: the parent project's checked-out branch captured
+   * at create time — the objective divergence point ("从哪里切出去就合并回哪里").
+   * `finish` uses this as the fixed ff merge-back target and never re-detects it,
+   * because the parent's live checkout may have moved on since the worktree was cut.
+   */
+  baseBranch?: string;
   defaultAgentProvider?: AgentProvider;
   openAgentOnConnect?: boolean;
   agentSessionIds?: Partial<Record<AgentProvider, string>>;
@@ -362,6 +369,9 @@ export interface AppSettings {
    *  Lower = less data lost on crash, higher = fewer IDB transactions. */
   agentHistorySaveThrottleMs: number;
   providerModels?: Partial<Record<PmProviderType | 'claude', ProviderModel[]>>;
+  /** Persisted width (px) of the left project sidebar. Restored at launch;
+   *  clamped to a usable range when applied. */
+  sidebarWidth?: number;
 }
 
 
@@ -394,10 +404,79 @@ export interface GitBranchInfo {
 export interface WorktreeAddResult {
   ok: boolean;
   path?: string;
+  /**
+   * The parent worktree's checked-out branch at the moment the worktree was cut —
+   * captured atomically alongside creation and stored as the sub-project's
+   * `baseBranch` (the fixed ff merge-back target for `finish`).
+   */
+  baseBranch?: string;
   error?: string;
 }
 
 export interface WorktreeRemoveResult {
+  ok: boolean;
+  error?: string;
+}
+
+export interface MigrateNoteResult {
+  ok: boolean;
+  /** true = a note was actually moved; false = none was bound (degenerate). */
+  migrated?: boolean;
+  error?: string;
+}
+
+/** main→renderer: open the agent-driven worktree-create confirm popup. */
+export interface WorktreeCreateRequest {
+  requestId: string;
+  /** The base project the worktree is cut from (ctx.projectId of the calling tab). */
+  parentProjectId: string;
+  /** Branch name the agent supplied (pre-filled into the confirm popup). */
+  branch: string;
+  /** Optional Phase-0 note to migrate into the worktree, relative to the base cwd. */
+  notePath?: string;
+}
+
+/** renderer→main: the create popup's outcome. Cancel is a NORMAL result, not a failure. */
+export interface WorktreeCreateResolution {
+  requestId: string;
+  outcome: 'created' | 'cancelled' | 'error';
+  projectId?: string;
+  baseBranch?: string;
+  error?: string;
+}
+
+export type WorktreeCloseKind = 'finish' | 'abandon';
+
+/** main→renderer: open the finish/abandon confirm popup for a worktree sub-project. */
+export interface WorktreeCloseRequest {
+  requestId: string;
+  kind: WorktreeCloseKind;
+  /** The worktree sub-project being closed (ctx.projectId of the calling tab). */
+  subProjectId: string;
+}
+
+/**
+ * renderer→main: the close popup's outcome.
+ * - closed = teardown done (+ merged, for finish)
+ * - cancelled = user declined (calm)
+ * - busy = another finish holds the repo lock (calm, retry)
+ * - non-ff = main advanced; agent must re-sync then retry (calm)
+ * - base-dirty = base worktree has uncommitted changes; user resolves (calm)
+ * - error = fail-loud
+ */
+export interface WorktreeCloseResolution {
+  requestId: string;
+  outcome: 'closed' | 'cancelled' | 'busy' | 'non-ff' | 'base-dirty' | 'error';
+  error?: string;
+}
+
+/** renderer→main result of the lock + ff-only merge-back step. */
+export interface FinishMergeBackResult {
+  outcome: 'merged' | 'busy' | 'non-ff' | 'base-dirty' | 'error';
+  error?: string;
+}
+
+export interface DeleteBranchResult {
   ok: boolean;
   error?: string;
 }

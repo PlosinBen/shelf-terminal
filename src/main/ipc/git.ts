@@ -1,7 +1,16 @@
 import { ipcMain } from 'electron';
 import { IPC } from '@shared/ipc-channels';
 import { createConnector } from '../connector';
-import type { Connection, GitBranchInfo, WorktreeAddResult, WorktreeRemoveResult } from '@shared/types';
+import { migrateFeatureNote } from '../worktree/note-migration';
+import { registerWorktreeCreateHandlers } from '../worktree/create-gate';
+import { registerWorktreeCloseHandlers } from '../worktree/close-gate';
+import { mergeBackFastForward } from '../worktree/merge-back';
+import { repoLockKey, tryAcquireRepoLock } from '../worktree/repo-lock';
+import { shellSingleQuote } from '../connector/file-utils';
+import type {
+  Connection, GitBranchInfo, MigrateNoteResult, WorktreeAddResult, WorktreeRemoveResult,
+  DeleteBranchResult, FinishMergeBackResult,
+} from '@shared/types';
 
 export function registerGitHandlers(): void {
   ipcMain.handle(IPC.GIT_BRANCH_LIST, async (_event, payload: { connection: Connection; cwd: string }): Promise<GitBranchInfo[]> => {
@@ -66,13 +75,23 @@ export function registerGitHandlers(): void {
         const dirName = `${payload.cwd.replace(/\/+$/, '').split('/').pop()}-${payload.branch.replace(/\//g, '-')}`;
         const worktreePath = `${parentDir}/${dirName}`;
 
+        // Capture the parent's checked-out branch BEFORE creating the worktree —
+        // this is the objective divergence point ("从哪里切出去就合并回哪里") that
+        // `finish` later uses as its fixed ff merge-back target. Detached HEAD →
+        // empty string (finish will fail-loud on merge-back rather than guess).
+        const headResult = await connector
+          .exec(payload.cwd, 'git rev-parse --abbrev-ref HEAD 2>/dev/null')
+          .catch(() => ({ stdout: '', stderr: '' }));
+        const rawHead = headResult.stdout.trim();
+        const baseBranch = rawHead && rawHead !== 'HEAD' ? rawHead : undefined;
+
         const branchFlag = payload.newBranch ? '-b' : '';
         const cmd = branchFlag
           ? `git worktree add ${branchFlag} ${JSON.stringify(payload.branch)} ${JSON.stringify(worktreePath)}`
           : `git worktree add ${JSON.stringify(worktreePath)} ${JSON.stringify(payload.branch)}`;
 
         await connector.exec(payload.cwd, cmd);
-        return { ok: true, path: worktreePath };
+        return { ok: true, path: worktreePath, baseBranch };
       } catch (err: any) {
         return { ok: false, error: err?.message ?? String(err) };
       }
@@ -91,4 +110,72 @@ export function registerGitHandlers(): void {
       }
     },
   );
+
+  ipcMain.handle(
+    IPC.GIT_MIGRATE_NOTE,
+    async (
+      _event,
+      payload: { connection: Connection; baseCwd: string; worktreeCwd: string; notePath?: string },
+    ): Promise<MigrateNoteResult> => {
+      try {
+        const connector = createConnector(payload.connection);
+        const res = await migrateFeatureNote(connector, payload.baseCwd, payload.worktreeCwd, payload.notePath);
+        return { ok: true, migrated: res.migrated };
+      } catch (err: any) {
+        // Fail-loud: given-but-missing / copy-failed surface to the caller, which
+        // rolls back the just-created worktree rather than booting a broken one.
+        return { ok: false, error: err?.message ?? String(err) };
+      }
+    },
+  );
+
+  ipcMain.handle(
+    IPC.GIT_DELETE_BRANCH,
+    async (
+      _event,
+      payload: { connection: Connection; cwd: string; branch: string; force?: boolean },
+    ): Promise<DeleteBranchResult> => {
+      try {
+        const connector = createConnector(payload.connection);
+        const flag = payload.force ? '-D' : '-d';
+        await connector.exec(payload.cwd, `git branch ${flag} ${shellSingleQuote(payload.branch)}`);
+        return { ok: true };
+      } catch (err: any) {
+        const msg = (err?.message ?? String(err)).replace(/^Error:\s*/, '');
+        return { ok: false, error: msg };
+      }
+    },
+  );
+
+  ipcMain.handle(
+    IPC.WORKTREE_FINISH_MERGE_BACK,
+    async (
+      _event,
+      payload: { connection: Connection; featureCwd: string; baseCwd: string; baseBranch: string; featureBranch: string },
+    ): Promise<FinishMergeBackResult> => {
+      // The repo lock wraps ONLY the "check main → ff" step: once the ff lands,
+      // baseBranch has advanced and the subsequent teardown/branch-delete (this
+      // feature's own cleanup) don't touch baseBranch, so another feature may
+      // proceed. Losing the race → immediate busy (non-blocking).
+      const key = repoLockKey(payload.connection, payload.baseCwd);
+      const release = tryAcquireRepoLock(key);
+      if (!release) return { outcome: 'busy' };
+      try {
+        const connector = createConnector(payload.connection);
+        return await mergeBackFastForward({
+          connector,
+          featureCwd: payload.featureCwd,
+          baseCwd: payload.baseCwd,
+          baseBranch: payload.baseBranch,
+          featureBranch: payload.featureBranch,
+        });
+      } finally {
+        release();
+      }
+    },
+  );
+
+  // main→renderer create/close gate resolve channels (siblings of the git IPCs).
+  registerWorktreeCreateHandlers();
+  registerWorktreeCloseHandlers();
 }

@@ -1,6 +1,7 @@
 import { useState, useCallback, useSyncExternalStore } from 'react';
 import type { ProjectConfig, AppSettings, UpdateStatus, TabType, AgentProvider, ConnectionHealth, ConnectionHealthState } from '@shared/types';
 import { DEFAULT_SETTINGS } from '@shared/defaults';
+import { groupedOrder, moveGroup } from './project-grouping';
 
 // ── Tab state ──
 
@@ -96,13 +97,17 @@ export function useStore() {
 // ── Actions ──
 
 export function setProjects(configs: ProjectConfig[]) {
-  projects = configs.map((config) => ({
-    config,
-    tabs: [],
-    activeTabIndex: 0,
-    splitTabId: null,
-    folderInvalid: false,
-  }));
+  // Normalize so worktree children sit directly after their parent — persisted
+  // order may predate grouping, and the flat-index invariant must hold on load.
+  projects = groupedOrder(
+    configs.map((config) => ({
+      config,
+      tabs: [],
+      activeTabIndex: 0,
+      splitTabId: null,
+      folderInvalid: false,
+    })),
+  );
   updateSnapshot();
 }
 
@@ -123,8 +128,10 @@ export function addProject(config: ProjectConfig) {
     splitTabId: null,
     folderInvalid: false,
   };
-  projects = [...projects, runtime];
-  activeProjectIndex = projects.length - 1;
+  // A worktree child lands right after its parent group (not the list tail);
+  // a plain project stays at the end. groupedOrder enforces the invariant.
+  projects = groupedOrder([...projects, runtime]);
+  activeProjectIndex = projects.findIndex((p) => p.config.id === config.id);
   updateSnapshot();
 }
 
@@ -148,20 +155,19 @@ export function reorderProjects(fromIndex: number, toIndex: number) {
   if (fromIndex < 0 || fromIndex >= projects.length) return;
   if (toIndex < 0 || toIndex >= projects.length) return;
 
-  const items = [...projects];
-  const [moved] = items.splice(fromIndex, 1);
-  items.splice(toIndex, 0, moved);
+  // Group-granular move: dragging any row drags its whole group (a project +
+  // its worktree children). No-op if source/target share a group.
+  const activeId = projects[activeProjectIndex]?.config.id;
+  const next = moveGroup(projects, fromIndex, toIndex);
+  if (next === projects) return;
+  projects = next;
 
-  // Follow the active project
-  if (activeProjectIndex === fromIndex) {
-    activeProjectIndex = toIndex;
-  } else if (fromIndex < activeProjectIndex && toIndex >= activeProjectIndex) {
-    activeProjectIndex--;
-  } else if (fromIndex > activeProjectIndex && toIndex <= activeProjectIndex) {
-    activeProjectIndex++;
+  // Follow the active project by identity (indices shifted with the group move).
+  if (activeId) {
+    const ni = projects.findIndex((p) => p.config.id === activeId);
+    if (ni !== -1) activeProjectIndex = ni;
   }
 
-  projects = items;
   layoutGeneration++;
   updateSnapshot();
   window.shelfApi.project.save(projects.map((p) => p.config));

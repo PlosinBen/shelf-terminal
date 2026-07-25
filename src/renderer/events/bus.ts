@@ -28,6 +28,7 @@ export const Events = {
   REMOVE_PROJECT: 'remove-project',  // (projectIndex)
   NEW_TAB: 'new-tab',               // (projectIndex)
   CONNECT_PROJECT: 'connect-project',       // (projectIndex)
+  AUTO_CONNECT_PROJECT: 'auto-connect-project', // (projectId) — connect a just-added project once it's in the store
   DISCONNECT_PROJECT: 'disconnect-project', // (projectIndex)
   OPEN_FOLDER_PICKER: 'open-folder-picker',
   ADD_PROJECT: 'add-project',       // (ProjectConfig)

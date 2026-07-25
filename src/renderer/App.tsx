@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { TabBar } from './components/TabBar';
 import { TerminalView } from './components/TerminalView';
@@ -12,6 +12,8 @@ import { SearchBar } from './components/SearchBar';
 import { ProjectEditPanel } from './components/ProjectEditPanel';
 import { CommandPicker } from './components/CommandPicker';
 import { WorktreeDialog } from './components/WorktreeDialog';
+import { WorktreeCreateGate } from './components/WorktreeCreateGate';
+import { WorktreeCloseGate } from './components/WorktreeCloseGate';
 import { RemoveConfirmDialog } from './components/RemoveConfirmDialog';
 import { BottomBar, SWITCH_BRANCH_EVENT } from './components/BottomBar';
 import { DevToolsPanel } from './components/DevToolsPanel';
@@ -37,6 +39,23 @@ import './styles/global.css';
 export function App() {
   const { projects, activeProjectIndex, sidebarVisible, settingsVisible, commandPickerVisible, devToolsVisible, notesVisible, skillsVisible, mcpVisible, editingProjectIndex, settings, pmVisible, awayMode } = useStore();
   useKeybindings();
+
+  // Auto-connect a just-added project (e.g. a fresh worktree) once it lands in the
+  // store. Driven off `projects` (fresh) so the CONNECT_PROJECT handler — which
+  // indexes the same fresh snapshot — resolves the new project; emitting inside a
+  // bus handler right after ADD_PROJECT would hit the pre-add closure instead.
+  const [pendingConnectId, setPendingConnectId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!pendingConnectId) return;
+    const idx = projects.findIndex((p) => p.config.id === pendingConnectId);
+    if (idx < 0) return; // not in the store yet — this effect re-runs when it lands
+    setPendingConnectId(null);
+    if (projects[idx].tabs.length > 0) return; // already connected
+    // Defer past this effect-flush so the CONNECT_PROJECT handler (re-subscribed in
+    // the SAME flush, whichever order the effects run) is live before we emit —
+    // otherwise the emit can land between the bus effect's cleanup and re-subscribe.
+    queueMicrotask(() => emit(Events.CONNECT_PROJECT, idx));
+  }, [projects, pendingConnectId]);
 
   useEffect(() => {
     window.shelfApi.settings.load().then(setSettings);
@@ -230,6 +249,12 @@ export function App() {
       await window.shelfApi.project.save(configs);
     });
 
+    // Just record the id; the store-keyed effect above connects it once it's added
+    // (the setter is stable, so the stale `projects` closure here doesn't matter).
+    const offAutoConnect = on(Events.AUTO_CONNECT_PROJECT, (projectId: string) => {
+      setPendingConnectId(projectId);
+    });
+
     const offToggleSplit = on(Events.TOGGLE_SPLIT, (projectIndex: number) => {
       const proj = projects[projectIndex];
       if (!proj) return;
@@ -270,7 +295,7 @@ export function App() {
       }
     });
 
-    return () => { offCloseTab(); offRemoveProject(); offNewTab(); offNewAgentTab(); offNewWebTab(); offOpenWebTab(); offConnectProject(); offDisconnectProject(); offAddProject(); offToggleSplit(); offSwitchBranch(); };
+    return () => { offCloseTab(); offRemoveProject(); offNewTab(); offNewAgentTab(); offNewWebTab(); offOpenWebTab(); offConnectProject(); offAutoConnect(); offDisconnectProject(); offAddProject(); offToggleSplit(); offSwitchBranch(); };
   }, [projects]);
 
   useEffect(() => {
@@ -408,6 +433,8 @@ export function App() {
       <CommandPicker />
       <QuickNoteOverlay />
       <WorktreeDialog />
+      <WorktreeCreateGate />
+      <WorktreeCloseGate />
       <RemoveConfirmDialog />
       <WebPermissionPrompt />
       <BrowserOpenPrompt />

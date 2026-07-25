@@ -181,6 +181,23 @@ export function deleteProjectSecret(projectId: string, name: string): void {
   writeSecretsFile(data);
 }
 
+/**
+ * Duplicate a project's whole secret section under a new project id — used when a
+ * worktree sub-project is cut so it inherits the parent's secrets. All projects
+ * share ONE master key, so the encrypted blobs are reused verbatim (no decrypt,
+ * no re-encrypt, values never enter plaintext). Overwrites any existing section
+ * for `toId`. No-op if the source has no secrets. Cleanup is automatic: on
+ * project removal PROJECT_SAVE prunes the removed id via deleteProjectSecrets.
+ */
+export function copyProjectSecrets(fromId: string, toId: string): void {
+  if (fromId === toId) return;
+  const data = readSecretsFile();
+  const section = data[fromId];
+  if (!section) return;
+  data[toId] = { ...section };
+  writeSecretsFile(data);
+}
+
 /** Prune a project's whole secret section (on project removal). No-op if absent. */
 export function deleteProjectSecrets(projectId: string): void {
   const data = readSecretsFile();

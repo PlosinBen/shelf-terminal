@@ -11,7 +11,7 @@ describe('shelf MCP bridge server', () => {
   let handle: ShelfMcpHandle | undefined;
   afterEach(() => { handle?.close(); handle = undefined; });
 
-  it('serves the 9 app-level bridge tools over HTTP', async () => {
+  it('serves the app-level bridge tools over HTTP', async () => {
     handle = await startShelfMcpServer();
     const client = new Client({ name: 'test-client', version: '0.0.0' });
     await client.connect(new StreamableHTTPClientTransport(new URL(handle.url)));
@@ -27,6 +27,9 @@ describe('shelf MCP bridge server', () => {
       'list_app_skills',
       'read_app_skill_file',
       'update_app_skill',
+      'worktree_project_abandon',
+      'worktree_project_create',
+      'worktree_project_finish',
       'write_app_skill_file',
     ]);
   });

@@ -6,7 +6,7 @@ import { removeProjectStorage } from '../project-storage';
 import { getProjects, setProjects } from '../app-state';
 import {
   listProjectSecretKeys, setProjectSecret, deleteProjectSecret,
-  deleteProjectSecrets, getKeyTier,
+  deleteProjectSecrets, copyProjectSecrets, getKeyTier,
 } from '../secret-store';
 import { log } from '@shared/logger';
 import type { ProjectConfig } from '@shared/types';
@@ -38,6 +38,10 @@ export function registerProjectHandlers(): void {
 
   ipcMain.handle(IPC.PROJECT_SECRET_DELETE, (_event, projectId: string, key: string): void =>
     deleteProjectSecret(projectId, key));
+
+  // Worktree inherits its parent's secrets (encrypted blobs reused under the new id).
+  ipcMain.handle(IPC.PROJECT_SECRETS_COPY, (_event, fromId: string, toId: string): void =>
+    copyProjectSecrets(fromId, toId));
 
   ipcMain.handle(IPC.SECRET_KEY_TIER, () => getKeyTier());
 

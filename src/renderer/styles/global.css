@@ -88,12 +88,32 @@ button {
 /* ── Sidebar ── */
 
 .sidebar {
+  position: relative;
+  /* width is set inline from the persisted (draggable) sidebarWidth; this is a
+     fallback for the first paint before settings hydrate. */
   width: 220px;
   background: var(--bg-secondary);
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
+}
+
+/* Drag handle straddling the right border to resize the sidebar. */
+.sidebar-resize-handle {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 50;
+}
+
+.sidebar-resize-handle:hover,
+.sidebar-resize-handle.resizing {
+  background: var(--accent);
+  opacity: 0.4;
 }
 
 .sidebar-header {
@@ -177,6 +197,50 @@ button {
 
 .sidebar-item.drag-over {
   border-top: 2px solid var(--accent);
+}
+
+/* A worktree child hangs off its parent by a tree connector (an elbow) rather
+   than a big left pad — the elbow occupies the offset, so the indent stays small
+   and the child's dot sits just under the parent's. It reads as a sub-item, not a
+   nudged peer. Line colour is a muted mix so it survives the active-row surface
+   (which equals --border). The guide continues past a child with a sibling below. */
+.sidebar-item.worktree-child {
+  position: relative;
+  padding-left: 34px;
+  height: 36px;
+}
+
+/* vertical guide: drops to the elbow (last child), or full-height when another
+   worktree sibling follows. */
+.sidebar-item.worktree-child::before {
+  content: '';
+  position: absolute;
+  left: 20px;
+  top: 0;
+  bottom: 50%;
+  border-left: 1px solid color-mix(in srgb, var(--text-muted) 40%, transparent);
+}
+
+.sidebar-item.worktree-child.has-sibling-below::before {
+  bottom: 0;
+}
+
+/* horizontal stub joining the guide to the child's dot (the elbow corner). */
+.sidebar-item.worktree-child::after {
+  content: '';
+  position: absolute;
+  left: 20px;
+  top: 50%;
+  width: 7px;
+  border-top: 1px solid color-mix(in srgb, var(--text-muted) 40%, transparent);
+}
+
+.sidebar-item.worktree-child .project-name {
+  color: var(--text-muted);
+}
+
+.sidebar-item.worktree-child.active .project-name {
+  color: var(--text);
 }
 
 /* ── Context Menu ── */
@@ -2127,6 +2191,28 @@ button {
   color: var(--text-muted);
   padding: 8px 4px;
   text-align: center;
+}
+
+/* Agent-driven create/finish/abandon confirm gates. Matches the dialog language:
+   13px body, 16px symmetric padding aligned with the header/footer horizontals,
+   and reset <p> margins so vertical rhythm comes from padding + gap alone. */
+.worktree-gate-body {
+  padding: 16px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.worktree-gate-body p {
+  margin: 0;
+}
+
+.worktree-gate-note {
+  font-size: 12px;
+  color: var(--text-muted);
 }
 
 /* ── Remove Confirm Dialog ── */

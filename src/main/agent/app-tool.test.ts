@@ -27,6 +27,16 @@ vi.mock('../skills-store', () => ({
 const onSkillsChanged = vi.fn();
 vi.mock('../skills-sync', () => ({ onSkillsChanged: () => onSkillsChanged() }));
 
+const requestWorktreeCreate = vi.fn();
+vi.mock('../worktree/create-gate', () => ({
+  requestWorktreeCreate: (...a: unknown[]) => requestWorktreeCreate(...a),
+}));
+
+const requestWorktreeClose = vi.fn();
+vi.mock('../worktree/close-gate', () => ({
+  requestWorktreeClose: (...a: unknown[]) => requestWorktreeClose(...a),
+}));
+
 import { handleAppTool, isSafeAppToolOp, isKnownAppToolOp } from './app-tool';
 
 beforeEach(() => {
@@ -42,6 +52,97 @@ beforeEach(() => {
   deleteSkillFile.mockReset();
   resolveAuxPath.mockReset();
   onSkillsChanged.mockReset();
+  requestWorktreeCreate.mockReset();
+  requestWorktreeClose.mockReset();
+});
+
+describe('worktree_project.finish / .abandon ops', () => {
+  it('both are known, non-safe (gated) ops', () => {
+    expect(isKnownAppToolOp('worktree_project.finish')).toBe(true);
+    expect(isKnownAppToolOp('worktree_project.abandon')).toBe(true);
+    expect(isSafeAppToolOp('worktree_project.finish')).toBe(false);
+    expect(isSafeAppToolOp('worktree_project.abandon')).toBe(false);
+  });
+
+  it('finish passes kind + the calling sub-project id', async () => {
+    requestWorktreeClose.mockResolvedValue({ outcome: 'closed' });
+    const r = await handleAppTool('worktree_project.finish', {}, { projectId: 'wt-1' });
+    expect(requestWorktreeClose).toHaveBeenCalledWith({ kind: 'finish', subProjectId: 'wt-1' });
+    expect(r).toEqual({ ok: true, data: { closed: true } });
+  });
+
+  it('abandon passes kind abandon', async () => {
+    requestWorktreeClose.mockResolvedValue({ outcome: 'closed' });
+    await handleAppTool('worktree_project.abandon', {}, { projectId: 'wt-1' });
+    expect(requestWorktreeClose).toHaveBeenCalledWith({ kind: 'abandon', subProjectId: 'wt-1' });
+  });
+
+  it('cancel / busy / non-ff / base-dirty are calm results (ok:true, closed:false + reason)', async () => {
+    for (const [outcome, reason] of [['cancelled', undefined], ['busy', 'busy'], ['non-ff', 'non-ff'], ['base-dirty', 'base-dirty']] as const) {
+      requestWorktreeClose.mockResolvedValue({ outcome });
+      const r = await handleAppTool('worktree_project.finish', {}, { projectId: 'wt-1' });
+      expect(r.ok).toBe(true);
+      expect((r.data as any).closed).toBe(false);
+      if (reason) expect((r.data as any).reason).toBe(reason);
+    }
+  });
+
+  it('error outcome → fail-loud ok:false', async () => {
+    requestWorktreeClose.mockResolvedValue({ outcome: 'error', error: 'boom' });
+    const r = await handleAppTool('worktree_project.finish', {}, { projectId: 'wt-1' });
+    expect(r).toEqual({ ok: false, error: 'boom' });
+  });
+
+  it('no calling project context → ok:false, popup never opened', async () => {
+    const r = await handleAppTool('worktree_project.finish', {}, {});
+    expect(r.ok).toBe(false);
+    expect(requestWorktreeClose).not.toHaveBeenCalled();
+  });
+});
+
+describe('worktree_project.create op', () => {
+  it('is a known, non-safe (gated) op', () => {
+    expect(isKnownAppToolOp('worktree_project.create')).toBe(true);
+    expect(isSafeAppToolOp('worktree_project.create')).toBe(false);
+  });
+
+  it('created outcome → ok:true with projectId + baseBranch', async () => {
+    requestWorktreeCreate.mockResolvedValue({ outcome: 'created', projectId: 'wt-1', baseBranch: 'main' });
+    const r = await handleAppTool('worktree_project.create', { branch: 'feature/x' }, { projectId: 'base-1' });
+    expect(requestWorktreeCreate).toHaveBeenCalledWith({ parentProjectId: 'base-1', branch: 'feature/x', notePath: undefined });
+    expect(r).toEqual({ ok: true, data: { created: true, projectId: 'wt-1', baseBranch: 'main' } });
+  });
+
+  it('passes a trimmed notePath through', async () => {
+    requestWorktreeCreate.mockResolvedValue({ outcome: 'created', projectId: 'wt-2' });
+    await handleAppTool('worktree_project.create', { branch: 'b', notePath: '  .agent/features/x.md ' }, { projectId: 'base-1' });
+    expect(requestWorktreeCreate).toHaveBeenCalledWith({ parentProjectId: 'base-1', branch: 'b', notePath: '.agent/features/x.md' });
+  });
+
+  it('cancel is a calm result (ok:true, created:false), not an error', async () => {
+    requestWorktreeCreate.mockResolvedValue({ outcome: 'cancelled', error: 'user' });
+    const r = await handleAppTool('worktree_project.create', { branch: 'b' }, { projectId: 'base-1' });
+    expect(r.ok).toBe(true);
+    expect(r.data).toMatchObject({ created: false, cancelled: true });
+  });
+
+  it('error outcome → fail-loud ok:false', async () => {
+    requestWorktreeCreate.mockResolvedValue({ outcome: 'error', error: 'worktree add failed' });
+    const r = await handleAppTool('worktree_project.create', { branch: 'b' }, { projectId: 'base-1' });
+    expect(r).toEqual({ ok: false, error: 'worktree add failed' });
+  });
+
+  it('missing branch → ok:false, popup never opened', async () => {
+    const r = await handleAppTool('worktree_project.create', {}, { projectId: 'base-1' });
+    expect(r.ok).toBe(false);
+    expect(requestWorktreeCreate).not.toHaveBeenCalled();
+  });
+
+  it('no calling project context → ok:false', async () => {
+    const r = await handleAppTool('worktree_project.create', { branch: 'b' }, {});
+    expect(r.ok).toBe(false);
+    expect(requestWorktreeCreate).not.toHaveBeenCalled();
+  });
 });
 
 describe('app-tool dispatcher (read ops)', () => {
