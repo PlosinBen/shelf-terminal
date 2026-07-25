@@ -2,6 +2,11 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useStore } from '../store';
 import { on, emit, Events } from '../events';
 import { buildWorktreeChildConfig } from '../worktree-child-config';
+import type { FeatureNoteInfo } from '@shared/types';
+
+// Sentinel <select> value for "don't seed a note" (a valid degenerate: the fresh
+// agent starts with no Phase-0 context). '' can't collide with a note path.
+const NO_NOTE = '';
 
 export function WorktreeDialog() {
   const { projects } = useStore();
@@ -10,6 +15,10 @@ export function WorktreeDialog() {
   const [input, setInput] = useState('');
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // In-progress feature notes in the base repo, offered as the handoff seed. The
+  // picked note is migrated into the worktree before its agent boots.
+  const [notes, setNotes] = useState<FeatureNoteInfo[]>([]);
+  const [selectedNote, setSelectedNote] = useState<string>(NO_NOTE);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -19,6 +28,22 @@ export function WorktreeDialog() {
       setInput('');
       setError(null);
       setCreating(false);
+      setNotes([]);
+      setSelectedNote(NO_NOTE);
+
+      // Fetch the base repo's in-progress notes for the picker. Pre-select when
+      // there's exactly one (the common case: one feature under discussion);
+      // otherwise default to "no note" so the user chooses deliberately.
+      const proj = projects[index];
+      if (proj) {
+        window.shelfApi.git
+          .listFeatureNotes(proj.config.connection, proj.config.cwd)
+          .then((found) => {
+            setNotes(found);
+            if (found.length === 1) setSelectedNote(found[0].path);
+          })
+          .catch(() => { /* picker just shows no notes; create still works */ });
+      }
     });
     return () => { off(); };
   }, [projects]);
@@ -38,31 +63,47 @@ export function WorktreeDialog() {
 
     setCreating(true);
     setError(null);
+    const { connection, cwd } = proj.config;
 
-    const result = await window.shelfApi.git.worktreeAdd(
-      proj.config.connection,
-      proj.config.cwd,
-      branch,
-      true,
-    );
-
-    if (!result.ok) {
+    // 1. Create the worktree (captures the parent's baseBranch atomically).
+    const result = await window.shelfApi.git.worktreeAdd(connection, cwd, branch, true);
+    if (!result.ok || !result.path) {
       setError(result.error ?? 'Failed to create worktree');
       setCreating(false);
       return;
     }
 
+    // 2. Migrate the picked note BEFORE the sub-project (and its agent) exists, so
+    //    the fresh agent boots with it in place. Fail-loud + roll back the just-
+    //    created worktree rather than booting a broken one.
+    if (selectedNote) {
+      const mig = await window.shelfApi.git.migrateNote(connection, cwd, result.path, selectedNote);
+      if (!mig.ok) {
+        await window.shelfApi.git.worktreeRemove(connection, cwd, result.path);
+        setError(mig.error ?? 'Failed to migrate feature note');
+        setCreating(false);
+        return;
+      }
+    }
+
+    // 3. Copy the parent's secrets under the new id, then add the sub-project
+    //    (inherits parent setup; base is freed; focus jumps).
     const projectId = `wt-${Date.now()}`;
     await window.shelfApi.project.copySecrets(proj.config.id, projectId);
     emit(Events.ADD_PROJECT, buildWorktreeChildConfig(proj.config, {
       id: projectId,
-      cwd: result.path!,
+      cwd: result.path,
       worktreeBranch: branch,
       baseBranch: result.baseBranch,
     }));
 
+    // 4. Auto-connect the fresh worktree so its agent boots (and, with a note
+    //    seeded, has context to read). Deterministic post-store connect lives in
+    //    App, keyed on the store — avoids the bus handlers' stale-projects closure.
+    emit(Events.AUTO_CONNECT_PROJECT, projectId);
+
     setOpen(false);
-  }, [input, projectIndex, projects, creating]);
+  }, [input, projectIndex, projects, creating, selectedNote]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Escape') {
@@ -93,6 +134,22 @@ export function WorktreeDialog() {
             onKeyDown={handleKeyDown}
             disabled={creating}
           />
+          {notes.length > 0 && (
+            <label className="worktree-note-picker">
+              <span className="worktree-note-picker-label">Feature note</span>
+              <select
+                className="worktree-select"
+                value={selectedNote}
+                onChange={(e) => setSelectedNote(e.target.value)}
+                disabled={creating}
+              >
+                <option value={NO_NOTE}>No note</option>
+                {notes.map((n) => (
+                  <option key={n.path} value={n.path}>{n.title ?? n.path}</option>
+                ))}
+              </select>
+            </label>
+          )}
           {error && <div className="worktree-error">{error}</div>}
         </div>
         <div className="project-edit-footer">

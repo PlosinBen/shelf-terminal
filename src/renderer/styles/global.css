@@ -2156,6 +2156,32 @@ button {
   border-color: var(--accent);
 }
 
+.worktree-note-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.worktree-note-picker-label {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.worktree-select {
+  width: 100%;
+  padding: 8px 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 13px;
+  outline: none;
+}
+
+.worktree-select:focus {
+  border-color: var(--accent);
+}
+
 .worktree-branch-list {
   max-height: 300px;
   overflow-y: auto;
