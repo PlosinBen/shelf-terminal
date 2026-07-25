@@ -3,7 +3,6 @@ import { IPC } from '@shared/ipc-channels';
 import { createConnector } from '../connector';
 import { migrateFeatureNote } from '../worktree/note-migration';
 import { listFeatureNotes } from '../worktree/feature-notes';
-import { registerWorktreeCreateHandlers } from '../worktree/create-gate';
 import { registerWorktreeCloseHandlers } from '../worktree/close-gate';
 import { mergeBackFastForward } from '../worktree/merge-back';
 import { repoLockKey, tryAcquireRepoLock } from '../worktree/repo-lock';
@@ -190,7 +189,6 @@ export function registerGitHandlers(): void {
     },
   );
 
-  // main→renderer create/close gate resolve channels (siblings of the git IPCs).
-  registerWorktreeCreateHandlers();
+  // main→renderer close gate resolve channels (sibling of the git IPCs).
   registerWorktreeCloseHandlers();
 }

@@ -54,13 +54,6 @@ export const IPC = {
   GIT_DELETE_BRANCH: 'git:delete-branch',
   GIT_LIST_FEATURE_NOTES: 'git:list-feature-notes',
 
-  // Worktree-dev-flow create gate (main→renderer confirm popup, renderer→main resolve).
-  // Modelled on the browser-open gate: an agent-driven worktree_project_create is
-  // gated by a client-owned confirm popup before the sub-project is created.
-  WORKTREE_CREATE_REQUEST: 'worktree:create-request',
-  WORKTREE_CREATE_RESOLVE: 'worktree:create-resolve',
-  WORKTREE_CREATE_CLOSE: 'worktree:create-close',
-
   // Worktree-dev-flow close gate (finish / abandon). Same popup-await shape.
   WORKTREE_CLOSE_REQUEST: 'worktree:close-request',
   WORKTREE_CLOSE_RESOLVE: 'worktree:close-resolve',

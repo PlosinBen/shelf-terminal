@@ -66,23 +66,16 @@ export const BROWSER_OPEN_DESC =
   + "opened — shown in the approval popup, since the popup hides your chat message while the user "
   + 'decides).';
 
-export const WORKTREE_CREATE_DESC =
-  'Cut a new git worktree + an isolated Shelf sub-project for a feature, so it develops in parallel while the '
-  + 'base branch is freed for other work. Use this in the worktree dev flow once the spec/plan is settled (or '
-  + 'earlier if isolation is wanted). The user is prompted to confirm before anything is created. '
-  + 'Args: branch (required — the new branch name); notePath (optional — path RELATIVE to the base project cwd of a '
-  + 'Phase-0 feature note to carry into the worktree so the fresh agent boots with it). Returns { created: true, '
-  + 'projectId } on approve, or { created: false, cancelled: true } if the user declines (a normal outcome — adapt, '
-  + 'do not retry blindly).';
-
 export const WORKTREE_FINISH_DESC =
-  'Finish THIS worktree: fast-forward-merge its branch back into the base branch it was cut from, then close it '
+  'Finish THIS worktree: fast-forward-merge its branch back into a base branch, then close it '
   + '(remove the worktree dir + delete the branch). Only the worktree\'s OWN agent may finish it. FIRST sync (merge '
-  + 'the base branch into this worktree) and verify (run the project\'s tests) — call this only when green and the '
-  + 'working tree is committed/clean. The user is prompted to confirm. Returns { closed: true } on success; '
-  + '{ closed: false, reason } otherwise — cancelled (user declined), busy (another finish holds the repo — retry '
-  + 'shortly), non-ff (the base advanced since sync — re-sync then retry), or base-dirty (the base worktree has '
-  + 'uncommitted changes — the user must resolve them).';
+  + 'the target branch into this worktree) and verify (run the project\'s tests) — call this only when green and the '
+  + 'working tree is committed/clean. '
+  + 'Args: target (optional — the branch to merge back into; MUST be the same branch you synced/resolved against. '
+  + 'Omit to use the branch this worktree was cut from). The user is prompted to confirm (the popup shows the target). '
+  + 'Returns { closed: true } on success; { closed: false, reason } otherwise — cancelled (user declined), busy '
+  + '(another finish holds the repo — retry shortly), non-ff (the target advanced since sync — re-sync then retry), '
+  + 'or base-dirty (the base worktree has uncommitted changes — the user must resolve them).';
 
 export const WORKTREE_ABANDON_DESC =
   'Abandon THIS worktree: discard it WITHOUT merging — remove the worktree dir and FORCE-delete its branch, '
@@ -90,16 +83,19 @@ export const WORKTREE_ABANDON_DESC =
   + 'is dropped. The user is prompted to confirm (the popup warns about the permanent loss). Returns { closed: true } '
   + 'or { closed: false, cancelled: true }.';
 
-/** Agent-facing tool names (flat, underscored) for the worktree_project family. */
+/**
+ * Agent-facing tool names (flat, underscored) for the worktree_project family.
+ * create is intentionally absent — cutting a worktree is a user-initiated UI
+ * action (sidebar New Worktree), not an agent tool (#entry). Only the close
+ * operations, which need the agent's case context, are tools.
+ */
 export const WORKTREE_TOOL = {
-  create: 'worktree_project_create',
   finish: 'worktree_project_finish',
   abandon: 'worktree_project_abandon',
 } as const;
 
 /** Corresponding main-side app-tool op keys (resource.verb registry convention). */
 export const WORKTREE_OP = {
-  create: 'worktree_project.create',
   finish: 'worktree_project.finish',
   abandon: 'worktree_project.abandon',
 } as const;
@@ -124,7 +120,6 @@ export const SHELF_BRIDGE_TOOLS: BridgeToolSpec[] = [
   { name: 'delete_app_skill_file', description: APP_SKILL_DELETE_FILE_DESC },
   { name: WEB_FETCH_TOOL, description: WEB_FETCH_DESC },
   { name: BROWSER_OPEN_TOOL, description: BROWSER_OPEN_DESC },
-  { name: WORKTREE_TOOL.create, description: WORKTREE_CREATE_DESC },
   { name: WORKTREE_TOOL.finish, description: WORKTREE_FINISH_DESC },
   { name: WORKTREE_TOOL.abandon, description: WORKTREE_ABANDON_DESC },
 ];

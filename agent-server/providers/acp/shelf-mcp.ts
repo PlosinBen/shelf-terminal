@@ -20,7 +20,7 @@ import {
   APP_SKILL_LIST_DESC, APP_SKILL_GET_DESC, APP_SKILL_CREATE_DESC, APP_SKILL_UPDATE_DESC,
   APP_SKILL_READ_FILE_DESC, APP_SKILL_WRITE_FILE_DESC, APP_SKILL_DELETE_FILE_DESC,
   WEB_FETCH_DESC, BROWSER_OPEN_DESC,
-  WORKTREE_CREATE_DESC, WORKTREE_FINISH_DESC, WORKTREE_ABANDON_DESC, WORKTREE_TOOL, WORKTREE_OP,
+  WORKTREE_FINISH_DESC, WORKTREE_ABANDON_DESC, WORKTREE_TOOL, WORKTREE_OP,
 } from '../../app-tool-tools';
 
 export interface ShelfMcpHandle {
@@ -86,16 +86,11 @@ function buildShelfMcpServer(): McpServer {
     } },
     async ({ url, reason }) => toToolResult(await runBridgeTool('web.open', { url, reason })));
 
-  server.registerTool(WORKTREE_TOOL.create,
-    { description: WORKTREE_CREATE_DESC, inputSchema: {
-      branch: z.string().describe('new branch name for the worktree'),
-      notePath: z.string().optional().describe('path RELATIVE to the base project cwd of a Phase-0 feature note to carry into the worktree'),
-    } },
-    async ({ branch, notePath }) => toToolResult(await runBridgeTool(WORKTREE_OP.create, { branch, notePath })));
-
   server.registerTool(WORKTREE_TOOL.finish,
-    { description: WORKTREE_FINISH_DESC, inputSchema: {} },
-    async () => toToolResult(await runBridgeTool(WORKTREE_OP.finish, {})));
+    { description: WORKTREE_FINISH_DESC, inputSchema: {
+      target: z.string().optional().describe('branch to merge back into (must match what you synced against); omit for the branch this worktree was cut from'),
+    } },
+    async ({ target }) => toToolResult(await runBridgeTool(WORKTREE_OP.finish, { target })));
 
   server.registerTool(WORKTREE_TOOL.abandon,
     { description: WORKTREE_ABANDON_DESC, inputSchema: {} },

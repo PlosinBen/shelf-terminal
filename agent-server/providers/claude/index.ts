@@ -1,7 +1,7 @@
 import { query as sdkQuery, tool, createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk';
 import type { Query, Options, SDKMessage, SDKUserMessage, CanUseTool } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
-import { runBridgeTool, APP_SKILL_LIST_DESC, APP_SKILL_GET_DESC, APP_SKILL_CREATE_DESC, APP_SKILL_UPDATE_DESC, APP_SKILL_READ_FILE_DESC, APP_SKILL_WRITE_FILE_DESC, APP_SKILL_DELETE_FILE_DESC, WEB_FETCH_DESC, BROWSER_OPEN_DESC, WORKTREE_CREATE_DESC, WORKTREE_FINISH_DESC, WORKTREE_ABANDON_DESC, WORKTREE_TOOL, WORKTREE_OP } from '../../app-tool-tools';
+import { runBridgeTool, APP_SKILL_LIST_DESC, APP_SKILL_GET_DESC, APP_SKILL_CREATE_DESC, APP_SKILL_UPDATE_DESC, APP_SKILL_READ_FILE_DESC, APP_SKILL_WRITE_FILE_DESC, APP_SKILL_DELETE_FILE_DESC, WEB_FETCH_DESC, BROWSER_OPEN_DESC, WORKTREE_FINISH_DESC, WORKTREE_ABANDON_DESC, WORKTREE_TOOL, WORKTREE_OP } from '../../app-tool-tools';
 import { isWebFetchTool, WEB_FETCH_TOOL, isBrowserOpenTool, BROWSER_OPEN_TOOL } from '@shared/web-session';
 import { serverLog } from '../../server-logger';
 import { createRouterState, notePush, routeMessage } from './turn-router';
@@ -270,15 +270,10 @@ function getShelfMcpServer() {
           const { text, isError } = await runBridgeTool('web.open', { url, reason });
           return { content: [{ type: 'text' as const, text }], ...(isError ? { isError: true } : {}) };
         }),
-        tool(WORKTREE_TOOL.create, WORKTREE_CREATE_DESC, {
-          branch: z.string().describe('new branch name for the worktree'),
-          notePath: z.string().optional().describe('path RELATIVE to the base project cwd of a Phase-0 feature note to carry into the worktree'),
-        }, async ({ branch, notePath }) => {
-          const { text, isError } = await runBridgeTool(WORKTREE_OP.create, { branch, notePath });
-          return { content: [{ type: 'text' as const, text }], ...(isError ? { isError: true } : {}) };
-        }),
-        tool(WORKTREE_TOOL.finish, WORKTREE_FINISH_DESC, {}, async () => {
-          const { text, isError } = await runBridgeTool(WORKTREE_OP.finish, {});
+        tool(WORKTREE_TOOL.finish, WORKTREE_FINISH_DESC, {
+          target: z.string().optional().describe('branch to merge back into (must match what you synced against); omit for the branch this worktree was cut from'),
+        }, async ({ target }) => {
+          const { text, isError } = await runBridgeTool(WORKTREE_OP.finish, { target });
           return { content: [{ type: 'text' as const, text }], ...(isError ? { isError: true } : {}) };
         }),
         tool(WORKTREE_TOOL.abandon, WORKTREE_ABANDON_DESC, {}, async () => {

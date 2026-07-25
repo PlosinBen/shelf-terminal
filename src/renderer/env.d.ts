@@ -78,9 +78,6 @@ interface ShelfApi {
     listFeatureNotes: (connection: import('../shared/types').Connection, cwd: string) => Promise<import('../shared/types').FeatureNoteInfo[]>;
   };
   worktree: {
-    onCreateRequest: (callback: (req: import('../shared/types').WorktreeCreateRequest) => void) => () => void;
-    resolveCreate: (resolution: import('../shared/types').WorktreeCreateResolution) => Promise<void>;
-    onCreateClose: (callback: (requestId: string) => void) => () => void;
     onCloseRequest: (callback: (req: import('../shared/types').WorktreeCloseRequest) => void) => () => void;
     resolveClose: (resolution: import('../shared/types').WorktreeCloseResolution) => Promise<void>;
     onCloseClose: (callback: (requestId: string) => void) => () => void;

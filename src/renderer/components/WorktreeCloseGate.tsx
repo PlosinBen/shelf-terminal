@@ -4,9 +4,9 @@ import { emit, Events } from '../events';
 import type { WorktreeCloseRequest, WorktreeCloseResolution } from '@shared/types';
 
 // App-global confirm popup for the agent-driven worktree_project_finish /
-// worktree_project_abandon tools. Sibling of WorktreeCreateGate: a main-side gate
-// (worktree/close-gate.ts) sends a request; on approve this runs the client-owned
-// close sequence and reports the outcome back.
+// worktree_project_abandon tools. A main-side gate (worktree/close-gate.ts) sends
+// a request; on approve this runs the client-owned close sequence and reports the
+// outcome back. (create has no such gate — it's a user-initiated UI action.)
 //
 //   finish  = lock+ff merge-back → (merged) teardown → delete branch (force; safe,
 //             commits live on baseBranch after the ff)

@@ -2,12 +2,13 @@ import type { Connector } from '../connector/types';
 import { normalizeCwd, shellSingleQuote as q } from '../connector/file-utils';
 
 /**
- * Feature-note migration for `worktree_project_create`.
+ * Feature-note migration for worktree create (the user-initiated New Worktree
+ * dialog picks which note to carry).
  *
  * When a worktree is cut, the Phase-0 note that seeded the feature must land in
  * the new worktree BEFORE the fresh agent boots and reads it — so migration is
- * bound into the create transaction (not an agent-side `cp` afterwards), the one
- * ordering-driven exception to "only client-owned actions become tools".
+ * bound into the create transaction (not an agent-side `cp` afterwards), keeping
+ * the "note in place before the agent boots" ordering race-free.
  *
  * Strategy = copy-then-delete-on-success: copy the note into the worktree at the
  * SAME relative position, verify it landed, only then delete the base copy. A

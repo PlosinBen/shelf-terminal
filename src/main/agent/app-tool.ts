@@ -23,7 +23,6 @@ import { parseHttpOrigin } from '../web-session-helpers';
 import { isGranted, grant } from '../web-grants';
 import { requestWebPermission } from '../web-permission';
 import { requestBrowserOpen, openWebTab } from '../browser-open';
-import { requestWorktreeCreate } from '../worktree/create-gate';
 import { requestWorktreeClose } from '../worktree/close-gate';
 
 /** Per-call context the bridge threads in (which tab/project asked). */
@@ -203,35 +202,8 @@ const REGISTRY: Record<string, AppToolDef> = {
         message: `Opened ${url} in a Web tab. Ask the user to log in there, then retry browser_fetch.` };
     },
   },
-  'worktree_project.create': {
-    // Mutation — gated by a client-owned confirm popup (requestWorktreeCreate),
-    // NOT the SDK tool prompt, so the gate is the single choke point even under
-    // bypass permission mode. The renderer performs the create-transaction
-    // (worktreeAdd → migrate note → add sub-project) and reports the outcome.
-    safe: false,
-    run: async (args, ctx) => {
-      const branch = typeof args.branch === 'string' ? args.branch.trim() : '';
-      if (!branch) throw new Error('worktree_project.create requires a "branch"');
-      const parentProjectId = ctx.projectId ?? '';
-      if (!parentProjectId) throw new Error('worktree_project.create: no calling project context');
-      const notePath = typeof args.notePath === 'string' && args.notePath.trim()
-        ? args.notePath.trim() : undefined;
-
-      const res = await requestWorktreeCreate({ parentProjectId, branch, notePath });
-
-      // Cancel is a NORMAL result (user said "not here") — return it calmly, not
-      // as a thrown error, so the agent adapts instead of treating it as a crash.
-      if (res.outcome === 'cancelled') {
-        return { created: false, cancelled: true, reason: res.error };
-      }
-      // A real failure (worktreeAdd / note migration) is fail-loud → throw so the
-      // op comes back ok:false and the agent knows not to proceed.
-      if (res.outcome === 'error') {
-        throw new Error(res.error ?? 'worktree create failed');
-      }
-      return { created: true, projectId: res.projectId, baseBranch: res.baseBranch };
-    },
-  },
+  // NOTE: there is no `worktree_project.create` op — cutting a worktree is a
+  // user-initiated UI action (sidebar New Worktree), not an agent tool (#entry).
   'worktree_project.finish': {
     // Self-close only: the feature's OWN agent finishes its OWN worktree (it has
     // the case context for the two-layer confirm's explanation). Gated by a
