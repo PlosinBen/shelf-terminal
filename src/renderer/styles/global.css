@@ -4704,21 +4704,32 @@ button {
   font-size: 12px;
   padding: 6px 8px;
 }
+.backup-field-hint {
+  display: block;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
 .backup-check {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
   flex: 1;
+  min-width: 0;
   cursor: pointer;
 }
-.backup-check input { cursor: pointer; }
-.backup-bound-header {
+.backup-check input { cursor: pointer; flex: none; margin-top: 2px; }
+/* Stack name over detail; let a long skill description wrap instead of
+   squeezing the name column to one-char-per-line (min-width:0 lets it shrink). */
+.backup-check-text {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 12px;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
 }
-.backup-bound-header .web-settings-hint { flex: 1; word-break: break-all; }
+.backup-check-text .web-list-main { word-break: break-word; }
+.backup-check-text .web-list-sub { white-space: normal; }
 .backup-actions {
   display: flex;
   justify-content: flex-end;
@@ -4734,7 +4745,11 @@ button {
   display: flex;
   gap: 4px;
   margin-bottom: 12px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
 }
+.backup-actions .backup-status { margin: 0; align-self: center; }
 .backup-mode-btn {
   background: none;
   border: 1px solid var(--border);

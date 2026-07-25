@@ -159,9 +159,8 @@ contextBridge.exposeInMainWorld('shelfApi', {
   },
   configBackup: {
     getBinding: () => ipcRenderer.invoke(IPC.CONFIG_BACKUP_GET_BINDING),
-    bind: (binding: { remoteUrl: string; machineLabel: string }) =>
-      ipcRenderer.invoke(IPC.CONFIG_BACKUP_BIND, binding),
-    unbind: () => ipcRenderer.invoke(IPC.CONFIG_BACKUP_UNBIND),
+    saveSettings: (settings: { remoteUrl: string; machineLabel: string }) =>
+      ipcRenderer.invoke(IPC.CONFIG_BACKUP_SAVE_SETTINGS, settings),
     list: () => ipcRenderer.invoke(IPC.CONFIG_BACKUP_LIST),
     run: (selectedIds: string[]) => ipcRenderer.invoke(IPC.CONFIG_BACKUP_RUN, selectedIds),
     listSources: () => ipcRenderer.invoke(IPC.CONFIG_BACKUP_LIST_SOURCES),

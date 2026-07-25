@@ -2,12 +2,13 @@ import { useEffect, useState, useCallback } from 'react';
 import type { BackupListResult, BackupItemSummary } from '@shared/config-backup';
 import { ImportSection } from './ImportSection';
 
-// Settings → Backup: App-Level Config Backup & Copy (Backup half).
-//   Backup = snapshot the ticked live items → THIS machine's remote branch.
-//   One-way (live → my branch), never touches live; per-item tick is the leak
-//   gate. The checklist pre-ticks items already in the branch (unticking removes
-//   them on the next snapshot); new/never-backed-up items start unticked.
-//   (Import — copy from another machine's branch into live — is a later phase.)
+// Settings → Backup: App-Level Config Backup & Copy.
+//   Two independent halves on one page:
+//   1. Remote settings (URL + this machine's label) — just settings, saved
+//      verbatim with no validation. Any real problem surfaces at Back up time.
+//   2. Back up / Import — snapshot the ticked live items → this machine's
+//      branch (Backup), or copy a chosen branch into live (Import). Per-item
+//      tick is the leak gate; the checklist pre-ticks from machine-local intent.
 
 export function BackupSettingsTab() {
   const [data, setData] = useState<BackupListResult | null>(null);
@@ -15,19 +16,22 @@ export function BackupSettingsTab() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
+  const [mode, setMode] = useState<'backup' | 'import'>('backup');
 
-  // Bind form (shown when this machine has no remote yet).
+  // Remote settings inputs — seeded from the saved binding (label falls back to
+  // the sanitized hostname for a machine that has never set one).
   const [remoteUrl, setRemoteUrl] = useState('');
   const [machineLabel, setMachineLabel] = useState('');
-  const [bindError, setBindError] = useState<string | null>(null);
-  const [mode, setMode] = useState<'backup' | 'import'>('backup');
+  const [saved, setSaved] = useState(false);
 
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
       const res = await window.shelfApi.configBackup.list();
       setData(res);
-      setSelected(new Set(res.backedUp));
+      setSelected(new Set(res.intent));
+      setRemoteUrl(res.binding?.remoteUrl ?? '');
+      setMachineLabel(res.binding?.machineLabel ?? res.suggestedLabel);
     } catch {
       setData(null);
     } finally {
@@ -37,33 +41,20 @@ export function BackupSettingsTab() {
 
   useEffect(() => { refresh(); }, [refresh]);
 
-  const onBind = async () => {
-    setBindError(null);
+  const savedUrl = data?.binding?.remoteUrl ?? '';
+  const savedLabel = data?.binding?.machineLabel ?? data?.suggestedLabel ?? '';
+  const dirty = remoteUrl !== savedUrl || machineLabel !== savedLabel;
+
+  const onSaveSettings = async () => {
     setBusy(true);
+    setSaved(false);
     try {
-      const res = await window.shelfApi.configBackup.bind({ remoteUrl, machineLabel });
-      if (res.ok) {
-        setRemoteUrl('');
-        setMachineLabel('');
-        await refresh();
-      } else {
-        setBindError(res.message);
-      }
+      await window.shelfApi.configBackup.saveSettings({ remoteUrl, machineLabel });
+      await refresh();
+      setSaved(true);
     } finally {
       setBusy(false);
     }
-  };
-
-  const onUnbind = async () => {
-    const ok = await window.shelfApi.dialog.confirm(
-      'Unbind backup remote',
-      'Stop backing up from this machine? Your existing backup branch is left untouched on the remote.',
-      'Unbind',
-    );
-    if (!ok) return;
-    await window.shelfApi.configBackup.unbind();
-    setStatus(null);
-    await refresh();
   };
 
   const toggle = (id: string) => {
@@ -100,50 +91,6 @@ export function BackupSettingsTab() {
     return <div className="web-settings"><p className="web-settings-hint">Loading…</p></div>;
   }
 
-  // Unbound → show the bind form.
-  if (data && !data.binding) {
-    return (
-      <div className="web-settings">
-        <h3 className="web-settings-title">Config Backup</h3>
-        <p className="web-settings-hint">
-          Back up this machine's skills &amp; MCP servers to a git remote you own. Each machine
-          publishes to its own branch — Shelf uses your machine's own git (and its credentials);
-          it stores no token. Requires <code>git</code> installed and access to the remote.
-        </p>
-        <label className="backup-field">
-          <span className="backup-field-label">Remote URL</span>
-          <input
-            className="backup-input"
-            type="text"
-            placeholder="git@github.com:me/shelf-backups.git"
-            value={remoteUrl}
-            onChange={(e) => setRemoteUrl(e.target.value)}
-          />
-        </label>
-        <label className="backup-field">
-          <span className="backup-field-label">This machine's label</span>
-          <input
-            className="backup-input"
-            type="text"
-            placeholder="work-mac"
-            value={machineLabel}
-            onChange={(e) => setMachineLabel(e.target.value)}
-          />
-        </label>
-        {bindError && <p className="backup-status backup-status-err">{bindError}</p>}
-        <div className="backup-actions">
-          <button
-            className="conn-btn conn-btn-next"
-            disabled={busy || !remoteUrl.trim() || !machineLabel.trim()}
-            onClick={onBind}
-          >
-            {busy ? 'Checking…' : 'Bind remote'}
-          </button>
-        </div>
-      </div>
-    );
-  }
-
   const items = data?.items ?? [];
   const skills = items.filter((i) => i.kind === 'skill');
   const mcp = items.filter((i) => i.kind === 'mcp');
@@ -159,8 +106,10 @@ export function BackupSettingsTab() {
             <li key={it.id} className="web-list-item">
               <label className="backup-check">
                 <input type="checkbox" checked={selected.has(it.id)} onChange={() => toggle(it.id)} />
-                <span className="web-list-main">{it.name}</span>
-                {it.detail && <span className="web-list-sub">{it.detail}</span>}
+                <span className="backup-check-text">
+                  <span className="web-list-main">{it.name}</span>
+                  {it.detail && <span className="web-list-sub">{it.detail}</span>}
+                </span>
               </label>
             </li>
           ))}
@@ -171,11 +120,39 @@ export function BackupSettingsTab() {
 
   return (
     <div className="web-settings">
-      <div className="backup-bound-header">
-        <p className="web-settings-hint" style={{ margin: 0 }}>
-          Backing up as <strong>{data?.binding?.machineLabel}</strong> → <code>{data?.binding?.remoteUrl}</code>
-        </p>
-        <button className="web-list-action" onClick={onUnbind}>Unbind</button>
+      <h3 className="web-settings-title">Config Backup</h3>
+      <p className="web-settings-hint">
+        Back up this machine's skills &amp; MCP servers to a git remote you own. Each machine
+        publishes to its own branch — Shelf uses your machine's own git (and its credentials);
+        it stores no token.
+      </p>
+
+      <label className="backup-field">
+        <span className="backup-field-label">Remote URL</span>
+        <input
+          className="backup-input"
+          type="text"
+          placeholder="git@github.com:me/shelf-backups.git"
+          value={remoteUrl}
+          onChange={(e) => { setRemoteUrl(e.target.value); setSaved(false); }}
+        />
+      </label>
+      <label className="backup-field">
+        <span className="backup-field-label">This machine's label</span>
+        <input
+          className="backup-input"
+          type="text"
+          placeholder="work-mac"
+          value={machineLabel}
+          onChange={(e) => { setMachineLabel(e.target.value); setSaved(false); }}
+        />
+        <span className="backup-field-hint">Display name only (shown when importing on other machines).</span>
+      </label>
+      <div className="backup-actions">
+        {saved && !dirty && <span className="backup-status backup-status-ok">Saved.</span>}
+        <button className="conn-btn conn-btn-next" disabled={busy || !dirty} onClick={onSaveSettings}>
+          Save settings
+        </button>
       </div>
 
       <div className="backup-mode-toggle">
@@ -200,13 +177,6 @@ export function BackupSettingsTab() {
   function BackupBody() {
     return (
       <>
-      {data && !data.remoteReadOk && (
-        <p className="backup-status backup-status-err">
-          Couldn't read your existing backup (offline?). Ticking here will define a fresh snapshot —
-          items you leave unticked will be removed from your backup branch.
-        </p>
-      )}
-
       <p className="web-settings-hint">
         Ticked items are published as a snapshot to your branch. Unticking a previously backed-up
         item removes it on the next backup. Nothing here ever changes your live config.

@@ -19,6 +19,7 @@ vi.mock('electron', () => ({
 
 const { runBackup } = await import('./backup');
 const { saveBinding, thisMachineBranchRef } = await import('./binding-store');
+const { loadIntent } = await import('./intent-store');
 const { createSideCar } = await import('./side-car');
 
 let root: string;
@@ -67,9 +68,20 @@ afterEach(() => {
 });
 
 describe('config-backup runBackup', () => {
-  it('not bound → typed not-bound result (never touches git)', async () => {
+  it('no remote configured → typed not-bound result (never touches git)', async () => {
     const res = await runBackup(['skill:alpha']);
     expect(res).toMatchObject({ ok: false, reason: 'not-bound' });
+  });
+
+  it('unreachable remote → surfaces the raw git error (no preflight)', async () => {
+    seedSkill('alpha');
+    saveBinding({ remoteUrl: path.join(root, 'does-not-exist.git'), machineLabel: 'm' });
+    const res = await runBackup(['skill:alpha']);
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.reason).toBe('remote');
+      expect(res.message).toBeTruthy();
+    }
   });
 
   it('pushes exactly the ticked items; unticked never leave (leak gate)', async () => {
@@ -99,6 +111,20 @@ describe('config-backup runBackup', () => {
     const manifest = JSON.parse((await read('machine.json'))!);
     expect(manifest.machineLabel).toBe('work-mac');
     expect(typeof manifest.appInstanceId).toBe('string');
+  });
+
+  it('persists the ticked set as machine-local intent (drives next pre-tick)', async () => {
+    seedSkill('alpha');
+    seedSkill('beta');
+    seedMcp({ fs: { type: 'stdio', command: 'node' } });
+    saveBinding({ remoteUrl: bareRemote, machineLabel: 'm' });
+
+    await runBackup(['skill:alpha', 'mcp:fs']);
+    expect(loadIntent().sort()).toEqual(['mcp:fs', 'skill:alpha']);
+
+    // Re-backup with a different tick set → intent tracks the latest choice.
+    await runBackup(['skill:beta']);
+    expect(loadIntent()).toEqual(['skill:beta']);
   });
 
   it('re-backup with no change → pushed:false', async () => {

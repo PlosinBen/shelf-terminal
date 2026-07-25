@@ -98,7 +98,7 @@ export function ImportSection() {
     <div>
       <label className="backup-field">
         <span className="backup-field-label">Import from</span>
-        <select className="backup-input" value={ref} onChange={(e) => chooseSource(e.target.value)}>
+        <select className="backup-input import-source" value={ref} onChange={(e) => chooseSource(e.target.value)}>
           <option value="">Choose a backup…</option>
           {sources.map((s) => (
             <option key={s.ref} value={s.ref}>

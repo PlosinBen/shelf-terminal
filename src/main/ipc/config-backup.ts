@@ -1,12 +1,13 @@
+import os from 'os';
 import { ipcMain } from 'electron';
 import { IPC } from '@shared/ipc-channels';
-import { log } from '@shared/logger';
 import type { BackupListResult, ConfigBackupBinding } from '@shared/config-backup';
 import type { ImportDecision } from '@shared/config-backup';
-import { loadBinding, clearBinding } from '../config-backup/binding-store';
-import { bindRemote } from '../config-backup/bind';
+import { sanitizeMachineLabel } from '@shared/config-backup';
+import { loadBinding, saveBinding } from '../config-backup/binding-store';
+import { loadIntent } from '../config-backup/intent-store';
 import { enumerateLiveItems } from '../config-backup/enumerate';
-import { runBackup, readBackedUpItemIds } from '../config-backup/backup';
+import { runBackup } from '../config-backup/backup';
 import { listBackupSources, listImportItems, planImport, applyImport } from '../config-backup/import';
 
 /**
@@ -18,34 +19,24 @@ export function registerConfigBackupHandlers(): void {
     return loadBinding();
   });
 
-  ipcMain.handle(IPC.CONFIG_BACKUP_BIND, async (_event, payload: ConfigBackupBinding) => {
-    return bindRemote(payload);
-  });
-
-  ipcMain.handle(IPC.CONFIG_BACKUP_UNBIND, async () => {
-    clearBinding();
+  // Save the remote settings verbatim — no preflight, no validation. Any real
+  // problem surfaces when Back up runs (config is just config).
+  ipcMain.handle(IPC.CONFIG_BACKUP_SAVE_SETTINGS, async (_event, payload: ConfigBackupBinding) => {
+    saveBinding(payload);
   });
 
   ipcMain.handle(IPC.CONFIG_BACKUP_LIST, async (): Promise<BackupListResult> => {
+    // Pre-tick comes from machine-local intent — no git, no network — so the
+    // checklist opens instantly and works offline. The remote is only touched
+    // when the user actually presses Back up (runBackup).
     const binding = loadBinding();
     const items = await enumerateLiveItems();
-    if (!binding) {
-      return { binding: null, items, backedUp: [], remoteReadOk: true };
-    }
-    // Reading the branch (default ticks) must never block showing the list.
-    try {
-      const backedUp = await readBackedUpItemIds();
-      return { binding, items, backedUp, remoteReadOk: true };
-    } catch (err: any) {
-      log.warn('config-backup', `could not read backup branch for defaults: ${err?.message ?? err}`);
-      return {
-        binding,
-        items,
-        backedUp: [],
-        remoteReadOk: false,
-        readError: err?.message ?? String(err),
-      };
-    }
+    return {
+      binding,
+      items,
+      intent: binding ? loadIntent() : [],
+      suggestedLabel: sanitizeMachineLabel(os.hostname()),
+    };
   });
 
   ipcMain.handle(IPC.CONFIG_BACKUP_RUN, async (_event, selectedIds: string[]) => {
