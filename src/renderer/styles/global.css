@@ -2210,6 +2210,18 @@ button {
   padding: 0 4px;
 }
 
+.worktree-error-actions {
+  margin-top: 8px;
+}
+
+.worktree-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text);
+}
+
 .worktree-loading,
 .worktree-empty,
 .worktree-creating {

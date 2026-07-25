@@ -1,69 +1,98 @@
 import { useEffect, useState } from 'react';
 import { useStore } from '../store';
-import { emit, Events } from '../events';
-import type { WorktreeCloseRequest, WorktreeCloseResolution } from '@shared/types';
+import { on, emit, emitAgent, Events } from '../events';
+import { enqueuePendingSend } from '../agentTabStore';
+import type { GitBranchInfo, WorktreeCloseKind } from '@shared/types';
 
-// App-global confirm popup for the agent-driven worktree_project_finish /
-// worktree_project_abandon tools. A main-side gate (worktree/close-gate.ts) sends
-// a request; on approve this runs the client-owned close sequence and reports the
-// outcome back. (create has no such gate — it's a user-initiated UI action.)
+// User-initiated finish/abandon popup for a worktree sub-project (#lifecycle).
+// Opened from the sidebar right-click menu (Events.WORKTREE_CLOSE) — NOT the
+// agent; the agent no longer drives the worktree lifecycle. The popup owns the
+// whole close sequence and, on failure, offers a one-click "Send to agent" that
+// hands the error to the worktree's own agent tab to resolve.
 //
-//   finish  = lock+ff merge-back → (merged) teardown → delete branch (force; safe,
-//             commits live on baseBranch after the ff)
-//   abandon = teardown → delete branch (force; UNMERGED → permanent commit loss)
+//   finish  = pick target ▾ (default baseBranch) → lock+ff merge-back → teardown
+//             → delete branch (force; commits are safe on target after the ff)
+//   abandon = teardown → delete branch (no merge; UNMERGED → commit loss)
 //
-// The popup is the dumb final execution gate; the "what you'll lose" explanation
-// is the agent's job in chat. Success = the worktree sub-project disappears — we
-// resolve the outcome to the agent BEFORE REMOVE_PROJECT tears down the calling
-// tab, so the op result isn't lost when the tab (the caller) is killed.
+// Success = the worktree sub-project disappears (REMOVE_PROJECT after teardown).
+
+interface CloseState {
+  subProjectId: string;
+  kind: WorktreeCloseKind;
+}
 
 export function WorktreeCloseGate() {
   const { projects } = useStore();
-  const [queue, setQueue] = useState<WorktreeCloseRequest[]>([]);
+  const [state, setState] = useState<CloseState | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // finish only: local branches offered as ff targets + the chosen one.
+  const [branches, setBranches] = useState<GitBranchInfo[]>([]);
+  const [target, setTarget] = useState('');
+  // Delete the feature branch as part of the close (default on).
+  const [deleteBranch, setDeleteBranch] = useState(true);
+
+  const sub = state ? projects.find((p) => p.config.id === state.subProjectId) : undefined;
+  const parent = sub ? projects.find((p) => p.config.id === sub.config.parentProjectId) : undefined;
 
   useEffect(() => {
-    const offReq = window.shelfApi.worktree.onCloseRequest((req) => {
-      setQueue((q) => [...q, req]);
+    const off = on(Events.WORKTREE_CLOSE, (index: number, kind: WorktreeCloseKind) => {
+      const proj = projects[index];
+      if (!proj || !proj.config.parentProjectId) return; // guard: children only
+      setState({ subProjectId: proj.config.id, kind });
+      setBusy(false);
+      setError(null);
+      setDeleteBranch(true);
+      setBranches([]);
+      const base = proj.config.baseBranch ?? '';
+      setTarget(base);
+
+      // finish: load the parent's local branches for the target selector (the
+      // user's latch on WHERE the ff lands; default = captured fork point).
+      if (kind === 'finish') {
+        const par = projects.find((p) => p.config.id === proj.config.parentProjectId);
+        if (par) {
+          window.shelfApi.git
+            .branchList(par.config.connection, par.config.cwd)
+            .then((found) => {
+              setBranches(found.filter((b) => b.name !== proj.config.worktreeBranch));
+              if (base && !found.some((b) => b.name === base) && found.length > 0) {
+                setTarget(found[0].name);
+              }
+            })
+            .catch(() => { /* selector just falls back to the text default */ });
+        }
+      }
     });
-    const offClose = window.shelfApi.worktree.onCloseClose((requestId) => {
-      setQueue((q) => q.filter((r) => r.requestId !== requestId));
-    });
-    return () => { offReq(); offClose(); };
-  }, []);
+    return () => { off(); };
+  }, [projects]);
 
-  const current = queue[0];
-  if (!current) return null;
+  if (!state || !sub) return null;
 
-  const subIndex = projects.findIndex((p) => p.config.id === current.subProjectId);
-  const sub = subIndex >= 0 ? projects[subIndex] : undefined;
-  const parent = sub ? projects.find((p) => p.config.id === sub.config.parentProjectId) : undefined;
-  const isAbandon = current.kind === 'abandon';
-  // The ff merge-back target: agent-supplied (#target) or the captured baseBranch
-  // (fork point). Shown in the popup so the user can veto a wrong-but-ff-able target.
-  const mergeTarget = current.target?.trim() || (sub?.config.baseBranch ?? '');
+  const isAbandon = state.kind === 'abandon';
+  const branch = sub.config.worktreeBranch;
+  // The worktree's agent tab, if any — the Send-to-agent target on failure.
+  const agentTabId = sub.tabs.find((t) => t.type === 'agent')?.id;
 
-  const dequeue = () => {
-    setQueue((q) => q.slice(1));
+  const close = () => {
+    setState(null);
     setBusy(false);
     setError(null);
   };
 
-  const resolve = (resolution: Omit<WorktreeCloseResolution, 'requestId'>) => {
-    window.shelfApi.worktree.resolveClose({ requestId: current.requestId, ...resolution });
-  };
-
-  const cancel = () => {
-    resolve({ outcome: 'cancelled' });
-    dequeue();
+  const sendToAgent = () => {
+    if (!agentTabId || !error) return;
+    const text = `The worktree finish failed with this error:\n\n${error}\n\nPlease resolve it here in this worktree, then I'll finish again.`;
+    const clientMsgId = crypto.randomUUID();
+    enqueuePendingSend(agentTabId, clientMsgId, text);
+    emitAgent('agent:send', { tabId: agentTabId, text, clientMsgId });
+    close();
   };
 
   const approve = async () => {
     if (busy) return;
-    if (!sub || !parent) {
-      resolve({ outcome: 'error', error: 'worktree sub-project or its parent not found' });
-      dequeue();
+    if (!parent) {
+      setError('worktree parent project not found');
       return;
     }
     setBusy(true);
@@ -74,20 +103,20 @@ export function WorktreeCloseGate() {
     const featureCwd = sub.config.cwd;
     const featureBranch = sub.config.worktreeBranch ?? '';
 
-    // finish: fast-forward baseBranch first; only a successful merge proceeds to teardown.
+    // finish: fast-forward the target first; only a successful merge tears down.
     if (!isAbandon) {
       const mb = await window.shelfApi.worktree.finishMergeBack({
         connection: parentConn,
         featureCwd,
         baseCwd: parentCwd,
-        baseBranch: mergeTarget,
+        baseBranch: target,
         featureBranch,
       });
       if (mb.outcome !== 'merged') {
-        // busy / non-ff / base-dirty / error → report, DON'T tear down.
-        if (mb.outcome === 'error') setError(mb.error ?? 'merge-back failed');
-        resolve({ outcome: mb.outcome, error: mb.error });
-        dequeue();
+        // busy / non-ff / base-dirty / error → show it; DON'T tear down. The user
+        // can Send-to-agent (all errors, uniformly) or fix + retry.
+        setError(mb.error ?? `merge-back failed (${mb.outcome})`);
+        setBusy(false);
         return;
       }
     }
@@ -96,55 +125,87 @@ export function WorktreeCloseGate() {
     const rm = await window.shelfApi.git.worktreeRemove(parentConn, parentCwd, featureCwd);
     if (!rm.ok) {
       setError(rm.error ?? 'failed to remove worktree');
-      resolve({ outcome: 'error', error: rm.error });
-      dequeue();
+      setBusy(false);
       return;
     }
-    if (featureBranch) {
-      // force: finish → commits are safe on baseBranch; abandon → intentional loss.
+    if (featureBranch && deleteBranch) {
+      // finish → force is safe (commits live on target after the ff); abandon →
+      // force is intentional discard.
       const del = await window.shelfApi.git.deleteBranch(parentConn, parentCwd, featureBranch, true);
       if (!del.ok) {
-        // The worktree is already gone; a leftover branch is a loud anomaly but not
-        // a data-loss event — surface it rather than swallow.
-        resolve({ outcome: 'error', error: del.error ?? 'failed to delete branch' });
-        dequeue();
+        // Worktree already gone; a leftover branch is a loud anomaly, not data loss.
+        setError(del.error ?? 'worktree removed but branch delete failed');
+        setBusy(false);
         return;
       }
     }
 
-    // Resolve BEFORE REMOVE_PROJECT: removing the sub-project tears down its agent
-    // tab (the caller), so the op result must already be on its way to the agent.
-    resolve({ outcome: 'closed' });
-    emit(Events.REMOVE_PROJECT, subIndex);
-    dequeue();
+    const subIndex = projects.findIndex((p) => p.config.id === state.subProjectId);
+    close();
+    if (subIndex >= 0) emit(Events.REMOVE_PROJECT, subIndex);
   };
 
   const title = isAbandon ? 'Abandon Worktree' : 'Finish Worktree';
-  const branch = sub?.config.worktreeBranch;
 
   return (
-    <div className="settings-overlay" onClick={busy ? undefined : cancel}>
+    <div className="settings-overlay" onClick={busy ? undefined : close}>
       <div className="worktree-dialog" onClick={(e) => e.stopPropagation()}>
         <div className="settings-header">
           <span>{title}</span>
-          <button className="settings-close" onClick={cancel} disabled={busy}>×</button>
+          <button className="settings-close" onClick={close} disabled={busy}>×</button>
         </div>
         <div className="worktree-gate-body">
           {isAbandon ? (
             <p>
-              Abandon worktree {branch ? <strong>{branch}</strong> : null} and delete its branch?
-              This <strong>permanently discards</strong> any unmerged commits.
+              Abandon worktree {branch ? <strong>{branch}</strong> : 'this worktree'} without merging?
+              {deleteBranch && <> This <strong>permanently discards</strong> any unmerged commits.</>}
             </p>
           ) : (
-            <p>
-              Merge {branch ? <strong>{branch}</strong> : 'this worktree'} back into{' '}
-              <strong>{mergeTarget || 'the base branch'}</strong> and close it?
-            </p>
+            <>
+              <p>Merge {branch ? <strong>{branch}</strong> : 'this worktree'} back into:</p>
+              {branches.length > 0 ? (
+                <select
+                  className="worktree-select"
+                  value={target}
+                  onChange={(e) => setTarget(e.target.value)}
+                  disabled={busy}
+                >
+                  {branches.map((b) => (
+                    <option key={b.name} value={b.name}>{b.name}</option>
+                  ))}
+                </select>
+              ) : (
+                <p><strong>{target || 'the base branch'}</strong></p>
+              )}
+            </>
           )}
-          {error && <div className="worktree-error">{error}</div>}
+          <label className="worktree-checkbox">
+            <input
+              type="checkbox"
+              checked={deleteBranch}
+              onChange={(e) => setDeleteBranch(e.target.checked)}
+              disabled={busy}
+            />
+            <span>Delete branch {branch ? <strong>{branch}</strong> : ''}</span>
+          </label>
+          {error && (
+            <div className="worktree-error">
+              {error}
+              <div className="worktree-error-actions">
+                <button
+                  className="conn-btn conn-btn-next"
+                  onClick={sendToAgent}
+                  disabled={!agentTabId}
+                  title={agentTabId ? 'Send this error to the worktree agent' : 'No agent tab open in this worktree'}
+                >
+                  Send to agent
+                </button>
+              </div>
+            </div>
+          )}
         </div>
         <div className="project-edit-footer">
-          <button className="conn-btn conn-btn-cancel" onClick={cancel} disabled={busy}>Cancel</button>
+          <button className="conn-btn conn-btn-cancel" onClick={close} disabled={busy}>Cancel</button>
           <button
             className={`conn-btn ${isAbandon ? 'conn-btn-danger' : 'conn-btn-next'}`}
             onClick={approve}

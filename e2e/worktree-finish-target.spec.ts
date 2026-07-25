@@ -1,17 +1,13 @@
 import { test, expect, _electron as electron, type ElectronApplication, type Page } from '@playwright/test';
-import { openAgentTab, sendAgentPrompt } from './helpers';
 import { execFileSync } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
 
 /**
- * worktree_project_finish with an agent-supplied `target` (#target / 甲).
- *
- * The agent controls which branch it synced/resolved against, so it also names
- * where finish ff-pushes — overriding the captured baseBranch. Here baseBranch is
- * `main` but the agent finishes into `develop`: the popup shows the target and the
- * ff lands on develop, leaving main untouched.
+ * Finish with a user-selected target (#lifecycle — target moved from the agent
+ * to the finish popup). baseBranch is `main` but the user picks `develop` in the
+ * target selector: the ff lands on develop, leaving main untouched.
  */
 
 const BASE_ID = 'wt-ftgt-base';
@@ -35,8 +31,8 @@ function makeRepo(): { root: string; base: string; feature: string } {
   fs.writeFileSync(path.join(base, 'a.txt'), 'c1');
   git(base, ['add', 'a.txt']);
   git(base, ['commit', '-m', 'c1']);
-  // A second integration branch at the same commit — the finish target. Not
-  // checked out anywhere → merge-back takes the free-ref push path.
+  // A second integration branch at the same commit — a selectable finish target.
+  // Not checked out anywhere → merge-back takes the free-ref push path.
   git(base, ['branch', 'develop']);
   // Feature worktree forked from main (baseBranch=main), one commit ahead.
   const feature = path.join(root, 'repo-feature');
@@ -58,18 +54,13 @@ function seed(userDataDir: string, base: string, feature: string) {
   fs.writeFileSync(path.join(userDataDir, 'projects.json'), JSON.stringify(projects), 'utf-8');
 }
 
-async function openAgentInSub(page: Page) {
-  await page.locator('.sidebar-item.worktree-child', { hasText: 'feature' }).click();
-  const prompt = page.locator('.connect-prompt');
-  if (await prompt.isVisible({ timeout: 3_000 }).catch(() => false)) {
-    await prompt.click();
-  }
-  await expect(page.locator('.tab-bar .tab')).toHaveCount(1, { timeout: 8_000 });
-  await openAgentTab(page);
-  await expect(page.locator('.tab-bar .tab')).toHaveCount(2, { timeout: 5_000 });
+async function openCloseMenu(page: Page, item: 'Finish' | 'Abandon') {
+  await page.locator('.sidebar-item.worktree-child', { hasText: 'feature' }).click({ button: 'right' });
+  await page.locator('.context-menu').waitFor({ state: 'visible', timeout: 5_000 });
+  await page.locator('.context-menu-item', { hasText: item }).click();
 }
 
-test.describe('worktree_project_finish target', () => {
+test.describe('finish target selector', () => {
   let userDataDir: string;
   let root: string;
   let base: string;
@@ -95,17 +86,17 @@ test.describe('worktree_project_finish target', () => {
     fs.rmSync(root, { recursive: true, force: true });
   });
 
-  test('finish with target ff-pushes into that branch, not baseBranch; popup shows it', async () => {
+  test('selecting a non-default target ff-pushes into that branch, not baseBranch', async () => {
     const featureTip = git(feature, ['rev-parse', 'HEAD']).trim();
     const mainBefore = git(base, ['rev-parse', 'main']).trim();
 
-    await openAgentInSub(page);
-    await sendAgentPrompt(page, 'apptool:worktree_project.finish:{"target":"develop"}');
+    await openCloseMenu(page, 'Finish');
 
     const popup = page.locator('.worktree-dialog', { hasText: 'Finish Worktree' });
     await expect(popup).toBeVisible({ timeout: 5_000 });
-    // The popup shows the agent-supplied target (the human's latch on a wrong target).
-    await expect(popup).toContainText('develop');
+    // The target selector lists the parent's branches (default = baseBranch main);
+    // pick develop.
+    await popup.locator('.worktree-select').selectOption('develop');
     await popup.locator('.conn-btn-next').click();
     await expect(popup).not.toBeVisible({ timeout: 8_000 });
 

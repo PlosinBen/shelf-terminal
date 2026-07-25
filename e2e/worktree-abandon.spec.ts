@@ -1,16 +1,15 @@
 import { test, expect, _electron as electron, type ElectronApplication, type Page } from '@playwright/test';
-import { openAgentTab, sendAgentPrompt } from './helpers';
 import { execFileSync } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
 
 /**
- * worktree_project_abandon E2E — the agent-driven abandon gate.
+ * Abandon worktree E2E — the user-initiated abandon gate (#lifecycle).
  *
  * Abandon = teardown → force-delete branch, NO merge-back: the base branch never
  * moves and the feature's unmerged commits are discarded (guarded by the popup's
- * loss warning). Self-close, driven by the sub-project's own agent tab.
+ * loss warning). Opened from the worktree child's right-click menu.
  */
 
 const BASE_ID = 'wt-abandon-base';
@@ -53,19 +52,14 @@ function seed(userDataDir: string, base: string, feature: string) {
   fs.writeFileSync(path.join(userDataDir, 'projects.json'), JSON.stringify(projects), 'utf-8');
 }
 
-async function openAgentInSub(page: Page) {
+async function openCloseMenu(page: Page, item: 'Finish' | 'Abandon') {
   const subItem = page.locator('.sidebar-item.worktree-child', { hasText: 'feature' });
-  await subItem.click();
-  const prompt = page.locator('.connect-prompt');
-  if (await prompt.isVisible({ timeout: 3_000 }).catch(() => false)) {
-    await prompt.click();
-  }
-  await expect(page.locator('.tab-bar .tab')).toHaveCount(1, { timeout: 8_000 });
-  await openAgentTab(page);
-  await expect(page.locator('.tab-bar .tab')).toHaveCount(2, { timeout: 5_000 });
+  await subItem.click({ button: 'right' });
+  await page.locator('.context-menu').waitFor({ state: 'visible', timeout: 5_000 });
+  await page.locator('.context-menu-item', { hasText: item }).click();
 }
 
-test.describe('worktree_project_abandon gate', () => {
+test.describe('abandon worktree gate', () => {
   let userDataDir: string;
   let root: string;
   let base: string;
@@ -94,11 +88,11 @@ test.describe('worktree_project_abandon gate', () => {
   test('approve removes the worktree + branch WITHOUT moving base', async () => {
     const mainBefore = git(base, ['rev-parse', 'main']).trim();
 
-    await openAgentInSub(page);
-    await sendAgentPrompt(page, 'apptool:worktree_project.abandon');
+    await openCloseMenu(page, 'Abandon');
 
     const popup = page.locator('.worktree-dialog', { hasText: 'Abandon Worktree' });
     await expect(popup).toBeVisible({ timeout: 5_000 });
+    // Unmerged feature commit + delete-branch checked → the loss warning shows.
     await expect(popup).toContainText('permanently discards');
     await popup.locator('.conn-btn-danger').click();
     await expect(popup).not.toBeVisible({ timeout: 8_000 });
@@ -110,9 +104,8 @@ test.describe('worktree_project_abandon gate', () => {
     expect(git(base, ['branch', '--list', 'feature']).trim()).toBe('');
   });
 
-  test('cancel keeps everything and reports closed:false', async () => {
-    await openAgentInSub(page);
-    await sendAgentPrompt(page, 'apptool:worktree_project.abandon');
+  test('cancel keeps everything', async () => {
+    await openCloseMenu(page, 'Abandon');
 
     const popup = page.locator('.worktree-dialog', { hasText: 'Abandon Worktree' });
     await expect(popup).toBeVisible({ timeout: 5_000 });
@@ -121,6 +114,6 @@ test.describe('worktree_project_abandon gate', () => {
 
     expect(fs.existsSync(feature)).toBe(true);
     expect(git(base, ['branch', '--list', 'feature']).trim()).toContain('feature');
-    await expect(page.locator('.agent-turn-response')).toContainText('"closed":false', { timeout: 8_000 });
+    await expect(page.locator('.sidebar-item.worktree-child', { hasText: 'feature' })).toHaveCount(1);
   });
 });

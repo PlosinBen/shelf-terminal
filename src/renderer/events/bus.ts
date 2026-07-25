@@ -34,6 +34,7 @@ export const Events = {
   ADD_PROJECT: 'add-project',       // (ProjectConfig)
   TOGGLE_SPLIT: 'toggle-split',     // (projectIndex)
   CREATE_WORKTREE: 'create-worktree', // (projectIndex)
+  WORKTREE_CLOSE: 'worktree-close',   // (projectIndex, kind: 'finish' | 'abandon')
   OPEN_PM: 'open-pm',                 // ()
   NEW_AGENT_TAB: 'new-agent-tab',     // (projectIndex, provider?)
   NEW_WEB_TAB: 'new-web-tab',         // (projectIndex, url?) — url pre-navigates the tab
