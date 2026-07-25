@@ -92,7 +92,8 @@ export function WorktreeCloseGate() {
 
   const sendToAgent = () => {
     if (!agentTabId || !error) return;
-    const text = `The worktree finish failed with this error:\n\n${error}\n\nPlease resolve it here in this worktree, then I'll finish again.`;
+    const verb = isAbandon ? 'abandon' : 'finish';
+    const text = `The worktree ${verb} failed with this error:\n\n${error}\n\nPlease resolve it here in this worktree, then I'll try again.`;
     const clientMsgId = crypto.randomUUID();
     enqueuePendingSend(agentTabId, clientMsgId, text);
     emitAgent('agent:send', { tabId: agentTabId, text, clientMsgId });
