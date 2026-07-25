@@ -274,9 +274,11 @@ async function runWorktreeClose(
     case 'busy':
       return { closed: false, reason: 'busy', message: 'another finish is in progress for this repo — retry shortly' };
     case 'non-ff':
-      return { closed: false, reason: 'non-ff', message: 'the base branch advanced — re-sync (merge base into the worktree) and retry' };
+      // res.error names the target branch + the git command attempted, so the
+      // agent knows WHICH branch to re-sync (not guess the base).
+      return { closed: false, reason: 'non-ff', message: res.error ?? 'the merge-back target advanced since your sync — re-sync it into the worktree and retry' };
     case 'base-dirty':
-      return { closed: false, reason: 'base-dirty', message: 'the base worktree has uncommitted changes — resolve them there, then retry' };
+      return { closed: false, reason: 'base-dirty', message: res.error ?? 'the base worktree has uncommitted changes — resolve them there, then retry' };
     default:
       throw new Error(res.error ?? `worktree ${kind} failed`);
   }

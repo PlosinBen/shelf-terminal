@@ -87,6 +87,16 @@ describe('worktree_project.finish / .abandon ops', () => {
     }
   });
 
+  it('non-ff surfaces the merge-back error (target + command) as the message', async () => {
+    const richError = "merge-back into 'develop' is not a fast-forward (attempted `git push . HEAD:develop`): rejected. Merge 'develop' into this worktree, then finish again.";
+    requestWorktreeClose.mockResolvedValue({ outcome: 'non-ff', error: richError });
+    const r = await handleAppTool('worktree_project.finish', {}, { projectId: 'wt-1' });
+    expect((r.data as any).reason).toBe('non-ff');
+    // The agent gets WHICH branch + the command it tried, not a generic message.
+    expect((r.data as any).message).toContain('develop');
+    expect((r.data as any).message).toContain('git push . HEAD:develop');
+  });
+
   it('error outcome → fail-loud ok:false', async () => {
     requestWorktreeClose.mockResolvedValue({ outcome: 'error', error: 'boom' });
     const r = await handleAppTool('worktree_project.finish', {}, { projectId: 'wt-1' });

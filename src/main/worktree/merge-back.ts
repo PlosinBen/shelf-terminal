@@ -38,10 +38,12 @@ export interface MergeBackParams {
 
 export type MergeBackOutcome =
   | { outcome: 'merged' }
-  /** main moved ahead since sync → not a fast-forward; agent must re-sync + retry. */
-  | { outcome: 'non-ff' }
+  /** target moved ahead since sync → not a fast-forward; agent must re-sync + retry.
+   *  `error` names the target branch + the git command attempted so the agent knows
+   *  WHICH branch to re-sync. */
+  | { outcome: 'non-ff'; error?: string }
   /** topology (b) but the base worktree has uncommitted changes → can't ff, don't touch. */
-  | { outcome: 'base-dirty' }
+  | { outcome: 'base-dirty'; error?: string }
   | { outcome: 'error'; error: string };
 
 function isCheckedOutRejection(msg: string): boolean {
@@ -60,13 +62,19 @@ export async function mergeBackFastForward(params: MergeBackParams): Promise<Mer
 
   // Topology (a): push the feature tip onto baseBranch. Works when baseBranch is
   // a free (not checked-out) ref; push rejects non-ff for us.
+  const pushCmd = `git push . HEAD:${baseBranch}`;
   try {
     await connector.exec(featureCwd, `git push . ${q(`HEAD:${baseBranch}`)}`);
     return { outcome: 'merged' };
   } catch (err: any) {
-    const msg = err?.message ?? String(err);
+    const msg = (err?.message ?? String(err)).trim();
     if (!isCheckedOutRejection(msg)) {
-      return { outcome: isNonFastForward(msg) ? 'non-ff' : 'error', error: msg };
+      // Name the target branch + the command so the agent knows WHICH branch it
+      // tried to merge into and can re-sync THAT branch (not guess).
+      const nonFf = isNonFastForward(msg);
+      return nonFf
+        ? { outcome: 'non-ff', error: `merge-back into '${baseBranch}' is not a fast-forward (attempted \`${pushCmd}\`): ${msg}. '${baseBranch}' moved since your last sync — merge '${baseBranch}' into this worktree, then finish again.` }
+        : { outcome: 'error', error: `merge-back into '${baseBranch}' failed (attempted \`${pushCmd}\`): ${msg}` };
     }
     // else fall through to topology (b)
   }
@@ -93,16 +101,22 @@ export async function mergeBackFastForward(params: MergeBackParams): Promise<Mer
   // someone else's uncommitted work in the base repo.
   try {
     const dirty = await connector.exec(baseCwd, 'git status --porcelain 2>/dev/null');
-    if (dirty.stdout.trim().length > 0) return { outcome: 'base-dirty' };
+    if (dirty.stdout.trim().length > 0) {
+      return { outcome: 'base-dirty', error: `cannot fast-forward '${baseBranch}': its base worktree has uncommitted changes. Resolve them in the base worktree, then finish again.` };
+    }
   } catch (err: any) {
     return { outcome: 'error', error: err?.message ?? String(err) };
   }
 
+  const mergeCmd = `git merge --ff-only ${featureBranch}`;
   try {
     await connector.exec(baseCwd, `git merge --ff-only ${q(featureBranch)}`);
     return { outcome: 'merged' };
   } catch (err: any) {
-    const msg = err?.message ?? String(err);
-    return { outcome: isNonFastForward(msg) ? 'non-ff' : 'error', error: msg };
+    const msg = (err?.message ?? String(err)).trim();
+    const nonFf = isNonFastForward(msg);
+    return nonFf
+      ? { outcome: 'non-ff', error: `merge-back into '${baseBranch}' is not a fast-forward (attempted \`${mergeCmd}\` in the base worktree): ${msg}. Merge '${baseBranch}' into this worktree, then finish again.` }
+      : { outcome: 'error', error: `merge-back into '${baseBranch}' failed (attempted \`${mergeCmd}\`): ${msg}` };
   }
 }

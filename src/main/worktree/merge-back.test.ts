@@ -76,6 +76,8 @@ describe('mergeBackFastForward', () => {
     const res = await mergeBackFastForward({ connector, featureCwd: feature, baseCwd: base, baseBranch: 'main', featureBranch: 'feature' });
     expect(res.outcome).toBe('base-dirty');
     expect(await tip(base, 'main')).toBe(before); // not moved
+    // The error names the target branch so the agent knows what's blocked.
+    expect((res as any).error).toContain("'main'");
   });
 
   it('non-ff: main advanced past the fork → non-ff (agent must re-sync)', async () => {
@@ -86,14 +88,22 @@ describe('mergeBackFastForward', () => {
     const res = await mergeBackFastForward({ connector, featureCwd: feature, baseCwd: base, baseBranch: 'main', featureBranch: 'feature' });
     expect(res.outcome).toBe('non-ff');
     expect(await tip(base, 'main')).toBe(mainAhead); // untouched
+    // The error names the target branch + the attempted command so the agent
+    // knows WHICH branch to re-sync (topology a → push path).
+    expect((res as any).error).toContain("'main'");
+    expect((res as any).error).toContain('git push . HEAD:main');
   });
 
-  it('non-ff via base-tree path: base on main but diverged → non-ff', async () => {
+  it('non-ff when base is on a diverged main → non-ff (caught at the push, not base-tree)', async () => {
     await commit(base, 'a.txt', 'c2-on-main'); // main ahead, base still on main
     const mainAhead = await tip(base, 'main');
     const res = await mergeBackFastForward({ connector, featureCwd: feature, baseCwd: base, baseBranch: 'main', featureBranch: 'feature' });
     expect(res.outcome).toBe('non-ff');
     expect(await tip(base, 'main')).toBe(mainAhead);
+    // A diverged push is rejected as non-ff (not denyCurrentBranch), so it's the
+    // push path that reports it — the error names that command + the target.
+    expect((res as any).error).toContain("'main'");
+    expect((res as any).error).toContain('git push . HEAD:main');
   });
 
   it('empty baseBranch → fail-loud error', async () => {
