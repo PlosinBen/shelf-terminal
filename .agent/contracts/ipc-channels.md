@@ -133,7 +133,8 @@ App-level Agent Skills (one folder per skill under userData).
 | `create()` | invoke `skills:create` → new skill |
 | `update(name, content)` | invoke `skills:update` |
 | `delete(name)` | invoke `skills:delete` |
-| `setLocked(name, locked: boolean)` | invoke `skills:set-locked` |
+| `setLocked(name, locked: boolean)` | invoke `skills:set-locked` (badge-only: `notifyRendererSkillsChanged`, no re-project) |
+| `setDisabled(name, disabled: boolean)` | invoke `skills:set-disabled` (full `onSkillsChanged` pipeline — drops/re-adds the skill from the projected tree) |
 | `onChanged(cb())` | recv `skills:changed` → unsubscribe fn (manager UI or agent bridge mutated skills) |
 
 ## mcp (`shelfApi.mcp`)

@@ -14,7 +14,7 @@ title: shelf-terminal — Intent → File Index
 | App lifecycle, IPC wiring | `index.ts` | app/window 啟動、`registerAllIpcHandlers()` 一次註冊、PM/Agent/updater 接線與 quit cleanup 的中樞 |
 | 共享 app 狀態 | `app-state.ts` | `mainWindow` / `cachedProjects` / `cachedSettings` 的 getter/setter，index 與 ipc 共用單一來源 |
 | IPC handler（按領域分檔） | `ipc/` (`index.ts` + `pty`/`project`/`connector`/`git`/`file-transfer`/`dialog`/`settings`/`logs`/`web`/`notes`/`skills`/`mcp`/`config-backup`/`updater`/`pm`) | 各檔 export `registerXxxHandlers()`，`ipc/index.ts` 匯總註冊 |
-| App 層 Agent Skills（CRUD + lock） | `skills-store.ts` | `<userData>/skills/` 下 app 層 skill 的檔案 CRUD + frontmatter 驗證 + lock marker |
+| App 層 Agent Skills（CRUD + lock + disable） | `skills-store.ts` | `<userData>/skills/` 下 app 層 skill 的檔案 CRUD + frontmatter 驗證 + `.locked`（agent 編輯鎖）+ `.disabled`（mount 開關）marker |
 | Skills 變更後處理（統一 pipeline） | `skills-sync.ts` | `onSkillsChanged()`：任何 skill mutation 後的單一出口（re-project + subscribers + 通知 renderer） |
 | App-tool bridge（main 端 dispatcher） | `agent/app-tool.ts` | `handleAppTool(op,args)` 把 agent-server 的 `app_tool` 請求轉成 client-owned 資源動作的純 dispatcher |
 | Skills 投影（local + hash） | `skills-projection.ts` | `projectSkillsLocal` mirror skills 到 `~/.shelf/apps/<appId>/skills` + hash helper |
@@ -184,7 +184,7 @@ title: shelf-terminal — Intent → File Index
 | 刪除確認 | `components/RemoveConfirmDialog.tsx` | Remove project 確認 modal，可勾選清理 worktree files |
 | PM 狀態面板（read-only） | `components/PmView.tsx` | 右側可拖拉 panel，read-only 訊息列表 + markdown，header 含 PM Active/Away/Clear toggle |
 | Notes 面板 | `components/NotesView.tsx` | ⌘N 右側 panel，per-project markdown scratch pad（preview/edit、貼圖、auto-save） |
-| Skills 面板 | `components/SkillsView.tsx` | 右側 panel，app 層 Agent Skills 管理（master-detail md 編輯器 + lock toggle） |
+| Skills 面板 | `components/SkillsView.tsx` | 右側 panel，app 層 Agent Skills 管理（master-detail md 編輯器 + lock toggle + enable/disable mount toggle） |
 | Quick Note overlay | `components/QuickNoteOverlay.tsx` | ⌘⇧N floating textarea，送到當下 active project（支援貼圖） |
 | Note 圖片縮圖 | `components/NoteImage.tsx` | 共用縮圖元件，透過 `notes.readImage` IPC 載 Blob URL |
 | Clipboard / drop 解析 | `utils/parse-data-transfer.ts` | 純 parser，`DataTransfer → PastedItem[]`（paste/drop 共用） |

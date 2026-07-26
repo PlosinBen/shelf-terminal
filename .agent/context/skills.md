@@ -159,3 +159,19 @@ related:
 **Do not change casually because**：別把 fs 投影搬回 provider backend（違反 `agent-providers#16` + 重造 race);別假設「copilot 用 `skillDirectories`」（那是已刪 SDK backend 的機制,ACP 走 `$COPILOT_HOME/skills`);codex 別硬套 config-home（它走 `.agents/skills`）。
 
 **Related**：`skills#1`（canonical 投影;其「Copilot `skillDirectories`」已被本條取代)、`agent-providers#13`（ACP skill 退化)、`agent-providers#15`（config-home)、`agent-providers#16`（provider 不碰 fs)、`agent-server/providers/shared.ts`（`projectAppSkills`)、`agent-server/providers/{copilot,codex}/{helpers,index}.ts`（`skillTarget`)、`agent-server/exec.ts`（中央投影)。
+
+## skills#11 — 可停用（optional）skill：`.disabled` marker 是 mount 開關，鏡像 `.locked` 但語意相反  ·  [Decision]
+
+**Problem**：app-level skill **永遠掛載**進每個 live session 的 projected tree,每個 skill 的 `name + description` 每回合都佔 model context（progressive disclosure 先載 description）。有些 skill（init-time 的 authoring skill 等)只偶爾用,長駐純浪費 context。
+
+**Decision — per-skill `.disabled` marker（present=停用、absence=啟用=預設 → 零 migration）**：folder 內 marker（同 `.locked`:rename 自動帶走、loader 忽略 stray dotfile;`RESERVED_AUX_FILES` 擋 agent aux-op)。停用 = 該 skill **整個資料夾**從 projected/synced tree 移除 → provider 掃不到 → description 離開 context;重啟用重投影 + hot-reload 回來。`skills-store` 出 `isSkillDisabled`/`setSkillDisabled` trio + `SkillMeta.disabled`。
+
+**與 `.locked` 的關鍵反轉(別搞錯)**：`.locked`（`skills#2`D / `skills#8`）刻意 **hash-invariant**——marker 排除出 projection、lock 在 main 端強制 agent 從不讀,所以 lock/unlock 只跑 `notifyRendererSkillsChanged()`（重畫 badge)。`.disabled` **相反**:移除整個資料夾 **必須改 tree hash** 且 **必須跑完整 `onSkillsChanged()`**（`skills#2` Decision C 那條 pipeline:re-project + remote re-mirror hash-gated + hot-reload live session)——否則 panel 看似有效但 skill 仍留 context。`ipc/skills.ts` 的 `SKILLS_SET_DISABLED` handler 因此呼叫 `onSkillsChanged()`（對比 `SKILLS_SET_LOCKED` 的 badge-only)。lock 與 disabled 是**兩條獨立 axis**（兩個獨立 marker,可 locked+enabled / disabled+unlocked 任意組合)。
+
+**投影 filter 兩個 touch-point（機制不同、彼此不覆蓋)**:`skills-projection.ts` 的 `listSkillFilesRel`（remote wipe-then-replace + `hashSkillsTree` 的單一槓桿:排除 disabled subtree → remote 掉它 + hash 變 → `.synced` gate re-sync)與 `projectSkillsLocal` 的 `fs.cpSync({filter})`（自己一套 copy,filter 回 false 給 disabled skill dir → cpSync 不遞迴進去,整棵跳過)。disabled-dir set 用 inline `.disabled` 存在檢查算,**不 import skills-store**（保持 projection 自足)。`.disabled` marker byte 本身跟 `.locked` 一樣永不進任何 projected tree。持久化靠 `ensureScaffold()` 從不 re-seed skill folder → marker 自然跨重啟存活。
+
+**Decision — UI-only,無 agent tool**：同 lock/unlock 與整 skill delete（`skills#2`D、`skills#8`)—— enable/disable 是使用者的 mount 決定,**無 `app_tool` bridge op**,agent 不切自己的掛載。disabled 是 **mount** 概念非 **existence**:agent bridge 仍 source-level（`list/get/update_app_skill` 對 disabled skill 照常運作,編輯無害、下次 enable 撿到新 bytes);`list_app_skills` 可選擇性 surface `disabled` flag。scope:per-project / per-conversation 明確 OUT（projection tree 以 appId(device) 為 key,per-session 掛載要大改架構,見 feature note 已刪)。
+
+**Do not change casually because**：別把 `SKILLS_SET_DISABLED` 降級成 badge-only（會讓 live agent 不掉 skill);別只改一個 projection touch-point（local 與 remote 各一套 copy 機制);別為了 per-project scope 而拆 per-session projection root（破壞 app-global invariant)。
+
+**Related**：`skills#2`（lock marker pattern)、`skills#8`（`.locked` reserved-aux + UI-only stance)、`skills#2` Decision C（`onSkillsChanged` pipeline)、`architecture/skills-projection`（disable 進 fan-out、lock 不進)、`contracts/ipc-channels`（`skills:set-disabled`)、`src/main/{skills-store,skills-projection,ipc/skills}.ts`、`src/renderer/components/SkillsView.tsx`、e2e `skills.spec.ts`。
