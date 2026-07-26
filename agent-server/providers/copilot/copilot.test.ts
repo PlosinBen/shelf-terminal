@@ -214,4 +214,41 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
 
     backend.dispose();
   });
+
+  it('unauthenticated caps carry an oauth authMethod (AuthPane Login button, Gap A)', async () => {
+    // A caps probe that can't reach a session (here: the spawn throws) is treated
+    // as unauthenticated. WITHOUT authMethod the AuthPane (gated on
+    // authMethod.kind === 'oauth') renders no Login button, so login can't start.
+    const backend = createCopilotBackend({
+      openAgent: () => { throw new Error('spawn failed'); },
+      getShelfMcp: async () => null,
+    });
+
+    const caps = await backend.gatherCapabilities!('/tmp/project');
+    expect(caps.authRequired).toBe(true);
+    expect((caps.authMethod as { kind?: string } | undefined)?.kind).toBe('oauth');
+
+    backend.dispose();
+  });
+
+  it('reconnect() drops the live connection so the next turn respawns (post-login re-init, Gap C)', async () => {
+    // Fresh mock per spawn — a respawn = a new process. reconnect() must drop
+    // conn+child+session so the next turn re-reads the config-home credentials a
+    // device-login just wrote (a running --acp process spawned pre-login won't).
+    let spawns = 0;
+    const openAgent = () => { spawns += 1; return { target: createMockAcpAgent() }; };
+    const backend = createCopilotBackend({ openAgent, getShelfMcp: async () => null });
+
+    await backend.query({ prompt: 'hi', cwd: '/tmp/project', appId: 'app-1' }, () => {});
+    expect(spawns).toBe(1);
+    // Same cwd+appId → normally reuses the process (no respawn).
+    await backend.query({ prompt: 'again', cwd: '/tmp/project', appId: 'app-1' }, () => {});
+    expect(spawns).toBe(1);
+    // reconnect() drops the connection → the next turn respawns (fresh, authed).
+    backend.reconnect!();
+    await backend.query({ prompt: 'post-login', cwd: '/tmp/project', appId: 'app-1' }, () => {});
+    expect(spawns).toBe(2);
+
+    backend.dispose();
+  });
 });

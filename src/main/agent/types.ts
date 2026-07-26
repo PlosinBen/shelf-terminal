@@ -219,4 +219,13 @@ export interface AgentBackend {
    *  app-level skill edit takes effect without reconnect (fire-and-forget).
    *  No-op when there's no live process. See DECISIONS (skill live reload). */
   reloadSkills?(): void;
+  /**
+   * Drop the provider's live ACP connection on the agent-server (fire-and-forget)
+   * so the NEXT capabilities probe / turn respawns and re-reads the config-home
+   * credentials. Called after a successful device-login (and by the checkAuth
+   * Retry path), because an already-running `--acp` process spawned pre-login won't
+   * re-read the credentials the login wrote. No-op when there's no live process.
+   * See agent-providers#11.
+   */
+  reconnect?(): void;
 }

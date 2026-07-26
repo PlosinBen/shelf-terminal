@@ -30,6 +30,16 @@ const EFFORT_CATEGORY = 'thought_level';
 
 export const COPILOT_PROVIDER = 'copilot';
 
+// oauth authMethod for the unauthenticated caps return — WITHOUT it the AuthPane
+// (gated on `authMethod.kind === 'oauth'`) renders no Login button, so device-flow
+// login can't be started. Mirrors CLAUDE_AUTH_METHOD and the deleted native-copilot
+// const (dropped in the ACP cutover — this restores it). The `instructions` ride the
+// pane as fallback hints (headless remotes authenticate via a token env var instead).
+const COPILOT_AUTH_METHOD = {
+  kind: 'oauth' as const,
+  instructions: [{ label: 'Or set a GitHub token env var on a headless remote', command: 'GH_TOKEN=…' }],
+};
+
 /** What to connect the ACP client to + the child to reap (production spawns a
  *  `copilot --acp` process; tests inject an in-process mock AgentApp). */
 export interface CopilotAgentTarget {
@@ -310,8 +320,10 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
         return buildCapabilities();
       } catch {
         // A fresh session most commonly fails when unauthenticated → surface the
-        // auth pane rather than an empty capability set.
-        return { models: [], permissionModes: [], effortLevels: [], slashCommands: [], authRequired: true };
+        // auth pane rather than an empty capability set. authMethod drives the
+        // AuthPane's Login button (oauth branch); without it the pane shows no way
+        // to start login.
+        return { models: [], permissionModes: [], effortLevels: [], slashCommands: [], authRequired: true, authMethod: COPILOT_AUTH_METHOD };
       }
     },
 
@@ -382,6 +394,22 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
 
     resetSession(): void {
       if (session) driver.forget(session.sessionId);
+      session = null;
+      sessionCwd = null;
+    },
+
+    /** Drop the live connection (process + session) so the next turn respawns and
+     *  re-reads the per-app COPILOT_HOME credentials a device-login just wrote.
+     *  copilot's CLI self-creates COPILOT_HOME, so no configHome hook is needed —
+     *  only this respawn after login. Mirrors the appId-change respawn, minus the
+     *  appId check. */
+    reconnect(): void {
+      if (session) driver.forget(session.sessionId);
+      try { conn?.close(); } catch { /* best-effort */ }
+      try { child?.kill(); } catch { /* best-effort */ }
+      conn = null;
+      child = null;
+      connAppId = undefined;
       session = null;
       sessionCwd = null;
     },

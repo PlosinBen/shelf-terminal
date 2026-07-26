@@ -17,7 +17,7 @@ import { toAcpMcpServers } from '../acp/mcp';
 import { getSharedShelfMcp } from '../acp/shelf-mcp';
 import { loadProjectedMcpServers } from '../mcp-config';
 import { serverLog } from '../../server-logger';
-import { resolveCodexAcpCommand, codexSkillsRoot, codexSkillTarget, codexAcpEnv } from './helpers';
+import { resolveCodexAcpCommand, codexSkillsRoot, codexSkillTarget, codexAcpEnv, codexConfigHome } from './helpers';
 import { codexPermissionModes, codexModeIdToShelf, shelfToCodexModeId, codexUnmappedModeIds } from './mode-map';
 import { driveDeviceCodeLogin, spawnCodexAppServerRpc, type LoginHandle } from './app-server-login';
 
@@ -25,6 +25,16 @@ import { driveDeviceCodeLogin, spawnCodexAppServerRpc, type LoginHandle } from '
 // copilot (verified from codex-acp: category `model` / `thought_level`).
 const MODEL_CATEGORY = 'model';
 const EFFORT_CATEGORY = 'thought_level';
+
+// oauth authMethod for the unauthenticated caps return — WITHOUT it the AuthPane
+// (gated on `authMethod.kind === 'oauth'`) renders no Login button, so codex's
+// device-code login can't be started. codex advertises both api-key and chat-gpt
+// ACP authMethods; the device-code (ChatGPT) path is the one Shelf drives (see
+// startLogin), so the backend declares it as the primary oauth method.
+const CODEX_AUTH_METHOD = {
+  kind: 'oauth' as const,
+  instructions: [{ label: 'Sign in with your ChatGPT account (device code)' }],
+};
 
 /** What to connect the ACP client to + the child to reap (production spawns a
  *  codex-acp process; tests inject an in-process mock AgentApp). Mirrors the
@@ -283,9 +293,11 @@ export function createCodexBackend(deps: CodexDeps = {}): ServerBackend {
         return buildCapabilities();
       } catch {
         // A fresh codex session most commonly fails when unauthenticated →
-        // surface the auth pane rather than an empty capability set. (T4.0 will
-        // refine to inspect the ACP auth_required error specifically.)
-        return { models: [], permissionModes: [], effortLevels: [], slashCommands: [], authRequired: true };
+        // surface the auth pane rather than an empty capability set. authMethod
+        // drives the AuthPane's Login button (oauth branch); without it the pane
+        // shows no way to start the device-code login. (T4.0 will refine to
+        // inspect the ACP auth_required error specifically.)
+        return { models: [], permissionModes: [], effortLevels: [], slashCommands: [], authRequired: true, authMethod: CODEX_AUTH_METHOD };
       }
     },
 
@@ -330,8 +342,29 @@ export function createCodexBackend(deps: CodexDeps = {}): ServerBackend {
       return codexSkillTarget(appId);
     },
 
+    /** codex-acp reads auth/config/sessions from CODEX_HOME; it errors if the dir
+     *  doesn't pre-exist. The agent-server mkdirs this before spawning (the backend
+     *  does no fs). Same path as the CODEX_HOME env (codexAcpEnv). */
+    configHome(appId: string | undefined): string | undefined {
+      return codexConfigHome(appId);
+    },
+
     resetSession(): void {
       if (session) driver.forget(session.sessionId);
+      session = null;
+      sessionCwd = null;
+    },
+
+    /** Drop the live connection (process + session) so the next turn respawns and
+     *  re-reads the per-app CODEX_HOME credentials a device-login just wrote. Mirrors
+     *  the appId-change respawn in ensureSession, minus the appId check. */
+    reconnect(): void {
+      if (session) driver.forget(session.sessionId);
+      try { conn?.close(); } catch { /* best-effort */ }
+      try { child?.kill(); } catch { /* best-effort */ }
+      conn = null;
+      child = null;
+      connAppId = undefined;
       session = null;
       sessionCwd = null;
     },

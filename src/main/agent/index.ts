@@ -548,6 +548,37 @@ async function sendMessage(
   return true;
 }
 
+/**
+ * Post-login re-init (Gap C): after a successful device-login, drop the provider's
+ * stale (pre-login) ACP connection so the capabilities probe respawns and re-reads
+ * the credentials the login just wrote to the config-home, then push the fresh caps.
+ * WITHOUT this the running `--acp` process — spawned at caps time, unauthenticated —
+ * keeps serving stale credentials and the first post-login turn errors.
+ *
+ * The FRESH caps drive the pane: the renderer already cleared it optimistically
+ * (finishLogin on ok), so an authed result leaves it cleared; a still-unauth result
+ * re-asserts AGENT_AUTH_REQUIRED to re-open it (the login didn't actually stick). No
+ * explicit authRequired:false push is needed. Fire-and-forget + fail-loud on error.
+ */
+async function reinitAfterLogin(tabId: string): Promise<void> {
+  const session = sessions.get(tabId);
+  if (!session?.backend.getCapabilities) return;
+  const tag = `[agent:${tabId.slice(0, 8)}]`;
+  session.backend.reconnect?.();
+  const settings = loadSettings();
+  const customModels = settings.ok
+    ? settings.value.providerModels?.[session.provider as keyof NonNullable<typeof settings.value.providerModels>]
+    : undefined;
+  try {
+    const caps = await session.backend.getCapabilities(session.cwd, customModels);
+    send(IPC.AGENT_CAPABILITIES, tabId, caps);
+    if (caps.authRequired) send(IPC.AGENT_AUTH_REQUIRED, tabId, session.provider);
+    else log.info('agent', `${tag} re-inited after login — capabilities refreshed, authed`);
+  } catch (err: any) {
+    log.error('agent', `${tag} post-login re-init failed: ${err?.message ?? err}`);
+  }
+}
+
 function dispatchEvent(tabId: string, event: AgentEvent) {
   // Tee everything backend.query yields to internal observers (e.g. Telegram
   // bridge mirror agent output). Observer fires before IPC dispatch so a
@@ -600,6 +631,10 @@ function dispatchEvent(tabId: string, event: AgentEvent) {
         cancelled: event.cancelled,
         error: event.error,
       });
+      // Post-login re-init (Gap C): on success, drop the stale ACP connection and
+      // re-fetch capabilities so the next turn is authenticated. The renderer already
+      // cleared the pane optimistically (finishLogin); fresh caps confirm or re-assert.
+      if (event.ok) void reinitAfterLogin(tabId);
       break;
     case 'error':
       send(IPC.AGENT_MESSAGE, tabId, { type: 'error', content: event.error });

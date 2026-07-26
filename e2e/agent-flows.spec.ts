@@ -199,8 +199,9 @@ test.describe('agent flows via fake provider', () => {
     const pane = page.locator('.agent-auth-pane:visible');
     await expect(pane).toBeVisible({ timeout: 5_000 });
 
-    // oauth method → interactive Login button (start_login round-trip).
-    const loginBtn = pane.locator('.agent-reset-btn', { hasText: 'Login with GitHub' });
+    // oauth method → interactive Login button (start_login round-trip). Copy is
+    // provider-agnostic ("Log in") — GitHub is Copilot-specific and wrong for codex.
+    const loginBtn = pane.locator('.agent-reset-btn', { hasText: 'Log in' });
     await expect(loginBtn).toBeVisible({ timeout: 5_000 });
     await loginBtn.click();
 
@@ -214,7 +215,7 @@ test.describe('agent flows via fake provider', () => {
     // Cancel → cancel_login → auth_login_done{cancelled} → back to the button.
     await pane.locator('.agent-reset-btn', { hasText: 'Cancel' }).click();
     await expect(pane.locator('.agent-auth-code')).toHaveCount(0, { timeout: 5_000 });
-    await expect(pane.locator('.agent-reset-btn', { hasText: 'Login with GitHub' })).toBeVisible();
+    await expect(pane.locator('.agent-reset-btn', { hasText: 'Log in' })).toBeVisible();
   });
 
   test('thinking: renders as a fold_text card', async ({ shelfApp: { page } }) => {

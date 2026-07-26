@@ -171,6 +171,13 @@ export function createRemoteBackend(
       // ensureInit re-runs here because a failed probe isn't cached, so after
       // the user runs `claude login` on the remote this flips to true and the
       // AuthPane clears. Any spawn/RPC failure → false (stay on AuthPane).
+      //
+      // Drop the provider's live ACP connection FIRST so the probe below respawns
+      // and re-reads config-home credentials — an out-of-app login (or one just
+      // completed) wrote them to disk, but a running `--acp` process spawned
+      // pre-login won't re-read them. Shares the reconnect the login-done path uses.
+      // Fire-and-forget; ordered before get_capabilities on the FIFO stdin stream.
+      backend.reconnect?.();
       try {
         const caps = await backend.getCapabilities!(cwd);
         return !caps.authRequired;
@@ -272,6 +279,17 @@ export function createRemoteBackend(
       // reconnect. No-op if the process isn't up. See DECISIONS (skill reload).
       if (remoteProc) {
         remoteProc.sendLine({ type: 'reload_skills' });
+      }
+    },
+
+    reconnect() {
+      // Fire-and-forget: tell the agent-server to drop this provider's live ACP
+      // connection so the next caps probe / turn respawns and re-reads config-home
+      // credentials (post-login re-init, Gap C). No-op if the process isn't up (the
+      // first spawn will already be post-login). Ordered before any following
+      // get_capabilities on the FIFO stream, so the respawn is authenticated.
+      if (remoteProc) {
+        remoteProc.sendLine({ type: 'reconnect', provider, sid: sessionId });
       }
     },
 

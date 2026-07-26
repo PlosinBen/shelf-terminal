@@ -200,4 +200,53 @@ describe('codex backend (via mock ACP agent)', () => {
 
     backend.dispose();
   });
+
+  it('unauthenticated caps carry an oauth authMethod (AuthPane Login button, Gap A)', async () => {
+    // A caps probe that can't reach a session (here: the spawn throws) is treated
+    // as unauthenticated. WITHOUT authMethod the AuthPane (gated on
+    // authMethod.kind === 'oauth') renders no Login button, so device-code login
+    // can't start. codex advertises both api-key + chat-gpt ACP methods; the
+    // backend declares the device-code (oauth) path it actually drives.
+    const backend = createCodexBackend({
+      openAgent: () => { throw new Error('spawn failed'); },
+      getShelfMcp: async () => null,
+    });
+
+    const caps = await backend.gatherCapabilities!('/tmp/project');
+    expect(caps.authRequired).toBe(true);
+    expect((caps.authMethod as { kind?: string } | undefined)?.kind).toBe('oauth');
+
+    backend.dispose();
+  });
+
+  it('declares its config-home as ~/.shelf/apps/<appId>/codex (agent-server mkdirs it, Gap B)', () => {
+    // codex-acp errors if CODEX_HOME does not pre-exist; the agent-server creates
+    // this declared path before spawning (provider does no fs). Same dir as the
+    // CODEX_HOME env — auth/config/sessions live here. Undefined without app context.
+    const backend = createCodexBackend({ openAgent: () => ({ target: createMockAcpAgent() }), getShelfMcp: async () => null });
+    expect(backend.configHome!('app-1')).toBe(path.join(os.homedir(), '.shelf', 'apps', 'app-1', 'codex'));
+    expect(backend.configHome!(undefined)).toBeUndefined();
+    backend.dispose();
+  });
+
+  it('reconnect() drops the live connection so the next turn respawns (post-login re-init, Gap C)', async () => {
+    // Fresh mock per spawn — a respawn = a new process. reconnect() must drop
+    // conn+child+session so the next turn re-reads the CODEX_HOME credentials a
+    // device-code login just wrote (a running codex-acp spawned pre-login won't).
+    let spawns = 0;
+    const openAgent = () => { spawns += 1; return { target: createMockAcpAgent() }; };
+    const backend = createCodexBackend({ openAgent, getShelfMcp: async () => null });
+
+    await backend.query({ prompt: 'hi', cwd: '/tmp/project', appId: 'app-1' }, () => {});
+    expect(spawns).toBe(1);
+    // Same cwd+appId → normally reuses the process (no respawn).
+    await backend.query({ prompt: 'again', cwd: '/tmp/project', appId: 'app-1' }, () => {});
+    expect(spawns).toBe(1);
+    // reconnect() drops the connection → the next turn respawns (fresh, authed).
+    backend.reconnect!();
+    await backend.query({ prompt: 'post-login', cwd: '/tmp/project', appId: 'app-1' }, () => {});
+    expect(spawns).toBe(2);
+
+    backend.dispose();
+  });
 });

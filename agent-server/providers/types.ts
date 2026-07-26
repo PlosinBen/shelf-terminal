@@ -546,6 +546,28 @@ export interface ServerBackend {
    * is no app context.
    */
   skillTarget?(appId: string | undefined): string | undefined;
+  /**
+   * The config-home directory THIS provider's CLI reads (auth / config / sessions)
+   * for `appId` — e.g. codex-acp: `$CODEX_HOME` = `~/.shelf/apps/<appId>/codex`. The
+   * agent-server CREATES this dir before spawning the CLI (the provider does NO
+   * filesystem work — provider-boundary principle), because some CLIs error if their
+   * config-home doesn't pre-exist (codex). Declaration only, like {@link skillTarget}.
+   * Return undefined when the CLI self-creates its home (copilot) or there is no app
+   * context. See agent-providers#16.
+   */
+  configHome?(appId: string | undefined): string | undefined;
+  /**
+   * Tear down the live ACP connection (process + session) so the NEXT spawn re-reads
+   * the config-home credentials. Called after a successful device-login: the login
+   * writes to the SAME per-app config-home the running `--acp` process was spawned
+   * with, but that process read its credentials at spawn (pre-login) and won't
+   * re-read them mid-life — so a fresh respawn is required for the first post-login
+   * turn to be authenticated. Stronger than `resetSession` (which keeps the stale
+   * process), weaker than `dispose` (which retires the backend). Sync — drop refs
+   * only. Omitted by providers with no long-lived process (claude/fake). See
+   * agent-providers#11.
+   */
+  reconnect?(): void;
 }
 
 /** Result of a {@link ServerBackend.reloadSkills} call. */
