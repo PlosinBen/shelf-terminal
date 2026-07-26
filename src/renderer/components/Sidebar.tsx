@@ -264,12 +264,32 @@ export function Sidebar() {
               Edit
             </button>
             <div className="context-menu-separator" />
-            <button
-              className="context-menu-item context-menu-item-danger"
-              onClick={() => { emit(CONFIRM_REMOVE_EVENT, contextMenu.index); setContextMenu(null); }}
-            >
-              Remove
-            </button>
+            {proj?.config.parentProjectId ? (
+              // A worktree child closes via Finish (ff merge-back) or Abandon
+              // (discard) — both user-initiated (#lifecycle). Plain Remove would
+              // orphan the git worktree + branch, so it's replaced here.
+              <>
+                <button
+                  className="context-menu-item"
+                  onClick={() => { emit(Events.WORKTREE_CLOSE, contextMenu.index, 'finish'); setContextMenu(null); }}
+                >
+                  Finish
+                </button>
+                <button
+                  className="context-menu-item context-menu-item-danger"
+                  onClick={() => { emit(Events.WORKTREE_CLOSE, contextMenu.index, 'abandon'); setContextMenu(null); }}
+                >
+                  Abandon
+                </button>
+              </>
+            ) : (
+              <button
+                className="context-menu-item context-menu-item-danger"
+                onClick={() => { emit(CONFIRM_REMOVE_EVENT, contextMenu.index); setContextMenu(null); }}
+              >
+                Remove
+              </button>
+            )}
           </div>
         );
       })()}

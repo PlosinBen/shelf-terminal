@@ -425,50 +425,8 @@ export interface MigrateNoteResult {
   error?: string;
 }
 
-/** main→renderer: open the agent-driven worktree-create confirm popup. */
-export interface WorktreeCreateRequest {
-  requestId: string;
-  /** The base project the worktree is cut from (ctx.projectId of the calling tab). */
-  parentProjectId: string;
-  /** Branch name the agent supplied (pre-filled into the confirm popup). */
-  branch: string;
-  /** Optional Phase-0 note to migrate into the worktree, relative to the base cwd. */
-  notePath?: string;
-}
-
-/** renderer→main: the create popup's outcome. Cancel is a NORMAL result, not a failure. */
-export interface WorktreeCreateResolution {
-  requestId: string;
-  outcome: 'created' | 'cancelled' | 'error';
-  projectId?: string;
-  baseBranch?: string;
-  error?: string;
-}
-
+/** Which user-initiated worktree close the sidebar menu triggered (#lifecycle). */
 export type WorktreeCloseKind = 'finish' | 'abandon';
-
-/** main→renderer: open the finish/abandon confirm popup for a worktree sub-project. */
-export interface WorktreeCloseRequest {
-  requestId: string;
-  kind: WorktreeCloseKind;
-  /** The worktree sub-project being closed (ctx.projectId of the calling tab). */
-  subProjectId: string;
-}
-
-/**
- * renderer→main: the close popup's outcome.
- * - closed = teardown done (+ merged, for finish)
- * - cancelled = user declined (calm)
- * - busy = another finish holds the repo lock (calm, retry)
- * - non-ff = main advanced; agent must re-sync then retry (calm)
- * - base-dirty = base worktree has uncommitted changes; user resolves (calm)
- * - error = fail-loud
- */
-export interface WorktreeCloseResolution {
-  requestId: string;
-  outcome: 'closed' | 'cancelled' | 'busy' | 'non-ff' | 'base-dirty' | 'error';
-  error?: string;
-}
 
 /** renderer→main result of the lock + ff-only merge-back step. */
 export interface FinishMergeBackResult {
@@ -479,6 +437,30 @@ export interface FinishMergeBackResult {
 export interface DeleteBranchResult {
   ok: boolean;
   error?: string;
+}
+
+/** Adaptive Abandon-warning input: is the feature branch merged into the target,
+ *  and how many commits would a force-delete discard. */
+export interface BranchMergedInfo {
+  merged: boolean;
+  aheadCount: number;
+}
+
+/**
+ * A feature note discovered under a repo's `.agent/features/` (the transient
+ * working notes owned by the feature-dev-flow skill). Surfaced in the worktree
+ * create dialog's note-picker so the user picks which note seeds the new
+ * worktree. `path` is relative to the base cwd (connection-agnostic, feeds
+ * `migrateNote` directly).
+ */
+export interface FeatureNoteInfo {
+  /** Path relative to the base repo cwd, e.g. `.agent/features/foo.md`. */
+  path: string;
+  /** Frontmatter `title`, if present (else the picker falls back to the filename). */
+  title?: string;
+  /** Frontmatter `status` (e.g. in-progress / pending / cancelled), shown in the
+   *  picker as info — NOT a filter. The user picks; the app doesn't gatekeep. */
+  status?: string;
 }
 
 // ── PM Agent ──

@@ -99,39 +99,14 @@ contextBridge.exposeInMainWorld('shelfApi', {
       ipcRenderer.invoke(IPC.GIT_MIGRATE_NOTE, { connection, baseCwd, worktreeCwd, notePath }),
     deleteBranch: (connection: any, cwd: string, branch: string, force?: boolean) =>
       ipcRenderer.invoke(IPC.GIT_DELETE_BRANCH, { connection, cwd, branch, force }),
+    branchMerged: (connection: any, cwd: string, target: string, branch: string) =>
+      ipcRenderer.invoke(IPC.GIT_BRANCH_MERGED, { connection, cwd, target, branch }),
+    listFeatureNotes: (connection: any, cwd: string) =>
+      ipcRenderer.invoke(IPC.GIT_LIST_FEATURE_NOTES, { connection, cwd }),
   },
   worktree: {
-    // main→renderer: open the agent-driven create confirm popup.
-    onCreateRequest: (callback: (req: { requestId: string; parentProjectId: string; branch: string; notePath?: string }) => void) => {
-      const listener = (_e: Electron.IpcRendererEvent, req: any) => callback(req);
-      ipcRenderer.on(IPC.WORKTREE_CREATE_REQUEST, listener);
-      return () => ipcRenderer.removeListener(IPC.WORKTREE_CREATE_REQUEST, listener);
-    },
-    // renderer→main: report the popup outcome (created / cancelled / error).
-    resolveCreate: (resolution: { requestId: string; outcome: 'created' | 'cancelled' | 'error'; projectId?: string; baseBranch?: string; error?: string }) =>
-      ipcRenderer.invoke(IPC.WORKTREE_CREATE_RESOLVE, resolution),
-    // main→renderer: a pending create was resolved elsewhere (timeout) → dismiss.
-    onCreateClose: (callback: (requestId: string) => void) => {
-      const listener = (_e: Electron.IpcRendererEvent, payload: { requestId: string }) => callback(payload.requestId);
-      ipcRenderer.on(IPC.WORKTREE_CREATE_CLOSE, listener);
-      return () => ipcRenderer.removeListener(IPC.WORKTREE_CREATE_CLOSE, listener);
-    },
-    // main→renderer: open the finish/abandon confirm popup.
-    onCloseRequest: (callback: (req: { requestId: string; kind: 'finish' | 'abandon'; subProjectId: string }) => void) => {
-      const listener = (_e: Electron.IpcRendererEvent, req: any) => callback(req);
-      ipcRenderer.on(IPC.WORKTREE_CLOSE_REQUEST, listener);
-      return () => ipcRenderer.removeListener(IPC.WORKTREE_CLOSE_REQUEST, listener);
-    },
-    // renderer→main: report the close outcome.
-    resolveClose: (resolution: { requestId: string; outcome: 'closed' | 'cancelled' | 'busy' | 'non-ff' | 'base-dirty' | 'error'; error?: string }) =>
-      ipcRenderer.invoke(IPC.WORKTREE_CLOSE_RESOLVE, resolution),
-    // main→renderer: a pending close was resolved elsewhere (timeout) → dismiss.
-    onCloseClose: (callback: (requestId: string) => void) => {
-      const listener = (_e: Electron.IpcRendererEvent, payload: { requestId: string }) => callback(payload.requestId);
-      ipcRenderer.on(IPC.WORKTREE_CLOSE_CLOSE, listener);
-      return () => ipcRenderer.removeListener(IPC.WORKTREE_CLOSE_CLOSE, listener);
-    },
-    // renderer→main: lock + ff-only merge-back step.
+    // renderer→main: lock + ff-only merge-back step (finish/abandon themselves
+    // are user-initiated in the renderer — #lifecycle).
     finishMergeBack: (payload: { connection: any; featureCwd: string; baseCwd: string; baseBranch: string; featureBranch: string }) =>
       ipcRenderer.invoke(IPC.WORKTREE_FINISH_MERGE_BACK, payload),
   },

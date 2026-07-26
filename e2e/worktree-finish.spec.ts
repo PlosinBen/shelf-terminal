@@ -1,21 +1,16 @@
 import { test, expect, _electron as electron, type ElectronApplication, type Page } from '@playwright/test';
-import { openAgentTab, sendAgentPrompt } from './helpers';
 import { execFileSync } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
 
 /**
- * worktree_project_finish E2E — the agent-driven finish gate + orchestration.
+ * Finish worktree E2E — the user-initiated finish gate (#lifecycle).
  *
- * Self-close: the worktree sub-project's OWN agent tab calls the finish tool via
- * the fake provider's apptool scenario → confirm popup → on approve the renderer
- * runs lock+ff merge-back → teardown → delete branch. Base sits on `main`
- * (topology b), so the ff lands via the base-tree merge --ff-only path.
- *
- * Success = the worktree disappears; assertions are on git state + sidebar, not
- * an agent reply (the calling tab is torn down on success). Cancel keeps the tab,
- * so there we assert the calm agent reply.
+ * The worktree child's sidebar right-click menu → "Finish" opens the confirm
+ * popup; on approve the renderer runs lock+ff merge-back → teardown → delete
+ * branch. Base sits on `main` (topology b), so the ff lands via the base-tree
+ * merge --ff-only path. Success = the worktree sub-project disappears.
  */
 
 const BASE_ID = 'wt-finish-base';
@@ -58,19 +53,15 @@ function seed(userDataDir: string, base: string, feature: string) {
   fs.writeFileSync(path.join(userDataDir, 'projects.json'), JSON.stringify(projects), 'utf-8');
 }
 
-async function openAgentInSub(page: Page) {
+/** Right-click the worktree child row and click a menu item ("Finish" / "Abandon"). */
+async function openCloseMenu(page: Page, item: 'Finish' | 'Abandon') {
   const subItem = page.locator('.sidebar-item.worktree-child', { hasText: 'feature' });
-  await subItem.click();
-  const prompt = page.locator('.connect-prompt');
-  if (await prompt.isVisible({ timeout: 3_000 }).catch(() => false)) {
-    await prompt.click();
-  }
-  await expect(page.locator('.tab-bar .tab')).toHaveCount(1, { timeout: 8_000 });
-  await openAgentTab(page);
-  await expect(page.locator('.tab-bar .tab')).toHaveCount(2, { timeout: 5_000 });
+  await subItem.click({ button: 'right' });
+  await page.locator('.context-menu').waitFor({ state: 'visible', timeout: 5_000 });
+  await page.locator('.context-menu-item', { hasText: item }).click();
 }
 
-test.describe('worktree_project_finish gate', () => {
+test.describe('finish worktree gate', () => {
   let userDataDir: string;
   let root: string;
   let base: string;
@@ -99,8 +90,7 @@ test.describe('worktree_project_finish gate', () => {
   test('approve fast-forwards base, removes the worktree, deletes the branch', async () => {
     const featureTip = git(feature, ['rev-parse', 'HEAD']).trim();
 
-    await openAgentInSub(page);
-    await sendAgentPrompt(page, 'apptool:worktree_project.finish');
+    await openCloseMenu(page, 'Finish');
 
     const popup = page.locator('.worktree-dialog', { hasText: 'Finish Worktree' });
     await expect(popup).toBeVisible({ timeout: 5_000 });
@@ -117,20 +107,34 @@ test.describe('worktree_project_finish gate', () => {
     expect(git(base, ['branch', '--list', 'feature']).trim()).toBe('');
   });
 
-  test('cancel merges nothing and reports closed:false', async () => {
+  test('unchecking "delete branch" keeps the branch after finish', async () => {
+    await openCloseMenu(page, 'Finish');
+
+    const popup = page.locator('.worktree-dialog', { hasText: 'Finish Worktree' });
+    await expect(popup).toBeVisible({ timeout: 5_000 });
+    await popup.locator('.worktree-checkbox input[type="checkbox"]').uncheck();
+    await popup.locator('.conn-btn-next').click();
+    await expect(popup).not.toBeVisible({ timeout: 8_000 });
+
+    await expect(page.locator('.sidebar-item.worktree-child', { hasText: 'feature' })).toHaveCount(0, { timeout: 8_000 });
+    // Merged + worktree gone, but the branch was preserved.
+    expect(fs.existsSync(feature)).toBe(false);
+    expect(git(base, ['branch', '--list', 'feature']).trim()).toContain('feature');
+  });
+
+  test('cancel merges nothing and keeps the worktree', async () => {
     const mainBefore = git(base, ['rev-parse', 'main']).trim();
 
-    await openAgentInSub(page);
-    await sendAgentPrompt(page, 'apptool:worktree_project.finish');
+    await openCloseMenu(page, 'Finish');
 
     const popup = page.locator('.worktree-dialog', { hasText: 'Finish Worktree' });
     await expect(popup).toBeVisible({ timeout: 5_000 });
     await popup.locator('.conn-btn-cancel').click();
     await expect(popup).not.toBeVisible({ timeout: 5_000 });
 
-    // Nothing merged/removed; the agent got a calm decline.
+    // Nothing merged/removed.
     expect(git(base, ['rev-parse', 'main']).trim()).toBe(mainBefore);
     expect(fs.existsSync(feature)).toBe(true);
-    await expect(page.locator('.agent-turn-response')).toContainText('"closed":false', { timeout: 8_000 });
+    await expect(page.locator('.sidebar-item.worktree-child', { hasText: 'feature' })).toHaveCount(1);
   });
 });

@@ -23,8 +23,6 @@ import { parseHttpOrigin } from '../web-session-helpers';
 import { isGranted, grant } from '../web-grants';
 import { requestWebPermission } from '../web-permission';
 import { requestBrowserOpen, openWebTab } from '../browser-open';
-import { requestWorktreeCreate } from '../worktree/create-gate';
-import { requestWorktreeClose } from '../worktree/close-gate';
 
 /** Per-call context the bridge threads in (which tab/project asked). */
 export interface AppToolContext {
@@ -203,49 +201,10 @@ const REGISTRY: Record<string, AppToolDef> = {
         message: `Opened ${url} in a Web tab. Ask the user to log in there, then retry browser_fetch.` };
     },
   },
-  'worktree_project.create': {
-    // Mutation — gated by a client-owned confirm popup (requestWorktreeCreate),
-    // NOT the SDK tool prompt, so the gate is the single choke point even under
-    // bypass permission mode. The renderer performs the create-transaction
-    // (worktreeAdd → migrate note → add sub-project) and reports the outcome.
-    safe: false,
-    run: async (args, ctx) => {
-      const branch = typeof args.branch === 'string' ? args.branch.trim() : '';
-      if (!branch) throw new Error('worktree_project.create requires a "branch"');
-      const parentProjectId = ctx.projectId ?? '';
-      if (!parentProjectId) throw new Error('worktree_project.create: no calling project context');
-      const notePath = typeof args.notePath === 'string' && args.notePath.trim()
-        ? args.notePath.trim() : undefined;
-
-      const res = await requestWorktreeCreate({ parentProjectId, branch, notePath });
-
-      // Cancel is a NORMAL result (user said "not here") — return it calmly, not
-      // as a thrown error, so the agent adapts instead of treating it as a crash.
-      if (res.outcome === 'cancelled') {
-        return { created: false, cancelled: true, reason: res.error };
-      }
-      // A real failure (worktreeAdd / note migration) is fail-loud → throw so the
-      // op comes back ok:false and the agent knows not to proceed.
-      if (res.outcome === 'error') {
-        throw new Error(res.error ?? 'worktree create failed');
-      }
-      return { created: true, projectId: res.projectId, baseBranch: res.baseBranch };
-    },
-  },
-  'worktree_project.finish': {
-    // Self-close only: the feature's OWN agent finishes its OWN worktree (it has
-    // the case context for the two-layer confirm's explanation). Gated by a
-    // client-owned confirm popup; the renderer runs ff merge-back → teardown →
-    // delete branch and reports the outcome.
-    safe: false,
-    run: (_args, ctx) => runWorktreeClose('finish', ctx),
-  },
-  'worktree_project.abandon': {
-    // Like finish but no merge-back — the branch is discarded (force delete,
-    // permanent commit loss), guarded by the popup's loss warning.
-    safe: false,
-    run: (_args, ctx) => runWorktreeClose('abandon', ctx),
-  },
+  // NOTE: the agent has no worktree_project ops. The whole worktree lifecycle —
+  // create AND finish/abandon — is user-initiated UI (sidebar right-click menu),
+  // not agent tools (#lifecycle). Integration is consequential + environment-
+  // specific, so the human drives it; the agent only develops in the worktree.
   'app_skill.update': {
     safe: false,
     run: async (args) => {
@@ -269,38 +228,6 @@ const REGISTRY: Record<string, AppToolDef> = {
     },
   },
 };
-
-/**
- * Shared finish/abandon op body. Self-close: ctx.projectId is the worktree
- * sub-project being closed. Maps the popup outcome onto the tool result —
- * genuine failure (error) throws (ok:false); every other non-close outcome is a
- * CALM actionable result (closed:false + reason), so the agent adapts (retry on
- * busy, re-sync on non-ff, point the user at the base on base-dirty) instead of
- * treating it as a crash.
- */
-async function runWorktreeClose(
-  kind: 'finish' | 'abandon',
-  ctx: AppToolContext,
-): Promise<unknown> {
-  const subProjectId = ctx.projectId ?? '';
-  if (!subProjectId) throw new Error(`worktree_project.${kind}: no calling project context`);
-
-  const res = await requestWorktreeClose({ kind, subProjectId });
-  switch (res.outcome) {
-    case 'closed':
-      return { closed: true };
-    case 'cancelled':
-      return { closed: false, cancelled: true };
-    case 'busy':
-      return { closed: false, reason: 'busy', message: 'another finish is in progress for this repo — retry shortly' };
-    case 'non-ff':
-      return { closed: false, reason: 'non-ff', message: 'the base branch advanced — re-sync (merge base into the worktree) and retry' };
-    case 'base-dirty':
-      return { closed: false, reason: 'base-dirty', message: 'the base worktree has uncommitted changes — resolve them there, then retry' };
-    default:
-      throw new Error(res.error ?? `worktree ${kind} failed`);
-  }
-}
 
 async function deleteSkillSafe(name: string): Promise<void> {
   try {
