@@ -14,7 +14,7 @@ vi.mock('electron', () => ({
 const {
   listSkills, getSkill, createSkill, updateSkill, deleteSkill,
   parseSkillMeta, isValidSkillName, uniqueSkillName,
-  isSkillLocked, setSkillLocked, validateFrontmatterYaml,
+  isSkillLocked, setSkillLocked, isSkillDisabled, setSkillDisabled, validateFrontmatterYaml,
   resolveAuxPath, listSkillAuxFiles, readSkillFile, writeSkillFile, deleteSkillFile,
 } = await import('./skills-store');
 
@@ -271,5 +271,53 @@ describe('lock', () => {
   it('locking a non-existent skill is a no-op (cannot lock what is not there)', async () => {
     await setSkillLocked('ghost', true);
     expect(isSkillLocked('ghost')).toBe(false);
+  });
+});
+
+describe('disabled', () => {
+  it('defaults enabled; setSkillDisabled(true) disables, list reflects it', async () => {
+    await createSkill();
+    expect(isSkillDisabled('my-skill')).toBe(false);
+    expect((await listSkills())[0].disabled).toBeUndefined();
+    await setSkillDisabled('my-skill', true);
+    expect(isSkillDisabled('my-skill')).toBe(true);
+    expect((await listSkills())[0].disabled).toBe(true);
+  });
+
+  it('setSkillDisabled(false) re-enables', async () => {
+    await createSkill();
+    await setSkillDisabled('my-skill', true);
+    await setSkillDisabled('my-skill', false);
+    expect(isSkillDisabled('my-skill')).toBe(false);
+  });
+
+  it('the disabled marker survives a rename (lives in the folder)', async () => {
+    await createSkill();
+    await setSkillDisabled('my-skill', true);
+    await updateSkill('my-skill', '---\nname: renamed\ndescription: d\n---\n');
+    expect(isSkillDisabled('renamed')).toBe(true);
+  });
+
+  it('disabling a non-existent skill is a no-op', async () => {
+    await setSkillDisabled('ghost', true);
+    expect(isSkillDisabled('ghost')).toBe(false);
+  });
+
+  it('lock and disabled are independent axes', async () => {
+    await createSkill();
+    await setSkillLocked('my-skill', true);
+    await setSkillDisabled('my-skill', true);
+    const meta = (await listSkills())[0];
+    expect(meta.locked).toBe(true);
+    expect(meta.disabled).toBe(true);
+    await setSkillDisabled('my-skill', false);
+    expect(isSkillLocked('my-skill')).toBe(true); // lock untouched
+    expect(isSkillDisabled('my-skill')).toBe(false);
+  });
+
+  it('the `.disabled` marker is reserved from aux-file ops', async () => {
+    await createSkill();
+    expect(resolveAuxPath('my-skill', '.disabled')).toBeNull();
+    expect((await deleteSkillFile('my-skill', '.disabled')).ok).toBe(false);
   });
 });

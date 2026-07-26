@@ -37,6 +37,10 @@ function lockSourceSkill(name: string) {
   fs.writeFileSync(path.join(userDataDir, 'skills', 'skills', name, '.locked'), '');
 }
 
+function disableSourceSkill(name: string) {
+  fs.writeFileSync(path.join(userDataDir, 'skills', 'skills', name, '.disabled'), '');
+}
+
 describe('getAppInstanceId', () => {
   it('generates a stable UUID persisted in userData', () => {
     const a = getAppInstanceId();
@@ -85,6 +89,27 @@ describe('projectSkillsLocal', () => {
     expect(fs.existsSync(path.join(dst, 'skills', 'a', 'SKILL.md'))).toBe(true);
     expect(fs.existsSync(path.join(dst, 'skills', 'a', '.locked'))).toBe(false);
   });
+
+  it('drops a DISABLED skill folder entirely; enabled siblings remain', () => {
+    seedSourceSkill('a', 'A');
+    seedSourceSkill('b', 'B');
+    disableSourceSkill('b');
+    projectSkillsLocal('app-1');
+    const dst = localSkillsTarget('app-1');
+    expect(fs.existsSync(path.join(dst, 'skills', 'a', 'SKILL.md'))).toBe(true);
+    // whole `b` subtree gone — not just the marker
+    expect(fs.existsSync(path.join(dst, 'skills', 'b'))).toBe(false);
+  });
+
+  it('re-enabling a skill restores it to the projection', () => {
+    seedSourceSkill('b', 'B');
+    disableSourceSkill('b');
+    projectSkillsLocal('app-1');
+    expect(fs.existsSync(path.join(localSkillsTarget('app-1'), 'skills', 'b'))).toBe(false);
+    fs.rmSync(path.join(userDataDir, 'skills', 'skills', 'b', '.disabled'));
+    projectSkillsLocal('app-1');
+    expect(fs.existsSync(path.join(localSkillsTarget('app-1'), 'skills', 'b', 'SKILL.md'))).toBe(true);
+  });
 });
 
 describe('listSkillFilesRel + hashSkillsTree', () => {
@@ -116,5 +141,19 @@ describe('listSkillFilesRel + hashSkillsTree', () => {
     expect(listSkillFilesRel(skillsSourceRoot())).not.toContain('skills/a/.locked');
     // ...and must not perturb the content hash → no incidental remote re-sync.
     expect(hashSkillsTree(skillsSourceRoot())).toBe(h1);
+  });
+
+  it('DISABLING drops the skill from the listing AND changes the hash (opposite of lock)', () => {
+    seedSourceSkill('a', 'A');
+    seedSourceSkill('b', 'B');
+    const h1 = hashSkillsTree(skillsSourceRoot());
+    disableSourceSkill('b');
+    const rels = listSkillFilesRel(skillsSourceRoot());
+    // whole `b` subtree gone from the list, and the marker itself never appears
+    expect(rels).toContain('skills/a/SKILL.md');
+    expect(rels).not.toContain('skills/b/SKILL.md');
+    expect(rels).not.toContain('skills/b/.disabled');
+    // hash MUST change → `.synced` gate re-syncs the remote
+    expect(hashSkillsTree(skillsSourceRoot())).not.toBe(h1);
   });
 });

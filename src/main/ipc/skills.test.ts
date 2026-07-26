@@ -7,6 +7,7 @@ vi.mock('electron', () => ({
 }));
 
 const setSkillLocked = vi.fn();
+const setSkillDisabled = vi.fn();
 const updateSkill = vi.fn();
 vi.mock('../skills-store', () => ({
   listSkills: vi.fn(),
@@ -15,6 +16,7 @@ vi.mock('../skills-store', () => ({
   updateSkill: (...a: unknown[]) => updateSkill(...a),
   deleteSkill: vi.fn(),
   setSkillLocked: (...a: unknown[]) => setSkillLocked(...a),
+  setSkillDisabled: (...a: unknown[]) => setSkillDisabled(...a),
   listSkillAuxFiles: vi.fn(),
   readSkillFile: vi.fn(),
   writeSkillFile: vi.fn(),
@@ -34,6 +36,7 @@ const { IPC } = await import('@shared/ipc-channels');
 beforeEach(() => {
   handlers.clear();
   setSkillLocked.mockReset();
+  setSkillDisabled.mockReset();
   updateSkill.mockReset();
   onSkillsChanged.mockReset();
   notifyRendererSkillsChanged.mockReset();
@@ -57,6 +60,23 @@ describe('SKILLS_SET_LOCKED handler', () => {
     expect(setSkillLocked).toHaveBeenCalledWith('a', false);
     expect(notifyRendererSkillsChanged).toHaveBeenCalledTimes(1);
     expect(onSkillsChanged).not.toHaveBeenCalled();
+  });
+});
+
+describe('SKILLS_SET_DISABLED handler', () => {
+  // Disabling changes the projected/synced tree (the skill's folder is dropped),
+  // so — UNLIKE lock — it MUST run the full onSkillsChanged() pipeline (re-project
+  // + remote re-sync + hot-reload), not the badge-only renderer notify.
+  it('sets the marker and runs the full onSkillsChanged pipeline', async () => {
+    await handlers.get(IPC.SKILLS_SET_DISABLED)!({}, { name: 'a', disabled: true });
+    expect(setSkillDisabled).toHaveBeenCalledWith('a', true);
+    expect(onSkillsChanged).toHaveBeenCalledTimes(1);
+  });
+
+  it('re-enabling takes the same full-pipeline path', async () => {
+    await handlers.get(IPC.SKILLS_SET_DISABLED)!({}, { name: 'a', disabled: false });
+    expect(setSkillDisabled).toHaveBeenCalledWith('a', false);
+    expect(onSkillsChanged).toHaveBeenCalledTimes(1);
   });
 });
 
