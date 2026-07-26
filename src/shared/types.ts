@@ -368,6 +368,12 @@ export interface AppSettings {
   /** How long (ms) to coalesce dirty writes before flushing to IDB.
    *  Lower = less data lost on crash, higher = fewer IDB transactions. */
   agentHistorySaveThrottleMs: number;
+  /** Minutes an agent tab may sit idle before its agent-server exec + provider
+   *  CLI are torn down to reclaim memory; the next message transparently
+   *  respawns + resumes the same session. `0` disables (opt-in). Only applies
+   *  to fate-shared transports (local/docker/wsl) — ssh has its own idle
+   *  shutdown. See claude-idle-teardown. */
+  agentIdleTeardownMinutes: number;
   providerModels?: Partial<Record<PmProviderType | 'claude', ProviderModel[]>>;
   /** Persisted width (px) of the left project sidebar. Restored at launch;
    *  clamped to a usable range when applied. */

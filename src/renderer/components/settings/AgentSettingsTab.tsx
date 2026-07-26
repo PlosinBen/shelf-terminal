@@ -40,6 +40,22 @@ export function AgentSettingsTab({ draft, updateDraft }: Props) {
       <div className="settings-sub-hint">How often the in-memory state flushes to disk. Lower = less data loss on crash, higher = fewer IDB writes.</div>
 
       <div className="settings-divider" />
+      <div className="settings-section-title">Memory</div>
+      <div className="settings-group">
+        <label className="settings-label">Idle Teardown (min)</label>
+        <input
+          className="settings-input"
+          type="number"
+          min={0}
+          max={180}
+          step={1}
+          value={draft.agentIdleTeardownMinutes ?? 0}
+          onChange={(e) => updateDraft({ agentIdleTeardownMinutes: Math.max(0, Number(e.target.value) || 0) })}
+        />
+      </div>
+      <div className="settings-sub-hint">Free memory by shutting down an agent tab's process after it sits idle this many minutes; the next message reconnects and resumes the same conversation (~2s). 0 = never (off). Applies to local/docker/wsl agents.</div>
+
+      <div className="settings-divider" />
       <div className="settings-section-title">Display</div>
       {AGENT_DISPLAY_KEYS.map(({ key, label, hint }) => (
         <React.Fragment key={key}>

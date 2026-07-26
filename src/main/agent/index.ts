@@ -5,6 +5,7 @@ import type { Connection, AgentProvider } from '@shared/types';
 import type { AgentSessionState, AgentEvent, AgentBackend, PermissionResult } from './types';
 import { createRemoteBackend, syncSkillsForConnection } from './remote';
 import { loadSettings } from '../settings-store';
+import { createIdleTracker } from './idle-tracker';
 import { projectSkillsLocal } from '../skills-projection';
 import { projectMcpLocal } from '../mcp-projection';
 import { getAppInstanceId } from '../app-instance-id';
@@ -29,9 +30,40 @@ interface SessionInstance {
    */
   activeTurns: number;
   pendingPermissions: Map<string, (result: PermissionResult) => void>;
+  /**
+   * True while the tab's exec + provider CLI have been torn down for idleness
+   * (idle-teardown). The session entry is KEPT; the next `sendMessage` clears
+   * this and the backend's `query()` transparently respawns + resumes. See
+   * claude-idle-teardown.
+   */
+  hibernated?: boolean;
 }
 
 const sessions = new Map<string, SessionInstance>();
+
+/**
+ * Idle-teardown: drop a tab's exec + provider CLI to reclaim memory, KEEPING the
+ * session entry so the next send transparently respawns + resumes (backend
+ * `query()` re-runs `ensureProcReady`, resuming from `lastSdkSessionId`). No-op
+ * if the tab is gone, busy, or already hibernated.
+ */
+function hibernateTab(tabId: string): void {
+  const session = sessions.get(tabId);
+  if (!session || session.hibernated || session.activeTurns > 0) return;
+  log.info('agent', `[agent:${tabId.slice(0, 8)}] idle-teardown → dispose exec+CLI (resumes on next send)`);
+  session.backend.dispose();
+  session.hibernated = true;
+}
+
+// Per-tab idle timer. `arm` on turn-end, `touch` on activity; fires hibernateTab
+// after the configured timeout (0 = disabled). Timeout seeded in initAgentManager
+// and updated on settings save (setAgentIdleTeardownMinutes).
+const idleTracker = createIdleTracker({ onIdle: hibernateTab });
+
+/** Update the idle-teardown timeout (minutes; 0 disables). Called on settings save. */
+export function setAgentIdleTeardownMinutes(minutes: number): void {
+  idleTracker.setTimeoutMinutes(minutes);
+}
 
 // ── Internal output observers (for Telegram bridge etc.) ──
 // Lets in-process modules (PM telegram bridge) tee EVERY tab's outgoing agent
@@ -66,6 +98,10 @@ let getWindow: (() => BrowserWindow | null) | null = null;
 
 export function initAgentManager(windowGetter: () => BrowserWindow | null): void {
   getWindow = windowGetter;
+
+  // Seed the idle-teardown timeout from settings (0 = disabled).
+  const s0 = loadSettings();
+  idleTracker.setTimeoutMinutes(s0.ok ? (s0.value.agentIdleTeardownMinutes ?? 0) : 0);
 
   // After ANY skill mutation: get the new files onto each live session's
   // consumption path, then tell that session to hot-reload so the edit lands
@@ -416,6 +452,14 @@ async function sendMessage(
   const tag = `[agent:${tabId.slice(0, 8)}]`;
   log.info('agent', `${tag} send promptLen=${(prompt ?? '').length}${prefs?.configEdit ? ` configEdit=${prefs.configEdit.key}` : ''}`);
 
+  // Activity: cancel any pending idle-teardown. If the tab was hibernated, the
+  // backend.query() below transparently respawns + resumes from lastSdkSessionId.
+  idleTracker.touch(tabId);
+  if (session.hibernated) {
+    session.hibernated = false;
+    log.info('agent', `${tag} waking hibernated tab (respawn + resume)`);
+  }
+
   session.activeTurns += 1;
   session.state = 'streaming';
   send(IPC.AGENT_STATUS, tabId, { state: 'streaming' });
@@ -492,6 +536,8 @@ async function sendMessage(
       // above (unchanged telegram-bridge behavior); this is the session-level
       // idle the renderer's tab-wide streaming flag consumes.
       send(IPC.AGENT_STATUS, tabId, { state: 'idle' });
+      // Tab is idle → arm idle-teardown (no-op if disabled / already busy again).
+      idleTracker.arm(tabId);
     }
     for (const resolve of session.pendingPermissions.values()) {
       resolve({ behavior: 'deny', message: 'Turn ended' });
@@ -576,6 +622,7 @@ async function stopSession(tabId: string): Promise<boolean> {
 async function destroySession(tabId: string): Promise<boolean> {
   const session = sessions.get(tabId);
   if (!session) return false;
+  idleTracker.forget(tabId);
   session.backend.dispose();
   sessions.delete(tabId);
   return true;
