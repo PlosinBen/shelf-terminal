@@ -298,12 +298,16 @@ export function createCodexBackend(deps: CodexDeps = {}): ServerBackend {
         currentEffort ??= cur.currentEffort;
         currentPermissionMode ??= codexModeIdToShelf(sessionModes?.currentModeId);
         return buildCapabilities();
-      } catch {
+      } catch (err: any) {
         // A fresh codex session most commonly fails when unauthenticated →
         // surface the auth pane rather than an empty capability set. authMethod
         // drives the AuthPane's Login button (oauth branch); without it the pane
-        // shows no way to start the device-code login. (T4.0 will refine to
-        // inspect the ACP auth_required error specifically.)
+        // shows no way to start the device-code login. FAIL-LOUD: log the real
+        // session/new failure — this is a CATCH-ALL (any error → authRequired), so
+        // without the message a NON-auth failure (config/MCP/timeout) is silently
+        // mislabeled as "needs login". (T4.0 will refine to inspect the ACP
+        // auth_required error specifically.)
+        serverLog('warn', 'codex', `gatherCapabilities failed → reporting authRequired: ${err?.message ?? String(err)}`);
         return { models: [], permissionModes: [], effortLevels: [], slashCommands: [], authRequired: true, authMethod: CODEX_AUTH_METHOD };
       }
     },

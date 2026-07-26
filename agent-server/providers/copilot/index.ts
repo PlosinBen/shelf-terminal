@@ -325,11 +325,14 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
         currentEffort ??= cur.currentEffort;
         currentPermissionMode ??= copilotModeIdToShelf(sessionModes?.currentModeId);
         return buildCapabilities();
-      } catch {
+      } catch (err: any) {
         // A fresh session most commonly fails when unauthenticated → surface the
         // auth pane rather than an empty capability set. authMethod drives the
         // AuthPane's Login button (oauth branch); without it the pane shows no way
-        // to start login.
+        // to start login. FAIL-LOUD: log the real failure — this is a catch-all, so
+        // without the message a non-auth failure (CLI hang/config) is silently
+        // mislabeled as "needs login".
+        serverLog('warn', 'copilot', `gatherCapabilities failed → reporting authRequired: ${err?.message ?? String(err)}`);
         return { models: [], permissionModes: [], effortLevels: [], slashCommands: [], authRequired: true, authMethod: COPILOT_AUTH_METHOD };
       }
     },
