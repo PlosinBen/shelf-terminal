@@ -206,6 +206,10 @@ export function createCodexBackend(deps: CodexDeps = {}): ServerBackend {
     if (session) driver.forget(session.sessionId);
 
     const c = ensureConnection(input.cwd, appId);
+    // ACP requires the `initialize` handshake before any session op; codex-acp
+    // rejects session/new with "Not initialized" otherwise. openAcpConnection fired
+    // it on open — await it here (overlaps the MCP/skill setup below).
+    await c.initialized;
     const root = codexSkillsRoot(appId);
     const mcp = loadProjectedMcpServers(appId);
     for (const e of mcp.errors) serverLog('warn', 'codex', `MCP config: ${e}`);

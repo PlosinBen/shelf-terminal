@@ -10,6 +10,7 @@ import {
   client,
   ndJsonStream,
   methods,
+  PROTOCOL_VERSION,
   type AgentApp,
   type ClientContext,
   type Stream,
@@ -25,6 +26,15 @@ export interface AcpConnection {
   readonly closed: Promise<void>;
   /** Aborts when the connection closes. */
   readonly signal: AbortSignal;
+  /**
+   * Resolves when the mandatory ACP `initialize` handshake completes. Any session
+   * op (session/new, session/resume) MUST await this first — ACP requires
+   * `initialize` as the FIRST request, and spec-strict agents (codex-acp) reject
+   * session ops with `{ details: "Not initialized" }` otherwise. Lenient agents
+   * (copilot --acp, the test mock) tolerate its absence, which is why the gap only
+   * surfaced on codex. See agent-providers.
+   */
+  readonly initialized: Promise<void>;
   /** Close the connection (and the child process, if any). */
   close(error?: unknown): void;
 }
@@ -59,10 +69,22 @@ export function openAcpConnection(
   }
   // Overload resolves by runtime type (Stream vs AgentApp) — the SDK accepts both.
   const conn = app.connect(target as Stream);
+  // ACP mandates `initialize` as the FIRST request, before any session op. Fire it
+  // eagerly on open so every connection is handshaken; session ops await
+  // `initialized`. We advertise NO fs/terminal client capabilities — Shelf only
+  // handles permission requests over ACP (fs/terminal tools run agent-side). Without
+  // this, codex-acp rejects session/new with { details: "Not initialized" }.
+  const initialized = conn.agent
+    .request(methods.agent.initialize, {
+      protocolVersion: PROTOCOL_VERSION,
+      clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
+    })
+    .then(() => undefined);
   return {
     agent: conn.agent,
     closed: conn.closed,
     signal: conn.signal,
+    initialized,
     close: (error?: unknown) => conn.close(error),
   };
 }

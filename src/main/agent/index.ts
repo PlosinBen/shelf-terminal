@@ -548,15 +548,6 @@ async function sendMessage(
   return true;
 }
 
-// Post-login re-init retry schedule (ms before each probe). The device-code
-// completion signal (account/login/completed → auth_login_done{ok}) fires BEFORE
-// the CLI finishes finalizing the credential: codex runs an oauth token exchange
-// and persists auth.json ~1s AFTER completion (observed live). Probing session/new
-// in that gap fails → mislabeled authRequired → the pane bounces back. So probe
-// with bounded backoff (each attempt respawns fresh, re-reading the latest creds);
-// a credential that settles a second late still clears the pane. ~3.7s worst case.
-const POST_LOGIN_REINIT_BACKOFF_MS = [0, 1200, 2500];
-
 /**
  * Post-login re-init (Gap C): after a successful device-login, drop the provider's
  * stale (pre-login) ACP connection so the capabilities probe respawns and re-reads
@@ -564,52 +555,32 @@ const POST_LOGIN_REINIT_BACKOFF_MS = [0, 1200, 2500];
  * WITHOUT this the running `--acp` process — spawned at caps time, unauthenticated —
  * keeps serving stale credentials and the first post-login turn errors.
  *
- * Retries with backoff to ride out the completion-vs-persistence race (see the
- * schedule above). The FRESH caps drive the pane: the renderer already cleared it
- * optimistically (finishLogin on ok), so an authed result leaves it cleared; only
- * if EVERY probe still reports unauth do we re-assert AGENT_AUTH_REQUIRED (login
- * genuinely didn't stick, or the account lacks entitlement). Fail-loud throughout.
+ * The FRESH caps drive the pane: the renderer already cleared it optimistically
+ * (finishLogin on ok), so an authed result leaves it cleared; a still-unauth result
+ * re-asserts AGENT_AUTH_REQUIRED (login genuinely didn't stick). Fail-loud on error.
  */
 async function reinitAfterLogin(tabId: string): Promise<void> {
-  const first = sessions.get(tabId);
-  if (!first?.backend.getCapabilities) return;
+  const session = sessions.get(tabId);
+  if (!session?.backend.getCapabilities) return;
   const tag = `[agent:${tabId.slice(0, 8)}]`;
-  const provider = first.provider;
+  const provider = session.provider;
   const settings = loadSettings();
   const customModels = settings.ok
     ? settings.value.providerModels?.[provider as keyof NonNullable<typeof settings.value.providerModels>]
     : undefined;
-  log.info('agent', `${tag} login ok — re-initing ${provider}: dropping the stale ACP connection + re-fetching capabilities (with backoff for late credential settle)`);
-
-  for (let attempt = 0; attempt < POST_LOGIN_REINIT_BACKOFF_MS.length; attempt++) {
-    const delay = POST_LOGIN_REINIT_BACKOFF_MS[attempt];
-    if (delay) await new Promise((r) => setTimeout(r, delay));
-    const session = sessions.get(tabId);
-    if (!session?.backend.getCapabilities) return; // tab closed mid-retry
-    const isLast = attempt === POST_LOGIN_REINIT_BACKOFF_MS.length - 1;
-    // Respawn fresh each attempt so it re-reads the latest (settling) credential.
-    session.backend.reconnect?.();
-    try {
-      const caps = await session.backend.getCapabilities(session.cwd, customModels);
-      if (!caps.authRequired) {
-        send(IPC.AGENT_CAPABILITIES, tabId, caps);
-        log.info('agent', `${tag} re-inited after login — capabilities refreshed, authed (attempt ${attempt + 1}/${POST_LOGIN_REINIT_BACKOFF_MS.length})`);
-        return;
-      }
-      if (isLast) {
-        // Every probe still reports unauth → re-assert the pane, fail-loud. The
-        // credential never became effective (wrong config-home, or the account lacks
-        // entitlement — codex needs a working ChatGPT subscription; that's out of scope).
-        send(IPC.AGENT_CAPABILITIES, tabId, caps);
-        send(IPC.AGENT_AUTH_REQUIRED, tabId, provider);
-        log.warn('agent', `${tag} post-login re-init: STILL authRequired for ${provider} after ${POST_LOGIN_REINIT_BACKOFF_MS.length} probes — re-showing the auth pane (credential not effective, or account lacks entitlement)`);
-      } else {
-        log.info('agent', `${tag} post-login caps still authRequired (attempt ${attempt + 1}) — credential may still be settling; retrying`);
-      }
-    } catch (err: any) {
-      log.error('agent', `${tag} post-login re-init probe failed (attempt ${attempt + 1}): ${err?.message ?? err}`);
-      if (isLast) return;
+  log.info('agent', `${tag} login ok — re-initing ${provider}: dropping the stale ACP connection + re-fetching capabilities`);
+  session.backend.reconnect?.();
+  try {
+    const caps = await session.backend.getCapabilities(session.cwd, customModels);
+    send(IPC.AGENT_CAPABILITIES, tabId, caps);
+    if (caps.authRequired) {
+      send(IPC.AGENT_AUTH_REQUIRED, tabId, provider);
+      log.warn('agent', `${tag} post-login re-init: STILL authRequired for ${provider} — re-showing the auth pane (login did not stick)`);
+    } else {
+      log.info('agent', `${tag} re-inited after login — capabilities refreshed, authed`);
     }
+  } catch (err: any) {
+    log.error('agent', `${tag} post-login re-init failed: ${err?.message ?? err}`);
   }
 }
 

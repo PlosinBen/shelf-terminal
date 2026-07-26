@@ -224,6 +224,10 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
     // (it calls skillTarget + projectAppSkills before this) — the backend does no
     // fs. copilot --acp scans config-home for them (ACP has no per-session field).
     const c = ensureConnection(input.cwd, appId);
+    // ACP requires the `initialize` handshake before any session op. copilot --acp
+    // has tolerated its absence, but sending it is spec-correct and consistent with
+    // codex-acp (which hard-rejects session/new otherwise). Overlaps the setup below.
+    await c.initialized;
     const mcp = loadProjectedMcpServers(appId);
     // Fail-loud: a bad/incomplete MCP entry is logged, not silently dropped.
     for (const e of mcp.errors) serverLog('warn', 'copilot', `MCP config: ${e}`);

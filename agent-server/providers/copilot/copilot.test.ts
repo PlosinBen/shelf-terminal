@@ -215,6 +215,22 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
     backend.dispose();
   });
 
+  it('sends the ACP initialize handshake BEFORE session/new', async () => {
+    // Shared acp/ toolkit change: initialize must precede session/new (spec-correct;
+    // codex-acp hard-rejects otherwise, copilot --acp tolerated its absence).
+    const calls: string[] = [];
+    const mock = createMockAcpAgent({
+      onInitialize: () => calls.push('initialize'),
+      onNewSession: () => calls.push('session/new'),
+    });
+    const backend = createCopilotBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
+
+    await backend.gatherCapabilities!('/tmp/project');
+    expect(calls).toEqual(['initialize', 'session/new']);
+
+    backend.dispose();
+  });
+
   it('unauthenticated caps carry an oauth authMethod (AuthPane Login button, Gap A)', async () => {
     // A caps probe that can't reach a session (here: the spawn throws) is treated
     // as unauthenticated. WITHOUT authMethod the AuthPane (gated on

@@ -201,6 +201,23 @@ describe('codex backend (via mock ACP agent)', () => {
     backend.dispose();
   });
 
+  it('sends the ACP initialize handshake BEFORE session/new (codex-acp rejects "Not initialized" otherwise)', async () => {
+    // Regression: the toolkit skipped `initialize`, so codex-acp rejected session/new
+    // with { details: "Not initialized" } and it was misreported as authRequired.
+    // Assert the handshake happens AND precedes session/new.
+    const calls: string[] = [];
+    const mock = createMockAcpAgent({
+      onInitialize: () => calls.push('initialize'),
+      onNewSession: () => calls.push('session/new'),
+    });
+    const backend = createCodexBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
+
+    await backend.gatherCapabilities!('/tmp/project');
+    expect(calls).toEqual(['initialize', 'session/new']);
+
+    backend.dispose();
+  });
+
   it('unauthenticated caps carry an oauth authMethod (AuthPane Login button, Gap A)', async () => {
     // A caps probe that can't reach a session (here: the spawn throws) is treated
     // as unauthenticated. WITHOUT authMethod the AuthPane (gated on

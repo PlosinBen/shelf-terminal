@@ -36,6 +36,9 @@ export interface MockAgentScript {
   updatesOnPrompt?: SessionUpdate[];
   /** Stop reason returned by session/prompt (default: 'end_turn'). */
   stopReason?: StopReason;
+  /** Called with the `initialize` params — lets a test assert the ACP handshake
+   *  happened (and, via a shared recorder, that it preceded session/new). */
+  onInitialize?: (params: unknown) => void;
   /** Called with each prompt's params — lets a test capture what was sent. */
   onPrompt?: (params: unknown) => void;
   /** Called with session/new params (e.g. to assert additionalDirectories). */
@@ -63,11 +66,14 @@ export function createMockAcpAgent(script: MockAgentScript = {}): AgentApp {
   const stopReason: StopReason = script.stopReason ?? 'end_turn';
 
   return agent({ name: 'mock-acp-agent' })
-    .onRequest('initialize', ({ params }) => ({
-      protocolVersion: params.protocolVersion,
-      agentCapabilities: { loadSession: true, promptCapabilities: { image: true } },
-      authMethods,
-    }))
+    .onRequest('initialize', ({ params }) => {
+      script.onInitialize?.(params);
+      return {
+        protocolVersion: params.protocolVersion,
+        agentCapabilities: { loadSession: true, promptCapabilities: { image: true } },
+        authMethods,
+      };
+    })
     .onRequest('session/new', async ({ params, client }) => {
       script.onNewSession?.(params);
       if (script.commandsOnNewSession) {
