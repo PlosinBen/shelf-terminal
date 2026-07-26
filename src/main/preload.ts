@@ -146,6 +146,8 @@ contextBridge.exposeInMainWorld('shelfApi', {
     delete: (name: string) => ipcRenderer.invoke(IPC.SKILLS_DELETE, name),
     setLocked: (name: string, locked: boolean) =>
       ipcRenderer.invoke(IPC.SKILLS_SET_LOCKED, { name, locked }),
+    setDisabled: (name: string, disabled: boolean) =>
+      ipcRenderer.invoke(IPC.SKILLS_SET_DISABLED, { name, disabled }),
     listFiles: (name: string) => ipcRenderer.invoke(IPC.SKILLS_LIST_FILES, name),
     readFile: (name: string, path: string) =>
       ipcRenderer.invoke(IPC.SKILLS_READ_FILE, { name, path }),

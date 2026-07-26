@@ -105,12 +105,13 @@ interface ShelfApi {
     readImage: (projectId: string, filename: string) => Promise<ArrayBuffer | null>;
   };
   skills: {
-    list: () => Promise<Array<{ name: string; description?: string; locked?: boolean }>>;
+    list: () => Promise<Array<{ name: string; description?: string; locked?: boolean; disabled?: boolean }>>;
     get: (name: string) => Promise<string | null>;
     create: () => Promise<{ name: string; description?: string }>;
     update: (name: string, content: string) => Promise<{ ok: boolean; name?: string; error?: string }>;
     delete: (name: string) => Promise<void>;
     setLocked: (name: string, locked: boolean) => Promise<void>;
+    setDisabled: (name: string, disabled: boolean) => Promise<void>;
     /** Aux files inside a skill folder (scripts/reference docs — NOT SKILL.md). */
     listFiles: (name: string) => Promise<string[]>;
     readFile: (name: string, path: string) => Promise<string | null>;

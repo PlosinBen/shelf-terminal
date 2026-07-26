@@ -1,7 +1,7 @@
 import { ipcMain } from 'electron';
 import { IPC } from '@shared/ipc-channels';
 import {
-  listSkills, getSkill, createSkill, updateSkill, deleteSkill, setSkillLocked,
+  listSkills, getSkill, createSkill, updateSkill, deleteSkill, setSkillLocked, setSkillDisabled,
   listSkillAuxFiles, readSkillFile, writeSkillFile, deleteSkillFile,
 } from '../skills-store';
 import { onSkillsChanged, notifyRendererSkillsChanged } from '../skills-sync';
@@ -44,6 +44,16 @@ export function registerSkillsHandlers(): void {
   ipcMain.handle(IPC.SKILLS_SET_LOCKED, async (_event, payload: { name: string; locked: boolean }) => {
     await setSkillLocked(payload.name, payload.locked);
     notifyRendererSkillsChanged();
+  });
+
+  // Enable/disable is the OPPOSITE of lock: it changes the projected/synced tree
+  // (a disabled skill's folder is dropped, so its description leaves context), so
+  // it MUST run the full onSkillsChanged() pipeline — re-project locally, re-mirror
+  // to live remotes (hash-gated), hot-reload live sessions — not the badge-only
+  // notifyRendererSkillsChanged the lock handler uses.
+  ipcMain.handle(IPC.SKILLS_SET_DISABLED, async (_event, payload: { name: string; disabled: boolean }) => {
+    await setSkillDisabled(payload.name, payload.disabled);
+    onSkillsChanged();
   });
 
   // Aux files: the manager is, like the agent bridge, just a TRIGGER — writes

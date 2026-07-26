@@ -78,6 +78,10 @@ export const IPC = {
   SKILLS_UPDATE: 'skills:update',
   SKILLS_DELETE: 'skills:delete',
   SKILLS_SET_LOCKED: 'skills:set-locked',
+  // Enable/disable a skill's MOUNT (present `.disabled` marker = excluded from the
+  // projected/synced tree). UNLIKE set-locked, this runs the full onSkillsChanged
+  // pipeline (re-project + remote re-sync + hot-reload) — see ipc/skills.ts.
+  SKILLS_SET_DISABLED: 'skills:set-disabled',
   // Aux files inside a skill folder (scripts/reference docs — NOT SKILL.md, which
   // goes through SKILLS_GET/UPDATE). Mirror the skills-store aux-file fns.
   SKILLS_LIST_FILES: 'skills:list-files',
