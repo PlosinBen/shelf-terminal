@@ -1,4 +1,7 @@
 import { test, expect } from './helpers';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 
 // App-level Skills panel (no project needed). Covers the L1 UI wire:
 // open → New (template) → edit frontmatter name → Save (renames the folder) →
@@ -28,6 +31,51 @@ test('skills: create, rename via save, list reflects the new name', async ({ she
   await page.locator('.skills-view .notes-back').click();
   await expect(page.locator('.skills-list-name')).toHaveText('kibana-connect');
   await expect(page.locator('.skills-list-desc')).toContainText('reach kibana');
+});
+
+// Optional (disable-able) skills: the enable/disable toggle is a MOUNT decision,
+// so it must be asserted against the PROJECTED TREE, not the panel list — a
+// disabled skill STILL shows in the panel (you need it visible to re-enable),
+// but its folder is dropped from ~/.shelf/apps/<appId>/skills/skills/<name>.
+// Store/projection/hash logic is unit-covered; this proves the UI→pipeline wire.
+test('skills: disable removes the skill from the projected tree; enable restores it', async ({ shelfApp }) => {
+  const { page, userDataDir } = shelfApp;
+
+  // Create a skill named `kibana-connect` (see the create/rename test above).
+  await page.locator('.right-tab-btn', { hasText: 'Skills' }).click();
+  await page.locator('.skills-view .notes-new-btn').click();
+  await page.locator('.skills-view .notes-textarea')
+    .fill('---\nname: kibana-connect\ndescription: reach kibana\n---\n\nssh to bastion');
+  await page.locator('.skills-view .notes-send-btn').click();
+  await expect(page.locator('.skills-view .skills-error')).toHaveCount(0);
+  await page.locator('.skills-view .notes-back').click();
+  await expect(page.locator('.skills-list-name')).toHaveText('kibana-connect');
+
+  // The projected consumption path for THIS app instance (creating the skill ran
+  // the pipeline, which stamps app-instance-id + projects locally).
+  const appId = fs.readFileSync(path.join(userDataDir, 'app-instance-id'), 'utf-8').trim();
+  const projected = path.join(os.homedir(), '.shelf', 'apps', appId, 'skills', 'skills', 'kibana-connect');
+  // The `.disabled` marker in the SOURCE tree is what survives an app restart
+  // (ensureScaffold never re-seeds skill folders) — assert it as the persistence substrate.
+  const sourceMarker = path.join(userDataDir, 'skills', 'skills', 'kibana-connect', '.disabled');
+
+  // Enabled by default → projected, no source marker.
+  await expect.poll(() => fs.existsSync(projected)).toBe(true);
+  expect(fs.existsSync(sourceMarker)).toBe(false);
+
+  // Disable via the list-row power toggle → folder drops from the projected tree,
+  // marker persists in source, and the row/toggle reflect the disabled state.
+  await page.locator('.skills-enable-toggle').click();
+  await expect(page.locator('.skills-list-item.disabled')).toBeVisible();
+  await expect(page.locator('.skills-enable-toggle.disabled')).toBeVisible();
+  await expect.poll(() => fs.existsSync(projected)).toBe(false);
+  expect(fs.existsSync(sourceMarker)).toBe(true);
+
+  // Re-enable → folder returns to the projected tree, marker cleared.
+  await page.locator('.skills-enable-toggle').click();
+  await expect(page.locator('.skills-list-item.disabled')).toHaveCount(0);
+  await expect.poll(() => fs.existsSync(projected)).toBe(true);
+  expect(fs.existsSync(sourceMarker)).toBe(false);
 });
 
 // Multi-file: a skill folder can bundle aux files (scripts/reference). The Files

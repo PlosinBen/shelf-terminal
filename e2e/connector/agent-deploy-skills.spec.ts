@@ -30,6 +30,10 @@ const test = base.extend<{}, { shelfApp: { app: ElectronApplication; page: Page 
     fs.mkdirSync(runtimeCacheDir, { recursive: true });
 
     seedSkill(userDataDir, 'kibana-connect', '---\nname: kibana-connect\ndescription: reach kibana\n---\n\nssh to bastion');
+    // A second skill, DISABLED — proves the mount toggle excludes it from the
+    // REMOTE projection too (the whole folder is dropped, not just the marker).
+    seedSkill(userDataDir, 'draft-skill', '---\nname: draft-skill\ndescription: not ready\n---\n\nwip');
+    fs.writeFileSync(path.join(userDataDir, 'skills', 'skills', 'draft-skill', '.disabled'), '');
 
     fs.writeFileSync(path.join(userDataDir, 'projects.json'), JSON.stringify([{
       id: 'skills-deploy-test',
@@ -88,4 +92,14 @@ test('docker: app-level skill is synced to the remote on agent deploy', async ({
   );
   expect(synced).toContain('.synced');
   expect(synced).toContain('plugin.json');
+
+  // The DISABLED skill's whole folder was excluded from the remote projection
+  // (opposite of lock, which stays projected). Its `.disabled` marker also never
+  // travels. See context/skills#11.
+  const remoteSkills = execSync(
+    `docker exec ${CONTAINER} sh -c 'ls /root/.shelf/apps/*/skills/skills/ 2>/dev/null'`,
+    { encoding: 'utf8', stdio: 'pipe' },
+  );
+  expect(remoteSkills).toContain('kibana-connect');
+  expect(remoteSkills).not.toContain('draft-skill');
 });

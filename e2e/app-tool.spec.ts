@@ -109,4 +109,47 @@ test.describe('skill reload feedback via fake provider', () => {
 
     await expect(page.locator('.agent-msg-system', { hasText: 'Skills reloaded' })).toHaveCount(0);
   });
+
+  // Optional (disable-able) skills — the mount toggle's OPPOSITE-of-lock wiring.
+  // A skill is created BEFORE the session goes live (so create's own reload is a
+  // no-op and cannot confound the assertion); the ONLY reload line can then come
+  // from the toggle under test. See context/skills#11.
+  test('DISABLING a skill hot-reloads the live session (full pipeline)', async ({ shelfApp: { page } }) => {
+    await setupProject(page);
+    await openAgentTab(page);
+
+    // Create a skill first — no live session yet, so this emits no reload line.
+    await page.locator('.right-tab-btn', { hasText: 'Skills' }).click();
+    await page.locator('.skills-view .notes-new-btn').click();
+    await page.locator('.skills-view .notes-back').click();
+    await expect(page.locator('.skills-list-name')).toHaveText('my-skill');
+
+    // Make the session live, THEN disable → onSkillsChanged → reload → one line.
+    await sendAgentPrompt(page, 'text:hello');
+    await expect(page.locator('.agent-turn-response')).toContainText('hello', { timeout: 8_000 });
+    await page.locator('.skills-enable-toggle').click();
+
+    await expect(page.locator('.skills-list-item.disabled')).toBeVisible();
+    await expect(page.locator('.agent-msg-system', { hasText: 'Skills reloaded' }))
+      .toHaveCount(1, { timeout: 8_000 });
+  });
+
+  test('LOCKING a skill does NOT reload the live session (badge-only)', async ({ shelfApp: { page } }) => {
+    await setupProject(page);
+    await openAgentTab(page);
+
+    await page.locator('.right-tab-btn', { hasText: 'Skills' }).click();
+    await page.locator('.skills-view .notes-new-btn').click();
+    await page.locator('.skills-view .notes-back').click();
+    await expect(page.locator('.skills-list-name')).toHaveText('my-skill');
+
+    await sendAgentPrompt(page, 'text:hello');
+    await expect(page.locator('.agent-turn-response')).toContainText('hello', { timeout: 8_000 });
+    await page.locator('.skills-lock-toggle').click();
+
+    // Lock is main-only enforcement — badge repaint, no re-project/re-sync/reload.
+    await expect(page.locator('.skills-lock-toggle.locked')).toBeVisible();
+    await page.waitForTimeout(1_500);
+    await expect(page.locator('.agent-msg-system', { hasText: 'Skills reloaded' })).toHaveCount(0);
+  });
 });
