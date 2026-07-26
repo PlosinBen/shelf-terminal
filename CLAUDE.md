@@ -42,6 +42,11 @@
 - 需要 dev 整個重 build 才能驗的項目（如 agent-server bundle 改動），先把所有相關項目一口氣做完再交給 dev 驗一輪 — 不要做一個交一個，造成來回重 build 浪費時間
 - 同一個問題一次無法修正，請嘗試使用 logger 靠實際輸出定位，不要純粹依靠讀 code（renderer 端走 `debugLog` bridge 落 main log 檔，AI 可直接讀）
 - 禁止靜默吞錯 / 丟資料 — 狀態對不上、解析失敗、收到非預期輸入時要 fail-loud（log 出關鍵 id / context），不要 silent `return` 或 catch 後不處理。良性 race 用低調 log（`debugLog` 落檔）、真資料遺失要大聲（`console.warn/error`）；純函式回傳 anomaly 讓 caller log（保持可測）。樂觀更新尤其要在跟真相源對帳對不上時留痕
+- **Worktree-first development**（覆寫 development-flow「原地開 branch」預設）：
+  - **Code / tests 一律在 worktree 開發** — 不在 main checkout 改 tracked source/test。main checkout = 規劃 + 唯讀調查 + 純文件維護。
+  - **純文件維護（不伴隨 code 變更）可在 main checkout 直接改**：`.agent/`、CLAUDE.md、其他 markdown、`.agent/features/` note。
+  - **伴隨 code 變更的 doc 跟著 code 走**：一次 code 變更該連帶更新的 `.agent/` / contract / map，與那份 code 同在 worktree、同批改，不拆回 main。
+  - **過 note gate 的 code feature**：main checkout 只建 feature note + 討論確認，開發交給 worktree — 由使用者從 New Worktree 建（帶新分支 + 複製 note），worktree 生命週期歸使用者；AI 不建 worktree、不 merge-back。
 
 ## Conventions
 
