@@ -151,6 +151,9 @@ export function createCodexBackend(deps: CodexDeps = {}): ServerBackend {
   /** Spawn codex-acp (with the per-app CODEX_HOME) + open the ACP connection once. */
   function ensureConnection(cwd: string, appId: string | undefined): AcpConnection {
     if (conn) return conn;
+    // Log the spawn + which CODEX_HOME it reads auth from, so a post-login repro can
+    // confirm the respawn points at the per-app config-home the login wrote to.
+    serverLog('info', 'codex', `spawning codex-acp (appId=${appId ? String(appId).slice(0, 8) : 'none'}, CODEX_HOME=${codexConfigHome(appId) ?? 'default(~/.codex)'})`);
     const opened = openAgent(cwd, appId);
     child = opened.child ?? null;
     connAppId = appId;
@@ -225,12 +228,15 @@ export function createCodexBackend(deps: CodexDeps = {}): ServerBackend {
         session = await driver.resume(c.agent, input.resumeId, opts);
         sessionCwd = input.cwd;
         sessionAppId = appId;
+        serverLog('info', 'codex', `session established via RESUME (${String(input.resumeId).slice(0, 8)})`);
         return session;
       } catch {
         // Resume rejected (session gone / unsupported) → fall through to new.
       }
     }
+    serverLog('info', 'codex', 'requesting session/new…');
     session = await driver.startNew(c.agent, opts);
+    serverLog('info', 'codex', `session/new OK (${session.sessionId})`);
     sessionCwd = input.cwd;
     sessionAppId = appId;
     // Cache advertised config so set-mode / set-config-option can resolve ids and
@@ -370,6 +376,7 @@ export function createCodexBackend(deps: CodexDeps = {}): ServerBackend {
      *  re-reads the per-app CODEX_HOME credentials a device-login just wrote. Mirrors
      *  the appId-change respawn in ensureSession, minus the appId check. */
     reconnect(): void {
+      serverLog('info', 'codex', `reconnect: ${conn ? 'dropping the LIVE connection' : 'no live connection to drop'} — next spawn re-reads config-home credentials`);
       if (session) driver.forget(session.sessionId);
       try { conn?.close(); } catch { /* best-effort */ }
       try { child?.kill(); } catch { /* best-effort */ }
