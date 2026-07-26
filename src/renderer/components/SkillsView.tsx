@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef, forwardRef, useImperativeHandle } from 'react';
 import { toggleRightSidebar } from '../store';
 import { renderMarkdown } from '../utils/markdown';
-import { LockIcon, UnlockIcon } from './icons';
+import { LockIcon, UnlockIcon, PowerIcon } from './icons';
 
 interface SkillMeta {
   name: string;
   description?: string;
   locked?: boolean;
+  disabled?: boolean;
 }
 
 const DEFAULT_WIDTH = 480; // wider than the other right panels — the editor packs a Files list + a full button row
@@ -89,6 +90,7 @@ export function SkillsView() {
           ref={editorRef}
           name={activeName!}
           locked={skills.find((s) => s.name === activeName)?.locked ?? false}
+          disabled={skills.find((s) => s.name === activeName)?.disabled ?? false}
           onRenamed={(newName) => setActiveName(newName)}
           onAfterSave={refreshList}
           onDeleted={handleBack}
@@ -107,11 +109,22 @@ function SkillsList({ skills, onPick }: { skills: SkillMeta[]; onPick: (name: st
   return (
     <div className="skills-list">
       {skills.map((s) => (
-        <div key={s.name} className="skills-list-item" onClick={() => onPick(s.name)}>
+        <div
+          key={s.name}
+          className={`skills-list-item ${s.disabled ? 'disabled' : ''}`}
+          onClick={() => onPick(s.name)}
+        >
           <div className="skills-list-main">
             <div className="skills-list-name">{s.name}</div>
             {s.description && <div className="skills-list-desc">{s.description}</div>}
           </div>
+          <button
+            className={`skills-enable-toggle ${s.disabled ? 'disabled' : ''}`}
+            title={s.disabled ? 'Disabled — not loaded by agents. Click to enable' : 'Enabled — click to disable (removes it from agent context)'}
+            onClick={(e) => { e.stopPropagation(); void window.shelfApi.skills.setDisabled(s.name, !s.disabled); }}
+          >
+            <PowerIcon size={14} />
+          </button>
           <button
             className={`skills-lock-toggle ${s.locked ? 'locked' : ''}`}
             title={s.locked ? 'Locked against agent edits — click to unlock' : 'Lock against agent edits'}
@@ -138,10 +151,11 @@ const isMarkdownFile = (file: string) => file === SKILL_MD || file.toLowerCase()
 const SkillEditor = forwardRef<SkillEditorHandle, {
   name: string;
   locked: boolean;
+  disabled: boolean;
   onRenamed: (newName: string) => void;
   onAfterSave: () => void | Promise<void>;
   onDeleted: () => void;
-}>(function SkillEditor({ name, locked, onRenamed, onAfterSave, onDeleted }, ref) {
+}>(function SkillEditor({ name, locked, disabled, onRenamed, onAfterSave, onDeleted }, ref) {
   // Which file the editor body is currently showing. SKILL.md is the privileged
   // default (its own save path: frontmatter validation + rename); aux files
   // (scripts/reference docs) use the generic file IPC. See skills#8.
@@ -262,6 +276,13 @@ const SkillEditor = forwardRef<SkillEditorHandle, {
     await window.shelfApi.skills.setLocked(name, !locked);
   }, [name, locked]);
 
+  // Enable/disable is a MOUNT toggle (not an edit gate): disabling removes the
+  // skill from the projected tree so agents stop loading it. The list refresh
+  // reflecting the new state arrives via the SKILLS_CHANGED subscription.
+  const toggleDisabled = useCallback(async () => {
+    await window.shelfApi.skills.setDisabled(name, !disabled);
+  }, [name, disabled]);
+
   const handleDelete = useCallback(async () => {
     const ok = await window.shelfApi.dialog.confirm('Delete skill', `Delete skill "${name}"? This cannot be undone.`, 'Delete');
     if (!ok) return;
@@ -291,6 +312,14 @@ const SkillEditor = forwardRef<SkillEditorHandle, {
           title={activeFile === SKILL_MD ? 'Save (renames the folder if the frontmatter name changed)' : `Save ${activeFile}`}
         >
           {saving ? 'Saving…' : 'Save'}
+        </button>
+        <button
+          className={`notes-mode-btn skills-enable-btn ${disabled ? 'disabled' : ''}`}
+          onClick={() => void toggleDisabled()}
+          title={disabled ? 'Disabled — not loaded by agents. Click to enable' : 'Enabled — click to disable (removes it from agent context)'}
+        >
+          <PowerIcon size={13} />
+          {disabled ? 'Disabled' : 'Enabled'}
         </button>
         <button
           className="notes-mode-btn skills-lock-btn"

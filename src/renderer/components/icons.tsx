@@ -107,3 +107,14 @@ export function UnlockIcon({ size }: IconProps) {
     </Svg>
   );
 }
+
+// Power symbol — a skill's enabled/disabled mount toggle (on = mounted into the
+// projected tree, off = excluded so its description leaves agent context).
+export function PowerIcon({ size }: IconProps) {
+  return (
+    <Svg size={size}>
+      <path d="M12 3v9" />
+      <path d="M6.4 6.4a8 8 0 1 0 11.2 0" />
+    </Svg>
+  );
+}

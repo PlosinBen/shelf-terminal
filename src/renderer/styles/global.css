@@ -4413,6 +4413,54 @@ button {
   gap: 4px;
 }
 
+/* Disabled skill: the whole row dims to read as "not mounted", but its controls
+   stay usable so it can be re-enabled. */
+.skills-list-item.disabled .skills-list-main {
+  opacity: 0.45;
+}
+
+/* Enable/disable (power) toggle. Enabled is faded until row-hover (quiet
+   affordance); disabled stays visible + accented as a status. Mirrors the lock
+   toggle's edge placement. */
+.skills-enable-toggle {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  padding: 4px;
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--text-muted);
+  opacity: 0.55;
+}
+
+.skills-list-item:hover .skills-enable-toggle,
+.skills-enable-toggle.disabled {
+  opacity: 1;
+}
+
+.skills-enable-toggle.disabled {
+  color: #f38ba8;
+}
+
+.skills-enable-toggle:hover {
+  background: var(--border);
+  color: var(--text);
+}
+
+/* Editor enable button: icon + label inline (mirrors skills-lock-btn). */
+.skills-enable-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.skills-enable-btn.disabled {
+  color: #f38ba8;
+}
+
 .skills-list-name {
   font-size: 13px;
   color: var(--text);
