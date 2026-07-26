@@ -159,8 +159,15 @@ export function createCodexBackend(deps: CodexDeps = {}): ServerBackend {
       onRequestPermission: permissions.onRequestPermission,
       onSessionUpdate: driver.onSessionUpdate,
     });
-    // Drop refs when the agent process/connection ends so the next turn respawns.
+    // Drop refs when the agent process/connection ends so the next turn respawns —
+    // but ONLY if we are STILL the live connection. reconnect()/appId-respawn close
+    // the old connection and immediately spawn a new one; the OLD conn's `closed`
+    // resolves later (on real child exit) and MUST NOT clobber the NEW refs (would
+    // leak the new process + force a redundant respawn). Identity-guarded, mirroring
+    // the dispatcher's SessionChannel.kill guard.
+    const thisConn = conn;
     conn.closed.finally(() => {
+      if (conn !== thisConn) return;
       conn = null;
       child = null;
       connAppId = undefined;

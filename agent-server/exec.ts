@@ -604,6 +604,7 @@ rl.on('line', (line) => {
       // FIFO stdin stream — reconnect runs synchronously before get_capabilities).
       const provider = msg.provider ?? 'copilot';
       try {
+        serverLog('info', 'exec', `reconnect: dropping ${provider} ACP connection so the next spawn re-reads config-home credentials`);
         getBackend(provider).reconnect?.();
       } catch (err: any) {
         serverLog('warn', 'exec', `reconnect failed: ${err?.message ?? err}`, { provider });

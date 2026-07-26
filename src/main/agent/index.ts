@@ -564,6 +564,7 @@ async function reinitAfterLogin(tabId: string): Promise<void> {
   const session = sessions.get(tabId);
   if (!session?.backend.getCapabilities) return;
   const tag = `[agent:${tabId.slice(0, 8)}]`;
+  log.info('agent', `${tag} login ok — re-initing ${session.provider}: dropping the stale ACP connection + re-fetching capabilities`);
   session.backend.reconnect?.();
   const settings = loadSettings();
   const customModels = settings.ok
@@ -572,8 +573,18 @@ async function reinitAfterLogin(tabId: string): Promise<void> {
   try {
     const caps = await session.backend.getCapabilities(session.cwd, customModels);
     send(IPC.AGENT_CAPABILITIES, tabId, caps);
-    if (caps.authRequired) send(IPC.AGENT_AUTH_REQUIRED, tabId, session.provider);
-    else log.info('agent', `${tag} re-inited after login — capabilities refreshed, authed`);
+    if (caps.authRequired) {
+      // Fresh caps STILL report unauth after a "successful" login → re-assert the
+      // pane, and fail-loud: the credential the login wrote isn't taking effect on
+      // the respawned CLI. Real causes: creds written to a different config-home than
+      // the CLI reads, or the account lacks entitlement for a working session (codex
+      // needs a ChatGPT subscription — that completion is out of this scope). Loud so
+      // this is distinguishable from a genuine auth clear, not silently re-shown.
+      log.warn('agent', `${tag} post-login re-init: capabilities STILL report authRequired for ${session.provider} — re-showing the auth pane (credential not effective on respawn, or account lacks entitlement)`);
+      send(IPC.AGENT_AUTH_REQUIRED, tabId, session.provider);
+    } else {
+      log.info('agent', `${tag} re-inited after login — capabilities refreshed, authed`);
+    }
   } catch (err: any) {
     log.error('agent', `${tag} post-login re-init failed: ${err?.message ?? err}`);
   }
