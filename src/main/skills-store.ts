@@ -29,6 +29,11 @@ export interface SkillMeta {
   /** True when the user has locked this skill against AGENT edits (the manager
    *  UI can still edit/unlock it). Marker = a `.locked` file in the folder. */
   locked?: boolean;
+  /** True when the user has disabled this skill — it is EXCLUDED from the
+   *  projected/synced consumption tree, so no live agent sees it (its description
+   *  leaves context). Marker = a `.disabled` file in the folder. Independent of
+   *  `locked` (two separate axes). */
+  disabled?: boolean;
 }
 
 export interface SkillUpdateResult {
@@ -73,15 +78,22 @@ export function skillDirPath(name: string): string {
 function lockMarkerPath(name: string): string {
   return path.join(skillDir(name), '.locked');
 }
+/** Disabled marker: a `.disabled` file inside the skill folder. Same in-folder
+ *  rationale as `.locked` (rename carries it, loaders ignore a stray dotfile).
+ *  Independent axis from lock; presence = disabled, absence = enabled (default). */
+function disabledMarkerPath(name: string): string {
+  return path.join(skillDir(name), '.disabled');
+}
 function manifestPath(): string {
   return path.join(skillsRoot(), '.claude-plugin', 'plugin.json');
 }
 
 /** Top-level files an agent may NOT touch via the generic aux-file ops: SKILL.md
- *  (owned by update_app_skill — identity/rename/YAML validation) and `.locked`
- *  (the user's UI-only agent-handsoff marker). Reserving them in the path guard
- *  is what makes "an agent can never orphan a skill's SKILL.md" true. */
-const RESERVED_AUX_FILES = new Set(['SKILL.md', '.locked']);
+ *  (owned by update_app_skill — identity/rename/YAML validation), `.locked`
+ *  (the user's UI-only agent-handsoff marker), and `.disabled` (the user's
+ *  UI-only mount toggle). Reserving them in the path guard is what makes "an
+ *  agent can never orphan a skill's SKILL.md" true. */
+const RESERVED_AUX_FILES = new Set(['SKILL.md', '.locked', '.disabled']);
 
 /** Ensure the plugin scaffold exists so the tree is projection-ready. Idempotent. */
 function ensureScaffold(): void {
@@ -188,6 +200,7 @@ export async function listSkills(): Promise<SkillMeta[]> {
       name: entry.name,
       ...(description ? { description } : {}),
       ...(isSkillLocked(entry.name) ? { locked: true } : {}),
+      ...(isSkillDisabled(entry.name) ? { disabled: true } : {}),
     });
   }
   out.sort((a, b) => a.name.localeCompare(b.name));
@@ -216,6 +229,23 @@ export async function setSkillLocked(name: string, locked: boolean): Promise<voi
   if (!isValidSkillName(name) || !fs.existsSync(skillDir(name))) return;
   if (locked) await fs.promises.writeFile(lockMarkerPath(name), '');
   else await fs.promises.rm(lockMarkerPath(name), { force: true });
+}
+
+/** Whether the skill is DISABLED (present `.disabled` marker) — i.e. excluded
+ *  from the projected/synced tree. Synchronous; mirror of isSkillLocked. */
+export function isSkillDisabled(name: string): boolean {
+  if (!isValidSkillName(name)) return false;
+  return fs.existsSync(disabledMarkerPath(name));
+}
+
+/** Set/clear a skill's disabled marker. No-op for an invalid name or a skill
+ *  that doesn't exist. UNLIKE lock, the caller (ipc/skills) must run the full
+ *  onSkillsChanged() pipeline afterwards: toggling this changes the projected +
+ *  synced tree (and its hash), so live sessions must re-project/hot-reload. */
+export async function setSkillDisabled(name: string, disabled: boolean): Promise<void> {
+  if (!isValidSkillName(name) || !fs.existsSync(skillDir(name))) return;
+  if (disabled) await fs.promises.writeFile(disabledMarkerPath(name), '');
+  else await fs.promises.rm(disabledMarkerPath(name), { force: true });
 }
 
 /** Materialise a new skill from the template under a unique placeholder name. */
@@ -281,7 +311,7 @@ export async function deleteSkill(name: string): Promise<void> {
 /**
  * Resolve a skill-folder-relative aux path to an absolute path INSIDE that
  * skill's folder, or null if the path is unusable: invalid skill name, blank,
- * absolute, a reserved file (SKILL.md / .locked), or escaping the folder (`..`).
+ * absolute, a reserved file (SKILL.md / .locked / .disabled), or escaping the folder (`..`).
  * The "resolved path is still within skillDir" check is authoritative — it
  * defends against every traversal trick, not just literal `..`. Pure (only path
  * math over skillDir) → unit-testable, and the single gate every aux op funnels
@@ -303,7 +333,7 @@ export function resolveAuxPath(name: string, rel: string): string | null {
   return resolved;
 }
 
-/** List a skill's aux files (everything except SKILL.md / .locked) as sorted,
+/** List a skill's aux files (everything except SKILL.md / .locked / .disabled) as sorted,
  *  POSIX-relative paths. Empty for an unknown/invalid skill. */
 export async function listSkillAuxFiles(name: string): Promise<string[]> {
   if (!isValidSkillName(name)) return [];
@@ -356,7 +386,7 @@ export async function writeSkillFile(name: string, rel: string, content: string)
   }
 }
 
-/** Delete one aux file. Cannot touch SKILL.md / .locked (reserved → guard null). */
+/** Delete one aux file. Cannot touch SKILL.md / .locked / .disabled (reserved → guard null). */
 export async function deleteSkillFile(name: string, rel: string): Promise<SkillFileResult> {
   const abs = resolveAuxPath(name, rel);
   if (!abs) return { ok: false, error: `Invalid or reserved skill file path: ${rel}` };
