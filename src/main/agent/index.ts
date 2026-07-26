@@ -568,16 +568,15 @@ async function reinitAfterLogin(tabId: string): Promise<void> {
   const customModels = settings.ok
     ? settings.value.providerModels?.[provider as keyof NonNullable<typeof settings.value.providerModels>]
     : undefined;
-  log.info('agent', `${tag} login ok — re-initing ${provider}: dropping the stale ACP connection + re-fetching capabilities`);
   session.backend.reconnect?.();
   try {
     const caps = await session.backend.getCapabilities(session.cwd, customModels);
     send(IPC.AGENT_CAPABILITIES, tabId, caps);
     if (caps.authRequired) {
+      // Fail-loud: a "successful" login whose re-init still reports unauth is an
+      // anomaly (login didn't stick) — re-show the pane, but leave a trace.
       send(IPC.AGENT_AUTH_REQUIRED, tabId, provider);
       log.warn('agent', `${tag} post-login re-init: STILL authRequired for ${provider} — re-showing the auth pane (login did not stick)`);
-    } else {
-      log.info('agent', `${tag} re-inited after login — capabilities refreshed, authed`);
     }
   } catch (err: any) {
     log.error('agent', `${tag} post-login re-init failed: ${err?.message ?? err}`);
