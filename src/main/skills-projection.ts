@@ -29,11 +29,43 @@ export function skillsSourceRoot(): string {
 // pure lock toggle never perturbs the hash or triggers a re-sync.
 const LOCK_MARKER = '.locked';
 
+// The per-skill `.disabled` marker is ALSO a main-only control file, but its
+// meaning is the OPPOSITE of `.locked`: a disabled skill's WHOLE folder is
+// dropped from the projected/synced tree (so no live agent sees it and its
+// description leaves context). So unlike `.locked` (engineered hash-invariant),
+// disabling MUST change the file list + tree hash → the `.synced` gate re-syncs
+// and onSkillsChanged() hot-reloads live sessions. See feature note.
+const DISABLED_MARKER = '.disabled';
+
+/** Absolute paths of DISABLED skill folders under `root` (each contains a
+ *  `.disabled` marker). Computed by an inline marker check on `root/skills/*` so
+ *  projection stays self-contained (no skills-store import). */
+function disabledSkillDirs(root: string): Set<string> {
+  const out = new Set<string>();
+  const collection = path.join(root, 'skills');
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(collection, { withFileTypes: true });
+  } catch {
+    return out;
+  }
+  for (const e of entries) {
+    if (e.isDirectory() && fs.existsSync(path.join(collection, e.name, DISABLED_MARKER))) {
+      out.add(path.join(collection, e.name));
+    }
+  }
+  return out;
+}
+
 /** All files under `root`, as POSIX-relative paths (sorted) — ready to mirror
- *  onto a remote. POSIX separators so remote paths are correct from any host. */
+ *  onto a remote. POSIX separators so remote paths are correct from any host.
+ *  DISABLED skill folders are dropped entirely (so remote + hash both reflect
+ *  the exclusion); the `.locked` / `.disabled` markers themselves never travel. */
 export function listSkillFilesRel(root: string): string[] {
   const out: string[] = [];
+  const disabledDirs = disabledSkillDirs(root);
   const walk = (dir: string, rel: string) => {
+    if (disabledDirs.has(dir)) return; // skip the whole disabled skill subtree
     let entries: fs.Dirent[];
     try {
       entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -43,7 +75,7 @@ export function listSkillFilesRel(root: string): string[] {
     for (const e of entries) {
       const childRel = rel ? `${rel}/${e.name}` : e.name;
       if (e.isDirectory()) walk(path.join(dir, e.name), childRel);
-      else if (e.isFile() && e.name !== LOCK_MARKER) out.push(childRel);
+      else if (e.isFile() && e.name !== LOCK_MARKER && e.name !== DISABLED_MARKER) out.push(childRel);
     }
   };
   walk(root, '');
@@ -84,8 +116,19 @@ export function projectSkillsLocal(appId: string): void {
     if (!fs.existsSync(src)) return;
     fs.rmSync(dst, { recursive: true, force: true });
     fs.mkdirSync(path.dirname(dst), { recursive: true });
-    // Exclude `.locked` markers (main-only control files — see LOCK_MARKER).
-    fs.cpSync(src, dst, { recursive: true, filter: (s) => path.basename(s) !== LOCK_MARKER });
+    // Exclude main-only control markers (`.locked` / `.disabled`) AND the entire
+    // folder of any DISABLED skill. cpSync does not recurse into a dir the filter
+    // rejects, so returning false for `skills/<name>` skips its whole subtree.
+    const disabledDirs = disabledSkillDirs(src);
+    fs.cpSync(src, dst, {
+      recursive: true,
+      filter: (s) => {
+        const base = path.basename(s);
+        if (base === LOCK_MARKER || base === DISABLED_MARKER) return false;
+        if (disabledDirs.has(s)) return false;
+        return true;
+      },
+    });
     // Touch the app's lease so the agent-server startup sweep (which may run
     // before the first heartbeat) doesn't reclaim a just-projected dir as an
     // orphan. The projection IS a liveness signal. See cleanup.ts / §5.9.
