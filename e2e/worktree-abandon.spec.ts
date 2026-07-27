@@ -52,6 +52,12 @@ function seed(userDataDir: string, base: string, feature: string) {
   fs.writeFileSync(path.join(userDataDir, 'projects.json'), JSON.stringify(projects), 'utf-8');
 }
 
+function writeFeatureNote(cwd: string, rel: string, body: string) {
+  const abs = path.join(cwd, rel);
+  fs.mkdirSync(path.dirname(abs), { recursive: true });
+  fs.writeFileSync(abs, body, 'utf-8');
+}
+
 async function openCloseMenu(page: Page, item: 'Finish' | 'Abandon') {
   const subItem = page.locator('.sidebar-item.worktree-child', { hasText: 'feature' });
   await subItem.click({ button: 'right' });
@@ -133,6 +139,26 @@ test.describe('abandon worktree gate', () => {
     await expect(popup).not.toBeVisible({ timeout: 5_000 });
 
     expect(fs.existsSync(feature)).toBe(true);
+    expect(git(base, ['branch', '--list', 'feature']).trim()).toContain('feature');
+    await expect(page.locator('.sidebar-item.worktree-child', { hasText: 'feature' })).toHaveCount(1);
+  });
+
+  test('restore conflict blocks abandon and keeps the worktree note', async () => {
+    const rel = '.agent/features/carried.md';
+    writeFeatureNote(base, rel, 'base note');
+    writeFeatureNote(feature, rel, 'worktree note');
+
+    await openCloseMenu(page, 'Abandon');
+
+    const popup = page.locator('.worktree-dialog', { hasText: 'Abandon Worktree' });
+    await expect(popup).toBeVisible({ timeout: 5_000 });
+    await popup.locator('.conn-btn-danger').click();
+
+    const err = popup.locator('.worktree-error');
+    await expect(err).toContainText('already exists', { timeout: 8_000 });
+    expect(fs.existsSync(feature)).toBe(true);
+    expect(fs.readFileSync(path.join(feature, rel), 'utf-8')).toBe('worktree note');
+    expect(fs.readFileSync(path.join(base, rel), 'utf-8')).toBe('base note');
     expect(git(base, ['branch', '--list', 'feature']).trim()).toContain('feature');
     await expect(page.locator('.sidebar-item.worktree-child', { hasText: 'feature' })).toHaveCount(1);
   });

@@ -53,6 +53,12 @@ function seed(userDataDir: string, base: string, feature: string) {
   fs.writeFileSync(path.join(userDataDir, 'projects.json'), JSON.stringify(projects), 'utf-8');
 }
 
+function writeFeatureNote(cwd: string, rel: string, body: string) {
+  const abs = path.join(cwd, rel);
+  fs.mkdirSync(path.dirname(abs), { recursive: true });
+  fs.writeFileSync(abs, body, 'utf-8');
+}
+
 /** Right-click the worktree child row and click a menu item ("Finish" / "Abandon"). */
 async function openCloseMenu(page: Page, item: 'Finish' | 'Abandon') {
   const subItem = page.locator('.sidebar-item.worktree-child', { hasText: 'feature' });
@@ -120,6 +126,26 @@ test.describe('finish worktree gate', () => {
     // Merged + worktree gone, but the branch was preserved.
     expect(fs.existsSync(feature)).toBe(false);
     expect(git(base, ['branch', '--list', 'feature']).trim()).toContain('feature');
+  });
+
+  test('restores carried feature note to base before removing the worktree', async () => {
+    const rel = '.agent/features/carried.md';
+    const body = '---\ntype: feature\ntitle: Carried\nstatus: in-progress\n---\n\n# Carried\n';
+    fs.writeFileSync(path.join(feature, '.gitignore'), '.agent/features/\n', 'utf-8');
+    git(feature, ['add', '.gitignore']);
+    git(feature, ['commit', '-m', 'ignore feature notes']);
+    writeFeatureNote(feature, rel, body);
+
+    await openCloseMenu(page, 'Finish');
+
+    const popup = page.locator('.worktree-dialog', { hasText: 'Finish Worktree' });
+    await expect(popup).toBeVisible({ timeout: 5_000 });
+    await popup.locator('.conn-btn-next').click();
+    await expect(popup).not.toBeVisible({ timeout: 8_000 });
+
+    await expect(page.locator('.sidebar-item.worktree-child', { hasText: 'feature' })).toHaveCount(0, { timeout: 8_000 });
+    expect(fs.existsSync(feature)).toBe(false);
+    expect(fs.readFileSync(path.join(base, rel), 'utf-8')).toBe(body);
   });
 
   test('cancel merges nothing and keeps the worktree', async () => {
