@@ -155,6 +155,10 @@ export function createSessionDriver(): SessionDriver {
         msgId === DEFAULT_AGENT_MSG_ID ? `${turnBase}:${streamType ?? 'msg'}:${seg}` : msgId;
 
       const textByMsg = new Map<string, string>();
+      // Codex may prefix the first thought chunk with whitespace-only formatting.
+      // Trim it once per thought message, but preserve whitespace in later chunks
+      // because those can start intentional paragraph breaks; see agent-providers#29.
+      const thoughtStarted = new Set<string>();
       // Carry tool-call title/kind across their partial updates (see
       // createToolMetaCarry) — one carry per turn, tool calls live within a turn.
       const carryToolMeta = createToolMetaCarry();
@@ -170,6 +174,12 @@ export function createSessionDriver(): SessionDriver {
             wire = { ...wire, msgId: namespaced(wire.msgId) };
           } else if (wire.type === 'stream') {
             wire = { ...wire, msgId: namespaced(wire.msgId, wire.streamType) };
+            if (wire.streamType === 'thinking' && !thoughtStarted.has(wire.msgId)) {
+              const content = wire.content.trimStart();
+              if (!content) continue;
+              wire = { ...wire, content };
+              thoughtStarted.add(wire.msgId);
+            }
             streamedSinceTool = true;
           }
           if (wire.type === 'stream' && wire.streamType === 'text') {

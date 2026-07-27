@@ -61,6 +61,26 @@ describe('acp session driver (connection + new/resume + turn)', () => {
     expect(stream(w1).msgId).toBe(reply(w1).msgId);
   });
 
+  it('strips only a thought message prefix, preserving a later paragraph chunk (codex)', async () => {
+    const updates: SessionUpdate[] = [
+      { sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: '\n  \n' }, messageId: 'thought-1' },
+      { sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: '**Inspecting the runtime**' }, messageId: 'thought-1' },
+      { sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: '\n\n**Verifying the result**' }, messageId: 'thought-1' },
+    ];
+    const mock = createMockAcpAgent({ updatesOnPrompt: updates });
+    const driver = createSessionDriver();
+    const conn = openAcpConnection(mock, { onSessionUpdate: driver.onSessionUpdate });
+    const session = await driver.startNew(conn.agent, { cwd: '/tmp/p' });
+    const wire: OutgoingMessage[] = [];
+    await driver.drivePromptTurn(conn.agent, session, 'go', (m) => wire.push(m));
+    conn.close();
+
+    expect(wire.filter((m) => m.type === 'stream')).toEqual([
+      { type: 'stream', msgId: 'thought-1', streamType: 'thinking', content: '**Inspecting the runtime**' },
+      { type: 'stream', msgId: 'thought-1', streamType: 'thinking', content: '\n\n**Verifying the result**' },
+    ]);
+  });
+
   it('splits messageId-less text at TOOL boundaries → separate reply cards (copilot interleaving)', async () => {
     // text → tool → text with no messageId: mirrors Zed (text after a tool is a
     // NEW message). Without segmenting, both texts collapse onto one early card.

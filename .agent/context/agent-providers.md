@@ -327,3 +327,11 @@ SDK 0.3.159 **並存**兩種 compact 完成訊號:`status` 形狀(`subtype:'stat
 **Reason**：讓不同 worktree 可啟動不同 provider，同時維持既有 parent-inheritance 行為與 provider registry 的單一來源。
 
 **Do not change casually because**：不要在 dialog 硬編 provider 名單，或把 selection 回寫 parent；前者會與 registry drift，後者會意外改變既有 project 的新 tab 行為。
+
+## agent-providers#29 — Codex thought chunks may begin with formatting-only blank lines; strip only the leading blank lines  ·  [Gotcha]
+
+**Symptom:** An expanded Codex Thinking card has a visibly empty area before its first thought.
+
+**Root cause:** Codex ACP can prefix an `agent_thought_chunk` with blank lines. Thinking bodies intentionally preserve whitespace so normal prose and paragraph breaks remain faithful; forwarding that prefix therefore creates real rendered height, rather than merely an invisible transport detail.
+
+**Fix / note:** At the ACP-to-wire boundary, remove only leading blank lines from thought chunks before emitting the Thinking stream. Do not trim ordinary assistant messages, tool output, trailing whitespace, or later paragraph breaks: those may carry user-visible formatting.
