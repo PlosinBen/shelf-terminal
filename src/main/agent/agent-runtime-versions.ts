@@ -87,6 +87,16 @@ export function claudeTarballUrl(t: RuntimeTarget, version: string): string {
 export const COPILOT_CLI_VERSION = '1.0.68';
 
 /**
+ * Codex ACP runtime set. These packages form one tested protocol/runtime unit:
+ * the ACP adapter launches the Codex CLI and both speak through the ACP SDK.
+ * Keep package.json dependencies exact; the companion test guards both the
+ * declared specifiers and installed versions against accidental range drift.
+ */
+export const CODEX_ACP_VERSION = '1.1.2';
+export const CODEX_CLI_VERSION = '0.144.4';
+export const ACP_SDK_VERSION = '1.2.1';
+
+/**
  * Scoped npm package shipping the standalone Copilot CLI binary for a target.
  * The variant is a PREFIX (`linux` / `linuxmusl`) — different shape from
  * Claude's `-musl` suffix. All four (arch × libc) combos exist.
@@ -107,4 +117,3 @@ export function copilotTarballUrl(t: RuntimeTarget, version: string): string {
 export function copilotManifestUrl(t: RuntimeTarget, version: string): string {
   return `https://registry.npmjs.org/${copilotPackageName(t)}/${version}`;
 }
-

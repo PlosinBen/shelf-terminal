@@ -4,6 +4,9 @@ import {
   NODE_VERSION,
   CLAUDE_SDK_VERSION,
   COPILOT_CLI_VERSION,
+  CODEX_ACP_VERSION,
+  CODEX_CLI_VERSION,
+  ACP_SDK_VERSION,
   nodeArchiveName,
   nodeDownloadUrl,
   claudePackageName,
@@ -87,6 +90,23 @@ describe('COPILOT_CLI_VERSION', () => {
   it('matches the installed @github/copilot version', () => {
     const pkg = JSON.parse(readFileSync('node_modules/@github/copilot/package.json', 'utf8'));
     expect(COPILOT_CLI_VERSION).toBe(pkg.version);
+  });
+});
+
+describe('Codex ACP runtime versions', () => {
+  // Drift guard: Codex ACP, its SDK, and the Codex CLI are a tested protocol
+  // unit. All three must stay exact and match the installed direct packages.
+  it('matches the installed exact Codex ACP runtime set', () => {
+    const root = JSON.parse(readFileSync('package.json', 'utf8'));
+    const acp = JSON.parse(readFileSync('node_modules/@agentclientprotocol/codex-acp/package.json', 'utf8'));
+    const cli = JSON.parse(readFileSync('node_modules/@openai/codex/package.json', 'utf8'));
+    const sdk = JSON.parse(readFileSync('node_modules/@agentclientprotocol/sdk/package.json', 'utf8'));
+    expect(root.dependencies['@agentclientprotocol/codex-acp']).toBe(CODEX_ACP_VERSION);
+    expect(root.dependencies['@openai/codex']).toBe(CODEX_CLI_VERSION);
+    expect(root.dependencies['@agentclientprotocol/sdk']).toBe(ACP_SDK_VERSION);
+    expect(CODEX_ACP_VERSION).toBe(acp.version);
+    expect(CODEX_CLI_VERSION).toBe(cli.version);
+    expect(ACP_SDK_VERSION).toBe(sdk.version);
   });
 });
 
