@@ -16,7 +16,7 @@ import type { BranchMergedInfo, GitBranchInfo, WorktreeCloseKind } from '@shared
 //   abandon = restore carried feature notes → teardown
 //             → delete branch (no merge; UNMERGED → commit loss)
 //
-// Success = the worktree sub-project disappears (REMOVE_PROJECT after teardown).
+// Success = emit WORKTREE_FINISH_COMPLETED / REMOVE_PROJECT after teardown.
 
 interface CloseState {
   subProjectId: string;
@@ -166,7 +166,18 @@ export function WorktreeCloseGate() {
 
     const subIndex = projects.findIndex((p) => p.config.id === state.subProjectId);
     close();
-    if (subIndex >= 0) emit(Events.REMOVE_PROJECT, subIndex);
+    if (subIndex >= 0) {
+      if (isAbandon) {
+        emit(Events.REMOVE_PROJECT, subIndex);
+      } else {
+        emit(Events.WORKTREE_FINISH_COMPLETED, {
+          subProjectId: state.subProjectId,
+          parentProjectId: parent.config.id,
+          featureBranch,
+          targetBranch: target,
+        });
+      }
+    }
   };
 
   const title = isAbandon ? 'Abandon Worktree' : 'Finish Worktree';

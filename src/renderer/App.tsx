@@ -23,7 +23,7 @@ import { SkillsView } from './components/SkillsView';
 import { McpView } from './components/McpView';
 import { QuickNoteOverlay } from './components/QuickNoteOverlay';
 import { useKeybindings } from './hooks/useKeybindings';
-import { useStore, setProjects, setSettings, setUpdateStatus, addProject, addTab, setActiveTab, removeTab, removeProject, setSplitTab, clearUnread, setInvalidProjects, setPmActive, setConnectionHealth } from './store';
+import { useStore, setProjects, setSettings, setUpdateStatus, addProject, addTab, setActiveTab, removeTab, removeProject, setSplitTab, clearUnread, setInvalidProjects, setPmActive, setConnectionHealth, setActiveProject, showProjectNotice } from './store';
 import type { ConnectionHealth } from '@shared/types';
 import type { ProjectConfig } from '@shared/types';
 import { disposeTerminal } from './components/TerminalView';
@@ -139,6 +139,30 @@ export function App() {
       removeProject(projectIndex);
       const configs = projects.filter((_, i) => i !== projectIndex).map((p) => p.config);
       window.shelfApi.project.save(configs);
+    });
+
+    const offWorktreeFinishCompleted = on(Events.WORKTREE_FINISH_COMPLETED, (payload: {
+      subProjectId: string;
+      parentProjectId: string;
+      featureBranch: string;
+      targetBranch: string;
+    }) => {
+      const subIndex = projects.findIndex((p) => p.config.id === payload.subProjectId);
+      const configsAfter = projects
+        .filter((p) => p.config.id !== payload.subProjectId)
+        .map((p) => p.config);
+      const parentIndexAfter = configsAfter.findIndex((p) => p.id === payload.parentProjectId);
+      if (subIndex === -1 || parentIndexAfter === -1) {
+        console.warn(`[worktree] finish-completed for unknown project pair ${payload.subProjectId} → ${payload.parentProjectId}`);
+        return;
+      }
+
+      emit(Events.REMOVE_PROJECT, subIndex);
+      setActiveProject(parentIndexAfter);
+      showProjectNotice({
+        projectId: payload.parentProjectId,
+        message: `Merged ${payload.featureBranch} → ${payload.targetBranch} and closed the worktree`,
+      });
     });
 
     const offNewTab = on(Events.NEW_TAB, (projectIndex: number) => {
@@ -313,7 +337,7 @@ export function App() {
       }
     });
 
-    return () => { offCloseTab(); offRemoveProject(); offNewTab(); offNewAgentTab(); offNewWebTab(); offOpenWebTab(); offProposeWorktreeCreate(); offProposeWorktreeFinish(); offConnectProject(); offAutoConnect(); offDisconnectProject(); offAddProject(); offToggleSplit(); offSwitchBranch(); };
+    return () => { offCloseTab(); offRemoveProject(); offWorktreeFinishCompleted(); offNewTab(); offNewAgentTab(); offNewWebTab(); offOpenWebTab(); offProposeWorktreeCreate(); offProposeWorktreeFinish(); offConnectProject(); offAutoConnect(); offDisconnectProject(); offAddProject(); offToggleSplit(); offSwitchBranch(); };
   }, [projects]);
 
   useEffect(() => {

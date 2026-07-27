@@ -35,6 +35,7 @@ export const Events = {
   TOGGLE_SPLIT: 'toggle-split',     // (projectIndex)
   CREATE_WORKTREE: 'create-worktree', // (projectIndex, prefill?: { branch?, notePath? })
   WORKTREE_CLOSE: 'worktree-close',   // (projectIndex, kind: 'finish' | 'abandon')
+  WORKTREE_FINISH_COMPLETED: 'worktree-finish-completed', // ({ subProjectId, parentProjectId, featureBranch, targetBranch })
   OPEN_PM: 'open-pm',                 // ()
   NEW_AGENT_TAB: 'new-agent-tab',     // (projectIndex, provider?)
   NEW_WEB_TAB: 'new-web-tab',         // (projectIndex, url?) — url pre-navigates the tab
