@@ -138,6 +138,44 @@ test.describe('finish worktree gate', () => {
     await expect(page.locator('.sidebar-item.worktree-child', { hasText: 'feature' })).toHaveCount(1);
   });
 
+  test('modified tracked file blocks finish before merge and keeps the worktree', async () => {
+    const mainBefore = git(base, ['rev-parse', 'main']).trim();
+    fs.writeFileSync(path.join(feature, 'f.txt'), 'uncommitted edit');
+
+    await openCloseMenu(page, 'Finish');
+
+    const popup = page.locator('.worktree-dialog', { hasText: 'Finish Worktree' });
+    await expect(popup).toBeVisible({ timeout: 5_000 });
+    await popup.locator('.conn-btn-next').click();
+
+    const err = popup.locator('.worktree-error');
+    await expect(err).toContainText('git status --porcelain', { timeout: 8_000 });
+    await expect(err).toContainText('f.txt');
+    expect(git(base, ['rev-parse', 'main']).trim()).toBe(mainBefore);
+    expect(fs.existsSync(feature)).toBe(true);
+    expect(fs.readFileSync(path.join(feature, 'f.txt'), 'utf-8')).toBe('uncommitted edit');
+    await expect(page.locator('.sidebar-item.worktree-child', { hasText: 'feature' })).toHaveCount(1);
+  });
+
+  test('untracked non-ignored file blocks finish before merge and keeps the worktree', async () => {
+    const mainBefore = git(base, ['rev-parse', 'main']).trim();
+    fs.writeFileSync(path.join(feature, 'scratch.txt'), 'keep me');
+
+    await openCloseMenu(page, 'Finish');
+
+    const popup = page.locator('.worktree-dialog', { hasText: 'Finish Worktree' });
+    await expect(popup).toBeVisible({ timeout: 5_000 });
+    await popup.locator('.conn-btn-next').click();
+
+    const err = popup.locator('.worktree-error');
+    await expect(err).toContainText('git status --porcelain', { timeout: 8_000 });
+    await expect(err).toContainText('scratch.txt');
+    expect(git(base, ['rev-parse', 'main']).trim()).toBe(mainBefore);
+    expect(fs.existsSync(feature)).toBe(true);
+    expect(fs.readFileSync(path.join(feature, 'scratch.txt'), 'utf-8')).toBe('keep me');
+    await expect(page.locator('.sidebar-item.worktree-child', { hasText: 'feature' })).toHaveCount(1);
+  });
+
   test('worktree agent proposal opens the Finish gate without merging', async () => {
     await page.locator('.sidebar-item.worktree-child', { hasText: 'feature' }).click();
     await page.locator('.connect-prompt').click();
