@@ -67,15 +67,22 @@ Type-specific connector helpers are surfaced as their own namespaces:
 | `checkDirty(connection, cwd)` | invoke `git:check-dirty` → `boolean` |
 | `checkout(connection, cwd, branch)` | invoke `git:checkout` → `void` |
 | `worktreeAdd(connection, cwd, branch, newBranch: boolean)` | invoke `git:worktree-add` |
-| `worktreeRemove(connection, cwd, worktreePath)` | invoke `git:worktree-remove` |
+| `worktreeRemove(connection, cwd, worktreePath)` | invoke `git:worktree-remove`; runs non-force Git worktree removal |
+| `migrateNote(connection, baseCwd, worktreeCwd, notePath?)` | invoke `git:migrate-note` → `{ ok, migrated?, error? }`; create-time base→child feature-note move |
+| `restoreNotes(connection, baseCwd, worktreeCwd)` | invoke `git:restore-notes` → `{ ok, migrated?, error? }`; close-time child→base feature-note restore |
+| `deleteBranch(connection, cwd, branch, force?)` | invoke `git:delete-branch` → `{ ok, error? }` |
+| `branchMerged(connection, cwd, target, branch)` | invoke `git:branch-merged` → `{ merged, aheadCount }` |
+| `listFeatureNotes(connection, cwd)` | invoke `git:list-feature-notes` → `FeatureNoteInfo[]` |
 
 ## worktree (`shelfApi.worktree`)
 
 | Method | Shape |
 |--------|-------|
-| `finishMergeBack(payload)` | invoke `worktree:finish-merge-back` |
+| `finishMergeBack(payload)` | invoke `worktree:finish-merge-back` → `FinishMergeBackResult`; `payload = { connection, featureCwd, baseCwd, baseBranch, featureBranch }`; outcome is `'merged' \| 'busy' \| 'non-ff' \| 'feature-dirty' \| 'base-dirty' \| 'error'` |
 | `onProposeCreate(cb(payload))` | recv `worktree:propose-create` → `{ projectId, branch?, notePath? }`; opens the New Worktree dialog only |
 | `onProposeFinish(cb(payload))` | recv `worktree:propose-finish` → `{ projectId }`; opens the Finish gate only |
+
+Renderer-local worktree completion uses the event bus, not IPC: `worktree-finish-completed` carries `{ subProjectId, parentProjectId, featureBranch, targetBranch }` after every close step succeeds.
 
 ## file-transfer
 

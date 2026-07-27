@@ -72,6 +72,16 @@ title: shelf-terminal — Intent → File Index
 | Docker | `docker.ts` | Docker exec connector |
 | 單元測試 | `connector.test.ts` | available() / buildSpawnConfig() 等測試 |
 
+## Worktree lifecycle (src/main/worktree/)
+
+| Intent | File | Role |
+|--------|------|------|
+| Finish merge-back | `worktree/merge-back.ts` | ff-only target advancement, feature/base dirty guards, non-ff rebase guidance |
+| Feature note create/close migration | `worktree/note-migration.ts` | create-time base→child note move and close-time child→base note restore |
+| Feature note listing | `worktree/feature-notes.ts` | Lists `.agent/features/*.md` with display frontmatter for picker/restore |
+| Branch merged check | `worktree/branch-merged.ts` | Computes merged/ahead state for Abandon branch-delete warning |
+| Per-repo finish lock | `worktree/repo-lock.ts` | In-process lock around the atomic “check target → fast-forward” merge-back step |
+
 ## Agent View (src/main/agent/)
 
 | Intent | File | Role |
@@ -160,7 +170,7 @@ title: shelf-terminal — Intent → File Index
 | Intent | File | Role |
 |--------|------|------|
 | Root 元件 / Event handler 中樞 | `App.tsx` | 載入 projects/settings、集中處理所有 event bus 事件、split view 渲染的唯一 side-effect hub |
-| 全域狀態管理 | `store.ts` | `useSyncExternalStore` store，管 projects/tabs/settings/UI state + connectionHealth + skillsVisible |
+| 全域狀態管理 | `store.ts` | `useSyncExternalStore` store，管 projects/tabs/settings/UI state + connectionHealth + projectNotice + skillsVisible |
 | Event bus | `events/` (`bus.ts` / `types.ts` / `ipc-agent.ts` / `index.ts`) | pub/sub + 類型化 `agent:*` vocabulary + IPC↔bus 適配層 |
 | 快捷鍵系統 | `hooks/useKeybindings.ts` | combo string 對應 action，支援參數化 action |
 | Paste/drop 上傳 hook | `hooks/useAttachmentPaste.ts` | paste/drop/upload pipeline + file size check |
@@ -184,6 +194,8 @@ title: shelf-terminal — Intent → File Index
 | 頁內搜尋 | `components/SearchBar.tsx` | terminal tab 走 xterm SearchAddon；agent/web tab 走 main findInPage（`shelfApi.find`）+ 命中計數 |
 | Settings 面板 | `components/SettingsPanel.tsx` | 左側 tab 分頁（Terminal / Agent / Models / PM Agent / Web / Backup / Shortcuts） |
 | Worktree 建立 | `components/WorktreeDialog.tsx` | 顯示 target、接收 branch/note prefill、選 boot provider 後建立 sub-project |
+| Worktree 關閉 gate | `components/WorktreeCloseGate.tsx` | Finish/Abandon close transaction：merge-back、note restore、teardown、branch delete、completion event |
+| Project-level notice banner | `components/ProjectNoticeBanner.tsx` + `project-notice.ts` | Parent project completion notice UI + latest-wins/dismiss/timeout state helpers |
 | 刪除確認 | `components/RemoveConfirmDialog.tsx` | Remove project 確認 modal，可勾選清理 worktree files |
 | PM 狀態面板（read-only） | `components/PmView.tsx` | 右側可拖拉 panel，read-only 訊息列表 + markdown，header 含 PM Active/Away/Clear toggle |
 | Notes 面板 | `components/NotesView.tsx` | ⌘N 右側 panel，per-project markdown scratch pad（preview/edit、貼圖、auto-save） |

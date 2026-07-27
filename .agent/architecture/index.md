@@ -15,3 +15,4 @@ Abstract data flow at the system level (component names, no filenames).
 | 背景任務 | [background-tasks](background-tasks.md) | task lane 與前景 turn 解耦；卡片獨立 settle；auto-resume |
 | Config 備份/複製 | [config-backup](config-backup.md) | 勾選 live → my branch 快照；chosen branch → plan vs live → apply；side-car git、per-machine branch |
 | 專案 env 注入 | [project-env](project-env.md) | plain+secret → 單一 resolve 出口 → 注入每個 spawn（agent-server/dispatcher/terminal）；dispatcher 走 open_session |
+| Worktree lifecycle | [worktree](worktree.md) | proposal gate → create/finish/abandon transaction → note preservation → parent completion |
