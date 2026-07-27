@@ -11,7 +11,7 @@ import os from 'os';
  * main is advanced past the fork so the ff merge-back is a non-fast-forward: the
  * Finish popup shows the enhanced error and keeps the worktree. Clicking
  * "Send to agent" hands that error to the worktree's own agent tab (as a queued
- * user message) so the agent can resolve it — the reactive-sync loop's entry.
+ * user message) so the agent can rebase the feature worktree and retry.
  */
 
 const BASE_ID = 'wt-sta-base';
@@ -111,6 +111,8 @@ test.describe('finish failure → Send to agent', () => {
     // Merge-back is a non-fast-forward → enhanced error shown, worktree kept.
     const err = popup.locator('.worktree-error');
     await expect(err).toContainText('fast-forward', { timeout: 8_000 });
+    await expect(err).toContainText("rebase this worktree onto 'main'");
+    await expect(err).not.toContainText("merge 'main' into this worktree");
     await expect(page.locator('.sidebar-item.worktree-child', { hasText: 'feature' })).toHaveCount(1);
 
     // Send to agent → popup closes and the error lands as a queued user message.
@@ -120,5 +122,7 @@ test.describe('finish failure → Send to agent', () => {
     const userMsg = page.locator('.agent-msg-user .agent-msg-content');
     await expect(userMsg.first()).toContainText('finish failed', { timeout: 8_000 });
     await expect(userMsg.first()).toContainText('fast-forward');
+    await expect(userMsg.first()).toContainText("rebase this worktree onto 'main'");
+    await expect(userMsg.first()).not.toContainText("merge 'main' into this worktree");
   });
 });
