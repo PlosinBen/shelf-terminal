@@ -1,8 +1,9 @@
 import { BrowserWindow, ipcMain, shell } from 'electron';
 import { IPC } from '@shared/ipc-channels';
 import { log } from '@shared/logger';
+import { diag } from '@shared/diag-log';
 import { formatTabLogId } from '@shared/tab-id';
-import type { Connection, AgentProvider } from '@shared/types';
+import type { Connection, AgentProvider, AgentInitStatus } from '@shared/types';
 import type { AgentSessionState, AgentEvent, AgentBackend, PermissionResult } from './types';
 import { createRemoteBackend, syncSkillsForConnection } from './remote';
 import { loadSettings } from '../settings-store';
@@ -313,6 +314,20 @@ function send(channel: string, tabId: string, ...args: unknown[]) {
   }
 }
 
+// Funnel EVERY AGENT_INIT_STATUS emission through here so the diag channel sees
+// every init-status transition main pushes to the renderer (state + phase),
+// without missing a call site. Diagnostic-only wrapper — behaviour is identical
+// to a bare send(IPC.AGENT_INIT_STATUS, …). Remove with the diag channel.
+function sendInitStatus(tabId: string, payload: AgentInitStatus) {
+  diag('main.init_status', {
+    tab: formatTabLogId(tabId),
+    state: payload.state,
+    phase: payload.state === 'starting' ? payload.phase ?? null : null,
+    reason: payload.state === 'failed' ? payload.reason : undefined,
+  });
+  send(IPC.AGENT_INIT_STATUS, tabId, payload);
+}
+
 async function startSession(
   tabId: string,
   cwd: string,
@@ -320,7 +335,14 @@ async function startSession(
   provider: AgentProvider,
   opts?: Record<string, unknown>,
 ): Promise<boolean> {
-  if (sessions.has(tabId)) return true;
+  const alreadyLive = sessions.has(tabId);
+  diag('main.startSession', { tab: formatTabLogId(tabId), provider, alreadyLive });
+  // Early-return WITHOUT re-sending AGENT_INIT_STATUS/capabilities: if the renderer
+  // remounted and is sitting at its reset default 'starting', it stays stuck (H1).
+  if (alreadyLive) {
+    diag('main.startSession_early_return', { tab: formatTabLogId(tabId), provider });
+    return true;
+  }
 
   const tag = `[agent:${formatTabLogId(tabId)}]`;
   log.info('agent', `${tag} start provider=${provider} cwd=${cwd}`);
@@ -342,7 +364,7 @@ async function startSession(
     sessionId,
     // Refine the renderer's "starting" spinner text as deploy/spawn/probe
     // progress (deploying → connecting → checking-auth).
-    (phase) => send(IPC.AGENT_INIT_STATUS, tabId, { state: 'starting', phase }),
+    (phase) => sendInitStatus(tabId, { state: 'starting', phase }),
     // Background-task sink — forwarded straight to the renderer. Session-level
     // (NOT tied to session.state): a backgrounded task outlives its turn, so we
     // never touch the turn's busy/idle state here. See background-tasks#2.
@@ -403,7 +425,7 @@ async function startSession(
   sessions.set(tabId, session);
 
   // Init lifecycle hint for the renderer's loading spinner / retry UI.
-  send(IPC.AGENT_INIT_STATUS, tabId, { state: 'starting' });
+  sendInitStatus(tabId, { state: 'starting' });
 
   if (backend.getCapabilities) {
     const settings = loadSettings();
@@ -421,15 +443,15 @@ async function startSession(
       // chat underneath is harmless while AuthPane covers the pane).
       send(IPC.AGENT_CAPABILITIES, tabId, caps);
       if (caps.authRequired) send(IPC.AGENT_AUTH_REQUIRED, tabId, provider);
-      send(IPC.AGENT_INIT_STATUS, tabId, { state: 'ready' });
+      sendInitStatus(tabId, { state: 'ready' });
     }).catch((err) => {
       log.error('agent', `${tag} capabilities error: ${err.message}`);
       log.flushTrace('agent', `${tag} init failed`);
-      send(IPC.AGENT_INIT_STATUS, tabId, { state: 'failed', reason: err.message });
+      sendInitStatus(tabId, { state: 'failed', reason: err.message });
     });
   } else {
     // Backend that exposes no capabilities is still "ready" — nothing to wait for.
-    send(IPC.AGENT_INIT_STATUS, tabId, { state: 'ready' });
+    sendInitStatus(tabId, { state: 'ready' });
   }
 
   return true;
