@@ -2141,6 +2141,11 @@ button {
   overflow: hidden;
 }
 
+.worktree-target {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
 .worktree-input {
   width: 100%;
   padding: 8px 10px;

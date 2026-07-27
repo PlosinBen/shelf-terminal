@@ -23,6 +23,8 @@ import { parseHttpOrigin } from '../web-session-helpers';
 import { isGranted, grant } from '../web-grants';
 import { requestWebPermission } from '../web-permission';
 import { requestBrowserOpen, openWebTab } from '../browser-open';
+import { getMainWindow, getProjects } from '../app-state';
+import { IPC } from '@shared/ipc-channels';
 
 /** Per-call context the bridge threads in (which tab/project asked). */
 export interface AppToolContext {
@@ -201,10 +203,36 @@ const REGISTRY: Record<string, AppToolDef> = {
         message: `Opened ${url} in a Web tab. Ask the user to log in there, then retry browser_fetch.` };
     },
   },
-  // NOTE: the agent has no worktree_project ops. The whole worktree lifecycle —
-  // create AND finish/abandon — is user-initiated UI (sidebar right-click menu),
-  // not agent tools (#lifecycle). Integration is consequential + environment-
-  // specific, so the human drives it; the agent only develops in the worktree.
+  // Worktree lifecycle mutations remain user-initiated UI. These proposal ops
+  // only open the relevant UI, so the human still reviews and commits Create /
+  // Finish; neither op runs git or creates/removes a worktree.
+  'worktree.propose_create': {
+    safe: false,
+    run: async (args, ctx) => {
+      const projectId = ctx.projectId;
+      if (!projectId) throw new Error('worktree.propose_create requires a project context');
+      const win = getMainWindow();
+      if (!win || win.isDestroyed()) throw new Error('cannot open New Worktree dialog: no application window');
+      const branch = typeof args.branch === 'string' && args.branch.trim() ? args.branch.trim() : undefined;
+      const notePath = typeof args.note === 'string' && args.note.trim() ? args.note.trim() : undefined;
+      win.webContents.send(IPC.WORKTREE_PROPOSE_CREATE, { projectId, branch, notePath });
+      return { opened: true, message: 'Opened the New Worktree dialog. The user must review and press Create.' };
+    },
+  },
+  'worktree.propose_finish': {
+    safe: false,
+    run: async (_args, ctx) => {
+      const projectId = ctx.projectId;
+      if (!projectId) throw new Error('worktree.propose_finish requires a project context');
+      const project = getProjects().find((candidate) => candidate.id === projectId);
+      if (!project) throw new Error(`project not found: ${projectId}`);
+      if (!project.parentProjectId) throw new Error(`${project.name} is not a worktree — nothing to finish`);
+      const win = getMainWindow();
+      if (!win || win.isDestroyed()) throw new Error('cannot open Finish Worktree gate: no application window');
+      win.webContents.send(IPC.WORKTREE_PROPOSE_FINISH, { projectId });
+      return { opened: true, message: 'Opened the Finish Worktree gate. The user must review and press Finish.' };
+    },
+  },
   'app_skill.update': {
     safe: false,
     run: async (args) => {

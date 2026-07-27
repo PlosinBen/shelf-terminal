@@ -80,6 +80,8 @@ interface ShelfApi {
   };
   worktree: {
     finishMergeBack: (payload: { connection: import('../shared/types').Connection; featureCwd: string; baseCwd: string; baseBranch: string; featureBranch: string }) => Promise<import('../shared/types').FinishMergeBackResult>;
+    onProposeCreate: (callback: (payload: { projectId: string; branch?: string; notePath?: string }) => void) => () => void;
+    onProposeFinish: (callback: (payload: { projectId: string }) => void) => () => void;
   };
   settings: {
     load: () => Promise<import('../shared/types').AppSettings>;

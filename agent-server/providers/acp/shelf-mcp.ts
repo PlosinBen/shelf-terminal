@@ -20,6 +20,7 @@ import {
   APP_SKILL_LIST_DESC, APP_SKILL_GET_DESC, APP_SKILL_CREATE_DESC, APP_SKILL_UPDATE_DESC,
   APP_SKILL_READ_FILE_DESC, APP_SKILL_WRITE_FILE_DESC, APP_SKILL_DELETE_FILE_DESC,
   WEB_FETCH_DESC, BROWSER_OPEN_DESC,
+  PROPOSE_WORKTREE_CREATE_DESC, PROPOSE_WORKTREE_FINISH_DESC,
 } from '../../app-tool-tools';
 
 export interface ShelfMcpHandle {
@@ -84,6 +85,17 @@ function buildShelfMcpServer(): McpServer {
       reason: z.string().optional().describe('short explanation of why this page must be opened (shown in the approval popup)'),
     } },
     async ({ url, reason }) => toToolResult(await runBridgeTool('web.open', { url, reason })));
+
+  server.registerTool('propose_worktree_create',
+    { description: PROPOSE_WORKTREE_CREATE_DESC, inputSchema: {
+      branch: z.string().optional().describe('suggested new branch name'),
+      note: z.string().optional().describe('feature note filename/path to preselect'),
+    } },
+    async ({ branch, note }) => toToolResult(await runBridgeTool('worktree.propose_create', { branch, note })));
+
+  server.registerTool('propose_worktree_finish',
+    { description: PROPOSE_WORKTREE_FINISH_DESC },
+    async () => toToolResult(await runBridgeTool('worktree.propose_finish', {})));
 
   return server;
 }

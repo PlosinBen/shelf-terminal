@@ -1,7 +1,7 @@
 import { query as sdkQuery, tool, createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk';
 import type { Query, Options, SDKMessage, SDKUserMessage, CanUseTool } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
-import { runBridgeTool, APP_SKILL_LIST_DESC, APP_SKILL_GET_DESC, APP_SKILL_CREATE_DESC, APP_SKILL_UPDATE_DESC, APP_SKILL_READ_FILE_DESC, APP_SKILL_WRITE_FILE_DESC, APP_SKILL_DELETE_FILE_DESC, WEB_FETCH_DESC, BROWSER_OPEN_DESC } from '../../app-tool-tools';
+import { runBridgeTool, APP_SKILL_LIST_DESC, APP_SKILL_GET_DESC, APP_SKILL_CREATE_DESC, APP_SKILL_UPDATE_DESC, APP_SKILL_READ_FILE_DESC, APP_SKILL_WRITE_FILE_DESC, APP_SKILL_DELETE_FILE_DESC, WEB_FETCH_DESC, BROWSER_OPEN_DESC, PROPOSE_WORKTREE_CREATE_DESC, PROPOSE_WORKTREE_FINISH_DESC } from '../../app-tool-tools';
 import { isWebFetchTool, WEB_FETCH_TOOL, isBrowserOpenTool, BROWSER_OPEN_TOOL } from '@shared/web-session';
 import { serverLog } from '../../server-logger';
 import { createRouterState, notePush, routeMessage } from './turn-router';
@@ -268,6 +268,17 @@ function getShelfMcpServer() {
           reason: z.string().optional().describe('short explanation of why this page must be opened (shown in the approval popup)'),
         }, async ({ url, reason }) => {
           const { text, isError } = await runBridgeTool('web.open', { url, reason });
+          return { content: [{ type: 'text' as const, text }], ...(isError ? { isError: true } : {}) };
+        }),
+        tool('propose_worktree_create', PROPOSE_WORKTREE_CREATE_DESC, {
+          branch: z.string().optional().describe('suggested new branch name'),
+          note: z.string().optional().describe('feature note filename/path to preselect'),
+        }, async ({ branch, note }) => {
+          const { text, isError } = await runBridgeTool('worktree.propose_create', { branch, note });
+          return { content: [{ type: 'text' as const, text }], ...(isError ? { isError: true } : {}) };
+        }),
+        tool('propose_worktree_finish', PROPOSE_WORKTREE_FINISH_DESC, {}, async () => {
+          const { text, isError } = await runBridgeTool('worktree.propose_finish', {});
           return { content: [{ type: 'text' as const, text }], ...(isError ? { isError: true } : {}) };
         }),
       ],

@@ -4,11 +4,11 @@ import { on, emit, emitAgent, Events } from '../events';
 import { enqueuePendingSend } from '../agentTabStore';
 import type { BranchMergedInfo, GitBranchInfo, WorktreeCloseKind } from '@shared/types';
 
-// User-initiated finish/abandon popup for a worktree sub-project (#lifecycle).
-// Opened from the sidebar right-click menu (Events.WORKTREE_CLOSE) — NOT the
-// agent; the agent no longer drives the worktree lifecycle. The popup owns the
-// whole close sequence and, on failure, offers a one-click "Send to agent" that
-// hands the error to the worktree's own agent tab to resolve.
+// User-committed finish/abandon popup for a worktree sub-project (#lifecycle).
+// Opened from the sidebar menu or an agent's side-effect-free proposal
+// (Events.WORKTREE_CLOSE); the human always commits the lifecycle action here.
+// The popup owns the whole close sequence and, on failure, offers a one-click
+// "Send to agent" that hands the error to the worktree's own agent tab.
 //
 //   finish  = pick target ▾ (default baseBranch) → lock+ff merge-back → teardown
 //             → delete branch (force; commits are safe on target after the ff)

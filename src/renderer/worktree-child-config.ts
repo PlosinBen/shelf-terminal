@@ -1,4 +1,4 @@
-import type { ProjectConfig } from '@shared/types';
+import type { AgentProvider, ProjectConfig } from '@shared/types';
 
 /**
  * Build a worktree sub-project's config by cloning the parent project's SETUP
@@ -16,7 +16,7 @@ import type { ProjectConfig } from '@shared/types';
  */
 export function buildWorktreeChildConfig(
   parent: ProjectConfig,
-  opts: { id: string; cwd: string; worktreeBranch: string; baseBranch?: string },
+  opts: { id: string; cwd: string; worktreeBranch: string; baseBranch?: string; defaultAgentProvider?: AgentProvider },
 ): ProjectConfig {
   return {
     // ── inherited setup ──
@@ -27,7 +27,7 @@ export function buildWorktreeChildConfig(
     envPlain: parent.envPlain,
     defaultTabs: parent.defaultTabs,
     quickCommands: parent.quickCommands,
-    defaultAgentProvider: parent.defaultAgentProvider,
+    defaultAgentProvider: opts.defaultAgentProvider ?? parent.defaultAgentProvider,
     agentPrefs: parent.agentPrefs,
     openAgentOnConnect: parent.openAgentOnConnect,
     // ── fresh worktree identity ──

@@ -137,4 +137,20 @@ test.describe('finish worktree gate', () => {
     expect(fs.existsSync(feature)).toBe(true);
     await expect(page.locator('.sidebar-item.worktree-child', { hasText: 'feature' })).toHaveCount(1);
   });
+
+  test('worktree agent proposal opens the Finish gate without merging', async () => {
+    await page.locator('.sidebar-item.worktree-child', { hasText: 'feature' }).click();
+    await page.locator('.connect-prompt').click();
+    await page.locator('.tab-add').click({ button: 'right' });
+    await page.locator('.context-menu-item', { hasText: 'Agent (Claude)' }).click();
+    const textarea = page.locator('.agent-textarea:visible');
+    await expect(textarea).toBeVisible({ timeout: 5_000 });
+    await textarea.fill('worktree_finish');
+    await textarea.press('Enter');
+
+    const popup = page.locator('.worktree-dialog', { hasText: 'Finish Worktree' });
+    await expect(popup).toBeVisible({ timeout: 8_000 });
+    await popup.locator('.conn-btn-cancel').click();
+    expect(fs.existsSync(feature)).toBe(true);
+  });
 });

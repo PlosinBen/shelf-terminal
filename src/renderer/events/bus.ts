@@ -33,7 +33,7 @@ export const Events = {
   OPEN_FOLDER_PICKER: 'open-folder-picker',
   ADD_PROJECT: 'add-project',       // (ProjectConfig)
   TOGGLE_SPLIT: 'toggle-split',     // (projectIndex)
-  CREATE_WORKTREE: 'create-worktree', // (projectIndex)
+  CREATE_WORKTREE: 'create-worktree', // (projectIndex, prefill?: { branch?, notePath? })
   WORKTREE_CLOSE: 'worktree-close',   // (projectIndex, kind: 'finish' | 'abandon')
   OPEN_PM: 'open-pm',                 // ()
   NEW_AGENT_TAB: 'new-agent-tab',     // (projectIndex, provider?)

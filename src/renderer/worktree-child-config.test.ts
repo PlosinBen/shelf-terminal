@@ -47,4 +47,12 @@ describe('buildWorktreeChildConfig', () => {
   it('NEVER inherits agentSessionIds (fresh agent boots and reads the note)', () => {
     expect(child.agentSessionIds).toBeUndefined();
   });
+
+  it('uses an explicit provider override without changing the parent', () => {
+    const overridden = buildWorktreeChildConfig(parent, {
+      id: 'wt-codex', cwd: '/repo-codex', worktreeBranch: 'codex', defaultAgentProvider: 'codex',
+    });
+    expect(overridden.defaultAgentProvider).toBe('codex');
+    expect(parent.defaultAgentProvider).toBe('claude');
+  });
 });

@@ -175,6 +175,24 @@ export function App() {
       addTab(projectIndex, undefined, undefined, undefined, 'web', undefined, url);
     });
 
+    const offProposeWorktreeCreate = window.shelfApi.worktree.onProposeCreate(({ projectId, branch, notePath }) => {
+      const projectIndex = projects.findIndex((p) => p.config.id === projectId);
+      if (projectIndex === -1) {
+        console.warn(`[worktree] propose-create for unknown project ${projectId}`);
+        return;
+      }
+      emit(Events.CREATE_WORKTREE, projectIndex, { branch, notePath });
+    });
+
+    const offProposeWorktreeFinish = window.shelfApi.worktree.onProposeFinish(({ projectId }) => {
+      const projectIndex = projects.findIndex((p) => p.config.id === projectId);
+      if (projectIndex === -1) {
+        console.warn(`[worktree] propose-finish for unknown project ${projectId}`);
+        return;
+      }
+      emit(Events.WORKTREE_CLOSE, projectIndex, 'finish');
+    });
+
     const offConnectProject = on(Events.CONNECT_PROJECT, async (projectIndex: number) => {
       const proj = projects[projectIndex];
       if (!proj || proj.tabs.length > 0) return;
@@ -294,7 +312,7 @@ export function App() {
       }
     });
 
-    return () => { offCloseTab(); offRemoveProject(); offNewTab(); offNewAgentTab(); offNewWebTab(); offOpenWebTab(); offConnectProject(); offAutoConnect(); offDisconnectProject(); offAddProject(); offToggleSplit(); offSwitchBranch(); };
+    return () => { offCloseTab(); offRemoveProject(); offNewTab(); offNewAgentTab(); offNewWebTab(); offOpenWebTab(); offProposeWorktreeCreate(); offProposeWorktreeFinish(); offConnectProject(); offAutoConnect(); offDisconnectProject(); offAddProject(); offToggleSplit(); offSwitchBranch(); };
   }, [projects]);
 
   useEffect(() => {

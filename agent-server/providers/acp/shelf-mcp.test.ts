@@ -25,6 +25,8 @@ describe('shelf MCP bridge server', () => {
       'delete_app_skill_file',
       'get_app_skill',
       'list_app_skills',
+      'propose_worktree_create',
+      'propose_worktree_finish',
       'read_app_skill_file',
       'update_app_skill',
       'write_app_skill_file',

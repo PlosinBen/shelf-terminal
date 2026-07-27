@@ -324,6 +324,24 @@ export function createFakeBackend(): ServerBackend {
       return;
     }
 
+    // worktree_create:<branch> [<note>] — opens the real New Worktree dialog
+    // through the bridge without creating anything. The optional note path has
+    // no spaces, matching feature-note filenames.
+    if (step.startsWith('worktree_create:')) {
+      const [branch, note] = step.slice('worktree_create:'.length).trim().split(/\s+/, 2);
+      const res = await callMain('worktree.propose_create', { branch, note });
+      send({ type: 'message', msgId: mintId('m'), msgType: 'reply', content: `worktree_create ${JSON.stringify(res)}` });
+      return;
+    }
+
+    // worktree_finish — opens the real Finish gate only for the caller's
+    // worktree. Main rejects the base project with an explanatory tool result.
+    if (step === 'worktree_finish') {
+      const res = await callMain('worktree.propose_finish', {});
+      send({ type: 'message', msgId: mintId('m'), msgType: 'reply', content: `worktree_finish ${JSON.stringify(res)}` });
+      return;
+    }
+
     if (step === 'picker_single' || step === 'picker_combo' || step === 'picker_multi' || step === 'picker_input' || step === 'picker_number') {
       const id = mintId('p');
       const prompts =

@@ -59,6 +59,9 @@ export const IPC = {
   // Finish/abandon are user-initiated in the renderer (#lifecycle); only this
   // git step crosses to main.
   WORKTREE_FINISH_MERGE_BACK: 'worktree:finish-merge-back',
+  // agent proposal → renderer only. The user still commits in the dialog/gate.
+  WORKTREE_PROPOSE_CREATE: 'worktree:propose-create',
+  WORKTREE_PROPOSE_FINISH: 'worktree:propose-finish',
 
   // Notes (per-project markdown scratch pad — multiple notes per project)
   NOTES_LIST: 'notes:list',

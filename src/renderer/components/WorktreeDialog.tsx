@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useStore } from '../store';
 import { on, emit, Events } from '../events';
 import { buildWorktreeChildConfig } from '../worktree-child-config';
-import type { FeatureNoteInfo } from '@shared/types';
+import type { AgentProvider, FeatureNoteInfo } from '@shared/types';
+import { agentProviderEntries } from '@shared/agent-providers';
 
 // Sentinel <select> value for "don't seed a note" (a valid degenerate: the fresh
 // agent starts with no Phase-0 context). '' can't collide with a note path.
@@ -19,28 +20,35 @@ export function WorktreeDialog() {
   // picked note is migrated into the worktree before its agent boots.
   const [notes, setNotes] = useState<FeatureNoteInfo[]>([]);
   const [selectedNote, setSelectedNote] = useState<string>(NO_NOTE);
+  const [baseBranch, setBaseBranch] = useState<string | null>(null);
+  const [defaultAgentProvider, setDefaultAgentProvider] = useState<AgentProvider>('claude');
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    const off = on(Events.CREATE_WORKTREE, (index: number) => {
+    const off = on(Events.CREATE_WORKTREE, (index: number, prefill?: { branch?: string; notePath?: string }) => {
       setProjectIndex(index);
       setOpen(true);
-      setInput('');
+      setInput(prefill?.branch ?? '');
       setError(null);
       setCreating(false);
       setNotes([]);
-      setSelectedNote(NO_NOTE);
+      setSelectedNote(prefill?.notePath ?? NO_NOTE);
+      setBaseBranch(null);
 
       // Fetch the base repo's in-progress notes for the picker. Pre-select when
       // there's exactly one (the common case: one feature under discussion);
       // otherwise default to "no note" so the user chooses deliberately.
       const proj = projects[index];
       if (proj) {
+        setDefaultAgentProvider(proj.config.defaultAgentProvider ?? 'claude');
+        window.shelfApi.git.branchList(proj.config.connection, proj.config.cwd)
+          .then((branches) => setBaseBranch(branches.find((branch) => branch.current)?.name ?? null))
+          .catch(() => setBaseBranch(null));
         window.shelfApi.git
           .listFeatureNotes(proj.config.connection, proj.config.cwd)
           .then((found) => {
             setNotes(found);
-            if (found.length === 1) setSelectedNote(found[0].path);
+            if (!prefill?.notePath && found.length === 1) setSelectedNote(found[0].path);
           })
           .catch(() => { /* picker just shows no notes; create still works */ });
       }
@@ -95,6 +103,7 @@ export function WorktreeDialog() {
       cwd: result.path,
       worktreeBranch: branch,
       baseBranch: result.baseBranch,
+      defaultAgentProvider,
     }));
 
     // 4. Auto-connect the fresh worktree so its agent boots (and, with a note
@@ -103,7 +112,7 @@ export function WorktreeDialog() {
     emit(Events.AUTO_CONNECT_PROJECT, projectId);
 
     setOpen(false);
-  }, [input, projectIndex, projects, creating, selectedNote]);
+  }, [input, projectIndex, projects, creating, selectedNote, defaultAgentProvider]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Escape') {
@@ -116,6 +125,8 @@ export function WorktreeDialog() {
 
   if (!open) return null;
 
+  const project = projectIndex === null ? undefined : projects[projectIndex];
+
   return (
     <div className="settings-overlay" onClick={() => setOpen(false)}>
       <div className="worktree-dialog" onClick={(e) => e.stopPropagation()}>
@@ -124,6 +135,9 @@ export function WorktreeDialog() {
           <button className="settings-close" onClick={() => setOpen(false)}>×</button>
         </div>
         <div className="worktree-dialog-body">
+          <div className="worktree-target">
+            {project?.config.name ?? 'Unknown project'} @ {baseBranch ?? 'unknown branch'}
+          </div>
           <input
             ref={inputRef}
             className="worktree-input"
@@ -155,6 +169,19 @@ export function WorktreeDialog() {
               </select>
             </label>
           )}
+          <label className="worktree-note-picker">
+            <span className="worktree-note-picker-label">Agent provider</span>
+            <select
+              className="worktree-select"
+              value={defaultAgentProvider}
+              onChange={(e) => setDefaultAgentProvider(e.target.value as AgentProvider)}
+              disabled={creating}
+            >
+              {agentProviderEntries().map(([id, meta]) => (
+                <option key={id} value={id}>{meta.label}</option>
+              ))}
+            </select>
+          </label>
           {error && <div className="worktree-error">{error}</div>}
         </div>
         <div className="project-edit-footer">

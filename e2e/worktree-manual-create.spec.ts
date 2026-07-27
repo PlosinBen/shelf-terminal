@@ -96,6 +96,10 @@ test.describe('user-initiated worktree create', () => {
   test('picker lists all notes with status; selecting one migrates it and auto-connects', async () => {
     const dialog = await openNewWorktreeDialog(page);
 
+    await expect(dialog.locator('.worktree-target')).toHaveText('WT Base @ main');
+    await expect(dialog.locator('.worktree-note-picker').filter({ hasText: 'Agent provider' }).locator('select'))
+      .toHaveValue('claude');
+
     // Every note is pickable regardless of status; each shows its name + status.
     const options = dialog.locator('.worktree-select option');
     await expect(options).toHaveCount(3); // "No note" + Demo (in-progress) + Old (cancelled)
@@ -136,5 +140,20 @@ test.describe('user-initiated worktree create', () => {
     // Nothing migrated — the base note stays put.
     expect(fs.existsSync(path.join(repo, '.agent/features/demo.md'))).toBe(true);
     expect(fs.existsSync(path.join(`${repo}-feature-n`, '.agent/features/demo.md'))).toBe(false);
+  });
+
+  test('agent proposal pre-fills the dialog but still requires the user to Create', async () => {
+    await page.locator('.tab-add').click({ button: 'right' });
+    await page.locator('.context-menu-item', { hasText: 'Agent (Claude)' }).click();
+    const textarea = page.locator('.agent-textarea:visible');
+    await expect(textarea).toBeVisible({ timeout: 5_000 });
+    await textarea.fill('worktree_create:feature/proposed .agent/features/demo.md');
+    await textarea.press('Enter');
+
+    const dialog = page.locator('.worktree-dialog');
+    await expect(dialog).toBeVisible({ timeout: 8_000 });
+    await expect(dialog.locator('.worktree-input')).toHaveValue('feature/proposed');
+    await expect(dialog.locator('.worktree-select').first()).toHaveValue('.agent/features/demo.md');
+    await expect(page.locator('.sidebar-item.worktree-child')).toHaveCount(0);
   });
 });

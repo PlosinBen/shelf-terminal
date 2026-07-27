@@ -66,11 +66,15 @@ export const BROWSER_OPEN_DESC =
   + "opened — shown in the approval popup, since the popup hides your chat message while the user "
   + 'decides).';
 
-// NOTE: the worktree_project family has NO agent tools. The whole worktree
-// lifecycle — create, finish, abandon — is user-initiated UI (sidebar right-
-// click menu), not agent tools (#lifecycle): integration is consequential +
-// environment-specific, so the human drives it. The agent only develops in the
-// worktree and resolves errors on demand (Send to agent).
+export const PROPOSE_WORKTREE_CREATE_DESC =
+  'Open the New Worktree dialog with an optional suggested branch and feature note. This creates NOTHING: '
+  + 'the user reviews the dialog and presses Create. Use after agreeing a work item in the main checkout. '
+  + 'Args: branch (optional suggested branch name), note (optional feature-note filename/path to preselect).';
+
+export const PROPOSE_WORKTREE_FINISH_DESC =
+  'Open the Finish Worktree gate for this worktree. This merges NOTHING: the user reviews the target and '
+  + 'presses Finish. Call only after consolidating the feature note into permanent docs, deleting that note, '
+  + 'and committing the worktree so it is ready to merge back. Has no effect outside a worktree.';
 
 /**
  * Canonical inventory of the in-process Shelf bridge tools (name + description).
@@ -92,6 +96,8 @@ export const SHELF_BRIDGE_TOOLS: BridgeToolSpec[] = [
   { name: 'delete_app_skill_file', description: APP_SKILL_DELETE_FILE_DESC },
   { name: WEB_FETCH_TOOL, description: WEB_FETCH_DESC },
   { name: BROWSER_OPEN_TOOL, description: BROWSER_OPEN_DESC },
+  { name: 'propose_worktree_create', description: PROPOSE_WORKTREE_CREATE_DESC },
+  { name: 'propose_worktree_finish', description: PROPOSE_WORKTREE_FINISH_DESC },
 ];
 
 export interface BridgeToolText {

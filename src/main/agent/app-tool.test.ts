@@ -27,6 +27,13 @@ vi.mock('../skills-store', () => ({
 const onSkillsChanged = vi.fn();
 vi.mock('../skills-sync', () => ({ onSkillsChanged: () => onSkillsChanged() }));
 
+const getProjects = vi.fn();
+const getMainWindow = vi.fn();
+vi.mock('../app-state', () => ({
+  getProjects: () => getProjects(),
+  getMainWindow: () => getMainWindow(),
+}));
+
 import { handleAppTool, isSafeAppToolOp, isKnownAppToolOp } from './app-tool';
 
 beforeEach(() => {
@@ -42,11 +49,42 @@ beforeEach(() => {
   deleteSkillFile.mockReset();
   resolveAuxPath.mockReset();
   onSkillsChanged.mockReset();
+  getProjects.mockReset();
+  getMainWindow.mockReset();
 });
 
-// worktree_project ops removed (#lifecycle): finish/abandon are user-initiated
-// UI (sidebar right-click), no longer agent tools. See WorktreeCloseGate + the
-// menu-driven E2E specs (e2e/worktree-finish|abandon|finish-target).
+describe('app-tool dispatcher (worktree proposals)', () => {
+  const send = vi.fn();
+
+  beforeEach(() => {
+    getMainWindow.mockReturnValue({ isDestroyed: () => false, webContents: { send } });
+    getProjects.mockReturnValue([
+      { id: 'base', name: 'Base' },
+      { id: 'child', name: 'Feature', parentProjectId: 'base' },
+    ]);
+    send.mockReset();
+  });
+
+  it('propose_create opens a prefilled dialog without a git side effect', async () => {
+    const r = await handleAppTool('worktree.propose_create', { branch: 'feature/worktree', note: '.agent/features/worktree-flow.md' }, { projectId: 'base' });
+    expect(r.ok).toBe(true);
+    expect(send).toHaveBeenCalledWith('worktree:propose-create', {
+      projectId: 'base', branch: 'feature/worktree', notePath: '.agent/features/worktree-flow.md',
+    });
+  });
+
+  it('propose_finish opens the gate for a worktree', async () => {
+    const r = await handleAppTool('worktree.propose_finish', {}, { projectId: 'child' });
+    expect(r.ok).toBe(true);
+    expect(send).toHaveBeenCalledWith('worktree:propose-finish', { projectId: 'child' });
+  });
+
+  it('propose_finish fails loudly outside a worktree and sends no IPC', async () => {
+    const r = await handleAppTool('worktree.propose_finish', {}, { projectId: 'base' });
+    expect(r).toEqual({ ok: false, error: 'Base is not a worktree — nothing to finish' });
+    expect(send).not.toHaveBeenCalled();
+  });
+});
 
 describe('app-tool dispatcher (read ops)', () => {
   it('app_skill.list → { skills } from skills-store', async () => {

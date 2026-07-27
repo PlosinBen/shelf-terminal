@@ -69,6 +69,14 @@ Type-specific connector helpers are surfaced as their own namespaces:
 | `worktreeAdd(connection, cwd, branch, newBranch: boolean)` | invoke `git:worktree-add` |
 | `worktreeRemove(connection, cwd, worktreePath)` | invoke `git:worktree-remove` |
 
+## worktree (`shelfApi.worktree`)
+
+| Method | Shape |
+|--------|-------|
+| `finishMergeBack(payload)` | invoke `worktree:finish-merge-back` |
+| `onProposeCreate(cb(payload))` | recv `worktree:propose-create` → `{ projectId, branch?, notePath? }`; opens the New Worktree dialog only |
+| `onProposeFinish(cb(payload))` | recv `worktree:propose-finish` → `{ projectId }`; opens the Finish gate only |
+
 ## file-transfer
 
 Surfaced through `shelfApi.connector` (`uploadFile` / `clearUploads` / `getUploadsSize`) over channels `file:upload`, `file:clear-uploads`, `file:uploads-size` — see the connector table above.

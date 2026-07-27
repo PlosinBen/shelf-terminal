@@ -319,3 +319,11 @@ SDK 0.3.159 **並存**兩種 compact 完成訊號:`status` 形狀(`subtype:'stat
 **Fix / note**：在 `flushChunkBuffer`（`agentTabStore.ts`）維持**單一 active caret 不變式**:記住這次 flush 最後寫入的 msgId（buffer 為插入序,末筆＝最新＝ live），迴圈後把其餘仍 `streaming:true` 的 reply/fold_text 就地 `streaming:false` + `markDirty`（在段落邊界就落 IDB,對齊 `setStreaming(false)` 的清理與持久化語意;`appendChunk` 本身刻意不 markDirty,partial 不落盤,所以這裡是唯一寫入點)。**別改回「只在 idle 清」**——會讓 boundary-split 的每段殘留 caret。前提:ACP 邊界只往前走,不回填前一個 msgId(若某 provider 會回填,單一 active 假設要重審)。
 
 **Related**：`src/renderer/agentTabStore.ts`（`flushChunkBuffer` / `setStreaming`）、`src/renderer/components/AgentMessage.tsx`（`.agent-cursor`）、`agent-providers#21`（boundary-split 是成因）。
+
+## agent-providers#28 — Worktree boot provider is an explicit creation-time override  ·  [Decision]
+
+**Decision**：New Worktree dialog 的 provider selector 從 `AGENT_PROVIDERS` registry iterate，預設取 parent `defaultAgentProvider`，未設定時取 `claude`。選擇值只寫到新 child project 的 `defaultAgentProvider`。
+
+**Reason**：讓不同 worktree 可啟動不同 provider，同時維持既有 parent-inheritance 行為與 provider registry 的單一來源。
+
+**Do not change casually because**：不要在 dialog 硬編 provider 名單，或把 selection 回寫 parent；前者會與 registry drift，後者會意外改變既有 project 的新 tab 行為。
