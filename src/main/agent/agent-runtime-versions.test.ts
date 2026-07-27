@@ -1,11 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import {
   NODE_VERSION,
   CLAUDE_SDK_VERSION,
   COPILOT_CLI_VERSION,
   CODEX_ACP_VERSION,
   CODEX_CLI_VERSION,
+  CODEX_OFFICIAL_SDK_VERSION,
   ACP_SDK_VERSION,
   nodeArchiveName,
   nodeDownloadUrl,
@@ -111,6 +112,28 @@ describe('Codex ACP runtime versions', () => {
   });
 });
 
+describe('Codex official SDK runtime versions', () => {
+  // Drift guard: the first-party TypeScript SDK is a typed wrapper around the
+  // Codex CLI. Shelf pins both direct dependencies to the same version so dev,
+  // packaged, and remote runtime resolution all select one CLI tree.
+  it('pins the official SDK and root Codex CLI to the same installed version', () => {
+    const root = JSON.parse(readFileSync('package.json', 'utf8'));
+    const officialSdk = JSON.parse(readFileSync('node_modules/@openai/codex-sdk/package.json', 'utf8'));
+    const cli = JSON.parse(readFileSync('node_modules/@openai/codex/package.json', 'utf8'));
+
+    expect(root.dependencies['@openai/codex-sdk']).toBe(CODEX_OFFICIAL_SDK_VERSION);
+    expect(root.dependencies['@openai/codex']).toBe(CODEX_CLI_VERSION);
+    expect(CODEX_OFFICIAL_SDK_VERSION).toBe(CODEX_CLI_VERSION);
+    expect(CODEX_OFFICIAL_SDK_VERSION).toBe(officialSdk.version);
+    expect(CODEX_CLI_VERSION).toBe(cli.version);
+    expect(officialSdk.dependencies['@openai/codex']).toBe(CODEX_CLI_VERSION);
+  });
+
+  it('does not install a second Codex CLI tree under the legacy ACP adapter', () => {
+    expect(existsSync('node_modules/@agentclientprotocol/codex-acp/node_modules/@openai/codex')).toBe(false);
+  });
+});
+
 describe('copilotPackageName / copilotTarballUrl', () => {
   it('uses linux / linuxmusl variant prefix per (arch × libc)', () => {
     expect(copilotPackageName(X64_GLIBC)).toBe('@github/copilot-linux-x64');
@@ -127,8 +150,8 @@ describe('copilotPackageName / copilotTarballUrl', () => {
 
 describe('codexNativeTarballUrl', () => {
   it('uses the Codex alias package tarball name, not the target package name', () => {
-    expect(codexNativeTarballUrl('arm64', '0.144.4')).toBe(
-      'https://registry.npmjs.org/@openai/codex/-/codex-0.144.4-linux-arm64.tgz',
+    expect(codexNativeTarballUrl('arm64', CODEX_CLI_VERSION)).toBe(
+      `https://registry.npmjs.org/@openai/codex/-/codex-${CODEX_CLI_VERSION}-linux-arm64.tgz`,
     );
   });
 });
