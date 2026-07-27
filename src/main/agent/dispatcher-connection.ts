@@ -10,6 +10,7 @@
 // Guarded by a flag in remote.ts (default off) so today's per-tab path is the
 // untouched fallback until the dispatcher path is E2E-proven, then flipped.
 import { log } from '@shared/logger';
+import { diag } from '@shared/diag-log';
 import type { ConnectionHealth } from '@shared/types';
 import type { AgentEvent } from './types';
 import { ConnectionHealthTracker, DEFAULT_HEALTH_THRESHOLDS } from './connection-health';
@@ -136,7 +137,14 @@ export function createDispatcherConnection(deps: DispatcherConnectionDeps): Disp
       const level: 'error' | 'warn' | 'info' | 'debug' =
         raw === 'error' ? 'error' : raw === 'warn' ? 'warn' : raw === 'debug' ? 'debug' : 'info';
       const tag = typeof parsed.tag === 'string' ? parsed.tag : 'agent-server';
-      log[level](tag, typeof parsed.msg === 'string' ? parsed.msg : String(parsed.msg));
+      const msg = typeof parsed.msg === 'string' ? parsed.msg : String(parsed.msg);
+      // A diag:-prefixed tag goes to the isolated init-lifecycle diag channel
+      // (its own file) instead of the main log — see src/shared/diag-log.ts.
+      if (tag.startsWith('diag:')) {
+        diag(tag, { msg });
+        return;
+      }
+      log[level](tag, msg);
       return;
     }
 

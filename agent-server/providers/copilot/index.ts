@@ -181,6 +181,9 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
     // the dispatcher's SessionChannel.kill guard.
     const thisConn = conn;
     conn.closed.finally(() => {
+      // diag: does the copilot ACP connection drop on long idle (H2)? Log every
+      // close, incl. the identity-guarded stale case, with whether a session was live.
+      serverLog('debug', 'diag:copilot', `conn.closed live=${conn === thisConn} hadSession=${session !== null} sid=${session?.sessionId ?? 'none'}`);
       if (conn !== thisConn) return;
       conn = null;
       child = null;
@@ -308,6 +311,9 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
       // COPILOT_HOME (config-home isolation), and login (which follows caps) can
       // reuse it via lastAppId.
       if (appId) lastAppId = appId;
+      // diag: caps re-run signals a re-init path (H2). Log enter (with whether a
+      // connection/session was already live) + exit outcome.
+      serverLog('debug', 'diag:copilot', `gatherCapabilities enter hadConn=${conn !== null} hadSession=${session !== null}`);
       // Seed current* from the renderer's saved prefs BEFORE building caps, so the
       // first reported values reflect the user's choice rather than the agent's
       // default (matches the ServerBackend `intent` contract).
@@ -328,6 +334,7 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
         currentModel ??= cur.currentModel;
         currentEffort ??= cur.currentEffort;
         currentPermissionMode ??= copilotModeIdToShelf(sessionModes?.currentModeId);
+        serverLog('debug', 'diag:copilot', `gatherCapabilities exit ok sid=${s.sessionId}`);
         return buildCapabilities();
       } catch (err: any) {
         // A fresh session most commonly fails when unauthenticated → surface the
@@ -337,6 +344,7 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
         // without the message a non-auth failure (CLI hang/config) is silently
         // mislabeled as "needs login".
         serverLog('warn', 'copilot', `gatherCapabilities failed → reporting authRequired: ${err?.message ?? String(err)}`);
+        serverLog('debug', 'diag:copilot', `gatherCapabilities exit failed → authRequired: ${err?.message ?? String(err)}`);
         return { models: [], permissionModes: [], effortLevels: [], slashCommands: [], authRequired: true, authMethod: COPILOT_AUTH_METHOD };
       }
     },
