@@ -17,7 +17,12 @@
 ## Entry 格式
 `- [<repo> #<n>](<url>) — <一行影響>. STANCE: <現行決策>. WHEN FIXED: <上游修了要做的事>. [→ context/<topic>#N]`
 
+若能力 blocker 尚無精確對應的公開 issue / PR，不可拿相鄰議題冒充。暫用 official
+release/source link，附 `TRACKER: no exact public tracker`；每次回檢先搜尋是否出現
+正式 issue / PR，有就把 release/source link 換成 tracker，再照上面格式追。
+
 ## Watching
 
 - [github/copilot-cli #1040](https://github.com/github/copilot-cli/issues/1040) — `copilot --acp` 靜默不載入經 `session/new` 傳入的 **stdio** MCP server(http transport 正常;Shelf 側已驗證 config 投影/轉換/傳送皆正確)。STANCE: **接受 regression**(copilot cutover 後使用者的 stdio custom MCP 失效;MCP 困擾 < skill,非 cutover blocker)。WHEN FIXED: 移除各處「accepted regression」註記 + 確認 stdio custom MCP 恢復;可省掉備案的「stdio→http wrap」workaround。
 - [github/copilot-cli #4233](https://github.com/github/copilot-cli/issues/4233) — `copilot --acp` 不 emit ACP `usage_update` → agent status bar 對 copilot **沒有 `ctx` 段**(claude 有);資料 copilot 內部有算(`/context`、`/usage`、`statusLine.command`),只是沒透過 ACP 送。STANCE: **不顯示 ctx**(不做像 Zed 那種不準的自估,見 zed#44909;`translate.ts` 已有 `usage_update` handler,球在上游)。**AI-credit 已改走 SDK `account.getQuota`**(agent-providers#26),不再等此票。WHEN FIXED: ctx 自動亮(handler 現成)。 [→ context/agent-providers#25]
+- [openai/codex releases](https://github.com/openai/codex/releases) + [app-server protocol](https://github.com/openai/codex/blob/main/codex-rs/app-server/README.md) + [agentclientprotocol/codex-acp releases](https://github.com/agentclientprotocol/codex-acp/releases) — Shelf 的 Codex Background Tasks integration 目前無法可靠啟用：official app-server 缺 initial-yield 後的 authoritative background-promotion notification 與 final process-owner termination reason；current `codex-acp` route 另有未透出 promotion、paginated list、per-process terminate 及 termination reason 的 adapter gate。STATUS: **TRACKING**。TRACKER: no exact public tracker；回檢時先搜尋兩個 repo 的 issue / PR。STANCE: **production integration 暫停，先重評 direct app-server 與 current adapter transport**；不以 turn timing/list heuristic 猜 task，不維護 Codex binary 或 adapter fork，也不先交付不可 Stop 的殘缺 UI。WHEN AVAILABLE: 先依 first-party dependency policy 定案 transport；只針對 selected surface pin 實際 release packages、確認 capability，跑 promotion→foreground handoff→idle progress/final、Stop/exit race、output read、normal teardown/reaper 的 bounded live probe；全數通過後才恢復 Shelf provider implementation。
