@@ -436,7 +436,7 @@ export type WorktreeCloseKind = 'finish' | 'abandon';
 
 /** renderer→main result of the lock + ff-only merge-back step. */
 export interface FinishMergeBackResult {
-  outcome: 'merged' | 'busy' | 'non-ff' | 'base-dirty' | 'error';
+  outcome: 'merged' | 'busy' | 'non-ff' | 'feature-dirty' | 'base-dirty' | 'error';
   error?: string;
 }
 

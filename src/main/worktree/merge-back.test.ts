@@ -57,6 +57,41 @@ afterEach(() => {
 });
 
 describe('mergeBackFastForward', () => {
+  it('feature worktree with modified tracked file → feature-dirty, main untouched', async () => {
+    const before = await tip(base, 'main');
+    fs.writeFileSync(path.join(feature, 'f.txt'), 'uncommitted edit');
+
+    const res = await mergeBackFastForward({ connector, featureCwd: feature, baseCwd: base, baseBranch: 'main', featureBranch: 'feature' });
+
+    expect(res.outcome).toBe('feature-dirty');
+    expect(await tip(base, 'main')).toBe(before);
+    expect(fs.readFileSync(path.join(feature, 'f.txt'), 'utf-8')).toBe('uncommitted edit');
+    expect((res as any).error).toContain('git status --porcelain');
+  });
+
+  it('feature worktree with untracked non-ignored file → feature-dirty, main untouched', async () => {
+    const before = await tip(base, 'main');
+    fs.writeFileSync(path.join(feature, 'scratch.txt'), 'keep me');
+
+    const res = await mergeBackFastForward({ connector, featureCwd: feature, baseCwd: base, baseBranch: 'main', featureBranch: 'feature' });
+
+    expect(res.outcome).toBe('feature-dirty');
+    expect(await tip(base, 'main')).toBe(before);
+    expect(fs.readFileSync(path.join(feature, 'scratch.txt'), 'utf-8')).toBe('keep me');
+    expect((res as any).error).toContain('scratch.txt');
+  });
+
+  it('feature worktree with ignored file only → merge-back is allowed', async () => {
+    await commit(feature, '.gitignore', '*.log\n');
+    fs.writeFileSync(path.join(feature, 'debug.log'), 'ignored');
+
+    const res = await mergeBackFastForward({ connector, featureCwd: feature, baseCwd: base, baseBranch: 'main', featureBranch: 'feature' });
+
+    expect(res.outcome).toBe('merged');
+    expect(await tip(base, 'main')).toBe(await tip(feature, 'HEAD'));
+    expect(fs.readFileSync(path.join(feature, 'debug.log'), 'utf-8')).toBe('ignored');
+  });
+
   it('topology (a): base off baseBranch → push ff, baseBranch == feature tip', async () => {
     await git(base, 'checkout -b other'); // free the `main` ref
     const res = await mergeBackFastForward({ connector, featureCwd: feature, baseCwd: base, baseBranch: 'main', featureBranch: 'feature' });

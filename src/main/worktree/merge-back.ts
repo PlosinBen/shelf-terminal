@@ -19,6 +19,11 @@ import { shellSingleQuote as q } from '../connector/file-utils';
  *      to a `git merge --ff-only <featureBranch>` INSIDE the base worktree, which
  *      requires the base tree to be clean (dirty → fail-loud, don't touch it).
  *
+ * Before either topology moves refs, the feature worktree must have no default
+ * `git status --porcelain` output. Ignored files are not part of that gate; the
+ * later non-force worktree removal is the backstop for leftovers Git refuses to
+ * delete.
+ *
  * "push succeeded" (or the base-tree ff succeeded) IS the assertion that the
  * merge-back happened and baseBranch now equals the feature tip — the caller
  * deletes the feature ref only on `merged`.
@@ -42,6 +47,8 @@ export type MergeBackOutcome =
    *  `error` names the target branch + the git command attempted so the agent knows
    *  WHICH branch to re-sync. */
   | { outcome: 'non-ff'; error?: string }
+  /** feature worktree has default `git status --porcelain` output → don't move refs. */
+  | { outcome: 'feature-dirty'; error?: string }
   /** topology (b) but the base worktree has uncommitted changes → can't ff, don't touch. */
   | { outcome: 'base-dirty'; error?: string }
   | { outcome: 'error'; error: string };
@@ -63,6 +70,19 @@ export async function mergeBackFastForward(params: MergeBackParams): Promise<Mer
   const { connector, featureCwd, baseCwd, baseBranch, featureBranch } = params;
   if (!baseBranch) {
     return { outcome: 'error', error: 'no baseBranch captured (detached HEAD at create?)' };
+  }
+
+  try {
+    const dirty = await connector.exec(featureCwd, 'git status --porcelain 2>/dev/null');
+    const status = dirty.stdout.trim();
+    if (status.length > 0) {
+      return {
+        outcome: 'feature-dirty',
+        error: `cannot finish '${featureBranch}': its worktree has uncommitted changes from \`git status --porcelain\`:\n${status}\nCommit, stash, or remove those files, then finish again.`,
+      };
+    }
+  } catch (err: any) {
+    return { outcome: 'error', error: err?.message ?? String(err) };
   }
 
   // Topology (a): push the feature tip onto baseBranch. Works when baseBranch is
