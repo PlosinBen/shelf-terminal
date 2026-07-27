@@ -103,7 +103,7 @@ export function registerGitHandlers(): void {
     async (_event, payload: { connection: Connection; cwd: string; worktreePath: string }): Promise<WorktreeRemoveResult> => {
       try {
         const connector = createConnector(payload.connection);
-        await connector.exec(payload.cwd, `git worktree remove ${JSON.stringify(payload.worktreePath)} --force`);
+        await connector.exec(payload.cwd, `git worktree remove ${JSON.stringify(payload.worktreePath)}`);
         return { ok: true };
       } catch (err: any) {
         return { ok: false, error: err?.message ?? String(err) };

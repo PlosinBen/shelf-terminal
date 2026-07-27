@@ -88,3 +88,18 @@ describe('GIT_WORKTREE_ADD captures the parent baseBranch', () => {
     expect(res.baseBranch).toBeUndefined();
   });
 });
+
+describe('GIT_WORKTREE_REMOVE', () => {
+  it('removes the worktree without --force so git can refuse dirty leftovers', async () => {
+    const res = await handlers.get(IPC.GIT_WORKTREE_REMOVE)!({}, {
+      connection,
+      cwd: '/repo',
+      worktreePath: '/repo-feature',
+    });
+
+    expect(res).toEqual({ ok: true });
+    expect(execCalls).toEqual([
+      { cwd: '/repo', cmd: 'git worktree remove "/repo-feature"' },
+    ]);
+  });
+});
