@@ -289,8 +289,8 @@ export function TabBar() {
             Terminal
           </button>
           <div className="context-menu-divider" />
-          {/* One button per provider, from the single-source registry (a "· dev"
-              label marks a not-yet-GA provider). Add a provider = one registry entry. */}
+          {/* One button per provider, from the single-source registry.
+              Add a provider = one registry entry. */}
           {agentProviderEntries().map(([id, meta]) => (
             <button
               key={id}

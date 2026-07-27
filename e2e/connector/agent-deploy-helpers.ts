@@ -96,7 +96,7 @@ export async function openCopilotAgentTab(page: Page): Promise<void> {
 /** Open a Codex agent tab. */
 export async function openCodexAgentTab(page: Page): Promise<void> {
   await page.locator('.tab-add').click({ button: 'right' });
-  await page.locator('.context-menu-item', { hasText: 'Agent (Codex · dev)' }).click();
+  await page.locator('.context-menu-item', { hasText: 'Agent (Codex)' }).click();
   await expect(page.locator('.agent-view:visible')).toBeVisible({ timeout: 5_000 });
 }
 

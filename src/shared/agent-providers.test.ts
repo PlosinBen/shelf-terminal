@@ -10,10 +10,10 @@ describe('AGENT_PROVIDERS registry', () => {
     expect(agentProviderEntries().map(([id]) => id)).toEqual(['claude', 'copilot', 'codex']);
   });
 
-  it('carries a label per provider; not-yet-GA ones are marked "· dev"', () => {
+  it('carries the user-visible label per provider', () => {
     expect(AGENT_PROVIDERS.claude.label).toBe('Claude');
     expect(AGENT_PROVIDERS.copilot.label).toBe('Copilot');
-    expect(AGENT_PROVIDERS.codex.label).toContain('· dev');
+    expect(AGENT_PROVIDERS.codex.label).toBe('Codex');
   });
 
   it('maps each provider to its remote-deploy binary', () => {

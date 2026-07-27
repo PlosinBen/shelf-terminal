@@ -4,14 +4,11 @@
 // select, and the remote deploy binary choice — derives from THIS registry. Adding
 // a provider = one entry here (+ its backend factory in agent-server exec).
 //
-// No `availability`/gating field by design: a not-yet-GA provider marks itself in
-// its `label` (a trailing "· dev"), and is shown everywhere — exposure in a
-// production build is acceptable (the label communicates it; a missing CLI fails
-// loud at spawn).
+// No `availability`/gating field by design: registry membership means the
+// provider is shown everywhere. A missing CLI/runtime fails loud at spawn.
 
 export interface AgentProviderMeta {
-  /** Display name (New-tab menu, project config). A trailing "· dev" flags a
-   *  not-yet-GA provider — delete the suffix when it ships. */
+  /** Display name (New-tab menu, project config). */
   label: string;
   /** The self-contained runtime kind the remote deploy ships for this provider. */
   bin: 'claude' | 'copilot' | 'codex';
@@ -23,7 +20,7 @@ export interface AgentProviderMeta {
 export const AGENT_PROVIDERS = {
   claude:  { label: 'Claude',      bin: 'claude'  },
   copilot: { label: 'Copilot',     bin: 'copilot' },
-  codex:   { label: 'Codex · dev', bin: 'codex'   },
+  codex:   { label: 'Codex',       bin: 'codex'   },
 } as const satisfies Record<string, AgentProviderMeta>;
 
 export type AgentProvider = keyof typeof AGENT_PROVIDERS;
