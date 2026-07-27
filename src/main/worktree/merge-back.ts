@@ -54,6 +54,11 @@ function isNonFastForward(msg: string): boolean {
   return /non-fast-forward|fetch first|\[rejected\]|not possible to fast-forward|cannot fast-forward|not.*fast-forward/i.test(msg);
 }
 
+function nonFastForwardError(params: { baseBranch: string; attempted: string; msg: string; location?: string }): string {
+  const { baseBranch, attempted, msg, location = '' } = params;
+  return `merge-back into '${baseBranch}' is not a fast-forward (attempted \`${attempted}\`${location}): ${msg}. '${baseBranch}' moved since your last sync — rebase this worktree onto '${baseBranch}', resolve conflicts, re-verify, then finish again.`;
+}
+
 export async function mergeBackFastForward(params: MergeBackParams): Promise<MergeBackOutcome> {
   const { connector, featureCwd, baseCwd, baseBranch, featureBranch } = params;
   if (!baseBranch) {
@@ -73,7 +78,7 @@ export async function mergeBackFastForward(params: MergeBackParams): Promise<Mer
       // tried to merge into and can re-sync THAT branch (not guess).
       const nonFf = isNonFastForward(msg);
       return nonFf
-        ? { outcome: 'non-ff', error: `merge-back into '${baseBranch}' is not a fast-forward (attempted \`${pushCmd}\`): ${msg}. '${baseBranch}' moved since your last sync — merge '${baseBranch}' into this worktree, then finish again.` }
+        ? { outcome: 'non-ff', error: nonFastForwardError({ baseBranch, attempted: pushCmd, msg }) }
         : { outcome: 'error', error: `merge-back into '${baseBranch}' failed (attempted \`${pushCmd}\`): ${msg}` };
     }
     // else fall through to topology (b)
@@ -116,7 +121,7 @@ export async function mergeBackFastForward(params: MergeBackParams): Promise<Mer
     const msg = (err?.message ?? String(err)).trim();
     const nonFf = isNonFastForward(msg);
     return nonFf
-      ? { outcome: 'non-ff', error: `merge-back into '${baseBranch}' is not a fast-forward (attempted \`${mergeCmd}\` in the base worktree): ${msg}. Merge '${baseBranch}' into this worktree, then finish again.` }
+      ? { outcome: 'non-ff', error: nonFastForwardError({ baseBranch, attempted: mergeCmd, location: ' in the base worktree', msg }) }
       : { outcome: 'error', error: `merge-back into '${baseBranch}' failed (attempted \`${mergeCmd}\`): ${msg}` };
   }
 }

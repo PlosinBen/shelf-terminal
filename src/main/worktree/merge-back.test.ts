@@ -28,6 +28,7 @@ const connector = {
 
 const git = (cwd: string, args: string) => connector.exec(cwd, `git ${args}`);
 const tip = async (cwd: string, ref: string) => (await git(cwd, `rev-parse ${ref}`)).stdout.trim();
+const mergeCommitCount = async (cwd: string, ref: string) => Number((await git(cwd, `rev-list --merges --count ${ref}`)).stdout.trim());
 
 let root: string;
 let base: string;
@@ -80,7 +81,7 @@ describe('mergeBackFastForward', () => {
     expect((res as any).error).toContain("'main'");
   });
 
-  it('non-ff: main advanced past the fork → non-ff (agent must re-sync)', async () => {
+  it('non-ff: main advanced past the fork → non-ff (agent must rebase and retry)', async () => {
     // Advance main beyond the feature fork, then free the ref (topology a push path).
     await commit(base, 'a.txt', 'c2-on-main');
     const mainAhead = await tip(base, 'main');
@@ -89,9 +90,27 @@ describe('mergeBackFastForward', () => {
     expect(res.outcome).toBe('non-ff');
     expect(await tip(base, 'main')).toBe(mainAhead); // untouched
     // The error names the target branch + the attempted command so the agent
-    // knows WHICH branch to re-sync (topology a → push path).
+    // knows WHICH branch to rebase onto (topology a → push path).
     expect((res as any).error).toContain("'main'");
     expect((res as any).error).toContain('git push . HEAD:main');
+    expect((res as any).error).toContain("rebase this worktree onto 'main'");
+    expect((res as any).error).not.toMatch(/merge 'main' into this worktree/i);
+  });
+
+  it('non-ff recovery: rebase feature onto main, retry finish, and keep main linear', async () => {
+    await commit(base, 'a.txt', 'c2-on-main');
+    await git(base, 'checkout -b other');
+
+    const blocked = await mergeBackFastForward({ connector, featureCwd: feature, baseCwd: base, baseBranch: 'main', featureBranch: 'feature' });
+    expect(blocked.outcome).toBe('non-ff');
+    expect((blocked as any).error).toContain("rebase this worktree onto 'main'");
+
+    await git(feature, 'rebase main');
+
+    const retried = await mergeBackFastForward({ connector, featureCwd: feature, baseCwd: base, baseBranch: 'main', featureBranch: 'feature' });
+    expect(retried.outcome).toBe('merged');
+    expect(await tip(base, 'main')).toBe(await tip(feature, 'HEAD'));
+    expect(await mergeCommitCount(base, 'main')).toBe(0);
   });
 
   it('non-ff when base is on a diverged main → non-ff (caught at the push, not base-tree)', async () => {
@@ -104,6 +123,8 @@ describe('mergeBackFastForward', () => {
     // push path that reports it — the error names that command + the target.
     expect((res as any).error).toContain("'main'");
     expect((res as any).error).toContain('git push . HEAD:main');
+    expect((res as any).error).toContain("rebase this worktree onto 'main'");
+    expect((res as any).error).not.toMatch(/merge 'main' into this worktree/i);
   });
 
   it('empty baseBranch → fail-loud error', async () => {
