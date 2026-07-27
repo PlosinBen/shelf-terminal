@@ -2,6 +2,7 @@ import { useState, useCallback, useSyncExternalStore } from 'react';
 import type { ProjectConfig, AppSettings, UpdateStatus, TabType, AgentProvider, ConnectionHealth, ConnectionHealthState } from '@shared/types';
 import { DEFAULT_SETTINGS } from '@shared/defaults';
 import { groupedOrder, moveGroup } from './project-grouping';
+import { createProjectNotice, dismissProjectNoticeState, showProjectNoticeState, type ProjectNotice } from './project-notice';
 
 // ── Tab state ──
 
@@ -56,6 +57,8 @@ let layoutGeneration = 0;
 // tabId). Transient — never persisted. The Sidebar aggregates per project
 // (worst among the project's agent tabs) for the status dot. See §5.9.
 let connectionHealth: Record<string, ConnectionHealth> = {};
+let projectNotice: ProjectNotice | null = null;
+let projectNoticeCounter = 0;
 // Pending payload for an agent chat input. Set by Notes' "Send to Chat" and
 // consumed by the next AgentView in the matching project that becomes
 // visible. Single-slot — only one staged note in flight at a time.
@@ -80,7 +83,7 @@ function subscribe(l: Listener) {
 }
 
 function getSnapshot() {
-  return { projects, activeProjectIndex, sidebarVisible, settingsVisible, searchVisible, commandPickerVisible, devToolsVisible, notesVisible, skillsVisible, mcpVisible, editingProjectIndex, settings, updateStatus, pmVisible, awayMode, pmActive, quickNoteVisible, layoutGeneration, chatStage, connectionHealth };
+  return { projects, activeProjectIndex, sidebarVisible, settingsVisible, searchVisible, commandPickerVisible, devToolsVisible, notesVisible, skillsVisible, mcpVisible, editingProjectIndex, settings, updateStatus, pmVisible, awayMode, pmActive, quickNoteVisible, layoutGeneration, chatStage, connectionHealth, projectNotice };
 }
 
 let snapshotRef = getSnapshot();
@@ -148,6 +151,27 @@ export function setActiveProject(index: number) {
     activeProjectIndex = index;
     updateSnapshot();
   }
+}
+
+export function showProjectNotice(input: { projectId: string; message: string }): ProjectNotice {
+  projectNoticeCounter++;
+  projectNotice = showProjectNoticeState(
+    projectNotice,
+    createProjectNotice(input, `project-notice-${Date.now()}-${projectNoticeCounter}`),
+  );
+  updateSnapshot();
+  return projectNotice;
+}
+
+export function dismissProjectNotice(id?: string) {
+  const next = dismissProjectNoticeState(projectNotice, id);
+  if (next === projectNotice) return;
+  projectNotice = next;
+  updateSnapshot();
+}
+
+export function expireProjectNotice(id: string) {
+  dismissProjectNotice(id);
 }
 
 export function reorderProjects(fromIndex: number, toIndex: number) {
@@ -507,6 +531,7 @@ export function setPmActive(on: boolean) {
 let syncTimer: ReturnType<typeof setTimeout> | null = null;
 
 function syncToMain() {
+  if (typeof window === 'undefined' || !window.shelfApi?.pm?.syncState) return;
   if (syncTimer) return;
   syncTimer = setTimeout(() => {
     syncTimer = null;

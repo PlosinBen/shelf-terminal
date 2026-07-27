@@ -662,6 +662,41 @@ button {
   margin-left: 4px;
 }
 
+/* ── Project Notice Banner ── */
+
+.project-notice-banner {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: min(720px, calc(100% - 32px));
+  padding: 8px 10px 8px 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-secondary) 92%, var(--accent));
+  color: var(--text);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.project-notice-dismiss {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  color: var(--text-muted);
+  line-height: 1;
+}
+
+.project-notice-dismiss:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+
 /* ── Split View ── */
 
 .split-view {

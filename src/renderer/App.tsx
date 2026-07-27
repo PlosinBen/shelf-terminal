@@ -13,6 +13,7 @@ import { ProjectEditPanel } from './components/ProjectEditPanel';
 import { CommandPicker } from './components/CommandPicker';
 import { WorktreeDialog } from './components/WorktreeDialog';
 import { WorktreeCloseGate } from './components/WorktreeCloseGate';
+import { ProjectNoticeBanner } from './components/ProjectNoticeBanner';
 import { RemoveConfirmDialog } from './components/RemoveConfirmDialog';
 import { BottomBar, SWITCH_BRANCH_EVENT } from './components/BottomBar';
 import { DevToolsPanel } from './components/DevToolsPanel';
@@ -364,6 +365,7 @@ export function App() {
         <div className="terminal-section">
         <TabBar />
         <div className="terminal-view">
+          <ProjectNoticeBanner />
           <SearchBar />
           {activeProject && activeProject.folderInvalid && (
             <div className="invalid-folder-overlay">
