@@ -10,6 +10,7 @@ import { isDevToolsKeyEvent } from './devtools-guard';
 import { shouldInstallAppMenu } from './menu-platform';
 import { cleanupConnectors } from './connector';
 import { log, setLogLevel, setFileWriter } from '@shared/logger';
+import { setDiagWriter } from '@shared/diag-log';
 import { applyUserDataIsolation } from './user-data-path';
 import { migratePmNotes } from './migrations/migrate-pm-notes';
 import { handlePmSend, handleTabEvent, stopGeneration, setWritePtyFn, initAwayMode, initPmActive, initTelegramBridge, setProjectsProvider, setStateChangeCallback, stopTelegram, setMessageCallback, setCallbackQueryHandler, setStopCallback, handlePtyData, handlePtyRemove, handlePtyClear } from './pm';
@@ -153,6 +154,18 @@ app.whenReady().then(async () => {
     const dir = path.join(logBaseDir, yyyymm);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     fs.appendFileSync(path.join(dir, `${mmdd}.log`), line + '\n');
+  });
+
+  // Isolated init-lifecycle diag channel — its OWN file under logs/diag/, so the
+  // sparse init events stay readable and never pollute the main MMDD.log.
+  // Diagnostic instrumentation for the "copilot idle → stuck on Starting agent…"
+  // investigation; remove once the root cause is proven.
+  setDiagWriter((line) => {
+    const now = new Date();
+    const mmdd = `${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
+    const dir = path.join(logBaseDir, 'diag');
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.appendFileSync(path.join(dir, `init-${mmdd}.log`), line + '\n');
   });
 
   const envLogLevel = process.env.LOG_LEVEL as import('../shared/types').LogLevel | undefined;
