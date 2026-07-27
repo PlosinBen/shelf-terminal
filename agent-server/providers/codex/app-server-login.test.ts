@@ -45,6 +45,17 @@ describe('driveDeviceCodeLogin', () => {
     expect(rpc.close).toHaveBeenCalled();
   });
 
+  it('stamps an injected provider id on prompt and done events', async () => {
+    const rpc = fakeRpc(START);
+    const wire: OutgoingMessage[] = [];
+    driveDeviceCodeLogin(rpc, (m) => wire.push(m), 'codex-offical');
+    await new Promise((r) => setTimeout(r, 0));
+    rpc.fireCompleted(true);
+
+    expect(wire[0]).toMatchObject({ type: 'auth_login_prompt', provider: 'codex-offical' });
+    expect(wire.at(-1)).toEqual({ type: 'auth_login_done', provider: 'codex-offical', ok: true });
+  });
+
   it('reports a failed handshake as auth_login_done(error)', async () => {
     const rpc: LoginRpc = {
       request: async <T>(m: string): Promise<T> => { if (m === 'initialize') throw new Error('boom'); return {} as T; },

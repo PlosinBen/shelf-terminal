@@ -10,7 +10,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import * as readline from 'node:readline';
 import type { SendFn } from '../types';
-import { deviceCodeToAuthPrompt, authLoginDone } from './auth';
+import { deviceCodeToAuthPrompt, authLoginDone } from '../codex-shared/auth';
 import { resolveCodexCliCommand } from './helpers';
 
 /** Minimal JSON-RPC client the login drive needs. */
@@ -36,12 +36,12 @@ export interface LoginHandle {
  * code) then `auth_login_done` on completion/failure. Returns a handle whose
  * `cancel()` tears down the transport.
  */
-export function driveDeviceCodeLogin(rpc: LoginRpc, emit: SendFn): LoginHandle {
+export function driveDeviceCodeLogin(rpc: LoginRpc, emit: SendFn, provider = 'codex'): LoginHandle {
   let settled = false;
   const done = (ok: boolean, opts?: { cancelled?: boolean; error?: string }) => {
     if (settled) return;
     settled = true;
-    emit(authLoginDone(ok, opts));
+    emit(authLoginDone(ok, { provider, ...opts }));
     rpc.close();
   };
 
@@ -56,7 +56,7 @@ export function driveDeviceCodeLogin(rpc: LoginRpc, emit: SendFn): LoginHandle {
       clientInfo: { name: 'shelf', version: '0.0.0', title: 'Shelf' },
     });
     const res = await rpc.request<DeviceCodeStartResponse>('account/login/start', { type: 'chatgptDeviceCode' });
-    emit(deviceCodeToAuthPrompt({ verificationUrl: res.verificationUrl, userCode: res.userCode }));
+    emit(deviceCodeToAuthPrompt({ verificationUrl: res.verificationUrl, userCode: res.userCode }, provider));
   })().catch((err) => {
     done(false, { error: (err as Error)?.message ?? String(err) });
   });
@@ -65,7 +65,7 @@ export function driveDeviceCodeLogin(rpc: LoginRpc, emit: SendFn): LoginHandle {
     cancel() {
       if (settled) return;
       settled = true;
-      emit(authLoginDone(false, { cancelled: true }));
+      emit(authLoginDone(false, { provider, cancelled: true }));
       rpc.close();
     },
   };
