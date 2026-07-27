@@ -233,7 +233,7 @@ title: shelf-terminal — Intent → File Index
 | `typecheck` | `tsc --noEmit` 型別檢查 |
 | `test` | 跑全部測試（typecheck → unit → e2e → docker → ssh） |
 | `test:unit` | vitest 單元測試 |
-| `test:e2e` | Playwright E2E 測試（自動 build，NODE_ENV=test 隔離 userData） |
+| `test:e2e` | Playwright E2E 測試（自動 build，NODE_ENV=test 隔離 userData；解除繼承的 `ELECTRON_RUN_AS_NODE`，見 `deployment#6`） |
 | `test:docker` | Docker connector E2E 測試 |
 | `test:ssh` | SSH connector E2E 測試 |
 | `test:wsl` | WSL connector E2E 測試（Windows-host-only；起 `wsl` project，需 wsl.exe） |

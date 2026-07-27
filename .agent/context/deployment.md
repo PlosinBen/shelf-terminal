@@ -98,3 +98,13 @@ related:
 **Fix**：① `deployAgentServer` 的 **local 分支也 pre-flight `fs.existsSync(indexPath)`**,缺檔丟 `agentBundleMissingMessage()`(帶版本 + 解析路徑 + 「重裝/`npm run dist`」或 dev 的 `node agent-server/build.mjs`),與 remote 分支共用同一 helper。② `ensureProcReady` 記 `lastInitError`,query/getCapabilities 的錯誤用它取代通用「Failed to start agent-server」→ **所有** init 失敗的真因都上得了 UI,不必看 logger。**別**把 local 分支的預檢拿掉(這正是 stale-package 版號打架的唯一早期攔截點)。迴歸測試在 `remote.test.ts`。
 
 **Related**：`deployment#4`(local 用 Electron node 那條也提到「錯誤被吞成通用訊息」)、`RELEASE_FLOW`(版號一致性)、`src/main/agent/remote.ts`(`agentBundleMissingMessage`/`ensureProcReady`)。
+
+## deployment#6 — Electron Node-mode 只限 agent-server bootstrap；E2E 必須解除繼承  ·  [Gotcha]
+
+**Symptom**：從 local agent 的 Bash tool 執行 Playwright Electron E2E 時，Electron 以 Node mode 啟動並拒絕 Chromium 的 `--remote-debugging-port=0`。
+
+**Root cause**：local agent-server 刻意以 `ELECTRON_RUN_AS_NODE=1` 啟動，讓 Electron 的 `process.execPath` 作為內嵌 Node runtime（`deployment#4`）。這個環境會繼承給 provider 的 Bash tool；Playwright 後續啟動另一個 Electron GUI 時仍帶著該變數，就不再接受 Chromium 啟動旗標。`ELECTRON_RUN_AS_NODE=0` 也會啟用 Node mode，不能作為解除方式。
+
+**Fix / note**：保留 local agent-server 與 dispatcher bootstrap 的 `ELECTRON_RUN_AS_NODE=1`。`test:e2e` 在 build 與 Playwright 兩個子行程前都用 `env -u ELECTRON_RUN_AS_NODE`，只解除該 E2E command tree，不改 agent session 或其他 provider tools 的環境。不要把這個變數全域移除，也不要改成 `=0`。
+
+**Related**：`deployment#4`（為何 local bootstrap 必須帶旗標）、`package.json`（`test:e2e`）、`src/main/agent/remote.ts`（local spawn boundary）。
