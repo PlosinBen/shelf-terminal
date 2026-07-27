@@ -96,6 +96,21 @@ export const CODEX_ACP_VERSION = '1.1.2';
 export const CODEX_CLI_VERSION = '0.144.4';
 export const ACP_SDK_VERSION = '1.2.1';
 
+/** Codex ships one Linux package per CPU architecture (no musl support in Shelf). */
+export function codexNativePackageName(arch: 'x64' | 'arm64'): string {
+  return `@openai/codex-linux-${arch}`;
+}
+
+export function codexNativeTarballUrl(arch: 'x64' | 'arm64', version: string): string {
+  const pkg = codexNativePackageName(arch);
+  const unscoped = pkg.split('/')[1];
+  return `https://registry.npmjs.org/${pkg}/-/${unscoped}-${version}.tgz`;
+}
+
+export function codexNativeManifestUrl(arch: 'x64' | 'arm64', version: string): string {
+  return `https://registry.npmjs.org/${codexNativePackageName(arch)}/${version}`;
+}
+
 /**
  * Scoped npm package shipping the standalone Copilot CLI binary for a target.
  * The variant is a PREFIX (`linux` / `linuxmusl`) — different shape from

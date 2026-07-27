@@ -20,7 +20,7 @@ describe('AGENT_PROVIDERS registry', () => {
     expect(AGENT_PROVIDERS.claude.bin).toBe('claude');
     // copilot (now ACP-backed) still ships the copilot binary (`copilot --acp`).
     expect(AGENT_PROVIDERS.copilot.bin).toBe('copilot');
-    // codex has no self-contained binary yet (deployed differently).
-    expect(AGENT_PROVIDERS.codex.bin).toBeNull();
+    // Codex is a deployed runtime tree, never a fallback to another provider.
+    expect(AGENT_PROVIDERS.codex.bin).toBe('codex');
   });
 });

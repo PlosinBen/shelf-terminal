@@ -9,8 +9,10 @@ import {
   cacheDir,
   cachedNodeBin,
   cachedClaudeBin,
+  codexDeployFiles,
   type RemoteInventory,
 } from './deploy-layout';
+import { codexNativePackageName } from './agent-runtime-versions';
 
 const GLIBC_FILES = deployFilesFor('glibc', 'claude');
 const MUSL_FILES = deployFilesFor('musl', 'claude');
@@ -42,6 +44,19 @@ describe('deployFilesFor', () => {
   it('ships the provider-specific binary (claude vs copilot)', () => {
     expect(deployFilesFor('glibc', 'copilot')).toEqual(['node', 'index.mjs', 'copilot']);
     expect(deployFilesFor('musl', 'copilot')).toEqual(['index.mjs', 'copilot']);
+  });
+  it('ships Codex as an adjacent node_modules tree on glibc only', () => {
+    expect(codexDeployFiles('glibc', 'x64')).toEqual(expect.arrayContaining([
+      'node',
+      'index.mjs',
+      'codex-cli/node_modules/@agentclientprotocol/codex-acp/dist/index.js',
+      'codex-cli/node_modules/@openai/codex/bin/codex.js',
+      'codex-cli/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex/codex',
+    ]));
+    expect(codexNativePackageName('arm64')).toBe('@openai/codex-linux-arm64');
+  });
+  it('rejects Codex on musl before any deploy work begins', () => {
+    expect(() => deployFilesFor('musl', 'codex')).toThrow('Codex requires a glibc host');
   });
 });
 

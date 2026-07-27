@@ -13,10 +13,8 @@ export interface AgentProviderMeta {
   /** Display name (New-tab menu, project config). A trailing "· dev" flags a
    *  not-yet-GA provider — delete the suffix when it ships. */
   label: string;
-  /** The self-contained CLI the remote deploy ships for this provider. `null` =
-   *  no self-contained binary yet (codex is resolved/bundled differently; its
-   *  remote deploy is a separate future task). */
-  bin: 'claude' | 'copilot' | null;
+  /** The self-contained runtime kind the remote deploy ships for this provider. */
+  bin: 'claude' | 'copilot' | 'codex';
 }
 
 // `copilot` is driven by the ACP backend (agent-server/providers/copilot/,
@@ -25,7 +23,7 @@ export interface AgentProviderMeta {
 export const AGENT_PROVIDERS = {
   claude:  { label: 'Claude',      bin: 'claude'  },
   copilot: { label: 'Copilot',     bin: 'copilot' },
-  codex:   { label: 'Codex · dev', bin: null      },
+  codex:   { label: 'Codex · dev', bin: 'codex'   },
 } as const satisfies Record<string, AgentProviderMeta>;
 
 export type AgentProvider = keyof typeof AGENT_PROVIDERS;

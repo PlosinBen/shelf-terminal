@@ -20,22 +20,44 @@
  */
 
 import * as path from 'path';
-import type { Libc } from './runtime-target';
+import type { Arch, Libc } from './runtime-target';
+import { codexNativePackageName } from './agent-runtime-versions';
 
 /** All possible payload files (superset; the actual set is libc+provider-dependent). */
 export const DEPLOY_FILES = ['node', 'index.mjs', 'claude', 'copilot'] as const;
-export type DeployFile = (typeof DEPLOY_FILES)[number];
+export type DeployFile = (typeof DEPLOY_FILES)[number] | string;
 
 /** The provider whose CLI binary a session ships (= the deployed filename). */
-export type ProviderBin = 'claude' | 'copilot';
+export type ProviderBin = 'claude' | 'copilot' | 'codex';
 
 /**
  * Files we ship for a target+provider. glibc ships our own Node; musl uses the
  * remote's node (omits node). The provider's CLI binary is named after it.
  */
 export function deployFilesFor(libc: Libc, provider: ProviderBin): DeployFile[] {
+  if (provider === 'codex') {
+    if (libc === 'musl') throw new Error('Codex requires a glibc host');
+    throw new Error('Codex deploy files require a target architecture');
+  }
   const base: DeployFile[] = libc === 'musl' ? ['index.mjs'] : ['node', 'index.mjs'];
   return [...base, provider];
+}
+
+/** Fixed relative Codex runtime manifest, preserving both require.resolve hops. */
+export function codexDeployFiles(libc: Libc, arch: Arch): DeployFile[] {
+  if (libc === 'musl') throw new Error('Codex requires a glibc host');
+  const native = codexNativePackageName(arch);
+  const nativeBin = arch === 'x64' ? 'x86_64-unknown-linux-musl' : 'aarch64-unknown-linux-musl';
+  return [
+    'node',
+    'index.mjs',
+    'codex-cli/node_modules/@agentclientprotocol/codex-acp/dist/index.js',
+    'codex-cli/node_modules/@agentclientprotocol/codex-acp/package.json',
+    'codex-cli/node_modules/@openai/codex/bin/codex.js',
+    'codex-cli/node_modules/@openai/codex/package.json',
+    `codex-cli/node_modules/${native}/package.json`,
+    `codex-cli/node_modules/${native}/vendor/${nativeBin}/codex/codex`,
+  ];
 }
 
 /** Completion sentinel, written only after every payload file is in place. */
@@ -106,4 +128,9 @@ export function cachedClaudeBin(userData: string, targetId: string, sdkVersion: 
 /** Cached Copilot binary for a target+version. */
 export function cachedCopilotBin(userData: string, targetId: string, version: string): string {
   return path.join(cacheDir(userData, targetId), `copilot-${version}`, 'copilot');
+}
+
+/** Cached extracted native Codex npm package directory. */
+export function cachedCodexNativeDir(userData: string, targetId: string, version: string): string {
+  return path.join(cacheDir(userData, targetId), `codex-${version}`);
 }

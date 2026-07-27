@@ -26,15 +26,15 @@ import {
   MIN_REMOTE_NODE_MAJOR,
   TARGET_PROBE_CMD,
 } from './runtime-target';
-import { CLAUDE_SDK_VERSION, COPILOT_CLI_VERSION } from './agent-runtime-versions';
-import { ensureNodeCached, ensureClaudeCached, ensureCopilotCached } from './runtime-cache';
+import { CLAUDE_SDK_VERSION, COPILOT_CLI_VERSION, CODEX_CLI_VERSION } from './agent-runtime-versions';
+import { ensureNodeCached, ensureClaudeCached, ensureCopilotCached, ensureCodexNativeCached } from './runtime-cache';
 import {
   deployRoot,
   agentServerDir,
   deployFilesFor,
+  codexDeployFiles,
   needsDeploy,
   missingFiles,
-  DEPLOY_FILES,
   DEPLOYED_SENTINEL,
   type DeployFile,
   type ProviderBin,
@@ -539,7 +539,7 @@ function wslOps(c: Extract<Connection, { type: 'wsl' }>): RemoteOps {
 }
 
 /** One round-trip: list which deploy files + sentinel already exist on the target. */
-function readRemoteInventory(ops: RemoteOps, root: string): RemoteInventory {
+function readRemoteInventory(ops: RemoteOps, root: string, expected: DeployFile[]): RemoteInventory {
   // List the root and test membership — do NOT use a remote `for f in …; echo $f`
   // loop. Over WSL's `wsl.exe -- sh -c <cmd>` the loop variable comes back EMPTY
   // (`$f` expands to nothing), so every file looked absent and `needsDeploy` was
@@ -547,10 +547,14 @@ function readRemoteInventory(ops: RemoteOps, root: string): RemoteInventory {
   // remote shell variable and is known to survive wsl.exe. `|| true` keeps exit 0
   // on a fresh target whose root doesn't exist yet (ls would otherwise non-zero
   // and make ops.exec throw).
-  const out = ops.exec(`ls -a ${root} 2>/dev/null || true`);
+  const nestedChecks = expected
+    .filter((f) => f.includes('/'))
+    .map((f) => `test -f ${root}/${f} && printf '%s\\n' '${f}' || true`)
+    .join('; ');
+  const out = ops.exec(`ls -a ${root} 2>/dev/null || true; ${nestedChecks}`);
   const present = new Set(out.split('\n').map((s) => s.trim()).filter(Boolean));
   const files: Partial<Record<DeployFile, boolean>> = {};
-  for (const f of DEPLOY_FILES) files[f] = present.has(f);
+  for (const f of expected) files[f] = present.has(f);
   return { sentinel: present.has(DEPLOYED_SENTINEL), files };
 }
 
@@ -587,8 +591,12 @@ async function deploySelfContained(connection: Connection, ops: RemoteOps, provi
   }
   const result: DeployResult = { nodeBin, indexPath: `${root}/index.mjs` };
 
-  const expected = deployFilesFor(target.libc, providerBin);
-  const inv = readRemoteInventory(ops, root);
+  // Codex has no supported musl runtime. Compute the manifest before cache or
+  // transfer work so Alpine fails with its own actionable diagnosis.
+  const expected = providerBin === 'codex'
+    ? codexDeployFiles(target.libc, target.arch)
+    : deployFilesFor(target.libc, providerBin);
+  const inv = readRemoteInventory(ops, root, expected);
   if (!needsDeploy(inv, expected)) {
     log.info('agent-remote', `agent-server already deployed at ${root} (${targetId(target)}, ${providerBin})`);
     return result;
@@ -604,16 +612,31 @@ async function deploySelfContained(connection: Connection, ops: RemoteOps, provi
   if (!isMusl) sources.node = await ensureNodeCached(cacheRoot, target);
   if (providerBin === 'copilot') {
     sources.copilot = await ensureCopilotCached(cacheRoot, target, COPILOT_CLI_VERSION);
-  } else {
+  } else if (providerBin === 'claude') {
     sources.claude = await ensureClaudeCached(cacheRoot, target, CLAUDE_SDK_VERSION);
+  } else {
+    const sourceNodeModules = app.isPackaged
+      ? path.join(process.resourcesPath, 'codex-cli', 'node_modules')
+      : path.join(app.getAppPath(), 'node_modules');
+    const nativeDir = await ensureCodexNativeCached(cacheRoot, target, CODEX_CLI_VERSION);
+    for (const file of expected) {
+      if (file === 'node' || file === 'index.mjs') continue;
+      const rel = file.replace(/^codex-cli\/node_modules\//, '');
+      sources[file] = rel.startsWith('@openai/codex-linux-')
+        ? path.join(nativeDir, rel.slice(rel.indexOf('/') + 1))
+        : path.join(sourceNodeModules, rel);
+    }
   }
 
   ops.exec(`mkdir -p ${root}`);
   for (const f of missingFiles(inv, expected)) {
+    const parent = path.posix.dirname(f);
+    if (parent !== '.') ops.exec(`mkdir -p ${root}/${parent}`);
     ops.copyIn(sources[f]!, `${root}/${f}`);
   }
   // Exec bits on what we shipped (node only for glibc; the provider binary).
-  const execBits = [isMusl ? null : `${root}/node`, `${root}/${providerBin}`].filter(Boolean).join(' ');
+  const codexBin = expected.find((f) => f.endsWith('/codex/codex'));
+  const execBits = [isMusl ? null : `${root}/node`, providerBin === 'codex' ? (codexBin ? `${root}/${codexBin}` : null) : `${root}/${providerBin}`].filter(Boolean).join(' ');
   ops.exec(`chmod +x ${execBits}`);
   ops.exec(`touch ${root}/${DEPLOYED_SENTINEL}`); // completion marker — last
   log.info('agent-remote', `Deployed agent-server to ${root} (${targetId(target)}, ${isMusl ? 'remote node' : 'own node'})`);
@@ -743,10 +766,9 @@ async function deployAgentServer(connection: Connection, provider: AgentProvider
     if (!fs.existsSync(indexPath)) throw new Error(agentBundleMissingMessage(indexPath));
     return { nodeBin: localNodeExec().nodeBin, indexPath };
   }
-  // Which self-contained CLI to ship, from the provider registry (fixes the old
-  // `=== 'copilot'` check that shipped the CLAUDE binary for acp-copilot). codex
-  // has no self-contained bin yet (null) → falls back to claude, unchanged.
-  const providerBin: ProviderBin = AGENT_PROVIDERS[provider].bin ?? 'claude';
+  // Exhaustive registry-owned runtime kind: no provider may fall through to a
+  // different binary/runtime under a misleading error.
+  const providerBin: ProviderBin = AGENT_PROVIDERS[provider].bin;
   // ssh / docker / wsl: ship our own runtime + provider binary, then mirror the
   // app-level skills onto the remote (#70/§5.7) so the remote agent loads them.
   let ops: RemoteOps;

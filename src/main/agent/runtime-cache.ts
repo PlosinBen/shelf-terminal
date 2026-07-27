@@ -20,7 +20,7 @@ import * as fs from 'fs';
 import * as fsp from 'fs/promises';
 import * as path from 'path';
 import * as https from 'https';
-import { findFile } from './tar';
+import { findFile, readTar } from './tar';
 import { type RuntimeTarget, targetId } from './runtime-target';
 import {
   NODE_VERSION,
@@ -31,8 +31,10 @@ import {
   claudeManifestUrl,
   copilotTarballUrl,
   copilotManifestUrl,
+  codexNativeTarballUrl,
+  codexNativeManifestUrl,
 } from './agent-runtime-versions';
-import { cachedNodeBin, cachedClaudeBin, cachedCopilotBin } from './deploy-layout';
+import { cachedNodeBin, cachedClaudeBin, cachedCopilotBin, cachedCodexNativeDir } from './deploy-layout';
 
 // ── pure helpers ──────────────────────────────────────────────────────────
 
@@ -184,6 +186,36 @@ export function ensureCopilotCached(
     dest: cachedCopilotBin(userData, targetId(target), version),
     label: `Copilot (${targetId(target)}@${version})`,
   });
+}
+
+/** Ensure the target-native Codex package is integrity-verified and extracted as a tree. */
+export async function ensureCodexNativeCached(
+  userData: string,
+  target: RuntimeTarget,
+  version: string,
+  deps: CacheDeps = defaultDeps,
+): Promise<string> {
+  const dest = cachedCodexNativeDir(userData, targetId(target), version);
+  const nativeBin = target.arch === 'x64' ? 'x86_64-unknown-linux-musl' : 'aarch64-unknown-linux-musl';
+  const sentinel = path.join(dest, 'vendor', nativeBin, 'codex', 'codex');
+  if (fs.existsSync(sentinel)) return dest;
+
+  const [tgz, manifest] = await Promise.all([
+    deps.download(codexNativeTarballUrl(target.arch, version)),
+    deps.download(codexNativeManifestUrl(target.arch, version)),
+  ]);
+  const integrity: string | undefined = JSON.parse(manifest.toString('utf8'))?.dist?.integrity;
+  if (integrity && !integrityMatches(tgz, integrity)) throw new Error(`Codex (${targetId(target)}@${version}) tarball integrity mismatch`);
+  for (const entry of readTar(gunzipSync(tgz))) {
+    if (entry.type !== 'file' || !entry.name.startsWith('package/')) continue;
+    const relative = entry.name.slice('package/'.length);
+    const out = path.join(dest, relative);
+    await fsp.mkdir(path.dirname(out), { recursive: true });
+    await fsp.writeFile(out, entry.data);
+    if (relative === `vendor/${nativeBin}/codex/codex`) await fsp.chmod(out, 0o755);
+  }
+  if (!fs.existsSync(sentinel)) throw new Error(`Codex native executable not found in ${targetId(target)} package`);
+  return dest;
 }
 
 export { NODE_VERSION };

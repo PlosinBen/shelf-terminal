@@ -11,10 +11,11 @@ import {
   ensureNodeCached,
   ensureClaudeCached,
   ensureCopilotCached,
+  ensureCodexNativeCached,
   type CacheDeps,
 } from './runtime-cache';
 import { nodeArchiveName, nodeShasumsUrl, claudeManifestUrl, copilotManifestUrl } from './agent-runtime-versions';
-import { cachedNodeBin, cachedClaudeBin, cachedCopilotBin } from './deploy-layout';
+import { cachedNodeBin, cachedClaudeBin, cachedCopilotBin, cachedCodexNativeDir } from './deploy-layout';
 import { targetId, type RuntimeTarget } from './runtime-target';
 
 const X64: RuntimeTarget = { arch: 'x64', libc: 'glibc' };
@@ -179,5 +180,28 @@ describe('ensureCopilotCached', () => {
     expect(p).toBe(cachedCopilotBin(userData, targetId(X64), VER));
     expect(fs.readFileSync(p, 'utf8')).toBe('COPILOTBIN');
     expect(fs.statSync(p).mode & 0o111).not.toBe(0);
+  });
+});
+
+describe('ensureCodexNativeCached', () => {
+  let userData: string;
+  beforeEach(() => {
+    userData = fs.mkdtempSync(path.join(os.tmpdir(), 'rc-codex-'));
+  });
+  afterEach(() => fs.rmSync(userData, { recursive: true, force: true }));
+
+  it('SRI-verifies and extracts the target package tree with an executable native Codex', async () => {
+    const tgz = tarGz('package/vendor/x86_64-unknown-linux-musl/codex/codex', 'CODEXBIN');
+    const integrity = 'sha512-' + createHash('sha512').update(tgz).digest('base64');
+    const archiveDeps: CacheDeps = {
+      async download(url) {
+        return url.endsWith('.tgz') ? tgz : Buffer.from(JSON.stringify({ dist: { integrity } }));
+      },
+    };
+    const dir = await ensureCodexNativeCached(userData, X64, '0.144.4', archiveDeps);
+    expect(dir).toBe(cachedCodexNativeDir(userData, targetId(X64), '0.144.4'));
+    const bin = path.join(dir, 'vendor/x86_64-unknown-linux-musl/codex/codex');
+    expect(fs.readFileSync(bin, 'utf8')).toBe('CODEXBIN');
+    expect(fs.statSync(bin).mode & 0o111).not.toBe(0);
   });
 });
