@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { migrateFeatureNote } from './note-migration';
+import { migrateFeatureNote, restoreFeatureNotes } from './note-migration';
 
 /** A scriptable connector.exec that records calls and dispatches on the command. */
 function makeConnector(handler: (cwd: string, cmd: string) => { stdout?: string; stderr?: string } | Error) {
@@ -86,5 +86,66 @@ describe('migrateFeatureNote', () => {
     await expect(
       migrateFeatureNote(connector, '/base', '/base-wt', '../../../secret.md'),
     ).rejects.toThrow(/traverse/);
+  });
+});
+
+describe('restoreFeatureNotes', () => {
+  it('no notes in worktree → no-op', async () => {
+    const { connector, calls } = makeConnector((_cwd, cmd) => {
+      if (cmd.startsWith('for f in .agent/features/*.md')) return { stdout: '' };
+      return {};
+    });
+
+    const res = await restoreFeatureNotes(connector, '/base', '/base-wt');
+
+    expect(res.migrated).toBe(false);
+    expect(calls).toHaveLength(1);
+  });
+
+  it('happy path: copy each remaining worktree note to base, verify, then remove source', async () => {
+    const seq: string[] = [];
+    const { connector } = makeConnector((cwd, cmd) => {
+      if (cmd.startsWith('for f in .agent/features/*.md')) {
+        return { stdout: '===SHELF_NOTE:.agent/features/x.md===\n---\ntitle: X\n---\n' };
+      }
+      if (cmd.startsWith('test ! -e')) return { stdout: '__SHELF_NOTE_OK__\n' };
+      if (cmd.includes('cp ')) { seq.push(`copy:${cwd}`); return {}; }
+      if (cmd.startsWith('test -f')) return { stdout: '__SHELF_NOTE_OK__\n' };
+      if (cmd.startsWith('rm -f')) { seq.push(`remove:${cwd}`); return {}; }
+      return {};
+    });
+
+    const res = await restoreFeatureNotes(connector, '/base', '/base-wt');
+
+    expect(res.migrated).toBe(true);
+    expect(seq).toEqual(['copy:/base-wt', 'remove:/base-wt']);
+  });
+
+  it('base destination already exists → fail-loud and keep worktree source', async () => {
+    const { connector, calls } = makeConnector((_cwd, cmd) => {
+      if (cmd.startsWith('for f in .agent/features/*.md')) {
+        return { stdout: '===SHELF_NOTE:.agent/features/x.md===\n---\ntitle: X\n---\n' };
+      }
+      if (cmd.startsWith('test ! -e')) return { stdout: '__SHELF_NOTE_MISSING__\n' };
+      return {};
+    });
+
+    await expect(restoreFeatureNotes(connector, '/base', '/base-wt')).rejects.toThrow(/already exists/);
+    expect(calls.some((c) => c.cmd.includes('cp '))).toBe(false);
+    expect(calls.some((c) => c.cmd.startsWith('rm -f'))).toBe(false);
+  });
+
+  it('copy did not land in base → fail-loud and keep worktree source', async () => {
+    const { connector, calls } = makeConnector((_cwd, cmd) => {
+      if (cmd.startsWith('for f in .agent/features/*.md')) {
+        return { stdout: '===SHELF_NOTE:.agent/features/x.md===\n---\ntitle: X\n---\n' };
+      }
+      if (cmd.startsWith('test ! -e')) return { stdout: '__SHELF_NOTE_OK__\n' };
+      if (cmd.startsWith('test -f')) return { stdout: '__SHELF_NOTE_MISSING__\n' };
+      return {};
+    });
+
+    await expect(restoreFeatureNotes(connector, '/base', '/base-wt')).rejects.toThrow(/restore failed/);
+    expect(calls.some((c) => c.cmd.startsWith('rm -f'))).toBe(false);
   });
 });

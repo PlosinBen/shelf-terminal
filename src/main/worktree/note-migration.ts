@@ -1,5 +1,6 @@
 import type { Connector } from '../connector/types';
 import { normalizeCwd, shellSingleQuote as q } from '../connector/file-utils';
+import { listFeatureNotes } from './feature-notes';
 
 /**
  * Feature-note migration for worktree create (the user-initiated New Worktree
@@ -74,6 +75,51 @@ export async function migrateFeatureNote(
 
   // 4. Copy confirmed — remove the base copy so no orphan lingers.
   await connector.exec(baseCwd, `rm -f ${q(src)}`);
+
+  return { migrated: true };
+}
+
+/**
+ * Reverse migration for worktree close: move any remaining transient feature
+ * notes from the child worktree back to the base checkout before teardown.
+ *
+ * Missing child notes are normal: development-flow wrap-up may already have
+ * consolidated and deleted the note. Existing base destinations are fail-loud so
+ * close never overwrites unrelated base notes.
+ */
+export async function restoreFeatureNotes(
+  connector: Pick<Connector, 'exec'>,
+  baseCwd: string,
+  worktreeCwd: string,
+): Promise<NoteMigrationResult> {
+  const notes = await listFeatureNotes(connector, worktreeCwd);
+  if (notes.length === 0) return { migrated: false };
+
+  const baseRoot = normalizeCwd(baseCwd);
+  const worktreeRoot = normalizeCwd(worktreeCwd);
+
+  for (const note of notes) {
+    const rel = note.path.trim();
+    assertRelativeSafe(rel);
+
+    const src = `${worktreeRoot}/${rel}`;
+    const dest = `${baseRoot}/${rel}`;
+
+    const destFree = await connector.exec(baseCwd, `test ! -e ${q(dest)} && echo ${OK} || echo ${MISSING}`);
+    if (!destFree.stdout.includes(OK)) {
+      throw new Error(`feature note restore target already exists in base: ${rel}`);
+    }
+
+    const destParent = dest.slice(0, dest.lastIndexOf('/')) || '/';
+    await connector.exec(worktreeCwd, `mkdir -p ${q(destParent)} && cp ${q(src)} ${q(dest)}`);
+
+    const verify = await connector.exec(baseCwd, `test -f ${q(dest)} && echo ${OK} || echo ${MISSING}`);
+    if (!verify.stdout.includes(OK)) {
+      throw new Error(`feature note restore failed (source kept): ${rel}`);
+    }
+
+    await connector.exec(worktreeCwd, `rm -f ${q(src)}`);
+  }
 
   return { migrated: true };
 }
