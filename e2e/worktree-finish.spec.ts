@@ -106,6 +106,11 @@ test.describe('finish worktree gate', () => {
 
     // The worktree sub-project disappeared (success = disappearance).
     await expect(page.locator('.sidebar-item.worktree-child', { hasText: 'feature' })).toHaveCount(0, { timeout: 8_000 });
+    await expect(page.locator('.sidebar-item.active', { hasText: 'Finish Base' })).toHaveCount(1);
+    const banner = page.locator('.project-notice-banner');
+    await expect(banner).toContainText('Merged feature → main and closed the worktree');
+    await banner.locator('.project-notice-dismiss').click();
+    await expect(banner).toHaveCount(0);
     // base `main` fast-forwarded to the feature tip.
     expect(git(base, ['rev-parse', 'main']).trim()).toBe(featureTip);
     // The worktree dir is gone and the branch was deleted.
@@ -181,6 +186,7 @@ test.describe('finish worktree gate', () => {
     expect(fs.existsSync(feature)).toBe(true);
     expect(fs.readFileSync(path.join(feature, 'f.txt'), 'utf-8')).toBe('uncommitted edit');
     await expect(page.locator('.sidebar-item.worktree-child', { hasText: 'feature' })).toHaveCount(1);
+    await expect(page.locator('.project-notice-banner')).toHaveCount(0);
   });
 
   test('untracked non-ignored file blocks finish before merge and keeps the worktree', async () => {
@@ -200,6 +206,7 @@ test.describe('finish worktree gate', () => {
     expect(fs.existsSync(feature)).toBe(true);
     expect(fs.readFileSync(path.join(feature, 'scratch.txt'), 'utf-8')).toBe('keep me');
     await expect(page.locator('.sidebar-item.worktree-child', { hasText: 'feature' })).toHaveCount(1);
+    await expect(page.locator('.project-notice-banner')).toHaveCount(0);
   });
 
   test('worktree agent proposal opens the Finish gate without merging', async () => {
