@@ -85,6 +85,19 @@ export function deployedFiles(container: string): string[] {
   }
 }
 
+/** Recursively list files under the deployed version root. */
+export function deployedFileTree(container: string): string[] {
+  try {
+    const out = execSync(
+      `docker exec ${container} sh -c 'cd /root/.shelf/agent-server/* 2>/dev/null && find . \\( -type f -o -type l \\) -print'`,
+      { encoding: 'utf8', stdio: 'pipe' },
+    );
+    return out.split('\n').map((s) => s.trim().replace(/^\.\//, '')).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
 /** Open a Copilot agent tab (mirrors openAgentTab, which opens Claude). */
 export async function openCopilotAgentTab(page: Page): Promise<void> {
   await page.locator('.tab-add').click({ button: 'right' });
@@ -97,6 +110,13 @@ export async function openCopilotAgentTab(page: Page): Promise<void> {
 export async function openCodexAgentTab(page: Page): Promise<void> {
   await page.locator('.tab-add').click({ button: 'right' });
   await page.locator('.context-menu-item', { hasText: 'Agent (Codex)' }).click();
+  await expect(page.locator('.agent-view:visible')).toBeVisible({ timeout: 5_000 });
+}
+
+/** Open the temporary official Codex SDK provider tab. */
+export async function openCodexOfficialAgentTab(page: Page): Promise<void> {
+  await page.locator('.tab-add').click({ button: 'right' });
+  await page.locator('.context-menu-item', { hasText: 'Agent (Codex Official (Test))' }).click();
   await expect(page.locator('.agent-view:visible')).toBeVisible({ timeout: 5_000 });
 }
 

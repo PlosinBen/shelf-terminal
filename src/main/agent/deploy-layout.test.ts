@@ -4,6 +4,7 @@ import {
   agentServerDir,
   remoteFilePath,
   deployFilesFor,
+  deployFilesForTarget,
   needsDeploy,
   missingFiles,
   cacheDir,
@@ -61,6 +62,11 @@ describe('deployFilesFor', () => {
   });
   it('rejects Codex on musl before any deploy work begins', () => {
     expect(() => deployFilesFor('musl', 'codex')).toThrow('Codex requires a glibc host');
+    expect(() => deployFilesForTarget('musl', 'x64', 'codex')).toThrow('Codex requires a glibc host');
+  });
+  it('selects the Codex manifest from the complete target-aware helper', () => {
+    expect(deployFilesForTarget('glibc', 'x64', 'codex')).toEqual(codexDeployFiles('glibc', 'x64'));
+    expect(deployFilesForTarget('glibc', 'x64', 'claude')).toEqual(['node', 'index.mjs', 'claude']);
   });
 });
 

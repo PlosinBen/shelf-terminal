@@ -32,7 +32,7 @@ import {
   deployRoot,
   agentServerDir,
   deployFilesFor,
-  codexDeployFiles,
+  deployFilesForTarget,
   needsDeploy,
   missingFiles,
   DEPLOYED_SENTINEL,
@@ -593,9 +593,7 @@ async function deploySelfContained(connection: Connection, ops: RemoteOps, provi
 
   // Codex has no supported musl runtime. Compute the manifest before cache or
   // transfer work so Alpine fails with its own actionable diagnosis.
-  const expected = providerBin === 'codex'
-    ? codexDeployFiles(target.libc, target.arch)
-    : deployFilesFor(target.libc, providerBin);
+  const expected = deployFilesForTarget(target.libc, target.arch, providerBin);
   const inv = readRemoteInventory(ops, root, expected);
   if (!needsDeploy(inv, expected)) {
     log.info('agent-remote', `agent-server already deployed at ${root} (${targetId(target)}, ${providerBin})`);

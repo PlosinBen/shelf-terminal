@@ -43,6 +43,13 @@ export function deployFilesFor(libc: Libc, provider: ProviderBin): DeployFile[] 
   return [...base, provider];
 }
 
+/** Files we ship for a fully-known target+provider runtime. */
+export function deployFilesForTarget(libc: Libc, arch: Arch, provider: ProviderBin): DeployFile[] {
+  return provider === 'codex'
+    ? codexDeployFiles(libc, arch)
+    : deployFilesFor(libc, provider);
+}
+
 /** Fixed relative Codex runtime manifest, preserving both require.resolve hops. */
 export function codexDeployFiles(libc: Libc, arch: Arch): DeployFile[] {
   if (libc === 'musl') throw new Error('Codex requires a glibc host');
