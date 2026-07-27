@@ -101,9 +101,9 @@ test.describe('user-initiated worktree create', () => {
       .toHaveValue('claude');
 
     // Every note is pickable regardless of status; each shows its name + status.
-    const options = dialog.locator('.worktree-select option');
+    const select = dialog.getByLabel('Feature note');
+    const options = select.locator('option');
     await expect(options).toHaveCount(3); // "No note" + Demo (in-progress) + Old (cancelled)
-    const select = dialog.locator('.worktree-select');
     await expect(select).toContainText('Demo Feature');
     await expect(select).toContainText('in-progress');
     await expect(select).toContainText('Old Feature');
@@ -131,7 +131,7 @@ test.describe('user-initiated worktree create', () => {
   test('choosing "No note" leaves the base note untouched', async () => {
     const dialog = await openNewWorktreeDialog(page);
 
-    await dialog.locator('.worktree-select').selectOption(''); // "No note"
+    await dialog.getByLabel('Feature note').selectOption(''); // "No note"
     await dialog.locator('.worktree-input').fill('feature/n');
     await dialog.locator('.conn-btn-next').click();
     await expect(dialog).not.toBeVisible({ timeout: 8_000 });
@@ -153,7 +153,7 @@ test.describe('user-initiated worktree create', () => {
     const dialog = page.locator('.worktree-dialog');
     await expect(dialog).toBeVisible({ timeout: 8_000 });
     await expect(dialog.locator('.worktree-input')).toHaveValue('feature/proposed');
-    await expect(dialog.locator('.worktree-select').first()).toHaveValue('.agent/features/demo.md');
+    await expect(dialog.getByLabel('Feature note')).toHaveValue('.agent/features/demo.md');
     await expect(page.locator('.sidebar-item.worktree-child')).toHaveCount(0);
   });
 });
