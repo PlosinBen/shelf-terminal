@@ -51,7 +51,9 @@ describe('deployFilesFor', () => {
       'index.mjs',
       'codex-cli/node_modules/@agentclientprotocol/codex-acp/dist/index.js',
       'codex-cli/node_modules/@openai/codex/bin/codex.js',
-      'codex-cli/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex/codex',
+      'codex-cli/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex',
+      'codex-cli/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/bwrap',
+      'codex-cli/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-path/rg',
     ]));
     expect(codexNativePackageName('arm64')).toBe('@openai/codex-linux-arm64');
   });

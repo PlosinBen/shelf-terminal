@@ -93,6 +93,13 @@ export async function openCopilotAgentTab(page: Page): Promise<void> {
   await expect(page.locator('.agent-textarea:visible')).toBeVisible();
 }
 
+/** Open a Codex agent tab. */
+export async function openCodexAgentTab(page: Page): Promise<void> {
+  await page.locator('.tab-add').click({ button: 'right' });
+  await page.locator('.context-menu-item', { hasText: 'Agent (Codex · dev)' }).click();
+  await expect(page.locator('.agent-view:visible')).toBeVisible({ timeout: 5_000 });
+}
+
 /**
  * Drive a fake picker turn and assert the panel appears — only possible if the
  * remote agent-server actually ran (deploy + spawn worked). A text echo would

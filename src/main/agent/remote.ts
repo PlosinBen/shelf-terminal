@@ -623,7 +623,7 @@ async function deploySelfContained(connection: Connection, ops: RemoteOps, provi
       if (file === 'node' || file === 'index.mjs') continue;
       const rel = file.replace(/^codex-cli\/node_modules\//, '');
       sources[file] = rel.startsWith('@openai/codex-linux-')
-        ? path.join(nativeDir, rel.slice(rel.indexOf('/') + 1))
+        ? path.join(nativeDir, rel.slice(`@openai/codex-linux-${target.arch}/`.length))
         : path.join(sourceNodeModules, rel);
     }
   }
@@ -635,7 +635,7 @@ async function deploySelfContained(connection: Connection, ops: RemoteOps, provi
     ops.copyIn(sources[f]!, `${root}/${f}`);
   }
   // Exec bits on what we shipped (node only for glibc; the provider binary).
-  const codexBin = expected.find((f) => f.endsWith('/codex/codex'));
+  const codexBin = expected.find((f) => f.endsWith('/bin/codex'));
   const execBits = [isMusl ? null : `${root}/node`, providerBin === 'codex' ? (codexBin ? `${root}/${codexBin}` : null) : `${root}/${providerBin}`].filter(Boolean).join(' ');
   ops.exec(`chmod +x ${execBits}`);
   ops.exec(`touch ${root}/${DEPLOYED_SENTINEL}`); // completion marker — last

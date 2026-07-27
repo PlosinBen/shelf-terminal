@@ -56,7 +56,12 @@ export function codexDeployFiles(libc: Libc, arch: Arch): DeployFile[] {
     'codex-cli/node_modules/@openai/codex/bin/codex.js',
     'codex-cli/node_modules/@openai/codex/package.json',
     `codex-cli/node_modules/${native}/package.json`,
-    `codex-cli/node_modules/${native}/vendor/${nativeBin}/codex/codex`,
+    `codex-cli/node_modules/${native}/vendor/${nativeBin}/bin/codex`,
+    `codex-cli/node_modules/${native}/vendor/${nativeBin}/bin/codex-code-mode-host`,
+    `codex-cli/node_modules/${native}/vendor/${nativeBin}/codex-path/rg`,
+    `codex-cli/node_modules/${native}/vendor/${nativeBin}/codex-resources/bwrap`,
+    `codex-cli/node_modules/${native}/vendor/${nativeBin}/codex-resources/zsh/bin/zsh`,
+    `codex-cli/node_modules/${native}/vendor/${nativeBin}/codex-package.json`,
   ];
 }
 

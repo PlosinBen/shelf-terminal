@@ -27,5 +27,6 @@ test('copilot: unauthenticated remote surfaces the AuthPane', async ({ shelfApp:
   const authPane = page.locator('.agent-auth-pane:visible');
   await expect(authPane).toBeVisible({ timeout: 240_000 });
   await expect(authPane).toContainText('Copilot');
-  await expect(authPane).toContainText('copilot login');
+  await expect(authPane).toContainText('Log in');
+  await expect(authPane).toContainText('GH_TOKEN');
 });

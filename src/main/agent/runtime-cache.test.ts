@@ -191,16 +191,18 @@ describe('ensureCodexNativeCached', () => {
   afterEach(() => fs.rmSync(userData, { recursive: true, force: true }));
 
   it('SRI-verifies and extracts the target package tree with an executable native Codex', async () => {
-    const tgz = tarGz('package/vendor/x86_64-unknown-linux-musl/codex/codex', 'CODEXBIN');
+    const tgz = tarGz('package/vendor/x86_64-unknown-linux-musl/bin/codex', 'CODEXBIN');
     const integrity = 'sha512-' + createHash('sha512').update(tgz).digest('base64');
     const archiveDeps: CacheDeps = {
       async download(url) {
-        return url.endsWith('.tgz') ? tgz : Buffer.from(JSON.stringify({ dist: { integrity } }));
+        return url.endsWith('.tgz')
+          ? tgz
+          : Buffer.from(JSON.stringify({ dist: { integrity, tarball: 'https://registry.test/codex.tgz' } }));
       },
     };
     const dir = await ensureCodexNativeCached(userData, X64, '0.144.4', archiveDeps);
     expect(dir).toBe(cachedCodexNativeDir(userData, targetId(X64), '0.144.4'));
-    const bin = path.join(dir, 'vendor/x86_64-unknown-linux-musl/codex/codex');
+    const bin = path.join(dir, 'vendor/x86_64-unknown-linux-musl/bin/codex');
     expect(fs.readFileSync(bin, 'utf8')).toBe('CODEXBIN');
     expect(fs.statSync(bin).mode & 0o111).not.toBe(0);
   });

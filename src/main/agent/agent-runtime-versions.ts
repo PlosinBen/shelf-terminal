@@ -102,13 +102,11 @@ export function codexNativePackageName(arch: 'x64' | 'arm64'): string {
 }
 
 export function codexNativeTarballUrl(arch: 'x64' | 'arm64', version: string): string {
-  const pkg = codexNativePackageName(arch);
-  const unscoped = pkg.split('/')[1];
-  return `https://registry.npmjs.org/${pkg}/-/${unscoped}-${version}.tgz`;
+  return `https://registry.npmjs.org/@openai/codex/-/codex-${version}-linux-${arch}.tgz`;
 }
 
 export function codexNativeManifestUrl(arch: 'x64' | 'arm64', version: string): string {
-  return `https://registry.npmjs.org/${codexNativePackageName(arch)}/${version}`;
+  return `https://registry.npmjs.org/@openai/codex/${version}-linux-${arch}`;
 }
 
 /**

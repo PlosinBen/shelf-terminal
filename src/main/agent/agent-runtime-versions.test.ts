@@ -13,6 +13,7 @@ import {
   claudeTarballUrl,
   copilotPackageName,
   copilotTarballUrl,
+  codexNativeTarballUrl,
 } from './agent-runtime-versions';
 import { UnsupportedTargetError, type RuntimeTarget } from './runtime-target';
 
@@ -120,6 +121,14 @@ describe('copilotPackageName / copilotTarballUrl', () => {
   it('builds the scoped registry tarball URL', () => {
     expect(copilotTarballUrl(X64_GLIBC, '1.0.56')).toBe(
       'https://registry.npmjs.org/@github/copilot-linux-x64/-/copilot-linux-x64-1.0.56.tgz',
+    );
+  });
+});
+
+describe('codexNativeTarballUrl', () => {
+  it('uses the Codex alias package tarball name, not the target package name', () => {
+    expect(codexNativeTarballUrl('arm64', '0.144.4')).toBe(
+      'https://registry.npmjs.org/@openai/codex/-/codex-0.144.4-linux-arm64.tgz',
     );
   });
 });

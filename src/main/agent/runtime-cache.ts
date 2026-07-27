@@ -31,7 +31,6 @@ import {
   claudeManifestUrl,
   copilotTarballUrl,
   copilotManifestUrl,
-  codexNativeTarballUrl,
   codexNativeManifestUrl,
 } from './agent-runtime-versions';
 import { cachedNodeBin, cachedClaudeBin, cachedCopilotBin, cachedCodexNativeDir } from './deploy-layout';
@@ -197,14 +196,14 @@ export async function ensureCodexNativeCached(
 ): Promise<string> {
   const dest = cachedCodexNativeDir(userData, targetId(target), version);
   const nativeBin = target.arch === 'x64' ? 'x86_64-unknown-linux-musl' : 'aarch64-unknown-linux-musl';
-  const sentinel = path.join(dest, 'vendor', nativeBin, 'codex', 'codex');
+  const sentinel = path.join(dest, 'vendor', nativeBin, 'bin', 'codex');
   if (fs.existsSync(sentinel)) return dest;
 
-  const [tgz, manifest] = await Promise.all([
-    deps.download(codexNativeTarballUrl(target.arch, version)),
-    deps.download(codexNativeManifestUrl(target.arch, version)),
-  ]);
-  const integrity: string | undefined = JSON.parse(manifest.toString('utf8'))?.dist?.integrity;
+  const manifest = JSON.parse((await deps.download(codexNativeManifestUrl(target.arch, version))).toString('utf8'));
+  const tarballUrl: string | undefined = manifest?.dist?.tarball;
+  if (!tarballUrl) throw new Error(`Codex (${targetId(target)}@${version}) manifest has no tarball URL`);
+  const tgz = await deps.download(tarballUrl);
+  const integrity: string | undefined = manifest?.dist?.integrity;
   if (integrity && !integrityMatches(tgz, integrity)) throw new Error(`Codex (${targetId(target)}@${version}) tarball integrity mismatch`);
   for (const entry of readTar(gunzipSync(tgz))) {
     if (entry.type !== 'file' || !entry.name.startsWith('package/')) continue;
@@ -212,7 +211,7 @@ export async function ensureCodexNativeCached(
     const out = path.join(dest, relative);
     await fsp.mkdir(path.dirname(out), { recursive: true });
     await fsp.writeFile(out, entry.data);
-    if (relative === `vendor/${nativeBin}/codex/codex`) await fsp.chmod(out, 0o755);
+    if ((entry.mode & 0o111) !== 0) await fsp.chmod(out, entry.mode & 0o777);
   }
   if (!fs.existsSync(sentinel)) throw new Error(`Codex native executable not found in ${targetId(target)} package`);
   return dest;
