@@ -36,3 +36,13 @@ related:
 **Do not change casually because**：真正的根因是「live session 被換到新程序、舊 in-memory 狀態被孤立」。上面的 fail-loud 是止血 + 裝偵測 —— orphan 的 warn log 會指出是哪個 lifecycle 事件清空了 map,再據此修根因。
 
 **Related**：`agent-observability#1`、`context/connection-health`、`context/agent-core`。
+
+## agent-observability#3 — Tab log label 必須保留完整 id  ·  [Gotcha]
+
+**Background**：renderer tab id 格式是 `tab-<epoch-ms>-<counter>`。`tab-` 與 epoch 高位是同時期所有 tab 的共同前綴，真正可區分 project / worktree / tab 的部分落在 epoch 低位與尾端 counter。
+
+**Gotcha**：tab log label 一律經 `formatTabLogId()` 保留完整 id，讓 main 與 renderer 的紀錄可精確 grep、逐行對帳；不可用 `slice(0, 8)` 等前綴截斷，否則同時期不同 tab 會顯示成相同標籤。這條只適用於 renderer tab id；`randomUUID()`、app id 與 provider task id 是不同 id domain，不應因這條規則改變其既有短碼格式。
+
+**Do not change casually because**：任何非一對一的縮碼都可能讓多 worktree 並行時的診斷紀錄重新碰撞。若未來確實要縮短，必須先改 tab id 格式或引入能證明無碰撞的映射，不能只改截取位置。
+
+**Related**：`src/shared/tab-id.ts`、`src/main/agent/index.ts`、`src/renderer/agentTabSubscriptions.ts`、`src/renderer/agentTabStore.ts`。

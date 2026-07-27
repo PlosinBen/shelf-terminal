@@ -1,6 +1,7 @@
 import { BrowserWindow, ipcMain, shell } from 'electron';
 import { IPC } from '@shared/ipc-channels';
 import { log } from '@shared/logger';
+import { formatTabLogId } from '@shared/tab-id';
 import type { Connection, AgentProvider } from '@shared/types';
 import type { AgentSessionState, AgentEvent, AgentBackend, PermissionResult } from './types';
 import { createRemoteBackend, syncSkillsForConnection } from './remote';
@@ -50,7 +51,7 @@ const sessions = new Map<string, SessionInstance>();
 function hibernateTab(tabId: string): void {
   const session = sessions.get(tabId);
   if (!session || session.hibernated || session.activeTurns > 0) return;
-  log.info('agent', `[agent:${tabId.slice(0, 8)}] idle-teardown → dispose exec+CLI (resumes on next send)`);
+  log.info('agent', `[agent:${formatTabLogId(tabId)}] idle-teardown → dispose exec+CLI (resumes on next send)`);
   session.backend.dispose();
   session.hibernated = true;
 }
@@ -89,7 +90,7 @@ function notifyObservers(tabId: string, event: AgentEvent): void {
     try {
       obs(tabId, event);
     } catch (e: any) {
-      log.error('agent', `observer error tab=${tabId.slice(0, 8)}: ${e?.message ?? e}`);
+      log.error('agent', `observer error tab=${formatTabLogId(tabId)}: ${e?.message ?? e}`);
     }
   }
 }
@@ -321,7 +322,7 @@ async function startSession(
 ): Promise<boolean> {
   if (sessions.has(tabId)) return true;
 
-  const tag = `[agent:${tabId.slice(0, 8)}]`;
+  const tag = `[agent:${formatTabLogId(tabId)}]`;
   log.info('agent', `${tag} start provider=${provider} cwd=${cwd}`);
 
   // Project app-level skills onto this machine's ~/.shelf/apps/<appId>/skills so
@@ -449,7 +450,7 @@ async function sendMessage(
   const session = sessions.get(tabId);
   if (!session) return false;
 
-  const tag = `[agent:${tabId.slice(0, 8)}]`;
+  const tag = `[agent:${formatTabLogId(tabId)}]`;
   log.info('agent', `${tag} send promptLen=${(prompt ?? '').length}${prefs?.configEdit ? ` configEdit=${prefs.configEdit.key}` : ''}`);
 
   // Activity: cancel any pending idle-teardown. If the tab was hibernated, the
@@ -562,7 +563,7 @@ async function sendMessage(
 async function reinitAfterLogin(tabId: string): Promise<void> {
   const session = sessions.get(tabId);
   if (!session?.backend.getCapabilities) return;
-  const tag = `[agent:${tabId.slice(0, 8)}]`;
+  const tag = `[agent:${formatTabLogId(tabId)}]`;
   const provider = session.provider;
   const settings = loadSettings();
   const customModels = settings.ok

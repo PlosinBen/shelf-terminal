@@ -4,6 +4,7 @@ import type { AgentFile, AgentInitPhase, AgentLoginPrompt, AgentLoginResult, Age
 import { loadAgentMessagesLatest, saveAgentMessagesDelta, clearAgentSession } from './storage/agent-history';
 import { reconcileQueueSnapshot, type PendingSend } from './queue-reconcile';
 import { debugLog } from './debugLog';
+import { formatTabLogId } from '../shared/tab-id';
 
 // Per-tab store for agent UI state. Split from store.ts because the
 // global store rebuilds its snapshot on every change — every useStore
@@ -617,7 +618,7 @@ export function applyQueueSnapshot(tabId: string, items: AgentQueueItem[]) {
   // discrepancy to the persistent main log (debugLog), and console.warn the
   // potential-message-loss case so it's loud in devtools too.
   for (const a of anomalies) {
-    debugLog('agent-queue', `tab=${tabId.slice(0, 8)} ${a.kind} clientMsgId=${a.clientMsgId}`);
+    debugLog('agent-queue', `tab=${formatTabLogId(tabId)} ${a.kind} clientMsgId=${a.clientMsgId}`);
     if (a.kind === 'dropped-confirmed-vanished') {
       console.warn(
         '[agent-queue] a queued message vanished from the server queue before running ' +

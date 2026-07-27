@@ -224,6 +224,7 @@ title: shelf-terminal — Intent → File Index
 | Shelf 檔案 placement 規則 | `shelf-paths.ts` | `shelfPlacement(type,ctx)` closed allowlist + `ShelfFileType*` 常數(transport 與 agent-server 共用單一路徑規則） |
 | 專案 env 純 helper | `project-env.ts` | `EnvMap`、`SHELF_RESERVED_ENV`、`isReservedEnvKey`/`validateEnvKey`、`applyEnvMap`（本機 merge、PATH-merge）、`buildEnvExportPrefix`（遠端 export 前綴）；main + renderer 共用 |
 | Logger | `logger.ts` | 統一 log 模組，支援 file writer / log level / env override |
+| Agent tab log id | `tab-id.ts` | `formatTabLogId()` 保留完整 renderer tab id，讓跨 main/renderer log 可精確 grep 對帳 |
 | 預設值 | `defaults.ts` | DEFAULT_SETTINGS, DEFAULT_KEYBINDINGS |
 | Slash prefix parser | `slash-prefix.ts` | `parseSlashPrefix(prompt)`，provider + renderer 同份 |
 | Web session 常數/型別 | `web-session.ts` | `WEB_SESSION_PARTITION`、`WEB_FETCH_TOOL`/`isWebFetchTool`、`BROWSER_OPEN_TOOL`/`isBrowserOpenTool`、`WebFetchRequest/Result`、`WebPermissionMeta`、`BrowserOpenMeta`/`BrowserOpenDecision` |

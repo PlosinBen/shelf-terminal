@@ -1,6 +1,7 @@
 import { onAgent, emitAgent } from './events';
 import { buildAgentMsg } from './agent-message-builder';
 import { debugLog } from './debugLog';
+import { formatTabLogId } from '../shared/tab-id';
 import {
   peekAgentTab,
   appendChunk,
@@ -40,10 +41,10 @@ export function bindAgentStoreSubscriptions(): () => void {
     // chain: an event in main's wire-rx / session-event trace but NOT here means
     // it never crossed IPC; here-but-not-rendered narrows it to buildAgentMsg /
     // store. See connection-wedge trace.
-    debugLog('agent-rx', `msg tab=${tabId.slice(0, 8)} type=${kind}`);
+    debugLog('agent-rx', `msg tab=${formatTabLogId(tabId)} type=${kind}`);
     const tab = peekAgentTab(tabId);
     if (!tab) {
-      debugLog('agent-rx', `DROP uninitialized tab=${tabId.slice(0, 8)} type=${kind}`);
+      debugLog('agent-rx', `DROP uninitialized tab=${formatTabLogId(tabId)} type=${kind}`);
       console.warn('[agent] message for uninitialized tab — dropping', { tabId, type: kind });
       return;
     }
@@ -52,7 +53,7 @@ export function bindAgentStoreSubscriptions(): () => void {
       // Unknown type (buildAgentMsg default → null). Real content being dropped
       // on the renderer side — log so an unhandled render primitive is visible
       // instead of a message silently not showing. See background-tasks#5.
-      debugLog('agent-rx', `DROP unhandled type tab=${tabId.slice(0, 8)} type=${kind}`);
+      debugLog('agent-rx', `DROP unhandled type tab=${formatTabLogId(tabId)} type=${kind}`);
       console.warn('[agent] unhandled type — message dropped, not rendered', { tabId, type: kind });
       return;
     }
