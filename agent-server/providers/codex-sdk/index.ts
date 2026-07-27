@@ -1,15 +1,19 @@
 import { CODEX_OFFICAL_PROVIDER } from '@shared/agent-providers';
 import * as path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { Codex, type CodexOptions, type Input, type ThreadEvent, type ThreadOptions, type TurnOptions } from '@openai/codex-sdk';
 import type { ProviderModel } from '@shared/types';
-import { codexConfigHome, codexEnv } from '../codex-shared/runtime';
+import { codexConfigHome, codexEnv, resolveCodexCliCommand } from '../codex-shared/runtime';
 import { driveDeviceCodeLogin, spawnCodexAppServerRpc, type LoginHandle, type LoginRpc } from '../codex-shared/app-server-login';
 import { pickEffortLevels, pickPermissionModes, type ProviderCapabilities, type SendFn, type ServerBackend } from '../types';
 import { formatConfigAck, type ConfigEditKey } from '@shared/config-ack';
 import { CODEX_SDK_EFFORT_LEVELS, buildCodexSdkRuntimeConfig, toCodexSdkInput } from './config';
 import { resolveCodexSdkCodexPathOverride } from './runtime';
 import { translateCodexThreadEvent } from './translate';
+import { loadProjectedMcpServers, type ParsedMcpConfig } from '../mcp-config';
+import { getSharedShelfMcp } from '../acp/shelf-mcp';
+import { serverLog } from '../../server-logger';
 
 interface CodexThreadLike {
   runStreamed(input: Input, options?: TurnOptions): Promise<{ events: AsyncGenerator<ThreadEvent> }>;
@@ -24,6 +28,9 @@ export interface CodexOfficialDeps {
   spawnLoginRpc?: (env: NodeJS.ProcessEnv) => { rpc: LoginRpc };
   createClient?: (options: CodexOptions) => CodexClientLike;
   resolveCodexPath?: () => string;
+  getShelfMcp?: () => Promise<{ url: string } | null>;
+  loadMcpServers?: (appId: string | undefined, env?: Record<string, string | undefined>) => ParsedMcpConfig;
+  listBundledModels?: () => ProviderCapabilities['models'];
 }
 
 export function codexSdkHome(appId: string | undefined): string | undefined {
@@ -47,10 +54,20 @@ export function createCodexOfficialBackend(deps: CodexOfficialDeps = {}): Server
   const spawnLoginRpc = deps.spawnLoginRpc ?? ((env: NodeJS.ProcessEnv) => spawnCodexAppServerRpc(env));
   const createClient = deps.createClient ?? ((options: CodexOptions) => new Codex(options));
   const resolveCodexPath = deps.resolveCodexPath ?? resolveCodexSdkCodexPathOverride;
+  const getShelfMcp = deps.getShelfMcp ?? getSharedShelfMcp;
+  const loadMcpServers = deps.loadMcpServers ?? loadProjectedMcpServers;
+  const listBundledModels = deps.listBundledModels ?? listCodexBundledModels;
 
   function buildCapabilities(customModels: ProviderModel[] = []): ProviderCapabilities {
+    const models = [...listBundledModels()];
+    const seen = new Set(models.map((model) => model.value));
+    for (const model of customModels) {
+      if (seen.has(model.id)) continue;
+      models.push({ value: model.id, displayName: model.id });
+      seen.add(model.id);
+    }
     return {
-      models: customModels.map((model) => ({ value: model.id, displayName: model.id })),
+      models,
       permissionModes: pickPermissionModes(['default', 'plan', 'bypassPermissions']),
       effortLevels: pickEffortLevels([...CODEX_SDK_EFFORT_LEVELS]),
       slashCommands: [],
@@ -92,12 +109,24 @@ export function createCodexOfficialBackend(deps: CodexOfficialDeps = {}): Server
           return;
         }
 
+        const baseEnv = codexEnv(input.appId);
+        const sdkHome = codexSdkHome(input.appId);
+        if (sdkHome) baseEnv.HOME = sdkHome;
+        const mcp = loadMcpServers(input.appId, baseEnv);
+        if (mcp.errors.length) {
+          send({ type: 'error', error: `codex-offical: ${mcp.errors.join('; ')}` });
+          return;
+        }
+        const shelfMcp = await getShelfMcp();
         const mapped = buildCodexSdkRuntimeConfig({
           cwd: input.cwd,
           model: input.model ?? currentModel,
           effort: input.effort ?? currentEffort,
           permissionMode: input.permissionMode ?? currentPermissionMode,
-          baseEnv: codexEnv(input.appId),
+          baseEnv,
+          mcpServers: mcp.servers,
+          shelfMcp: shelfMcp ?? undefined,
+          additionalDirectories: sdkHome ? [sdkHome] : undefined,
         });
         if (!mapped.ok) {
           send({ type: 'error', error: `codex-offical: ${mapped.errors.join('; ')}` });
@@ -189,4 +218,34 @@ export function createCodexOfficialBackend(deps: CodexOfficialDeps = {}): Server
       loginHandle = null;
     },
   };
+}
+
+function listCodexBundledModels(): ProviderCapabilities['models'] {
+  try {
+    const { command, args } = resolveCodexCliCommand();
+    const result = spawnSync(command, [...args, 'debug', 'models', '--bundled'], {
+      encoding: 'utf8',
+      timeout: 30_000,
+      env: codexEnv(undefined),
+    });
+    if (result.status !== 0) {
+      serverLog('warn', 'codex-offical', `codex debug models --bundled failed: ${result.stderr || `exit ${result.status}`}`);
+      return [];
+    }
+    const parsed = JSON.parse(result.stdout) as { models?: Array<{ slug?: unknown; display_name?: unknown; supported_reasoning_levels?: Array<{ effort?: unknown }> }> };
+    return (parsed.models ?? [])
+      .filter((model): model is { slug: string; display_name?: string; supported_reasoning_levels?: Array<{ effort?: unknown }> } => typeof model.slug === 'string')
+      .map((model) => ({
+        value: model.slug,
+        displayName: typeof model.display_name === 'string' ? model.display_name : model.slug,
+        effortLevels: pickEffortLevels(
+          (model.supported_reasoning_levels ?? [])
+            .map((level) => level.effort)
+            .filter((effort): effort is string => typeof effort === 'string' && (CODEX_SDK_EFFORT_LEVELS as readonly string[]).includes(effort)),
+        ),
+      }));
+  } catch (err) {
+    serverLog('warn', 'codex-offical', `failed to list bundled Codex models: ${(err as Error)?.message ?? String(err)}`);
+    return [];
+  }
 }

@@ -203,7 +203,11 @@ describe('Codex official SDK backend lifecycle', () => {
   });
 
   it('reports the reduced SDK capability surface with current saved intent', async () => {
-    const backend = createCodexOfficialBackend();
+    const backend = createCodexOfficialBackend({
+      listBundledModels: () => [
+        { value: 'gpt-5.6-sol', displayName: 'GPT-5.6-Sol', effortLevels: [{ value: 'low', displayName: 'low' }] },
+      ],
+    });
     const caps = await backend.gatherCapabilities!(
       '/repo',
       undefined,
@@ -211,7 +215,7 @@ describe('Codex official SDK backend lifecycle', () => {
       { model: 'custom-model', effort: 'minimal', permissionMode: 'plan' },
     );
 
-    expect(caps.models.map((m) => m.value)).toContain('custom-model');
+    expect(caps.models.map((m) => m.value)).toEqual(['gpt-5.6-sol', 'custom-model']);
     expect(caps.effortLevels.map((e) => e.value)).toEqual(['minimal', 'low', 'medium', 'high', 'xhigh']);
     expect(caps.permissionModes.map((p) => p.value)).toEqual(['default', 'plan', 'bypassPermissions']);
     expect(caps.slashCommands).toEqual([]);
@@ -226,6 +230,63 @@ describe('Codex official SDK backend lifecycle', () => {
     expect(backend.skillTarget!('app-1')).toBe(path.join(os.homedir(), '.shelf', 'apps', 'app-1', 'codex-sdk-home', '.agents', 'skills'));
     expect(backend.configHome!(undefined)).toBeUndefined();
     expect(backend.skillTarget!(undefined)).toBeUndefined();
+  });
+
+  it('builds full app-scoped SDK env, required shelf MCP, user MCP, and SDK skill HOME', async () => {
+    const calls: Array<Record<string, unknown>> = [];
+    const backend = createCodexOfficialBackend({
+      createClient: (options) => {
+        calls.push({ op: 'createClient', options });
+        return fakeClient([{ type: 'thread.started', thread_id: 'thread-1' }], calls);
+      },
+      resolveCodexPath: () => '/runtime/codex',
+      getShelfMcp: async () => ({ url: 'http://127.0.0.1:9/mcp' }),
+      loadMcpServers: () => ({
+        servers: {
+          gh: { type: 'stdio', command: 'node', args: ['server.js'], env: { GITHUB_TOKEN: 'secret-token' } },
+        },
+        errors: [],
+      }),
+    });
+    const out: OutgoingMessage[] = [];
+    await backend.query({ prompt: 'hi', cwd: '/repo', appId: 'app-1' }, (m) => out.push(m));
+
+    const create = calls.find((call) => call.op === 'createClient')!;
+    expect(create).toBeTruthy();
+    expect(create.options).toMatchObject({
+      codexPathOverride: '/runtime/codex',
+      env: {
+        CODEX_HOME: path.join(os.homedir(), '.shelf', 'apps', 'app-1', 'codex'),
+        HOME: path.join(os.homedir(), '.shelf', 'apps', 'app-1', 'codex-sdk-home'),
+        GITHUB_TOKEN: 'secret-token',
+      },
+      config: {
+        mcp_servers: {
+          shelf: { url: 'http://127.0.0.1:9/mcp', required: true },
+          gh: { command: 'node', args: ['server.js'], env_vars: ['GITHUB_TOKEN'] },
+        },
+      },
+    });
+    expect(calls.find((call) => call.op === 'startThread')?.options).toMatchObject({
+      additionalDirectories: [path.join(os.homedir(), '.shelf', 'apps', 'app-1', 'codex-sdk-home')],
+    });
+    expect(JSON.stringify((create.options as { config?: unknown }).config)).not.toContain('secret-token');
+    expect(out.find((m) => m.type === 'error')).toBeUndefined();
+  });
+
+  it('surfaces projected MCP config errors before calling the SDK', async () => {
+    const createClient = vi.fn();
+    const backend = createCodexOfficialBackend({
+      createClient,
+      resolveCodexPath: () => '/runtime/codex',
+      loadMcpServers: () => ({ servers: {}, errors: ['MCP server "gh" references env var(s) not set on this host: TOKEN'] }),
+    });
+    const out: OutgoingMessage[] = [];
+    await backend.query({ prompt: 'hi', cwd: '/repo', appId: 'app-1' }, (m) => out.push(m));
+
+    expect(createClient).not.toHaveBeenCalled();
+    expect(out[0]).toMatchObject({ type: 'error', error: expect.stringMatching(/MCP server "gh"/) });
+    expect(out.at(-1)).toEqual({ type: 'status', state: 'idle' });
   });
 
   it('stamps auth events with the temporary provider id', async () => {
