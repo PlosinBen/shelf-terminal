@@ -335,3 +335,21 @@ SDK 0.3.159 **並存**兩種 compact 完成訊號:`status` 形狀(`subtype:'stat
 **Root cause:** Codex ACP can prefix an `agent_thought_chunk` with blank lines. Thinking bodies intentionally preserve whitespace so normal prose and paragraph breaks remain faithful; forwarding that prefix therefore creates real rendered height, rather than merely an invisible transport detail.
 
 **Fix / note:** At the ACP-to-wire boundary, remove only leading blank lines from thought chunks before emitting the Thinking stream. Do not trim ordinary assistant messages, tool output, trailing whitespace, or later paragraph breaks: those may carry user-visible formatting.
+
+## agent-providers#30 — 「一個 CLI 服務多 session」是 per-provider 硬差異  ·  [Decision]
+
+**Decision:** Copilot / Codex 的 CLI 能一個 CLI 多 session（`CopilotClient` 有 `sessions`/`createSession`/`resumeSession`;ACP 一連線多 `session/new`，`agent-server/providers/acp/client.ts` 的 `createSessionDriver` 以 `Map<sessionId>` 多工於單一連線）。**Claude 不行**——`@anthropic-ai/claude-agent-sdk` 的 `query()` 每次呼叫是「一個對話綁一個 spawn 的 `claude` 子行程」，`resume`/`forkSession` 都各自 spawn 新行程，沒有共享的 multi-session client。
+
+**Reason：** Shelf 目前「一 tab 一 CLI」對 Copilot/Codex 是 dispatch-layering 的**選擇**（每個 exec 各開自己的 client），不是 SDK 限制——這兩者可把 N 個 tab 收斂到一個 CLI（provider CLI 是記憶體最大宗）。對 Claude 是**硬限制**（一對話一行程），無法共享，只能靠 idle-teardown 之類手段回收。
+
+**Trade-off（CLI 共享未做的原因）：** 共享 CLI = 該 provider 全 tab 共命運——一個 CLI crash 會拖垮它服務的所有 session;dispatch-layering 選 per-session 隔離部分正是為此。省記憶體要拿隔離性換,這是任何 CLI-sharing 設計要先權衡的點。
+
+**Do not change casually because：** 任何「CLI 共享」設計只對 Copilot/Codex 成立；套到 Claude 會違反 SDK 的一行程一對話模型。
+
+## agent-providers#31 — Claude resume/wake 成本由 spawn 主導、與 session 大小無關  ·  [Decision]
+
+**Decision：** Claude resume-to-ready ≈ **~1.5s，且與 session JSONL 大小無關**（1KB 與 47MB 實測皆 ~1.5s）——由 `claude` binary 的 **spawn 主導**，不是 JSONL 載入；model 回應延遲 warm 與 resumed 相同（Claude 每輪都重送完整 context）。整個 Shelf 層 wake ≈ exec 開機 ~250ms + claude resume ~1.5s + MCP/skills reload（config-dependent，0…數秒）。裸 tab ~1.75s;**MCP-heavy tab 由 MCP respawn 主導、可能數秒**。
+
+**Reason：** 這讓「idle 就 teardown、下次互動再 resume」對 Claude 成本低且不隨對話變長而退化——idle-teardown 這類手段對 Claude 划算。MCP-heavy tab 是唯一讓 wake 明顯變慢的變因，值得考慮排除或給較長 timeout。
+
+**Do not change casually because：** 別假設「長 session resume 較慢」（47MB 實測已反證）；wake 慢的元兇是 MCP respawn，不是 history 載入。
