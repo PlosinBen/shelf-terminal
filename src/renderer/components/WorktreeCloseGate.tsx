@@ -202,6 +202,7 @@ export function WorktreeCloseGate() {
               {deleteBranch && !mergeInfo && (
                 <> This <strong>permanently discards</strong> any unmerged commits.</>
               )}
+              <> Any remaining feature notes will be restored to the parent project before the worktree is removed.</>
             </p>
           ) : (
             <>

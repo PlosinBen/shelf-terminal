@@ -100,6 +100,7 @@ test.describe('abandon worktree gate', () => {
     await expect(popup).toBeVisible({ timeout: 5_000 });
     // Unmerged feature commit + delete-branch checked → the loss warning shows.
     await expect(popup).toContainText('permanently discards');
+    await expect(popup).toContainText('Any remaining feature notes will be restored to the parent project before the worktree is removed.');
     await popup.locator('.conn-btn-danger').click();
     await expect(popup).not.toBeVisible({ timeout: 8_000 });
 
@@ -121,6 +122,7 @@ test.describe('abandon worktree gate', () => {
     await expect(popup).toBeVisible({ timeout: 5_000 });
     // Adaptive: merged → reassuring "already merged", NOT the discard warning.
     await expect(popup).toContainText('already merged');
+    await expect(popup).toContainText('Any remaining feature notes will be restored to the parent project before the worktree is removed.');
     await expect(popup).not.toContainText('permanently discards');
     await popup.locator('.conn-btn-danger').click();
     await expect(popup).not.toBeVisible({ timeout: 8_000 });
