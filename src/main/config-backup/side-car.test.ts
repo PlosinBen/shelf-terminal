@@ -20,6 +20,7 @@ const { createSideCar } = await import('./side-car');
 
 let root: string;
 let bareRemote: string;
+const GIT_HEAVY_TIMEOUT = 20_000;
 
 async function makeBareRemote(dir: string): Promise<void> {
   fs.mkdirSync(dir, { recursive: true });
@@ -69,7 +70,7 @@ describe('config-backup side-car round-trip', () => {
 
     expect(await b.readFileAtRef(aBranch!.ref, 'skills/demo/SKILL.md')).toBe('# demo skill\n');
     expect(await b.readFileAtRef(aBranch!.ref, 'skills/nope/SKILL.md')).toBeNull();
-  });
+  }, GIT_HEAVY_TIMEOUT);
 
   it('stageAllAndCommit returns false when the tree is unchanged', async () => {
     const a = machine('machineA');

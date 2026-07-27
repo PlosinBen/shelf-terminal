@@ -27,6 +27,7 @@ const readLiveMcp = () => JSON.parse(fs.readFileSync(path.join(userDataDir, 'mcp
 
 let root: string;
 let bareRemote: string;
+const GIT_HEAVY_TIMEOUT = 20_000;
 
 function seedSkill(name: string, desc: string): void {
   const dir = path.join(userDataDir, 'skills', 'skills', name);
@@ -105,7 +106,7 @@ describe('config-backup import (read side)', () => {
     expect(other.isSelf).toBe(false);
     expect(other.machineLabel).toBe('other-laptop');
     expect(other.ref).toBe('origin/backup/other-id');
-  });
+  }, GIT_HEAVY_TIMEOUT);
 
   it('lists a chosen branch items read-only (skills + mcp, with detail)', async () => {
     seedSkill('alpha', 'my skill');
@@ -126,7 +127,7 @@ describe('config-backup import (read side)', () => {
       { id: 'skill:alpha', kind: 'skill', name: 'alpha', detail: 'my skill' },
       { id: 'mcp:fs', kind: 'mcp', name: 'fs', detail: 'stdio' },
     ]);
-  });
+  }, GIT_HEAVY_TIMEOUT);
 
   it('unbound machine → no sources', async () => {
     expect(await listBackupSources()).toEqual([]);

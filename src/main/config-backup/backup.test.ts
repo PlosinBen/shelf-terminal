@@ -24,6 +24,7 @@ const { createSideCar } = await import('./side-car');
 
 let root: string;
 let bareRemote: string;
+const GIT_HEAVY_TIMEOUT = 20_000;
 
 function seedSkill(name: string, aux?: { rel: string; bytes: Buffer }): void {
   const dir = path.join(userDataDir, 'skills', 'skills', name);
@@ -111,7 +112,7 @@ describe('config-backup runBackup', () => {
     const manifest = JSON.parse((await read('machine.json'))!);
     expect(manifest.machineLabel).toBe('work-mac');
     expect(typeof manifest.appInstanceId).toBe('string');
-  });
+  }, GIT_HEAVY_TIMEOUT);
 
   it('persists the ticked set as machine-local intent (drives next pre-tick)', async () => {
     seedSkill('alpha');
@@ -125,7 +126,7 @@ describe('config-backup runBackup', () => {
     // Re-backup with a different tick set → intent tracks the latest choice.
     await runBackup(['skill:beta']);
     expect(loadIntent()).toEqual(['skill:beta']);
-  });
+  }, GIT_HEAVY_TIMEOUT);
 
   it('re-backup with no change → pushed:false', async () => {
     seedSkill('alpha');
