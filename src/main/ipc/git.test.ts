@@ -103,3 +103,39 @@ describe('GIT_WORKTREE_REMOVE', () => {
     ]);
   });
 });
+
+describe('GIT_RESTORE_NOTES', () => {
+  it('returns migrated=false when the worktree has no feature notes', async () => {
+    execImpl = async (_cwd, cmd) => {
+      if (cmd.startsWith('for f in .agent/features/*.md')) return { stdout: '', stderr: '' };
+      return { stdout: '', stderr: '' };
+    };
+
+    const res = await handlers.get(IPC.GIT_RESTORE_NOTES)!({}, {
+      connection,
+      baseCwd: '/repo',
+      worktreeCwd: '/repo-feature',
+    });
+
+    expect(res).toEqual({ ok: true, migrated: false });
+  });
+
+  it('fails loud when restore would overwrite a base note', async () => {
+    execImpl = async (_cwd, cmd) => {
+      if (cmd.startsWith('for f in .agent/features/*.md')) {
+        return { stdout: '===SHELF_NOTE:.agent/features/x.md===\n---\ntitle: X\n---\n', stderr: '' };
+      }
+      if (cmd.startsWith('test ! -e')) return { stdout: '__SHELF_NOTE_MISSING__\n', stderr: '' };
+      return { stdout: '', stderr: '' };
+    };
+
+    const res = await handlers.get(IPC.GIT_RESTORE_NOTES)!({}, {
+      connection,
+      baseCwd: '/repo',
+      worktreeCwd: '/repo-feature',
+    });
+
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain('already exists');
+  });
+});

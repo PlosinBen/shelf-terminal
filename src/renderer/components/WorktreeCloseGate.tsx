@@ -10,9 +10,11 @@ import type { BranchMergedInfo, GitBranchInfo, WorktreeCloseKind } from '@shared
 // The popup owns the whole close sequence and, on failure, offers a one-click
 // "Send to agent" that hands the error to the worktree's own agent tab.
 //
-//   finish  = pick target ▾ (default baseBranch) → lock+ff merge-back → teardown
+//   finish  = pick target ▾ (default baseBranch) → lock+ff merge-back
+//             → restore carried feature notes → teardown
 //             → delete branch (force; commits are safe on target after the ff)
-//   abandon = teardown → delete branch (no merge; UNMERGED → commit loss)
+//   abandon = restore carried feature notes → teardown
+//             → delete branch (no merge; UNMERGED → commit loss)
 //
 // Success = the worktree sub-project disappears (REMOVE_PROJECT after teardown).
 
@@ -124,12 +126,21 @@ export function WorktreeCloseGate() {
         featureBranch,
       });
       if (mb.outcome !== 'merged') {
-        // busy / non-ff / base-dirty / error → show it; DON'T tear down. The user
-        // can Send-to-agent (all errors, uniformly) or fix + retry.
+        // busy / non-ff / feature-dirty / base-dirty / error → show it; DON'T
+        // tear down. The user can Send-to-agent (all errors, uniformly) or fix + retry.
         setError(mb.error ?? `merge-back failed (${mb.outcome})`);
         setBusy(false);
         return;
       }
+    }
+
+    // Restore any remaining transient feature note before teardown. An absent note
+    // is a no-op; failure keeps the worktree so the ignored note cannot be erased.
+    const restored = await window.shelfApi.git.restoreNotes(parentConn, parentCwd, featureCwd);
+    if (!restored.ok) {
+      setError(restored.error ?? 'failed to restore feature notes');
+      setBusy(false);
+      return;
     }
 
     // Teardown: remove the worktree dir, then delete the (now unchecked-out) branch.

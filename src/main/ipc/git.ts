@@ -1,7 +1,7 @@
 import { ipcMain } from 'electron';
 import { IPC } from '@shared/ipc-channels';
 import { createConnector } from '../connector';
-import { migrateFeatureNote } from '../worktree/note-migration';
+import { migrateFeatureNote, restoreFeatureNotes } from '../worktree/note-migration';
 import { listFeatureNotes } from '../worktree/feature-notes';
 import { checkBranchMerged } from '../worktree/branch-merged';
 import { mergeBackFastForward } from '../worktree/merge-back';
@@ -124,6 +124,24 @@ export function registerGitHandlers(): void {
       } catch (err: any) {
         // Fail-loud: given-but-missing / copy-failed surface to the caller, which
         // rolls back the just-created worktree rather than booting a broken one.
+        return { ok: false, error: err?.message ?? String(err) };
+      }
+    },
+  );
+
+  ipcMain.handle(
+    IPC.GIT_RESTORE_NOTES,
+    async (
+      _event,
+      payload: { connection: Connection; baseCwd: string; worktreeCwd: string },
+    ): Promise<MigrateNoteResult> => {
+      try {
+        const connector = createConnector(payload.connection);
+        const res = await restoreFeatureNotes(connector, payload.baseCwd, payload.worktreeCwd);
+        return { ok: true, migrated: res.migrated };
+      } catch (err: any) {
+        // Fail-loud: close must not remove the worktree if any carried transient
+        // note cannot be restored to the base checkout first.
         return { ok: false, error: err?.message ?? String(err) };
       }
     },
