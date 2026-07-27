@@ -78,6 +78,9 @@ title: shelf-terminal — Intent → File Index
 |--------|------|------|
 | Session manager + IPC handlers | `index.ts` | `initAgentManager()`：註冊 agent IPC、管理 tab→session、permission bridging |
 | Remote backend | `remote.ts` | `createRemoteBackend()`：JSON line protocol 跟 agent-server 通訊 + 自帶 node/provider 部署；`syncSkillsToRemote` 走 transport `transportPutDir`（ssh tilde gotcha 見 `context/connector` connector#6）；bundle deploy 仍走 `RemoteOps.copyIn`。`USE_DISPATCHER`（`SHELF_USE_DISPATCHER!=='0'`，**預設 ON**）分支走 `ensureDispatcher()`（per-host 共用 dispatcher，`dispatcherKeyFor` 為 key、ref-counted + idle-teardown grace）；`=0` 退回 per-tab `spawnAgentServer`/`wrapProcess`（**暫時 fallback，cleanup 待移除**） |
+| Remote runtime pins + target package metadata | `agent-runtime-versions.ts` | Node/CLI/ACP version constants、target package name 與 npm manifest/tarball URL helper |
+| Downloaded runtime cache | `runtime-cache.ts` | 下載、完整性驗證並快取 Node、provider CLI 與 Codex 原生 runtime tree |
+| Remote deploy payload layout | `deploy-layout.ts` | 依 target/provider 列出完整 deploy manifest、sentinel 與本機 runtime-cache 路徑 |
 | 主機 dispatcher 連線（main 端） | `dispatcher-connection.ts` | `createDispatcherConnection()`：一台 host 一個 dispatcher process 的 main 端擁有者。依 `sid` demux dispatcher stdout 到 per-sid `SessionChannel`（`RemoteProcess` drop-in）、單一 per-host heartbeat/health、`session_down`→`failAllTurns` fail-loud、`onDown` 驱逐、app_tool reply 路由 |
 | Turn dispatcher | `turn-dispatcher.ts` | 純邏輯 event router，按 turnId 路由 wire events 到對應 turn 的 generator；`failAllTurns()` 在 session 掛掉時讓所有 in-flight turn fail-loud（error→idle） |
 | Type 定義 | `types.ts` | `AgentBackend` / `AgentEvent` / `AgentSessionState` 等系統型別 |
