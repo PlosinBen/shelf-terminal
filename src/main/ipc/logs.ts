@@ -3,6 +3,7 @@ import path from 'path';
 import fs from 'fs';
 import { IPC } from '@shared/ipc-channels';
 import { log } from '@shared/logger';
+import { diag } from '@shared/diag-log';
 
 export function registerLogsHandlers(): void {
   ipcMain.handle(IPC.APP_LOGS_PATH, () => {
@@ -11,8 +12,16 @@ export function registerLogsHandlers(): void {
 
   // Fire-and-forget renderer diagnostic → main log file (persists at log level
   // info/debug). Lets renderer-only UI flows be traced from the log file.
+  // A `diag:`-prefixed tag is routed to the isolated init-lifecycle diag channel
+  // (its own file) instead of the main log — see src/shared/diag-log.ts.
   ipcMain.on(IPC.APP_DEBUG_LOG, (_e, tag: unknown, msg: unknown) => {
-    log.info(typeof tag === 'string' ? tag : 'renderer', typeof msg === 'string' ? msg : String(msg));
+    const tagStr = typeof tag === 'string' ? tag : 'renderer';
+    const msgStr = typeof msg === 'string' ? msg : String(msg);
+    if (tagStr.startsWith('diag:')) {
+      diag(tagStr, { msg: msgStr });
+      return;
+    }
+    log.info(tagStr, msgStr);
   });
 
   ipcMain.handle(IPC.LOGS_CLEAR, () => {
