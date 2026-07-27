@@ -29,6 +29,7 @@ export interface CodexSdkProbeEventSummary {
   itemType?: string;
   itemId?: string;
   itemStatus?: string;
+  usageKeys?: string[];
   redactedJson?: string;
 }
 
@@ -200,6 +201,7 @@ function summarizeProbeEvent(event: unknown, request: CodexSdkProbeRequest): Cod
     itemType: typeof item?.type === 'string' ? item.type : undefined,
     itemId: typeof item?.id === 'string' ? item.id : undefined,
     itemStatus: typeof item?.status === 'string' ? item.status : undefined,
+    usageKeys: isObjectRecord(event.usage) ? Object.keys(event.usage).sort() : undefined,
   };
   if (request.includeRedactedEventJson) {
     summary.redactedJson = redactJson(event, request.redactValues ?? []);
@@ -213,7 +215,9 @@ function classifyProbeError(error: unknown): { outcome: CodexSdkProbeOutcome; er
   }
   const message = error instanceof Error ? error.message : String(error);
   if (/\b(parse|jsonl|json)\b/i.test(message)) return { outcome: 'parse_error', error: message };
-  if (/\b(exit|non-zero|status code)\b/i.test(message)) return { outcome: 'non_zero', error: message };
+  if (/\b(non-zero|status code|exited? with code|code \d+)\b/i.test(message)) {
+    return { outcome: 'non_zero', error: message };
+  }
   return { outcome: 'stream_error', error: message };
 }
 

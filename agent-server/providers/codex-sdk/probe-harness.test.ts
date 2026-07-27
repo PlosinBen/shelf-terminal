@@ -53,7 +53,16 @@ describe('runCodexSdkProbe', () => {
       events: [
         { type: 'thread.started' },
         { type: 'item.completed', itemType: 'agent_message', itemId: 'item-1' },
-        { type: 'turn.completed' },
+        {
+          type: 'turn.completed',
+          usageKeys: [
+            'cache_write_input_tokens',
+            'cached_input_tokens',
+            'input_tokens',
+            'output_tokens',
+            'reasoning_output_tokens',
+          ],
+        },
       ],
     });
     expect(JSON.stringify(summary)).not.toContain('prompt body must not appear');
@@ -112,6 +121,17 @@ describe('runCodexSdkProbe', () => {
 
     expect(nonZero).toMatchObject({ ok: false, outcome: 'non_zero' });
     expect(parse).toMatchObject({ ok: false, outcome: 'parse_error' });
+  });
+
+  it('classifies the real SDK child-exit error shape as non-zero', async () => {
+    const summary = await runCodexSdkProbe(BASE_REQUEST, {
+      now: fixedClock(),
+      createEventStream: async () => {
+        throw new Error('Codex Exec exited with code 1: No prompt provided via stdin.');
+      },
+    });
+
+    expect(summary).toMatchObject({ ok: false, outcome: 'non_zero' });
   });
 
   it('times out and aborts the active probe', async () => {
