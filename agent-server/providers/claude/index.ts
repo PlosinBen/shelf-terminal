@@ -272,9 +272,10 @@ function getShelfMcpServer() {
         }),
         tool('propose_worktree_create', PROPOSE_WORKTREE_CREATE_DESC, {
           branch: z.string().optional().describe('suggested new branch name'),
-          note: z.string().optional().describe('feature note filename/path to preselect'),
-        }, async ({ branch, note }) => {
-          const { text, isError } = await runBridgeTool('worktree.propose_create', { branch, note });
+          note: z.string().optional().describe('legacy single feature note filename/path to preselect'),
+          notes: z.array(z.string()).optional().describe('feature note filenames/paths to preselect'),
+        }, async ({ branch, note, notes }) => {
+          const { text, isError } = await runBridgeTool('worktree.propose_create', { branch, note, notes });
           return { content: [{ type: 'text' as const, text }], ...(isError ? { isError: true } : {}) };
         }),
         tool('propose_worktree_finish', PROPOSE_WORKTREE_FINISH_DESC, {}, async () => {

@@ -89,9 +89,10 @@ function buildShelfMcpServer(): McpServer {
   server.registerTool('propose_worktree_create',
     { description: PROPOSE_WORKTREE_CREATE_DESC, inputSchema: {
       branch: z.string().optional().describe('suggested new branch name'),
-      note: z.string().optional().describe('feature note filename/path to preselect'),
+      note: z.string().optional().describe('legacy single feature note filename/path to preselect'),
+      notes: z.array(z.string()).optional().describe('feature note filenames/paths to preselect'),
     } },
-    async ({ branch, note }) => toToolResult(await runBridgeTool('worktree.propose_create', { branch, note })));
+    async ({ branch, note, notes }) => toToolResult(await runBridgeTool('worktree.propose_create', { branch, note, notes })));
 
   server.registerTool('propose_worktree_finish',
     { description: PROPOSE_WORKTREE_FINISH_DESC },

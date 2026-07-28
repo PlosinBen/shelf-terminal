@@ -67,9 +67,10 @@ export const BROWSER_OPEN_DESC =
   + 'decides).';
 
 export const PROPOSE_WORKTREE_CREATE_DESC =
-  'Open the New Worktree dialog with an optional suggested branch and feature note. This creates NOTHING: '
+  'Open the New Worktree dialog with an optional suggested branch and feature note(s). This creates NOTHING: '
   + 'the user reviews the dialog and presses Create. Use after agreeing a work item in the main checkout. '
-  + 'Args: branch (optional suggested branch name), note (optional feature-note filename/path to preselect).';
+  + 'Args: branch (optional suggested branch name), note (optional legacy single feature-note filename/path), '
+  + 'notes (optional feature-note filenames/paths to preselect).';
 
 export const PROPOSE_WORKTREE_FINISH_DESC =
   'Open the Finish Worktree gate for this worktree. This merges NOTHING: the user reviews the target and '

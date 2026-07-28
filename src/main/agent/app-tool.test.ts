@@ -69,7 +69,35 @@ describe('app-tool dispatcher (worktree proposals)', () => {
     const r = await handleAppTool('worktree.propose_create', { branch: 'feature/worktree', note: '.agent/features/worktree-flow.md' }, { projectId: 'base' });
     expect(r.ok).toBe(true);
     expect(send).toHaveBeenCalledWith('worktree:propose-create', {
-      projectId: 'base', branch: 'feature/worktree', notePath: '.agent/features/worktree-flow.md',
+      projectId: 'base', branch: 'feature/worktree', notePaths: ['.agent/features/worktree-flow.md'],
+    });
+  });
+
+  it('propose_create accepts empty args and sends normalized notePaths', async () => {
+    const r = await handleAppTool('worktree.propose_create', { branch: '   ', note: '   ', notes: ['', '  '] }, { projectId: 'base' });
+    expect(r.ok).toBe(true);
+    expect(send).toHaveBeenCalledWith('worktree:propose-create', {
+      projectId: 'base', notePaths: [],
+    });
+  });
+
+  it('propose_create merges legacy note and notes into deduped notePaths', async () => {
+    const r = await handleAppTool('worktree.propose_create', {
+      branch: ' feature/multi ',
+      note: ' .agent/features/a.md ',
+      notes: [
+        '.agent/features/b.md',
+        ' .agent/features/a.md ',
+        '',
+        42,
+        '.agent/features/c.md',
+      ],
+    }, { projectId: 'base' });
+    expect(r.ok).toBe(true);
+    expect(send).toHaveBeenCalledWith('worktree:propose-create', {
+      projectId: 'base',
+      branch: 'feature/multi',
+      notePaths: ['.agent/features/a.md', '.agent/features/b.md', '.agent/features/c.md'],
     });
   });
 

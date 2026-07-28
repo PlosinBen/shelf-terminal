@@ -46,6 +46,23 @@ interface AppToolDef {
   run: (args: Record<string, unknown>, ctx: AppToolContext) => Promise<unknown>;
 }
 
+function normalizeProposedNotePaths(args: Record<string, unknown>): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const add = (value: unknown) => {
+    if (typeof value !== 'string') return;
+    const notePath = value.trim();
+    if (!notePath || seen.has(notePath)) return;
+    seen.add(notePath);
+    out.push(notePath);
+  };
+  add(args.note);
+  if (Array.isArray(args.notes)) {
+    for (const note of args.notes) add(note);
+  }
+  return out;
+}
+
 const REGISTRY: Record<string, AppToolDef> = {
   'app_skill.list': {
     safe: true,
@@ -214,8 +231,8 @@ const REGISTRY: Record<string, AppToolDef> = {
       const win = getMainWindow();
       if (!win || win.isDestroyed()) throw new Error('cannot open New Worktree dialog: no application window');
       const branch = typeof args.branch === 'string' && args.branch.trim() ? args.branch.trim() : undefined;
-      const notePath = typeof args.note === 'string' && args.note.trim() ? args.note.trim() : undefined;
-      win.webContents.send(IPC.WORKTREE_PROPOSE_CREATE, { projectId, branch, notePath });
+      const notePaths = normalizeProposedNotePaths(args);
+      win.webContents.send(IPC.WORKTREE_PROPOSE_CREATE, { projectId, ...(branch ? { branch } : {}), notePaths });
       return { opened: true, message: 'Opened the New Worktree dialog. The user must review and press Create.' };
     },
   },

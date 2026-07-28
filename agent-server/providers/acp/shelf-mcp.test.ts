@@ -31,5 +31,13 @@ describe('shelf MCP bridge server', () => {
       'update_app_skill',
       'write_app_skill_file',
     ]);
+    expect(tools.find((t) => t.name === 'propose_worktree_create')?.inputSchema).toMatchObject({
+      type: 'object',
+      properties: {
+        branch: { type: 'string' },
+        note: { type: 'string' },
+        notes: { type: 'array', items: { type: 'string' } },
+      },
+    });
   });
 });
