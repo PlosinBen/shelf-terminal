@@ -3,6 +3,7 @@ import { execFileSync } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
+import { openAgentTab } from './helpers';
 
 /**
  * User-initiated worktree create (the #entry pivot) — sidebar "New Worktree" →
@@ -60,13 +61,30 @@ async function openNewWorktreeDialog(page: Page): Promise<ReturnType<Page['locat
   return dialog;
 }
 
+function readLogText(userDataDir: string): string {
+  const root = path.join(userDataDir, 'logs');
+  if (!fs.existsSync(root)) return '';
+  const files: string[] = [];
+  const walk = (dir: string) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const abs = path.join(dir, entry.name);
+      if (entry.isDirectory()) walk(abs);
+      else files.push(abs);
+    }
+  };
+  walk(root);
+  return files.map((file) => fs.readFileSync(file, 'utf-8')).join('\n');
+}
+
 test.describe('user-initiated worktree create', () => {
+  test.describe.configure({ timeout: 60_000 });
+
   let userDataDir: string;
   let repo: string;
   let app: ElectronApplication;
   let page: Page;
 
-  test.beforeEach(async () => {
+  test.beforeEach(async ({}, testInfo) => {
     userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'shelf-wtm-e2e-'));
     repo = makeRepo();
     // Two notes of different status — BOTH must be pickable (status is shown, not
@@ -74,9 +92,21 @@ test.describe('user-initiated worktree create', () => {
     seedNote(repo, '.agent/features/demo.md', '---\ntype: feature\ntitle: Demo Feature\nstatus: in-progress\n---\n\n# Demo\n');
     seedNote(repo, '.agent/features/old.md', '---\ntype: feature\ntitle: Old Feature\nstatus: cancelled\n---\n');
     seedProject(userDataDir, repo);
+    const forceCreateFailure = testInfo.titlePath.join(' ').includes('migration rollback failure');
     app = await electron.launch({
       args: [path.join(__dirname, '..'), `--user-data-dir=${userDataDir}`],
-      env: { ...process.env, SHELF_TEST_MODE: '1', NODE_ENV: 'test' } as Record<string, string>,
+      env: {
+        ...process.env,
+        SHELF_TEST_MODE: '1',
+        NODE_ENV: 'test',
+        ...(forceCreateFailure
+          ? {
+              SHELF_TEST_GIT_MIGRATE_NOTE_ERROR: 'FULL MIGRATION ERROR\ncopy failed: demo.md',
+              SHELF_TEST_GIT_WORKTREE_REMOVE_ERROR: 'FULL ROLLBACK ERROR\nworktree busy',
+              LOG_LEVEL: 'info',
+            }
+          : {}),
+      } as Record<string, string>,
     });
     page = await app.firstWindow();
     await page.waitForSelector('.app', { timeout: 10_000 });
@@ -100,29 +130,34 @@ test.describe('user-initiated worktree create', () => {
     await expect(dialog.locator('.worktree-note-picker').filter({ hasText: 'Agent provider' }).locator('select'))
       .toHaveValue('claude');
 
-    // Every note is pickable regardless of status; each shows its name + status.
-    const select = dialog.getByLabel('Feature note');
-    const options = select.locator('option');
-    await expect(options).toHaveCount(3); // "No note" + Demo (in-progress) + Old (cancelled)
-    await expect(select).toContainText('Demo Feature');
-    await expect(select).toContainText('in-progress');
-    await expect(select).toContainText('Old Feature');
-    await expect(select).toContainText('cancelled');
+    // Every note is pickable regardless of status; rows are filename-first and
+    // show title/status as metadata.
+    const rows = dialog.locator('.worktree-note-row');
+    await expect(rows).toHaveCount(2);
+    await expect(rows.nth(0).locator('.worktree-note-filename')).toHaveText('demo.md');
+    await expect(rows.nth(0).locator('.worktree-note-title')).toHaveText('Demo Feature');
+    await expect(rows.nth(0).locator('.worktree-note-status')).toHaveText('in-progress');
+    await expect(rows.nth(1).locator('.worktree-note-filename')).toHaveText('old.md');
+    await expect(rows.nth(1).locator('.worktree-note-title')).toHaveText('Old Feature');
+    await expect(rows.nth(1).locator('.worktree-note-status')).toHaveText('cancelled');
 
-    // Multiple notes → nothing pre-selected; pick the one to seed the worktree.
-    await select.selectOption('.agent/features/demo.md');
+    // Multiple notes → nothing pre-selected; pick both to seed the worktree.
+    await rows.nth(0).locator('input[type="checkbox"]').check();
+    await rows.nth(1).locator('input[type="checkbox"]').check();
     await dialog.locator('.worktree-input').fill('feature/m');
     await dialog.locator('.conn-btn-next').click();
-    await expect(dialog).not.toBeVisible({ timeout: 8_000 });
+    await expect(dialog).not.toBeVisible({ timeout: 30_000 });
 
     // Worktree child appears under the parent, labelled by branch.
     const items = page.locator('.sidebar-item');
     await expect(items.nth(1)).toHaveClass(/worktree-child/, { timeout: 8_000 });
     await expect(items.nth(1)).toContainText('feature/m');
 
-    // Note migrated: now in the worktree, gone from the base (copy-then-delete).
+    // Notes migrated: now in the worktree, gone from the base (copy-then-delete).
     expect(fs.existsSync(path.join(`${repo}-feature-m`, '.agent/features/demo.md'))).toBe(true);
+    expect(fs.existsSync(path.join(`${repo}-feature-m`, '.agent/features/old.md'))).toBe(true);
     expect(fs.existsSync(path.join(repo, '.agent/features/demo.md'))).toBe(false);
+    expect(fs.existsSync(path.join(repo, '.agent/features/old.md'))).toBe(false);
 
     // Auto-connected: no lingering connect prompt for the now-active worktree.
     await expect(page.locator('.connect-prompt')).toHaveCount(0, { timeout: 8_000 });
@@ -131,15 +166,17 @@ test.describe('user-initiated worktree create', () => {
   test('choosing "No note" leaves the base note untouched', async () => {
     const dialog = await openNewWorktreeDialog(page);
 
-    await dialog.getByLabel('Feature note').selectOption(''); // "No note"
+    await expect(dialog.locator('.worktree-note-row input[type="checkbox"]:checked')).toHaveCount(0);
     await dialog.locator('.worktree-input').fill('feature/n');
     await dialog.locator('.conn-btn-next').click();
-    await expect(dialog).not.toBeVisible({ timeout: 8_000 });
+    await expect(dialog).not.toBeVisible({ timeout: 30_000 });
 
     await expect(page.locator('.sidebar-item.worktree-child', { hasText: 'feature/n' })).toHaveCount(1, { timeout: 8_000 });
     // Nothing migrated — the base note stays put.
     expect(fs.existsSync(path.join(repo, '.agent/features/demo.md'))).toBe(true);
+    expect(fs.existsSync(path.join(repo, '.agent/features/old.md'))).toBe(true);
     expect(fs.existsSync(path.join(`${repo}-feature-n`, '.agent/features/demo.md'))).toBe(false);
+    expect(fs.existsSync(path.join(`${repo}-feature-n`, '.agent/features/old.md'))).toBe(false);
   });
 
   test('agent proposal pre-fills the dialog but still requires the user to Create', async () => {
@@ -153,7 +190,45 @@ test.describe('user-initiated worktree create', () => {
     const dialog = page.locator('.worktree-dialog');
     await expect(dialog).toBeVisible({ timeout: 8_000 });
     await expect(dialog.locator('.worktree-input')).toHaveValue('feature/proposed');
-    await expect(dialog.getByLabel('Feature note')).toHaveValue('.agent/features/demo.md');
+    await expect(
+      dialog.locator('.worktree-note-row', { hasText: 'demo.md' }).locator('input[type="checkbox"]'),
+    ).toBeChecked();
+    await expect(
+      dialog.locator('.worktree-note-row', { hasText: 'old.md' }).locator('input[type="checkbox"]'),
+    ).not.toBeChecked();
     await expect(page.locator('.sidebar-item.worktree-child')).toHaveCount(0);
+  });
+
+  test('migration rollback failure reveals full errors, logs them, and sends them to the base agent', async () => {
+    await openAgentTab(page);
+
+    const dialog = await openNewWorktreeDialog(page);
+    await dialog.locator('.worktree-note-row', { hasText: 'demo.md' }).locator('input[type="checkbox"]').check();
+    await dialog.locator('.worktree-input').fill('feature/fail');
+    await dialog.locator('.conn-btn-next').click();
+
+    const err = dialog.locator('.worktree-error');
+    await expect(err).toContainText('FULL MIGRATION ERROR', { timeout: 8_000 });
+    await expect(err).toContainText('copy failed: demo.md');
+    await expect(err).toContainText('Rollback also failed');
+    await expect(err).toContainText('FULL ROLLBACK ERROR');
+    await expect(err).toContainText('worktree busy');
+
+    await expect.poll(() => readLogText(userDataDir), { timeout: 5_000 }).toContain('worktree-create');
+    const logs = readLogText(userDataDir);
+    expect(logs).toContain('"failedStep":"migrateNote"');
+    expect(logs).toContain('FULL MIGRATION ERROR');
+    expect(logs).toContain('"failedStep":"rollbackWorktreeRemove"');
+    expect(logs).toContain('FULL ROLLBACK ERROR');
+
+    await err.locator('button', { hasText: 'Send to agent' }).click();
+    await expect(dialog).not.toBeVisible({ timeout: 5_000 });
+
+    const userMsg = page.locator('.agent-msg-user .agent-msg-content');
+    await expect(userMsg.first()).toContainText('worktree create flow failed', { timeout: 8_000 });
+    await expect(userMsg.first()).toContainText('Branch: feature/fail');
+    await expect(userMsg.first()).toContainText(`Base cwd: ${repo}`);
+    await expect(userMsg.first()).toContainText('FULL MIGRATION ERROR');
+    await expect(userMsg.first()).toContainText('FULL ROLLBACK ERROR');
   });
 });

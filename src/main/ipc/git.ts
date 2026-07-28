@@ -102,6 +102,9 @@ export function registerGitHandlers(): void {
     IPC.GIT_WORKTREE_REMOVE,
     async (_event, payload: { connection: Connection; cwd: string; worktreePath: string }): Promise<WorktreeRemoveResult> => {
       try {
+        if (process.env.SHELF_TEST_MODE === '1' && process.env.SHELF_TEST_GIT_WORKTREE_REMOVE_ERROR) {
+          return { ok: false, error: process.env.SHELF_TEST_GIT_WORKTREE_REMOVE_ERROR };
+        }
         const connector = createConnector(payload.connection);
         await connector.exec(payload.cwd, `git worktree remove ${JSON.stringify(payload.worktreePath)}`);
         return { ok: true };
@@ -118,6 +121,9 @@ export function registerGitHandlers(): void {
       payload: { connection: Connection; baseCwd: string; worktreeCwd: string; notePaths: string[] },
     ): Promise<MigrateNoteResult> => {
       try {
+        if (process.env.SHELF_TEST_MODE === '1' && process.env.SHELF_TEST_GIT_MIGRATE_NOTE_ERROR) {
+          return { ok: false, error: process.env.SHELF_TEST_GIT_MIGRATE_NOTE_ERROR };
+        }
         const connector = createConnector(payload.connection);
         const res = await migrateFeatureNotes(connector, payload.baseCwd, payload.worktreeCwd, payload.notePaths);
         return { ok: true, migrated: res.migrated };

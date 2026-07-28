@@ -25,6 +25,9 @@ const { IPC } = await import('@shared/ipc-channels');
 const connection = { type: 'local' } as unknown as Connection;
 
 beforeEach(() => {
+  delete process.env.SHELF_TEST_MODE;
+  delete process.env.SHELF_TEST_GIT_MIGRATE_NOTE_ERROR;
+  delete process.env.SHELF_TEST_GIT_WORKTREE_REMOVE_ERROR;
   handlers.clear();
   execCalls.length = 0;
   execImpl = async () => ({ stdout: '', stderr: '' });
@@ -101,6 +104,55 @@ describe('GIT_WORKTREE_REMOVE', () => {
     expect(execCalls).toEqual([
       { cwd: '/repo', cmd: 'git worktree remove "/repo-feature"' },
     ]);
+  });
+
+  it('can inject a test-mode failure for create rollback E2E coverage', async () => {
+    process.env.SHELF_TEST_MODE = '1';
+    process.env.SHELF_TEST_GIT_WORKTREE_REMOVE_ERROR = 'forced remove failure';
+
+    const res = await handlers.get(IPC.GIT_WORKTREE_REMOVE)!({}, {
+      connection,
+      cwd: '/repo',
+      worktreePath: '/repo-feature',
+    });
+
+    expect(res).toEqual({ ok: false, error: 'forced remove failure' });
+    expect(execCalls).toHaveLength(0);
+  });
+});
+
+describe('GIT_MIGRATE_NOTE', () => {
+  it('passes multiple note paths to the batch migrator', async () => {
+    execImpl = async (_cwd, cmd) => {
+      if (cmd.startsWith('test -f')) return { stdout: '__SHELF_NOTE_OK__\n', stderr: '' };
+      return { stdout: '', stderr: '' };
+    };
+
+    const res = await handlers.get(IPC.GIT_MIGRATE_NOTE)!({}, {
+      connection,
+      baseCwd: '/repo',
+      worktreeCwd: '/repo-feature',
+      notePaths: ['.agent/features/a.md', '.agent/features/b.md'],
+    });
+
+    expect(res).toEqual({ ok: true, migrated: true });
+    expect(execCalls.some((c) => c.cmd.includes('/repo/.agent/features/a.md'))).toBe(true);
+    expect(execCalls.some((c) => c.cmd.includes('/repo/.agent/features/b.md'))).toBe(true);
+  });
+
+  it('can inject a test-mode migration failure for create recovery E2E coverage', async () => {
+    process.env.SHELF_TEST_MODE = '1';
+    process.env.SHELF_TEST_GIT_MIGRATE_NOTE_ERROR = 'forced migrate failure';
+
+    const res = await handlers.get(IPC.GIT_MIGRATE_NOTE)!({}, {
+      connection,
+      baseCwd: '/repo',
+      worktreeCwd: '/repo-feature',
+      notePaths: ['.agent/features/a.md'],
+    });
+
+    expect(res).toEqual({ ok: false, error: 'forced migrate failure' });
+    expect(execCalls).toHaveLength(0);
   });
 });
 
