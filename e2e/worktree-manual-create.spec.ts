@@ -126,20 +126,21 @@ test.describe('user-initiated worktree create', () => {
   test('picker lists all notes with status; selecting one migrates it and auto-connects', async () => {
     const dialog = await openNewWorktreeDialog(page);
 
+    await expect(dialog).toHaveCSS('width', '480px');
     await expect(dialog.locator('.worktree-target')).toHaveText('WT Base @ main');
     await expect(dialog.locator('.worktree-note-picker').filter({ hasText: 'Agent provider' }).locator('select'))
       .toHaveValue('claude');
 
     // Every note is pickable regardless of status; rows are filename-first and
-    // show title/status as metadata.
+    // keep status on the same line as the filename.
     const rows = dialog.locator('.worktree-note-row');
     await expect(rows).toHaveCount(2);
     await expect(rows.nth(0).locator('.worktree-note-filename')).toHaveText('demo.md');
     await expect(rows.nth(0).locator('.worktree-note-title')).toHaveText('Demo Feature');
-    await expect(rows.nth(0).locator('.worktree-note-status')).toHaveText('in-progress');
+    await expect(rows.nth(0).locator('.worktree-note-heading .worktree-note-status')).toHaveText('in-progress');
     await expect(rows.nth(1).locator('.worktree-note-filename')).toHaveText('old.md');
     await expect(rows.nth(1).locator('.worktree-note-title')).toHaveText('Old Feature');
-    await expect(rows.nth(1).locator('.worktree-note-status')).toHaveText('cancelled');
+    await expect(rows.nth(1).locator('.worktree-note-heading .worktree-note-status')).toHaveText('cancelled');
 
     // Multiple notes → nothing pre-selected; pick both to seed the worktree.
     await rows.nth(0).locator('input[type="checkbox"]').check();

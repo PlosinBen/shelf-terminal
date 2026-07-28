@@ -2158,7 +2158,7 @@ button {
 /* ── Worktree Dialog ── */
 
 .worktree-dialog {
-  width: 400px;
+  width: 480px;
   max-height: 500px;
   background: var(--bg-secondary);
   border: 1px solid var(--border);
@@ -2259,9 +2259,17 @@ button {
 
 .worktree-note-row-main {
   min-width: 0;
+  flex: 1 1 auto;
   display: flex;
   flex-direction: column;
   gap: 3px;
+}
+
+.worktree-note-heading {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .worktree-note-filename,
@@ -2272,20 +2280,15 @@ button {
 }
 
 .worktree-note-filename {
-  color: var(--text);
-}
-
-.worktree-note-meta {
   min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--text-muted);
-  font-size: 11px;
+  flex: 1 1 auto;
+  color: var(--text);
 }
 
 .worktree-note-title {
   min-width: 0;
+  color: var(--text-muted);
+  font-size: 11px;
 }
 
 .worktree-note-status {

@@ -282,13 +282,11 @@ export function WorktreeDialog() {
                         disabled={creating}
                       />
                       <span className="worktree-note-row-main">
-                        <span className="worktree-note-filename">{filename}</span>
-                        {(n.title || n.status) && (
-                          <span className="worktree-note-meta">
-                            {n.title && <span className="worktree-note-title">{n.title}</span>}
-                            {n.status && <span className="worktree-note-status">{n.status}</span>}
-                          </span>
-                        )}
+                        <span className="worktree-note-heading">
+                          <span className="worktree-note-filename">{filename}</span>
+                          {n.status && <span className="worktree-note-status">{n.status}</span>}
+                        </span>
+                        {n.title && <span className="worktree-note-title">{n.title}</span>}
                       </span>
                     </label>
                   );
