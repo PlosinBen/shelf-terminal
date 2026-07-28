@@ -126,7 +126,7 @@ test.describe('user-initiated worktree create', () => {
   test('picker lists all notes with status; selecting one migrates it and auto-connects', async () => {
     const dialog = await openNewWorktreeDialog(page);
 
-    await expect(dialog).toHaveCSS('width', '480px');
+    await expect(dialog).toHaveCSS('width', '600px');
     await expect(dialog.locator('.worktree-target')).toHaveText('WT Base @ main');
     await expect(dialog.locator('.worktree-note-picker').filter({ hasText: 'Agent provider' }).locator('select'))
       .toHaveValue('claude');

@@ -2158,7 +2158,7 @@ button {
 /* ── Worktree Dialog ── */
 
 .worktree-dialog {
-  width: 480px;
+  width: 600px;
   max-height: 500px;
   background: var(--bg-secondary);
   border: 1px solid var(--border);
