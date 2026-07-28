@@ -30,11 +30,12 @@ describe('translateCodexAppServerNotification', () => {
   it('maps token usage updates to context status', () => {
     expect(translateCodexAppServerNotification('thread/tokenUsage/updated', {
       tokenUsage: {
-        total: { totalTokens: 129_200 },
+        total: { totalTokens: 237_005 },
+        last: { inputTokens: 14_654, totalTokens: 14_689 },
         modelContextWindow: 258_400,
       },
     })).toEqual([
-      { type: 'status', state: 'streaming', contextUsage: { text: 'ctx: 50%', severity: 'warning' } },
+      { type: 'status', state: 'streaming', contextUsage: { text: 'ctx: 6%', severity: 'normal' } },
     ]);
   });
 
@@ -73,12 +74,16 @@ describe('summarizeTokenUsageForLog', () => {
   it('extracts only numeric context fields for diagnostics', () => {
     expect(summarizeTokenUsageForLog({
       total: { totalTokens: 221_900 },
+      last: { inputTokens: 4_100, totalTokens: 4_278 },
       modelContextWindow: 258_400,
       prompt: 'must not be logged',
     })).toEqual({
-      totalTokens: 221_900,
+      cumulativeTotalTokens: 221_900,
+      lastInputTokens: 4_100,
+      lastTotalTokens: 4_278,
       modelContextWindow: 258_400,
-      percent: 86,
+      cumulativePercent: 86,
+      lastPercent: 2,
     });
   });
 });

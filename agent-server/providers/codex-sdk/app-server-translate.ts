@@ -34,21 +34,44 @@ export function translateCodexAppServerNotification(
 export function tokenUsageToContextSegment(raw: unknown): StatusSegment | null {
   const summary = summarizeTokenUsageForLog(raw);
   if (!summary) return null;
+  const contextTokens = summary.lastTotalTokens ?? summary.lastInputTokens;
+  if (contextTokens == null) return null;
+  const percent = Math.max(0, Math.min(100, Math.round((contextTokens / summary.modelContextWindow) * 100)));
   return {
-    text: `ctx: ${summary.percent}%`,
-    severity: summary.percent >= 80 ? 'critical' : summary.percent >= 50 ? 'warning' : 'normal',
+    text: `ctx: ${percent}%`,
+    severity: percent >= 80 ? 'critical' : percent >= 50 ? 'warning' : 'normal',
   };
 }
 
-export function summarizeTokenUsageForLog(raw: unknown): { totalTokens: number; modelContextWindow: number; percent: number } | null {
+export function summarizeTokenUsageForLog(raw: unknown): {
+  cumulativeTotalTokens: number | null;
+  lastInputTokens: number | null;
+  lastTotalTokens: number | null;
+  modelContextWindow: number;
+  cumulativePercent: number | null;
+  lastPercent: number | null;
+} | null {
   const usage = asRecord(raw);
   if (!usage) return null;
   const total = asRecord(usage.total) ?? usage;
-  const used = numberValue(total.totalTokens ?? total.total_tokens);
+  const last = asRecord(usage.last);
+  const cumulative = numberValue(total.totalTokens ?? total.total_tokens);
+  const lastInput = numberValue(last?.inputTokens ?? last?.input_tokens);
+  const lastTotal = numberValue(last?.totalTokens ?? last?.total_tokens);
   const size = numberValue(usage.modelContextWindow ?? usage.model_context_window);
-  if (used == null || size == null || size <= 0) return null;
-  const percent = Math.max(0, Math.min(100, Math.round((used / size) * 100)));
-  return { totalTokens: used, modelContextWindow: size, percent };
+  if (size == null || size <= 0) return null;
+  return {
+    cumulativeTotalTokens: cumulative,
+    lastInputTokens: lastInput,
+    lastTotalTokens: lastTotal,
+    modelContextWindow: size,
+    cumulativePercent: cumulative == null ? null : percent(cumulative, size),
+    lastPercent: lastTotal == null ? null : percent(lastTotal, size),
+  };
+}
+
+function percent(tokens: number, window: number): number {
+  return Math.max(0, Math.min(100, Math.round((tokens / window) * 100)));
 }
 
 function translateThreadStatus(params: unknown): OutgoingMessage[] {

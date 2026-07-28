@@ -33,7 +33,7 @@ class FakeAppServer {
       this.fire('item/agentMessage/delta', { itemId: 'm1', delta: 'hel' });
       this.fire('item/agentMessage/delta', { itemId: 'm1', delta: 'lo' });
       this.fire('item/completed', { item: { id: 'm1', type: 'agentMessage', text: 'hello' } });
-      this.fire('thread/tokenUsage/updated', { tokenUsage: { total: { totalTokens: 129_200 }, modelContextWindow: 258_400 } });
+      this.fire('thread/tokenUsage/updated', { tokenUsage: { total: { totalTokens: 129_200 }, last: { inputTokens: 129_000, totalTokens: 129_200 }, modelContextWindow: 258_400 } });
       this.fire('turn/completed', { threadId: 'thread-1', turn: { id: 'turn-1' } });
       return { turn: { id: 'turn-1' } } as T;
     }

@@ -133,7 +133,7 @@ export function createCodexOfficialBackend(deps: CodexOfficialDeps = {}): Server
     serverLog(
       'info',
       'codex-app-server',
-      `tokenUsage thread=${threadId} turn=${turnId} totalTokens=${summary.totalTokens} modelContextWindow=${summary.modelContextWindow} percent=${summary.percent}`,
+      `tokenUsage thread=${threadId} turn=${turnId} cumulativeTotalTokens=${summary.cumulativeTotalTokens ?? 'null'} lastInputTokens=${summary.lastInputTokens ?? 'null'} lastTotalTokens=${summary.lastTotalTokens ?? 'null'} modelContextWindow=${summary.modelContextWindow} cumulativePercent=${summary.cumulativePercent ?? 'null'} lastPercent=${summary.lastPercent ?? 'null'}`,
     );
   }
 
