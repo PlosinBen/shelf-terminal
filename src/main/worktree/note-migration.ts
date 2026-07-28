@@ -41,42 +41,106 @@ function assertRelativeSafe(notePath: string): void {
   }
 }
 
+function normalizeNotePaths(notePaths: readonly (string | undefined)[]): string[] {
+  const seen = new Set<string>();
+  const rels: string[] = [];
+  for (const notePath of notePaths) {
+    const rel = notePath?.trim();
+    if (!rel || seen.has(rel)) continue;
+    assertRelativeSafe(rel);
+    seen.add(rel);
+    rels.push(rel);
+  }
+  return rels;
+}
+
+function notePair(baseRoot: string, worktreeRoot: string, rel: string): { src: string; dest: string } {
+  return {
+    src: `${baseRoot}/${rel}`,
+    dest: `${worktreeRoot}/${rel}`,
+  };
+}
+
+async function restoreBaseCopies(
+  connector: Pick<Connector, 'exec'>,
+  baseCwd: string,
+  worktreeCwd: string,
+  rels: readonly string[],
+): Promise<void> {
+  const baseRoot = normalizeCwd(baseCwd);
+  const worktreeRoot = normalizeCwd(worktreeCwd);
+
+  for (const rel of rels) {
+    const { src, dest } = notePair(baseRoot, worktreeRoot, rel);
+    const check = await connector.exec(baseCwd, `test -f ${q(src)} && echo ${OK} || echo ${MISSING}`);
+    if (check.stdout.includes(OK)) continue;
+    const srcParent = src.slice(0, src.lastIndexOf('/')) || '/';
+    await connector.exec(baseCwd, `mkdir -p ${q(srcParent)} && cp ${q(dest)} ${q(src)}`);
+  }
+}
+
+export async function migrateFeatureNotes(
+  connector: Pick<Connector, 'exec'>,
+  baseCwd: string,
+  worktreeCwd: string,
+  notePaths: readonly string[],
+): Promise<NoteMigrationResult> {
+  const rels = normalizeNotePaths(notePaths);
+  // No notes bound — a valid degenerate case (fresh agent with no seed note).
+  if (rels.length === 0) return { migrated: false };
+
+  const baseRoot = normalizeCwd(baseCwd);
+  const worktreeRoot = normalizeCwd(worktreeCwd);
+
+  // Source checks are completed before any copy so a missing later note cannot
+  // leave earlier notes half-migrated.
+  for (const rel of rels) {
+    const { src } = notePair(baseRoot, worktreeRoot, rel);
+    const check = await connector.exec(baseCwd, `test -f ${q(src)} && echo ${OK} || echo ${MISSING}`);
+    if (!check.stdout.includes(OK)) {
+      throw new Error(`feature note not found at base: ${rel}`);
+    }
+  }
+
+  const copied: string[] = [];
+  try {
+    for (const rel of rels) {
+      const { src, dest } = notePair(baseRoot, worktreeRoot, rel);
+      const destParent = dest.slice(0, dest.lastIndexOf('/')) || '/';
+      await connector.exec(worktreeCwd, `mkdir -p ${q(destParent)} && cp ${q(src)} ${q(dest)}`);
+      copied.push(rel);
+
+      const verify = await connector.exec(worktreeCwd, `test -f ${q(dest)} && echo ${OK} || echo ${MISSING}`);
+      if (!verify.stdout.includes(OK)) {
+        throw new Error(`feature note copy failed (source kept): ${rel}`);
+      }
+    }
+  } catch (err) {
+    if (copied.length > 0) {
+      const dests = copied.map((rel) => q(notePair(baseRoot, worktreeRoot, rel).dest)).join(' ');
+      await connector.exec(worktreeCwd, `rm -f ${dests}`);
+    }
+    throw err;
+  }
+
+  try {
+    const sources = rels.map((rel) => q(notePair(baseRoot, worktreeRoot, rel).src)).join(' ');
+    await connector.exec(baseCwd, `rm -f ${sources}`);
+  } catch (err) {
+    await restoreBaseCopies(connector, baseCwd, worktreeCwd, rels);
+    throw err;
+  }
+
+  return { migrated: true };
+}
+
 export async function migrateFeatureNote(
   connector: Pick<Connector, 'exec'>,
   baseCwd: string,
   worktreeCwd: string,
   notePath: string | undefined,
 ): Promise<NoteMigrationResult> {
-  const rel = notePath?.trim();
-  // No note bound — a valid degenerate case (fresh agent with no seed note).
-  if (!rel) return { migrated: false };
-
-  assertRelativeSafe(rel);
-
-  const src = `${normalizeCwd(baseCwd)}/${rel}`;
-  const dest = `${normalizeCwd(worktreeCwd)}/${rel}`;
-
-  // 1. Source must exist. Given-but-missing = fail-loud; never fabricate an empty note.
-  const check = await connector.exec(baseCwd, `test -f ${q(src)} && echo ${OK} || echo ${MISSING}`);
-  if (!check.stdout.includes(OK)) {
-    throw new Error(`feature note not found at base: ${rel}`);
-  }
-
-  // 2. Copy into the worktree at the same relative position (mkdir parents first).
-  const destParent = dest.slice(0, dest.lastIndexOf('/')) || '/';
-  await connector.exec(worktreeCwd, `mkdir -p ${q(destParent)} && cp ${q(src)} ${q(dest)}`);
-
-  // 3. Verify the copy landed BEFORE touching the source (copy-then-delete-on-success).
-  const verify = await connector.exec(worktreeCwd, `test -f ${q(dest)} && echo ${OK} || echo ${MISSING}`);
-  if (!verify.stdout.includes(OK)) {
-    // Copy did not land — keep the source so nothing is lost.
-    throw new Error(`feature note copy failed (source kept): ${rel}`);
-  }
-
-  // 4. Copy confirmed — remove the base copy so no orphan lingers.
-  await connector.exec(baseCwd, `rm -f ${q(src)}`);
-
-  return { migrated: true };
+  return migrateFeatureNotes(connector, baseCwd, worktreeCwd, notePath ? [notePath] : []);
 }
 
 /**

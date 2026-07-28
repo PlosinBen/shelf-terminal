@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { migrateFeatureNote, restoreFeatureNotes } from './note-migration';
+import { migrateFeatureNote, migrateFeatureNotes, restoreFeatureNotes } from './note-migration';
 
 /** A scriptable connector.exec that records calls and dispatches on the command. */
 function makeConnector(handler: (cwd: string, cmd: string) => { stdout?: string; stderr?: string } | Error) {
@@ -71,7 +71,8 @@ describe('migrateFeatureNote', () => {
     await expect(
       migrateFeatureNote(connector, '/base', '/base-wt', '.agent/features/x.md'),
     ).rejects.toThrow(/copy failed/);
-    expect(calls.some((c) => c.cmd.startsWith('rm -f'))).toBe(false);
+    expect(calls.some((c) => c.cmd.startsWith('rm -f') && c.cwd === '/base')).toBe(false);
+    expect(calls.some((c) => c.cmd.startsWith('rm -f') && c.cwd === '/base-wt')).toBe(true);
   });
 
   it('rejects absolute notePath', async () => {
@@ -86,6 +87,104 @@ describe('migrateFeatureNote', () => {
     await expect(
       migrateFeatureNote(connector, '/base', '/base-wt', '../../../secret.md'),
     ).rejects.toThrow(/traverse/);
+  });
+});
+
+describe('migrateFeatureNotes', () => {
+  it('empty notePaths → degenerate no-op, no shell calls', async () => {
+    const { connector, calls } = makeConnector(() => ({}));
+    const res = await migrateFeatureNotes(connector, '/base', '/base-wt', []);
+    expect(res.migrated).toBe(false);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('happy path: copies and verifies every note before deleting base copies', async () => {
+    const seq: string[] = [];
+    const { connector } = makeConnector((_cwd, cmd) => {
+      if (cmd.startsWith('test -f')) return { stdout: '__SHELF_NOTE_OK__\n' };
+      if (cmd.includes('cp ')) { seq.push(`copy:${cmd}`); return {}; }
+      if (cmd.startsWith('rm -f')) { seq.push(`remove:${cmd}`); return {}; }
+      return {};
+    });
+
+    const res = await migrateFeatureNotes(connector, '/base', '/base-wt', [
+      '.agent/features/a.md',
+      '.agent/features/b.md',
+    ]);
+
+    expect(res.migrated).toBe(true);
+    expect(seq).toHaveLength(3);
+    expect(seq[0]).toContain('/base/.agent/features/a.md');
+    expect(seq[1]).toContain('/base/.agent/features/b.md');
+    expect(seq[2]).toContain('rm -f');
+  });
+
+  it('mid-batch copy failure keeps all base notes and removes worktree-side copies already made', async () => {
+    const { connector, calls } = makeConnector((_cwd, cmd) => {
+      if (cmd.startsWith('test -f')) return { stdout: '__SHELF_NOTE_OK__\n' };
+      if (cmd.includes('/base/.agent/features/b.md') && cmd.includes('cp ')) {
+        throw new Error('copy b failed');
+      }
+      return {};
+    });
+
+    await expect(
+      migrateFeatureNotes(connector, '/base', '/base-wt', [
+        '.agent/features/a.md',
+        '.agent/features/b.md',
+      ]),
+    ).rejects.toThrow(/copy b failed/);
+
+    expect(calls.some((c) => c.cmd.startsWith('rm -f') && c.cwd === '/base')).toBe(false);
+    expect(calls.some((c) => c.cmd.startsWith('rm -f') && c.cwd === '/base-wt')).toBe(true);
+    expect(calls.find((c) => c.cmd.startsWith('rm -f') && c.cwd === '/base-wt')?.cmd).toContain(
+      '/base-wt/.agent/features/a.md',
+    );
+  });
+
+  it('mid-batch verify failure keeps all base notes and removes worktree-side copies already made', async () => {
+    const { connector, calls } = makeConnector((_cwd, cmd) => {
+      if (cmd.startsWith('test -f')) {
+        if (cmd.includes('/base-wt/.agent/features/b.md')) {
+          return { stdout: '__SHELF_NOTE_MISSING__\n' };
+        }
+        return { stdout: '__SHELF_NOTE_OK__\n' };
+      }
+      return {};
+    });
+
+    await expect(
+      migrateFeatureNotes(connector, '/base', '/base-wt', [
+        '.agent/features/a.md',
+        '.agent/features/b.md',
+      ]),
+    ).rejects.toThrow(/copy failed/);
+
+    expect(calls.some((c) => c.cmd.startsWith('rm -f') && c.cwd === '/base')).toBe(false);
+    const cleanup = calls.find((c) => c.cmd.startsWith('rm -f') && c.cwd === '/base-wt');
+    expect(cleanup?.cmd).toContain('/base-wt/.agent/features/a.md');
+    expect(cleanup?.cmd).toContain('/base-wt/.agent/features/b.md');
+  });
+
+  it('given-but-missing source before copy phase → fail-loud, no copy, no remove', async () => {
+    const { connector, calls } = makeConnector((_cwd, cmd) => {
+      if (cmd.startsWith('test -f')) {
+        return cmd.includes('/base/.agent/features/b.md')
+          ? { stdout: '__SHELF_NOTE_MISSING__\n' }
+          : { stdout: '__SHELF_NOTE_OK__\n' };
+      }
+      return {};
+    });
+
+    await expect(
+      migrateFeatureNotes(connector, '/base', '/base-wt', [
+        '.agent/features/a.md',
+        '.agent/features/b.md',
+      ]),
+    ).rejects.toThrow(/not found/);
+
+    expect(calls.some((c) => c.cmd.includes('cp '))).toBe(false);
+    expect(calls.some((c) => c.cmd.startsWith('rm -f'))).toBe(false);
   });
 });
 
