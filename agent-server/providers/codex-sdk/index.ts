@@ -91,6 +91,7 @@ export function createCodexOfficialBackend(deps: CodexOfficialDeps = {}): Server
   let resolveActiveTurn: (() => void) | null = null;
   const commandMetadataByItemId = new Map<string, { command?: string }>();
   const commandOutputByItemId = new Map<string, string>();
+  const reasoningByItemId = new Map<string, string>();
   const pendingPermissionRequests = new Map<string, {
     resolve: (value: ApprovalResolution) => void;
     toolName: string;
@@ -131,6 +132,7 @@ export function createCodexOfficialBackend(deps: CodexOfficialDeps = {}): Server
           activeTurnId = stringValue(asRecord(asRecord(params)?.turn)?.id) ?? activeTurnId;
           commandMetadataByItemId.clear();
           commandOutputByItemId.clear();
+          reasoningByItemId.clear();
         }
         if (method === 'turn/completed') resolveActiveTurn?.();
         if (method === 'thread/tokenUsage/updated') logTokenUsageUpdate(params);
@@ -140,8 +142,13 @@ export function createCodexOfficialBackend(deps: CodexOfficialDeps = {}): Server
           if (message) activeSend(message);
           return;
         }
+        if (method === 'item/reasoning/summaryTextDelta' || method === 'item/reasoning/textDelta') {
+          const message = translateReasoningDelta(params);
+          if (message) activeSend(message);
+          return;
+        }
         const translatedParams = method === 'item/started' || method === 'item/updated' || method === 'item/completed'
-          ? carryCommandExecutionOutput(params)
+          ? carryAppServerItemState(params)
           : params;
         for (const message of translateCodexAppServerNotification(method, translatedParams)) activeSend(message);
       });
@@ -155,12 +162,32 @@ export function createCodexOfficialBackend(deps: CodexOfficialDeps = {}): Server
       'item/completed',
       'item/agentMessage/delta',
       'item/commandExecution/outputDelta',
+      'item/reasoning/summaryTextDelta',
+      'item/reasoning/textDelta',
+      'item/reasoning/summaryPartAdded',
       'thread/tokenUsage/updated',
       'account/rateLimits/updated',
       'mcpServer/startupStatus/updated',
     ]) {
       forward(method);
     }
+  }
+
+  function translateReasoningDelta(params: unknown): Parameters<SendFn>[0] | null {
+    const p = asRecord(params);
+    const itemId = stringValue(p?.itemId ?? p?.item_id);
+    const delta = stringValue(p?.delta);
+    if (!itemId || delta == null) return null;
+    const text = `${reasoningByItemId.get(itemId) ?? ''}${delta}`;
+    reasoningByItemId.set(itemId, text);
+    if (!text.trim()) return null;
+    return {
+      type: 'message',
+      msgId: itemId,
+      msgType: 'fold_text',
+      label: 'Reasoning',
+      body: { content: redactCodexAccountText(text), tone: 'muted' },
+    };
   }
 
   function translateCommandOutputDelta(params: unknown): Parameters<SendFn>[0] | null {
@@ -181,14 +208,25 @@ export function createCodexOfficialBackend(deps: CodexOfficialDeps = {}): Server
     };
   }
 
-  function carryCommandExecutionOutput(params: unknown): unknown {
+  function carryAppServerItemState(params: unknown): unknown {
     const outer = asRecord(params);
     const item = asRecord(outer?.item);
     if (!outer || !item) return params;
     const itemType = stringValue(item.type);
-    if (itemType !== 'commandExecution' && itemType !== 'command_execution') return params;
     const itemId = stringValue(item.id);
     if (!itemId) return params;
+    if (itemType === 'reasoning') {
+      const carried = reasoningByItemId.get(itemId);
+      if (!carried) return params;
+      return {
+        ...outer,
+        item: {
+          ...item,
+          summary: [carried],
+        },
+      };
+    }
+    if (itemType !== 'commandExecution' && itemType !== 'command_execution') return params;
     const command = stringValue(item.command);
     if (command) commandMetadataByItemId.set(itemId, { command });
     const aggregate = stringValue(item.aggregatedOutput ?? item.aggregated_output);

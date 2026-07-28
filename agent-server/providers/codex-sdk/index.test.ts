@@ -337,6 +337,50 @@ describe('Codex official app-server backend lifecycle', () => {
     });
   });
 
+  it('renders reasoning only after app-server reasoning deltas provide content', async () => {
+    const app = new FakeAppServer({
+      'turn/start': async () => {
+        app.fire('turn/started', { threadId: 'thread-1', turn: { id: 'turn-1' } });
+        app.fire('item/started', {
+          item: { id: 'reason-1', type: 'reasoning', summary: [], content: [] },
+        });
+        app.fire('item/reasoning/summaryTextDelta', {
+          threadId: 'thread-1',
+          turnId: 'turn-1',
+          itemId: 'reason-1',
+          delta: 'checking state',
+          summaryIndex: 0,
+        });
+        app.fire('item/completed', {
+          item: { id: 'reason-1', type: 'reasoning', summary: [], content: [] },
+        });
+        app.fire('turn/completed', { threadId: 'thread-1', turn: { id: 'turn-1' } });
+        return { turn: { id: 'turn-1' } };
+      },
+    });
+    const backend = createCodexOfficialBackend({ createAppServer: () => app });
+    const out: OutgoingMessage[] = [];
+
+    await backend.query({ prompt: 'think', cwd: '/repo' }, (m) => out.push(m));
+
+    expect(out.filter((m) => m.type === 'message' && m.msgId === 'reason-1')).toEqual([
+      {
+        type: 'message',
+        msgId: 'reason-1',
+        msgType: 'fold_text',
+        label: 'Reasoning',
+        body: { content: 'checking state', tone: 'muted' },
+      },
+      {
+        type: 'message',
+        msgId: 'reason-1',
+        msgType: 'fold_text',
+        label: 'Reasoning',
+        body: { content: 'checking state', tone: 'muted' },
+      },
+    ]);
+  });
+
   it('bridges file change and permission profile approvals with deny/allow responses', async () => {
     let fileApproval!: Promise<unknown>;
     let permissionApproval!: Promise<unknown>;

@@ -122,6 +122,7 @@ function translateCompletedItem(params: unknown, opts: CodexAppServerTranslateOp
   if (itemType === 'reasoning') {
     const text = asArray(item.summary).map(stringValue).filter((value): value is string => !!value).join('\n')
       || asArray(item.content).map(stringValue).filter((value): value is string => !!value).join('\n');
+    if (!text.trim()) return [];
     return [{
       type: 'message',
       msgId: id,
@@ -163,6 +164,8 @@ function commandExecutionToMessage(id: string, item: Record<string, unknown>, op
   const command = stringValue(item.command) ?? 'command';
   const output = stringValue(item.aggregatedOutput ?? item.aggregated_output) ?? '';
   const exitCode = numberValue(item.exitCode ?? item.exit_code);
+  const settled = status === 'completed' || status === 'failed' || status === 'declined';
+  const bodyContent = output || (settled ? '(no output)' : '');
   return {
     type: 'message',
     msgId: id,
@@ -170,8 +173,8 @@ function commandExecutionToMessage(id: string, item: Record<string, unknown>, op
     label: 'Command',
     subtitle: redactText(command, opts.redactValues),
     ...(status === 'failed' ? { errorMessage: `Command failed with exit code ${exitCode ?? 'unknown'}` } : {}),
-    ...((output || status === 'completed' || status === 'failed' || status === 'declined')
-      ? { body: { content: redactText(output, opts.redactValues) } }
+    ...(bodyContent
+      ? { body: { content: redactText(bodyContent, opts.redactValues) } }
       : {}),
   };
 }

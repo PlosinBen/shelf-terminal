@@ -27,6 +27,12 @@ describe('translateCodexAppServerNotification', () => {
     ]);
   });
 
+  it('suppresses empty reasoning items', () => {
+    expect(translateCodexAppServerNotification('item/started', {
+      item: { id: 'reason-1', type: 'reasoning', summary: [], content: [] },
+    })).toEqual([]);
+  });
+
   it('maps command execution items to fold_code cards', () => {
     expect(translateCodexAppServerNotification('item/updated', {
       item: {
@@ -51,6 +57,28 @@ describe('translateCodexAppServerNotification', () => {
       },
     })).toEqual([
       { type: 'message', msgId: 'cmd-1', msgType: 'fold_code', label: 'Command', subtitle: 'npm test', body: { content: 'ok' } },
+    ]);
+  });
+
+  it('marks completed command executions with no output explicitly', () => {
+    expect(translateCodexAppServerNotification('item/completed', {
+      item: {
+        id: 'cmd-1',
+        type: 'commandExecution',
+        command: 'true',
+        status: 'completed',
+        aggregatedOutput: null,
+        exitCode: 0,
+      },
+    })).toEqual([
+      {
+        type: 'message',
+        msgId: 'cmd-1',
+        msgType: 'fold_code',
+        label: 'Command',
+        subtitle: 'true',
+        body: { content: '(no output)' },
+      },
     ]);
   });
 
