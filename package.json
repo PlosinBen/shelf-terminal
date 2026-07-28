@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite build && node agent-server/build.mjs && NODE_ENV=development vite",
     "build": "vite build && node agent-server/build.mjs",
-    "postinstall": "electron-rebuild",
+    "postinstall": "electron-rebuild && node scripts/ensure-node-pty-helper-mode.cjs",
     "typecheck": "tsc --noEmit",
     "test": "npm run typecheck && npm run test:unit && npm run test:e2e && npm run test:docker && npm run test:ssh",
     "test:unit": "vitest run",

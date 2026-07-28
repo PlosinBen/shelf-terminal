@@ -88,3 +88,11 @@ related:
 **Root cause**：xterm.js Unicode11Addon 把 Ambiguous width 字元（如 prompt 中的 `→` U+2192）當 width 1，但 zsh 可能當 width 2。Tab completion 時 shell 根據自己的寬度計算重繪命令行，游標位置與 xterm 不同步，導致字元偏移重複。這是 xterm.js 的已知限制（[#1453](https://github.com/xtermjs/xterm.js/issues/1453)、[#4753](https://github.com/xtermjs/xterm.js/issues/4753)）。
 
 **Fix**：Unicode11Addon 仍然載入（註冊可用版本），但預設不啟用（`unicode.activeVersion` 保持預設 `'6'`）。使用者可在 Settings 開啟「Unicode 11」選項，啟用後即時生效。啟用 Unicode 11 可改善較新 emoji 和部分 CJK 字元的寬度判定，但只要 prompt 含有 Ambiguous width 字元就可能觸發此問題。
+
+## terminal-pty#9 — node-pty prebuild `spawn-helper` 必須有 executable bit  ·  [Gotcha]
+
+**Symptom**：本機 terminal tab 開啟時 `pty:spawn` handler 報 `Error: posix_spawnp failed`，stack 在 `node_modules/node-pty/lib/unixTerminal.js` 的 `pty.fork(...)`。shell 與 cwd 都存在，直接用同一個 `/bin/zsh -l` 也正常。
+
+**Root cause**：`node-pty` 的 Unix prebuild 會呼叫 `prebuilds/<platform>-<arch>/spawn-helper`；如果 npm 解包後該檔案變成 `0644`（沒有 executable bit），macOS 會拒絕執行 helper，node-pty 只回拋泛化的 `posix_spawnp failed`。
+
+**Fix**：`postinstall` 在 `electron-rebuild` 後跑 `scripts/ensure-node-pty-helper-mode.cjs`，對目前平台的 prebuild helper 與 source-build `build/Release/spawn-helper` 補上 executable bit。若本機已壞，直接跑同一支 script 可修復當前 checkout 的 `node_modules`，重啟 app 後生效。
