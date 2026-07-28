@@ -5,9 +5,9 @@ import { buildWorktreeChildConfig } from '../worktree-child-config';
 import type { AgentProvider, FeatureNoteInfo } from '@shared/types';
 import { agentProviderEntries } from '@shared/agent-providers';
 
-// Sentinel <select> value for "don't seed a note" (a valid degenerate: the fresh
-// agent starts with no Phase-0 context). '' can't collide with a note path.
-const NO_NOTE = '';
+function featureNoteFilename(path: string): string {
+  return path.split('/').pop() ?? path;
+}
 
 export function WorktreeDialog() {
   const { projects } = useStore();
@@ -17,9 +17,9 @@ export function WorktreeDialog() {
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // In-progress feature notes in the base repo, offered as the handoff seed. The
-  // picked note is migrated into the worktree before its agent boots.
+  // checked notes are migrated into the worktree before its agent boots.
   const [notes, setNotes] = useState<FeatureNoteInfo[]>([]);
-  const [selectedNote, setSelectedNote] = useState<string>(NO_NOTE);
+  const [selectedNotes, setSelectedNotes] = useState<Set<string>>(() => new Set());
   const [baseBranch, setBaseBranch] = useState<string | null>(null);
   const [defaultAgentProvider, setDefaultAgentProvider] = useState<AgentProvider>('claude');
   const inputRef = useRef<HTMLInputElement>(null);
@@ -32,12 +32,12 @@ export function WorktreeDialog() {
       setError(null);
       setCreating(false);
       setNotes([]);
-      setSelectedNote(prefill?.notePath ?? NO_NOTE);
+      setSelectedNotes(prefill?.notePath ? new Set([prefill.notePath]) : new Set());
       setBaseBranch(null);
 
       // Fetch the base repo's in-progress notes for the picker. Pre-select when
       // there's exactly one (the common case: one feature under discussion);
-      // otherwise default to "no note" so the user chooses deliberately.
+      // otherwise default to none so the user chooses deliberately.
       const proj = projects[index];
       if (proj) {
         setDefaultAgentProvider(proj.config.defaultAgentProvider ?? 'claude');
@@ -48,7 +48,7 @@ export function WorktreeDialog() {
           .listFeatureNotes(proj.config.connection, proj.config.cwd)
           .then((found) => {
             setNotes(found);
-            if (!prefill?.notePath && found.length === 1) setSelectedNote(found[0].path);
+            if (!prefill?.notePath && found.length === 1) setSelectedNotes(new Set([found[0].path]));
           })
           .catch(() => { /* picker just shows no notes; create still works */ });
       }
@@ -84,8 +84,9 @@ export function WorktreeDialog() {
     // 2. Migrate the picked note BEFORE the sub-project (and its agent) exists, so
     //    the fresh agent boots with it in place. Fail-loud + roll back the just-
     //    created worktree rather than booting a broken one.
-    if (selectedNote) {
-      const mig = await window.shelfApi.git.migrateNote(connection, cwd, result.path, [selectedNote]);
+    const selectedNotePaths = Array.from(selectedNotes);
+    if (selectedNotePaths.length > 0) {
+      const mig = await window.shelfApi.git.migrateNote(connection, cwd, result.path, selectedNotePaths);
       if (!mig.ok) {
         await window.shelfApi.git.worktreeRemove(connection, cwd, result.path);
         setError(mig.error ?? 'Failed to migrate feature note');
@@ -112,7 +113,16 @@ export function WorktreeDialog() {
     emit(Events.AUTO_CONNECT_PROJECT, projectId);
 
     setOpen(false);
-  }, [input, projectIndex, projects, creating, selectedNote, defaultAgentProvider]);
+  }, [input, projectIndex, projects, creating, selectedNotes, defaultAgentProvider]);
+
+  const toggleSelectedNote = useCallback((path: string) => {
+    setSelectedNotes((current) => {
+      const next = new Set(current);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+  }, []);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Escape') {
@@ -149,25 +159,34 @@ export function WorktreeDialog() {
             disabled={creating}
           />
           {notes.length > 0 && (
-            <label className="worktree-note-picker">
+            <div className="worktree-note-picker">
               <span className="worktree-note-picker-label">Feature note</span>
-              <select
-                className="worktree-select"
-                value={selectedNote}
-                onChange={(e) => setSelectedNote(e.target.value)}
-                disabled={creating}
-              >
-                <option value={NO_NOTE}>No note</option>
+              <div className="worktree-note-list">
                 {notes.map((n) => {
-                  const name = n.title ?? (n.path.split('/').pop() ?? n.path);
+                  const filename = featureNoteFilename(n.path);
+                  const checked = selectedNotes.has(n.path);
                   return (
-                    <option key={n.path} value={n.path}>
-                      {n.status ? `${name} — ${n.status}` : name}
-                    </option>
+                    <label key={n.path} className="worktree-note-row">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggleSelectedNote(n.path)}
+                        disabled={creating}
+                      />
+                      <span className="worktree-note-row-main">
+                        <span className="worktree-note-filename">{filename}</span>
+                        {(n.title || n.status) && (
+                          <span className="worktree-note-meta">
+                            {n.title && <span className="worktree-note-title">{n.title}</span>}
+                            {n.status && <span className="worktree-note-status">{n.status}</span>}
+                          </span>
+                        )}
+                      </span>
+                    </label>
                   );
                 })}
-              </select>
-            </label>
+              </div>
+            </div>
           )}
           <label className="worktree-note-picker">
             <span className="worktree-note-picker-label">Agent provider</span>
