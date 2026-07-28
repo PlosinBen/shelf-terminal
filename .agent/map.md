@@ -77,7 +77,7 @@ title: shelf-terminal — Intent → File Index
 | Intent | File | Role |
 |--------|------|------|
 | Finish merge-back | `worktree/merge-back.ts` | ff-only target advancement, feature/base dirty guards, non-ff rebase guidance |
-| Feature note create/close migration | `worktree/note-migration.ts` | create-time base→child note move and close-time child→base note restore |
+| Feature note create/close migration | `worktree/note-migration.ts` | create-time base→child batch note move and close-time child→base note restore |
 | Feature note listing | `worktree/feature-notes.ts` | Lists `.agent/features/*.md` with display frontmatter for picker/restore |
 | Branch merged check | `worktree/branch-merged.ts` | Computes merged/ahead state for Abandon branch-delete warning |
 | Per-repo finish lock | `worktree/repo-lock.ts` | In-process lock around the atomic “check target → fast-forward” merge-back step |

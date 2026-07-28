@@ -65,3 +65,19 @@ related:
 **Reason:** Worktree integration is a project-level lifecycle event. It must be visible even when the parent currently shows Terminal or Web, and it should not pollute an agent transcript or create an agent tab just to acknowledge a UI transaction.
 
 **Do not change casually because:** Announcing success before the entire close sequence finishes creates false completion after partial teardown failures. Routing completion into an agent timeline couples project lifecycle state to a provider session that may not exist or may not be the right audience.
+
+## worktree#8 — Create may carry multiple feature notes, migrated as one batch  ·  [Decision]
+
+**Decision:** The New Worktree dialog lets the user select zero or more `.agent/features/*.md` notes. Create-time migration accepts the selected relative paths as one batch. It copies and verifies every selected note into the child checkout before deleting any base copy; if a copy/verify step fails, base notes stay intact and any child-side copies already made are removed.
+
+**Reason:** A single worktree can intentionally carry several small feature notes, and close already restores all remaining child notes. Looping the old single-note move would delete earlier base notes before later notes were proven safe; if the caller then removed the child checkout, those earlier notes could be lost.
+
+**Do not change casually because:** Feature notes are often gitignored transient working memory. Batch create migration must preserve all-or-nothing semantics across the whole selected set, not just within each individual file.
+
+## worktree#9 — Worktree transaction failures are visible now and logged for later  ·  [Decision]
+
+**Decision:** Create, Finish, and Abandon failures surface the full error text in the dialog and write structured context to the persistent app log through the renderer debug-log bridge. Create migration failure also attempts rollback; if rollback fails, the dialog shows both full errors and can send a recovery prompt to the base project's agent tab. Finish/Abandon keep their existing Send-to-agent behavior to the worktree agent tab.
+
+**Reason:** These flows mutate git state and can stop midway. The user needs the exact failure immediately for recovery, while logs preserve operation, project ids, branches/targets, cwd/worktree paths, failed step, and full error text after the dialog is closed.
+
+**Do not change casually because:** Hiding rollback or teardown details makes partial git-state transactions hard to repair and violates the fail-loud rule for possible data loss or orphaned worktrees.

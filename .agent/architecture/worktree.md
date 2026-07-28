@@ -18,7 +18,7 @@ Create:
 Proposal or user menu
   → New Worktree gate
   → create child checkout
-  → optionally move selected feature note into child
+  → optionally migrate selected feature notes into child as one all-or-nothing batch
   → create child project
   → auto-connect child
 ```
@@ -54,5 +54,7 @@ User menu
 The merge-back boundary is only the fast-forward advancement of the selected target. It does not rebase, merge with conflicts, squash, delete files, remove worktrees, or announce success.
 
 The close gate sequences the transaction and stops at the first failure. A close failure leaves the child project and checkout visible so the user or agent can recover from the exact step that failed.
+
+Create gates also stop on the first failed transaction step. If note migration fails, the renderer asks Git to remove the just-created child checkout; if that rollback fails too, both full errors remain visible and can be sent to the base project's agent tab. Create/finish/abandon failures log structured context through the app log for post-mortem recovery.
 
 The completion banner is project-level UI state. It is not an agent timeline message and does not create or mutate an agent conversation.
