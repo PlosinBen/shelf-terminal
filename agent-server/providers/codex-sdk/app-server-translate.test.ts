@@ -77,7 +77,29 @@ describe('translateCodexAppServerNotification', () => {
     ]);
   });
 
-  it('maps file changes to a markdown card with real diff blocks when available', () => {
+  it('maps a single unified file change to a fold_diff card', () => {
+    expect(translateCodexAppServerNotification('item/completed', {
+      item: {
+        id: 'file-1',
+        type: 'fileChange',
+        status: 'completed',
+        changes: [
+          { path: 'a.ts', kind: 'update', diff: '@@ -1 +1 @@\n-old\n+new' },
+        ],
+      },
+    })).toEqual([
+      {
+        type: 'message',
+        msgId: 'file-1',
+        msgType: 'fold_diff',
+        label: 'File changes',
+        subtitle: 'a.ts',
+        body: { diff: { oldString: 'old', newString: 'new' } },
+      },
+    ]);
+  });
+
+  it('falls back to markdown for multi-file or non-unified file changes', () => {
     expect(translateCodexAppServerNotification('item/completed', {
       item: {
         id: 'file-1',

@@ -178,6 +178,19 @@ function commandExecutionToMessage(id: string, item: Record<string, unknown>, op
 
 function fileChangeToMessage(id: string, item: Record<string, unknown>, opts: CodexAppServerTranslateOptions): OutgoingMessage {
   const status = stringValue(item.status);
+  const diff = singleFileDiff(item.changes);
+  if (diff) {
+    return {
+      type: 'message',
+      msgId: id,
+      msgType: 'fold_diff',
+      label: 'File changes',
+      subtitle: redactText(diff.path, opts.redactValues),
+      ...(status === 'failed' ? { errorMessage: 'File change failed' } : {}),
+      ...(status === 'declined' ? { errorMessage: 'File change declined' } : {}),
+      body: { diff: { oldString: redactText(diff.oldString, opts.redactValues), newString: redactText(diff.newString, opts.redactValues) } },
+    };
+  }
   return {
     type: 'message',
     msgId: id,
@@ -187,6 +200,42 @@ function fileChangeToMessage(id: string, item: Record<string, unknown>, opts: Co
     ...(status === 'declined' ? { errorMessage: 'File change declined' } : {}),
     body: { content: redactText(renderFileChanges(item.changes), opts.redactValues) },
   };
+}
+
+function singleFileDiff(raw: unknown): { path: string; oldString: string; newString: string } | null {
+  const changes = asArray(raw).map(asRecord).filter((value): value is Record<string, unknown> => !!value);
+  if (changes.length !== 1) return null;
+  const change = changes[0];
+  const path = stringValue(change.path) ?? 'unknown';
+  const parsed = parseUnifiedDiff(stringValue(change.diff) ?? '');
+  return parsed ? { path, ...parsed } : null;
+}
+
+function parseUnifiedDiff(diff: string): { oldString: string; newString: string } | null {
+  if (!diff.trim() || !/^@@\s/m.test(diff)) return null;
+  const oldLines: string[] = [];
+  const newLines: string[] = [];
+  for (const line of diff.split('\n')) {
+    if (line.startsWith('@@') || line.startsWith('diff --git ') || line.startsWith('index ') || line.startsWith('--- ') || line.startsWith('+++ ')) continue;
+    if (line.startsWith('-')) {
+      oldLines.push(line.slice(1));
+      continue;
+    }
+    if (line.startsWith('+')) {
+      newLines.push(line.slice(1));
+      continue;
+    }
+    if (line.startsWith(' ')) {
+      const text = line.slice(1);
+      oldLines.push(text);
+      newLines.push(text);
+      continue;
+    }
+    if (line === '\\ No newline at end of file') continue;
+    // Some app-server snapshots contain raw file content instead of unified diff.
+    return null;
+  }
+  return { oldString: oldLines.join('\n'), newString: newLines.join('\n') };
 }
 
 function renderFileChanges(raw: unknown): string {
