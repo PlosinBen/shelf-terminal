@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { tokenUsageToContextSegment, translateCodexAppServerNotification } from './app-server-translate';
+import { summarizeTokenUsageForLog, tokenUsageToContextSegment, translateCodexAppServerNotification } from './app-server-translate';
 
 describe('translateCodexAppServerNotification', () => {
   it('maps agent message deltas to text stream chunks', () => {
@@ -66,5 +66,19 @@ describe('tokenUsageToContextSegment', () => {
   it('returns null for incomplete token usage shapes', () => {
     expect(tokenUsageToContextSegment({ total: { totalTokens: 1 } })).toBeNull();
     expect(tokenUsageToContextSegment({ modelContextWindow: 1 })).toBeNull();
+  });
+});
+
+describe('summarizeTokenUsageForLog', () => {
+  it('extracts only numeric context fields for diagnostics', () => {
+    expect(summarizeTokenUsageForLog({
+      total: { totalTokens: 221_900 },
+      modelContextWindow: 258_400,
+      prompt: 'must not be logged',
+    })).toEqual({
+      totalTokens: 221_900,
+      modelContextWindow: 258_400,
+      percent: 86,
+    });
   });
 });

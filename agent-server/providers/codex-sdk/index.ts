@@ -11,7 +11,7 @@ import { formatConfigAck, type ConfigEditKey } from '@shared/config-ack';
 import { CODEX_SDK_EFFORT_LEVELS, buildCodexSdkRuntimeConfig } from './config';
 import { refreshCodexAccountStatus } from './account-status';
 import { spawnCodexAppServerClient, type CodexAppServerNotificationHandler } from './app-server-client';
-import { translateCodexAppServerNotification } from './app-server-translate';
+import { summarizeTokenUsageForLog, translateCodexAppServerNotification } from './app-server-translate';
 import { loadProjectedMcpServers, type ParsedMcpConfig } from '../mcp-config';
 import { getSharedShelfMcp } from '../acp/shelf-mcp';
 import { serverLog } from '../../server-logger';
@@ -100,6 +100,7 @@ export function createCodexOfficialBackend(deps: CodexOfficialDeps = {}): Server
       client.onNotification(method, (params) => {
         if (method === 'turn/started') activeTurnId = stringValue(asRecord(asRecord(params)?.turn)?.id) ?? activeTurnId;
         if (method === 'turn/completed') resolveActiveTurn?.();
+        if (method === 'thread/tokenUsage/updated') logTokenUsageUpdate(params);
         if (!activeSend) return;
         for (const message of translateCodexAppServerNotification(method, params)) activeSend(message);
       });
@@ -118,6 +119,22 @@ export function createCodexOfficialBackend(deps: CodexOfficialDeps = {}): Server
     ]) {
       forward(method);
     }
+  }
+
+  function logTokenUsageUpdate(params: unknown): void {
+    const p = asRecord(params);
+    const summary = summarizeTokenUsageForLog(p?.tokenUsage ?? p?.token_usage ?? p);
+    if (!summary) {
+      serverLog('debug', 'codex-app-server', 'tokenUsage update without displayable context values');
+      return;
+    }
+    const threadId = stringValue(p?.threadId ?? p?.thread_id) ?? activeThreadId ?? '<unknown>';
+    const turnId = stringValue(p?.turnId ?? p?.turn_id) ?? activeTurnId ?? '<unknown>';
+    serverLog(
+      'info',
+      'codex-app-server',
+      `tokenUsage thread=${threadId} turn=${turnId} totalTokens=${summary.totalTokens} modelContextWindow=${summary.modelContextWindow} percent=${summary.percent}`,
+    );
   }
 
   function buildCapabilities(

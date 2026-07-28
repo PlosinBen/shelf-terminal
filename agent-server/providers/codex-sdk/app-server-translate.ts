@@ -32,6 +32,15 @@ export function translateCodexAppServerNotification(
 }
 
 export function tokenUsageToContextSegment(raw: unknown): StatusSegment | null {
+  const summary = summarizeTokenUsageForLog(raw);
+  if (!summary) return null;
+  return {
+    text: `ctx: ${summary.percent}%`,
+    severity: summary.percent >= 80 ? 'critical' : summary.percent >= 50 ? 'warning' : 'normal',
+  };
+}
+
+export function summarizeTokenUsageForLog(raw: unknown): { totalTokens: number; modelContextWindow: number; percent: number } | null {
   const usage = asRecord(raw);
   if (!usage) return null;
   const total = asRecord(usage.total) ?? usage;
@@ -39,10 +48,7 @@ export function tokenUsageToContextSegment(raw: unknown): StatusSegment | null {
   const size = numberValue(usage.modelContextWindow ?? usage.model_context_window);
   if (used == null || size == null || size <= 0) return null;
   const percent = Math.max(0, Math.min(100, Math.round((used / size) * 100)));
-  return {
-    text: `ctx: ${percent}%`,
-    severity: percent >= 80 ? 'critical' : percent >= 50 ? 'warning' : 'normal',
-  };
+  return { totalTokens: used, modelContextWindow: size, percent };
 }
 
 function translateThreadStatus(params: unknown): OutgoingMessage[] {
