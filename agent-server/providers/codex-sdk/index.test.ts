@@ -288,6 +288,55 @@ describe('Codex official app-server backend lifecycle', () => {
     await running;
   });
 
+  it('uses commandExecution outputDelta as command card result when completed item has no aggregate output', async () => {
+    const app = new FakeAppServer({
+      'turn/start': async () => {
+        app.fire('turn/started', { threadId: 'thread-1', turn: { id: 'turn-1' } });
+        app.fire('item/started', {
+          item: {
+            id: 'cmd-1',
+            type: 'commandExecution',
+            command: 'git status --short',
+            status: 'inProgress',
+            aggregatedOutput: null,
+            exitCode: null,
+          },
+        });
+        app.fire('item/commandExecution/outputDelta', {
+          threadId: 'thread-1',
+          turnId: 'turn-1',
+          itemId: 'cmd-1',
+          delta: ' M file.txt\n',
+        });
+        app.fire('item/completed', {
+          item: {
+            id: 'cmd-1',
+            type: 'commandExecution',
+            command: 'git status --short',
+            status: 'completed',
+            aggregatedOutput: null,
+            exitCode: 0,
+          },
+        });
+        app.fire('turn/completed', { threadId: 'thread-1', turn: { id: 'turn-1' } });
+        return { turn: { id: 'turn-1' } };
+      },
+    });
+    const backend = createCodexOfficialBackend({ createAppServer: () => app });
+    const out: OutgoingMessage[] = [];
+
+    await backend.query({ prompt: 'check status', cwd: '/repo' }, (m) => out.push(m));
+
+    expect(out).toContainEqual({
+      type: 'message',
+      msgId: 'cmd-1',
+      msgType: 'fold_code',
+      label: 'Command',
+      subtitle: 'git status --short',
+      body: { content: ' M file.txt\n' },
+    });
+  });
+
   it('bridges file change and permission profile approvals with deny/allow responses', async () => {
     let fileApproval!: Promise<unknown>;
     let permissionApproval!: Promise<unknown>;

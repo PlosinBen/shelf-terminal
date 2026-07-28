@@ -89,6 +89,8 @@ export function createCodexOfficialBackend(deps: CodexOfficialDeps = {}): Server
   let activeThreadId: string | null = null;
   let activeTurnId: string | null = null;
   let resolveActiveTurn: (() => void) | null = null;
+  const commandMetadataByItemId = new Map<string, { command?: string }>();
+  const commandOutputByItemId = new Map<string, string>();
   const pendingPermissionRequests = new Map<string, {
     resolve: (value: ApprovalResolution) => void;
     toolName: string;
@@ -125,11 +127,23 @@ export function createCodexOfficialBackend(deps: CodexOfficialDeps = {}): Server
   function registerAppServerNotifications(client: CodexAppServerLike): void {
     const forward = (method: string) => {
       client.onNotification(method, (params) => {
-        if (method === 'turn/started') activeTurnId = stringValue(asRecord(asRecord(params)?.turn)?.id) ?? activeTurnId;
+        if (method === 'turn/started') {
+          activeTurnId = stringValue(asRecord(asRecord(params)?.turn)?.id) ?? activeTurnId;
+          commandMetadataByItemId.clear();
+          commandOutputByItemId.clear();
+        }
         if (method === 'turn/completed') resolveActiveTurn?.();
         if (method === 'thread/tokenUsage/updated') logTokenUsageUpdate(params);
         if (!activeSend) return;
-        for (const message of translateCodexAppServerNotification(method, params)) activeSend(message);
+        if (method === 'item/commandExecution/outputDelta') {
+          const message = translateCommandOutputDelta(params);
+          if (message) activeSend(message);
+          return;
+        }
+        const translatedParams = method === 'item/started' || method === 'item/updated' || method === 'item/completed'
+          ? carryCommandExecutionOutput(params)
+          : params;
+        for (const message of translateCodexAppServerNotification(method, translatedParams)) activeSend(message);
       });
     };
     for (const method of [
@@ -140,12 +154,54 @@ export function createCodexOfficialBackend(deps: CodexOfficialDeps = {}): Server
       'item/updated',
       'item/completed',
       'item/agentMessage/delta',
+      'item/commandExecution/outputDelta',
       'thread/tokenUsage/updated',
       'account/rateLimits/updated',
       'mcpServer/startupStatus/updated',
     ]) {
       forward(method);
     }
+  }
+
+  function translateCommandOutputDelta(params: unknown): Parameters<SendFn>[0] | null {
+    const p = asRecord(params);
+    const itemId = stringValue(p?.itemId ?? p?.item_id);
+    const delta = stringValue(p?.delta);
+    if (!itemId || delta == null) return null;
+    const output = `${commandOutputByItemId.get(itemId) ?? ''}${delta}`;
+    commandOutputByItemId.set(itemId, output);
+    const meta = commandMetadataByItemId.get(itemId);
+    return {
+      type: 'message',
+      msgId: itemId,
+      msgType: 'fold_code',
+      label: 'Command',
+      ...(meta?.command ? { subtitle: redactCodexAccountText(meta.command) } : {}),
+      body: { content: redactCodexAccountText(output) },
+    };
+  }
+
+  function carryCommandExecutionOutput(params: unknown): unknown {
+    const outer = asRecord(params);
+    const item = asRecord(outer?.item);
+    if (!outer || !item) return params;
+    const itemType = stringValue(item.type);
+    if (itemType !== 'commandExecution' && itemType !== 'command_execution') return params;
+    const itemId = stringValue(item.id);
+    if (!itemId) return params;
+    const command = stringValue(item.command);
+    if (command) commandMetadataByItemId.set(itemId, { command });
+    const aggregate = stringValue(item.aggregatedOutput ?? item.aggregated_output);
+    if (aggregate) commandOutputByItemId.set(itemId, aggregate);
+    const carried = commandOutputByItemId.get(itemId);
+    if (!carried || aggregate) return params;
+    return {
+      ...outer,
+      item: {
+        ...item,
+        aggregatedOutput: carried,
+      },
+    };
   }
 
   function registerAppServerRequests(client: CodexAppServerLike): void {
