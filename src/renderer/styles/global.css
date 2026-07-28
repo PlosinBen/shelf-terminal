@@ -2222,6 +2222,82 @@ button {
   border-color: var(--accent);
 }
 
+.worktree-note-list {
+  max-height: 220px;
+  overflow-y: auto;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.worktree-note-row {
+  min-height: 44px;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border);
+}
+
+.worktree-note-row:last-child {
+  border-bottom: 0;
+}
+
+.worktree-note-row:hover {
+  background: var(--surface);
+}
+
+.worktree-note-row input {
+  width: 14px;
+  height: 14px;
+  margin: 2px 0 0;
+  flex: 0 0 auto;
+}
+
+.worktree-note-row-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.worktree-note-filename,
+.worktree-note-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.worktree-note-filename {
+  color: var(--text);
+}
+
+.worktree-note-meta {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.worktree-note-title {
+  min-width: 0;
+}
+
+.worktree-note-status {
+  flex: 0 0 auto;
+  padding: 1px 5px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 14px;
+}
+
 .worktree-branch-list {
   max-height: 300px;
   overflow-y: auto;
@@ -2248,6 +2324,14 @@ button {
   font-size: 12px;
   color: #f38ba8;
   padding: 0 4px;
+}
+
+.worktree-error-text {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: inherit;
+  font: inherit;
 }
 
 .worktree-error-actions {
