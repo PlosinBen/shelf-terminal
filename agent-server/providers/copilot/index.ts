@@ -11,6 +11,7 @@ import { methods, type Stream, type AgentApp, type SessionModeState, type Sessio
 import { formatConfigAck, type ConfigEditKey } from '@shared/config-ack';
 import type { ServerBackend, QueryInput, SendFn, ProviderCapabilities } from '../types';
 import { serverLog } from '../../server-logger';
+import { wireLogger, LogTag } from '../../logger';
 import { openAcpConnection, spawnAgentStdio, type AcpConnection } from '../acp/connection';
 import { createSessionDriver, type AcpSession } from '../acp/client';
 import { createPermissionBridge } from '../acp/permission';
@@ -27,6 +28,11 @@ import { startLogin as startCopilotLogin, prefillLoginUrl, type LoginRunner } fr
 // resolve the option id for session/set_config_option.
 const MODEL_CATEGORY = 'model';
 const EFFORT_CATEGORY = 'thought_level';
+
+// Isolated diagnostic stream for the copilot idle → stuck-overlay investigation.
+// Routes to its own file at main (logs/copilot-init/) via the wire channel, so
+// these lifecycle probes stay out of the main log. Remove with the investigation.
+const diagLog = wireLogger.channel('copilot-init');
 
 export const COPILOT_PROVIDER = 'copilot';
 
@@ -183,7 +189,7 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
     conn.closed.finally(() => {
       // diag: does the copilot ACP connection drop on long idle (H2)? Log every
       // close, incl. the identity-guarded stale case, with whether a session was live.
-      serverLog('debug', 'diag:copilot', `conn.closed live=${conn === thisConn} hadSession=${session !== null} sid=${session?.sessionId ?? 'none'}`);
+      diagLog.debug(LogTag.copilot, `conn.closed live=${conn === thisConn} hadSession=${session !== null} sid=${session?.sessionId ?? 'none'}`);
       if (conn !== thisConn) return;
       conn = null;
       child = null;
@@ -313,7 +319,7 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
       if (appId) lastAppId = appId;
       // diag: caps re-run signals a re-init path (H2). Log enter (with whether a
       // connection/session was already live) + exit outcome.
-      serverLog('debug', 'diag:copilot', `gatherCapabilities enter hadConn=${conn !== null} hadSession=${session !== null}`);
+      diagLog.debug(LogTag.copilot, `gatherCapabilities enter hadConn=${conn !== null} hadSession=${session !== null}`);
       // Seed current* from the renderer's saved prefs BEFORE building caps, so the
       // first reported values reflect the user's choice rather than the agent's
       // default (matches the ServerBackend `intent` contract).
@@ -334,7 +340,7 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
         currentModel ??= cur.currentModel;
         currentEffort ??= cur.currentEffort;
         currentPermissionMode ??= copilotModeIdToShelf(sessionModes?.currentModeId);
-        serverLog('debug', 'diag:copilot', `gatherCapabilities exit ok sid=${s.sessionId}`);
+        diagLog.debug(LogTag.copilot, `gatherCapabilities exit ok sid=${s.sessionId}`);
         return buildCapabilities();
       } catch (err: any) {
         // A fresh session most commonly fails when unauthenticated → surface the
@@ -344,7 +350,7 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
         // without the message a non-auth failure (CLI hang/config) is silently
         // mislabeled as "needs login".
         serverLog('warn', 'copilot', `gatherCapabilities failed → reporting authRequired: ${err?.message ?? String(err)}`);
-        serverLog('debug', 'diag:copilot', `gatherCapabilities exit failed → authRequired: ${err?.message ?? String(err)}`);
+        diagLog.debug(LogTag.copilot, `gatherCapabilities exit failed → authRequired: ${err?.message ?? String(err)}`);
         return { models: [], permissionModes: [], effortLevels: [], slashCommands: [], authRequired: true, authMethod: COPILOT_AUTH_METHOD };
       }
     },
