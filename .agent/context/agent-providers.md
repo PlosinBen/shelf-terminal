@@ -353,3 +353,45 @@ SDK 0.3.159 **並存**兩種 compact 完成訊號:`status` 形狀(`subtype:'stat
 **Reason：** 這讓「idle 就 teardown、下次互動再 resume」對 Claude 成本低且不隨對話變長而退化——idle-teardown 這類手段對 Claude 划算。MCP-heavy tab 是唯一讓 wake 明顯變慢的變因，值得考慮排除或給較長 timeout。
 
 **Do not change casually because：** 別假設「長 session resume 較慢」（47MB 實測已反證）；wake 慢的元兇是 MCP respawn，不是 history 載入。
+
+## agent-providers#32 — Codex account quota/usage 走官方 `codex app-server` JSON-RPC，不走 TypeScript SDK  ·  [Decision]
+
+**Decision：** Codex 的 account subscription quota / usage 要透過官方 `codex app-server` 的本機 JSON-RPC 讀取，而不是 `@openai/codex-sdk` TypeScript SDK。Shelf 已經為 Codex login spawn app-server，因此 quota/usage 應復用同一條 app-scoped `CODEX_HOME` auth boundary，呼叫：
+
+- `account/read`：確認目前 account / auth 狀態（輸出可能含 email，UI/log 必須遮罩）
+- `account/rateLimits/read`：ChatGPT/Codex rate-limit buckets
+- `account/usage/read`：Codex token activity summary / daily buckets
+
+**Reason：** 官方 TypeScript SDK 目前只在 turn lifecycle 裡提供 per-turn token `Usage`（例如 `turn.completed`），不提供 account-level subscription quota API。官方 Codex app-server manual 才列出 `account/rateLimits/read` 與 `account/usage/read`。這些 method 依賴 Codex service-backed auth（ChatGPT/device-code、external token、agent identity、PAT 等）；API-key-only / Bedrock 這類路徑拿不到 ChatGPT account quota。
+
+**Observed shape（只讀 probe）：** 對 prod app scoped `CODEX_HOME=~/.shelf/apps/<appId>/codex` 呼叫 app-server 成功：
+
+- `account/read`：`type: "chatgpt"`、`planType: "plus"`、`requiresOpenaiAuth: true`（email 已遮罩）
+- `account/rateLimits/read` top-level keys：`rateLimits`、`rateLimitsByLimitId`、`rateLimitResetCredits`
+- `rateLimitsByLimitId` 可有多個 bucket，例如：
+  - `codex`：`planType: "prolite"`、`primary.usedPercent`、`primary.windowDurationMins`、`primary.resetsAt`、`credits`
+  - provider/model-specific bucket（實測為 `codex_bengalfox`）：`limitName`、`planType`、`primary.*`
+- `rateLimitResetCredits`：`availableCount` + `credits[]`
+- `account/usage/read` top-level keys：`summary`、`dailyUsageBuckets`
+- `summary`：`lifetimeTokens`、`peakDailyTokens`、`longestRunningTurnSec`、`currentStreakDays`、`longestStreakDays`
+- `dailyUsageBuckets[]`：`startDate`、`tokens`
+
+**Implementation note：** 這是 local app-server JSON-RPC，不是 OpenAI Platform public REST API；不要把它建模成一般 OpenAI API key call。輸出如果進 status/log/diagnostics，必須只保留 quota/usage 數字與 bucket metadata，遮罩 email / account id / token / auth payload。`rateLimitsByLimitId` 的 key 與 bucket 數量不可寫死；以 provider 回傳為準。
+
+**Do not change casually because：** 別在 Codex SDK wrapper 裡硬找不存在的 account quota method；也別自行解析 Codex credential files。auth、refresh、credential layout 都應由官方 app-server/CLI 擁有，Shelf 只用 app-scoped `CODEX_HOME` 指定 device boundary 並打官方 JSON-RPC。
+
+**Related：** `agent-providers#15`（per-appId `CODEX_HOME` device auth）、`agent-providers#16`（provider backend 不承攬 credential internals）、官方 Codex manual `codex-app-server.md` / `codex-sdk.md`。
+
+## agent-providers#33 — `codex-offical` 正式採 app-server-only，不保留 TypeScript SDK runtime  ·  [Decision]
+
+**Decision：** 測試 provider key `codex-offical` 的正式實作路徑是直接使用 pinned `codex app-server` JSON-RPC；不再透過 `@openai/codex-sdk` 作 turn transport，也不保留 SDK wrapper 作 production fallback。舊 `codex` provider 仍維持 ACP/codex-acp baseline，直到後續 cutover 決策移除。
+
+**Reason：** live smoke 已驗證 app-server-only 能提供互動 provider 需要的一條 truth source：`thread/start`/`thread/resume`、`turn/start`、model catalog、skills/MCP status、slash/control、manual compact、account quota、session context usage、tool/file/command/MCP item notifications，以及 command/file/permission approval request bridge。TypeScript SDK 則是 `codex exec` wrapper；它缺少上述 control/context/status surface，若和 app-server 混用會把 session truth、compaction、context accounting、approval state 分裂成兩套 authority。
+
+**Implementation note：** `providers/codex-sdk/` 目錄名保留歷史名稱，但 runtime 內容是 app-server client/translator/config；`@openai/codex-sdk` package dependency 與 SDK probe/translator 已移除。Codex runtime pin 只需要 `@openai/codex`（CLI/app-server/native package）與 legacy `@agentclientprotocol/codex-acp`（舊 provider baseline）。`buildCodexSdkRuntimeConfig` 名稱暫留為內部 helper；它產出的是 app-server config object / env，不依賴 SDK types。
+
+**Open follow-ups：** MCP elicitation form 尚只 fail-loud cancel；`/ps`、`/stop`、`/clean` 等 background-task slash 仍因 app-server schema 缺穩定 route 而 explicit unsupported；create/delete file changes 若 app-server 只給 raw file content 而非 unified diff，UI 仍會 fallback markdown；reasoning item 常為空，暫保留 bounded `reasoning-notification` debug log觀察。
+
+**Do not change casually because：** 不要把 TypeScript SDK 加回 production path 當 fallback；那會重建 hybrid transport 問題。若 app-server 有缺口，應在 app-server request/notification bridge 補齊或明確 unsupported，而不是讓同一 provider 在 SDK/app-server 間切換。
+
+**Related：** `agent-providers#32`（quota/usage 走 app-server）、`agent-providers#15`（per-appId `CODEX_HOME` device auth）、`UPSTREAM_WATCH.md` Codex background-task tracker。

@@ -112,6 +112,7 @@ title: shelf-terminal — Intent → File Index
 | Claude provider | `providers/claude/index.ts` | `@anthropic-ai/claude-agent-sdk` wrapper：持久 streaming-input session、emit 渲染原語、auth 偵測 |
 | Copilot provider (ACP) | `providers/copilot/index.ts` | `createCopilotBackend`：spawn `copilot --acp`、走共用 `acp/` toolkit runtime、OWN copilot 特有（binary launch、device-flow login、config-home）。ACP 是內部細節、provider identity = `copilot`（cutover 後即 copilot backend，pre-ACP native SDK backend 已刪，見 git 歷史） |
 | Codex provider (ACP) | `providers/codex/index.ts` | `createCodexBackend`：spawn codex-acp、走共用 `acp/` toolkit runtime、OWN codex 特有（launch、app-server login、`CODEX_HOME`） |
+| Codex official provider (app-server) | `providers/codex-sdk/index.ts` | `createCodexOfficialBackend`：測試 provider key `codex-offical`；直接 spawn pinned `codex app-server` JSON-RPC，處理 turn/session、slash/control、model list、skills/MCP、quota/context、tool items 與 approval bridge |
 | ACP 共用 toolkit | `providers/acp/` | provider-agnostic ACP runtime：`connection`/`client`/`translate`/`permission`/`capabilities`/`mcp`/`shelf-mcp`（L1 in-process HTTP bridge）+ `mock-agent`（測試）。兩個 ACP provider 共用、無 provider 語意 |
 | Provider registry（單一來源） | `src/shared/agent-providers.ts` | `AGENT_PROVIDERS = { label, bin }` per provider + `AgentProvider = keyof typeof`；consumers 一律 iterate（見 `context/agent-providers` #18） |
 | Provider 純 helper（claude） | `providers/claude/helpers.ts` | claude/index 抽出的 side-effect-free 函式 + types（封閉邊界，只被 claude/ 引用） |
