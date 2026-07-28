@@ -218,7 +218,10 @@ function parseUnifiedDiff(diff: string): { oldString: string; newString: string 
   if (!diff.trim() || !/^@@\s/m.test(diff)) return null;
   const oldLines: string[] = [];
   const newLines: string[] = [];
-  for (const line of diff.split('\n')) {
+  const lines = diff.split('\n');
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (line === '' && i === lines.length - 1) continue;
     if (line.startsWith('@@') || line.startsWith('diff --git ') || line.startsWith('index ') || line.startsWith('--- ') || line.startsWith('+++ ')) continue;
     if (line.startsWith('-')) {
       oldLines.push(line.slice(1));

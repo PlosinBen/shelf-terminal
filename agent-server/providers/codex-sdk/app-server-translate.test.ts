@@ -112,7 +112,7 @@ describe('translateCodexAppServerNotification', () => {
         type: 'fileChange',
         status: 'completed',
         changes: [
-          { path: 'a.ts', kind: 'update', diff: '@@ -1 +1 @@\n-old\n+new' },
+          { path: 'a.ts', kind: 'update', diff: '@@ -1 +1 @@\n-old\n+new\n' },
         ],
       },
     })).toEqual([
