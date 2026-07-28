@@ -68,7 +68,7 @@ Type-specific connector helpers are surfaced as their own namespaces:
 | `checkout(connection, cwd, branch)` | invoke `git:checkout` → `void` |
 | `worktreeAdd(connection, cwd, branch, newBranch: boolean)` | invoke `git:worktree-add` |
 | `worktreeRemove(connection, cwd, worktreePath)` | invoke `git:worktree-remove`; runs non-force Git worktree removal |
-| `migrateNote(connection, baseCwd, worktreeCwd, notePath?)` | invoke `git:migrate-note` → `{ ok, migrated?, error? }`; create-time base→child feature-note move |
+| `migrateNote(connection, baseCwd, worktreeCwd, notePaths)` | invoke `git:migrate-note` → `{ ok, migrated?, error? }`; create-time base→child feature-note move for selected feature-note paths |
 | `restoreNotes(connection, baseCwd, worktreeCwd)` | invoke `git:restore-notes` → `{ ok, migrated?, error? }`; close-time child→base feature-note restore |
 | `deleteBranch(connection, cwd, branch, force?)` | invoke `git:delete-branch` → `{ ok, error? }` |
 | `branchMerged(connection, cwd, target, branch)` | invoke `git:branch-merged` → `{ merged, aheadCount }` |

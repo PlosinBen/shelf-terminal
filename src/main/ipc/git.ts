@@ -1,7 +1,7 @@
 import { ipcMain } from 'electron';
 import { IPC } from '@shared/ipc-channels';
 import { createConnector } from '../connector';
-import { migrateFeatureNote, restoreFeatureNotes } from '../worktree/note-migration';
+import { migrateFeatureNotes, restoreFeatureNotes } from '../worktree/note-migration';
 import { listFeatureNotes } from '../worktree/feature-notes';
 import { checkBranchMerged } from '../worktree/branch-merged';
 import { mergeBackFastForward } from '../worktree/merge-back';
@@ -115,11 +115,11 @@ export function registerGitHandlers(): void {
     IPC.GIT_MIGRATE_NOTE,
     async (
       _event,
-      payload: { connection: Connection; baseCwd: string; worktreeCwd: string; notePath?: string },
+      payload: { connection: Connection; baseCwd: string; worktreeCwd: string; notePaths: string[] },
     ): Promise<MigrateNoteResult> => {
       try {
         const connector = createConnector(payload.connection);
-        const res = await migrateFeatureNote(connector, payload.baseCwd, payload.worktreeCwd, payload.notePath);
+        const res = await migrateFeatureNotes(connector, payload.baseCwd, payload.worktreeCwd, payload.notePaths);
         return { ok: true, migrated: res.migrated };
       } catch (err: any) {
         // Fail-loud: given-but-missing / copy-failed surface to the caller, which

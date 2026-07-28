@@ -85,7 +85,7 @@ export function WorktreeDialog() {
     //    the fresh agent boots with it in place. Fail-loud + roll back the just-
     //    created worktree rather than booting a broken one.
     if (selectedNote) {
-      const mig = await window.shelfApi.git.migrateNote(connection, cwd, result.path, selectedNote);
+      const mig = await window.shelfApi.git.migrateNote(connection, cwd, result.path, [selectedNote]);
       if (!mig.ok) {
         await window.shelfApi.git.worktreeRemove(connection, cwd, result.path);
         setError(mig.error ?? 'Failed to migrate feature note');

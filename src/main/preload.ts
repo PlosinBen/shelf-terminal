@@ -95,8 +95,8 @@ contextBridge.exposeInMainWorld('shelfApi', {
       ipcRenderer.invoke(IPC.GIT_WORKTREE_ADD, { connection, cwd, branch, newBranch }),
     worktreeRemove: (connection: any, cwd: string, worktreePath: string) =>
       ipcRenderer.invoke(IPC.GIT_WORKTREE_REMOVE, { connection, cwd, worktreePath }),
-    migrateNote: (connection: any, baseCwd: string, worktreeCwd: string, notePath?: string) =>
-      ipcRenderer.invoke(IPC.GIT_MIGRATE_NOTE, { connection, baseCwd, worktreeCwd, notePath }),
+    migrateNote: (connection: any, baseCwd: string, worktreeCwd: string, notePaths: string[]) =>
+      ipcRenderer.invoke(IPC.GIT_MIGRATE_NOTE, { connection, baseCwd, worktreeCwd, notePaths }),
     restoreNotes: (connection: any, baseCwd: string, worktreeCwd: string) =>
       ipcRenderer.invoke(IPC.GIT_RESTORE_NOTES, { connection, baseCwd, worktreeCwd }),
     deleteBranch: (connection: any, cwd: string, branch: string, force?: boolean) =>
