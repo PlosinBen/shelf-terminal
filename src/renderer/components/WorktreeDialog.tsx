@@ -4,6 +4,7 @@ import { on, emit, emitAgent, Events } from '../events';
 import { enqueuePendingSend } from '../agentTabStore';
 import { debugLog } from '../debugLog';
 import { buildWorktreeChildConfig } from '../worktree-child-config';
+import { normalizeWorktreePrefillNotePaths } from '../worktree-prefill';
 import type { AgentProvider, FeatureNoteInfo } from '@shared/types';
 import { agentProviderEntries } from '@shared/agent-providers';
 
@@ -67,7 +68,7 @@ export function WorktreeDialog() {
 
   useEffect(() => {
     const off = on(Events.CREATE_WORKTREE, (index: number, prefill?: { branch?: string; notePaths?: string[] }) => {
-      const prefilledNotePaths = prefill?.notePaths?.map((notePath) => notePath.trim()).filter(Boolean) ?? [];
+      const prefilledNotePaths = normalizeWorktreePrefillNotePaths(prefill?.notePaths);
       setProjectIndex(index);
       setOpen(true);
       setInput(prefill?.branch ?? '');
