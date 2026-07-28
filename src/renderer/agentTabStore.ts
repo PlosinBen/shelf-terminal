@@ -324,6 +324,10 @@ export interface InitTabOpts {
 
 export function initTab(tabId: string, opts: InitTabOpts) {
   if (tabs.has(tabId)) return;  // idempotent
+  // diag: a fresh tab is created at initStatus:'starting'. On a remount this is
+  // the reset-default the pane can get wedged at (H1) if main's re-init doesn't
+  // re-send a terminal AGENT_INIT_STATUS. See copilot-idle investigation.
+  debugLog('diag:initstatus', `initTab fresh tab=${formatTabLogId(tabId)} provider=${opts.provider} → initStatus=starting`);
   const initial: AgentTabState = {
     sessionId: opts.sessionId,
     provider: opts.provider,
@@ -920,6 +924,11 @@ export function setInitStatus(
   error: string | null = null,
   phase: AgentInitPhase | null = null,
 ) {
+  // diag: log EVERY renderer-side initStatus transition (prev → next). This is
+  // the pane's source-of-truth for what the user sees — closes the H3 blind spot
+  // (a flip to 'starting' with no matching main emission / no remount).
+  const prev = peekAgentTab(tabId)?.initStatus ?? 'none';
+  debugLog('diag:initstatus', `set tab=${formatTabLogId(tabId)} ${prev} → ${status} phase=${phase ?? 'null'}`);
   update(tabId, (prev) => ({ ...prev, initStatus: status, initError: error, initPhase: phase }));
 }
 
