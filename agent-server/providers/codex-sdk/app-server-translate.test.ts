@@ -27,6 +27,124 @@ describe('translateCodexAppServerNotification', () => {
     ]);
   });
 
+  it('maps command execution items to fold_code cards', () => {
+    expect(translateCodexAppServerNotification('item/updated', {
+      item: {
+        id: 'cmd-1',
+        type: 'commandExecution',
+        command: 'npm test',
+        status: 'inProgress',
+        aggregatedOutput: null,
+        exitCode: null,
+      },
+    })).toEqual([
+      { type: 'message', msgId: 'cmd-1', msgType: 'fold_code', label: 'Command', subtitle: 'npm test' },
+    ]);
+    expect(translateCodexAppServerNotification('item/completed', {
+      item: {
+        id: 'cmd-1',
+        type: 'commandExecution',
+        command: 'npm test',
+        status: 'completed',
+        aggregatedOutput: 'ok',
+        exitCode: 0,
+      },
+    })).toEqual([
+      { type: 'message', msgId: 'cmd-1', msgType: 'fold_code', label: 'Command', subtitle: 'npm test', body: { content: 'ok' } },
+    ]);
+  });
+
+  it('marks failed command execution as an error card', () => {
+    expect(translateCodexAppServerNotification('item/completed', {
+      item: {
+        id: 'cmd-1',
+        type: 'commandExecution',
+        command: 'false',
+        status: 'failed',
+        aggregatedOutput: 'no',
+        exitCode: 1,
+      },
+    })).toEqual([
+      {
+        type: 'message',
+        msgId: 'cmd-1',
+        msgType: 'fold_code',
+        label: 'Command',
+        subtitle: 'false',
+        errorMessage: 'Command failed with exit code 1',
+        body: { content: 'no' },
+      },
+    ]);
+  });
+
+  it('maps file changes to a markdown card with real diff blocks when available', () => {
+    expect(translateCodexAppServerNotification('item/completed', {
+      item: {
+        id: 'file-1',
+        type: 'fileChange',
+        status: 'completed',
+        changes: [
+          { path: 'a.ts', kind: 'update', diff: '@@ -1 +1 @@\n-old\n+new' },
+          { path: 'b.ts', kind: 'add', diff: '' },
+        ],
+      },
+    })).toEqual([
+      {
+        type: 'message',
+        msgId: 'file-1',
+        msgType: 'fold_markdown',
+        label: 'File changes',
+        body: { content: '- update `a.ts`\n```diff\n@@ -1 +1 @@\n-old\n+new\n```\n- add `b.ts`' },
+      },
+    ]);
+  });
+
+  it('maps MCP and dynamic tool calls to markdown cards', () => {
+    expect(translateCodexAppServerNotification('item/completed', {
+      item: {
+        id: 'mcp-1',
+        type: 'mcpToolCall',
+        server: 'shelf',
+        tool: 'list_app_skills',
+        status: 'completed',
+        arguments: { appId: 'app-1' },
+        result: { content: [{ type: 'text', text: 'done' }] },
+        error: null,
+      },
+    })).toEqual([
+      {
+        type: 'message',
+        msgId: 'mcp-1',
+        msgType: 'fold_markdown',
+        label: 'MCP tool',
+        subtitle: 'shelf.list_app_skills',
+        body: { content: 'Arguments:\n```json\n{\n  "appId": "app-1"\n}\n```\n\nResult:\ndone' },
+      },
+    ]);
+    expect(translateCodexAppServerNotification('item/completed', {
+      item: {
+        id: 'dyn-1',
+        type: 'dynamicToolCall',
+        namespace: 'custom',
+        tool: 'fetch',
+        arguments: { url: 'https://example.com' },
+        status: 'failed',
+        contentItems: [{ type: 'inputText', text: 'boom' }],
+        success: false,
+      },
+    })).toEqual([
+      {
+        type: 'message',
+        msgId: 'dyn-1',
+        msgType: 'fold_markdown',
+        label: 'Tool',
+        subtitle: 'custom.fetch',
+        errorMessage: 'Tool call failed',
+        body: { content: 'Arguments:\n```json\n{\n  "url": "https://example.com"\n}\n```\n\nOutput:\nboom' },
+      },
+    ]);
+  });
+
   it('maps token usage updates to context status', () => {
     expect(translateCodexAppServerNotification('thread/tokenUsage/updated', {
       tokenUsage: {

@@ -15,6 +15,7 @@ class FakeAppServer {
   calls: RequestCall[] = [];
   closed = false;
   private notifications = new Map<string, (params: unknown) => void>();
+  private requestHandlers = new Map<string, (params: unknown) => unknown | Promise<unknown>>();
   private handlers = new Map<string, (params?: unknown) => unknown | Promise<unknown>>();
 
   constructor(handlers: Record<string, (params?: unknown) => unknown | Promise<unknown>> = {}) {
@@ -82,6 +83,16 @@ class FakeAppServer {
 
   onNotification(method: string, handler: (params: unknown) => void): void {
     this.notifications.set(method, handler);
+  }
+
+  onRequest(method: string, handler: (params: unknown) => unknown | Promise<unknown>): void {
+    this.requestHandlers.set(method, handler);
+  }
+
+  async serverRequest(method: string, params: unknown): Promise<unknown> {
+    const handler = this.requestHandlers.get(method);
+    if (!handler) throw new Error(`missing request handler ${method}`);
+    return await handler(params);
   }
 
   fire(method: string, params: unknown): void {
@@ -235,6 +246,96 @@ describe('Codex official app-server backend lifecycle', () => {
 
     expect(app.calls.find((call) => call.method === 'turn/interrupt')?.params).toEqual({ threadId: 'thread-1', turnId: 'turn-1' });
     expect(out.filter((m) => m.type === 'status' && m.state === 'idle')).toHaveLength(1);
+  });
+
+  it('bridges command execution approval requests to Shelf permission UI and returns the decision', async () => {
+    let approval!: Promise<unknown>;
+    let release!: () => void;
+    const finish = new Promise<void>((resolve) => { release = resolve; });
+    const app = new FakeAppServer({
+      'turn/start': async () => {
+        app.fire('turn/started', { threadId: 'thread-1', turn: { id: 'turn-1' } });
+        approval = app.serverRequest('item/commandExecution/requestApproval', {
+          threadId: 'thread-1',
+          turnId: 'turn-1',
+          itemId: 'cmd-1',
+          approvalId: 'approval-1',
+          command: 'touch a.txt',
+          cwd: '/repo',
+          reason: 'write file',
+          commandActions: [{ type: 'create_file' }],
+        });
+        await approval;
+        await finish;
+        app.fire('turn/completed', { threadId: 'thread-1', turn: { id: 'turn-1' } });
+        return { turn: { id: 'turn-1' } };
+      },
+    });
+    const backend = createCodexOfficialBackend({ createAppServer: () => app });
+    const out: OutgoingMessage[] = [];
+    const running = backend.query({ prompt: 'write file', cwd: '/repo' }, (m) => out.push(m));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(out).toContainEqual({
+      type: 'permission_request',
+      toolUseId: 'approval-1',
+      toolName: 'Command',
+      input: { command: 'touch a.txt', cwd: '/repo', reason: 'write file', commandActions: [{ type: 'create_file' }] },
+    });
+    backend.resolvePermission!('approval-1', true, undefined, 'session');
+    await expect(approval).resolves.toEqual({ decision: 'acceptForSession' });
+    release();
+    await running;
+  });
+
+  it('bridges file change and permission profile approvals with deny/allow responses', async () => {
+    let fileApproval!: Promise<unknown>;
+    let permissionApproval!: Promise<unknown>;
+    let release!: () => void;
+    const finish = new Promise<void>((resolve) => { release = resolve; });
+    const app = new FakeAppServer({
+      'turn/start': async () => {
+        app.fire('turn/started', { threadId: 'thread-1', turn: { id: 'turn-1' } });
+        fileApproval = app.serverRequest('item/fileChange/requestApproval', {
+          threadId: 'thread-1',
+          turnId: 'turn-1',
+          itemId: 'file-1',
+          reason: 'apply patch',
+          grantRoot: '/repo',
+        });
+        await fileApproval;
+        permissionApproval = app.serverRequest('item/permissions/requestApproval', {
+          threadId: 'thread-1',
+          turnId: 'turn-1',
+          itemId: 'perm-1',
+          cwd: '/repo',
+          reason: 'network',
+          permissions: { network: { enabled: true }, fileSystem: null },
+        });
+        await permissionApproval;
+        await finish;
+        app.fire('turn/completed', { threadId: 'thread-1', turn: { id: 'turn-1' } });
+        return { turn: { id: 'turn-1' } };
+      },
+    });
+    const backend = createCodexOfficialBackend({ createAppServer: () => app });
+    const out: OutgoingMessage[] = [];
+    const running = backend.query({ prompt: 'patch and network', cwd: '/repo' }, (m) => out.push(m));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(out.some((m) => m.type === 'permission_request' && m.toolUseId === 'file-1')).toBe(true);
+    backend.resolvePermission!('file-1', false, 'no');
+    await expect(fileApproval).resolves.toEqual({ decision: 'decline' });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(out.some((m) => m.type === 'permission_request' && m.toolUseId === 'perm-1')).toBe(true);
+    backend.resolvePermission!('perm-1', true, undefined, 'once');
+    await expect(permissionApproval).resolves.toEqual({
+      permissions: { network: { enabled: true } },
+      scope: 'turn',
+      strictAutoReview: false,
+    });
+    release();
+    await running;
   });
 
   it('reports app-server model/list capabilities and normalizes stale saved model intent', async () => {

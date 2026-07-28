@@ -19,7 +19,15 @@ import { serverLog } from '../../server-logger';
 interface CodexAppServerLike {
   request<T = unknown>(method: string, params?: unknown): Promise<T>;
   onNotification(method: string, handler: CodexAppServerNotificationHandler): void;
+  onRequest?(method: string, handler: (params: unknown) => unknown | Promise<unknown>): void;
   close(): void;
+}
+
+interface ApprovalResolution {
+  allow: boolean;
+  message?: string;
+  scope?: 'once' | 'session';
+  cancelled?: boolean;
 }
 
 const CODEX_SDK_SLASH_COMMANDS = [
@@ -81,6 +89,10 @@ export function createCodexOfficialBackend(deps: CodexOfficialDeps = {}): Server
   let activeThreadId: string | null = null;
   let activeTurnId: string | null = null;
   let resolveActiveTurn: (() => void) | null = null;
+  const pendingPermissionRequests = new Map<string, {
+    resolve: (value: ApprovalResolution) => void;
+    toolName: string;
+  }>();
   const spawnLoginRpc = deps.spawnLoginRpc ?? ((env: NodeJS.ProcessEnv) => spawnCodexAppServerRpc(env));
   const createAppServer = deps.createAppServer ?? ((env: NodeJS.ProcessEnv) => spawnCodexAppServerClient(env).client);
   const getShelfMcp = deps.getShelfMcp ?? getSharedShelfMcp;
@@ -98,6 +110,7 @@ export function createCodexOfficialBackend(deps: CodexOfficialDeps = {}): Server
       appServer = createAppServer(env);
       appServerAppId = appId;
       registerAppServerNotifications(appServer);
+      registerAppServerRequests(appServer);
     }
     if (!appServerInitialized) {
       await appServer.request('initialize', {
@@ -133,6 +146,112 @@ export function createCodexOfficialBackend(deps: CodexOfficialDeps = {}): Server
     ]) {
       forward(method);
     }
+  }
+
+  function registerAppServerRequests(client: CodexAppServerLike): void {
+    if (!client.onRequest) {
+      serverLog('warn', 'codex-app-server', 'app-server client does not support server request handlers');
+      return;
+    }
+    client.onRequest('item/commandExecution/requestApproval', (params) => handleCommandApprovalRequest(params));
+    client.onRequest('item/fileChange/requestApproval', (params) => handleFileChangeApprovalRequest(params));
+    client.onRequest('item/permissions/requestApproval', (params) => handlePermissionProfileApprovalRequest(params));
+    client.onRequest('execCommandApproval', (params) => handleLegacyExecApprovalRequest(params));
+    client.onRequest('applyPatchApproval', (params) => handleLegacyApplyPatchApprovalRequest(params));
+    client.onRequest('mcpServer/elicitation/request', (params) => {
+      serverLog('warn', 'codex-app-server', `unsupported MCP elicitation request: ${redactCodexAccountText(formatJsonForLog(summarizeApprovalInput(params)).slice(0, 500))}`);
+      return { action: 'cancel', content: null, _meta: null };
+    });
+  }
+
+  async function handleCommandApprovalRequest(params: unknown): Promise<Record<string, unknown>> {
+    const p = asRecord(params);
+    const toolUseId = stringValue(p?.approvalId) ?? stringValue(p?.itemId) ?? `codex-approval-${randomUUID()}`;
+    const command = stringValue(p?.command) ?? 'command';
+    const resolution = await requestPermission(toolUseId, 'Command', {
+      command,
+      cwd: stringValue(p?.cwd),
+      reason: stringValue(p?.reason),
+      commandActions: asArray(p?.commandActions),
+    });
+    return { decision: resolutionToAppServerDecision(resolution) };
+  }
+
+  async function handleFileChangeApprovalRequest(params: unknown): Promise<Record<string, unknown>> {
+    const p = asRecord(params);
+    const toolUseId = stringValue(p?.itemId) ?? `codex-file-approval-${randomUUID()}`;
+    const resolution = await requestPermission(toolUseId, 'File changes', {
+      reason: stringValue(p?.reason),
+      grantRoot: stringValue(p?.grantRoot),
+    });
+    return { decision: resolutionToAppServerDecision(resolution) };
+  }
+
+  async function handlePermissionProfileApprovalRequest(params: unknown): Promise<Record<string, unknown>> {
+    const p = asRecord(params);
+    const permissions = asRecord(p?.permissions) ?? {};
+    const toolUseId = stringValue(p?.itemId) ?? `codex-permission-approval-${randomUUID()}`;
+    const resolution = await requestPermission(toolUseId, 'Permissions', {
+      cwd: stringValue(p?.cwd),
+      reason: stringValue(p?.reason),
+      permissions,
+    });
+    if (!resolution.allow) return { permissions: {}, scope: 'turn', strictAutoReview: true };
+    const granted: Record<string, unknown> = {};
+    if (permissions.network) granted.network = permissions.network;
+    if (permissions.fileSystem) granted.fileSystem = permissions.fileSystem;
+    return { permissions: granted, scope: resolution.scope === 'session' ? 'session' : 'turn', strictAutoReview: false };
+  }
+
+  async function handleLegacyExecApprovalRequest(params: unknown): Promise<Record<string, unknown>> {
+    const p = asRecord(params);
+    const command = asArray(p?.command).map((part) => String(part)).join(' ') || 'command';
+    const toolUseId = stringValue(p?.approvalId) ?? stringValue(p?.callId) ?? `codex-exec-approval-${randomUUID()}`;
+    const resolution = await requestPermission(toolUseId, 'Command', {
+      command,
+      cwd: stringValue(p?.cwd),
+      reason: stringValue(p?.reason),
+      parsedCmd: asArray(p?.parsedCmd),
+    });
+    return { decision: resolutionToLegacyReviewDecision(resolution) };
+  }
+
+  async function handleLegacyApplyPatchApprovalRequest(params: unknown): Promise<Record<string, unknown>> {
+    const p = asRecord(params);
+    const toolUseId = stringValue(p?.callId) ?? `codex-patch-approval-${randomUUID()}`;
+    const resolution = await requestPermission(toolUseId, 'File changes', {
+      reason: stringValue(p?.reason),
+      grantRoot: stringValue(p?.grantRoot),
+      fileChanges: asRecord(p?.fileChanges) ?? {},
+    });
+    return { decision: resolutionToLegacyReviewDecision(resolution) };
+  }
+
+  function requestPermission(toolUseId: string, toolName: string, input: Record<string, unknown>): Promise<ApprovalResolution> {
+    if (!activeSend) {
+      serverLog('warn', 'codex-app-server', `approval requested without active turn: ${toolName} ${toolUseId}`);
+      return Promise.resolve({ allow: false, cancelled: true });
+    }
+    if (pendingPermissionRequests.has(toolUseId)) {
+      serverLog('warn', 'codex-app-server', `duplicate approval id from app-server: ${toolUseId}`);
+      return Promise.resolve({ allow: false, cancelled: true });
+    }
+    activeSend({ type: 'permission_request', toolUseId, toolName, input });
+    return new Promise((resolve) => {
+      pendingPermissionRequests.set(toolUseId, { resolve, toolName });
+    });
+  }
+
+  function resolutionToAppServerDecision(resolution: ApprovalResolution): string {
+    if (resolution.cancelled) return 'cancel';
+    if (!resolution.allow) return 'decline';
+    return resolution.scope === 'session' ? 'acceptForSession' : 'accept';
+  }
+
+  function resolutionToLegacyReviewDecision(resolution: ApprovalResolution): unknown {
+    if (resolution.cancelled) return 'abort';
+    if (!resolution.allow) return { denied: { rejection: resolution.message ?? 'Denied by user' } };
+    return resolution.scope === 'session' ? 'approved_for_session' : 'approved';
   }
 
   function logTokenUsageUpdate(params: unknown): void {
@@ -346,6 +465,16 @@ export function createCodexOfficialBackend(deps: CodexOfficialDeps = {}): Server
     setEffort(effort): void { currentEffort = effort; },
     setPermissionMode(mode): void { currentPermissionMode = mode; },
 
+    resolvePermission(toolUseId, allow, message, scope): void {
+      const pending = pendingPermissionRequests.get(toolUseId);
+      if (!pending) {
+        serverLog('warn', 'codex-app-server', `resolvePermission for unknown approval id: ${toolUseId}`);
+        return;
+      }
+      pendingPermissionRequests.delete(toolUseId);
+      pending.resolve({ allow, message, scope });
+    },
+
     startLogin(_cwd: string, send: SendFn): void {
       loginHandle?.cancel();
       const { rpc } = spawnLoginRpc(codexEnv(lastAppId));
@@ -384,6 +513,11 @@ export function createCodexOfficialBackend(deps: CodexOfficialDeps = {}): Server
 
     dispose(): void {
       resolveActiveTurn?.();
+      for (const [toolUseId, pending] of pendingPermissionRequests) {
+        serverLog('warn', 'codex-app-server', `disposing unresolved approval id: ${toolUseId} (${pending.toolName})`);
+        pending.resolve({ allow: false, cancelled: true });
+      }
+      pendingPermissionRequests.clear();
       appServer?.close();
       appServer = null;
       appServerInitialized = false;
@@ -647,6 +781,25 @@ function formatCodexAppServerGoalCard(raw: unknown): string {
     ...(tokenBudget != null ? [['Token budget', new Intl.NumberFormat('en-US').format(tokenBudget)]] : []),
   ];
   return `Codex goal:\n\n${mdTable(['Field', 'Value'], rows)}`;
+}
+
+function summarizeApprovalInput(raw: unknown): Record<string, unknown> {
+  const record = asRecord(raw);
+  if (!record) return {};
+  const out: Record<string, unknown> = {};
+  for (const key of ['threadId', 'turnId', 'itemId', 'approvalId', 'serverName', 'mode', 'message', 'url', 'reason', 'cwd', 'grantRoot']) {
+    const value = record[key];
+    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' || value == null) out[key] = value;
+  }
+  return out;
+}
+
+function formatJsonForLog(value: unknown): string {
+  try {
+    return JSON.stringify(value) ?? 'null';
+  } catch {
+    return '[unserializable]';
+  }
 }
 
 function asArray(value: unknown): unknown[] {

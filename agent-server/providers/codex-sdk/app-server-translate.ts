@@ -14,6 +14,8 @@ export function translateCodexAppServerNotification(
       return translateThreadStatus(params);
     case 'item/agentMessage/delta':
       return translateAgentMessageDelta(params, opts);
+    case 'item/started':
+    case 'item/updated':
     case 'item/completed':
       return translateCompletedItem(params, opts);
     case 'thread/tokenUsage/updated':
@@ -21,8 +23,6 @@ export function translateCodexAppServerNotification(
     case 'turn/completed':
       return [];
     case 'turn/started':
-    case 'item/started':
-    case 'item/updated':
     case 'account/rateLimits/updated':
     case 'mcpServer/startupStatus/updated':
       return [];
@@ -119,7 +119,163 @@ function translateCompletedItem(params: unknown, opts: CodexAppServerTranslateOp
       content: 'Context compacted.',
     }];
   }
+  if (itemType === 'reasoning') {
+    const text = asArray(item.summary).map(stringValue).filter((value): value is string => !!value).join('\n')
+      || asArray(item.content).map(stringValue).filter((value): value is string => !!value).join('\n');
+    return [{
+      type: 'message',
+      msgId: id,
+      msgType: 'fold_text',
+      label: 'Reasoning',
+      body: { content: redactText(text, opts.redactValues), tone: 'muted' },
+    }];
+  }
+  if (itemType === 'plan') {
+    const text = stringValue(item.text);
+    return text ? [{ type: 'plan', content: redactText(text, opts.redactValues) }] : [];
+  }
+  if (itemType === 'commandExecution' || itemType === 'command_execution') {
+    return [commandExecutionToMessage(id, item, opts)];
+  }
+  if (itemType === 'fileChange' || itemType === 'file_change') {
+    return [fileChangeToMessage(id, item, opts)];
+  }
+  if (itemType === 'mcpToolCall' || itemType === 'mcp_tool_call') {
+    return [mcpToolCallToMessage(id, item, opts)];
+  }
+  if (itemType === 'dynamicToolCall' || itemType === 'dynamic_tool_call') {
+    return [dynamicToolCallToMessage(id, item, opts)];
+  }
+  if (itemType === 'webSearch' || itemType === 'web_search') {
+    const query = stringValue(item.query);
+    return query ? [{
+      type: 'message',
+      msgId: id,
+      msgType: 'note',
+      content: `Web search: ${redactText(query, opts.redactValues)}`,
+    }] : [];
+  }
   return [];
+}
+
+function commandExecutionToMessage(id: string, item: Record<string, unknown>, opts: CodexAppServerTranslateOptions): OutgoingMessage {
+  const status = stringValue(item.status);
+  const command = stringValue(item.command) ?? 'command';
+  const output = stringValue(item.aggregatedOutput ?? item.aggregated_output) ?? '';
+  const exitCode = numberValue(item.exitCode ?? item.exit_code);
+  return {
+    type: 'message',
+    msgId: id,
+    msgType: 'fold_code',
+    label: 'Command',
+    subtitle: redactText(command, opts.redactValues),
+    ...(status === 'failed' ? { errorMessage: `Command failed with exit code ${exitCode ?? 'unknown'}` } : {}),
+    ...((output || status === 'completed' || status === 'failed' || status === 'declined')
+      ? { body: { content: redactText(output, opts.redactValues) } }
+      : {}),
+  };
+}
+
+function fileChangeToMessage(id: string, item: Record<string, unknown>, opts: CodexAppServerTranslateOptions): OutgoingMessage {
+  const status = stringValue(item.status);
+  return {
+    type: 'message',
+    msgId: id,
+    msgType: 'fold_markdown',
+    label: 'File changes',
+    ...(status === 'failed' ? { errorMessage: 'File change failed' } : {}),
+    ...(status === 'declined' ? { errorMessage: 'File change declined' } : {}),
+    body: { content: redactText(renderFileChanges(item.changes), opts.redactValues) },
+  };
+}
+
+function renderFileChanges(raw: unknown): string {
+  const lines: string[] = [];
+  for (const entry of asArray(raw)) {
+    const change = asRecord(entry);
+    const path = stringValue(change?.path) ?? 'unknown';
+    const kind = stringValue(change?.kind) ?? 'change';
+    const diff = stringValue(change?.diff);
+    lines.push(`- ${kind} \`${path}\``);
+    if (diff?.trim()) lines.push(`\`\`\`diff\n${diff}\n\`\`\``);
+  }
+  return lines.join('\n');
+}
+
+function mcpToolCallToMessage(id: string, item: Record<string, unknown>, opts: CodexAppServerTranslateOptions): OutgoingMessage {
+  const server = stringValue(item.server) ?? 'mcp';
+  const tool = stringValue(item.tool) ?? 'tool';
+  const status = stringValue(item.status);
+  const contentParts = renderArgsAndOutput(item.arguments, mcpResultText(asRecord(item.result)?.content), 'Result', opts);
+  const error = stringValue(asRecord(item.error)?.message) ?? 'MCP tool call failed';
+  return {
+    type: 'message',
+    msgId: id,
+    msgType: 'fold_markdown',
+    label: 'MCP tool',
+    subtitle: `${server}.${tool}`,
+    ...(status === 'failed' ? { errorMessage: redactText(error, opts.redactValues) } : {}),
+    ...((contentParts || status === 'completed' || status === 'failed') ? { body: { content: contentParts } } : {}),
+  };
+}
+
+function dynamicToolCallToMessage(id: string, item: Record<string, unknown>, opts: CodexAppServerTranslateOptions): OutgoingMessage {
+  const namespace = stringValue(item.namespace);
+  const tool = stringValue(item.tool) ?? 'tool';
+  const status = stringValue(item.status);
+  const contentParts = renderArgsAndOutput(item.arguments, dynamicToolOutputText(item.contentItems ?? item.content_items), 'Output', opts);
+  return {
+    type: 'message',
+    msgId: id,
+    msgType: 'fold_markdown',
+    label: 'Tool',
+    subtitle: namespace ? `${namespace}.${tool}` : tool,
+    ...(status === 'failed' || item.success === false ? { errorMessage: 'Tool call failed' } : {}),
+    ...((contentParts || status === 'completed' || status === 'failed') ? { body: { content: contentParts } } : {}),
+  };
+}
+
+function renderArgsAndOutput(args: unknown, output: string, outputHeading: string, opts: CodexAppServerTranslateOptions): string {
+  const contentParts: string[] = [];
+  contentParts.push('Arguments:');
+  contentParts.push('```json');
+  contentParts.push(redactText(formatJson(args), opts.redactValues));
+  contentParts.push('```');
+  if (output) {
+    contentParts.push('');
+    contentParts.push(`${outputHeading}:`);
+    contentParts.push(redactText(output, opts.redactValues));
+  }
+  return contentParts.join('\n');
+}
+
+function mcpResultText(raw: unknown): string {
+  return asArray(raw).map(contentBlockToText).filter(Boolean).join('\n');
+}
+
+function dynamicToolOutputText(raw: unknown): string {
+  return asArray(raw)
+    .map((entry) => stringValue(asRecord(entry)?.text) ?? stringValue(asRecord(entry)?.imageUrl) ?? stringValue(asRecord(entry)?.audioUrl))
+    .filter((value): value is string => !!value)
+    .join('\n');
+}
+
+function contentBlockToText(raw: unknown): string {
+  const block = asRecord(raw);
+  if (!block) return '';
+  if (block.type === 'text') return stringValue(block.text) ?? '';
+  if (block.type === 'resource_link') return stringValue(block.uri) ?? stringValue(block.name) ?? '';
+  const resource = asRecord(block.resource);
+  if (block.type === 'resource' && typeof resource?.text === 'string') return resource.text;
+  return '';
+}
+
+function formatJson(value: unknown): string {
+  try {
+    return JSON.stringify(value, null, 2) ?? 'null';
+  } catch {
+    return '[unserializable]';
+  }
 }
 
 function translateTokenUsage(params: unknown): OutgoingMessage[] {
@@ -135,6 +291,10 @@ function collectText(raw: unknown): string | null {
     .filter((entry): entry is string => !!entry)
     .join('');
   return text || null;
+}
+
+function asArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
 }
 
 function stringValue(value: unknown): string | null {
