@@ -200,13 +200,13 @@ export function App() {
       addTab(projectIndex, undefined, undefined, undefined, 'web', undefined, url);
     });
 
-    const offProposeWorktreeCreate = window.shelfApi.worktree.onProposeCreate(({ projectId, branch, notePath }) => {
+    const offProposeWorktreeCreate = window.shelfApi.worktree.onProposeCreate(({ projectId, branch, notePaths }) => {
       const projectIndex = projects.findIndex((p) => p.config.id === projectId);
       if (projectIndex === -1) {
         console.warn(`[worktree] propose-create for unknown project ${projectId}`);
         return;
       }
-      emit(Events.CREATE_WORKTREE, projectIndex, { branch, notePath });
+      emit(Events.CREATE_WORKTREE, projectIndex, { branch, notePaths });
     });
 
     const offProposeWorktreeFinish = window.shelfApi.worktree.onProposeFinish(({ projectId }) => {

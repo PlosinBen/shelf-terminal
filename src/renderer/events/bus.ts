@@ -33,7 +33,7 @@ export const Events = {
   OPEN_FOLDER_PICKER: 'open-folder-picker',
   ADD_PROJECT: 'add-project',       // (ProjectConfig)
   TOGGLE_SPLIT: 'toggle-split',     // (projectIndex)
-  CREATE_WORKTREE: 'create-worktree', // (projectIndex, prefill?: { branch?, notePath? })
+  CREATE_WORKTREE: 'create-worktree', // (projectIndex, prefill?: { branch?, notePaths? })
   WORKTREE_CLOSE: 'worktree-close',   // (projectIndex, kind: 'finish' | 'abandon')
   WORKTREE_FINISH_COMPLETED: 'worktree-finish-completed', // ({ subProjectId, parentProjectId, featureBranch, targetBranch })
   OPEN_PM: 'open-pm',                 // ()

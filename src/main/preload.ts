@@ -111,8 +111,8 @@ contextBridge.exposeInMainWorld('shelfApi', {
     // are user-initiated in the renderer — #lifecycle).
     finishMergeBack: (payload: { connection: any; featureCwd: string; baseCwd: string; baseBranch: string; featureBranch: string }) =>
       ipcRenderer.invoke(IPC.WORKTREE_FINISH_MERGE_BACK, payload),
-    onProposeCreate: (callback: (payload: { projectId: string; branch?: string; notePath?: string }) => void) => {
-      const listener = (_e: Electron.IpcRendererEvent, payload: { projectId: string; branch?: string; notePath?: string }) => callback(payload);
+    onProposeCreate: (callback: (payload: { projectId: string; branch?: string; notePaths?: string[] }) => void) => {
+      const listener = (_e: Electron.IpcRendererEvent, payload: { projectId: string; branch?: string; notePaths?: string[] }) => callback(payload);
       ipcRenderer.on(IPC.WORKTREE_PROPOSE_CREATE, listener);
       return () => ipcRenderer.removeListener(IPC.WORKTREE_PROPOSE_CREATE, listener);
     },

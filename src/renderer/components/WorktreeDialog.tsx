@@ -66,7 +66,8 @@ export function WorktreeDialog() {
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    const off = on(Events.CREATE_WORKTREE, (index: number, prefill?: { branch?: string; notePath?: string }) => {
+    const off = on(Events.CREATE_WORKTREE, (index: number, prefill?: { branch?: string; notePaths?: string[] }) => {
+      const prefilledNotePaths = prefill?.notePaths?.map((notePath) => notePath.trim()).filter(Boolean) ?? [];
       setProjectIndex(index);
       setOpen(true);
       setInput(prefill?.branch ?? '');
@@ -74,7 +75,7 @@ export function WorktreeDialog() {
       setFailurePrompt(null);
       setCreating(false);
       setNotes([]);
-      setSelectedNotes(prefill?.notePath ? new Set([prefill.notePath]) : new Set());
+      setSelectedNotes(new Set(prefilledNotePaths));
       setBaseBranch(null);
 
       // Fetch the base repo's in-progress notes for the picker. Pre-select when
@@ -90,7 +91,7 @@ export function WorktreeDialog() {
           .listFeatureNotes(proj.config.connection, proj.config.cwd)
           .then((found) => {
             setNotes(found);
-            if (!prefill?.notePath && found.length === 1) setSelectedNotes(new Set([found[0].path]));
+            if (prefilledNotePaths.length === 0 && found.length === 1) setSelectedNotes(new Set([found[0].path]));
           })
           .catch(() => { /* picker just shows no notes; create still works */ });
       }
