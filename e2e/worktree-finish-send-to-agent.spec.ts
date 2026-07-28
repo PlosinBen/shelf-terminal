@@ -59,6 +59,21 @@ function seed(userDataDir: string, base: string, feature: string) {
   fs.writeFileSync(path.join(userDataDir, 'projects.json'), JSON.stringify(projects), 'utf-8');
 }
 
+function readLogText(userDataDir: string): string {
+  const root = path.join(userDataDir, 'logs');
+  if (!fs.existsSync(root)) return '';
+  const files: string[] = [];
+  const walk = (dir: string) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const abs = path.join(dir, entry.name);
+      if (entry.isDirectory()) walk(abs);
+      else files.push(abs);
+    }
+  };
+  walk(root);
+  return files.map((file) => fs.readFileSync(file, 'utf-8')).join('\n');
+}
+
 async function openAgentInSub(page: Page) {
   await page.locator('.sidebar-item.worktree-child', { hasText: 'feature' }).click();
   const prompt = page.locator('.connect-prompt');
@@ -84,7 +99,7 @@ test.describe('finish failure → Send to agent', () => {
     seed(userDataDir, base, feature);
     app = await electron.launch({
       args: [path.join(__dirname, '..'), `--user-data-dir=${userDataDir}`],
-      env: { ...process.env, SHELF_TEST_MODE: '1', NODE_ENV: 'test' } as Record<string, string>,
+      env: { ...process.env, SHELF_TEST_MODE: '1', NODE_ENV: 'test', LOG_LEVEL: 'info' } as Record<string, string>,
     });
     page = await app.firstWindow();
     await page.waitForSelector('.app', { timeout: 10_000 });
@@ -114,6 +129,16 @@ test.describe('finish failure → Send to agent', () => {
     await expect(err).toContainText("rebase this worktree onto 'main'");
     await expect(err).not.toContainText("merge 'main' into this worktree");
     await expect(page.locator('.sidebar-item.worktree-child', { hasText: 'feature' })).toHaveCount(1);
+
+    await expect.poll(() => readLogText(userDataDir), { timeout: 5_000 }).toContain('worktree-close');
+    const logs = readLogText(userDataDir);
+    expect(logs).toContain('"operation":"finish"');
+    expect(logs).toContain('"failedStep":"mergeBack"');
+    expect(logs).toContain('"subProjectId":"wt-sta-sub"');
+    expect(logs).toContain('"parentProjectId":"wt-sta-base"');
+    expect(logs).toContain('"featureBranch":"feature"');
+    expect(logs).toContain('"targetBranch":"main"');
+    expect(logs).toContain('fast-forward');
 
     // Send to agent → popup closes and the error lands as a queued user message.
     await err.locator('button', { hasText: 'Send to agent' }).click();

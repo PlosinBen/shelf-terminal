@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useStore } from '../store';
 import { on, emit, emitAgent, Events } from '../events';
 import { enqueuePendingSend } from '../agentTabStore';
+import { debugLog } from '../debugLog';
 import type { BranchMergedInfo, GitBranchInfo, WorktreeCloseKind } from '@shared/types';
 
 // User-committed finish/abandon popup for a worktree sub-project (#lifecycle).
@@ -21,6 +22,20 @@ import type { BranchMergedInfo, GitBranchInfo, WorktreeCloseKind } from '@shared
 interface CloseState {
   subProjectId: string;
   kind: WorktreeCloseKind;
+}
+
+function logCloseFailure(input: {
+  operation: WorktreeCloseKind;
+  subProjectId: string;
+  parentProjectId?: string;
+  featureBranch?: string;
+  targetBranch?: string;
+  parentCwd?: string;
+  featureCwd?: string;
+  failedStep: string;
+  error: string;
+}) {
+  debugLog('worktree-close', JSON.stringify(input));
 }
 
 export function WorktreeCloseGate() {
@@ -105,7 +120,17 @@ export function WorktreeCloseGate() {
   const approve = async () => {
     if (busy) return;
     if (!parent) {
-      setError('worktree parent project not found');
+      const msg = 'worktree parent project not found';
+      logCloseFailure({
+        operation: state.kind,
+        subProjectId: state.subProjectId,
+        parentProjectId: sub.config.parentProjectId,
+        featureBranch: branch,
+        featureCwd: sub.config.cwd,
+        failedStep: 'missingParentProject',
+        error: msg,
+      });
+      setError(msg);
       return;
     }
     setBusy(true);
@@ -128,7 +153,19 @@ export function WorktreeCloseGate() {
       if (mb.outcome !== 'merged') {
         // busy / non-ff / feature-dirty / base-dirty / error → show it; DON'T
         // tear down. The user can Send-to-agent (all errors, uniformly) or fix + retry.
-        setError(mb.error ?? `merge-back failed (${mb.outcome})`);
+        const msg = mb.error ?? `merge-back failed (${mb.outcome})`;
+        logCloseFailure({
+          operation: state.kind,
+          subProjectId: state.subProjectId,
+          parentProjectId: parent.config.id,
+          featureBranch,
+          targetBranch: target,
+          parentCwd,
+          featureCwd,
+          failedStep: 'mergeBack',
+          error: msg,
+        });
+        setError(msg);
         setBusy(false);
         return;
       }
@@ -138,7 +175,19 @@ export function WorktreeCloseGate() {
     // is a no-op; failure keeps the worktree so the ignored note cannot be erased.
     const restored = await window.shelfApi.git.restoreNotes(parentConn, parentCwd, featureCwd);
     if (!restored.ok) {
-      setError(restored.error ?? 'failed to restore feature notes');
+      const msg = restored.error ?? 'failed to restore feature notes';
+      logCloseFailure({
+        operation: state.kind,
+        subProjectId: state.subProjectId,
+        parentProjectId: parent.config.id,
+        featureBranch,
+        targetBranch: target,
+        parentCwd,
+        featureCwd,
+        failedStep: 'restoreNotes',
+        error: msg,
+      });
+      setError(msg);
       setBusy(false);
       return;
     }
@@ -146,7 +195,19 @@ export function WorktreeCloseGate() {
     // Teardown: remove the worktree dir, then delete the (now unchecked-out) branch.
     const rm = await window.shelfApi.git.worktreeRemove(parentConn, parentCwd, featureCwd);
     if (!rm.ok) {
-      setError(rm.error ?? 'failed to remove worktree');
+      const msg = rm.error ?? 'failed to remove worktree';
+      logCloseFailure({
+        operation: state.kind,
+        subProjectId: state.subProjectId,
+        parentProjectId: parent.config.id,
+        featureBranch,
+        targetBranch: target,
+        parentCwd,
+        featureCwd,
+        failedStep: 'worktreeRemove',
+        error: msg,
+      });
+      setError(msg);
       setBusy(false);
       return;
     }
@@ -158,7 +219,19 @@ export function WorktreeCloseGate() {
       const del = await window.shelfApi.git.deleteBranch(parentConn, parentCwd, featureBranch, force);
       if (!del.ok) {
         // Worktree already gone; a leftover branch is a loud anomaly, not data loss.
-        setError(del.error ?? 'worktree removed but branch delete failed');
+        const msg = del.error ?? 'worktree removed but branch delete failed';
+        logCloseFailure({
+          operation: state.kind,
+          subProjectId: state.subProjectId,
+          parentProjectId: parent.config.id,
+          featureBranch,
+          targetBranch: target,
+          parentCwd,
+          featureCwd,
+          failedStep: 'deleteBranch',
+          error: msg,
+        });
+        setError(msg);
         setBusy(false);
         return;
       }
