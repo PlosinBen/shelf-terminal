@@ -51,7 +51,7 @@ Authoritative definition: the `REGISTRY` constant and `handleAppTool` in `src/ma
 | `app_skill.delete_file` | `{ name, path }` | `{ name, path }` | no (write — confirm) | `delete_app_skill_file` |
 | `web.fetch` | `{ url, method?, headers?, body? }` | `{ status, headers, body }` (raw response) | no — gated **in main** per origin (not the provider confirm; see below) | `browser_fetch` |
 | `web.open` | `{ url, reason? }` | `{ opened: true, url, message }` | no — gated **in main** per call, Open/Deny only (see below) | `browser_open` |
-| `worktree.propose_create` | `{ branch?, note? }` | `{ opened: true, message }` | no — opens UI only | `propose_worktree_create` |
+| `worktree.propose_create` | `{ branch?, note?, notes? }` | `{ opened: true, message }` | no — opens UI only | `propose_worktree_create` |
 | `worktree.propose_finish` | — | `{ opened: true, message }` | no — opens UI only; errors outside a worktree | `propose_worktree_finish` |
 
 **Errors (`ok:false`):** missing/blank `name` / `content` / `path` → arg error; `app_skill.get` / `*_file` on absent skill → `skill not found: <name>`; `read_file` on a reserved/invalid path → `invalid or reserved skill file path: <path>`, on an absent file → `file not found: <path>`. See guards below for `update` / `*_file`. `delete` (whole-skill) is **deliberately not registered** — agents cannot delete skills (UI-only, same stance as unlock).
@@ -88,4 +88,4 @@ Like `web.fetch`, `browser_open` is **skip-confirm** on claude (`canUseTool` sho
 
 ### `worktree.propose_*` — agent drafts, user commits (`context/worktree` worktree#1)
 
-`propose_worktree_create({ branch?, note? })` sends `{ projectId, branch?, notePath? }` to open the New Worktree dialog. `propose_worktree_finish()` sends `{ projectId }` to open the Finish gate. Both return an acknowledgement only: the user must click Create or Finish before any git action occurs. `propose_worktree_finish` first resolves `ctx.projectId` against the cached project list and returns `{ ok:false }` without IPC when it is not a worktree (`parentProjectId` absent).
+`propose_worktree_create({ branch?, note?, notes? })` sends `{ projectId, branch?, notePaths }` to open the New Worktree dialog. `note` is the legacy single-note alias; `notes` is the preferred multi-note list. Main trims `branch`, trims note path strings, drops empty note paths, and deduplicates `note` + `notes` into `notePaths: string[]` while preserving first-seen order. `propose_worktree_finish()` sends `{ projectId }` to open the Finish gate. Both return an acknowledgement only: the user must click Create or Finish before any git action occurs. `propose_worktree_finish` first resolves `ctx.projectId` against the cached project list and returns `{ ok:false }` without IPC when it is not a worktree (`parentProjectId` absent).

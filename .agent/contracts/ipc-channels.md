@@ -79,7 +79,7 @@ Type-specific connector helpers are surfaced as their own namespaces:
 | Method | Shape |
 |--------|-------|
 | `finishMergeBack(payload)` | invoke `worktree:finish-merge-back` → `FinishMergeBackResult`; `payload = { connection, featureCwd, baseCwd, baseBranch, featureBranch }`; outcome is `'merged' \| 'busy' \| 'non-ff' \| 'feature-dirty' \| 'base-dirty' \| 'error'` |
-| `onProposeCreate(cb(payload))` | recv `worktree:propose-create` → `{ projectId, branch?, notePath? }`; opens the New Worktree dialog only |
+| `onProposeCreate(cb(payload))` | recv `worktree:propose-create` → `{ projectId, branch?, notePaths?: string[] }`; opens the New Worktree dialog only |
 | `onProposeFinish(cb(payload))` | recv `worktree:propose-finish` → `{ projectId }`; opens the Finish gate only |
 
 Renderer-local worktree completion uses the event bus, not IPC: `worktree-finish-completed` carries `{ subProjectId, parentProjectId, featureBranch, targetBranch }` after every close step succeeds.

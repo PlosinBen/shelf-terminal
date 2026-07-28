@@ -81,3 +81,11 @@ related:
 **Reason:** These flows mutate git state and can stop midway. The user needs the exact failure immediately for recovery, while logs preserve operation, project ids, branches/targets, cwd/worktree paths, failed step, and full error text after the dialog is closed.
 
 **Do not change casually because:** Hiding rollback or teardown details makes partial git-state transactions hard to repair and violates the fail-loud rule for possible data loss or orphaned worktrees.
+
+## worktree#10 — Create proposals accept legacy single-note and preferred multi-note inputs  ·  [Decision]
+
+**Decision:** `propose_worktree_create` accepts `note?: string` as a legacy alias and `notes?: string[]` as the preferred multi-note input. Main normalizes both into a trimmed, deduped `notePaths: string[]` proposal payload before renderer prefill. The fake provider's compact `worktree_create:<branch> [<note>]` command remains single-note shorthand; multi-note behavior is covered through direct app-tool, MCP schema, and renderer prefill tests.
+
+**Reason:** Older agents and E2E smoke paths may still call the single-note form, while the New Worktree dialog and create-time migration already support selecting and moving several feature notes as one batch. Normalizing at the bridge boundary keeps renderer code on the current payload shape and keeps the proposal tool side-effect free.
+
+**Do not change casually because:** Removing `note` would break existing callers, and moving merge/dedup logic downstream would reintroduce multiple prefill shapes in the renderer. Expanding the fake shorthand would add another mini-parser that is not part of the model-facing contract.

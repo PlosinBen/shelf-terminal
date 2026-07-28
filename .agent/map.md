@@ -195,6 +195,7 @@ title: shelf-terminal — Intent → File Index
 | 頁內搜尋 | `components/SearchBar.tsx` | terminal tab 走 xterm SearchAddon；agent/web tab 走 main findInPage（`shelfApi.find`）+ 命中計數 |
 | Settings 面板 | `components/SettingsPanel.tsx` | 左側 tab 分頁（Terminal / Agent / Models / PM Agent / Web / Backup / Shortcuts） |
 | Worktree 建立 | `components/WorktreeDialog.tsx` | 顯示 target、接收 branch/note prefill、選 boot provider 後建立 sub-project |
+| Worktree proposal prefill helper | `worktree-prefill.ts` | 純函式正規化 New Worktree proposal 帶入的多 note path prefill |
 | Worktree 關閉 gate | `components/WorktreeCloseGate.tsx` | Finish/Abandon close transaction：merge-back、note restore、teardown、branch delete、completion event |
 | Project-level notice banner | `components/ProjectNoticeBanner.tsx` + `project-notice.ts` | Parent project completion notice UI + latest-wins/dismiss/timeout state helpers |
 | 刪除確認 | `components/RemoveConfirmDialog.tsx` | Remove project 確認 modal，可勾選清理 worktree files |
