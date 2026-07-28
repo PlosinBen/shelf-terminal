@@ -794,8 +794,16 @@ export function createCodexOfficialBackend(deps: CodexOfficialDeps = {}): Server
 function toCodexAppServerInput(prompt: string, images: string[] = []): Array<Record<string, unknown>> {
   const input: Array<Record<string, unknown>> = [];
   if (prompt.trim()) input.push({ type: 'text', text: prompt, text_elements: [] });
-  for (const image of images) input.push({ type: 'localImage', path: image });
+  for (const image of images) {
+    input.push(isCodexAppServerImageUrl(image)
+      ? { type: 'image', url: image }
+      : { type: 'localImage', path: image });
+  }
   return input;
+}
+
+function isCodexAppServerImageUrl(image: string): boolean {
+  return /^data:image\/[^;,]+;base64,/i.test(image) || /^https?:\/\//i.test(image);
 }
 
 function formatCodexAppServerMcpCard(raw: unknown): string {

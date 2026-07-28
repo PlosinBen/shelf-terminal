@@ -206,6 +206,22 @@ describe('Codex official app-server backend lifecycle', () => {
     expect(out.find((m) => m.type === 'error')).toBeUndefined();
   });
 
+  it('sends remote image URLs as app-server image URL input', async () => {
+    const app = new FakeAppServer();
+    const backend = createCodexOfficialBackend({ createAppServer: () => app });
+    const out: OutgoingMessage[] = [];
+
+    await backend.query({ prompt: 'see', cwd: '/repo', images: ['https://example.test/a.png'] }, (m) => out.push(m));
+
+    expect(app.calls.find((call) => call.method === 'turn/start')?.params).toMatchObject({
+      input: [
+        { type: 'text', text: 'see', text_elements: [] },
+        { type: 'image', url: 'https://example.test/a.png' },
+      ],
+    });
+    expect(out.find((m) => m.type === 'error')).toBeUndefined();
+  });
+
   it('applies config-edit locally without calling app-server turn routes', async () => {
     const app = new FakeAppServer();
     const backend = createCodexOfficialBackend({ createAppServer: () => app });
