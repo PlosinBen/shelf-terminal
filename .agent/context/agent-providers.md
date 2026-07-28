@@ -395,3 +395,28 @@ SDK 0.3.159 **並存**兩種 compact 完成訊號:`status` 形狀(`subtype:'stat
 **Do not change casually because：** 不要把 TypeScript SDK 加回 production path 當 fallback；那會重建 hybrid transport 問題。若 app-server 有缺口，應在 app-server request/notification bridge 補齊或明確 unsupported，而不是讓同一 provider 在 SDK/app-server 間切換。
 
 **Related：** `agent-providers#32`（quota/usage 走 app-server）、`agent-providers#15`（per-appId `CODEX_HOME` device auth）、`UPSTREAM_WATCH.md` Codex background-task tracker。
+
+## agent-providers#34 — Codex app-server image input must distinguish data URLs from local paths  ·  [Gotcha]
+
+**Symptom：** Sending a pasted screenshot/image through `codex-offical` can fail with Codex trying to
+read a path that starts with `data:image/png;base64,...`, eventually surfacing a local-image read
+error such as "File name too long".
+
+**Root cause：** Shelf renderer attachments are carried to providers as `images?: string[]`, and
+renderer-originated images are data URLs. Codex app-server has separate `UserInput` variants:
+`image.url` for image URLs/data URIs, and `localImage.path` for filesystem paths. Mapping every
+string to `localImage.path` makes app-server treat the whole data URI as a filename.
+
+**Fix / note：** The Codex official provider boundary classifies image strings before calling
+app-server: `data:image/...;base64,...` and `http(s)://...` are sent as `{ type: 'image', url }`;
+all other strings remain `{ type: 'localImage', path }` for local-path compatibility. Do not change
+the renderer attachment contract or IPC shape for this; provider-local translation owns the
+Codex-specific distinction.
+
+**Do not change casually because：** Collapsing images back to only `localImage.path` reintroduces
+the pasted-image failure. Conversely, converting every string to `image.url` would break internal
+or test callers that intentionally pass filesystem paths.
+
+**Related：** `agent-providers#1`（provider 差異封裝在 provider 內）、`agent-providers#33`
+（`codex-offical` app-server-only path）、`contracts/agent-wire-protocol`（Shelf wire still carries
+`images?: string[]`）。
