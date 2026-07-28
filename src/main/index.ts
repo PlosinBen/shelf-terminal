@@ -11,6 +11,7 @@ import { shouldInstallAppMenu } from './menu-platform';
 import { cleanupConnectors } from './connector';
 import { log, setLogLevel, setFileWriter } from '@shared/logger';
 import { setDiagWriter } from '@shared/diag-log';
+import { setChannelWriter } from './channel-log';
 import { applyUserDataIsolation } from './user-data-path';
 import { migratePmNotes } from './migrations/migrate-pm-notes';
 import { handlePmSend, handleTabEvent, stopGeneration, setWritePtyFn, initAwayMode, initPmActive, initTelegramBridge, setProjectsProvider, setStateChangeCallback, stopTelegram, setMessageCallback, setCallbackQueryHandler, setStopCallback, handlePtyData, handlePtyRemove, handlePtyClear } from './pm';
@@ -166,6 +167,17 @@ app.whenReady().then(async () => {
     const dir = path.join(logBaseDir, 'diag');
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     fs.appendFileSync(path.join(dir, `init-${mmdd}.log`), line + '\n');
+  });
+
+  // Named-channel log sink — destination for agent-server wireLogger.channel(name)
+  // records. Each channel is its own file under logs/<channel>/, keeping a feature's
+  // stream out of the main log. (Channel names are sanitized in channel-log.ts.)
+  setChannelWriter((channel, line) => {
+    const now = new Date();
+    const mmdd = `${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
+    const dir = path.join(logBaseDir, channel);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.appendFileSync(path.join(dir, `${mmdd}.log`), line + '\n');
   });
 
   const envLogLevel = process.env.LOG_LEVEL as import('../shared/types').LogLevel | undefined;

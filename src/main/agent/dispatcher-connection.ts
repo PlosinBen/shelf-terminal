@@ -11,6 +11,7 @@
 // untouched fallback until the dispatcher path is E2E-proven, then flipped.
 import { log } from '@shared/logger';
 import { diag } from '@shared/diag-log';
+import { channelLog } from '../channel-log';
 import type { ConnectionHealth } from '@shared/types';
 import type { AgentEvent } from './types';
 import { ConnectionHealthTracker, DEFAULT_HEALTH_THRESHOLDS } from './connection-health';
@@ -138,6 +139,13 @@ export function createDispatcherConnection(deps: DispatcherConnectionDeps): Disp
         raw === 'error' ? 'error' : raw === 'warn' ? 'warn' : raw === 'debug' ? 'debug' : 'info';
       const tag = typeof parsed.tag === 'string' ? parsed.tag : 'agent-server';
       const msg = typeof parsed.msg === 'string' ? parsed.msg : String(parsed.msg);
+      // A named channel (wireLogger.channel) → its own file at main; keeps the
+      // feature's stream out of the main log. See src/main/channel-log.ts.
+      const channel = typeof parsed.channel === 'string' ? parsed.channel : undefined;
+      if (channel) {
+        channelLog(channel, level, tag, msg);
+        return;
+      }
       // A diag:-prefixed tag goes to the isolated init-lifecycle diag channel
       // (its own file) instead of the main log — see src/shared/diag-log.ts.
       if (tag.startsWith('diag:')) {
