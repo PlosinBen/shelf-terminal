@@ -72,7 +72,7 @@ export function resolveCodexCliCommand(findEntry: () => string | undefined = res
   return { command: process.execPath, args: [entry] };
 }
 
-/** Optional native executable path for SDK `codexPathOverride`; never uses PATH. */
+/** Optional native executable path from the pinned Codex package; never uses PATH. */
 export function codexNativeExecutable(exists: (p: string) => boolean = fs.existsSync): string | undefined {
   const binName = process.platform === 'win32' ? 'codex.exe' : 'codex';
   const rel = path.join('node_modules', codexNativePackageNameForHost(), 'vendor', codexNativeVendorTriple(), 'bin', binName);
@@ -87,7 +87,7 @@ export function codexNativeExecutable(exists: (p: string) => boolean = fs.exists
   }
 }
 
-/** Throwing variant for production code paths that require SDK `codexPathOverride`. */
+/** Throwing variant for production code paths that require the pinned native Codex binary. */
 export function resolveCodexNativeExecutable(
   findEntry: () => string | undefined = codexNativeExecutable,
 ): string {

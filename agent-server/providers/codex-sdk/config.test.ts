@@ -3,7 +3,6 @@ import { parseMcpConfig } from '../mcp-config';
 import {
   CODEX_SDK_EFFORT_LEVELS,
   buildCodexSdkRuntimeConfig,
-  toCodexSdkInput,
 } from './config';
 
 describe('Codex SDK pure runtime config mapping', () => {
@@ -164,29 +163,5 @@ describe('Codex SDK pure runtime config mapping', () => {
     );
     expect(parsed.servers).toEqual({});
     expect(parsed.errors.join('\n')).toMatch(/MISSING/);
-  });
-});
-
-describe('Codex SDK input mapping', () => {
-  it('passes text-only prompts as a string', () => {
-    expect(toCodexSdkInput('hello', [])).toEqual({ ok: true, input: 'hello' });
-  });
-
-  it('passes text plus images as structured SDK input', () => {
-    expect(toCodexSdkInput('describe', ['/tmp/a.png', '/tmp/b.jpg'])).toEqual({
-      ok: true,
-      input: [
-        { type: 'text', text: 'describe' },
-        { type: 'local_image', path: '/tmp/a.png' },
-        { type: 'local_image', path: '/tmp/b.jpg' },
-      ],
-    });
-  });
-
-  it('rejects image-only input before the SDK is called', () => {
-    expect(toCodexSdkInput('   ', ['/tmp/a.png'])).toEqual({
-      ok: false,
-      error: expect.stringMatching(/requires a text prompt/) as unknown as string,
-    });
   });
 });

@@ -1,7 +1,21 @@
-import type { CodexOptions, Input, ModelReasoningEffort, ThreadOptions } from '@openai/codex-sdk';
 import type { McpServerBlock, McpServersFile } from '@shared/mcp';
 
-export const CODEX_SDK_EFFORT_LEVELS = ['minimal', 'low', 'medium', 'high', 'xhigh'] as const satisfies readonly ModelReasoningEffort[];
+export const CODEX_SDK_EFFORT_LEVELS = ['minimal', 'low', 'medium', 'high', 'xhigh'] as const;
+type CodexReasoningEffort = typeof CODEX_SDK_EFFORT_LEVELS[number];
+
+interface CodexThreadOptions {
+  workingDirectory: string;
+  skipGitRepoCheck: boolean;
+  model?: string;
+  modelReasoningEffort?: CodexReasoningEffort;
+  sandboxMode?: 'read-only' | 'workspace-write' | 'danger-full-access';
+  approvalPolicy?: 'never' | 'on-request';
+  additionalDirectories?: string[];
+}
+
+interface CodexConfigObject {
+  mcp_servers?: Record<string, CodexMcpServerConfig>;
+}
 
 export const CODEX_SDK_PERMISSION_MODES = {
   plan: {
@@ -16,7 +30,7 @@ export const CODEX_SDK_PERMISSION_MODES = {
     sandboxMode: 'danger-full-access',
     approvalPolicy: 'never',
   },
-} as const satisfies Record<string, Pick<ThreadOptions, 'sandboxMode' | 'approvalPolicy'>>;
+} as const satisfies Record<string, Pick<CodexThreadOptions, 'sandboxMode' | 'approvalPolicy'>>;
 
 export type CodexSdkPermissionMode = keyof typeof CODEX_SDK_PERMISSION_MODES;
 
@@ -44,20 +58,18 @@ type CodexMcpServerConfig =
       env_http_headers?: Record<string, string>;
     };
 
-type CodexSdkConfigObject = NonNullable<CodexOptions['config']>;
-
 export interface CodexSdkRuntimeConfigResult {
   ok: boolean;
   errors: string[];
-  codexOptions: { config: CodexSdkConfigObject; env: Record<string, string> };
-  threadOptions: ThreadOptions;
+  codexOptions: { config: CodexConfigObject; env: Record<string, string> };
+  threadOptions: CodexThreadOptions;
 }
 
 export function buildCodexSdkRuntimeConfig(input: BuildConfigInput): CodexSdkRuntimeConfigResult {
   const errors: string[] = [];
   const env = compactEnv(input.baseEnv ?? {});
   const mcpServers: Record<string, CodexMcpServerConfig> = {};
-  const threadOptions: ThreadOptions = {
+  const threadOptions: CodexThreadOptions = {
     workingDirectory: input.cwd,
     skipGitRepoCheck: true,
   };
@@ -93,9 +105,9 @@ export function buildCodexSdkRuntimeConfig(input: BuildConfigInput): CodexSdkRun
     if (mapped) mcpServers[serverName] = mapped;
   }
 
-  const config: CodexSdkConfigObject = {};
+  const config: CodexConfigObject = {};
   if (Object.keys(mcpServers).length > 0) {
-    config.mcp_servers = mcpServers as unknown as CodexSdkConfigObject['mcp_servers'];
+    config.mcp_servers = mcpServers;
   }
 
   return {
@@ -103,20 +115,6 @@ export function buildCodexSdkRuntimeConfig(input: BuildConfigInput): CodexSdkRun
     errors,
     codexOptions: { config, env },
     threadOptions,
-  };
-}
-
-export function toCodexSdkInput(prompt: string, images: string[] = []): { ok: true; input: Input } | { ok: false; error: string } {
-  if (images.length > 0 && !prompt.trim()) {
-    return { ok: false, error: 'Codex SDK requires a text prompt when images are attached.' };
-  }
-  if (images.length === 0) return { ok: true, input: prompt };
-  return {
-    ok: true,
-    input: [
-      { type: 'text', text: prompt },
-      ...images.map((image) => ({ type: 'local_image' as const, path: image })),
-    ],
   };
 }
 
@@ -189,7 +187,7 @@ function compactEnv(env: Record<string, string | undefined>): Record<string, str
   return out;
 }
 
-function isCodexSdkEffort(value: string): value is ModelReasoningEffort {
+function isCodexSdkEffort(value: string): value is CodexReasoningEffort {
   return (CODEX_SDK_EFFORT_LEVELS as readonly string[]).includes(value);
 }
 
