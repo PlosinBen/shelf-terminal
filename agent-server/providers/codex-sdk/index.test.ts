@@ -53,6 +53,21 @@ class FakeAppServer {
     }
     if (method === 'mcpServerStatus/list') return { data: [{ name: 'shelf', authStatus: 'authorized' }], nextCursor: null } as T;
     if (method === 'skills/list') return { data: [{ cwd: '/repo', skills: [{ name: 'skill-a', shortDescription: 'does A' }], errors: [] }] } as T;
+    if (method === 'account/rateLimits/read') {
+      return { rateLimitsByLimitId: { codex: { primary: { usedPercent: 7, resetsAt: Date.now() + 604_800_000 } } } } as T;
+    }
+    if (method === 'account/usage/read') return { totalTokens: 12345, requests: 9 } as T;
+    if (method === 'gitDiffToRemote') return { diff: 'diff --git a/a.ts b/a.ts\n+hello' } as T;
+    if (method === 'thread/goal/get') return { goal: { objective: 'ship it', status: 'in_progress', tokenBudget: 5000 } } as T;
+    if (method === 'thread/goal/set') return {} as T;
+    if (method === 'thread/goal/clear') return {} as T;
+    if (method === 'thread/name/set') return {} as T;
+    if (method === 'account/logout') return {} as T;
+    if (method === 'review/start') {
+      this.fire('item/completed', { item: { id: 'review-1', type: 'agentMessage', text: 'reviewed' } });
+      this.fire('turn/completed', { threadId: 'thread-1', turn: { id: 'review-turn' } });
+      return { turn: { id: 'review-turn' } } as T;
+    }
     if (method === 'thread/compact/start') {
       this.fire('item/completed', { item: { id: 'compact-1', type: 'contextCompaction' } });
       this.fire('turn/completed', { threadId: 'thread-1', turn: { id: 'compact-turn' } });
@@ -241,7 +256,24 @@ describe('Codex official app-server backend lifecycle', () => {
     expect((caps as unknown as Record<string, unknown>).currentModel).toBe('gpt-5.6-sol');
     expect((caps as unknown as Record<string, unknown>).currentEffort).toBe('ultra');
     expect((caps as unknown as Record<string, unknown>).currentPermissionMode).toBe('plan');
-    expect(caps.slashCommands.map((cmd) => cmd.name)).toEqual(['mcp', 'skills', 'skill', 'clear', 'compact']);
+    expect(caps.slashCommands.map((cmd) => cmd.name)).toEqual([
+      'status',
+      'usage',
+      'mcp',
+      'skills',
+      'skill',
+      'compact',
+      'clear',
+      'new',
+      'review',
+      'diff',
+      'goal',
+      'rename',
+      'logout',
+      'ps',
+      'stop',
+      'clean',
+    ]);
   });
 
   it('handles typed config slashes locally without app-server turn routes', async () => {
@@ -270,6 +302,29 @@ describe('Codex official app-server backend lifecycle', () => {
     expect(out.some((m) => m.type === 'message' && m.msgType === 'reply' && m.content.includes('`skill-a`'))).toBe(true);
   });
 
+  it('reports /status locally after app-server initialization', async () => {
+    const app = new FakeAppServer();
+    const backend = createCodexOfficialBackend({ createAppServer: () => app });
+    const out: OutgoingMessage[] = [];
+
+    await backend.query({ prompt: '/status', cwd: '/repo', model: 'gpt-5.4-mini', effort: 'medium', permissionMode: 'bypassPermissions' }, (m) => out.push(m));
+
+    expect(app.calls.map((call) => call.method)).toEqual(['initialize']);
+    expect(out.some((m) => m.type === 'message' && m.msgType === 'reply' && m.content.includes('gpt-5.4-mini'))).toBe(true);
+  });
+
+  it('routes /usage to app-server account usage and rate-limit routes', async () => {
+    const app = new FakeAppServer();
+    const backend = createCodexOfficialBackend({ createAppServer: () => app });
+    const out: OutgoingMessage[] = [];
+
+    await backend.query({ prompt: '/usage', cwd: '/repo' }, (m) => out.push(m));
+
+    expect(app.calls.map((call) => call.method)).toEqual(['initialize', 'account/rateLimits/read', 'account/usage/read']);
+    expect(out.some((m) => m.type === 'message' && m.msgType === 'reply' && m.content.includes('7d: 7%'))).toBe(true);
+    expect(out.some((m) => m.type === 'message' && m.msgType === 'reply' && m.content.includes('Total tokens: 12,345'))).toBe(true);
+  });
+
   it('clears persisted app-server context locally', async () => {
     const app = new FakeAppServer();
     const backend = createCodexOfficialBackend({ createAppServer: () => app });
@@ -283,6 +338,18 @@ describe('Codex official app-server backend lifecycle', () => {
     expect(out.at(-1)).toEqual({ type: 'status', state: 'idle' });
   });
 
+  it('starts a new local Codex thread context with /new', async () => {
+    const app = new FakeAppServer();
+    const backend = createCodexOfficialBackend({ createAppServer: () => app });
+    const out: OutgoingMessage[] = [];
+
+    await backend.query({ prompt: '/new', cwd: '/repo', restoreContext: restoreContext('thread-1') }, (m) => out.push(m));
+
+    expect(app.calls.map((call) => call.method)).toEqual(['initialize']);
+    expect(out).toContainEqual({ type: 'context_patch', patch: { lastSdkSessionId: null } });
+    expect(out.some((m) => m.type === 'message' && m.msgType === 'system' && m.content.includes('new Codex thread'))).toBe(true);
+  });
+
   it('routes /compact through thread/compact/start', async () => {
     const app = new FakeAppServer();
     const backend = createCodexOfficialBackend({ createAppServer: () => app });
@@ -293,6 +360,80 @@ describe('Codex official app-server backend lifecycle', () => {
     expect(app.calls.map((call) => call.method)).toEqual(['initialize', 'thread/start', 'thread/compact/start']);
     expect(out).toContainEqual({ type: 'message', msgId: 'compact-1', msgType: 'system', content: 'Context compacted.' });
     expect(out.at(-1)).toEqual({ type: 'status', state: 'idle' });
+  });
+
+  it('routes /review through review/start for uncommitted changes', async () => {
+    const app = new FakeAppServer();
+    const backend = createCodexOfficialBackend({ createAppServer: () => app });
+    const out: OutgoingMessage[] = [];
+
+    await backend.query({ prompt: '/review', cwd: '/repo' }, (m) => out.push(m));
+
+    expect(app.calls.find((call) => call.method === 'review/start')?.params).toMatchObject({
+      threadId: 'thread-1',
+      target: { type: 'uncommittedChanges' },
+    });
+    expect(out).toContainEqual({ type: 'message', msgId: 'review-1', msgType: 'reply', content: 'reviewed' });
+  });
+
+  it('routes /diff through gitDiffToRemote without starting a thread', async () => {
+    const app = new FakeAppServer();
+    const backend = createCodexOfficialBackend({ createAppServer: () => app });
+    const out: OutgoingMessage[] = [];
+
+    await backend.query({ prompt: '/diff', cwd: '/repo' }, (m) => out.push(m));
+
+    expect(app.calls.map((call) => call.method)).toEqual(['initialize', 'gitDiffToRemote']);
+    expect(out.some((m) => m.type === 'message' && m.msgType === 'reply' && m.content.includes('```diff'))).toBe(true);
+  });
+
+  it('gets, sets, and clears Codex goals through thread goal routes', async () => {
+    const app = new FakeAppServer();
+    const backend = createCodexOfficialBackend({ createAppServer: () => app });
+    const out: OutgoingMessage[] = [];
+
+    await backend.query({ prompt: '/goal', cwd: '/repo' }, (m) => out.push(m));
+    await backend.query({ prompt: '/goal finish slash commands', cwd: '/repo' }, (m) => out.push(m));
+    await backend.query({ prompt: '/goal clear', cwd: '/repo' }, (m) => out.push(m));
+
+    expect(app.calls.map((call) => call.method)).toEqual([
+      'initialize',
+      'thread/start',
+      'thread/goal/get',
+      'thread/start',
+      'thread/goal/set',
+      'thread/start',
+      'thread/goal/clear',
+    ]);
+    expect(app.calls.find((call) => call.method === 'thread/goal/set')?.params).toMatchObject({ objective: 'finish slash commands' });
+    expect(out.some((m) => m.type === 'message' && m.msgType === 'reply' && m.content.includes('ship it'))).toBe(true);
+    expect(out.some((m) => m.type === 'message' && m.msgType === 'system' && m.content.includes('Cleared Codex goal'))).toBe(true);
+  });
+
+  it('routes /rename and /logout through app-server account/thread routes', async () => {
+    const app = new FakeAppServer();
+    const backend = createCodexOfficialBackend({ createAppServer: () => app });
+    const out: OutgoingMessage[] = [];
+
+    await backend.query({ prompt: '/rename focused work', cwd: '/repo' }, (m) => out.push(m));
+    await backend.query({ prompt: '/logout', cwd: '/repo' }, (m) => out.push(m));
+
+    expect(app.calls.find((call) => call.method === 'thread/name/set')?.params).toMatchObject({ threadId: 'thread-1', name: 'focused work' });
+    expect(app.calls.some((call) => call.method === 'account/logout')).toBe(true);
+    expect(out).toContainEqual({ type: 'context_patch', patch: { lastSdkSessionId: null } });
+  });
+
+  it('surfaces app-server schema gaps for background-task slash commands', async () => {
+    const app = new FakeAppServer();
+    const backend = createCodexOfficialBackend({ createAppServer: () => app });
+    const out: OutgoingMessage[] = [];
+
+    await backend.query({ prompt: '/ps', cwd: '/repo' }, (m) => out.push(m));
+    await backend.query({ prompt: '/stop', cwd: '/repo' }, (m) => out.push(m));
+    await backend.query({ prompt: '/clean', cwd: '/repo' }, (m) => out.push(m));
+
+    expect(app.calls.map((call) => call.method)).toEqual(['initialize']);
+    expect(out.filter((m) => m.type === 'message' && m.msgType === 'error' && m.content.includes('not available'))).toHaveLength(3);
   });
 
   it('declares isolated config home and SDK HOME-scoped skill target until app-server skill roots are finalized', () => {

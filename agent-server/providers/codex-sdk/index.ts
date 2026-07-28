@@ -9,7 +9,7 @@ import { driveDeviceCodeLogin, spawnCodexAppServerRpc, type LoginHandle, type Lo
 import { pickEffortLevels, pickPermissionModes, type ProviderCapabilities, type SendFn, type ServerBackend } from '../types';
 import { formatConfigAck, type ConfigEditKey } from '@shared/config-ack';
 import { CODEX_SDK_EFFORT_LEVELS, buildCodexSdkRuntimeConfig } from './config';
-import { refreshCodexAccountStatus } from './account-status';
+import { normalizeCodexAccountStatus, redactCodexAccountText, refreshCodexAccountStatus } from './account-status';
 import { spawnCodexAppServerClient, type CodexAppServerNotificationHandler } from './app-server-client';
 import { summarizeTokenUsageForLog, translateCodexAppServerNotification } from './app-server-translate';
 import { loadProjectedMcpServers, type ParsedMcpConfig } from '../mcp-config';
@@ -23,12 +23,26 @@ interface CodexAppServerLike {
 }
 
 const CODEX_SDK_SLASH_COMMANDS = [
+  { name: 'status', description: 'Show current Codex session status' },
+  { name: 'usage', description: 'Show Codex account usage and quota limits' },
   { name: 'mcp', description: 'List loaded MCP servers' },
   { name: 'skills', description: 'List loaded skills' },
   { name: 'skill', description: 'List loaded skills' },
+  { name: 'compact', description: 'Compact Codex thread context' },
   { name: 'clear', description: 'Clear Codex session context' },
-  { name: 'compact', description: 'Compact context (not supported by Codex SDK yet)' },
+  { name: 'new', description: 'Start a new Codex thread for the next turn' },
+  { name: 'review', description: 'Review uncommitted changes' },
+  { name: 'diff', description: 'Show git diff to remote' },
+  { name: 'goal', description: 'Get, set, or clear the current Codex goal' },
+  { name: 'rename', description: 'Rename the current Codex thread' },
+  { name: 'logout', description: 'Log out of the current Codex account' },
+  { name: 'ps', description: 'List background Codex tasks' },
+  { name: 'stop', description: 'Stop a background Codex task' },
+  { name: 'clean', description: 'Clean completed background Codex tasks' },
 ] as const;
+
+const CODEX_APP_SERVER_SLASH_COMMAND_NAMES = new Set<string>(CODEX_SDK_SLASH_COMMANDS.map((command) => command.name));
+const UNSUPPORTED_APP_SERVER_SLASH_COMMANDS = new Set(['ps', 'stop', 'clean']);
 
 export interface CodexOfficialDeps {
   spawnLoginRpc?: (env: NodeJS.ProcessEnv) => { rpc: LoginRpc };
@@ -200,29 +214,80 @@ export function createCodexOfficialBackend(deps: CodexOfficialDeps = {}): Server
           return;
         }
 
-        if (slash && (slash.cmd === 'mcp' || slash.cmd === 'skills' || slash.cmd === 'skill' || slash.cmd === 'clear' || slash.cmd === 'compact')) {
+        if (slash && CODEX_APP_SERVER_SLASH_COMMAND_NAMES.has(slash.cmd)) {
           send({ type: 'status', state: 'streaming' });
           const baseEnv = codexEnv(input.appId);
           const sdkHome = codexSdkHome(input.appId);
           if (sdkHome) baseEnv.HOME = sdkHome;
           const client = await ensureAppServer(input.appId, baseEnv);
+          if (slash.cmd === 'status') {
+            sendSlashMessage(send, 'reply', formatCodexAppServerStatusCard(input, activeThreadId, {
+              model: currentModel,
+              effort: currentEffort,
+              permissionMode: currentPermissionMode,
+            }));
+            return;
+          }
+          if (slash.cmd === 'usage') {
+            const [rateLimits, usage] = await Promise.all([
+              client.request('account/rateLimits/read'),
+              client.request('account/usage/read'),
+            ]);
+            sendSlashMessage(send, 'reply', formatCodexAppServerUsageCard(rateLimits, usage));
+            return;
+          }
           if (slash.cmd === 'mcp') {
             const content = formatCodexAppServerMcpCard(await client.request('mcpServerStatus/list', activeThreadId ? { threadId: activeThreadId } : {}));
-            send({ type: 'message', msgId: mintSlashMsgId(), msgType: 'reply', content });
+            sendSlashMessage(send, 'reply', content);
             return;
           }
           if (slash.cmd === 'skills' || slash.cmd === 'skill') {
-            send({ type: 'message', msgId: mintSlashMsgId(), msgType: 'reply', content: formatCodexAppServerSkillsCard(await client.request('skills/list', { cwds: [input.cwd], forceReload: false })) });
+            sendSlashMessage(send, 'reply', formatCodexAppServerSkillsCard(await client.request('skills/list', { cwds: [input.cwd], forceReload: false })));
             return;
           }
-          if (slash.cmd === 'clear') {
+          if (slash.cmd === 'clear' || slash.cmd === 'new') {
             activeThreadId = null;
             send({ type: 'context_patch', patch: { lastSdkSessionId: null } });
-            send({ type: 'message', msgId: mintSlashMsgId(), msgType: 'system', content: 'Cleared Codex app-server session context.' });
+            sendSlashMessage(send, 'system', slash.cmd === 'new' ? 'Started a new Codex thread for the next turn.' : 'Cleared Codex app-server session context.');
+            return;
+          }
+          if (slash.cmd === 'diff') {
+            sendSlashMessage(send, 'reply', formatCodexAppServerDiffCard(await client.request('gitDiffToRemote', { cwd: input.cwd })));
+            return;
+          }
+          if (slash.cmd === 'logout') {
+            await client.request('account/logout');
+            activeThreadId = null;
+            send({ type: 'context_patch', patch: { lastSdkSessionId: null } });
+            sendSlashMessage(send, 'system', 'Logged out of Codex.');
+            return;
+          }
+          if (UNSUPPORTED_APP_SERVER_SLASH_COMMANDS.has(slash.cmd)) {
+            sendSlashMessage(send, 'error', `/${slash.cmd} is not available through the current Codex app-server schema yet.`);
             return;
           }
           const threadId = await ensureThread(client, input, send, baseEnv);
-          await waitForTurnCompletion(() => client.request('thread/compact/start', { threadId }));
+          if (slash.cmd === 'compact') {
+            await waitForTurnCompletion(() => client.request('thread/compact/start', { threadId }));
+            return;
+          }
+          if (slash.cmd === 'review') {
+            await waitForTurnCompletion(() => client.request('review/start', { threadId, target: { type: 'uncommittedChanges' } }));
+            return;
+          }
+          if (slash.cmd === 'goal') {
+            await handleGoalSlash(client, threadId, slash.args, send);
+            return;
+          }
+          if (slash.cmd === 'rename') {
+            if (!slash.args) {
+              sendSlashMessage(send, 'error', 'Usage: /rename <thread name>');
+              return;
+            }
+            await client.request('thread/name/set', { threadId, name: slash.args });
+            sendSlashMessage(send, 'system', `Renamed Codex thread to "${redactCodexAccountText(slash.args)}".`);
+            return;
+          }
           return;
         }
 
@@ -381,6 +446,21 @@ export function createCodexOfficialBackend(deps: CodexOfficialDeps = {}): Server
     });
   }
 
+  async function handleGoalSlash(client: CodexAppServerLike, threadId: string, args: string, send: SendFn): Promise<void> {
+    const trimmed = args.trim();
+    if (!trimmed) {
+      sendSlashMessage(send, 'reply', formatCodexAppServerGoalCard(await client.request('thread/goal/get', { threadId })));
+      return;
+    }
+    if (trimmed === 'clear') {
+      await client.request('thread/goal/clear', { threadId });
+      sendSlashMessage(send, 'system', 'Cleared Codex goal.');
+      return;
+    }
+    await client.request('thread/goal/set', { threadId, objective: trimmed });
+    sendSlashMessage(send, 'system', `Set Codex goal: ${redactCodexAccountText(trimmed)}`);
+  }
+
   function threadOverrides(input: Parameters<ServerBackend['query']>[0]): Record<string, unknown> {
     return {
       cwd: input.cwd,
@@ -492,6 +572,83 @@ function formatCodexAppServerSkillsCard(raw: unknown): string {
   return `${lines.length} skill${lines.length > 1 ? 's' : ''}:\n\n${lines.join('\n')}`;
 }
 
+function formatCodexAppServerStatusCard(
+  input: Parameters<ServerBackend['query']>[0],
+  activeThreadId: string | null,
+  current: { model?: string; effort?: string; permissionMode?: string },
+): string {
+  const rows = [
+    ['Provider', CODEX_OFFICAL_PROVIDER],
+    ['Thread', activeThreadId ?? input.restoreContext?.lastSdkSessionId ?? 'none'],
+    ['Model', input.model ?? current.model ?? 'provider default'],
+    ['Effort', input.effort ?? current.effort ?? 'provider default'],
+    ['Permission', input.permissionMode ?? current.permissionMode ?? 'provider default'],
+    ['CWD', input.cwd],
+  ];
+  return `Codex status:\n\n${mdTable(['Field', 'Value'], rows.map(([key, value]) => [key, redactCodexAccountText(value)]))}`;
+}
+
+function formatCodexAppServerUsageCard(rateLimits: unknown, usage: unknown): string {
+  const normalized = normalizeCodexAccountStatus({ account: null, rateLimits, usage });
+  const lines: string[] = [];
+  if (normalized?.rateLimits.length) {
+    lines.push('Quota limits:');
+    for (const segment of normalized.rateLimits) lines.push(`- ${redactCodexAccountText(segment.text)}`);
+  } else {
+    lines.push('Quota limits: no rate-limit buckets returned.');
+  }
+
+  const usageSummary = summarizeCodexUsage(usage);
+  lines.push('', 'Account usage:');
+  if (usageSummary.length) {
+    for (const row of usageSummary) lines.push(`- ${row}`);
+  } else {
+    lines.push('- No displayable usage counters returned.');
+  }
+  return lines.join('\n');
+}
+
+function summarizeCodexUsage(raw: unknown): string[] {
+  const record = asRecord(raw);
+  if (!record) return [];
+  const candidates = [
+    ['Total tokens', record.totalTokens ?? record.total_tokens ?? record.lifetimeTokens ?? record.lifetime_tokens],
+    ['Input tokens', record.inputTokens ?? record.input_tokens],
+    ['Output tokens', record.outputTokens ?? record.output_tokens],
+    ['Requests', record.requests ?? record.requestCount ?? record.request_count],
+    ['Current streak', record.currentStreak ?? record.current_streak],
+  ];
+  return candidates
+    .map(([label, value]) => {
+      const n = numberValue(value);
+      if (n == null) return null;
+      return `${label}: ${new Intl.NumberFormat('en-US').format(n)}`;
+    })
+    .filter((line): line is string => !!line);
+}
+
+function formatCodexAppServerDiffCard(raw: unknown): string {
+  const record = asRecord(raw);
+  const diff = stringValue(record?.diff ?? record?.text ?? record?.content) ?? (typeof raw === 'string' ? raw : null);
+  if (!diff?.trim()) return 'No git diff to remote returned.';
+  return `Git diff to remote:\n\n\`\`\`diff\n${redactCodexAccountText(diff).slice(0, 20_000)}\n\`\`\``;
+}
+
+function formatCodexAppServerGoalCard(raw: unknown): string {
+  const record = asRecord(raw);
+  const goal = asRecord(record?.goal) ?? record;
+  const objective = stringValue(goal?.objective);
+  const status = stringValue(goal?.status);
+  const tokenBudget = numberValue(goal?.tokenBudget ?? goal?.token_budget);
+  if (!objective && !status && tokenBudget == null) return 'No Codex goal is set.';
+  const rows = [
+    ...(objective ? [['Objective', redactCodexAccountText(objective)]] : []),
+    ...(status ? [['Status', status]] : []),
+    ...(tokenBudget != null ? [['Token budget', new Intl.NumberFormat('en-US').format(tokenBudget)]] : []),
+  ];
+  return `Codex goal:\n\n${mdTable(['Field', 'Value'], rows)}`;
+}
+
 function asArray(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [];
 }
@@ -504,8 +661,17 @@ function stringValue(value: unknown): string | null {
   return typeof value === 'string' ? value : null;
 }
 
+function numberValue(value: unknown): number | null {
+  const n = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN;
+  return Number.isFinite(n) ? n : null;
+}
+
 function mintSlashMsgId(): string {
   return `slash-${randomUUID().slice(0, 8)}`;
+}
+
+function sendSlashMessage(send: SendFn, msgType: 'reply' | 'system' | 'error', content: string): void {
+  send({ type: 'message', msgId: mintSlashMsgId(), msgType, content });
 }
 
 function mdTable(headers: string[], rows: string[][]): string {
