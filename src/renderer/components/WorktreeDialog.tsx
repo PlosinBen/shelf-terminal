@@ -1,12 +1,52 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useStore } from '../store';
-import { on, emit, Events } from '../events';
+import { on, emit, emitAgent, Events } from '../events';
+import { enqueuePendingSend } from '../agentTabStore';
+import { debugLog } from '../debugLog';
 import { buildWorktreeChildConfig } from '../worktree-child-config';
 import type { AgentProvider, FeatureNoteInfo } from '@shared/types';
 import { agentProviderEntries } from '@shared/agent-providers';
 
 function featureNoteFilename(path: string): string {
   return path.split('/').pop() ?? path;
+}
+
+function errorText(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+function logCreateFailure(input: {
+  projectId: string;
+  branch: string;
+  baseCwd: string;
+  worktreePath?: string;
+  failedStep: string;
+  error: string;
+}) {
+  debugLog('worktree-create', JSON.stringify({ operation: 'create', ...input }));
+}
+
+function buildCreateFailurePrompt(input: {
+  branch: string;
+  baseCwd: string;
+  worktreePath?: string;
+  migrationError?: string;
+  rollbackError?: string;
+  setupError?: string;
+  createError?: string;
+}) {
+  const lines = [
+    'The worktree create flow failed. Please inspect the repository/worktree state and repair it so I can retry Create.',
+    '',
+    `Branch: ${input.branch}`,
+    `Base cwd: ${input.baseCwd}`,
+    `Attempted worktree path: ${input.worktreePath ?? '(not returned)'}`,
+  ];
+  if (input.createError) lines.push('', `Create error:\n${input.createError}`);
+  if (input.migrationError) lines.push('', `Migration error:\n${input.migrationError}`);
+  if (input.rollbackError) lines.push('', `Rollback error:\n${input.rollbackError}`);
+  if (input.setupError) lines.push('', `Setup error:\n${input.setupError}`);
+  return lines.join('\n');
 }
 
 export function WorktreeDialog() {
@@ -16,6 +56,7 @@ export function WorktreeDialog() {
   const [input, setInput] = useState('');
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [failurePrompt, setFailurePrompt] = useState<string | null>(null);
   // In-progress feature notes in the base repo, offered as the handoff seed. The
   // checked notes are migrated into the worktree before its agent boots.
   const [notes, setNotes] = useState<FeatureNoteInfo[]>([]);
@@ -30,6 +71,7 @@ export function WorktreeDialog() {
       setOpen(true);
       setInput(prefill?.branch ?? '');
       setError(null);
+      setFailurePrompt(null);
       setCreating(false);
       setNotes([]);
       setSelectedNotes(prefill?.notePath ? new Set([prefill.notePath]) : new Set());
@@ -71,12 +113,23 @@ export function WorktreeDialog() {
 
     setCreating(true);
     setError(null);
+    setFailurePrompt(null);
     const { connection, cwd } = proj.config;
 
     // 1. Create the worktree (captures the parent's baseBranch atomically).
     const result = await window.shelfApi.git.worktreeAdd(connection, cwd, branch, true);
     if (!result.ok || !result.path) {
-      setError(result.error ?? 'Failed to create worktree');
+      const createError = result.error ?? 'Failed to create worktree';
+      logCreateFailure({
+        projectId: proj.config.id,
+        branch,
+        baseCwd: cwd,
+        worktreePath: result.path,
+        failedStep: 'worktreeAdd',
+        error: createError,
+      });
+      setError(createError);
+      setFailurePrompt(buildCreateFailurePrompt({ branch, baseCwd: cwd, worktreePath: result.path, createError }));
       setCreating(false);
       return;
     }
@@ -88,8 +141,38 @@ export function WorktreeDialog() {
     if (selectedNotePaths.length > 0) {
       const mig = await window.shelfApi.git.migrateNote(connection, cwd, result.path, selectedNotePaths);
       if (!mig.ok) {
-        await window.shelfApi.git.worktreeRemove(connection, cwd, result.path);
-        setError(mig.error ?? 'Failed to migrate feature note');
+        const migrationError = mig.error ?? 'Failed to migrate feature notes';
+        logCreateFailure({
+          projectId: proj.config.id,
+          branch,
+          baseCwd: cwd,
+          worktreePath: result.path,
+          failedStep: 'migrateNote',
+          error: migrationError,
+        });
+        const rollback = await window.shelfApi.git.worktreeRemove(connection, cwd, result.path);
+        const rollbackError = rollback.ok ? undefined : (rollback.error ?? 'Failed to remove worktree after note migration failure');
+        if (rollbackError) {
+          logCreateFailure({
+            projectId: proj.config.id,
+            branch,
+            baseCwd: cwd,
+            worktreePath: result.path,
+            failedStep: 'rollbackWorktreeRemove',
+            error: rollbackError,
+          });
+        }
+        const fullError = rollbackError
+          ? `Failed to migrate feature notes:\n\n${migrationError}\n\nRollback also failed:\n\n${rollbackError}`
+          : `Failed to migrate feature notes:\n\n${migrationError}`;
+        setError(fullError);
+        setFailurePrompt(buildCreateFailurePrompt({
+          branch,
+          baseCwd: cwd,
+          worktreePath: result.path,
+          migrationError,
+          rollbackError,
+        }));
         setCreating(false);
         return;
       }
@@ -98,14 +181,30 @@ export function WorktreeDialog() {
     // 3. Copy the parent's secrets under the new id, then add the sub-project
     //    (inherits parent setup; base is freed; focus jumps).
     const projectId = `wt-${Date.now()}`;
-    await window.shelfApi.project.copySecrets(proj.config.id, projectId);
-    emit(Events.ADD_PROJECT, buildWorktreeChildConfig(proj.config, {
-      id: projectId,
-      cwd: result.path,
-      worktreeBranch: branch,
-      baseBranch: result.baseBranch,
-      defaultAgentProvider,
-    }));
+    try {
+      await window.shelfApi.project.copySecrets(proj.config.id, projectId);
+      emit(Events.ADD_PROJECT, buildWorktreeChildConfig(proj.config, {
+        id: projectId,
+        cwd: result.path,
+        worktreeBranch: branch,
+        baseBranch: result.baseBranch,
+        defaultAgentProvider,
+      }));
+    } catch (err) {
+      const setupError = errorText(err);
+      logCreateFailure({
+        projectId: proj.config.id,
+        branch,
+        baseCwd: cwd,
+        worktreePath: result.path,
+        failedStep: 'setupChildProject',
+        error: setupError,
+      });
+      setError(`Worktree was created, but setup failed:\n\n${setupError}`);
+      setFailurePrompt(buildCreateFailurePrompt({ branch, baseCwd: cwd, worktreePath: result.path, setupError }));
+      setCreating(false);
+      return;
+    }
 
     // 4. Auto-connect the fresh worktree so its agent boots (and, with a note
     //    seeded, has context to read). Deterministic post-store connect lives in
@@ -136,6 +235,15 @@ export function WorktreeDialog() {
   if (!open) return null;
 
   const project = projectIndex === null ? undefined : projects[projectIndex];
+  const agentTabId = project?.tabs.find((t) => t.type === 'agent')?.id;
+
+  const sendFailureToAgent = () => {
+    if (!agentTabId || !failurePrompt) return;
+    const clientMsgId = crypto.randomUUID();
+    enqueuePendingSend(agentTabId, clientMsgId, failurePrompt);
+    emitAgent('agent:send', { tabId: agentTabId, text: failurePrompt, clientMsgId });
+    setOpen(false);
+  };
 
   return (
     <div className="settings-overlay" onClick={() => setOpen(false)}>
@@ -201,7 +309,23 @@ export function WorktreeDialog() {
               ))}
             </select>
           </label>
-          {error && <div className="worktree-error">{error}</div>}
+          {error && (
+            <div className="worktree-error">
+              <pre className="worktree-error-text">{error}</pre>
+              {failurePrompt && (
+                <div className="worktree-error-actions">
+                  <button
+                    className="conn-btn conn-btn-next"
+                    onClick={sendFailureToAgent}
+                    disabled={!agentTabId}
+                    title={agentTabId ? 'Send this error to the base project agent' : 'No agent tab open in the base project'}
+                  >
+                    Send to agent
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
         <div className="project-edit-footer">
           <button className="conn-btn conn-btn-cancel" onClick={() => setOpen(false)}>Cancel</button>
