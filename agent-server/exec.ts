@@ -17,6 +17,7 @@ import { readProcStartTime } from './proc-scan';
 import { loadRestoreContextFor, newTurnId, wrapSendForContext, wrapSendForTurn } from './orchestrator';
 import { initAppToolClient, resolveAppToolResult } from './app-tool-client';
 import { setLogSink, serverLog } from './server-logger';
+import { setWireSink } from './logger';
 import { createSendQueue } from './send-queue';
 import { projectAppSkills } from './providers/shared';
 import type { OutgoingMessage, QueryInput, ServerBackend, PickerResolvePayload, ModelCacheClient } from './providers/types';
@@ -149,6 +150,10 @@ function wireSummary(m: Record<string, unknown>): string {
 // Route all agent-server diagnostics back to main over the wire (see
 // server-logger.ts). After this, serverLog() no longer falls back to stderr.
 setLogSink(send);
+// New logger facade (wireLogger) shares the same wire writer. `channel` rides as
+// an extra JSON field; send() forwards it verbatim. Cast bridges the decoupled
+// WireLogMessage to OutgoingMessage (its {type:'log'} variant) at this one seam.
+setWireSink((m) => send(m as unknown as OutgoingMessage));
 
 // Last appId seen on a `send` — names this app's projected skills dir; used to
 // keep its `.heartbeat` lease fresh + protect it from the startup sweep.
