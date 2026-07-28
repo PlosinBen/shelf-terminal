@@ -139,18 +139,24 @@ export function createCodexOfficialBackend(deps: CodexOfficialDeps = {}): Server
         if (!activeSend) return;
         if (method === 'item/commandExecution/outputDelta') {
           const message = translateCommandOutputDelta(params);
+          logToolNotification(method, params, message ? [message] : []);
           if (message) activeSend(message);
           return;
         }
         if (method === 'item/reasoning/summaryTextDelta' || method === 'item/reasoning/textDelta') {
           const message = translateReasoningDelta(params);
+          logToolNotification(method, params, message ? [message] : []);
           if (message) activeSend(message);
           return;
         }
         const translatedParams = method === 'item/started' || method === 'item/updated' || method === 'item/completed'
           ? carryAppServerItemState(params)
           : params;
-        for (const message of translateCodexAppServerNotification(method, translatedParams)) activeSend(message);
+        const messages = translateCodexAppServerNotification(method, translatedParams);
+        if (method === 'item/started' || method === 'item/updated' || method === 'item/completed') {
+          logToolNotification(method, translatedParams, messages);
+        }
+        for (const message of messages) activeSend(message);
       });
     };
     for (const method of [
@@ -188,6 +194,30 @@ export function createCodexOfficialBackend(deps: CodexOfficialDeps = {}): Server
       label: 'Reasoning',
       body: { content: redactCodexAccountText(text), tone: 'muted' },
     };
+  }
+
+  function logToolNotification(method: string, params: unknown, messages: Parameters<SendFn>[0][]): void {
+    const item = asRecord(asRecord(params)?.item) ?? asRecord(params);
+    const itemType = stringValue(item?.type);
+    if (!itemType && method !== 'item/commandExecution/outputDelta' && method !== 'item/reasoning/summaryTextDelta' && method !== 'item/reasoning/textDelta') return;
+    const itemId = stringValue(item?.id ?? item?.itemId ?? item?.item_id) ?? '<unknown>';
+    const status = stringValue(item?.status);
+    const changes = asArray(item?.changes);
+    const aggregate = stringValue(item?.aggregatedOutput ?? item?.aggregated_output);
+    const delta = stringValue(item?.delta);
+    const reasoningSummary = asArray(item?.summary).map(stringValue).filter((value): value is string => !!value).join('');
+    const reasoningContent = asArray(item?.content).map(stringValue).filter((value): value is string => !!value).join('');
+    const hasDiff = changes.some((change) => !!stringValue(asRecord(change)?.diff));
+    const route = messages.map((message) => {
+      if (message.type === 'message') return message.msgType;
+      if (message.type === 'stream') return `stream:${message.streamType}`;
+      return message.type;
+    }).join(',') || 'ignored';
+    serverLog(
+      'debug',
+      'codex-app-server',
+      `tool-notification method=${method} itemId=${itemId} itemType=${itemType ?? '<none>'} status=${status ?? '<none>'} route=${route} aggregateLen=${aggregate?.length ?? 0} deltaLen=${delta?.length ?? 0} changes=${changes.length} hasDiff=${hasDiff} reasoningLen=${reasoningSummary.length + reasoningContent.length}`,
+    );
   }
 
   function translateCommandOutputDelta(params: unknown): Parameters<SendFn>[0] | null {
