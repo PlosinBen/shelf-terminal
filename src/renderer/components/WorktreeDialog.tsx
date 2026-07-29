@@ -53,7 +53,7 @@ function buildCreateFailurePrompt(input: {
 export function WorktreeDialog() {
   const { projects } = useStore();
   const [open, setOpen] = useState(false);
-  const [projectIndex, setProjectIndex] = useState<number | null>(null);
+  const [projectId, setProjectId] = useState<string | null>(null);
   const [input, setInput] = useState('');
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -67,9 +67,9 @@ export function WorktreeDialog() {
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    const off = on(Events.CREATE_WORKTREE, (index: number, prefill?: { branch?: string; notePaths?: string[] }) => {
+    const off = on(Events.CREATE_WORKTREE, (targetProjectId: string, prefill?: { branch?: string; notePaths?: string[] }) => {
       const prefilledNotePaths = normalizeWorktreePrefillNotePaths(prefill?.notePaths);
-      setProjectIndex(index);
+      setProjectId(targetProjectId);
       setOpen(true);
       setInput(prefill?.branch ?? '');
       setError(null);
@@ -82,7 +82,7 @@ export function WorktreeDialog() {
       // Fetch the base repo's in-progress notes for the picker. Pre-select when
       // there's exactly one (the common case: one feature under discussion);
       // otherwise default to none so the user chooses deliberately.
-      const proj = projects[index];
+      const proj = projects.find((p) => p.config.id === targetProjectId);
       if (proj) {
         setDefaultAgentProvider(proj.config.defaultAgentProvider ?? 'claude');
         window.shelfApi.git.branchList(proj.config.connection, proj.config.cwd)
@@ -108,9 +108,9 @@ export function WorktreeDialog() {
 
   const handleCreate = useCallback(async () => {
     const branch = input.trim();
-    if (!branch || projectIndex === null || creating) return;
+    if (!branch || projectId === null || creating) return;
 
-    const proj = projects[projectIndex];
+    const proj = projects.find((p) => p.config.id === projectId);
     if (!proj) return;
 
     setCreating(true);
@@ -182,11 +182,11 @@ export function WorktreeDialog() {
 
     // 3. Copy the parent's secrets under the new id, then add the sub-project
     //    (inherits parent setup; base is freed; focus jumps).
-    const projectId = `wt-${Date.now()}`;
+    const childProjectId = `wt-${Date.now()}`;
     try {
-      await window.shelfApi.project.copySecrets(proj.config.id, projectId);
+      await window.shelfApi.project.copySecrets(proj.config.id, childProjectId);
       emit(Events.ADD_PROJECT, buildWorktreeChildConfig(proj.config, {
-        id: projectId,
+        id: childProjectId,
         cwd: result.path,
         worktreeBranch: branch,
         baseBranch: result.baseBranch,
@@ -211,10 +211,10 @@ export function WorktreeDialog() {
     // 4. Auto-connect the fresh worktree so its agent boots (and, with a note
     //    seeded, has context to read). Deterministic post-store connect lives in
     //    App, keyed on the store — avoids the bus handlers' stale-projects closure.
-    emit(Events.AUTO_CONNECT_PROJECT, projectId);
+    emit(Events.AUTO_CONNECT_PROJECT, childProjectId);
 
     setOpen(false);
-  }, [input, projectIndex, projects, creating, selectedNotes, defaultAgentProvider]);
+  }, [input, projectId, projects, creating, selectedNotes, defaultAgentProvider]);
 
   const toggleSelectedNote = useCallback((path: string) => {
     setSelectedNotes((current) => {
@@ -236,7 +236,7 @@ export function WorktreeDialog() {
 
   if (!open) return null;
 
-  const project = projectIndex === null ? undefined : projects[projectIndex];
+  const project = projectId === null ? undefined : projects.find((p) => p.config.id === projectId);
   const agentTabId = project?.tabs.find((t) => t.type === 'agent')?.id;
 
   const sendFailureToAgent = () => {

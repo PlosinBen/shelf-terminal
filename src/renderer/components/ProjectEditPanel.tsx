@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useStore, setEditingProject, updateProjectConfig } from '../store';
+import { useStore, setEditingProjectById, updateProjectConfigById } from '../store';
 import type { TabTemplate, QuickCommand, AgentProvider } from '@shared/types';
 import { agentProviderEntries } from '@shared/agent-providers';
 import { TAB_COLORS } from './TabBar';
@@ -9,8 +9,8 @@ import { validateEnvKey } from '@shared/project-env';
 interface EnvRow { key: string; value: string; }
 
 export function ProjectEditPanel() {
-  const { editingProjectIndex, projects } = useStore();
-  const project = editingProjectIndex !== null ? projects[editingProjectIndex] : null;
+  const { editingProjectId, projects } = useStore();
+  const project = editingProjectId ? projects.find((p) => p.config.id === editingProjectId) ?? null : null;
 
   const [name, setName] = useState('');
   const [initScript, setInitScript] = useState('');
@@ -48,7 +48,7 @@ export function ProjectEditPanel() {
       setDefaultAgentProvider(project.config.defaultAgentProvider || '');
       setOpenAgentOnConnect(project.config.openAgentOnConnect || false);
     }
-  }, [editingProjectIndex]);
+  }, [editingProjectId, project]);
 
   // Probe whether the remote is currently reachable so we can enable/disable
   // the Clear button. Local connections are always considered reachable.
@@ -66,13 +66,13 @@ export function ProjectEditPanel() {
     return () => {
       cancelled = true;
     };
-  }, [editingProjectIndex]);
+  }, [editingProjectId, project]);
 
   // Reset cached size whenever the editing target changes so we don't flash
   // the previous project's value before the next fetch lands.
   useEffect(() => {
     setUploadsSize(null);
-  }, [editingProjectIndex]);
+  }, [editingProjectId]);
 
   const refreshUploadsSize = useCallback(() => {
     if (!project) return;
@@ -97,9 +97,9 @@ export function ProjectEditPanel() {
     refreshUploadsSize();
   }, [refreshUploadsSize]);
 
-  if (!project || editingProjectIndex === null) return null;
+  if (!project || !editingProjectId) return null;
 
-  const handleClose = () => setEditingProject(null);
+  const handleClose = () => setEditingProjectById(null);
 
   const handleSave = () => {
     const tabs = defaultTabs
@@ -122,7 +122,7 @@ export function ProjectEditPanel() {
       if (!key || validateEnvKey(key, Object.keys(envPlain)) !== null) continue;
       envPlain[key] = row.value;
     }
-    updateProjectConfig(editingProjectIndex, {
+    updateProjectConfigById(editingProjectId, {
       name: name.trim() || project.config.name,
       initScript: initScript.trim() || undefined,
       defaultTabs: tabs.length > 0 ? tabs : undefined,

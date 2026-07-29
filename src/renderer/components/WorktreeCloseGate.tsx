@@ -56,8 +56,8 @@ export function WorktreeCloseGate() {
   const parent = sub ? projects.find((p) => p.config.id === sub.config.parentProjectId) : undefined;
 
   useEffect(() => {
-    const off = on(Events.WORKTREE_CLOSE, (index: number, kind: WorktreeCloseKind) => {
-      const proj = projects[index];
+    const off = on(Events.WORKTREE_CLOSE, (projectId: string, kind: WorktreeCloseKind) => {
+      const proj = projects.find((p) => p.config.id === projectId);
       if (!proj || !proj.config.parentProjectId) return; // guard: children only
       setState({ subProjectId: proj.config.id, kind });
       setBusy(false);
@@ -237,11 +237,10 @@ export function WorktreeCloseGate() {
       }
     }
 
-    const subIndex = projects.findIndex((p) => p.config.id === state.subProjectId);
     close();
-    if (subIndex >= 0) {
+    if (projects.some((p) => p.config.id === state.subProjectId)) {
       if (isAbandon) {
-        emit(Events.REMOVE_PROJECT, subIndex);
+        emit(Events.REMOVE_PROJECT, state.subProjectId);
       } else {
         emit(Events.WORKTREE_FINISH_COMPLETED, {
           subProjectId: state.subProjectId,

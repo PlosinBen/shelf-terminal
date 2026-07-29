@@ -24,21 +24,21 @@ export function emit(event: string, ...args: any[]) {
 // existed before the typed agent group. New events should go through
 // AgentEventMap in ./types.ts and use onAgent/emitAgent helpers.
 export const Events = {
-  CLOSE_TAB: 'close-tab',           // (projectIndex, tabIndex)
-  REMOVE_PROJECT: 'remove-project',  // (projectIndex)
-  NEW_TAB: 'new-tab',               // (projectIndex)
-  CONNECT_PROJECT: 'connect-project',       // (projectIndex)
+  CLOSE_TAB: 'close-tab',           // (projectId, tabIndex)
+  REMOVE_PROJECT: 'remove-project',  // (projectId)
+  NEW_TAB: 'new-tab',               // (projectId)
+  CONNECT_PROJECT: 'connect-project',       // (projectId)
   AUTO_CONNECT_PROJECT: 'auto-connect-project', // (projectId) — connect a just-added project once it's in the store
-  DISCONNECT_PROJECT: 'disconnect-project', // (projectIndex)
+  DISCONNECT_PROJECT: 'disconnect-project', // (projectId)
   OPEN_FOLDER_PICKER: 'open-folder-picker',
   ADD_PROJECT: 'add-project',       // (ProjectConfig)
-  TOGGLE_SPLIT: 'toggle-split',     // (projectIndex)
-  CREATE_WORKTREE: 'create-worktree', // (projectIndex, prefill?: { branch?, notePaths? })
-  WORKTREE_CLOSE: 'worktree-close',   // (projectIndex, kind: 'finish' | 'abandon')
+  TOGGLE_SPLIT: 'toggle-split',     // (projectId)
+  CREATE_WORKTREE: 'create-worktree', // (projectId, prefill?: { branch?, notePaths? })
+  WORKTREE_CLOSE: 'worktree-close',   // (projectId, kind: 'finish' | 'abandon')
   WORKTREE_FINISH_COMPLETED: 'worktree-finish-completed', // ({ subProjectId, parentProjectId, featureBranch, targetBranch })
   OPEN_PM: 'open-pm',                 // ()
-  NEW_AGENT_TAB: 'new-agent-tab',     // (projectIndex, provider?)
-  NEW_WEB_TAB: 'new-web-tab',         // (projectIndex, url?) — url pre-navigates the tab
+  NEW_AGENT_TAB: 'new-agent-tab',     // (projectId, provider?)
+  NEW_WEB_TAB: 'new-web-tab',         // (projectId, url?) — url pre-navigates the tab
 } as const;
 
 // Test helper — clears every registered handler. Tests run in shared

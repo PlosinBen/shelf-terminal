@@ -35,7 +35,7 @@ export interface ProjectRuntime {
 // ── Global store (simple event emitter pattern) ──
 
 let projects: ProjectRuntime[] = [];
-let activeProjectIndex = 0;
+let activeProjectId: string | null = null;
 let sidebarVisible = true;
 let settingsVisible = false;
 let searchVisible = false;
@@ -44,7 +44,7 @@ let devToolsVisible = false;
 let notesVisible = false;
 let skillsVisible = false;
 let mcpVisible = false;
-let editingProjectIndex: number | null = null;
+let editingProjectId: string | null = null;
 let settings: AppSettings = { ...DEFAULT_SETTINGS };
 let updateStatus: UpdateStatus = { state: 'idle' };
 let pmVisible = false;
@@ -82,8 +82,23 @@ function subscribe(l: Listener) {
   return () => listeners.delete(l);
 }
 
+function projectIndexById(projectId: string | null): number {
+  return projectId ? projects.findIndex((p) => p.config.id === projectId) : -1;
+}
+
+function projectIdAtIndex(index: number): string | null {
+  return projects[index]?.config.id ?? null;
+}
+
+function reconcileActiveProject(preferredIndex = 0) {
+  if (activeProjectId && projects.some((p) => p.config.id === activeProjectId)) return;
+  activeProjectId = projects[preferredIndex]?.config.id ?? projects[projects.length - 1]?.config.id ?? null;
+}
+
 function getSnapshot() {
-  return { projects, activeProjectIndex, sidebarVisible, settingsVisible, searchVisible, commandPickerVisible, devToolsVisible, notesVisible, skillsVisible, mcpVisible, editingProjectIndex, settings, updateStatus, pmVisible, awayMode, pmActive, quickNoteVisible, layoutGeneration, chatStage, connectionHealth, projectNotice };
+  const activeProjectIndex = projectIndexById(activeProjectId);
+  const editingProjectIndex = projectIndexById(editingProjectId);
+  return { projects, activeProjectIndex, activeProjectId, sidebarVisible, settingsVisible, searchVisible, commandPickerVisible, devToolsVisible, notesVisible, skillsVisible, mcpVisible, editingProjectIndex: editingProjectIndex === -1 ? null : editingProjectIndex, editingProjectId, settings, updateStatus, pmVisible, awayMode, pmActive, quickNoteVisible, layoutGeneration, chatStage, connectionHealth, projectNotice };
 }
 
 let snapshotRef = getSnapshot();
@@ -111,6 +126,7 @@ export function setProjects(configs: ProjectConfig[]) {
       folderInvalid: false,
     })),
   );
+  reconcileActiveProject();
   updateSnapshot();
 }
 
@@ -134,23 +150,44 @@ export function addProject(config: ProjectConfig) {
   // A worktree child lands right after its parent group (not the list tail);
   // a plain project stays at the end. groupedOrder enforces the invariant.
   projects = groupedOrder([...projects, runtime]);
-  activeProjectIndex = projects.findIndex((p) => p.config.id === config.id);
+  activeProjectId = config.id;
   updateSnapshot();
 }
 
 export function removeProject(index: number) {
+  const removedId = projectIdAtIndex(index);
   projects = projects.filter((_, i) => i !== index);
-  if (activeProjectIndex >= projects.length) {
-    activeProjectIndex = Math.max(0, projects.length - 1);
+  if (activeProjectId === removedId) {
+    activeProjectId = projects[index]?.config.id ?? projects[index - 1]?.config.id ?? null;
+  } else {
+    reconcileActiveProject(index);
   }
+  if (editingProjectId === removedId) editingProjectId = null;
   updateSnapshot();
 }
 
 export function setActiveProject(index: number) {
-  if (index >= 0 && index < projects.length) {
-    activeProjectIndex = index;
-    updateSnapshot();
-  }
+  const projectId = projectIdAtIndex(index);
+  if (!projectId) return;
+  setActiveProjectById(projectId);
+}
+
+export function setActiveProjectById(projectId: string) {
+  if (!projects.some((p) => p.config.id === projectId)) return;
+  activeProjectId = projectId;
+  updateSnapshot();
+}
+
+export function getActiveProjectId() {
+  return activeProjectId;
+}
+
+export function getProjectIndexById(projectId: string) {
+  return projectIndexById(projectId);
+}
+
+export function getProjectById(projectId: string): ProjectRuntime | null {
+  return projects.find((p) => p.config.id === projectId) ?? null;
 }
 
 export function showProjectNotice(input: { projectId: string; message: string }): ProjectNotice {
@@ -181,20 +218,21 @@ export function reorderProjects(fromIndex: number, toIndex: number) {
 
   // Group-granular move: dragging any row drags its whole group (a project +
   // its worktree children). No-op if source/target share a group.
-  const activeId = projects[activeProjectIndex]?.config.id;
   const next = moveGroup(projects, fromIndex, toIndex);
   if (next === projects) return;
   projects = next;
-
-  // Follow the active project by identity (indices shifted with the group move).
-  if (activeId) {
-    const ni = projects.findIndex((p) => p.config.id === activeId);
-    if (ni !== -1) activeProjectIndex = ni;
-  }
+  reconcileActiveProject();
 
   layoutGeneration++;
   updateSnapshot();
   window.shelfApi.project.save(projects.map((p) => p.config));
+}
+
+export function reorderProjectsById(sourceProjectId: string, targetProjectId: string) {
+  const fromIndex = projectIndexById(sourceProjectId);
+  const toIndex = projectIndexById(targetProjectId);
+  if (fromIndex === -1 || toIndex === -1) return;
+  reorderProjects(fromIndex, toIndex);
 }
 
 export function toggleProjectList() {
@@ -346,6 +384,10 @@ export function getProjectConfigs(): ProjectConfig[] {
   return projects.map((p) => p.config);
 }
 
+export function listStableProjectViews(): readonly ProjectRuntime[] {
+  return [...projects].sort((a, b) => a.config.id.localeCompare(b.config.id));
+}
+
 // ── Settings actions ──
 
 export function setSettings(s: AppSettings) {
@@ -451,7 +493,12 @@ export function markUnread(tabId: string) {
 // ── Project edit actions ──
 
 export function setEditingProject(index: number | null) {
-  editingProjectIndex = index;
+  editingProjectId = index === null ? null : projectIdAtIndex(index);
+  updateSnapshot();
+}
+
+export function setEditingProjectById(projectId: string | null) {
+  editingProjectId = projectId && projects.some((p) => p.config.id === projectId) ? projectId : null;
   updateSnapshot();
 }
 
@@ -463,6 +510,12 @@ export function updateProjectConfig(index: number, partial: Partial<ProjectConfi
   projects = projects.map((p, i) => (i === index ? { ...p, config } : p));
   updateSnapshot();
   window.shelfApi.project.save(projects.map((p) => p.config));
+}
+
+export function updateProjectConfigById(projectId: string, partial: Partial<ProjectConfig>) {
+  const index = projectIndexById(projectId);
+  if (index === -1) return;
+  updateProjectConfig(index, partial);
 }
 
 // ── Split pane actions ──
@@ -543,7 +596,7 @@ function syncToMain() {
       name: p.config.name,
       cwd: p.config.cwd,
       connectionType: p.config.connection.type,
-      active: pi === activeProjectIndex,
+      active: p.config.id === activeProjectId,
       tabs: p.tabs.map((t, ti) => ({
         id: t.id,
         label: t.label,

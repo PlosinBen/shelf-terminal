@@ -16,7 +16,7 @@ import {
   useAgentTab,
 } from '../agentTabStore';
 import { emitAgent } from '../events';
-import { useStore, updateProjectConfig } from '../store';
+import { useStore, updateProjectConfigById } from '../store';
 import { debugLog } from '../debugLog';
 import { formatTabLogId } from '@shared/tab-id';
 
@@ -37,7 +37,7 @@ interface Props {
  *    persist into projectConfig), initTab/removeTab, emit init/destroy.
  * 2. **Capability-driven persist** — when the provider reports
  *    capabilities (after any config-edit turn), commit the backend's
- *    current* into projectConfig.agentPrefs (needs projectIndex;
+ *    current* into projectConfig.agentPrefs (needs projectId;
  *    sub-components don't have it). The config-edit *action* itself is
  *    emitted directly by DecisionPanel (agent:send + configEdit), not
  *    routed through here.
@@ -68,7 +68,7 @@ export function AgentView({ tabId, cwd, connection, provider, projectId, visible
       const newId = crypto.randomUUID();
       sessionIdRef.current = newId;
       const ids = { ...projects[projectIndex]?.config.agentSessionIds, [provider]: newId };
-      updateProjectConfig(projectIndex, { agentSessionIds: ids });
+      updateProjectConfigById(projectId, { agentSessionIds: ids });
     }
   }
   const sessionId = sessionIdRef.current;
@@ -110,8 +110,8 @@ export function AgentView({ tabId, cwd, connection, provider, projectId, visible
   const persistPref = useCallback((partial: Partial<AgentPrefs>) => {
     const current = projects[projectIndex]?.config.agentPrefs ?? {};
     const updated = { ...current, [provider]: { ...current[provider], ...partial } };
-    updateProjectConfig(projectIndex, { agentPrefs: updated });
-  }, [projectIndex, provider, projects]);
+    updateProjectConfigById(projectId, { agentPrefs: updated });
+  }, [projectId, projectIndex, provider, projects]);
 
   /**
    * Capability-driven persist: when provider re-broadcasts capabilities

@@ -23,7 +23,7 @@ import { SkillsView } from './components/SkillsView';
 import { McpView } from './components/McpView';
 import { QuickNoteOverlay } from './components/QuickNoteOverlay';
 import { useKeybindings } from './hooks/useKeybindings';
-import { useStore, setProjects, setSettings, setUpdateStatus, addProject, addTab, setActiveTab, removeTab, removeProject, setSplitTab, clearUnread, setInvalidProjects, setPmActive, setConnectionHealth, setActiveProject, showProjectNotice } from './store';
+import { useStore, setProjects, setSettings, setUpdateStatus, addProject, addTab, setActiveTab, removeTab, removeProject, setSplitTab, clearUnread, setInvalidProjects, setPmActive, setConnectionHealth, setActiveProject, setActiveProjectById, getProjectById, getProjectIndexById, showProjectNotice } from './store';
 import type { ConnectionHealth } from '@shared/types';
 import type { ProjectConfig } from '@shared/types';
 import { disposeTerminal } from './components/TerminalView';
@@ -37,7 +37,7 @@ import { clearAgentSession } from './storage/agent-history';
 import './styles/global.css';
 
 export function App() {
-  const { projects, activeProjectIndex, sidebarVisible, settingsVisible, commandPickerVisible, devToolsVisible, notesVisible, skillsVisible, mcpVisible, editingProjectIndex, settings, pmVisible, awayMode } = useStore();
+  const { projects, activeProjectIndex, activeProjectId, sidebarVisible, settingsVisible, commandPickerVisible, devToolsVisible, notesVisible, skillsVisible, mcpVisible, editingProjectIndex, settings, pmVisible, awayMode } = useStore();
   useKeybindings();
 
   // Auto-connect a just-added project (e.g. a fresh worktree) once it lands in the
@@ -54,7 +54,7 @@ export function App() {
     // Defer past this effect-flush so the CONNECT_PROJECT handler (re-subscribed in
     // the SAME flush, whichever order the effects run) is live before we emit —
     // otherwise the emit can land between the bus effect's cleanup and re-subscribe.
-    queueMicrotask(() => emit(Events.CONNECT_PROJECT, idx));
+    queueMicrotask(() => emit(Events.CONNECT_PROJECT, pendingConnectId));
   }, [projects, pendingConnectId]);
 
   useEffect(() => {
@@ -119,15 +119,18 @@ export function App() {
 
   // Centralized event handlers
   useEffect(() => {
-    const offCloseTab = on(Events.CLOSE_TAB, (projectIndex: number, tabIndex: number) => {
-      const proj = projects[projectIndex];
+    const offCloseTab = on(Events.CLOSE_TAB, (projectId: string, tabIndex: number) => {
+      const projectIndex = getProjectIndexById(projectId);
+      const proj = getProjectById(projectId);
       const tab = proj?.tabs[tabIndex];
       if (tab) teardownTab(tab);
       removeTab(projectIndex, tabIndex);
     });
 
-    const offRemoveProject = on(Events.REMOVE_PROJECT, (projectIndex: number) => {
-      const proj = projects[projectIndex];
+    const offRemoveProject = on(Events.REMOVE_PROJECT, (projectId: string) => {
+      const projectIndex = getProjectIndexById(projectId);
+      const proj = getProjectById(projectId);
+      if (projectIndex === -1 || !proj) return;
       if (proj) {
         // Clean up agent session data (IndexedDB)
         const sessionIds = proj.config.agentSessionIds;
@@ -137,7 +140,7 @@ export function App() {
         proj.tabs.forEach(teardownTab);
       }
       removeProject(projectIndex);
-      const configs = projects.filter((_, i) => i !== projectIndex).map((p) => p.config);
+      const configs = projects.filter((p) => p.config.id !== projectId).map((p) => p.config);
       window.shelfApi.project.save(configs);
     });
 
@@ -147,40 +150,42 @@ export function App() {
       featureBranch: string;
       targetBranch: string;
     }) => {
-      const subIndex = projects.findIndex((p) => p.config.id === payload.subProjectId);
       const configsAfter = projects
         .filter((p) => p.config.id !== payload.subProjectId)
         .map((p) => p.config);
       const parentIndexAfter = configsAfter.findIndex((p) => p.id === payload.parentProjectId);
-      if (subIndex === -1 || parentIndexAfter === -1) {
+      if (!getProjectById(payload.subProjectId) || parentIndexAfter === -1) {
         console.warn(`[worktree] finish-completed for unknown project pair ${payload.subProjectId} → ${payload.parentProjectId}`);
         return;
       }
 
-      emit(Events.REMOVE_PROJECT, subIndex);
-      setActiveProject(parentIndexAfter);
+      emit(Events.REMOVE_PROJECT, payload.subProjectId);
+      setActiveProjectById(payload.parentProjectId);
       showProjectNotice({
         projectId: payload.parentProjectId,
         message: `Merged ${payload.featureBranch} → ${payload.targetBranch} and closed the worktree`,
       });
     });
 
-    const offNewTab = on(Events.NEW_TAB, (projectIndex: number) => {
-      const proj = projects[projectIndex];
-      if (!proj) return;
+    const offNewTab = on(Events.NEW_TAB, (projectId: string) => {
+      const projectIndex = getProjectIndexById(projectId);
+      const proj = getProjectById(projectId);
+      if (!proj || projectIndex === -1) return;
       addTab(projectIndex);
     });
 
-    const offNewAgentTab = on(Events.NEW_AGENT_TAB, (projectIndex: number, provider?: import('@shared/types').AgentProvider) => {
-      const proj = projects[projectIndex];
-      if (!proj) return;
+    const offNewAgentTab = on(Events.NEW_AGENT_TAB, (projectId: string, provider?: import('@shared/types').AgentProvider) => {
+      const projectIndex = getProjectIndexById(projectId);
+      const proj = getProjectById(projectId);
+      if (!proj || projectIndex === -1) return;
       const resolvedProvider = provider ?? proj.config.defaultAgentProvider ?? 'claude';
       addTab(projectIndex, undefined, undefined, undefined, 'agent', resolvedProvider);
     });
 
-    const offNewWebTab = on(Events.NEW_WEB_TAB, (projectIndex: number, url?: string) => {
-      const proj = projects[projectIndex];
-      if (!proj) return;
+    const offNewWebTab = on(Events.NEW_WEB_TAB, (projectId: string, url?: string) => {
+      const projectIndex = getProjectIndexById(projectId);
+      const proj = getProjectById(projectId);
+      if (!proj || projectIndex === -1) return;
       // `url` (from the + menu's granted-origin shortcuts) pre-navigates the tab;
       // absent = a blank web tab. Unnamed either way → label follows the host.
       addTab(projectIndex, undefined, undefined, undefined, 'web', undefined, url);
@@ -206,7 +211,7 @@ export function App() {
         console.warn(`[worktree] propose-create for unknown project ${projectId}`);
         return;
       }
-      emit(Events.CREATE_WORKTREE, projectIndex, { branch, notePaths });
+      emit(Events.CREATE_WORKTREE, projectId, { branch, notePaths });
     });
 
     const offProposeWorktreeFinish = window.shelfApi.worktree.onProposeFinish(({ projectId }) => {
@@ -215,11 +220,11 @@ export function App() {
         console.warn(`[worktree] propose-finish for unknown project ${projectId}`);
         return;
       }
-      emit(Events.WORKTREE_CLOSE, projectIndex, 'finish');
+      emit(Events.WORKTREE_CLOSE, projectId, 'finish');
     });
 
-    const offConnectProject = on(Events.CONNECT_PROJECT, async (projectIndex: number) => {
-      const proj = projects[projectIndex];
+    const offConnectProject = on(Events.CONNECT_PROJECT, async (projectId: string) => {
+      let proj = getProjectById(projectId);
       if (!proj || proj.tabs.length > 0) return;
 
       // Establish SSH ControlMaster before spawning tabs
@@ -254,10 +259,16 @@ export function App() {
       }
 
       if (proj.config.openAgentOnConnect) {
+        proj = getProjectById(projectId);
+        const projectIndex = getProjectIndexById(projectId);
+        if (!proj || projectIndex === -1 || proj.tabs.length > 0) return;
         const provider = proj.config.defaultAgentProvider ?? 'claude';
         addTab(projectIndex, undefined, undefined, undefined, 'agent', provider);
       }
 
+      proj = getProjectById(projectId);
+      const projectIndex = getProjectIndexById(projectId);
+      if (!proj || projectIndex === -1) return;
       const templates = proj.config.defaultTabs;
       if (templates && templates.length > 0) {
         templates.forEach((t) =>
@@ -271,8 +282,9 @@ export function App() {
       setActiveTab(projectIndex, 0);
     });
 
-    const offDisconnectProject = on(Events.DISCONNECT_PROJECT, (projectIndex: number) => {
-      const proj = projects[projectIndex];
+    const offDisconnectProject = on(Events.DISCONNECT_PROJECT, (projectId: string) => {
+      const projectIndex = getProjectIndexById(projectId);
+      const proj = getProjectById(projectId);
       if (!proj || proj.tabs.length === 0) return;
       // Was leaking: this only killed PTYs and forgot agent tabs, so an agent
       // session's exec (+ provider CLI) survived a project disconnect. Route
@@ -297,9 +309,10 @@ export function App() {
       setPendingConnectId(projectId);
     });
 
-    const offToggleSplit = on(Events.TOGGLE_SPLIT, (projectIndex: number) => {
-      const proj = projects[projectIndex];
-      if (!proj) return;
+    const offToggleSplit = on(Events.TOGGLE_SPLIT, (projectId: string) => {
+      const projectIndex = getProjectIndexById(projectId);
+      const proj = getProjectById(projectId);
+      if (!proj || projectIndex === -1) return;
 
       if (proj.splitTabId) {
         // Close split — kill the split tab
@@ -351,7 +364,7 @@ export function App() {
   const focusTerminal = () => {
     // Clear unread badge on active tab when window regains focus
     const proj = projects[activeProjectIndex];
-    if (proj) clearUnread(activeProjectIndex, proj.activeTabIndex);
+    if (proj && activeProjectIndex !== -1) clearUnread(activeProjectIndex, proj.activeTabIndex);
 
     requestAnimationFrame(() => {
       const textarea = document.querySelector('.terminal-container:not([style*="display: none"]) .xterm-helper-textarea') as HTMLElement;
@@ -400,8 +413,8 @@ export function App() {
           {activeProject && !activeProject.folderInvalid && activeProject.tabs.length === 0 && (
             <div
               className="connect-prompt"
-              onClick={() => emit(Events.CONNECT_PROJECT, activeProjectIndex)}
-              onKeyDown={(e) => { if (e.key === 'Enter') emit(Events.CONNECT_PROJECT, activeProjectIndex); }}
+              onClick={() => { if (activeProjectId) emit(Events.CONNECT_PROJECT, activeProjectId); }}
+              onKeyDown={(e) => { if (e.key === 'Enter' && activeProjectId) emit(Events.CONNECT_PROJECT, activeProjectId); }}
               tabIndex={0}
               ref={(el) => el?.focus()}
             >

@@ -3,7 +3,7 @@ import { useStore } from '../store';
 import { on, emit, Events } from '../events';
 
 interface PendingRemove {
-  projectIndex: number;
+  projectId: string;
   isWorktree: boolean;
   projectName: string;
   branch?: string;
@@ -18,11 +18,11 @@ export function RemoveConfirmDialog() {
   const dialogRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const off = on(CONFIRM_REMOVE_EVENT, (projectIndex: number) => {
-      const proj = projects[projectIndex];
+    const off = on(CONFIRM_REMOVE_EVENT, (projectId: string) => {
+      const proj = projects.find((p) => p.config.id === projectId);
       if (!proj) return;
       setPending({
-        projectIndex,
+        projectId,
         isWorktree: !!proj.config.parentProjectId,
         projectName: proj.config.name,
         branch: proj.config.worktreeBranch,
@@ -48,7 +48,7 @@ export function RemoveConfirmDialog() {
   if (!pending) return null;
 
   const handleConfirm = async () => {
-    const proj = projects[pending.projectIndex];
+    const proj = projects.find((p) => p.config.id === pending.projectId);
     if (pending.isWorktree && cleanWorktree && proj) {
       const parent = projects.find((p) => p.config.id === proj.config.parentProjectId);
       if (parent) {
@@ -59,7 +59,7 @@ export function RemoveConfirmDialog() {
         );
       }
     }
-    emit(Events.REMOVE_PROJECT, pending.projectIndex);
+    emit(Events.REMOVE_PROJECT, pending.projectId);
     setPending(null);
   };
 

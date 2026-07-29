@@ -2,7 +2,7 @@ import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import {
   useStore,
   setActiveProject,
-  setEditingProject,
+  setEditingProjectById,
   toggleSettings,
   reorderProjects,
   updateSettings,
@@ -52,7 +52,7 @@ export function Sidebar() {
   const [resizeWidth, setResizeWidth] = useState<number | null>(null);
   const sidebarWidth = resizeWidth ?? settings.sidebarWidth ?? SIDEBAR_DEFAULT_WIDTH;
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
-  const [contextMenu, setContextMenu] = useState<{ index: number; x: number; y: number } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ projectId: string; x: number; y: number } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   // Clamped on-screen position, measured after the menu mounts. Null until
   // measured → first paint falls back to the raw cursor position.
@@ -111,7 +111,9 @@ export function Sidebar() {
 
   const handleContextMenu = (e: React.MouseEvent, index: number) => {
     e.preventDefault();
-    setContextMenu({ index, x: e.clientX, y: e.clientY });
+    const projectId = projects[index]?.config.id;
+    if (!projectId) return;
+    setContextMenu({ projectId, x: e.clientX, y: e.clientY });
   };
 
   const handleNewProject = () => {
@@ -223,7 +225,7 @@ export function Sidebar() {
       />
 
       {contextMenu && (() => {
-        const proj = projects[contextMenu.index];
+        const proj = projects.find((p) => p.config.id === contextMenu.projectId);
         const isConnected = proj && proj.tabs.length > 0;
         const isInvalid = proj?.folderInvalid;
         return (
@@ -235,7 +237,7 @@ export function Sidebar() {
             {isConnected ? (
               <button
                 className="context-menu-item"
-                onClick={() => { emit(Events.DISCONNECT_PROJECT, contextMenu.index); setContextMenu(null); }}
+                onClick={() => { emit(Events.DISCONNECT_PROJECT, contextMenu.projectId); setContextMenu(null); }}
               >
                 Disconnect
               </button>
@@ -243,7 +245,7 @@ export function Sidebar() {
               <button
                 className="context-menu-item"
                 disabled={isInvalid}
-                onClick={() => { emit(Events.CONNECT_PROJECT, contextMenu.index); setContextMenu(null); }}
+                onClick={() => { emit(Events.CONNECT_PROJECT, contextMenu.projectId); setContextMenu(null); }}
               >
                 Connect
               </button>
@@ -252,14 +254,14 @@ export function Sidebar() {
               <button
                 className="context-menu-item"
                 disabled={isInvalid}
-                onClick={() => { emit(Events.CREATE_WORKTREE, contextMenu.index); setContextMenu(null); }}
+                onClick={() => { emit(Events.CREATE_WORKTREE, contextMenu.projectId); setContextMenu(null); }}
               >
                 New Worktree
               </button>
             )}
             <button
               className="context-menu-item"
-              onClick={() => { setEditingProject(contextMenu.index); setContextMenu(null); }}
+              onClick={() => { setEditingProjectById(contextMenu.projectId); setContextMenu(null); }}
             >
               Edit
             </button>
@@ -271,13 +273,13 @@ export function Sidebar() {
               <>
                 <button
                   className="context-menu-item"
-                  onClick={() => { emit(Events.WORKTREE_CLOSE, contextMenu.index, 'finish'); setContextMenu(null); }}
+                  onClick={() => { emit(Events.WORKTREE_CLOSE, contextMenu.projectId, 'finish'); setContextMenu(null); }}
                 >
                   Finish
                 </button>
                 <button
                   className="context-menu-item context-menu-item-danger"
-                  onClick={() => { emit(Events.WORKTREE_CLOSE, contextMenu.index, 'abandon'); setContextMenu(null); }}
+                  onClick={() => { emit(Events.WORKTREE_CLOSE, contextMenu.projectId, 'abandon'); setContextMenu(null); }}
                 >
                   Abandon
                 </button>
@@ -285,7 +287,7 @@ export function Sidebar() {
             ) : (
               <button
                 className="context-menu-item context-menu-item-danger"
-                onClick={() => { emit(CONFIRM_REMOVE_EVENT, contextMenu.index); setContextMenu(null); }}
+                onClick={() => { emit(CONFIRM_REMOVE_EVENT, contextMenu.projectId); setContextMenu(null); }}
               >
                 Remove
               </button>

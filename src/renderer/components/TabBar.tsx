@@ -46,6 +46,7 @@ export { TAB_COLORS };
 export function TabBar() {
   const { projects, activeProjectIndex, pmActive } = useStore();
   const project = projects[activeProjectIndex];
+  const projectId = project?.config.id ?? null;
 
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editValue, setEditValue] = useState('');
@@ -102,12 +103,12 @@ export function TabBar() {
   }
 
   const handleNewTab = () => {
-    emit(Events.NEW_TAB, activeProjectIndex);
+    if (projectId) emit(Events.NEW_TAB, projectId);
   };
 
   const handleCloseTab = (tabIndex: number, e: React.MouseEvent) => {
     e.stopPropagation();
-    emit(Events.CLOSE_TAB, activeProjectIndex, tabIndex);
+    if (projectId) emit(Events.CLOSE_TAB, projectId, tabIndex);
   };
 
   const handleDoubleClick = (tabIndex: number) => {
@@ -268,7 +269,7 @@ export function TabBar() {
             </button>
             <button
               className="context-menu-item context-menu-item-danger"
-              onClick={() => { emit(Events.CLOSE_TAB, activeProjectIndex, contextMenu.index); setContextMenu(null); }}
+              onClick={() => { if (projectId) emit(Events.CLOSE_TAB, projectId, contextMenu.index); setContextMenu(null); }}
             >
               Close
             </button>
@@ -296,7 +297,7 @@ export function TabBar() {
               key={id}
               className="context-menu-item"
               disabled={project?.tabs.some((t) => t.type === 'agent' && t.provider === id)}
-              onClick={() => { emit(Events.NEW_AGENT_TAB, activeProjectIndex, id); setAddMenu(null); }}
+              onClick={() => { if (projectId) emit(Events.NEW_AGENT_TAB, projectId, id); setAddMenu(null); }}
             >
               Agent ({meta.label})
             </button>
@@ -304,7 +305,7 @@ export function TabBar() {
           <div className="context-menu-divider" />
           <button
             className="context-menu-item"
-            onClick={() => { emit(Events.NEW_WEB_TAB, activeProjectIndex); setAddMenu(null); }}
+            onClick={() => { if (projectId) emit(Events.NEW_WEB_TAB, projectId); setAddMenu(null); }}
           >
             Web
           </button>
@@ -313,7 +314,7 @@ export function TabBar() {
               key={origin}
               className="context-menu-item context-menu-item-web-origin"
               title={origin}
-              onClick={() => { emit(Events.NEW_WEB_TAB, activeProjectIndex, origin); setAddMenu(null); }}
+              onClick={() => { if (projectId) emit(Events.NEW_WEB_TAB, projectId, origin); setAddMenu(null); }}
             >
               Web ({origin})
             </button>
