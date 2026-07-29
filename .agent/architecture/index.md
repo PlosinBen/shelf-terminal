@@ -16,3 +16,4 @@ Abstract data flow at the system level (component names, no filenames).
 | Config 備份/複製 | [config-backup](config-backup.md) | 勾選 live → my branch 快照；chosen branch → plan vs live → apply；side-car git、per-machine branch |
 | 專案 env 注入 | [project-env](project-env.md) | plain+secret → 單一 resolve 出口 → 注入每個 spawn（agent-server/dispatcher/terminal）；dispatcher 走 open_session |
 | Worktree lifecycle | [worktree](worktree.md) | proposal gate → create/finish/abandon transaction → note preservation → parent completion |
+| Project collection boundary | [projects](projects.md) | persisted configs → visual order / stable mounted-view order；project id view state and readonly snapshots |
