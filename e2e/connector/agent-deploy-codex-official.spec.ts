@@ -11,7 +11,7 @@ import {
  *
  * SHELF_TEST_MODE keeps the backend fake after deploy, so this proves provider
  * selection + self-contained runtime shipping without requiring real OpenAI auth.
- * The official SDK JS is bundled in agent-server; the deployed side only needs
+ * The app-server JS is bundled in agent-server; the deployed side only needs
  * the pinned Codex CLI/native tree.
  */
 const test = makeShelfAppFixture('shelf-agent-test');

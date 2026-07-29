@@ -11,7 +11,7 @@ import path from 'path';
  * therefore prove the renderer/main routing, registry selectors, project config
  * persistence, auth UI, stop, reload notification, and old/new provider key
  * isolation. The real SDK transport/auth/MCP/runtime behavior is covered by the
- * codex-sdk provider unit/live seam suites.
+ * Codex provider unit/live seam suites.
  */
 
 const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
@@ -66,7 +66,7 @@ async function disconnectAndReconnect(page: Page) {
   await expectAgentInputReady(page);
 }
 
-test.describe('Codex official SDK provider renderer flow', () => {
+test.describe('Canonical Codex provider renderer flow', () => {
   test('project default opens a Codex official tab and runs normal agent controls', async ({ shelfApp: { page, userDataDir } }) => {
     await setupProject(page);
 

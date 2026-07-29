@@ -1,4 +1,4 @@
-// Codex device-code login DRIVE (shared by legacy ACP and official SDK transports).
+// Codex device-code login DRIVE (shared by legacy ACP and app-server transports).
 
 import { spawn, type ChildProcess } from 'node:child_process';
 import * as readline from 'node:readline';

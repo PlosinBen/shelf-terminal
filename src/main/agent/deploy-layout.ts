@@ -58,8 +58,6 @@ export function codexDeployFiles(libc: Libc, arch: Arch): DeployFile[] {
   return [
     'node',
     'index.mjs',
-    'codex-cli/node_modules/@agentclientprotocol/codex-acp/dist/index.js',
-    'codex-cli/node_modules/@agentclientprotocol/codex-acp/package.json',
     'codex-cli/node_modules/@openai/codex/bin/codex.js',
     'codex-cli/node_modules/@openai/codex/package.json',
     `codex-cli/node_modules/${native}/package.json`,

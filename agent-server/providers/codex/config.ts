@@ -1,7 +1,7 @@
 import type { McpServerBlock, McpServersFile } from '@shared/mcp';
 
-export const CODEX_SDK_EFFORT_LEVELS = ['minimal', 'low', 'medium', 'high', 'xhigh'] as const;
-type CodexReasoningEffort = typeof CODEX_SDK_EFFORT_LEVELS[number];
+export const CODEX_EFFORT_LEVELS = ['minimal', 'low', 'medium', 'high', 'xhigh'] as const;
+type CodexReasoningEffort = typeof CODEX_EFFORT_LEVELS[number];
 
 interface CodexThreadOptions {
   workingDirectory: string;
@@ -65,7 +65,7 @@ export interface CodexSdkRuntimeConfigResult {
   threadOptions: CodexThreadOptions;
 }
 
-export function buildCodexSdkRuntimeConfig(input: BuildConfigInput): CodexSdkRuntimeConfigResult {
+export function buildCodexRuntimeConfig(input: BuildConfigInput): CodexSdkRuntimeConfigResult {
   const errors: string[] = [];
   const env = compactEnv(input.baseEnv ?? {});
   const mcpServers: Record<string, CodexMcpServerConfig> = {};
@@ -188,7 +188,7 @@ function compactEnv(env: Record<string, string | undefined>): Record<string, str
 }
 
 function isCodexSdkEffort(value: string): value is CodexReasoningEffort {
-  return (CODEX_SDK_EFFORT_LEVELS as readonly string[]).includes(value);
+  return (CODEX_EFFORT_LEVELS as readonly string[]).includes(value);
 }
 
 function isSafeMcpServerName(value: string): boolean {

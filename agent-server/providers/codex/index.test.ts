@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { CODEX_PROVIDER } from '@shared/agent-providers';
-import { createCodexOfficialBackend } from './index';
+import { createCodexBackend } from './index';
 import type { LoginRpc } from '../codex-shared/app-server-login';
 import type { OutgoingMessage } from '../types';
 
@@ -137,7 +137,7 @@ function restoreContext(lastSdkSessionId: string) {
 describe('Codex official app-server backend lifecycle', () => {
   it('starts a new app-server thread, starts a turn, streams deltas, persists thread id, reports ctx, and idles once', async () => {
     const app = new FakeAppServer();
-    const backend = createCodexOfficialBackend({ createAppServer: () => app });
+    const backend = createCodexBackend({ createAppServer: () => app });
     const out: OutgoingMessage[] = [];
 
     await backend.query({ prompt: 'hi', cwd: '/repo', appId: 'app-1' }, (m) => out.push(m));
@@ -157,7 +157,7 @@ describe('Codex official app-server backend lifecycle', () => {
 
   it('resumes a persisted app-server thread id and rejects resume id mismatch', async () => {
     const ok = new FakeAppServer();
-    const backend = createCodexOfficialBackend({ createAppServer: () => ok });
+    const backend = createCodexBackend({ createAppServer: () => ok });
     const out: OutgoingMessage[] = [];
 
     await backend.query({ prompt: 'again', cwd: '/repo', restoreContext: restoreContext('thread-existing') }, (m) => out.push(m));
@@ -168,7 +168,7 @@ describe('Codex official app-server backend lifecycle', () => {
     const mismatch = new FakeAppServer({
       'thread/resume': () => ({ thread: { id: 'fresh-thread' } }),
     });
-    const mismatchBackend = createCodexOfficialBackend({ createAppServer: () => mismatch });
+    const mismatchBackend = createCodexBackend({ createAppServer: () => mismatch });
     const mismatchOut: OutgoingMessage[] = [];
 
     await mismatchBackend.query({ prompt: 'again', cwd: '/repo', restoreContext: restoreContext('missing-thread') }, (m) => mismatchOut.push(m));
@@ -179,7 +179,7 @@ describe('Codex official app-server backend lifecycle', () => {
 
   it('sends image-only turns as app-server localImage input', async () => {
     const app = new FakeAppServer();
-    const backend = createCodexOfficialBackend({ createAppServer: () => app });
+    const backend = createCodexBackend({ createAppServer: () => app });
     const out: OutgoingMessage[] = [];
 
     await backend.query({ prompt: ' ', cwd: '/repo', images: ['/tmp/a.png'] }, (m) => out.push(m));
@@ -192,7 +192,7 @@ describe('Codex official app-server backend lifecycle', () => {
 
   it('sends uploaded renderer images as app-server localImage input', async () => {
     const app = new FakeAppServer();
-    const backend = createCodexOfficialBackend({ createAppServer: () => app });
+    const backend = createCodexBackend({ createAppServer: () => app });
     const out: OutgoingMessage[] = [];
 
     await backend.query({
@@ -212,7 +212,7 @@ describe('Codex official app-server backend lifecycle', () => {
 
   it('rejects legacy data URI images before app-server can treat them as paths', async () => {
     const app = new FakeAppServer();
-    const backend = createCodexOfficialBackend({ createAppServer: () => app });
+    const backend = createCodexBackend({ createAppServer: () => app });
     const out: OutgoingMessage[] = [];
 
     await backend.query({ prompt: 'see', cwd: '/repo', images: ['data:image/png;base64,QUJD'] }, (m) => out.push(m));
@@ -226,7 +226,7 @@ describe('Codex official app-server backend lifecycle', () => {
 
   it('sends remote image URLs as app-server image URL input', async () => {
     const app = new FakeAppServer();
-    const backend = createCodexOfficialBackend({ createAppServer: () => app });
+    const backend = createCodexBackend({ createAppServer: () => app });
     const out: OutgoingMessage[] = [];
 
     await backend.query({ prompt: 'see', cwd: '/repo', images: ['https://example.test/a.png'] }, (m) => out.push(m));
@@ -242,7 +242,7 @@ describe('Codex official app-server backend lifecycle', () => {
 
   it('applies config-edit locally without calling app-server turn routes', async () => {
     const app = new FakeAppServer();
-    const backend = createCodexOfficialBackend({ createAppServer: () => app });
+    const backend = createCodexBackend({ createAppServer: () => app });
     const out: OutgoingMessage[] = [];
 
     await backend.query({ prompt: '', cwd: '/repo', configEdit: { key: 'model', value: 'gpt-5-codex' } }, (m) => out.push(m));
@@ -262,7 +262,7 @@ describe('Codex official app-server backend lifecycle', () => {
         return { turn: { id: 'turn-1' } };
       },
     });
-    const backend = createCodexOfficialBackend({ createAppServer: () => app });
+    const backend = createCodexBackend({ createAppServer: () => app });
     const first: OutgoingMessage[] = [];
     const second: OutgoingMessage[] = [];
     const running = backend.query({ prompt: 'first', cwd: '/repo' }, (m) => first.push(m));
@@ -285,7 +285,7 @@ describe('Codex official app-server backend lifecycle', () => {
         return { turn: { id: 'turn-1' } };
       },
     });
-    const backend = createCodexOfficialBackend({ createAppServer: () => app });
+    const backend = createCodexBackend({ createAppServer: () => app });
     const out: OutgoingMessage[] = [];
     const running = backend.query({ prompt: 'first', cwd: '/repo' }, (m) => out.push(m));
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -321,7 +321,7 @@ describe('Codex official app-server backend lifecycle', () => {
         return { turn: { id: 'turn-1' } };
       },
     });
-    const backend = createCodexOfficialBackend({ createAppServer: () => app });
+    const backend = createCodexBackend({ createAppServer: () => app });
     const out: OutgoingMessage[] = [];
     const running = backend.query({ prompt: 'write file', cwd: '/repo' }, (m) => out.push(m));
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -372,7 +372,7 @@ describe('Codex official app-server backend lifecycle', () => {
         return { turn: { id: 'turn-1' } };
       },
     });
-    const backend = createCodexOfficialBackend({ createAppServer: () => app });
+    const backend = createCodexBackend({ createAppServer: () => app });
     const out: OutgoingMessage[] = [];
 
     await backend.query({ prompt: 'check status', cwd: '/repo' }, (m) => out.push(m));
@@ -408,7 +408,7 @@ describe('Codex official app-server backend lifecycle', () => {
         return { turn: { id: 'turn-1' } };
       },
     });
-    const backend = createCodexOfficialBackend({ createAppServer: () => app });
+    const backend = createCodexBackend({ createAppServer: () => app });
     const out: OutgoingMessage[] = [];
 
     await backend.query({ prompt: 'think', cwd: '/repo' }, (m) => out.push(m));
@@ -461,7 +461,7 @@ describe('Codex official app-server backend lifecycle', () => {
         return { turn: { id: 'turn-1' } };
       },
     });
-    const backend = createCodexOfficialBackend({ createAppServer: () => app });
+    const backend = createCodexBackend({ createAppServer: () => app });
     const out: OutgoingMessage[] = [];
     const running = backend.query({ prompt: 'patch and network', cwd: '/repo' }, (m) => out.push(m));
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -483,7 +483,7 @@ describe('Codex official app-server backend lifecycle', () => {
 
   it('reports app-server model/list capabilities and normalizes stale saved model intent', async () => {
     const app = new FakeAppServer();
-    const backend = createCodexOfficialBackend({ createAppServer: () => app });
+    const backend = createCodexBackend({ createAppServer: () => app });
 
     const caps = await backend.gatherCapabilities!(
       '/repo',
@@ -522,7 +522,7 @@ describe('Codex official app-server backend lifecycle', () => {
 
   it('handles typed config slashes locally without app-server turn routes', async () => {
     const app = new FakeAppServer();
-    const backend = createCodexOfficialBackend({ createAppServer: () => app });
+    const backend = createCodexBackend({ createAppServer: () => app });
     const out: OutgoingMessage[] = [];
 
     await backend.query({ prompt: '/model gpt-5-codex', cwd: '/repo' }, (m) => out.push(m));
@@ -535,7 +535,7 @@ describe('Codex official app-server backend lifecycle', () => {
 
   it('routes /mcp and /skills to app-server list routes', async () => {
     const app = new FakeAppServer();
-    const backend = createCodexOfficialBackend({ createAppServer: () => app });
+    const backend = createCodexBackend({ createAppServer: () => app });
     const out: OutgoingMessage[] = [];
 
     await backend.query({ prompt: '/mcp', cwd: '/repo', appId: 'app-1' }, (m) => out.push(m));
@@ -548,7 +548,7 @@ describe('Codex official app-server backend lifecycle', () => {
 
   it('reports /status locally after app-server initialization', async () => {
     const app = new FakeAppServer();
-    const backend = createCodexOfficialBackend({ createAppServer: () => app });
+    const backend = createCodexBackend({ createAppServer: () => app });
     const out: OutgoingMessage[] = [];
 
     await backend.query({ prompt: '/status', cwd: '/repo', model: 'gpt-5.4-mini', effort: 'medium', permissionMode: 'bypassPermissions' }, (m) => out.push(m));
@@ -559,7 +559,7 @@ describe('Codex official app-server backend lifecycle', () => {
 
   it('routes /usage to app-server account usage and rate-limit routes', async () => {
     const app = new FakeAppServer();
-    const backend = createCodexOfficialBackend({ createAppServer: () => app });
+    const backend = createCodexBackend({ createAppServer: () => app });
     const out: OutgoingMessage[] = [];
 
     await backend.query({ prompt: '/usage', cwd: '/repo' }, (m) => out.push(m));
@@ -571,7 +571,7 @@ describe('Codex official app-server backend lifecycle', () => {
 
   it('clears persisted app-server context locally', async () => {
     const app = new FakeAppServer();
-    const backend = createCodexOfficialBackend({ createAppServer: () => app });
+    const backend = createCodexBackend({ createAppServer: () => app });
     const out: OutgoingMessage[] = [];
 
     await backend.query({ prompt: '/clear', cwd: '/repo', restoreContext: restoreContext('thread-1') }, (m) => out.push(m));
@@ -584,7 +584,7 @@ describe('Codex official app-server backend lifecycle', () => {
 
   it('starts a new local Codex thread context with /new', async () => {
     const app = new FakeAppServer();
-    const backend = createCodexOfficialBackend({ createAppServer: () => app });
+    const backend = createCodexBackend({ createAppServer: () => app });
     const out: OutgoingMessage[] = [];
 
     await backend.query({ prompt: '/new', cwd: '/repo', restoreContext: restoreContext('thread-1') }, (m) => out.push(m));
@@ -596,7 +596,7 @@ describe('Codex official app-server backend lifecycle', () => {
 
   it('routes /compact through thread/compact/start', async () => {
     const app = new FakeAppServer();
-    const backend = createCodexOfficialBackend({ createAppServer: () => app });
+    const backend = createCodexBackend({ createAppServer: () => app });
     const out: OutgoingMessage[] = [];
 
     await backend.query({ prompt: '/compact', cwd: '/repo' }, (m) => out.push(m));
@@ -608,7 +608,7 @@ describe('Codex official app-server backend lifecycle', () => {
 
   it('routes /review through review/start for uncommitted changes', async () => {
     const app = new FakeAppServer();
-    const backend = createCodexOfficialBackend({ createAppServer: () => app });
+    const backend = createCodexBackend({ createAppServer: () => app });
     const out: OutgoingMessage[] = [];
 
     await backend.query({ prompt: '/review', cwd: '/repo' }, (m) => out.push(m));
@@ -622,7 +622,7 @@ describe('Codex official app-server backend lifecycle', () => {
 
   it('routes /diff through gitDiffToRemote without starting a thread', async () => {
     const app = new FakeAppServer();
-    const backend = createCodexOfficialBackend({ createAppServer: () => app });
+    const backend = createCodexBackend({ createAppServer: () => app });
     const out: OutgoingMessage[] = [];
 
     await backend.query({ prompt: '/diff', cwd: '/repo' }, (m) => out.push(m));
@@ -633,7 +633,7 @@ describe('Codex official app-server backend lifecycle', () => {
 
   it('gets, sets, and clears Codex goals through thread goal routes', async () => {
     const app = new FakeAppServer();
-    const backend = createCodexOfficialBackend({ createAppServer: () => app });
+    const backend = createCodexBackend({ createAppServer: () => app });
     const out: OutgoingMessage[] = [];
 
     await backend.query({ prompt: '/goal', cwd: '/repo' }, (m) => out.push(m));
@@ -656,7 +656,7 @@ describe('Codex official app-server backend lifecycle', () => {
 
   it('routes /rename and /logout through app-server account/thread routes', async () => {
     const app = new FakeAppServer();
-    const backend = createCodexOfficialBackend({ createAppServer: () => app });
+    const backend = createCodexBackend({ createAppServer: () => app });
     const out: OutgoingMessage[] = [];
 
     await backend.query({ prompt: '/rename focused work', cwd: '/repo' }, (m) => out.push(m));
@@ -669,7 +669,7 @@ describe('Codex official app-server backend lifecycle', () => {
 
   it('surfaces app-server schema gaps for background-task slash commands', async () => {
     const app = new FakeAppServer();
-    const backend = createCodexOfficialBackend({ createAppServer: () => app });
+    const backend = createCodexBackend({ createAppServer: () => app });
     const out: OutgoingMessage[] = [];
 
     await backend.query({ prompt: '/ps', cwd: '/repo' }, (m) => out.push(m));
@@ -681,9 +681,9 @@ describe('Codex official app-server backend lifecycle', () => {
   });
 
   it('declares isolated config home and SDK HOME-scoped skill target until app-server skill roots are finalized', () => {
-    const backend = createCodexOfficialBackend();
+    const backend = createCodexBackend();
     expect(backend.configHome!('app-1')).toBe(path.join(os.homedir(), '.shelf', 'apps', 'app-1', 'codex'));
-    expect(backend.skillTarget!('app-1')).toBe(path.join(os.homedir(), '.shelf', 'apps', 'app-1', 'codex-sdk-home', '.agents', 'skills'));
+    expect(backend.skillTarget!('app-1')).toBe(path.join(os.homedir(), '.shelf', 'apps', 'app-1', 'codex-home', '.agents', 'skills'));
     expect(backend.configHome!(undefined)).toBeUndefined();
     expect(backend.skillTarget!(undefined)).toBeUndefined();
   });
@@ -691,7 +691,7 @@ describe('Codex official app-server backend lifecycle', () => {
   it('builds app-scoped env, required shelf MCP, user MCP, and secret-safe config for thread/start', async () => {
     const envs: NodeJS.ProcessEnv[] = [];
     const app = new FakeAppServer();
-    const backend = createCodexOfficialBackend({
+    const backend = createCodexBackend({
       createAppServer: (env) => {
         envs.push(env);
         return app;
@@ -710,7 +710,7 @@ describe('Codex official app-server backend lifecycle', () => {
 
     expect(envs[0]).toMatchObject({
       CODEX_HOME: path.join(os.homedir(), '.shelf', 'apps', 'app-1', 'codex'),
-      HOME: path.join(os.homedir(), '.shelf', 'apps', 'app-1', 'codex-sdk-home'),
+      HOME: path.join(os.homedir(), '.shelf', 'apps', 'app-1', 'codex-home'),
     });
     const threadStart = app.calls.find((call) => call.method === 'thread/start')!;
     expect(threadStart.params).toMatchObject({
@@ -727,7 +727,7 @@ describe('Codex official app-server backend lifecycle', () => {
 
   it('maps permission mode to thread sandbox and turn sandboxPolicy without mixing schema fields', async () => {
     const app = new FakeAppServer();
-    const backend = createCodexOfficialBackend({ createAppServer: () => app });
+    const backend = createCodexBackend({ createAppServer: () => app });
 
     await backend.query({ prompt: 'hi', cwd: '/repo', permissionMode: 'plan' }, () => {});
 
@@ -741,7 +741,7 @@ describe('Codex official app-server backend lifecycle', () => {
 
   it('surfaces projected MCP config errors before turn/start', async () => {
     const app = new FakeAppServer();
-    const backend = createCodexOfficialBackend({
+    const backend = createCodexBackend({
       createAppServer: () => app,
       loadMcpServers: () => ({ servers: {}, errors: ['MCP server "gh" references env var(s) not set on this host: TOKEN'] }),
     });
@@ -756,7 +756,7 @@ describe('Codex official app-server backend lifecycle', () => {
 
   it('stamps auth events with the temporary provider id', async () => {
     const rpc = fakeRpc();
-    const backend = createCodexOfficialBackend({ spawnLoginRpc: () => ({ rpc }) });
+    const backend = createCodexBackend({ spawnLoginRpc: () => ({ rpc }) });
     const out: OutgoingMessage[] = [];
 
     backend.startLogin!('/repo', (m) => out.push(m));
@@ -771,7 +771,7 @@ describe('Codex official app-server backend lifecycle', () => {
     const refreshAccountStatus = vi.fn(async (_cache, send) => {
       send({ type: 'status', rateLimits: [{ text: '7d: 1%', severity: 'normal' }] });
     });
-    const backend = createCodexOfficialBackend({ refreshAccountStatus });
+    const backend = createCodexBackend({ refreshAccountStatus });
     const out: OutgoingMessage[] = [];
 
     await backend.refreshAccountStatus!(undefined, (m) => out.push(m), 'app-1');

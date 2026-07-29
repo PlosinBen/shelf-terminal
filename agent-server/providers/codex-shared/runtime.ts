@@ -1,7 +1,7 @@
 // Shared first-party Codex runtime primitives.
 //
 // This module owns Codex concepts that are common to both Shelf's legacy
-// codex-acp provider and the temporary official SDK provider: app-scoped
+// codex-acp provider and the temporary app-server provider: app-scoped
 // CODEX_HOME, the official CLI entry, and the native `codex` executable path.
 // ACP-specific adapter entry and ACP skill scan conventions stay in
 // providers/codex/.

@@ -21,7 +21,7 @@ describe('test:agent-deploy script', () => {
 });
 
 describe('packaged Codex runtime inventory', () => {
-  it('ships the Codex CLI/native tree but not a duplicate official SDK JS tree', () => {
+  it('ships the Codex CLI/native tree but not a duplicate app-server JS tree', () => {
     const build = pkg.build;
     expect(build.files).toContain('!node_modules/@openai/codex/**/*');
     expect(build.files).toContain('!node_modules/@openai/codex-*/**/*');

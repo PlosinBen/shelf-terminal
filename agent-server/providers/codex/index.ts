@@ -1,342 +1,604 @@
-// Codex agent provider (ServerBackend), peer to createClaudeBackend /
-// createCopilotBackend. Uses the shared, semantics-free acp/ toolkit for the
-// runtime and OWNS codex specifics (binary launch, skills root, and — later —
-// modes, model format, device-code auth). ACP is an internal detail; the
-// provider identity is 'codex'.
-
+import { CODEX_PROVIDER } from '@shared/agent-providers';
+import * as path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import type { ChildProcess } from 'node:child_process';
-import { methods, type Stream, type AgentApp, type SessionModeState, type SessionConfigOption } from '@agentclientprotocol/sdk';
+import type { AgentAttachment, ProviderModel } from '@shared/types';
+import { parseSlashPrefix } from '@shared/slash-prefix';
+import { codexConfigHome, codexEnv, resolveCodexCliCommand } from '../codex-shared/runtime';
+import { driveDeviceCodeLogin, spawnCodexAppServerRpc, type LoginHandle, type LoginRpc } from '../codex-shared/app-server-login';
+import { pickEffortLevels, pickPermissionModes, type ProviderCapabilities, type SendFn, type ServerBackend } from '../types';
 import { formatConfigAck, type ConfigEditKey } from '@shared/config-ack';
-import type { ServerBackend, QueryInput, SendFn, ProviderCapabilities } from '../types';
-import { openAcpConnection, spawnAgentStdio, type AcpConnection } from '../acp/connection';
-import { createSessionDriver, type AcpSession } from '../acp/client';
-import { createPermissionBridge } from '../acp/permission';
-import { mapSessionCapabilities, currentSelections, configOptionIdForCategory } from '../acp/capabilities';
-import { toAcpMcpServers } from '../acp/mcp';
+import { CODEX_EFFORT_LEVELS, buildCodexRuntimeConfig } from './config';
+import { normalizeCodexAccountStatus, redactCodexAccountText, refreshCodexAccountStatus } from './account-status';
+import { spawnCodexAppServerClient, type CodexAppServerNotificationHandler } from './app-server-client';
+import { summarizeTokenUsageForLog, translateCodexAppServerNotification } from './app-server-translate';
+import { loadProjectedMcpServers, type ParsedMcpConfig } from '../mcp-config';
 import { getSharedShelfMcp } from '../acp/shelf-mcp';
-import { loadProjectedMcpServers } from '../mcp-config';
 import { serverLog } from '../../server-logger';
-import { resolveCodexAcpCommand, codexSkillsRoot, codexSkillTarget, codexAcpEnv, codexConfigHome } from './helpers';
-import { codexPermissionModes, codexModeIdToShelf, shelfToCodexModeId, codexUnmappedModeIds } from './mode-map';
-import { driveDeviceCodeLogin, spawnCodexAppServerRpc, type LoginHandle } from './app-server-login';
 
-// Category names for codex's dynamic config options (agent-owned) — SAME as
-// copilot (verified from codex-acp: category `model` / `thought_level`).
-const MODEL_CATEGORY = 'model';
-const EFFORT_CATEGORY = 'thought_level';
-
-// oauth authMethod for the unauthenticated caps return — WITHOUT it the AuthPane
-// (gated on `authMethod.kind === 'oauth'`) renders no Login button, so codex's
-// device-code login can't be started. codex advertises both api-key and chat-gpt
-// ACP authMethods; the device-code (ChatGPT) path is the one Shelf drives (see
-// startLogin), so the backend declares it as the primary oauth method.
-const CODEX_AUTH_METHOD = {
-  kind: 'oauth' as const,
-  instructions: [{ label: 'Sign in with your ChatGPT account (device code)' }],
-};
-
-/** What to connect the ACP client to + the child to reap (production spawns a
- *  codex-acp process; tests inject an in-process mock AgentApp). Mirrors the
- *  copilot-acp seam so the codex backend is unit-testable with a mock agent. */
-export interface CodexAgentTarget {
-  target: Stream | AgentApp;
-  child?: ChildProcess;
+interface CodexAppServerLike {
+  request<T = unknown>(method: string, params?: unknown): Promise<T>;
+  onNotification(method: string, handler: CodexAppServerNotificationHandler): void;
+  onRequest?(method: string, handler: (params: unknown) => unknown | Promise<unknown>): void;
+  close(): void;
 }
 
-export interface CodexDeps {
-  /** Open the agent transport for `cwd`. `appId` selects the per-app `CODEX_HOME`
-   *  (device-scoped auth isolation). Default: spawn codex-acp. */
-  openAgent?: (cwd: string, appId?: string) => CodexAgentTarget;
-  /** Resolve the in-process Shelf MCP bridge (level 1). Default: the shared HTTP
-   *  server. Return null to omit it (tests skip starting a real HTTP server). */
+interface ApprovalResolution {
+  allow: boolean;
+  message?: string;
+  scope?: 'once' | 'session';
+  cancelled?: boolean;
+}
+
+const CODEX_SDK_SLASH_COMMANDS = [
+  { name: 'status', description: 'Show current Codex session status' },
+  { name: 'usage', description: 'Show Codex account usage and quota limits' },
+  { name: 'mcp', description: 'List loaded MCP servers' },
+  { name: 'skills', description: 'List loaded skills' },
+  { name: 'skill', description: 'List loaded skills' },
+  { name: 'compact', description: 'Compact Codex thread context' },
+  { name: 'clear', description: 'Clear Codex session context' },
+  { name: 'new', description: 'Start a new Codex thread for the next turn' },
+  { name: 'review', description: 'Review uncommitted changes' },
+  { name: 'diff', description: 'Show git diff to remote' },
+  { name: 'goal', description: 'Get, set, or clear the current Codex goal' },
+  { name: 'rename', description: 'Rename the current Codex thread' },
+  { name: 'logout', description: 'Log out of the current Codex account' },
+  { name: 'ps', description: 'List background Codex tasks' },
+  { name: 'stop', description: 'Stop a background Codex task' },
+  { name: 'clean', description: 'Clean completed background Codex tasks' },
+] as const;
+
+const CODEX_APP_SERVER_SLASH_COMMAND_NAMES = new Set<string>(CODEX_SDK_SLASH_COMMANDS.map((command) => command.name));
+const UNSUPPORTED_APP_SERVER_SLASH_COMMANDS = new Set(['ps', 'stop', 'clean']);
+
+export interface CodexBackendDeps {
+  spawnLoginRpc?: (env: NodeJS.ProcessEnv) => { rpc: LoginRpc };
+  createAppServer?: (env: NodeJS.ProcessEnv) => CodexAppServerLike;
   getShelfMcp?: () => Promise<{ url: string } | null>;
+  loadMcpServers?: (appId: string | undefined, env?: Record<string, string | undefined>) => ParsedMcpConfig;
+  listBundledModels?: () => ProviderCapabilities['models'];
+  refreshAccountStatus?: (
+    cache: Parameters<NonNullable<ServerBackend['refreshAccountStatus']>>[0],
+    send: SendFn,
+    appId?: string,
+  ) => Promise<void>;
 }
 
-function defaultOpenAgent(cwd: string, appId?: string): CodexAgentTarget {
-  const { command, args } = resolveCodexAcpCommand();
-  // CODEX_HOME (per-app config-home) is set at SPAWN — process env, so it must be
-  // right from the start (auth lives under it). appId is known by caps-time.
-  const spawned = spawnAgentStdio(command, args, { cwd, env: codexAcpEnv(appId) });
-  return { target: spawned.stream, child: spawned.child };
+export function codexHome(appId: string | undefined): string | undefined {
+  const home = codexConfigHome(appId);
+  return home ? path.join(path.dirname(home), 'codex-home') : undefined;
 }
 
-export function createCodexBackend(deps: CodexDeps = {}): ServerBackend {
-  const openAgent = deps.openAgent ?? defaultOpenAgent;
-  const getShelfMcp = deps.getShelfMcp ?? getSharedShelfMcp;
+export function codexSkillTarget(appId: string | undefined): string | undefined {
+  const home = codexHome(appId);
+  return home ? path.join(home, '.agents', 'skills') : undefined;
+}
 
-  let conn: AcpConnection | null = null;
-  let child: ChildProcess | null = null;
-  let session: AcpSession | null = null;
-  let sessionCwd: string | null = null;
-  // The appId the live session was created with — MCP servers + skills root are
-  // fixed at session/new; gatherCapabilities has no appId, the first send does,
-  // so the session is recreated once appId is learned. Stable per app instance.
-  let sessionAppId: string | undefined;
-  let lastAppId: string | undefined;
-  // The appId the live CONNECTION (process) was spawned for. CODEX_HOME is fixed at
-  // spawn, so a change here forces a process respawn (not just a new session).
-  let connAppId: string | undefined;
-  // The active turn's send — the permission bridge rides this lane so requests
-  // reach the renderer on the current turn's id.
-  let currentSend: SendFn | null = null;
-  let loginHandle: LoginHandle | null = null;
-  const permissions = createPermissionBridge(() => currentSend);
-  const driver = createSessionDriver();
-
-  // Live session config (cached from the last new-session response) + the active
-  // selections in SHELF vocabulary, kept in sync as edits apply (mirrors copilot-acp).
-  let sessionModes: SessionModeState | undefined;
-  let sessionConfigOptions: SessionConfigOption[] | undefined;
+export function createCodexBackend(deps: CodexBackendDeps = {}): ServerBackend {
   let currentModel: string | undefined;
   let currentEffort: string | undefined;
-  let currentPermissionMode: string | undefined; // Shelf id (default/plan/bypassPermissions)
+  let currentPermissionMode: string | undefined;
+  let lastAppId: string | undefined;
+  let loginHandle: LoginHandle | null = null;
+  let activeRun: symbol | null = null;
+  let appServer: CodexAppServerLike | null = null;
+  let appServerAppId: string | undefined;
+  let appServerInitialized = false;
+  let activeSend: SendFn | null = null;
+  let activeThreadId: string | null = null;
+  let activeTurnId: string | null = null;
+  let resolveActiveTurn: (() => void) | null = null;
+  const commandMetadataByItemId = new Map<string, { command?: string }>();
+  const commandOutputByItemId = new Map<string, string>();
+  const reasoningByItemId = new Map<string, string>();
+  const pendingPermissionRequests = new Map<string, {
+    resolve: (value: ApprovalResolution) => void;
+    toolName: string;
+  }>();
+  const spawnLoginRpc = deps.spawnLoginRpc ?? ((env: NodeJS.ProcessEnv) => spawnCodexAppServerRpc(env));
+  const createAppServer = deps.createAppServer ?? ((env: NodeJS.ProcessEnv) => spawnCodexAppServerClient(env).client);
+  const getShelfMcp = deps.getShelfMcp ?? getSharedShelfMcp;
+  const loadMcpServers = deps.loadMcpServers ?? loadProjectedMcpServers;
+  const listBundledModels = deps.listBundledModels ?? listCodexBundledModels;
+  const refreshAccount = deps.refreshAccountStatus ?? refreshCodexAccountStatus;
 
-  /** Caps from the live session config + current* selections. permissionModes are
-   *  codex's advertised modes mapped to Shelf vocabulary (see mode-map). */
-  function buildCapabilities(): ProviderCapabilities {
-    const availableCommands = session ? driver.getAvailableCommands(session.sessionId) : undefined;
-    const base = mapSessionCapabilities({ modes: sessionModes, configOptions: sessionConfigOptions, availableCommands });
-    // Fail-loud: a codex mode we can't map is dropped from the picker — log it as a
-    // candidate for a new Shelf permission mode (integration policy).
-    for (const id of codexUnmappedModeIds(sessionModes)) {
-      serverLog('warn', 'codex', `unmapped permission mode "${id}" — hidden from the picker (candidate for a new Shelf mode)`);
+  async function ensureAppServer(appId: string | undefined, env: NodeJS.ProcessEnv): Promise<CodexAppServerLike> {
+    if (appServer && appServerAppId !== appId) {
+      appServer.close();
+      appServer = null;
+      appServerInitialized = false;
+    }
+    if (!appServer) {
+      appServer = createAppServer(env);
+      appServerAppId = appId;
+      registerAppServerNotifications(appServer);
+      registerAppServerRequests(appServer);
+    }
+    if (!appServerInitialized) {
+      await appServer.request('initialize', {
+        capabilities: null,
+        clientInfo: { name: 'shelf', version: '0.0.0', title: 'Shelf' },
+      });
+      appServerInitialized = true;
+    }
+    return appServer;
+  }
+
+  function registerAppServerNotifications(client: CodexAppServerLike): void {
+    const forward = (method: string) => {
+      client.onNotification(method, (params) => {
+        if (method === 'turn/started') {
+          activeTurnId = stringValue(asRecord(asRecord(params)?.turn)?.id) ?? activeTurnId;
+          commandMetadataByItemId.clear();
+          commandOutputByItemId.clear();
+          reasoningByItemId.clear();
+        }
+        if (method === 'turn/completed') resolveActiveTurn?.();
+        if (method === 'thread/tokenUsage/updated') logTokenUsageUpdate(params);
+        if (!activeSend) return;
+        if (method === 'item/commandExecution/outputDelta') {
+          const message = translateCommandOutputDelta(params);
+          if (message) activeSend(message);
+          return;
+        }
+        if (method === 'item/reasoning/summaryTextDelta' || method === 'item/reasoning/textDelta') {
+          const message = translateReasoningDelta(params);
+          logReasoningNotification(method, params, message ? [message] : []);
+          if (message) activeSend(message);
+          return;
+        }
+        const translatedParams = method === 'item/started' || method === 'item/updated' || method === 'item/completed'
+          ? carryAppServerItemState(params)
+          : params;
+        const messages = translateCodexAppServerNotification(method, translatedParams);
+        if (method === 'item/started' || method === 'item/updated' || method === 'item/completed') {
+          logReasoningNotification(method, translatedParams, messages);
+        }
+        for (const message of messages) activeSend(message);
+      });
+    };
+    for (const method of [
+      'thread/status/changed',
+      'turn/started',
+      'turn/completed',
+      'item/started',
+      'item/updated',
+      'item/completed',
+      'item/agentMessage/delta',
+      'item/commandExecution/outputDelta',
+      'item/reasoning/summaryTextDelta',
+      'item/reasoning/textDelta',
+      'item/reasoning/summaryPartAdded',
+      'thread/tokenUsage/updated',
+      'account/rateLimits/updated',
+      'mcpServer/startupStatus/updated',
+    ]) {
+      forward(method);
+    }
+  }
+
+  function translateReasoningDelta(params: unknown): Parameters<SendFn>[0] | null {
+    const p = asRecord(params);
+    const itemId = stringValue(p?.itemId ?? p?.item_id);
+    const delta = stringValue(p?.delta);
+    if (!itemId || delta == null) return null;
+    const text = `${reasoningByItemId.get(itemId) ?? ''}${delta}`;
+    reasoningByItemId.set(itemId, text);
+    if (!text.trim()) return null;
+    return {
+      type: 'message',
+      msgId: itemId,
+      msgType: 'fold_text',
+      label: 'Reasoning',
+      body: { content: redactCodexAccountText(text), tone: 'muted' },
+    };
+  }
+
+  function logReasoningNotification(method: string, params: unknown, messages: Parameters<SendFn>[0][]): void {
+    const item = asRecord(asRecord(params)?.item) ?? asRecord(params);
+    const itemType = stringValue(item?.type);
+    const isReasoningDelta = method === 'item/reasoning/summaryTextDelta' || method === 'item/reasoning/textDelta';
+    if (itemType !== 'reasoning' && !isReasoningDelta) return;
+    const itemId = stringValue(item?.id ?? item?.itemId ?? item?.item_id) ?? '<unknown>';
+    const delta = stringValue(item?.delta);
+    const reasoningSummary = asArray(item?.summary).map(stringValue).filter((value): value is string => !!value).join('');
+    const reasoningContent = asArray(item?.content).map(stringValue).filter((value): value is string => !!value).join('');
+    const route = messages.map((message) => {
+      if (message.type === 'message') return message.msgType;
+      if (message.type === 'stream') return `stream:${message.streamType}`;
+      return message.type;
+    }).join(',') || 'ignored';
+    serverLog(
+      'debug',
+      'codex-app-server',
+      `reasoning-notification method=${method} itemId=${itemId} route=${route} deltaLen=${delta?.length ?? 0} reasoningLen=${reasoningSummary.length + reasoningContent.length}`,
+    );
+  }
+
+  function translateCommandOutputDelta(params: unknown): Parameters<SendFn>[0] | null {
+    const p = asRecord(params);
+    const itemId = stringValue(p?.itemId ?? p?.item_id);
+    const delta = stringValue(p?.delta);
+    if (!itemId || delta == null) return null;
+    const output = `${commandOutputByItemId.get(itemId) ?? ''}${delta}`;
+    commandOutputByItemId.set(itemId, output);
+    const meta = commandMetadataByItemId.get(itemId);
+    return {
+      type: 'message',
+      msgId: itemId,
+      msgType: 'fold_code',
+      label: 'Command',
+      ...(meta?.command ? { subtitle: redactCodexAccountText(meta.command) } : {}),
+      body: { content: redactCodexAccountText(output) },
+    };
+  }
+
+  function carryAppServerItemState(params: unknown): unknown {
+    const outer = asRecord(params);
+    const item = asRecord(outer?.item);
+    if (!outer || !item) return params;
+    const itemType = stringValue(item.type);
+    const itemId = stringValue(item.id);
+    if (!itemId) return params;
+    if (itemType === 'reasoning') {
+      const carried = reasoningByItemId.get(itemId);
+      if (!carried) return params;
+      return {
+        ...outer,
+        item: {
+          ...item,
+          summary: [carried],
+        },
+      };
+    }
+    if (itemType !== 'commandExecution' && itemType !== 'command_execution') return params;
+    const command = stringValue(item.command);
+    if (command) commandMetadataByItemId.set(itemId, { command });
+    const aggregate = stringValue(item.aggregatedOutput ?? item.aggregated_output);
+    if (aggregate) commandOutputByItemId.set(itemId, aggregate);
+    const carried = commandOutputByItemId.get(itemId);
+    if (!carried || aggregate) return params;
+    return {
+      ...outer,
+      item: {
+        ...item,
+        aggregatedOutput: carried,
+      },
+    };
+  }
+
+  function registerAppServerRequests(client: CodexAppServerLike): void {
+    if (!client.onRequest) {
+      serverLog('warn', 'codex-app-server', 'app-server client does not support server request handlers');
+      return;
+    }
+    client.onRequest('item/commandExecution/requestApproval', (params) => handleCommandApprovalRequest(params));
+    client.onRequest('item/fileChange/requestApproval', (params) => handleFileChangeApprovalRequest(params));
+    client.onRequest('item/permissions/requestApproval', (params) => handlePermissionProfileApprovalRequest(params));
+    client.onRequest('execCommandApproval', (params) => handleLegacyExecApprovalRequest(params));
+    client.onRequest('applyPatchApproval', (params) => handleLegacyApplyPatchApprovalRequest(params));
+    client.onRequest('mcpServer/elicitation/request', (params) => {
+      serverLog('warn', 'codex-app-server', `unsupported MCP elicitation request: ${redactCodexAccountText(formatJsonForLog(summarizeApprovalInput(params)).slice(0, 500))}`);
+      return { action: 'cancel', content: null, _meta: null };
+    });
+  }
+
+  async function handleCommandApprovalRequest(params: unknown): Promise<Record<string, unknown>> {
+    const p = asRecord(params);
+    const toolUseId = stringValue(p?.approvalId) ?? stringValue(p?.itemId) ?? `codex-approval-${randomUUID()}`;
+    const command = stringValue(p?.command) ?? 'command';
+    const resolution = await requestPermission(toolUseId, 'Command', {
+      command,
+      cwd: stringValue(p?.cwd),
+      reason: stringValue(p?.reason),
+      commandActions: asArray(p?.commandActions),
+    });
+    return { decision: resolutionToAppServerDecision(resolution) };
+  }
+
+  async function handleFileChangeApprovalRequest(params: unknown): Promise<Record<string, unknown>> {
+    const p = asRecord(params);
+    const toolUseId = stringValue(p?.itemId) ?? `codex-file-approval-${randomUUID()}`;
+    const resolution = await requestPermission(toolUseId, 'File changes', {
+      reason: stringValue(p?.reason),
+      grantRoot: stringValue(p?.grantRoot),
+    });
+    return { decision: resolutionToAppServerDecision(resolution) };
+  }
+
+  async function handlePermissionProfileApprovalRequest(params: unknown): Promise<Record<string, unknown>> {
+    const p = asRecord(params);
+    const permissions = asRecord(p?.permissions) ?? {};
+    const toolUseId = stringValue(p?.itemId) ?? `codex-permission-approval-${randomUUID()}`;
+    const resolution = await requestPermission(toolUseId, 'Permissions', {
+      cwd: stringValue(p?.cwd),
+      reason: stringValue(p?.reason),
+      permissions,
+    });
+    if (!resolution.allow) return { permissions: {}, scope: 'turn', strictAutoReview: true };
+    const granted: Record<string, unknown> = {};
+    if (permissions.network) granted.network = permissions.network;
+    if (permissions.fileSystem) granted.fileSystem = permissions.fileSystem;
+    return { permissions: granted, scope: resolution.scope === 'session' ? 'session' : 'turn', strictAutoReview: false };
+  }
+
+  async function handleLegacyExecApprovalRequest(params: unknown): Promise<Record<string, unknown>> {
+    const p = asRecord(params);
+    const command = asArray(p?.command).map((part) => String(part)).join(' ') || 'command';
+    const toolUseId = stringValue(p?.approvalId) ?? stringValue(p?.callId) ?? `codex-exec-approval-${randomUUID()}`;
+    const resolution = await requestPermission(toolUseId, 'Command', {
+      command,
+      cwd: stringValue(p?.cwd),
+      reason: stringValue(p?.reason),
+      parsedCmd: asArray(p?.parsedCmd),
+    });
+    return { decision: resolutionToLegacyReviewDecision(resolution) };
+  }
+
+  async function handleLegacyApplyPatchApprovalRequest(params: unknown): Promise<Record<string, unknown>> {
+    const p = asRecord(params);
+    const toolUseId = stringValue(p?.callId) ?? `codex-patch-approval-${randomUUID()}`;
+    const resolution = await requestPermission(toolUseId, 'File changes', {
+      reason: stringValue(p?.reason),
+      grantRoot: stringValue(p?.grantRoot),
+      fileChanges: asRecord(p?.fileChanges) ?? {},
+    });
+    return { decision: resolutionToLegacyReviewDecision(resolution) };
+  }
+
+  function requestPermission(toolUseId: string, toolName: string, input: Record<string, unknown>): Promise<ApprovalResolution> {
+    if (!activeSend) {
+      serverLog('warn', 'codex-app-server', `approval requested without active turn: ${toolName} ${toolUseId}`);
+      return Promise.resolve({ allow: false, cancelled: true });
+    }
+    if (pendingPermissionRequests.has(toolUseId)) {
+      serverLog('warn', 'codex-app-server', `duplicate approval id from app-server: ${toolUseId}`);
+      return Promise.resolve({ allow: false, cancelled: true });
+    }
+    activeSend({ type: 'permission_request', toolUseId, toolName, input });
+    return new Promise((resolve) => {
+      pendingPermissionRequests.set(toolUseId, { resolve, toolName });
+    });
+  }
+
+  function resolutionToAppServerDecision(resolution: ApprovalResolution): string {
+    if (resolution.cancelled) return 'cancel';
+    if (!resolution.allow) return 'decline';
+    return resolution.scope === 'session' ? 'acceptForSession' : 'accept';
+  }
+
+  function resolutionToLegacyReviewDecision(resolution: ApprovalResolution): unknown {
+    if (resolution.cancelled) return 'abort';
+    if (!resolution.allow) return { denied: { rejection: resolution.message ?? 'Denied by user' } };
+    return resolution.scope === 'session' ? 'approved_for_session' : 'approved';
+  }
+
+  function logTokenUsageUpdate(params: unknown): void {
+    const p = asRecord(params);
+    const summary = summarizeTokenUsageForLog(p?.tokenUsage ?? p?.token_usage ?? p);
+    if (!summary) {
+      serverLog('debug', 'codex-app-server', 'tokenUsage update without displayable context values');
+      return;
+    }
+    const threadId = stringValue(p?.threadId ?? p?.thread_id) ?? activeThreadId ?? '<unknown>';
+    const turnId = stringValue(p?.turnId ?? p?.turn_id) ?? activeTurnId ?? '<unknown>';
+    serverLog(
+      'info',
+      'codex-app-server',
+      `tokenUsage thread=${threadId} turn=${turnId} cumulativeTotalTokens=${summary.cumulativeTotalTokens ?? 'null'} lastInputTokens=${summary.lastInputTokens ?? 'null'} lastTotalTokens=${summary.lastTotalTokens ?? 'null'} modelContextWindow=${summary.modelContextWindow} cumulativePercent=${summary.cumulativePercent ?? 'null'} lastPercent=${summary.lastPercent ?? 'null'}`,
+    );
+  }
+
+  function buildCapabilities(
+    customModels: ProviderModel[] = [],
+    normalizeCurrentModel = false,
+    appServerModels?: ProviderCapabilities['models'],
+  ): ProviderCapabilities {
+    const models = [...(appServerModels?.length ? appServerModels : listBundledModels())];
+    const seen = new Set(models.map((model) => model.value));
+    for (const model of customModels) {
+      if (seen.has(model.id)) continue;
+      models.push({ value: model.id, displayName: model.id });
+      seen.add(model.id);
+    }
+    if (normalizeCurrentModel && models.length > 0 && (!currentModel || !seen.has(currentModel))) {
+      currentModel = models[0].value;
     }
     return {
-      ...base,
-      permissionModes: codexPermissionModes(sessionModes),
+      models,
+      permissionModes: pickPermissionModes(['default', 'plan', 'bypassPermissions']),
+      effortLevels: pickEffortLevels([...CODEX_EFFORT_LEVELS]),
+      slashCommands: [...CODEX_SDK_SLASH_COMMANDS],
       ...(currentModel ? { currentModel } : {}),
       ...(currentEffort ? { currentEffort } : {}),
       ...(currentPermissionMode ? { currentPermissionMode } : {}),
     };
   }
 
-  async function applyModel(model: string): Promise<void> {
-    currentModel = model;
-    const configId = configOptionIdForCategory(sessionConfigOptions, MODEL_CATEGORY);
-    if (conn && session && configId) await driver.setConfigOption(conn.agent, session, configId, model);
-    else if (conn && session) serverLog('warn', 'codex', `setModel: no model config option on session ${session.sessionId}`);
-  }
-
-  async function applyEffort(effort: string): Promise<void> {
-    currentEffort = effort;
-    const configId = configOptionIdForCategory(sessionConfigOptions, EFFORT_CATEGORY);
-    if (conn && session && configId) await driver.setConfigOption(conn.agent, session, configId, effort);
-    else if (conn && session) serverLog('warn', 'codex', `setEffort: no thought_level config option on session ${session.sessionId}`);
-  }
-
-  async function applyPermissionMode(mode: string): Promise<void> {
-    currentPermissionMode = mode;
-    const modeId = shelfToCodexModeId(mode, sessionModes);
-    if (conn && session && modeId) await driver.setMode(conn.agent, session, modeId);
-    else if (conn && session) serverLog('warn', 'codex', `setPermissionMode: codex has no mode for "${mode}"`);
-  }
-
-  /** Apply a config-edit turn (picker / status-bar): imperative apply + updated
-   *  capabilities + an ack divider. No-op guard skips a re-pick of the live value. */
-  async function applyConfigEdit(key: ConfigEditKey, value: string, send: SendFn): Promise<void> {
-    const cur = key === 'model' ? currentModel : key === 'effort' ? currentEffort : currentPermissionMode;
-    if (cur === value) return;
-    try {
-      if (key === 'model') await applyModel(value);
-      else if (key === 'effort') await applyEffort(value);
-      else await applyPermissionMode(value);
-      send({ type: 'capabilities', ...buildCapabilities() });
-      send({ type: 'message', msgId: `m-${randomUUID().slice(0, 8)}`, msgType: 'system', content: formatConfigAck(key, value) });
-    } catch (err) {
-      send({ type: 'message', msgId: `m-${randomUUID().slice(0, 8)}`, msgType: 'error', content: `Failed to set ${key}: ${(err as Error)?.message ?? String(err)}` });
-    }
-  }
-
-  /** Spawn codex-acp (with the per-app CODEX_HOME) + open the ACP connection once. */
-  function ensureConnection(cwd: string, appId: string | undefined): AcpConnection {
-    if (conn) return conn;
-    const opened = openAgent(cwd, appId);
-    child = opened.child ?? null;
-    connAppId = appId;
-    conn = openAcpConnection(opened.target, {
-      name: 'shelf-codex',
-      onRequestPermission: permissions.onRequestPermission,
-      onSessionUpdate: driver.onSessionUpdate,
-    });
-    // Drop refs when the agent process/connection ends so the next turn respawns —
-    // but ONLY if we are STILL the live connection. reconnect()/appId-respawn close
-    // the old connection and immediately spawn a new one; the OLD conn's `closed`
-    // resolves later (on real child exit) and MUST NOT clobber the NEW refs (would
-    // leak the new process + force a redundant respawn). Identity-guarded, mirroring
-    // the dispatcher's SessionChannel.kill guard.
-    const thisConn = conn;
-    conn.closed.finally(() => {
-      if (conn !== thisConn) return;
-      conn = null;
-      child = null;
-      connAppId = undefined;
-      session = null;
-      sessionCwd = null;
-    });
-    return conn;
-  }
-
-  /**
-   * Establish the session (once per cwd), preferring RESUME of a persisted
-   * `lastSdkSessionId` so a reconnect continues the conversation; falls back to
-   * a fresh session/new if resume fails. Emits `context_patch` to persist the
-   * (new) session id — Shelf never touches the context store directly.
-   */
-  async function ensureSession(input: { cwd: string; appId?: string; resumeId?: string | null }, send: SendFn | null): Promise<AcpSession> {
-    // appId is stable per app instance; gatherCapabilities lacks it, the first
-    // send carries it. Resolve against the last-seen value and recreate the
-    // session when it changes so app-level MCP servers + skills root take effect.
-    if (input.appId) lastAppId = input.appId;
-    const appId = input.appId ?? lastAppId;
-
-    // CODEX_HOME is fixed at spawn. If the live connection was spawned for a
-    // DIFFERENT appId (e.g. a legacy caps call that lacked appId), tear it down so
-    // it respawns with the right config-home. Normally a no-op (appId rides caps).
-    if (conn && connAppId !== appId) {
-      serverLog('debug', 'codex', `appId changed (${String(connAppId).slice(0, 8)} → ${String(appId).slice(0, 8)}) — respawning connection for CODEX_HOME`);
-      try { conn.close(); } catch { /* best-effort */ }
-      conn = null; child = null; connAppId = undefined; session = null; sessionCwd = null;
-    }
-
-    if (session && sessionCwd === input.cwd && sessionAppId === appId) return session;
-    if (session) driver.forget(session.sessionId);
-
-    const c = ensureConnection(input.cwd, appId);
-    // ACP requires the `initialize` handshake before any session op; codex-acp
-    // rejects session/new with "Not initialized" otherwise. openAcpConnection fired
-    // it on open — await it here (overlaps the MCP/skill setup below).
-    await c.initialized;
-    const root = codexSkillsRoot(appId);
-    const mcp = loadProjectedMcpServers(appId);
-    for (const e of mcp.errors) serverLog('warn', 'codex', `MCP config: ${e}`);
-    // Level 1 (Shelf built-in bridge) + level 2 (user MCP) coexist as mcpServers
-    // entries — same as copilot-acp/claude. The shelf bridge is an in-process HTTP
-    // MCP server (acp/shelf-mcp.ts); without it codex has no app-level bridge tools
-    // (app_skill CRUD, web_fetch, browser_open).
-    const shelf = await getShelfMcp();
-    const opts = {
-      cwd: input.cwd,
-      additionalDirectories: root ? [root] : undefined,
-      mcpServers: [
-        ...toAcpMcpServers(mcp.servers),
-        ...(shelf ? [{ type: 'http' as const, name: 'shelf', url: shelf.url, headers: [] }] : []),
-      ],
-    };
-
-    if (input.resumeId) {
-      try {
-        session = await driver.resume(c.agent, input.resumeId, opts);
-        sessionCwd = input.cwd;
-        sessionAppId = appId;
-        return session;
-      } catch {
-        // Resume rejected (session gone / unsupported) → fall through to new.
-      }
-    }
-    session = await driver.startNew(c.agent, opts);
-    sessionCwd = input.cwd;
-    sessionAppId = appId;
-    // Cache advertised config so set-mode / set-config-option can resolve ids and
-    // buildCapabilities() has the option lists.
-    sessionModes = session.newSessionResponse?.modes ?? undefined;
-    sessionConfigOptions = session.newSessionResponse?.configOptions ?? undefined;
-    // Persist the SDK session id so the next process can resume it.
-    send?.({ type: 'context_patch', patch: { lastSdkSessionId: session.sessionId } });
-    return session;
+  function applyConfigEdit(key: ConfigEditKey, value: string, send: SendFn): void {
+    if (key === 'model') currentModel = value;
+    else if (key === 'effort') currentEffort = value;
+    else currentPermissionMode = value;
+    send({ type: 'capabilities', ...buildCapabilities() });
+    send({ type: 'message', msgId: `m-${randomUUID().slice(0, 8)}`, msgType: 'system', content: formatConfigAck(key, value) });
   }
 
   return {
-    async query(input: QueryInput, send: SendFn): Promise<void> {
-      currentSend = send;
+    async query(input, send): Promise<void> {
+      if (activeRun) {
+        send({ type: 'error', error: 'codex: a turn is already running' });
+        send({ type: 'status', state: 'idle' });
+        return;
+      }
+      if (input.appId) lastAppId = input.appId;
+      const runId = Symbol('codex-app-server-run');
+      activeRun = runId;
+      activeSend = send;
       try {
-        // A config-edit turn (picker / status-bar) carries no prompt — apply it
-        // imperatively and return, rather than driving an empty prompt.
         if (input.configEdit) {
-          await ensureSession({ cwd: input.cwd, appId: input.appId, resumeId: input.restoreContext?.lastSdkSessionId }, send);
-          await applyConfigEdit(input.configEdit.key, input.configEdit.value, send);
+          applyConfigEdit(input.configEdit.key, input.configEdit.value, send);
           return;
         }
-        const s = await ensureSession(
-          { cwd: input.cwd, appId: input.appId, resumeId: input.restoreContext?.lastSdkSessionId },
-          send,
-        );
-        await driver.drivePromptTurn(conn!.agent, s, input.prompt, send, input.images, input.attachments);
+
+        const slash = parseSlashPrefix(input.prompt);
+        if (slash && (slash.cmd === 'model' || slash.cmd === 'effort' || slash.cmd === 'permission')) {
+          if (!slash.args) {
+            send({ type: 'status', state: 'streaming' });
+            send({ type: 'message', msgId: mintSlashMsgId(), msgType: 'error', content: `Usage: /${slash.cmd} <value>` });
+            return;
+          }
+          const key: ConfigEditKey = slash.cmd === 'permission' ? 'permissionMode' : slash.cmd;
+          applyConfigEdit(key, slash.args, send);
+          return;
+        }
+
+        if (slash && CODEX_APP_SERVER_SLASH_COMMAND_NAMES.has(slash.cmd)) {
+          send({ type: 'status', state: 'streaming' });
+          const baseEnv = codexEnv(input.appId);
+          const sdkHome = codexHome(input.appId);
+          if (sdkHome) baseEnv.HOME = sdkHome;
+          const client = await ensureAppServer(input.appId, baseEnv);
+          if (slash.cmd === 'status') {
+            sendSlashMessage(send, 'reply', formatCodexAppServerStatusCard(input, activeThreadId, {
+              model: currentModel,
+              effort: currentEffort,
+              permissionMode: currentPermissionMode,
+            }));
+            return;
+          }
+          if (slash.cmd === 'usage') {
+            const [rateLimits, usage] = await Promise.all([
+              client.request('account/rateLimits/read'),
+              client.request('account/usage/read'),
+            ]);
+            sendSlashMessage(send, 'reply', formatCodexAppServerUsageCard(rateLimits, usage));
+            return;
+          }
+          if (slash.cmd === 'mcp') {
+            const content = formatCodexAppServerMcpCard(await client.request('mcpServerStatus/list', activeThreadId ? { threadId: activeThreadId } : {}));
+            sendSlashMessage(send, 'reply', content);
+            return;
+          }
+          if (slash.cmd === 'skills' || slash.cmd === 'skill') {
+            sendSlashMessage(send, 'reply', formatCodexAppServerSkillsCard(await client.request('skills/list', { cwds: [input.cwd], forceReload: false })));
+            return;
+          }
+          if (slash.cmd === 'clear' || slash.cmd === 'new') {
+            activeThreadId = null;
+            send({ type: 'context_patch', patch: { lastSdkSessionId: null } });
+            sendSlashMessage(send, 'system', slash.cmd === 'new' ? 'Started a new Codex thread for the next turn.' : 'Cleared Codex app-server session context.');
+            return;
+          }
+          if (slash.cmd === 'diff') {
+            sendSlashMessage(send, 'reply', formatCodexAppServerDiffCard(await client.request('gitDiffToRemote', { cwd: input.cwd })));
+            return;
+          }
+          if (slash.cmd === 'logout') {
+            await client.request('account/logout');
+            activeThreadId = null;
+            send({ type: 'context_patch', patch: { lastSdkSessionId: null } });
+            sendSlashMessage(send, 'system', 'Logged out of Codex.');
+            return;
+          }
+          if (UNSUPPORTED_APP_SERVER_SLASH_COMMANDS.has(slash.cmd)) {
+            sendSlashMessage(send, 'error', `/${slash.cmd} is not available through the current Codex app-server schema yet.`);
+            return;
+          }
+          const threadId = await ensureThread(client, input, send, baseEnv);
+          if (slash.cmd === 'compact') {
+            await waitForTurnCompletion(() => client.request('thread/compact/start', { threadId }));
+            return;
+          }
+          if (slash.cmd === 'review') {
+            await waitForTurnCompletion(() => client.request('review/start', { threadId, target: { type: 'uncommittedChanges' } }));
+            return;
+          }
+          if (slash.cmd === 'goal') {
+            await handleGoalSlash(client, threadId, slash.args, send);
+            return;
+          }
+          if (slash.cmd === 'rename') {
+            if (!slash.args) {
+              sendSlashMessage(send, 'error', 'Usage: /rename <thread name>');
+              return;
+            }
+            await client.request('thread/name/set', { threadId, name: slash.args });
+            sendSlashMessage(send, 'system', `Renamed Codex thread to "${redactCodexAccountText(slash.args)}".`);
+            return;
+          }
+          return;
+        }
+
+        const baseEnv = codexEnv(input.appId);
+        const sdkHome = codexHome(input.appId);
+        if (sdkHome) baseEnv.HOME = sdkHome;
+        const client = await ensureAppServer(input.appId, baseEnv);
+        const threadId = await ensureThread(client, input, send, baseEnv);
+        await waitForTurnCompletion(async () => {
+          const started = await client.request('turn/start', {
+            threadId,
+            clientUserMessageId: `shelf-${randomUUID()}`,
+            input: toCodexAppServerInput(input.prompt, input.images, input.attachments),
+            ...turnOverrides(input),
+          });
+          activeTurnId = stringValue(asRecord(asRecord(started)?.turn)?.id) ?? activeTurnId;
+        });
       } catch (err) {
         send({ type: 'error', error: `codex: ${(err as Error)?.message ?? String(err)}` });
       } finally {
-        currentSend = null;
+        if (activeRun === runId) {
+          activeRun = null;
+          activeSend = null;
+          resolveActiveTurn = null;
+          activeTurnId = null;
+        }
         send({ type: 'status', state: 'idle' });
       }
     },
 
     async gatherCapabilities(
-      cwd: string,
-      _sessionId?: string,
-      _customModels?: unknown,
-      intent?: { model?: string; effort?: string; permissionMode?: string },
-      _cache?: unknown,
-      appId?: string,
+      _cwd,
+      _sessionId,
+      customModels,
+      intent,
+      _cache,
+      appId,
     ): Promise<ProviderCapabilities> {
-      // appId rides caps → the codex-acp spawn below already gets the per-app
-      // CODEX_HOME (device-scoped auth isolation), and login (which follows caps)
-      // reuses it via lastAppId.
       if (appId) lastAppId = appId;
-      // Seed current* from the renderer's saved prefs BEFORE building caps, so the
-      // first reported values reflect the user's choice, not the agent default.
       if (intent?.model) currentModel = intent.model;
       if (intent?.effort) currentEffort = intent.effort;
       if (intent?.permissionMode) currentPermissionMode = intent.permissionMode;
+      const baseEnv = codexEnv(appId);
+      const sdkHome = codexHome(appId);
+      if (sdkHome) baseEnv.HOME = sdkHome;
       try {
-        const s = await ensureSession({ cwd, appId }, null);
-        // `available_commands_update` arrives out-of-turn just AFTER session/new,
-        // so briefly wait (bounded) for it — else slash autocomplete is empty on
-        // the first caps fetch. Mirrors copilot-acp.
-        for (let i = 0; i < 20 && !driver.getAvailableCommands(s.sessionId); i++) {
-          await new Promise((r) => setTimeout(r, 10));
-        }
-        // Fill any current* the renderer didn't pin from the agent's live values;
-        // the permission mode is mapped codex → Shelf vocabulary.
-        const cur = currentSelections({ modes: sessionModes, configOptions: sessionConfigOptions });
-        currentModel ??= cur.currentModel;
-        currentEffort ??= cur.currentEffort;
-        currentPermissionMode ??= codexModeIdToShelf(sessionModes?.currentModeId);
-        return buildCapabilities();
-      } catch (err: any) {
-        // A fresh codex session most commonly fails when unauthenticated →
-        // surface the auth pane rather than an empty capability set. authMethod
-        // drives the AuthPane's Login button (oauth branch); without it the pane
-        // shows no way to start the device-code login. FAIL-LOUD: log the real
-        // session/new failure — this is a CATCH-ALL (any error → authRequired), so
-        // without the message a NON-auth failure (config/MCP/timeout) is silently
-        // mislabeled as "needs login". (T4.0 will refine to inspect the ACP
-        // auth_required error specifically.)
-        serverLog('warn', 'codex', `gatherCapabilities failed → reporting authRequired: ${err?.message ?? String(err)}`);
-        return { models: [], permissionModes: [], effortLevels: [], slashCommands: [], authRequired: true, authMethod: CODEX_AUTH_METHOD };
+        const client = await ensureAppServer(appId, baseEnv);
+        return buildCapabilities(customModels, true, await listAppServerModels(client));
+      } catch (err) {
+        serverLog('warn', 'codex-app-server', `model/list failed; using bundled fallback: ${(err as Error)?.message ?? String(err)}`);
+        return buildCapabilities(customModels, true);
       }
     },
 
-    setModel(model: string): Promise<void> { return applyModel(model); },
-    setEffort(effort: string): Promise<void> { return applyEffort(effort); },
-    setPermissionMode(mode: string): Promise<void> { return applyPermissionMode(mode); },
+    setModel(model): void { currentModel = model; },
+    setEffort(effort): void { currentEffort = effort; },
+    setPermissionMode(mode): void { currentPermissionMode = mode; },
 
-    resolvePermission(toolUseId: string, allow: boolean, message?: string, scope?: 'once' | 'session'): void {
-      permissions.resolvePermission(toolUseId, allow, message, scope);
+    resolvePermission(toolUseId, allow, message, scope): void {
+      const pending = pendingPermissionRequests.get(toolUseId);
+      if (!pending) {
+        serverLog('warn', 'codex-app-server', `resolvePermission for unknown approval id: ${toolUseId}`);
+        return;
+      }
+      pendingPermissionRequests.delete(toolUseId);
+      pending.resolve({ allow, message, scope });
     },
 
-    /**
-     * Subscription auth (device-code), out-of-band from ACP: drive codex's
-     * app-server login, surface the URL + code via `auth_login_prompt`, and
-     * report the outcome via `auth_login_done`. Codex persists its own credentials
-     * (Shelf touches no file) under the per-app `CODEX_HOME` — the SAME config-home
-     * the `--acp` session reads, so the device authorization sticks. lastAppId is
-     * set by the preceding caps call (auth pane only shows after caps).
-     */
     startLogin(_cwd: string, send: SendFn): void {
       loginHandle?.cancel();
-      if (!lastAppId) serverLog('warn', 'codex', 'startLogin: appId unknown — login will use the default CODEX_HOME, not the per-app dir');
-      const { rpc } = spawnCodexAppServerRpc(codexAcpEnv(lastAppId));
-      loginHandle = driveDeviceCodeLogin(rpc, send);
+      const { rpc } = spawnLoginRpc(codexEnv(lastAppId));
+      loginHandle = driveDeviceCodeLogin(rpc, send, CODEX_PROVIDER);
     },
 
     cancelLogin(): void {
@@ -344,55 +606,405 @@ export function createCodexBackend(deps: CodexDeps = {}): ServerBackend {
       loginHandle = null;
     },
 
-    async stop(): Promise<void> {
-      // Cooperative cancel: tell the agent to abort the active turn. The prompt
-      // then resolves with stopReason 'cancelled' and query()'s finally emits idle.
-      permissions.cancelAll();
-      if (conn && session) {
-        await conn.agent.notify(methods.agent.session.cancel, { sessionId: session.sessionId });
-      }
-    },
-
-    skillTarget(appId: string | undefined): string | undefined {
+    skillTarget(appId): string | undefined {
       return codexSkillTarget(appId);
     },
 
-    /** codex-acp reads auth/config/sessions from CODEX_HOME; it errors if the dir
-     *  doesn't pre-exist. The agent-server mkdirs this before spawning (the backend
-     *  does no fs). Same path as the CODEX_HOME env (codexAcpEnv). */
-    configHome(appId: string | undefined): string | undefined {
+    refreshAccountStatus(cache, send, appId): Promise<void> {
+      return refreshAccount(cache, send, appId);
+    },
+
+    configHome(appId): string | undefined {
       return codexConfigHome(appId);
     },
 
-    resetSession(): void {
-      if (session) driver.forget(session.sessionId);
-      session = null;
-      sessionCwd = null;
+    async stop(): Promise<void> {
+      if (appServer && activeThreadId && activeTurnId) {
+        await appServer.request('turn/interrupt', { threadId: activeThreadId, turnId: activeTurnId }).catch((err) => {
+          serverLog('warn', 'codex-app-server', `turn/interrupt failed: ${(err as Error)?.message ?? String(err)}`);
+        });
+      }
+      resolveActiveTurn?.();
     },
 
-    /** Drop the live connection (process + session) so the next turn respawns and
-     *  re-reads the per-app CODEX_HOME credentials a device-login just wrote. Mirrors
-     *  the appId-change respawn in ensureSession, minus the appId check. */
     reconnect(): void {
-      if (session) driver.forget(session.sessionId);
-      try { conn?.close(); } catch { /* best-effort */ }
-      try { child?.kill(); } catch { /* best-effort */ }
-      conn = null;
-      child = null;
-      connAppId = undefined;
-      session = null;
-      sessionCwd = null;
+      resolveActiveTurn?.();
     },
 
     dispose(): void {
-      permissions.cancelAll();
-      if (session) driver.forget(session.sessionId);
-      try { conn?.close(); } catch { /* best-effort */ }
-      try { child?.kill(); } catch { /* best-effort */ }
-      conn = null;
-      child = null;
-      session = null;
-      sessionCwd = null;
+      resolveActiveTurn?.();
+      for (const [toolUseId, pending] of pendingPermissionRequests) {
+        serverLog('warn', 'codex-app-server', `disposing unresolved approval id: ${toolUseId} (${pending.toolName})`);
+        pending.resolve({ allow: false, cancelled: true });
+      }
+      pendingPermissionRequests.clear();
+      appServer?.close();
+      appServer = null;
+      appServerInitialized = false;
+      loginHandle?.cancel();
+      loginHandle = null;
     },
   };
+
+  async function ensureThread(
+    client: CodexAppServerLike,
+    input: Parameters<ServerBackend['query']>[0],
+    send: SendFn,
+    baseEnv: NodeJS.ProcessEnv,
+  ): Promise<string> {
+        const mcp = loadMcpServers(input.appId, baseEnv);
+        if (mcp.errors.length) {
+          throw new Error(mcp.errors.join('; '));
+        }
+        const shelfMcp = await getShelfMcp();
+        const sdkHome = codexHome(input.appId);
+        const mapped = buildCodexRuntimeConfig({
+          cwd: input.cwd,
+          model: input.model ?? currentModel,
+          effort: input.effort ?? currentEffort,
+          permissionMode: input.permissionMode ?? currentPermissionMode,
+          baseEnv,
+          mcpServers: mcp.servers,
+          shelfMcp: shelfMcp ?? undefined,
+          additionalDirectories: sdkHome ? [sdkHome] : undefined,
+        });
+        if (!mapped.ok) {
+          throw new Error(mapped.errors.join('; '));
+        }
+        const resumeId = input.restoreContext?.lastSdkSessionId;
+        const params = {
+          ...threadOverrides(input),
+          config: Object.keys(mapped.codexOptions.config).length ? mapped.codexOptions.config : undefined,
+        };
+        const response = resumeId
+          ? await client.request('thread/resume', { threadId: resumeId, ...params })
+          : await client.request('thread/start', { ...params, sessionStartSource: 'startup' });
+        const threadId = stringValue(asRecord(asRecord(response)?.thread)?.id);
+        if (!threadId) throw new Error('app-server did not return a thread id');
+        if (resumeId && threadId !== resumeId) {
+          throw new Error(`resume thread mismatch (requested ${resumeId}, got ${threadId})`);
+        }
+        activeThreadId = threadId;
+        send({ type: 'context_patch', patch: { lastSdkSessionId: threadId } });
+        send({ type: 'status', state: 'streaming', sessionId: threadId });
+        return threadId;
+    }
+
+  function waitForTurnCompletion(start: () => Promise<void>): Promise<void> {
+    return new Promise((resolve, reject) => {
+      resolveActiveTurn = resolve;
+      start().catch((err) => {
+        resolveActiveTurn = null;
+        reject(err);
+      });
+    });
+  }
+
+  async function handleGoalSlash(client: CodexAppServerLike, threadId: string, args: string, send: SendFn): Promise<void> {
+    const trimmed = args.trim();
+    if (!trimmed) {
+      sendSlashMessage(send, 'reply', formatCodexAppServerGoalCard(await client.request('thread/goal/get', { threadId })));
+      return;
+    }
+    if (trimmed === 'clear') {
+      await client.request('thread/goal/clear', { threadId });
+      sendSlashMessage(send, 'system', 'Cleared Codex goal.');
+      return;
+    }
+    await client.request('thread/goal/set', { threadId, objective: trimmed });
+    sendSlashMessage(send, 'system', `Set Codex goal: ${redactCodexAccountText(trimmed)}`);
+  }
+
+  function threadOverrides(input: Parameters<ServerBackend['query']>[0]): Record<string, unknown> {
+    return {
+      cwd: input.cwd,
+      ...(input.model ?? currentModel ? { model: input.model ?? currentModel } : {}),
+      ...threadPermissionOverrides(input.permissionMode ?? currentPermissionMode),
+    };
+  }
+
+  function turnOverrides(input: Parameters<ServerBackend['query']>[0]): Record<string, unknown> {
+    return {
+      cwd: input.cwd,
+      ...(input.model ?? currentModel ? { model: input.model ?? currentModel } : {}),
+      ...(input.effort ?? currentEffort ? { effort: input.effort ?? currentEffort } : {}),
+      ...turnPermissionOverrides(input.permissionMode ?? currentPermissionMode),
+    };
+  }
+
+  function threadPermissionOverrides(mode: string | undefined): Record<string, unknown> {
+    switch (mode) {
+      case 'plan':
+        return { approvalPolicy: 'never', sandbox: 'read-only' };
+      case 'default':
+        return { approvalPolicy: 'on-request', sandbox: 'workspace-write' };
+      case 'bypassPermissions':
+        return { approvalPolicy: 'never', sandbox: 'danger-full-access' };
+      case undefined:
+        return {};
+      default:
+        throw new Error(`Unsupported Codex app-server permission mode: ${mode}`);
+    }
+  }
+
+  function turnPermissionOverrides(mode: string | undefined): Record<string, unknown> {
+    switch (mode) {
+      case 'plan':
+        return { approvalPolicy: 'never', sandboxPolicy: { type: 'readOnly', networkAccess: false } };
+      case 'default':
+        return { approvalPolicy: 'on-request', sandboxPolicy: { type: 'workspaceWrite', writableRoots: [], networkAccess: false, excludeTmpdirEnvVar: false, excludeSlashTmp: false } };
+      case 'bypassPermissions':
+        return { approvalPolicy: 'never', sandboxPolicy: { type: 'dangerFullAccess' } };
+      case undefined:
+        return {};
+      default:
+        throw new Error(`Unsupported Codex app-server permission mode: ${mode}`);
+    }
+  }
+
+  async function listAppServerModels(client: CodexAppServerLike): Promise<ProviderCapabilities['models']> {
+    const out: ProviderCapabilities['models'] = [];
+    let cursor: string | null | undefined = null;
+    do {
+      const response = asRecord(await client.request('model/list', { ...(cursor ? { cursor } : {}), includeHidden: false }));
+      for (const model of asArray(response?.data)) {
+        const record = asRecord(model);
+        const value = stringValue(record?.model ?? record?.id);
+        if (!value) continue;
+        out.push({
+          value,
+          displayName: stringValue(record?.displayName) ?? value,
+          effortLevels: normalizeAppServerEfforts(record?.supportedReasoningEfforts),
+        });
+        if (record?.isDefault === true && !currentModel) currentModel = value;
+      }
+      cursor = stringValue(response?.nextCursor);
+    } while (cursor);
+    return out;
+  }
+
+  function normalizeAppServerEfforts(raw: unknown): ProviderCapabilities['effortLevels'] {
+    return asArray(raw)
+      .map((entry) => stringValue(asRecord(entry)?.reasoningEffort))
+      .filter((value): value is string => !!value)
+      .map((value) => ({ value, displayName: value }));
+  }
+}
+
+function toCodexAppServerInput(prompt: string, images: string[] = [], attachments: AgentAttachment[] = []): Array<Record<string, unknown>> {
+  const input: Array<Record<string, unknown>> = [];
+  if (prompt.trim()) input.push({ type: 'text', text: prompt, text_elements: [] });
+  for (const image of images) {
+    if (isImageDataUrl(image)) {
+      throw new Error('data URL images must be uploaded before reaching Codex app-server');
+    }
+    input.push(isCodexAppServerImageUrl(image)
+      ? { type: 'image', url: image }
+      : { type: 'localImage', path: image });
+  }
+  for (const attachment of attachments) {
+    if (attachment.kind === 'image') {
+      input.push({ type: 'localImage', path: attachment.path });
+    }
+  }
+  return input;
+}
+
+function isCodexAppServerImageUrl(image: string): boolean {
+  return /^https?:\/\//i.test(image);
+}
+
+function isImageDataUrl(image: string): boolean {
+  return /^data:image\/[^;,]+;base64,/i.test(image);
+}
+
+function formatCodexAppServerMcpCard(raw: unknown): string {
+  const rows = asArray(asRecord(raw)?.data)
+    .map((entry) => asRecord(entry))
+    .filter((entry): entry is Record<string, unknown> => !!entry)
+    .map((entry) => [`\`${mdCell(stringValue(entry.name) ?? 'unknown')}\``, mdCell(stringValue(entry.authStatus) ?? 'loaded')]);
+  if (rows.length === 0) return 'No MCP servers loaded for Codex app-server.';
+  return `${rows.length} MCP server${rows.length > 1 ? 's' : ''}:\n\n${mdTable(['Server', 'Status'], rows)}`;
+}
+
+function formatCodexAppServerSkillsCard(raw: unknown): string {
+  const lines: string[] = [];
+  for (const entry of asArray(asRecord(raw)?.data)) {
+    const record = asRecord(entry);
+    for (const skill of asArray(record?.skills)) {
+      const item = asRecord(skill);
+      const name = stringValue(item?.name);
+      if (!name) continue;
+      const description = stringValue(item?.shortDescription) ?? stringValue(item?.description) ?? '';
+      lines.push(`- \`${name}\`${description ? ` — ${description}` : ''}`);
+    }
+    for (const error of asArray(record?.errors)) {
+      lines.push(`- error: ${mdCell(JSON.stringify(error))}`);
+    }
+  }
+  if (lines.length === 0) return 'No skills loaded for Codex app-server.';
+  return `${lines.length} skill${lines.length > 1 ? 's' : ''}:\n\n${lines.join('\n')}`;
+}
+
+function formatCodexAppServerStatusCard(
+  input: Parameters<ServerBackend['query']>[0],
+  activeThreadId: string | null,
+  current: { model?: string; effort?: string; permissionMode?: string },
+): string {
+  const rows = [
+    ['Provider', CODEX_PROVIDER],
+    ['Thread', activeThreadId ?? input.restoreContext?.lastSdkSessionId ?? 'none'],
+    ['Model', input.model ?? current.model ?? 'provider default'],
+    ['Effort', input.effort ?? current.effort ?? 'provider default'],
+    ['Permission', input.permissionMode ?? current.permissionMode ?? 'provider default'],
+    ['CWD', input.cwd],
+  ];
+  return `Codex status:\n\n${mdTable(['Field', 'Value'], rows.map(([key, value]) => [key, redactCodexAccountText(value)]))}`;
+}
+
+function formatCodexAppServerUsageCard(rateLimits: unknown, usage: unknown): string {
+  const normalized = normalizeCodexAccountStatus({ account: null, rateLimits, usage });
+  const lines: string[] = [];
+  if (normalized?.rateLimits.length) {
+    lines.push('Quota limits:');
+    for (const segment of normalized.rateLimits) lines.push(`- ${redactCodexAccountText(segment.text)}`);
+  } else {
+    lines.push('Quota limits: no rate-limit buckets returned.');
+  }
+
+  const usageSummary = summarizeCodexUsage(usage);
+  lines.push('', 'Account usage:');
+  if (usageSummary.length) {
+    for (const row of usageSummary) lines.push(`- ${row}`);
+  } else {
+    lines.push('- No displayable usage counters returned.');
+  }
+  return lines.join('\n');
+}
+
+function summarizeCodexUsage(raw: unknown): string[] {
+  const record = asRecord(raw);
+  if (!record) return [];
+  const candidates = [
+    ['Total tokens', record.totalTokens ?? record.total_tokens ?? record.lifetimeTokens ?? record.lifetime_tokens],
+    ['Input tokens', record.inputTokens ?? record.input_tokens],
+    ['Output tokens', record.outputTokens ?? record.output_tokens],
+    ['Requests', record.requests ?? record.requestCount ?? record.request_count],
+    ['Current streak', record.currentStreak ?? record.current_streak],
+  ];
+  return candidates
+    .map(([label, value]) => {
+      const n = numberValue(value);
+      if (n == null) return null;
+      return `${label}: ${new Intl.NumberFormat('en-US').format(n)}`;
+    })
+    .filter((line): line is string => !!line);
+}
+
+function formatCodexAppServerDiffCard(raw: unknown): string {
+  const record = asRecord(raw);
+  const diff = stringValue(record?.diff ?? record?.text ?? record?.content) ?? (typeof raw === 'string' ? raw : null);
+  if (!diff?.trim()) return 'No git diff to remote returned.';
+  return `Git diff to remote:\n\n\`\`\`diff\n${redactCodexAccountText(diff).slice(0, 20_000)}\n\`\`\``;
+}
+
+function formatCodexAppServerGoalCard(raw: unknown): string {
+  const record = asRecord(raw);
+  const goal = asRecord(record?.goal) ?? record;
+  const objective = stringValue(goal?.objective);
+  const status = stringValue(goal?.status);
+  const tokenBudget = numberValue(goal?.tokenBudget ?? goal?.token_budget);
+  if (!objective && !status && tokenBudget == null) return 'No Codex goal is set.';
+  const rows = [
+    ...(objective ? [['Objective', redactCodexAccountText(objective)]] : []),
+    ...(status ? [['Status', status]] : []),
+    ...(tokenBudget != null ? [['Token budget', new Intl.NumberFormat('en-US').format(tokenBudget)]] : []),
+  ];
+  return `Codex goal:\n\n${mdTable(['Field', 'Value'], rows)}`;
+}
+
+function summarizeApprovalInput(raw: unknown): Record<string, unknown> {
+  const record = asRecord(raw);
+  if (!record) return {};
+  const out: Record<string, unknown> = {};
+  for (const key of ['threadId', 'turnId', 'itemId', 'approvalId', 'serverName', 'mode', 'message', 'url', 'reason', 'cwd', 'grantRoot']) {
+    const value = record[key];
+    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' || value == null) out[key] = value;
+  }
+  return out;
+}
+
+function formatJsonForLog(value: unknown): string {
+  try {
+    return JSON.stringify(value) ?? 'null';
+  } catch {
+    return '[unserializable]';
+  }
+}
+
+function asArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+function stringValue(value: unknown): string | null {
+  return typeof value === 'string' ? value : null;
+}
+
+function numberValue(value: unknown): number | null {
+  const n = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN;
+  return Number.isFinite(n) ? n : null;
+}
+
+function mintSlashMsgId(): string {
+  return `slash-${randomUUID().slice(0, 8)}`;
+}
+
+function sendSlashMessage(send: SendFn, msgType: 'reply' | 'system' | 'error', content: string): void {
+  send({ type: 'message', msgId: mintSlashMsgId(), msgType, content });
+}
+
+function mdTable(headers: string[], rows: string[][]): string {
+  return [
+    `| ${headers.map(mdCell).join(' | ')} |`,
+    `| ${headers.map(() => '---').join(' | ')} |`,
+    ...rows.map((row) => `| ${row.map(mdCell).join(' | ')} |`),
+  ].join('\n');
+}
+
+function mdCell(value: string): string {
+  return value.replace(/\|/g, '\\|').replace(/\n+/g, ' ');
+}
+
+function listCodexBundledModels(): ProviderCapabilities['models'] {
+  try {
+    const { command, args } = resolveCodexCliCommand();
+    const result = spawnSync(command, [...args, 'debug', 'models', '--bundled'], {
+      encoding: 'utf8',
+      timeout: 30_000,
+      env: codexEnv(undefined),
+    });
+    if (result.status !== 0) {
+      serverLog('warn', 'codex', `codex debug models --bundled failed: ${result.stderr || `exit ${result.status}`}`);
+      return [];
+    }
+    const parsed = JSON.parse(result.stdout) as { models?: Array<{ slug?: unknown; display_name?: unknown; supported_reasoning_levels?: Array<{ effort?: unknown }> }> };
+    return (parsed.models ?? [])
+      .filter((model): model is { slug: string; display_name?: string; supported_reasoning_levels?: Array<{ effort?: unknown }> } => typeof model.slug === 'string')
+      .map((model) => ({
+        value: model.slug,
+        displayName: typeof model.display_name === 'string' ? model.display_name : model.slug,
+        effortLevels: pickEffortLevels(
+          (model.supported_reasoning_levels ?? [])
+            .map((level) => level.effort)
+            .filter((effort): effort is string => typeof effort === 'string' && (CODEX_EFFORT_LEVELS as readonly string[]).includes(effort)),
+        ),
+      }));
+  } catch (err) {
+    serverLog('warn', 'codex', `failed to list bundled Codex models: ${(err as Error)?.message ?? String(err)}`);
+    return [];
+  }
 }

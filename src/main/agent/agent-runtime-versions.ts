@@ -92,7 +92,6 @@ export const COPILOT_CLI_VERSION = '1.0.68';
  * Keep package.json dependencies exact; the companion test guards both the
  * declared specifiers and installed versions against accidental range drift.
  */
-export const CODEX_ACP_VERSION = '1.1.7';
 export const CODEX_CLI_VERSION = '0.145.0';
 export const ACP_SDK_VERSION = '1.3.0';
 

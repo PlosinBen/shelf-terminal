@@ -1,28 +1,28 @@
 import { describe, expect, it } from 'vitest';
 import { parseMcpConfig } from '../mcp-config';
 import {
-  CODEX_SDK_EFFORT_LEVELS,
-  buildCodexSdkRuntimeConfig,
+  CODEX_EFFORT_LEVELS,
+  buildCodexRuntimeConfig,
 } from './config';
 
 describe('Codex SDK pure runtime config mapping', () => {
   it('maps Shelf permission modes to the probed SDK non-interactive modes', () => {
-    expect(buildCodexSdkRuntimeConfig({ cwd: '/repo', permissionMode: 'plan' }).threadOptions).toMatchObject({
+    expect(buildCodexRuntimeConfig({ cwd: '/repo', permissionMode: 'plan' }).threadOptions).toMatchObject({
       sandboxMode: 'read-only',
       approvalPolicy: 'never',
     });
-    expect(buildCodexSdkRuntimeConfig({ cwd: '/repo', permissionMode: 'default' }).threadOptions).toMatchObject({
+    expect(buildCodexRuntimeConfig({ cwd: '/repo', permissionMode: 'default' }).threadOptions).toMatchObject({
       sandboxMode: 'workspace-write',
       approvalPolicy: 'on-request',
     });
-    expect(buildCodexSdkRuntimeConfig({ cwd: '/repo', permissionMode: 'bypassPermissions' }).threadOptions).toMatchObject({
+    expect(buildCodexRuntimeConfig({ cwd: '/repo', permissionMode: 'bypassPermissions' }).threadOptions).toMatchObject({
       sandboxMode: 'danger-full-access',
       approvalPolicy: 'never',
     });
   });
 
   it('passes supported model and effort through ThreadOptions', () => {
-    const mapped = buildCodexSdkRuntimeConfig({ cwd: '/repo', model: 'gpt-5-codex', effort: 'xhigh' });
+    const mapped = buildCodexRuntimeConfig({ cwd: '/repo', model: 'gpt-5-codex', effort: 'xhigh' });
     expect(mapped.ok).toBe(true);
     expect(mapped.threadOptions).toMatchObject({
       workingDirectory: '/repo',
@@ -30,22 +30,22 @@ describe('Codex SDK pure runtime config mapping', () => {
       model: 'gpt-5-codex',
       modelReasoningEffort: 'xhigh',
     });
-    expect(CODEX_SDK_EFFORT_LEVELS).toEqual(['minimal', 'low', 'medium', 'high', 'xhigh']);
+    expect(CODEX_EFFORT_LEVELS).toEqual(['minimal', 'low', 'medium', 'high', 'xhigh']);
   });
 
   it('rejects unsupported effort and permission values without rewriting them', () => {
-    expect(buildCodexSdkRuntimeConfig({ cwd: '/repo', effort: 'ultra' })).toMatchObject({
+    expect(buildCodexRuntimeConfig({ cwd: '/repo', effort: 'ultra' })).toMatchObject({
       ok: false,
       errors: expect.arrayContaining([expect.stringMatching(/Unsupported Codex SDK effort/)]) as unknown[],
     });
-    expect(buildCodexSdkRuntimeConfig({ cwd: '/repo', permissionMode: 'yolo' })).toMatchObject({
+    expect(buildCodexRuntimeConfig({ cwd: '/repo', permissionMode: 'yolo' })).toMatchObject({
       ok: false,
       errors: expect.arrayContaining([expect.stringMatching(/Unsupported Codex SDK permission mode/)]) as unknown[],
     });
   });
 
   it('maps required Shelf L1 MCP to config without secrets', () => {
-    const mapped = buildCodexSdkRuntimeConfig({
+    const mapped = buildCodexRuntimeConfig({
       cwd: '/repo',
       shelfMcp: { url: 'http://127.0.0.1:1234/mcp' },
       baseEnv: { PATH: '/bin' },
@@ -63,7 +63,7 @@ describe('Codex SDK pure runtime config mapping', () => {
   });
 
   it('maps stdio MCP env values via env_vars and child env, not serialized config', () => {
-    const mapped = buildCodexSdkRuntimeConfig({
+    const mapped = buildCodexRuntimeConfig({
       cwd: '/repo',
       mcpServers: {
         gh: { type: 'stdio', command: 'node', args: ['server.js'], env: { GITHUB_TOKEN: 'secret-token' } },
@@ -85,7 +85,7 @@ describe('Codex SDK pure runtime config mapping', () => {
   });
 
   it('maps HTTP MCP headers through generated env vars and bearer_token_env_var', () => {
-    const mapped = buildCodexSdkRuntimeConfig({
+    const mapped = buildCodexRuntimeConfig({
       cwd: '/repo',
       mcpServers: {
         api: {
@@ -119,7 +119,7 @@ describe('Codex SDK pure runtime config mapping', () => {
   });
 
   it('rejects duplicate stdio env names with different values', () => {
-    const mapped = buildCodexSdkRuntimeConfig({
+    const mapped = buildCodexRuntimeConfig({
       cwd: '/repo',
       mcpServers: {
         a: { type: 'stdio', command: 'a', env: { TOKEN: 'one' } },
@@ -132,7 +132,7 @@ describe('Codex SDK pure runtime config mapping', () => {
   });
 
   it('allows duplicate stdio env names when the value is identical', () => {
-    const mapped = buildCodexSdkRuntimeConfig({
+    const mapped = buildCodexRuntimeConfig({
       cwd: '/repo',
       mcpServers: {
         a: { type: 'stdio', command: 'a', env: { TOKEN: 'same' } },
@@ -145,7 +145,7 @@ describe('Codex SDK pure runtime config mapping', () => {
   });
 
   it('rejects malicious env var names before they enter SDK config', () => {
-    const mapped = buildCodexSdkRuntimeConfig({
+    const mapped = buildCodexRuntimeConfig({
       cwd: '/repo',
       mcpServers: {
         bad: { type: 'stdio', command: 'node', env: { 'BAD-NAME': 'secret' } },
