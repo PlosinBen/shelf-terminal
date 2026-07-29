@@ -427,46 +427,50 @@ export function App() {
                 const isActiveProject = proj.config.id === activeProjectId;
                 const isSplit = isActiveProject && proj.splitTabId !== null;
 
-                return proj.tabs.map((tab, ti) => {
-                  const isActiveTab = ti === proj.activeTabIndex;
-                  const isSplitTab = tab.id === proj.splitTabId;
-                  const visible = isActiveProject && (isSplit ? (isActiveTab || isSplitTab) : isActiveTab);
+                return (
+                  <React.Fragment key={proj.config.id}>
+                    {proj.tabs.map((tab, ti) => {
+                      const isActiveTab = ti === proj.activeTabIndex;
+                      const isSplitTab = tab.id === proj.splitTabId;
+                      const visible = isActiveProject && (isSplit ? (isActiveTab || isSplitTab) : isActiveTab);
 
-                  return (
-                    <div
-                      key={tab.id}
-                      className={isSplit && visible ? 'split-pane' : undefined}
-                      style={!visible ? { display: 'none' } : undefined}
-                    >
-                      {tab.type === 'web' ? (
-                        <WebTabView
-                          tabId={tab.id}
-                          initialUrl={tab.url}
-                          visible={visible}
-                        />
-                      ) : tab.type === 'agent' && tab.provider ? (
-                        <AgentView
-                          tabId={tab.id}
-                          cwd={proj.config.cwd}
-                          connection={proj.config.connection}
-                          provider={tab.provider}
-                          projectId={proj.config.id}
-                          visible={visible}
-                        />
-                      ) : (
-                        <TerminalView
-                          tabId={tab.id}
-                          projectId={proj.config.id}
-                          cwd={proj.config.cwd}
-                          connection={proj.config.connection}
-                          initScript={proj.config.initScript}
-                          tabCmd={tab.cmd}
-                          visible={visible}
-                        />
-                      )}
-                    </div>
-                  );
-                });
+                      return (
+                        <div
+                          key={tab.id}
+                          className={isSplit && visible ? 'split-pane' : undefined}
+                          style={!visible ? { display: 'none' } : undefined}
+                        >
+                          {tab.type === 'web' ? (
+                            <WebTabView
+                              tabId={tab.id}
+                              initialUrl={tab.url}
+                              visible={visible}
+                            />
+                          ) : tab.type === 'agent' && tab.provider ? (
+                            <AgentView
+                              tabId={tab.id}
+                              cwd={proj.config.cwd}
+                              connection={proj.config.connection}
+                              provider={tab.provider}
+                              projectId={proj.config.id}
+                              visible={visible}
+                            />
+                          ) : (
+                            <TerminalView
+                              tabId={tab.id}
+                              projectId={proj.config.id}
+                              cwd={proj.config.cwd}
+                              connection={proj.config.connection}
+                              initScript={proj.config.initScript}
+                              tabCmd={tab.cmd}
+                              visible={visible}
+                            />
+                          )}
+                        </div>
+                      );
+                    })}
+                  </React.Fragment>
+                );
               })}
           </div>
         </div>

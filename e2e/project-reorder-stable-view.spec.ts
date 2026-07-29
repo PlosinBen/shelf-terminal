@@ -2,6 +2,9 @@ import { test, expect, _electron as electron, type ElectronApplication, type Pag
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { openAgentTab } from './helpers';
+
+const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
 
 function mkdir(label: string): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), `shelf-reorder-${label}-`));
@@ -113,6 +116,47 @@ test.describe('project reorder stable view order', () => {
     await expect(page.locator('[data-reorder-active-wrapper="1"] .terminal-container:visible')).toBeVisible();
     await expect.poll(
       () => page.evaluate(() => (window as unknown as { __activeTerminalReinserted?: boolean }).__activeTerminalReinserted),
+      { timeout: 1_000 },
+    ).toBe(false);
+  });
+
+  test('inserting a project before a live agent view does not remount that view', async () => {
+    await connectProject(page, 'Alpha');
+    await openAgentTab(page);
+    await expect(page.locator('.agent-conn-overlay:visible')).toHaveCount(0, { timeout: 8_000 });
+
+    await page.evaluate(() => {
+      const agent = document.querySelector('.agent-view:not([style*="display: none"])');
+      const wrapper = agent?.parentElement;
+      const host = wrapper?.parentElement;
+      if (!wrapper || !host) throw new Error('active agent wrapper not found');
+      wrapper.setAttribute('data-insertion-agent-wrapper', '1');
+      (window as unknown as { __agentViewReinserted?: boolean }).__agentViewReinserted = false;
+      const observer = new MutationObserver((records) => {
+        for (const record of records) {
+          const touched = [...record.removedNodes, ...record.addedNodes]
+            .some((node) => node === wrapper);
+          if (touched) {
+            (window as unknown as { __agentViewReinserted?: boolean }).__agentViewReinserted = true;
+          }
+        }
+      });
+      observer.observe(host, { childList: true });
+    });
+
+    // FolderPicker generates `proj-<timestamp>`, which sorts before the seeded
+    // `proj-A`/`proj-B`/`proj-C` ids in listStableProjectViews. That inserts a
+    // new outer project group before Alpha without touching Alpha itself.
+    await page.locator('.sidebar-btn', { hasText: '+' }).click();
+    await expect(page.locator('.folder-picker-overlay')).toBeVisible({ timeout: 5_000 });
+    await page.locator('.conn-btn-next').click();
+    await expect(page.locator('.fp-browser-path')).toContainText('/', { timeout: 5_000 });
+    await page.keyboard.press(`${modifier}+Enter`);
+    await expect(page.locator('.folder-picker-overlay')).not.toBeVisible({ timeout: 3_000 });
+
+    await expect(page.locator('[data-insertion-agent-wrapper="1"]')).toHaveCount(1);
+    await expect.poll(
+      () => page.evaluate(() => (window as unknown as { __agentViewReinserted?: boolean }).__agentViewReinserted),
       { timeout: 1_000 },
     ).toBe(false);
   });
