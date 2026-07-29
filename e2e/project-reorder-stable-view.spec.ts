@@ -120,7 +120,7 @@ test.describe('project reorder stable view order', () => {
     ).toBe(false);
   });
 
-  test('inserting a project before a live agent view does not remount that view', async () => {
+  test('inserting or removing a project before a live agent view does not remount that view', async () => {
     await connectProject(page, 'Alpha');
     await openAgentTab(page);
     await expect(page.locator('.agent-conn-overlay:visible')).toHaveCount(0, { timeout: 8_000 });
@@ -153,6 +153,20 @@ test.describe('project reorder stable view order', () => {
     await expect(page.locator('.fp-browser-path')).toContainText('/', { timeout: 5_000 });
     await page.keyboard.press(`${modifier}+Enter`);
     await expect(page.locator('.folder-picker-overlay')).not.toBeVisible({ timeout: 3_000 });
+
+    await expect(page.locator('[data-insertion-agent-wrapper="1"]')).toHaveCount(1);
+    await expect.poll(
+      () => page.evaluate(() => (window as unknown as { __agentViewReinserted?: boolean }).__agentViewReinserted),
+      { timeout: 1_000 },
+    ).toBe(false);
+
+    // The newly added project is active and its timestamp id sorts before
+    // `proj-A`. Removing that preceding outer group must preserve Alpha's
+    // existing agent subtree as well.
+    await page.locator('.sidebar-item.active').click({ button: 'right' });
+    await page.locator('.context-menu-item', { hasText: 'Remove' }).click();
+    await page.locator('.conn-btn-danger', { hasText: 'Remove' }).click();
+    await expect(page.locator('.sidebar-item')).toHaveCount(3, { timeout: 5_000 });
 
     await expect(page.locator('[data-insertion-agent-wrapper="1"]')).toHaveCount(1);
     await expect.poll(
