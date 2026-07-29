@@ -77,7 +77,7 @@ related:
 
 **Symptom**：拖曳排序 project 後 terminal 變黑屏。
 
-**Root cause**：React 在 `projects.map()` 順序改變時會 unmount/remount TerminalView。remount 時 `initializedRef` 重置為 false，導致 `term.open(newContainer)` 被第二次呼叫。xterm.js 不支援 `open()` 重複呼叫，terminal 進入壞狀態。
+**Root cause**：TerminalView 在任何 component remount 後 `initializedRef` 都會重置為 false，若把它當成首次建立就會再次呼叫 `term.open(newContainer)`。xterm.js 不支援 `open()` 重複呼叫，terminal 會進入壞狀態。Project mounted-view identity 會避免無關 collection mutation 造成 remount，但 TerminalView 本身仍須能安全處理其他合法 remount。
 
 **Fix**：在 `terminalCache` 加 `opened: boolean` flag。首次 mount 正常呼叫 `term.open(container)`；remount 時改用 `container.appendChild(term.element)` 把已有的 DOM 搬過去，不呼叫 `open()`。搬移後重新載入 WebglAddon（canvas 移動可能觸發 context loss）。WebGL context loss 的 handler 也要自動 reload addon（`dispose()` + `setTimeout(() => loadWebgl(term), 100)`），否則會 fallback 到 DOM renderer 導致畫面異常。
 

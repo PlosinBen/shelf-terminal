@@ -194,3 +194,13 @@ guard：只有 `ready` + healthy 才不蓋。phase 文字的單一 source 是 `c
 - 別把 overlay 改成 opaque / 藏掉對話 —— 斷線 / reconnect 時歷史仍要可讀。
 
 **Related**：`connection-health#8`（reconnect health-seed —— overlay 自清的前提）、`connection-health#7`（兩層 health / reconnect 的失敗來源）、`architecture/agent-dispatch`、`src/renderer/components/agent/ConnectionOverlay.tsx`。
+
+## agent-ui#8 — Agent tab store 生命週期跟 logical tab，不跟 component mount  ·  [Decision]
+
+**Decision**：`agentTabStore` 的 entry 由 AgentView mount 做冪等初始化，但只在真正的 agent tab teardown 時刪除。React component unmount 只卸下 view，不代表 logical tab 已被刪除；所有 close tab、remove project、disconnect project 路徑都經過統一 teardown owner。
+
+**Reason**：renderer store 持有 messages、capabilities、auth、queue、tasks 與 init status，生命週期屬於 logical tab。父層 reconciliation、layout 或其他 view 結構變化可能讓 component unmount/remount；若 cleanup 在 unmount 時刪 store，同一個 live backend session 會被重建成 renderer 預設 `starting`，並遺失其餘 renderer-local state。
+
+**Do not change casually because**：不要把 store deletion 放回 AgentView effect cleanup，也不要在個別 close/disconnect handler 各自複製 cleanup。前者把 render lifecycle 誤當 domain lifecycle，後者會讓某些 tab-removal path 漏清或重複清理。
+
+**Related**：`projects#1`（mounted project/tab identity）、`src/renderer/tab-teardown.ts`。

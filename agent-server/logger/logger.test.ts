@@ -26,9 +26,9 @@ describe('wireLogger', () => {
   it('.channel(name) stamps the channel; the transport stays wire', () => {
     const sink = vi.fn();
     setWireSink(sink);
-    wireLogger.channel('copilot-init').debug('copilot', 'conn.closed');
+    wireLogger.channel('feature-trace').debug('worker', 'phase complete');
     expect(sink).toHaveBeenCalledWith(
-      expect.objectContaining({ type: 'log', level: 'debug', tag: 'copilot', msg: 'conn.closed', channel: 'copilot-init' }),
+      expect.objectContaining({ type: 'log', level: 'debug', tag: 'worker', msg: 'phase complete', channel: 'feature-trace' }),
     );
   });
 

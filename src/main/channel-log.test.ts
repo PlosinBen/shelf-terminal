@@ -7,7 +7,7 @@ afterEach(() => {
 
 describe('sanitizeChannel', () => {
   it('keeps safe segments', () => {
-    expect(sanitizeChannel('copilot-init')).toBe('copilot-init');
+    expect(sanitizeChannel('feature-trace')).toBe('feature-trace');
     expect(sanitizeChannel('wire_tx-2')).toBe('wire_tx-2');
   });
   it('neutralizes path traversal / odd chars', () => {
@@ -24,11 +24,11 @@ describe('channelLog', () => {
   it('formats a timestamped line and routes it to the (sanitized) channel', () => {
     const writer = vi.fn();
     setChannelWriter(writer);
-    channelLog('copilot-init', 'debug', 'copilot', 'conn.closed');
+    channelLog('feature-trace', 'debug', 'worker', 'phase complete');
     expect(writer).toHaveBeenCalledTimes(1);
     const [channel, line] = writer.mock.calls[0];
-    expect(channel).toBe('copilot-init');
-    expect(line).toContain('[DEBUG][copilot] conn.closed');
+    expect(channel).toBe('feature-trace');
+    expect(line).toContain('[DEBUG][worker] phase complete');
     expect(line).toMatch(/^\d{4}-\d\d-\d\dT/); // ISO timestamp prefix
   });
 

@@ -37,4 +37,4 @@ Project runtime state includes tabs, active tab index, split tab id, folder vali
 
 Visual order is the user-facing project list order. It is group-aware for worktree parent/child rows and is the order persisted to disk.
 
-Stable mounted-view order is deterministic by project identity and does not change when visual order changes. Mounted views use this order so project reorder does not move active terminal, agent, or web tab DOM nodes.
+Stable mounted-view order is deterministic by project identity and does not change when visual order changes. Mounted-view identity is hierarchical: project identity owns a tab subtree, and tab identity owns the individual view. Reorder, insertion, or removal preserves every unaffected subtree instead of remounting it.

@@ -16,8 +16,6 @@ import {
 } from '../agentTabStore';
 import { emitAgent } from '../events';
 import { useStore, updateProjectConfigById } from '../store';
-import { debugLog } from '../debugLog';
-import { formatTabLogId } from '@shared/tab-id';
 
 interface Props {
   tabId: string;
@@ -89,10 +87,6 @@ export function AgentView({ tabId, cwd, connection, provider, projectId, visible
   // connection / provider / sessionId never change for a mounted
   // AgentView (they come from the tab's identity).
   useEffect(() => {
-    // diag: does idle actually remount AgentView? (H1). A mount re-emits
-    // agent:init → main startSession may early-return without re-sending
-    // init-status → renderer stays stuck at reset-default 'starting'.
-    debugLog('diag:agentview', `mount tab=${formatTabLogId(tabId)} provider=${provider}`);
     initTabStore(tabId, { sessionId, provider, intent: savedPrefs });
     // `opts.intent` flows main-side through AGENT_INIT → getCapabilities so
     // session-stateful providers (Copilot) can seed their closures BEFORE
@@ -100,9 +94,6 @@ export function AgentView({ tabId, cwd, connection, provider, projectId, visible
     // `currentPermissionMode` reports its hardcoded 'default' on every
     // reconnect, overwriting the warm-started actual* in agentTabStore.
     emitAgent('agent:init', { tabId, cwd, connection, provider, sessionId, opts: { intent: savedPrefs, projectId } });
-    return () => {
-      debugLog('diag:agentview', `unmount tab=${formatTabLogId(tabId)} provider=${provider}`);
-    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tabId]);
 

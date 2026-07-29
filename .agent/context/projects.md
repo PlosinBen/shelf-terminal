@@ -8,18 +8,18 @@ related:
 
 # Projects
 
-## projects#1 — Keep-alive views use stable order  ·  [Decision]
+## projects#1 — Keep-alive views have stable project and tab identity  ·  [Decision]
 
-**Decision:** Project visual order and right-side keep-alive view order are separate. Sidebar and persistence follow visual order; mounted terminal/agent/web views render in stable project identity order.
+**Decision:** Project visual order and right-side keep-alive view order are separate. Sidebar and persistence follow visual order; mounted terminal/agent/web views render in stable project identity order. The mounted-view tree identifies each outer project group by project id and each tab by tab id.
 
-**Reason:** Reordering the project array can make React move existing keyed tab DOM nodes with `insertBefore`. Moving the active project's mounted terminal or webview can repaint, refit, or reload it even though the active project id did not change.
+**Reason:** Stable sorting prevents visual reorder from moving mounted views, but it does not establish identity by itself. Tab keys inside an unkeyed nested project array are scoped to that array position; inserting or removing an earlier project changes the positional path and makes React remount otherwise unchanged tabs. An agent remount can re-run initialization, while terminal/web remounts can repaint, refit, or reload.
 
-**Do not change casually because:** Reusing visual project order for mounted views reintroduces the asymmetric repaint bug: dragging an inactive project may look fine, while dragging the active project can disturb the visible tab.
+**Do not change casually because:** Reusing visual project order or removing the outer project identity lets unrelated project-list mutations disturb live tabs. A project-level key is required even when every tab already has its own key.
 
 ### Gotchas
 
 - Active visibility must be computed by project id in the stable view loop. Index-based active checks are only valid in visual-order loops.
-- A regression should prove both sides: visual order changes after reorder, stable view order does not.
+- Regressions must cover both reorder and insertion/removal before a live project. The original mounted tab node must remain the same node; checking only the resulting order misses remounts.
 
 ## projects#2 — Project identity is opaque config id  ·  [Decision]
 
