@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { CODEX_OFFICAL_PROVIDER } from '@shared/agent-providers';
+import { CODEX_PROVIDER } from '@shared/agent-providers';
 import { createCodexOfficialBackend } from './index';
 import type { LoginRpc } from '../codex-shared/app-server-login';
 import type { OutgoingMessage } from '../types';
@@ -128,7 +128,7 @@ function fakeRpc(): LoginRpc & { fireCompleted: (success: boolean) => void } {
 function restoreContext(lastSdkSessionId: string) {
   return {
     sessionId: 'session-1',
-    provider: CODEX_OFFICAL_PROVIDER,
+    provider: CODEX_PROVIDER,
     lastSdkSessionId,
     updatedAt: 1,
   };
@@ -763,8 +763,8 @@ describe('Codex official app-server backend lifecycle', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     rpc.fireCompleted(true);
 
-    expect(out[0]).toMatchObject({ type: 'auth_login_prompt', provider: CODEX_OFFICAL_PROVIDER });
-    expect(out.at(-1)).toEqual({ type: 'auth_login_done', provider: CODEX_OFFICAL_PROVIDER, ok: true });
+    expect(out[0]).toMatchObject({ type: 'auth_login_prompt', provider: CODEX_PROVIDER });
+    expect(out.at(-1)).toEqual({ type: 'auth_login_done', provider: CODEX_PROVIDER, ok: true });
   });
 
   it('exposes a post-turn account status refresh hook', async () => {

@@ -116,7 +116,7 @@ export async function openCodexAgentTab(page: Page): Promise<void> {
 /** Open the temporary official Codex SDK provider tab. */
 export async function openCodexOfficialAgentTab(page: Page): Promise<void> {
   await page.locator('.tab-add').click({ button: 'right' });
-  await page.locator('.context-menu-item', { hasText: 'Agent (Codex Official (Test))' }).click();
+  await page.locator('.context-menu-item', { hasText: 'Agent (Codex)' }).click();
   await expect(page.locator('.agent-view:visible')).toBeVisible({ timeout: 5_000 });
 }
 

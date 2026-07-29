@@ -1,5 +1,5 @@
 import { test, expect, sendAgentPrompt } from './helpers';
-import { CODEX_OFFICAL_PROVIDER } from '../src/shared/agent-providers';
+import { CODEX_PROVIDER } from '../src/shared/agent-providers';
 import type { Page } from '@playwright/test';
 import fs from 'fs';
 import path from 'path';
@@ -15,7 +15,7 @@ import path from 'path';
  */
 
 const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
-const OFFICIAL_LABEL = 'Codex Official (Test)';
+const OFFICIAL_LABEL = 'Codex';
 const OFFICIAL_MENU_LABEL = `Agent (${OFFICIAL_LABEL})`;
 
 async function setupProject(page: Page) {
@@ -74,17 +74,17 @@ test.describe('Codex official SDK provider renderer flow', () => {
     const agentField = panel.locator('.project-edit-field').filter({ hasText: 'Default provider for new agent tabs' });
     const providerSelect = agentField.locator('select');
     await expect(providerSelect.locator('option', { hasText: OFFICIAL_LABEL })).toHaveCount(1);
-    await providerSelect.selectOption(CODEX_OFFICAL_PROVIDER);
+    await providerSelect.selectOption(CODEX_PROVIDER);
     await agentField.locator('input[type="checkbox"]').check();
     await panel.locator('.project-edit-footer .conn-btn-next').click();
     await expect(panel).not.toBeVisible({ timeout: 3_000 });
 
     await expect.poll(async () => (await readProjects(userDataDir))[0]?.defaultAgentProvider)
-      .toBe(CODEX_OFFICAL_PROVIDER);
+      .toBe(CODEX_PROVIDER);
 
     await disconnectAndReconnect(page);
-    await expect(page.locator('.tab-bar .tab').first()).toContainText('Codex-offical');
-    await expect(page.locator('.agent-status-bar:visible')).toContainText('Codex-offical');
+    await expect(page.locator('.tab-bar .tab').first()).toContainText('Codex');
+    await expect(page.locator('.agent-status-bar:visible')).toContainText('Codex');
 
     await sendAgentPrompt(page, 'text:official-default');
     await expect(page.locator('.agent-messages:visible')).toContainText('official-default', { timeout: 8_000 });
@@ -117,10 +117,9 @@ test.describe('Codex official SDK provider renderer flow', () => {
       .toBeVisible({ timeout: 8_000 });
   });
 
-  test('legacy Codex and Codex official keep distinct session keys', async ({ shelfApp: { page, userDataDir } }) => {
+  test('canonical Codex persists only the canonical session key', async ({ shelfApp: { page, userDataDir } }) => {
     await setupProject(page);
 
-    await openAgentTab(page, 'Agent (Codex)');
     await openAgentTab(page, OFFICIAL_MENU_LABEL);
 
     await sendAgentPrompt(page, 'text:official-isolated');
@@ -129,12 +128,10 @@ test.describe('Codex official SDK provider renderer flow', () => {
     await expect.poll(async () => {
       const projects = await readProjects(userDataDir);
       return Object.keys(projects[0]?.agentSessionIds ?? {}).sort();
-    }).toEqual(['codex', CODEX_OFFICAL_PROVIDER].sort());
+    }).toEqual([CODEX_PROVIDER]);
 
     const projects = await readProjects(userDataDir);
     const ids = projects[0].agentSessionIds;
-    expect(ids.codex).toBeTruthy();
-    expect(ids[CODEX_OFFICAL_PROVIDER]).toBeTruthy();
-    expect(ids[CODEX_OFFICAL_PROVIDER]).not.toBe(ids.codex);
+    expect(ids[CODEX_PROVIDER]).toBeTruthy();
   });
 });

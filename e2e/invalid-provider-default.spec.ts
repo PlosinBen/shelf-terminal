@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 const PROJECT_ID = 'stale-provider-project';
-const STALE_PROVIDER = 'codex-offical-retired';
+const STALE_PROVIDER = 'codex-offical';
 
 test.describe('invalid persisted provider default', () => {
   let app: ElectronApplication;

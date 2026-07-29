@@ -1,4 +1,4 @@
-import { CODEX_OFFICAL_PROVIDER } from '@shared/agent-providers';
+import { CODEX_PROVIDER } from '@shared/agent-providers';
 import { codexEnv } from '../codex-shared/runtime';
 import { spawnCodexAppServerRpc, type LoginRpc } from '../codex-shared/app-server-login';
 import { serverLog } from '../../server-logger';
@@ -69,7 +69,7 @@ export async function refreshCodexAccountStatus(
 ): Promise<void> {
   try {
     const cached = cache
-      ? ((await cache.get(ACCOUNT_STATUS_CACHE_KEY, CODEX_OFFICAL_PROVIDER)).value as CachedAccountStatus | undefined)
+      ? ((await cache.get(ACCOUNT_STATUS_CACHE_KEY, CODEX_PROVIDER)).value as CachedAccountStatus | undefined)
       : localAccountStatus;
     if (cached && now() - cached.fetchedAt < ACCOUNT_STATUS_TTL_MS) {
       emitCodexAccountStatus(send, cached.segments);
@@ -77,7 +77,7 @@ export async function refreshCodexAccountStatus(
     }
     const segments = await fetch(appId);
     const entry: CachedAccountStatus = { segments, fetchedAt: now() };
-    if (cache) cache.put(ACCOUNT_STATUS_CACHE_KEY, CODEX_OFFICAL_PROVIDER, entry);
+    if (cache) cache.put(ACCOUNT_STATUS_CACHE_KEY, CODEX_PROVIDER, entry);
     else localAccountStatus = entry;
     emitCodexAccountStatus(send, segments);
   } catch (err) {

@@ -14,7 +14,7 @@ export interface AgentProviderMeta {
   bin: 'claude' | 'copilot' | 'codex';
 }
 
-export const CODEX_OFFICAL_PROVIDER = 'codex-offical';
+export const CODEX_PROVIDER = 'codex';
 
 // `copilot` is driven by the ACP backend (agent-server/providers/copilot/,
 // createCopilotBackend launching `copilot --acp`). The pre-ACP native SDK backend
@@ -22,8 +22,7 @@ export const CODEX_OFFICAL_PROVIDER = 'codex-offical';
 export const AGENT_PROVIDERS = {
   claude:  { label: 'Claude',                 bin: 'claude'  },
   copilot: { label: 'Copilot',                bin: 'copilot' },
-  codex:   { label: 'Codex',                  bin: 'codex'   },
-  [CODEX_OFFICAL_PROVIDER]: { label: 'Codex Official (Test)', bin: 'codex' },
+  [CODEX_PROVIDER]: { label: 'Codex', bin: 'codex' },
 } as const satisfies Record<string, AgentProviderMeta>;
 
 export type AgentProvider = keyof typeof AGENT_PROVIDERS;

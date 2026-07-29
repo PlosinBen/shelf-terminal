@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { buildWorktreeChildConfig } from './worktree-child-config';
-import { CODEX_OFFICAL_PROVIDER } from '@shared/agent-providers';
+import { CODEX_PROVIDER } from '@shared/agent-providers';
 import type { ProjectConfig } from '@shared/types';
 
 const parent: ProjectConfig = {
@@ -57,14 +57,14 @@ describe('buildWorktreeChildConfig', () => {
     expect(parent.defaultAgentProvider).toBe('claude');
   });
 
-  it('accepts the temporary Codex official provider override', () => {
+  it('accepts the canonical Codex provider override', () => {
     const overridden = buildWorktreeChildConfig(parent, {
       id: 'wt-codex-official',
       cwd: '/repo-codex-official',
       worktreeBranch: 'codex-official',
-      defaultAgentProvider: CODEX_OFFICAL_PROVIDER,
+      defaultAgentProvider: CODEX_PROVIDER,
     });
-    expect(overridden.defaultAgentProvider).toBe(CODEX_OFFICAL_PROVIDER);
+    expect(overridden.defaultAgentProvider).toBe(CODEX_PROVIDER);
     expect(overridden.agentSessionIds).toBeUndefined();
   });
 });

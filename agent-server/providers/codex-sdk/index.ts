@@ -1,4 +1,4 @@
-import { CODEX_OFFICAL_PROVIDER } from '@shared/agent-providers';
+import { CODEX_PROVIDER } from '@shared/agent-providers';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -427,7 +427,7 @@ export function createCodexOfficialBackend(deps: CodexOfficialDeps = {}): Server
   return {
     async query(input, send): Promise<void> {
       if (activeRun) {
-        send({ type: 'error', error: 'codex-offical: a turn is already running' });
+        send({ type: 'error', error: 'codex: a turn is already running' });
         send({ type: 'status', state: 'idle' });
         return;
       }
@@ -545,7 +545,7 @@ export function createCodexOfficialBackend(deps: CodexOfficialDeps = {}): Server
           activeTurnId = stringValue(asRecord(asRecord(started)?.turn)?.id) ?? activeTurnId;
         });
       } catch (err) {
-        send({ type: 'error', error: `codex-offical: ${(err as Error)?.message ?? String(err)}` });
+        send({ type: 'error', error: `codex: ${(err as Error)?.message ?? String(err)}` });
       } finally {
         if (activeRun === runId) {
           activeRun = null;
@@ -598,7 +598,7 @@ export function createCodexOfficialBackend(deps: CodexOfficialDeps = {}): Server
     startLogin(_cwd: string, send: SendFn): void {
       loginHandle?.cancel();
       const { rpc } = spawnLoginRpc(codexEnv(lastAppId));
-      loginHandle = driveDeviceCodeLogin(rpc, send, CODEX_OFFICAL_PROVIDER);
+      loginHandle = driveDeviceCodeLogin(rpc, send, CODEX_PROVIDER);
     },
 
     cancelLogin(): void {
@@ -852,7 +852,7 @@ function formatCodexAppServerStatusCard(
   current: { model?: string; effort?: string; permissionMode?: string },
 ): string {
   const rows = [
-    ['Provider', CODEX_OFFICAL_PROVIDER],
+    ['Provider', CODEX_PROVIDER],
     ['Thread', activeThreadId ?? input.restoreContext?.lastSdkSessionId ?? 'none'],
     ['Model', input.model ?? current.model ?? 'provider default'],
     ['Effort', input.effort ?? current.effort ?? 'provider default'],
@@ -988,7 +988,7 @@ function listCodexBundledModels(): ProviderCapabilities['models'] {
       env: codexEnv(undefined),
     });
     if (result.status !== 0) {
-      serverLog('warn', 'codex-offical', `codex debug models --bundled failed: ${result.stderr || `exit ${result.status}`}`);
+      serverLog('warn', 'codex', `codex debug models --bundled failed: ${result.stderr || `exit ${result.status}`}`);
       return [];
     }
     const parsed = JSON.parse(result.stdout) as { models?: Array<{ slug?: unknown; display_name?: unknown; supported_reasoning_levels?: Array<{ effort?: unknown }> }> };
@@ -1004,7 +1004,7 @@ function listCodexBundledModels(): ProviderCapabilities['models'] {
         ),
       }));
   } catch (err) {
-    serverLog('warn', 'codex-offical', `failed to list bundled Codex models: ${(err as Error)?.message ?? String(err)}`);
+    serverLog('warn', 'codex', `failed to list bundled Codex models: ${(err as Error)?.message ?? String(err)}`);
     return [];
   }
 }

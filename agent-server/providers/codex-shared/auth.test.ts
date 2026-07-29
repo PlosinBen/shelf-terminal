@@ -17,12 +17,12 @@ describe('shared Codex device-code auth mapping', () => {
     expect(
       deviceCodeToAuthPrompt(
         { verificationUrl: 'https://chatgpt.com/device', userCode: 'WXYZ-9999' },
-        'codex-offical',
+        'codex',
       ),
-    ).toMatchObject({ type: 'auth_login_prompt', provider: 'codex-offical' });
-    expect(authLoginDone(false, { provider: 'codex-offical', cancelled: true })).toEqual({
+    ).toMatchObject({ type: 'auth_login_prompt', provider: 'codex' });
+    expect(authLoginDone(false, { provider: 'codex', cancelled: true })).toEqual({
       type: 'auth_login_done',
-      provider: 'codex-offical',
+      provider: 'codex',
       ok: false,
       cancelled: true,
     });

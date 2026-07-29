@@ -148,7 +148,7 @@ describe('refreshCodexAccountStatus', () => {
 
   it('fresh cache HIT → sends cached status without fetch', async () => {
     const { client } = fakeCache();
-    client.put('account-status', 'codex-offical', { segments, fetchedAt: 1000 });
+    client.put('account-status', 'codex', { segments, fetchedAt: 1000 });
     const sent: OutgoingMessage[] = [];
     const fetch = vi.fn(async () => segments);
 

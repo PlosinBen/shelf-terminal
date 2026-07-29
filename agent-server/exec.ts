@@ -4,7 +4,6 @@ import * as path from 'path';
 import * as os from 'os';
 import { randomUUID } from 'node:crypto';
 import { createClaudeBackend } from './providers/claude';
-import { createCodexBackend } from './providers/codex';
 import { createCodexOfficialBackend } from './providers/codex-sdk';
 // `copilot` is driven by the ACP backend (the native SDK backend was deleted at
 // cutover — recoverable from git history at the pre-cutover commit).
@@ -289,8 +288,7 @@ function ensureConfigHome(backend: ServerBackend, appId: string | undefined): vo
 const BACKEND_FACTORIES: Record<Provider, () => ServerBackend> = {
   claude: createClaudeBackend,
   copilot: createCopilotBackend,
-  codex: createCodexBackend,
-  'codex-offical': createCodexOfficialBackend,
+  codex: createCodexOfficialBackend,
 };
 
 function getBackend(provider: Provider): ServerBackend {
