@@ -42,6 +42,23 @@
 - 需要 dev 整個重 build 才能驗的項目（如 agent-server bundle 改動），先把所有相關項目一口氣做完再交給 dev 驗一輪 — 不要做一個交一個，造成來回重 build 浪費時間
 - 同一個問題一次無法修正，請嘗試使用 logger 靠實際輸出定位，不要純粹依靠讀 code（renderer 端走 `debugLog` bridge 落 main log 檔，AI 可直接讀）
 - 禁止靜默吞錯 / 丟資料 — 狀態對不上、解析失敗、收到非預期輸入時要 fail-loud（log 出關鍵 id / context），不要 silent `return` 或 catch 後不處理。良性 race 用低調 log（`debugLog` 落檔）、真資料遺失要大聲（`console.warn/error`）；純函式回傳 anomaly 讓 caller log（保持可測）。樂觀更新尤其要在跟真相源對帳對不上時留痕
+- **Commit message 格式**：使用精練 Claude-style Conventional Commit，保留有用脈絡與 model provenance。
+  - Subject 一律：`<type>(<scope>): <concise outcome>`。允許 type：`feat`、`fix`、`refactor`、`test`、`docs`、`chore`、`build`、`style`。scope 用子系統/產品面，不用檔名（例：`agent`、`codex`、`copilot`、`worktree`、`skills`、`backup`、`pty`、`main`、`renderer`、`diag`、`e2e`）。
+  - Subject 用英文、祈使/結果導向、冒號後小寫開頭、不加句號。不要用 bare scope（如 `agent: ...`）或句子式 subject（如 `Show ...`）。
+  - Body 只在有助 review 時寫：root cause、設計取捨、行為變更、regression test、已知限制。保持精練，通常 1-3 個短段落或少量 bullets。
+  - 實質參與撰寫 commit 時保留 trailer：`Co-Authored-By: <Model Name> <noreply/...>`。多人/多模型合作可多行。
+  - 範例：
+    ```text
+    fix(codex): send data URI images as app-server image URLs
+
+    The app-server accepts image URL parts, not raw data URI image payloads.
+    Normalize pasted image inputs before dispatch so local screenshots and
+    dragged images follow the same path as file-backed images.
+
+    Regression covers data URI image input translation.
+
+    Co-Authored-By: GPT-5 Codex <noreply@openai.com>
+    ```
 - **Worktree-first development**（覆寫 development-flow「原地開 branch」預設）：
   - **Code / tests 一律在 worktree 開發** — 不在 main checkout 改 tracked source/test。main checkout = 規劃 + 唯讀調查 + 純文件維護。
   - **純文件維護（不伴隨 code 變更）可在 main checkout 直接改**：`.agent/`、CLAUDE.md、其他 markdown、`.agent/features/` note。
