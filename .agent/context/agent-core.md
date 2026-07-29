@@ -12,13 +12,14 @@ related:
 
 # Agent Core
 
-> Agent tab 的核心架構：兩 provider 各自原生 SDK、tab/provider 綁定、雙層持久化、fail-loud 解析、server-owned send queue。
+> Agent tab 的核心架構：provider 官方 transport、tab/provider 綁定、雙層持久化、fail-loud 解析、server-owned send queue。
 
-## agent-core#1 — Agent View：兩 provider 各自原生 SDK + bundled CLI  ·  [Decision]
+## agent-core#1 — Agent View：每個 provider 使用其官方 transport + bundled CLI  ·  [Decision]
 
 **Decision**: Agent tab 直接呼叫 AI provider SDK（不是解析 terminal scrollback）：
 - Claude → `@anthropic-ai/claude-agent-sdk`，spawn bundled `claude` binary
 - Copilot → spawn standalone `copilot` CLI binary + `--acp`（ACP over stdio），不再用 `@github/copilot-sdk`（cutover 後細節見 `agent-providers#9`）
+- Codex → spawn pinned `codex app-server`，以 JSON-RPC 驅動 thread/turn、auth、config、MCP/skills 與 account status
 
 兩者都在 `agent-server` bundle 裡執行，透過 stdin/stdout JSON line protocol 跟 main process 通訊。Binary 透過 `electron-builder` 的 `files` + `asarUnpack` 打包進 app（per-platform：claude-agent-sdk-{darwin|linux|win32}-{arch}、copilot-{darwin|linux|win32}-{arch}）。**Windows build 額外 force-install `claude-agent-sdk-linux-x64`**（CI step，因為 WSL agent-server 跑在 Linux）；npm `os` 限制用 `--force --no-save` 繞過。
 
@@ -41,7 +42,7 @@ related:
 
 ## agent-core#3 — Agent Tab 固定 Provider，每 Project 每 Provider 至多一個  ·  [Decision]
 
-**Decision**: Agent tab 建立時綁定一個 provider（claude 或 copilot），不可在 tab 內切換。UI 層限制同一個 project 不能開兩個相同 provider 的 agent tab（`addTab()` 檢查 + TabBar menu disabled）。Backend 透過 tabId-based session 管理，架構上不限制數量。
+**Decision**: Agent tab 建立時綁定一個 registry-valid provider（claude、copilot 或 codex），不可在 tab 內切換。UI 層限制同一個 project 不能開兩個相同 provider 的 agent tab。Backend 透過 tabId-based session 管理，架構上不限制數量。
 
 **Reason**: Provider 切換涉及完全不同的 context/session 管理（Claude SDK session vs Copilot modelMessages），切換會丟前 provider 對話。固定綁定讓 sessionId 跟 provider 一對一。
 
@@ -50,7 +51,7 @@ related:
 ## agent-core#4 — Agent 雙層持久化：Server-side Context File + Client-side IndexedDB  ·  [Decision]
 
 **Decision**: Agent 對話持久化分兩層：
-- **Server-side**（`~/.shelf/agent-context/{sessionId}.json`）：Copilot 存 `modelMessages`（會被 compaction 壓縮）/ `lastResponseId` 用於 API 呼叫；Claude 存 `lastSdkSessionId` 作為 SDK `options.resume` 的指針（對話本體在 SDK 自管的 `~/.claude/projects/`），詳見 `background-tasks#1`
+- **Server-side**（`~/.shelf/agent-context/{sessionId}.json`）：保存 provider resume pointer與 orchestration context；Claude/Copilot/Codex 的對話本體仍由各自 CLI/runtime管理，詳見 `background-tasks#1`
 - **Client-side**（IndexedDB `shelf-agent-history`）：存完整 UI messages（含 user messages、tool calls 展開等），用於重新開啟 tab 時恢復顯示
 
 SessionId 是 UUID v4，存在 `ProjectConfig.agentSessionIds[provider]`，兩層用同一個 key。

@@ -111,10 +111,10 @@ related:
 
 ## deployment#7 — Codex remote 是完整、驗證過的 target runtime tree；只支援 glibc  ·  [Decision]
 
-**Decision**：Codex remote deploy 一律攜帶 Shelf 釘選的 Node、agent-server、Codex ACP adapter、Codex JavaScript launcher，以及目標 CPU 的完整原生 Codex package tree。這個 payload 只在 glibc target 上建立；musl target 在開始傳檔或 spawn 前明確失敗，不可退回 Claude、遠端既有 Codex 或部分檔案。
+**Decision**：Codex remote deploy 一律攜帶 Shelf 釘選的 Node、agent-server、Codex JavaScript launcher，以及目標 CPU 的完整原生 Codex package tree。Production 不攜帶 ACP adapter。這個 payload 只在 glibc target 上建立；musl target 在開始傳檔或 spawn 前明確失敗，不可退回 Claude、遠端既有 Codex 或部分檔案。
 
 **Reason**：Codex launcher 除了原生 `codex` executable，還會解析同一個 package tree 裡的 code-mode host、ripgrep、sandbox 與 shell resources；只複製主 binary 會在啟動後失敗。npm 的平台 package 是 `@openai/codex` 的 alias：可靠來源是 canonical version manifest，其 `dist.tarball` 與 `dist.integrity`，不是以 alias package name 拼出的 URL。完整性驗證後保留 tar entry 的 executable mode，才可讓 target 上的 launcher 正常執行。
 
-**Do not change casually because**：不要把 payload 縮回單一 binary、猜測平台 alias 的 registry path，或把 native package 內帶有 musl triple 的檔名誤解成 Shelf 支援 musl。後者只是 upstream package 的編譯 target 命名，Shelf 的支援邊界仍是 glibc。Codex ACP、Codex CLI 與 ACP SDK 是一組精確版本的相容單位；升級必須同步更新 pins 並由 drift test 擋住 range drift。
+**Do not change casually because**：不要把 payload 縮回單一 binary、猜測平台 alias 的 registry path，或把 native package 內帶有 musl triple 的檔名誤解成 Shelf 支援 musl。後者只是 upstream package 的編譯 target 命名，Shelf 的支援邊界仍是 glibc。Codex CLI 與 target native package 是同一組精確版本的相容單位；升級必須同步更新 pins 並由 drift test 擋住 range drift。
 
-**Related**：`deployment#1`（version-keyed runtime payload）、`deployment#4`（Node target policy）、`deployment#6`（agent-deploy E2E environment）、`agent-providers#13`（Codex ACP）、`src/main/agent/{agent-runtime-versions,runtime-cache,deploy-layout,remote}.ts`。
+**Related**：`deployment#1`（version-keyed runtime payload）、`deployment#4`（Node target policy）、`deployment#6`（agent-deploy E2E environment）、`agent-providers#33`（Codex app-server）、`src/main/agent/{agent-runtime-versions,runtime-cache,deploy-layout,remote}.ts`。

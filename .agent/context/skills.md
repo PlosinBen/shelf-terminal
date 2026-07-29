@@ -158,7 +158,7 @@ related:
 
 **Do not change casually because**：別把 fs 投影搬回 provider backend（違反 `agent-providers#16` + 重造 race);別假設「copilot 用 `skillDirectories`」（那是已刪 SDK backend 的機制,ACP 走 `$COPILOT_HOME/skills`);Codex 的 skill root 跟 app-server isolated HOME 必須一致。
 
-**Related**：`skills#1`（canonical 投影;其「Copilot `skillDirectories`」已被本條取代)、`agent-providers#13`（ACP skill 退化)、`agent-providers#15`（config-home)、`agent-providers#16`（provider 不碰 fs)、`agent-server/providers/shared.ts`（`projectAppSkills`)、`agent-server/providers/{copilot,codex}/{helpers,index}.ts`（`skillTarget`)、`agent-server/exec.ts`（中央投影)。
+**Related**：`skills#1`、`agent-providers#13`、`agent-providers#15`、`agent-providers#16`、`agent-server/providers/shared.ts`、`agent-server/providers/copilot/index.ts`、`agent-server/providers/codex/index.ts`、`agent-server/exec.ts`。
 
 ## skills#11 — 可停用（optional）skill：`.disabled` marker 是 mount 開關，鏡像 `.locked` 但語意相反  ·  [Decision]
 

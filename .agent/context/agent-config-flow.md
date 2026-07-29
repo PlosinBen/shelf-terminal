@@ -38,7 +38,7 @@ related:
 **Decision**：Slash 是 provider 想特別解釋的字串，**不是獨立 channel**：
 
 - Renderer 不偵測 slash — `agent.send(text)` 一條路徑通吃普通 text 跟 `/cmd`（config picker 走 `agent-config-flow#3` / `agent-config-flow#5` 的結構化 config-edit turn，是「按鍵級 config edit」不是 agent command）
-- Provider 在 `query(input, send)` 入口呼叫 `parseSlashPrefix(input.prompt)`，命中走內部 `dispatchSlash(cmd, args, send)`（**只剩 claude 走此路**；copilot/codex 走 ACP 後 slash 由 CLI 原生派發，不經 `parseSlashPrefix`/`dispatchSlash`，見 `agent-providers#13`(c)）
+- Provider 自己決定如何解釋 slash：Claude 在 `query()` 內 parse/dispatch；Copilot 交給 ACP CLI；Codex 在 app-server backend 將 Shelf-supported slash 映到對應 JSON-RPC route，unsupported route 明確回錯。
 - Slash 輸出走 `fold_markdown` 渲染原語（label 是 `/cmd` 名、失敗用 `errorMessage`；見 `agent-ui#5`）
 - Backend interface 只剩 `query(input, send)`，沒有 `handleSlashCommand`
 
@@ -148,7 +148,7 @@ model/effort/permission 三個入口（打字 `/model X`、picker、status-bar �
 - 不要在 `handleConfigEdit` 加回樂觀 `setActual*`/`persistPref` — 會跟打字的 round-trip 行為分歧。顯示/持久化一律由回傳的 capabilities 驅動
 - renderer 送結構化 `{key,value}`，不要組 `/model X` 字串（slash 語法留在 provider）；也不要為 config-edit 開新 IPC（它是 turn，重用 send/turn 路由）
 - `applyConfigEdit`（明確變更，有 divider）≠ `setModel`/`setEffort`（orchestrator 每訊息的 silent pref-diff，無 divider）
-- **值沒變＝完全 no-op**：送出的值 === 現行 closure（重選已選中的 model/effort/permission，或 `/model <current>`）時 provider 直接 return，不 emit divider、capabilities、status streaming/idle。config-edit turn 上沒有前置 setter 先改 closure，所以此時 closure 仍是真正的舊值，比對可靠。兩 provider 都有此 guard（Claude 在 `applyConfigEdit` 開頭；Copilot 在 `query()` config-edit 分支的 streaming emit 前）
+- **值沒變＝完全 no-op**：送出的值 === 現行 closure 時 provider直接 return，不 emit divider、capabilities、status streaming/idle；各 backend在自己的 apply入口維持此 guard。
 
 ## agent-config-flow#6 — Config 套用職責邊界：能塞給 SDK 就塞，不擴張權責（model / effort / permission 同一套）  ·  [Decision]
 
@@ -159,13 +159,13 @@ model/effort/permission 三個入口（打字 `/model X`、picker、status-bar �
 - **SDK 沒有（值只能透過下次 query 的 options 生效，如 Claude）→ 只記 closure、defer 到下次 query**，由 SDK 收到 option 時判定。不為了「當下就驗」而擴張權責。
 - 不維護自家白名單前置拒絕 model——清單（`listModels()`）會落後 GitHub 實際支援（例：opus 4.8 已上線但 `listModels` 還沒列，前置擋會誤殺）。「卡在外來 id」靠 SDK 報錯 + 使用者改選（picker 只列合法值）復原。
 
-**三個 knob × 兩 provider**：
+**三個 knob × 三個 provider**：
 
-| knob | Copilot / Codex（ACP，有 live-session apply） | Claude（無，per-call options） |
-|------|------|------|
-| model | `driver.setConfigOption(configId('model'), value)`（ACP session config option）直接塞 | 記 closure，下次 query `options.model` 由 SDK 驗 |
-| effort | `driver.setConfigOption(configId('thought_level'), value)` 直接塞 | 同上 |
-| permission | `driver.setMode(modeId)`（ACP `session/set_mode`）直接塞 | 記 closure，下次 query `options.permissionMode` 由 SDK 驗 |
+| knob | Copilot（ACP） | Codex（app-server） | Claude（per-call options） |
+|------|------|------|------|
+| model | `driver.setConfigOption(configId('model'), value)` | backend closure 套到下一個 app-server turn/thread config | 記 closure，下次 query `options.model` 由 SDK 驗 |
+| effort | `driver.setConfigOption(configId('thought_level'), value)` | backend closure 套到下一個 app-server turn config | 同上 |
+| permission | `driver.setMode(modeId)` | 映成 approval policy + sandbox policy | 記 closure，下次 query `options.permissionMode` 由 SDK 驗 |
 
 （cutover 後 copilot 走 ACP：以上 native SDK 的 `session.setModel`/`session.rpc.mode.set` 已刪。）
 
@@ -175,9 +175,9 @@ model/effort/permission 三個入口（打字 `/model X`、picker、status-bar �
 - 翻譯**翻不出來** = 沒有對應的 SDK 動作可做（無效值，或 Copilot 不支援的合法 app 模式如 `acceptEdits`）→ 照實 emit error、不採用。這是「無 SDK action」的誠實回報，不是發明驗證。**踩過的雷**：舊 code `if (sdkMode) { set }` 翻不出來時跳過 SDK 卻照樣 `currentPermissionMode = args` + 回報成功 + persist → silent 假成功。
 
 **Renderer / Backend 分層（回應「picker 兩邊行為是否不同」— 不同只在 backend）**：
-- **Renderer 對 provider 無感、單一路徑**：picker/status-bar/無參數 `/model` → `handleConfigEdit` → `agent:send{configEdit}`；手打 `/model X` → 普通 prompt。送給 claude/copilot 完全一樣，renderer 不分流。
-- **差異只在 backend apply 收斂點**（本質差異，勿為對稱強行統一）：兩邊都在 `query()` 見到 `QueryInput.configEdit` 時走各自 `applyConfigEdit`（`agent-config-flow#5`），依 `key` 分派到 `setModel`/`setEffort`/`setPermissionMode`（Copilot ACP 是 `setConfigOption`/`setMode`；Claude 純 set+emit defer）。**漏路由會 fall through 成空 prompt → 沒卡片、接續上次對話**（曾經的 bug；native copilot 時代靠 `dispatchSlash` 路由，ACP 後改直接 apply func）。
-- 兩邊 config-edit 成功都 emit `system` divider（共用 `formatConfigAck`，「applies on next query」對兩邊都成立）；Copilot 失敗 emit `error`。`/help`/`/clear`/`/context`/`/compact` 仍是 `fold_markdown`（slash 內容輸出，非狀態轉換）。
+- **Renderer 對 provider 無感、單一路徑**：picker/status-bar/無參數 `/model` → `handleConfigEdit` → `agent:send{configEdit}`；手打 `/model X` → 普通 prompt。
+- **差異只在 backend apply 收斂點**：各 provider在 `query()` 見到 `QueryInput.configEdit` 時走自己的 `applyConfigEdit`，依 transport套用或記住下一回合設定。
+- config-edit成功都 emit `system` divider（共用 `formatConfigAck`）；失敗 emit `error`。
 
 **Do not change casually because**：
 - 不要在 `gatherCapabilities`/`setModel`/`dispatchSlash` 加「model 是否在 `listModels` 清單內」的前置拒絕 — 交給 SDK，錯誤照實回。
@@ -196,10 +196,10 @@ model/effort/permission 三個入口（打字 `/model X`、picker、status-bar �
 - 不要把 timeout 改回 `resolve(空 caps)`「讓 UI 至少顯示點東西」——那正是假可用 + 讓訊息 queue 進未確立的 backend 的來源。要嘛 reject（現況），要嘛未來把慢的 `listModels` 移出關鍵路徑（背景載入）讓 ready 快而可靠。
 - `checkAuth` 已 `try/catch → false`，getCapabilities reject 是**既有設計預期**（`remote.test.ts` 已斷言），不是回歸。
 - E2E 靠 fake provider 的 `SHELF_TEST_CAPS_FAIL` env（`capsFail` fixture option）驅動 failed-init；**不要**改成用 provider name 分派 fail backend —— 會撞 `agent-deploy-copilot`/`-mcp` 這些在 SHELF_TEST_MODE 下開 Copilot tab 且預期成功的既有測試。
-- 不要把兩 provider 的 config-edit apply 抽成跨 provider 共用函式 — apply 語意本質不同，只共用 `formatConfigAck` 文案與 wire 形狀。
-- 不要在 renderer 為 copilot/claude 分流 config-edit — 分層邊界在 backend。
+- 不要把 provider 的 config-edit apply 抽成跨 provider 共用函式 — apply 語意本質不同，只共用 `formatConfigAck` 文案與 wire 形狀。
+- 不要在 renderer 依 provider 分流 config-edit — 分層邊界在 backend。
 
-**Related**：`agent-config-flow#3`（slash routing + prefs flow）、`agent-config-flow#5`（config-edit 收斂）、`agent-config-flow#4`（model 顯示 intent-driven）、`agent-server/providers/{claude,copilot}/index.ts`、`agent-server/providers/types.ts`（`PERMISSION_MODES`）、`src/shared/config-ack.ts`。
+**Related**：`agent-config-flow#3`、`agent-config-flow#5`、`agent-config-flow#4`、`agent-server/providers/{claude,copilot,codex}/index.ts`、`agent-server/providers/types.ts`、`src/shared/config-ack.ts`。
 
 ## agent-config-flow#8 — Dispatcher model cache：cache-aside + TTL-only；caps per-sid 在 session_ready 之後  ·  [Decision]
 

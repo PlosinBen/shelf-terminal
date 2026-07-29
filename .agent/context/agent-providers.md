@@ -87,11 +87,11 @@ related:
 
 ## agent-providers#6 — 列表類 provider 輸出 = 各 provider 自組渲染原語（md），不建共通 result type  ·  [Decision]
 
-**Decision**：像 `/mcp` `/skills` 這種「列出 session 載入了什麼」的輸出,**每個 provider 用自己的 SDK 形狀直接組 markdown**(渲染原語)再 `reply` 出去。**不**先把各家資料 normalize 成一個跨 provider 的共通結果型別(如先前的 `NormalizedMcpServer`/`NormalizedSkill`)。共通層只保留**無語意的排版工具**(`agent-server/providers/md-table.ts` 的 `mdTable`/`cell`)。各 provider 的「raw SDK shape → md string」是純函式,各自單測(`claude/mcp-skills-cards.test.ts`)。（**cutover 後只剩 claude 是此決策的活實例**:copilot/codex 走 ACP,`/mcp` `/skills` 原生派發、Shelf 不組卡片,見 `agent-providers#13`(c)、`skills#3` 適用範圍註。）
+**Decision**：像 `/mcp` `/skills` 這種「列出 session 載入了什麼」的輸出,**每個 provider 用自己的 runtime shape 直接組 markdown**(渲染原語)再 `reply` 出去。**不**先把各家資料 normalize 成一個跨 provider 的共通結果型別。Claude 使用 SDK shape；Codex 使用 app-server list routes；Copilot ACP 由 CLI 原生派發。共通層只保留無語意的排版工具。
 
 **Reason / 為什麼**:共通 result type 是**最低公分母契約** —— 各家資料天生不對稱(Claude `mcpServerStatus().tools` 帶 per-server tools + `readOnly`/`destructive` annotations;Copilot 的 `mcp_servers_loaded` / `mcp.list()` / `mcp.discover()` 三者都**沒有** per-server tools),硬塞進共通型別只能靠一堆 optional 欄 + adaptive column 撐,愈加愈漏。更糟的是**權責倒置**:把「怎麼呈現」的責任從各 provider 上收到共通層,等於逼共通層去懂每一家的 quirks,新 provider 進來得先滿足這個型別 → 不利擴充。承 `agent-providers#1`(差異封裝在 provider 內)+ CLAUDE.md「wire 給 renderer 的是渲染原語,不是 provider 語意」:呈現本就是 per-provider 的事,直接在 provider 內組 md 最誠實。
 
-**結果**:Claude `/mcp` 每 server 巢狀列 tools(+annotation 標記),自組卡片;copilot/codex(ACP)不走此路 —— slash 原生派發、CLI 自己吐輸出。此決策下**合法**,renderer 無感(claude 收到 `reply` markdown;ACP provider 的 slash 由 CLI 處理)。（Reason 段的 Copilot SDK 資料不對稱是 native 時代的佐證,現屬對照史。）
+**結果**：Claude與Codex各自產生 provider-owned輸出，Copilot CLI原生輸出；renderer只接收渲染原語，不知道來源 transport。
 
 **Do not change casually because**:不要「為了一致」再把這類輸出抽回共通 normalized struct —— 那會重新把各家差異上收到共通層,造成權責倒置、卡住新 provider。要共用就只共用 `md-table` 這種無語意工具。判準:**跨 provider 共用「無語意工具」可以,共用「帶語意的結果型別」不行**。
 
@@ -180,7 +180,7 @@ SDK 0.3.159 **並存**兩種 compact 完成訊號:`status` 形狀(`subtype:'stat
 
 ## agent-providers#15 — Provider auth = device-scoped：per-appId config-home ENV 隔離 device-login；token-env 正交  ·  [Decision]
 
-**Decision**：provider 的 device-login 憑證按 **appId 隔離**,方法是把 CLI 的 config-home ENV 指到 per-app 目錄:copilot `COPILOT_HOME`、codex `CODEX_HOME`、（未來）claude `CLAUDE_CONFIG_DIR` → `~/.shelf/apps/<appId>/{copilot,codex,claude}`。**env 要同時設在 `login` 與 run（`--acp` spawn）兩處**。因為 config-home 是行程 env、spawn 當下固定,而 appId 到 `get_capabilities` 才第一次已知（見 `contracts`）→ appId 要 thread 進 caps,且 appId 變更要重生連線。
+**Decision**：provider 的 device-login 憑證按 **appId 隔離**,方法是把 CLI 的 config-home ENV 指到 per-app 目錄:copilot `COPILOT_HOME`、codex `CODEX_HOME`、（未來）claude `CLAUDE_CONFIG_DIR` → `~/.shelf/apps/<appId>/{copilot,codex,claude}`。Env 必須同時設在 login 與 runtime spawn（Copilot `--acp`、Codex `app-server`）。因為 config-home 是行程 env、spawn 當下固定,appId 變更要重生連線。
 
 **Reason**：provider auth 本質是 **device-scoped**（GitHub device-flow / codex device-code 授權的是一台裝置）。remote 上**一組 appId 就是一台 device**（一個 install/client）→ 按 appId 隔離 = 讓 auth 邊界對齊 device 邊界,語意正確,非防禦性 hack。**多租戶正確**:一台 remote 服務多個 client（不同 appId/帳號）,共用 `~/.<cli>` 會撞 auth。「一次性重登」不是 regression,是**正確的一次 device 授權**（Shelf 是它自己的 device;使用者 terminal 的 `~/.<cli>` 是另一個 device-context,不該默默沿用）。守 `agent-providers#12` 原意「不承攬憑證」= 不 parse/copy auth 內容;**ENV 改 config dir 是給路徑,不算承攬**（複製憑證檔才算,已否決）。
 
@@ -190,7 +190,7 @@ SDK 0.3.159 **並存**兩種 compact 完成訊號:`status` 形狀(`subtype:'stat
 
 **Do not change casually because**：別只在 run 設 config-home 而漏了 login（憑證會寫錯目錄）;別以為 appId 在 caps 前就有（要 thread 進 `get_capabilities`,否則 caps-time spawn 拿不到 home）;別把 device-home 隔離跟 token-env 混為一談。
 
-**Related**：`agent-providers#12`（token-env headless）、`agent-providers#10`（copilot device-login 流程,ACP 沿用同一份）、`contracts`（appId 進 caps）、`agent-server/providers/{copilot,codex}/helpers.ts`（`*ConfigHome`/`*AcpEnv`）。
+**Related**：`agent-providers#12`、`agent-providers#10`、`contracts`、`agent-server/providers/copilot/helpers.ts`、`agent-server/providers/codex-shared/runtime.ts`。
 
 ## agent-providers#16 — Provider backend = 純 SDK/CLI adapter；provider 目錄互相孤立  ·  [Decision]
 
@@ -214,7 +214,7 @@ SDK 0.3.159 **並存**兩種 compact 完成訊號:`status` 形狀(`subtype:'stat
 
 **Do not change casually because**：別讓 provider 自訂 displayName（破壞中央 `PERMISSION_MODES` 一致性）;別對不上就默默丟(要 log,才知道要不要新增 Shelf mode)。
 
-**Related**：`agent-providers#4`（permission 語意 + `PERMISSION_MODES`）、`agent-server/providers/{copilot,codex}/mode-map.ts`、`agent-server/providers/acp/capabilities.ts`。
+**Related**：`agent-providers#4`、`agent-server/providers/copilot/mode-map.ts`、`agent-server/providers/codex/config.ts`、`agent-server/providers/acp/capabilities.ts`。
 
 ## agent-providers#18 — Provider 清單單一來源:`AGENT_PROVIDERS` registry,型別 derive,消費端一律 iterate  ·  [Decision]
 
@@ -334,7 +334,7 @@ SDK 0.3.159 **並存**兩種 compact 完成訊號:`status` 形狀(`subtype:'stat
 
 ## agent-providers#30 — 「一個 CLI 服務多 session」是 per-provider 硬差異  ·  [Decision]
 
-**Decision:** Copilot / Codex 的 CLI 能一個 CLI 多 session（`CopilotClient` 有 `sessions`/`createSession`/`resumeSession`;ACP 一連線多 `session/new`，`agent-server/providers/acp/client.ts` 的 `createSessionDriver` 以 `Map<sessionId>` 多工於單一連線）。**Claude 不行**——`@anthropic-ai/claude-agent-sdk` 的 `query()` 每次呼叫是「一個對話綁一個 spawn 的 `claude` 子行程」，`resume`/`forkSession` 都各自 spawn 新行程，沒有共享的 multi-session client。
+**Decision:** Copilot ACP與Codex app-server的底層 CLI protocol都能承載多個 session/thread；Shelf目前仍以 per-session execution隔離它們。Claude不行——Agent SDK的 `query()` 每個對話各自 spawn CLI，resume/fork也會產生新行程。
 
 **Reason：** Shelf 目前「一 tab 一 CLI」對 Copilot/Codex 是 dispatch-layering 的**選擇**（每個 exec 各開自己的 client），不是 SDK 限制——這兩者可把 N 個 tab 收斂到一個 CLI（provider CLI 是記憶體最大宗）。對 Claude 是**硬限制**（一對話一行程），無法共享，只能靠 idle-teardown 之類手段回收。
 
