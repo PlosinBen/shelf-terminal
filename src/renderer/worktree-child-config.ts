@@ -1,4 +1,5 @@
 import type { AgentProvider, ProjectConfig } from '@shared/types';
+import { isAgentProvider } from '@shared/agent-providers';
 
 /**
  * Build a worktree sub-project's config by cloning the parent project's SETUP
@@ -27,7 +28,8 @@ export function buildWorktreeChildConfig(
     envPlain: parent.envPlain,
     defaultTabs: parent.defaultTabs,
     quickCommands: parent.quickCommands,
-    defaultAgentProvider: opts.defaultAgentProvider ?? parent.defaultAgentProvider,
+    defaultAgentProvider: opts.defaultAgentProvider
+      ?? (isAgentProvider(parent.defaultAgentProvider) ? parent.defaultAgentProvider : undefined),
     agentPrefs: parent.agentPrefs,
     openAgentOnConnect: parent.openAgentOnConnect,
     // ── fresh worktree identity ──

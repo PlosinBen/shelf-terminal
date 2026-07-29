@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useStore } from '../store';
+import { useStore, getResolvedDefaultAgentProvider } from '../store';
 import { on, emit, emitAgent, Events } from '../events';
 import { enqueuePendingSend } from '../agentTabStore';
 import { debugLog } from '../debugLog';
@@ -63,7 +63,7 @@ export function WorktreeDialog() {
   const [notes, setNotes] = useState<FeatureNoteInfo[]>([]);
   const [selectedNotes, setSelectedNotes] = useState<Set<string>>(() => new Set());
   const [baseBranch, setBaseBranch] = useState<string | null>(null);
-  const [defaultAgentProvider, setDefaultAgentProvider] = useState<AgentProvider>('claude');
+  const [defaultAgentProvider, setDefaultAgentProvider] = useState<AgentProvider | ''>('');
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -84,7 +84,7 @@ export function WorktreeDialog() {
       // otherwise default to none so the user chooses deliberately.
       const proj = projects.find((p) => p.config.id === targetProjectId);
       if (proj) {
-        setDefaultAgentProvider(proj.config.defaultAgentProvider ?? 'claude');
+        setDefaultAgentProvider(getResolvedDefaultAgentProvider(proj.config.id) ?? '');
         window.shelfApi.git.branchList(proj.config.connection, proj.config.cwd)
           .then((branches) => setBaseBranch(branches.find((branch) => branch.current)?.name ?? null))
           .catch(() => setBaseBranch(null));
@@ -191,7 +191,7 @@ export function WorktreeDialog() {
         cwd: result.path,
         worktreeBranch: branch,
         baseBranch: result.baseBranch,
-        defaultAgentProvider,
+        defaultAgentProvider: defaultAgentProvider || undefined,
       }));
     } catch (err) {
       const setupError = errorText(err);
@@ -305,6 +305,7 @@ export function WorktreeDialog() {
               onChange={(e) => setDefaultAgentProvider(e.target.value as AgentProvider)}
               disabled={creating}
             >
+              <option value="">Select a provider</option>
               {agentProviderEntries().map(([id, meta]) => (
                 <option key={id} value={id}>{meta.label}</option>
               ))}
@@ -332,7 +333,7 @@ export function WorktreeDialog() {
           <button className="conn-btn conn-btn-cancel" onClick={() => setOpen(false)}>Cancel</button>
           <button
             className="conn-btn conn-btn-next"
-            disabled={!input.trim() || creating}
+            disabled={!input.trim() || !defaultAgentProvider || creating}
             onClick={handleCreate}
           >
             {creating ? 'Creating...' : 'Create'}

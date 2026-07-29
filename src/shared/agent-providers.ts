@@ -28,6 +28,10 @@ export const AGENT_PROVIDERS = {
 
 export type AgentProvider = keyof typeof AGENT_PROVIDERS;
 
+export function isAgentProvider(value: unknown): value is AgentProvider {
+  return typeof value === 'string' && Object.prototype.hasOwnProperty.call(AGENT_PROVIDERS, value);
+}
+
 /** The providers in registry order, as `[id, meta]` pairs — for menus / selects. */
 export function agentProviderEntries(): Array<[AgentProvider, AgentProviderMeta]> {
   return Object.entries(AGENT_PROVIDERS) as Array<[AgentProvider, AgentProviderMeta]>;

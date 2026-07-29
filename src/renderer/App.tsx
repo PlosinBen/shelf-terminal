@@ -23,7 +23,7 @@ import { SkillsView } from './components/SkillsView';
 import { McpView } from './components/McpView';
 import { QuickNoteOverlay } from './components/QuickNoteOverlay';
 import { useKeybindings } from './hooks/useKeybindings';
-import { useStore, setProjects, setSettings, setUpdateStatus, addProject, addTab, setActiveTab, removeTab, removeProject, setSplitTab, clearUnread, setInvalidProjects, setPmActive, setConnectionHealth, setActiveProject, setActiveProjectById, getProjectById, getProjectIndexById, getProjectConfigs, listStableProjectViews, showProjectNotice } from './store';
+import { useStore, setProjects, setSettings, setUpdateStatus, addProject, addTab, setActiveTab, removeTab, removeProject, setSplitTab, clearUnread, setInvalidProjects, setPmActive, setConnectionHealth, setActiveProject, setActiveProjectById, getProjectById, getProjectIndexById, getProjectConfigs, listStableProjectViews, showProjectNotice, resolveAgentProviderForOpen, resolveAgentProviderForConnect } from './store';
 import type { ConnectionHealth } from '@shared/types';
 import type { ProjectConfig } from '@shared/types';
 import { disposeTerminal } from './components/TerminalView';
@@ -178,7 +178,8 @@ export function App() {
       const projectIndex = getProjectIndexById(projectId);
       const proj = getProjectById(projectId);
       if (!proj || projectIndex === -1) return;
-      const resolvedProvider = provider ?? proj.config.defaultAgentProvider ?? 'claude';
+      const resolvedProvider = resolveAgentProviderForOpen(projectId, provider);
+      if (!resolvedProvider) return;
       addTab(projectIndex, undefined, undefined, undefined, 'agent', resolvedProvider);
     });
 
@@ -262,8 +263,10 @@ export function App() {
         proj = getProjectById(projectId);
         const projectIndex = getProjectIndexById(projectId);
         if (!proj || projectIndex === -1 || proj.tabs.length > 0) return;
-        const provider = proj.config.defaultAgentProvider ?? 'claude';
-        addTab(projectIndex, undefined, undefined, undefined, 'agent', provider);
+        const provider = resolveAgentProviderForConnect(projectId);
+        if (provider) {
+          addTab(projectIndex, undefined, undefined, undefined, 'agent', provider);
+        }
       }
 
       proj = getProjectById(projectId);

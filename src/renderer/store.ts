@@ -3,6 +3,7 @@ import type { ProjectConfig, AppSettings, UpdateStatus, TabType, AgentProvider, 
 import { DEFAULT_SETTINGS } from '@shared/defaults';
 import { groupedOrder, moveGroup } from './project-grouping';
 import { createProjectNotice, dismissProjectNoticeState, showProjectNoticeState, type ProjectNotice } from './project-notice';
+import { isAgentProvider } from '@shared/agent-providers';
 
 // ── Tab state ──
 
@@ -222,6 +223,36 @@ export function getProjectIndexById(projectId: string) {
 
 export function getProjectById(projectId: string): ProjectRuntime | null {
   return projects.find((p) => p.config.id === projectId) ?? null;
+}
+
+export function getResolvedDefaultAgentProvider(projectId: string): AgentProvider | null {
+  const candidate = getProjectById(projectId)?.config.defaultAgentProvider;
+  return isAgentProvider(candidate) ? candidate : null;
+}
+
+export function resolveAgentProviderForOpen(
+  projectId: string,
+  explicitProvider?: string,
+): AgentProvider | null {
+  const project = getProjectById(projectId);
+  if (!project) {
+    console.warn(`[agent-provider] cannot resolve provider for unknown project ${projectId}`);
+    return null;
+  }
+  const candidate = explicitProvider ?? project.config.defaultAgentProvider;
+  if (isAgentProvider(candidate)) return candidate;
+  console.warn(
+    `[agent-provider] refusing agent open for project ${projectId}: ${
+      candidate === undefined ? 'no default provider' : `invalid provider ${candidate}`
+    }`,
+  );
+  return null;
+}
+
+export function resolveAgentProviderForConnect(projectId: string): AgentProvider | null {
+  const project = getProjectById(projectId);
+  if (!project?.config.openAgentOnConnect) return null;
+  return resolveAgentProviderForOpen(projectId);
 }
 
 export function showProjectNotice(input: { projectId: string; message: string }): ProjectNotice {

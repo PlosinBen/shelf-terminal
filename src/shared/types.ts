@@ -293,10 +293,10 @@ export interface ProjectConfig {
    * because the parent's live checkout may have moved on since the worktree was cut.
    */
   baseBranch?: string;
-  defaultAgentProvider?: AgentProvider;
+  defaultAgentProvider?: string;
   openAgentOnConnect?: boolean;
-  agentSessionIds?: Partial<Record<AgentProvider, string>>;
-  agentPrefs?: Partial<Record<AgentProvider, AgentPrefs>>;
+  agentSessionIds?: Record<string, string>;
+  agentPrefs?: Record<string, AgentPrefs>;
 }
 
 // ── IPC payloads: Renderer → Main ──

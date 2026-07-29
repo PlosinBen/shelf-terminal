@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useStore, setEditingProjectById, updateProjectConfigById } from '../store';
+import { useStore, setEditingProjectById, updateProjectConfigById, getResolvedDefaultAgentProvider } from '../store';
 import type { TabTemplate, QuickCommand, AgentProvider } from '@shared/types';
 import { agentProviderEntries } from '@shared/agent-providers';
 import { TAB_COLORS } from './TabBar';
@@ -31,6 +31,7 @@ export function ProjectEditPanel() {
   const [remoteConnected, setRemoteConnected] = useState(true);
   const [uploadsSize, setUploadsSize] = useState<{ totalBytes: number; fileCount: number } | null>(null);
   const [defaultAgentProvider, setDefaultAgentProvider] = useState<AgentProvider | ''>('');
+  const providerTouched = useRef(false);
   const [openAgentOnConnect, setOpenAgentOnConnect] = useState(false);
 
   useEffect(() => {
@@ -45,7 +46,8 @@ export function ProjectEditPanel() {
       // Secret KEY names + the machine's key-storage tier (for honest disclosure).
       void window.shelfApi.project.listSecretKeys(project.config.id).then(setSecretKeys).catch(() => setSecretKeys([]));
       void window.shelfApi.project.secretKeyTier().then(setKeyTier).catch(() => setKeyTier(null));
-      setDefaultAgentProvider(project.config.defaultAgentProvider || '');
+      setDefaultAgentProvider(getResolvedDefaultAgentProvider(project.config.id) ?? '');
+      providerTouched.current = false;
       setOpenAgentOnConnect(project.config.openAgentOnConnect || false);
     }
   }, [editingProjectId, project]);
@@ -128,7 +130,9 @@ export function ProjectEditPanel() {
       defaultTabs: tabs.length > 0 ? tabs : undefined,
       quickCommands: cmds.length > 0 ? cmds : undefined,
       envPlain: Object.keys(envPlain).length > 0 ? envPlain : undefined,
-      defaultAgentProvider: defaultAgentProvider || undefined,
+      ...(providerTouched.current
+        ? { defaultAgentProvider: defaultAgentProvider || undefined }
+        : {}),
       openAgentOnConnect: openAgentOnConnect || undefined,
     });
 
@@ -438,7 +442,10 @@ export function ProjectEditPanel() {
             <select
               className="settings-input settings-input-wide"
               value={defaultAgentProvider}
-              onChange={(e) => setDefaultAgentProvider(e.target.value as AgentProvider | '')}
+              onChange={(e) => {
+                providerTouched.current = true;
+                setDefaultAgentProvider(e.target.value as AgentProvider | '');
+              }}
             >
               <option value="">None (ask each time)</option>
               {agentProviderEntries().map(([id, meta]) => (
