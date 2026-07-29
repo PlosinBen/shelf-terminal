@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import type { SessionUpdate, SessionConfigOption, SessionModeState } from '@agentclientprotocol/sdk';
@@ -169,17 +170,26 @@ describe('codex backend (via mock ACP agent)', () => {
     backend.dispose();
   });
 
-  it('forwards images through the prompt turn', async () => {
-    let promptParams: { prompt?: Array<{ type: string }> } | undefined;
+  it('forwards uploaded image attachments through the prompt turn', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'shelf-codex-image-'));
+    const imagePath = path.join(dir, 'a.png');
+    fs.writeFileSync(imagePath, Buffer.from('AAAA'));
+    let promptParams: { prompt?: Array<{ type: string; data?: string; mimeType?: string }> } | undefined;
     const mock = createMockAcpAgent({ onPrompt: (p) => { promptParams = p as typeof promptParams; } });
     const backend = createCodexBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
 
     await backend.query(
-      { prompt: 'see', cwd: '/tmp/project', images: ['data:image/png;base64,AAAA'] },
+      {
+        prompt: 'see',
+        cwd: '/tmp/project',
+        attachments: [{ kind: 'image', path: imagePath, displayPath: '.tmp/shelf/a.png', name: 'a.png', mimeType: 'image/png' }],
+      },
       () => {},
     );
-    const kinds = (promptParams?.prompt ?? []).map((b) => b.type);
+    const prompt = promptParams?.prompt ?? [];
+    const kinds = prompt.map((b) => b.type);
     expect(kinds).toContain('image');
+    expect(prompt.find((b) => b.type === 'image')).toMatchObject({ data: Buffer.from('AAAA').toString('base64'), mimeType: 'image/png' });
 
     backend.dispose();
   });

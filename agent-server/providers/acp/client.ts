@@ -15,8 +15,10 @@ import {
   type McpServer,
   type AvailableCommand,
 } from '@agentclientprotocol/sdk';
+import type { AgentAttachment } from '@shared/types';
 import type { OutgoingMessage } from '../types';
 import { translateSessionUpdate, createToolMetaCarry, imageContentBlocks, DEFAULT_AGENT_MSG_ID } from './translate';
+import { readUploadedImageAttachments } from '../shared';
 
 /** An async FIFO of session updates that unblocks readers on push or done. */
 interface UpdateQueue {
@@ -67,6 +69,7 @@ export interface SessionDriver {
     prompt: string,
     send: (msg: OutgoingMessage) => void,
     images?: string[],
+    attachments?: AgentAttachment[],
   ): Promise<StopReason>;
   /** Set the session's mode (`session/set_mode`). Mode-id semantics are the agent's. */
   setMode(agent: ClientContext, session: AcpSession, modeId: string): Promise<void>;
@@ -123,16 +126,22 @@ export function createSessionDriver(): SessionDriver {
       return { sessionId };
     },
 
-    async drivePromptTurn(agent, session, prompt, send, images) {
+    async drivePromptTurn(agent, session, prompt, send, images, attachments) {
       const q = queues.get(session.sessionId);
       if (!q) throw new Error(`drivePromptTurn: no queue for session ${session.sessionId}`);
 
-      // Text block + any attached images (data URLs → ACP image ContentBlocks).
-      const content = [{ type: 'text' as const, text: prompt }, ...imageContentBlocks(images)];
+      // Text block + any attached images (legacy data URLs or uploaded paths →
+      // ACP image ContentBlocks).
+      const uploadedImages = (await readUploadedImageAttachments(attachments)).map(({ mimeType, data }) => ({
+        type: 'image' as const,
+        data,
+        mimeType,
+      }));
+      const content = [{ type: 'text' as const, text: prompt }, ...imageContentBlocks(images), ...uploadedImages];
       let done = false;
       const promptDone = agent
         .request(methods.agent.session.prompt, { sessionId: session.sessionId, prompt: content })
-        .finally(() => { done = true; q.wake(); });
+        .finally(() => { done = true; q.wake(); }) as Promise<{ stopReason: StopReason }>;
 
       // Per-turn namespace for the messageId-less sentinel. Streams keep their
       // streamType so a turn's reply text and thinking don't collide with each

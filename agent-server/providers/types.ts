@@ -21,7 +21,7 @@ export function formatResetCountdown(resetsAtMs: number): string | null {
   return `${Math.ceil(d / 60_000)}m`;
 }
 
-import type { AgentQueueItem, ProviderModel, TaskEvent } from '@shared/types';
+import type { AgentAttachment, AgentQueueItem, ProviderModel, TaskEvent } from '@shared/types';
 import type { PersistedContext } from '../context-store';
 
 /**
@@ -283,6 +283,7 @@ export interface QueryInput {
   model?: string;
   effort?: string;
   images?: string[];
+  attachments?: AgentAttachment[];
   sessionId?: string;
   /**
    * Structured config edit (from a picker / status-bar click). When set, the

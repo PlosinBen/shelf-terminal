@@ -21,6 +21,7 @@ import { setLogSink, serverLog } from './server-logger';
 import { setWireSink } from './logger';
 import { createSendQueue } from './send-queue';
 import { projectAppSkills } from './providers/shared';
+import type { AgentAttachment } from '@shared/types';
 import type { OutgoingMessage, QueryInput, ServerBackend, PickerResolvePayload, ModelCacheClient } from './providers/types';
 import type { ProviderModel, AgentProvider } from '@shared/types';
 
@@ -44,6 +45,7 @@ interface IncomingMessage {
   model?: string;
   effort?: string;
   images?: string[];
+  attachments?: AgentAttachment[];
   sessionId?: string;
   /**
    * App/tab SESSION routing key (dispatch-layering) — the demux dimension for
@@ -312,7 +314,7 @@ async function handleSend(msg: IncomingMessage) {
   // flipped to streaming on send, and without a terminal idle its spinner +
   // queue-flush latch wedge forever (the "whole conversation stuck" bug when an
   // image was sent with no text).
-  const hasInput = !!msg.prompt || (msg.images?.length ?? 0) > 0;
+  const hasInput = !!msg.prompt || (msg.images?.length ?? 0) > 0 || (msg.attachments?.length ?? 0) > 0;
   if (!isConfigEdit && (!hasInput || !msg.cwd)) {
     turnSend({ type: 'error', error: !msg.cwd ? 'Missing cwd' : 'Missing prompt or images' });
     turnSend({ type: 'status', state: 'idle' });
@@ -366,6 +368,7 @@ async function handleSend(msg: IncomingMessage) {
     model: msg.model,
     effort: msg.effort,
     images: msg.images,
+    attachments: msg.attachments,
     sessionId: msg.sessionId,
     configEdit: msg.configEdit,
     clientMsgId: msg.clientMsgId,

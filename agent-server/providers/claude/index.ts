@@ -14,7 +14,7 @@ import { severityFromUtilization, pickPermissionModes, pickEffortLevels } from '
 import { parseSlashPrefix } from '@shared/slash-prefix';
 import { formatConfigAck, type ConfigEditKey } from '@shared/config-ack';
 import type { ProviderModel, NormalizedTask } from '@shared/types';
-import { stripCwd, resolveSkillsPluginRoot } from '../shared';
+import { stripCwd, resolveSkillsPluginRoot, readUploadedImageAttachments } from '../shared';
 import { loadProjectedMcpServers } from '../mcp-config';
 import {
   formatClaudeMcpCard,
@@ -1368,8 +1368,12 @@ export function createClaudeBackend(): ServerBackend {
       const imageBlocks = (input.images ?? [])
         .map(dataUrlToImageBlock)
         .filter((b): b is NonNullable<typeof b> => b !== null);
-      const content = imageBlocks.length > 0
-        ? [...imageBlocks, ...(input.prompt ? [{ type: 'text' as const, text: input.prompt }] : [])]
+      const uploadedImageBlocks = (await readUploadedImageAttachments(input.attachments))
+        .map(({ mimeType, data }) => imageDataToImageBlock(mimeType, data))
+        .filter((b): b is NonNullable<typeof b> => b !== null);
+      const allImageBlocks = [...imageBlocks, ...uploadedImageBlocks];
+      const content = allImageBlocks.length > 0
+        ? [...allImageBlocks, ...(input.prompt ? [{ type: 'text' as const, text: input.prompt }] : [])]
         : input.prompt;
       s.pushUser(content as SDKUserMessage['message']['content']);
       await done;
@@ -1547,8 +1551,13 @@ export function createClaudeBackend(): ServerBackend {
 function dataUrlToImageBlock(dataUrl: string): { type: 'image'; source: { type: 'base64'; media_type: string; data: string } } | null {
   const match = dataUrl.match(/^data:(image\/[a-z+]+);base64,(.+)$/i);
   if (!match) return null;
-  if (match[2].length > 20 * 1024 * 1024) return null;
-  return { type: 'image', source: { type: 'base64', media_type: match[1], data: match[2] } };
+  return imageDataToImageBlock(match[1], match[2]);
+}
+
+function imageDataToImageBlock(mimeType: string, data: string): { type: 'image'; source: { type: 'base64'; media_type: string; data: string } } | null {
+  if (!/^image\/[a-z+]+$/i.test(mimeType)) return null;
+  if (data.length > 20 * 1024 * 1024) return null;
+  return { type: 'image', source: { type: 'base64', media_type: mimeType, data } };
 }
 
 // Per-turn usage cache for context %. result.usage is cumulative across the

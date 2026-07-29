@@ -164,9 +164,10 @@ describe('bindAgentIPCGroup', () => {
     });
 
     it('forwards agent:send to api.send', () => {
-      emitAgent('agent:send', { tabId: 't1', text: 'hi', images: ['data:img'], prefs: { model: 'opus' } });
+      const attachments = [{ kind: 'image' as const, path: '/tmp/a.png', displayPath: '.tmp/shelf/a.png', name: 'a.png', mimeType: 'image/png' }];
+      emitAgent('agent:send', { tabId: 't1', text: 'hi', attachments, prefs: { model: 'opus' } });
       const call = mock.calls.find((c) => c.method === 'send');
-      expect(call!.args).toEqual(['t1', 'hi', ['data:img'], { model: 'opus' }]);
+      expect(call!.args).toEqual(['t1', 'hi', undefined, { model: 'opus', attachments }]);
     });
 
     it('forwards agent:stop to api.stop', () => {

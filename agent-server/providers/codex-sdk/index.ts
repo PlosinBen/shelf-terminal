@@ -2,7 +2,7 @@ import { CODEX_OFFICAL_PROVIDER } from '@shared/agent-providers';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import type { ProviderModel } from '@shared/types';
+import type { AgentAttachment, ProviderModel } from '@shared/types';
 import { parseSlashPrefix } from '@shared/slash-prefix';
 import { codexConfigHome, codexEnv, resolveCodexCliCommand } from '../codex-shared/runtime';
 import { driveDeviceCodeLogin, spawnCodexAppServerRpc, type LoginHandle, type LoginRpc } from '../codex-shared/app-server-login';
@@ -539,7 +539,7 @@ export function createCodexOfficialBackend(deps: CodexOfficialDeps = {}): Server
           const started = await client.request('turn/start', {
             threadId,
             clientUserMessageId: `shelf-${randomUUID()}`,
-            input: toCodexAppServerInput(input.prompt, input.images),
+            input: toCodexAppServerInput(input.prompt, input.images, input.attachments),
             ...turnOverrides(input),
           });
           activeTurnId = stringValue(asRecord(asRecord(started)?.turn)?.id) ?? activeTurnId;
@@ -791,19 +791,31 @@ export function createCodexOfficialBackend(deps: CodexOfficialDeps = {}): Server
   }
 }
 
-function toCodexAppServerInput(prompt: string, images: string[] = []): Array<Record<string, unknown>> {
+function toCodexAppServerInput(prompt: string, images: string[] = [], attachments: AgentAttachment[] = []): Array<Record<string, unknown>> {
   const input: Array<Record<string, unknown>> = [];
   if (prompt.trim()) input.push({ type: 'text', text: prompt, text_elements: [] });
   for (const image of images) {
+    if (isImageDataUrl(image)) {
+      throw new Error('data URL images must be uploaded before reaching Codex app-server');
+    }
     input.push(isCodexAppServerImageUrl(image)
       ? { type: 'image', url: image }
       : { type: 'localImage', path: image });
+  }
+  for (const attachment of attachments) {
+    if (attachment.kind === 'image') {
+      input.push({ type: 'localImage', path: attachment.path });
+    }
   }
   return input;
 }
 
 function isCodexAppServerImageUrl(image: string): boolean {
-  return /^data:image\/[^;,]+;base64,/i.test(image) || /^https?:\/\//i.test(image);
+  return /^https?:\/\//i.test(image);
+}
+
+function isImageDataUrl(image: string): boolean {
+  return /^data:image\/[^;,]+;base64,/i.test(image);
 }
 
 function formatCodexAppServerMcpCard(raw: unknown): string {

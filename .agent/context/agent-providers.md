@@ -402,21 +402,27 @@ SDK 0.3.159 **並存**兩種 compact 完成訊號:`status` 形狀(`subtype:'stat
 read a path that starts with `data:image/png;base64,...`, eventually surfacing a local-image read
 error such as "File name too long".
 
-**Root cause：** Shelf renderer attachments are carried to providers as `images?: string[]`, and
-renderer-originated images are data URLs. Codex app-server has separate `UserInput` variants:
-`image.url` for image URLs/data URIs, and `localImage.path` for filesystem paths. Mapping every
-string to `localImage.path` makes app-server treat the whole data URI as a filename.
+**Root cause：** Shelf's AgentView used to carry pasted images to providers as `images?: string[]`
+data URLs. That made renderer-local preview format double as the provider transport contract.
+Codex app-server does not accept `data:image/...` in its image URL path the way ACP providers accept
+inline base64; when it sees that value it can attempt a local-image read with the whole data URI as
+the path.
 
-**Fix / note：** The Codex official provider boundary classifies image strings before calling
-app-server: `data:image/...;base64,...` and `http(s)://...` are sent as `{ type: 'image', url }`;
-all other strings remain `{ type: 'localImage', path }` for local-path compatibility. Do not change
-the renderer attachment contract or IPC shape for this; provider-local translation owns the
-Codex-specific distinction.
+**Fix / note：** AgentView image input uses the same upload flow as Terminal files: bytes are
+uploaded to the target cwd's `.tmp/shelf/`, then sent as shared `AgentImageAttachment` objects whose
+`path` is readable by the agent-server/provider host. Renderer history/user bubbles may still keep
+base64 data URLs for local preview, but `agent:send` / main→agent-server provider payloads use
+`attachments`. Providers convert from the uploaded path to their native schema: Codex app-server
+uses `{ type:'localImage', path }`; ACP/Claude providers read the file and build their inline base64
+image blocks. Legacy `images?: string[]` remains transitional compatibility; Codex app-server now
+fails loud if a data URL reaches it instead of sending it as `image.url`.
 
-**Do not change casually because：** Collapsing images back to only `localImage.path` reintroduces
-the pasted-image failure. Conversely, converting every string to `image.url` would break internal
-or test callers that intentionally pass filesystem paths.
+**Do not change casually because：** Do not bind provider input back to renderer preview data URLs.
+That reintroduces provider-specific assumptions at the wrong layer and breaks any provider whose
+native input is a target-host file path. Conversely, do not move upload/path creation into a
+provider-local temp dir when the existing connector upload path already handles local/remote target
+placement and cleanup.
 
 **Related：** `agent-providers#1`（provider 差異封裝在 provider 內）、`agent-providers#33`
-（`codex-offical` app-server-only path）、`contracts/agent-wire-protocol`（Shelf wire still carries
-`images?: string[]`）。
+（`codex-offical` app-server-only path）、`contracts/agent-routing`（uploaded attachment send
+contract）。

@@ -2,7 +2,7 @@ import { BrowserWindow, ipcMain, shell } from 'electron';
 import { IPC } from '@shared/ipc-channels';
 import { log } from '@shared/logger';
 import { formatTabLogId } from '@shared/tab-id';
-import type { Connection, AgentProvider } from '@shared/types';
+import type { AgentAttachment, Connection, AgentProvider } from '@shared/types';
 import type { AgentSessionState, AgentEvent, AgentBackend, PermissionResult } from './types';
 import { createRemoteBackend, syncSkillsForConnection } from './remote';
 import { loadSettings } from '../settings-store';
@@ -205,8 +205,8 @@ export function initAgentManager(windowGetter: () => BrowserWindow | null): void
   });
 
   ipcMain.handle(IPC.AGENT_SEND, async (_e, payload) => {
-    const { tabId, prompt, images, model, effort, permissionMode, configEdit, clientMsgId } = payload;
-    return sendMessage(tabId, prompt, images, { model, effort, permissionMode, configEdit, clientMsgId });
+    const { tabId, prompt, images, attachments, model, effort, permissionMode, configEdit, clientMsgId } = payload;
+    return sendMessage(tabId, prompt, images, { model, effort, permissionMode, attachments, configEdit, clientMsgId });
   });
 
   ipcMain.handle(IPC.AGENT_STOP, async (_e, payload) => {
@@ -446,6 +446,7 @@ async function sendMessage(
     model?: string;
     effort?: string;
     permissionMode?: string;
+    attachments?: AgentAttachment[];
     configEdit?: { key: 'model' | 'effort' | 'permissionMode'; value: string };
     clientMsgId?: string;
   },
@@ -481,6 +482,7 @@ async function sendMessage(
     for await (const event of session.backend.query(prompt, session.cwd, {
       canUseTool,
       images,
+      attachments: prefs?.attachments,
       model: prefs?.model,
       effort: prefs?.effort,
       permissionMode: prefs?.permissionMode,

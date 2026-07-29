@@ -121,7 +121,7 @@ title: shelf-terminal — Intent → File Index
 | Copilot ACP mode-map | `providers/copilot/mode-map.ts` | copilot session-mode ↔ Shelf permission-mode（agent→default / plan→plan / autopilot→bypassPermissions）；copilot 特有、不在 toolkit |
 | Copilot account credit | `providers/copilot/credit.ts` | `fetchCopilotCredit`（SDK `account.getQuota`、config-home auth）+ `normalizeCredit` + `refreshCopilotCredit`（per-host cache-aside、15min TTL、fail-quiet）；turn-end 經 `refreshAccountStatus` hook 觸發，見 `context/agent-providers#26` |
 | Copilot 互動登入（device flow） | `providers/copilot/login.ts` | `parseLoginPrompt`（stdout 抽 URL+code 純函式）+ `startLogin`（spawn `copilot login`、env 剝 token、cancel）+ `prefillLoginUrl`（見 `context/agent-providers` #10）。移入 copilot/ 保持 provider 目錄隔離 |
-| Provider 共用 helper | `providers/shared.ts` | `stripCwd` / `resolveSkillsPluginRoot` / `projectAppSkills`（idempotent + atomic symlink-to-temp+rename 的 skill projection）— 跨 provider 共用純函式 |
+| Provider 共用 helper | `providers/shared.ts` | `stripCwd` / `resolveSkillsPluginRoot` / `projectAppSkills`（idempotent + atomic symlink-to-temp+rename 的 skill projection）/ `readUploadedImageAttachments`（uploaded image path → base64）— 跨 provider 共用純函式 |
 | MCP config 消費（解析 + ${VAR}） | `providers/mcp-config.ts` | `loadProjectedMcpServers`：讀 projected `mcp-servers.json` → 驗證 → 對 worker env 展開 `${VAR}` → fail-loud（兩 provider 共用） |
 | App-tool bridge（agent-server 端） | `app-tool-client.ts` + `app-tool-tools.ts` | in-process MCP 工具的共用 body：`callMain` + `runBridgeTool` + 描述常數 |
 | Log proxy → main | `server-logger.ts` | `serverLog(level,tag,msg,...args)`：args 源頭 flatten 後走 wire `log` 訊息回 main（agent-server 無獨立 observability，見 `contracts/agent-wire-protocol`） |
@@ -176,6 +176,7 @@ title: shelf-terminal — Intent → File Index
 | Event bus | `events/` (`bus.ts` / `types.ts` / `ipc-agent.ts` / `index.ts`) | pub/sub + 類型化 `agent:*` vocabulary + IPC↔bus 適配層 |
 | 快捷鍵系統 | `hooks/useKeybindings.ts` | combo string 對應 action，支援參數化 action |
 | Paste/drop 上傳 hook | `hooks/useAttachmentPaste.ts` | paste/drop/upload pipeline + file size check |
+| Agent send attachment helper | `utils/agent-send-attachments.ts` | renderer-local image preview data URL 與 provider-bound uploaded `AgentAttachment` payload 分離 |
 | Terminal 渲染 | `components/TerminalView.tsx` | xterm.js instance cache + PTY I/O + paste hook + unread badge |
 | Agent 對話 UI | `components/AgentView.tsx` + `components/agent/{MessageList,InputZone,StatusBar,DecisionPanel,PlanPanel,AuthPane,ConnectionOverlay}.tsx` + `agentTabStore.ts` + `agentTabSubscriptions.ts` + `agent-message-builder.ts` + `tab-teardown.ts` | AgentView 是 layout coordinator，domain state 在 per-tab `agentTabStore`，真正 tab teardown 才清 state；子 component 各自 subscribe。`ConnectionOverlay` 是 pane-scoped（`absolute` 非 `fixed`）dim+blur「未 ready」遮罩，統一 init-`starting`（first-open/reconnect，phase 文字由 `agent/init-phase.ts` 提供）/ init-`failed`（Retry）/ health-`dead`（Reconnect）四態 |
 | Web tab（登入 surface + 瀏覽） | `components/WebTabView.tsx` | `<webview partition=persist:web>` + 網址列 + identity chip；人在這登入內網服務 |

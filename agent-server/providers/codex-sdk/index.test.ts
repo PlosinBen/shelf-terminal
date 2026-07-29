@@ -190,20 +190,38 @@ describe('Codex official app-server backend lifecycle', () => {
     expect(out.find((m) => m.type === 'error')).toBeUndefined();
   });
 
-  it('sends renderer data URI images as app-server image URL input', async () => {
+  it('sends uploaded renderer images as app-server localImage input', async () => {
+    const app = new FakeAppServer();
+    const backend = createCodexOfficialBackend({ createAppServer: () => app });
+    const out: OutgoingMessage[] = [];
+
+    await backend.query({
+      prompt: 'see',
+      cwd: '/repo',
+      attachments: [{ kind: 'image', path: '/repo/.tmp/shelf/a.png', displayPath: '.tmp/shelf/a.png', name: 'a.png', mimeType: 'image/png' }],
+    }, (m) => out.push(m));
+
+    expect(app.calls.find((call) => call.method === 'turn/start')?.params).toMatchObject({
+      input: [
+        { type: 'text', text: 'see', text_elements: [] },
+        { type: 'localImage', path: '/repo/.tmp/shelf/a.png' },
+      ],
+    });
+    expect(out.find((m) => m.type === 'error')).toBeUndefined();
+  });
+
+  it('rejects legacy data URI images before app-server can treat them as paths', async () => {
     const app = new FakeAppServer();
     const backend = createCodexOfficialBackend({ createAppServer: () => app });
     const out: OutgoingMessage[] = [];
 
     await backend.query({ prompt: 'see', cwd: '/repo', images: ['data:image/png;base64,QUJD'] }, (m) => out.push(m));
 
-    expect(app.calls.find((call) => call.method === 'turn/start')?.params).toMatchObject({
-      input: [
-        { type: 'text', text: 'see', text_elements: [] },
-        { type: 'image', url: 'data:image/png;base64,QUJD' },
-      ],
+    expect(app.calls.find((call) => call.method === 'turn/start')).toBeUndefined();
+    expect(out.find((m) => m.type === 'error')).toMatchObject({
+      type: 'error',
+      error: expect.stringContaining('data URL images must be uploaded'),
     });
-    expect(out.find((m) => m.type === 'error')).toBeUndefined();
   });
 
   it('sends remote image URLs as app-server image URL input', async () => {

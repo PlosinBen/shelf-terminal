@@ -242,6 +242,7 @@ export function createRemoteBackend(
         model: opts?.model,
         effort: opts?.effort,
         images: opts?.images,
+        attachments: opts?.attachments,
         configEdit: opts?.configEdit,
         clientMsgId: opts?.clientMsgId,
         // Names this app's projected skills dir (~/.shelf/apps/<appId>/skills)

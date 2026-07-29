@@ -1,5 +1,5 @@
 import { useEffect, useRef, type RefObject } from 'react';
-import type { Connection } from '@shared/types';
+import type { AgentImageAttachment, Connection } from '@shared/types';
 import { parseDataTransfer, type PastedItem } from '../utils/parse-data-transfer';
 
 type FileItem = Extract<PastedItem, { kind: 'file' }>;
@@ -12,6 +12,11 @@ export interface AttachmentUpload {
   displayPath: string;
 }
 
+export interface ImageAttachmentUpload extends AttachmentUpload {
+  dataUrl: string;
+  attachment: AgentImageAttachment;
+}
+
 export interface UseAttachmentPasteOpts {
   connection: Connection;
   cwd: string;
@@ -19,10 +24,9 @@ export interface UseAttachmentPasteOpts {
   /** Called with successfully uploaded non-image files (or all files if onImages
    * is not provided). Callers should display a badge / write the path somewhere. */
   onUpload: (uploads: AttachmentUpload[]) => void;
-  /** Optional — if provided, image files are read as data URLs and passed here
-   * instead of uploaded. Useful for multimodal chat inputs that want the raw
-   * base64 payload. */
-  onImages?: (dataUrls: string[]) => void;
+  /** Optional — if provided, image files are uploaded like other files and also
+   * returned with a renderer-local data URL for preview/history. */
+  onImages?: (images: ImageAttachmentUpload[]) => void;
 }
 
 function readFileAsDataUrl(file: File): Promise<string | null> {
@@ -111,18 +115,43 @@ export function useAttachmentPaste(
       const current = optsRef.current;
       const extractImages = !!current.onImages;
       const toUpload: File[] = [];
-      const imageDataUrls: string[] = [];
+      const imageFiles: File[] = [];
+      const imageDataUrls = new Map<File, string>();
 
       for (const item of fileItems) {
         if (extractImages && item.isImage) {
           const url = await readFileAsDataUrl(item.file);
-          if (url) imageDataUrls.push(url);
+          if (url) {
+            imageFiles.push(item.file);
+            imageDataUrls.set(item.file, url);
+          }
         } else {
           toUpload.push(item.file);
         }
       }
 
-      if (imageDataUrls.length > 0) current.onImages?.(imageDataUrls);
+      if (imageFiles.length > 0) {
+        const uploads = await uploadFiles(imageFiles, current);
+        const imageUploads = uploads
+          .map((u): ImageAttachmentUpload | null => {
+            const dataUrl = imageDataUrls.get(u.file);
+            if (!dataUrl) return null;
+            return {
+              ...u,
+              dataUrl,
+              attachment: {
+                kind: 'image',
+                path: u.remotePath,
+                displayPath: u.displayPath,
+                name: u.file.name,
+                mimeType: u.file.type || 'image/png',
+                size: u.file.size,
+              },
+            };
+          })
+          .filter((u): u is ImageAttachmentUpload => u !== null);
+        if (imageUploads.length > 0) current.onImages?.(imageUploads);
+      }
       if (toUpload.length > 0) {
         const uploads = await uploadFiles(toUpload, current);
         if (uploads.length > 0) current.onUpload(uploads);

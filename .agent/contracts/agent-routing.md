@@ -27,9 +27,36 @@ Authoritative type names: `IncomingMessage` (`agent-server/index.ts`), `Outgoing
 
 Slash is NOT a control message of its own. A typed `/cmd args` flows as ordinary prompt text and the provider decides whether to interpret the prefix (`agent-config-flow#2`). The renderer only short-circuits unparametrised `OPTIONED_SLASHES` (`/model` `/effort` `/permission`) into an inline picker (`agent-config-flow#3`); everything else is sent as text.
 
-- renderer → main: `IPC.AGENT_SEND` with `{ tabId, prompt: "/help", images?, model?, effort?, permissionMode?, clientMsgId? }` (no `configEdit`).
-- main → agent-server: `sendLine({ type: 'send', turnId, provider, prompt: "/help", cwd, sessionId, model?, effort?, permissionMode?, clientMsgId?, appId, ... })`.
+- renderer → main: `IPC.AGENT_SEND` with `{ tabId, prompt: "/help", attachments?, images?, model?, effort?, permissionMode?, clientMsgId? }` (no `configEdit`). `attachments` is the provider-bound payload; `images` is a legacy / renderer-preview compatibility field.
+- main → agent-server: `sendLine({ type: 'send', turnId, provider, prompt: "/help", cwd, sessionId, attachments?, images?, model?, effort?, permissionMode?, clientMsgId?, appId, ... })`.
 - The provider calls `parseSlashPrefix(input.prompt)` inside `query()`; output comes back as a normal `fold_markdown` wire message (`errorMessage` on failure), not a distinct response type.
+
+## Uploaded attachments
+
+**Direction**: renderer → main → agent-server → provider.
+
+Agent image/file input uses the shared `AgentAttachment` contract in `src/shared/types.ts`.
+Images pasted/dropped in AgentView are uploaded through the same connector path as Terminal file
+uploads, landing under the target cwd's `.tmp/shelf/`; the resulting absolute target-host path is
+sent as an `AgentImageAttachment`. Renderer history can keep base64 data URLs for local preview,
+but provider-bound `attachments` must contain target-host readable paths.
+
+`AgentAttachment` fields:
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `kind` | `'image' \| 'file'` | Provider conversion usually filters `kind:'image'`; file attachments may be surfaced later per provider. |
+| `path` | `string` | Absolute path readable by the agent-server/provider process on the target host. |
+| `displayPath` | `string` | Cwd-relative or short-form path for renderer chips/history. |
+| `name` | `string` | Original/sanitized display filename. |
+| `mimeType` | `string?` | Required by `AgentImageAttachment`; providers that need inline bytes reuse it. |
+| `size` | `number?` | Byte size when known. |
+
+Provider mapping examples: Codex app-server maps `AgentImageAttachment` to
+`{ type:'localImage', path }`; ACP providers read `path` and produce ACP
+`{ type:'image', data:<base64>, mimeType }`; Claude reads `path` and produces its SDK base64 image
+block. `data:image/...` must not be sent to Codex app-server as `image.url`; legacy data URL images
+are fail-loud at that provider boundary.
 
 ## Config edit (model / effort / permission)
 

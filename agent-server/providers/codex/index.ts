@@ -261,7 +261,7 @@ export function createCodexBackend(deps: CodexDeps = {}): ServerBackend {
           { cwd: input.cwd, appId: input.appId, resumeId: input.restoreContext?.lastSdkSessionId },
           send,
         );
-        await driver.drivePromptTurn(conn!.agent, s, input.prompt, send, input.images);
+        await driver.drivePromptTurn(conn!.agent, s, input.prompt, send, input.images, input.attachments);
       } catch (err) {
         send({ type: 'error', error: `codex: ${(err as Error)?.message ?? String(err)}` });
       } finally {

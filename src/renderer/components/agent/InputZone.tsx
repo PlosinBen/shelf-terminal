@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import type { AgentPrefs, Connection } from '@shared/types';
+import type { AgentAttachment, AgentPrefs, Connection } from '@shared/types';
 import { parseSlashPrefix } from '@shared/slash-prefix';
 import { useStore, setChatStage } from '../../store';
 import {
@@ -10,9 +10,70 @@ import {
 } from '../../agentTabStore';
 import { emitAgent } from '../../events';
 import { useAttachmentPaste } from '../../hooks/useAttachmentPaste';
+import { backendAttachments, historyImagePreviews, type PendingImageAttachment } from '../../utils/agent-send-attachments';
 import { OPTIONED_SLASHES, useSlashCommands, type SlashCommand } from './slash-commands';
 import { SlashMenu } from './SlashMenu';
 import { AttachmentChips } from './AttachmentChips';
+
+function imageExtFromMime(mimeType: string): string {
+  switch (mimeType.toLowerCase()) {
+    case 'image/jpeg':
+      return 'jpg';
+    case 'image/png':
+      return 'png';
+    case 'image/gif':
+      return 'gif';
+    case 'image/webp':
+      return 'webp';
+    default:
+      return 'png';
+  }
+}
+
+async function stageImagesForSend(
+  dataUrls: string[],
+  connection: Connection,
+  cwd: string,
+): Promise<PendingImageAttachment[]> {
+  const staged: PendingImageAttachment[] = [];
+  const failures: string[] = [];
+  const cwdPrefix = cwd.replace(/\/+$/, '') + '/';
+
+  for (const [i, dataUrl] of dataUrls.entries()) {
+    try {
+      const response = await fetch(dataUrl);
+      const buffer = await response.arrayBuffer();
+      const mimeType = response.headers.get('content-type') || /^data:([^;]+);base64,/i.exec(dataUrl)?.[1] || 'image/png';
+      const name = `note-image-${i + 1}.${imageExtFromMime(mimeType)}`;
+      const result = await window.shelfApi.connector.uploadFile(connection, cwd, name, buffer);
+      if (!result.ok) {
+        failures.push(`${name}: ${result.reason}`);
+        continue;
+      }
+      const displayPath = result.remotePath.startsWith(cwdPrefix)
+        ? result.remotePath.slice(cwdPrefix.length)
+        : result.remotePath;
+      staged.push({
+        previewUrl: dataUrl,
+        attachment: {
+          kind: 'image',
+          path: result.remotePath,
+          displayPath,
+          name,
+          mimeType,
+          size: buffer.byteLength,
+        },
+      });
+    } catch (err: any) {
+      failures.push(`image ${i + 1}: ${err?.message ?? String(err)}`);
+    }
+  }
+
+  if (failures.length > 0) {
+    void window.shelfApi.dialog.warn('Upload failed', failures.join('\n'));
+  }
+  return staged;
+}
 
 interface Props {
   tabId: string;
@@ -77,8 +138,9 @@ export function InputZone({ tabId, projectId, cwd, connection, visible, rootRef,
   const [showSlashMenu, setShowSlashMenu] = useState(false);
   const [slashFilter, setSlashFilter] = useState('');
   const [slashSelection, setSlashSelection] = useState(0);
-  const [pendingFiles, setPendingFiles] = useState<Array<{ path: string; displayPath: string }>>([]);
-  const [pendingImages, setPendingImages] = useState<string[]>([]);
+  const [pendingFiles, setPendingFiles] = useState<AgentAttachment[]>([]);
+  const [pendingImages, setPendingImages] = useState<PendingImageAttachment[]>([]);
+  const [stagingImages, setStagingImages] = useState(false);
   const [escPending, setEscPending] = useState(false);
   const escPendingRef = useRef(false);
   const escTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -104,19 +166,27 @@ export function InputZone({ tabId, projectId, cwd, connection, visible, rootRef,
     onUpload: (uploads) => {
       setPendingFiles((prev) => [
         ...prev,
-        ...uploads.map((u) => ({ path: u.remotePath, displayPath: u.displayPath })),
+        ...uploads.map((u) => ({
+          kind: 'file' as const,
+          path: u.remotePath,
+          displayPath: u.displayPath,
+          name: u.file.name,
+          mimeType: u.file.type || undefined,
+          size: u.file.size,
+        })),
       ]);
     },
-    onImages: (urls) => {
+    onImages: (images) => {
       // No vision pre-gate: always accept images and let the agent report an
       // error if the model can't take them. A `vision` capability flag is hard
       // to keep accurate per model/provider, and pre-blocking on a stale/absent
       // flag wrongly drops images a capable model would accept.
-      const accepted = urls.filter((u) => u.length < 20 * 1024 * 1024);
-      if (accepted.length < urls.length) {
-        window.shelfApi.dialog.warn('Image too large', 'Images over ~20MB were skipped.');
+      if (images.length > 0) {
+        setPendingImages((prev) => [
+          ...prev,
+          ...images.map((image) => ({ previewUrl: image.dataUrl, attachment: image.attachment })),
+        ]);
       }
-      if (accepted.length > 0) setPendingImages((prev) => [...prev, ...accepted]);
     },
   });
 
@@ -132,10 +202,17 @@ export function InputZone({ tabId, projectId, cwd, connection, visible, rootRef,
       const trimmed = prev.trimEnd();
       return trimmed ? `${trimmed}\n\n${incoming.text}` : incoming.text;
     });
-    setPendingImages((prev) => [...prev, ...incoming.images]);
+    if (incoming.images.length > 0) {
+      setStagingImages(true);
+      void stageImagesForSend(incoming.images, connection, cwd)
+        .then((images) => {
+          if (images.length > 0) setPendingImages((prev) => [...prev, ...images]);
+        })
+        .finally(() => setStagingImages(false));
+    }
     setChatStage(null);
     requestAnimationFrame(() => inputRef.current?.focus());
-  }, [visible, chatStage, projectId]);
+  }, [visible, chatStage, projectId, connection, cwd]);
 
   // ESC pending reset when the agent goes fully idle (no running turn AND no
   // queued sends) — clears any half-armed double-tap so the next ESC isn't
@@ -165,6 +242,7 @@ export function InputZone({ tabId, projectId, cwd, connection, visible, rootRef,
     // Locked until init 'ready' — don't emit, don't queue. Belt-and-suspenders:
     // the textarea is also disabled when !initReady, so Enter can't reach here.
     if (!initReady) return;
+    if (stagingImages) return;
 
     // Inline picker shortcut: `/model` / `/effort` / `/permission` without
     // args opens a renderer-side picker (options come from capabilities,
@@ -187,7 +265,8 @@ export function InputZone({ tabId, projectId, cwd, connection, visible, rootRef,
     // through agent.send as normal text — provider parses + dispatches
     // internally; output arrives as fold_markdown messages.
     const files = pendingFiles;
-    const images = pendingImages.length > 0 ? pendingImages : undefined;
+    const images = historyImagePreviews(pendingImages);
+    const attachments = backendAttachments(files, pendingImages);
     setInput('');
     setPendingFiles([]);
     setPendingImages([]);
@@ -197,15 +276,14 @@ export function InputZone({ tabId, projectId, cwd, connection, visible, rootRef,
     // client-side queueing or turn-boundary guessing. agent-server owns the
     // queue; it echoes the clientMsgId in the queue snapshot. The optimistic
     // pending chip (enqueuePendingSend) shows instantly; the snapshot promotes
-    // it into the timeline when its turn runs. Attachments (files) ride on the
-    // chip for display only — agent:send carries text + images (matches the
-    // prior behaviour: files were never forwarded to the agent).
+    // it into the timeline when its turn runs. Preview images stay renderer-local
+    // for history; provider-bound payload uses uploaded attachments.
     const clientMsgId = crypto.randomUUID();
     enqueuePendingSend(tabId, clientMsgId, text, images, files.length > 0 ? files : undefined);
     emitAgent('agent:send', {
       tabId,
       text,
-      images,
+      attachments,
       prefs: {
         model: intent?.model,
         effort: intent?.effort,
@@ -213,7 +291,7 @@ export function InputZone({ tabId, projectId, cwd, connection, visible, rootRef,
       },
       clientMsgId,
     });
-  }, [tabId, input, pendingFiles, pendingImages, intent, initReady]);
+  }, [tabId, input, pendingFiles, pendingImages, stagingImages, intent, initReady]);
 
   const handleStop = useCallback(() => {
     // ESC-twice (stop) means "abort this turn AND drop everything I queued up
@@ -302,7 +380,7 @@ export function InputZone({ tabId, projectId, cwd, connection, visible, rootRef,
       )}
       {(pendingFiles.length > 0 || pendingImages.length > 0) && (
         <AttachmentChips
-          images={pendingImages}
+          images={pendingImages.map((image) => image.previewUrl)}
           files={pendingFiles}
           onRemoveImage={(i) => setPendingImages((prev) => prev.filter((_, j) => j !== i))}
           onRemoveFile={(path) => setPendingFiles((prev) => prev.filter((p) => p.path !== path))}

@@ -1,6 +1,20 @@
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
+import type { AgentAttachment } from '@shared/types';
+
+export interface UploadedImageData {
+  mimeType: string;
+  data: string;
+}
+
+export async function readUploadedImageAttachments(attachments: AgentAttachment[] | undefined): Promise<UploadedImageData[]> {
+  const images = (attachments ?? []).filter((attachment) => attachment.kind === 'image');
+  return Promise.all(images.map(async (attachment) => ({
+    mimeType: attachment.mimeType || 'image/png',
+    data: (await fs.promises.readFile(attachment.path)).toString('base64'),
+  })));
+}
 
 /**
  * Strip a leading `cwd/` prefix from an absolute path so the renderer shows

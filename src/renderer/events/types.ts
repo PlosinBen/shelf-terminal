@@ -1,4 +1,4 @@
-import type { AgentInitStatus, AgentLoginPrompt, AgentLoginResult, AgentPrefs, AgentQueueItem, Connection, TaskEvent } from '../../shared/types';
+import type { AgentAttachment, AgentInitStatus, AgentLoginPrompt, AgentLoginResult, AgentPrefs, AgentQueueItem, Connection, TaskEvent } from '../../shared/types';
 import { on, emit } from './bus';
 
 // Typed agent event vocabulary. Names prefixed 'agent:' to coexist with
@@ -43,6 +43,7 @@ export interface AgentEventMap {
     tabId: string;
     text: string;
     images?: string[];
+    attachments?: AgentAttachment[];
     prefs?: AgentPrefs;
     /** Structured config edit (picker / status-bar). When set, text is empty
      *  and no user echo is written — the provider applies it + emits a divider. */

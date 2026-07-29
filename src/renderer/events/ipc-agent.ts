@@ -64,8 +64,8 @@ export function bindAgentIPCGroup(): () => void {
   const offInitEvt = onAgent('agent:init', ({ tabId, cwd, connection, provider, sessionId, opts }) => {
     api.init(tabId, cwd, connection, provider, sessionId, opts);
   });
-  const offSendEvt = onAgent('agent:send', ({ tabId, text, images, prefs, configEdit, clientMsgId }) => {
-    api.send(tabId, text, images, { ...prefs, configEdit, clientMsgId });
+  const offSendEvt = onAgent('agent:send', ({ tabId, text, images, attachments, prefs, configEdit, clientMsgId }) => {
+    api.send(tabId, text, images, { ...prefs, attachments, configEdit, clientMsgId });
   });
   const offStopEvt = onAgent('agent:stop', ({ tabId }) => {
     api.stop(tabId);

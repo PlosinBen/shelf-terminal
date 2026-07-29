@@ -1,4 +1,4 @@
-import type { AgentMessage, AuthMethod, ProviderModel } from '@shared/types';
+import type { AgentAttachment, AgentMessage, AuthMethod, ProviderModel } from '@shared/types';
 
 export type { AgentMessage, AgentMessageType } from '@shared/types';
 
@@ -95,6 +95,7 @@ export interface AgentQueryOptions {
   permissionMode?: string;
   canUseTool?: PermissionCallback;
   images?: string[];
+  attachments?: AgentAttachment[];
   /**
    * Per-send pref values. Renderer is the authoritative owner of these
    * (savedPrefs in projectConfig); main passes them straight through from

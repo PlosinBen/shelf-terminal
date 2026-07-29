@@ -20,8 +20,27 @@ export interface AgentPrefs {
 }
 
 /**
- * A file attachment on a user message. `path` is the canonical / absolute
- * path; `displayPath` is the basename or short-form for chip rendering.
+ * An attachment uploaded to the target host for an agent turn. `path` is the
+ * canonical / absolute path readable by the agent-server/provider process;
+ * `displayPath` is the basename or cwd-relative short-form for chip rendering.
+ */
+export interface AgentAttachment {
+  kind: 'file' | 'image';
+  path: string;
+  displayPath: string;
+  name: string;
+  mimeType?: string;
+  size?: number;
+}
+
+export interface AgentImageAttachment extends AgentAttachment {
+  kind: 'image';
+  mimeType: string;
+}
+
+/**
+ * A file attachment shown on a user message. Kept as the renderer history
+ * shape; backend send payloads use AgentAttachment.
  */
 export interface AgentFile {
   path: string;
