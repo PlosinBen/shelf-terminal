@@ -89,3 +89,11 @@ related:
 **Reason:** Older agents and E2E smoke paths may still call the single-note form, while the New Worktree dialog and create-time migration already support selecting and moving several feature notes as one batch. Normalizing at the bridge boundary keeps renderer code on the current payload shape and keeps the proposal tool side-effect free.
 
 **Do not change casually because:** Removing `note` would break existing callers, and moving merge/dedup logic downstream would reintroduce multiple prefill shapes in the renderer. Expanding the fake shorthand would add another mini-parser that is not part of the model-facing contract.
+
+## worktree#11 — Worktree proposal tool calls are visible in Agent View  ·  [Decision]
+
+**Decision:** For `propose_worktree_create` and `propose_worktree_finish`, main emits a session-level Agent View `fold_code` audit card when the Shelf app-tool bridge receives the request. The card shows the model-facing tool name and raw args, then upserts with the app-tool result. Create result includes normalized `notePaths`.
+
+**Reason:** Proposal dialogs are user-committed UI gates, and failures or incorrect prefills depend on what the agent actually sent versus what main normalized. Showing this in the timeline makes debugging possible without log spelunking, while scoping to worktree proposal tools avoids exposing noisy or sensitive app-tool args.
+
+**Do not change casually because:** Provider-native tool cards do not consistently carry args across Claude, Copilot, and Codex. Broad app-tool auditing would risk leaking `browser_fetch` headers/body or long skill contents.

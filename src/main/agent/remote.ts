@@ -19,6 +19,7 @@ import { syncMcpForConnection } from '../mcp-remote';
 import { transportPutDir, composeRemotePath } from '../connector/transport';
 import { shelfPlacement, ShelfFileTypeSkill } from '@shared/shelf-paths';
 import { handleAppTool } from './app-tool';
+import { buildWorktreeAppToolAuditEvent } from './app-tool-audit';
 import {
   detectTargetFromProbe,
   targetId,
@@ -1173,7 +1174,15 @@ function wrapProcess(
         const requestId = parsed.requestId;
         const op = typeof parsed.op === 'string' ? parsed.op : '';
         const args = (parsed.args && typeof parsed.args === 'object') ? parsed.args : {};
+        const auditStarted = typeof requestId === 'string'
+          ? buildWorktreeAppToolAuditEvent({ requestId, op, args })
+          : null;
+        if (auditStarted) onSessionEvent?.(auditStarted);
         void handleAppTool(op, args, { projectId }).then((result) => {
+          if (typeof requestId === 'string') {
+            const auditCompleted = buildWorktreeAppToolAuditEvent({ requestId, op, args, result });
+            if (auditCompleted) onSessionEvent?.(auditCompleted);
+          }
           try {
             proc.stdin?.write(JSON.stringify({ type: 'app_tool_result', requestId, ...result }) + '\n');
           } catch { /* stdin closed — bridge tool will time out / get a dead channel */ }

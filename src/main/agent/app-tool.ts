@@ -233,7 +233,12 @@ const REGISTRY: Record<string, AppToolDef> = {
       const branch = typeof args.branch === 'string' && args.branch.trim() ? args.branch.trim() : undefined;
       const notePaths = normalizeProposedNotePaths(args);
       win.webContents.send(IPC.WORKTREE_PROPOSE_CREATE, { projectId, ...(branch ? { branch } : {}), notePaths });
-      return { opened: true, message: 'Opened the New Worktree dialog. The user must review and press Create.' };
+      return {
+        opened: true,
+        ...(branch ? { branch } : {}),
+        notePaths,
+        message: 'Opened the New Worktree dialog. The user must review and press Create.',
+      };
     },
   },
   'worktree.propose_finish': {

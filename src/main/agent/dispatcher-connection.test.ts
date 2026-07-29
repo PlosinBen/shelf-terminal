@@ -76,6 +76,37 @@ describe('dispatcher-connection (per-host demux by sid)', () => {
     expect(f.parsedWritten()).toContainEqual({ type: 'app_tool_result', sid: 's1', requestId: 'r1', ok: true, data: 'R' });
   });
 
+  it('emits an Agent View audit card for worktree app_tool args and result', async () => {
+    const events: any[] = [];
+    const { f, conn } = make();
+    conn.openSession('s1', undefined, { projectId: 'proj-1', onSessionEvent: (ev) => events.push(ev) });
+
+    f.emit({
+      type: 'app_tool',
+      sid: 's1',
+      requestId: 'r1',
+      op: 'worktree.propose_create',
+      args: { branch: 'feature/x', note: '.agent/features/x.md' },
+    });
+
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      type: 'message',
+      payload: {
+        msgId: 'app-tool-r1',
+        type: 'fold_code',
+        label: 'Shelf tool',
+        subtitle: 'propose_worktree_create',
+      },
+    });
+    expect(events[0].payload.body.content).toContain('"note": ".agent/features/x.md"');
+
+    await Promise.resolve(); await Promise.resolve();
+    expect(events).toHaveLength(2);
+    expect(events[1].payload.msgId).toBe('app-tool-r1');
+    expect(events[1].payload.body.content).toContain('"result":');
+  });
+
   it('marks a sid dead only on a TERMINAL session_down (willReconnect:false)', () => {
     const h1: any[] = []; const h2: any[] = [];
     const { f, conn } = make();

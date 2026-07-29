@@ -16,6 +16,7 @@ import type { ConnectionHealth } from '@shared/types';
 import type { AgentEvent } from './types';
 import { ConnectionHealthTracker, DEFAULT_HEALTH_THRESHOLDS } from './connection-health';
 import { createTurnDispatcher, type PermissionHandler } from './turn-dispatcher';
+import { buildWorktreeAppToolAuditEvent } from './app-tool-audit';
 
 /** The subset of a spawned child process this module drives (injectable for tests). */
 export interface DispatcherProc {
@@ -172,7 +173,15 @@ export function createDispatcherConnection(deps: DispatcherConnectionDeps): Disp
       const requestId = parsed.requestId;
       const op = typeof parsed.op === 'string' ? parsed.op : '';
       const args = (parsed.args && typeof parsed.args === 'object') ? parsed.args : {};
+      const auditStarted = typeof requestId === 'string'
+        ? buildWorktreeAppToolAuditEvent({ requestId, op, args })
+        : null;
+      if (auditStarted) ch.sinks.onSessionEvent?.(auditStarted);
       void deps.handleAppTool(op, args, { projectId: ch.sinks.projectId }).then((result) => {
+        if (typeof requestId === 'string') {
+          const auditCompleted = buildWorktreeAppToolAuditEvent({ requestId, op, args, result });
+          if (auditCompleted) ch.sinks.onSessionEvent?.(auditCompleted);
+        }
         writeToProc({ type: 'app_tool_result', sid, requestId, ...result });
       });
       return;

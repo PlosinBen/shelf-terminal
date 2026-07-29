@@ -197,6 +197,17 @@ test.describe('user-initiated worktree create', () => {
     await expect(
       dialog.locator('.worktree-note-row', { hasText: 'old.md' }).locator('input[type="checkbox"]'),
     ).not.toBeChecked();
+    await dialog.locator('.settings-close').click();
+    await expect(dialog).not.toBeVisible({ timeout: 5_000 });
+
+    const auditCard = page
+      .locator('.agent-msg-fold:has(.fold-label:has-text("Shelf tool")):visible')
+      .last();
+    await expect(auditCard).toBeVisible({ timeout: 5_000 });
+    await expect(auditCard.locator('.fold-subtitle')).toHaveText('propose_worktree_create');
+    await auditCard.locator('.fold-header').click();
+    await expect(auditCard.locator('.fold-body-code')).toContainText('"note": ".agent/features/demo.md"');
+    await expect(auditCard.locator('.fold-body-code')).toContainText('"notePaths": [');
     await expect(page.locator('.sidebar-item.worktree-child')).toHaveCount(0);
   });
 
