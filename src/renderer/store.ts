@@ -662,3 +662,38 @@ export function clearUnread(projectIndex: number, tabIndex: number) {
   projects = projects.map((p, i) => (i === projectIndex ? { ...p, tabs } : p));
   updateSnapshot();
 }
+
+export function __resetStoreForTests() {
+  projects = [];
+  activeProjectId = null;
+  sidebarVisible = true;
+  settingsVisible = false;
+  searchVisible = false;
+  commandPickerVisible = false;
+  devToolsVisible = false;
+  notesVisible = false;
+  skillsVisible = false;
+  mcpVisible = false;
+  editingProjectId = null;
+  settings = { ...DEFAULT_SETTINGS };
+  updateStatus = { state: 'idle' };
+  pmVisible = false;
+  awayMode = false;
+  pmActive = false;
+  quickNoteVisible = false;
+  nextTabCounter = 0;
+  layoutGeneration = 0;
+  connectionHealth = {};
+  projectNotice = null;
+  projectNoticeCounter = 0;
+  chatStage = null;
+  if (syncTimer) {
+    clearTimeout(syncTimer);
+    syncTimer = null;
+  }
+  updateSnapshot();
+}
+
+export function __getSnapshotForTests() {
+  return snapshotRef;
+}

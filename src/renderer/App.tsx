@@ -23,7 +23,7 @@ import { SkillsView } from './components/SkillsView';
 import { McpView } from './components/McpView';
 import { QuickNoteOverlay } from './components/QuickNoteOverlay';
 import { useKeybindings } from './hooks/useKeybindings';
-import { useStore, setProjects, setSettings, setUpdateStatus, addProject, addTab, setActiveTab, removeTab, removeProject, setSplitTab, clearUnread, setInvalidProjects, setPmActive, setConnectionHealth, setActiveProject, setActiveProjectById, getProjectById, getProjectIndexById, showProjectNotice } from './store';
+import { useStore, setProjects, setSettings, setUpdateStatus, addProject, addTab, setActiveTab, removeTab, removeProject, setSplitTab, clearUnread, setInvalidProjects, setPmActive, setConnectionHealth, setActiveProject, setActiveProjectById, getProjectById, getProjectIndexById, listStableProjectViews, showProjectNotice } from './store';
 import type { ConnectionHealth } from '@shared/types';
 import type { ProjectConfig } from '@shared/types';
 import { disposeTerminal } from './components/TerminalView';
@@ -393,6 +393,7 @@ export function App() {
   }, [theme]);
 
   const activeProject = projects[activeProjectIndex] ?? null;
+  const stableProjectViews = listStableProjectViews();
 
   return (
     <div className="app">
@@ -422,8 +423,8 @@ export function App() {
             </div>
           )}
           <div className={activeProject?.splitTabId ? 'split-view' : 'terminal-fill'}>
-            {projects.map((proj, pi) => {
-                const isActiveProject = pi === activeProjectIndex;
+            {stableProjectViews.map((proj) => {
+                const isActiveProject = proj.config.id === activeProjectId;
                 const isSplit = isActiveProject && proj.splitTabId !== null;
 
                 return proj.tabs.map((tab, ti) => {
