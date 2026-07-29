@@ -1,5 +1,6 @@
 import type { TabType } from '@shared/types';
 import { disposeTerminal } from './components/TerminalView';
+import { removeTab as removeAgentTabState } from './agentTabStore';
 
 /** Minimal tab shape needed to release its backend/OS resources. */
 export interface TeardownTab {
@@ -17,13 +18,14 @@ export interface TeardownTab {
  * project with agent tabs left the agent-server exec process (and its provider
  * CLI child) alive forever.
  *
- * - `agent`  → destroy the backend session (→ close_session → exec is killed).
+ * - `agent`  → destroy the backend session and remove renderer tab state.
  * - `terminal` → kill the PTY + dispose the xterm instance.
  * - `web`    → nothing: the <webview> tears down on unmount.
  */
 export function teardownTab(tab: TeardownTab): void {
   if (tab.type === 'agent') {
     window.shelfApi.agent.destroy(tab.id);
+    removeAgentTabState(tab.id);
   } else if (tab.type === 'terminal') {
     window.shelfApi.pty.kill(tab.id);
     disposeTerminal(tab.id);

@@ -10,7 +10,6 @@ import { ConnectionOverlay } from './agent/ConnectionOverlay';
 import { AuthPane } from './agent/AuthPane';
 import {
   initTab as initTabStore,
-  removeTab as removeTabStore,
   setCapabilities as setCapabilitiesStore,
   setInitStatus as setInitStatusStore,
   useAgentTab,
@@ -34,7 +33,8 @@ interface Props {
  * sub-components can't reasonably own:
  *
  * 1. **Per-tab lifecycle** — sessionId allocation (lazy create +
- *    persist into projectConfig), initTab/removeTab, emit init/destroy.
+ *    persist into projectConfig), initTab, emit init/destroy. Store removal
+ *    belongs to actual tab teardown, not React component unmount.
  * 2. **Capability-driven persist** — when the provider reports
  *    capabilities (after any config-edit turn), commit the backend's
  *    current* into projectConfig.agentPrefs (needs projectId;
@@ -102,7 +102,6 @@ export function AgentView({ tabId, cwd, connection, provider, projectId, visible
     emitAgent('agent:init', { tabId, cwd, connection, provider, sessionId, opts: { intent: savedPrefs, projectId } });
     return () => {
       debugLog('diag:agentview', `unmount tab=${formatTabLogId(tabId)} provider=${provider}`);
-      removeTabStore(tabId);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tabId]);
