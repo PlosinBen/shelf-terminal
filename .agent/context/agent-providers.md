@@ -386,7 +386,9 @@ SDK 0.3.159 **並存**兩種 compact 完成訊號:`status` 形狀(`subtype:'stat
 
 **Implementation note：** `providers/codex/` 封裝 app-server client/translator/config/auth/account status。Packaged與 remote runtime 只保留 `@openai/codex` CLI launcher、target native package與 agent-server bundle；shared ACP toolkit仍為 Copilot保留。
 
-**Open follow-ups：** MCP elicitation form 尚只 fail-loud cancel；`/ps`、`/stop`、`/clean` 等 background-task slash 仍因 app-server schema 缺穩定 route 而 explicit unsupported；create/delete file changes 若 app-server 只給 raw file content 而非 unified diff，UI 仍會 fallback markdown；reasoning item 常為空，暫保留 bounded `reasoning-notification` debug log觀察。
+**Current app-server surface：** final provider behavior should stay on the app-server routes already proven/implemented: `initialize` / `model/list` for capabilities, `thread/start` / `thread/resume` / `turn/start` / `turn/interrupt` for session and turn lifecycle, `item/agentMessage/delta` and item notifications for timeline primitives, `thread/tokenUsage/updated` for session ctx, `thread/compact/start` for `/compact`, `mcpServerStatus/list` for `/mcp`, `skills/list` for `/skills`, and `account/rateLimits/read` / `account/rateLimits/updated` for quota buckets. `account/usage/read.summary.lifetimeTokens` is account-level activity, not session context pressure; do not label or position it as `ctx`.
+
+**Open follow-ups：** MCP elicitation form 尚只 fail-loud cancel；`/ps`、`/stop`、`/clean` 等 background-task slash 仍因 app-server schema 缺穩定 route 而 explicit unsupported；create/delete file changes 若 app-server 只給 raw file content 而非 unified diff，UI 仍會 fallback markdown；reasoning item 常為空，暫保留 bounded `reasoning-notification` debug log觀察。Skill root 設計若要改，不要搬回舊 SDK 的 `$HOME/.agents/skills` 假設；先以 current app-server `skills/list` / `skills/extraRoots/set` 實測為準。
 
 **Do not change casually because：** 不要把 TypeScript SDK 加回 production path 當 fallback；那會重建 hybrid transport 問題。若 app-server 有缺口，應在 app-server request/notification bridge 補齊或明確 unsupported，而不是讓同一 provider 在 SDK/app-server 間切換。
 
