@@ -39,7 +39,7 @@ export function CommandPicker() {
   const listRef = useRef<HTMLDivElement>(null);
 
   const project = projects[activeProjectIndex];
-  const commands: QuickCommand[] = project?.config.quickCommands ?? [];
+  const commands: readonly QuickCommand[] = project?.config.quickCommands ?? [];
   const filtered = commands.filter(
     (c) =>
       c.label.toLowerCase().includes(filter.toLowerCase()) ||

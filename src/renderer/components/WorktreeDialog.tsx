@@ -5,7 +5,7 @@ import { enqueuePendingSend } from '../agentTabStore';
 import { debugLog } from '../debugLog';
 import { buildWorktreeChildConfig } from '../worktree-child-config';
 import { normalizeWorktreePrefillNotePaths } from '../worktree-prefill';
-import type { AgentProvider, FeatureNoteInfo } from '@shared/types';
+import type { AgentProvider, FeatureNoteInfo, ProjectConfig } from '@shared/types';
 import { agentProviderEntries } from '@shared/agent-providers';
 
 function featureNoteFilename(path: string): string {
@@ -185,7 +185,8 @@ export function WorktreeDialog() {
     const childProjectId = `wt-${Date.now()}`;
     try {
       await window.shelfApi.project.copySecrets(proj.config.id, childProjectId);
-      emit(Events.ADD_PROJECT, buildWorktreeChildConfig(proj.config, {
+      const parentConfig: ProjectConfig = structuredClone(proj.config) as ProjectConfig;
+      emit(Events.ADD_PROJECT, buildWorktreeChildConfig(parentConfig, {
         id: childProjectId,
         cwd: result.path,
         worktreeBranch: branch,

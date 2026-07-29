@@ -37,8 +37,8 @@ export function ProjectEditPanel() {
     if (project) {
       setName(project.config.name);
       setInitScript(project.config.initScript || '');
-      setDefaultTabs(project.config.defaultTabs || [{ name: 'Terminal' }]);
-      setQuickCommands(project.config.quickCommands || []);
+      setDefaultTabs(project.config.defaultTabs?.map((tab) => ({ ...tab })) || [{ name: 'Terminal' }]);
+      setQuickCommands(project.config.quickCommands?.map((cmd) => ({ ...cmd })) || []);
       setEnvRows(Object.entries(project.config.envPlain || {}).map(([key, value]) => ({ key, value })));
       setNewSecretRows([]);
       setClearedSecrets([]);

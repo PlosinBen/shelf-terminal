@@ -23,7 +23,7 @@ import { SkillsView } from './components/SkillsView';
 import { McpView } from './components/McpView';
 import { QuickNoteOverlay } from './components/QuickNoteOverlay';
 import { useKeybindings } from './hooks/useKeybindings';
-import { useStore, setProjects, setSettings, setUpdateStatus, addProject, addTab, setActiveTab, removeTab, removeProject, setSplitTab, clearUnread, setInvalidProjects, setPmActive, setConnectionHealth, setActiveProject, setActiveProjectById, getProjectById, getProjectIndexById, listStableProjectViews, showProjectNotice } from './store';
+import { useStore, setProjects, setSettings, setUpdateStatus, addProject, addTab, setActiveTab, removeTab, removeProject, setSplitTab, clearUnread, setInvalidProjects, setPmActive, setConnectionHealth, setActiveProject, setActiveProjectById, getProjectById, getProjectIndexById, getProjectConfigs, listStableProjectViews, showProjectNotice } from './store';
 import type { ConnectionHealth } from '@shared/types';
 import type { ProjectConfig } from '@shared/types';
 import { disposeTerminal } from './components/TerminalView';
@@ -140,7 +140,7 @@ export function App() {
         proj.tabs.forEach(teardownTab);
       }
       removeProject(projectIndex);
-      const configs = projects.filter((p) => p.config.id !== projectId).map((p) => p.config);
+      const configs = getProjectConfigs();
       window.shelfApi.project.save(configs);
     });
 
@@ -299,7 +299,7 @@ export function App() {
 
     const offAddProject = on(Events.ADD_PROJECT, async (config: ProjectConfig) => {
       addProject(config);
-      const configs = [...projects.map((p) => p.config), config];
+      const configs = getProjectConfigs();
       await window.shelfApi.project.save(configs);
     });
 

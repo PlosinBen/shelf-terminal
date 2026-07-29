@@ -32,6 +32,40 @@ export interface ProjectRuntime {
   folderInvalid: boolean;
 }
 
+export type ReadonlyDeep<T> =
+  T extends (...args: never[]) => unknown ? T :
+  T extends readonly (infer U)[] ? readonly ReadonlyDeep<U>[] :
+  T extends object ? { readonly [K in keyof T]: ReadonlyDeep<T[K]> } :
+  T;
+
+export type ReadonlyProjectRuntime = ReadonlyDeep<ProjectRuntime>;
+
+interface StoreSnapshot {
+  projects: readonly ReadonlyProjectRuntime[];
+  activeProjectIndex: number;
+  activeProjectId: string | null;
+  sidebarVisible: boolean;
+  settingsVisible: boolean;
+  searchVisible: boolean;
+  commandPickerVisible: boolean;
+  devToolsVisible: boolean;
+  notesVisible: boolean;
+  skillsVisible: boolean;
+  mcpVisible: boolean;
+  editingProjectIndex: number | null;
+  editingProjectId: string | null;
+  settings: AppSettings;
+  updateStatus: UpdateStatus;
+  pmVisible: boolean;
+  awayMode: boolean;
+  pmActive: boolean;
+  quickNoteVisible: boolean;
+  layoutGeneration: number;
+  chatStage: ChatStage | null;
+  connectionHealth: Record<string, ConnectionHealth>;
+  projectNotice: ProjectNotice | null;
+}
+
 // ── Global store (simple event emitter pattern) ──
 
 let projects: ProjectRuntime[] = [];
@@ -95,10 +129,10 @@ function reconcileActiveProject(preferredIndex = 0) {
   activeProjectId = projects[preferredIndex]?.config.id ?? projects[projects.length - 1]?.config.id ?? null;
 }
 
-function getSnapshot() {
+function getSnapshot(): StoreSnapshot {
   const activeProjectIndex = projectIndexById(activeProjectId);
   const editingProjectIndex = projectIndexById(editingProjectId);
-  return { projects, activeProjectIndex, activeProjectId, sidebarVisible, settingsVisible, searchVisible, commandPickerVisible, devToolsVisible, notesVisible, skillsVisible, mcpVisible, editingProjectIndex: editingProjectIndex === -1 ? null : editingProjectIndex, editingProjectId, settings, updateStatus, pmVisible, awayMode, pmActive, quickNoteVisible, layoutGeneration, chatStage, connectionHealth, projectNotice };
+  return { projects: projects as readonly ReadonlyProjectRuntime[], activeProjectIndex, activeProjectId, sidebarVisible, settingsVisible, searchVisible, commandPickerVisible, devToolsVisible, notesVisible, skillsVisible, mcpVisible, editingProjectIndex: editingProjectIndex === -1 ? null : editingProjectIndex, editingProjectId, settings, updateStatus, pmVisible, awayMode, pmActive, quickNoteVisible, layoutGeneration, chatStage, connectionHealth, projectNotice };
 }
 
 let snapshotRef = getSnapshot();
@@ -381,10 +415,10 @@ export function reorderTabs(projectIndex: number, fromIndex: number, toIndex: nu
 }
 
 export function getProjectConfigs(): ProjectConfig[] {
-  return projects.map((p) => p.config);
+  return projects.map((p) => structuredClone(p.config));
 }
 
-export function listStableProjectViews(): readonly ProjectRuntime[] {
+export function listStableProjectViews(): readonly ReadonlyProjectRuntime[] {
   return [...projects].sort((a, b) => a.config.id.localeCompare(b.config.id));
 }
 
@@ -628,7 +662,7 @@ export function clearConnectionHealth(tabId: string) {
  *  is being monitored yet. Degradation order: dead > unstable > slow > healthy. */
 export const HEALTH_RANK: Record<ConnectionHealthState, number> = { healthy: 0, slow: 1, unstable: 2, dead: 3 };
 export function projectHealth(
-  project: ProjectRuntime,
+  project: ReadonlyProjectRuntime,
   health: Record<string, ConnectionHealth>,
 ): ConnectionHealth | null {
   let worst: ConnectionHealth | null = null;
