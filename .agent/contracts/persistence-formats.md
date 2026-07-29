@@ -14,7 +14,7 @@ The on-disk artifacts Shelf persists and their layout. Two roots: `<userData>` (
 ## `<userData>/projects.json`
 
 - **Path**: `<userData>/projects.json`
-- **Format**: JSON array, pretty-printed (2-space). Each element is a `ProjectConfig` (`src/shared/types.ts`) — `{ id, name, cwd, connection, maxTabs, … }` including optional `agentSessionIds` / `agentPrefs` keyed by `AgentProvider`.
+- **Format**: JSON array, pretty-printed (2-space). Each element is a raw `ProjectConfig` (`src/shared/types.ts`) — `{ id, name, cwd, connection, maxTabs, … }`. Persisted `defaultAgentProvider` is an optional string and `agentSessionIds` / `agentPrefs` are string-keyed records so unknown old/future provider ids remain representable; runtime consumers must resolve them through the live provider registry.
 - **Source of truth**: `src/main/project-store.ts` (`loadProjects` / `saveProjects`, type `ProjectConfig[]`). Missing file → `[]`. Empty-write guard: overwriting a non-empty file with `[]` first copies the original to `projects.json.backup.<YYYYMMDD-HHMMSS>`.
 
 ## `<userData>/settings.json`

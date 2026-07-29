@@ -158,19 +158,15 @@ SDK 0.3.159 **並存**兩種 compact 完成訊號:`status` 形狀(`subtype:'stat
 
 **Related**：`context/project-env`（secret env 儲存/注入）、`agent-providers#15`（device-scoped auth / token 正交）、`agent-server/providers/copilot/helpers.ts`（`copilotAcpEnv` 帶 env）。
 
-## agent-providers#13 — Copilot + Codex 走 ACP（`copilot --acp` / codex-acp）+ 共用 `acp/` toolkit；ACP 是「有官方 ACP 的 provider」的基準  ·  [Decision]
+## agent-providers#13 — ACP toolkit 服務官方 ACP provider；目前 production consumer 是 Copilot  ·  [Decision]
 
-**Decision**：非-Claude 的 agent provider 走 **Agent Client Protocol (ACP)** — Shelf 是 ACP **client**，spawn provider 的 ACP server（copilot 官方直出 `copilot --acp`；codex 走 `@agentclientprotocol/codex-acp` 包 codex CLI），per-tab 一條連線。Provider→wire 的翻譯（tool 對相關、event 過濾、streaming 組裝）收進**共用 `acp/` toolkit**（`connection`/`client`/`translate`/`permission`/`capabilities`），copilot 與 codex backend 都是它的 consumer；各 backend 只剩自家語意（mode-map、auth、launch cmd、skill target）。
+**Decision**：Shelf 的 ACP client/translation toolkit 保持 provider-agnostic，供官方直接提供 ACP mode 的 provider 使用；目前 production consumer 是 `copilot --acp`。Codex 改走官方 app-server JSON-RPC，Claude 保持官方 Agent SDK。
 
-**Reason / verdict（spike 結論）**：
-- **已證（N=2）**：ACP 收束 provider→wire 翻譯 —— 免掉整套 SDK-specific correlation/filtering/streaming（copilot backend ≈ 420 LOC vs 已刪的 native SDK backend 2,751 LOC）。第二個 consumer（copilot）逼出真正的 toolkit 層界。
-- **未證（要 N=3 才驗）**：「ACP 讓每個 provider 整合都便宜」。① 整合 + ② 硬化 toolkit 因果不可分（②只在做①時才發現）；per-provider 成本低要到成熟 toolkit 接第 3 個 provider 才驗得到。
-- **ACP 不是萬用便宜（誠實反例）**：(a) Shelf built-in MCP bridge 在 claude 是幾行 `createSdkMcpServer`，在 ACP 要架真 in-process HTTP MCP server（重）。(b) **skill 注入退化**：native SDK 有 per-session skill 欄位，ACP `NewSessionRequest` 沒有 → 被逼進 config-home + 重登（見 `skills`）。(c) **使用者 stdio MCP 退化**（copilot 上游 bug，見 `mcp`）。—— 抵銷面：ACP 讓 `/mcp` `/skills` 原生派發，`skills#3` 那套攔截對 ACP provider 可移除。
-- **DIRECTION**：ACP 是**「CLI 有官方 ACP mode」的 provider 的基準**（盡可能，非全面）。copilot ✓、codex ✓；**claude 例外** —— 它唯一的 ACP surface 是第三方 SDK-wrapper adapter（Anthropic 只出 Agent SDK，`claude acp serve` 上游 closed「not planned」），高成本低效益 → claude 留在 Agent SDK。ACP-as-baseline = 新的「官方直出 ACP」provider 的預設,不是回頭硬遷既有的。
+**Reason**：協定共用只在 provider 真正採 ACP 時成立。Copilot 仍需要 connection/client/translation/permission/capabilities 與 Shelf MCP bridge；Codex app-server 提供更完整的 thread/control/context/account surface，不應為了重用 toolkit 而退回第三方 ACP adapter。
 
-**Do not change casually because**：別把 copilot/codex 的 ACP 翻譯邏輯搬回各 backend —— 那正是 toolkit 收束掉的東西,重複=回到 per-provider 各寫一套。別為了「統一」把 claude 也硬推 ACP（第三方 adapter、N sessions=N procs、無官方 ACP）。
+**Do not change casually because**：不要移除 Copilot 仍使用的 shared ACP toolkit；也不要為表面一致把 Codex 或 Claude 強制包回 ACP。選擇 transport 要以 provider 官方、完整的 runtime surface 為準。
 
-**Related**：`agent-providers#14`（prior-art 方法論）、`skills`/`mcp`（ACP 帶來的 skill/MCP 差異）、`agent-server/providers/acp/*`、`agent-server/providers/{copilot,codex}/index.ts`。
+**Related**：`agent-providers#14`、`agent-providers#33`、`skills`、`mcp`、`agent-server/providers/acp/*`。
 
 ## agent-providers#14 — 整合新 provider/能力：先查 prior art（agent 官方 docs → Zed → SDK types），別從「標準說 X」推  ·  [Decision]
 
@@ -212,7 +208,7 @@ SDK 0.3.159 **並存**兩種 compact 完成訊號:`status` 形狀(`subtype:'stat
 
 **Decision**：各 provider 的原生 permission mode **映射到 Shelf 的 canonical 詞彙**（`default`/`plan`/`acceptEdits`/`bypassPermissions`）。一個 provider **暴露它所有「可映射」的原生 mode**（清單本就 per-provider 變動 —— claude 4 個含 `acceptEdits`,copilot/codex 各 3 個）;**對不上任何 Shelf mode 的原生 mode → hide + fail-loud log**（那是「該不該新增一個 Shelf mode」的討論觸發點,前例:`acceptEdits` 就是為 claude 加的）。displayName 一律走中央 `PERMISSION_MODES` 單一來源（per-provider「誠實副標」如 `Plan (read-only)` 考慮過但**否決** —— 會跟中央化 displayName 打架）。
 
-具體 mode-map（`<provider>/mode-map.ts`,per-provider）:copilot `agent/plan/autopilot` ↔ `default/plan/bypassPermissions`;**codex `read-only/agent/agent-full-access`（查自 codex-acp `AgentMode.ts`）↔ `plan/default/bypassPermissions`**（`plan↔read-only` 是唯一判斷 —— read-only = 不自主寫 = 最接近 plan 的安全桶）。permission mode 清單**從 session 實際 advertise 的 modes 推導**再映射,不寫死。
+具體映射由 transport 各自擁有：Copilot ACP 的 `agent/plan/autopilot` ↔ `default/plan/bypassPermissions` 由 mode-map 依 session advertise 值解析；Codex app-server 把 Shelf mode 映成 thread/turn 的 approval policy 與 sandbox policy，其中 `plan` 是 read-only、`bypassPermissions` 是 full-access。
 
 **Reason**：承 `agent-providers#4`（permission 語意收進 provider）+ `agent-providers#1`（renderer 對 provider 無感）。統一詞彙 → 一致 UX、可攜設定、固定 keybinding;「可映射才暴露、不可映射 hide+log」= 既不吃掉 provider 能力、也不默默丟失資訊。displayName 中央化 = app-wide UX 一致（同 `agent-providers#4` companion）。
 
@@ -322,7 +318,7 @@ SDK 0.3.159 **並存**兩種 compact 完成訊號:`status` 形狀(`subtype:'stat
 
 ## agent-providers#28 — Worktree boot provider is an explicit creation-time override  ·  [Decision]
 
-**Decision**：New Worktree dialog 的 provider selector 從 `AGENT_PROVIDERS` registry iterate，預設取 parent `defaultAgentProvider`，未設定時取 `claude`。選擇值只寫到新 child project 的 `defaultAgentProvider`。
+**Decision**：New Worktree dialog 的 provider selector 從 `AGENT_PROVIDERS` registry iterate。Parent default 只有在 registry-valid 時才可預選；missing/unknown default 顯示無選擇並禁止建立，直到使用者明確選一個有效 provider。選擇值只寫到新 child project 的 `defaultAgentProvider`。
 
 **Reason**：讓不同 worktree 可啟動不同 provider，同時維持既有 parent-inheritance 行為與 provider registry 的單一來源。
 
@@ -382,13 +378,13 @@ SDK 0.3.159 **並存**兩種 compact 完成訊號:`status` 形狀(`subtype:'stat
 
 **Related：** `agent-providers#15`（per-appId `CODEX_HOME` device auth）、`agent-providers#16`（provider backend 不承攬 credential internals）、官方 Codex manual `codex-app-server.md` / `codex-sdk.md`。
 
-## agent-providers#33 — `codex-offical` 正式採 app-server-only，不保留 TypeScript SDK runtime  ·  [Decision]
+## agent-providers#33 — Canonical `codex` 採 app-server-only，不保留 SDK/ACP fallback  ·  [Decision]
 
-**Decision：** 測試 provider key `codex-offical` 的正式實作路徑是直接使用 pinned `codex app-server` JSON-RPC；不再透過 `@openai/codex-sdk` 作 turn transport，也不保留 SDK wrapper 作 production fallback。舊 `codex` provider 仍維持 ACP/codex-acp baseline，直到後續 cutover 決策移除。
+**Decision：** Canonical provider key 是 `codex`，直接使用 pinned `codex app-server` JSON-RPC。Production 不保留 `@openai/codex-sdk` wrapper、`@agentclientprotocol/codex-acp` adapter、hidden alias 或 runtime fallback。
 
 **Reason：** live smoke 已驗證 app-server-only 能提供互動 provider 需要的一條 truth source：`thread/start`/`thread/resume`、`turn/start`、model catalog、skills/MCP status、slash/control、manual compact、account quota、session context usage、tool/file/command/MCP item notifications，以及 command/file/permission approval request bridge。TypeScript SDK 則是 `codex exec` wrapper；它缺少上述 control/context/status surface，若和 app-server 混用會把 session truth、compaction、context accounting、approval state 分裂成兩套 authority。
 
-**Implementation note：** `providers/codex-sdk/` 目錄名保留歷史名稱，但 runtime 內容是 app-server client/translator/config；`@openai/codex-sdk` package dependency 與 SDK probe/translator 已移除。Codex runtime pin 只需要 `@openai/codex`（CLI/app-server/native package）與 legacy `@agentclientprotocol/codex-acp`（舊 provider baseline）。`buildCodexSdkRuntimeConfig` 名稱暫留為內部 helper；它產出的是 app-server config object / env，不依賴 SDK types。
+**Implementation note：** `providers/codex/` 封裝 app-server client/translator/config/auth/account status。Packaged與 remote runtime 只保留 `@openai/codex` CLI launcher、target native package與 agent-server bundle；shared ACP toolkit仍為 Copilot保留。
 
 **Open follow-ups：** MCP elicitation form 尚只 fail-loud cancel；`/ps`、`/stop`、`/clean` 等 background-task slash 仍因 app-server schema 缺穩定 route 而 explicit unsupported；create/delete file changes 若 app-server 只給 raw file content 而非 unified diff，UI 仍會 fallback markdown；reasoning item 常為空，暫保留 bounded `reasoning-notification` debug log觀察。
 
@@ -398,7 +394,7 @@ SDK 0.3.159 **並存**兩種 compact 完成訊號:`status` 形狀(`subtype:'stat
 
 ## agent-providers#34 — Codex app-server image input must distinguish data URLs from local paths  ·  [Gotcha]
 
-**Symptom：** Sending a pasted screenshot/image through `codex-offical` can fail with Codex trying to
+**Symptom：** Sending a pasted screenshot/image through `codex` can fail with Codex trying to
 read a path that starts with `data:image/png;base64,...`, eventually surfacing a local-image read
 error such as "File name too long".
 
@@ -424,5 +420,15 @@ provider-local temp dir when the existing connector upload path already handles 
 placement and cleanup.
 
 **Related：** `agent-providers#1`（provider 差異封裝在 provider 內）、`agent-providers#33`
-（`codex-offical` app-server-only path）、`contracts/agent-routing`（uploaded attachment send
+（`codex` app-server-only path）、`contracts/agent-routing`（uploaded attachment send
 contract）。
+
+## agent-providers#35 — Persisted provider ids remain raw; runtime opens only registry-valid providers  ·  [Decision]
+
+**Decision:** Project persistence admits unknown provider strings so old/future keys round-trip without migration. The renderer store boundary narrows raw ids through `AGENT_PROVIDERS`: explicit opens require a valid id; implicit and connect-time opens require a valid project default. Missing or invalid defaults create no AgentView and never fall back to Claude.
+
+Project Edit renders an unknown default as no selection and preserves the raw value when the provider field is untouched. Only an explicit provider-field change replaces or removes it. Worktree creation never inherits an unknown default and requires an explicit valid selection.
+
+**Reason:** Persisted configuration is external historical data, while runtime dispatch must be exhaustive over the current registry. Keeping those shapes separate avoids destructive migrations and prevents stale ids from reaching deploy/backend lookup.
+
+**Do not change casually because:** Do not cast persisted strings to `AgentProvider`, restore a fallback provider, or filter stale keys independently in UI consumers. Resolution and named provider writes belong at the production project-store boundary.

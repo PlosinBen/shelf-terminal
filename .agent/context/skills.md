@@ -151,12 +151,12 @@ related:
 - **agent-server（`exec.ts`)執行投影**:session 用前（caps/send）與 `reload_skills` 時,讀各 backend 的 `skillTarget`,呼叫共用 `projectAppSkills(appId, target)`（`providers/shared.ts`)—— 泛用、**冪等 + 原子**（symlink 到暫存名再 `rename`）。source 固定 = canonical `…/skills/skills`。
 - **各 provider 的 target（掃描機制 per-provider,不統一)**:
   - **copilot（ACP）→ config-home**:`$COPILOT_HOME/skills`（ACP 沒 per-session skill 欄位 → 只能靠 config-home 自動掃。這是 ACP 的退化,見 `agent-providers#13` 反例 b)。
-  - **codex（ACP）→ additionalDirectory**:`<codexSkillsRoot>/.agents/skills`（codex-acp `refreshSkills` 把 `additionalDirectory` 後綴 `.agents/skills` 當 skill root,查證自 codex-acp 原始碼 —— **不是 config-home**,codex skill 不需要 config-home)。
+  - **codex（app-server）→ isolated HOME skill root**:`~/.shelf/apps/<appId>/codex-home/.agents/skills`，由 app-server thread 使用同一個 isolated HOME 掃描。
   - **claude → 無投影**:`options.plugins` 直接指 canonical。
 
 **Reason**：`agent-providers#16`（provider 不碰 fs)+ 中央投影 = 冪等/原子讓 N 個 instance 併發只成一次、無 race;symlink 讓 skill **更新**免重投影（canonical 一改,symlink 自動反映;只有 copy 模式才需重投）。skill 掃描機制天生 per-provider（SDK 欄位 / config-home / additionalDirectory 各不同),所以「投到哪」留 provider、「怎麼投」收中央。
 
-**Do not change casually because**：別把 fs 投影搬回 provider backend（違反 `agent-providers#16` + 重造 race);別假設「copilot 用 `skillDirectories`」（那是已刪 SDK backend 的機制,ACP 走 `$COPILOT_HOME/skills`);codex 別硬套 config-home（它走 `.agents/skills`）。
+**Do not change casually because**：別把 fs 投影搬回 provider backend（違反 `agent-providers#16` + 重造 race);別假設「copilot 用 `skillDirectories`」（那是已刪 SDK backend 的機制,ACP 走 `$COPILOT_HOME/skills`);Codex 的 skill root 跟 app-server isolated HOME 必須一致。
 
 **Related**：`skills#1`（canonical 投影;其「Copilot `skillDirectories`」已被本條取代)、`agent-providers#13`（ACP skill 退化)、`agent-providers#15`（config-home)、`agent-providers#16`（provider 不碰 fs)、`agent-server/providers/shared.ts`（`projectAppSkills`)、`agent-server/providers/{copilot,codex}/{helpers,index}.ts`（`skillTarget`)、`agent-server/exec.ts`（中央投影)。
 

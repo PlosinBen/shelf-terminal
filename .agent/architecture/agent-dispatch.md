@@ -82,6 +82,8 @@ The dispatcher is ondemand: spawned lazily by the first session to a host, reuse
 
 ## Boundaries
 
+- **Provider identity is resolved before tab creation.** Explicit opens require a registry member; implicit and connect-time opens use only a registry-valid project default. Missing or unknown defaults create no AgentView and never fall back to another provider.
+- **Persistence remains raw while runtime views are narrowed.** Unknown provider ids may remain on disk for round-trip preservation, but the project-state boundary exposes only live registry members to UI and dispatch consumers.
 - **Dispatch is always shared per host; execution sharing is a resolved policy.** The front is provider-agnostic and always one per host. Whether a session reuses an execution unit or gets its own is decided from the provider's declared multiplex capability at open time, expressed entirely as the runtime-key function — no global hard-coding, no user-facing toggle.
 - **The front stays thin by construction.** It must not load provider or SDK code; provider modules load lazily only in the execution role. A front that eagerly imported providers would carry their weight and crash surface despite never running them.
 - **The front relays, it does not process.** Opaque pass-through of the stream is mandatory; the front peeks only what it services locally (health reply, cache lookup) and never parses render primitives.

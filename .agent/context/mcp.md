@@ -108,7 +108,7 @@ related:
 - **L2 = user custom MCP**:`loadProjectedMcpServers(appId)`(`mcp#4` 不變)→ `toAcpMcpServers()`(`acp/mcp.ts`)轉 ACP `McpServer[]`(stdio 無 `type` tag、http 帶 `type:'http'`,env/headers → `[{name,value}]`)。
 - **兩層 per-session = 天生多租戶隔離**,不需 config-home 的 `mcp-config.json`(那反而會重造 auth/skill 那種共用檔碰撞)。
 
-**KNOWN LIMITATION（已知、接受的 regression)**：**`copilot --acp` 靜默不載入經 `session/new` 傳入的 stdio MCP server**（http 正常 → L1 bridge 連得上,但使用者的 `npx …` stdio server 不出現在 `/mcp`)。上游 bug **github/copilot-cli #1040(open)**,Shelf 側已驗證 config 投影/轉換/傳送皆正確。**DECIDED 接受**(MCP 困擾 < skill;非 cutover blocker)。**追蹤在 `.agent/UPSTREAM_WATCH.md`** —— 上游修了才回收(可省掉備案的「把 stdio server 包成 in-process http」workaround)。codex-acp 是不同實作,未驗是否同 bug。
+**KNOWN LIMITATION（已知、接受的 regression)**：**`copilot --acp` 靜默不載入經 `session/new` 傳入的 stdio MCP server**（http 正常 → L1 bridge 連得上,但使用者的 `npx …` stdio server 不出現在 `/mcp`)。上游 bug **github/copilot-cli #1040(open)**,Shelf 側已驗證 config 投影/轉換/傳送皆正確。**DECIDED 接受**(MCP 困擾 < skill;非 cutover blocker)。**追蹤在 `.agent/UPSTREAM_WATCH.md`** —— 上游修了才回收(可省掉備案的「把 stdio server 包成 in-process http」workaround)。
 
 **Do not change casually because**：L1 一定要 in-process http（stdio 子進程無法回 main 執行 bridge tool);別把 L2 user MCP 挪去 config-home（per-session 已多租戶隔離,config-home 會重造碰撞);stdio MCP 在 copilot 失效是上游 #1040,不是 Shelf bug —— 別在 Shelf 側「修」（絕對路徑也沒用,見 UPSTREAM_WATCH)。
 
