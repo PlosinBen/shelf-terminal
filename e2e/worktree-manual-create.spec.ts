@@ -1,4 +1,5 @@
 import { test, expect, _electron as electron, type ElectronApplication, type Page } from '@playwright/test';
+import { CLAUDE_PROVIDER } from '../src/shared/agent-providers';
 import { execFileSync } from 'child_process';
 import path from 'path';
 import fs from 'fs';
@@ -49,7 +50,7 @@ function seedProject(userDataDir: string, repo: string) {
     cwd: repo,
     connection: { type: 'local' },
     maxTabs: 5,
-    defaultAgentProvider: 'claude',
+    defaultAgentProvider: CLAUDE_PROVIDER,
   };
   fs.writeFileSync(path.join(userDataDir, 'projects.json'), JSON.stringify([project]), 'utf-8');
 }
@@ -130,7 +131,7 @@ test.describe('user-initiated worktree create', () => {
     await expect(dialog).toHaveCSS('width', '600px');
     await expect(dialog.locator('.worktree-target')).toHaveText('WT Base @ main');
     await expect(dialog.locator('.worktree-note-picker').filter({ hasText: 'Agent provider' }).locator('select'))
-      .toHaveValue('claude');
+      .toHaveValue(CLAUDE_PROVIDER);
 
     // Every note is pickable regardless of status; rows are filename-first and
     // keep status on the same line as the filename.

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { buildWorktreeChildConfig } from './worktree-child-config';
-import { CODEX_PROVIDER } from '@shared/agent-providers';
+import { CLAUDE_PROVIDER, CODEX_PROVIDER } from '@shared/agent-providers';
 import type { ProjectConfig } from '@shared/types';
 
 const parent: ProjectConfig = {
@@ -13,10 +13,10 @@ const parent: ProjectConfig = {
   envPlain: { FOO: 'bar' },
   defaultTabs: [{ name: 'dev', cmd: 'npm run dev' } as any],
   quickCommands: [{ label: 'build', command: 'npm run build', target: 'current' }],
-  defaultAgentProvider: 'claude',
-  agentPrefs: { claude: { model: 'opus' } as any },
+  defaultAgentProvider: CLAUDE_PROVIDER,
+  agentPrefs: { [CLAUDE_PROVIDER]: { model: 'opus' } as any },
   openAgentOnConnect: true,
-  agentSessionIds: { claude: 'sess-parent' },
+  agentSessionIds: { [CLAUDE_PROVIDER]: 'sess-parent' },
 };
 
 describe('buildWorktreeChildConfig', () => {
@@ -32,7 +32,7 @@ describe('buildWorktreeChildConfig', () => {
     expect(child.envPlain).toEqual({ FOO: 'bar' });
     expect(child.defaultTabs).toEqual(parent.defaultTabs);
     expect(child.quickCommands).toEqual(parent.quickCommands);
-    expect(child.defaultAgentProvider).toBe('claude');
+    expect(child.defaultAgentProvider).toBe(CLAUDE_PROVIDER);
     expect(child.agentPrefs).toEqual(parent.agentPrefs);
     expect(child.openAgentOnConnect).toBe(true);
   });
@@ -51,10 +51,10 @@ describe('buildWorktreeChildConfig', () => {
 
   it('uses an explicit provider override without changing the parent', () => {
     const overridden = buildWorktreeChildConfig(parent, {
-      id: 'wt-codex', cwd: '/repo-codex', worktreeBranch: 'codex', defaultAgentProvider: 'codex',
+      id: 'wt-codex', cwd: '/repo-codex', worktreeBranch: 'feature-codex', defaultAgentProvider: CODEX_PROVIDER,
     });
-    expect(overridden.defaultAgentProvider).toBe('codex');
-    expect(parent.defaultAgentProvider).toBe('claude');
+    expect(overridden.defaultAgentProvider).toBe(CODEX_PROVIDER);
+    expect(parent.defaultAgentProvider).toBe(CLAUDE_PROVIDER);
   });
 
   it('accepts the canonical Codex provider override', () => {

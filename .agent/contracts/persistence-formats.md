@@ -130,10 +130,9 @@ The on-disk artifacts Shelf persists and their layout. Two roots: `<userData>` (
   agent-server/<version>/
   ├── node          ← pinned Node binary (glibc only; omitted for musl)
   ├── index.mjs     ← agent-server esbuild bundle
-  ├── claude        ← Claude CLI binary (provider-dependent)
-  ├── copilot       ← Copilot CLI binary (provider-dependent)
+  ├── <provider>    ← optional provider-specific runtime payload
   └── .deployed     ← completion sentinel, written LAST
   ```
 
-  The `.deployed` sentinel is written only after every payload file lands; redeploy is skipped only when the sentinel **and** all expected files are present (`needsDeploy`).
+  The `.deployed` sentinel is written only after every expected payload file lands; redeploy is skipped only when the sentinel **and** all expected files are present (`needsDeploy`). A provider with a null runtime binding expects only the base runtime (`node` where applicable + `index.mjs`) and still follows the same deploy/sentinel contract.
 - **Source of truth**: `src/main/agent/deploy-layout.ts` (`deployRoot` / `remoteFilePath` / `DEPLOY_FILES` / `deployFilesFor`). Remote paths are always POSIX (never `path.join`). See `context/deployment` deployment#2.

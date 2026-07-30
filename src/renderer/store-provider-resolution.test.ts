@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { CODEX_PROVIDER, COPILOT_PROVIDER } from '@shared/agent-providers';
 import type { AgentProvider, ProjectConfig } from '@shared/types';
 import * as store from './store';
 
@@ -42,13 +43,13 @@ describe('store provider resolution', () => {
   it('uses an explicitly requested registry-valid provider', () => {
     store.setProjects([config('retired-provider')]);
 
-    expect(providerStore.resolveAgentProviderForOpen('project-1', 'codex')).toBe('codex');
+    expect(providerStore.resolveAgentProviderForOpen('project-1', CODEX_PROVIDER)).toBe(CODEX_PROVIDER);
   });
 
   it('uses a registry-valid project default for an implicit open', () => {
-    store.setProjects([config('copilot')]);
+    store.setProjects([config(COPILOT_PROVIDER)]);
 
-    expect(providerStore.resolveAgentProviderForOpen('project-1')).toBe('copilot');
+    expect(providerStore.resolveAgentProviderForOpen('project-1')).toBe(COPILOT_PROVIDER);
   });
 
   it('returns no provider when an implicit open has no default', () => {
@@ -70,10 +71,10 @@ describe('store provider resolution', () => {
   });
 
   it('returns the valid default for openAgentOnConnect only when enabled', () => {
-    store.setProjects([config('codex', true)]);
-    expect(providerStore.resolveAgentProviderForConnect('project-1')).toBe('codex');
+    store.setProjects([config(CODEX_PROVIDER, true)]);
+    expect(providerStore.resolveAgentProviderForConnect('project-1')).toBe(CODEX_PROVIDER);
 
-    store.setProjects([config('codex', false)]);
+    store.setProjects([config(CODEX_PROVIDER, false)]);
     expect(providerStore.resolveAgentProviderForConnect('project-1')).toBeNull();
   });
 });

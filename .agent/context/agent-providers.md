@@ -218,13 +218,7 @@ SDK 0.3.159 **並存**兩種 compact 完成訊號:`status` 形狀(`subtype:'stat
 
 ## agent-providers#18 — Provider 清單單一來源:`AGENT_PROVIDERS` registry,型別 derive,消費端一律 iterate  ·  [Decision]
 
-**Decision**：全部 agent provider 收進單一 registry `src/shared/agent-providers.ts` `AGENT_PROVIDERS = { <id>: { label, bin } }`。`label` 是正式使用者可見顯示名；`bin` 是 exhaustive remote deploy selector：Claude/Copilot 對應單一 shipped binary，Codex=`codex` 觸發其完整 target runtime tree（見 `deployment#7`）。`AgentProvider` 型別 = `keyof typeof AGENT_PROVIDERS`(derive,不另寫 union)。所有消費端 **iterate registry**:New-tab 選單（`TabBar`）、project-config 預設 provider select（`ProjectEditPanel`）、remote deploy binary（`remote.ts` 讀 `.bin`）、agent-server dispatch（`exec.ts` 用 exhaustive `Record<AgentProvider, factory>` —— 漏接一個 compile error）。**無 gating 欄位** —— registry membership 代表 provider 到處都顯示；runtime/CLI 缺失在 spawn 時 fail-loud。加一個 provider = registry 加一筆 + 一個 backend factory。
-
-**Reason**：加 codex + ACP 時發現「provider 集合」原本硬編在 ~6 處且**已 diverge**（project-config select 漏 2 個 provider;`remote.ts` 把 acp-copilot 錯配成 claude binary）。收進 registry + 型別 derive → 加/改一處全自動,不會漏。承 CLAUDE.md「跨檔重複值用具名 const、型別從常數 derive」。
-
-**Do not change casually because**：別再在別處硬編 provider 清單或 `provider === 'x'` 的分支去做 dispatch/選單/部署 —— 一律從 registry 來,否則又會 diverge。
-
-**Related**：CLAUDE.md Conventions、`agent-providers#1`、`src/shared/agent-providers.ts`、`agent-server/exec.ts`、`src/main/agent/remote.ts`、`src/renderer/components/{TabBar,ProjectEditPanel}.tsx`。
+**Superseded by `agent-providers#36`.**
 
 ## agent-providers#19 — ACP tool-call update 是 partial:title 要在 provider 層 carry-forward,別讓 title-less update 覆蓋成 `Tool`  ·  [Gotcha]
 
@@ -434,3 +428,15 @@ Project Edit renders an unknown default as no selection and preserves the raw va
 **Reason:** Persisted configuration is external historical data, while runtime dispatch must be exhaustive over the current registry. Keeping those shapes separate avoids destructive migrations and prevents stale ids from reaching deploy/backend lookup.
 
 **Do not change casually because:** Do not cast persisted strings to `AgentProvider`, restore a fallback provider, or filter stale keys independently in UI consumers. Resolution and named provider writes belong at the production project-store boundary.
+
+## agent-providers#36 — Provider key 是不可變 identity；registry 集中 presentation、visibility 與 runtime binding  ·  [Decision]
+
+**Decision：** `AGENT_PROVIDERS` 是 provider identity 的單一來源。registry key 是跨 renderer state、routing、persistence、backend cache 與部署路徑流動的 opaque immutable id；`AgentProvider` 與可自訂 model 的 provider subset 都由 registry metadata derive，不另寫 union。`label` 只供顯示，`visibility`（`product` / `internal`）只決定 presentation policy，`bin` 則是 provider-specific remote runtime binding，允許 `null` 表示只需 base runtime。registry membership 代表 provider 是完整、可呼叫的 provider；backend factory 必須 exhaustive，provider 目錄 basename 也必須與 key 對齊（共用 toolkit 目錄除外）。
+
+Renderer 在 dev/E2E 傳入是否顯示 internal provider 的環境政策，再由 registry helper 產生選項；label 不得回流成 routing key。Auth event 的 display content 由 provider 擁有並原樣顯示，也不得拿來推導 provider identity。`fake` 因此是普通的 registered internal provider：顯式選取時 identity 就是 `fake`；`SHELF_TEST_MODE` 只把 requested provider 的 backend implementation 換成 fake，requested key、per-provider cache 與其他 identity flow 不變。
+
+**Reason：** identity 與 presentation 分離後，rename label 不會破壞已持久化設定或 runtime dispatch；新增 provider 只需在 registry 與 exhaustive factory 各完成一處。把 fake 正式建模為 internal provider，能沿用完整 production 路線而不引入 test-only validity 分支；保留 requested key 的 test substitution 則能驗證真實 provider state isolation。
+
+**Do not change casually because：** 不要散落 provider key/label magic string（宣告本身、provider 目錄名與故意的 invalid fixture 除外）；不要用 label、auth 文案或 visibility 做 dispatch；不要為 fake 建特殊合法性路徑，也不要讓 test mode 把不同 requested provider 合併成同一 cache key。現有 persistence/auth/config location 不做 alias migration；若新增 provider，必須維持 key-isolated state、cache 與 runtime 路徑。
+
+**Related：** `agent-providers#1`、`agent-providers#35`、`agent-core#5`、`deployment#8`、`src/shared/agent-providers.ts`、`agent-server/backend-registry.ts`。

@@ -118,3 +118,13 @@ related:
 **Do not change casually because**：不要把 payload 縮回單一 binary、猜測平台 alias 的 registry path，或把 native package 內帶有 musl triple 的檔名誤解成 Shelf 支援 musl。後者只是 upstream package 的編譯 target 命名，Shelf 的支援邊界仍是 glibc。Codex CLI 與 target native package 是同一組精確版本的相容單位；升級必須同步更新 pins 並由 drift test 擋住 range drift。
 
 **Related**：`deployment#1`（version-keyed runtime payload）、`deployment#4`（Node target policy）、`deployment#6`（agent-deploy E2E environment）、`agent-providers#33`（Codex app-server）、`src/main/agent/{agent-runtime-versions,runtime-cache,deploy-layout,remote}.ts`。
+
+## deployment#8 — Provider runtime binding 可為 null；remote 仍部署完整 base runtime  ·  [Decision]
+
+**Decision：** Provider registry 的 runtime binding 可為 `null`。這表示該 provider 不需要額外的 provider-specific binary/package，但仍沿用完整 local/SSH/Docker/WSL agent-server 流程：glibc target 部署 pinned Node + agent-server bundle，musl target 使用遠端合格 Node + bundle；兩者都只略過 provider payload 的 cache、下載、copy 與 chmod。`null` 不表示 provider disabled 或 local-only。
+
+**Reason：** 完整 provider 未必有獨立 CLI runtime。把「可呼叫性」與「額外 binary 是否存在」分開，可讓 internal fake 等 provider 使用同一條 deploy contract，而不必偽造 binary 或另開特殊 remote 路徑。
+
+**Do not change casually because：** 不要把 null binding 當作跳過整個 deploy、禁止 remote，或 fallback 到其他 provider runtime；base runtime 與 completion sentinel 仍必須照常驗證和落地。
+
+**Related：** `agent-providers#36`、`deployment#4`、`deployment#7`、`src/main/agent/{deploy-layout,remote}.ts`。

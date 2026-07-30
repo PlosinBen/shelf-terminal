@@ -31,7 +31,7 @@ describe('createBackendRegistry', () => {
   it('uses the exhaustive real factory for explicit fake selection', () => {
     const registry = createBackendRegistry(factories(), false, vi.fn());
 
-    expect((registry.get(FAKE_PROVIDER) as { name: string }).name).toBe(FAKE_PROVIDER);
+    expect(registry.get(FAKE_PROVIDER)).toMatchObject({ name: FAKE_PROVIDER });
   });
 
   it('preserves requested identities when substituting fake implementations', () => {

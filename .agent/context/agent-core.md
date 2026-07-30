@@ -70,8 +70,9 @@ SessionId 是 UUID v4，存在 `ProjectConfig.agentSessionIds[provider]`，兩�
 ## agent-core#5 — Fake provider 作為 E2E 入口、fixture per-test scope  ·  [Decision]
 
 **Decision**:
-- **agent-server 內建 fake provider**（`agent-server/providers/fake.ts`），speak 同一個 `ServerBackend` interface + 同一組 `OutgoingMessage` shape —— 沒有 test-only event，凡 fake 能 emit 的事 real provider 都可能 emit
-- **`SHELF_TEST_MODE=1` hijack 模式**：env 開時 `getBackend()` **不論 renderer 要哪個 provider** 都回 fake。Renderer 維持 `claude`/`copilot` 選項，但 wire 鏈走 fake。Production build 沒設 env → fake code dead branch
+- **agent-server 內建 registered internal `fake` provider**，speak 同一個 `ServerBackend` interface + 同一組 `OutgoingMessage` shape —— 沒有 test-only event，凡 fake 能 emit 的事 real provider 都可能 emit
+- **顯式 fake 模式**：dev/E2E renderer 可顯示並選取 `fake`，整條 state、routing、backend 與 wire identity 都維持 `fake`；production 只以 registry visibility 隱藏，不把它視為非法 provider
+- **`SHELF_TEST_MODE=1` substitution 模式**：不論 requested provider 是哪個 key，都以 fake implementation 執行，但 backend registry 仍按 requested provider 分開 cache，事件與狀態保留 requested identity
 - **Scenario syntax**: prefix match + `|` chain（`text:hi|delay:30|tool:Read`），文件在 `fake.ts` JSDoc
 - **Picker resolve 驗證走 echo**: fake 解 picker 後 emit `text` message `picker_answers:<json>` 或 `picker_answers:cancelled`，spec assert echo（避免戳 renderer 內部 state）
 - **Playwright fixture per-test scope**（不是 worker scope）：每 test 新 Electron + tempdir
@@ -79,8 +80,10 @@ SessionId 是 UUID v4，存在 `ProjectConfig.agentSessionIds[provider]`，兩�
 **Do not change casually because**:
 - 不要把 fake.ts 改成跟 real provider 不同的 wire shape —— 整套保證來自「same wire 鏈、不跳層」。
 - 不要回到 worker-scoped fixture —— `project-creation.spec.ts` 後半段、`app-startup.spec.ts:22 no projects on fresh start`、`notes.spec.ts:103 manual title overrides` 會立刻壞。
-- 不要在 renderer 暴露 fake provider —— hijack 是底層替換，UI 保持跟 production 一樣的路徑。
-- 不要改成「register fake as a third provider」—— 會逼 `AgentProvider` union 改 shared/types.ts、persistence schema、Settings UI 都動，contained boundary 失守。
+- 不要對 fake 加 test-only validity/dispatch 分支；它和其他 provider 一樣由 registry 與 exhaustive factory 定義。
+- 不要讓 substitution 模式把 requested provider key 改成 `fake` 或共用單一 backend cache —— 那會掩蓋 provider state isolation 問題。
+
+**Related**：`agent-providers#36`。
 
 ## agent-core#6 — Provider 格式解析失敗一定要 fail-loud（serverLog('error')）  ·  [Decision]
 

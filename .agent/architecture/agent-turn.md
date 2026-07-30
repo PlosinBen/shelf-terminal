@@ -84,10 +84,17 @@ Two branches leave this spine without leaving the machinery:
 
 A state side-channel runs parallel to the timeline: the plan/todo view is replace-semantics state, not an appendable event, so it bypasses the message store's timeline entirely and overwrites a dedicated slice.
 
+## Provider identity and presentation
+
+A provider enters the flow as a validated opaque key. That key remains unchanged through renderer state, routing, persistence, backend caching and runtime placement. A central registry resolves the key into presentation metadata (label and visibility) and an optional provider-specific runtime binding; none of those values can be used to reconstruct or replace the key. Provider-owned auth display content follows the same display-only rule and is rendered verbatim.
+
+An internal provider follows the same route as a product-visible provider; environment policy only filters which entries a selector presents. Test-mode substitution changes the backend implementation behind a requested key, not the requested identity or its cache boundary.
+
 ## Boundaries
 
 - **Renderer owns drafting and display; the backend owns ordering and turn boundaries.** The client eager-sends and mirrors the server's ordered snapshot — it never decides when a turn starts or ends, and never re-derives the queue locally.
 - **The wire carries render primitives, not provider semantics.** What crosses to the renderer is shaped for rendering (reply / foldable card / note / system / error); the renderer holds no provider type, tool name, or slash grammar and adds no "if this tool then…" branch.
+- **Provider keys route; provider labels only render.** Visibility and auth display text are presentation metadata. They never become persistence values, cache keys, runtime selectors or aliases for the validated provider key.
 - **Every send must terminate in an idle signal on its own turn id.** The renderer flips to streaming the instant a message is sent and waits for idle to release; any early-out or error path that skips idle wedges the spinner permanently. Each dropped or cancelled send still emits a terminal idle on its turn id.
 - **Correlation ids and turn ids stay internal.** The client-minted send id exists only to reconcile the optimistic entry against the server snapshot; the per-turn id exists only to route **status/lifecycle** events (turn-end / busy-idle). Neither leaks into UI behavior decisions, and neither reaches the renderer (it keys on tab id + message id).
 - **turn id is the serial-seam token, NOT a concurrency or content key.** Turns are strictly serial (a foreground turn and an SDK auto-resume turn never overlap), so turn id is not for concurrency — it disambiguates **status/lifecycle at the seam** between one turn's trailing events (a tail idle after the first) and the next turn's opening, including an unsolicited auto-resume turn. Content render primitives are therefore decoupled from turn id (session-scoped by tab) so a mis-attributed turn boundary (router drift) can never lose a reply or tool result; on the provider side, content the turn-router can't attribute to an active turn is emitted session-scoped rather than dropped. Permission round-trips correlate by tool-use id, not turn id. Do not re-introduce a turn-id gate on content delivery.

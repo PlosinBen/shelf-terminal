@@ -1,4 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
+import { CLAUDE_PROVIDER, COPILOT_PROVIDER } from '@shared/agent-providers';
 import { randomUUID } from 'node:crypto';
 import { existsSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
@@ -28,11 +29,11 @@ describe('orchestrator', () => {
       const sessionId = randomUUID();
       created.push(sessionId);
       saveContext({
-        sessionId, provider: 'claude',
+        sessionId, provider: CLAUDE_PROVIDER,
         lastSdkSessionId: 'sdk-x',
         updatedAt: 1,
       });
-      const ctx = loadRestoreContextFor('claude', sessionId);
+      const ctx = loadRestoreContextFor(CLAUDE_PROVIDER, sessionId);
       expect(ctx?.lastSdkSessionId).toBe('sdk-x');
     });
 
@@ -40,19 +41,19 @@ describe('orchestrator', () => {
       const sessionId = randomUUID();
       created.push(sessionId);
       saveContext({
-        sessionId, provider: 'claude',
+        sessionId, provider: CLAUDE_PROVIDER,
         lastSdkSessionId: 'sdk-x',
         updatedAt: 1,
       });
-      expect(loadRestoreContextFor('copilot', sessionId)).toBeUndefined();
+      expect(loadRestoreContextFor(COPILOT_PROVIDER, sessionId)).toBeUndefined();
     });
 
     it('returns undefined when sessionId is missing', () => {
-      expect(loadRestoreContextFor('claude', undefined)).toBeUndefined();
+      expect(loadRestoreContextFor(CLAUDE_PROVIDER, undefined)).toBeUndefined();
     });
 
     it('returns undefined when no file exists', () => {
-      expect(loadRestoreContextFor('claude', randomUUID())).toBeUndefined();
+      expect(loadRestoreContextFor(CLAUDE_PROVIDER, randomUUID())).toBeUndefined();
     });
   });
 
@@ -61,7 +62,7 @@ describe('orchestrator', () => {
       const sessionId = randomUUID();
       created.push(sessionId);
       const seen: OutgoingMessage[] = [];
-      const send = wrapSendForContext('claude', sessionId, (m) => seen.push(m));
+      const send = wrapSendForContext(CLAUDE_PROVIDER, sessionId, (m) => seen.push(m));
       send({ type: 'status', state: 'streaming' });
       send({ type: 'message', msgId: 'm-1', msgType: 'reply', content: 'hi' });
       expect(seen).toHaveLength(2);
@@ -72,12 +73,12 @@ describe('orchestrator', () => {
       const sessionId = randomUUID();
       created.push(sessionId);
       const seen: OutgoingMessage[] = [];
-      const send = wrapSendForContext('claude', sessionId, (m) => seen.push(m), () => 12345);
+      const send = wrapSendForContext(CLAUDE_PROVIDER, sessionId, (m) => seen.push(m), () => 12345);
       send({ type: 'context_patch', patch: { lastSdkSessionId: 'sdk-abc' } });
       expect(seen).toHaveLength(0);
       const ctx = loadContext(sessionId);
       expect(ctx?.lastSdkSessionId).toBe('sdk-abc');
-      expect(ctx?.provider).toBe('claude');
+      expect(ctx?.provider).toBe(CLAUDE_PROVIDER);
       expect(ctx?.sessionId).toBe(sessionId);
       expect(ctx?.updatedAt).toBe(12345);
     });
@@ -86,12 +87,12 @@ describe('orchestrator', () => {
       const sessionId = randomUUID();
       created.push(sessionId);
       saveContext({
-        sessionId, provider: 'claude',
+        sessionId, provider: CLAUDE_PROVIDER,
         lastSdkSessionId: 'sdk-old',
         model: 'claude-sonnet-4',
         updatedAt: 1,
       });
-      const send = wrapSendForContext('claude', sessionId, () => {}, () => 999);
+      const send = wrapSendForContext(CLAUDE_PROVIDER, sessionId, () => {}, () => 999);
       // Only patch lastSdkSessionId — `model` should survive.
       send({ type: 'context_patch', patch: { lastSdkSessionId: 'sdk-new' } });
       const ctx = loadContext(sessionId);
@@ -103,19 +104,19 @@ describe('orchestrator', () => {
     it('does not let provider patches override orchestrator-owned fields', () => {
       const sessionId = randomUUID();
       created.push(sessionId);
-      const send = wrapSendForContext('copilot', sessionId, () => {}, () => 555);
+      const send = wrapSendForContext(COPILOT_PROVIDER, sessionId, () => {}, () => 555);
       // Malicious / buggy provider tries to forge identity fields.
       send({
         type: 'context_patch',
         patch: {
-          provider: 'claude',
+          provider: CLAUDE_PROVIDER,
           sessionId: 'forged',
           updatedAt: 1,
           lastSdkSessionId: 'cli-1',
         },
       });
       const ctx = loadContext(sessionId);
-      expect(ctx?.provider).toBe('copilot');
+      expect(ctx?.provider).toBe(COPILOT_PROVIDER);
       expect(ctx?.sessionId).toBe(sessionId);
       expect(ctx?.updatedAt).toBe(555);
       expect(ctx?.lastSdkSessionId).toBe('cli-1');
@@ -124,7 +125,7 @@ describe('orchestrator', () => {
     it('returns the raw send unchanged when sessionId is missing — patches with no destination are simply forwarded (and ignored downstream)', () => {
       const seen: OutgoingMessage[] = [];
       const raw = (m: OutgoingMessage) => seen.push(m);
-      const send = wrapSendForContext('claude', undefined, raw);
+      const send = wrapSendForContext(CLAUDE_PROVIDER, undefined, raw);
       expect(send).toBe(raw);
       // And a context_patch through it is forwarded as-is (no disk write
       // because there's no sessionId to key on).
@@ -135,10 +136,10 @@ describe('orchestrator', () => {
     it('treats missing patch field as empty object (no crash, just timestamp bump)', () => {
       const sessionId = randomUUID();
       created.push(sessionId);
-      const send = wrapSendForContext('claude', sessionId, () => {}, () => 42);
+      const send = wrapSendForContext(CLAUDE_PROVIDER, sessionId, () => {}, () => 42);
       send({ type: 'context_patch', patch: {} });
       const ctx = loadContext(sessionId);
-      expect(ctx?.provider).toBe('claude');
+      expect(ctx?.provider).toBe(CLAUDE_PROVIDER);
       expect(ctx?.sessionId).toBe(sessionId);
       expect(ctx?.updatedAt).toBe(42);
     });
@@ -205,7 +206,7 @@ describe('orchestrator', () => {
       const seen: OutgoingMessage[] = [];
       const raw = (m: OutgoingMessage) => seen.push(m);
       const turnAware = wrapSendForTurn('t-99999999', raw);
-      const contextAware = wrapSendForContext('claude', sessionId, turnAware, () => 7);
+      const contextAware = wrapSendForContext(CLAUDE_PROVIDER, sessionId, turnAware, () => 7);
       // context_patch never reaches turnAware → no turnId pollution in stored context
       contextAware({ type: 'context_patch', patch: { lastSdkSessionId: 'sdk-1' } });
       expect(seen).toHaveLength(0);

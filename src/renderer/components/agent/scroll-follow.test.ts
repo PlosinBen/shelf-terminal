@@ -1,11 +1,12 @@
 import { describe, it, expect } from 'vitest';
+import { CLAUDE_PROVIDER } from '@shared/agent-providers';
 import { nextForceFollow } from './scroll-follow';
 import type { AgentMsg } from '../AgentMessage';
 
 const user = (id: string): AgentMsg =>
   ({ id, type: 'user', content: 'hi', timestamp: 0 } as AgentMsg);
 const agent = (id: string): AgentMsg =>
-  ({ id, type: 'reply', content: 'ok', provider: 'claude', timestamp: 0 } as AgentMsg);
+  ({ id, type: 'reply', content: 'ok', provider: CLAUDE_PROVIDER, timestamp: 0 } as AgentMsg);
 
 describe('nextForceFollow', () => {
   it('no messages → never forces', () => {

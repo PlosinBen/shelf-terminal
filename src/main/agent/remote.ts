@@ -17,6 +17,7 @@ import {
   AGENT_PROVIDERS,
   AGENT_RUNTIME_KIND,
   CLAUDE_PROVIDER,
+  COPILOT_PROVIDER,
 } from '@shared/agent-providers';
 import { skillsSourceRoot, listSkillFilesRel, hashSkillsTree } from '../skills-projection';
 import { syncMcpForConnection } from '../mcp-remote';
@@ -1323,14 +1324,14 @@ export function parseRemoteMessage(msg: any): AgentEvent | null {
   }
 
   if (msg.type === 'auth_required') {
-    return { type: 'auth_required', provider: msg.provider ?? 'copilot' };
+    return { type: 'auth_required', provider: msg.provider ?? COPILOT_PROVIDER };
   }
 
   if (msg.type === 'auth_login_prompt') {
     if (typeof msg.verificationUri !== 'string' || typeof msg.userCode !== 'string') return null;
     return {
       type: 'auth_login_prompt',
-      provider: msg.provider ?? 'copilot',
+      provider: msg.provider ?? COPILOT_PROVIDER,
       verificationUri: msg.verificationUri,
       userCode: msg.userCode,
       prefilledUri: typeof msg.prefilledUri === 'string' ? msg.prefilledUri : msg.verificationUri,
@@ -1340,7 +1341,7 @@ export function parseRemoteMessage(msg: any): AgentEvent | null {
   if (msg.type === 'auth_login_done') {
     return {
       type: 'auth_login_done',
-      provider: msg.provider ?? 'copilot',
+      provider: msg.provider ?? COPILOT_PROVIDER,
       ok: !!msg.ok,
       cancelled: msg.cancelled === true ? true : undefined,
       error: typeof msg.error === 'string' ? msg.error : undefined,

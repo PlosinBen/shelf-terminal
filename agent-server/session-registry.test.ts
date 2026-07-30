@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
+import { CLAUDE_PROVIDER, COPILOT_PROVIDER } from '@shared/agent-providers';
 import { createSessionRegistry } from './session-registry';
 import type { ServerBackend } from './providers/types';
 
@@ -12,8 +13,8 @@ function makeBackend(): ServerBackend {
 describe('session-registry (isolated default: runtimeKey = sid)', () => {
   it('gives every sid its OWN runtime, 1:1', () => {
     const reg = createSessionRegistry({ createRuntime: () => makeBackend() });
-    const a = reg.open('s1', 'claude');
-    const b = reg.open('s2', 'claude');
+    const a = reg.open('s1', CLAUDE_PROVIDER);
+    const b = reg.open('s2', CLAUDE_PROVIDER);
     expect(a).not.toBe(b);
     expect(reg.get('s1')).toBe(a);
     expect(reg.get('s2')).toBe(b);
@@ -24,8 +25,8 @@ describe('session-registry (isolated default: runtimeKey = sid)', () => {
   it('open is idempotent for the same sid (no second runtime)', () => {
     const create = vi.fn(() => makeBackend());
     const reg = createSessionRegistry({ createRuntime: create });
-    const first = reg.open('s1', 'copilot');
-    const again = reg.open('s1', 'copilot');
+    const first = reg.open('s1', COPILOT_PROVIDER);
+    const again = reg.open('s1', COPILOT_PROVIDER);
     expect(again).toBe(first);
     expect(create).toHaveBeenCalledTimes(1);
     expect(reg.size()).toBe(1);
@@ -38,7 +39,7 @@ describe('session-registry (isolated default: runtimeKey = sid)', () => {
 
   it('close drops the sid and returns its runtime to dispose (isolated → always unshared)', () => {
     const reg = createSessionRegistry({ createRuntime: () => makeBackend() });
-    const a = reg.open('s1', 'claude');
+    const a = reg.open('s1', CLAUDE_PROVIDER);
     const disposed = reg.close('s1');
     expect(disposed).toBe(a);
     expect(reg.get('s1')).toBeUndefined();
@@ -59,8 +60,8 @@ describe('session-registry (shared seam: runtimeKey = provider)', () => {
       createRuntime: create,
       runtimeKeyFor: (_sid, provider) => provider,
     });
-    const a = reg.open('s1', 'copilot');
-    const b = reg.open('s2', 'copilot');
+    const a = reg.open('s1', COPILOT_PROVIDER);
+    const b = reg.open('s2', COPILOT_PROVIDER);
     expect(a).toBe(b); // shared
     expect(create).toHaveBeenCalledTimes(1);
     expect(reg.runtimes()).toHaveLength(1);
@@ -71,8 +72,8 @@ describe('session-registry (shared seam: runtimeKey = provider)', () => {
       createRuntime: () => makeBackend(),
       runtimeKeyFor: (_sid, provider) => provider,
     });
-    reg.open('s1', 'copilot');
-    reg.open('s2', 'copilot');
+    reg.open('s1', COPILOT_PROVIDER);
+    reg.open('s2', COPILOT_PROVIDER);
     // s1 leaves — runtime still used by s2 → nothing to dispose.
     expect(reg.close('s1')).toBeUndefined();
     expect(reg.runtimes()).toHaveLength(1);

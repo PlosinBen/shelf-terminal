@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest';
+import fs from 'node:fs';
+import path from 'node:path';
 import {
   AGENT_CUSTOM_MODEL_PROVIDERS,
   AGENT_PROVIDERS,
@@ -63,5 +65,19 @@ describe('AGENT_PROVIDERS registry', () => {
     expect(AGENT_PROVIDER_REGISTRY).toEqual([
       { id: CLAUDE_PROVIDER, label: CLAUDE_PROVIDER_LABEL, models: [] },
     ]);
+  });
+
+  it('requires every registered key to have a same-name backend entrypoint', () => {
+    for (const [provider] of agentProviderEntries()) {
+      expect(
+        fs.existsSync(path.join(process.cwd(), 'agent-server', 'providers', provider, 'index.ts')),
+        `missing provider entrypoint for ${provider}`,
+      ).toBe(true);
+    }
+
+    // The guard is intentionally one-way: helper/toolkit directories may exist
+    // without becoming provider identities.
+    expect(fs.existsSync(path.join(process.cwd(), 'agent-server', 'providers', 'acp'))).toBe(true);
+    expect(AGENT_PROVIDERS).not.toHaveProperty('acp');
   });
 });

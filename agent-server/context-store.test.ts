@@ -1,4 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
+import { CLAUDE_PROVIDER, COPILOT_PROVIDER } from '@shared/agent-providers';
 import { randomUUID } from 'node:crypto';
 import { existsSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
@@ -30,7 +31,7 @@ describe('context-store', () => {
 
     const data: PersistedContext = {
       sessionId,
-      provider: 'claude',
+      provider: CLAUDE_PROVIDER,
       lastSdkSessionId: 'sdk-session-abc-123',
       updatedAt: 1_700_000_000_000,
     };
@@ -39,7 +40,7 @@ describe('context-store', () => {
     const loaded = loadContext(sessionId);
     expect(loaded).not.toBeNull();
     expect(loaded?.lastSdkSessionId).toBe('sdk-session-abc-123');
-    expect(loaded?.provider).toBe('claude');
+    expect(loaded?.provider).toBe(CLAUDE_PROVIDER);
     // Copilot-only fields should remain absent (we made them optional).
     expect(loaded?.modelMessages).toBeUndefined();
     expect(loaded?.lastResponseId).toBeUndefined();
@@ -51,7 +52,7 @@ describe('context-store', () => {
 
     const data: PersistedContext = {
       sessionId,
-      provider: 'copilot',
+      provider: COPILOT_PROVIDER,
       lastResponseId: 'resp_abc',
       modelMessages: [{ role: 'user', content: 'hi' }],
       totalInputTokens: 12,
@@ -77,7 +78,7 @@ describe('context-store', () => {
 
     saveContext({
       sessionId,
-      provider: 'claude',
+      provider: CLAUDE_PROVIDER,
       lastSdkSessionId: 'x',
       updatedAt: Date.now(),
     });

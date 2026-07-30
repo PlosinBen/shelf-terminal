@@ -113,7 +113,8 @@ title: shelf-terminal — Intent → File Index
 | Copilot provider (ACP) | `providers/copilot/index.ts` | `createCopilotBackend`：spawn `copilot --acp`、走共用 `acp/` toolkit runtime、OWN copilot 特有（binary launch、device-flow login、config-home）。ACP 是內部細節、provider identity = `copilot`（cutover 後即 copilot backend，pre-ACP native SDK backend 已刪，見 git 歷史） |
 | Codex provider (app-server) | `providers/codex/index.ts` | `createCodexBackend`：直接驅動 pinned `codex app-server` JSON-RPC，封裝 turn/session、auth、config、skills/MCP、quota/context、tool items 與 approval bridge |
 | ACP 共用 toolkit | `providers/acp/` | provider-agnostic ACP runtime：`connection`/`client`/`translate`/`permission`/`capabilities`/`mcp`/`shelf-mcp`（L1 in-process HTTP bridge）+ `mock-agent`（測試），由 Copilot 使用 |
-| Provider registry（單一來源） | `src/shared/agent-providers.ts` | `AGENT_PROVIDERS = { label, bin }` per provider + `AgentProvider = keyof typeof`；consumers 一律 iterate（見 `context/agent-providers` #18） |
+| Provider registry（identity 單一來源） | `src/shared/agent-providers.ts` | provider key → label / visibility / runtime binding，衍生 `AgentProvider` 與 presentation helpers（見 `context/agent-providers` #36） |
+| Backend registry | `backend-registry.ts` | requested provider key → cached backend；test mode 只替換 implementation，不改 identity/cache boundary |
 | Provider 純 helper（claude） | `providers/claude/helpers.ts` | claude/index 抽出的 side-effect-free 函式 + types（封閉邊界，只被 claude/ 引用） |
 | Turn 路由（claude） | `providers/claude/turn-router.ts` | 純 attribution 狀態機，按順序把 message 分 foreground/server/task lane |
 | Provider 純 helper（copilot） | `providers/copilot/helpers.ts` | `resolveCopilotBinary` / `resolveCopilotCommand` / `copilotConfigHome`（`$COPILOT_HOME` per-appId）/ `copilotEnv`（token-env 傳遞）— 只被 copilot/ 引用 |
@@ -133,7 +134,7 @@ title: shelf-terminal — Intent → File Index
 | Context persistence 測試 | `context-store.test.ts` | round-trip + Claude resume / Copilot chain |
 | Provider types | `providers/types.ts` | `ServerBackend` / `SendFn` / `QueryInput` / `OutgoingMessage` / `ProviderCapabilities` 等 |
 | Slash prefix detection | `src/shared/slash-prefix.ts` | `parseSlashPrefix(prompt)` 共用 helper（provider + renderer 同份） |
-| Fake provider | `providers/fake/index.ts` | E2E-only backend，`SHELF_TEST_MODE=1` 時回它，prompt 走 prefix-matched scenario |
+| Fake provider | `providers/fake/index.ts` | registered internal provider；可顯式選取，也可在 `SHELF_TEST_MODE=1` 作 requested provider 的 substitute；prompt 走 prefix-matched scenario |
 | Fake provider 測試 | `providers/fake/fake.test.ts` | 每個 scenario 的 wire-shape 驗證 + stop/abort 行為 |
 | Bundle build | `build.mjs` | esbuild → `dist/agent-server/<version>/index.js` 單一 ESM bundle（index/exec/dispatcher 同一 bundle，role 由 argv 選） |
 | Copilot provider 測試 | `providers/copilot/{copilot,helpers,login,mode-map,credit}.test.ts` | ACP backend wire-shape / helper 純函式 / device-flow login / mode-map 對應 / credit normalize + cache-aside |

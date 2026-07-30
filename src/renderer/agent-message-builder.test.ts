@@ -1,29 +1,30 @@
 import { describe, it, expect } from 'vitest';
+import { CLAUDE_PROVIDER } from '@shared/agent-providers';
 import { buildAgentMsg } from './agent-message-builder';
 
 describe('buildAgentMsg', () => {
   it('maps reply wire payload to a reply bubble', () => {
-    const out = buildAgentMsg({ type: 'reply', msgId: 'm1', content: 'hi' }, 'claude');
-    expect(out).toMatchObject({ id: 'm1', type: 'reply', content: 'hi', provider: 'claude' });
+    const out = buildAgentMsg({ type: 'reply', msgId: 'm1', content: 'hi' }, CLAUDE_PROVIDER);
+    expect(out).toMatchObject({ id: 'm1', type: 'reply', content: 'hi', provider: CLAUDE_PROVIDER });
   });
 
   it('maps error wire payload to an error bubble', () => {
-    const out = buildAgentMsg({ type: 'error', msgId: 'e1', content: 'boom' }, 'claude');
+    const out = buildAgentMsg({ type: 'error', msgId: 'e1', content: 'boom' }, CLAUDE_PROVIDER);
     expect(out).toMatchObject({ id: 'e1', type: 'error', content: 'boom' });
   });
 
   it('returns null for unknown message type', () => {
-    const out = buildAgentMsg({ type: 'totally-unknown', msgId: 'x' } as any, 'claude');
+    const out = buildAgentMsg({ type: 'totally-unknown', msgId: 'x' } as any, CLAUDE_PROVIDER);
     expect(out).toBeNull();
   });
 
   it('carries parentToolUseId through for a nested subagent message', () => {
-    const out = buildAgentMsg({ type: 'fold_code', msgId: 't1', label: 'Read', parentToolUseId: 'outer-1' }, 'claude') as any;
+    const out = buildAgentMsg({ type: 'fold_code', msgId: 't1', label: 'Read', parentToolUseId: 'outer-1' }, CLAUDE_PROVIDER) as any;
     expect(out.parentToolUseId).toBe('outer-1');
   });
 
   it('omits parentToolUseId for a top-level message', () => {
-    const out = buildAgentMsg({ type: 'reply', msgId: 'm1', content: 'hi' }, 'claude') as any;
+    const out = buildAgentMsg({ type: 'reply', msgId: 'm1', content: 'hi' }, CLAUDE_PROVIDER) as any;
     expect(out.parentToolUseId).toBeUndefined();
   });
 
@@ -39,7 +40,7 @@ describe('buildAgentMsg', () => {
     it('maps user wire payload to a user bubble', () => {
       const out = buildAgentMsg(
         { type: 'user', msgId: 'bridge-user-1', content: 'hello from telegram' },
-        'claude',
+        CLAUDE_PROVIDER,
       );
       expect(out).toMatchObject({
         id: 'bridge-user-1',
@@ -51,19 +52,19 @@ describe('buildAgentMsg', () => {
     it('passes through images when present', () => {
       const out = buildAgentMsg(
         { type: 'user', msgId: 'u1', content: 'pic', images: ['data:image/png;base64,x'] },
-        'claude',
+        CLAUDE_PROVIDER,
       ) as any;
       expect(out.images).toEqual(['data:image/png;base64,x']);
     });
 
     it('omits images/files when empty or absent', () => {
-      const out = buildAgentMsg({ type: 'user', msgId: 'u2', content: 'plain' }, 'claude') as any;
+      const out = buildAgentMsg({ type: 'user', msgId: 'u2', content: 'plain' }, CLAUDE_PROVIDER) as any;
       expect(out.images).toBeUndefined();
       expect(out.files).toBeUndefined();
     });
 
     it('falls back to empty string when content is missing', () => {
-      const out = buildAgentMsg({ type: 'user', msgId: 'u3' }, 'claude') as any;
+      const out = buildAgentMsg({ type: 'user', msgId: 'u3' }, CLAUDE_PROVIDER) as any;
       expect(out.content).toBe('');
     });
   });
