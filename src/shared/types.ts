@@ -3,7 +3,12 @@
 // AgentProvider is DERIVED from the single-source provider registry (label + deploy
 // binary per provider). Re-exported here so the many `@shared/types` importers keep
 // working. To add a provider: edit shared/agent-providers.ts (+ its backend factory).
-import type { AgentProvider } from './agent-providers';
+import {
+  AGENT_CUSTOM_MODEL_PROVIDERS,
+  AGENT_PROVIDERS,
+  type AgentCustomModelProvider,
+  type AgentProvider,
+} from './agent-providers';
 export type { AgentProvider };
 export type TabType = 'terminal' | 'agent' | 'web';
 
@@ -393,7 +398,7 @@ export interface AppSettings {
    *  to fate-shared transports (local/docker/wsl) — ssh has its own idle
    *  shutdown. See claude-idle-teardown. */
   agentIdleTeardownMinutes: number;
-  providerModels?: Partial<Record<PmProviderType | 'claude', ProviderModel[]>>;
+  providerModels?: Partial<Record<PmProviderType | AgentCustomModelProvider, ProviderModel[]>>;
   /** Persisted width (px) of the left project sidebar. Restored at launch;
    *  clamped to a usable range when applied. */
   sidebarWidth?: number;
@@ -601,9 +606,15 @@ export const PM_PROVIDERS: PmProviderMeta[] = [
  * its SDK validates model IDs against GitHub's API and would reject custom entries.
  * See agent-server/providers/copilot.ts gatherCapabilities.
  */
-export const AGENT_PROVIDER_REGISTRY: { id: 'claude'; label: string; models: ProviderModel[] }[] = [
-  { id: 'claude', label: 'Claude', models: [] },
-];
+export const AGENT_PROVIDER_REGISTRY: {
+  id: AgentCustomModelProvider;
+  label: string;
+  models: ProviderModel[];
+}[] = AGENT_CUSTOM_MODEL_PROVIDERS.map((id) => ({
+  id,
+  label: AGENT_PROVIDERS[id].label,
+  models: [],
+}));
 
 export function getModelsForProvider(providerType: PmProviderType, custom?: Partial<Record<PmProviderType, ProviderModel[]>>): ProviderModel[] {
   const defaults = PM_PROVIDERS.find((p) => p.id === providerType)?.models ?? [];
