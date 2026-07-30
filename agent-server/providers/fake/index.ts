@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { formatConfigAck } from '@shared/config-ack';
 import { parseSlashPrefix } from '@shared/slash-prefix';
+import { FAKE_PROVIDER, type AgentProvider } from '@shared/agent-providers';
 import { mdTable } from '../md-table';
 import { callMain } from '../../app-tool-client';
 import type {
@@ -160,7 +161,7 @@ export function pickerComboPrompts(): FakePrompt[] {
   }];
 }
 
-export function createFakeBackend(): ServerBackend {
+export function createFakeBackend(_representedProvider: AgentProvider = FAKE_PROVIDER): ServerBackend {
   const pendingPickers = new Map<string, PendingPicker>();
   const pendingPermissions = new Map<string, PendingPermission>();
   // Canned output per background task id, populated by the `taskdone:` scenario

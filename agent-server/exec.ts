@@ -19,6 +19,7 @@ import { initAppToolClient, resolveAppToolResult } from './app-tool-client';
 import { setLogSink, serverLog } from './server-logger';
 import { setWireSink } from './logger';
 import { createSendQueue } from './send-queue';
+import { createBackendRegistry, type BackendFactory } from './backend-registry';
 import { projectAppSkills } from './providers/shared';
 import type { AgentAttachment } from '@shared/types';
 import type { OutgoingMessage, QueryInput, ServerBackend, PickerResolvePayload, ModelCacheClient } from './providers/types';
@@ -27,6 +28,7 @@ import {
   CLAUDE_PROVIDER,
   CODEX_PROVIDER,
   COPILOT_PROVIDER,
+  FAKE_PROVIDER,
 } from '@shared/agent-providers';
 
 // Reuse the shared registry-derived union — no separate list to keep in sync.
@@ -195,7 +197,6 @@ function touchHeartbeats(): void {
 const SHELF_SESSION = randomUUID();
 process.env[SESSION_ENV_KEY] = SHELF_SESSION;
 
-const backends = new Map<Provider, ServerBackend>();
 let activeBackend: ServerBackend | null = null;
 
 /**
@@ -290,19 +291,21 @@ function ensureConfigHome(backend: ServerBackend, appId: string | undefined): vo
 
 // Backend factory per provider. `Record<Provider, …>` makes this EXHAUSTIVE —
 // adding a provider to the shared registry is a compile error until wired here.
-const BACKEND_FACTORIES: Record<Provider, () => ServerBackend> = {
+const BACKEND_FACTORIES = {
   [CLAUDE_PROVIDER]: createClaudeBackend,
   [COPILOT_PROVIDER]: createCopilotBackend,
   [CODEX_PROVIDER]: createCodexBackend,
-};
+  [FAKE_PROVIDER]: () => createFakeBackend(FAKE_PROVIDER),
+} satisfies Record<Provider, BackendFactory>;
+
+const backendRegistry = createBackendRegistry(
+  BACKEND_FACTORIES,
+  TEST_MODE,
+  (provider) => createFakeBackend(provider),
+);
 
 function getBackend(provider: Provider): ServerBackend {
-  const key = (TEST_MODE ? 'fake' : provider) as Provider;
-  let b = backends.get(key);
-  if (b) return b;
-  b = TEST_MODE ? createFakeBackend() : BACKEND_FACTORIES[provider]();
-  backends.set(key, b);
-  return b;
+  return backendRegistry.get(provider);
 }
 
 async function handleSend(msg: IncomingMessage) {
@@ -580,8 +583,8 @@ rl.on('line', (line) => {
       // copy-mode), THEN tell EVERY provider to re-scan on its live session. App
       // skills are app-global, not per-session; each reload is best-effort + no-op
       // without a live session. Emit a `skills_reloaded` result via the BASE send.
-      for (const b of backends.values()) ensureSkillsProjected(b, lastAppId);
-      for (const b of backends.values()) {
+      for (const b of backendRegistry.values()) ensureSkillsProjected(b, lastAppId);
+      for (const b of backendRegistry.values()) {
         void b.reloadSkills?.().then((r) => {
           if (r && r.reloaded) send({ type: 'skills_reloaded', ok: r.ok, ...(r.error ? { error: r.error } : {}) });
         });
@@ -629,7 +632,7 @@ rl.on('line', (line) => {
         // Tell every provider that has cached state for this session to drop it,
         // so they don't try to resume from a now-deleted lastSdkSessionId on
         // the next turn. Sync per-backend call — they just clear in-memory refs.
-        for (const b of backends.values()) b.resetSession?.(msg.sessionId);
+        for (const b of backendRegistry.values()) b.resetSession?.(msg.sessionId);
       }
       break;
     }
@@ -655,7 +658,7 @@ async function shutdown(): Promise<void> {
   if (shuttingDown) return;
   shuttingDown = true;
   await performShutdown({
-    backends: [...backends.values()],
+    backends: backendRegistry.values(),
     reapTimeoutMs: REAP_TIMEOUT_MS,
     log: (level, msg) => serverLog(level, 'reaper', msg),
     // Normal closure: we just reaped our own detached tasks, so drop our crash-net
