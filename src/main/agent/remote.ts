@@ -13,7 +13,7 @@ import { buildEnvExportPrefix, applyEnvMap, type EnvMap } from '@shared/project-
 import { createTurnDispatcher, type PermissionHandler } from './turn-dispatcher';
 import { createDispatcherConnection, type DispatcherConnection, type DispatcherProc } from './dispatcher-connection';
 import { getAppInstanceId } from '../app-instance-id';
-import { AGENT_PROVIDERS } from '@shared/agent-providers';
+import { AGENT_PROVIDERS, CLAUDE_PROVIDER } from '@shared/agent-providers';
 import { skillsSourceRoot, listSkillFilesRel, hashSkillsTree } from '../skills-projection';
 import { syncMcpForConnection } from '../mcp-remote';
 import { transportPutDir, composeRemotePath } from '../connector/transport';
@@ -70,7 +70,7 @@ interface RemoteProcess {
 export function createRemoteBackend(
   connection: Connection,
   initScript?: string,
-  provider: AgentProvider = 'claude',
+  provider: AgentProvider = CLAUDE_PROVIDER,
   sessionId?: string,
   // Optional per-tab init-phase reporter — main wires it to AGENT_INIT_STATUS
   // so the renderer's spinner text refines as deploy/spawn/probe progress.

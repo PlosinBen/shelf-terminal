@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { serverLog } from './server-logger';
 import { loadContext, saveContext, type PersistedContext } from './context-store';
 import type { OutgoingMessage, SendFn } from './providers/types';
+import type { AgentProvider } from '@shared/agent-providers';
 
 /**
  * Hydrate persisted context for a turn. Surfaces the row only when the
@@ -10,7 +11,7 @@ import type { OutgoingMessage, SendFn } from './providers/types';
  * could mislead a provider into resuming an unrelated SDK session.
  */
 export function loadRestoreContextFor(
-  provider: string,
+  provider: AgentProvider,
   sessionId: string | undefined,
 ): PersistedContext | undefined {
   if (!sessionId) return undefined;
@@ -76,7 +77,7 @@ export function wrapSendForTurn(turnId: string, raw: SendFn): SendFn {
 }
 
 export function wrapSendForContext(
-  provider: string,
+  provider: AgentProvider,
   sessionId: string | undefined,
   raw: SendFn,
   now: () => number = Date.now,

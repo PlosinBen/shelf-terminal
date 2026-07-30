@@ -10,6 +10,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { createRequire } from 'node:module';
+import { CODEX_PROVIDER } from '@shared/agent-providers';
 
 /** Command + args to launch a Codex JS entry. */
 export interface CodexCommand {
@@ -26,7 +27,7 @@ const CODEX_CLI_ENTRY = path.join('node_modules', '@openai', 'codex', 'bin', 'co
  */
 export function codexConfigHome(appId: string | undefined): string | undefined {
   if (!appId) return undefined;
-  return path.join(os.homedir(), '.shelf', 'apps', appId, 'codex');
+  return path.join(os.homedir(), '.shelf', 'apps', appId, CODEX_PROVIDER);
 }
 
 /**

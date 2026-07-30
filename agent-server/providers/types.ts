@@ -21,7 +21,7 @@ export function formatResetCountdown(resetsAtMs: number): string | null {
   return `${Math.ceil(d / 60_000)}m`;
 }
 
-import type { AgentAttachment, AgentQueueItem, ProviderModel, TaskEvent } from '@shared/types';
+import type { AgentAttachment, AgentProvider, AgentQueueItem, ProviderModel, TaskEvent } from '@shared/types';
 import type { PersistedContext } from '../context-store';
 
 /**
@@ -380,8 +380,8 @@ export interface ProviderCapabilities {
  * provider-private blob (the raw model list).
  */
 export interface ModelCacheClient {
-  get(key: string, provider: string): Promise<{ hit: boolean; value?: unknown }>;
-  put(key: string, provider: string, value: unknown): void;
+  get(key: string, provider: AgentProvider): Promise<{ hit: boolean; value?: unknown }>;
+  put(key: string, provider: AgentProvider, value: unknown): void;
 }
 
 /**

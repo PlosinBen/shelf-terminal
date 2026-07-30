@@ -6,6 +6,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
+import { COPILOT_PROVIDER } from '@shared/agent-providers';
 
 /** Command + args to launch the `copilot` CLI in ACP mode over stdio. */
 export interface CopilotCommand {
@@ -68,7 +69,7 @@ export function resolveCopilotCommand(
  */
 export function copilotConfigHome(appId: string | undefined): string | undefined {
   if (!appId) return undefined;
-  return path.join(os.homedir(), '.shelf', 'apps', appId, 'copilot');
+  return path.join(os.homedir(), '.shelf', 'apps', appId, COPILOT_PROVIDER);
 }
 
 /**

@@ -15,22 +15,23 @@
 // generalization — deliberately OUT of scope here. The seam (the injected
 // `runtimeKeyFor`) is in place so G is a policy change, not a wire retrofit.
 import type { ServerBackend } from './providers/types';
+import type { AgentProvider } from '@shared/agent-providers';
 
 export type RuntimeKey = string;
 
 export interface SessionRegistryDeps {
   /** Build a fresh single-session backend for a provider (index.ts injects its
    *  `getBackend`). Called once per distinct runtimeKey. */
-  createRuntime: (provider: string) => ServerBackend;
+  createRuntime: (provider: AgentProvider) => ServerBackend;
   /** Maps a session to its runtime. Default (isolated): the sid itself → one
    *  runtime per session. Overridden in gated-G for shared (provider:account). */
-  runtimeKeyFor?: (sid: string, provider: string) => RuntimeKey;
+  runtimeKeyFor?: (sid: string, provider: AgentProvider) => RuntimeKey;
 }
 
 export interface SessionRegistry {
   /** Ensure a runtime for `sid` (reusing one when its runtimeKey already exists)
    *  and return it. Idempotent for the same sid. */
-  open(sid: string, provider: string): ServerBackend;
+  open(sid: string, provider: AgentProvider): ServerBackend;
   /** The runtime hosting `sid`, or undefined if the sid is unknown. */
   get(sid: string): ServerBackend | undefined;
   /**
@@ -50,7 +51,7 @@ export function createSessionRegistry(deps: SessionRegistryDeps): SessionRegistr
   const sessions = new Map<string, RuntimeKey>();
   const runtimes = new Map<RuntimeKey, ServerBackend>();
 
-  function open(sid: string, provider: string): ServerBackend {
+  function open(sid: string, provider: AgentProvider): ServerBackend {
     const rk = runtimeKeyFor(sid, provider);
     let rt = runtimes.get(rk);
     if (!rt) {

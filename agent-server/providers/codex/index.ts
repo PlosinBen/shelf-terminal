@@ -67,7 +67,7 @@ export interface CodexBackendDeps {
 
 export function codexHome(appId: string | undefined): string | undefined {
   const home = codexConfigHome(appId);
-  return home ? path.join(path.dirname(home), 'codex-home') : undefined;
+  return home ? path.join(path.dirname(home), `${CODEX_PROVIDER}-home`) : undefined;
 }
 
 export function codexSkillTarget(appId: string | undefined): string | undefined {

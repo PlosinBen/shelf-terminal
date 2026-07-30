@@ -5,6 +5,7 @@
 // (`COPILOT_HOME` + `useLoggedInUser`) — NO token is read or passed, so the
 // device-scoped-auth / provider boundary is preserved (Shelf only hands a PATH).
 import { CopilotClient, RuntimeConnection } from '@github/copilot-sdk';
+import { COPILOT_PROVIDER } from '@shared/agent-providers';
 import { resolveCopilotBinary, copilotEnv } from './helpers';
 import { serverLog } from '../../server-logger';
 import type { ModelCacheClient, SendFn, StatusSegment } from '../types';
@@ -87,7 +88,7 @@ export async function refreshCopilotCredit(
 ): Promise<void> {
   try {
     const cached = cache
-      ? ((await cache.get(CREDIT_CACHE_KEY, 'copilot')).value as CachedCredit | undefined)
+      ? ((await cache.get(CREDIT_CACHE_KEY, COPILOT_PROVIDER)).value as CachedCredit | undefined)
       : localCredit;
     if (cached && now() - cached.fetchedAt < CREDIT_TTL_MS) {
       if (cached.segment) send({ type: 'status', credits: cached.segment });
@@ -95,7 +96,7 @@ export async function refreshCopilotCredit(
     }
     const segment = await fetch(appId);
     const entry: CachedCredit = { segment, fetchedAt: now() };
-    if (cache) cache.put(CREDIT_CACHE_KEY, 'copilot', entry);
+    if (cache) cache.put(CREDIT_CACHE_KEY, COPILOT_PROVIDER, entry);
     else localCredit = entry;
     if (segment) send({ type: 'status', credits: segment });
   } catch (err) {

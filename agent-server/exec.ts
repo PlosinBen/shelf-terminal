@@ -23,6 +23,11 @@ import { projectAppSkills } from './providers/shared';
 import type { AgentAttachment } from '@shared/types';
 import type { OutgoingMessage, QueryInput, ServerBackend, PickerResolvePayload, ModelCacheClient } from './providers/types';
 import type { ProviderModel, AgentProvider } from '@shared/types';
+import {
+  CLAUDE_PROVIDER,
+  CODEX_PROVIDER,
+  COPILOT_PROVIDER,
+} from '@shared/agent-providers';
 
 // Reuse the shared registry-derived union — no separate list to keep in sync.
 type Provider = AgentProvider;
@@ -286,9 +291,9 @@ function ensureConfigHome(backend: ServerBackend, appId: string | undefined): vo
 // Backend factory per provider. `Record<Provider, …>` makes this EXHAUSTIVE —
 // adding a provider to the shared registry is a compile error until wired here.
 const BACKEND_FACTORIES: Record<Provider, () => ServerBackend> = {
-  claude: createClaudeBackend,
-  copilot: createCopilotBackend,
-  codex: createCodexBackend,
+  [CLAUDE_PROVIDER]: createClaudeBackend,
+  [COPILOT_PROVIDER]: createCopilotBackend,
+  [CODEX_PROVIDER]: createCodexBackend,
 };
 
 function getBackend(provider: Provider): ServerBackend {
@@ -323,7 +328,7 @@ async function handleSend(msg: IncomingMessage) {
     turnSend({ type: 'status', state: 'idle' });
     return;
   }
-  const provider = msg.provider ?? 'claude';
+  const provider = msg.provider ?? CLAUDE_PROVIDER;
   let backend: ServerBackend;
   try {
     backend = getBackend(provider);
@@ -505,7 +510,7 @@ rl.on('line', (line) => {
       }
       break;
     case 'get_capabilities': {
-      const provider = msg.provider ?? 'claude';
+      const provider = msg.provider ?? CLAUDE_PROVIDER;
       (async () => {
         try {
           const backend = getBackend(provider);
@@ -527,7 +532,7 @@ rl.on('line', (line) => {
       break;
     }
     case 'store_credential': {
-      const provider = msg.provider ?? 'claude';
+      const provider = msg.provider ?? CLAUDE_PROVIDER;
       (async () => {
         try {
           const backend = getBackend(provider);
@@ -541,7 +546,7 @@ rl.on('line', (line) => {
       break;
     }
     case 'clear_credential': {
-      const provider = msg.provider ?? 'claude';
+      const provider = msg.provider ?? CLAUDE_PROVIDER;
       (async () => {
         try {
           const backend = getBackend(provider);
@@ -555,7 +560,7 @@ rl.on('line', (line) => {
       break;
     }
     case 'read_task_output': {
-      const provider = msg.provider ?? 'claude';
+      const provider = msg.provider ?? CLAUDE_PROVIDER;
       (async () => {
         try {
           const backend = getBackend(provider);
@@ -587,7 +592,7 @@ rl.on('line', (line) => {
       // CLI login, forwards the parsed prompt via the BASE `send` (turnId-less,
       // like auth_required), and emits auth_login_done on exit. See
       // features copilot-device-login.
-      const provider = msg.provider ?? 'copilot';
+      const provider = msg.provider ?? COPILOT_PROVIDER;
       try {
         const backend = getBackend(provider);
         if (!backend.startLogin) {
@@ -610,7 +615,7 @@ rl.on('line', (line) => {
       // login just wrote. No-op for providers without a long-lived process. main
       // sends this right before re-fetching capabilities (order preserved by the
       // FIFO stdin stream — reconnect runs synchronously before get_capabilities).
-      const provider = msg.provider ?? 'copilot';
+      const provider = msg.provider ?? COPILOT_PROVIDER;
       try {
         getBackend(provider).reconnect?.();
       } catch (err: any) {

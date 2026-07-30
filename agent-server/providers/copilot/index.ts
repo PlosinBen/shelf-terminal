@@ -8,6 +8,7 @@ import { randomUUID } from 'node:crypto';
 import * as path from 'node:path';
 import type { ChildProcess } from 'node:child_process';
 import { methods, type Stream, type AgentApp, type SessionModeState, type SessionConfigOption } from '@agentclientprotocol/sdk';
+import { COPILOT_PROVIDER } from '@shared/agent-providers';
 import { formatConfigAck, type ConfigEditKey } from '@shared/config-ack';
 import type { ServerBackend, QueryInput, SendFn, ProviderCapabilities } from '../types';
 import { serverLog } from '../../server-logger';
@@ -27,8 +28,6 @@ import { startLogin as startCopilotLogin, prefillLoginUrl, type LoginRunner } fr
 // resolve the option id for session/set_config_option.
 const MODEL_CATEGORY = 'model';
 const EFFORT_CATEGORY = 'thought_level';
-
-export const COPILOT_PROVIDER = 'copilot';
 
 // oauth authMethod for the unauthenticated caps return — WITHOUT it the AuthPane
 // (gated on `authMethod.kind === 'oauth'`) renders no Login button, so device-flow
