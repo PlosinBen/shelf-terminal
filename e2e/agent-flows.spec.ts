@@ -45,10 +45,23 @@ test.describe('agent flows via fake provider', () => {
       await expect(menu).toBeVisible({ timeout: 5_000 });
       // One button per registry entry. Post-cutover: `copilot` IS the ACP backend
       // (no separate "Copilot ACP · dev" entry).
-      for (const label of ['Agent (Claude)', 'Agent (Copilot)', 'Agent (Codex)']) {
+      for (const label of ['Agent (Claude)', 'Agent (Copilot)', 'Agent (Codex)', 'Agent (Test Agent)']) {
         await expect(menu.locator('.context-menu-item', { hasText: label })).toBeVisible();
       }
       await expect(menu.locator('.context-menu-item', { hasText: 'Copilot ACP' })).toHaveCount(0);
+    });
+
+    test('renders an internal provider from its registry label', async ({ shelfApp: { page } }) => {
+      await setupProject(page);
+      await page.locator('.tab-add').click({ button: 'right' });
+      await page.locator('.context-menu-item', { hasText: 'Agent (Test Agent)' }).click();
+
+      await expect(page.locator('.tab-bar .tab', { hasText: 'Test Agent' })).toBeVisible();
+      await expect(page.locator('.agent-status-bar:visible')).toContainText('Test Agent');
+
+      await sendAgentPrompt(page, 'text:label-source');
+      await expect(page.locator('.agent-msg-reply:visible').last().locator('.agent-msg-label'))
+        .toHaveText('Test Agent:');
     });
   });
 
@@ -185,7 +198,7 @@ test.describe('agent flows via fake provider', () => {
 
     // The entire agent view flips to the auth pane on auth_required.
     await expect(page.locator('.agent-auth-pane:visible')).toBeVisible({ timeout: 5_000 });
-    await expect(page.locator('.agent-auth-title:visible')).toContainText('Fake');
+    await expect(page.locator('.agent-auth-title:visible')).toHaveText('Fake Harness not authenticated');
     // OAuth pane renders the method's fallback hints under the login button
     // (Copilot uses this to point headless remotes at a token env var).
     await expect(page.locator('.agent-auth-hints:visible')).toBeVisible();

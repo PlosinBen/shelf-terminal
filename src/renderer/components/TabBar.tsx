@@ -11,7 +11,7 @@ import {
   toggleRightSidebar,
 } from '../store';
 import { emit, Events } from '../events';
-import { agentProviderEntries } from '@shared/agent-providers';
+import { visibleAgentProviderEntries } from '@shared/agent-providers';
 import { PaperPlaneIcon } from './icons';
 
 // PM Active (telegram listener) live badge — shown in the tab bar's top-right
@@ -292,7 +292,7 @@ export function TabBar() {
           <div className="context-menu-divider" />
           {/* One button per provider, from the single-source registry.
               Add a provider = one registry entry. */}
-          {agentProviderEntries().map(([id, meta]) => (
+          {visibleAgentProviderEntries(import.meta.env.DEV).map(([id, meta]) => (
             <button
               key={id}
               className="context-menu-item"

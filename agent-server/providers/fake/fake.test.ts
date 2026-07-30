@@ -202,7 +202,7 @@ describe('createFakeBackend — scenarios', () => {
     const { send, msgs } = collect();
     await createFakeBackend().query(makeInput('auth_required'), send);
     const e = msgs.find((m) => m.type === 'auth_required') as any;
-    expect(e.provider).toBe('fake');
+    expect(e.provider).toBe('Fake Harness');
   });
 
   it('error: emits error event', async () => {

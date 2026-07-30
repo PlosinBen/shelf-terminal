@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { driveDeviceCodeLogin, type LoginRpc } from './app-server-login';
+import { CODEX_AUTH_DISPLAY_NAME } from './auth';
 import type { OutgoingMessage } from '../types';
 
 /** Fake JSON-RPC transport scripting the codex app-server login handshake. */
@@ -27,11 +28,11 @@ describe('driveDeviceCodeLogin', () => {
     await new Promise((r) => setTimeout(r, 0)); // let the async handshake run
 
     expect(wire).toEqual([
-      { type: 'auth_login_prompt', provider: 'codex', verificationUri: START.verificationUrl, userCode: 'ABCD-1234', prefilledUri: START.verificationUrl },
+      { type: 'auth_login_prompt', provider: CODEX_AUTH_DISPLAY_NAME, verificationUri: START.verificationUrl, userCode: 'ABCD-1234', prefilledUri: START.verificationUrl },
     ]);
 
     rpc.fireCompleted(true);
-    expect(wire.at(-1)).toEqual({ type: 'auth_login_done', provider: 'codex', ok: true });
+    expect(wire.at(-1)).toEqual({ type: 'auth_login_done', provider: CODEX_AUTH_DISPLAY_NAME, ok: true });
     expect(rpc.close).toHaveBeenCalled();
   });
 
@@ -41,19 +42,19 @@ describe('driveDeviceCodeLogin', () => {
     const handle = driveDeviceCodeLogin(rpc, (m) => wire.push(m));
     await new Promise((r) => setTimeout(r, 0));
     handle.cancel();
-    expect(wire.at(-1)).toEqual({ type: 'auth_login_done', provider: 'codex', ok: false, cancelled: true });
+    expect(wire.at(-1)).toEqual({ type: 'auth_login_done', provider: CODEX_AUTH_DISPLAY_NAME, ok: false, cancelled: true });
     expect(rpc.close).toHaveBeenCalled();
   });
 
-  it('stamps an injected provider id on prompt and done events', async () => {
+  it('stamps injected display content on prompt and done events', async () => {
     const rpc = fakeRpc(START);
     const wire: OutgoingMessage[] = [];
-    driveDeviceCodeLogin(rpc, (m) => wire.push(m), 'codex');
+    driveDeviceCodeLogin(rpc, (m) => wire.push(m), 'Codex Preview');
     await new Promise((r) => setTimeout(r, 0));
     rpc.fireCompleted(true);
 
-    expect(wire[0]).toMatchObject({ type: 'auth_login_prompt', provider: 'codex' });
-    expect(wire.at(-1)).toEqual({ type: 'auth_login_done', provider: 'codex', ok: true });
+    expect(wire[0]).toMatchObject({ type: 'auth_login_prompt', provider: 'Codex Preview' });
+    expect(wire.at(-1)).toEqual({ type: 'auth_login_done', provider: 'Codex Preview', ok: true });
   });
 
   it('reports a failed handshake as auth_login_done(error)', async () => {
@@ -65,6 +66,11 @@ describe('driveDeviceCodeLogin', () => {
     const wire: OutgoingMessage[] = [];
     driveDeviceCodeLogin(rpc, (m) => wire.push(m));
     await new Promise((r) => setTimeout(r, 0));
-    expect(wire.at(-1)).toMatchObject({ type: 'auth_login_done', provider: 'codex', ok: false, error: 'boom' });
+    expect(wire.at(-1)).toMatchObject({
+      type: 'auth_login_done',
+      provider: CODEX_AUTH_DISPLAY_NAME,
+      ok: false,
+      error: 'boom',
+    });
   });
 });

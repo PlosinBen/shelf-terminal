@@ -12,6 +12,8 @@ import type {
   ServerBackend,
 } from '../types';
 
+const FAKE_AUTH_DISPLAY_NAME = 'Fake Harness';
+
 /**
  * Fake provider for E2E — emits scripted OutgoingMessage sequences in
  * response to scenario-prefixed prompts. Gated by `SHELF_TEST_MODE=1`
@@ -487,7 +489,7 @@ export function createFakeBackend(): ServerBackend {
     }
 
     if (step === 'auth_required') {
-      send({ type: 'auth_required', provider: 'fake' });
+      send({ type: 'auth_required', provider: FAKE_AUTH_DISPLAY_NAME });
       return;
     }
 
@@ -658,7 +660,7 @@ export function createFakeBackend(): ServerBackend {
       fakeLoginSend = send;
       send({
         type: 'auth_login_prompt',
-        provider: 'fake',
+        provider: FAKE_AUTH_DISPLAY_NAME,
         verificationUri: 'https://github.com/login/device',
         userCode: 'FAKE-CODE',
         prefilledUri: 'https://github.com/login/device?user_code=FAKE-CODE',
@@ -666,7 +668,7 @@ export function createFakeBackend(): ServerBackend {
     },
 
     cancelLogin() {
-      fakeLoginSend?.({ type: 'auth_login_done', provider: 'fake', ok: false, cancelled: true });
+      fakeLoginSend?.({ type: 'auth_login_done', provider: FAKE_AUTH_DISPLAY_NAME, ok: false, cancelled: true });
       fakeLoginSend = null;
     },
 

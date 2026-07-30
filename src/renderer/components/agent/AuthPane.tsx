@@ -33,7 +33,7 @@ export function AuthPane({ tabId }: Props) {
 
   if (!authRequired) return null;
 
-  const providerLabel = authRequired.provider.charAt(0).toUpperCase() + authRequired.provider.slice(1);
+  const providerName = authRequired.provider;
 
   // Interactive device-flow login (oauth providers, e.g. Copilot). Spawns
   // `copilot login` on the agent-server; main opens the LOCAL browser to the
@@ -66,13 +66,13 @@ export function AuthPane({ tabId }: Props) {
   return (
     <div className="agent-auth-pane">
       <div className="agent-auth-title">
-        {authMethod?.kind === 'api-key' ? `${providerLabel} API key missing` :
-         authMethod?.kind === 'sdk-managed' ? `${providerLabel} SDK not signed in` :
-         `${providerLabel} not authenticated`}
+        {authMethod?.kind === 'api-key' ? `${providerName} API key missing` :
+         authMethod?.kind === 'sdk-managed' ? `${providerName} SDK not signed in` :
+         `${providerName} not authenticated`}
       </div>
       {authMethod?.kind === 'api-key' && (
         <div className="agent-auth-instructions">
-          {providerLabel} needs an API key.
+          {providerName} needs an API key.
           {authMethod.setupUrl && <> Get one at <code>{authMethod.setupUrl}</code>.</>}
         </div>
       )}
@@ -101,7 +101,7 @@ export function AuthPane({ tabId }: Props) {
             </div>
           ) : (
             <>
-              <div className="agent-auth-instructions">Sign in to {providerLabel}:</div>
+              <div className="agent-auth-instructions">Sign in to {providerName}:</div>
               <button className="agent-reset-btn" onClick={startLogin}>Log in</button>
               {authMethod.instructions && authMethod.instructions.length > 0 && (
                 <ul className="agent-auth-list agent-auth-hints">

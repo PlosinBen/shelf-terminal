@@ -6,7 +6,7 @@ import { debugLog } from '../debugLog';
 import { buildWorktreeChildConfig } from '../worktree-child-config';
 import { normalizeWorktreePrefillNotePaths } from '../worktree-prefill';
 import type { AgentProvider, FeatureNoteInfo, ProjectConfig } from '@shared/types';
-import { agentProviderEntries } from '@shared/agent-providers';
+import { visibleAgentProviderEntries } from '@shared/agent-providers';
 
 function featureNoteFilename(path: string): string {
   return path.split('/').pop() ?? path;
@@ -306,7 +306,7 @@ export function WorktreeDialog() {
               disabled={creating}
             >
               <option value="">Select a provider</option>
-              {agentProviderEntries().map(([id, meta]) => (
+              {visibleAgentProviderEntries(import.meta.env.DEV).map(([id, meta]) => (
                 <option key={id} value={id}>{meta.label}</option>
               ))}
             </select>

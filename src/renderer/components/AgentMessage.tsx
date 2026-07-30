@@ -4,6 +4,7 @@ import { renderMarkdown } from '../utils/markdown';
 import { alignLineDiff, type DiffRow } from '../utils/line-diff';
 import type { AgentDisplayMode, AgentDisplayKey, AgentFile, FoldBase } from '@shared/types';
 import { DEFAULT_AGENT_DISPLAY } from '@shared/types';
+import { isAgentProvider, providerLabel } from '@shared/agent-providers';
 
 /**
  * Renderer-side message variant. Mirrors `AgentMessage` from `@shared/types`
@@ -137,8 +138,8 @@ export function AgentMessage({ message, cwd: _cwd, nested }: Props) {
 
   switch (message.type) {
     case 'reply': {
-      const label = message.provider
-        ? `${message.provider.charAt(0).toUpperCase() + message.provider.slice(1)}:`
+      const label = isAgentProvider(message.provider)
+        ? `${providerLabel(message.provider)}:`
         : 'Assistant:';
       return (
         <div className="agent-msg agent-msg-reply">

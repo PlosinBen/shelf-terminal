@@ -1,5 +1,6 @@
 import React, { useCallback } from 'react';
 import type { AgentProvider } from '@shared/types';
+import { providerLabel } from '@shared/agent-providers';
 import { clearMessages as clearMessagesStore, setLocalPicker, useAgentTab } from '../../agentTabStore';
 
 interface Props {
@@ -63,7 +64,7 @@ export function StatusBar({ tabId, provider }: Props) {
       <span className="agent-status-dot" style={{ color: isStreaming ? 'var(--agent-warning, #e5c07b)' : 'var(--agent-success, #98c379)' }}>{'●'}</span>
       <span className="agent-status-label">{isStreaming ? 'running' : 'idle'}</span>
       <span className="agent-status-sep">|</span>
-      <span className="agent-status-seg">{provider.charAt(0).toUpperCase() + provider.slice(1)}</span>
+      <span className="agent-status-seg">{providerLabel(provider)}</span>
       {statusModel && (
         <>
           <span className="agent-status-sep">|</span>

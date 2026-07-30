@@ -3,7 +3,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import * as readline from 'node:readline';
 import type { SendFn } from '../types';
-import { deviceCodeToAuthPrompt, authLoginDone } from './auth';
+import { CODEX_AUTH_DISPLAY_NAME, deviceCodeToAuthPrompt, authLoginDone } from './auth';
 import { resolveCodexCliCommand } from './runtime';
 
 /** Minimal JSON-RPC client the login drive needs. */
@@ -29,7 +29,11 @@ export interface LoginHandle {
  * code) then `auth_login_done` on completion/failure. Returns a handle whose
  * `cancel()` tears down the transport.
  */
-export function driveDeviceCodeLogin(rpc: LoginRpc, emit: SendFn, provider = 'codex'): LoginHandle {
+export function driveDeviceCodeLogin(
+  rpc: LoginRpc,
+  emit: SendFn,
+  provider = CODEX_AUTH_DISPLAY_NAME,
+): LoginHandle {
   let settled = false;
   const done = (ok: boolean, opts?: { cancelled?: boolean; error?: string }) => {
     if (settled) return;

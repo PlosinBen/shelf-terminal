@@ -38,6 +38,7 @@ const COPILOT_AUTH_METHOD = {
   kind: 'oauth' as const,
   instructions: [{ label: 'Or set a GitHub token env var on a headless remote', command: 'GH_TOKEN=…' }],
 };
+const COPILOT_AUTH_DISPLAY_NAME = 'Copilot';
 
 /** What to connect the ACP client to + the child to reap (production spawns a
  *  `copilot --acp` process; tests inject an in-process mock AgentApp). */
@@ -361,7 +362,7 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
       try {
         cliPath = resolveCopilotCommand().command;
       } catch (err) {
-        send({ type: 'auth_login_done', provider: COPILOT_PROVIDER, ok: false, error: (err as Error)?.message ?? String(err) });
+        send({ type: 'auth_login_done', provider: COPILOT_AUTH_DISPLAY_NAME, ok: false, error: (err as Error)?.message ?? String(err) });
         return;
       }
       // Log into the per-app COPILOT_HOME so credentials land in the same config-
@@ -373,7 +374,7 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
         env: copilotEnv(lastAppId),
         onPrompt: (p) => send({
           type: 'auth_login_prompt',
-          provider: COPILOT_PROVIDER,
+          provider: COPILOT_AUTH_DISPLAY_NAME,
           verificationUri: p.verificationUri,
           userCode: p.userCode,
           prefilledUri: prefillLoginUrl(p),
@@ -381,7 +382,7 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
       });
       loginRunner.done.then((r) => send({
         type: 'auth_login_done',
-        provider: COPILOT_PROVIDER,
+        provider: COPILOT_AUTH_DISPLAY_NAME,
         ok: r.ok,
         cancelled: r.cancelled,
         error: r.error,

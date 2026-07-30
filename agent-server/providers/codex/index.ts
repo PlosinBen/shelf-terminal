@@ -598,7 +598,7 @@ export function createCodexBackend(deps: CodexBackendDeps = {}): ServerBackend {
     startLogin(_cwd: string, send: SendFn): void {
       loginHandle?.cancel();
       const { rpc } = spawnLoginRpc(codexEnv(lastAppId));
-      loginHandle = driveDeviceCodeLogin(rpc, send, CODEX_PROVIDER);
+      loginHandle = driveDeviceCodeLogin(rpc, send);
     },
 
     cancelLogin(): void {

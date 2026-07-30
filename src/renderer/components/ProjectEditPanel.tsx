@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useStore, setEditingProjectById, updateProjectConfigById, getResolvedDefaultAgentProvider } from '../store';
 import type { TabTemplate, QuickCommand, AgentProvider } from '@shared/types';
-import { agentProviderEntries } from '@shared/agent-providers';
+import { visibleAgentProviderEntries } from '@shared/agent-providers';
 import { TAB_COLORS } from './TabBar';
 import { formatBytes } from '../utils/format-bytes';
 import { validateEnvKey } from '@shared/project-env';
@@ -448,7 +448,7 @@ export function ProjectEditPanel() {
               }}
             >
               <option value="">None (ask each time)</option>
-              {agentProviderEntries().map(([id, meta]) => (
+              {visibleAgentProviderEntries(import.meta.env.DEV).map(([id, meta]) => (
                 <option key={id} value={id}>{meta.label}</option>
               ))}
             </select>

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ProjectConfig } from '@shared/types';
+import { FAKE_PROVIDER, FAKE_PROVIDER_LABEL } from '@shared/agent-providers';
 import { createProjectsRepository } from './projects-repository';
 
 function config(id: string): ProjectConfig {
@@ -13,6 +14,16 @@ function config(id: string): ProjectConfig {
 }
 
 describe('projects repository ordering', () => {
+  it('uses registry presentation metadata for a provider-keyed agent tab', () => {
+    const repo = createProjectsRepository();
+    repo.setProjects([config('A')]);
+
+    const tab = repo.addTab('A', undefined, undefined, undefined, 'agent', FAKE_PROVIDER);
+
+    expect(tab?.label).toBe(FAKE_PROVIDER_LABEL);
+    expect(tab?.provider).toBe(FAKE_PROVIDER);
+  });
+
   it('keeps stable view order unchanged when visual project order changes', () => {
     const save = vi.fn();
     const repo = createProjectsRepository({ saveProjects: save });

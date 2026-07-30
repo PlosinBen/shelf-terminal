@@ -1,6 +1,6 @@
 import type { OutgoingMessage } from '../types';
 
-export const CODEX_PROVIDER = 'codex';
+export const CODEX_AUTH_DISPLAY_NAME = 'Codex';
 
 /** Structured device-code login response from codex's app-server. */
 export interface CodexDeviceCodeLogin {
@@ -15,12 +15,12 @@ export type AuthLoginDoneMessage = Extract<OutgoingMessage, { type: 'auth_login_
 
 /**
  * Map a codex device-code login response → Shelf's `auth_login_prompt` wire
- * event. `provider` is injectable so side-by-side Codex transports can route
- * login feedback to the correct tab/provider identity.
+ * event. `provider` is provider-owned display content; routing is already
+ * session/tab scoped and must never derive identity from this value.
  */
 export function deviceCodeToAuthPrompt(
   login: CodexDeviceCodeLogin,
-  provider: string = CODEX_PROVIDER,
+  provider: string = CODEX_AUTH_DISPLAY_NAME,
 ): AuthLoginPromptMessage {
   return {
     type: 'auth_login_prompt',
@@ -38,7 +38,7 @@ export function authLoginDone(
 ): AuthLoginDoneMessage {
   return {
     type: 'auth_login_done',
-    provider: opts.provider ?? CODEX_PROVIDER,
+    provider: opts.provider ?? CODEX_AUTH_DISPLAY_NAME,
     ok,
     ...(opts.cancelled ? { cancelled: true } : {}),
     ...(opts.error ? { error: opts.error } : {}),

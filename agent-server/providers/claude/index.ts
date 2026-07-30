@@ -106,6 +106,7 @@ const CLAUDE_AUTH_METHOD = {
     { label: 'Run this in a terminal on the remote host, then click Retry', command: 'claude login' },
   ],
 };
+const CLAUDE_AUTH_DISPLAY_NAME = 'Claude';
 
 /**
  * Tri-state result of the tab-open auth probe (ensureInit).
@@ -1031,7 +1032,7 @@ export function createClaudeBackend(): ServerBackend {
     // ── foreground-only pre-hooks ──
     if (frame.kind === 'foreground') {
       // Mid-turn auth failure → AuthPane takeover (mirrors copilot).
-      if (isClaudeAuthFailure(msg)) frame.rawSend!({ type: 'auth_required', provider: 'claude' });
+      if (isClaudeAuthFailure(msg)) frame.rawSend!({ type: 'auth_required', provider: CLAUDE_AUTH_DISPLAY_NAME });
       // /compact completion. The SDK marks a finished compaction with a
       // `compact_boundary` system message (see isCompactBoundary). Failure has
       // no distinct signal — the boundary just never arrives and closeFrame

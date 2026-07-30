@@ -1,4 +1,5 @@
 import type { ProjectConfig, TabType, AgentProvider } from '@shared/types';
+import { providerLabel } from '@shared/agent-providers';
 import { groupedOrder, moveGroup } from './project-grouping';
 import type { ProjectRuntime, Tab } from './store';
 
@@ -183,7 +184,7 @@ export function createProjectsRepository(options: ProjectsRepositoryOptions = {}
 
       nextTabCounter++;
       const defaultLabel = type === 'agent'
-        ? `${provider ? provider.charAt(0).toUpperCase() + provider.slice(1) : 'Agent'}`
+        ? (provider ? providerLabel(provider) : 'Agent')
         : type === 'web'
           ? 'Web'
           : `Terminal ${proj.tabs.length + 1}`;
