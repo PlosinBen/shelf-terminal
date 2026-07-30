@@ -5,6 +5,7 @@ import {
   remoteFilePath,
   deployFilesFor,
   deployFilesForTarget,
+  executableDeployFiles,
   needsDeploy,
   missingFiles,
   cacheDir,
@@ -66,6 +67,16 @@ describe('deployFilesFor', () => {
   it('selects the Codex manifest from the complete target-aware helper', () => {
     expect(deployFilesForTarget('glibc', 'x64', 'codex')).toEqual(codexDeployFiles('glibc', 'x64'));
     expect(deployFilesForTarget('glibc', 'x64', 'claude')).toEqual(['node', 'index.mjs', 'claude']);
+  });
+  it('ships only the base runtime for a provider without a remote binary', () => {
+    expect(deployFilesForTarget('glibc', 'x64', null)).toEqual(['node', 'index.mjs']);
+    expect(deployFilesForTarget('musl', 'x64', null)).toEqual(['index.mjs']);
+  });
+  it('does not invent a provider executable or chmod target for a null binding', () => {
+    const glibc = deployFilesForTarget('glibc', 'x64', null);
+    const musl = deployFilesForTarget('musl', 'x64', null);
+    expect(executableDeployFiles('glibc', glibc, null)).toEqual(['node']);
+    expect(executableDeployFiles('musl', musl, null)).toEqual([]);
   });
 });
 

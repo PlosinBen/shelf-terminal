@@ -13,7 +13,11 @@ import { buildEnvExportPrefix, applyEnvMap, type EnvMap } from '@shared/project-
 import { createTurnDispatcher, type PermissionHandler } from './turn-dispatcher';
 import { createDispatcherConnection, type DispatcherConnection, type DispatcherProc } from './dispatcher-connection';
 import { getAppInstanceId } from '../app-instance-id';
-import { AGENT_PROVIDERS, CLAUDE_PROVIDER } from '@shared/agent-providers';
+import {
+  AGENT_PROVIDERS,
+  AGENT_RUNTIME_KIND,
+  CLAUDE_PROVIDER,
+} from '@shared/agent-providers';
 import { skillsSourceRoot, listSkillFilesRel, hashSkillsTree } from '../skills-projection';
 import { syncMcpForConnection } from '../mcp-remote';
 import { transportPutDir, composeRemotePath } from '../connector/transport';
@@ -32,13 +36,13 @@ import { ensureNodeCached, ensureClaudeCached, ensureCopilotCached, ensureCodexN
 import {
   deployRoot,
   agentServerDir,
-  deployFilesFor,
   deployFilesForTarget,
+  executableDeployFiles,
   needsDeploy,
   missingFiles,
   DEPLOYED_SENTINEL,
   type DeployFile,
-  type ProviderBin,
+  type ProviderRuntimeBinding,
   type RemoteInventory,
 } from './deploy-layout';
 
@@ -566,7 +570,11 @@ function readRemoteInventory(ops: RemoteOps, root: string, expected: DeployFile[
  * {node, index.mjs, claude} to a versioned root. The `.deployed` sentinel is
  * written LAST so a half-finished transfer never looks complete.
  */
-async function deploySelfContained(connection: Connection, ops: RemoteOps, providerBin: ProviderBin): Promise<DeployResult> {
+async function deploySelfContained(
+  connection: Connection,
+  ops: RemoteOps,
+  providerBin: ProviderRuntimeBinding,
+): Promise<DeployResult> {
   const version = getAppVersion();
   const root = deployRoot(ops.base, version);
 
@@ -610,11 +618,11 @@ async function deploySelfContained(connection: Connection, ops: RemoteOps, provi
   // Only the files this target+provider ships (musl omits node; binary = provider).
   const sources: Partial<Record<DeployFile, string>> = { 'index.mjs': indexLocal };
   if (!isMusl) sources.node = await ensureNodeCached(cacheRoot, target);
-  if (providerBin === 'copilot') {
+  if (providerBin === AGENT_RUNTIME_KIND.COPILOT) {
     sources.copilot = await ensureCopilotCached(cacheRoot, target, COPILOT_CLI_VERSION);
-  } else if (providerBin === 'claude') {
+  } else if (providerBin === AGENT_RUNTIME_KIND.CLAUDE) {
     sources.claude = await ensureClaudeCached(cacheRoot, target, CLAUDE_SDK_VERSION);
-  } else {
+  } else if (providerBin === AGENT_RUNTIME_KIND.CODEX) {
     const sourceNodeModules = app.isPackaged
       ? path.join(process.resourcesPath, 'codex-cli', 'node_modules')
       : path.join(app.getAppPath(), 'node_modules');
@@ -635,9 +643,9 @@ async function deploySelfContained(connection: Connection, ops: RemoteOps, provi
     ops.copyIn(sources[f]!, `${root}/${f}`);
   }
   // Exec bits on what we shipped (node only for glibc; the provider binary).
-  const codexBin = expected.find((f) => f.endsWith('/bin/codex'));
-  const execBits = [isMusl ? null : `${root}/node`, providerBin === 'codex' ? (codexBin ? `${root}/${codexBin}` : null) : `${root}/${providerBin}`].filter(Boolean).join(' ');
-  ops.exec(`chmod +x ${execBits}`);
+  const execBits = executableDeployFiles(target.libc, expected, providerBin)
+    .map((file) => `${root}/${file}`);
+  if (execBits.length > 0) ops.exec(`chmod +x ${execBits.join(' ')}`);
   ops.exec(`touch ${root}/${DEPLOYED_SENTINEL}`); // completion marker — last
   log.info('agent-remote', `Deployed agent-server to ${root} (${targetId(target)}, ${isMusl ? 'remote node' : 'own node'})`);
 
@@ -768,7 +776,7 @@ async function deployAgentServer(connection: Connection, provider: AgentProvider
   }
   // Exhaustive registry-owned runtime kind: no provider may fall through to a
   // different binary/runtime under a misleading error.
-  const providerBin: ProviderBin = AGENT_PROVIDERS[provider].bin;
+  const providerBin = AGENT_PROVIDERS[provider].bin;
   // ssh / docker / wsl: ship our own runtime + provider binary, then mirror the
   // app-level skills onto the remote (#70/§5.7) so the remote agent loads them.
   let ops: RemoteOps;

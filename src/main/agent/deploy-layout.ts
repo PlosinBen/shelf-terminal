@@ -22,32 +22,56 @@
 import * as path from 'path';
 import type { Arch, Libc } from './runtime-target';
 import { codexNativePackageName } from './agent-runtime-versions';
+import {
+  AGENT_RUNTIME_KIND,
+  type AgentRuntimeKind,
+} from '@shared/agent-providers';
 
 /** All possible payload files (superset; the actual set is libc+provider-dependent). */
 export const DEPLOY_FILES = ['node', 'index.mjs', 'claude', 'copilot'] as const;
 export type DeployFile = (typeof DEPLOY_FILES)[number] | string;
 
 /** The provider whose CLI binary a session ships (= the deployed filename). */
-export type ProviderBin = 'claude' | 'copilot' | 'codex';
+export type ProviderBin = AgentRuntimeKind;
+export type ProviderRuntimeBinding = ProviderBin | null;
 
 /**
  * Files we ship for a target+provider. glibc ships our own Node; musl uses the
  * remote's node (omits node). The provider's CLI binary is named after it.
  */
-export function deployFilesFor(libc: Libc, provider: ProviderBin): DeployFile[] {
-  if (provider === 'codex') {
+export function deployFilesFor(libc: Libc, provider: ProviderRuntimeBinding): DeployFile[] {
+  if (provider === AGENT_RUNTIME_KIND.CODEX) {
     if (libc === 'musl') throw new Error('Codex requires a glibc host');
     throw new Error('Codex deploy files require a target architecture');
   }
   const base: DeployFile[] = libc === 'musl' ? ['index.mjs'] : ['node', 'index.mjs'];
-  return [...base, provider];
+  return provider === null ? base : [...base, provider];
 }
 
 /** Files we ship for a fully-known target+provider runtime. */
-export function deployFilesForTarget(libc: Libc, arch: Arch, provider: ProviderBin): DeployFile[] {
-  return provider === 'codex'
+export function deployFilesForTarget(
+  libc: Libc,
+  arch: Arch,
+  provider: ProviderRuntimeBinding,
+): DeployFile[] {
+  return provider === AGENT_RUNTIME_KIND.CODEX
     ? codexDeployFiles(libc, arch)
     : deployFilesFor(libc, provider);
+}
+
+/** Payload files that need executable bits after transfer. */
+export function executableDeployFiles(
+  libc: Libc,
+  expected: DeployFile[],
+  provider: ProviderRuntimeBinding,
+): DeployFile[] {
+  const executable: DeployFile[] = libc === 'musl' ? [] : ['node'];
+  if (provider === null) return executable;
+  if (provider === AGENT_RUNTIME_KIND.CODEX) {
+    const codexBin = expected.find((file) => file.endsWith('/bin/codex'));
+    return codexBin ? [...executable, codexBin] : executable;
+  }
+  return [...executable, provider];
 }
 
 /** Fixed relative Codex runtime manifest, preserving both require.resolve hops. */
