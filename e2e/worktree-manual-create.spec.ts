@@ -49,6 +49,7 @@ function seedProject(userDataDir: string, repo: string) {
     cwd: repo,
     connection: { type: 'local' },
     maxTabs: 5,
+    defaultAgentProvider: 'claude',
   };
   fs.writeFileSync(path.join(userDataDir, 'projects.json'), JSON.stringify([project]), 'utf-8');
 }
