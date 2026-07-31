@@ -6,13 +6,14 @@ import path from 'path';
 let tmpDir: string;
 let safeAvailable = true;
 let safeBackend: string | undefined;
+const isEncryptionAvailable = vi.fn(() => safeAvailable);
 
 // Reversible fake safeStorage (os-backed tier): "ENC:" prefix stands in for the
 // OS keychain wrap. Real fs + tmp userData for everything else.
 vi.mock('electron', () => ({
   app: { getPath: () => tmpDir },
   safeStorage: {
-    isEncryptionAvailable: () => safeAvailable,
+    isEncryptionAvailable,
     getSelectedStorageBackend: () => safeBackend,
     encryptString: (s: string) => Buffer.from('ENC:' + s),
     decryptString: (b: Buffer) => b.toString().replace(/^ENC:/, ''),
@@ -21,36 +22,42 @@ vi.mock('electron', () => ({
 
 const store = await import('./secret-store');
 
+function withPlatform<T>(platform: NodeJS.Platform, run: () => T): T {
+  const original = Object.getOwnPropertyDescriptor(process, 'platform')!;
+  Object.defineProperty(process, 'platform', { ...original, value: platform });
+  try {
+    return run();
+  } finally {
+    Object.defineProperty(process, 'platform', original);
+  }
+}
+
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'shelf-secret-store-'));
   safeAvailable = true;
   safeBackend = undefined;
-  delete process.env.SHELF_MAC_SIGNED;
+  isEncryptionAvailable.mockClear();
   store.__resetKeyCacheForTests();
 });
 afterEach(() => {
   if (fs.existsSync(tmpDir)) fs.rmSync(tmpDir, { recursive: true, force: true });
-  delete process.env.SHELF_MAC_SIGNED;
 });
 
 describe('secret-store tier selection', () => {
-  it('unsigned macOS (default) → local-key even when safeStorage says available', () => {
-    // Test host is darwin; without SHELF_MAC_SIGNED the Keychain isn't trusted.
-    if (process.platform !== 'darwin') return;
+  it('macOS → local-key without probing safeStorage', () => {
     safeAvailable = true;
-    expect(store.getKeyTier()).toBe('local-key');
-  });
-
-  it('signed macOS → os-backed', () => {
-    if (process.platform !== 'darwin') return;
-    process.env.SHELF_MAC_SIGNED = '1';
-    safeAvailable = true;
-    expect(store.getKeyTier()).toBe('os-backed');
+    withPlatform('darwin', () => {
+      expect(store.getKeyTier()).toBe('local-key');
+      expect(isEncryptionAvailable).not.toHaveBeenCalled();
+    });
   });
 
   it('safeStorage unavailable → local-key', () => {
     safeAvailable = false;
-    expect(store.getKeyTier()).toBe('local-key');
+    withPlatform('win32', () => {
+      expect(store.getKeyTier()).toBe('local-key');
+      expect(isEncryptionAvailable).toHaveBeenCalledOnce();
+    });
   });
 });
 
@@ -135,13 +142,13 @@ describe('secret-store persistence (local-key tier)', () => {
 
 describe('secret-store persistence (os-backed tier)', () => {
   it('round-trips via the safeStorage-wrapped master key', () => {
-    if (process.platform !== 'darwin') return;
-    process.env.SHELF_MAC_SIGNED = '1';
     safeAvailable = true;
-    store.setProjectSecret('p1', 'TOKEN', 'secret');
-    expect(store.resolveProjectSecrets('p1')).toEqual({ TOKEN: 'secret' });
-    // The os-backed key file exists (wrapped), not the local one.
-    expect(fs.existsSync(path.join(tmpDir, 'secret-key.enc'))).toBe(true);
-    expect(fs.existsSync(path.join(tmpDir, 'secret-key.local'))).toBe(false);
+    withPlatform('win32', () => {
+      store.setProjectSecret('p1', 'TOKEN', 'secret');
+      expect(store.resolveProjectSecrets('p1')).toEqual({ TOKEN: 'secret' });
+      // The os-backed key file exists (wrapped), not the local one.
+      expect(fs.existsSync(path.join(tmpDir, 'secret-key.enc'))).toBe(true);
+      expect(fs.existsSync(path.join(tmpDir, 'secret-key.local'))).toBe(false);
+    });
   });
 });

@@ -40,14 +40,14 @@ related:
 
 | tier | 何時 | 保護 |
 |---|---|---|
-| **os-backed** | Windows DPAPI（user-bound）· Linux 真 keyring（`safeStorage.getSelectedStorageBackend()` ∈ `gnome_libsecret`/`kwallet*`）· **簽章** macOS Keychain（`SHELF_MAC_SIGNED=1`）| 真 OS 級 |
-| **local-key** | **unsigned macOS** · **無 keyring 的 Linux**（backend `basic_text`）| per-install 隨機 key 存 0600 檔。擋商品化 infostealer（掃已知明碼 token 樣式）+ 誤上傳雲備份；**非**針對性本機攻擊者 |
+| **os-backed** | Windows DPAPI（user-bound）· Linux 真 keyring（`safeStorage.getSelectedStorageBackend()` ∈ `gnome_libsecret`/`kwallet*`）| 真 OS 級 |
+| **local-key** | **macOS（正式簽章版啟用 Keychain 前）** · **無 keyring 的 Linux**（backend `basic_text`）| per-install 隨機 key 存 0600 檔。擋商品化 infostealer（掃已知明碼 token 樣式）+ 誤上傳雲備份；**非**針對性本機攻擊者 |
 
 **永不** `setUsePlainTextEncryption(true)` / 信任 `basic_text` → 一律退到 local-key，secret 絕不落明碼。storage：單一 project-keyed 檔 `<userData>/project-secrets.json`，per-entry 加密、decrypt scope 只解目標 project 那段（別的 project 的 secret 不進明碼記憶體）；刪 project prune 該段。decrypt 失敗 fail-loud + **跳過該 key**（永不注入 stale/empty），key 留著讓使用者重設。
 
-## project-env#5 — unsigned macOS 必用 local-key，是為 durability 不只避提示  ·  [Gotcha]
+## project-env#5 — macOS 在正式簽章前必用 local-key，是為 durability 不只避提示  ·  [Gotcha]
 
-**要點**：macOS Keychain ACL 綁 code-signing identity；unsigned build 是 ad-hoc 簽章、cdhash **每次更新都變** → 存進 Keychain 的 key 在 app 更新後**存取不到 → secret 遺失**（不只是每次啟動跳提示）。這是結構性資料遺失，不是 UX 小事。只有 macOS Keychain 綁簽章；Windows DPAPI（user-bound）、Linux keyring（session-bound）unsigned 下仍耐用。所以 mac tier 是**build-time**決定（簽章版 → Keychain；否則 local-key），`SHELF_MAC_SIGNED=1` 只在簽章+公證的 release 才開。
+**要點**：macOS Keychain ACL 綁 code-signing identity；unsigned build 是 ad-hoc 簽章、cdhash **每次更新都變** → 存進 Keychain 的 key 在 app 更新後**存取不到 → secret 遺失**（不只是每次啟動跳提示）。這是結構性資料遺失，不是 UX 小事。只有 macOS Keychain 綁簽章；Windows DPAPI（user-bound）、Linux keyring（session-bound）unsigned 下仍耐用。因此目前 macOS 無條件走 local-key，且必須在任何 `safeStorage` probe 前返回；等正式簽章+公證 release 導入時，才移除這個 gate 並啟用 Keychain。
 
 ## project-env#6 — 安全靠 key 位置不靠 code obscurity；tier-aware 誠實揭露  ·  [Decision]
 

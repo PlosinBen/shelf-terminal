@@ -15,20 +15,21 @@ import { sanitizeEnvMap, isReservedEnvKey, type EnvMap } from '@shared/project-e
  * with no data migration:
  *
  *   os-backed — Windows DPAPI (user-bound) · Linux with a REAL keyring
- *               (gnome_libsecret / kwallet*) · SIGNED macOS Keychain. Real
- *               OS-level protection of the master key.
- *   local-key — unsigned macOS · Linux with no keyring (safeStorage backend
- *               'basic_text'). A per-install random master key in a 0600 file:
+ *               (gnome_libsecret / kwallet*). Real OS-level protection of the
+ *               master key.
+ *   local-key — macOS until signed releases enable Keychain · Linux with no
+ *               keyring (safeStorage backend 'basic_text'). A per-install
+ *               random master key in a 0600 file:
  *               obfuscation-grade (defeats commodity infostealers scanning for
  *               known plaintext token shapes + accidental cloud-backup exposure),
  *               NOT a targeted local adversary. We NEVER call
  *               setUsePlainTextEncryption / trust 'basic_text' — we degrade to
  *               local-key instead, so a secret is never written in the clear.
  *
- * macOS unsigned MUST be local-key for DURABILITY: Keychain ACLs bind to the
- * code-signing identity; an unsigned build's ad-hoc cdhash changes every update,
- * so a Keychain-stored key becomes inaccessible after an update (data loss).
- * Flip SHELF_MAC_SIGNED=1 only for a signed+notarized release.
+ * macOS MUST remain local-key until releases are signed: Keychain ACLs bind to
+ * the code-signing identity; an unsigned build's ad-hoc cdhash changes every
+ * update, so a Keychain-stored key becomes inaccessible after an update (data
+ * loss). Enable the Keychain path only when signed+notarized releases ship.
  *
  * See context/project-env#4 (crypto + tier seam) and #5 (unsigned-mac durability).
  */
@@ -47,16 +48,16 @@ function userDataPath(file: string): string {
 }
 
 /**
- * Whether the OS-backed tier genuinely protects the master key on this machine
- * — the authoritative runtime signal, not a platform assumption.
+ * Whether the OS-backed tier is enabled and genuinely protects the master key
+ * on this machine. macOS is deliberately gated before its runtime probe.
  */
 export function osBackedAvailable(): boolean {
+  // macOS must never probe safeStorage until signed releases enable Keychain:
+  // even the availability check can request access.
+  if (process.platform === 'darwin') return false;
+
   try {
     if (!safeStorage.isEncryptionAvailable()) return false;
-    if (process.platform === 'darwin') {
-      // Keychain durability holds only on a signed build (see file header).
-      return process.env.SHELF_MAC_SIGNED === '1';
-    }
     if (process.platform === 'linux') {
       // isEncryptionAvailable() is TRUE even for the hardcoded-key 'basic_text'
       // backend (no real protection) — require a real keyring.
