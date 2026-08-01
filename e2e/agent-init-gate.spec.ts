@@ -90,6 +90,29 @@ test.describe('agent init-readiness gate', () => {
     });
   });
 
+  test.describe('post-login capabilities fail', () => {
+    test.use({ postLoginCapsFail: true });
+
+    test('settles the re-init lifecycle as failed with the probe reason', async ({ shelfApp: { page } }) => {
+      await setupProject(page);
+      await openAgentTab(page);
+      const ta = page.locator('.agent-textarea:visible');
+      await ta.fill('auth_required');
+      await ta.press('Enter');
+
+      const pane = page.locator('.agent-auth-pane:visible');
+      await expect(pane).toBeVisible({ timeout: 5_000 });
+      await pane.locator('.agent-reset-btn', { hasText: 'Log in' }).click();
+
+      const overlay = page.locator('.agent-conn-overlay');
+      await expect(overlay).toBeVisible({ timeout: 5_000 });
+      await expect(overlay).toContainText('Failed to start agent');
+      await expect(overlay).toContainText('fake post-login capabilities failure');
+      await expect(overlay.locator('button', { hasText: 'Retry' })).toBeVisible();
+      await expect(page.locator('.agent-textarea:visible')).toBeDisabled();
+    });
+  });
+
   test('ready init unlocks the input (enabled, sendable)', async ({ shelfApp: { page } }) => {
     // No capsFail → normal fake → init 'ready'. Contrast case for the gate.
     await setupProject(page);

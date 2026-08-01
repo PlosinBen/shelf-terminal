@@ -185,6 +185,10 @@ InputZone ──emit('agent:send', ...)──▶ EventBus
 
 guard：只有 `ready` + healthy 才不蓋。phase 文字的單一 source 是 `components/agent/init-phase.ts` 的 `initPhaseLabel`（overlay 用它；MessageList 已無獨立 init-pane）。Retry/Reconnect 走既有 `handleRetryInit`；init ready + health 復原後 overlay **自清**（依賴 reconnect 的 health-seed，見 `connection-health#8` —— 沒 seed 紅燈不清、overlay 不會消失）。
 
+**Init phase ownership**：會回報 deploy / connect / checking-auth phase 的 capability probe 屬於 init / re-init lifecycle；發起它的 workflow 必須對稱送出 terminal `ready` 或 `failed`，不能只把 `initStatus` 推回 `starting`。登入完成後的 re-init 是這類 workflow：成功時先發布 fresh capabilities / auth state 再送 `ready`，probe error 則帶 reason 送 `failed`。
+
+AuthPane 的手動 `checkAuth` 是不同 surface：busy / error 由 AuthPane 自己負責，所以 auth-only probe 從 process setup 到 capability RPC 都必須 phase-silent，不可改動既有 `initStatus`；成功結果仍要經共用 post-auth result path 發布 fresh capabilities，避免 pane 清掉後 models / modes / commands 還停在未登入時的空資料。Renderer-facing check 只需要 boolean，structured capabilities 保留在 main/backend 邊界內。
+
 **為何 `absolute` 不是 `fixed`**：overlay 定位在 agent pane 內（`position:absolute` inside `.agent-view`），**不是** viewport-`fixed`。`fixed` 會蓋住 sidebar 或 split 的**兄弟 pane** —— 一個 pane 斷線不該遮住整個 app 或旁邊還活著的 pane。pane-scoped 讓失敗視覺被關在自己的 pane 裡。
 
 **為何 dim+blur 不是 opaque**：blur 讓對話**仍可讀** —— 斷線**不該藏掉歷史**；使用者要能一邊看之前的內容一邊決定 Retry。
@@ -193,6 +197,7 @@ guard：只有 `ready` + healthy 才不蓋。phase 文字的單一 source 是 `c
 - 別把 overlay 改成 `fixed` —— 會蓋住 sidebar / sibling split pane（一個 pane 的失敗不該波及全 app）。
 - 別把四態拆回各自的小 affordance —— 統一一個 overlay 才不會像舊版那樣被錯過（first-open starting 曾經只有 list 內 spinner，太隱晦）。
 - 別把 overlay 改成 opaque / 藏掉對話 —— 斷線 / reconnect 時歷史仍要可讀。
+- 別從 AuthPane 的 auth-only Retry 呼叫會回報 init phase 的 probe；若 workflow 會回報 phase，就必須同時擁有 terminal `ready` / `failed`。
 
 **Related**：`connection-health#8`（reconnect health-seed —— overlay 自清的前提）、`connection-health#7`（兩層 health / reconnect 的失敗來源）、`architecture/agent-dispatch`、`src/renderer/components/agent/ConnectionOverlay.tsx`。
 

@@ -1,11 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { spawn } from 'child_process';
 import * as fs from 'fs';
+import { EventEmitter } from 'events';
+
+// Exercise createRemoteBackend's per-session process path with an injectable
+// child process. Dispatcher behavior has its own focused test suite.
+process.env.SHELF_USE_DISPATCHER = '0';
 
 // Mock electron
 vi.mock('electron', () => ({
   app: {
     getAppPath: () => '/mock/app',
+    getPath: () => '/mock/user-data',
     isPackaged: false,
   },
 }));
@@ -34,6 +40,34 @@ vi.mock('@shared/logger', () => ({
 vi.mock('../connector/shell-env', () => ({
   getShellEnv: () => ({ PATH: '/usr/bin', SHELL_ENV_MARKER: 'yes' }),
 }));
+
+function capabilitiesChild(payload: Record<string, unknown>) {
+  const child = new EventEmitter() as any;
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  const writes: any[] = [];
+  child.stdin = {
+    writableEnded: false,
+    destroyed: false,
+    write: vi.fn((line: string) => {
+      const message = JSON.parse(line);
+      writes.push(message);
+      if (message.type === 'get_capabilities') {
+        queueMicrotask(() => {
+          child.stdout.emit('data', Buffer.from(`${JSON.stringify({
+            type: 'capabilities',
+            requestId: message.requestId,
+            ...payload,
+          })}\n`));
+        });
+      }
+      return true;
+    }),
+    end: vi.fn(),
+  };
+  child.kill = vi.fn();
+  return { child, writes };
+}
 
 describe('toWslPath', () => {
   it('converts Windows drive paths to WSL mount paths', async () => {
@@ -172,14 +206,54 @@ describe('remote backend', () => {
     // side drives diff detection and calls provider.setX as needed.
   });
 
-  it('checkAuth probes via capabilities and returns false when the server cannot start', async () => {
-    // checkAuth now delegates to getCapabilities (re-running the provider auth
-    // probe). With child_process.spawn mocked, the agent-server never starts →
-    // getCapabilities throws → checkAuth catches and reports not-authed.
+  it('checkAuth emits no init phase when process setup fails', async () => {
+    vi.mocked(fs.existsSync).mockReturnValueOnce(false);
     const { createRemoteBackend } = await import('./remote');
-    const backend = createRemoteBackend({ type: 'local' } as any);
+    const onPhase = vi.fn();
+    const backend = createRemoteBackend(
+      { type: 'local' } as any,
+      undefined,
+      undefined,
+      'auth-probe-failure',
+      onPhase,
+    );
     const result = await backend.checkAuth('/tmp');
-    expect(result).toBe(false);
+    expect(result).toBeNull();
+    expect(onPhase).not.toHaveBeenCalled();
+  });
+
+  it('checkAuth keeps fresh capabilities and stays phase-silent during process setup', async () => {
+    const freshCaps = {
+      models: [{ value: 'fresh-model', displayName: 'Fresh model' }],
+      permissionModes: [{ value: 'default', displayName: 'ask' }],
+      effortLevels: [],
+      slashCommands: [],
+      currentModel: 'fresh-model',
+      authRequired: false,
+    };
+    const { child, writes } = capabilitiesChild(freshCaps);
+    vi.mocked(spawn).mockImplementationOnce(() => {
+      setTimeout(() => child.stdout.emit('data', Buffer.from('{"type":"ready"}\n')), 0);
+      return child;
+    });
+    const { createRemoteBackend } = await import('./remote');
+    const onPhase = vi.fn();
+    const backend = createRemoteBackend(
+      { type: 'local' } as any,
+      undefined,
+      undefined,
+      'auth-probe-success',
+      onPhase,
+    );
+
+    const result = await backend.checkAuth('/tmp', [{ id: 'custom-model' }]);
+
+    expect(result).toMatchObject(freshCaps);
+    expect(onPhase).not.toHaveBeenCalled();
+    expect(writes.find((message) => message.type === 'get_capabilities')).toMatchObject({
+      customModels: [{ id: 'custom-model' }],
+    });
+    backend.dispose();
   });
 
   it('dispose does not throw when no process exists', async () => {

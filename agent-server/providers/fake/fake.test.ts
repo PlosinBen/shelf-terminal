@@ -312,6 +312,17 @@ describe('createFakeBackend — scenarios', () => {
       delete process.env[FAKE_TEST_ENV.POST_LOGIN_CAPS_FAIL];
     }
   });
+
+  it('auth_required makes a later successful probe return visibly fresh capabilities', async () => {
+    const { send } = collect();
+    const b = createFakeBackend();
+
+    await b.query(makeInput('auth_required'), send);
+
+    await expect(b.gatherCapabilities!('/tmp')).resolves.toMatchObject({
+      models: [{ value: 'fake-model-after-auth' }],
+    });
+  });
 });
 
 describe('canned prompt shapes', () => {

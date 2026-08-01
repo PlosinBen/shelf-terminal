@@ -231,6 +231,46 @@ test.describe('agent flows via fake provider', () => {
     await expect(pane.locator('.agent-reset-btn', { hasText: 'Log in' })).toBeVisible();
   });
 
+  test.describe('interactive login succeeds', () => {
+    test.use({ loginSuccess: true });
+
+    test('clears auth and init overlays and leaves the originating pane usable', async ({ shelfApp: { page } }) => {
+      await setupProject(page);
+      await openAgentTab(page);
+      await sendAgentPrompt(page, 'auth_required');
+
+      const pane = page.locator('.agent-auth-pane:visible');
+      await expect(pane).toBeVisible({ timeout: 5_000 });
+      await pane.locator('.agent-reset-btn', { hasText: 'Log in' }).click();
+
+      await expect(page.locator('.agent-auth-pane:visible')).toHaveCount(0, { timeout: 5_000 });
+      await expect(page.locator('.agent-conn-overlay')).toHaveCount(0, { timeout: 5_000 });
+      const ta = page.locator('.agent-textarea:visible');
+      await expect(ta).toBeEnabled();
+      await ta.fill('/model');
+      await ta.press('Enter');
+      await expect(page.locator('.agent-permission:visible')).toContainText('fake-model-after-auth');
+    });
+  });
+
+  test('manual auth Retry stays phase-silent and publishes fresh capabilities', async ({ shelfApp: { page } }) => {
+    await setupProject(page);
+    await openAgentTab(page);
+    await sendAgentPrompt(page, 'auth_required');
+
+    const pane = page.locator('.agent-auth-pane:visible');
+    await expect(pane).toBeVisible({ timeout: 5_000 });
+    await pane.locator('.agent-reset-btn', { hasText: 'Retry' }).click();
+
+    await expect(page.locator('.agent-auth-pane:visible')).toHaveCount(0, { timeout: 5_000 });
+    await expect(page.locator('.agent-conn-overlay')).toHaveCount(0, { timeout: 5_000 });
+    const ta = page.locator('.agent-textarea:visible');
+    await expect(ta).toBeEnabled();
+    await ta.fill('/model');
+    await ta.press('Enter');
+    await expect(page.locator('.agent-permission:visible')).toContainText('fake-model-after-auth');
+  });
+
   test('thinking: renders as a fold_text card', async ({ shelfApp: { page } }) => {
     await setupProject(page);
     await openAgentTab(page);

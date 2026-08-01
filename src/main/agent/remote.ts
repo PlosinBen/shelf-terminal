@@ -124,16 +124,16 @@ export function createRemoteBackend(
   // bundle-missing error) instead of the generic "Failed to start agent-server".
   let lastInitError: string | null = null;
 
-  function ensureProcReady(cwd: string): Promise<RemoteProcess | null> {
+  function ensureProcReady(cwd: string, reportPhase = true): Promise<RemoteProcess | null> {
     if (remoteProc) return Promise.resolve(remoteProc);
     if (!initInFlight) {
       initInFlight = (async () => {
         if (!deployed) {
-          onPhase?.('deploying');
+          if (reportPhase) onPhase?.('deploying');
           deployResult = await deployAgentServer(connection, provider);
           deployed = true;
         }
-        onPhase?.('connecting');
+        if (reportPhase) onPhase?.('connecting');
         // Project-level env (plain + decrypted secrets), injected into the
         // agent-server (+ the CLIs it spawns). Resolved per-session: the
         // dispatcher is shared per-host, so this rides open_session, not the
@@ -171,12 +171,55 @@ export function createRemoteBackend(
     });
   }
 
+  async function probeCapabilities(
+    cwd: string,
+    customModels?: ProviderModel[],
+    intent?: { model?: string; effort?: string; permissionMode?: string },
+    reportPhase = true,
+  ): Promise<import('./types').ProviderCapabilities> {
+    const proc = await ensureProcReady(cwd, reportPhase);
+    // 失敗時 throw 而非回空 capabilities — 讓 lifecycle owner 能區分
+    // 「真的沒能力」跟「啟動失敗」，並送出正確的 terminal UI state。
+    if (!proc) throw new Error(lastInitError ?? 'Failed to start agent-server');
+    const requestId = `cap-${Date.now()}`;
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        // Fail-loud + fail-closed. A caps RPC that never answers means the
+        // agent-server ↔ Copilot CLI/SDK link is unhealthy — and we can't tell
+        // "slow listModels" (turns would still work) from "CLI spawn hung"
+        // (turns dead too), because ensureClient is shared. REJECT instead of
+        // resolving empty caps so the owning surface stays blocked honestly.
+        log.warn('agent-remote', `getCapabilities RPC timed out after 30s (${provider}) reqId=${requestId} — rejecting probe (SDK link unhealthy)`);
+        reject(new Error('getCapabilities timed out after 30s — agent-server did not respond'));
+      }, 30000);
+      proc.onResponse(requestId, 'capabilities', (payload) => {
+        clearTimeout(timeout);
+        if ((payload as any).error) {
+          log.warn('agent-remote', `getCapabilities RPC returned error (${provider}) reqId=${requestId}: ${(payload as any).error} — rejecting probe`);
+          reject(new Error((payload as any).error));
+          return;
+        }
+        resolve({
+          models: payload.models ?? [],
+          permissionModes: payload.permissionModes ?? [],
+          effortLevels: payload.effortLevels ?? [],
+          slashCommands: payload.slashCommands ?? [],
+          authMethod: payload.authMethod,
+          currentModel: payload.currentModel,
+          currentEffort: payload.currentEffort,
+          currentPermissionMode: payload.currentPermissionMode,
+          authRequired: payload.authRequired,
+        });
+      });
+      if (reportPhase) onPhase?.('checking-auth');
+      proc.sendLine({ type: 'get_capabilities', provider, cwd, sessionId, customModels, intent, requestId, appId: getAppInstanceId() });
+    });
+  }
+
   const backend: AgentBackend = {
-    async checkAuth(cwd: string) {
-      // Reuse the capabilities probe and invert its verdict. Claude's
-      // ensureInit re-runs here because a failed probe isn't cached, so after
-      // the user runs `claude login` on the remote this flips to true and the
-      // AuthPane clears. Any spawn/RPC failure → false (stay on AuthPane).
+    async checkAuth(cwd: string, customModels?: ProviderModel[]) {
+      // Claude's ensureInit re-runs here because a failed probe isn't cached, so
+      // credentials added out-of-app can become visible without restarting Shelf.
       //
       // Drop the provider's live ACP connection FIRST so the probe below respawns
       // and re-reads config-home credentials — an out-of-app login (or one just
@@ -185,10 +228,10 @@ export function createRemoteBackend(
       // Fire-and-forget; ordered before get_capabilities on the FIFO stdin stream.
       backend.reconnect?.();
       try {
-        const caps = await backend.getCapabilities!(cwd);
-        return !caps.authRequired;
-      } catch {
-        return false;
+        return await probeCapabilities(cwd, customModels, undefined, false);
+      } catch (err: any) {
+        log.warn('agent-remote', `checkAuth capabilities probe failed (${provider}): ${err?.message ?? String(err)}`);
+        return null;
       }
     },
 
@@ -344,52 +387,7 @@ export function createRemoteBackend(
       customModels?: ProviderModel[],
       intent?: { model?: string; effort?: string; permissionMode?: string },
     ) {
-      const proc = await ensureProcReady(cwd);
-      // 失敗時 throw 而非回空 capabilities — 讓 startSession 的 .catch 能區分
-      // 「真的沒能力」跟「啟動失敗」，並對應送 init_status=failed 給 renderer。
-      if (!proc) throw new Error(lastInitError ?? 'Failed to start agent-server');
-      const requestId = `cap-${Date.now()}`;
-      return new Promise<import('./types').ProviderCapabilities>((resolve, reject) => {
-        const timeout = setTimeout(() => {
-          // Fail-loud + fail-closed. A caps RPC that never answers means the
-          // agent-server ↔ Copilot CLI/SDK link is unhealthy — and we can't tell
-          // "slow listModels" (turns would still work) from "CLI spawn hung"
-          // (turns dead too), because ensureClient is shared. REJECT instead of
-          // resolving empty caps: startSession's .catch marks init 'failed' →
-          // the input stays locked + Retry shows, rather than faking a 'ready'
-          // pane the user can send into. See agent-config-flow (init readiness).
-          log.warn('agent-remote', `getCapabilities RPC timed out after 30s (${provider}) reqId=${requestId} — failing init (SDK link unhealthy)`);
-          reject(new Error('getCapabilities timed out after 30s — agent-server did not respond'));
-        }, 30000);
-        proc.onResponse(requestId, 'capabilities', (payload) => {
-          clearTimeout(timeout);
-          // Same rule for an explicit error payload (gatherCapabilities threw in
-          // the child): reject, don't swallow into empty caps.
-          if ((payload as any).error) {
-            log.warn('agent-remote', `getCapabilities RPC returned error (${provider}) reqId=${requestId}: ${(payload as any).error} — failing init`);
-            reject(new Error((payload as any).error));
-            return;
-          }
-          resolve({
-            models: payload.models ?? [],
-            permissionModes: payload.permissionModes ?? [],
-            effortLevels: payload.effortLevels ?? [],
-            slashCommands: payload.slashCommands ?? [],
-            authMethod: payload.authMethod,
-            currentModel: payload.currentModel,
-            currentEffort: payload.currentEffort,
-            currentPermissionMode: payload.currentPermissionMode,
-            authRequired: payload.authRequired,
-          });
-        });
-        // `intent` lets agent-server's provider seed session-level closures
-        // (e.g. Copilot's currentPermissionMode) before reporting caps back.
-        onPhase?.('checking-auth');
-        // appId (install id) rides caps too — config-home providers (copilot
-        // --acp) spawn their CLI during gatherCapabilities and need the per-app
-        // COPILOT_HOME set at spawn, before the first send carries appId.
-        proc.sendLine({ type: 'get_capabilities', provider, cwd, sessionId, customModels, intent, requestId, appId: getAppInstanceId() });
-      });
+      return probeCapabilities(cwd, customModels, intent, true);
     },
 
     async readTaskOutput(taskId: string): Promise<string> {

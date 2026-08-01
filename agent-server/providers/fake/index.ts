@@ -180,6 +180,9 @@ export function createFakeBackend(_representedProvider: AgentProvider = FAKE_PRO
   // Armed only after the deterministic login-success hook completes, so the
   // initial capabilities probe remains healthy and exactly one re-probe fails.
   let failNextPostLoginCapabilities = false;
+  // The auth_required scenario makes the next successful auth probe visibly
+  // different, allowing E2E to prove main published the fresh capabilities.
+  let reportAuthenticatedCapabilities = false;
   // Test hook: the `reloadfail` scenario arms this so the NEXT reloadSkills
   // reports a failure (exercises the agent-view error line). Consumed once.
   let failNextReload = false;
@@ -495,6 +498,7 @@ export function createFakeBackend(_representedProvider: AgentProvider = FAKE_PRO
     }
 
     if (step === 'auth_required') {
+      reportAuthenticatedCapabilities = true;
       send({ type: 'auth_required', provider: FAKE_AUTH_DISPLAY_NAME });
       return;
     }
@@ -632,7 +636,9 @@ export function createFakeBackend(_representedProvider: AgentProvider = FAKE_PRO
       const capsDelay = Number(process.env[FAKE_TEST_ENV.CAPS_DELAY]);
       if (Number.isFinite(capsDelay) && capsDelay > 0) await sleep(capsDelay);
       return {
-        models: [{ value: 'fake-model', displayName: 'fake-model' }],
+        models: reportAuthenticatedCapabilities
+          ? [{ value: 'fake-model-after-auth', displayName: 'fake-model-after-auth' }]
+          : [{ value: 'fake-model', displayName: 'fake-model' }],
         permissionModes: [{ value: 'default', displayName: 'ask' }],
         effortLevels: [],
         // Enough entries to OVERFLOW the slash-menu fold (max-height scroll) so

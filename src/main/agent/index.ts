@@ -3,7 +3,7 @@ import { IPC } from '@shared/ipc-channels';
 import { log } from '@shared/logger';
 import { formatTabLogId } from '@shared/tab-id';
 import type { AgentAttachment, Connection, AgentProvider } from '@shared/types';
-import type { AgentSessionState, AgentEvent, AgentBackend, PermissionResult } from './types';
+import type { AgentSessionState, AgentEvent, AgentBackend, PermissionResult, ProviderCapabilities } from './types';
 import { createRemoteBackend, syncSkillsForConnection } from './remote';
 import { loadSettings } from '../settings-store';
 import { createIdleTracker } from './idle-tracker';
@@ -247,7 +247,9 @@ export function initAgentManager(windowGetter: () => BrowserWindow | null): void
   ipcMain.handle(IPC.AGENT_CHECK_AUTH, async (_e, payload) => {
     const session = sessions.get(payload.tabId);
     if (!session) return false;
-    return session.backend.checkAuth(session.cwd);
+    const caps = await session.backend.checkAuth(session.cwd, providerCustomModels(session.provider));
+    if (!caps) return false;
+    return applyPostAuthResult(payload.tabId, session, caps);
   });
 
   ipcMain.handle(IPC.AGENT_START_LOGIN, async (_e, payload) => {
@@ -409,8 +411,7 @@ async function startSession(
   send(IPC.AGENT_INIT_STATUS, tabId, { state: 'starting' });
 
   if (backend.getCapabilities) {
-    const settings = loadSettings();
-    const customModels = settings.ok ? settings.value.providerModels?.[provider as keyof NonNullable<typeof settings.value.providerModels>] : undefined;
+    const customModels = providerCustomModels(provider);
     // `intent` originates in AgentView (projectConfig.agentPrefs[provider]),
     // carried through agent:init's opts → preload spread into AGENT_INIT
     // payload. Seeds the provider's session-level closures before the first
@@ -570,23 +571,39 @@ async function reinitAfterLogin(tabId: string): Promise<void> {
   if (!session?.backend.getCapabilities) return;
   const tag = `[agent:${formatTabLogId(tabId)}]`;
   const provider = session.provider;
-  const settings = loadSettings();
-  const customModels = settings.ok
-    ? settings.value.providerModels?.[provider as keyof NonNullable<typeof settings.value.providerModels>]
-    : undefined;
+  const customModels = providerCustomModels(provider);
   session.backend.reconnect?.();
   try {
     const caps = await session.backend.getCapabilities(session.cwd, customModels);
-    send(IPC.AGENT_CAPABILITIES, tabId, caps);
-    if (caps.authRequired) {
+    const authenticated = applyPostAuthResult(tabId, session, caps);
+    if (!authenticated) {
       // Fail-loud: a "successful" login whose re-init still reports unauth is an
       // anomaly (login didn't stick) — re-show the pane, but leave a trace.
-      send(IPC.AGENT_AUTH_REQUIRED, tabId, provider);
       log.warn('agent', `${tag} post-login re-init: STILL authRequired for ${provider} — re-showing the auth pane (login did not stick)`);
     }
+    send(IPC.AGENT_INIT_STATUS, tabId, { state: 'ready' });
   } catch (err: any) {
-    log.error('agent', `${tag} post-login re-init failed: ${err?.message ?? err}`);
+    const reason = err?.message ?? String(err);
+    log.error('agent', `${tag} post-login re-init failed: ${reason}`);
+    send(IPC.AGENT_INIT_STATUS, tabId, { state: 'failed', reason });
   }
+}
+
+function providerCustomModels(provider: AgentProvider) {
+  const settings = loadSettings();
+  return settings.ok
+    ? settings.value.providerModels?.[provider as keyof NonNullable<typeof settings.value.providerModels>]
+    : undefined;
+}
+
+function applyPostAuthResult(
+  tabId: string,
+  session: Pick<SessionInstance, 'provider'>,
+  caps: ProviderCapabilities,
+): boolean {
+  send(IPC.AGENT_CAPABILITIES, tabId, caps);
+  if (caps.authRequired) send(IPC.AGENT_AUTH_REQUIRED, tabId, session.provider);
+  return !caps.authRequired;
 }
 
 function dispatchEvent(tabId: string, event: AgentEvent) {

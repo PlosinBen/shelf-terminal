@@ -167,12 +167,12 @@ export interface AgentBackend {
   stop(): Promise<void>;
   dispose(): void;
   /**
-   * Re-run the provider's auth probe and report whether credentials are now
-   * valid. `cwd` is required because the probe spins up (or reuses) the remote
-   * agent-server, which needs a working directory. Drives the AuthPane Retry
-   * button: true clears the pane, false keeps it.
+   * Re-run the provider's auth probe and retain the fresh capabilities so main
+   * can publish them before returning the renderer-facing boolean verdict.
+   * `null` means the probe itself failed. This query owns its authBusy/authError
+   * surface and therefore must not emit init lifecycle phases.
    */
-  checkAuth(cwd: string): Promise<boolean>;
+  checkAuth(cwd: string, customModels?: ProviderModel[]): Promise<ProviderCapabilities | null>;
   /**
    * `intent` carries renderer's saved prefs (projectConfig.agentPrefs[provider]).
    * Forwarded to agent-server so providers with session-level state (Copilot)
