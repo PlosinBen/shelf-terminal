@@ -63,14 +63,6 @@ related:
 
 **Fix**：**自帶 pinned Node**、不依賴遠端的 node —— `NODE_VERSION`（`agent-runtime-versions.ts`）對齊 esbuild `target: node20`，部署時把 Node 一起送（見 `deployment#1`/`deployment#2`）。Node builder 為 **glibc-only**（不出 musl Node，musl target 直接 throw）；Claude companion binary 另有官方 `-musl` 版。
 
-## build-packaging#7 — electron-builder 的 brace-expansion advisory 只能等上游換依賴鏈  ·  [Gotcha]
-
-**Symptom**：最新 stable `electron-builder` 仍讓完整 `npm audit` 回報 `brace-expansion` OOM advisory，以及由它連帶標記的 build-tool high vulnerabilities；`npm audit --omit=dev` 則為零。
-
-**Root cause**：electron-builder 透過固定 major 的 `@electron/asar`、`@electron/universal`、`ejs` / `minimatch` / `glob` 鏈帶入舊 `brace-expansion`。已修補的 v5 改了 CommonJS export，不能直接 override 給仍以函式形式 `require()` 的 minimatch 3/5；`npm audit fix --force` 會反向降級 electron-builder，也不是安全修正。
-
-**Current stance**：保持最新 stable electron-builder；這條 advisory 只存在 release build 工具鏈，輸入是受控的 repository path / glob，不打包進 runtime。等待上游換成相容的修補依賴後再升級，不用跨 major override 或 `--force` 壓掉 audit。追蹤入口見 `UPSTREAM_WATCH.md`。
-
 ## build-packaging#8 — electron-builder 可能在單一 platform job 建立重複 draft release  ·  [Gotcha]
 
 **Symptom**：同一個 tag 出現兩份 draft release；macOS artifacts 被拆開，後續 Windows/Linux artifacts 各自附著到其中一份。即使 matrix 設了 `max-parallel: 1`，仍可能發生。
