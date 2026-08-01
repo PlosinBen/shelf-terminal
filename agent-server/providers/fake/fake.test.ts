@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { createFakeBackend, parseChain, pickerSinglePrompts, pickerMultiPrompts } from './index';
+import { FAKE_TEST_ENV } from './test-env';
 import type { OutgoingMessage, QueryInput } from '../types';
 
 /**
@@ -15,6 +16,10 @@ function collect(): { send: (m: OutgoingMessage) => void; msgs: OutgoingMessage[
 
 function makeInput(prompt: string): QueryInput {
   return { prompt, cwd: '/tmp', sessionId: 's1' };
+}
+
+async function waitForLoginResult(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 50));
 }
 
 describe('parseChain', () => {
@@ -257,6 +262,55 @@ describe('createFakeBackend — scenarios', () => {
     const caps = await b.gatherCapabilities!('/tmp');
     expect(caps.models[0].value).toBe('fake-model');
     expect(caps.permissionModes[0].value).toBe('default');
+  });
+
+  it('interactive login stays pending until cancelled by default', () => {
+    const { send, msgs } = collect();
+    const b = createFakeBackend();
+
+    b.startLogin!('/tmp', send);
+    expect(msgs.map((m) => m.type)).toEqual(['auth_login_prompt']);
+
+    b.cancelLogin!();
+    expect(msgs.map((m) => m.type)).toEqual(['auth_login_prompt', 'auth_login_done']);
+    expect(msgs[1]).toMatchObject({ ok: false, cancelled: true });
+  });
+
+  it('interactive login can complete successfully through the test hook', async () => {
+    process.env[FAKE_TEST_ENV.LOGIN_SUCCESS] = '1';
+    try {
+      const { send, msgs } = collect();
+      const b = createFakeBackend();
+
+      b.startLogin!('/tmp', send);
+      await waitForLoginResult();
+
+      expect(msgs.map((m) => m.type)).toEqual(['auth_login_prompt', 'auth_login_done']);
+      expect(msgs[1]).toMatchObject({ ok: true });
+      b.dispose();
+    } finally {
+      delete process.env[FAKE_TEST_ENV.LOGIN_SUCCESS];
+    }
+  });
+
+  it('post-login capabilities failure is armed after success and consumed once', async () => {
+    process.env[FAKE_TEST_ENV.LOGIN_SUCCESS] = '1';
+    process.env[FAKE_TEST_ENV.POST_LOGIN_CAPS_FAIL] = '1';
+    try {
+      const { send } = collect();
+      const b = createFakeBackend();
+
+      await expect(b.gatherCapabilities!('/tmp')).resolves.toMatchObject({ models: [{ value: 'fake-model' }] });
+      b.startLogin!('/tmp', send);
+      await waitForLoginResult();
+
+      await expect(b.gatherCapabilities!('/tmp')).rejects.toThrow('fake post-login capabilities failure');
+      await expect(b.gatherCapabilities!('/tmp')).resolves.toMatchObject({ models: [{ value: 'fake-model' }] });
+      b.dispose();
+    } finally {
+      delete process.env[FAKE_TEST_ENV.LOGIN_SUCCESS];
+      delete process.env[FAKE_TEST_ENV.POST_LOGIN_CAPS_FAIL];
+    }
   });
 });
 

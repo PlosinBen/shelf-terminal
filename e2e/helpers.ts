@@ -2,6 +2,7 @@ import { test as base, type ElectronApplication, type Page, _electron as electro
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
+import { FAKE_TEST_ENV } from '../agent-server/providers/fake/test-env';
 
 function createTempUserDataDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'shelf-e2e-'));
@@ -54,11 +55,17 @@ export const test = base.extend<{
   // gatherCapabilities for N ms (SHELF_TEST_CAPS_DELAY), keeping init in
   // 'starting' long enough to assert the not-ready overlay before it clears.
   capsDelayMs: number;
+  // Opt-in deterministic device-flow completion. Post-login caps failure
+  // implies success because the failure is armed by the login-done transition.
+  loginSuccess: boolean;
+  postLoginCapsFail: boolean;
   shelfApp: { app: ElectronApplication; page: Page; userDataDir: string };
 }>({
   capsFail: [false, { option: true }],
   capsDelayMs: [0, { option: true }],
-  shelfApp: async ({ capsFail, capsDelayMs }, use) => {
+  loginSuccess: [false, { option: true }],
+  postLoginCapsFail: [false, { option: true }],
+  shelfApp: async ({ capsFail, capsDelayMs, loginSuccess, postLoginCapsFail }, use) => {
     const userDataDir = createTempUserDataDir();
     seedProjectsData(userDataDir);
     ensureTestDirectories();
@@ -69,7 +76,15 @@ export const test = base.extend<{
       // !== 'test'`) so e2e launches don't steal macOS foreground focus. Set it
       // HERE (not only via the `NODE_ENV=test npx playwright` npm script) so a
       // bare `npx playwright test` invocation still gets hidden windows.
-      env: { ...process.env, SHELF_TEST_MODE: '1', NODE_ENV: 'test', ...(capsFail ? { SHELF_TEST_CAPS_FAIL: '1' } : {}), ...(capsDelayMs > 0 ? { SHELF_TEST_CAPS_DELAY: String(capsDelayMs) } : {}) },
+      env: {
+        ...process.env,
+        SHELF_TEST_MODE: '1',
+        NODE_ENV: 'test',
+        ...(capsFail ? { [FAKE_TEST_ENV.CAPS_FAIL]: '1' } : {}),
+        ...(capsDelayMs > 0 ? { [FAKE_TEST_ENV.CAPS_DELAY]: String(capsDelayMs) } : {}),
+        ...((loginSuccess || postLoginCapsFail) ? { [FAKE_TEST_ENV.LOGIN_SUCCESS]: '1' } : {}),
+        ...(postLoginCapsFail ? { [FAKE_TEST_ENV.POST_LOGIN_CAPS_FAIL]: '1' } : {}),
+      },
     });
 
     let page: Page;

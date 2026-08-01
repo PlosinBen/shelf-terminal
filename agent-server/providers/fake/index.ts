@@ -4,6 +4,7 @@ import { parseSlashPrefix } from '@shared/slash-prefix';
 import { FAKE_PROVIDER, type AgentProvider } from '@shared/agent-providers';
 import { mdTable } from '../md-table';
 import { callMain } from '../../app-tool-client';
+import { FAKE_TEST_ENV } from './test-env';
 import type {
   OutgoingMessage,
   PickerResolvePayload,
@@ -175,6 +176,10 @@ export function createFakeBackend(_representedProvider: AgentProvider = FAKE_PRO
   let lastSend: SendFn | null = null;
   // Live device-flow login send (see startLogin/cancelLogin + the `login_ok` step).
   let fakeLoginSend: SendFn | null = null;
+  let fakeLoginTimer: ReturnType<typeof setTimeout> | null = null;
+  // Armed only after the deterministic login-success hook completes, so the
+  // initial capabilities probe remains healthy and exactly one re-probe fails.
+  let failNextPostLoginCapabilities = false;
   // Test hook: the `reloadfail` scenario arms this so the NEXT reloadSkills
   // reports a failure (exercises the agent-view error line). Consumed once.
   let failNextReload = false;
@@ -586,6 +591,9 @@ export function createFakeBackend(_representedProvider: AgentProvider = FAKE_PRO
 
     dispose(): void {
       abortController?.abort();
+      if (fakeLoginTimer) clearTimeout(fakeLoginTimer);
+      fakeLoginTimer = null;
+      fakeLoginSend = null;
       pendingPickers.clear();
       pendingPermissions.clear();
       taskOutputs.clear();
@@ -611,13 +619,17 @@ export function createFakeBackend(_representedProvider: AgentProvider = FAKE_PRO
       // Lets an E2E assert the init-readiness gate (locked input, no send, Retry
       // pane) deterministically. Scoped to that spec's own app instance, so it
       // never affects other SHELF_TEST_MODE specs.
-      if (process.env.SHELF_TEST_CAPS_FAIL === '1') {
+      if (process.env[FAKE_TEST_ENV.CAPS_FAIL] === '1') {
         throw new Error('fake init failure (SHELF_TEST_CAPS_FAIL)');
+      }
+      if (failNextPostLoginCapabilities) {
+        failNextPostLoginCapabilities = false;
+        throw new Error('fake post-login capabilities failure (SHELF_TEST_POST_LOGIN_CAPS_FAIL)');
       }
       // Test hook: SHELF_TEST_CAPS_DELAY=<ms> holds init in 'starting' long
       // enough for an E2E to observe the not-ready overlay before it clears to
       // 'ready'. Same scoping as CAPS_FAIL (that spec's own app instance).
-      const capsDelay = Number(process.env.SHELF_TEST_CAPS_DELAY);
+      const capsDelay = Number(process.env[FAKE_TEST_ENV.CAPS_DELAY]);
       if (Number.isFinite(capsDelay) && capsDelay > 0) await sleep(capsDelay);
       return {
         models: [{ value: 'fake-model', displayName: 'fake-model' }],
@@ -651,12 +663,9 @@ export function createFakeBackend(_representedProvider: AgentProvider = FAKE_PRO
     },
 
     // Interactive device-flow login (deterministic fake for E2E). startLogin
-    // emits a verification prompt immediately, then stays pending until
-    // cancelLogin resolves it as cancelled — exercising the full round-trip
-    // (start_login → auth_login_prompt → UI → cancel_login → auth_login_done).
-    // The success state transition (finishLogin clearing the pane) is covered by
-    // agentTabStore unit tests, since the AuthPane hides the input so a UI-driven
-    // success can't be triggered mid-login.
+    // emits a verification prompt immediately. By default it stays pending until
+    // cancelLogin resolves it as cancelled. The opt-in success hook completes on
+    // a short timer so E2E can exercise the real post-login re-probe lifecycle.
     startLogin(_cwd, send) {
       fakeLoginSend = send;
       send({
@@ -666,9 +675,20 @@ export function createFakeBackend(_representedProvider: AgentProvider = FAKE_PRO
         userCode: 'FAKE-CODE',
         prefilledUri: 'https://github.com/login/device?user_code=FAKE-CODE',
       });
+      if (process.env[FAKE_TEST_ENV.LOGIN_SUCCESS] === '1') {
+        fakeLoginTimer = setTimeout(() => {
+          fakeLoginTimer = null;
+          if (!fakeLoginSend) return;
+          failNextPostLoginCapabilities = process.env[FAKE_TEST_ENV.POST_LOGIN_CAPS_FAIL] === '1';
+          fakeLoginSend({ type: 'auth_login_done', provider: FAKE_AUTH_DISPLAY_NAME, ok: true });
+          fakeLoginSend = null;
+        }, 25);
+      }
     },
 
     cancelLogin() {
+      if (fakeLoginTimer) clearTimeout(fakeLoginTimer);
+      fakeLoginTimer = null;
       fakeLoginSend?.({ type: 'auth_login_done', provider: FAKE_AUTH_DISPLAY_NAME, ok: false, cancelled: true });
       fakeLoginSend = null;
     },
