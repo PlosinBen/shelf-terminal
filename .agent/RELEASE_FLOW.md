@@ -34,7 +34,7 @@
    git push origin main
    git tag vX.X.X && git push origin vX.X.X
    ```
-5. GitHub Actions 自動 build 三平台（mac/win/linux），建立 **draft** release
+5. GitHub Actions 先自動建立或重用該 tag 的唯一 **draft** release，再 build 三平台（mac/win/linux）並上傳 assets；若同 tag 已有多份 release 或已 publish，workflow 會 fail-loud，不會自行選擇或覆寫
 6. 使用者在 GitHub 上 review draft，手動 publish
 
 ## Commit Message Format

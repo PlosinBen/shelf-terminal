@@ -8,6 +8,11 @@ on:
 permissions:
   contents: write
 
+# A rerun and the original run must not both pass the release gate at once.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   # Gate the release on typecheck + unit tests. e2e is verified locally before
   # tagging (per CLAUDE.md workflow) — running it here would add ~4min for
@@ -39,16 +44,30 @@ jobs:
       - name: Unit tests
         run: npm run test:unit
 
-  build:
+  create_release:
     needs: test
-    # Serialize the platform builds. Each electron-builder publish does a
-    # non-atomic find-or-create of the draft release for this tag; running
-    # mac/win/linux in parallel makes them race and create duplicate drafts
-    # with the installers + auto-update latest*.yml split across them, leaving
-    # neither publishable. With max-parallel 1 the first job creates the draft
-    # and the rest find it and only upload. Uses electron-builder's native
-    # GitHub publish (GH_TOKEN) — no gh CLI or extra tooling. Cost: ~3x wall
-    # clock vs parallel.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # The tag commit message is used as the draft release body.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22.22.0
+
+      - name: Ensure exactly one draft release exists for this tag
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/ensure-draft-release.mjs
+
+  build:
+    needs: create_release
+    # Keep platform builds serialized as defense in depth. The create_release
+    # gate is the primary protection: electron-builder only finds the existing
+    # draft and uploads assets, so concurrent artifact publishers cannot race
+    # to create separate releases.
     strategy:
       max-parallel: 1
       # One platform's failure must not cancel the others — each produces an

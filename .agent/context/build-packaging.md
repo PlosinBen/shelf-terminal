@@ -70,3 +70,11 @@ related:
 **Root cause**：electron-builder 透過固定 major 的 `@electron/asar`、`@electron/universal`、`ejs` / `minimatch` / `glob` 鏈帶入舊 `brace-expansion`。已修補的 v5 改了 CommonJS export，不能直接 override 給仍以函式形式 `require()` 的 minimatch 3/5；`npm audit fix --force` 會反向降級 electron-builder，也不是安全修正。
 
 **Current stance**：保持最新 stable electron-builder；這條 advisory 只存在 release build 工具鏈，輸入是受控的 repository path / glob，不打包進 runtime。等待上游換成相容的修補依賴後再升級，不用跨 major override 或 `--force` 壓掉 audit。追蹤入口見 `UPSTREAM_WATCH.md`。
+
+## build-packaging#8 — electron-builder 可能在單一 platform job 建立重複 draft release  ·  [Gotcha]
+
+**Symptom**：同一個 tag 出現兩份 draft release；macOS artifacts 被拆開，後續 Windows/Linux artifacts 各自附著到其中一份。即使 matrix 設了 `max-parallel: 1`，仍可能發生。
+
+**Root cause**：electron-builder 的 publisher cache 在非同步建立 publisher 完成後才寫入；同一個 macOS build 內並行處理 DMG、ZIP、blockmap 時，會各自看見 cache miss 並建立不同的 GitHub publisher。publisher 各自執行非原子的 find-or-create，因而建立兩份 draft。讀取 release notes 的非同步步驟放大了此競速窗口。
+
+**Fix**：release workflow 在 build matrix 前先執行 `create_release` gate：查詢 exact tag 的所有 releases；零份就自動建立 draft、一份 draft 就重用、多份或已 publish 就 fail-loud。workflow 另以 tag-scoped concurrency 防止 rerun 同時通過 gate。平台仍暫時序列化作為 defense in depth；等 stable electron-builder 包含 promise-cache 上游修正後，再移除 gate並重新評估平行 build。追蹤入口見 `UPSTREAM_WATCH.md`。
