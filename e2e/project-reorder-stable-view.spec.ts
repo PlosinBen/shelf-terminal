@@ -81,12 +81,13 @@ test.describe('project reorder stable view order', () => {
     fs.rmSync(userDataDir, { recursive: true, force: true });
   });
 
-  test('dragging the active project does not reinsert its mounted terminal view', async () => {
+  test('dragging the active project does not reinsert or refocus its mounted terminal view', async () => {
     await connectProject(page, 'Alpha');
     await connectProject(page, 'Bravo');
     await connectProject(page, 'Charlie');
     await page.locator('.sidebar-item', { hasText: 'Alpha' }).click();
     await expect(page.locator('.terminal-container:visible')).toBeVisible({ timeout: 8_000 });
+    await page.waitForTimeout(100);
 
     await page.evaluate(() => {
       const activeTerminal = document.querySelector('.terminal-container:not([style*="display: none"])');
@@ -105,6 +106,26 @@ test.describe('project reorder stable view order', () => {
         }
       });
       observer.observe(host, { childList: true });
+
+      type TerminalCache = Map<string, {
+        term: {
+          element?: HTMLElement | null;
+          focus(): void;
+        };
+      }>;
+      const testWindow = window as unknown as {
+        __shelfTerminalCache__?: TerminalCache;
+        __reorderTerminalFocusCount?: number;
+      };
+      const cached = [...(testWindow.__shelfTerminalCache__?.values() ?? [])]
+        .find(({ term }) => !!term.element && activeTerminal.contains(term.element));
+      if (!cached) throw new Error('active cached terminal not found');
+      const originalFocus = cached.term.focus.bind(cached.term);
+      testWindow.__reorderTerminalFocusCount = 0;
+      cached.term.focus = () => {
+        testWindow.__reorderTerminalFocusCount = (testWindow.__reorderTerminalFocusCount ?? 0) + 1;
+        originalFocus();
+      };
     });
 
     await dragProject(page, 0, 2);
@@ -118,6 +139,9 @@ test.describe('project reorder stable view order', () => {
       () => page.evaluate(() => (window as unknown as { __activeTerminalReinserted?: boolean }).__activeTerminalReinserted),
       { timeout: 1_000 },
     ).toBe(false);
+    expect(await page.evaluate(
+      () => (window as unknown as { __reorderTerminalFocusCount?: number }).__reorderTerminalFocusCount,
+    )).toBe(0);
   });
 
   test('inserting or removing a project before a live agent view does not remount that view', async () => {

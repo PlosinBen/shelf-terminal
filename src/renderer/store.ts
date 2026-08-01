@@ -61,7 +61,6 @@ interface StoreSnapshot {
   awayMode: boolean;
   pmActive: boolean;
   quickNoteVisible: boolean;
-  layoutGeneration: number;
   chatStage: ChatStage | null;
   connectionHealth: Record<string, ConnectionHealth>;
   projectNotice: ProjectNotice | null;
@@ -87,7 +86,6 @@ let awayMode = false;
 let pmActive = false;
 let quickNoteVisible = false;
 let nextTabCounter = 0;
-let layoutGeneration = 0;
 // Per-agent-tab connection health from the heartbeat round-trip (keyed by
 // tabId). Transient — never persisted. The Sidebar aggregates per project
 // (worst among the project's agent tabs) for the status dot. See §5.9.
@@ -133,7 +131,7 @@ function reconcileActiveProject(preferredIndex = 0) {
 function getSnapshot(): StoreSnapshot {
   const activeProjectIndex = projectIndexById(activeProjectId);
   const editingProjectIndex = projectIndexById(editingProjectId);
-  return { projects: projects as readonly ReadonlyProjectRuntime[], activeProjectIndex, activeProjectId, sidebarVisible, settingsVisible, searchVisible, commandPickerVisible, devToolsVisible, notesVisible, skillsVisible, mcpVisible, editingProjectIndex: editingProjectIndex === -1 ? null : editingProjectIndex, editingProjectId, settings, updateStatus, pmVisible, awayMode, pmActive, quickNoteVisible, layoutGeneration, chatStage, connectionHealth, projectNotice };
+  return { projects: projects as readonly ReadonlyProjectRuntime[], activeProjectIndex, activeProjectId, sidebarVisible, settingsVisible, searchVisible, commandPickerVisible, devToolsVisible, notesVisible, skillsVisible, mcpVisible, editingProjectIndex: editingProjectIndex === -1 ? null : editingProjectIndex, editingProjectId, settings, updateStatus, pmVisible, awayMode, pmActive, quickNoteVisible, chatStage, connectionHealth, projectNotice };
 }
 
 let snapshotRef = getSnapshot();
@@ -288,7 +286,6 @@ export function reorderProjects(fromIndex: number, toIndex: number) {
   projects = next;
   reconcileActiveProject();
 
-  layoutGeneration++;
   updateSnapshot();
   window.shelfApi.project.save(projects.map((p) => p.config));
 }
@@ -747,7 +744,6 @@ export function __resetStoreForTests() {
   pmActive = false;
   quickNoteVisible = false;
   nextTabCounter = 0;
-  layoutGeneration = 0;
   connectionHealth = {};
   projectNotice = null;
   projectNoticeCounter = 0;

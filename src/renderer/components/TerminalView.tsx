@@ -60,7 +60,7 @@ export function TerminalView({ tabId, projectId, cwd, connection, initScript, ta
   const visibleRef = useRef(visible);
   visibleRef.current = visible;
   const [initLoading, setInitLoading] = useState(!!(initScript || tabCmd));
-  const { settings, layoutGeneration } = useStore();
+  const { settings } = useStore();
   const theme = getTheme(settings.themeName);
 
   useAttachmentPaste(containerRef, {
@@ -199,7 +199,7 @@ export function TerminalView({ tabId, projectId, cwd, connection, initScript, ta
         });
       }
     }
-  }, [visible, tabId, layoutGeneration]);
+  }, [visible, tabId]);
 
   return (
     <>
