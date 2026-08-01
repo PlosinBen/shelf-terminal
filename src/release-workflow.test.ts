@@ -10,6 +10,9 @@ type Workflow = {
   };
   jobs?: Record<string, {
     needs?: string | string[];
+    strategy?: {
+      'max-parallel'?: number;
+    };
     steps?: Array<{ run?: string }>;
   }>;
 };
@@ -54,6 +57,13 @@ describe('release workflow draft gate', () => {
 
     expect(workflow.concurrency?.group).toContain('github.ref');
     expect(workflow.concurrency?.['cancel-in-progress']).toBe(false);
+  });
+
+  it('allows all platform builds to run in parallel after the draft gate', () => {
+    const source = fs.readFileSync(`${repoRoot}/.github/workflows/build.yml`, 'utf8');
+    const workflow = parseYaml(source) as Workflow;
+
+    expect(workflow.jobs?.build.strategy?.['max-parallel']).toBeUndefined();
   });
 });
 

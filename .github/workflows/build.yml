@@ -64,12 +64,9 @@ jobs:
 
   build:
     needs: create_release
-    # Keep platform builds serialized as defense in depth. The create_release
-    # gate is the primary protection: electron-builder only finds the existing
-    # draft and uploads assets, so concurrent artifact publishers cannot race
-    # to create separate releases.
+    # The draft gate removes the release-creation race, so platform-specific
+    # assets can be built and uploaded concurrently.
     strategy:
-      max-parallel: 1
       # One platform's failure must not cancel the others — each produces an
       # independent installer for the same draft release.
       fail-fast: false
