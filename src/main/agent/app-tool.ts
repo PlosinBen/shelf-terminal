@@ -24,6 +24,8 @@ import { isGranted, grant } from '../web-grants';
 import { requestWebPermission } from '../web-permission';
 import { requestBrowserOpen, openWebTab } from '../browser-open';
 import { getMainWindow, getProjects } from '../app-state';
+import { createConnector } from '../connector';
+import { listFeatureNotes } from '../worktree/feature-notes';
 import { IPC } from '@shared/ipc-channels';
 
 /** Per-call context the bridge threads in (which tab/project asked). */
@@ -61,6 +63,49 @@ function normalizeProposedNotePaths(args: Record<string, unknown>): string[] {
     for (const note of args.notes) add(note);
   }
   return out;
+}
+
+async function resolveProposedNotePaths(projectId: string, identifiers: readonly string[]): Promise<string[]> {
+  if (identifiers.length === 0) return [];
+
+  const project = getProjects().find((candidate) => candidate.id === projectId);
+  if (!project) throw new Error(`project not found: ${projectId}`);
+  if (!project.featureNoteDir) {
+    throw new Error('cannot propose feature notes: this project has no feature note directory configured');
+  }
+
+  const listed = await listFeatureNotes(
+    createConnector(project.connection),
+    project.cwd,
+    project.featureNoteDir,
+  );
+  if (!listed.ok) throw new Error(`cannot list configured feature notes: ${listed.error}`);
+
+  const byPath = new Map(listed.notes.map((note) => [note.path, note.path]));
+  const byBasename = new Map<string, string[]>();
+  for (const note of listed.notes) {
+    const basename = note.path.split('/').pop() ?? note.path;
+    byBasename.set(basename, [...(byBasename.get(basename) ?? []), note.path]);
+  }
+
+  const resolved: string[] = [];
+  const seen = new Set<string>();
+  for (const identifier of identifiers) {
+    let canonical = byPath.get(identifier);
+    if (!canonical) {
+      const basenameMatches = byBasename.get(identifier) ?? [];
+      if (basenameMatches.length > 1) {
+        throw new Error(`ambiguous feature note identifier: ${identifier}`);
+      }
+      canonical = basenameMatches[0];
+    }
+    if (!canonical) throw new Error(`feature note not found: ${identifier}`);
+    if (!seen.has(canonical)) {
+      seen.add(canonical);
+      resolved.push(canonical);
+    }
+  }
+  return resolved;
 }
 
 const REGISTRY: Record<string, AppToolDef> = {
@@ -236,7 +281,7 @@ const REGISTRY: Record<string, AppToolDef> = {
       const win = getMainWindow();
       if (!win || win.isDestroyed()) throw new Error('cannot open New Worktree dialog: no application window');
       const branch = typeof args.branch === 'string' && args.branch.trim() ? args.branch.trim() : undefined;
-      const notePaths = normalizeProposedNotePaths(args);
+      const notePaths = await resolveProposedNotePaths(projectId, normalizeProposedNotePaths(args));
       win.webContents.send(IPC.WORKTREE_PROPOSE_CREATE, { projectId, ...(branch ? { branch } : {}), notePaths });
       return {
         opened: true,

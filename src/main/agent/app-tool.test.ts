@@ -55,6 +55,13 @@ vi.mock('../app-state', () => ({
   getMainWindow: () => getMainWindow(),
 }));
 
+const createConnector = vi.fn();
+vi.mock('../connector', () => ({ createConnector: (...args: unknown[]) => createConnector(...args) }));
+const listFeatureNotes = vi.fn();
+vi.mock('../worktree/feature-notes', () => ({
+  listFeatureNotes: (...args: unknown[]) => listFeatureNotes(...args),
+}));
+
 import { handleAppTool, isSafeAppToolOp, isKnownAppToolOp } from './app-tool';
 
 beforeEach(() => {
@@ -78,6 +85,8 @@ beforeEach(() => {
   webFetch.mockReset();
   isGranted.mockReset();
   grant.mockReset();
+  createConnector.mockReset();
+  listFeatureNotes.mockReset();
 });
 
 describe('app-tool dispatcher (browser prompt ownership)', () => {
@@ -122,10 +131,27 @@ describe('app-tool dispatcher (worktree proposals)', () => {
 
   beforeEach(() => {
     getMainWindow.mockReturnValue({ isDestroyed: () => false, webContents: { send } });
+    const connector = { exec: vi.fn() };
+    createConnector.mockReturnValue(connector);
     getProjects.mockReturnValue([
-      { id: 'base', name: 'Base' },
-      { id: 'child', name: 'Feature', parentProjectId: 'base' },
+      {
+        id: 'base', name: 'Base', cwd: '/repo', connection: { type: 'local' },
+        featureNoteDir: '.agent/features',
+      },
+      {
+        id: 'child', name: 'Feature', cwd: '/repo-feature', connection: { type: 'local' },
+        parentProjectId: 'base', featureNoteDir: '.agent/features',
+      },
     ]);
+    listFeatureNotes.mockResolvedValue({
+      ok: true,
+      notes: [
+        { path: '.agent/features/worktree-flow.md' },
+        { path: '.agent/features/a.md' },
+        { path: '.agent/features/b.md' },
+        { path: '.agent/features/c.md' },
+      ],
+    });
     send.mockReset();
   });
 
@@ -174,6 +200,61 @@ describe('app-tool dispatcher (worktree proposals)', () => {
       branch: 'feature/multi',
       notePaths: ['.agent/features/a.md', '.agent/features/b.md', '.agent/features/c.md'],
     });
+  });
+
+  it('propose_create resolves a unique basename to its canonical configured path', async () => {
+    const r = await handleAppTool('worktree.propose_create', {
+      note: 'worktree-flow.md',
+    }, { projectId: 'base' });
+
+    expect(r.ok).toBe(true);
+    expect(r.data).toMatchObject({ notePaths: ['.agent/features/worktree-flow.md'] });
+    expect(listFeatureNotes).toHaveBeenCalledWith(
+      expect.anything(),
+      '/repo',
+      '.agent/features',
+    );
+  });
+
+  it('propose_create dedupes exact and basename identifiers after canonicalization', async () => {
+    const r = await handleAppTool('worktree.propose_create', {
+      note: '.agent/features/a.md',
+      notes: ['a.md'],
+    }, { projectId: 'base' });
+    expect(r.ok).toBe(true);
+    expect(r.data).toMatchObject({ notePaths: ['.agent/features/a.md'] });
+  });
+
+  it('propose_create rejects explicit notes when the integration is disabled', async () => {
+    getProjects.mockReturnValue([{ id: 'base', name: 'Base', cwd: '/repo', connection: { type: 'local' } }]);
+    const r = await handleAppTool('worktree.propose_create', { note: 'a.md' }, { projectId: 'base' });
+    expect(r).toEqual({
+      ok: false,
+      error: 'cannot propose feature notes: this project has no feature note directory configured',
+    });
+    expect(send).not.toHaveBeenCalled();
+    expect(listFeatureNotes).not.toHaveBeenCalled();
+  });
+
+  it('propose_create rejects unknown and ambiguous identifiers without opening the dialog', async () => {
+    listFeatureNotes.mockResolvedValueOnce({ ok: true, notes: [] });
+    const unknown = await handleAppTool('worktree.propose_create', { note: 'missing.md' }, { projectId: 'base' });
+    expect(unknown).toEqual({ ok: false, error: 'feature note not found: missing.md' });
+
+    listFeatureNotes.mockResolvedValueOnce({
+      ok: true,
+      notes: [{ path: 'one/same.md' }, { path: 'two/same.md' }],
+    });
+    const ambiguous = await handleAppTool('worktree.propose_create', { note: 'same.md' }, { projectId: 'base' });
+    expect(ambiguous).toEqual({ ok: false, error: 'ambiguous feature note identifier: same.md' });
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('propose_create preserves listing failures when explicit notes require validation', async () => {
+    listFeatureNotes.mockResolvedValue({ ok: false, error: 'remote permission denied' });
+    const r = await handleAppTool('worktree.propose_create', { note: 'a.md' }, { projectId: 'base' });
+    expect(r).toEqual({ ok: false, error: 'cannot list configured feature notes: remote permission denied' });
+    expect(send).not.toHaveBeenCalled();
   });
 
   it('propose_finish opens the gate for a worktree', async () => {
