@@ -216,12 +216,20 @@ test.describe('finish worktree gate', () => {
     await page.locator('.context-menu-item', { hasText: 'Agent (Claude)' }).click();
     const textarea = page.locator('.agent-textarea:visible');
     await expect(textarea).toBeVisible({ timeout: 5_000 });
-    await textarea.fill('worktree_finish');
+    await textarea.fill('delay:800|worktree_finish');
     await textarea.press('Enter');
+
+    const baseProject = page.locator('.sidebar-item', { hasText: 'Finish Base' }).first();
+    const childProject = page.locator('.sidebar-item.worktree-child', { hasText: 'feature' });
+    await baseProject.click();
+    await expect(baseProject).toHaveClass(/active/);
 
     const popup = page.locator('.worktree-dialog', { hasText: 'Finish Worktree' });
     await expect(popup).toBeVisible({ timeout: 8_000 });
+    await expect(childProject).toHaveClass(/active/);
+    await expect(popup.locator('.project-requester')).toHaveText('Requested by: feature');
     await popup.locator('.conn-btn-cancel').click();
+    await expect(childProject).toHaveClass(/active/);
     expect(fs.existsSync(feature)).toBe(true);
   });
 });

@@ -43,7 +43,7 @@ function seedNote(repo: string, rel: string, frontmatter: string) {
   fs.writeFileSync(abs, frontmatter, 'utf-8');
 }
 
-function seedProject(userDataDir: string, repo: string) {
+function seedProject(userDataDir: string, repo: string, includeDistractor = false) {
   const project = {
     id: PROJECT_ID,
     name: 'WT Base',
@@ -52,7 +52,16 @@ function seedProject(userDataDir: string, repo: string) {
     maxTabs: 5,
     defaultAgentProvider: CLAUDE_PROVIDER,
   };
-  fs.writeFileSync(path.join(userDataDir, 'projects.json'), JSON.stringify([project]), 'utf-8');
+  const projects = includeDistractor
+    ? [project, {
+        id: 'other-project',
+        name: 'Other Project',
+        cwd: path.dirname(repo),
+        connection: { type: 'local' },
+        maxTabs: 5,
+      }]
+    : [project];
+  fs.writeFileSync(path.join(userDataDir, 'projects.json'), JSON.stringify(projects), 'utf-8');
 }
 
 async function openNewWorktreeDialog(page: Page): Promise<ReturnType<Page['locator']>> {
@@ -93,7 +102,8 @@ test.describe('user-initiated worktree create', () => {
     // filtered): one in-progress + one cancelled.
     seedNote(repo, '.agent/features/demo.md', '---\ntype: feature\ntitle: Demo Feature\nstatus: in-progress\n---\n\n# Demo\n');
     seedNote(repo, '.agent/features/old.md', '---\ntype: feature\ntitle: Old Feature\nstatus: cancelled\n---\n');
-    seedProject(userDataDir, repo);
+    const isAgentProposal = testInfo.titlePath.join(' ').includes('agent proposal');
+    seedProject(userDataDir, repo, isAgentProposal);
     const forceCreateFailure = testInfo.titlePath.join(' ').includes('migration rollback failure');
     app = await electron.launch({
       args: [path.join(__dirname, '..'), `--user-data-dir=${userDataDir}`],
@@ -187,11 +197,18 @@ test.describe('user-initiated worktree create', () => {
     await page.locator('.context-menu-item', { hasText: 'Agent (Claude)' }).click();
     const textarea = page.locator('.agent-textarea:visible');
     await expect(textarea).toBeVisible({ timeout: 5_000 });
-    await textarea.fill('worktree_create:feature/proposed .agent/features/demo.md');
+    await textarea.fill('delay:800|worktree_create:feature/proposed .agent/features/demo.md');
     await textarea.press('Enter');
+
+    const baseProject = page.locator('.sidebar-item', { hasText: 'WT Base' });
+    const otherProject = page.locator('.sidebar-item', { hasText: 'Other Project' });
+    await otherProject.click();
+    await expect(otherProject).toHaveClass(/active/);
 
     const dialog = page.locator('.worktree-dialog');
     await expect(dialog).toBeVisible({ timeout: 8_000 });
+    await expect(baseProject).toHaveClass(/active/);
+    await expect(dialog.locator('.project-requester')).toHaveText('Requested by: WT Base');
     await expect(dialog.locator('.worktree-input')).toHaveValue('feature/proposed');
     await expect(
       dialog.locator('.worktree-note-row', { hasText: 'demo.md' }).locator('input[type="checkbox"]'),
@@ -201,6 +218,7 @@ test.describe('user-initiated worktree create', () => {
     ).not.toBeChecked();
     await dialog.locator('.settings-close').click();
     await expect(dialog).not.toBeVisible({ timeout: 5_000 });
+    await expect(baseProject).toHaveClass(/active/);
 
     const auditCard = page
       .locator('.agent-msg-fold:has(.fold-label:has-text("Shelf tool")):visible')

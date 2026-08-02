@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { SelectionPanel } from './SelectionPanel';
 import type { WebPermissionMeta } from '@shared/web-session';
-import { getProjectById, setActiveProjectById } from '../store';
+import { getProjectById, projectDisplayLabel, setActiveProjectById } from '../store';
 
 // App-global popup for web.fetch authorization. Driven by the main-side
 // web-permission channel (WEB_PERMISSION_REQUEST), NOT the agent tool-permission
@@ -22,7 +22,7 @@ export function WebPermissionPrompt() {
         return;
       }
       setActiveProjectById(req.projectId);
-      setQueue((q) => [...q, { ...req, projectName: project.config.name }]);
+      setQueue((q) => [...q, { ...req, projectName: projectDisplayLabel(project) }]);
     });
     // Resolved elsewhere (Telegram while Away, or timed out) → drop it locally.
     const offClose = window.shelfApi.web.onPermissionClose((requestId) => {

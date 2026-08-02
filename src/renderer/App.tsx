@@ -212,6 +212,7 @@ export function App() {
         console.warn(`[worktree] propose-create for unknown project ${projectId}`);
         return;
       }
+      setActiveProjectById(projectId);
       emit(Events.CREATE_WORKTREE, projectId, { branch, notePaths });
     });
 
@@ -221,6 +222,7 @@ export function App() {
         console.warn(`[worktree] propose-finish for unknown project ${projectId}`);
         return;
       }
+      setActiveProjectById(projectId);
       emit(Events.WORKTREE_CLOSE, projectId, 'finish');
     });
 

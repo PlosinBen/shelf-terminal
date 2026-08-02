@@ -33,6 +33,19 @@ export interface ProjectRuntime {
   folderInvalid: boolean;
 }
 
+/** Match the identity shown in Sidebar: worktree children are their branch. */
+export function projectDisplayLabel(project: {
+  readonly config: {
+    readonly name: string;
+    readonly parentProjectId?: string;
+    readonly worktreeBranch?: string;
+  };
+}): string {
+  return project.config.parentProjectId
+    ? (project.config.worktreeBranch ?? project.config.name)
+    : project.config.name;
+}
+
 export type ReadonlyDeep<T> =
   T extends (...args: never[]) => unknown ? T :
   T extends readonly (infer U)[] ? readonly ReadonlyDeep<U>[] :

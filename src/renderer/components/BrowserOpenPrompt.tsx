@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { SelectionPanel } from './SelectionPanel';
 import type { BrowserOpenMeta } from '@shared/web-session';
-import { getProjectById, setActiveProjectById } from '../store';
+import { getProjectById, projectDisplayLabel, setActiveProjectById } from '../store';
 
 // App-global popup for the browser_open tool (agent asks to open a visible Web
 // tab so the user can log in). Sibling of WebPermissionPrompt, but STRICTER:
@@ -24,7 +24,7 @@ export function BrowserOpenPrompt() {
         return;
       }
       setActiveProjectById(req.projectId);
-      setQueue((q) => [...q, { ...req, projectName: project.config.name }]);
+      setQueue((q) => [...q, { ...req, projectName: projectDisplayLabel(project) }]);
     });
     // Resolved elsewhere (timed out) → drop it locally.
     const offClose = window.shelfApi.web.onBrowserOpenClose((requestId) => {

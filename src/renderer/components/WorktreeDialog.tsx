@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useStore, getResolvedDefaultAgentProvider } from '../store';
+import { useStore, getResolvedDefaultAgentProvider, projectDisplayLabel } from '../store';
 import { on, emit, emitAgent, Events } from '../events';
 import { enqueuePendingSend } from '../agentTabStore';
 import { debugLog } from '../debugLog';
@@ -256,6 +256,9 @@ export function WorktreeDialog() {
           <button className="settings-close" onClick={() => setOpen(false)}>×</button>
         </div>
         <div className="worktree-dialog-body">
+          {project && (
+            <div className="project-requester">Requested by: {projectDisplayLabel(project)}</div>
+          )}
           <div className="worktree-target">
             {project?.config.name ?? 'Unknown project'} @ {baseBranch ?? 'unknown branch'}
           </div>

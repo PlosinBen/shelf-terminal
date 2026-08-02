@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useStore } from '../store';
+import { projectDisplayLabel, useStore } from '../store';
 import { on, emit, emitAgent, Events } from '../events';
 import { enqueuePendingSend } from '../agentTabStore';
 import { debugLog } from '../debugLog';
@@ -262,6 +262,7 @@ export function WorktreeCloseGate() {
           <button className="settings-close" onClick={close} disabled={busy}>×</button>
         </div>
         <div className="worktree-gate-body">
+          <div className="project-requester">Requested by: {projectDisplayLabel(sub)}</div>
           {isAbandon ? (
             <p>
               Abandon worktree {branch ? <strong>{branch}</strong> : 'this worktree'} without merging?

@@ -6,6 +6,7 @@ import {
   addTab,
   getActiveProjectId,
   listStableProjectViews,
+  projectDisplayLabel,
   reorderProjects,
   setActiveProjectById,
   setProjects,
@@ -29,6 +30,21 @@ describe('store project ordering', () => {
       },
     });
     __resetStoreForTests();
+  });
+
+  it('uses the worktree branch as the visible project label', () => {
+    const base = { config: config('Base') };
+    const child = {
+      config: {
+        ...config('Child'),
+        name: 'Base',
+        parentProjectId: 'Base',
+        worktreeBranch: 'feature/popup-focus',
+      },
+    };
+
+    expect(projectDisplayLabel(base)).toBe('Base');
+    expect(projectDisplayLabel(child)).toBe('feature/popup-focus');
   });
 
   afterEach(() => {
