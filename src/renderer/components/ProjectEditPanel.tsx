@@ -332,7 +332,7 @@ export function ProjectEditPanel() {
                 setFeatureNoteDir(e.target.value);
                 setFeatureNoteDirError(null);
               }}
-              placeholder=".agent/features"
+              placeholder="path/to/feature-notes"
               disabled={Boolean(project.config.parentProjectId)}
               spellCheck={false}
               autoCapitalize="off"

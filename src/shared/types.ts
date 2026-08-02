@@ -485,7 +485,7 @@ export interface BranchMergedInfo {
  * (connection-agnostic, feeds `migrateNote` directly).
  */
 export interface FeatureNoteInfo {
-  /** Path relative to the base repo cwd, e.g. `.agent/features/foo.md`. */
+  /** Path relative to the base repo cwd, e.g. `notes/features/foo.md`. */
   path: string;
   /** Frontmatter `title`, if present (else the picker falls back to the filename). */
   title?: string;
