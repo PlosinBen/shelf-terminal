@@ -2207,6 +2207,29 @@ button {
   color: var(--text-muted);
 }
 
+.worktree-note-dir {
+  margin-left: 4px;
+  font: inherit;
+  color: var(--text);
+}
+
+.worktree-note-empty,
+.worktree-note-list-error {
+  padding: 8px 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.worktree-note-empty {
+  color: var(--text-muted);
+}
+
+.worktree-note-list-error {
+  color: #f38ba8;
+}
+
 .worktree-select {
   width: 100%;
   padding: 8px 10px;

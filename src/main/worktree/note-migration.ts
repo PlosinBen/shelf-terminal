@@ -155,14 +155,16 @@ export async function restoreFeatureNotes(
   connector: Pick<Connector, 'exec'>,
   baseCwd: string,
   worktreeCwd: string,
+  featureNoteDir: string,
 ): Promise<NoteMigrationResult> {
-  const notes = await listFeatureNotes(connector, worktreeCwd);
-  if (notes.length === 0) return { migrated: false };
+  const listed = await listFeatureNotes(connector, worktreeCwd, featureNoteDir);
+  if (!listed.ok) throw new Error(listed.error);
+  if (listed.notes.length === 0) return { migrated: false };
 
   const baseRoot = normalizeCwd(baseCwd);
   const worktreeRoot = normalizeCwd(worktreeCwd);
 
-  for (const note of notes) {
+  for (const note of listed.notes) {
     const rel = note.path.trim();
     assertRelativeSafe(rel);
 

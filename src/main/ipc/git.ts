@@ -9,7 +9,7 @@ import { repoLockKey, tryAcquireRepoLock } from '../worktree/repo-lock';
 import { shellSingleQuote } from '../connector/file-utils';
 import type {
   Connection, GitBranchInfo, MigrateNoteResult, WorktreeAddResult, WorktreeRemoveResult,
-  DeleteBranchResult, FinishMergeBackResult, FeatureNoteInfo, BranchMergedInfo,
+  DeleteBranchResult, FinishMergeBackResult, FeatureNoteListResult, BranchMergedInfo,
 } from '@shared/types';
 
 export function registerGitHandlers(): void {
@@ -139,11 +139,16 @@ export function registerGitHandlers(): void {
     IPC.GIT_RESTORE_NOTES,
     async (
       _event,
-      payload: { connection: Connection; baseCwd: string; worktreeCwd: string },
+      payload: { connection: Connection; baseCwd: string; worktreeCwd: string; featureNoteDir: string },
     ): Promise<MigrateNoteResult> => {
       try {
         const connector = createConnector(payload.connection);
-        const res = await restoreFeatureNotes(connector, payload.baseCwd, payload.worktreeCwd);
+        const res = await restoreFeatureNotes(
+          connector,
+          payload.baseCwd,
+          payload.worktreeCwd,
+          payload.featureNoteDir,
+        );
         return { ok: true, migrated: res.migrated };
       } catch (err: any) {
         // Fail-loud: close must not remove the worktree if any carried transient
@@ -155,15 +160,12 @@ export function registerGitHandlers(): void {
 
   ipcMain.handle(
     IPC.GIT_LIST_FEATURE_NOTES,
-    async (_event, payload: { connection: Connection; cwd: string }): Promise<FeatureNoteInfo[]> => {
-      try {
-        const connector = createConnector(payload.connection);
-        return await listFeatureNotes(connector, payload.cwd);
-      } catch {
-        // A missing `.agent/features/` or a listing hiccup is not fatal — the
-        // picker just shows no notes (user can still create without one).
-        return [];
-      }
+    async (
+      _event,
+      payload: { connection: Connection; cwd: string; featureNoteDir: string },
+    ): Promise<FeatureNoteListResult> => {
+      const connector = createConnector(payload.connection);
+      return listFeatureNotes(connector, payload.cwd, payload.featureNoteDir);
     },
   );
 

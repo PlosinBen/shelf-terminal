@@ -97,14 +97,14 @@ contextBridge.exposeInMainWorld('shelfApi', {
       ipcRenderer.invoke(IPC.GIT_WORKTREE_REMOVE, { connection, cwd, worktreePath }),
     migrateNote: (connection: any, baseCwd: string, worktreeCwd: string, notePaths: string[]) =>
       ipcRenderer.invoke(IPC.GIT_MIGRATE_NOTE, { connection, baseCwd, worktreeCwd, notePaths }),
-    restoreNotes: (connection: any, baseCwd: string, worktreeCwd: string) =>
-      ipcRenderer.invoke(IPC.GIT_RESTORE_NOTES, { connection, baseCwd, worktreeCwd }),
+    restoreNotes: (connection: any, baseCwd: string, worktreeCwd: string, featureNoteDir: string) =>
+      ipcRenderer.invoke(IPC.GIT_RESTORE_NOTES, { connection, baseCwd, worktreeCwd, featureNoteDir }),
     deleteBranch: (connection: any, cwd: string, branch: string, force?: boolean) =>
       ipcRenderer.invoke(IPC.GIT_DELETE_BRANCH, { connection, cwd, branch, force }),
     branchMerged: (connection: any, cwd: string, target: string, branch: string) =>
       ipcRenderer.invoke(IPC.GIT_BRANCH_MERGED, { connection, cwd, target, branch }),
-    listFeatureNotes: (connection: any, cwd: string) =>
-      ipcRenderer.invoke(IPC.GIT_LIST_FEATURE_NOTES, { connection, cwd }),
+    listFeatureNotes: (connection: any, cwd: string, featureNoteDir: string) =>
+      ipcRenderer.invoke(IPC.GIT_LIST_FEATURE_NOTES, { connection, cwd, featureNoteDir }),
   },
   worktree: {
     // renderer→main: lock + ff-only merge-back step (finish/abandon themselves

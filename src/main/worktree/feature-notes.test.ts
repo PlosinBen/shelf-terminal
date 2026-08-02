@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { parseFeatureNoteList } from './feature-notes';
+import { describe, it, expect, vi } from 'vitest';
+import { buildFeatureNoteListCommand, listFeatureNotes, parseFeatureNoteList } from './feature-notes';
 
 /** Build the shell-dump shape parseFeatureNoteList consumes. */
 function dump(entries: { path: string; body: string }[]): string {
@@ -81,5 +81,68 @@ describe('parseFeatureNoteList', () => {
       '.agent/features/a.md',
       '.agent/features/b.md',
     ]);
+  });
+});
+
+describe('listFeatureNotes', () => {
+  it('lists direct markdown notes from the configured directory', async () => {
+    const exec = vi.fn().mockResolvedValue({
+      stdout: dump([{ path: 'notes/features/alpha.md', body: note('Alpha', 'in-progress') }]),
+      stderr: '',
+    });
+
+    await expect(listFeatureNotes({ exec }, '/repo', ' notes/features/ ')).resolves.toEqual({
+      ok: true,
+      notes: [{ path: 'notes/features/alpha.md', title: 'Alpha', status: 'in-progress' }],
+    });
+    expect(exec).toHaveBeenCalledWith('/repo', expect.stringContaining("rel_dir='notes/features'"));
+  });
+
+  it('treats missing or empty configured directories as a successful empty list', async () => {
+    const exec = vi.fn().mockResolvedValue({ stdout: '', stderr: '' });
+    await expect(listFeatureNotes({ exec }, '/repo', 'notes/features')).resolves.toEqual({
+      ok: true,
+      notes: [],
+    });
+  });
+
+  it('returns the full connector error instead of collapsing it to an empty list', async () => {
+    const exec = vi.fn().mockRejectedValue(new Error('permission denied: notes/features'));
+    await expect(listFeatureNotes({ exec }, '/repo', 'notes/features')).resolves.toEqual({
+      ok: false,
+      error: 'permission denied: notes/features',
+    });
+  });
+
+  it('rejects listing output outside the configured directory', async () => {
+    const exec = vi.fn().mockResolvedValue({
+      stdout: dump([{ path: '.agent/features/alpha.md', body: note('Alpha', 'in-progress') }]),
+      stderr: '',
+    });
+    await expect(listFeatureNotes({ exec }, '/repo', 'notes/features')).resolves.toEqual({
+      ok: false,
+      error: 'Feature note listing returned a path outside the configured directory',
+    });
+  });
+
+  it('rejects an unsafe directory before executing a connector command', async () => {
+    const exec = vi.fn();
+    const result = await listFeatureNotes({ exec }, '/repo', '../notes');
+    expect(result).toEqual({
+      ok: false,
+      error: 'Feature note directory must not traverse parent directories',
+    });
+    expect(exec).not.toHaveBeenCalled();
+  });
+});
+
+describe('buildFeatureNoteListCommand', () => {
+  it('guards directory and note symlinks against escaping the physical project root', () => {
+    const command = buildFeatureNoteListCommand("/repo's root", 'notes/features');
+    expect(command).toContain("root_input='/repo'\\''s root'");
+    expect(command).toContain('Configured feature note directory escapes project root');
+    expect(command).toContain('Feature note escapes project root');
+    expect(command).toContain('for f in "$dir"/*.md');
+    expect(command).toContain('*/index.md');
   });
 });

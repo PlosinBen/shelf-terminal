@@ -61,13 +61,17 @@ export function WorktreeDialog() {
   // In-progress feature notes in the base repo, offered as the handoff seed. The
   // checked notes are migrated into the worktree before its agent boots.
   const [notes, setNotes] = useState<FeatureNoteInfo[]>([]);
+  const [featureNoteDir, setFeatureNoteDir] = useState<string | null>(null);
+  const [noteListError, setNoteListError] = useState<string | null>(null);
   const [selectedNotes, setSelectedNotes] = useState<Set<string>>(() => new Set());
   const [baseBranch, setBaseBranch] = useState<string | null>(null);
   const [defaultAgentProvider, setDefaultAgentProvider] = useState<AgentProvider | ''>('');
   const inputRef = useRef<HTMLInputElement>(null);
+  const requestGenerationRef = useRef(0);
 
   useEffect(() => {
     const off = on(Events.CREATE_WORKTREE, (targetProjectId: string, prefill?: { branch?: string; notePaths?: string[] }) => {
+      const requestGeneration = ++requestGenerationRef.current;
       const prefilledNotePaths = normalizeWorktreePrefillNotePaths(prefill?.notePaths);
       setProjectId(targetProjectId);
       setOpen(true);
@@ -76,7 +80,9 @@ export function WorktreeDialog() {
       setFailurePrompt(null);
       setCreating(false);
       setNotes([]);
-      setSelectedNotes(new Set(prefilledNotePaths));
+      setFeatureNoteDir(null);
+      setNoteListError(null);
+      setSelectedNotes(new Set());
       setBaseBranch(null);
 
       // Fetch the base repo's in-progress notes for the picker. Pre-select when
@@ -84,17 +90,39 @@ export function WorktreeDialog() {
       // otherwise default to none so the user chooses deliberately.
       const proj = projects.find((p) => p.config.id === targetProjectId);
       if (proj) {
+        const configuredDir = proj.config.featureNoteDir;
+        setFeatureNoteDir(configuredDir ?? null);
         setDefaultAgentProvider(getResolvedDefaultAgentProvider(proj.config.id) ?? '');
         window.shelfApi.git.branchList(proj.config.connection, proj.config.cwd)
-          .then((branches) => setBaseBranch(branches.find((branch) => branch.current)?.name ?? null))
-          .catch(() => setBaseBranch(null));
-        window.shelfApi.git
-          .listFeatureNotes(proj.config.connection, proj.config.cwd)
-          .then((found) => {
-            setNotes(found);
-            if (prefilledNotePaths.length === 0 && found.length === 1) setSelectedNotes(new Set([found[0].path]));
+          .then((branches) => {
+            if (requestGenerationRef.current !== requestGeneration) return;
+            setBaseBranch(branches.find((branch) => branch.current)?.name ?? null);
           })
-          .catch(() => { /* picker just shows no notes; create still works */ });
+          .catch(() => {
+            if (requestGenerationRef.current === requestGeneration) setBaseBranch(null);
+          });
+        if (configuredDir) {
+          window.shelfApi.git
+            .listFeatureNotes(proj.config.connection, proj.config.cwd, configuredDir)
+            .then((result) => {
+              if (requestGenerationRef.current !== requestGeneration) return;
+              if (!result.ok) {
+                setNoteListError(result.error);
+                return;
+              }
+              setNotes(result.notes);
+              const availablePaths = new Set(result.notes.map((note) => note.path));
+              const selectedPrefills = prefilledNotePaths.filter((path) => availablePaths.has(path));
+              if (selectedPrefills.length > 0) {
+                setSelectedNotes(new Set(selectedPrefills));
+              } else if (prefilledNotePaths.length === 0 && result.notes.length === 1) {
+                setSelectedNotes(new Set([result.notes[0].path]));
+              }
+            })
+            .catch((err) => {
+              if (requestGenerationRef.current === requestGeneration) setNoteListError(errorText(err));
+            });
+        }
       }
     });
     return () => { off(); };
@@ -272,10 +300,17 @@ export function WorktreeDialog() {
             onKeyDown={handleKeyDown}
             disabled={creating}
           />
-          {notes.length > 0 && (
+          {featureNoteDir && (
             <div className="worktree-note-picker">
-              <span className="worktree-note-picker-label">Feature note</span>
-              <div className="worktree-note-list">
+              <span className="worktree-note-picker-label">
+                Feature note <code className="worktree-note-dir">{featureNoteDir}</code>
+              </span>
+              {noteListError ? (
+                <pre className="worktree-error-text worktree-note-list-error">{noteListError}</pre>
+              ) : notes.length === 0 ? (
+                <span className="worktree-note-empty">No feature notes available</span>
+              ) : (
+                <div className="worktree-note-list">
                 {notes.map((n) => {
                   const filename = featureNoteFilename(n.path);
                   const checked = selectedNotes.has(n.path);
@@ -297,7 +332,8 @@ export function WorktreeDialog() {
                     </label>
                   );
                 })}
-              </div>
+                </div>
+              )}
             </div>
           )}
           <label className="worktree-note-picker">

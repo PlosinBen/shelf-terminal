@@ -494,6 +494,10 @@ export interface FeatureNoteInfo {
   status?: string;
 }
 
+export type FeatureNoteListResult =
+  | { ok: true; notes: FeatureNoteInfo[] }
+  | { ok: false; error: string };
+
 // ── PM Agent ──
 
 export type PmProviderType = 'openai' | 'gemini' | 'ollama';

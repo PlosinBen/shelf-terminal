@@ -74,10 +74,10 @@ interface ShelfApi {
     worktreeAdd: (connection: import('../shared/types').Connection, cwd: string, branch: string, newBranch: boolean) => Promise<import('../shared/types').WorktreeAddResult>;
     worktreeRemove: (connection: import('../shared/types').Connection, cwd: string, worktreePath: string) => Promise<import('../shared/types').WorktreeRemoveResult>;
     migrateNote: (connection: import('../shared/types').Connection, baseCwd: string, worktreeCwd: string, notePaths: string[]) => Promise<import('../shared/types').MigrateNoteResult>;
-    restoreNotes: (connection: import('../shared/types').Connection, baseCwd: string, worktreeCwd: string) => Promise<import('../shared/types').MigrateNoteResult>;
+    restoreNotes: (connection: import('../shared/types').Connection, baseCwd: string, worktreeCwd: string, featureNoteDir: string) => Promise<import('../shared/types').MigrateNoteResult>;
     deleteBranch: (connection: import('../shared/types').Connection, cwd: string, branch: string, force?: boolean) => Promise<import('../shared/types').DeleteBranchResult>;
     branchMerged: (connection: import('../shared/types').Connection, cwd: string, target: string, branch: string) => Promise<import('../shared/types').BranchMergedInfo>;
-    listFeatureNotes: (connection: import('../shared/types').Connection, cwd: string) => Promise<import('../shared/types').FeatureNoteInfo[]>;
+    listFeatureNotes: (connection: import('../shared/types').Connection, cwd: string, featureNoteDir: string) => Promise<import('../shared/types').FeatureNoteListResult>;
   };
   worktree: {
     finishMergeBack: (payload: { connection: import('../shared/types').Connection; featureCwd: string; baseCwd: string; baseBranch: string; featureBranch: string }) => Promise<import('../shared/types').FinishMergeBackResult>;

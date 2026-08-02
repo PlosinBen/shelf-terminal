@@ -159,7 +159,7 @@ describe('GIT_MIGRATE_NOTE', () => {
 describe('GIT_RESTORE_NOTES', () => {
   it('returns migrated=false when the worktree has no feature notes', async () => {
     execImpl = async (_cwd, cmd) => {
-      if (cmd.startsWith('for f in .agent/features/*.md')) return { stdout: '', stderr: '' };
+      if (cmd.includes('for f in "$dir"/*.md')) return { stdout: '', stderr: '' };
       return { stdout: '', stderr: '' };
     };
 
@@ -167,6 +167,7 @@ describe('GIT_RESTORE_NOTES', () => {
       connection,
       baseCwd: '/repo',
       worktreeCwd: '/repo-feature',
+      featureNoteDir: '.agent/features',
     });
 
     expect(res).toEqual({ ok: true, migrated: false });
@@ -174,7 +175,7 @@ describe('GIT_RESTORE_NOTES', () => {
 
   it('fails loud when restore would overwrite a base note', async () => {
     execImpl = async (_cwd, cmd) => {
-      if (cmd.startsWith('for f in .agent/features/*.md')) {
+      if (cmd.includes('for f in "$dir"/*.md')) {
         return { stdout: '===SHELF_NOTE:.agent/features/x.md===\n---\ntitle: X\n---\n', stderr: '' };
       }
       if (cmd.startsWith('test ! -e')) return { stdout: '__SHELF_NOTE_MISSING__\n', stderr: '' };
@@ -185,9 +186,34 @@ describe('GIT_RESTORE_NOTES', () => {
       connection,
       baseCwd: '/repo',
       worktreeCwd: '/repo-feature',
+      featureNoteDir: '.agent/features',
     });
 
     expect(res.ok).toBe(false);
     expect(res.error).toContain('already exists');
+  });
+});
+
+describe('GIT_LIST_FEATURE_NOTES', () => {
+  it('returns an explicit successful empty result for a missing directory', async () => {
+    const res = await handlers.get(IPC.GIT_LIST_FEATURE_NOTES)!({}, {
+      connection,
+      cwd: '/repo',
+      featureNoteDir: 'notes/features',
+    });
+
+    expect(res).toEqual({ ok: true, notes: [] });
+    expect(execCalls[0]?.cmd).toContain("rel_dir='notes/features'");
+  });
+
+  it('preserves connector failures as explicit listing errors', async () => {
+    execImpl = async () => { throw new Error('remote permission denied'); };
+    const res = await handlers.get(IPC.GIT_LIST_FEATURE_NOTES)!({}, {
+      connection,
+      cwd: '/repo',
+      featureNoteDir: 'notes/features',
+    });
+
+    expect(res).toEqual({ ok: false, error: 'remote permission denied' });
   });
 });

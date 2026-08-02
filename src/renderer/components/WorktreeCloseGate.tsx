@@ -171,25 +171,32 @@ export function WorktreeCloseGate() {
       }
     }
 
-    // Restore any remaining transient feature note before teardown. An absent note
-    // is a no-op; failure keeps the worktree so the ignored note cannot be erased.
-    const restored = await window.shelfApi.git.restoreNotes(parentConn, parentCwd, featureCwd);
-    if (!restored.ok) {
-      const msg = restored.error ?? 'failed to restore feature notes';
-      logCloseFailure({
-        operation: state.kind,
-        subProjectId: state.subProjectId,
-        parentProjectId: parent.config.id,
-        featureBranch,
-        targetBranch: target,
+    // Restore from the child's creation-time snapshot. Disabled/legacy children
+    // have no binding and deliberately skip feature-note handling.
+    if (sub.config.featureNoteDir) {
+      const restored = await window.shelfApi.git.restoreNotes(
+        parentConn,
         parentCwd,
         featureCwd,
-        failedStep: 'restoreNotes',
-        error: msg,
-      });
-      setError(msg);
-      setBusy(false);
-      return;
+        sub.config.featureNoteDir,
+      );
+      if (!restored.ok) {
+        const msg = restored.error ?? 'failed to restore feature notes';
+        logCloseFailure({
+          operation: state.kind,
+          subProjectId: state.subProjectId,
+          parentProjectId: parent.config.id,
+          featureBranch,
+          targetBranch: target,
+          parentCwd,
+          featureCwd,
+          failedStep: 'restoreNotes',
+          error: msg,
+        });
+        setError(msg);
+        setBusy(false);
+        return;
+      }
     }
 
     // Teardown: remove the worktree dir, then delete the (now unchecked-out) branch.
