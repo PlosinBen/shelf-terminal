@@ -27,6 +27,27 @@ vi.mock('../skills-store', () => ({
 const onSkillsChanged = vi.fn();
 vi.mock('../skills-sync', () => ({ onSkillsChanged: () => onSkillsChanged() }));
 
+const requestWebPermission = vi.fn();
+const requestBrowserOpen = vi.fn();
+const openWebTab = vi.fn();
+const webFetch = vi.fn();
+const isGranted = vi.fn();
+const grant = vi.fn();
+vi.mock('../web-permission', () => ({
+  requestWebPermission: (...a: unknown[]) => requestWebPermission(...a),
+}));
+vi.mock('../browser-open', () => ({
+  requestBrowserOpen: (...a: unknown[]) => requestBrowserOpen(...a),
+  openWebTab: (...a: unknown[]) => openWebTab(...a),
+}));
+vi.mock('../web-session', () => ({
+  webFetch: (...a: unknown[]) => webFetch(...a),
+}));
+vi.mock('../web-grants', () => ({
+  isGranted: (...a: unknown[]) => isGranted(...a),
+  grant: (...a: unknown[]) => grant(...a),
+}));
+
 const getProjects = vi.fn();
 const getMainWindow = vi.fn();
 vi.mock('../app-state', () => ({
@@ -51,6 +72,49 @@ beforeEach(() => {
   onSkillsChanged.mockReset();
   getProjects.mockReset();
   getMainWindow.mockReset();
+  requestWebPermission.mockReset();
+  requestBrowserOpen.mockReset();
+  openWebTab.mockReset();
+  webFetch.mockReset();
+  isGranted.mockReset();
+  grant.mockReset();
+});
+
+describe('app-tool dispatcher (browser prompt ownership)', () => {
+  it('passes the source project to the web.fetch permission prompt', async () => {
+    isGranted.mockReturnValue(false);
+    requestWebPermission.mockResolvedValue('once');
+    webFetch.mockResolvedValue({ status: 200, headers: {}, body: 'ok' });
+
+    const result = await handleAppTool(
+      'web.fetch',
+      { url: 'https://kibana.corp.com/api/status' },
+      { projectId: 'project-b' },
+    );
+
+    expect(result.ok).toBe(true);
+    expect(requestWebPermission).toHaveBeenCalledWith(expect.objectContaining({ projectId: 'project-b' }));
+  });
+
+  it('passes the source project to browser_open and opens the tab there', async () => {
+    requestBrowserOpen.mockResolvedValue('open');
+
+    const result = await handleAppTool(
+      'web.open',
+      { url: 'https://kibana.corp.com/login' },
+      { projectId: 'project-b' },
+    );
+
+    expect(result.ok).toBe(true);
+    expect(requestBrowserOpen).toHaveBeenCalledWith(expect.objectContaining({ projectId: 'project-b' }));
+    expect(openWebTab).toHaveBeenCalledWith('project-b', 'https://kibana.corp.com/login');
+  });
+
+  it.each(['web.fetch', 'web.open'])('%s fails loudly without a project context', async (op) => {
+    const result = await handleAppTool(op, { url: 'https://kibana.corp.com/login' });
+
+    expect(result).toEqual({ ok: false, error: `${op} requires a project context` });
+  });
 });
 
 describe('app-tool dispatcher (worktree proposals)', () => {

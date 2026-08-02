@@ -43,6 +43,8 @@ export function isBrowserOpenTool(toolName: string): boolean {
  * they see the exact login/service page before approving.
  */
 export interface BrowserOpenMeta {
+  /** Project whose agent requested the popup. */
+  projectId: string;
   /** Full absolute http(s) URL the tab will navigate to. */
   url: string;
   /** Canonical scheme://host[:port], parsed authoritatively (never the raw URL). */
@@ -64,6 +66,8 @@ export type BrowserOpenDecision = 'open' | 'deny';
 
 /** Anti-spoof origin metadata attached to a web.fetch permission request. */
 export interface WebPermissionMeta {
+  /** Project whose agent requested access. */
+  projectId: string;
   /** Canonical scheme://host[:port] — the grant key, parsed authoritatively. */
   origin: string;
   /** eTLD+1 for display highlight (null if unknown). */

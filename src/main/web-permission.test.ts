@@ -37,7 +37,7 @@ vi.mock('./pm/telegram', () => ({
 
 const { requestWebPermission, registerWebPermissionHandlers } = await import('./web-permission');
 
-const META = { origin: 'https://kibana.corp.com', registrableDomain: 'corp.com', method: 'GET' };
+const META = { projectId: 'project-b', origin: 'https://kibana.corp.com', registrableDomain: 'corp.com', method: 'GET' };
 
 function lastRequestId(): string {
   const req = [...sentIpc].reverse().find((m) => m.channel === IPC.WEB_PERMISSION_REQUEST);
@@ -55,6 +55,7 @@ describe('web-permission', () => {
   it('shows the desktop popup and resolves from the renderer answer', async () => {
     const p = requestWebPermission(META);
     expect(sentIpc.find((m) => m.channel === IPC.WEB_PERMISSION_REQUEST)?.payload.origin).toBe(META.origin);
+    expect(sentIpc.find((m) => m.channel === IPC.WEB_PERMISSION_REQUEST)?.payload.projectId).toBe(META.projectId);
 
     const requestId = lastRequestId();
     ipcHandlers[IPC.WEB_PERMISSION_RESOLVE](null, { requestId, decision: 'always' });

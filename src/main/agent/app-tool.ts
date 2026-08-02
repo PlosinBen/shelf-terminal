@@ -161,13 +161,15 @@ const REGISTRY: Record<string, AppToolDef> = {
     run: async (args, ctx) => {
       const url = typeof args.url === 'string' ? args.url : '';
       if (!url) throw new Error('web.fetch requires a "url"');
+      const projectId = ctx.projectId;
+      if (!projectId) throw new Error('web.fetch requires a project context');
       const parsed = parseHttpOrigin(url);
       if (!parsed) throw new Error(`web.fetch: invalid or non-http(s) URL: ${url}`);
-      const projectId = ctx.projectId ?? '';
       const method = typeof args.method === 'string' ? args.method : undefined;
 
       if (!isGranted(projectId, parsed.origin)) {
         const decision = await requestWebPermission({
+          projectId,
           origin: parsed.origin,
           registrableDomain: parsed.registrableDomain,
           method: method ?? 'GET',
@@ -197,6 +199,8 @@ const REGISTRY: Record<string, AppToolDef> = {
     run: async (args, ctx) => {
       const url = typeof args.url === 'string' ? args.url : '';
       if (!url) throw new Error('web.open requires a "url"');
+      const projectId = ctx.projectId;
+      if (!projectId) throw new Error('web.open requires a project context');
       const parsed = parseHttpOrigin(url);
       if (!parsed) throw new Error(`web.open: invalid or non-http(s) URL: ${url}`);
       // Agent-supplied, non-authoritative — trimmed + length-capped so a runaway
@@ -205,6 +209,7 @@ const REGISTRY: Record<string, AppToolDef> = {
       const reason = rawReason ? rawReason.slice(0, 300) : undefined;
 
       const decision = await requestBrowserOpen({
+        projectId,
         url,
         origin: parsed.origin,
         registrableDomain: parsed.registrableDomain,
@@ -215,7 +220,7 @@ const REGISTRY: Record<string, AppToolDef> = {
         throw new Error(`browser_open denied by user for ${parsed.origin}`);
       }
 
-      openWebTab(ctx.projectId ?? '', url);
+      openWebTab(projectId, url);
       return { opened: true, url: parsed.origin,
         message: `Opened ${url} in a Web tab. Ask the user to log in there, then retry browser_fetch.` };
     },
