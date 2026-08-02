@@ -43,7 +43,12 @@ function seedNote(repo: string, rel: string, frontmatter: string) {
   fs.writeFileSync(abs, frontmatter, 'utf-8');
 }
 
-function seedProject(userDataDir: string, repo: string, includeDistractor = false) {
+function seedProject(
+  userDataDir: string,
+  repo: string,
+  featureNoteDir?: string,
+  includeDistractor = false,
+) {
   const project = {
     id: PROJECT_ID,
     name: 'WT Base',
@@ -51,6 +56,7 @@ function seedProject(userDataDir: string, repo: string, includeDistractor = fals
     connection: { type: 'local' },
     maxTabs: 5,
     defaultAgentProvider: CLAUDE_PROVIDER,
+    featureNoteDir,
   };
   const projects = includeDistractor
     ? [project, {
@@ -102,8 +108,18 @@ test.describe('user-initiated worktree create', () => {
     // filtered): one in-progress + one cancelled.
     seedNote(repo, '.agent/features/demo.md', '---\ntype: feature\ntitle: Demo Feature\nstatus: in-progress\n---\n\n# Demo\n');
     seedNote(repo, '.agent/features/old.md', '---\ntype: feature\ntitle: Old Feature\nstatus: cancelled\n---\n');
-    const isAgentProposal = testInfo.titlePath.join(' ').includes('agent proposal');
-    seedProject(userDataDir, repo, isAgentProposal);
+    const title = testInfo.titlePath.join(' ');
+    const featureNoteDir = title.includes('without configured directory')
+      ? undefined
+      : title.includes('empty configured directory')
+        ? 'notes/features'
+        : title.includes('unlistable configured directory')
+          ? 'outside-notes'
+        : '.agent/features';
+    if (title.includes('unlistable configured directory')) {
+      fs.symlinkSync(os.tmpdir(), path.join(repo, 'outside-notes'));
+    }
+    seedProject(userDataDir, repo, featureNoteDir, title.includes('agent proposal'));
     const forceCreateFailure = testInfo.titlePath.join(' ').includes('migration rollback failure');
     app = await electron.launch({
       args: [path.join(__dirname, '..'), `--user-data-dir=${userDataDir}`],
@@ -140,6 +156,8 @@ test.describe('user-initiated worktree create', () => {
 
     await expect(dialog).toHaveCSS('width', '600px');
     await expect(dialog.locator('.worktree-target')).toHaveText('WT Base @ main');
+    await expect(dialog.locator('.worktree-note-picker-label', { hasText: 'Feature note' }))
+      .toContainText('.agent/features');
     await expect(dialog.locator('.worktree-note-picker').filter({ hasText: 'Agent provider' }).locator('select'))
       .toHaveValue(CLAUDE_PROVIDER);
 
@@ -166,6 +184,17 @@ test.describe('user-initiated worktree create', () => {
     await expect(items.nth(1)).toHaveClass(/worktree-child/, { timeout: 8_000 });
     await expect(items.nth(1)).toContainText('feature/m');
 
+    const projects = JSON.parse(fs.readFileSync(path.join(userDataDir, 'projects.json'), 'utf-8'));
+    expect(projects.find((project: { parentProjectId?: string }) => project.parentProjectId === PROJECT_ID)?.featureNoteDir)
+      .toBe('.agent/features');
+
+    await items.nth(1).click({ button: 'right' });
+    await page.locator('.context-menu-item', { hasText: 'Edit' }).click();
+    const featureDirField = page.locator('.project-edit-field', { hasText: 'Feature Note Directory' });
+    await expect(featureDirField.locator('input')).toHaveValue('.agent/features');
+    await expect(featureDirField.locator('input')).toBeDisabled();
+    await page.locator('.project-edit-panel .settings-close').click();
+
     // Notes migrated: now in the worktree, gone from the base (copy-then-delete).
     expect(fs.existsSync(path.join(`${repo}-feature-m`, '.agent/features/demo.md'))).toBe(true);
     expect(fs.existsSync(path.join(`${repo}-feature-m`, '.agent/features/old.md'))).toBe(true);
@@ -174,6 +203,32 @@ test.describe('user-initiated worktree create', () => {
 
     // Auto-connected: no lingering connect prompt for the now-active worktree.
     await expect(page.locator('.connect-prompt')).toHaveCount(0, { timeout: 8_000 });
+  });
+
+  test('without configured directory omits the entire Feature Note section', async () => {
+    const dialog = await openNewWorktreeDialog(page);
+    await expect(dialog.locator('.worktree-note-picker-label', { hasText: 'Feature note' })).toHaveCount(0);
+    await expect(dialog.locator('.worktree-note-row')).toHaveCount(0);
+    await expect(dialog.locator('.worktree-note-empty')).toHaveCount(0);
+  });
+
+  test('empty configured directory shows its path and a successful empty state', async () => {
+    const dialog = await openNewWorktreeDialog(page);
+    const label = dialog.locator('.worktree-note-picker-label', { hasText: 'Feature note' });
+    await expect(label).toContainText('notes/features');
+    await expect(dialog.locator('.worktree-note-row')).toHaveCount(0);
+    await expect(dialog.locator('.worktree-note-empty')).toHaveText('No feature notes available');
+  });
+
+  test('unlistable configured directory shows the full error without disabling Create', async () => {
+    const dialog = await openNewWorktreeDialog(page);
+    await expect(dialog.locator('.worktree-note-picker-label', { hasText: 'Feature note' }))
+      .toContainText('outside-notes');
+    await expect(dialog.locator('.worktree-note-list-error')).toContainText(
+      'Configured feature note directory escapes project root',
+    );
+    await dialog.locator('.worktree-input').fill('feature/no-note');
+    await expect(dialog.locator('.conn-btn-next')).toBeEnabled();
   });
 
   test('choosing "No note" leaves the base note untouched', async () => {
@@ -197,7 +252,7 @@ test.describe('user-initiated worktree create', () => {
     await page.locator('.context-menu-item', { hasText: 'Agent (Claude)' }).click();
     const textarea = page.locator('.agent-textarea:visible');
     await expect(textarea).toBeVisible({ timeout: 5_000 });
-    await textarea.fill('delay:800|worktree_create:feature/proposed .agent/features/demo.md');
+    await textarea.fill('delay:800|worktree_create:feature/proposed demo.md');
     await textarea.press('Enter');
 
     const baseProject = page.locator('.sidebar-item', { hasText: 'WT Base' });
@@ -226,8 +281,9 @@ test.describe('user-initiated worktree create', () => {
     await expect(auditCard).toBeVisible({ timeout: 5_000 });
     await expect(auditCard.locator('.fold-subtitle')).toHaveText('propose_worktree_create');
     await auditCard.locator('.fold-header').click();
-    await expect(auditCard.locator('.fold-body-code')).toContainText('"note": ".agent/features/demo.md"');
+    await expect(auditCard.locator('.fold-body-code')).toContainText('"note": "demo.md"');
     await expect(auditCard.locator('.fold-body-code')).toContainText('"notePaths": [');
+    await expect(auditCard.locator('.fold-body-code')).toContainText('".agent/features/demo.md"');
     await expect(page.locator('.sidebar-item.worktree-child')).toHaveCount(0);
   });
 

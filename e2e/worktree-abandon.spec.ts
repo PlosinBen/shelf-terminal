@@ -41,12 +41,16 @@ function makeRepoWithWorktree(): { root: string; base: string; feature: string }
   return { root, base, feature };
 }
 
-function seed(userDataDir: string, base: string, feature: string) {
+function seed(userDataDir: string, base: string, feature: string, configured: boolean) {
   const projects = [
-    { id: BASE_ID, name: 'Abandon Base', cwd: base, connection: { type: 'local' }, maxTabs: 5 },
+    {
+      id: BASE_ID, name: 'Abandon Base', cwd: base, connection: { type: 'local' }, maxTabs: 5,
+      ...(configured ? { featureNoteDir: 'notes/future' } : {}),
+    },
     {
       id: SUB_ID, name: 'Abandon Base', cwd: feature, connection: { type: 'local' }, maxTabs: 5,
       parentProjectId: BASE_ID, worktreeBranch: 'feature', baseBranch: 'main',
+      ...(configured ? { featureNoteDir: '.agent/features' } : {}),
     },
   ];
   fs.writeFileSync(path.join(userDataDir, 'projects.json'), JSON.stringify(projects), 'utf-8');
@@ -88,10 +92,10 @@ test.describe('abandon worktree gate', () => {
   let app: ElectronApplication;
   let page: Page;
 
-  test.beforeEach(async () => {
+  test.beforeEach(async ({}, testInfo) => {
     userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'shelf-wta-ud-'));
     ({ root, base, feature } = makeRepoWithWorktree());
-    seed(userDataDir, base, feature);
+    seed(userDataDir, base, feature, !testInfo.title.includes('disabled child'));
     app = await electron.launch({
       args: [path.join(__dirname, '..'), `--user-data-dir=${userDataDir}`],
       env: { ...process.env, SHELF_TEST_MODE: '1', NODE_ENV: 'test', LOG_LEVEL: 'info' } as Record<string, string>,
@@ -158,6 +162,24 @@ test.describe('abandon worktree gate', () => {
     expect(fs.existsSync(feature)).toBe(true);
     expect(git(base, ['branch', '--list', 'feature']).trim()).toContain('feature');
     await expect(page.locator('.sidebar-item.worktree-child', { hasText: 'feature' })).toHaveCount(1);
+  });
+
+  test('disabled child omits restore messaging and skips note restore', async () => {
+    const rel = '.agent/features/legacy.md';
+    fs.writeFileSync(path.join(feature, '.gitignore'), '.agent/features/\n', 'utf-8');
+    git(feature, ['add', '.gitignore']);
+    git(feature, ['commit', '-m', 'ignore feature notes']);
+    writeFeatureNote(feature, rel, 'legacy note');
+
+    await openCloseMenu(page, 'Abandon');
+
+    const popup = page.locator('.worktree-dialog', { hasText: 'Abandon Worktree' });
+    await expect(popup).not.toContainText('feature notes will be restored');
+    await popup.locator('.conn-btn-danger').click();
+    await expect(popup).not.toBeVisible({ timeout: 8_000 });
+
+    expect(fs.existsSync(feature)).toBe(false);
+    expect(fs.existsSync(path.join(base, rel))).toBe(false);
   });
 
   test('restore conflict blocks abandon and keeps the worktree note', async () => {

@@ -44,10 +44,14 @@ function makeRepoWithWorktree(): { root: string; base: string; feature: string }
 
 function seed(userDataDir: string, base: string, feature: string) {
   const projects = [
-    { id: BASE_ID, name: 'Finish Base', cwd: base, connection: { type: 'local' }, maxTabs: 5 },
+    {
+      id: BASE_ID, name: 'Finish Base', cwd: base, connection: { type: 'local' }, maxTabs: 5,
+      featureNoteDir: 'notes/future',
+    },
     {
       id: SUB_ID, name: 'Finish Base', cwd: feature, connection: { type: 'local' }, maxTabs: 5,
       parentProjectId: BASE_ID, worktreeBranch: 'feature', baseBranch: 'main',
+      featureNoteDir: '.agent/features',
     },
   ];
   fs.writeFileSync(path.join(userDataDir, 'projects.json'), JSON.stringify(projects), 'utf-8');
