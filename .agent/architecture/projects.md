@@ -23,6 +23,12 @@ User project action
   -> collection boundary resolves current project
   -> runtime/config mutation
   -> readonly snapshot to renderer
+
+Project-owned request
+  -> resolve source project identity
+  -> focus source project
+  -> render request gate with the source's visible label
+  -> continue or deny within that project
 ```
 
 ## Boundaries
@@ -30,6 +36,10 @@ User project action
 The project collection boundary owns project lookup, add/delete/reorder, config update, visual listing, stable mounted-view listing, and persistence writes for project config/order changes.
 
 Renderer view state owns active project id, editing project id, sidebar/panel visibility, and invalid-id reconciliation after deletion.
+
+An app-global gate with a project owner must resolve and focus that owner before it is presented.
+Unknown ownership fails closed; a completed or cancelled gate leaves the source project active rather
+than maintaining a navigation-return stack.
 
 Project runtime state includes tabs, active tab index, split tab id, folder validity, and connection health. Persistence serializes only project config; runtime tab/session state stays renderer-local.
 

@@ -79,8 +79,8 @@ Type-specific connector helpers are surfaced as their own namespaces:
 | Method | Shape |
 |--------|-------|
 | `finishMergeBack(payload)` | invoke `worktree:finish-merge-back` → `FinishMergeBackResult`; `payload = { connection, featureCwd, baseCwd, baseBranch, featureBranch }`; outcome is `'merged' \| 'busy' \| 'non-ff' \| 'feature-dirty' \| 'base-dirty' \| 'error'` |
-| `onProposeCreate(cb(payload))` | recv `worktree:propose-create` → `{ projectId, branch?, notePaths?: string[] }`; opens the New Worktree dialog only |
-| `onProposeFinish(cb(payload))` | recv `worktree:propose-finish` → `{ projectId }`; opens the Finish gate only |
+| `onProposeCreate(cb(payload))` | recv `worktree:propose-create` → `{ projectId, branch?, notePaths?: string[] }`; renderer focuses `projectId`, then opens the New Worktree dialog only |
+| `onProposeFinish(cb(payload))` | recv `worktree:propose-finish` → `{ projectId }`; renderer focuses `projectId`, then opens the Finish gate only |
 
 Renderer-local worktree completion uses the event bus, not IPC: `worktree-finish-completed` carries `{ subProjectId, parentProjectId, featureBranch, targetBranch }` after every close step succeeds.
 
@@ -190,10 +190,10 @@ Manage the shared web session + the app-global `web.fetch` permission popup. See
 | `deleteSession(domain)` | invoke `web:delete-session` (log out of a registrable domain) |
 | `listGrants()` | invoke `web:list-grants` → `WebGrantsByProject` (`{ [projectId]: origin[] }`) |
 | `revokeGrant(projectId, origin)` | invoke `web:revoke-grant` |
-| `onPermissionRequest(cb(req))` | recv `web:permission-request` → unsubscribe fn. `req`: `WebPermissionMeta & { requestId }` (`{ requestId, origin, registrableDomain, method }`) |
+| `onPermissionRequest(cb(req))` | recv `web:permission-request` → unsubscribe fn. `req`: `WebPermissionMeta & { requestId }` (`{ requestId, projectId, origin, registrableDomain, method }`) |
 | `resolvePermission(requestId, decision: 'once'|'always'|'deny')` | invoke `web:permission-resolve` |
 | `onPermissionClose(cb(requestId))` | recv `web:permission-close` → unsubscribe fn (resolved elsewhere — Telegram / timeout — dismiss the local popup) |
-| `onBrowserOpenRequest(cb(req))` | recv `web:browser-open-request` → unsubscribe fn. `req`: `BrowserOpenMeta & { requestId }` (`{ requestId, url, origin, registrableDomain }`) |
+| `onBrowserOpenRequest(cb(req))` | recv `web:browser-open-request` → unsubscribe fn. `req`: `BrowserOpenMeta & { requestId }` (`{ requestId, projectId, url, origin, registrableDomain, reason? }`) |
 | `resolveBrowserOpen(requestId, decision: 'open'|'deny')` | invoke `web:browser-open-resolve` |
 | `onBrowserOpenClose(cb(requestId))` | recv `web:browser-open-close` → unsubscribe fn (resolved elsewhere — timeout — dismiss the local popup) |
 | `onOpenTab(cb(projectId, url))` | recv `web:open-tab` → unsubscribe fn. Post-approval: open a Web tab in `projectId` navigated to `url` |

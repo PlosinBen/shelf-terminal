@@ -97,3 +97,11 @@ related:
 **Reason:** Proposal dialogs are user-committed UI gates, and failures or incorrect prefills depend on what the agent actually sent versus what main normalized. Showing this in the timeline makes debugging possible without log spelunking, while scoping to worktree proposal tools avoids exposing noisy or sensitive app-tool args.
 
 **Do not change casually because:** Provider-native tool cards do not consistently carry args across Claude, Copilot, and Codex. Broad app-tool auditing would risk leaking `browser_fetch` headers/body or long skill contents.
+
+## worktree#12 — Proposal gates focus and identify their source project  ·  [Decision]
+
+**Decision:** A `propose_worktree_create` or `propose_worktree_finish` renderer request validates its existing `projectId`, focuses that project, and only then opens the corresponding gate. Each gate shows `Requested by: <project label>`; worktree children use their branch label because their configured name intentionally matches the parent. Cancel leaves the source project active.
+
+**Reason:** A proposal may arrive from a background agent while another project is visible. The gate is app-global but the requested git action belongs to one project, so its background context and visible attribution must agree before the user commits or cancels it.
+
+**Do not change casually because:** Opening a gate without focusing its owner makes one project's UI appear to request another project's git mutation. Restoring the previous project after Cancel would add hidden navigation and race with subsequent proposals or manual project changes.

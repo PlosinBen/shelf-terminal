@@ -78,13 +78,13 @@ The store gate is `resolveAuxPath(name, rel)` (`src/main/skills-store.ts`): reso
 
 `web.fetch` rides the user's logged-in web session (cookies in main), so unlike the skill ops its authorization is **NOT** the provider tool-confirm. Claude registers `browser_fetch` as skip-confirm; Copilot ACP and Codex app-server receive it through the Shelf MCP bridge. Provider-native MCP approval may still occur, but the real gate runs inside `handleAppTool('web.fetch')`: parse the origin (`parseHttpOrigin`, anti-spoof), check the per-`(projectId, origin)` grant (`web-grants.ts`), and on a miss raise a dedicated app-global permission popup via `requestWebPermission` (`web-permission.ts`). `allow always` persists the grant; `deny` → `{ ok:false }`. Because the tool always executes `handleAppTool`, this gate holds under every provider permission mode. Named `browser_fetch`, not `web_fetch`, because the Claude SDK ships a conflicting built-in `web_fetch`. Returns the raw response.
 
-This op needs context the skill ops don't: `handleAppTool(op, args, ctx)` carries `ctx.projectId` (the grant key), threaded from `createRemoteBackend` → `spawnAgentServer` → `wrapProcess` → the `app_tool` handler.
+Both web ops need context the skill ops don't: `handleAppTool(op, args, ctx)` carries required `ctx.projectId`, threaded from `createRemoteBackend` → `spawnAgentServer` → `wrapProcess` → the `app_tool` handler. `web.fetch` includes it in `WebPermissionMeta`; `web.open` includes it in `BrowserOpenMeta`. Missing context fails with `{ ok:false }` before a request or tab is opened.
 
 ### `web.open` — open a visible Web tab for the user to log in (`context/web-tab` web-tab#8)
 
 Sibling of `web.fetch`: when `browser_fetch` hits a login wall, the agent calls `browser_open(url)` to open a **visible** Web tab navigated to `url` so the user can log in in-place (then retries `browser_fetch`). Cookies flow automatically via the shared `persist:web` partition — this op only opens the tab.
 
-Like `web.fetch`, `browser_open` is skip-confirm on Claude and reaches Copilot ACP / Codex app-server through the Shelf MCP bridge. The real gate runs in main with a stricter per-call **Open/Deny** popup and no persisted grant. The optional reason is capped and non-authoritative; timeout fails closed. On approval main opens the project Web tab, and on denial returns a fail-loud error so the agent does not retry.
+Like `web.fetch`, `browser_open` is skip-confirm on Claude and reaches Copilot ACP / Codex app-server through the Shelf MCP bridge. The real gate runs in main with a stricter per-call **Open/Deny** popup and no persisted grant. The optional reason is capped and non-authoritative; timeout fails closed. The gate carries the source project id so renderer can focus and identify its owner. On approval main opens that project's Web tab, and on denial returns a fail-loud error so the agent does not retry.
 
 ### `worktree.propose_*` — agent drafts, user commits (`context/worktree` worktree#1)
 

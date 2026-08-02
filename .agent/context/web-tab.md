@@ -154,3 +154,13 @@ related:
 **Do not change casually because**：別把來源改成 `listAllGrants()` 全域攤平（會跨專案洩漏授權清單、破壞 per-project 界線）；別因為「順便」就在這裡加開/改 grant（存取控制只在 permission gate 動）。
 
 **Related**：`web-tab#3`、`web-tab#6`、`src/renderer/components/TabBar.tsx`（`openAddMenu` + web-origin 捷徑）、`src/renderer/App.tsx`（`NEW_WEB_TAB` 帶 url）、`src/main/web-grants.ts`（`listGrants`）、`e2e/web-quicklinks.spec.ts`。
+
+## web-tab#11 — Browser gate 先 focus 來源 project，再顯示 attribution · [Decision]
+
+**Decision**：`browser_fetch` permission 與 `browser_open` request 都攜帶必要的來源 `projectId`。renderer 收到後先確認 project 存在、同步切換 active project，再把 request 排入 app-global popup；popup 顯示 `Requested by: <project label>`。一般 project 的 label 是名稱，worktree child 則使用 Sidebar 的 branch label。找不到來源時記錄 anomaly 並立即 deny，不 fallback 到當下 project。
+
+**Reason**：背景 project B 的 agent 可能在使用者觀看 A 時觸發 gate。只顯示 popup 會讓 A 畫面承接 B 的請求；只寫 attribution 則核准後的 Web tab 仍可能開在不可見的 B。先 focus 再 render 能讓 gate、後續 action 與來源 project 保持同一個 UI context。
+
+**Do not change casually because**：Deny/Cancel 後刻意停在來源 project，不維護「返回先前 project」stack；自動還原會在並行 request 與手動切換間製造 navigation race。不要在來源未知時靜默沿用 active project。
+
+**Related**：`web-tab#2`、`web-tab#8`、`contracts/ipc-channels` 的 web request metadata。
