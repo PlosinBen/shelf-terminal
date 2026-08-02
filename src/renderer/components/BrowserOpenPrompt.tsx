@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { SelectionPanel } from './SelectionPanel';
 import type { BrowserOpenMeta } from '@shared/web-session';
+import { getProjectById, setActiveProjectById } from '../store';
 
 // App-global popup for the browser_open tool (agent asks to open a visible Web
 // tab so the user can log in). Sibling of WebPermissionPrompt, but STRICTER:
@@ -9,14 +10,21 @@ import type { BrowserOpenMeta } from '@shared/web-session';
 // browser-open channel (WEB_BROWSER_OPEN_REQUEST). Requests queue (rare
 // concurrency) and show one at a time.
 
-type PendingReq = BrowserOpenMeta & { requestId: string };
+type PendingReq = BrowserOpenMeta & { requestId: string; projectName: string };
 
 export function BrowserOpenPrompt() {
   const [queue, setQueue] = useState<PendingReq[]>([]);
 
   useEffect(() => {
     const offReq = window.shelfApi.web.onBrowserOpenRequest((req) => {
-      setQueue((q) => [...q, req]);
+      const project = getProjectById(req.projectId);
+      if (!project) {
+        console.warn(`[browser_open] request ${req.requestId} for unknown project ${req.projectId}`);
+        window.shelfApi.web.resolveBrowserOpen(req.requestId, 'deny');
+        return;
+      }
+      setActiveProjectById(req.projectId);
+      setQueue((q) => [...q, { ...req, projectName: project.config.name }]);
     });
     // Resolved elsewhere (timed out) → drop it locally.
     const offClose = window.shelfApi.web.onBrowserOpenClose((requestId) => {
@@ -39,6 +47,7 @@ export function BrowserOpenPrompt() {
         title={<>Let the agent open a <strong>Web tab</strong> for you to log in?</>}
         description={
           <div className="web-perm-desc">
+            <div className="project-requester">Requested by: {current.projectName}</div>
             {/* Agent's (non-authoritative) explanation — shown FIRST because the
                 popup hides the chat where it would otherwise say why. Quoted so
                 it reads as the agent's words, not a system statement. */}

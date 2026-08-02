@@ -1,20 +1,28 @@
 import { useEffect, useState } from 'react';
 import { SelectionPanel } from './SelectionPanel';
 import type { WebPermissionMeta } from '@shared/web-session';
+import { getProjectById, setActiveProjectById } from '../store';
 
 // App-global popup for web.fetch authorization. Driven by the main-side
 // web-permission channel (WEB_PERMISSION_REQUEST), NOT the agent tool-permission
 // path — so it's provider-agnostic and the agent timeline never branches on
 // tool semantics. Requests queue (rare concurrency) and are shown one at a time.
 
-type PendingReq = WebPermissionMeta & { requestId: string };
+type PendingReq = WebPermissionMeta & { requestId: string; projectName: string };
 
 export function WebPermissionPrompt() {
   const [queue, setQueue] = useState<PendingReq[]>([]);
 
   useEffect(() => {
     const offReq = window.shelfApi.web.onPermissionRequest((req) => {
-      setQueue((q) => [...q, req]);
+      const project = getProjectById(req.projectId);
+      if (!project) {
+        console.warn(`[web.fetch] permission request ${req.requestId} for unknown project ${req.projectId}`);
+        window.shelfApi.web.resolvePermission(req.requestId, 'deny');
+        return;
+      }
+      setActiveProjectById(req.projectId);
+      setQueue((q) => [...q, { ...req, projectName: project.config.name }]);
     });
     // Resolved elsewhere (Telegram while Away, or timed out) → drop it locally.
     const offClose = window.shelfApi.web.onPermissionClose((requestId) => {
@@ -37,6 +45,7 @@ export function WebPermissionPrompt() {
         title={<>Let the agent use <strong>your logged-in browser session</strong>?</>}
         description={
           <div className="web-perm-desc">
+            <div className="project-requester">Requested by: {current.projectName}</div>
             {/* Authoritatively-parsed origin — never the agent's raw URL string,
                 so a spoofed host (userinfo / IDN / subdomain) can't sneak past. */}
             <div className="web-perm-origin">

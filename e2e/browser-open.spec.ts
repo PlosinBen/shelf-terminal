@@ -32,7 +32,41 @@ async function setupProject(page: Page) {
   await page.waitForTimeout(500);
 }
 
+async function setupNamedProject(page: Page, name: string) {
+  await page.locator('.sidebar-btn', { hasText: '+' }).click();
+  await expect(page.locator('.folder-picker-overlay')).toBeVisible({ timeout: 5_000 });
+  await page.locator('.conn-btn-next').click();
+  await expect(page.locator('.fp-browser-path')).toContainText('/', { timeout: 5_000 });
+  await page.locator('.folder-picker-item', { hasText: name }).click();
+  await page.keyboard.press(`${modifier}+Enter`);
+  await expect(page.locator('.folder-picker-overlay')).not.toBeVisible({ timeout: 3_000 });
+
+  const prompt = page.locator('.connect-prompt');
+  if (await prompt.isVisible({ timeout: 3_000 }).catch(() => false)) await prompt.click();
+  await expect(page.locator('.tab-bar .tab')).toHaveCount(1, { timeout: 5_000 });
+}
+
 test.describe('browser_open', () => {
+  test('focuses and names the requesting project before showing a background request', async ({ shelfApp: { page } }) => {
+    await setupNamedProject(page, 'shelf-test-a');
+    await setupNamedProject(page, 'shelf-test-b');
+    const projects = page.locator('.sidebar-item');
+    await expect(projects).toHaveCount(2);
+
+    await openAgentTab(page);
+    await sendAgentPrompt(page, 'delay:800|browser_open:https://kibana.corp.com/login');
+    await projects.nth(0).click();
+    await expect(projects.nth(0)).toHaveClass(/active/);
+
+    const popup = page.locator('.web-perm-overlay');
+    await expect(popup).toBeVisible({ timeout: 5_000 });
+    await expect(projects.nth(1)).toHaveClass(/active/);
+    await expect(popup.locator('.project-requester')).toHaveText('Requested by: shelf-test-b');
+
+    await popup.locator('.agent-perm-option', { hasText: 'Deny' }).click();
+    await expect(projects.nth(1)).toHaveClass(/active/);
+  });
+
   test('pops an Open/Deny confirm (no remember option) and opens a Web tab on Open', async ({ shelfApp: { page } }) => {
     await setupProject(page);
     await openAgentTab(page);
