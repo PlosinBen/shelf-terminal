@@ -4,6 +4,7 @@ title: App-Tool Bridge
 related:
   - contracts/agent-routing
   - context/skills
+  - context/worktree
 ---
 
 # App-Tool Bridge
@@ -88,6 +89,8 @@ Like `web.fetch`, `browser_open` is skip-confirm on Claude and reaches Copilot A
 
 ### `worktree.propose_*` — agent drafts, user commits (`context/worktree` worktree#1)
 
-`propose_worktree_create({ branch?, note?, notes? })` sends `{ projectId, branch?, notePaths }` to open the New Worktree dialog. `note` is the legacy single-note alias; `notes` is the preferred multi-note list. Main trims `branch`, trims note path strings, drops empty note paths, and deduplicates `note` + `notes` into `notePaths: string[]` while preserving first-seen order. `propose_worktree_finish()` sends `{ projectId }` to open the Finish gate. Both return an acknowledgement only: the user must click Create or Finish before any git action occurs. `propose_worktree_finish` first resolves `ctx.projectId` against the cached project list and returns `{ ok:false }` without IPC when it is not a worktree (`parentProjectId` absent).
+`propose_worktree_create({ branch?, note?, notes? })` sends `{ projectId, branch?, notePaths }` to open the New Worktree dialog. `note` is the legacy single-note alias; `notes` is the preferred multi-note list. Main trims inputs and, when note identifiers are present, lists the caller project's configured feature-note directory before opening the dialog. Each identifier resolves by exact canonical repo-relative path first, then by unique basename; canonical paths are deduplicated in first-seen order. A disabled binding, listing failure, unknown identifier, or ambiguous basename returns `{ ok:false }` without opening a misleading prefill. With no note identifiers, the proposal may open without listing even when the binding is disabled; the renderer omits the Feature Note section.
 
-For these two worktree proposal ops only, main also injects an Agent View audit card. The event is a renderer primitive (`fold_code`), not a provider-native tool card: `label: "Shelf tool"`, `subtitle` = the model-facing MCP tool name (`propose_worktree_create` / `propose_worktree_finish`), and `msgId: "app-tool-<requestId>"`. The first body is `{ args }`; after `handleAppTool` returns, main upserts the same `msgId` with `{ args, result }`. For create, `result.notePaths` shows the normalized paths actually sent to the dialog. Non-worktree app-tools are intentionally not audited here to avoid noisy timelines and accidental exposure of sensitive/large app-tool arguments.
+`propose_worktree_finish()` sends `{ projectId }` to open the Finish gate. Both proposal tools return an acknowledgement only: the user must click Create or Finish before any git action occurs. `propose_worktree_finish` first resolves `ctx.projectId` against the cached project list and returns `{ ok:false }` without IPC when it is not a worktree (`parentProjectId` absent).
+
+For these two worktree proposal ops only, main also injects an Agent View audit card. The event is a renderer primitive (`fold_code`), not a provider-native tool card: `label: "Shelf tool"`, `subtitle` = the model-facing MCP tool name (`propose_worktree_create` / `propose_worktree_finish`), and `msgId: "app-tool-<requestId>"`. The first body is `{ args }`; after `handleAppTool` returns, main upserts the same `msgId` with `{ args, result }`. For create, `result.notePaths` shows the canonical paths actually sent to the dialog. Non-worktree app-tools are intentionally not audited here to avoid noisy timelines and accidental exposure of sensitive/large app-tool arguments.

@@ -77,8 +77,8 @@ title: shelf-terminal — Intent → File Index
 | Intent | File | Role |
 |--------|------|------|
 | Finish merge-back | `worktree/merge-back.ts` | ff-only target advancement, feature/base dirty guards, non-ff rebase guidance |
-| Feature note create/close migration | `worktree/note-migration.ts` | create-time base→child batch note move and close-time child→base note restore |
-| Feature note listing | `worktree/feature-notes.ts` | Lists `.agent/features/*.md` with display frontmatter for picker/restore |
+| Feature note create/close migration | `worktree/note-migration.ts` | create-time base→child batch note move and configured close-time child→base restore |
+| Feature note listing | `worktree/feature-notes.ts` | 依 project-configured directory 列 direct markdown notes、驗證 repo boundary 並解析 picker frontmatter |
 | Branch merged check | `worktree/branch-merged.ts` | Computes merged/ahead state for Abandon branch-delete warning |
 | Per-repo finish lock | `worktree/repo-lock.ts` | In-process lock around the atomic “check target → fast-forward” merge-back step |
 
@@ -196,8 +196,9 @@ title: shelf-terminal — Intent → File Index
 | 資料夾瀏覽器 | `components/FolderBrowser.tsx` | 純展示元件，顯示目錄清單和 keyboard hints |
 | 頁內搜尋 | `components/SearchBar.tsx` | terminal tab 走 xterm SearchAddon；agent/web tab 走 main findInPage（`shelfApi.find`）+ 命中計數 |
 | Settings 面板 | `components/SettingsPanel.tsx` | 左側 tab 分頁（Terminal / Agent / Models / PM Agent / Web / Backup / Shortcuts） |
-| Worktree 建立 | `components/WorktreeDialog.tsx` | 顯示 target、接收 branch/note prefill、選 boot provider 後建立 sub-project |
+| Worktree 建立 | `components/WorktreeDialog.tsx` | 顯示 target、configured note source/list 狀態、接收 branch/note prefill、選 boot provider 後建立 sub-project |
 | Worktree proposal prefill helper | `worktree-prefill.ts` | 純函式正規化 New Worktree proposal 帶入的多 note path prefill |
+| Feature-note config edit rule | `feature-note-config-edit.ts` | main config canonicalization 與 child snapshot read-only save rule |
 | Worktree 關閉 gate | `components/WorktreeCloseGate.tsx` | Finish/Abandon close transaction：merge-back、note restore、teardown、branch delete、completion event |
 | Project-level notice banner | `components/ProjectNoticeBanner.tsx` + `project-notice.ts` | Parent project completion notice UI + latest-wins/dismiss/timeout state helpers |
 | 刪除確認 | `components/RemoveConfirmDialog.tsx` | Remove project 確認 modal，可勾選清理 worktree files |
@@ -210,7 +211,7 @@ title: shelf-terminal — Intent → File Index
 | 右側 sidebar toggle | `store.toggleRightSidebar(feature)` | PM/Notes/DevTools 三 panel 共用的 toggle action |
 | Tooltip 快捷鍵 helper | `utils/format-keybinding.ts` | 純函式 `formatCombo` / `tooltipWithShortcut` |
 | PM stream reducer | `components/pm-view-reducer.ts` | 純 reducer 管 PM streaming/streamText/streamToolCalls/error 四個 UI state |
-| Project 編輯面板 | `components/ProjectEditPanel.tsx` | 改名、init script、default tabs、quick commands、Clear uploaded files |
+| Project 編輯面板 | `components/ProjectEditPanel.tsx` | 改名、init script、feature-note directory、default tabs、quick commands、Clear uploaded files |
 | Agent UI 訊息持久化 | `storage/agent-history.ts` | IndexedDB 存 UI messages keyed by sessionId（append-only delta save） |
 | Canonical Agent message type | `src/shared/types.ts` (`AgentMessage`) | 9-variant 渲染原語 discriminated union（inline + fold_* 卡片類） |
 | Inline SVG icon | `components/icons.tsx` | 手繪原創 line icon（24x24，`currentColor`），footer toggle 用 |
@@ -223,6 +224,7 @@ title: shelf-terminal — Intent → File Index
 | Intent | File | Role |
 |--------|------|------|
 | Type 定義 | `types.ts` | Connection / ProjectConfig / AppSettings / PM types / IPC payloads |
+| Feature-note directory validator | `feature-note-dir.ts` | optional repo-relative POSIX directory 的 canonicalization 與 lexical safety validation |
 | IPC channel 常數 | `ipc-channels.ts` | 所有 IPC channel name 常數 |
 | App 層 MCP 型別 + 驗證 | `mcp.ts` | `McpServerBlock`/`McpServersFile` + 純 validator(main store 與 agent-server loader 共用，不 pull electron） |
 | Shelf 檔案 placement 規則 | `shelf-paths.ts` | `shelfPlacement(type,ctx)` closed allowlist + `ShelfFileType*` 常數(transport 與 agent-server 共用單一路徑規則） |

@@ -52,11 +52,11 @@ related:
 
 ## worktree#6 — Carried feature notes are restored before close teardown  ·  [Decision]
 
-**Decision:** Before Finish or Abandon removes a child checkout, any remaining `.agent/features/*.md` notes in the child are copied back to the parent checkout, verified, and then removed from the child. No child notes is a successful no-op. If the parent destination already exists or verification fails, close stops and leaves the child checkout in place.
+**Decision:** When a child has a `featureNoteDir` snapshot, Finish or Abandon lists remaining direct markdown notes there, copies them back to the same relative directory in the parent checkout, verifies them, and only then removes the child copies. An absent snapshot or no child notes is a successful no-op. If listing fails, the parent destination exists, or verification fails, close stops and leaves the child checkout in place.
 
-**Reason:** Feature notes are transient working memory and are normally gitignored, so they do not travel through merge-back. Restoring before teardown preserves that state without turning an already-consolidated/deleted note into an error.
+**Reason:** Feature notes are transient working memory and are normally gitignored, so they do not travel through merge-back. Restoring through the child snapshot preserves that state without turning an already-consolidated/deleted note into an error or letting a later main-project config edit redirect an in-flight worktree transaction.
 
-**Do not change casually because:** Worktree removal is the last chance to avoid losing ignored note files. Overwriting a parent note during restore would be another form of silent data loss, so destination conflicts must stay fail-loud.
+**Do not change casually because:** Worktree removal is the last chance to avoid losing ignored note files. Overwriting a parent note or silently converting a listing failure into an empty result would be another form of data loss, so both must stay fail-loud.
 
 ## worktree#7 — Finish completion is parent project UI, not agent conversation state  ·  [Decision]
 
@@ -68,7 +68,7 @@ related:
 
 ## worktree#8 — Create may carry multiple feature notes, migrated as one batch  ·  [Decision]
 
-**Decision:** The New Worktree dialog lets the user select zero or more `.agent/features/*.md` notes. Create-time migration accepts the selected relative paths as one batch. It copies and verifies every selected note into the child checkout before deleting any base copy; if a copy/verify step fails, base notes stay intact and any child-side copies already made are removed.
+**Decision:** When a main project configures `featureNoteDir`, the New Worktree dialog lists its direct `*.md` children except reserved `index.md` and lets the user select zero or more canonical repo-relative paths. Create-time migration accepts those paths as one batch. It copies and verifies every selected note into the child checkout before deleting any base copy; if a copy/verify step fails, base notes stay intact and any child-side copies already made are removed.
 
 **Reason:** A single worktree can intentionally carry several small feature notes, and close already restores all remaining child notes. Looping the old single-note move would delete earlier base notes before later notes were proven safe; if the caller then removed the child checkout, those earlier notes could be lost.
 
@@ -84,11 +84,11 @@ related:
 
 ## worktree#10 — Create proposals accept legacy single-note and preferred multi-note inputs  ·  [Decision]
 
-**Decision:** `propose_worktree_create` accepts `note?: string` as a legacy alias and `notes?: string[]` as the preferred multi-note input. Main normalizes both into a trimmed, deduped `notePaths: string[]` proposal payload before renderer prefill. The fake provider's compact `worktree_create:<branch> [<note>]` command remains single-note shorthand; multi-note behavior is covered through direct app-tool, MCP schema, and renderer prefill tests.
+**Decision:** `propose_worktree_create` accepts `note?: string` as a legacy alias and `notes?: string[]` as the preferred multi-note input. For explicit identifiers, main lists the project's configured candidates and resolves exact canonical paths first, then unique basenames, before sending deduped canonical `notePaths` to renderer prefill. Disabled, unlistable, unknown, or ambiguous input fails before the dialog opens. The fake provider's compact `worktree_create:<branch> [<note>]` command remains single-note shorthand; multi-note behavior is covered through direct app-tool, MCP schema, and renderer prefill tests.
 
-**Reason:** Older agents and E2E smoke paths may still call the single-note form, while the New Worktree dialog and create-time migration already support selecting and moving several feature notes as one batch. Normalizing at the bridge boundary keeps renderer code on the current payload shape and keeps the proposal tool side-effect free.
+**Reason:** Older agents and E2E smoke paths may still call the single-note form, including bare filenames, while migration requires canonical repo-relative paths. Resolving against the authoritative listing at the bridge boundary makes the acknowledgement and audit result truthful and keeps renderer code on one payload shape.
 
-**Do not change casually because:** Removing `note` would break existing callers, and moving merge/dedup logic downstream would reintroduce multiple prefill shapes in the renderer. Expanding the fake shorthand would add another mini-parser that is not part of the model-facing contract.
+**Do not change casually because:** Removing `note` would break existing callers. Moving reconciliation downstream would let main report `opened: true` for an invalid prefill and hide the error from the agent that can correct it.
 
 ## worktree#11 — Worktree proposal tool calls are visible in Agent View  ·  [Decision]
 
@@ -105,3 +105,17 @@ related:
 **Reason:** A proposal may arrive from a background agent while another project is visible. The gate is app-global but the requested git action belongs to one project, so its background context and visible attribution must agree before the user commits or cancels it.
 
 **Do not change casually because:** Opening a gate without focusing its owner makes one project's UI appear to request another project's git mutation. Restoring the previous project after Cancel would add hidden navigation and race with subsequent proposals or manual project changes.
+
+## worktree#13 — Project config explicitly binds Shelf to a feature-note directory  ·  [Decision]
+
+**Decision:** Shelf's feature-note mechanism is enabled only by optional project-level `ProjectConfig.featureNoteDir`; there is no auto-detection or fallback to `.agent/features`. Shelf owns safe listing, picker handoff, migration, and restore. The workflow or skill owns note semantics and its recommended directory, while the project supplies the binding value. A configured dialog always shows the source directory; missing/empty directories show a successful empty state, while operational failures remain visible and non-blocking for ordinary worktree creation.
+
+At child creation, the main project's current value is copied into the child's same field. The shared config interface stays identical, Project Settings makes the child field read-only, and close uses that stored snapshot. Main edits affect future children only. Existing projects and pre-feature children receive no migration or implicit default.
+
+**Reason:** Hardcoding `.agent/features` made Shelf appear to own a convention that actually belongs to the optional `development-flow` workflow. An explicit project binding lets the two cooperate without making either depend on the other. A stored child snapshot matches the worktree transaction: the restore destination is decided when the child is created and should not change underneath it.
+
+**Do not change casually because:** A fallback recreates the hidden cross-product contract and makes “unset” indistinguishable from enabled. Live inheritance can redirect close-time restore after a main setting changes. Child-specific config types or generic inheritance metadata add structure without changing the one-field snapshot behavior.
+
+### Gotchas
+
+- A pre-feature child with no snapshot skips restore on close. An ignored note can therefore be discarded on Abandon; this accepted upgrade edge is why the UI must not promise restore when the child field is absent.

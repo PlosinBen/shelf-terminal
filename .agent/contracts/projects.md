@@ -4,6 +4,7 @@ title: Projects
 related:
   - architecture/projects
   - context/projects
+  - context/worktree
   - contracts/persistence-formats
 ---
 
@@ -65,3 +66,17 @@ Project ids are opaque `ProjectConfig.id` strings. Events may include tab indice
 ## Persistence
 
 Project persistence remains `projects.json` as an array of `ProjectConfig`. Reorder changes persisted array order, but stable mounted-view order is renderer-derived and is not persisted.
+
+## Feature-note Directory Binding
+
+Authoritative field: `ProjectConfig.featureNoteDir` in `src/shared/types.ts`.
+
+```ts
+interface ProjectConfig {
+  featureNoteDir?: string;
+}
+```
+
+An absent field disables worktree feature-note listing, migration, and restore. A configured value is a trimmed, repo-relative POSIX directory: trailing slashes are removed; absolute paths, backslashes, empty/current-directory segments, and parent traversal are rejected. Resolved directories and note candidates must remain inside the project root.
+
+Main projects may edit or clear the field in Project Settings. Child projects use the same interface and field, but Project Settings renders it read-only. Child creation copies the main project's current value; the child retains that stored snapshot even if the main value later changes or is cleared. Existing project records receive no implicit default or migration.
