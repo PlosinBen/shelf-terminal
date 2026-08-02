@@ -5,6 +5,7 @@ import { visibleAgentProviderEntries } from '@shared/agent-providers';
 import { TAB_COLORS } from './TabBar';
 import { formatBytes } from '../utils/format-bytes';
 import { validateEnvKey } from '@shared/project-env';
+import { featureNoteDirForProjectSave } from '../feature-note-config-edit';
 
 interface EnvRow { key: string; value: string; }
 
@@ -33,6 +34,8 @@ export function ProjectEditPanel() {
   const [defaultAgentProvider, setDefaultAgentProvider] = useState<AgentProvider | ''>('');
   const providerTouched = useRef(false);
   const [openAgentOnConnect, setOpenAgentOnConnect] = useState(false);
+  const [featureNoteDir, setFeatureNoteDir] = useState('');
+  const [featureNoteDirError, setFeatureNoteDirError] = useState<string | null>(null);
 
   useEffect(() => {
     if (project) {
@@ -49,6 +52,8 @@ export function ProjectEditPanel() {
       setDefaultAgentProvider(getResolvedDefaultAgentProvider(project.config.id) ?? '');
       providerTouched.current = false;
       setOpenAgentOnConnect(project.config.openAgentOnConnect || false);
+      setFeatureNoteDir(project.config.featureNoteDir ?? '');
+      setFeatureNoteDirError(null);
     }
   }, [editingProjectId, project]);
 
@@ -104,6 +109,14 @@ export function ProjectEditPanel() {
   const handleClose = () => setEditingProjectById(null);
 
   const handleSave = () => {
+    let savedFeatureNoteDir: string | undefined;
+    try {
+      savedFeatureNoteDir = featureNoteDirForProjectSave(project.config, featureNoteDir);
+    } catch (err) {
+      setFeatureNoteDirError(err instanceof Error ? err.message : String(err));
+      return;
+    }
+
     const tabs = defaultTabs
       .filter((t) => t.name.trim())
       .map((t): TabTemplate => {
@@ -129,6 +142,7 @@ export function ProjectEditPanel() {
       initScript: initScript.trim() || undefined,
       defaultTabs: tabs.length > 0 ? tabs : undefined,
       quickCommands: cmds.length > 0 ? cmds : undefined,
+      featureNoteDir: savedFeatureNoteDir,
       envPlain: Object.keys(envPlain).length > 0 ? envPlain : undefined,
       ...(providerTouched.current
         ? { defaultAgentProvider: defaultAgentProvider || undefined }
@@ -301,6 +315,30 @@ export function ProjectEditPanel() {
               placeholder="e.g. nvm use 22.22&#10;source .env"
               rows={3}
             />
+          </div>
+
+          <div className="project-edit-field">
+            <label className="settings-label">Feature Note Directory</label>
+            <div className="project-edit-hint">
+              {project.config.parentProjectId
+                ? 'Captured from the main project when this worktree was created.'
+                : 'Optional repo-relative directory used to hand feature notes into worktrees.'}
+            </div>
+            <input
+              className={`settings-input settings-input-wide${featureNoteDirError ? ' settings-input-invalid' : ''}`}
+              type="text"
+              value={featureNoteDir}
+              onChange={(e) => {
+                setFeatureNoteDir(e.target.value);
+                setFeatureNoteDirError(null);
+              }}
+              placeholder=".agent/features"
+              disabled={Boolean(project.config.parentProjectId)}
+              spellCheck={false}
+              autoCapitalize="off"
+              autoCorrect="off"
+            />
+            {featureNoteDirError && <div className="env-var-error">{featureNoteDirError}</div>}
           </div>
 
           <div className="project-edit-field">

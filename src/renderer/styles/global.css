@@ -1753,6 +1753,10 @@ button {
   border-color: var(--error, #e5534b);
 }
 
+.settings-input.settings-input-invalid {
+  border-color: #f38ba8;
+}
+
 .env-var-error {
   color: var(--error, #e5534b);
   font-size: 11px;
