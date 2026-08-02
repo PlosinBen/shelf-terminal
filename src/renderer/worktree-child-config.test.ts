@@ -13,6 +13,7 @@ const parent: ProjectConfig = {
   envPlain: { FOO: 'bar' },
   defaultTabs: [{ name: 'dev', cmd: 'npm run dev' } as any],
   quickCommands: [{ label: 'build', command: 'npm run build', target: 'current' }],
+  featureNoteDir: '.agent/features',
   defaultAgentProvider: CLAUDE_PROVIDER,
   agentPrefs: { [CLAUDE_PROVIDER]: { model: 'opus' } as any },
   openAgentOnConnect: true,
@@ -32,6 +33,7 @@ describe('buildWorktreeChildConfig', () => {
     expect(child.envPlain).toEqual({ FOO: 'bar' });
     expect(child.defaultTabs).toEqual(parent.defaultTabs);
     expect(child.quickCommands).toEqual(parent.quickCommands);
+    expect(child.featureNoteDir).toBe('.agent/features');
     expect(child.defaultAgentProvider).toBe(CLAUDE_PROVIDER);
     expect(child.agentPrefs).toEqual(parent.agentPrefs);
     expect(child.openAgentOnConnect).toBe(true);
@@ -47,6 +49,15 @@ describe('buildWorktreeChildConfig', () => {
 
   it('NEVER inherits agentSessionIds (fresh agent boots and reads the note)', () => {
     expect(child.agentSessionIds).toBeUndefined();
+  });
+
+  it('snapshots featureNoteDir without linking later parent edits', () => {
+    const editableParent = { ...parent };
+    const snapshotted = buildWorktreeChildConfig(editableParent, {
+      id: 'wt-snapshot', cwd: '/repo-snapshot', worktreeBranch: 'snapshot',
+    });
+    editableParent.featureNoteDir = 'notes/features';
+    expect(snapshotted.featureNoteDir).toBe('.agent/features');
   });
 
   it('uses an explicit provider override without changing the parent', () => {

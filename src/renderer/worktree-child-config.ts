@@ -28,6 +28,7 @@ export function buildWorktreeChildConfig(
     envPlain: parent.envPlain,
     defaultTabs: parent.defaultTabs,
     quickCommands: parent.quickCommands,
+    featureNoteDir: parent.featureNoteDir,
     defaultAgentProvider: opts.defaultAgentProvider
       ?? (isAgentProvider(parent.defaultAgentProvider) ? parent.defaultAgentProvider : undefined),
     agentPrefs: parent.agentPrefs,

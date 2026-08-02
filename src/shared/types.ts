@@ -289,6 +289,8 @@ export interface ProjectConfig {
   envPlain?: Record<string, string>;
   defaultTabs?: TabTemplate[];
   quickCommands?: QuickCommand[];
+  /** Optional repo-relative POSIX directory used for worktree feature-note handoff. */
+  featureNoteDir?: string;
   parentProjectId?: string;
   worktreeBranch?: string;
   /**
@@ -477,11 +479,10 @@ export interface BranchMergedInfo {
 }
 
 /**
- * A feature note discovered under a repo's `.agent/features/` (the transient
- * working notes owned by the feature-dev-flow skill). Surfaced in the worktree
- * create dialog's note-picker so the user picks which note seeds the new
- * worktree. `path` is relative to the base cwd (connection-agnostic, feeds
- * `migrateNote` directly).
+ * A feature note discovered under a project's configured feature-note directory.
+ * Surfaced in the worktree create dialog's note-picker so the user picks which
+ * note seeds the new worktree. `path` is relative to the base cwd
+ * (connection-agnostic, feeds `migrateNote` directly).
  */
 export interface FeatureNoteInfo {
   /** Path relative to the base repo cwd, e.g. `.agent/features/foo.md`. */
