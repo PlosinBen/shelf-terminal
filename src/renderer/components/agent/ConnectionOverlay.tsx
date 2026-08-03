@@ -43,7 +43,7 @@ export function ConnectionOverlay({ tabId, onRetry }: Props) {
           <>
             <span className="agent-loading-spinner" />
             {/* dead+starting = a reconnect in flight; otherwise first-open init. */}
-            <div className="agent-conn-title">{dead ? 'Reconnecting…' : initPhaseLabel(tab?.initPhase ?? null)}</div>
+            <div className="agent-loading-text">{dead ? 'Reconnecting…' : initPhaseLabel(tab?.initPhase ?? null)}</div>
           </>
         ) : failed ? (
           <>

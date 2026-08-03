@@ -81,6 +81,10 @@ test.describe('agent init-readiness gate', () => {
       await expect(overlay).toBeVisible({ timeout: 5_000 });
       await expect(overlay).toContainText(/Starting agent|Deploying runtime|Connecting|Checking sign-in/);
       await expect(overlay.locator('.agent-loading-spinner')).toBeVisible();
+      const statusText = overlay.locator('.agent-loading-text');
+      await expect(statusText).toHaveCSS('font-size', '12px');
+      await expect(statusText).toHaveCSS('font-weight', '400');
+      await expect(statusText).toHaveCSS('color', 'rgb(166, 173, 200)');
       // Input is visibly blocked while covered.
       await expect(page.locator('.agent-textarea:visible')).toBeDisabled();
 
