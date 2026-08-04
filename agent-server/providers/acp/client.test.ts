@@ -34,6 +34,44 @@ describe('acp session driver (connection + new/resume + turn)', () => {
     ]);
   });
 
+  it('drains a final session update whose handler settles just after the prompt response', async () => {
+    const driver = createSessionDriver();
+    const lateSummary: SessionUpdate = {
+      sessionUpdate: 'tool_call_update',
+      toolCallId: 'task-complete-1',
+      title: 'task_complete',
+      status: 'completed',
+      content: [{ type: 'content', content: { type: 'text', text: 'final summary' } }],
+    };
+    const mock = createMockAcpAgent({
+      onPrompt: () => {
+        // The ACP SDK processes notifications independently from the matching
+        // prompt response. Reproduce the production race: the response resolves,
+        // then the already-arriving final update reaches our callback one event-
+        // loop turn later. It must still belong to THIS turn, not the next one.
+        setImmediate(() => driver.onSessionUpdate({
+          sessionId: 'mock-session',
+          update: lateSummary,
+        }));
+      },
+    });
+    const conn = openAcpConnection(mock, { onSessionUpdate: driver.onSessionUpdate });
+    const session = await driver.startNew(conn.agent, { cwd: '/tmp/proj' });
+    const wire: OutgoingMessage[] = [];
+
+    try {
+      await driver.drivePromptTurn(conn.agent, session, 'hi', (m) => wire.push(m));
+      expect(wire).toContainEqual({
+        type: 'message',
+        msgId: 'task-complete-1',
+        msgType: 'reply',
+        content: 'final summary',
+      });
+    } finally {
+      conn.close();
+    }
+  });
+
   it('namespaces messageId-less replies per turn so they do not collide (copilot --acp case)', async () => {
     // copilot --acp omits `messageId` on agent_message_chunk → translate falls back
     // to the DEFAULT_AGENT_MSG_ID constant. Without per-turn namespacing, every

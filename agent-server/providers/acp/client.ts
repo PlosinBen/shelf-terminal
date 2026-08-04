@@ -140,8 +140,18 @@ export function createSessionDriver(): SessionDriver {
       const content = [{ type: 'text' as const, text: prompt }, ...imageContentBlocks(images), ...uploadedImages];
       let done = false;
       const promptDone = agent
-        .request(methods.agent.session.prompt, { sessionId: session.sessionId, prompt: content })
-        .finally(() => { done = true; q.wake(); }) as Promise<{ stopReason: StopReason }>;
+        .request(methods.agent.session.prompt, { sessionId: session.sessionId, prompt: content }) as Promise<{ stopReason: StopReason }>;
+      const finishUpdates = () => {
+        // ACP v1 defines the prompt response as the turn boundary, after all
+        // pending session updates. The SDK dispatches notifications independently
+        // from response resolution, though, so the final notification handler can
+        // settle one event-loop turn later even when its wire message came first.
+        // Keep this turn's queue open through that dispatch barrier; otherwise the
+        // update remains queued and is misattributed to the user's NEXT prompt
+        // (agent-providers#37).
+        setImmediate(() => { done = true; q.wake(); });
+      };
+      void promptDone.then(finishUpdates, finishUpdates);
 
       // Per-turn namespace for the messageId-less sentinel. Streams keep their
       // streamType so a turn's reply text and thinking don't collide with each

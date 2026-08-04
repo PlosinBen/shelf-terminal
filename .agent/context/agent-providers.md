@@ -440,3 +440,13 @@ Renderer 在 dev/E2E 傳入是否顯示 internal provider 的環境政策，再�
 **Do not change casually because：** 不要散落 provider key/label magic string（宣告本身、provider 目錄名與故意的 invalid fixture 除外）；不要用 label、auth 文案或 visibility 做 dispatch；不要為 fake 建特殊合法性路徑，也不要讓 test mode 把不同 requested provider 合併成同一 cache key。現有 persistence/auth/config location 不做 alias migration；若新增 provider，必須維持 key-isolated state、cache 與 runtime 路徑。
 
 **Related：** `agent-providers#1`、`agent-providers#35`、`agent-core#5`、`deployment#8`、`src/shared/agent-providers.ts`、`agent-server/backend-registry.ts`。
+
+## agent-providers#37 — ACP prompt response 後要跨 event-loop barrier 再關 update queue  ·  [Gotcha]
+
+**Symptom：** Copilot turn 的最後一段（通常是 `task_complete` 最終總結）在本次完成時不顯示，直到使用者送出下一則訊息才突然出現，而且會被歸到下一 turn。
+
+**Root cause：** ACP v1 以 `session/prompt` response 作為 turn boundary，agent 應先送完 pending `session/update`。但 TypeScript SDK 對 notification handler 與 matching response 採獨立 dispatch；即使 notification wire message 先到，我方 `onSessionUpdate` callback 仍可能比 prompt Promise 晚一個 event-loop turn settle。session driver 原本在 prompt Promise resolve 時立刻把 queue 標成 done；最後 update 因此留在 session queue，下一次 `drivePromptTurn()` 才被取走並用新 turn 的 `send` closure 發出。
+
+**Fix / note：** prompt Promise settle 後，先跨一次 `setImmediate` dispatch barrier，再將本 turn queue 標成 done 並 wake reader。這只等待已經在途的 SDK handler，不使用固定毫秒 grace period：固定 delay 會讓每個 ACP turn 平白變慢，且可能把真正的 out-of-turn update 誤歸到已完成 turn。不要移除 barrier 或改回 prompt resolve 當下立即關 queue；若 ACP v2 改成明確 `state_update: idle` boundary，再以該協定訊號取代 compatibility barrier。
+
+**Related：** `agent-server/providers/acp/client.ts`、`agent-server/providers/acp/client.test.ts`、`agent-providers#24`（Copilot `task_complete` 最終總結）。
