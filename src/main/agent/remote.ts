@@ -25,6 +25,7 @@ import { transportPutDir, composeRemotePath } from '../connector/transport';
 import { shelfPlacement, ShelfFileTypeSkill } from '@shared/shelf-paths';
 import { handleAppTool } from './app-tool';
 import { buildWorktreeAppToolAuditEvent } from './app-tool-audit';
+import { connectionScopeKey } from '@shared/process-memory';
 import {
   detectTargetFromProbe,
   targetId,
@@ -900,18 +901,6 @@ const SHUTDOWN_GRACE_MS = 3000;
 // net if a remote-transport issue surfaces. See the feature note.
 const USE_DISPATCHER = process.env.SHELF_USE_DISPATCHER !== '0';
 
-/** Per-transport connection identity — the dispatcher scope key (#3). NOT
- *  "the ControlPath" (that's ssh-unix only). */
-function dispatcherKeyFor(c: Connection): string {
-  switch (c.type) {
-    case 'ssh': return `ssh:${c.host}:${c.port}:${c.user}`;
-    case 'docker': return `docker:${c.container}`;
-    case 'wsl': return `wsl:${c.distro}`;
-    case 'local': return 'local';
-    default: return JSON.stringify(c);
-  }
-}
-
 // Shared per-host dispatcher connections. Ref-counted: the last session's close
 // fires onEmpty → arm an idle-teardown GRACE window; a reopen within it reuses the
 // warm dispatcher + its model cache (F-b, ControlPersist-style). 120s << the 24h
@@ -976,7 +965,7 @@ export function spawnDispatcherProc(connection: Connection, cwd: string, deploy:
 
 /** Get (or spawn) the shared dispatcher for this host. */
 function ensureDispatcher(connection: Connection, cwd: string, deploy: DeployResult, initScript?: string): DispatcherConnection | null {
-  const key = dispatcherKeyFor(connection);
+  const key = connectionScopeKey(connection);
   const existing = dispatchers.get(key);
   if (existing) {
     // Reopen within the grace window → cancel teardown, reuse the warm dispatcher.
