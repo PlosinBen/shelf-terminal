@@ -2097,6 +2097,20 @@ button {
   font-size: 11px;
 }
 
+.bottom-bar-memory {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.bottom-bar-memory-separator {
+  color: var(--border);
+}
+
 .bottom-bar-right {
   display: flex;
   align-items: center;
@@ -2968,6 +2982,11 @@ button {
 
 .agent-status-seg {
   color: var(--text-muted);
+}
+
+.agent-status-memory {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 .agent-status-seg[data-severity="info"] { color: var(--agent-info, #61afef); }

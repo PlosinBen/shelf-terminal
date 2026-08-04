@@ -2,6 +2,8 @@ import React, { useCallback } from 'react';
 import type { AgentProvider } from '@shared/types';
 import { providerLabel } from '@shared/agent-providers';
 import { clearMessages as clearMessagesStore, setLocalPicker, useAgentTab } from '../../agentTabStore';
+import { useStore } from '../../store';
+import { AgentMemory } from '../MemoryDisplay';
 
 interface Props {
   tabId: string;
@@ -23,6 +25,7 @@ interface Props {
  */
 export function StatusBar({ tabId, provider }: Props) {
   const tab = useAgentTab(tabId);
+  const { processMemorySummary } = useStore();
   const isStreaming = tab?.isStreaming ?? false;
   const statusModel = tab?.actualModel ?? null;
   const permissionMode = tab?.actualPermissionMode ?? 'default';
@@ -120,6 +123,8 @@ export function StatusBar({ tabId, provider }: Props) {
           <span className="agent-status-seg" data-severity={seg.severity ?? 'normal'}>{seg.text}</span>
         </React.Fragment>
       ))}
+      <span className="agent-status-sep">|</span>
+      <AgentMemory rollup={processMemorySummary?.tabs[tabId]} />
       <span style={{ marginLeft: 'auto' }} />
       <button
         className="agent-reset-btn"

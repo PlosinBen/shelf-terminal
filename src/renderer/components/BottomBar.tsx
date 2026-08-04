@@ -4,6 +4,8 @@ import { tooltipWithShortcut } from '../utils/format-keybinding';
 import { isMac } from '../hooks/useKeybindings';
 import { PanelLeftIcon, PaperPlaneIcon, NoteIcon, CodeIcon, SkillIcon, McpIcon } from './icons';
 import type { Connection } from '@shared/types';
+import { connectionScopeKey } from '@shared/process-memory';
+import { FooterMemory } from './MemoryDisplay';
 
 const version = __APP_VERSION__;
 
@@ -36,6 +38,7 @@ export function BottomBar() {
     awayMode,
     updateStatus,
     settings,
+    processMemorySummary,
   } = useStore();
   const kb = settings.keybindings;
   const proj = projects[activeProjectIndex] ?? null;
@@ -51,6 +54,10 @@ export function BottomBar() {
           </>
         )}
       </div>
+      <FooterMemory
+        summary={processMemorySummary}
+        selectedConnectionScopeKey={proj ? connectionScopeKey(proj.config.connection) : undefined}
+      />
       <div className="bottom-bar-right">
         {/* Group 1 — version + updater */}
         <span className="bottom-bar-group">
