@@ -13,7 +13,10 @@ title: shelf-terminal — Intent → File Index
 |--------|------|------|
 | App lifecycle, IPC wiring | `index.ts` | app/window 啟動、`registerAllIpcHandlers()` 一次註冊、PM/Agent/updater 接線與 quit cleanup 的中樞 |
 | 共享 app 狀態 | `app-state.ts` | `mainWindow` / `cachedProjects` / `cachedSettings` 的 getter/setter，index 與 ipc 共用單一來源 |
-| IPC handler（按領域分檔） | `ipc/` (`index.ts` + `pty`/`project`/`connector`/`git`/`file-transfer`/`dialog`/`settings`/`logs`/`web`/`notes`/`skills`/`mcp`/`config-backup`/`updater`/`pm`) | 各檔 export `registerXxxHandlers()`，`ipc/index.ts` 匯總註冊 |
+| IPC handler（按領域分檔） | `ipc/` (`index.ts` + `pty`/`project`/`connector`/`git`/`file-transfer`/`dialog`/`settings`/`logs`/`web`/`notes`/`skills`/`mcp`/`config-backup`/`updater`/`pm`/`process-memory`) | 各檔 export `registerXxxHandlers()`，`ipc/index.ts` 匯總註冊 |
+| Process memory current state + summary clock | `process-memory-manager.ts` | 註冊 App/dispatcher/exec sources、接收 latest reports、計算 freshness rollups、記錄並發布 summary |
+| Electron process memory attribution | `app-memory.ts` | 將 app process metrics 映射成 App role rows |
+| Named retained channel logs | `channel-log.ts` | 依 channel/day append log 並執行 retention policy cleanup |
 | App 層 Agent Skills（CRUD + lock + disable） | `skills-store.ts` | `<userData>/skills/` 下 app 層 skill 的檔案 CRUD + frontmatter 驗證 + `.locked`（agent 編輯鎖）+ `.disabled`（mount 開關）marker |
 | Skills 變更後處理（統一 pipeline） | `skills-sync.ts` | `onSkillsChanged()`：任何 skill mutation 後的單一出口（re-project + subscribers + 通知 renderer） |
 | App-tool bridge（main 端 dispatcher） | `agent/app-tool.ts` | `handleAppTool(op,args)` 把 agent-server 的 `app_tool` 請求轉成 client-owned 資源動作的純 dispatcher |
@@ -107,6 +110,7 @@ title: shelf-terminal — Intent → File Index
 | Role-split entry point | `index.ts` | 薄 entrypoint：讀 `--role`，dynamic-import `./exec`（預設）或 `./dispatcher`。lazy import → dispatcher role 永不載入 provider/SDK（保持 thin） |
 | Execution proc（per session） | `exec.ts` | 原 agent-server 主體：stdin/stdout JSON line protocol + dispatch to Claude/Copilot + context persistence。在 dispatcher 下以 `--sid` spawn，outbound 全蓋自己的 `sid`；含 model-cache client（cache_get/put 側通道） |
 | 主機 dispatcher（per host broker） | `dispatcher.ts` | 薄 per-host broker：`sid` 路由/relay（串流 opaque pass-through，只 peek pong/cache_）、open/close_session、兩層 health 的 inner-ping、supervisor（exec 死→reconnect + backoff）、per-host model cache 側通道。**不 import provider/SDK** |
+| Dispatcher/exec memory reporting | `memory-report.ts` | source-owned process snapshot、role attribution、success/error report 與 10 秒初始排程 |
 | Model/caps cache（泛型 TTL） | `model-cache.ts` | `createModelCache({ttlMs})`：泛型 TTL 儲存，過期即 evict（cache-aside 的被動 store，見 `context/agent-config-flow`） |
 | Session hosting 抽象（兩張 map） | `session-registry.ts` | `createSessionRegistry()`：`sessions: Map<sid, runtimeKey>` + `runtimes: Map<runtimeKey, T>`，`runtimeKeyFor` 決定 isolated（sid）/shared（provider:account）。為 shared 部署預備（isolated milestone 未用） |
 | Claude provider | `providers/claude/index.ts` | `@anthropic-ai/claude-agent-sdk` wrapper：持久 streaming-input session、emit 渲染原語、auth 偵測 |
@@ -172,6 +176,7 @@ title: shelf-terminal — Intent → File Index
 |--------|------|------|
 | Root 元件 / Event handler 中樞 | `App.tsx` | 載入 projects/settings、集中處理所有 event bus 事件、split view 渲染的唯一 side-effect hub |
 | 全域狀態管理 | `store.ts` | `useSyncExternalStore` store，管 projects/tabs/settings/UI state + connectionHealth + projectNotice + skillsVisible |
+| Process memory renderer sync | `process-memory-sync.ts` | listener-first hydration 並以完整 summary snapshot 更新全域 store |
 | Project collection boundary / stable view order | `projects-repository.ts` + `store.ts` | project identity lookup、visual reorder、stable mounted-view listing、readonly project snapshots |
 | Event bus | `events/` (`bus.ts` / `types.ts` / `ipc-agent.ts` / `index.ts`) | pub/sub + 類型化 `agent:*` vocabulary + IPC↔bus 適配層 |
 | 快捷鍵系統 | `hooks/useKeybindings.ts` | combo string 對應 action，支援參數化 action |
@@ -187,7 +192,8 @@ title: shelf-terminal — Intent → File Index
 | App 層 MCP server 管理 | `components/McpView.tsx` | 右側欄 view（BottomBar 插頭 icon 開、Skills 的姊妹）：list + per-transport 新增/編輯(stdio/http)、rename、`?` scope help。沿用 `.right-panel` 殼 |
 | 選擇面板 | `components/SelectionPanel.tsx` | Bottom-anchored 單題 N-way 選單，permission popup + config picker 共用 |
 | Picker 面板 | `components/PickerPanel.tsx` | Bottom-anchored 多題互動 form（AskUserQuestion / elicitation 共用） |
-| Bottom bar（全寬 app footer） | `components/BottomBar.tsx` | App 層全寬狀態列：service type/cwd + 右側分三組（分隔線）：version｜左側欄(Projects)｜右側欄(PM/Notes/Skills/MCP/DevTools) toggle |
+| Bottom bar（全寬 app footer） | `components/BottomBar.tsx` | App 層全寬狀態列：connection/cwd、App/Runtime/Agents memory、version 與 app panel toggles |
+| Memory rollup formatting | `components/MemoryDisplay.tsx` | footer/per-tab summary selection primitives 與 MiB/GiB display formatting |
 | Sidebar | `components/Sidebar.tsx` | Project 列表、拖曳排序、右鍵選單、worktree branch、連線健康 status-dot |
 | Tab bar | `components/TabBar.tsx` | Tab 列表、拖曳排序、雙擊重命名、unread badge、PM Active badge |
 | 快速指令選擇器 | `components/CommandPicker.tsx` | ⌘P overlay，過濾 + 執行 per-project 快速指令 |
@@ -226,6 +232,9 @@ title: shelf-terminal — Intent → File Index
 | Type 定義 | `types.ts` | Connection / ProjectConfig / AppSettings / PM types / IPC payloads |
 | Feature-note directory validator | `feature-note-dir.ts` | optional repo-relative POSIX directory 的 canonicalization 與 lexical safety validation |
 | IPC channel 常數 | `ipc-channels.ts` | 所有 IPC channel name 常數 |
+| Process memory contracts | `process-memory.ts` | wire type、role、timing、source/summary shape 與 connection scope identity |
+| Cross-platform process memory adapter | `process-memory-sampler.ts` | host snapshot normalization與 dispatcher/exec process-tree classification |
+| Named channel log policy | `channel-log.ts` | retained log channel名稱與天數政策 |
 | App 層 MCP 型別 + 驗證 | `mcp.ts` | `McpServerBlock`/`McpServersFile` + 純 validator(main store 與 agent-server loader 共用，不 pull electron） |
 | Shelf 檔案 placement 規則 | `shelf-paths.ts` | `shelfPlacement(type,ctx)` closed allowlist + `ShelfFileType*` 常數(transport 與 agent-server 共用單一路徑規則） |
 | 專案 env 純 helper | `project-env.ts` | `EnvMap`、`SHELF_RESERVED_ENV`、`isReservedEnvKey`/`validateEnvKey`、`applyEnvMap`（本機 merge、PATH-merge）、`buildEnvExportPrefix`（遠端 export 前綴）；main + renderer 共用 |
@@ -255,6 +264,7 @@ title: shelf-terminal — Intent → File Index
 | `typecheck` | `tsc --noEmit` 型別檢查 |
 | `test` | 跑全部測試（typecheck → unit → e2e → docker → ssh） |
 | `test:unit` | vitest 單元測試 |
+| `test:memory-host` | 真實 host process-memory adapter integration（macOS/Linux ps；Windows PowerShell/CIM） |
 | `test:e2e` | Playwright E2E 測試（自動 build，NODE_ENV=test 隔離 userData；解除繼承的 `ELECTRON_RUN_AS_NODE`，見 `deployment#6`） |
 | `test:docker` | Docker connector E2E 測試 |
 | `test:ssh` | SSH connector E2E 測試 |

@@ -5,6 +5,7 @@ related:
   - context/storage
   - context/settings-config
   - context/deployment
+  - contracts/process-memory
 ---
 
 # Persistence Formats
@@ -22,6 +23,14 @@ The on-disk artifacts Shelf persists and their layout. Two roots: `<userData>` (
 - **Path**: `<userData>/settings.json`
 - **Format**: JSON object, pretty-printed (2-space). Shape is `AppSettings` (`src/shared/types.ts`) — `fontSize`, `fontFamily`, `themeName`, `scrollback`, `keybindings: KeybindingConfig`, `logLevel`, `pmProvider`, `telegram`, `pmActive`, etc.
 - **Source of truth**: `src/main/settings-store.ts`. On load it is **shallow-merged over `DEFAULT_SETTINGS`** (`src/shared/defaults.ts`), with `keybindings` additionally deep-merged, so a stored file may omit keys added in newer versions. Missing file → defaults (see `context/settings-config` settings-config#2).
+
+## `<userData>/logs/{mem,mem-summary}/YYYYMMDD.log` — retained memory diagnostics
+
+- **Paths**: `<userData>/logs/mem/YYYYMMDD.log` and `<userData>/logs/mem-summary/YYYYMMDD.log`, using local calendar dates.
+- **Line format**: `<writer ISO timestamp> [<LEVEL>][<tag>] <JSON payload>`; one append-only record per line.
+- **`mem` payload**: `MemorySourceRecord` from `src/main/process-memory-manager.ts` — `{ receivedAt, sourceId, source?, accepted, reason?, report }`. Successful `report` values contain every attributed process row; failed and rejected attempts remain explicit records.
+- **`mem-summary` payload**: the exact `ProcessMemorySummary` object cached for hydration and pushed to renderer on that 30-second tick. Its authoritative shape is `src/shared/process-memory.ts`; see `contracts/process-memory`.
+- **Retention**: both named channels keep 30 days. `src/shared/channel-log.ts` owns the policies; `src/main/channel-log.ts` owns daily rotation and cleanup at initialization and the first write of each new day.
 
 ## `<userData>/projects/<projectId>/` — per-project dir
 

@@ -3,6 +3,7 @@ type: contract
 title: Agent Wire Protocol
 related:
   - contracts/agent-routing
+  - contracts/process-memory
   - context/agent-ui
   - context/agent-config-flow
 ---
@@ -263,6 +264,14 @@ Emitted outside any turn. Some are one-shot RPC responses keyed `<type>:<request
 | `log` | `level: error\|warn\|info\|debug; tag; msg` | diagnostic → main's `@shared/logger` at `level` (main applies the filter). See below. |
 | `context_patch` | `patch: Partial<PersistedContext>` | intercepted in `agent-server/index.ts`, NOT forwarded to main |
 
+### Process memory acquisition — `get_memory_usage` / `memory_usage`
+
+Memory messages are turnId-exempt infrastructure messages. Main sends `{ "type": "get_memory_usage" }`; a source returns `memory_usage` success rows or an error report as defined in `contracts/process-memory`.
+
+- At the main↔dispatcher boundary, the request has no `sid`: the dispatcher samples itself and forwards the request to every current exec. Dispatcher self-report is host-level without `sid`; every relayed exec report carries its session `sid`.
+- At the dispatcher↔exec boundary, the exec responds with its own root plus provider descendants. The dispatcher relays that report opaquely.
+- On the direct fallback, main sends the same request to one exec and binds the returned report to that tab without a dispatcher envelope.
+
 ### `log` — agent-server has no independent observability
 
 agent-server can't use `@shared/logger` (it writes a file via electron `app.getPath`, and there is no electron in agent-server) and its **stdout is this wire**, so it routes every diagnostic to main as a `log` message instead of writing anywhere itself. `serverLog(level, tag, msg, ...args)` (`agent-server/server-logger.ts`) flattens args to text at the source (where `Error` objects are still intact — they'd serialize to `{}` over the wire) and emits `{type:'log', ...}`; main's reader (`remote.ts`) calls `log[level](tag, msg)`, so the **level filter lives in main** (single source of truth) — agent-server emits every level and main drops what's below `currentLevel`. Benign per-event diagnostics use `debug` (silent at the default `error` level).
@@ -296,6 +305,7 @@ Over the transport (secure channel / subsystem / container / same-machine stdio)
 | `open_session` | `sid; provider; cwd; initScript?; projectId?; env?` | Ensure an execution unit for `sid`. Answered by a relayed `ready{sid}` (= `session_ready`) or `session_down`. Opening an already-open `sid` replaces the stale channel first (see `agent-core#11`). `env` = the project's resolved env map (plain + decrypted secret): the dispatcher is per-HOST so per-project env can't ride its own process env — it travels here and is applied to the per-session exec proc (re-applied on reconnect). See `context/project-env#2`. |
 | `close_session` | `sid` | Session closed → dispatcher disposes that execution unit (a NORMAL closure → it self-reaps escaped detached tasks). |
 | `ping` | `seq` | Host-level heartbeat, ONE per host (no `sid`); replaces the per-session ping. |
+| `get_memory_usage` | — | Host-level acquisition request: sample dispatcher self and fan out to every current exec. |
 | per-session commands | + `sid` | `send`, `stop`, `cancel_queued`, `resolve_permission`, `resolve_picker`, `stop_task`, `get_capabilities`, `store_credential`, `clear_credential`, `clear_context`, `read_task_output`, `reload_skills`, `app_tool_result` — each gains `sid`, routed to that session's execution unit, payloads otherwise UNCHANGED. |
 
 **dispatcher → main**
@@ -305,13 +315,14 @@ Over the transport (secure channel / subsystem / container / same-machine stdio)
 | `ready` | — | Dispatcher process up (no `sid`); gates nothing per-session. |
 | `session_down` | `sid; reason; willReconnect` | Execution unit for `sid` exited (crash / hang / normal). Main fails that session's in-flight turns loudly, then marks it recovering if `willReconnect` (a relayed `ready{sid}` follows once reconnected) or disconnected if not (backoff exhausted). |
 | `pong` | `seq` | Host heartbeat ack (no `sid`). Host-level health = RTT / miss on THIS. |
+| `memory_usage` | `status; sampledAt; rows?; error?; sid?` | Dispatcher self has no `sid`; session exec reports carry `sid`. See `contracts/process-memory`. |
 | existing per-turn / session events | + `sid` | Every existing `OutgoingMessage` (stream, message, status, queue, task_event, skills_reloaded, capabilities, credential_*, task_output, permission_request, picker_request, plan, auth_required, turn_started, error, log) is stamped with `sid` and **passed through OPAQUELY** — the dispatcher forwards without parsing. |
 
 `session_ready` is not a separate message: the execution unit stamps its own `ready` with its `sid`, and the dispatcher relays it. `get_capabilities` is per-`sid` and comes AFTER the session is ready (`open_session` → ready → `get_capabilities(sid)`); it is answered by the execution unit's runtime, keeping the dispatcher thin.
 
 ## Boundary 2 — dispatcher ↔ execution unit
 
-Local stdio on the host. The execution unit is a session-addressed harness (see `architecture/agent-dispatch`), so this boundary ALSO carries `sid`: every per-session command/event carries it, the unit routes inbound to its session map and stamps outbound events with their `sid`, and the dispatcher relays to/from main. In the currently deployed isolated shape the map holds one entry, so `sid` is redundant-but-harmless there; the point is the harness is uniformly session-addressed.
+Local stdio on the host. The execution unit is a session-addressed harness (see `architecture/agent-dispatch`), so this boundary ALSO carries `sid`: every ordinary per-session command/event carries it, the unit routes inbound to its session map and stamps outbound events with their `sid`, and the dispatcher relays to/from main. The infrastructure `get_memory_usage` request is the exception: dispatcher sends it without `sid` because each current exec process is already session-bound; the exec still stamps its response with its own `sid`. In the currently deployed isolated shape the map holds one entry, so `sid` is otherwise redundant-but-harmless there; the point is the harness is uniformly session-addressed.
 
 This boundary additionally carries the **cache side-channel** — serviced locally by the dispatcher, NOT relayed to main (peeked like the health pong):
 

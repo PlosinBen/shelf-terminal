@@ -19,6 +19,7 @@ Decisions + gotchas grouped by topic. Cited from code as `<topic>#N`.
 | slash / config / model 流 | [agent-config-flow](agent-config-flow.md) | turnId envelope、slash dispatch、applyConfigEdit |
 | 背景任務 | [background-tasks](background-tasks.md) | task_event lane、streaming session、auto-resume |
 | 連線健康 | [connection-health](connection-health.md) | ping/pong heartbeat、idle-shutdown watchdog |
+| Process memory observability | [process-memory-observability](process-memory-observability.md) | source-owned acquisition、KiB normalization、latest-value/freshness 與 UI/log cadence |
 | 部署 / 投影 | [deployment](deployment.md) | `~/.shelf/` taxonomy、cp-to-remote 投影、agent-server bundle |
 | app 層 skills | [skills](skills.md) | 開放標準 + 投影、bridge、hot-reload、lock |
 | app 層 MCP servers | [mcp](mcp.md) | additive-on-native、keyed-object opaque、sibling pipeline、reconnect 通知、heartbeat lease、scope 傳達 |

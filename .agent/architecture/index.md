@@ -8,6 +8,7 @@ Abstract data flow at the system level (component names, no filenames).
 | 連線生命週期 | [connection-lifecycle](connection-lifecycle.md) | connect → connector → shell/exec；部署、heartbeat、idle-shutdown |
 | Agent turn | [agent-turn](agent-turn.md) | user msg → send queue → provider turn → 渲染原語 → timeline |
 | Agent dispatch | [agent-dispatch](agent-dispatch.md) | main → per-host dispatcher → per-session exec → CLI；sid demux、two-map hosting、two-tier health、reconnect、cache |
+| Process memory observability | [process-memory-observability](process-memory-observability.md) | source-owned acquisition → main latest-value registry → retained detail + 30s summary → footer/status bar |
 | PM 控制迴圈 | [pm-control](pm-control.md) | 訊息 → PM turn → 寫入 terminal → 觀察回饋 |
 | Skills 投影 | [skills-projection](skills-projection.md) | UI 編輯 → 投影 → provider 載入 → live hot-reload |
 | MCP config sync | [mcp-sync](mcp-sync.md) | UI 編輯 → sibling pipeline → 投影/transport → agent-server 解析餵 SDK → reconnect 通知 |

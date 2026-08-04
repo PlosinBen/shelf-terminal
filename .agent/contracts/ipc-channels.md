@@ -4,6 +4,7 @@ title: IPC Channels
 related:
   - contracts/agent-wire-protocol
   - contracts/persistence-formats
+  - contracts/process-memory
 ---
 
 # IPC Channels
@@ -257,6 +258,7 @@ Renderer → main (invoke / send):
 | `cancelLogin(tabId)` | invoke `agent:cancel-login` — kill a running interactive login |
 | `fetchTaskOutput(tabId, taskId)` | invoke `agent:read-task-output` → background task's full remote output |
 | `stopTask(tabId, taskId)` | invoke `agent:stop-task` |
+| `getMemoryUsage()` | invoke `agent:memory-usage-current` → cached `ProcessMemorySummary \| null`; hydration only, never samples or recomputes. See `contracts/process-memory`. |
 
 Main → renderer (push; all return an unsubscribe fn):
 
@@ -276,3 +278,4 @@ Main → renderer (push; all return an unsubscribe fn):
 | `onLoginPrompt(cb(tabId, prompt))` | `agent:login-prompt` — device-flow `{ provider, verificationUri, userCode, prefilledUri }` (session-level). Main also opens the URL locally |
 | `onLoginDone(cb(tabId, result))` | `agent:login-done` — `{ provider, ok, cancelled?, error? }` |
 | `onInitStatus(cb(tabId, status))` | `agent:init-status` |
+| `onMemoryUsage(cb(summary))` | `agent:memory-usage` — complete app-wide `ProcessMemorySummary`, unconditionally published every 30 seconds. See `contracts/process-memory`. |
