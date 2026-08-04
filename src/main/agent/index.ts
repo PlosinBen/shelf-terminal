@@ -2,6 +2,7 @@ import { BrowserWindow, ipcMain, shell } from 'electron';
 import { IPC } from '@shared/ipc-channels';
 import { log } from '@shared/logger';
 import { formatTabLogId } from '@shared/tab-id';
+import { providerLabel } from '@shared/agent-providers';
 import type { AgentAttachment, Connection, AgentProvider } from '@shared/types';
 import type { AgentSessionState, AgentEvent, AgentBackend, PermissionResult, ProviderCapabilities } from './types';
 import { createRemoteBackend, syncSkillsForConnection } from './remote';
@@ -424,7 +425,7 @@ async function startSession(
       // routing → setAuthRequired → AuthPane takeover); then mark ready (the
       // chat underneath is harmless while AuthPane covers the pane).
       send(IPC.AGENT_CAPABILITIES, tabId, caps);
-      if (caps.authRequired) send(IPC.AGENT_AUTH_REQUIRED, tabId, provider);
+      if (caps.authRequired) send(IPC.AGENT_AUTH_REQUIRED, tabId, providerLabel(provider));
       send(IPC.AGENT_INIT_STATUS, tabId, { state: 'ready' });
     }).catch((err) => {
       log.error('agent', `${tag} capabilities error: ${err.message}`);
@@ -602,7 +603,7 @@ function applyPostAuthResult(
   caps: ProviderCapabilities,
 ): boolean {
   send(IPC.AGENT_CAPABILITIES, tabId, caps);
-  if (caps.authRequired) send(IPC.AGENT_AUTH_REQUIRED, tabId, session.provider);
+  if (caps.authRequired) send(IPC.AGENT_AUTH_REQUIRED, tabId, providerLabel(session.provider));
   return !caps.authRequired;
 }
 

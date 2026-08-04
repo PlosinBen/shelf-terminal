@@ -53,6 +53,12 @@ class FakeAppServer {
         nextCursor: null,
       } as T;
     }
+    if (method === 'account/read') {
+      return {
+        account: { type: 'chatgpt', planType: 'plus' },
+        requiresOpenaiAuth: true,
+      } as T;
+    }
     if (method === 'mcpServerStatus/list') return { data: [{ name: 'shelf', authStatus: 'authorized' }], nextCursor: null } as T;
     if (method === 'skills/list') return { data: [{ cwd: '/repo', skills: [{ name: 'skill-a', shortDescription: 'does A' }], errors: [] }] } as T;
     if (method === 'account/rateLimits/read') {
@@ -542,7 +548,7 @@ describe('Codex official app-server backend lifecycle', () => {
       'app-1',
     );
 
-    expect(app.calls.map((call) => call.method)).toEqual(['initialize', 'model/list']);
+    expect(app.calls.map((call) => call.method)).toEqual(['initialize', 'account/read', 'model/list']);
     expect(caps.models.map((m) => m.value)).toEqual(['gpt-5.6-sol', 'custom-model']);
     expect(caps.models[0].effortLevels?.map((e) => e.value)).toEqual(['low', 'ultra']);
     expect((caps as unknown as Record<string, unknown>).currentModel).toBe('gpt-5.6-sol');
@@ -566,6 +572,66 @@ describe('Codex official app-server backend lifecycle', () => {
       'stop',
       'clean',
     ]);
+  });
+
+  it('reports auth required before listing models when app-server has no OpenAI account', async () => {
+    const app = new FakeAppServer({
+      'account/read': () => ({ account: null, requiresOpenaiAuth: true }),
+    });
+    const backend = createCodexBackend({ createAppServer: () => app });
+
+    const caps = await backend.gatherCapabilities!('/repo', undefined, undefined, undefined, undefined, 'app-1');
+
+    expect(app.calls.map((call) => call.method)).toEqual(['initialize', 'account/read']);
+    expect(caps).toMatchObject({
+      authRequired: true,
+      authMethod: {
+        kind: 'oauth',
+        instructions: [{ label: 'Sign in with your ChatGPT account (device code)' }],
+      },
+    });
+  });
+
+  it('does not require OpenAI auth when the active app-server provider does not need it', async () => {
+    const app = new FakeAppServer({
+      'account/read': () => ({ account: null, requiresOpenaiAuth: false }),
+    });
+    const backend = createCodexBackend({ createAppServer: () => app });
+
+    const caps = await backend.gatherCapabilities!('/repo', undefined, undefined, undefined, undefined, 'app-1');
+
+    expect(app.calls.map((call) => call.method)).toEqual(['initialize', 'account/read', 'model/list']);
+    expect(caps.authRequired).not.toBe(true);
+  });
+
+  it('fails loudly when account/read does not return a definitive auth state', async () => {
+    const app = new FakeAppServer({
+      'account/read': () => ({ account: null }),
+    });
+    const backend = createCodexBackend({ createAppServer: () => app });
+
+    await expect(backend.gatherCapabilities!('/repo', undefined, undefined, undefined, undefined, 'app-1'))
+      .rejects.toThrow('account/read returned an invalid auth state');
+  });
+
+  it('respawns app-server on reconnect so the post-login probe reads fresh credentials', async () => {
+    const beforeLogin = new FakeAppServer({
+      'account/read': () => ({ account: null, requiresOpenaiAuth: true }),
+    });
+    const afterLogin = new FakeAppServer();
+    const createAppServer = vi.fn()
+      .mockReturnValueOnce(beforeLogin)
+      .mockReturnValueOnce(afterLogin);
+    const backend = createCodexBackend({ createAppServer });
+
+    await expect(backend.gatherCapabilities!('/repo', undefined, undefined, undefined, undefined, 'app-1'))
+      .resolves.toMatchObject({ authRequired: true });
+    backend.reconnect!();
+    const caps = await backend.gatherCapabilities!('/repo', undefined, undefined, undefined, undefined, 'app-1');
+
+    expect(beforeLogin.closed).toBe(true);
+    expect(createAppServer).toHaveBeenCalledTimes(2);
+    expect(caps.authRequired).not.toBe(true);
   });
 
   it('handles typed config slashes locally without app-server turn routes', async () => {

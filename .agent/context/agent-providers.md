@@ -460,3 +460,15 @@ Renderer 在 dev/E2E 傳入是否顯示 internal provider 的環境政策，再�
 **Fix / note：** 只有 app-server 明確回報 `thread/resume` + code `-32600` + 該 thread id 的 `no rollout found` 時才恢復：先 emit `lastSdkSessionId:null`（即使後續 start 失敗也不再重試 stale id），再 `thread/start`，成功後顯示一次 system notice 並保存新 id，原 prompt 照常進 `turn/start`。其他 resume 錯誤（auth、transport、timeout、response mismatch）一律維持 fail-loud，不得用 broad catch 靜默開新 thread；否則會把可修復的連線問題偽裝成對話 context 遺失。
 
 **Related：** `agent-providers#33`、`agent-server/providers/codex/index.ts`、`agent-server/context-store.ts`。
+
+## agent-providers#39 — Codex capability probe 必須先用 `account/read` 擋住未登入 turn  ·  [Gotcha]
+
+**Symptom：** 新的 app-scoped `CODEX_HOME` 尚未登入時，Codex tab 仍顯示可輸入；送出訊息後才在 Responses WebSocket 收到 `401 Unauthorized`，且 turn 因沒有 terminal event 持續顯示 running。
+
+**Root cause：** `model/list` 未登入也可能成功，不能作為 auth probe。app-server-only cutover 若只取 model capabilities，就會漏掉原本 provider 的登入 gate。舊 app-server process 也可能保留登入前的 auth state；device-code login 由另一個 process 寫入 credential 後，post-login re-init 若不重生 runtime，仍可能回報未登入。
+
+**Fix / note：** `gatherCapabilities` 在 `model/list` 前呼叫官方 `account/read { refreshToken:false }`。只有 `account === null && requiresOpenaiAuth === true` 才回 `authRequired:true` + ChatGPT device-code OAuth method；`requiresOpenaiAuth:false` 代表 active provider 不需要 OpenAI credential，不可誤擋。缺欄位或非預期 shape 一律讓 init fail-loud，不猜成已登入或登出。登入完成的 `reconnect` 要關閉舊 app-server，讓下一次 capabilities probe 從同一個 per-appId `CODEX_HOME` 重讀新 credential。
+
+**Do not change casually because：** 不要用 `account === null` 或 `requiresOpenaiAuth` 任一欄位單獨判斷；API key、ChatGPT、Bedrock 等模式的 account shape 不同。不要把 auth probe 失敗降級成 bundled model fallback，否則 UI 會再次在未知 auth 狀態下放行 turn。
+
+**Related：** `agent-providers#15`（per-appId device auth）、`agent-providers#32`（官方 account JSON-RPC）、`agent-ui#7`（AuthPane / post-login re-init ownership）、`agent-server/providers/codex/index.ts`。

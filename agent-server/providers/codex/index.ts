@@ -52,6 +52,10 @@ const CODEX_SDK_SLASH_COMMANDS = [
 const CODEX_APP_SERVER_SLASH_COMMAND_NAMES = new Set<string>(CODEX_SDK_SLASH_COMMANDS.map((command) => command.name));
 const UNSUPPORTED_APP_SERVER_SLASH_COMMANDS = new Set(['ps', 'stop', 'clean']);
 const CODEX_STALE_THREAD_NOTICE = 'Previous Codex thread was unavailable; started a new thread.';
+const CODEX_AUTH_METHOD = {
+  kind: 'oauth' as const,
+  instructions: [{ label: 'Sign in with your ChatGPT account (device code)' }],
+};
 
 export interface CodexBackendDeps {
   spawnLoginRpc?: (env: NodeJS.ProcessEnv) => { rpc: LoginRpc };
@@ -573,8 +577,19 @@ export function createCodexBackend(deps: CodexBackendDeps = {}): ServerBackend {
       const baseEnv = codexEnv(appId);
       const sdkHome = codexHome(appId);
       if (sdkHome) baseEnv.HOME = sdkHome;
+      const client = await ensureAppServer(appId, baseEnv);
+      const authState = await client.request('account/read', { refreshToken: false });
+      if (codexAuthRequired(authState)) {
+        return {
+          models: [],
+          permissionModes: [],
+          effortLevels: [],
+          slashCommands: [],
+          authRequired: true,
+          authMethod: CODEX_AUTH_METHOD,
+        };
+      }
       try {
-        const client = await ensureAppServer(appId, baseEnv);
         return buildCapabilities(customModels, true, await listAppServerModels(client));
       } catch (err) {
         serverLog('warn', 'codex-app-server', `model/list failed; using bundled fallback: ${(err as Error)?.message ?? String(err)}`);
@@ -630,6 +645,12 @@ export function createCodexBackend(deps: CodexBackendDeps = {}): ServerBackend {
 
     reconnect(): void {
       resolveActiveTurn?.();
+      appServer?.close();
+      appServer = null;
+      appServerAppId = undefined;
+      appServerInitialized = false;
+      activeThreadId = null;
+      activeTurnId = null;
     },
 
     dispose(): void {
@@ -976,6 +997,20 @@ function asArray(value: unknown): unknown[] {
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+function codexAuthRequired(value: unknown): boolean {
+  const state = asRecord(value);
+  const account = state?.account;
+  if (
+    !state
+    || !Object.prototype.hasOwnProperty.call(state, 'account')
+    || typeof state.requiresOpenaiAuth !== 'boolean'
+    || (account !== null && !asRecord(account))
+  ) {
+    throw new Error('codex app-server account/read returned an invalid auth state');
+  }
+  return account === null && state.requiresOpenaiAuth;
 }
 
 function stringValue(value: unknown): string | null {
