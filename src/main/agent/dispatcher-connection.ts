@@ -76,6 +76,8 @@ export interface DispatcherConnection {
   openSession(sid: string, cwd: string | undefined, sinks: SessionSinks, env?: Record<string, string>): SessionChannel;
   /** Live session count (for ref-counted teardown). */
   size(): number;
+  /** Request dispatcher self + current exec measurements (no response barrier). */
+  requestMemoryUsage(): void;
   /** Kill the dispatcher proc + all sessions. */
   kill(): void;
 }
@@ -300,5 +302,10 @@ export function createDispatcherConnection(deps: DispatcherConnectionDeps): Disp
     deps.proc.kill();
   }
 
-  return { openSession, size: () => channels.size, kill };
+  return {
+    openSession,
+    size: () => channels.size,
+    requestMemoryUsage: () => writeToProc({ type: MEMORY_WIRE_TYPE.GET_USAGE }),
+    kill,
+  };
 }

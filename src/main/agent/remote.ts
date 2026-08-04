@@ -78,6 +78,14 @@ interface RemoteProcess {
   kill: () => void;
 }
 
+const directProcesses = new Set<RemoteProcess>();
+
+/** Main-owned round trigger: one command per live dispatcher/direct exec route. */
+export function requestAllAgentMemoryUsage(): void {
+  for (const entry of dispatchers.values()) entry.conn.requestMemoryUsage();
+  for (const proc of directProcesses) proc.sendLine({ type: MEMORY_WIRE_TYPE.GET_USAGE });
+}
+
 export function createRemoteBackend(
   connection: Connection,
   initScript?: string,
@@ -117,6 +125,8 @@ export function createRemoteBackend(
   memorySinks?: {
     session?: (report: MemoryUsageReport) => void;
     host?: (report: MemoryUsageReport) => void;
+    hostStarted?: () => void;
+    hostStopped?: () => void;
   },
 ): AgentBackend {
   let remoteProc: RemoteProcess | null = null;
@@ -152,7 +162,7 @@ export function createRemoteBackend(
         let proc: RemoteProcess | null;
         if (USE_DISPATCHER) {
           // Shared per-host dispatcher: open a session on it (drop-in RemoteProcess).
-          const dc = ensureDispatcher(connection, cwd, deployResult!, initScript, memorySinks?.host);
+          const dc = ensureDispatcher(connection, cwd, deployResult!, initScript, memorySinks);
           const sid = sessionId ?? randomUUID();
           proc = dc
             ? dc.openSession(sid, cwd, { onTaskEvent, onServerTurn, onHealth, onQueue, onSkillsReloaded, onSessionEvent, onMemoryUsage: memorySinks?.session, projectId }, projectEnv)
@@ -979,7 +989,11 @@ function ensureDispatcher(
   cwd: string,
   deploy: DeployResult,
   initScript?: string,
-  onMemoryUsage?: (report: MemoryUsageReport) => void,
+  memorySinks?: {
+    host?: (report: MemoryUsageReport) => void;
+    hostStarted?: () => void;
+    hostStopped?: () => void;
+  },
 ): DispatcherConnection | null {
   const key = connectionScopeKey(connection);
   const existing = dispatchers.get(key);
@@ -1012,7 +1026,7 @@ function ensureDispatcher(
     parseRemoteMessage,
     handleAppTool,
     heartbeatIntervalMs: HEARTBEAT_INTERVAL_MS,
-    onMemoryUsage,
+    onMemoryUsage: memorySinks?.host,
     onEmpty: () => {
       const e = dispatchers.get(key);
       if (!e || e.conn !== conn || e.grace) return;
@@ -1020,6 +1034,7 @@ function ensureDispatcher(
       e.grace = setTimeout(() => {
         if (dispatchers.get(key)?.conn === conn) {
           log.info('agent-remote', `dispatcher: grace expired for ${key} — tearing down`);
+          memorySinks?.hostStopped?.();
           dispatchers.delete(key); conn.kill();
         }
       }, DISPATCHER_GRACE_MS);
@@ -1038,6 +1053,7 @@ function ensureDispatcher(
     },
   });
   dispatchers.set(key, { conn });
+  memorySinks?.hostStarted?.();
   return conn;
 }
 
@@ -1225,8 +1241,11 @@ export function wrapProcess(
     log.error('agent-remote', 'stderr:', chunk.toString());
   });
 
+  let wrapped: RemoteProcess;
+
   proc.on('exit', (code, signal) => {
     active = false;
+    directProcesses.delete(wrapped);
     // Transport is gone. Nothing auto-recovers this — the session stays wedged
     // (sends write to a dead stdin, no events flow) until the user manually
     // disconnect→connect (respawn). Warn (not info) so it surfaces at the
@@ -1243,7 +1262,7 @@ export function wrapProcess(
     log.flushTrace('agent-remote', `proc error: ${err.message}`);
   });
 
-  return {
+  wrapped = {
     sendLine: (msg) => {
       const w = proc.stdin;
       // Fail-loud on a write to a dead pipe: after a sleep/crash the stdin can be
@@ -1269,12 +1288,15 @@ export function wrapProcess(
       // app-quit; the CLI self-exits on its own stdin-EOF regardless.
       clearInterval(heartbeatTimer);
       active = false;
+      directProcesses.delete(wrapped);
       proc.stdin?.end();
       const forceKill = setTimeout(() => { try { proc.kill(); } catch { /* already exited */ } }, SHUTDOWN_GRACE_MS);
       forceKill.unref();
       proc.once('exit', () => clearTimeout(forceKill));
     },
   };
+  directProcesses.add(wrapped);
+  return wrapped;
 }
 
 export function parseRemoteMessage(msg: any): AgentEvent | null {

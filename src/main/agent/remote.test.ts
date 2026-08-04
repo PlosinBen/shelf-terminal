@@ -295,6 +295,21 @@ describe('direct exec memory routing', () => {
     child.stdout.emit('data', Buffer.from(`${JSON.stringify(report)}\n`));
     expect(onMemoryUsage).toHaveBeenCalledTimes(1);
   });
+
+  it('fans one main round request to every live direct exec', async () => {
+    const first = capabilitiesChild({});
+    const second = capabilitiesChild({});
+    const { requestAllAgentMemoryUsage, wrapProcess } = await import('./remote');
+    const firstRemote = wrapProcess(first.child);
+    const secondRemote = wrapProcess(second.child);
+
+    requestAllAgentMemoryUsage();
+
+    expect(first.writes).toContainEqual({ type: MEMORY_WIRE_TYPE.GET_USAGE });
+    expect(second.writes).toContainEqual({ type: MEMORY_WIRE_TYPE.GET_USAGE });
+    firstRemote.kill();
+    secondRemote.kill();
+  });
 });
 
 describe('parseRemoteMessage — mid-turn capabilities', () => {

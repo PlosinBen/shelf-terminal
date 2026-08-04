@@ -14,6 +14,14 @@ import { getAppInstanceId } from '../app-instance-id';
 import { subscribeSkillsChanged } from '../skills-sync';
 import { subscribeMcpChanged } from '../mcp-sync';
 import { syncMcpForConnection } from '../mcp-remote';
+import {
+  acceptDispatcherMemoryReport,
+  acceptExecMemoryReport,
+  registerDispatcherMemorySource,
+  registerExecMemorySource,
+  unregisterDispatcherMemorySource,
+  unregisterExecMemorySource,
+} from '../process-memory-manager';
 
 interface SessionInstance {
   tabId: string;
@@ -55,6 +63,7 @@ function hibernateTab(tabId: string): void {
   log.info('agent', `[agent:${formatTabLogId(tabId)}] idle-teardown → dispose exec+CLI (resumes on next send)`);
   session.backend.dispose();
   session.hibernated = true;
+  unregisterExecMemorySource(tabId);
 }
 
 // Per-tab idle timer. `arm` on turn-end, `touch` on activity; fires hibernateTab
@@ -393,6 +402,12 @@ async function startSession(
     (ev) => dispatchEvent(tabId, ev),
     // Owning project — the app_tool bridge keys the web.fetch grant on it.
     typeof opts?.projectId === 'string' ? opts.projectId : undefined,
+    {
+      session: (report) => { acceptExecMemoryReport(tabId, report); },
+      host: (report) => { acceptDispatcherMemoryReport(connection, report); },
+      hostStarted: () => { registerDispatcherMemorySource(connection); },
+      hostStopped: () => { unregisterDispatcherMemorySource(connection); },
+    },
   );
 
   const session: SessionInstance = {
@@ -407,6 +422,7 @@ async function startSession(
   };
 
   sessions.set(tabId, session);
+  registerExecMemorySource(tabId, provider, connection);
 
   // Init lifecycle hint for the renderer's loading spinner / retry UI.
   send(IPC.AGENT_INIT_STATUS, tabId, { state: 'starting' });
@@ -464,6 +480,7 @@ async function sendMessage(
   idleTracker.touch(tabId);
   if (session.hibernated) {
     session.hibernated = false;
+    registerExecMemorySource(tabId, session.provider, session.connection);
     log.info('agent', `${tag} waking hibernated tab (respawn + resume)`);
   }
 
@@ -688,6 +705,7 @@ async function destroySession(tabId: string): Promise<boolean> {
   idleTracker.forget(tabId);
   session.backend.dispose();
   sessions.delete(tabId);
+  unregisterExecMemorySource(tabId);
   return true;
 }
 
@@ -785,6 +803,7 @@ export function getAgentProvider(tabId: string): AgentProvider | null {
 export function disposeAllAgents(): void {
   for (const session of sessions.values()) {
     session.backend.dispose();
+    unregisterExecMemorySource(session.tabId);
   }
   sessions.clear();
 }

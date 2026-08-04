@@ -21,6 +21,7 @@ import { registerAllIpcHandlers } from './ipc';
 import { hardenWebSession, installWebviewHardening } from './web-session-harden';
 import { shouldRecreateWindowOnActivate } from './window-lifecycle';
 import { primeShellEnv } from './connector/shell-env';
+import { disposeProcessMemory, initProcessMemory } from './process-memory-manager';
 
 applyUserDataIsolation();
 
@@ -157,6 +158,7 @@ app.whenReady().then(async () => {
   });
 
   initializeChannelLog(logBaseDir);
+  initProcessMemory();
 
   const envLogLevel = process.env.LOG_LEVEL as import('../shared/types').LogLevel | undefined;
   if (envLogLevel) setLogLevel(envLogLevel);
@@ -240,6 +242,7 @@ app.whenReady().then(async () => {
 });
 
 function shutdown() {
+  disposeProcessMemory();
   killAllPtys();
   disposeAllAgents();
   stopAutoUpdater();

@@ -57,6 +57,12 @@ describe('dispatcher-connection (per-host demux by sid)', () => {
     expect(f.parsedWritten()).toContainEqual({ type: 'send', prompt: 'x', sid: 's1' });
   });
 
+  it('requests host memory without a sid', () => {
+    const { f, conn } = make();
+    conn.requestMemoryUsage();
+    expect(f.parsedWritten()).toContainEqual({ type: MEMORY_WIRE_TYPE.GET_USAGE });
+  });
+
   it('routes a session event to the matching sid sink only', () => {
     const q1: any[] = []; const q2: any[] = [];
     const { f, conn } = make();
