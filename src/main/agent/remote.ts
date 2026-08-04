@@ -27,6 +27,11 @@ import { handleAppTool } from './app-tool';
 import { buildWorktreeAppToolAuditEvent } from './app-tool-audit';
 import { connectionScopeKey } from '@shared/process-memory';
 import {
+  MEMORY_WIRE_TYPE,
+  parseMemoryUsageReport,
+  type MemoryUsageReport,
+} from '@shared/process-memory';
+import {
   detectTargetFromProbe,
   targetId,
   isRemoteNodeSupported,
@@ -109,6 +114,10 @@ export function createRemoteBackend(
   // Owning project id — threaded into the app_tool bridge so the web.fetch gate
   // can key its grant on (projectId, origin). Connection-agnostic; defaults empty.
   projectId?: string,
+  memorySinks?: {
+    session?: (report: MemoryUsageReport) => void;
+    host?: (report: MemoryUsageReport) => void;
+  },
 ): AgentBackend {
   let remoteProc: RemoteProcess | null = null;
   let deployed = false;
@@ -143,13 +152,13 @@ export function createRemoteBackend(
         let proc: RemoteProcess | null;
         if (USE_DISPATCHER) {
           // Shared per-host dispatcher: open a session on it (drop-in RemoteProcess).
-          const dc = ensureDispatcher(connection, cwd, deployResult!, initScript);
+          const dc = ensureDispatcher(connection, cwd, deployResult!, initScript, memorySinks?.host);
           const sid = sessionId ?? randomUUID();
           proc = dc
-            ? dc.openSession(sid, cwd, { onTaskEvent, onServerTurn, onHealth, onQueue, onSkillsReloaded, onSessionEvent, projectId }, projectEnv)
+            ? dc.openSession(sid, cwd, { onTaskEvent, onServerTurn, onHealth, onQueue, onSkillsReloaded, onSessionEvent, onMemoryUsage: memorySinks?.session, projectId }, projectEnv)
             : null;
         } else {
-          proc = await spawnAgentServer(connection, cwd, deployResult!, initScript, projectEnv, onTaskEvent, onServerTurn, onHealth, onQueue, onSkillsReloaded, onSessionEvent, projectId);
+          proc = await spawnAgentServer(connection, cwd, deployResult!, initScript, projectEnv, onTaskEvent, onServerTurn, onHealth, onQueue, onSkillsReloaded, onSessionEvent, projectId, memorySinks?.session);
         }
         if (!proc) return null;
         const ready = await proc.awaitReady();
@@ -817,6 +826,7 @@ async function spawnAgentServer(
   onSkillsReloaded?: (ok: boolean, error?: string) => void,
   onSessionEvent?: (event: AgentEvent) => void,
   projectId?: string,
+  onMemoryUsage?: (report: MemoryUsageReport) => void,
 ): Promise<RemoteProcess | null> {
   const { nodeBin, indexPath } = deploy;
   // Forward SHELF_TEST_MODE to the remote agent-server so E2E specs can drive
@@ -832,7 +842,7 @@ async function spawnAgentServer(
       // spawnLocalNode applies ELECTRON_RUN_AS_NODE so the app binary runs as
       // plain Node (never a second Electron window), and merges the project env.
       const proc = spawnLocalNode(nodeBin, [indexPath], cwd, projectEnv);
-      return wrapProcess(proc, onTaskEvent, onServerTurn, onHealth, onQueue, onSkillsReloaded, onSessionEvent, projectId);
+      return wrapProcess(proc, onTaskEvent, onServerTurn, onHealth, onQueue, onSkillsReloaded, onSessionEvent, projectId, onMemoryUsage);
     } catch (err: any) {
       log.error('agent-remote', `Local spawn failed: ${err.message}`);
       return null;
@@ -862,7 +872,7 @@ async function spawnAgentServer(
       cmd,
     ];
     const proc = spawn('ssh', args, { stdio: ['pipe', 'pipe', 'pipe'] });
-    return wrapProcess(proc, onTaskEvent, onServerTurn, onHealth, onQueue, onSkillsReloaded, onSessionEvent, projectId);
+    return wrapProcess(proc, onTaskEvent, onServerTurn, onHealth, onQueue, onSkillsReloaded, onSessionEvent, projectId, onMemoryUsage);
   }
 
   if (connection.type === 'docker') {
@@ -870,14 +880,14 @@ async function spawnAgentServer(
     const proc = spawn('docker', ['exec', '-i', connection.container, 'sh', '-c', cmd], {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
-    return wrapProcess(proc, onTaskEvent, onServerTurn, onHealth, onQueue, onSkillsReloaded, onSessionEvent, projectId);
+    return wrapProcess(proc, onTaskEvent, onServerTurn, onHealth, onQueue, onSkillsReloaded, onSessionEvent, projectId, onMemoryUsage);
   }
 
   if (connection.type === 'wsl') {
     const proc = spawn('wsl.exe', ['-d', connection.distro, '--', 'sh', '-lc', `${buildEnvExportPrefix(projectEnv)}${testEnv}exec ${nodeBin} ${indexPath}`], {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
-    return wrapProcess(proc, onTaskEvent, onServerTurn, onHealth, onQueue, onSkillsReloaded, onSessionEvent, projectId);
+    return wrapProcess(proc, onTaskEvent, onServerTurn, onHealth, onQueue, onSkillsReloaded, onSessionEvent, projectId, onMemoryUsage);
   }
 
   return null;
@@ -964,7 +974,13 @@ export function spawnDispatcherProc(connection: Connection, cwd: string, deploy:
 }
 
 /** Get (or spawn) the shared dispatcher for this host. */
-function ensureDispatcher(connection: Connection, cwd: string, deploy: DeployResult, initScript?: string): DispatcherConnection | null {
+function ensureDispatcher(
+  connection: Connection,
+  cwd: string,
+  deploy: DeployResult,
+  initScript?: string,
+  onMemoryUsage?: (report: MemoryUsageReport) => void,
+): DispatcherConnection | null {
   const key = connectionScopeKey(connection);
   const existing = dispatchers.get(key);
   if (existing) {
@@ -996,6 +1012,7 @@ function ensureDispatcher(connection: Connection, cwd: string, deploy: DeployRes
     parseRemoteMessage,
     handleAppTool,
     heartbeatIntervalMs: HEARTBEAT_INTERVAL_MS,
+    onMemoryUsage,
     onEmpty: () => {
       const e = dispatchers.get(key);
       if (!e || e.conn !== conn || e.grace) return;
@@ -1024,7 +1041,7 @@ function ensureDispatcher(connection: Connection, cwd: string, deploy: DeployRes
   return conn;
 }
 
-function wrapProcess(
+export function wrapProcess(
   proc: ChildProcess,
   onTaskEvent?: (ev: TaskEvent) => void,
   onServerTurn?: (turnId: string, events: AsyncGenerator<AgentEvent>) => void,
@@ -1033,9 +1050,11 @@ function wrapProcess(
   onSkillsReloaded?: (ok: boolean, error?: string) => void,
   onSessionEvent?: (event: AgentEvent) => void,
   projectId?: string,
+  onMemoryUsage?: (report: MemoryUsageReport) => void,
 ): RemoteProcess {
   const dispatcher = createTurnDispatcher(parseRemoteMessage, onTaskEvent, onServerTurn, onQueue, onSkillsReloaded, onSessionEvent);
   let buffer = '';
+  let active = true;
 
   // ── Heartbeat: app→agent-server liveness + RTT (see §5.9 / connection-health.ts).
   // The `ping`/`pong` round-trip serves three things off one beat: the version-dir
@@ -1152,6 +1171,18 @@ function wrapProcess(
         emitHealth();
         continue;
       }
+      if (parsed?.type === MEMORY_WIRE_TYPE.USAGE) {
+        if (!active) {
+          log.warn('agent-remote', 'late memory report from inactive direct exec — dropped');
+          continue;
+        }
+        try {
+          onMemoryUsage?.(parseMemoryUsageReport(parsed));
+        } catch (error) {
+          log.error('agent-remote', `malformed direct memory report — dropped: ${String(error)}`);
+        }
+        continue;
+      }
       // App-tool bridge — transport-level request/response (like pong), never a
       // turn event. An in-process bridge tool on the agent-server asks main to
       // act on a client-owned resource (skills-store); handle + reply by
@@ -1195,6 +1226,7 @@ function wrapProcess(
   });
 
   proc.on('exit', (code, signal) => {
+    active = false;
     // Transport is gone. Nothing auto-recovers this — the session stays wedged
     // (sends write to a dead stdin, no events flow) until the user manually
     // disconnect→connect (respawn). Warn (not info) so it surfaces at the
@@ -1236,6 +1268,7 @@ function wrapProcess(
       // proc.kill() (SIGTERM) would cut the reap off. unref'd so it can't delay
       // app-quit; the CLI self-exits on its own stdin-EOF regardless.
       clearInterval(heartbeatTimer);
+      active = false;
       proc.stdin?.end();
       const forceKill = setTimeout(() => { try { proc.kill(); } catch { /* already exited */ } }, SHUTDOWN_GRACE_MS);
       forceKill.unref();

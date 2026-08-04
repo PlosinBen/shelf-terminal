@@ -178,6 +178,26 @@ describe('dispatcher core', () => {
     expect(h.spawnExec).toHaveBeenCalledTimes(2); // exec2 NOT reconnected
   });
 
+  it('rejects a STALE exec memory line after reconnect replaces its process handle', () => {
+    const h = harness();
+    h.d.onMainLine(JSON.stringify({ type: 'open_session', sid: 's1' }));
+    const oldExec = h.spawned[0];
+    oldExec.hooks.onExit(1);
+    expect(h.spawned).toHaveLength(2);
+    h.toMain.length = 0;
+
+    oldExec.hooks.onLine(JSON.stringify({
+      type: MEMORY_WIRE_TYPE.USAGE,
+      sid: 's1',
+      status: MEMORY_REPORT_STATUS.OK,
+      sampledAt: '2026-08-05T00:00:00.000Z',
+      rows: [],
+    }));
+
+    expect(h.toMain).toHaveLength(0);
+    expect(h.logs).toContainEqual(['warn', 'late line from replaced exec s1 — dropped']);
+  });
+
   it('does NOT reconnect after an intentional close_session', () => {
     const h = harness();
     h.d.onMainLine(JSON.stringify({ type: 'open_session', sid: 's1' }));

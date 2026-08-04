@@ -16,6 +16,11 @@ import type { AgentEvent } from './types';
 import { ConnectionHealthTracker, DEFAULT_HEALTH_THRESHOLDS } from './connection-health';
 import { createTurnDispatcher, type PermissionHandler } from './turn-dispatcher';
 import { buildWorktreeAppToolAuditEvent } from './app-tool-audit';
+import {
+  MEMORY_WIRE_TYPE,
+  parseMemoryUsageReport,
+  type MemoryUsageReport,
+} from '@shared/process-memory';
 
 /** The subset of a spawned child process this module drives (injectable for tests). */
 export interface DispatcherProc {
@@ -33,6 +38,7 @@ export interface SessionSinks {
   onQueue?: (items: any[]) => void;
   onSkillsReloaded?: (ok: boolean, error?: string) => void;
   onSessionEvent?: (event: AgentEvent) => void;
+  onMemoryUsage?: (report: MemoryUsageReport) => void;
   projectId?: string;
 }
 
@@ -57,6 +63,8 @@ export interface DispatcherConnectionDeps {
   /** Called when the dispatcher proc EXITS (crash / kill) → owner evicts this dead
    *  connection so the next connect spawns a fresh dispatcher. */
   onDown?: () => void;
+  /** Host-level dispatcher report sink. */
+  onMemoryUsage?: (report: MemoryUsageReport) => void;
 }
 
 export interface DispatcherConnection {
@@ -81,6 +89,7 @@ interface ChannelState {
 export function createDispatcherConnection(deps: DispatcherConnectionDeps): DispatcherConnection {
   const channels = new Map<string, ChannelState>();
   const intervalMs = deps.heartbeatIntervalMs ?? DEFAULT_HEALTH_THRESHOLDS.intervalMs;
+  let active = true;
 
   function writeToProc(msg: object): void {
     deps.proc.writeLine(JSON.stringify(msg));
@@ -122,6 +131,19 @@ export function createDispatcherConnection(deps: DispatcherConnectionDeps): Disp
     }
     const type = parsed?.type;
 
+    if (type === MEMORY_WIRE_TYPE.USAGE && parsed.sid === undefined) {
+      if (!active) {
+        log.warn('dispatcher-conn', 'late host memory report from inactive dispatcher — dropped');
+        return;
+      }
+      try {
+        deps.onMemoryUsage?.(parseMemoryUsageReport(parsed));
+      } catch (error) {
+        log.error('dispatcher-conn', `malformed host memory report — dropped: ${String(error)}`);
+      }
+      return;
+    }
+
     // Host-level heartbeat ack (no sid).
     if (type === 'pong') {
       if (typeof parsed.seq === 'number') health.onAck(parsed.seq, Date.now());
@@ -158,6 +180,19 @@ export function createDispatcherConnection(deps: DispatcherConnectionDeps): Disp
     const ch = channels.get(sid);
     if (!ch) {
       log.info('dispatcher-conn', `line for unknown sid ${sid}, dropping type=${type}`);
+      return;
+    }
+
+    if (type === MEMORY_WIRE_TYPE.USAGE) {
+      if (!active || channels.get(sid) !== ch) {
+        log.warn('dispatcher-conn', `late session memory report sid=${sid} — dropped`);
+        return;
+      }
+      try {
+        ch.sinks.onMemoryUsage?.(parseMemoryUsageReport(parsed));
+      } catch (error) {
+        log.error('dispatcher-conn', `malformed session memory report sid=${sid} — dropped: ${String(error)}`);
+      }
       return;
     }
 
@@ -201,6 +236,7 @@ export function createDispatcherConnection(deps: DispatcherConnectionDeps): Disp
   });
 
   deps.proc.onExit((code) => {
+    active = false;
     log.warn('dispatcher-conn', `dispatcher process exited code=${code} — host down until reconnect`);
     clearInterval(timer);
     for (const ch of channels.values()) ch.sinks.onHealth?.({ state: 'dead' } as ConnectionHealth);
@@ -258,6 +294,7 @@ export function createDispatcherConnection(deps: DispatcherConnectionDeps): Disp
   }
 
   function kill(): void {
+    active = false;
     clearInterval(timer);
     channels.clear();
     deps.proc.kill();

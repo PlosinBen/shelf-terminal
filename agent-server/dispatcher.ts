@@ -106,7 +106,7 @@ export function createDispatcher(deps: DispatcherDeps): Dispatcher {
     // eslint-disable-next-line prefer-const -- referenced (lazily) in the onExit closure
     let proc: ExecProc;
     proc = deps.spawnExec(sid, cwd, {
-      onLine: (l) => handleExecLine(sid, l),
+      onLine: (l) => handleExecLine(sid, l, proc),
       // Pass THIS proc so handleExecDown can ignore a stale exec's late exit after a
       // reconnect/replace (its sid now maps to a newer proc). See handleExecDown.
       onExit: (code) => handleExecDown(sid, `exited (code ${code})`, proc),
@@ -120,7 +120,11 @@ export function createDispatcher(deps: DispatcherDeps): Dispatcher {
    * parse-free (they don't contain the marker) — only rare candidates are parsed.
    * Today only the inner-heartbeat `pong` is serviced here (E adds cache_get/put).
    */
-  function handleExecLine(sid: string, line: string): void {
+  function handleExecLine(sid: string, line: string, proc: ExecProc): void {
+    if (execs.get(sid)?.proc !== proc) {
+      deps.log('warn', `late line from replaced exec ${sid} — dropped`);
+      return;
+    }
     if (line.includes('"type":"pong"')) {
       let p: any;
       try { p = JSON.parse(line); } catch { /* not really pong */ }

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { createDispatcherConnection, type DispatcherProc } from './dispatcher-connection';
+import { MEMORY_PROCESS_ROLE, MEMORY_REPORT_STATUS, MEMORY_WIRE_TYPE } from '@shared/process-memory';
 
 vi.mock('@shared/logger', () => ({ log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } }));
 
@@ -36,6 +37,13 @@ function make(overrides: Partial<Parameters<typeof createDispatcherConnection>[0
 }
 
 describe('dispatcher-connection (per-host demux by sid)', () => {
+  const memoryReport = () => ({
+    type: MEMORY_WIRE_TYPE.USAGE,
+    status: MEMORY_REPORT_STATUS.OK,
+    sampledAt: '2026-08-05T00:00:00.000Z',
+    rows: [{ pid: 10, ppid: 1, memoryKiB: 100, role: MEMORY_PROCESS_ROLE.DISPATCHER }],
+  });
+
   it('openSession sends open_session with sid + cwd', () => {
     const { f, conn } = make();
     conn.openSession('s1', '/tmp/p', {});
@@ -57,6 +65,31 @@ describe('dispatcher-connection (per-host demux by sid)', () => {
     f.emit({ type: 'queue', items: [{ a: 1 }], sid: 's2' });
     expect(q2).toHaveLength(1);
     expect(q1).toHaveLength(0);
+  });
+
+  it('routes host memory before the no-sid rejection branch', () => {
+    const onMemoryUsage = vi.fn();
+    const { f } = make({ onMemoryUsage });
+    f.emit(memoryReport());
+    expect(onMemoryUsage).toHaveBeenCalledWith(memoryReport());
+  });
+
+  it('routes a validated memory report only to its sid session sink', () => {
+    const m1 = vi.fn(); const m2 = vi.fn();
+    const { f, conn } = make();
+    conn.openSession('s1', undefined, { onMemoryUsage: m1 });
+    conn.openSession('s2', undefined, { onMemoryUsage: m2 });
+    f.emit({ ...memoryReport(), sid: 's2' });
+    expect(m1).not.toHaveBeenCalled();
+    expect(m2).toHaveBeenCalledWith(memoryReport());
+  });
+
+  it('rejects late host reports after the dispatcher handle is killed', () => {
+    const onMemoryUsage = vi.fn();
+    const { f, conn } = make({ onMemoryUsage });
+    conn.kill();
+    f.emit(memoryReport());
+    expect(onMemoryUsage).not.toHaveBeenCalled();
   });
 
   it('drops a line for an unknown sid', () => {

@@ -56,6 +56,63 @@ export interface MemoryUsageFailureReport {
 
 export type MemoryUsageReport = MemoryUsageSuccessReport | MemoryUsageFailureReport;
 
+const MEMORY_PROCESS_ROLES = new Set<string>(Object.values(MEMORY_PROCESS_ROLE));
+
+/** Validate an untrusted wire payload and strip routing-only envelope fields. */
+export function parseMemoryUsageReport(value: unknown): MemoryUsageReport {
+  if (!value || typeof value !== 'object') throw new Error('memory_usage report must be an object');
+  const report = value as Record<string, unknown>;
+  if (report.type !== MEMORY_WIRE_TYPE.USAGE) throw new Error('unexpected memory report type');
+  if (typeof report.sampledAt !== 'string' || Number.isNaN(Date.parse(report.sampledAt))) {
+    throw new Error('memory_usage sampledAt must be an ISO timestamp');
+  }
+
+  if (report.status === MEMORY_REPORT_STATUS.ERROR) {
+    if (typeof report.error !== 'string' || report.error.trim().length === 0) {
+      throw new Error('failed memory_usage report requires an error');
+    }
+    if ('rows' in report) throw new Error('failed memory_usage report must not contain rows');
+    return {
+      type: MEMORY_WIRE_TYPE.USAGE,
+      status: MEMORY_REPORT_STATUS.ERROR,
+      sampledAt: report.sampledAt,
+      error: report.error,
+    };
+  }
+
+  if (report.status !== MEMORY_REPORT_STATUS.OK || !Array.isArray(report.rows)) {
+    throw new Error('successful memory_usage report requires rows');
+  }
+  const rows = report.rows.map((raw, index): ProcessMemoryRow => {
+    if (!raw || typeof raw !== 'object') throw new Error(`memory_usage row ${index} must be an object`);
+    const row = raw as Record<string, unknown>;
+    if (!Number.isSafeInteger(row.pid) || Number(row.pid) <= 0) {
+      throw new Error(`memory_usage row ${index} has invalid pid`);
+    }
+    if (row.ppid !== undefined && (!Number.isSafeInteger(row.ppid) || Number(row.ppid) < 0)) {
+      throw new Error(`memory_usage row ${index} has invalid ppid`);
+    }
+    if (!Number.isSafeInteger(row.memoryKiB) || Number(row.memoryKiB) < 0) {
+      throw new Error(`memory_usage row ${index} has invalid memoryKiB`);
+    }
+    if (typeof row.role !== 'string' || !MEMORY_PROCESS_ROLES.has(row.role)) {
+      throw new Error(`memory_usage row ${index} has invalid role`);
+    }
+    return {
+      pid: Number(row.pid),
+      ...(row.ppid === undefined ? {} : { ppid: Number(row.ppid) }),
+      memoryKiB: Number(row.memoryKiB),
+      role: row.role as MemoryProcessRole,
+    };
+  });
+  return {
+    type: MEMORY_WIRE_TYPE.USAGE,
+    status: MEMORY_REPORT_STATUS.OK,
+    sampledAt: report.sampledAt,
+    rows,
+  };
+}
+
 /** Stable, non-secret identity shared by dispatcher pooling and memory rollups. */
 export function connectionScopeKey(connection: Connection): string {
   switch (connection.type) {

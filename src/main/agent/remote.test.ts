@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { spawn } from 'child_process';
 import * as fs from 'fs';
 import { EventEmitter } from 'events';
+import { MEMORY_PROCESS_ROLE, MEMORY_REPORT_STATUS, MEMORY_WIRE_TYPE } from '@shared/process-memory';
 
 // Exercise createRemoteBackend's per-session process path with an injectable
 // child process. Dispatcher behavior has its own focused test suite.
@@ -262,6 +263,38 @@ describe('remote backend', () => {
     expect(() => backend.dispose()).not.toThrow();
   });
 
+});
+
+describe('direct exec memory routing', () => {
+  it('delivers a validated report while active and rejects late output after kill', async () => {
+    const { child } = capabilitiesChild({});
+    const onMemoryUsage = vi.fn();
+    const { wrapProcess } = await import('./remote');
+    const remote = wrapProcess(
+      child,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      onMemoryUsage,
+    );
+    const report = {
+      type: MEMORY_WIRE_TYPE.USAGE,
+      status: MEMORY_REPORT_STATUS.OK,
+      sampledAt: '2026-08-05T00:00:00.000Z',
+      rows: [{ pid: 10, ppid: 1, memoryKiB: 100, role: MEMORY_PROCESS_ROLE.EXEC }],
+    };
+
+    child.stdout.emit('data', Buffer.from(`${JSON.stringify(report)}\n`));
+    expect(onMemoryUsage).toHaveBeenCalledWith(report);
+
+    remote.kill();
+    child.stdout.emit('data', Buffer.from(`${JSON.stringify(report)}\n`));
+    expect(onMemoryUsage).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('parseRemoteMessage — mid-turn capabilities', () => {

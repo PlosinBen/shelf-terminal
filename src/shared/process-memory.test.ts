@@ -7,6 +7,7 @@ import {
   MEMORY_REPORT_STATUS,
   MEMORY_WIRE_TYPE,
   connectionScopeKey,
+  parseMemoryUsageReport,
 } from './process-memory';
 
 describe('process memory contracts', () => {
@@ -22,6 +23,28 @@ describe('process memory contracts', () => {
     expect(MEM_SOURCE_STALE_AFTER_MS).toBe(
       2 * MEM_SAMPLE_INTERVAL_MS + MEM_RENDERER_PUBLISH_INTERVAL_MS,
     );
+  });
+
+  it('validates reports and strips routing envelope fields', () => {
+    expect(parseMemoryUsageReport({
+      type: MEMORY_WIRE_TYPE.USAGE,
+      sid: 'session-only-routing',
+      status: MEMORY_REPORT_STATUS.OK,
+      sampledAt: '2026-08-05T00:00:00.000Z',
+      rows: [{ pid: 10, ppid: 1, memoryKiB: 100, role: MEMORY_PROCESS_ROLE.EXEC }],
+    })).toEqual({
+      type: MEMORY_WIRE_TYPE.USAGE,
+      status: MEMORY_REPORT_STATUS.OK,
+      sampledAt: '2026-08-05T00:00:00.000Z',
+      rows: [{ pid: 10, ppid: 1, memoryKiB: 100, role: MEMORY_PROCESS_ROLE.EXEC }],
+    });
+    expect(() => parseMemoryUsageReport({
+      type: MEMORY_WIRE_TYPE.USAGE,
+      status: MEMORY_REPORT_STATUS.ERROR,
+      sampledAt: '2026-08-05T00:00:00.000Z',
+      error: 'failed',
+      rows: [],
+    })).toThrow('must not contain rows');
   });
 
   it('derives the same non-secret scope used for one dispatcher host', () => {
