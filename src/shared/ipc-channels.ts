@@ -180,6 +180,8 @@ export const IPC = {
    *  (fire-and-forget). Server drops it from its queue + re-emits AGENT_QUEUE.
    *  No-op once the message is running. See message-queue-ownership design. */
   AGENT_CANCEL_QUEUED: 'agent:cancel-queued',
+  /** Renderer hydration getter for the latest cached process-memory summary. */
+  AGENT_MEMORY_USAGE_CURRENT: 'agent:memory-usage-current',
 
   // PM Agent
   PM_SEND: 'pm:send',
@@ -229,4 +231,6 @@ export const IPC = {
   AGENT_QUEUE: 'agent:queue',
   /** Per-agent-server connection health from the heartbeat round-trip. Carries a ConnectionHealth. */
   AGENT_CONNECTION_HEALTH: 'agent:connection-health',
+  /** Complete process-memory summary snapshot, published independently every 30s. */
+  AGENT_MEMORY_USAGE: 'agent:memory-usage',
 } as const;

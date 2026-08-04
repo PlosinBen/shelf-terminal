@@ -287,6 +287,13 @@ contextBridge.exposeInMainWorld('shelfApi', {
     },
   },
   agent: {
+    getMemoryUsage: () =>
+      ipcRenderer.invoke(IPC.AGENT_MEMORY_USAGE_CURRENT) as Promise<import('../shared/process-memory').ProcessMemorySummary | null>,
+    onMemoryUsage: (callback: (summary: import('../shared/process-memory').ProcessMemorySummary) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, summary: import('../shared/process-memory').ProcessMemorySummary) => callback(summary);
+      ipcRenderer.on(IPC.AGENT_MEMORY_USAGE, listener);
+      return () => ipcRenderer.removeListener(IPC.AGENT_MEMORY_USAGE, listener);
+    },
     init: (tabId: string, cwd: string, connection: unknown, provider: string, sessionId?: string, opts?: Record<string, unknown>) =>
       ipcRenderer.invoke(IPC.AGENT_INIT, { tabId, cwd, connection, provider, sessionId, ...opts }),
     send: (tabId: string, prompt: string, images?: string[], prefs?: { model?: string; effort?: string; permissionMode?: string; attachments?: import('../shared/types').AgentAttachment[]; configEdit?: { key: 'model' | 'effort' | 'permissionMode'; value: string }; clientMsgId?: string }) =>

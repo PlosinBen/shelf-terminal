@@ -4,6 +4,7 @@ import { DEFAULT_SETTINGS } from '@shared/defaults';
 import { groupedOrder, moveGroup } from './project-grouping';
 import { createProjectNotice, dismissProjectNoticeState, showProjectNoticeState, type ProjectNotice } from './project-notice';
 import { isAgentProvider, providerLabel } from '@shared/agent-providers';
+import type { ProcessMemorySummary } from '@shared/process-memory';
 
 // ── Tab state ──
 
@@ -77,6 +78,7 @@ interface StoreSnapshot {
   chatStage: ChatStage | null;
   connectionHealth: Record<string, ConnectionHealth>;
   projectNotice: ProjectNotice | null;
+  processMemorySummary: ProcessMemorySummary | null;
 }
 
 // ── Global store (simple event emitter pattern) ──
@@ -104,6 +106,7 @@ let nextTabCounter = 0;
 // (worst among the project's agent tabs) for the status dot. See §5.9.
 let connectionHealth: Record<string, ConnectionHealth> = {};
 let projectNotice: ProjectNotice | null = null;
+let processMemorySummary: ProcessMemorySummary | null = null;
 let projectNoticeCounter = 0;
 // Pending payload for an agent chat input. Set by Notes' "Send to Chat" and
 // consumed by the next AgentView in the matching project that becomes
@@ -144,7 +147,7 @@ function reconcileActiveProject(preferredIndex = 0) {
 function getSnapshot(): StoreSnapshot {
   const activeProjectIndex = projectIndexById(activeProjectId);
   const editingProjectIndex = projectIndexById(editingProjectId);
-  return { projects: projects as readonly ReadonlyProjectRuntime[], activeProjectIndex, activeProjectId, sidebarVisible, settingsVisible, searchVisible, commandPickerVisible, devToolsVisible, notesVisible, skillsVisible, mcpVisible, editingProjectIndex: editingProjectIndex === -1 ? null : editingProjectIndex, editingProjectId, settings, updateStatus, pmVisible, awayMode, pmActive, quickNoteVisible, chatStage, connectionHealth, projectNotice };
+  return { projects: projects as readonly ReadonlyProjectRuntime[], activeProjectIndex, activeProjectId, sidebarVisible, settingsVisible, searchVisible, commandPickerVisible, devToolsVisible, notesVisible, skillsVisible, mcpVisible, editingProjectIndex: editingProjectIndex === -1 ? null : editingProjectIndex, editingProjectId, settings, updateStatus, pmVisible, awayMode, pmActive, quickNoteVisible, chatStage, connectionHealth, projectNotice, processMemorySummary };
 }
 
 let snapshotRef = getSnapshot();
@@ -654,6 +657,11 @@ export function setPmActive(on: boolean) {
   updateSnapshot();
 }
 
+export function setProcessMemorySummary(summary: ProcessMemorySummary) {
+  processMemorySummary = summary;
+  updateSnapshot();
+}
+
 // ── State sync to main process (for PM tools) ──
 
 let syncTimer: ReturnType<typeof setTimeout> | null = null;
@@ -759,6 +767,7 @@ export function __resetStoreForTests() {
   nextTabCounter = 0;
   connectionHealth = {};
   projectNotice = null;
+  processMemorySummary = null;
   projectNoticeCounter = 0;
   chatStage = null;
   if (syncTimer) {

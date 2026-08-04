@@ -34,6 +34,7 @@ import { bindAgentStoreSubscriptions } from './agentTabSubscriptions';
 import { setInMemoryMax, setSaveThrottleMs } from './agentTabStore';
 import { getTheme, buildThemeVars } from './themes';
 import { clearAgentSession } from './storage/agent-history';
+import { bindProcessMemorySummary } from './process-memory-sync';
 import './styles/global.css';
 
 export function App() {
@@ -94,6 +95,8 @@ export function App() {
     const offStore = bindAgentStoreSubscriptions();
     return () => { offIPC(); offStore(); };
   }, []);
+
+  useEffect(() => bindProcessMemorySummary(), []);
 
   // Connection health (heartbeat) → main store, keyed by tabId. Bound directly
   // (not via the agent typed-event river) because it's connection

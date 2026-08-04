@@ -14,6 +14,7 @@ import { registerConfigBackupHandlers } from './config-backup';
 import { registerUpdaterHandlers } from './updater';
 import { registerPmHandlers } from './pm';
 import { registerFindHandlers } from './find';
+import { registerProcessMemoryHandlers } from './process-memory';
 
 /**
  * Registers every domain's IPC handlers. Agent handlers are registered
@@ -37,4 +38,5 @@ export function registerAllIpcHandlers(): void {
   registerUpdaterHandlers();
   registerPmHandlers();
   registerFindHandlers();
+  registerProcessMemoryHandlers();
 }
