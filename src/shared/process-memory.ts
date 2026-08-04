@@ -21,8 +21,14 @@ export const MEMORY_PROCESS_ROLE = {
   PROVIDER: 'provider',
 } as const;
 
+export const MEMORY_AVAILABILITY = {
+  AVAILABLE: 'available',
+  UNAVAILABLE: 'unavailable',
+} as const;
+
 export type MemoryProcessRole = typeof MEMORY_PROCESS_ROLE[keyof typeof MEMORY_PROCESS_ROLE];
 export type MemoryReportStatus = typeof MEMORY_REPORT_STATUS[keyof typeof MEMORY_REPORT_STATUS];
+export type MemoryAvailability = typeof MEMORY_AVAILABILITY[keyof typeof MEMORY_AVAILABILITY];
 
 export const MEM_INITIAL_SAMPLE_DELAY_MS = 10_000;
 export const MEM_SAMPLE_INTERVAL_MS = 5 * 60_000;
@@ -55,6 +61,26 @@ export interface MemoryUsageFailureReport {
 }
 
 export type MemoryUsageReport = MemoryUsageSuccessReport | MemoryUsageFailureReport;
+
+export interface MemoryRollup {
+  availability: MemoryAvailability;
+  memoryKiB?: number;
+  excludedSources: number;
+}
+
+export interface ConnectionMemorySummary {
+  runtime: MemoryRollup;
+  agents: MemoryRollup;
+  agentCount: number;
+}
+
+export interface ProcessMemorySummary {
+  summarizedAt: string;
+  app: MemoryRollup;
+  connections: Record<string, ConnectionMemorySummary>;
+  tabs: Record<string, MemoryRollup>;
+  excludedSourceCount: number;
+}
 
 const MEMORY_PROCESS_ROLES = new Set<string>(Object.values(MEMORY_PROCESS_ROLE));
 

@@ -17,6 +17,7 @@ import { syncMcpForConnection } from '../mcp-remote';
 import {
   acceptDispatcherMemoryReport,
   acceptExecMemoryReport,
+  forgetExecMemoryScope,
   registerDispatcherMemorySource,
   registerExecMemorySource,
   unregisterDispatcherMemorySource,
@@ -705,7 +706,7 @@ async function destroySession(tabId: string): Promise<boolean> {
   idleTracker.forget(tabId);
   session.backend.dispose();
   sessions.delete(tabId);
-  unregisterExecMemorySource(tabId);
+  forgetExecMemoryScope(tabId);
   return true;
 }
 
@@ -803,7 +804,7 @@ export function getAgentProvider(tabId: string): AgentProvider | null {
 export function disposeAllAgents(): void {
   for (const session of sessions.values()) {
     session.backend.dispose();
-    unregisterExecMemorySource(session.tabId);
+    forgetExecMemoryScope(session.tabId);
   }
   sessions.clear();
 }
