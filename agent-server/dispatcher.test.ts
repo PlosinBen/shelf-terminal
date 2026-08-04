@@ -1,10 +1,11 @@
 import { describe, it, expect, vi } from 'vitest';
 import { createDispatcher, type ExecProc } from './dispatcher';
 import { createModelCache } from './model-cache';
+import { MEMORY_PROCESS_ROLE, MEMORY_REPORT_STATUS, MEMORY_WIRE_TYPE } from '@shared/process-memory';
 
 // A fake exec proc that records forwarded lines / kills and exposes the hooks the
 // dispatcher wired, so tests can drive exec→main (onLine) and exit (onExit).
-function harness(opts: { now?: () => number; cache?: any; onMainPing?: () => void } = {}) {
+function harness(opts: { now?: () => number; cache?: any; onMainPing?: () => void; sampleMemory?: () => Promise<any> } = {}) {
   const toMain: string[] = [];
   const logs: Array<[string, string]> = [];
   const spawned: Array<{
@@ -34,6 +35,7 @@ function harness(opts: { now?: () => number; cache?: any; onMainPing?: () => voi
     now: opts.now,
     cache: opts.cache,
     onMainPing: opts.onMainPing,
+    sampleMemory: opts.sampleMemory,
   });
   const parsedToMain = () => toMain.map((l) => JSON.parse(l));
   return { d, toMain, parsedToMain, logs, spawned, spawnExec };
@@ -102,6 +104,30 @@ describe('dispatcher core', () => {
     const h = harness();
     h.d.onMainLine(JSON.stringify({ type: 'ping', seq: 7 }));
     expect(h.parsedToMain()).toContainEqual({ type: 'pong', seq: 7 });
+  });
+
+  it('get_memory_usage reports dispatcher self and fans out to every current exec', async () => {
+    const sampleMemory = vi.fn(async () => ({
+      type: MEMORY_WIRE_TYPE.USAGE,
+      status: MEMORY_REPORT_STATUS.OK,
+      sampledAt: '2026-08-05T00:00:00.000Z',
+      rows: [{ pid: 10, ppid: 1, memoryKiB: 100, role: MEMORY_PROCESS_ROLE.DISPATCHER }],
+    }));
+    const h = harness({ sampleMemory });
+    h.d.onMainLine(JSON.stringify({ type: 'open_session', sid: 's1' }));
+    h.d.onMainLine(JSON.stringify({ type: 'open_session', sid: 's2' }));
+
+    h.d.onMainLine(JSON.stringify({ type: MEMORY_WIRE_TYPE.GET_USAGE }));
+    await vi.waitFor(() => expect(sampleMemory).toHaveBeenCalledTimes(1));
+    expect(h.parsedToMain()).toContainEqual(expect.objectContaining({
+      type: MEMORY_WIRE_TYPE.USAGE,
+      status: MEMORY_REPORT_STATUS.OK,
+    }));
+    for (const exec of h.spawned) {
+      expect(exec.written.map((line) => JSON.parse(line))).toContainEqual({
+        type: MEMORY_WIRE_TYPE.GET_USAGE,
+      });
+    }
   });
 
   it('fires onMainPing on a main ping (idle-watchdog reset hook, F-a)', () => {

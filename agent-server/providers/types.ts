@@ -22,6 +22,7 @@ export function formatResetCountdown(resetsAtMs: number): string | null {
 }
 
 import type { AgentAttachment, AgentProvider, AgentQueueItem, ProviderModel, TaskEvent } from '@shared/types';
+import type { MemoryUsageReport } from '@shared/process-memory';
 import type { PersistedContext } from '../context-store';
 
 /**
@@ -104,6 +105,7 @@ export type OutgoingMessage = WireEnvelope & (
    *  agent-server keeps NO independent logging — everything but a fatal crash
    *  comes back this way. See agent-server/server-logger.ts. */
   | { type: 'log'; level: 'error' | 'warn' | 'info' | 'debug'; tag: string; msg: string }
+  | MemoryUsageReport
 
   // ── Per-turn control / status (turnId expected) ──────────────────────────
   | {

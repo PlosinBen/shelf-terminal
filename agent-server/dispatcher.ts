@@ -13,6 +13,8 @@ import * as readline from 'readline';
 import { spawn } from 'child_process';
 import { applyEnvMap } from '@shared/project-env';
 import { createModelCache, type ModelCache } from './model-cache';
+import { MEMORY_WIRE_TYPE, type MemoryUsageReport } from '@shared/process-memory';
+import { sampleMemoryUsage, scheduleInitialMemoryReport } from './memory-report';
 
 /** A spawned per-session exec proc, from the dispatcher's side. */
 export interface ExecProc {
@@ -48,6 +50,8 @@ export interface DispatcherDeps {
   /** Called on each main heartbeat ping — runDispatcher resets its idle watchdog
    *  (ssh remote self-exit when main goes quiet). See F-a / connection-health#2. */
   onMainPing?: () => void;
+  /** Dispatcher-owned measurement. Presence also enables its initial report. */
+  sampleMemory?: () => Promise<MemoryUsageReport>;
 }
 
 /** Reconnect backoff: at most MAX reconnects within WINDOW before giving up. */
@@ -79,6 +83,21 @@ export function createDispatcher(deps: DispatcherDeps): Dispatcher {
   interface ExecEntry { proc: ExecProc; cwd: string | undefined; env: Record<string, string> | undefined; reconnectAt: number[]; missed: number; unresponsive: boolean; }
   const execs = new Map<string, ExecEntry>();
   const now = deps.now ?? (() => Date.now());
+
+  function emitMemoryReport(): void {
+    if (!deps.sampleMemory) {
+      deps.log('error', 'memory sample requested without a dispatcher sampler');
+      return;
+    }
+    void deps.sampleMemory().then(
+      (report) => deps.sendToMain(JSON.stringify(report)),
+      (error) => deps.log('error', `dispatcher memory sampler rejected: ${String(error)}`),
+    );
+  }
+
+  const initialMemoryTimer = deps.sampleMemory
+    ? scheduleInitialMemoryReport(emitMemoryReport)
+    : undefined;
 
   /** Open an exec execution for `sid` and wire its relay + down-handling. `env` is
    *  this session's project env, re-applied on every (re)spawn so a reconnected
@@ -211,6 +230,13 @@ export function createDispatcher(deps: DispatcherDeps): Dispatcher {
       return;
     }
 
+    if (type === MEMORY_WIRE_TYPE.GET_USAGE) {
+      emitMemoryReport();
+      const command = JSON.stringify({ type: MEMORY_WIRE_TYPE.GET_USAGE });
+      for (const entry of execs.values()) entry.proc.writeLine(command);
+      return;
+    }
+
     // Any other message is session-scoped → forward RAW to its exec proc.
     if (typeof sid !== 'string') {
       deps.log('warn', `inbound ${type} without sid — dropped`);
@@ -245,6 +271,7 @@ export function createDispatcher(deps: DispatcherDeps): Dispatcher {
   }
 
   function shutdown(): void {
+    if (initialMemoryTimer) clearTimeout(initialMemoryTimer);
     for (const entry of execs.values()) entry.proc.kill();
     execs.clear();
   }
@@ -308,6 +335,7 @@ export function runDispatcher(): void {
     // the sole freshness mechanism (no account-guard; see model-cache.ts).
     cache: createModelCache({ ttlMs: Number(process.env.SHELF_MODEL_CACHE_TTL_MS) || 1_800_000 }),
     onMainPing: resetWatchdog,
+    sampleMemory: () => sampleMemoryUsage({ kind: 'dispatcher' }),
   });
 
   const rl = readline.createInterface({ input: process.stdin, terminal: false });
