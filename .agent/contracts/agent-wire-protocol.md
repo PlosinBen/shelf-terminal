@@ -9,7 +9,7 @@ related:
 
 # Agent Wire Protocol
 
-The line-delimited JSON message stream from `agent-server` → main process: each message is one `OutgoingMessage` discriminated by `type`, optionally wrapped in a `WireEnvelope` (`turnId` / `startsTurn`) that routes per-turn events; a small set of session-level lanes are turnId-exempt. The authoritative definition is `OutgoingMessage` in `agent-server/providers/types.ts`; main parses each variant in `parseRemoteMessage` (`src/main/agent/remote.ts`) and dispatches to renderer IPC in `src/main/agent/index.ts`. This contract describes the envelope, the renderer-facing render primitives, and the turnId-exempt lanes.
+The line-delimited JSON message stream from `agent-server` → main process: each message is one `OutgoingMessage` discriminated by `type`, optionally wrapped in a `WireEnvelope` (`turnId`) that routes per-turn lifecycle events; a small set of session-level lanes are turnId-exempt. The authoritative definition is `OutgoingMessage` in `agent-server/providers/types.ts`; main parses each variant in `parseRemoteMessage` (`src/main/agent/remote.ts`) and dispatches to renderer IPC in `src/main/agent/index.ts`. This contract describes the envelope, the renderer-facing render primitives, and the turnId-exempt lanes.
 
 ## Envelope — `WireEnvelope`
 
@@ -18,8 +18,7 @@ Source: `WireEnvelope` in `agent-server/providers/types.ts`. Stamped onto every 
 | Field | Type | Notes |
 |-------|------|-------|
 | `turnId` | `string?` | Routing key. Main's `createTurnDispatcher` (`src/main/agent/turn-dispatcher.ts`) routes the message to the per-turn `AsyncGenerator` registered under this id. Lifecycle messages and session-level lanes omit it intentionally. A non-lifecycle message missing `turnId` is logged and dropped. |
-| `startsTurn` | `boolean?` | Only meaningful on `type: 'message'`. Marks the first message of a server-initiated (auto-resume) turn so the renderer's `buildTurns` opens a fresh turn block (these turns have no anchoring `user` message). See agent-config-flow#1, DECISIONS #69. |
-| `parentToolUseId` | `string?` | Only on `type: 'message'` (msgType `reply` \| `fold_*`). Set when the message was emitted BY A SUBAGENT (Task/Agent tool); value is the outer Agent tool_use's `msgId`. `buildTurns` nests the message under that card instead of the main list (absent = top-level / main agent). claude threads the SDK `parent_tool_use_id` (incl. the tool_result re-emit); a subagent is also dropped from the background-tasks panel. See background-tasks#7. |
+| `parentToolUseId` | `string?` | Only on `type: 'message'` (msgType `reply` \| `fold_*`). Set when the message was emitted BY A SUBAGENT (Task/Agent tool); value is the outer Agent tool_use's `msgId`. The renderer's linear timeline nests the message under an earlier matching card (absent/missing = fail-visible at top level). Claude threads the SDK `parent_tool_use_id` (incl. the tool_result re-emit); a subagent is also dropped from the background-tasks panel. See background-tasks#7. |
 
 Main mints `turnId` (`t-${randomUUID().slice(0,8)}`) at `query()` entry and registers the turn **before** the `send` reaches agent-server, so early events have a destination. Generator ends after the first `status` with `state:'idle'` (plus buffered tail events).
 
@@ -240,7 +239,7 @@ Inbound commands: `start_login` (`{ provider, cwd, sid }`) and `cancel_login` (`
 
 ### turn_started — `type: 'turn_started'`
 
-Server-initiated turn announcement carrying a provider-minted `turnId` (via the envelope). The dispatcher registers that turnId **synchronously** on receipt (permissionless handler) and hands the turn's generator to the `onServerTurn` sink — used when a backgrounded task finishes and the SDK auto-resumes to write a real reply that has no live foreground turn. The subsequent `message` carries `startsTurn:true`. See agent-config-flow#1, DECISIONS #69.
+Server-initiated turn announcement carrying a provider-minted `turnId` (via the envelope). The dispatcher registers that turnId **synchronously** on receipt (permissionless handler) and hands the turn's generator to the `onServerTurn` sink — used when a backgrounded task finishes and the SDK auto-resumes to write a real reply that has no live foreground turn. The subsequent content is an ordinary timeline message; execution turn boundaries never become renderer grouping metadata. See agent-config-flow#1, DECISIONS #69.
 
 | Field | Type |
 |-------|------|

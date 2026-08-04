@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { CLAUDE_PROVIDER } from '@shared/agent-providers';
 import { buildAgentMsg } from './agent-message-builder';
+import type { AgentMsg } from './components/AgentMessage';
 
 describe('buildAgentMsg', () => {
   it('maps reply wire payload to a reply bubble', () => {
@@ -26,6 +27,14 @@ describe('buildAgentMsg', () => {
   it('omits parentToolUseId for a top-level message', () => {
     const out = buildAgentMsg({ type: 'reply', msgId: 'm1', content: 'hi' }, CLAUDE_PROVIDER) as any;
     expect(out.parentToolUseId).toBeUndefined();
+  });
+
+  it('does not carry wire turn markers into renderer messages', () => {
+    const out = buildAgentMsg(
+      { type: 'reply', msgId: 'm1', content: 'auto-resume', startsTurn: true },
+      CLAUDE_PROVIDER,
+    ) as AgentMsg & { startsTurn?: boolean };
+    expect(out.startsTurn).toBeUndefined();
   });
 
   /**

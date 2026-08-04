@@ -24,14 +24,8 @@ export type AgentMsg = {
   provider?: string;
   timestamp: number;
   /**
-   * First message of a server-initiated turn (auto-resume prose after a
-   * background task). buildTurns opens a fresh turn block for it — these turns
-   * have no `user` message to anchor one. See background-tasks#2.
-   */
-  startsTurn?: boolean;
-  /**
    * Set when this message was emitted BY A SUBAGENT — value is the outer Agent
-   * tool_use's id. buildTurns nests it under that card instead of the main list.
+   * tool_use's id. The timeline nests it under that card instead of the main list.
    * Only reply + fold_* carry it. See subagent-display.
    */
   parentToolUseId?: string;

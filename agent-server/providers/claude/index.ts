@@ -367,7 +367,7 @@ export function createClaudeBackend(): ServerBackend {
   interface TurnFrame {
     kind: 'foreground' | 'server';
     /** Content + status sink. FG: idle-deduped `turnSend`. Server: base send
-     *  pre-stamped with `turnId` + `startsTurn` on its first message. */
+     *  pre-stamped with its lifecycle-routing `turnId`. */
     send: SendFn;
     blockMsgIds: BlockMsgIdState;
     /** FG: forward EVERY SDK message to processMessage (live stream deltas +
@@ -1007,11 +1007,8 @@ export function createClaudeBackend(): ServerBackend {
     // main forwards these ONLY when no foreground turn is in flight, so the
     // spinner reflects the agent actively writing. See background-tasks#6.
     base({ type: 'status', state: 'streaming', turnId });
-    let started = false;
     const send: SendFn = (m) => {
-      const tagged: any = { ...m, turnId };
-      if (!started && m.type === 'message') { tagged.startsTurn = true; started = true; }
-      base(tagged);
+      base({ ...m, turnId });
     };
     activeFrame = { kind: 'server', send, blockMsgIds: createBlockMsgIdState(), forwardAll: false };
   }

@@ -56,14 +56,6 @@ export interface WireEnvelope {
    * seam and nothing consumes it yet.
    */
   sid?: string;
-  /**
-   * Marks a `message` as the first of a new render turn so the renderer's
-   * buildTurns opens a fresh turn block for it. Needed for server-initiated
-   * (auto-resume) turns: they have no `user` message to anchor a new block, so
-   * without this the prose would glue onto the previous (possibly unrelated)
-   * turn. Only meaningful on `message` events. See background-tasks#2.
-   */
-  startsTurn?: boolean;
 }
 
 /** Top-level discriminator for canonical conversation messages in the timeline.

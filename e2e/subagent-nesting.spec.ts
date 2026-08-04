@@ -39,11 +39,11 @@ test.describe('subagent nesting via fake provider', () => {
     await openAgentTab(page);
     await sendAgentPrompt(page, 'subagent:deploy dashboard');
 
-    const response = page.locator('.agent-turn-response').first();
+    const timeline = page.locator('.agent-messages');
 
     // The outer Agent/Task card renders in the main list.
-    const outer = response
-      .locator('.agent-msg-fold', { has: page.locator('.fold-label', { hasText: 'Task' }) })
+    const outer = timeline
+      .locator(':scope > .agent-msg-fold', { has: page.locator('.fold-label', { hasText: 'Task' }) })
       .first();
     await expect(outer).toBeVisible({ timeout: 5_000 });
 
@@ -52,7 +52,7 @@ test.describe('subagent nesting via fake provider', () => {
 
     // The outer Task card is the ONLY top-level fold in the response — the inner
     // steps are not flat siblings in the main list.
-    await expect(response.locator(':scope > .agent-msg-fold')).toHaveCount(1);
+    await expect(timeline.locator(':scope > .agent-msg-fold')).toHaveCount(1);
 
     // Ensure the outer card is expanded (clicking the header toggles).
     const nested = outer.locator('.agent-subagent-nested');
@@ -71,9 +71,9 @@ test.describe('subagent nesting via fake provider', () => {
     await openAgentTab(page);
     await sendAgentPrompt(page, 'subagent:research');
 
-    const response = page.locator('.agent-turn-response').first();
-    const outer = response
-      .locator('.agent-msg-fold', { has: page.locator('.fold-label', { hasText: 'Task' }) })
+    const timeline = page.locator('.agent-messages');
+    const outer = timeline
+      .locator(':scope > .agent-msg-fold', { has: page.locator('.fold-label', { hasText: 'Task' }) })
       .first();
     await expect(outer).toBeVisible({ timeout: 5_000 });
 

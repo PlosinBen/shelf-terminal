@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AgentMessage } from '../AgentMessage';
 import { AgentDisplayContext } from './AgentDisplayContext';
-import { buildTurns, cancelPendingSend, useAgentTab } from '../../agentTabStore';
+import { buildMessageTimeline, cancelPendingSend, useAgentTab } from '../../agentTabStore';
 import { emitAgent } from '../../events';
 import { useStore } from '../../store';
 import { nextForceFollow } from './scroll-follow';
@@ -17,7 +17,7 @@ interface Props {
  * Subscribes to its own per-tab store slice (messages / isStreaming /
  * pendingSends / initStatus) so input keystrokes elsewhere don't re-render
  * the timeline (agent-ui#4), owns its scroll-position intent, and renders
- * the entire message area: init/empty/failed pane, the turn timeline, the
+ * the entire message area: init/empty/failed pane, the linear timeline, the
  * streaming spinner, queued-message chips, and the jump-to-bottom FAB.
  *
  * Display prefs flow to `AgentMessage` children via `AgentDisplayContext`
@@ -33,7 +33,7 @@ export function MessageList({ tabId, visible }: Props) {
   const initStatus = tab?.initStatus ?? 'starting';
   const agentDisplay = settings.agentDisplay ?? {};
 
-  const turns = useMemo(() => buildTurns(messages), [messages]);
+  const timeline = useMemo(() => buildMessageTimeline(messages), [messages]);
 
   const listRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -133,21 +133,9 @@ export function MessageList({ tabId, visible }: Props) {
           <div className="agent-empty">Send a message to start</div>
         )}
 
-        {turns.map((turn, ti) => {
-          const hasResponseContent = turn.agent.length > 0;
-          return (
-            <div key={turn.user?.id ?? `turn-${ti}`} className="agent-turn">
-              {turn.user && <AgentMessage message={turn.user} />}
-              {hasResponseContent && (
-                <div className="agent-turn-response">
-                  {turn.agent.map((msg) => (
-                    <AgentMessage key={msg.id} message={msg} nested={turn.children[msg.id]} />
-                  ))}
-                </div>
-              )}
-            </div>
-          );
-        })}
+        {timeline.topLevel.map((msg) => (
+          <AgentMessage key={msg.id} message={msg} nested={timeline.children[msg.id]} />
+        ))}
 
         {showSpinner && (
           <div className="agent-loading">

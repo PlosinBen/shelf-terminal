@@ -58,7 +58,7 @@ const FAKE_AUTH_DISPLAY_NAME = 'Fake Harness';
  *   plan:<markdown>     emit a plan / todo-list side-channel update (→ PlanPanel,
  *                       distinct from the background-tasks panel)
  *   serverturn:<msg>    server-initiated turn (auto-resume prose): turn_started
- *                       + reply (startsTurn) + idle, all on a fresh turnId
+ *                       + reply + idle, all on a fresh turnId
  *
  * Chain steps with `|`:
  *   text:hi|delay:50|tool:Read|text:bye
@@ -465,15 +465,14 @@ export function createFakeBackend(_representedProvider: AgentProvider = FAKE_PRO
 
     // serverturn:<msg> — a server-initiated turn (auto-resume prose after a
     // background task finishes). Opens a fresh turnId via turn_started, emits
-    // the prose tagged with it + startsTurn so the renderer renders it in its
-    // own turn block, then closes with that turn's idle. Same wire shapes a
-    // real provider emits. See background-tasks#2.
+    // the prose tagged with it, then closes with that turn's idle. The renderer
+    // still displays one linear timeline; turnId is lifecycle routing only.
     if (step.startsWith('serverturn:')) {
       const content = step.slice('serverturn:'.length);
       const turnId = mintId('t');
       send({ type: 'turn_started', turnId });
       send({ type: 'status', state: 'streaming', turnId });
-      send({ type: 'message', msgId: mintId('m'), msgType: 'reply', content, turnId, startsTurn: true });
+      send({ type: 'message', msgId: mintId('m'), msgType: 'reply', content, turnId });
       send({ type: 'status', state: 'idle', turnId });
       return;
     }

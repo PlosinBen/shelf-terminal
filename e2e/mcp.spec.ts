@@ -92,7 +92,7 @@ test('mcp: a config change surfaces a "reconnect to apply" line in the live agen
 
   // Make the session live (a no-op notice with no live session emits nothing).
   await sendAgentPrompt(page, 'text:hello');
-  await expect(page.locator('.agent-turn-response')).toContainText('hello', { timeout: 8_000 });
+  await expect(page.locator('.agent-messages')).toContainText('hello', { timeout: 8_000 });
 
   // Add an MCP server → onMcpChanged → subscriber emits the notice to this tab.
   await addMcpServerViaView(page, 'gamma');

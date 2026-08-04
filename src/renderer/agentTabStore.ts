@@ -924,51 +924,42 @@ export function setInitStatus(
 
 // ── Selectors ──
 
-export interface Turn {
-  user?: AgentMsg;
-  /** Top-level agent messages (main agent). Subagent-emitted messages are NOT
-   *  here — they live under `children`, keyed by their outer Agent card's id. */
-  agent: AgentMsg[];
+export interface MessageTimeline {
+  /** Messages rendered directly in the timeline, in store order. */
+  topLevel: AgentMsg[];
   /** Subagent activity, grouped by the outer Agent tool_use id it nests under.
    *  MessageList renders `children[card.id]` inside that card. See subagent-display. */
   children: Record<string, AgentMsg[]>;
 }
 
 /**
- * Turn grouping selector — pure derivation from messages. Not memoized here;
- * consumer (MessageList) wraps in useMemo.
+ * Linear timeline selector. Every message stays in store order unless it has
+ * an earlier, visible `parentToolUseId`, in which case it is rendered inside
+ * that tool card. Missing parents fall back to top-level so metadata can never
+ * hide content. Not memoized here; MessageList wraps it in useMemo.
  */
-export function buildTurns(messages: AgentMsg[]): Turn[] {
-  const result: Turn[] = [];
+export function buildMessageTimeline(messages: AgentMsg[]): MessageTimeline {
+  const topLevel: AgentMsg[] = [];
+  const children: Record<string, AgentMsg[]> = {};
+  const nestableParentIds = new Set<string>();
+
   for (const msg of messages) {
-    if (msg.type === 'user') {
-      result.push({ user: msg, agent: [], children: {} });
-      continue;
-    }
     // Subagent-emitted message → nest under its outer Agent card (parentToolUseId
-    // === that card's msgId) instead of the main list. Fall back to top-level if
-    // the parent isn't in the current turn (fail-visible: never drop the message).
+    // === that card's msgId) instead of the main list. An earlier parent is the
+    // only condition that changes placement; transport turn boundaries do not.
     const parentId = msg.parentToolUseId;
-    if (parentId) {
-      const turn = result[result.length - 1];
-      const parentSeen = turn && (turn.children[parentId] || turn.agent.some((m) => m.id === parentId));
-      if (parentSeen) {
-        (turn.children[parentId] ??= []).push(msg);
-        continue;
-      }
-      // parent not found — fall through to top-level placement below.
-    }
-    if (msg.startsTurn || result.length === 0) {
-      // `startsTurn`: first message of a server-initiated turn (auto-resume
-      // prose after a background task). It has no `user` message to anchor a
-      // block, so open one explicitly — otherwise it'd glue onto the previous
-      // (possibly unrelated) turn. See background-tasks#2.
-      result.push({ agent: [msg], children: {} });
+    if (parentId && nestableParentIds.has(parentId)) {
+      (children[parentId] ??= []).push(msg);
     } else {
-      result[result.length - 1].agent.push(msg);
+      // Parent not found — fail-visible at top-level rather than dropping data.
+      topLevel.push(msg);
+      // AgentMessage currently exposes nested content only for fold_code tool
+      // cards. Never place children under a row that cannot render them.
+      if (msg.type === 'fold_code') nestableParentIds.add(msg.id);
     }
   }
-  return result;
+
+  return { topLevel, children };
 }
 
 // ── Test helpers ──

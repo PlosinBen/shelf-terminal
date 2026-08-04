@@ -210,3 +210,15 @@ AuthPane 的手動 `checkAuth` 是不同 surface：busy / error 由 AuthPane 自
 **Do not change casually because**：不要把 store deletion 放回 AgentView effect cleanup，也不要在個別 close/disconnect handler 各自複製 cleanup。前者把 render lifecycle 誤當 domain lifecycle，後者會讓某些 tab-removal path 漏清或重複清理。
 
 **Related**：`projects#1`（mounted project/tab identity）、`src/renderer/tab-teardown.ts`。
+
+## agent-ui#9 — 訊息列是線性 timeline，不以 execution turn 分組  ·  [Decision]
+
+**Decision**：`MessageList` 直接依 per-tab store 的 message 順序渲染，不再把 user / agent 訊息衍生成 turn block，也不接收 start-of-turn presentation marker。`turnId` 只留在 main/backend 的 status、cancel、idle 與 permission lifecycle routing，不得影響 renderer 的訊息可見性、DOM 分組或間距。
+
+唯一保留的階層衍生是 subagent `parentToolUseId`：`buildMessageTimeline` 只把訊息收進前面已出現、實際能承載 nested UI 的 `fold_code` 工具卡；父卡不存在或不能承載 children 就 fail-visible 放回 top-level。這是工具內容的歸屬，不是對話 turn。
+
+**Reason**：conversation content 已是 session-scoped delivery，store 本身也是 ordered flat array。UI 再按 execution turn 重建區塊既重複建模，也讓延遲 finalize、server auto-resume 或邊界 attribution 影響顯示；訊息是否出現不應依賴控制層 metadata。
+
+**Do not change casually because**：不要為了視覺分段重新加入 `startsTurn`、用 `turnId` key DOM、或把「找不到 turn」當成不 render 的理由。若需要閱讀間距，只能根據訊息自身 presentation type 做 styling，不能恢復 execution lifecycle coupling。
+
+**Related**：`architecture/agent-turn`、`contracts/agent-wire-protocol`、`background-tasks#7`、`src/renderer/components/agent/MessageList.tsx`、`src/renderer/agentTabStore.ts`。

@@ -39,7 +39,7 @@ import {
   setInitStatus,
   setInMemoryMax,
   setSaveThrottleMs,
-  buildTurns,
+  buildMessageTimeline,
   __resetStoreForTests,
   __getCapsForTests,
   __getTabForTests,
@@ -534,50 +534,18 @@ describe('agentTabStore — settings constraints', () => {
   });
 });
 
-describe('agentTabStore — buildTurns selector', () => {
-  it('groups orphan agent msgs into a leading agent-only turn', () => {
+describe('agentTabStore — buildMessageTimeline selector', () => {
+  it('keeps top-level messages in store order without turn grouping', () => {
     const msgs: AgentMsg[] = [
       textMsg('m1', 'sys boot'),
       userMsg('u1', 'hi'),
       textMsg('m2', 'response'),
+      userMsg('u2', 'follow-up'),
+      textMsg('m3', 'second response'),
     ];
-    const turns = buildTurns(msgs);
-    expect(turns.length).toBe(2);
-    expect(turns[0].user).toBeUndefined();
-    expect(turns[0].agent.length).toBe(1);
-    expect(turns[1].user?.id).toBe('u1');
-    expect(turns[1].agent.length).toBe(1);
-  });
-
-  it('opens a new turn on every user message', () => {
-    const msgs: AgentMsg[] = [
-      userMsg('u1', 'A'),
-      textMsg('m1', 'a-reply'),
-      userMsg('u2', 'B'),
-      textMsg('m2', 'b-reply'),
-    ];
-    const turns = buildTurns(msgs);
-    expect(turns.length).toBe(2);
-    expect(turns[0].user?.id).toBe('u1');
-    expect(turns[1].user?.id).toBe('u2');
-  });
-
-  it('opens a new turn on a startsTurn message (server-initiated auto-resume prose)', () => {
-    // Background-task auto-resume prose has no `user` message; the startsTurn
-    // flag must open its own block instead of gluing onto the prior turn.
-    // See background-tasks#2.
-    const serverReply: AgentMsg = { ...textMsg('m2', 'sleep done'), startsTurn: true };
-    const msgs: AgentMsg[] = [
-      userMsg('u1', 'run sleep in background'),
-      textMsg('m1', 'ok, backgrounding it'),
-      serverReply,
-    ];
-    const turns = buildTurns(msgs);
-    expect(turns.length).toBe(2);
-    expect(turns[0].user?.id).toBe('u1');
-    expect(turns[0].agent.map((m) => m.id)).toEqual(['m1']); // prose did NOT glue here
-    expect(turns[1].user).toBeUndefined();
-    expect(turns[1].agent.map((m) => m.id)).toEqual(['m2']);
+    const timeline = buildMessageTimeline(msgs);
+    expect(timeline.topLevel.map((m) => m.id)).toEqual(['m1', 'u1', 'm2', 'u2', 'm3']);
+    expect(timeline.children).toEqual({});
   });
 
   it('nests subagent messages under their outer Agent card (parentToolUseId), not the main list', () => {
@@ -591,19 +559,34 @@ describe('agentTabStore — buildTurns selector', () => {
       innerReply,
       textMsg('m-after', 'main agent resumes'),
     ];
-    const turns = buildTurns(msgs);
-    expect(turns.length).toBe(1);
-    // Main list holds the outer card + the main-agent reply, NOT the inner steps.
-    expect(turns[0].agent.map((m) => m.id)).toEqual(['outer-1', 'm-after']);
+    const timeline = buildMessageTimeline(msgs);
+    // Main list holds the user, outer card, and main-agent reply, NOT the inner steps.
+    expect(timeline.topLevel.map((m) => m.id)).toEqual(['u1', 'outer-1', 'm-after']);
     // Inner steps nested under the outer card's id, in order.
-    expect(turns[0].children['outer-1']?.map((m) => m.id)).toEqual(['inner-1', 'inner-2']);
+    expect(timeline.children['outer-1']?.map((m) => m.id)).toEqual(['inner-1', 'inner-2']);
   });
 
-  it('falls back to top-level when a parentToolUseId has no matching card in the turn (never drops)', () => {
+  it('nests under an earlier parent even when a user message appears between them', () => {
+    const outer: AgentMsg = { id: 'outer-1', type: 'fold_code', label: 'Task', timestamp: 1000 };
+    const child: AgentMsg = { ...textMsg('inner-1', 'late subagent step'), parentToolUseId: 'outer-1' };
+    const timeline = buildMessageTimeline([outer, userMsg('u1', 'follow-up'), child]);
+    expect(timeline.topLevel.map((m) => m.id)).toEqual(['outer-1', 'u1']);
+    expect(timeline.children['outer-1']?.map((m) => m.id)).toEqual(['inner-1']);
+  });
+
+  it('falls back to top-level when a parentToolUseId has no earlier matching card (never drops)', () => {
     const orphan: AgentMsg = { ...textMsg('orphan-1', 'stray subagent msg'), parentToolUseId: 'missing-parent' };
-    const turns = buildTurns([userMsg('u1', 'hi'), orphan]);
-    expect(turns[0].agent.map((m) => m.id)).toEqual(['orphan-1']);
-    expect(turns[0].children['missing-parent']).toBeUndefined();
+    const timeline = buildMessageTimeline([userMsg('u1', 'hi'), orphan]);
+    expect(timeline.topLevel.map((m) => m.id)).toEqual(['u1', 'orphan-1']);
+    expect(timeline.children['missing-parent']).toBeUndefined();
+  });
+
+  it('falls back to top-level when the referenced row cannot render nested content', () => {
+    const parent = textMsg('reply-parent', 'plain reply');
+    const child: AgentMsg = { ...textMsg('child-1', 'must remain visible'), parentToolUseId: 'reply-parent' };
+    const timeline = buildMessageTimeline([parent, child]);
+    expect(timeline.topLevel.map((m) => m.id)).toEqual(['reply-parent', 'child-1']);
+    expect(timeline.children['reply-parent']).toBeUndefined();
   });
 });
 

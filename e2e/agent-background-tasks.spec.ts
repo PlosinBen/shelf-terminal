@@ -48,24 +48,20 @@ test.describe('background tasks panel via fake provider', () => {
     await expect(item.locator('.agent-task-label')).toContainText('bg t1');
   });
 
-  test('auto-resume prose renders as its own (user-less) turn block', async ({ shelfApp: { page } }) => {
+  test('auto-resume prose stays visible in the linear message timeline', async ({ shelfApp: { page } }) => {
     await setupProject(page);
     await openAgentTab(page);
 
     // serverturn: drives the M3 server-initiated turn end-to-end (wire
-    // turn_started → dispatcher registers → main forwarder → renderer
-    // buildTurns opens a fresh block). See background-tasks#2.
+    // turn_started → dispatcher registers → main forwarder → renderer.
+    // The transport turn must not create or gate a renderer display block.
     await sendAgentPrompt(page, 'serverturn:the sleep finished');
 
-    // The prose appears...
-    await expect(page.locator('.agent-turn-response')).toContainText('the sleep finished', { timeout: 5_000 });
-
-    // ...in an agent-only turn block (no user bubble) — i.e. it did NOT glue
-    // onto the prompt's turn. The server turn is the LAST .agent-turn and it
-    // contains the prose but no user message.
-    const serverBlock = page.locator('.agent-turn').last();
-    await expect(serverBlock).toContainText('the sleep finished');
-    await expect(serverBlock.locator('.agent-msg-user')).toHaveCount(0);
+    const timelineMessages = page.locator('.agent-messages > .agent-msg');
+    await expect(timelineMessages).toHaveCount(2, { timeout: 5_000 });
+    await expect(timelineMessages.nth(0)).toContainText('serverturn:the sleep finished');
+    await expect(timelineMessages.nth(1)).toContainText('the sleep finished');
+    await expect(page.locator('.agent-turn')).toHaveCount(0);
   });
 
   test('completed task: read output + dismiss', async ({ shelfApp: { page } }) => {
@@ -202,7 +198,7 @@ test.describe('plan/todo vs background tasks — distinct surfaces', () => {
     // The plan is a side-channel panel, NOT an agent timeline message — the only
     // place the marker appears in the timeline is the user's own prompt echo, so
     // there is no agent reply / fold card carrying it.
-    await expect(page.locator('.agent-messages .agent-turn-response').getByText('PLAN_MARKER_ONE')).toHaveCount(0);
+    await expect(page.locator('.agent-messages > .agent-msg:not(.agent-msg-user)').getByText('PLAN_MARKER_ONE')).toHaveCount(0);
   });
 
   test('plan-panel and background-tasks-panel render side by side as separate panels', async ({ shelfApp: { page } }) => {

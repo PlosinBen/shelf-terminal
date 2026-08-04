@@ -1262,9 +1262,6 @@ export function parseRemoteMessage(msg: any): AgentEvent | null {
     // shape; unknown msgType returns null (caller drops the message).
     const payload = buildAgentMessagePayload(msg);
     if (!payload) return null;
-    // Server-initiated turn marker (auto-resume prose) — pass through so the
-    // renderer opens a new turn block for it. See background-tasks#2.
-    if (msg.startsTurn) payload.startsTurn = true;
     return { type: 'message', payload };
   }
 

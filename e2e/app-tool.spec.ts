@@ -39,7 +39,7 @@ test.describe('app-tool bridge via fake provider', () => {
     // The reply carries the bridge result. The handler reached skills-store and
     // returned ok:true (empty list under the isolated test userData) — proving
     // the whole server→main→skills-store→back chain, not a stub.
-    const reply = page.locator('.agent-turn-response');
+    const reply = page.locator('.agent-messages');
     await expect(reply).toContainText('apptool app_skill.list', { timeout: 8_000 });
     await expect(reply).toContainText('"ok":true');
     await expect(reply).toContainText('"skills":');
@@ -51,7 +51,7 @@ test.describe('app-tool bridge via fake provider', () => {
 
     await sendAgentPrompt(page, 'apptool:app_skill.frobnicate');
 
-    const reply = page.locator('.agent-turn-response');
+    const reply = page.locator('.agent-messages');
     await expect(reply).toContainText('"ok":false', { timeout: 8_000 });
     await expect(reply).toContainText('unknown app_tool op');
   });
@@ -71,7 +71,7 @@ test.describe('skill reload feedback via fake provider', () => {
     // Run a turn so the session is "live" (the fake captures its send) — a no-op
     // reload (no live session) would emit nothing.
     await sendAgentPrompt(page, 'text:hello');
-    await expect(page.locator('.agent-turn-response')).toContainText('hello', { timeout: 8_000 });
+    await expect(page.locator('.agent-messages')).toContainText('hello', { timeout: 8_000 });
 
     // Change a skill via the Skills panel → onSkillsChanged → reload_skills →
     // fake.reloadSkills(reloaded:true) → skills_reloaded → a system line here.
@@ -89,7 +89,7 @@ test.describe('skill reload feedback via fake provider', () => {
 
     // Run a turn that arms the next reload to fail (also makes the session live).
     await sendAgentPrompt(page, 'reloadfail');
-    await expect(page.locator('.agent-turn-response')).toContainText('reload armed to fail', { timeout: 8_000 });
+    await expect(page.locator('.agent-messages')).toContainText('reload armed to fail', { timeout: 8_000 });
 
     await page.locator('.right-tab-btn', { hasText: 'Skills' }).click();
     await page.locator('.skills-view .notes-new-btn').click();
@@ -126,7 +126,7 @@ test.describe('skill reload feedback via fake provider', () => {
 
     // Make the session live, THEN disable → onSkillsChanged → reload → one line.
     await sendAgentPrompt(page, 'text:hello');
-    await expect(page.locator('.agent-turn-response')).toContainText('hello', { timeout: 8_000 });
+    await expect(page.locator('.agent-messages')).toContainText('hello', { timeout: 8_000 });
     await page.locator('.skills-enable-toggle').click();
 
     await expect(page.locator('.skills-list-item.disabled')).toBeVisible();
@@ -144,7 +144,7 @@ test.describe('skill reload feedback via fake provider', () => {
     await expect(page.locator('.skills-list-name')).toHaveText('my-skill');
 
     await sendAgentPrompt(page, 'text:hello');
-    await expect(page.locator('.agent-turn-response')).toContainText('hello', { timeout: 8_000 });
+    await expect(page.locator('.agent-messages')).toContainText('hello', { timeout: 8_000 });
     await page.locator('.skills-lock-toggle').click();
 
     // Lock is main-only enforcement — badge repaint, no re-project/re-sync/reload.

@@ -67,13 +67,6 @@ type WithMsgId = {
   msgId: string;
   streaming?: boolean;
   /**
-   * First message of a server-initiated turn (auto-resume prose after a
-   * background task). Tells the renderer's buildTurns to open a fresh turn
-   * block — these turns have no `user` message to anchor one. See
-   * background-tasks#2.
-   */
-  startsTurn?: boolean;
-  /**
    * Set when this message was emitted BY A SUBAGENT (Task/Agent tool). Its value
    * is the outer Agent tool_use's msgId. The renderer nests the message UNDER
    * that card instead of showing it flat in the main list. Absent = top-level

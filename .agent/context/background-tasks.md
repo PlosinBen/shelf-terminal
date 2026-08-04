@@ -153,9 +153,9 @@ Seed 時機：`gatherCapabilities` 結尾（tab 開啟時必跑）+ `query()` �
 
 ## background-tasks#6 — Auto-resume turn 走與 foreground 相同的內容路徑；busy/idle 用單一 active-cycle counter  ·  [Decision]
 
-背景任務 settle 後，SDK auto-resume 讓 agent 自動續寫(一個 server turn：`init`→ 內容 →`result`，`turn_started` 開場、`startsTurn` 標第一則訊息讓 renderer 開新視覺區塊)。這個 server turn 的處理有兩個現況重點：
+背景任務 settle 後，SDK auto-resume 讓 agent 自動續寫(一個 server turn：`init`→ 內容 →`result`，`turn_started` 開場；renderer 仍只收到一般內容訊息，不建立 turn 視覺區塊)。這個 server turn 的處理有兩個現況重點：
 
-**① 內容走**單一** `routeContent`(吃一個 `TurnFrame`)。** foreground 與 auto-resume(server) turn 用**同一條**內容路徑;兩者差異全是 `TurnFrame` 上的**資料**、不是分岔的 code:`forwardAll`(foreground 轉每則 SDK 訊息含 live stream delta + result 的 cost;server 只轉 `assistant`/`user` + block 邊界 stream event `message_start`/`content_block_start`,**不**轉 `content_block_delta`,維持整段回覆、不逐字串流) + 一個 `kind==='foreground'` guard 包住 compact/auth/model-alias hook。tool_result 搭在 `user` 訊息上,所以 server 也吃 `user` 才收得到。turn 開場由 `openForegroundFrame`/`openServerFrame` 建對應的 frame(server 額外 mint turnId + 發 `turn_started`/`startsTurn`),收尾一律走 `closeFrame`。
+**① 內容走**單一** `routeContent`(吃一個 `TurnFrame`)。** foreground 與 auto-resume(server) turn 用**同一條**內容路徑;兩者差異全是 `TurnFrame` 上的**資料**、不是分岔的 code:`forwardAll`(foreground 轉每則 SDK 訊息含 live stream delta + result 的 cost;server 只轉 `assistant`/`user` + block 邊界 stream event `message_start`/`content_block_start`,**不**轉 `content_block_delta`,維持整段回覆、不逐字串流) + 一個 `kind==='foreground'` guard 包住 compact/auth/model-alias hook。tool_result 搭在 `user` 訊息上,所以 server 也吃 `user` 才收得到。turn 開場由 `openForegroundFrame`/`openServerFrame` 建對應的 frame(server 額外 mint turnId + 發 `turn_started`),收尾一律走 `closeFrame`。
 - **為什麼是一條路徑(別再拆兩條)**:早期 foreground / server 各有一條近似複製的 `route*`,server 那條**只處理 `assistant`、漏了 `user`** → auto-resume turn 裡每個 tool_result 被整批丟掉(tool 卡開了永遠沒 body、且不觸發 orphan 警告,因 `emitClaudeToolResult` 根本沒被呼叫);又因 skip `stream_event` → block index 不前進 → 同 turn 的 reply/thinking msgId 全撞在一起互相覆蓋。合成單一 `routeContent` 後,新增內容處理只會加在一處,不可能再發生「一條 lane 漏一整類訊息」。**這是那個 bug 的根 —— 不要再把內容路徑按 turn 種類拆開。**
 
 **② busy/idle 是一個 active-cycle **counter**(不是 per-turn 各自算)。** `init` 開 cycle(counter++)、`closeFrame` 排空(`counter = max(0, counter−1)`)、**counter 歸 0 才發 `idle`**;ESC/teardown 強制歸 0。
@@ -194,7 +194,7 @@ Seed 時機：`gatherCapabilities` 結尾（tab 開啟時必跑）+ `query()` �
 
 **Mechanism（wire + renderer 純衍生）**：
 - wire 新增 optional `parentToolUseId`（見 `agent-wire-protocol`），只有 subagent 會發的 msgType 帶（reply + fold_*）。claude 從 SDK `parent_tool_use_id` 貫穿 `processMessage`（reply/thinking/tool_use）+ tool_result 重發（存進 inflight entry 再套回，pending→completed upsert 不掉巢狀）。
-- renderer：store 的 flat message array **不變**（upsert-by-id 照舊）。巢狀是 `buildTurns` 的**純衍生** —— 帶 `parentToolUseId` 的訊息 group 到 id 相符的外層卡底下（`turn.children[cardId]`），找不到父卡則 fail-visible 落回 top-level（絕不丟）。`MessageList` 把 children 傳給 `AgentMessage`，在 `fold_code` 展開區內渲染（縮排 rail）。
+- renderer：store 的 flat message array **不變**（upsert-by-id 照舊）。巢狀是 `buildMessageTimeline` 的**純衍生** —— 帶 `parentToolUseId` 的訊息只在前面已出現 id 相符、能承載 nested UI 的 `fold_code` 外層卡時收進 `children[cardId]`；找不到父卡或父列不能 render children 則 fail-visible 落回 top-level（絕不丟）。對話本身不再依 user/server turn 分組。`MessageList` 把 children 傳給 `AgentMessage`，在 `fold_code` 展開區內渲染（縮排 rail）。
 
 **Do not change casually because**：
 - 面板的判別前提：subagent(`local_agent`/`subagent`) 與前景 Bash 一樣**在 `task_started` 就分類**，之後同 id 事件全 drop —— 不要改成事後才濾。
@@ -202,6 +202,6 @@ Seed 時機：`gatherCapabilities` 結尾（tab 開啟時必跑）+ `query()` �
 - 巢狀只做 renderer 衍生，不要把 flat array 改成樹（persistence/upsert 會複雜化）。
 - 不要把 subagent 當 background task 塞回面板 —— 面板語意 = fire-and-forget。
 
-**驗證**：`isSubagentTaskStart` + `processMessage` 帶 `parentToolUseId`（`claude.test.ts`）、`normalizeCopilotTask` agent 濾除（`copilot.test.ts`）、`buildTurns` 巢狀 + orphan 落回（`agentTabStore.test.ts`）、builder 貫穿（`agent-message-builder.test.ts`）、E2E subagent 巢狀 + 面板不出卡 + 收合隱藏（`subagent-nesting.spec.ts`，fake `subagent:<label>` scenario 不發 task_event）。
+**驗證**：`isSubagentTaskStart` + `processMessage` 帶 `parentToolUseId`（`claude.test.ts`）、`normalizeCopilotTask` agent 濾除（`copilot.test.ts`）、`buildMessageTimeline` 巢狀 + orphan 落回（`agentTabStore.test.ts`）、builder 貫穿（`agent-message-builder.test.ts`）、E2E subagent 巢狀 + 面板不出卡 + 收合隱藏（`subagent-nesting.spec.ts`，fake `subagent:<label>` scenario 不發 task_event）。
 
 **Related**：`background-tasks#2`（task_event lane / 面板來源）、`background-tasks#5`（前景 Bash 濾除同型模式）、`agent-ui#5`（渲染原語）、`agent-wire-protocol`（`parentToolUseId`）、`agent-server/providers/claude/{index,helpers}.ts`、`agent-server/providers/copilot/index.ts`、`agent-server/providers/fake/index.ts`（`subagent:` scenario）、`src/renderer/{agentTabStore,agent-message-builder}.ts`、`src/renderer/components/{AgentMessage,agent/MessageList}.tsx`。

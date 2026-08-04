@@ -229,12 +229,12 @@ describe('claude detached-loop background tasks', () => {
       && (m as any).turnId === started.turnId);
     expect(serverStreaming).toBeTruthy();
 
-    // The prose is re-emitted as a normal reply tagged with that turnId and
-    // flagged startsTurn so the renderer opens a new turn block for it.
+    // The prose is re-emitted as a normal reply tagged with that turnId. There
+    // is no renderer-facing turn marker: the UI is a linear message timeline.
     const reply = sent.find((m) => m.type === 'message' && (m as any).msgType === 'reply'
       && (m as any).turnId === started.turnId) as any;
     expect(reply?.content).toContain('sleep finished');
-    expect(reply?.startsTurn).toBe(true);
+    expect(reply?.startsTurn).toBeUndefined();
 
     // The server turn is closed with its OWN idle (carries the server turnId),
     // separate from the single foreground idle (which has no turnId here).
