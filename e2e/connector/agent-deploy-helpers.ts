@@ -21,7 +21,7 @@ export function makeShelfAppFixture(container: string, opts: { testMode?: boolea
   // claude provider runs its ensureInit probe against the (unauthenticated)
   // deployed binary, which is the only way to exercise AuthPane end to end.
   const testMode = opts.testMode ?? true;
-  return base.extend<{}, { shelfApp: { app: ElectronApplication; page: Page } }>({
+  return base.extend<{}, { shelfApp: { app: ElectronApplication; page: Page; userDataDir: string } }>({
     shelfApp: [async ({}, use) => {
       const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'shelf-agentdeploy-'));
       const runtimeCacheDir = path.join(os.tmpdir(), 'shelf-rt-cache-e2e');
@@ -55,7 +55,7 @@ export function makeShelfAppFixture(container: string, opts: { testMode?: boolea
         throw err;
       }
 
-      await use({ app, page });
+      await use({ app, page, userDataDir });
       await app.close().catch(() => {});
       fs.rmSync(userDataDir, { recursive: true, force: true });
     }, { scope: 'worker' }],
