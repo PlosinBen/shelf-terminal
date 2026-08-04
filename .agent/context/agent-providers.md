@@ -450,3 +450,13 @@ Renderer 在 dev/E2E 傳入是否顯示 internal provider 的環境政策，再�
 **Fix / note：** prompt Promise settle 後，先跨一次 `setImmediate` dispatch barrier，再將本 turn queue 標成 done 並 wake reader。這只等待已經在途的 SDK handler，不使用固定毫秒 grace period：固定 delay 會讓每個 ACP turn 平白變慢，且可能把真正的 out-of-turn update 誤歸到已完成 turn。不要移除 barrier 或改回 prompt resolve 當下立即關 queue；若 ACP v2 改成明確 `state_update: idle` boundary，再以該協定訊號取代 compatibility barrier。
 
 **Related：** `agent-server/providers/acp/client.ts`、`agent-server/providers/acp/client.test.ts`、`agent-providers#24`（Copilot `task_complete` 最終總結）。
+
+## agent-providers#38 — Codex persisted thread 找不到 rollout 時清 pointer 並明確開新 thread  ·  [Gotcha]
+
+**Symptom：** Codex 每次發送都回 `thread/resume failed`、JSON-RPC `-32600`、`no rollout found for thread id ...`；重送只會重複同一錯誤。
+
+**Root cause：** Shelf 的 `lastSdkSessionId` context pointer 可存活 30 天，但 app-scoped Codex home 裡的 rollout 可能因手動清理、config-home 搬移或 upstream retention 提前不存在。Codex provider 原本每一 turn 都無條件拿 persisted id 呼叫 `thread/resume`；明確 missing-rollout 後既不清 pointer、也不 `thread/start`，因此 stale id 永久卡住該 Shelf session。
+
+**Fix / note：** 只有 app-server 明確回報 `thread/resume` + code `-32600` + 該 thread id 的 `no rollout found` 時才恢復：先 emit `lastSdkSessionId:null`（即使後續 start 失敗也不再重試 stale id），再 `thread/start`，成功後顯示一次 system notice 並保存新 id，原 prompt 照常進 `turn/start`。其他 resume 錯誤（auth、transport、timeout、response mismatch）一律維持 fail-loud，不得用 broad catch 靜默開新 thread；否則會把可修復的連線問題偽裝成對話 context 遺失。
+
+**Related：** `agent-providers#33`、`agent-server/providers/codex/index.ts`、`agent-server/context-store.ts`。

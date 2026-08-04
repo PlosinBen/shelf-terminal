@@ -178,6 +178,53 @@ describe('Codex official app-server backend lifecycle', () => {
     expect(mismatchOut[0]).toMatchObject({ type: 'error', error: expect.stringMatching(/resume thread mismatch/) });
   });
 
+  it('starts a new thread when the persisted Codex rollout no longer exists', async () => {
+    const app = new FakeAppServer({
+      'thread/resume': () => {
+        throw new Error('codex app-server thread/resume failed: {"code":-32600,"message":"no rollout found for thread id thread-missing"}');
+      },
+    });
+    const backend = createCodexBackend({ createAppServer: () => app });
+    const out: OutgoingMessage[] = [];
+
+    await backend.query(
+      { prompt: 'recover', cwd: '/repo', restoreContext: restoreContext('thread-missing') },
+      (m) => out.push(m),
+    );
+
+    expect(app.calls.map((call) => call.method)).toEqual(['initialize', 'thread/resume', 'thread/start', 'turn/start']);
+    expect(out).toContainEqual({ type: 'context_patch', patch: { lastSdkSessionId: null } });
+    expect(out).toContainEqual({ type: 'context_patch', patch: { lastSdkSessionId: 'thread-1' } });
+    expect(out).toContainEqual(expect.objectContaining({
+      type: 'message',
+      msgType: 'system',
+      content: 'Previous Codex thread was unavailable; started a new thread.',
+    }));
+    expect(out.find((m) => m.type === 'error')).toBeUndefined();
+  });
+
+  it('does not hide unrelated thread/resume failures behind a new thread', async () => {
+    const app = new FakeAppServer({
+      'thread/resume': () => {
+        throw new Error('codex app-server thread/resume failed: authentication expired');
+      },
+    });
+    const backend = createCodexBackend({ createAppServer: () => app });
+    const out: OutgoingMessage[] = [];
+
+    await backend.query(
+      { prompt: 'again', cwd: '/repo', restoreContext: restoreContext('thread-existing') },
+      (m) => out.push(m),
+    );
+
+    expect(app.calls.map((call) => call.method)).toEqual(['initialize', 'thread/resume']);
+    expect(out.find((m) => m.type === 'context_patch')).toBeUndefined();
+    expect(out).toContainEqual(expect.objectContaining({
+      type: 'error',
+      error: expect.stringContaining('authentication expired'),
+    }));
+  });
+
   it('sends image-only turns as app-server localImage input', async () => {
     const app = new FakeAppServer();
     const backend = createCodexBackend({ createAppServer: () => app });

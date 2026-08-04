@@ -51,6 +51,7 @@ const CODEX_SDK_SLASH_COMMANDS = [
 
 const CODEX_APP_SERVER_SLASH_COMMAND_NAMES = new Set<string>(CODEX_SDK_SLASH_COMMANDS.map((command) => command.name));
 const UNSUPPORTED_APP_SERVER_SLASH_COMMANDS = new Set(['ps', 'stop', 'clean']);
+const CODEX_STALE_THREAD_NOTICE = 'Previous Codex thread was unavailable; started a new thread.';
 
 export interface CodexBackendDeps {
   spawnLoginRpc?: (env: NodeJS.ProcessEnv) => { rpc: LoginRpc };
@@ -676,19 +677,46 @@ export function createCodexBackend(deps: CodexBackendDeps = {}): ServerBackend {
           ...threadOverrides(input),
           config: Object.keys(mapped.codexOptions.config).length ? mapped.codexOptions.config : undefined,
         };
-        const response = resumeId
-          ? await client.request('thread/resume', { threadId: resumeId, ...params })
-          : await client.request('thread/start', { ...params, sessionStartSource: 'startup' });
+        let response: unknown;
+        let resumed = false;
+        let recoveredMissingRollout = false;
+        if (resumeId) {
+          try {
+            response = await client.request('thread/resume', { threadId: resumeId, ...params });
+            resumed = true;
+          } catch (err) {
+            if (!isMissingCodexRolloutError(err, resumeId)) throw err;
+            // A persisted pointer can outlive its rollout (manual cleanup,
+            // config-home migration, or upstream retention). Clear it before
+            // starting so a failed thread/start cannot wedge every later send
+            // on the same stale resume. Context loss is visible, not silent.
+            activeThreadId = null;
+            serverLog('warn', 'codex-app-server', 'persisted thread rollout unavailable; starting a new thread', { threadId: resumeId });
+            send({ type: 'context_patch', patch: { lastSdkSessionId: null } });
+            recoveredMissingRollout = true;
+            response = await client.request('thread/start', { ...params, sessionStartSource: 'startup' });
+          }
+        } else {
+          response = await client.request('thread/start', { ...params, sessionStartSource: 'startup' });
+        }
         const threadId = stringValue(asRecord(asRecord(response)?.thread)?.id);
         if (!threadId) throw new Error('app-server did not return a thread id');
-        if (resumeId && threadId !== resumeId) {
+        if (resumed && threadId !== resumeId) {
           throw new Error(`resume thread mismatch (requested ${resumeId}, got ${threadId})`);
         }
+        if (recoveredMissingRollout) sendSlashMessage(send, 'system', CODEX_STALE_THREAD_NOTICE);
         activeThreadId = threadId;
         send({ type: 'context_patch', patch: { lastSdkSessionId: threadId } });
         send({ type: 'status', state: 'streaming', sessionId: threadId });
         return threadId;
-    }
+  }
+
+  function isMissingCodexRolloutError(err: unknown, threadId: string): boolean {
+    const message = (err as Error)?.message ?? String(err);
+    return message.includes('codex app-server thread/resume failed:')
+      && message.includes('"code":-32600')
+      && message.includes(`"message":"no rollout found for thread id ${threadId}"`);
+  }
 
   function waitForTurnCompletion(start: () => Promise<void>): Promise<void> {
     return new Promise((resolve, reject) => {
