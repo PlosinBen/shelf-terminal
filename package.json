@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "test": "npm run typecheck && npm run test:unit && npm run test:e2e && npm run test:docker && npm run test:ssh",
     "test:unit": "vitest run",
+    "test:memory-host": "vitest run src/shared/process-memory-sampler.integration.test.ts",
     "test:e2e": "env -u ELECTRON_RUN_AS_NODE NODE_ENV=test npm run build && env -u ELECTRON_RUN_AS_NODE NODE_ENV=test npx playwright test --project=e2e",
     "test:docker": "docker run -d --name shelf-test-container -p 2222:2222 -e USER_NAME=testuser -e USER_PASSWORD=testpass -e PASSWORD_ACCESS=true linuxserver/openssh-server && NODE_ENV=test npm run build && NODE_ENV=test npx playwright test --project=docker; docker rm -f shelf-test-container",
     "test:ssh": "docker run -d --name shelf-test-container -p 2222:2222 -e USER_NAME=testuser -e USER_PASSWORD=testpass -e PASSWORD_ACCESS=true linuxserver/openssh-server && NODE_ENV=test npm run build && NODE_ENV=test npx playwright test --project=ssh; docker rm -f shelf-test-container",
