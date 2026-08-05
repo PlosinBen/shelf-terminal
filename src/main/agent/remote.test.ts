@@ -32,8 +32,9 @@ vi.mock('child_process', () => ({
 }));
 
 // Mock logger
+const logError = vi.hoisted(() => vi.fn());
 vi.mock('@shared/logger', () => ({
-  log: { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn(), trace: vi.fn(), flushTrace: vi.fn() },
+  log: { info: vi.fn(), error: logError, warn: vi.fn(), debug: vi.fn(), trace: vi.fn(), flushTrace: vi.fn() },
 }));
 
 // Mock shell-env so spawnLocalNode's env is deterministic (no real login-shell
@@ -296,6 +297,25 @@ describe('direct exec memory routing', () => {
     expect(onMemoryUsage).toHaveBeenCalledTimes(1);
   });
 
+  it('logs an error instead of silently dropping a report without a sink', async () => {
+    logError.mockClear();
+    const { child } = capabilitiesChild({});
+    const { wrapProcess } = await import('./remote');
+    const remote = wrapProcess(child);
+    child.stdout.emit('data', Buffer.from(`${JSON.stringify({
+      type: MEMORY_WIRE_TYPE.USAGE,
+      status: MEMORY_REPORT_STATUS.OK,
+      sampledAt: '2026-08-05T00:00:00.000Z',
+      rows: [{ pid: 10, ppid: 1, memoryKiB: 100, role: MEMORY_PROCESS_ROLE.EXEC }],
+    })}\n`));
+
+    expect(logError).toHaveBeenCalledWith(
+      'agent-remote',
+      'direct memory report has no registered sink — dropped',
+    );
+    remote.kill();
+  });
+
   it('fans one main round request to every live direct exec', async () => {
     const first = capabilitiesChild({});
     const second = capabilitiesChild({});
@@ -307,6 +327,29 @@ describe('direct exec memory routing', () => {
 
     expect(first.writes).toContainEqual({ type: MEMORY_WIRE_TYPE.GET_USAGE });
     expect(second.writes).toContainEqual({ type: MEMORY_WIRE_TYPE.GET_USAGE });
+    firstRemote.kill();
+    secondRemote.kill();
+  });
+
+  it('continues the round after one direct request write fails', async () => {
+    logError.mockClear();
+    const first = capabilitiesChild({});
+    const second = capabilitiesChild({});
+    first.child.stdin.write.mockImplementation((line: string) => {
+      const message = JSON.parse(line);
+      if (message.type === MEMORY_WIRE_TYPE.GET_USAGE) throw new Error('closed pipe');
+      return true;
+    });
+    const { requestAllAgentMemoryUsage, wrapProcess } = await import('./remote');
+    const firstRemote = wrapProcess(first.child);
+    const secondRemote = wrapProcess(second.child);
+
+    expect(() => requestAllAgentMemoryUsage()).not.toThrow();
+    expect(second.writes).toContainEqual({ type: MEMORY_WIRE_TYPE.GET_USAGE });
+    expect(logError).toHaveBeenCalledWith(
+      'agent-remote',
+      expect.stringContaining('memory request failed for direct exec: closed pipe'),
+    );
     firstRemote.kill();
     secondRemote.kill();
   });

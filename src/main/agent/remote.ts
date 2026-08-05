@@ -82,8 +82,20 @@ const directProcesses = new Set<RemoteProcess>();
 
 /** Main-owned round trigger: one command per live dispatcher/direct exec route. */
 export function requestAllAgentMemoryUsage(): void {
-  for (const entry of dispatchers.values()) entry.conn.requestMemoryUsage();
-  for (const proc of directProcesses) proc.sendLine({ type: MEMORY_WIRE_TYPE.GET_USAGE });
+  for (const [scopeKey, entry] of dispatchers) {
+    try {
+      entry.conn.requestMemoryUsage();
+    } catch (error) {
+      log.error('agent-remote', `memory request failed for dispatcher ${scopeKey}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  for (const proc of directProcesses) {
+    try {
+      proc.sendLine({ type: MEMORY_WIRE_TYPE.GET_USAGE });
+    } catch (error) {
+      log.error('agent-remote', `memory request failed for direct exec: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
 }
 
 export function createRemoteBackend(
@@ -1193,7 +1205,9 @@ export function wrapProcess(
           continue;
         }
         try {
-          onMemoryUsage?.(parseMemoryUsageReport(parsed));
+          const report = parseMemoryUsageReport(parsed);
+          if (onMemoryUsage) onMemoryUsage(report);
+          else log.error('agent-remote', 'direct memory report has no registered sink — dropped');
         } catch (error) {
           log.error('agent-remote', `malformed direct memory report — dropped: ${String(error)}`);
         }

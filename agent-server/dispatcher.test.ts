@@ -5,7 +5,7 @@ import { MEMORY_PROCESS_ROLE, MEMORY_REPORT_STATUS, MEMORY_WIRE_TYPE } from '@sh
 
 // A fake exec proc that records forwarded lines / kills and exposes the hooks the
 // dispatcher wired, so tests can drive exec→main (onLine) and exit (onExit).
-function harness(opts: { now?: () => number; cache?: any; onMainPing?: () => void; sampleMemory?: () => Promise<any> } = {}) {
+function harness(opts: { now?: () => number; cache?: any; onMainPing?: () => void; sampleMemory?: () => Promise<any>; sendToMain?: (line: string) => void } = {}) {
   const toMain: string[] = [];
   const logs: Array<[string, string]> = [];
   const spawned: Array<{
@@ -16,13 +16,25 @@ function harness(opts: { now?: () => number; cache?: any; onMainPing?: () => voi
     written: string[];
     killed: number;
     forceKilled: number;
+    writeError?: Error;
   }> = [];
 
   const spawnExec = vi.fn((sid: string, cwd: string | undefined, hooks: any, env?: Record<string, string>): ExecProc => {
-    const rec = { sid, cwd, hooks, env, written: [] as string[], killed: 0, forceKilled: 0 };
+    const rec: (typeof spawned)[number] = {
+      sid,
+      cwd,
+      hooks,
+      env,
+      written: [],
+      killed: 0,
+      forceKilled: 0,
+    };
     spawned.push(rec);
     return {
-      writeLine: (l: string) => rec.written.push(l),
+      writeLine: (l: string) => {
+        if (rec.writeError) throw rec.writeError;
+        rec.written.push(l);
+      },
       kill: () => { rec.killed++; },
       forceKill: () => { rec.forceKilled++; },
     };
@@ -30,7 +42,7 @@ function harness(opts: { now?: () => number; cache?: any; onMainPing?: () => voi
 
   const d = createDispatcher({
     spawnExec,
-    sendToMain: (l) => toMain.push(l),
+    sendToMain: opts.sendToMain ?? ((l) => toMain.push(l)),
     log: (lvl, m) => logs.push([lvl, m]),
     now: opts.now,
     cache: opts.cache,
@@ -128,6 +140,45 @@ describe('dispatcher core', () => {
         type: MEMORY_WIRE_TYPE.GET_USAGE,
       });
     }
+  });
+
+  it('logs a dispatcher memory delivery failure', async () => {
+    const h = harness({
+      sampleMemory: async () => ({
+        type: MEMORY_WIRE_TYPE.USAGE,
+        status: MEMORY_REPORT_STATUS.OK,
+        sampledAt: '2026-08-05T00:00:00.000Z',
+        rows: [],
+      }),
+      sendToMain: () => { throw new Error('stdout closed'); },
+    });
+
+    h.d.onMainLine(JSON.stringify({ type: MEMORY_WIRE_TYPE.GET_USAGE }));
+    await vi.waitFor(() => expect(h.logs).toContainEqual([
+      'error',
+      'dispatcher memory report failed: Error: stdout closed',
+    ]));
+  });
+
+  it('continues memory fan-out after one exec write fails', () => {
+    const h = harness({ sampleMemory: async () => ({
+      type: MEMORY_WIRE_TYPE.USAGE,
+      status: MEMORY_REPORT_STATUS.OK,
+      sampledAt: '2026-08-05T00:00:00.000Z',
+      rows: [],
+    }) });
+    h.d.onMainLine(JSON.stringify({ type: 'open_session', sid: 's1' }));
+    h.d.onMainLine(JSON.stringify({ type: 'open_session', sid: 's2' }));
+    h.spawned[0].writeError = new Error('stdin closed');
+
+    expect(() => h.d.onMainLine(JSON.stringify({ type: MEMORY_WIRE_TYPE.GET_USAGE }))).not.toThrow();
+    expect(h.spawned[1].written.map((line) => JSON.parse(line))).toContainEqual({
+      type: MEMORY_WIRE_TYPE.GET_USAGE,
+    });
+    expect(h.logs).toContainEqual([
+      'error',
+      'memory request to exec s1 failed: Error: stdin closed',
+    ]);
   });
 
   it('fires onMainPing on a main ping (idle-watchdog reset hook, F-a)', () => {

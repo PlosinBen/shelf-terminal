@@ -55,6 +55,8 @@ A failed attempt contains no rows:
 
 Dispatcher reports are host-level and carry no `sid`. Exec reports carry their session `sid` only as a routing envelope; main validates the report and removes the routing field before storing it. A dispatcher request samples the dispatcher and fans the same request to its current execs. The direct-exec fallback routes the same command/report shape without a dispatcher.
 
+Sampling failures produce an explicit error report. Request delivery is isolated per dispatcher or exec, so one closed route is logged and does not stop the rest of the fan-out. A report that is malformed, late, or has no registered memory sink is logged at its receiving boundary and dropped rather than being silently ignored.
+
 ## Platform adapter inputs
 
 | Runtime platform | Acquisition source | Source value normalized to `memoryKiB` |

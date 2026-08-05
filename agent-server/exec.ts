@@ -200,10 +200,14 @@ const SHELF_SESSION = randomUUID();
 process.env[SESSION_ENV_KEY] = SHELF_SESSION;
 
 async function reportMemoryUsage(): Promise<void> {
-  const supplementaryPids = process.platform === 'linux'
-    ? findPidsByEnv(SESSION_ENV_KEY, SHELF_SESSION)
-    : [];
-  send(await sampleMemoryUsage({ kind: 'exec', supplementaryPids }));
+  try {
+    const supplementaryPids = process.platform === 'linux'
+      ? findPidsByEnv(SESSION_ENV_KEY, SHELF_SESSION)
+      : [];
+    send(await sampleMemoryUsage({ kind: 'exec', supplementaryPids }));
+  } catch (error) {
+    serverLog('error', 'memory', `exec memory report failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
 }
 
 scheduleInitialMemoryReport(reportMemoryUsage);

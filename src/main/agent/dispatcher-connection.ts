@@ -133,15 +133,38 @@ export function createDispatcherConnection(deps: DispatcherConnectionDeps): Disp
     }
     const type = parsed?.type;
 
-    if (type === MEMORY_WIRE_TYPE.USAGE && parsed.sid === undefined) {
-      if (!active) {
-        log.warn('dispatcher-conn', 'late host memory report from inactive dispatcher — dropped');
+    if (type === MEMORY_WIRE_TYPE.USAGE) {
+      const sid = parsed.sid;
+      if (sid === undefined) {
+        if (!active) {
+          log.warn('dispatcher-conn', 'late host memory report from inactive dispatcher — dropped');
+          return;
+        }
+        try {
+          const report = parseMemoryUsageReport(parsed);
+          if (deps.onMemoryUsage) deps.onMemoryUsage(report);
+          else log.error('dispatcher-conn', 'host memory report has no registered sink — dropped');
+        } catch (error) {
+          log.error('dispatcher-conn', `malformed host memory report — dropped: ${String(error)}`);
+        }
+        return;
+      }
+
+      if (typeof sid !== 'string') {
+        log.error('dispatcher-conn', `memory report has invalid sid type=${typeof sid} — dropped`);
+        return;
+      }
+      const ch = channels.get(sid);
+      if (!ch || !active) {
+        log.warn('dispatcher-conn', `late session memory report sid=${sid} — dropped`);
         return;
       }
       try {
-        deps.onMemoryUsage?.(parseMemoryUsageReport(parsed));
+        const report = parseMemoryUsageReport(parsed);
+        if (ch.sinks.onMemoryUsage) ch.sinks.onMemoryUsage(report);
+        else log.error('dispatcher-conn', `session memory report sid=${sid} has no registered sink — dropped`);
       } catch (error) {
-        log.error('dispatcher-conn', `malformed host memory report — dropped: ${String(error)}`);
+        log.error('dispatcher-conn', `malformed session memory report sid=${sid} — dropped: ${String(error)}`);
       }
       return;
     }
@@ -182,19 +205,6 @@ export function createDispatcherConnection(deps: DispatcherConnectionDeps): Disp
     const ch = channels.get(sid);
     if (!ch) {
       log.info('dispatcher-conn', `line for unknown sid ${sid}, dropping type=${type}`);
-      return;
-    }
-
-    if (type === MEMORY_WIRE_TYPE.USAGE) {
-      if (!active || channels.get(sid) !== ch) {
-        log.warn('dispatcher-conn', `late session memory report sid=${sid} — dropped`);
-        return;
-      }
-      try {
-        ch.sinks.onMemoryUsage?.(parseMemoryUsageReport(parsed));
-      } catch (error) {
-        log.error('dispatcher-conn', `malformed session memory report sid=${sid} — dropped: ${String(error)}`);
-      }
       return;
     }
 

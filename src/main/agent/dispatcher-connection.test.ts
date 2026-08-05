@@ -1,8 +1,15 @@
-import { describe, it, expect, vi } from 'vitest';
+import { beforeEach, describe, it, expect, vi } from 'vitest';
 import { createDispatcherConnection, type DispatcherProc } from './dispatcher-connection';
 import { MEMORY_PROCESS_ROLE, MEMORY_REPORT_STATUS, MEMORY_WIRE_TYPE } from '@shared/process-memory';
 
-vi.mock('@shared/logger', () => ({ log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } }));
+const logWarn = vi.hoisted(() => vi.fn());
+const logError = vi.hoisted(() => vi.fn());
+vi.mock('@shared/logger', () => ({ log: { info: vi.fn(), warn: logWarn, error: logError, debug: vi.fn() } }));
+
+beforeEach(() => {
+  logWarn.mockClear();
+  logError.mockClear();
+});
 
 function fakeProc() {
   const written: string[] = [];
@@ -88,6 +95,40 @@ describe('dispatcher-connection (per-host demux by sid)', () => {
     f.emit({ ...memoryReport(), sid: 's2' });
     expect(m1).not.toHaveBeenCalled();
     expect(m2).toHaveBeenCalledWith(memoryReport());
+  });
+
+  it('logs an error instead of silently dropping a host report without a sink', () => {
+    const { f } = make();
+    f.emit(memoryReport());
+    expect(logError).toHaveBeenCalledWith(
+      'dispatcher-conn',
+      'host memory report has no registered sink — dropped',
+    );
+  });
+
+  it('logs an error instead of silently dropping a session report without a sink', () => {
+    const { f, conn } = make();
+    conn.openSession('s1', undefined, {});
+    f.emit({ ...memoryReport(), sid: 's1' });
+    expect(logError).toHaveBeenCalledWith(
+      'dispatcher-conn',
+      'session memory report sid=s1 has no registered sink — dropped',
+    );
+  });
+
+  it('logs malformed and late memory routing at error/warn level', () => {
+    const { f } = make();
+    f.emit({ ...memoryReport(), sid: 7 });
+    expect(logError).toHaveBeenCalledWith(
+      'dispatcher-conn',
+      'memory report has invalid sid type=number — dropped',
+    );
+
+    f.emit({ ...memoryReport(), sid: 'gone' });
+    expect(logWarn).toHaveBeenCalledWith(
+      'dispatcher-conn',
+      'late session memory report sid=gone — dropped',
+    );
   });
 
   it('rejects late host reports after the dispatcher handle is killed', () => {

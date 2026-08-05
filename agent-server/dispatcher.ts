@@ -89,10 +89,9 @@ export function createDispatcher(deps: DispatcherDeps): Dispatcher {
       deps.log('error', 'memory sample requested without a dispatcher sampler');
       return;
     }
-    void deps.sampleMemory().then(
-      (report) => deps.sendToMain(JSON.stringify(report)),
-      (error) => deps.log('error', `dispatcher memory sampler rejected: ${String(error)}`),
-    );
+    void deps.sampleMemory()
+      .then((report) => deps.sendToMain(JSON.stringify(report)))
+      .catch((error) => deps.log('error', `dispatcher memory report failed: ${String(error)}`));
   }
 
   const initialMemoryTimer = deps.sampleMemory
@@ -237,7 +236,13 @@ export function createDispatcher(deps: DispatcherDeps): Dispatcher {
     if (type === MEMORY_WIRE_TYPE.GET_USAGE) {
       emitMemoryReport();
       const command = JSON.stringify({ type: MEMORY_WIRE_TYPE.GET_USAGE });
-      for (const entry of execs.values()) entry.proc.writeLine(command);
+      for (const [execSid, entry] of execs) {
+        try {
+          entry.proc.writeLine(command);
+        } catch (error) {
+          deps.log('error', `memory request to exec ${execSid} failed: ${String(error)}`);
+        }
+      }
       return;
     }
 
