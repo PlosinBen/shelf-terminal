@@ -8,7 +8,7 @@ import type { OutgoingMessage } from '../types';
 // Exercises the toolkit runtime path end-to-end (connection + driver + turn)
 // against the in-process mock agent — no stdio, no binary, no credentials.
 describe('acp session driver (connection + new/resume + turn)', () => {
-  it('drives a prompt turn: streams chunks + finalizes a reply + tool card', async () => {
+  it('drives a prompt: forwards stream deltas and a tool card without manufacturing a full reply', async () => {
     const updates: SessionUpdate[] = [
       { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Hel' }, messageId: 'm1' },
       { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'lo' }, messageId: 'm1' },
@@ -30,29 +30,33 @@ describe('acp session driver (connection + new/resume + turn)', () => {
       { type: 'stream', msgId: 'm1', streamType: 'text', content: 'Hel' },
       { type: 'stream', msgId: 'm1', streamType: 'text', content: 'lo' },
       { type: 'message', msgId: 't1', msgType: 'fold_code', label: 'Read', subtitle: 'Read', body: { content: '' } },
-      { type: 'message', msgId: 'm1', msgType: 'reply', content: 'Hello' },
     ]);
   });
 
-  it('drains a final session update whose handler settles just after the prompt response', async () => {
+  it('delivers a partial terminal tool update even when its callback settles after the prompt response', async () => {
     const driver = createSessionDriver();
     const lateSummary: SessionUpdate = {
       sessionUpdate: 'tool_call_update',
       toolCallId: 'task-complete-1',
-      title: 'task_complete',
       status: 'completed',
       content: [{ type: 'content', content: { type: 'text', text: 'final summary' } }],
     };
     const mock = createMockAcpAgent({
+      updatesOnPrompt: [{
+        sessionUpdate: 'tool_call',
+        toolCallId: 'task-complete-1',
+        title: 'task_complete',
+        kind: 'other',
+        status: 'in_progress',
+      }],
       onPrompt: () => {
         // The ACP SDK processes notifications independently from the matching
-        // prompt response. Reproduce the production race: the response resolves,
-        // then the already-arriving final update reaches our callback one event-
-        // loop turn later. It must still belong to THIS turn, not the next one.
-        setImmediate(() => driver.onSessionUpdate({
-          sessionId: 'mock-session',
-          update: lateSummary,
-        }));
+        // prompt response. Reproduce the production race beyond the old one-tick
+        // barrier: the response resolves, then the result-bearing partial update
+        // reaches our callback two event-loop turns later.
+        setImmediate(() => setImmediate(() => driver.onSessionUpdate({
+          sessionId: 'mock-session', update: lateSummary,
+        })));
       },
     });
     const conn = openAcpConnection(mock, { onSessionUpdate: driver.onSessionUpdate });
@@ -61,6 +65,10 @@ describe('acp session driver (connection + new/resume + turn)', () => {
 
     try {
       await driver.drivePromptTurn(conn.agent, session, 'hi', (m) => wire.push(m));
+      // Prompt settlement controls idle/queue release; content delivery remains
+      // live. The terminal callback intentionally has not run yet.
+      expect(wire).not.toContainEqual(expect.objectContaining({ msgId: 'task-complete-1', msgType: 'reply' }));
+      await new Promise<void>((resolve) => setImmediate(() => setImmediate(resolve)));
       expect(wire).toContainEqual({
         type: 'message',
         msgId: 'task-complete-1',
@@ -72,10 +80,10 @@ describe('acp session driver (connection + new/resume + turn)', () => {
     }
   });
 
-  it('namespaces messageId-less replies per turn so they do not collide (copilot --acp case)', async () => {
+  it('namespaces messageId-less replies per prompt so they do not collide (copilot --acp case)', async () => {
     // copilot --acp omits `messageId` on agent_message_chunk → translate falls back
-    // to the DEFAULT_AGENT_MSG_ID constant. Without per-turn namespacing, every
-    // turn's reply reuses that id and the renderer upserts them onto one entry.
+    // to the DEFAULT_AGENT_MSG_ID constant. Without per-prompt namespacing, every
+    // prompt's reply reuses that id and the renderer upserts them onto one entry.
     const mock = createMockAcpAgent({
       updatesOnPrompt: [{ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'hi' } } as SessionUpdate],
     });
@@ -89,14 +97,11 @@ describe('acp session driver (connection + new/resume + turn)', () => {
     await driver.drivePromptTurn(conn.agent, session, 'b', (m) => w2.push(m));
     conn.close();
 
-    const reply = (w: OutgoingMessage[]) => w.find((m) => m.type === 'message' && m.msgType === 'reply') as Extract<OutgoingMessage, { msgType: 'reply' }>;
     const stream = (w: OutgoingMessage[]) => w.find((m) => m.type === 'stream') as Extract<OutgoingMessage, { type: 'stream' }>;
-    expect(reply(w1).content).toBe('hi');
-    expect(reply(w2).content).toBe('hi');
-    // Distinct per turn → renderer keeps them as separate bubbles.
-    expect(reply(w1).msgId).not.toBe(reply(w2).msgId);
-    // A turn's stream chunk and its finalized reply share the turn's id.
-    expect(stream(w1).msgId).toBe(reply(w1).msgId);
+    expect(stream(w1).content).toBe('hi');
+    expect(stream(w2).content).toBe('hi');
+    // Distinct per prompt → renderer keeps them as separate bubbles.
+    expect(stream(w1).msgId).not.toBe(stream(w2).msgId);
   });
 
   it('strips only a thought message prefix, preserving a later paragraph chunk (codex)', async () => {
@@ -135,10 +140,11 @@ describe('acp session driver (connection + new/resume + turn)', () => {
     await driver.drivePromptTurn(conn.agent, session, 'go', (m) => wire.push(m));
     conn.close();
 
-    const replies = wire.filter((m) => m.type === 'message' && m.msgType === 'reply') as Array<Extract<OutgoingMessage, { msgType: 'reply' }>>;
-    expect(replies.map((r) => r.content)).toEqual(['before', 'after']);
+    const textStreams = wire.filter((m): m is Extract<OutgoingMessage, { type: 'stream' }> =>
+      m.type === 'stream' && m.streamType === 'text');
+    expect(textStreams.map((m) => m.content)).toEqual(['before', 'after']);
     // Distinct ids → two cards at their own positions (closing text not merged up top).
-    expect(replies[0].msgId).not.toBe(replies[1].msgId);
+    expect(textStreams[0].msgId).not.toBe(textStreams[1].msgId);
   });
 
   it('forwards attached images as ACP image content blocks (drops non-data-urls)', async () => {
@@ -168,6 +174,40 @@ describe('acp session driver (connection + new/resume + turn)', () => {
     expect(driver.getAvailableCommands('s1')).toEqual([{ name: 'compact', description: 'x' }]);
     driver.forget('s1');
     expect(driver.getAvailableCommands('s1')).toBeUndefined();
+  });
+
+  it('clears carried tool metadata when a session is forgotten', async () => {
+    const driver = createSessionDriver();
+    const mock = createMockAcpAgent();
+    const conn = openAcpConnection(mock, { onSessionUpdate: driver.onSessionUpdate });
+    const first = await driver.startNew(conn.agent, { cwd: '/tmp/p' });
+    await driver.drivePromptTurn(conn.agent, first, 'first', () => {});
+    driver.onSessionUpdate({
+      sessionId: first.sessionId,
+      update: {
+        sessionUpdate: 'tool_call', toolCallId: 'reused', title: 'task_complete',
+        kind: 'other', status: 'in_progress',
+      },
+    });
+
+    driver.forget(first.sessionId);
+    const resumed = await driver.resume(conn.agent, first.sessionId, { cwd: '/tmp/p' });
+    const wire: OutgoingMessage[] = [];
+    await driver.drivePromptTurn(conn.agent, resumed, 'second', (m) => wire.push(m));
+    driver.onSessionUpdate({
+      sessionId: resumed.sessionId,
+      update: {
+        sessionUpdate: 'tool_call_update', toolCallId: 'reused', status: 'completed',
+        content: [{ type: 'content', content: { type: 'text', text: 'not a summary without its title' } }],
+      },
+    });
+    conn.close();
+
+    expect(wire).not.toContainEqual(expect.objectContaining({ msgId: 'reused', msgType: 'reply' }));
+    expect(wire).toContainEqual({
+      type: 'message', msgId: 'reused', msgType: 'fold_code', label: 'Tool',
+      body: { content: 'not a summary without its title' },
+    });
   });
 
   it('sends session/set_mode and session/set_config_option', async () => {
@@ -219,6 +259,6 @@ describe('acp session driver (connection + new/resume + turn)', () => {
     const stop = await driver.drivePromptTurn(conn.agent, session, 'again', (m) => wire.push(m));
     conn.close();
     expect(stop).toBe('end_turn');
-    expect(wire).toContainEqual({ type: 'message', msgId: 'r1', msgType: 'reply', content: 'resumed' });
+    expect(wire).toContainEqual({ type: 'stream', msgId: 'r1', streamType: 'text', content: 'resumed' });
   });
 });

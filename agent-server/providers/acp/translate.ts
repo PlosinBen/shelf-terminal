@@ -130,7 +130,9 @@ function errorFor(status: ToolCallStatus | null | undefined): string | undefined
  * clobber the card back to defaults. Resolve ACP's partial semantics HERE (the
  * provider owns provider semantics; the renderer stays a dumb full-replace):
  * remember the last-seen title + kind per `toolCallId` and re-inject them into
- * later updates. Create one carry per turn (tool calls live within a turn).
+ * later updates. A session router owns one carry: terminal updates are enriched
+ * before their entry is evicted, and dropping the router clears all remaining
+ * entries on session reset/forget.
  */
 export function createToolMetaCarry(): (update: SessionUpdate) => SessionUpdate {
   const metaByToolCall = new Map<string, { title?: string; kind?: ToolKind }>();
@@ -141,8 +143,11 @@ export function createToolMetaCarry(): (update: SessionUpdate) => SessionUpdate 
     const prev = metaByToolCall.get(update.toolCallId) ?? {};
     const title = (update.title || prev.title) ?? undefined;
     const kind = (update.kind || prev.kind) ?? undefined;
-    metaByToolCall.set(update.toolCallId, { title, kind });
-    return { ...update, ...(title ? { title } : {}), ...(kind ? { kind } : {}) } as SessionUpdate;
+    const carried = { ...update, ...(title ? { title } : {}), ...(kind ? { kind } : {}) } as SessionUpdate;
+    const status = 'status' in update ? update.status : undefined;
+    if (status === 'completed' || status === 'failed') metaByToolCall.delete(update.toolCallId);
+    else metaByToolCall.set(update.toolCallId, { title, kind });
+    return carried;
   };
 }
 
@@ -167,7 +172,7 @@ function toolKindLabel(kind: ToolKind | null | undefined): string {
  * turnId — the send wrapper stamps that). Returns `[]` for updates that are not
  * timeline render primitives (capabilities/mode/config/usage are consumed by the
  * stateful client, not rendered here). Tool-call updates should be run through a
- * per-turn {@link createToolMetaCarry} first so title/kind survive partial updates.
+ * session-scoped {@link createToolMetaCarry} first so title/kind survive partial updates.
  */
 export function translateSessionUpdate(update: SessionUpdate): OutgoingMessage[] {
   switch (update.sessionUpdate) {

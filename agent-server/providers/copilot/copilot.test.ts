@@ -44,7 +44,7 @@ const COPILOT_CONFIG = [
 ] as unknown as SessionConfigOption[];
 
 describe('acp-copilot backend (via mock ACP agent)', () => {
-  it('drives a prompt turn to a reply and terminates with idle', async () => {
+  it('forwards prompt text deltas and terminates with idle', async () => {
     const updates: SessionUpdate[] = [
       { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Hello ' }, messageId: 'm1' },
       { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'world' }, messageId: 'm1' },
@@ -57,9 +57,10 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
     await backend.query({ prompt: 'hi', cwd: '/tmp/project' }, (m) => out.push(m));
 
     expect(promptSeen).toBeTruthy();
-    // Streamed chunks + a finalized reply assembled from them.
+    // Text is a delta stream; the renderer is the sole accumulator/finalizer.
     expect(out).toContainEqual({ type: 'stream', msgId: 'm1', streamType: 'text', content: 'Hello ' });
-    expect(out).toContainEqual({ type: 'message', msgId: 'm1', msgType: 'reply', content: 'Hello world' });
+    expect(out).toContainEqual({ type: 'stream', msgId: 'm1', streamType: 'text', content: 'world' });
+    expect(out).not.toContainEqual(expect.objectContaining({ type: 'message', msgId: 'm1', msgType: 'reply' }));
     // New session id persisted for later resume.
     expect(out).toContainEqual({ type: 'context_patch', patch: { lastSdkSessionId: 'mock-session' } });
     // Turn ALWAYS ends idle (renderer spinner/queue latch depends on it).

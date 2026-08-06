@@ -180,6 +180,19 @@ describe('createToolMetaCarry — title/kind survive partial tool_call_update', 
     const passthrough: SessionUpdate = { sessionUpdate: 'current_mode_update', currentModeId: 'agent' };
     expect(carry(passthrough)).toBe(passthrough);
   });
+
+  it('evicts metadata after enriching a terminal update', () => {
+    const carry = createToolMetaCarry();
+    carry({ sessionUpdate: 'tool_call', toolCallId: 'done', title: 'Read file', kind: 'read' });
+
+    expect(carry({
+      sessionUpdate: 'tool_call_update', toolCallId: 'done', status: 'completed',
+    })).toMatchObject({ title: 'Read file', kind: 'read', status: 'completed' });
+
+    const afterTerminal = carry({ sessionUpdate: 'tool_call_update', toolCallId: 'done' });
+    expect(afterTerminal).not.toHaveProperty('title');
+    expect(afterTerminal).not.toHaveProperty('kind');
+  });
 });
 
 describe('contentBlockToText / renderPlan helpers', () => {

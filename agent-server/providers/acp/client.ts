@@ -2,8 +2,8 @@
 //
 // Semantics-free session driver: starts NEW or RESUMES sessions uniformly (the
 // SDK's convenience ActiveSession is new-only, so we route session/update
-// notifications ourselves into per-session queues) and pumps each prompt turn's
-// stream through the pure `translate` layer onto Shelf's wire. No codex specifics.
+// notifications ourselves through a persistent per-session router) and maps
+// updates through the pure `translate` layer onto Shelf's wire. No codex specifics.
 
 import {
   methods,
@@ -16,32 +16,18 @@ import {
   type AvailableCommand,
 } from '@agentclientprotocol/sdk';
 import type { AgentAttachment } from '@shared/types';
-import type { OutgoingMessage } from '../types';
+import type { OutgoingMessage, SendFn } from '../types';
 import { translateSessionUpdate, createToolMetaCarry, imageContentBlocks, DEFAULT_AGENT_MSG_ID } from './translate';
 import { readUploadedImageAttachments } from '../shared';
+import { serverLog } from '../../server-logger';
 
-/** An async FIFO of session updates that unblocks readers on push or done. */
-interface UpdateQueue {
-  push(u: SessionUpdate): void;
-  wake(): void;
-  /** Next update, or null once `isDone()` is true and the buffer is drained. */
-  next(isDone: () => boolean): Promise<SessionUpdate | null>;
-}
-
-function createUpdateQueue(): UpdateQueue {
-  const items: SessionUpdate[] = [];
-  let waiter: (() => void) | null = null;
-  return {
-    push(u) { items.push(u); const w = waiter; waiter = null; w?.(); },
-    wake() { const w = waiter; waiter = null; w?.(); },
-    async next(isDone) {
-      for (;;) {
-        if (items.length) return items.shift()!;
-        if (isDone()) return null;
-        await new Promise<void>((r) => { waiter = r; });
-      }
-    },
-  };
+interface SessionRouteState {
+  send: SendFn | null;
+  promptBase: string;
+  seg: number;
+  streamedSinceTool: boolean;
+  thoughtStarted: Set<string>;
+  carryToolMeta: ReturnType<typeof createToolMetaCarry>;
 }
 
 export interface AcpSession {
@@ -59,7 +45,7 @@ export interface StartSessionOptions {
 }
 
 export interface SessionDriver {
-  /** Register on the ACP connection: routes session/update into per-session queues. */
+  /** Register on the ACP connection: routes session/update for the session lifetime. */
   onSessionUpdate(notification: SessionNotification): void;
   startNew(agent: ClientContext, opts: StartSessionOptions): Promise<AcpSession>;
   resume(agent: ClientContext, sessionId: string, opts: StartSessionOptions): Promise<AcpSession>;
@@ -79,27 +65,78 @@ export interface SessionDriver {
    *  `available_commands_update`, which arrives out-of-turn near session start).
    *  Undefined until the first such update lands. */
   getAvailableCommands(sessionId: string): AvailableCommand[] | undefined;
-  /** Drop a session's queue (session ended / reset). */
+  /** Drop all routing/presentation state for a session (session ended / reset). */
   forget(sessionId: string): void;
 }
 
 export function createSessionDriver(): SessionDriver {
-  const queues = new Map<string, UpdateQueue>();
+  const routeBySession = new Map<string, SessionRouteState>();
   // Per-session slash commands captured from `available_commands_update` (arrives
   // out-of-turn near session start; the backend reads it at gatherCapabilities).
   const commandsBySession = new Map<string, AvailableCommand[]>();
-  // Monotonic across turns so a per-turn namespace for messageId-less agents
+  // Monotonic across prompts so a per-prompt namespace for messageId-less agents
   // (copilot --acp omits `messageId`) stays unique — otherwise every turn's reply
   // collapses onto the constant DEFAULT_AGENT_MSG_ID and the renderer upserts them
-  // all onto one entry (reply shows above the wrong turn).
-  let turnSeq = 0;
+  // all onto one entry (reply shows above the wrong prompt's output).
+  let promptSeq = 0;
+
+  function routeState(sessionId: string): SessionRouteState {
+    let state = routeBySession.get(sessionId);
+    if (!state) {
+      state = {
+        send: null,
+        promptBase: `${sessionId}#0`,
+        seg: 0,
+        streamedSinceTool: false,
+        thoughtStarted: new Set<string>(),
+        carryToolMeta: createToolMetaCarry(),
+      };
+      routeBySession.set(sessionId, state);
+    }
+    return state;
+  }
+
+  function routeUpdate(sessionId: string, update: SessionUpdate): void {
+    const state = routeState(sessionId);
+    const namespaced = (msgId: string, streamType?: string): string =>
+      msgId === DEFAULT_AGENT_MSG_ID ? `${state.promptBase}:${streamType ?? 'msg'}:${state.seg}` : msgId;
+
+    for (const raw of translateSessionUpdate(state.carryToolMeta(update))) {
+      let wire = raw;
+      if (wire.type === 'message') {
+        // Tool/other card after streamed text = message boundary → next text
+        // is a new segment. Consecutive tools do not over-bump.
+        if (state.streamedSinceTool) {
+          state.seg++;
+          state.streamedSinceTool = false;
+        }
+        wire = { ...wire, msgId: namespaced(wire.msgId) };
+      } else if (wire.type === 'stream') {
+        wire = { ...wire, msgId: namespaced(wire.msgId, wire.streamType) };
+        if (wire.streamType === 'thinking' && !state.thoughtStarted.has(wire.msgId)) {
+          const content = wire.content.trimStart();
+          if (!content) continue;
+          wire = { ...wire, content };
+          state.thoughtStarted.add(wire.msgId);
+        }
+        state.streamedSinceTool = true;
+      }
+      if (state.send) state.send(wire);
+      else {
+        // Session setup normally emits metadata-only updates. A renderable update
+        // before the first prompt has no provider output callback to reach main;
+        // surface that protocol anomaly instead of silently losing content.
+        serverLog('error', 'acp', `session update produced ${wire.type} before output sink was bound (session=${sessionId})`);
+      }
+    }
+  }
 
   return {
     onSessionUpdate(n) {
       if (n.update.sessionUpdate === 'available_commands_update') {
         commandsBySession.set(n.sessionId, n.update.availableCommands);
       }
-      queues.get(n.sessionId)?.push(n.update);
+      routeUpdate(n.sessionId, n.update);
     },
 
     getAvailableCommands(sessionId) {
@@ -112,7 +149,7 @@ export function createSessionDriver(): SessionDriver {
         mcpServers: opts.mcpServers ?? [],
         ...(opts.additionalDirectories?.length ? { additionalDirectories: opts.additionalDirectories } : {}),
       });
-      queues.set(res.sessionId, createUpdateQueue());
+      routeState(res.sessionId);
       return { sessionId: res.sessionId, newSessionResponse: res };
     },
 
@@ -122,14 +159,11 @@ export function createSessionDriver(): SessionDriver {
         cwd: opts.cwd,
         ...(opts.additionalDirectories?.length ? { additionalDirectories: opts.additionalDirectories } : {}),
       });
-      queues.set(sessionId, createUpdateQueue());
+      routeState(sessionId);
       return { sessionId };
     },
 
     async drivePromptTurn(agent, session, prompt, send, images, attachments) {
-      const q = queues.get(session.sessionId);
-      if (!q) throw new Error(`drivePromptTurn: no queue for session ${session.sessionId}`);
-
       // Text block + any attached images (legacy data URLs or uploaded paths →
       // ACP image ContentBlocks).
       const uploadedImages = (await readUploadedImageAttachments(attachments)).map(({ mimeType, data }) => ({
@@ -138,23 +172,8 @@ export function createSessionDriver(): SessionDriver {
         mimeType,
       }));
       const content = [{ type: 'text' as const, text: prompt }, ...imageContentBlocks(images), ...uploadedImages];
-      let done = false;
-      const promptDone = agent
-        .request(methods.agent.session.prompt, { sessionId: session.sessionId, prompt: content }) as Promise<{ stopReason: StopReason }>;
-      const finishUpdates = () => {
-        // ACP v1 defines the prompt response as the turn boundary, after all
-        // pending session updates. The SDK dispatches notifications independently
-        // from response resolution, though, so the final notification handler can
-        // settle one event-loop turn later even when its wire message came first.
-        // Keep this turn's queue open through that dispatch barrier; otherwise the
-        // update remains queued and is misattributed to the user's NEXT prompt
-        // (agent-providers#37).
-        setImmediate(() => { done = true; q.wake(); });
-      };
-      void promptDone.then(finishUpdates, finishUpdates);
-
-      // Per-turn namespace for the messageId-less sentinel. Streams keep their
-      // streamType so a turn's reply text and thinking don't collide with each
+      // Per-prompt namespace for the messageId-less sentinel. Streams keep their
+      // streamType so a prompt's reply text and thinking don't collide with each
       // other (both would otherwise be DEFAULT_AGENT_MSG_ID). Agents that DO send
       // a real messageId (codex) are untouched.
       //
@@ -167,51 +186,18 @@ export function createSessionDriver(): SessionDriver {
       // closing text is merged up top, above the tool cards, and the turn appears
       // to end with no reply. Bumping `seg` when a tool card follows streamed text
       // gives the later text a fresh msgId → its own card at the right position.
-      const turnBase = `${session.sessionId}#${++turnSeq}`;
-      let seg = 0;
-      let streamedSinceTool = false;
-      const namespaced = (msgId: string, streamType?: string): string =>
-        msgId === DEFAULT_AGENT_MSG_ID ? `${turnBase}:${streamType ?? 'msg'}:${seg}` : msgId;
+      const state = routeState(session.sessionId);
+      state.send = send;
+      state.promptBase = `${session.sessionId}#${++promptSeq}`;
+      state.seg = 0;
+      state.streamedSinceTool = false;
+      state.thoughtStarted.clear();
 
-      const textByMsg = new Map<string, string>();
-      // Codex may prefix the first thought chunk with whitespace-only formatting.
-      // Trim it once per thought message, but preserve whitespace in later chunks
-      // because those can start intentional paragraph breaks; see agent-providers#29.
-      const thoughtStarted = new Set<string>();
-      // Carry tool-call title/kind across their partial updates (see
-      // createToolMetaCarry) — one carry per turn, tool calls live within a turn.
-      const carryToolMeta = createToolMetaCarry();
-      for (;;) {
-        const update = await q.next(() => done);
-        if (!update) break;
-        for (const raw of translateSessionUpdate(carryToolMeta(update))) {
-          let wire = raw;
-          if (wire.type === 'message') {
-            // Tool/other card after streamed text = message boundary → next text
-            // is a new segment. (Consecutive tools don't over-bump: flag is reset.)
-            if (streamedSinceTool) { seg++; streamedSinceTool = false; }
-            wire = { ...wire, msgId: namespaced(wire.msgId) };
-          } else if (wire.type === 'stream') {
-            wire = { ...wire, msgId: namespaced(wire.msgId, wire.streamType) };
-            if (wire.streamType === 'thinking' && !thoughtStarted.has(wire.msgId)) {
-              const content = wire.content.trimStart();
-              if (!content) continue;
-              wire = { ...wire, content };
-              thoughtStarted.add(wire.msgId);
-            }
-            streamedSinceTool = true;
-          }
-          if (wire.type === 'stream' && wire.streamType === 'text') {
-            textByMsg.set(wire.msgId, (textByMsg.get(wire.msgId) ?? '') + wire.content);
-          }
-          send(wire);
-        }
-      }
-      for (const [msgId, content] of textByMsg) {
-        send({ type: 'message', msgId, msgType: 'reply', content });
-      }
       try {
-        const res = await promptDone;
+        const res = await agent.request(methods.agent.session.prompt, {
+          sessionId: session.sessionId,
+          prompt: content,
+        }) as { stopReason: StopReason };
         return res.stopReason;
       } catch (err) {
         send({ type: 'error', error: `ACP prompt failed: ${(err as Error)?.message ?? String(err)}` });
@@ -228,7 +214,7 @@ export function createSessionDriver(): SessionDriver {
     },
 
     forget(sessionId) {
-      queues.delete(sessionId);
+      routeBySession.delete(sessionId);
       commandsBySession.delete(sessionId);
     },
   };
