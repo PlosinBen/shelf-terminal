@@ -5,3 +5,5 @@ export { on, emit, Events, __resetBusForTests } from './bus';
 export { onAgent, emitAgent } from './types';
 export type { AgentEventMap, AgentEventName } from './types';
 export { bindAgentIPCGroup } from './ipc-agent';
+export { onBackup, emitBackup } from './backup';
+export type { BackupEventMap, BackupEventName } from './backup';

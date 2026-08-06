@@ -5134,6 +5134,50 @@ button {
   overflow-y: auto;
   padding: 16px;
 }
+
+.backup-panel-body h3 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.backup-config-form,
+.backup-config-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.backup-section-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.backup-section-heading .web-settings-hint {
+  margin: 4px 0 0;
+}
+
+.backup-config-details {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px 12px;
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  font-size: 12px;
+}
+
+.backup-config-details dt {
+  color: var(--text-muted);
+}
+
+.backup-config-details dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
 /* Import review */
 .import-review-item {
   border: 1px solid var(--border);

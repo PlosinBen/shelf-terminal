@@ -5,6 +5,7 @@ import { groupedOrder, moveGroup } from './project-grouping';
 import { createProjectNotice, dismissProjectNoticeState, showProjectNoticeState, type ProjectNotice } from './project-notice';
 import { isAgentProvider, providerLabel } from '@shared/agent-providers';
 import type { ProcessMemorySummary } from '@shared/process-memory';
+import { closeBackupPanelSession, openBackupPanelSession } from './backup-panel-store';
 
 // ── Tab state ──
 
@@ -69,7 +70,6 @@ interface StoreSnapshot {
   skillsVisible: boolean;
   mcpVisible: boolean;
   backupVisible: boolean;
-  backupActiveTab: BackupPanelTab;
   editingProjectIndex: number | null;
   editingProjectId: string | null;
   settings: AppSettings;
@@ -98,7 +98,6 @@ let notesVisible = false;
 let skillsVisible = false;
 let mcpVisible = false;
 let backupVisible = false;
-let backupActiveTab: BackupPanelTab = 'backup';
 let editingProjectId: string | null = null;
 let settings: AppSettings = { ...DEFAULT_SETTINGS };
 let updateStatus: UpdateStatus = { state: 'idle' };
@@ -153,7 +152,7 @@ function reconcileActiveProject(preferredIndex = 0) {
 function getSnapshot(): StoreSnapshot {
   const activeProjectIndex = projectIndexById(activeProjectId);
   const editingProjectIndex = projectIndexById(editingProjectId);
-  return { projects: projects as readonly ReadonlyProjectRuntime[], activeProjectIndex, activeProjectId, hideDisconnected, sidebarVisible, settingsVisible, searchVisible, commandPickerVisible, devToolsVisible, notesVisible, skillsVisible, mcpVisible, backupVisible, backupActiveTab, editingProjectIndex: editingProjectIndex === -1 ? null : editingProjectIndex, editingProjectId, settings, updateStatus, pmVisible, awayMode, pmActive, quickNoteVisible, chatStage, connectionHealth, projectNotice, processMemorySummary };
+  return { projects: projects as readonly ReadonlyProjectRuntime[], activeProjectIndex, activeProjectId, hideDisconnected, sidebarVisible, settingsVisible, searchVisible, commandPickerVisible, devToolsVisible, notesVisible, skillsVisible, mcpVisible, backupVisible, editingProjectIndex: editingProjectIndex === -1 ? null : editingProjectIndex, editingProjectId, settings, updateStatus, pmVisible, awayMode, pmActive, quickNoteVisible, chatStage, connectionHealth, projectNotice, processMemorySummary };
 }
 
 let snapshotRef = getSnapshot();
@@ -526,7 +525,6 @@ export function closeCommandPicker() {
 // ── Right sidebar actions ──
 
 export type RightSidebarFeature = 'pm' | 'notes' | 'devtools' | 'skills' | 'mcp' | 'backup';
-export type BackupPanelTab = 'backup' | 'import';
 
 export function toggleRightSidebar(feature: RightSidebarFeature) {
   switch (feature) {
@@ -547,14 +545,10 @@ export function toggleRightSidebar(feature: RightSidebarFeature) {
       break;
     case 'backup':
       backupVisible = !backupVisible;
-      if (backupVisible) backupActiveTab = 'backup';
+      if (backupVisible) openBackupPanelSession();
+      else closeBackupPanelSession();
       break;
   }
-  updateSnapshot();
-}
-
-export function setBackupActiveTab(tab: BackupPanelTab) {
-  backupActiveTab = tab;
   updateSnapshot();
 }
 

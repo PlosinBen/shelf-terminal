@@ -29,13 +29,14 @@ import type { ConnectionHealth } from '@shared/types';
 import type { ProjectConfig } from '@shared/types';
 import { disposeTerminal } from './components/TerminalView';
 import { teardownTab } from './tab-teardown';
-import { on, emit, Events } from './events';
+import { on, emit, Events, onBackup } from './events';
 import { bindAgentIPCGroup } from './events';
 import { bindAgentStoreSubscriptions } from './agentTabSubscriptions';
 import { setInMemoryMax, setSaveThrottleMs } from './agentTabStore';
 import { getTheme, buildThemeVars } from './themes';
 import { clearAgentSession } from './storage/agent-history';
 import { bindProcessMemorySummary } from './process-memory-sync';
+import { acceptBackupPanelList, failBackupPanelRequest } from './backup-panel-store';
 import './styles/global.css';
 
 export function App() {
@@ -98,6 +99,48 @@ export function App() {
   }, []);
 
   useEffect(() => bindProcessMemorySummary(), []);
+
+  // Backup panel intents cross the renderer→main boundary here. The view owns
+  // rendering only; session/request revisions prevent a closed or superseded
+  // panel from accepting a late IPC completion.
+  useEffect(() => {
+    const logStale = (operation: string, sessionRevision: number, requestRevision: number) => {
+      window.shelfApi.app.debugLog(
+        'config-backup',
+        `discarded stale ${operation} result (session=${sessionRevision}, request=${requestRevision})`,
+      );
+    };
+    const messageOf = (error: unknown) => error instanceof Error ? error.message : String(error);
+
+    const offLoad = onBackup('backup:load-local', async (token) => {
+      try {
+        const result = await window.shelfApi.configBackup.list();
+        if (!acceptBackupPanelList(token, result)) {
+          logStale('load-local', token.sessionRevision, token.requestRevision);
+        }
+      } catch (error) {
+        if (!failBackupPanelRequest(token, messageOf(error))) {
+          logStale('load-local failure', token.sessionRevision, token.requestRevision);
+        }
+      }
+    });
+
+    const offSave = onBackup('backup:save-settings', async ({ settings: nextSettings, ...token }) => {
+      try {
+        await window.shelfApi.configBackup.saveSettings(nextSettings);
+        const result = await window.shelfApi.configBackup.list();
+        if (!acceptBackupPanelList(token, result)) {
+          logStale('save-settings', token.sessionRevision, token.requestRevision);
+        }
+      } catch (error) {
+        if (!failBackupPanelRequest(token, messageOf(error))) {
+          logStale('save-settings failure', token.sessionRevision, token.requestRevision);
+        }
+      }
+    });
+
+    return () => { offLoad(); offSave(); };
+  }, []);
 
   // Connection health (heartbeat) → main store, keyed by tabId. Bound directly
   // (not via the agent typed-event river) because it's connection
