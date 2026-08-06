@@ -41,6 +41,16 @@ function validationFailure(message: string, itemId?: string): BackupRunResult {
   return { ok: false, reason: 'validation', message, ...(itemId ? { itemId } : {}) };
 }
 
+function pathEntryExists(file: string): boolean {
+  try {
+    fs.lstatSync(file);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw error;
+  }
+}
+
 function copyValidatedSkill(
   name: string,
   destination: string,
@@ -134,7 +144,11 @@ async function captureSelected(
 
 function readRemoteMcp(repoDirectory: string): Record<string, unknown> {
   const file = path.join(repoDirectory, REPO_MCP_FILE);
-  if (!fs.existsSync(file)) return {};
+  if (!pathEntryExists(file)) return {};
+  const stat = fs.lstatSync(file);
+  if (stat.isSymbolicLink() || !stat.isFile()) {
+    throw new Error('Remote mcp-servers.json must be a regular file; nothing was pushed.');
+  }
   let parsed: unknown;
   try {
     parsed = JSON.parse(fs.readFileSync(file, 'utf-8'));
@@ -155,6 +169,21 @@ function applySelected(
   const selectedMcp = snapshot.selected.filter((item) => item.kind === 'mcp');
   const remoteMcp = selectedMcp.length > 0 ? readRemoteMcp(repoDirectory) : null;
   const stagedPaths = [REPO_MACHINE_MANIFEST];
+
+  const skillsRoot = path.join(repoDirectory, REPO_SKILLS_DIR);
+  if (snapshot.selected.some((item) => item.kind === 'skill') && pathEntryExists(skillsRoot)) {
+    const stat = fs.lstatSync(skillsRoot);
+    if (stat.isSymbolicLink() || !stat.isDirectory()) {
+      throw new Error('Remote skills path must be a regular directory; nothing was pushed.');
+    }
+  }
+  const manifestFile = path.join(repoDirectory, REPO_MACHINE_MANIFEST);
+  if (pathEntryExists(manifestFile)) {
+    const stat = fs.lstatSync(manifestFile);
+    if (stat.isSymbolicLink() || !stat.isFile()) {
+      throw new Error('Remote machine.json must be a regular file; nothing was pushed.');
+    }
+  }
 
   for (const item of snapshot.selected) {
     if (item.kind !== 'skill') continue;
@@ -182,7 +211,7 @@ function applySelected(
 
   const manifest: BackupMachineManifest = { appInstanceId: getAppInstanceId(), machineLabel };
   fs.writeFileSync(
-    path.join(repoDirectory, REPO_MACHINE_MANIFEST),
+    manifestFile,
     JSON.stringify(manifest, null, 2) + '\n',
     'utf-8',
   );

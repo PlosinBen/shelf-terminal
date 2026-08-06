@@ -195,9 +195,8 @@ contextBridge.exposeInMainWorld('shelfApi', {
     listSources: (remoteUrl: string) => ipcRenderer.invoke(IPC.CONFIG_BACKUP_LIST_SOURCES, remoteUrl),
     listImportItems: (remoteUrl: string, sourceRevision: string) =>
       ipcRenderer.invoke(IPC.CONFIG_BACKUP_LIST_IMPORT_ITEMS, { remoteUrl, sourceRevision }),
-    planImport: (ref: string, ids: string[]) => ipcRenderer.invoke(IPC.CONFIG_BACKUP_PLAN_IMPORT, { ref, ids }),
-    applyImport: (ref: string, decisions: unknown) =>
-      ipcRenderer.invoke(IPC.CONFIG_BACKUP_APPLY_IMPORT, { ref, decisions }),
+    applyImport: (remoteUrl: string, sourceRevision: string, selectedIds: string[]) =>
+      ipcRenderer.invoke(IPC.CONFIG_BACKUP_APPLY_IMPORT, { remoteUrl, sourceRevision, selectedIds }),
   },
   app: {
     logsPath: (): Promise<string> => ipcRenderer.invoke(IPC.APP_LOGS_PATH),

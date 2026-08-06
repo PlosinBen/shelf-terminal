@@ -241,6 +241,25 @@ describe('config-backup runBackup', () => {
     expect(loadIntent()).toEqual(['skill:alpha']);
   }, GIT_HEAVY_TIMEOUT);
 
+  it('rejects remote payload symlinks without writing outside the side-car tree', async () => {
+    seedSkill('alpha', { 'version.txt': 'one' });
+    saveBinding({ remoteUrl: bareRemote, machineLabel: 'm' });
+    await runBackup(['skill:alpha']);
+    const branch = thisMachineBranchRef();
+    await mutateRemoteBranch(branch, (directory) => {
+      fs.rmSync(path.join(directory, 'machine.json'));
+      fs.symlinkSync('../escaped.json', path.join(directory, 'machine.json'));
+    });
+    replaceSkill('alpha', { 'version.txt': 'two' });
+    const before = await remoteHead(branch);
+
+    const result = await runBackup(['skill:alpha']);
+
+    expect(result).toMatchObject({ ok: false, reason: 'remote' });
+    expect(await remoteHead(branch)).toBe(before);
+    expect(fs.existsSync(path.join(userDataDir, 'escaped.json'))).toBe(false);
+  }, GIT_HEAVY_TIMEOUT);
+
   it('persists the latest successful selected set and skips an unchanged push', async () => {
     seedSkill('alpha');
     seedSkill('beta');

@@ -2,13 +2,12 @@ import os from 'os';
 import { ipcMain } from 'electron';
 import { IPC } from '@shared/ipc-channels';
 import type { BackupListResult, ConfigBackupBinding } from '@shared/config-backup';
-import type { ImportDecision } from '@shared/config-backup';
 import { sanitizeMachineLabel } from '@shared/config-backup';
 import { loadBinding, saveBinding } from '../config-backup/binding-store';
 import { loadIntent } from '../config-backup/intent-store';
 import { enumerateLiveItems } from '../config-backup/enumerate';
 import { runBackup } from '../config-backup/backup';
-import { listBackupSources, listImportItems, planImport, applyImport } from '../config-backup/import';
+import { listBackupSources, listImportItems, applyImport } from '../config-backup/import';
 
 /**
  * IPC surface for App-Level Config Backup & Copy (Backup half — Phase 2).
@@ -55,11 +54,11 @@ export function registerConfigBackupHandlers(): void {
     },
   );
 
-  ipcMain.handle(IPC.CONFIG_BACKUP_PLAN_IMPORT, async (_event, payload: { ref: string; ids: string[] }) => {
-    return planImport(payload.ref, payload.ids);
-  });
-
-  ipcMain.handle(IPC.CONFIG_BACKUP_APPLY_IMPORT, async (_event, payload: { ref: string; decisions: ImportDecision[] }) => {
-    return applyImport(payload.ref, payload.decisions);
-  });
+  ipcMain.handle(
+    IPC.CONFIG_BACKUP_APPLY_IMPORT,
+    async (
+      _event,
+      payload: { remoteUrl: string; sourceRevision: string; selectedIds: string[] },
+    ) => applyImport(payload.remoteUrl, payload.sourceRevision, payload.selectedIds),
+  );
 }

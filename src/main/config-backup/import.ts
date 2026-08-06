@@ -1,16 +1,15 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import crypto from 'crypto';
+import { app } from 'electron';
 import {
   REPO_SKILLS_DIR,
   REPO_MCP_FILE,
   REPO_MACHINE_MANIFEST,
+  SKILL_CONTROL_MARKERS,
   backupItemId,
-  type BackupItemKind,
   type BackupMachineManifest,
-  type ImportEntry,
-  type ImportItemPlan,
-  type ImportDecision,
   type BackupSource,
   type ImportApplyResult,
   type ImportItemSummary,
@@ -19,11 +18,10 @@ import {
 import { log } from '@shared/logger';
 import { getAppInstanceId } from '../app-instance-id';
 import { parseSkillMeta, skillDirPath } from '../skills-store';
-import { listMcpServers, addMcpServer, updateMcpServer } from '../mcp-store';
-import { validateMcpEntry } from '@shared/mcp';
+import { validateMcpEntry, type McpServerBlock } from '@shared/mcp';
+import { mcpConfigSourcePath } from '../mcp-projection';
 import { onSkillsChanged } from '../skills-sync';
 import { onMcpChanged } from '../mcp-sync';
-import type { McpServerBlock } from '@shared/mcp';
 import { enumerateLiveItems } from './enumerate';
 import { withConfigBackupOperation } from './operation-lock';
 import { createSideCar, type SideCar } from './side-car';
@@ -38,8 +36,6 @@ function parseId(id: string): { kind: string; name: string } | null {
   if (!name) return null;
   return { kind: id.slice(0, idx), name };
 }
-
-const hasNul = (s: string) => s.includes('\u0000');
 
 /**
  * Import (copy) — READ side. Browse a chosen backup branch (another machine's or
@@ -93,7 +89,7 @@ function inspectImportItems(directory: string, liveIds: Set<string>): ImportList
   const impact = (id: string) => liveIds.has(id) ? 'replace-local' as const : 'new' as const;
 
   const skillsDirectory = path.join(directory, REPO_SKILLS_DIR);
-  if (fs.existsSync(skillsDirectory)) {
+  if (pathExists(skillsDirectory)) {
     const skillsStat = fs.lstatSync(skillsDirectory);
     if (skillsStat.isSymbolicLink() || !skillsStat.isDirectory()) {
       throw new Error('Source skills path must be a regular directory.');
@@ -127,7 +123,7 @@ function inspectImportItems(directory: string, liveIds: Set<string>): ImportList
   }
 
   const mcpFile = path.join(directory, REPO_MCP_FILE);
-  if (fs.existsSync(mcpFile)) {
+  if (pathExists(mcpFile)) {
     const stat = fs.lstatSync(mcpFile);
     if (stat.isSymbolicLink() || !stat.isFile()) {
       issues.push({ scope: 'mcp', message: 'mcp-servers.json must be a regular file.' });
@@ -185,194 +181,450 @@ export async function listImportItems(
   });
 }
 
-// ── Import plan: per-item overwrite status vs live (NOT a conflict — just an
-//    honest "you already have this; here's what changes; replace or keep") ────
-
-/** Per-file status of a backup skill vs live. Live-only files are ignored
- *  (Import never deletes — no-orphan invariant `skills#8`). */
-async function planSkill(ref: string, name: string, sideCar: SideCar): Promise<ImportEntry[]> {
-  const prefix = `${REPO_SKILLS_DIR}/${name}/`;
-  const files = (await sideCar.listFilesAtRef(ref)).filter((f) => f.startsWith(prefix));
-  const liveDir = skillDirPath(name);
-  const entries: ImportEntry[] = [];
-  for (const f of files) {
-    const rel = f.slice(prefix.length);
-    const backup = (await sideCar.readFileAtRef(ref, f)) ?? '';
-    const liveFile = path.join(liveDir, rel);
-    if (!fs.existsSync(liveFile)) {
-      entries.push({ path: rel, change: 'new' });
-      continue;
-    }
-    const live = fs.readFileSync(liveFile, 'utf-8');
-    if (live === backup) {
-      entries.push({ path: rel, change: 'identical' });
-      continue;
-    }
-    const binary = hasNul(backup) || hasNul(live);
-    entries.push({ path: rel, change: 'differs', ...(binary ? { binary: true } : { live, backup }) });
-  }
-  return entries;
+interface PreparedSkill {
+  id: string;
+  name: string;
+  preparedDirectory: string;
+  destination: string;
+  changed: boolean;
 }
 
-/** Status of a backup MCP server block vs live (per-server, never whole-file). */
-async function planMcp(ref: string, name: string, sideCar: SideCar): Promise<ImportEntry[]> {
-  const raw = await sideCar.readFileAtRef(ref, REPO_MCP_FILE);
-  if (!raw) return [];
-  let servers: Record<string, unknown>;
-  try {
-    servers = JSON.parse(raw);
-  } catch {
-    return [];
-  }
-  if (!(name in servers)) return [];
-  const backup = JSON.stringify(servers[name], null, 2);
-  const liveAll = listMcpServers();
-  if (!(name in liveAll)) return [{ path: '', change: 'new' }];
-  const live = JSON.stringify(liveAll[name], null, 2);
-  if (live === backup) return [{ path: '', change: 'identical' }];
-  return [{ path: '', change: 'differs', live, backup }];
+interface PreparedMcp {
+  changedIds: string[];
+  nextBytes: Buffer | null;
+  previousBytes: Buffer | null;
+  destination: string;
 }
 
-/**
- * Compute the per-item import plan for a chosen branch + selected items: for each
- * item, the file/block-level status (new / identical / differs) and whether it
- * conflicts (any differs → needs a replace/keep confirm). Read-only; the caller
- * must have fetched (via listBackupSources). Items absent from the branch drop.
- */
-export async function planImport(
-  ref: string,
-  selectedIds: string[],
-  sideCar: SideCar = createSideCar(),
-): Promise<ImportItemPlan[]> {
-  const out: ImportItemPlan[] = [];
-  for (const id of selectedIds) {
+interface PreparedImport {
+  skills: PreparedSkill[];
+  mcp: PreparedMcp;
+}
+
+interface AppliedSkill {
+  item: PreparedSkill;
+  displaced: string;
+  hadDestination: boolean;
+}
+
+export interface ImportApplyDependencies {
+  createSideCar(): SideCar;
+  beforeCanonicalWrite?(itemId: string): void;
+  beforeRollback?(itemId: string): void;
+  notifySkillsChanged(): void;
+  notifyMcpChanged(): void;
+}
+
+const DEFAULT_APPLY_DEPENDENCIES: ImportApplyDependencies = {
+  createSideCar,
+  notifySkillsChanged: onSkillsChanged,
+  notifyMcpChanged: onMcpChanged,
+};
+
+function importFailure(
+  phase: 'source' | 'validation' | 'apply' | 'rollback',
+  message: string,
+  rollback: 'not-needed' | 'completed' | 'failed',
+  itemId?: string,
+): ImportApplyResult {
+  return { ok: false, phase, message, rollback, ...(itemId ? { itemId } : {}) };
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function parseSelectedIds(selectedIds: string[]): {
+  skills: Array<{ id: string; name: string }>;
+  mcp: Array<{ id: string; name: string }>;
+} | ImportApplyResult {
+  const skills: Array<{ id: string; name: string }> = [];
+  const mcp: Array<{ id: string; name: string }> = [];
+  for (const id of [...new Set(selectedIds)]) {
     const parsed = parseId(id);
-    if (!parsed) continue;
-    let entries: ImportEntry[] = [];
-    if (parsed.kind === 'skill') entries = await planSkill(ref, parsed.name, sideCar);
-    else if (parsed.kind === 'mcp') entries = await planMcp(ref, parsed.name, sideCar);
-    else continue;
-    if (entries.length === 0) continue; // not present in this branch
-    out.push({
-      id,
-      kind: parsed.kind as BackupItemKind,
-      name: parsed.name,
-      entries,
-      hasConflict: entries.some((e) => e.change === 'differs'),
-    });
-  }
-  return out;
-}
-
-// ── Apply: the ONLY writer of live. Per item: new files always copied, identical
-//    skipped, differing files copied iff replaceConflicts. Never deletes. ──────
-
-/** Recursively list file paths under `dir`, relative to it. */
-function walkFiles(dir: string, base = dir): string[] {
-  const out: string[] = [];
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    const abs = path.join(dir, entry.name);
-    if (entry.isDirectory()) out.push(...walkFiles(abs, base));
-    else out.push(path.relative(base, abs));
-  }
-  return out;
-}
-
-function bytesEqual(a: string, b: string): boolean {
-  return fs.readFileSync(a).equals(fs.readFileSync(b));
-}
-
-function copyFile(src: string, dest: string): void {
-  fs.mkdirSync(path.dirname(dest), { recursive: true });
-  fs.copyFileSync(src, dest);
-}
-
-/** Copy a backup skill's files into live (binary-safe). Returns files written. */
-async function applySkill(ref: string, name: string, replace: boolean, sideCar: SideCar): Promise<number> {
-  const repoRel = `${REPO_SKILLS_DIR}/${name}`;
-  await sideCar.checkoutPathsFromRef(ref, [repoRel]); // materialize real bytes
-  const srcDir = path.join(sideCar.dir, repoRel);
-  if (!fs.existsSync(srcDir)) return 0;
-  const liveDir = skillDirPath(name);
-  let written = 0;
-  for (const rel of walkFiles(srcDir)) {
-    const src = path.join(srcDir, rel);
-    const dest = path.join(liveDir, rel);
-    if (!fs.existsSync(dest)) {
-      copyFile(src, dest); // new file — additive
-      written++;
-    } else if (bytesEqual(src, dest)) {
-      // identical — skip
-    } else if (replace) {
-      copyFile(src, dest); // differs + replace
-      written++;
+    if (!parsed || (parsed.kind !== 'skill' && parsed.kind !== 'mcp')) {
+      return importFailure('validation', `Unknown Import item: ${id}`, 'not-needed', id);
     }
-    // differs + keep → leave live untouched
+    (parsed.kind === 'skill' ? skills : mcp).push({ id, name: parsed.name });
   }
-  return written;
+  if (skills.length === 0 && mcp.length === 0) {
+    return importFailure('validation', 'Select at least one item to Import.', 'not-needed');
+  }
+  return { skills, mcp };
 }
 
-/** Merge one backup MCP server block into live (per-server, never whole-file). */
-async function applyMcp(ref: string, name: string, replace: boolean, sideCar: SideCar): Promise<boolean> {
-  const raw = await sideCar.readFileAtRef(ref, REPO_MCP_FILE);
-  if (!raw) return false;
-  let servers: Record<string, unknown>;
+function copyValidatedSkill(
+  sourceDirectory: string,
+  destinationDirectory: string,
+  name: string,
+): string | null {
+  const validation = validateSkillPayload(name, sourceDirectory);
+  if (!validation.valid) return validation.reason;
+  for (const relative of validation.payloadFiles) {
+    const source = path.join(sourceDirectory, relative);
+    const destination = path.join(destinationDirectory, relative);
+    fs.mkdirSync(path.dirname(destination), { recursive: true });
+    fs.copyFileSync(source, destination);
+  }
+  return null;
+}
+
+function preserveDestinationMarkers(destination: string, prepared: string): void {
+  let destinationIsDirectory = false;
   try {
-    servers = JSON.parse(raw);
+    const stat = fs.lstatSync(destination);
+    destinationIsDirectory = !stat.isSymbolicLink() && stat.isDirectory();
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+    throw error;
+  }
+  if (!destinationIsDirectory) return;
+  for (const marker of SKILL_CONTROL_MARKERS) {
+    try {
+      const stat = fs.lstatSync(path.join(destination, marker));
+      if (stat.isFile() || stat.isSymbolicLink()) {
+        fs.mkdirSync(prepared, { recursive: true });
+        fs.writeFileSync(path.join(prepared, marker), '');
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+  }
+}
+
+function treesEqual(left: string, right: string): boolean {
+  let leftStat: fs.Stats;
+  let rightStat: fs.Stats;
+  try {
+    leftStat = fs.lstatSync(left);
+    rightStat = fs.lstatSync(right);
   } catch {
     return false;
   }
-  if (!(name in servers)) return false;
-  const block = servers[name] as McpServerBlock;
-  const live = listMcpServers();
-  if (!(name in live)) {
-    return addMcpServer(name, block).ok;
+  if (leftStat.isSymbolicLink() || rightStat.isSymbolicLink()) {
+    return leftStat.isSymbolicLink()
+      && rightStat.isSymbolicLink()
+      && fs.readlinkSync(left) === fs.readlinkSync(right);
   }
-  if (JSON.stringify(live[name]) === JSON.stringify(block)) return false; // identical
-  if (!replace) return false; // keep live
-  return updateMcpServer(name, block).ok;
+  if (leftStat.isFile() || rightStat.isFile()) {
+    return leftStat.isFile() && rightStat.isFile()
+      && fs.readFileSync(left).equals(fs.readFileSync(right));
+  }
+  if (!leftStat.isDirectory() || !rightStat.isDirectory()) return false;
+  const leftEntries = fs.readdirSync(left).sort();
+  const rightEntries = fs.readdirSync(right).sort();
+  if (leftEntries.length !== rightEntries.length) return false;
+  return leftEntries.every((entry, index) => (
+    entry === rightEntries[index]
+    && treesEqual(path.join(left, entry), path.join(right, entry))
+  ));
+}
+
+function pathExists(file: string): boolean {
+  try {
+    fs.lstatSync(file);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw error;
+  }
+}
+
+function readKeyedMcpFile(file: string, label: string): {
+  bytes: Buffer | null;
+  servers: Record<string, unknown>;
+} {
+  if (!pathExists(file)) return { bytes: null, servers: Object.create(null) };
+  const stat = fs.lstatSync(file);
+  if (stat.isSymbolicLink() || !stat.isFile()) throw new Error(`${label} must be a regular file`);
+  const bytes = fs.readFileSync(file);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(bytes.toString('utf-8'));
+  } catch {
+    throw new Error(`${label} is not valid JSON`);
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`${label} is not a keyed JSON object`);
+  }
+  return { bytes, servers: parsed as Record<string, unknown> };
+}
+
+function stableMcpBytes(servers: Record<string, unknown>): Buffer {
+  const stable: Record<string, unknown> = Object.create(null);
+  for (const name of Object.keys(servers).sort()) stable[name] = servers[name];
+  return Buffer.from(JSON.stringify(stable, null, 2) + '\n', 'utf-8');
+}
+
+function prepareImport(
+  sourceRoot: string,
+  operationRoot: string,
+  selected: Exclude<ReturnType<typeof parseSelectedIds>, ImportApplyResult>,
+): PreparedImport | ImportApplyResult {
+  const skills: PreparedSkill[] = [];
+  try {
+    for (const { id, name } of selected.skills) {
+      const source = path.join(sourceRoot, REPO_SKILLS_DIR, name);
+      const preparedDirectory = path.join(operationRoot, 'prepared', REPO_SKILLS_DIR, name);
+      const validationError = copyValidatedSkill(source, preparedDirectory, name);
+      if (validationError) {
+        return importFailure('validation', `Cannot Import ${id}: ${validationError}`, 'not-needed', id);
+      }
+      const destination = skillDirPath(name);
+      preserveDestinationMarkers(destination, preparedDirectory);
+      const preparedValidation = validateSkillPayload(name, preparedDirectory);
+      if (!preparedValidation.valid) {
+        return importFailure(
+          'validation',
+          `Cannot Import ${id}: staged payload ${preparedValidation.reason}`,
+          'not-needed',
+          id,
+        );
+      }
+      skills.push({
+        id,
+        name,
+        preparedDirectory,
+        destination,
+        changed: !treesEqual(destination, preparedDirectory),
+      });
+    }
+
+    const destination = mcpConfigSourcePath();
+    if (selected.mcp.length === 0) {
+      return {
+        skills,
+        mcp: { changedIds: [], nextBytes: null, previousBytes: null, destination },
+      };
+    }
+
+    let sourceMcp: ReturnType<typeof readKeyedMcpFile>;
+    let liveMcp: ReturnType<typeof readKeyedMcpFile>;
+    try {
+      sourceMcp = readKeyedMcpFile(path.join(sourceRoot, REPO_MCP_FILE), 'Source mcp-servers.json');
+      liveMcp = readKeyedMcpFile(destination, 'Local mcp-servers.json');
+    } catch (error) {
+      return importFailure(
+        'validation',
+        `Cannot Import ${selected.mcp[0].id}: ${errorMessage(error)}`,
+        'not-needed',
+        selected.mcp[0].id,
+      );
+    }
+    const next: Record<string, unknown> = Object.create(null);
+    for (const [name, block] of Object.entries(liveMcp.servers)) next[name] = block;
+    const changedIds: string[] = [];
+    for (const { id, name } of selected.mcp) {
+      if (!Object.prototype.hasOwnProperty.call(sourceMcp.servers, name)) {
+        return importFailure('validation', `Import item ${id} is missing from the source`, 'not-needed', id);
+      }
+      const block = sourceMcp.servers[name];
+      const validationError = validateMcpEntry(name, block);
+      if (validationError) {
+        return importFailure('validation', `Cannot Import ${id}: ${validationError}`, 'not-needed', id);
+      }
+      if (JSON.stringify(liveMcp.servers[name]) !== JSON.stringify(block)) changedIds.push(id);
+      next[name] = structuredClone(block) as McpServerBlock;
+    }
+    return {
+      skills,
+      mcp: {
+        changedIds,
+        nextBytes: changedIds.length > 0 ? stableMcpBytes(next) : null,
+        previousBytes: liveMcp.bytes,
+        destination,
+      },
+    };
+  } catch (error) {
+    return importFailure('validation', `Could not prepare Import: ${errorMessage(error)}`, 'not-needed');
+  }
+}
+
+function writeAtomic(file: string, bytes: Buffer): void {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const temporary = `${file}.import-${crypto.randomUUID()}.tmp`;
+  try {
+    fs.writeFileSync(temporary, bytes);
+    fs.renameSync(temporary, file);
+  } finally {
+    fs.rmSync(temporary, { force: true });
+  }
+}
+
+function rollbackApplied(
+  appliedSkills: AppliedSkill[],
+  mcpAttempted: boolean,
+  prepared: PreparedImport,
+  dependencies: ImportApplyDependencies,
+): { ok: true } | { ok: false; itemId?: string; messages: string[] } {
+  const failures: Array<{ itemId?: string; message: string }> = [];
+  if (mcpAttempted) {
+    const itemId = prepared.mcp.changedIds[0];
+    try {
+      dependencies.beforeRollback?.(itemId ?? 'mcp');
+      if (prepared.mcp.previousBytes === null) fs.rmSync(prepared.mcp.destination, { force: true });
+      else writeAtomic(prepared.mcp.destination, prepared.mcp.previousBytes);
+    } catch (error) {
+      failures.push({ itemId, message: `MCP rollback failed: ${errorMessage(error)}` });
+    }
+  }
+  for (const applied of [...appliedSkills].reverse()) {
+    try {
+      dependencies.beforeRollback?.(applied.item.id);
+      fs.rmSync(applied.item.destination, { recursive: true, force: true });
+      if (applied.hadDestination) fs.renameSync(applied.displaced, applied.item.destination);
+    } catch (error) {
+      failures.push({
+        itemId: applied.item.id,
+        message: `${applied.item.id} rollback failed: ${errorMessage(error)}`,
+      });
+    }
+  }
+  return failures.length === 0
+    ? { ok: true }
+    : { ok: false, itemId: failures[0].itemId, messages: failures.map((failure) => failure.message) };
+}
+
+function commitPreparedImport(
+  prepared: PreparedImport,
+  operationRoot: string,
+  dependencies: ImportApplyDependencies,
+): ImportApplyResult {
+  const changedSkills = prepared.skills.filter((item) => item.changed);
+  const appliedSkills: AppliedSkill[] = [];
+  let mcpAttempted = false;
+  let currentItemId: string | undefined;
+  try {
+    for (const item of changedSkills) {
+      currentItemId = item.id;
+      dependencies.beforeCanonicalWrite?.(item.id);
+      const displaced = path.join(operationRoot, 'displaced', item.name);
+      fs.mkdirSync(path.dirname(displaced), { recursive: true });
+      const hadDestination = pathExists(item.destination);
+      if (hadDestination) fs.renameSync(item.destination, displaced);
+      const applied = { item, displaced, hadDestination };
+      appliedSkills.push(applied);
+      fs.mkdirSync(path.dirname(item.destination), { recursive: true });
+      fs.renameSync(item.preparedDirectory, item.destination);
+    }
+
+    if (prepared.mcp.nextBytes) {
+      currentItemId = prepared.mcp.changedIds[0];
+      dependencies.beforeCanonicalWrite?.(currentItemId);
+      mcpAttempted = true;
+      writeAtomic(prepared.mcp.destination, prepared.mcp.nextBytes);
+    }
+  } catch (error) {
+    const rollback = rollbackApplied(appliedSkills, mcpAttempted, prepared, dependencies);
+    if (!rollback.ok) {
+      return importFailure(
+        'rollback',
+        `Import failed (${errorMessage(error)}); ${rollback.messages.join('; ')}`,
+        'failed',
+        rollback.itemId ?? currentItemId,
+      );
+    }
+    return importFailure(
+      'apply',
+      `Could not apply ${currentItemId ?? 'Import'}: ${errorMessage(error)}`,
+      appliedSkills.length > 0 || mcpAttempted ? 'completed' : 'not-needed',
+      currentItemId,
+    );
+  }
+
+  const itemsChanged = [
+    ...changedSkills.map((item) => item.id),
+    ...prepared.mcp.changedIds,
+  ];
+  return {
+    ok: true,
+    skillsWritten: changedSkills.length,
+    mcpWritten: prepared.mcp.changedIds.length,
+    itemsChanged,
+  };
+}
+
+function cleanupOperationDirectory(directory: string): void {
+  try {
+    fs.rmSync(directory, { recursive: true, force: true });
+  } catch (error) {
+    log.warn('config-backup', `could not clean Import staging ${directory}: ${errorMessage(error)}`);
+  }
 }
 
 /**
- * Apply an import into live — the ONLY writer of live config. For each decision:
- * new files/servers are always copied (additive), identical skipped, and
- * differing ones overwritten only when replaceConflicts is set. Live-only skill
- * files are never removed (no-orphan `skills#8`). Writes route through the normal
- * re-projection pipelines (onSkillsChanged / onMcpChanged).
+ * Import selected complete items from one pinned source revision. Preparation
+ * validates and stages the whole batch before canonical mutation. Caught write
+ * failures roll every already-applied item back while the process is running.
  */
 export async function applyImport(
-  ref: string,
-  decisions: ImportDecision[],
-  sideCar: SideCar = createSideCar(),
+  remoteUrl: string,
+  sourceRevision: string,
+  selectedIds: string[],
+  dependencies: ImportApplyDependencies = DEFAULT_APPLY_DEPENDENCIES,
 ): Promise<ImportApplyResult> {
-  let skillsWritten = 0;
-  let mcpWritten = 0;
-  const itemsChanged: string[] = [];
-  let anySkill = false;
-  let anyMcp = false;
+  const selected = parseSelectedIds(selectedIds);
+  if ('ok' in selected) return selected;
 
-  for (const { id, replaceConflicts } of decisions) {
-    const parsed = parseId(id);
-    if (!parsed) continue;
-    if (parsed.kind === 'skill') {
-      const n = await applySkill(ref, parsed.name, replaceConflicts, sideCar);
-      if (n > 0) {
-        skillsWritten += n;
-        itemsChanged.push(id);
-        anySkill = true;
-      }
-    } else if (parsed.kind === 'mcp') {
-      const wrote = await applyMcp(ref, parsed.name, replaceConflicts, sideCar);
-      if (wrote) {
-        mcpWritten++;
-        itemsChanged.push(id);
-        anyMcp = true;
-      }
+  return withConfigBackupOperation(async () => {
+    const commit = resolveImportSource(remoteUrl, sourceRevision);
+    if (!commit) {
+      return importFailure(
+        'source',
+        'This Import source is no longer available. Find backups again.',
+        'not-needed',
+      );
     }
-  }
 
-  if (anySkill) onSkillsChanged();
-  if (anyMcp) onMcpChanged();
-  log.info('config-backup', `import applied: ${skillsWritten} skill file(s), ${mcpWritten} mcp server(s)`);
-  return { ok: true, skillsWritten, mcpWritten, itemsChanged };
+    let operationRoot: string;
+    try {
+      operationRoot = fs.mkdtempSync(path.join(app.getPath('userData'), '.config-backup-import-'));
+    } catch (error) {
+      return importFailure(
+        'validation',
+        `Could not create Import staging: ${errorMessage(error)}`,
+        'not-needed',
+      );
+    }
+    const sourceRoot = path.join(operationRoot, 'source');
+    let cleaned = false;
+    try {
+      try {
+        const sideCar = dependencies.createSideCar();
+        await sideCar.ensureClone(remoteUrl);
+        await sideCar.exportCommit(commit, sourceRoot);
+      } catch (error) {
+        return importFailure('source', `Could not load Import source: ${errorMessage(error)}`, 'not-needed');
+      }
+
+      const prepared = prepareImport(sourceRoot, operationRoot, selected);
+      if ('ok' in prepared) return prepared;
+      const result = commitPreparedImport(prepared, operationRoot, dependencies);
+      if (!result.ok) return result;
+
+      cleanupOperationDirectory(operationRoot);
+      cleaned = true;
+      if (result.skillsWritten > 0) {
+        try {
+          dependencies.notifySkillsChanged();
+        } catch (error) {
+          log.error('config-backup', `post-Import Skills projection failed: ${errorMessage(error)}`);
+        }
+      }
+      if (result.mcpWritten > 0) {
+        try {
+          dependencies.notifyMcpChanged();
+        } catch (error) {
+          log.error('config-backup', `post-Import MCP projection failed: ${errorMessage(error)}`);
+        }
+      }
+      log.info(
+        'config-backup',
+        `import applied: ${result.skillsWritten} Skill(s), ${result.mcpWritten} MCP server(s)`,
+      );
+      return result;
+    } finally {
+      if (!cleaned) cleanupOperationDirectory(operationRoot);
+    }
+  });
 }

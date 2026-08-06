@@ -3,6 +3,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import simpleGit from 'simple-git';
+import type { ImportApplyDependencies } from './import';
 
 /**
  * Import READ side: after a machine backs up, another machine fetches + lists
@@ -18,7 +19,7 @@ vi.mock('electron', () => ({
 
 const { runBackup } = await import('./backup');
 const { saveBinding } = await import('./binding-store');
-const { listBackupSources, listImportItems, planImport, applyImport } = await import('./import');
+const { listBackupSources, listImportItems, applyImport } = await import('./import');
 const { createSideCar } = await import('./side-car');
 const { resetPinnedImportSourcesForTests } = await import('./source-revisions');
 
@@ -89,10 +90,23 @@ async function advanceBranch(branch: string, mutate: (directory: string) => void
   await git.push('origin', branch);
 }
 
-async function fetchSideCar(): Promise<void> {
-  const sideCar = createSideCar();
-  await sideCar.ensureClone(bareRemote);
-  await sideCar.fetch();
+function applyDependencies(
+  overrides: Partial<ImportApplyDependencies> = {},
+): ImportApplyDependencies {
+  return {
+    createSideCar,
+    notifySkillsChanged: () => {},
+    notifyMcpChanged: () => {},
+    ...overrides,
+  };
+}
+
+function stagingDirectories(): string[] {
+  return fs.readdirSync(userDataDir).filter((name) => name.startsWith('.config-backup-import-'));
+}
+
+async function discoverSource(branch = 'backup/src') {
+  return (await listBackupSources(bareRemote)).find((source) => source.branch === branch)!;
 }
 
 beforeEach(async () => {
@@ -217,100 +231,240 @@ describe('config-backup import (read side)', () => {
     expect(pinned.items[0].detail).toBe('version one');
   }, GIT_HEAVY_TIMEOUT);
 
-  it('planImport classifies each entry new / identical / differs vs live', async () => {
-    // Live: skill "shared" with SKILL.md = X, and mcp "fs".
-    const sharedDir = path.join(userDataDir, 'skills', 'skills', 'shared');
-    fs.mkdirSync(sharedDir, { recursive: true });
-    fs.writeFileSync(path.join(sharedDir, 'SKILL.md'), 'X');
-    seedMcp({ fs: { type: 'stdio', command: 'node' } });
-    saveBinding({ remoteUrl: bareRemote, machineLabel: 'work-mac' });
-
-    // A branch that differs from live in every way.
-    await pushBranch('backup/src', {
-      'skills/shared/SKILL.md': 'Y',                        // differs
-      'skills/shared/extra.txt': 'e',                       // new (live lacks it)
-      'skills/beta/SKILL.md': '---\nname: beta\n---\n',     // new skill
-      'mcp-servers.json': JSON.stringify({
-        fs: { type: 'stdio', command: 'node' },             // identical to live
-        git: { type: 'stdio', command: 'git-mcp' },         // new server
-      }),
+  it('transactionally replaces whole selected items, preserves local markers, and leaves unrelated items', async () => {
+    seedSkill('shared', 'local shared');
+    fs.writeFileSync(liveSkillFile('shared', 'old-only.txt'), 'remove me');
+    fs.writeFileSync(liveSkillFile('shared', '.locked'), '');
+    fs.writeFileSync(liveSkillFile('shared', '.disabled'), '');
+    seedSkill('unrelated', 'leave local');
+    seedMcp({
+      existing: { type: 'stdio', command: 'old' },
+      untouched: { type: 'http', url: 'https://local.example' },
     });
+    await pushBranch('backup/src', {
+      'skills/shared/SKILL.md': '---\nname: shared\ndescription: source shared\n---\n',
+      'skills/shared/new-only.txt': 'source file',
+      'skills/shared/.locked': 'source marker ignored',
+      'skills/beta/SKILL.md': '---\nname: beta\ndescription: source beta\n---\n',
+      'skills/beta/.disabled': 'source marker ignored',
+      'mcp-servers.json': JSON.stringify({
+        existing: { type: 'stdio', command: 'new' },
+        git: { type: 'stdio', command: 'git-mcp' },
+      }),
+      'machine.json': JSON.stringify({ appInstanceId: 'src', machineLabel: 'source' }),
+    });
+    const source = await discoverSource();
 
-    await fetchSideCar();
-    const ref = 'origin/backup/src';
-    const plan = await planImport(ref, ['skill:shared', 'skill:beta', 'mcp:fs', 'mcp:git']);
+    const result = await applyImport(
+      bareRemote,
+      source.sourceRevision,
+      ['skill:shared', 'skill:beta', 'mcp:existing', 'mcp:git'],
+      applyDependencies(),
+    );
 
-    const shared = plan.find((p) => p.id === 'skill:shared')!;
-    expect(shared.hasConflict).toBe(true);
-    const sharedByPath = Object.fromEntries(shared.entries.map((e) => [e.path, e.change]));
-    expect(sharedByPath['SKILL.md']).toBe('differs');
-    expect(sharedByPath['extra.txt']).toBe('new');
-    const skillMd = shared.entries.find((e) => e.path === 'SKILL.md')!;
-    expect(skillMd.live).toBe('X');
-    expect(skillMd.backup).toBe('Y');
+    expect(result).toMatchObject({ ok: true, skillsWritten: 2, mcpWritten: 2 });
+    if (!result.ok) throw new Error(result.message);
+    expect(result.itemsChanged).toEqual(['skill:shared', 'skill:beta', 'mcp:existing', 'mcp:git']);
+    expect(readLive('shared', 'new-only.txt')).toBe('source file');
+    expect(fs.existsSync(liveSkillFile('shared', 'old-only.txt'))).toBe(false);
+    expect(fs.existsSync(liveSkillFile('shared', '.locked'))).toBe(true);
+    expect(fs.existsSync(liveSkillFile('shared', '.disabled'))).toBe(true);
+    expect(fs.existsSync(liveSkillFile('beta', '.locked'))).toBe(false);
+    expect(fs.existsSync(liveSkillFile('beta', '.disabled'))).toBe(false);
+    expect(readLive('unrelated', 'SKILL.md')).toContain('leave local');
+    expect(readLiveMcp()).toEqual({
+      existing: { type: 'stdio', command: 'new' },
+      git: { type: 'stdio', command: 'git-mcp' },
+      untouched: { type: 'http', url: 'https://local.example' },
+    });
+    expect(stagingDirectories()).toEqual([]);
+  }, GIT_HEAVY_TIMEOUT);
 
-    expect(plan.find((p) => p.id === 'skill:beta')!.hasConflict).toBe(false);
-    expect(plan.find((p) => p.id === 'mcp:fs')!.entries[0].change).toBe('identical');
-    expect(plan.find((p) => p.id === 'mcp:git')!.entries[0].change).toBe('new');
+  it('rejects a malformed selected source item after staging siblings but before live writes', async () => {
+    await pushBranch('backup/src', {
+      'skills/alpha/SKILL.md': '---\nname: alpha\ndescription: valid\n---\n',
+      'skills/broken/SKILL.md': '---\nname: wrong\n---\n',
+      'machine.json': JSON.stringify({ appInstanceId: 'src', machineLabel: 'source' }),
+    });
+    const source = await discoverSource();
+
+    const result = await applyImport(
+      bareRemote,
+      source.sourceRevision,
+      ['skill:alpha', 'skill:broken'],
+      applyDependencies(),
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      phase: 'validation',
+      itemId: 'skill:broken',
+      rollback: 'not-needed',
+    });
+    expect(fs.existsSync(liveSkillFile('alpha', 'SKILL.md'))).toBe(false);
+    expect(stagingDirectories()).toEqual([]);
+  }, GIT_HEAVY_TIMEOUT);
+
+  it('rejects malformed local MCP preservation before applying a staged Skill', async () => {
+    seedSkill('alpha', 'local alpha');
+    fs.writeFileSync(path.join(userDataDir, 'mcp-servers.json'), '{broken local json');
+    await pushBranch('backup/src', {
+      'skills/alpha/SKILL.md': '---\nname: alpha\ndescription: source alpha\n---\n',
+      'mcp-servers.json': JSON.stringify({ existing: { type: 'stdio', command: 'new' } }),
+      'machine.json': JSON.stringify({ appInstanceId: 'src', machineLabel: 'source' }),
+    });
+    const source = await discoverSource();
+
+    const result = await applyImport(
+      bareRemote,
+      source.sourceRevision,
+      ['skill:alpha', 'mcp:existing'],
+      applyDependencies(),
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      phase: 'validation',
+      itemId: 'mcp:existing',
+      rollback: 'not-needed',
+    });
+    expect(readLive('alpha', 'SKILL.md')).toContain('local alpha');
+    expect(fs.readFileSync(path.join(userDataDir, 'mcp-servers.json'), 'utf-8')).toBe('{broken local json');
+    expect(stagingDirectories()).toEqual([]);
+  }, GIT_HEAVY_TIMEOUT);
+
+  it('rejects empty and unknown selections without creating staging', async () => {
+    expect(await applyImport(bareRemote, 'unused', [], applyDependencies())).toMatchObject({
+      ok: false,
+      phase: 'validation',
+      rollback: 'not-needed',
+    });
+    expect(await applyImport(bareRemote, 'unused', ['settings:all'], applyDependencies())).toMatchObject({
+      ok: false,
+      phase: 'validation',
+      itemId: 'settings:all',
+      rollback: 'not-needed',
+    });
+    expect(stagingDirectories()).toEqual([]);
   });
 
-  it('applyImport: new always copied, replace overwrites, keep preserves, never deletes', async () => {
-    // Live: skill "shared" (SKILL.md=X + a live-only notes.md) and mcp "existing".
-    const sharedDir = path.join(userDataDir, 'skills', 'skills', 'shared');
-    fs.mkdirSync(sharedDir, { recursive: true });
-    fs.writeFileSync(path.join(sharedDir, 'SKILL.md'), 'X');
-    fs.writeFileSync(path.join(sharedDir, 'notes.md'), 'keep-me'); // live-only
+  it('rolls back earlier Skill swaps when a later canonical write fails', async () => {
+    seedSkill('alpha', 'local alpha');
+    seedSkill('beta', 'local beta');
+    await pushBranch('backup/src', {
+      'skills/alpha/SKILL.md': '---\nname: alpha\ndescription: source alpha\n---\n',
+      'skills/beta/SKILL.md': '---\nname: beta\ndescription: source beta\n---\n',
+      'machine.json': JSON.stringify({ appInstanceId: 'src', machineLabel: 'source' }),
+    });
+    const source = await discoverSource();
+
+    const result = await applyImport(
+      bareRemote,
+      source.sourceRevision,
+      ['skill:alpha', 'skill:beta'],
+      applyDependencies({
+        beforeCanonicalWrite: (itemId) => {
+          if (itemId === 'skill:beta') throw new Error('injected write failure');
+        },
+      }),
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      phase: 'apply',
+      itemId: 'skill:beta',
+      rollback: 'completed',
+    });
+    expect(readLive('alpha', 'SKILL.md')).toContain('local alpha');
+    expect(readLive('beta', 'SKILL.md')).toContain('local beta');
+    expect(stagingDirectories()).toEqual([]);
+  }, GIT_HEAVY_TIMEOUT);
+
+  it('returns a typed rollback failure with the affected item', async () => {
+    seedSkill('alpha', 'local alpha');
+    seedSkill('beta', 'local beta');
+    await pushBranch('backup/src', {
+      'skills/alpha/SKILL.md': '---\nname: alpha\ndescription: source alpha\n---\n',
+      'skills/beta/SKILL.md': '---\nname: beta\ndescription: source beta\n---\n',
+      'machine.json': JSON.stringify({ appInstanceId: 'src', machineLabel: 'source' }),
+    });
+    const source = await discoverSource();
+
+    const result = await applyImport(
+      bareRemote,
+      source.sourceRevision,
+      ['skill:alpha', 'skill:beta'],
+      applyDependencies({
+        beforeCanonicalWrite: (itemId) => {
+          if (itemId === 'skill:beta') throw new Error('injected write failure');
+        },
+        beforeRollback: (itemId) => {
+          if (itemId === 'skill:alpha') throw new Error('injected rollback failure');
+        },
+      }),
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      phase: 'rollback',
+      itemId: 'skill:alpha',
+      rollback: 'failed',
+    });
+    expect(stagingDirectories()).toEqual([]);
+  }, GIT_HEAVY_TIMEOUT);
+
+  it('rolls Skills back and preserves the MCP file when the atomic MCP step fails', async () => {
+    seedSkill('alpha', 'local alpha');
     seedMcp({ existing: { type: 'stdio', command: 'old' } });
-    saveBinding({ remoteUrl: bareRemote, machineLabel: 'work-mac' });
-
+    const previousMcp = fs.readFileSync(path.join(userDataDir, 'mcp-servers.json'));
     await pushBranch('backup/src', {
-      'skills/shared/SKILL.md': 'Y',                              // differs
-      'skills/shared/extra.txt': 'e',                            // new
-      'skills/beta/SKILL.md': '---\nname: beta\n---\n',          // new skill
-      'mcp-servers.json': JSON.stringify({
-        existing: { type: 'stdio', command: 'new' },             // differs
-        git: { type: 'stdio', command: 'g' },                    // new
+      'skills/alpha/SKILL.md': '---\nname: alpha\ndescription: source alpha\n---\n',
+      'mcp-servers.json': JSON.stringify({ existing: { type: 'stdio', command: 'new' } }),
+      'machine.json': JSON.stringify({ appInstanceId: 'src', machineLabel: 'source' }),
+    });
+    const source = await discoverSource();
+
+    const result = await applyImport(
+      bareRemote,
+      source.sourceRevision,
+      ['skill:alpha', 'mcp:existing'],
+      applyDependencies({
+        beforeCanonicalWrite: (itemId) => {
+          if (itemId === 'mcp:existing') throw new Error('injected MCP failure');
+        },
       }),
-    });
+    );
 
-    await fetchSideCar();
-    const res = await applyImport('origin/backup/src', [
-      { id: 'skill:shared', replaceConflicts: true },
-      { id: 'skill:beta', replaceConflicts: false },
-      { id: 'mcp:git', replaceConflicts: false },
-      { id: 'mcp:existing', replaceConflicts: false }, // differs + keep
-    ]);
+    expect(result).toMatchObject({ ok: false, phase: 'apply', rollback: 'completed' });
+    expect(readLive('alpha', 'SKILL.md')).toContain('local alpha');
+    expect(fs.readFileSync(path.join(userDataDir, 'mcp-servers.json'))).toEqual(previousMcp);
+    expect(fs.readdirSync(userDataDir).some((name) => name.includes('.import-') && name.endsWith('.tmp'))).toBe(false);
+    expect(stagingDirectories()).toEqual([]);
+  }, GIT_HEAVY_TIMEOUT);
 
-    // skills: SKILL.md replaced, extra.txt added, live-only notes.md untouched.
-    expect(readLive('shared', 'SKILL.md')).toBe('Y');
-    expect(readLive('shared', 'extra.txt')).toBe('e');
-    expect(readLive('shared', 'notes.md')).toBe('keep-me');
-    expect(fs.existsSync(liveSkillFile('beta', 'SKILL.md'))).toBe(true);
-
-    // mcp: git added; existing kept (differs + keep) — per-server, not whole-file.
-    const mcp = readLiveMcp();
-    expect(mcp.git).toBeDefined();
-    expect(mcp.existing.command).toBe('old');
-
-    expect(res).toMatchObject({ ok: true, skillsWritten: 3, mcpWritten: 1 });
-    expect(res.itemsChanged.sort()).toEqual(['mcp:git', 'skill:beta', 'skill:shared']);
-  });
-
-  it('applyImport keep: differing file preserved but new files still copied', async () => {
-    const sharedDir = path.join(userDataDir, 'skills', 'skills', 'shared');
-    fs.mkdirSync(sharedDir, { recursive: true });
-    fs.writeFileSync(path.join(sharedDir, 'SKILL.md'), 'X');
-    saveBinding({ remoteUrl: bareRemote, machineLabel: 'm' });
+  it('keeps committed canonical data when post-commit projections fail', async () => {
+    seedSkill('alpha', 'local alpha');
+    seedMcp({ existing: { type: 'stdio', command: 'old' } });
     await pushBranch('backup/src', {
-      'skills/shared/SKILL.md': 'Y',      // differs → keep
-      'skills/shared/extra.txt': 'e',     // new → still copied
+      'skills/alpha/SKILL.md': '---\nname: alpha\ndescription: source alpha\n---\n',
+      'mcp-servers.json': JSON.stringify({ existing: { type: 'stdio', command: 'new' } }),
+      'machine.json': JSON.stringify({ appInstanceId: 'src', machineLabel: 'source' }),
     });
+    const source = await discoverSource();
 
-    await fetchSideCar();
-    const res = await applyImport('origin/backup/src', [{ id: 'skill:shared', replaceConflicts: false }]);
+    const result = await applyImport(
+      bareRemote,
+      source.sourceRevision,
+      ['skill:alpha', 'mcp:existing'],
+      applyDependencies({
+        notifySkillsChanged: () => { throw new Error('projection failed'); },
+        notifyMcpChanged: () => { throw new Error('projection failed'); },
+      }),
+    );
 
-    expect(readLive('shared', 'SKILL.md')).toBe('X');   // kept
-    expect(readLive('shared', 'extra.txt')).toBe('e');  // new copied
-    expect(res.skillsWritten).toBe(1);
-  });
+    expect(result).toMatchObject({ ok: true, skillsWritten: 1, mcpWritten: 1 });
+    expect(readLive('alpha', 'SKILL.md')).toContain('source alpha');
+    expect(readLiveMcp().existing.command).toBe('new');
+    expect(stagingDirectories()).toEqual([]);
+  }, GIT_HEAVY_TIMEOUT);
 });
