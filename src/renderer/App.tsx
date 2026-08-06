@@ -139,7 +139,30 @@ export function App() {
       }
     });
 
-    return () => { offLoad(); offSave(); };
+    const offRun = onBackup('backup:run', async ({ selectedIds, ...token }) => {
+      try {
+        const result = await window.shelfApi.configBackup.run(selectedIds);
+        if (!result.ok) {
+          if (!failBackupPanelRequest(token, result.message)) {
+            logStale('run failure', token.sessionRevision, token.requestRevision);
+          }
+          return;
+        }
+        const list = await window.shelfApi.configBackup.list();
+        const status = result.pushed
+          ? `Backed up ${result.itemCount} item${result.itemCount === 1 ? '' : 's'}.`
+          : 'Selected items are already up to date.';
+        if (!acceptBackupPanelList(token, list, status)) {
+          logStale('run', token.sessionRevision, token.requestRevision);
+        }
+      } catch (error) {
+        if (!failBackupPanelRequest(token, messageOf(error))) {
+          logStale('run failure', token.sessionRevision, token.requestRevision);
+        }
+      }
+    });
+
+    return () => { offLoad(); offSave(); offRun(); };
   }, []);
 
   // Connection health (heartbeat) → main store, keyed by tabId. Bound directly

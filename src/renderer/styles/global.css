@@ -5017,7 +5017,7 @@ button {
 }
 .web-list-action:hover { background: var(--surface); color: var(--text); }
 
-/* ── Config Backup settings tab ── */
+/* ── Config Backup ── */
 .backup-field {
   display: block;
   margin: 0 0 10px;
@@ -5177,6 +5177,95 @@ button {
 .backup-config-details dd {
   margin: 0;
   overflow-wrap: anywhere;
+}
+
+.backup-selection {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 2px;
+}
+
+.backup-selection-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.backup-selection-heading .web-settings-hint {
+  margin: 4px 0 0;
+}
+
+.backup-selection-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  font-size: 12px;
+}
+
+.backup-selection-summary-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.backup-selection-summary-row span:last-child {
+  color: var(--text-muted);
+  text-align: right;
+}
+
+.backup-selection-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.backup-selection-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.backup-selection-group h4 {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.backup-selection-group .backup-check {
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.backup-check.invalid {
+  cursor: not-allowed;
+  opacity: 0.72;
+}
+
+.backup-item-badge {
+  display: inline-block;
+  margin-left: 7px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--accent);
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.backup-item-badge.invalid {
+  background: color-mix(in srgb, var(--error, #e06c6c) 18%, transparent);
+  color: var(--error, #e06c6c);
 }
 /* Import review */
 .import-review-item {

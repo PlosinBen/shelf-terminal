@@ -4,9 +4,10 @@ import {
   acceptBackupPanelList,
   getBackupPanelSnapshot,
   openBackupPanelSession,
+  toggleBackupItemSelection,
 } from '../backup-panel-store';
 import { __resetBusForTests, onBackup } from '../events';
-import { requestBackupPanelLoad, requestBackupSettingsSave } from './BackupView';
+import { requestBackupPanelLoad, requestBackupRun, requestBackupSettingsSave } from './BackupView';
 
 const EMPTY_LIST: BackupListResult = {
   binding: null,
@@ -53,5 +54,51 @@ describe('BackupView intents', () => {
     expect(getBackupPanelSnapshot().busy).toBe('save-settings');
     offLoad();
     offSave();
+  });
+
+  it('preselects only valid saved intent and leaves new items unchecked', () => {
+    requestBackupPanelLoad();
+    const token = {
+      sessionRevision: getBackupPanelSnapshot().sessionRevision,
+      requestRevision: 1,
+    };
+    acceptBackupPanelList(token, {
+      binding: { remoteUrl: '/tmp/backup.git', machineLabel: 'work' },
+      suggestedLabel: 'test-machine',
+      intent: ['skill:alpha', 'skill:broken'],
+      items: [
+        { id: 'skill:alpha', kind: 'skill', name: 'alpha', valid: true },
+        { id: 'skill:beta', kind: 'skill', name: 'beta', valid: true },
+        {
+          id: 'skill:broken',
+          kind: 'skill',
+          name: 'broken',
+          valid: false,
+          invalidReason: 'SKILL.md frontmatter is invalid',
+        },
+      ],
+    });
+
+    expect(getBackupPanelSnapshot().selectedIds).toEqual(['skill:alpha']);
+    expect(getBackupPanelSnapshot().selectionExpanded).toBe(false);
+
+    toggleBackupItemSelection('skill:beta');
+    toggleBackupItemSelection('skill:broken');
+    expect(getBackupPanelSnapshot().selectedIds).toEqual(['skill:alpha', 'skill:beta']);
+  });
+
+  it('emits the current selection through a versioned run intent', () => {
+    let received: unknown;
+    const off = onBackup('backup:run', (payload) => { received = payload; });
+
+    requestBackupRun(['skill:alpha', 'mcp:fs']);
+
+    expect(received).toEqual({
+      sessionRevision: getBackupPanelSnapshot().sessionRevision,
+      requestRevision: 1,
+      selectedIds: ['skill:alpha', 'mcp:fs'],
+    });
+    expect(getBackupPanelSnapshot().busy).toBe('run');
+    off();
   });
 });

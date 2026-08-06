@@ -5,6 +5,7 @@ import type { BackupPanelRequestToken } from '../backup-panel-store';
 export interface BackupEventMap {
   'backup:load-local': BackupPanelRequestToken;
   'backup:save-settings': BackupPanelRequestToken & { settings: ConfigBackupBinding };
+  'backup:run': BackupPanelRequestToken & { selectedIds: string[] };
 }
 
 export type BackupEventName = keyof BackupEventMap;

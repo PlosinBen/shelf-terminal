@@ -1,8 +1,8 @@
 import { useSyncExternalStore } from 'react';
-import type { BackupListResult, ConfigBackupBinding } from '@shared/config-backup';
+import type { BackupItemSummary, BackupListResult, ConfigBackupBinding } from '@shared/config-backup';
 
 export type BackupPanelTab = 'backup' | 'import';
-export type BackupPanelRequestKind = 'load' | 'save-settings';
+export type BackupPanelRequestKind = 'load' | 'save-settings' | 'run';
 
 export interface BackupPanelRequestToken {
   sessionRevision: number;
@@ -19,6 +19,11 @@ interface BackupPanelState {
   suggestedLabel: string;
   configDraft: ConfigBackupBinding;
   configEditing: boolean;
+  items: BackupItemSummary[];
+  intent: string[];
+  selectedIds: string[];
+  selectionExpanded: boolean;
+  status: string | null;
   error: string | null;
 }
 
@@ -36,6 +41,11 @@ function initialState(sessionRevision: number): BackupPanelState {
     suggestedLabel: '',
     configDraft: { remoteUrl: '', machineLabel: '' },
     configEditing: false,
+    items: [],
+    intent: [],
+    selectedIds: [],
+    selectionExpanded: true,
+    status: null,
     error: null,
   };
 }
@@ -74,7 +84,7 @@ export function setBackupActiveTab(activeTab: BackupPanelTab): void {
 
 export function startBackupPanelRequest(kind: BackupPanelRequestKind): BackupPanelRequestToken {
   const requestRevision = state.requestRevision + 1;
-  publish({ ...state, requestRevision, busy: kind, error: null });
+  publish({ ...state, requestRevision, busy: kind, status: null, error: null });
   return { sessionRevision: state.sessionRevision, requestRevision };
 }
 
@@ -86,8 +96,11 @@ function isCurrent(token: BackupPanelRequestToken): boolean {
 export function acceptBackupPanelList(
   token: BackupPanelRequestToken,
   result: BackupListResult,
+  status: string | null = null,
 ): boolean {
   if (!isCurrent(token)) return false;
+  const validIds = new Set(result.items.filter((item) => item.valid).map((item) => item.id));
+  const selectedIds = [...new Set(result.intent)].filter((id) => validIds.has(id));
   const configDraft = {
     remoteUrl: result.binding?.remoteUrl ?? '',
     machineLabel: result.binding?.machineLabel ?? result.suggestedLabel,
@@ -100,6 +113,11 @@ export function acceptBackupPanelList(
     suggestedLabel: result.suggestedLabel,
     configDraft,
     configEditing: false,
+    items: result.items,
+    intent: result.intent,
+    selectedIds,
+    selectionExpanded: selectedIds.length === 0,
+    status,
     error: null,
   });
   return true;
@@ -107,7 +125,7 @@ export function acceptBackupPanelList(
 
 export function failBackupPanelRequest(token: BackupPanelRequestToken, message: string): boolean {
   if (!isCurrent(token)) return false;
-  publish({ ...state, loaded: true, busy: null, error: message });
+  publish({ ...state, loaded: true, busy: null, status: null, error: message });
   return true;
 }
 
@@ -128,7 +146,30 @@ export function cancelBackupConfigEdit(): void {
 }
 
 export function updateBackupConfigDraft(patch: Partial<ConfigBackupBinding>): void {
-  publish({ ...state, configDraft: { ...state.configDraft, ...patch }, error: null });
+  publish({ ...state, configDraft: { ...state.configDraft, ...patch }, status: null, error: null });
+}
+
+export function setBackupSelectionExpanded(selectionExpanded: boolean): void {
+  if (!selectionExpanded && state.selectedIds.length === 0) return;
+  publish({ ...state, selectionExpanded, status: null, error: null });
+}
+
+export function toggleBackupItemSelection(id: string): void {
+  const item = state.items.find((candidate) => candidate.id === id);
+  if (!item?.valid || state.busy === 'run') return;
+  const selected = new Set(state.selectedIds);
+  if (selected.has(id)) selected.delete(id);
+  else selected.add(id);
+  const selectedIds = state.items
+    .map((candidate) => candidate.id)
+    .filter((candidateId) => selected.has(candidateId));
+  publish({
+    ...state,
+    selectedIds,
+    selectionExpanded: selectedIds.length === 0 ? true : state.selectionExpanded,
+    status: null,
+    error: null,
+  });
 }
 
 export function isBackupConfigDirty(snapshot: BackupPanelState = state): boolean {
