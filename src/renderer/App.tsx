@@ -36,7 +36,13 @@ import { setInMemoryMax, setSaveThrottleMs } from './agentTabStore';
 import { getTheme, buildThemeVars } from './themes';
 import { clearAgentSession } from './storage/agent-history';
 import { bindProcessMemorySummary } from './process-memory-sync';
-import { acceptBackupPanelList, failBackupPanelRequest } from './backup-panel-store';
+import {
+  acceptBackupPanelList,
+  acceptImportItems,
+  acceptImportSources,
+  failBackupPanelRequest,
+  failImportPanelRequest,
+} from './backup-panel-store';
 import './styles/global.css';
 
 export function App() {
@@ -162,7 +168,45 @@ export function App() {
       }
     });
 
-    return () => { offLoad(); offSave(); offRun(); };
+    const offFindImportSources = onBackup(
+      'backup:find-import-sources',
+      async ({ remoteUrl, ...token }) => {
+        try {
+          const sources = await window.shelfApi.configBackup.listSources(remoteUrl);
+          if (!acceptImportSources(token, sources)) {
+            logStale('find-import-sources', token.sessionRevision, token.requestRevision);
+          }
+        } catch (error) {
+          if (!failImportPanelRequest(token, messageOf(error))) {
+            logStale('find-import-sources failure', token.sessionRevision, token.requestRevision);
+          }
+        }
+      },
+    );
+
+    const offLoadImportSource = onBackup(
+      'backup:load-import-source',
+      async ({ remoteUrl, sourceRevision, ...token }) => {
+        try {
+          const result = await window.shelfApi.configBackup.listImportItems(remoteUrl, sourceRevision);
+          if (!acceptImportItems(token, result)) {
+            logStale('load-import-source', token.sessionRevision, token.requestRevision);
+          }
+        } catch (error) {
+          if (!failImportPanelRequest(token, messageOf(error))) {
+            logStale('load-import-source failure', token.sessionRevision, token.requestRevision);
+          }
+        }
+      },
+    );
+
+    return () => {
+      offLoad();
+      offSave();
+      offRun();
+      offFindImportSources();
+      offLoadImportSource();
+    };
   }, []);
 
   // Connection health (heartbeat) → main store, keyed by tabId. Bound directly

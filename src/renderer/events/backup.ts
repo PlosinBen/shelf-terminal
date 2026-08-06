@@ -6,6 +6,11 @@ export interface BackupEventMap {
   'backup:load-local': BackupPanelRequestToken;
   'backup:save-settings': BackupPanelRequestToken & { settings: ConfigBackupBinding };
   'backup:run': BackupPanelRequestToken & { selectedIds: string[] };
+  'backup:find-import-sources': BackupPanelRequestToken & { remoteUrl: string };
+  'backup:load-import-source': BackupPanelRequestToken & {
+    remoteUrl: string;
+    sourceRevision: string;
+  };
 }
 
 export type BackupEventName = keyof BackupEventMap;

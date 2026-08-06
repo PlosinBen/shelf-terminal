@@ -5,11 +5,16 @@ import {
   cancelBackupConfigEdit,
   getBackupPanelSnapshot,
   isBackupConfigDirty,
+  selectAllValidImportItems,
   setBackupActiveTab,
   setBackupSelectionExpanded,
+  startImportSourceDiscovery,
+  startImportSourceLoad,
   startBackupPanelRequest,
   toggleBackupItemSelection,
+  toggleImportItemSelection,
   updateBackupConfigDraft,
+  updateImportUrl,
   useBackupPanelStore,
 } from '../backup-panel-store';
 import { emitBackup } from '../events';
@@ -30,6 +35,25 @@ export function requestBackupRun(selectedIds: string[]): void {
   emitBackup('backup:run', {
     ...startBackupPanelRequest('run'),
     selectedIds,
+  });
+}
+
+export function requestImportSourceDiscovery(): void {
+  const snapshot = getBackupPanelSnapshot();
+  emitBackup('backup:find-import-sources', {
+    ...startImportSourceDiscovery(),
+    remoteUrl: snapshot.importUrl,
+  });
+}
+
+export function requestImportSourceLoad(sourceRevision: string): void {
+  const snapshot = getBackupPanelSnapshot();
+  const token = startImportSourceLoad(sourceRevision);
+  if (!sourceRevision) return;
+  emitBackup('backup:load-import-source', {
+    ...token,
+    remoteUrl: snapshot.importUrl,
+    sourceRevision,
   });
 }
 
@@ -76,7 +100,7 @@ export function BackupView() {
         {panel.activeTab === 'backup' ? (
           <BackupConfig panel={panel} />
         ) : (
-          <p className="web-settings-hint">Import Skills and MCP servers from a backup.</p>
+          <ImportPanel panel={panel} />
         )}
       </div>
     </aside>
@@ -288,6 +312,153 @@ function BackupSelectionGroup({
               {item.name}
               {item.valid && !intent.has(item.id) && <span className="backup-item-badge">New</span>}
               {!item.valid && <span className="backup-item-badge invalid">Invalid</span>}
+            </span>
+            <span className="web-list-sub">
+              {item.valid ? (item.detail ?? item.kind) : item.invalidReason}
+            </span>
+          </span>
+        </label>
+      ))}
+    </section>
+  );
+}
+
+function ImportPanel({ panel }: { panel: ReturnType<typeof getBackupPanelSnapshot> }) {
+  if (!panel.loaded) return <p className="web-settings-hint">Loading…</p>;
+
+  const finding = panel.busy === 'find-import-sources';
+  const loadingSource = panel.busy === 'load-import-source';
+  const validItems = panel.importItems?.filter((item) => item.valid) ?? [];
+  const allValidSelected = validItems.length > 0
+    && validItems.every((item) => panel.importSelectedIds.includes(item.id));
+
+  return (
+    <section className="import-panel">
+      <div>
+        <h3>Import into this machine</h3>
+        <p className="web-settings-hint">
+          Find a backup from any Git remote. This URL is not saved.
+        </p>
+      </div>
+      <label className="backup-field">
+        <span className="backup-field-label">Remote URL</span>
+        <input
+          className="backup-input"
+          type="text"
+          placeholder="git@github.com:me/shelf-backups.git"
+          value={panel.importUrl}
+          onChange={(event) => updateImportUrl(event.target.value)}
+        />
+      </label>
+      <div className="backup-actions">
+        <button
+          className="conn-btn conn-btn-next"
+          disabled={finding || !panel.importUrl.trim()}
+          onClick={requestImportSourceDiscovery}
+        >
+          {finding ? 'Finding…' : 'Find backups'}
+        </button>
+      </div>
+
+      {panel.importSources && panel.importSources.length === 0 && (
+        <p className="web-settings-hint">No Shelf backups found at this remote.</p>
+      )}
+
+      {panel.importSources && panel.importSources.length > 0 && (
+        <label className="backup-field import-source-field">
+          <span className="backup-field-label">Backup source</span>
+          <select
+            className="backup-input import-source"
+            value={panel.importSourceRevision ?? ''}
+            onChange={(event) => requestImportSourceLoad(event.target.value)}
+          >
+            <option value="">Choose a backup…</option>
+            {panel.importSources.map((source) => (
+              <option key={source.sourceRevision} value={source.sourceRevision}>
+                {source.machineLabel}{source.isSelf ? ' (this machine)' : ''}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+
+      {loadingSource && <p className="web-settings-hint">Loading source…</p>}
+
+      {panel.importItems && !loadingSource && (
+        <section className="import-item-selection" aria-label="Import selection">
+          <div className="backup-selection-heading">
+            <div>
+              <h3>Items to import</h3>
+              <p className="web-settings-hint">Selected items will replace the same local item.</p>
+            </div>
+            <button
+              className="web-list-action"
+              disabled={validItems.length === 0 || allValidSelected}
+              onClick={selectAllValidImportItems}
+            >
+              Select all
+            </button>
+          </div>
+          <div className="backup-selection-groups">
+            <ImportSelectionGroup
+              title="Skills"
+              items={panel.importItems.filter((item) => item.kind === 'skill')}
+              selectedIds={panel.importSelectedIds}
+            />
+            <ImportSelectionGroup
+              title="MCP servers"
+              items={panel.importItems.filter((item) => item.kind === 'mcp')}
+              selectedIds={panel.importSelectedIds}
+              issue={panel.importIssues.find((candidate) => candidate.scope === 'mcp')?.message}
+            />
+          </div>
+          <p className="import-selection-count">
+            {panel.importSelectedIds.length} selected
+          </p>
+        </section>
+      )}
+
+      {panel.importError && <p className="backup-status backup-status-err">{panel.importError}</p>}
+    </section>
+  );
+}
+
+function ImportSelectionGroup({
+  title,
+  items,
+  selectedIds,
+  issue,
+}: {
+  title: string;
+  items: NonNullable<ReturnType<typeof getBackupPanelSnapshot>['importItems']>;
+  selectedIds: string[];
+  issue?: string;
+}) {
+  const selected = new Set(selectedIds);
+  return (
+    <section className="backup-selection-group">
+      <h4>{title}</h4>
+      {issue && <p className="import-category-issue"><span>Invalid</span>{issue}</p>}
+      {items.length === 0 && !issue ? (
+        <p className="web-settings-hint">None found.</p>
+      ) : items.map((item) => (
+        <label className={`backup-check${item.valid ? '' : ' invalid'}`} key={item.id}>
+          <input
+            type="checkbox"
+            checked={item.valid && selected.has(item.id)}
+            disabled={!item.valid}
+            onChange={() => toggleImportItemSelection(item.id)}
+          />
+          <span className="backup-check-text">
+            <span className="web-list-main">
+              {item.name}
+              {item.valid ? (
+                <span className={`import-impact ${item.impact}`}>
+                  {item.impact === 'new' ? 'New' : 'Replace local'}
+                </span>
+              ) : (
+                <span className="backup-item-badge invalid">Invalid</span>
+              )}
             </span>
             <span className="web-list-sub">
               {item.valid ? (item.detail ?? item.kind) : item.invalidReason}

@@ -5,6 +5,27 @@ import simpleGit from 'simple-git';
 
 const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
 
+async function pushBackupBranch(
+  remote: string,
+  workingDirectory: string,
+  branch: string,
+  files: Record<string, string>,
+): Promise<void> {
+  await simpleGit().clone(remote, workingDirectory);
+  const git = simpleGit(workingDirectory);
+  await git.addConfig('user.name', 'Backup E2E');
+  await git.addConfig('user.email', 'backup-e2e@shelf.local');
+  await git.checkout(['-b', branch]);
+  for (const [relative, contents] of Object.entries(files)) {
+    const file = path.join(workingDirectory, relative);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, contents);
+  }
+  await git.add(['-A']);
+  await git.commit('seed backup source');
+  await git.push(['-u', 'origin', branch]);
+}
+
 test('backup operation panel opens from the footer and resets to Back up after close', async ({ shelfApp: { page } }) => {
   const toggle = page.locator('.right-tab-btn[title="Backup"]');
   await expect(toggle).toBeVisible();
@@ -21,7 +42,7 @@ test('backup operation panel opens from the footer and resets to Back up after c
 
   await importTab.click();
   await expect(importTab).toHaveAttribute('aria-selected', 'true');
-  await expect(panel.getByText('Import Skills and MCP servers from a backup.')).toBeVisible();
+  await expect(panel.getByRole('heading', { name: 'Import into this machine' })).toBeVisible();
 
   await panel.getByRole('button', { name: 'Close Backup' }).click();
   await expect(panel).toBeHidden();
@@ -186,4 +207,84 @@ test('Back up preselects intent, blocks invalid Skills, and preserves unselected
   await expect(alphaCheck).not.toBeChecked();
   await expect(betaCheck).toBeChecked();
   await expect(brokenRow.locator('input')).toBeDisabled();
+});
+
+test('Import discovers pinned sources from an unsaved URL and labels selectable impact', async ({ shelfApp }) => {
+  const { page, userDataDir } = shelfApp;
+  const remote = path.join(userDataDir, 'import-remote.git');
+  await simpleGit().raw(['init', '--bare', remote]);
+
+  const appInstanceFile = path.join(userDataDir, 'app-instance-id');
+  if (!fs.existsSync(appInstanceFile)) fs.writeFileSync(appInstanceFile, 'e2e-self-id\n');
+  const appInstanceId = fs.readFileSync(appInstanceFile, 'utf-8').trim();
+
+  const localAlpha = path.join(userDataDir, 'skills', 'skills', 'alpha');
+  fs.mkdirSync(localAlpha, { recursive: true });
+  fs.writeFileSync(
+    path.join(localAlpha, 'SKILL.md'),
+    '---\nname: alpha\ndescription: local alpha\n---\n',
+  );
+
+  await pushBackupBranch(
+    remote,
+    path.join(userDataDir, 'seed-source'),
+    'backup/source-id',
+    {
+      'machine.json': JSON.stringify({ appInstanceId: 'source-id', machineLabel: 'source-machine' }),
+      'skills/alpha/SKILL.md': '---\nname: alpha\ndescription: remote alpha\n---\n',
+      'skills/beta/SKILL.md': '---\nname: beta\ndescription: remote beta\n---\n',
+      'skills/broken/SKILL.md': '---\nname: wrong-name\n---\n',
+      'mcp-servers.json': '{broken',
+    },
+  );
+  await pushBackupBranch(
+    remote,
+    path.join(userDataDir, 'seed-self'),
+    `backup/${appInstanceId}`,
+    {
+      'machine.json': JSON.stringify({ appInstanceId, machineLabel: 'self-machine' }),
+      'skills/self-restore/SKILL.md': '---\nname: self-restore\ndescription: restore me\n---\n',
+    },
+  );
+
+  expect(fs.existsSync(path.join(userDataDir, 'config-backup.json'))).toBe(false);
+  await page.locator('.right-tab-btn[title="Backup"]').click();
+  const panel = page.locator('.backup-view');
+  await panel.getByRole('tab', { name: 'Import' }).click();
+  const remoteInput = panel.getByLabel('Remote URL');
+  await expect(remoteInput).toHaveValue('');
+  await remoteInput.fill(remote);
+  await panel.getByRole('button', { name: 'Find backups' }).click();
+
+  const sourcePicker = panel.getByLabel('Backup source');
+  await expect(sourcePicker.locator('option')).toContainText([
+    'Choose a backup…',
+    'self-machine (this machine)',
+    'source-machine',
+  ]);
+  await sourcePicker.selectOption({ label: 'source-machine' });
+
+  const selection = panel.locator('.import-item-selection');
+  const alpha = selection.locator('.backup-check', { hasText: 'alpha' });
+  const beta = selection.locator('.backup-check', { hasText: 'beta' });
+  const broken = selection.locator('.backup-check', { hasText: 'broken' });
+  await expect(alpha).toContainText('Replace local');
+  await expect(beta).toContainText('New');
+  await expect(alpha.locator('input')).not.toBeChecked();
+  await expect(beta.locator('input')).not.toBeChecked();
+  await expect(broken.locator('input')).toBeDisabled();
+  await expect(broken).toContainText('does not match folder');
+  await expect(selection.locator('.import-category-issue')).toContainText(
+    'mcp-servers.json is not a keyed JSON object',
+  );
+
+  await selection.getByRole('button', { name: 'Select all' }).click();
+  await expect(alpha.locator('input')).toBeChecked();
+  await expect(beta.locator('input')).toBeChecked();
+  await expect(broken.locator('input')).toBeDisabled();
+  await expect(selection.locator('.import-selection-count')).toHaveText('2 selected');
+
+  await remoteInput.fill(`${remote}-edited`);
+  await expect(panel.locator('.import-source-field')).toHaveCount(0);
+  await expect(panel.locator('.import-item-selection')).toHaveCount(0);
 });
