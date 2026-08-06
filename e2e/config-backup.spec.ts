@@ -1,196 +1,37 @@
 import { test, expect } from './helpers';
-import path from 'path';
-import fs from 'fs';
-import os from 'os';
-import { execFileSync } from 'child_process';
-
-// Settings → Backup tab: the full UI → IPC → git wire for the Backup half.
-// A temp BARE repo stands in for the GitHub remote (local path, real git). We
-// save the remote settings, tick a seeded skill, back up, and assert the remote
-// branch got exactly that skill + the machine manifest. Main-process logic is
-// covered by src/main/config-backup/*.test.ts; this proves the renderer wire.
 
 const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
 
-test('config backup: save settings, tick a skill, back up to my branch', async ({ shelfApp }) => {
-  const { page, userDataDir } = shelfApp;
+test('backup operation panel opens from the footer and resets to Back up after close', async ({ shelfApp: { page } }) => {
+  const toggle = page.locator('.right-tab-btn[title="Backup"]');
+  await expect(toggle).toBeVisible();
 
-  // A local bare repo as the "remote".
-  const remoteDir = fs.mkdtempSync(path.join(os.tmpdir(), 'shelf-backup-remote-'));
-  const bare = path.join(remoteDir, 'backups.git');
-  execFileSync('git', ['init', '--bare', bare]);
+  await toggle.click();
+  const panel = page.locator('.backup-view');
+  await expect(panel).toBeVisible();
+  await expect(toggle).toHaveClass(/active/);
 
-  // Seed a live skill — listSkills() reads live, so post-launch is fine.
-  const skillDir = path.join(userDataDir, 'skills', 'skills', 'demo');
-  fs.mkdirSync(skillDir, { recursive: true });
-  // A deliberately long description: this used to force the name column to
-  // collapse to one-char-per-line (the nowrap detail ate all the width). The
-  // layout assertion below guards that regression.
-  const longDesc =
-    'Drive an in-flight feature or spike from orientation to wrap-up using a single transient note that captures requirements, design, and a phased plan.';
-  fs.writeFileSync(
-    path.join(skillDir, 'SKILL.md'),
-    `---\nname: demo\ndescription: ${longDesc}\n---\n# demo\n`,
-    'utf-8',
-  );
+  const backupTab = panel.getByRole('tab', { name: 'Back up' });
+  const importTab = panel.getByRole('tab', { name: 'Import' });
+  await expect(backupTab).toHaveAttribute('aria-selected', 'true');
+  await expect(panel.getByText('Back up selected Skills and MCP servers.')).toBeVisible();
 
-  // Open Settings → Backup.
-  await page.keyboard.press(`${modifier}+,`);
-  await expect(page.locator('.settings-panel')).toBeVisible({ timeout: 3_000 });
-  await page.locator('.settings-tab', { hasText: 'Backup' }).click();
+  await importTab.click();
+  await expect(importTab).toHaveAttribute('aria-selected', 'true');
+  await expect(panel.getByText('Import Skills and MCP servers from a backup.')).toBeVisible();
 
-  // Settings + checklist are on one page (no bind ceremony). The label input is
-  // pre-filled with this machine's (sanitized) hostname.
-  const inputs = page.locator('.backup-input');
-  await expect(inputs.nth(1)).not.toHaveValue('');
-  // Fill the remote URL and Save the settings (no preflight — just persist).
-  await inputs.nth(0).fill(bare);
-  await inputs.nth(1).fill('e2e-machine');
-  await page.locator('.conn-btn-next', { hasText: 'Save settings' }).click();
+  await panel.getByRole('button', { name: 'Close Backup' }).click();
+  await expect(panel).toBeHidden();
+  await expect(toggle).not.toHaveClass(/active/);
 
-  // The checklist shows the demo skill (unticked — it's new/never-backed-up).
-  const demoRow = page.locator('.backup-check', { hasText: 'demo' });
-  await expect(demoRow).toBeVisible({ timeout: 15_000 });
-  const demoCheck = demoRow.locator('input[type=checkbox]');
-  await expect(demoCheck).not.toBeChecked();
-
-  // Layout regression: the name must render on a single line, not collapse to
-  // one-char-per-line (which produced a tall, ~1-char-wide column).
-  const nameBox = await demoRow.locator('.web-list-main').boundingBox();
-  expect(nameBox).toBeTruthy();
-  expect(nameBox!.height).toBeLessThan(30);
-  expect(nameBox!.width).toBeGreaterThan(30);
-
-  // Tick it and back up.
-  await demoCheck.check();
-  await page.locator('.conn-btn-next', { hasText: 'Back up' }).click();
-  // `p.` scopes to the backup result (the settings "Saved." is a span.backup-status-ok).
-  await expect(page.locator('p.backup-status-ok')).toContainText(/Backed up/i, { timeout: 20_000 });
-
-  // The remote branch now holds exactly that skill + the machine manifest.
-  const branch = execFileSync('git', ['--git-dir', bare, 'for-each-ref', '--format=%(refname:short)', 'refs/heads'])
-    .toString()
-    .trim()
-    .split('\n')
-    .find((b) => b.startsWith('backup/'));
-  expect(branch).toBeTruthy();
-  const files = execFileSync('git', ['--git-dir', bare, 'ls-tree', '-r', '--name-only', branch!]).toString();
-  expect(files).toContain('skills/demo/SKILL.md');
-  expect(files).toContain('machine.json');
-
-  // Pre-tick persists from machine-local intent: reopen the tab and the item is
-  // still ticked — no remote read needed to remember what I chose to back up.
-  await page.keyboard.press('Escape');
-  await expect(page.locator('.settings-panel')).toBeHidden({ timeout: 3_000 });
-  await page.keyboard.press(`${modifier}+,`);
-  await page.locator('.settings-tab', { hasText: 'Backup' }).click();
-  const reopened = page.locator('.backup-check', { hasText: 'demo' });
-  await expect(reopened).toBeVisible({ timeout: 15_000 });
-  await expect(reopened.locator('input[type=checkbox]')).toBeChecked();
-
-  fs.rmSync(remoteDir, { recursive: true, force: true });
+  await toggle.click();
+  await expect(panel).toBeVisible();
+  await expect(backupTab).toHaveAttribute('aria-selected', 'true');
 });
 
-test('config backup: import a skill from another machine branch into live', async ({ shelfApp }) => {
-  const { page, userDataDir } = shelfApp;
-
-  const remoteDir = fs.mkdtempSync(path.join(os.tmpdir(), 'shelf-import-remote-'));
-  const bare = path.join(remoteDir, 'backups.git');
-  execFileSync('git', ['init', '--bare', bare]);
-
-  // Push an "other machine" backup branch carrying a skill + manifest.
-  const wt = path.join(remoteDir, 'wt');
-  execFileSync('git', ['clone', bare, wt]);
-  execFileSync('git', ['-C', wt, 'config', 'user.email', 't@t']);
-  execFileSync('git', ['-C', wt, 'config', 'user.name', 't']);
-  execFileSync('git', ['-C', wt, 'checkout', '-b', 'backup/otherid']);
-  fs.mkdirSync(path.join(wt, 'skills', 'imported'), { recursive: true });
-  fs.writeFileSync(
-    path.join(wt, 'skills', 'imported', 'SKILL.md'),
-    '---\nname: imported\ndescription: from laptop\n---\n# imported\n',
-  );
-  fs.writeFileSync(path.join(wt, 'machine.json'), JSON.stringify({ appInstanceId: 'otherid', machineLabel: 'laptop' }));
-  execFileSync('git', ['-C', wt, 'add', '-A']);
-  execFileSync('git', ['-C', wt, 'commit', '-m', 'seed']);
-  execFileSync('git', ['-C', wt, 'push', '-u', 'origin', 'backup/otherid']);
-
-  // Bind this machine (seed the binding directly).
-  fs.writeFileSync(
-    path.join(userDataDir, 'config-backup.json'),
-    JSON.stringify({ remoteUrl: bare, machineLabel: 'e2e' }),
-  );
-
-  // Settings → Backup → Import mode.
+test('Settings no longer exposes a Backup tab', async ({ shelfApp: { page } }) => {
   await page.keyboard.press(`${modifier}+,`);
-  await expect(page.locator('.settings-panel')).toBeVisible({ timeout: 3_000 });
-  await page.locator('.settings-tab', { hasText: 'Backup' }).click();
-  await page.locator('.backup-mode-btn', { hasText: 'Import' }).click();
-
-  // Pick the laptop source → its items load.
-  await page.locator('.import-source').selectOption({ label: 'laptop' });
-  const importedRow = page.locator('.backup-check', { hasText: 'imported' });
-  await expect(importedRow).toBeVisible({ timeout: 15_000 });
-  await importedRow.locator('input[type=checkbox]').check();
-
-  // Review → new item (no conflict) → Import.
-  await page.locator('.conn-btn-next', { hasText: 'Review changes' }).click();
-  await expect(page.locator('.import-entry-new')).toBeVisible({ timeout: 10_000 });
-  await page.locator('.conn-btn-next', { hasText: 'Import' }).click();
-  await expect(page.locator('.backup-status-ok')).toContainText(/Imported/i, { timeout: 20_000 });
-
-  // The skill now exists in live config.
-  expect(fs.existsSync(path.join(userDataDir, 'skills', 'skills', 'imported', 'SKILL.md'))).toBe(true);
-
-  fs.rmSync(remoteDir, { recursive: true, force: true });
-});
-
-test('config backup: replace-all imports overwrite a conflicting skill without reviewing', async ({ shelfApp }) => {
-  const { page, userDataDir } = shelfApp;
-
-  const remoteDir = fs.mkdtempSync(path.join(os.tmpdir(), 'shelf-replaceall-remote-'));
-  const bare = path.join(remoteDir, 'backups.git');
-  execFileSync('git', ['init', '--bare', bare]);
-
-  // Other machine's branch: skill "shared" with NEW content.
-  const wt = path.join(remoteDir, 'wt');
-  execFileSync('git', ['clone', bare, wt]);
-  execFileSync('git', ['-C', wt, 'config', 'user.email', 't@t']);
-  execFileSync('git', ['-C', wt, 'config', 'user.name', 't']);
-  execFileSync('git', ['-C', wt, 'checkout', '-b', 'backup/otherid']);
-  fs.mkdirSync(path.join(wt, 'skills', 'shared'), { recursive: true });
-  fs.writeFileSync(path.join(wt, 'skills', 'shared', 'SKILL.md'), '---\nname: shared\n---\nNEW from laptop\n');
-  fs.writeFileSync(path.join(wt, 'machine.json'), JSON.stringify({ appInstanceId: 'otherid', machineLabel: 'laptop' }));
-  execFileSync('git', ['-C', wt, 'add', '-A']);
-  execFileSync('git', ['-C', wt, 'commit', '-m', 'seed']);
-  execFileSync('git', ['-C', wt, 'push', '-u', 'origin', 'backup/otherid']);
-
-  // Live already has "shared" with OLD content → a conflict.
-  const liveShared = path.join(userDataDir, 'skills', 'skills', 'shared');
-  fs.mkdirSync(liveShared, { recursive: true });
-  fs.writeFileSync(path.join(liveShared, 'SKILL.md'), '---\nname: shared\n---\nOLD local\n');
-
-  fs.writeFileSync(
-    path.join(userDataDir, 'config-backup.json'),
-    JSON.stringify({ remoteUrl: bare, machineLabel: 'e2e' }),
-  );
-
-  await page.keyboard.press(`${modifier}+,`);
-  await page.locator('.settings-tab', { hasText: 'Backup' }).click();
-  await page.locator('.backup-mode-btn', { hasText: 'Import' }).click();
-  await page.locator('.import-source').selectOption({ label: 'laptop' });
-
-  const row = page.locator('.backup-check', { hasText: 'shared' });
-  await expect(row).toBeVisible({ timeout: 15_000 });
-  await row.locator('input[type=checkbox]').check();
-
-  // Tick replace-all → the primary button becomes a direct bulk import.
-  await page.locator('.import-replaceall input[type=checkbox]').check();
-  await page.locator('.conn-btn-next', { hasText: 'Import (replace all)' }).click();
-  await expect(page.locator('.backup-status-ok')).toContainText(/Imported/i, { timeout: 20_000 });
-
-  // No review step was shown, and live was overwritten with the backup version.
-  await expect(page.locator('.import-review-item')).toHaveCount(0);
-  expect(fs.readFileSync(path.join(liveShared, 'SKILL.md'), 'utf-8')).toContain('NEW from laptop');
-
-  fs.rmSync(remoteDir, { recursive: true, force: true });
+  const settings = page.locator('.settings-panel');
+  await expect(settings).toBeVisible();
+  await expect(settings.locator('.settings-tab', { hasText: 'Backup' })).toHaveCount(0);
 });

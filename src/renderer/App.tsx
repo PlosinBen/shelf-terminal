@@ -21,6 +21,7 @@ import { PmView } from './components/PmView';
 import { NotesView } from './components/NotesView';
 import { SkillsView } from './components/SkillsView';
 import { McpView } from './components/McpView';
+import { BackupView } from './components/BackupView';
 import { QuickNoteOverlay } from './components/QuickNoteOverlay';
 import { useKeybindings } from './hooks/useKeybindings';
 import { useStore, setProjects, setSettings, setUpdateStatus, addProject, addTab, setActiveTab, removeTab, removeProject, setSplitTab, clearUnread, setInvalidProjects, setPmActive, setConnectionHealth, setActiveProject, setActiveProjectById, getProjectById, getProjectIndexById, getProjectConfigs, listStableProjectViews, showProjectNotice, resolveAgentProviderForOpen, resolveAgentProviderForConnect } from './store';
@@ -38,7 +39,7 @@ import { bindProcessMemorySummary } from './process-memory-sync';
 import './styles/global.css';
 
 export function App() {
-  const { projects, activeProjectIndex, activeProjectId, sidebarVisible, settingsVisible, commandPickerVisible, devToolsVisible, notesVisible, skillsVisible, mcpVisible, editingProjectIndex, settings, pmVisible, awayMode } = useStore();
+  const { projects, activeProjectIndex, activeProjectId, sidebarVisible, settingsVisible, commandPickerVisible, devToolsVisible, notesVisible, skillsVisible, mcpVisible, backupVisible, editingProjectIndex, settings, pmVisible, awayMode } = useStore();
   useKeybindings();
 
   // Auto-connect a just-added project (e.g. a fresh worktree) once it lands in the
@@ -492,6 +493,7 @@ export function App() {
         {notesVisible && <NotesView />}
         {skillsVisible && <SkillsView />}
         {mcpVisible && <McpView />}
+        {backupVisible && <BackupView />}
         {devToolsVisible && <DevToolsPanel />}
       </main>
       </div>

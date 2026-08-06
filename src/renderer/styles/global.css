@@ -5099,6 +5099,41 @@ button {
   border-color: var(--accent, var(--text-muted));
 }
 .backup-actions { gap: 8px; }
+
+/* ── Backup operation panel ── */
+
+.backup-view {
+  width: 400px;
+}
+
+.backup-panel-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  padding: 10px 12px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.backup-panel-tab {
+  padding: 8px 10px;
+  color: var(--text-muted);
+  border-bottom: 2px solid transparent;
+  font-size: 12px;
+}
+
+.backup-panel-tab:hover {
+  color: var(--text);
+}
+
+.backup-panel-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.backup-panel-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+}
 /* Import review */
 .import-review-item {
   border: 1px solid var(--border);

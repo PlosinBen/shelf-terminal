@@ -2,7 +2,7 @@ import React from 'react';
 import { useStore, toggleProjectList, toggleRightSidebar } from '../store';
 import { tooltipWithShortcut } from '../utils/format-keybinding';
 import { isMac } from '../hooks/useKeybindings';
-import { PanelLeftIcon, PaperPlaneIcon, NoteIcon, CodeIcon, SkillIcon, McpIcon } from './icons';
+import { PanelLeftIcon, PaperPlaneIcon, NoteIcon, CodeIcon, SkillIcon, McpIcon, BackupIcon } from './icons';
 import type { Connection } from '@shared/types';
 import { connectionScopeKey } from '@shared/process-memory';
 import { FooterMemory } from './MemoryDisplay';
@@ -34,6 +34,7 @@ export function BottomBar() {
     notesVisible,
     skillsVisible,
     mcpVisible,
+    backupVisible,
     devToolsVisible,
     awayMode,
     updateStatus,
@@ -159,6 +160,15 @@ export function BottomBar() {
           >
             <McpIcon />
             <span className="sr-only">MCP</span>
+          </button>
+          <button
+            className={`right-tab-btn${backupVisible ? ' active' : ''}`}
+            tabIndex={-1}
+            onClick={() => toggleRightSidebar('backup')}
+            title="Backup"
+          >
+            <BackupIcon />
+            <span className="sr-only">Backup</span>
           </button>
           <button
             className={`right-tab-btn${devToolsVisible ? ' active' : ''}`}

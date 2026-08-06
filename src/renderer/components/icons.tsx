@@ -97,6 +97,17 @@ export function McpIcon({ size }: IconProps) {
   );
 }
 
+// Archive tray with a downward copy arrow — app config Backup / Import.
+export function BackupIcon({ size }: IconProps) {
+  return (
+    <Svg size={size}>
+      <path d="M4 14v5h16v-5" />
+      <path d="M12 3v11" />
+      <polyline points="8 10 12 14 16 10" />
+    </Svg>
+  );
+}
+
 // Closed padlock — a skill locked against agent edits.
 export function LockIcon({ size }: IconProps) {
   return (
