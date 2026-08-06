@@ -161,3 +161,12 @@ export interface BackupListResult {
   /** Default label for a machine that hasn't set one yet (sanitized hostname). */
   suggestedLabel: string;
 }
+
+export type BackupRunResult =
+  | { ok: true; pushed: boolean; branch: string; itemCount: number }
+  | {
+      ok: false;
+      reason: 'not-bound' | 'validation' | 'remote';
+      message: string;
+      itemId?: string;
+    };

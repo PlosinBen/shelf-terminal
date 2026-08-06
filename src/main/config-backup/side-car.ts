@@ -1,5 +1,6 @@
 import path from 'path';
 import fs from 'fs';
+import crypto from 'crypto';
 import { app } from 'electron';
 import simpleGit, { type SimpleGit } from 'simple-git';
 import { log } from '@shared/logger';
@@ -50,6 +51,14 @@ export interface SideCar {
   ensureClone(remoteUrl: string): Promise<void>;
   /** Fetch all remote branches (prune deleted ones). */
   fetch(): Promise<void>;
+  /** Fetched remote branch head, or null when the branch does not exist. */
+  remoteBranchHead(branch: string): Promise<string | null>;
+  /** Reset to a fetched commit, or create a clean parentless working branch. */
+  materializeCleanBase(remoteHead: string | null): Promise<void>;
+  /** Stage only approved paths and commit. Returns false when unchanged. */
+  stagePathsAndCommit(paths: string[], message: string): Promise<boolean>;
+  /** Push current HEAD to the requested remote branch without force. */
+  pushHead(branch: string): Promise<void>;
   /** Create-or-switch to a local branch, tracking origin when it already exists. */
   checkoutBranch(branch: string): Promise<void>;
   /** Stage everything (incl. deletions) and commit. Returns false if nothing changed. */
@@ -106,6 +115,42 @@ export function createSideCar(): SideCar {
     async fetch(): Promise<void> {
       const git = await repo();
       await git.fetch(['--prune']);
+    },
+
+    async remoteBranchHead(branch: string): Promise<string | null> {
+      const git = await repo();
+      try {
+        return (await git.revparse([`refs/remotes/origin/${branch}`])).trim();
+      } catch {
+        return null;
+      }
+    },
+
+    async materializeCleanBase(remoteHead: string | null): Promise<void> {
+      const git = await repo();
+      if (remoteHead) {
+        await git.checkout(['--force', '--detach', remoteHead]);
+        await git.reset(['--hard', remoteHead]);
+      } else {
+        await git.checkout(['--force', '--orphan', `shelf-backup-run-${crypto.randomUUID()}`]);
+        await git.raw(['rm', '-rf', '--ignore-unmatch', '.']);
+      }
+      await git.raw(['clean', '-fdx']);
+    },
+
+    async stagePathsAndCommit(paths: string[], message: string): Promise<boolean> {
+      if (paths.length === 0) return false;
+      const git = await repo();
+      await git.add(['-A', '--', ...paths]);
+      const staged = (await git.diff(['--cached', '--name-only'])).trim();
+      if (!staged) return false;
+      await git.commit(message);
+      return true;
+    },
+
+    async pushHead(branch: string): Promise<void> {
+      const git = await repo();
+      await git.push(['origin', `HEAD:refs/heads/${branch}`]);
     },
 
     async checkoutBranch(branch: string): Promise<void> {

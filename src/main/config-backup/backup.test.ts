@@ -4,13 +4,6 @@ import os from 'os';
 import path from 'path';
 import simpleGit from 'simple-git';
 
-/**
- * Backup action integration test: real skills/MCP on disk under a mocked
- * <userData>, a real temp bare repo as the remote. Runs runBackup(), then a
- * second "machine" clones + reads the pushed branch to prove exactly the ticked
- * items landed (leak gate: unticked never leaves; snapshot: unticking removes).
- */
-
 let userDataDir: string;
 
 vi.mock('electron', () => ({
@@ -19,41 +12,66 @@ vi.mock('electron', () => ({
 
 const { runBackup } = await import('./backup');
 const { saveBinding, thisMachineBranchRef } = await import('./binding-store');
-const { loadIntent } = await import('./intent-store');
+const { loadIntent, saveIntent } = await import('./intent-store');
 const { createSideCar } = await import('./side-car');
 
 let root: string;
 let bareRemote: string;
 const GIT_HEAVY_TIMEOUT = 20_000;
 
-function seedSkill(name: string, aux?: { rel: string; bytes: Buffer }): void {
+function seedSkill(name: string, files: Record<string, string | Buffer> = {}): void {
   const dir = path.join(userDataDir, 'skills', 'skills', name);
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, 'SKILL.md'), `---\nname: ${name}\ndescription: d\n---\n# ${name}\n`);
-  if (aux) fs.writeFileSync(path.join(dir, aux.rel), aux.bytes);
+  for (const [relative, contents] of Object.entries(files)) {
+    const file = path.join(dir, relative);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, contents);
+  }
 }
+
+function replaceSkill(name: string, files: Record<string, string | Buffer> = {}): void {
+  fs.rmSync(path.join(userDataDir, 'skills', 'skills', name), { recursive: true, force: true });
+  seedSkill(name, files);
+}
+
 function seedMcp(servers: Record<string, unknown>): void {
   fs.writeFileSync(path.join(userDataDir, 'mcp-servers.json'), JSON.stringify(servers, null, 2));
 }
 
-/** Clone the bare into a throwaway reader dir and return branch file contents. */
-async function readBranch(branch: string): Promise<{ files: string[]; read: (p: string) => Promise<string | null> }> {
-  const readerUserData = path.join(root, 'reader-' + Math.abs(hash(branch + fs.readdirSync(root).length)));
-  fs.mkdirSync(readerUserData, { recursive: true });
-  const prev = userDataDir;
+async function readBranch(branch: string): Promise<{
+  files: string[];
+  read: (relative: string) => Promise<string | null>;
+}> {
+  const readerUserData = fs.mkdtempSync(path.join(root, 'reader-'));
+  const previous = userDataDir;
   userDataDir = readerUserData;
-  const sc = createSideCar();
-  await sc.ensureClone(bareRemote);
-  await sc.fetch();
+  const sideCar = createSideCar();
+  await sideCar.ensureClone(bareRemote);
+  await sideCar.fetch();
   const ref = `origin/${branch}`;
-  const files = await sc.listFilesAtRef(ref);
-  userDataDir = prev;
-  return { files, read: (p) => sc.readFileAtRef(ref, p) };
+  const files = await sideCar.listFilesAtRef(ref);
+  userDataDir = previous;
+  return { files, read: (relative) => sideCar.readFileAtRef(ref, relative) };
 }
-function hash(s: string): number {
-  let h = 0;
-  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
-  return h;
+
+async function mutateRemoteBranch(
+  branch: string,
+  mutate: (directory: string) => void,
+): Promise<void> {
+  const directory = fs.mkdtempSync(path.join(root, 'remote-writer-'));
+  await simpleGit().clone(bareRemote, directory, ['--branch', branch]);
+  const git = simpleGit(directory);
+  await git.addConfig('user.name', 'Backup Test');
+  await git.addConfig('user.email', 'backup-test@shelf.local');
+  mutate(directory);
+  await git.add(['-A']);
+  await git.commit('test: mutate remote branch');
+  await git.push('origin', branch);
+}
+
+async function remoteHead(branch: string): Promise<string> {
+  return (await simpleGit().raw(['--git-dir', bareRemote, 'rev-parse', `refs/heads/${branch}`])).trim();
 }
 
 beforeEach(async () => {
@@ -64,93 +82,178 @@ beforeEach(async () => {
   userDataDir = path.join(root, 'machineA');
   fs.mkdirSync(userDataDir, { recursive: true });
 });
+
 afterEach(() => {
   if (fs.existsSync(root)) fs.rmSync(root, { recursive: true, force: true });
 });
 
 describe('config-backup runBackup', () => {
-  it('no remote configured → typed not-bound result (never touches git)', async () => {
-    const res = await runBackup(['skill:alpha']);
-    expect(res).toMatchObject({ ok: false, reason: 'not-bound' });
+  it('returns not-bound only after the selected live payload is recoverable', async () => {
+    seedSkill('alpha');
+
+    await expect(runBackup(['skill:alpha'])).resolves.toMatchObject({
+      ok: false,
+      reason: 'not-bound',
+    });
   });
 
-  it('unreachable remote → surfaces the raw git error (no preflight)', async () => {
+  it('an empty selection performs no enumeration or Git work and leaves intent unchanged', async () => {
+    saveIntent(['skill:previous']);
+    const enumerate = vi.fn();
+    const sideCar = vi.fn();
+
+    const result = await runBackup([], {
+      enumerateLiveItems: enumerate,
+      createSideCar: sideCar,
+    });
+
+    expect(result).toMatchObject({ ok: false, reason: 'validation' });
+    expect(enumerate).not.toHaveBeenCalled();
+    expect(sideCar).not.toHaveBeenCalled();
+    expect(loadIntent()).toEqual(['skill:previous']);
+  });
+
+  it('rejects an item deleted after listing before Git and leaves intent unchanged', async () => {
+    saveIntent(['skill:previous']);
+    saveBinding({ remoteUrl: path.join(root, 'does-not-exist.git'), machineLabel: 'm' });
+    const sideCar = vi.fn();
+
+    const result = await runBackup(['skill:gone'], {
+      enumerateLiveItems: async () => [{
+        id: 'skill:gone',
+        kind: 'skill',
+        name: 'gone',
+        valid: true,
+      }],
+      createSideCar: sideCar,
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      reason: 'validation',
+      itemId: 'skill:gone',
+    });
+    expect(sideCar).not.toHaveBeenCalled();
+    expect(loadIntent()).toEqual(['skill:previous']);
+  });
+
+  it('returns a typed remote failure for an unreachable remote', async () => {
     seedSkill('alpha');
     saveBinding({ remoteUrl: path.join(root, 'does-not-exist.git'), machineLabel: 'm' });
-    const res = await runBackup(['skill:alpha']);
-    expect(res.ok).toBe(false);
-    if (!res.ok) {
-      expect(res.reason).toBe('remote');
-      expect(res.message).toBeTruthy();
+
+    const result = await runBackup(['skill:alpha']);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toBe('remote');
+      expect(result.message).toBeTruthy();
     }
   });
 
-  it('pushes exactly the ticked items; unticked never leave (leak gate)', async () => {
-    seedSkill('alpha', { rel: 'logo.png', bytes: Buffer.from([0x89, 0x50, 0x4e, 0x47]) });
-    seedSkill('beta');
-    seedMcp({ fs: { type: 'stdio', command: 'node' }, secret: { type: 'http', url: 'https://x' } });
+  it('replaces selected whole items while preserving unselected items and unrelated remote paths', async () => {
+    seedSkill('alpha', { 'old.js': 'old', 'assets/logo.png': Buffer.from([0x89, 0x50, 0x4e, 0x47]) });
+    seedSkill('beta', { 'keep.js': 'keep' });
+    seedMcp({
+      fs: { type: 'stdio', command: 'old-command' },
+      secret: { type: 'http', url: 'https://old.example' },
+    });
     saveBinding({ remoteUrl: bareRemote, machineLabel: 'work-mac' });
 
-    const res = await runBackup(['skill:alpha', 'mcp:fs']);
-    expect(res).toMatchObject({ ok: true, pushed: true, itemCount: 2 });
-
+    expect(await runBackup(['skill:alpha', 'skill:beta', 'mcp:fs', 'mcp:secret'])).toMatchObject({
+      ok: true,
+      pushed: true,
+    });
     const branch = thisMachineBranchRef();
-    const { files, read } = await readBranch(branch);
+    await mutateRemoteBranch(branch, (directory) => {
+      fs.writeFileSync(path.join(directory, 'remote-note.txt'), 'leave me alone');
+    });
 
-    // ticked skill (incl. binary aux) + ticked mcp + manifest present
-    expect(files).toContain('skills/alpha/SKILL.md');
-    expect(files).toContain('skills/alpha/logo.png');
-    expect(files).toContain('mcp-servers.json');
-    expect(files).toContain('machine.json');
+    replaceSkill('alpha', {
+      'new.js': 'new',
+      '.locked': '',
+      '.disabled': '',
+    });
+    seedMcp({
+      fs: { type: 'stdio', command: 'new-command' },
+      secret: { type: 'http', url: 'https://local-change.example' },
+    });
 
-    // unticked skill + unticked server never left the machine
-    expect(files.some((f) => f.startsWith('skills/beta/'))).toBe(false);
-    const mcpJson = JSON.parse((await read('mcp-servers.json'))!);
-    expect(Object.keys(mcpJson)).toEqual(['fs']);
-    expect(mcpJson.secret).toBeUndefined();
+    const result = await runBackup(['skill:alpha', 'mcp:fs']);
+    expect(result).toMatchObject({ ok: true, pushed: true, itemCount: 2 });
 
-    const manifest = JSON.parse((await read('machine.json'))!);
-    expect(manifest.machineLabel).toBe('work-mac');
-    expect(typeof manifest.appInstanceId).toBe('string');
+    const snapshot = await readBranch(branch);
+    expect(snapshot.files).toContain('skills/alpha/new.js');
+    expect(snapshot.files).not.toContain('skills/alpha/old.js');
+    expect(snapshot.files).not.toContain('skills/alpha/.locked');
+    expect(snapshot.files).not.toContain('skills/alpha/.disabled');
+    expect(snapshot.files).toContain('skills/beta/keep.js');
+    expect(await snapshot.read('remote-note.txt')).toBe('leave me alone');
+
+    const mcp = JSON.parse((await snapshot.read('mcp-servers.json'))!);
+    expect(mcp.fs.command).toBe('new-command');
+    expect(mcp.secret.url).toBe('https://old.example');
+    expect(loadIntent().sort()).toEqual(['mcp:fs', 'skill:alpha']);
   }, GIT_HEAVY_TIMEOUT);
 
-  it('persists the ticked set as machine-local intent (drives next pre-tick)', async () => {
+  it('does not inherit files from the remote default branch on a first machine backup', async () => {
+    const seed = fs.mkdtempSync(path.join(root, 'default-branch-'));
+    await simpleGit(seed).init();
+    const git = simpleGit(seed);
+    await git.addConfig('user.name', 'Backup Test');
+    await git.addConfig('user.email', 'backup-test@shelf.local');
+    fs.writeFileSync(path.join(seed, 'main-only.txt'), 'not backup data');
+    await git.add(['main-only.txt']);
+    await git.commit('seed default branch');
+    await git.addRemote('origin', bareRemote);
+    await git.push(['-u', 'origin', 'HEAD:main']);
+
     seedSkill('alpha');
-    seedSkill('beta');
+    saveBinding({ remoteUrl: bareRemote, machineLabel: 'm' });
+    await runBackup(['skill:alpha']);
+
+    const snapshot = await readBranch(thisMachineBranchRef());
+    expect(snapshot.files).toContain('skills/alpha/SKILL.md');
+    expect(snapshot.files).not.toContain('main-only.txt');
+  }, GIT_HEAVY_TIMEOUT);
+
+  it('leaves malformed remote MCP untouched for Skill-only backup and blocks selected MCP', async () => {
+    seedSkill('alpha', { 'version.txt': 'one' });
     seedMcp({ fs: { type: 'stdio', command: 'node' } });
     saveBinding({ remoteUrl: bareRemote, machineLabel: 'm' });
-
     await runBackup(['skill:alpha', 'mcp:fs']);
-    expect(loadIntent().sort()).toEqual(['mcp:fs', 'skill:alpha']);
+    const branch = thisMachineBranchRef();
 
-    // Re-backup with a different tick set → intent tracks the latest choice.
-    await runBackup(['skill:beta']);
-    expect(loadIntent()).toEqual(['skill:beta']);
+    await mutateRemoteBranch(branch, (directory) => {
+      fs.writeFileSync(path.join(directory, 'mcp-servers.json'), '{broken json');
+    });
+    replaceSkill('alpha', { 'version.txt': 'two' });
+
+    expect(await runBackup(['skill:alpha'])).toMatchObject({ ok: true, pushed: true });
+    let snapshot = await readBranch(branch);
+    expect(await snapshot.read('mcp-servers.json')).toBe('{broken json');
+    expect(await snapshot.read('skills/alpha/version.txt')).toBe('two');
+    expect(loadIntent()).toEqual(['skill:alpha']);
+
+    const before = await remoteHead(branch);
+    const result = await runBackup(['mcp:fs']);
+    expect(result).toMatchObject({ ok: false, reason: 'remote' });
+    expect(await remoteHead(branch)).toBe(before);
+    expect(loadIntent()).toEqual(['skill:alpha']);
   }, GIT_HEAVY_TIMEOUT);
 
-  it('re-backup with no change → pushed:false', async () => {
-    seedSkill('alpha');
-    saveBinding({ remoteUrl: bareRemote, machineLabel: 'm' });
-    expect((await runBackup(['skill:alpha'])).ok).toBe(true);
-    const res = await runBackup(['skill:alpha']);
-    expect(res).toMatchObject({ ok: true, pushed: false });
-  });
-
-  it('snapshot semantics: unticking an item removes it from the branch', async () => {
+  it('persists the latest successful selected set and skips an unchanged push', async () => {
     seedSkill('alpha');
     seedSkill('beta');
     saveBinding({ remoteUrl: bareRemote, machineLabel: 'm' });
 
-    await runBackup(['skill:alpha', 'skill:beta']);
-    const branch = thisMachineBranchRef();
-    let snap = await readBranch(branch);
-    expect(snap.files.some((f) => f.startsWith('skills/beta/'))).toBe(true);
+    expect(await runBackup(['skill:alpha'])).toMatchObject({ ok: true, pushed: true });
+    expect(loadIntent()).toEqual(['skill:alpha']);
+    expect(await runBackup(['skill:alpha'])).toMatchObject({ ok: true, pushed: false });
 
-    // Next backup ticks only alpha → beta must be removed from the branch.
-    const res = await runBackup(['skill:alpha']);
-    expect(res).toMatchObject({ ok: true, pushed: true });
-    snap = await readBranch(branch);
-    expect(snap.files.some((f) => f.startsWith('skills/alpha/'))).toBe(true);
-    expect(snap.files.some((f) => f.startsWith('skills/beta/'))).toBe(false);
-  });
+    expect(await runBackup(['skill:beta'])).toMatchObject({ ok: true, pushed: true });
+    expect(loadIntent()).toEqual(['skill:beta']);
+    const snapshot = await readBranch(thisMachineBranchRef());
+    expect(snapshot.files).toContain('skills/alpha/SKILL.md');
+    expect(snapshot.files).toContain('skills/beta/SKILL.md');
+  }, GIT_HEAVY_TIMEOUT);
 });

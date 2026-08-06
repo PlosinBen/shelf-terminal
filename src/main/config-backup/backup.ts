@@ -1,145 +1,244 @@
-import path from 'path';
 import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import { log } from '@shared/logger';
 import {
-  REPO_SKILLS_DIR,
-  REPO_MCP_FILE,
   REPO_MACHINE_MANIFEST,
+  REPO_MCP_FILE,
+  REPO_SKILLS_DIR,
+  type BackupItemSummary,
   type BackupMachineManifest,
+  type BackupRunResult,
 } from '@shared/config-backup';
-import type { McpServersFile } from '@shared/mcp';
+import type { McpServerBlock, McpServersFile } from '@shared/mcp';
 import { getAppInstanceId } from '../app-instance-id';
-import { skillDirPath } from '../skills-store';
 import { listMcpServers } from '../mcp-store';
+import { skillDirPath } from '../skills-store';
 import { loadBinding, thisMachineBranchRef } from './binding-store';
+import { enumerateLiveItems } from './enumerate';
 import { saveIntent } from './intent-store';
-import { createSideCar } from './side-car';
+import { createSideCar, type SideCar } from './side-car';
+import { validateSkillPayload } from './validation';
 
-/**
- * Backup (Publish): snapshot the ticked live items → this machine's branch →
- * push. One-way (live → my branch); NEVER touches live. Per-item selection is
- * the leak gate — an unticked item never leaves the machine.
- *
- * Snapshot semantics: each Backup writes EXACTLY the ticked set. The payload
- * region of the working tree is cleared and re-copied, so `git add -A` stages
- * removals for items that were backed up before but are no longer ticked — the
- * branch is always "my latest published set" (current-state-wins). Because only
- * this machine writes its own branch, the push is a fast-forward.
- */
-
-export type BackupRunResult =
-  | { ok: true; pushed: boolean; branch: string; itemCount: number }
-  | { ok: false; reason: 'not-bound' | 'remote'; message: string };
-
-interface Selection {
-  skills: string[];
-  mcp: string[];
+interface BackupSnapshot {
+  directory: string;
+  selected: BackupItemSummary[];
+  mcp: McpServersFile;
 }
 
-/** Split `kind:name` ids into skill / mcp buckets (names carry no colon). */
-function parseSelection(selectedIds: string[]): Selection {
-  const skills: string[] = [];
-  const mcp: string[] = [];
-  for (const id of selectedIds) {
-    const idx = id.indexOf(':');
-    if (idx < 0) continue;
-    const kind = id.slice(0, idx);
-    const name = id.slice(idx + 1);
-    if (!name) continue;
-    if (kind === 'skill') skills.push(name);
-    else if (kind === 'mcp') mcp.push(name);
+interface BackupDependencies {
+  enumerateLiveItems(): Promise<BackupItemSummary[]>;
+  createSideCar(): SideCar;
+}
+
+const DEFAULT_DEPENDENCIES: BackupDependencies = {
+  enumerateLiveItems,
+  createSideCar,
+};
+
+function validationFailure(message: string, itemId?: string): BackupRunResult {
+  return { ok: false, reason: 'validation', message, ...(itemId ? { itemId } : {}) };
+}
+
+function copyValidatedSkill(
+  name: string,
+  destination: string,
+): BackupRunResult | null {
+  const itemId = `skill:${name}`;
+  const source = skillDirPath(name);
+  const validation = validateSkillPayload(name, source);
+  if (!validation.valid) {
+    return validationFailure(`Cannot back up ${itemId}: ${validation.reason}`, itemId);
   }
-  return { skills, mcp };
-}
 
-/** Rewrite the working tree's payload region to exactly the ticked set. */
-function writeSnapshot(repoDir: string, sel: Selection): number {
-  let count = 0;
-
-  // Skills — clear the whole dir, then copy each ticked folder verbatim.
-  const repoSkills = path.join(repoDir, REPO_SKILLS_DIR);
-  fs.rmSync(repoSkills, { recursive: true, force: true });
-  for (const name of sel.skills) {
-    const src = skillDirPath(name);
-    if (!fs.existsSync(src)) {
-      log.warn('config-backup', `ticked skill "${name}" not found on disk — skipped`);
-      continue;
+  try {
+    for (const relative of validation.payloadFiles) {
+      const sourceFile = path.join(source, relative);
+      const stat = fs.lstatSync(sourceFile);
+      if (!stat.isFile()) {
+        return validationFailure(`Cannot back up ${itemId}: ${relative} changed while being captured`, itemId);
+      }
+      const destinationFile = path.join(destination, relative);
+      fs.mkdirSync(path.dirname(destinationFile), { recursive: true });
+      fs.copyFileSync(sourceFile, destinationFile);
     }
-    fs.cpSync(src, path.join(repoSkills, name), { recursive: true });
-    count++;
+  } catch (error) {
+    return validationFailure(
+      `Cannot back up ${itemId}: ${error instanceof Error ? error.message : String(error)}`,
+      itemId,
+    );
   }
 
-  // MCP — one keyed-object file with only the ticked servers (verbatim blocks).
-  const repoMcp = path.join(repoDir, REPO_MCP_FILE);
-  fs.rmSync(repoMcp, { force: true });
-  if (sel.mcp.length > 0) {
-    const all = listMcpServers();
-    const picked: McpServersFile = {};
-    for (const name of sel.mcp.sort()) {
-      if (name in all) {
-        picked[name] = all[name];
-        count++;
+  const capturedValidation = validateSkillPayload(name, destination);
+  if (!capturedValidation.valid) {
+    return validationFailure(`Cannot back up ${itemId}: ${capturedValidation.reason}`, itemId);
+  }
+  return null;
+}
+
+async function captureSelected(
+  selectedIds: string[],
+  dependencies: BackupDependencies,
+): Promise<BackupSnapshot | BackupRunResult> {
+  let available: BackupItemSummary[];
+  try {
+    available = await dependencies.enumerateLiveItems();
+  } catch (error) {
+    return validationFailure(
+      `Could not refresh Backup items: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+
+  const byId = new Map(available.map((item) => [item.id, item]));
+  const selected: BackupItemSummary[] = [];
+  for (const id of selectedIds) {
+    const item = byId.get(id);
+    if (!item) return validationFailure(`Backup item "${id}" no longer exists`, id);
+    if (!item.valid) return validationFailure(`Cannot back up ${id}: ${item.invalidReason}`, id);
+    selected.push(item);
+  }
+
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'shelf-backup-capture-'));
+  const mcp: McpServersFile = {};
+  try {
+    const liveMcp = selected.some((item) => item.kind === 'mcp') ? listMcpServers() : {};
+    for (const item of selected) {
+      if (item.kind === 'skill') {
+        const failure = copyValidatedSkill(
+          item.name,
+          path.join(directory, REPO_SKILLS_DIR, item.name),
+        );
+        if (failure) {
+          fs.rmSync(directory, { recursive: true, force: true });
+          return failure;
+        }
       } else {
-        log.warn('config-backup', `ticked MCP server "${name}" not found — skipped`);
+        const block = liveMcp[item.name];
+        if (!block) {
+          fs.rmSync(directory, { recursive: true, force: true });
+          return validationFailure(`Backup item "${item.id}" no longer exists`, item.id);
+        }
+        mcp[item.name] = structuredClone(block);
       }
     }
-    if (Object.keys(picked).length > 0) {
-      fs.writeFileSync(repoMcp, JSON.stringify(picked, null, 2) + '\n', 'utf-8');
-    }
+  } catch (error) {
+    fs.rmSync(directory, { recursive: true, force: true });
+    return validationFailure(
+      `Could not capture Backup items: ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
 
-  return count;
+  return { directory, selected, mcp };
 }
 
-/** Always-present branch manifest so the Import picker can show a human label. */
-function writeManifest(repoDir: string, machineLabel: string): void {
+function readRemoteMcp(repoDirectory: string): Record<string, unknown> {
+  const file = path.join(repoDirectory, REPO_MCP_FILE);
+  if (!fs.existsSync(file)) return {};
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(fs.readFileSync(file, 'utf-8'));
+  } catch {
+    throw new Error('Remote mcp-servers.json is not valid JSON; nothing was pushed.');
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('Remote mcp-servers.json is not a keyed object; nothing was pushed.');
+  }
+  return parsed as Record<string, unknown>;
+}
+
+function applySelected(
+  repoDirectory: string,
+  snapshot: BackupSnapshot,
+  machineLabel: string,
+): string[] {
+  const selectedMcp = snapshot.selected.filter((item) => item.kind === 'mcp');
+  const remoteMcp = selectedMcp.length > 0 ? readRemoteMcp(repoDirectory) : null;
+  const stagedPaths = [REPO_MACHINE_MANIFEST];
+
+  for (const item of snapshot.selected) {
+    if (item.kind !== 'skill') continue;
+    const relative = `${REPO_SKILLS_DIR}/${item.name}`;
+    const destination = path.join(repoDirectory, relative);
+    fs.rmSync(destination, { recursive: true, force: true });
+    fs.mkdirSync(path.dirname(destination), { recursive: true });
+    fs.cpSync(path.join(snapshot.directory, relative), destination, { recursive: true });
+    stagedPaths.push(relative);
+  }
+
+  if (remoteMcp) {
+    for (const item of selectedMcp) {
+      remoteMcp[item.name] = snapshot.mcp[item.name] as McpServerBlock;
+    }
+    const stable: Record<string, unknown> = {};
+    for (const name of Object.keys(remoteMcp).sort()) stable[name] = remoteMcp[name];
+    fs.writeFileSync(
+      path.join(repoDirectory, REPO_MCP_FILE),
+      JSON.stringify(stable, null, 2) + '\n',
+      'utf-8',
+    );
+    stagedPaths.push(REPO_MCP_FILE);
+  }
+
   const manifest: BackupMachineManifest = { appInstanceId: getAppInstanceId(), machineLabel };
   fs.writeFileSync(
-    path.join(repoDir, REPO_MACHINE_MANIFEST),
+    path.join(repoDirectory, REPO_MACHINE_MANIFEST),
     JSON.stringify(manifest, null, 2) + '\n',
     'utf-8',
   );
+  return stagedPaths;
 }
 
-export async function runBackup(selectedIds: string[]): Promise<BackupRunResult> {
-  const binding = loadBinding();
-  if (!binding || !binding.remoteUrl) {
-    return { ok: false, reason: 'not-bound', message: 'Set a backup remote URL in the settings above first.' };
+/**
+ * Capture every selected live item before network work, then replace those
+ * whole items on the fetched branch head. Unselected remote content is never
+ * interpreted as deletion and remains byte-for-byte untouched.
+ */
+export async function runBackup(
+  selectedIdsInput: string[],
+  dependencies: BackupDependencies = DEFAULT_DEPENDENCIES,
+): Promise<BackupRunResult> {
+  const selectedIds = [...new Set(selectedIdsInput)];
+  if (selectedIds.length === 0) {
+    return validationFailure('Select at least one Skill or MCP server before Back up.');
   }
 
-  const sel = parseSelection(selectedIds);
-  const branch = thisMachineBranchRef();
-  const sideCar = createSideCar();
+  const captured = await captureSelected(selectedIds, dependencies);
+  if ('ok' in captured) return captured;
+  const snapshot = captured;
 
-  // No preflight — just run git. Whatever git (local) or the remote (GitHub, …)
-  // rejects is surfaced verbatim as the error; we never pre-validate.
-  let changed: boolean;
-  let itemCount: number;
+  const binding = loadBinding();
+  if (!binding?.remoteUrl) {
+    fs.rmSync(snapshot.directory, { recursive: true, force: true });
+    return { ok: false, reason: 'not-bound', message: 'Save a Backup remote URL first.' };
+  }
+
+  const branch = thisMachineBranchRef();
   try {
+    const sideCar = dependencies.createSideCar();
     await sideCar.ensureClone(binding.remoteUrl);
     await sideCar.fetch();
-    await sideCar.checkoutBranch(branch);
+    const remoteHead = await sideCar.remoteBranchHead(branch);
+    await sideCar.materializeCleanBase(remoteHead);
+    const stagedPaths = applySelected(sideCar.dir, snapshot, binding.machineLabel);
+    const changed = await sideCar.stagePathsAndCommit(
+      stagedPaths,
+      `backup: ${snapshot.selected.length} selected item(s)`,
+    );
+    if (changed) await sideCar.pushHead(branch);
 
-    itemCount = writeSnapshot(sideCar.dir, sel);
-    writeManifest(sideCar.dir, binding.machineLabel);
-
-    const stamp = `backup: ${sel.skills.length} skill(s), ${sel.mcp.length} mcp server(s)`;
-    changed = await sideCar.stageAllAndCommit(stamp);
-    if (changed) await sideCar.push(branch);
-  } catch (err: any) {
-    const message = err?.message ?? String(err);
+    saveIntent(selectedIds);
+    log.info(
+      'config-backup',
+      changed
+        ? `pushed ${branch} (${snapshot.selected.length} item(s))`
+        : `${branch} already up to date — nothing to push`,
+    );
+    return { ok: true, pushed: changed, branch, itemCount: snapshot.selected.length };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
     log.warn('config-backup', `backup to ${branch} failed: ${message}`);
     return { ok: false, reason: 'remote', message };
+  } finally {
+    fs.rmSync(snapshot.directory, { recursive: true, force: true });
   }
-
-  log.info(
-    'config-backup',
-    changed ? `pushed ${branch} (${itemCount} item(s))` : `${branch} already up to date — nothing to push`,
-  );
-
-  // Remember what this machine chose to back up → seeds the checklist pre-tick
-  // next time (machine-local intent, decoupled from the remote branch).
-  saveIntent(selectedIds);
-
-  return { ok: true, pushed: changed, branch, itemCount };
 }
