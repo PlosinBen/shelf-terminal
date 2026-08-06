@@ -23,7 +23,7 @@ title: shelf-terminal — Intent → File Index
 | Skills 投影（local + hash） | `skills-projection.ts` | `projectSkillsLocal` mirror skills 到 `~/.shelf/apps/<appId>/skills` + hash helper |
 | App 層 MCP config store | `mcp-store.ts` | `<userData>/mcp-servers.json`（keyed object）的同步 CRUD + 驗證（web-grants 風格，opaque 不碰 secret） |
 | MCP 變更後處理（sibling pipeline） | `mcp-sync.ts` | `onMcpChanged()`：re-project + subscribers + `MCP_CHANGED`；**不**呼叫 `onSkillsChanged()` |
-| Config 備份/複製（App-Level Config Backup & Copy） | `config-backup/` (`binding-store`/`intent-store`/`side-car`/`enumerate`/`backup`/`import`) | backup+copy 非 sync；`binding-store` 存 remote 設定（純寫檔無驗證）；`side-car` 是 `simple-git` transport（clone/fetch/commit/push/diff）；`backup.ts` 快照 live→my branch（不預檢，git 錯直接攤回）；`intent-store` 存本機預勾意圖（checklist pre-tick，不碰 remote）；`import.ts` list sources / plan vs live / apply into live。見 `context/config-backup` |
+| Config 備份/複製（App-Level Config Backup & Copy） | `config-backup/` (`binding-store`/`intent-store`/`side-car`/`enumerate`/`validation`/`operation-lock`/`source-revisions`/`backup`/`import`) | backup+copy 非 sync；Backup 以 selected whole-item scope 更新自己的 fetched branch head、未選 remote 不動；Import 將 transient remote 的 fetched commit pin 成 opaque revision，再 isolated export + prepare/swap/rollback 寫 live；兩者共用 side-car operation lock。見 `context/config-backup` |
 | MCP 投影（local + hash） | `mcp-projection.ts` | `projectMcpLocal` 寫單一 `mcp-servers.json` 到 `~/.shelf/apps/<appId>/` + touch heartbeat + `hashMcpConfig` |
 | MCP 遠端同步 | `mcp-remote.ts` | `syncMcpForConnection`：client-side hash-gate + transport 放到 worker（local no-op） |
 | App-instance id | `app-instance-id.ts` | `getAppInstanceId()`：`<userData>/app-instance-id` 的 generate-once 穩定 UUID |
@@ -188,7 +188,7 @@ title: shelf-terminal — Intent → File Index
 | Web.fetch 授權 popup | `components/WebPermissionPrompt.tsx` | app 層全域 popup，防偽 origin 顯示 + allow once/always/deny（由 `web:permission-request` 驅動） |
 | browser_open 確認 popup | `components/BrowserOpenPrompt.tsx` | app 層全域 popup，只有 Open/Deny（不記住），由 `web:browser-open-request` 驅動；核可後 `web:open-tab` 由 `App.tsx` 開分頁 |
 | Web session/grant 管理 | `components/settings/WebSettingsTab.tsx` | Settings → Web 分頁：已登入 session 清單(刪) + grant whitelist(per-project 分組、revoke) |
-| Config 備份/複製 UI | `components/settings/BackupSettingsTab.tsx` + `ImportSection.tsx` | Settings → Backup 分頁：未綁 remote 顯示綁定表單；綁了則 Back up \| Import 切換。Backup=per-item checklist（預勾已備份項）；Import=選來源分支→勾項目→review diff（replace/keep）→apply，含 replace-all bulk |
+| Config 備份/複製 UI | `components/BackupView.tsx` + `backup-panel-store.ts` + `events/backup.ts` + `App.tsx` central handlers | Bottom bar 開同一個右側 operation panel，內含 Back up / Import tabs；Backup settings/清單/intent 與 transient Import URL/pinned source/選取分離；元件只 emit，store 管 session state，中央 handler 打 IPC |
 | App 層 MCP server 管理 | `components/McpView.tsx` | 右側欄 view（BottomBar 插頭 icon 開、Skills 的姊妹）：list + per-transport 新增/編輯(stdio/http)、rename、`?` scope help。沿用 `.right-panel` 殼 |
 | 選擇面板 | `components/SelectionPanel.tsx` | Bottom-anchored 單題 N-way 選單，permission popup + config picker 共用 |
 | Picker 面板 | `components/PickerPanel.tsx` | Bottom-anchored 多題互動 form（AskUserQuestion / elicitation 共用） |
@@ -201,7 +201,7 @@ title: shelf-terminal — Intent → File Index
 | 資料夾選擇器 | `components/FolderPicker.tsx` | 兩步驟（connection type → browse）選資料夾 |
 | 資料夾瀏覽器 | `components/FolderBrowser.tsx` | 純展示元件，顯示目錄清單和 keyboard hints |
 | 頁內搜尋 | `components/SearchBar.tsx` | terminal tab 走 xterm SearchAddon；agent/web tab 走 main findInPage（`shelfApi.find`）+ 命中計數 |
-| Settings 面板 | `components/SettingsPanel.tsx` | 左側 tab 分頁（Terminal / Agent / Models / PM Agent / Web / Backup / Shortcuts） |
+| Settings 面板 | `components/SettingsPanel.tsx` | 左側 tab 分頁（Terminal / Agent / Models / PM Agent / Web / Shortcuts）；Backup 是獨立右側 operation panel，不在 Settings |
 | Worktree 建立 | `components/WorktreeDialog.tsx` | 顯示 target、configured note source/list 狀態、接收 branch/note prefill、選 boot provider 後建立 sub-project |
 | Worktree proposal prefill helper | `worktree-prefill.ts` | 純函式正規化 New Worktree proposal 帶入的多 note path prefill |
 | Feature-note config edit rule | `feature-note-config-edit.ts` | main config canonicalization 與 child snapshot read-only save rule |
@@ -286,6 +286,7 @@ title: shelf-terminal — Intent → File Index
 | E2E 測試 | `e2e/project-creation.spec.ts` | 建立 project、connect、tab、terminal output |
 | E2E 測試 | `e2e/features.spec.ts` | Search、settings、project edit、dev tools、快捷鍵 |
 | E2E 測試 | `e2e/config-bootstrap.spec.ts` | Config 損毀 bootstrap dialog（quit / backup & continue） |
+| E2E 測試 | `e2e/config-backup.spec.ts` | Backup operation panel 的 config gating、tab/session state、Backup checklist 與 Import source/selection/apply flow |
 | E2E 測試 | `e2e/pm-agent.spec.ts` | PM sidebar、PmView toggle、provider settings、Away Mode、Telegram |
 | E2E 測試 | `e2e/init-script.spec.ts` | Init script 不重複顯示 |
 | Connector 測試 | `e2e/connector/ssh.spec.ts` | SSH connect/multiplex/file upload + clearUploads |

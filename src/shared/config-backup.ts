@@ -2,12 +2,13 @@
  * App-Level Config Backup & Copy — shared constants + types.
  *
  * Model (see the feature design): this is BACKUP + cross-machine COPY, NOT sync.
- * - Each machine owns ONE branch (its backup) on a shared remote. Because only
- *   that machine ever writes its own branch, every push is fast-forward — no
- *   merge, no conflict engine.
+ * - Each machine owns ONE branch (its backup) on a shared remote. Backup mutates
+ *   only explicitly selected whole items on the fetched branch head; omission
+ *   leaves existing remote items alone.
  * - A machine's live config is its SOLE source of truth; nothing auto-overwrites
  *   it. Two actions only: Backup (live → my branch) and Import (a chosen branch →
- *   live, per-item, overwrite-confirmed).
+ *   live, per-item and source-wins). Import pins the fetched source commit and
+ *   prepares the selected batch before replacing canonical live items.
  *
  * git engine = the machine's own `git` (via simple-git); auth = the machine's
  * existing git credentials (Shelf holds no secret). See binding-store /

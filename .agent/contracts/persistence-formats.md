@@ -97,10 +97,16 @@ The on-disk artifacts Shelf persists and their layout. Two roots: `<userData>` (
 - **Format**: JSON object `{ remoteUrl: string, machineLabel: string }` (`ConfigBackupBinding`, `src/shared/config-backup.ts`). `remoteUrl` 是使用者的 git remote（https 或 ssh，Shelf 不解析也不認證 —— 交給機器的 git 憑證）；`machineLabel` 是這台機器分支的顯示名。
 - **Source of truth**: `src/main/config-backup/binding-store.ts`。**機器本地、永不進任何備份 payload**（描述「本機備份去哪」，是機器特定的，備份它會循環且洩漏 remote URL）。缺檔 = 未綁定。見 `context/config-backup` config-backup#1/#3。
 
+## `<userData>/config-backup-intent.json` — Backup checklist intent
+
+- **Format**：JSON string array，內容是上一次成功 Backup 的 selected item ids（`skill:<name>` / `mcp:<name>`）。
+- **Source of truth**：`src/main/config-backup/intent-store.ts`。只用來預勾下次 checklist；它不是 remote inventory，也不讓未勾選項目產生刪除語意。沒有 saved Backup binding 時 `list()` 不回傳 intent。
+- **Scope**：機器本地、永不進 payload。只有 Backup 成功（包含內容已相同、無需 push）後才更新。
+
 ## `<userData>/config-backup-repo/` — side-car git clone
 
 - **Path**: `<userData>/config-backup-repo/`（一個一般 git clone，非 bare）
-- **用途**：config-backup 的 transport + durable store。git **只**在這裡操作，永不包住 live 資料夾。可丟棄、隨時可刪（下次 Backup 會重新 clone/snapshot）。
+- **用途**：config-backup 的 transport cache。git **只**在這裡操作，永不包住 live 資料夾。可丟棄、隨時可刪（下次操作會重新 clone/fetch）。Backup 與 Import 共用此 clone，所以所有操作由 process-local lock 序列化；Import source 另 export 到 operation temp dir，不把此 working tree/index 當 pinned view。
 - **Source of truth**: `src/main/config-backup/side-car.ts`（`simple-git`）。每台機器一個 `backup/<app-instance-id>` 分支，分支的 working-tree payload layout：
 
   ```
@@ -110,7 +116,7 @@ The on-disk artifacts Shelf persists and their layout. Two roots: `<userData>` (
   └── machine.json               ← { appInstanceId, machineLabel }（BackupMachineManifest）— 給 Import 來源選單顯示 label
   ```
 
-  layout 常數是 skills/MCP 兩端共用的單一真相源（`REPO_SKILLS_DIR` / `REPO_MCP_FILE` / `REPO_MACHINE_MANIFEST`，`src/shared/config-backup.ts`）。Backup 寫「勾選集的完整快照」，Import 唯讀。見 `context/config-backup`、`architecture/config-backup`。
+  layout 常數是 Skills/MCP 兩端共用的單一真相源（`REPO_SKILLS_DIR` / `REPO_MCP_FILE` / `REPO_MACHINE_MANIFEST`，`src/shared/config-backup.ts`）。Backup 的 selected Skill 取代同名整個目錄，selected MCP 取代同名 block；未選 remote payload 與不相關路徑不動。Import source revision token 只存在 process memory，綁定 remote URL + fetched commit，不持久化。`.locked` / `.disabled` 與 binding、intent、app identity 都不進 portable payload。見 `context/config-backup`、`architecture/config-backup`。
 
 ## `~/.shelf/apps/<appId>/skills/` — per-app skills projection
 

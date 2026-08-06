@@ -39,8 +39,8 @@ function parseId(id: string): { kind: string; name: string } | null {
 
 /**
  * Import (copy) — READ side. Browse a chosen backup branch (another machine's or
- * my own) and list its items, entirely read-only against the source branch (zero
- * contention). Writing into live is a later step; nothing here touches live.
+ * my own) and list its items read-only from a pinned source commit. Shared
+ * side-car work is serialized; writing into live is a later explicit step.
  */
 
 /** Fetch + list every backup branch (all machines, incl. this one). */

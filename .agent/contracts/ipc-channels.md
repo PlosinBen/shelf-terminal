@@ -168,18 +168,17 @@ App-level MCP servers (`<userData>/mcp-servers.json`, keyed object). See `contex
 
 ## configBackup (`shelfApi.configBackup`)
 
-App-Level Config Backup & Copy（skills + MCP）。Backup = 快照 live → 本機的 `backup/<app-instance-id>` 分支；Import = 從某分支複製進 live。See `context/config-backup`、`architecture/config-backup`。型別在 `src/shared/config-backup.ts`。
+App-Level Config Backup & Copy（Skills + MCP）。Backup = selected live items → 本機的 `backup/<app-instance-id>` 分支；Import = pinned source revision 的 selected items → live。See `context/config-backup`、`architecture/config-backup`。authoritative 型別在 `src/shared/config-backup.ts`。
 
 | Method | Shape |
 |--------|-------|
 | `getBinding()` | invoke `config-backup:get-binding` → `ConfigBackupBinding \| null` |
 | `saveSettings({ remoteUrl, machineLabel })` | invoke `config-backup:save-settings` → `void`。純寫檔、**零驗證**（兩欄全空 = 刪檔清除）；錯誤延到 Back up 才報 |
 | `list()` | invoke `config-backup:list` → `BackupListResult`（binding + live items + `intent` 預勾 + `suggestedLabel` = sanitize 過的 hostname）。只讀本機 intent，不碰 git/網路 → 秒開、離線可用 |
-| `run(selectedIds)` | invoke `config-backup:run` → `{ ok:true, pushed, branch, itemCount } \| { ok:false, reason:'not-bound'\|'remote', message }`（Backup：勾選集完整快照 → push；不預檢，git/remote 的錯原樣回傳）|
-| `listSources()` | invoke `config-backup:list-sources` → `BackupSource[]`（所有備份分支，含自己，own 優先）|
-| `listImportItems(ref)` | invoke `config-backup:list-import-items` → `BackupItemSummary[]`（某分支的項目，唯讀）|
-| `planImport(ref, ids)` | invoke `config-backup:plan-import` → `ImportItemPlan[]`（逐項 new/identical/differs + diff）|
-| `applyImport(ref, decisions)` | invoke `config-backup:apply-import` → `ImportApplyResult`（唯一寫 live 者；`decisions: ImportDecision[]`）|
+| `run(selectedIds)` | invoke `config-backup:run` → `BackupRunResult`。成功含 `pushed/branch/itemCount`；失敗 `reason: 'not-bound' \| 'validation' \| 'remote'`，validation 可帶 `itemId`。selected whole items replace remote 同名 item，未選 remote content 不動 |
+| `listSources(remoteUrl)` | invoke `config-backup:list-sources` → `BackupSource[]`（transient URL 的所有備份分支，own 優先）；每筆含 process-local opaque `sourceRevision`，pin 到本次 fetch 的 commit |
+| `listImportItems(remoteUrl, sourceRevision)` | invoke `config-backup:list-import-items` with object payload → `ImportListResult`（`items` 含 validity + `new/replace-local` impact；top-level category 問題在 `issues`）|
+| `applyImport(remoteUrl, sourceRevision, selectedIds)` | invoke `config-backup:apply-import` with object payload → `ImportApplyResult`。成功回 canonical changed counts/ids；失敗帶 `phase: source \| validation \| apply \| rollback`、optional `itemId`、`rollback` status |
 
 ## web (`shelfApi.web`)
 

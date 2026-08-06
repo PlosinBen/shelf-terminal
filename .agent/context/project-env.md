@@ -55,4 +55,4 @@ related:
 
 ## project-env#7 — secret 不同步靠 side-car + backup allowlist，不靠加密  ·  [Decision]
 
-**要點**：唯一致命外洩是 config-sync 把設定推上 git remote。解法是結構性的：secret 存獨立 side-car（`project-secrets.json`），而 config-backup 用 **allowlist**（只 enumerate 得到的 skill/mcp 能被選+複製），secret 從沒被 enumerate → 天生不可同步（`enumerate.test.ts` 鎖住「只吐 skill/mcp」的 invariant）。加密是正交的另一層——防 at-rest 外洩（誤拷、雲備份、infostealer），不防 sync path。plain env 在 projectConfig（允許同步），secret 永不。
+**要點**：唯一致命外洩是 config backup 把設定推上 git remote。解法是結構性的：secret 存獨立 side-car（`project-secrets.json`），而 config-backup 用 **allowlist**（只 enumerate 得到的 Skill/MCP 能被選+複製），project config 與 secret 都不在目前 payload → 天生不可備份（`enumerate.test.ts` 鎖住「只吐 skill/mcp」的 invariant）。加密是正交的另一層——防 at-rest 外洩（誤拷、雲備份、infostealer），不防 egress path。若未來納入 project config，plain/secret 仍必須逐欄審計，secret 永遠不入 payload。

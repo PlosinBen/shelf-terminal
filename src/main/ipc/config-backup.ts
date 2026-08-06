@@ -10,7 +10,7 @@ import { runBackup } from '../config-backup/backup';
 import { listBackupSources, listImportItems, applyImport } from '../config-backup/import';
 
 /**
- * IPC surface for App-Level Config Backup & Copy (Backup half — Phase 2).
+ * IPC surface for App-Level Config Backup & Copy.
  * The Backup UI is a trigger; all git/transport work lives in ../config-backup.
  */
 export function registerConfigBackupHandlers(): void {
