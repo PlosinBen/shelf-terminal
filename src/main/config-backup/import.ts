@@ -98,7 +98,7 @@ export async function listImportItems(ref: string, sideCar: SideCar = createSide
     let detail: string | undefined;
     const raw = await sideCar.readFileAtRef(ref, `${REPO_SKILLS_DIR}/${name}/SKILL.md`);
     if (raw) detail = parseSkillMeta(raw).description;
-    out.push({ id: backupItemId('skill', name), kind: 'skill', name, ...(detail ? { detail } : {}) });
+    out.push({ id: backupItemId('skill', name), kind: 'skill', name, ...(detail ? { detail } : {}), valid: true });
   }
 
   const mcpRaw = await sideCar.readFileAtRef(ref, REPO_MCP_FILE);
@@ -106,7 +106,7 @@ export async function listImportItems(ref: string, sideCar: SideCar = createSide
     try {
       const servers = JSON.parse(mcpRaw) as Record<string, { type?: string }>;
       for (const name of Object.keys(servers).sort()) {
-        out.push({ id: backupItemId('mcp', name), kind: 'mcp', name, detail: servers[name]?.type });
+        out.push({ id: backupItemId('mcp', name), kind: 'mcp', name, detail: servers[name]?.type, valid: true });
       }
     } catch {
       log.warn('config-backup', `branch mcp-servers.json at ${ref} is not valid JSON — skipped in import list`);

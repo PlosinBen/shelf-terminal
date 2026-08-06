@@ -65,6 +65,9 @@ export const REPO_MCP_FILE = 'mcp-servers.json';
 /** Per-branch manifest so the Import picker can show a human machine label. */
 export const REPO_MACHINE_MANIFEST = 'machine.json';
 
+/** Shelf-local Skill controls are not portable Skill payload. */
+export const SKILL_CONTROL_MARKERS = ['.locked', '.disabled'] as const;
+
 /** Written at the root of each machine's branch; read by the Import source picker. */
 export interface BackupMachineManifest {
   appInstanceId: string;
@@ -80,13 +83,18 @@ export function backupItemId(kind: BackupItemKind, name: string): string {
   return `${kind}:${name}`;
 }
 
-export interface BackupItemSummary {
+interface BackupItemSummaryBase {
   id: string;
   kind: BackupItemKind;
   name: string;
   /** Skill description / MCP transport type — a one-line hint for the checklist. */
   detail?: string;
 }
+
+export type BackupItemSummary = BackupItemSummaryBase & (
+  | { valid: true }
+  | { valid: false; invalidReason: string }
+);
 
 // ── Import plan (per-item overwrite status vs live) ─────────────────────────
 

@@ -119,13 +119,13 @@ describe('config-backup import (read side)', () => {
     const other = sources.find((s) => s.appInstanceId === 'other-id')!;
     const items = await listImportItems(other.ref);
     expect(items).toEqual([
-      { id: 'skill:beta', kind: 'skill', name: 'beta', detail: 'from laptop' },
+      { id: 'skill:beta', kind: 'skill', name: 'beta', detail: 'from laptop', valid: true },
     ]);
 
     const mine = await listImportItems(sources.find((s) => s.isSelf)!.ref);
     expect(mine).toEqual([
-      { id: 'skill:alpha', kind: 'skill', name: 'alpha', detail: 'my skill' },
-      { id: 'mcp:fs', kind: 'mcp', name: 'fs', detail: 'stdio' },
+      { id: 'skill:alpha', kind: 'skill', name: 'alpha', detail: 'my skill', valid: true },
+      { id: 'mcp:fs', kind: 'mcp', name: 'fs', detail: 'stdio', valid: true },
     ]);
   }, GIT_HEAVY_TIMEOUT);
 

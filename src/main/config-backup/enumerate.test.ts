@@ -5,12 +5,18 @@ vi.mock('../skills-store', () => ({
     { name: 'alpha', description: 'first skill' },
     { name: 'beta' },
   ],
+  skillDirPath: (name: string) => `/skills/${name}`,
 }));
 vi.mock('../mcp-store', () => ({
   listMcpServers: () => ({
     playwright: { type: 'http', url: 'https://x' },
     fs: { type: 'stdio', command: 'node' },
   }),
+}));
+vi.mock('./validation', () => ({
+  validateSkillPayload: (name: string) => name === 'beta'
+    ? { valid: false, reason: 'SKILL.md is invalid' }
+    : { valid: true, payloadFiles: ['SKILL.md'] },
 }));
 
 const { enumerateLiveItems } = await import('./enumerate');
@@ -19,10 +25,10 @@ describe('config-backup enumerate live items', () => {
   it('lists skills (by name) then MCP servers (by name), with ids + detail', async () => {
     const items = await enumerateLiveItems();
     expect(items).toEqual([
-      { id: 'skill:alpha', kind: 'skill', name: 'alpha', detail: 'first skill' },
-      { id: 'skill:beta', kind: 'skill', name: 'beta' },
-      { id: 'mcp:fs', kind: 'mcp', name: 'fs', detail: 'stdio' },
-      { id: 'mcp:playwright', kind: 'mcp', name: 'playwright', detail: 'http' },
+      { id: 'skill:alpha', kind: 'skill', name: 'alpha', detail: 'first skill', valid: true },
+      { id: 'skill:beta', kind: 'skill', name: 'beta', valid: false, invalidReason: 'SKILL.md is invalid' },
+      { id: 'mcp:fs', kind: 'mcp', name: 'fs', detail: 'stdio', valid: true },
+      { id: 'mcp:playwright', kind: 'mcp', name: 'playwright', detail: 'http', valid: true },
     ]);
   });
 
