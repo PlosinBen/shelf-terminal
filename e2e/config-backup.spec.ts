@@ -288,3 +288,88 @@ test('Import discovers pinned sources from an unsaved URL and labels selectable 
   await expect(panel.locator('.import-source-field')).toHaveCount(0);
   await expect(panel.locator('.import-item-selection')).toHaveCount(0);
 });
+
+test('Import replaces selected whole items, refreshes impact, and preserves failed selection', async ({ shelfApp }) => {
+  const { page, userDataDir } = shelfApp;
+  const remote = path.join(userDataDir, 'apply-import-remote.git');
+  await simpleGit().raw(['init', '--bare', remote]);
+
+  const seedLocalSkill = (name: string, description: string) => {
+    const directory = path.join(userDataDir, 'skills', 'skills', name);
+    fs.mkdirSync(directory, { recursive: true });
+    fs.writeFileSync(
+      path.join(directory, 'SKILL.md'),
+      `---\nname: ${name}\ndescription: ${description}\n---\n`,
+    );
+    return directory;
+  };
+  const shared = seedLocalSkill('shared', 'local shared');
+  fs.writeFileSync(path.join(shared, 'old-only.txt'), 'remove me');
+  fs.writeFileSync(path.join(shared, '.locked'), '');
+  fs.writeFileSync(path.join(shared, '.disabled'), '');
+  seedLocalSkill('unrelated', 'leave local');
+  const mcpFile = path.join(userDataDir, 'mcp-servers.json');
+  fs.writeFileSync(mcpFile, JSON.stringify({
+    existing: { type: 'stdio', command: 'old' },
+    untouched: { type: 'http', url: 'https://local.example' },
+  }, null, 2));
+
+  await pushBackupBranch(
+    remote,
+    path.join(userDataDir, 'seed-apply-source'),
+    'backup/apply-source',
+    {
+      'machine.json': JSON.stringify({ appInstanceId: 'apply-source', machineLabel: 'apply-source' }),
+      'skills/shared/SKILL.md': '---\nname: shared\ndescription: source shared\n---\n',
+      'skills/shared/new-only.txt': 'source file',
+      'skills/shared/.locked': 'source marker ignored',
+      'skills/beta/SKILL.md': '---\nname: beta\ndescription: source beta\n---\n',
+      'skills/beta/.disabled': 'source marker ignored',
+      'mcp-servers.json': JSON.stringify({
+        existing: { type: 'stdio', command: 'new' },
+        'remote-extra': { type: 'stdio', command: 'extra' },
+      }),
+    },
+  );
+
+  await page.locator('.right-tab-btn[title="Backup"]').click();
+  const panel = page.locator('.backup-view');
+  await panel.getByRole('tab', { name: 'Import' }).click();
+  await panel.getByLabel('Remote URL').fill(remote);
+  await panel.getByRole('button', { name: 'Find backups' }).click();
+  await panel.getByLabel('Backup source').selectOption({ label: 'apply-source' });
+
+  const selection = panel.locator('.import-item-selection');
+  const row = (name: string) => selection.locator('.backup-check', { hasText: name });
+  await row('shared').locator('input').check();
+  await row('beta').locator('input').check();
+  await row('existing').locator('input').check();
+  await panel.getByRole('button', { name: 'Import 3 items' }).click();
+  await expect(panel.locator('.backup-status-ok')).toHaveText('Imported 3 items; 3 changed.');
+
+  await expect(selection.locator('.import-selection-count')).toHaveText('0 selected');
+  await expect(row('shared').locator('input')).not.toBeChecked();
+  await expect(row('beta')).toContainText('Replace local');
+  expect(fs.readFileSync(path.join(shared, 'new-only.txt'), 'utf-8')).toBe('source file');
+  expect(fs.existsSync(path.join(shared, 'old-only.txt'))).toBe(false);
+  expect(fs.existsSync(path.join(shared, '.locked'))).toBe(true);
+  expect(fs.existsSync(path.join(shared, '.disabled'))).toBe(true);
+  const beta = path.join(userDataDir, 'skills', 'skills', 'beta');
+  expect(fs.existsSync(path.join(beta, '.locked'))).toBe(false);
+  expect(fs.existsSync(path.join(beta, '.disabled'))).toBe(false);
+  expect(fs.readFileSync(path.join(userDataDir, 'skills', 'skills', 'unrelated', 'SKILL.md'), 'utf-8'))
+    .toContain('leave local');
+  expect(JSON.parse(fs.readFileSync(mcpFile, 'utf-8'))).toEqual({
+    existing: { type: 'stdio', command: 'new' },
+    untouched: { type: 'http', url: 'https://local.example' },
+  });
+
+  await row('remote-extra').locator('input').check();
+  fs.writeFileSync(mcpFile, '{broken local json');
+  await panel.getByRole('button', { name: 'Import 1 item' }).click();
+  const failure = panel.locator('.import-failure');
+  await expect(failure).toContainText('Validation failed');
+  await expect(failure).toContainText('Item: mcp:remote-extra');
+  await expect(failure).toContainText('Rollback: Not needed');
+  await expect(row('remote-extra').locator('input')).toBeChecked();
+});

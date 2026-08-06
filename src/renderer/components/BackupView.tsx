@@ -10,6 +10,7 @@ import {
   setBackupSelectionExpanded,
   startImportSourceDiscovery,
   startImportSourceLoad,
+  startImportApply,
   startBackupPanelRequest,
   toggleBackupItemSelection,
   toggleImportItemSelection,
@@ -57,8 +58,20 @@ export function requestImportSourceLoad(sourceRevision: string): void {
   });
 }
 
+export function requestImportApply(): void {
+  const snapshot = getBackupPanelSnapshot();
+  if (!snapshot.importSourceRevision || snapshot.importSelectedIds.length === 0) return;
+  emitBackup('backup:apply-import', {
+    ...startImportApply(),
+    remoteUrl: snapshot.importUrl,
+    sourceRevision: snapshot.importSourceRevision,
+    selectedIds: snapshot.importSelectedIds,
+  });
+}
+
 export function BackupView() {
   const panel = useBackupPanelStore();
+  const canonicalOperationRunning = panel.busy === 'run' || panel.busy === 'apply-import';
 
   useEffect(() => {
     requestBackupPanelLoad();
@@ -82,6 +95,7 @@ export function BackupView() {
           className={`backup-panel-tab${panel.activeTab === 'backup' ? ' active' : ''}`}
           role="tab"
           aria-selected={panel.activeTab === 'backup'}
+          disabled={canonicalOperationRunning}
           onClick={() => setBackupActiveTab('backup')}
         >
           Back up
@@ -90,6 +104,7 @@ export function BackupView() {
           className={`backup-panel-tab${panel.activeTab === 'import' ? ' active' : ''}`}
           role="tab"
           aria-selected={panel.activeTab === 'import'}
+          disabled={canonicalOperationRunning}
           onClick={() => setBackupActiveTab('import')}
         >
           Import
@@ -328,6 +343,7 @@ function ImportPanel({ panel }: { panel: ReturnType<typeof getBackupPanelSnapsho
 
   const finding = panel.busy === 'find-import-sources';
   const loadingSource = panel.busy === 'load-import-source';
+  const applying = panel.busy === 'apply-import';
   const validItems = panel.importItems?.filter((item) => item.valid) ?? [];
   const allValidSelected = validItems.length > 0
     && validItems.every((item) => panel.importSelectedIds.includes(item.id));
@@ -347,13 +363,14 @@ function ImportPanel({ panel }: { panel: ReturnType<typeof getBackupPanelSnapsho
           type="text"
           placeholder="git@github.com:me/shelf-backups.git"
           value={panel.importUrl}
+          disabled={applying}
           onChange={(event) => updateImportUrl(event.target.value)}
         />
       </label>
       <div className="backup-actions">
         <button
           className="conn-btn conn-btn-next"
-          disabled={finding || !panel.importUrl.trim()}
+          disabled={finding || applying || !panel.importUrl.trim()}
           onClick={requestImportSourceDiscovery}
         >
           {finding ? 'Finding…' : 'Find backups'}
@@ -370,6 +387,7 @@ function ImportPanel({ panel }: { panel: ReturnType<typeof getBackupPanelSnapsho
           <select
             className="backup-input import-source"
             value={panel.importSourceRevision ?? ''}
+            disabled={applying}
             onChange={(event) => requestImportSourceLoad(event.target.value)}
           >
             <option value="">Choose a backup…</option>
@@ -393,7 +411,7 @@ function ImportPanel({ panel }: { panel: ReturnType<typeof getBackupPanelSnapsho
             </div>
             <button
               className="web-list-action"
-              disabled={validItems.length === 0 || allValidSelected}
+              disabled={applying || validItems.length === 0 || allValidSelected}
               onClick={selectAllValidImportItems}
             >
               Select all
@@ -404,20 +422,35 @@ function ImportPanel({ panel }: { panel: ReturnType<typeof getBackupPanelSnapsho
               title="Skills"
               items={panel.importItems.filter((item) => item.kind === 'skill')}
               selectedIds={panel.importSelectedIds}
+              disabled={applying}
             />
             <ImportSelectionGroup
               title="MCP servers"
               items={panel.importItems.filter((item) => item.kind === 'mcp')}
               selectedIds={panel.importSelectedIds}
+              disabled={applying}
               issue={panel.importIssues.find((candidate) => candidate.scope === 'mcp')?.message}
             />
           </div>
           <p className="import-selection-count">
             {panel.importSelectedIds.length} selected
           </p>
+          <div className="backup-actions">
+            <button
+              className="conn-btn conn-btn-next"
+              disabled={applying || panel.importSelectedIds.length === 0}
+              onClick={requestImportApply}
+            >
+              {applying
+                ? 'Importing…'
+                : `Import ${panel.importSelectedIds.length} item${panel.importSelectedIds.length === 1 ? '' : 's'}`}
+            </button>
+          </div>
         </section>
       )}
 
+      {panel.importStatus && <p className="backup-status backup-status-ok">{panel.importStatus}</p>}
+      {panel.importFailure && <ImportFailureDetails failure={panel.importFailure} />}
       {panel.importError && <p className="backup-status backup-status-err">{panel.importError}</p>}
     </section>
   );
@@ -427,11 +460,13 @@ function ImportSelectionGroup({
   title,
   items,
   selectedIds,
+  disabled,
   issue,
 }: {
   title: string;
   items: NonNullable<ReturnType<typeof getBackupPanelSnapshot>['importItems']>;
   selectedIds: string[];
+  disabled: boolean;
   issue?: string;
 }) {
   const selected = new Set(selectedIds);
@@ -446,7 +481,7 @@ function ImportSelectionGroup({
           <input
             type="checkbox"
             checked={item.valid && selected.has(item.id)}
-            disabled={!item.valid}
+            disabled={disabled || !item.valid}
             onChange={() => toggleImportItemSelection(item.id)}
           />
           <span className="backup-check-text">
@@ -467,5 +502,24 @@ function ImportSelectionGroup({
         </label>
       ))}
     </section>
+  );
+}
+
+function ImportFailureDetails({
+  failure,
+}: {
+  failure: NonNullable<ReturnType<typeof getBackupPanelSnapshot>['importFailure']>;
+}) {
+  const phase = failure.phase[0].toUpperCase() + failure.phase.slice(1);
+  const rollback = failure.rollback === 'not-needed'
+    ? 'Not needed'
+    : failure.rollback === 'completed' ? 'Completed' : 'Failed';
+  return (
+    <div className="import-failure" role="alert">
+      <strong>{phase} failed</strong>
+      {failure.itemId && <span>Item: {failure.itemId}</span>}
+      <span>{failure.message}</span>
+      <span>Rollback: {rollback}</span>
+    </div>
   );
 }

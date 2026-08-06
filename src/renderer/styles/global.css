@@ -5335,6 +5335,24 @@ button {
   font-size: 11px;
   text-align: right;
 }
+
+.import-failure {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--error, #e06c6c) 55%, var(--border));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--error, #e06c6c) 8%, transparent);
+  color: var(--text-muted);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.import-failure strong {
+  color: var(--error, #e06c6c);
+  font-size: 12px;
+}
 /* Import review */
 .import-review-item {
   border: 1px solid var(--border);

@@ -254,6 +254,12 @@ describe('config-backup import (read side)', () => {
       'machine.json': JSON.stringify({ appInstanceId: 'src', machineLabel: 'source' }),
     });
     const source = await discoverSource();
+    const listed = await listImportItems(bareRemote, source.sourceRevision);
+    expect(listed.items.find((item) => item.id === 'skill:shared')?.impact).toBe('replace-local');
+    fs.writeFileSync(
+      liveSkillFile('shared', 'SKILL.md'),
+      '---\nname: shared\ndescription: changed after listing\n---\n',
+    );
 
     const result = await applyImport(
       bareRemote,

@@ -7,6 +7,7 @@ import type {
   ImportItemSummary,
   ImportListIssue,
   ImportListResult,
+  ImportApplyResult,
 } from '@shared/config-backup';
 
 export type BackupPanelTab = 'backup' | 'import';
@@ -15,7 +16,8 @@ export type BackupPanelRequestKind =
   | 'save-settings'
   | 'run'
   | 'find-import-sources'
-  | 'load-import-source';
+  | 'load-import-source'
+  | 'apply-import';
 
 export interface BackupPanelRequestToken {
   sessionRevision: number;
@@ -46,6 +48,8 @@ interface BackupPanelState {
   importIssues: ImportListIssue[];
   importSelectedIds: string[];
   importError: string | null;
+  importFailure: Extract<ImportApplyResult, { ok: false }> | null;
+  importStatus: string | null;
 }
 
 type Listener = () => void;
@@ -76,6 +80,8 @@ function initialState(sessionRevision: number): BackupPanelState {
     importIssues: [],
     importSelectedIds: [],
     importError: null,
+    importFailure: null,
+    importStatus: null,
   };
 }
 
@@ -172,6 +178,8 @@ export function updateImportUrl(importUrl: string): void {
     importIssues: [],
     importSelectedIds: [],
     importError: null,
+    importFailure: null,
+    importStatus: null,
   });
 }
 
@@ -185,6 +193,8 @@ export function startImportSourceDiscovery(): BackupPanelRequestToken {
     importIssues: [],
     importSelectedIds: [],
     importError: null,
+    importFailure: null,
+    importStatus: null,
   });
   return token;
 }
@@ -203,6 +213,8 @@ export function acceptImportSources(
     importIssues: [],
     importSelectedIds: [],
     importError: null,
+    importFailure: null,
+    importStatus: null,
   });
   return true;
 }
@@ -216,6 +228,8 @@ export function startImportSourceLoad(sourceRevision: string): BackupPanelReques
     importIssues: [],
     importSelectedIds: [],
     importError: null,
+    importFailure: null,
+    importStatus: null,
     busy: sourceRevision ? state.busy : null,
   });
   return token;
@@ -233,19 +247,21 @@ export function acceptImportItems(
     importIssues: result.issues,
     importSelectedIds: [],
     importError: null,
+    importFailure: null,
+    importStatus: null,
   });
   return true;
 }
 
 export function failImportPanelRequest(token: BackupPanelRequestToken, message: string): boolean {
   if (!isCurrent(token)) return false;
-  publish({ ...state, busy: null, importError: message });
+  publish({ ...state, busy: null, importError: message, importFailure: null, importStatus: null });
   return true;
 }
 
 export function toggleImportItemSelection(id: string): void {
   const item = state.importItems?.find((candidate) => candidate.id === id);
-  if (!item?.valid || state.busy === 'load-import-source') return;
+  if (!item?.valid || state.busy === 'load-import-source' || state.busy === 'apply-import') return;
   const selected = new Set(state.importSelectedIds);
   if (selected.has(id)) selected.delete(id);
   else selected.add(id);
@@ -255,6 +271,8 @@ export function toggleImportItemSelection(id: string): void {
       .map((candidate) => candidate.id)
       .filter((candidateId) => selected.has(candidateId)),
     importError: null,
+    importFailure: null,
+    importStatus: null,
   });
 }
 
@@ -265,7 +283,51 @@ export function selectAllValidImportItems(): void {
       .filter((item) => item.valid)
       .map((item) => item.id),
     importError: null,
+    importFailure: null,
+    importStatus: null,
   });
+}
+
+export function startImportApply(): BackupPanelRequestToken {
+  const token = startBackupPanelRequest('apply-import');
+  publish({ ...state, importError: null, importFailure: null, importStatus: null });
+  return token;
+}
+
+export function acceptImportApplyFailure(
+  token: BackupPanelRequestToken,
+  failure: Extract<ImportApplyResult, { ok: false }>,
+): boolean {
+  if (!isCurrent(token)) return false;
+  publish({
+    ...state,
+    busy: null,
+    importError: null,
+    importFailure: failure,
+    importStatus: null,
+  });
+  return true;
+}
+
+export function acceptImportApplySuccess(
+  token: BackupPanelRequestToken,
+  result: Extract<ImportApplyResult, { ok: true }>,
+  refreshed: ImportListResult | null,
+  selectedCount: number,
+  refreshError?: string,
+): boolean {
+  if (!isCurrent(token)) return false;
+  publish({
+    ...state,
+    busy: null,
+    importItems: refreshed?.items ?? state.importItems,
+    importIssues: refreshed?.issues ?? state.importIssues,
+    importSelectedIds: [],
+    importError: refreshError ?? null,
+    importFailure: null,
+    importStatus: `Imported ${selectedCount} item${selectedCount === 1 ? '' : 's'}; ${result.itemsChanged.length} changed.`,
+  });
+  return true;
 }
 
 export function beginBackupConfigEdit(): void {

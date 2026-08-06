@@ -11,6 +11,11 @@ export interface BackupEventMap {
     remoteUrl: string;
     sourceRevision: string;
   };
+  'backup:apply-import': BackupPanelRequestToken & {
+    remoteUrl: string;
+    sourceRevision: string;
+    selectedIds: string[];
+  };
 }
 
 export type BackupEventName = keyof BackupEventMap;

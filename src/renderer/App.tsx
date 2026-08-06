@@ -38,6 +38,8 @@ import { clearAgentSession } from './storage/agent-history';
 import { bindProcessMemorySummary } from './process-memory-sync';
 import {
   acceptBackupPanelList,
+  acceptImportApplyFailure,
+  acceptImportApplySuccess,
   acceptImportItems,
   acceptImportSources,
   failBackupPanelRequest,
@@ -200,12 +202,47 @@ export function App() {
       },
     );
 
+    const offApplyImport = onBackup(
+      'backup:apply-import',
+      async ({ remoteUrl, sourceRevision, selectedIds, ...token }) => {
+        try {
+          const result = await window.shelfApi.configBackup.applyImport(
+            remoteUrl,
+            sourceRevision,
+            selectedIds,
+          );
+          if (!result.ok) {
+            if (!acceptImportApplyFailure(token, result)) {
+              logStale('apply-import failure', token.sessionRevision, token.requestRevision);
+            }
+            return;
+          }
+
+          let refreshed = null;
+          let refreshError: string | undefined;
+          try {
+            refreshed = await window.shelfApi.configBackup.listImportItems(remoteUrl, sourceRevision);
+          } catch (error) {
+            refreshError = `Import succeeded, but impact refresh failed: ${messageOf(error)}`;
+          }
+          if (!acceptImportApplySuccess(token, result, refreshed, selectedIds.length, refreshError)) {
+            logStale('apply-import', token.sessionRevision, token.requestRevision);
+          }
+        } catch (error) {
+          if (!failImportPanelRequest(token, messageOf(error))) {
+            logStale('apply-import rejection', token.sessionRevision, token.requestRevision);
+          }
+        }
+      },
+    );
+
     return () => {
       offLoad();
       offSave();
       offRun();
       offFindImportSources();
       offLoadImportSource();
+      offApplyImport();
     };
   }, []);
 

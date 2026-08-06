@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import type { BackupListResult } from '@shared/config-backup';
 import {
   acceptBackupPanelList,
+  acceptImportApplyFailure,
+  acceptImportApplySuccess,
   acceptImportItems,
   acceptImportSources,
   getBackupPanelSnapshot,
@@ -18,6 +20,7 @@ import {
   requestBackupSettingsSave,
   requestImportSourceDiscovery,
   requestImportSourceLoad,
+  requestImportApply,
 } from './BackupView';
 
 const EMPTY_LIST: BackupListResult = {
@@ -178,6 +181,66 @@ describe('BackupView intents', () => {
     expect(getBackupPanelSnapshot().importIssues).toEqual([
       { scope: 'mcp', message: 'broken MCP file' },
     ]);
+    off();
+  });
+
+  it('preserves failed Import selection and clears it after a refreshed success', () => {
+    updateImportUrl('/transient.git');
+    requestImportSourceLoad('opaque-revision');
+    acceptImportItems({
+      sessionRevision: getBackupPanelSnapshot().sessionRevision,
+      requestRevision: 2,
+    }, {
+      issues: [],
+      items: [
+        { id: 'skill:alpha', kind: 'skill', name: 'alpha', valid: true, impact: 'new' },
+      ],
+    });
+    toggleImportItemSelection('skill:alpha');
+
+    let received: unknown;
+    const off = onBackup('backup:apply-import', (payload) => { received = payload; });
+    requestImportApply();
+    const token = {
+      sessionRevision: getBackupPanelSnapshot().sessionRevision,
+      requestRevision: 3,
+    };
+    expect(received).toEqual({
+      ...token,
+      remoteUrl: '/transient.git',
+      sourceRevision: 'opaque-revision',
+      selectedIds: ['skill:alpha'],
+    });
+
+    expect(acceptImportApplyFailure(token, {
+      ok: false,
+      phase: 'validation',
+      itemId: 'skill:alpha',
+      message: 'changed after listing',
+      rollback: 'not-needed',
+    })).toBe(true);
+    expect(getBackupPanelSnapshot().importSelectedIds).toEqual(['skill:alpha']);
+    expect(getBackupPanelSnapshot().importFailure?.phase).toBe('validation');
+
+    requestImportApply();
+    const successToken = {
+      sessionRevision: getBackupPanelSnapshot().sessionRevision,
+      requestRevision: 4,
+    };
+    expect(acceptImportApplySuccess(successToken, {
+      ok: true,
+      skillsWritten: 1,
+      mcpWritten: 0,
+      itemsChanged: ['skill:alpha'],
+    }, {
+      issues: [],
+      items: [
+        { id: 'skill:alpha', kind: 'skill', name: 'alpha', valid: true, impact: 'replace-local' },
+      ],
+    }, 1)).toBe(true);
+    expect(getBackupPanelSnapshot().importSelectedIds).toEqual([]);
+    expect(getBackupPanelSnapshot().importItems?.[0].impact).toBe('replace-local');
+    expect(getBackupPanelSnapshot().importStatus).toBe('Imported 1 item; 1 changed.');
     off();
   });
 });
