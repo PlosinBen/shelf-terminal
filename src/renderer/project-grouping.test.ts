@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { computeGroups, groupedOrder, moveGroup, type GroupableItem } from './project-grouping';
+import {
+  computeGroups,
+  computeVisibleProjectIndices,
+  findDirectionalVisibleProjectIndex,
+  groupedOrder,
+  moveGroup,
+  type GroupableItem,
+} from './project-grouping';
 
 // Minimal items — only config.id / config.parentProjectId matter.
 const item = (id: string, parentProjectId?: string): GroupableItem => ({
@@ -78,5 +85,58 @@ describe('moveGroup', () => {
 
   it('moves a group up above an earlier group', () => {
     expect(ids(moveGroup(items, 2, 0))).toEqual(['B', 'A', 'A1', 'C']);
+  });
+});
+
+describe('computeVisibleProjectIndices', () => {
+  const project = (id: string, connected: boolean, parentProjectId?: string) => ({
+    ...item(id, parentProjectId),
+    tabs: connected ? [{}] : [],
+  });
+
+  it('returns every original index when connected-only mode is off', () => {
+    const items = [project('A', false), project('B', true)];
+    expect(computeVisibleProjectIndices(items, false)).toEqual([0, 1]);
+  });
+
+  it('hides disconnected standalone projects', () => {
+    const items = [project('A', false), project('B', true), project('C', false)];
+    expect(computeVisibleProjectIndices(items, true)).toEqual([1]);
+  });
+
+  it('keeps a whole worktree group when any member is connected', () => {
+    const items = [
+      project('A', false),
+      project('A1', true, 'A'),
+      project('A2', false, 'A'),
+      project('B', false),
+      project('B1', false, 'B'),
+    ];
+    expect(computeVisibleProjectIndices(items, true)).toEqual([0, 1, 2]);
+  });
+
+  it('treats an orphan child as its own visibility group', () => {
+    const items = [project('A', true), project('X1', false, 'GONE'), project('B', true)];
+    expect(computeVisibleProjectIndices(items, true)).toEqual([0, 2]);
+  });
+});
+
+describe('findDirectionalVisibleProjectIndex', () => {
+  const visible = [0, 2, 5];
+
+  it('finds the nearest visible index in either direction', () => {
+    expect(findDirectionalVisibleProjectIndex(visible, 2, -1)).toBe(0);
+    expect(findDirectionalVisibleProjectIndex(visible, 2, 1)).toBe(5);
+  });
+
+  it('can navigate outward from a currently hidden index', () => {
+    expect(findDirectionalVisibleProjectIndex(visible, 3, -1)).toBe(2);
+    expect(findDirectionalVisibleProjectIndex(visible, 3, 1)).toBe(5);
+  });
+
+  it('does not wrap when no visible index exists in the direction', () => {
+    expect(findDirectionalVisibleProjectIndex(visible, 0, -1)).toBeNull();
+    expect(findDirectionalVisibleProjectIndex(visible, 5, 1)).toBeNull();
+    expect(findDirectionalVisibleProjectIndex([], 2, 1)).toBeNull();
   });
 });

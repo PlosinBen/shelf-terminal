@@ -59,6 +59,7 @@ interface StoreSnapshot {
   projects: readonly ReadonlyProjectRuntime[];
   activeProjectIndex: number;
   activeProjectId: string | null;
+  hideDisconnected: boolean;
   sidebarVisible: boolean;
   settingsVisible: boolean;
   searchVisible: boolean;
@@ -85,6 +86,7 @@ interface StoreSnapshot {
 
 let projects: ProjectRuntime[] = [];
 let activeProjectId: string | null = null;
+let hideDisconnected = false;
 let sidebarVisible = true;
 let settingsVisible = false;
 let searchVisible = false;
@@ -147,7 +149,7 @@ function reconcileActiveProject(preferredIndex = 0) {
 function getSnapshot(): StoreSnapshot {
   const activeProjectIndex = projectIndexById(activeProjectId);
   const editingProjectIndex = projectIndexById(editingProjectId);
-  return { projects: projects as readonly ReadonlyProjectRuntime[], activeProjectIndex, activeProjectId, sidebarVisible, settingsVisible, searchVisible, commandPickerVisible, devToolsVisible, notesVisible, skillsVisible, mcpVisible, editingProjectIndex: editingProjectIndex === -1 ? null : editingProjectIndex, editingProjectId, settings, updateStatus, pmVisible, awayMode, pmActive, quickNoteVisible, chatStage, connectionHealth, projectNotice, processMemorySummary };
+  return { projects: projects as readonly ReadonlyProjectRuntime[], activeProjectIndex, activeProjectId, hideDisconnected, sidebarVisible, settingsVisible, searchVisible, commandPickerVisible, devToolsVisible, notesVisible, skillsVisible, mcpVisible, editingProjectIndex: editingProjectIndex === -1 ? null : editingProjectIndex, editingProjectId, settings, updateStatus, pmVisible, awayMode, pmActive, quickNoteVisible, chatStage, connectionHealth, projectNotice, processMemorySummary };
 }
 
 let snapshotRef = getSnapshot();
@@ -229,6 +231,11 @@ export function setActiveProjectById(projectId: string) {
 
 export function getActiveProjectId() {
   return activeProjectId;
+}
+
+export function toggleHideDisconnected() {
+  hideDisconnected = !hideDisconnected;
+  updateSnapshot();
 }
 
 export function getProjectIndexById(projectId: string) {
@@ -749,6 +756,7 @@ export function clearUnread(projectIndex: number, tabIndex: number) {
 export function __resetStoreForTests() {
   projects = [];
   activeProjectId = null;
+  hideDisconnected = false;
   sidebarVisible = true;
   settingsVisible = false;
   searchVisible = false;

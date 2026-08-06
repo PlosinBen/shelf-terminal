@@ -21,7 +21,7 @@ export interface GroupableItem {
  * A group is a run starting at a parent (or an orphan child whose parent is absent)
  * followed by that parent's children. Returns arrays of indices into `items`.
  */
-export function computeGroups<T extends GroupableItem>(items: T[]): number[][] {
+export function computeGroups<T extends GroupableItem>(items: readonly T[]): number[][] {
   const groups: number[][] = [];
   for (let i = 0; i < items.length; i++) {
     const pid = items[i].config.parentProjectId;
@@ -33,6 +33,41 @@ export function computeGroups<T extends GroupableItem>(items: T[]): number[][] {
     }
   }
   return groups;
+}
+
+export interface ConnectableGroupableItem extends GroupableItem {
+  readonly tabs: readonly unknown[];
+}
+
+/**
+ * Return indices into the original flat project list that should be visible.
+ * Connected-only mode keeps an entire visual group when any member has a tab.
+ */
+export function computeVisibleProjectIndices<T extends ConnectableGroupableItem>(
+  items: readonly T[],
+  hideDisconnected: boolean,
+): number[] {
+  if (!hideDisconnected) return items.map((_, index) => index);
+
+  return computeGroups(items).flatMap((group) =>
+    group.some((index) => items[index].tabs.length > 0) ? group : [],
+  );
+}
+
+/** Find the nearest visible real project index in one direction, without wrap. */
+export function findDirectionalVisibleProjectIndex(
+  visibleIndices: readonly number[],
+  activeProjectIndex: number,
+  direction: -1 | 1,
+): number | null {
+  if (direction === 1) {
+    return visibleIndices.find((index) => index > activeProjectIndex) ?? null;
+  }
+
+  for (let i = visibleIndices.length - 1; i >= 0; i--) {
+    if (visibleIndices[i] < activeProjectIndex) return visibleIndices[i];
+  }
+  return null;
 }
 
 /**
