@@ -19,6 +19,8 @@ vi.mock('electron', () => ({
 const { runBackup } = await import('./backup');
 const { saveBinding } = await import('./binding-store');
 const { listBackupSources, listImportItems, planImport, applyImport } = await import('./import');
+const { createSideCar } = await import('./side-car');
+const { resetPinnedImportSourcesForTests } = await import('./source-revisions');
 
 const liveSkillFile = (name: string, rel: string) =>
   path.join(userDataDir, 'skills', 'skills', name, rel);
@@ -75,6 +77,24 @@ async function pushBranch(branch: string, files: Record<string, string>): Promis
   await git.push(['-u', 'origin', branch]);
 }
 
+async function advanceBranch(branch: string, mutate: (directory: string) => void): Promise<void> {
+  const work = path.join(root, `advance-${branch.replace(/\//g, '-')}`);
+  await simpleGit().clone(bareRemote, work, ['--branch', branch]);
+  const git = simpleGit(work);
+  await git.addConfig('user.name', 't', false, 'local');
+  await git.addConfig('user.email', 't@t', false, 'local');
+  mutate(work);
+  await git.add(['-A']);
+  await git.commit('advance');
+  await git.push('origin', branch);
+}
+
+async function fetchSideCar(): Promise<void> {
+  const sideCar = createSideCar();
+  await sideCar.ensureClone(bareRemote);
+  await sideCar.fetch();
+}
+
 beforeEach(async () => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'shelf-import-'));
   bareRemote = path.join(root, 'remote.git');
@@ -82,6 +102,7 @@ beforeEach(async () => {
   await simpleGit().raw(['init', '--bare', bareRemote]);
   userDataDir = path.join(root, 'machineA');
   fs.mkdirSync(userDataDir, { recursive: true });
+  resetPinnedImportSourcesForTests();
 });
 afterEach(() => {
   if (fs.existsSync(root)) fs.rmSync(root, { recursive: true, force: true });
@@ -95,7 +116,7 @@ describe('config-backup import (read side)', () => {
     await runBackup(['skill:alpha', 'mcp:fs']);
     await pushOtherMachineBranch();
 
-    const sources = await listBackupSources();
+    const sources = await listBackupSources(bareRemote);
     expect(sources.length).toBe(2);
 
     // Own branch sorts first, labelled from this machine's binding.
@@ -105,7 +126,7 @@ describe('config-backup import (read side)', () => {
     const other = sources.find((s) => s.appInstanceId === 'other-id')!;
     expect(other.isSelf).toBe(false);
     expect(other.machineLabel).toBe('other-laptop');
-    expect(other.ref).toBe('origin/backup/other-id');
+    expect(other.sourceRevision).toEqual(expect.any(String));
   }, GIT_HEAVY_TIMEOUT);
 
   it('lists a chosen branch items read-only (skills + mcp, with detail)', async () => {
@@ -115,23 +136,86 @@ describe('config-backup import (read side)', () => {
     await runBackup(['skill:alpha', 'mcp:fs']);
     await pushOtherMachineBranch();
 
-    const sources = await listBackupSources();
+    const sources = await listBackupSources(bareRemote);
     const other = sources.find((s) => s.appInstanceId === 'other-id')!;
-    const items = await listImportItems(other.ref);
-    expect(items).toEqual([
+    const items = await listImportItems(bareRemote, other.sourceRevision);
+    expect(items.items).toEqual([
       { id: 'skill:beta', kind: 'skill', name: 'beta', detail: 'from laptop', valid: true },
-    ]);
+    ].map((item) => ({ ...item, impact: 'new' })));
 
-    const mine = await listImportItems(sources.find((s) => s.isSelf)!.ref);
-    expect(mine).toEqual([
+    const mineSource = sources.find((s) => s.isSelf)!;
+    const mine = await listImportItems(bareRemote, mineSource.sourceRevision);
+    expect(mine.items).toEqual([
       { id: 'skill:alpha', kind: 'skill', name: 'alpha', detail: 'my skill', valid: true },
       { id: 'mcp:fs', kind: 'mcp', name: 'fs', detail: 'stdio', valid: true },
-    ]);
+    ].map((item) => ({ ...item, impact: 'replace-local' })));
   }, GIT_HEAVY_TIMEOUT);
 
-  it('unbound machine → no sources', async () => {
-    expect(await listBackupSources()).toEqual([]);
+  it('an empty transient URL performs no discovery', async () => {
+    expect(await listBackupSources('')).toEqual([]);
   });
+
+  it('validates source items, reports malformed MCP separately, and leaves the side-car clean', async () => {
+    seedSkill('alpha', 'local alpha');
+    await pushBranch('backup/source', {
+      'skills/alpha/SKILL.md': '---\nname: alpha\ndescription: remote alpha\n---\n',
+      'skills/broken/SKILL.md': '---\nname: wrong-name\n---\n',
+      'mcp-servers.json': '{broken',
+      'machine.json': JSON.stringify({ appInstanceId: 'source', machineLabel: 'source-machine' }),
+    });
+
+    const source = (await listBackupSources(bareRemote))[0];
+    const sideCar = createSideCar();
+    const before = await simpleGit(sideCar.dir).status();
+    const result = await listImportItems(bareRemote, source.sourceRevision);
+    const after = await simpleGit(sideCar.dir).status();
+
+    expect(result.items).toEqual([
+      {
+        id: 'skill:alpha',
+        kind: 'skill',
+        name: 'alpha',
+        detail: 'remote alpha',
+        valid: true,
+        impact: 'replace-local',
+      },
+      expect.objectContaining({
+        id: 'skill:broken',
+        valid: false,
+        impact: 'new',
+        invalidReason: expect.stringContaining('does not match folder'),
+      }),
+    ]);
+    expect(result.issues).toEqual([
+      { scope: 'mcp', message: 'mcp-servers.json is not a keyed JSON object.' },
+    ]);
+    expect(after.files).toEqual(before.files);
+    expect(after.staged).toEqual(before.staged);
+  }, GIT_HEAVY_TIMEOUT);
+
+  it('keeps a discovered source pinned when its remote branch advances', async () => {
+    await pushBranch('backup/source', {
+      'skills/alpha/SKILL.md': '---\nname: alpha\ndescription: version one\n---\n',
+      'machine.json': JSON.stringify({ appInstanceId: 'source', machineLabel: 'source-machine' }),
+    });
+    const source = (await listBackupSources(bareRemote))[0];
+
+    await advanceBranch('backup/source', (directory) => {
+      fs.writeFileSync(
+        path.join(directory, 'skills', 'alpha', 'SKILL.md'),
+        '---\nname: alpha\ndescription: version two\n---\n',
+      );
+      fs.mkdirSync(path.join(directory, 'skills', 'beta'), { recursive: true });
+      fs.writeFileSync(
+        path.join(directory, 'skills', 'beta', 'SKILL.md'),
+        '---\nname: beta\ndescription: added later\n---\n',
+      );
+    });
+
+    const pinned = await listImportItems(bareRemote, source.sourceRevision);
+    expect(pinned.items.map((item) => item.id)).toEqual(['skill:alpha']);
+    expect(pinned.items[0].detail).toBe('version one');
+  }, GIT_HEAVY_TIMEOUT);
 
   it('planImport classifies each entry new / identical / differs vs live', async () => {
     // Live: skill "shared" with SKILL.md = X, and mcp "fs".
@@ -152,7 +236,7 @@ describe('config-backup import (read side)', () => {
       }),
     });
 
-    await listBackupSources(); // clone + fetch
+    await fetchSideCar();
     const ref = 'origin/backup/src';
     const plan = await planImport(ref, ['skill:shared', 'skill:beta', 'mcp:fs', 'mcp:git']);
 
@@ -189,7 +273,7 @@ describe('config-backup import (read side)', () => {
       }),
     });
 
-    await listBackupSources();
+    await fetchSideCar();
     const res = await applyImport('origin/backup/src', [
       { id: 'skill:shared', replaceConflicts: true },
       { id: 'skill:beta', replaceConflicts: false },
@@ -222,7 +306,7 @@ describe('config-backup import (read side)', () => {
       'skills/shared/extra.txt': 'e',     // new → still copied
     });
 
-    await listBackupSources();
+    await fetchSideCar();
     const res = await applyImport('origin/backup/src', [{ id: 'skill:shared', replaceConflicts: false }]);
 
     expect(readLive('shared', 'SKILL.md')).toBe('X');   // kept

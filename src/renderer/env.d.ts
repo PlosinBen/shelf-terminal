@@ -141,8 +141,11 @@ interface ShelfApi {
     run: (
       selectedIds: string[],
     ) => Promise<import('../shared/config-backup').BackupRunResult>;
-    listSources: () => Promise<import('../shared/config-backup').BackupSource[]>;
-    listImportItems: (ref: string) => Promise<import('../shared/config-backup').BackupItemSummary[]>;
+    listSources: (remoteUrl: string) => Promise<import('../shared/config-backup').BackupSource[]>;
+    listImportItems: (
+      remoteUrl: string,
+      sourceRevision: string,
+    ) => Promise<import('../shared/config-backup').ImportListResult>;
     planImport: (
       ref: string,
       ids: string[],

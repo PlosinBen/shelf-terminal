@@ -19,6 +19,7 @@ import { enumerateLiveItems } from './enumerate';
 import { saveIntent } from './intent-store';
 import { createSideCar, type SideCar } from './side-car';
 import { validateSkillPayload } from './validation';
+import { withConfigBackupOperation } from './operation-lock';
 
 interface BackupSnapshot {
   directory: string;
@@ -214,17 +215,20 @@ export async function runBackup(
 
   const branch = thisMachineBranchRef();
   try {
-    const sideCar = dependencies.createSideCar();
-    await sideCar.ensureClone(binding.remoteUrl);
-    await sideCar.fetch();
-    const remoteHead = await sideCar.remoteBranchHead(branch);
-    await sideCar.materializeCleanBase(remoteHead);
-    const stagedPaths = applySelected(sideCar.dir, snapshot, binding.machineLabel);
-    const changed = await sideCar.stagePathsAndCommit(
-      stagedPaths,
-      `backup: ${snapshot.selected.length} selected item(s)`,
-    );
-    if (changed) await sideCar.pushHead(branch);
+    const changed = await withConfigBackupOperation(async () => {
+      const sideCar = dependencies.createSideCar();
+      await sideCar.ensureClone(binding.remoteUrl);
+      await sideCar.fetch();
+      const remoteHead = await sideCar.remoteBranchHead(branch);
+      await sideCar.materializeCleanBase(remoteHead);
+      const stagedPaths = applySelected(sideCar.dir, snapshot, binding.machineLabel);
+      const committed = await sideCar.stagePathsAndCommit(
+        stagedPaths,
+        `backup: ${snapshot.selected.length} selected item(s)`,
+      );
+      if (committed) await sideCar.pushHead(branch);
+      return committed;
+    });
 
     saveIntent(selectedIds);
     log.info(

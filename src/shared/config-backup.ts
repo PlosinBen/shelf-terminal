@@ -131,14 +131,30 @@ export interface ImportDecision {
 
 /** A backup branch available to import from (all machines, incl. own). */
 export interface BackupSource {
-  /** Readable git ref, e.g. `origin/backup/<id>`. */
-  ref: string;
   branch: string;
   appInstanceId: string;
   /** Human label from the branch's machine.json (falls back to the id). */
   machineLabel: string;
   /** True for this machine's own branch (self-restore). */
   isSelf: boolean;
+  /** Opaque process-local handle pinned to the fetched branch commit. */
+  sourceRevision: string;
+}
+
+export type ImportItemImpact = 'new' | 'replace-local';
+
+export type ImportItemSummary = BackupItemSummary & {
+  impact: ImportItemImpact;
+};
+
+export interface ImportListIssue {
+  scope: 'mcp';
+  message: string;
+}
+
+export interface ImportListResult {
+  items: ImportItemSummary[];
+  issues: ImportListIssue[];
 }
 
 export interface ImportApplyResult {

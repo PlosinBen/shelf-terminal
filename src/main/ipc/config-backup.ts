@@ -44,13 +44,16 @@ export function registerConfigBackupHandlers(): void {
   });
 
   // ── Import (copy from a chosen branch into live) ──
-  ipcMain.handle(IPC.CONFIG_BACKUP_LIST_SOURCES, async () => {
-    return listBackupSources();
+  ipcMain.handle(IPC.CONFIG_BACKUP_LIST_SOURCES, async (_event, remoteUrl: string) => {
+    return listBackupSources(remoteUrl);
   });
 
-  ipcMain.handle(IPC.CONFIG_BACKUP_LIST_IMPORT_ITEMS, async (_event, ref: string) => {
-    return listImportItems(ref);
-  });
+  ipcMain.handle(
+    IPC.CONFIG_BACKUP_LIST_IMPORT_ITEMS,
+    async (_event, payload: { remoteUrl: string; sourceRevision: string }) => {
+      return listImportItems(payload.remoteUrl, payload.sourceRevision);
+    },
+  );
 
   ipcMain.handle(IPC.CONFIG_BACKUP_PLAN_IMPORT, async (_event, payload: { ref: string; ids: string[] }) => {
     return planImport(payload.ref, payload.ids);

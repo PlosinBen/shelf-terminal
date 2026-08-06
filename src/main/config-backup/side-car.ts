@@ -71,6 +71,10 @@ export interface SideCar {
   listFilesAtRef(ref: string): Promise<string[]>;
   /** File content at a ref, or null if the path does not exist there. */
   readFileAtRef(ref: string, relPath: string): Promise<string | null>;
+  /** Resolve a fetched ref to its immutable commit SHA. */
+  resolveCommit(ref: string): Promise<string>;
+  /** Materialize a commit in an isolated local clone, leaving this tree/index untouched. */
+  exportCommit(commit: string, destination: string): Promise<void>;
   /** Materialize paths from a ref into the working tree (real bytes on disk),
    *  so Import can fs-copy them into live binary-safe. Does not move HEAD. */
   checkoutPathsFromRef(ref: string, paths: string[]): Promise<void>;
@@ -213,6 +217,16 @@ export function createSideCar(): SideCar {
       } catch {
         return null; // path absent at this ref
       }
+    },
+
+    async resolveCommit(ref: string): Promise<string> {
+      const git = await repo();
+      return (await git.revparse([`${ref}^{commit}`])).trim();
+    },
+
+    async exportCommit(commit: string, destination: string): Promise<void> {
+      await simpleGit().clone(dir, destination, ['--no-checkout', '--shared']);
+      await simpleGit(destination).checkout(['--force', '--detach', commit]);
     },
 
     async checkoutPathsFromRef(ref: string, paths: string[]): Promise<void> {

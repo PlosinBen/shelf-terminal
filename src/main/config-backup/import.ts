@@ -1,11 +1,11 @@
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import {
   REPO_SKILLS_DIR,
   REPO_MCP_FILE,
   REPO_MACHINE_MANIFEST,
   backupItemId,
-  type BackupItemSummary,
   type BackupItemKind,
   type BackupMachineManifest,
   type ImportEntry,
@@ -13,16 +13,22 @@ import {
   type ImportDecision,
   type BackupSource,
   type ImportApplyResult,
+  type ImportItemSummary,
+  type ImportListResult,
 } from '@shared/config-backup';
 import { log } from '@shared/logger';
 import { getAppInstanceId } from '../app-instance-id';
 import { parseSkillMeta, skillDirPath } from '../skills-store';
 import { listMcpServers, addMcpServer, updateMcpServer } from '../mcp-store';
+import { validateMcpEntry } from '@shared/mcp';
 import { onSkillsChanged } from '../skills-sync';
 import { onMcpChanged } from '../mcp-sync';
 import type { McpServerBlock } from '@shared/mcp';
-import { loadBinding } from './binding-store';
+import { enumerateLiveItems } from './enumerate';
+import { withConfigBackupOperation } from './operation-lock';
 import { createSideCar, type SideCar } from './side-car';
+import { pinImportSource, resolveImportSource } from './source-revisions';
+import { validateSkillPayload } from './validation';
 
 /** Split `kind:name` into a kind + name (names carry no colon). */
 function parseId(id: string): { kind: string; name: string } | null {
@@ -41,79 +47,142 @@ const hasNul = (s: string) => s.includes('\u0000');
  * contention). Writing into live is a later step; nothing here touches live.
  */
 
-/** Unique skill folder names present under `skills/` at a ref. */
-function skillNamesFromFiles(files: string[]): string[] {
-  const names = new Set<string>();
-  for (const f of files) {
-    if (f.startsWith(REPO_SKILLS_DIR + '/')) {
-      const name = f.slice(REPO_SKILLS_DIR.length + 1).split('/')[0];
-      if (name) names.add(name);
-    }
-  }
-  return [...names].sort();
-}
-
 /** Fetch + list every backup branch (all machines, incl. this one). */
-export async function listBackupSources(): Promise<BackupSource[]> {
-  const binding = loadBinding();
-  if (!binding) return [];
+export async function listBackupSources(remoteUrl: string): Promise<BackupSource[]> {
+  if (!remoteUrl) return [];
+  return withConfigBackupOperation(async () => {
+    const sideCar = createSideCar();
+    await sideCar.ensureClone(remoteUrl);
+    await sideCar.fetch();
 
-  const sideCar = createSideCar();
-  await sideCar.ensureClone(binding.remoteUrl);
-  await sideCar.fetch();
-
-  const selfId = getAppInstanceId();
-  const branches = await sideCar.listBackupBranches();
-  const out: BackupSource[] = [];
-  for (const b of branches) {
-    let machineLabel = b.appInstanceId;
-    const raw = await sideCar.readFileAtRef(b.ref, REPO_MACHINE_MANIFEST);
-    if (raw) {
-      try {
-        const m = JSON.parse(raw) as BackupMachineManifest;
-        if (m?.machineLabel) machineLabel = m.machineLabel;
-      } catch {
-        log.warn('config-backup', `branch ${b.branch} has an unreadable machine.json — using id as label`);
+    const selfId = getAppInstanceId();
+    const branches = await sideCar.listBackupBranches();
+    const out: BackupSource[] = [];
+    for (const branch of branches) {
+      let machineLabel = branch.appInstanceId;
+      const raw = await sideCar.readFileAtRef(branch.ref, REPO_MACHINE_MANIFEST);
+      if (raw) {
+        try {
+          const manifest = JSON.parse(raw) as BackupMachineManifest;
+          if (manifest?.machineLabel) machineLabel = manifest.machineLabel;
+        } catch {
+          log.warn('config-backup', `branch ${branch.branch} has an unreadable machine.json — using id as label`);
+        }
       }
+      const commit = await sideCar.resolveCommit(branch.ref);
+      out.push({
+        branch: branch.branch,
+        appInstanceId: branch.appInstanceId,
+        machineLabel,
+        isSelf: branch.appInstanceId === selfId,
+        sourceRevision: pinImportSource(remoteUrl, commit),
+      });
     }
-    out.push({
-      ref: b.ref,
-      branch: b.branch,
-      appInstanceId: b.appInstanceId,
-      machineLabel,
-      isSelf: b.appInstanceId === selfId,
-    });
-  }
-  // Own branch first, then by label.
-  out.sort((a, b) => (a.isSelf === b.isSelf ? a.machineLabel.localeCompare(b.machineLabel) : a.isSelf ? -1 : 1));
-  return out;
+    out.sort((a, b) => (
+      a.isSelf === b.isSelf
+        ? a.machineLabel.localeCompare(b.machineLabel)
+        : a.isSelf ? -1 : 1
+    ));
+    return out;
+  });
 }
 
-/** List the backup-able items present in a chosen branch (read-only). */
-export async function listImportItems(ref: string, sideCar: SideCar = createSideCar()): Promise<BackupItemSummary[]> {
-  const files = await sideCar.listFilesAtRef(ref);
-  const out: BackupItemSummary[] = [];
+function inspectImportItems(directory: string, liveIds: Set<string>): ImportListResult {
+  const items: ImportItemSummary[] = [];
+  const issues: ImportListResult['issues'] = [];
+  const impact = (id: string) => liveIds.has(id) ? 'replace-local' as const : 'new' as const;
 
-  for (const name of skillNamesFromFiles(files)) {
-    let detail: string | undefined;
-    const raw = await sideCar.readFileAtRef(ref, `${REPO_SKILLS_DIR}/${name}/SKILL.md`);
-    if (raw) detail = parseSkillMeta(raw).description;
-    out.push({ id: backupItemId('skill', name), kind: 'skill', name, ...(detail ? { detail } : {}), valid: true });
-  }
-
-  const mcpRaw = await sideCar.readFileAtRef(ref, REPO_MCP_FILE);
-  if (mcpRaw) {
-    try {
-      const servers = JSON.parse(mcpRaw) as Record<string, { type?: string }>;
-      for (const name of Object.keys(servers).sort()) {
-        out.push({ id: backupItemId('mcp', name), kind: 'mcp', name, detail: servers[name]?.type, valid: true });
+  const skillsDirectory = path.join(directory, REPO_SKILLS_DIR);
+  if (fs.existsSync(skillsDirectory)) {
+    const skillsStat = fs.lstatSync(skillsDirectory);
+    if (skillsStat.isSymbolicLink() || !skillsStat.isDirectory()) {
+      throw new Error('Source skills path must be a regular directory.');
+    }
+    for (const entry of fs.readdirSync(skillsDirectory, { withFileTypes: true })
+      .sort((a, b) => a.name.localeCompare(b.name))) {
+      const id = backupItemId('skill', entry.name);
+      const validation = validateSkillPayload(entry.name, path.join(skillsDirectory, entry.name));
+      if (!validation.valid) {
+        items.push({
+          id,
+          kind: 'skill',
+          name: entry.name,
+          valid: false,
+          invalidReason: validation.reason,
+          impact: impact(id),
+        });
+        continue;
       }
-    } catch {
-      log.warn('config-backup', `branch mcp-servers.json at ${ref} is not valid JSON — skipped in import list`);
+      const skillMarkdown = fs.readFileSync(path.join(skillsDirectory, entry.name, 'SKILL.md'), 'utf-8');
+      const detail = parseSkillMeta(skillMarkdown).description;
+      items.push({
+        id,
+        kind: 'skill',
+        name: entry.name,
+        ...(detail ? { detail } : {}),
+        valid: true,
+        impact: impact(id),
+      });
     }
   }
 
-  return out;
+  const mcpFile = path.join(directory, REPO_MCP_FILE);
+  if (fs.existsSync(mcpFile)) {
+    const stat = fs.lstatSync(mcpFile);
+    if (stat.isSymbolicLink() || !stat.isFile()) {
+      issues.push({ scope: 'mcp', message: 'mcp-servers.json must be a regular file.' });
+    } else {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(fs.readFileSync(mcpFile, 'utf-8'));
+      } catch {
+        parsed = null;
+      }
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        issues.push({ scope: 'mcp', message: 'mcp-servers.json is not a keyed JSON object.' });
+      } else {
+        for (const [name, block] of Object.entries(parsed as Record<string, unknown>)
+          .sort(([a], [b]) => a.localeCompare(b))) {
+          const id = backupItemId('mcp', name);
+          const error = validateMcpEntry(name, block);
+          items.push(error
+            ? { id, kind: 'mcp', name, valid: false, invalidReason: error, impact: impact(id) }
+            : {
+                id,
+                kind: 'mcp',
+                name,
+                detail: (block as { type: string }).type,
+                valid: true,
+                impact: impact(id),
+              });
+        }
+      }
+    }
+  }
+
+  return { items, issues };
+}
+
+/** Materialize and inspect a pinned source without touching the side-car tree/index. */
+export async function listImportItems(
+  remoteUrl: string,
+  sourceRevision: string,
+): Promise<ImportListResult> {
+  return withConfigBackupOperation(async () => {
+    const commit = resolveImportSource(remoteUrl, sourceRevision);
+    if (!commit) throw new Error('This Import source is no longer available. Find backups again.');
+
+    const sideCar = createSideCar();
+    await sideCar.ensureClone(remoteUrl);
+    const operationDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'shelf-import-source-'));
+    try {
+      await sideCar.exportCommit(commit, operationDirectory);
+      const liveIds = new Set((await enumerateLiveItems()).map((item) => item.id));
+      return inspectImportItems(operationDirectory, liveIds);
+    } finally {
+      fs.rmSync(operationDirectory, { recursive: true, force: true });
+    }
+  });
 }
 
 // ── Import plan: per-item overwrite status vs live (NOT a conflict — just an
