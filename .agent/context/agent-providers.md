@@ -472,3 +472,13 @@ Renderer 在 dev/E2E 傳入是否顯示 internal provider 的環境政策，再�
 **Do not change casually because：** 不要用 `account === null` 或 `requiresOpenaiAuth` 任一欄位單獨判斷；API key、ChatGPT、Bedrock 等模式的 account shape 不同。不要把 auth probe 失敗降級成 bundled model fallback，否則 UI 會再次在未知 auth 狀態下放行 turn。
 
 **Related：** `agent-providers#15`（per-appId device auth）、`agent-providers#32`（官方 account JSON-RPC）、`agent-ui#7`（AuthPane / post-login re-init ownership）、`agent-server/providers/codex/index.ts`。
+
+## agent-providers#40 — Codex web search 使用無 body 的 fold card  ·  [Decision]
+
+**Decision：** Codex app-server 的 `webSearch` / `web_search` item 由 provider 轉成 `fold_markdown` 渲染原語：`label` 固定為 `Web search`，頂層 `item.query` 放在 `subtitle`，不帶 body；query 缺失或為空時略過。Payload 的 `results` 不轉送 renderer。
+
+**Reason：** Web search 與其他工具活動使用一致的 card 呈現，同時維持 renderer 只接收渲染原語、不理解 provider-native search result shape 的邊界。搜尋結果 UI 不屬於目前需求。
+
+**Do not change casually because：** 不要為了顯示 `results` 在 renderer 加 Codex-specific 分支，或在沒有明確產品需求時擴張 search-result normalization；若要呈現結果，應另行定義跨層 UX 與資料契約。
+
+**Related：** `agent-providers#1`、`agent-ui#5`、`agent-server/providers/codex/app-server-translate.ts`。

@@ -152,8 +152,9 @@ function translateCompletedItem(params: unknown, opts: CodexAppServerTranslateOp
     return query ? [{
       type: 'message',
       msgId: id,
-      msgType: 'note',
-      content: `Web search: ${redactText(query, opts.redactValues)}`,
+      msgType: 'fold_markdown',
+      label: 'Web search',
+      subtitle: redactText(query, opts.redactValues),
     }] : [];
   }
   return [];

@@ -77,6 +77,18 @@ describe('createFakeBackend — scenarios', () => {
     expect(m.body.tone).toBe('muted');
   });
 
+  it('websearch: emits a bodyless fold_markdown message', async () => {
+    const { send, msgs } = collect();
+    await createFakeBackend().query(makeInput('websearch:Codex app server protocol'), send);
+    const m = msgs.find((x) => x.type === 'message') as any;
+    expect(m).toMatchObject({
+      msgType: 'fold_markdown',
+      label: 'Web search',
+      subtitle: 'Codex app server protocol',
+    });
+    expect(m.body).toBeUndefined();
+  });
+
   it('tool: emits fold_code without errorMessage on success', async () => {
     const { send, msgs } = collect();
     await createFakeBackend().query(makeInput('tool:Read'), send);

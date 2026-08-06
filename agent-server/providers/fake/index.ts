@@ -32,6 +32,7 @@ const FAKE_AUTH_DISPLAY_NAME = 'Fake Harness';
  *   chunk:<msg>         stream chunks under a fresh msgId, NO finalize (copilot
  *                       boundary-split segment — settles only at turn-end idle)
  *   thinking:<msg>      thinking message
+ *   websearch:<query>   bodyless Web search markdown card
  *   tool:<name>         tool_use + tool_result success
  *   tool_err:<name>     tool_use + tool_result error
  *   subagent:<label>    outer Agent/Task tool_use card + inner steps tagged with
@@ -239,6 +240,17 @@ export function createFakeBackend(_representedProvider: AgentProvider = FAKE_PRO
         type: 'message', msgId, msgType: 'fold_text',
         label: 'Thinking',
         body: { content, tone: 'muted' },
+      });
+      return;
+    }
+
+    if (step.startsWith('websearch:')) {
+      send({
+        type: 'message',
+        msgId: mintId('m'),
+        msgType: 'fold_markdown',
+        label: 'Web search',
+        subtitle: step.slice('websearch:'.length),
       });
       return;
     }

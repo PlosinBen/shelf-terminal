@@ -33,6 +33,32 @@ describe('translateCodexAppServerNotification', () => {
     })).toEqual([]);
   });
 
+  it.each(['webSearch', 'web_search'])('maps %s items to bodyless markdown cards', (type) => {
+    expect(translateCodexAppServerNotification('item/completed', {
+      item: {
+        id: 'search-1',
+        type,
+        query: 'Codex app server protocol',
+        results: [{ title: 'Ignored result' }],
+      },
+    })).toEqual([{
+      type: 'message',
+      msgId: 'search-1',
+      msgType: 'fold_markdown',
+      label: 'Web search',
+      subtitle: 'Codex app server protocol',
+    }]);
+  });
+
+  it('suppresses web search items without a query', () => {
+    expect(translateCodexAppServerNotification('item/completed', {
+      item: { id: 'search-1', type: 'webSearch' },
+    })).toEqual([]);
+    expect(translateCodexAppServerNotification('item/completed', {
+      item: { id: 'search-2', type: 'webSearch', query: '' },
+    })).toEqual([]);
+  });
+
   it('maps command execution items to fold_code cards', () => {
     expect(translateCodexAppServerNotification('item/updated', {
       item: {

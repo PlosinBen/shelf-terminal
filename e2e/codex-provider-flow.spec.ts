@@ -134,4 +134,16 @@ test.describe('Canonical Codex provider renderer flow', () => {
     const ids = projects[0].agentSessionIds;
     expect(ids[CODEX_PROVIDER]).toBeTruthy();
   });
+
+  test('Codex web searches render as bodyless fold cards', async ({ shelfApp: { page } }) => {
+    await setupProject(page);
+    await openAgentTab(page, OFFICIAL_MENU_LABEL);
+
+    await sendAgentPrompt(page, 'websearch:Codex app server protocol');
+
+    const card = page.locator('.agent-msg-fold:has(.fold-label:has-text("Web search")):visible').last();
+    await expect(card).toBeVisible({ timeout: 5_000 });
+    await expect(card.locator('.fold-subtitle')).toHaveText('Codex app server protocol');
+    await expect(card.locator('.fold-body')).toHaveCount(0);
+  });
 });
