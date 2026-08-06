@@ -1,4 +1,4 @@
-import type { AppSettings, KeybindingConfig } from './types';
+import { TOGGLE_CONNECTED_FILTER_ACTION, type AppSettings, type KeybindingConfig } from './types';
 
 export const DEFAULT_KEYBINDINGS: KeybindingConfig = {
   toggleProjectList: 'mod+shift+b',
@@ -12,6 +12,7 @@ export const DEFAULT_KEYBINDINGS: KeybindingConfig = {
   openSettings: 'mod+,',
   search: 'mod+f',
   toggleSplitRight: 'mod+shift+\\',
+  [TOGGLE_CONNECTED_FILTER_ACTION]: 'mod+\\',
   openCommandPicker: 'mod+p',
   toggleDevTools: 'mod+shift+d',
   toggleNotes: 'mod+shift+n',

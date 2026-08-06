@@ -1,6 +1,10 @@
 import React from 'react';
 import { comboToLabel } from '../../hooks/useKeybindings';
-import type { AppSettings, KeybindingAction } from '@shared/types';
+import {
+  TOGGLE_CONNECTED_FILTER_ACTION,
+  type AppSettings,
+  type KeybindingAction,
+} from '@shared/types';
 
 const ACTION_LABELS: Record<KeybindingAction, string> = {
   toggleProjectList: 'Toggle Project List',
@@ -14,6 +18,7 @@ const ACTION_LABELS: Record<KeybindingAction, string> = {
   openSettings: 'Settings',
   search: 'Search',
   toggleSplitRight: 'Split Right',
+  [TOGGLE_CONNECTED_FILTER_ACTION]: 'Toggle Connected Filter',
   openCommandPicker: 'Quick Commands',
   toggleDevTools: 'Dev Tools',
   toggleNotes: 'Notes',

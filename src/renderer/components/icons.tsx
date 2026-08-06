@@ -34,6 +34,15 @@ export function PanelLeftIcon({ size }: IconProps) {
   );
 }
 
+// Funnel — connected-only project filter.
+export function FilterIcon({ size }: IconProps) {
+  return (
+    <Svg size={size}>
+      <path d="M4 5h16l-6 7v5l-4 2v-7z" />
+    </Svg>
+  );
+}
+
 // Paper plane — PM agent (Telegram-driven remote control / watcher).
 export function PaperPlaneIcon({ size }: IconProps) {
   return (

@@ -339,6 +339,8 @@ export interface PtyExitPayload {
 
 // ── App settings (persisted) ──
 
+export const TOGGLE_CONNECTED_FILTER_ACTION = 'toggleConnectedFilter' as const;
+
 export type KeybindingAction =
   | 'toggleProjectList'
   | 'newProject'
@@ -355,7 +357,8 @@ export type KeybindingAction =
   | 'toggleDevTools'
   | 'toggleNotes'
   | 'togglePm'
-  | 'quickNote';
+  | 'quickNote'
+  | typeof TOGGLE_CONNECTED_FILTER_ACTION;
 
 export type KeybindingConfig = Record<KeybindingAction, string>;
 

@@ -147,6 +147,11 @@ button {
   background: var(--surface);
 }
 
+.sidebar-btn.active {
+  color: var(--accent);
+  background: var(--surface);
+}
+
 .sidebar-list {
   flex: 1;
   overflow-y: auto;

@@ -14,9 +14,19 @@ test('app window opens with correct layout', async ({ shelfApp: { page } }) => {
   await expect(tabBar).toBeVisible();
 });
 
-test('sidebar has settings and new project buttons', async ({ shelfApp: { page } }) => {
+test('sidebar header actions stay out of sequential focus order', async ({ shelfApp: { page } }) => {
   const actions = page.locator('.sidebar-header-actions .sidebar-btn');
-  await expect(actions).toHaveCount(2);
+  await expect(actions).toHaveCount(3);
+
+  for (let i = 0; i < 3; i++) {
+    await expect(actions.nth(i)).toHaveAttribute('tabindex', '-1');
+  }
+
+  await page.evaluate(() => document.body.focus());
+  for (let i = 0; i < 6; i++) {
+    await page.keyboard.press('Tab');
+    expect(await page.evaluate(() => !!document.activeElement?.closest('.sidebar-header-actions'))).toBe(false);
+  }
 });
 
 test('no projects on fresh start', async ({ shelfApp: { page } }) => {

@@ -8,12 +8,16 @@ import {
   updateSettings,
   projectHealth,
   HEALTH_RANK,
+  toggleHideDisconnected,
 } from '../store';
 import type { ConnectionHealthState } from '@shared/types';
 import { emit, Events } from '../events';
 import { CONFIRM_REMOVE_EVENT } from './RemoveConfirmDialog';
 import { tooltipWithShortcut } from '../utils/format-keybinding';
 import { isMac } from '../hooks/useKeybindings';
+import { TOGGLE_CONNECTED_FILTER_ACTION } from '@shared/types';
+import { computeVisibleProjectIndices } from '../project-grouping';
+import { FilterIcon } from './icons';
 
 /**
  * Clamp a context-menu's desired top-left so the whole menu stays on screen
@@ -43,9 +47,21 @@ const SIDEBAR_MIN_WIDTH = 160;
 const SIDEBAR_MAX_WIDTH = 480;
 const SIDEBAR_DEFAULT_WIDTH = 220;
 
+function preventButtonFocus(e: React.MouseEvent<HTMLButtonElement>) {
+  e.preventDefault();
+}
+
 export function Sidebar() {
-  const { projects, activeProjectIndex, settings, connectionHealth } = useStore();
+  const {
+    projects,
+    activeProjectIndex,
+    hideDisconnected,
+    settings,
+    connectionHealth,
+  } = useStore();
   const kb = settings.keybindings;
+  const visibleProjectIndices = new Set(computeVisibleProjectIndices(projects, hideDisconnected));
+  const filterLabel = hideDisconnected ? 'Show all projects' : 'Show connected only';
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   // Live width while dragging the resize handle; null when not resizing (then the
   // persisted settings width applies). Committed to settings on mouse-up.
@@ -168,12 +184,24 @@ export function Sidebar() {
       <div className="sidebar-header">
         <span>Shelf</span>
         <span className="sidebar-header-actions">
-          <button className="sidebar-btn" tabIndex={-1} onClick={toggleSettings} title={tooltipWithShortcut('Settings', kb.openSettings, isMac)}>&#9881;</button>
-          <button className="sidebar-btn" tabIndex={-1} onClick={handleNewProject} title={tooltipWithShortcut('New project', kb.newProject, isMac)}>+</button>
+          <button className="sidebar-btn" tabIndex={-1} onMouseDown={preventButtonFocus} onClick={toggleSettings} title={tooltipWithShortcut('Settings', kb.openSettings, isMac)}>&#9881;</button>
+          <button className="sidebar-btn" tabIndex={-1} onMouseDown={preventButtonFocus} onClick={handleNewProject} title={tooltipWithShortcut('New project', kb.newProject, isMac)}>+</button>
+          <button
+            className={`sidebar-btn${hideDisconnected ? ' active' : ''}`}
+            tabIndex={-1}
+            onMouseDown={preventButtonFocus}
+            onClick={toggleHideDisconnected}
+            title={tooltipWithShortcut(filterLabel, kb[TOGGLE_CONNECTED_FILTER_ACTION], isMac)}
+            aria-label={filterLabel}
+            aria-pressed={hideDisconnected}
+          >
+            <FilterIcon />
+          </button>
         </span>
       </div>
       <div className="sidebar-list">
         {projects.map((proj, i) => {
+          if (!visibleProjectIndices.has(i)) return null;
           const hasAlive = proj.tabs.length > 0;
           const isDragging = dragIndex === i;
           const isDragOver = dragOverIndex === i && dragIndex !== i;

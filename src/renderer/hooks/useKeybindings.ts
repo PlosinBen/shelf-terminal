@@ -8,11 +8,16 @@ import {
   openQuickNote,
   setActiveProject,
   setActiveTab,
+  toggleHideDisconnected,
   useStore,
 } from '../store';
 import { emit, Events } from '../events';
-import type { KeybindingAction } from '@shared/types';
+import { TOGGLE_CONNECTED_FILTER_ACTION, type KeybindingAction } from '@shared/types';
 import { formatCombo } from '../utils/format-keybinding';
+import {
+  computeVisibleProjectIndices,
+  findDirectionalVisibleProjectIndex,
+} from '../project-grouping';
 
 export const isMac = navigator.platform.toUpperCase().includes('MAC');
 
@@ -30,7 +35,7 @@ function eventToCombo(e: KeyboardEvent): string {
 }
 
 export function useKeybindings() {
-  const { projects, activeProjectIndex, activeProjectId, settings } = useStore();
+  const { projects, activeProjectIndex, activeProjectId, hideDisconnected, settings } = useStore();
   const bindings = settings.keybindings;
 
   useEffect(() => {
@@ -43,6 +48,15 @@ export function useKeybindings() {
     for (let n = 1; n <= 9; n++) {
       comboToAction.set(`mod+${n}`, `switchTab_${n}` as KeybindingAction);
     }
+    const visibleProjectIndices = computeVisibleProjectIndices(projects, hideDisconnected);
+    const navigateVisibleProject = (direction: -1 | 1) => () => {
+      const nextIndex = findDirectionalVisibleProjectIndex(
+        visibleProjectIndices,
+        activeProjectIndex,
+        direction,
+      );
+      if (nextIndex !== null) setActiveProject(nextIndex);
+    };
 
     const handler = (e: KeyboardEvent) => {
       const combo = eventToCombo(e);
@@ -62,9 +76,10 @@ export function useKeybindings() {
           case 'toggleNotes':      return activeProject ? () => toggleRightSidebar('notes') : null;
           case 'togglePm':         return () => toggleRightSidebar('pm');
           case 'quickNote':        return activeProject ? openQuickNote : null;
+          case TOGGLE_CONNECTED_FILTER_ACTION: return toggleHideDisconnected;
           case 'newProject':     return () => emit(Events.OPEN_FOLDER_PICKER);
-          case 'prevProject':    return () => setActiveProject(Math.max(0, activeProjectIndex - 1));
-          case 'nextProject':    return () => setActiveProject(Math.min(projects.length - 1, activeProjectIndex + 1));
+          case 'prevProject':    return navigateVisibleProject(-1);
+          case 'nextProject':    return navigateVisibleProject(1);
           case 'removeProject':   return activeProject && activeProjectId ? () => emit('confirm-remove-project', activeProjectId) : null;
           case 'newTab':         return activeProject && activeProjectId ? () => emit(Events.NEW_TAB, activeProjectId) : null;
           case 'toggleSplitRight': return activeProject && activeProjectId ? () => emit(Events.TOGGLE_SPLIT, activeProjectId) : null;
@@ -89,7 +104,7 @@ export function useKeybindings() {
 
     window.addEventListener('keydown', handler, true);
     return () => window.removeEventListener('keydown', handler, true);
-  }, [projects, activeProjectIndex, bindings]);
+  }, [projects, activeProjectIndex, activeProjectId, hideDisconnected, bindings]);
 }
 
 // Utility: convert a combo string to display label
