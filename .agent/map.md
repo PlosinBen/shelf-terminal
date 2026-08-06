@@ -194,7 +194,7 @@ title: shelf-terminal — Intent → File Index
 | Picker 面板 | `components/PickerPanel.tsx` | Bottom-anchored 多題互動 form（AskUserQuestion / elicitation 共用） |
 | Bottom bar（全寬 app footer） | `components/BottomBar.tsx` | App 層全寬狀態列：connection/cwd、App/Runtime/Agents memory、version 與 app panel toggles |
 | Memory rollup formatting | `components/MemoryDisplay.tsx` | footer/per-tab summary selection primitives 與 MiB/GiB display formatting |
-| Sidebar | `components/Sidebar.tsx` | Project 列表、拖曳排序、右鍵選單、worktree branch、連線健康 status-dot |
+| Sidebar | `components/Sidebar.tsx` | Project 列表、connected-only filter、拖曳排序、右鍵選單、worktree branch、連線健康 status-dot |
 | Tab bar | `components/TabBar.tsx` | Tab 列表、拖曳排序、雙擊重命名、unread badge、PM Active badge |
 | 快速指令選擇器 | `components/CommandPicker.tsx` | ⌘P overlay，過濾 + 執行 per-project 快速指令 |
 | 開發工具面板 | `components/DevToolsPanel.tsx` | ⌘D 右側 panel，Base64/JSON/URL/UUID/Timestamp/Hash 工具 |

@@ -41,3 +41,25 @@ related:
 **Reason:** Array internals preserve the existing worktree grouping and persistence behavior while the boundary removes external dependence on raw collection shape. Type-only readonly catches normal accidental mutation of returned projects, configs, tabs, and tab objects during typecheck without clone/freeze churn in render paths.
 
 **Do not change casually because:** Runtime deep-freeze or clone-on-read can disturb object identity and renderer performance. A full `byId + order` internal migration is reserved for present-tense evidence that array internals are creating real complexity, such as repeated order synchronization or another ordering feature.
+
+## projects#4 — Connected-only sidebar is a non-destructive projection  ·  [Decision]
+
+**Decision:** The connected-only Sidebar mode is transient renderer view state derived from runtime tab presence (`tabs.length > 0`). A contiguous worktree parent/child visual group uses OR semantics: one connected member keeps the whole group visible. Filtering preserves the real project order and active project id; previous/next project actions search the nearest visible real index in their direction without wrapping.
+
+**Reason:** The filter should reduce Sidebar noise without changing project truth or unexpectedly switching the user's working context. Group-level visibility preserves the parent/child visual structure, while visible-only navigation keeps keyboard movement consistent with what the Sidebar shows.
+
+**Do not change casually because:** Rendering or navigating a separately filtered array makes visual indices diverge from index-based project actions. Automatically selecting another project when the active row becomes hidden changes the right-side context as a side effect of display filtering; navigating through hidden rows defeats the filter's purpose.
+
+### Gotchas
+
+- Connection health is not the connectivity source for this view; a project is connected when it owns at least one runtime tab.
+- An orphan worktree child remains its own visual group rather than joining non-contiguous rows by a missing parent id.
+- Click, context-menu, drag/drop, and navigation targets must resolve to indices in the original visual project list.
+
+## projects#5 — Sidebar header actions preserve terminal focus  ·  [Decision]
+
+**Decision:** Settings, New Project, and connected-filter buttons stay out of sequential Tab focus and prevent native focus transfer at mouse-down. Keyboard operation uses configurable shortcuts; the connected filter defaults to `mod+\`, while Split Right remains `mod+shift+\`.
+
+**Reason:** Shelf is terminal-first: pointer activation of a header action must not move input focus away from the terminal, while shortcut actions provide the keyboard path without making one button in the header group behave differently from its peers.
+
+**Do not change casually because:** Letting a button focus and blurring it after click still interrupts terminal focus and does not restore the prior focus owner. Loose modifier matching can also make `mod+\` trigger Split Right instead of only toggling the filter.

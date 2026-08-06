@@ -18,6 +18,11 @@ Persisted project configs
   -> visual project order -> sidebar / persistence
   -> stable project view order -> mounted terminal / agent / web views
 
+Visual project order + runtime tab presence + transient filter mode
+  -> visual-group connectivity
+  -> visible real project indices
+  -> sidebar rows / directional project navigation
+
 User project action
   -> project id event or store action
   -> collection boundary resolves current project
@@ -36,6 +41,8 @@ Project-owned request
 The project collection boundary owns project lookup, add/delete/reorder, config update, visual listing, stable mounted-view listing, and persistence writes for project config/order changes.
 
 Renderer view state owns active project id, editing project id, sidebar/panel visibility, and invalid-id reconciliation after deletion.
+
+Sidebar visibility is a projection over visual project order, not a second project collection. It may hide the active project row without changing the active project or mounted right-side view; interactions continue to target real visual indices.
 
 An app-global gate with a project owner must resolve and focus that owner before it is presented.
 Unknown ownership fails closed; a completed or cancelled gate leaves the source project active rather
