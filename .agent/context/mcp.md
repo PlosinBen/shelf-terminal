@@ -62,7 +62,7 @@ related:
 
 **Background**：MCP 不能跨 provider 即時套用(Copilot 無 session-level setter;Claude 有 `setMcpServers()` 但 v1 不用)。
 
-**Decision**：v1「next session 生效」+ **reconnect 通知**(別讓使用者乾等)。`onMcpChanged()` 的 subscriber 在 remote re-mirror 後,對**每個 live session** emit 一條 per-tab system line:`MCP servers updated — reconnect this project to apply.`。鏡射 `skills#9` 但反向(不是 reload 是 reconnect),走同一條 session-scoped、turnId-less 的回饋軌(base send)。通知 **provider-invariant** → 攔在 provider 之上(`agent/index.ts` 的 subscriber 直接 emit,provider backend v1 不參與)。無 live session 不發。
+**Decision**：v1「next session 生效」+ **reconnect 通知**(別讓使用者乾等)。`onMcpChanged()` 的 subscriber 在 remote re-mirror 後,對**每個 live session** emit 一條 per-tab system line:`MCP servers updated — reconnect this project to apply.`。鏡射 `skills#9` 但反向(不是 reload 是 reconnect),走同一條 session-scoped、executionId-less 的回饋軌(base send)。通知 **provider-invariant** → 攔在 provider 之上(`agent/index.ts` 的 subscriber 直接 emit,provider backend v1 不參與)。無 live session 不發。
 
 **Do not change casually because**：別下放進 provider(答案跟 provider 無關 → 會複製邏輯)。v2 可只把 Claude 升級成真 live reload(那時才值得加 per-provider backend hook)。
 

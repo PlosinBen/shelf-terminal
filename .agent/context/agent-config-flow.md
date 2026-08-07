@@ -2,7 +2,7 @@
 type: context
 title: Agent Config Flow
 related:
-  - architecture/agent-turn
+  - architecture/agent-execution
   - contracts/agent-wire-protocol
   - contracts/agent-routing
   - context/agent-core
@@ -12,26 +12,26 @@ related:
 
 # Agent Config Flow
 
-> Agent turn 的 wire envelope（per-event turnId）、slash 命令的 provider-internal dispatch，以及 model / effort / permission 三個 config knob 從 renderer 發起 → provider 套用 → capabilities 廣播落地的單向流動。
+> Shelf execution 的 control envelope、session-scoped content delivery、slash 命令的 provider-internal dispatch，以及 model / effort / permission 三個 config knob 從 renderer 發起 → provider 套用 → capabilities 廣播落地的單向流動。
 
-## agent-config-flow#1 — Wire protocol envelope: per-event `turnId` 做 main 端 turn 路由  ·  [Decision]
+## agent-config-flow#1 — `executionId` 只路由 control；content 走 session sink  ·  [Decision]
 
-**Problem**：舊 `OutgoingMessage` 是 free-form `[key: string]: unknown`，沒有 envelope 標識「這個 event 屬於哪個 query turn」。`src/main/agent/remote.ts` 用單一 `lineHandler` setter 接收 stdout — 每個新 query 上來覆寫前一個的 handler。當 agent-server 在 turn N 結束後**延遲**發出 event（譬如 claude.ts `result` handler 發完 idle、`finally` block 又補一次），這個 leftover event 會被 turn N+1 剛裝好的 handler 吃掉，誤判成自己的 idle → for-await 立刻結束 → turn N+1 真實 events 沒人讀（queued msg bug 的根因）。
+**Problem**：單一 stdout handler 會讓前一個 request 的晚到 control 被下一個 request 誤收；若進一步把 conversation content 也綁到 request boundary，execution settlement 後到達的 final message 或 tool result 就會被當成 orphan 丟棄。
 
-**Decision**：每個 per-turn wire event 帶 `turnId: string` envelope。
+**Decision**：Shelf 把「一次 accepted send 的本地控制生命週期」命名為 execution；它不是 ACP 或 provider protocol 定義的 turn。
 
-- Main 端在 `query()` 入口生成 turnId（`t-${randomUUID().slice(0, 8)}`），透過 IPC `send` payload 餵給 agent-server
-- agent-server 的 `handleSend` 從 incoming msg 拿 turnId（缺則 fallback 新生），用 `wrapSendForTurn(turnId, send)` 包 send 函式 — 自動在所有 outgoing event 上 stamp turnId
-- Provider 完全不感知 turnId（透過 closure 帶過去）
-- Main 端的 `createTurnDispatcher`（`src/main/agent/turn-dispatcher.ts`）取代舊 `streamRemoteEvents`：單一全域 stdout listener 按 turnId 路由到 per-turn `AsyncGenerator`，turn 結束後 unregister；任何後續帶舊 turnId 的 event 找不到接收者就 log + drop
-- Lifecycle events（`ready` / `pong` / `capabilities` / `credential_*`）在 turn 外部，turnId 是 optional — 由 requestId 或單一 dispatcher 處理
+- Main 在 `query()` 入口生成 `executionId`（`e-${randomUUID().slice(0, 8)}`），在 send 抵達 agent-server 前註冊 `ExecutionDispatcher` reader。
+- `status`、permission 與必要 control 帶 `executionId`；terminal idle 結束 reader、清 permission、更新 busy state並釋放下一個 queued send。
+- `message`、`stream`、renderable `error` 與 `task_event` 經 `wrapSendForExecution` 時明確移除 `executionId`，由常駐的 per-session `onSessionEvent` sink 送到 tab。execution settlement 不關閉這條路。
+- Lifecycle/RPC events（`ready` / `pong` / `capabilities` / `credential_*`）依各自的 session sink 或 `requestId` 處理。
+- Provider 不需要感知 `executionId`；provider-native turn/cycle 可以保留自己的名稱與語意。
 
-**配套 envelope**：`AgentMessage` / `stream` payload 另帶 `msgId`（per-message-block 識別碼，不同於 per-turn 的 turnId），讓 stream chunks 跟 finalize 在 renderer 對齊到同一 timeline entry（store 上的 upsert key）。`OutgoingMessage` 同時從 free-form 收緊成 discriminated union。
+**Content identity**：`msgId` 與 `executionId` 無關。renderer 第一次看到新 `msgId` 就依到達順序 append；重複 `msgId` 就地 upsert，並由 renderer 單獨累積 stream delta。idle 只把當下內容 settle/persist；之後晚到的 chunk 仍照常顯示、保持 settled 並立即持久化。
 
 **Do not change casually because**：
-- 不要為了 backward-compat 加 fallback「沒 turnId 就分配給 currentTurn」— 這正是舊 single-lineHandler 模型的 bug 來源
-- 不要在 provider 端 dedupe idle — turn-dispatcher 已從根上擋下，不需要二次防線
-- 不要把 turnId / msgId 暴露給 renderer-side `AgentMsg.id` 以外的用法 — 它是 store 的 upsert key，不該洩漏到 UI 行為決策（如「if id starts with t- 就...」）
+- 不要加「沒 executionId 就歸給 current/last execution」的 fallback，也不要用 grace timer、drain barrier 或 prompt attribution 推測內容歸屬。
+- 不要用 terminal idle/stop reason 關閉 content sink；它只控制 execution settlement 與 queue unlock。
+- 不要讓 renderer 依 `executionId` 分組、決定訊息可見性或 key DOM；renderer 只使用 `msgId` 做 append/upsert。
 
 ## agent-config-flow#2 — Slash commands: provider-internal dispatch，不是 RPC channel  ·  [Decision]
 

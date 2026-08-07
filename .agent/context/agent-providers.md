@@ -2,7 +2,7 @@
 type: context
 title: Agent Providers
 related:
-  - architecture/agent-turn
+  - architecture/agent-execution
   - contracts/agent-routing
   - context/agent-core
   - context/agent-config-flow
@@ -285,30 +285,30 @@ SDK 0.3.159 **並存**兩種 compact 完成訊號:`status` 形狀(`subtype:'stat
 
 **Related**：`agent-server/providers/acp/translate.ts`（`usage_update` handler）、`agent-providers#26`（credit via SDK）、`src/renderer/components/agent/StatusBar.tsx`、`UPSTREAM_WATCH.md`。
 
-## agent-providers#26 — copilot account credit 走 SDK `account.getQuota`（config-home auth）+ 每 host cache-aside(15min)+ turn-end 觸發,turnId-less status 送渲染  ·  [Decision]
+## agent-providers#26 — copilot account credit 走 SDK `account.getQuota`（config-home auth）+ 每 host cache-aside(15min)+ execution-end 觸發,executionId-less status 送渲染  ·  [Decision]
 
 **Decision**：copilot 的 **account-level AI-credit**（premium requests 用量）不走 ACP,改用 `@github/copilot-sdk` 的 `account.getQuota`。封裝在 `agent-server/providers/copilot/credit.ts`:
 - **Fetch**：`new CopilotClient({ connection: RuntimeConnection.forStdio({ path: <shipped copilot bin> }), env: copilotEnv(appId), useLoggedInUser: true })` → `start()` → `rpc.account.getQuota({})` → `stop()`。`normalizeCredit` 取 `quotaSnapshots.premium_interactions` → `StatusSegment`（`premium: used/total (pct%)`,severity 隨剩餘 %;`isUnlimitedEntitlement`/缺欄位 → `null` 不顯示）。
 - **Auth = config-home,不碰 token 檔**：`useLoggedInUser:true` + `env.COPILOT_HOME = ~/.shelf/apps/<appId>/copilot`（ACP session 用的同一個 per-app config-home）→ SDK 用 CLI 既有登入態認證,不讀 copilot 私有 token 檔。守住 device-scoped-auth / provider-boundary（`#15`/`#16`）。
 - **Cache-aside**：`refreshCopilotCredit` 打 dispatcher 的 per-host cache（`agent-dispatch.md` 的 `ModelCacheClient`）,**TTL 15min**。key = 單一 `account-credit`（**不帶 appId**:一個 host = 一個 config-home = 一個 user)。沒有 dispatcher cache 時退化用 process-local fallback（仍受 TTL 節流）。任何 error → fail-quiet 不顯示。
-- **觸發 = turn-end**（無開場 fetch,對齊 claude 首輪後才有 status）。`exec.ts` 在 `backend.query` 後 fire-and-forget `backend.refreshAccountStatus?.(cache, send, appId)`（`ServerBackend` 選配 hook）,用 **base send（turnId-less）**。
-- **送渲染**：credit status **不帶 `state`**（status wire `state?` 因此設為選配,避免 credit-only status 誤翻 streaming）。`turn-dispatcher` 特判「turnId-less 的 `status`」→ 走 `onSessionEvent`（session-scoped）→ IPC → store `setStatus` 合併 `credits` → `StatusBar.tsx` 渲染,不進 per-turn generator。
+- **觸發 = execution-end**（無開場 fetch,對齊 claude 首輪後才有 status）。`exec.ts` 在 `backend.query` 後 fire-and-forget `backend.refreshAccountStatus?.(cache, send, appId)`（`ServerBackend` 選配 hook）,用 **base send（executionId-less）**。
+- **送渲染**：credit status **不帶 `state`**（status wire `state?` 因此設為選配,避免 credit-only status 誤翻 streaming）。`execution-dispatcher` 特判「executionId-less 的 `status`」→ 走 `onSessionEvent`（session-scoped）→ IPC → store `setStatus` 合併 `credits` → `StatusBar.tsx` 渲染,不進 execution reader。
 
-**Reason**：credit 是 account 級、ACP 無標準欄位且 `copilot --acp` 不 emit usage（`#25`）,SDK 是今天唯一乾淨路徑。spawn copilot binary 有成本 → 每 host 15min 一次、turn-end 才查、cache 共用,把 spawn 頻率壓到最低。
+**Reason**：credit 是 account 級、ACP 無標準欄位且 `copilot --acp` 不 emit usage（`#25`）,SDK 是今天唯一乾淨路徑。spawn copilot binary 有成本 → 每 host 15min 一次、execution-end 才查、cache 共用,把 spawn 頻率壓到最低。
 
-**Do not change casually because**：(1) 拿掉「turnId-less status → onSessionEvent」特判,credit status 會因無對應 turn 被丟棄。(2) 把 `state?` 改回必填,credit-only status 會誤觸發 streaming 旁效。(3) cache key 加回 appId 會讓同 host 多 tab 各自 spawn,失去共用。(4) `account.getQuota` 是 `@experimental` → 一定 fail-quiet,別讓它 block turn 或 crash。
+**Do not change casually because**：(1) 拿掉「executionId-less status → onSessionEvent」特判,credit status 會因無對應 execution 被丟棄。(2) 把 `state?` 改回必填,credit-only status 會誤觸發 streaming 旁效。(3) cache key 加回 appId 會讓同 host 多 tab 各自 spawn,失去共用。(4) `account.getQuota` 是 `@experimental` → 一定 fail-quiet,別讓它 block execution 或 crash。
 
-**Related**：`agent-server/providers/copilot/credit.ts`、`agent-server/providers/copilot/helpers.ts`（`resolveCopilotBinary`/`copilotEnv`）、`agent-server/exec.ts`、`agent-server/providers/types.ts`（`refreshAccountStatus` hook + `credits`）、`src/main/agent/turn-dispatcher.ts`、`src/renderer/components/agent/StatusBar.tsx`、`architecture/agent-dispatch.md`（per-host cache）。
+**Related**：`agent-server/providers/copilot/credit.ts`、`agent-server/providers/copilot/helpers.ts`（`resolveCopilotBinary`/`copilotEnv`）、`agent-server/exec.ts`、`agent-server/providers/types.ts`（`refreshAccountStatus` hook + `credits`）、`src/main/agent/execution-dispatcher.ts`、`src/renderer/components/agent/StatusBar.tsx`、`architecture/agent-dispatch.md`（per-host cache）。
 
 ## agent-providers#27 — streaming caret 維持「單一 active」不變式:flush 時 settle 非當前段,別等 turn-end idle  ·  [Gotcha]
 
 **Symptom**：copilot 一個 turn 內出現多個閃爍光標——每則助理 reply 卡都掛著 caret,而不是只有正在輸出的那則。
 
-**Root cause**：caret 就是 `message.streaming === true` 時渲染的 `.agent-cursor`（`AgentMessage.tsx`）。`streaming` flag 由 `appendChunk`/flush 設 true,但**原本只有 `setStreaming(false)`（turn-end idle）一條路清它,且一次清光**。boundary-split（`#21`）把一個 turn 的文字切成多則各自 msgId 的 chunk-only reply(無 per-segment finalize),中途沒有任何地方 settle 前一段 → 全部撐到 idle 才清 → 多 caret 併存。claude 因單一 msgId 全程同一則、不觸發。
+**Root cause**：caret 就是 `message.streaming === true` 時渲染的 `.agent-cursor`（`AgentMessage.tsx`）。`streaming` flag 由 `appendChunk`/flush 設 true,但**原本只有 `setExecutionActive(false)`（turn-end idle）一條路清它,且一次清光**。boundary-split（`#21`）把一個 turn 的文字切成多則各自 msgId 的 chunk-only reply(無 per-segment finalize),中途沒有任何地方 settle 前一段 → 全部撐到 idle 才清 → 多 caret 併存。claude 因單一 msgId 全程同一則、不觸發。
 
-**Fix / note**：在 `flushChunkBuffer`（`agentTabStore.ts`）維持**單一 active caret 不變式**:記住這次 flush 最後寫入的 msgId（buffer 為插入序,末筆＝最新＝ live），迴圈後把其餘仍 `streaming:true` 的 reply/fold_text 就地 `streaming:false` + `markDirty`（在段落邊界就落 IDB,對齊 `setStreaming(false)` 的清理與持久化語意;`appendChunk` 本身刻意不 markDirty,partial 不落盤,所以這裡是唯一寫入點)。**別改回「只在 idle 清」**——會讓 boundary-split 的每段殘留 caret。前提:ACP 邊界只往前走,不回填前一個 msgId(若某 provider 會回填,單一 active 假設要重審)。
+**Fix / note**：在 `flushChunkBuffer`（`agentTabStore.ts`）維持**單一 active caret 不變式**:記住這次 flush 最後寫入的 msgId（buffer 為插入序,末筆＝最新＝ live），迴圈後把其餘仍 `streaming:true` 的 reply/fold_text 就地 `streaming:false` + `markDirty`（在段落邊界就落 IDB,對齊 `setExecutionActive(false)` 的清理與持久化語意;`appendChunk` 本身刻意不 markDirty,partial 不落盤,所以這裡是唯一寫入點)。**別改回「只在 idle 清」**——會讓 boundary-split 的每段殘留 caret。前提:ACP 邊界只往前走,不回填前一個 msgId(若某 provider 會回填,單一 active 假設要重審)。
 
-**Related**：`src/renderer/agentTabStore.ts`（`flushChunkBuffer` / `setStreaming`）、`src/renderer/components/AgentMessage.tsx`（`.agent-cursor`）、`agent-providers#21`（boundary-split 是成因）。
+**Related**：`src/renderer/agentTabStore.ts`（`flushChunkBuffer` / `setExecutionActive`）、`src/renderer/components/AgentMessage.tsx`（`.agent-cursor`）、`agent-providers#21`（boundary-split 是成因）。
 
 ## agent-providers#28 — Worktree boot provider is an explicit creation-time override  ·  [Decision]
 
@@ -441,13 +441,17 @@ Renderer 在 dev/E2E 傳入是否顯示 internal provider 的環境政策，再�
 
 **Related：** `agent-providers#1`、`agent-providers#35`、`agent-core#5`、`deployment#8`、`src/shared/agent-providers.ts`、`agent-server/backend-registry.ts`。
 
-## agent-providers#37 — ACP prompt response 後要跨 event-loop barrier 再關 update queue  ·  [Gotcha]
+## agent-providers#37 — ACP update router 必須是 session-scoped，不能綁 prompt settlement  ·  [Gotcha]
 
-**Symptom：** Copilot turn 的最後一段（通常是 `task_complete` 最終總結）在本次完成時不顯示，直到使用者送出下一則訊息才突然出現，而且會被歸到下一 turn。
+**Symptom：** Copilot 的最後一段（通常是 `task_complete` 最終總結）可能在 prompt response／stop reason 已 settlement 後才由 SDK callback 送達。若 update sink 跟 prompt 一起關閉，內容會延遲到下一次 send 或直接遺失。
 
-**Root cause：** ACP v1 以 `session/prompt` response 作為 turn boundary，agent 應先送完 pending `session/update`。但 TypeScript SDK 對 notification handler 與 matching response 採獨立 dispatch；即使 notification wire message 先到，我方 `onSessionUpdate` callback 仍可能比 prompt Promise 晚一個 event-loop turn settle。session driver 原本在 prompt Promise resolve 時立刻把 queue 標成 done；最後 update 因此留在 session queue，下一次 `drivePromptTurn()` 才被取走並用新 turn 的 `send` closure 發出。
+**Root cause：** ACP SDK 的 prompt response 與 session notification callback 是獨立排程；response 先 resolve 不代表所有 renderable update 都已 callback。這是 SDK scheduling 特性，不是 Shelf 應以 drain/barrier 猜測並修補的 protocol boundary。
 
-**Fix / note：** prompt Promise settle 後，先跨一次 `setImmediate` dispatch barrier，再將本 turn queue 標成 done 並 wake reader。這只等待已經在途的 SDK handler，不使用固定毫秒 grace period：固定 delay 會讓每個 ACP turn 平白變慢，且可能把真正的 out-of-turn update 誤歸到已完成 turn。不要移除 barrier 或改回 prompt resolve 當下立即關 queue；若 ACP v2 改成明確 `state_update: idle` boundary，再以該協定訊號取代 compatibility barrier。
+**Fix / note：** ACP driver 的 update router 與 render sink 跟 session 同壽命；prompt settlement 只 emit execution idle，讓 main 更新 idle、清 permission、完成 reader並釋放 next queued message。所有 ACP renderable updates 一律繼續走同一條 session content sink，所以 late final message 會按到達時序正常顯示。
+
+Tool call 的 display metadata 也是 session-scoped carry，以 `toolCallId` 暫存，terminal translate 後立即 evict；reset/forget 清空。driver 不保存 `textByMsg`，文字 delta 的累積與持久化只由 renderer 負責。`activeExecutionSend` 僅供當下 tool permission round-trip，不是一般 notification/content sink。
+
+**Do not change casually because：** 不要恢復 per-prompt update queue、`setImmediate`/固定 delay barrier、current/last prompt attribution 或 stopReason content gate。若 upstream 額外發訊息，Shelf 的責任是按時序顯示，不是宣稱 settlement 已收齊內容。
 
 **Related：** `agent-server/providers/acp/client.ts`、`agent-server/providers/acp/client.test.ts`、`agent-providers#24`（Copilot `task_complete` 最終總結）。
 

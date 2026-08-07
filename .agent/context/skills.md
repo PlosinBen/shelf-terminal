@@ -134,13 +134,13 @@ related:
 
 **Decision**：reload 完由 **provider 在 agent view 顯示一條線**（成功 system 分隔線 `Skills reloaded`、失敗既有 error 樣式），責任切分清楚：
 - `SKILLS_CHANGED` IPC = **sidebar 的事**（刷新 Skills 面板 list），與此無關。
-- agent-view 回饋 = **agent-server 的事**：`reloadSkills()` 改回傳 `{reloaded, ok, error?}`；`reload_skills` handler 依結果**用 base send** emit `skills_reloaded`（session-scoped、turnId-less），main 合成 system/error `AGENT_MESSAGE` 到該 tab。
+- agent-view 回饋 = **agent-server 的事**：`reloadSkills()` 改回傳 `{reloaded, ok, error?}`；`reload_skills` handler 依結果**用 base send** emit `skills_reloaded`（session-scoped、executionId-less），main 合成 system/error `AGENT_MESSAGE` 到該 tab。
 - **per live session**：skill 是 app 全域,一次編輯 reload N 個 live session,每個在自己的 tab 各顯示一條;沒 live session(`reloaded:false`)不顯示。
 - 失敗走 **fail-loud**(error 線),正好落在 reload 完那個時間點。
 
-**Do not change casually because**：別把回饋掛回 `SKILLS_CHANGED`(那是 sidebar，不分 tab、不知 reload 結果);emit 必須走 base send 而非 turn send(turn-less,且 reload 不在任何 turn 裡 —— 見 `architecture/agent-turn` 的 content session-scoped 投遞)。wire 規格見 `contracts/agent-routing` 的 `skills_reloaded`。
+**Do not change casually because**：別把回饋掛回 `SKILLS_CHANGED`(那是 sidebar，不分 tab、不知 reload 結果);emit 必須走 base send 而非 execution-scoped send（reload 不屬於任何 execution；見 `architecture/agent-execution` 的 session-scoped 投遞）。wire 規格見 `contracts/agent-routing` 的 `skills_reloaded`。
 
-**Related**：`skills#4`(hot-reload)、`contracts/agent-routing`(`skills_reloaded` wire)、`architecture/agent-turn`(turnId-scoping / session-scoped 投遞)、`agent-server/{index,providers/{claude,copilot}/index}.ts`、`src/main/agent/{turn-dispatcher,remote,index}.ts`、e2e `app-tool.spec.ts`。
+**Related**：`skills#4`(hot-reload)、`contracts/agent-routing`(`skills_reloaded` wire)、`architecture/agent-execution`(executionId-scoping / session-scoped 投遞)、`agent-server/{index,providers/{claude,copilot}/index}.ts`、`src/main/agent/{execution-dispatcher,remote,index}.ts`、e2e `app-tool.spec.ts`。
 
 ## skills#10 — Skill 投影權責:provider 宣告 target,agent-server 執行投影;ACP 逼 skill 走 config-home  ·  [Decision]
 

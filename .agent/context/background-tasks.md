@@ -3,14 +3,14 @@ type: context
 title: Background Tasks
 related:
   - architecture/background-tasks
-  - architecture/agent-turn
+  - architecture/agent-execution
   - context/agent-providers
   - context/agent-ui
 ---
 
 # Background Tasks
 
-> 模型把工作丟背景跑（`run_in_background` / 自動背景化）時，背景事件走 turnId-less 的 `task_event` lane 解耦 busy-state，渲染成 BackgroundTasksPanel 卡片；claude 用 streaming-input 持久 session 對應 turn，session resume 純 server-side。
+> 模型把工作丟背景跑（`run_in_background` / 自動背景化）時，背景事件走 session-scoped、executionId-less 的 `task_event` lane 解耦 busy-state，渲染成 BackgroundTasksPanel 卡片；Claude 用 streaming-input 持久 session 處理 provider-native turns，session resume 純 server-side。
 
 ## background-tasks#1 — Claude Auto-Resume 純 Server-Side（含跨 process 持久化）  ·  [Decision]
 
@@ -37,13 +37,13 @@ Seed 時機：`gatherCapabilities` 結尾（tab 開啟時必跑）+ `query()` �
 
 ## background-tasks#2 — task_event lane 解耦 busy-state + detached-loop  ·  [Decision]
 
-> ⚠️ claude 的 detached-loop / foregroundDone / sendChainGate / identity-guard 機制已被 `background-tasks#3`（streaming-input 持久 session）取代。仍有效、未變的部分：`task_event` turnId-less lane、`normalizeTaskMessage` emission、server-turn 自動續寫的渲染原語（wire 對 renderer 不變）。下面「detached-loop」「identity-guard teardown」兩條只作歷史紀錄，現況讀 `background-tasks#3`。
+> ⚠️ claude 的 detached-loop / foregroundDone / sendChainGate / identity-guard 機制已被 `background-tasks#3`（streaming-input 持久 session）取代。仍有效、未變的部分：`task_event` executionId-less lane、`normalizeTaskMessage` emission、server-turn 自動續寫的渲染原語（wire 對 renderer 不變）。下面「detached-loop」「identity-guard teardown」兩條只作歷史紀錄，現況讀 `background-tasks#3`。
 
-**Problem**：模型把工作丟背景跑（Bash `run_in_background`、自動背景化）時，前景 turn 正常 idle，但 claude SDK 的 single-prompt generator **不在 `result` 結束** —— 它繼續吐背景任務訊息、且任務 settle 後**自動讓主 agent 續寫一段回覆**（Phase 0 實測：`result` 在前景結束就發，generator 到任務 settle（~29s 後）才結束）。兩個衍生 bug：(a) 後續訊息帶**已死的 turnId** → main 端 `event for unknown turn … dropping`；(b) claude 的 `query()` 等整個 generator 結束才 resolve，卡住 `sendChain` → 下一個前景 send 卡死（無限轉圈）。
+**Problem**：模型把工作丟背景跑（Bash `run_in_background`、自動背景化）時，前景 turn 正常 idle，但 claude SDK 的 single-prompt generator **不在 `result` 結束** —— 它繼續吐背景任務訊息、且任務 settle 後**自動讓主 agent 續寫一段回覆**（Phase 0 實測：`result` 在前景結束就發，generator 到任務 settle（~29s 後）才結束）。兩個衍生 bug：(a) 後續訊息帶**已死的 executionId** → main 端 `event for unknown turn … dropping`；(b) claude 的 `query()` 等整個 generator 結束才 resolve，卡住 `sendChain` → 下一個前景 send 卡死（無限轉圈）。
 
 **Decision**：
 
-- **routing 與 busy-state 解耦**：背景事件走新 wire 訊息 `task_event`（`OutgoingMessage` variant，payload = `@shared/types` 的 `TaskEvent` / `NormalizedTask` 渲染原語），**不帶 turnId、不碰 status**。`wrapSendForTurn` 豁免它（比照 lifecycle）；turn-dispatcher `feed()` 在 turnId 檢查**之前**攔截 → session-level `onTaskEvent` callback → `IPC.AGENT_BACKGROUND_TASKS` → renderer `applyTaskEvent`。**絕不**用 `backgroundTaskId` 當 turn id（turn 綁了 idle/busy 語意，會破壞 non-blocking 本意）。
+- **routing 與 busy-state 解耦**：背景事件走新 wire 訊息 `task_event`（`OutgoingMessage` variant，payload = `@shared/types` 的 `TaskEvent` / `NormalizedTask` 渲染原語），**不帶 executionId、不碰 status**。`wrapSendForExecution` 豁免它（比照 lifecycle）；execution-dispatcher `feed()` 在 executionId 檢查**之前**攔截 → session-level `onTaskEvent` callback → `IPC.AGENT_BACKGROUND_TASKS` → renderer `applyTaskEvent`。**絕不**用 `backgroundTaskId` 當 execution id（execution control 綁 idle/busy，會破壞 non-blocking 本意）。
 - **detached-loop（claude）**：把整個 consume loop 包進 detached async（`void drain().catch(releaseSendChain)`），`query()` 回傳的 Promise 在**前景 `result`**（`origin.kind !== 'task-notification'`，這是 SDK 標記自動續寫 turn 的判別器）就 resolve `sendChainGate`，解開 sendChain；loop 在背景續跑到 generator 真正結束。**🚫 不可用 `break` 接手**：`for await` 的 `break` 會呼叫 iterator `.return()` 殺掉 SDK generator（連背景任務一起殺）。
 - **identity-guard teardown**：query() 提早 resolve 後，後一個 turn 可能已接管 module-level `activeQuery`/`abortController`；finally 用 `if (activeQuery === myQuery)` 才清，否則會蓋掉新 turn（正是 `sendChain` 序列化原本要防的 race）。
 - **emission（純函式）**：`normalizeTaskMessage`（`helpers.ts`，可單測）把 SDK `task_started/updated/progress/notification` system 訊息 → `NormalizedTask`；index.ts 只持 `backgroundTasks`/`taskOutputFiles`/`ambientTaskIds` 三 map + 在 loop 呼叫它。**前景結束發 `snapshot`(仍 running 的 task)、之後逐則發** —— 同步 Bash 的 task 在前景 `result` 前就 done，自然被排除，**不會誤報卡片**（World A 不確定同步 Bash 是否也發 task_started，此設計對兩種都正確）。
@@ -52,19 +52,19 @@ Seed 時機：`gatherCapabilities` 結尾（tab 開啟時必跑）+ `query()` �
 **SDK 事實（Phase 0 真機確認）**：`result` 不帶 `background_tasks[]`（故 snapshot 靠累積事件、非 result）；status `killed→stopped`、`paused→running`；`task_type` `local_bash→shell`；`task_started.skip_transcript===true` = ambient task（不出卡）；自動續寫 turn 的 `result` 帶 `origin.kind:'task-notification'`。
 
 **Do not change casually because**：
-- 不要把 `task_event` 加 turnId（會被當 unknown turn 丟）。
+- 不要把 `task_event` 加 executionId；背景任務比 foreground execution 活得更久，必須維持 session lane。
 - 不要在 detached-loop 裡 `break` 出 for-await（殺 generator）。
 - 不要靠 `result.background_tasks[]` 做 snapshot（claude 不帶）。
 - 不要把 `backgroundTasks` 跟 plan/TODO 的 `tasks` map（TaskCreate/TaskList → `renderPlan`）搞混 —— 不同概念、不同面板。
 - 不要讓 idle 在背景階段重發（只前景發一次，沿用 `idleEmitted` dedup）。
 
-**copilot 對齊**：copilot `query()` = `await session.sendAndWait()`，在前景 turn 邊界就 resolve → **不需要 detached-loop**（sendChain 不卡，與 claude 不同）。背景變動走 `session.on` 的 `session.background_tasks_changed`（空 payload ping）+ `system.notification`（agent/shell completed 等）→ debounced `rpc.tasks.list()` → 過濾 `executionMode==='background'` → `normalizeCopilotTask`（純函式，`copilot/helpers.ts`）→ emit `task_event` kind `snapshot`。**`currentSend` 永不 null**（line 944 設、不清）→ 任務在 turn 之間 settle 也能發；且 `task_event` turnId-exempt → 路由正確（claude 那個 unknown-turn bug 在 copilot 被這兩點自然化解）。`readTaskOutput`：shell 讀 `logPath`（遠端讀檔）、agent 回 `result`/`latestResponse`。status 映射 `idle→running`、`cancelled→stopped`。**⚠️ 未經真機驗證**：沒有 copilot session 可測，emission 從 SDK `.d.ts` 寫 + 純 mapper 單測；live 行為（event 名、`rpc.tasks.list()` 回傳 shape）待真跑一次確認。
+**copilot 對齊**：copilot `query()` = `await session.sendAndWait()`，prompt response settlement 可直接放行 send queue；notification/update callback 則由 session-scoped router 持續接收，不跟 prompt 一起關閉。背景變動走 `session.on` 的 `session.background_tasks_changed`（空 payload ping）+ `system.notification`（agent/shell completed 等）→ debounced `rpc.tasks.list()` → 過濾 `executionMode==='background'` → `normalizeCopilotTask`（純函式，`copilot/helpers.ts`）→ emit `task_event` kind `snapshot`。`activeExecutionSend` 只在 execution active 時服務 permission，不能拿來承接背景 notification；一般輸出走 session sink。`readTaskOutput`：shell 讀 `logPath`（遠端讀檔）、agent 回 `result`/`latestResponse`。status 映射 `idle→running`、`cancelled→stopped`。**⚠️ 未經真機驗證**：沒有 copilot session 可測，emission 從 SDK `.d.ts` 寫 + 純 mapper 單測；live 行為（event 名、`rpc.tasks.list()` 回傳 shape）待真跑一次確認。
 
 **未做（future enhancement，低優先，trigger 未到）**：
-- **server-turn 工具授權**：背景任務 settle 後 auto-resume 的 prose 若呼叫工具，會卡背景 drain（`canUseTool` 走 stale module-level send）。pre-existing 限制，低價值 + 踩 currentSend race，待真要時再正解。
+- **provider auto-resume 工具授權**：背景任務 settle 後 auto-resume 的 prose 若呼叫工具，當下未必有 active Shelf execution 可承接 permission。這是 permission/control 問題；不可為了解它把 content sink 綁回 `activeExecutionSend`。
 - **copilot 真機 turn 驗證**：見上方「⚠️ 未經真機驗證」。
 
-**Related**：`background-tasks#3`（取代 detached-loop；task_event/server-turn 渲染仍沿用）、`agent-providers#1`（provider 封裝）、`agent-ui#4`（事件/Store 分層）、`agent-ui#5`（渲染原語）、`agent-server/providers/claude/index.ts`（detached-loop）、`helpers.ts`（`normalizeTaskMessage`）、`agent-server/providers/fake/index.ts`（`task:`/`taskdone:` E2E scenarios）、`src/main/agent/turn-dispatcher.ts`（`onTaskEvent`）、`src/renderer/components/agent/BackgroundTasksPanel.tsx`、`src/renderer/agentTabStore.ts`（`applyTaskEvent`）。
+**Related**：`background-tasks#3`（取代 detached-loop；task_event/server-turn 渲染仍沿用）、`agent-providers#1`（provider 封裝）、`agent-ui#4`（事件/Store 分層）、`agent-ui#5`（渲染原語）、`agent-server/providers/claude/index.ts`（detached-loop）、`helpers.ts`（`normalizeTaskMessage`）、`agent-server/providers/fake/index.ts`（`task:`/`taskdone:` E2E scenarios）、`src/main/agent/execution-dispatcher.ts`（`onTaskEvent`）、`src/renderer/components/agent/BackgroundTasksPanel.tsx`、`src/renderer/agentTabStore.ts`（`applyTaskEvent`）。
 
 ## background-tasks#3 — Claude provider 改用 streaming-input 持久 session（取代 detached-loop）  ·  [Decision]
 
@@ -132,7 +132,7 @@ Seed 時機：`gatherCapabilities` 結尾（tab 開啟時必跑）+ `query()` �
 2. `closeForegroundTurn`：turn 收尾只 `snapshot = backgroundTasks.filter(t => !t.done)`。
 3. **致命組合**：某背景任務**在前景 result 之前就完成** → Map 裡標 `done` → 被 `!t.done` 濾掉，而它先前又沒被逐一 emit → **整張卡從未送達 renderer**。跑得快的幾個被吞，只剩最慢、仍 running 的進得了 snapshot → 看起來「5 變 1」。
 
-**Fix**：`routeTask` 改成**即時送**(`task_event` 一到就 emit，連前景 turn 內也是)，不再累積到 turn 收尾。`task_event` 是 turnId-less、落在獨立的 BackgroundTasksPanel lane，**不會跟 turn 內容流交錯**，所以即時送是安全的；`closeForegroundTurn` 仍發一個 still-running 的 snapshot 作對帳(idempotent upsert)。這一次同時解掉兩件事：(a) turn 內完成的任務以 `done` 即時送達、不再被 running-only snapshot 濾掉(原 drop bug)；(b) 面板**隨任務 start/settle 即時更新**，不再「整輪結束才一口氣冒出所有卡」。
+**Fix**：`routeTask` 改成**即時送**(`task_event` 一到就 emit，連前景 turn 內也是)，不再累積到 turn 收尾。`task_event` 是 executionId-less、落在獨立的 BackgroundTasksPanel lane，**不會跟 turn 內容流交錯**，所以即時送是安全的；`closeForegroundTurn` 仍發一個 still-running 的 snapshot 作對帳(idempotent upsert)。這一次同時解掉兩件事：(a) turn 內完成的任務以 `done` 即時送達、不再被 running-only snapshot 濾掉(原 drop bug)；(b) 面板**隨任務 start/settle 即時更新**，不再「整輪結束才一口氣冒出所有卡」。
 
 > **為何即時送安全(關鍵前提)**：`scripts/spike-sync-vs-bg.ts` 證實 **同步(前景、`run_in_background=false`)Bash 不發 `system/task_started`**，只有真正背景化的任務才發。所以即時送**永遠不會**幫前景 shell 呼叫冒假卡 —— `background-tasks#2` 當初「累積+只 snapshot running」正是為了防這個(當時 World A 不確定同步 Bash 會不會發 task_started)，前提既已推翻，即時送取而代之。
 >
@@ -145,7 +145,7 @@ Seed 時機：`gatherCapabilities` 結尾（tab 開啟時必跑）+ `query()` �
 **Silent-drop 稽核(agent 管線)**：既然連踩兩個靜默 bug，掃了一遍「會吞資料卻不留痕」的點。結論：agent-server 的 `catch` 大多已 log 或 emit error(最終 best-effort 清理/關閉的空 catch 可接受)。真正缺 log 的是 routing/dispatch 的 drop-guard，已逐一補上 `console.error`/`log.info`/`console.warn`：
 - `claude/index.ts` `handleSdkMessage` 的 `lane:'ignore'` —— content 訊息無 active turn 被丟。
 - `claude/index.ts` `routeTask` —— task_ 無 `task_id`、或未知 task_ subtype 無法 normalize。
-- `turn-dispatcher.ts` —— `parseRemoteMessage` 回 null(未知 wire type / msgType / 畸形 payload)的 turn 內容被丟。
+- `execution-dispatcher.ts` —— `parseRemoteMessage` 回 null(未知 wire type / msgType / 畸形 payload)的 turn 內容被丟。
 - `agentTabSubscriptions.ts` `agent:onMessage` —— tab 未初始化、或 `buildAgentMsg` 對未知 msgType 回 null 的訊息被丟(renderer 端「content 不顯示」)。
 這些正常情況永不觸發；一旦出現在 agent-server stderr / devtools console，即坐實某類 wire shape 沒被處理。 **copilot 同查**：`session.on` 的 switch 缺 `default` → 未知 SDK event type 靜默丟，補了 default 診斷。真機一跑發現 copilot 對**大量 lifecycle 事件**都 fire(`session.idle`/`assistant.turn_start|end`/`user.message`/`hook.*`/`permission.requested|completed`/`tool.execution_partial_result`…)，全是良性 no-op，但 agent-server stderr 在 main 端記成 `[ERROR]` → 變洗版假錯誤。改成 **`KNOWN_IGNORED_COPILOT_EVENTS` 明確 allow-list(知情忽略)，default 只對真正未知的新 type 警告一次**。其餘 catch 多已 log。copilot 的背景任務走全量 `snapshot` 重讀，故無 claude 那個「快任務 drop」問題。**已知 by-design 的略過**(ambient task 隱藏、server frame 不轉 `content_block_delta` 而是整段回覆)維持靜默，屬刻意行為。
 
@@ -153,9 +153,9 @@ Seed 時機：`gatherCapabilities` 結尾（tab 開啟時必跑）+ `query()` �
 
 ## background-tasks#6 — Auto-resume turn 走與 foreground 相同的內容路徑；busy/idle 用單一 active-cycle counter  ·  [Decision]
 
-背景任務 settle 後，SDK auto-resume 讓 agent 自動續寫(一個 server turn：`init`→ 內容 →`result`，`turn_started` 開場；renderer 仍只收到一般內容訊息，不建立 turn 視覺區塊)。這個 server turn 的處理有兩個現況重點：
+背景任務 settle 後，SDK auto-resume 讓 agent 自動續寫(一個 server turn：`init`→ 內容 →`result`，`execution_started` 開場；renderer 仍只收到一般內容訊息，不建立 turn 視覺區塊)。這個 server turn 的處理有兩個現況重點：
 
-**① 內容走**單一** `routeContent`(吃一個 `TurnFrame`)。** foreground 與 auto-resume(server) turn 用**同一條**內容路徑;兩者差異全是 `TurnFrame` 上的**資料**、不是分岔的 code:`forwardAll`(foreground 轉每則 SDK 訊息含 live stream delta + result 的 cost;server 只轉 `assistant`/`user` + block 邊界 stream event `message_start`/`content_block_start`,**不**轉 `content_block_delta`,維持整段回覆、不逐字串流) + 一個 `kind==='foreground'` guard 包住 compact/auth/model-alias hook。tool_result 搭在 `user` 訊息上,所以 server 也吃 `user` 才收得到。turn 開場由 `openForegroundFrame`/`openServerFrame` 建對應的 frame(server 額外 mint turnId + 發 `turn_started`),收尾一律走 `closeFrame`。
+**① 內容走**單一** `routeContent`(吃一個 `TurnFrame`)。** foreground 與 auto-resume(server) turn 用**同一條**內容路徑;兩者差異全是 `TurnFrame` 上的**資料**、不是分岔的 code:`forwardAll`(foreground 轉每則 SDK 訊息含 live stream delta + result 的 cost;server 只轉 `assistant`/`user` + block 邊界 stream event `message_start`/`content_block_start`,**不**轉 `content_block_delta`,維持整段回覆、不逐字串流) + 一個 `kind==='foreground'` guard 包住 compact/auth/model-alias hook。tool_result 搭在 `user` 訊息上,所以 server 也吃 `user` 才收得到。turn 開場由 `openForegroundFrame`/`openServerFrame` 建對應的 frame(server 額外 mint executionId + 發 `execution_started`),收尾一律走 `closeFrame`。
 - **為什麼是一條路徑(別再拆兩條)**:早期 foreground / server 各有一條近似複製的 `route*`,server 那條**只處理 `assistant`、漏了 `user`** → auto-resume turn 裡每個 tool_result 被整批丟掉(tool 卡開了永遠沒 body、且不觸發 orphan 警告,因 `emitClaudeToolResult` 根本沒被呼叫);又因 skip `stream_event` → block index 不前進 → 同 turn 的 reply/thinking msgId 全撞在一起互相覆蓋。合成單一 `routeContent` 後,新增內容處理只會加在一處,不可能再發生「一條 lane 漏一整類訊息」。**這是那個 bug 的根 —— 不要再把內容路徑按 turn 種類拆開。**
 
 **② busy/idle 是一個 active-cycle **counter**(不是 per-turn 各自算)。** `init` 開 cycle(counter++)、`closeFrame` 排空(`counter = max(0, counter−1)`)、**counter 歸 0 才發 `idle`**;ESC/teardown 強制歸 0。
@@ -168,7 +168,7 @@ Seed 時機：`gatherCapabilities` 結尾（tab 開啟時必跑）+ `query()` �
 
 **驗證**：`background-tasks.test.ts` —— M1(stray result 被 clamp → 只 1 個 idle)、M3(foreground idle + server streaming/idle)、REPRO(auto-resume tool_result 收尾 + reply msgId 不撞)、cost+single-idle;**packaged app live 實測**過真正的 auto-resume server turn(tool 卡收尾、reply msgId 不撞、無 router drift)。
 
-**Related**：`background-tasks#2`(task_event lane、`openServerFrame`/`turn_started`)、`agent-observability#2`(orphan tool card)、`agent-server/providers/claude/index.ts`(`routeContent`/`TurnFrame`/`closeFrame`/`emitIdleIfSettled`/`activeCycles`)、`architecture/agent-turn`。
+**Related**：`background-tasks#2`(task_event lane、`openServerFrame`/`execution_started`)、`agent-observability#2`(orphan tool card)、`agent-server/providers/claude/index.ts`(`routeContent`/`TurnFrame`/`closeFrame`/`emitIdleIfSettled`/`activeCycles`)、`architecture/agent-execution`。
 
 ## background-tasks#4 — 完成卡片 30s 自動消失（engagement 凍結、錯誤保留）  ·  [Decision]
 

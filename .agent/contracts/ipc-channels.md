@@ -267,7 +267,7 @@ Main → renderer (push; all return an unsubscribe fn):
 | `onStream(cb(tabId, chunk))` | `agent:stream` — incremental reply text |
 | `onStatus(cb(tabId, status))` | `agent:status` — busy/idle |
 | `onPlan(cb(tabId, { content }))` | `agent:plan` |
-| `onBackgroundTasks(cb(tabId, event))` | `agent:background-tasks` — `TaskEvent` (turnId-less) |
+| `onBackgroundTasks(cb(tabId, event))` | `agent:background-tasks` — `TaskEvent` (executionId-less) |
 | `onQueue(cb(tabId, items))` | `agent:queue` — server-owned `AgentQueueItem[]` snapshot |
 | `onConnectionHealth(cb(tabId, health))` | `agent:connection-health` — `ConnectionHealth` from heartbeat RTT |
 | `onPermissionRequest(cb(tabId, req))` | `agent:permission-request` |

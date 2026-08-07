@@ -31,7 +31,7 @@ related:
 
 ## web-tab#2 — web.fetch gate 在 main `handleAppTool`，不在 `canUseTool` · [Decision]
 
-**Problem**：web.fetch 要 per-origin 授權。第一版把 gate 放在 main 的 agent permission callback（`canUseTool`），重用 `AGENT_PERMISSION_REQUEST` + `DecisionPanel`，但這違反 `agent-turn` 的「wire 只帶渲染原語、renderer 不得 if-this-tool 分支」（DecisionPanel 出現 `if web` 變體、permission payload 帶 web meta），且把 gate 綁進 provider-specific 的 permission 形狀 → Claude（per-tool name）與 Copilot（per-kind）行為分歧。
+**Problem**：web.fetch 要 per-origin 授權。第一版把 gate 放在 main 的 agent permission callback（`canUseTool`），重用 `AGENT_PERMISSION_REQUEST` + `DecisionPanel`，但這違反 `agent-execution` 的「wire 只帶渲染原語、renderer 不得 if-this-tool 分支」（DecisionPanel 出現 `if web` 變體、permission payload 帶 web meta），且把 gate 綁進 provider-specific 的 permission 形狀 → Claude（per-tool name）與 Copilot（per-kind）行為分歧。
 
 **Decision**：gate 放在 **`handleAppTool('web.fetch')`**（`src/main/agent/app-tool.ts`）——兩 provider 都經 `callMain('web.fetch')` 匯流到這個**單一 provider-agnostic 窄口**。
 - permission 走**自有的 web-permission channel**（`src/main/web-permission.ts`：`requestWebPermission(meta)` → `WEB_PERMISSION_REQUEST` IPC → renderer app 層全域 popup `WebPermissionPrompt.tsx` → `WEB_PERMISSION_RESOLVE`）。跟 agent timeline / DecisionPanel **完全脫鉤**（重用 `SelectionPanel` 純元件,但不走 agent permission plumbing）。

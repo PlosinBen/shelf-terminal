@@ -2,7 +2,7 @@
 type: architecture
 title: Agent Dispatch
 related:
-  - architecture/agent-turn
+  - architecture/agent-execution
   - architecture/connection-lifecycle
   - contracts/agent-wire-protocol
   - context/connection-health
@@ -70,7 +70,7 @@ The inner tier is required, not optional: without it a wedged execution unit wou
 
 Recovery is framed as reconnecting a session's provider execution, **not** respawning a worker. The dispatcher maintains, per session, a live connection to a provider execution; in isolated mode the execution process is merely that connection's current embodiment. On loss — the process exited ("gone"), or the inner probe went unanswered ("no response") — the dispatcher reconnects the session to a fresh execution. Because the conversation is persisted (via the provider's own resume identifier), the reconnected execution resumes the same logical session rather than starting a new one. This framing generalizes to shared hosting (reconnect to the client) where "respawn a process" would not.
 
-Ordering is fail-loud FIRST, then reconnect. When an execution goes down, the dispatcher signals the loss up to the app **before** opening a fresh execution: each in-flight turn on that session is failed loudly (the user sees the turn interrupted, the spinner unsticks, any open permission prompt is cleared) and only then is the replacement execution brought up and the mapping updated. Mid-turn work is lost — recovery resumes from the last committed turn boundary, never a silent gap. Repeated reconnect failures back off with increasing delay up to a cap; past the cap the dispatcher stops and the host degrades to the ordinary disconnected state.
+Ordering is fail-loud FIRST, then reconnect. When an execution unit goes down, the dispatcher signals the loss up to the app **before** opening a fresh unit: each in-flight Shelf execution on that session is failed loudly (the user sees the interruption, the spinner unsticks, and any open permission prompt is cleared) before the replacement is brought up and the mapping updated. In-flight provider work is lost; recovery resumes from the last provider-committed boundary, never a silent gap. Repeated reconnect failures back off with increasing delay up to a cap; past the cap the dispatcher stops and the host degrades to the ordinary disconnected state.
 
 ## Cache lives on the dispatcher
 
@@ -88,5 +88,5 @@ The dispatcher is ondemand: spawned lazily by the first session to a host, reuse
 - **The front stays thin by construction.** It must not load provider or SDK code; provider modules load lazily only in the execution role. A front that eagerly imported providers would carry their weight and crash surface despite never running them.
 - **The front relays, it does not process.** Opaque pass-through of the stream is mandatory; the front peeks only what it services locally (health reply, cache lookup) and never parses render primitives.
 - **Cache belongs to the front, not the client.** It is the only home that spans executions for every provider, including non-multiplexable ones; a client-level copy is at most redundant, never the source of truth.
-- **Reconnect is connection-centric and fail-loud-first.** The session's execution is reconnected (and resumed from persisted state), not respawned; the loss is surfaced before the replacement comes up, so a dropped turn is always visible.
+- **Reconnect is connection-centric and fail-loud-first.** The session's execution unit is reconnected from persisted state; the loss is surfaced before the replacement comes up, so dropped in-flight work is always visible.
 - **Front death is an existing state, not a new blast radius.** It collapses to host-level disconnect and recovers by user retry; there is no daemon supervising the daemon and none is added.

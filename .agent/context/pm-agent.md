@@ -241,7 +241,7 @@ User 用 slash command 切 mode：`/pm` / `/use_<alias>` / `/projects` / `/mode`
 
 **Open（Alias collision）**：MVP 不處理。第一個註冊的 project 拿走 alias、第二個 silently fail（user 看 `/projects` 發現問題、改 project name 解）。
 
-**Related**：`pm-agent#6`（PM 唯一輸出通道是 write_to_pty — 本 feature 不違反、是另開 channel）、`pm-agent#7`（PM 對話是單一 thread、Shelf UI ↔ Telegram 兩 view — 本 feature 延伸到 agent）、`agent-providers#1`（provider 對外行為一致 — Telegram bridge 不對 provider 做特殊處理）、`agent-config-flow#1`（turnId envelope — observer pattern 設計考量）、`agent-ui#5`（AgentMessage 9 variant — MVP 只取 `reply` text）。
+**Related**：`pm-agent#6`（PM 唯一輸出通道是 write_to_pty — 本 feature 不違反、是另開 channel）、`pm-agent#7`（PM 對話是單一 thread、Shelf UI ↔ Telegram 兩 view — 本 feature 延伸到 agent）、`agent-providers#1`（provider 對外行為一致 — Telegram bridge 不對 provider 做特殊處理）、`agent-config-flow#1`（execution control 與 session content 分流 — observer pattern 設計考量）、`agent-ui#5`（AgentMessage 9 variant — MVP 只取 `reply` text）。
 
 ## pm-agent#13 — PM Active = telegram listener master switch  ·  [Decision]
 

@@ -16,7 +16,7 @@ Decisions + gotchas grouped by topic. Cited from code as `<topic>#N`.
 | agent 事件不靜默丟棄 | [agent-observability](agent-observability.md) | 每個事件都要留痕(renderer/logger)、default/else 守門、orphan tool card 兩方向 fail-loud |
 | Claude/Copilot provider 差異 | [agent-providers](agent-providers.md) | 行為一致差異封裝、登入、model registry、permission |
 | agent UI 渲染 | [agent-ui](agent-ui.md) | plan panel、status bar、picker、event/store、渲染原語 |
-| slash / config / model 流 | [agent-config-flow](agent-config-flow.md) | turnId envelope、slash dispatch、applyConfigEdit |
+| execution / content / slash / config 流 | [agent-config-flow](agent-config-flow.md) | executionId control、session content、slash dispatch、applyConfigEdit |
 | 背景任務 | [background-tasks](background-tasks.md) | task_event lane、streaming session、auto-resume |
 | 連線健康 | [connection-health](connection-health.md) | ping/pong heartbeat、idle-shutdown watchdog |
 | Process memory observability | [process-memory-observability](process-memory-observability.md) | source-owned acquisition、KiB normalization、latest-value/freshness 與 UI/log cadence |

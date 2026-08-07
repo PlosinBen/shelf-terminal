@@ -9,7 +9,7 @@ related:
 
 # Agent Routing
 
-The control / routing messages that drive an agent session across the three hops `renderer → main → agent-server`: slash commands, structured config edits, picker resolve, the app-tool bridge, skill reload, stop, and queue cancel. Conversation-content events (reply / fold_* / status / stream) are NOT here — see `contracts/agent-wire-protocol`. This doc covers the imperative / control surface only.
+The control / routing messages that drive an agent session across the three hops `renderer → main → agent-server`: slash commands, structured config edits, picker resolve, the app-tool bridge, skill reload, stop, and queue cancel. Conversation content (reply / fold_* / stream / error) and execution status are specified in `contracts/agent-wire-protocol`. This doc covers the imperative / control surface only.
 
 ## Topology
 
@@ -17,7 +17,7 @@ Three transports, each with its own framing — a control action threads through
 
 - **renderer → main** — IPC `invoke` on the `IPC.AGENT_*` channels (`src/shared/ipc-channels.ts`). Payloads are `{ tabId, ... }`; handlers in `src/main/agent/index.ts` look up the per-tab `session.backend` (an `AgentBackend`, `src/main/agent/types.ts`) and call a method.
 - **main → agent-server** — newline-delimited JSON on the child's stdin. `RemoteProcess.sendLine(obj)` in `src/main/agent/remote.ts` writes one `IncomingMessage` (`agent-server/index.ts`, the `IncomingMessage` interface) per line. The `rl.on('line')` switch dispatches by `type`.
-- **agent-server → main** — newline-delimited JSON on stdout, the `OutgoingMessage` union (`agent-server/providers/types.ts`). Per-turn events carry a `turnId` envelope; control responses are matched by `requestId`; a few are transport-level (`pong`, `app_tool`) and never reach the turn dispatcher.
+- **agent-server → main** — newline-delimited JSON on stdout, the `OutgoingMessage` union (`agent-server/providers/types.ts`). Execution status/permission control may carry `executionId`; conversation content is session-scoped; RPC responses use `requestId`; transport-level messages such as `pong` and `app_tool` bypass the execution dispatcher.
 
 Authoritative type names: `IncomingMessage` (`agent-server/index.ts`), `OutgoingMessage` / `PickerResolvePayload` / `QueryInput` / `ServerBackend` (`agent-server/providers/types.ts`), `AgentBackend` / `AgentQueryOptions` / `AgentEvent` (`src/main/agent/types.ts`).
 
@@ -28,7 +28,7 @@ Authoritative type names: `IncomingMessage` (`agent-server/index.ts`), `Outgoing
 Slash is NOT a control message of its own. A typed `/cmd args` flows as ordinary prompt text and the provider decides whether to interpret the prefix (`agent-config-flow#2`). The renderer only short-circuits unparametrised `OPTIONED_SLASHES` (`/model` `/effort` `/permission`) into an inline picker (`agent-config-flow#3`); everything else is sent as text.
 
 - renderer → main: `IPC.AGENT_SEND` with `{ tabId, prompt: "/help", attachments?, images?, model?, effort?, permissionMode?, clientMsgId? }` (no `configEdit`). `attachments` is the provider-bound payload; `images` is a legacy / renderer-preview compatibility field.
-- main → agent-server: `sendLine({ type: 'send', turnId, provider, prompt: "/help", cwd, sessionId, attachments?, images?, model?, effort?, permissionMode?, clientMsgId?, appId, ... })`.
+- main → agent-server: `sendLine({ type: 'send', executionId, provider, prompt: "/help", cwd, sessionId, attachments?, images?, model?, effort?, permissionMode?, clientMsgId?, appId, ... })`.
 - The provider calls `parseSlashPrefix(input.prompt)` inside `query()`; output comes back as a normal `fold_markdown` wire message (`errorMessage` on failure), not a distinct response type.
 
 ## Uploaded attachments
@@ -60,12 +60,12 @@ are fail-loud at that provider boundary.
 
 ## Config edit (model / effort / permission)
 
-**Direction**: renderer → main → agent-server, as a structured no-prompt turn.
+**Direction**: renderer → main → agent-server, as a structured no-prompt execution.
 
 Picker / status-bar config changes do NOT build a `/model X` string — they send a structured `configEdit` that converges on the provider's `applyConfigEdit` (`agent-config-flow#5`). `key` is the picker/prefs key; note `/permission` maps to `permissionMode`.
 
 - renderer → main: `IPC.AGENT_SEND` with `{ tabId, prompt: '', configEdit: { key: 'model' | 'effort' | 'permissionMode', value: string }, clientMsgId? }`.
-- main → agent-server: `sendLine({ type: 'send', turnId, provider, prompt: '', cwd, sessionId, configEdit: { key, value }, ... })` — `prompt` is empty; agent-server's `handleSend` treats `!!msg.configEdit` as the config-edit branch and skips `applyPrefDiff` (the edit IS the change).
+- main → agent-server: `sendLine({ type: 'send', executionId, provider, prompt: '', cwd, sessionId, configEdit: { key, value }, ... })` — `prompt` is empty; agent-server's `handleSend` treats `!!msg.configEdit` as the config-edit branch and skips `applyPrefDiff` (the edit IS the change).
 - The provider applies it and emits a `system` divider + a fresh `capabilities` wire message; the renderer persists from capabilities, never optimistically.
 
 Field type: `configEdit?: { key: 'model' | 'effort' | 'permissionMode'; value: string }` — identical on `AgentQueryOptions`, `IncomingMessage`, and `QueryInput`.
@@ -106,7 +106,7 @@ Separate from picker (`agent-ui#3` — the "Allow/Deny/Allow and remember" strin
 A provider's in-process bridge tool calls `callMain(op, args)` (`agent-server/app-tool-client.ts`), which emits a request matched by `requestId`.
 
 - agent-server → main: `OutgoingMessage` `{ type: 'app_tool', requestId, op: string, args: Record<string, unknown> }`. `op` is `resource.verb` (e.g. `app_skill.list`, `app_skill.update`).
-- main: handled directly in `remote.ts`'s stdout reader (NOT the turn dispatcher) — `handleAppTool(op, args)` (`src/main/agent/app-tool.ts`) runs it against client-owned resources (skills-store) and returns `{ ok, data?, error? }`.
+- main: handled directly in `remote.ts`'s stdout reader (NOT the execution dispatcher) — `handleAppTool(op, args)` (`src/main/agent/app-tool.ts`) runs it against client-owned resources (skills-store) and returns `{ ok, data?, error? }`.
 - main → agent-server: `sendLine({ type: 'app_tool_result', requestId, ok, data?, error? })`. The switch calls `resolveAppToolResult(requestId, { ok, data, error })`, unblocking `callMain`'s Promise.
 
 ## reload_skills
@@ -114,23 +114,23 @@ A provider's in-process bridge tool calls `callMain(op, args)` (`agent-server/ap
 **Direction**: renderer/main-internal → agent-server (fire-and-forget). App-level skills changed on disk and were already projected/synced to the consumption path; tell live provider sessions to re-scan without reconnect.
 
 - trigger: main's skills-changed pipeline (`onSkillsChanged` → subscriber in `src/main/agent/index.ts`) calls `session.backend.reloadSkills()` per live session.
-- main → agent-server: `sendLine({ type: 'reload_skills' })`. The switch fans out to every instantiated backend: `for (const b of backends.values()) void b.reloadSkills?.()` — best-effort, no-op without a live session, effective from the session's next turn.
+- main → agent-server: `sendLine({ type: 'reload_skills' })`. The switch fans out to every instantiated backend: `for (const b of backends.values()) void b.reloadSkills?.()` — best-effort, no-op without a live session, effective from the session's next execution.
 
 No payload beyond `type`. (`reloadSkills?()` exists on both `AgentBackend` and `ServerBackend`.) `ServerBackend.reloadSkills()` returns `{ reloaded, ok, error? }` so the agent-server can surface the result (see `skills_reloaded`); `reloaded:false` = no live session (no line emitted).
 
 ## skills_reloaded
 
-**Direction**: agent-server → main → renderer (the result of a `reload_skills`). Session-scoped (NO turnId) — emitted by the agent-server `reload_skills` handler via the **base send** after each backend's `reloadSkills()` resolves, so it bypasses `wrapSendForTurn` and is turnId-less by construction.
+**Direction**: agent-server → main → renderer (the result of a `reload_skills`). Session-scoped (NO executionId) — emitted by the agent-server `reload_skills` handler via the **base send** after each backend's `reloadSkills()` resolves, so it bypasses `wrapSendForExecution` and is executionId-less by construction.
 
 - agent-server → main: `{ type: 'skills_reloaded', ok: boolean, error?: string }`, only when `reloaded` (no-op reloads emit nothing).
-- routing: the host-process dispatcher routes it by type (before the turnId check) to a session-level `onSkillsReloaded` sink — its callback in `index.ts` captures `tabId` (the agent-server child is 1:1 with a tab, like `task_event` / `queue`).
+- routing: the host-process dispatcher routes it by type (before the executionId check) to a session-level `onSkillsReloaded` sink — its callback in `index.ts` captures `tabId` (the agent-server child is 1:1 with a tab, like `task_event` / `queue`).
 - main synthesizes an `AGENT_MESSAGE` for that tab, reusing the existing renderer rendering: `ok` → `{ type:'system', content:'Skills reloaded' }` (a divider line); `!ok` → `{ type:'error', content:'Skills reload failed: …' }` (fail-loud).
 
 This is the user-visible feedback for skill hot-reload (`context/skills` skills#4) — without it the re-scan is silent and the user can't tell their edit reached the running agent.
 
-## skills_reloaded ⟂ content delivery (turnId-scoping)
+## skills_reloaded and content delivery
 
-`skills_reloaded` rides the same **session-scoped delivery** that all conversation content now uses: the host-process dispatcher routes `message` / `stream` / `error` events to a session sink (`onSessionEvent` → `dispatchEvent` by tab id) **before** the turnId check, so content is never gated on (or dropped by) turn id. turn id routes only `status` / control events (turn-end, busy/idle, permission). See `architecture/agent-turn` for the full model. Conversation-content event SHAPES stay in `contracts/agent-wire-protocol`; this is only their host-side routing.
+`skills_reloaded` rides **session-scoped delivery**, as do all conversation-content events. The host dispatcher routes `message` / `stream` / `error` to the tab's `onSessionEvent` sink before execution lookup. `executionId` routes status/permission control only; settlement never gates content. See `architecture/agent-execution` for the full model. Conversation-content event shapes remain in `contracts/agent-wire-protocol`.
 
 ## stop_task
 
@@ -139,18 +139,18 @@ This is the user-visible feedback for skill hot-reload (`context/skills` skills#
 - renderer → main: `IPC.AGENT_STOP_TASK` `{ tabId, taskId }` → `session.backend.stopTask?.(taskId)`.
 - main → agent-server: `sendLine({ type: 'stop_task', taskId })` → `void activeBackend.stopTask?.(taskId)`. No direct reply — the resulting `task_notification` (status `'stopped'`) flows back through the normal `task_event` lane and updates the task card (so the stop's effect is observed via `AGENT_BACKGROUND_TASKS`, not a stop_task ack).
 
-## stop (interrupt turn)
+## stop (interrupt execution)
 
-**Direction**: renderer → main → agent-server (fire-and-forget). ESC: clear the waiting queue + interrupt the running turn.
+**Direction**: renderer → main → agent-server (fire-and-forget). ESC: clear the waiting queue + interrupt the running execution.
 
 - renderer → main: `IPC.AGENT_STOP` `{ tabId }` → `stopSession(tabId)` → `backend.stop()`.
-- main → agent-server: `sendLine({ type: 'stop' })`. The switch runs `sendQueue.clear()` (drops all not-yet-running sends and re-emits the queue snapshot) then `handleStop()` → `activeBackend.stop()`. Per-turn `stoppable` is provider-internal and never surfaces to the renderer (`agent-config-flow#2`).
+- main → agent-server: `sendLine({ type: 'stop' })`. The switch runs `sendQueue.clear()` (drops all not-yet-running sends and re-emits the queue snapshot) then `handleStop()` → `activeBackend.stop()`. Provider-native stoppability remains internal and never surfaces to the renderer (`agent-config-flow#2`).
 
 ## queue (send-queue snapshot)
 
-**Direction**: agent-server → main → renderer. Session-level (NO `turnId`). agent-server owns the send queue; it serializes turns one-at-a-time and emits the FULL ordered snapshot on every change (enqueue / start-running / complete / cancel).
+**Direction**: agent-server → main → renderer. Session-level (NO `executionId`). agent-server owns the send queue; it serializes executions one-at-a-time and emits the FULL ordered snapshot on every change (enqueue / start-running / complete / cancel).
 
-- agent-server → main: `OutgoingMessage` `{ type: 'queue', items: AgentQueueItem[] }` (no `turnId` — `wrapSendForTurn` must not stamp it). Routed via the session-level `onQueue` sink in `remote.ts`, never the per-turn lane.
+- agent-server → main: `OutgoingMessage` `{ type: 'queue', items: AgentQueueItem[] }` (no `executionId` — `wrapSendForExecution` must not stamp it). Routed via the session-level `onQueue` sink in `remote.ts`, never the execution-control lane.
 - main → renderer: `IPC.AGENT_QUEUE`, carrying the `AgentQueueItem[]` for the renderer to mirror.
 
 There is no `enqueue` control message — the renderer eager-sends every `{ type: 'send' }` and agent-server's `createSendQueue` owns timing/ordering. `clientMsgId` (renderer-minted at submit) is the correlation key echoed in each snapshot item.
@@ -179,4 +179,4 @@ Same renderer→main→agent-server pattern; payloads are self-describing:
 - **clear_credential** — `IPC.AGENT_CLEAR_CREDENTIAL` `{ tabId }` → `sendLine({ type: 'clear_credential', provider, requestId })` → reply `{ type: 'credential_cleared', requestId, ok, error? }`.
 - **read_task_output** — `IPC.AGENT_READ_TASK_OUTPUT` `{ tabId, taskId }` → `sendLine({ type: 'read_task_output', provider, taskId, requestId })` → reply `{ type: 'task_output', requestId, content?, error? }`.
 - **clear_context** — internal `backend.clearContext()` → `sendLine({ type: 'clear_context', sessionId })`; agent-server deletes persisted context + calls `resetSession` on every backend. No reply.
-- **ping / pong** — heartbeat. `remote.ts` writes `{ type: 'ping', seq }` on an interval; agent-server replies `{ type: 'pong', seq }`. Transport-level (RTT + liveness lease + idle-shutdown watchdog), never the turn dispatcher. See `context/connection-health`.
+- **ping / pong** — heartbeat. `remote.ts` writes `{ type: 'ping', seq }` on an interval; agent-server replies `{ type: 'pong', seq }`. Transport-level (RTT + liveness lease + idle-shutdown watchdog), never the execution dispatcher. See `context/connection-health`.

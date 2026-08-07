@@ -10,28 +10,28 @@ related:
 
 # Agent Wire Protocol
 
-The line-delimited JSON message stream from `agent-server` → main process: each message is one `OutgoingMessage` discriminated by `type`, optionally wrapped in a `WireEnvelope` (`turnId`) that routes per-turn lifecycle events; a small set of session-level lanes are turnId-exempt. The authoritative definition is `OutgoingMessage` in `agent-server/providers/types.ts`; main parses each variant in `parseRemoteMessage` (`src/main/agent/remote.ts`) and dispatches to renderer IPC in `src/main/agent/index.ts`. This contract describes the envelope, the renderer-facing render primitives, and the turnId-exempt lanes.
+The line-delimited JSON message stream from `agent-server` → main process: each message is one `OutgoingMessage` discriminated by `type`. `executionId` addresses execution control only; conversation content is session-scoped and intentionally has no execution envelope. The authoritative definition is `OutgoingMessage` in `agent-server/providers/types.ts`; main parses each variant in `parseRemoteMessage` (`src/main/agent/remote.ts`) and dispatches to renderer IPC in `src/main/agent/index.ts`.
 
 ## Envelope — `WireEnvelope`
 
-Source: `WireEnvelope` in `agent-server/providers/types.ts`. Stamped onto every per-turn message by `wrapSendForTurn` in agent-server; providers never see it (carried via closure).
+Source: `WireEnvelope` in `agent-server/providers/types.ts`. `wrapSendForExecution` stamps execution-scoped control and status events, but strips `executionId` from renderable `message`, `stream`, `error`, and `task_event` output. Providers receive a send closure and do not need to know Shelf's execution id.
 
 | Field | Type | Notes |
 |-------|------|-------|
-| `turnId` | `string?` | Routing key. Main's `createTurnDispatcher` (`src/main/agent/turn-dispatcher.ts`) routes the message to the per-turn `AsyncGenerator` registered under this id. Lifecycle messages and session-level lanes omit it intentionally. A non-lifecycle message missing `turnId` is logged and dropped. |
+| `executionId` | `string?` | Shelf control routing key. Main's `createExecutionDispatcher` (`src/main/agent/execution-dispatcher.ts`) routes status and permission control to the registered execution reader. Content and session-level lanes omit it intentionally. |
 | `parentToolUseId` | `string?` | Only on `type: 'message'` (msgType `reply` \| `fold_*`). Set when the message was emitted BY A SUBAGENT (Task/Agent tool); value is the outer Agent tool_use's `msgId`. The renderer's linear timeline nests the message under an earlier matching card (absent/missing = fail-visible at top level). Claude threads the SDK `parent_tool_use_id` (incl. the tool_result re-emit); a subagent is also dropped from the background-tasks panel. See background-tasks#7. |
 
-Main mints `turnId` (`t-${randomUUID().slice(0,8)}`) at `query()` entry and registers the turn **before** the `send` reaches agent-server, so early events have a destination. Generator ends after the first `status` with `state:'idle'` (plus buffered tail events).
+Main mints `executionId` (`e-${randomUUID().slice(0,8)}`) at `query()` entry and registers the execution **before** the `send` reaches agent-server, so early control events have a destination. The reader ends on terminal `status.state:'idle'`; this settlement releases control state and the next queued send, but does not close the session content sink.
 
 ```jsonc
-{ "type": "message", "turnId": "t-1a2b3c4d", "msgId": "msg_01", "msgType": "reply", "content": "Hello" }
+{ "type": "status", "executionId": "e-1a2b3c4d", "state": "streaming" }
 ```
 
 ## Render-primitive messages — `type: 'message'`
 
-The renderer-facing timeline entries. One wire `type: 'message'`, discriminated by `msgType`. Main's `buildAgentMessagePayload` translates each into the canonical `AgentMessage` union (`src/shared/types.ts`); the renderer upserts by `msgId`. Unknown `msgType` → main returns null and drops the message.
+The renderer-facing timeline entries. One wire `type: 'message'`, discriminated by `msgType`. These messages are session-scoped and MUST NOT carry `executionId`. Main's `buildAgentMessagePayload` translates each into the canonical `AgentMessage` union (`src/shared/types.ts`). Unknown `msgType` → main returns null and drops the message.
 
-`msgId` is the universal upsert key (provider-minted). Stream chunks (see [stream](#stream--type-stream)) share a `msgId` with their eventual finalize so the renderer accumulates them into one entry. For `fold_*` tool messages providers typically reuse the SDK `toolUseId` as `msgId` (pending → completed upsert).
+`msgId` is the universal identity key (provider-minted). A first-seen `msgId` appends at its arrival position; later events with the same `msgId` update that entry in place. Stream chunks (see [stream](#stream--type-stream)) share a `msgId` with their eventual finalize so the renderer accumulates them into one entry. For `fold_*` tool messages providers typically reuse the SDK `toolUseId` as `msgId` (pending → completed upsert).
 
 The renderer-side `AgentMessage` adds a renderer-only `user` variant (never emitted by providers) and an optional `streaming?` flag (set only while `reply` / `fold_text` receive deltas). `plan` is **not** in this union — it is a state side-channel (see [plan](#plan-side-channel--type-plan)).
 
@@ -49,7 +49,7 @@ Pure inline content, single `content` field.
 Rendering (per agent-ui#5): `reply` = assistant markdown reply (streams); `note` = one-line dim italic, renderer draws the leading `▸` marker (provider sends pure content); `system` = framework/SDK inline notice (config-edit dividers land here); `error` = inline red provider-business-layer error.
 
 ```jsonc
-{ "type": "message", "turnId": "t-1a2b3c4d", "msgId": "msg_07", "msgType": "note", "content": "Reading config files" }
+{ "type": "message", "msgId": "msg_07", "msgType": "note", "content": "Reading config files" }
 ```
 
 ### Foldable card variants — `fold_text` / `fold_code` / `fold_markdown` / `fold_diff`
@@ -77,20 +77,20 @@ Body shape per variant:
 | `fold_diff` | `{ diff: { oldString: string; newString: string } }?` | side-by-side diff |
 
 ```jsonc
-{ "type": "message", "turnId": "t-1a2b3c4d", "msgId": "tool_abc",
+{ "type": "message", "msgId": "tool_abc",
   "msgType": "fold_diff", "label": "Edit src/app.ts", "subtitle": "src/app.ts",
   "body": { "diff": { "oldString": "const a = 1", "newString": "const a = 2" } } }
 ```
 
 ```jsonc
-{ "type": "message", "turnId": "t-1a2b3c4d", "msgId": "tool_def",
+{ "type": "message", "msgId": "tool_def",
   "msgType": "fold_code", "label": "Bash", "subtitle": "npm run typecheck",
   "errorMessage": "exit 1", "body": { "content": "Type error on line 4" } }
 ```
 
 ## stream — `type: 'stream'`
 
-Incremental delta chunks for a streaming `reply` / `fold_text`. Per-turn (carries `turnId`). The renderer upserts by `msgId` onto a placeholder that the eventual finalize `message` (same `msgId`) replaces.
+Incremental delta chunks for a streaming `reply` / `fold_text`. Session-scoped; MUST NOT carry `executionId`. The renderer appends the first chunk as a placeholder and accumulates later chunks by `msgId`; an eventual finalize `message` with the same id updates that entry.
 
 | Field | Type | Notes |
 |-------|------|-------|
@@ -100,23 +100,23 @@ Incremental delta chunks for a streaming `reply` / `fold_text`. Per-turn (carrie
 | `content` | `string` | Delta chunk (append). |
 
 ```jsonc
-{ "type": "stream", "turnId": "t-1a2b3c4d", "msgId": "msg_07", "streamType": "text", "content": "partial " }
+{ "type": "stream", "msgId": "msg_07", "streamType": "text", "content": "partial " }
 ```
 
 ## status — `type: 'status'`
 
-Per-turn busy-state + cost/usage. `state:'idle'` closes the turn generator. Forwarded to `IPC.AGENT_STATUS`. **Also carries turnId-less account-level status** (`credits`): emitted post-turn without a turnId → main's `turn-dispatcher` routes it session-scoped (not to any turn generator); such a status omits `state` (so it doesn't flip streaming). See `context/agent-providers#26`.
+Execution busy-state + cost/usage. `state:'idle'` closes the execution reader, clears execution-scoped UI/permission state, and permits queue progress; it is not a content boundary. Forwarded to `IPC.AGENT_STATUS`. Account-level status (`credits`) has no `executionId`, is routed session-scoped, and omits `state` so it cannot change execution activity. See `context/agent-providers#26`.
 
 | Field | Type | Notes |
 |-------|------|-------|
 | `type` | `'status'` | |
-| `state` | `'streaming'` \| `'idle'` **?** | Optional — a turnId-less credit-only status omits it. |
-| `model` | `string?` | Per-turn resolved model — display is intent-driven via capabilities, not this (agent-config-flow#4). |
+| `state` | `'streaming'` \| `'idle'` **?** | Optional — an executionId-less credit-only status omits it. |
+| `model` | `string?` | Per-execution resolved model — display is intent-driven via capabilities, not this (agent-config-flow#4). |
 | `sessionId` | `string?` | |
 | `costUsd` / `inputTokens` / `outputTokens` / `numTurns` | `number?` | |
 | `contextUsage` | `StatusSegment?` | `{ text, severity? }` — see `agent-server/providers/types.ts`. |
 | `rateLimits` | `StatusSegment[]?` | |
-| `credits` | `StatusSegment?` | Account-level credit (copilot premium requests, via SDK `account.getQuota`). TurnId-less, refreshed post-turn. |
+| `credits` | `StatusSegment?` | Account-level credit (copilot premium requests, via SDK `account.getQuota`). ExecutionId-less, refreshed after an execution. |
 
 ## capabilities — `type: 'capabilities'`
 
@@ -155,7 +155,7 @@ See agent-ui#3 for the channel-ownership rationale (kept separate from permissio
 
 ## permission_request — `type: 'permission_request'`
 
-Per-turn tool-permission prompt. Does NOT enter the event queue — the dispatcher fires the turn's `permissionHandler` directly (initiating the `canUseTool` round-trip). Forwarded to `IPC.AGENT_PERMISSION_REQUEST`; renderer answers via `AGENT_RESOLVE_PERMISSION`.
+Execution-scoped tool-permission prompt. Does NOT enter the content queue — the dispatcher invokes that execution's `permissionHandler` directly. Forwarded to `IPC.AGENT_PERMISSION_REQUEST`; renderer answers via `AGENT_RESOLVE_PERMISSION`.
 
 | Field | Type |
 |-------|------|
@@ -166,7 +166,7 @@ Per-turn tool-permission prompt. Does NOT enter the event queue — the dispatch
 
 ## error — `type: 'error'`
 
-Per-turn (carries `turnId`) transport/business error. Logged to file in main, then forwarded to the renderer as an inline `error` message (`IPC.AGENT_MESSAGE` with `{ type:'error', content }`).
+Session-scoped transport/business error. It MUST NOT carry `executionId`; main logs it and forwards it as an inline `error` timeline message (`IPC.AGENT_MESSAGE` with `{ type:'error', content }`). Execution failure still settles separately through status/control.
 
 | Field | Type |
 |-------|------|
@@ -175,7 +175,7 @@ Per-turn (carries `turnId`) transport/business error. Logged to file in main, th
 
 ## auth_required — `type: 'auth_required'`
 
-Per-turn signal that the remote lost credentials. Forwarded to `IPC.AGENT_AUTH_REQUIRED`.
+Execution-scoped signal that the remote lost credentials. Forwarded to `IPC.AGENT_AUTH_REQUIRED`.
 
 | Field | Type |
 |-------|------|
@@ -184,9 +184,9 @@ Per-turn signal that the remote lost credentials. Forwarded to `IPC.AGENT_AUTH_R
 
 ---
 
-## Session-level lanes (turnId-exempt)
+## Session-level lanes (executionId-exempt)
 
-These are routed by `createTurnDispatcher` **before** the `turnId` check, into dedicated session sinks — they must NOT carry a `turnId` (`wrapSendForTurn` is exempted for them), because a backgrounded task or session-scoped snapshot outlives any single turn and would otherwise be dropped as "unknown turn" once the turn deregisters. See DECISIONS #69, message-queue-ownership.
+`message`, `stream`, `error`, and the following side channels are routed by `createExecutionDispatcher` **before** execution lookup into session sinks. They MUST NOT carry `executionId`: session content can arrive after an execution reader settles and must remain visible. There is no drain/barrier or fallback attribution to a current/last execution.
 
 ### task_event — `type: 'task_event'`
 
@@ -238,20 +238,20 @@ Emitted while an interactive `copilot login` (OAuth device flow) runs. Session-l
 
 Inbound commands: `start_login` (`{ provider, cwd, sid }`) and `cancel_login` (`{ provider, sid }`) — see `agent-server/exec.ts`.
 
-### turn_started — `type: 'turn_started'`
+### execution_started — `type: 'execution_started'`
 
-Server-initiated turn announcement carrying a provider-minted `turnId` (via the envelope). The dispatcher registers that turnId **synchronously** on receipt (permissionless handler) and hands the turn's generator to the `onServerTurn` sink — used when a backgrounded task finishes and the SDK auto-resumes to write a real reply that has no live foreground turn. The subsequent content is an ordinary timeline message; execution turn boundaries never become renderer grouping metadata. See agent-config-flow#1, DECISIONS #69.
+Server-initiated execution announcement carrying a provider-minted `executionId` (via the envelope). The dispatcher registers it **synchronously** and hands its reader to `onServerExecution`; this supports provider auto-resume work that has no live foreground send. Subsequent content still uses the session sink and does not inherit the execution id or create renderer grouping metadata. See agent-config-flow#1.
 
 | Field | Type |
 |-------|------|
-| `type` | `'turn_started'` |
-| `turnId` | `string` (in envelope) |
+| `type` | `'execution_started'` |
+| `executionId` | `string` (in envelope) |
 
 ---
 
-## Lifecycle messages (turnId-exempt, out-of-band)
+## Lifecycle messages (executionId-exempt, out-of-band)
 
-Emitted outside any turn. Some are one-shot RPC responses keyed `<type>:<requestId>` in the dispatcher's `onResponse` map; others are signals. Defined in `OutgoingMessage` (`agent-server/providers/types.ts`):
+Emitted outside any execution. Some are one-shot RPC responses keyed `<type>:<requestId>` in the dispatcher's `onResponse` map; others are signals. Defined in `OutgoingMessage` (`agent-server/providers/types.ts`):
 
 | `type` | Key fields | Routing |
 |--------|-----------|---------|
@@ -266,7 +266,7 @@ Emitted outside any turn. Some are one-shot RPC responses keyed `<type>:<request
 
 ### Process memory acquisition — `get_memory_usage` / `memory_usage`
 
-Memory messages are turnId-exempt infrastructure messages. Main sends `{ "type": "get_memory_usage" }`; a source returns `memory_usage` success rows or an error report as defined in `contracts/process-memory`.
+Memory messages are executionId-exempt infrastructure messages. Main sends `{ "type": "get_memory_usage" }`; a source returns `memory_usage` success rows or an error report as defined in `contracts/process-memory`.
 
 - At the main↔dispatcher boundary, the request has no `sid`: the dispatcher samples itself and forwards the request to every current exec. Dispatcher self-report is host-level without `sid`; every relayed exec report carries its session `sid`.
 - At the dispatcher↔exec boundary, the exec responds with its own root plus provider descendants. The dispatcher relays that report opaquely.
@@ -282,13 +282,13 @@ The ONLY things still on the child's **stderr**: a log emitted before the sink i
 
 ---
 
-## Dispatch addressing — `sid` vs `turnId` vs payload `sessionId`
+## Dispatch addressing — `sid` vs `executionId` vs payload `sessionId`
 
 When a single per-host dispatcher multiplexes many sessions (see `architecture/agent-dispatch`), the wire gains one new routing dimension. THREE distinct identifiers now coexist and MUST keep distinct names — they are not interchangeable:
 
 | Name | Scope | Meaning |
 |------|-------|---------|
-| `turnId` | per turn | Routes per-turn events to their turn reader (unchanged; see the Envelope above). Main mints it per `send`. |
+| `executionId` | per Shelf execution | Routes status/permission control to one execution reader. Main normally mints it per `send`; a provider may mint one for auto-resume. It is not an ACP/native turn id and never owns content. |
 | `sid` | per session | **NEW envelope field.** The app/tab session key = the routing dimension the dispatcher demuxes on. Its value is the same app session key that already rides as `send.sessionId`. A distinct NAME so it can never collide with a payload `sessionId`. |
 | `sessionId` | payload-internal, provider-owned | The provider's SDK session id (e.g. Claude `msg.session_id`) inside `status`, and the context-store key inside `send` / `clear_context`. NEVER an envelope routing key — the dispatcher never routes on it. |
 
@@ -313,10 +313,10 @@ Over the transport (secure channel / subsystem / container / same-machine stdio)
 | `type` | Key fields | Meaning |
 |--------|-----------|---------|
 | `ready` | — | Dispatcher process up (no `sid`); gates nothing per-session. |
-| `session_down` | `sid; reason; willReconnect` | Execution unit for `sid` exited (crash / hang / normal). Main fails that session's in-flight turns loudly, then marks it recovering if `willReconnect` (a relayed `ready{sid}` follows once reconnected) or disconnected if not (backoff exhausted). |
+| `session_down` | `sid; reason; willReconnect` | Execution unit for `sid` exited (crash / hang / normal). Main fails that session's in-flight executions loudly, then marks it recovering if `willReconnect` (a relayed `ready{sid}` follows once reconnected) or disconnected if not (backoff exhausted). |
 | `pong` | `seq` | Host heartbeat ack (no `sid`). Host-level health = RTT / miss on THIS. |
 | `memory_usage` | `status; sampledAt; rows?; error?; sid?` | Dispatcher self has no `sid`; session exec reports carry `sid`. See `contracts/process-memory`. |
-| existing per-turn / session events | + `sid` | Every existing `OutgoingMessage` (stream, message, status, queue, task_event, skills_reloaded, capabilities, credential_*, task_output, permission_request, picker_request, plan, auth_required, turn_started, error, log) is stamped with `sid` and **passed through OPAQUELY** — the dispatcher forwards without parsing. |
+| existing execution / session events | + `sid` | Every existing `OutgoingMessage` (stream, message, status, queue, task_event, skills_reloaded, capabilities, credential_*, task_output, permission_request, picker_request, plan, auth_required, execution_started, error, log) is stamped with `sid` and **passed through OPAQUELY** — the dispatcher forwards without parsing. |
 
 `session_ready` is not a separate message: the execution unit stamps its own `ready` with its `sid`, and the dispatcher relays it. `get_capabilities` is per-`sid` and comes AFTER the session is ready (`open_session` → ready → `get_capabilities(sid)`); it is answered by the execution unit's runtime, keeping the dispatcher thin.
 

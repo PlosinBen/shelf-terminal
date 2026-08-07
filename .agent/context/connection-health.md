@@ -64,13 +64,13 @@ related:
 - `wire-tx`（`agent-server/index.ts` `send`）— provider 到底有沒有把該 event 寫出 stdout。
 - `wire-rx`（`remote.ts` stdout loop）— main 有沒有從 pipe 收到；配 `stdout buffer residual`（截斷/desync）。
 - `pong` / `ping` — 醒來後 pong 有沒有恢復 → 區分「pipe 活、provider wedge」vs「pipe/transport 死」。
-- `session-event`（`turn-dispatcher.ts`）— 顯示內容（tool result / reply / stream）有沒有走到 session sink（顯示內容是 session-scoped、不經 per-turn generator）。
+- `session-event`（`execution-dispatcher.ts`）— 顯示內容（tool result / reply / stream）有沒有走到 session sink（顯示內容是 session-scoped、不經 execution reader）。
 - `agent-rx`（`agentTabSubscriptions.ts`，經 `debugLog`→main log，info 即現）— 有沒有跨過 IPC 到 renderer store。
 - 判讀：`wire-tx` 有、`wire-rx` 無 = 傳輸中掉（pipe/睡眠）；`wire-rx`/`session-event` 有、`agent-rx` 無 = IPC 沒過；`agent-rx` 有卻沒渲染 = renderer 端（`buildAgentMsg`/store）。`sendLine to non-writable stdin` warn = 送到死 pipe。
 
 **現況**：復原策略（自動 respawn vs 明示 reconnect 提示）與確切 wedge 點**待這輪 trace 重現後再定**。此條先記缺口 + 診斷路徑。
 
-**Related**：`connection-health#1`（heartbeat / dead 偵測）、`connection-health#2`（跨睡眠：不做 client auto-kill）、`connection-health#7`（dispatcher 路徑的兩層 health + connection-centric reconnect，取代此條缺口）、`agent-core#8`（每個 send 必以 idle 收尾）、`src/main/agent/{remote,index,turn-dispatcher}.ts`、`agent-server/index.ts`、`src/renderer/agentTabSubscriptions.ts`。
+**Related**：`connection-health#1`（heartbeat / dead 偵測）、`connection-health#2`（跨睡眠：不做 client auto-kill）、`connection-health#7`（dispatcher 路徑的兩層 health + connection-centric reconnect，取代此條缺口）、`agent-core#8`（每個 send 必以 idle 收尾）、`src/main/agent/{remote,index,execution-dispatcher}.ts`、`agent-server/index.ts`、`src/renderer/agentTabSubscriptions.ts`。
 
 ## connection-health#5 — 逃出 tree 的 detached 背景任務：正常關閉一律自收（不分意圖）  ·  [Decision]
 
@@ -121,11 +121,11 @@ related:
 
 **Connection-centric reconnect（不是 respawn）**：dispatcher 對**每個 session** 維持一條到 provider execution 的活連線；isolated 下 exec process 只是這條連線當下的化身。連線斷（exit=「gone」/ inner-probe 無回=「no response」）→ dispatcher 把該 session **reconnect 到一個全新 exec**；因對話已持久化（provider 自身的 resume id），重連的 exec **resume 同一個邏輯 session**，非重生。此框架能推廣到 shared（reconnect 到 client），「respawn 一個 worker」不能。
 
-**Ordering：fail-loud 先，reconnect 後**（order-critical）。exec down 時 dispatcher **先** 把該 session 所有 in-flight turn 大聲失敗掉（renderer 顯示 turn interrupted、spinner 解卡、清掉任何開著的 permission prompt），**才** 拉起新 exec 並更新 mapping。mid-turn work 一定丟 —— 從上一個 committed turn 邊界 resume，**絕不靜默留白**。無回應的 exec 直接 SIGKILL（它不會處理 stdin-EOF）。反覆重連失敗 → backoff 遞增到 cap；超過 cap 停手、host 退回既有 disconnected 狀態。
+**Ordering：fail-loud 先，reconnect 後**（order-critical）。exec down 時 dispatcher **先** 把該 session 所有 in-flight executions 大聲失敗掉（renderer 顯示 interrupted、spinner 解卡、清掉任何開著的 permission prompt），**才** 拉起新 exec 並更新 mapping。in-flight provider work 一定丟 —— 從上一個 committed provider boundary resume，**絕不靜默留白**。無回應的 exec 直接 SIGKILL（它不會處理 stdin-EOF）。反覆重連失敗 → backoff 遞增到 cap；超過 cap 停手、host 退回既有 disconnected 狀態。
 
 **Do not change casually because**：
 - INNER ping 只是 liveness probe —— 別把 heartbeat 的 side-effect（idle watchdog reset / lease touch）留在 exec；那些上移到 dispatcher（見 `deployment#1` lease、`architecture/agent-dispatch`）。
-- reconnect 一定 **fail-loud 先於重連** —— 顛倒順序會讓 renderer 把 in-flight turn 的失敗誤當新 exec 的事件，或漏掉「turn 已丟」的通知（回到 `connection-health#4` 的靜默 wedge）。
+- reconnect 一定 **fail-loud 先於重連** —— 顛倒順序會讓 renderer 把 in-flight execution 的失敗誤當新 exec 的事件，或漏掉「execution 已丟」的通知（回到 `connection-health#4` 的靜默 wedge）。
 - 別把 dispatcher 的 outer 漏拍改成只砍單一 tab —— 共用 channel 死掉時整台 host 都不可達，砍整台才對。
 
 **Related**：`connection-health#1`（heartbeat 基礎）、`connection-health#4`（此條修掉的舊缺口）、`connection-health#8`（reconnect 的 health-seed gotcha + dispatcher death）、`contracts/agent-wire-protocol`（Boundary 1 `session_down{sid,reason,willReconnect}` + host-level ping/pong）、`architecture/agent-dispatch`。
