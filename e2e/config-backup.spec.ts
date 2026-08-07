@@ -265,6 +265,9 @@ test('Import discovers pinned sources from an unsaved URL and labels selectable 
   await sourcePicker.selectOption({ label: 'source-machine' });
 
   const selection = panel.locator('.import-item-selection');
+  // Materializing the pinned Git commit can exceed Playwright's 5s default on
+  // a cold filesystem; wait for the completed import surface explicitly.
+  await expect(selection).toBeVisible({ timeout: 15_000 });
   const alpha = selection.locator('.backup-check', { hasText: 'alpha' });
   const beta = selection.locator('.backup-check', { hasText: 'beta' });
   const broken = selection.locator('.backup-check', { hasText: 'broken' });

@@ -606,7 +606,7 @@ test('close project via context menu removes it', async ({ shelfApp: { page } })
 // ── BottomBar grouping ──
 
 // The right cluster is split into three divider-separated groups —
-// version | left sidebar (Projects) | right sidebar (PM/Notes/Skills/MCP/DevTools).
+// version | left sidebar (Projects) | right sidebar (PM/Notes/Skills/MCP/Backup/DevTools).
 // No project needed: the bottom bar is always mounted.
 test('bottom bar groups the right cluster with dividers', async ({ shelfApp: { page } }) => {
   const groups = page.locator('.bottom-bar-right > .bottom-bar-group');
@@ -619,10 +619,10 @@ test('bottom bar groups the right cluster with dividers', async ({ shelfApp: { p
   await expect(leftGroup.locator('.right-tab-btn')).toHaveCount(1);
   await expect(leftGroup.locator('.sr-only', { hasText: 'Projects' })).toHaveCount(1);
 
-  // Group 3 = the five right-sidebar features, MCP sitting after Skills.
+  // Group 3 = the six right-sidebar features, MCP sitting after Skills.
   const rightGroup = groups.nth(2);
   await expect(rightGroup.locator('.right-tab-btn .sr-only'))
-    .toHaveText(['PM', 'Notes', 'Skills', 'MCP', 'Dev Tools']);
+    .toHaveText(['PM', 'Notes', 'Skills', 'MCP', 'Backup', 'Dev Tools']);
 });
 
 // The grouped MCP icon opens the MCP right-sidebar view (it lives in group 3).
