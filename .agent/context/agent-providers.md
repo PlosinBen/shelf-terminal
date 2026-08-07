@@ -267,13 +267,13 @@ SDK 0.3.159 **並存**兩種 compact 完成訊號:`status` 形狀(`subtype:'stat
 
 **Fix / note**：`translate.ts` `rawOutputToText()` —— `content` 為空時 fallback 抓 `rawOutput`(handle `{content}` copilot / `{formatted_output}` codex / 純字串)。另:`status==='completed'` 但仍無文字的工具,**送空 body `{content:''}`** 標記 settled(reload 就不誤判);renderer `AgentMessage` fold_code 對**空 content 不渲染空灰條**。in-flight(pending/in_progress)仍保持無 body → 真崩潰照樣被 reload 標出。
 
-## agent-providers#24 — copilot 用 `task_complete` 工具送最終總結:translate 特判成結尾 `reply`,不是埋在工具卡  ·  [Decision]
+## agent-providers#24 — Copilot `task_complete` 摘要是 timeline note，不是 assistant reply  ·  [Decision]
 
-**Decision**：`translate.ts` 特判 `title==='task_complete'`(靠 `createToolMetaCarry` 帶過來的 title)—— 有內容 → 渲染成 `reply`(markdown 結尾發言,因是該 turn 最後動作故落在最底);裸訊號(無內容)→ 不顯示。
+**Decision**：ACP translator 特判 `title === 'task_complete'`（靠 session-scoped tool metadata carry 保留 title）：有摘要內容就依到達時序渲染為 `note`；裸訊號（無內容）不顯示。這項分類不檢查前面是否已有 reply，也不把摘要歸屬到某次 execution。
 
-**Reason**：copilot 的 agent 用 `task_complete` 工具自我宣告完成、把**最終總結放在它的 content/rawOutput**,而非純文字(ACP 的完成訊號是 turn 級 `stopReason`,agent 只好借工具送結尾訊息)。若當普通工具渲染,總結會埋在收合的「Tool」卡裡。
+**Reason**：Copilot 明確把 `task_complete` 當作 internal autopilot control message，摘要放在 tool `content`／`rawOutput`；它不是 end-user assistant message。映射成 `reply` 會在正常 assistant 回覆後多出第二個 `Copilot:`，映射成普通工具則會把摘要埋進收合卡片。`note` 保留完整文字與 timeline 時序，同時表達它是附帶的完成摘要。
 
-**Do not change casually because**：這是 **copilot title 慣例的特判、非 ACP 標準**(Zed 等參考 client 不特判,一律當普通工具);copilot 改名就失效。屬 Shelf 專屬加值,發現顯示問題(如與前面文字重複)再議。
+**Do not change casually because**：這是 **Copilot title 慣例的特判，不是 ACP 標準**；Copilot 改名就會失效。不要用 prompt settlement、stop reason 或 execution attribution 判定它是否顯示；session content lane 收到後就按時序呈現。現行 `note` 不截斷長文字，但以純文字顯示；若未來摘要穩定包含需要格式化的多段 Markdown，再單獨定義呈現規則，不要把它改回 assistant reply。
 
 ## agent-providers#25 — copilot ACP 不 emit `usage_update` → status bar 對 copilot 沒有 ctx / cost / AI-credit（等上游 #4233）  ·  [Gotcha]
 

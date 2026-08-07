@@ -67,12 +67,12 @@ describe('acp session driver (connection + new/resume + turn)', () => {
       await driver.drivePromptTurn(conn.agent, session, 'hi', (m) => wire.push(m));
       // Prompt settlement controls idle/queue release; content delivery remains
       // live. The terminal callback intentionally has not run yet.
-      expect(wire).not.toContainEqual(expect.objectContaining({ msgId: 'task-complete-1', msgType: 'reply' }));
+      expect(wire).not.toContainEqual(expect.objectContaining({ msgId: 'task-complete-1', msgType: 'note' }));
       await new Promise<void>((resolve) => setImmediate(() => setImmediate(resolve)));
       expect(wire).toContainEqual({
         type: 'message',
         msgId: 'task-complete-1',
-        msgType: 'reply',
+        msgType: 'note',
         content: 'final summary',
       });
     } finally {

@@ -208,17 +208,17 @@ export function translateSessionUpdate(update: SessionUpdate): OutgoingMessage[]
       // of copilot's long titles. Both survive partial updates via createToolMetaCarry.
       const msgId = update.toolCallId;
       const title = ('title' in update && update.title) ? update.title : undefined;
-      // copilot delivers its FINAL SUMMARY via a `task_complete` signal tool (not
-      // plain assistant text; ACP's turn-completion signal is the turn-level
-      // stopReason, so agents lean on a tool for the closing message). Surface that
-      // summary as the turn's closing `reply` (it's markdown) instead of a buried
-      // "Tool" card. A bare signal (initial pending call, no content) emits nothing.
+      // Copilot's `task_complete` is an internal completion summary, not an
+      // assistant message. Keep it visible in the flat timeline as a note without
+      // adding a second "Copilot:" reply heading or burying it in a Tool card.
+      // A bare signal (initial pending call, no content) emits nothing.
       // Copilot-specific title match — no ACP standard marker exists; revisit if it
       // is renamed. `title` is carried across partial updates (createToolMetaCarry).
+      // See agent-providers#24.
       if (title === 'task_complete') {
         const summary = toolContentToText('content' in update ? update.content : undefined)
           || rawOutputToText('rawOutput' in update ? update.rawOutput : undefined);
-        return summary ? [{ type: 'message', msgId, msgType: 'reply', content: summary }] : [];
+        return summary ? [{ type: 'message', msgId, msgType: 'note', content: summary }] : [];
       }
       const label = toolCallLabel('kind' in update ? update.kind : undefined, title);
       const status = 'status' in update ? update.status : undefined;
