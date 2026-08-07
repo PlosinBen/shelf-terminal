@@ -31,9 +31,11 @@
    Co-Authored-By: <model name> <noreply@anthropic.com>
    EOF
    )"
+   git show -s --format=%B HEAD      # 確認是真正的多行 body + trailer，不是字面上的 \n
    git push origin main
    git tag vX.X.X && git push origin vX.X.X
    ```
+   上述 heredoc 是強制寫法：禁止在 `git commit -m` 參數中用 `\n` 或 `\\n` 拼接 release notes / trailer。字面 escape 會破壞 commit 格式、Co-Authored-By trailer、GitHub Actions run title 與 draft release body；驗證未通過時不得 push / tag。
 5. GitHub Actions 先自動建立或重用該 tag 的唯一 **draft** release，再平行 build 三平台（mac/win/linux）並上傳各自 assets；若同 tag 已有多份 release 或已 publish，workflow 會 fail-loud，不會自行選擇或覆寫
 6. 使用者在 GitHub 上 review draft，手動 publish
 

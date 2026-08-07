@@ -47,6 +47,7 @@
   - Subject 用英文、祈使/結果導向、冒號後小寫開頭、不加句號。不要用 bare scope（如 `agent: ...`）或句子式 subject（如 `Show ...`）。
   - Body 只在有助 review 時寫：root cause、設計取捨、行為變更、regression test、已知限制。保持精練，通常 1-3 個短段落或少量 bullets。
   - 實質參與撰寫 commit 時保留 trailer：`Co-Authored-By: <Model Name> <noreply/...>`。多人/多模型合作可多行。
+  - **多行 commit message 必須使用 heredoc 產生真正換行**；禁止在 `git commit -m` 參數中用 `\n` 或 `\\n` 拼接 body / trailer（shell 會原樣寫入，trailer 也不會被 Git 辨識）。commit 後一律以 `git show -s --format=%B HEAD` 確認段落、bullets 與 trailers 格式正常，再進行 push / tag。
   - 範例：
     ```text
     fix(codex): send data URI images as app-server image URLs
