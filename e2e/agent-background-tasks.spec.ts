@@ -3,7 +3,7 @@ import type { Page } from '@playwright/test';
 
 /**
  * Background-tasks panel — end-to-end over the fake provider (SHELF_TEST_MODE=1).
- * Exercises the turnId-less task_event lane all the way to the renderer:
+ * Exercises the executionId-less task_event lane all the way to the renderer:
  * a running task shows in the "N tasks" panel, a completed task exposes its
  * output via read_task_output, tasks can be dismissed, and a cleanly-completed
  * card auto-dismisses after a countdown (shrunk via a window override) while a
@@ -52,23 +52,23 @@ test.describe('background tasks panel via fake provider', () => {
     await setupProject(page);
     await openAgentTab(page);
 
-    // serverturn: drives the M3 server-initiated turn end-to-end (wire
-    // turn_started → dispatcher registers → main forwarder → renderer.
-    // The transport turn must not create or gate a renderer display block.
-    await sendAgentPrompt(page, 'serverturn:the sleep finished');
+    // serverexecution: drives the M3 server-initiated execution end-to-end (wire
+    // execution_started → dispatcher registers → main forwarder → renderer.
+    // The transport execution must not create or gate a renderer display block.
+    await sendAgentPrompt(page, 'serverexecution:the sleep finished');
 
     const timelineMessages = page.locator('.agent-messages > .agent-msg');
     await expect(timelineMessages).toHaveCount(2, { timeout: 5_000 });
-    await expect(timelineMessages.nth(0)).toContainText('serverturn:the sleep finished');
+    await expect(timelineMessages.nth(0)).toContainText('serverexecution:the sleep finished');
     await expect(timelineMessages.nth(1)).toContainText('the sleep finished');
-    await expect(page.locator('.agent-turn')).toHaveCount(0);
+    await expect(page.locator('.agent-execution')).toHaveCount(0);
   });
 
   test('completed task: read output + dismiss', async ({ shelfApp: { page } }) => {
     await setupProject(page);
     await openAgentTab(page);
 
-    // Start it running, then complete it (two turns).
+    // Start it running, then complete it (two executions).
     await sendAgentPrompt(page, 'task:t1');
     await expect(page.locator('.agent-tasks-panel:visible')).toBeVisible({ timeout: 5_000 });
     await sendAgentPrompt(page, 'taskdone:t1');
@@ -204,7 +204,7 @@ test.describe('plan/todo vs background tasks — distinct surfaces', () => {
   test('plan-panel and background-tasks-panel render side by side as separate panels', async ({ shelfApp: { page } }) => {
     await setupProject(page);
     await openAgentTab(page);
-    // One turn emits BOTH a plan/todo update and a running background task.
+    // One execution emits BOTH a plan/todo update and a running background task.
     await sendAgentPrompt(page, 'plan:PLAN_MARKER_TWO|task:bgjob');
 
     const plan = page.locator('.agent-plan-panel:visible');

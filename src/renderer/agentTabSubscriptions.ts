@@ -16,7 +16,7 @@ import {
   setPlan,
   applyTaskEvent,
   setStatus,
-  setStreaming,
+  setExecutionActive,
   upsertMessage,
   type Capabilities,
 } from './agentTabStore';
@@ -68,14 +68,14 @@ export function bindAgentStoreSubscriptions(): () => void {
     setPlan(tabId, content);
   });
 
-  // Background-task side-channel — turnId-less; main forwards over
+  // Background-task side-channel — executionId-less; main forwards over
   // IPC.AGENT_BACKGROUND_TASKS; bus surfaces it as `agent:onBackgroundTasks`.
   // Upserts into the store's backgroundTasks; BackgroundTasksPanel reads it.
   const offBackgroundTasks = onAgent('agent:onBackgroundTasks', ({ tabId, event }) => {
     applyTaskEvent(tabId, event);
   });
 
-  // Server-owned send-queue snapshot — turnId-less; main forwards over
+  // Server-owned send-queue snapshot — executionId-less; main forwards over
   // IPC.AGENT_QUEUE; bus surfaces it as `agent:onQueue`. Reconciles against the
   // optimistic pending chips + promotes newly-running sends into the timeline.
   const offQueue = onAgent('agent:onQueue', ({ tabId, items }) => {
@@ -94,12 +94,12 @@ export function bindAgentStoreSubscriptions(): () => void {
   const offStatus = onAgent('agent:onStatus', ({ tabId, status }) => {
     const s = status as any;
     // Stream state is a discrete flag; status partial bundles all other
-    // status fields. Splitting keeps setStreaming pure (no field grab
-    // bag) and lets setStreaming(false)'s turn-end side effects (clear
+    // status fields. Splitting keeps setExecutionActive pure (no field grab
+    // bag) and lets setExecutionActive(false)'s execution-end side effects (clear
     // streaming flag on in-flight chunks + requestSave) fire on the
     // exact transition.
-    if (s.state === 'streaming') setStreaming(tabId, true);
-    else if (s.state === 'idle' || s.state === 'done') setStreaming(tabId, false);
+    if (s.state === 'streaming') setExecutionActive(tabId, true);
+    else if (s.state === 'idle' || s.state === 'done') setExecutionActive(tabId, false);
     setStatus(tabId, {
       costUsd: s.costUsd,
       numTurns: s.numTurns,

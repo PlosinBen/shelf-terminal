@@ -5,7 +5,7 @@
  * to the remote. Those binaries are specific to BOTH cpu arch AND libc — a
  * glibc binary fails on Alpine (musl) with `no such file or directory` (the
  * dynamic loader is missing). So the deploy unit is `(arch × libc)`, not arch
- * alone. These pure parsers turn a remote probe into a validated target.
+ * alone. These pure parsers execution a remote probe into a validated target.
  *
  * Strategy by libc (2026-06):
  * - **glibc** → we ship our own Node (official nodejs.org), fully decoupled from

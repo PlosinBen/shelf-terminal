@@ -105,7 +105,7 @@ export function shouldFetchOutput(
 
 /**
  * Sticky "N tasks" indicator + collapsible list of background tasks (a
- * backgrounded Bash, subagent, etc.). Tasks arrive turnId-less via
+ * backgrounded Bash, subagent, etc.). Tasks arrive executionId-less via
  * `agent:onBackgroundTasks` → `applyTaskEvent` → `tab.backgroundTasks`.
  * Clicking a task row expands it: the label/summary stop truncating and wrap to
  * show the full text (e.g. a long command), and a settled task additionally

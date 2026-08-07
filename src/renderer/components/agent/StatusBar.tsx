@@ -12,7 +12,7 @@ interface Props {
 
 /**
  * Bottom status bar — running/idle dot, provider label, clickable
- * model / mode / effort segments, context usage, cost, turns, rate-limit
+ * model / mode / effort segments, context usage, cost, executions, rate-limit
  * segments, Clear History button.
  *
  * Clicking a model / mode / effort segment opens the renderer-local picker
@@ -20,13 +20,13 @@ interface Props {
  * Cycle-on-click was easy to misfire — a stray click would silently switch
  * the model with no confirmation. Opening a dismissable picker makes a
  * misclick harmless (Esc closes it) and the selection explicit. Options come
- * from `capabilities`; the picker's onSelect emits a config-edit turn
+ * from `capabilities`; the picker's onSelect emits a config-edit execution
  * (DecisionPanel → agent:send + configEdit).
  */
 export function StatusBar({ tabId, provider }: Props) {
   const tab = useAgentTab(tabId);
   const { processMemorySummary } = useStore();
-  const isStreaming = tab?.isStreaming ?? false;
+  const isExecutionActive = tab?.isExecutionActive ?? false;
   const statusModel = tab?.actualModel ?? null;
   const permissionMode = tab?.actualPermissionMode ?? 'default';
   const currentEffort = tab?.actualEffort ?? 'medium';
@@ -54,7 +54,7 @@ export function StatusBar({ tabId, provider }: Props) {
 
   const handleClearHistory = useCallback(async () => {
     // Wipes what the user sees (in-memory + IDB). Does NOT touch agent
-    // backend, sessionId, or accumulated cost / turns / context %. The
+    // backend, sessionId, or accumulated cost / executions / context %. The
     // agent keeps its memory — `/clear` slash is the provider-side reset.
     await clearMessagesStore(tabId);
   }, [tabId]);
@@ -64,8 +64,8 @@ export function StatusBar({ tabId, provider }: Props) {
 
   return (
     <div className="agent-status-bar">
-      <span className="agent-status-dot" style={{ color: isStreaming ? 'var(--agent-warning, #e5c07b)' : 'var(--agent-success, #98c379)' }}>{'●'}</span>
-      <span className="agent-status-label">{isStreaming ? 'running' : 'idle'}</span>
+      <span className="agent-status-dot" style={{ color: isExecutionActive ? 'var(--agent-warning, #e5c07b)' : 'var(--agent-success, #98c379)' }}>{'●'}</span>
+      <span className="agent-status-label">{isExecutionActive ? 'running' : 'idle'}</span>
       <span className="agent-status-sep">|</span>
       <span className="agent-status-seg">{providerLabel(provider)}</span>
       {statusModel && (
@@ -115,7 +115,7 @@ export function StatusBar({ tabId, provider }: Props) {
         <><span className="agent-status-sep">|</span><span className="agent-status-seg">${costUsd.toFixed(3)}</span></>
       )}
       {numTurns !== undefined && (
-        <><span className="agent-status-sep">|</span><span className="agent-status-seg">{numTurns} turns</span></>
+        <><span className="agent-status-sep">|</span><span className="agent-status-seg">{numTurns} executions</span></>
       )}
       {rateLimits.map((seg, i) => (
         <React.Fragment key={`rl-${i}`}>
@@ -129,7 +129,7 @@ export function StatusBar({ tabId, provider }: Props) {
       <button
         className="agent-reset-btn"
         onClick={handleClearHistory}
-        disabled={isStreaming}
+        disabled={isExecutionActive}
         title="Clear visible messages (agent keeps its memory; use /clear to reset agent context)"
       >Clear History</button>
     </div>

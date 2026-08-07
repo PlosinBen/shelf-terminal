@@ -35,7 +35,7 @@ function make(overrides: Partial<Parameters<typeof createDispatcherConnection>[0
   const handleAppTool = vi.fn(async () => ({ ok: true, data: 'R' }));
   const conn = createDispatcherConnection({
     proc: f.proc,
-    parseRemoteMessage: () => null, // we exercise dedicated sinks (queue/task), not turn parsing
+    parseRemoteMessage: () => null, // we exercise dedicated sinks (queue/task), not execution parsing
     handleAppTool,
     heartbeatIntervalMs: 1_000_000, // effectively off for the test
     ...overrides,
@@ -206,12 +206,12 @@ describe('dispatcher-connection (per-host demux by sid)', () => {
     expect(h1).not.toContainEqual({ state: 'dead' }); // reconnecting; host heartbeat stands
   });
 
-  it('fails in-flight turns loud on session_down (error then idle end the generator)', async () => {
+  it('fails in-flight executions loud on session_down (error then idle end the generator)', async () => {
     const { f, conn } = make();
     const ch = conn.openSession('s1', undefined, {});
-    const gen = ch.registerTurn('t1', () => {});
+    const gen = ch.registerExecution('t1', () => {});
     f.emit({ type: 'session_down', sid: 's1', reason: 'exited (code 1)', willReconnect: true });
-    // The turn generator yields the fail-loud error, then ends (idle).
+    // The execution generator yields the fail-loud error, then ends (idle).
     const first = await gen.next();
     expect(first.value).toMatchObject({ type: 'error' });
     expect(String((first.value as any).error)).toContain('interrupted');

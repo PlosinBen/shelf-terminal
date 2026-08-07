@@ -51,7 +51,7 @@ export type Lane = 'foreground' | 'server' | 'task' | 'ignore';
 export interface RouterAction {
   lane: Lane;
   /** Open a turn on the lane before routing (consume a pendingPush for
-   *  foreground; mint a server turnId for server). */
+   *  foreground; mint a server executionId for server). */
   start?: boolean;
   /** Close the lane's active turn after routing. */
   close?: boolean;
@@ -82,7 +82,7 @@ export function notePush(state: RouterState): RouterState {
 export function routeMessage(state: RouterState, input: RouterInput): RouterAction {
   const { type, systemSubtype } = input;
 
-  // ── Background-task system messages → task lane (turnId-less task_event).
+  // ── Background-task system messages → task lane (executionId-less task_event).
   if (type === 'system' && systemSubtype && systemSubtype.startsWith('task_')) {
     return { lane: 'task' };
   }

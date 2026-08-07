@@ -11,7 +11,7 @@ const DB_NAME = 'shelf-agent-history';
 // v4: keyPath 'dbId' autoIncrement, indexes 'by-session' and the composite
 // 'by-session-time' that lets `loadLatest` reverse-iterate the tail of a
 // session in O(limit). Save layer is append-only delta — writes only happen
-// at turn end (agentTabStore's doSave isStreaming guard), so each msg.id
+// at execution end (agentTabStore's doSave isExecutionActive guard), so each msg.id
 // appears in the store exactly once and we never need upsert semantics.
 const DB_VERSION = 4;
 const STORE_NAME = 'messages';
@@ -104,7 +104,7 @@ export async function loadAgentMessagesLatest(
  * `store.add` each one as a new row. msg.id may already exist in another
  * row for this session, but that's fine — IDB doesn't enforce uniqueness
  * on msg.id (keyPath is the synthetic dbId), and the agentTabStore
- * isStreaming guard ensures each msg is only written once per turn at
+ * isExecutionActive guard ensures each msg is only written once per execution at
  * its final state. On load, ascending-by-time iteration naturally yields
  * the latest write last; if a logic bug ever caused a dup, the later
  * row wins display-wise.

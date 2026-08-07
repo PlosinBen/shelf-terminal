@@ -348,7 +348,7 @@ describe('Codex official app-server backend lifecycle', () => {
     release();
     await running;
 
-    expect(app.calls.find((call) => call.method === 'turn/interrupt')?.params).toEqual({ threadId: 'thread-1', turnId: 'turn-1' });
+    expect(app.calls.find((call) => call.method === 'turn/interrupt')?.params).toEqual({ threadId: 'thread-1', executionId: 'turn-1' });
     expect(out.filter((m) => m.type === 'status' && m.state === 'idle')).toHaveLength(1);
   });
 
@@ -361,7 +361,7 @@ describe('Codex official app-server backend lifecycle', () => {
         app.fire('turn/started', { threadId: 'thread-1', turn: { id: 'turn-1' } });
         approval = app.serverRequest('item/commandExecution/requestApproval', {
           threadId: 'thread-1',
-          turnId: 'turn-1',
+          executionId: 'turn-1',
           itemId: 'cmd-1',
           approvalId: 'approval-1',
           command: 'touch a.txt',
@@ -408,7 +408,7 @@ describe('Codex official app-server backend lifecycle', () => {
         });
         app.fire('item/commandExecution/outputDelta', {
           threadId: 'thread-1',
-          turnId: 'turn-1',
+          executionId: 'turn-1',
           itemId: 'cmd-1',
           delta: ' M file.txt\n',
         });
@@ -450,7 +450,7 @@ describe('Codex official app-server backend lifecycle', () => {
         });
         app.fire('item/reasoning/summaryTextDelta', {
           threadId: 'thread-1',
-          turnId: 'turn-1',
+          executionId: 'turn-1',
           itemId: 'reason-1',
           delta: 'checking state',
           summaryIndex: 0,
@@ -495,7 +495,7 @@ describe('Codex official app-server backend lifecycle', () => {
         app.fire('turn/started', { threadId: 'thread-1', turn: { id: 'turn-1' } });
         fileApproval = app.serverRequest('item/fileChange/requestApproval', {
           threadId: 'thread-1',
-          turnId: 'turn-1',
+          executionId: 'turn-1',
           itemId: 'file-1',
           reason: 'apply patch',
           grantRoot: '/repo',
@@ -503,7 +503,7 @@ describe('Codex official app-server backend lifecycle', () => {
         await fileApproval;
         permissionApproval = app.serverRequest('item/permissions/requestApproval', {
           threadId: 'thread-1',
-          turnId: 'turn-1',
+          executionId: 'turn-1',
           itemId: 'perm-1',
           cwd: '/repo',
           reason: 'network',

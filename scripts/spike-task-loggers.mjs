@@ -5,12 +5,12 @@
  * eyeball whether they fire as documented in
  * .agent/features/empty-background-task-cards.md.
  *
- *   Turn FG : foreground bash `echo SYNC_HELLO` (+ a TodoWrite list)
+ *   Execution FG : foreground bash `echo SYNC_HELLO` (+ a TodoWrite list)
  *             → expect `[claude] dropped foreground bash task_started` (no card)
- *   Turn BG : background bash `sleep 15 && echo BG_DONE`
+ *   Execution BG : background bash `sleep 15 && echo BG_DONE`
  *             → expect `[claude] carding ... task_type:'local_bash' bgState:'true'`
  *               a real output_file, NO "settled with no output file"
- *   Turn SUB: a backgrounded subagent (Task tool)
+ *   Execution SUB: a backgrounded subagent (Task tool)
  *             → expect `[claude] carding ... bgState:'n/a'` and, on read,
  *               the inline-output (case 2) path
  *
@@ -51,7 +51,7 @@ const waitFor = (pred, ms) => new Promise((res) => {
   const t = setTimeout(() => res(null), ms);
   waiters.push((m) => { if (pred(m)) { clearTimeout(t); res(m); } });
 });
-const idle = (turnId, ms) => waitFor((m) => m.type === 'status' && m.state === 'idle' && m.turnId === turnId, ms);
+const idle = (executionId, ms) => waitFor((m) => m.type === 'status' && m.state === 'idle' && m.executionId === executionId, ms);
 const anyTaskId = () => {
   for (const m of lines) if (m.type === 'task_event') {
     if (m.task?.id) return m.task.id;
@@ -64,16 +64,16 @@ async function main() {
   await waitFor((m) => m.type === 'ready', 30000);
   const base = { provider: 'claude', cwd: root, sessionId: 'tasklog1', permissionMode: 'bypassPermissions' };
 
-  console.log('\n=== Turn FG: foreground bash + todo list ===');
-  send({ type: 'send', turnId: 't-fg', ...base,
-    prompt: 'Do BOTH in this turn: (1) use TodoWrite to create a 2-item todo list ["check env","echo hello"]; '
+  console.log('\n=== Execution FG: foreground bash + todo list ===');
+  send({ type: 'send', executionId: 'e-fg', ...base,
+    prompt: 'Do BOTH in this execution: (1) use TodoWrite to create a 2-item todo list ["check env","echo hello"]; '
       + '(2) run a NORMAL foreground shell command `echo SYNC_HELLO` (run_in_background=false) and WAIT for it. Then reply "fg done".' });
-  await idle('t-fg', 60000);
+  await idle('e-fg', 60000);
 
-  console.log('\n=== Turn BG: background bash ===');
-  send({ type: 'send', turnId: 't-bg', ...base,
+  console.log('\n=== Execution BG: background bash ===');
+  send({ type: 'send', executionId: 'e-bg', ...base,
     prompt: 'Run this shell command IN THE BACKGROUND (run_in_background=true): `sleep 15 && echo BG_DONE`. Immediately reply "started".' });
-  await idle('t-bg', 60000);
+  await idle('e-bg', 60000);
   await waitFor((m) => m.type === 'task_event' && (m.task?.id || m.tasks?.length), 10000);
   const bgId = anyTaskId();
   const readOut = async (label) => {
@@ -92,10 +92,10 @@ async function main() {
     await readOut('completed');
   }
 
-  console.log('\n=== Turn SUB: backgrounded subagent (case 2 inline-output) ===');
-  send({ type: 'send', turnId: 't-sub', ...base,
+  console.log('\n=== Execution SUB: backgrounded subagent (case 2 inline-output) ===');
+  send({ type: 'send', executionId: 'e-sub', ...base,
     prompt: 'Launch ONE background subagent (Task tool, run it in the background) whose entire job is to reply with the single word "PONG". Immediately reply "spawned".' });
-  await idle('t-sub', 90000);
+  await idle('e-sub', 90000);
   await waitFor((m) => m.type === 'task_event' && (m.task?.type === 'subagent' || m.tasks?.some?.((t) => t.type === 'subagent')), 15000);
 
   await new Promise((r) => setTimeout(r, 2000));

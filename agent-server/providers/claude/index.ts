@@ -348,10 +348,10 @@ export function createClaudeBackend(): ServerBackend {
   // A user prompt waiting in the queue for its `system/init` to arrive. On init
   // it is turned into an active foreground TurnFrame (openForegroundFrame).
   interface ForegroundTurn {
-    /** Turn-bound send (orchestrator already wrapped it with turnId+context). */
+    /** Turn-bound send (orchestrator already wrapped it with executionId+context). */
     send: SendFn;
     /** Idle-deduped wrapper over `send` (multiple idle emit sites per turn). */
-    turnSend: SendFn;
+    executionSend: SendFn;
     blockMsgIds: BlockMsgIdState;
     cwd: string;
     pendingCompactMsgId: string | null;
@@ -366,8 +366,8 @@ export function createClaudeBackend(): ServerBackend {
   // See features/claude-content-turn-unify.
   interface TurnFrame {
     kind: 'foreground' | 'server';
-    /** Content + status sink. FG: idle-deduped `turnSend`. Server: base send
-     *  pre-stamped with its lifecycle-routing `turnId`. */
+    /** Content + status sink. FG: idle-deduped `executionSend`. Server: base send
+     *  pre-stamped with its lifecycle-routing `executionId`. */
     send: SendFn;
     blockMsgIds: BlockMsgIdState;
     /** FG: forward EVERY SDK message to processMessage (live stream deltas +
@@ -420,7 +420,7 @@ export function createClaudeBackend(): ServerBackend {
   // For content the router drops with no active turn (drift): emit it session-
   // scoped via lastTurnSend rather than lose it. Status is suppressed there (no
   // turn to attribute), and content needs its OWN blockMsgIds (no turn's to use).
-  // See turnId-scoping (Phase 3).
+  // See executionId-scoping (Phase 3).
   const NOOP_SEND: SendFn = () => {};
   const driftBlockMsgIds = createBlockMsgIdState();
 
@@ -863,7 +863,7 @@ export function createClaudeBackend(): ServerBackend {
     activeCycles = 0; // session ending — force the counter to settled
     stoppable = true;
     for (const t of stuck) {
-      t.turnSend({ type: 'status', state: 'idle' });
+      t.executionSend({ type: 'status', state: 'idle' });
       t.resolve();
     }
     // Active frame: a foreground turn idles + resolves its query(); a server
@@ -891,7 +891,7 @@ export function createClaudeBackend(): ServerBackend {
     const stuck = [...pendingPush];
     pendingPush.length = 0;
     for (const t of stuck) {
-      t.turnSend({ type: 'status', state: 'idle' });
+      t.executionSend({ type: 'status', state: 'idle' });
       t.resolve();
     }
     // Active frame — BOTH kinds emit idle (spinner clears); only a foreground
@@ -942,9 +942,9 @@ export function createClaudeBackend(): ServerBackend {
         // after the turn's `result` (active already null). This WAS the silent
         // drop path ("tool use result not showing"). Now: emit the CONTENT
         // session-scoped via lastTurnSend (Phase 2 routes content by type, not
-        // turnId, so a stale turnId is fine), with status suppressed (no turn to
+        // executionId, so a stale executionId is fine), with status suppressed (no turn to
         // attribute busy/idle to) and its own blockMsgIds. The drift is still
-        // logged (warn) so it stays observable. See turnId-scoping (Phase 3).
+        // logged (warn) so it stays observable. See executionId-scoping (Phase 3).
         if (msg.type === 'assistant' || msg.type === 'stream_event' || msg.type === 'user') {
           serverLog('warn', 'claude', 'content with no active turn — emitting session-scoped (router drift)', {
             type: msg.type,
@@ -978,10 +978,10 @@ export function createClaudeBackend(): ServerBackend {
     if (turn) {
       // lastTurnSend is the RAW (non-idle-deduped) send: server turns + capability
       // + task_event emits base off it and must NOT be swallowed by this turn's
-      // idle dedup. The foreground idle itself goes via `send` (= turnSend).
+      // idle dedup. The foreground idle itself goes via `send` (= executionSend).
       lastTurnSend = turn.send;
       activeFrame = {
-        kind: 'foreground', send: turn.turnSend, blockMsgIds: turn.blockMsgIds,
+        kind: 'foreground', send: turn.executionSend, blockMsgIds: turn.blockMsgIds,
         forwardAll: true, rawSend: turn.send, cwd: turn.cwd,
         pendingCompactMsgId: turn.pendingCompactMsgId, resolve: turn.resolve,
       };
@@ -995,20 +995,20 @@ export function createClaudeBackend(): ServerBackend {
     }
   }
 
-  /** Open a server-initiated (auto-resume) turn: mint a turnId the main side
-   *  registers via `turn_started`, so the prose renders as a normal reply. */
+  /** Open a server-initiated (auto-resume) turn: mint a executionId the main side
+   *  registers via `execution_started`, so the prose renders as a normal reply. */
   function openServerFrame() {
     const base = lastTurnSend;
     if (!base) { activeFrame = null; return; }
     noteCycleOpen();
-    const turnId = `t-${randomUUID().slice(0, 8)}`;
-    base({ type: 'turn_started', turnId });
+    const executionId = `e-${randomUUID().slice(0, 8)}`;
+    base({ type: 'execution_started', executionId });
     // Drive busy state for the auto-resume: streaming on open, idle on close.
     // main forwards these ONLY when no foreground turn is in flight, so the
     // spinner reflects the agent actively writing. See background-tasks#6.
-    base({ type: 'status', state: 'streaming', turnId });
+    base({ type: 'status', state: 'streaming', executionId });
     const send: SendFn = (m) => {
-      base({ ...m, turnId });
+      base({ ...m, executionId });
     };
     activeFrame = { kind: 'server', send, blockMsgIds: createBlockMsgIdState(), forwardAll: false };
   }
@@ -1180,7 +1180,7 @@ export function createClaudeBackend(): ServerBackend {
     if (any.subtype === 'task_notification' && !taskOutputFiles.has(norm.task.id)) {
       serverLog('warn', 'claude', 'task_notification settled with no output file ' + JSON.stringify({ task_id: norm.task.id, task_type: norm.task.type, status: norm.task.status }));
     }
-    // Emit LIVE — even mid-foreground-turn. task_event is turnId-less and lands
+    // Emit LIVE — even mid-foreground-turn. task_event is executionId-less and lands
     // in the sticky BackgroundTasksPanel, a separate lane from the turn's content
     // stream, so emitting it now does NOT interleave with the reply — the panel
     // updates as each task starts and settles, instead of all cards popping out
@@ -1318,11 +1318,11 @@ export function createClaudeBackend(): ServerBackend {
       // lazily on the first real turn; reused thereafter — Architecture B).
       const s = ensureSession(input.cwd, input.resume, input.appId);
 
-      // Per-turn render state. turnSend de-dupes idle (the result case and the
+      // Per-turn render state. executionSend de-dupes idle (the result case and the
       // turn-close path can both emit one).
       const blockMsgIds = createBlockMsgIdState();
       let idleEmitted = false;
-      const turnSend: SendFn = (msg) => {
+      const executionSend: SendFn = (msg) => {
         if (msg.type === 'status' && (msg as any).state === 'idle') {
           if (idleEmitted) return;
           idleEmitted = true;
@@ -1358,7 +1358,7 @@ export function createClaudeBackend(): ServerBackend {
       // Register the foreground turn, then push its prompt into the live
       // session. The consumer loop attributes the SDK's reply back to this
       // entry (FIFO) and resolves `done` at the foreground result.
-      const turn: ForegroundTurn = { send, turnSend, blockMsgIds, cwd: input.cwd, pendingCompactMsgId, resolve: () => {} };
+      const turn: ForegroundTurn = { send, executionSend, blockMsgIds, cwd: input.cwd, pendingCompactMsgId, resolve: () => {} };
       const done = new Promise<void>((r) => { turn.resolve = r; });
       pendingPush.push(turn);
       notePush(router);
@@ -1628,7 +1628,7 @@ const pendingTaskLists = new Set<string>();
 /**
  * Background tasks — DISTINCT from the `tasks` plan/TODO map above. These mirror
  * the SDK's `task_*` system messages (a backgrounded Bash, subagent, etc.) and
- * are emitted to the renderer via the turnId-less `task_event` lane. Accumulating
+ * are emitted to the renderer via the executionId-less `task_event` lane. Accumulating
  * here lets `task_updated`/`task_notification` merge with the fields established
  * at `task_started`. `taskOutputFiles` stashes the remote `output_file` path
  * (server-only — not a render primitive; consumed by the M2 read_task_output RPC).
@@ -1863,7 +1863,7 @@ export function processMessage(msg: SDKMessage, send: SendFn, cwd: string, block
   // STATUS (streaming/idle) + plan stay on `send`. `contentSend` lets the caller
   // route content session-scoped (independent of the active turn) so it's never
   // dropped at the turn-router seam; defaults to `send` (turn-scoped) → identical
-  // behavior when omitted. See turnId-scoping (Phase 3).
+  // behavior when omitted. See executionId-scoping (Phase 3).
   const content = contentSend ?? send;
   switch (msg.type) {
     case 'assistant': {

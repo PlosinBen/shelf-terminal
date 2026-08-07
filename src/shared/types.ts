@@ -25,7 +25,7 @@ export interface AgentPrefs {
 }
 
 /**
- * An attachment uploaded to the target host for an agent turn. `path` is the
+ * An attachment uploaded to the target host for an agent execution. `path` is the
  * canonical / absolute path readable by the agent-server/provider process;
  * `displayPath` is the basename or cwd-relative short-form for chip rendering.
  */
@@ -533,8 +533,8 @@ export interface NormalizedTask {
 export type TaskEventKind = 'started' | 'updated' | 'progress' | 'done' | 'snapshot';
 
 /**
- * One background-task update. Routed OUTSIDE the per-turn lane (no turnId) so a
- * backgrounded task never gets dropped when the foreground turn goes idle.
+ * One background-task update. Routed OUTSIDE the per-execution lane (no executionId) so a
+ * backgrounded task never gets dropped when the foreground execution goes idle.
  *
  * - `task` present for started/updated/progress/done (the single task affected)
  * - `tasks` present for `snapshot` (authoritative full list, e.g. claude's
@@ -548,13 +548,13 @@ export interface TaskEvent {
 
 /**
  * One entry in the server-owned send queue snapshot. The queue lives in
- * agent-server (the execution plane serializes turns); it emits the full
+ * agent-server (the execution plane serializes executions); it emits the full
  * ordered snapshot of in-flight client sends on every change, and the renderer
  * mirrors it (optimistic chips reconciled against this authoritative list).
  *
  * - `clientMsgId`: renderer-minted correlation key (crypto.randomUUID at submit).
- * - `state`: 'queued' = waiting its turn (render as a chip); 'running' = the
- *   turn agent-server is actively processing (renderer promotes it from chip to
+ * - `state`: 'queued' = waiting its execution (render as a chip); 'running' = the
+ *   execution agent-server is actively processing (renderer promotes it from chip to
  *   a real timeline user bubble). An id that leaves the snapshot without ever
  *   appearing as 'running' was cancelled. See message-queue-ownership design.
  */

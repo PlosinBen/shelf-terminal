@@ -355,15 +355,15 @@ describe('direct exec memory routing', () => {
   });
 });
 
-describe('parseRemoteMessage — mid-turn capabilities', () => {
-  // Regression: mid-turn capabilities (from /model slash or provider model
+describe('parseRemoteMessage — mid-execution capabilities', () => {
+  // Regression: mid-execution capabilities (from /model slash or provider model
   // promotion) were dropped because parseRemoteMessage had no 'capabilities'
   // case, so the status bar never reflected a mid-session model change.
   it('maps a capabilities wire message to a capabilities AgentEvent', async () => {
     const { parseRemoteMessage } = await import('./remote');
     const event = parseRemoteMessage({
       type: 'capabilities',
-      turnId: 't-1',
+      executionId: 'e-1',
       models: [{ value: 'default', displayName: 'Default' }],
       permissionModes: [],
       effortLevels: [],

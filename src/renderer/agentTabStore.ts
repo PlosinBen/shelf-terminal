@@ -9,7 +9,7 @@ import { formatTabLogId } from '../shared/tab-id';
 // Per-tab store for agent UI state. Split from store.ts because the
 // global store rebuilds its snapshot on every change — every useStore
 // consumer re-renders. Agent state changes (stream chunks, status
-// pings) fire dozens of times per turn; bundling them with project /
+// pings) fire dozens of times per execution; bundling them with project /
 // settings would force every component to re-render. This store
 // notifies only the listeners registered for the tab that changed.
 //
@@ -72,21 +72,21 @@ export interface AgentTabState {
   // Server-owned send queue (display mirror). The renderer eager-sends every
   // submission and optimistically tracks it here as a chip; agent-server emits
   // the authoritative queue snapshot and reconcileQueueSnapshot folds it in,
-  // promoting items into the timeline when their turn starts. `promotedClientMsgIds`
+  // promoting items into the timeline when their execution starts. `promotedClientMsgIds`
   // dedups promotion. See queue-reconcile.ts + message-queue-ownership design.
   pendingSends: PendingSend[];
   promotedClientMsgIds: Set<string>;
   currentPlan: string;
-  // Background tasks (turnId-less side-channel). Upserted by id from task_event;
+  // Background tasks (executionId-less side-channel). Upserted by id from task_event;
   // ordered by first-seen. See background-tasks#2.
   backgroundTasks: NormalizedTask[];
   // Ids the user deleted — tombstoned so a later task_notification (e.g. the
-  // 'stopped' echo after stopTask, or a turn-boundary snapshot) can't resurrect
+  // 'stopped' echo after stopTask, or a execution-boundary snapshot) can't resurrect
   // a card the user already dismissed. Cleared on /clear.
   dismissedTaskIds: Set<string>;
 
   // status (display only — what backend reports)
-  isStreaming: boolean;
+  isExecutionActive: boolean;
   actualModel: string | null;
   actualEffort: string;
   actualPermissionMode: string;
@@ -234,9 +234,9 @@ function flushSave(tabId: string) {
   const entry = pendingSaves.get(tabId);
   if (!entry) return;
   clearTimeout(entry.timer);
-  // doSaveCallback owns the delete + isStreaming check + actual write.
+  // doSaveCallback owns the delete + isExecutionActive check + actual write.
   // Calling it directly here makes flush semantically "fire now instead
-  // of waiting for the timer" — same isStreaming guard applies (a tab
+  // of waiting for the timer" — same isExecutionActive guard applies (a tab
   // currently streaming can't be flushed; caller paths that need a
   // sync flush also clear streaming first, e.g. removeTab).
   doSaveCallback(tabId);
@@ -250,11 +250,11 @@ function doSaveCallback(tabId: string) {
     pendingSaves.delete(tabId);
     return;
   }
-  // Streaming mid-turn → DON'T delete the entry (old overwrite-all code
+  // Streaming mid-execution → DON'T delete the entry (old overwrite-all code
   // dropped it and relied on the next save rewriting everything; delta
   // save can't recover lost dirtyMsgs that way). Re-arm the timer
   // instead so we retry next window.
-  if (tab.isStreaming) {
+  if (tab.isExecutionActive) {
     entry.timer = setTimeout(() => doSaveCallback(tabId), saveThrottleMs);
     return;
   }
@@ -268,9 +268,9 @@ function doSaveCallback(tabId: string) {
 /**
  * Trim in-memory tab.messages down to inMemoryMax. Cut point snaps
  * forward to the nearest user msg so MessageList never renders a
- * "headless" turn (agent msgs without their preceding user msg).
+ * "headless" execution (agent msgs without their preceding user msg).
  *
- * Called only from setStreaming(false) — turn boundary is the one
+ * Called only from setExecutionActive(false) — execution boundary is the one
  * unambiguous moment when trimming can't surprise the user (no live
  * content gets cut). Used to live inside doSave but that conflated
  * persistence timing with in-memory bookkeeping.
@@ -332,7 +332,7 @@ export function initTab(tabId: string, opts: InitTabOpts) {
     currentPlan: '',
     backgroundTasks: [],
     dismissedTaskIds: new Set(),
-    isStreaming: false,
+    isExecutionActive: false,
     // Warm-start from intent so StatusBar doesn't flash "—" on mount.
     // First capabilities event overwrites with backend-reported actual.
     actualModel: opts.intent?.model ?? null,
@@ -407,7 +407,7 @@ export function upsertMessage(tabId: string, msg: AgentMsg) {
   // finalize `reply` replaces an earlier streaming card, upsertById preserves the
   // EARLY (streaming) timestamp, but `msg` still carries buildAgentMsg's fresh
   // finalize-time stamp. Persisting `msg` would make reload's by-session-time sort
-  // clump every finalized reply at turn-end, breaking interleaving with tool cards.
+  // clump every finalized reply at execution-end, breaking interleaving with tool cards.
   const stored = tabs.get(tabId)?.messages.find((m) => m.id === msg.id) ?? msg;
   markDirty(tabId, stored);
 }
@@ -474,13 +474,13 @@ function flushChunkBuffer(tabId: string) {
       if (m.id !== msgId) continue;
       const next = messages.slice();
       if (type === 'text' && m.type === 'reply') {
-        next[i] = { ...m, content: (m.content as string) + delta, streaming: tab.isStreaming };
+        next[i] = { ...m, content: (m.content as string) + delta, streaming: tab.isExecutionActive };
       } else if (type === 'thinking' && m.type === 'fold_text') {
         const prev = m.body?.content ?? '';
         next[i] = {
           ...m,
           body: { content: prev + delta, tone: 'muted' as const },
-          streaming: tab.isStreaming,
+          streaming: tab.isExecutionActive,
         };
       } else {
         // Type mismatch — unexpected, skip safely.
@@ -500,7 +500,7 @@ function flushChunkBuffer(tabId: string) {
             id: msgId,
             type: 'reply',
             content: delta,
-            streaming: tab.isStreaming,
+            streaming: tab.isExecutionActive,
             provider: tab.provider,
             timestamp: Date.now(),
           } as AgentMsg,
@@ -515,7 +515,7 @@ function flushChunkBuffer(tabId: string) {
             type: 'fold_text',
             label: 'Thinking',
             body: { content: delta, tone: 'muted' as const },
-            streaming: tab.isStreaming,
+            streaming: tab.isExecutionActive,
             provider: tab.provider,
             timestamp: Date.now(),
           } as AgentMsg,
@@ -526,9 +526,9 @@ function flushChunkBuffer(tabId: string) {
   }
   // Single active caret: settle any message still flagged streaming that ISN'T
   // the live stream. Without this, boundary-split (a new reply per tool boundary,
-  // agent-providers#27) leaves every prior segment's caret blinking until turn-end
+  // agent-providers#27) leaves every prior segment's caret blinking until execution-end
   // idle. Persist the settled text now (markDirty) so its final content lands in
-  // IDB at the boundary, matching setStreaming(false)'s clear path — appendChunk
+  // IDB at the boundary, matching setExecutionActive(false)'s clear path — appendChunk
   // itself skips markDirty (partials shouldn't persist), so this is the write.
   let settled = false;
   const cleared = messages.map((m) => {
@@ -537,13 +537,13 @@ function flushChunkBuffer(tabId: string) {
     // prompt settlement are independent. It is still content: show it, but do not
     // resurrect the caret/execution. Persist every touched settled message now,
     // because no later idle transition is guaranteed to flush it.
-    if (!tab.isStreaming && streamMessage && (touchedIds.has(m.id) || m.streaming)) {
+    if (!tab.isExecutionActive && streamMessage && (touchedIds.has(m.id) || m.streaming)) {
       settled = true;
       const s = m.streaming ? ({ ...m, streaming: false } as AgentMsg) : m;
       markDirty(tabId, s);
       return s;
     }
-    if (tab.isStreaming && streamMessage && m.streaming && m.id !== activeMsgId) {
+    if (tab.isExecutionActive && streamMessage && m.streaming && m.id !== activeMsgId) {
       settled = true;
       const s = { ...m, streaming: false } as AgentMsg;
       markDirty(tabId, s);
@@ -670,7 +670,7 @@ export function cancelPendingSend(tabId: string, clientMsgId: string) {
  * Drop ALL optimistic pending chips (ESC / stop). The server clears its own
  * queue in parallel; this clears the local optimistic view (incl. items not yet
  * confirmed by a snapshot, which reconcile would otherwise keep). The running
- * turn — already promoted to a timeline bubble — is unaffected.
+ * execution — already promoted to a timeline bubble — is unaffected.
  */
 export function clearPendingSends(tabId: string) {
   update(tabId, (prev) =>
@@ -701,10 +701,10 @@ export async function clearMessages(tabId: string) {
 
 // ── Status actions (dumb setters — backend authoritative) ──
 
-export function setStreaming(tabId: string, value: boolean) {
+export function setExecutionActive(tabId: string, value: boolean) {
   const tab = tabs.get(tabId);
   if (!tab) return;
-  const wasStreaming = tab.isStreaming;
+  const wasStreaming = tab.isExecutionActive;
   if (wasStreaming === value) return;
 
   // streaming → idle: flush any pending chunks **first** so the
@@ -742,23 +742,23 @@ export function setStreaming(tabId: string, value: boolean) {
   }
   tabs.set(tabId, {
     ...cur,
-    isStreaming: value,
+    isExecutionActive: value,
     messages: nextMessages,
-    // Auto-dismiss any in-flight picker at turn end — provider's abort
+    // Auto-dismiss any in-flight picker at execution end — provider's abort
     // path already resolved its pending Promise, so leaving the UI up
     // would be a ghost panel.
     pendingPicker: wasStreaming && !value ? null : cur.pendingPicker,
   });
   notify(tabId);
 
-  // Turn end: trim in-memory once (cap was off during streaming so the
-  // turn could grow freely). markDirty above already scheduled the save
+  // Execution end: trim in-memory once (cap was off during streaming so the
+  // execution could grow freely). markDirty above already scheduled the save
   // timer; trim snapshot has already been preserved in dirtyMsgs so
   // even if trim drops a msg here it'll still be persisted.
   if (wasStreaming && !value) {
     trimMessagesInMemory(tabId);
     // Ensure a save fires even if nothing was marked dirty above
-    // (e.g. a turn that produced only non-text msgs already marked
+    // (e.g. a execution that produced only non-text msgs already marked
     // via upsertMessage but whose throttle timer was reset by
     // streaming-skip retries). ensurePendingSave is idempotent.
     ensurePendingSave(tabId);
@@ -777,9 +777,9 @@ export interface StatusPartial {
 export function setStatus(tabId: string, partial: StatusPartial) {
   // NOTE: model is intentionally NOT a status field. The displayed model
   // (actualModel) is driven solely by the capabilities channel + intent seed
-  // + explicit edits — never by the per-turn resolved model. This keeps a
+  // + explicit edits — never by the per-execution resolved model. This keeps a
   // selected alias (default/sonnet/haiku) stable instead of flip-flopping to
-  // the concrete resolved id each turn. See claude.ts alias-resolution block.
+  // the concrete resolved id each execution. See claude.ts alias-resolution block.
   update(tabId, (prev) => {
     const next: AgentTabState = { ...prev };
     if (partial.costUsd != null) next.costUsd = partial.costUsd;
@@ -791,7 +791,7 @@ export function setStatus(tabId: string, partial: StatusPartial) {
     if (partial.credits) next.credits = partial.credits;
     return next;
   });
-  // Streaming flag transition is handled separately via setStreaming —
+  // Streaming flag transition is handled separately via setExecutionActive —
   // the IPC binder in PR 3 will call both based on status.state.
 }
 
@@ -800,14 +800,14 @@ export function setPlan(tabId: string, content: string) {
 }
 
 /**
- * Apply a background-task event (turnId-less side-channel).
+ * Apply a background-task event (executionId-less side-channel).
  *   - started/updated/progress/done: upsert the single task by id, preserving
  *     first-seen order; later events merge over earlier state (the provider
  *     already merged, so we just replace the entry).
  *   - snapshot: reconcile the authoritative list — upsert each, preserving
  *     existing order for known ids and appending new ones. (We don't drop
  *     tasks absent from a snapshot: claude's snapshot only carries the
- *     still-running set at a turn boundary; completed ones must stay visible.)
+ *     still-running set at a execution boundary; completed ones must stay visible.)
  */
 export function applyTaskEvent(tabId: string, event: TaskEvent) {
   update(tabId, (prev) => {
@@ -959,7 +959,7 @@ export function buildMessageTimeline(messages: AgentMsg[]): MessageTimeline {
   for (const msg of messages) {
     // Subagent-emitted message → nest under its outer Agent card (parentToolUseId
     // === that card's msgId) instead of the main list. An earlier parent is the
-    // only condition that changes placement; transport turn boundaries do not.
+    // only condition that changes placement; transport execution boundaries do not.
     const parentId = msg.parentToolUseId;
     if (parentId && nestableParentIds.has(parentId)) {
       (children[parentId] ??= []).push(msg);

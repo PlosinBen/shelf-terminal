@@ -32,14 +32,14 @@ interface SessionInstance {
   backend: AgentBackend;
   state: AgentSessionState;
   /**
-   * Count of concurrently in-flight foreground turns. With the server-owned
+   * Count of concurrently in-flight foreground executions. With the server-owned
    * queue the renderer eager-sends, so several `sendMessage` generators can run
    * at once (agent-server serializes them, but main holds one generator each).
    * `state` is 'streaming' while this is > 0 — without the counter, the FIRST
-   * turn's finally would flip `state` to 'idle' while later queued turns are
-   * still draining, breaking the server-turn busy-skip (see startSession).
+   * execution's finally would flip `state` to 'idle' while later queued executions are
+   * still draining, breaking the server-execution busy-skip (see startSession).
    */
-  activeTurns: number;
+  activeExecutions: number;
   pendingPermissions: Map<string, (result: PermissionResult) => void>;
   /**
    * True while the tab's exec + provider CLI have been torn down for idleness
@@ -60,14 +60,14 @@ const sessions = new Map<string, SessionInstance>();
  */
 function hibernateTab(tabId: string): void {
   const session = sessions.get(tabId);
-  if (!session || session.hibernated || session.activeTurns > 0) return;
+  if (!session || session.hibernated || session.activeExecutions > 0) return;
   log.info('agent', `[agent:${formatTabLogId(tabId)}] idle-teardown → dispose exec+CLI (resumes on next send)`);
   session.backend.dispose();
   session.hibernated = true;
   unregisterExecMemorySource(tabId);
 }
 
-// Per-tab idle timer. `arm` on turn-end, `touch` on activity; fires hibernateTab
+// Per-tab idle timer. `arm` on execution-end, `touch` on activity; fires hibernateTab
 // after the configured timeout (0 = disabled). Timeout seeded in initAgentManager
 // and updated on settings save (setAgentIdleTeardownMinutes).
 const idleTracker = createIdleTracker({ onIdle: hibernateTab });
@@ -117,7 +117,7 @@ export function initAgentManager(windowGetter: () => BrowserWindow | null): void
 
   // After ANY skill mutation: get the new files onto each live session's
   // consumption path, then tell that session to hot-reload so the edit lands
-  // WITHOUT a reconnect (effect from the session's next turn). Two transports:
+  // WITHOUT a reconnect (effect from the session's next execution). Two transports:
   //   - local  : onSkillsChanged already re-projected to the local path
   //              synchronously → reload the session right away.
   //   - remote : must re-mirror onto the remote FIRST (blocking execSync
@@ -360,24 +360,24 @@ async function startSession(
     // progress (deploying → connecting → checking-auth).
     (phase) => send(IPC.AGENT_INIT_STATUS, tabId, { state: 'starting', phase }),
     // Background-task sink — forwarded straight to the renderer. Session-level
-    // (NOT tied to session.state): a backgrounded task outlives its turn, so we
-    // never touch the turn's busy/idle state here. See background-tasks#2.
+    // (NOT tied to session.state): a backgrounded task outlives its execution, so we
+    // never touch the execution's busy/idle state here. See background-tasks#2.
     (ev) => send(IPC.AGENT_BACKGROUND_TASKS, tabId, ev),
-    // Server-initiated turn (auto-resume prose after a background task). Drain
-    // the turn's events into the renderer like a normal turn. Busy/idle is now a
+    // Server-initiated execution (auto-resume prose after a background task). Drain
+    // the execution's events into the renderer like a normal execution. Busy/idle is now a
     // single active-cycle counter in the claude provider: it emits idle ONLY when
     // ALL cycles (foreground + auto-resume) have drained, so an auto-resume close
     // can no longer clear a live foreground spinner. The old suppression here
-    // (skip server status while a foreground turn streams) is therefore redundant
-    // and removed. See features/claude-content-turn-unify.
-    (turnId, events) => {
+    // (skip server status while a foreground execution streams) is therefore redundant
+    // and removed. See features/claude-content-execution-unify.
+    (executionId, events) => {
       void (async () => {
         try {
           for await (const ev of events) {
             dispatchEvent(tabId, ev);
           }
         } catch (err: any) {
-          log.error('agent', `${tag} server-turn ${turnId} drain error: ${err?.message ?? err}`);
+          log.error('agent', `${tag} server-execution ${executionId} drain error: ${err?.message ?? err}`);
         }
       })();
     },
@@ -387,19 +387,19 @@ async function startSession(
     (healthState) => send(IPC.AGENT_CONNECTION_HEALTH, tabId, healthState),
     // Server-owned send-queue snapshot — forwarded straight to the renderer,
     // which mirrors it (optimistic chips reconciled against this authoritative
-    // list). Session-level (turnId-less). See message-queue-ownership.
+    // list). Session-level (executionId-less). See message-queue-ownership.
     (items) => send(IPC.AGENT_QUEUE, tabId, items),
     // App-skill reload result → a system/error line in THIS tab's agent view
-    // (reuses AGENT_MESSAGE rendering). Session-level (turnId-less); the agent-
+    // (reuses AGENT_MESSAGE rendering). Session-level (executionId-less); the agent-
     // server emits it after a live re-scan, no-op sessions emit nothing. See
     // skill-reload feedback.
     (ok, error) => send(IPC.AGENT_MESSAGE, tabId, ok
       ? { type: 'system', content: 'Skills reloaded' }
       : { type: 'error', content: `Skills reload failed: ${error ?? 'unknown error'}` }),
-    // Session-scoped DISPLAY events (Phase 2 turnId-scoping): the dispatcher
-    // delivers message/stream/error here by tabId instead of via the per-turn
-    // generator, so late-at-the-seam content is never dropped as "unknown turn".
-    // Same sink dispatchEvent the per-turn drain uses. Wired type-by-type.
+    // Session-scoped DISPLAY events (Phase 2 executionId-scoping): the dispatcher
+    // delivers message/stream/error here by tabId instead of via the per-execution
+    // generator, so late-at-the-seam content is never dropped as "unknown execution".
+    // Same sink dispatchEvent the per-execution drain uses. Wired type-by-type.
     (ev) => dispatchEvent(tabId, ev),
     // Owning project — the app_tool bridge keys the web.fetch grant on it.
     typeof opts?.projectId === 'string' ? opts.projectId : undefined,
@@ -418,7 +418,7 @@ async function startSession(
     cwd,
     backend,
     state: 'idle',
-    activeTurns: 0,
+    activeExecutions: 0,
     pendingPermissions: new Map(),
   };
 
@@ -485,7 +485,7 @@ async function sendMessage(
     log.info('agent', `${tag} waking hibernated tab (respawn + resume)`);
   }
 
-  session.activeTurns += 1;
+  session.activeExecutions += 1;
   session.state = 'streaming';
   send(IPC.AGENT_STATUS, tabId, { state: 'streaming' });
   notifyObservers(tabId, { type: 'status', payload: { state: 'streaming' } });
@@ -509,28 +509,28 @@ async function sendMessage(
       configEdit: prefs?.configEdit,
       clientMsgId: prefs?.clientMsgId,
     })) {
-      // A per-turn `status` event is turn-lifecycle plumbing (it closes THIS
-      // turn's generator), NOT a session-level signal. The renderer's streaming
-      // flag is a SESSION fact owned here via `activeTurns` — so we must not let
-      // one turn's idle flip the whole tab to idle. Concretely: cancelling a
-      // QUEUED send makes agent-server emit a bare `idle` on that send's turnId
+      // A per-execution `status` event is execution-lifecycle plumbing (it closes THIS
+      // execution's generator), NOT a session-level signal. The renderer's streaming
+      // flag is a SESSION fact owned here via `activeExecutions` — so we must not let
+      // one execution's idle flip the whole tab to idle. Concretely: cancelling a
+      // QUEUED send makes agent-server emit a bare `idle` on that send's executionId
       // (to release its generator); forwarding it verbatim used to clear the
-      // spinner while a foreground turn was still streaming. So intercept status:
+      // spinner while a foreground execution was still streaming. So intercept status:
       // forward its cost/usage metrics (idempotent, must not be lost — a real
-      // turn's terminal idle carries them) but strip `state`, and emit the
+      // execution's terminal idle carries them) but strip `state`, and emit the
       // session-level idle exclusively from `finally` (post-decrement → race-free
       // vs. multiple idles arriving together). Observers still see the raw event.
       if (event.type === 'status') {
         notifyObservers(tabId, event);
         const turnState = (event.payload as { state?: string }).state;
         if (turnState === 'idle' || turnState === 'done') {
-          // Terminal per-turn idle: relay its metrics but STRIP `state`, so a
-          // cancelled queued turn's idle can't flip the whole tab to idle — the
-          // session-level idle is emitted from `finally` (activeTurns → 0).
+          // Terminal per-execution idle: relay its metrics but STRIP `state`, so a
+          // cancelled queued execution's idle can't flip the whole tab to idle — the
+          // session-level idle is emitted from `finally` (activeExecutions → 0).
           const { state: _terminal, ...metrics } = event.payload;
           send(IPC.AGENT_STATUS, tabId, metrics);
         } else {
-          // Streaming (non-terminal): forward as-is. Providers piggyback mid-turn
+          // Streaming (non-terminal): forward as-is. Providers piggyback mid-execution
           // usage on `state:'streaming'` events (copilot: rateLimits / contextUsage
           // / token counts) — dropping it blanks the status-bar quota. Re-flagging
           // streaming is idempotent in the renderer.
@@ -545,20 +545,20 @@ async function sendMessage(
     send(IPC.AGENT_MESSAGE, tabId, { type: 'error', content: err.message });
     notifyObservers(tabId, { type: 'error', error: err.message });
   } finally {
-    // Only the LAST in-flight turn flips the session back to idle — earlier
-    // turns finishing while later queued turns still drain must keep it
-    // streaming (see activeTurns doc on SessionInstance). This is the ONLY place
-    // a foreground idle reaches the renderer, so a cancelled queued turn (which
-    // leaves other turns running) never emits it.
-    session.activeTurns = Math.max(0, session.activeTurns - 1);
-    const sessionIdle = session.activeTurns === 0;
-    // Turn-end trace (debug). Shows whether a turn's generator actually ended
-    // (vs. wedged mid-turn after a stall, leaving activeTurns > 0 forever) and
+    // Only the LAST in-flight execution flips the session back to idle — earlier
+    // executions finishing while later queued executions still drain must keep it
+    // streaming (see activeExecutions doc on SessionInstance). This is the ONLY place
+    // a foreground idle reaches the renderer, so a cancelled queued execution (which
+    // leaves other executions running) never emits it.
+    session.activeExecutions = Math.max(0, session.activeExecutions - 1);
+    const sessionIdle = session.activeExecutions === 0;
+    // Execution-end trace (debug). Shows whether a execution's generator actually ended
+    // (vs. wedged mid-execution after a stall, leaving activeExecutions > 0 forever) and
     // whether this was the transition that released the renderer spinner.
-    log.debug('agent', `${tag} turn end activeTurns=${session.activeTurns} sessionIdle=${sessionIdle}`);
+    log.debug('agent', `${tag} execution end activeExecutions=${session.activeExecutions} sessionIdle=${sessionIdle}`);
     if (sessionIdle) {
       session.state = 'idle';
-      // Renderer-only: observers already saw the raw per-turn idle in the loop
+      // Renderer-only: observers already saw the raw per-execution idle in the loop
       // above (unchanged telegram-bridge behavior); this is the session-level
       // idle the renderer's tab-wide streaming flag consumes.
       send(IPC.AGENT_STATUS, tabId, { state: 'idle' });
@@ -566,7 +566,7 @@ async function sendMessage(
       idleTracker.arm(tabId);
     }
     for (const resolve of session.pendingPermissions.values()) {
-      resolve({ behavior: 'deny', message: 'Turn ended' });
+      resolve({ behavior: 'deny', message: 'Execution ended' });
     }
     session.pendingPermissions.clear();
   }
@@ -579,7 +579,7 @@ async function sendMessage(
  * stale (pre-login) ACP connection so the capabilities probe respawns and re-reads
  * the credentials the login wrote to the config-home, then push the fresh caps.
  * WITHOUT this the running `--acp` process — spawned at caps time, unauthenticated —
- * keeps serving stale credentials and the first post-login turn errors.
+ * keeps serving stale credentials and the first post-login execution errors.
  *
  * The FRESH caps drive the pane: the renderer already cleared it optimistically
  * (finishLogin on ok), so an authed result leaves it cleared; a still-unauth result
@@ -644,8 +644,8 @@ function dispatchEvent(tabId: string, event: AgentEvent) {
       send(IPC.AGENT_PLAN, tabId, { content: event.content });
       break;
     case 'capabilities':
-      // Mid-turn capabilities update (model/effort/permission changed during a
-      // turn). Same IPC channel as the initial capabilities so the renderer's
+      // Mid-execution capabilities update (model/effort/permission changed during a
+      // execution). Same IPC channel as the initial capabilities so the renderer's
       // onCapabilities → setCapabilities path updates the status bar.
       send(IPC.AGENT_CAPABILITIES, tabId, event.caps);
       break;
@@ -678,7 +678,7 @@ function dispatchEvent(tabId: string, event: AgentEvent) {
         error: event.error,
       });
       // Post-login re-init (Gap C): on success, drop the stale ACP connection and
-      // re-fetch capabilities so the next turn is authenticated. The renderer already
+      // re-fetch capabilities so the next execution is authenticated. The renderer already
       // cleared the pane optimistically (finishLogin); fresh caps confirm or re-assert.
       if (event.ok) void reinitAfterLogin(tabId);
       break;
@@ -734,11 +734,11 @@ export function isAgentTab(tabId: string): boolean {
  * bridge in agent mode (see pm-agent#12).
  *
  * Returns the same boolean as sendMessage: false if tabId has no session, true
- * once the turn completes (including catch'd errors — those propagate through
+ * once the execution completes (including catch'd errors — those propagate through
  * the observer stream as AgentEvent.error, not as a rejected promise).
  *
  * Mirrors a user-message bubble into the renderer's history before kicking
- * off the turn. The IPC path doesn't need this because InputZone upserts the
+ * off the execution. The IPC path doesn't need this because InputZone upserts the
  * user bubble locally before emitting agent:send — but internal callers (the
  * Telegram bridge) bypass that, so without this mirror the renderer would
  * only see the agent reply with no record of what was asked. The bridge IS

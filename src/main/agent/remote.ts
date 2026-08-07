@@ -10,7 +10,7 @@ import * as fs from 'fs';
 import { getShellEnv } from '../connector/shell-env';
 import { resolveProjectEnv } from '../project-env';
 import { buildEnvExportPrefix, applyEnvMap, type EnvMap } from '@shared/project-env';
-import { createTurnDispatcher, type PermissionHandler } from './turn-dispatcher';
+import { createExecutionDispatcher, type PermissionHandler } from './execution-dispatcher';
 import { createDispatcherConnection, type DispatcherConnection, type DispatcherProc } from './dispatcher-connection';
 import { getAppInstanceId } from '../app-instance-id';
 import {
@@ -66,12 +66,12 @@ interface DeployResult {
 interface RemoteProcess {
   sendLine: (msg: object) => void;
   /**
-   * Register a turn so agent-server events tagged with `turnId` get routed to
-   * the returned AsyncGenerator. MUST be called before `sendLine({type:'send',turnId,...})`
+   * Register a execution so agent-server events tagged with `executionId` get routed to
+   * the returned AsyncGenerator. MUST be called before `sendLine({type:'send',executionId,...})`
    * so the dispatcher knows where to deliver events that may arrive before
    * the registration completes. Generator ends on first `state:'idle'` event.
    */
-  registerTurn: (turnId: string, permissionHandler: PermissionHandler) => AsyncGenerator<AgentEvent>;
+  registerExecution: (executionId: string, permissionHandler: PermissionHandler) => AsyncGenerator<AgentEvent>;
   /** Wait for agent-server's `{type:'ready'}` signal. Resolves false on timeout. */
   awaitReady: (timeoutMs?: number) => Promise<boolean>;
   onResponse: (requestId: string, expectedType: string, handler: (payload: any) => void) => void;
@@ -108,28 +108,28 @@ export function createRemoteBackend(
   // Defaults to no-op, keeping the backend connection-agnostic.
   onPhase?: (phase: AgentInitPhase) => void,
   // Optional per-tab background-task sink — main wires it to
-  // AGENT_BACKGROUND_TASKS. Session-level (NOT per-turn): a backgrounded task
-  // outlives the turn that spawned it. See background-tasks#2.
+  // AGENT_BACKGROUND_TASKS. Session-level (NOT per-execution): a backgrounded task
+  // outlives the execution that spawned it. See background-tasks#2.
   onTaskEvent?: (ev: TaskEvent) => void,
-  // Optional sink for a server-initiated turn (auto-resume prose after a
-  // background task finishes). Receives the turnId + the turn's event
+  // Optional sink for a server-initiated execution (auto-resume prose after a
+  // background task finishes). Receives the executionId + the execution's event
   // generator to drain into the renderer. See background-tasks#2.
-  onServerTurn?: (turnId: string, events: AsyncGenerator<AgentEvent>) => void,
+  onServerExecution?: (executionId: string, events: AsyncGenerator<AgentEvent>) => void,
   // Optional per-connection health sink — main wires it to
   // AGENT_CONNECTION_HEALTH. Driven by the heartbeat round-trip (see §5.9 /
   // connection-health.ts). Fires only on health-state change.
   onHealth?: (health: ConnectionHealth) => void,
   // Optional session-level sink for the server-owned send-queue snapshot. Main
-  // wires it to IPC.AGENT_QUEUE. Session-scoped (turnId-less), like onTaskEvent.
+  // wires it to IPC.AGENT_QUEUE. Session-scoped (executionId-less), like onTaskEvent.
   // See message-queue-ownership.
   onQueue?: (items: AgentQueueItem[]) => void,
   // Optional session-level sink for an app-skill reload result. Main wires it to
-  // a system/error AGENT_MESSAGE in this tab's view. turnId-less, like onQueue.
+  // a system/error AGENT_MESSAGE in this tab's view. executionId-less, like onQueue.
   // See skill-reload feedback.
   onSkillsReloaded?: (ok: boolean, error?: string) => void,
   // Optional session-level sink for DISPLAY events delivered by tabId instead of
-  // the per-turn generator (Phase 2 turnId-scoping). Main wires it to
-  // dispatchEvent. See turnId-scoping.
+  // the per-execution generator (Phase 2 executionId-scoping). Main wires it to
+  // dispatchEvent. See executionId-scoping.
   onSessionEvent?: (event: AgentEvent) => void,
   // Owning project id — threaded into the app_tool bridge so the web.fetch gate
   // can key its grant on (projectId, origin). Connection-agnostic; defaults empty.
@@ -149,7 +149,7 @@ export function createRemoteBackend(
   // would pass the `!deployed` check and run deploySelfContained concurrently —
   // the two deploys then collide copying the same files (one deploy's spawned
   // `<root>/node` is already executing while the other `cp`s over it → ETXTBSY
-  // "Text file busy", failing one turn nondeterministically). Reset on failure
+  // "Text file busy", failing one execution nondeterministically). Reset on failure
   // so a later call can retry (e.g. after the user authenticates on the remote).
   let initInFlight: Promise<RemoteProcess | null> | null = null;
   // Last init failure message, so the UI shows the real cause (e.g. a stale-package
@@ -177,10 +177,10 @@ export function createRemoteBackend(
           const dc = ensureDispatcher(connection, cwd, deployResult!, initScript, memorySinks);
           const sid = sessionId ?? randomUUID();
           proc = dc
-            ? dc.openSession(sid, cwd, { onTaskEvent, onServerTurn, onHealth, onQueue, onSkillsReloaded, onSessionEvent, onMemoryUsage: memorySinks?.session, projectId }, projectEnv)
+            ? dc.openSession(sid, cwd, { onTaskEvent, onServerExecution, onHealth, onQueue, onSkillsReloaded, onSessionEvent, onMemoryUsage: memorySinks?.session, projectId }, projectEnv)
             : null;
         } else {
-          proc = await spawnAgentServer(connection, cwd, deployResult!, initScript, projectEnv, onTaskEvent, onServerTurn, onHealth, onQueue, onSkillsReloaded, onSessionEvent, projectId, memorySinks?.session);
+          proc = await spawnAgentServer(connection, cwd, deployResult!, initScript, projectEnv, onTaskEvent, onServerExecution, onHealth, onQueue, onSkillsReloaded, onSessionEvent, projectId, memorySinks?.session);
         }
         if (!proc) return null;
         const ready = await proc.awaitReady();
@@ -218,8 +218,8 @@ export function createRemoteBackend(
       const timeout = setTimeout(() => {
         // Fail-loud + fail-closed. A caps RPC that never answers means the
         // agent-server ↔ Copilot CLI/SDK link is unhealthy — and we can't tell
-        // "slow listModels" (turns would still work) from "CLI spawn hung"
-        // (turns dead too), because ensureClient is shared. REJECT instead of
+        // "slow listModels" (executions would still work) from "CLI spawn hung"
+        // (executions dead too), because ensureClient is shared. REJECT instead of
         // resolving empty caps so the owning surface stays blocked honestly.
         log.warn('agent-remote', `getCapabilities RPC timed out after 30s (${provider}) reqId=${requestId} — rejecting probe (SDK link unhealthy)`);
         reject(new Error('getCapabilities timed out after 30s — agent-server did not respond'));
@@ -274,10 +274,10 @@ export function createRemoteBackend(
         return;
       }
 
-      // Main-side generates the turnId so we can register the per-turn
+      // Main-side generates the executionId so we can register the per-execution
       // dispatcher BEFORE sending. Agent-server respects the incoming
-      // turnId and tags every outgoing event with it.
-      const turnId = `t-${randomUUID().slice(0, 8)}`;
+      // executionId and tags every outgoing event with it.
+      const executionId = `e-${randomUUID().slice(0, 8)}`;
 
       const userCallback = opts?.canUseTool;
       const permissionHandler: PermissionHandler = (toolUseId, toolName, input) => {
@@ -300,11 +300,11 @@ export function createRemoteBackend(
         })();
       };
 
-      // Pre-register so events for this turn have a destination from the
+      // Pre-register so events for this execution have a destination from the
       // get-go. Without pre-registration there's a tiny window between
-      // sendLine and registerTurn where agent-server's first response
-      // could arrive and get dropped as "unknown turn".
-      const events = proc.registerTurn(turnId, permissionHandler);
+      // sendLine and registerExecution where agent-server's first response
+      // could arrive and get dropped as "unknown execution".
+      const events = proc.registerExecution(executionId, permissionHandler);
 
       // Opts are authoritative — renderer reads savedPrefs / statusModel /
       // currentEffort / permissionMode and sends them with every AGENT_SEND
@@ -312,7 +312,7 @@ export function createRemoteBackend(
       // diff-detects per-session and calls provider.setModel etc on change.
       proc.sendLine({
         type: 'send',
-        turnId,
+        executionId,
         provider,
         prompt,
         cwd,
@@ -366,7 +366,7 @@ export function createRemoteBackend(
 
     reconnect() {
       // Fire-and-forget: tell the agent-server to drop this provider's live ACP
-      // connection so the next caps probe / turn respawns and re-reads config-home
+      // connection so the next caps probe / execution respawns and re-reads config-home
       // credentials (post-login re-init, Gap C). No-op if the process isn't up (the
       // first spawn will already be post-login). Ordered before any following
       // get_capabilities on the FIFO stream, so the respawn is authenticated.
@@ -424,7 +424,7 @@ export function createRemoteBackend(
 
     async readTaskOutput(taskId: string): Promise<string> {
       // Reuse the already-running session process — don't spawn just to read a
-      // log. The panel only shows tasks after a turn ran, so remoteProc is set.
+      // log. The panel only shows tasks after a execution ran, so remoteProc is set.
       const proc = remoteProc;
       if (!proc) throw new Error('agent-server not running');
       const requestId = `tout-${randomUUID().slice(0, 8)}`;
@@ -842,7 +842,7 @@ async function spawnAgentServer(
   initScript?: string,
   projectEnv: EnvMap = {},
   onTaskEvent?: (ev: TaskEvent) => void,
-  onServerTurn?: (turnId: string, events: AsyncGenerator<AgentEvent>) => void,
+  onServerExecution?: (executionId: string, events: AsyncGenerator<AgentEvent>) => void,
   onHealth?: (health: ConnectionHealth) => void,
   onQueue?: (items: AgentQueueItem[]) => void,
   onSkillsReloaded?: (ok: boolean, error?: string) => void,
@@ -864,7 +864,7 @@ async function spawnAgentServer(
       // spawnLocalNode applies ELECTRON_RUN_AS_NODE so the app binary runs as
       // plain Node (never a second Electron window), and merges the project env.
       const proc = spawnLocalNode(nodeBin, [indexPath], cwd, projectEnv);
-      return wrapProcess(proc, onTaskEvent, onServerTurn, onHealth, onQueue, onSkillsReloaded, onSessionEvent, projectId, onMemoryUsage);
+      return wrapProcess(proc, onTaskEvent, onServerExecution, onHealth, onQueue, onSkillsReloaded, onSessionEvent, projectId, onMemoryUsage);
     } catch (err: any) {
       log.error('agent-remote', `Local spawn failed: ${err.message}`);
       return null;
@@ -894,7 +894,7 @@ async function spawnAgentServer(
       cmd,
     ];
     const proc = spawn('ssh', args, { stdio: ['pipe', 'pipe', 'pipe'] });
-    return wrapProcess(proc, onTaskEvent, onServerTurn, onHealth, onQueue, onSkillsReloaded, onSessionEvent, projectId, onMemoryUsage);
+    return wrapProcess(proc, onTaskEvent, onServerExecution, onHealth, onQueue, onSkillsReloaded, onSessionEvent, projectId, onMemoryUsage);
   }
 
   if (connection.type === 'docker') {
@@ -902,14 +902,14 @@ async function spawnAgentServer(
     const proc = spawn('docker', ['exec', '-i', connection.container, 'sh', '-c', cmd], {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
-    return wrapProcess(proc, onTaskEvent, onServerTurn, onHealth, onQueue, onSkillsReloaded, onSessionEvent, projectId, onMemoryUsage);
+    return wrapProcess(proc, onTaskEvent, onServerExecution, onHealth, onQueue, onSkillsReloaded, onSessionEvent, projectId, onMemoryUsage);
   }
 
   if (connection.type === 'wsl') {
     const proc = spawn('wsl.exe', ['-d', connection.distro, '--', 'sh', '-lc', `${buildEnvExportPrefix(projectEnv)}${testEnv}exec ${nodeBin} ${indexPath}`], {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
-    return wrapProcess(proc, onTaskEvent, onServerTurn, onHealth, onQueue, onSkillsReloaded, onSessionEvent, projectId, onMemoryUsage);
+    return wrapProcess(proc, onTaskEvent, onServerExecution, onHealth, onQueue, onSkillsReloaded, onSessionEvent, projectId, onMemoryUsage);
   }
 
   return null;
@@ -1072,7 +1072,7 @@ function ensureDispatcher(
 export function wrapProcess(
   proc: ChildProcess,
   onTaskEvent?: (ev: TaskEvent) => void,
-  onServerTurn?: (turnId: string, events: AsyncGenerator<AgentEvent>) => void,
+  onServerExecution?: (executionId: string, events: AsyncGenerator<AgentEvent>) => void,
   onHealth?: (health: ConnectionHealth) => void,
   onQueue?: (items: AgentQueueItem[]) => void,
   onSkillsReloaded?: (ok: boolean, error?: string) => void,
@@ -1080,7 +1080,7 @@ export function wrapProcess(
   projectId?: string,
   onMemoryUsage?: (report: MemoryUsageReport) => void,
 ): RemoteProcess {
-  const dispatcher = createTurnDispatcher(parseRemoteMessage, onTaskEvent, onServerTurn, onQueue, onSkillsReloaded, onSessionEvent);
+  const dispatcher = createExecutionDispatcher(parseRemoteMessage, onTaskEvent, onServerExecution, onQueue, onSkillsReloaded, onSessionEvent);
   let buffer = '';
   let active = true;
 
@@ -1152,7 +1152,7 @@ export function wrapProcess(
     buffer = lines.pop() ?? '';
     // A large residual means a wire frame is still mid-arrival (or, after a
     // sleep/network stall, that the stream desynced and no newline is closing
-    // the frame). Debug-gated so it's silent unless a wedge repro turns it on.
+    // the frame). Debug-gated so it's silent unless a wedge repro executions it on.
     if (buffer.length > 16384) {
       log.debug('agent-remote', `stdout buffer residual len=${buffer.length} (frame mid-arrival or desync)`);
     }
@@ -1169,13 +1169,13 @@ export function wrapProcess(
       // Wire-RX trace (debug; off by default). Pairs with agent-server's wire-tx:
       // an event present in wire-tx but missing here = lost in transit (pipe /
       // sleep stall); present here but never rendered = dropped downstream
-      // (dispatcher turnId / renderer). Exclude `log` (already routed below) and
-      // `pong` (transport-level, handled below) to keep the signal on turn/content events.
+      // (dispatcher executionId / renderer). Exclude `log` (already routed below) and
+      // `pong` (transport-level, handled below) to keep the signal on execution/content events.
       if (parsed?.type !== 'log' && parsed?.type !== 'pong') {
         const bit = (k: string, v: unknown) => (v == null ? '' : ` ${k}=${String(v).slice(0, 12)}`);
-        log.debug('agent-remote', `wire-rx type=${parsed?.type}${bit('turn', parsed?.turnId)}${bit('msgType', parsed?.msgType)}${bit('msgId', parsed?.msgId)}`);
+        log.debug('agent-remote', `wire-rx type=${parsed?.type}${bit('execution', parsed?.executionId)}${bit('msgType', parsed?.msgType)}${bit('msgId', parsed?.msgId)}`);
       }
-      // Heartbeat ack — transport-level, never reaches the turn dispatcher.
+      // Heartbeat ack — transport-level, never reaches the execution dispatcher.
       if (parsed?.type === 'pong') {
         const now = Date.now();
         if (typeof parsed.seq === 'number') {
@@ -1214,7 +1214,7 @@ export function wrapProcess(
         continue;
       }
       // App-tool bridge — transport-level request/response (like pong), never a
-      // turn event. An in-process bridge tool on the agent-server asks main to
+      // execution event. An in-process bridge tool on the agent-server asks main to
       // act on a client-owned resource (skills-store); handle + reply by
       // requestId. See .agent/features/app-level-capabilities.md.
       // Diagnostic log from agent-server (it has no electron to write the file
@@ -1291,7 +1291,7 @@ export function wrapProcess(
       }
       w?.write(JSON.stringify(msg) + '\n');
     },
-    registerTurn: dispatcher.registerTurn,
+    registerExecution: dispatcher.registerExecution,
     awaitReady: dispatcher.awaitReady,
     onResponse: dispatcher.onResponse,
     kill: () => {
@@ -1328,7 +1328,7 @@ export function parseRemoteMessage(msg: any): AgentEvent | null {
   }
 
   if (msg.type === 'capabilities') {
-    // Mid-turn capabilities (e.g. /model slash, provider model promotion).
+    // Mid-execution capabilities (e.g. /model slash, provider model promotion).
     // Mirror the field extraction used by getCapabilities()'s RPC response so
     // the renderer's setCapabilities gets the same shape.
     return {

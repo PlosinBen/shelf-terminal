@@ -218,13 +218,13 @@ export const IPC = {
   AGENT_START_LOGIN: 'agent:start-login',
   AGENT_CANCEL_LOGIN: 'agent:cancel-login',
   /** Main → renderer: device-flow verification prompt (URL + user code) while an
-   *  interactive login runs, and the terminal result. Session-level (turnId-less). */
+   *  interactive login runs, and the terminal result. Session-level (executionId-less). */
   AGENT_LOGIN_PROMPT: 'agent:login-prompt',
   AGENT_LOGIN_DONE: 'agent:login-done',
   AGENT_INIT_STATUS: 'agent:init-status',
-  /** Background task updates (turnId-less; see background-tasks#2). Carries a TaskEvent. */
+  /** Background task updates (executionId-less; see background-tasks#2). Carries a TaskEvent. */
   AGENT_BACKGROUND_TASKS: 'agent:background-tasks',
-  /** Server-owned send-queue snapshot (session-level, turnId-less). Carries the
+  /** Server-owned send-queue snapshot (session-level, executionId-less). Carries the
    *  full ordered AgentQueueItem[] of in-flight client sends. Renderer mirrors
    *  it. See message-queue-ownership design. */
   AGENT_QUEUE: 'agent:queue',

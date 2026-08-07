@@ -48,8 +48,8 @@ const waitFor = (pred, ms) => new Promise((res) => {
 async function main() {
   await waitFor((m) => m.type === 'ready', 30000);
   console.log(`ready — appId=${appId}, asking for the secret word\n`);
-  send({ type: 'send', turnId: 't-s', provider: 'claude', prompt: 'What is the secret word? Reply with ONLY the word.', cwd: root, sessionId: 'skill1', appId, permissionMode: 'bypassPermissions' });
-  await waitFor((m) => m.type === 'status' && m.state === 'idle' && m.turnId === 't-s', 90000);
+  send({ type: 'send', executionId: 'e-s', provider: 'claude', prompt: 'What is the secret word? Reply with ONLY the word.', cwd: root, sessionId: 'skill1', appId, permissionMode: 'bypassPermissions' });
+  await waitFor((m) => m.type === 'status' && m.state === 'idle' && m.executionId === 'e-s', 90000);
 
   const replies = lines.filter((m) => m.type === 'message' && m.msgType === 'reply').map((m) => m.content).join(' ');
   const used = /BANANA-42/.test(replies);

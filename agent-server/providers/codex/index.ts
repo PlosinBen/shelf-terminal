@@ -387,11 +387,11 @@ export function createCodexBackend(deps: CodexBackendDeps = {}): ServerBackend {
       return;
     }
     const threadId = stringValue(p?.threadId ?? p?.thread_id) ?? activeThreadId ?? '<unknown>';
-    const turnId = stringValue(p?.turnId ?? p?.turn_id) ?? activeTurnId ?? '<unknown>';
+    const executionId = stringValue(p?.executionId ?? p?.turn_id) ?? activeTurnId ?? '<unknown>';
     serverLog(
       'info',
       'codex-app-server',
-      `tokenUsage thread=${threadId} turn=${turnId} cumulativeTotalTokens=${summary.cumulativeTotalTokens ?? 'null'} lastInputTokens=${summary.lastInputTokens ?? 'null'} lastTotalTokens=${summary.lastTotalTokens ?? 'null'} modelContextWindow=${summary.modelContextWindow} cumulativePercent=${summary.cumulativePercent ?? 'null'} lastPercent=${summary.lastPercent ?? 'null'}`,
+      `tokenUsage thread=${threadId} turn=${executionId} cumulativeTotalTokens=${summary.cumulativeTotalTokens ?? 'null'} lastInputTokens=${summary.lastInputTokens ?? 'null'} lastTotalTokens=${summary.lastTotalTokens ?? 'null'} modelContextWindow=${summary.modelContextWindow} cumulativePercent=${summary.cumulativePercent ?? 'null'} lastPercent=${summary.lastPercent ?? 'null'}`,
     );
   }
 
@@ -636,7 +636,7 @@ export function createCodexBackend(deps: CodexBackendDeps = {}): ServerBackend {
 
     async stop(): Promise<void> {
       if (appServer && activeThreadId && activeTurnId) {
-        await appServer.request('turn/interrupt', { threadId: activeThreadId, turnId: activeTurnId }).catch((err) => {
+        await appServer.request('turn/interrupt', { threadId: activeThreadId, executionId: activeTurnId }).catch((err) => {
           serverLog('warn', 'codex-app-server', `turn/interrupt failed: ${(err as Error)?.message ?? String(err)}`);
         });
       }
@@ -976,7 +976,7 @@ function summarizeApprovalInput(raw: unknown): Record<string, unknown> {
   const record = asRecord(raw);
   if (!record) return {};
   const out: Record<string, unknown> = {};
-  for (const key of ['threadId', 'turnId', 'itemId', 'approvalId', 'serverName', 'mode', 'message', 'url', 'reason', 'cwd', 'grantRoot']) {
+  for (const key of ['threadId', 'executionId', 'itemId', 'approvalId', 'serverName', 'mode', 'message', 'url', 'reason', 'cwd', 'grantRoot']) {
     const value = record[key];
     if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' || value == null) out[key] = value;
   }

@@ -60,7 +60,7 @@ test.describe('app-tool bridge via fake provider', () => {
 /**
  * Skill reload feedback — end-to-end over the fake provider. A skill change on a
  * LIVE agent session re-scans the provider (`reload_skills`), which emits a
- * turnId-less `skills_reloaded` session event; main surfaces it as a system line
+ * executionId-less `skills_reloaded` session event; main surfaces it as a system line
  * in that tab's agent view. See .agent/features/skill-reload-feedback.md (Phase 1).
  */
 test.describe('skill reload feedback via fake provider', () => {
@@ -68,7 +68,7 @@ test.describe('skill reload feedback via fake provider', () => {
     await setupProject(page);
     await openAgentTab(page);
 
-    // Run a turn so the session is "live" (the fake captures its send) — a no-op
+    // Run a execution so the session is "live" (the fake captures its send) — a no-op
     // reload (no live session) would emit nothing.
     await sendAgentPrompt(page, 'text:hello');
     await expect(page.locator('.agent-messages')).toContainText('hello', { timeout: 8_000 });
@@ -87,7 +87,7 @@ test.describe('skill reload feedback via fake provider', () => {
     await setupProject(page);
     await openAgentTab(page);
 
-    // Run a turn that arms the next reload to fail (also makes the session live).
+    // Run a execution that arms the next reload to fail (also makes the session live).
     await sendAgentPrompt(page, 'reloadfail');
     await expect(page.locator('.agent-messages')).toContainText('reload armed to fail', { timeout: 8_000 });
 
@@ -102,7 +102,7 @@ test.describe('skill reload feedback via fake provider', () => {
     await setupProject(page);
     await openAgentTab(page);
 
-    // No turn was ever run → reloadSkills is a no-op (reloaded:false) → no line.
+    // No execution was ever run → reloadSkills is a no-op (reloaded:false) → no line.
     await page.locator('.right-tab-btn', { hasText: 'Skills' }).click();
     await page.locator('.skills-view .notes-new-btn').click();
     await page.waitForTimeout(1_500);

@@ -5,7 +5,7 @@ import { existsSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { loadContext, saveContext } from './context-store';
-import { loadRestoreContextFor, newTurnId, wrapSendForContext, wrapSendForTurn } from './orchestrator';
+import { loadRestoreContextFor, newExecutionId, wrapSendForContext, wrapSendForExecution } from './orchestrator';
 import type { OutgoingMessage } from './providers/types';
 
 // Mirror context-store.test.ts: real FS, UUID sessionIds for collision-free
@@ -37,7 +37,7 @@ describe('orchestrator', () => {
       expect(ctx?.lastSdkSessionId).toBe('sdk-x');
     });
 
-    it('returns undefined when provider does NOT match — prevents Claude data leaking into a Copilot turn', () => {
+    it('returns undefined when provider does NOT match — prevents Claude data leaking into a Copilot execution', () => {
       const sessionId = randomUUID();
       created.push(sessionId);
       saveContext({
@@ -145,43 +145,43 @@ describe('orchestrator', () => {
     });
   });
 
-  describe('newTurnId', () => {
-    it('produces `t-` prefixed 10-char ids', () => {
-      const id = newTurnId();
-      expect(id).toMatch(/^t-[0-9a-f]{8}$/);
+  describe('newExecutionId', () => {
+    it('produces `e-` prefixed 10-char ids', () => {
+      const id = newExecutionId();
+      expect(id).toMatch(/^e-[0-9a-f]{8}$/);
     });
 
     it('yields a fresh id on each call (no collisions in 1k samples)', () => {
       const ids = new Set<string>();
-      for (let i = 0; i < 1000; i++) ids.add(newTurnId());
+      for (let i = 0; i < 1000; i++) ids.add(newExecutionId());
       expect(ids.size).toBe(1000);
     });
   });
 
-  describe('wrapSendForTurn', () => {
-    it('stamps turnId onto every forwarded message', () => {
+  describe('wrapSendForExecution', () => {
+    it('stamps control while keeping renderable content session-scoped', () => {
       const seen: OutgoingMessage[] = [];
-      const send = wrapSendForTurn('t-abc12345', (m) => seen.push(m));
+      const send = wrapSendForExecution('e-abc12345', (m) => seen.push(m));
       send({ type: 'status', state: 'streaming' });
-      send({ type: 'message', msgId: 'm-1', msgType: 'reply', content: 'hi' });
+      send({ type: 'message', msgId: 'm-1', msgType: 'reply', content: 'hi', executionId: 'e-stale' });
       expect(seen).toEqual([
-        { type: 'status', state: 'streaming', turnId: 't-abc12345' },
-        { type: 'message', msgId: 'm-1', msgType: 'reply', content: 'hi', turnId: 't-abc12345' },
+        { type: 'status', state: 'streaming', executionId: 'e-abc12345' },
+        { type: 'message', msgId: 'm-1', msgType: 'reply', content: 'hi' },
       ]);
     });
 
-    it('does NOT stamp turnId onto task_event (backgrounded task outlives its turn)', () => {
+    it('does NOT stamp executionId onto task_event (backgrounded task outlives its execution)', () => {
       const seen: OutgoingMessage[] = [];
-      const send = wrapSendForTurn('t-abc12345', (m) => seen.push(m));
+      const send = wrapSendForExecution('e-abc12345', (m) => seen.push(m));
       send({
         type: 'task_event',
         kind: 'started',
         task: { id: 'task-1', type: 'shell', label: 'sleep 30', status: 'running', done: false },
       });
-      // Passed through verbatim — no turnId injected, else the main-side
-      // dispatcher would drop it as "unknown turn" once the turn is idle.
+      // Passed through verbatim — no executionId injected, else the main-side
+      // dispatcher would drop it as "unknown execution" once the execution is idle.
       expect(seen).toHaveLength(1);
-      expect((seen[0] as any).turnId).toBeUndefined();
+      expect((seen[0] as any).executionId).toBeUndefined();
       expect(seen[0]).toEqual({
         type: 'task_event',
         kind: 'started',
@@ -189,34 +189,34 @@ describe('orchestrator', () => {
       });
     });
 
-    it('different turn wrappers stamp different ids (independent state)', () => {
+    it('different execution wrappers stamp different ids (independent state)', () => {
       const seen: OutgoingMessage[] = [];
       const raw = (m: OutgoingMessage) => seen.push(m);
-      const a = wrapSendForTurn('t-aaaaaaaa', raw);
-      const b = wrapSendForTurn('t-bbbbbbbb', raw);
+      const a = wrapSendForExecution('e-aaaaaaaa', raw);
+      const b = wrapSendForExecution('e-bbbbbbbb', raw);
       a({ type: 'status', state: 'streaming' });
       b({ type: 'status', state: 'idle' });
-      expect((seen[0] as any).turnId).toBe('t-aaaaaaaa');
-      expect((seen[1] as any).turnId).toBe('t-bbbbbbbb');
+      expect((seen[0] as any).executionId).toBe('e-aaaaaaaa');
+      expect((seen[1] as any).executionId).toBe('e-bbbbbbbb');
     });
 
-    it('composes with wrapSendForContext: context_patch is intercepted before turnId injection so the disk write is untainted', () => {
+    it('composes with wrapSendForContext: context_patch is intercepted before executionId injection so the disk write is untainted', () => {
       const sessionId = randomUUID();
       created.push(sessionId);
       const seen: OutgoingMessage[] = [];
       const raw = (m: OutgoingMessage) => seen.push(m);
-      const turnAware = wrapSendForTurn('t-99999999', raw);
-      const contextAware = wrapSendForContext(CLAUDE_PROVIDER, sessionId, turnAware, () => 7);
-      // context_patch never reaches turnAware → no turnId pollution in stored context
+      const executionAware = wrapSendForExecution('e-99999999', raw);
+      const contextAware = wrapSendForContext(CLAUDE_PROVIDER, sessionId, executionAware, () => 7);
+      // context_patch never reaches executionAware → no executionId pollution in stored context
       contextAware({ type: 'context_patch', patch: { lastSdkSessionId: 'sdk-1' } });
       expect(seen).toHaveLength(0);
       const ctx = loadContext(sessionId);
       expect(ctx?.lastSdkSessionId).toBe('sdk-1');
-      expect((ctx as any)?.turnId).toBeUndefined();
-      // Non-patch goes through both wrappers and acquires turnId
+      expect((ctx as any)?.executionId).toBeUndefined();
+      // Non-patch goes through both wrappers and acquires executionId
       contextAware({ type: 'status', state: 'streaming' });
       expect(seen).toEqual([
-        { type: 'status', state: 'streaming', turnId: 't-99999999' },
+        { type: 'status', state: 'streaming', executionId: 'e-99999999' },
       ]);
     });
   });

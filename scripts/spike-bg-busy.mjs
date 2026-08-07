@@ -1,9 +1,9 @@
 /**
  * Companion to spike-bg-idle.mjs. Launches a backgrounded bash, then keeps the
- * session BUSY with back-to-back input turns while the task runs to completion.
+ * session BUSY with back-to-back input executions while the task runs to completion.
  * The `[claude] rx` raw logger then shows whether the SDK still delivers the
  * terminal task_notification (with output_file) when the session never idles —
- * isolating "is task_notification idle-gated?" from agent-turn noise.
+ * isolating "is task_notification idle-gated?" from agent-execution noise.
  *
  *   idle  variant (spike-bg-idle): expect rx task_notification output_file:set
  *   busy  variant (this):          does it still arrive, or not?
@@ -47,24 +47,24 @@ const waitFor = (pred, ms) => new Promise((res) => {
   const t = setTimeout(() => res(null), ms);
   waiters.push((m) => { if (pred(m)) { clearTimeout(t); res(m); } });
 });
-const idle = (turnId, ms) => waitFor((m) => m.type === 'status' && m.state === 'idle' && m.turnId === turnId, ms);
+const idle = (executionId, ms) => waitFor((m) => m.type === 'status' && m.state === 'idle' && m.executionId === executionId, ms);
 
 async function main() {
   await waitFor((m) => m.type === 'ready', 30000);
   const base = { provider: 'claude', cwd: root, sessionId: 'bgbusy1', permissionMode: 'bypassPermissions' };
 
-  console.log('\n=== Turn BG: spawn bg bash (sleep 12), then keep the session BUSY ===');
-  send({ type: 'send', turnId: 't-bg', ...base,
+  console.log('\n=== Execution BG: spawn bg bash (sleep 12), then keep the session BUSY ===');
+  send({ type: 'send', executionId: 'e-bg', ...base,
     prompt: 'Run this shell command IN THE BACKGROUND (run_in_background=true): `sleep 12 && echo BG_DONE`. Immediately reply "started".' });
-  await idle('t-bg', 60000);
+  await idle('e-bg', 60000);
 
-  // Keep BUSY: 8 quick turns ~2s apart spanning the bash's 12s lifetime, so the
+  // Keep BUSY: 8 quick executions ~2s apart spanning the bash's 12s lifetime, so the
   // session is never idle when the task settles.
   for (let i = 1; i <= 8; i++) {
-    const id = `t-busy${i}`;
-    send({ type: 'send', turnId: id, ...base, prompt: `Reply with just the number ${i}.` });
+    const id = `e-busy${i}`;
+    send({ type: 'send', executionId: id, ...base, prompt: `Reply with just the number ${i}.` });
     await idle(id, 30000);
-    console.log(`  (busy turn ${i} done${sawNotification ? ' — notification already seen' : ''})`);
+    console.log(`  (busy execution ${i} done${sawNotification ? ' — notification already seen' : ''})`);
   }
 
   // Tail: small idle window at the very end to see if a deferred notification
@@ -74,7 +74,7 @@ async function main() {
 
   console.log('\n=== VERDICT ===');
   console.log(sawNotification
-    ? '✅ task_notification ARRIVED even under continuous busy turns → NOT idle-gated.'
+    ? '✅ task_notification ARRIVED even under continuous busy executions → NOT idle-gated.'
     : '❌ task_notification NEVER arrived during the busy burst → delivery is idle-gated (busy starves it).');
   proc.kill();
   process.exit(0);

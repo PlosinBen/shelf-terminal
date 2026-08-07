@@ -38,14 +38,14 @@ export type PickerResolvePayload =
   | { cancelled: true };
 
 /**
- * Envelope present on every outgoing message produced inside a turn. Lifecycle
+ * Envelope present on every outgoing message produced inside a execution. Lifecycle
  * messages (`ready`, `pong`, `capabilities`, `credential_*`) are emitted
- * outside any turn and intentionally omit `turnId`. Main side routes per-turn
+ * outside any execution and intentionally omit `executionId`. Main side routes per-execution
  * events back to AsyncIterators by this id; lifecycle is
  * dispatched separately.
  */
 export interface WireEnvelope {
-  turnId?: string;
+  executionId?: string;
   /**
    * App/tab SESSION routing key — the dimension that lets one dispatcher
    * multiplex N tabs (dispatch-layering). DISTINCT from the payload `sessionId`
@@ -73,7 +73,7 @@ export type CanonicalMsgType =
  * parse case in `src/main/agent/remote.ts`.
  */
 export type OutgoingMessage = WireEnvelope & (
-  // ── Lifecycle (no turnId) ────────────────────────────────────────────────
+  // ── Lifecycle (no executionId) ────────────────────────────────────────────────
   | { type: 'ready' }
   // pong echoes the heartbeat's `seq` so the client can correlate the ack to its
   // send-time and measure RTT on its own clock (see connection-health.ts).
@@ -107,11 +107,11 @@ export type OutgoingMessage = WireEnvelope & (
   | { type: 'log'; level: 'error' | 'warn' | 'info' | 'debug'; tag: string; msg: string }
   | MemoryUsageReport
 
-  // ── Per-turn control / status (turnId expected) ──────────────────────────
+  // ── Per-execution control / status (executionId expected) ──────────────────────────
   | {
       type: 'status';
-      /** Turn state. OPTIONAL: an account-status refresh (credits) omits it so the
-       *  renderer doesn't run turn-end/streaming side effects for a pure usage update. */
+      /** Execution state. OPTIONAL: an account-status refresh (credits) omits it so the
+       *  renderer doesn't run execution-end/streaming side effects for a pure usage update. */
       state?: 'streaming' | 'idle';
       model?: string;
       sessionId?: string;
@@ -122,21 +122,21 @@ export type OutgoingMessage = WireEnvelope & (
       contextUsage?: StatusSegment;
       rateLimits?: StatusSegment[];
       /** Account-level usage (e.g. copilot premium-request quota). Provider-agnostic
-       *  segment; copilot fills it post-turn via `refreshAccountStatus`. */
+       *  segment; copilot fills it post-execution via `refreshAccountStatus`. */
       credits?: StatusSegment;
     }
   | { type: 'error'; error: string }
   /**
-   * Server-initiated turn announcement. Carries a provider-minted `turnId`
-   * (via WireEnvelope) that the main side registers BEFORE the turn's content
+   * Server-initiated execution announcement. Carries a provider-minted `executionId`
+   * (via WireEnvelope) that the main side registers BEFORE the execution's content
    * arrives — without registration the dispatcher drops the content as
-   * "unknown turn". Used when a backgrounded task finishes and the SDK
-   * auto-resumes the agent to write a real reply: that prose has no live turn,
+   * "unknown execution". Used when a backgrounded task finishes and the SDK
+   * auto-resumes the agent to write a real reply: that prose has no live execution,
    * so the provider opens one. See background-tasks#2.
    */
-  | { type: 'turn_started' }
+  | { type: 'execution_started' }
   | { type: 'auth_required'; provider: string }
-  // ── Interactive device-flow login (NO turnId — session-level, like auth_required) ──
+  // ── Interactive device-flow login (NO executionId — session-level, like auth_required) ──
   // Emitted while an interactive `copilot login` runs. `auth_login_prompt`
   // carries the verification URL + user code parsed from the CLI so the LOCAL
   // Shelf can open the browser (essential for the remote case: the CLI runs on
@@ -179,27 +179,27 @@ export type OutgoingMessage = WireEnvelope & (
    */
   | { type: 'context_patch'; patch: Partial<PersistedContext> }
 
-  // ── Send queue snapshot (NO turnId) ──────────────────────────────────────
+  // ── Send queue snapshot (NO executionId) ──────────────────────────────────────
   // Session-level, like task_event: agent-server owns the send queue (it
-  // serializes turns) and emits the FULL ordered snapshot of in-flight client
+  // serializes executions) and emits the FULL ordered snapshot of in-flight client
   // sends on every change (enqueue / start-running / complete / cancel).
-  // Routed via the session-level `onQueue` sink, never the per-turn lane —
-  // wrapSendForTurn MUST NOT stamp a turnId on it. See message-queue-ownership.
+  // Routed via the session-level `onQueue` sink, never the per-execution lane —
+  // wrapSendForExecution MUST NOT stamp a executionId on it. See message-queue-ownership.
   | { type: 'queue'; items: AgentQueueItem[] }
 
-  // ── Background tasks (NO turnId) ─────────────────────────────────────────
+  // ── Background tasks (NO executionId) ─────────────────────────────────────────
   // Decoupled from busy-state: a backgrounded task keeps emitting after the
-  // foreground turn goes idle. `wrapSendForTurn` MUST NOT stamp a turnId on
+  // foreground execution goes idle. `wrapSendForExecution` MUST NOT stamp a executionId on
   // these (it's exempted) — otherwise the main-side dispatcher drops them as
-  // "unknown turn" once the turn is deregistered. Routed via a session-level
-  // `onTaskEvent` callback, never the per-turn AsyncIterator.
+  // "unknown execution" once the execution is deregistered. Routed via a session-level
+  // `onTaskEvent` callback, never the per-execution AsyncIterator.
   // See background-tasks#2.
   | ({ type: 'task_event' } & TaskEvent)
 
-  // ── Skill reload result (NO turnId) ──────────────────────────────────────
+  // ── Skill reload result (NO executionId) ──────────────────────────────────────
   // Session-level, like task_event/queue. Emitted by the agent-server
   // `reload_skills` handler via the BASE send after a provider re-scan — so it
-  // never passes through `wrapSendForTurn` and is turnId-less by construction.
+  // never passes through `wrapSendForExecution` and is executionId-less by construction.
   // Main surfaces it as a system (ok) / error (!ok) line in the agent view.
   // See skills#4 / skill-reload feedback.
   | { type: 'skills_reloaded'; ok: boolean; error?: string }
@@ -283,7 +283,7 @@ export interface QueryInput {
    * Structured config edit (from a picker / status-bar click). When set, the
    * provider applies it (set current value + emit capabilities + emit a
    * `system` divider) and returns WITHOUT running an SDK query — `prompt` is
-   * empty for these turns. Converges UI config edits onto the same provider
+   * empty for these executions. Converges UI config edits onto the same provider
    * path as a typed `/model` slash, so the divider + capabilities come back
    * identically regardless of entry point.
    */
@@ -411,12 +411,12 @@ export interface ServerBackend {
   stop(): Promise<void>;
   dispose(): void;
   /**
-   * Post-turn account-level status refresh (optional). exec.ts fires this
-   * fire-and-forget AFTER a turn ends. Providers that expose ACCOUNT-scoped usage
-   * NOT carried in the turn's status stream (copilot's premium-request quota, which
+   * Post-execution account-level status refresh (optional). exec.ts fires this
+   * fire-and-forget AFTER a execution ends. Providers that expose ACCOUNT-scoped usage
+   * NOT carried in the execution's status stream (copilot's premium-request quota, which
    * ACP `--acp` never emits) fetch it here and `send` a `status` with the segment.
    * Cache-aside via the per-host `cache` (shared across the host's sessions → one
-   * fetch serves all). MUST be fail-quiet — never throw / block the next turn.
+   * fetch serves all). MUST be fail-quiet — never throw / block the next execution.
    */
   refreshAccountStatus?(cache: ModelCacheClient | undefined, send: SendFn, appId?: string): Promise<void>;
   /**
@@ -455,7 +455,7 @@ export interface ServerBackend {
   /**
    * Resolve a pending picker_request by id. `payload` carries index-aligned
    * answers (one per prompt, multi-select uses string[]) or `cancelled: true`
-   * (user pressed Cancel / Esc, or the turn aborted). Provider's internal
+   * (user pressed Cancel / Esc, or the execution aborted). Provider's internal
    * Promise for that picker resolves with this.
    */
   resolvePicker?(id: string, payload: PickerResolvePayload): void;
@@ -524,7 +524,7 @@ export interface ServerBackend {
    * a provider whose SDK has no hot-reload API omits this; one that does wraps
    * the call so a reload failure logs and falls back to today's behaviour
    * (change picked up on next session init). Effective from the session's next
-   * turn — an in-flight turn keeps its init-time skill snapshot. See DECISIONS.
+   * execution — an in-flight execution keeps its init-time skill snapshot. See DECISIONS.
    *
    * Returns the outcome so the agent-server can surface a `skills_reloaded` line:
    * `reloaded:false` = no live session (nothing re-scanned → no line); else
@@ -557,7 +557,7 @@ export interface ServerBackend {
    * writes to the SAME per-app config-home the running `--acp` process was spawned
    * with, but that process read its credentials at spawn (pre-login) and won't
    * re-read them mid-life — so a fresh respawn is required for the first post-login
-   * turn to be authenticated. Stronger than `resetSession` (which keeps the stale
+   * execution to be authenticated. Stronger than `resetSession` (which keeps the stale
    * process), weaker than `dispose` (which retires the backend). Sync — drop refs
    * only. Omitted by providers with no long-lived process (claude/fake). See
    * agent-providers#11.

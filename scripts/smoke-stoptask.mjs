@@ -3,9 +3,9 @@
  * a 'stopped' task_notification flows back as a task_event. Drives the bundled
  * agent-server against real claude. ✅ Confirmed working.
  *
- * NOTE: `task_started` can land just AFTER the foreground turn's idle (the SDK
+ * NOTE: `task_started` can land just AFTER the foreground execution's idle (the SDK
  * emits it around the run_in_background tool-result), so this WAITS for a
- * task_event after the turn rather than checking synchronously — checking too
+ * task_event after the execution rather than checking synchronously — checking too
  * early was a false "no task" earlier. The SDK reliably emits task_started for
  * run_in_background:true (confirmed raw in scripts/spike-bg-notify.ts).
  *
@@ -53,17 +53,17 @@ const anyTaskId = () => {
 async function main() {
   await waitFor((m) => m.type === 'ready', 30000);
   const base = { provider: 'claude', cwd: root, sessionId: 'stoptask1', permissionMode: 'bypassPermissions' };
-  // Mirror smoke-streaming-input's proven sequence (two context turns) — the SDK
+  // Mirror smoke-streaming-input's proven sequence (two context executions) — the SDK
   // reliably uses its task_started/notification mechanism there.
-  console.log('ready — warmup turns');
-  send({ type: 'send', turnId: 't-a', prompt: 'Remember the number 42. Reply with just "ok".', ...base });
-  await waitFor((m) => m.type === 'status' && m.state === 'idle' && m.turnId === 't-a', 30000);
-  send({ type: 'send', turnId: 't-b', prompt: 'What number did I ask you to remember? Reply with just the number.', ...base });
-  await waitFor((m) => m.type === 'status' && m.state === 'idle' && m.turnId === 't-b', 30000);
+  console.log('ready — warmup executions');
+  send({ type: 'send', executionId: 'e-a', prompt: 'Remember the number 42. Reply with just "ok".', ...base });
+  await waitFor((m) => m.type === 'status' && m.state === 'idle' && m.executionId === 'e-a', 30000);
+  send({ type: 'send', executionId: 'e-b', prompt: 'What number did I ask you to remember? Reply with just the number.', ...base });
+  await waitFor((m) => m.type === 'status' && m.state === 'idle' && m.executionId === 'e-b', 30000);
   console.log('— starting a long background task\n');
-  send({ type: 'send', turnId: 't-bg', ...base,
+  send({ type: 'send', executionId: 'e-bg', ...base,
     prompt: 'Run this shell command IN THE BACKGROUND (run_in_background): `sleep 15 && echo BG_DONE`. Immediately reply "started" without waiting for it.' });
-  await waitFor((m) => m.type === 'status' && m.state === 'idle' && m.turnId === 't-bg', 60000);
+  await waitFor((m) => m.type === 'status' && m.state === 'idle' && m.executionId === 'e-bg', 60000);
 
   // task_started can land just AFTER the foreground idle (then routeTask emits an
   // individual task_event), so wait for a task_event rather than checking now.

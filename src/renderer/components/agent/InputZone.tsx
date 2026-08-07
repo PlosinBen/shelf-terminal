@@ -90,7 +90,7 @@ interface Props {
    *  same as store.actual* — actual reflects what the backend reports
    *  (possibly after a fallback / cap), intent reflects what the user
    *  asked for. We send intent so a backend fallback doesn't silently
-   *  pin future turns to the fallback model. See agent-ui#4. */
+   *  pin future executions to the fallback model. See agent-ui#4. */
   intent: AgentPrefs | undefined;
 }
 
@@ -102,24 +102,24 @@ interface Props {
  * agentTabStore via useAgentTab.
  *
  * Outbound: every submission EAGER-sends 'agent:send' immediately with a
- * renderer-minted `clientMsgId` (no client-side queueing / turn-boundary
+ * renderer-minted `clientMsgId` (no client-side queueing / execution-boundary
  * guessing — agent-server owns the queue). The submission also records an
  * optimistic pending chip (enqueuePendingSend); the server's queue snapshot
- * promotes it into the timeline when its turn runs. Config slashes: with-arg
+ * promotes it into the timeline when its execution runs. Config slashes: with-arg
  * (/model X) falls through to agent:send (provider's slash handler); no-arg
  * (/model) opens the renderer-local picker via setLocalPicker (DecisionPanel
- * renders it and emits the config-edit turn on select).
+ * renders it and emits the config-edit execution on select).
  */
 export function InputZone({ tabId, projectId, cwd, connection, visible, rootRef, intent }: Props) {
   const tab = useAgentTab(tabId);
   const { settings, chatStage } = useStore();
 
-  const isStreaming = tab?.isStreaming ?? false;
+  const isExecutionActive = tab?.isExecutionActive ?? false;
   const pendingCount = tab?.pendingSends.length ?? 0;
-  // "Busy" = a turn is running OR sends are still queued. Used for ESC-to-stop
-  // and the streaming→idle reset so ESC keeps working across the brief inter-turn
+  // "Busy" = a execution is running OR sends are still queued. Used for ESC-to-stop
+  // and the streaming→idle reset so ESC keeps working across the brief inter-execution
   // idle gap while the server drains the queue.
-  const busy = isStreaming || pendingCount > 0;
+  const busy = isExecutionActive || pendingCount > 0;
   // Init readiness gate. The agent is usable only once the backend reports
   // init 'ready' (capabilities gathered). While 'starting' — or 'failed' (e.g.
   // the caps RPC timed out, meaning the SDK/CLI link is unhealthy) — the input
@@ -214,7 +214,7 @@ export function InputZone({ tabId, projectId, cwd, connection, visible, rootRef,
     requestAnimationFrame(() => inputRef.current?.focus());
   }, [visible, chatStage, projectId, connection, cwd]);
 
-  // ESC pending reset when the agent goes fully idle (no running turn AND no
+  // ESC pending reset when the agent goes fully idle (no running execution AND no
   // queued sends) — clears any half-armed double-tap so the next ESC isn't
   // surprise-stopping the (now-idle) agent.
   useEffect(() => {
@@ -273,10 +273,10 @@ export function InputZone({ tabId, projectId, cwd, connection, visible, rootRef,
     setShowSlashMenu(false);
 
     // Eager send: emit immediately with a renderer-minted clientMsgId — no
-    // client-side queueing or turn-boundary guessing. agent-server owns the
+    // client-side queueing or execution-boundary guessing. agent-server owns the
     // queue; it echoes the clientMsgId in the queue snapshot. The optimistic
     // pending chip (enqueuePendingSend) shows instantly; the snapshot promotes
-    // it into the timeline when its turn runs. Preview images stay renderer-local
+    // it into the timeline when its execution runs. Preview images stay renderer-local
     // for history; provider-bound payload uses uploaded attachments.
     const clientMsgId = crypto.randomUUID();
     enqueuePendingSend(tabId, clientMsgId, text, images, files.length > 0 ? files : undefined);
@@ -294,10 +294,10 @@ export function InputZone({ tabId, projectId, cwd, connection, visible, rootRef,
   }, [tabId, input, pendingFiles, pendingImages, stagingImages, intent, initReady]);
 
   const handleStop = useCallback(() => {
-    // ESC-twice (stop) means "abort this turn AND drop everything I queued up
+    // ESC-twice (stop) means "abort this execution AND drop everything I queued up
     // while it was running". The server clears its queue on stop; we clear the
     // local optimistic chips too (incl. not-yet-confirmed ones). The running
-    // turn — already a timeline bubble — stays, marked interrupted by the agent.
+    // execution — already a timeline bubble — stays, marked interrupted by the agent.
     clearPendingSends(tabId);
     emitAgent('agent:stop', { tabId });
   }, [tabId]);

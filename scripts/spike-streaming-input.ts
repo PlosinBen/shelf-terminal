@@ -2,7 +2,7 @@
  * Spike: Architecture B — claude streaming-input 持久 session 行為釘死。
  *
  * 目的：在 commit 任何重構前，真機確認 streaming-input 模式的四個關鍵行為，
- *       決定 FIFO turnId 對應策略是否成立。全過才往下做重寫。
+ *       決定 FIFO executionId 對應策略是否成立。全過才往下做重寫。
  *
  * Run: npx tsx scripts/spike-streaming-input.ts [--only=1|2|3|4]
  *      （需本機 claude 已登入；exp3/exp4 各約 ~20s）

@@ -94,9 +94,9 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
   let connAppId: string | undefined;
   // The active turn's send — the permission bridge rides this lane so requests
   // reach the renderer on the current turn's id.
-  let currentSend: SendFn | null = null;
+  let activeExecutionSend: SendFn | null = null;
   let loginRunner: LoginRunner | null = null;
-  const permissions = createPermissionBridge(() => currentSend);
+  const permissions = createPermissionBridge(() => activeExecutionSend);
   const driver = createSessionDriver();
 
   // Live session config (cached from the last new-session response) + the active
@@ -265,7 +265,7 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
 
   return {
     async query(input: QueryInput, send: SendFn): Promise<void> {
-      currentSend = send;
+      activeExecutionSend = send;
       try {
         // A config-edit turn (picker / status-bar) carries no prompt — apply it
         // imperatively (set-mode / set-config-option) and return, rather than
@@ -284,7 +284,7 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
       } catch (err) {
         send({ type: 'error', error: `copilot: ${(err as Error)?.message ?? String(err)}` });
       } finally {
-        currentSend = null;
+        activeExecutionSend = null;
         send({ type: 'status', state: 'idle' });
       }
     },

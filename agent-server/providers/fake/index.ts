@@ -53,14 +53,14 @@ const FAKE_AUTH_DISPLAY_NAME = 'Fake Harness';
  *                       project-env injection reached the agent-server)
  *   error:<msg>         emit error
  *   delay:<ms>          sleep before next step
- *   task:<id>           emit a running background task_event (turnId-less)
+ *   task:<id>           emit a running background task_event (executionId-less)
  *   taskdone:<id>       emit a completed background task_event + stash its
  *                       output so read_task_output (fetchTaskOutput) returns it
  *   taskfail:<id>       emit a failed (errored) terminal background task_event
  *   plan:<markdown>     emit a plan / todo-list side-channel update (→ PlanPanel,
  *                       distinct from the background-tasks panel)
- *   serverturn:<msg>    server-initiated turn (auto-resume prose): turn_started
- *                       + reply + idle, all on a fresh turnId
+ *   serverexecution:<msg>    server-initiated turn (auto-resume prose): execution_started
+ *                       + reply + idle, all on a fresh executionId
  *
  * Chain steps with `|`:
  *   text:hi|delay:50|tool:Read|text:bye
@@ -189,7 +189,7 @@ export function createFakeBackend(_representedProvider: AgentProvider = FAKE_PRO
   // reports a failure (exercises the agent-view error line). Consumed once.
   let failNextReload = false;
   // Test hook: the `credit` step arms this so the NEXT post-turn
-  // refreshAccountStatus emits an account-credit status (turnId-less), mirroring
+  // refreshAccountStatus emits an account-credit status (executionId-less), mirroring
   // how copilot fetches premium-request credit at turn end. Consumed once.
   let emitCreditNext = false;
   const lateTimers = new Set<ReturnType<typeof setTimeout>>();
@@ -409,7 +409,7 @@ export function createFakeBackend(_representedProvider: AgentProvider = FAKE_PRO
       return;
     }
 
-    // task:<id> — a running background task (turnId-less task_event lane).
+    // task:<id> — a running background task (executionId-less task_event lane).
     if (step.startsWith('task:')) {
       const id = step.slice('task:'.length);
       send({
@@ -494,17 +494,17 @@ export function createFakeBackend(_representedProvider: AgentProvider = FAKE_PRO
       return;
     }
 
-    // serverturn:<msg> — a server-initiated turn (auto-resume prose after a
-    // background task finishes). Opens a fresh turnId via turn_started, emits
+    // serverexecution:<msg> — a server-initiated turn (auto-resume prose after a
+    // background task finishes). Opens a fresh executionId via execution_started, emits
     // the prose tagged with it, then closes with that turn's idle. The renderer
-    // still displays one linear timeline; turnId is lifecycle routing only.
-    if (step.startsWith('serverturn:')) {
-      const content = step.slice('serverturn:'.length);
-      const turnId = mintId('t');
-      send({ type: 'turn_started', turnId });
-      send({ type: 'status', state: 'streaming', turnId });
-      send({ type: 'message', msgId: mintId('m'), msgType: 'reply', content, turnId });
-      send({ type: 'status', state: 'idle', turnId });
+    // still displays one linear timeline; executionId is lifecycle routing only.
+    if (step.startsWith('serverexecution:')) {
+      const content = step.slice('serverexecution:'.length);
+      const executionId = mintId('t');
+      send({ type: 'execution_started', executionId });
+      send({ type: 'status', state: 'streaming', executionId });
+      send({ type: 'message', msgId: mintId('m'), msgType: 'reply', content, executionId });
+      send({ type: 'status', state: 'idle', executionId });
       return;
     }
 
@@ -518,7 +518,7 @@ export function createFakeBackend(_representedProvider: AgentProvider = FAKE_PRO
     }
 
     // credit — arm the post-turn account-status refresh. The credit segment is
-    // NOT emitted inline (it's account-level, turnId-less); refreshAccountStatus
+    // NOT emitted inline (it's account-level, executionId-less); refreshAccountStatus
     // fires it after the turn closes, exercising the real delivery path
     // (post-turn fire → session sink → status bar). See agent-providers#26.
     if (step === 'credit') {
@@ -612,7 +612,7 @@ export function createFakeBackend(_representedProvider: AgentProvider = FAKE_PRO
     },
 
     async refreshAccountStatus(_cache, send): Promise<void> {
-      // Mirror copilot: emit an account-level credit segment (turnId-less) after
+      // Mirror copilot: emit an account-level credit segment (executionId-less) after
       // a turn, only when the `credit` step armed it. Consumed once.
       if (!emitCreditNext) return;
       emitCreditNext = false;
@@ -748,7 +748,7 @@ export function createFakeBackend(_representedProvider: AgentProvider = FAKE_PRO
     },
 
     // Mirror claude: stopping a task emits a terminal 'stopped' task_event on the
-    // turnId-less lane (here via the last turn's send), which the panel waits for
+    // executionId-less lane (here via the last turn's send), which the panel waits for
     // before removing the card. No-op if no turn has run yet.
     async stopTask(taskId: string): Promise<void> {
       lastSend?.({

@@ -2,40 +2,40 @@ import type { AgentQueueItem } from '@shared/types';
 
 /**
  * Server-owned send queue (Architecture: queue lives in agent-server, the
- * execution plane that serializes turns). The client eager-sends every
+ * execution plane that serializes executions). The client eager-sends every
  * submission; this owns排序 + 釋放時機 and emits a snapshot the renderer
  * mirrors. See .agent/features/message-queue-ownership.md.
  *
- * Why serialize at all (the original `sendChain` reason): concurrent turn
- * handlers race on the provider backend's module-level state (currentSend /
- * abortController / activeQuery / lastSessionId). One turn runs at a time.
+ * Why serialize at all (the original `sendChain` reason): concurrent execution
+ * handlers race on the provider backend's module-level state (activeExecutionSend /
+ * abortController / activeQuery / lastSessionId). One execution runs at a time.
  *
  * Pure factory (no stdin/stdout / no provider imports) so the enqueue / pump /
  * cancel / clear / snapshot logic is unit-testable without a real backend.
  */
 export interface QueuedSend {
-  /** Main-minted per-turn id. Present for real sends; used to emit a terminal
-   *  idle if the send is dropped before running (else main's per-turn generator
+  /** Main-minted per-execution id. Present for real sends; used to emit a terminal
+   *  idle if the send is dropped before running (else main's per-execution generator
    *  hangs forever). */
-  turnId?: string;
+  executionId?: string;
   /** Renderer-minted correlation key. Absent for internal sends (telegram
    *  bridge) — those are still serialized but omitted from the snapshot. */
   clientMsgId?: string;
 }
 
 export interface SendQueueDeps<T extends QueuedSend> {
-  /** Run one send to completion (the provider turn). */
+  /** Run one send to completion (the provider execution). */
   handle: (msg: T) => Promise<void>;
   /** Push the full ordered snapshot of in-flight client sends to the client. */
   emitSnapshot: (items: AgentQueueItem[]) => void;
-  /** Emit a terminal idle for a dropped queued send's turnId so the main-side
-   *  per-turn generator (registered before the send was sent) doesn't hang. */
-  terminateTurn: (turnId: string) => void;
-  /** A handle() that threw must STILL end the turn (idle), or the renderer —
+  /** Emit a terminal idle for a dropped queued send's executionId so the main-side
+   *  per-execution generator (registered before the send was sent) doesn't hang. */
+  terminateExecution: (executionId: string) => void;
+  /** A handle() that threw must STILL end the execution (idle), or the renderer —
    *  already streaming — wedges forever. */
   onHandleError: (msg: T, err: unknown) => void;
   /** Diagnostic for a cancel/clear edge that isn't a clean queue removal (never
-   *  silent). `reason`: 'cancel-running' = the id is the turn already running
+   *  silent). `reason`: 'cancel-running' = the id is the execution already running
    *  (benign race — can't un-run); 'cancel-unknown' = no such id anywhere. */
   onAnomaly?: (reason: 'cancel-running' | 'cancel-unknown', clientMsgId: string) => void;
 }
@@ -45,7 +45,7 @@ export interface SendQueue<T extends QueuedSend> {
   enqueue(msg: T): void;
   /** Drop a specific not-yet-running send by clientMsgId. No-op if running/unknown. */
   cancel(clientMsgId: string): void;
-  /** Drop every waiting send (ESC / stop). The running turn is interrupted
+  /** Drop every waiting send (ESC / stop). The running execution is interrupted
    *  separately by the caller (backend.stop). */
   clear(): void;
   /** Test/diagnostic introspection. */
@@ -66,7 +66,7 @@ export function createSendQueue<T extends QueuedSend>(deps: SendQueueDeps<T>): S
     return items;
   }
   const emit = () => deps.emitSnapshot(snapshot());
-  const terminate = (msg: T) => { if (msg.turnId) deps.terminateTurn(msg.turnId); };
+  const terminate = (msg: T) => { if (msg.executionId) deps.terminateExecution(msg.executionId); };
 
   function pump(): void {
     if (processing) return;
@@ -95,7 +95,7 @@ export function createSendQueue<T extends QueuedSend>(deps: SendQueueDeps<T>): S
     enqueue(msg: T): void {
       queue.push(msg);
       // Show the new chip immediately when busy (pump won't emit until the
-      // current turn ends). When idle, skip — pump emits [running] right away,
+      // current execution ends). When idle, skip — pump emits [running] right away,
       // avoiding a one-tick 'queued' flash for the common idle send.
       if (processing) emit();
       pump();
@@ -103,7 +103,7 @@ export function createSendQueue<T extends QueuedSend>(deps: SendQueueDeps<T>): S
     cancel(clientMsgId: string): void {
       const i = queue.findIndex((m) => m.clientMsgId === clientMsgId);
       if (i < 0) {
-        // Not in the waiting queue: either it's the running turn (benign race —
+        // Not in the waiting queue: either it's the running execution (benign race —
         // the snapshot re-promotes it) or genuinely unknown. Report, never silent.
         deps.onAnomaly?.(clientMsgId === runningClientMsgId ? 'cancel-running' : 'cancel-unknown', clientMsgId);
         return;

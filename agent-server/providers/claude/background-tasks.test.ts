@@ -7,7 +7,7 @@ import type { OutgoingMessage } from '../types';
  * generator alive past the foreground `result` (to drain the task + auto-resume
  * the agent), and claude's `query()` only resolved at generator-end — blocking
  * the sendChain (next user send showed an infinite spinner). And the post-result
- * background content carried the now-dead turnId → dropped as "unknown turn".
+ * background content carried the now-dead executionId → dropped as "unknown turn".
  *
  * These tests mock the SDK with a *controllable* generator that suspends right
  * after the foreground `result`, so we can assert query() has ALREADY resolved
@@ -98,8 +98,8 @@ describe('claude detached-loop background tasks', () => {
     release();
     await flush();
 
-    // Now the completion task_event lands (turnId-less; the orchestrator wrap
-    // that omits turnId is covered separately in orchestrator.test.ts).
+    // Now the completion task_event lands (executionId-less; the orchestrator wrap
+    // that omits executionId is covered separately in orchestrator.test.ts).
     const done = sent.find((m) => m.type === 'task_event' && (m as any).kind === 'done') as any;
     expect(done?.task).toMatchObject({ id: 't1', status: 'completed', done: true, summary: 'done (exit 0)' });
 
@@ -199,10 +199,10 @@ describe('claude detached-loop background tasks', () => {
     expect(seen.get('bg2')).toMatchObject({ id: 'bg2', status: 'running', done: false });
   });
 
-  it('surfaces the auto-resume prose as a server-initiated turn (M3: turn_started + reply + idle, fresh turnId)', async () => {
+  it('surfaces the auto-resume prose as a server-initiated turn (M3: execution_started + reply + idle, fresh executionId)', async () => {
     // Regression for the M3 gap: when a backgrounded task finishes the SDK
     // auto-resumes the agent to write a real reply. It used to be dropped on
-    // the dead foreground turnId (`if (foregroundDone) continue`). Now it must
+    // the dead foreground executionId (`if (foregroundDone) continue`). Now it must
     // be re-emitted as a server-initiated turn. See background-tasks#2.
     const { it, release } = controllableQuery(
       [INIT, FG_REPLY, TASK_STARTED, FG_RESULT],
@@ -218,31 +218,31 @@ describe('claude detached-loop background tasks', () => {
     release();
     await flush();
 
-    // A server turn was opened with a fresh turnId (distinct from foreground).
-    const started = sent.find((m) => m.type === 'turn_started') as any;
-    expect(started?.turnId).toMatch(/^t-/);
+    // A server turn was opened with a fresh executionId (distinct from foreground).
+    const started = sent.find((m) => m.type === 'execution_started') as any;
+    expect(started?.executionId).toMatch(/^e-/);
 
     // The auto-resume drives busy state: a streaming status tagged with the
-    // server turnId is emitted on open (main forwards it only when no foreground
+    // server executionId is emitted on open (main forwards it only when no foreground
     // turn is in flight, so the spinner reflects the agent writing). See #76.
     const serverStreaming = sent.find((m) => m.type === 'status' && (m as any).state === 'streaming'
-      && (m as any).turnId === started.turnId);
+      && (m as any).executionId === started.executionId);
     expect(serverStreaming).toBeTruthy();
 
-    // The prose is re-emitted as a normal reply tagged with that turnId. There
+    // The prose is re-emitted as a normal reply tagged with that executionId. There
     // is no renderer-facing turn marker: the UI is a linear message timeline.
     const reply = sent.find((m) => m.type === 'message' && (m as any).msgType === 'reply'
-      && (m as any).turnId === started.turnId) as any;
+      && (m as any).executionId === started.executionId) as any;
     expect(reply?.content).toContain('sleep finished');
     expect(reply?.startsTurn).toBeUndefined();
 
-    // The server turn is closed with its OWN idle (carries the server turnId),
-    // separate from the single foreground idle (which has no turnId here).
+    // The server turn is closed with its OWN idle (carries the server executionId),
+    // separate from the single foreground idle (which has no executionId here).
     const serverIdle = sent.find((m) => m.type === 'status' && (m as any).state === 'idle'
-      && (m as any).turnId === started.turnId);
+      && (m as any).executionId === started.executionId);
     expect(serverIdle).toBeTruthy();
     expect(sent.filter((m) => m.type === 'status' && (m as any).state === 'idle'
-      && !(m as any).turnId)).toHaveLength(1); // foreground idle untouched
+      && !(m as any).executionId)).toHaveLength(1); // foreground idle untouched
   });
 
   it('REPRO: tool_result inside an auto-resume turn completes its fold card (not dropped)', async () => {

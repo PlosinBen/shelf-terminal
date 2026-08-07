@@ -14,7 +14,7 @@ function setup() {
   const q = createSendQueue<Msg>({
     handle: (msg) => new Promise<void>((resolve, reject) => handles.push({ msg, resolve, reject })),
     emitSnapshot: (items) => snapshots.push(items),
-    terminateTurn: (t) => terminated.push(t),
+    terminateExecution: (t) => terminated.push(t),
     onHandleError: (msg, err) => errors.push({ msg, err }),
     onAnomaly: (reason, clientMsgId) => anomalies.push({ reason, clientMsgId }),
   });
@@ -30,7 +30,7 @@ const queued = (id: string): AgentQueueItem => ({ clientMsgId: id, state: 'queue
 describe('createSendQueue', () => {
   it('idle enqueue runs immediately with no queued flash', async () => {
     const { q, snapshots, handles } = setup();
-    q.enqueue({ id: 'a', clientMsgId: 'a', turnId: 't1' });
+    q.enqueue({ id: 'a', clientMsgId: 'a', executionId: 't1' });
     // First (and only) snapshot is [running] — no intermediate 'queued'.
     expect(snapshots).toEqual([[running('a')]]);
     await flush();
@@ -43,8 +43,8 @@ describe('createSendQueue', () => {
 
   it('serializes: second send waits as queued until the first completes', async () => {
     const { q, snapshots, handles } = setup();
-    q.enqueue({ id: 'a', clientMsgId: 'a', turnId: 't1' });
-    q.enqueue({ id: 'b', clientMsgId: 'b', turnId: 't2' });
+    q.enqueue({ id: 'a', clientMsgId: 'a', executionId: 't1' });
+    q.enqueue({ id: 'b', clientMsgId: 'b', executionId: 't2' });
     expect(snapshots).toEqual([
       [running('a')],
       [running('a'), queued('b')],
@@ -60,11 +60,11 @@ describe('createSendQueue', () => {
     expect(snapshots.at(-1)).toEqual([]);
   });
 
-  it('cancel removes a queued send + terminates its turn; never runs it', async () => {
+  it('cancel removes a queued send + terminates its execution; never runs it', async () => {
     const { q, snapshots, terminated, handles } = setup();
-    q.enqueue({ id: 'a', clientMsgId: 'a', turnId: 't1' });
-    q.enqueue({ id: 'b', clientMsgId: 'b', turnId: 't2' });
-    q.enqueue({ id: 'c', clientMsgId: 'c', turnId: 't3' });
+    q.enqueue({ id: 'a', clientMsgId: 'a', executionId: 't1' });
+    q.enqueue({ id: 'b', clientMsgId: 'b', executionId: 't2' });
+    q.enqueue({ id: 'c', clientMsgId: 'c', executionId: 't3' });
     q.cancel('b');
     expect(terminated).toEqual(['t2']);
     expect(snapshots.at(-1)).toEqual([running('a'), queued('c')]);
@@ -77,7 +77,7 @@ describe('createSendQueue', () => {
 
   it('cancel of the running send is a no-op but is FLAGGED (cancel-running), not silent', async () => {
     const { q, snapshots, terminated, anomalies } = setup();
-    q.enqueue({ id: 'a', clientMsgId: 'a', turnId: 't1' });
+    q.enqueue({ id: 'a', clientMsgId: 'a', executionId: 't1' });
     const before = snapshots.length;
     q.cancel('a'); // already running → not in queue
     expect(terminated).toEqual([]);
@@ -87,24 +87,24 @@ describe('createSendQueue', () => {
 
   it('cancel of an unknown id is FLAGGED (cancel-unknown), not silent', () => {
     const { q, anomalies } = setup();
-    q.enqueue({ id: 'a', clientMsgId: 'a', turnId: 't1' });
+    q.enqueue({ id: 'a', clientMsgId: 'a', executionId: 't1' });
     q.cancel('nope');
     expect(anomalies).toEqual([{ reason: 'cancel-unknown', clientMsgId: 'nope' }]);
   });
 
   it('a clean cancel of a queued send does NOT flag an anomaly', () => {
     const { q, anomalies } = setup();
-    q.enqueue({ id: 'a', clientMsgId: 'a', turnId: 't1' });
-    q.enqueue({ id: 'b', clientMsgId: 'b', turnId: 't2' });
+    q.enqueue({ id: 'a', clientMsgId: 'a', executionId: 't1' });
+    q.enqueue({ id: 'b', clientMsgId: 'b', executionId: 't2' });
     q.cancel('b');
     expect(anomalies).toEqual([]);
   });
 
   it('clear drops every waiting send (keeps the running one)', async () => {
     const { q, snapshots, terminated } = setup();
-    q.enqueue({ id: 'a', clientMsgId: 'a', turnId: 't1' });
-    q.enqueue({ id: 'b', clientMsgId: 'b', turnId: 't2' });
-    q.enqueue({ id: 'c', clientMsgId: 'c', turnId: 't3' });
+    q.enqueue({ id: 'a', clientMsgId: 'a', executionId: 't1' });
+    q.enqueue({ id: 'b', clientMsgId: 'b', executionId: 't2' });
+    q.enqueue({ id: 'c', clientMsgId: 'c', executionId: 't3' });
     q.clear();
     expect(terminated).toEqual(['t2', 't3']);
     expect(snapshots.at(-1)).toEqual([running('a')]);
@@ -112,8 +112,8 @@ describe('createSendQueue', () => {
 
   it('omits sends without a clientMsgId from the snapshot but still serializes them', async () => {
     const { q, snapshots, handles } = setup();
-    q.enqueue({ id: 'internal', turnId: 't1' }); // no clientMsgId
-    q.enqueue({ id: 'a', clientMsgId: 'a', turnId: 't2' });
+    q.enqueue({ id: 'internal', executionId: 't1' }); // no clientMsgId
+    q.enqueue({ id: 'a', clientMsgId: 'a', executionId: 't2' });
     // internal running (no clientMsgId → not shown); a queued.
     expect(snapshots).toEqual([
       [],
@@ -126,10 +126,10 @@ describe('createSendQueue', () => {
     expect(snapshots.at(-1)).toEqual([running('a')]);
   });
 
-  it('a thrown handle ends the turn and continues to the next', async () => {
+  it('a thrown handle ends the execution and continues to the next', async () => {
     const { q, snapshots, errors, handles } = setup();
-    q.enqueue({ id: 'a', clientMsgId: 'a', turnId: 't1' });
-    q.enqueue({ id: 'b', clientMsgId: 'b', turnId: 't2' });
+    q.enqueue({ id: 'a', clientMsgId: 'a', executionId: 't1' });
+    q.enqueue({ id: 'b', clientMsgId: 'b', executionId: 't2' });
     await flush();
     handles[0].reject(new Error('boom'));
     await flush();

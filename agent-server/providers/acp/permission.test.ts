@@ -38,10 +38,10 @@ describe('permission round-trip (mock agent asks → wire → resolve → agent)
     });
 
     const wire: OutgoingMessage[] = [];
-    let currentSend: SendFn | null = null;
-    const bridge = createPermissionBridge(() => currentSend);
+    let activeExecutionSend: SendFn | null = null;
+    const bridge = createPermissionBridge(() => activeExecutionSend);
     // Auto-answer: allow-once as soon as the permission request hits the wire.
-    currentSend = (m) => {
+    activeExecutionSend = (m) => {
       wire.push(m);
       if (m.type === 'permission_request') bridge.resolvePermission(m.toolUseId, true, undefined, 'once');
     };
@@ -52,7 +52,7 @@ describe('permission round-trip (mock agent asks → wire → resolve → agent)
       onSessionUpdate: driver.onSessionUpdate,
     });
     const session = await driver.startNew(conn.agent, { cwd: '/tmp/p' });
-    await driver.drivePromptTurn(conn.agent, session, 'edit please', currentSend);
+    await driver.drivePromptTurn(conn.agent, session, 'edit please', activeExecutionSend);
     conn.close();
 
     expect(outcome).toEqual({ outcome: 'selected', optionId: 'ao' });

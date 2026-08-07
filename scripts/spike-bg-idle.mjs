@@ -1,10 +1,10 @@
 /**
  * Reproduces the REAL-APP empty-bg-bash-card scenario against the built bundle:
- * spawn a backgrounded bash in a turn that CLOSES before the bash finishes, then
- * sit IDLE (send no further turns) while it completes. The broad `[claude] sdkmsg`
+ * spawn a backgrounded bash in a execution that CLOSES before the bash finishes, then
+ * sit IDLE (send no further executions) while it completes. The broad `[claude] sdkmsg`
  * logger then shows HOW (and whether) the completion/output_file is delivered
  * during idle, and which router lane it lands on. Contrast with
- * spike-task-loggers.mjs where later turns keep the stream active.
+ * spike-task-loggers.mjs where later executions keep the stream active.
  *
  * Run (after `node agent-server/build.mjs`): node scripts/spike-bg-idle.mjs
  */
@@ -39,17 +39,17 @@ const waitFor = (pred, ms) => new Promise((res) => {
   const t = setTimeout(() => res(null), ms);
   waiters.push((m) => { if (pred(m)) { clearTimeout(t); res(m); } });
 });
-const idle = (turnId, ms) => waitFor((m) => m.type === 'status' && m.state === 'idle' && m.turnId === turnId, ms);
+const idle = (executionId, ms) => waitFor((m) => m.type === 'status' && m.state === 'idle' && m.executionId === executionId, ms);
 
 async function main() {
   await waitFor((m) => m.type === 'ready', 30000);
   const base = { provider: 'claude', cwd: root, sessionId: 'bgidle1', permissionMode: 'bypassPermissions' };
 
-  console.log('\n=== Turn BG: spawn bg bash, turn CLOSES before it finishes ===');
-  send({ type: 'send', turnId: 't-bg', ...base,
+  console.log('\n=== Execution BG: spawn bg bash, execution CLOSES before it finishes ===');
+  send({ type: 'send', executionId: 'e-bg', ...base,
     prompt: 'Run this shell command IN THE BACKGROUND (run_in_background=true): `sleep 12 && echo BG_DONE`. Immediately reply "started" — do NOT wait.' });
-  await idle('t-bg', 60000);
-  console.log('  (turn t-bg is now CLOSED / session IDLE — bash still running)');
+  await idle('e-bg', 60000);
+  console.log('  (execution t-bg is now CLOSED / session IDLE — bash still running)');
 
   console.log('\n=== IDLE WAIT 20s — watch what the SDK emits when the bash completes ===');
   await new Promise((r) => setTimeout(r, 20000));

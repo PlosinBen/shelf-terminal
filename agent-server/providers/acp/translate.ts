@@ -169,7 +169,7 @@ function toolKindLabel(kind: ToolKind | null | undefined): string {
 
 /**
  * Map ONE ACP `SessionUpdate` to zero or more Shelf wire messages (WITHOUT a
- * turnId — the send wrapper stamps that). Returns `[]` for updates that are not
+ * executionId — the send wrapper stamps that). Returns `[]` for updates that are not
  * timeline render primitives (capabilities/mode/config/usage are consumed by the
  * stateful client, not rendered here). Tool-call updates should be run through a
  * session-scoped {@link createToolMetaCarry} first so title/kind survive partial updates.

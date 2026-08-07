@@ -5,7 +5,7 @@ import type { Page } from '@playwright/test';
  * Agent rendering flows beyond picker — exercises every other major wire
  * event the renderer must handle: permission_request, streaming chunks
  * pairing with finalize, fold cards (tool success + error), error events,
- * auth_required pane, and stop mid-turn.
+ * auth_required pane, and stop mid-execution.
  *
  * All driven via the fake provider (SHELF_TEST_MODE=1, see helpers.ts).
  * Scenarios documented in `agent-server/providers/fake.ts`.
@@ -104,19 +104,19 @@ test.describe('agent flows via fake provider', () => {
       const messages = page.locator('.agent-messages:visible');
       await expect(messages).toContainText('hello world', { timeout: 5_000 });
 
-      // Status should drop to idle after the turn completes.
+      // Status should drop to idle after the execution completes.
       await expect(page.locator('.agent-status-label:visible')).toHaveText('idle', { timeout: 5_000 });
     });
 
-    // Regression: providers piggyback mid-turn usage/quota on `state:'streaming'`
+    // Regression: providers piggyback mid-execution usage/quota on `state:'streaming'`
     // status events (copilot: rateLimits / contextUsage). The queued-cancel fix
     // (agent-core#10) must strip `state` only on the TERMINAL idle — dropping
     // streaming-status metrics wholesale blanks the status-bar quota.
-    test('mid-turn streaming usage/quota reaches the status bar', async ({ shelfApp: { page } }) => {
+    test('mid-execution streaming usage/quota reaches the status bar', async ({ shelfApp: { page } }) => {
       await setupProject(page);
       await openAgentTab(page);
       // `usage` emits a streaming status with contextUsage + rateLimits, then the
-      // turn produces its reply. Segments are sticky, so they persist post-turn.
+      // execution produces its reply. Segments are sticky, so they persist post-execution.
       await sendAgentPrompt(page, 'usage|text:done');
 
       const messages = page.locator('.agent-messages:visible');
@@ -127,11 +127,11 @@ test.describe('agent flows via fake provider', () => {
       await expect(statusBar).toContainText('quota: 7%', { timeout: 5_000 });
     });
 
-    // Account-level credit (copilot premium requests) is fetched AFTER the turn
-    // via backend.refreshAccountStatus and delivered turnId-less through the
-    // session sink — not on the turn's status. Proves the full post-turn path
+    // Account-level credit (copilot premium requests) is fetched AFTER the execution
+    // via backend.refreshAccountStatus and delivered executionId-less through the
+    // session sink — not on the execution's status. Proves the full post-execution path
     // (fire-and-forget refresh → session-scoped status → status bar). agent-providers#26.
-    test('post-turn account credit reaches the status bar', async ({ shelfApp: { page } }) => {
+    test('post-execution account credit reaches the status bar', async ({ shelfApp: { page } }) => {
       await setupProject(page);
       await openAgentTab(page);
       await sendAgentPrompt(page, 'credit');
@@ -144,19 +144,19 @@ test.describe('agent flows via fake provider', () => {
     });
 
     // Regression: copilot ACP boundary-split makes one reply per tool boundary,
-    // each a chunk-only segment that settles only at turn-end idle. The streaming
+    // each a chunk-only segment that settles only at execution-end idle. The streaming
     // caret (`.agent-cursor`) must live on ONLY the live segment — earlier ones
     // must settle when the next starts, not blink until idle. See agent-providers#27.
     test('boundary-split: only the live segment shows a streaming caret', async ({ shelfApp: { page } }) => {
       await setupProject(page);
       await openAgentTab(page);
-      // Two chunk-only segments split by a tool, then a trailing delay so the turn
-      // is STILL streaming when we assert (the bug is a mid-turn state).
+      // Two chunk-only segments split by a tool, then a trailing delay so the execution
+      // is STILL streaming when we assert (the bug is a mid-execution state).
       await sendAgentPrompt(page, 'chunk:first-answer|tool:Read|chunk:second-answer|delay:2000');
 
       const messages = page.locator('.agent-messages:visible');
       await expect(messages).toContainText('second-answer', { timeout: 5_000 });
-      // Both segments are on screen and the turn is mid-stream → exactly ONE caret.
+      // Both segments are on screen and the execution is mid-stream → exactly ONE caret.
       await expect(page.locator('.agent-cursor:visible')).toHaveCount(1, { timeout: 2_000 });
 
       // After idle, no caret remains anywhere.
@@ -319,7 +319,7 @@ test.describe('agent flows via fake provider', () => {
     await setupProject(page);
     await openAgentTab(page);
     // Two text + one tool, separated by a tiny delay. All three should
-    // appear and the turn should settle to idle.
+    // appear and the execution should settle to idle.
     await sendAgentPrompt(page, 'text:hello|delay:30|tool:Read|text:bye');
 
     const messages = page.locator('.agent-messages:visible');
@@ -350,10 +350,10 @@ test.describe('agent flows via fake provider', () => {
     await expect(err).toContainText('something broke');
   });
 
-  test('stop via double-Esc cancels mid-turn picker', async ({ shelfApp: { page } }) => {
+  test('stop via double-Esc cancels mid-execution picker', async ({ shelfApp: { page } }) => {
     await setupProject(page);
     await openAgentTab(page);
-    // delay:5000 keeps the turn open in case picker resolves fast on its own;
+    // delay:5000 keeps the execution open in case picker resolves fast on its own;
     // we hit Esc to abort once the panel is visible.
     await sendAgentPrompt(page, 'picker_single|delay:5000');
 
@@ -364,7 +364,7 @@ test.describe('agent flows via fake provider', () => {
     await page.keyboard.press('Escape');
     await expect(panel).not.toBeVisible({ timeout: 3_000 });
 
-    // Then the turn is still running due to `delay:5000` — second Esc twice
+    // Then the execution is still running due to `delay:5000` — second Esc twice
     // hits the stop affordance ("Press Esc again to stop").
     await page.locator('.agent-textarea:visible').focus();
     await page.keyboard.press('Escape');
@@ -375,8 +375,8 @@ test.describe('agent flows via fake provider', () => {
   });
 
   test.describe('queued messages', () => {
-    // Messages submitted while a turn streams are EAGER-sent (each with a
-    // clientMsgId) and queued by agent-server, which serializes them one turn at
+    // Messages submitted while a execution streams are EAGER-sent (each with a
+    // clientMsgId) and queued by agent-server, which serializes them one execution at
     // a time and emits a queue snapshot the renderer mirrors as chips. This e2e
     // covers the WIRING a unit test can't: every queued send actually drains
     // through IPC → agent-server → provider and runs in order.
@@ -391,13 +391,13 @@ test.describe('agent flows via fake provider', () => {
       await setupProject(page);
       await openAgentTab(page);
 
-      // T1 holds the turn open so T2/T3 are submitted while streaming → enqueued.
+      // T1 holds the execution open so T2/T3 are submitted while streaming → enqueued.
       await sendAgentPrompt(page, 'delay:1500|text:T1');
       await expect(page.locator('.agent-loading')).toBeVisible({ timeout: 5_000 });
       await sendAgentPrompt(page, 'delay:300|text:T2');
       await sendAgentPrompt(page, 'delay:300|text:T3');
 
-      // All three turns flush through the queue and produce their output, and the
+      // All three executions flush through the queue and produce their output, and the
       // queue ends empty.
       const messages = page.locator('.agent-messages:visible');
       await expect(messages).toContainText('T1', { timeout: 10_000 });
@@ -406,17 +406,17 @@ test.describe('agent flows via fake provider', () => {
       await expect(page.locator('.agent-msg-queued')).toHaveCount(0, { timeout: 10_000 });
     });
 
-    // Regression: cancelling a QUEUED send must not disturb the RUNNING turn's
-    // status. agent-server emits a bare `idle` on the cancelled send's turnId
-    // (to release its per-turn generator); that per-turn idle must NOT flip the
-    // tab-wide streaming flag to idle while a foreground turn is still running
-    // (session idle is owned by main's activeTurns, emitted only when the LAST
-    // turn ends). Before the fix, cancelling the chip cleared the spinner mid-run.
-    test('cancelling a queued send leaves the running turn streaming', async ({ shelfApp: { page } }) => {
+    // Regression: cancelling a QUEUED send must not disturb the RUNNING execution's
+    // status. agent-server emits a bare `idle` on the cancelled send's executionId
+    // (to release its per-execution generator); that per-execution idle must NOT flip the
+    // tab-wide streaming flag to idle while a foreground execution is still running
+    // (session idle is owned by main's activeExecutions, emitted only when the LAST
+    // execution ends). Before the fix, cancelling the chip cleared the spinner mid-run.
+    test('cancelling a queued send leaves the running execution streaming', async ({ shelfApp: { page } }) => {
       await setupProject(page);
       await openAgentTab(page);
 
-      // T1 holds the turn open (long delay, no text yet → spinner stays up).
+      // T1 holds the execution open (long delay, no text yet → spinner stays up).
       await sendAgentPrompt(page, 'delay:4000|text:T1');
       await expect(page.locator('.agent-loading')).toBeVisible({ timeout: 5_000 });
 
@@ -425,11 +425,11 @@ test.describe('agent flows via fake provider', () => {
       const queued = page.locator('.agent-msg-queued');
       await expect(queued).toHaveCount(1, { timeout: 5_000 });
 
-      // Cancel the queued chip. Its terminateTurn idle must not clear the spinner.
+      // Cancel the queued chip. Its terminateExecution idle must not clear the spinner.
       await queued.locator('.agent-queued-cancel').click();
       await expect(queued).toHaveCount(0, { timeout: 5_000 });
 
-      // The running turn (T1) is still going: spinner stays visible. Wait past the
+      // The running execution (T1) is still going: spinner stays visible. Wait past the
       // cancel's IPC round-trip so the (previously bug-inducing) idle has arrived.
       await expect(page.locator('.agent-loading')).toBeVisible();
       await page.waitForTimeout(1000);

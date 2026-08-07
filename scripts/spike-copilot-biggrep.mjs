@@ -8,7 +8,7 @@
  *
  *   Key questions:
  *     - does tool.execution_complete EVER fire, or does the card hang until the
- *       30-min turn timeout?
+ *       30-min execution timeout?
  *     - do partial_result / progress stream during the run (feedback we drop)?
  *     - does the CLI detach the shell (system.notification shell_detached_*)?
  *
@@ -64,8 +64,8 @@ async function main() {
   await waitFor((m) => m.type === 'ready', 30000);
   const base = { provider: 'copilot', cwd: root, sessionId: 'biggrep1', permissionMode: 'bypassPermissions' };
 
-  console.log(`\n${ts()} === Turn: force ONE long, high-output bash grep over node_modules ===`);
-  send({ type: 'send', turnId: 't-grep', ...base,
+  console.log(`\n${ts()} === Execution: force ONE long, high-output bash grep over node_modules ===`);
+  send({ type: 'send', executionId: 'e-grep', ...base,
     prompt: 'Run EXACTLY ONE shell command (run_in_background=false) and nothing else, then report the line count. '
       + 'Command: `grep -rn "function" node_modules | wc -l`. Do not use any other tool.' });
 

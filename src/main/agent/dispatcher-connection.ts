@@ -14,7 +14,7 @@ import { channelLog } from '../channel-log';
 import type { ConnectionHealth } from '@shared/types';
 import type { AgentEvent } from './types';
 import { ConnectionHealthTracker, DEFAULT_HEALTH_THRESHOLDS } from './connection-health';
-import { createTurnDispatcher, type PermissionHandler } from './turn-dispatcher';
+import { createExecutionDispatcher, type PermissionHandler } from './execution-dispatcher';
 import { buildWorktreeAppToolAuditEvent } from './app-tool-audit';
 import {
   MEMORY_WIRE_TYPE,
@@ -30,10 +30,10 @@ export interface DispatcherProc {
   kill(): void;
 }
 
-/** Per-session sinks — same set the per-tab path threads into its turn-dispatcher. */
+/** Per-session sinks — same set the per-tab path threads into its execution-dispatcher. */
 export interface SessionSinks {
   onTaskEvent?: (ev: any) => void;
-  onServerTurn?: (turnId: string, events: AsyncGenerator<AgentEvent>) => void;
+  onServerExecution?: (executionId: string, events: AsyncGenerator<AgentEvent>) => void;
   onHealth?: (health: ConnectionHealth) => void;
   onQueue?: (items: any[]) => void;
   onSkillsReloaded?: (ok: boolean, error?: string) => void;
@@ -45,7 +45,7 @@ export interface SessionSinks {
 /** The `RemoteProcess`-shaped handle a SessionChannel exposes to createRemoteBackend. */
 export interface SessionChannel {
   sendLine(msg: object): void;
-  registerTurn(turnId: string, permissionHandler: PermissionHandler): AsyncGenerator<AgentEvent>;
+  registerExecution(executionId: string, permissionHandler: PermissionHandler): AsyncGenerator<AgentEvent>;
   awaitReady(timeoutMs?: number): Promise<boolean>;
   onResponse(requestId: string, expectedType: string, handler: (payload: any) => void): void;
   kill(): void;
@@ -53,7 +53,7 @@ export interface SessionChannel {
 
 export interface DispatcherConnectionDeps {
   proc: DispatcherProc;
-  /** Same parser the per-tab turn-dispatcher uses (injected to avoid a remote.ts cycle). */
+  /** Same parser the per-tab execution-dispatcher uses (injected to avoid a remote.ts cycle). */
   parseRemoteMessage: (msg: any) => AgentEvent | null;
   /** App-tool bridge handler (injected). */
   handleAppTool: (op: string, args: Record<string, unknown>, ctx: { projectId?: string }) => Promise<any>;
@@ -85,7 +85,7 @@ export interface DispatcherConnection {
 interface ChannelState {
   sid: string;
   sinks: SessionSinks;
-  dispatcher: ReturnType<typeof createTurnDispatcher>;
+  dispatcher: ReturnType<typeof createExecutionDispatcher>;
 }
 
 export function createDispatcherConnection(deps: DispatcherConnectionDeps): DispatcherConnection {
@@ -228,13 +228,13 @@ export function createDispatcherConnection(deps: DispatcherConnectionDeps): Disp
     }
     // The session's provider execution went down (crashed or unresponsive). The
     // dispatcher will RECONNECT it (open a fresh exec + resume the persisted
-    // conversation) — but FIRST, fail-loud: end this sid's in-flight turn(s) with
-    // an error so the renderer tells the user the turn was interrupted, the spinner
+    // conversation) — but FIRST, fail-loud: end this sid's in-flight execution(s) with
+    // an error so the renderer tells the user the execution was interrupted, the spinner
     // unsticks, and main's sendMessage `finally` clears its pending permissions.
     if (type === 'session_down') {
       const why = typeof parsed.reason === 'string' ? parsed.reason : 'process error';
-      log.warn('dispatcher-conn', `session ${sid} down: ${why} (willReconnect=${parsed.willReconnect !== false}) — failing in-flight turns`);
-      ch.dispatcher.failAllTurns(`Session process ${why} — this turn was interrupted; the conversation resumes from the last message.`);
+      log.warn('dispatcher-conn', `session ${sid} down: ${why} (willReconnect=${parsed.willReconnect !== false}) — failing in-flight executions`);
+      ch.dispatcher.failAllExecutions(`Session process ${why} — this execution was interrupted; the conversation resumes from the last message.`);
       // willReconnect:false = terminal (reconnect attempts exhausted) → dead health
       // for this one tab (session-level, not host-wide). willReconnect:true = a
       // fresh exec is coming; don't flap to dead — the host heartbeat stands and the
@@ -243,7 +243,7 @@ export function createDispatcherConnection(deps: DispatcherConnectionDeps): Disp
       return;
     }
 
-    // Everything else is a turn / session event → the sid's turn-dispatcher.
+    // Everything else is a execution / session event → the sid's execution-dispatcher.
     ch.dispatcher.feed(parsed);
   });
 
@@ -270,10 +270,10 @@ export function createDispatcherConnection(deps: DispatcherConnectionDeps): Disp
       channels.delete(sid);
       writeToProc({ type: 'close_session', sid });
     }
-    const dispatcher = createTurnDispatcher(
+    const dispatcher = createExecutionDispatcher(
       deps.parseRemoteMessage,
       sinks.onTaskEvent,
-      sinks.onServerTurn,
+      sinks.onServerExecution,
       sinks.onQueue,
       sinks.onSkillsReloaded,
       sinks.onSessionEvent,
@@ -290,7 +290,7 @@ export function createDispatcherConnection(deps: DispatcherConnectionDeps): Disp
 
     return {
       sendLine: (msg) => writeToProc({ ...msg, sid }),
-      registerTurn: dispatcher.registerTurn,
+      registerExecution: dispatcher.registerExecution,
       awaitReady: dispatcher.awaitReady,
       onResponse: dispatcher.onResponse,
       kill: () => {

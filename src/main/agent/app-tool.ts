@@ -1,5 +1,5 @@
 /**
- * App-tool dispatcher (main side) — turns an `app_tool` request (op + args)
+ * App-tool dispatcher (main side) — executions an `app_tool` request (op + args)
  * coming from an agent-server bridge tool into a call against client-owned
  * resources (currently app-level skills via skills-store), and returns a
  * structured result the bridge tool relays back to the model.

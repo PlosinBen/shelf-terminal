@@ -1030,7 +1030,7 @@ describe('Claude config-edit (model / effort / permission)', () => {
   });
 });
 
-describe('processMessage — content/status send split (Phase 3 turnId-scoping)', () => {
+describe('processMessage — content/status send split (Phase 3 executionId-scoping)', () => {
   const map = () => createBlockMsgIdState();
 
   it('routes display content to contentSend and status to the (turn) send', () => {

@@ -14,7 +14,7 @@ interface Props {
 /**
  * Complete, self-contained agent message-history component.
  *
- * Subscribes to its own per-tab store slice (messages / isStreaming /
+ * Subscribes to its own per-tab store slice (messages / isExecutionActive /
  * pendingSends / initStatus) so input keystrokes elsewhere don't re-render
  * the timeline (agent-ui#4), owns its scroll-position intent, and renders
  * the entire message area: init/empty/failed pane, the linear timeline, the
@@ -28,7 +28,7 @@ export function MessageList({ tabId, visible }: Props) {
   const { settings } = useStore();
 
   const messages = tab?.messages ?? [];
-  const isStreaming = tab?.isStreaming ?? false;
+  const isExecutionActive = tab?.isExecutionActive ?? false;
   const pendingSends = tab?.pendingSends ?? [];
   const initStatus = tab?.initStatus ?? 'starting';
   const agentDisplay = settings.agentDisplay ?? {};
@@ -99,9 +99,9 @@ export function MessageList({ tabId, visible }: Props) {
     if (followBottomRef.current) {
       bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
-    // Deps: messages (new bubble / chunk / upsert), isStreaming (spinner flip),
+    // Deps: messages (new bubble / chunk / upsert), isExecutionActive (spinner flip),
     // pendingSends (queued chip below the timeline).
-  }, [messages, isStreaming, pendingSends]);
+  }, [messages, isExecutionActive, pendingSends]);
 
   // When tab becomes visible again, catch up (scrollIntoView is a no-op while
   // display:none, so auto-follow couldn't run).
@@ -118,10 +118,10 @@ export function MessageList({ tabId, visible }: Props) {
     if (m.type === 'fold_text' && m.streaming) return true;
     return false;
   });
-  // Spinner shows during the gap between turn-start and first visible chunk.
+  // Spinner shows during the gap between execution-start and first visible chunk.
   // "Busy" includes a non-empty queue so the spinner stays up across the brief
-  // inter-turn idle while the server drains queued sends (no flicker).
-  const busy = isStreaming || pendingSends.length > 0;
+  // inter-execution idle while the server drains queued sends (no flicker).
+  const busy = isExecutionActive || pendingSends.length > 0;
   const showSpinner = busy && !hasVisibleStreaming && messages.length > 0;
 
   return (
@@ -129,7 +129,7 @@ export function MessageList({ tabId, visible }: Props) {
       <div className="agent-messages" ref={listRef}>
         {/* 'starting' has no in-list pane — ConnectionOverlay covers the whole
             pane with a spinner + phase text (see ConnectionOverlay). */}
-        {initStatus === 'ready' && messages.length === 0 && !isStreaming && (
+        {initStatus === 'ready' && messages.length === 0 && !isExecutionActive && (
           <div className="agent-empty">Send a message to start</div>
         )}
 

@@ -5,7 +5,7 @@ import type { OutgoingMessage, SendFn } from './providers/types';
 import type { AgentProvider } from '@shared/agent-providers';
 
 /**
- * Hydrate persisted context for a turn. Surfaces the row only when the
+ * Hydrate persisted context for a execution. Surfaces the row only when the
  * recorded provider matches `provider` — cross-provider data (e.g. Claude
  * session pointer when the active provider is Copilot) is irrelevant and
  * could mislead a provider into resuming an unrelated SDK session.
@@ -37,42 +37,45 @@ export function loadRestoreContextFor(
  * @param now optional clock injection for tests; defaults to `Date.now`.
  */
 /**
- * Generate a unique turn id for a single `handleSend` invocation. Short enough
- * to read in logs (`t-3f8a91c2`); 8 hex chars give 4 billion combinations,
+ * Generate a unique execution id for a single `handleSend` invocation. Short enough
+ * to read in logs (`e-3f8a91c2`); 8 hex chars give 4 billion combinations,
  * which is far more than an agent-server process will ever see in its
  * lifetime. Format intentionally distinct from sessionId so the two don't
  * collide in eyeball debugging.
  */
-export function newTurnId(): string {
-  return `t-${randomUUID().slice(0, 8)}`;
+export function newExecutionId(): string {
+  return `e-${randomUUID().slice(0, 8)}`;
 }
 
+const SESSION_SCOPED_OUTPUT_TYPES = new Set<OutgoingMessage['type']>([
+  'message',
+  'stream',
+  'error',
+  'task_event',
+]);
+
 /**
- * Wrap a `send` function so every outgoing message carries the same `turnId`.
- * Each call to `handleSend` in agent-server is one "turn" — generating a turn
- * id once per turn and injecting it lets the main-process side route events
- * back to the correct per-turn AsyncIterator without ambiguity.
+ * Wrap a `send` function so every outgoing message carries the same `executionId`.
+ * Each call to `handleSend` in agent-server is one Shelf execution. Its id routes
+ * status/control to the matching main-process AsyncIterator; renderable content
+ * is session-scoped and deliberately carries no execution ownership.
  *
  * Lifecycle messages (`ready`, `pong`, etc.) are emitted from agent-server
- * outside of `handleSend` and intentionally do NOT carry a turnId — they
- * belong to no specific turn. The main side handles those on a separate
+ * outside of `handleSend` and intentionally do NOT carry a executionId — they
+ * belong to no specific execution. The main side handles those on a separate
  * dispatch path.
  */
-export function wrapSendForTurn(turnId: string, raw: SendFn): SendFn {
+export function wrapSendForExecution(executionId: string, raw: SendFn): SendFn {
   return (msg: OutgoingMessage) => {
-    // Background task events are intentionally turnId-less: a backgrounded task
-    // outlives its originating turn, so stamping the (soon-deregistered) turnId
-    // would get it dropped as "unknown turn" main-side. Pass through raw —
-    // mirrors how lifecycle messages stay turnId-less. See background-tasks#2.
-    if (msg.type === 'task_event') {
-      raw(msg);
+    if (SESSION_SCOPED_OUTPUT_TYPES.has(msg.type)) {
+      // Content and background-task events outlive execution settlement. Strip a
+      // provider-prepopulated id too: the session sink is their sole owner.
+      const { executionId: _executionId, ...sessionScoped } = msg;
+      raw(sessionScoped as OutgoingMessage);
       return;
     }
-    // Respect a pre-set turnId so a provider can open a server-initiated turn
-    // with its OWN id (auto-resume prose after a background task: `turn_started`
-    // + the prose reply carry the server turnId, NOT the foreground one). Falls
-    // back to this turn's id for ordinary messages. See background-tasks#2.
-    raw({ ...msg, turnId: msg.turnId ?? turnId } as OutgoingMessage);
+    // Respect a pre-set executionId for server-initiated control (`execution_started`).
+    raw({ ...msg, executionId: msg.executionId ?? executionId } as OutgoingMessage);
   };
 }
 
@@ -96,7 +99,7 @@ export function wrapSendForContext(
           updatedAt: now(),
         });
       } catch (err: any) {
-        // Persistence is best-effort — never let it break the turn — but
+        // Persistence is best-effort — never let it break the execution — but
         // also never invisibly: consistent persist failure means user history
         // is being lost, which is a much-harder-to-debug class of bug.
         serverLog('error', 'orchestrator', 'context persistence failed', { sessionId, provider, message: err?.message ?? err });

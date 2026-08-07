@@ -134,7 +134,7 @@ describe('refreshCodexAccountStatus', () => {
 
   beforeEach(() => __resetCodexAccountStatusCacheForTests());
 
-  it('cache MISS → fetch, cache, send turnId-less status', async () => {
+  it('cache MISS → fetch, cache, send executionId-less status', async () => {
     const { client, store } = fakeCache();
     const sent: OutgoingMessage[] = [];
     const fetch = vi.fn(async () => segments);

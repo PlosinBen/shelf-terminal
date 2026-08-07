@@ -57,7 +57,7 @@ export interface StatusSegment {
 
 export interface AgentStatusPayload {
   /** OPTIONAL: a pure account-status refresh (credits) omits it so the renderer
-   *  doesn't run streaming/turn-end side effects for a non-turn update. */
+   *  doesn't run streaming/execution-end side effects for a non-execution update. */
   state?: AgentSessionState;
   model?: string;
   costUsd?: number;
@@ -107,7 +107,7 @@ export interface AgentQueryOptions {
   effort?: string;
   /**
    * Structured config edit (picker / status-bar click). Routed as a no-prompt
-   * turn so the provider applies it + emits a divider the same way a typed
+   * execution so the provider applies it + emits a divider the same way a typed
    * /model slash does. Threaded through to agent-server's send line.
    */
   configEdit?: { key: 'model' | 'effort' | 'permissionMode'; value: string };
@@ -130,9 +130,9 @@ export type AgentEvent =
    */
   | { type: 'plan'; content: string }
   /**
-   * Mid-turn capabilities update — e.g. /model slash changing currentModel, or
+   * Mid-execution capabilities update — e.g. /model slash changing currentModel, or
    * the provider promoting a resolved model. Unlike the initial capabilities
-   * (a requestId-keyed RPC response), these arrive on the turn stream and must
+   * (a requestId-keyed RPC response), these arrive on the execution stream and must
    * be forwarded to the renderer's status bar. Without this variant they'd be
    * dropped by parseRemoteMessage and the status bar would never reflect a
    * mid-session model/effort/permission change.
@@ -153,7 +153,7 @@ export type AgentEvent =
     }
   | { type: 'auth_required'; provider: string }
   /**
-   * Interactive device-flow login events (session-level, turnId-less). The
+   * Interactive device-flow login events (session-level, executionId-less). The
    * prompt carries the verification URL + user code so main can open the LOCAL
    * browser (essential when the agent-server runs on a remote host). `done`
    * reports the terminal outcome. See features copilot-device-login.
@@ -222,7 +222,7 @@ export interface AgentBackend {
   reloadSkills?(): void;
   /**
    * Drop the provider's live ACP connection on the agent-server (fire-and-forget)
-   * so the NEXT capabilities probe / turn respawns and re-reads the config-home
+   * so the NEXT capabilities probe / execution respawns and re-reads the config-home
    * credentials. Called after a successful device-login (and by the checkAuth
    * Retry path), because an already-running `--acp` process spawned pre-login won't
    * re-read the credentials the login wrote. No-op when there's no live process.

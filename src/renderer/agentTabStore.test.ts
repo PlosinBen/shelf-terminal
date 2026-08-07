@@ -20,7 +20,7 @@ import {
   cancelPendingSend,
   clearPendingSends,
   clearMessages,
-  setStreaming,
+  setExecutionActive,
   setStatus,
   setPlan,
   applyTaskEvent,
@@ -120,7 +120,7 @@ describe('agentTabStore — applyTaskEvent (background tasks)', () => {
   it('tombstones a removed id — a later task_notification cannot resurrect it', () => {
     applyTaskEvent(TAB, { kind: 'started', task: task('t1') });
     removeBackgroundTask(TAB, 't1');
-    // The SDK's 'stopped' echo (and any turn-boundary snapshot) arrives AFTER
+    // The SDK's 'stopped' echo (and any execution-boundary snapshot) arrives AFTER
     // the user deleted the card — it must not re-add it.
     applyTaskEvent(TAB, { kind: 'done', task: task('t1', { status: 'stopped', done: true }) });
     applyTaskEvent(TAB, { kind: 'snapshot', tasks: [task('t1')] });
@@ -238,14 +238,14 @@ describe('agentTabStore — message actions', () => {
     // in-memory keeps the early (position-stable) stamp
     expect(__getTabForTests(TAB)!.messages.find((m) => m.id === 'm1')!.timestamp).toBe(1000);
     // and the PERSISTED copy must match — otherwise reload's by-session-time sort
-    // clumps finalized replies at turn-end, past the interleaved tool cards.
+    // clumps finalized replies at execution-end, past the interleaved tool cards.
     removeTab(TAB);  // flushSave fires synchronously
     const dirty = mockedStorage.saveAgentMessagesDelta.mock.calls.at(-1)![1];
     expect(dirty.find((m) => m.id === 'm1')!.timestamp).toBe(1000);
   });
 
   it('appendChunk buffers deltas and flushes after the 33ms window', () => {
-    setStreaming(TAB, true);
+    setExecutionActive(TAB, true);
     appendChunk(TAB, 'chunk-1', 'Hello ', 'text');
     appendChunk(TAB, 'chunk-1', 'world', 'text');
     // Before the timer fires, messages is still empty — deltas live
@@ -281,12 +281,12 @@ describe('agentTabStore — message actions', () => {
   });
 
   it('boundary-split: minting a new streaming segment settles the previous one (single caret)', () => {
-    // Regression: copilot ACP splits a turn's text into one reply per tool
+    // Regression: copilot ACP splits a execution's text into one reply per tool
     // boundary (agent-providers#27). Each segment is a distinct msgId. The
     // caret (message.streaming) must live on ONLY the segment currently
     // receiving chunks — earlier segments must settle at the boundary, not
-    // linger with a blinking caret until turn-end idle.
-    setStreaming(TAB, true);
+    // linger with a blinking caret until execution-end idle.
+    setExecutionActive(TAB, true);
     appendChunk(TAB, 'segA', 'first answer', 'text');
     vi.advanceTimersByTime(33);
     expect((__getTabForTests(TAB)!.messages.find((m) => m.id === 'segA') as any).streaming).toBe(true);
@@ -302,20 +302,20 @@ describe('agentTabStore — message actions', () => {
   });
 
   it('appendChunk does NOT requestSave (skips during streaming)', () => {
-    setStreaming(TAB, true);
+    setExecutionActive(TAB, true);
     appendChunk(TAB, 'chunk-1', 'hi', 'text');
     vi.advanceTimersByTime(33);
     expect(__getPendingSaveForTests(TAB)).toBeUndefined();
   });
 
   it('appendChunk after idle settles immediately and is persisted without another status transition', () => {
-    setStreaming(TAB, true);
-    setStreaming(TAB, false);
+    setExecutionActive(TAB, true);
+    setExecutionActive(TAB, false);
     appendChunk(TAB, 'late', 'tail content', 'text');
     vi.advanceTimersByTime(33);
 
     const tab = __getTabForTests(TAB)!;
-    expect(tab.isStreaming).toBe(false);
+    expect(tab.isExecutionActive).toBe(false);
     expect(tab.messages).toContainEqual(expect.objectContaining({
       id: 'late', type: 'reply', content: 'tail content', streaming: false,
     }));
@@ -329,13 +329,13 @@ describe('agentTabStore — message actions', () => {
     );
   });
 
-  it('setStreaming(false) flushes pending chunks before clearing streaming flag', () => {
-    setStreaming(TAB, true);
+  it('setExecutionActive(false) flushes pending chunks before clearing streaming flag', () => {
+    setExecutionActive(TAB, true);
     appendChunk(TAB, 'chunk-1', 'pending', 'text');
     // Buffer not yet flushed
     expect(__getTabForTests(TAB)!.messages.length).toBe(0);
-    setStreaming(TAB, false);
-    // Flushed synchronously by setStreaming, AND the streaming flag
+    setExecutionActive(TAB, false);
+    // Flushed synchronously by setExecutionActive, AND the streaming flag
     // got cleared on the flushed entry in the same pass.
     const msgs = __getTabForTests(TAB)!.messages;
     expect(msgs.length).toBe(1);
@@ -447,7 +447,7 @@ describe('agentTabStore — status / capabilities (no-fallback semantics)', () =
   });
 
   it('setStatus updates metric fields but does NOT touch actualModel', () => {
-    // Model display is capabilities-driven only — per-turn status must not
+    // Model display is capabilities-driven only — per-execution status must not
     // change actualModel (prevents alias flip-flop, see claude.ts).
     setActualModel(TAB, 'default');
     setStatus(TAB, { costUsd: 0.05, numTurns: 3 });
@@ -461,24 +461,24 @@ describe('agentTabStore — status / capabilities (no-fallback semantics)', () =
 describe('agentTabStore — streaming transitions', () => {
   beforeEach(() => initTab(TAB, { sessionId: SESSION, provider: 'claude' }));
 
-  it('setStreaming(false) clears streaming flag on in-flight text', () => {
+  it('setExecutionActive(false) clears streaming flag on in-flight text', () => {
     appendChunk(TAB, 'm1', 'hi', 'text');
-    setStreaming(TAB, true);
-    setStreaming(TAB, false);
+    setExecutionActive(TAB, true);
+    setExecutionActive(TAB, false);
     const m = __getTabForTests(TAB)!.messages[0] as any;
     expect(m.streaming).toBe(false);
   });
 
-  it('setStreaming(false) clears pendingPicker (ghost panel guard)', () => {
-    setStreaming(TAB, true);
+  it('setExecutionActive(false) clears pendingPicker (ghost panel guard)', () => {
+    setExecutionActive(TAB, true);
     setPendingPicker(TAB, { id: 'p1', prompts: [] });
-    setStreaming(TAB, false);
+    setExecutionActive(TAB, false);
     expect(__getTabForTests(TAB)!.pendingPicker).toBeNull();
   });
 
   it('streaming flag transition true→false triggers requestSave', () => {
-    setStreaming(TAB, true);
-    setStreaming(TAB, false);
+    setExecutionActive(TAB, true);
+    setExecutionActive(TAB, false);
     expect(__getPendingSaveForTests(TAB)).toBeDefined();
   });
 });
@@ -495,8 +495,8 @@ describe('agentTabStore — save throttle', () => {
     expect(mockedStorage.saveAgentMessagesDelta).toHaveBeenCalledTimes(1);
   });
 
-  it('streaming-in-progress skips doSave (deferred to turn end)', () => {
-    setStreaming(TAB, true);
+  it('streaming-in-progress skips doSave (deferred to execution end)', () => {
+    setExecutionActive(TAB, true);
     upsertMessage(TAB, textMsg('m1', 'mid-stream'));
     vi.advanceTimersByTime(5001);
     expect(mockedStorage.saveAgentMessagesDelta).not.toHaveBeenCalled();
@@ -515,29 +515,29 @@ describe('agentTabStore — in-memory trim', () => {
     initTab(TAB, { sessionId: SESSION, provider: 'claude' });
   });
 
-  it('trim runs at setStreaming(false), aligned to nearest user msg', () => {
+  it('trim runs at setExecutionActive(false), aligned to nearest user msg', () => {
     // Build u0,t0, u1,t1, u2,t2, u3,t3 — 8 msgs, user every other slot.
     for (let i = 0; i < 4; i++) {
       upsertMessage(TAB, userMsg(`u${i}`, `q${i}`));
       upsertMessage(TAB, textMsg(`t${i}`, `a${i}`));
     }
-    // doSave throttle no longer trims — only setStreaming(false) does.
+    // doSave throttle no longer trims — only setExecutionActive(false) does.
     vi.advanceTimersByTime(5001);
     expect(__getTabForTests(TAB)!.messages.length).toBe(8);
 
-    setStreaming(TAB, true);
-    setStreaming(TAB, false);
+    setExecutionActive(TAB, true);
+    setExecutionActive(TAB, false);
     // target idx = length - cap = 8 - 5 = 3 → messages[3] = t1 (not user),
     // so the loop walks forward to messages[4] = u2 and cuts there.
     // Kept tail = [u2, t2, u3, t3] = 4 msgs (slightly under cap — the
-    // turn-alignment trade-off).
+    // execution-alignment trade-off).
     const msgs = __getTabForTests(TAB)!.messages;
     expect(msgs.length).toBe(4);
     expect(msgs[0].id).toBe('u2');
   });
 
-  it('streaming-in-progress does NOT trim (cap deferred to turn end)', () => {
-    setStreaming(TAB, true);
+  it('streaming-in-progress does NOT trim (cap deferred to execution end)', () => {
+    setExecutionActive(TAB, true);
     for (let i = 0; i < 8; i++) upsertMessage(TAB, textMsg(`m${i}`, `c${i}`));
     vi.advanceTimersByTime(5001);
     expect(__getTabForTests(TAB)!.messages.length).toBe(8);
@@ -559,7 +559,7 @@ describe('agentTabStore — settings constraints', () => {
 });
 
 describe('agentTabStore — buildMessageTimeline selector', () => {
-  it('keeps top-level messages in store order without turn grouping', () => {
+  it('keeps top-level messages in store order without execution grouping', () => {
     const msgs: AgentMsg[] = [
       textMsg('m1', 'sys boot'),
       userMsg('u1', 'hi'),
