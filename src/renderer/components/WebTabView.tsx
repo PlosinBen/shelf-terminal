@@ -55,12 +55,12 @@ export function WebTabView({ tabId, initialUrl, visible }: Props) {
     if (!el) return;
 
     const onNavigate = (e: { url?: string }) => {
-      if (!e.url) return;
-      // The blank starter page is an implementation detail — show an empty bar
-      // (browser new-tab behavior), not the literal "about:blank".
-      const url = e.url === 'about:blank' ? '' : e.url;
-      setAddress(url);
-      setWebTabUrl(tabId, url);
+      // The blank starter page is an implementation detail. Its did-navigate
+      // event can arrive after the user has started typing, so never let it
+      // clear a fresh tab's address bar.
+      if (!e.url || e.url === 'about:blank') return;
+      setAddress(e.url);
+      setWebTabUrl(tabId, e.url);
     };
     // A new navigation starting clears any prior failure banner.
     const onStartLoading = () => setLoadError(null);
