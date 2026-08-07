@@ -91,6 +91,22 @@ describe('translateSessionUpdate', () => {
     }]);
   });
 
+  it('specializes a read tool whose title starts with Finding as Find', () => {
+    const u: SessionUpdate = {
+      sessionUpdate: 'tool_call',
+      toolCallId: 'find-1',
+      title: 'Finding files matching README.md',
+      kind: 'read',
+      status: 'completed',
+      content: [{ type: 'content', content: { type: 'text', text: './README.md' } }],
+    };
+    expect(translateSessionUpdate(u)[0]).toMatchObject({
+      msgType: 'fold_code',
+      label: 'Find',
+      subtitle: 'Finding files matching README.md',
+    });
+  });
+
   it('an IN-FLIGHT tool with no output stays body-less (so a genuine mid-call crash IS surfaced on reload)', () => {
     const u: SessionUpdate = { sessionUpdate: 'tool_call', toolCallId: 'r2', title: 'View', kind: 'read', status: 'in_progress' };
     expect(translateSessionUpdate(u)[0]).not.toHaveProperty('body');

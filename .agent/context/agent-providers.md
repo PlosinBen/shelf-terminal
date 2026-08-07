@@ -486,3 +486,15 @@ Tool call 的 display metadata 也是 session-scoped carry，以 `toolCallId` �
 **Do not change casually because：** 不要為了顯示 `results` 在 renderer 加 Codex-specific 分支，或在沒有明確產品需求時擴張 search-result normalization；若要呈現結果，應另行定義跨層 UX 與資料契約。
 
 **Related：** `agent-providers#1`、`agent-ui#5`、`agent-server/providers/codex/app-server-translate.ts`。
+
+## agent-providers#41 — Copilot ACP `glob` 以 Finding title 修正 read label  ·  [Gotcha]
+
+**Symptom：** Copilot 尋找符合 pattern 的檔案時，卡片 subtitle 是 `Finding files matching …`，label 卻顯示 `Read`，讓找檔與讀檔語意不對稱。
+
+**Root cause：** Copilot ACP adapter 把原生 `glob` 壓成標準 `kind:'read'`，但不傳原始 tool name；它只在生成的英文 title 保留 `Finding…` 意圖。共用 ACP translator 原本只做 `kind → label`，因此按協定值顯示 `Read`。
+
+**Fix / note：** label resolver 採兩層 fallback：`kind==='read' && title.startsWith('Finding')` 時顯示 `Find`，其餘仍走標準 ACP kind map，最後未知值回退 `Tool`。這只改卡片 label；subtitle、body 與 `fold_code`／`fold_diff` 選擇不變。
+
+**Do not change casually because：** 不要把所有 `read` 改成 `Find`，也不要通用擷取 title 第一個單字；ACP title 是 provider 文案而非穩定 tool-name 欄位。若 Copilot 未來傳出原始 tool name 或修正 kind，應優先使用正式 metadata，再移除此窄相容規則。
+
+**Related：** `agent-providers#6`（共用 ACP translation）、`agent-ui#5`（fold card 渲染原語）、`agent-server/providers/acp/translate.ts`。

@@ -167,6 +167,14 @@ function toolKindLabel(kind: ToolKind | null | undefined): string {
   return (kind && TOOL_KIND_LABELS[kind]) || 'Tool';
 }
 
+function toolCallLabel(kind: ToolKind | null | undefined, title: string | undefined): string {
+  // Copilot ACP collapses glob into `read`; its generated title preserves the
+  // more precise finding-files intent. Keep the standard kind map as fallback.
+  // See agent-providers#41.
+  if (kind === 'read' && title?.startsWith('Finding')) return 'Find';
+  return toolKindLabel(kind);
+}
+
 /**
  * Map ONE ACP `SessionUpdate` to zero or more Shelf wire messages (WITHOUT a
  * executionId — the send wrapper stamps that). Returns `[]` for updates that are not
@@ -211,7 +219,7 @@ export function translateSessionUpdate(update: SessionUpdate): OutgoingMessage[]
           || rawOutputToText('rawOutput' in update ? update.rawOutput : undefined);
         return summary ? [{ type: 'message', msgId, msgType: 'reply', content: summary }] : [];
       }
-      const label = toolKindLabel('kind' in update ? update.kind : undefined);
+      const label = toolCallLabel('kind' in update ? update.kind : undefined, title);
       const status = 'status' in update ? update.status : undefined;
       const errorMessage = errorFor(status);
       const diff = firstDiff('content' in update ? update.content : undefined);
