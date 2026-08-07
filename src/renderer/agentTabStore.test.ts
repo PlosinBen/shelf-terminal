@@ -245,6 +245,7 @@ describe('agentTabStore — message actions', () => {
   });
 
   it('appendChunk buffers deltas and flushes after the 33ms window', () => {
+    setStreaming(TAB, true);
     appendChunk(TAB, 'chunk-1', 'Hello ', 'text');
     appendChunk(TAB, 'chunk-1', 'world', 'text');
     // Before the timer fires, messages is still empty — deltas live
@@ -285,6 +286,7 @@ describe('agentTabStore — message actions', () => {
     // caret (message.streaming) must live on ONLY the segment currently
     // receiving chunks — earlier segments must settle at the boundary, not
     // linger with a blinking caret until turn-end idle.
+    setStreaming(TAB, true);
     appendChunk(TAB, 'segA', 'first answer', 'text');
     vi.advanceTimersByTime(33);
     expect((__getTabForTests(TAB)!.messages.find((m) => m.id === 'segA') as any).streaming).toBe(true);
@@ -300,9 +302,31 @@ describe('agentTabStore — message actions', () => {
   });
 
   it('appendChunk does NOT requestSave (skips during streaming)', () => {
+    setStreaming(TAB, true);
     appendChunk(TAB, 'chunk-1', 'hi', 'text');
     vi.advanceTimersByTime(33);
     expect(__getPendingSaveForTests(TAB)).toBeUndefined();
+  });
+
+  it('appendChunk after idle settles immediately and is persisted without another status transition', () => {
+    setStreaming(TAB, true);
+    setStreaming(TAB, false);
+    appendChunk(TAB, 'late', 'tail content', 'text');
+    vi.advanceTimersByTime(33);
+
+    const tab = __getTabForTests(TAB)!;
+    expect(tab.isStreaming).toBe(false);
+    expect(tab.messages).toContainEqual(expect.objectContaining({
+      id: 'late', type: 'reply', content: 'tail content', streaming: false,
+    }));
+    expect(__getPendingSaveForTests(TAB)).toBeDefined();
+
+    vi.advanceTimersByTime(5001);
+    expect(mockedStorage.saveAgentMessagesDelta).toHaveBeenCalledWith(
+      SESSION,
+      [expect.objectContaining({ id: 'late', content: 'tail content', streaming: false })],
+      expect.any(Set),
+    );
   });
 
   it('setStreaming(false) flushes pending chunks before clearing streaming flag', () => {

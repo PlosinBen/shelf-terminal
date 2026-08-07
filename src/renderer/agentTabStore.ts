@@ -457,6 +457,7 @@ function flushChunkBuffer(tabId: string) {
   // array. One reducer pass, one notify — even if 200 chunks landed
   // in the 33 ms window for the same msgId, MessageList commits once.
   let messages = tab.messages;
+  const touchedIds = new Set<string>();
   // The msgId that received the most recent chunk in this flush — the single
   // "live" stream. Any earlier message still flagged streaming is a completed
   // segment (boundary-split mints a fresh message per tool boundary), so it is
@@ -473,13 +474,13 @@ function flushChunkBuffer(tabId: string) {
       if (m.id !== msgId) continue;
       const next = messages.slice();
       if (type === 'text' && m.type === 'reply') {
-        next[i] = { ...m, content: (m.content as string) + delta, streaming: true };
+        next[i] = { ...m, content: (m.content as string) + delta, streaming: tab.isStreaming };
       } else if (type === 'thinking' && m.type === 'fold_text') {
         const prev = m.body?.content ?? '';
         next[i] = {
           ...m,
           body: { content: prev + delta, tone: 'muted' as const },
-          streaming: true,
+          streaming: tab.isStreaming,
         };
       } else {
         // Type mismatch — unexpected, skip safely.
@@ -487,6 +488,7 @@ function flushChunkBuffer(tabId: string) {
         break;
       }
       messages = next;
+      touchedIds.add(msgId);
       found = true;
       break;
     }
@@ -498,7 +500,7 @@ function flushChunkBuffer(tabId: string) {
             id: msgId,
             type: 'reply',
             content: delta,
-            streaming: true,
+            streaming: tab.isStreaming,
             provider: tab.provider,
             timestamp: Date.now(),
           } as AgentMsg,
@@ -513,12 +515,13 @@ function flushChunkBuffer(tabId: string) {
             type: 'fold_text',
             label: 'Thinking',
             body: { content: delta, tone: 'muted' as const },
-            streaming: true,
+            streaming: tab.isStreaming,
             provider: tab.provider,
             timestamp: Date.now(),
           } as AgentMsg,
         ];
       }
+      touchedIds.add(msgId);
     }
   }
   // Single active caret: settle any message still flagged streaming that ISN'T
@@ -529,7 +532,18 @@ function flushChunkBuffer(tabId: string) {
   // itself skips markDirty (partials shouldn't persist), so this is the write.
   let settled = false;
   const cleared = messages.map((m) => {
-    if ((m.type === 'reply' || m.type === 'fold_text') && m.streaming && m.id !== activeMsgId) {
+    const streamMessage = m.type === 'reply' || m.type === 'fold_text';
+    // A chunk may arrive after execution idle because provider notifications and
+    // prompt settlement are independent. It is still content: show it, but do not
+    // resurrect the caret/execution. Persist every touched settled message now,
+    // because no later idle transition is guaranteed to flush it.
+    if (!tab.isStreaming && streamMessage && (touchedIds.has(m.id) || m.streaming)) {
+      settled = true;
+      const s = m.streaming ? ({ ...m, streaming: false } as AgentMsg) : m;
+      markDirty(tabId, s);
+      return s;
+    }
+    if (tab.isStreaming && streamMessage && m.streaming && m.id !== activeMsgId) {
       settled = true;
       const s = { ...m, streaming: false } as AgentMsg;
       markDirty(tabId, s);
@@ -565,10 +579,9 @@ export function appendChunk(
     buffer.set(chunkMsgId, { type, delta });
   }
   scheduleChunkFlush(tabId);
-  // Stream chunks deliberately skip requestSave — saving partials
-  // would re-write the full message list every throttle window
-  // during a long turn. doSave at turn end (setStreaming(false))
-  // captures the final.
+  // Persistence is decided at flush time from the current execution status:
+  // active chunks remain transient, while chunks that arrive after idle are
+  // immediately marked dirty because no later idle transition is guaranteed.
 }
 
 // ── Server-owned send queue (optimistic chips + snapshot reconcile) ──

@@ -163,6 +163,18 @@ test.describe('agent flows via fake provider', () => {
       await expect(page.locator('.agent-status-label:visible')).toHaveText('idle', { timeout: 5_000 });
       await expect(page.locator('.agent-cursor:visible')).toHaveCount(0, { timeout: 5_000 });
     });
+
+    test('content arriving after idle stays settled and visible', async ({ shelfApp: { page } }) => {
+      await setupProject(page);
+      await openAgentTab(page);
+      await sendAgentPrompt(page, 'late_chunk:300:late tail');
+
+      // The query settles before the scheduled provider notification.
+      await expect(page.locator('.agent-status-label:visible')).toHaveText('idle', { timeout: 5_000 });
+      await expect(page.locator('.agent-messages:visible')).toContainText('late tail', { timeout: 5_000 });
+      await expect(page.locator('.agent-status-label:visible')).toHaveText('idle');
+      await expect(page.locator('.agent-cursor:visible')).toHaveCount(0);
+    });
   });
 
   test.describe('fold (tool_use)', () => {

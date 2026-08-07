@@ -31,6 +31,7 @@ const FAKE_AUTH_DISPLAY_NAME = 'Fake Harness';
  *   text:<msg>          stream chunks then finalize as text message
  *   chunk:<msg>         stream chunks under a fresh msgId, NO finalize (copilot
  *                       boundary-split segment — settles only at turn-end idle)
+ *   late_chunk:<ms>:<msg> schedule a stream chunk after query/idle has returned
  *   thinking:<msg>      thinking message
  *   websearch:<query>   bodyless Web search markdown card
  *   tool:<name>         tool_use + tool_result success
@@ -191,6 +192,7 @@ export function createFakeBackend(_representedProvider: AgentProvider = FAKE_PRO
   // refreshAccountStatus emits an account-credit status (turnId-less), mirroring
   // how copilot fetches premium-request credit at turn end. Consumed once.
   let emitCreditNext = false;
+  const lateTimers = new Set<ReturnType<typeof setTimeout>>();
 
   async function runStep(
     step: string,
@@ -230,6 +232,23 @@ export function createFakeBackend(_representedProvider: AgentProvider = FAKE_PRO
       const mid = Math.ceil(content.length / 2);
       send({ type: 'stream', msgId, streamType: 'text', content: content.slice(0, mid) });
       send({ type: 'stream', msgId, streamType: 'text', content: content.slice(mid) });
+      return;
+    }
+
+    // late_chunk:<ms>:<msg> — schedule content after query returns and its idle
+    // status has been emitted. Uses an ordinary stream wire event; only timing is
+    // special, mirroring provider notification callbacks that settle late.
+    if (step.startsWith('late_chunk:')) {
+      const [, delayRaw, ...contentParts] = step.split(':');
+      const delayMs = Number(delayRaw);
+      const content = contentParts.join(':');
+      if (!Number.isFinite(delayMs) || delayMs < 0 || !content) return;
+      const msgId = mintId('late');
+      const timer = setTimeout(() => {
+        lateTimers.delete(timer);
+        send({ type: 'stream', msgId, streamType: 'text', content });
+      }, delayMs);
+      lateTimers.add(timer);
       return;
     }
 
@@ -606,6 +625,8 @@ export function createFakeBackend(_representedProvider: AgentProvider = FAKE_PRO
 
     dispose(): void {
       abortController?.abort();
+      for (const timer of lateTimers) clearTimeout(timer);
+      lateTimers.clear();
       if (fakeLoginTimer) clearTimeout(fakeLoginTimer);
       fakeLoginTimer = null;
       fakeLoginSend = null;

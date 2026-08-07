@@ -239,6 +239,20 @@ describe('createFakeBackend — scenarios', () => {
     expect(texts).toHaveLength(2);
   });
 
+  it('late_chunk: emits a stream only after query has settled idle', async () => {
+    const { send, msgs } = collect();
+    const backend = createFakeBackend();
+    await backend.query(makeInput('late_chunk:10:tail:content'), send);
+
+    expect((msgs.at(-1) as any).state).toBe('idle');
+    expect(msgs.some((m) => m.type === 'stream')).toBe(false);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(msgs.at(-1)).toEqual(expect.objectContaining({
+      type: 'stream', streamType: 'text', content: 'tail:content',
+    }));
+    backend.dispose();
+  });
+
   it('chain: runs steps in order', async () => {
     const { send, msgs } = collect();
     await createFakeBackend().query(makeInput('text:hi|tool:Read|text:bye'), send);
