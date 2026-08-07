@@ -107,6 +107,22 @@ describe('translateSessionUpdate', () => {
     });
   });
 
+  it('specializes an other tool whose title starts with Searching as Search', () => {
+    const u: SessionUpdate = {
+      sessionUpdate: 'tool_call',
+      toolCallId: 'search-1',
+      title: "Searching for 'module'",
+      kind: 'other',
+      status: 'completed',
+      content: [{ type: 'content', content: { type: 'text', text: 'src/go.mod:module shelf' } }],
+    };
+    expect(translateSessionUpdate(u)[0]).toMatchObject({
+      msgType: 'fold_code',
+      label: 'Search',
+      subtitle: "Searching for 'module'",
+    });
+  });
+
   it('an IN-FLIGHT tool with no output stays body-less (so a genuine mid-call crash IS surfaced on reload)', () => {
     const u: SessionUpdate = { sessionUpdate: 'tool_call', toolCallId: 'r2', title: 'View', kind: 'read', status: 'in_progress' };
     expect(translateSessionUpdate(u)[0]).not.toHaveProperty('body');

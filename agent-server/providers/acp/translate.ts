@@ -168,10 +168,11 @@ function toolKindLabel(kind: ToolKind | null | undefined): string {
 }
 
 function toolCallLabel(kind: ToolKind | null | undefined, title: string | undefined): string {
-  // Copilot ACP collapses glob into `read`; its generated title preserves the
-  // more precise finding-files intent. Keep the standard kind map as fallback.
+  // Copilot ACP collapses some tool names into broad kinds; its generated title
+  // preserves the more precise find/search intent. Keep the kind map as fallback.
   // See agent-providers#41.
   if (kind === 'read' && title?.startsWith('Finding')) return 'Find';
+  if (kind === 'other' && title?.startsWith('Searching')) return 'Search';
   return toolKindLabel(kind);
 }
 
