@@ -108,7 +108,7 @@ related:
 
 ## worktree#13 — Project config explicitly binds Shelf to a feature-note directory  ·  [Decision]
 
-**Decision:** Shelf's feature-note mechanism is enabled only by optional project-level `ProjectConfig.featureNoteDir`; there is no auto-detection or fallback to `.agent/features`. Shelf owns safe listing, picker handoff, migration, and restore. The workflow or skill owns note semantics and its recommended directory, while the project supplies the binding value. A configured dialog always shows the source directory; missing/empty directories show a successful empty state, while operational failures remain visible and non-blocking for ordinary worktree creation.
+**Decision:** Shelf's feature-note mechanism is enabled only by nullable canonical `Project.featureNoteDir`; there is no auto-detection or fallback to `.agent/features`. Shelf owns safe listing, picker handoff, migration, and restore. The workflow or skill owns note semantics and its recommended directory, while the project supplies the binding value. A configured dialog always shows the source directory; missing/empty directories show a successful empty state, while operational failures remain visible and non-blocking for ordinary worktree creation.
 
 At child creation, the main project's current value is copied into the child's same field. The shared config interface stays identical, Project Settings makes the child field read-only, and close uses that stored snapshot. Main edits affect future children only. Existing projects and pre-feature children receive no migration or implicit default.
 

@@ -54,7 +54,7 @@ related:
 - **Server-side**（`~/.shelf/agent-context/{sessionId}.json`）：保存 provider resume pointer與 orchestration context；Claude/Copilot/Codex 的對話本體仍由各自 CLI/runtime管理，詳見 `background-tasks#1`
 - **Client-side**（IndexedDB `shelf-agent-history`）：存完整 UI messages（含 user messages、tool calls 展開等），用於重新開啟 tab 時恢復顯示
 
-SessionId 是 UUID v4，存在 `ProjectConfig.agentSessionIds[provider]`，兩層用同一個 key。
+SessionId 是 UUID v4，存在 canonical `Project.agentSessionIds[provider]`，兩層用同一個 key。
 
 **清理策略**：
 - Server-side：agent-server 啟動時掃描，移除 `updatedAt` 超過 30 天 + 損壞 JSON

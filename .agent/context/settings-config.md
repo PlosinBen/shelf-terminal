@@ -40,14 +40,14 @@ E2E 測試在 `e2e/helpers.ts` 每個 worker `mkdtempSync` 一個 tempdir，啟�
 
 ## settings-config#3 — Bootstrap 在開窗前先載入 config，失敗時 blocking dialog  ·  [Decision]
 
-**Decision**：`app.whenReady()` 裡先呼叫 `bootstrap()` 同步載入 `projects.json` 和 `settings.json`，再 `createWindow()`。`loadProjects` / `loadSettings` 回傳 `LoadResult` discriminated union（`ok | parse | permission | read`），bootstrap 根據錯誤型別跳對應的 `dialog.showMessageBoxSync`：parse 給「Quit / Backup & Continue」、permission/read 只給 Quit。
+**Decision**：`app.whenReady()` 裡先呼叫 `bootstrap()` 同步建立 ready project repository 並載入 settings，再 `createWindow()`。Project persistence 會區分 decode/parse/schema/format 與 read/permission failures；bootstrap 對無法載入的 project document 跳 blocking `dialog.showMessageBoxSync`：format/schema 類錯誤提供「Quit / Backup & Continue」，read/permission 只給 Quit。Continue 只有在原檔成功移到 `.corrupt.*` 後才建立 empty repository。
 
 **Reason**：
 - 過去 config 損毀時 silent 退回 default，使用者不會意識到自己的 project 列表「不見了」直到下次儲存覆寫。
-- Sync dialog 在 ready 階段是少數能 block 的時機；window 都還沒開，視覺上不會看到半成品的 UI 又跳錯。
+- Sync dialog 在 ready 階段是少數能 block 的時機；window 都還沒開，renderer 不可能讀到未初始化 repository。
 - E2E 測試用 `SHELF_BOOTSTRAP_DIALOG_RESPONSE=quit|continue` env 變數 mock dialog 回應，避免測試卡在 native 對話框。
 
-**Do not change because**：把 dialog 推到 createWindow 之後 / 用 async dialog 會讓 race condition 變多（renderer 已經跟 main 要 cachedProjects 但 cache 還沒填）。
+**Do not change because**：把 dialog 推到 createWindow 之後 / 用 async dialog 會讓 renderer 可能在 repository ready 前發 query。Backup 失敗時直接以空集合繼續則可能讓下次儲存覆蓋唯一可復原的損毀原檔。
 
 ## settings-config#4 — DEFAULT_SETTINGS 不能放在 types.ts  ·  [Gotcha]
 

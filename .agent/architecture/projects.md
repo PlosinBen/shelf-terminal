@@ -8,50 +8,45 @@ related:
 
 # Projects
 
-Projects are renderer-local runtime state backed by a persisted project-config list. The collection boundary owns project identity lookup, visual ordering, stable mounted-view ordering, and config persistence. UI state owns which project is active or being edited by id.
+Project configuration has one durable authority in the main process. Persisted documents are decoded into a current canonical project collection before any consumer sees them; renderer runtime state is a second layer composed by project identity.
 
 ## Flow
 
 ```text
-Persisted project configs
-  -> project collection boundary
-  -> visual project order -> sidebar / persistence
-  -> stable project view order -> mounted terminal / agent / web views
+Persisted project document
+  -> opaque file read
+  -> version-aware loader and canonical validation
+  -> ready main project repository
+       -> main project queries
+       -> project operation boundary
+            -> renderer repository client
+            -> mutation coordinator
+            -> canonical collection reconcile
+            -> canonical Project + runtime-by-project-id
+            -> flat readonly ProjectView
+            -> components
+
+Canonical project mutation
+  -> construct candidate collection
+  -> format newest document
+  -> atomic replace
+  -> publish main canonical collection
+  -> authoritative renderer refresh
 
 Visual project order + runtime tab presence + transient filter mode
   -> visual-group connectivity
   -> visible real project indices
   -> sidebar rows / directional project navigation
-
-User project action
-  -> project id event or store action
-  -> collection boundary resolves current project
-  -> runtime/config mutation
-  -> readonly snapshot to renderer
-
-Project-owned request
-  -> resolve source project identity
-  -> focus source project
-  -> render request gate with the source's visible label
-  -> continue or deny within that project
 ```
 
 ## Boundaries
 
-The project collection boundary owns project lookup, add/delete/reorder, config update, visual listing, stable mounted-view listing, and persistence writes for project config/order changes.
+The persistence boundary alone understands raw bytes, legacy/current persisted shapes, schema versions, formatting, atomic replacement, and the nonempty-to-empty backup guard. Missing files produce an empty canonical collection; malformed or unsupported documents fail before a repository becomes ready.
 
-Renderer view state owns active project id, editing project id, sidebar/panel visibility, and invalid-id reconciliation after deletion.
+The main repository owns canonical identity, defaults, grouping/order invariants, durable project-level mutations, and main-process queries. It publishes a candidate collection only after persistence succeeds. Removed-project storage and secrets cleanup is post-commit work with an explicit retry result, not part of the config transaction.
 
-Sidebar visibility is a projection over visual project order, not a second project collection. It may hide the active project row without changing the active project or mounted right-side view; interactions continue to target real visual indices.
+The renderer repository client is a stateless operation adapter private to the App-side coordinator. A successful mutation is followed by an authoritative collection query; only that result is reconciled into renderer state. A failed mutation leaves the current renderer collection unchanged, while a post-commit refresh failure retries only the query.
 
-An app-global gate with a project owner must resolve and focus that owner before it is presented.
-Unknown ownership fails closed; a completed or cancelled gate leaves the source project active rather
-than maintaining a navigation-return stack.
+The renderer project store owns runtime/reactive state: tabs, active tab, split tab, folder validity, active/editing project identity, notices, and connection health. Runtime state is preserved by project id when a fresh canonical collection is reconciled. Components read flat project views and emit intents; they do not know persisted schema or call project-config operations.
 
-Project runtime state includes tabs, active tab index, split tab id, folder validity, and connection health. Persistence serializes only project config; runtime tab/session state stays renderer-local.
-
-## Ordering
-
-Visual order is the user-facing project list order. It is group-aware for worktree parent/child rows and is the order persisted to disk.
-
-Stable mounted-view order is deterministic by project identity and does not change when visual order changes. Mounted-view identity is hierarchical: project identity owns a tab subtree, and tab identity owns the individual view. Reorder, insertion, or removal preserves every unaffected subtree instead of remounting it.
+Sidebar visibility is a projection over authoritative visual order, not a second project collection. Stable mounted-view order is deterministic by project identity so reorder, insertion, or deletion cannot remount unaffected terminal, agent, or web subtrees.

@@ -28,4 +28,4 @@ Decisions + gotchas grouped by topic. Cited from code as `<topic>#N`.
 | app 層 config 備份 / 複製 | [config-backup](config-backup.md) | explicit copy 非 sync、selected-item Backup、pinned transactional Import、side-car serialization、local control markers |
 | 專案 env（plain + secret） | [project-env](project-env.md) | 兩類 env 單一注入 map、全 connector 注入、dispatcher 走 open_session、secret AES-GCM + key-tier seam、side-car 不同步 |
 | Worktree lifecycle | [worktree](worktree.md) | create/finish proposal gates, project-configured note hand-off + child snapshots, provider override |
-| Project collection / Sidebar visibility | [projects](projects.md) | stable mounted-view order、project-id targets、connected-only projection、terminal-first header focus |
+| Project repository / renderer views | [projects](projects.md) | versioned canonical boundary、main-owned identity、durable recovery、stable views與 Sidebar projection |

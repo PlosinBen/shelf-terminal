@@ -10,73 +10,117 @@ related:
 
 # Projects
 
-Renderer project contracts cover the store snapshot, project-level event payloads, listing orders, and persistence shape.
+Project contracts cover the canonical domain model, main repository operations, renderer composition, and project-level intents. Authoritative domain types are defined in `src/shared/projects.ts`.
 
-## Store Snapshot
-
-Authoritative source: `src/renderer/store.ts`.
+## Canonical model
 
 ```ts
-type StoreSnapshot = {
-  projects: readonly ReadonlyProjectRuntime[];
-  activeProjectId: string | null;
-  activeProjectIndex: number;
-  editingProjectId: string | null;
-  editingProjectIndex: number | null;
-  // other renderer UI state...
+interface Project {
+  readonly id: ProjectId;
+  readonly name: string;
+  readonly cwd: string;
+  readonly connection: ReadonlyDeep<Connection>;
+  readonly maxTabs: number;
+  readonly initScript: string | null;
+  readonly envPlain: Readonly<Record<string, string>>;
+  readonly defaultTabs: readonly ReadonlyDeep<TabTemplate>[];
+  readonly quickCommands: readonly ReadonlyDeep<QuickCommand>[];
+  readonly featureNoteDir: string | null;
+  readonly parentProjectId: ProjectId | null;
+  readonly worktreeBranch: string | null;
+  readonly baseBranch: string | null;
+  readonly defaultAgentProvider: string | null;
+  readonly openAgentOnConnect: boolean;
+  readonly agentSessionIds: Readonly<Record<string, string>>;
+  readonly agentPrefs: Readonly<Record<string, ReadonlyDeep<AgentPrefs>>>;
 }
 ```
 
-`projects` is a deep readonly view. Normal TypeScript call sites must not mutate returned project objects, nested config objects, the tabs array, or tab objects directly.
+`ProjectCreateInput` is the same create-domain input without `id` or `agentSessionIds`, and with fields that receive canonical defaults marked optional. Project ids are opaque strings created only by the main repository.
 
-`activeProjectIndex` and `editingProjectIndex` are derived compatibility values. Long-lived project identity must use `activeProjectId`, `editingProjectId`, or an explicit project id payload.
+Unknown provider ids remain valid stored strings and record keys. Runtime behavior must resolve them through the live provider registry; the config loader/formatter must not discard them.
 
-## Listing Orders
+## Main repository
 
-Authoritative source: `src/renderer/store.ts`.
+Authoritative source: `src/main/projects/projects-repository.ts`.
 
 ```ts
-function getProjectConfigs(): ProjectConfig[]
-function listStableProjectViews(): readonly ReadonlyProjectRuntime[]
+interface MainProjectsRepository {
+  getAll(): readonly Project[];
+  get(projectId: ProjectId): Project | null;
+  add(input: ProjectCreateInput): Promise<Project>;
+  save(project: Project): Promise<void>;
+  delete(projectId: ProjectId): Promise<ProjectDeleteResult>;
+  retryCleanup(projectId: ProjectId): Promise<ProjectDeleteResult>;
+  reorder(sourceId: ProjectId, targetId: ProjectId): Promise<void>;
+}
+
+interface ProjectDeleteResult {
+  readonly cleanupPending: boolean;
+}
 ```
 
-`getProjectConfigs()` returns cloned mutable configs for persistence and IPC boundaries.
+The repository is exposed only after synchronous bootstrap loading succeeds. It has no public `load`, `replaceAll`, raw file, or persisted-document operation.
 
-`listStableProjectViews()` returns mounted-view order. It must not mutate or depend on visual order beyond the current set of project identities.
+Identical save, missing delete, and same-group reorder are successful no-ops. Missing save and stale reorder do not guess replacement targets and leave diagnostic context. A rejected mutation means config was not committed. `delete()` resolves with `cleanupPending: true` when config committed but post-commit cleanup failed; retry uses `retryCleanup`, never a second delete.
 
-## Project-Level Events
+## Project operation bridge
+
+Authoritative channels: `src/shared/ipc-channels.ts`; bridge: `src/main/preload.ts`; renderer adapter: `src/renderer/projects-repository-client.ts`.
+
+```ts
+project.getAll(): Promise<readonly Project[]>
+project.add(input: ProjectCreateInput): Promise<Project>
+project.update(project: Project): Promise<void>
+project.delete(projectId: ProjectId): Promise<ProjectDeleteResult>
+project.retryCleanup(projectId: ProjectId): Promise<ProjectDeleteResult>
+project.reorder(sourceId: ProjectId, targetId: ProjectId): Promise<void>
+project.validateDirs(): Promise<ProjectId[]>
+```
+
+`validateDirs` takes no renderer collection. Main resolves the current projects from its repository. Project secrets and worktree operations remain separate project-scoped services and never accept a persisted document or whole canonical collection.
+
+## Renderer project view
+
+Authoritative source: `src/renderer/store-projects.ts`.
+
+```ts
+interface ProjectRuntimeState {
+  tabs: Tab[];
+  activeTabIndex: number;
+  splitTabId: string | null;
+  folderInvalid: boolean;
+}
+
+type ProjectView = Project & ProjectRuntimeState;
+```
+
+Store snapshots expose deep-readonly flat project views. There is no `config` property. `activeProjectIndex` and `editingProjectIndex` are derived compatibility values; long-lived targets use ids. `listStableProjectViews()` returns mounted-view order and never changes visual project order.
+
+## Project-level intents
 
 Authoritative source: `src/renderer/events/bus.ts`.
 
 ```ts
-Events.CLOSE_TAB          // (projectId: string, tabIndex: number)
-Events.REMOVE_PROJECT    // (projectId: string)
-Events.NEW_TAB           // (projectId: string)
-Events.CONNECT_PROJECT   // (projectId: string)
-Events.DISCONNECT_PROJECT // (projectId: string)
-Events.TOGGLE_SPLIT      // (projectId: string)
-Events.CREATE_WORKTREE   // (projectId: string, prefill?)
-Events.WORKTREE_CLOSE    // (projectId: string, kind)
-Events.NEW_AGENT_TAB     // (projectId: string, provider?)
-Events.NEW_WEB_TAB       // (projectId: string, url?)
+Events.ADD_PROJECT       // (input: ProjectCreateInput, onSettled?)
+Events.UPDATE_PROJECT    // (projectId: ProjectId, changes: Partial<Omit<Project, 'id'>>)
+Events.REORDER_PROJECTS  // (sourceId: ProjectId, targetId: ProjectId)
+Events.REMOVE_PROJECT    // (projectId: ProjectId)
+Events.CLOSE_TAB         // (projectId: ProjectId, tabIndex: number)
+Events.NEW_TAB           // (projectId: ProjectId)
+Events.CONNECT_PROJECT   // (projectId: ProjectId)
+Events.DISCONNECT_PROJECT // (projectId: ProjectId)
+Events.TOGGLE_SPLIT      // (projectId: ProjectId)
+Events.CREATE_WORKTREE   // (projectId: ProjectId, prefill?)
+Events.WORKTREE_CLOSE    // (projectId: ProjectId, kind)
+Events.NEW_AGENT_TAB     // (projectId: ProjectId, provider?)
+Events.NEW_WEB_TAB       // (projectId: ProjectId, url?)
 ```
 
-Project ids are opaque `ProjectConfig.id` strings. Events may include tab indices only when the tab index is scoped under the project id.
+Components emit these intents. The App-side coordinator is the only renderer owner of the project repository client. Tab indices are allowed only when scoped under an explicit current project id.
 
-## Persistence
+## Feature-note directory binding
 
-Project persistence remains `projects.json` as an array of `ProjectConfig`. Reorder changes persisted array order, but stable mounted-view order is renderer-derived and is not persisted.
+Canonical field: `Project.featureNoteDir`.
 
-## Feature-note Directory Binding
-
-Authoritative field: `ProjectConfig.featureNoteDir` in `src/shared/types.ts`.
-
-```ts
-interface ProjectConfig {
-  featureNoteDir?: string;
-}
-```
-
-An absent field disables worktree feature-note listing, migration, and restore. A configured value is a trimmed, repo-relative POSIX directory: trailing slashes are removed; absolute paths, backslashes, empty/current-directory segments, and parent traversal are rejected. Resolved directories and note candidates must remain inside the project root.
-
-Main projects may edit or clear the field in Project Settings. Child projects use the same interface and field, but Project Settings renders it read-only. Child creation copies the main project's current value; the child retains that stored snapshot even if the main value later changes or is cleared. Existing project records receive no implicit default or migration.
+`null` disables worktree feature-note listing, migration, and restore. A configured value is a normalized repo-relative POSIX directory. Main projects may edit or clear it; child projects expose their copied snapshot as read-only and do not follow later parent edits.

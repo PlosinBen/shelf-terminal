@@ -11,4 +11,4 @@ Exact interface specs / message formats. Point to source types rather than dupli
 | Connector 介面 | [connector-interface](connector-interface.md) | factory + createShell/exec/listDir/… + 連線型別 |
 | 磁碟持久化格式 | [persistence-formats](persistence-formats.md) | projects/settings/notes/skills/投影/context layout |
 | app-tool bridge 協定 | [app-tool-bridge](app-tool-bridge.md) | `app_tool` 訊息 + `op=resource.verb` registry |
-| renderer project/config contract | [projects](projects.md) | readonly project snapshots、visual/stable listing、project-id events、feature-note directory snapshots |
+| canonical project contract | [projects](projects.md) | canonical model、main repository/IPC operations、flat renderer views、project intents與 feature-note snapshots |

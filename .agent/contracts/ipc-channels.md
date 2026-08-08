@@ -28,12 +28,17 @@ The renderer↔main bridge surface — `window.shelfApi.*` methods (RPC over `ip
 
 | Method | Shape |
 |--------|-------|
-| `load()` | invoke `project:load` → `ProjectConfig[]` (see `src/shared/types.ts`) |
-| `save(projects)` | invoke `project:save` (also prunes a removed project's storage + secrets) |
-| `validateDirs(projects)` | invoke `project:validate-dirs` → per-project dir-existence result |
+| `getAll()` | invoke `project:get-all` → readonly canonical `Project[]` (see `src/shared/projects.ts`) |
+| `add(input)` | invoke `project:add` with id-less `ProjectCreateInput` → main-owned canonical `Project` |
+| `update(project)` | invoke `project:update` with a complete canonical `Project` |
+| `delete(projectId)` | invoke `project:delete` → `{ cleanupPending }`; rejection means config did not commit |
+| `retryCleanup(projectId)` | invoke `project:retry-cleanup` → `{ cleanupPending }`; never resends delete |
+| `reorder(sourceId, targetId)` | invoke `project:reorder` with opaque project ids |
+| `validateDirs()` | invoke `project:validate-dirs` → invalid project ids; main reads repository state |
 | `listSecretKeys(projectId)` | invoke `project:secrets-list` → `string[]` KEY names (values NEVER cross back to renderer) |
 | `setSecret(projectId, key, value)` | invoke `project:secret-set` (encrypt + persist to the side-car; rejects reserved keys) |
 | `deleteSecret(projectId, key)` | invoke `project:secret-delete` |
+| `copySecrets(fromId, toId)` | invoke `project:secrets-copy` after durable child creation |
 | `secretKeyTier()` | invoke `secret:key-tier` → `'os-backed' \| 'local-key'` (drives honest disclosure copy) |
 
 ## connector (`shelfApi.connector`)

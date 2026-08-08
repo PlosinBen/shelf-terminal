@@ -4,6 +4,7 @@ title: Storage
 related:
   - contracts/persistence-formats
   - context/pm-agent
+  - context/projects
 ---
 
 # Storage
@@ -23,7 +24,9 @@ related:
 **Mechanism**：
 - `src/main/project-storage.ts` 提供 `projectDir(id)` / `ensureProjectDir(id)` / `removeProjectStorage(id)`
 - `src/main/migrations/migrate-pm-notes.ts` 啟動時 idempotent 搬家：copy → verify → unlink，partial run 安全 resume
-- `IPC.PROJECT_SAVE` handler 比較 old/new id set，刪掉的 id 觸發 `removeProjectStorage`
+- Main project repository 在 config delete durable commit 後呼叫 project-level cleanup；cleanup adapter
+  同次嘗試 `removeProjectStorage(id)` 與 secret side-car deletion，任一失敗都回報 pending，供 caller
+  透過 `retryCleanup(id)` 重試
 
 **Out of scope**：
 - Agent context（`~/.shelf/agent-context/{sessionId}.json`）跟 IndexedDB agent UI history 是 sessionId-keyed 不是 projectId-keyed，多 session 共用一個 project，硬塞進來反而扭曲關係——維持現狀
@@ -31,7 +34,8 @@ related:
 
 **Do not change casually because**：
 - 不要在新 per-project feature 自己 `<userData>/foo-<id>.md`，直接用 `projectDir(id)`
-- 不要在 PROJECT_SAVE handler 之外另起 cleanup 路徑——單一進入點才不會漏
+- 不要從 IPC handler 或 renderer 另起 cleanup 路徑；Main project repository 的 post-commit cleanup
+  是單一入口，且 config commit 與 cleanup failure 必須維持可區分
 
 ## storage#2 — Notes 走 file storage + auto-GC，不用 base64 inline  ·  [Decision]
 

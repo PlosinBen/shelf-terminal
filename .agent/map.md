@@ -12,7 +12,7 @@ title: shelf-terminal — Intent → File Index
 | Intent | File | Role |
 |--------|------|------|
 | App lifecycle, IPC wiring | `index.ts` | app/window 啟動、`registerAllIpcHandlers()` 一次註冊、PM/Agent/updater 接線與 quit cleanup 的中樞 |
-| 共享 app 狀態 | `app-state.ts` | `mainWindow` / `cachedProjects` / `cachedSettings` 的 getter/setter，index 與 ipc 共用單一來源 |
+| 共享 app 狀態 | `app-state.ts` | `mainWindow` / `cachedSettings` 的 getter/setter，index 與 ipc 共用單一來源 |
 | IPC handler（按領域分檔） | `ipc/` (`index.ts` + `pty`/`project`/`connector`/`git`/`file-transfer`/`dialog`/`settings`/`logs`/`web`/`notes`/`skills`/`mcp`/`config-backup`/`updater`/`pm`/`process-memory`) | 各檔 export `registerXxxHandlers()`，`ipc/index.ts` 匯總註冊 |
 | Process memory current state + summary clock | `process-memory-manager.ts` | 註冊 App/dispatcher/exec sources、接收 latest reports、計算 freshness rollups、記錄並發布 summary |
 | Electron process memory attribution | `app-memory.ts` | 將 app process metrics 映射成 App role rows |
@@ -34,7 +34,9 @@ title: shelf-terminal — Intent → File Index
 | DevTools key predicate | `devtools-guard.ts` | `isDevToolsKeyEvent(input)`（F12 / Ctrl+Shift+I）的純判斷 |
 | PTY spawn/kill/resize | `pty-manager.ts` | 透過 connector spawn shell、idle notification、輸出經注入的 `PtyObserver` 回報 |
 | Preload bridge | `preload.ts` | contextBridge 暴露 `window.shelfApi`，純 RPC bridge 到 main |
-| Project 持久化 | `project-store.ts` | 讀寫 `projects.json`（userData 路徑） |
+| Project canonical repository | `projects/projects-repository.ts` + `projects/repository-provider.ts` | ready-only canonical project queries/mutations、main-owned identity、durable publish 與 cleanup retry boundary |
+| Project config persistence | `projects/project-config-file-io.ts` + `projects/project-config-codec.ts` + `projects/project-config-persistence.ts` | opaque atomic File I/O、v0/v1 loader/current formatter 與 `projects.json` facade |
+| Project delete cleanup | `projects/project-cleanup.ts` | Config commit 後的 per-project storage/secrets cleanup 聚合 |
 | 專案 env 解析（plain+secret 合併） | `project-env.ts` | `resolveProjectEnv(projectId)`：合併 plain（projectConfig）+ 解密 secret 成單一注入 EnvMap，兩個 spawn 面共用的唯一出口 |
 | Secret 值加密核心（純） | `secret-crypto.ts` | AES-256-GCM `encryptWithKey`/`decryptWithKey`，versioned+authenticated blob，無 electron、可測 |
 | Secret master-key seam + 加密 store | `secret-store.ts` | key-storage tier（os-backed/local-key/永不明碼）依 runtime backend 選；單一 project-keyed 加密 side-car 的 CRUD + decrypt-scope-by-project |
@@ -174,10 +176,14 @@ title: shelf-terminal — Intent → File Index
 
 | Intent | File | Role |
 |--------|------|------|
-| Root 元件 / Event handler 中樞 | `App.tsx` | 載入 projects/settings、集中處理所有 event bus 事件、split view 渲染的唯一 side-effect hub |
-| 全域狀態管理 | `store.ts` | `useSyncExternalStore` store，管 projects/tabs/settings/UI state + connectionHealth + projectNotice + skillsVisible |
+| Root 元件 / Event handler 中樞 | `App.tsx` | Project mutation/recovery coordinator、集中 event bus side effects 與 split view rendering 中樞 |
+| Store facade | `store.ts` + `store-core.ts` | `useSyncExternalStore` facade、跨 project/UI slice publish/subscription 核心 |
+| Project reactive state | `store-projects.ts` | Canonical projects + runtime-by-id reconcile 成 flat readonly `ProjectView`，並管理 tabs/selection/health/notices |
+| UI/settings state | `store-ui.ts` | Settings 與 renderer panel/overlay visibility state |
 | Process memory renderer sync | `process-memory-sync.ts` | listener-first hydration 並以完整 summary snapshot 更新全域 store |
-| Project collection boundary / stable view order | `projects-repository.ts` + `store.ts` | project identity lookup、visual reorder、stable mounted-view listing、readonly project snapshots |
+| Renderer project operation adapter | `projects-repository-client.ts` + `project-mutation-coordinator.ts` | App-private stateless IPC client與 durable mutation→authoritative refresh orchestration |
+| Project mutation recovery | `project-mutation-recovery.ts` | Pre-commit Retry 與 post-commit refresh-only Retry/Cancel 分流 |
+| Worktree secret continuation | `worktree-secret-copy.ts` | Durable child 建立後的 secrets Retry/Cancel 與 stale revalidation |
 | Event bus | `events/` (`bus.ts` / `types.ts` / `ipc-agent.ts` / `index.ts`) | pub/sub + 類型化 `agent:*` vocabulary + IPC↔bus 適配層 |
 | 快捷鍵系統 | `hooks/useKeybindings.ts` | combo string 對應 action，支援參數化 action |
 | Paste/drop 上傳 hook | `hooks/useAttachmentPaste.ts` | paste/drop/upload pipeline + file size check |
@@ -230,7 +236,8 @@ title: shelf-terminal — Intent → File Index
 
 | Intent | File | Role |
 |--------|------|------|
-| Type 定義 | `types.ts` | Connection / ProjectConfig / AppSettings / PM types / IPC payloads |
+| 通用型別 | `types.ts` | Connection / AppSettings / PM types 與非 project-domain shared payloads |
+| Canonical project contract | `projects.ts` | `Project` / `ProjectCreateInput` / `ProjectDeleteResult` / readonly helper |
 | Feature-note directory validator | `feature-note-dir.ts` | optional repo-relative POSIX directory 的 canonicalization 與 lexical safety validation |
 | IPC channel 常數 | `ipc-channels.ts` | 所有 IPC channel name 常數 |
 | Process memory contracts | `process-memory.ts` | wire type、role、timing、source/summary shape 與 connection scope identity |
@@ -297,4 +304,4 @@ title: shelf-terminal — Intent → File Index
 | 單元測試 | `src/main/updater-state.test.ts` | Updater reducer 21 個 transition 測試 |
 | 單元測試 | `src/main/file-transfer.test.ts` | 純函式 + local fs 行為 |
 | 單元測試 | `src/main/user-data-path.test.ts` | `applyUserDataIsolation()` 五個分支 |
-| 單元測試 | `src/main/project-store.test.ts` | Project store read/write/backup 測試 |
+| Project repository/persistence 單元測試 | `src/main/projects/*.test.ts` | Codec、File I/O、persistence、repository、cleanup 與 provider lifecycle matrix |

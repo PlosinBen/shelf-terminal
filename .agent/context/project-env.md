@@ -11,11 +11,11 @@ related:
 
 # Project Env (plain + secret)
 
-> 專案層級環境變數：Shelf 注入到它為該 project 啟動的**每個** process（agent-server + 它 spawn 的 CLI、以及互動 terminal）。分 **plain**（明碼存 projectConfig、會同步）與 **secret**（加密 side-car、永不同步）兩類，但兩者解析成**同一份注入 env map**，差別只在儲存與顯示。
+> 專案層級環境變數：Shelf 注入到它為該 project 啟動的**每個** process（agent-server + 它 spawn 的 CLI、以及互動 terminal）。分 **plain**（明碼存 canonical project config、會同步）與 **secret**（加密 side-car、永不同步）兩類，但兩者解析成**同一份注入 env map**，差別只在儲存與顯示。
 
 ## project-env#1 — 兩類 env、單一注入 map、單一解析出口  ·  [Decision]
 
-**Decision**：plain env 存 `ProjectConfig.envPlain`（`Record<KEY,value>`，明碼、跟 projectConfig 一起走）；secret env 存加密 side-car（見 #4）。兩者都經 `src/main/project-env.ts` 的 `resolveProjectEnv(projectId)` 合併成一份 `EnvMap`（secret 覆蓋同名 plain），**兩個 spawn 面（agent-server、terminal）只讀這一個出口**，永遠不知道值是 plain 還 secret。純 helper（reserved 政策、UI 驗證、PATH-merge、`export` prefix 產生器）在 `src/shared/project-env.ts`。
+**Decision**：plain env 存 canonical `Project.envPlain`（`Record<KEY,value>`，明碼、隨 project config 持久化）；secret env 存加密 side-car（見 #4）。兩者都經 `src/main/project-env.ts` 的 `resolveProjectEnv(projectId)` 合併成一份 `EnvMap`（secret 覆蓋同名 plain），**兩個 spawn 面（agent-server、terminal）只讀這一個出口**，永遠不知道值是 plain 還 secret。純 helper（reserved 政策、UI 驗證、PATH-merge、`export` prefix 產生器）在 `src/shared/project-env.ts`。
 
 **Reason**：使用者自己分類（K8s env/Secret、CI vars/masked 的標準模型），比我們猜哪個是機密可靠。單一注入出口讓「之後把 secret 併進來」不用動任何 call site。
 

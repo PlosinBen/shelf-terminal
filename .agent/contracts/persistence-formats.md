@@ -15,8 +15,38 @@ The on-disk artifacts Shelf persists and their layout. Two roots: `<userData>` (
 ## `<userData>/projects.json`
 
 - **Path**: `<userData>/projects.json`
-- **Format**: JSON array, pretty-printed (2-space). Each element is a raw `ProjectConfig` (`src/shared/types.ts`) — `{ id, name, cwd, connection, maxTabs, … }`. Persisted `defaultAgentProvider` is an optional string and `agentSessionIds` / `agentPrefs` are string-keyed records so unknown old/future provider ids remain representable; runtime consumers must resolve them through the live provider registry.
-- **Source of truth**: `src/main/project-store.ts` (`loadProjects` / `saveProjects`, type `ProjectConfig[]`). Missing file → `[]`. Empty-write guard: overwriting a non-empty file with `[]` first copies the original to `projects.json.backup.<YYYYMMDD-HHMMSS>`.
+- **Current format**: pretty-printed versioned envelope. Authoritative persisted DTO and validation live only in `src/main/projects/project-config-codec.ts`.
+
+  ```json
+  {
+    "schemaVersion": 1,
+    "projects": [
+      {
+        "id": "opaque-id",
+        "name": "Example",
+        "cwd": "/repo/example",
+        "connection": { "type": "local" },
+        "maxTabs": 5,
+        "initScript": null,
+        "envPlain": {},
+        "defaultTabs": [],
+        "quickCommands": [],
+        "featureNoteDir": null,
+        "parentProjectId": null,
+        "worktreeBranch": null,
+        "baseBranch": null,
+        "defaultAgentProvider": null,
+        "openAgentOnConnect": false,
+        "agentSessionIds": {},
+        "agentPrefs": {}
+      }
+    ]
+  }
+  ```
+
+- **Compatibility**: an unversioned array is supported legacy v0. Loading either v0 or v1 produces the same canonical `Project[]`; load is read-only. The next successful project mutation formats v1 naturally. Malformed data, duplicate ids, wrong shapes, or unsupported versions fail all-or-nothing.
+- **Source of truth**: `src/main/projects/project-config-{file-io,codec,persistence}.ts`. Missing file → canonical `[]`; an existing zero-byte file is malformed, not missing. Writes use same-directory temp + atomic replace. Before a nonempty persisted collection is replaced by canonical empty, the original opaque file is copied to `projects.json.backup.<timestamp>`.
+- **Provider compatibility**: `defaultAgentProvider`, `agentSessionIds`, and `agentPrefs` retain unknown old/future provider ids; runtime consumers resolve behavior through the live registry.
 
 ## `<userData>/settings.json`
 

@@ -427,7 +427,7 @@ Project Edit renders an unknown default as no selection and preserves the raw va
 
 **Reason:** Persisted configuration is external historical data, while runtime dispatch must be exhaustive over the current registry. Keeping those shapes separate avoids destructive migrations and prevents stale ids from reaching deploy/backend lookup.
 
-**Do not change casually because:** Do not cast persisted strings to `AgentProvider`, restore a fallback provider, or filter stale keys independently in UI consumers. Resolution and named provider writes belong at the production project-store boundary.
+**Do not change casually because:** Do not cast persisted strings to `AgentProvider`, restore a fallback provider, or filter stale keys independently in UI consumers. Raw compatibility belongs to the main project loader/formatter; runtime resolution and named writes belong at the canonical project/store boundary.
 
 ## agent-providers#36 — Provider key 是不可變 identity；registry 集中 presentation、visibility 與 runtime binding  ·  [Decision]
 
