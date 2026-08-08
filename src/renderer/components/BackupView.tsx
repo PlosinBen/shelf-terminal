@@ -19,6 +19,7 @@ import {
   useBackupPanelStore,
 } from '../backup-panel-store';
 import { emitBackup } from '../events';
+import { RightPanel, RIGHT_PANEL_WIDTH } from './RightPanel';
 import { toggleRightSidebar } from '../store';
 
 export function requestBackupPanelLoad(): void {
@@ -78,18 +79,23 @@ export function BackupView() {
   }, [panel.sessionRevision]);
 
   return (
-    <aside className="right-panel backup-view" aria-label="Backup">
-      <div className="right-panel-header">
-        <span className="right-panel-title">Backup</span>
-        <button
-          className="notes-close"
-          onClick={() => toggleRightSidebar('backup')}
-          aria-label="Close Backup"
-        >
-          ×
-        </button>
-      </div>
-
+    <RightPanel
+      className="backup-view"
+      aria-label="Backup"
+      defaultWidth={RIGHT_PANEL_WIDTH.defaults.backup}
+      header={(
+        <>
+          <span className="right-panel-title">Backup</span>
+          <button
+            className="notes-close"
+            onClick={() => toggleRightSidebar('backup')}
+            aria-label="Close Backup"
+          >
+            ×
+          </button>
+        </>
+      )}
+    >
       <div className="backup-panel-tabs" role="tablist" aria-label="Backup operations">
         <button
           className={`backup-panel-tab${panel.activeTab === 'backup' ? ' active' : ''}`}
@@ -118,7 +124,7 @@ export function BackupView() {
           <ImportPanel panel={panel} />
         )}
       </div>
-    </aside>
+    </RightPanel>
   );
 }
 

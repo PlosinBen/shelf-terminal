@@ -5102,10 +5102,6 @@ button {
 
 /* ── Backup operation panel ── */
 
-.backup-view {
-  width: 400px;
-}
-
 .backup-panel-tabs {
   display: grid;
   grid-template-columns: 1fr 1fr;
