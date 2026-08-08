@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { toggleRightSidebar } from '../store';
 import type { McpServerBlock, McpStdioBlock, McpHttpBlock } from '@shared/mcp';
+import { RightPanel, RIGHT_PANEL_WIDTH } from './RightPanel';
 
 // App-level MCP servers manager (right sidebar — sibling to the Skills panel:
 // both are App-layer, Shelf-managed, fed to the agent). Set once → every project,
@@ -9,10 +10,6 @@ import type { McpServerBlock, McpStdioBlock, McpHttpBlock } from '@shared/mcp';
 // from when this lived in Settings → MCP; only the host shell moved.
 
 type Transport = 'stdio' | 'http';
-
-const DEFAULT_WIDTH = 440; // room for label + input rows
-const MIN_WIDTH = 300;
-const MAX_WIDTH = 640;
 
 interface FormState {
   /** null = adding a new server; otherwise the name being edited (for rename). */
@@ -91,8 +88,6 @@ export function McpView() {
   const [form, setForm] = useState<FormState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showHelp, setShowHelp] = useState(false);
-  const [width, setWidth] = useState(DEFAULT_WIDTH);
-  const [resizing, setResizing] = useState(false);
 
   const refresh = useCallback(() => {
     window.shelfApi.mcp.list().then(setServers).catch(() => setServers({}));
@@ -100,15 +95,6 @@ export function McpView() {
 
   useEffect(() => { refresh(); }, [refresh]);
   useEffect(() => window.shelfApi.mcp.onChanged(refresh), [refresh]);
-
-  useEffect(() => {
-    if (!resizing) return;
-    const onMove = (e: MouseEvent) => setWidth(Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, window.innerWidth - e.clientX)));
-    const onUp = () => setResizing(false);
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
-    return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
-  }, [resizing]);
 
   const startAdd = () => { setError(null); setForm({ ...EMPTY_FORM }); };
   const startEdit = (name: string, block: McpServerBlock) => { setError(null); setForm(blockToForm(name, block)); };
@@ -136,16 +122,20 @@ export function McpView() {
   const set = (patch: Partial<FormState>) => setForm((f) => (f ? { ...f, ...patch } : f));
 
   return (
-    <div className="right-panel mcp-view" style={{ width }}>
-      <div className="right-panel-resize-handle" onMouseDown={() => setResizing(true)} />
-      <div className="right-panel-header">
-        <span className="right-panel-title">MCP</span>
-        <span className="notes-header-actions">
-          <button className="mcp-help-btn" onClick={() => setShowHelp((v) => !v)} title="What is this?">?</button>
-          <button className="notes-close" onClick={() => toggleRightSidebar('mcp')}>×</button>
-        </span>
-      </div>
-
+    <RightPanel
+      className="mcp-view"
+      aria-label="MCP"
+      defaultWidth={RIGHT_PANEL_WIDTH.defaults.mcp}
+      header={(
+        <>
+          <span className="right-panel-title">MCP</span>
+          <span className="notes-header-actions">
+            <button className="mcp-help-btn" onClick={() => setShowHelp((v) => !v)} title="What is this?">?</button>
+            <button className="notes-close" onClick={() => toggleRightSidebar('mcp')}>×</button>
+          </span>
+        </>
+      )}
+    >
       <div className="mcp-view-body">
         <p className="web-settings-hint">
           External MCP servers the agent can use — set once, applies to every project and both agents (Claude &amp; Copilot).
@@ -227,6 +217,6 @@ export function McpView() {
           </div>
         )}
       </div>
-    </div>
+    </RightPanel>
   );
 }

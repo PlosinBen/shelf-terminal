@@ -1,12 +1,9 @@
-import React, { useState, useEffect, useReducer, useRef, useCallback, useMemo } from 'react';
+import { useState, useEffect, useReducer, useRef, useCallback, useMemo } from 'react';
 import { useStore, setAwayMode, toggleRightSidebar } from '../store';
 import { renderMarkdown } from '../utils/markdown';
 import type { PmMessage, PmStreamChunk, PmToolCall } from '@shared/types';
 import { pmStreamReducer, initialPmStreamState } from './pm-view-reducer';
-
-const DEFAULT_WIDTH = 380;
-const MIN_WIDTH = 280;
-const MAX_WIDTH = 700;
+import { RightPanel, RIGHT_PANEL_WIDTH } from './RightPanel';
 
 // Read-only PM panel: PM is driven by tab events / Telegram, not in-app chat
 // (you're at the computer — no need to relay through PM). No message input, no
@@ -18,9 +15,7 @@ export function PmView() {
   const [messages, setMessages] = useState<PmMessage[]>([]);
   const [streamState, dispatch] = useReducer(pmStreamReducer, initialPmStreamState);
   const { streaming, streamText, streamToolCalls, error } = streamState;
-  const [width, setWidth] = useState(DEFAULT_WIDTH);
   const listRef = useRef<HTMLDivElement>(null);
-  const dragging = useRef(false);
 
   const hasProvider = !!(settings.pmProvider?.provider && settings.pmProvider?.apiKey && settings.pmProvider?.model);
 
@@ -56,63 +51,45 @@ export function PmView() {
     dispatch({ type: 'clear_display' });
   }, []);
 
-  const onDragStart = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    dragging.current = true;
-    const startX = e.clientX;
-    const startWidth = width;
-    const onMove = (ev: MouseEvent) => {
-      if (!dragging.current) return;
-      const delta = startX - ev.clientX;
-      setWidth(Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, startWidth + delta)));
-    };
-    const onUp = () => {
-      dragging.current = false;
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
-    };
-    document.body.style.cursor = 'col-resize';
-    document.body.style.userSelect = 'none';
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
-  }, [width]);
-
   return (
-    <div className="right-panel pm-panel" style={{ width }}>
-      <div className="right-panel-resize-handle pm-resize-handle" onMouseDown={onDragStart} />
-      <div className="right-panel-header pm-header">
-        <span className="right-panel-title pm-header-title">PM</span>
-        <span className="pm-header-actions">
-          <button
-            className={`pm-active-toggle ${pmActive ? 'pm-active-on' : ''}`}
-            onClick={() => window.shelfApi.pm.setActive(!pmActive)}
-            disabled={!hasTelegram}
-            title={!hasTelegram
-              ? 'Configure Telegram in Settings to enable PM Active'
-              : pmActive ? 'PM Active ON — telegram listener running (click to stop)' : 'PM Active OFF (click to start)'}
-          >
-            {pmActive ? 'PM ON' : 'PM OFF'}
-          </button>
-          <button
-            className={`pm-away-toggle ${awayMode ? 'pm-away-on' : ''}`}
-            onClick={() => window.shelfApi.pm.setAwayMode(!awayMode)}
-            disabled={!pmActive}
-            title={!pmActive
-              ? 'Enable PM Active first'
-              : awayMode ? 'Away Mode ON — PM can control terminals' : 'Away Mode OFF — read only'}
-          >
-            {awayMode ? 'Away ON' : 'Away OFF'}
-          </button>
-          <button className="pm-header-btn" onClick={handleClear} title="Clear conversation history">
-            Clear History
-          </button>
-          <button className="pm-header-btn" onClick={() => toggleRightSidebar('pm')} title="Close">
-            ×
-          </button>
-        </span>
-      </div>
+    <RightPanel
+      className="pm-panel"
+      aria-label="PM"
+      defaultWidth={RIGHT_PANEL_WIDTH.defaults.pm}
+      header={(
+        <>
+          <span className="right-panel-title pm-header-title">PM</span>
+          <span className="pm-header-actions">
+            <button
+              className={`pm-active-toggle ${pmActive ? 'pm-active-on' : ''}`}
+              onClick={() => window.shelfApi.pm.setActive(!pmActive)}
+              disabled={!hasTelegram}
+              title={!hasTelegram
+                ? 'Configure Telegram in Settings to enable PM Active'
+                : pmActive ? 'PM Active ON — telegram listener running (click to stop)' : 'PM Active OFF (click to start)'}
+            >
+              {pmActive ? 'PM ON' : 'PM OFF'}
+            </button>
+            <button
+              className={`pm-away-toggle ${awayMode ? 'pm-away-on' : ''}`}
+              onClick={() => window.shelfApi.pm.setAwayMode(!awayMode)}
+              disabled={!pmActive}
+              title={!pmActive
+                ? 'Enable PM Active first'
+                : awayMode ? 'Away Mode ON — PM can control terminals' : 'Away Mode OFF — read only'}
+            >
+              {awayMode ? 'Away ON' : 'Away OFF'}
+            </button>
+            <button className="pm-header-btn" onClick={handleClear} title="Clear conversation history">
+              Clear History
+            </button>
+            <button className="pm-header-btn" onClick={() => toggleRightSidebar('pm')} title="Close">
+              ×
+            </button>
+          </span>
+        </>
+      )}
+    >
       {!hasProvider && (
         <div className="pm-no-provider">
           Configure PM provider in Settings
@@ -141,7 +118,7 @@ export function PmView() {
           </div>
         )}
       </div>
-    </div>
+    </RightPanel>
   );
 }
 
@@ -196,4 +173,3 @@ function ToolCallSummary({ toolCall }: { toolCall: PmToolCall }) {
     </div>
   );
 }
-

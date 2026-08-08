@@ -57,3 +57,27 @@ test('Backup panel resizes, clamps, cleans up drag state, and resets on reopen',
   await expect(panel).toBeVisible();
   await expect.poll(() => renderedWidth(panel)).toBe(400);
 });
+
+test('adjacent panels resize from the dragged panel width', async ({ shelfApp: { page } }) => {
+  await page.locator('.right-tab-btn', { hasText: 'Notes' }).click();
+  await page.locator('.right-tab-btn[title="Backup"]').click();
+
+  const notes = page.locator('.notes-view');
+  const backup = page.locator('.backup-view');
+  const handle = notes.locator(':scope > .right-panel-resize-handle');
+  await expect(notes).toBeVisible();
+  await expect(backup).toBeVisible();
+  await expect.poll(() => renderedWidth(notes)).toBe(380);
+
+  const notesBox = await notes.boundingBox();
+  const backupBox = await backup.boundingBox();
+  const handleBox = await handle.boundingBox();
+  expect(notesBox).not.toBeNull();
+  expect(backupBox).not.toBeNull();
+  expect(handleBox).not.toBeNull();
+  expect(notesBox!.x + notesBox!.width).toBeLessThanOrEqual(backupBox!.x + 1);
+
+  const startX = handleBox!.x + handleBox!.width / 2;
+  await dispatchDrag(page, handle, startX, startX - 50);
+  await expect.poll(() => renderedWidth(notes)).toBe(430);
+});

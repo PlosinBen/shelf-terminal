@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef, forwardRef, useImperativeHandle } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef, forwardRef, useImperativeHandle } from 'react';
 import { toggleRightSidebar } from '../store';
 import { renderMarkdown } from '../utils/markdown';
 import { LockIcon, UnlockIcon, PowerIcon } from './icons';
+import { RightPanel, RIGHT_PANEL_WIDTH } from './RightPanel';
 
 interface SkillMeta {
   name: string;
@@ -9,10 +10,6 @@ interface SkillMeta {
   locked?: boolean;
   disabled?: boolean;
 }
-
-const DEFAULT_WIDTH = 480; // wider than the other right panels — the editor packs a Files list + a full button row
-const MIN_WIDTH = 280;
-const MAX_WIDTH = 700;
 
 /**
  * App-level Agent Skills manager (right sidebar). Master-detail like NotesView:
@@ -24,8 +21,6 @@ const MAX_WIDTH = 700;
 export function SkillsView() {
   const [skills, setSkills] = useState<SkillMeta[]>([]);
   const [activeName, setActiveName] = useState<string | null>(null);
-  const [width, setWidth] = useState(DEFAULT_WIDTH);
-  const [resizing, setResizing] = useState(false);
   const editorRef = useRef<SkillEditorHandle | null>(null);
 
   const refreshList = useCallback(async () => {
@@ -56,34 +51,29 @@ export function SkillsView() {
     await refreshList();
   }, [refreshList]);
 
-  useEffect(() => {
-    if (!resizing) return;
-    const onMove = (e: MouseEvent) => setWidth(Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, window.innerWidth - e.clientX)));
-    const onUp = () => setResizing(false);
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
-    return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
-  }, [resizing]);
-
   const inEditor = activeName !== null;
 
   return (
-    <div className="right-panel skills-view" style={{ width }}>
-      <div className="right-panel-resize-handle" onMouseDown={() => setResizing(true)} />
-      <div className="right-panel-header">
-        {inEditor ? (
-          <button className="notes-back" onClick={handleBack}>‹ Back</button>
-        ) : (
-          <span className="right-panel-title">Skills</span>
-        )}
-        <span className="notes-header-actions">
-          {!inEditor && (
-            <button className="notes-new-btn" onClick={handleNew} title="New skill">+</button>
+    <RightPanel
+      className="skills-view"
+      aria-label="Skills"
+      defaultWidth={RIGHT_PANEL_WIDTH.defaults.skills}
+      header={(
+        <>
+          {inEditor ? (
+            <button className="notes-back" onClick={handleBack}>‹ Back</button>
+          ) : (
+            <span className="right-panel-title">Skills</span>
           )}
-          <button className="notes-close" onClick={() => toggleRightSidebar('skills')}>×</button>
-        </span>
-      </div>
-
+          <span className="notes-header-actions">
+            {!inEditor && (
+              <button className="notes-new-btn" onClick={handleNew} title="New skill">+</button>
+            )}
+            <button className="notes-close" onClick={() => toggleRightSidebar('skills')}>×</button>
+          </span>
+        </>
+      )}
+    >
       {inEditor ? (
         <SkillEditor
           key={activeName!}
@@ -98,7 +88,7 @@ export function SkillsView() {
       ) : (
         <SkillsList skills={skills} onPick={setActiveName} />
       )}
-    </div>
+    </RightPanel>
   );
 }
 

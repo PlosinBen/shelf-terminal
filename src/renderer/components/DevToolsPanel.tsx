@@ -1,5 +1,6 @@
-import React, { useState, useCallback, useRef } from 'react';
+import { useState, useCallback } from 'react';
 import { useStore, toggleRightSidebar } from '../store';
+import { RightPanel, RIGHT_PANEL_WIDTH } from './RightPanel';
 
 // ── Tool definitions ──
 
@@ -219,15 +220,9 @@ function ToolActions({ id, onAction }: { id: ToolId; onAction: (action: string) 
 
 // ── Main panel ──
 
-const MIN_WIDTH = 240;
-const MAX_WIDTH = 600;
-const DEFAULT_WIDTH = 320;
-
 export function DevToolsPanel() {
   const { devToolsVisible } = useStore();
   const [expandedTools, setExpandedTools] = useState<Set<ToolId>>(new Set(['base64']));
-  const [width, setWidth] = useState(DEFAULT_WIDTH);
-  const dragging = useRef(false);
 
   const toggle = (id: ToolId) => {
     setExpandedTools((prev) => {
@@ -238,42 +233,20 @@ export function DevToolsPanel() {
     });
   };
 
-  const onDragStart = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    dragging.current = true;
-    const startX = e.clientX;
-    const startWidth = width;
-
-    const onMove = (ev: MouseEvent) => {
-      if (!dragging.current) return;
-      const delta = startX - ev.clientX; // dragging left = wider
-      const next = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, startWidth + delta));
-      setWidth(next);
-    };
-
-    const onUp = () => {
-      dragging.current = false;
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
-    };
-
-    document.body.style.cursor = 'col-resize';
-    document.body.style.userSelect = 'none';
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
-  }, [width]);
-
   if (!devToolsVisible) return null;
 
   return (
-    <div className="right-panel devtools-panel" style={{ width }}>
-      <div className="right-panel-resize-handle devtools-resize-handle" onMouseDown={onDragStart} />
-      <div className="right-panel-header devtools-header">
-        <span className="right-panel-title">Dev Tools</span>
-        <button className="settings-close" onClick={() => toggleRightSidebar('devtools')}>×</button>
-      </div>
+    <RightPanel
+      className="devtools-panel"
+      aria-label="Dev Tools"
+      defaultWidth={RIGHT_PANEL_WIDTH.defaults.devtools}
+      header={(
+        <>
+          <span className="right-panel-title">Dev Tools</span>
+          <button className="settings-close" onClick={() => toggleRightSidebar('devtools')}>×</button>
+        </>
+      )}
+    >
       <div className="devtools-body">
         {TOOLS.map((tool) => (
           <ToolSection
@@ -285,6 +258,6 @@ export function DevToolsPanel() {
           />
         ))}
       </div>
-    </div>
+    </RightPanel>
   );
 }

@@ -1894,7 +1894,7 @@ button {
 /* ── Dev Tools Panel ── */
 
 
-/* Right-side dock panel shell — shared by DevTools, PM, Notes.
+/* Right-side dock panel shell — shared by all right-side panels.
    Each panel keeps panel-specific classes (e.g. .pm-header-btn,
    .notes-mode-btn) for their own widgets, but the outer shell, resize
    handle, header bar, and title typography all live here. */
