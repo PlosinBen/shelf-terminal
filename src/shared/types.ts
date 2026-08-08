@@ -246,7 +246,7 @@ export type WSLConnection = { type: 'wsl'; distro: string };
 export type DockerConnection = { type: 'docker'; container: string };
 export type Connection = LocalConnection | SSHConnection | WSLConnection | DockerConnection;
 
-// ── Project config (persisted) ──
+// ── Project domain primitives ──
 
 export interface TabTemplate {
   name: string;
@@ -262,41 +262,6 @@ export interface QuickCommand {
   label: string;
   command: string;
   target: 'current' | string; // 'current' = active tab, or tab name
-}
-
-export interface ProjectConfig {
-  id: string;
-  name: string;
-  cwd: string;
-  connection: Connection;
-  maxTabs: number;
-  initScript?: string;
-  /**
-   * Project-level PLAIN environment variables (KEY → value), injected into every
-   * process Shelf launches for this project — the agent-server (+ the CLIs it
-   * spawns) and the project's interactive terminals. Stored in the clear and
-   * synced with the rest of projectConfig. Secret env vars live in a separate
-   * encrypted side-car (never here, never synced). Reserved `SHELF_*` /
-   * `ELECTRON_RUN_AS_NODE` keys are blocked at input. See src/shared/project-env.ts.
-   */
-  envPlain?: Record<string, string>;
-  defaultTabs?: TabTemplate[];
-  quickCommands?: QuickCommand[];
-  /** Optional repo-relative POSIX directory used for worktree feature-note handoff. */
-  featureNoteDir?: string;
-  parentProjectId?: string;
-  worktreeBranch?: string;
-  /**
-   * Worktree sub-projects only: the parent project's checked-out branch captured
-   * at create time — the objective divergence point ("从哪里切出去就合并回哪里").
-   * `finish` uses this as the fixed ff merge-back target and never re-detects it,
-   * because the parent's live checkout may have moved on since the worktree was cut.
-   */
-  baseBranch?: string;
-  defaultAgentProvider?: string;
-  openAgentOnConnect?: boolean;
-  agentSessionIds?: Record<string, string>;
-  agentPrefs?: Record<string, AgentPrefs>;
 }
 
 // ── IPC payloads: Renderer → Main ──

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import type { ProjectConfig } from '@shared/types';
+import type { Project } from '@shared/projects';
 
-let projects: ProjectConfig[] = [];
+let projects: Project[] = [];
 vi.mock('./projects/repository-provider', () => ({
   getProjectsRepository: () => ({
     get: (projectId: string) => projects.find((project) => project.id === projectId) ?? null,
@@ -16,10 +16,26 @@ vi.mock('./secret-store', () => ({ resolveProjectSecrets: (id: string) => resolv
 // Import AFTER the mock is registered.
 const { resolveProjectEnv } = await import('./project-env');
 
-function project(id: string, envPlain?: Record<string, string>): ProjectConfig {
+function project(id: string, envPlain: Record<string, string> = {}): Project {
   return {
-    id, name: id, cwd: '/tmp', connection: { type: 'local' }, maxTabs: 4, envPlain,
-  } as ProjectConfig;
+    id,
+    name: id,
+    cwd: '/tmp',
+    connection: { type: 'local' },
+    maxTabs: 4,
+    initScript: null,
+    envPlain,
+    defaultTabs: [],
+    quickCommands: [],
+    featureNoteDir: null,
+    parentProjectId: null,
+    worktreeBranch: null,
+    baseBranch: null,
+    defaultAgentProvider: null,
+    openAgentOnConnect: false,
+    agentSessionIds: {},
+    agentPrefs: {},
+  };
 }
 
 describe('resolveProjectEnv', () => {
@@ -43,7 +59,7 @@ describe('resolveProjectEnv', () => {
     expect(resolveProjectEnv('p1')).toEqual({ GH_TOKEN: 'abc' });
   });
 
-  it('returns {} when the project has no envPlain', () => {
+  it('returns {} when the project envPlain map is empty', () => {
     projects = [project('p1')];
     expect(resolveProjectEnv('p1')).toEqual({});
   });

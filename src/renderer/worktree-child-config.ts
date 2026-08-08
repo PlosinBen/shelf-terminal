@@ -7,7 +7,7 @@ import { isAgentProvider } from '@shared/agent-providers';
  * while giving it a FRESH identity. A worktree is the same project on a different
  * branch, so it should develop in the same environment: inherit env, init script,
  * tab layout, quick commands, and agent preferences. Secrets live in a separate
- * encrypted store (not in ProjectConfig) and are copied alongside by the caller.
+ * encrypted side-car (not in the canonical Project) and are copied separately by the caller.
  *
  * Deliberately NOT inherited:
  *  - id / cwd / parentProjectId / worktreeBranch / baseBranch — worktree-specific

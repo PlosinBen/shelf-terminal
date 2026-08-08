@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { ProjectConfig } from '@shared/types';
+import type { Project } from '@shared/projects';
 
 const listSkills = vi.fn();
 const getSkill = vi.fn();
@@ -56,7 +56,7 @@ vi.mock('../app-state', () => ({
 }));
 vi.mock('../projects/repository-provider', () => ({
   getProjectsRepository: () => ({
-    get: (projectId: string) => (getProjects() as ProjectConfig[])
+    get: (projectId: string) => (getProjects() as Project[])
       .find((project) => project.id === projectId) ?? null,
   }),
 }));
