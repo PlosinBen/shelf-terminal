@@ -38,6 +38,7 @@ import { clearAgentSession } from './storage/agent-history';
 import { bindProcessMemorySummary } from './process-memory-sync';
 import { createProjectMutationCoordinator } from './project-mutation-coordinator';
 import { createRendererProjectsRepositoryClient } from './projects-repository-client';
+import { runProjectOperationWithRecovery } from './project-mutation-recovery';
 import {
   acceptBackupPanelList,
   acceptImportApplyFailure,
@@ -58,6 +59,50 @@ function reportProjectMutationError(operation: string, error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
   console.error(`[project-coordinator] operation=${operation} failed: ${message}`);
   void window.shelfApi.dialog.warn('Project update failed', message);
+}
+
+async function confirmProjectRetry(input: {
+  operation: string;
+  kind: 'mutation' | 'refresh';
+  error: unknown;
+}): Promise<boolean> {
+  const detail = input.error instanceof Error ? input.error.message : String(input.error);
+  const message = input.kind === 'refresh'
+    ? `The project ${input.operation} was saved, but the project list could not be refreshed. Retry refresh?\n\n${detail}`
+    : `The project ${input.operation} could not be saved. Retry?\n\n${detail}`;
+  try {
+    return await window.shelfApi.dialog.confirm('Project update failed', message, 'Retry');
+  } catch (error) {
+    console.error(`[project-recovery] prompt failed operation=${input.operation}`, error);
+    return false;
+  }
+}
+
+function runProjectOperation<T>(operation: string, action: () => Promise<T>) {
+  return runProjectOperationWithRecovery({
+    operation,
+    action,
+    refresh: () => projectCoordinator.refresh(),
+    confirmRetry: confirmProjectRetry,
+  });
+}
+
+async function recoverProjectCleanup(projectId: string, cleanupPending: boolean) {
+  let pending = cleanupPending;
+  while (pending) {
+    const retry = await window.shelfApi.dialog.confirm(
+      'Project removed with leftover data',
+      'The project was removed, but some project storage or secrets could not be cleaned up. Retry cleanup?',
+      'Retry',
+    ).catch((error) => {
+      console.error(`[project-cleanup] prompt failed projectId=${projectId}`, error);
+      return false;
+    });
+    if (!retry) return;
+    const recovered = await runProjectOperation('cleanup', () => projectCoordinator.retryCleanup(projectId));
+    if (recovered.status === 'cancelled') return;
+    pending = recovered.value.cleanupPending;
+  }
 }
 
 export function App() {
@@ -295,14 +340,11 @@ export function App() {
       const projectIndex = getProjectIndexById(projectId);
       const proj = getProjectById(projectId);
       if (projectIndex === -1 || !proj) return;
-      try {
-        await projectCoordinator.delete(projectId);
-      } catch (error) {
-        reportProjectMutationError('delete', error);
-        return;
-      }
+      const deleted = await runProjectOperation('delete', () => projectCoordinator.delete(projectId));
+      if (deleted.status === 'cancelled') return;
       Object.values(proj.agentSessionIds).forEach((id) => { if (id) clearAgentSession(id); });
       proj.tabs.forEach(teardownTab);
+      await recoverProjectCleanup(projectId, deleted.value.cleanupPending);
     });
 
     const offWorktreeFinishCompleted = on(Events.WORKTREE_FINISH_COMPLETED, (payload: {
@@ -466,33 +508,24 @@ export function App() {
       input: ProjectCreateInput,
       onSettled?: (result: { ok: true; project: Project } | { ok: false; error: unknown }) => void,
     ) => {
-      try {
-        const project = await projectCoordinator.add(input);
-        setActiveProjectById(project.id);
-        onSettled?.({ ok: true, project });
-      } catch (error) {
-        reportProjectMutationError('add', error);
-        onSettled?.({ ok: false, error });
+      const added = await runProjectOperation('add', () => projectCoordinator.add(input));
+      if (added.status === 'cancelled') {
+        onSettled?.({ ok: false, error: added.error });
+        return;
       }
+      setActiveProjectById(added.value.id);
+      onSettled?.({ ok: true, project: added.value });
     });
 
     const offUpdateProject = on(Events.UPDATE_PROJECT, async (
       projectId: string,
       changes: Partial<Omit<Project, 'id'>>,
     ) => {
-      try {
-        await projectCoordinator.save(projectId, changes);
-      } catch (error) {
-        reportProjectMutationError('update', error);
-      }
+      await runProjectOperation('update', () => projectCoordinator.save(projectId, changes));
     });
 
     const offReorderProjects = on(Events.REORDER_PROJECTS, async (sourceId: string, targetId: string) => {
-      try {
-        await projectCoordinator.reorder(sourceId, targetId);
-      } catch (error) {
-        reportProjectMutationError('reorder', error);
-      }
+      await runProjectOperation('reorder', () => projectCoordinator.reorder(sourceId, targetId));
     });
 
     // Just record the id; the store-keyed effect above connects it once it's added

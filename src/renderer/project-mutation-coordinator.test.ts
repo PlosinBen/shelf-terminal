@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Project } from '@shared/projects';
 import type { RendererProjectsRepositoryClient } from './projects-repository-client';
-import { createProjectMutationCoordinator } from './project-mutation-coordinator';
+import { createProjectMutationCoordinator, ProjectMutationRefreshError } from './project-mutation-coordinator';
 
 function project(id: string): Project {
   return {
@@ -108,5 +108,24 @@ describe('project mutation coordinator', () => {
       .toBeLessThan(vi.mocked(repository.getAll).mock.invocationCallOrder[0]);
     expect(vi.mocked(repository.getAll).mock.invocationCallOrder[0])
       .toBeLessThan(reconcile.mock.invocationCallOrder[0]);
+  });
+
+  it('reports a post-commit refresh failure without losing the committed result', async () => {
+    const repository = client();
+    const added = project('main-id');
+    vi.mocked(repository.add).mockResolvedValue(added);
+    vi.mocked(repository.getAll).mockRejectedValue(new Error('query failed'));
+    const coordinator = createProjectMutationCoordinator(repository, {
+      getProject: () => null,
+      reconcile: vi.fn(),
+    });
+
+    const error = await coordinator.add({
+      name: 'A', cwd: '/repo/a', connection: { type: 'local' }, maxTabs: 5,
+    }).catch((reason) => reason);
+
+    expect(error).toBeInstanceOf(ProjectMutationRefreshError);
+    expect(error.committedResult).toEqual(added);
+    expect(repository.add).toHaveBeenCalledOnce();
   });
 });

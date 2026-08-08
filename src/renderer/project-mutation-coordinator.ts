@@ -11,6 +11,18 @@ export interface ProjectMutationState {
   reconcile(projects: readonly Project[]): void;
 }
 
+export class ProjectMutationRefreshError<T> extends Error {
+  constructor(
+    readonly operation: 'add' | 'save' | 'delete' | 'reorder',
+    readonly committedResult: T,
+    readonly refreshError: unknown,
+  ) {
+    super(`project ${operation} was committed, but renderer refresh failed: ${
+      refreshError instanceof Error ? refreshError.message : String(refreshError)
+    }`);
+  }
+}
+
 export interface ProjectMutationCoordinator {
   initialize(): Promise<void>;
   refresh(): Promise<void>;
@@ -30,6 +42,18 @@ export function createProjectMutationCoordinator(
     state.reconcile(await client.getAll());
   }
 
+  async function refreshAfterCommit<T>(
+    operation: ProjectMutationRefreshError<T>['operation'],
+    committedResult: T,
+  ): Promise<T> {
+    try {
+      await refresh();
+      return committedResult;
+    } catch (error) {
+      throw new ProjectMutationRefreshError(operation, committedResult, error);
+    }
+  }
+
   return {
     initialize: refresh,
     refresh,
@@ -37,8 +61,7 @@ export function createProjectMutationCoordinator(
 
     async add(input) {
       const added = await client.add(input);
-      await refresh();
-      return added;
+      return refreshAfterCommit('add', added);
     },
 
     async save(projectId, changes) {
@@ -48,20 +71,19 @@ export function createProjectMutationCoordinator(
         return;
       }
       await client.save({ ...current, ...changes, id: current.id });
-      await refresh();
+      await refreshAfterCommit('save', undefined);
     },
 
     async delete(projectId) {
       const result = await client.delete(projectId);
-      await refresh();
-      return result;
+      return refreshAfterCommit('delete', result);
     },
 
     retryCleanup: (projectId) => client.retryCleanup(projectId),
 
     async reorder(sourceId, targetId) {
       await client.reorder(sourceId, targetId);
-      await refresh();
+      await refreshAfterCommit('reorder', undefined);
     },
   };
 }
