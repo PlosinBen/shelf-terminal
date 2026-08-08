@@ -49,9 +49,6 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v6
-        with:
-          # The tag commit message is used as the draft release body.
-          fetch-depth: 0
 
       - uses: actions/setup-node@v6
         with:

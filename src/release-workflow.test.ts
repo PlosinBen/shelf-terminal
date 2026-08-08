@@ -33,6 +33,13 @@ const repoRoot = fileURLToPath(new URL('..', import.meta.url));
 
 async function loadReleasePlanner(): Promise<{
   planDraftRelease: (releases: Release[], tag: string) => ReleasePlan;
+  draftReleasePayload: (tag: string) => {
+    tag_name: string;
+    name: string;
+    body: string;
+    draft: boolean;
+    prerelease: boolean;
+  };
 }> {
   const moduleUrl = new URL('../scripts/ensure-draft-release.mjs', import.meta.url).href;
   return import(/* @vite-ignore */ moduleUrl);
@@ -68,6 +75,18 @@ describe('release workflow draft gate', () => {
 });
 
 describe('draft release planning', () => {
+  it('creates drafts with an empty description', async () => {
+    const { draftReleasePayload } = await loadReleasePlanner();
+
+    expect(draftReleasePayload('v2.15.0')).toEqual({
+      tag_name: 'v2.15.0',
+      name: '2.15.0',
+      body: '',
+      draft: true,
+      prerelease: false,
+    });
+  });
+
   it('creates a draft only when no release exists for the tag', async () => {
     const { planDraftRelease } = await loadReleasePlanner();
     expect(planDraftRelease([], 'v2.15.0')).toEqual({ kind: 'create' });

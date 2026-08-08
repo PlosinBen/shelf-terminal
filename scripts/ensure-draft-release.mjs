@@ -1,4 +1,3 @@
-import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 
 const API_VERSION = '2022-11-28';
@@ -83,31 +82,21 @@ async function listReleases(apiUrl, repository, token) {
   return releases;
 }
 
-function readReleaseNotes(tag) {
-  const notes = execFileSync(
-    'git',
-    ['for-each-ref', '--format=%(contents)', `refs/tags/${tag}`],
-    { encoding: 'utf8' },
-  ).trim();
-
-  if (!notes) {
-    throw new Error(`Tag ${tag} has no release notes`);
-  }
-
-  return notes;
+export function draftReleasePayload(tag) {
+  return {
+    tag_name: tag,
+    name: tag.replace(/^v/, ''),
+    body: '',
+    draft: true,
+    prerelease: false,
+  };
 }
 
 async function createDraft(apiUrl, repository, token, tag) {
   const response = await githubRequest(`${apiUrl}/repos/${repository}/releases`, token, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      tag_name: tag,
-      name: tag.replace(/^v/, ''),
-      body: readReleaseNotes(tag),
-      draft: true,
-      prerelease: false,
-    }),
+    body: JSON.stringify(draftReleasePayload(tag)),
   });
 
   return response.json();
