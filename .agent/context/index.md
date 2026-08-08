@@ -9,6 +9,7 @@ Decisions + gotchas grouped by topic. Cited from code as `<topic>#N`.
 | 檔案上傳 / 貼上 / 清理 | [file-transfer](file-transfer.md) | `.tmp/shelf/`、cat-via-stdin、session-based cleanup |
 | 設定 merge、bootstrap、userData 隔離 | [settings-config](settings-config.md) | shallow+deep merge、開窗前載 config、DEFAULT_SETTINGS |
 | app 快捷鍵 / 視窗 shell 行為 | [keybindings-shell](keybindings-shell.md) | capture phase、外部連結、DevTools、IME composition |
+| 右側 panel 外框 / resize / width lifecycle | [renderer-shell](renderer-shell.md) | 六個右側 panel 的共用 shell、寬度 policy、相鄰 panel resize gotcha |
 | per-project 檔案儲存、notes | [storage](storage.md) | `projects/<id>/`、notes file storage + GC |
 | 打包 / CI / 簽章 | [build-packaging](build-packaging.md) | electron-builder、code signing、E2E build |
 | PM agent | [pm-agent](pm-agent.md) | Telegram 遙控、away/active、雙層 prompt、rolling note |

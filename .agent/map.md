@@ -214,7 +214,8 @@ title: shelf-terminal — Intent → File Index
 | Quick Note overlay | `components/QuickNoteOverlay.tsx` | ⌘⇧N floating textarea，送到當下 active project（支援貼圖） |
 | Note 圖片縮圖 | `components/NoteImage.tsx` | 共用縮圖元件，透過 `notes.readImage` IPC 載 Blob URL |
 | Clipboard / drop 解析 | `utils/parse-data-transfer.ts` | 純 parser，`DataTransfer → PastedItem[]`（paste/drop 共用） |
-| 右側 sidebar toggle | `store.toggleRightSidebar(feature)` | PM/Notes/DevTools 三 panel 共用的 toggle action |
+| 右側 panel 共用外框 / resize | `components/RightPanel.tsx` | 六個右側 panel 共用的 aside shell、width policy、header wrapper 與 drag lifecycle |
+| 右側 sidebar toggle | `store.toggleRightSidebar(feature)` | PM/Notes/Skills/MCP/Backup/DevTools 六個 panel 共用的 toggle action |
 | Tooltip 快捷鍵 helper | `utils/format-keybinding.ts` | 純函式 `formatCombo` / `tooltipWithShortcut` |
 | PM stream reducer | `components/pm-view-reducer.ts` | 純 reducer 管 PM streaming/streamText/streamToolCalls/error 四個 UI state |
 | Project 編輯面板 | `components/ProjectEditPanel.tsx` | 改名、init script、feature-note directory、default tabs、quick commands、Clear uploaded files |
