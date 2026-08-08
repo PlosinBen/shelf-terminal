@@ -19,7 +19,7 @@ export function ProjectNoticeBannerView({ notice, onDismiss }: { notice: Project
 
 export function ProjectNoticeBanner() {
   const { projects, activeProjectIndex, projectNotice } = useStore();
-  const activeProjectId = projects[activeProjectIndex]?.config.id;
+  const activeProjectId = projects[activeProjectIndex]?.id;
 
   useEffect(() => {
     if (!projectNotice) return;

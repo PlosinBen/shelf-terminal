@@ -14,6 +14,7 @@ export interface ProjectMutationState {
 export interface ProjectMutationCoordinator {
   initialize(): Promise<void>;
   refresh(): Promise<void>;
+  getInvalidDirectoryIds(): Promise<readonly ProjectId[]>;
   add(input: ProjectCreateInput): Promise<Project>;
   save(projectId: ProjectId, changes: Partial<Omit<Project, 'id'>>): Promise<void>;
   delete(projectId: ProjectId): Promise<ProjectDeleteResult>;
@@ -32,6 +33,7 @@ export function createProjectMutationCoordinator(
   return {
     initialize: refresh,
     refresh,
+    getInvalidDirectoryIds: () => client.getInvalidDirectoryIds(),
 
     async add(input) {
       const added = await client.add(input);

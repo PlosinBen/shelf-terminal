@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ProjectConfig } from '@shared/types';
+import type { Project } from '@shared/projects';
 import {
   __getSnapshotForTests,
   __resetStoreForTests,
@@ -7,44 +7,37 @@ import {
   getActiveProjectId,
   listStableProjectViews,
   projectDisplayLabel,
-  reorderProjects,
   setActiveProjectById,
   setProjects,
 } from './store';
 
-function config(id: string): ProjectConfig {
+function project(id: string, changes: Partial<Project> = {}): Project {
   return {
     id,
     name: id,
     cwd: `/repo/${id}`,
     connection: { type: 'local' },
     maxTabs: 5,
+    initScript: null,
+    envPlain: {},
+    defaultTabs: [],
+    quickCommands: [],
+    featureNoteDir: null,
+    parentProjectId: null,
+    worktreeBranch: null,
+    baseBranch: null,
+    defaultAgentProvider: null,
+    openAgentOnConnect: false,
+    agentSessionIds: {},
+    agentPrefs: {},
+    ...changes,
   };
 }
 
-describe('store project ordering', () => {
+describe('store project reconciliation', () => {
   beforeEach(() => {
-    vi.stubGlobal('window', {
-      shelfApi: {
-        project: { save: vi.fn() },
-      },
-    });
+    vi.stubGlobal('window', { shelfApi: { pm: { syncState: vi.fn() } } });
     __resetStoreForTests();
-  });
-
-  it('uses the worktree branch as the visible project label', () => {
-    const base = { config: config('Base') };
-    const child = {
-      config: {
-        ...config('Child'),
-        name: 'Base',
-        parentProjectId: 'Base',
-        worktreeBranch: 'feature/popup-focus',
-      },
-    };
-
-    expect(projectDisplayLabel(base)).toBe('Base');
-    expect(projectDisplayLabel(child)).toBe('feature/popup-focus');
   });
 
   afterEach(() => {
@@ -52,21 +45,27 @@ describe('store project ordering', () => {
     __resetStoreForTests();
   });
 
-  it('keeps stable project view order unchanged when visual project order changes', () => {
-    setProjects([config('A'), config('B'), config('C')]);
+  it('uses the worktree branch as the visible project label', () => {
+    expect(projectDisplayLabel(project('Base'))).toBe('Base');
+    expect(projectDisplayLabel(project('Child', {
+      name: 'Base',
+      parentProjectId: 'Base',
+      worktreeBranch: 'feature/popup-focus',
+    }))).toBe('feature/popup-focus');
+  });
+
+  it('adopts repository order while preserving runtime state by project id', () => {
+    setProjects([project('A'), project('B'), project('C')]);
     addTab(0);
     addTab(1);
     addTab(2);
     setActiveProjectById('A');
 
-    expect(__getSnapshotForTests().projects.map((p) => p.config.id)).toEqual(['A', 'B', 'C']);
-    expect(listStableProjectViews().map((p) => p.config.id)).toEqual(['A', 'B', 'C']);
+    setProjects([project('B'), project('C'), project('A')]);
 
-    reorderProjects(0, 2);
-
-    expect(__getSnapshotForTests().projects.map((p) => p.config.id)).toEqual(['B', 'C', 'A']);
-    expect(listStableProjectViews().map((p) => p.config.id)).toEqual(['A', 'B', 'C']);
+    expect(__getSnapshotForTests().projects.map((candidate) => candidate.id)).toEqual(['B', 'C', 'A']);
+    expect(__getSnapshotForTests().projects.map((candidate) => candidate.tabs.length)).toEqual([1, 1, 1]);
+    expect(listStableProjectViews().map((candidate) => candidate.id)).toEqual(['A', 'B', 'C']);
     expect(getActiveProjectId()).toBe('A');
-    expect(window.shelfApi.project.save).toHaveBeenLastCalledWith([config('B'), config('C'), config('A')]);
   });
 });

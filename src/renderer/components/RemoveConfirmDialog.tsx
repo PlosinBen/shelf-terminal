@@ -6,7 +6,7 @@ interface PendingRemove {
   projectId: string;
   isWorktree: boolean;
   projectName: string;
-  branch?: string;
+  branch?: string | null;
 }
 
 export const CONFIRM_REMOVE_EVENT = 'confirm-remove-project';
@@ -19,13 +19,13 @@ export function RemoveConfirmDialog() {
 
   useEffect(() => {
     const off = on(CONFIRM_REMOVE_EVENT, (projectId: string) => {
-      const proj = projects.find((p) => p.config.id === projectId);
+      const proj = projects.find((p) => p.id === projectId);
       if (!proj) return;
       setPending({
         projectId,
-        isWorktree: !!proj.config.parentProjectId,
-        projectName: proj.config.name,
-        branch: proj.config.worktreeBranch,
+        isWorktree: !!proj.parentProjectId,
+        projectName: proj.name,
+        branch: proj.worktreeBranch,
       });
       setCleanWorktree(true);
     });
@@ -48,14 +48,14 @@ export function RemoveConfirmDialog() {
   if (!pending) return null;
 
   const handleConfirm = async () => {
-    const proj = projects.find((p) => p.config.id === pending.projectId);
+    const proj = projects.find((p) => p.id === pending.projectId);
     if (pending.isWorktree && cleanWorktree && proj) {
-      const parent = projects.find((p) => p.config.id === proj.config.parentProjectId);
+      const parent = projects.find((p) => p.id === proj.parentProjectId);
       if (parent) {
         await window.shelfApi.git.worktreeRemove(
-          parent.config.connection,
-          parent.config.cwd,
-          proj.config.cwd,
+          parent.connection,
+          parent.cwd,
+          proj.cwd,
         );
       }
     }

@@ -3,7 +3,8 @@ import { useStore } from '../store';
 import { FolderBrowser } from './FolderBrowser';
 import { ConnectionStep } from './folder-picker/ConnectionStep';
 import { on, emit, Events } from '../events';
-import type { ProjectConfig, Connection } from '@shared/types';
+import type { Connection } from '@shared/types';
+import type { ProjectCreateInput } from '@shared/projects';
 
 type Step = 'connection' | 'browse';
 
@@ -154,8 +155,7 @@ export function FolderPicker() {
       displayName = `[WSL] ${folderName}`;
     }
 
-    const config: ProjectConfig = {
-      id: `proj-${Date.now()}`,
+    const config: ProjectCreateInput = {
       name: displayName,
       cwd: selectedPath,
       connection: conn,

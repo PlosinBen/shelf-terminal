@@ -24,9 +24,9 @@ import { McpView } from './components/McpView';
 import { BackupView } from './components/BackupView';
 import { QuickNoteOverlay } from './components/QuickNoteOverlay';
 import { useKeybindings } from './hooks/useKeybindings';
-import { useStore, setProjects, setSettings, setUpdateStatus, addProject, addTab, setActiveTab, removeTab, removeProject, setSplitTab, clearUnread, setInvalidProjects, setPmActive, setConnectionHealth, setActiveProject, setActiveProjectById, getProjectById, getProjectIndexById, getProjectConfigs, listStableProjectViews, showProjectNotice, resolveAgentProviderForOpen, resolveAgentProviderForConnect } from './store';
+import { useStore, setSettings, setUpdateStatus, addTab, setActiveTab, removeTab, setSplitTab, clearUnread, setInvalidProjects, setPmActive, setConnectionHealth, setActiveProjectById, getProjectById, getProjectViews, getProjectIndexById, getCanonicalProjectById, reconcileProjects, listStableProjectViews, showProjectNotice, resolveAgentProviderForOpen, resolveAgentProviderForConnect } from './store';
 import type { ConnectionHealth } from '@shared/types';
-import type { ProjectConfig } from '@shared/types';
+import type { Project, ProjectCreateInput } from '@shared/projects';
 import { disposeTerminal } from './components/TerminalView';
 import { teardownTab } from './tab-teardown';
 import { on, emit, Events, onBackup } from './events';
@@ -36,6 +36,8 @@ import { setInMemoryMax, setSaveThrottleMs } from './agentTabStore';
 import { getTheme, buildThemeVars } from './themes';
 import { clearAgentSession } from './storage/agent-history';
 import { bindProcessMemorySummary } from './process-memory-sync';
+import { createProjectMutationCoordinator } from './project-mutation-coordinator';
+import { createRendererProjectsRepositoryClient } from './projects-repository-client';
 import {
   acceptBackupPanelList,
   acceptImportApplyFailure,
@@ -46,6 +48,17 @@ import {
   failImportPanelRequest,
 } from './backup-panel-store';
 import './styles/global.css';
+
+const projectCoordinator = createProjectMutationCoordinator(
+  createRendererProjectsRepositoryClient(),
+  { getProject: getCanonicalProjectById, reconcile: reconcileProjects },
+);
+
+function reportProjectMutationError(operation: string, error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  console.error(`[project-coordinator] operation=${operation} failed: ${message}`);
+  void window.shelfApi.dialog.warn('Project update failed', message);
+}
 
 export function App() {
   const { projects, activeProjectIndex, activeProjectId, sidebarVisible, settingsVisible, commandPickerVisible, devToolsVisible, notesVisible, skillsVisible, mcpVisible, backupVisible, editingProjectIndex, settings, pmVisible, awayMode } = useStore();
@@ -58,7 +71,7 @@ export function App() {
   const [pendingConnectId, setPendingConnectId] = useState<string | null>(null);
   useEffect(() => {
     if (!pendingConnectId) return;
-    const idx = projects.findIndex((p) => p.config.id === pendingConnectId);
+    const idx = projects.findIndex((p) => p.id === pendingConnectId);
     if (idx < 0) return; // not in the store yet — this effect re-runs when it lands
     setPendingConnectId(null);
     if (projects[idx].tabs.length > 0) return; // already connected
@@ -278,21 +291,18 @@ export function App() {
       removeTab(projectIndex, tabIndex);
     });
 
-    const offRemoveProject = on(Events.REMOVE_PROJECT, (projectId: string) => {
+    const offRemoveProject = on(Events.REMOVE_PROJECT, async (projectId: string) => {
       const projectIndex = getProjectIndexById(projectId);
       const proj = getProjectById(projectId);
       if (projectIndex === -1 || !proj) return;
-      if (proj) {
-        // Clean up agent session data (IndexedDB)
-        const sessionIds = proj.config.agentSessionIds;
-        if (sessionIds) {
-          Object.values(sessionIds).forEach((id) => { if (id) clearAgentSession(id); });
-        }
-        proj.tabs.forEach(teardownTab);
+      try {
+        await projectCoordinator.delete(projectId);
+      } catch (error) {
+        reportProjectMutationError('delete', error);
+        return;
       }
-      removeProject(projectIndex);
-      const configs = getProjectConfigs();
-      window.shelfApi.project.save(configs);
+      Object.values(proj.agentSessionIds).forEach((id) => { if (id) clearAgentSession(id); });
+      proj.tabs.forEach(teardownTab);
     });
 
     const offWorktreeFinishCompleted = on(Events.WORKTREE_FINISH_COMPLETED, (payload: {
@@ -301,9 +311,8 @@ export function App() {
       featureBranch: string;
       targetBranch: string;
     }) => {
-      const configsAfter = projects
-        .filter((p) => p.config.id !== payload.subProjectId)
-        .map((p) => p.config);
+      const configsAfter = getProjectViews()
+        .filter((p) => p.id !== payload.subProjectId);
       const parentIndexAfter = configsAfter.findIndex((p) => p.id === payload.parentProjectId);
       if (!getProjectById(payload.subProjectId) || parentIndexAfter === -1) {
         console.warn(`[worktree] finish-completed for unknown project pair ${payload.subProjectId} → ${payload.parentProjectId}`);
@@ -347,7 +356,7 @@ export function App() {
     // in the agent's project, AFTER the user approved the per-call popup. addTab
     // auto-activates the new tab so the login page is front-and-center.
     const offOpenWebTab = window.shelfApi.web.onOpenTab((projectId: string, url: string) => {
-      const projectIndex = projects.findIndex((p) => p.config.id === projectId);
+      const projectIndex = getProjectIndexById(projectId);
       if (projectIndex === -1) {
         // Fail-loud: the target project vanished (closed mid-turn) — don't
         // silently drop the user's login request.
@@ -358,7 +367,7 @@ export function App() {
     });
 
     const offProposeWorktreeCreate = window.shelfApi.worktree.onProposeCreate(({ projectId, branch, notePaths }) => {
-      const projectIndex = projects.findIndex((p) => p.config.id === projectId);
+      const projectIndex = getProjectIndexById(projectId);
       if (projectIndex === -1) {
         console.warn(`[worktree] propose-create for unknown project ${projectId}`);
         return;
@@ -368,7 +377,7 @@ export function App() {
     });
 
     const offProposeWorktreeFinish = window.shelfApi.worktree.onProposeFinish(({ projectId }) => {
-      const projectIndex = projects.findIndex((p) => p.config.id === projectId);
+      const projectIndex = getProjectIndexById(projectId);
       if (projectIndex === -1) {
         console.warn(`[worktree] propose-finish for unknown project ${projectId}`);
         return;
@@ -382,7 +391,7 @@ export function App() {
       if (!proj || proj.tabs.length > 0) return;
 
       // Establish SSH ControlMaster before spawning tabs
-      const conn = proj.config.connection;
+      const conn = proj.connection;
       if (conn.type === 'ssh' && conn.password) {
         try {
           await window.shelfApi.connector.connect(conn, conn.password);
@@ -412,7 +421,7 @@ export function App() {
         }
       }
 
-      if (proj.config.openAgentOnConnect) {
+      if (proj.openAgentOnConnect) {
         proj = getProjectById(projectId);
         const projectIndex = getProjectIndexById(projectId);
         if (!proj || projectIndex === -1 || proj.tabs.length > 0) return;
@@ -425,7 +434,7 @@ export function App() {
       proj = getProjectById(projectId);
       const projectIndex = getProjectIndexById(projectId);
       if (!proj || projectIndex === -1) return;
-      const templates = proj.config.defaultTabs;
+      const templates = proj.defaultTabs;
       if (templates && templates.length > 0) {
         templates.forEach((t) =>
           t.kind === 'web'
@@ -453,10 +462,37 @@ export function App() {
       setSplitTab(projectIndex, null);
     });
 
-    const offAddProject = on(Events.ADD_PROJECT, async (config: ProjectConfig) => {
-      addProject(config);
-      const configs = getProjectConfigs();
-      await window.shelfApi.project.save(configs);
+    const offAddProject = on(Events.ADD_PROJECT, async (
+      input: ProjectCreateInput,
+      onSettled?: (result: { ok: true; project: Project } | { ok: false; error: unknown }) => void,
+    ) => {
+      try {
+        const project = await projectCoordinator.add(input);
+        setActiveProjectById(project.id);
+        onSettled?.({ ok: true, project });
+      } catch (error) {
+        reportProjectMutationError('add', error);
+        onSettled?.({ ok: false, error });
+      }
+    });
+
+    const offUpdateProject = on(Events.UPDATE_PROJECT, async (
+      projectId: string,
+      changes: Partial<Omit<Project, 'id'>>,
+    ) => {
+      try {
+        await projectCoordinator.save(projectId, changes);
+      } catch (error) {
+        reportProjectMutationError('update', error);
+      }
+    });
+
+    const offReorderProjects = on(Events.REORDER_PROJECTS, async (sourceId: string, targetId: string) => {
+      try {
+        await projectCoordinator.reorder(sourceId, targetId);
+      } catch (error) {
+        reportProjectMutationError('reorder', error);
+      }
     });
 
     // Just record the id; the store-keyed effect above connects it once it's added
@@ -494,10 +530,10 @@ export function App() {
     });
 
     const offSwitchBranch = on(SWITCH_BRANCH_EVENT, async (projectIndex: number, branch: string, callback: (success: boolean, branch?: string) => void) => {
-      const proj = projects[projectIndex];
+      const proj = getProjectViews()[projectIndex];
       if (!proj) { callback(false); return; }
 
-      const result = await window.shelfApi.git.checkout(proj.config.connection, proj.config.cwd, branch);
+      const result = await window.shelfApi.git.checkout(proj.connection, proj.cwd, branch);
       if (result.ok) {
         callback(true, branch);
       } else {
@@ -506,14 +542,14 @@ export function App() {
       }
     });
 
-    return () => { offCloseTab(); offRemoveProject(); offWorktreeFinishCompleted(); offNewTab(); offNewAgentTab(); offNewWebTab(); offOpenWebTab(); offProposeWorktreeCreate(); offProposeWorktreeFinish(); offConnectProject(); offAutoConnect(); offDisconnectProject(); offAddProject(); offToggleSplit(); offSwitchBranch(); };
-  }, [projects]);
+    return () => { offCloseTab(); offRemoveProject(); offWorktreeFinishCompleted(); offNewTab(); offNewAgentTab(); offNewWebTab(); offOpenWebTab(); offProposeWorktreeCreate(); offProposeWorktreeFinish(); offConnectProject(); offAutoConnect(); offDisconnectProject(); offAddProject(); offUpdateProject(); offReorderProjects(); offToggleSplit(); offSwitchBranch(); };
+  }, []);
 
   useEffect(() => {
-    window.shelfApi.project.load().then((configs) => {
-      setProjects(configs);
-      window.shelfApi.project.validateDirs(configs).then(setInvalidProjects);
-    });
+    projectCoordinator.initialize()
+      .then(() => projectCoordinator.getInvalidDirectoryIds())
+      .then(setInvalidProjects)
+      .catch((error) => reportProjectMutationError('initialize', error));
   }, []);
 
   // Re-focus active terminal when window regains focus or panels close
@@ -564,7 +600,7 @@ export function App() {
           {activeProject && activeProject.folderInvalid && (
             <div className="invalid-folder-overlay">
               <span>Invalid folder</span>
-              <span className="invalid-folder-path">{activeProject.config.cwd}</span>
+              <span className="invalid-folder-path">{activeProject.cwd}</span>
             </div>
           )}
           {activeProject && !activeProject.folderInvalid && activeProject.tabs.length === 0 && (
@@ -575,16 +611,16 @@ export function App() {
               tabIndex={0}
               ref={(el) => el?.focus()}
             >
-              Click or press Enter to connect to <strong>{activeProject.config.name}</strong>
+              Click or press Enter to connect to <strong>{activeProject.name}</strong>
             </div>
           )}
           <div className={activeProject?.splitTabId ? 'split-view' : 'terminal-fill'}>
             {stableProjectViews.map((proj) => {
-                const isActiveProject = proj.config.id === activeProjectId;
+                const isActiveProject = proj.id === activeProjectId;
                 const isSplit = isActiveProject && proj.splitTabId !== null;
 
                 return (
-                  <React.Fragment key={proj.config.id}>
+                  <React.Fragment key={proj.id}>
                     {proj.tabs.map((tab, ti) => {
                       const isActiveTab = ti === proj.activeTabIndex;
                       const isSplitTab = tab.id === proj.splitTabId;
@@ -605,19 +641,19 @@ export function App() {
                           ) : tab.type === 'agent' && tab.provider ? (
                             <AgentView
                               tabId={tab.id}
-                              cwd={proj.config.cwd}
-                              connection={proj.config.connection}
+                              cwd={proj.cwd}
+                              connection={proj.connection}
                               provider={tab.provider}
-                              projectId={proj.config.id}
+                              projectId={proj.id}
                               visible={visible}
                             />
                           ) : (
                             <TerminalView
                               tabId={tab.id}
-                              projectId={proj.config.id}
-                              cwd={proj.config.cwd}
-                              connection={proj.config.connection}
-                              initScript={proj.config.initScript}
+                              projectId={proj.id}
+                              cwd={proj.cwd}
+                              connection={proj.connection}
+                              initScript={proj.initScript ?? undefined}
                               tabCmd={tab.cmd}
                               visible={visible}
                             />

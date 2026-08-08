@@ -31,7 +31,9 @@ export const Events = {
   AUTO_CONNECT_PROJECT: 'auto-connect-project', // (projectId) — connect a just-added project once it's in the store
   DISCONNECT_PROJECT: 'disconnect-project', // (projectId)
   OPEN_FOLDER_PICKER: 'open-folder-picker',
-  ADD_PROJECT: 'add-project',       // (ProjectConfig)
+  ADD_PROJECT: 'add-project',       // (ProjectCreateInput, onSettled?)
+  UPDATE_PROJECT: 'update-project', // (projectId, changes)
+  REORDER_PROJECTS: 'reorder-projects', // (sourceId, targetId)
   TOGGLE_SPLIT: 'toggle-split',     // (projectId)
   CREATE_WORKTREE: 'create-worktree', // (projectId, prefill?: { branch?, notePaths? })
   WORKTREE_CLOSE: 'worktree-close',   // (projectId, kind: 'finish' | 'abandon')

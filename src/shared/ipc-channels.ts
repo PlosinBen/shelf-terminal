@@ -2,8 +2,6 @@ export const IPC = {
   // Renderer → Main (invoke)
   PTY_SPAWN: 'pty:spawn',
   PTY_KILL: 'pty:kill',
-  PROJECT_LOAD: 'project:load',
-  PROJECT_SAVE: 'project:save',
   PROJECT_GET_ALL: 'project:get-all',
   PROJECT_ADD: 'project:add',
   PROJECT_UPDATE: 'project:update',

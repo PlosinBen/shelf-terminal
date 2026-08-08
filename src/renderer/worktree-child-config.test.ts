@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { buildWorktreeChildConfig } from './worktree-child-config';
 import { CLAUDE_PROVIDER, CODEX_PROVIDER } from '@shared/agent-providers';
-import type { ProjectConfig } from '@shared/types';
+import type { Project } from '@shared/projects';
 
-const parent: ProjectConfig = {
+const parent: Project = {
   id: 'base-1',
   name: 'My Project',
   cwd: '/repo',
@@ -18,11 +18,14 @@ const parent: ProjectConfig = {
   agentPrefs: { [CLAUDE_PROVIDER]: { model: 'opus' } as any },
   openAgentOnConnect: true,
   agentSessionIds: { [CLAUDE_PROVIDER]: 'sess-parent' },
+  parentProjectId: null,
+  worktreeBranch: null,
+  baseBranch: null,
 };
 
 describe('buildWorktreeChildConfig', () => {
   const child = buildWorktreeChildConfig(parent, {
-    id: 'wt-1', cwd: '/repo-feature', worktreeBranch: 'feature', baseBranch: 'main',
+    cwd: '/repo-feature', worktreeBranch: 'feature', baseBranch: 'main',
   });
 
   it('inherits the parent setup fields', () => {
@@ -40,7 +43,7 @@ describe('buildWorktreeChildConfig', () => {
   });
 
   it('sets a fresh worktree identity', () => {
-    expect(child.id).toBe('wt-1');
+    expect(child).not.toHaveProperty('id');
     expect(child.cwd).toBe('/repo-feature');
     expect(child.parentProjectId).toBe('base-1');
     expect(child.worktreeBranch).toBe('feature');
@@ -48,13 +51,13 @@ describe('buildWorktreeChildConfig', () => {
   });
 
   it('NEVER inherits agentSessionIds (fresh agent boots and reads the note)', () => {
-    expect(child.agentSessionIds).toBeUndefined();
+    expect(child).not.toHaveProperty('agentSessionIds');
   });
 
   it('snapshots featureNoteDir without linking later parent edits', () => {
     const editableParent = { ...parent };
     const snapshotted = buildWorktreeChildConfig(editableParent, {
-      id: 'wt-snapshot', cwd: '/repo-snapshot', worktreeBranch: 'snapshot',
+      cwd: '/repo-snapshot', worktreeBranch: 'snapshot',
     });
     editableParent.featureNoteDir = 'notes/features';
     expect(snapshotted.featureNoteDir).toBe('.agent/features');
@@ -62,7 +65,7 @@ describe('buildWorktreeChildConfig', () => {
 
   it('uses an explicit provider override without changing the parent', () => {
     const overridden = buildWorktreeChildConfig(parent, {
-      id: 'wt-codex', cwd: '/repo-codex', worktreeBranch: 'feature-codex', defaultAgentProvider: CODEX_PROVIDER,
+      cwd: '/repo-codex', worktreeBranch: 'feature-codex', defaultAgentProvider: CODEX_PROVIDER,
     });
     expect(overridden.defaultAgentProvider).toBe(CODEX_PROVIDER);
     expect(parent.defaultAgentProvider).toBe(CLAUDE_PROVIDER);
@@ -70,12 +73,11 @@ describe('buildWorktreeChildConfig', () => {
 
   it('accepts the canonical Codex provider override', () => {
     const overridden = buildWorktreeChildConfig(parent, {
-      id: 'wt-codex-official',
       cwd: '/repo-codex-official',
       worktreeBranch: 'codex-official',
       defaultAgentProvider: CODEX_PROVIDER,
     });
     expect(overridden.defaultAgentProvider).toBe(CODEX_PROVIDER);
-    expect(overridden.agentSessionIds).toBeUndefined();
+    expect(overridden).not.toHaveProperty('agentSessionIds');
   });
 });

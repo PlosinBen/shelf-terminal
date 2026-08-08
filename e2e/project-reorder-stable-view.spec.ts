@@ -168,9 +168,8 @@ test.describe('project reorder stable view order', () => {
       observer.observe(host, { childList: true });
     });
 
-    // FolderPicker generates `proj-<timestamp>`, which sorts before the seeded
-    // `proj-A`/`proj-B`/`proj-C` ids in listStableProjectViews. That inserts a
-    // new outer project group before Alpha without touching Alpha itself.
+    // Main owns the new opaque id. Adding the project changes the stable outer
+    // project list without touching Alpha's existing subtree.
     await page.locator('.sidebar-btn', { hasText: '+' }).click();
     await expect(page.locator('.folder-picker-overlay')).toBeVisible({ timeout: 5_000 });
     await page.locator('.conn-btn-next').click();
@@ -184,8 +183,7 @@ test.describe('project reorder stable view order', () => {
       { timeout: 1_000 },
     ).toBe(false);
 
-    // The newly added project is active and its timestamp id sorts before
-    // `proj-A`. Removing that preceding outer group must preserve Alpha's
+    // The newly added project is active. Removing it must preserve Alpha's
     // existing agent subtree as well.
     await page.locator('.sidebar-item.active').click({ button: 'right' });
     await page.locator('.context-menu-item', { hasText: 'Remove' }).click();

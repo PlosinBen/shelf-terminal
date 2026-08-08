@@ -1,14 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { featureNoteDirForProjectSave } from './feature-note-config-edit';
-import type { ProjectConfig } from '@shared/types';
 
-const main: ProjectConfig = {
-  id: 'main',
-  name: 'Main',
-  cwd: '/repo',
-  connection: { type: 'local' },
-  maxTabs: 4,
-};
+const main = { parentProjectId: null, featureNoteDir: null };
 
 describe('featureNoteDirForProjectSave', () => {
   it('normalizes a main project edit', () => {
@@ -16,13 +9,12 @@ describe('featureNoteDirForProjectSave', () => {
   });
 
   it('clears a main project binding when the input is blank', () => {
-    expect(featureNoteDirForProjectSave({ ...main, featureNoteDir: '.agent/features' }, '  ')).toBeUndefined();
+    expect(featureNoteDirForProjectSave({ ...main, featureNoteDir: '.agent/features' }, '  ')).toBeNull();
   });
 
   it('keeps a child snapshot regardless of submitted input', () => {
     const child = {
       ...main,
-      id: 'child',
       parentProjectId: 'main',
       featureNoteDir: '.agent/features',
     };

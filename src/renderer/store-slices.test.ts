@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ProjectConfig } from '@shared/types';
+import type { Project } from '@shared/projects';
 import {
   __getSnapshotForTests,
   __resetStoreForTests,
@@ -8,13 +8,25 @@ import {
   toggleRightSidebar,
 } from './store';
 
-function config(id: string): ProjectConfig {
+function config(id: string): Project {
   return {
     id,
     name: id,
     cwd: `/repo/${id}`,
     connection: { type: 'local' },
     maxTabs: 5,
+    initScript: null,
+    envPlain: {},
+    defaultTabs: [],
+    quickCommands: [],
+    featureNoteDir: null,
+    parentProjectId: null,
+    worktreeBranch: null,
+    baseBranch: null,
+    defaultAgentProvider: null,
+    openAgentOnConnect: false,
+    agentSessionIds: {},
+    agentPrefs: {},
   };
 }
 

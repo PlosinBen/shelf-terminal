@@ -27,8 +27,8 @@ interface CloseState {
 function logCloseFailure(input: {
   operation: WorktreeCloseKind;
   subProjectId: string;
-  parentProjectId?: string;
-  featureBranch?: string;
+  parentProjectId?: string | null;
+  featureBranch?: string | null;
   targetBranch?: string;
   parentCwd?: string;
   featureCwd?: string;
@@ -52,30 +52,30 @@ export function WorktreeCloseGate() {
   // a force-delete discard commits (→ loud warning). null until the check returns.
   const [mergeInfo, setMergeInfo] = useState<BranchMergedInfo | null>(null);
 
-  const sub = state ? projects.find((p) => p.config.id === state.subProjectId) : undefined;
-  const parent = sub ? projects.find((p) => p.config.id === sub.config.parentProjectId) : undefined;
+  const sub = state ? projects.find((p) => p.id === state.subProjectId) : undefined;
+  const parent = sub ? projects.find((p) => p.id === sub.parentProjectId) : undefined;
 
   useEffect(() => {
     const off = on(Events.WORKTREE_CLOSE, (projectId: string, kind: WorktreeCloseKind) => {
-      const proj = projects.find((p) => p.config.id === projectId);
-      if (!proj || !proj.config.parentProjectId) return; // guard: children only
-      setState({ subProjectId: proj.config.id, kind });
+      const proj = projects.find((p) => p.id === projectId);
+      if (!proj || !proj.parentProjectId) return; // guard: children only
+      setState({ subProjectId: proj.id, kind });
       setBusy(false);
       setError(null);
       setDeleteBranch(true);
       setBranches([]);
       setMergeInfo(null);
-      const base = proj.config.baseBranch ?? '';
+      const base = proj.baseBranch ?? '';
       setTarget(base);
 
-      const par = projects.find((p) => p.config.id === proj.config.parentProjectId);
+      const par = projects.find((p) => p.id === proj.parentProjectId);
       // finish: load the parent's local branches for the target selector (the
       // user's latch on WHERE the ff lands; default = captured fork point).
       if (kind === 'finish' && par) {
         window.shelfApi.git
-          .branchList(par.config.connection, par.config.cwd)
+          .branchList(par.connection, par.cwd)
           .then((found) => {
-            setBranches(found.filter((b) => b.name !== proj.config.worktreeBranch));
+            setBranches(found.filter((b) => b.name !== proj.worktreeBranch));
             if (base && !found.some((b) => b.name === base) && found.length > 0) {
               setTarget(found[0].name);
             }
@@ -84,9 +84,9 @@ export function WorktreeCloseGate() {
       }
       // abandon: is the branch already merged into base → drives the adaptive
       // warning + whether the delete is safe (-d) or a forced discard (-D).
-      if (kind === 'abandon' && par && base && proj.config.worktreeBranch) {
+      if (kind === 'abandon' && par && base && proj.worktreeBranch) {
         window.shelfApi.git
-          .branchMerged(par.config.connection, par.config.cwd, base, proj.config.worktreeBranch)
+          .branchMerged(par.connection, par.cwd, base, proj.worktreeBranch)
           .then(setMergeInfo)
           .catch(() => { /* stays null → cautious unmerged-style warning */ });
       }
@@ -97,7 +97,7 @@ export function WorktreeCloseGate() {
   if (!state || !sub) return null;
 
   const isAbandon = state.kind === 'abandon';
-  const branch = sub.config.worktreeBranch;
+  const branch = sub.worktreeBranch;
   // The worktree's agent tab, if any — the Send-to-agent target on failure.
   const agentTabId = sub.tabs.find((t) => t.type === 'agent')?.id;
 
@@ -124,9 +124,9 @@ export function WorktreeCloseGate() {
       logCloseFailure({
         operation: state.kind,
         subProjectId: state.subProjectId,
-        parentProjectId: sub.config.parentProjectId,
+        parentProjectId: sub.parentProjectId,
         featureBranch: branch,
-        featureCwd: sub.config.cwd,
+        featureCwd: sub.cwd,
         failedStep: 'missingParentProject',
         error: msg,
       });
@@ -136,10 +136,10 @@ export function WorktreeCloseGate() {
     setBusy(true);
     setError(null);
 
-    const parentConn = parent.config.connection;
-    const parentCwd = parent.config.cwd;
-    const featureCwd = sub.config.cwd;
-    const featureBranch = sub.config.worktreeBranch ?? '';
+    const parentConn = parent.connection;
+    const parentCwd = parent.cwd;
+    const featureCwd = sub.cwd;
+    const featureBranch = sub.worktreeBranch ?? '';
 
     // finish: fast-forward the target first; only a successful merge tears down.
     if (!isAbandon) {
@@ -157,7 +157,7 @@ export function WorktreeCloseGate() {
         logCloseFailure({
           operation: state.kind,
           subProjectId: state.subProjectId,
-          parentProjectId: parent.config.id,
+          parentProjectId: parent.id,
           featureBranch,
           targetBranch: target,
           parentCwd,
@@ -173,19 +173,19 @@ export function WorktreeCloseGate() {
 
     // Restore from the child's creation-time snapshot. Disabled/legacy children
     // have no binding and deliberately skip feature-note handling.
-    if (sub.config.featureNoteDir) {
+    if (sub.featureNoteDir) {
       const restored = await window.shelfApi.git.restoreNotes(
         parentConn,
         parentCwd,
         featureCwd,
-        sub.config.featureNoteDir,
+        sub.featureNoteDir,
       );
       if (!restored.ok) {
         const msg = restored.error ?? 'failed to restore feature notes';
         logCloseFailure({
           operation: state.kind,
           subProjectId: state.subProjectId,
-          parentProjectId: parent.config.id,
+          parentProjectId: parent.id,
           featureBranch,
           targetBranch: target,
           parentCwd,
@@ -206,7 +206,7 @@ export function WorktreeCloseGate() {
       logCloseFailure({
         operation: state.kind,
         subProjectId: state.subProjectId,
-        parentProjectId: parent.config.id,
+        parentProjectId: parent.id,
         featureBranch,
         targetBranch: target,
         parentCwd,
@@ -230,7 +230,7 @@ export function WorktreeCloseGate() {
         logCloseFailure({
           operation: state.kind,
           subProjectId: state.subProjectId,
-          parentProjectId: parent.config.id,
+          parentProjectId: parent.id,
           featureBranch,
           targetBranch: target,
           parentCwd,
@@ -245,13 +245,13 @@ export function WorktreeCloseGate() {
     }
 
     close();
-    if (projects.some((p) => p.config.id === state.subProjectId)) {
+    if (projects.some((p) => p.id === state.subProjectId)) {
       if (isAbandon) {
         emit(Events.REMOVE_PROJECT, state.subProjectId);
       } else {
         emit(Events.WORKTREE_FINISH_COMPLETED, {
           subProjectId: state.subProjectId,
-          parentProjectId: parent.config.id,
+          parentProjectId: parent.id,
           featureBranch,
           targetBranch: target,
         });
@@ -282,7 +282,7 @@ export function WorktreeCloseGate() {
               {deleteBranch && !mergeInfo && (
                 <> This <strong>permanently discards</strong> any unmerged commits.</>
               )}
-              {sub.config.featureNoteDir && (
+              {sub.featureNoteDir && (
                 <> Any remaining feature notes will be restored to the parent project before the worktree is removed.</>
               )}
             </p>

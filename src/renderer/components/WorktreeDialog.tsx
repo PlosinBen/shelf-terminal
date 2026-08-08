@@ -5,7 +5,8 @@ import { enqueuePendingSend } from '../agentTabStore';
 import { debugLog } from '../debugLog';
 import { buildWorktreeChildConfig } from '../worktree-child-config';
 import { normalizeWorktreePrefillNotePaths } from '../worktree-prefill';
-import type { AgentProvider, FeatureNoteInfo, ProjectConfig } from '@shared/types';
+import type { AgentProvider, FeatureNoteInfo } from '@shared/types';
+import type { Project } from '@shared/projects';
 import { visibleAgentProviderEntries } from '@shared/agent-providers';
 
 function featureNoteFilename(path: string): string {
@@ -88,12 +89,12 @@ export function WorktreeDialog() {
       // Fetch the base repo's in-progress notes for the picker. Pre-select when
       // there's exactly one (the common case: one feature under discussion);
       // otherwise default to none so the user chooses deliberately.
-      const proj = projects.find((p) => p.config.id === targetProjectId);
+      const proj = projects.find((p) => p.id === targetProjectId);
       if (proj) {
-        const configuredDir = proj.config.featureNoteDir;
+        const configuredDir = proj.featureNoteDir;
         setFeatureNoteDir(configuredDir ?? null);
-        setDefaultAgentProvider(getResolvedDefaultAgentProvider(proj.config.id) ?? '');
-        window.shelfApi.git.branchList(proj.config.connection, proj.config.cwd)
+        setDefaultAgentProvider(getResolvedDefaultAgentProvider(proj.id) ?? '');
+        window.shelfApi.git.branchList(proj.connection, proj.cwd)
           .then((branches) => {
             if (requestGenerationRef.current !== requestGeneration) return;
             setBaseBranch(branches.find((branch) => branch.current)?.name ?? null);
@@ -103,7 +104,7 @@ export function WorktreeDialog() {
           });
         if (configuredDir) {
           window.shelfApi.git
-            .listFeatureNotes(proj.config.connection, proj.config.cwd, configuredDir)
+            .listFeatureNotes(proj.connection, proj.cwd, configuredDir)
             .then((result) => {
               if (requestGenerationRef.current !== requestGeneration) return;
               if (!result.ok) {
@@ -138,20 +139,20 @@ export function WorktreeDialog() {
     const branch = input.trim();
     if (!branch || projectId === null || creating) return;
 
-    const proj = projects.find((p) => p.config.id === projectId);
+    const proj = projects.find((p) => p.id === projectId);
     if (!proj) return;
 
     setCreating(true);
     setError(null);
     setFailurePrompt(null);
-    const { connection, cwd } = proj.config;
+    const { connection, cwd } = proj;
 
     // 1. Create the worktree (captures the parent's baseBranch atomically).
     const result = await window.shelfApi.git.worktreeAdd(connection, cwd, branch, true);
     if (!result.ok || !result.path) {
       const createError = result.error ?? 'Failed to create worktree';
       logCreateFailure({
-        projectId: proj.config.id,
+        projectId: proj.id,
         branch,
         baseCwd: cwd,
         worktreePath: result.path,
@@ -173,7 +174,7 @@ export function WorktreeDialog() {
       if (!mig.ok) {
         const migrationError = mig.error ?? 'Failed to migrate feature notes';
         logCreateFailure({
-          projectId: proj.config.id,
+          projectId: proj.id,
           branch,
           baseCwd: cwd,
           worktreePath: result.path,
@@ -184,7 +185,7 @@ export function WorktreeDialog() {
         const rollbackError = rollback.ok ? undefined : (rollback.error ?? 'Failed to remove worktree after note migration failure');
         if (rollbackError) {
           logCreateFailure({
-            projectId: proj.config.id,
+            projectId: proj.id,
             branch,
             baseCwd: cwd,
             worktreePath: result.path,
@@ -210,21 +211,25 @@ export function WorktreeDialog() {
 
     // 3. Copy the parent's secrets under the new id, then add the sub-project
     //    (inherits parent setup; base is freed; focus jumps).
-    const childProjectId = `wt-${Date.now()}`;
     try {
-      await window.shelfApi.project.copySecrets(proj.config.id, childProjectId);
-      const parentConfig: ProjectConfig = structuredClone(proj.config) as ProjectConfig;
-      emit(Events.ADD_PROJECT, buildWorktreeChildConfig(parentConfig, {
-        id: childProjectId,
+      const childInput = buildWorktreeChildConfig(proj, {
         cwd: result.path,
         worktreeBranch: branch,
         baseBranch: result.baseBranch,
         defaultAgentProvider: defaultAgentProvider || undefined,
-      }));
+      });
+      const childProject = await new Promise<Project>((resolve, reject) => {
+        emit(Events.ADD_PROJECT, childInput, (settled: { ok: true; project: Project } | { ok: false; error: unknown }) => {
+          if (settled.ok) resolve(settled.project);
+          else reject(settled.error);
+        });
+      });
+      await window.shelfApi.project.copySecrets(proj.id, childProject.id);
+      emit(Events.AUTO_CONNECT_PROJECT, childProject.id);
     } catch (err) {
       const setupError = errorText(err);
       logCreateFailure({
-        projectId: proj.config.id,
+        projectId: proj.id,
         branch,
         baseCwd: cwd,
         worktreePath: result.path,
@@ -240,8 +245,6 @@ export function WorktreeDialog() {
     // 4. Auto-connect the fresh worktree so its agent boots (and, with a note
     //    seeded, has context to read). Deterministic post-store connect lives in
     //    App, keyed on the store — avoids the bus handlers' stale-projects closure.
-    emit(Events.AUTO_CONNECT_PROJECT, childProjectId);
-
     setOpen(false);
   }, [input, projectId, projects, creating, selectedNotes, defaultAgentProvider]);
 
@@ -265,7 +268,7 @@ export function WorktreeDialog() {
 
   if (!open) return null;
 
-  const project = projectId === null ? undefined : projects.find((p) => p.config.id === projectId);
+  const project = projectId === null ? undefined : projects.find((p) => p.id === projectId);
   const agentTabId = project?.tabs.find((t) => t.type === 'agent')?.id;
 
   const sendFailureToAgent = () => {
@@ -288,7 +291,7 @@ export function WorktreeDialog() {
             <div className="project-requester">Requested by: {projectDisplayLabel(project)}</div>
           )}
           <div className="worktree-target">
-            {project?.config.name ?? 'Unknown project'} @ {baseBranch ?? 'unknown branch'}
+            {project?.name ?? 'Unknown project'} @ {baseBranch ?? 'unknown branch'}
           </div>
           <input
             ref={inputRef}

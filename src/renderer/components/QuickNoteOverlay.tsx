@@ -51,7 +51,7 @@ export function QuickNoteOverlay() {
       try {
         const buffer = await item.file.arrayBuffer();
         const filename = await window.shelfApi.notes.saveImage(
-          project.config.id,
+          project.id,
           buffer,
           item.ext,
         );
@@ -83,7 +83,7 @@ export function QuickNoteOverlay() {
     }
     setSubmitting(true);
     try {
-      await window.shelfApi.notes.quickCreate(project.config.id, body, images);
+      await window.shelfApi.notes.quickCreate(project.id, body, images);
     } catch (err) {
       // Keep the overlay open so the user can retry / copy text out.
       // eslint-disable-next-line no-console
@@ -118,7 +118,7 @@ export function QuickNoteOverlay() {
       <div className="quick-note-panel">
         <div className="quick-note-header">
           <span className="quick-note-title">Quick Note</span>
-          <span className="quick-note-project">{project.config.name}</span>
+          <span className="quick-note-project">{project.name}</span>
         </div>
         <textarea
           ref={textareaRef}
@@ -136,7 +136,7 @@ export function QuickNoteOverlay() {
             {images.map((filename) => (
               <NoteImage
                 key={filename}
-                projectId={project.config.id}
+                projectId={project.id}
                 filename={filename}
                 onRemove={() => removeImage(filename)}
               />

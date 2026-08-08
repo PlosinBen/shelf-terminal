@@ -44,15 +44,13 @@ interface ShelfApi {
     ) => Promise<{ totalBytes: number; fileCount: number }>;
   };
   project: {
-    load: () => Promise<import('../shared/types').ProjectConfig[]>;
-    save: (projects: import('../shared/types').ProjectConfig[]) => Promise<void>;
     getAll: () => Promise<readonly import('../shared/projects').Project[]>;
     add: (input: import('../shared/projects').ProjectCreateInput) => Promise<import('../shared/projects').Project>;
     update: (project: import('../shared/projects').Project) => Promise<void>;
     delete: (projectId: string) => Promise<import('../shared/projects').ProjectDeleteResult>;
     retryCleanup: (projectId: string) => Promise<import('../shared/projects').ProjectDeleteResult>;
     reorder: (sourceId: string, targetId: string) => Promise<void>;
-    validateDirs: (projects?: import('../shared/types').ProjectConfig[]) => Promise<string[]>;
+    validateDirs: () => Promise<string[]>;
     listSecretKeys: (projectId: string) => Promise<string[]>;
     setSecret: (projectId: string, key: string, value: string) => Promise<void>;
     deleteSecret: (projectId: string, key: string) => Promise<void>;

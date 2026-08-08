@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CODEX_PROVIDER, COPILOT_PROVIDER } from '@shared/agent-providers';
-import type { AgentProvider, ProjectConfig } from '@shared/types';
+import type { AgentProvider } from '@shared/types';
+import type { Project } from '@shared/projects';
 import * as store from './store';
 
 type ProviderResolutionStore = {
@@ -13,15 +14,25 @@ const providerStore = store as typeof store & ProviderResolutionStore;
 function config(
   defaultAgentProvider?: string,
   openAgentOnConnect = false,
-): ProjectConfig {
+): Project {
   return {
     id: 'project-1',
     name: 'Project',
     cwd: '/repo/project-1',
     connection: { type: 'local' },
     maxTabs: 5,
-    defaultAgentProvider: defaultAgentProvider as AgentProvider | undefined,
+    initScript: null,
+    envPlain: {},
+    defaultTabs: [],
+    quickCommands: [],
+    featureNoteDir: null,
+    parentProjectId: null,
+    worktreeBranch: null,
+    baseBranch: null,
+    defaultAgentProvider: defaultAgentProvider ?? null,
     openAgentOnConnect,
+    agentSessionIds: {},
+    agentPrefs: {},
   };
 }
 

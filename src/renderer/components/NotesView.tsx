@@ -8,7 +8,7 @@ import { RightPanel, RIGHT_PANEL_WIDTH } from './RightPanel';
 export function NotesView() {
   const { projects, activeProjectIndex } = useStore();
   const project = projects[activeProjectIndex];
-  const projectId = project?.config.id;
+  const projectId = project?.id;
 
   const [notes, setNotes] = useState<NoteMeta[]>([]);
   const [filter, setFilter] = useState<Filter>('active');

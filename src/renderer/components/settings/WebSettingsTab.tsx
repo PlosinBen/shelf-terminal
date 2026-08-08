@@ -20,7 +20,7 @@ export function WebSettingsTab() {
   useEffect(() => { refresh(); }, [refresh]);
 
   const nameFor = (projectId: string) =>
-    projects.find((p) => p.config.id === projectId)?.config.name ?? projectId;
+    projects.find((p) => p.id === projectId)?.name ?? projectId;
 
   const onDeleteSession = async (domain: string) => {
     await window.shelfApi.web.deleteSession(domain);

@@ -8,11 +8,12 @@ import {
   type GroupableItem,
 } from './project-grouping';
 
-// Minimal items — only config.id / config.parentProjectId matter.
+// Minimal items — only id / parentProjectId matter.
 const item = (id: string, parentProjectId?: string): GroupableItem => ({
-  config: { id, ...(parentProjectId ? { parentProjectId } : {}) },
+  id,
+  parentProjectId: parentProjectId ?? null,
 });
-const ids = (items: GroupableItem[]) => items.map((it) => it.config.id);
+const ids = (items: GroupableItem[]) => items.map((it) => it.id);
 
 describe('computeGroups', () => {
   it('groups each parent with its trailing children (invariant holds)', () => {

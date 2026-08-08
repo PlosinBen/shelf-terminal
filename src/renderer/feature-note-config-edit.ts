@@ -1,15 +1,15 @@
 import { normalizeFeatureNoteDir } from '@shared/feature-note-dir';
 
 interface FeatureNoteProjectConfig {
-  readonly parentProjectId?: string;
-  readonly featureNoteDir?: string;
+  readonly parentProjectId: string | null;
+  readonly featureNoteDir: string | null;
 }
 
 /** Project Settings rule: main projects edit the binding; children retain their snapshot. */
 export function featureNoteDirForProjectSave(
   project: FeatureNoteProjectConfig,
   input: string,
-): string | undefined {
+): string | null {
   if (project.parentProjectId) return project.featureNoteDir;
-  return normalizeFeatureNoteDir(input);
+  return normalizeFeatureNoteDir(input) ?? null;
 }

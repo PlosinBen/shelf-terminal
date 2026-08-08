@@ -7,7 +7,6 @@ import {
   clearUnread,
   toggleMuted,
   setTabColor,
-  appendDefaultTab,
   toggleRightSidebar,
 } from '../store';
 import { emit, Events } from '../events';
@@ -46,7 +45,7 @@ export { TAB_COLORS };
 export function TabBar() {
   const { projects, activeProjectIndex, pmActive } = useStore();
   const project = projects[activeProjectIndex];
-  const projectId = project?.config.id ?? null;
+  const projectId = project?.id ?? null;
 
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editValue, setEditValue] = useState('');
@@ -64,7 +63,7 @@ export function TabBar() {
 
   const openAddMenu = (x: number, y: number) => {
     setAddMenu({ x, y });
-    const projectId = project?.config.id;
+    const projectId = project?.id;
     if (!projectId) { setWebShortcuts([]); return; }
     window.shelfApi.web.listGrants()
       .then((byProject) => setWebShortcuts(byProject[projectId] ?? []))
@@ -212,7 +211,7 @@ export function TabBar() {
         onClick={(e) => { e.preventDefault(); openAddMenu(e.clientX, e.clientY); }}
         onContextMenu={(e) => { e.preventDefault(); openAddMenu(e.clientX, e.clientY); }}
         title="New tab"
-        disabled={project.tabs.length >= project.config.maxTabs}
+        disabled={project.tabs.length >= project.maxTabs}
       >
         +
       </button>
@@ -256,7 +255,12 @@ export function TabBar() {
             </button>
             <button
               className="context-menu-item"
-              onClick={() => { appendDefaultTab(activeProjectIndex, tab.label, tab.color); setContextMenu(null); }}
+              onClick={() => {
+                emit(Events.UPDATE_PROJECT, project.id, {
+                  defaultTabs: [...project.defaultTabs, { name: tab.label, color: tab.color }],
+                });
+                setContextMenu(null);
+              }}
             >
               Save to Default
             </button>

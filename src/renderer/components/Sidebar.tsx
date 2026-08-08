@@ -4,7 +4,6 @@ import {
   setActiveProject,
   setEditingProjectById,
   toggleSettings,
-  reorderProjects,
   updateSettings,
   projectHealth,
   HEALTH_RANK,
@@ -86,9 +85,9 @@ export function Sidebar() {
     for (const proj of projects) {
       const h = projectHealth(proj, connectionHealth);
       if (!h) continue;
-      next[proj.config.id] = h.state;
-      const before = prev[proj.config.id];
-      if (before && HEALTH_RANK[h.state] > HEALTH_RANK[before]) worsened.push(proj.config.id);
+      next[proj.id] = h.state;
+      const before = prev[proj.id];
+      if (before && HEALTH_RANK[h.state] > HEALTH_RANK[before]) worsened.push(proj.id);
     }
     prevHealthRef.current = next;
     if (worsened.length === 0) return;
@@ -127,7 +126,7 @@ export function Sidebar() {
 
   const handleContextMenu = (e: React.MouseEvent, index: number) => {
     e.preventDefault();
-    const projectId = projects[index]?.config.id;
+    const projectId = projects[index]?.id;
     if (!projectId) return;
     setContextMenu({ projectId, x: e.clientX, y: e.clientY });
   };
@@ -168,7 +167,9 @@ export function Sidebar() {
   const handleDrop = (e: React.DragEvent, toIndex: number) => {
     e.preventDefault();
     if (dragIndex !== null && dragIndex !== toIndex) {
-      reorderProjects(dragIndex, toIndex);
+      const sourceId = projects[dragIndex]?.id;
+      const targetId = projects[toIndex]?.id;
+      if (sourceId && targetId) emit(Events.REORDER_PROJECTS, sourceId, targetId);
     }
     setDragIndex(null);
     setDragOverIndex(null);
@@ -213,21 +214,21 @@ export function Sidebar() {
           const healthTitle = health
             ? `Connection: ${health.state}${health.rttMs != null ? ` · ${Math.round(health.rttMs)}ms` : ''}`
             : undefined;
-          const isFlashing = flashingIds.has(proj.config.id);
+          const isFlashing = flashingIds.has(proj.id);
           // A worktree child renders as an indented group member showing just its
           // branch (the parent project name is redundant — the group conveys it),
           // and it cannot start a drag: the whole group moves via its parent.
-          const isWorktreeChild = !!proj.config.parentProjectId;
-          const label = isWorktreeChild ? proj.config.worktreeBranch : proj.config.name;
+          const isWorktreeChild = !!proj.parentProjectId;
+          const label = isWorktreeChild ? proj.worktreeBranch : proj.name;
           // Another worktree of the same parent follows → the guide line keeps
           // running past this child instead of ending at its elbow.
           const nextProj = projects[i + 1];
           const hasSiblingBelow =
-            isWorktreeChild && !!nextProj && nextProj.config.parentProjectId === proj.config.parentProjectId;
+            isWorktreeChild && !!nextProj && nextProj.parentProjectId === proj.parentProjectId;
 
           return (
             <div
-              key={proj.config.id}
+              key={proj.id}
               className={`sidebar-item ${i === activeProjectIndex ? 'active' : ''} ${isDragging ? 'dragging' : ''} ${isDragOver ? 'drag-over' : ''}${isFlashing ? ' health-flash' : ''}${isWorktreeChild ? ' worktree-child' : ''}${hasSiblingBelow ? ' has-sibling-below' : ''}`}
               onClick={() => setActiveProject(i)}
               onContextMenu={(e) => { setActiveProject(i); handleContextMenu(e, i); }}
@@ -253,7 +254,7 @@ export function Sidebar() {
       />
 
       {contextMenu && (() => {
-        const proj = projects.find((p) => p.config.id === contextMenu.projectId);
+        const proj = projects.find((p) => p.id === contextMenu.projectId);
         const isConnected = proj && proj.tabs.length > 0;
         const isInvalid = proj?.folderInvalid;
         return (
@@ -278,7 +279,7 @@ export function Sidebar() {
                 Connect
               </button>
             )}
-            {!proj?.config.parentProjectId && (
+            {!proj?.parentProjectId && (
               <button
                 className="context-menu-item"
                 disabled={isInvalid}
@@ -294,7 +295,7 @@ export function Sidebar() {
               Edit
             </button>
             <div className="context-menu-separator" />
-            {proj?.config.parentProjectId ? (
+            {proj?.parentProjectId ? (
               // A worktree child closes via Finish (ff merge-back) or Abandon
               // (discard) — both user-initiated (#lifecycle). Plain Remove would
               // orphan the git worktree + branch, so it's replaced here.

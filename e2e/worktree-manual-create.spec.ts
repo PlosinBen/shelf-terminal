@@ -184,8 +184,12 @@ test.describe('user-initiated worktree create', () => {
     await expect(items.nth(1)).toHaveClass(/worktree-child/, { timeout: 8_000 });
     await expect(items.nth(1)).toContainText('feature/m');
 
-    const projects = JSON.parse(fs.readFileSync(path.join(userDataDir, 'projects.json'), 'utf-8'));
-    expect(projects.find((project: { parentProjectId?: string }) => project.parentProjectId === PROJECT_ID)?.featureNoteDir)
+    const document = JSON.parse(fs.readFileSync(path.join(userDataDir, 'projects.json'), 'utf-8')) as {
+      schemaVersion: number;
+      projects: Array<{ parentProjectId?: string; featureNoteDir?: string }>;
+    };
+    expect(document.schemaVersion).toBe(1);
+    expect(document.projects.find((project) => project.parentProjectId === PROJECT_ID)?.featureNoteDir)
       .toBe('.agent/features');
 
     await items.nth(1).click({ button: 'right' });

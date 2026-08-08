@@ -49,15 +49,15 @@ export function BottomBar() {
       <div className="bottom-bar-left">
         {proj && (
           <>
-            <span className="bottom-bar-connection">{connectionLabel(proj.config.connection)}</span>
+            <span className="bottom-bar-connection">{connectionLabel(proj.connection)}</span>
             <span className="bottom-bar-separator">|</span>
-            <span className="bottom-bar-path" title={proj.config.cwd}>{proj.config.cwd}</span>
+            <span className="bottom-bar-path" title={proj.cwd}>{proj.cwd}</span>
           </>
         )}
       </div>
       <FooterMemory
         summary={processMemorySummary}
-        selectedConnectionScopeKey={proj ? connectionScopeKey(proj.config.connection) : undefined}
+        selectedConnectionScopeKey={proj ? connectionScopeKey(proj.connection) : undefined}
       />
       <div className="bottom-bar-right">
         {/* Group 1 — version + updater */}

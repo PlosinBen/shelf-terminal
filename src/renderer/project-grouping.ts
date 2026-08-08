@@ -7,12 +7,12 @@
  * child sits immediately after its parent. These pure helpers own that invariant
  * and the group-granular reorder math, kept out of the store so they're testable.
  *
- * Generic over any item exposing `config.id` / `config.parentProjectId` — works on
- * both ProjectRuntime (renderer) and bare ProjectConfig.
+ * Generic over any item exposing the canonical project identity fields.
  */
 
 export interface GroupableItem {
-  config: { id: string; parentProjectId?: string };
+  readonly id: string;
+  readonly parentProjectId: string | null;
 }
 
 /**
@@ -24,9 +24,9 @@ export interface GroupableItem {
 export function computeGroups<T extends GroupableItem>(items: readonly T[]): number[][] {
   const groups: number[][] = [];
   for (let i = 0; i < items.length; i++) {
-    const pid = items[i].config.parentProjectId;
+    const pid = items[i].parentProjectId;
     const last = groups[groups.length - 1];
-    if (pid && last && items[last[0]].config.id === pid) {
+    if (pid && last && items[last[0]].id === pid) {
       last.push(i);
     } else {
       groups.push([i]);
@@ -77,14 +77,14 @@ export function findDirectionalVisibleProjectIndex(
  * on load (persisted order may predate grouping) and after appending a new child.
  */
 export function groupedOrder<T extends GroupableItem>(items: T[]): T[] {
-  const ids = new Set(items.map((it) => it.config.id));
+  const ids = new Set(items.map((it) => it.id));
   const result: T[] = [];
   const used = new Array<boolean>(items.length).fill(false);
 
   for (let i = 0; i < items.length; i++) {
     if (used[i]) continue;
     const it = items[i];
-    const pid = it.config.parentProjectId;
+    const pid = it.parentProjectId;
     // A child whose parent exists is emitted alongside that parent below — skip
     // here so it lands right after the parent, not at its original position.
     if (pid && ids.has(pid)) continue;
@@ -95,7 +95,7 @@ export function groupedOrder<T extends GroupableItem>(items: T[]): T[] {
     if (pid) continue; // orphan child has no children of its own
     for (let j = 0; j < items.length; j++) {
       if (used[j]) continue;
-      if (items[j].config.parentProjectId === it.config.id) {
+      if (items[j].parentProjectId === it.id) {
         result.push(items[j]);
         used[j] = true;
       }

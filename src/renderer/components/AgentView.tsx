@@ -14,8 +14,8 @@ import {
   setInitStatus as setInitStatusStore,
   useAgentTab,
 } from '../agentTabStore';
-import { emitAgent } from '../events';
-import { useStore, updateProjectConfigById } from '../store';
+import { emitAgent, emit, Events } from '../events';
+import { useStore } from '../store';
 
 interface Props {
   tabId: string;
@@ -54,19 +54,19 @@ export function AgentView({ tabId, cwd, connection, provider, projectId, visible
   // position) shifts when user reorders projects via drag, which
   // would otherwise point this AgentView at the wrong project's
   // prefs / sessionIds. See GOTCHAS "AgentView projectIndex drift".
-  const projectIndex = projects.findIndex((p) => p.config.id === projectId);
-  const savedPrefs = projects[projectIndex]?.config.agentPrefs?.[provider];
+  const projectIndex = projects.findIndex((p) => p.id === projectId);
+  const savedPrefs = projects[projectIndex]?.agentPrefs[provider];
 
   const sessionIdRef = useRef<string | null>(null);
   if (!sessionIdRef.current) {
-    const existing = projects[projectIndex]?.config.agentSessionIds?.[provider];
+    const existing = projects[projectIndex]?.agentSessionIds[provider];
     if (existing) {
       sessionIdRef.current = existing;
     } else {
       const newId = crypto.randomUUID();
       sessionIdRef.current = newId;
-      const ids = { ...projects[projectIndex]?.config.agentSessionIds, [provider]: newId };
-      updateProjectConfigById(projectId, { agentSessionIds: ids });
+      const ids = { ...projects[projectIndex]?.agentSessionIds, [provider]: newId };
+      emit(Events.UPDATE_PROJECT, projectId, { agentSessionIds: ids });
     }
   }
   const sessionId = sessionIdRef.current;
@@ -98,9 +98,9 @@ export function AgentView({ tabId, cwd, connection, provider, projectId, visible
   }, [tabId]);
 
   const persistPref = useCallback((partial: Partial<AgentPrefs>) => {
-    const current = projects[projectIndex]?.config.agentPrefs ?? {};
+    const current = projects[projectIndex]?.agentPrefs ?? {};
     const updated = { ...current, [provider]: { ...current[provider], ...partial } };
-    updateProjectConfigById(projectId, { agentPrefs: updated });
+    emit(Events.UPDATE_PROJECT, projectId, { agentPrefs: updated });
   }, [projectId, projectIndex, provider, projects]);
 
   /**

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useStore, setEditingProjectById, updateProjectConfigById, getResolvedDefaultAgentProvider } from '../store';
+import { useStore, setEditingProjectById, getResolvedDefaultAgentProvider } from '../store';
+import { emit, Events } from '../events';
 import type { TabTemplate, QuickCommand, AgentProvider } from '@shared/types';
 import { visibleAgentProviderEntries } from '@shared/agent-providers';
 import { TAB_COLORS } from './TabBar';
@@ -11,7 +12,7 @@ interface EnvRow { key: string; value: string; }
 
 export function ProjectEditPanel() {
   const { editingProjectId, projects } = useStore();
-  const project = editingProjectId ? projects.find((p) => p.config.id === editingProjectId) ?? null : null;
+  const project = editingProjectId ? projects.find((p) => p.id === editingProjectId) ?? null : null;
 
   const [name, setName] = useState('');
   const [initScript, setInitScript] = useState('');
@@ -39,20 +40,20 @@ export function ProjectEditPanel() {
 
   useEffect(() => {
     if (project) {
-      setName(project.config.name);
-      setInitScript(project.config.initScript || '');
-      setDefaultTabs(project.config.defaultTabs?.map((tab) => ({ ...tab })) || [{ name: 'Terminal' }]);
-      setQuickCommands(project.config.quickCommands?.map((cmd) => ({ ...cmd })) || []);
-      setEnvRows(Object.entries(project.config.envPlain || {}).map(([key, value]) => ({ key, value })));
+      setName(project.name);
+      setInitScript(project.initScript || '');
+      setDefaultTabs(project.defaultTabs.map((tab) => ({ ...tab })) || [{ name: 'Terminal' }]);
+      setQuickCommands(project.quickCommands.map((cmd) => ({ ...cmd })) || []);
+      setEnvRows(Object.entries(project.envPlain).map(([key, value]) => ({ key, value })));
       setNewSecretRows([]);
       setClearedSecrets([]);
       // Secret KEY names + the machine's key-storage tier (for honest disclosure).
-      void window.shelfApi.project.listSecretKeys(project.config.id).then(setSecretKeys).catch(() => setSecretKeys([]));
+      void window.shelfApi.project.listSecretKeys(project.id).then(setSecretKeys).catch(() => setSecretKeys([]));
       void window.shelfApi.project.secretKeyTier().then(setKeyTier).catch(() => setKeyTier(null));
-      setDefaultAgentProvider(getResolvedDefaultAgentProvider(project.config.id) ?? '');
+      setDefaultAgentProvider(getResolvedDefaultAgentProvider(project.id) ?? '');
       providerTouched.current = false;
-      setOpenAgentOnConnect(project.config.openAgentOnConnect || false);
-      setFeatureNoteDir(project.config.featureNoteDir ?? '');
+      setOpenAgentOnConnect(project.openAgentOnConnect);
+      setFeatureNoteDir(project.featureNoteDir ?? '');
       setFeatureNoteDirError(null);
     }
   }, [editingProjectId, project]);
@@ -61,7 +62,7 @@ export function ProjectEditPanel() {
   // the Clear button. Local connections are always considered reachable.
   useEffect(() => {
     if (!project) return;
-    const conn = project.config.connection;
+    const conn = project.connection;
     if (conn.type === 'local') {
       setRemoteConnected(true);
       return;
@@ -83,7 +84,7 @@ export function ProjectEditPanel() {
 
   const refreshUploadsSize = useCallback(() => {
     if (!project) return;
-    const conn = project.config.connection;
+    const conn = project.connection;
     const isRemote = conn.type !== 'local';
     // Skip remote dirs when not connected — the IPC would just round-trip
     // back zeros after a failed SSH/Docker/WSL command. Display stays at
@@ -94,7 +95,7 @@ export function ProjectEditPanel() {
     }
     setUploadsSize(null);
     window.shelfApi.connector
-      .getUploadsSize(conn, project.config.cwd)
+      .getUploadsSize(conn, project.cwd)
       .then(setUploadsSize)
       .catch(() => setUploadsSize({ totalBytes: 0, fileCount: 0 }));
   }, [project, remoteConnected]);
@@ -109,9 +110,9 @@ export function ProjectEditPanel() {
   const handleClose = () => setEditingProjectById(null);
 
   const handleSave = () => {
-    let savedFeatureNoteDir: string | undefined;
+    let savedFeatureNoteDir: string | null;
     try {
-      savedFeatureNoteDir = featureNoteDirForProjectSave(project.config, featureNoteDir);
+      savedFeatureNoteDir = featureNoteDirForProjectSave(project, featureNoteDir);
     } catch (err) {
       setFeatureNoteDirError(err instanceof Error ? err.message : String(err));
       return;
@@ -137,23 +138,23 @@ export function ProjectEditPanel() {
       if (!key || validateEnvKey(key, Object.keys(envPlain)) !== null) continue;
       envPlain[key] = row.value;
     }
-    updateProjectConfigById(editingProjectId, {
-      name: name.trim() || project.config.name,
-      initScript: initScript.trim() || undefined,
-      defaultTabs: tabs.length > 0 ? tabs : undefined,
-      quickCommands: cmds.length > 0 ? cmds : undefined,
+    emit(Events.UPDATE_PROJECT, editingProjectId, {
+      name: name.trim() || project.name,
+      initScript: initScript.trim() || null,
+      defaultTabs: tabs,
+      quickCommands: cmds,
       featureNoteDir: savedFeatureNoteDir,
-      envPlain: Object.keys(envPlain).length > 0 ? envPlain : undefined,
+      envPlain,
       ...(providerTouched.current
-        ? { defaultAgentProvider: defaultAgentProvider || undefined }
+        ? { defaultAgentProvider: defaultAgentProvider || null }
         : {}),
-      openAgentOnConnect: openAgentOnConnect || undefined,
+      openAgentOnConnect,
     });
 
     // Flush secret ops to main (side-car, not projectConfig). Cleared first, then
     // new sets — same reserved/valid/duplicate gate as the UI, applied against
     // the FINAL plain keys so a plain/secret collision can't slip through.
-    const projectId = project.config.id;
+    const projectId = project.id;
     const plainKeys = Object.keys(envPlain);
     void (async () => {
       for (const key of clearedSecrets) {
@@ -252,15 +253,15 @@ export function ProjectEditPanel() {
     if (!project || clearing) return;
     const ok = await window.shelfApi.dialog.confirm(
       'Clear uploaded files',
-      `Delete every file in ${project.config.cwd}/.tmp/shelf/ ?\n\nThis cannot be undone.`,
+      `Delete every file in ${project.cwd}/.tmp/shelf/ ?\n\nThis cannot be undone.`,
       'Delete',
     );
     if (!ok) return;
     setClearing(true);
     try {
       const result = await window.shelfApi.connector.clearUploads(
-        project.config.connection,
-        project.config.cwd,
+        project.connection,
+        project.cwd,
       );
       if (result.ok) {
         await window.shelfApi.dialog.warn(
@@ -278,7 +279,7 @@ export function ProjectEditPanel() {
     }
   };
 
-  const isRemote = project ? project.config.connection.type !== 'local' : false;
+  const isRemote = project ? project.connection.type !== 'local' : false;
   const clearDisabled = clearing || (isRemote && !remoteConnected);
   const clearTooltip =
     isRemote && !remoteConnected
@@ -320,7 +321,7 @@ export function ProjectEditPanel() {
           <div className="project-edit-field">
             <label className="settings-label">Feature Note Directory</label>
             <div className="project-edit-hint">
-              {project.config.parentProjectId
+              {project.parentProjectId
                 ? 'Captured from the main project when this worktree was created.'
                 : 'Optional repo-relative directory used to hand feature notes into worktrees.'}
             </div>
@@ -333,7 +334,7 @@ export function ProjectEditPanel() {
                 setFeatureNoteDirError(null);
               }}
               placeholder="path/to/feature-notes"
-              disabled={Boolean(project.config.parentProjectId)}
+              disabled={Boolean(project.parentProjectId)}
               spellCheck={false}
               autoCapitalize="off"
               autoCorrect="off"
