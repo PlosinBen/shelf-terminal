@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useStore, getResolvedDefaultAgentProvider, projectDisplayLabel } from '../store';
+import { useStore, getProjectById, getResolvedDefaultAgentProvider, projectDisplayLabel } from '../store';
 import { on, emit, emitAgent, Events } from '../events';
 import { enqueuePendingSend } from '../agentTabStore';
 import { debugLog } from '../debugLog';
@@ -8,6 +8,7 @@ import { normalizeWorktreePrefillNotePaths } from '../worktree-prefill';
 import type { AgentProvider, FeatureNoteInfo } from '@shared/types';
 import type { Project } from '@shared/projects';
 import { visibleAgentProviderEntries } from '@shared/agent-providers';
+import { copyWorktreeSecretsWithRecovery } from '../worktree-secret-copy';
 
 function featureNoteFilename(path: string): string {
   return path.split('/').pop() ?? path;
@@ -224,7 +225,22 @@ export function WorktreeDialog() {
           else reject(settled.error);
         });
       });
-      await window.shelfApi.project.copySecrets(proj.id, childProject.id);
+      const copyResult = await copyWorktreeSecretsWithRecovery({
+        isCurrent: () => Boolean(getProjectById(proj.id) && getProjectById(childProject.id)),
+        copy: () => window.shelfApi.project.copySecrets(proj.id, childProject.id),
+        confirmRetry: async (copyError) => window.shelfApi.dialog.confirm(
+          'Worktree created, but secrets were not copied',
+          `The worktree project is saved, but its secrets could not be copied. Retry?\n\n${errorText(copyError)}`,
+          'Retry',
+        ),
+      });
+      if (copyResult === 'cancelled') {
+        setOpen(false);
+        return;
+      }
+      if (copyResult === 'stale') {
+        throw new Error('The worktree project or its parent changed before secret setup completed');
+      }
       emit(Events.AUTO_CONNECT_PROJECT, childProject.id);
     } catch (err) {
       const setupError = errorText(err);

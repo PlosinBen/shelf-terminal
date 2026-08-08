@@ -5,6 +5,7 @@ import path from 'path';
 import fs from 'fs';
 import os from 'os';
 import { openAgentTab } from './helpers';
+import { IPC } from '../src/shared/ipc-channels';
 
 /**
  * User-initiated worktree create (the #entry pivot) — sidebar "New Worktree" →
@@ -249,6 +250,60 @@ test.describe('user-initiated worktree create', () => {
     expect(fs.existsSync(path.join(repo, '.agent/features/old.md'))).toBe(true);
     expect(fs.existsSync(path.join(`${repo}-feature-n`, '.agent/features/demo.md'))).toBe(false);
     expect(fs.existsSync(path.join(`${repo}-feature-n`, '.agent/features/old.md'))).toBe(false);
+  });
+
+  test('secret copy Retry continues the already committed child once', async () => {
+    await app.evaluate(({ dialog, ipcMain }, channel) => {
+      let copyAttempts = 0;
+      ipcMain.removeHandler(channel);
+      ipcMain.handle(channel, () => {
+        copyAttempts++;
+        (globalThis as any).__worktreeSecretCopyAttempts = copyAttempts;
+        if (copyAttempts === 1) throw new Error('simulated secret copy failure');
+      });
+      (globalThis as any).__worktreeSecretCopyPrompts = 0;
+      (dialog as any).showMessageBox = async (_window: unknown, options: { title?: string }) => {
+        if (options.title === 'Worktree created, but secrets were not copied') {
+          (globalThis as any).__worktreeSecretCopyPrompts++;
+          return { response: 0, checkboxChecked: false };
+        }
+        return { response: 1, checkboxChecked: false };
+      };
+    }, IPC.PROJECT_SECRETS_COPY);
+    const dialog = await openNewWorktreeDialog(page);
+    await dialog.locator('.worktree-input').fill('feature/secret-retry');
+    await dialog.locator('.conn-btn-next').click();
+
+    await expect(dialog).not.toBeVisible({ timeout: 30_000 });
+    await expect(page.locator('.sidebar-item.worktree-child', { hasText: 'feature/secret-retry' })).toHaveCount(1);
+    await expect(page.locator('.connect-prompt')).toHaveCount(0, { timeout: 8_000 });
+    expect(await app.evaluate(() => (globalThis as any).__worktreeSecretCopyAttempts)).toBe(2);
+    expect(await app.evaluate(() => (globalThis as any).__worktreeSecretCopyPrompts)).toBe(1);
+  });
+
+  test('secret copy Cancel keeps one durable child disconnected', async () => {
+    await app.evaluate(({ dialog, ipcMain }, channel) => {
+      ipcMain.removeHandler(channel);
+      ipcMain.handle(channel, () => {
+        (globalThis as any).__worktreeSecretCopyAttempts =
+          ((globalThis as any).__worktreeSecretCopyAttempts ?? 0) + 1;
+        throw new Error('simulated persistent secret copy failure');
+      });
+      (dialog as any).showMessageBox = async () => ({
+        response: 1,
+        checkboxChecked: false,
+      });
+    }, IPC.PROJECT_SECRETS_COPY);
+    const dialog = await openNewWorktreeDialog(page);
+    await dialog.locator('.worktree-input').fill('feature/secret-cancel');
+    await dialog.locator('.conn-btn-next').click();
+
+    await expect(dialog).not.toBeVisible({ timeout: 30_000 });
+    await expect(page.locator('.sidebar-item.worktree-child', { hasText: 'feature/secret-cancel' })).toHaveCount(1);
+    await expect(page.locator('.connect-prompt')).toBeVisible();
+    expect(await app.evaluate(() => (globalThis as any).__worktreeSecretCopyAttempts)).toBe(1);
+    const document = JSON.parse(fs.readFileSync(path.join(userDataDir, 'projects.json'), 'utf8'));
+    expect(document.projects).toHaveLength(2);
   });
 
   test('agent proposal pre-fills the dialog but still requires the user to Create', async () => {
