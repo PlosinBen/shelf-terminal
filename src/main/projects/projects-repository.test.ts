@@ -1,0 +1,143 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { log } from '@shared/logger';
+import type { Project, ProjectCreateInput } from '@shared/projects';
+import type { ProjectConfigPersistence } from './project-config-persistence';
+import {
+  ProjectRepositoryError,
+  createMainProjectsRepository,
+} from './projects-repository';
+
+function project(id: string, parentProjectId: string | null = null): Project {
+  return {
+    id,
+    name: id,
+    cwd: `/repo/${id}`,
+    connection: { type: 'local' },
+    maxTabs: 5,
+    initScript: null,
+    envPlain: {},
+    defaultTabs: [],
+    quickCommands: [],
+    featureNoteDir: null,
+    parentProjectId,
+    worktreeBranch: parentProjectId ? `feature/${id}` : null,
+    baseBranch: parentProjectId ? 'main' : null,
+    defaultAgentProvider: null,
+    openAgentOnConnect: false,
+    agentSessionIds: {},
+    agentPrefs: {},
+  };
+}
+
+function createInput(overrides: Partial<ProjectCreateInput> = {}): ProjectCreateInput {
+  return {
+    name: 'generated-id',
+    cwd: '/repo/generated-id',
+    connection: { type: 'local' },
+    maxTabs: 5,
+    ...overrides,
+  };
+}
+
+function persistence(initial: readonly Project[] = []) {
+  const save = vi.fn<ProjectConfigPersistence['save']>(async () => ({ ok: true }));
+  const value: ProjectConfigPersistence = {
+    load: vi.fn(async () => ({ ok: true as const, value: initial })),
+    save,
+  };
+  return { value, save };
+}
+
+describe('main projects repository', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('does not create a ready repository when config load fails', async () => {
+    const config: ProjectConfigPersistence = {
+      load: vi.fn(async () => ({
+        ok: false as const,
+        error: { stage: 'parse' as const, path: '/config/projects.json', message: 'bad JSON' },
+      })),
+      save: vi.fn(),
+    };
+
+    await expect(createMainProjectsRepository(config, () => 'unused')).rejects.toMatchObject({
+      name: 'ProjectRepositoryError',
+      operation: 'load',
+    });
+  });
+
+  it('owns identity, defaults, detached state, and durable-before-publish add', async () => {
+    const config = persistence();
+    let resolveSave: ((value: { ok: true }) => void) | undefined;
+    config.save.mockImplementationOnce(() => new Promise((resolve) => {
+      resolveSave = resolve;
+    }));
+    const repository = await createMainProjectsRepository(config.value, () => 'generated-id');
+    const input = createInput();
+
+    const adding = repository.add(input);
+    expect(repository.getAll()).toEqual([]);
+    resolveSave?.({ ok: true });
+    const added = await adding;
+
+    expect(added).toEqual(project('generated-id'));
+    expect(repository.getAll()).toEqual([project('generated-id')]);
+    expect(Object.isFrozen(repository.getAll())).toBe(true);
+    expect(Object.isFrozen(repository.get('generated-id')?.connection)).toBe(true);
+  });
+
+  it('keeps authoritative state unchanged when add persistence fails', async () => {
+    const config = persistence([project('existing')]);
+    config.save.mockResolvedValueOnce({
+      ok: false,
+      error: { stage: 'replace', path: '/config/projects.json', message: 'disk full' },
+    });
+    const repository = await createMainProjectsRepository(config.value, () => 'new-id');
+
+    await expect(repository.add(createInput())).rejects.toBeInstanceOf(ProjectRepositoryError);
+    expect(repository.getAll()).toEqual([project('existing')]);
+  });
+
+  it('treats identical and missing saves as non-persisting no-ops', async () => {
+    const config = persistence([project('a')]);
+    const warn = vi.spyOn(log, 'warn');
+    const repository = await createMainProjectsRepository(config.value, () => 'unused');
+
+    await repository.save(project('a'));
+    await repository.save(project('missing'));
+
+    expect(config.save).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(
+      'projects-repository',
+      expect.stringContaining('operation=save projectId=missing'),
+    );
+  });
+
+  it('deletes durably and treats a missing id as a successful no-op', async () => {
+    const config = persistence([project('a'), project('b')]);
+    const repository = await createMainProjectsRepository(config.value, () => 'unused');
+
+    await expect(repository.delete('missing')).resolves.toEqual({ cleanupPending: false });
+    expect(config.save).not.toHaveBeenCalled();
+
+    await expect(repository.delete('a')).resolves.toEqual({ cleanupPending: false });
+    expect(config.save).toHaveBeenLastCalledWith([project('b')]);
+    expect(repository.getAll()).toEqual([project('b')]);
+    await expect(repository.retryCleanup('a')).resolves.toEqual({ cleanupPending: false });
+  });
+
+  it('moves whole worktree groups and skips same-group reorder', async () => {
+    const initial = [project('a'), project('a-child', 'a'), project('b')];
+    const config = persistence(initial);
+    const repository = await createMainProjectsRepository(config.value, () => 'unused');
+
+    await repository.reorder('a', 'a-child');
+    expect(config.save).not.toHaveBeenCalled();
+
+    await repository.reorder('a', 'b');
+    expect(repository.getAll().map(({ id }) => id)).toEqual(['b', 'a', 'a-child']);
+    expect(config.save).toHaveBeenCalledOnce();
+  });
+});
