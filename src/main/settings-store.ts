@@ -4,7 +4,12 @@ import { app } from 'electron';
 import { DEFAULT_SETTINGS } from '@shared/defaults';
 import { log } from '@shared/logger';
 import type { AppSettings } from '@shared/types';
-import type { LoadResult } from './project-store';
+
+export type LoadError = 'parse' | 'permission' | 'read';
+
+export type LoadResult<T> =
+  | { ok: true; value: T }
+  | { ok: false; error: LoadError; path: string; message: string };
 
 function getSettingsPath(): string {
   return path.join(app.getPath('userData'), 'settings.json');

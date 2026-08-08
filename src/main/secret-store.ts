@@ -188,7 +188,7 @@ export function deleteProjectSecret(projectId: string, name: string): void {
  * share ONE master key, so the encrypted blobs are reused verbatim (no decrypt,
  * no re-encrypt, values never enter plaintext). Overwrites any existing section
  * for `toId`. No-op if the source has no secrets. Cleanup is automatic: on
- * project removal PROJECT_SAVE prunes the removed id via deleteProjectSecrets.
+ * worktree creation. Repository post-commit cleanup prunes removed project ids.
  */
 export function copyProjectSecrets(fromId: string, toId: string): void {
   if (fromId === toId) return;
