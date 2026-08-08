@@ -1,8 +1,9 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProjectConfig } from '@shared/types';
 import {
   __getSnapshotForTests,
   __resetStoreForTests,
+  setActiveProjectById,
   setProjects,
   toggleRightSidebar,
 } from './store';
@@ -21,6 +22,12 @@ describe('store facade slice behavior', () => {
   beforeEach(() => {
     __resetStoreForTests();
     setProjects([config('A')]);
+  });
+
+  afterEach(() => {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
   });
 
   it('publishes a new facade snapshot without rebuilding projects for UI-only changes', () => {
@@ -53,5 +60,27 @@ describe('store facade slice behavior', () => {
       pmVisible: false,
       notesVisible: true,
     });
+  });
+
+  it('syncs PM project state only for project-slice changes', () => {
+    vi.useFakeTimers();
+    const syncState = vi.fn();
+    vi.stubGlobal('window', {
+      shelfApi: {
+        pm: { syncState },
+      },
+    });
+
+    setProjects([config('A')]);
+    vi.advanceTimersByTime(200);
+    syncState.mockClear();
+
+    toggleRightSidebar('pm');
+    vi.advanceTimersByTime(200);
+    expect(syncState).not.toHaveBeenCalled();
+
+    setActiveProjectById('A');
+    vi.advanceTimersByTime(200);
+    expect(syncState).toHaveBeenCalledTimes(1);
   });
 });
