@@ -36,9 +36,8 @@ function seedProjects(userDataDir: string) {
 async function connectProject(page: Page, name: string) {
   await page.locator('.sidebar-item', { hasText: name }).click();
   const prompt = page.locator('.connect-prompt');
-  if (await prompt.isVisible({ timeout: 3_000 }).catch(() => false)) {
-    await prompt.click();
-  }
+  await expect(prompt).toBeVisible({ timeout: 5_000 });
+  await prompt.click();
   await expect(page.locator('.tab-bar .tab')).toHaveCount(1, { timeout: 8_000 });
   await expect(page.locator('.terminal-container:visible')).toBeVisible({ timeout: 8_000 });
 }

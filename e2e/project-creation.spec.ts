@@ -42,9 +42,8 @@ async function ensureProjectWithTerminal(page: any) {
   // Open a terminal tab if none.
   if (await page.locator('.tab-bar .tab').count() === 0) {
     const prompt = page.locator('.connect-prompt');
-    if (await prompt.isVisible({ timeout: 3_000 }).catch(() => false)) {
-      await prompt.click();
-    }
+    await expect(prompt).toBeVisible({ timeout: 5_000 });
+    await prompt.click();
     await expect(page.locator('.tab-bar .tab')).toHaveCount(1, { timeout: 5_000 });
   }
 }

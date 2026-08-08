@@ -42,7 +42,9 @@ export function ProjectEditPanel() {
     if (project) {
       setName(project.name);
       setInitScript(project.initScript || '');
-      setDefaultTabs(project.defaultTabs.map((tab) => ({ ...tab })) || [{ name: 'Terminal' }]);
+      setDefaultTabs(project.defaultTabs.length > 0
+        ? project.defaultTabs.map((tab) => ({ ...tab }))
+        : [{ name: 'Terminal' }]);
       setQuickCommands(project.quickCommands.map((cmd) => ({ ...cmd })) || []);
       setEnvRows(Object.entries(project.envPlain).map(([key, value]) => ({ key, value })));
       setNewSecretRows([]);

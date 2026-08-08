@@ -120,9 +120,7 @@ export function App() {
     if (idx < 0) return; // not in the store yet — this effect re-runs when it lands
     setPendingConnectId(null);
     if (projects[idx].tabs.length > 0) return; // already connected
-    // Defer past this effect-flush so the CONNECT_PROJECT handler (re-subscribed in
-    // the SAME flush, whichever order the effects run) is live before we emit —
-    // otherwise the emit can land between the bus effect's cleanup and re-subscribe.
+    // Defer until the current store-driven render has committed.
     queueMicrotask(() => emit(Events.CONNECT_PROJECT, pendingConnectId));
   }, [projects, pendingConnectId]);
 
