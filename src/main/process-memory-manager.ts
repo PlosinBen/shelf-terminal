@@ -19,7 +19,7 @@ import {
 import { channelLog } from './channel-log';
 import { mapElectronAppMetrics } from './app-memory';
 import { requestAllAgentMemoryUsage } from './agent/remote';
-import { getProjects } from './app-state';
+import { getProjectsRepository } from './projects/repository-provider';
 
 export type MemorySource =
   | { id: 'app'; kind: 'app' }
@@ -346,7 +346,7 @@ let summarySink: ((summary: ProcessMemorySummary) => void) | undefined;
 const processMemoryRuntime = createProcessMemoryRuntime({
   getAppMetrics: () => app.getAppMetrics(),
   requestAgents: requestAllAgentMemoryUsage,
-  getConnectionScopeKeys: () => getProjects().map((project) => connectionScopeKey(project.connection)),
+  getConnectionScopeKeys: () => getProjectsRepository().getAll().map((project) => connectionScopeKey(project.connection)),
   getTabIds: () => knownTabScopes,
   recordSummary: (summary) => channelLog(
     CHANNEL_LOG.MEMORY_SUMMARY,

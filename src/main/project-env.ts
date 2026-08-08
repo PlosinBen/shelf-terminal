@@ -1,4 +1,4 @@
-import { getProjects } from './app-state';
+import { getProjectsRepository } from './projects/repository-provider';
 import { resolveProjectSecrets } from './secret-store';
 import { sanitizeEnvMap, type EnvMap } from '@shared/project-env';
 
@@ -16,7 +16,7 @@ import { sanitizeEnvMap, type EnvMap } from '@shared/project-env';
  */
 export function resolveProjectEnv(projectId: string | undefined): EnvMap {
   if (!projectId) return {};
-  const project = getProjects().find((p) => p.id === projectId);
+  const project = getProjectsRepository().get(projectId);
   if (!project) return {};
   const plain = sanitizeEnvMap(project.envPlain);
   const secret = resolveProjectSecrets(projectId);

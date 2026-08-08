@@ -23,7 +23,8 @@ import { parseHttpOrigin } from '../web-session-helpers';
 import { isGranted, grant } from '../web-grants';
 import { requestWebPermission } from '../web-permission';
 import { requestBrowserOpen, openWebTab } from '../browser-open';
-import { getMainWindow, getProjects } from '../app-state';
+import { getMainWindow } from '../app-state';
+import { getProjectsRepository } from '../projects/repository-provider';
 import { createConnector } from '../connector';
 import { listFeatureNotes } from '../worktree/feature-notes';
 import { IPC } from '@shared/ipc-channels';
@@ -68,7 +69,7 @@ function normalizeProposedNotePaths(args: Record<string, unknown>): string[] {
 async function resolveProposedNotePaths(projectId: string, identifiers: readonly string[]): Promise<string[]> {
   if (identifiers.length === 0) return [];
 
-  const project = getProjects().find((candidate) => candidate.id === projectId);
+  const project = getProjectsRepository().get(projectId);
   if (!project) throw new Error(`project not found: ${projectId}`);
   if (!project.featureNoteDir) {
     throw new Error('cannot propose feature notes: this project has no feature note directory configured');
@@ -296,7 +297,7 @@ const REGISTRY: Record<string, AppToolDef> = {
     run: async (_args, ctx) => {
       const projectId = ctx.projectId;
       if (!projectId) throw new Error('worktree.propose_finish requires a project context');
-      const project = getProjects().find((candidate) => candidate.id === projectId);
+      const project = getProjectsRepository().get(projectId);
       if (!project) throw new Error(`project not found: ${projectId}`);
       if (!project.parentProjectId) throw new Error(`${project.name} is not a worktree — nothing to finish`);
       const win = getMainWindow();

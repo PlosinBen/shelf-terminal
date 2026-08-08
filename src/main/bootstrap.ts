@@ -1,14 +1,22 @@
 import fs from 'fs';
+import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { app, dialog } from 'electron';
 import { DEFAULT_SETTINGS } from '@shared/defaults';
 import { log } from '@shared/logger';
-import { loadProjects } from './project-store';
 import { loadSettings } from './settings-store';
 import type { LoadResult } from './project-store';
-import type { AppSettings, ProjectConfig } from '@shared/types';
+import type { AppSettings } from '@shared/types';
+import { createProjectConfigFileIo } from './projects/project-config-file-io';
+import { createProjectConfigPersistence } from './projects/project-config-persistence';
+import { createProjectCleanup } from './projects/project-cleanup';
+import {
+  createMainProjectsRepository,
+  type MainProjectsRepository,
+} from './projects/projects-repository';
 
 export interface BootstrapResult {
-  projects: ProjectConfig[];
+  projectsRepository: MainProjectsRepository;
   settings: AppSettings;
 }
 
@@ -149,16 +157,49 @@ function handleLoadError<T>(
   throw new Error('app exiting');
 }
 
+function loadProjectsRepository(): MainProjectsRepository {
+  const filePath = path.join(app.getPath('userData'), 'projects.json');
+  const createRepository = () => createMainProjectsRepository(
+    createProjectConfigPersistence(filePath, createProjectConfigFileIo()),
+    randomUUID,
+    createProjectCleanup(),
+  );
+
+  const created = createRepository();
+  if (created.ok) return created.repository;
+  const failure = created.error;
+  if (failure.stage === 'decode' || failure.stage === 'parse' || failure.stage === 'schema') {
+    const choice = showParseDialog('projects.json', failure.path, failure.message);
+    if (choice === 'quit') {
+      app.exit(0);
+      throw new Error('app exiting');
+    }
+    const backupError = backupCorruptFile(failure.path);
+    if (backupError) {
+      showBackupFailedDialog(failure.path, backupError);
+      app.exit(1);
+      throw new Error('app exiting');
+    }
+    const empty = createRepository();
+    if (empty.ok) return empty.repository;
+    throw new Error(`projects repository failed after config backup: ${empty.error.message}`);
+  }
+  if (failure.kind === 'permission') {
+    showPermissionDialog('projects.json', failure.path, failure.message);
+  } else {
+    showReadDialog('projects.json', failure.path, failure.message);
+  }
+  app.exit(0);
+  throw new Error('app exiting');
+}
+
 export function bootstrap(): BootstrapResult {
-  const projectsResult = loadProjects();
-  const projects: ProjectConfig[] = projectsResult.ok
-    ? projectsResult.value
-    : handleLoadError('projects.json', [] as ProjectConfig[], projectsResult);
+  const projectsRepository = loadProjectsRepository();
 
   const settingsResult = loadSettings();
   const settings: AppSettings = settingsResult.ok
     ? settingsResult.value
     : handleLoadError('settings.json', { ...DEFAULT_SETTINGS }, settingsResult);
 
-  return { projects, settings };
+  return { projectsRepository, settings };
 }

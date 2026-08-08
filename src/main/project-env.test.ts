@@ -1,6 +1,12 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { setProjects } from './app-state';
 import type { ProjectConfig } from '@shared/types';
+
+let projects: ProjectConfig[] = [];
+vi.mock('./projects/repository-provider', () => ({
+  getProjectsRepository: () => ({
+    get: (projectId: string) => projects.find((project) => project.id === projectId) ?? null,
+  }),
+}));
 
 // secret-store pulls in electron (safeStorage/app) — mock it so this suite stays
 // electron-free. Per-test behavior is set via the mock fn below.
@@ -18,7 +24,7 @@ function project(id: string, envPlain?: Record<string, string>): ProjectConfig {
 
 describe('resolveProjectEnv', () => {
   beforeEach(() => {
-    setProjects([]);
+    projects = [];
     resolveProjectSecrets.mockReturnValue({});
   });
 
@@ -28,22 +34,22 @@ describe('resolveProjectEnv', () => {
   });
 
   it('returns the project plain env map', () => {
-    setProjects([project('p1', { GH_TOKEN: 'abc', HTTPS_PROXY: 'http://x' })]);
+    projects = [project('p1', { GH_TOKEN: 'abc', HTTPS_PROXY: 'http://x' })];
     expect(resolveProjectEnv('p1')).toEqual({ GH_TOKEN: 'abc', HTTPS_PROXY: 'http://x' });
   });
 
   it('drops reserved keys as a backstop', () => {
-    setProjects([project('p1', { GH_TOKEN: 'abc', SHELF_TEST_MODE: '1', ELECTRON_RUN_AS_NODE: '1' })]);
+    projects = [project('p1', { GH_TOKEN: 'abc', SHELF_TEST_MODE: '1', ELECTRON_RUN_AS_NODE: '1' })];
     expect(resolveProjectEnv('p1')).toEqual({ GH_TOKEN: 'abc' });
   });
 
   it('returns {} when the project has no envPlain', () => {
-    setProjects([project('p1')]);
+    projects = [project('p1')];
     expect(resolveProjectEnv('p1')).toEqual({});
   });
 
   it('merges plain + secret, secret winning a same-key collision', () => {
-    setProjects([project('p1', { PLAIN_ONLY: 'p', SHARED: 'plain-val' })]);
+    projects = [project('p1', { PLAIN_ONLY: 'p', SHARED: 'plain-val' })];
     resolveProjectSecrets.mockReturnValue({ SECRET_ONLY: 's', SHARED: 'secret-val' });
     expect(resolveProjectEnv('p1')).toEqual({
       PLAIN_ONLY: 'p', SECRET_ONLY: 's', SHARED: 'secret-val',

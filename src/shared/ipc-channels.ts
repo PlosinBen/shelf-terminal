@@ -4,6 +4,12 @@ export const IPC = {
   PTY_KILL: 'pty:kill',
   PROJECT_LOAD: 'project:load',
   PROJECT_SAVE: 'project:save',
+  PROJECT_GET_ALL: 'project:get-all',
+  PROJECT_ADD: 'project:add',
+  PROJECT_UPDATE: 'project:update',
+  PROJECT_DELETE: 'project:delete',
+  PROJECT_RETRY_CLEANUP: 'project:retry-cleanup',
+  PROJECT_REORDER: 'project:reorder',
   PROJECT_VALIDATE_DIRS: 'project:validate-dirs',
 
   // Project SECRET env vars (encrypted side-car; renderer never sees values)

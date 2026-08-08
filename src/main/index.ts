@@ -16,7 +16,8 @@ import { migratePmNotes } from './migrations/migrate-pm-notes';
 import { handlePmSend, handleTabEvent, stopGeneration, setWritePtyFn, initAwayMode, initPmActive, initTelegramBridge, setProjectsProvider, setStateChangeCallback, stopTelegram, setMessageCallback, setCallbackQueryHandler, setStopCallback, handlePtyData, handlePtyRemove, handlePtyClear } from './pm';
 import { applyPmActive } from './ipc/pm';
 import { initAgentManager, disposeAllAgents } from './agent';
-import { getMainWindow, setMainWindow, setProjects, setSettings, getSettings, getProjects } from './app-state';
+import { getMainWindow, setMainWindow, setSettings, getSettings } from './app-state';
+import { setProjectsRepository } from './projects/repository-provider';
 import { registerAllIpcHandlers } from './ipc';
 import { hardenWebSession, installWebviewHardening } from './web-session-harden';
 import { shouldRecreateWindowOnActivate } from './window-lifecycle';
@@ -158,14 +159,13 @@ app.whenReady().then(async () => {
   });
 
   initializeChannelLog(logBaseDir);
-  initProcessMemory();
-
   const envLogLevel = process.env.LOG_LEVEL as import('../shared/types').LogLevel | undefined;
   if (envLogLevel) setLogLevel(envLogLevel);
 
-  const { projects, settings } = bootstrap();
-  setProjects(projects);
+  const { projectsRepository, settings } = bootstrap();
+  setProjectsRepository(projectsRepository);
   setSettings(settings);
+  initProcessMemory();
 
   if (!envLogLevel) setLogLevel(settings.logLevel);
 
@@ -197,7 +197,10 @@ app.whenReady().then(async () => {
   // The handler's mode-gate decides whether to forward events to Telegram —
   // PM Active off → `mode = pm` → everything dropped on the floor.
   initTelegramBridge();
-  setProjectsProvider(() => getProjects().map((p) => ({ name: p.name, connectionType: p.connection.type })));
+  setProjectsProvider(() => projectsRepository.getAll().map((project) => ({
+    name: project.name,
+    connectionType: project.connection.type,
+  })));
   setWritePtyFn(writePty);
   // Feed PTY output/lifecycle into PM scrollback + tab-watcher (P1-1: the
   // dependency now points pm→infra via this injection, not pty-manager→pm).

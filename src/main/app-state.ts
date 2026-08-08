@@ -1,17 +1,14 @@
 import type { BrowserWindow } from 'electron';
-import type { ProjectConfig, AppSettings } from '@shared/types';
+import type { AppSettings } from '@shared/types';
 import { DEFAULT_SETTINGS } from '@shared/defaults';
 
 /**
  * Authoritative in-memory app state shared between the window lifecycle code in
- * index.ts and the per-domain IPC handlers in src/main/ipc/. Handlers both read
- * and mutate these (PROJECT_SAVE writes projects, SETTINGS_SAVE writes settings,
- * PM_SEND reads settings), so they live in one module with accessors rather than
- * being threaded through every register function as parameters.
+ * index.ts and the per-domain IPC handlers in src/main/ipc/. Window and settings
+ * remain here; canonical projects live behind the Main projects repository.
  */
 
 let mainWindow: BrowserWindow | null = null;
-let cachedProjects: ProjectConfig[] = [];
 let cachedSettings: AppSettings = { ...DEFAULT_SETTINGS };
 
 export function getMainWindow(): BrowserWindow | null {
@@ -20,14 +17,6 @@ export function getMainWindow(): BrowserWindow | null {
 
 export function setMainWindow(win: BrowserWindow | null): void {
   mainWindow = win;
-}
-
-export function getProjects(): ProjectConfig[] {
-  return cachedProjects;
-}
-
-export function setProjects(projects: ProjectConfig[]): void {
-  cachedProjects = projects;
 }
 
 export function getSettings(): AppSettings {
