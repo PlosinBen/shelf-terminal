@@ -216,6 +216,19 @@ describe('agentTabStore — IDB load merge (race-safe)', () => {
     expect(__getTabForTests(TAB)!.messages.length).toBe(1);
     errSpy.mockRestore();
   });
+
+  it('does not restore stale IDB history when an in-flight load resolves after clearMessages', async () => {
+    let resolveLoad!: (msgs: AgentMsg[]) => void;
+    mockedStorage.loadAgentMessagesLatest.mockReturnValue(new Promise<AgentMsg[]>((r) => { resolveLoad = r; }));
+    initTab(TAB, { sessionId: SESSION, provider: 'claude' });
+
+    await clearMessages(TAB);
+    resolveLoad([textMsg('m-old', 'old history')]);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(__getTabForTests(TAB)!.messages).toEqual([]);
+  });
 });
 
 describe('agentTabStore — message actions', () => {
@@ -417,6 +430,16 @@ describe('agentTabStore — message actions', () => {
     await clearMessages(TAB);
     expect(__getTabForTests(TAB)!.messages.length).toBe(0);
     expect(mockedStorage.clearAgentSession).toHaveBeenCalledWith(SESSION);
+  });
+
+  it('clearMessages drops stream chunks waiting for the render throttle', async () => {
+    appendChunk(TAB, 'chunk-1', 'stale tail', 'text');
+
+    await clearMessages(TAB);
+    vi.advanceTimersByTime(33);
+
+    expect(__getTabForTests(TAB)!.messages).toEqual([]);
+    expect(__getPendingSaveForTests(TAB)).toBeUndefined();
   });
 });
 

@@ -224,3 +224,11 @@ AuthPane 的手動 `checkAuth` 是不同 surface：busy / error 由 AuthPane 自
 **Do not change casually because**：不要為了視覺分段重新加入 start marker、用 `executionId` key DOM、或把「找不到 execution」當成不 render 的理由。若需要閱讀間距，只能根據訊息自身 presentation type 做 styling，不能恢復 execution lifecycle coupling。
 
 **Related**：`architecture/agent-execution`、`contracts/agent-wire-protocol`、`background-tasks#7`、`src/renderer/components/agent/MessageList.tsx`、`src/renderer/agentTabStore.ts`。
+
+## agent-ui#10 — Clear History 必須使進行中的 history hydration 與 chunk buffer 失效  ·  [Gotcha]
+
+**Symptom**：Clear History 已把 timeline 清空後，舊的 tool / reply 卡片又出現；IndexedDB 本身可能已經刪除，但 renderer memory 被舊 snapshot 回填。
+
+**Root cause**：Agent tab 初始化會非同步讀取 IndexedDB，而 clear 不會自動取消已開始的 read transaction；若舊 load 在 clear 後才 resolve，就會把 pre-clear snapshot merge 回當前 store。同時，33ms renderer throttle 中尚未 flush 的 stream chunk 也能在 clear 後 append 回 timeline。
+
+**Fix / note**：Per-tab history load 使用 per-init identity token；init 捕捉 token，clear 與 remove 先 invalidate，load resolve 時只有 token 仍一致才可 merge。Clear 也必須取消 chunk timer 並丟棄 pending buffer。這只使 renderer-owned pre-clear work 失效，不改變 session-scoped content 可在 execution idle 後抵達的契約（`agent-ui#9`）。

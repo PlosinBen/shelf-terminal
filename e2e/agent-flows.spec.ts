@@ -203,6 +203,25 @@ test.describe('agent flows via fake provider', () => {
     });
   });
 
+  test('Clear History removes the rendered timeline and leaves the agent usable', async ({ shelfApp: { page } }) => {
+    await setupProject(page);
+    await openAgentTab(page);
+    await sendAgentPrompt(page, 'text:before clear|tool:Read');
+
+    const messages = page.locator('.agent-messages:visible');
+    await expect(messages).toContainText('before clear', { timeout: 5_000 });
+    await expect(messages.locator('.fold-label', { hasText: 'Read' })).toBeVisible();
+    await expect(page.locator('.agent-status-label:visible')).toHaveText('idle', { timeout: 5_000 });
+
+    await page.locator('.agent-reset-btn:visible', { hasText: 'Clear History' }).click();
+    await expect(messages.locator('.agent-msg')).toHaveCount(0);
+    await expect(messages.locator('.agent-empty')).toHaveText('Send a message to start');
+
+    await sendAgentPrompt(page, 'text:after clear');
+    await expect(messages).toContainText('after clear', { timeout: 5_000 });
+    await expect(messages).not.toContainText('before clear');
+  });
+
   test('auth_required swaps the view for the auth pane', async ({ shelfApp: { page } }) => {
     await setupProject(page);
     await openAgentTab(page);

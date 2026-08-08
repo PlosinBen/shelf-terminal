@@ -128,6 +128,10 @@ export interface AgentTabState {
 type Listener = () => void;
 const tabs = new Map<string, AgentTabState>();
 const listeners = new Map<string, Set<Listener>>();
+// Per-init identity token for async history hydration. Clear/remove invalidates
+// any IndexedDB read that started earlier so its stale snapshot cannot merge
+// back into a newly-cleared or recreated tab. See agent-ui#10.
+const historyLoadTokens = new Map<string, symbol>();
 
 // Settings synced from App.tsx. inMemoryMax used to be clamped against
 // an idbMax sibling; that was removed when IDB went unlimited via the
@@ -323,6 +327,8 @@ export interface InitTabOpts {
 
 export function initTab(tabId: string, opts: InitTabOpts) {
   if (tabs.has(tabId)) return;  // idempotent
+  const historyLoadToken = Symbol();
+  historyLoadTokens.set(tabId, historyLoadToken);
   const initial: AgentTabState = {
     sessionId: opts.sessionId,
     provider: opts.provider,
@@ -368,6 +374,7 @@ export function initTab(tabId: string, opts: InitTabOpts) {
   // first; load merges loaded-before-current with ID dedupe so the new
   // entries aren't clobbered.
   loadAgentMessagesLatest(opts.sessionId, inMemoryMax).then((loaded) => {
+    if (historyLoadTokens.get(tabId) !== historyLoadToken) return;
     if (loaded.length === 0) return;
     const current = tabs.get(tabId);
     if (!current) return;  // tab removed during load
@@ -382,6 +389,7 @@ export function initTab(tabId: string, opts: InitTabOpts) {
 }
 
 export function removeTab(tabId: string) {
+  historyLoadTokens.delete(tabId);
   flushSave(tabId);
   clearChunkBuffer(tabId);
   tabs.delete(tabId);
@@ -681,6 +689,13 @@ export function clearPendingSends(tabId: string) {
 export async function clearMessages(tabId: string) {
   const tab = tabs.get(tabId);
   if (!tab) return;
+  // Invalidate the init-time IndexedDB read before changing either memory or
+  // storage. A read already in flight may still resolve with the pre-clear
+  // snapshot, but its epoch check will now discard that result.
+  historyLoadTokens.delete(tabId);
+  // Drop deltas waiting for the 33ms renderer throttle. Otherwise their timer
+  // can append a stale reply immediately after messages becomes empty.
+  clearChunkBuffer(tabId);
   // Drop any queued dirty snapshots outright — don't flushSave, because
   // if the tab is streaming flushSave just re-arms the timer, then a
   // later fire would re-write pre-clear msgs back to IDB after we wipe
@@ -691,8 +706,8 @@ export async function clearMessages(tabId: string) {
     clearTimeout(entry.timer);
     pendingSaves.delete(tabId);
   }
-  // Clear background tasks too — the backend clears its task map on /clear,
-  // so the panel must not keep showing stale tasks from the wiped session.
+  // Clear background tasks too so every renderer-owned history surface follows
+  // the same visible-history wipe.
   update(tabId, (prev) => ({ ...prev, messages: [], backgroundTasks: [], dismissedTaskIds: new Set(), pendingSends: [], promotedClientMsgIds: new Set() }));
   await clearAgentSession(tab.sessionId).catch((err) => {
     console.error('[agentTabStore] clearAgentSession failed', err);
@@ -986,6 +1001,7 @@ export function __resetStoreForTests() {
   pendingChunks.clear();
   tabs.clear();
   listeners.clear();
+  historyLoadTokens.clear();
   saveThrottleMs = DEFAULT_THROTTLE_MS;
   inMemoryMax = DEFAULT_IN_MEMORY_MAX;
 }
