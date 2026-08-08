@@ -1,8 +1,9 @@
 import fs from 'node:fs/promises';
+import fsSync from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 
-export type ProjectConfigFileIoOperation = 'read' | 'prepare-directory' | 'write-temp' | 'replace';
+export type ProjectConfigFileIoOperation = 'read' | 'prepare-directory' | 'backup' | 'write-temp' | 'replace';
 export type ProjectConfigFileIoErrorKind = 'permission' | 'io';
 
 export interface ProjectConfigFileIoError {
@@ -22,13 +23,15 @@ export type ProjectConfigFileWriteResult =
   | { readonly ok: false; readonly error: ProjectConfigFileIoError };
 
 export interface ProjectConfigFileIo {
-  read(filePath: string): Promise<ProjectConfigFileReadResult>;
+  read(filePath: string): ProjectConfigFileReadResult;
+  backup(sourcePath: string, backupPath: string): Promise<ProjectConfigFileWriteResult>;
   writeAtomic(filePath: string, data: string | Uint8Array): Promise<ProjectConfigFileWriteResult>;
 }
 
 export interface ProjectConfigFileOperations {
-  readFile(filePath: string): Promise<Uint8Array>;
+  readFile(filePath: string): Uint8Array;
   mkdir(directory: string): Promise<void>;
+  copyFile(sourcePath: string, targetPath: string): Promise<void>;
   writeFile(filePath: string, data: string | Uint8Array): Promise<void>;
   rename(sourcePath: string, targetPath: string): Promise<void>;
   unlink(filePath: string): Promise<void>;
@@ -40,10 +43,11 @@ interface ProjectConfigFileIoOptions {
 }
 
 const DEFAULT_OPERATIONS: ProjectConfigFileOperations = {
-  readFile: (filePath) => fs.readFile(filePath),
+  readFile: (filePath) => fsSync.readFileSync(filePath),
   mkdir: async (directory) => {
     await fs.mkdir(directory, { recursive: true });
   },
+  copyFile: (sourcePath, targetPath) => fs.copyFile(sourcePath, targetPath),
   writeFile: (filePath, data) => fs.writeFile(filePath, data),
   rename: (sourcePath, targetPath) => fs.rename(sourcePath, targetPath),
   unlink: (filePath) => fs.unlink(filePath),
@@ -80,12 +84,21 @@ export function createProjectConfigFileIo(
   const createTempToken = options.createTempToken ?? randomUUID;
 
   return {
-    async read(filePath) {
+    read(filePath) {
       try {
-        return { ok: true, state: 'present', data: await operations.readFile(filePath) };
+        return { ok: true, state: 'present', data: operations.readFile(filePath) };
       } catch (error) {
         if (errorCode(error) === 'ENOENT') return { ok: true, state: 'missing' };
         return { ok: false, error: ioError('read', filePath, error) };
+      }
+    },
+
+    async backup(sourcePath, backupPath) {
+      try {
+        await operations.copyFile(sourcePath, backupPath);
+        return { ok: true };
+      } catch (error) {
+        return { ok: false, error: ioError('backup', sourcePath, error) };
       }
     },
 

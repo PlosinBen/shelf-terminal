@@ -43,7 +43,7 @@ function createInput(overrides: Partial<ProjectCreateInput> = {}): ProjectCreate
 function persistence(initial: readonly Project[] = []) {
   const save = vi.fn<ProjectConfigPersistence['save']>(async () => ({ ok: true }));
   const value: ProjectConfigPersistence = {
-    load: vi.fn(async () => ({ ok: true as const, value: initial })),
+    load: vi.fn(() => ({ ok: true as const, value: initial })),
     save,
   };
   return { value, save };
@@ -54,23 +54,33 @@ function cleanup() {
   return { value: { cleanup: run } satisfies ProjectCleanup, run };
 }
 
+function readyRepository(
+  config: ProjectConfigPersistence,
+  createProjectId: () => string,
+  projectCleanup = cleanup().value,
+) {
+  const result = createMainProjectsRepository(config, createProjectId, projectCleanup);
+  if (!result.ok) throw new Error(`unexpected load failure: ${result.error.message}`);
+  return result.repository;
+}
+
 describe('main projects repository', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
   });
 
-  it('does not create a ready repository when config load fails', async () => {
+  it('does not create a ready repository when config load fails', () => {
     const config: ProjectConfigPersistence = {
-      load: vi.fn(async () => ({
+      load: vi.fn(() => ({
         ok: false as const,
         error: { stage: 'parse' as const, path: '/config/projects.json', message: 'bad JSON' },
       })),
       save: vi.fn(),
     };
 
-    await expect(createMainProjectsRepository(config, () => 'unused', cleanup().value)).rejects.toMatchObject({
-      name: 'ProjectRepositoryError',
-      operation: 'load',
+    expect(createMainProjectsRepository(config, () => 'unused', cleanup().value)).toMatchObject({
+      ok: false,
+      error: { stage: 'parse' },
     });
   });
 
@@ -80,7 +90,7 @@ describe('main projects repository', () => {
     config.save.mockImplementationOnce(() => new Promise((resolve) => {
       resolveSave = resolve;
     }));
-    const repository = await createMainProjectsRepository(config.value, () => 'generated-id', cleanup().value);
+    const repository = readyRepository(config.value, () => 'generated-id');
     const input = createInput();
 
     const adding = repository.add(input);
@@ -100,7 +110,7 @@ describe('main projects repository', () => {
       ok: false,
       error: { stage: 'replace', path: '/config/projects.json', message: 'disk full' },
     });
-    const repository = await createMainProjectsRepository(config.value, () => 'new-id', cleanup().value);
+    const repository = readyRepository(config.value, () => 'new-id');
 
     await expect(repository.add(createInput())).rejects.toBeInstanceOf(ProjectRepositoryError);
     expect(repository.getAll()).toEqual([project('existing')]);
@@ -109,7 +119,7 @@ describe('main projects repository', () => {
   it('treats identical and missing saves as non-persisting no-ops', async () => {
     const config = persistence([project('a')]);
     const warn = vi.spyOn(log, 'warn');
-    const repository = await createMainProjectsRepository(config.value, () => 'unused', cleanup().value);
+    const repository = readyRepository(config.value, () => 'unused');
 
     await repository.save(project('a'));
     await repository.save(project('missing'));
@@ -124,7 +134,7 @@ describe('main projects repository', () => {
   it('deletes durably and treats a missing id as a successful no-op', async () => {
     const config = persistence([project('a'), project('b')]);
     const projectCleanup = cleanup();
-    const repository = await createMainProjectsRepository(config.value, () => 'unused', projectCleanup.value);
+    const repository = readyRepository(config.value, () => 'unused', projectCleanup.value);
 
     await expect(repository.delete('missing')).resolves.toEqual({ cleanupPending: false });
     expect(config.save).not.toHaveBeenCalled();
@@ -139,7 +149,7 @@ describe('main projects repository', () => {
   it('moves whole worktree groups and skips same-group reorder', async () => {
     const initial = [project('a'), project('a-child', 'a'), project('b')];
     const config = persistence(initial);
-    const repository = await createMainProjectsRepository(config.value, () => 'unused', cleanup().value);
+    const repository = readyRepository(config.value, () => 'unused');
 
     await repository.reorder('a', 'a-child');
     expect(config.save).not.toHaveBeenCalled();
@@ -155,7 +165,7 @@ describe('main projects repository', () => {
     projectCleanup.run
       .mockRejectedValueOnce(new Error('cleanup failed'))
       .mockResolvedValueOnce(undefined);
-    const repository = await createMainProjectsRepository(
+    const repository = readyRepository(
       config.value,
       () => 'unused',
       projectCleanup.value,
@@ -179,7 +189,7 @@ describe('main projects repository', () => {
       error: { stage: 'replace', path: '/config/projects.json', message: 'disk full' },
     });
     const projectCleanup = cleanup();
-    const repository = await createMainProjectsRepository(
+    const repository = readyRepository(
       config.value,
       () => 'unused',
       projectCleanup.value,

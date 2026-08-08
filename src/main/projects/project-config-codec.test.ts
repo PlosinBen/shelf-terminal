@@ -101,6 +101,23 @@ describe('project config formatter', () => {
     expect(loadProjectsDocument(formatted.data)).toEqual({ ok: true, value: projects });
   });
 
+  it('round-trips unknown provider ids as opaque data', () => {
+    const input: Project = {
+      ...project(),
+      defaultAgentProvider: 'future-provider',
+      agentSessionIds: { 'retired-provider': 'session-1' },
+      agentPrefs: {
+        'future-provider': { model: 'future-model', permissionMode: 'custom' },
+      },
+    };
+
+    const formatted = formatProjectsDocument([input]);
+    expect(formatted.ok).toBe(true);
+    if (!formatted.ok) return;
+
+    expect(loadProjectsDocument(formatted.data)).toEqual({ ok: true, value: [input] });
+  });
+
   it('rejects a runtime-invalid canonical value', () => {
     const invalid = { ...project(), maxTabs: 0 };
 

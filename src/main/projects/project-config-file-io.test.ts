@@ -42,15 +42,30 @@ describe('project config file I/O', () => {
     expect(await fs.readdir(path.dirname(filePath))).toEqual(['projects.json']);
   });
 
+  it('copies an opaque backup without interpreting its contents', async () => {
+    const io = createProjectConfigFileIo();
+    const filePath = path.join(tempDir, 'projects.json');
+    const backupPath = `${filePath}.backup.test`;
+    await fs.writeFile(filePath, new Uint8Array([0, 255, 1]));
+
+    expect(await io.backup(filePath, backupPath)).toEqual({ ok: true });
+    expect(await fs.readFile(backupPath)).toEqual(Buffer.from([0, 255, 1]));
+  });
+
   it('keeps the target and removes the temp file when replace fails', async () => {
     const files = new Map<string, string>([['/config/projects.json', 'original']]);
     const operations: ProjectConfigFileOperations = {
-      async readFile(filePath) {
+      readFile(filePath) {
         const value = files.get(filePath);
         if (value === undefined) throw Object.assign(new Error('missing'), { code: 'ENOENT' });
         return new TextEncoder().encode(value);
       },
       async mkdir() {},
+      async copyFile(sourcePath, targetPath) {
+        const value = files.get(sourcePath);
+        if (value === undefined) throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+        files.set(targetPath, value);
+      },
       async writeFile(filePath, data) {
         files.set(filePath, typeof data === 'string' ? data : new TextDecoder().decode(data));
       },

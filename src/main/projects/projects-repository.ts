@@ -24,6 +24,10 @@ export interface MainProjectsRepository {
   reorder(sourceId: ProjectId, targetId: ProjectId): Promise<void>;
 }
 
+export type MainProjectsRepositoryCreateResult =
+  | { readonly ok: true; readonly repository: MainProjectsRepository }
+  | { readonly ok: false; readonly error: ProjectConfigPersistenceError };
+
 type ProjectRepositoryOperation = 'load' | 'add' | 'save' | 'delete' | 'reorder';
 
 export class ProjectRepositoryError extends Error {
@@ -158,13 +162,13 @@ function persistenceFailure(
   );
 }
 
-export async function createMainProjectsRepository(
+export function createMainProjectsRepository(
   config: ProjectConfigPersistence,
   createProjectId: ProjectIdFactory,
   cleanup: ProjectCleanup,
-): Promise<MainProjectsRepository> {
-  const loaded = await config.load();
-  if (!loaded.ok) throw persistenceFailure('load', loaded.error);
+): MainProjectsRepositoryCreateResult {
+  const loaded = config.load();
+  if (!loaded.ok) return { ok: false, error: loaded.error };
   let projects = readyCollection(loaded.value, 'load');
   const pendingCleanup = new Set<ProjectId>();
 
@@ -191,7 +195,7 @@ export async function createMainProjectsRepository(
     }
   }
 
-  return {
+  const repository: MainProjectsRepository = {
     getAll() {
       return projects;
     },
@@ -254,4 +258,5 @@ export async function createMainProjectsRepository(
       await persist('reorder', candidate);
     },
   };
+  return { ok: true, repository };
 }
