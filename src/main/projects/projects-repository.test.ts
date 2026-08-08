@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { log } from '@shared/logger';
 import type { Project, ProjectCreateInput } from '@shared/projects';
 import type { ProjectConfigPersistence } from './project-config-persistence';
+import type { ProjectCleanup } from './project-cleanup';
 import {
   ProjectRepositoryError,
   createMainProjectsRepository,
@@ -48,6 +49,11 @@ function persistence(initial: readonly Project[] = []) {
   return { value, save };
 }
 
+function cleanup() {
+  const run = vi.fn<ProjectCleanup['cleanup']>(async () => {});
+  return { value: { cleanup: run } satisfies ProjectCleanup, run };
+}
+
 describe('main projects repository', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -62,7 +68,7 @@ describe('main projects repository', () => {
       save: vi.fn(),
     };
 
-    await expect(createMainProjectsRepository(config, () => 'unused')).rejects.toMatchObject({
+    await expect(createMainProjectsRepository(config, () => 'unused', cleanup().value)).rejects.toMatchObject({
       name: 'ProjectRepositoryError',
       operation: 'load',
     });
@@ -74,7 +80,7 @@ describe('main projects repository', () => {
     config.save.mockImplementationOnce(() => new Promise((resolve) => {
       resolveSave = resolve;
     }));
-    const repository = await createMainProjectsRepository(config.value, () => 'generated-id');
+    const repository = await createMainProjectsRepository(config.value, () => 'generated-id', cleanup().value);
     const input = createInput();
 
     const adding = repository.add(input);
@@ -94,7 +100,7 @@ describe('main projects repository', () => {
       ok: false,
       error: { stage: 'replace', path: '/config/projects.json', message: 'disk full' },
     });
-    const repository = await createMainProjectsRepository(config.value, () => 'new-id');
+    const repository = await createMainProjectsRepository(config.value, () => 'new-id', cleanup().value);
 
     await expect(repository.add(createInput())).rejects.toBeInstanceOf(ProjectRepositoryError);
     expect(repository.getAll()).toEqual([project('existing')]);
@@ -103,7 +109,7 @@ describe('main projects repository', () => {
   it('treats identical and missing saves as non-persisting no-ops', async () => {
     const config = persistence([project('a')]);
     const warn = vi.spyOn(log, 'warn');
-    const repository = await createMainProjectsRepository(config.value, () => 'unused');
+    const repository = await createMainProjectsRepository(config.value, () => 'unused', cleanup().value);
 
     await repository.save(project('a'));
     await repository.save(project('missing'));
@@ -117,7 +123,8 @@ describe('main projects repository', () => {
 
   it('deletes durably and treats a missing id as a successful no-op', async () => {
     const config = persistence([project('a'), project('b')]);
-    const repository = await createMainProjectsRepository(config.value, () => 'unused');
+    const projectCleanup = cleanup();
+    const repository = await createMainProjectsRepository(config.value, () => 'unused', projectCleanup.value);
 
     await expect(repository.delete('missing')).resolves.toEqual({ cleanupPending: false });
     expect(config.save).not.toHaveBeenCalled();
@@ -125,13 +132,14 @@ describe('main projects repository', () => {
     await expect(repository.delete('a')).resolves.toEqual({ cleanupPending: false });
     expect(config.save).toHaveBeenLastCalledWith([project('b')]);
     expect(repository.getAll()).toEqual([project('b')]);
+    expect(projectCleanup.run).toHaveBeenCalledWith('a');
     await expect(repository.retryCleanup('a')).resolves.toEqual({ cleanupPending: false });
   });
 
   it('moves whole worktree groups and skips same-group reorder', async () => {
     const initial = [project('a'), project('a-child', 'a'), project('b')];
     const config = persistence(initial);
-    const repository = await createMainProjectsRepository(config.value, () => 'unused');
+    const repository = await createMainProjectsRepository(config.value, () => 'unused', cleanup().value);
 
     await repository.reorder('a', 'a-child');
     expect(config.save).not.toHaveBeenCalled();
@@ -139,5 +147,46 @@ describe('main projects repository', () => {
     await repository.reorder('a', 'b');
     expect(repository.getAll().map(({ id }) => id)).toEqual(['b', 'a', 'a-child']);
     expect(config.save).toHaveBeenCalledOnce();
+  });
+
+  it('publishes a durable delete before returning cleanup pending and retries cleanup only', async () => {
+    const config = persistence([project('a'), project('b')]);
+    const projectCleanup = cleanup();
+    projectCleanup.run
+      .mockRejectedValueOnce(new Error('cleanup failed'))
+      .mockResolvedValueOnce(undefined);
+    const repository = await createMainProjectsRepository(
+      config.value,
+      () => 'unused',
+      projectCleanup.value,
+    );
+
+    await expect(repository.delete('a')).resolves.toEqual({ cleanupPending: true });
+    expect(repository.getAll()).toEqual([project('b')]);
+    expect(config.save).toHaveBeenCalledOnce();
+
+    await expect(repository.retryCleanup('a')).resolves.toEqual({ cleanupPending: false });
+    expect(projectCleanup.run).toHaveBeenCalledTimes(2);
+    expect(config.save).toHaveBeenCalledOnce();
+    await expect(repository.retryCleanup('a')).resolves.toEqual({ cleanupPending: false });
+    expect(projectCleanup.run).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not start cleanup when delete persistence fails', async () => {
+    const config = persistence([project('a')]);
+    config.save.mockResolvedValueOnce({
+      ok: false,
+      error: { stage: 'replace', path: '/config/projects.json', message: 'disk full' },
+    });
+    const projectCleanup = cleanup();
+    const repository = await createMainProjectsRepository(
+      config.value,
+      () => 'unused',
+      projectCleanup.value,
+    );
+
+    await expect(repository.delete('a')).rejects.toBeInstanceOf(ProjectRepositoryError);
+    expect(repository.getAll()).toEqual([project('a')]);
+    expect(projectCleanup.run).not.toHaveBeenCalled();
   });
 });

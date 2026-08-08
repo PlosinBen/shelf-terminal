@@ -72,4 +72,11 @@ describe('removeProjectStorage', () => {
     expect(fs.existsSync(b)).toBe(true);
     expect(fs.readFileSync(path.join(b, 'note.md'), 'utf-8')).toBe('b');
   });
+
+  it('rejects when storage removal fails', async () => {
+    const failure = new Error('remove failed');
+    vi.spyOn(fs.promises, 'rm').mockRejectedValueOnce(failure);
+
+    await expect(removeProjectStorage('p1')).rejects.toBe(failure);
+  });
 });

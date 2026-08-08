@@ -32,5 +32,6 @@ export async function removeProjectStorage(projectId: string): Promise<void> {
     await fs.promises.rm(dir, { recursive: true, force: true });
   } catch (err) {
     log.error('project-storage', `failed to remove ${dir}`, err);
+    throw err;
   }
 }

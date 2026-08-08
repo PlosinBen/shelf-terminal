@@ -10,6 +10,7 @@ import type {
   ProjectConfigPersistence,
   ProjectConfigPersistenceError,
 } from './project-config-persistence';
+import type { ProjectCleanup } from './project-cleanup';
 
 export type ProjectIdFactory = () => ProjectId;
 
@@ -160,10 +161,12 @@ function persistenceFailure(
 export async function createMainProjectsRepository(
   config: ProjectConfigPersistence,
   createProjectId: ProjectIdFactory,
+  cleanup: ProjectCleanup,
 ): Promise<MainProjectsRepository> {
   const loaded = await config.load();
   if (!loaded.ok) throw persistenceFailure('load', loaded.error);
   let projects = readyCollection(loaded.value, 'load');
+  const pendingCleanup = new Set<ProjectId>();
 
   async function persist(
     operation: Exclude<ProjectRepositoryOperation, 'load'>,
@@ -172,6 +175,20 @@ export async function createMainProjectsRepository(
     const saved = await config.save(candidate);
     if (!saved.ok) throw persistenceFailure(operation, saved.error);
     projects = candidate;
+  }
+
+  async function runCleanup(projectId: ProjectId): Promise<ProjectDeleteResult> {
+    try {
+      await cleanup.cleanup(projectId);
+      pendingCleanup.delete(projectId);
+      return { cleanupPending: false };
+    } catch (error) {
+      log.error(
+        'projects-repository',
+        `operation=cleanup projectId=${projectId} failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return { cleanupPending: true };
+    }
   }
 
   return {
@@ -185,7 +202,7 @@ export async function createMainProjectsRepository(
 
     async add(input) {
       const project = createProject(createProjectId(), input);
-      if (projects.some(({ id }) => id === project.id)) {
+      if (projects.some(({ id }) => id === project.id) || pendingCleanup.has(project.id)) {
         throw new ProjectRepositoryError('add', `generated duplicate project id ${project.id}`);
       }
       const candidate = readyCollection([...projects, project], 'add');
@@ -213,11 +230,13 @@ export async function createMainProjectsRepository(
       if (candidate.length === projects.length) return { cleanupPending: false };
       const ready = deepFreeze(candidate);
       await persist('delete', ready);
-      return { cleanupPending: false };
+      pendingCleanup.add(projectId);
+      return runCleanup(projectId);
     },
 
-    async retryCleanup() {
-      return { cleanupPending: false };
+    async retryCleanup(projectId) {
+      if (!pendingCleanup.has(projectId)) return { cleanupPending: false };
+      return runCleanup(projectId);
     },
 
     async reorder(sourceId, targetId) {
