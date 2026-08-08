@@ -52,7 +52,7 @@ interface ShelfApi {
     delete: (projectId: string) => Promise<import('../shared/projects').ProjectDeleteResult>;
     retryCleanup: (projectId: string) => Promise<import('../shared/projects').ProjectDeleteResult>;
     reorder: (sourceId: string, targetId: string) => Promise<void>;
-    validateDirs: (projects: import('../shared/types').ProjectConfig[]) => Promise<string[]>;
+    validateDirs: (projects?: import('../shared/types').ProjectConfig[]) => Promise<string[]>;
     listSecretKeys: (projectId: string) => Promise<string[]>;
     setSecret: (projectId: string, key: string, value: string) => Promise<void>;
     deleteSecret: (projectId: string, key: string) => Promise<void>;
