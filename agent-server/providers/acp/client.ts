@@ -21,12 +21,18 @@ import { translateSessionUpdate, createToolMetaCarry, imageContentBlocks, DEFAUL
 import { readUploadedImageAttachments } from '../shared';
 import { serverLog } from '../../server-logger';
 
+interface TurnPresentationState {
+  sawAssistantReply: boolean;
+}
+
 interface SessionRouteState {
   send: SendFn | null;
   promptBase: string;
   seg: number;
   streamedSinceTool: boolean;
   thoughtStarted: Set<string>;
+  currentTurn: TurnPresentationState;
+  taskCompleteTurns: Map<string, TurnPresentationState>;
   carryToolMeta: ReturnType<typeof createToolMetaCarry>;
 }
 
@@ -89,6 +95,8 @@ export function createSessionDriver(): SessionDriver {
         seg: 0,
         streamedSinceTool: false,
         thoughtStarted: new Set<string>(),
+        currentTurn: { sawAssistantReply: false },
+        taskCompleteTurns: new Map<string, TurnPresentationState>(),
         carryToolMeta: createToolMetaCarry(),
       };
       routeBySession.set(sessionId, state);
@@ -98,11 +106,34 @@ export function createSessionDriver(): SessionDriver {
 
   function routeUpdate(sessionId: string, update: SessionUpdate): void {
     const state = routeState(sessionId);
+    const carriedUpdate = state.carryToolMeta(update);
+    const isToolUpdate = carriedUpdate.sessionUpdate === 'tool_call'
+      || carriedUpdate.sessionUpdate === 'tool_call_update';
+    const isTaskComplete = isToolUpdate && carriedUpdate.title === 'task_complete';
+    if (carriedUpdate.sessionUpdate === 'agent_message_chunk') {
+      state.currentTurn.sawAssistantReply = true;
+    } else if (isTaskComplete && !state.taskCompleteTurns.has(carriedUpdate.toolCallId)) {
+      // The terminal update can arrive after prompt settlement — or even after a
+      // later prompt starts. Bind the tool call to the turn where it first appears
+      // so the fallback-reply decision does not use whichever turn is current when
+      // the result-bearing callback finally runs. See agent-providers#24/#37.
+      state.taskCompleteTurns.set(carriedUpdate.toolCallId, state.currentTurn);
+    }
+    const taskCompleteTurn = isTaskComplete
+      ? state.taskCompleteTurns.get(carriedUpdate.toolCallId)
+      : undefined;
     const namespaced = (msgId: string, streamType?: string): string =>
       msgId === DEFAULT_AGENT_MSG_ID ? `${state.promptBase}:${streamType ?? 'msg'}:${state.seg}` : msgId;
 
-    for (const raw of translateSessionUpdate(state.carryToolMeta(update))) {
+    for (const raw of translateSessionUpdate(carriedUpdate)) {
       let wire = raw;
+      if (isTaskComplete && wire.type === 'message' && wire.msgType === 'note'
+        && taskCompleteTurn && !taskCompleteTurn.sawAssistantReply) {
+        // Copilot autopilot sometimes uses task_complete as the turn's ONLY
+        // user-facing answer. In that case promote its summary to the normal
+        // markdown reply surface; keep it a note when a real reply already exists.
+        wire = { type: 'message', msgId: wire.msgId, msgType: 'reply', content: wire.content };
+      }
       if (wire.type === 'message') {
         // Tool/other card after streamed text = message boundary → next text
         // is a new segment. Consecutive tools do not over-bump.
@@ -128,6 +159,9 @@ export function createSessionDriver(): SessionDriver {
         // surface that protocol anomaly instead of silently losing content.
         serverLog('error', 'acp', `session update produced ${wire.type} before output sink was bound (session=${sessionId})`);
       }
+    }
+    if (isTaskComplete && (carriedUpdate.status === 'completed' || carriedUpdate.status === 'failed')) {
+      state.taskCompleteTurns.delete(carriedUpdate.toolCallId);
     }
   }
 
@@ -192,6 +226,7 @@ export function createSessionDriver(): SessionDriver {
       state.seg = 0;
       state.streamedSinceTool = false;
       state.thoughtStarted.clear();
+      state.currentTurn = { sawAssistantReply: false };
 
       try {
         const res = await agent.request(methods.agent.session.prompt, {

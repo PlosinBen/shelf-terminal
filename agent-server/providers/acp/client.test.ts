@@ -33,7 +33,7 @@ describe('acp session driver (connection + new/resume + turn)', () => {
     ]);
   });
 
-  it('delivers a partial terminal tool update even when its callback settles after the prompt response', async () => {
+  it('promotes a task_complete-only turn to a markdown reply even when completion settles after the prompt response', async () => {
     const driver = createSessionDriver();
     const lateSummary: SessionUpdate = {
       sessionUpdate: 'tool_call_update',
@@ -67,17 +67,76 @@ describe('acp session driver (connection + new/resume + turn)', () => {
       await driver.drivePromptTurn(conn.agent, session, 'hi', (m) => wire.push(m));
       // Prompt settlement controls idle/queue release; content delivery remains
       // live. The terminal callback intentionally has not run yet.
-      expect(wire).not.toContainEqual(expect.objectContaining({ msgId: 'task-complete-1', msgType: 'note' }));
+      expect(wire).not.toContainEqual(expect.objectContaining({ msgId: 'task-complete-1' }));
       await new Promise<void>((resolve) => setImmediate(() => setImmediate(resolve)));
       expect(wire).toContainEqual({
         type: 'message',
         msgId: 'task-complete-1',
-        msgType: 'note',
+        msgType: 'reply',
         content: 'final summary',
       });
     } finally {
       conn.close();
     }
+  });
+
+  it('keeps task_complete as a note when the same turn already emitted an assistant reply', async () => {
+    const updates: SessionUpdate[] = [
+      { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'answer' } },
+      { sessionUpdate: 'tool_call', toolCallId: 'task-complete-2', title: 'task_complete', kind: 'other', status: 'in_progress' },
+      {
+        sessionUpdate: 'tool_call_update', toolCallId: 'task-complete-2', status: 'completed',
+        content: [{ type: 'content', content: { type: 'text', text: 'completion summary' } }],
+      },
+    ] as SessionUpdate[];
+    const mock = createMockAcpAgent({ updatesOnPrompt: updates });
+    const driver = createSessionDriver();
+    const conn = openAcpConnection(mock, { onSessionUpdate: driver.onSessionUpdate });
+    const session = await driver.startNew(conn.agent, { cwd: '/tmp/p' });
+    const wire: OutgoingMessage[] = [];
+
+    await driver.drivePromptTurn(conn.agent, session, 'go', (m) => wire.push(m));
+    conn.close();
+
+    expect(wire).toContainEqual(expect.objectContaining({ type: 'stream', streamType: 'text', content: 'answer' }));
+    expect(wire).toContainEqual({
+      type: 'message', msgId: 'task-complete-2', msgType: 'note', content: 'completion summary',
+    });
+  });
+
+  it('attributes a late task_complete to the turn where its tool call started', async () => {
+    const mock = createMockAcpAgent();
+    const driver = createSessionDriver();
+    const conn = openAcpConnection(mock, { onSessionUpdate: driver.onSessionUpdate });
+    const session = await driver.startNew(conn.agent, { cwd: '/tmp/p' });
+    const firstWire: OutgoingMessage[] = [];
+    await driver.drivePromptTurn(conn.agent, session, 'first', (m) => firstWire.push(m));
+    driver.onSessionUpdate({
+      sessionId: session.sessionId,
+      update: {
+        sessionUpdate: 'tool_call', toolCallId: 'late-task-complete', title: 'task_complete',
+        kind: 'other', status: 'in_progress',
+      },
+    });
+
+    const secondWire: OutgoingMessage[] = [];
+    await driver.drivePromptTurn(conn.agent, session, 'second', (m) => secondWire.push(m));
+    driver.onSessionUpdate({
+      sessionId: session.sessionId,
+      update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'second answer' } } as SessionUpdate,
+    });
+    driver.onSessionUpdate({
+      sessionId: session.sessionId,
+      update: {
+        sessionUpdate: 'tool_call_update', toolCallId: 'late-task-complete', status: 'completed',
+        content: [{ type: 'content', content: { type: 'text', text: 'first summary' } }],
+      },
+    });
+    conn.close();
+
+    expect(secondWire).toContainEqual({
+      type: 'message', msgId: 'late-task-complete', msgType: 'reply', content: 'first summary',
+    });
   });
 
   it('namespaces messageId-less replies per prompt so they do not collide (copilot --acp case)', async () => {
