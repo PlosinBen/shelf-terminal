@@ -430,7 +430,8 @@ async function startSession(
 
   if (backend.getCapabilities) {
     const customModels = providerCustomModels(provider);
-    // `intent` originates in AgentView (projectConfig.agentPrefs[provider]),
+    // `intent` originates in canonical `Project.agentPrefs[provider]`
+    // (`Project` is defined by `@shared/projects`),
     // carried through agent:init's opts → preload spread into AGENT_INIT
     // payload. Seeds the provider's session-level closures before the first
     // capabilities event so renderer's status bar reflects saved prefs after

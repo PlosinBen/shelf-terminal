@@ -153,9 +153,10 @@ export function ProjectEditPanel() {
       openAgentOnConnect,
     });
 
-    // Flush secret ops to main (side-car, not projectConfig). Cleared first, then
-    // new sets — same reserved/valid/duplicate gate as the UI, applied against
-    // the FINAL plain keys so a plain/secret collision can't slip through.
+    // Flush secret ops to main (encrypted side-car, not canonical `Project` from
+    // `@shared/projects`). Cleared first, then new sets — same
+    // reserved/valid/duplicate gate as the UI, applied against the FINAL plain
+    // keys so a plain/secret collision can't slip through.
     const projectId = project.id;
     const plainKeys = Object.keys(envPlain);
     void (async () => {

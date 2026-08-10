@@ -250,8 +250,9 @@ export function InputZone({ tabId, projectId, cwd, connection, visible, rootRef,
     // falls through to agent.send below — provider's slash handler is the
     // single source of truth for "did the switch actually happen", emits a
     // fold_markdown reply card, and broadcasts updated capabilities. The
-    // renderer persists to projectConfig when capabilities reports the new
-    // value (see AgentView's capability-driven persist effect).
+    // renderer persists through the project mutation boundary into canonical
+    // `Project.agentPrefs` (`Project` is defined by `@shared/projects`) when
+    // capabilities reports the new value (see AgentView's persist effect).
     const slash = parseSlashPrefix(text);
     const pickerKey = slash ? OPTIONED_SLASHES[slash.cmd] : undefined;
     if (slash && pickerKey && !slash.args) {

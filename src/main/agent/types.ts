@@ -97,11 +97,12 @@ export interface AgentQueryOptions {
   images?: string[];
   attachments?: AgentAttachment[];
   /**
-   * Per-send pref values. Renderer is the authoritative owner of these
-   * (savedPrefs in projectConfig); main passes them straight through from
-   * the AGENT_SEND payload. remote.ts forwards them to agent-server in the
-   * send line; orchestrator there diff-detects against last-applied prefs
-   * for the session and calls provider.setModel / setEffort etc on change.
+   * Per-send pref values. Renderer reads these from canonical
+   * `Project.agentPrefs` (`Project` is defined by `@shared/projects`); main
+   * passes them straight through from the AGENT_SEND payload. remote.ts forwards
+   * them to agent-server in the send line; orchestrator there diff-detects
+   * against last-applied prefs for the session and calls provider.setModel /
+   * setEffort etc on change.
    */
   model?: string;
   effort?: string;
@@ -174,11 +175,12 @@ export interface AgentBackend {
    */
   checkAuth(cwd: string, customModels?: ProviderModel[]): Promise<ProviderCapabilities | null>;
   /**
-   * `intent` carries renderer's saved prefs (projectConfig.agentPrefs[provider]).
+   * `intent` carries renderer's saved prefs from canonical
+   * `Project.agentPrefs[provider]` (`Project` is defined by `@shared/projects`).
    * Forwarded to agent-server so providers with session-level state (Copilot)
    * can seed currentModel / currentEffort / currentPermissionMode BEFORE
-   * reporting `current*` back, so the status bar after reconnect reflects
-   * the user's saved choice instead of the provider's hardcoded default.
+   * reporting `current*` back, so the status bar after reconnect reflects the
+   * user's saved choice instead of the provider's hardcoded default.
    */
   getCapabilities?(
     cwd: string,

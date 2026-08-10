@@ -5,9 +5,9 @@
  * Model: a project carries a map of user-set env vars that Shelf injects into
  * EVERY process it launches for that project (the agent-server and its CLIs, and
  * the project's interactive terminals). Two categories exist — `plain` (stored in
- * projectConfig, this file's `EnvMap`) and `secret` (encrypted side-car, added
- * later) — but both resolve to the same injected env map; only storage/display
- * differ.
+ * canonical `Project.envPlain` (interface defined by `@shared/projects`, this
+ * file's `EnvMap`) and `secret` (encrypted side-car, added later) — but both
+ * resolve to the same injected env map; only storage/display differ.
  *
  * Precedence (ecosystem norm — silent override, no warnings): ambient/inherited
  * env  <  project env  <  Shelf's own required vars (applied last as a backstop).

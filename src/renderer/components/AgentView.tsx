@@ -30,12 +30,13 @@ interface Props {
  * Layout coordinator for an agent tab. Holds three concerns the
  * sub-components can't reasonably own:
  *
- * 1. **Per-tab lifecycle** — sessionId allocation (lazy create +
- *    persist into projectConfig), initTab, emit init/destroy. Store removal
- *    belongs to actual tab teardown, not React component unmount.
+ * 1. **Per-tab lifecycle** — sessionId allocation (lazy create + persist through
+ *    the project mutation boundary into canonical `Project.agentSessionIds`;
+ *    `Project` is defined by `@shared/projects`), initTab, emit init/destroy.
+ *    Store removal belongs to actual tab teardown, not React component unmount.
  * 2. **Capability-driven persist** — when the provider reports
  *    capabilities (after any config-edit turn), commit the backend's
- *    current* into projectConfig.agentPrefs (needs projectId;
+ *    current* into canonical `Project.agentPrefs` (needs projectId;
  *    sub-components don't have it). The config-edit *action* itself is
  *    emitted directly by DecisionPanel (agent:send + configEdit), not
  *    routed through here.
@@ -106,7 +107,8 @@ export function AgentView({ tabId, cwd, connection, provider, projectId, visible
   /**
    * Capability-driven persist: when provider re-broadcasts capabilities
    * (after /model X slash, picker pick, or any setX), commit the backend's
-   * reported current* to projectConfig if it differs from what's saved.
+   * reported current* to canonical `Project.agentPrefs` if it differs from
+   * what's saved.
    *
    * Init is naturally a no-op — provider seeds its closures from the intent
    * we passed in agent:init, so the first capabilities event carries back
@@ -114,9 +116,10 @@ export function AgentView({ tabId, cwd, connection, provider, projectId, visible
    * cause persist to fire.
    *
    * This is what makes the config-edit path (/model X or the picker →
-   * agent:send → provider slash → capabilities) eventually update
-   * projectConfig — there is no renderer-side optimistic config write;
-   * persist follows the backend's capabilities event.
+   * agent:send → provider slash → capabilities) eventually update canonical
+   * `Project.agentPrefs` through the project mutation boundary — there is no
+   * renderer-side optimistic write; persist follows the backend's capabilities
+   * event.
    */
   const capabilities = tabState?.capabilities;
   useEffect(() => {
