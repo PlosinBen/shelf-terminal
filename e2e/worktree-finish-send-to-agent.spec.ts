@@ -77,9 +77,8 @@ function readLogText(userDataDir: string): string {
 async function openAgentInSub(page: Page) {
   await page.locator('.sidebar-item.worktree-child', { hasText: 'feature' }).click();
   const prompt = page.locator('.connect-prompt');
-  if (await prompt.isVisible({ timeout: 3_000 }).catch(() => false)) {
-    await prompt.click();
-  }
+  await expect(prompt).toBeVisible({ timeout: 5_000 });
+  await prompt.click();
   await expect(page.locator('.tab-bar .tab')).toHaveCount(1, { timeout: 8_000 });
   await openAgentTab(page);
   await expect(page.locator('.tab-bar .tab')).toHaveCount(2, { timeout: 5_000 });

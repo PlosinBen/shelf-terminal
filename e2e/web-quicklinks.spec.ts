@@ -66,9 +66,8 @@ test.describe('web quick-links (web-tab#10)', () => {
   test('the + menu shows only the active project grants and opens a tab at the origin', async ({ shelfApp: { page } }) => {
     // Connect to the pre-seeded project.
     const prompt = page.locator('.connect-prompt');
-    if (await prompt.isVisible({ timeout: 3_000 }).catch(() => false)) {
-      await prompt.click();
-    }
+    await expect(prompt).toBeVisible({ timeout: 5_000 });
+    await prompt.click();
     await expect(page.locator('.tab-bar .tab')).toHaveCount(1, { timeout: 5_000 });
 
     await page.locator('.tab-add').click();

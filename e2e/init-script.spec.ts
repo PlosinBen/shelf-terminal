@@ -51,9 +51,8 @@ const test = base.extend<{}, { shelfApp: { app: ElectronApplication; page: Page 
 test('init script command should not appear twice in terminal output', async ({ shelfApp: { page } }) => {
   // Connect to the pre-seeded project
   const prompt = page.locator('.connect-prompt');
-  if (await prompt.isVisible({ timeout: 3_000 }).catch(() => false)) {
-    await prompt.click();
-  }
+  await expect(prompt).toBeVisible({ timeout: 5_000 });
+  await prompt.click();
   await expect(page.locator('.tab-bar .tab')).toHaveCount(1, { timeout: 5_000 });
 
   // Wait for init script output to appear (poll xterm buffer; WebGL renderer

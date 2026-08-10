@@ -55,8 +55,8 @@ test.describe('invalid persisted provider default', () => {
     await edit.locator('.project-edit-footer .conn-btn-next').click();
 
     await expect.poll(() => {
-      const projects = JSON.parse(fs.readFileSync(path.join(userDataDir, 'projects.json'), 'utf-8'));
-      return projects[0]?.defaultAgentProvider;
+      const document = JSON.parse(fs.readFileSync(path.join(userDataDir, 'projects.json'), 'utf-8'));
+      return document.projects[0]?.defaultAgentProvider;
     }).toBe(STALE_PROVIDER);
 
     await page.locator('.sidebar-item').click({ button: 'right' });

@@ -175,6 +175,8 @@ test.describe('project reorder stable view order', () => {
     await expect(page.locator('.fp-browser-path')).toContainText('/', { timeout: 5_000 });
     await page.keyboard.press(`${modifier}+Enter`);
     await expect(page.locator('.folder-picker-overlay')).not.toBeVisible({ timeout: 3_000 });
+    await expect(page.locator('.sidebar-item')).toHaveCount(4, { timeout: 5_000 });
+    await expect(page.locator('.sidebar-item.active')).not.toContainText('Alpha', { timeout: 5_000 });
 
     await expect(page.locator('[data-insertion-agent-wrapper="1"]')).toHaveCount(1);
     await expect.poll(

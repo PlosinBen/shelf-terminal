@@ -88,7 +88,8 @@ async function setupProjectAndOpenEdit(page: any, userDataDir: string): Promise<
   for (let i = 0; i < 50; i++) {
     try {
       const raw = fs.readFileSync(path.join(userDataDir, 'projects.json'), 'utf-8');
-      const projects = JSON.parse(raw) as Array<{ cwd: string }>;
+      const document = JSON.parse(raw) as { projects: Array<{ cwd: string }> };
+      const projects = document.projects;
       if (projects.length > 0 && projects[0].cwd) {
         cwd = projects[0].cwd;
         break;

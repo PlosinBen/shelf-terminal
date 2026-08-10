@@ -28,9 +28,8 @@ async function setupProject(page: Page) {
   await expect(page.locator('.folder-picker-overlay')).not.toBeVisible({ timeout: 3_000 });
 
   const prompt = page.locator('.connect-prompt');
-  if (await prompt.isVisible({ timeout: 3_000 }).catch(() => false)) {
-    await prompt.click();
-  }
+  await expect(prompt).toBeVisible({ timeout: 5_000 });
+  await prompt.click();
   await expect(page.locator('.tab-bar .tab')).toHaveCount(1, { timeout: 5_000 });
 }
 
@@ -50,7 +49,10 @@ async function openProjectEdit(page: Page) {
 }
 
 async function readProjects(userDataDir: string): Promise<any[]> {
-  return JSON.parse(await fs.promises.readFile(path.join(userDataDir, 'projects.json'), 'utf-8'));
+  const document = JSON.parse(
+    await fs.promises.readFile(path.join(userDataDir, 'projects.json'), 'utf-8'),
+  );
+  return document.projects;
 }
 
 async function expectAgentInputReady(page: Page) {
