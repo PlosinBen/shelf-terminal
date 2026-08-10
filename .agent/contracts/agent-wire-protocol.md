@@ -257,6 +257,7 @@ Emitted outside any execution. Some are one-shot RPC responses keyed `<type>:<re
 |--------|-----------|---------|
 | `ready` | — | resolves `awaitReady()` once at boot |
 | `pong` | `seq?` | heartbeat ack (RTT → `ConnectionHealth`, `IPC.AGENT_CONNECTION_HEALTH`) |
+| `stop_result` | `requestId; ok; error?` | RPC response — provider-confirmed stop completion |
 | `credential_stored` | `requestId; ok; error?` | RPC response |
 | `credential_cleared` | `requestId; ok; error?` | RPC response |
 | `task_output` | `requestId; content?; error?` | RPC response — full background-task output |
@@ -279,6 +280,28 @@ agent-server can't use `@shared/logger` (it writes a file via electron `app.getP
 The ONLY things still on the child's **stderr**: a log emitted before the sink is wired (early boot fallback) and a fatal/death path (Node's default uncaught dump; the idle-shutdown self-exit). main logs raw stderr at `error` — now rare and meaningful, since routine diagnostics no longer go there. See `context/agent-core` agent-core#9.
 
 (`capabilities` is also requestId-keyed when used as an RPC response — documented above under its render section since it doubles as a mid-turn broadcast.)
+
+### Stop completion — `stop` / `stop_result`
+
+Main sends a request-correlated stop command:
+
+```json
+{ "type": "stop", "requestId": "stop-..." }
+```
+
+The execution unit replies only after the provider's native stop operation completes:
+
+```json
+{ "type": "stop_result", "requestId": "stop-...", "ok": true }
+```
+
+Failure is explicit and carries a diagnostic:
+
+```json
+{ "type": "stop_result", "requestId": "stop-...", "ok": false, "error": "..." }
+```
+
+`ok:true` means provider-confirmed termination, not merely that the stop command was written to the transport. For Copilot ACP, the confirmation is the active `session/prompt` returning `stopReason:'cancelled'` after `session/cancel`. A non-cancelled reason or prompt failure produces `ok:false`; main also rejects the operation if no correlated response arrives within its bounded timeout.
 
 ---
 
@@ -306,7 +329,7 @@ Over the transport (secure channel / subsystem / container / same-machine stdio)
 | `close_session` | `sid` | Session closed → dispatcher disposes that execution unit (a NORMAL closure → it self-reaps escaped detached tasks). |
 | `ping` | `seq` | Host-level heartbeat, ONE per host (no `sid`); replaces the per-session ping. |
 | `get_memory_usage` | — | Host-level acquisition request: sample dispatcher self and fan out to every current exec. |
-| per-session commands | + `sid` | `send`, `stop`, `cancel_queued`, `resolve_permission`, `resolve_picker`, `stop_task`, `get_capabilities`, `store_credential`, `clear_credential`, `clear_context`, `read_task_output`, `reload_skills`, `app_tool_result` — each gains `sid`, routed to that session's execution unit, payloads otherwise UNCHANGED. |
+| per-session commands | + `sid` | `send`, `stop`, `cancel_queued`, `resolve_permission`, `resolve_picker`, `stop_task`, `get_capabilities`, `store_credential`, `clear_credential`, `clear_context`, `read_task_output`, `reload_skills`, `app_tool_result` — each gains `sid`, routed to that session's execution unit. Request-correlated commands retain their payload `requestId`; other payloads are unchanged. |
 
 **dispatcher → main**
 
@@ -316,7 +339,7 @@ Over the transport (secure channel / subsystem / container / same-machine stdio)
 | `session_down` | `sid; reason; willReconnect` | Execution unit for `sid` exited (crash / hang / normal). Main fails that session's in-flight executions loudly, then marks it recovering if `willReconnect` (a relayed `ready{sid}` follows once reconnected) or disconnected if not (backoff exhausted). |
 | `pong` | `seq` | Host heartbeat ack (no `sid`). Host-level health = RTT / miss on THIS. |
 | `memory_usage` | `status; sampledAt; rows?; error?; sid?` | Dispatcher self has no `sid`; session exec reports carry `sid`. See `contracts/process-memory`. |
-| existing execution / session events | + `sid` | Every existing `OutgoingMessage` (stream, message, status, queue, task_event, skills_reloaded, capabilities, credential_*, task_output, permission_request, picker_request, plan, auth_required, execution_started, error, log) is stamped with `sid` and **passed through OPAQUELY** — the dispatcher forwards without parsing. |
+| existing execution / session events | + `sid` | Every existing `OutgoingMessage` (stream, message, status, queue, task_event, skills_reloaded, capabilities, stop_result, credential_*, task_output, permission_request, picker_request, plan, auth_required, execution_started, error, log) is stamped with `sid` and **passed through OPAQUELY** — the dispatcher forwards without parsing. |
 
 `session_ready` is not a separate message: the execution unit stamps its own `ready` with its `sid`, and the dispatcher relays it. `get_capabilities` is per-`sid` and comes AFTER the session is ready (`open_session` → ready → `get_capabilities(sid)`); it is answered by the execution unit's runtime, keeping the dispatcher thin.
 

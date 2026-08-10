@@ -447,11 +447,13 @@ Renderer 在 dev/E2E 傳入是否顯示 internal provider 的環境政策，再�
 
 **Root cause：** ACP SDK 的 prompt response 與 session notification callback 是獨立排程；response 先 resolve 不代表所有 renderable update 都已 callback。這是 SDK scheduling 特性，不是 Shelf 應以 drain/barrier 猜測並修補的 protocol boundary。
 
-**Fix / note：** ACP driver 的 update router 與 render sink 跟 session 同壽命；prompt settlement 只 emit execution idle，讓 main 更新 idle、清 permission、完成 reader並釋放 next queued message。所有 ACP renderable updates 一律繼續走同一條 session content sink，所以 late final message 會按到達時序正常顯示。
+**Fix / note：** ACP driver 的 update router 與 render sink 跟 session 同壽命；一般 prompt settlement 只 emit execution idle，讓 main 更新 idle、清 permission、完成 reader並釋放 next queued message。所有 ACP renderable updates 一律繼續走同一條 session content sink，所以 late final message 會按到達時序正常顯示。
+
+使用者要求取消是獨立的 control-plane boundary：Copilot provider 發出 `session/cancel` 後，`stop()` 必須等待同一個 active `session/prompt` 回傳 `stopReason:'cancelled'` 才算成功；prompt failure、其他 stop reason 或 bounded RPC timeout 都是取消失敗，必須 fail loud。這個確認只決定 stop RPC 是否完成，不關閉 session content sink，也不把 stop reason 當成一般內容 gate。
 
 Tool call 的 display metadata 也是 session-scoped carry，以 `toolCallId` 暫存，terminal translate 後立即 evict；reset/forget 清空。driver 不保存 `textByMsg`，文字 delta 的累積與持久化只由 renderer 負責。`activeExecutionSend` 僅供當下 tool permission round-trip，不是一般 notification/content sink。
 
-**Do not change casually because：** 不要恢復 per-prompt update queue、`setImmediate`/固定 delay barrier、current/last prompt attribution 或 stopReason content gate。若 upstream 額外發訊息，Shelf 的責任是按時序顯示，不是宣稱 settlement 已收齊內容。
+**Do not change casually because：** 不要恢復 per-prompt update queue、`setImmediate`/固定 delay barrier、current/last prompt attribution 或一般 stopReason content gate；也不要把 `session/cancel` 已寫入 pipe 當成取消成功。若 upstream 額外發訊息，Shelf 的責任是按時序顯示；唯有明確取消時，`cancelled` 是 control-plane completion confirmation，不是內容已收齊的宣告。
 
 **Related：** `agent-server/providers/acp/client.ts`、`agent-server/providers/acp/client.test.ts`、`agent-providers#24`（Copilot `task_complete` 最終總結）。
 

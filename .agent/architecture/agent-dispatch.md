@@ -57,6 +57,8 @@ Isolated and shared are therefore the same code path with the map holding one en
 
 Every session-scoped message on both boundaries carries the session id, and the front routes purely on it. Session-explicit addressing on both boundaries is what lets the front stay a dumb relay: it stamps outbound events with their session id and forwards inbound commands by session id, without understanding their contents. The one hard rule on the streaming hot path is that the front does **opaque pass-through** — it forwards stream data untouched and only intercepts the handful of messages it actually services (a health probe reply, a cache lookup). Parsing the stream would put heavy per-message work on the front and serialize the whole host's throughput through it; keeping it thin is both the performance rule and the stability rule (a thin front has little logic to crash and freezes nothing when it does).
 
+Control operations that require completion use request-correlated command/result pairs over the same opaque route. The execution tier owns the provider-native completion boundary and emits the result; the dispatcher only stamps and relays it. This lets main distinguish an accepted transport write from a confirmed provider action without moving provider semantics into the front.
+
 ## Health — two tiers
 
 Health is checked at two independent levels, replacing the earlier single per-session heartbeat:
