@@ -135,7 +135,7 @@ const historyLoadTokens = new Map<string, symbol>();
 
 // Settings synced from App.tsx. inMemoryMax used to be clamped against
 // an idbMax sibling; that was removed when IDB went unlimited via the
-// append-only delta save refactor. in-memory still has a cap for RAM /
+// dirty-snapshot save refactor. in-memory still has a cap for RAM /
 // React reconciliation reasons.
 const DEFAULT_THROTTLE_MS = 5000;
 const DEFAULT_IN_MEMORY_MAX = 500;

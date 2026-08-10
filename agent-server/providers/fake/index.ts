@@ -32,6 +32,8 @@ const FAKE_AUTH_DISPLAY_NAME = 'Fake Harness';
  *   chunk:<msg>         stream chunks under a fresh msgId, NO finalize (copilot
  *                       boundary-split segment — settles only at turn-end idle)
  *   late_chunk:<ms>:<msg> schedule a stream chunk after query/idle has returned
+ *   late_append:<ms>:<base>:<tail> stream base now, then append tail to the same
+ *                              msgId after query/idle (history-upsert fixture)
  *   thinking:<msg>      thinking message
  *   websearch:<query>   bodyless Web search markdown card
  *   tool:<name>         tool_use + tool_result success
@@ -247,6 +249,25 @@ export function createFakeBackend(_representedProvider: AgentProvider = FAKE_PRO
       const timer = setTimeout(() => {
         lateTimers.delete(timer);
         send({ type: 'stream', msgId, streamType: 'text', content });
+      }, delayMs);
+      lateTimers.add(timer);
+      return;
+    }
+
+    // late_append:<ms>:<base>:<tail> — one msgId receives a settled snapshot,
+    // then a fuller snapshot after idle. This reproduces provider callbacks that
+    // arrive after prompt settlement and verifies persistence updates the row
+    // instead of appending a duplicate history entry.
+    if (step.startsWith('late_append:')) {
+      const [, delayRaw, base, ...tailParts] = step.split(':');
+      const delayMs = Number(delayRaw);
+      const tail = tailParts.join(':');
+      if (!Number.isFinite(delayMs) || delayMs < 0 || !base || !tail) return;
+      const msgId = mintId('late');
+      send({ type: 'stream', msgId, streamType: 'text', content: base });
+      const timer = setTimeout(() => {
+        lateTimers.delete(timer);
+        send({ type: 'stream', msgId, streamType: 'text', content: tail });
       }, delayMs);
       lateTimers.add(timer);
       return;

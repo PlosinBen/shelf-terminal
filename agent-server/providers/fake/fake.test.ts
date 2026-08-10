@@ -253,6 +253,22 @@ describe('createFakeBackend — scenarios', () => {
     backend.dispose();
   });
 
+  it('late_append: reuses one msgId for content arriving after idle', async () => {
+    const { send, msgs } = collect();
+    const backend = createFakeBackend();
+    await backend.query(makeInput('late_append:10:base:tail'), send);
+
+    const initial = msgs.find((m) => m.type === 'stream') as any;
+    expect(initial).toMatchObject({ type: 'stream', content: 'base' });
+    expect((msgs.at(-1) as any).state).toBe('idle');
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(msgs.at(-1)).toEqual(expect.objectContaining({
+      type: 'stream', msgId: initial.msgId, content: 'tail',
+    }));
+    backend.dispose();
+  });
+
   it('chain: runs steps in order', async () => {
     const { send, msgs } = collect();
     await createFakeBackend().query(makeInput('text:hi|tool:Read|text:bye'), send);

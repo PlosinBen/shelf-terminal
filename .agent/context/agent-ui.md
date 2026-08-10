@@ -232,3 +232,13 @@ AuthPane 的手動 `checkAuth` 是不同 surface：busy / error 由 AuthPane 自
 **Root cause**：Agent tab 初始化會非同步讀取 IndexedDB，而 clear 不會自動取消已開始的 read transaction；若舊 load 在 clear 後才 resolve，就會把 pre-clear snapshot merge 回當前 store。同時，33ms renderer throttle 中尚未 flush 的 stream chunk 也能在 clear 後 append 回 timeline。
 
 **Fix / note**：Per-tab history load 使用 per-init identity token；init 捕捉 token，clear 與 remove 先 invalidate，load resolve 時只有 token 仍一致才可 merge。Clear 也必須取消 chunk timer 並丟棄 pending buffer。這只使 renderer-owned pre-clear work 失效，不改變 session-scoped content 可在 execution idle 後抵達的契約（`agent-ui#9`）。
+
+## agent-ui#11 — IndexedDB dirty snapshot 必須依 session + msgId upsert  ·  [Gotcha]
+
+**Symptom**：重新開啟 agent history 後，同一則 Copilot reply 出現多張逐步變長的副本；live timeline 原本只有一張。
+
+**Root cause**：execution idle 後仍可收到合法的 session-scoped late chunk（`agent-ui#9`）。每次 late flush 都會產生同一 `msg.id` 的較完整 settled snapshot；若 persistence 一律用 IndexedDB `add()`，不同 save window 就會把同一 logical message 寫成多筆 row，hydration 再逐筆顯示。
+
+**Fix / note**：dirty save 在既有 `by-session` index 上掃描一次，以 `(sessionId, msg.id)` 找到現存 `dbId`；新 id 用 `add()`，既有 id 用 `put()` 更新原 row。這維持 v4 schema、不清理或改寫既有重複資料，並讓未來 late snapshot 不再新增副本。不要用 load-time dedupe 取代 write-side identity contract，否則 storage 仍會持續累積錯誤 rows。
+
+**Related**：`agent-ui#9`、`agent-providers#37`、`src/renderer/storage/agent-history.ts`。

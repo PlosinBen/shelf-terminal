@@ -10,9 +10,8 @@ const DB_NAME = 'shelf-agent-history';
 // don't migrate per-row; v4 just drops the old store and starts fresh.
 // v4: keyPath 'dbId' autoIncrement, indexes 'by-session' and the composite
 // 'by-session-time' that lets `loadLatest` reverse-iterate the tail of a
-// session in O(limit). Save layer is append-only delta — writes only happen
-// at execution end (agentTabStore's doSave isExecutionActive guard), so each msg.id
-// appears in the store exactly once and we never need upsert semantics.
+// session in O(limit). Save layer writes dirty snapshots by msg.id: a new id is
+// appended, while a later settled snapshot for the same id replaces its row.
 const DB_VERSION = 4;
 const STORE_NAME = 'messages';
 
@@ -99,15 +98,11 @@ export async function loadAgentMessagesLatest(
 }
 
 /**
- * Append-only delta save. Caller (agentTabStore) batches dirty msg
- * snapshots inside a throttle window and hands them off here; we just
- * `store.add` each one as a new row. msg.id may already exist in another
- * row for this session, but that's fine — IDB doesn't enforce uniqueness
- * on msg.id (keyPath is the synthetic dbId), and the agentTabStore
- * isExecutionActive guard ensures each msg is only written once per execution at
- * its final state. On load, ascending-by-time iteration naturally yields
- * the latest write last; if a logic bug ever caused a dup, the later
- * row wins display-wise.
+ * Dirty-snapshot save. Caller (agentTabStore) batches changed messages inside
+ * a throttle window. New msg ids append; an id already persisted for this
+ * session updates its existing dbId. The upsert is required for content that
+ * legitimately arrives after execution idle: each late flush carries a fuller
+ * snapshot of the same reply and must not create another history row.
  *
  * Streaming partials (text / thinking with `streaming: true`) are dropped
  * here as a safety net — agentTabStore already excludes them at mark
@@ -128,24 +123,33 @@ export async function saveAgentMessagesDelta(
   const tx = db.transaction(STORE_NAME, 'readwrite');
   const store = tx.objectStore(STORE_NAME);
 
-  if (deletedIds && deletedIds.size > 0) {
-    // No msg.id index, so cursor-scan the session and delete rows whose
-    // msg.id is in the set. Acceptable cost since deletion is rare.
-    const idx = store.index('by-session');
-    let cursor = await idx.openCursor(sessionId);
-    while (cursor) {
-      const v = cursor.value as StoredMsg;
-      if (deletedIds.has(v.id)) {
-        await cursor.delete();
-      }
-      cursor = await cursor.continue();
+  // There is no msg.id index in the existing v4 schema. Scan this session once
+  // for both delete and upsert resolution rather than migrating user history.
+  // If old buggy data already contains duplicate ids, the last row becomes the
+  // update target; existing duplicates are deliberately left untouched.
+  const existingDbIdByMsgId = new Map<string, number>();
+  const idx = store.index('by-session');
+  let cursor = await idx.openCursor(sessionId);
+  while (cursor) {
+    const value = cursor.value as StoredMsg;
+    if (deletedIds?.has(value.id)) {
+      await cursor.delete();
+    } else if (typeof cursor.primaryKey === 'number') {
+      existingDbIdByMsgId.set(value.id, cursor.primaryKey);
     }
+    cursor = await cursor.continue();
   }
 
   for (const msg of dirty) {
     if (msg.type === 'reply' && msg.streaming) continue;
     if (msg.type === 'fold_text' && msg.streaming) continue;
-    await store.add({ ...msg, sessionId } as StoredMsg);
+    const dbId = existingDbIdByMsgId.get(msg.id);
+    if (dbId !== undefined) {
+      await store.put({ ...msg, sessionId, dbId } as StoredMsg);
+    } else {
+      const newDbId = await store.add({ ...msg, sessionId } as StoredMsg);
+      if (typeof newDbId === 'number') existingDbIdByMsgId.set(msg.id, newDbId);
+    }
   }
   await tx.done;
 }

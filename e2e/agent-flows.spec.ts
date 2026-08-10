@@ -108,6 +108,40 @@ test.describe('agent flows via fake provider', () => {
       await expect(page.locator('.agent-status-label:visible')).toHaveText('idle', { timeout: 5_000 });
     });
 
+    test('late chunks upsert one persisted history row', async ({ shelfApp: { page } }) => {
+      await setupProject(page);
+      await openAgentTab(page);
+
+      // Default save throttle is 5s: the base snapshot persists first, then the
+      // same msgId receives a late append and must update that row on its next save.
+      await sendAgentPrompt(page, 'late_append:6000:early-content:late-content');
+      await expect(page.locator('.agent-status-label:visible')).toHaveText('idle', { timeout: 5_000 });
+      await expect(page.locator('.agent-msg-reply:visible', { hasText: 'early-content' })).toHaveCount(1);
+      await page.waitForTimeout(12_000);
+      await expect(page.locator('.agent-msg-reply:visible', { hasText: 'early-contentlate-content' })).toHaveCount(1);
+
+      // Inspect the renderer-owned persistence boundary directly. A page reload
+      // intentionally disconnects the ephemeral E2E project/tab, so it cannot
+      // exercise hydration of this same session. The storage rows are the exact
+      // write-side contract under regression here.
+      const persisted = await page.evaluate(async () => {
+        const db = await new Promise<IDBDatabase>((resolve, reject) => {
+          const request = indexedDB.open('shelf-agent-history', 4);
+          request.onsuccess = () => resolve(request.result);
+          request.onerror = () => reject(request.error);
+        });
+        const rows = await new Promise<any[]>((resolve, reject) => {
+          const request = db.transaction('messages', 'readonly').objectStore('messages').getAll();
+          request.onsuccess = () => resolve(request.result);
+          request.onerror = () => reject(request.error);
+        });
+        db.close();
+        return rows.filter((row) => row.type === 'reply' && row.content.includes('early-content'));
+      });
+      expect(persisted).toHaveLength(1);
+      expect(persisted[0].content).toBe('early-contentlate-content');
+    });
+
     // Regression: providers piggyback mid-execution usage/quota on `state:'streaming'`
     // status events (copilot: rateLimits / contextUsage). The queued-cancel fix
     // (agent-core#10) must strip `state` only on the TERMINAL idle — dropping
