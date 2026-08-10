@@ -44,6 +44,45 @@ const COPILOT_CONFIG = [
 ] as unknown as SessionConfigOption[];
 
 describe('acp-copilot backend (via mock ACP agent)', () => {
+  it('confirms stop only when the active ACP prompt returns cancelled', async () => {
+    let promptStarted!: () => void;
+    const started = new Promise<void>((resolve) => { promptStarted = resolve; });
+    let cancelParams: unknown;
+    const mock = createMockAcpAgent({
+      waitForCancelOnPrompt: true,
+      stopReason: 'cancelled',
+      onPrompt: () => promptStarted(),
+      onCancel: (params) => { cancelParams = params; },
+    });
+    const backend = createCopilotBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
+
+    const queryDone = backend.query({ prompt: 'keep working', cwd: '/tmp/project' }, () => {});
+    await started;
+    await expect(backend.stop()).resolves.toBeUndefined();
+    await queryDone;
+
+    expect(cancelParams).toEqual({ sessionId: 'mock-session' });
+    backend.dispose();
+  });
+
+  it('fails stop when Copilot settles the cancelled prompt with a different reason', async () => {
+    let promptStarted!: () => void;
+    const started = new Promise<void>((resolve) => { promptStarted = resolve; });
+    const mock = createMockAcpAgent({
+      waitForCancelOnPrompt: true,
+      stopReason: 'end_turn',
+      onPrompt: () => promptStarted(),
+    });
+    const backend = createCopilotBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
+
+    const queryDone = backend.query({ prompt: 'keep working', cwd: '/tmp/project' }, () => {});
+    await started;
+    await expect(backend.stop()).rejects.toThrow('expected cancelled, received end_turn');
+    await queryDone;
+
+    backend.dispose();
+  });
+
   it('forwards prompt text deltas and terminates with idle', async () => {
     const updates: SessionUpdate[] = [
       { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Hello ' }, messageId: 'm1' },

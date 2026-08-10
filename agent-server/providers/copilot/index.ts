@@ -7,7 +7,7 @@
 import { randomUUID } from 'node:crypto';
 import * as path from 'node:path';
 import type { ChildProcess } from 'node:child_process';
-import { methods, type Stream, type AgentApp, type SessionModeState, type SessionConfigOption } from '@agentclientprotocol/sdk';
+import { methods, type Stream, type AgentApp, type SessionModeState, type SessionConfigOption, type StopReason } from '@agentclientprotocol/sdk';
 import { COPILOT_PROVIDER } from '@shared/agent-providers';
 import { formatConfigAck, type ConfigEditKey } from '@shared/config-ack';
 import type { ServerBackend, QueryInput, SendFn, ProviderCapabilities } from '../types';
@@ -95,6 +95,10 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
   // The active turn's send — the permission bridge rides this lane so requests
   // reach the renderer on the current turn's id.
   let activeExecutionSend: SendFn | null = null;
+  // The outstanding ACP prompt is the cancellation acknowledgement boundary.
+  // session/cancel itself is a notification; only this prompt resolving with
+  // stopReason:'cancelled' confirms that Copilot stopped its model/tool work.
+  let activePromptCompletion: Promise<StopReason> | null = null;
   let loginRunner: LoginRunner | null = null;
   const permissions = createPermissionBridge(() => activeExecutionSend);
   const driver = createSessionDriver();
@@ -280,7 +284,20 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
           { cwd: input.cwd, appId: input.appId, resumeId: input.restoreContext?.lastSdkSessionId },
           send,
         );
-        await driver.drivePromptTurn(conn!.agent, s, input.prompt, send, input.images, input.attachments);
+        const promptCompletion = driver.drivePromptTurn(
+          conn!.agent,
+          s,
+          input.prompt,
+          send,
+          input.images,
+          input.attachments,
+        );
+        activePromptCompletion = promptCompletion;
+        try {
+          await promptCompletion;
+        } finally {
+          if (activePromptCompletion === promptCompletion) activePromptCompletion = null;
+        }
       } catch (err) {
         send({ type: 'error', error: `copilot: ${(err as Error)?.message ?? String(err)}` });
       } finally {
@@ -395,10 +412,15 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
     },
 
     async stop(): Promise<void> {
-      // Cooperative cancel: tell the agent to abort the active turn.
+      // Cooperative cancel: tell the agent to abort the active turn, then wait
+      // for the original prompt response — ACP's only cancellation confirmation.
       permissions.cancelAll();
-      if (conn && session) {
-        await conn.agent.notify(methods.agent.session.cancel, { sessionId: session.sessionId });
+      const promptCompletion = activePromptCompletion;
+      if (!conn || !session || !promptCompletion) throw new Error('copilot cancel failed: no active ACP prompt');
+      await conn.agent.notify(methods.agent.session.cancel, { sessionId: session.sessionId });
+      const stopReason = await promptCompletion;
+      if (stopReason !== 'cancelled') {
+        throw new Error(`copilot cancel failed: expected cancelled, received ${stopReason}`);
       }
     },
 

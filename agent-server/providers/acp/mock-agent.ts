@@ -36,11 +36,15 @@ export interface MockAgentScript {
   updatesOnPrompt?: SessionUpdate[];
   /** Stop reason returned by session/prompt (default: 'end_turn'). */
   stopReason?: StopReason;
+  /** Keep session/prompt pending until the client sends session/cancel. */
+  waitForCancelOnPrompt?: boolean;
   /** Called with the `initialize` params — lets a test assert the ACP handshake
    *  happened (and, via a shared recorder, that it preceded session/new). */
   onInitialize?: (params: unknown) => void;
   /** Called with each prompt's params — lets a test capture what was sent. */
   onPrompt?: (params: unknown) => void;
+  /** Called when the client sends session/cancel. */
+  onCancel?: (params: unknown) => void;
   /** Called with session/new params (e.g. to assert additionalDirectories). */
   onNewSession?: (params: unknown) => void;
   /** Called with session/set_mode params (assert modeId). */
@@ -64,6 +68,7 @@ export function createMockAcpAgent(script: MockAgentScript = {}): AgentApp {
   const authMethods = script.authMethods ?? [{ id: 'chatgpt', name: 'ChatGPT', description: 'Use ChatGPT to authenticate' }];
   const updates = script.updatesOnPrompt ?? [];
   const stopReason: StopReason = script.stopReason ?? 'end_turn';
+  let releaseCancelledPrompt: (() => void) | null = null;
 
   return agent({ name: 'mock-acp-agent' })
     .onRequest('initialize', ({ params }) => {
@@ -95,8 +100,16 @@ export function createMockAcpAgent(script: MockAgentScript = {}): AgentApp {
       // Response echoes the full config set (real agents return updated values).
       return { configOptions: script.configOptions ?? [] };
     })
+    .onNotification('session/cancel', ({ params }) => {
+      script.onCancel?.(params);
+      releaseCancelledPrompt?.();
+      releaseCancelledPrompt = null;
+    })
     .onRequest('session/prompt', async ({ params, client }) => {
       script.onPrompt?.(params);
+      if (script.waitForCancelOnPrompt) {
+        await new Promise<void>((resolve) => { releaseCancelledPrompt = resolve; });
+      }
       if (script.requestPermissionOnPrompt) {
         const { toolCallId, title, options } = script.requestPermissionOnPrompt;
         const res = await client.request(methods.client.session.requestPermission, {
