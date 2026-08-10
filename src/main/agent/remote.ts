@@ -79,6 +79,7 @@ interface RemoteProcess {
 }
 
 const directProcesses = new Set<RemoteProcess>();
+const STOP_CONFIRM_TIMEOUT_MS = 10_000;
 
 /** Main-owned round trigger: one command per live dispatcher/direct exec route. */
 export function requestAllAgentMemoryUsage(): void {
@@ -334,9 +335,27 @@ export function createRemoteBackend(
     },
 
     async stop() {
-      if (remoteProc) {
-        remoteProc.sendLine({ type: 'stop' });
-      }
+      const proc = remoteProc;
+      if (!proc) throw new Error('agent stop failed: agent-server is not running');
+      const requestId = `stop-${randomUUID().slice(0, 8)}`;
+      await new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          const error = `agent stop confirmation timed out after ${STOP_CONFIRM_TIMEOUT_MS / 1000}s`;
+          log.error('agent-remote', `${error} reqId=${requestId}`);
+          reject(new Error(error));
+        }, STOP_CONFIRM_TIMEOUT_MS);
+        proc.onResponse(requestId, 'stop_result', (payload) => {
+          clearTimeout(timeout);
+          if (payload.ok === true) {
+            resolve();
+            return;
+          }
+          const error = typeof payload.error === 'string' ? payload.error : 'agent stop was not confirmed';
+          log.error('agent-remote', `stop RPC failed reqId=${requestId}: ${error}`);
+          reject(new Error(error));
+        });
+        proc.sendLine({ type: 'stop', requestId });
+      });
     },
 
     async stopTask(taskId: string) {

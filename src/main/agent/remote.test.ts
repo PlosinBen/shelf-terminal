@@ -43,7 +43,10 @@ vi.mock('../connector/shell-env', () => ({
   getShellEnv: () => ({ PATH: '/usr/bin', SHELL_ENV_MARKER: 'yes' }),
 }));
 
-function capabilitiesChild(payload: Record<string, unknown>) {
+function capabilitiesChild(
+  payload: Record<string, unknown>,
+  stopResult?: { ok: boolean; error?: string },
+) {
   const child = new EventEmitter() as any;
   child.stdout = new EventEmitter();
   child.stderr = new EventEmitter();
@@ -60,6 +63,15 @@ function capabilitiesChild(payload: Record<string, unknown>) {
             type: 'capabilities',
             requestId: message.requestId,
             ...payload,
+          })}\n`));
+        });
+      }
+      if (message.type === 'stop' && stopResult) {
+        queueMicrotask(() => {
+          child.stdout.emit('data', Buffer.from(`${JSON.stringify({
+            type: 'stop_result',
+            requestId: message.requestId,
+            ...stopResult,
           })}\n`));
         });
       }
@@ -206,6 +218,38 @@ describe('remote backend', () => {
     // setModel/setEffort/setPermissionMode removed — renderer now passes
     // prefs in each AGENT_SEND payload; orchestrator on the agent-server
     // side drives diff detection and calls provider.setX as needed.
+  });
+
+  it('waits for a request-correlated stop confirmation', async () => {
+    const { child, writes } = capabilitiesChild({}, { ok: true });
+    vi.mocked(spawn).mockImplementationOnce(() => {
+      setTimeout(() => child.stdout.emit('data', Buffer.from('{"type":"ready"}\n')), 0);
+      return child;
+    });
+    const { createRemoteBackend } = await import('./remote');
+    const backend = createRemoteBackend({ type: 'local' } as any);
+    await backend.checkAuth('/tmp');
+
+    await expect(backend.stop()).resolves.toBeUndefined();
+    expect(writes.find((message) => message.type === 'stop')).toEqual({
+      type: 'stop',
+      requestId: expect.any(String),
+    });
+    backend.dispose();
+  });
+
+  it('rejects a failed stop confirmation', async () => {
+    const { child } = capabilitiesChild({}, { ok: false, error: 'expected cancelled, received end_turn' });
+    vi.mocked(spawn).mockImplementationOnce(() => {
+      setTimeout(() => child.stdout.emit('data', Buffer.from('{"type":"ready"}\n')), 0);
+      return child;
+    });
+    const { createRemoteBackend } = await import('./remote');
+    const backend = createRemoteBackend({ type: 'local' } as any);
+    await backend.checkAuth('/tmp');
+
+    await expect(backend.stop()).rejects.toThrow('expected cancelled, received end_turn');
+    backend.dispose();
   });
 
   it('checkAuth emits no init phase when process setup fails', async () => {

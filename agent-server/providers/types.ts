@@ -92,6 +92,8 @@ export type OutgoingMessage = WireEnvelope & (
     })
   | { type: 'credential_stored'; requestId: string; ok: boolean; error?: string }
   | { type: 'credential_cleared'; requestId: string; ok: boolean; error?: string }
+  /** RPC response: provider confirmed that the requested active execution stopped. */
+  | { type: 'stop_result'; requestId: string; ok: boolean; error?: string }
   /** RPC response: full output of a background task (read from its remote
    *  output_file). One-shot, matched by requestId. See background-tasks#2. */
   | { type: 'task_output'; requestId: string; content?: string; error?: string }

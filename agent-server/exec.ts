@@ -407,9 +407,8 @@ async function handleSend(msg: IncomingMessage) {
 }
 
 async function handleStop() {
-  if (activeBackend) {
-    await activeBackend.stop();
-  }
+  if (!activeBackend) throw new Error('stop failed: no active backend');
+  await activeBackend.stop();
 }
 
 // ── Idle-shutdown watchdog (ssh only) ────────────────────────────────────────
@@ -488,7 +487,19 @@ rl.on('line', (line) => {
       // ESC: clear the waiting queue (server is the queue authority now) +
       // interrupt the running execution. clear() emits the updated snapshot.
       sendQueue.clear();
-      handleStop();
+      if (typeof msg.requestId === 'string') {
+        void handleStop().then(
+          () => send({ type: 'stop_result', requestId: msg.requestId!, ok: true }),
+          (err) => {
+            const error = (err as Error)?.message ?? String(err);
+            serverLog('error', 'stop', `${error} reqId=${msg.requestId}`);
+            send({ type: 'stop_result', requestId: msg.requestId!, ok: false, error });
+          },
+        );
+      } else {
+        // Legacy/non-RPC caller: still fail loud if provider cancellation fails.
+        void handleStop().catch((err) => serverLog('error', 'stop', (err as Error)?.message ?? String(err)));
+      }
       break;
     case 'ping':
       // Heartbeat: echo `seq` (client measures RTT on its own clock), refresh the
