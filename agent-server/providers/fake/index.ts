@@ -29,6 +29,7 @@ const FAKE_AUTH_DISPLAY_NAME = 'Fake Harness';
  *
  * Scenario syntax (prefix-matched against `input.prompt`):
  *   text:<msg>          stream chunks then finalize as text message
+ *   completion:<msg>    final completion summary as a normal reply
  *   chunk:<msg>         stream chunks under a fresh msgId, NO finalize (copilot
  *                       boundary-split segment — settles only at turn-end idle)
  *   late_chunk:<ms>:<msg> schedule a stream chunk after query/idle has returned
@@ -220,6 +221,14 @@ export function createFakeBackend(_representedProvider: AgentProvider = FAKE_PRO
       send({ type: 'stream', msgId, streamType: 'text', content: content.slice(0, mid) });
       send({ type: 'stream', msgId, streamType: 'text', content: content.slice(mid) });
       send({ type: 'message', msgId, msgType: 'reply', content });
+      return;
+    }
+
+    // completion:<msg> — wire shape emitted after Copilot ACP translates a
+    // content-bearing task_complete signal (agent-providers#24).
+    if (step.startsWith('completion:')) {
+      const content = step.slice('completion:'.length);
+      send({ type: 'message', msgId: mintId('completion'), msgType: 'reply', content });
       return;
     }
 

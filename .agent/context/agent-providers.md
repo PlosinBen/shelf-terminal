@@ -267,13 +267,13 @@ SDK 0.3.159 **並存**兩種 compact 完成訊號:`status` 形狀(`subtype:'stat
 
 **Fix / note**：`translate.ts` `rawOutputToText()` —— `content` 為空時 fallback 抓 `rawOutput`(handle `{content}` copilot / `{formatted_output}` codex / 純字串)。另:`status==='completed'` 但仍無文字的工具,**送空 body `{content:''}`** 標記 settled(reload 就不誤判);renderer `AgentMessage` fold_code 對**空 content 不渲染空灰條**。in-flight(pending/in_progress)仍保持無 body → 真崩潰照樣被 reload 標出。
 
-## agent-providers#24 — Copilot `task_complete` 摘要在缺少正式回答時是 fallback reply  ·  [Decision]
+## agent-providers#24 — Copilot `task_complete` 有內容時視為一般對話結尾  ·  [Decision]
 
-**Decision**：pure ACP translator 仍把 `title === 'task_complete'` 的摘要翻成 `note`（靠 session-scoped tool metadata carry 保留 title），但 session router 會記錄每個 prompt turn 是否收到 `agent_message_chunk`，並以 `toolCallId` 把 `task_complete` 綁回首次出現的 turn：該 turn **沒有正式 assistant reply** 時，把摘要提升成 Markdown `reply`；已有正式 reply 時維持 `note`，避免雙重回答。裸訊號（無內容）仍不顯示。
+**Decision**：pure ACP translator 把 `title === 'task_complete'` 且帶內容的摘要直接翻成 Markdown `reply`（靠 session-scoped tool metadata carry 保留 title），一律使用一般 assistant 對話 surface；裸訊號（無內容）仍不顯示。
 
-**Reason**：Copilot 明確把 `task_complete` 當作 internal autopilot control message，摘要放在 tool `content`／`rawOutput`；但 Copilot autopilot 也會在某些 turn **只送 `task_complete`、完全不送 `agent_message_chunk`**（其 session DB 的 `assistant_response` 同時為 NULL）。無條件映射成 `note` 會讓唯一的使用者回答長期呈現成斜體內部摘要；無條件映射成 `reply` 又會在正常 assistant 回覆後多出第二個 `Copilot:`。因此只有「該 turn 無正式 reply」時才提升，其他情況保留 timeline note。
+**Reason**：Copilot 把最終摘要放在 internal `task_complete` tool 的 `content`／`rawOutput`，而且是否另送 `agent_message_chunk` 不穩定。依前面是否已有 assistant chunk 分類，會讓同樣是最終回答的內容有時呈現成一般對話、有時落進 `Task completed` note。結尾語意應一致；即使前面已有進度文字，最終摘要仍是正常 assistant reply。
 
-**Do not change casually because**：這是 **Copilot title 慣例的特判，不是 ACP 標準**；Copilot 改名就會失效。不要拿「callback 到達時的 current turn」判斷：terminal update 可能在 prompt settlement、甚至下一 prompt 開始後才到（`#37`），必須使用初始 tool call 的 `toolCallId` 維持原 turn 歸屬。也不要用 stop reason 當內容 barrier。現行 fallback reply 使用標準 Markdown reply surface；已有正式 reply 的摘要仍是純文字 note。
+**Do not change casually because**：這是 **Copilot title 慣例的特判，不是 ACP 標準**；Copilot 改名就會失效。terminal update 可能在 prompt settlement、甚至下一 prompt 開始後才到（`#37`），所以 output sink 必須維持 session lifetime；不要用 stop reason 當內容 barrier。`task_complete` 無內容時仍只是一個控制訊號，不應產生空 reply。
 
 ## agent-providers#25 — copilot ACP 不 emit `usage_update` → status bar 對 copilot 沒有 ctx / cost / AI-credit（等上游 #4233）  ·  [Gotcha]
 

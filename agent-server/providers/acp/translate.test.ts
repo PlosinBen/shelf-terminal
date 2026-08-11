@@ -146,13 +146,13 @@ describe('translateSessionUpdate', () => {
     expect(translateSessionUpdate(u)[0]).toMatchObject({ body: { content: 'exit 0\nok' } });
   });
 
-  it('renders copilot `task_complete` content as a timeline note, not a second assistant reply or tool card', () => {
+  it('renders copilot `task_complete` content as a normal reply, not a tool card', () => {
     const u = {
       sessionUpdate: 'tool_call_update', toolCallId: 'tc1', title: 'task_complete', status: 'completed',
       rawOutput: { content: '## Done\n- fixed the auto_renew override' },
     } as unknown as SessionUpdate;
     expect(translateSessionUpdate(u)).toEqual([
-      { type: 'message', msgId: 'tc1', msgType: 'note', content: '## Done\n- fixed the auto_renew override' },
+      { type: 'message', msgId: 'tc1', msgType: 'reply', content: '## Done\n- fixed the auto_renew override' },
     ]);
   });
 

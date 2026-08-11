@@ -80,7 +80,7 @@ describe('acp session driver (connection + new/resume + turn)', () => {
     }
   });
 
-  it('keeps task_complete as a note when the same turn already emitted an assistant reply', async () => {
+  it('renders task_complete as a normal reply when the same turn already emitted assistant text', async () => {
     const updates: SessionUpdate[] = [
       { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'answer' } },
       { sessionUpdate: 'tool_call', toolCallId: 'task-complete-2', title: 'task_complete', kind: 'other', status: 'in_progress' },
@@ -100,7 +100,7 @@ describe('acp session driver (connection + new/resume + turn)', () => {
 
     expect(wire).toContainEqual(expect.objectContaining({ type: 'stream', streamType: 'text', content: 'answer' }));
     expect(wire).toContainEqual({
-      type: 'message', msgId: 'task-complete-2', msgType: 'note', content: 'completion summary',
+      type: 'message', msgId: 'task-complete-2', msgType: 'reply', content: 'completion summary',
     });
   });
 

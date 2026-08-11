@@ -107,6 +107,19 @@ test.describe('agent flows via fake provider', () => {
       await expect(page.locator('.agent-status-label:visible')).toHaveText('idle', { timeout: 5_000 });
     });
 
+    test('completion summary renders as a normal assistant reply, not a task note', async ({ shelfApp: { page } }) => {
+      await setupProject(page);
+      await page.locator('.tab-add').click({ button: 'right' });
+      await page.locator('.context-menu-item', { hasText: 'Agent (Copilot)' }).click();
+      await expect(page.locator('.agent-view:visible')).toBeVisible({ timeout: 5_000 });
+      await sendAgentPrompt(page, 'completion:final completion summary');
+
+      const reply = page.locator('.agent-msg-reply:visible', { hasText: 'final completion summary' });
+      await expect(reply).toBeVisible({ timeout: 5_000 });
+      await expect(reply.locator('.agent-msg-label')).toHaveText('Copilot:');
+      await expect(page.locator('.agent-msg-note:visible', { hasText: 'final completion summary' })).toHaveCount(0);
+    });
+
     test('late chunks upsert one persisted history row', async ({ shelfApp: { page } }) => {
       await setupProject(page);
       await openAgentTab(page);

@@ -47,6 +47,15 @@ describe('createFakeBackend — scenarios', () => {
     expect((msgs[msgs.length - 1] as any).state).toBe('idle');
   });
 
+  it('completion: emits the final summary as a normal reply', async () => {
+    const { send, msgs } = collect();
+    await createFakeBackend().query(makeInput('completion:final summary'), send);
+    expect(msgs).toContainEqual(expect.objectContaining({
+      type: 'message', msgType: 'reply', content: 'final summary',
+    }));
+    expect(msgs).not.toContainEqual(expect.objectContaining({ msgType: 'note' }));
+  });
+
   it('env: echoes the exec process env var as a reply', async () => {
     process.env.FAKE_ENV_PROBE = 'probe-value';
     try {
