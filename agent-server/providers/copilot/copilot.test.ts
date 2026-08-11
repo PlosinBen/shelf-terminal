@@ -83,6 +83,26 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
     backend.dispose();
   });
 
+  it('still sends session/cancel after the prompt response has settled', async () => {
+    let cancelParams: unknown;
+    let connectionCount = 0;
+    const mock = createMockAcpAgent({
+      onCancel: (params) => { cancelParams = params; },
+    });
+    const backend = createCopilotBackend({
+      openAgent: () => { connectionCount++; return { target: mock }; },
+      getShelfMcp: async () => null,
+    });
+
+    await backend.query({ prompt: 'start autopilot work', cwd: '/tmp/project' }, () => {});
+    await expect(backend.stop()).resolves.toBeUndefined();
+    await backend.query({ prompt: 'resume after forced stop', cwd: '/tmp/project' }, () => {});
+
+    expect(cancelParams).toEqual({ sessionId: 'mock-session' });
+    expect(connectionCount).toBe(2);
+    backend.dispose();
+  });
+
   it('forwards prompt text deltas and terminates with idle', async () => {
     const updates: SessionUpdate[] = [
       { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Hello ' }, messageId: 'm1' },

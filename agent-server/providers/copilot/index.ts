@@ -412,12 +412,36 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
     },
 
     async stop(): Promise<void> {
-      // Cooperative cancel: tell the agent to abort the active turn, then wait
-      // for the original prompt response — ACP's only cancellation confirmation.
+      // Cooperative cancel while session/prompt is live; after that response has
+      // already settled, Copilot autopilot may still emit session work. There is
+      // no remaining request whose stopReason can acknowledge cancellation, so
+      // notify first and then tear down the ACP process to guarantee it stopped.
       permissions.cancelAll();
       const promptCompletion = activePromptCompletion;
-      if (!conn || !session || !promptCompletion) throw new Error('copilot cancel failed: no active ACP prompt');
-      await conn.agent.notify(methods.agent.session.cancel, { sessionId: session.sessionId });
+      const liveConn = conn;
+      const liveSession = session;
+      const liveChild = child;
+      if (!liveConn || !liveSession) throw new Error('copilot cancel failed: no active ACP session');
+      if (!promptCompletion) {
+        try {
+          await liveConn.agent.notify(methods.agent.session.cancel, { sessionId: liveSession.sessionId });
+        } catch (err) {
+          serverLog('warn', 'copilot', `post-prompt session/cancel failed; forcing connection close: ${(err as Error)?.message ?? String(err)}`);
+        } finally {
+          driver.forget(liveSession.sessionId);
+          try { liveConn.close(); } catch { /* best-effort before process kill */ }
+          try { liveChild?.kill(); } catch { /* best-effort; connection is already closed */ }
+          if (conn === liveConn) {
+            conn = null;
+            child = null;
+            connAppId = undefined;
+            session = null;
+            sessionCwd = null;
+          }
+        }
+        return;
+      }
+      await liveConn.agent.notify(methods.agent.session.cancel, { sessionId: liveSession.sessionId });
       const stopReason = await promptCompletion;
       if (stopReason !== 'cancelled') {
         throw new Error(`copilot cancel failed: expected cancelled, received ${stopReason}`);

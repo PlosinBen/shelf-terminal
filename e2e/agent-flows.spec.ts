@@ -439,6 +439,22 @@ test.describe('agent flows via fake provider', () => {
     await expect(page.locator('.agent-status-label:visible')).toHaveText('idle', { timeout: 5_000 });
   });
 
+  test('Copilot double-Esc stops late work even after the prompt reports idle', async ({ shelfApp: { page } }) => {
+    await setupProject(page);
+    await page.locator('.tab-add').click({ button: 'right' });
+    await page.locator('.context-menu-item', { hasText: 'Agent (Copilot)' }).click();
+    await expect(page.locator('.agent-view:visible')).toBeVisible({ timeout: 5_000 });
+
+    await sendAgentPrompt(page, 'late_chunk:1500:must-not-arrive');
+    await expect(page.locator('.agent-status-label:visible')).toHaveText('idle', { timeout: 5_000 });
+    await page.locator('.agent-textarea:visible').focus();
+    await page.keyboard.press('Escape');
+    await page.keyboard.press('Escape');
+
+    await page.waitForTimeout(2_000);
+    await expect(page.locator('.agent-msg-reply:visible', { hasText: 'must-not-arrive' })).toHaveCount(0);
+  });
+
   test.describe('queued messages', () => {
     // Messages submitted while a execution streams are EAGER-sent (each with a
     // clientMsgId) and queued by agent-server, which serializes them one execution at

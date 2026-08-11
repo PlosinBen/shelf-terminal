@@ -651,6 +651,10 @@ export function createFakeBackend(_representedProvider: AgentProvider = FAKE_PRO
 
     async stop(): Promise<void> {
       abortController?.abort();
+      // Late provider callbacks model Copilot work that outlives prompt
+      // settlement. Stopping the session must cancel those too.
+      for (const timer of lateTimers) clearTimeout(timer);
+      lateTimers.clear();
     },
 
     dispose(): void {

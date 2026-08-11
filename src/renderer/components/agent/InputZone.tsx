@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { AgentAttachment, AgentPrefs, Connection } from '@shared/types';
+import { COPILOT_PROVIDER } from '@shared/agent-providers';
 import { parseSlashPrefix } from '@shared/slash-prefix';
 import { useStore, setChatStage } from '../../store';
 import {
@@ -120,6 +121,10 @@ export function InputZone({ tabId, projectId, cwd, connection, visible, rootRef,
   // and the streaming→idle reset so ESC keeps working across the brief inter-execution
   // idle gap while the server drains the queue.
   const busy = isExecutionActive || pendingCount > 0;
+  // Copilot ACP can keep autopilot/session work alive after session/prompt has
+  // settled and the display correctly returns to idle. Keep double-Esc available
+  // for that provider so the backend can force-stop post-prompt work.
+  const stopEligible = busy || tab?.provider === COPILOT_PROVIDER;
   // Init readiness gate. The agent is usable only once the backend reports
   // init 'ready' (capabilities gathered). While 'starting' — or 'failed' (e.g.
   // the caps RPC timed out, meaning the SDK/CLI link is unhealthy) — the input
@@ -214,15 +219,14 @@ export function InputZone({ tabId, projectId, cwd, connection, visible, rootRef,
     requestAnimationFrame(() => inputRef.current?.focus());
   }, [visible, chatStage, projectId, connection, cwd]);
 
-  // ESC pending reset when the agent goes fully idle (no running execution AND no
-  // queued sends) — clears any half-armed double-tap so the next ESC isn't
-  // surprise-stopping the (now-idle) agent.
+  // ESC pending reset when stopping is no longer eligible. Copilot stays eligible
+  // while visually idle because ACP work may outlive prompt settlement.
   useEffect(() => {
-    if (busy) return;
+    if (stopEligible) return;
     escPendingRef.current = false;
     setEscPending(false);
     if (escTimerRef.current) { clearTimeout(escTimerRef.current); escTimerRef.current = null; }
-  }, [busy]);
+  }, [stopEligible]);
 
   // Textarea auto-resize. Cap at 200px so a multi-screen paste
   // doesn't push the timeline out of view.
@@ -349,7 +353,7 @@ export function InputZone({ tabId, projectId, cwd, connection, visible, rootRef,
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
     if (e.key === 'Escape') {
       if (showSlashMenu) { setShowSlashMenu(false); return; }
-      if (busy) {
+      if (stopEligible) {
         e.preventDefault();
         if (escPendingRef.current) {
           if (escTimerRef.current) { clearTimeout(escTimerRef.current); escTimerRef.current = null; }

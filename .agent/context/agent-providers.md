@@ -447,15 +447,15 @@ Renderer 在 dev/E2E 傳入是否顯示 internal provider 的環境政策，再�
 
 **Root cause：** ACP SDK 的 prompt response 與 session notification callback 是獨立排程；response 先 resolve 不代表所有 renderable update 都已 callback。這是 SDK scheduling 特性，不是 Shelf 應以 drain/barrier 猜測並修補的 protocol boundary。
 
-**Fix / note：** ACP driver 的 update router 與 render sink 跟 session 同壽命；一般 prompt settlement 只 emit execution idle，讓 main 更新 idle、清 permission、完成 reader並釋放 next queued message。所有 ACP renderable updates 一律繼續走同一條 session content sink，所以 late final message 會按到達時序正常顯示。
+**Fix / note：** ACP driver 的 update router 與 render sink 跟 session 同壽命；一般 prompt settlement 只 emit execution idle，讓 main 更新 idle、清 permission、完成 reader並釋放 next queued message。所有 ACP renderable updates 一律繼續走同一條 session content sink，所以 late final message 會按到達時序正常顯示。**顯示 idle 不等於 session 已不可取消**：Copilot tab 即使 visually idle 仍保留 double-ESC stop affordance，因為 autopilot work 可能在 prompt settlement 後繼續。
 
-使用者要求取消是獨立的 control-plane boundary：Copilot provider 發出 `session/cancel` 後，`stop()` 必須等待同一個 active `session/prompt` 回傳 `stopReason:'cancelled'` 才算成功；prompt failure、其他 stop reason 或 bounded RPC timeout 都是取消失敗，必須 fail loud。這個確認只決定 stop RPC 是否完成，不關閉 session content sink，也不把 stop reason 當成一般內容 gate。
+使用者要求取消是獨立的 control-plane boundary：若 Copilot 的 `session/prompt` 仍 active，provider 發出 `session/cancel` 後，`stop()` 必須等待同一個 prompt 回傳 `stopReason:'cancelled'` 才算成功；prompt failure、其他 stop reason 或 bounded RPC timeout 都是取消失敗，必須 fail loud。若 prompt response **已先 settlement**，就不存在可等的 cancellation acknowledgement，但 Copilot autopilot 仍可能實質工作；此時先 best-effort `session/cancel`，再關閉 ACP connection 並 kill CLI process，下一輪從 persisted session resume。這是保證 stop 的 force fallback，不改 UI idle 語意。
 
 Tool call 的 display metadata 也是 session-scoped carry，以 `toolCallId` 暫存，terminal translate 後立即 evict；reset/forget 清空。driver 不保存 `textByMsg`，文字 delta 的累積與持久化只由 renderer 負責。`activeExecutionSend` 僅供當下 tool permission round-trip，不是一般 notification/content sink。
 
-**Do not change casually because：** 不要恢復 per-prompt update queue、`setImmediate`/固定 delay barrier、current/last prompt attribution 或一般 stopReason content gate；也不要把 `session/cancel` 已寫入 pipe 當成取消成功。若 upstream 額外發訊息，Shelf 的責任是按時序顯示；唯有明確取消時，`cancelled` 是 control-plane completion confirmation，不是內容已收齊的宣告。
+**Do not change casually because：** 不要恢復 per-prompt update queue、`setImmediate`/固定 delay barrier、current/last prompt attribution 或一般 stopReason content gate。active prompt 時不可把 `session/cancel` 已寫入 pipe 當成取消成功；post-prompt 因已無 ack boundary，必須 force-close，不能只送 notification 後假裝已停。若 upstream 額外發訊息，Shelf 的責任是按時序顯示；唯有使用者明確取消時才切斷 session content sink。
 
-**Related：** `agent-server/providers/acp/client.ts`、`agent-server/providers/acp/client.test.ts`、`agent-providers#24`（Copilot `task_complete` 最終總結）。
+**Related：** `agent-server/providers/acp/client.ts`、`agent-server/providers/copilot/index.ts`、`src/renderer/components/agent/InputZone.tsx`、`e2e/agent-flows.spec.ts`、`agent-providers#24`（Copilot `task_complete` 最終總結）。
 
 ## agent-providers#38 — Codex persisted thread 找不到 rollout 時清 pointer 並明確開新 thread  ·  [Gotcha]
 
