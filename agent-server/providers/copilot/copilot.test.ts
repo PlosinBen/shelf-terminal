@@ -1,7 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import type { SessionUpdate, SessionConfigOption, SessionModeState } from '@agentclientprotocol/sdk';
+import type {
+  PermissionOption,
+  RequestPermissionResponse,
+  SessionUpdate,
+  SessionConfigOption,
+  SessionModeState,
+} from '@agentclientprotocol/sdk';
 import { createMockAcpAgent } from '../acp/mock-agent';
 import { createCopilotBackend } from './index';
 import type { OutgoingMessage } from '../types';
@@ -42,6 +48,12 @@ const COPILOT_CONFIG = [
     ],
   },
 ] as unknown as SessionConfigOption[];
+
+const PERMISSION_OPTIONS: PermissionOption[] = [
+  { optionId: 'allow-once', name: 'Allow once', kind: 'allow_once' },
+  { optionId: 'allow-always', name: 'Always allow', kind: 'allow_always' },
+  { optionId: 'reject-once', name: 'Reject once', kind: 'reject_once' },
+];
 
 describe('acp-copilot backend (via mock ACP agent)', () => {
   it('confirms stop only when the active ACP prompt returns cancelled', async () => {
@@ -252,6 +264,66 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
     // Shelf 'bypassPermissions' → copilot 'autopilot' mode id.
     expect(setMode?.modeId).toBe('autopilot');
     expect(out.at(-1)).toEqual({ type: 'status', state: 'idle' });
+
+    backend.dispose();
+  });
+
+  it('auto-approves ACP permission requests in bypassPermissions mode without showing UI', async () => {
+    let outcome: RequestPermissionResponse['outcome'] | undefined;
+    const mock = createMockAcpAgent({
+      modes: COPILOT_MODES,
+      configOptions: COPILOT_CONFIG,
+      requestPermissionOnPrompt: {
+        toolCallId: 'find-go-files',
+        title: 'Find related Go files',
+        options: PERMISSION_OPTIONS,
+      },
+      onPermissionOutcome: (value) => { outcome = value; },
+    });
+    const backend = createCopilotBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
+
+    await backend.gatherCapabilities!(
+      '/tmp/project',
+      undefined,
+      undefined,
+      { permissionMode: 'bypassPermissions' },
+    );
+    const out: OutgoingMessage[] = [];
+    await backend.query({ prompt: 'inspect another project', cwd: '/tmp/project' }, (m) => out.push(m));
+
+    expect(outcome).toEqual({ outcome: 'selected', optionId: 'allow-once' });
+    expect(out).not.toContainEqual(expect.objectContaining({ type: 'permission_request' }));
+
+    backend.dispose();
+  });
+
+  it('continues bridging ACP permission requests in default mode', async () => {
+    let outcome: RequestPermissionResponse['outcome'] | undefined;
+    const mock = createMockAcpAgent({
+      modes: COPILOT_MODES,
+      requestPermissionOnPrompt: {
+        toolCallId: 'write-file',
+        title: 'Write file',
+        options: PERMISSION_OPTIONS,
+      },
+      onPermissionOutcome: (value) => { outcome = value; },
+    });
+    const backend = createCopilotBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
+
+    const out: OutgoingMessage[] = [];
+    await backend.query({ prompt: 'edit the file', cwd: '/tmp/project' }, (message) => {
+      out.push(message);
+      if (message.type === 'permission_request') {
+        backend.resolvePermission!(message.toolUseId, true, undefined, 'once');
+      }
+    });
+
+    expect(outcome).toEqual({ outcome: 'selected', optionId: 'allow-once' });
+    expect(out).toContainEqual(expect.objectContaining({
+      type: 'permission_request',
+      toolUseId: 'write-file',
+      toolName: 'Write file',
+    }));
 
     backend.dispose();
   });

@@ -524,3 +524,17 @@ Tool call 的 display metadata 也是 session-scoped carry，以 `toolCallId` �
 **Do not change casually because：** 不要只依賴 1.5 秒 timer 或 `nativeEvent.isComposing`；timer 不是手勢連續性的證明，IME event ordering 也不能取代「任何輸入都中止 stop 手勢」的規則。也不要讓 `KeyboardEvent.repeat` 完成 double press。
 
 **Related：** `src/renderer/components/agent/InputZone.tsx`、`e2e/agent-flows.spec.ts`、`agent-providers#37`、`agent-providers#42`。
+
+## agent-providers#44 — Copilot ACP autopilot 不等於 allow-all；Shelf bypass 必須自行 auto-approve  ·  [Gotcha]
+
+**Symptom：** Copilot status bar 顯示 `bypassPermissions`，工具仍送出 permission request，renderer 因此顯示 Allow/Deny panel；跨 workspace path 的 shell/search 特別容易重現。
+
+**Root cause：** Shelf 將 canonical `bypassPermissions` 映成 Copilot ACP 的 `autopilot` session mode，但 Copilot 把「自動續跑」與「allow all tools/paths/URLs」視為不同狀態；`session/set_mode(autopilot)` 本身不保證工具已獲准。舊 native SDK backend 在 permission callback 另有 `bypassPermissions` short-circuit，ACP cutover 只保留 mode mapping、漏掉 auto-approve，造成 regression。
+
+**Fix / note：** Copilot provider 保留既有 `bypassPermissions → autopilot` mapping，同時在 provider-local ACP permission handler 檢查 Shelf mode；bypass 時選擇 agent 提供的 allow option（優先 `allow_once`）直接回覆，不 emit `permission_request`。找不到任何 allow option 是 protocol anomaly：error log 關鍵 toolCallId 並 fail closed。非 bypass 繼續走共用 ACP permission bridge。
+
+Copilot 在 `task_complete` 後發出的 `current_mode_update(agent)` 不直接覆蓋 Shelf 的 sticky permission preference：退出 autopilot continuation 不等於撤銷 Shelf bypass。若未來產品要把 autonomous continuation 與 permission 拆成兩個 knob，應另行設計 capability/UI contract，不要用 provider mode update 偷改 renderer prefs。
+
+**Do not change casually because：** 不要再假設 autopilot 隱含 allow-all，也不要把 bypass 判斷塞進共用 ACP toolkit（那是 Copilot/Shelf 語意，不是 protocol mechanics）。不要改回只同步 `current_mode_update` 來掩蓋 popup；那會取消使用者的 sticky bypass preference，下一 turn 仍重新詢問。
+
+**Related：** `agent-providers#4`、`agent-providers#17`、`agent-server/providers/copilot/index.ts`、`agent-server/providers/acp/permission.ts`。

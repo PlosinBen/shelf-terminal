@@ -7,14 +7,22 @@
 import { randomUUID } from 'node:crypto';
 import * as path from 'node:path';
 import type { ChildProcess } from 'node:child_process';
-import { methods, type Stream, type AgentApp, type SessionModeState, type SessionConfigOption, type StopReason } from '@agentclientprotocol/sdk';
+import {
+  methods,
+  type Stream,
+  type AgentApp,
+  type RequestPermissionResponse,
+  type SessionModeState,
+  type SessionConfigOption,
+  type StopReason,
+} from '@agentclientprotocol/sdk';
 import { COPILOT_PROVIDER } from '@shared/agent-providers';
 import { formatConfigAck, type ConfigEditKey } from '@shared/config-ack';
-import type { ServerBackend, QueryInput, SendFn, ProviderCapabilities } from '../types';
+import { PERMISSION_MODES, type ServerBackend, type QueryInput, type SendFn, type ProviderCapabilities } from '../types';
 import { serverLog } from '../../server-logger';
-import { openAcpConnection, spawnAgentStdio, type AcpConnection } from '../acp/connection';
+import { openAcpConnection, spawnAgentStdio, type AcpConnection, type PermissionHandler } from '../acp/connection';
 import { createSessionDriver, type AcpSession } from '../acp/client';
-import { createPermissionBridge } from '../acp/permission';
+import { createPermissionBridge, pickOptionId } from '../acp/permission';
 import { mapSessionCapabilities, currentSelections, configOptionIdForCategory } from '../acp/capabilities';
 import { toAcpMcpServers } from '../acp/mcp';
 import { getSharedShelfMcp } from '../acp/shelf-mcp';
@@ -112,6 +120,24 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
   let currentEffort: string | undefined;
   let currentPermissionMode: string | undefined; // Shelf id (default/plan/bypassPermissions)
 
+  // Copilot's ACP `autopilot` session mode controls autonomous continuation; it
+  // does not itself guarantee allow-all permissions. Preserve Shelf's canonical
+  // bypass contract (and the deleted native backend's behavior) by answering
+  // tool approvals locally instead of surfacing a permission panel. See
+  // agent-providers#44.
+  const onRequestPermission: PermissionHandler = (context) => {
+    const { params } = context;
+    if (currentPermissionMode !== PERMISSION_MODES.bypassPermissions.value) {
+      return permissions.onRequestPermission(context);
+    }
+    const optionId = pickOptionId(params.options, true, 'once');
+    if (!optionId) {
+      serverLog('error', 'copilot', `bypassPermissions request has no allow option (toolCallId=${params.toolCall.toolCallId})`);
+      return { outcome: { outcome: 'cancelled' } } satisfies RequestPermissionResponse;
+    }
+    return { outcome: { outcome: 'selected', optionId } } satisfies RequestPermissionResponse;
+  };
+
   /** Caps from the live session config + the active current* selections, ready to
    *  spread into a `capabilities` wire message. permissionModes are the Shelf-
    *  standard set (matches native copilot), NOT copilot's raw agent/plan/autopilot. */
@@ -174,7 +200,7 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
     connAppId = appId;
     conn = openAcpConnection(opened.target, {
       name: 'shelf-copilot',
-      onRequestPermission: permissions.onRequestPermission,
+      onRequestPermission,
       onSessionUpdate: driver.onSessionUpdate,
     });
     // Drop refs when the agent process/connection ends so the next turn respawns —
