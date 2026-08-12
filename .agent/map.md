@@ -118,13 +118,12 @@ title: shelf-terminal — Intent → File Index
 | Claude provider | `providers/claude/index.ts` | `@anthropic-ai/claude-agent-sdk` wrapper：持久 streaming-input session、emit 渲染原語、auth 偵測 |
 | Copilot provider (ACP) | `providers/copilot/index.ts` | `createCopilotBackend`：spawn `copilot --acp`、走共用 `acp/` toolkit runtime、OWN copilot 特有（binary launch、device-flow login、config-home）。ACP 是內部細節、provider identity = `copilot`（cutover 後即 copilot backend，pre-ACP native SDK backend 已刪，見 git 歷史） |
 | Codex provider (app-server) | `providers/codex/index.ts` | `createCodexBackend`：直接驅動 pinned `codex app-server` JSON-RPC，封裝 turn/session、auth、config、skills/MCP、quota/context、tool items 與 approval bridge |
-| ACP 共用 toolkit | `providers/acp/` | provider-agnostic ACP runtime：`connection`/`client`/`translate`/`permission`/`capabilities`/`mcp`/`shelf-mcp`（L1 in-process HTTP bridge）+ `mock-agent`（測試），由 Copilot 使用 |
+| ACP 共用 toolkit | `providers/acp/` | provider-agnostic ACP runtime：`connection`/`client`/`translate`/`permission`/`capabilities`/`mcp`/`shelf-mcp`（L1 in-process HTTP bridge）+ `mock-agent`；driver 觀察 authoritative mode/config state，由 Copilot 使用 |
 | Provider registry（identity 單一來源） | `src/shared/agent-providers.ts` | provider key → label / visibility / runtime binding，衍生 `AgentProvider` 與 presentation helpers（見 `context/agent-providers` #36） |
 | Backend registry | `backend-registry.ts` | requested provider key → cached backend；test mode 只替換 implementation，不改 identity/cache boundary |
 | Provider 純 helper（claude） | `providers/claude/helpers.ts` | claude/index 抽出的 side-effect-free 函式 + types（封閉邊界，只被 claude/ 引用） |
 | Turn 路由（claude） | `providers/claude/turn-router.ts` | 純 attribution 狀態機，按順序把 message 分 foreground/server/task lane |
 | Provider 純 helper（copilot） | `providers/copilot/helpers.ts` | `resolveCopilotBinary` / `resolveCopilotCommand` / `copilotConfigHome`（`$COPILOT_HOME` per-appId）/ `copilotEnv`（token-env 傳遞）— 只被 copilot/ 引用 |
-| Copilot ACP mode-map | `providers/copilot/mode-map.ts` | copilot session-mode ↔ Shelf permission-mode（agent→default / plan→plan / autopilot→bypassPermissions）；copilot 特有、不在 toolkit |
 | Copilot account credit | `providers/copilot/credit.ts` | `fetchCopilotCredit`（SDK `account.getQuota`、config-home auth）+ `normalizeCredit` + `refreshCopilotCredit`（per-host cache-aside、15min TTL、fail-quiet）；turn-end 經 `refreshAccountStatus` hook 觸發，見 `context/agent-providers#26` |
 | Copilot 互動登入（device flow） | `providers/copilot/login.ts` | `parseLoginPrompt`（stdout 抽 URL+code 純函式）+ `startLogin`（spawn `copilot login`、env 剝 token、cancel）+ `prefillLoginUrl`（見 `context/agent-providers` #10）。移入 copilot/ 保持 provider 目錄隔離 |
 | Provider 共用 helper | `providers/shared.ts` | `stripCwd` / `resolveSkillsPluginRoot` / `projectAppSkills`（idempotent + atomic symlink-to-temp+rename 的 skill projection）/ `readUploadedImageAttachments`（uploaded image path → base64）— 跨 provider 共用純函式 |
@@ -138,12 +137,12 @@ title: shelf-terminal — Intent → File Index
 | Crash-net：session lease + 啟動 sweep | `session-sweep.ts` | `SHELF_SESSION` lease 讀寫 + `sweepDeadSessions()`：對 owner 已死的 lease 用 tag 找活著的孤兒 → group-kill |
 | Context persistence | `context-store.ts` | `loadContext`/`saveContext`/`deleteContext`/`cleanupOldContexts`，atomic write 到 `~/.shelf/agent-context/` |
 | Context persistence 測試 | `context-store.test.ts` | round-trip + Claude resume / Copilot chain |
-| Provider types | `providers/types.ts` | `ServerBackend` / `SendFn` / `QueryInput` / `OutgoingMessage` / `ProviderCapabilities` 等 |
+| Provider types | `providers/types.ts` | `ServerBackend` / `SendFn` / `QueryInput` / `OutgoingMessage` / `ProviderCapabilities`；provider 宣告 Shelf/native permission strategy |
 | Slash prefix detection | `src/shared/slash-prefix.ts` | `parseSlashPrefix(prompt)` 共用 helper（provider + renderer 同份） |
 | Fake provider | `providers/fake/index.ts` | registered internal provider；可顯式選取，也可在 `SHELF_TEST_MODE=1` 作 requested provider 的 substitute；prompt 走 prefix-matched scenario |
 | Fake provider 測試 | `providers/fake/fake.test.ts` | 每個 scenario 的 wire-shape 驗證 + stop/abort 行為 |
 | Bundle build | `build.mjs` | esbuild → `dist/agent-server/<version>/index.js` 單一 ESM bundle（index/exec/dispatcher 同一 bundle，role 由 argv 選） |
-| Copilot provider 測試 | `providers/copilot/{copilot,helpers,login,mode-map,credit}.test.ts` | ACP backend wire-shape / helper 純函式 / device-flow login / mode-map 對應 / credit normalize + cache-aside |
+| Copilot provider 測試 | `providers/copilot/{copilot,helpers,login,credit}.test.ts` | ACP backend wire-shape / native mode+allow_all / resume-before-discovery / helper / device-flow login / credit normalize + cache-aside |
 | ACP toolkit 測試 | `providers/acp/*.test.ts` | connection/client/translate/permission/capabilities/mcp/shelf-mcp + mock-agent 驅動的 toolkit 驗證 |
 | Dispatcher 單元測試 | `dispatcher.test.ts` | open/close_session / raw relay / reconnect + backoff / inner-ping hung / proc-identity guard / cache 側通道 |
 | Model-cache 單元測試 | `model-cache.test.ts` | TTL hit/miss/expiry evict |
@@ -189,7 +188,7 @@ title: shelf-terminal — Intent → File Index
 | Paste/drop 上傳 hook | `hooks/useAttachmentPaste.ts` | paste/drop/upload pipeline + file size check |
 | Agent send attachment helper | `utils/agent-send-attachments.ts` | renderer-local image preview data URL 與 provider-bound uploaded `AgentAttachment` payload 分離 |
 | Terminal 渲染 | `components/TerminalView.tsx` | xterm.js instance cache + PTY I/O + paste hook + unread badge |
-| Agent 對話 UI | `components/AgentView.tsx` + `components/agent/{MessageList,InputZone,StatusBar,DecisionPanel,PlanPanel,AuthPane,ConnectionOverlay}.tsx` + `agentTabStore.ts` + `agentTabSubscriptions.ts` + `agent-message-builder.ts` + `tab-teardown.ts` | AgentView 是 layout coordinator，domain state 在 per-tab `agentTabStore`，真正 tab teardown 才清 state；子 component 各自 subscribe。`ConnectionOverlay` 是 pane-scoped（`absolute` 非 `fixed`）dim+blur「未 ready」遮罩，統一 init-`starting`（first-open/reconnect，phase 文字由 `agent/init-phase.ts` 提供）/ init-`failed`（Retry）/ health-`dead`（Reconnect）四態 |
+| Agent 對話 UI | `components/AgentView.tsx` + `components/agent/{MessageList,InputZone,StatusBar,DecisionPanel,PlanPanel,AuthPane,ConnectionOverlay}.tsx` + `components/agent/{permission-control-view,capability-prefs}.ts` + `agentTabStore.ts` + `agentTabSubscriptions.ts` + `agent-message-builder.ts` + `tab-teardown.ts` | AgentView 是 layout coordinator；permission UI 只依 capability strategy/descriptor 選 canonical 或 native controls，不依 provider identity；native state 不 persist。domain state 在 per-tab store，真正 teardown 才清 state |
 | Web tab（登入 surface + 瀏覽） | `components/WebTabView.tsx` | `<webview partition=persist:web>` + 網址列 + identity chip；人在這登入內網服務 |
 | Web.fetch 授權 popup | `components/WebPermissionPrompt.tsx` | app 層全域 popup，防偽 origin 顯示 + allow once/always/deny（由 `web:permission-request` 驅動） |
 | browser_open 確認 popup | `components/BrowserOpenPrompt.tsx` | app 層全域 popup，只有 Open/Deny（不記住），由 `web:browser-open-request` 驅動；核可後 `web:open-tab` 由 `App.tsx` 開分頁 |
@@ -250,6 +249,7 @@ title: shelf-terminal — Intent → File Index
 | Agent tab log id | `tab-id.ts` | `formatTabLogId()` 保留完整 renderer tab id，讓跨 main/renderer log 可精確 grep 對帳 |
 | 預設值 | `defaults.ts` | DEFAULT_SETTINGS, DEFAULT_KEYBINDINGS |
 | Slash prefix parser | `slash-prefix.ts` | `parseSlashPrefix(prompt)`，provider + renderer 同份 |
+| Permission control contract | `permission-controls.ts` | Shelf/native strategy、native mode/permission descriptor 與 config-edit key 的單一來源 |
 | Web session 常數/型別 | `web-session.ts` | `WEB_SESSION_PARTITION`、`WEB_FETCH_TOOL`/`isWebFetchTool`、`BROWSER_OPEN_TOOL`/`isBrowserOpenTool`、`WebFetchRequest/Result`、`WebPermissionMeta`、`BrowserOpenMeta`/`BrowserOpenDecision` |
 | 單元測試 | `slash-prefix.test.ts` | `parseSlashPrefix` 邊界 case 覆蓋 |
 

@@ -206,15 +206,7 @@ SDK 0.3.159 **並存**兩種 compact 完成訊號:`status` 形狀(`subtype:'stat
 
 ## agent-providers#17 — Permission mode 整合政策：native mode 映射到 Shelf 詞彙,可映射全暴露,不可映射 hide+log  ·  [Decision]
 
-**Decision**：各 provider 的原生 permission mode **映射到 Shelf 的 canonical 詞彙**（`default`/`plan`/`acceptEdits`/`bypassPermissions`）。一個 provider **暴露它所有「可映射」的原生 mode**（清單本就 per-provider 變動 —— claude 4 個含 `acceptEdits`,copilot/codex 各 3 個）;**對不上任何 Shelf mode 的原生 mode → hide + fail-loud log**（那是「該不該新增一個 Shelf mode」的討論觸發點,前例:`acceptEdits` 就是為 claude 加的）。displayName 一律走中央 `PERMISSION_MODES` 單一來源（per-provider「誠實副標」如 `Plan (read-only)` 考慮過但**否決** —— 會跟中央化 displayName 打架）。
-
-具體映射由 transport 各自擁有：Copilot ACP 的 `agent/plan/autopilot` ↔ `default/plan/bypassPermissions` 由 mode-map 依 session advertise 值解析；Codex app-server 把 Shelf mode 映成 thread/turn 的 approval policy 與 sandbox policy，其中 `plan` 是 read-only、`bypassPermissions` 是 full-access。
-
-**Reason**：承 `agent-providers#4`（permission 語意收進 provider）+ `agent-providers#1`（renderer 對 provider 無感）。統一詞彙 → 一致 UX、可攜設定、固定 keybinding;「可映射才暴露、不可映射 hide+log」= 既不吃掉 provider 能力、也不默默丟失資訊。displayName 中央化 = app-wide UX 一致（同 `agent-providers#4` companion）。
-
-**Do not change casually because**：別讓 provider 自訂 displayName（破壞中央 `PERMISSION_MODES` 一致性）;別對不上就默默丟(要 log,才知道要不要新增 Shelf mode)。
-
-**Related**：`agent-providers#4`、`agent-server/providers/copilot/mode-map.ts`、`agent-server/providers/codex/config.ts`、`agent-server/providers/acp/capabilities.ts`。
+**Superseded by `agent-providers#45`.**
 
 ## agent-providers#18 — Provider 清單單一來源:`AGENT_PROVIDERS` registry,型別 derive,消費端一律 iterate  ·  [Decision]
 
@@ -527,14 +519,18 @@ Tool call 的 display metadata 也是 session-scoped carry，以 `toolCallId` �
 
 ## agent-providers#44 — Copilot ACP autopilot 不等於 allow-all；Shelf bypass 必須自行 auto-approve  ·  [Gotcha]
 
-**Symptom：** Copilot status bar 顯示 `bypassPermissions`，工具仍送出 permission request，renderer 因此顯示 Allow/Deny panel；跨 workspace path 的 shell/search 特別容易重現。
+**Superseded by `agent-providers#45`.**
 
-**Root cause：** Shelf 將 canonical `bypassPermissions` 映成 Copilot ACP 的 `autopilot` session mode，但 Copilot 把「自動續跑」與「allow all tools/paths/URLs」視為不同狀態；`session/set_mode(autopilot)` 本身不保證工具已獲准。舊 native SDK backend 在 permission callback 另有 `bypassPermissions` short-circuit，ACP cutover 只保留 mode mapping、漏掉 auto-approve，造成 regression。
+## agent-providers#45 — Permission control 由 provider 選 strategy；Copilot 原樣採 ACP state  ·  [Decision]
 
-**Fix / note：** Copilot provider 保留既有 `bypassPermissions → autopilot` mapping，同時在 provider-local ACP permission handler 檢查 Shelf mode；bypass 時選擇 agent 提供的 allow option（優先 `allow_once`）直接回覆，不 emit `permission_request`。找不到任何 allow option 是 protocol anomaly：error log 關鍵 toolCallId 並 fail closed。非 bypass 繼續走共用 ACP permission bridge。
+**Decision：** `ProviderCapabilities.permissionControl` 明示 `shelf` 或 `native` strategy。`shelf` 保留既有 canonical `permissionModes`、project pref 與 provider adapter；`native` 則提供一個 mode control 與一個 permission control 的 descriptor，renderer 只依 descriptor 畫 UI，不依 provider identity 分支。這是刻意窄化的 permission surface，不是把任意 ACP config 動態生 UI。
 
-Copilot 在 `task_complete` 後發出的 `current_mode_update(agent)` 不直接覆蓋 Shelf 的 sticky permission preference：退出 autopilot continuation 不等於撤銷 Shelf bypass。若未來產品要把 autonomous continuation 與 permission 拆成兩個 knob，應另行設計 capability/UI contract，不要用 provider mode update 偷改 renderer prefs。
+Copilot 選 `native`：ACP session modes 原值送 `session/set_mode`；ACP `allow_all` config option 原值送 `session/set_config_option`。兩者是獨立狀態，`autopilot` 不再映成 Shelf `bypassPermissions`，permission callback 也不自行 auto-approve。`/allow-all`、`/yolo`、`/reset-allowed-tools` 仍是 Copilot CLI 的原生 slash 語意，Shelf 不攔截或改寫。
 
-**Do not change casually because：** 不要再假設 autopilot 隱含 allow-all，也不要把 bypass 判斷塞進共用 ACP toolkit（那是 Copilot/Shelf 語意，不是 protocol mechanics）。不要改回只同步 `current_mode_update` 來掩蓋 popup；那會取消使用者的 sticky bypass preference，下一 turn 仍重新詢問。
+**Truth / lifecycle：** UI 顯示以 `session/update` 與 `set_config_option` 回覆的完整 config options 為準；bare acknowledgement 不做 optimistic mutation。沒有 advertise 的 control 就省略，advertise 後 shape/value 不合法則 fail loud。native control 不讀寫 `AgentPrefs.permissionMode`，也不 migration/delete 舊值。恢復既有 Copilot session 時，必須先 `resumeSession` 取得 mode/config state，再產生 capabilities；不可為了 discovery 先建立 fresh ACP session。
 
-**Related：** `agent-providers#4`、`agent-providers#17`、`agent-server/providers/copilot/index.ts`、`agent-server/providers/acp/permission.ts`。
+**Reason：** 保留 Shelf 統一詞彙雖有一致 UX，但需要維護 mode mapping、雙向同步、slash side effect 與 provider-specific error recovery。原生 CLI 使用者已熟悉其語意，也能直接查到上游文件；讓 SDK/CLI 保持 authority 可縮小失同步與漏接更新的風險。strategy seam 讓本次只改 Copilot，Claude/Codex 不受影響。
+
+**Do not change casually because：** 不要用 provider-name branch 選 UI，也不要把 native control 持久化成 canonical permission pref。不要把所有 ACP config option 泛化成 settings panel；若別的 provider 要 native strategy，必須明確描述同一個窄 surface。不要把 mode 當 allow-all，或重新加入 permission handler short-circuit。
+
+**Related：** `agent-config-flow#9`、`contracts/agent-routing`、`contracts/agent-wire-protocol`、`src/shared/permission-controls.ts`、`agent-server/providers/copilot/index.ts`、`agent-server/providers/acp/client.ts`。

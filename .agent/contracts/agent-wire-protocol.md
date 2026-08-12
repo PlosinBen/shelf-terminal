@@ -120,15 +120,22 @@ Execution busy-state + cost/usage. `state:'idle'` closes the execution reader, c
 
 ## capabilities — `type: 'capabilities'`
 
-Dual-purpose: a one-shot RPC response carrying `requestId` (matched in main's `onResponse` map), **or** an unsolicited mid-turn update (model/mode change, model promotion). Full field shape is `Partial<ProviderCapabilities>` plus `currentModel` / `currentEffort` / `currentPermissionMode` — see `ProviderCapabilities` in `agent-server/providers/types.ts`. Forwarded to `IPC.AGENT_CAPABILITIES`; drives renderer status bar + pref persistence (agent-config-flow#3).
+Dual-purpose: a one-shot RPC response carrying `requestId` (matched in main's `onResponse` map), **or** an unsolicited session update (model/config change, model promotion). Full field shape is `Partial<ProviderCapabilities>` plus `currentModel` / `currentEffort` / `currentPermissionMode` — see `ProviderCapabilities` in `agent-server/providers/types.ts`. Forwarded to `IPC.AGENT_CAPABILITIES`; execution-less updates intentionally use the session sink.
 
 | Field | Type | Notes |
 |-------|------|-------|
 | `type` | `'capabilities'` | |
 | `requestId` | `string?` | Present ⇒ RPC response; absent ⇒ unsolicited broadcast. |
 | `error` | `string?` | |
-| ...`ProviderCapabilities` | — | `models`, `permissionModes`, `effortLevels`, `slashCommands`, `authMethod?`, `authRequired?` |
+| ...`ProviderCapabilities` | — | `models`, `permissionModes`, `permissionControl`, `effortLevels`, `slashCommands`, `authMethod?`, `authRequired?` |
 | `currentModel` / `currentEffort` / `currentPermissionMode` | `string?` | |
+
+`permissionControl` is a strategy discriminator:
+
+- `{ strategy: 'shelf' }` uses canonical `permissionModes` / `currentPermissionMode`; a legacy wire payload that omits the field defaults to this strategy.
+- `{ strategy: 'native', mode?, permission? }` carries at most one descriptor of each kind. A descriptor is `{ label, description?, currentValue?, options }`; each option is `{ value, displayName, description? }`. Values are opaque provider ids and must round-trip unchanged.
+
+For native state, a provider update or successful config response publishes the full relevant descriptor snapshot. Consumers replace from that truth instead of retaining stale options/current values. Missing unadvertised controls are omitted; malformed advertised controls fail loud.
 
 ## plan side-channel — `type: 'plan'`
 

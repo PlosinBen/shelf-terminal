@@ -58,17 +58,17 @@ Provider mapping examples: Codex app-server maps `AgentImageAttachment` to
 block. `data:image/...` must not be sent to Codex app-server as `image.url`; legacy data URL images
 are fail-loud at that provider boundary.
 
-## Config edit (model / effort / permission)
+## Config edit (model / effort / canonical or native permission)
 
 **Direction**: renderer → main → agent-server, as a structured no-prompt execution.
 
-Picker / status-bar config changes do NOT build a `/model X` string — they send a structured `configEdit` that converges on the provider's `applyConfigEdit` (`agent-config-flow#5`). `key` is the picker/prefs key; note `/permission` maps to `permissionMode`.
+Picker / status-bar config changes do NOT build a slash string — they send a structured `configEdit` that converges on the provider's `applyConfigEdit` (`agent-config-flow#5`). Canonical Shelf permission uses `permissionMode`; a native strategy uses the dedicated `nativeMode` / `nativePermission` keys advertised by capabilities.
 
-- renderer → main: `IPC.AGENT_SEND` with `{ tabId, prompt: '', configEdit: { key: 'model' | 'effort' | 'permissionMode', value: string }, clientMsgId? }`.
+- renderer → main: `IPC.AGENT_SEND` with `{ tabId, prompt: '', configEdit: { key: 'model' | 'effort' | 'permissionMode' | 'nativeMode' | 'nativePermission', value: string }, clientMsgId? }`.
 - main → agent-server: `sendLine({ type: 'send', executionId, provider, prompt: '', cwd, sessionId, configEdit: { key, value }, ... })` — `prompt` is empty; agent-server's `handleSend` treats `!!msg.configEdit` as the config-edit branch and skips `applyPrefDiff` (the edit IS the change).
-- The provider applies it and emits a `system` divider + a fresh `capabilities` wire message; the renderer persists from capabilities, never optimistically.
+- The provider applies it and emits a `system` divider; confirmed capabilities update the renderer, never optimistically. Canonical model/effort/permission may persist from that confirmation. Native permission controls remain session state and are never written to `AgentPrefs`.
 
-Field type: `configEdit?: { key: 'model' | 'effort' | 'permissionMode'; value: string }` — identical on `AgentQueryOptions`, `IncomingMessage`, and `QueryInput`.
+Field type: `configEdit?: { key: ConfigEditKey; value: string }`, where `ConfigEditKey` is defined once in `src/shared/permission-controls.ts` and shared by `AgentQueryOptions`, `IncomingMessage`, and `QueryInput`.
 
 Silent per-message prefs (`model` / `effort` / `permissionMode` on every send) are a SEPARATE mechanism: the orchestrator diff-detects them per session and calls `ServerBackend.setModel/setEffort/setPermissionMode` only on change, with no divider (`agent-config-flow#6`). They are NOT `configEdit`.
 
@@ -168,8 +168,8 @@ There is no `enqueue` control message — the renderer eager-sends every `{ type
 
 Listed for completeness — the capabilities request/response that seeds the status bar. Not renderer-initiated as a control action; `remote.ts` issues it from `getCapabilities()`.
 
-- main → agent-server: `sendLine({ type: 'get_capabilities', provider, cwd, sessionId, customModels?, intent?, requestId })`. `intent` = renderer's saved prefs `{ model?, effort?, permissionMode? }`, so session-stateful providers (Copilot) seed their `current*` closures before reporting back.
-- agent-server → main: `OutgoingMessage` `{ type: 'capabilities', requestId, error?, ...ProviderCapabilities, currentModel?, currentEffort?, currentPermissionMode? }`, matched in `proc.onResponse`. Mid-turn unsolicited `capabilities` (no `requestId`) also exist — those go through `parseRemoteMessage` → `IPC.AGENT_CAPABILITIES` (see `agent-config-flow#3`).
+- main → agent-server: `sendLine({ type: 'get_capabilities', provider, cwd, sessionId, customModels?, intent?, requestId })`. Agent-server loads provider-matched restore context and passes it to `gatherCapabilities`; Copilot resumes that ACP session before capability discovery. `intent.permissionMode` seeds only Shelf-strategy providers and is ignored by Copilot native permission controls.
+- agent-server → main: `OutgoingMessage` `{ type: 'capabilities', requestId, error?, ...ProviderCapabilities, currentModel?, currentEffort?, currentPermissionMode? }`, matched in `proc.onResponse`. Unsolicited `capabilities` without `requestId` may be execution-scoped or execution-less; both route through the session event sink to `IPC.AGENT_CAPABILITIES` (`agent-config-flow#9`).
 
 ## Other control messages (one-line each)
 

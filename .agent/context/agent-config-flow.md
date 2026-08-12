@@ -96,7 +96,7 @@ InputZone parseSlashPrefix
 - Backend 拒絕的值不會被 broadcast → 不會 persist。**Disk 永遠是 backend 確認過的真相**
 
 **Provider 差異**：
-- Copilot（ACP）：`applyConfigEdit` → `setConfigOption`（model/effort）/ `setMode`（permission）直接對 live ACP session 塞 — CLI 驗證即時，失敗就 emit error（原 native SDK 的 slash-handler `session.setModel` 已刪）
+- Copilot（ACP）：model/effort 仍直接對 live ACP session 套用；permission UI 改走 provider-native mode + `allow_all`，不再參與 canonical pref flow（`agent-config-flow#9`）
 - Claude：per-call options 設計，slash handler 只更新 closure + broadcast（永遠成功；validation 推到下次 query SDK 收到時）
 
 ### 配套 invariants
@@ -165,14 +165,14 @@ model/effort/permission 三個入口（打字 `/model X`、picker、status-bar �
 |------|------|------|------|
 | model | `driver.setConfigOption(configId('model'), value)` | backend closure 套到下一個 app-server turn/thread config | 記 closure，下次 query `options.model` 由 SDK 驗 |
 | effort | `driver.setConfigOption(configId('thought_level'), value)` | backend closure 套到下一個 app-server turn config | 同上 |
-| permission | `driver.setMode(modeId)` | 映成 approval policy + sandbox policy | 記 closure，下次 query `options.permissionMode` 由 SDK 驗 |
+| permission | native mode 用 `driver.setMode(value)`；native permission 用 `driver.setConfigOption('allow_all', value)` | 映成 approval policy + sandbox policy | 記 closure，下次 query `options.permissionMode` 由 SDK 驗 |
 
 （cutover 後 copilot 走 ACP：以上 native SDK 的 `session.setModel`/`session.rpc.mode.set` 已刪。）
 
 **翻譯 adapter ≠ 驗證**：
-- app 對外詞彙（permission list）是**共用單一來源** `PERMISSION_MODES` / `PermissionModeId`（`agent-server/providers/types.ts`）；各 provider 用 `pickPermissionModes(subset)` 宣告自己支援的子集。
-- app→provider 的**翻譯表是各 provider 自己的**，不共用：Copilot（ACP）`mode-map.ts` `shelfToCopilotModeId`（default→agent / plan→plan / bypassPermissions→autopilot，且對 session 已 advertise 的 ACP mode id 解析，送出完整 URL id）；Claude 不翻譯（app 詞彙 == SDK 詞彙，直接傳 + bypass DIY 特例）。抽成共用 helper 是假複用（每家 target 詞彙不同、Claude 還沒有）。
-- 翻譯**翻不出來** = 沒有對應的 SDK 動作可做（無效值，或 Copilot 不支援的合法 app 模式如 `acceptEdits`）→ 照實 emit error、不採用。這是「無 SDK action」的誠實回報，不是發明驗證。**踩過的雷**：舊 code `if (sdkMode) { set }` 翻不出來時跳過 SDK 卻照樣 `currentPermissionMode = args` + 回報成功 + persist → silent 假成功。
+- Shelf strategy 的 app 對外詞彙（permission list）是**共用單一來源** `PERMISSION_MODES` / `PermissionModeId`；Claude/Codex 各自翻譯或套用。
+- Native strategy 不做 canonical 翻譯；opaque value 必須在 provider advertise 的 options 中往返。Copilot 的 mode 與 `allow_all` 各自交給 ACP 驗證。
+- SDK 拒絕或 advertised state 不合法就照實 emit error；不可跳過 SDK action 卻回報成功。
 
 **Renderer / Backend 分層（回應「picker 兩邊行為是否不同」— 不同只在 backend）**：
 - **Renderer 對 provider 無感、單一路徑**：picker/status-bar/無參數 `/model` → `handleConfigEdit` → `agent:send{configEdit}`；手打 `/model X` → 普通 prompt。
@@ -181,7 +181,7 @@ model/effort/permission 三個入口（打字 `/model X`、picker、status-bar �
 
 **Do not change casually because**：
 - 不要在 `gatherCapabilities`/`setModel`/`dispatchSlash` 加「model 是否在 `listModels` 清單內」的前置拒絕 — 交給 SDK，錯誤照實回。
-- 不要把 app→SDK 翻譯表抽成跨 provider 共用 helper（假複用）；共用的只有 app 詞彙 list（`PERMISSION_MODES`）。
+- 不要讓 Copilot native permission 回流 canonical `PERMISSION_MODES`；strategy boundary 見 `agent-config-flow#9`。
 
 ## agent-config-flow#7 — Init readiness gate：caps RPC fail-closed，input 鎖到 `init 'ready'`（不 queue）  ·  [Decision]
 
@@ -222,3 +222,16 @@ model/effort/permission 三個入口（打字 `/model X`、picker、status-bar �
 - 別讓 dispatcher 去 fetch（delegate/orchestrate）—— 破壞 cache-aside 的 passive-store 性質，把重活塞進該保持 thin 的 front。
 
 **Related**：`agent-config-flow#7`（一次性 blocking init → 為何需要 TTL）、`connection-health#7`（cache side-channel 跟 pong 一樣被 dispatcher peek、不 relay 到 main）、`contracts/agent-wire-protocol`（Boundary 2 `cache_get`/`cache_reply`/`cache_put`）、`architecture/agent-dispatch`。
+
+## agent-config-flow#9 — Canonical 與 native permission 是互斥 flow  ·  [Decision]
+
+Provider 以 capability strategy 選一條路：
+
+- `shelf`：沿用 `permissionModes` / `currentPermissionMode`、`permissionMode` config edit、per-message pref diff 與 confirmed-capability persistence。
+- `native`：capability 帶專用 mode/permission descriptors；renderer 送 `nativeMode` / `nativePermission` config edit。值不進 `AgentPrefs`，agent-server 不用舊 `permissionMode` seed、reapply 或 writeback。
+
+Native descriptor 是 session truth。ACP notification 可在沒有 active execution 時到達，因此 execution-less `capabilities` 必須走 session sink；收到 provider update 或完整 set-config response就用完整 snapshot 取代舊 state，不自行 merge 猜測。UI 顯示 provider option label/current value，只有 edit request 走既有 structured config-edit turn。
+
+**Do not change casually because：** 不要同時 expose canonical 與 native permission controls；不要把缺少的 native control補成 Shelf default；不要把 native value 存進跨 session pref。Renderer 只判 strategy/descriptor，provider identity 與 ACP vocabulary 留在 backend。
+
+**Related：** `agent-providers#45`、`contracts/agent-routing`、`contracts/agent-wire-protocol`、`architecture/agent-execution`。
