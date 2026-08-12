@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { AgentAttachment, AgentPrefs, Connection } from '@shared/types';
-import { COPILOT_PROVIDER } from '@shared/agent-providers';
+import { CODEX_PROVIDER, COPILOT_PROVIDER } from '@shared/agent-providers';
 import { parseSlashPrefix } from '@shared/slash-prefix';
 import { useStore, setChatStage } from '../../store';
 import {
@@ -121,10 +121,10 @@ export function InputZone({ tabId, projectId, cwd, connection, visible, rootRef,
   // and the streaming→idle reset so ESC keeps working across the brief inter-execution
   // idle gap while the server drains the queue.
   const busy = isExecutionActive || pendingCount > 0;
-  // Copilot ACP can keep autopilot/session work alive after session/prompt has
-  // settled and the display correctly returns to idle. Keep double-Esc available
-  // for that provider so the backend can force-stop post-prompt work.
-  const stopEligible = busy || tab?.provider === COPILOT_PROVIDER;
+  // Copilot ACP and Codex app-server can keep provider-side work alive after the
+  // display correctly returns to idle. Keep double-Esc available so their
+  // backends can force-close the provider process when no active turn remains.
+  const stopEligible = busy || tab?.provider === COPILOT_PROVIDER || tab?.provider === CODEX_PROVIDER;
   // Init readiness gate. The agent is usable only once the backend reports
   // init 'ready' (capabilities gathered). While 'starting' — or 'failed' (e.g.
   // the caps RPC timed out, meaning the SDK/CLI link is unhealthy) — the input

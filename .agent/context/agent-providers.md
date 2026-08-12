@@ -500,3 +500,15 @@ Tool call 的 display metadata 也是 session-scoped carry，以 `toolCallId` �
 **Do not change casually because：** 不要把所有 `read`／`other` 改成 `Find`／`Search`，也不要通用擷取 title 第一個單字；ACP title 是 provider 文案而非穩定 tool-name 欄位。若 Copilot 未來傳出原始 tool name 或修正 kind，應優先使用正式 metadata，再移除對應的窄相容規則。
 
 **Related：** `agent-providers#6`（共用 ACP translation）、`agent-ui#5`（fold card 渲染原語）、`agent-server/providers/acp/translate.ts`。
+
+## agent-providers#42 — Codex stop 必須關閉 app-server，不能只解鎖本地 turn  ·  [Gotcha]
+
+**Symptom：** Codex 畫面已顯示 idle 時，背景 agent 仍可能繼續輸出或執行；double-ESC 無法停止。active turn 的 `turn/interrupt` 若失敗，UI 仍會回 idle，形成已停止的假象。
+
+**Root cause：** Renderer 原本只在 execution busy 時允許 Codex stop；backend 又會吞掉 `turn/interrupt` 錯誤並直接 resolve 本地 completion。UI state 與 provider process 因此脫鉤，沒有任何 control-plane 證據證明背景工作已終止。
+
+**Fix / note：** Codex tab 即使 visually idle 仍保留 double-ESC。若有 active turn，先給 `turn/interrupt` 一個 bounded acknowledgement window；無論 interrupt 成功、失敗或逾時，stop 都關閉 app-server 子程序、取消未決 permission request、清除 in-memory thread/runtime reference，再解鎖本地 turn。下一次 send 建立新 app-server，並用 persisted `lastSdkSessionId` resume 原 thread。若 force-close 本身失敗則 stop fail-loud，不得回報成功。
+
+**Do not change casually because：** 不要把 `turn/interrupt` 已送出或本地 promise 已 resolve 當成實際停止；也不要在 force-close 時清掉 persisted thread pointer，否則取消會不必要地丟失對話 continuity。visual idle 只代表 Shelf 沒有 active execution，不代表 provider process 無背景工作。
+
+**Related：** `agent-server/providers/codex/index.ts`、`src/renderer/components/agent/InputZone.tsx`、`e2e/agent-flows.spec.ts`、`agent-providers#37`。

@@ -52,6 +52,7 @@ const CODEX_SDK_SLASH_COMMANDS = [
 const CODEX_APP_SERVER_SLASH_COMMAND_NAMES = new Set<string>(CODEX_SDK_SLASH_COMMANDS.map((command) => command.name));
 const UNSUPPORTED_APP_SERVER_SLASH_COMMANDS = new Set(['ps', 'stop', 'clean']);
 const CODEX_STALE_THREAD_NOTICE = 'Previous Codex thread was unavailable; started a new thread.';
+const CODEX_INTERRUPT_GRACE_MS = 1_000;
 const CODEX_AUTH_METHOD = {
   kind: 'oauth' as const,
   instructions: [{ label: 'Sign in with your ChatGPT account (device code)' }],
@@ -635,11 +636,30 @@ export function createCodexBackend(deps: CodexBackendDeps = {}): ServerBackend {
     },
 
     async stop(): Promise<void> {
-      if (appServer && activeThreadId && activeTurnId) {
-        await appServer.request('turn/interrupt', { threadId: activeThreadId, executionId: activeTurnId }).catch((err) => {
-          serverLog('warn', 'codex-app-server', `turn/interrupt failed: ${(err as Error)?.message ?? String(err)}`);
-        });
+      const client = appServer;
+      if (!client) throw new Error('codex stop failed: no app-server session');
+      if (activeThreadId && activeTurnId) {
+        await requestCodexInterrupt(client, activeThreadId, activeTurnId);
       }
+      try {
+        client.close();
+      } catch (err) {
+        const message = (err as Error)?.message ?? String(err);
+        serverLog('error', 'codex-app-server', `force-close after stop failed: ${message}`);
+        throw new Error(`codex stop failed: could not close app-server: ${message}`);
+      }
+      if (appServer === client) {
+        appServer = null;
+        appServerAppId = undefined;
+        appServerInitialized = false;
+        activeThreadId = null;
+        activeTurnId = null;
+      }
+      for (const [toolUseId, pending] of pendingPermissionRequests) {
+        serverLog('warn', 'codex-app-server', `cancelling approval during stop: ${toolUseId} (${pending.toolName})`);
+        pending.resolve({ allow: false, cancelled: true });
+      }
+      pendingPermissionRequests.clear();
       resolveActiveTurn?.();
     },
 
@@ -747,6 +767,22 @@ export function createCodexBackend(deps: CodexBackendDeps = {}): ServerBackend {
         reject(err);
       });
     });
+  }
+
+  async function requestCodexInterrupt(client: CodexAppServerLike, threadId: string, turnId: string): Promise<void> {
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        client.request('turn/interrupt', { threadId, executionId: turnId }),
+        new Promise<never>((_, reject) => {
+          timeout = setTimeout(() => reject(new Error(`no acknowledgement within ${CODEX_INTERRUPT_GRACE_MS}ms`)), CODEX_INTERRUPT_GRACE_MS);
+        }),
+      ]);
+    } catch (err) {
+      serverLog('warn', 'codex-app-server', `turn/interrupt failed; force-closing app-server: ${(err as Error)?.message ?? String(err)}`);
+    } finally {
+      if (timeout) clearTimeout(timeout);
+    }
   }
 
   async function handleGoalSlash(client: CodexAppServerLike, threadId: string, args: string, send: SendFn): Promise<void> {

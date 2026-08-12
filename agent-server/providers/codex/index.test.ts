@@ -352,6 +352,43 @@ describe('Codex official app-server backend lifecycle', () => {
     expect(out.filter((m) => m.type === 'status' && m.state === 'idle')).toHaveLength(1);
   });
 
+  it('force-closes app-server when interrupt fails instead of reporting a false stop', async () => {
+    let release!: () => void;
+    const app = new FakeAppServer({
+      'turn/start': async () => {
+        app.fire('turn/started', { threadId: 'thread-1', turn: { id: 'turn-1' } });
+        await new Promise<void>((resolve) => { release = resolve; });
+        return { turn: { id: 'turn-1' } };
+      },
+      'turn/interrupt': () => { throw new Error('interrupt transport failed'); },
+    });
+    const backend = createCodexBackend({ createAppServer: () => app });
+    const running = backend.query({ prompt: 'first', cwd: '/repo' }, () => {});
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    await expect(backend.stop()).resolves.toBeUndefined();
+    release();
+    await running;
+
+    expect(app.closed).toBe(true);
+  });
+
+  it('force-closes idle app-server and reconnects on the next turn', async () => {
+    const apps = [new FakeAppServer(), new FakeAppServer()];
+    let appIndex = 0;
+    const backend = createCodexBackend({ createAppServer: () => apps[appIndex++] });
+
+    await backend.query({ prompt: 'first', cwd: '/repo' }, () => {});
+    await expect(backend.stop()).resolves.toBeUndefined();
+    await backend.query({
+      prompt: 'second', cwd: '/repo', restoreContext: restoreContext('thread-1'),
+    }, () => {});
+
+    expect(apps[0].closed).toBe(true);
+    expect(apps[1].calls.some((call) => call.method === 'thread/resume')).toBe(true);
+    backend.dispose();
+  });
+
   it('bridges command execution approval requests to Shelf permission UI and returns the decision', async () => {
     let approval!: Promise<unknown>;
     let release!: () => void;
