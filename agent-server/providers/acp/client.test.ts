@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import type { SessionUpdate } from '@agentclientprotocol/sdk';
+import type { SessionConfigOption, SessionUpdate } from '@agentclientprotocol/sdk';
 import { createMockAcpAgent } from './mock-agent';
 import { openAcpConnection } from './connection';
 import { createSessionDriver } from './client';
@@ -286,6 +286,54 @@ describe('acp session driver (connection + new/resume + turn)', () => {
 
     expect(modeParams).toMatchObject({ sessionId: 'mock-session', modeId: 'mode-x' });
     expect(configParams).toMatchObject({ sessionId: 'mock-session', configId: 'model', value: 'gpt-5.4' });
+  });
+
+  it('publishes authoritative mode and config replacement snapshots from ACP', async () => {
+    const initialConfig: SessionConfigOption[] = [{
+      type: 'select',
+      id: 'allow_all',
+      name: 'Allow all',
+      category: 'permissions',
+      currentValue: 'on',
+      options: [
+        { value: 'off', name: 'Off' },
+        { value: 'on', name: 'On' },
+      ],
+    }];
+    const changes: unknown[] = [];
+    const driver = createSessionDriver({ onStateChange: (sessionId, change) => changes.push({ sessionId, change }) });
+    const mock = createMockAcpAgent({ configOptions: initialConfig });
+    const conn = openAcpConnection(mock, { onSessionUpdate: driver.onSessionUpdate });
+    const session = await driver.startNew(conn.agent, { cwd: '/tmp/p' });
+
+    await driver.setConfigOption(conn.agent, session, 'allow_all', 'on');
+    driver.onSessionUpdate({
+      sessionId: session.sessionId,
+      update: { sessionUpdate: 'current_mode_update', currentModeId: 'autopilot' },
+    });
+    const replacementConfig: SessionConfigOption[] = initialConfig.map((option) => (
+      option.type === 'select' ? { ...option, currentValue: 'off' } : option
+    ));
+    driver.onSessionUpdate({
+      sessionId: session.sessionId,
+      update: { sessionUpdate: 'config_option_update', configOptions: replacementConfig },
+    });
+    conn.close();
+
+    expect(changes).toEqual([
+      {
+        sessionId: 'mock-session',
+        change: { kind: 'config_options', configOptions: initialConfig },
+      },
+      {
+        sessionId: 'mock-session',
+        change: { kind: 'mode', currentModeId: 'autopilot' },
+      },
+      {
+        sessionId: 'mock-session',
+        change: { kind: 'config_options', configOptions: replacementConfig },
+      },
+    ]);
   });
 
   it('passes additionalDirectories + mcpServers to session/new', async () => {

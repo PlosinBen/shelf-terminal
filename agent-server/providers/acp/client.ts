@@ -14,6 +14,7 @@ import {
   type StopReason,
   type McpServer,
   type AvailableCommand,
+  type SessionConfigOption,
 } from '@agentclientprotocol/sdk';
 import type { AgentAttachment } from '@shared/types';
 import type { OutgoingMessage, SendFn } from '../types';
@@ -44,6 +45,25 @@ export interface StartSessionOptions {
   mcpServers?: McpServer[];
 }
 
+export const ACP_SESSION_STATE_CHANGES = {
+  MODE: 'mode',
+  CONFIG_OPTIONS: 'config_options',
+} as const;
+
+export type AcpSessionStateChange =
+  | {
+      kind: typeof ACP_SESSION_STATE_CHANGES.MODE;
+      currentModeId: string;
+    }
+  | {
+      kind: typeof ACP_SESSION_STATE_CHANGES.CONFIG_OPTIONS;
+      configOptions: SessionConfigOption[];
+    };
+
+export interface SessionDriverOptions {
+  onStateChange?: (sessionId: string, change: AcpSessionStateChange) => void;
+}
+
 export interface SessionDriver {
   /** Register on the ACP connection: routes session/update for the session lifetime. */
   onSessionUpdate(notification: SessionNotification): void;
@@ -69,7 +89,7 @@ export interface SessionDriver {
   forget(sessionId: string): void;
 }
 
-export function createSessionDriver(): SessionDriver {
+export function createSessionDriver(options: SessionDriverOptions = {}): SessionDriver {
   const routeBySession = new Map<string, SessionRouteState>();
   // Per-session slash commands captured from `available_commands_update` (arrives
   // out-of-turn near session start; the backend reads it at gatherCapabilities).
@@ -136,6 +156,16 @@ export function createSessionDriver(): SessionDriver {
     onSessionUpdate(n) {
       if (n.update.sessionUpdate === 'available_commands_update') {
         commandsBySession.set(n.sessionId, n.update.availableCommands);
+      } else if (n.update.sessionUpdate === 'current_mode_update') {
+        options.onStateChange?.(n.sessionId, {
+          kind: ACP_SESSION_STATE_CHANGES.MODE,
+          currentModeId: n.update.currentModeId,
+        });
+      } else if (n.update.sessionUpdate === 'config_option_update') {
+        options.onStateChange?.(n.sessionId, {
+          kind: ACP_SESSION_STATE_CHANGES.CONFIG_OPTIONS,
+          configOptions: n.update.configOptions,
+        });
       }
       routeUpdate(n.sessionId, n.update);
     },
@@ -210,7 +240,15 @@ export function createSessionDriver(): SessionDriver {
     },
 
     async setConfigOption(agent, session, configId, value) {
-      await agent.request(methods.agent.session.setConfigOption, { sessionId: session.sessionId, configId, value });
+      const response = await agent.request(methods.agent.session.setConfigOption, {
+        sessionId: session.sessionId,
+        configId,
+        value,
+      });
+      options.onStateChange?.(session.sessionId, {
+        kind: ACP_SESSION_STATE_CHANGES.CONFIG_OPTIONS,
+        configOptions: response.configOptions,
+      });
     },
 
     forget(sessionId) {
