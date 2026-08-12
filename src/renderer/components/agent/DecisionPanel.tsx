@@ -8,6 +8,7 @@ import {
   useAgentTab,
 } from '../../agentTabStore';
 import { emitAgent } from '../../events';
+import { permissionControlViews } from './permission-control-view';
 
 interface Props {
   tabId: string;
@@ -93,13 +94,26 @@ export function DecisionPanel({ tabId }: Props) {
     // capabilities at render time — closing & reopening always
     // reflects latest state.
     const key = localPicker.key;
+    const permissionControl = capabilities ? permissionControlViews({
+      permissionModes: capabilities.permissionModes,
+      currentPermissionMode: permissionMode,
+      permissionControl: capabilities.permissionControl,
+    }).find((control) => control.key === key) : undefined;
     const options = key === 'model'
       ? (capabilities?.models ?? []).map((m) => ({ value: m.value, label: m.displayName }))
       : key === 'effort'
         ? (capabilities?.effortLevels ?? []).map((e) => ({ value: e.value, label: e.displayName }))
-        : (capabilities?.permissionModes ?? []).map((p) => ({ value: p.value, label: p.displayName }));
-    const current = key === 'model' ? statusModel : key === 'effort' ? currentEffort : permissionMode;
-    const title = key === 'model' ? 'Select model' : key === 'effort' ? 'Select effort' : 'Select permission mode';
+        : (permissionControl?.options ?? []).map((option) => ({
+            value: option.value,
+            label: option.displayName,
+            description: option.description,
+          }));
+    const current = key === 'model' ? statusModel : key === 'effort' ? currentEffort : permissionControl?.currentValue;
+    const title = key === 'model'
+      ? 'Select model'
+      : key === 'effort'
+        ? 'Select effort'
+        : `Select ${permissionControl?.label ?? 'permission mode'}`;
     return (
       <SelectionPanel
         title={title}

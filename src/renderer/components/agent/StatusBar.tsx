@@ -4,6 +4,7 @@ import { providerLabel } from '@shared/agent-providers';
 import { clearMessages as clearMessagesStore, setLocalPicker, useAgentTab } from '../../agentTabStore';
 import { useStore } from '../../store';
 import { AgentMemory } from '../MemoryDisplay';
+import { permissionControlViews, type PermissionControlView } from './permission-control-view';
 
 interface Props {
   tabId: string;
@@ -42,10 +43,9 @@ export function StatusBar({ tabId, provider }: Props) {
     setLocalPicker(tabId, { key: 'model' });
   }, [tabId, capabilities]);
 
-  const handleOpenModePicker = useCallback(() => {
-    if (!capabilities || capabilities.permissionModes.length === 0) return;
-    setLocalPicker(tabId, { key: 'permissionMode' });
-  }, [tabId, capabilities]);
+  const handleOpenPermissionPicker = useCallback((key: PermissionControlView['key']) => {
+    setLocalPicker(tabId, { key });
+  }, [tabId]);
 
   const handleOpenEffortPicker = useCallback(() => {
     if (!capabilities || capabilities.effortLevels.length === 0) return;
@@ -59,7 +59,11 @@ export function StatusBar({ tabId, provider }: Props) {
     await clearMessagesStore(tabId);
   }, [tabId]);
 
-  const currentModeOption = capabilities?.permissionModes.find((m) => m.value === permissionMode);
+  const permissionControls = capabilities ? permissionControlViews({
+    permissionModes: capabilities.permissionModes,
+    currentPermissionMode: permissionMode,
+    permissionControl: capabilities.permissionControl,
+  }) : [];
   const currentEffortOption = capabilities?.effortLevels.find((e) => e.value === currentEffort);
 
   return (
@@ -77,16 +81,25 @@ export function StatusBar({ tabId, provider }: Props) {
           >{statusModel}</span>
         </>
       )}
-      {capabilities && capabilities.permissionModes.length > 0 && currentModeOption && (
-        <>
+      {permissionControls.map((control) => {
+        const current = control.options.find((option) => option.value === control.currentValue);
+        if (!current) return null;
+        return (
+        <React.Fragment key={control.key}>
           <span className="agent-status-sep">|</span>
           <span
             className="agent-status-seg agent-status-interactive"
-            data-severity={currentModeOption.severity ?? 'normal'}
-            onClick={handleOpenModePicker}
-          >{currentModeOption.displayName}</span>
-        </>
-      )}
+            data-severity={current.severity ?? 'normal'}
+            data-config-key={control.key}
+            onClick={() => handleOpenPermissionPicker(control.key)}
+          >
+            {control.key === 'permissionMode'
+              ? current.displayName
+              : <><span className="agent-status-seg-label">{control.label}: </span>{current.displayName}</>}
+          </span>
+        </React.Fragment>
+        );
+      })}
       {capabilities && capabilities.effortLevels.length > 0 && currentEffortOption && (
         <>
           <span className="agent-status-sep">|</span>

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef } from 'react';
 import type { AgentProvider, AgentPrefs, Connection } from '@shared/types';
+import { persistedPrefsFromCapabilities } from './agent/capability-prefs';
 import { MessageList } from './agent/MessageList';
 import { InputZone } from './agent/InputZone';
 import { StatusBar } from './agent/StatusBar';
@@ -124,16 +125,7 @@ export function AgentView({ tabId, cwd, connection, provider, projectId, visible
   const capabilities = tabState?.capabilities;
   useEffect(() => {
     if (!capabilities) return;
-    const partial: Partial<AgentPrefs> = {};
-    if (capabilities.currentModel && capabilities.currentModel !== savedPrefs?.model) {
-      partial.model = capabilities.currentModel;
-    }
-    if (capabilities.currentEffort && capabilities.currentEffort !== savedPrefs?.effort) {
-      partial.effort = capabilities.currentEffort;
-    }
-    if (capabilities.currentPermissionMode && capabilities.currentPermissionMode !== savedPrefs?.permissionMode) {
-      partial.permissionMode = capabilities.currentPermissionMode;
-    }
+    const partial = persistedPrefsFromCapabilities(capabilities, savedPrefs);
     if (Object.keys(partial).length > 0) persistPref(partial);
   }, [capabilities?.currentModel, capabilities?.currentEffort, capabilities?.currentPermissionMode, savedPrefs?.model, savedPrefs?.effort, savedPrefs?.permissionMode, persistPref]);
 

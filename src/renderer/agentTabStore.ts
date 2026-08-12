@@ -5,6 +5,8 @@ import { loadAgentMessagesLatest, saveAgentMessagesDelta, clearAgentSession } fr
 import { reconcileQueueSnapshot, type PendingSend } from './queue-reconcile';
 import { debugLog } from './debugLog';
 import { formatTabLogId } from '../shared/tab-id';
+import type { PermissionControlCapabilities } from '../shared/permission-controls';
+import type { ConfigEditKey } from '../shared/config-ack';
 
 // Per-tab store for agent UI state. Split from store.ts because the
 // global store rebuilds its snapshot on every change — every useStore
@@ -30,6 +32,7 @@ export interface CycleOption {
 export interface Capabilities {
   models: { value: string; displayName: string; effortLevels?: CycleOption[]; vision?: boolean }[];
   permissionModes: CycleOption[];
+  permissionControl?: PermissionControlCapabilities;
   effortLevels: CycleOption[];
   slashCommands: { name: string; description: string }[];
   authMethod?: AuthMethod;
@@ -59,7 +62,7 @@ export interface PendingPicker {
 }
 
 export interface LocalPicker {
-  key: 'model' | 'effort' | 'permissionMode';
+  key: ConfigEditKey;
 }
 
 export interface AgentTabState {
