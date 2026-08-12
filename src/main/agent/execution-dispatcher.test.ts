@@ -18,6 +18,9 @@ function parse(msg: any): AgentEvent | null {
   if (msg?.type === 'error') {
     return { type: 'error', error: msg.error ?? '' };
   }
+  if (msg?.type === 'capabilities') {
+    return { type: 'capabilities', caps: msg.caps ?? msg } as AgentEvent;
+  }
   return null;
 }
 
@@ -147,6 +150,34 @@ describe('createExecutionDispatcher', () => {
     // Handlers are one-shot — same requestId firing again is dropped
     d.feed({ type: 'capabilities', requestId: 'cap-1', error: 'late' });
     expect(captured).toHaveLength(1);
+  });
+
+  it('routes an unsolicited execution-less capabilities update to the session sink', () => {
+    const sessionEvents: AgentEvent[] = [];
+    const d = createExecutionDispatcher(
+      parse,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      (event) => sessionEvents.push(event),
+    );
+    const permissionControl = {
+      strategy: 'native',
+      permission: {
+        label: 'Allow all',
+        currentValue: 'on',
+        options: [{ value: 'on', displayName: 'On' }],
+      },
+    };
+
+    d.feed({ type: 'capabilities', permissionControl });
+
+    expect(sessionEvents).toHaveLength(1);
+    expect(sessionEvents[0]).toMatchObject({
+      type: 'capabilities',
+      caps: { permissionControl },
+    });
   });
 
   // ── Background tasks: executionId-less routing (the "unknown execution dropping" fix) ──

@@ -13,10 +13,11 @@ export type PermissionHandler = (toolUseId: string, toolName: string, input: Rec
 /**
  * Pure event dispatcher — no I/O. Routes raw parsed events from agent-server
  * stdout to one of two destinations, by type:
- *   - **Display content** (message / stream / error) → the session-level
+ *   - **Session state/content** (execution-less capabilities, message / stream /
+ *     error) → the session-level
  *     `onSessionEvent` sink, delivered by tabId, NOT through the per-execution
  *     generator — so late-at-the-seam content is never dropped as "unknown execution".
- *   - **Status / control** (status, permission_request, plan, capabilities,
+ *   - **Execution control** (status, permission_request, plan, execution-bound capabilities,
  *     picker, auth) → the per-execution AsyncGenerator by `executionId` envelope (drives
  *     execution-end / busy-idle / `query()` resolution).
  * So `executionId` is the seam token for STATUS/lifecycle, not for content. Session-
@@ -129,6 +130,19 @@ export function createExecutionDispatcher(
     // Route to the session sink before the executionId check below.
     if (m?.type === 'skills_reloaded') {
       onSkillsReloaded?.(!!m.ok, typeof m.error === 'string' ? m.error : undefined);
+      return;
+    }
+
+    // Provider-native mode/config updates can arrive after the execution that
+    // triggered them has settled (for example a native slash command or ACP
+    // config update). They describe session truth, so execution-less capability
+    // updates use the tab/session sink instead of being dropped by the execution
+    // guard below. requestId-keyed probes were consumed by the RPC branch above;
+    // execution-bound canonical updates keep their existing generator path.
+    if (onSessionEvent && m?.type === 'capabilities' && !m?.requestId && !m?.executionId) {
+      const ev = parseRemoteMessage(m);
+      if (ev) onSessionEvent(ev);
+      else log.info('agent-remote', 'session capabilities event unparseable, dropped');
       return;
     }
 

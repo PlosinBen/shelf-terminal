@@ -83,9 +83,9 @@ export type OutgoingMessage = WireEnvelope & (
   /**
    * Capabilities is dual-purpose: usually a one-shot RPC response carrying
    * `requestId` (matched in main's onResponse map), but providers may also
-   * emit unsolicited updates on model/mode change. requestId optional to
-   * cover both. Main side ignores requestId-less variants currently (they
-   * fall through parseRemoteMessage); this stays open for future use.
+   * emit unsolicited session-scoped updates on model/mode/config change.
+   * requestId optional to cover both; requestId-less, execution-less variants
+   * are delivered through main's session event sink.
    */
   | ({ type: 'capabilities'; requestId?: string; error?: string } & Partial<ProviderCapabilities> & {
       currentModel?: string;
