@@ -11,6 +11,7 @@ import {
   type SessionNotification,
   type SessionUpdate,
   type NewSessionResponse,
+  type ResumeSessionResponse,
   type StopReason,
   type McpServer,
   type AvailableCommand,
@@ -35,6 +36,8 @@ export interface AcpSession {
   sessionId: string;
   /** Present for NEW sessions (drives capability mapping); absent on resume. */
   newSessionResponse?: NewSessionResponse;
+  /** Present for resumed sessions when the agent reports restored native state. */
+  resumeSessionResponse?: ResumeSessionResponse;
 }
 
 export interface StartSessionOptions {
@@ -185,13 +188,13 @@ export function createSessionDriver(options: SessionDriverOptions = {}): Session
     },
 
     async resume(agent, sessionId, opts) {
-      await agent.request(methods.agent.session.resume, {
+      const response = await agent.request(methods.agent.session.resume, {
         sessionId,
         cwd: opts.cwd,
         ...(opts.additionalDirectories?.length ? { additionalDirectories: opts.additionalDirectories } : {}),
       });
       routeState(sessionId);
-      return { sessionId };
+      return { sessionId, resumeSessionResponse: response };
     },
 
     async drivePromptTurn(agent, session, prompt, send, images, attachments) {

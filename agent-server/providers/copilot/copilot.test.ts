@@ -230,6 +230,42 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
     backend.dispose();
   });
 
+  it('resumes persisted ACP state before capability discovery creates a new session', async () => {
+    let newSessions = 0;
+    let resumedSessionId: string | undefined;
+    const mock = createMockAcpAgent({
+      modes: COPILOT_MODES,
+      configOptions: COPILOT_CONFIG,
+      onNewSession: () => { newSessions += 1; },
+      onResumeSession: (params) => { resumedSessionId = (params as { sessionId?: string }).sessionId; },
+    });
+    const backend = createCopilotBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
+
+    const caps = await backend.gatherCapabilities!(
+      '/tmp/project',
+      'shelf-session',
+      undefined,
+      { permissionMode: 'bypassPermissions' },
+      undefined,
+      'app-1',
+      {
+        sessionId: 'shelf-session',
+        provider: 'copilot',
+        updatedAt: 1,
+        lastSdkSessionId: 'persisted-acp-session',
+      },
+    );
+
+    expect(resumedSessionId).toBe('persisted-acp-session');
+    expect(newSessions).toBe(0);
+    expect(caps.permissionControl).toMatchObject({
+      strategy: 'native',
+      mode: { currentValue: 'agent' },
+      permission: { currentValue: 'off' },
+    });
+    backend.dispose();
+  });
+
   it('respawns the CONNECTION when appId changes (COPILOT_HOME is fixed at spawn)', async () => {
     // Fresh mock per spawn — a respawn = a brand-new connection, so we count
     // openAgent calls (process spawns), not session/new. COPILOT_HOME is process

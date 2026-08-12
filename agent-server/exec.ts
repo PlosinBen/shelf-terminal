@@ -554,7 +554,16 @@ rl.on('line', (line) => {
           // by then (codex errors if CODEX_HOME is absent → misreported as auth).
           ensureConfigHome(backend, msg.appId);
           ensureSkillsProjected(backend, msg.appId);
-          const caps = await backend.gatherCapabilities?.(msg.cwd ?? process.cwd(), msg.sessionId, msg.customModels, msg.intent, modelCacheClient, msg.appId);
+          const restoreContext = loadRestoreContextFor(provider, msg.sessionId);
+          const caps = await backend.gatherCapabilities?.(
+            msg.cwd ?? process.cwd(),
+            msg.sessionId,
+            msg.customModels,
+            msg.intent,
+            modelCacheClient,
+            msg.appId,
+            restoreContext,
+          );
           send({ type: 'capabilities', requestId: msg.requestId ?? '', ...(caps ?? {}) });
         } catch (err: any) {
           // Real data loss: gatherCapabilities threw → response carries only

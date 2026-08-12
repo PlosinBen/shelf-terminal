@@ -47,6 +47,8 @@ export interface MockAgentScript {
   onCancel?: (params: unknown) => void;
   /** Called with session/new params (e.g. to assert additionalDirectories). */
   onNewSession?: (params: unknown) => void;
+  /** Called with session/resume params. */
+  onResumeSession?: (params: unknown) => void;
   /** Called with session/set_mode params (assert modeId). */
   onSetMode?: (params: unknown) => void;
   /** Authoritative updates emitted while handling session/set_mode. */
@@ -99,7 +101,13 @@ export function createMockAcpAgent(script: MockAgentScript = {}): AgentApp {
         ...(script.configOptions ? { configOptions: script.configOptions } : {}),
       };
     })
-    .onRequest('session/resume', () => ({}))
+    .onRequest('session/resume', ({ params }) => {
+      script.onResumeSession?.(params);
+      return {
+        ...(script.modes ? { modes: script.modes } : {}),
+        ...(script.configOptions ? { configOptions: script.configOptions } : {}),
+      };
+    })
     .onRequest('session/set_mode', async ({ params, client }) => {
       script.onSetMode?.(params);
       for (const update of script.updatesOnSetMode ?? []) {

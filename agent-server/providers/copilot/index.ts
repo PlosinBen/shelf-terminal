@@ -337,6 +337,8 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
         session = await driver.resume(c.agent, input.resumeId, opts);
         sessionCwd = input.cwd;
         sessionAppId = appId;
+        sessionModes = session.resumeSessionResponse?.modes ?? undefined;
+        sessionConfigOptions = session.resumeSessionResponse?.configOptions ?? undefined;
         return session;
       } catch {
         // Resume rejected (session gone / unsupported) → fall through to new.
@@ -406,6 +408,7 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
       intent?: { model?: string; effort?: string; permissionMode?: string },
       _cache?: unknown,
       appId?: string,
+      restoreContext?: import('../../context-store').PersistedContext,
     ): Promise<ProviderCapabilities> {
       // appId now rides caps → the CLI spawn below already gets the per-app
       // COPILOT_HOME (config-home isolation), and login (which follows caps) can
@@ -416,7 +419,7 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
       if (intent?.model) currentModel = intent.model;
       if (intent?.effort) currentEffort = intent.effort;
       try {
-        const s = await ensureSession({ cwd, appId }, null);
+        const s = await ensureSession({ cwd, appId, resumeId: restoreContext?.lastSdkSessionId }, null);
         // `available_commands_update` arrives out-of-turn just AFTER session/new,
         // so it may not be captured yet. Briefly wait for it (bounded) so the
         // slash-command autocomplete isn't empty on the first caps fetch. Resolves

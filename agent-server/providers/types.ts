@@ -458,6 +458,9 @@ export interface ServerBackend {
      * copilot-acp feature note (spawn-timing).
      */
     appId?: string,
+    /** Persisted provider context loaded by the orchestrator for capability-time
+     * resume. Providers remain decoupled from context-store I/O. */
+    restoreContext?: PersistedContext,
   ): Promise<ProviderCapabilities>;
   resolvePermission?(toolUseId: string, allow: boolean, message?: string, scope?: 'once' | 'session'): void;
   /**
