@@ -1,4 +1,6 @@
 import type { AgentAttachment, AgentMessage, AuthMethod, ProviderModel } from '@shared/types';
+import type { PermissionControlCapabilities } from '@shared/permission-controls';
+import type { ConfigEditKey } from '@shared/config-ack';
 
 export type { AgentMessage, AgentMessageType } from '@shared/types';
 
@@ -74,6 +76,7 @@ export interface AgentStatusPayload {
 export interface ProviderCapabilities {
   models: { value: string; displayName: string; effortLevels?: CycleOption[]; vision?: boolean }[];
   permissionModes: CycleOption[];
+  permissionControl: PermissionControlCapabilities;
   effortLevels: CycleOption[];
   slashCommands: SlashCommand[];
   authMethod?: AuthMethod;
@@ -111,7 +114,7 @@ export interface AgentQueryOptions {
    * execution so the provider applies it + emits a divider the same way a typed
    * /model slash does. Threaded through to agent-server's send line.
    */
-  configEdit?: { key: 'model' | 'effort' | 'permissionMode'; value: string };
+  configEdit?: { key: ConfigEditKey; value: string };
   /**
    * Renderer-minted correlation key for this send. Forwarded to agent-server in
    * the send line so the server's queue snapshot can echo it back. See

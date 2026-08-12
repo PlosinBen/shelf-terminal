@@ -421,12 +421,14 @@ describe('parseRemoteMessage — mid-execution capabilities', () => {
       caps: {
         models: [{ value: 'default', displayName: 'Default' }],
         permissionModes: [],
+        permissionControl: { strategy: 'shelf' },
         effortLevels: [],
         slashCommands: [],
         authMethod: undefined,
         currentModel: 'claude-opus-4-8',
         currentEffort: 'high',
         currentPermissionMode: 'plan',
+        authRequired: undefined,
       },
     });
   });
@@ -436,7 +438,49 @@ describe('parseRemoteMessage — mid-execution capabilities', () => {
     const event = parseRemoteMessage({ type: 'capabilities', currentModel: 'sonnet' });
     expect(event).toMatchObject({
       type: 'capabilities',
-      caps: { models: [], permissionModes: [], effortLevels: [], slashCommands: [], currentModel: 'sonnet' },
+      caps: {
+        models: [],
+        permissionModes: [],
+        effortLevels: [],
+        slashCommands: [],
+        permissionControl: { strategy: 'shelf' },
+        currentModel: 'sonnet',
+      },
+    });
+  });
+
+  it('preserves provider-native mode and permission descriptors as independent controls', async () => {
+    const { parseRemoteMessage } = await import('./remote');
+    const permissionControl = {
+      strategy: 'native',
+      mode: {
+        label: 'Mode',
+        currentValue: 'agent',
+        options: [
+          { value: 'agent', displayName: 'Agent' },
+          { value: 'plan', displayName: 'Plan' },
+        ],
+      },
+      permission: {
+        label: 'Allow all',
+        currentValue: 'off',
+        options: [
+          { value: 'off', displayName: 'Off' },
+          { value: 'on', displayName: 'On' },
+        ],
+      },
+    };
+
+    expect(parseRemoteMessage({
+      type: 'capabilities',
+      models: [],
+      permissionModes: [],
+      effortLevels: [],
+      slashCommands: [],
+      permissionControl,
+    })).toMatchObject({
+      type: 'capabilities',
+      caps: { permissionControl },
     });
   });
 });

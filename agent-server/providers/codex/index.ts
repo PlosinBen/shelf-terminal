@@ -1,4 +1,5 @@
 import { CODEX_PROVIDER } from '@shared/agent-providers';
+import { SHELF_PERMISSION_CONTROL } from '@shared/permission-controls';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -414,6 +415,7 @@ export function createCodexBackend(deps: CodexBackendDeps = {}): ServerBackend {
     return {
       models,
       permissionModes: pickPermissionModes(['default', 'plan', 'bypassPermissions']),
+      permissionControl: SHELF_PERMISSION_CONTROL,
       effortLevels: pickEffortLevels([...CODEX_EFFORT_LEVELS]),
       slashCommands: [...CODEX_SDK_SLASH_COMMANDS],
       ...(currentModel ? { currentModel } : {}),
@@ -584,6 +586,7 @@ export function createCodexBackend(deps: CodexBackendDeps = {}): ServerBackend {
         return {
           models: [],
           permissionModes: [],
+          permissionControl: SHELF_PERMISSION_CONTROL,
           effortLevels: [],
           slashCommands: [],
           authRequired: true,

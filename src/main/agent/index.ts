@@ -4,6 +4,7 @@ import { log } from '@shared/logger';
 import { formatTabLogId } from '@shared/tab-id';
 import { providerLabel } from '@shared/agent-providers';
 import type { AgentAttachment, Connection, AgentProvider } from '@shared/types';
+import type { ConfigEditKey } from '@shared/config-ack';
 import type { AgentSessionState, AgentEvent, AgentBackend, PermissionResult, ProviderCapabilities } from './types';
 import { createRemoteBackend, syncSkillsForConnection } from './remote';
 import { loadSettings } from '../settings-store';
@@ -467,7 +468,7 @@ async function sendMessage(
     effort?: string;
     permissionMode?: string;
     attachments?: AgentAttachment[];
-    configEdit?: { key: 'model' | 'effort' | 'permissionMode'; value: string };
+    configEdit?: { key: ConfigEditKey; value: string };
     clientMsgId?: string;
   },
 ): Promise<boolean> {

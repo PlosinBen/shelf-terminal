@@ -17,6 +17,7 @@ import {
   type StopReason,
 } from '@agentclientprotocol/sdk';
 import { COPILOT_PROVIDER } from '@shared/agent-providers';
+import { SHELF_PERMISSION_CONTROL } from '@shared/permission-controls';
 import { formatConfigAck, type ConfigEditKey } from '@shared/config-ack';
 import { PERMISSION_MODES, type ServerBackend, type QueryInput, type SendFn, type ProviderCapabilities } from '../types';
 import { serverLog } from '../../server-logger';
@@ -148,6 +149,7 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
     return {
       ...base,
       permissionModes: copilotPermissionModes(),
+      permissionControl: SHELF_PERMISSION_CONTROL,
       ...(currentModel ? { currentModel } : {}),
       ...(currentEffort ? { currentEffort } : {}),
       ...(currentPermissionMode ? { currentPermissionMode } : {}),
@@ -380,7 +382,15 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
         // without the message a non-auth failure (CLI hang/config) is silently
         // mislabeled as "needs login".
         serverLog('warn', 'copilot', `gatherCapabilities failed → reporting authRequired: ${err?.message ?? String(err)}`);
-        return { models: [], permissionModes: [], effortLevels: [], slashCommands: [], authRequired: true, authMethod: COPILOT_AUTH_METHOD };
+        return {
+          models: [],
+          permissionModes: [],
+          permissionControl: SHELF_PERMISSION_CONTROL,
+          effortLevels: [],
+          slashCommands: [],
+          authRequired: true,
+          authMethod: COPILOT_AUTH_METHOD,
+        };
       }
     },
 

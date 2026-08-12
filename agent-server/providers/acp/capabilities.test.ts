@@ -53,7 +53,13 @@ describe('mapSessionCapabilities', () => {
   });
 
   it('returns empty arrays when the agent advertises nothing', () => {
-    expect(mapSessionCapabilities({})).toEqual({ models: [], permissionModes: [], effortLevels: [], slashCommands: [] });
+    expect(mapSessionCapabilities({})).toEqual({
+      models: [],
+      permissionModes: [],
+      permissionControl: { strategy: 'shelf' },
+      effortLevels: [],
+      slashCommands: [],
+    });
   });
 
   it('reads current selections for seeding the UI', () => {

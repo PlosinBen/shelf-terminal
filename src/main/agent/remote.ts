@@ -1,4 +1,5 @@
 import { log } from '@shared/logger';
+import { SHELF_PERMISSION_CONTROL } from '@shared/permission-controls';
 import type { Connection, AgentProvider, AgentInitPhase, AgentQueueItem, ProviderModel, TaskEvent, ConnectionHealth, ConnectionHealthState } from '@shared/types';
 import type { AgentBackend, AgentEvent, AgentQueryOptions, PickerResolvePayload } from './types';
 import { ConnectionHealthTracker, DEFAULT_HEALTH_THRESHOLDS } from './connection-health';
@@ -235,6 +236,7 @@ export function createRemoteBackend(
         resolve({
           models: payload.models ?? [],
           permissionModes: payload.permissionModes ?? [],
+          permissionControl: payload.permissionControl ?? SHELF_PERMISSION_CONTROL,
           effortLevels: payload.effortLevels ?? [],
           slashCommands: payload.slashCommands ?? [],
           authMethod: payload.authMethod,
@@ -1355,6 +1357,7 @@ export function parseRemoteMessage(msg: any): AgentEvent | null {
       caps: {
         models: msg.models ?? [],
         permissionModes: msg.permissionModes ?? [],
+        permissionControl: msg.permissionControl ?? SHELF_PERMISSION_CONTROL,
         effortLevels: msg.effortLevels ?? [],
         slashCommands: msg.slashCommands ?? [],
         authMethod: msg.authMethod,

@@ -14,6 +14,7 @@ import type {
   AvailableCommand,
 } from '@agentclientprotocol/sdk';
 import type { ProviderCapabilities, CycleOption } from '../types';
+import { SHELF_PERMISSION_CONTROL } from '@shared/permission-controls';
 
 export interface AcpSessionCapabilitiesInput {
   modes?: SessionModeState | null;
@@ -68,7 +69,7 @@ export function mapSessionCapabilities(input: AcpSessionCapabilitiesInput): Prov
     name: c.name,
     description: c.description,
   }));
-  return { models, permissionModes, effortLevels, slashCommands };
+  return { models, permissionModes, permissionControl: SHELF_PERMISSION_CONTROL, effortLevels, slashCommands };
 }
 
 /**

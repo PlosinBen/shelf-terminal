@@ -14,6 +14,7 @@ import { severityFromUtilization, pickPermissionModes, pickEffortLevels } from '
 import { parseSlashPrefix } from '@shared/slash-prefix';
 import { formatConfigAck, type ConfigEditKey } from '@shared/config-ack';
 import type { ProviderModel, NormalizedTask } from '@shared/types';
+import { SHELF_PERMISSION_CONTROL } from '@shared/permission-controls';
 import { stripCwd, resolveSkillsPluginRoot, readUploadedImageAttachments } from '../shared';
 import { loadProjectedMcpServers } from '../mcp-config';
 import {
@@ -662,6 +663,7 @@ export function createClaudeBackend(): ServerBackend {
     return {
       models: mergeClaudeModels(cache.models ?? [], customModels),
       permissionModes: pickPermissionModes(['default', 'acceptEdits', 'bypassPermissions', 'plan']),
+      permissionControl: SHELF_PERMISSION_CONTROL,
       effortLevels: pickEffortLevels(['low', 'medium', 'high', 'xhigh', 'max']),
       slashCommands: (() => {
         const userCmds = (cache.commands ?? []).map((c: any) => ({ name: c.name, description: c.description }));

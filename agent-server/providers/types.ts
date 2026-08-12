@@ -22,6 +22,8 @@ export function formatResetCountdown(resetsAtMs: number): string | null {
 }
 
 import type { AgentAttachment, AgentProvider, AgentQueueItem, ProviderModel, TaskEvent } from '@shared/types';
+import type { PermissionControlCapabilities } from '@shared/permission-controls';
+import type { ConfigEditKey } from '@shared/config-ack';
 import type { MemoryUsageReport } from '@shared/process-memory';
 import type { PersistedContext } from '../context-store';
 
@@ -289,7 +291,7 @@ export interface QueryInput {
    * path as a typed `/model` slash, so the divider + capabilities come back
    * identically regardless of entry point.
    */
-  configEdit?: { key: 'model' | 'effort' | 'permissionMode'; value: string };
+  configEdit?: { key: ConfigEditKey; value: string };
   /**
    * Renderer-minted correlation key for this send (crypto.randomUUID at submit
    * time). Echoed back in the queue snapshot + used by the orchestrator to track
@@ -357,6 +359,7 @@ export function pickEffortLevels(values: string[]): CycleOption[] {
 export interface ProviderCapabilities {
   models: { value: string; displayName: string; effortLevels?: CycleOption[]; vision?: boolean }[];
   permissionModes: CycleOption[];
+  permissionControl: PermissionControlCapabilities;
   effortLevels: CycleOption[];
   slashCommands: { name: string; description: string }[];
   authMethod?: unknown;

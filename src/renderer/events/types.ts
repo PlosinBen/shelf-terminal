@@ -1,4 +1,5 @@
 import type { AgentAttachment, AgentInitStatus, AgentLoginPrompt, AgentLoginResult, AgentPrefs, AgentQueueItem, Connection, TaskEvent } from '../../shared/types';
+import type { ConfigEditKey } from '../../shared/config-ack';
 import { on, emit } from './bus';
 
 // Typed agent event vocabulary. Names prefixed 'agent:' to coexist with
@@ -47,7 +48,7 @@ export interface AgentEventMap {
     prefs?: AgentPrefs;
     /** Structured config edit (picker / status-bar). When set, text is empty
      *  and no user echo is written — the provider applies it + emits a divider. */
-    configEdit?: { key: 'model' | 'effort' | 'permissionMode'; value: string };
+    configEdit?: { key: ConfigEditKey; value: string };
     /** Renderer-minted correlation key (crypto.randomUUID at submit). Threaded
      *  to agent-server so its queue snapshot can echo it back. */
     clientMsgId?: string;

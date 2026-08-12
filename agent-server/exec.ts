@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { randomUUID } from 'node:crypto';
+import type { ConfigEditKey } from '@shared/config-ack';
 import { createClaudeBackend } from './providers/claude';
 import { createCodexBackend } from './providers/codex';
 // `copilot` is driven by the ACP backend (the native SDK backend was deleted at
@@ -66,7 +67,7 @@ interface IncomingMessage {
   /** For `type: 'send'`: a structured config edit (picker / status-bar). When
    *  present, the provider applies it + emits a divider instead of running a
    *  query — prompt is empty for these executions. */
-  configEdit?: { key: 'model' | 'effort' | 'permissionMode'; value: string };
+  configEdit?: { key: ConfigEditKey; value: string };
   /** For `type: 'send'` / `type: 'cancel_queued'`: renderer-minted correlation
    *  key. Tracked through the send queue + echoed in the queue snapshot. */
   clientMsgId?: string;

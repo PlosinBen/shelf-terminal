@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { formatConfigAck } from '@shared/config-ack';
 import { parseSlashPrefix } from '@shared/slash-prefix';
 import { FAKE_PROVIDER, type AgentProvider } from '@shared/agent-providers';
+import { SHELF_PERMISSION_CONTROL } from '@shared/permission-controls';
 import { mdTable } from '../md-table';
 import { callMain } from '../../app-tool-client';
 import { FAKE_TEST_ENV } from './test-env';
@@ -706,6 +707,7 @@ export function createFakeBackend(_representedProvider: AgentProvider = FAKE_PRO
           ? [{ value: 'fake-model-after-auth', displayName: 'fake-model-after-auth' }]
           : [{ value: 'fake-model', displayName: 'fake-model' }],
         permissionModes: [{ value: 'default', displayName: 'ask' }],
+        permissionControl: SHELF_PERMISSION_CONTROL,
         effortLevels: [],
         // Enough entries to OVERFLOW the slash-menu fold (max-height scroll) so
         // e2e can exercise render-all + scroll-into-view. mcp/skills stay first
