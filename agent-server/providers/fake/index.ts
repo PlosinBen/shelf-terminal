@@ -3,6 +3,7 @@ import { formatConfigAck } from '@shared/config-ack';
 import { parseSlashPrefix } from '@shared/slash-prefix';
 import { FAKE_PROVIDER, type AgentProvider } from '@shared/agent-providers';
 import { SHELF_PERMISSION_CONTROL } from '@shared/permission-controls';
+import { PERMISSION_CONTROL_STRATEGIES } from '@shared/permission-controls';
 import { mdTable } from '../md-table';
 import { callMain } from '../../app-tool-client';
 import { FAKE_TEST_ENV } from './test-env';
@@ -189,6 +190,8 @@ export function createFakeBackend(_representedProvider: AgentProvider = FAKE_PRO
   // The auth_required scenario makes the next successful auth probe visibly
   // different, allowing E2E to prove main published the fresh capabilities.
   let reportAuthenticatedCapabilities = false;
+  let nativeMode = 'agent';
+  let nativePermission = 'off';
   // Test hook: the `reloadfail` scenario arms this so the NEXT reloadSkills
   // reports a failure (exercises the agent-view error line). Consumed once.
   let failNextReload = false;
@@ -197,6 +200,34 @@ export function createFakeBackend(_representedProvider: AgentProvider = FAKE_PRO
   // how copilot fetches premium-request credit at turn end. Consumed once.
   let emitCreditNext = false;
   const lateTimers = new Set<ReturnType<typeof setTimeout>>();
+
+  function nativePermissionCapabilities(): ProviderCapabilities {
+    return {
+      models: [{ value: 'fake-model', displayName: 'fake-model' }],
+      permissionModes: [],
+      permissionControl: {
+        strategy: PERMISSION_CONTROL_STRATEGIES.NATIVE,
+        mode: {
+          label: 'Mode',
+          currentValue: nativeMode,
+          options: [
+            { value: 'agent', displayName: 'Agent' },
+            { value: 'plan', displayName: 'Plan' },
+          ],
+        },
+        permission: {
+          label: 'Allow all',
+          currentValue: nativePermission,
+          options: [
+            { value: 'off', displayName: 'Off' },
+            { value: 'on', displayName: 'On' },
+          ],
+        },
+      },
+      effortLevels: [],
+      slashCommands: [],
+    };
+  }
 
   async function runStep(
     step: string,
@@ -595,6 +626,11 @@ export function createFakeBackend(_representedProvider: AgentProvider = FAKE_PRO
       if (input.configEdit) {
         const { key, value } = input.configEdit;
         send({ type: 'status', state: 'streaming' });
+        if (process.env[FAKE_TEST_ENV.NATIVE_PERMISSIONS] === '1') {
+          if (key === 'nativeMode') nativeMode = value;
+          else if (key === 'nativePermission') nativePermission = value;
+          send({ type: 'capabilities', ...nativePermissionCapabilities() });
+        }
         send({ type: 'message', msgId: mintId('m'), msgType: 'system', content: formatConfigAck(key, value) });
         send({ type: 'status', state: 'idle' });
         return;
@@ -702,6 +738,7 @@ export function createFakeBackend(_representedProvider: AgentProvider = FAKE_PRO
       // 'ready'. Same scoping as CAPS_FAIL (that spec's own app instance).
       const capsDelay = Number(process.env[FAKE_TEST_ENV.CAPS_DELAY]);
       if (Number.isFinite(capsDelay) && capsDelay > 0) await sleep(capsDelay);
+      if (process.env[FAKE_TEST_ENV.NATIVE_PERMISSIONS] === '1') return nativePermissionCapabilities();
       return {
         models: reportAuthenticatedCapabilities
           ? [{ value: 'fake-model-after-auth', displayName: 'fake-model-after-auth' }]

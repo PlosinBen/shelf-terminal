@@ -36,6 +36,32 @@ async function setupProject(page: Page) {
 }
 
 test.describe('agent flows via fake provider', () => {
+  test.describe('provider-native permission controls', () => {
+    test.use({ nativePermissions: true });
+
+    test('shows and mutates mode and permission independently', async ({ shelfApp: { page } }) => {
+      await setupProject(page);
+      await openAgentTab(page);
+
+      const mode = page.locator('[data-config-key="nativeMode"]:visible');
+      const permission = page.locator('[data-config-key="nativePermission"]:visible');
+      await expect(mode).toHaveText('Mode: Agent');
+      await expect(permission).toHaveText('Allow all: Off');
+
+      await mode.click();
+      await expect(page.locator('.agent-permission-header:visible')).toHaveText('Select Mode');
+      await page.locator('.agent-perm-option:visible', { hasText: 'Plan' }).click();
+      await expect(mode).toHaveText('Mode: Plan', { timeout: 5_000 });
+      await expect(permission).toHaveText('Allow all: Off');
+
+      await permission.click();
+      await expect(page.locator('.agent-permission-header:visible')).toHaveText('Select Allow all');
+      await page.locator('.agent-perm-option:visible', { hasText: 'On' }).click();
+      await expect(permission).toHaveText('Allow all: On', { timeout: 5_000 });
+      await expect(mode).toHaveText('Mode: Plan');
+    });
+  });
+
   test.describe('add-tab menu', () => {
     test('lists every provider from the single-source registry', async ({ shelfApp: { page } }) => {
       await setupProject(page);
