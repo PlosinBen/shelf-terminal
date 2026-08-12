@@ -152,6 +152,15 @@ export function InputZone({ tabId, projectId, cwd, connection, visible, rootRef,
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
+  const clearEscPending = useCallback(() => {
+    escPendingRef.current = false;
+    setEscPending(false);
+    if (escTimerRef.current) {
+      clearTimeout(escTimerRef.current);
+      escTimerRef.current = null;
+    }
+  }, []);
+
   // Focus on visible — tab switch / project switch / app launch.
   // rAF defers past the layout pass so the textarea is in the visible
   // DOM (parent flipped from display:none).
@@ -223,10 +232,8 @@ export function InputZone({ tabId, projectId, cwd, connection, visible, rootRef,
   // while visually idle because ACP work may outlive prompt settlement.
   useEffect(() => {
     if (stopEligible) return;
-    escPendingRef.current = false;
-    setEscPending(false);
-    if (escTimerRef.current) { clearTimeout(escTimerRef.current); escTimerRef.current = null; }
-  }, [stopEligible]);
+    clearEscPending();
+  }, [stopEligible, clearEscPending]);
 
   // Textarea auto-resize. Cap at 200px so a multi-screen paste
   // doesn't push the timeline out of view.
@@ -309,6 +316,10 @@ export function InputZone({ tabId, projectId, cwd, connection, visible, rootRef,
 
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const val = e.target.value;
+    // Double-Esc must be two consecutive stop gestures. Typing, paste, or an
+    // IME commit after the first Esc abandons that gesture instead of leaving a
+    // hidden armed state that a later Esc can accidentally complete.
+    clearEscPending();
     setInput(val);
     // Slash menu is for command-name autocomplete only:
     // - Show while typing the cmd name (`/m`, `/mo`, `/model`)
@@ -334,7 +345,12 @@ export function InputZone({ tabId, projectId, cwd, connection, visible, rootRef,
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.nativeEvent.isComposing) return;
+    if (e.nativeEvent.isComposing) {
+      clearEscPending();
+      return;
+    }
+
+    if (e.key !== 'Escape') clearEscPending();
 
     if (showSlashMenu && filteredCommands.length > 0) {
       if (e.key === 'ArrowDown') { e.preventDefault(); setSlashSelection((s) => Math.min(s + 1, filteredCommands.length - 1)); return; }
@@ -355,10 +371,11 @@ export function InputZone({ tabId, projectId, cwd, connection, visible, rootRef,
       if (showSlashMenu) { setShowSlashMenu(false); return; }
       if (stopEligible) {
         e.preventDefault();
+        // A held key emits repeated keydown events; it is still one physical
+        // Escape press and must not satisfy the double-Esc confirmation.
+        if (e.repeat) return;
         if (escPendingRef.current) {
-          if (escTimerRef.current) { clearTimeout(escTimerRef.current); escTimerRef.current = null; }
-          escPendingRef.current = false;
-          setEscPending(false);
+          clearEscPending();
           handleStop();
         } else {
           escPendingRef.current = true;

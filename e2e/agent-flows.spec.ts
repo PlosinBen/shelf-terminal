@@ -455,6 +455,24 @@ test.describe('agent flows via fake provider', () => {
     await expect(page.locator('.agent-msg-reply:visible', { hasText: 'must-not-arrive' })).toHaveCount(0);
   });
 
+  test('typing between Escape presses does not stop idle Copilot work', async ({ shelfApp: { page } }) => {
+    await setupProject(page);
+    await page.locator('.tab-add').click({ button: 'right' });
+    await page.locator('.context-menu-item', { hasText: 'Agent (Copilot)' }).click();
+    await expect(page.locator('.agent-view:visible')).toBeVisible({ timeout: 5_000 });
+
+    await sendAgentPrompt(page, 'late_chunk:1500:copilot-still-running');
+    await expect(page.locator('.agent-status-label:visible')).toHaveText('idle', { timeout: 5_000 });
+    const input = page.locator('.agent-textarea:visible');
+    await input.focus();
+    await page.keyboard.press('Escape');
+    await input.pressSequentially('draft text');
+    await page.keyboard.press('Escape');
+
+    await expect(page.locator('.agent-msg-reply:visible', { hasText: 'copilot-still-running' })).toBeVisible({ timeout: 3_000 });
+    await expect(input).toHaveValue('draft text');
+  });
+
   test('Codex double-Esc stops late work even after the turn reports idle', async ({ shelfApp: { page } }) => {
     await setupProject(page);
     await page.locator('.tab-add').click({ button: 'right' });

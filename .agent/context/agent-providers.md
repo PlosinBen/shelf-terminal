@@ -512,3 +512,15 @@ Tool call 的 display metadata 也是 session-scoped carry，以 `toolCallId` �
 **Do not change casually because：** 不要把 `turn/interrupt` 已送出或本地 promise 已 resolve 當成實際停止；也不要在 force-close 時清掉 persisted thread pointer，否則取消會不必要地丟失對話 continuity。visual idle 只代表 Shelf 沒有 active execution，不代表 provider process 無背景工作。
 
 **Related：** `agent-server/providers/codex/index.ts`、`src/renderer/components/agent/InputZone.tsx`、`e2e/agent-flows.spec.ts`、`agent-providers#37`。
+
+## agent-providers#43 — Double-ESC stop 必須是連續且獨立的按鍵手勢  ·  [Gotcha]
+
+**Symptom：** 使用者在 Agent input 打字時，Copilot 突然顯示 `Operation cancelled by user`。main log 證實 Shelf 確實送出 stop，但使用者沒有刻意連按兩次 ESC。
+
+**Root cause：** 第一次 ESC 會把 stop confirmation armed 1.5 秒；原本只有逾時或 tab 不再 eligible 才清除。這段期間的文字輸入、paste、IME composition 都不會解除 armed，長按 ESC 產生的 repeated keydown 也會被當成第二次按鍵，因此正常輸入流程可能意外完成 stop 手勢。
+
+**Fix / note：** Double-ESC 只接受兩次連續、非 repeat、非 IME composition 的 Escape keydown。第一次 ESC 後只要發生文字變更、其他按鍵或 composition key event，就清除 pending confirmation；第二次 ESC 只會重新 arm，不會停止。Copilot/Codex visually idle stop eligibility 不變。
+
+**Do not change casually because：** 不要只依賴 1.5 秒 timer 或 `nativeEvent.isComposing`；timer 不是手勢連續性的證明，IME event ordering 也不能取代「任何輸入都中止 stop 手勢」的規則。也不要讓 `KeyboardEvent.repeat` 完成 double press。
+
+**Related：** `src/renderer/components/agent/InputZone.tsx`、`e2e/agent-flows.spec.ts`、`agent-providers#37`、`agent-providers#42`。
