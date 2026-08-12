@@ -424,6 +424,9 @@ export interface ServerBackend {
    * fetch serves all). MUST be fail-quiet — never throw / block the next execution.
    */
   refreshAccountStatus?(cache: ModelCacheClient | undefined, send: SendFn, appId?: string): Promise<void>;
+  /** Bind the process-level session sink for provider updates that may arrive
+   * outside an execution (for example ACP mode/config notifications). */
+  bindSessionSend?(send: SendFn): void;
   /**
    * `intent` carries the renderer's saved prefs (projectConfig.agentPrefs) so
    * providers that track session-level state (Copilot's currentPermissionMode,

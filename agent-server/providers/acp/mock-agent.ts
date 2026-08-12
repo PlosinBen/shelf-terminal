@@ -49,8 +49,14 @@ export interface MockAgentScript {
   onNewSession?: (params: unknown) => void;
   /** Called with session/set_mode params (assert modeId). */
   onSetMode?: (params: unknown) => void;
+  /** Authoritative updates emitted while handling session/set_mode. */
+  updatesOnSetMode?: SessionUpdate[];
   /** Called with session/set_config_option params (assert configId + value). */
   onSetConfigOption?: (params: unknown) => void;
+  /** Full authoritative config snapshot returned by session/set_config_option. */
+  configOptionsOnSetConfigOption?: SessionConfigOption[];
+  /** Reject session/set_config_option (for provider policy fixtures). */
+  setConfigOptionError?: string;
   /**
    * When set, the prompt handler first calls `session/request_permission` with
    * these options and reports the client's outcome via `onPermissionOutcome`.
@@ -94,11 +100,18 @@ export function createMockAcpAgent(script: MockAgentScript = {}): AgentApp {
       };
     })
     .onRequest('session/resume', () => ({}))
-    .onRequest('session/set_mode', ({ params }) => { script.onSetMode?.(params); return {}; })
+    .onRequest('session/set_mode', async ({ params, client }) => {
+      script.onSetMode?.(params);
+      for (const update of script.updatesOnSetMode ?? []) {
+        await client.notify('session/update', { sessionId, update });
+      }
+      return {};
+    })
     .onRequest('session/set_config_option', ({ params }) => {
       script.onSetConfigOption?.(params);
+      if (script.setConfigOptionError) throw new Error(script.setConfigOptionError);
       // Response echoes the full config set (real agents return updated values).
-      return { configOptions: script.configOptions ?? [] };
+      return { configOptions: script.configOptionsOnSetConfigOption ?? script.configOptions ?? [] };
     })
     .onNotification('session/cancel', ({ params }) => {
       script.onCancel?.(params);

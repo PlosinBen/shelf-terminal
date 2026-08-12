@@ -11,32 +11,31 @@ import {
   methods,
   type Stream,
   type AgentApp,
-  type RequestPermissionResponse,
   type SessionModeState,
   type SessionConfigOption,
   type StopReason,
 } from '@agentclientprotocol/sdk';
 import { COPILOT_PROVIDER } from '@shared/agent-providers';
-import { SHELF_PERMISSION_CONTROL } from '@shared/permission-controls';
-import { formatConfigAck, type ConfigEditKey } from '@shared/config-ack';
-import { PERMISSION_MODES, type ServerBackend, type QueryInput, type SendFn, type ProviderCapabilities } from '../types';
+import { PERMISSION_CONTROL_STRATEGIES, type PermissionControlCapabilities } from '@shared/permission-controls';
+import { CONFIG_EDIT_KEYS, formatConfigAck, type ConfigEditKey } from '@shared/config-ack';
+import { type ServerBackend, type QueryInput, type SendFn, type ProviderCapabilities } from '../types';
 import { serverLog } from '../../server-logger';
 import { openAcpConnection, spawnAgentStdio, type AcpConnection, type PermissionHandler } from '../acp/connection';
 import { createSessionDriver, type AcpSession } from '../acp/client';
-import { createPermissionBridge, pickOptionId } from '../acp/permission';
+import { createPermissionBridge } from '../acp/permission';
 import { mapSessionCapabilities, currentSelections, configOptionIdForCategory } from '../acp/capabilities';
 import { toAcpMcpServers } from '../acp/mcp';
 import { getSharedShelfMcp } from '../acp/shelf-mcp';
 import { loadProjectedMcpServers } from '../mcp-config';
 import { resolveCopilotCommand, copilotConfigHome, copilotEnv } from './helpers';
 import { refreshCopilotCredit } from './credit';
-import { copilotPermissionModes, copilotModeIdToShelf, shelfToCopilotModeId } from './mode-map';
 import { startLogin as startCopilotLogin, prefillLoginUrl, type LoginRunner } from './login';
 
 // Category names for copilot's dynamic config options (agent-owned), used to
 // resolve the option id for session/set_config_option.
 const MODEL_CATEGORY = 'model';
 const EFFORT_CATEGORY = 'thought_level';
+const COPILOT_PERMISSION_OPTION_ID = 'allow_all';
 
 // oauth authMethod for the unauthenticated caps return — WITHOUT it the AuthPane
 // (gated on `authMethod.kind === 'oauth'`) renders no Login button, so device-flow
@@ -110,83 +109,142 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
   let activePromptCompletion: Promise<StopReason> | null = null;
   let loginRunner: LoginRunner | null = null;
   const permissions = createPermissionBridge(() => activeExecutionSend);
-  const driver = createSessionDriver();
+  let sessionSend: SendFn | null = null;
 
-  // Live session config (cached from the last new-session response) + the active
-  // selections in SHELF vocabulary. Seeded from the renderer's saved prefs (intent)
-  // and the agent's advertised current values; kept in sync as edits apply.
+  // Live session config cached from provider snapshots. Mode and permission
+  // remain provider-native and are never seeded from Shelf permission prefs.
   let sessionModes: SessionModeState | undefined;
   let sessionConfigOptions: SessionConfigOption[] | undefined;
   let currentModel: string | undefined;
   let currentEffort: string | undefined;
-  let currentPermissionMode: string | undefined; // Shelf id (default/plan/bypassPermissions)
 
-  // Copilot's ACP `autopilot` session mode controls autonomous continuation; it
-  // does not itself guarantee allow-all permissions. Preserve Shelf's canonical
-  // bypass contract (and the deleted native backend's behavior) by answering
-  // tool approvals locally instead of surfacing a permission panel. See
-  // agent-providers#44.
-  const onRequestPermission: PermissionHandler = (context) => {
-    const { params } = context;
-    if (currentPermissionMode !== PERMISSION_MODES.bypassPermissions.value) {
-      return permissions.onRequestPermission(context);
+  const onRequestPermission: PermissionHandler = (context) => permissions.onRequestPermission(context);
+
+  function nativePermissionControl(): PermissionControlCapabilities {
+    const mode = sessionModes ? {
+      label: 'Mode',
+      currentValue: sessionModes.currentModeId,
+      options: sessionModes.availableModes.map((option) => ({
+        value: option.id,
+        displayName: option.name,
+        ...(option.description ? { description: option.description } : {}),
+      })),
+    } : undefined;
+    const advertised = sessionConfigOptions?.find((option) => option.id === COPILOT_PERMISSION_OPTION_ID);
+    let permission: Extract<PermissionControlCapabilities, { strategy: 'native' }>['permission'];
+    if (advertised?.type === 'select') {
+      permission = {
+        label: advertised.name,
+        ...(advertised.description ? { description: advertised.description } : {}),
+        currentValue: advertised.currentValue,
+        options: advertised.options.flatMap((option) => (
+          'options' in option
+            ? option.options.map((nested) => ({
+                value: nested.value,
+                displayName: nested.name,
+                ...(nested.description ? { description: nested.description } : {}),
+              }))
+            : [{
+                value: option.value,
+                displayName: option.name,
+                ...(option.description ? { description: option.description } : {}),
+              }]
+        )),
+      };
+    } else if (advertised) {
+      serverLog('error', 'copilot', `malformed ${COPILOT_PERMISSION_OPTION_ID} config: expected select (session=${session?.sessionId ?? '<none>'}, type=${advertised.type})`);
     }
-    const optionId = pickOptionId(params.options, true, 'once');
-    if (!optionId) {
-      serverLog('error', 'copilot', `bypassPermissions request has no allow option (toolCallId=${params.toolCall.toolCallId})`);
-      return { outcome: { outcome: 'cancelled' } } satisfies RequestPermissionResponse;
-    }
-    return { outcome: { outcome: 'selected', optionId } } satisfies RequestPermissionResponse;
-  };
+    return {
+      strategy: PERMISSION_CONTROL_STRATEGIES.NATIVE,
+      ...(mode ? { mode } : {}),
+      ...(permission ? { permission } : {}),
+    };
+  }
 
   /** Caps from the live session config + the active current* selections, ready to
-   *  spread into a `capabilities` wire message. permissionModes are the Shelf-
-   *  standard set (matches native copilot), NOT copilot's raw agent/plan/autopilot. */
+   * spread into a `capabilities` wire message. Canonical permission modes stay
+   * empty because Copilot publishes its two independent native controls. */
   function buildCapabilities(): ProviderCapabilities {
     const availableCommands = session ? driver.getAvailableCommands(session.sessionId) : undefined;
     const input = { modes: sessionModes, configOptions: sessionConfigOptions, availableCommands };
     const base = mapSessionCapabilities(input);
     return {
       ...base,
-      permissionModes: copilotPermissionModes(),
-      permissionControl: SHELF_PERMISSION_CONTROL,
+      permissionModes: [],
+      permissionControl: nativePermissionControl(),
       ...(currentModel ? { currentModel } : {}),
       ...(currentEffort ? { currentEffort } : {}),
-      ...(currentPermissionMode ? { currentPermissionMode } : {}),
     };
   }
 
+  function publishCapabilities(): void {
+    (sessionSend ?? activeExecutionSend)?.({ type: 'capabilities', ...buildCapabilities() });
+  }
+
+  const driver = createSessionDriver({
+    onStateChange(sessionId, change) {
+      if (!session || session.sessionId !== sessionId) return;
+      if (change.kind === 'mode') {
+        if (!sessionModes) {
+          serverLog('error', 'copilot', `mode update without advertised modes (session=${sessionId}, mode=${change.currentModeId})`);
+          return;
+        }
+        sessionModes = { ...sessionModes, currentModeId: change.currentModeId };
+      } else {
+        sessionConfigOptions = change.configOptions;
+        const current = currentSelections({ configOptions: sessionConfigOptions });
+        currentModel = current.currentModel;
+        currentEffort = current.currentEffort;
+      }
+      publishCapabilities();
+    },
+  });
+
   async function applyModel(model: string): Promise<void> {
-    currentModel = model;
     const configId = configOptionIdForCategory(sessionConfigOptions, MODEL_CATEGORY);
     if (conn && session && configId) await driver.setConfigOption(conn.agent, session, configId, model);
     else if (conn && session) serverLog('warn', 'copilot', `setModel: no model config option on session ${session.sessionId}`);
   }
 
   async function applyEffort(effort: string): Promise<void> {
-    currentEffort = effort;
     const configId = configOptionIdForCategory(sessionConfigOptions, EFFORT_CATEGORY);
     if (conn && session && configId) await driver.setConfigOption(conn.agent, session, configId, effort);
     else if (conn && session) serverLog('warn', 'copilot', `setEffort: no thought_level config option on session ${session.sessionId}`);
   }
 
-  async function applyPermissionMode(mode: string): Promise<void> {
-    currentPermissionMode = mode;
-    const modeId = shelfToCopilotModeId(mode, sessionModes);
-    if (conn && session && modeId) await driver.setMode(conn.agent, session, modeId);
-    else if (conn && session) serverLog('warn', 'copilot', `setPermissionMode: copilot has no mode for "${mode}"`);
+  async function applyNativeMode(modeId: string): Promise<void> {
+    if (!sessionModes?.availableModes.some((mode) => mode.id === modeId)) {
+      throw new Error(`Copilot did not advertise native mode "${modeId}"`);
+    }
+    if (conn && session) await driver.setMode(conn.agent, session, modeId);
+  }
+
+  async function applyNativePermission(value: string): Promise<void> {
+    const option = sessionConfigOptions?.find((candidate) => candidate.id === COPILOT_PERMISSION_OPTION_ID);
+    if (!option || option.type !== 'select') throw new Error(`Copilot did not advertise ${COPILOT_PERMISSION_OPTION_ID} as a select option`);
+    if (conn && session) await driver.setConfigOption(conn.agent, session, option.id, value);
   }
 
   /** Apply a config-edit turn (picker / status-bar): imperative apply + updated
    *  capabilities + an ack divider. No-op guard skips a re-pick of the live value. */
   async function applyConfigEdit(key: ConfigEditKey, value: string, send: SendFn): Promise<void> {
-    const cur = key === 'model' ? currentModel : key === 'effort' ? currentEffort : currentPermissionMode;
+    const controls = nativePermissionControl();
+    const cur = key === CONFIG_EDIT_KEYS.MODEL
+      ? currentModel
+      : key === CONFIG_EDIT_KEYS.EFFORT
+        ? currentEffort
+        : key === CONFIG_EDIT_KEYS.NATIVE_MODE
+          ? controls.strategy === 'native' ? controls.mode?.currentValue : undefined
+          : key === CONFIG_EDIT_KEYS.NATIVE_PERMISSION
+            ? controls.strategy === 'native' ? controls.permission?.currentValue : undefined
+            : undefined;
     if (cur === value) return;
     try {
-      if (key === 'model') await applyModel(value);
-      else if (key === 'effort') await applyEffort(value);
-      else await applyPermissionMode(value);
-      send({ type: 'capabilities', ...buildCapabilities() });
+      if (key === CONFIG_EDIT_KEYS.MODEL) await applyModel(value);
+      else if (key === CONFIG_EDIT_KEYS.EFFORT) await applyEffort(value);
+      else if (key === CONFIG_EDIT_KEYS.NATIVE_MODE) await applyNativeMode(value);
+      else if (key === CONFIG_EDIT_KEYS.NATIVE_PERMISSION) await applyNativePermission(value);
+      else throw new Error(`Copilot native strategy does not accept config key "${key}"`);
       send({ type: 'message', msgId: `m-${randomUUID().slice(0, 8)}`, msgType: 'system', content: formatConfigAck(key, value) });
     } catch (err) {
       send({ type: 'message', msgId: `m-${randomUUID().slice(0, 8)}`, msgType: 'error', content: `Failed to set ${key}: ${(err as Error)?.message ?? String(err)}` });
@@ -353,12 +411,10 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
       // COPILOT_HOME (config-home isolation), and login (which follows caps) can
       // reuse it via lastAppId.
       if (appId) lastAppId = appId;
-      // Seed current* from the renderer's saved prefs BEFORE building caps, so the
-      // first reported values reflect the user's choice rather than the agent's
-      // default (matches the ServerBackend `intent` contract).
+      // Model/effort retain their existing persisted intent. Native mode and
+      // permission always initialize from provider truth.
       if (intent?.model) currentModel = intent.model;
       if (intent?.effort) currentEffort = intent.effort;
-      if (intent?.permissionMode) currentPermissionMode = intent.permissionMode;
       try {
         const s = await ensureSession({ cwd, appId }, null);
         // `available_commands_update` arrives out-of-turn just AFTER session/new,
@@ -372,7 +428,6 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
         const cur = currentSelections({ modes: sessionModes, configOptions: sessionConfigOptions });
         currentModel ??= cur.currentModel;
         currentEffort ??= cur.currentEffort;
-        currentPermissionMode ??= copilotModeIdToShelf(sessionModes?.currentModeId);
         return buildCapabilities();
       } catch (err: any) {
         // A fresh session most commonly fails when unauthenticated → surface the
@@ -385,7 +440,7 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
         return {
           models: [],
           permissionModes: [],
-          permissionControl: SHELF_PERMISSION_CONTROL,
+          permissionControl: { strategy: PERMISSION_CONTROL_STRATEGIES.NATIVE },
           effortLevels: [],
           slashCommands: [],
           authRequired: true,
@@ -396,7 +451,7 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
 
     setModel(model: string): Promise<void> { return applyModel(model); },
     setEffort(effort: string): Promise<void> { return applyEffort(effort); },
-    setPermissionMode(mode: string): Promise<void> { return applyPermissionMode(mode); },
+    bindSessionSend(send: SendFn): void { sessionSend = send; },
 
     resolvePermission(toolUseId: string, allow: boolean, message?: string, scope?: 'once' | 'session'): void {
       permissions.resolvePermission(toolUseId, allow, message, scope);

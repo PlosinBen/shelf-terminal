@@ -47,6 +47,18 @@ const COPILOT_CONFIG = [
       { value: 'high', name: 'high' },
     ],
   },
+  {
+    id: 'allow_all',
+    name: 'Allow all',
+    description: 'Allow all tool permissions',
+    category: 'permissions',
+    type: 'select',
+    currentValue: 'off',
+    options: [
+      { value: 'off', name: 'Off', description: 'Ask before protected tools' },
+      { value: 'on', name: 'On', description: 'Allow protected tools' },
+    ],
+  },
 ] as unknown as SessionConfigOption[];
 
 const PERMISSION_OPTIONS: PermissionOption[] = [
@@ -140,7 +152,7 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
     backend.dispose();
   });
 
-  it('maps copilot session state onto capabilities via the shared toolkit', async () => {
+  it('exposes separate provider-native mode and permission controls', async () => {
     const mock = createMockAcpAgent({ modes: COPILOT_MODES, configOptions: COPILOT_CONFIG });
     const backend = createCopilotBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
 
@@ -148,15 +160,32 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
 
     expect(caps.models.map((m) => m.value)).toEqual(['claude-sonnet-5', 'gpt-5.4']);
     expect(caps.effortLevels.map((e) => e.value)).toEqual(['low', 'medium', 'high']);
-    // Permission modes are the SHELF-standard set (matches native copilot), NOT
-    // copilot's raw agent/plan/autopilot — parity + clean cutover.
-    expect(caps.permissionModes.map((p) => p.value)).toEqual(['default', 'bypassPermissions', 'plan']);
+    expect(caps.permissionModes).toEqual([]);
+    expect(caps.permissionControl).toEqual({
+      strategy: 'native',
+      mode: {
+        label: 'Mode',
+        currentValue: 'agent',
+        options: [
+          { value: 'agent', displayName: 'agent' },
+          { value: 'plan', displayName: 'plan' },
+          { value: 'autopilot', displayName: 'autopilot' },
+        ],
+      },
+      permission: {
+        label: 'Allow all',
+        description: 'Allow all tool permissions',
+        currentValue: 'off',
+        options: [
+          { value: 'off', displayName: 'Off', description: 'Ask before protected tools' },
+          { value: 'on', displayName: 'On', description: 'Allow protected tools' },
+        ],
+      },
+    });
     expect(caps.authRequired).toBeUndefined();
-    // Current selections ride along so the status bar shows the active values;
-    // the permission mode is mapped copilot#agent → Shelf 'default'.
     expect((caps as unknown as Record<string, unknown>).currentModel).toBe('claude-sonnet-5');
     expect((caps as unknown as Record<string, unknown>).currentEffort).toBe('medium');
-    expect((caps as unknown as Record<string, unknown>).currentPermissionMode).toBe('default');
+    expect((caps as unknown as Record<string, unknown>).currentPermissionMode).toBeUndefined();
 
     backend.dispose();
   });
@@ -247,28 +276,115 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
     backend.dispose();
   });
 
-  it('applies a permission-mode config-edit via session/set_mode (Shelf → copilot id)', async () => {
+  it('applies native mode and permission edits through their independent ACP methods', async () => {
     let setMode: { modeId?: string } | undefined;
+    let setConfig: { configId?: string; value?: string } | undefined;
+    const permissionOn = COPILOT_CONFIG.map((option) => (
+      option.id === 'allow_all' && option.type === 'select' ? { ...option, currentValue: 'on' } : option
+    ));
     const mock = createMockAcpAgent({
       modes: COPILOT_MODES, configOptions: COPILOT_CONFIG,
+      configOptionsOnSetConfigOption: permissionOn,
       onSetMode: (p) => { setMode = p as typeof setMode; },
+      updatesOnSetMode: [{ sessionUpdate: 'current_mode_update', currentModeId: 'autopilot' }],
+      onSetConfigOption: (p) => { setConfig = p as typeof setConfig; },
     });
     const backend = createCopilotBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
 
     const out: OutgoingMessage[] = [];
     await backend.query(
-      { prompt: '', cwd: '/tmp/project', configEdit: { key: 'permissionMode', value: 'bypassPermissions' } },
+      { prompt: '', cwd: '/tmp/project', configEdit: { key: 'nativeMode', value: 'autopilot' } },
       (m) => out.push(m),
     );
-
-    // Shelf 'bypassPermissions' → copilot 'autopilot' mode id.
     expect(setMode?.modeId).toBe('autopilot');
+    await backend.query(
+      { prompt: '', cwd: '/tmp/project', configEdit: { key: 'nativePermission', value: 'on' } },
+      (m) => out.push(m),
+    );
+    expect(setConfig).toMatchObject({ configId: 'allow_all', value: 'on' });
+    expect(out).toContainEqual(expect.objectContaining({
+      type: 'capabilities',
+      permissionControl: expect.objectContaining({
+        permission: expect.objectContaining({ currentValue: 'on' }),
+      }),
+    }));
     expect(out.at(-1)).toEqual({ type: 'status', state: 'idle' });
 
     backend.dispose();
   });
 
-  it('auto-approves ACP permission requests in bypassPermissions mode without showing UI', async () => {
+  it('replaces displayed native state from slash-driven ACP updates', async () => {
+    const permissionOn = COPILOT_CONFIG.map((option) => (
+      option.id === 'allow_all' && option.type === 'select' ? { ...option, currentValue: 'on' } : option
+    ));
+    const mock = createMockAcpAgent({
+      modes: COPILOT_MODES,
+      configOptions: COPILOT_CONFIG,
+      updatesOnPrompt: [
+        { sessionUpdate: 'current_mode_update', currentModeId: 'plan' },
+        { sessionUpdate: 'config_option_update', configOptions: permissionOn },
+      ],
+    });
+    const backend = createCopilotBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
+    const sessionEvents: OutgoingMessage[] = [];
+    backend.bindSessionSend!((message) => sessionEvents.push(message));
+
+    await backend.query({ prompt: '/allow-all', cwd: '/tmp/project' }, () => {});
+
+    expect(sessionEvents.at(-1)).toMatchObject({
+      type: 'capabilities',
+      permissionControl: {
+        strategy: 'native',
+        mode: { currentValue: 'plan' },
+        permission: { currentValue: 'on' },
+      },
+    });
+    backend.dispose();
+  });
+
+  it('omits an unadvertised native permission control without restoring a Shelf fallback', async () => {
+    const configWithoutPermission = COPILOT_CONFIG.filter((option) => option.id !== 'allow_all');
+    const mock = createMockAcpAgent({ modes: COPILOT_MODES, configOptions: configWithoutPermission });
+    const backend = createCopilotBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
+
+    const caps = await backend.gatherCapabilities!('/tmp/project');
+
+    expect(caps.permissionModes).toEqual([]);
+    expect(caps.permissionControl).toMatchObject({ strategy: 'native', mode: { currentValue: 'agent' } });
+    expect(caps.permissionControl).not.toHaveProperty('permission');
+    expect(backend.setPermissionMode).toBeUndefined();
+    backend.dispose();
+  });
+
+  it('keeps provider truth when enterprise policy rejects allow_all', async () => {
+    const mock = createMockAcpAgent({
+      modes: COPILOT_MODES,
+      configOptions: COPILOT_CONFIG,
+      setConfigOptionError: 'allow_all is disabled by enterprise policy',
+    });
+    const backend = createCopilotBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
+    const out: OutgoingMessage[] = [];
+
+    await backend.query(
+      { prompt: '', cwd: '/tmp/project', configEdit: { key: 'nativePermission', value: 'on' } },
+      (message) => out.push(message),
+    );
+
+    expect(out).toContainEqual(expect.objectContaining({
+      type: 'message',
+      msgType: 'error',
+      content: expect.stringContaining('Failed to set nativePermission'),
+    }));
+    expect(out).not.toContainEqual(expect.objectContaining({
+      type: 'capabilities',
+      permissionControl: expect.objectContaining({
+        permission: expect.objectContaining({ currentValue: 'on' }),
+      }),
+    }));
+    backend.dispose();
+  });
+
+  it('always bridges ACP permission requests instead of auto-approving from Shelf prefs', async () => {
     let outcome: RequestPermissionResponse['outcome'] | undefined;
     const mock = createMockAcpAgent({
       modes: COPILOT_MODES,
@@ -289,10 +405,13 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
       { permissionMode: 'bypassPermissions' },
     );
     const out: OutgoingMessage[] = [];
-    await backend.query({ prompt: 'inspect another project', cwd: '/tmp/project' }, (m) => out.push(m));
+    await backend.query({ prompt: 'inspect another project', cwd: '/tmp/project' }, (message) => {
+      out.push(message);
+      if (message.type === 'permission_request') backend.resolvePermission!(message.toolUseId, true, undefined, 'once');
+    });
 
     expect(outcome).toEqual({ outcome: 'selected', optionId: 'allow-once' });
-    expect(out).not.toContainEqual(expect.objectContaining({ type: 'permission_request' }));
+    expect(out).toContainEqual(expect.objectContaining({ type: 'permission_request' }));
 
     backend.dispose();
   });

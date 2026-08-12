@@ -321,7 +321,9 @@ const backendRegistry = createBackendRegistry(
 );
 
 function getBackend(provider: Provider): ServerBackend {
-  return backendRegistry.get(provider);
+  const backend = backendRegistry.get(provider);
+  backend.bindSessionSend?.(send);
+  return backend;
 }
 
 async function handleSend(msg: IncomingMessage) {
