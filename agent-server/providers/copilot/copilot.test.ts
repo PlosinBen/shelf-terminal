@@ -335,6 +335,43 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
     backend.dispose();
   });
 
+  it('starts a fresh session when the persisted Copilot session no longer exists', async () => {
+    let newSessions = 0;
+    const mock = createMockAcpAgent({
+      sessionId: 'fresh-acp-session',
+      loadSessionError: 'Resource not found: Session persisted-acp-session not found',
+      onNewSession: () => { newSessions += 1; },
+    });
+    const backend = createCopilotBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
+    const sessionOut: OutgoingMessage[] = [];
+    backend.bindSessionSend!((message) => sessionOut.push(message));
+
+    await expect(backend.gatherCapabilities!(
+      '/tmp/project',
+      'shelf-session',
+      undefined,
+      undefined,
+      undefined,
+      'app-1',
+      {
+        sessionId: 'shelf-session',
+        provider: 'copilot',
+        updatedAt: 1,
+        lastSdkSessionId: 'persisted-acp-session',
+      },
+    )).resolves.toMatchObject({ permissionControl: { strategy: 'native' } });
+
+    expect(newSessions).toBe(1);
+    expect(sessionOut).toContainEqual({ type: 'context_patch', patch: { lastSdkSessionId: null } });
+    expect(sessionOut).toContainEqual({ type: 'context_patch', patch: { lastSdkSessionId: 'fresh-acp-session' } });
+    expect(sessionOut).toContainEqual(expect.objectContaining({
+      type: 'message',
+      msgType: 'system',
+      content: 'Previous Copilot session was unavailable; started a new session.',
+    }));
+    backend.dispose();
+  });
+
   it('loads legacy Copilot sessions without replaying duplicate conversation content', async () => {
     let loadedSessionId: string | undefined;
     let resumeRequests = 0;

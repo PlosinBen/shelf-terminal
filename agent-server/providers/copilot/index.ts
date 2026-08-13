@@ -31,6 +31,8 @@ import { resolveCopilotCommand, copilotConfigHome, copilotEnv } from './helpers'
 import { refreshCopilotCredit } from './credit';
 import { startLogin as startCopilotLogin, prefillLoginUrl, type LoginRunner } from './login';
 
+const COPILOT_STALE_SESSION_NOTICE = 'Previous Copilot session was unavailable; started a new session.';
+
 // Category names for copilot's dynamic config options (agent-owned), used to
 // resolve the option id for session/set_config_option.
 const MODEL_CATEGORY = 'model';
@@ -339,19 +341,31 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
       ],
     };
 
+    let recoveredMissingSession = false;
     if (input.resumeId) {
       // Prefer stable resume (no history replay). Bundled Copilot 1.0.68 only
       // advertises session/load; the shared driver suppresses its conversation
       // replay while retaining mode/config/command metadata.
-      session = supportsResume
-        ? await driver.resume(c.agent, input.resumeId, opts)
-        : await driver.load(c.agent, input.resumeId, opts);
-      sessionCwd = input.cwd;
-      sessionAppId = appId;
-      const restored = session.resumeSessionResponse ?? session.loadSessionResponse;
-      sessionModes = restored?.modes ?? undefined;
-      sessionConfigOptions = restored?.configOptions ?? undefined;
-      return session;
+      try {
+        session = supportsResume
+          ? await driver.resume(c.agent, input.resumeId, opts)
+          : await driver.load(c.agent, input.resumeId, opts);
+        sessionCwd = input.cwd;
+        sessionAppId = appId;
+        const restored = session.resumeSessionResponse ?? session.loadSessionResponse;
+        sessionModes = restored?.modes ?? undefined;
+        sessionConfigOptions = restored?.configOptions ?? undefined;
+        return session;
+      } catch (err) {
+        if (!isMissingCopilotSessionError(err, input.resumeId)) throw err;
+        // A persisted pointer can outlive the CLI's session storage. Clear it
+        // before starting so a failed session/new cannot wedge every retry on
+        // the same stale id. Context loss is visible, not silent.
+        driver.forget(input.resumeId);
+        serverLog('warn', 'copilot', 'persisted session unavailable; starting a new session', { sessionId: input.resumeId });
+        (send ?? sessionSend)?.({ type: 'context_patch', patch: { lastSdkSessionId: null } });
+        recoveredMissingSession = true;
+      }
     }
     session = await driver.startNew(c.agent, opts);
     sessionCwd = input.cwd;
@@ -363,8 +377,26 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
     // Capability discovery can create the first native session before an
     // execution exists. Publish through the session sink in that case so the
     // agent-server's context wrapper persists the pointer immediately.
-    (send ?? sessionSend)?.({ type: 'context_patch', patch: { lastSdkSessionId: session.sessionId } });
+    const output = send ?? sessionSend;
+    output?.({ type: 'context_patch', patch: { lastSdkSessionId: session.sessionId } });
+    if (recoveredMissingSession) {
+      output?.({
+        type: 'message',
+        msgId: `m-${randomUUID().slice(0, 8)}`,
+        msgType: 'system',
+        content: COPILOT_STALE_SESSION_NOTICE,
+      });
+    }
     return session;
+  }
+
+  function isMissingCopilotSessionError(err: unknown, sessionId: string): boolean {
+    const code = typeof err === 'object' && err !== null && 'code' in err
+      ? (err as { code?: unknown }).code
+      : undefined;
+    const message = (err as Error)?.message ?? String(err);
+    return code === -32001
+      && message.includes(`Resource not found: Session ${sessionId} not found`);
   }
 
   return {

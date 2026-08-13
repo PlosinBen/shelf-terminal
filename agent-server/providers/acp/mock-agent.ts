@@ -59,6 +59,8 @@ export interface MockAgentScript {
   resumeSessionError?: string;
   /** Called with session/load params. */
   onLoadSession?: (params: unknown) => void;
+  /** Reject session/load with this message. */
+  loadSessionError?: string;
   /** Conversation/metadata updates replayed while handling session/load. */
   updatesOnLoadSession?: SessionUpdate[];
   /** Called with session/set_mode params (assert modeId). */
@@ -133,6 +135,7 @@ export function createMockAcpAgent(script: MockAgentScript = {}): AgentApp {
     })
     .onRequest('session/load', async ({ params, client }) => {
       script.onLoadSession?.(params);
+      if (script.loadSessionError) throw new RequestError(-32001, script.loadSessionError);
       for (const update of script.updatesOnLoadSession ?? []) {
         await client.notify('session/update', { sessionId: params.sessionId, update });
       }

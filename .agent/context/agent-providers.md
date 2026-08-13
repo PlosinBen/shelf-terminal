@@ -539,10 +539,20 @@ Copilot 選 `native`：ACP session modes 原值送 `session/set_mode`；ACP `all
 
 **Decision：** Copilot capabilities probe 在建立任何 native session 前先載入 provider-matched `lastSdkSessionId`。Agent advertise stable `sessionCapabilities.resume` 時走 `session/resume`；只有 legacy `loadSession` 時走 `session/load`。`session/load` 的 conversation replay 在 ACP driver hydration 階段不轉成 renderer content，但 mode、config options 與 available commands 仍更新 session state。兩者都沒 advertise 就 fail loud。
 
-Fresh capabilities probe 若建立 `session/new`，立刻透過 session-scoped `context_patch` 寫回 native ID；不能等第一個 prompt，因為 prompt 會 reuse live session 而不再發 patch。Restore 的任何錯誤維持原錯誤並阻止 `session/new`；只有未來取得穩定且有測試的 missing-session discriminator 後，才可另議窄 fallback。
+Fresh capabilities probe 若建立 `session/new`，立刻透過 session-scoped `context_patch` 寫回 native ID；不能等第一個 prompt，因為 prompt 會 reuse live session 而不再發 patch。Restore failure 預設維持原錯誤並阻止 `session/new`；唯一例外是 `agent-providers#47` 的明確 missing-session recovery。
 
 **Reason：** capabilities 在 prompt 前執行，若它先建立未持久化的新 session，renderer 歷史與 provider context 會分叉。Bundled Copilot 的 ACP surface 可能只提供會 replay history 的 `session/load`；Shelf 已有自己的持久 timeline，重播進 UI 會重複訊息，但完全忽略 load notifications 又會漏掉 config/command metadata。分開「hydrate metadata」與「render replay」可保留單一 timeline ownership並繼續原對話。
 
 **Do not change casually because：** 不要把 `loadSession: true` 當成可呼叫 `session/resume`，也不要無條件偏好 load；以 initialize capabilities 選 method。不要 broad-catch restore 後靜默開新 session，也不要把 `lastSdkSessionId` 暴露到 renderer/main wire。Replay suppression 只限 restore hydration window；正常 prompt update 仍必須完整送達。
 
 **Related：** `agent-providers#37`、`agent-providers#45`、`architecture/agent-execution`、`contracts/agent-routing`、`contracts/persistence-formats`、`agent-server/providers/acp/{connection,client}.ts`、`agent-server/providers/copilot/index.ts`。
+
+## agent-providers#47 — Copilot persisted session 明確不存在時清 pointer 並開新 session  ·  [Gotcha]
+
+**Symptom：** Copilot tab 初始化失敗並顯示 `Resource not found: Session <id> not found`；Retry 只會用同一個 persisted `lastSdkSessionId` 再次 restore，因此無法自行恢復。
+
+**Root cause：** Shelf 的 context pointer 可能比 Copilot CLI 的 session storage 活得久。Capabilities probe 會在顯示輸入框前 restore provider session；原本任何 restore failure 都 fail-loud，連 ACP 明確回報 session 不存在也不例外，所以 stale pointer 會永久卡住該 Shelf session。
+
+**Fix / note：** 只有 ACP `RequestError.code === -32001` 且 message 明確包含同一個 session ID 的 `Resource not found: Session <id> not found` 時才恢復：先 emit `lastSdkSessionId:null`，再走 `session/new`；成功後保存新 ID，並顯示一次 system notice 說明舊 conversation context 無法恢復。其他 restore failure（auth、transport、protocol、timeout 或不同 ID）維持 fail-loud，不得 broad-catch 後靜默開新 session。
+
+**Related：** `agent-providers#38`（Codex 同類窄 recovery）、`agent-providers#46`、`agent-server/providers/copilot/index.ts`、`agent-server/context-store.ts`。
