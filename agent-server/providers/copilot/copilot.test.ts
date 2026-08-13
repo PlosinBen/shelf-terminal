@@ -409,7 +409,7 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
         updatedAt: 1,
         lastSdkSessionId: 'persisted-acp-session',
       },
-    )).rejects.toThrow('does not advertise session resume support');
+    )).rejects.toThrow('does not advertise session restore support');
     expect(resumeRequests).toBe(0);
     expect(newSessions).toBe(0);
     backend.dispose();

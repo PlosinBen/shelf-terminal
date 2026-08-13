@@ -323,7 +323,7 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
     const supportsResume = capabilities?.sessionCapabilities?.resume !== undefined;
     const supportsLoad = capabilities?.loadSession === true;
     if (input.resumeId && !supportsResume && !supportsLoad) {
-        throw new Error('Copilot ACP does not advertise session resume support');
+      throw new Error('Copilot ACP does not advertise session restore support');
     }
     const mcp = loadProjectedMcpServers(appId);
     // Fail-loud: a bad/incomplete MCP entry is logged, not silently dropped.
