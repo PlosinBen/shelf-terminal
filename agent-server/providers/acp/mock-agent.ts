@@ -49,6 +49,8 @@ export interface MockAgentScript {
   onNewSession?: (params: unknown) => void;
   /** Called with session/resume params. */
   onResumeSession?: (params: unknown) => void;
+  /** Reject session/resume with this message. */
+  resumeSessionError?: string;
   /** Called with session/set_mode params (assert modeId). */
   onSetMode?: (params: unknown) => void;
   /** Authoritative updates emitted while handling session/set_mode. */
@@ -103,6 +105,7 @@ export function createMockAcpAgent(script: MockAgentScript = {}): AgentApp {
     })
     .onRequest('session/resume', ({ params }) => {
       script.onResumeSession?.(params);
+      if (script.resumeSessionError) throw new Error(script.resumeSessionError);
       return {
         ...(script.modes ? { modes: script.modes } : {}),
         ...(script.configOptions ? { configOptions: script.configOptions } : {}),

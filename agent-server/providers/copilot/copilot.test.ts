@@ -233,11 +233,13 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
   it('resumes persisted ACP state before capability discovery creates a new session', async () => {
     let newSessions = 0;
     let resumedSessionId: string | undefined;
+    let promptSessionId: string | undefined;
     const mock = createMockAcpAgent({
       modes: COPILOT_MODES,
       configOptions: COPILOT_CONFIG,
       onNewSession: () => { newSessions += 1; },
       onResumeSession: (params) => { resumedSessionId = (params as { sessionId?: string }).sessionId; },
+      onPrompt: (params) => { promptSessionId = (params as { sessionId?: string }).sessionId; },
     });
     const backend = createCopilotBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
 
@@ -263,6 +265,69 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
       mode: { currentValue: 'agent' },
       permission: { currentValue: 'off' },
     });
+    await backend.query({
+      prompt: 'continue the restored conversation',
+      cwd: '/tmp/project',
+      appId: 'app-1',
+      restoreContext: {
+        sessionId: 'shelf-session',
+        provider: 'copilot',
+        updatedAt: 1,
+        lastSdkSessionId: 'persisted-acp-session',
+      },
+    }, () => {});
+    expect(promptSessionId).toBe('persisted-acp-session');
+    expect(newSessions).toBe(0);
+    backend.dispose();
+  });
+
+  it('publishes the native session pointer when capability discovery starts a fresh session', async () => {
+    let newSessions = 0;
+    let promptSessionId: string | undefined;
+    const mock = createMockAcpAgent({
+      sessionId: 'fresh-acp-session',
+      onNewSession: () => { newSessions += 1; },
+      onPrompt: (params) => { promptSessionId = (params as { sessionId?: string }).sessionId; },
+    });
+    const backend = createCopilotBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
+    const sessionOut: OutgoingMessage[] = [];
+    backend.bindSessionSend!((message) => sessionOut.push(message));
+
+    await backend.gatherCapabilities!('/tmp/project', 'shelf-session', undefined, undefined, undefined, 'app-1');
+    await backend.query({ prompt: 'first prompt', cwd: '/tmp/project', appId: 'app-1' }, () => {});
+
+    expect(newSessions).toBe(1);
+    expect(promptSessionId).toBe('fresh-acp-session');
+    expect(sessionOut).toContainEqual({
+      type: 'context_patch',
+      patch: { lastSdkSessionId: 'fresh-acp-session' },
+    });
+    backend.dispose();
+  });
+
+  it('fails loud without starting a replacement session when resume is rejected', async () => {
+    let newSessions = 0;
+    const mock = createMockAcpAgent({
+      resumeSessionError: 'resume transport failed',
+      onNewSession: () => { newSessions += 1; },
+    });
+    const backend = createCopilotBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
+
+    await expect(backend.gatherCapabilities!(
+      '/tmp/project',
+      'shelf-session',
+      undefined,
+      undefined,
+      undefined,
+      'app-1',
+      {
+        sessionId: 'shelf-session',
+        provider: 'copilot',
+        updatedAt: 1,
+        lastSdkSessionId: 'persisted-acp-session',
+      },
+    )).rejects.toThrow('resume transport failed');
+    expect(newSessions).toBe(0);
     backend.dispose();
   });
 
