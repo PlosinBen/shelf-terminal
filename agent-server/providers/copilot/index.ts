@@ -351,7 +351,10 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
     // and buildCapabilities() has the option lists.
     sessionModes = session.newSessionResponse?.modes ?? undefined;
     sessionConfigOptions = session.newSessionResponse?.configOptions ?? undefined;
-    send?.({ type: 'context_patch', patch: { lastSdkSessionId: session.sessionId } });
+    // Capability discovery can create the first native session before an
+    // execution exists. Publish through the session sink in that case so the
+    // agent-server's context wrapper persists the pointer immediately.
+    (send ?? sessionSend)?.({ type: 'context_patch', patch: { lastSdkSessionId: session.sessionId } });
     return session;
   }
 

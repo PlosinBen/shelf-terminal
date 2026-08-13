@@ -368,6 +368,7 @@ async function handleSend(msg: IncomingMessage) {
   // Hydrate persisted context once per execution — providers read fields they care
   // about (e.g. `lastSdkSessionId`) without touching disk themselves.
   const restoreContext = loadRestoreContextFor(provider, msg.sessionId);
+  backend.bindSessionSend?.(wrapSendForContext(provider, msg.sessionId, send));
 
   // Pref diff only for prompt executions. A config-edit execution IS the change — it's
   // applied by the provider via input.configEdit; running the diff too would
@@ -555,6 +556,7 @@ rl.on('line', (line) => {
           ensureConfigHome(backend, msg.appId);
           ensureSkillsProjected(backend, msg.appId);
           const restoreContext = loadRestoreContextFor(provider, msg.sessionId);
+          backend.bindSessionSend?.(wrapSendForContext(provider, msg.sessionId, send));
           const caps = await backend.gatherCapabilities?.(
             msg.cwd ?? process.cwd(),
             msg.sessionId,
