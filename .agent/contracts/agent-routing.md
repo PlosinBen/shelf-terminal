@@ -168,8 +168,11 @@ There is no `enqueue` control message — the renderer eager-sends every `{ type
 
 Listed for completeness — the capabilities request/response that seeds the status bar. Not renderer-initiated as a control action; `remote.ts` issues it from `getCapabilities()`.
 
-- main → agent-server: `sendLine({ type: 'get_capabilities', provider, cwd, sessionId, customModels?, intent?, requestId })`. Agent-server loads provider-matched restore context and passes it to `gatherCapabilities`; Copilot resumes that ACP session before capability discovery. `intent.permissionMode` seeds only Shelf-strategy providers and is ignored by Copilot native permission controls.
+- main → agent-server: `sendLine({ type: 'get_capabilities', provider, cwd, sessionId, customModels?, intent?, requestId })`. Agent-server loads provider-matched restore context, binds a context-aware session sink, and passes both boundaries to `gatherCapabilities`. Copilot restores before discovery: `session/resume` when `sessionCapabilities.resume` is advertised, otherwise `session/load` when `loadSession` is true; load replay content is suppressed while metadata is retained. A capabilities-time `session/new` emits `context_patch` immediately. `intent.permissionMode` seeds only Shelf-strategy providers and is ignored by Copilot native permission controls.
 - agent-server → main: `OutgoingMessage` `{ type: 'capabilities', requestId, error?, ...ProviderCapabilities, currentModel?, currentEffort?, currentPermissionMode? }`, matched in `proc.onResponse`. Unsolicited `capabilities` without `requestId` may be execution-scoped or execution-less; both route through the session event sink to `IPC.AGENT_CAPABILITIES` (`agent-config-flow#9`).
+
+Restore failure is not a fresh-session signal. Copilot propagates the original failure and issues no
+`session/new`; no automatic missing-session recovery exists without a stable provider-specific discriminator.
 
 ## Other control messages (one-line each)
 

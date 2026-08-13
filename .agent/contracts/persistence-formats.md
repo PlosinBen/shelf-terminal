@@ -164,7 +164,7 @@ The on-disk artifacts Shelf persists and their layout. Two roots: `<userData>` (
 
 - **Path**: `os.homedir()/.shelf/agent-context/<sessionId>.json` (keyed by sessionId, not projectId)
 - **Format**: single JSON object — `PersistedContext` (`agent-server/context-store.ts`): `{ sessionId, provider, updatedAt, modelMessages?, totalInputTokens?, totalOutputTokens?, model?, lastResponseId?, lastSdkSessionId? }`. `lastSdkSessionId: null` is the explicit "cleared" sentinel.
-- **Source of truth**: `agent-server/context-store.ts` (`loadContext` / `saveContext` / `deleteContext`). Written atomically (tmp + rename). The orchestrator (`agent-server/index.ts`) is the single disk writer. Files older than 30 days are swept by `cleanupOldContexts`. Lives on whichever machine the agent-server runs on.
+- **Source of truth**: `agent-server/context-store.ts` (`loadContext` / `saveContext` / `deleteContext`). Written atomically (tmp + rename). The execution process's `wrapSendForContext` boundary is the single disk writer; it intercepts `context_patch` from both execution and session-scoped provider sinks, including a native session created during capability discovery. Files older than 30 days are swept by `cleanupOldContexts`. Lives on whichever machine the agent-server runs on.
 
 ## `~/.shelf/agent-server/<version>/` — deployed runtime (remote/local)
 

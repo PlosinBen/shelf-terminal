@@ -527,10 +527,22 @@ Tool call 的 display metadata 也是 session-scoped carry，以 `toolCallId` �
 
 Copilot 選 `native`：ACP session modes 原值送 `session/set_mode`；ACP `allow_all` config option 原值送 `session/set_config_option`。兩者是獨立狀態，`autopilot` 不再映成 Shelf `bypassPermissions`，permission callback 也不自行 auto-approve。`/allow-all`、`/yolo`、`/reset-allowed-tools` 仍是 Copilot CLI 的原生 slash 語意，Shelf 不攔截或改寫。
 
-**Truth / lifecycle：** UI 顯示以 `session/update` 與 `set_config_option` 回覆的完整 config options 為準；bare acknowledgement 不做 optimistic mutation。沒有 advertise 的 control 就省略，advertise 後 shape/value 不合法則 fail loud。native control 不讀寫 `AgentPrefs.permissionMode`，也不 migration/delete 舊值。恢復既有 Copilot session 時，必須先 `resumeSession` 取得 mode/config state，再產生 capabilities；不可為了 discovery 先建立 fresh ACP session。
+**Truth / lifecycle：** UI 顯示以 `session/update` 與 config response 的完整 options 為準；bare acknowledgement 不做 optimistic mutation。沒有 advertise 的 control 就省略，advertise 後 shape/value 不合法則 fail loud。native control 不讀寫 `AgentPrefs.permissionMode`，也不 migration/delete 舊值。恢復既有 Copilot session 時，必須先用 agent advertise 的 restore method 取得 mode/config state，再產生 capabilities；不可為了 discovery 先建立 fresh ACP session。
 
 **Reason：** 保留 Shelf 統一詞彙雖有一致 UX，但需要維護 mode mapping、雙向同步、slash side effect 與 provider-specific error recovery。原生 CLI 使用者已熟悉其語意，也能直接查到上游文件；讓 SDK/CLI 保持 authority 可縮小失同步與漏接更新的風險。strategy seam 讓本次只改 Copilot，Claude/Codex 不受影響。
 
 **Do not change casually because：** 不要用 provider-name branch 選 UI，也不要把 native control 持久化成 canonical permission pref。不要把所有 ACP config option 泛化成 settings panel；若別的 provider 要 native strategy，必須明確描述同一個窄 surface。不要把 mode 當 allow-all，或重新加入 permission handler short-circuit。
 
 **Related：** `agent-config-flow#9`、`contracts/agent-routing`、`contracts/agent-wire-protocol`、`src/shared/permission-controls.ts`、`agent-server/providers/copilot/index.ts`、`agent-server/providers/acp/client.ts`。
+
+## agent-providers#46 — Copilot reconnect 依 ACP capability 選 restore；load replay 不進 Shelf timeline  ·  [Decision]
+
+**Decision：** Copilot capabilities probe 在建立任何 native session 前先載入 provider-matched `lastSdkSessionId`。Agent advertise stable `sessionCapabilities.resume` 時走 `session/resume`；只有 legacy `loadSession` 時走 `session/load`。`session/load` 的 conversation replay 在 ACP driver hydration 階段不轉成 renderer content，但 mode、config options 與 available commands 仍更新 session state。兩者都沒 advertise 就 fail loud。
+
+Fresh capabilities probe 若建立 `session/new`，立刻透過 session-scoped `context_patch` 寫回 native ID；不能等第一個 prompt，因為 prompt 會 reuse live session 而不再發 patch。Restore 的任何錯誤維持原錯誤並阻止 `session/new`；只有未來取得穩定且有測試的 missing-session discriminator 後，才可另議窄 fallback。
+
+**Reason：** capabilities 在 prompt 前執行，若它先建立未持久化的新 session，renderer 歷史與 provider context 會分叉。Bundled Copilot 的 ACP surface 可能只提供會 replay history 的 `session/load`；Shelf 已有自己的持久 timeline，重播進 UI 會重複訊息，但完全忽略 load notifications 又會漏掉 config/command metadata。分開「hydrate metadata」與「render replay」可保留單一 timeline ownership並繼續原對話。
+
+**Do not change casually because：** 不要把 `loadSession: true` 當成可呼叫 `session/resume`，也不要無條件偏好 load；以 initialize capabilities 選 method。不要 broad-catch restore 後靜默開新 session，也不要把 `lastSdkSessionId` 暴露到 renderer/main wire。Replay suppression 只限 restore hydration window；正常 prompt update 仍必須完整送達。
+
+**Related：** `agent-providers#37`、`agent-providers#45`、`architecture/agent-execution`、`contracts/agent-routing`、`contracts/persistence-formats`、`agent-server/providers/acp/{connection,client}.ts`、`agent-server/providers/copilot/index.ts`。

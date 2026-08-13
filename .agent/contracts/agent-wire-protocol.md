@@ -270,7 +270,7 @@ Emitted outside any execution. Some are one-shot RPC responses keyed `<type>:<re
 | `task_output` | `requestId; content?; error?` | RPC response — full background-task output |
 | `app_tool` | `requestId; op; args` | server→main bridge-tool request; main replies `app_tool_result` |
 | `log` | `level: error\|warn\|info\|debug; tag; msg` | diagnostic → main's `@shared/logger` at `level` (main applies the filter). See below. |
-| `context_patch` | `patch: Partial<PersistedContext>` | intercepted in `agent-server/index.ts`, NOT forwarded to main |
+| `context_patch` | `patch: Partial<PersistedContext>` | intercepted by the execution process's context wrapper, NOT forwarded to main; may arrive through an execution send or the bound session sink during capability discovery |
 
 ### Process memory acquisition — `get_memory_usage` / `memory_usage`
 

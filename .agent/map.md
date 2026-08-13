@@ -116,9 +116,9 @@ title: shelf-terminal — Intent → File Index
 | Model/caps cache（泛型 TTL） | `model-cache.ts` | `createModelCache({ttlMs})`：泛型 TTL 儲存，過期即 evict（cache-aside 的被動 store，見 `context/agent-config-flow`） |
 | Session hosting 抽象（兩張 map） | `session-registry.ts` | `createSessionRegistry()`：`sessions: Map<sid, runtimeKey>` + `runtimes: Map<runtimeKey, T>`，`runtimeKeyFor` 決定 isolated（sid）/shared（provider:account）。為 shared 部署預備（isolated milestone 未用） |
 | Claude provider | `providers/claude/index.ts` | `@anthropic-ai/claude-agent-sdk` wrapper：持久 streaming-input session、emit 渲染原語、auth 偵測 |
-| Copilot provider (ACP) | `providers/copilot/index.ts` | `createCopilotBackend`：spawn `copilot --acp`、走共用 `acp/` toolkit runtime、OWN copilot 特有（binary launch、device-flow login、config-home）。ACP 是內部細節、provider identity = `copilot`（cutover 後即 copilot backend，pre-ACP native SDK backend 已刪，見 git 歷史） |
+| Copilot provider (ACP) | `providers/copilot/index.ts` | `createCopilotBackend`：spawn `copilot --acp`、依 initialize capability 選 resume/load、管理 native config、device-flow login 與 config-home |
 | Codex provider (app-server) | `providers/codex/index.ts` | `createCodexBackend`：直接驅動 pinned `codex app-server` JSON-RPC，封裝 turn/session、auth、config、skills/MCP、quota/context、tool items 與 approval bridge |
-| ACP 共用 toolkit | `providers/acp/` | provider-agnostic ACP runtime：`connection`/`client`/`translate`/`permission`/`capabilities`/`mcp`/`shelf-mcp`（L1 in-process HTTP bridge）+ `mock-agent`；driver 觀察 authoritative mode/config state，由 Copilot 使用 |
+| ACP 共用 toolkit | `providers/acp/` | provider-agnostic ACP runtime：connection/initialize、new/resume/load（load replay suppression）、update translation、permission、capabilities、MCP 與測試 mock |
 | Provider registry（identity 單一來源） | `src/shared/agent-providers.ts` | provider key → label / visibility / runtime binding，衍生 `AgentProvider` 與 presentation helpers（見 `context/agent-providers` #36） |
 | Backend registry | `backend-registry.ts` | requested provider key → cached backend；test mode 只替換 implementation，不改 identity/cache boundary |
 | Provider 純 helper（claude） | `providers/claude/helpers.ts` | claude/index 抽出的 side-effect-free 函式 + types（封閉邊界，只被 claude/ 引用） |
@@ -142,7 +142,7 @@ title: shelf-terminal — Intent → File Index
 | Fake provider | `providers/fake/index.ts` | registered internal provider；可顯式選取，也可在 `SHELF_TEST_MODE=1` 作 requested provider 的 substitute；prompt 走 prefix-matched scenario |
 | Fake provider 測試 | `providers/fake/fake.test.ts` | 每個 scenario 的 wire-shape 驗證 + stop/abort 行為 |
 | Bundle build | `build.mjs` | esbuild → `dist/agent-server/<version>/index.js` 單一 ESM bundle（index/exec/dispatcher 同一 bundle，role 由 argv 選） |
-| Copilot provider 測試 | `providers/copilot/{copilot,helpers,login,credit}.test.ts` | ACP backend wire-shape / native mode+allow_all / resume-before-discovery / helper / device-flow login / credit normalize + cache-aside |
+| Copilot provider 測試 | `providers/copilot/{copilot,helpers,login,credit}.test.ts` | ACP backend wire-shape / native config / reconnect restore+pointer persistence / helper / device-flow login / credit cache |
 | ACP toolkit 測試 | `providers/acp/*.test.ts` | connection/client/translate/permission/capabilities/mcp/shelf-mcp + mock-agent 驅動的 toolkit 驗證 |
 | Dispatcher 單元測試 | `dispatcher.test.ts` | open/close_session / raw relay / reconnect + backoff / inner-ping hung / proc-identity guard / cache 側通道 |
 | Model-cache 單元測試 | `model-cache.test.ts` | TTL hit/miss/expiry evict |

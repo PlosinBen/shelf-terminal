@@ -40,6 +40,8 @@ provider execution                                              │
 
 The client eager-sends each input and mirrors the backend's ordered queue snapshots. A queued item appears as a chip; when it becomes running, its optimistic user message is promoted into the timeline. The client does not infer provider boundaries or decide when another send may start.
 
+Session initialization restores provider context before capability discovery may create a replacement context. A restore operation may replay provider history; when the client already owns the persisted timeline, replay render content is hydration input rather than new timeline content, while restored configuration and command metadata still update session state. A newly created provider context becomes durable immediately, before the first execution can reuse it.
+
 Provider output divides into two independent lanes:
 
 - **Content lane:** render primitives are session-scoped. A new message id appends at arrival position; a repeated message id updates that existing entry in place. Content remains deliverable before, during, or after execution settlement.
@@ -63,4 +65,5 @@ Plan/todo data is not timeline content. It is replace-semantics state on its own
 - **Permission correlation is execution-local.** Tool permission requests use the active execution's response channel and tool-use id; this permission pointer is not a general content sink.
 - **The backend owns ordering.** The renderer submits eagerly and mirrors authoritative queue snapshots instead of guessing execution seams.
 - **Config confirmation flows one way.** The renderer sends edits; the backend publishes confirmed capabilities/status. Shelf-strategy state may persist after confirmation; provider-native permission descriptors remain session-scoped and replace from provider truth.
+- **Restore failure does not imply fresh context.** Authentication, transport, unsupported-method, timeout, and malformed restore failures terminate initialization unless a provider has a separately proven missing-context recovery rule.
 - **Triggers emit intents.** Host-touching effects and store mutation stay centralized rather than being performed by UI triggers.

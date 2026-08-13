@@ -72,7 +72,7 @@ related:
 
 ## skills#4 — App-skill live hot-reload：skill 改完免重連即生效  ·  [Decision]
 
-**Problem**：plugins/skillDirectories 在持久 session 建立時載入一次（`background-tasks#3`），所以 skill 改完預設要下一個 session 才生效。使用者直覺是「改完最多 reconnect 就該吃到新的」，但**連線跨 project 共用**（真重連得 disconnect 所有 project），且 reconnect 走 `resumeSession`/resume pointer **會把舊 skill 快照接回來、根本沒重掃** → 改完怎樣都看不到新的。
+**Problem**：plugins/skillDirectories 在持久 session 建立時載入一次（`background-tasks#3`），所以 skill 改完預設要下一個 session 才生效。使用者直覺是「改完最多 reconnect 就該吃到新的」，但**連線跨 project 共用**（真重連得 disconnect 所有 project），且 reconnect 會依 persisted pointer restore 舊 session **把舊 skill 快照接回來、根本沒重掃** → 改完怎樣都看不到新的。
 
 **Decision**：有 live-reload API 的 provider 接成 `ServerBackend.reloadSkills?()`，掛在 `onSkillsChanged()` 下游：skill 改 → 自動 reload 進每個 live session，**免重連、不丟對話歷史**，該 session **下一個 turn** 生效。
 - **Claude** `query.reloadPlugins()`（回傳 refreshed `commands`/`mcpServers` → 更新 `/skills` `/mcp` cache）。best-effort：無 live session = no-op，失敗則退回「下次 init 生效」。
