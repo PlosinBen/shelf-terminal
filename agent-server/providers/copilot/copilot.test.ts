@@ -238,6 +238,7 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
       agentCapabilities: { sessionCapabilities: { resume: {} } },
       modes: COPILOT_MODES,
       configOptions: COPILOT_CONFIG,
+      commandsOnResumeSession: [{ name: 'compact', description: 'Summarize conversation' }],
       onNewSession: () => { newSessions += 1; },
       onResumeSession: (params) => { resumedSessionId = (params as { sessionId?: string }).sessionId; },
       onPrompt: (params) => { promptSessionId = (params as { sessionId?: string }).sessionId; },
@@ -266,6 +267,7 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
       mode: { currentValue: 'agent' },
       permission: { currentValue: 'off' },
     });
+    expect(caps.slashCommands).toEqual([{ name: 'compact', description: 'Summarize conversation' }]);
     await backend.query({
       prompt: 'continue the restored conversation',
       cwd: '/tmp/project',
@@ -309,6 +311,7 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
   it('fails loud without starting a replacement session when resume is rejected', async () => {
     let newSessions = 0;
     const mock = createMockAcpAgent({
+      agentCapabilities: { sessionCapabilities: { resume: {} } },
       resumeSessionError: 'resume transport failed',
       onNewSession: () => { newSessions += 1; },
     });
@@ -329,6 +332,57 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
       },
     )).rejects.toThrow('resume transport failed');
     expect(newSessions).toBe(0);
+    backend.dispose();
+  });
+
+  it('loads legacy Copilot sessions without replaying duplicate conversation content', async () => {
+    let loadedSessionId: string | undefined;
+    let resumeRequests = 0;
+    let newSessions = 0;
+    let promptSessionId: string | undefined;
+    const mock = createMockAcpAgent({
+      modes: COPILOT_MODES,
+      configOptions: COPILOT_CONFIG,
+      updatesOnLoadSession: [
+        { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'old replayed answer' }, messageId: 'old-1' },
+        {
+          sessionUpdate: 'available_commands_update',
+          availableCommands: [{ name: 'compact', description: 'Summarize conversation' }],
+        },
+      ],
+      onLoadSession: (params) => { loadedSessionId = (params as { sessionId?: string }).sessionId; },
+      onResumeSession: () => { resumeRequests += 1; },
+      onNewSession: () => { newSessions += 1; },
+      onPrompt: (params) => { promptSessionId = (params as { sessionId?: string }).sessionId; },
+    });
+    const backend = createCopilotBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
+    const sessionOut: OutgoingMessage[] = [];
+    backend.bindSessionSend!((message) => sessionOut.push(message));
+    const restoreContext = {
+      sessionId: 'shelf-session',
+      provider: 'copilot' as const,
+      updatedAt: 1,
+      lastSdkSessionId: 'persisted-acp-session',
+    };
+
+    const caps = await backend.gatherCapabilities!(
+      '/tmp/project', 'shelf-session', undefined, undefined, undefined, 'app-1', restoreContext,
+    );
+    await backend.query({
+      prompt: 'continue after load', cwd: '/tmp/project', appId: 'app-1', restoreContext,
+    }, () => {});
+
+    expect(loadedSessionId).toBe('persisted-acp-session');
+    expect(resumeRequests).toBe(0);
+    expect(newSessions).toBe(0);
+    expect(promptSessionId).toBe('persisted-acp-session');
+    expect(sessionOut).not.toContainEqual(expect.objectContaining({ type: 'stream', content: 'old replayed answer' }));
+    expect(caps.slashCommands).toEqual([{ name: 'compact', description: 'Summarize conversation' }]);
+    expect(caps.permissionControl).toMatchObject({
+      strategy: 'native',
+      mode: { currentValue: 'agent' },
+      permission: { currentValue: 'off' },
+    });
     backend.dispose();
   });
 

@@ -11,6 +11,7 @@ import {
   type SessionNotification,
   type SessionUpdate,
   type NewSessionResponse,
+  type LoadSessionResponse,
   type ResumeSessionResponse,
   type StopReason,
   type McpServer,
@@ -38,6 +39,8 @@ export interface AcpSession {
   newSessionResponse?: NewSessionResponse;
   /** Present for resumed sessions when the agent reports restored native state. */
   resumeSessionResponse?: ResumeSessionResponse;
+  /** Present for loaded sessions after replay hydration completes. */
+  loadSessionResponse?: LoadSessionResponse;
 }
 
 export interface StartSessionOptions {
@@ -71,6 +74,7 @@ export interface SessionDriver {
   /** Register on the ACP connection: routes session/update for the session lifetime. */
   onSessionUpdate(notification: SessionNotification): void;
   startNew(agent: ClientContext, opts: StartSessionOptions): Promise<AcpSession>;
+  load(agent: ClientContext, sessionId: string, opts: StartSessionOptions): Promise<AcpSession>;
   resume(agent: ClientContext, sessionId: string, opts: StartSessionOptions): Promise<AcpSession>;
   drivePromptTurn(
     agent: ClientContext,
@@ -97,6 +101,10 @@ export function createSessionDriver(options: SessionDriverOptions = {}): Session
   // Per-session slash commands captured from `available_commands_update` (arrives
   // out-of-turn near session start; the backend reads it at gatherCapabilities).
   const commandsBySession = new Map<string, AvailableCommand[]>();
+  // session/load replays prior conversation by protocol. Shelf already restores
+  // its timeline from local history, so consume metadata during hydration but
+  // suppress renderable replay to avoid duplicate messages.
+  const hydratingSessions = new Set<string>();
   // Monotonic across prompts so a per-prompt namespace for messageId-less agents
   // (copilot --acp omits `messageId`) stays unique — otherwise every turn's reply
   // collapses onto the constant DEFAULT_AGENT_MSG_ID and the renderer upserts them
@@ -170,6 +178,7 @@ export function createSessionDriver(options: SessionDriverOptions = {}): Session
           configOptions: n.update.configOptions,
         });
       }
+      if (hydratingSessions.has(n.sessionId)) return;
       routeUpdate(n.sessionId, n.update);
     },
 
@@ -185,6 +194,26 @@ export function createSessionDriver(options: SessionDriverOptions = {}): Session
       });
       routeState(res.sessionId);
       return { sessionId: res.sessionId, newSessionResponse: res };
+    },
+
+    async load(agent, sessionId, opts) {
+      routeState(sessionId);
+      hydratingSessions.add(sessionId);
+      try {
+        const response = await agent.request(methods.agent.session.load, {
+          sessionId,
+          cwd: opts.cwd,
+          mcpServers: opts.mcpServers ?? [],
+          ...(opts.additionalDirectories?.length ? { additionalDirectories: opts.additionalDirectories } : {}),
+        });
+        return { sessionId, loadSessionResponse: response };
+      } catch (error) {
+        routeBySession.delete(sessionId);
+        commandsBySession.delete(sessionId);
+        throw error;
+      } finally {
+        hydratingSessions.delete(sessionId);
+      }
     },
 
     async resume(agent, sessionId, opts) {
@@ -257,6 +286,7 @@ export function createSessionDriver(options: SessionDriverOptions = {}): Session
     forget(sessionId) {
       routeBySession.delete(sessionId);
       commandsBySession.delete(sessionId);
+      hydratingSessions.delete(sessionId);
     },
   };
 }

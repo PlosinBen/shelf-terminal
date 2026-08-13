@@ -319,16 +319,11 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
     // has tolerated its absence, but sending it is spec-correct and consistent with
     // codex-acp (which hard-rejects session/new otherwise). Overlaps the setup below.
     const initialized = await c.initialized;
-    if (input.resumeId) {
-      const capabilities = initialized.agentCapabilities;
-      // Stable ACP advertises sessionCapabilities.resume. Pinned Copilot 1.0.68
-      // implements session/resume but still advertises only the legacy
-      // loadSession flag, so accept either signal at this provider boundary.
-      const supportsResume = capabilities?.sessionCapabilities?.resume !== undefined
-        || capabilities?.loadSession === true;
-      if (!supportsResume) {
+    const capabilities = initialized.agentCapabilities;
+    const supportsResume = capabilities?.sessionCapabilities?.resume !== undefined;
+    const supportsLoad = capabilities?.loadSession === true;
+    if (input.resumeId && !supportsResume && !supportsLoad) {
         throw new Error('Copilot ACP does not advertise session resume support');
-      }
     }
     const mcp = loadProjectedMcpServers(appId);
     // Fail-loud: a bad/incomplete MCP entry is logged, not silently dropped.
@@ -345,11 +340,17 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
     };
 
     if (input.resumeId) {
-      session = await driver.resume(c.agent, input.resumeId, opts);
+      // Prefer stable resume (no history replay). Bundled Copilot 1.0.68 only
+      // advertises session/load; the shared driver suppresses its conversation
+      // replay while retaining mode/config/command metadata.
+      session = supportsResume
+        ? await driver.resume(c.agent, input.resumeId, opts)
+        : await driver.load(c.agent, input.resumeId, opts);
       sessionCwd = input.cwd;
       sessionAppId = appId;
-      sessionModes = session.resumeSessionResponse?.modes ?? undefined;
-      sessionConfigOptions = session.resumeSessionResponse?.configOptions ?? undefined;
+      const restored = session.resumeSessionResponse ?? session.loadSessionResponse;
+      sessionModes = restored?.modes ?? undefined;
+      sessionConfigOptions = restored?.configOptions ?? undefined;
       return session;
     }
     session = await driver.startNew(c.agent, opts);

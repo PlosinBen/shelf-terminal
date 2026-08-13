@@ -36,6 +36,8 @@ export interface MockAgentScript {
   /** Slash commands emitted as an `available_commands_update` right after
    *  session/new (mirrors copilot, which sends them out-of-turn near session start). */
   commandsOnNewSession?: AvailableCommand[];
+  /** Slash commands emitted after session/resume. */
+  commandsOnResumeSession?: AvailableCommand[];
   /** Updates emitted (in order) while handling each session/prompt. */
   updatesOnPrompt?: SessionUpdate[];
   /** Stop reason returned by session/prompt (default: 'end_turn'). */
@@ -55,6 +57,10 @@ export interface MockAgentScript {
   onResumeSession?: (params: unknown) => void;
   /** Reject session/resume with this message. */
   resumeSessionError?: string;
+  /** Called with session/load params. */
+  onLoadSession?: (params: unknown) => void;
+  /** Conversation/metadata updates replayed while handling session/load. */
+  updatesOnLoadSession?: SessionUpdate[];
   /** Called with session/set_mode params (assert modeId). */
   onSetMode?: (params: unknown) => void;
   /** Authoritative updates emitted while handling session/set_mode. */
@@ -111,9 +117,25 @@ export function createMockAcpAgent(script: MockAgentScript = {}): AgentApp {
         ...(script.configOptions ? { configOptions: script.configOptions } : {}),
       };
     })
-    .onRequest('session/resume', ({ params }) => {
+    .onRequest('session/resume', async ({ params, client }) => {
       script.onResumeSession?.(params);
       if (script.resumeSessionError) throw new RequestError(-32001, script.resumeSessionError);
+      if (script.commandsOnResumeSession) {
+        await client.notify('session/update', {
+          sessionId: params.sessionId,
+          update: { sessionUpdate: 'available_commands_update', availableCommands: script.commandsOnResumeSession },
+        });
+      }
+      return {
+        ...(script.modes ? { modes: script.modes } : {}),
+        ...(script.configOptions ? { configOptions: script.configOptions } : {}),
+      };
+    })
+    .onRequest('session/load', async ({ params, client }) => {
+      script.onLoadSession?.(params);
+      for (const update of script.updatesOnLoadSession ?? []) {
+        await client.notify('session/update', { sessionId: params.sessionId, update });
+      }
       return {
         ...(script.modes ? { modes: script.modes } : {}),
         ...(script.configOptions ? { configOptions: script.configOptions } : {}),
