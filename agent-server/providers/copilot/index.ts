@@ -318,7 +318,18 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
     // ACP requires the `initialize` handshake before any session op. copilot --acp
     // has tolerated its absence, but sending it is spec-correct and consistent with
     // codex-acp (which hard-rejects session/new otherwise). Overlaps the setup below.
-    await c.initialized;
+    const initialized = await c.initialized;
+    if (input.resumeId) {
+      const capabilities = initialized.agentCapabilities;
+      // Stable ACP advertises sessionCapabilities.resume. Pinned Copilot 1.0.68
+      // implements session/resume but still advertises only the legacy
+      // loadSession flag, so accept either signal at this provider boundary.
+      const supportsResume = capabilities?.sessionCapabilities?.resume !== undefined
+        || capabilities?.loadSession === true;
+      if (!supportsResume) {
+        throw new Error('Copilot ACP does not advertise session resume support');
+      }
+    }
     const mcp = loadProjectedMcpServers(appId);
     // Fail-loud: a bad/incomplete MCP entry is logged, not silently dropped.
     for (const e of mcp.errors) serverLog('warn', 'copilot', `MCP config: ${e}`);

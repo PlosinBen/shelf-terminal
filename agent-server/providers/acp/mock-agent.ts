@@ -12,6 +12,7 @@ import {
   methods,
   RequestError,
   type AgentApp,
+  type AgentCapabilities,
   type SessionUpdate,
   type StopReason,
   type PermissionOption,
@@ -22,6 +23,8 @@ import {
 } from '@agentclientprotocol/sdk';
 
 export interface MockAgentScript {
+  /** Capabilities returned by initialize (default mirrors pinned Copilot's legacy resume signal). */
+  agentCapabilities?: AgentCapabilities;
   /** Auth methods advertised at initialize (default: one chatgpt-like method). */
   authMethods?: Array<{ id: string; name: string; description?: string | null }>;
   /** Session id handed back from session/new (default: 'mock-session'). */
@@ -86,7 +89,11 @@ export function createMockAcpAgent(script: MockAgentScript = {}): AgentApp {
       script.onInitialize?.(params);
       return {
         protocolVersion: params.protocolVersion,
-        agentCapabilities: { loadSession: true, promptCapabilities: { image: true } },
+        agentCapabilities: script.agentCapabilities ?? {
+          loadSession: true,
+          promptCapabilities: { image: true },
+          sessionCapabilities: { list: {} },
+        },
         authMethods,
       };
     })

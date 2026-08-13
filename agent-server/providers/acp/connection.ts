@@ -16,6 +16,7 @@ import {
   type Stream,
   type SessionNotification,
   type ClientRequestHandlersByMethod,
+  type InitializeResponse,
 } from '@agentclientprotocol/sdk';
 
 /** Handle over a live ACP connection. `agent` drives agent-side methods. */
@@ -34,7 +35,7 @@ export interface AcpConnection {
    * (copilot --acp, the test mock) tolerate its absence, which is why the gap only
    * surfaced on codex. See agent-providers.
    */
-  readonly initialized: Promise<void>;
+  readonly initialized: Promise<InitializeResponse>;
   /** Close the connection (and the child process, if any). */
   close(error?: unknown): void;
 }
@@ -74,12 +75,10 @@ export function openAcpConnection(
   // `initialized`. We advertise NO fs/terminal client capabilities — Shelf only
   // handles permission requests over ACP (fs/terminal tools run agent-side). Without
   // this, codex-acp rejects session/new with { details: "Not initialized" }.
-  const initialized = conn.agent
-    .request(methods.agent.initialize, {
-      protocolVersion: PROTOCOL_VERSION,
-      clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
-    })
-    .then(() => undefined);
+  const initialized = conn.agent.request(methods.agent.initialize, {
+    protocolVersion: PROTOCOL_VERSION,
+    clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
+  });
   return {
     agent: conn.agent,
     closed: conn.closed,
