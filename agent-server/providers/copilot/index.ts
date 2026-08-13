@@ -283,9 +283,10 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
 
   /**
    * Establish the session (once per cwd), preferring RESUME of a persisted
-   * `lastSdkSessionId` so a reconnect continues the conversation; falls back to
-   * a fresh session/new if resume fails. Emits `context_patch` to persist the
-   * (new) session id — Shelf never touches the context store directly.
+   * `lastSdkSessionId` so a reconnect continues the conversation. Resume
+   * failures remain failures: silently starting fresh would switch conversation
+   * branches and hide auth/transport/protocol errors. Emits `context_patch` to
+   * persist a new session id — Shelf never touches the context store directly.
    */
   async function ensureSession(
     input: { cwd: string; appId?: string; resumeId?: string | null },
@@ -333,16 +334,12 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
     };
 
     if (input.resumeId) {
-      try {
-        session = await driver.resume(c.agent, input.resumeId, opts);
-        sessionCwd = input.cwd;
-        sessionAppId = appId;
-        sessionModes = session.resumeSessionResponse?.modes ?? undefined;
-        sessionConfigOptions = session.resumeSessionResponse?.configOptions ?? undefined;
-        return session;
-      } catch {
-        // Resume rejected (session gone / unsupported) → fall through to new.
-      }
+      session = await driver.resume(c.agent, input.resumeId, opts);
+      sessionCwd = input.cwd;
+      sessionAppId = appId;
+      sessionModes = session.resumeSessionResponse?.modes ?? undefined;
+      sessionConfigOptions = session.resumeSessionResponse?.configOptions ?? undefined;
+      return session;
     }
     session = await driver.startNew(c.agent, opts);
     sessionCwd = input.cwd;
@@ -436,6 +433,9 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
         currentEffort ??= cur.currentEffort;
         return buildCapabilities();
       } catch (err: any) {
+        // A persisted pointer means this was a resume attempt. Preserve its
+        // actual failure for init rather than relabeling it as unauthenticated.
+        if (restoreContext?.lastSdkSessionId) throw err;
         // A fresh session most commonly fails when unauthenticated → surface the
         // auth pane rather than an empty capability set. authMethod drives the
         // AuthPane's Login button (oauth branch); without it the pane shows no way

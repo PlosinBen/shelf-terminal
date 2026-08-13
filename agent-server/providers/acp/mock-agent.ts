@@ -10,6 +10,7 @@
 import {
   agent,
   methods,
+  RequestError,
   type AgentApp,
   type SessionUpdate,
   type StopReason,
@@ -105,7 +106,7 @@ export function createMockAcpAgent(script: MockAgentScript = {}): AgentApp {
     })
     .onRequest('session/resume', ({ params }) => {
       script.onResumeSession?.(params);
-      if (script.resumeSessionError) throw new Error(script.resumeSessionError);
+      if (script.resumeSessionError) throw new RequestError(-32001, script.resumeSessionError);
       return {
         ...(script.modes ? { modes: script.modes } : {}),
         ...(script.configOptions ? { configOptions: script.configOptions } : {}),
