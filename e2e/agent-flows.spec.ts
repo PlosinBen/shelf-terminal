@@ -76,7 +76,7 @@ test.describe('agent flows via fake provider', () => {
       await expect(menu.locator('.context-menu-item', { hasText: 'Copilot ACP' })).toHaveCount(0);
     });
 
-    test('renders an internal provider from its registry label', async ({ shelfApp: { page } }) => {
+    test('renders an internal provider name outside assistant replies', async ({ shelfApp: { page } }) => {
       await setupProject(page);
       await page.locator('.tab-add').click({ button: 'right' });
       await page.locator('.context-menu-item', { hasText: 'Agent (Test Agent)' }).click();
@@ -86,7 +86,7 @@ test.describe('agent flows via fake provider', () => {
 
       await sendAgentPrompt(page, 'text:label-source');
       await expect(page.locator('.agent-msg-reply:visible').last().locator('.agent-msg-label'))
-        .toHaveText('Test Agent:');
+        .toHaveCount(0);
     });
   });
 
@@ -142,7 +142,7 @@ test.describe('agent flows via fake provider', () => {
 
       const reply = page.locator('.agent-msg-reply:visible', { hasText: 'final completion summary' });
       await expect(reply).toBeVisible({ timeout: 5_000 });
-      await expect(reply.locator('.agent-msg-label')).toHaveText('Copilot:');
+      await expect(reply.locator('.agent-msg-label')).toHaveCount(0);
       await expect(page.locator('.agent-msg-note:visible', { hasText: 'final completion summary' })).toHaveCount(0);
     });
 

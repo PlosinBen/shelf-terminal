@@ -4,7 +4,6 @@ import { renderMarkdown } from '../utils/markdown';
 import { alignLineDiff, type DiffRow } from '../utils/line-diff';
 import type { AgentDisplayMode, AgentDisplayKey, AgentFile, FoldBase } from '@shared/types';
 import { DEFAULT_AGENT_DISPLAY } from '@shared/types';
-import { isAgentProvider, providerLabel } from '@shared/agent-providers';
 
 /**
  * Renderer-side message variant. Mirrors `AgentMessage` from `@shared/types`
@@ -131,18 +130,13 @@ export function AgentMessage({ message, cwd: _cwd, nested }: Props) {
   const foldMdHtml = useMemo(() => renderMarkdown(foldMdContent), [foldMdContent]);
 
   switch (message.type) {
-    case 'reply': {
-      const label = isAgentProvider(message.provider)
-        ? `${providerLabel(message.provider)}:`
-        : 'Assistant:';
+    case 'reply':
       return (
         <div className="agent-msg agent-msg-reply">
-          <span className="agent-msg-label">{label}</span>
           <div className="agent-msg-content agent-markdown" dangerouslySetInnerHTML={{ __html: replyHtml }} />
           {message.streaming === true && <span className="agent-cursor" />}
         </div>
       );
-    }
 
     case 'note':
       // Provider sends pure content; renderer owns the leading marker so the
