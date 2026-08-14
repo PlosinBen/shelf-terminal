@@ -437,15 +437,15 @@ Renderer 在 dev/E2E 傳入是否顯示 internal provider 的環境政策，再�
 
 **Symptom：** Copilot 的最後一段（通常是 `task_complete` 最終總結）可能在 prompt response／stop reason 已 settlement 後才由 SDK callback 送達。若 update sink 跟 prompt 一起關閉，內容會延遲到下一次 send 或直接遺失。
 
-**Root cause：** ACP SDK 的 prompt response 與 session notification callback 是獨立排程；response 先 resolve 不代表所有 renderable update 都已 callback。這是 SDK scheduling 特性，不是 Shelf 應以 drain/barrier 猜測並修補的 protocol boundary。
+**Root cause：** ACP SDK 的 prompt response 與 session notification callback 是獨立排程；response 先 resolve 不代表所有 renderable update 都已 callback。bundled Copilot ACP 更進一步以 `wait:false` 呼叫內部 `session.send()`，所以 `session/prompt` response 只代表工作已排入，不代表 Autopilot 已停止執行。這不是 Shelf 能以固定 delay 或一般 content drain 猜出的 protocol boundary。
 
-**Fix / note：** ACP driver 的 update router 與 render sink 跟 session 同壽命；一般 prompt settlement 只 emit execution idle，讓 main 更新 idle、清 permission、完成 reader並釋放 next queued message。所有 ACP renderable updates 一律繼續走同一條 session content sink，所以 late final message 會按到達時序正常顯示。**顯示 idle 不等於 session 已不可取消**：Copilot tab 即使 visually idle 仍保留 double-ESC stop affordance，因為 autopilot work 可能在 prompt settlement 後繼續。
+**Fix / note：** ACP driver 的 update router 與 render sink 跟 session 同壽命；所有 ACP renderable updates 一律繼續走同一條 session content sink，所以 late final message 會按到達時序正常顯示。Copilot **Autopilot** 額外以 provider-native `task_complete` terminal tool update 作 execution boundary：先記住帶 title 的 tool id，後續同 id 的 `status:'completed'` 才 emit idle、完成 reader並釋放下一則 queued send；`session/prompt` 提前回覆時仍維持 running。其他 mode 沒有可靠 terminal signal，仍以 prompt settlement 收尾；因此 Copilot tab 即使 visually idle 仍保留 double-ESC stop affordance。
 
 使用者要求取消是獨立的 control-plane boundary：若 Copilot 的 `session/prompt` 仍 active，provider 發出 `session/cancel` 後，`stop()` 必須等待同一個 prompt 回傳 `stopReason:'cancelled'` 才算成功；prompt failure、其他 stop reason 或 bounded RPC timeout 都是取消失敗，必須 fail loud。若 prompt response **已先 settlement**，就不存在可等的 cancellation acknowledgement，但 Copilot autopilot 仍可能實質工作；此時先 best-effort `session/cancel`，再關閉 ACP connection 並 kill CLI process，下一輪從 persisted session resume。這是保證 stop 的 force fallback，不改 UI idle 語意。
 
 Tool call 的 display metadata 也是 session-scoped carry，以 `toolCallId` 暫存，terminal translate 後立即 evict；reset/forget 清空。driver 不保存 `textByMsg`，文字 delta 的累積與持久化只由 renderer 負責。`activeExecutionSend` 僅供當下 tool permission round-trip，不是一般 notification/content sink。
 
-**Do not change casually because：** 不要恢復 per-prompt update queue、`setImmediate`/固定 delay barrier、current/last prompt attribution 或一般 stopReason content gate。active prompt 時不可把 `session/cancel` 已寫入 pipe 當成取消成功；post-prompt 因已無 ack boundary，必須 force-close，不能只送 notification 後假裝已停。若 upstream 額外發訊息，Shelf 的責任是按時序顯示；唯有使用者明確取消時才切斷 session content sink。
+**Do not change casually because：** 不要恢復 per-prompt update queue、`setImmediate`/短 quiet-period barrier、current/last prompt attribution 或把一般 stopReason 當 content gate。Autopilot completion 必須追蹤 `task_complete` 的 tool id，因 terminal partial update 可能省略 title；stop/reconnect/dispose 必須解除 completion gate，否則 execution reader 與 send queue 會永久卡住。30 分鐘 watchdog 只處理上游漏訊號的故障：逾時明確 emit error 後 idle，不是正常完成判斷。active prompt 時不可把 `session/cancel` 已寫入 pipe 當成取消成功；post-prompt 因已無 ack boundary，必須 force-close，不能只送 notification 後假裝已停。
 
 **Related：** `agent-server/providers/acp/client.ts`、`agent-server/providers/copilot/index.ts`、`src/renderer/components/agent/InputZone.tsx`、`e2e/agent-flows.spec.ts`、`agent-providers#24`（Copilot `task_complete` 最終總結）。
 
@@ -563,7 +563,7 @@ Fresh capabilities probe 若建立 `session/new`，立刻透過 session-scoped `
 
 **Root cause：** bundled Copilot CLI 的 ACP `session/prompt` handler 在每個新 prompt 開始前無條件呼叫 `session.abort()`。若上一輪 ACP request 已回覆、但內部尾端工作仍在 settle，新 prompt 會 abort 該工作。Copilot 隨後 emit `session.info { infoType: "cancellation" }`；ACP adapter 丟失 `infoType`，將內容壓成無 message id 的 `agent_message_chunk`。共用 ACP translator 因此只能把它視為一般 assistant delta，並與同一 prompt 的正常回答累積在同一個 bubble。
 
-**Fix / note：** 只在 Copilot provider 的 session-update 邊界辨認並略過精確的 adapter 產物 `Info: Operation cancelled by user`；共用 ACP driver 保持 provider-neutral。Shelf 的顯式 stop 已由自己的 control/status path 回饋，不依賴這段 provider 文字。其他 `Info:`、warning、error 與正常 assistant chunk 不受影響。
+**Fix / note：** 只在 Copilot provider 的 session-update 邊界辨認並略過精確的 adapter 產物 `Info: Operation cancelled by user`；共用 ACP driver 保持 provider-neutral。Autopilot execution 另等到 `task_complete` completed 才釋放下一則 queued prompt，避免因 ACP request 提前回覆而主動撞上這個 abort；窄文字 filter 仍保護其他 mode 與上游 race。Shelf 的顯式 stop 已由自己的 control/status path 回饋，不依賴這段 provider 文字。其他 `Info:`、warning、error 與正常 assistant chunk 不受影響。
 
 **Do not change casually because：** 不要在共用 ACP translator 全域過濾這個字串，也不要把所有 `Info:` 都吞掉。上游若保留 `session.info.infoType`、改成非 assistant update，或不再在新 prompt 前 abort，應移除此窄 workaround 與對應 regression test。
 

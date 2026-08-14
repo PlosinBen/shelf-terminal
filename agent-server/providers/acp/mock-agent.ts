@@ -42,6 +42,9 @@ export interface MockAgentScript {
   updatesOnPrompt?: SessionUpdate[];
   /** Per-prompt updates, indexed from zero. Takes precedence over updatesOnPrompt. */
   updatesByPrompt?: SessionUpdate[][];
+  /** Updates emitted after session/prompt has already returned. Reproduces agents
+   *  whose session work outlives the ACP request lifecycle. */
+  updatesAfterPrompt?: SessionUpdate[];
   /** Stop reason returned by session/prompt (default: 'end_turn'). */
   stopReason?: StopReason;
   /** Keep session/prompt pending until the client sends session/cancel. */
@@ -182,6 +185,16 @@ export function createMockAcpAgent(script: MockAgentScript = {}): AgentApp {
       promptIndex++;
       for (const update of updates) {
         await client.notify('session/update', { sessionId, update });
+      }
+      if (script.updatesAfterPrompt) {
+        const lateUpdates = script.updatesAfterPrompt;
+        setImmediate(() => {
+          void (async () => {
+            for (const update of lateUpdates) {
+              await client.notify('session/update', { sessionId, update });
+            }
+          })();
+        });
       }
       return { stopReason };
     });

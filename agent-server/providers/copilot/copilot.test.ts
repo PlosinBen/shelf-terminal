@@ -153,6 +153,81 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
     backend.dispose();
   });
 
+  it('keeps an Autopilot execution active until task_complete finishes after the prompt response', async () => {
+    const autopilotModes = { ...COPILOT_MODES, currentModeId: 'autopilot' } as SessionModeState;
+    const mock = createMockAcpAgent({
+      modes: autopilotModes,
+      updatesOnPrompt: [{
+        sessionUpdate: 'tool_call',
+        toolCallId: 'task-complete-late',
+        title: 'task_complete',
+        kind: 'other',
+        status: 'in_progress',
+      }],
+      updatesAfterPrompt: [{
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'task-complete-late',
+        status: 'completed',
+        rawOutput: { content: 'finished after prompt response' },
+      } as unknown as SessionUpdate],
+    });
+    const backend = createCopilotBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
+    const out: OutgoingMessage[] = [];
+    let settled = false;
+
+    const queryDone = backend.query(
+      { prompt: 'finish the task', cwd: '/tmp/project' },
+      (message) => out.push(message),
+    ).then(() => { settled = true; });
+
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(settled).toBe(false);
+    expect(out).not.toContainEqual({ type: 'status', state: 'idle' });
+
+    await queryDone;
+    expect(out).toContainEqual(expect.objectContaining({
+      type: 'message',
+      msgId: 'task-complete-late',
+      msgType: 'reply',
+      content: 'finished after prompt response',
+    }));
+    expect(out.at(-1)).toEqual({ type: 'status', state: 'idle' });
+
+    backend.dispose();
+  });
+
+  it('releases a post-prompt Autopilot completion wait when the user stops', async () => {
+    const autopilotModes = { ...COPILOT_MODES, currentModeId: 'autopilot' } as SessionModeState;
+    let cancelParams: unknown;
+    const mock = createMockAcpAgent({
+      modes: autopilotModes,
+      updatesOnPrompt: [{
+        sessionUpdate: 'tool_call',
+        toolCallId: 'task-complete-stopped',
+        title: 'task_complete',
+        kind: 'other',
+        status: 'in_progress',
+      }],
+      onCancel: (params) => { cancelParams = params; },
+    });
+    const backend = createCopilotBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
+    const out: OutgoingMessage[] = [];
+    const queryDone = backend.query(
+      { prompt: 'keep working', cwd: '/tmp/project' },
+      (message) => out.push(message),
+    );
+
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    await expect(backend.stop()).resolves.toBeUndefined();
+    await queryDone;
+
+    expect(cancelParams).toEqual({ sessionId: 'mock-session' });
+    expect(out).not.toContainEqual(expect.objectContaining({ type: 'error' }));
+    expect(out.at(-1)).toEqual({ type: 'status', state: 'idle' });
+
+    backend.dispose();
+  });
+
   it('does not prepend Copilot internal prompt supersession as user cancellation', async () => {
     const mock = createMockAcpAgent({
       updatesByPrompt: [

@@ -13,6 +13,7 @@ import {
   type AgentApp,
   type SessionModeState,
   type SessionConfigOption,
+  type SessionNotification,
   type StopReason,
 } from '@agentclientprotocol/sdk';
 import { COPILOT_PROVIDER } from '@shared/agent-providers';
@@ -22,6 +23,7 @@ import { type ServerBackend, type QueryInput, type SendFn, type ProviderCapabili
 import { serverLog } from '../../server-logger';
 import { openAcpConnection, spawnAgentStdio, type AcpConnection, type PermissionHandler } from '../acp/connection';
 import { createSessionDriver, type AcpSession } from '../acp/client';
+import { COPILOT_TASK_COMPLETE_TOOL_TITLE } from '../acp/translate';
 import { createPermissionBridge } from '../acp/permission';
 import { mapSessionCapabilities, currentSelections, configOptionIdForCategory } from '../acp/capabilities';
 import { toAcpMcpServers } from '../acp/mcp';
@@ -37,6 +39,19 @@ import { refreshCopilotCredit } from './credit';
 import { startLogin as startCopilotLogin, prefillLoginUrl, type LoginRunner } from './login';
 
 const COPILOT_STALE_SESSION_NOTICE = 'Previous Copilot session was unavailable; started a new session.';
+const COPILOT_AUTOPILOT_MODE_ID = 'autopilot';
+const COPILOT_AUTOPILOT_COMPLETION_TIMEOUT_MS = 30 * 60_000;
+
+type AutopilotCompletionOutcome = 'task_complete' | 'terminated' | 'connection_closed' | 'timeout';
+
+interface AutopilotCompletionGate {
+  sessionId: string;
+  toolCallIds: Set<string>;
+  promise: Promise<AutopilotCompletionOutcome>;
+  resolve: (outcome: AutopilotCompletionOutcome) => void;
+  settled: boolean;
+  timeout?: ReturnType<typeof setTimeout>;
+}
 
 // Category names for copilot's dynamic config options (agent-owned), used to
 // resolve the option id for session/set_config_option.
@@ -114,6 +129,12 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
   // session/cancel itself is a notification; only this prompt resolving with
   // stopReason:'cancelled' confirms that Copilot stopped its model/tool work.
   let activePromptCompletion: Promise<StopReason> | null = null;
+  // copilot --acp returns session/prompt after scheduling work (`wait:false`). In
+  // Autopilot that response is not an execution boundary; task_complete is.
+  // Keep the local execution open until its terminal tool update arrives so the
+  // UI and send queue do not claim idle while Copilot is still editing. See
+  // agent-providers#37.
+  let activeAutopilotCompletion: AutopilotCompletionGate | null = null;
   let loginRunner: LoginRunner | null = null;
   const permissions = createPermissionBridge(() => activeExecutionSend);
   let sessionSend: SendFn | null = null;
@@ -126,6 +147,43 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
   let currentEffort: string | undefined;
 
   const onRequestPermission: PermissionHandler = (context) => permissions.onRequestPermission(context);
+
+  function createAutopilotCompletionGate(sessionId: string): AutopilotCompletionGate {
+    let resolvePromise!: (outcome: AutopilotCompletionOutcome) => void;
+    const gate: AutopilotCompletionGate = {
+      sessionId,
+      toolCallIds: new Set<string>(),
+      promise: new Promise((resolve) => {
+        resolvePromise = resolve;
+      }),
+      resolve: (outcome) => {
+        if (gate.settled) return;
+        gate.settled = true;
+        if (gate.timeout) clearTimeout(gate.timeout);
+        resolvePromise(outcome);
+      },
+      settled: false,
+    };
+    gate.timeout = setTimeout(
+      () => gate.resolve('timeout'),
+      COPILOT_AUTOPILOT_COMPLETION_TIMEOUT_MS,
+    );
+    gate.timeout.unref?.();
+    return gate;
+  }
+
+  function observeAutopilotCompletion(notification: SessionNotification): void {
+    const gate = activeAutopilotCompletion;
+    if (!gate || gate.sessionId !== notification.sessionId) return;
+    const update = notification.update;
+    if (update.sessionUpdate !== 'tool_call' && update.sessionUpdate !== 'tool_call_update') return;
+    if ('title' in update && update.title === COPILOT_TASK_COMPLETE_TOOL_TITLE) {
+      gate.toolCallIds.add(update.toolCallId);
+    }
+    if (gate.toolCallIds.has(update.toolCallId) && 'status' in update && update.status === 'completed') {
+      gate.resolve('task_complete');
+    }
+  }
 
   function nativePermissionControl(): PermissionControlCapabilities {
     const mode = sessionModes ? {
@@ -269,6 +327,7 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
       name: 'shelf-copilot',
       onRequestPermission,
       onSessionUpdate(notification) {
+        observeAutopilotCompletion(notification);
         // Copilot's ACP adapter flattens session.info into agent_message_chunk,
         // so the shared driver cannot distinguish this framework notice from a
         // model reply. Shelf owns explicit stop feedback, and a new prompt can
@@ -290,6 +349,7 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
     const thisConn = conn;
     conn.closed.finally(() => {
       if (conn !== thisConn) return;
+      activeAutopilotCompletion?.resolve('connection_closed');
       conn = null;
       child = null;
       connAppId = undefined;
@@ -432,6 +492,10 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
           { cwd: input.cwd, appId: input.appId, resumeId: input.restoreContext?.lastSdkSessionId },
           send,
         );
+        const autopilotCompletion = sessionModes?.currentModeId === COPILOT_AUTOPILOT_MODE_ID
+          ? createAutopilotCompletionGate(s.sessionId)
+          : null;
+        activeAutopilotCompletion = autopilotCompletion;
         const promptCompletion = driver.drivePromptTurn(
           conn!.agent,
           s,
@@ -442,9 +506,23 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
         );
         activePromptCompletion = promptCompletion;
         try {
-          await promptCompletion;
+          let stopReason: StopReason;
+          try {
+            stopReason = await promptCompletion;
+          } finally {
+            if (activePromptCompletion === promptCompletion) activePromptCompletion = null;
+          }
+          if (stopReason === 'end_turn' && autopilotCompletion) {
+            const outcome = await autopilotCompletion.promise;
+            if (outcome === 'connection_closed') {
+              throw new Error('Copilot connection closed before task_complete');
+            }
+            if (outcome === 'timeout') {
+              throw new Error('Copilot Autopilot did not emit task_complete within 30 minutes');
+            }
+          }
         } finally {
-          if (activePromptCompletion === promptCompletion) activePromptCompletion = null;
+          if (activeAutopilotCompletion === autopilotCompletion) activeAutopilotCompletion = null;
         }
       } catch (err) {
         send({ type: 'error', error: `copilot: ${(err as Error)?.message ?? String(err)}` });
@@ -580,6 +658,7 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
       const liveChild = child;
       if (!liveConn || !liveSession) throw new Error('copilot cancel failed: no active ACP session');
       if (!promptCompletion) {
+        activeAutopilotCompletion?.resolve('terminated');
         try {
           await liveConn.agent.notify(methods.agent.session.cancel, { sessionId: liveSession.sessionId });
         } catch (err) {
@@ -610,6 +689,8 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
     },
 
     resetSession(): void {
+      activeAutopilotCompletion?.resolve('terminated');
+      activeAutopilotCompletion = null;
       if (session) driver.forget(session.sessionId);
       session = null;
       sessionCwd = null;
@@ -621,6 +702,8 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
      *  only this respawn after login. Mirrors the appId-change respawn, minus the
      *  appId check. */
     reconnect(): void {
+      activeAutopilotCompletion?.resolve('terminated');
+      activeAutopilotCompletion = null;
       if (session) driver.forget(session.sessionId);
       try { conn?.close(); } catch { /* best-effort */ }
       try { child?.kill(); } catch { /* best-effort */ }
@@ -634,6 +717,8 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
     dispose(): void {
       loginRunner?.cancel();
       permissions.cancelAll();
+      activeAutopilotCompletion?.resolve('terminated');
+      activeAutopilotCompletion = null;
       if (session) driver.forget(session.sessionId);
       try { conn?.close(); } catch { /* best-effort */ }
       try { child?.kill(); } catch { /* best-effort */ }
