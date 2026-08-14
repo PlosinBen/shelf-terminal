@@ -27,7 +27,12 @@ import { mapSessionCapabilities, currentSelections, configOptionIdForCategory } 
 import { toAcpMcpServers } from '../acp/mcp';
 import { getSharedShelfMcp } from '../acp/shelf-mcp';
 import { loadProjectedMcpServers } from '../mcp-config';
-import { resolveCopilotCommand, copilotConfigHome, copilotEnv } from './helpers';
+import {
+  resolveCopilotCommand,
+  copilotConfigHome,
+  copilotEnv,
+  isCopilotCancellationNotice,
+} from './helpers';
 import { refreshCopilotCredit } from './credit';
 import { startLogin as startCopilotLogin, prefillLoginUrl, type LoginRunner } from './login';
 
@@ -263,7 +268,18 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
     conn = openAcpConnection(opened.target, {
       name: 'shelf-copilot',
       onRequestPermission,
-      onSessionUpdate: driver.onSessionUpdate,
+      onSessionUpdate(notification) {
+        // Copilot's ACP adapter flattens session.info into agent_message_chunk,
+        // so the shared driver cannot distinguish this framework notice from a
+        // model reply. Shelf owns explicit stop feedback, and a new prompt can
+        // also trigger this notice without user cancellation; keep it out of the
+        // assistant timeline at the provider-specific boundary. agent-providers#48
+        if (isCopilotCancellationNotice(notification.update)) {
+          serverLog('debug', 'copilot', `suppressed ACP cancellation notice (session=${notification.sessionId})`);
+          return;
+        }
+        driver.onSessionUpdate(notification);
+      },
     });
     // Drop refs when the agent process/connection ends so the next turn respawns —
     // but ONLY if we are STILL the live connection. reconnect()/appId-respawn close

@@ -6,7 +6,21 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
+import type { SessionUpdate } from '@agentclientprotocol/sdk';
 import { COPILOT_PROVIDER } from '@shared/agent-providers';
+
+/**
+ * Copilot CLI emits this session.info both for an explicit cancel and when its
+ * ACP adapter supersedes lingering work at the start of the next prompt. The
+ * adapter discards infoType and flattens the notice into assistant text.
+ */
+export const COPILOT_ACP_CANCELLATION_NOTICE = 'Info: Operation cancelled by user';
+
+export function isCopilotCancellationNotice(update: SessionUpdate): boolean {
+  return update.sessionUpdate === 'agent_message_chunk'
+    && update.content.type === 'text'
+    && update.content.text === COPILOT_ACP_CANCELLATION_NOTICE;
+}
 
 /** Command + args to launch the `copilot` CLI in ACP mode over stdio. */
 export interface CopilotCommand {

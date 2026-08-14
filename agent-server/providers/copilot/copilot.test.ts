@@ -10,6 +10,7 @@ import type {
 } from '@agentclientprotocol/sdk';
 import { createMockAcpAgent } from '../acp/mock-agent';
 import { createCopilotBackend } from './index';
+import { COPILOT_ACP_CANCELLATION_NOTICE } from './helpers';
 import type { OutgoingMessage } from '../types';
 
 // Copilot-shaped session state (matches F5's measured `copilot --acp` catalog):
@@ -149,6 +150,44 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
     // Turn ALWAYS ends idle (renderer spinner/queue latch depends on it).
     expect(out.at(-1)).toEqual({ type: 'status', state: 'idle' });
 
+    backend.dispose();
+  });
+
+  it('does not prepend Copilot internal prompt supersession as user cancellation', async () => {
+    const mock = createMockAcpAgent({
+      updatesByPrompt: [
+        [{ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'first answer' } } as SessionUpdate],
+        [
+          // copilot --acp calls session.abort() at the start of every prompt. If
+          // prior work is still settling, its session.info is flattened into an
+          // ordinary agent_message_chunk before the new answer.
+          { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: COPILOT_ACP_CANCELLATION_NOTICE } } as SessionUpdate,
+          { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Info: unrelated provider notice' } } as SessionUpdate,
+          { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'second answer' } } as SessionUpdate,
+        ],
+      ],
+    });
+    const backend = createCopilotBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
+
+    await backend.query({ prompt: 'first', cwd: '/tmp/project' }, () => {});
+    const secondOut: OutgoingMessage[] = [];
+    await backend.query({ prompt: 'second', cwd: '/tmp/project' }, (message) => secondOut.push(message));
+
+    expect(secondOut).not.toContainEqual(expect.objectContaining({
+      type: 'stream',
+      streamType: 'text',
+      content: COPILOT_ACP_CANCELLATION_NOTICE,
+    }));
+    expect(secondOut).toContainEqual(expect.objectContaining({
+      type: 'stream',
+      streamType: 'text',
+      content: 'second answer',
+    }));
+    expect(secondOut).toContainEqual(expect.objectContaining({
+      type: 'stream',
+      streamType: 'text',
+      content: 'Info: unrelated provider notice',
+    }));
     backend.dispose();
   });
 

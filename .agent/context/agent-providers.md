@@ -556,3 +556,15 @@ Fresh capabilities probe 若建立 `session/new`，立刻透過 session-scoped `
 **Fix / note：** 只有 ACP `RequestError.code === -32001` 且 message 明確包含同一個 session ID 的 `Resource not found: Session <id> not found` 時才恢復：先 emit `lastSdkSessionId:null`，再走 `session/new`；成功後保存新 ID，並顯示一次 system notice 說明舊 conversation context 無法恢復。其他 restore failure（auth、transport、protocol、timeout 或不同 ID）維持 fail-loud，不得 broad-catch 後靜默開新 session。
 
 **Related：** `agent-providers#38`（Codex 同類窄 recovery）、`agent-providers#46`、`agent-server/providers/copilot/index.ts`、`agent-server/context-store.ts`。
+
+## agent-providers#48 — Copilot ACP 新 prompt 會 abort 上一輪並偽裝成使用者取消  ·  [Gotcha]
+
+**Symptom：** 使用者沒有按 ESC，送出下一則訊息時，正常回答前仍出現 `Info: Operation cancelled by user`，而且兩段文字合併在同一個 assistant reply。
+
+**Root cause：** bundled Copilot CLI 的 ACP `session/prompt` handler 在每個新 prompt 開始前無條件呼叫 `session.abort()`。若上一輪 ACP request 已回覆、但內部尾端工作仍在 settle，新 prompt 會 abort 該工作。Copilot 隨後 emit `session.info { infoType: "cancellation" }`；ACP adapter 丟失 `infoType`，將內容壓成無 message id 的 `agent_message_chunk`。共用 ACP translator 因此只能把它視為一般 assistant delta，並與同一 prompt 的正常回答累積在同一個 bubble。
+
+**Fix / note：** 只在 Copilot provider 的 session-update 邊界辨認並略過精確的 adapter 產物 `Info: Operation cancelled by user`；共用 ACP driver 保持 provider-neutral。Shelf 的顯式 stop 已由自己的 control/status path 回饋，不依賴這段 provider 文字。其他 `Info:`、warning、error 與正常 assistant chunk 不受影響。
+
+**Do not change casually because：** 不要在共用 ACP translator 全域過濾這個字串，也不要把所有 `Info:` 都吞掉。上游若保留 `session.info.infoType`、改成非 assistant update，或不再在新 prompt 前 abort，應移除此窄 workaround 與對應 regression test。
+
+**Related：** `agent-providers#37`、`agent-providers#43`、`agent-server/providers/copilot/index.ts`、`agent-server/providers/copilot/helpers.ts`、`agent-server/providers/copilot/copilot.test.ts`。

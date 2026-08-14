@@ -40,6 +40,8 @@ export interface MockAgentScript {
   commandsOnResumeSession?: AvailableCommand[];
   /** Updates emitted (in order) while handling each session/prompt. */
   updatesOnPrompt?: SessionUpdate[];
+  /** Per-prompt updates, indexed from zero. Takes precedence over updatesOnPrompt. */
+  updatesByPrompt?: SessionUpdate[][];
   /** Stop reason returned by session/prompt (default: 'end_turn'). */
   stopReason?: StopReason;
   /** Keep session/prompt pending until the client sends session/cancel. */
@@ -88,9 +90,9 @@ export interface MockAgentScript {
 export function createMockAcpAgent(script: MockAgentScript = {}): AgentApp {
   const sessionId = script.sessionId ?? 'mock-session';
   const authMethods = script.authMethods ?? [{ id: 'chatgpt', name: 'ChatGPT', description: 'Use ChatGPT to authenticate' }];
-  const updates = script.updatesOnPrompt ?? [];
   const stopReason: StopReason = script.stopReason ?? 'end_turn';
   let releaseCancelledPrompt: (() => void) | null = null;
+  let promptIndex = 0;
 
   return agent({ name: 'mock-acp-agent' })
     .onRequest('initialize', ({ params }) => {
@@ -176,6 +178,8 @@ export function createMockAcpAgent(script: MockAgentScript = {}): AgentApp {
         });
         script.onPermissionOutcome?.(res.outcome);
       }
+      const updates = script.updatesByPrompt?.[promptIndex] ?? script.updatesOnPrompt ?? [];
+      promptIndex++;
       for (const update of updates) {
         await client.notify('session/update', { sessionId, update });
       }
