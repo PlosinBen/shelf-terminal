@@ -196,6 +196,54 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
     backend.dispose();
   });
 
+  it('keeps an execution active when Copilot reports Autopilot after the prompt starts', async () => {
+    const mock = createMockAcpAgent({
+      modes: COPILOT_MODES,
+      updatesOnPrompt: [
+        {
+          sessionUpdate: 'current_mode_update',
+          currentModeId: 'autopilot',
+        },
+        {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'late-mode-task-complete',
+          title: 'task_complete',
+          kind: 'other',
+          status: 'in_progress',
+        },
+      ],
+      updatesAfterPrompt: [{
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'late-mode-task-complete',
+        status: 'completed',
+        rawOutput: { content: 'finished after the authoritative mode update' },
+      } as unknown as SessionUpdate],
+    });
+    const backend = createCopilotBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
+    const out: OutgoingMessage[] = [];
+    let settled = false;
+
+    const queryDone = backend.query(
+      { prompt: 'continue in restored autopilot', cwd: '/tmp/project' },
+      (message) => out.push(message),
+    ).then(() => { settled = true; });
+
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(settled).toBe(false);
+    expect(out).not.toContainEqual({ type: 'status', state: 'idle' });
+
+    await queryDone;
+    expect(out).toContainEqual(expect.objectContaining({
+      type: 'message',
+      msgId: 'late-mode-task-complete',
+      msgType: 'reply',
+      content: 'finished after the authoritative mode update',
+    }));
+    expect(out.at(-1)).toEqual({ type: 'status', state: 'idle' });
+
+    backend.dispose();
+  });
+
   it('keeps a restored Autopilot session active when its mode update arrives during load', async () => {
     const mock = createMockAcpAgent({
       sessionId: 'persisted-acp-session',

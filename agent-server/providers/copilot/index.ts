@@ -492,9 +492,11 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
           { cwd: input.cwd, appId: input.appId, resumeId: input.restoreContext?.lastSdkSessionId },
           send,
         );
-        const autopilotCompletion = sessionModes?.currentModeId === COPILOT_AUTOPILOT_MODE_ID
-          ? createAutopilotCompletionGate(s.sessionId)
-          : null;
+        // Install the observer before session/prompt starts. A restored Copilot
+        // session can publish its authoritative mode only after the prompt is in
+        // flight; deciding whether to observe here would miss both that mode
+        // update and an early task_complete tool_call from the same prompt.
+        const autopilotCompletion = createAutopilotCompletionGate(s.sessionId);
         activeAutopilotCompletion = autopilotCompletion;
         const promptCompletion = driver.drivePromptTurn(
           conn!.agent,
@@ -512,7 +514,7 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
           } finally {
             if (activePromptCompletion === promptCompletion) activePromptCompletion = null;
           }
-          if (stopReason === 'end_turn' && autopilotCompletion) {
+          if (stopReason === 'end_turn' && sessionModes?.currentModeId === COPILOT_AUTOPILOT_MODE_ID) {
             const outcome = await autopilotCompletion.promise;
             if (outcome === 'connection_closed') {
               throw new Error('Copilot connection closed before task_complete');
@@ -520,8 +522,13 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
             if (outcome === 'timeout') {
               throw new Error('Copilot Autopilot did not emit task_complete within 30 minutes');
             }
+          } else {
+            autopilotCompletion.resolve('terminated');
           }
         } finally {
+          // Clears the watchdog on every non-wait/error path. resolve is
+          // idempotent when task_complete or stop already settled the gate.
+          autopilotCompletion.resolve('terminated');
           if (activeAutopilotCompletion === autopilotCompletion) activeAutopilotCompletion = null;
         }
       } catch (err) {
