@@ -9,20 +9,23 @@ import type {
   SessionModeState,
 } from '@agentclientprotocol/sdk';
 import { createMockAcpAgent } from '../acp/mock-agent';
-import { createCopilotBackend } from './index';
+import { COPILOT_AUTOPILOT_MODE_ID, createCopilotBackend } from './index';
 import { COPILOT_ACP_CANCELLATION_NOTICE } from './helpers';
 import type { OutgoingMessage } from '../types';
 
+const COPILOT_AGENT_MODE_ID = 'https://agentclientprotocol.com/protocol/session-modes#agent';
+const COPILOT_PLAN_MODE_ID = 'https://agentclientprotocol.com/protocol/session-modes#plan';
+
 // Copilot-shaped session state (matches F5's measured `copilot --acp` catalog):
-// modes agent/plan/autopilot, model list, thought_level effort. Proves copilot
+// URI modes agent/plan/autopilot, model list, thought_level effort. Proves copilot
 // maps through the SHARED toolkit — no copilot-specific capability code (the N=2
 // layering finding: capability mapping already belongs in acp/, not per-provider).
 const COPILOT_MODES = {
-  currentModeId: 'agent',
+  currentModeId: COPILOT_AGENT_MODE_ID,
   availableModes: [
-    { id: 'agent', name: 'agent' },
-    { id: 'plan', name: 'plan' },
-    { id: 'autopilot', name: 'autopilot' },
+    { id: COPILOT_AGENT_MODE_ID, name: 'agent' },
+    { id: COPILOT_PLAN_MODE_ID, name: 'plan' },
+    { id: COPILOT_AUTOPILOT_MODE_ID, name: 'autopilot' },
   ],
 } as unknown as SessionModeState;
 
@@ -154,7 +157,7 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
   });
 
   it('keeps an Autopilot execution active until task_complete finishes after the prompt response', async () => {
-    const autopilotModes = { ...COPILOT_MODES, currentModeId: 'autopilot' } as SessionModeState;
+    const autopilotModes = { ...COPILOT_MODES, currentModeId: COPILOT_AUTOPILOT_MODE_ID } as SessionModeState;
     const mock = createMockAcpAgent({
       modes: autopilotModes,
       updatesOnPrompt: [{
@@ -202,7 +205,7 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
       updatesOnPrompt: [
         {
           sessionUpdate: 'current_mode_update',
-          currentModeId: 'autopilot',
+          currentModeId: COPILOT_AUTOPILOT_MODE_ID,
         },
         {
           sessionUpdate: 'tool_call',
@@ -252,7 +255,7 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
       modes: COPILOT_MODES,
       updatesOnLoadSession: [{
         sessionUpdate: 'current_mode_update',
-        currentModeId: 'autopilot',
+        currentModeId: COPILOT_AUTOPILOT_MODE_ID,
       }],
       updatesOnPrompt: [{
         sessionUpdate: 'tool_call',
@@ -292,14 +295,14 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
     expect(idleIndex).toBeGreaterThan(replyIndex);
     expect(caps.permissionControl).toMatchObject({
       strategy: 'native',
-      mode: { currentValue: 'autopilot' },
+      mode: { currentValue: COPILOT_AUTOPILOT_MODE_ID },
     });
 
     backend.dispose();
   });
 
   it('releases a post-prompt Autopilot completion wait when the user stops', async () => {
-    const autopilotModes = { ...COPILOT_MODES, currentModeId: 'autopilot' } as SessionModeState;
+    const autopilotModes = { ...COPILOT_MODES, currentModeId: COPILOT_AUTOPILOT_MODE_ID } as SessionModeState;
     let cancelParams: unknown;
     const mock = createMockAcpAgent({
       modes: autopilotModes,
@@ -381,11 +384,11 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
       strategy: 'native',
       mode: {
         label: 'Mode',
-        currentValue: 'agent',
+        currentValue: COPILOT_AGENT_MODE_ID,
         options: [
-          { value: 'agent', displayName: 'agent' },
-          { value: 'plan', displayName: 'plan' },
-          { value: 'autopilot', displayName: 'autopilot' },
+          { value: COPILOT_AGENT_MODE_ID, displayName: 'agent' },
+          { value: COPILOT_PLAN_MODE_ID, displayName: 'plan' },
+          { value: COPILOT_AUTOPILOT_MODE_ID, displayName: 'autopilot' },
         ],
       },
       permission: {
@@ -480,7 +483,7 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
     expect(newSessions).toBe(0);
     expect(caps.permissionControl).toMatchObject({
       strategy: 'native',
-      mode: { currentValue: 'agent' },
+      mode: { currentValue: COPILOT_AGENT_MODE_ID },
       permission: { currentValue: 'off' },
     });
     expect(caps.slashCommands).toEqual([{ name: 'compact', description: 'Summarize conversation' }]);
@@ -633,7 +636,7 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
     expect(caps.slashCommands).toEqual([{ name: 'compact', description: 'Summarize conversation' }]);
     expect(caps.permissionControl).toMatchObject({
       strategy: 'native',
-      mode: { currentValue: 'agent' },
+      mode: { currentValue: COPILOT_AGENT_MODE_ID },
       permission: { currentValue: 'off' },
     });
     backend.dispose();
@@ -724,17 +727,17 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
       modes: COPILOT_MODES, configOptions: COPILOT_CONFIG,
       configOptionsOnSetConfigOption: permissionOn,
       onSetMode: (p) => { setMode = p as typeof setMode; },
-      updatesOnSetMode: [{ sessionUpdate: 'current_mode_update', currentModeId: 'autopilot' }],
+      updatesOnSetMode: [{ sessionUpdate: 'current_mode_update', currentModeId: COPILOT_AUTOPILOT_MODE_ID }],
       onSetConfigOption: (p) => { setConfig = p as typeof setConfig; },
     });
     const backend = createCopilotBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
 
     const out: OutgoingMessage[] = [];
     await backend.query(
-      { prompt: '', cwd: '/tmp/project', configEdit: { key: 'nativeMode', value: 'autopilot' } },
+      { prompt: '', cwd: '/tmp/project', configEdit: { key: 'nativeMode', value: COPILOT_AUTOPILOT_MODE_ID } },
       (m) => out.push(m),
     );
-    expect(setMode?.modeId).toBe('autopilot');
+    expect(setMode?.modeId).toBe(COPILOT_AUTOPILOT_MODE_ID);
     await backend.query(
       { prompt: '', cwd: '/tmp/project', configEdit: { key: 'nativePermission', value: 'on' } },
       (m) => out.push(m),
@@ -751,6 +754,55 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
     backend.dispose();
   });
 
+  it('updates the reported native mode from Copilot config snapshots after set_mode', async () => {
+    const agentMode = COPILOT_AGENT_MODE_ID;
+    const autopilotMode = COPILOT_AUTOPILOT_MODE_ID;
+    const modes = {
+      currentModeId: agentMode,
+      availableModes: [
+        { id: agentMode, name: 'Agent' },
+        { id: autopilotMode, name: 'Autopilot' },
+      ],
+    } as unknown as SessionModeState;
+    const initialConfig = [{
+      id: 'mode',
+      name: 'Mode',
+      category: 'mode',
+      type: 'select',
+      currentValue: agentMode,
+      options: [
+        { value: agentMode, name: 'Agent' },
+        { value: autopilotMode, name: 'Autopilot' },
+      ],
+    }] as unknown as SessionConfigOption[];
+    const autopilotConfig = initialConfig.map((option) => (
+      option.type === 'select' ? { ...option, currentValue: autopilotMode } : option
+    ));
+    const mock = createMockAcpAgent({
+      modes,
+      configOptions: initialConfig,
+      updatesOnSetMode: [{
+        sessionUpdate: 'config_option_update',
+        configOptions: autopilotConfig,
+      }],
+    });
+    const backend = createCopilotBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
+    const out: OutgoingMessage[] = [];
+
+    await backend.query(
+      { prompt: '', cwd: '/tmp/project', configEdit: { key: 'nativeMode', value: autopilotMode } },
+      (message) => out.push(message),
+    );
+
+    expect(out).toContainEqual(expect.objectContaining({
+      type: 'capabilities',
+      permissionControl: expect.objectContaining({
+        mode: expect.objectContaining({ currentValue: autopilotMode }),
+      }),
+    }));
+    backend.dispose();
+  });
+
   it('replaces displayed native state from slash-driven ACP updates', async () => {
     const permissionOn = COPILOT_CONFIG.map((option) => (
       option.id === 'allow_all' && option.type === 'select' ? { ...option, currentValue: 'on' } : option
@@ -759,7 +811,7 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
       modes: COPILOT_MODES,
       configOptions: COPILOT_CONFIG,
       updatesOnPrompt: [
-        { sessionUpdate: 'current_mode_update', currentModeId: 'plan' },
+        { sessionUpdate: 'current_mode_update', currentModeId: COPILOT_PLAN_MODE_ID },
         { sessionUpdate: 'config_option_update', configOptions: permissionOn },
       ],
     });
@@ -773,7 +825,7 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
       type: 'capabilities',
       permissionControl: {
         strategy: 'native',
-        mode: { currentValue: 'plan' },
+        mode: { currentValue: COPILOT_PLAN_MODE_ID },
         permission: { currentValue: 'on' },
       },
     });
@@ -788,7 +840,7 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
     const caps = await backend.gatherCapabilities!('/tmp/project');
 
     expect(caps.permissionModes).toEqual([]);
-    expect(caps.permissionControl).toMatchObject({ strategy: 'native', mode: { currentValue: 'agent' } });
+    expect(caps.permissionControl).toMatchObject({ strategy: 'native', mode: { currentValue: COPILOT_AGENT_MODE_ID } });
     expect(caps.permissionControl).not.toHaveProperty('permission');
     expect(backend.setPermissionMode).toBeUndefined();
     backend.dispose();

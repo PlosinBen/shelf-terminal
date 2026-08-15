@@ -54,11 +54,15 @@ test.describe('agent flows via fake provider', () => {
       await expect(mode).toHaveText('Mode: Plan', { timeout: 5_000 });
       await expect(permission).toHaveText('Allow all: Off');
 
+      await mode.click();
+      await page.locator('.agent-perm-option:visible', { hasText: 'Autopilot' }).click();
+      await expect(mode).toHaveText('Mode: Autopilot', { timeout: 5_000 });
+
       await permission.click();
       await expect(page.locator('.agent-permission-header:visible')).toHaveText('Select Allow all');
       await page.locator('.agent-perm-option:visible', { hasText: 'On' }).click();
       await expect(permission).toHaveText('Allow all: On', { timeout: 5_000 });
-      await expect(mode).toHaveText('Mode: Plan');
+      await expect(mode).toHaveText('Mode: Autopilot');
     });
   });
 

@@ -213,6 +213,7 @@ export function createFakeBackend(_representedProvider: AgentProvider = FAKE_PRO
           options: [
             { value: 'agent', displayName: 'Agent' },
             { value: 'plan', displayName: 'Plan' },
+            { value: 'autopilot', displayName: 'Autopilot' },
           ],
         },
         permission: {

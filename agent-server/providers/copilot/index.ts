@@ -39,7 +39,7 @@ import { refreshCopilotCredit } from './credit';
 import { startLogin as startCopilotLogin, prefillLoginUrl, type LoginRunner } from './login';
 
 const COPILOT_STALE_SESSION_NOTICE = 'Previous Copilot session was unavailable; started a new session.';
-const COPILOT_AUTOPILOT_MODE_ID = 'autopilot';
+export const COPILOT_AUTOPILOT_MODE_ID = 'https://agentclientprotocol.com/protocol/session-modes#autopilot';
 const COPILOT_AUTOPILOT_COMPLETION_TIMEOUT_MS = 30 * 60_000;
 
 type AutopilotCompletionOutcome = 'task_complete' | 'terminated' | 'connection_closed' | 'timeout';
@@ -57,6 +57,7 @@ interface AutopilotCompletionGate {
 // resolve the option id for session/set_config_option.
 const MODEL_CATEGORY = 'model';
 const EFFORT_CATEGORY = 'thought_level';
+const MODE_CATEGORY = 'mode';
 const COPILOT_PERMISSION_OPTION_ID = 'allow_all';
 
 // oauth authMethod for the unauthenticated caps return — WITHOUT it the AuthPane
@@ -257,6 +258,22 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
         sessionModes = { ...sessionModes, currentModeId: change.currentModeId };
       } else {
         sessionConfigOptions = change.configOptions;
+        const modeOption = sessionConfigOptions.find((option) => option.category === MODE_CATEGORY);
+        if (modeOption && modeOption.type !== 'select') {
+          serverLog('error', 'copilot', `malformed mode config: expected select (session=${sessionId}, type=${modeOption.type})`);
+        } else if (modeOption) {
+          if (!sessionModes) {
+            serverLog('error', 'copilot', `mode config update without advertised modes (session=${sessionId}, mode=${modeOption.currentValue})`);
+          } else if (!sessionModes.availableModes.some((mode) => mode.id === modeOption.currentValue)) {
+            serverLog('error', 'copilot', `mode config update selected an unadvertised mode (session=${sessionId}, mode=${modeOption.currentValue})`);
+          } else {
+            // Copilot exposes mode through both ACP session modes and a category=mode
+            // config option, but currently reports set_mode changes through the full
+            // config snapshot. Reconcile that authoritative value before publishing
+            // capabilities so the renderer does not receive the stale session mode.
+            sessionModes = { ...sessionModes, currentModeId: modeOption.currentValue };
+          }
+        }
         const current = currentSelections({ configOptions: sessionConfigOptions });
         currentModel = current.currentModel;
         currentEffort = current.currentEffort;
