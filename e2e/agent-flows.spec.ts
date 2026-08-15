@@ -146,6 +146,29 @@ test.describe('agent flows via fake provider', () => {
       await expect(page.locator('.agent-msg-note:visible', { hasText: 'final completion summary' })).toHaveCount(0);
     });
 
+    test('Copilot stays streaming until its delayed completion reply is visible', async ({ shelfApp: { page } }) => {
+      await setupProject(page);
+      await page.locator('.tab-add').click({ button: 'right' });
+      await page.locator('.context-menu-item', { hasText: 'Agent (Copilot)' }).click();
+      await expect(page.locator('.agent-view:visible')).toBeVisible({ timeout: 5_000 });
+
+      const scenario = 'delay:1500|completion:autopilot completion boundary';
+      await sendAgentPrompt(page, scenario);
+
+      await expect(page.locator('.agent-status-label:visible')).toHaveText('running', { timeout: 1_000 });
+      await page.waitForTimeout(500);
+      await expect(page.locator('.agent-status-label:visible')).toHaveText('running');
+      await expect(page.locator('.agent-msg-reply:visible', { hasText: 'autopilot completion boundary' })).toHaveCount(0);
+
+      const reply = page.locator('.agent-msg-reply:visible', { hasText: 'autopilot completion boundary' });
+      await expect(reply).toBeVisible({ timeout: 5_000 });
+      await expect(page.locator('.agent-status-label:visible')).toHaveText('idle', { timeout: 5_000 });
+
+      const rows = await page.locator('.agent-messages:visible > .agent-msg').allTextContents();
+      expect(rows.findIndex((text) => text.includes(scenario)))
+        .toBeLessThan(rows.findIndex((text) => text.includes('autopilot completion boundary') && !text.includes(scenario)));
+    });
+
     test('late chunks upsert one persisted history row', async ({ shelfApp: { page } }) => {
       await setupProject(page);
       await openAgentTab(page);
