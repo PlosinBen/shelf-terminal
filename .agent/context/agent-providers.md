@@ -237,11 +237,11 @@ SDK 0.3.159 **並存**兩種 compact 完成訊號:`status` 形狀(`subtype:'stat
 
 ## agent-providers#21 — messageId-less ACP 文字用「工具邊界」切段(mirror Zed),否則一個 turn 的文字折疊成一張早期卡  ·  [Decision]
 
-**Background/Symptom**：copilot `--acp` **省略 `agent_message_chunk.messageId`**（ACP 唯一的訊息邊界訊號;spec 對「省略時」無 fallback,見官方 message-id RFD）。原本 Shelf 把 messageId-less 文字整個 turn namespace 成單一 `sessionId#turnSeq:text` → 一個 turn 內**所有**助理文字(開場 + 工具後的收尾)全落同一張卡、釘在最早位置 → 收尾摘要被併到頂端,底部只剩工具卡,像「沒有結尾訊息」。
+**Background/Symptom**：copilot `--acp` **省略 `agent_message_chunk.messageId`**（ACP 唯一的訊息邊界訊號;spec 對「省略時」無 fallback,見官方 message-id RFD）。Shelf 必須自行產生 fallback id；同一 turn 若只用一個 id，開場與工具後的收尾會折疊到最早卡片；若 namespace 使用 process-local turn sequence，agent-server restart 後 resume 同一 session 又會重用歷史 id，讓新回覆覆寫舊卡並留在舊 timestamp，看起來像當前對話漏訊息。
 
-**Decision**：在 `client.ts drivePromptTurn` 用 **tool 邊界切段**——文字之後出現 `tool_call`(wire `message`)就 `seg++`,下一段文字換新 id `sessionId#turnSeq:text:<seg>`(text/thinking 共用 seg)。**Mirror Zed 參考 client** 的 `push_assistant_content_block`:上一筆是 assistant message 才 append、是 ToolCall 就開新 entry。每段文字各自成卡、落在自己的時序位置。
+**Decision**：在 `client.ts drivePromptTurn` 為每個 prompt 建立跨 process 唯一的 opaque namespace，並用 **tool 邊界切段**——文字之後出現 `tool_call`(wire `message`)就 `seg++`,下一段文字換新 id `sessionId#promptUuid:text:<seg>`(text/thinking 共用 seg)。**Mirror Zed 參考 client** 的 `push_assistant_content_block`:上一筆是 assistant message 才 append、是 ToolCall 就開新 entry。每段文字各自成卡、落在自己的時序位置；agent 有提供真 `messageId` 時原樣使用。
 
-**Do not change casually because**：ACP 沒有「訊息完成」旗標(`ContentChunk` 只有 content/messageId/_meta;`stopReason` 是 turn 級),tool 邊界是唯一可靠的推斷。agent 若**有**送 messageId(codex)則 `namespaced` 直接用真 id、不套切段,別破壞那條路徑。
+**Do not change casually because**：ACP 沒有「訊息完成」旗標(`ContentChunk` 只有 content/messageId/_meta;`stopReason` 是 turn 級),tool 邊界是唯一可靠的推斷。fallback namespace 不可退回 process-local counter，也不可從 content 推導；renderer 的 `msgId` 是 session history 的 upsert key，必須對所有已持久化歷史保持唯一。agent 若**有**送 messageId(codex)則 `namespaced` 直接用真 id、不套切段,別破壞那條路徑。
 
 ## agent-providers#22 — reconnect 排序用「發起時間」:`upsertMessage` 必須持久化 upsertById 保留後的 timestamp,不是原始 msg  ·  [Gotcha]
 
@@ -537,11 +537,11 @@ Copilot 選 `native`：ACP session modes 原值送 `session/set_mode`；ACP `all
 
 ## agent-providers#46 — Copilot reconnect 依 ACP capability 選 restore；load replay 不進 Shelf timeline  ·  [Decision]
 
-**Decision：** Copilot capabilities probe 在建立任何 native session 前先載入 provider-matched `lastSdkSessionId`。Agent advertise stable `sessionCapabilities.resume` 時走 `session/resume`；只有 legacy `loadSession` 時走 `session/load`。`session/load` 的 conversation replay 在 ACP driver hydration 階段不轉成 renderer content，但 mode、config options 與 available commands 仍更新 session state。兩者都沒 advertise 就 fail loud。
+**Decision：** Copilot capabilities probe 在建立任何 native session 前先載入 provider-matched `lastSdkSessionId`。Agent advertise stable `sessionCapabilities.resume` 時走 `session/resume`；只有 legacy `loadSession` 時走 `session/load`。`session/load` 的 conversation replay 在 ACP driver hydration 階段不轉成 renderer content，但 mode、config options 與 available commands 仍更新 session state。Hydration 期間的 `current_mode_update` / `config_option_update` 是較新的 authoritative snapshot；ACP driver 必須把它們 reconcile 進 load result，不能讓 request response 的舊值在 await 返回後蓋回去。兩者都沒 advertise 就 fail loud。
 
 Fresh capabilities probe 若建立 `session/new`，立刻透過 session-scoped `context_patch` 寫回 native ID；不能等第一個 prompt，因為 prompt 會 reuse live session 而不再發 patch。Restore failure 預設維持原錯誤並阻止 `session/new`；唯一例外是 `agent-providers#47` 的明確 missing-session recovery。
 
-**Reason：** capabilities 在 prompt 前執行，若它先建立未持久化的新 session，renderer 歷史與 provider context 會分叉。Bundled Copilot 的 ACP surface 可能只提供會 replay history 的 `session/load`；Shelf 已有自己的持久 timeline，重播進 UI 會重複訊息，但完全忽略 load notifications 又會漏掉 config/command metadata。分開「hydrate metadata」與「render replay」可保留單一 timeline ownership並繼續原對話。
+**Reason：** capabilities 在 prompt 前執行，若它先建立未持久化的新 session，renderer 歷史與 provider context 會分叉。Bundled Copilot 的 ACP surface 可能只提供會 replay history 的 `session/load`；Shelf 已有自己的持久 timeline，重播進 UI 會重複訊息，但完全忽略或晚套用 load notifications 會漏掉 config/command metadata，並可能把實際 Autopilot 誤判成 agent mode，跳過 `task_complete` completion gate 而提早 idle。分開「hydrate metadata」與「render replay」可保留單一 timeline ownership並繼續原對話。
 
 **Do not change casually because：** 不要把 `loadSession: true` 當成可呼叫 `session/resume`，也不要無條件偏好 load；以 initialize capabilities 選 method。不要 broad-catch restore 後靜默開新 session，也不要把 `lastSdkSessionId` 暴露到 renderer/main wire。Replay suppression 只限 restore hydration window；正常 prompt update 仍必須完整送達。
 
