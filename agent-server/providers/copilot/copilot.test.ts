@@ -196,6 +196,60 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
     backend.dispose();
   });
 
+  it('keeps a restored Autopilot session active when its mode update arrives during load', async () => {
+    const mock = createMockAcpAgent({
+      sessionId: 'persisted-acp-session',
+      // The load response can lag behind the authoritative notification emitted
+      // during replay. This mirrors Copilot restoring its persisted native mode.
+      modes: COPILOT_MODES,
+      updatesOnLoadSession: [{
+        sessionUpdate: 'current_mode_update',
+        currentModeId: 'autopilot',
+      }],
+      updatesOnPrompt: [{
+        sessionUpdate: 'tool_call',
+        toolCallId: 'restored-task-complete',
+        title: 'task_complete',
+        kind: 'other',
+        status: 'in_progress',
+      }],
+      updatesAfterPrompt: [{
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'restored-task-complete',
+        status: 'completed',
+        rawOutput: { content: 'restored autopilot finished' },
+      } as unknown as SessionUpdate],
+    });
+    const backend = createCopilotBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
+    const restoreContext = {
+      sessionId: 'shelf-session',
+      provider: 'copilot' as const,
+      updatedAt: 1,
+      lastSdkSessionId: 'persisted-acp-session',
+    };
+
+    const caps = await backend.gatherCapabilities!(
+      '/tmp/project', 'shelf-session', undefined, undefined, undefined, 'app-1', restoreContext,
+    );
+    const out: OutgoingMessage[] = [];
+    await backend.query({
+      prompt: 'continue autopilot', cwd: '/tmp/project', appId: 'app-1', restoreContext,
+    }, (message) => out.push(message));
+    await new Promise<void>((resolve) => setImmediate(() => setImmediate(resolve)));
+
+    const replyIndex = out.findIndex((message) =>
+      message.type === 'message' && message.msgId === 'restored-task-complete' && message.msgType === 'reply');
+    const idleIndex = out.findIndex((message) => message.type === 'status' && message.state === 'idle');
+    expect(replyIndex).toBeGreaterThanOrEqual(0);
+    expect(idleIndex).toBeGreaterThan(replyIndex);
+    expect(caps.permissionControl).toMatchObject({
+      strategy: 'native',
+      mode: { currentValue: 'autopilot' },
+    });
+
+    backend.dispose();
+  });
+
   it('releases a post-prompt Autopilot completion wait when the user stops', async () => {
     const autopilotModes = { ...COPILOT_MODES, currentModeId: 'autopilot' } as SessionModeState;
     let cancelParams: unknown;

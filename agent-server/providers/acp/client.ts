@@ -34,6 +34,11 @@ interface SessionRouteState {
   carryToolMeta: ReturnType<typeof createToolMetaCarry>;
 }
 
+interface HydrationState {
+  currentModeId?: string;
+  configOptions?: SessionConfigOption[];
+}
+
 export interface AcpSession {
   sessionId: string;
   /** Present for NEW sessions (drives capability mapping); absent on resume. */
@@ -106,6 +111,10 @@ export function createSessionDriver(options: SessionDriverOptions = {}): Session
   // its timeline from local history, so consume metadata during hydration but
   // suppress renderable replay to avoid duplicate messages.
   const hydratingSessions = new Set<string>();
+  // session/load can publish authoritative state notifications before its
+  // response settles. Retain the latest snapshots so a stale response cannot
+  // overwrite the restored provider truth after hydration.
+  const hydrationStateBySession = new Map<string, HydrationState>();
   function routeState(sessionId: string): SessionRouteState {
     let state = routeBySession.get(sessionId);
     if (!state) {
@@ -163,11 +172,23 @@ export function createSessionDriver(options: SessionDriverOptions = {}): Session
       if (n.update.sessionUpdate === 'available_commands_update') {
         commandsBySession.set(n.sessionId, n.update.availableCommands);
       } else if (n.update.sessionUpdate === 'current_mode_update') {
+        if (hydratingSessions.has(n.sessionId)) {
+          hydrationStateBySession.set(n.sessionId, {
+            ...hydrationStateBySession.get(n.sessionId),
+            currentModeId: n.update.currentModeId,
+          });
+        }
         options.onStateChange?.(n.sessionId, {
           kind: ACP_SESSION_STATE_CHANGES.MODE,
           currentModeId: n.update.currentModeId,
         });
       } else if (n.update.sessionUpdate === 'config_option_update') {
+        if (hydratingSessions.has(n.sessionId)) {
+          hydrationStateBySession.set(n.sessionId, {
+            ...hydrationStateBySession.get(n.sessionId),
+            configOptions: n.update.configOptions,
+          });
+        }
         options.onStateChange?.(n.sessionId, {
           kind: ACP_SESSION_STATE_CHANGES.CONFIG_OPTIONS,
           configOptions: n.update.configOptions,
@@ -194,6 +215,7 @@ export function createSessionDriver(options: SessionDriverOptions = {}): Session
     async load(agent, sessionId, opts) {
       routeState(sessionId);
       hydratingSessions.add(sessionId);
+      hydrationStateBySession.delete(sessionId);
       try {
         const response = await agent.request(methods.agent.session.load, {
           sessionId,
@@ -201,13 +223,26 @@ export function createSessionDriver(options: SessionDriverOptions = {}): Session
           mcpServers: opts.mcpServers ?? [],
           ...(opts.additionalDirectories?.length ? { additionalDirectories: opts.additionalDirectories } : {}),
         });
-        return { sessionId, loadSessionResponse: response };
+        const hydrated = hydrationStateBySession.get(sessionId);
+        const modes = response.modes && hydrated?.currentModeId
+          ? { ...response.modes, currentModeId: hydrated.currentModeId }
+          : response.modes;
+        const configOptions = hydrated?.configOptions ?? response.configOptions;
+        return {
+          sessionId,
+          loadSessionResponse: {
+            ...response,
+            ...(modes ? { modes } : {}),
+            ...(configOptions ? { configOptions } : {}),
+          },
+        };
       } catch (error) {
         routeBySession.delete(sessionId);
         commandsBySession.delete(sessionId);
         throw error;
       } finally {
         hydratingSessions.delete(sessionId);
+        hydrationStateBySession.delete(sessionId);
       }
     },
 
@@ -286,6 +321,7 @@ export function createSessionDriver(options: SessionDriverOptions = {}): Session
       routeBySession.delete(sessionId);
       commandsBySession.delete(sessionId);
       hydratingSessions.delete(sessionId);
+      hydrationStateBySession.delete(sessionId);
     },
   };
 }
