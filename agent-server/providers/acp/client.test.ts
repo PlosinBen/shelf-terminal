@@ -163,6 +163,39 @@ describe('acp session driver (connection + new/resume + turn)', () => {
     expect(stream(w1).msgId).not.toBe(stream(w2).msgId);
   });
 
+  it('keeps messageId-less reply ids unique after a fresh driver resumes the same session', async () => {
+    const driveResumedPrompt = async (): Promise<string> => {
+      const mock = createMockAcpAgent({
+        updatesOnPrompt: [{
+          sessionUpdate: 'agent_message_chunk',
+          content: { type: 'text', text: 'resumed reply' },
+        } as SessionUpdate],
+      });
+      const driver = createSessionDriver();
+      const conn = openAcpConnection(mock, { onSessionUpdate: driver.onSessionUpdate });
+      const session = await driver.resume(conn.agent, 'mock-session', { cwd: '/tmp/p' });
+      const wire: OutgoingMessage[] = [];
+
+      try {
+        await driver.drivePromptTurn(conn.agent, session, 'continue', (message) => wire.push(message));
+      } finally {
+        conn.close();
+      }
+
+      const stream = wire.find((message): message is Extract<OutgoingMessage, { type: 'stream' }> =>
+        message.type === 'stream' && message.streamType === 'text');
+      expect(stream?.content).toBe('resumed reply');
+      return stream!.msgId;
+    };
+
+    // Each driver represents a fresh agent-server process. A process-local
+    // sequence restarts at one and reuses an id already present in history.
+    const historicalId = await driveResumedPrompt();
+    const currentId = await driveResumedPrompt();
+
+    expect(currentId).not.toBe(historicalId);
+  });
+
   it('strips only a thought message prefix, preserving a later paragraph chunk (codex)', async () => {
     const updates: SessionUpdate[] = [
       { sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: '\n  \n' }, messageId: 'thought-1' },

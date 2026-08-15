@@ -5,6 +5,7 @@
 // notifications ourselves through a persistent per-session router) and maps
 // updates through the pure `translate` layer onto Shelf's wire. No codex specifics.
 
+import { randomUUID } from 'node:crypto';
 import {
   methods,
   type ClientContext,
@@ -105,12 +106,6 @@ export function createSessionDriver(options: SessionDriverOptions = {}): Session
   // its timeline from local history, so consume metadata during hydration but
   // suppress renderable replay to avoid duplicate messages.
   const hydratingSessions = new Set<string>();
-  // Monotonic across prompts so a per-prompt namespace for messageId-less agents
-  // (copilot --acp omits `messageId`) stays unique — otherwise every turn's reply
-  // collapses onto the constant DEFAULT_AGENT_MSG_ID and the renderer upserts them
-  // all onto one entry (reply shows above the wrong prompt's output).
-  let promptSeq = 0;
-
   function routeState(sessionId: string): SessionRouteState {
     let state = routeBySession.get(sessionId);
     if (!state) {
@@ -251,7 +246,11 @@ export function createSessionDriver(options: SessionDriverOptions = {}): Session
       // gives the later text a fresh msgId → its own card at the right position.
       const state = routeState(session.sessionId);
       state.send = send;
-      state.promptBase = `${session.sessionId}#${++promptSeq}`;
+      // A fresh agent-server can resume a session whose history already contains
+      // ids minted by an older process. A process-local sequence would restart
+      // and collide, so each messageId-less prompt gets an opaque namespace that
+      // remains unique across process restarts and resumed history.
+      state.promptBase = `${session.sessionId}#${randomUUID()}`;
       state.seg = 0;
       state.streamedSinceTool = false;
       state.thoughtStarted.clear();
