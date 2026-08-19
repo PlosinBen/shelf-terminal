@@ -553,7 +553,7 @@ Fresh capabilities probe 若建立 `session/new`，立刻透過 session-scoped `
 
 **Root cause：** Shelf 的 context pointer 可能比 Copilot CLI 的 session storage 活得久。Capabilities probe 會在顯示輸入框前 restore provider session；原本任何 restore failure 都 fail-loud，連 ACP 明確回報 session 不存在也不例外，所以 stale pointer 會永久卡住該 Shelf session。
 
-**Fix / note：** 只有 ACP `RequestError.code === -32001` 且 message 明確包含同一個 session ID 的 `Resource not found: Session <id> not found` 時才恢復：先 emit `lastSdkSessionId:null`，再走 `session/new`；成功後保存新 ID，並顯示一次 system notice 說明舊 conversation context 無法恢復。其他 restore failure（auth、transport、protocol、timeout 或不同 ID）維持 fail-loud，不得 broad-catch 後靜默開新 session。
+**Fix / note：** 只有 ACP `RequestError.code` 等於官方 SDK `RequestError.resourceNotFound().code`（目前為 `-32002`），且 message 明確包含同一個 session ID 的 `Resource not found: Session <id> not found` 時才恢復：先 emit `lastSdkSessionId:null`，再走 `session/new`；成功後保存新 ID，並顯示一次 system notice 說明舊 conversation context 無法恢復。其他 restore failure（auth、transport、protocol、timeout 或不同 ID）維持 fail-loud，不得 broad-catch 後靜默開新 session。Regression mock 也必須由同一個 SDK helper 取得 code，不可另外手寫數字，否則會讓測試通過但正式 transport 無法觸發 fallback。
 
 **Related：** `agent-providers#38`（Codex 同類窄 recovery）、`agent-providers#46`、`agent-server/providers/copilot/index.ts`、`agent-server/context-store.ts`。
 

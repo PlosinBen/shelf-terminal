@@ -140,7 +140,9 @@ export function createMockAcpAgent(script: MockAgentScript = {}): AgentApp {
     })
     .onRequest('session/load', async ({ params, client }) => {
       script.onLoadSession?.(params);
-      if (script.loadSessionError) throw new RequestError(-32001, script.loadSessionError);
+      if (script.loadSessionError) {
+        throw new RequestError(RequestError.resourceNotFound().code, script.loadSessionError);
+      }
       for (const update of script.updatesOnLoadSession ?? []) {
         await client.notify('session/update', { sessionId: params.sessionId, update });
       }

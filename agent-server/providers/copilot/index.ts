@@ -9,6 +9,7 @@ import * as path from 'node:path';
 import type { ChildProcess } from 'node:child_process';
 import {
   methods,
+  RequestError,
   type Stream,
   type AgentApp,
   type SessionModeState,
@@ -39,6 +40,7 @@ import { refreshCopilotCredit } from './credit';
 import { startLogin as startCopilotLogin, prefillLoginUrl, type LoginRunner } from './login';
 
 const COPILOT_STALE_SESSION_NOTICE = 'Previous Copilot session was unavailable; started a new session.';
+const ACP_RESOURCE_NOT_FOUND_ERROR_CODE = RequestError.resourceNotFound().code;
 export const COPILOT_AUTOPILOT_MODE_ID = 'https://agentclientprotocol.com/protocol/session-modes#autopilot';
 const COPILOT_AUTOPILOT_COMPLETION_TIMEOUT_MS = 30 * 60_000;
 
@@ -488,7 +490,7 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
       ? (err as { code?: unknown }).code
       : undefined;
     const message = (err as Error)?.message ?? String(err);
-    return code === -32001
+    return code === ACP_RESOURCE_NOT_FOUND_ERROR_CODE
       && message.includes(`Resource not found: Session ${sessionId} not found`);
   }
 
