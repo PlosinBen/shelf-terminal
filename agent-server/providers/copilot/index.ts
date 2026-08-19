@@ -20,6 +20,7 @@ import {
 import { COPILOT_PROVIDER } from '@shared/agent-providers';
 import { PERMISSION_CONTROL_STRATEGIES, type PermissionControlCapabilities } from '@shared/permission-controls';
 import { CONFIG_EDIT_KEYS, formatConfigAck, type ConfigEditKey } from '@shared/config-ack';
+import { parseSlashPrefix } from '@shared/slash-prefix';
 import { type ServerBackend, type QueryInput, type SendFn, type ProviderCapabilities } from '../types';
 import { serverLog } from '../../server-logger';
 import { openAcpConnection, spawnAgentStdio, type AcpConnection, type PermissionHandler } from '../acp/connection';
@@ -517,6 +518,9 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
         // update and an early task_complete tool_call from the same prompt.
         const autopilotCompletion = createAutopilotCompletionGate(s.sessionId);
         activeAutopilotCompletion = autopilotCompletion;
+        const slash = parseSlashPrefix(input.prompt);
+        const isAdvertisedSlashCommand = slash !== null
+          && driver.getAvailableCommands(s.sessionId)?.some((command) => command.name === slash.cmd) === true;
         const promptCompletion = driver.drivePromptTurn(
           conn!.agent,
           s,
@@ -533,7 +537,11 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
           } finally {
             if (activePromptCompletion === promptCompletion) activePromptCompletion = null;
           }
-          if (stopReason === 'end_turn' && sessionModes?.currentModeId === COPILOT_AUTOPILOT_MODE_ID) {
+          if (
+            stopReason === 'end_turn'
+            && sessionModes?.currentModeId === COPILOT_AUTOPILOT_MODE_ID
+            && !isAdvertisedSlashCommand
+          ) {
             const outcome = await autopilotCompletion.promise;
             if (outcome === 'connection_closed') {
               throw new Error('Copilot connection closed before task_complete');
