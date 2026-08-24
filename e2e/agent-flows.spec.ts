@@ -401,6 +401,22 @@ test.describe('agent flows via fake provider', () => {
     await expect(page.locator('.agent-permission:visible')).toContainText('fake-model-after-auth');
   });
 
+  test('sdk-managed auth Check again stays on the pane while credentials remain invalid', async ({ shelfApp: { page } }) => {
+    await setupProject(page);
+    await openAgentTab(page);
+    await sendAgentPrompt(page, 'auth_required_sdk');
+
+    const pane = page.locator('.agent-auth-pane:visible');
+    await expect(pane).toBeVisible({ timeout: 5_000 });
+    await expect(pane.locator('.agent-auth-title')).toHaveText('Fake Harness SDK not signed in');
+    const checkAgain = pane.locator('.agent-reset-btn', { hasText: 'Check again' });
+    await expect(checkAgain).toBeVisible();
+    await checkAgain.click();
+
+    await expect(pane).toBeVisible();
+    await expect(pane.locator('.agent-auth-error')).toHaveText('Still no valid credentials found.');
+  });
+
   test('thinking: renders as a fold_text card', async ({ shelfApp: { page } }) => {
     await setupProject(page);
     await openAgentTab(page);

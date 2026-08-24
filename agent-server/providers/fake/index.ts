@@ -190,6 +190,9 @@ export function createFakeBackend(_representedProvider: AgentProvider = FAKE_PRO
   // The auth_required scenario makes the next successful auth probe visibly
   // different, allowing E2E to prove main published the fresh capabilities.
   let reportAuthenticatedCapabilities = false;
+  // sdk-managed auth scenario remains logged out across Check again so E2E can
+  // prove the pane is not dismissed on a failed manual-login verification.
+  let sdkManagedAuthRequired = false;
   let nativeMode = 'agent';
   let nativePermission = 'off';
   // Test hook: the `reloadfail` scenario arms this so the NEXT reloadSkills
@@ -596,6 +599,20 @@ export function createFakeBackend(_representedProvider: AgentProvider = FAKE_PRO
       return;
     }
 
+    if (step === 'auth_required_sdk') {
+      sdkManagedAuthRequired = true;
+      send({
+        type: 'capabilities',
+        authRequired: true,
+        authMethod: {
+          kind: 'sdk-managed',
+          instructions: [{ command: 'fake auth login', label: 'run on the agent host' }],
+        },
+      });
+      send({ type: 'auth_required', provider: FAKE_AUTH_DISPLAY_NAME });
+      return;
+    }
+
     if (step.startsWith('error:')) {
       send({ type: 'error', error: step.slice('error:'.length) });
       return;
@@ -767,10 +784,12 @@ export function createFakeBackend(_representedProvider: AgentProvider = FAKE_PRO
           { name: 'lima', description: 'Filler command lima' },
           { name: 'zulu', description: 'Filler command zulu (last)' },
         ],
-        // Declare an oauth method so the AuthPane shows the interactive "Login
-        // with GitHub" button (device-flow) when auth_required fires. See
-        // features copilot-device-login.
-        authMethod: { kind: 'oauth', instructions: [{ command: 'fake login', label: 'fake device flow' }] },
+        authMethod: sdkManagedAuthRequired
+          ? { kind: 'sdk-managed', instructions: [{ command: 'fake auth login', label: 'run on the agent host' }] }
+          // Declare an oauth method so the AuthPane shows the interactive Login
+          // button (device-flow) when auth_required fires.
+          : { kind: 'oauth', instructions: [{ command: 'fake login', label: 'fake device flow' }] },
+        authRequired: sdkManagedAuthRequired || undefined,
       };
     },
 

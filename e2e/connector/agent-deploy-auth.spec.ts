@@ -8,13 +8,13 @@ import { openAgentTab } from '../helpers';
  *
  * Unlike the other agent-deploy specs, this runs the REAL claude provider
  * (testMode:false → no SHELF_TEST_MODE), so ensureInit performs a genuine SDK
- * init + accountInfo() probe against the unauthenticated binary. With no
- * ~/.claude credentials, accountInfo returns tokenSource:'none' → auth-failed →
+ * `auth status --json` probe against the unauthenticated binary. With no
+ * ~/.claude credentials, it returns loggedIn:false → auth-failed →
  * gatherCapabilities.authRequired → AuthPane takes over the chat pane.
  *
  * This is the only end-to-end exercise of the real auth detection against a
- * genuinely logged-out claude (verified: system/init arrives even logged out, so
- * accountInfo — not init — is the auth signal).
+ * genuinely logged-out claude. It protects the warmup gate specifically: the
+ * textarea must not remain usable until a real prompt discovers auth failure.
  */
 const test = makeShelfAppFixture('shelf-agent-test', { testMode: false });
 // First run downloads our node + the claude binary (~200MB) into the runtime
@@ -31,14 +31,15 @@ test('claude: unauthenticated remote surfaces the AuthPane', async ({ shelfApp: 
   if (await prompt.isVisible({ timeout: 5_000 }).catch(() => false)) await prompt.click();
   await expect(page.locator('.tab-bar .tab')).toHaveCount(1, { timeout: 10_000 });
 
-  // Opening the tab triggers deploy → spawn → SDK init probe. The textarea is
+  // Opening the tab triggers deploy → spawn → CLI auth-status probe. The textarea is
   // visible during the 'starting' phase (before the probe resolves); once the
   // probe reports auth-failed, AgentView swaps the whole pane for AuthPane.
   await openAgentTab(page);
 
   const authPane = page.locator('.agent-auth-pane:visible');
   await expect(authPane).toBeVisible({ timeout: 240_000 });
-  // sdk-managed kind → "Claude SDK not signed in" + the `claude login` hint.
+  // sdk-managed kind → current terminal command + verification action.
   await expect(authPane).toContainText('Claude');
-  await expect(authPane).toContainText('claude login');
+  await expect(authPane).toContainText('claude auth login');
+  await expect(authPane.locator('.agent-reset-btn', { hasText: 'Check again' })).toBeVisible();
 });

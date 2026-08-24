@@ -11,11 +11,17 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // `query`). The mock returns an async-iterable that also carries
 // supportedModels()/supportedCommands(), matching the SDK's Query object.
 const sdkQueryMock = vi.fn();
+const cliAuthProbeMock = vi.fn();
 vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
   query: (...args: unknown[]) => sdkQueryMock(...args),
 }));
+vi.mock('./auth-status', async (importOriginal) => ({
+  ...await importOriginal<typeof import('./auth-status')>(),
+  probeClaudeCliAuth: (...args: unknown[]) => cliAuthProbeMock(...args),
+}));
 
 import { createClaudeBackend, isClaudeAuthFailure } from './index';
+import { CLAUDE_CLI_AUTH_OUTCOME } from './auth-status';
 
 /**
  * Build a fake SDK Query: async-iterates `messages`, exposes model/command
@@ -66,6 +72,46 @@ describe('isClaudeAuthFailure', () => {
 describe('gatherCapabilities authRequired', () => {
   beforeEach(() => {
     sdkQueryMock.mockReset();
+    cliAuthProbeMock.mockReset();
+    // Unknown keeps the existing SDK control-channel probe as a compatibility
+    // fallback; individual tests opt into definitive CLI status outcomes.
+    cliAuthProbeMock.mockResolvedValue({ outcome: CLAUDE_CLI_AUTH_OUTCOME.UNKNOWN, error: 'test fallback' });
+  });
+
+  it('expired first-party token: CLI status blocks warmup even when SDK accountInfo still sees oauth', async () => {
+    cliAuthProbeMock.mockResolvedValue({ outcome: CLAUDE_CLI_AUTH_OUTCOME.UNAUTHENTICATED });
+    sdkQueryMock.mockImplementation(() => fakeQuery([INIT], { account: SIGNED_IN }));
+    const backend = createClaudeBackend();
+
+    expect((await backend.gatherCapabilities!('/tmp')).authRequired).toBe(true);
+    expect(sdkQueryMock).not.toHaveBeenCalled();
+  });
+
+  it('a known auth failure stays latched when the next CLI probe is inconclusive', async () => {
+    cliAuthProbeMock
+      .mockResolvedValueOnce({ outcome: CLAUDE_CLI_AUTH_OUTCOME.UNAUTHENTICATED })
+      .mockResolvedValueOnce({ outcome: CLAUDE_CLI_AUTH_OUTCOME.UNKNOWN, error: 'status timed out' });
+    const backend = createClaudeBackend();
+
+    expect((await backend.gatherCapabilities!('/tmp')).authRequired).toBe(true);
+    expect((await backend.gatherCapabilities!('/tmp')).authRequired).toBe(true);
+    expect(sdkQueryMock).not.toHaveBeenCalled();
+  });
+
+  it('definite login clears the auth latch and completes a fresh SDK warmup', async () => {
+    cliAuthProbeMock
+      .mockResolvedValueOnce({ outcome: CLAUDE_CLI_AUTH_OUTCOME.UNAUTHENTICATED })
+      .mockResolvedValueOnce({ outcome: CLAUDE_CLI_AUTH_OUTCOME.AUTHENTICATED });
+    sdkQueryMock.mockImplementation(() => fakeQuery([INIT], {
+      models: [{ value: 'opus', displayName: 'Opus' }],
+      commands: [],
+      account: SIGNED_OUT,
+    }));
+    const backend = createClaudeBackend();
+
+    expect((await backend.gatherCapabilities!('/tmp')).authRequired).toBe(true);
+    expect((await backend.gatherCapabilities!('/tmp')).authRequired).toBe(false);
+    expect(sdkQueryMock).toHaveBeenCalledTimes(1);
   });
 
   it('signed in: init + accountInfo(tokenSource!=none) → authRequired false, cached', async () => {
@@ -82,15 +128,17 @@ describe('gatherCapabilities authRequired', () => {
     expect(sdkQueryMock).toHaveBeenCalledTimes(1);
   });
 
-  it('logged out: accountInfo tokenSource "none" → authRequired true, NOT cached (re-probes)', async () => {
-    sdkQueryMock.mockImplementation(() => fakeQuery([INIT], { account: SIGNED_OUT }));
+  it('logged out: CLI status → authRequired true, NOT cached (re-probes)', async () => {
+    cliAuthProbeMock.mockResolvedValue({ outcome: CLAUDE_CLI_AUTH_OUTCOME.UNAUTHENTICATED });
     const backend = createClaudeBackend();
     const caps = await backend.gatherCapabilities!('/tmp');
     expect(caps.authRequired).toBe(true);
 
-    // A failed probe must NOT be memoized — a retry re-runs the SDK init.
+    // A failed probe must NOT be memoized — a retry re-runs CLI status without
+    // constructing a stale SDK query.
     await backend.gatherCapabilities!('/tmp');
-    expect(sdkQueryMock).toHaveBeenCalledTimes(2);
+    expect(cliAuthProbeMock).toHaveBeenCalledTimes(2);
+    expect(sdkQueryMock).not.toHaveBeenCalled();
   });
 
   it('reconnect invalidates a previously authenticated probe so expired credentials are checked again', async () => {
@@ -113,7 +161,7 @@ describe('gatherCapabilities authRequired', () => {
     expect(caps.authMethod).toEqual({
       kind: 'sdk-managed',
       instructions: [{
-        label: 'Run this in a terminal on the remote host, then click Retry',
+        label: 'Run this in a terminal on the remote host, then click Check again',
         command: 'claude auth login',
       }],
     });
@@ -148,12 +196,15 @@ describe('gatherCapabilities authRequired', () => {
   });
 
   it('recovers after login: logged-out then signed-in flips authRequired to false', async () => {
-    sdkQueryMock
-      .mockImplementationOnce(() => fakeQuery([INIT], { account: SIGNED_OUT }))
-      .mockImplementationOnce(() => fakeQuery([INIT], { models: [{ value: 'opus', displayName: 'Opus' }], commands: [], account: SIGNED_IN }));
+    cliAuthProbeMock
+      .mockResolvedValueOnce({ outcome: CLAUDE_CLI_AUTH_OUTCOME.UNAUTHENTICATED })
+      .mockResolvedValueOnce({ outcome: CLAUDE_CLI_AUTH_OUTCOME.AUTHENTICATED });
+    sdkQueryMock.mockImplementation(() =>
+      fakeQuery([INIT], { models: [{ value: 'opus', displayName: 'Opus' }], commands: [], account: SIGNED_OUT }),
+    );
     const backend = createClaudeBackend();
     expect((await backend.gatherCapabilities!('/tmp')).authRequired).toBe(true);
     expect((await backend.gatherCapabilities!('/tmp')).authRequired).toBe(false);
-    expect(sdkQueryMock).toHaveBeenCalledTimes(2);
+    expect(sdkQueryMock).toHaveBeenCalledTimes(1);
   });
 });

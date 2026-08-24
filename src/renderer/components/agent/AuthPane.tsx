@@ -14,12 +14,12 @@ interface Props {
 /**
  * Full-pane replacement for the chat UI when the provider reports
  * authentication is missing. Shows method-specific instructions
- * (api-key / oauth / sdk-managed) and a Retry button that calls
+ * (api-key / oauth / sdk-managed) and a verification button that calls
  * checkAuth (kept as direct IPC — checkAuth returns Promise<boolean>
  * which the event-bus pattern can't carry).
  *
  * Caller (AgentView) renders this *instead of* the chat area when
- * tab.authRequired is set; on Retry success the store clears
+ * tab.authRequired is set; on verification success the store clears
  * authRequired and the normal chat UI renders again.
  */
 export function AuthPane({ tabId }: Props) {
@@ -126,7 +126,7 @@ export function AuthPane({ tabId }: Props) {
       )}
       {!loginBusy && (
         <button className="agent-reset-btn" disabled={authBusy} onClick={retry}>
-          {authBusy ? 'Checking…' : 'Retry'}
+          {authBusy ? 'Checking…' : authMethod?.kind === 'sdk-managed' ? 'Check again' : 'Retry'}
         </button>
       )}
       {authError && <div className="agent-auth-error">{authError}</div>}

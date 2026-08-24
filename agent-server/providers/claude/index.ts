@@ -17,6 +17,7 @@ import type { ProviderModel, NormalizedTask } from '@shared/types';
 import { SHELF_PERMISSION_CONTROL } from '@shared/permission-controls';
 import { stripCwd, resolveSkillsPluginRoot, readUploadedImageAttachments } from '../shared';
 import { loadProjectedMcpServers } from '../mcp-config';
+import { CLAUDE_CLI_AUTH_OUTCOME, probeClaudeCliAuth } from './auth-status';
 import {
   formatClaudeMcpCard,
   formatClaudeSkillsCard,
@@ -104,14 +105,14 @@ const CLAUDE_AUTH_METHOD = {
   // is correct regardless of which claude binary is invoked. On headless hosts
   // (SSH/container/WSL) the CLI falls back to a paste-the-code flow.
   instructions: [
-    { label: 'Run this in a terminal on the remote host, then click Retry', command: 'claude auth login' },
+    { label: 'Run this in a terminal on the remote host, then click Check again', command: 'claude auth login' },
   ],
 };
 const CLAUDE_AUTH_DISPLAY_NAME = 'Claude';
 
 /**
  * Tri-state result of the tab-open auth probe (ensureInit).
- *  - 'authed'      SDK reached `system/init` — credentials are valid.
+ *  - 'authed'      CLI status (or compatibility fallback) validated credentials.
  *  - 'auth-failed' a structured auth-failure frame arrived — show AuthPane.
  *  - 'error'       transient/unknown (timeout, non-auth error) — do NOT block
  *                  the pane; the user falls through to chat and any real auth
@@ -296,6 +297,11 @@ export function createClaudeBackend(): ServerBackend {
   // not loaded yet.
   const cache: { models?: any[]; commands?: any[]; mcpServers?: ClaudeMcpServer[]; skills?: Array<{ name: string; description?: string }> } = {};
   let initPromise: Promise<AuthOutcome> | null = null;
+  // A definite auth failure must survive an inconclusive later probe. Otherwise
+  // Retry can hide AuthPane merely because `auth status` timed out, and the next
+  // real request repeats the same 401. Only a definite authenticated result
+  // clears this latch.
+  let authFailureLatched = false;
   // In-flight dedup for ensureLoadedContext so concurrent /mcp + /skills (or a
   // double-tap) spin only one cold-start probe.
   let loadedContextWarm: Promise<void> | null = null;
@@ -543,10 +549,9 @@ export function createClaudeBackend(): ServerBackend {
   }
 
   /**
-   * Probe the authenticated account via the SDK control channel. `system/init`
-   * arrives even when logged out, so this is the real auth verdict. A populated
-   * AccountInfo (any credential indicator) → authed; an empty/absent one →
-   * auth-failed; a control-channel throw → 'error' (unknown, don't block).
+   * Compatibility fallback for an older/missing CLI whose public auth-status
+   * command cannot run. This only proves credential presence, not OAuth refresh
+   * validity, so a known auth failure never relies on it to clear the latch.
    */
   async function probeAccount(gen: Query): Promise<AuthOutcome> {
     const TIMEOUT = Symbol('timeout');
@@ -580,6 +585,21 @@ export function createClaudeBackend(): ServerBackend {
     if (cache.models && cache.commands) return Promise.resolve('authed');
     if (initPromise) return initPromise;
     initPromise = (async (): Promise<AuthOutcome> => {
+      // `accountInfo()` reports that an OAuth token EXISTS, not that its refresh
+      // token is still valid. The public CLI status command performs the real
+      // credential check and catches expiry before the user sends a prompt.
+      const cliAuth = await probeClaudeCliAuth(CLAUDE_BINARY_PATH);
+      if (cliAuth.outcome === CLAUDE_CLI_AUTH_OUTCOME.UNAUTHENTICATED) {
+        authFailureLatched = true;
+        return 'auth-failed';
+      }
+      if (cliAuth.outcome === CLAUDE_CLI_AUTH_OUTCOME.UNKNOWN) {
+        serverLog('warn', 'claude', `auth status unavailable; falling back to SDK probe: ${cliAuth.error}`);
+        if (authFailureLatched) return 'auth-failed';
+      } else {
+        authFailureLatched = false;
+      }
+
       const warmupAbort = new AbortController();
       // Hang guard — see AUTH_PROBE_TIMEOUT_MS. A logged-out CLI may emit
       // neither `init` nor an auth_status failure; bound the wait so tab-open
@@ -600,6 +620,7 @@ export function createClaudeBackend(): ServerBackend {
         for await (const msg of generator) {
           // Auth failure may surface as a structured frame before init.
           if (isClaudeAuthFailure(msg)) {
+            authFailureLatched = true;
             outcome = 'auth-failed';
             warmupAbort.abort();
             break;
@@ -625,7 +646,14 @@ export function createClaudeBackend(): ServerBackend {
             // system/init alone does NOT prove auth — the CLI inits a session
             // without credentials; auth is only validated on a real call. Probe
             // the account explicitly via the control channel.
-            outcome = await probeAccount(generator);
+            // A definitive CLI verdict supersedes accountInfo's credential-
+            // presence heuristic. Keep accountInfo only as compatibility fallback
+            // when an older/missing CLI cannot answer `auth status`.
+            outcome = cliAuth.outcome === CLAUDE_CLI_AUTH_OUTCOME.AUTHENTICATED
+              ? 'authed'
+              : await probeAccount(generator);
+            if (outcome === 'auth-failed') authFailureLatched = true;
+            else if (outcome === 'authed') authFailureLatched = false;
             // Never leave caps cached on a non-authed outcome, or the top-of-
             // function short-circuit would wrongly report 'authed' next time.
             if (outcome !== 'authed') { cache.models = undefined; cache.commands = undefined; }
@@ -911,6 +939,7 @@ export function createClaudeBackend(): ServerBackend {
   function handleSdkMessage(msg: SDKMessage) {
     const any = msg as any;
     if (typeof any.session_id === 'string' && any.session_id) lastSessionId = any.session_id;
+    if (isClaudeAuthFailure(msg)) authFailureLatched = true;
 
     // On the REAL session's init, refresh the /mcp /skills listings from its
     // control methods (full options: app skills + in-process MCP). Fire-and-
@@ -1031,7 +1060,9 @@ export function createClaudeBackend(): ServerBackend {
     // ── foreground-only pre-hooks ──
     if (frame.kind === 'foreground') {
       // Mid-turn auth failure → AuthPane takeover (mirrors copilot).
-      if (isClaudeAuthFailure(msg)) frame.rawSend!({ type: 'auth_required', provider: CLAUDE_AUTH_DISPLAY_NAME });
+      if (isClaudeAuthFailure(msg)) {
+        frame.rawSend!({ type: 'auth_required', provider: CLAUDE_AUTH_DISPLAY_NAME });
+      }
       // /compact completion. The SDK marks a finished compaction with a
       // `compact_boundary` system message (see isCompactBoundary). Failure has
       // no distinct signal — the boundary just never arrives and closeFrame

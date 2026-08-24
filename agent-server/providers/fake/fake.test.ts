@@ -374,6 +374,21 @@ describe('createFakeBackend — scenarios', () => {
       models: [{ value: 'fake-model-after-auth' }],
     });
   });
+
+  it('sdk-managed auth scenario remains unauthenticated for Check again', async () => {
+    const { send } = collect();
+    const b = createFakeBackend();
+
+    await b.query(makeInput('auth_required_sdk'), send);
+
+    await expect(b.gatherCapabilities!('/tmp')).resolves.toMatchObject({
+      authRequired: true,
+      authMethod: {
+        kind: 'sdk-managed',
+        instructions: [{ command: 'fake auth login' }],
+      },
+    });
+  });
 });
 
 describe('canned prompt shapes', () => {

@@ -186,7 +186,7 @@ SDK 0.3.159 **並存**兩種 compact 完成訊號:`status` 形狀(`subtype:'stat
 
 **token 路徑正交**：帳號級 TOKEN env（copilot `COPILOT_GITHUB_TOKEN`/`GH_TOKEN`、`ANTHROPIC_API_KEY`）不受 home 隔離 —— 它注入帳號憑證、短路 device-login,跨 device 生效（`copilot/login.ts` 的 `scrubLoginEnv` 就在互動登入時剝掉它們免短路）。home-env 隔離的是 **device-login store**;token-env 是獨立的帳號 override。兩者並存不衝突。
 
-**claude 例外（已知、非平凡的未來 migration）**：claude auth 是 `sdk-managed`、現在靠 **ambient `~/.claude`**（AuthPane 叫使用者去 terminal 跑 `claude login`,**無 in-app login flow**）。套 device 模型到 claude 會 (a) 打破 ambient 沿用 (b) 要重做 auth UX (c) 撞 `CLAUDE_CONFIG_DIR` 弱連結（未文件化）。只有 OAuth 路徑受影響（`ANTHROPIC_API_KEY` = 正交 token 路徑）→ 獨立的未來工作,claude 現況刻意留 ambient（odd-one-out）。
+**claude 例外（已知、非平凡的未來 migration）**：claude auth 是 `sdk-managed`、現在靠 **ambient `~/.claude`**（AuthPane 叫使用者去 terminal 跑 `claude auth login`,**無 in-app login flow**）。套 device 模型到 claude 會 (a) 打破 ambient 沿用 (b) 要重做 auth UX (c) 撞 `CLAUDE_CONFIG_DIR` 弱連結（未文件化）。只有 OAuth 路徑受影響（`ANTHROPIC_API_KEY` = 正交 token 路徑）→ 獨立的未來工作,claude 現況刻意留 ambient（odd-one-out）。
 
 **Do not change casually because**：別只在 run 設 config-home 而漏了 login（憑證會寫錯目錄）;別以為 appId 在 caps 前就有（要 thread 進 `get_capabilities`,否則 caps-time spawn 拿不到 home）;別把 device-home 隔離跟 token-env 混為一談。
 
@@ -569,14 +569,14 @@ Fresh capabilities probe 若建立 `session/new`，立刻透過 session-scoped `
 
 **Related：** `agent-providers#37`、`agent-providers#43`、`agent-server/providers/copilot/index.ts`、`agent-server/providers/copilot/helpers.ts`、`agent-server/providers/copilot/copilot.test.ts`。
 
-## agent-providers#49 — Claude OAuth 過期後 Retry 必須重建 SDK session 並重新 probe  ·  [Gotcha]
+## agent-providers#49 — Claude OAuth 有效性以 CLI status 為準；warmup / Check again 共用三態 latch  ·  [Gotcha]
 
-**Symptom：** 既有 Claude tab 在 OAuth token 過期後會正確收到 `auth_required`，但依 AuthPane 指示重新登入再按 Retry，pane 可能被錯誤清掉，下一個 turn 仍回 `401 OAuth access token has expired`。
+**Symptom：** OAuth token 過期的 Claude tab 在 warmup 仍顯示 history，直到送出第一則訊息才回 `401 OAuth access token has expired` 並顯示 AuthPane；未重新登入直接重試時，pane 又被錯誤清掉，下一個 turn 重複 401。
 
-**Root cause：** Claude 的 models/commands cache 同時被 `ensureInit()` 當作「auth probe 已成功」memo；Retry 雖先送 provider `reconnect`，Claude backend 原本沒實作該 hook，所以既不清 memo，也不關閉已讀入舊 token 的 persistent SDK query。另外，bundled Claude Code 2.1.x 的登入 subcommand 是 `claude auth login`，舊指示 `claude login` 只會走一般 CLI 入口。
+**Root cause：** SDK `accountInfo()` 的 `tokenSource` 只證明 credential 存在；過期 OAuth token 仍回 `oauth`，所以不能作有效性判斷。models/commands cache 又兼任成功 memo，live SDK query 也已讀入舊 token，單純再 probe 會同時沿用錯誤 verdict 與 stale query。bundled Claude Code 的登入 subcommand 是 `claude auth login`，不是一般 CLI 入口的 `claude login`。
 
-**Fix / note：** Claude `reconnect()` 先收尾 active turn、關閉並 abort 舊 SDK query，保留 `lastSessionId` 供下一個真實 turn resume，再清除 models/commands auth memo，讓緊接的 capabilities probe 重新呼叫 `accountInfo()`。AuthPane 的 sdk-managed instruction 使用 `claude auth login`。只清 cache 不足以修正，因為 live query 仍持有過期 credential；清 `lastSessionId` 也不對，會無謂中斷對話 continuity。
+**Fix / note：** warmup 與 Check again 都先用 provider 同一支 Claude binary / ambient env 執行公開的 `claude auth status --json`。first-party `loggedIn:false` 在建立 SDK query 前直接回 `authRequired`；非 first-party（Bedrock / Vertex / gateway）是外部 auth，不套 OAuth gate。probe 是 `authenticated / unauthenticated / unknown` 三態：fresh warmup 的 unknown 可退回 `accountInfo()` 相容路徑，避免 transient process error 誤鎖；一旦 CLI 或 structured mid-turn frame 確認 auth failure，就 latch，unknown 不得解除，只有 definite authenticated 才能清。Claude `reconnect()` 同步收尾 active turn、關閉/abort stale query、清 models/commands memo，但保留 `lastSessionId` 讓登入後 resume 原 history。AuthPane 指示 `claude auth login`，驗證按鈕叫 Check again，明示它不啟動 in-app OAuth。
 
-**Do not change casually because：** `checkAuth` 的 `reconnect → get_capabilities` 依 main→agent-server FIFO 順序成立；Claude reconnect 必須同步 drop refs，不能非同步完成後才清 session。重新驗證要失效 auth memo，但不得清 provider context pointer。
+**Do not change casually because：** 不要把 `accountInfo().tokenSource !== 'none'` 恢復成第一方 OAuth 的主要有效性判斷，也不要讓 unknown 清除已知 401；兩者都會重現「回 history、下一則再 401」。`checkAuth` 的 `reconnect → get_capabilities` 依 main→agent-server FIFO 順序成立，reconnect 必須同步 drop refs，但不得清 provider context pointer。不要用 SDK 未公開的 Claude OAuth control methods 取代 external CLI flow；目前的 UI/protocol 沒有承諾該私有 surface。
 
-**Related：** `agent-server/providers/claude/index.ts`、`src/main/agent/remote.ts`、`src/renderer/components/agent/AuthPane.tsx`。
+**Related：** `agent-server/providers/claude/auth-status.ts`、`agent-server/providers/claude/index.ts`、`src/main/agent/remote.ts`、`src/renderer/components/agent/AuthPane.tsx`、`e2e/connector/agent-deploy-auth.spec.ts`。
