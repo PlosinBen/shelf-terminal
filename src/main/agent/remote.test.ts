@@ -302,6 +302,26 @@ describe('remote backend', () => {
     backend.dispose();
   });
 
+  it('checkAuth reconnects an existing provider before requesting fresh capabilities', async () => {
+    const { child, writes } = capabilitiesChild({ authRequired: false });
+    vi.mocked(spawn).mockImplementationOnce(() => {
+      setTimeout(() => child.stdout.emit('data', Buffer.from('{"type":"ready"}\n')), 0);
+      return child;
+    });
+    const { createRemoteBackend } = await import('./remote');
+    const backend = createRemoteBackend({ type: 'local' } as any);
+
+    await backend.checkAuth('/tmp');
+    const beforeRetry = writes.length;
+    await backend.checkAuth('/tmp');
+
+    expect(writes.slice(beforeRetry).map((message) => message.type)).toEqual([
+      'reconnect',
+      'get_capabilities',
+    ]);
+    backend.dispose();
+  });
+
   it('dispose does not throw when no process exists', async () => {
     const { createRemoteBackend } = await import('./remote');
     const backend = createRemoteBackend({ type: 'local' } as any);

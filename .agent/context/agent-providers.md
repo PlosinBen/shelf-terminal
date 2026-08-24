@@ -568,3 +568,15 @@ Fresh capabilities probe 若建立 `session/new`，立刻透過 session-scoped `
 **Do not change casually because：** 不要在共用 ACP translator 全域過濾這個字串，也不要把所有 `Info:` 都吞掉。上游若保留 `session.info.infoType`、改成非 assistant update，或不再在新 prompt 前 abort，應移除此窄 workaround 與對應 regression test。
 
 **Related：** `agent-providers#37`、`agent-providers#43`、`agent-server/providers/copilot/index.ts`、`agent-server/providers/copilot/helpers.ts`、`agent-server/providers/copilot/copilot.test.ts`。
+
+## agent-providers#49 — Claude OAuth 過期後 Retry 必須重建 SDK session 並重新 probe  ·  [Gotcha]
+
+**Symptom：** 既有 Claude tab 在 OAuth token 過期後會正確收到 `auth_required`，但依 AuthPane 指示重新登入再按 Retry，pane 可能被錯誤清掉，下一個 turn 仍回 `401 OAuth access token has expired`。
+
+**Root cause：** Claude 的 models/commands cache 同時被 `ensureInit()` 當作「auth probe 已成功」memo；Retry 雖先送 provider `reconnect`，Claude backend 原本沒實作該 hook，所以既不清 memo，也不關閉已讀入舊 token 的 persistent SDK query。另外，bundled Claude Code 2.1.x 的登入 subcommand 是 `claude auth login`，舊指示 `claude login` 只會走一般 CLI 入口。
+
+**Fix / note：** Claude `reconnect()` 先收尾 active turn、關閉並 abort 舊 SDK query，保留 `lastSessionId` 供下一個真實 turn resume，再清除 models/commands auth memo，讓緊接的 capabilities probe 重新呼叫 `accountInfo()`。AuthPane 的 sdk-managed instruction 使用 `claude auth login`。只清 cache 不足以修正，因為 live query 仍持有過期 credential；清 `lastSessionId` 也不對，會無謂中斷對話 continuity。
+
+**Do not change casually because：** `checkAuth` 的 `reconnect → get_capabilities` 依 main→agent-server FIFO 順序成立；Claude reconnect 必須同步 drop refs，不能非同步完成後才清 session。重新驗證要失效 auth memo，但不得清 provider context pointer。
+
+**Related：** `agent-server/providers/claude/index.ts`、`src/main/agent/remote.ts`、`src/renderer/components/agent/AuthPane.tsx`。

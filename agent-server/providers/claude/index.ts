@@ -100,11 +100,11 @@ const CLAUDE_AUTH_METHOD = {
   // Option A: the user signs in ON the remote host in a real terminal — the
   // credential is written to the remote's own ~/.claude and NEVER crosses
   // machines. We deliberately don't inject the deployed binary path: `claude`
-  // reads credentials by home-dir, not by binary-dir, so a plain `claude login`
+  // reads credentials by home-dir, not by binary-dir, so `claude auth login`
   // is correct regardless of which claude binary is invoked. On headless hosts
   // (SSH/container/WSL) the CLI falls back to a paste-the-code flow.
   instructions: [
-    { label: 'Run this in a terminal on the remote host, then click Retry', command: 'claude login' },
+    { label: 'Run this in a terminal on the remote host, then click Retry', command: 'claude auth login' },
   ],
 };
 const CLAUDE_AUTH_DISPLAY_NAME = 'Claude';
@@ -1407,6 +1407,26 @@ export function createClaudeBackend(): ServerBackend {
           try { session.abort.abort(); } catch { /* best-effort */ }
         }
       }
+    },
+
+    reconnect() {
+      // Auth can expire after the initial capabilities probe. Retry reaches
+      // this hook before probing again: discard the query that captured the old
+      // OAuth token, but preserve lastSessionId so the next turn resumes history.
+      // See agent-providers#49.
+      cancelActiveTurns();
+      if (session) {
+        const old = session;
+        session = null;
+        try { old.closeInput(); } catch { /* best-effort */ }
+        try { old.query.close(); } catch { /* best-effort */ }
+        try { old.abort.abort(); } catch { /* best-effort */ }
+      }
+      // models + commands currently double as the successful auth-probe memo.
+      // Invalidate both so checkAuth cannot report stale authentication.
+      initPromise = null;
+      cache.models = undefined;
+      cache.commands = undefined;
     },
 
     dispose() {

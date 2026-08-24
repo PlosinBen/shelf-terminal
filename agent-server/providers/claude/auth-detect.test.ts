@@ -93,6 +93,32 @@ describe('gatherCapabilities authRequired', () => {
     expect(sdkQueryMock).toHaveBeenCalledTimes(2);
   });
 
+  it('reconnect invalidates a previously authenticated probe so expired credentials are checked again', async () => {
+    sdkQueryMock
+      .mockImplementationOnce(() => fakeQuery([INIT], { account: SIGNED_IN }))
+      .mockImplementationOnce(() => fakeQuery([INIT], { account: SIGNED_OUT }));
+    const backend = createClaudeBackend();
+
+    expect((await backend.gatherCapabilities!('/tmp')).authRequired).toBe(false);
+    backend.reconnect?.();
+    expect((await backend.gatherCapabilities!('/tmp')).authRequired).toBe(true);
+    expect(sdkQueryMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('directs the user to the current Claude auth subcommand', async () => {
+    sdkQueryMock.mockImplementation(() => fakeQuery([INIT], { account: SIGNED_OUT }));
+    const backend = createClaudeBackend();
+
+    const caps = await backend.gatherCapabilities!('/tmp');
+    expect(caps.authMethod).toEqual({
+      kind: 'sdk-managed',
+      instructions: [{
+        label: 'Run this in a terminal on the remote host, then click Retry',
+        command: 'claude auth login',
+      }],
+    });
+  });
+
   it('auth failure frame BEFORE init (auth_status) → authRequired true', async () => {
     sdkQueryMock.mockImplementation(() =>
       fakeQuery([{ type: 'auth_status', isAuthenticating: false, error: 'not_logged_in' }]),
