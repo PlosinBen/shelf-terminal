@@ -15,7 +15,12 @@ export type TabType = 'terminal' | 'agent' | 'web';
 export type AuthMethod =
   | { kind: 'api-key'; envVar: string; setupUrl?: string; placeholder?: string }
   | { kind: 'oauth'; instructions: Array<{ label: string; command?: string }> }
-  | { kind: 'sdk-managed'; instructions: Array<{ label: string; command?: string }> }
+  | {
+      kind: 'sdk-managed';
+      instructions: Array<{ label: string; command?: string }>;
+      /** Explicit command launched in a visible project terminal after user consent. */
+      loginCommand: string;
+    }
   | { kind: 'none' };
 
 export interface AgentPrefs {

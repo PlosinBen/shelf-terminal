@@ -1,4 +1,4 @@
-import { test, expect, openAgentTab, sendAgentPrompt } from './helpers';
+import { test, expect, openAgentTab, readActiveTerminalText, sendAgentPrompt } from './helpers';
 import type { Page } from '@playwright/test';
 
 /**
@@ -415,6 +415,22 @@ test.describe('agent flows via fake provider', () => {
 
     await expect(pane).toBeVisible();
     await expect(pane.locator('.agent-auth-error')).toHaveText('Still no valid credentials found.');
+  });
+
+  test('sdk-managed auth Log in opens an interactive terminal on the same project', async ({ shelfApp: { page } }) => {
+    await setupProject(page);
+    await openAgentTab(page);
+    await sendAgentPrompt(page, 'auth_required_sdk');
+
+    const pane = page.locator('.agent-auth-pane:visible');
+    await expect(pane).toBeVisible({ timeout: 5_000 });
+    await expect(pane.locator('.agent-auth-instructions')).toContainText('Open a terminal');
+    await pane.locator('.agent-reset-btn', { hasText: 'Log in' }).click();
+
+    await expect(page.locator('.tab-bar .tab')).toHaveCount(3, { timeout: 5_000 });
+    await expect(page.locator('.tab-bar .tab.active')).toContainText('Fake Harness Login');
+    await expect.poll(() => readActiveTerminalText(page), { timeout: 12_000 })
+      .toContain('fake auth login launched');
   });
 
   test('thinking: renders as a fold_text card', async ({ shelfApp: { page } }) => {

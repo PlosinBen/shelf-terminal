@@ -130,6 +130,8 @@ Dual-purpose: a one-shot RPC response carrying `requestId` (matched in main's `o
 | ...`ProviderCapabilities` | — | `models`, `permissionModes`, `permissionControl`, `effortLevels`, `slashCommands`, `authMethod?`, `authRequired?` |
 | `currentModel` / `currentEffort` / `currentPermissionMode` | `string?` | |
 
+`authMethod` is the renderer-facing authentication capability defined authoritatively by `AuthMethod` in `src/shared/types.ts`. For `kind:'sdk-managed'`, `loginCommand` is the explicit command that the renderer may launch only after the user clicks Log in; commands embedded in `instructions` are display text and are never executable authority. The launch intent stays renderer-local: App opens a terminal tab in the originating agent tab's project, and the normal PTY spawn path runs the command on that project's connection.
+
 `permissionControl` is a strategy discriminator:
 
 - `{ strategy: 'shelf' }` uses canonical `permissionModes` / `currentPermissionMode`; a legacy wire payload that omits the field defaults to this strategy.

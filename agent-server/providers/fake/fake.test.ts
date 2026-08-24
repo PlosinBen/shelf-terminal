@@ -386,6 +386,7 @@ describe('createFakeBackend — scenarios', () => {
       authMethod: {
         kind: 'sdk-managed',
         instructions: [{ command: 'fake auth login' }],
+        loginCommand: "printf 'fake auth login launched\\n'",
       },
     });
   });

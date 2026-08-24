@@ -68,6 +68,12 @@ export interface AgentEventMap {
     pickerId: string;
     payload: { answers: Array<string | string[]> } | { cancelled: true };
   };
+  /** Open the provider's interactive auth CLI in a terminal beside this agent tab. */
+  'agent:openAuthTerminal': {
+    tabId: string;
+    provider: string;
+    command: string;
+  };
 }
 
 export type AgentEventName = keyof AgentEventMap;

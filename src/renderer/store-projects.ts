@@ -288,6 +288,23 @@ export function addTab(
   return tab;
 }
 
+/**
+ * Open a visible command terminal in the project that owns `sourceTabId`.
+ * The source must still be an agent tab; a stale UI event must not fall back
+ * to whichever project happens to be active.
+ */
+export function addTerminalTabForSource(
+  sourceTabId: string,
+  name: string,
+  command: string,
+): Tab | null {
+  const projectIndex = projects.findIndex((project) =>
+    project.tabs.some((tab) => tab.id === sourceTabId && tab.type === 'agent'),
+  );
+  if (projectIndex === -1) return null;
+  return addTab(projectIndex, name, command);
+}
+
 export function removeTab(projectIndex: number, tabIndex: number) {
   updateRuntime(projectIndex, (runtime) => {
     const tabs = runtime.tabs.filter((_, index) => index !== tabIndex);

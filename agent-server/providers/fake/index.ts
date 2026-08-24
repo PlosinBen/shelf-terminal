@@ -607,6 +607,7 @@ export function createFakeBackend(_representedProvider: AgentProvider = FAKE_PRO
         authMethod: {
           kind: 'sdk-managed',
           instructions: [{ command: 'fake auth login', label: 'run on the agent host' }],
+          loginCommand: "printf 'fake auth login launched\\n'",
         },
       });
       send({ type: 'auth_required', provider: FAKE_AUTH_DISPLAY_NAME });
@@ -785,7 +786,11 @@ export function createFakeBackend(_representedProvider: AgentProvider = FAKE_PRO
           { name: 'zulu', description: 'Filler command zulu (last)' },
         ],
         authMethod: sdkManagedAuthRequired
-          ? { kind: 'sdk-managed', instructions: [{ command: 'fake auth login', label: 'run on the agent host' }] }
+          ? {
+              kind: 'sdk-managed',
+              instructions: [{ command: 'fake auth login', label: 'run on the agent host' }],
+              loginCommand: "printf 'fake auth login launched\\n'",
+            }
           // Declare an oauth method so the AuthPane shows the interactive Login
           // button (device-flow) when auth_required fires.
           : { kind: 'oauth', instructions: [{ command: 'fake login', label: 'fake device flow' }] },

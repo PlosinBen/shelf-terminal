@@ -6,6 +6,7 @@ import {
   setAuthRequired,
   useAgentTab,
 } from '../../agentTabStore';
+import { emitAgent } from '../../events';
 
 interface Props {
   tabId: string;
@@ -44,6 +45,17 @@ export function AuthPane({ tabId }: Props) {
   };
   const cancelLogin = () => {
     void window.shelfApi.agent.cancelLogin(tabId);
+  };
+  const startSdkLogin = () => {
+    const command = authMethod?.kind === 'sdk-managed' && typeof authMethod.loginCommand === 'string'
+      ? authMethod.loginCommand.trim()
+      : '';
+    if (!command) {
+      setAuthError(tabId, 'No login command is available for this provider.');
+      return;
+    }
+    setAuthError(tabId, null);
+    emitAgent('agent:openAuthTerminal', { tabId, provider: providerName, command });
   };
 
   const retry = async () => {
@@ -116,17 +128,23 @@ export function AuthPane({ tabId }: Props) {
       )}
       {authMethod?.kind === 'sdk-managed' && (
         <>
-          <div className="agent-auth-instructions">Run the following, then click Retry:</div>
+          <div className="agent-auth-instructions">
+            Open a terminal on this connection to sign in, then return and check again.
+          </div>
+          <button className="agent-reset-btn" onClick={startSdkLogin}>Log in</button>
           <ul className="agent-auth-list">
             {authMethod.instructions.map((ins, i) => (
               <li key={i}>{ins.command && <code>{ins.command}</code>}{ins.label && ` — ${ins.label}`}</li>
             ))}
           </ul>
+          <button className="agent-reset-btn" disabled={authBusy} onClick={retry}>
+            {authBusy ? 'Checking…' : 'Check again'}
+          </button>
         </>
       )}
-      {!loginBusy && (
+      {!loginBusy && authMethod?.kind !== 'sdk-managed' && (
         <button className="agent-reset-btn" disabled={authBusy} onClick={retry}>
-          {authBusy ? 'Checking…' : authMethod?.kind === 'sdk-managed' ? 'Check again' : 'Retry'}
+          {authBusy ? 'Checking…' : 'Retry'}
         </button>
       )}
       {authError && <div className="agent-auth-error">{authError}</div>}

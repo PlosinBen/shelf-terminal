@@ -161,9 +161,10 @@ describe('gatherCapabilities authRequired', () => {
     expect(caps.authMethod).toEqual({
       kind: 'sdk-managed',
       instructions: [{
-        label: 'Run this in a terminal on the remote host, then click Check again',
+        label: 'Complete the sign-in there, then return here',
         command: 'claude auth login',
       }],
+      loginCommand: 'claude auth login',
     });
   });
 

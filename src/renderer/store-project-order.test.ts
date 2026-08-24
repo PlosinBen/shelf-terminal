@@ -4,6 +4,7 @@ import {
   __getSnapshotForTests,
   __resetStoreForTests,
   addTab,
+  addTerminalTabForSource,
   getActiveProjectId,
   listStableProjectViews,
   projectDisplayLabel,
@@ -67,5 +68,33 @@ describe('store project reconciliation', () => {
     expect(__getSnapshotForTests().projects.map((candidate) => candidate.tabs.length)).toEqual([1, 1, 1]);
     expect(listStableProjectViews().map((candidate) => candidate.id)).toEqual(['A', 'B', 'C']);
     expect(getActiveProjectId()).toBe('A');
+  });
+
+  it('opens a command terminal in the source agent tab project', () => {
+    setProjects([project('A'), project('B')]);
+    const agentTab = addTab(1, undefined, undefined, undefined, 'agent', 'claude');
+
+    const terminal = addTerminalTabForSource(
+      agentTab!.id,
+      'Claude Login',
+      'claude auth login',
+    );
+
+    expect(terminal).toMatchObject({
+      label: 'Claude Login',
+      type: 'terminal',
+      cmd: 'claude auth login',
+    });
+    expect(__getSnapshotForTests().projects[0].tabs).toHaveLength(0);
+    expect(__getSnapshotForTests().projects[1].tabs.map((tab) => tab.id))
+      .toEqual([agentTab!.id, terminal!.id]);
+    expect(__getSnapshotForTests().projects[1].activeTabIndex).toBe(1);
+  });
+
+  it('does not open an auth terminal when the source tab is gone', () => {
+    setProjects([project('A')]);
+
+    expect(addTerminalTabForSource('missing-tab', 'Claude Login', 'claude auth login')).toBeNull();
+    expect(__getSnapshotForTests().projects[0].tabs).toHaveLength(0);
   });
 });

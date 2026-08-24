@@ -575,8 +575,18 @@ Fresh capabilities probe 若建立 `session/new`，立刻透過 session-scoped `
 
 **Root cause：** SDK `accountInfo()` 的 `tokenSource` 只證明 credential 存在；過期 OAuth token 仍回 `oauth`，所以不能作有效性判斷。models/commands cache 又兼任成功 memo，live SDK query 也已讀入舊 token，單純再 probe 會同時沿用錯誤 verdict 與 stale query。bundled Claude Code 的登入 subcommand 是 `claude auth login`，不是一般 CLI 入口的 `claude login`。
 
-**Fix / note：** warmup 與 Check again 都先用 provider 同一支 Claude binary / ambient env 執行公開的 `claude auth status --json`。first-party `loggedIn:false` 在建立 SDK query 前直接回 `authRequired`；非 first-party（Bedrock / Vertex / gateway）是外部 auth，不套 OAuth gate。probe 是 `authenticated / unauthenticated / unknown` 三態：fresh warmup 的 unknown 可退回 `accountInfo()` 相容路徑，避免 transient process error 誤鎖；一旦 CLI 或 structured mid-turn frame 確認 auth failure，就 latch，unknown 不得解除，只有 definite authenticated 才能清。Claude `reconnect()` 同步收尾 active turn、關閉/abort stale query、清 models/commands memo，但保留 `lastSessionId` 讓登入後 resume 原 history。AuthPane 指示 `claude auth login`，驗證按鈕叫 Check again，明示它不啟動 in-app OAuth。
+**Fix / note：** warmup 與 Check again 都先用 provider 同一支 Claude binary / ambient env 執行公開的 `claude auth status --json`。first-party `loggedIn:false` 在建立 SDK query 前直接回 `authRequired`；非 first-party（Bedrock / Vertex / gateway）是外部 auth，不套 OAuth gate。probe 是 `authenticated / unauthenticated / unknown` 三態：fresh warmup 的 unknown 可退回 `accountInfo()` 相容路徑，避免 transient process error 誤鎖；一旦 CLI 或 structured mid-turn frame 確認 auth failure，就 latch，unknown 不得解除，只有 definite authenticated 才能清。Claude `reconnect()` 同步收尾 active turn、關閉/abort stale query、清 models/commands memo，但保留 `lastSessionId` 讓登入後 resume 原 history。AuthPane 的 Check again 只負責這條驗證；登入啟動與 PTY 互動由 `agent-providers#50` 的可見 terminal flow 負責。
 
 **Do not change casually because：** 不要把 `accountInfo().tokenSource !== 'none'` 恢復成第一方 OAuth 的主要有效性判斷，也不要讓 unknown 清除已知 401；兩者都會重現「回 history、下一則再 401」。`checkAuth` 的 `reconnect → get_capabilities` 依 main→agent-server FIFO 順序成立，reconnect 必須同步 drop refs，但不得清 provider context pointer。不要用 SDK 未公開的 Claude OAuth control methods 取代 external CLI flow；目前的 UI/protocol 沒有承諾該私有 surface。
 
 **Related：** `agent-server/providers/claude/auth-status.ts`、`agent-server/providers/claude/index.ts`、`src/main/agent/remote.ts`、`src/renderer/components/agent/AuthPane.tsx`、`e2e/connector/agent-deploy-auth.spec.ts`。
+
+## agent-providers#50 — Claude sdk-managed 登入在來源專案開可見 terminal  ·  [Decision]
+
+**Decision：** Claude AuthPane 的 Log in 不直接呼叫 SDK 私有 OAuth API；它使用 `authMethod.loginCommand` 發出 renderer-local typed intent，由 App 在來源 agent tab 所屬專案新增並聚焦 terminal tab，再交給既有 `tabCmd` / PTY spawn 執行。terminal 因此沿用同一個 cwd、connection 與 project env，登入憑證留在 Claude runtime 讀取的 host。完成 CLI flow 後，使用者回 agent tab 按 Check again 驗證。
+
+**Reason：** `claude auth login` 是公開且可互動的登入 surface；可見 PTY 同時支援 local、SSH、WSL、container 與 headless paste-code flow。Claude Agent SDK 的 OAuth callback control methods 未公開，而且 upstream 在 refresh-token expiry 後仍有 callback 失敗案例；把 CLI spawn 成背景 child 則會隱藏 remote/headless 必需的互動。
+
+**Do not change casually because：** `instructions[].command` 只供顯示，不能當作任意 command execution authority；只有明確的 `sdk-managed.loginCommand` 且使用者點擊 Log in 後才可啟動。handler 必須用來源 `tabId` 找 project，不可退回 current active project，否則 tab switch/race 會把登入跑在錯誤 host。terminal 建立失敗要在 AuthPane fail-visible 並記錄來源 tab id，不得 silent return。
+
+**Related：** `agent-providers#49`、`contracts/agent-wire-protocol`、`src/shared/types.ts`、`src/renderer/components/agent/AuthPane.tsx`、`src/renderer/App.tsx`、`src/renderer/store-projects.ts`。

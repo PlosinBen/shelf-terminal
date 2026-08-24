@@ -105,8 +105,9 @@ const CLAUDE_AUTH_METHOD = {
   // is correct regardless of which claude binary is invoked. On headless hosts
   // (SSH/container/WSL) the CLI falls back to a paste-the-code flow.
   instructions: [
-    { label: 'Run this in a terminal on the remote host, then click Check again', command: 'claude auth login' },
+    { label: 'Complete the sign-in there, then return here', command: 'claude auth login' },
   ],
+  loginCommand: 'claude auth login',
 };
 const CLAUDE_AUTH_DISPLAY_NAME = 'Claude';
 

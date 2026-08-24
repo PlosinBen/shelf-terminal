@@ -24,15 +24,15 @@ import { McpView } from './components/McpView';
 import { BackupView } from './components/BackupView';
 import { QuickNoteOverlay } from './components/QuickNoteOverlay';
 import { useKeybindings } from './hooks/useKeybindings';
-import { useStore, setSettings, setUpdateStatus, addTab, setActiveTab, removeTab, setSplitTab, clearUnread, setInvalidProjects, setPmActive, setConnectionHealth, setActiveProjectById, getProjectById, getProjectViews, getProjectIndexById, getCanonicalProjectById, reconcileProjects, listStableProjectViews, showProjectNotice, resolveAgentProviderForOpen, resolveAgentProviderForConnect } from './store';
+import { useStore, setSettings, setUpdateStatus, addTab, addTerminalTabForSource, setActiveTab, removeTab, setSplitTab, clearUnread, setInvalidProjects, setPmActive, setConnectionHealth, setActiveProjectById, getProjectById, getProjectViews, getProjectIndexById, getCanonicalProjectById, reconcileProjects, listStableProjectViews, showProjectNotice, resolveAgentProviderForOpen, resolveAgentProviderForConnect } from './store';
 import type { ConnectionHealth } from '@shared/types';
 import type { Project, ProjectCreateInput } from '@shared/projects';
 import { disposeTerminal } from './components/TerminalView';
 import { teardownTab } from './tab-teardown';
-import { on, emit, Events, onBackup } from './events';
+import { on, emit, Events, onAgent, onBackup } from './events';
 import { bindAgentIPCGroup } from './events';
 import { bindAgentStoreSubscriptions } from './agentTabSubscriptions';
-import { setInMemoryMax, setSaveThrottleMs } from './agentTabStore';
+import { setAuthError, setInMemoryMax, setSaveThrottleMs } from './agentTabStore';
 import { getTheme, buildThemeVars } from './themes';
 import { clearAgentSession } from './storage/agent-history';
 import { bindProcessMemorySummary } from './process-memory-sync';
@@ -392,6 +392,16 @@ export function App() {
       addTab(projectIndex, undefined, undefined, undefined, 'web', undefined, url);
     });
 
+    const offOpenAuthTerminal = onAgent('agent:openAuthTerminal', ({ tabId, provider, command }) => {
+      const terminal = addTerminalTabForSource(tabId, `${provider} Login`, command);
+      if (terminal) {
+        setAuthError(tabId, null);
+        return;
+      }
+      console.warn(`[agent-auth] could not open login terminal for stale or full source tab ${tabId}`);
+      setAuthError(tabId, 'Could not open a login terminal. Close an unused tab and try again.');
+    });
+
     // browser_open (agent tool): main asks to open a Web tab navigated to `url`
     // in the agent's project, AFTER the user approved the per-call popup. addTab
     // auto-activates the new tab so the login page is front-and-center.
@@ -573,7 +583,7 @@ export function App() {
       }
     });
 
-    return () => { offCloseTab(); offRemoveProject(); offWorktreeFinishCompleted(); offNewTab(); offNewAgentTab(); offNewWebTab(); offOpenWebTab(); offProposeWorktreeCreate(); offProposeWorktreeFinish(); offConnectProject(); offAutoConnect(); offDisconnectProject(); offAddProject(); offUpdateProject(); offReorderProjects(); offToggleSplit(); offSwitchBranch(); };
+    return () => { offCloseTab(); offRemoveProject(); offWorktreeFinishCompleted(); offNewTab(); offNewAgentTab(); offNewWebTab(); offOpenAuthTerminal(); offOpenWebTab(); offProposeWorktreeCreate(); offProposeWorktreeFinish(); offConnectProject(); offAutoConnect(); offDisconnectProject(); offAddProject(); offUpdateProject(); offReorderProjects(); offToggleSplit(); offSwitchBranch(); };
   }, []);
 
   useEffect(() => {
