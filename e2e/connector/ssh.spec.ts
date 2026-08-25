@@ -19,6 +19,16 @@ test('SSH password auth establishes ControlMaster and runs commands', async ({ s
     async () => await readActiveTerminalText(page),
     { timeout: 10_000 },
   ).toContain('__SSH_E2E_TEST__');
+
+  const url = 'https://ssh.example.com/oauth?state=exact-ssh-state';
+  await page.keyboard.type(`"$BROWSER" '${url}'\n`);
+  const popup = page.locator('.external-url-intent-overlay');
+  await expect(popup).toBeVisible({ timeout: 10_000 });
+  await expect(popup.locator('.external-url-intent-url')).toHaveText(url);
+  await expect(popup.locator('.external-url-intent-source')).toContainText('Requested by:');
+  await page.keyboard.press('Escape');
+  await expect(popup).not.toBeVisible();
+  await expect.poll(async () => readActiveTerminalText(page)).not.toContain('6973;external-url;1;');
 });
 
 test('SSH ControlMaster multiplexes second session without re-auth', async ({ shelfApp: { page } }) => {

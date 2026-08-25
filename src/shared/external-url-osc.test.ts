@@ -73,4 +73,14 @@ describe('ExternalUrlOscParser', () => {
     const title = '\x1b]0;terminal title\x07prompt';
     expect(parser.push(title)).toEqual({ visible: title, urls: [], anomalies: [] });
   });
+
+  it('reports an unterminated Shelf frame at stream end but flushes a partial unrelated prefix', () => {
+    const parser = new ExternalUrlOscParser();
+    parser.push(`${EXTERNAL_URL_OSC_PREFIX}AAAA`);
+    expect(parser.finish()).toEqual({ visible: '', urls: [], anomalies: ['unterminated-frame'] });
+
+    const other = new ExternalUrlOscParser();
+    other.push('text\x1b]69');
+    expect(other.finish()).toEqual({ visible: '\x1b]69', urls: [], anomalies: [] });
+  });
 });

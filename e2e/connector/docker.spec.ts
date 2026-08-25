@@ -18,6 +18,16 @@ test('Docker exec spawns terminal and runs commands', async ({ shelfApp: { page 
     async () => await readActiveTerminalText(page),
     { timeout: 10_000 },
   ).toContain('__DOCKER_E2E__');
+
+  const url = 'https://docker.example.com/oauth?state=exact-docker-state';
+  await page.keyboard.type(`"$BROWSER" '${url}'\n`);
+  const popup = page.locator('.external-url-intent-overlay');
+  await expect(popup).toBeVisible({ timeout: 10_000 });
+  await expect(popup.locator('.external-url-intent-url')).toHaveText(url);
+  await expect(popup.locator('.external-url-intent-source')).toContainText('Requested by:');
+  await page.keyboard.press('Escape');
+  await expect(popup).not.toBeVisible();
+  await expect.poll(async () => readActiveTerminalText(page)).not.toContain('6973;external-url;1;');
 });
 
 test('uploadFile streams a file into the container via docker exec', async ({ shelfApp: { page } }) => {

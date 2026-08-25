@@ -25,6 +25,7 @@ import { primeShellEnv } from './connector/shell-env';
 import { disposeProcessMemory, initProcessMemory } from './process-memory-manager';
 import { requestExternalUrlIntent } from './external-url-intent';
 import { createExternalWindowOpenHandler, handleExternalWillNavigate } from './external-navigation';
+import { formatTabLogId } from '@shared/tab-id';
 
 applyUserDataIsolation();
 
@@ -200,7 +201,30 @@ app.whenReady().then(async () => {
   setWritePtyFn(writePty);
   // Feed PTY output/lifecycle into PM scrollback + tab-watcher (P1-1: the
   // dependency now points pm→infra via this injection, not pty-manager→pm).
-  setPtyObserver({ onData: handlePtyData, onRemove: handlePtyRemove, onClear: handlePtyClear });
+  setPtyObserver({
+    onData: handlePtyData,
+    onRemove: handlePtyRemove,
+    onClear: handlePtyClear,
+    onExternalUrl: (projectId, tabId, url) => {
+      void requestExternalUrlIntent({
+        url,
+        reason: 'Open a link requested by a terminal command',
+        source: { kind: 'project-tab', projectId, tabId },
+      }).catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : String(error);
+        log.error(
+          'external-url-intent',
+          `terminal request rejected project=${projectId} tab=${formatTabLogId(tabId)}: ${message}`,
+        );
+      });
+    },
+    onProtocolAnomaly: (projectId, tabId, anomaly) => {
+      log.error(
+        'external-url-intent',
+        `terminal protocol anomaly project=${projectId} tab=${formatTabLogId(tabId)} kind=${anomaly}`,
+      );
+    },
+  });
   setStateChangeCallback((tabId, tabName, projectName, oldState, newState) => {
     const win = getMainWindow();
     const pmProvider = getSettings().pmProvider;

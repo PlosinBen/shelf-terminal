@@ -1,4 +1,4 @@
-import { expect, test } from './helpers';
+import { expect, readActiveTerminalText, test } from './helpers';
 import type { ElectronApplication } from '@playwright/test';
 
 type IntentInput = {
@@ -98,4 +98,16 @@ test('external URL popup defaults to copy and supports cancel/open decisions', a
   await expect(popup.locator('.external-url-intent-url')).toHaveText(rendererLink);
   await popup.locator('.agent-perm-option', { hasText: 'Cancel' }).click();
   await expect(popup).not.toBeVisible();
+
+  const terminalUrl = 'https://terminal.example.com/oauth?state=exact-terminal-state';
+  await page.locator('.terminal-container:visible .xterm-screen').click({ force: true });
+  await page.keyboard.type(`"$BROWSER" '${terminalUrl}'\n`);
+
+  await expect(popup).toBeVisible();
+  await expect(popup.locator('.external-url-intent-source')).toContainText('Requested by: shelf-test-a /');
+  await expect(popup.locator('.external-url-intent-url')).toHaveText(terminalUrl);
+  await page.keyboard.press('Enter');
+  await expect(popup).not.toBeVisible();
+  expect(await app.evaluate(({ clipboard }) => clipboard.readText())).toBe(terminalUrl);
+  await expect.poll(async () => readActiveTerminalText(page)).not.toContain('6973;external-url;1;');
 });

@@ -24,7 +24,8 @@ vi.mock('electron', () => ({ Notification: h.Notification, BrowserWindow: class 
 vi.mock('./connector', () => ({ createConnector: () => ({ createShell: () => h.shell }) }));
 vi.mock('./file-transfer', () => ({ maybeScheduleCleanup: () => {} }));
 
-import { spawnPty, writePty, setMuted } from './pty-manager';
+import { spawnPty, writePty, setMuted, setPtyObserver } from './pty-manager';
+import { encodeExternalUrlOscFrame, EXTERNAL_URL_OSC_PREFIX } from '@shared/external-url-osc';
 
 const conn = {} as any;
 function makeWin(focused = false) {
@@ -47,6 +48,7 @@ beforeEach(() => {
   h.dataCbs.length = 0;
   h.show.mockClear();
   h.Notification.mockClear();
+  setPtyObserver({});
 });
 afterEach(() => {
   vi.useRealTimers();
@@ -90,5 +92,44 @@ describe('pty-manager idle notification (terminal-pty#4)', () => {
     writePty('tab-short', 'ls\n');
     await vi.advanceTimersByTimeAsync(3000); // idle fires after ~0s of activity
     expect(h.show).not.toHaveBeenCalled();
+  });
+});
+
+describe('pty-manager external URL frames', () => {
+  it('strips a frame from observer/renderer output and preserves PTY source identity', () => {
+    const onData = vi.fn();
+    const onExternalUrl = vi.fn();
+    const onProtocolAnomaly = vi.fn();
+    const win = makeWin(false);
+    setPtyObserver({ onData, onExternalUrl, onProtocolAnomaly });
+    spawnPty('project-1', 'tab-1', '/cwd', conn, win);
+    const url = 'https://terminal.example/oauth?state=exact-private';
+
+    emit(`before${encodeExternalUrlOscFrame(url)}after`);
+
+    expect(onExternalUrl).toHaveBeenCalledWith('project-1', 'tab-1', url);
+    expect(onData).toHaveBeenCalledWith('tab-1', 'beforeafter');
+    expect(onProtocolAnomaly).not.toHaveBeenCalled();
+    expect(win.webContents.send).toHaveBeenCalledWith('pty:data', {
+      tabId: 'tab-1',
+      data: 'beforeafter',
+    });
+    expect(JSON.stringify(win.webContents.send.mock.calls)).not.toContain(EXTERNAL_URL_OSC_PREFIX);
+  });
+
+  it('strips malformed frames and reports a bounded anomaly without payload data', () => {
+    const onData = vi.fn();
+    const onExternalUrl = vi.fn();
+    const onProtocolAnomaly = vi.fn();
+    const win = makeWin(false);
+    setPtyObserver({ onData, onExternalUrl, onProtocolAnomaly });
+    spawnPty('project-1', 'tab-1', '/cwd', conn, win);
+
+    emit(`left${EXTERNAL_URL_OSC_PREFIX}private+payload\x07right`);
+
+    expect(onExternalUrl).not.toHaveBeenCalled();
+    expect(onProtocolAnomaly).toHaveBeenCalledWith('project-1', 'tab-1', 'invalid-payload');
+    expect(onData).toHaveBeenCalledWith('tab-1', 'leftright');
+    expect(JSON.stringify(onProtocolAnomaly.mock.calls)).not.toContain('private+payload');
   });
 });

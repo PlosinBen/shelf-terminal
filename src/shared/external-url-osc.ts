@@ -8,7 +8,7 @@ export const EXTERNAL_URL_OSC_MAX_FRAME = EXTERNAL_URL_OSC_PREFIX.length
   + EXTERNAL_URL_OSC_MAX_PAYLOAD
   + EXTERNAL_URL_OSC_ST.length;
 
-export type ExternalUrlOscAnomaly = 'invalid-payload' | 'frame-too-long';
+export type ExternalUrlOscAnomaly = 'invalid-payload' | 'frame-too-long' | 'unterminated-frame';
 
 export interface ExternalUrlOscParseResult {
   visible: string;
@@ -61,6 +61,16 @@ function terminatorAt(value: string): { index: number; length: number } | null {
 
 export class ExternalUrlOscParser {
   private pending = '';
+
+  finish(): ExternalUrlOscParseResult {
+    const pending = this.pending;
+    this.pending = '';
+    if (!pending) return { visible: '', urls: [], anomalies: [] };
+    if (pending.startsWith(EXTERNAL_URL_OSC_PREFIX)) {
+      return { visible: '', urls: [], anomalies: ['unterminated-frame'] };
+    }
+    return { visible: pending, urls: [], anomalies: [] };
+  }
 
   push(data: string): ExternalUrlOscParseResult {
     let input = this.pending + data;

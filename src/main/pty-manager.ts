@@ -4,6 +4,11 @@ import type { Connection } from '@shared/types';
 import type { Shell } from './connector/types';
 import { createConnector } from './connector';
 import { log } from '@shared/logger';
+import {
+  ExternalUrlOscParser,
+  type ExternalUrlOscAnomaly,
+  type ExternalUrlOscParseResult,
+} from '@shared/external-url-osc';
 import { maybeScheduleCleanup } from './file-transfer';
 
 /**
@@ -16,8 +21,12 @@ import { maybeScheduleCleanup } from './file-transfer';
  * never the reverse. Same injection pattern as pm's setWritePtyFn.
  */
 export interface PtyObserver {
-  /** Every PTY output chunk, before it's forwarded to the renderer. */
+  /** Every visible PTY output chunk, before it's forwarded to the renderer. */
   onData?(tabId: string, data: string): void;
+  /** A validated external URL frame with its immutable PTY source identity. */
+  onExternalUrl?(projectId: string, tabId: string, url: string): void;
+  /** A bounded protocol error that never includes the frame payload. */
+  onProtocolAnomaly?(projectId: string, tabId: string, anomaly: ExternalUrlOscAnomaly): void;
   /** A single tab was killed (killPty). */
   onRemove?(tabId: string): void;
   /** All tabs were killed (killAllPtys). */
@@ -63,6 +72,7 @@ export function spawnPty(
 ): void {
   const connector = createConnector(connection);
   const shell = connector.createShell(cwd, env, requiredEnv);
+  const externalUrlParser = new ExternalUrlOscParser();
 
   shells.set(tabId, shell);
 
@@ -122,7 +132,8 @@ export function spawnPty(
     setTimeout(send, 10000);
   }
 
-  shell.onData((data) => {
+  const forwardVisibleData = (data: string) => {
+    if (!data) return;
     observer.onData?.(tabId, data);
 
     if (!win.isDestroyed()) {
@@ -150,9 +161,24 @@ export function spawnPty(
       state!.idleTimer = null;
       state!.userInput = false;
     }, IDLE_THRESHOLD_MS);
+  };
+
+  const handleParsedData = (result: ExternalUrlOscParseResult) => {
+    for (const anomaly of result.anomalies) {
+      observer.onProtocolAnomaly?.(projectId, tabId, anomaly);
+    }
+    for (const url of result.urls) {
+      observer.onExternalUrl?.(projectId, tabId, url);
+    }
+    forwardVisibleData(result.visible);
+  };
+
+  shell.onData((data) => {
+    handleParsedData(externalUrlParser.push(data));
   });
 
   shell.onExit((exitCode) => {
+    handleParsedData(externalUrlParser.finish());
     log.info('pty', `exit: tabId=${tabId} exitCode=${exitCode}`);
     clearActivity(tabId);
     shells.delete(tabId);
