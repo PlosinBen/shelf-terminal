@@ -7,6 +7,7 @@ import { PERMISSION_CONTROL_STRATEGIES } from '@shared/permission-controls';
 import { mdTable } from '../md-table';
 import { callMain } from '../../app-tool-client';
 import { FAKE_TEST_ENV } from './test-env';
+import type { AgentPrefs } from '@shared/types';
 import type {
   OutgoingMessage,
   PickerResolvePayload,
@@ -193,6 +194,8 @@ export function createFakeBackend(_representedProvider: AgentProvider = FAKE_PRO
   // sdk-managed auth scenario remains logged out across Check again so E2E can
   // prove the pane is not dismissed on a failed manual-login verification.
   let sdkManagedAuthRequired = false;
+  let currentModel = 'fake-model';
+  let currentEffort = 'medium';
   let nativeMode = 'agent';
   let nativePermission = 'off';
   // Test hook: the `reloadfail` scenario arms this so the NEXT reloadSkills
@@ -206,7 +209,10 @@ export function createFakeBackend(_representedProvider: AgentProvider = FAKE_PRO
 
   function nativePermissionCapabilities(): ProviderCapabilities {
     return {
-      models: [{ value: 'fake-model', displayName: 'fake-model' }],
+      models: [
+        { value: 'fake-model', displayName: 'fake-model' },
+        { value: 'fake-model-pro', displayName: 'fake-model-pro' },
+      ],
       permissionModes: [],
       permissionControl: {
         strategy: PERMISSION_CONTROL_STRATEGIES.NATIVE,
@@ -228,8 +234,14 @@ export function createFakeBackend(_representedProvider: AgentProvider = FAKE_PRO
           ],
         },
       },
-      effortLevels: [],
+      effortLevels: [
+        { value: 'low', displayName: 'low' },
+        { value: 'medium', displayName: 'medium' },
+        { value: 'high', displayName: 'high' },
+      ],
       slashCommands: [],
+      currentModel,
+      currentEffort,
     };
   }
 
@@ -646,7 +658,9 @@ export function createFakeBackend(_representedProvider: AgentProvider = FAKE_PRO
         const { key, value } = input.configEdit;
         send({ type: 'status', state: 'streaming' });
         if (process.env[FAKE_TEST_ENV.NATIVE_PERMISSIONS] === '1') {
-          if (key === 'nativeMode') nativeMode = value;
+          if (key === 'model') currentModel = value;
+          else if (key === 'effort') currentEffort = value;
+          else if (key === 'nativeMode') nativeMode = value;
           else if (key === 'nativePermission') nativePermission = value;
           send({ type: 'capabilities', ...nativePermissionCapabilities() });
         }
@@ -738,7 +752,12 @@ export function createFakeBackend(_representedProvider: AgentProvider = FAKE_PRO
       return { reloaded: true, ok: true };
     },
 
-    async gatherCapabilities(): Promise<ProviderCapabilities> {
+    async gatherCapabilities(
+      _cwd: string,
+      _sessionId?: string,
+      _customModels?: unknown,
+      intent?: AgentPrefs,
+    ): Promise<ProviderCapabilities> {
       // Test hook: a spec launches with SHELF_TEST_CAPS_FAIL=1 to drive the
       // init-failed path — the caps RPC throws → agent-server replies with an
       // `error` payload → remote.ts rejects → startSession marks init 'failed'.
@@ -757,7 +776,13 @@ export function createFakeBackend(_representedProvider: AgentProvider = FAKE_PRO
       // 'ready'. Same scoping as CAPS_FAIL (that spec's own app instance).
       const capsDelay = Number(process.env[FAKE_TEST_ENV.CAPS_DELAY]);
       if (Number.isFinite(capsDelay) && capsDelay > 0) await sleep(capsDelay);
-      if (process.env[FAKE_TEST_ENV.NATIVE_PERMISSIONS] === '1') return nativePermissionCapabilities();
+      if (process.env[FAKE_TEST_ENV.NATIVE_PERMISSIONS] === '1') {
+        if (intent?.model) currentModel = intent.model;
+        if (intent?.effort) currentEffort = intent.effort;
+        if (intent?.nativeMode) nativeMode = intent.nativeMode;
+        if (intent?.nativePermission) nativePermission = intent.nativePermission;
+        return nativePermissionCapabilities();
+      }
       return {
         models: reportAuthenticatedCapabilities
           ? [{ value: 'fake-model-after-auth', displayName: 'fake-model-after-auth' }]

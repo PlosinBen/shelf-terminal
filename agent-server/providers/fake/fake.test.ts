@@ -315,6 +315,30 @@ describe('createFakeBackend — scenarios', () => {
     expect(caps.permissionModes[0].value).toBe('default');
   });
 
+  it('hydrates native test capabilities from saved initialization intent', async () => {
+    process.env[FAKE_TEST_ENV.NATIVE_PERMISSIONS] = '1';
+    try {
+      const b = createFakeBackend();
+      const caps = await b.gatherCapabilities!(
+        '/tmp', undefined, undefined,
+        { model: 'fake-model-pro', effort: 'high', nativeMode: 'plan', nativePermission: 'on' },
+      );
+
+      expect(caps).toMatchObject({
+        currentModel: 'fake-model-pro',
+        currentEffort: 'high',
+        permissionControl: {
+          strategy: 'native',
+          mode: { currentValue: 'plan' },
+          permission: { currentValue: 'on' },
+        },
+      });
+      b.dispose();
+    } finally {
+      delete process.env[FAKE_TEST_ENV.NATIVE_PERMISSIONS];
+    }
+  });
+
   it('interactive login stays pending until cancelled by default', () => {
     const { send, msgs } = collect();
     const b = createFakeBackend();

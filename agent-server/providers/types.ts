@@ -362,6 +362,9 @@ export interface ProviderCapabilities {
   permissionControl: PermissionControlCapabilities;
   effortLevels: CycleOption[];
   slashCommands: { name: string; description: string }[];
+  currentModel?: string;
+  currentEffort?: string;
+  currentPermissionMode?: string;
   authMethod?: unknown;
   /**
    * Set true by a provider's gatherCapabilities when its tab-open auth probe

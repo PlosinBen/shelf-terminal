@@ -1,5 +1,7 @@
 import { test, expect, openAgentTab, readActiveTerminalText, sendAgentPrompt } from './helpers';
 import type { Page } from '@playwright/test';
+import fs from 'node:fs';
+import path from 'node:path';
 
 /**
  * Agent rendering flows beyond picker — exercises every other major wire
@@ -63,6 +65,53 @@ test.describe('agent flows via fake provider', () => {
       await page.locator('.agent-perm-option:visible', { hasText: 'On' }).click();
       await expect(permission).toHaveText('Allow all: On', { timeout: 5_000 });
       await expect(mode).toHaveText('Mode: Autopilot');
+    });
+
+    test('retains confirmed model, effort, mode, and permission after disconnect and reconnect', async ({ shelfApp: { page, userDataDir } }) => {
+      await setupProject(page);
+      await openAgentTab(page);
+
+      const model = page.locator('.agent-status-seg.agent-status-interactive', { hasText: 'fake-model' });
+      const effort = page.locator('.agent-status-seg.agent-status-interactive', { hasText: 'effort:' });
+      const mode = page.locator('[data-config-key="nativeMode"]:visible');
+      const permission = page.locator('[data-config-key="nativePermission"]:visible');
+
+      await model.click();
+      await page.locator('.agent-perm-option:visible', { hasText: 'fake-model-pro' }).click();
+      await effort.click();
+      await page.locator('.agent-perm-option:visible', { hasText: 'High' }).click();
+      await mode.click();
+      await page.locator('.agent-perm-option:visible', { hasText: 'Plan' }).click();
+      await permission.click();
+      await page.locator('.agent-perm-option:visible', { hasText: 'On' }).click();
+
+      await expect(model).toHaveText('fake-model-pro');
+      await expect(effort).toHaveText('effort: high');
+      await expect(mode).toHaveText('Mode: Plan');
+      await expect(permission).toHaveText('Allow all: On');
+      await expect.poll(() => {
+        const document = JSON.parse(fs.readFileSync(path.join(userDataDir, 'projects.json'), 'utf8'));
+        return document.projects[0].agentPrefs.claude;
+      }).toEqual({
+        model: 'fake-model-pro',
+        effort: 'high',
+        nativeMode: 'plan',
+        nativePermission: 'on',
+      });
+
+      const item = page.locator('.sidebar-item').first();
+      await item.click({ button: 'right' });
+      await page.locator('.context-menu-item', { hasText: 'Disconnect' }).click();
+      const prompt = page.locator('.connect-prompt');
+      await expect(prompt).toBeVisible({ timeout: 5_000 });
+      await prompt.click();
+      await expect(page.locator('.tab-bar .tab')).toHaveCount(1, { timeout: 5_000 });
+      await openAgentTab(page);
+
+      await expect(page.locator('.agent-status-seg.agent-status-interactive', { hasText: 'fake-model-pro' })).toBeVisible();
+      await expect(page.locator('.agent-status-seg.agent-status-interactive', { hasText: 'effort: high' })).toBeVisible();
+      await expect(page.locator('[data-config-key="nativeMode"]:visible')).toHaveText('Mode: Plan');
+      await expect(page.locator('[data-config-key="nativePermission"]:visible')).toHaveText('Allow all: On');
     });
   });
 
