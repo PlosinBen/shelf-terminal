@@ -32,8 +32,8 @@ export class WSLConnector implements Connector {
     });
   }
 
-  createShell(cwd: string, env?: Record<string, string>): Shell {
-    const args = ['-d', this.distro, '--', 'sh', '-c', `${buildEnvExportPrefix(env ?? {})}cd ${shellEscape(cwd)} && exec $SHELL`];
+  createShell(cwd: string, env?: Record<string, string>, requiredEnv?: Record<string, string>): Shell {
+    const args = ['-d', this.distro, '--', 'sh', '-c', `${buildEnvExportPrefix(env ?? {}, requiredEnv ?? {})}cd ${shellEscape(cwd)} && exec $SHELL`];
     log.info('connector', `wsl spawn: distro=${this.distro} cwd=${cwd}`);
     const p = pty.spawn('wsl.exe', args, {
       name: 'xterm-256color',

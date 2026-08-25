@@ -14,7 +14,7 @@ import {
 } from '../file-utils';
 
 export class LocalWin32Connector implements Connector {
-  createShell(cwd: string, env?: Record<string, string>): Shell {
+  createShell(cwd: string, env?: Record<string, string>, requiredEnv?: Record<string, string>): Shell {
     const resolvedCwd = fs.existsSync(cwd) ? cwd : os.homedir();
     log.info('connector', `local/win32 spawn: shell=powershell.exe cwd=${resolvedCwd}`);
     const p = pty.spawn('powershell.exe', [], {
@@ -22,7 +22,7 @@ export class LocalWin32Connector implements Connector {
       cols: 80,
       rows: 24,
       cwd: resolvedCwd,
-      env: applyEnvMap(process.env, env ?? {}),
+      env: applyEnvMap(process.env, env ?? {}, requiredEnv ?? {}),
     });
     return wrapPty(p);
   }

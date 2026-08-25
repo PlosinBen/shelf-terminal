@@ -15,7 +15,7 @@ import {
 } from '../file-utils';
 
 export class LocalUnixConnector implements Connector {
-  createShell(cwd: string, env?: Record<string, string>): Shell {
+  createShell(cwd: string, env?: Record<string, string>, requiredEnv?: Record<string, string>): Shell {
     const resolvedCwd = fs.existsSync(cwd) ? cwd : os.homedir();
     const shell = resolveShell();
     log.info('connector', `local/unix spawn: shell=${shell} cwd=${resolvedCwd}`);
@@ -31,7 +31,7 @@ export class LocalUnixConnector implements Connector {
       cols: 80,
       rows: 24,
       cwd: resolvedCwd,
-      env: { ...applyEnvMap(getShellEnv(), env ?? {}), HISTFILE: '/dev/null' },
+      env: { ...applyEnvMap(getShellEnv(), env ?? {}, requiredEnv ?? {}), HISTFILE: '/dev/null' },
     });
     return wrapPty(p);
   }

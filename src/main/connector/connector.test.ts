@@ -12,6 +12,11 @@ vi.mock('node-pty', () => ({
     kill: () => {},
   })),
 }));
+vi.mock('../ssh-control', () => ({
+  getControlPath: () => '/tmp/shelf-test-control',
+  checkConnection: () => true,
+  getKnownHostsPath: () => '/tmp/shelf-test-known-hosts',
+}));
 import {
   makePrefix, parseUploadPrefix, sanitizeFilename, shellSingleQuote,
   assertSafeCwd, buildPaths, buildGitignoreGuardCmd, normalizeCwd,
@@ -141,6 +146,31 @@ describe('LocalUnixConnector createShell', () => {
     expect(env.GH_TOKEN).toBe('abc');
     expect(env.HISTFILE).toBe('/dev/null');
   });
+
+  it('applies the required BROWSER after project env', async () => {
+    if (process.platform === 'win32') return;
+    const pty = await import('node-pty');
+    const { LocalUnixConnector } = await import('./local/unix');
+    new LocalUnixConnector().createShell(
+      '/tmp',
+      { BROWSER: '/tmp/project-browser' },
+      { BROWSER: '/opt/shelf/shelf-browser' },
+    );
+    const env = (pty.spawn as any).mock.calls[0][2].env as Record<string, string>;
+    expect(env.BROWSER).toBe('/opt/shelf/shelf-browser');
+  });
+
+  it('applies the required BROWSER to a local Windows shell environment', async () => {
+    const pty = await import('node-pty');
+    const { LocalWin32Connector } = await import('./local/win32');
+    new LocalWin32Connector().createShell(
+      '/tmp',
+      { BROWSER: 'project-browser.cmd' },
+      { BROWSER: 'C:\\Shelf\\shelf-browser.cmd' },
+    );
+    const env = (pty.spawn as any).mock.calls[0][2].env as Record<string, string>;
+    expect(env.BROWSER).toBe('C:\\Shelf\\shelf-browser.cmd');
+  });
 });
 
 // ── Project-env injection into remote createShell commands ──
@@ -175,6 +205,40 @@ describe('remote connector createShell env injection', () => {
     new WSLConnector('Ubuntu').createShell('/work', { FOO: 'bar' });
     const args = (pty.spawn as any).mock.calls[0][1] as string[];
     expect(args[args.length - 1]).toContain("export FOO='bar'; ");
+  });
+
+  it('ssh emits required BROWSER after project exports', async () => {
+    const pty = await import('node-pty');
+    const { SSHUnixConnector } = await import('./ssh/unix');
+    new SSHUnixConnector('example.com', 22, 'tester').createShell(
+      '/work',
+      { BROWSER: '/tmp/project-browser', FOO: 'bar' },
+      { BROWSER: '/home/tester/.shelf/external-url/1/shelf-browser' },
+    );
+    const args = (pty.spawn as any).mock.calls[0][1] as string[];
+    const command = args[args.length - 1];
+    expect(command).not.toContain('/tmp/project-browser');
+    expect(command).toContain(
+      "export FOO='bar'; export BROWSER='/home/tester/.shelf/external-url/1/shelf-browser'; ",
+    );
+  });
+
+  it.each([
+    ['docker', async () => (await import('./docker')).DockerConnector, ['container']],
+    ['wsl', async () => (await import('./wsl')).WSLConnector, ['Ubuntu']],
+  ] as const)('%s emits required BROWSER after project exports', async (_name, load, args) => {
+    const pty = await import('node-pty');
+    const ConnectorClass = await load();
+    const connector = new ConnectorClass(...args as [string]);
+    connector.createShell(
+      '/work',
+      { BROWSER: '/tmp/project-browser', FOO: 'bar' },
+      { BROWSER: "/home/tester's launcher" },
+    );
+    const spawnArgs = (pty.spawn as any).mock.calls[0][1] as string[];
+    const command = spawnArgs[spawnArgs.length - 1];
+    expect(command).not.toContain('/tmp/project-browser');
+    expect(command).toContain("export FOO='bar'; export BROWSER='/home/tester'\\''s launcher'; ");
   });
 });
 

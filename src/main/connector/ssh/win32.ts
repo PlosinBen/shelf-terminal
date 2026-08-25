@@ -45,10 +45,10 @@ export class SSHWin32Connector implements Connector {
     ];
   }
 
-  createShell(cwd: string, env?: Record<string, string>): Shell {
+  createShell(cwd: string, env?: Record<string, string>, requiredEnv?: Record<string, string>): Shell {
     const args = this.sshArgs([
       '-t',
-      `${buildEnvExportPrefix(env ?? {})}cd ${shellEscape(cwd)} && exec $SHELL -l`,
+      `${buildEnvExportPrefix(env ?? {}, requiredEnv ?? {})}cd ${shellEscape(cwd)} && exec $SHELL -l`,
     ]);
     log.info('connector', `ssh/win32 spawn: ${this.user}@${this.host}:${this.port} cwd=${cwd}`);
     const p = pty.spawn('ssh', args, {

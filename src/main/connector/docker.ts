@@ -20,12 +20,12 @@ export class DockerConnector implements Connector {
     return ['exec', this.container, 'sh', '-c', cmd];
   }
 
-  createShell(cwd: string, env?: Record<string, string>): Shell {
+  createShell(cwd: string, env?: Record<string, string>, requiredEnv?: Record<string, string>): Shell {
     const bin = 'docker';
     // Inject project env INSIDE the container: the pty `env` below only reaches
     // the local `docker` client, not the container shell — so prepend an
     // `export …` prefix to the command the container runs.
-    const envPrefix = buildEnvExportPrefix(env ?? {});
+    const envPrefix = buildEnvExportPrefix(env ?? {}, requiredEnv ?? {});
     const args = ['exec', '-it', this.container, 'sh', '-c', `${envPrefix}cd ${shellEscape(cwd)} && exec \${SHELL:-sh}`];
     log.info('connector', `docker spawn: container=${this.container} cwd=${cwd} bin=${bin}`);
     const p = pty.spawn(bin, args, {

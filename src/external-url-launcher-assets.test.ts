@@ -22,4 +22,17 @@ describe('external URL launcher assets', () => {
     expect(script).toContain('[Convert]::ToBase64String');
     expect(script).toContain("'CONOUT$'");
   });
+
+  it('provides a Windows command entrypoint for BROWSER and packages the launcher directory', () => {
+    const command = asset('shelf-browser.cmd');
+    expect(command).toContain('powershell.exe');
+    expect(command).toContain('shelf-browser.ps1');
+    expect(command).toContain('"%~1"');
+
+    const pkg = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'package.json'), 'utf8'));
+    expect(pkg.build.extraResources).toContainEqual({
+      from: 'resources/external-url-launcher',
+      to: 'external-url-launcher',
+    });
+  });
 });

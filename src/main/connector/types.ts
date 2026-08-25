@@ -25,9 +25,15 @@ export interface Connector {
    * + secret) to inject: local connectors merge it into the pty's `env` (PATH
    * merges); remote connectors (docker/ssh/wsl) prepend an `export …` prefix to
    * the launched command, since the pty `env` only reaches the local ssh/docker
-   * client, not the remote shell. Reserved keys are dropped. Absent → no injection.
+   * client, not the remote shell. Reserved project keys are dropped;
+   * `requiredEnv` is applied last for Shelf-owned process boundaries. Absent →
+   * no injection.
    */
-  createShell(cwd: string, env?: Record<string, string>): Shell;
+  createShell(
+    cwd: string,
+    env?: Record<string, string>,
+    requiredEnv?: Record<string, string>,
+  ): Shell;
 
   // ── Connection lifecycle ──
   isConnected(): Promise<boolean>;

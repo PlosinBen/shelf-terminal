@@ -52,6 +52,10 @@
         "to": "agent-server"
       },
       {
+        "from": "resources/external-url-launcher",
+        "to": "external-url-launcher"
+      },
+      {
         "from": "node_modules/@github",
         "to": "copilot-cli/@github",
         "filter": [
