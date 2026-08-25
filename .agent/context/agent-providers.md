@@ -527,11 +527,11 @@ Tool call 的 display metadata 也是 session-scoped carry，以 `toolCallId` �
 
 Copilot 選 `native`：ACP session modes 原值送 `session/set_mode`；ACP `allow_all` config option 原值送 `session/set_config_option`。兩者是獨立狀態，`autopilot` 不再映成 Shelf `bypassPermissions`，permission callback 也不自行 auto-approve。`/allow-all`、`/yolo`、`/reset-allowed-tools` 仍是 Copilot CLI 的原生 slash 語意，Shelf 不攔截或改寫。
 
-**Truth / lifecycle：** UI 顯示以 `session/update` 與 config response 的完整 options 為準；bare acknowledgement 不做 optimistic mutation。Copilot 的 mode id 是 ACP well-known URI（例如 `https://agentclientprotocol.com/protocol/session-modes#autopilot`），而且同一份 mode state 同時出現在 `SessionModeState` 與 `category=mode` config option；`set_mode` 後目前會用完整 `config_option_update` 回報，因此 backend 必須把該 snapshot 的 `currentValue` reconcile 回 session mode，再發布 capabilities。只等 `current_mode_update` 或用 `autopilot` 短字串比較，都會讓 status bar／Autopilot completion gate 留在錯誤狀態。沒有 advertise 的 control 就省略，advertise 後 shape/value 不合法則 fail loud。native control 不讀寫 `AgentPrefs.permissionMode`，也不 migration/delete 舊值。恢復既有 Copilot session 時，必須先用 agent advertise 的 restore method 取得 mode/config state，再產生 capabilities；不可為了 discovery 先建立 fresh ACP session。
+**Truth / lifecycle：** UI 顯示以 `session/update` 與 config response 的完整 options 為準；bare acknowledgement 不做 optimistic mutation。Copilot 的 mode id 是 ACP well-known URI（例如 `https://agentclientprotocol.com/protocol/session-modes#autopilot`），而且同一份 mode state 同時出現在 `SessionModeState` 與 `category=mode` config option；`set_mode` 後目前會用完整 `config_option_update` 回報，因此 backend 必須把該 snapshot 的 `currentValue` reconcile 回 session mode，再發布 capabilities。只等 `current_mode_update` 或用 `autopilot` 短字串比較，都會讓 status bar／Autopilot completion gate 留在錯誤狀態。沒有 advertise 的 control 就省略，advertise 後 shape/value 不合法則 fail loud。native control 不讀寫 `AgentPrefs.permissionMode`，也不 migration/delete 舊值；confirmed mode/permission 分別使用 `nativeMode` / `nativePermission` 持久化並在 warm-up 重套。恢復既有 Copilot session 時，必須先用 agent advertise 的 restore method 取得 mode/config state，再產生 capabilities；不可為了 discovery 先建立 fresh ACP session。
 
 **Reason：** 保留 Shelf 統一詞彙雖有一致 UX，但需要維護 mode mapping、雙向同步、slash side effect 與 provider-specific error recovery。原生 CLI 使用者已熟悉其語意，也能直接查到上游文件；讓 SDK/CLI 保持 authority 可縮小失同步與漏接更新的風險。strategy seam 讓本次只改 Copilot，Claude/Codex 不受影響。
 
-**Do not change casually because：** 不要用 provider-name branch 選 UI，也不要把 native control 持久化成 canonical permission pref。不要把所有 ACP config option 泛化成 settings panel；若別的 provider 要 native strategy，必須明確描述同一個窄 surface。不要把 mode 當 allow-all，或重新加入 permission handler short-circuit。
+**Do not change casually because：** 不要用 provider-name branch 選 UI，也不要把 native control 持久化成 canonical permission pref。Native 專用 preference 欄位不改變 provider snapshot 的 runtime authority。不要把所有 ACP config option 泛化成 settings panel；若別的 provider 要 native strategy，必須明確描述同一個窄 surface。不要把 mode 當 allow-all，或重新加入 permission handler short-circuit。
 
 **Related：** `agent-config-flow#9`、`contracts/agent-routing`、`contracts/agent-wire-protocol`、`src/shared/permission-controls.ts`、`agent-server/providers/copilot/index.ts`、`agent-server/providers/acp/client.ts`。
 
@@ -553,7 +553,7 @@ Fresh capabilities probe 若建立 `session/new`，立刻透過 session-scoped `
 
 **Root cause：** Shelf 的 context pointer 可能比 Copilot CLI 的 session storage 活得久。Capabilities probe 會在顯示輸入框前 restore provider session；原本任何 restore failure 都 fail-loud，連 ACP 明確回報 session 不存在也不例外，所以 stale pointer 會永久卡住該 Shelf session。
 
-**Fix / note：** 只有 ACP `RequestError.code` 等於官方 SDK `RequestError.resourceNotFound().code`（目前為 `-32002`），且 message 明確包含同一個 session ID 的 `Resource not found: Session <id> not found` 時才恢復：先 emit `lastSdkSessionId:null`，再走 `session/new`；成功後保存新 ID，並顯示一次 system notice 說明舊 conversation context 無法恢復。其他 restore failure（auth、transport、protocol、timeout 或不同 ID）維持 fail-loud，不得 broad-catch 後靜默開新 session。Regression mock 也必須由同一個 SDK helper 取得 code，不可另外手寫數字，否則會讓測試通過但正式 transport 無法觸發 fallback。
+**Fix / note：** 只有 ACP `RequestError.code` 等於官方 SDK `RequestError.resourceNotFound().code`（目前為 `-32002`），且 message 明確包含同一個 session ID 的 `Resource not found: Session <id> not found` 時才恢復：先 emit `lastSdkSessionId:null`，再走 `session/new`；成功後保存新 ID，並顯示一次 system notice 說明舊 conversation context 無法恢復。Final session 建立後仍須依 `agent-providers#51` 重套 project selections；replacement session 的 provider defaults 不是 durable preference。其他 restore failure（auth、transport、protocol、timeout 或不同 ID）維持 fail-loud，不得 broad-catch 後靜默開新 session。Regression mock 也必須由同一個 SDK helper 取得 code，不可另外手寫數字，否則會讓測試通過但正式 transport 無法觸發 fallback。
 
 **Related：** `agent-providers#38`（Codex 同類窄 recovery）、`agent-providers#46`、`agent-server/providers/copilot/index.ts`、`agent-server/context-store.ts`。
 
@@ -590,3 +590,15 @@ Fresh capabilities probe 若建立 `session/new`，立刻透過 session-scoped `
 **Do not change casually because：** `instructions[].command` 只供顯示，不能當作任意 command execution authority；只有明確的 `sdk-managed.loginCommand` 且使用者點擊 Log in 後才可啟動。handler 必須用來源 `tabId` 找 project，不可退回 current active project，否則 tab switch/race 會把登入跑在錯誤 host。terminal 建立失敗要在 AuthPane fail-visible 並記錄來源 tab id，不得 silent return。
 
 **Related：** `agent-providers#49`、`contracts/agent-wire-protocol`、`src/shared/types.ts`、`src/renderer/components/agent/AuthPane.tsx`、`src/renderer/App.tsx`、`src/renderer/store-projects.ts`。
+
+## agent-providers#51 — Copilot warm-up 在 final ACP session 重套並確認 saved selections  ·  [Decision]
+
+**Decision：** Copilot capabilities warm-up 將 project prefs 視為 initialization intent。它先 resume/load persisted ACP session；只有 `agent-providers#47` 的 exact missing-session error 才換成 new session。取得 final session 的 modes/config options 後，hydrate current model/effort，再完整驗證 saved model、effort、native mode、native permission，依序套用差異。Reconciliation 期間 provider update 不對外發布 capabilities；所有值確認後才回傳 final snapshot。
+
+**Confirmation：** Model、effort 與 native permission 以 `session/set_config_option` 回傳的完整 config snapshot 為權威。Native mode 在呼叫 `session/set_mode` 前先註冊 waiter，接受同 session 的 `current_mode_update` 或 mode-bearing `config_option_update`；值不符、session/connection teardown 或 bounded timeout 都 reject。Waiter 必須先註冊，因為 notification 可能早於 set-mode response。
+
+**Reason：** Copilot replacement session 會帶 provider defaults；若只修 session pointer，model/effort/native selections 仍會遺失。先確定 final session 再對帳，可讓 successful resume 與 missing-session replacement 遵守同一份 project-level selection contract。Suppress intermediate capabilities 則避免 renderer 把 temporary defaults 當成 confirmed state 寫回 project prefs。
+
+**Do not change casually because：** 不要在 `ensureSession` 前套 prefs、不要把 config acknowledgement 當 confirmation、不要遇到任一 warm-up failure仍回傳 partial capabilities。Fresh pre-session auth probe 可以回 `authRequired`；但 final session 已建立後的 validation/apply/confirmation failure 必須 fail initialization，否則會以 ready 狀態掩蓋設定遺失。
+
+**Related：** `agent-config-flow#10`、`agent-providers#45`、`agent-providers#46`、`agent-providers#47`、`contracts/agent-routing`、`architecture/agent-execution`。

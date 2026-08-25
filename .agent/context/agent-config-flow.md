@@ -87,7 +87,7 @@ InputZone parseSlashPrefix
           └─ 不認識 → fold_markdown errorMessage: "Unknown command: /cmd"
 ```
 
-### Prefs (`model` / `effort` / `permissionMode`) 的擴充行為
+### Prefs (`model` / `effort` / `permissionMode` / native selections) 的擴充行為
 
 走「**renderer 發起 → provider 執行 → 廣播 capabilities → renderer 落地**」：
 
@@ -96,7 +96,7 @@ InputZone parseSlashPrefix
 - Backend 拒絕的值不會被 broadcast → 不會 persist。**Disk 永遠是 backend 確認過的真相**
 
 **Provider 差異**：
-- Copilot（ACP）：model/effort 仍直接對 live ACP session 套用；permission UI 改走 provider-native mode + `allow_all`，不再參與 canonical pref flow（`agent-config-flow#9`）
+- Copilot（ACP）：model/effort 直接對 live ACP session 套用；permission UI 走 provider-native mode + `allow_all`。兩者不冒充 canonical `permissionMode`，但各自的 confirmed current value 會持久化，並在 session warm-up 重套（`agent-config-flow#9` / `agent-config-flow#10`）
 - Claude：per-call options 設計，slash handler 只更新 closure + broadcast（永遠成功；validation 推到下次 query SDK 收到時）
 
 ### 配套 invariants
@@ -228,10 +228,22 @@ model/effort/permission 三個入口（打字 `/model X`、picker、status-bar �
 Provider 以 capability strategy 選一條路：
 
 - `shelf`：沿用 `permissionModes` / `currentPermissionMode`、`permissionMode` config edit、per-message pref diff 與 confirmed-capability persistence。
-- `native`：capability 帶專用 mode/permission descriptors；renderer 送 `nativeMode` / `nativePermission` config edit。值不進 `AgentPrefs`，agent-server 不用舊 `permissionMode` seed、reapply 或 writeback。
+- `native`：capability 帶專用 mode/permission descriptors；renderer 送 `nativeMode` / `nativePermission` config edit。confirmed descriptor current values 分別寫入 `AgentPrefs.nativeMode` / `AgentPrefs.nativePermission`，warm-up 也只從這兩個欄位重套；舊 `permissionMode` 不參與 native flow。
 
-Native descriptor 是 session truth。ACP notification 可在沒有 active execution 時到達，因此 execution-less `capabilities` 必須走 session sink；收到 provider update 或完整 set-config response就用完整 snapshot 取代舊 state，不自行 merge 猜測。UI 顯示 provider option label/current value，只有 edit request 走既有 structured config-edit turn。
+持久化的是 project-level confirmed selection，不是 backend truth cache。Runtime 仍以 native descriptor 的 provider snapshot 為權威：ACP notification 可在沒有 active execution 時到達，因此 execution-less `capabilities` 必須走 session sink；收到 provider update 或完整 set-config response就用完整 snapshot 取代舊 state，不自行 merge 猜測。UI 顯示 provider option label/current value，只有 edit request 走既有 structured config-edit turn。只有 present、非空的 confirmed value 更新 preference；provider 未 advertise control 不代表刪除已存值。
 
-**Do not change casually because：** 不要同時 expose canonical 與 native permission controls；不要把缺少的 native control補成 Shelf default；不要把 native value 存進跨 session pref。Renderer 只判 strategy/descriptor，provider identity 與 ACP vocabulary 留在 backend。
+**Do not change casually because：** 不要同時 expose canonical 與 native permission controls；不要把缺少的 native control補成 Shelf default；不要讓 `permissionMode` 與 native 欄位互相 migration 或覆寫。Renderer 只判 strategy/descriptor，provider identity 與 ACP vocabulary 留在 backend。
 
-**Related：** `agent-providers#45`、`contracts/agent-routing`、`contracts/agent-wire-protocol`、`architecture/agent-execution`。
+**Related：** `agent-config-flow#10`、`agent-providers#45`、`contracts/agent-routing`、`contracts/agent-wire-protocol`、`architecture/agent-execution`。
+
+## agent-config-flow#10 — Warm-up 先確定 final session，再以 confirmed capabilities 原子對帳 project prefs  ·  [Decision]
+
+**Decision：** `AgentPrefs` 在 capabilities RPC 中是 desired initialization intent，不是已確認 runtime state。Provider 必須先完成 resume；若符合窄化的 missing-session recovery 才建立 replacement session。取得 final session 的 provider snapshot 後，先驗證完整 saved selection set，再依 provider 支援的順序 apply 差異，最後只發布一份 confirmed capabilities。Renderer 收到後沿既有 capability writeback 寫回 project prefs；main 保持被動 relay，不新增 `confirmed_config` 或第二個持久化責任人。
+
+**Reason：** Session pointer 與 project selection 是兩條生命週期。Resume 失敗改走 new session 只代表 provider conversation context 無法延續，不代表 model、effort 或 permission selections 應回到 provider defaults。若在 session 建立前套 prefs，或把 restore/new 的中間 capabilities 提早送出，replacement session 仍會遺失設定，renderer 也可能把暫時 defaults 回寫磁碟。
+
+**Failure boundary：** Warm-up 先驗證所有 saved values 都在 final snapshot advertise 的 options 中，再依 model → effort → native mode → native permission 套用。每一步都必須取得 authoritative confirmation；setter failure、confirmed mismatch、mode timeout、session teardown 或 connection teardown都 reject initialization，且不得發布中間 capabilities。一般 config edit 同樣只有成功 confirmation 才發布 capabilities；失敗情境本來就不應持久化，例如 set model failed。
+
+**Do not change casually because：** 不要把 project prefs 變成 session create 參數並假設 provider會沿用；不要在 missing-session fallback 前套用；不要讓中間 notification 穿過 reconciliation gate；也不要把責任擴張到 main。這些做法會重新混淆 desired intent、provider truth 與 durable confirmed selection。
+
+**Related：** `agent-config-flow#3`、`agent-config-flow#7`、`agent-config-flow#9`、`agent-providers#51`、`architecture/agent-execution`、`contracts/agent-routing`。

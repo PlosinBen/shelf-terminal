@@ -160,7 +160,8 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
   let sessionSend: SendFn | null = null;
 
   // Live session config cached from provider snapshots. Mode and permission
-  // remain provider-native and are never seeded from Shelf permission prefs.
+  // remain provider-native; warm-up seeds their dedicated saved selections,
+  // never the canonical Shelf permissionMode preference.
   let sessionModes: SessionModeState | undefined;
   let sessionConfigOptions: SessionConfigOption[] | undefined;
   let currentModel: string | undefined;

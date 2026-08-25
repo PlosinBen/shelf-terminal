@@ -38,6 +38,23 @@ provider execution                                              │
                                                         one linear timeline
 ```
 
+Session readiness also carries a confirmed-configuration loop:
+
+```text
+durable project selections
+    │ desired initialization intent
+    ▼
+restore provider session ── missing-context recovery ── create replacement session
+    │
+    ▼
+hydrate provider snapshot → reconcile saved selections → publish final capabilities
+                                                        │ confirmed values
+                                                        ▼
+                                               durable project selections
+```
+
+Session restore or replacement is completed before saved selections are applied. Capability publication stays covered during reconciliation, so the renderer sees one final authoritative snapshot rather than persisting intermediate provider defaults. A rejected or unconfirmed selection fails initialization and publishes no replacement capability snapshot.
+
 The client eager-sends each input and mirrors the backend's ordered queue snapshots. A queued item appears as a chip; when it becomes running, its optimistic user message is promoted into the timeline. The client does not infer provider boundaries or decide when another send may start.
 
 Session initialization restores provider context before capability discovery may create a replacement context. A restore operation may replay provider history; when the client already owns the persisted timeline, replay render content is hydration input rather than new timeline content, while restored configuration and command metadata still update session state. A newly created provider context becomes durable immediately, before the first execution can reuse it.
@@ -64,6 +81,7 @@ Plan/todo data is not timeline content. It is replace-semantics state on its own
 - **Every accepted send terminates its control reader.** Success, failure, cancellation, or queue removal must produce terminal control settlement so busy state and queued work cannot remain locked.
 - **Permission correlation is execution-local.** Tool permission requests use the active execution's response channel and tool-use id; this permission pointer is not a general content sink.
 - **The backend owns ordering.** The renderer submits eagerly and mirrors authoritative queue snapshots instead of guessing execution seams.
-- **Config confirmation flows one way.** The renderer sends edits; the backend publishes confirmed capabilities/status. Shelf-strategy state may persist after confirmation; provider-native permission descriptors remain session-scoped and replace from provider truth.
+- **Config confirmation flows one way.** The renderer sends edits or initialization intent; the backend applies them and publishes confirmed capabilities. Confirmed model, effort, canonical permission, and advertised native mode/permission may persist as project selections. Provider snapshots remain runtime truth, and failed edits or reconciliation never write preferences.
+- **Session identity and project configuration are separate lifecycles.** Replacing a missing provider session may discard provider conversation context, but it must not discard durable project selections. Recovery notices and session-pointer persistence remain independent from configuration reconciliation.
 - **Restore failure does not imply fresh context.** Authentication, transport, unsupported-method, timeout, and malformed restore failures terminate initialization unless a provider has a separately proven missing-context recovery rule.
 - **Triggers emit intents.** Host-touching effects and store mutation stay centralized rather than being performed by UI triggers.
