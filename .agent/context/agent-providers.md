@@ -129,16 +129,16 @@ SDK 0.3.159 **並存**兩種 compact 完成訊號:`status` 形狀(`subtype:'stat
 
 **Decision**：由 agent-server spawn CLI 的 `copilot login`（OAuth device flow）驅動登入。實測（Docker headless）確認：無瀏覽器/無 TTY 下它**印出 `To authenticate, visit <url> and enter code <XXXX-XXXX>` 後持續輪詢**，格式穩定；local（有瀏覽器）時 CLI 還會自動開瀏覽器。所以：
 - **CLI 擁有 OAuth client_id**，我們不碰未公開的 client_id（自刻 device flow 會被迫拿它 → 破裂風險）。
-- agent-server `parseLoginPrompt` 抽 stdout 的 `{verificationUri,userCode}`（純函式，`copilot/login.ts`），走 wire `auth_login_prompt` 回 main；**main 端用 `shell.openExternal` 開「本機」系統瀏覽器**（`openLoginUrl`，預填 `?user_code=`）。這對 **remote 是必要的**：CLI 跑遠端、輪詢與 credential 寫在遠端（正確，SDK 也在那讀），但人在本機 → URL 必須開在本機瀏覽器。
+- agent-server `parseLoginPrompt` 抽 stdout 的 `{verificationUri,userCode}`（純函式，`copilot/login.ts`），走 wire `auth_login_prompt` 回 main；main 以來源 project/tab 將預填 `?user_code=` URL 送進 app-level external-URL intent gate。這對 **remote 是必要的**：CLI 跑遠端、輪詢與 credential 寫在遠端（正確，SDK 也在那讀），但 Copy/Open 的決策與 default-app side effect 留在本機。
 - **成功 = login 進程 exit 0**（不靠 parse 判成敗，只靠 parse 取 URL/code）；取消 = kill；失敗 = 非 0（`auth_login_done{ok,cancelled,error}`）。
 - **spawn env 必須剝除 `COPILOT_GITHUB_TOKEN`/`GH_TOKEN`/`GITHUB_TOKEN`**（`scrubLoginEnv`）—— 否則 CLI 依 `copilot help environment` 的優先序直接吃 token 短路、不走瀏覽器。
 - login child 是 agent-server **直接子進程**（非 `setsid` detached）→ 不進 reaper（那是給逃離 process tree 的 detached shell），改在 `dispose()` kill。
 
-**AuthPane**：oauth kind 顯示「Login with GitHub」按鈕（呼叫 `agent.startLogin` 直接 IPC，像 `checkAuth`）；輪詢中顯示 **可點的預填 URL（`prefilledUri`，`<a target="_blank">` → `setWindowOpenHandler` → 系統瀏覽器）** + `userCode` + Waiting + Cancel。可點 URL 是「一律呈現」的可靠備援，不倚賴 `openLoginUrl` 自動開瀏覽器成功；`auth_login_done{ok}` → `finishLogin` 清 pane（authRequired→null），cancel 不視為 error，fail 顯示 error。
+**AuthPane**：oauth kind 顯示「Login with GitHub」按鈕（呼叫 `agent.startLogin` 直接 IPC，像 `checkAuth`）；輪詢中顯示可點的預填 URL + `userCode` + Waiting + Cancel。自動產生的 intent 與使用者點 fallback link 都進同一 gate，預設 Copy、可選 Open/Cancel；`auth_login_done{ok}` → `finishLogin` 清 pane（authRequired→null），cancel 不視為 error，fail 顯示 error。
 
-**Do not change casually because**：① 別改成自刻 GitHub device flow（B 案）—— 要拿未公開的 Copilot client_id，破裂/維護風險高，除非官方提供穩定 SDK 登入 API。② 別把開瀏覽器改成在 agent-server 端（remote 沒有可用瀏覽器）—— 一律回 main 用 `shell.openExternal`。③ 別忘了 env 剝 token，否則互動登入會被既有 token 短路。
+**Do not change casually because**：① 別改成自刻 GitHub device flow（B 案）—— 要拿未公開的 Copilot client_id，破裂/維護風險高，除非官方提供穩定 SDK 登入 API。② 別在 agent-server 或 main 收到 prompt 時直接開瀏覽器；remote 沒有可用瀏覽器，且使用者必須先決定 Copy/Open/Cancel。③ 別忘了 env 剝 token，否則互動登入會被既有 token 短路。
 
-**Related**：`contracts/agent-wire-protocol`（`auth_login_prompt`/`auth_login_done`）、`contracts/ipc-channels`（`agent:start-login`/`cancel-login`/`login-prompt`/`login-done`）、`agent-providers#2`（gh token 路徑，與互動登入正交並存）、`agent-server/providers/copilot/login.ts`、`src/main/agent/index.ts`（`openLoginUrl`）、`src/renderer/components/agent/AuthPane.tsx`。
+**Related**：`contracts/agent-wire-protocol`（`auth_login_prompt`/`auth_login_done`）、`contracts/external-url-intent`、`agent-providers#2`（gh token 路徑，與互動登入正交並存）、`agent-server/providers/copilot/login.ts`、`src/main/agent/login-url-intent.ts`、`src/renderer/components/agent/AuthPane.tsx`。
 
 ## agent-providers#11 — 登入成功後在跑的 `copilot --acp` 是否讀得到新憑證，是 field-test open item  ·  [Gotcha]
 
@@ -186,7 +186,7 @@ SDK 0.3.159 **並存**兩種 compact 完成訊號:`status` 形狀(`subtype:'stat
 
 **token 路徑正交**：帳號級 TOKEN env（copilot `COPILOT_GITHUB_TOKEN`/`GH_TOKEN`、`ANTHROPIC_API_KEY`）不受 home 隔離 —— 它注入帳號憑證、短路 device-login,跨 device 生效（`copilot/login.ts` 的 `scrubLoginEnv` 就在互動登入時剝掉它們免短路）。home-env 隔離的是 **device-login store**;token-env 是獨立的帳號 override。兩者並存不衝突。
 
-**claude 例外（已知、非平凡的未來 migration）**：claude auth 是 `sdk-managed`、現在靠 **ambient `~/.claude`**（AuthPane 叫使用者去 terminal 跑 `claude auth login`,**無 in-app login flow**）。套 device 模型到 claude 會 (a) 打破 ambient 沿用 (b) 要重做 auth UX (c) 撞 `CLAUDE_CONFIG_DIR` 弱連結（未文件化）。只有 OAuth 路徑受影響（`ANTHROPIC_API_KEY` = 正交 token 路徑）→ 獨立的未來工作,claude 現況刻意留 ambient（odd-one-out）。
+**claude 例外（已知、非平凡的未來 migration）**：claude auth 是 `sdk-managed`，仍靠 **ambient `~/.claude`**。AuthPane 的 Log in 只在來源 project 開可見 terminal 執行公開的 `claude auth login`；它不把 Claude credential 搬進 per-app home。套 device 模型到 Claude 仍會 (a) 打破 ambient 沿用 (b) 要重做 credential ownership (c) 撞 `CLAUDE_CONFIG_DIR` 弱連結（未文件化）。只有 OAuth 路徑受影響（`ANTHROPIC_API_KEY` = 正交 token 路徑），所以 Claude 現況刻意留 ambient（odd-one-out）。
 
 **Do not change casually because**：別只在 run 設 config-home 而漏了 login（憑證會寫錯目錄）;別以為 appId 在 caps 前就有（要 thread 進 `get_capabilities`,否則 caps-time spawn 拿不到 home）;別把 device-home 隔離跟 token-env 混為一談。
 

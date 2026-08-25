@@ -32,7 +32,7 @@ title: shelf-terminal — Intent → File Index
 | 選單安裝平台判斷 | `menu-platform.ts` | `shouldInstallAppMenu(platform)`（只有 darwin true） |
 | Reload key predicate | `reload-guard.ts` | `isReloadKeyEvent(input)` 判斷是不是 Cmd/Ctrl+R / F5 |
 | DevTools key predicate | `devtools-guard.ts` | `isDevToolsKeyEvent(input)`（F12 / Ctrl+Shift+I）的純判斷 |
-| PTY spawn/kill/resize | `pty-manager.ts` | 透過 connector spawn shell、idle notification、輸出經注入的 `PtyObserver` 回報 |
+| PTY spawn/kill/resize | `pty-manager.ts` | 透過 connector spawn shell、idle notification、剝離 external-URL frame 後經注入的 `PtyObserver` 回報可見輸出/intent/anomaly |
 | Preload bridge | `preload.ts` | contextBridge 暴露 `window.shelfApi`，純 RPC bridge 到 main |
 | Project canonical repository | `projects/projects-repository.ts` + `projects/repository-provider.ts` | ready-only canonical project queries/mutations、main-owned identity、durable publish 與 cleanup retry boundary |
 | Project config persistence | `projects/project-config-file-io.ts` + `projects/project-config-codec.ts` + `projects/project-config-persistence.ts` | opaque atomic File I/O、v0/v1 loader/current formatter 與 `projects.json` facade |
@@ -57,6 +57,9 @@ title: shelf-terminal — Intent → File Index
 | Web.fetch grant 持久化 | `web-grants.ts` | per-`(projectId, origin)` grant CRUD（`projects/<id>/web-grants.json`）+ `listAllGrants` |
 | Web.fetch permission channel | `web-permission.ts` | `requestWebPermission()`：app 層全域 popup + away→Telegram + first-wins + timeout backstop |
 | browser_open gate + 開分頁 | `browser-open.ts` | `requestBrowserOpen()`：Open/Deny popup（不記住、無 Telegram、timeout backstop）+ `openWebTab()` 送 `web:open-tab`（agent 開登入分頁的 `web.open` op 用） |
+| External URL intent gate | `external-url-intent.ts` + `external-url-intent-gate.ts` | main-owned validation/FIFO lifecycle 與 Copy/Open/Cancel side effects |
+| External navigation adapters | `external-navigation.ts` | Electron popup/navigation intent 轉成明確 project-tab 或 app-window source |
+| Terminal browser launcher deployment | `external-url-launcher.ts` | 選 local platform asset或透過 connector 部署 POSIX launcher並回傳 Shelf-required `BROWSER` path |
 | Webview hardening | `web-session-harden.ts` | 強制安全 webPreferences、彈窗/導航/權限/下載鎖定（全在 main） |
 
 ## Connector (src/main/connector/)
@@ -192,6 +195,7 @@ title: shelf-terminal — Intent → File Index
 | Web tab（登入 surface + 瀏覽） | `components/WebTabView.tsx` | `<webview partition=persist:web>` + 網址列 + identity chip；人在這登入內網服務 |
 | Web.fetch 授權 popup | `components/WebPermissionPrompt.tsx` | app 層全域 popup，防偽 origin 顯示 + allow once/always/deny（由 `web:permission-request` 驅動） |
 | browser_open 確認 popup | `components/BrowserOpenPrompt.tsx` | app 層全域 popup，只有 Open/Deny（不記住），由 `web:browser-open-request` 驅動；核可後 `web:open-tab` 由 `App.tsx` 開分頁 |
+| External URL intent popup/state | `components/ExternalUrlIntentPrompt.tsx` + `store-external-url-intent.ts` | app-global FIFO presentation，Copy 預選，回傳 Copy/Open/Cancel 並顯示精確來源/目的地/URL |
 | Web session/grant 管理 | `components/settings/WebSettingsTab.tsx` | Settings → Web 分頁：已登入 session 清單(刪) + grant whitelist(per-project 分組、revoke) |
 | Config 備份/複製 UI | `components/BackupView.tsx` + `backup-panel-store.ts` + `events/backup.ts` + `App.tsx` central handlers | Bottom bar 開同一個右側 operation panel，內含 Back up / Import tabs；Backup settings/清單/intent 與 transient Import URL/pinned source/選取分離；元件只 emit，store 管 session state，中央 handler 打 IPC |
 | App 層 MCP server 管理 | `components/McpView.tsx` | 右側欄 view（BottomBar 插頭 icon 開、Skills 的姊妹）：list + per-transport 新增/編輯(stdio/http)、rename、`?` scope help。沿用 `.right-panel` 殼 |
@@ -245,6 +249,8 @@ title: shelf-terminal — Intent → File Index
 | App 層 MCP 型別 + 驗證 | `mcp.ts` | `McpServerBlock`/`McpServersFile` + 純 validator(main store 與 agent-server loader 共用，不 pull electron） |
 | Shelf 檔案 placement 規則 | `shelf-paths.ts` | `shelfPlacement(type,ctx)` closed allowlist + `ShelfFileType*` 常數(transport 與 agent-server 共用單一路徑規則） |
 | 專案 env 純 helper | `project-env.ts` | `EnvMap`、`SHELF_RESERVED_ENV`、`isReservedEnvKey`/`validateEnvKey`、`applyEnvMap`（本機 merge、PATH-merge）、`buildEnvExportPrefix`（遠端 export 前綴）；main + renderer 共用 |
+| External URL intent contract | `external-url-intent.ts` | source/decision/destination types、allowlist/length limits與不回顯 URL 的純 validation |
+| External URL terminal protocol | `external-url-osc.ts` | bounded OSC frame encoder與 streaming parser/stripper/anomaly types |
 | Logger | `logger.ts` | 統一 log 模組，支援 file writer / log level / env override |
 | Agent tab log id | `tab-id.ts` | `formatTabLogId()` 保留完整 renderer tab id，讓跨 main/renderer log 可精確 grep 對帳 |
 | 預設值 | `defaults.ts` | DEFAULT_SETTINGS, DEFAULT_KEYBINDINGS |
@@ -259,6 +265,7 @@ title: shelf-terminal — Intent → File Index
 |--------|------|------|
 | Path alias 定義 | `aliases.ts` | `@shared` alias 的單一來源，vite/vitest 共用 |
 | Build 設定 | `vite.config.ts` | Vite + electron plugin、manualChunks、node-pty external |
+| External URL launcher assets | `resources/external-url-launcher/` | bundled POSIX、PowerShell 與 Windows command-wrapper launchers |
 | 單元測試設定 | `vitest.config.ts` | 獨立 vitest config（不繼承 vite.config.ts） |
 | 套件 / 打包設定 | `package.json` | electron-builder config、scripts、dependencies |
 | CI/CD | `.github/workflows/build.yml` | Tag push → 三平台 build → GitHub Release |

@@ -3,6 +3,7 @@ type: contract
 title: IPC Channels
 related:
   - contracts/agent-wire-protocol
+  - contracts/external-url-intent
   - contracts/persistence-formats
   - contracts/process-memory
 ---
@@ -206,6 +207,19 @@ Manage the shared web session + the app-global `web.fetch` permission popup. See
 > The permission round-trip is **decoupled from the agent path** (`shelfApi.agent.resolvePermission` / `agent:permission-request`): `web.fetch` is gated at the resource layer in main, not the provider tool-confirm. See `contracts/app-tool-bridge` (`web.fetch`) and `context/web-tab` web-tab#2.
 >
 > `browser_open` (`web:browser-open-*`) is the agent-opens-a-login-tab tool: a per-call **Open/Deny** popup (never remembered — a separate, stricter round-trip than the `web:permission-*` grant path), then `web:open-tab` opens the tab. See `contracts/app-tool-bridge` (`web.open`) and `context/web-tab` web-tab#8.
+
+## externalUrlIntent (`shelfApi.externalUrlIntent`)
+
+App-wide external default-app decision gate. Source, request, destination, decision, limits, and terminal framing are authoritative in `contracts/external-url-intent`.
+
+| Method | Shape |
+|--------|-------|
+| `request(input)` | invoke `external-url-intent:submit` with `ExternalUrlIntentInput` → `'copy' \| 'open' \| 'cancel'` |
+| `resolve(requestId, decision)` | invoke `external-url-intent:resolve` with `{ requestId, decision }` |
+| `onRequest(cb(request))` | recv `external-url-intent:request` with `ExternalUrlIntentRequest` → unsubscribe fn |
+| `onClose(cb(requestId))` | recv `external-url-intent:close` with `{ requestId }` → unsubscribe fn |
+
+Only renderer-owned producers use `request`; main-owned renderer navigation, provider login, and PTY producers call the same main gate directly. Renderer queues presentation state but does not validate URLs or execute clipboard/default-app effects.
 
 ## updater (`shelfApi.updater`)
 

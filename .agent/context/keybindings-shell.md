@@ -37,18 +37,19 @@ related:
 
 **Fix**：在 TerminalView 用 `term.attachCustomKeyEventHandler()` 對非 Mac 平台攔截 Ctrl+V 和 Ctrl+C（有選取時），return `false` 讓瀏覽器處理。
 
-## keybindings-shell#4 — 外部連結必須 `target="_blank"`，否則 Electron window 會被帶走  ·  [Gotcha]
+## keybindings-shell#4 — Renderer 外部連結保留來源並交給 app-level intent gate  ·  [Gotcha]
 
 **Symptom**：在 renderer 放 `<a href="https://...">` 沒加 `target="_blank"`，點下去整個 app window 跳到那個網址，terminal state 全失。
 
-**Root cause**：Electron 預設沒有區分內部/外部連結。`createWindow()` 裡用 `setWindowOpenHandler` 攔 `target="_blank"`/`window.open()` 呼叫 `shell.openExternal` 丟給系統瀏覽器；但 in-window navigation（plain link click）不會經過 handler。
+**Root cause**：Electron 預設沒有區分內部/外部連結；而 main 的 `setWindowOpenHandler` / `will-navigate` defense path 無法可靠推回 renderer 當下的 project/tab。只在 main 依 active project 猜來源會在 tab switch race 下歸錯 owner。
 
 **Rule**：
-- renderer 所有 `<a href="http(s)://...">` 一律加 `target="_blank" rel="noopener noreferrer"`。
+- renderer capture listener 在 click 當下解析 `<a>`，帶明確 project/tab source 送 external-URL intent gate；原事件一律阻止。
+- renderer 所有 `<a href="http(s)://...">` 仍加 `target="_blank" rel="noopener noreferrer"`，讓未經 capture 的 defense path 不會帶走 app window。
 - 不要在 renderer 用 `window.location = url` 跳外部網址。
-- 需要程式化開外部連結時，走 IPC → main process → `shell.openExternal`（目前還沒有這個 channel，需要時再加）。
+- 需要程式化開外部連結時，送 typed external-URL intent；只有 central gate 在使用者選 Open 後可呼叫 default-app side effect。
 
-**Do not change casually because**：不要拿掉 `setWindowOpenHandler` 的 scheme 白名單（只放 http/https/mailto），避免 `javascript:` / `file:` 被誤丟 `shell.openExternal`。
+**Do not change casually because**：不要拿掉 main 的 `setWindowOpenHandler` / `will-navigate` defense，也不要略過 gate 的 scheme allowlist（只放 HTTP(S)/mailto）。`browser_open` 是開 Shelf Web tab 的另一份安全契約，不可混用。見 `external-url-intent#1`、`external-url-intent#3`。
 
 ## keybindings-shell#5 — Win/Linux DevTools 寫死在 main，刻意不走 renderer keybinding  ·  [Gotcha]
 

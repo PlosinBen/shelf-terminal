@@ -9,6 +9,7 @@ Decisions + gotchas grouped by topic. Cited from code as `<topic>#N`.
 | 檔案上傳 / 貼上 / 清理 | [file-transfer](file-transfer.md) | `.tmp/shelf/`、cat-via-stdin、session-based cleanup |
 | 設定 merge、bootstrap、userData 隔離 | [settings-config](settings-config.md) | shallow+deep merge、開窗前載 config、DEFAULT_SETTINGS |
 | app 快捷鍵 / 視窗 shell 行為 | [keybindings-shell](keybindings-shell.md) | capture phase、外部連結、DevTools、IME composition |
+| 外部 URL 決策與 terminal launcher 邊界 | [external-url-intent](external-url-intent.md) | main-owned Copy/Open/Cancel gate、typed source、cooperative PTY bridge、敏感 URL 診斷限制 |
 | 右側 panel 外框 / resize / width lifecycle | [renderer-shell](renderer-shell.md) | 六個右側 panel 的共用 shell、寬度 policy、相鄰 panel resize gotcha |
 | per-project 檔案儲存、notes | [storage](storage.md) | `projects/<id>/`、notes file storage + GC |
 | 打包 / CI / 簽章 | [build-packaging](build-packaging.md) | electron-builder、code signing、E2E build |

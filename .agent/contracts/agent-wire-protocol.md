@@ -227,7 +227,7 @@ Server-owned send-queue snapshot (agent-server serializes turns and owns the que
 
 ### auth_login_prompt / auth_login_done — interactive device-flow login
 
-Emitted while an interactive `copilot login` (OAuth device flow) runs. Session-level because login is triggered by an IPC command (`agent:start-login`), NOT a `send` — it runs outside any turn. Routed by the dispatcher to `onSessionEvent` → main → `IPC.AGENT_LOGIN_PROMPT` / `IPC.AGENT_LOGIN_DONE`. On `auth_login_prompt`, main ALSO opens the URL in the user's LOCAL system browser (`shell.openExternal`) — essential when the agent-server runs on a remote host. Provider-side: `agent-server/providers/copilot/login.ts`. See `context/agent-providers` agent-providers#10.
+Emitted while an interactive `copilot login` (OAuth device flow) runs. Session-level because login is triggered by an IPC command (`agent:start-login`), NOT a `send` — it runs outside any turn. Routed by the dispatcher to `onSessionEvent` → main → `IPC.AGENT_LOGIN_PROMPT` / `IPC.AGENT_LOGIN_DONE`. On `auth_login_prompt`, main submits the prefilled URL to the app-level external-URL intent gate with the owning project/tab; it never opens the browser directly. Provider-side: `agent-server/providers/copilot/login.ts`. See `context/agent-providers` agent-providers#10 and `contracts/external-url-intent`.
 
 | Field | Type | Notes |
 |-------|------|-------|

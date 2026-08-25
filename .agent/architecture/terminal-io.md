@@ -5,11 +5,12 @@ related:
   - context/terminal-pty
   - context/file-transfer
   - context/keybindings-shell
+  - context/external-url-intent
 ---
 
 # Terminal I/O
 
-This flow describes how user input reaches a shell and how shell output reaches the screen, plus how files dropped or pasted into a terminal become readable by that shell. At the abstract level there are two interleaved tracks: a keyboard track where each keystroke is either claimed by an application shortcut or passed through to the shell, and an attachment track where pasted or dropped files are written into a project-scoped staging area so the shell can refer to them by path.
+This flow describes how user input reaches a shell and how shell output reaches the screen, how files dropped or pasted into a terminal become readable by that shell, and how a cooperative terminal program can request an app-level external URL action without launching a browser on its own host.
 
 ## Flow
 
@@ -69,11 +70,37 @@ Attachment interceptor (in the terminal view)
 - Every transport uses one symmetric upload mechanism: create the directory and stream the bytes in a single remote shell step, with the destination path quoted once.
 - Staged files are named with a time-encoded prefix; a session-scoped cleanup removes entries older than the current process start, and a manual clear empties the area on demand. Files without the recognized prefix are left untouched.
 
+### Terminal program → external URL decision
+
+```
+Browser-aware terminal program
+   │
+   ▼
+Shelf-required launcher on the shell host
+   │  one bounded intent frame written to the controlling terminal
+   ▼
+PTY output stream
+   │
+   ├─ ordinary output ──► terminal rendering and output observers
+   │
+   └─ URL intent frame ──► strip from visible output
+                           retain owning project/tab
+                           validate and queue in the app-level URL gate
+                                      │
+                                      ▼
+                          Copy URL / Open default app / Cancel
+```
+
+- The launcher is cooperative: it mediates programs that honor the shell's browser-launcher contract. Programs that call an operating-system browser API directly remain outside Shelf's boundary.
+- The signal is one-way. The launcher exits after writing a valid frame; the originating command does not wait for the popup decision and Cancel does not terminate it.
+- Remote shells emit the frame through their PTY, but the decision and any default-app launch happen in the local Shelf app.
+
 ## Boundaries
 
 Inside this flow:
 - The keyboard path from a keypress through shortcut arbitration into the shell and back out as rendered output.
 - The attachment path from a paste/drop gesture through policy checks and upload into shell-visible paths.
+- The cooperative browser-launcher path from a terminal program through a stripped PTY control frame to an app-level user decision.
 - The split of responsibility between the intercept-first keybinding layer and the terminal view that owns shell I/O and rendering.
 
 Outside this flow:

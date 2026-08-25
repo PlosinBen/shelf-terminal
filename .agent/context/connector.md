@@ -6,6 +6,7 @@ related:
   - contracts/connector-interface
   - context/file-transfer
   - context/terminal-pty
+  - context/external-url-intent
 ---
 
 # Connector

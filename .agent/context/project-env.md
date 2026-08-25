@@ -32,7 +32,7 @@ related:
 **Decision**：ambient/繼承 env `<` project env `<` Shelf-required（最後套，backstop）。project env **靜默覆蓋** ambient（生態系慣例：shell `FOO=bar cmd`、docker `-e`、dotenv、CI、K8s 都是覆蓋不警告；在這裡警告只是噪音）。歧義在**輸入時**擋，不在 runtime：
 - **PATH 只 merge 不取代**（project 值前置），取代會打斷 binary 查找。PATH 可設但強制 merge、**不**是保留字。
 - **plain/secret 同名** → UI inline 擋（跨兩類唯一）。
-- **Shelf-required 是保留字**：`SHELF_*` 前綴 + `ELECTRON_RUN_AS_NODE`，單一來源 `SHELF_RESERVED_ENV`（新 `SHELF_*` 自動保留）。UI inline 擋；注入時 Shelf 自己的 var 仍最後套（防手改 config 繞過）。
+- **Shelf-required 是保留字**：`SHELF_*` 前綴 + `ELECTRON_RUN_AS_NODE` + `BROWSER`，單一來源 `SHELF_RESERVED_ENV`（新 `SHELF_*` 自動保留）。UI inline 擋；注入時 Shelf 自己的 var 仍最後套（防手改 config 繞過）。`BROWSER` 對 terminal 指向 Shelf external-URL launcher；這個保證只到 process creation，使用者的 shell profile 或之後手動 export 可再覆蓋，Shelf 不在 startup 後偷偷重設或嘗試鎖死。
 
 ## project-env#4 — secret at-rest：AES-256-GCM + 可換 key-storage tier seam  ·  [Decision]
 

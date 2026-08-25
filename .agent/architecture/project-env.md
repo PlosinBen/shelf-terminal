@@ -32,5 +32,5 @@ related:
 - **單一解析出口**：兩個注入面（agent-server、terminal）都只讀 `resolveProjectEnv`；plain 與 secret 在此合併，下游不感知來源類別。secret 只在 main process、注入前一刻解密。
 - **注入機制依 connector 分**：本機直接 merge 進 child 的 `env`（PATH merge、reserved 丟棄、Shelf-required 最後套）；遠端（docker/ssh/wsl）因 pty `env` 只到本機 client，改在遠端指令前綴 `export`。
 - **dispatcher 是 per-host 共用**：它自己的 process env 裝不下 per-project 值，所以 env 隨 `open_session` 控制訊息過去，由 dispatcher 套到它 spawn 的 per-session exec proc，且 exec 崩潰 reconnect 時重套（見 context/project-env#2、architecture/agent-dispatch）。
-- **precedence**：ambient `<` project `<` Shelf-required（backstop）；PATH merge 不取代；`SHELF_*`/`ELECTRON_RUN_AS_NODE` 保留字在輸入時擋。
+- **precedence**：ambient `<` project `<` Shelf-required（backstop）；PATH merge 不取代；`SHELF_*`、`ELECTRON_RUN_AS_NODE`、`BROWSER` 等 Shelf-required key 在輸入時擋。`BROWSER` 在 terminal spawn 時指向 Shelf 的 cooperative external-URL launcher。
 - **secret at-rest**：AES-256-GCM 值加密 + 可換 master-key tier（OS keychain / 本機 0600 檔 / 永不明碼）；獨立 side-car，不進任何同步/備份路徑（見 context/project-env#4、#7）。

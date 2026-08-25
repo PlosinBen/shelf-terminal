@@ -4,6 +4,7 @@ title: Terminal & PTY
 related:
   - architecture/terminal-io
   - architecture/connection-lifecycle
+  - context/external-url-intent
   - context/connector
   - context/file-transfer
   - context/settings-config
