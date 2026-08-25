@@ -1,4 +1,4 @@
-import { BrowserWindow, ipcMain, shell } from 'electron';
+import { BrowserWindow, ipcMain } from 'electron';
 import { IPC } from '@shared/ipc-channels';
 import { log } from '@shared/logger';
 import { formatTabLogId } from '@shared/tab-id';
@@ -24,9 +24,12 @@ import {
   unregisterDispatcherMemorySource,
   unregisterExecMemorySource,
 } from '../process-memory-manager';
+import { requestExternalUrlIntent } from '../external-url-intent';
+import { mediateAgentLoginUrl } from './login-url-intent';
 
 interface SessionInstance {
   tabId: string;
+  projectId?: string;
   provider: AgentProvider;
   connection: Connection;
   cwd: string;
@@ -294,32 +297,6 @@ export function initAgentManager(windowGetter: () => BrowserWindow | null): void
 
 }
 
-/**
- * Open the device-flow verification URL in the user's LOCAL system browser.
- * Deliberately the system browser (not an in-app web tab): the user authorizes
- * with their own logged-in GitHub session, and this works identically whether
- * the agent-server ran locally or on a remote host. Fail-loud on a bad URL —
- * the renderer still shows the code as a manual fallback. See
- * features copilot-device-login.
- */
-function openLoginUrl(url: string): void {
-  try {
-    const u = new URL(url);
-    if (u.protocol !== 'https:' && u.protocol !== 'http:') {
-      log.warn('agent', `openLoginUrl: refusing non-http(s) URL: ${url}`);
-      return;
-    }
-    // E2E drives this with a fake URL — don't actually pop a system browser.
-    if (process.env.SHELF_TEST_MODE === '1') {
-      log.debug('agent', `openLoginUrl: test mode, skipping shell.openExternal(${url})`);
-      return;
-    }
-    void shell.openExternal(url);
-  } catch (err: any) {
-    log.warn('agent', `openLoginUrl: invalid URL ${JSON.stringify(url)}: ${err?.message ?? err}`);
-  }
-}
-
 function send(channel: string, tabId: string, ...args: unknown[]) {
   const win = getWindow?.();
   if (win && !win.isDestroyed()) {
@@ -352,6 +329,7 @@ async function startSession(
   }
 
   const sessionId = opts?.sessionId as string | undefined;
+  const projectId = typeof opts?.projectId === 'string' ? opts.projectId : undefined;
   const backend = createRemoteBackend(
     connection,
     undefined,
@@ -403,7 +381,7 @@ async function startSession(
     // Same sink dispatchEvent the per-execution drain uses. Wired type-by-type.
     (ev) => dispatchEvent(tabId, ev),
     // Owning project — the app_tool bridge keys the web.fetch grant on it.
-    typeof opts?.projectId === 'string' ? opts.projectId : undefined,
+    projectId,
     {
       session: (report) => { acceptExecMemoryReport(tabId, report); },
       host: (report) => { acceptDispatcherMemoryReport(connection, report); },
@@ -414,6 +392,7 @@ async function startSession(
 
   const session: SessionInstance = {
     tabId,
+    projectId,
     provider,
     connection,
     cwd,
@@ -661,10 +640,20 @@ function dispatchEvent(tabId: string, event: AgentEvent) {
       send(IPC.AGENT_AUTH_REQUIRED, tabId, event.provider);
       break;
     case 'auth_login_prompt':
-      // Open the LOCAL browser for the device-flow URL (essential when the
-      // agent-server runs on a remote host — the CLI can't reach the user's
-      // browser) and hand the code to the renderer's AuthPane.
-      openLoginUrl(event.prefilledUri);
+      // The provider runs locally or remotely, but the user chooses whether to
+      // copy the URL or hand it to the LOCAL default app. Preserve the owning
+      // project/tab instead of attributing it to whichever project is active.
+      mediateAgentLoginUrl({
+        projectId: sessions.get(tabId)?.projectId,
+        tabId,
+        provider: event.provider,
+        url: event.prefilledUri,
+      }, {
+        request: requestExternalUrlIntent,
+        reportFailure: (message) => {
+          log.error('agent', `[agent:${formatTabLogId(tabId)}] login URL mediation failed: ${message}`);
+        },
+      });
       send(IPC.AGENT_LOGIN_PROMPT, tabId, {
         provider: event.provider,
         verificationUri: event.verificationUri,

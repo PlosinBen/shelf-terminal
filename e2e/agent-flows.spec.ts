@@ -383,7 +383,15 @@ test.describe('agent flows via fake provider', () => {
     await expect(page.locator('.agent-auth-hints:visible')).toBeVisible();
   });
 
-  test('interactive login: button → device code → cancel → back to button', async ({ shelfApp: { page } }) => {
+  test('interactive login: URL gate → device code → cancel → back to button', async ({ shelfApp: { app, page } }) => {
+    await app.evaluate(({ shell, clipboard }) => {
+      const testGlobal = globalThis as typeof globalThis & { __copilotOpenedUrls?: string[] };
+      testGlobal.__copilotOpenedUrls = [];
+      clipboard.clear();
+      shell.openExternal = async (url: string) => {
+        testGlobal.__copilotOpenedUrls!.push(url);
+      };
+    });
     await setupProject(page);
     await openAgentTab(page);
     await sendAgentPrompt(page, 'auth_required');
@@ -397,12 +405,41 @@ test.describe('agent flows via fake provider', () => {
     await expect(loginBtn).toBeVisible({ timeout: 5_000 });
     await loginBtn.click();
 
-    // auth_login_prompt flowed back → device code + waiting state shown.
+    const loginUrl = 'https://github.com/login/device?user_code=FAKE-CODE';
+    const urlPopup = page.locator('.external-url-intent-overlay');
+    await expect(urlPopup).toBeVisible({ timeout: 5_000 });
+    await expect(urlPopup.locator('.external-url-intent-url')).toHaveText(loginUrl);
+    await expect(urlPopup.locator('.external-url-intent-source')).toContainText(' / Claude');
+
+    // The automatic provider prompt defaults to Copy URL; it does not launch a
+    // browser before the user chooses.
+    await page.keyboard.press('Enter');
+    await expect(urlPopup).not.toBeVisible();
+    expect(await app.evaluate(({ clipboard }) => clipboard.readText())).toBe(loginUrl);
+    expect(await app.evaluate(() => (
+      (globalThis as typeof globalThis & { __copilotOpenedUrls?: string[] }).__copilotOpenedUrls
+    ))).toEqual([]);
+
+    // auth_login_prompt also flowed back → device code + manual link remain shown.
     await expect(pane.locator('.agent-auth-code')).toHaveText('FAKE-CODE', { timeout: 5_000 });
     await expect(pane.locator('.agent-auth-waiting')).toBeVisible();
-    // The prefilled URL is always surfaced as a clickable link (opens the system
-    // browser via setWindowOpenHandler), regardless of auto-open.
-    await expect(pane.locator('a.agent-auth-link')).toHaveAttribute('href', 'https://github.com/login/device?user_code=FAKE-CODE');
+    const authLink = pane.locator('a.agent-auth-link');
+    await expect(authLink).toHaveAttribute('href', loginUrl);
+
+    // Reopening the visible fallback link uses the same gate. Cancel performs no
+    // action; a later explicit Open hands the exact URL to the default-app seam.
+    await authLink.click();
+    await expect(urlPopup).toBeVisible();
+    await urlPopup.locator('.agent-perm-option', { hasText: 'Cancel' }).click();
+    await expect(urlPopup).not.toBeVisible();
+
+    await authLink.click();
+    await expect(urlPopup).toBeVisible();
+    await urlPopup.locator('.agent-perm-option', { hasText: 'Open with default app' }).click();
+    await expect(urlPopup).not.toBeVisible();
+    expect(await app.evaluate(() => (
+      (globalThis as typeof globalThis & { __copilotOpenedUrls?: string[] }).__copilotOpenedUrls
+    ))).toEqual([loginUrl]);
 
     // Cancel → cancel_login → auth_login_done{cancelled} → back to the button.
     await pane.locator('.agent-reset-btn', { hasText: 'Cancel' }).click();
