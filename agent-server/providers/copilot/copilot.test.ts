@@ -792,6 +792,63 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
     backend.dispose();
   });
 
+  it('rejects a stale saved selection before applying any warm-up config', async () => {
+    const setConfigCalls: unknown[] = [];
+    const mock = createMockAcpAgent({
+      modes: COPILOT_MODES,
+      configOptions: COPILOT_CONFIG,
+      onSetConfigOption: (params) => setConfigCalls.push(params),
+    });
+    const backend = createCopilotBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
+    const sessionOut: OutgoingMessage[] = [];
+    backend.bindSessionSend!((message) => sessionOut.push(message));
+
+    await expect(backend.gatherCapabilities!(
+      '/tmp/project', undefined, undefined, { model: 'retired-model' },
+    )).rejects.toThrow('did not advertise saved model value "retired-model"');
+
+    expect(setConfigCalls).toEqual([]);
+    expect(sessionOut).not.toContainEqual(expect.objectContaining({ type: 'capabilities' }));
+    backend.dispose();
+  });
+
+  it('rejects a warm-up setter failure without publishing capabilities or auth fallback', async () => {
+    const mock = createMockAcpAgent({
+      modes: COPILOT_MODES,
+      configOptions: COPILOT_CONFIG,
+      setConfigOptionError: 'provider rejected saved model',
+    });
+    const backend = createCopilotBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
+    const sessionOut: OutgoingMessage[] = [];
+    backend.bindSessionSend!((message) => sessionOut.push(message));
+
+    await expect(backend.gatherCapabilities!(
+      '/tmp/project', undefined, undefined, { model: 'gpt-5.4' },
+    )).rejects.toThrow();
+
+    expect(sessionOut).not.toContainEqual(expect.objectContaining({ type: 'capabilities' }));
+    backend.dispose();
+  });
+
+  it('rejects a mismatched warm-up config snapshot without publishing capabilities', async () => {
+    const mock = createMockAcpAgent({
+      modes: COPILOT_MODES,
+      configOptions: COPILOT_CONFIG,
+      // Return the unchanged provider snapshot after accepting the request.
+      configOptionsOnSetConfigOption: COPILOT_CONFIG,
+    });
+    const backend = createCopilotBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
+    const sessionOut: OutgoingMessage[] = [];
+    backend.bindSessionSend!((message) => sessionOut.push(message));
+
+    await expect(backend.gatherCapabilities!(
+      '/tmp/project', undefined, undefined, { effort: 'high' },
+    )).rejects.toThrow('confirmed effort "medium" instead of "high"');
+
+    expect(sessionOut).not.toContainEqual(expect.objectContaining({ type: 'capabilities' }));
+    backend.dispose();
+  });
+
   it('loads legacy Copilot sessions without replaying duplicate conversation content', async () => {
     let loadedSessionId: string | undefined;
     let resumeRequests = 0;
@@ -915,6 +972,30 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
     expect(out.some((m) => m.type === 'message' && m.msgType === 'system')).toBe(true);
     expect(out.at(-1)).toEqual({ type: 'status', state: 'idle' });
 
+    backend.dispose();
+  });
+
+  it('does not publish confirmed capabilities when a config edit fails', async () => {
+    const mock = createMockAcpAgent({
+      modes: COPILOT_MODES,
+      configOptions: COPILOT_CONFIG,
+      setConfigOptionError: 'provider rejected model',
+    });
+    const backend = createCopilotBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
+    const out: OutgoingMessage[] = [];
+
+    await backend.query(
+      { prompt: '', cwd: '/tmp/project', configEdit: { key: 'model', value: 'gpt-5.4' } },
+      (message) => out.push(message),
+    );
+
+    expect(out).toContainEqual(expect.objectContaining({
+      type: 'message',
+      msgType: 'error',
+      content: expect.stringContaining('Failed to set model'),
+    }));
+    expect(out).not.toContainEqual(expect.objectContaining({ type: 'capabilities' }));
+    expect(out).not.toContainEqual(expect.objectContaining({ type: 'message', msgType: 'system' }));
     backend.dispose();
   });
 
