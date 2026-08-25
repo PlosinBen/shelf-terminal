@@ -4,7 +4,7 @@ import { marked, type Tokens } from 'marked';
 // All <a> tags get target=_blank + rel=noopener — without this, clicking a
 // link inside agent / PM / notes markdown navigates the renderer window away
 // and trashes app state. target=_blank routes through window.open semantics
-// which the main process intercepts via setWindowOpenHandler → openExternal.
+// which the app-level renderer click handler turns into a typed external URL intent.
 
 marked.use({
   renderer: {

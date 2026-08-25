@@ -185,6 +185,9 @@ interface ShelfApi {
     onOpenTab: (callback: (projectId: string, url: string) => void) => () => void;
   };
   externalUrlIntent: {
+    request: (
+      input: import('../shared/external-url-intent').ExternalUrlIntentInput,
+    ) => Promise<import('../shared/external-url-intent').ExternalUrlIntentDecision>;
     resolve: (
       requestId: string,
       decision: import('../shared/external-url-intent').ExternalUrlIntentDecision,

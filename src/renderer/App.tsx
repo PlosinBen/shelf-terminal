@@ -25,9 +25,9 @@ import { McpView } from './components/McpView';
 import { BackupView } from './components/BackupView';
 import { QuickNoteOverlay } from './components/QuickNoteOverlay';
 import { useKeybindings } from './hooks/useKeybindings';
-import { useStore, setSettings, setUpdateStatus, addTab, addTerminalTabForSource, setActiveTab, removeTab, setSplitTab, clearUnread, setInvalidProjects, setPmActive, setConnectionHealth, setActiveProjectById, getProjectById, getProjectViews, getProjectIndexById, getCanonicalProjectById, reconcileProjects, listStableProjectViews, showProjectNotice, resolveAgentProviderForOpen, resolveAgentProviderForConnect, projectDisplayLabel, enqueueExternalUrlIntent, removeExternalUrlIntent, beginExternalUrlIntentResolution, setExternalUrlIntentError } from './store';
+import { useStore, setSettings, setUpdateStatus, addTab, addTerminalTabForSource, setActiveTab, removeTab, setSplitTab, clearUnread, setInvalidProjects, setPmActive, setConnectionHealth, setActiveProjectById, getActiveProjectId, getProjectById, getProjectViews, getProjectIndexById, getCanonicalProjectById, reconcileProjects, listStableProjectViews, showProjectNotice, resolveAgentProviderForOpen, resolveAgentProviderForConnect, projectDisplayLabel, enqueueExternalUrlIntent, removeExternalUrlIntent, beginExternalUrlIntentResolution, setExternalUrlIntentError } from './store';
 import type { ConnectionHealth } from '@shared/types';
-import type { ExternalUrlIntentDecision } from '@shared/external-url-intent';
+import type { ExternalUrlIntentDecision, ExternalUrlIntentInput } from '@shared/external-url-intent';
 import type { Project, ProjectCreateInput } from '@shared/projects';
 import { disposeTerminal } from './components/TerminalView';
 import { teardownTab } from './tab-teardown';
@@ -128,6 +128,48 @@ export function App() {
 
   useEffect(() => {
     window.shelfApi.settings.load().then(setSettings);
+  }, []);
+
+  useEffect(() => {
+    const handleLinkClick = (event: MouseEvent) => {
+      if (event.defaultPrevented || event.button !== 0) return;
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      const anchor = target.closest('a[href]') as HTMLAnchorElement | null;
+      if (!anchor || anchor.hasAttribute('download')) return;
+      const rawHref = anchor.getAttribute('href');
+      if (!rawHref || rawHref.startsWith('#')) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+
+      const activeProject = getProjectViews().find((project) => project.id === getActiveProjectId());
+      const activeTab = activeProject?.tabs[activeProject.activeTabIndex];
+      const source: ExternalUrlIntentInput['source'] = activeProject && activeTab
+        ? { kind: 'project-tab', projectId: activeProject.id, tabId: activeTab.id }
+        : { kind: 'app-window' };
+      emit(Events.EXTERNAL_URL_INTENT_REQUEST, {
+        url: anchor.href,
+        reason: 'Open a link from Shelf',
+        source,
+      } satisfies ExternalUrlIntentInput);
+    };
+    const offRequest = on(Events.EXTERNAL_URL_INTENT_REQUEST, async (input: ExternalUrlIntentInput) => {
+      try {
+        await window.shelfApi.externalUrlIntent.request(input);
+      } catch (error) {
+        console.error('[external-url-intent] renderer link request failed');
+        void window.shelfApi.dialog.warn(
+          'External link blocked',
+          error instanceof Error ? error.message : 'Shelf could not handle this external link.',
+        );
+      }
+    });
+    document.addEventListener('click', handleLinkClick, true);
+    return () => {
+      document.removeEventListener('click', handleLinkClick, true);
+      offRequest();
+    };
   }, []);
 
   useEffect(() => {

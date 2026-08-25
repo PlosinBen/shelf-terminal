@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, Menu, shell } from 'electron';
+import { app, BrowserWindow, dialog, Menu } from 'electron';
 import path from 'path';
 import fs from 'fs';
 import { writePty, killAllPtys, setPtyObserver } from './pty-manager';
@@ -23,6 +23,8 @@ import { hardenWebSession, installWebviewHardening } from './web-session-harden'
 import { shouldRecreateWindowOnActivate } from './window-lifecycle';
 import { primeShellEnv } from './connector/shell-env';
 import { disposeProcessMemory, initProcessMemory } from './process-memory-manager';
+import { requestExternalUrlIntent } from './external-url-intent';
+import { createExternalWindowOpenHandler, handleExternalWillNavigate } from './external-navigation';
 
 applyUserDataIsolation();
 
@@ -50,12 +52,24 @@ function createWindow() {
   // (layout tearing). macOS keeps its system top menu bar. See menu-platform.ts.
   if (!isMac) win.removeMenu();
 
-  win.webContents.setWindowOpenHandler(({ url }) => {
-    if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('mailto:')) {
-      shell.openExternal(url);
-    }
-    return { action: 'deny' };
-  });
+  const reportExternalUrlFailure = (message: string) => {
+    void dialog.showMessageBox(win, {
+      type: 'warning',
+      title: 'External link blocked',
+      message: 'Shelf could not handle this external link.',
+      detail: message,
+      buttons: ['OK'],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true,
+    });
+  };
+  const externalNavigation = {
+    request: requestExternalUrlIntent,
+    reportFailure: reportExternalUrlFailure,
+  };
+
+  win.webContents.setWindowOpenHandler(createExternalWindowOpenHandler(externalNavigation));
 
   // Defense-in-depth: if anything tries to navigate the renderer frame away
   // from Shelf (markdown link missing target=_blank, stray window.location,
@@ -65,30 +79,12 @@ function createWindow() {
   win.webContents.on('will-navigate', (event, url) => {
     // Initial app load (file:// in prod, vite dev server URL in dev) is allowed
     // to pass through; only intercept post-load navigations.
-    const current = win.webContents.getURL();
-    if (current && url === current) return;
-
-    event.preventDefault();
-
-    const isOpenable = url.startsWith('http://') || url.startsWith('https://') || url.startsWith('mailto:');
-    dialog
-      .showMessageBox(win, {
-        type: 'question',
-        title: 'Leave Shelf?',
-        message: `A link is trying to navigate Shelf to:\n${url}`,
-        detail: isOpenable
-          ? 'Cancel keeps Shelf where it is. Open in browser sends the link to your default browser.'
-          : 'This URL cannot be opened externally. Cancel to stay in Shelf.',
-        buttons: isOpenable ? ['Cancel', 'Open in browser'] : ['Cancel'],
-        defaultId: 0,
-        cancelId: 0,
-        noLink: true,
-      })
-      .then((result) => {
-        if (isOpenable && result.response === 1) {
-          shell.openExternal(url);
-        }
-      });
+    handleExternalWillNavigate(
+      event,
+      url,
+      win.webContents.getURL(),
+      externalNavigation,
+    );
   });
 
   // Intercept Cmd/Ctrl+R, Shift+Cmd/Ctrl+R, and F5 — a stray reload would clear

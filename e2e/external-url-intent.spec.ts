@@ -72,4 +72,30 @@ test('external URL popup defaults to copy and supports cancel/open decisions', a
   expect(await app.evaluate(() => (
     (globalThis as typeof globalThis & { __shelfTestOpenedUrls?: string[] }).__shelfTestOpenedUrls
   ))).toEqual([openUrl]);
+
+  const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
+  await page.locator('.sidebar-btn', { hasText: '+' }).click();
+  await expect(page.locator('.folder-picker-overlay')).toBeVisible();
+  await page.locator('.conn-btn-next').click();
+  await page.locator('.folder-picker-item', { hasText: 'shelf-test-a' }).click();
+  await page.keyboard.press(`${modifier}+Enter`);
+  await page.locator('.connect-prompt').click();
+  await expect(page.locator('.tab-bar .tab')).toHaveCount(1);
+
+  const rendererLink = 'https://renderer.example.com/path?state=exact-renderer-state';
+  await page.evaluate((url) => {
+    const anchor = document.createElement('a');
+    anchor.id = 'external-url-e2e-link';
+    anchor.href = url;
+    anchor.target = '_blank';
+    anchor.textContent = 'External URL E2E link';
+    document.body.appendChild(anchor);
+  }, rendererLink);
+  await page.locator('#external-url-e2e-link').click();
+
+  await expect(popup).toBeVisible();
+  await expect(popup.locator('.external-url-intent-source')).toContainText('Requested by: shelf-test-a /');
+  await expect(popup.locator('.external-url-intent-url')).toHaveText(rendererLink);
+  await popup.locator('.agent-perm-option', { hasText: 'Cancel' }).click();
+  await expect(popup).not.toBeVisible();
 });

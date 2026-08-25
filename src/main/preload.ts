@@ -255,6 +255,8 @@ contextBridge.exposeInMainWorld('shelfApi', {
     },
   },
   externalUrlIntent: {
+    request: (input: import('../shared/external-url-intent').ExternalUrlIntentInput) =>
+      ipcRenderer.invoke(IPC.EXTERNAL_URL_INTENT_SUBMIT, input),
     resolve: (requestId: string, decision: import('../shared/external-url-intent').ExternalUrlIntentDecision) =>
       ipcRenderer.invoke(IPC.EXTERNAL_URL_INTENT_RESOLVE, { requestId, decision }),
     onRequest: (callback: (request: import('../shared/external-url-intent').ExternalUrlIntentRequest) => void) => {

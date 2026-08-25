@@ -154,6 +154,7 @@ export const IPC = {
   // App-wide external URL intent gate. Main owns validation, queueing, and the
   // selected clipboard/default-app side effect; renderer only presents and resolves.
   EXTERNAL_URL_INTENT_REQUEST: 'external-url-intent:request',
+  EXTERNAL_URL_INTENT_SUBMIT: 'external-url-intent:submit',
   EXTERNAL_URL_INTENT_RESOLVE: 'external-url-intent:resolve',
   EXTERNAL_URL_INTENT_CLOSE: 'external-url-intent:close',
 
