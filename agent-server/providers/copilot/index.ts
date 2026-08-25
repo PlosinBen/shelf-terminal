@@ -45,6 +45,7 @@ const COPILOT_STALE_SESSION_NOTICE = 'Previous Copilot session was unavailable; 
 const ACP_RESOURCE_NOT_FOUND_ERROR_CODE = RequestError.resourceNotFound().code;
 export const COPILOT_AUTOPILOT_MODE_ID = 'https://agentclientprotocol.com/protocol/session-modes#autopilot';
 const COPILOT_AUTOPILOT_COMPLETION_TIMEOUT_MS = 30 * 60_000;
+const COPILOT_MODE_CONFIRMATION_TIMEOUT_MS = 5_000;
 
 type AutopilotCompletionOutcome = 'task_complete' | 'terminated' | 'connection_closed' | 'timeout';
 
@@ -53,6 +54,16 @@ interface AutopilotCompletionGate {
   toolCallIds: Set<string>;
   promise: Promise<AutopilotCompletionOutcome>;
   resolve: (outcome: AutopilotCompletionOutcome) => void;
+  settled: boolean;
+  timeout?: ReturnType<typeof setTimeout>;
+}
+
+interface NativeModeConfirmationGate {
+  sessionId: string;
+  targetModeId: string;
+  promise: Promise<void>;
+  resolve: () => void;
+  reject: (error: Error) => void;
   settled: boolean;
   timeout?: ReturnType<typeof setTimeout>;
 }
@@ -89,6 +100,8 @@ export interface CopilotDeps {
   /** Resolve the in-process Shelf MCP bridge (level 1). Default: the shared HTTP
    *  server. Return null to omit it (tests skip starting a real HTTP server). */
   getShelfMcp?: () => Promise<{ url: string } | null>;
+  /** Test seam for the provider-local native-mode confirmation bound. */
+  modeConfirmationTimeoutMs?: number;
 }
 
 function defaultOpenAgent(cwd: string, appId?: string): CopilotAgentTarget {
@@ -112,6 +125,7 @@ function copilotSkillTarget(appId: string | undefined): string | undefined {
 export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
   const openAgent = deps.openAgent ?? defaultOpenAgent;
   const getShelfMcp = deps.getShelfMcp ?? getSharedShelfMcp;
+  const modeConfirmationTimeoutMs = deps.modeConfirmationTimeoutMs ?? COPILOT_MODE_CONFIRMATION_TIMEOUT_MS;
 
   let conn: AcpConnection | null = null;
   let child: ChildProcess | null = null;
@@ -140,6 +154,7 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
   // UI and send queue do not claim idle while Copilot is still editing. See
   // agent-providers#37.
   let activeAutopilotCompletion: AutopilotCompletionGate | null = null;
+  let nativeModeConfirmation: NativeModeConfirmationGate | null = null;
   let loginRunner: LoginRunner | null = null;
   const permissions = createPermissionBridge(() => activeExecutionSend);
   let sessionSend: SendFn | null = null;
@@ -189,6 +204,53 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
     if (gate.toolCallIds.has(update.toolCallId) && 'status' in update && update.status === 'completed') {
       gate.resolve('task_complete');
     }
+  }
+
+  function createNativeModeConfirmationGate(sessionId: string, targetModeId: string): NativeModeConfirmationGate {
+    nativeModeConfirmation?.reject(new Error('Copilot native mode confirmation was superseded'));
+    let resolvePromise!: () => void;
+    let rejectPromise!: (error: Error) => void;
+    const gate: NativeModeConfirmationGate = {
+      sessionId,
+      targetModeId,
+      promise: new Promise<void>((resolve, reject) => {
+        resolvePromise = resolve;
+        rejectPromise = reject;
+      }),
+      resolve: () => {
+        if (gate.settled) return;
+        gate.settled = true;
+        if (gate.timeout) clearTimeout(gate.timeout);
+        resolvePromise();
+      },
+      reject: (error) => {
+        if (gate.settled) return;
+        gate.settled = true;
+        if (gate.timeout) clearTimeout(gate.timeout);
+        rejectPromise(error);
+      },
+      settled: false,
+    };
+    gate.timeout = setTimeout(() => {
+      gate.reject(new Error(`Copilot did not confirm native mode "${targetModeId}" within ${modeConfirmationTimeoutMs}ms`));
+    }, modeConfirmationTimeoutMs);
+    gate.timeout.unref?.();
+    nativeModeConfirmation = gate;
+    return gate;
+  }
+
+  function observeNativeModeConfirmation(sessionId: string, currentModeId: string): void {
+    const gate = nativeModeConfirmation;
+    if (!gate || gate.sessionId !== sessionId) return;
+    if (currentModeId === gate.targetModeId) {
+      gate.resolve();
+      return;
+    }
+    gate.reject(new Error(`Copilot confirmed native mode "${currentModeId}" instead of "${gate.targetModeId}"`));
+  }
+
+  function rejectNativeModeConfirmation(reason: string): void {
+    nativeModeConfirmation?.reject(new Error(reason));
   }
 
   function nativePermissionControl(): PermissionControlCapabilities {
@@ -256,12 +318,14 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
   const driver = createSessionDriver({
     onStateChange(sessionId, change) {
       if (!session || session.sessionId !== sessionId) return;
+      let authoritativeModeId: string | undefined;
       if (change.kind === 'mode') {
         if (!sessionModes) {
           serverLog('error', 'copilot', `mode update without advertised modes (session=${sessionId}, mode=${change.currentModeId})`);
           return;
         }
         sessionModes = { ...sessionModes, currentModeId: change.currentModeId };
+        authoritativeModeId = change.currentModeId;
       } else {
         sessionConfigOptions = change.configOptions;
         const modeOption = sessionConfigOptions.find((option) => option.category === MODE_CATEGORY);
@@ -278,12 +342,14 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
             // config snapshot. Reconcile that authoritative value before publishing
             // capabilities so the renderer does not receive the stale session mode.
             sessionModes = { ...sessionModes, currentModeId: modeOption.currentValue };
+            authoritativeModeId = modeOption.currentValue;
           }
         }
         const current = currentSelections({ configOptions: sessionConfigOptions });
         currentModel = current.currentModel;
         currentEffort = current.currentEffort;
       }
+      if (authoritativeModeId) observeNativeModeConfirmation(sessionId, authoritativeModeId);
       publishCapabilities();
     },
   });
@@ -308,7 +374,20 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
     if (!sessionModes?.availableModes.some((mode) => mode.id === modeId)) {
       throw new Error(`Copilot did not advertise native mode "${modeId}"`);
     }
-    if (conn && session) await driver.setMode(conn.agent, session, modeId);
+    if (!conn || !session) throw new Error('Copilot has no live session for native mode configuration');
+    if (sessionModes.currentModeId === modeId) return;
+    const gate = createNativeModeConfirmationGate(session.sessionId, modeId);
+    try {
+      await Promise.all([
+        driver.setMode(conn.agent, session, modeId),
+        gate.promise,
+      ]);
+    } catch (error) {
+      gate.reject(error instanceof Error ? error : new Error(String(error)));
+      throw error;
+    } finally {
+      if (nativeModeConfirmation === gate) nativeModeConfirmation = null;
+    }
   }
 
   async function applyNativePermission(value: string): Promise<void> {
@@ -448,6 +527,7 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
     conn.closed.finally(() => {
       if (conn !== thisConn) return;
       activeAutopilotCompletion?.resolve('connection_closed');
+      rejectNativeModeConfirmation('Copilot connection closed during native mode confirmation');
       conn = null;
       child = null;
       connAppId = undefined;
@@ -800,6 +880,7 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
     resetSession(): void {
       activeAutopilotCompletion?.resolve('terminated');
       activeAutopilotCompletion = null;
+      rejectNativeModeConfirmation('Copilot session closed during native mode confirmation');
       if (session) driver.forget(session.sessionId);
       session = null;
       sessionCwd = null;
@@ -813,6 +894,7 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
     reconnect(): void {
       activeAutopilotCompletion?.resolve('terminated');
       activeAutopilotCompletion = null;
+      rejectNativeModeConfirmation('Copilot connection closed during native mode confirmation');
       if (session) driver.forget(session.sessionId);
       try { conn?.close(); } catch { /* best-effort */ }
       try { child?.kill(); } catch { /* best-effort */ }
@@ -828,6 +910,7 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
       permissions.cancelAll();
       activeAutopilotCompletion?.resolve('terminated');
       activeAutopilotCompletion = null;
+      rejectNativeModeConfirmation('Copilot connection closed during native mode confirmation');
       if (session) driver.forget(session.sessionId);
       try { conn?.close(); } catch { /* best-effort */ }
       try { child?.kill(); } catch { /* best-effort */ }

@@ -65,6 +65,19 @@ const COPILOT_CONFIG = [
   },
 ] as unknown as SessionConfigOption[];
 
+const COPILOT_MODE_CONFIG = {
+  id: 'mode',
+  name: 'Mode',
+  category: 'mode',
+  type: 'select',
+  currentValue: COPILOT_AGENT_MODE_ID,
+  options: [
+    { value: COPILOT_AGENT_MODE_ID, name: 'Agent' },
+    { value: COPILOT_PLAN_MODE_ID, name: 'Plan' },
+    { value: COPILOT_AUTOPILOT_MODE_ID, name: 'Autopilot' },
+  ],
+} as unknown as SessionConfigOption;
+
 const PERMISSION_OPTIONS: PermissionOption[] = [
   { optionId: 'allow-once', name: 'Allow once', kind: 'allow_once' },
   { optionId: 'allow-always', name: 'Always allow', kind: 'allow_always' },
@@ -988,6 +1001,100 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
         mode: expect.objectContaining({ currentValue: autopilotMode }),
       }),
     }));
+    backend.dispose();
+  });
+
+  it('confirms saved native mode from a notification emitted before set_mode responds', async () => {
+    const mock = createMockAcpAgent({
+      modes: COPILOT_MODES,
+      configOptions: COPILOT_CONFIG,
+      updatesOnSetMode: [{
+        sessionUpdate: 'current_mode_update',
+        currentModeId: COPILOT_AUTOPILOT_MODE_ID,
+      }],
+    });
+    const backend = createCopilotBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
+
+    const caps = await backend.gatherCapabilities!(
+      '/tmp/project', undefined, undefined, { nativeMode: COPILOT_AUTOPILOT_MODE_ID },
+    );
+
+    expect(caps.permissionControl).toMatchObject({
+      strategy: 'native',
+      mode: { currentValue: COPILOT_AUTOPILOT_MODE_ID },
+    });
+    backend.dispose();
+  });
+
+  it('confirms saved native mode from a mode-bearing config snapshot', async () => {
+    const configWithMode = [...COPILOT_CONFIG, COPILOT_MODE_CONFIG];
+    const confirmedConfig = withConfigSelection(configWithMode, 'mode', COPILOT_PLAN_MODE_ID);
+    const mock = createMockAcpAgent({
+      modes: COPILOT_MODES,
+      configOptions: configWithMode,
+      updatesOnSetMode: [{
+        sessionUpdate: 'config_option_update',
+        configOptions: confirmedConfig,
+      }],
+    });
+    const backend = createCopilotBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
+
+    const caps = await backend.gatherCapabilities!(
+      '/tmp/project', undefined, undefined, { nativeMode: COPILOT_PLAN_MODE_ID },
+    );
+
+    expect(caps.permissionControl).toMatchObject({
+      strategy: 'native',
+      mode: { currentValue: COPILOT_PLAN_MODE_ID },
+    });
+    backend.dispose();
+  });
+
+  it('rejects a conflicting authoritative native mode update', async () => {
+    const mock = createMockAcpAgent({
+      modes: COPILOT_MODES,
+      configOptions: COPILOT_CONFIG,
+      updatesOnSetMode: [{
+        sessionUpdate: 'current_mode_update',
+        currentModeId: COPILOT_PLAN_MODE_ID,
+      }],
+    });
+    const backend = createCopilotBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
+
+    await expect(backend.gatherCapabilities!(
+      '/tmp/project', undefined, undefined, { nativeMode: COPILOT_AUTOPILOT_MODE_ID },
+    )).rejects.toThrow(/native mode/);
+    backend.dispose();
+  });
+
+  it('keeps native mode reconciliation pending until session teardown rejects it', async () => {
+    const mock = createMockAcpAgent({ modes: COPILOT_MODES, configOptions: COPILOT_CONFIG });
+    const backend = createCopilotBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
+    let settled = false;
+
+    const gathering = backend.gatherCapabilities!(
+      '/tmp/project', undefined, undefined, { nativeMode: COPILOT_AUTOPILOT_MODE_ID },
+    ).finally(() => { settled = true; });
+    const rejection = expect(gathering).rejects.toThrow(/session.*closed|connection.*closed/i);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(settled).toBe(false);
+
+    backend.reconnect!();
+    await rejection;
+    backend.dispose();
+  });
+
+  it('fails native mode reconciliation after its bounded confirmation timeout', async () => {
+    const mock = createMockAcpAgent({ modes: COPILOT_MODES, configOptions: COPILOT_CONFIG });
+    const backend = createCopilotBackend({
+      openAgent: () => ({ target: mock }),
+      getShelfMcp: async () => null,
+      modeConfirmationTimeoutMs: 10,
+    });
+
+    await expect(backend.gatherCapabilities!(
+      '/tmp/project', undefined, undefined, { nativeMode: COPILOT_AUTOPILOT_MODE_ID },
+    )).rejects.toThrow(/within 10ms/);
     backend.dispose();
   });
 
