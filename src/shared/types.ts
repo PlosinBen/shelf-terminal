@@ -27,6 +27,8 @@ export interface AgentPrefs {
   model?: string;
   effort?: string;
   permissionMode?: string;
+  nativeMode?: string;
+  nativePermission?: string;
 }
 
 /**

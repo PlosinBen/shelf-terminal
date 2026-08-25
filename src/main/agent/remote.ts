@@ -1,6 +1,6 @@
 import { log } from '@shared/logger';
 import { SHELF_PERMISSION_CONTROL } from '@shared/permission-controls';
-import type { Connection, AgentProvider, AgentInitPhase, AgentQueueItem, ProviderModel, TaskEvent, ConnectionHealth, ConnectionHealthState } from '@shared/types';
+import type { AgentPrefs, Connection, AgentProvider, AgentInitPhase, AgentQueueItem, ProviderModel, TaskEvent, ConnectionHealth, ConnectionHealthState } from '@shared/types';
 import type { AgentBackend, AgentEvent, AgentQueryOptions, PickerResolvePayload } from './types';
 import { ConnectionHealthTracker, DEFAULT_HEALTH_THRESHOLDS } from './connection-health';
 import { ChildProcess, spawn, execSync, execFileSync } from 'child_process';
@@ -208,7 +208,7 @@ export function createRemoteBackend(
   async function probeCapabilities(
     cwd: string,
     customModels?: ProviderModel[],
-    intent?: { model?: string; effort?: string; permissionMode?: string },
+    intent?: AgentPrefs,
     reportPhase = true,
   ): Promise<import('./types').ProviderCapabilities> {
     const proc = await ensureProcReady(cwd, reportPhase);
@@ -438,7 +438,7 @@ export function createRemoteBackend(
     async getCapabilities(
       cwd: string,
       customModels?: ProviderModel[],
-      intent?: { model?: string; effort?: string; permissionMode?: string },
+      intent?: AgentPrefs,
     ) {
       return probeCapabilities(cwd, customModels, intent, true);
     },

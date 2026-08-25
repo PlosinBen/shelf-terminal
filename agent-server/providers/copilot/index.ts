@@ -18,6 +18,7 @@ import {
   type StopReason,
 } from '@agentclientprotocol/sdk';
 import { COPILOT_PROVIDER } from '@shared/agent-providers';
+import type { AgentPrefs } from '@shared/types';
 import { PERMISSION_CONTROL_STRATEGIES, type PermissionControlCapabilities } from '@shared/permission-controls';
 import { CONFIG_EDIT_KEYS, formatConfigAck, type ConfigEditKey } from '@shared/config-ack';
 import { parseSlashPrefix } from '@shared/slash-prefix';
@@ -577,7 +578,7 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
       cwd: string,
       _sessionId?: string,
       _customModels?: unknown,
-      intent?: { model?: string; effort?: string; permissionMode?: string },
+      intent?: AgentPrefs,
       _cache?: unknown,
       appId?: string,
       restoreContext?: import('../../context-store').PersistedContext,

@@ -13,7 +13,7 @@ import type { QueryInput, SendFn, ServerBackend, ProviderCapabilities, StatusSeg
 import { severityFromUtilization, pickPermissionModes, pickEffortLevels } from '../types';
 import { parseSlashPrefix } from '@shared/slash-prefix';
 import { formatConfigAck, type ConfigEditKey } from '@shared/config-ack';
-import type { ProviderModel, NormalizedTask } from '@shared/types';
+import type { AgentPrefs, ProviderModel, NormalizedTask } from '@shared/types';
 import { SHELF_PERMISSION_CONTROL } from '@shared/permission-controls';
 import { stripCwd, resolveSkillsPluginRoot, readUploadedImageAttachments } from '../shared';
 import { loadProjectedMcpServers } from '../mcp-config';
@@ -1231,7 +1231,7 @@ export function createClaudeBackend(): ServerBackend {
       cwd: string,
       _sessionId?: string,
       customModels?: ProviderModel[],
-      intent?: { model?: string; effort?: string; permissionMode?: string },
+      intent?: AgentPrefs,
     ): Promise<ProviderCapabilities> {
       // Seed closures from renderer's saved intent so /model /effort /permission
       // slash handlers can re-broadcast capabilities with the right current*.

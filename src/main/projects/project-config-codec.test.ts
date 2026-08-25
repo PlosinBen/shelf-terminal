@@ -107,7 +107,12 @@ describe('project config formatter', () => {
       defaultAgentProvider: 'future-provider',
       agentSessionIds: { 'retired-provider': 'session-1' },
       agentPrefs: {
-        'future-provider': { model: 'future-model', permissionMode: 'custom' },
+        'future-provider': {
+          model: 'future-model',
+          permissionMode: 'custom',
+          nativeMode: 'autopilot',
+          nativePermission: 'allow-all',
+        },
       },
     };
 

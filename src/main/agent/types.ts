@@ -1,4 +1,4 @@
-import type { AgentAttachment, AgentMessage, AuthMethod, ProviderModel } from '@shared/types';
+import type { AgentAttachment, AgentMessage, AgentPrefs, AuthMethod, ProviderModel } from '@shared/types';
 import type { PermissionControlCapabilities } from '@shared/permission-controls';
 import type { ConfigEditKey } from '@shared/config-ack';
 
@@ -188,7 +188,7 @@ export interface AgentBackend {
   getCapabilities?(
     cwd: string,
     customModels?: ProviderModel[],
-    intent?: { model?: string; effort?: string; permissionMode?: string },
+    intent?: AgentPrefs,
   ): Promise<ProviderCapabilities>;
   storeCredential?(key: string): Promise<void>;
   clearCredential?(): Promise<void>;

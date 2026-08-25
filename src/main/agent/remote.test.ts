@@ -322,6 +322,31 @@ describe('remote backend', () => {
     backend.dispose();
   });
 
+  it('forwards provider-native saved preferences in capabilities intent', async () => {
+    const { child, writes } = capabilitiesChild({});
+    vi.mocked(spawn).mockImplementationOnce(() => {
+      setTimeout(() => child.stdout.emit('data', Buffer.from('{"type":"ready"}\n')), 0);
+      return child;
+    });
+    const { createRemoteBackend } = await import('./remote');
+    const backend = createRemoteBackend({ type: 'local' } as any);
+
+    await backend.getCapabilities!('/tmp', undefined, {
+      model: 'gpt-5.4',
+      effort: 'high',
+      nativeMode: 'autopilot',
+      nativePermission: 'on',
+    });
+
+    expect(writes.find((message) => message.type === 'get_capabilities')?.intent).toEqual({
+      model: 'gpt-5.4',
+      effort: 'high',
+      nativeMode: 'autopilot',
+      nativePermission: 'on',
+    });
+    backend.dispose();
+  });
+
   it('dispose does not throw when no process exists', async () => {
     const { createRemoteBackend } = await import('./remote');
     const backend = createRemoteBackend({ type: 'local' } as any);

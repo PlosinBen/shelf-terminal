@@ -21,7 +21,7 @@ export function formatResetCountdown(resetsAtMs: number): string | null {
   return `${Math.ceil(d / 60_000)}m`;
 }
 
-import type { AgentAttachment, AgentProvider, AgentQueueItem, ProviderModel, TaskEvent } from '@shared/types';
+import type { AgentAttachment, AgentPrefs, AgentProvider, AgentQueueItem, ProviderModel, TaskEvent } from '@shared/types';
 import type { PermissionControlCapabilities } from '@shared/permission-controls';
 import type { ConfigEditKey } from '@shared/config-ack';
 import type { MemoryUsageReport } from '@shared/process-memory';
@@ -440,7 +440,7 @@ export interface ServerBackend {
     cwd: string,
     sessionId?: string,
     customModels?: ProviderModel[],
-    intent?: { model?: string; effort?: string; permissionMode?: string },
+    intent?: AgentPrefs,
     /**
      * Per-host model cache (dispatch-layering group E). A provider whose caps
      * include an expensive network model fetch (Copilot's `listModels`) consults

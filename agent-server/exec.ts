@@ -22,7 +22,7 @@ import { setWireSink } from './logger';
 import { createSendQueue } from './send-queue';
 import { createBackendRegistry, type BackendFactory } from './backend-registry';
 import { projectAppSkills } from './providers/shared';
-import type { AgentAttachment } from '@shared/types';
+import type { AgentAttachment, AgentPrefs } from '@shared/types';
 import type { OutgoingMessage, QueryInput, ServerBackend, PickerResolvePayload, ModelCacheClient } from './providers/types';
 import type { ProviderModel, AgentProvider } from '@shared/types';
 import {
@@ -100,7 +100,7 @@ interface IncomingMessage {
    * session-stateful providers (Copilot) can seed currentModel/currentEffort/
    * currentPermissionMode closures before reporting `current*` back.
    */
-  intent?: { model?: string; effort?: string; permissionMode?: string };
+  intent?: AgentPrefs;
 }
 
 // Session id assigned by the dispatcher at spawn (`--sid=<sid>`); undefined when

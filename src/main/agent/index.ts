@@ -3,7 +3,7 @@ import { IPC } from '@shared/ipc-channels';
 import { log } from '@shared/logger';
 import { formatTabLogId } from '@shared/tab-id';
 import { providerLabel } from '@shared/agent-providers';
-import type { AgentAttachment, Connection, AgentProvider } from '@shared/types';
+import type { AgentAttachment, AgentPrefs, Connection, AgentProvider } from '@shared/types';
 import type { ConfigEditKey } from '@shared/config-ack';
 import type { AgentSessionState, AgentEvent, AgentBackend, PermissionResult, ProviderCapabilities } from './types';
 import { createRemoteBackend, syncSkillsForConnection } from './remote';
@@ -437,7 +437,7 @@ async function startSession(
     // payload. Seeds the provider's session-level closures before the first
     // capabilities event so renderer's status bar reflects saved prefs after
     // reconnect instead of the provider's hardcoded default ("ask" etc.).
-    const intent = (opts as { intent?: { model?: string; effort?: string; permissionMode?: string } } | undefined)?.intent;
+    const intent = (opts as { intent?: AgentPrefs } | undefined)?.intent;
     backend.getCapabilities(cwd, customModels, intent).then((caps) => {
       // Capabilities first so AuthPane can read caps.authMethod for its
       // instructions; then flip auth (reusing the existing auth_required

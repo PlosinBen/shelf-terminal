@@ -173,7 +173,7 @@ function objectArray<T>(
 function normalizeAgentPrefs(value: unknown, context: string): AgentPrefs {
   if (!isRecord(value)) throw new SchemaIssue(context, 'expected agent preferences object');
   const result: AgentPrefs = {};
-  for (const key of ['model', 'effort', 'permissionMode'] as const) {
+  for (const key of ['model', 'effort', 'permissionMode', 'nativeMode', 'nativePermission'] as const) {
     const entry = value[key];
     if (entry !== undefined && typeof entry !== 'string') {
       throw new SchemaIssue(`${context}.${key}`, 'expected string');
