@@ -22,5 +22,15 @@ export function persistedPrefsFromCapabilities(
     && capabilities.currentPermissionMode !== saved?.permissionMode) {
     partial.permissionMode = capabilities.currentPermissionMode;
   }
+  if (capabilities.permissionControl?.strategy === 'native') {
+    const nativeMode = capabilities.permissionControl.mode?.currentValue;
+    if (nativeMode && nativeMode !== saved?.nativeMode) {
+      partial.nativeMode = nativeMode;
+    }
+    const nativePermission = capabilities.permissionControl.permission?.currentValue;
+    if (nativePermission && nativePermission !== saved?.nativePermission) {
+      partial.nativePermission = nativePermission;
+    }
+  }
   return partial;
 }

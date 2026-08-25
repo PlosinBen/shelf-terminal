@@ -123,11 +123,18 @@ export function AgentView({ tabId, cwd, connection, provider, projectId, visible
    * event.
    */
   const capabilities = tabState?.capabilities;
+  const permissionControl = capabilities?.permissionControl;
+  const nativeMode = permissionControl?.strategy === 'native'
+    ? permissionControl.mode?.currentValue
+    : undefined;
+  const nativePermission = permissionControl?.strategy === 'native'
+    ? permissionControl.permission?.currentValue
+    : undefined;
   useEffect(() => {
     if (!capabilities) return;
     const partial = persistedPrefsFromCapabilities(capabilities, savedPrefs);
     if (Object.keys(partial).length > 0) persistPref(partial);
-  }, [capabilities?.currentModel, capabilities?.currentEffort, capabilities?.currentPermissionMode, savedPrefs?.model, savedPrefs?.effort, savedPrefs?.permissionMode, persistPref]);
+  }, [capabilities?.currentModel, capabilities?.currentEffort, capabilities?.currentPermissionMode, nativeMode, nativePermission, savedPrefs?.model, savedPrefs?.effort, savedPrefs?.permissionMode, savedPrefs?.nativeMode, savedPrefs?.nativePermission, persistPref]);
 
   const handleRetryInit = useCallback(() => {
     setInitStatusStore(tabId, 'starting');
