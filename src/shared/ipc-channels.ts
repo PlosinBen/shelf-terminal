@@ -151,6 +151,12 @@ export const IPC = {
   // main→renderer: open a Web tab navigated to a URL (post-approval).
   WEB_OPEN_TAB: 'web:open-tab',
 
+  // App-wide external URL intent gate. Main owns validation, queueing, and the
+  // selected clipboard/default-app side effect; renderer only presents and resolves.
+  EXTERNAL_URL_INTENT_REQUEST: 'external-url-intent:request',
+  EXTERNAL_URL_INTENT_RESOLVE: 'external-url-intent:resolve',
+  EXTERNAL_URL_INTENT_CLOSE: 'external-url-intent:close',
+
   // App info
   APP_LOGS_PATH: 'app:logs-path',
   // renderer→main fire-and-forget diagnostic log → main log file (persists when

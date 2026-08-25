@@ -254,6 +254,20 @@ contextBridge.exposeInMainWorld('shelfApi', {
       return () => ipcRenderer.removeListener(IPC.WEB_OPEN_TAB, listener);
     },
   },
+  externalUrlIntent: {
+    resolve: (requestId: string, decision: import('../shared/external-url-intent').ExternalUrlIntentDecision) =>
+      ipcRenderer.invoke(IPC.EXTERNAL_URL_INTENT_RESOLVE, { requestId, decision }),
+    onRequest: (callback: (request: import('../shared/external-url-intent').ExternalUrlIntentRequest) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, request: import('../shared/external-url-intent').ExternalUrlIntentRequest) => callback(request);
+      ipcRenderer.on(IPC.EXTERNAL_URL_INTENT_REQUEST, listener);
+      return () => ipcRenderer.removeListener(IPC.EXTERNAL_URL_INTENT_REQUEST, listener);
+    },
+    onClose: (callback: (requestId: string) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, payload: { requestId: string }) => callback(payload.requestId);
+      ipcRenderer.on(IPC.EXTERNAL_URL_INTENT_CLOSE, listener);
+      return () => ipcRenderer.removeListener(IPC.EXTERNAL_URL_INTENT_CLOSE, listener);
+    },
+  },
   pm: {
     send: (message: string) => ipcRenderer.invoke(IPC.PM_SEND, message),
     stop: () => ipcRenderer.invoke(IPC.PM_STOP),

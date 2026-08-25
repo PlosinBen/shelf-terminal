@@ -15,6 +15,7 @@ import { registerUpdaterHandlers } from './updater';
 import { registerPmHandlers } from './pm';
 import { registerFindHandlers } from './find';
 import { registerProcessMemoryHandlers } from './process-memory';
+import { registerExternalUrlIntentHandlers } from './external-url-intent';
 
 /**
  * Registers every domain's IPC handlers. Agent handlers are registered
@@ -39,4 +40,5 @@ export function registerAllIpcHandlers(): void {
   registerPmHandlers();
   registerFindHandlers();
   registerProcessMemoryHandlers();
+  registerExternalUrlIntentHandlers();
 }

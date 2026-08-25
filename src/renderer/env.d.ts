@@ -184,6 +184,16 @@ interface ShelfApi {
     onBrowserOpenClose: (callback: (requestId: string) => void) => () => void;
     onOpenTab: (callback: (projectId: string, url: string) => void) => () => void;
   };
+  externalUrlIntent: {
+    resolve: (
+      requestId: string,
+      decision: import('../shared/external-url-intent').ExternalUrlIntentDecision,
+    ) => Promise<void>;
+    onRequest: (
+      callback: (request: import('../shared/external-url-intent').ExternalUrlIntentRequest) => void,
+    ) => () => void;
+    onClose: (callback: (requestId: string) => void) => () => void;
+  };
   pm: {
     send: (message: string) => Promise<void>;
     stop: () => Promise<void>;
