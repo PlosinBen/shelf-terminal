@@ -6,6 +6,7 @@ import { AgentView } from './components/AgentView';
 import { WebTabView } from './components/WebTabView';
 import { WebPermissionPrompt } from './components/WebPermissionPrompt';
 import { BrowserOpenPrompt } from './components/BrowserOpenPrompt';
+import { ExternalUrlIntentPrompt } from './components/ExternalUrlIntentPrompt';
 import { FolderPicker } from './components/FolderPicker';
 import { SettingsPanel } from './components/SettingsPanel';
 import { SearchBar } from './components/SearchBar';
@@ -24,8 +25,9 @@ import { McpView } from './components/McpView';
 import { BackupView } from './components/BackupView';
 import { QuickNoteOverlay } from './components/QuickNoteOverlay';
 import { useKeybindings } from './hooks/useKeybindings';
-import { useStore, setSettings, setUpdateStatus, addTab, addTerminalTabForSource, setActiveTab, removeTab, setSplitTab, clearUnread, setInvalidProjects, setPmActive, setConnectionHealth, setActiveProjectById, getProjectById, getProjectViews, getProjectIndexById, getCanonicalProjectById, reconcileProjects, listStableProjectViews, showProjectNotice, resolveAgentProviderForOpen, resolveAgentProviderForConnect } from './store';
+import { useStore, setSettings, setUpdateStatus, addTab, addTerminalTabForSource, setActiveTab, removeTab, setSplitTab, clearUnread, setInvalidProjects, setPmActive, setConnectionHealth, setActiveProjectById, getProjectById, getProjectViews, getProjectIndexById, getCanonicalProjectById, reconcileProjects, listStableProjectViews, showProjectNotice, resolveAgentProviderForOpen, resolveAgentProviderForConnect, projectDisplayLabel, enqueueExternalUrlIntent, removeExternalUrlIntent, beginExternalUrlIntentResolution, setExternalUrlIntentError } from './store';
 import type { ConnectionHealth } from '@shared/types';
+import type { ExternalUrlIntentDecision } from '@shared/external-url-intent';
 import type { Project, ProjectCreateInput } from '@shared/projects';
 import { disposeTerminal } from './components/TerminalView';
 import { teardownTab } from './tab-teardown';
@@ -163,6 +165,54 @@ export function App() {
   }, []);
 
   useEffect(() => bindProcessMemorySummary(), []);
+
+  useEffect(() => {
+    const cancelUnattributed = (requestId: string, detail: string) => {
+      console.warn(`[external-url-intent] ${detail}; cancelling ${requestId}`);
+      void window.shelfApi.externalUrlIntent.resolve(requestId, 'cancel').catch(() => {
+        console.error('[external-url-intent] failed to cancel unattributed request');
+      });
+    };
+
+    const offRequest = window.shelfApi.externalUrlIntent.onRequest((request) => {
+      let sourceLabel: string;
+      if (request.source.kind === 'project-tab') {
+        const source = request.source;
+        const project = getProjectById(source.projectId);
+        if (!project) {
+          cancelUnattributed(request.requestId, `unknown project ${source.projectId}`);
+          return;
+        }
+        const tab = project.tabs.find((candidate) => candidate.id === source.tabId);
+        if (!tab) {
+          cancelUnattributed(request.requestId, `unknown tab ${source.tabId} in project ${source.projectId}`);
+          return;
+        }
+        setActiveProjectById(source.projectId);
+        sourceLabel = `${projectDisplayLabel(project)} / ${tab.label}`;
+      } else {
+        sourceLabel = 'Shelf app window';
+      }
+      enqueueExternalUrlIntent({ ...request, sourceLabel });
+    });
+    const offClose = window.shelfApi.externalUrlIntent.onClose(removeExternalUrlIntent);
+    const offDecision = on(Events.EXTERNAL_URL_INTENT_DECIDE, async (
+      requestId: string,
+      decision: ExternalUrlIntentDecision,
+    ) => {
+      if (!beginExternalUrlIntentResolution(requestId)) return;
+      try {
+        await window.shelfApi.externalUrlIntent.resolve(requestId, decision);
+      } catch (error) {
+        console.error('[external-url-intent] selected action failed');
+        setExternalUrlIntentError(
+          requestId,
+          error instanceof Error ? error.message : 'The selected action failed.',
+        );
+      }
+    });
+    return () => { offRequest(); offClose(); offDecision(); };
+  }, []);
 
   // Backup panel intents cross the renderer→main boundary here. The view owns
   // rendering only; session/request revisions prevent a closed or superseded
@@ -732,6 +782,7 @@ export function App() {
       <RemoveConfirmDialog />
       <WebPermissionPrompt />
       <BrowserOpenPrompt />
+      <ExternalUrlIntentPrompt />
     </div>
   );
 }

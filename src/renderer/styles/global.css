@@ -5538,3 +5538,8 @@ button {
 .browser-open-url { word-break: break-all; }
 /* browser_open popup: the agent's (non-authoritative) reason, shown first. */
 .browser-open-reason { font-size: 12px; color: var(--text); font-style: italic; margin-bottom: 2px; }
+.external-url-intent-overlay .agent-permission { max-width: 560px; }
+.external-url-intent-reason { font-size: 12px; color: var(--text); margin-bottom: 2px; }
+.external-url-intent-url { word-break: break-all; user-select: text; }
+.external-url-intent-error { color: var(--agent-error, #e06c75); font-size: 12px; margin-top: 4px; }
+.external-url-intent-overlay.is-resolving .agent-perm-option { opacity: 0.55; pointer-events: none; }

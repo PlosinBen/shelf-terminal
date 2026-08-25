@@ -39,6 +39,31 @@ export interface SelectionPanelProps {
   onCancel?: () => void;
 }
 
+export type SelectionKeyDecision =
+  | { kind: 'move'; index: number }
+  | { kind: 'select'; index: number }
+  | { kind: 'cancel' }
+  | { kind: 'ignore' };
+
+export function decideSelectionKey(
+  key: string,
+  selected: number,
+  optionCount: number,
+  cancellable: boolean,
+  isComposing: boolean,
+): SelectionKeyDecision {
+  if (isComposing || optionCount === 0) return { kind: 'ignore' };
+  if (key === 'ArrowUp') {
+    return { kind: 'move', index: selected > 0 ? selected - 1 : optionCount - 1 };
+  }
+  if (key === 'ArrowDown') {
+    return { kind: 'move', index: selected < optionCount - 1 ? selected + 1 : 0 };
+  }
+  if (key === 'Enter') return { kind: 'select', index: selected };
+  if (key === 'Escape' && cancellable) return { kind: 'cancel' };
+  return { kind: 'ignore' };
+}
+
 export function SelectionPanel({
   title,
   description,
@@ -55,21 +80,15 @@ export function SelectionPanel({
 
   useEffect(() => {
     if (options.length === 0) return;
-    const max = options.length - 1;
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        setSelected((p) => (p > 0 ? p - 1 : max));
-      } else if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        setSelected((p) => (p < max ? p + 1 : 0));
-      } else if (e.key === 'Enter') {
-        e.preventDefault();
-        const opt = options[selected];
-        if (opt) onSelect(opt.value);
-      } else if (e.key === 'Escape' && cancellable) {
-        e.preventDefault();
-        onCancel?.();
+      const decision = decideSelectionKey(e.key, selected, options.length, cancellable, e.isComposing);
+      if (decision.kind === 'ignore') return;
+      e.preventDefault();
+      if (decision.kind === 'move') setSelected(decision.index);
+      else if (decision.kind === 'cancel') onCancel?.();
+      else {
+        const option = options[decision.index];
+        if (option) onSelect(option.value);
       }
     };
     // Capture phase so we beat xterm / global combo handlers that consume keys.

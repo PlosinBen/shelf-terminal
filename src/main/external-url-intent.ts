@@ -28,3 +28,9 @@ export const externalUrlIntentGate = new ExternalUrlIntentGate({
 export function requestExternalUrlIntent(input: ExternalUrlIntentInput | unknown) {
   return externalUrlIntentGate.request(input);
 }
+
+if (process.env.SHELF_TEST_MODE === '1') {
+  (globalThis as typeof globalThis & {
+    __shelfTestRequestExternalUrlIntent?: typeof requestExternalUrlIntent;
+  }).__shelfTestRequestExternalUrlIntent = requestExternalUrlIntent;
+}

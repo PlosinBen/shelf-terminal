@@ -41,6 +41,7 @@ export const Events = {
   OPEN_PM: 'open-pm',                 // ()
   NEW_AGENT_TAB: 'new-agent-tab',     // (projectId, provider?)
   NEW_WEB_TAB: 'new-web-tab',         // (projectId, url?) — url pre-navigates the tab
+  EXTERNAL_URL_INTENT_DECIDE: 'external-url-intent-decide', // (requestId, decision)
 } as const;
 
 // Test helper — clears every registered handler. Tests run in shared
