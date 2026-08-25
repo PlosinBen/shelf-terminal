@@ -71,6 +71,18 @@ const PERMISSION_OPTIONS: PermissionOption[] = [
   { optionId: 'reject-once', name: 'Reject once', kind: 'reject_once' },
 ];
 
+function withConfigSelection(
+  configOptions: SessionConfigOption[],
+  configId: string,
+  value: string,
+): SessionConfigOption[] {
+  return configOptions.map((option) => (
+    option.id === configId && option.type === 'select'
+      ? { ...option, currentValue: value }
+      : option
+  ));
+}
+
 describe('acp-copilot backend (via mock ACP agent)', () => {
   it('confirms stop only when the active ACP prompt returns cancelled', async () => {
     let promptStarted!: () => void;
@@ -648,6 +660,120 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
     expect(sessionOut).toContainEqual(expect.objectContaining({
       type: 'message',
       msgType: 'system',
+      content: 'Previous Copilot session was unavailable; started a new session.',
+    }));
+    backend.dispose();
+  });
+
+  it('reapplies saved config to a replacement session without publishing intermediate capabilities', async () => {
+    let liveConfig = COPILOT_CONFIG;
+    const setConfigCalls: Array<{ configId?: string; value?: string }> = [];
+    const mock = createMockAcpAgent({
+      sessionId: 'fresh-acp-session',
+      modes: COPILOT_MODES,
+      configOptions: COPILOT_CONFIG,
+      loadSessionError: 'Resource not found: Session persisted-acp-session not found',
+      get configOptionsOnSetConfigOption() { return liveConfig; },
+      onSetConfigOption: (params) => {
+        const call = params as { configId?: string; value?: string };
+        setConfigCalls.push(call);
+        if (call.configId && call.value) {
+          liveConfig = withConfigSelection(liveConfig, call.configId, call.value);
+        }
+      },
+    });
+    const backend = createCopilotBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
+    const sessionOut: OutgoingMessage[] = [];
+    backend.bindSessionSend!((message) => sessionOut.push(message));
+
+    const caps = await backend.gatherCapabilities!(
+      '/tmp/project',
+      'shelf-session',
+      undefined,
+      { model: 'gpt-5.4', effort: 'high', nativePermission: 'on' },
+      undefined,
+      'app-1',
+      {
+        sessionId: 'shelf-session',
+        provider: 'copilot',
+        updatedAt: 1,
+        lastSdkSessionId: 'persisted-acp-session',
+      },
+    );
+
+    expect(setConfigCalls).toEqual([
+      expect.objectContaining({ configId: 'model', value: 'gpt-5.4' }),
+      expect.objectContaining({ configId: 'reasoning_effort', value: 'high' }),
+      expect.objectContaining({ configId: 'allow_all', value: 'on' }),
+    ]);
+    expect(caps).toMatchObject({
+      currentModel: 'gpt-5.4',
+      currentEffort: 'high',
+      permissionControl: {
+        strategy: 'native',
+        permission: { currentValue: 'on' },
+      },
+    });
+    expect(sessionOut).not.toContainEqual(expect.objectContaining({ type: 'capabilities' }));
+    expect(sessionOut).toContainEqual(expect.objectContaining({
+      type: 'message',
+      msgType: 'system',
+      content: 'Previous Copilot session was unavailable; started a new session.',
+    }));
+    backend.dispose();
+  });
+
+  it('reapplies saved config after a successful resume without publishing intermediate capabilities', async () => {
+    let liveConfig = COPILOT_CONFIG;
+    const setConfigCalls: Array<{ configId?: string; value?: string }> = [];
+    const mock = createMockAcpAgent({
+      agentCapabilities: { sessionCapabilities: { resume: {} } },
+      modes: COPILOT_MODES,
+      configOptions: COPILOT_CONFIG,
+      get configOptionsOnSetConfigOption() { return liveConfig; },
+      onSetConfigOption: (params) => {
+        const call = params as { configId?: string; value?: string };
+        setConfigCalls.push(call);
+        if (call.configId && call.value) {
+          liveConfig = withConfigSelection(liveConfig, call.configId, call.value);
+        }
+      },
+    });
+    const backend = createCopilotBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
+    const sessionOut: OutgoingMessage[] = [];
+    backend.bindSessionSend!((message) => sessionOut.push(message));
+
+    const caps = await backend.gatherCapabilities!(
+      '/tmp/project',
+      'shelf-session',
+      undefined,
+      { model: 'gpt-5.4', effort: 'high', nativePermission: 'on' },
+      undefined,
+      'app-1',
+      {
+        sessionId: 'shelf-session',
+        provider: 'copilot',
+        updatedAt: 1,
+        lastSdkSessionId: 'persisted-acp-session',
+      },
+    );
+
+    expect(setConfigCalls.map(({ configId, value }) => ({ configId, value }))).toEqual([
+      { configId: 'model', value: 'gpt-5.4' },
+      { configId: 'reasoning_effort', value: 'high' },
+      { configId: 'allow_all', value: 'on' },
+    ]);
+    expect(caps).toMatchObject({
+      currentModel: 'gpt-5.4',
+      currentEffort: 'high',
+      permissionControl: {
+        strategy: 'native',
+        permission: { currentValue: 'on' },
+      },
+    });
+    expect(sessionOut).not.toContainEqual(expect.objectContaining({ type: 'capabilities' }));
+    expect(sessionOut).not.toContainEqual(expect.objectContaining({
+      type: 'message',
       content: 'Previous Copilot session was unavailable; started a new session.',
     }));
     backend.dispose();

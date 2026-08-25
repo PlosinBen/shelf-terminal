@@ -150,6 +150,7 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
   let sessionConfigOptions: SessionConfigOption[] | undefined;
   let currentModel: string | undefined;
   let currentEffort: string | undefined;
+  let reconcilingCapabilities = false;
 
   const onRequestPermission: PermissionHandler = (context) => permissions.onRequestPermission(context);
 
@@ -248,6 +249,7 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
   }
 
   function publishCapabilities(): void {
+    if (reconcilingCapabilities) return;
     (sessionSend ?? activeExecutionSend)?.({ type: 'capabilities', ...buildCapabilities() });
   }
 
@@ -287,15 +289,19 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
   });
 
   async function applyModel(model: string): Promise<void> {
+    if (currentModel === model) return;
     const configId = configOptionIdForCategory(sessionConfigOptions, MODEL_CATEGORY);
-    if (conn && session && configId) await driver.setConfigOption(conn.agent, session, configId, model);
-    else if (conn && session) serverLog('warn', 'copilot', `setModel: no model config option on session ${session.sessionId}`);
+    if (!conn || !session) throw new Error('Copilot has no live session for model configuration');
+    if (!configId) throw new Error(`Copilot did not advertise a ${MODEL_CATEGORY} config option`);
+    await driver.setConfigOption(conn.agent, session, configId, model);
   }
 
   async function applyEffort(effort: string): Promise<void> {
+    if (currentEffort === effort) return;
     const configId = configOptionIdForCategory(sessionConfigOptions, EFFORT_CATEGORY);
-    if (conn && session && configId) await driver.setConfigOption(conn.agent, session, configId, effort);
-    else if (conn && session) serverLog('warn', 'copilot', `setEffort: no thought_level config option on session ${session.sessionId}`);
+    if (!conn || !session) throw new Error('Copilot has no live session for effort configuration');
+    if (!configId) throw new Error(`Copilot did not advertise a ${EFFORT_CATEGORY} config option`);
+    await driver.setConfigOption(conn.agent, session, configId, effort);
   }
 
   async function applyNativeMode(modeId: string): Promise<void> {
@@ -308,7 +314,78 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
   async function applyNativePermission(value: string): Promise<void> {
     const option = sessionConfigOptions?.find((candidate) => candidate.id === COPILOT_PERMISSION_OPTION_ID);
     if (!option || option.type !== 'select') throw new Error(`Copilot did not advertise ${COPILOT_PERMISSION_OPTION_ID} as a select option`);
-    if (conn && session) await driver.setConfigOption(conn.agent, session, option.id, value);
+    if (!conn || !session) throw new Error('Copilot has no live session for native permission configuration');
+    if (option.currentValue === value) return;
+    await driver.setConfigOption(conn.agent, session, option.id, value);
+  }
+
+  function selectOptionValues(option: SessionConfigOption | undefined): string[] {
+    if (!option || option.type !== 'select') return [];
+    return option.options.flatMap((candidate) => (
+      'options' in candidate
+        ? candidate.options.map((nested) => nested.value)
+        : [candidate.value]
+    ));
+  }
+
+  function validateSavedSelection(label: string, option: SessionConfigOption | undefined, value: string): void {
+    if (!option || option.type !== 'select') {
+      throw new Error(`Copilot did not advertise ${label} as a select option`);
+    }
+    if (!selectOptionValues(option).includes(value)) {
+      throw new Error(`Copilot did not advertise saved ${label} value "${value}"`);
+    }
+  }
+
+  function currentNativePermission(): string | undefined {
+    const option = sessionConfigOptions?.find((candidate) => candidate.id === COPILOT_PERMISSION_OPTION_ID);
+    return option?.type === 'select' ? option.currentValue : undefined;
+  }
+
+  function hydrateCurrentSelections(): void {
+    const current = currentSelections({ modes: sessionModes, configOptions: sessionConfigOptions });
+    currentModel = current.currentModel;
+    currentEffort = current.currentEffort;
+  }
+
+  async function reconcileSavedIntent(intent: AgentPrefs | undefined): Promise<void> {
+    if (!intent) return;
+
+    const modelOption = sessionConfigOptions?.find((option) => option.category === MODEL_CATEGORY);
+    const effortOption = sessionConfigOptions?.find((option) => option.category === EFFORT_CATEGORY);
+    const permissionOption = sessionConfigOptions?.find((option) => option.id === COPILOT_PERMISSION_OPTION_ID);
+
+    // Validate the complete desired set before changing the live session so a
+    // stale later field cannot cause an avoidable partial apply.
+    if (intent.model !== undefined) validateSavedSelection(MODEL_CATEGORY, modelOption, intent.model);
+    if (intent.effort !== undefined) validateSavedSelection(EFFORT_CATEGORY, effortOption, intent.effort);
+    if (intent.nativeMode !== undefined) {
+      if (!sessionModes?.availableModes.some((mode) => mode.id === intent.nativeMode)) {
+        throw new Error(`Copilot did not advertise saved native mode "${intent.nativeMode}"`);
+      }
+    }
+    if (intent.nativePermission !== undefined) {
+      validateSavedSelection(COPILOT_PERMISSION_OPTION_ID, permissionOption, intent.nativePermission);
+    }
+
+    if (intent.model !== undefined && currentModel !== intent.model) {
+      await applyModel(intent.model);
+      if (currentModel !== intent.model) throw new Error(`Copilot confirmed model "${String(currentModel)}" instead of "${intent.model}"`);
+    }
+    if (intent.effort !== undefined && currentEffort !== intent.effort) {
+      await applyEffort(intent.effort);
+      if (currentEffort !== intent.effort) throw new Error(`Copilot confirmed effort "${String(currentEffort)}" instead of "${intent.effort}"`);
+    }
+    if (intent.nativeMode !== undefined && sessionModes?.currentModeId !== intent.nativeMode) {
+      await applyNativeMode(intent.nativeMode);
+      if (sessionModes?.currentModeId !== intent.nativeMode) throw new Error(`Copilot did not confirm native mode "${intent.nativeMode}"`);
+    }
+    if (intent.nativePermission !== undefined && currentNativePermission() !== intent.nativePermission) {
+      await applyNativePermission(intent.nativePermission);
+      if (currentNativePermission() !== intent.nativePermission) {
+        throw new Error(`Copilot did not confirm native permission "${intent.nativePermission}"`);
+      }
+    }
   }
 
   /** Apply a config-edit turn (picker / status-bar): imperative apply + updated
@@ -587,12 +664,31 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
       // COPILOT_HOME (config-home isolation), and login (which follows caps) can
       // reuse it via lastAppId.
       if (appId) lastAppId = appId;
-      // Model/effort retain their existing persisted intent. Native mode and
-      // permission always initialize from provider truth.
-      if (intent?.model) currentModel = intent.model;
-      if (intent?.effort) currentEffort = intent.effort;
+      reconcilingCapabilities = true;
       try {
-        const s = await ensureSession({ cwd, appId, resumeId: restoreContext?.lastSdkSessionId }, null);
+        let s: AcpSession;
+        try {
+          s = await ensureSession({ cwd, appId, resumeId: restoreContext?.lastSdkSessionId }, null);
+        } catch (err: any) {
+          // A persisted pointer means this was a resume attempt. Preserve its
+          // actual failure for init rather than relabeling it as unauthenticated.
+          if (restoreContext?.lastSdkSessionId) throw err;
+          // A fresh session most commonly fails when unauthenticated → surface the
+          // auth pane rather than an empty capability set. FAIL-LOUD: keep the
+          // original error in logs because this remains a broad pre-session probe.
+          serverLog('warn', 'copilot', `gatherCapabilities failed → reporting authRequired: ${err?.message ?? String(err)}`);
+          return {
+            models: [],
+            permissionModes: [],
+            permissionControl: { strategy: PERMISSION_CONTROL_STRATEGIES.NATIVE },
+            effortLevels: [],
+            slashCommands: [],
+            authRequired: true,
+            authMethod: COPILOT_AUTH_METHOD,
+          };
+        }
+        hydrateCurrentSelections();
+        await reconcileSavedIntent(intent);
         // `available_commands_update` arrives out-of-turn just AFTER session/new,
         // so it may not be captured yet. Briefly wait for it (bounded) so the
         // slash-command autocomplete isn't empty on the first caps fetch. Resolves
@@ -600,31 +696,9 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
         for (let i = 0; i < 20 && !driver.getAvailableCommands(s.sessionId); i++) {
           await new Promise((r) => setTimeout(r, 10));
         }
-        // Fill any current* the renderer didn't pin from the agent's live values.
-        const cur = currentSelections({ modes: sessionModes, configOptions: sessionConfigOptions });
-        currentModel ??= cur.currentModel;
-        currentEffort ??= cur.currentEffort;
         return buildCapabilities();
-      } catch (err: any) {
-        // A persisted pointer means this was a resume attempt. Preserve its
-        // actual failure for init rather than relabeling it as unauthenticated.
-        if (restoreContext?.lastSdkSessionId) throw err;
-        // A fresh session most commonly fails when unauthenticated → surface the
-        // auth pane rather than an empty capability set. authMethod drives the
-        // AuthPane's Login button (oauth branch); without it the pane shows no way
-        // to start login. FAIL-LOUD: log the real failure — this is a catch-all, so
-        // without the message a non-auth failure (CLI hang/config) is silently
-        // mislabeled as "needs login".
-        serverLog('warn', 'copilot', `gatherCapabilities failed → reporting authRequired: ${err?.message ?? String(err)}`);
-        return {
-          models: [],
-          permissionModes: [],
-          permissionControl: { strategy: PERMISSION_CONTROL_STRATEGIES.NATIVE },
-          effortLevels: [],
-          slashCommands: [],
-          authRequired: true,
-          authMethod: COPILOT_AUTH_METHOD,
-        };
+      } finally {
+        reconcilingCapabilities = false;
       }
     },
 
