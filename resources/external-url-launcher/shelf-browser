@@ -1,0 +1,11 @@
+#!/bin/sh
+set -eu
+
+[ "$#" -eq 1 ] || exit 64
+url=$1
+[ "${#url}" -gt 0 ] && [ "${#url}" -le 8192 ] || exit 65
+
+encoded=$(printf '%s' "$url" | base64 | tr '/+' '_-' | tr -d '=\r\n')
+[ -n "$encoded" ] && [ "${#encoded}" -le 10923 ] || exit 65
+
+printf '\033]6973;external-url;1;%s\007' "$encoded" > /dev/tty

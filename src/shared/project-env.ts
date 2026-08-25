@@ -23,16 +23,16 @@ export type EnvMap = Record<string, string>;
 /**
  * Shelf-owned env namespace. Reserved keys can't be set at the project level:
  * the `SHELF_*` prefix is Shelf's own control channel (test mode, dispatcher
- * toggles, session leases…), and `ELECTRON_RUN_AS_NODE` flips the app binary
- * between Electron and plain-Node — overriding it would boot a stray window or
- * break the agent-server. Single source of truth; adding a new `SHELF_*` var is
- * auto-reserved.
+ * toggles, session leases…). `ELECTRON_RUN_AS_NODE` flips the app binary between
+ * Electron and plain-Node, while `BROWSER` routes cooperative child-process URL
+ * launches through Shelf. Project config cannot replace either boundary. Single
+ * source of truth; adding a new `SHELF_*` var is auto-reserved.
  */
 export const SHELF_RESERVED_ENV = {
   /** Any variable whose name starts with one of these prefixes is Shelf-owned. */
   prefixes: ['SHELF_'] as readonly string[],
   /** Specific non-prefixed variables Shelf sets and must not be overridden. */
-  keys: ['ELECTRON_RUN_AS_NODE'] as readonly string[],
+  keys: ['ELECTRON_RUN_AS_NODE', 'BROWSER'] as readonly string[],
 } as const;
 
 /** True if `key` is reserved by Shelf and must not be set at the project level. */
@@ -78,17 +78,23 @@ export function sanitizeEnvMap(raw: Record<string, unknown> | undefined | null):
  * Merge a resolved project env map onto a base env map (for a LOCAL child's
  * `env` option). Base = ambient/inherited; project overrides silently. `PATH`
  * merges (project entry prepended to the base PATH) instead of replacing.
- * Reserved keys in `projectEnv` are ignored (backstop). The caller is expected
- * to apply Shelf-required vars AFTER this (the backstop layer).
+ * Reserved keys in `projectEnv` are ignored (backstop). `requiredEnv` is applied
+ * last and may intentionally contain reserved keys owned by Shelf.
  */
 export function applyEnvMap(
   base: Record<string, string | undefined>,
   projectEnv: EnvMap,
+  requiredEnv: EnvMap = {},
 ): EnvMap {
   const out: EnvMap = {};
   for (const [k, v] of Object.entries(base)) if (typeof v === 'string') out[k] = v;
   for (const [k, v] of Object.entries(projectEnv)) {
     if (isReservedEnvKey(k)) continue;
+    if (k === 'PATH') out.PATH = out.PATH ? `${v}:${out.PATH}` : v;
+    else out[k] = v;
+  }
+  for (const [k, v] of Object.entries(requiredEnv)) {
+    if (!ENV_KEY_RE.test(k)) continue;
     if (k === 'PATH') out.PATH = out.PATH ? `${v}:${out.PATH}` : v;
     else out[k] = v;
   }
@@ -105,12 +111,18 @@ function shSingleQuote(value: string): string {
  * shell command (ssh/docker/wsl) where the child inherits the target's ambient
  * env. Values are single-quoted. `PATH` is emitted as a merge
  * (`export PATH='…':"$PATH"`) so the target's own PATH is preserved. Reserved
- * keys are dropped (backstop). Returns '' for an empty map (no-op prefix).
+ * project keys are dropped; `requiredEnv` is emitted last and may contain
+ * Shelf-owned keys. Returns '' for two empty maps (no-op prefix).
  */
-export function buildEnvExportPrefix(projectEnv: EnvMap): string {
+export function buildEnvExportPrefix(projectEnv: EnvMap, requiredEnv: EnvMap = {}): string {
   const parts: string[] = [];
   for (const [k, v] of Object.entries(projectEnv)) {
     if (isReservedEnvKey(k)) continue;
+    if (!ENV_KEY_RE.test(k)) continue;
+    if (k === 'PATH') parts.push(`export PATH=${shSingleQuote(v)}:"$PATH"`);
+    else parts.push(`export ${k}=${shSingleQuote(v)}`);
+  }
+  for (const [k, v] of Object.entries(requiredEnv)) {
     if (!ENV_KEY_RE.test(k)) continue;
     if (k === 'PATH') parts.push(`export PATH=${shSingleQuote(v)}:"$PATH"`);
     else parts.push(`export ${k}=${shSingleQuote(v)}`);

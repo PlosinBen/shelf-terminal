@@ -12,6 +12,7 @@ describe('isReservedEnvKey', () => {
     expect(isReservedEnvKey('SHELF_TEST_MODE')).toBe(true);
     expect(isReservedEnvKey('SHELF_ANYTHING_NEW')).toBe(true); // new SHELF_* auto-reserved
     expect(isReservedEnvKey('ELECTRON_RUN_AS_NODE')).toBe(true);
+    expect(isReservedEnvKey('BROWSER')).toBe(true);
   });
   it('leaves ordinary vars settable', () => {
     expect(isReservedEnvKey('GH_TOKEN')).toBe(false);
@@ -71,8 +72,15 @@ describe('applyEnvMap', () => {
     expect(applyEnvMap({}, { PATH: '/opt/bin' })).toEqual({ PATH: '/opt/bin' });
   });
   it('ignores reserved keys in the project map (backstop)', () => {
-    expect(applyEnvMap({ A: '1' }, { SHELF_X: 'y', ELECTRON_RUN_AS_NODE: '0', B: '2' }))
+    expect(applyEnvMap({ A: '1' }, { SHELF_X: 'y', ELECTRON_RUN_AS_NODE: '0', BROWSER: '/tmp/project-browser', B: '2' }))
       .toEqual({ A: '1', B: '2' });
+  });
+  it('applies Shelf-required values after project values', () => {
+    expect(applyEnvMap(
+      { BROWSER: '/usr/bin/ambient-browser' },
+      { BROWSER: '/tmp/project-browser', FOO: 'project' },
+      { BROWSER: '/opt/shelf/shelf-browser' },
+    )).toMatchObject({ BROWSER: '/opt/shelf/shelf-browser', FOO: 'project' });
   });
 });
 
@@ -91,5 +99,11 @@ describe('buildEnvExportPrefix', () => {
   });
   it('drops reserved keys', () => {
     expect(buildEnvExportPrefix({ SHELF_X: '1', OK: 'v' })).toBe("export OK='v'; ");
+  });
+  it('emits Shelf-required values last so they override project input', () => {
+    expect(buildEnvExportPrefix(
+      { BROWSER: '/tmp/project-browser', OK: 'v' },
+      { BROWSER: "/opt/shelf/browser's launcher" },
+    )).toBe("export OK='v'; export BROWSER='/opt/shelf/browser'\\''s launcher'; ");
   });
 });
