@@ -116,6 +116,47 @@ describe('main projects repository', () => {
     expect(repository.getAll()).toEqual([project('existing')]);
   });
 
+  it('rejects a duplicate effective target before persistence', async () => {
+    const existing = project('existing');
+    const config = persistence([existing]);
+    const repository = readyRepository(config.value, () => 'new-id');
+
+    await expect(repository.add(createInput({
+      cwd: `${existing.cwd}/`,
+      connection: existing.connection,
+    }))).rejects.toMatchObject({
+      name: 'ProjectRepositoryError',
+      operation: 'add',
+    });
+    expect(config.save).not.toHaveBeenCalled();
+    expect(repository.getAll()).toEqual([existing]);
+  });
+
+  it('allows the same cwd on a distinct connection target', async () => {
+    const existing = project('existing');
+    const config = persistence([existing]);
+    const repository = readyRepository(config.value, () => 'new-id');
+
+    await expect(repository.add(createInput({
+      cwd: existing.cwd,
+      connection: { type: 'docker', container: 'dev' },
+    }))).resolves.toMatchObject({ id: 'new-id' });
+    expect(config.save).toHaveBeenCalledOnce();
+  });
+
+  it('loads and saves existing duplicate targets without retroactive validation', async () => {
+    const first = project('first');
+    const second = { ...project('second'), cwd: `${first.cwd}/` };
+    const config = persistence([first, second]);
+    const repository = readyRepository(config.value, () => 'unused');
+
+    await expect(repository.save({ ...first, name: 'renamed' })).resolves.toBeUndefined();
+    expect(config.save).toHaveBeenCalledWith([
+      { ...first, name: 'renamed' },
+      second,
+    ]);
+  });
+
   it('treats identical and missing saves as non-persisting no-ops', async () => {
     const config = persistence([project('a')]);
     const warn = vi.spyOn(log, 'warn');

@@ -1,5 +1,6 @@
 import { isDeepStrictEqual } from 'node:util';
 import { log } from '@shared/logger';
+import { sameProjectTarget } from '@shared/project-target';
 import type {
   Project,
   ProjectCreateInput,
@@ -208,6 +209,13 @@ export function createMainProjectsRepository(
       const project = createProject(createProjectId(), input);
       if (projects.some(({ id }) => id === project.id) || pendingCleanup.has(project.id)) {
         throw new ProjectRepositoryError('add', `generated duplicate project id ${project.id}`);
+      }
+      const duplicate = projects.find((existing) => sameProjectTarget(existing, project));
+      if (duplicate) {
+        throw new ProjectRepositoryError(
+          'add',
+          `duplicate project target matches project ${duplicate.id}`,
+        );
       }
       const candidate = readyCollection([...projects, project], 'add');
       await persist('add', candidate);
