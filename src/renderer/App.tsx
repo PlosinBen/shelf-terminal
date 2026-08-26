@@ -589,6 +589,16 @@ export function App() {
       setActiveTab(projectIndex, 0);
     });
 
+    const offOpenExistingProject = on(Events.OPEN_EXISTING_PROJECT, (projectId: string) => {
+      const project = getProjectById(projectId);
+      if (!project) {
+        console.warn(`[projects] open-existing-project for unknown project ${projectId}`);
+        return;
+      }
+      setActiveProjectById(projectId);
+      if (project.tabs.length === 0) emit(Events.CONNECT_PROJECT, projectId);
+    });
+
     const offDisconnectProject = on(Events.DISCONNECT_PROJECT, (projectId: string) => {
       const projectIndex = getProjectIndexById(projectId);
       const proj = getProjectById(projectId);
@@ -675,7 +685,7 @@ export function App() {
       }
     });
 
-    return () => { offCloseTab(); offRemoveProject(); offWorktreeFinishCompleted(); offNewTab(); offNewAgentTab(); offNewWebTab(); offOpenAuthTerminal(); offOpenWebTab(); offProposeWorktreeCreate(); offProposeWorktreeFinish(); offConnectProject(); offAutoConnect(); offDisconnectProject(); offAddProject(); offUpdateProject(); offReorderProjects(); offToggleSplit(); offSwitchBranch(); };
+    return () => { offCloseTab(); offRemoveProject(); offWorktreeFinishCompleted(); offNewTab(); offNewAgentTab(); offNewWebTab(); offOpenAuthTerminal(); offOpenWebTab(); offProposeWorktreeCreate(); offProposeWorktreeFinish(); offConnectProject(); offOpenExistingProject(); offAutoConnect(); offDisconnectProject(); offAddProject(); offUpdateProject(); offReorderProjects(); offToggleSplit(); offSwitchBranch(); };
   }, []);
 
   useEffect(() => {

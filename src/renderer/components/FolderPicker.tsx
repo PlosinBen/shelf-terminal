@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { useStore } from '../store';
+import { getProjectViews, useStore } from '../store';
 import { FolderBrowser } from './FolderBrowser';
 import { ConnectionStep } from './folder-picker/ConnectionStep';
 import { on, emit, Events } from '../events';
 import type { Connection } from '@shared/types';
 import type { ProjectCreateInput } from '@shared/projects';
+import { sameProjectTarget } from '@shared/project-target';
 
 type Step = 'connection' | 'browse';
 
@@ -162,7 +163,12 @@ export function FolderPicker() {
       maxTabs: settings.defaultMaxTabs,
     };
 
-    emit(Events.ADD_PROJECT, config);
+    const existing = getProjectViews().find((project) => sameProjectTarget(project, config));
+    if (existing) {
+      emit(Events.OPEN_EXISTING_PROJECT, existing.id);
+    } else {
+      emit(Events.ADD_PROJECT, config);
+    }
     setOpen(false);
   };
 

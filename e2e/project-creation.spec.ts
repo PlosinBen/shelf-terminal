@@ -1,4 +1,8 @@
 import { test, expect, readActiveTerminalText } from './helpers';
+import { _electron as electron, type ElectronApplication, type Page } from '@playwright/test';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 
 const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
 
@@ -46,6 +50,76 @@ async function ensureProjectWithTerminal(page: any) {
     await prompt.click();
     await expect(page.locator('.tab-bar .tab')).toHaveCount(1, { timeout: 5_000 });
   }
+}
+
+interface SeededProjectApp {
+  app: ElectronApplication;
+  page: Page;
+  userDataDir: string;
+  targetDir: string;
+  close(): Promise<void>;
+}
+
+function seededProject(id: string, name: string, cwd: string) {
+  return {
+    id,
+    name,
+    cwd,
+    connection: { type: 'local' as const },
+    maxTabs: 5,
+  };
+}
+
+async function launchSeededProjectApp(duplicateCount = 1): Promise<SeededProjectApp> {
+  const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'shelf-duplicate-project-e2e-'));
+  const targetDir = fs.mkdtempSync(path.join(os.homedir(), 'shelf-duplicate-target-'));
+  const otherDir = fs.mkdtempSync(path.join(os.tmpdir(), 'shelf-other-project-'));
+  const projects = [
+    seededProject('first-match', 'First Match', targetDir),
+    ...(duplicateCount > 1
+      ? [seededProject('second-match', 'Second Match', `${targetDir}${path.sep}`)]
+      : []),
+    seededProject('other-project', 'Other Project', otherDir),
+  ];
+  fs.writeFileSync(path.join(userDataDir, 'projects.json'), JSON.stringify(projects), 'utf-8');
+
+  const app = await electron.launch({
+    args: [path.join(__dirname, '..'), `--user-data-dir=${userDataDir}`],
+    env: { ...process.env, SHELF_TEST_MODE: '1', NODE_ENV: 'test' } as Record<string, string>,
+  });
+  const page = await app.firstWindow();
+  await page.waitForSelector('.app', { timeout: 10_000 });
+
+  return {
+    app,
+    page,
+    userDataDir,
+    targetDir,
+    async close() {
+      await app.close().catch(() => {});
+      fs.rmSync(userDataDir, { recursive: true, force: true });
+      fs.rmSync(targetDir, { recursive: true, force: true });
+      fs.rmSync(otherDir, { recursive: true, force: true });
+    },
+  };
+}
+
+async function selectSeededTarget(page: Page, targetDir: string) {
+  await page.locator('.sidebar-btn', { hasText: '+' }).click();
+  await expect(page.locator('.folder-picker-overlay')).toBeVisible({ timeout: 5_000 });
+  await page.locator('.conn-btn-next').click();
+  await expect(page.locator('.fp-browser-path')).toContainText('/', { timeout: 5_000 });
+
+  const targetName = path.basename(targetDir);
+  const targetRow = page.locator('.folder-picker-item').filter({ hasText: targetName });
+  await expect(targetRow).toHaveCount(1);
+  await targetRow.click();
+  await page.keyboard.press(`${modifier}+Enter`);
+  await expect(page.locator('.folder-picker-overlay')).not.toBeVisible({ timeout: 3_000 });
+}
+
+function persistedProjects(userDataDir: string): unknown[] {
+  return JSON.parse(fs.readFileSync(path.join(userDataDir, 'projects.json'), 'utf-8'));
 }
 
 test('open folder picker via sidebar button', async ({ shelfApp: { page } }) => {
@@ -137,8 +211,7 @@ test('select folder and create project', async ({ shelfApp: { page } }) => {
 
   // Project should appear in sidebar (count increases by 1)
   const sidebarItems = page.locator('.sidebar-item');
-  const count = await sidebarItems.count();
-  expect(count).toBeGreaterThanOrEqual(1);
+  await expect(sidebarItems).toHaveCount(1, { timeout: 5_000 });
 });
 
 test('project shows connect prompt before connecting', async ({ shelfApp: { page } }) => {
@@ -186,4 +259,57 @@ test('project shows green status dot', async ({ shelfApp: { page } }) => {
   await ensureProjectWithTerminal(page);
   const statusDot = page.locator('.sidebar-item .status-dot.alive').first();
   await expect(statusDot).toBeVisible({ timeout: 5_000 });
+});
+
+test('selecting a disconnected duplicate reopens and connects the existing project', async () => {
+  const seeded = await launchSeededProjectApp();
+  try {
+    await seeded.page.locator('.sidebar-item', { hasText: 'Other Project' }).click();
+
+    await selectSeededTarget(seeded.page, seeded.targetDir);
+
+    await expect(seeded.page.locator('.sidebar-item.active')).toContainText('First Match');
+    await expect(seeded.page.locator('.tab-bar .tab')).toHaveCount(1, { timeout: 8_000 });
+    expect(persistedProjects(seeded.userDataDir)).toHaveLength(2);
+  } finally {
+    await seeded.close();
+  }
+});
+
+test('selecting a connected duplicate preserves its existing tab without reconnecting', async () => {
+  const seeded = await launchSeededProjectApp();
+  try {
+    await seeded.page.locator('.sidebar-item', { hasText: 'First Match' }).click();
+    await seeded.page.locator('.connect-prompt').click();
+    await expect(seeded.page.locator('.terminal-container:visible')).toBeVisible({ timeout: 8_000 });
+    await seeded.page.locator('.terminal-container:visible').evaluate((element) => {
+      element.setAttribute('data-existing-terminal', 'true');
+    });
+    await seeded.page.locator('.sidebar-item', { hasText: 'Other Project' }).click();
+
+    await selectSeededTarget(seeded.page, seeded.targetDir);
+
+    await expect(seeded.page.locator('.sidebar-item.active')).toContainText('First Match');
+    await expect(seeded.page.locator('[data-existing-terminal="true"]:visible')).toBeVisible();
+    await expect(seeded.page.locator('.tab-bar .tab')).toHaveCount(1);
+    expect(persistedProjects(seeded.userDataDir)).toHaveLength(2);
+  } finally {
+    await seeded.close();
+  }
+});
+
+test('selecting a legacy duplicate target reopens the first project in reconciled order', async () => {
+  const seeded = await launchSeededProjectApp(2);
+  try {
+    await seeded.page.locator('.sidebar-item', { hasText: 'Other Project' }).click();
+
+    await selectSeededTarget(seeded.page, seeded.targetDir);
+
+    await expect(seeded.page.locator('.sidebar-item.active')).toContainText('First Match');
+    await expect(seeded.page.locator('.sidebar-item', { hasText: 'First Match' }).locator('.status-dot')).toHaveClass(/alive/);
+    await expect(seeded.page.locator('.sidebar-item', { hasText: 'Second Match' }).locator('.status-dot')).toHaveClass(/dead/);
+    expect(persistedProjects(seeded.userDataDir)).toHaveLength(3);
+  } finally {
+    await seeded.close();
+  }
 });

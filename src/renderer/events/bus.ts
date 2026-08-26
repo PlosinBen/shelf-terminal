@@ -31,6 +31,7 @@ export const Events = {
   AUTO_CONNECT_PROJECT: 'auto-connect-project', // (projectId) — connect a just-added project once it's in the store
   DISCONNECT_PROJECT: 'disconnect-project', // (projectId)
   OPEN_FOLDER_PICKER: 'open-folder-picker',
+  OPEN_EXISTING_PROJECT: 'open-existing-project', // (projectId)
   ADD_PROJECT: 'add-project',       // (ProjectCreateInput, onSettled?)
   UPDATE_PROJECT: 'update-project', // (projectId, changes)
   REORDER_PROJECTS: 'reorder-projects', // (sourceId, targetId)
