@@ -91,3 +91,19 @@ related:
 - Retry/Cancel is user-controlled; repeated refresh failures remain refresh-only until the user cancels.
 - Worktree secrets and auto-connect begin only after child add returns its main-owned id and renderer reconcile completes. Secret Retry targets the same child; Cancel leaves that durable child disconnected.
 - This is single-renderer, local-file coordination. Do not add global mutation queues, revision conflicts, or file locks without a real second writer.
+
+## projects#8 — Target uniqueness applies only to new project creation  ·  [Decision]
+
+**Decision:** A new project cannot reuse an existing effective target, defined as connection identity plus a lexically normalized `cwd`. Local identity is local-machine scope; SSH identity is user, host, and port; WSL identity is distribution; Docker identity is container. SSH password and idle-shutdown policy do not affect identity. Path normalization removes trailing `/` or `\` separators while preserving roots.
+
+Folder Picker treats a matching selection as reopening the first matching project in current reconciled order. It activates that project and connects it only when the project has no runtime tabs. The main repository independently rejects matching targets at `add` before persistence.
+
+**Reason:** Separate project ids otherwise create independent Shelf state for terminals and agents operating on the same configured files. Renderer preflight fulfills the user's Open Project intent without generic mutation error UX, while the repository guard covers every creation caller and preserves `add` as an unambiguous creation contract.
+
+**Do not change casually because:** Target uniqueness is deliberately add-only and non-retroactive. Persisted load and project save/update must continue accepting existing duplicate records; they are not migrated, merged, deleted, reordered, or repaired. Returning an existing project as a successful `add` would also let creation continuations treat an old project as newly created.
+
+### Gotchas
+
+- Multiple legacy matches resolve to the first project in reconciled order without modifying any record.
+- Target comparison is configuration-level and lexical. It does not use filesystem I/O, `realpath`, symlink resolution, case folding, `.` / `..` normalization, or connection aliases.
+- The same path on distinct connection identities remains valid. A Git worktree remains distinct because its configured working directory differs.

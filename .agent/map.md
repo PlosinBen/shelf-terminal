@@ -207,7 +207,7 @@ title: shelf-terminal — Intent → File Index
 | Tab bar | `components/TabBar.tsx` | Tab 列表、拖曳排序、雙擊重命名、unread badge、PM Active badge |
 | 快速指令選擇器 | `components/CommandPicker.tsx` | ⌘P overlay，過濾 + 執行 per-project 快速指令 |
 | 開發工具面板 | `components/DevToolsPanel.tsx` | ⌘D 右側 panel，Base64/JSON/URL/UUID/Timestamp/Hash 工具 |
-| 資料夾選擇器 | `components/FolderPicker.tsx` | 兩步驟（connection type → browse）選資料夾 |
+| 資料夾選擇器 | `components/FolderPicker.tsx` | 兩步驟選資料夾，依 effective target 分流為 reopen-existing 或 add intent |
 | 資料夾瀏覽器 | `components/FolderBrowser.tsx` | 純展示元件，顯示目錄清單和 keyboard hints |
 | 頁內搜尋 | `components/SearchBar.tsx` | terminal tab 走 xterm SearchAddon；agent/web tab 走 main findInPage（`shelfApi.find`）+ 命中計數 |
 | Settings 面板 | `components/SettingsPanel.tsx` | 左側 tab 分頁（Terminal / Agent / Models / PM Agent / Web / Shortcuts）；Backup 是獨立右側 operation panel，不在 Settings |
@@ -241,6 +241,7 @@ title: shelf-terminal — Intent → File Index
 |--------|------|------|
 | 通用型別 | `types.ts` | Connection / AppSettings / PM types 與非 project-domain shared payloads |
 | Canonical project contract | `projects.ts` | `Project` / `ProjectCreateInput` / `ProjectDeleteResult` / readonly helper |
+| Project effective target identity | `project-target.ts` | Connection identity + lexical cwd normalization 的純比較 helper |
 | Feature-note directory validator | `feature-note-dir.ts` | optional repo-relative POSIX directory 的 canonicalization 與 lexical safety validation |
 | IPC channel 常數 | `ipc-channels.ts` | 所有 IPC channel name 常數 |
 | Process memory contracts | `process-memory.ts` | wire type、role、timing、source/summary shape 與 connection scope identity |
@@ -298,7 +299,7 @@ title: shelf-terminal — Intent → File Index
 | E2E 測試 | `e2e/agent-picker.spec.ts` | Picker_request 全鏈（single/multi/cancel/free-text），fake provider |
 | E2E 測試 | `e2e/agent-flows.spec.ts` | permission / stream / fold 卡片 / auth_required / 互動 device-flow 登入（button→code→cancel）/ error / Esc stop，fake provider |
 | E2E 測試 | `e2e/app-startup.spec.ts` | App 啟動、sidebar 驗證 |
-| E2E 測試 | `e2e/project-creation.spec.ts` | 建立 project、connect、tab、terminal output |
+| E2E 測試 | `e2e/project-creation.spec.ts` | 建立/reopen project、connect、tab、terminal output與 legacy duplicate first-match |
 | E2E 測試 | `e2e/features.spec.ts` | Search、settings、project edit、dev tools、快捷鍵 |
 | E2E 測試 | `e2e/config-bootstrap.spec.ts` | Config 損毀 bootstrap dialog（quit / backup & continue） |
 | E2E 測試 | `e2e/config-backup.spec.ts` | Backup operation panel 的 config gating、tab/session state、Backup checklist 與 Import source/selection/apply flow |

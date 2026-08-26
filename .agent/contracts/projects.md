@@ -64,6 +64,22 @@ The repository is exposed only after synchronous bootstrap loading succeeds. It 
 
 Identical save, missing delete, and same-group reorder are successful no-ops. Missing save and stale reorder do not guess replacement targets and leave diagnostic context. A rejected mutation means config was not committed. `delete()` resolves with `cleanupPending: true` when config committed but post-commit cleanup failed; retry uses `retryCleanup`, never a second delete.
 
+`add()` rejects before persistence when another canonical project has the same effective target. Persisted load and `save()` do not enforce this uniqueness rule, so existing duplicate records remain valid.
+
+Effective target comparison is defined by `src/shared/project-target.ts`:
+
+```ts
+interface ProjectTarget {
+  readonly connection: Connection;
+  readonly cwd: string;
+}
+
+projectTargetKey(target: ProjectTarget): string
+sameProjectTarget(first: ProjectTarget, second: ProjectTarget): boolean
+```
+
+The key contains normalized `cwd` plus local scope, SSH user/host/port, WSL distribution, or Docker container. SSH password and `idleShutdownMinutes` are excluded. Path normalization removes trailing `/` and `\` while preserving roots; it performs no filesystem canonicalization.
+
 ## Project operation bridge
 
 Authoritative channels: `src/shared/ipc-channels.ts`; bridge: `src/main/preload.ts`; renderer adapter: `src/renderer/projects-repository-client.ts`.
@@ -103,6 +119,7 @@ Authoritative source: `src/renderer/events/bus.ts`.
 
 ```ts
 Events.ADD_PROJECT       // (input: ProjectCreateInput, onSettled?)
+Events.OPEN_EXISTING_PROJECT // (projectId: ProjectId)
 Events.UPDATE_PROJECT    // (projectId: ProjectId, changes: Partial<Omit<Project, 'id'>>)
 Events.REORDER_PROJECTS  // (sourceId: ProjectId, targetId: ProjectId)
 Events.REMOVE_PROJECT    // (projectId: ProjectId)
@@ -118,6 +135,8 @@ Events.NEW_WEB_TAB       // (projectId: ProjectId, url?)
 ```
 
 Components emit these intents. The App-side coordinator is the only renderer owner of the project repository client. Tab indices are allowed only when scoped under an explicit current project id.
+
+Folder Picker emits `OPEN_EXISTING_PROJECT` for the first effective-target match in current reconciled order and otherwise emits `ADD_PROJECT`. The open-existing handler validates the id, activates the project, and emits `CONNECT_PROJECT` only when `tabs.length === 0`. `ADD_PROJECT` and its optional `onSettled` result contract remain creation-only and unchanged.
 
 ## Feature-note directory binding
 
