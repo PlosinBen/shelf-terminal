@@ -792,6 +792,108 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
     backend.dispose();
   });
 
+  it('applies matching saved perf once after resume before returning capabilities', async () => {
+    const setModes: Array<{ modeId?: string }> = [];
+    const setConfigs: Array<{ configId?: string; value?: string }> = [];
+    const mock = createMockAcpAgent({
+      agentCapabilities: { sessionCapabilities: { resume: {} } },
+      modes: COPILOT_MODES,
+      configOptions: COPILOT_CONFIG,
+      onSetMode: (params) => setModes.push(params as { modeId?: string }),
+      onSetConfigOption: (params) => setConfigs.push(params as { configId?: string; value?: string }),
+    });
+    const backend = createCopilotBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
+    const intent = {
+      model: 'claude-sonnet-5',
+      effort: 'medium',
+      nativeMode: COPILOT_AGENT_MODE_ID,
+      nativePermission: 'off',
+    };
+    const restoreContext = {
+      sessionId: 'shelf-session',
+      provider: 'copilot' as const,
+      updatedAt: 1,
+      lastSdkSessionId: 'persisted-acp-session',
+    };
+
+    const first = await backend.gatherCapabilities!(
+      '/tmp/project', 'shelf-session', undefined, intent, undefined, 'app-1', restoreContext,
+    );
+    const second = await backend.gatherCapabilities!(
+      '/tmp/project', 'shelf-session', undefined, intent, undefined, 'app-1', restoreContext,
+    );
+
+    expect(setModes).toEqual([
+      expect.objectContaining({ modeId: COPILOT_AGENT_MODE_ID }),
+    ]);
+    expect(setConfigs.map(({ configId, value }) => ({ configId, value }))).toEqual([
+      { configId: 'model', value: 'claude-sonnet-5' },
+      { configId: 'reasoning_effort', value: 'medium' },
+      { configId: 'allow_all', value: 'off' },
+    ]);
+    expect(first).toMatchObject({
+      currentModel: 'claude-sonnet-5',
+      currentEffort: 'medium',
+      permissionControl: {
+        strategy: 'native',
+        mode: { currentValue: COPILOT_AGENT_MODE_ID },
+        permission: { currentValue: 'off' },
+      },
+    });
+    expect(second).toMatchObject(first);
+    backend.dispose();
+  });
+
+  it('applies matching saved perf again only after replacing the live session', async () => {
+    const setConfigs: Array<{ configId?: string; value?: string }> = [];
+    const mock = createMockAcpAgent({
+      modes: COPILOT_MODES,
+      configOptions: COPILOT_CONFIG,
+      onSetConfigOption: (params) => setConfigs.push(params as { configId?: string; value?: string }),
+    });
+    const backend = createCopilotBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
+    const intent = { nativePermission: 'off' };
+
+    await backend.gatherCapabilities!('/tmp/project-a', undefined, undefined, intent, undefined, 'app-1');
+    await backend.gatherCapabilities!('/tmp/project-a', undefined, undefined, intent, undefined, 'app-1');
+    await backend.gatherCapabilities!('/tmp/project-b', undefined, undefined, intent, undefined, 'app-1');
+
+    expect(setConfigs.map(({ configId, value }) => ({ configId, value }))).toEqual([
+      { configId: 'allow_all', value: 'off' },
+      { configId: 'allow_all', value: 'off' },
+    ]);
+    backend.dispose();
+  });
+
+  it('retries initial perf apply after a setter rejection', async () => {
+    let remainingFailures = 1;
+    const setConfigs: Array<{ configId?: string; value?: string }> = [];
+    const mock = createMockAcpAgent({
+      modes: COPILOT_MODES,
+      configOptions: COPILOT_CONFIG,
+      get setConfigOptionError() {
+        if (remainingFailures === 0) return undefined;
+        remainingFailures -= 1;
+        return 'provider rejected initial permission';
+      },
+      onSetConfigOption: (params) => setConfigs.push(params as { configId?: string; value?: string }),
+    });
+    const backend = createCopilotBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
+    const intent = { nativePermission: 'off' };
+
+    await expect(backend.gatherCapabilities!(
+      '/tmp/project', undefined, undefined, intent,
+    )).rejects.toThrow();
+    await expect(backend.gatherCapabilities!(
+      '/tmp/project', undefined, undefined, intent,
+    )).resolves.toMatchObject({
+      permissionControl: { permission: { currentValue: 'off' } },
+    });
+
+    expect(setConfigs).toHaveLength(2);
+    backend.dispose();
+  });
+
   it('rejects a stale saved selection before applying any warm-up config', async () => {
     const setConfigCalls: unknown[] = [];
     const mock = createMockAcpAgent({

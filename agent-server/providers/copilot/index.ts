@@ -167,6 +167,10 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
   let currentModel: string | undefined;
   let currentEffort: string | undefined;
   let reconcilingCapabilities = false;
+  // A newly established ACP session has not finished Shelf's init contract until
+  // the renderer's saved perf intent has been sent through the SDK once. This is
+  // lifecycle state, not a provider-side prefs cache. agent-config-flow#10
+  let pendingInitialPerfSessionId: string | null = null;
 
   const onRequestPermission: PermissionHandler = (context) => permissions.onRequestPermission(context);
 
@@ -355,29 +359,33 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
     },
   });
 
-  async function applyModel(model: string): Promise<void> {
-    if (currentModel === model) return;
+  async function applyModel(model: string, force = false): Promise<void> {
+    if (!force && currentModel === model) return;
     const configId = configOptionIdForCategory(sessionConfigOptions, MODEL_CATEGORY);
     if (!conn || !session) throw new Error('Copilot has no live session for model configuration');
     if (!configId) throw new Error(`Copilot did not advertise a ${MODEL_CATEGORY} config option`);
     await driver.setConfigOption(conn.agent, session, configId, model);
   }
 
-  async function applyEffort(effort: string): Promise<void> {
-    if (currentEffort === effort) return;
+  async function applyEffort(effort: string, force = false): Promise<void> {
+    if (!force && currentEffort === effort) return;
     const configId = configOptionIdForCategory(sessionConfigOptions, EFFORT_CATEGORY);
     if (!conn || !session) throw new Error('Copilot has no live session for effort configuration');
     if (!configId) throw new Error(`Copilot did not advertise a ${EFFORT_CATEGORY} config option`);
     await driver.setConfigOption(conn.agent, session, configId, effort);
   }
 
-  async function applyNativeMode(modeId: string): Promise<void> {
+  async function applyNativeMode(modeId: string, force = false): Promise<void> {
     if (!sessionModes?.availableModes.some((mode) => mode.id === modeId)) {
       throw new Error(`Copilot did not advertise native mode "${modeId}"`);
     }
     if (!conn || !session) throw new Error('Copilot has no live session for native mode configuration');
-    if (sessionModes.currentModeId === modeId) return;
+    if (!force && sessionModes.currentModeId === modeId) return;
     const gate = createNativeModeConfirmationGate(session.sessionId, modeId);
+    // The restored authoritative snapshot may already satisfy the requested
+    // state. ACP still receives set_mode, while its successful RPC response is
+    // sufficient without requiring a redundant current_mode_update.
+    if (sessionModes.currentModeId === modeId) gate.resolve();
     try {
       await Promise.all([
         driver.setMode(conn.agent, session, modeId),
@@ -391,11 +399,11 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
     }
   }
 
-  async function applyNativePermission(value: string): Promise<void> {
+  async function applyNativePermission(value: string, force = false): Promise<void> {
     const option = sessionConfigOptions?.find((candidate) => candidate.id === COPILOT_PERMISSION_OPTION_ID);
     if (!option || option.type !== 'select') throw new Error(`Copilot did not advertise ${COPILOT_PERMISSION_OPTION_ID} as a select option`);
     if (!conn || !session) throw new Error('Copilot has no live session for native permission configuration');
-    if (option.currentValue === value) return;
+    if (!force && option.currentValue === value) return;
     await driver.setConfigOption(conn.agent, session, option.id, value);
   }
 
@@ -428,7 +436,7 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
     currentEffort = current.currentEffort;
   }
 
-  async function reconcileSavedIntent(intent: AgentPrefs | undefined): Promise<void> {
+  async function reconcileSavedIntent(intent: AgentPrefs | undefined, force = false): Promise<void> {
     if (!intent) return;
 
     const modelOption = sessionConfigOptions?.find((option) => option.category === MODEL_CATEGORY);
@@ -448,20 +456,20 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
       validateSavedSelection(COPILOT_PERMISSION_OPTION_ID, permissionOption, intent.nativePermission);
     }
 
-    if (intent.model !== undefined && currentModel !== intent.model) {
-      await applyModel(intent.model);
+    if (intent.model !== undefined && (force || currentModel !== intent.model)) {
+      await applyModel(intent.model, force);
       if (currentModel !== intent.model) throw new Error(`Copilot confirmed model "${String(currentModel)}" instead of "${intent.model}"`);
     }
-    if (intent.effort !== undefined && currentEffort !== intent.effort) {
-      await applyEffort(intent.effort);
+    if (intent.effort !== undefined && (force || currentEffort !== intent.effort)) {
+      await applyEffort(intent.effort, force);
       if (currentEffort !== intent.effort) throw new Error(`Copilot confirmed effort "${String(currentEffort)}" instead of "${intent.effort}"`);
     }
-    if (intent.nativeMode !== undefined && sessionModes?.currentModeId !== intent.nativeMode) {
-      await applyNativeMode(intent.nativeMode);
+    if (intent.nativeMode !== undefined && (force || sessionModes?.currentModeId !== intent.nativeMode)) {
+      await applyNativeMode(intent.nativeMode, force);
       if (sessionModes?.currentModeId !== intent.nativeMode) throw new Error(`Copilot did not confirm native mode "${intent.nativeMode}"`);
     }
-    if (intent.nativePermission !== undefined && currentNativePermission() !== intent.nativePermission) {
-      await applyNativePermission(intent.nativePermission);
+    if (intent.nativePermission !== undefined && (force || currentNativePermission() !== intent.nativePermission)) {
+      await applyNativePermission(intent.nativePermission, force);
       if (currentNativePermission() !== intent.nativePermission) {
         throw new Error(`Copilot did not confirm native permission "${intent.nativePermission}"`);
       }
@@ -610,6 +618,7 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
         const restored = session.resumeSessionResponse ?? session.loadSessionResponse;
         sessionModes = restored?.modes ?? undefined;
         sessionConfigOptions = restored?.configOptions ?? undefined;
+        pendingInitialPerfSessionId = session.sessionId;
         return session;
       } catch (err) {
         if (!isMissingCopilotSessionError(err, input.resumeId)) throw err;
@@ -629,6 +638,7 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
     // and buildCapabilities() has the option lists.
     sessionModes = session.newSessionResponse?.modes ?? undefined;
     sessionConfigOptions = session.newSessionResponse?.configOptions ?? undefined;
+    pendingInitialPerfSessionId = session.sessionId;
     // Capability discovery can create the first native session before an
     // execution exists. Publish through the session sink in that case so the
     // agent-server's context wrapper persists the pointer immediately.
@@ -769,7 +779,11 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
           };
         }
         hydrateCurrentSelections();
-        await reconcileSavedIntent(intent);
+        const isInitialPerfApply = pendingInitialPerfSessionId === s.sessionId;
+        await reconcileSavedIntent(intent, isInitialPerfApply);
+        if (isInitialPerfApply && pendingInitialPerfSessionId === s.sessionId) {
+          pendingInitialPerfSessionId = null;
+        }
         // `available_commands_update` arrives out-of-turn just AFTER session/new,
         // so it may not be captured yet. Briefly wait for it (bounded) so the
         // slash-command autocomplete isn't empty on the first caps fetch. Resolves

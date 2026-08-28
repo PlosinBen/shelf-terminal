@@ -236,14 +236,16 @@ Provider 以 capability strategy 選一條路：
 
 **Related：** `agent-config-flow#10`、`agent-providers#45`、`contracts/agent-routing`、`contracts/agent-wire-protocol`、`architecture/agent-execution`。
 
-## agent-config-flow#10 — Warm-up 先確定 final session，再以 confirmed capabilities 原子對帳 project prefs  ·  [Decision]
+## agent-config-flow#10 — Warm-up 先確定 final session，再完成 init apply 後原子發布 capabilities  ·  [Decision]
 
-**Decision：** `AgentPrefs` 在 capabilities RPC 中是 desired initialization intent，不是已確認 runtime state。Provider 必須先完成 resume；若符合窄化的 missing-session recovery 才建立 replacement session。取得 final session 的 provider snapshot 後，先驗證完整 saved selection set，再依 provider 支援的順序 apply 差異，最後只發布一份 confirmed capabilities。Renderer 收到後沿既有 capability writeback 寫回 project prefs；main 保持被動 relay，不新增 `confirmed_config` 或第二個持久化責任人。
+**Decision：** `AgentPrefs` 在 capabilities RPC 中是 desired initialization intent，不是已確認 runtime state。Provider 必須先完成 resume；若符合窄化的 missing-session recovery 才建立 replacement session。取得 final session 的 advertised controls 後，先驗證完整 saved selection set，再完成該 provider 的 init apply，最後只發布一份 confirmed capabilities。Copilot 對每個新建立的 final ACP session，依 model → effort → native mode → native permission 順序把存在且已 advertise 的 saved selection 各送進 SDK 一次；restored snapshot 與 intent 同值不能省略這次 outbound apply。Renderer 收到 final capabilities 後沿既有 capability writeback 寫回 project prefs；main 保持被動 relay，不新增 `confirmed_config` 或第二個持久化責任人。
 
-**Reason：** Session pointer 與 project selection 是兩條生命週期。Resume 失敗改走 new session 只代表 provider conversation context 無法延續，不代表 model、effort 或 permission selections 應回到 provider defaults。若在 session 建立前套 prefs，或把 restore/new 的中間 capabilities 提早送出，replacement session 仍會遺失設定，renderer 也可能把暫時 defaults 回寫磁碟。
+**Reason：** Session pointer 與 project selection 是兩條生命週期。Resume 失敗改走 new session 只代表 provider conversation context 無法延續，不代表 model、effort 或 permission selections 應回到 provider defaults。Final session snapshot 是 runtime status 的真相源，但不是 caller 已將 initialization intent 送進這個 session 的證明。固定走 `establish final session → apply saved perf → build final capabilities → emit status`，可避免 Shelf 的同值 guard 省略可控的 SDK call，也不需要推測 SDK 的 cache 或內部狀態機。
 
-**Failure boundary：** Warm-up 先驗證所有 saved values 都在 final snapshot advertise 的 options 中，再依 model → effort → native mode → native permission 套用。每一步都必須取得 authoritative confirmation；setter failure、confirmed mismatch、mode timeout、session teardown 或 connection teardown都 reject initialization，且不得發布中間 capabilities。一般 config edit 同樣只有成功 confirmation 才發布 capabilities；失敗情境本來就不應持久化，例如 set model failed。
+**Lifecycle / confirmation：** Authoritative init apply 每個 final session 只執行一次；重用已初始化 live session 的一般 capabilities read 不重送全部 perf，真正改變的後續 intent 仍走既有 setter。Config-option setter 以 SDK 回傳的完整 snapshot 確認。Native mode 一律送 `session/set_mode`，並以「RPC 成功且目前 observed mode 等於 requested mode」為完成條件：restored mode 已同值時不要求 redundant notification，異值時則等待 `current_mode_update` 或等價的 authoritative mode snapshot。
 
-**Do not change casually because：** 不要把 project prefs 變成 session create 參數並假設 provider會沿用；不要在 missing-session fallback 前套用；不要讓中間 notification 穿過 reconciliation gate；也不要把責任擴張到 main。這些做法會重新混淆 desired intent、provider truth 與 durable confirmed selection。
+**Failure boundary：** Warm-up 先驗證所有 saved values 都在 final snapshot advertise 的 options 中。Setter failure、confirmed mismatch、mode timeout、session teardown 或 connection teardown都 reject initialization，且不得發布中間 capabilities；失敗的 initial apply 保持未完成，後續 init 可重試。一般 config edit 同樣只有成功 confirmation 才發布 capabilities。
+
+**Do not change casually because：** 不要在 initial apply 恢復 diff-only guard，也不要把 force apply 擴張成每次 capabilities read 或每個 turn 都重送。不要為推測中的 SDK cache 加 forced transition、polling 或 permission callback compensation；只有 protocol-compliant init apply 後仍確認是 SDK defect，才另立有 upstream trace、適用範圍與移除條件的 workaround。不要在 missing-session fallback 前套用、讓中間 notification 穿過 warm-up gate，或把責任擴張到 main。
 
 **Related：** `agent-config-flow#3`、`agent-config-flow#7`、`agent-config-flow#9`、`agent-providers#51`、`architecture/agent-execution`、`contracts/agent-routing`。
