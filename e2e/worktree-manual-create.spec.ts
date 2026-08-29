@@ -358,7 +358,10 @@ test.describe('user-initiated worktree create', () => {
     await dialog.locator('.conn-btn-next').click();
 
     const err = dialog.locator('.worktree-error');
-    await expect(err).toContainText('FULL MIGRATION ERROR', { timeout: 8_000 });
+    // This promise spans real worktree creation plus forced migration and
+    // rollback failures. Wait for the operation boundary, not an 8s UI timing
+    // assumption, while preserving every error-content assertion below.
+    await expect(err).toContainText('FULL MIGRATION ERROR', { timeout: 30_000 });
     await expect(err).toContainText('copy failed: demo.md');
     await expect(err).toContainText('Rollback also failed');
     await expect(err).toContainText('FULL ROLLBACK ERROR');
