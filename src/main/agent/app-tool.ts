@@ -43,6 +43,9 @@ export interface AppToolResult {
   error?: string;
 }
 
+export const NESTED_WORKTREE_CREATE_ERROR =
+  'Cannot create a worktree project from a worktree project. Continue in the current child project and use propose_worktree_finish when the work is ready.';
+
 interface AppToolDef {
   /** Safe (read-only) ops need no user confirmation; mutations do. */
   safe: boolean;
@@ -279,6 +282,9 @@ const REGISTRY: Record<string, AppToolDef> = {
     run: async (args, ctx) => {
       const projectId = ctx.projectId;
       if (!projectId) throw new Error('worktree.propose_create requires a project context');
+      const project = getProjectsRepository().get(projectId);
+      if (!project) throw new Error(`project not found: ${projectId}`);
+      if (project.parentProjectId) throw new Error(NESTED_WORKTREE_CREATE_ERROR);
       const win = getMainWindow();
       if (!win || win.isDestroyed()) throw new Error('cannot open New Worktree dialog: no application window');
       const branch = typeof args.branch === 'string' && args.branch.trim() ? args.branch.trim() : undefined;

@@ -68,7 +68,12 @@ vi.mock('../worktree/feature-notes', () => ({
   listFeatureNotes: (...args: unknown[]) => listFeatureNotes(...args),
 }));
 
-import { handleAppTool, isSafeAppToolOp, isKnownAppToolOp } from './app-tool';
+import {
+  handleAppTool,
+  isSafeAppToolOp,
+  isKnownAppToolOp,
+  NESTED_WORKTREE_CREATE_ERROR,
+} from './app-tool';
 
 beforeEach(() => {
   listSkills.mockReset();
@@ -172,6 +177,32 @@ describe('app-tool dispatcher (worktree proposals)', () => {
     expect(send).toHaveBeenCalledWith('worktree:propose-create', {
       projectId: 'base', branch: 'feature/worktree', notePaths: ['.agent/features/worktree-flow.md'],
     });
+  });
+
+  it('propose_create rejects a nested worktree before resolving notes or sending IPC', async () => {
+    const r = await handleAppTool(
+      'worktree.propose_create',
+      { branch: 'feature/nested', note: '.agent/features/a.md' },
+      { projectId: 'child' },
+    );
+
+    expect(r).toEqual({
+      ok: false,
+      error: NESTED_WORKTREE_CREATE_ERROR,
+    });
+    expect(listFeatureNotes).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('propose_create fails loudly for an unknown project without sending IPC', async () => {
+    const r = await handleAppTool(
+      'worktree.propose_create',
+      {},
+      { projectId: 'missing' },
+    );
+
+    expect(r).toEqual({ ok: false, error: 'project not found: missing' });
+    expect(send).not.toHaveBeenCalled();
   });
 
   it('propose_create accepts empty args and sends normalized notePaths', async () => {

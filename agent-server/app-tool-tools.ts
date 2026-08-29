@@ -67,15 +67,18 @@ export const BROWSER_OPEN_DESC =
   + 'decides).';
 
 export const PROPOSE_WORKTREE_CREATE_DESC =
-  'Open the New Worktree dialog with an optional suggested branch and feature note(s). This creates NOTHING: '
-  + 'the user reviews the dialog and presses Create. Use after agreeing a work item in the main checkout. '
-  + 'Args: branch (optional suggested branch name), note (optional legacy single feature-note filename/path), '
-  + 'notes (optional feature-note filenames/paths to preselect).';
+  'Open the New Worktree dialog for the current parent project, optionally prefilled with a suggested branch and feature-note file(s). '
+  + 'This tool creates nothing. The user reviews the branch, selected notes, and agent provider. If the user confirms Create, '
+  + 'Shelf creates the Git worktree and child project and migrates the selected note files. The provider defaults to the parent '
+  + "project's resolved default but remains user-selectable; the child inherits openAgentOnConnect but never the parent's agent session. "
+  + 'Calls from a worktree child are rejected. Args: branch (optional suggested branch), note (optional legacy single feature-note '
+  + 'filename/path), notes (optional feature-note filenames/paths).';
 
 export const PROPOSE_WORKTREE_FINISH_DESC =
-  'Open the Finish Worktree gate for this worktree. This merges NOTHING: the user reviews the target and '
-  + 'presses Finish. Call only after consolidating the feature note into permanent docs, deleting that note, '
-  + 'and committing the worktree so it is ready to merge back. Has no effect outside a worktree.';
+  'Open the Finish Worktree gate for the current worktree child. This tool merges or removes nothing. The user reviews the target '
+  + 'and confirms Finish. If confirmed, Shelf requires a clean child worktree, fast-forwards the selected target, restores remaining '
+  + 'configured feature-note files, and removes the child checkout and project only after every step succeeds. Calls outside a '
+  + 'worktree child are rejected.';
 
 /**
  * Canonical inventory of the in-process Shelf bridge tools (name + description).
