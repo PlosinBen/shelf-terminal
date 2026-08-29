@@ -119,3 +119,21 @@ At child creation, the main project's current value is copied into the child's s
 ### Gotchas
 
 - A pre-feature child with no snapshot skips restore on close. An ignored note can therefore be discarded on Abandon; this accepted upgrade edge is why the UI must not promise restore when the child field is absent.
+
+## worktree#14 — Create proposals are valid only for parent projects  ·  [Decision]
+
+**Decision:** `propose_worktree_create` resolves the caller project before feature-note lookup or renderer IPC. An unknown project fails with its id; a caller with `parentProjectId` fails with guidance to remain in the current child and use `propose_worktree_finish` when ready. The renderer's hidden child-project entry remains a UI backstop, not the only guard.
+
+**Reason:** The app-tool bridge is available from child agents even though the sidebar hides New Worktree there. Enforcing the invariant at the operation boundary prevents nested Shelf projects and tells the calling agent how to continue without opening a misleading dialog.
+
+**Do not change casually because:** Resolving notes or acknowledging the proposal before validating project kind can perform unnecessary work and report success for an operation the UI must never allow.
+
+## worktree#15 — One integration skill owns the cross-session development handoff  ·  [Decision]
+
+**Decision:** Repository policy may route isolated development through the app-level `shelf-worktree-handoff` skill. That skill composes `development-flow` with the two Shelf proposal tools across parent preparation, user-confirmed Create, fresh child-session resume, and user-confirmed Finish. `development-flow` retains the portable development and feature-note lifecycle; Shelf retains runtime effects and human gates; repository instructions retain only the routing rule. A selected feature note carries required working context because the child never inherits the parent agent session.
+
+Every invocation requires `development-flow`, `propose_worktree_create`, and `propose_worktree_finish`. If a dependency is absent before entry or disappears mid-handoff, the integration stops loudly; it never falls back to raw Git lifecycle commands or absorbs the missing responsibility.
+
+**Reason:** Capability descriptions and portable development rules cannot each contain half of a Shelf-specific cross-session sequence without either coupling themselves to one environment or leaving control-transfer gaps. A dedicated integration owner keeps the three layers independently useful while making their cooperation executable.
+
+**Do not change casually because:** Duplicating the full sequence into tool descriptions, `development-flow`, or repository instructions creates conflicting owners. Silent Git fallback bypasses Shelf's child-project creation, note migration, and user-confirmed integration gates.

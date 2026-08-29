@@ -30,3 +30,4 @@ Decisions + gotchas grouped by topic. Cited from code as `<topic>#N`.
 | 專案 env（plain + secret） | [project-env](project-env.md) | 兩類 env 單一注入 map、全 connector 注入、dispatcher 走 open_session、secret AES-GCM + key-tier seam、side-car 不同步 |
 | Worktree lifecycle | [worktree](worktree.md) | create/finish proposal gates, project-configured note hand-off + child snapshots, provider override |
 | Project repository / renderer views | [projects](projects.md) | versioned canonical boundary、main-owned identity、durable recovery、stable views與 Sidebar projection |
+| Testing practices | [testing](testing.md) | non-obvious promise coverage、nearby rationale 與 cross-surface review trigger |
