@@ -64,7 +64,7 @@
   - **Code / tests 一律在 worktree 開發** — 不在 main checkout 改 tracked source/test。main checkout = 規劃 + 唯讀調查 + 純文件維護。
   - **純文件維護（不伴隨 code 變更）可在 main checkout 直接改**：`.agent/`、CLAUDE.md、其他 markdown、`.agent/features/` note。
   - **伴隨 code 變更的 doc 跟著 code 走**：一次 code 變更該連帶更新的 `.agent/` / contract / map，與那份 code 同在 worktree、同批改，不拆回 main。
-  - **過 note gate 的 code feature**：main checkout 只建 feature note + 討論確認，開發交給 worktree — AI 可用 `propose_worktree_create` / `propose_worktree_finish` 開啟預填 UI，但使用者仍在 dialog/gate 點擊確認；AI 不建 worktree、不 merge-back。
+  - 對本 repo 中必須隔離的 code / test work，**必須**以 `shelf-worktree-handoff` 作為控制流程；**禁止**繞過它自行建立 worktree，或留在 parent project 實作。該 skill、development-flow 或必要 Shelf worktree tools 任一缺失時，**必須立即停止並明確回報，禁止降級或自行補做整合流程**。純文件維護仍依本 repo 的明文例外處理。
 
 ## Conventions
 

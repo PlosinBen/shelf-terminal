@@ -23,6 +23,13 @@ const parent: Project = {
   baseBranch: null,
 };
 
+/**
+ * Promise rationale: child creation is a cross-session handoff boundary. The
+ * child must preserve reproducible project setup while receiving fresh identity
+ * and agent state; these assertions are contract behavior, not clone mechanics.
+ * If they change, review the Create UI, proposal-tool description, worktree
+ * lifecycle context, and shelf-worktree-handoff skill together.
+ */
 describe('buildWorktreeChildConfig', () => {
   const child = buildWorktreeChildConfig(parent, {
     cwd: '/repo-feature', worktreeBranch: 'feature', baseBranch: 'main',
@@ -50,7 +57,7 @@ describe('buildWorktreeChildConfig', () => {
     expect(child.baseBranch).toBe('main');
   });
 
-  it('NEVER inherits agentSessionIds (fresh agent boots and reads the note)', () => {
+  it('NEVER inherits agentSessionIds (the child starts with fresh agent state)', () => {
     expect(child).not.toHaveProperty('agentSessionIds');
   });
 

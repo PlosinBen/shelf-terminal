@@ -137,6 +137,13 @@ describe('app-tool dispatcher (browser prompt ownership)', () => {
   });
 });
 
+/**
+ * Promise rationale: worktree proposal tools are an agent-facing human gate,
+ * so invalid project kinds must fail before note resolution or renderer IPC.
+ * These assertions protect the boundary, not registry implementation details;
+ * behavior changes must review the model-facing tool descriptions and the
+ * durable app-tool bridge contract together.
+ */
 describe('app-tool dispatcher (worktree proposals)', () => {
   const send = vi.fn();
 

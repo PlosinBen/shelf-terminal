@@ -9,12 +9,15 @@ import { IPC } from '../src/shared/ipc-channels';
 
 /**
  * User-initiated worktree create (the #entry pivot) — sidebar "New Worktree" →
- * WorktreeDialog with a feature-note picker. Proves: the picker lists only
- * in-progress notes; creating with a note migrates it into the worktree and
+ * WorktreeDialog with a feature-note picker. Proves: the picker lists configured
+ * notes with their statuses; creating with a note migrates it into the worktree and
  * auto-connects; creating with "No note" leaves the base note untouched.
  *
  * A real temp git repo backs the base project so worktreeAdd cuts a real
  * worktree; the note-picker + migrate + auto-connect wiring is what this proves.
+ * These assertions protect the user-visible cross-process handoff rather than
+ * dialog implementation details. If they change, review the Worktree dialog,
+ * proposal-tool contract, child-config boundary, and durable worktree context.
  */
 
 const PROJECT_ID = 'wt-base-project';
