@@ -240,4 +240,22 @@ describe('main projects repository', () => {
     expect(repository.getAll()).toEqual([project('a')]);
     expect(projectCleanup.run).not.toHaveBeenCalled();
   });
+
+  it('returns target leftover context for a current-session cleanup retry', async () => {
+    const config = persistence([project('a')]);
+    const projectCleanup = cleanup();
+    const targetError = Object.assign(new Error('target offline'), {
+      targetPath: '/home/ben/.shelf/apps/app-1/projects/a',
+    });
+    projectCleanup.run.mockRejectedValueOnce(new AggregateError([targetError], 'cleanup failed'));
+    const repository = readyRepository(config.value, () => 'unused', projectCleanup.value);
+
+    await expect(repository.delete('a')).resolves.toEqual({
+      cleanupPending: true,
+      leftover: {
+        targetPath: '/home/ben/.shelf/apps/app-1/projects/a',
+        reason: 'target offline',
+      },
+    });
+  });
 });

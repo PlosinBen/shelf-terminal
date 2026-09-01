@@ -53,4 +53,8 @@ export interface ProjectCreateInput {
 
 export interface ProjectDeleteResult {
   readonly cleanupPending: boolean;
+  readonly leftover?: {
+    readonly targetPath: string;
+    readonly reason: string;
+  };
 }

@@ -89,12 +89,15 @@ function runProjectOperation<T>(operation: string, action: () => Promise<T>) {
   });
 }
 
-async function recoverProjectCleanup(projectId: string, cleanupPending: boolean) {
-  let pending = cleanupPending;
-  while (pending) {
+async function recoverProjectCleanup(projectId: string, initial: import('@shared/projects').ProjectDeleteResult) {
+  let result = initial;
+  while (result.cleanupPending) {
+    const leftover = result.leftover
+      ? `\n\nTarget path: ${result.leftover.targetPath}\nReason: ${result.leftover.reason}`
+      : '';
     const retry = await window.shelfApi.dialog.confirm(
       'Project removed with leftover data',
-      'The project was removed, but some project storage or secrets could not be cleaned up. Retry cleanup?',
+      `The project was removed, but some project data could not be cleaned up. Retry cleanup?${leftover}`,
       'Retry',
     ).catch((error) => {
       console.error(`[project-cleanup] prompt failed projectId=${projectId}`, error);
@@ -103,7 +106,7 @@ async function recoverProjectCleanup(projectId: string, cleanupPending: boolean)
     if (!retry) return;
     const recovered = await runProjectOperation('cleanup', () => projectCoordinator.retryCleanup(projectId));
     if (recovered.status === 'cancelled') return;
-    pending = recovered.value.cleanupPending;
+    result = recovered.value;
   }
 }
 
@@ -434,7 +437,7 @@ export function App() {
       if (deleted.status === 'cancelled') return;
       Object.values(proj.agentSessionIds).forEach((id) => { if (id) clearAgentSession(id); });
       proj.tabs.forEach(teardownTab);
-      await recoverProjectCleanup(projectId, deleted.value.cleanupPending);
+      await recoverProjectCleanup(projectId, deleted.value);
     });
 
     const offWorktreeFinishCompleted = on(Events.WORKTREE_FINISH_COMPLETED, (payload: {

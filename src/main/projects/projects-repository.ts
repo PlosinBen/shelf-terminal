@@ -192,7 +192,20 @@ export function createMainProjectsRepository(
         'projects-repository',
         `operation=cleanup projectId=${projectId} failed: ${error instanceof Error ? error.message : String(error)}`,
       );
-      return { cleanupPending: true };
+      const historyFailure = error instanceof AggregateError
+        ? error.errors.find((candidate) => candidate && typeof candidate === 'object' && 'targetPath' in candidate)
+        : undefined;
+      return {
+        cleanupPending: true,
+        ...(historyFailure && typeof historyFailure === 'object' && 'targetPath' in historyFailure
+          ? {
+            leftover: {
+              targetPath: String(historyFailure.targetPath),
+              reason: historyFailure instanceof Error ? historyFailure.message : 'target cleanup failed',
+            },
+          }
+          : {}),
+      };
     }
   }
 
@@ -238,9 +251,11 @@ export function createMainProjectsRepository(
     },
 
     async delete(projectId) {
+      const removed = projects.find(({ id }) => id === projectId);
       const candidate = projects.filter(({ id }) => id !== projectId);
       if (candidate.length === projects.length) return { cleanupPending: false };
       const ready = deepFreeze(candidate);
+      if (removed) cleanup.capture?.(removed);
       await persist('delete', ready);
       pendingCleanup.add(projectId);
       return runCleanup(projectId);

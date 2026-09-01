@@ -701,6 +701,15 @@ async function destroySession(tabId: string): Promise<boolean> {
   return true;
 }
 
+/** Main-owned project teardown used by durable project removal orchestration. */
+export async function destroyProjectAgentSessions(projectId: string): Promise<number> {
+  const tabIds = [...sessions.values()]
+    .filter((session) => session.projectId === projectId)
+    .map((session) => session.tabId);
+  await Promise.all(tabIds.map((tabId) => destroySession(tabId)));
+  return tabIds.length;
+}
+
 function resolvePermission(tabId: string, toolUseId: string, allow: boolean, scope?: 'once' | 'session'): boolean {
   const session = sessions.get(tabId);
   if (!session) return false;
