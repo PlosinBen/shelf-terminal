@@ -32,7 +32,8 @@ title: shelf-terminal — Intent → File Index
 | 選單安裝平台判斷 | `menu-platform.ts` | `shouldInstallAppMenu(platform)`（只有 darwin true） |
 | Reload key predicate | `reload-guard.ts` | `isReloadKeyEvent(input)` 判斷是不是 Cmd/Ctrl+R / F5 |
 | DevTools key predicate | `devtools-guard.ts` | `isDevToolsKeyEvent(input)`（F12 / Ctrl+Shift+I）的純判斷 |
-| PTY spawn/kill/resize | `pty-manager.ts` | 透過 connector spawn shell、idle notification、剝離 external-URL frame 後經注入的 `PtyObserver` 回報可見輸出/intent/anomaly |
+| PTY lifecycle / initialization | `pty-manager.ts` + `terminal-init-session.ts` | 組合 runner launch、main-owned input/output phase gate、retry、idle notification 與可見輸出轉送 |
+| Terminal runner policy | `terminal-runner/` | 依 target facts 選 zsh/bash/PowerShell/Native、建立 project history namespace 與 runner bootstrap |
 | Preload bridge | `preload.ts` | contextBridge 暴露 `window.shelfApi`，純 RPC bridge 到 main |
 | Project canonical repository | `projects/projects-repository.ts` + `projects/repository-provider.ts` | ready-only canonical project queries/mutations、main-owned identity、durable publish 與 cleanup retry boundary |
 | Project config persistence | `projects/project-config-file-io.ts` + `projects/project-config-codec.ts` + `projects/project-config-persistence.ts` | opaque atomic File I/O、v0/v1 loader/current formatter 與 `projects.json` facade |
@@ -66,7 +67,12 @@ title: shelf-terminal — Intent → File Index
 
 | Intent | File | Role |
 |--------|------|------|
-| Factory + 匯出 | `index.ts` | `createConnector(connection)` factory + type 列舉 + cleanup |
+| Runtime factory + 匯出 | `index.ts` | `createConnector(connection)` 取得 generation-scoped runtime、列出 AppOS 支援 connector 並處理 invalidation |
+| Persisted connector config | `config.ts` | 只表示 connection method 與參數，不保存 app executable、target OS 或 target shell |
+| Runtime / generation boundary | `runtime.ts` + `runtime-owner.ts` | protocol runtime facade、immutable launch-plan API 與 generation lifetime cache |
+| App OS composition | `app-os.ts` | 依 Shelf 所在 OS 註冊 connector adapters，將 launch request materialize 成 executable/argv/env |
+| Terminal launch plans | `launch-plan.ts` | compatibility / explicit-interpreter immutable plan contract |
+| Target facts resolver | `target-facts.ts` | lazy generation-scoped POSIX/PowerShell probe、nonce frame validation與失敗快取 |
 | 介面定義 | `types.ts` | `Connector`（含 `putFile`）/ `Shell` / `Disposable` / `ExecResult` 介面 |
 | 型別宣告傳輸 | `transport.ts` | `transportPut`（單檔，source = localPath/buffer）+ `transportPutDir`（多檔樹，解析 home 一次）→ `shelfPlacement` → worker `homePath()` → `connector.putFile`（見 `architecture/transport`） |
 | PTY wrapper | `wrap-pty.ts` | 將 node-pty 包成 `Shell` 介面 |
@@ -180,6 +186,7 @@ title: shelf-terminal — Intent → File Index
 |--------|------|------|
 | Root 元件 / Event handler 中樞 | `App.tsx` | Project mutation/recovery coordinator、集中 event bus side effects 與 split view rendering 中樞 |
 | Store facade | `store.ts` + `store-core.ts` | `useSyncExternalStore` facade、跨 project/UI slice publish/subscription 核心 |
+| Terminal lifecycle state | `store-terminal-lifecycle.ts` | per-tab initialization presentation phase 與 dispose cleanup actions |
 | Project reactive state | `store-projects.ts` | Canonical projects + runtime-by-id reconcile 成 flat readonly `ProjectView`，並管理 tabs/selection/health/notices |
 | UI/settings state | `store-ui.ts` | Settings 與 renderer panel/overlay visibility state |
 | Process memory renderer sync | `process-memory-sync.ts` | listener-first hydration 並以完整 summary snapshot 更新全域 store |
@@ -190,7 +197,7 @@ title: shelf-terminal — Intent → File Index
 | 快捷鍵系統 | `hooks/useKeybindings.ts` | combo string 對應 action，支援參數化 action |
 | Paste/drop 上傳 hook | `hooks/useAttachmentPaste.ts` | paste/drop/upload pipeline + file size check |
 | Agent send attachment helper | `utils/agent-send-attachments.ts` | renderer-local image preview data URL 與 provider-bound uploaded `AgentAttachment` payload 分離 |
-| Terminal 渲染 | `components/TerminalView.tsx` | xterm.js instance cache + PTY I/O + paste hook + unread badge |
+| Terminal 渲染 | `components/TerminalView.tsx` | xterm.js cache、PTY I/O、init cover/store projection、paste hook 與 unread badge |
 | Agent 對話 UI | `components/AgentView.tsx` + `components/agent/{MessageList,InputZone,StatusBar,DecisionPanel,PlanPanel,AuthPane,ConnectionOverlay}.tsx` + `components/agent/{permission-control-view,capability-prefs}.ts` + `agentTabStore.ts` + `agentTabSubscriptions.ts` + `agent-message-builder.ts` + `tab-teardown.ts` | AgentView 是 layout coordinator；permission UI 只依 capability strategy/descriptor 選 canonical 或 native controls，不依 provider identity；native state 不 persist。domain state 在 per-tab store，真正 teardown 才清 state |
 | Web tab（登入 surface + 瀏覽） | `components/WebTabView.tsx` | `<webview partition=persist:web>` + 網址列 + identity chip；人在這登入內網服務 |
 | Web.fetch 授權 popup | `components/WebPermissionPrompt.tsx` | app 層全域 popup，防偽 origin 顯示 + allow once/always/deny（由 `web:permission-request` 驅動） |
@@ -251,7 +258,9 @@ title: shelf-terminal — Intent → File Index
 | Shelf 檔案 placement 規則 | `shelf-paths.ts` | `shelfPlacement(type,ctx)` closed allowlist + `ShelfFileType*` 常數(transport 與 agent-server 共用單一路徑規則） |
 | 專案 env 純 helper | `project-env.ts` | `EnvMap`、`SHELF_RESERVED_ENV`、`isReservedEnvKey`/`validateEnvKey`、`applyEnvMap`（本機 merge、PATH-merge）、`buildEnvExportPrefix`（遠端 export 前綴）；main + renderer 共用 |
 | External URL intent contract | `external-url-intent.ts` | source/decision/destination types、allowlist/length limits與不回顯 URL 的純 validation |
-| External URL terminal protocol | `external-url-osc.ts` | bounded OSC frame encoder與 streaming parser/stripper/anomaly types |
+| External URL terminal protocol | `external-url-osc.ts` | external-url route 的 bounded payload encoder/decoder 與相容常數 |
+| Shelf OSC router | `shelf-osc.ts` | OSC 6973 的 bounded chunk-safe shared router，按 route 保留/攔截原始 PTY bytes |
+| Terminal initialization protocol | `terminal-init-osc.ts` | nonce/phase/result payload、opaque runner tokens 與 OSC encode/decode validation |
 | Logger | `logger.ts` | 統一 log 模組，支援 file writer / log level / env override |
 | Agent tab log id | `tab-id.ts` | `formatTabLogId()` 保留完整 renderer tab id，讓跨 main/renderer log 可精確 grep 對帳 |
 | 預設值 | `defaults.ts` | DEFAULT_SETTINGS, DEFAULT_KEYBINDINGS |

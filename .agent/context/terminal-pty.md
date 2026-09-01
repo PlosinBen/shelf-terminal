@@ -24,23 +24,7 @@ related:
 
 ## terminal-pty#2 — Local shell HISTFILE=/dev/null：tab 間 history 完全隔離、不持久化  ·  [Decision]
 
-**Decision**：`LocalUnixConnector.createShell()` spawn pty 時把 `HISTFILE=/dev/null` 塞進 env。每個 tab 的 shell process 只保留 in-memory history（↑↓ 在當前 session 內仍可叫回剛跑的指令），但不寫檔、不共享、關 tab 就沒。
-
-**Reason（為什麼不直接用 user 的 `~/.zsh_history`）**：
-- Shelf 把 project 當 working context；多個 project 共用同一個 history file 會洩漏「我剛在哪個 project 跑了什麼」的狀態。
-- 多 tab 並開時，A tab 跑的指令污染 B tab 的 ↑（zsh `share_history` / inc_append 行為）。
-- 使用者實際 workflow：以 session 內微調指令重跑為主，少用 `history | grep xxx` 翻舊紀錄。
-
-**Reason（為什麼不寫 per-project history file）**：
-- 多一個檔案要管（mkdir、project 刪除 cleanup、備份範圍）。
-- 為了極少使用的 cross-session 翻舊紀錄需求增加架構複雜度，不值得。
-- 若之後有人需求，HISTFILE 從 `/dev/null` 改成 `userData/shell-history/<projectId>.history` 是一行改動，model 相容。
-
-**Background（範圍）**：
-- Phase 1：只 `local/unix`（macOS / Linux 的 bash / zsh）。
-- Phase 2 候補：`local/win32`（PowerShell 用 PSReadLine，要 `Set-PSReadLineOption -HistorySavePath`）、`wsl`、`ssh`（遠端 history，要 ssh remote exec 注入，corner case 多）。
-
-**Do not change casually because**：不要回到 `getShellEnv()` 直接傳（會繼承使用者 `HISTFILE` 設定）。
+**Superseded by terminal-pty#10.**
 
 ## terminal-pty#3 — node-pty 需要 electron-rebuild  ·  [Gotcha]
 
@@ -97,3 +81,31 @@ related:
 **Root cause**：`node-pty` 的 Unix prebuild 會呼叫 `prebuilds/<platform>-<arch>/spawn-helper`；如果 npm 解包後該檔案變成 `0644`（沒有 executable bit），macOS 會拒絕執行 helper，node-pty 只回拋泛化的 `posix_spawnp failed`。
 
 **Fix**：`postinstall` 在 `electron-rebuild` 後跑 `scripts/ensure-node-pty-helper-mode.cjs`，對目前平台的 prebuild helper 與 source-build `build/Release/spawn-helper` 補上 executable bit。若本機已壞，直接跑同一支 script 可修復當前 checkout 的 `node_modules`，重啟 app 後生效。
+
+## terminal-pty#10 — History 以 project 與 target host 為邊界，只隔離 zsh/bash  ·  [Decision]
+
+**Decision**：Shelf 只對自己啟動的第一層 command interpreter 套用 history policy。Target 的 default-shell basename 是 `zsh` 或 `bash` 時，使用 `$HOME/.shelf/apps/<appId>/projects/<projectId>/shell-history/<shell>`；同 project 的 tabs 共用 namespace，不同 project 不互相污染。PowerShell、`sh` 與其他 shell 維持 native history；這只表示沒有 isolation guarantee，不降低 terminal support。使用者之後手動開 nested shell、tmux、SSH 或 container 不在 Shelf 控管範圍。
+
+**Reason**：history 是執行 shell 所在 host 的原生資料；放在 target home 保留 SSH/WSL/Docker 的一般直覺，也避免 client-side sync/merge。只額外支援可驗證的 zsh/bash，才能避免把 `HISTFILE` 誤宣稱為所有 Unix shell 的通用隔離協定。
+
+**Do not change casually because**：不要用 app OS 或 connector type 猜 shell，也不要因 history isolation 不支援或未確認就拒絕一個原本可用的 target。
+
+### Gotchas
+- Zsh 透過 app-level、immutable、versioned one-file `ZDOTDIR/.zshenv` shim；每個 session 的 project path/nonce 只走 env。Bash 不產生 shim，透過 launch-time `HISTFILE` 與 one-shot `PROMPT_COMMAND`。
+- Project delete 先 durable commit，再 teardown project sessions 並等 bounded exit ack，最後才刪 target history；否則 live shell exit 可能把已刪 history 重建。失敗只保留 current-session retry snapshot，不建立 durable queue。
+
+## terminal-pty#11 — Terminal 初始化由 main state machine 控制，renderer 只投影 phase  ·  [Decision]
+
+**Decision**：main 擁有 runner initialization、hidden output、`initScript`、`tabCmd` 與 input gate。Runner 階段全局 cover；受支援 runner 執行 `initScript` 時 terminal output 可見但只接受 Ctrl+C；`tabCmd` 寫入後即 ready，不等待長命令結束。Blocked input 直接丟棄，不在 ready 後 replay。NativeRunner 只能保證 initScript/tabCmd 的 atomic write ordering，不能宣稱知道未知 interpreter 的 command completion。
+
+**Reason**：renderer、paste 或其他 IPC caller 都會到達同一個 main boundary，才能避免繞過 phase gate。`initScript` 是 Shelf 代替使用者執行的 project-wide setup；在 zsh/bash hook 中內部執行可保留環境變動與可見輸出，又不把 setup 本身寫入 command history。
+
+**Do not change casually because**：不要用 prompt text 或固定 sleep 猜 ready。OSC frame 必須綁 session nonce + expected phase；ready 後任何 matching-looking bytes 都應回到 normal display path。
+
+## terminal-pty#12 — zsh shim hash 工具的輸出欄位不同  ·  [Gotcha]
+
+**Symptom**：macOS 或 Linux 已成功放置且內容正確的 zsh shim，仍被判定 installation failure，terminal 因而降級到未隔離 native launch。
+
+**Root cause**：`sha256sum` / `shasum` 的 hash 是第一欄，`openssl dgst` 的 hash 是最後一欄；共用 `awk '{print $NF}'` 會把前兩者的檔案路徑當 hash。
+
+**Fix / note**：先用 `command -v` 選 utility，再依 utility 格式取第一欄或最後一欄。驗證必須用真實 POSIX command + tempfile 回歸，不只 mock command string。

@@ -10,9 +10,36 @@ related:
 
 # Terminal I/O
 
-This flow describes how user input reaches a shell and how shell output reaches the screen, how files dropped or pasted into a terminal become readable by that shell, and how a cooperative terminal program can request an app-level external URL action without launching a browser on its own host.
+This flow describes how a terminal selects and initializes its first command interpreter, how user input reaches that shell and output reaches the screen, how files become readable by that shell, and how a cooperative terminal program can request an app-level external URL action.
 
 ## Flow
+
+### Terminal request → interactive shell
+
+```
+Terminal request
+   │
+   ▼
+Live connection generation ──► lazy target-facts resolution
+   │                              │
+   │                              ├─ positive shell path ──► shell-specific runner
+   │                              └─ unavailable facts ────► native compatibility runner
+   ▼
+Immutable launch plan ──► PTY process
+                            │
+                            ▼
+                     Main-owned initialization session
+                            │
+                            ├─ runner setup (hidden, input blocked)
+                            ├─ project init script (visible; interrupt only when controlled)
+                            ├─ tab command submission
+                            └─ ready (normal input/output)
+```
+
+- The connection generation owns shared target facts; individual tabs only wait for the result. Replacing the generation invalidates the facts.
+- The runner controls only the first interpreter Shelf launches. Zsh and Bash can establish target-local project history; other interpreters keep native history without becoming unsupported terminals.
+- Main owns every phase gate and consumes only nonce- and phase-valid control frames. Renderer state is a presentation projection, not lifecycle authority.
+- Automatic project setup is visible after runner initialization. Supported runners execute it internally so environment changes survive without adding the setup source to interactive history; the tab command remains ordinary shell input.
 
 ### Keyboard → output
 
@@ -98,12 +125,14 @@ PTY output stream
 ## Boundaries
 
 Inside this flow:
+- Selection, launch, and initialization of the first Shelf-managed command interpreter.
 - The keyboard path from a keypress through shortcut arbitration into the shell and back out as rendered output.
 - The attachment path from a paste/drop gesture through policy checks and upload into shell-visible paths.
 - The cooperative browser-launcher path from a terminal program through a stripped PTY control frame to an app-level user decision.
 - The split of responsibility between the intercept-first keybinding layer and the terminal view that owns shell I/O and rendering.
 
 Outside this flow:
+- Command interpreters the user starts after the first shell becomes interactive, including nested shells, tmux, SSH, and containers.
 - Which specific shortcuts exist, their default bindings, and how they are registered — that is the keybinding configuration concern, not the I/O path.
 - How a shell process is spawned, isolated, and torn down; native-module and renderer-engine pitfalls — covered by the terminal/PTY context.
 - Transport-specific upload mechanics, prefix parsing rules, and cleanup edge cases — covered by the file-transfer context.

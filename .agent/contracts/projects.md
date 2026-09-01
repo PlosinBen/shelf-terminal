@@ -57,12 +57,16 @@ interface MainProjectsRepository {
 
 interface ProjectDeleteResult {
   readonly cleanupPending: boolean;
+  readonly leftover?: {
+    readonly targetPath: string;
+    readonly reason: string;
+  };
 }
 ```
 
 The repository is exposed only after synchronous bootstrap loading succeeds. It has no public `load`, `replaceAll`, raw file, or persisted-document operation.
 
-Identical save, missing delete, and same-group reorder are successful no-ops. Missing save and stale reorder do not guess replacement targets and leave diagnostic context. A rejected mutation means config was not committed. `delete()` resolves with `cleanupPending: true` when config committed but post-commit cleanup failed; retry uses `retryCleanup`, never a second delete.
+Identical save, missing delete, and same-group reorder are successful no-ops. Missing save and stale reorder do not guess replacement targets and leave diagnostic context. A rejected mutation means config was not committed. `delete()` resolves with `cleanupPending: true` when config committed but project-session teardown or target-history cleanup remains; `leftover` identifies the target path and reason. Retry uses the current-process cleanup snapshot through `retryCleanup`, never a second delete or a durable tombstone.
 
 `add()` rejects before persistence when another canonical project has the same effective target. Persisted load and `save()` do not enforce this uniqueness rule, so existing duplicate records remain valid.
 

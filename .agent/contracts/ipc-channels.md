@@ -24,6 +24,7 @@ The renderer↔main bridge surface — `window.shelfApi.*` methods (RPC over `ip
 | `onData(cb(tabId, data))` | recv `pty:data` → unsubscribe fn |
 | `onExit(cb(tabId, exitCode: number))` | recv `pty:exit` → unsubscribe fn |
 | `onInitSent(cb(tabId))` | recv `pty:init-sent` → unsubscribe fn |
+| `onInitPhase(cb(tabId, phase))` | recv `pty:init-phase`; phase is `'initializing' \| 'init-script' \| 'ready' \| 'failed'` → unsubscribe fn. See `contracts/terminal-control`. |
 
 ## project (`shelfApi.project`)
 
@@ -32,8 +33,8 @@ The renderer↔main bridge surface — `window.shelfApi.*` methods (RPC over `ip
 | `getAll()` | invoke `project:get-all` → readonly canonical `Project[]` (see `src/shared/projects.ts`) |
 | `add(input)` | invoke `project:add` with id-less `ProjectCreateInput` → main-owned canonical `Project` |
 | `update(project)` | invoke `project:update` with a complete canonical `Project` |
-| `delete(projectId)` | invoke `project:delete` → `{ cleanupPending }`; rejection means config did not commit |
-| `retryCleanup(projectId)` | invoke `project:retry-cleanup` → `{ cleanupPending }`; never resends delete |
+| `delete(projectId)` | invoke `project:delete` → `ProjectDeleteResult`; rejection means config did not commit. A committed delete may return `{ cleanupPending: true, leftover: { targetPath, reason } }` when target history cleanup needs current-session retry. |
+| `retryCleanup(projectId)` | invoke `project:retry-cleanup` → `ProjectDeleteResult`; reuses the in-memory cleanup snapshot and never resends delete |
 | `reorder(sourceId, targetId)` | invoke `project:reorder` with opaque project ids |
 | `validateDirs()` | invoke `project:validate-dirs` → invalid project ids; main reads repository state |
 | `listSecretKeys(projectId)` | invoke `project:secrets-list` → `string[]` KEY names (values NEVER cross back to renderer) |

@@ -4,8 +4,8 @@ Decisions + gotchas grouped by topic. Cited from code as `<topic>#N`.
 
 | Intent | File | One-line summary |
 |---|---|---|
-| 終端輸入/輸出、pty、xterm | [terminal-pty](terminal-pty.md) | TerminalView spawn、HISTFILE、xterm addon 雷 |
-| local/SSH/WSL/Docker 連線抽象 | [connector](connector.md) | connector factory、ControlMaster、exec、branch 切換 |
+| 終端輸入/輸出、pty、xterm | [terminal-pty](terminal-pty.md) | TerminalView spawn、project history、init lifecycle、xterm addon 雷 |
+| local/SSH/WSL/Docker 連線抽象 | [connector](connector.md) | config/runtime/AppOS 分層、generation facts、ControlMaster、exec |
 | 檔案上傳 / 貼上 / 清理 | [file-transfer](file-transfer.md) | `.tmp/shelf/`、cat-via-stdin、session-based cleanup |
 | 設定 merge、bootstrap、userData 隔離 | [settings-config](settings-config.md) | shallow+deep merge、開窗前載 config、DEFAULT_SETTINGS |
 | app 快捷鍵 / 視窗 shell 行為 | [keybindings-shell](keybindings-shell.md) | capture phase、外部連結、DevTools、IME composition |

@@ -4,8 +4,8 @@ Abstract data flow at the system level (component names, no filenames).
 
 | Intent | File | One-line summary |
 |---|---|---|
-| 終端 I/O 流 | [terminal-io](terminal-io.md) | keypress → 快捷鍵層 → pty → 輸出；貼上/拖檔 → staging → shell |
-| 連線生命週期 | [connection-lifecycle](connection-lifecycle.md) | connect → connector → shell/exec；部署、heartbeat、idle-shutdown |
+| 終端 I/O 流 | [terminal-io](terminal-io.md) | target facts → runner/init phases → 互動 I/O；附件 staging 與 external URL control frame |
+| 連線生命週期 | [connection-lifecycle](connection-lifecycle.md) | config → runtime generation → AppOS materialization → shell/exec；部署與 health lifecycle |
 | Agent execution / content | [agent-execution](agent-execution.md) | send queue → execution control；session content → CLI 式線性 timeline |
 | Agent dispatch | [agent-dispatch](agent-dispatch.md) | main → per-host dispatcher → per-session exec → CLI；sid demux、two-map hosting、two-tier health、reconnect、cache |
 | Process memory observability | [process-memory-observability](process-memory-observability.md) | source-owned acquisition → main latest-value registry → retained detail + 30s summary → footer/status bar |

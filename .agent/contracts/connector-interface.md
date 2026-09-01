@@ -4,17 +4,18 @@ title: Connector Interface
 related:
   - context/connector
   - architecture/connection-lifecycle
+  - contracts/terminal-control
 ---
 
 # Connector Interface
 
-The `Connector` is the single abstraction that hides where work runs — same machine, a remote host over SSH, a Windows Linux subsystem, or a container — behind one uniform method surface; every consumer (pty-manager, file-transfer, git/IPC handlers) talks to a `Connector` and never branches on connection type.
+Connector composition separates persisted connection data, connector protocol behavior, and the operating system running Shelf. Consumers receive a `ConnectorRuntime`; they never select a client executable or infer the target OS from the connection method.
 
-Authoritative definitions live in `src/main/connector/types.ts` (`Connector`, `Shell`, `Disposable`, `ExecResult`) and `src/main/connector/index.ts` (`createConnector`). Connection-type shapes live in `src/shared/types.ts`.
+Authoritative definitions live in `src/main/connector/config.ts`, `runtime.ts`, `launch-plan.ts`, `types.ts`, and `index.ts`. Connection-type shapes live in `src/shared/types.ts`.
 
 ## Factory
 
-`createConnector(connection: Connection): Connector` — `src/main/connector/index.ts`. Synchronously dispatches on `connection.type` (and `process.platform` for local/SSH) and returns the matching implementation. There is no async setup here; establishing the actual link is deferred to `connect()`.
+`createConnector(connection: Connection): ConnectorRuntime` — `src/main/connector/index.ts`. The runtime owner keys and reuses a live generation by immutable `ConnectorConfig`. AppOS registry membership is the structural support list; the selected adapter creates protocol behavior and materializes terminal launch plans for the OS running Shelf. Establishing an external link remains deferred to `connect()`.
 
 Companion exports (same file):
 
@@ -23,15 +24,19 @@ Companion exports (same file):
 | `getAvailableTypes` | `(): ConnectionType[]` | Connection types selectable on the current OS (`wsl` is Windows-only). |
 | `listDockerContainers` | `(): Promise<string[]>` | Enumerate running Docker containers for the picker. |
 | `listWSLDistros` | `(): Promise<string[]>` | Enumerate WSL distros (empty off Windows). |
-| `cleanupConnectors` | `(): void` | App-quit hook; terminates SSH ControlMaster sockets. |
+| `invalidateConnectorRuntime` | `(connection): void` | Invalidates the matching runtime generation so later terminal facts cannot reuse stale completion. |
+| `cleanupConnectors` | `(): void` | App-quit hook; invalidates all runtime generations and terminates SSH ControlMaster sockets. |
 
 ## Methods
 
-Every connector implements the `Connector` interface (`src/main/connector/types.ts`). `cwd` arguments are absolute paths in the target environment.
+Each runtime delegates ordinary target operations to a connector protocol implementation. `cwd` arguments are absolute paths in the target environment.
 
 | Method | Signature | Purpose |
 |--------|-----------|---------|
-| `createShell` | `(cwd: string, env?: Record<string,string>): Shell` | Spawn an interactive PTY shell rooted at `cwd`; returns a `Shell` (consumers never import node-pty). `env` = the project's injected env map (plain + secret): local connectors merge it into the pty `env` (PATH merges); remote connectors (docker/ssh/wsl) prepend an `export …` prefix since the pty `env` only reaches the local ssh/docker client, not the remote shell. |
+| `createCompatibilityLaunchPlan` | `(cwd, env?, requiredEnv?): TerminalLaunchPlan` | Materialize the connector's behavior-preserving terminal startup without target-shell classification. |
+| `createInterpreterLaunchPlan` | `(cwd, interpreter, interpreterArgs, env?, requiredEnv?, preserveEnv?): TerminalLaunchPlan` | Materialize an explicit resolved target interpreter through the same AppOS/connector composition. |
+| `spawnTerminalPlan` | `(plan): Shell` | Spawn an already materialized immutable plan; returns the connector-neutral `Shell` surface. |
+| `createShell` | `(cwd, env?, requiredEnv?): Shell` | Compatibility wrapper for consumers that do not use runner selection. |
 | `isConnected` | `(): Promise<boolean>` | Probe whether the link is currently reachable. |
 | `connect` | `(password?: string): Promise<void>` | Establish/authenticate the link (e.g. SSH ControlMaster); `password` is used for SSH first-connect. |
 | `exec` | `(cwd: string, cmd: string): Promise<ExecResult>` | Run a non-interactive command in the target env (e.g. git ops); returns `{ stdout, stderr }`. Not exposed as a generic IPC channel. |
@@ -43,7 +48,7 @@ Every connector implements the `Connector` interface (`src/main/connector/types.
 | `clearUploads` | `(cwd: string): Promise<number>` | Remove all staged uploads under `cwd`; returns count removed. |
 | `getUploadsSize` | `(cwd: string): Promise<{ totalBytes: number; fileCount: number }>` | Size/count of `<cwd>/.tmp/shelf/` for Project Edit display; returns zeros on any failure (no error distinction). |
 
-`Shell` (returned by `createShell`) exposes `onData(cb): Disposable`, `onExit(cb): Disposable`, `write(data)`, `resize(cols, rows)`, and `kill()`. `Disposable` is `{ dispose(): void }`.
+`Shell` exposes `onData(cb): Disposable`, `onExit(cb): Disposable`, `write(data)`, `resize(cols, rows)`, and `kill()`. `Disposable` is `{ dispose(): void }`. Terminal launch-plan and control-frame formats are specified in `contracts/terminal-control`.
 
 ## Connection types
 

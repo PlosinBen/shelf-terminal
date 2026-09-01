@@ -9,20 +9,27 @@ related:
 
 # Connection Lifecycle
 
-A project connection is established through one uniform pathway regardless of where the work actually runs — same machine, a remote host over a secure channel, a Windows Linux subsystem, or a container. The app holds the user's source of truth and drives every connection; each connection target hosts its own server-side runtime that the app spawns, feeds, and keeps alive. The shape below is identical across transports; only the lowest layer that moves bytes (spawn shell, run one-off command, copy a file) differs per target, and that difference is hidden behind a single connector role so nothing upstream branches on the target kind.
+A project connection is established through one uniform pathway regardless of where work runs. Persisted connection parameters select protocol behavior; the operating system running the app materializes local executables and arguments; runtime target facts are detected independently only when a terminal needs them. The app holds the user's source of truth and drives every connection target without persisting inferred OS or shell state.
 
 ## Flow
 
 ```
-[App / project]
-      │  open a project on a chosen target (same-machine / remote / subsystem / container)
+[App / project config]
+      │  connector method + parameters only
       ▼
-[Connector]  ── one abstraction per target kind, selected by target + host OS ──
-      │  it owns all target-specific work; everything above treats targets uniformly
-      │
-      ├─► [Interactive shell channel]  ── long-lived terminal session for the user
-      │
-      └─► [Command channel]  ── short, non-interactive one-shot commands (e.g. version-control ops)
+[Runtime owner] ──► [Live connector generation]
+                           │ protocol/auth/command/file lifecycle
+                           ├─► [Command channel] ── short, non-interactive target commands
+                           │
+                           ├─► [Terminal launch request]
+                           │             │
+                           │             ▼
+                           │   [App-OS adapter registry]
+                           │             │ materialize client executable/argv/env
+                           │             ▼
+                           │   [Immutable launch plan] ──► long-lived PTY shell
+                           │
+                           └─ invalidation bounds ephemeral target facts
       │
       ▼
 [Deploy transport]  ── push runtime + projected per-app data to the target's server area ──
@@ -51,7 +58,9 @@ A project connection is established through one uniform pathway regardless of wh
 
 ## Boundaries
 
-- **Target-specifics live only in the connector.** Selecting the runtime, opening a shell, running a one-shot command, listing a directory, uploading, and cleanup are all resolved inside the per-target abstraction. Nothing above it switches on the target kind; adding a new target kind is adding one connector, not editing every call site. The bridge that exposes capabilities to the UI is a plain pass-through with no dispatch of its own.
+- **Configuration, protocol, and app OS are separate boundaries.** Persisted configuration names the connection method and its parameters. The live runtime owns protocol behavior and generation lifetime. The app-OS adapter owns client executable and argument construction and exposes the structural support registry. The UI bridge remains a plain pass-through.
+
+- **Target facts are terminal-owned and ephemeral.** A lazy resolver uses the live runtime's bounded command operation and caches one positive result or failure per generation. It does not change connector support, connection establishment, agent startup, Git, or file behavior. Probe failure preserves the connector's opaque compatibility terminal plan; it never causes connector fallback or target inference.
 
 - **Source of truth flows one way.** The app owns the canonical user data; the server area on each target holds only derived, disposable projections that can be rebuilt at any time. Projection is always a push from app to target over the deploy transport — the app never reaches in to read or write the target's filesystem directly, and reads back only the small markers it deployed. Local is not a special case: it projects to the same home-rooted server area as remote targets so the server-side code stays branch-free.
 

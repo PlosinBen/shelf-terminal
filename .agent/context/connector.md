@@ -83,3 +83,11 @@ footer 重設計後，BottomBar 的 branch **顯示/dropdown UI 已移除**（�
 - prime 是**非同步**（`primeShellEnv()` 開窗後才跑），理論上「prime 未完成就先呼叫本機 execFile」會拿到未校正 PATH；實務上連線 picker 都在啟動後很晚才開，且 `getShellEnv()` 有 sync fallback 會強制 resolve（連帶 patch `process.env`）。
 - 只 merge PATH（不整包覆蓋 `process.env`），避免丟掉 Electron 設的其他 var。
 - **測試**：mutate `process.env.PATH` 是全域 side effect，測試需 snapshot + `afterEach` 還原，否則跨檔污染變 flaky。
+
+## connector#9 — ConnectorConfig、ConnectorRuntime 與 AppOS 分離，target facts 不持久化  ·  [Decision]
+
+**Decision**：persisted config 只保存 `local` / `ssh` / `docker` / `wsl` 與其參數。ConnectorRuntime 只管 protocol/lifecycle 並提供 generation identity；AppOS adapter registry 只管 Shelf 所在 OS 如何 materialize executable、argv、cwd、env，registry membership 同時是 structural support list。Target OS/default shell 由 terminal-owned resolver lazy probe，對每個 live runtime generation single-flight cache success 或 failure；generation invalidation 後才重試。
+
+**Reason**：connector 是連線方式，不能從 SSH/Docker/WSL 推斷 remote OS；`ssh` 與 `ssh.exe` 又是 client OS execution detail，不應進 config。分層後 connector 不需混入 app OS branch，runner 也不需重建 transport arguments。
+
+**Do not change casually because**：probe failure 必須採用 connector 產生的 opaque compatibility launch plan，不能改猜 `/bin/sh`、另一個 connector 或 client platform default。單 tab dispose 只取消自己的 wait，不得取消 generation-owned shared probe；disconnect/reconnect 的 stale completion 不得寫入新 generation。

@@ -4,6 +4,7 @@ title: External URL Intent
 related:
   - architecture/terminal-io
   - contracts/ipc-channels
+  - contracts/terminal-control
   - context/external-url-intent
 ---
 
@@ -60,7 +61,7 @@ main gate --external-url-intent:close({requestId})------> renderer popup
 ESC ] 6973 ; external-url ; 1 ; <base64url(UTF-8 exact URL)> BEL
 ```
 
-The string prefix is `\x1b]6973;external-url;1;`. `ST` (`ESC \\`) is accepted as an alternate terminator. Payload is unpadded canonical base64url and bounded from the 8192-character URL limit. The streaming parser may receive fragmented or multiple frames; it preserves all unrelated terminal output and removes every recognized Shelf frame.
+The string prefix is `\x1b]6973;external-url;1;`. `ST` (`ESC \\`) is accepted as an alternate terminator. Payload is unpadded canonical base64url and bounded from the 8192-character URL limit. One shared Shelf OSC router receives fragmented or multiple frames and dispatches by route; the external-url handler consumes only a supported valid frame. Unrelated output, unknown routes/versions, and frames no phase-aware handler owns remain visible. See `contracts/terminal-control` for the shared envelope and terminal-init route.
 
 | Parser anomaly | Meaning |
 |---|---|
