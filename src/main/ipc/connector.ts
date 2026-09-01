@@ -1,6 +1,12 @@
 import { ipcMain } from 'electron';
 import { IPC } from '@shared/ipc-channels';
-import { createConnector, getAvailableTypes, listDockerContainers, listWSLDistros } from '../connector';
+import {
+  createConnector,
+  getAvailableTypes,
+  invalidateConnectorRuntime,
+  listDockerContainers,
+  listWSLDistros,
+} from '../connector';
 import { removeHostKey } from '../ssh-control';
 import { loadSSHServers, saveSSHServer } from '../ssh-server-store';
 import type { Connection } from '@shared/types';
@@ -26,6 +32,10 @@ export function registerConnectorHandlers(): void {
   ipcMain.handle(IPC.CONNECTOR_ESTABLISH, async (_event, payload: { connection: Connection; password?: string }) => {
     const connector = createConnector(payload.connection);
     await connector.connect(payload.password);
+    // A successful establish/re-establish is the explicit boundary for
+    // ephemeral target facts. The external SSH master remains reusable, while
+    // the next consumer receives a fresh runtime generation.
+    invalidateConnectorRuntime(payload.connection);
     // Auto-save SSH server on successful connect
     if (payload.connection.type === 'ssh') {
       saveSSHServer({
