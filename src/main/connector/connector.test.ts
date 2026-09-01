@@ -242,6 +242,83 @@ describe('remote connector createShell env injection', () => {
   });
 });
 
+// ── Connector PTY launch characterization ──
+// These assertions intentionally lock the current executable/argv boundary before
+// ConnectorRuntime and AppOS take over its composition.
+
+describe('connector PTY launch characterization', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('launches local Unix as a login shell', async () => {
+    if (process.platform === 'win32') return;
+    const pty = await import('node-pty');
+    const { LocalUnixConnector } = await import('./local/unix');
+
+    new LocalUnixConnector().createShell('/tmp');
+
+    const [executable, args, options] = (pty.spawn as any).mock.calls[0];
+    expect(executable).toEqual(expect.any(String));
+    expect(args).toEqual(['-l']);
+    expect(options).toMatchObject({ name: 'xterm-256color', cols: 80, rows: 24, cwd: '/tmp' });
+  });
+
+  it('launches local Windows with the existing powershell.exe behavior', async () => {
+    const pty = await import('node-pty');
+    const { LocalWin32Connector } = await import('./local/win32');
+
+    new LocalWin32Connector().createShell('/tmp');
+
+    const [executable, args, options] = (pty.spawn as any).mock.calls[0];
+    expect(executable).toBe('powershell.exe');
+    expect(args).toEqual([]);
+    expect(options).toMatchObject({ name: 'xterm-256color', cols: 80, rows: 24 });
+  });
+
+  it('launches Docker through exec -it and the target sh compatibility command', async () => {
+    const pty = await import('node-pty');
+    const { DockerConnector } = await import('./docker');
+
+    new DockerConnector('container-a').createShell('/work tree');
+
+    const [executable, args] = (pty.spawn as any).mock.calls[0];
+    expect(executable).toBe('docker');
+    expect(args).toEqual([
+      'exec', '-it', 'container-a', 'sh', '-c',
+      "cd '/work tree' && exec ${SHELL:-sh}",
+    ]);
+  });
+
+  it('launches WSL through the selected distro and target sh compatibility command', async () => {
+    const pty = await import('node-pty');
+    const { WSLConnector } = await import('./wsl');
+
+    new WSLConnector('Ubuntu').createShell('/work tree');
+
+    const [executable, args] = (pty.spawn as any).mock.calls[0];
+    expect(executable).toBe('wsl.exe');
+    expect(args).toEqual([
+      '-d', 'Ubuntu', '--', 'sh', '-c',
+      "cd '/work tree' && exec $SHELL",
+    ]);
+  });
+
+  it('launches POSIX-app SSH with ControlMaster and the target login shell command', async () => {
+    const pty = await import('node-pty');
+    const { SSHUnixConnector } = await import('./ssh/unix');
+
+    new SSHUnixConnector('example.com', 2222, 'tester').createShell('/work tree');
+
+    const [executable, args] = (pty.spawn as any).mock.calls[0];
+    expect(executable).toBe('ssh');
+    expect(args).toEqual(expect.arrayContaining([
+      '-o', 'ControlMaster=auto',
+      '-o', 'ControlPath=/tmp/shelf-test-control',
+      '-p', '2222', 'tester@example.com',
+      '-t', "cd '/work tree' && exec $SHELL -l",
+    ]));
+  });
+});
+
 // ── file-utils (these duplicate some file-transfer.test.ts coverage but ──
 // ── verify the canonical source in connector/file-utils.ts)               ──
 
