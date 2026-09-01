@@ -148,6 +148,7 @@ function spawnTerminalPlan(plan: TerminalLaunchPlan): Shell {
 
 function materializeLocalUnix(request: TerminalLaunchRequest): TerminalLaunchPlan {
   const cwd = fs.existsSync(request.cwd) ? request.cwd : os.homedir();
+  const baseEnv = getShellEnv();
   const executable = request.kind === TERMINAL_LAUNCH_KIND.compatibility
     ? resolveShell()
     : request.interpreter;
@@ -160,8 +161,15 @@ function materializeLocalUnix(request: TerminalLaunchRequest): TerminalLaunchPla
     args,
     cwd,
     env: {
-      ...applyEnvMap(getShellEnv(), { ...request.env }, { ...request.requiredEnv }),
-      HISTFILE: '/dev/null',
+      ...applyEnvMap(
+        baseEnv,
+        { ...request.env },
+        {
+          ...preservedLocalEnv(request, baseEnv),
+          ...request.requiredEnv,
+        },
+      ),
+      ...(request.kind === TERMINAL_LAUNCH_KIND.compatibility ? { HISTFILE: '/dev/null' } : {}),
     },
     logContext: `local/unix spawn: shell=${executable} cwd=${cwd}`,
   });
@@ -169,6 +177,7 @@ function materializeLocalUnix(request: TerminalLaunchRequest): TerminalLaunchPla
 
 function materializeLocalWindows(request: TerminalLaunchRequest): TerminalLaunchPlan {
   const cwd = fs.existsSync(request.cwd) ? request.cwd : os.homedir();
+  const baseEnv = stringEnv(process.env);
   return freezeTerminalLaunchPlan({
     kind: request.kind,
     executable: request.kind === TERMINAL_LAUNCH_KIND.compatibility
@@ -176,7 +185,10 @@ function materializeLocalWindows(request: TerminalLaunchRequest): TerminalLaunch
       : request.interpreter,
     args: request.kind === TERMINAL_LAUNCH_KIND.compatibility ? [] : request.interpreterArgs,
     cwd,
-    env: applyEnvMap(stringEnv(process.env), { ...request.env }, { ...request.requiredEnv }),
+    env: applyEnvMap(baseEnv, { ...request.env }, {
+      ...preservedLocalEnv(request, baseEnv),
+      ...request.requiredEnv,
+    }),
     logContext: `local/win32 spawn: shell=${request.kind === TERMINAL_LAUNCH_KIND.compatibility ? 'powershell.exe' : request.interpreter} cwd=${cwd}`,
   });
 }
@@ -241,11 +253,28 @@ function materializeWSL(
 }
 
 function targetCommand(request: TerminalLaunchRequest, compatibilityInterpreter: string): string {
-  const envPrefix = buildEnvExportPrefix({ ...request.env }, { ...request.requiredEnv });
+  const projectEnvPrefix = buildEnvExportPrefix({ ...request.env }, {});
+  const preservePrefix = request.kind === TERMINAL_LAUNCH_KIND.interpreter
+    ? request.preserveEnv
+      .map(({ source, target }) => `export ${target}=\"\${${source}-}\"; `)
+      .join('')
+    : '';
+  const requiredEnvPrefix = buildEnvExportPrefix({}, { ...request.requiredEnv });
   const interpreter = request.kind === TERMINAL_LAUNCH_KIND.compatibility
     ? compatibilityInterpreter
     : [shellSingleQuote(request.interpreter), ...request.interpreterArgs.map(shellSingleQuote)].join(' ');
-  return `${envPrefix}cd ${shellEscape(request.cwd)} && exec ${interpreter}`;
+  return `${projectEnvPrefix}${preservePrefix}${requiredEnvPrefix}cd ${shellEscape(request.cwd)} && exec ${interpreter}`;
+}
+
+function preservedLocalEnv(
+  request: TerminalLaunchRequest,
+  baseEnv: Readonly<Record<string, string>>,
+): Record<string, string> {
+  if (request.kind !== TERMINAL_LAUNCH_KIND.interpreter) return {};
+  return Object.fromEntries(request.preserveEnv.map(({ source, target }) => [
+    target,
+    request.env[source] ?? baseEnv[source] ?? '',
+  ]));
 }
 
 function stringEnv(env: NodeJS.ProcessEnv): Record<string, string> {

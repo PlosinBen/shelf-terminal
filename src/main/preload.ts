@@ -34,6 +34,13 @@ contextBridge.exposeInMainWorld('shelfApi', {
       ipcRenderer.on(IPC.PTY_INIT_SENT, listener);
       return () => ipcRenderer.removeListener(IPC.PTY_INIT_SENT, listener);
     },
+    onInitPhase: (callback: (tabId: string, phase: import('@shared/types').PtyInitPresentationPhase) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, payload: import('@shared/types').PtyInitPhasePayload) => {
+        callback(payload.tabId, payload.phase);
+      };
+      ipcRenderer.on(IPC.PTY_INIT_PHASE, listener);
+      return () => ipcRenderer.removeListener(IPC.PTY_INIT_PHASE, listener);
+    },
   },
   connector: {
     listDir: (connection: any, dirPath: string) =>

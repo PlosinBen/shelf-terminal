@@ -6,6 +6,7 @@ import {
   TERMINAL_LAUNCH_KIND,
   type TerminalLaunchPlan,
   type TerminalLaunchRequest,
+  type PreservedTargetEnv,
 } from './launch-plan';
 
 export interface TerminalPlanAdapter {
@@ -63,6 +64,7 @@ export class ConnectorRuntime implements Connector {
     interpreterArgs: readonly string[],
     env: Record<string, string> = {},
     requiredEnv: Record<string, string> = {},
+    preserveEnv: readonly PreservedTargetEnv[] = [],
   ): TerminalLaunchPlan {
     return this.requireTerminalAdapter().materialize({
       kind: TERMINAL_LAUNCH_KIND.interpreter,
@@ -71,6 +73,7 @@ export class ConnectorRuntime implements Connector {
       interpreterArgs,
       env,
       requiredEnv,
+      preserveEnv,
     });
   }
 

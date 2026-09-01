@@ -18,7 +18,7 @@ export function registerPtyHandlers(): void {
         createConnector(payload.connection),
         payload.connection,
       );
-      spawnPty(
+      await spawnPty(
         payload.projectId,
         payload.tabId,
         payload.cwd,

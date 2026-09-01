@@ -10,7 +10,7 @@ import { getTheme } from '../themes';
 import { useAttachmentPaste } from '../hooks/useAttachmentPaste';
 import '@xterm/xterm/css/xterm.css';
 
-import type { Connection } from '@shared/types';
+import { PTY_INIT_PRESENTATION_PHASE, type Connection, type PtyInitPresentationPhase } from '@shared/types';
 
 interface Props {
   tabId: string;
@@ -59,7 +59,7 @@ export function TerminalView({ tabId, projectId, cwd, connection, initScript, ta
   const initializedRef = useRef(false);
   const visibleRef = useRef(visible);
   visibleRef.current = visible;
-  const [initLoading, setInitLoading] = useState(!!(initScript || tabCmd));
+  const [initPhase, setInitPhase] = useState<PtyInitPresentationPhase>(PTY_INIT_PRESENTATION_PHASE.initializing);
   const { settings } = useStore();
   const theme = getTheme(settings.themeName);
 
@@ -130,9 +130,6 @@ export function TerminalView({ tabId, projectId, cwd, connection, initScript, ta
       fitAddon.fit();
     });
 
-    // Spawn pty
-    window.shelfApi.pty.spawn(projectId, tabId, cwd, connection, initScript, tabCmd);
-
     // Terminal input → pty
     const onDataDispose = term.onData((data) => {
       window.shelfApi.pty.input(tabId, data);
@@ -148,8 +145,15 @@ export function TerminalView({ tabId, projectId, cwd, connection, initScript, ta
 
     // Init script sent → hide loading
     const removeInitSentListener = window.shelfApi.pty.onInitSent((id) => {
-      if (id === tabId) setInitLoading(false);
+      if (id === tabId) setInitPhase(PTY_INIT_PRESENTATION_PHASE.ready);
     });
+    const removeInitPhaseListener = window.shelfApi.pty.onInitPhase((id, phase) => {
+      if (id === tabId) setInitPhase(phase);
+    });
+
+    // Subscribe before spawn so even a local NativeRunner cannot publish its
+    // ready phase before TerminalView is listening.
+    void window.shelfApi.pty.spawn(projectId, tabId, cwd, connection, initScript, tabCmd);
 
     // Resize handling
     const onResizeDispose = term.onResize(({ cols, rows }) => {
@@ -168,6 +172,7 @@ export function TerminalView({ tabId, projectId, cwd, connection, initScript, ta
       onResizeDispose.dispose();
       removeDataListener();
       removeInitSentListener();
+      removeInitPhaseListener();
       resizeObserver.disconnect();
     };
   }, [tabId]);
@@ -208,7 +213,7 @@ export function TerminalView({ tabId, projectId, cwd, connection, initScript, ta
         className="terminal-container"
         style={{ display: visible ? 'block' : 'none' }}
       />
-      {initLoading && visible && (
+      {initPhase === PTY_INIT_PRESENTATION_PHASE.initializing && visible && (
         <div className="terminal-loading">Loading...</div>
       )}
     </>

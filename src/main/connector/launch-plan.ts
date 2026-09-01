@@ -28,6 +28,12 @@ export interface InterpreterTerminalRequest {
   readonly interpreterArgs: readonly string[];
   readonly env: Readonly<Record<string, string>>;
   readonly requiredEnv: Readonly<Record<string, string>>;
+  readonly preserveEnv: readonly PreservedTargetEnv[];
+}
+
+export interface PreservedTargetEnv {
+  readonly source: string;
+  readonly target: string;
 }
 
 export type TerminalLaunchRequest = CompatibilityTerminalRequest | InterpreterTerminalRequest;

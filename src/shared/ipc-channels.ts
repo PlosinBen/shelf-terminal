@@ -213,6 +213,7 @@ export const IPC = {
   PTY_DATA: 'pty:data',
   PTY_EXIT: 'pty:exit',
   PTY_INIT_SENT: 'pty:init-sent',
+  PTY_INIT_PHASE: 'pty:init-phase',
   PM_STREAM: 'pm:stream',
 
   // Agent (Main → Renderer)

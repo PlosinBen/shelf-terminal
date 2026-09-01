@@ -8,23 +8,40 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 const h = vi.hoisted(() => {
   const dataCbs: Array<(d: string) => void> = [];
+  const exitCbs: Array<(code: number) => void> = [];
   const shell = {
     onData: (cb: (d: string) => void) => { dataCbs.push(cb); return { dispose: () => {} }; },
-    onExit: () => ({ dispose: () => {} }),
+    onExit: (cb: (code: number) => void) => { exitCbs.push(cb); return { dispose: () => {} }; },
     write: () => {},
     resize: () => {},
-    kill: () => {},
+    kill: vi.fn(),
   };
   const show = vi.fn();
   const Notification = vi.fn(function () { return { show }; });
-  return { dataCbs, shell, show, Notification };
+  return { dataCbs, exitCbs, shell, show, Notification };
 });
 
 vi.mock('electron', () => ({ Notification: h.Notification, BrowserWindow: class {} }));
-vi.mock('./connector', () => ({ createConnector: () => ({ createShell: () => h.shell }) }));
+vi.mock('./connector', () => ({
+  createConnector: () => ({
+    generation: { id: 'test-generation' },
+    createCompatibilityLaunchPlan: () => ({
+      kind: 'compatibility', executable: 'test', args: [], cwd: '/cwd', env: {}, logContext: 'test',
+    }),
+    spawnTerminalPlan: () => h.shell,
+  }),
+}));
+vi.mock('./connector/target-facts', () => ({
+  TargetFactsResolver: class {
+    resolve() {
+      return Promise.resolve({ ok: false, reason: 'probe-failed', attempts: [] });
+    }
+  },
+}));
+vi.mock('./app-instance-id', () => ({ getAppInstanceId: () => 'test-app' }));
 vi.mock('./file-transfer', () => ({ maybeScheduleCleanup: () => {} }));
 
-import { spawnPty, writePty, setMuted, setPtyObserver } from './pty-manager';
+import { spawnPty, writePty, setMuted, setPtyObserver, teardownProjectPtys } from './pty-manager';
 import { encodeExternalUrlOscFrame, EXTERNAL_URL_OSC_PREFIX } from '@shared/external-url-osc';
 
 const conn = {} as any;
@@ -46,9 +63,35 @@ async function sustainThenIdle() {
 beforeEach(() => {
   vi.useFakeTimers();
   h.dataCbs.length = 0;
+  h.exitCbs.length = 0;
+  h.shell.kill.mockClear();
   h.show.mockClear();
   h.Notification.mockClear();
   setPtyObserver({});
+});
+
+describe('pty-manager project teardown', () => {
+  it('waits for PTY exit acknowledgement before confirming project teardown', async () => {
+    await spawnPty('project-teardown', 'tab-teardown', '/cwd', conn, makeWin(false));
+
+    const teardown = teardownProjectPtys('project-teardown', 1000);
+    expect(h.shell.kill).toHaveBeenCalledOnce();
+    h.exitCbs.forEach((callback) => callback(0));
+
+    await expect(teardown).resolves.toEqual({ confirmed: true, unconfirmedTabIds: [] });
+  });
+
+  it('reports an unconfirmed tab when the bounded exit acknowledgement expires', async () => {
+    await spawnPty('project-timeout', 'tab-timeout', '/cwd', conn, makeWin(false));
+
+    const teardown = teardownProjectPtys('project-timeout', 1000);
+    await vi.advanceTimersByTimeAsync(1000);
+
+    await expect(teardown).resolves.toEqual({
+      confirmed: false,
+      unconfirmedTabIds: ['tab-timeout'],
+    });
+  });
 });
 afterEach(() => {
   vi.useRealTimers();
@@ -56,7 +99,7 @@ afterEach(() => {
 
 describe('pty-manager idle notification (terminal-pty#4)', () => {
   it('notifies after sustained activity when user typed and window is unfocused', async () => {
-    spawnPty('p', 'tab-ok', '/cwd', conn, makeWin(false));
+    await spawnPty('p', 'tab-ok', '/cwd', conn, makeWin(false));
     emit('seed');                 // create activity state
     writePty('tab-ok', 'ls\n');   // userInput = true
     await sustainThenIdle();
@@ -64,13 +107,13 @@ describe('pty-manager idle notification (terminal-pty#4)', () => {
   });
 
   it('does NOT notify when the user never typed (no userInput)', async () => {
-    spawnPty('p', 'tab-noinput', '/cwd', conn, makeWin(false));
+    await spawnPty('p', 'tab-noinput', '/cwd', conn, makeWin(false));
     await sustainThenIdle();      // output only, no writePty
     expect(h.show).not.toHaveBeenCalled();
   });
 
   it('does NOT notify when the tab is muted', async () => {
-    spawnPty('p', 'tab-muted', '/cwd', conn, makeWin(false));
+    await spawnPty('p', 'tab-muted', '/cwd', conn, makeWin(false));
     setMuted('tab-muted', true);
     emit('seed');
     writePty('tab-muted', 'ls\n');
@@ -79,7 +122,7 @@ describe('pty-manager idle notification (terminal-pty#4)', () => {
   });
 
   it('does NOT notify when the window is focused', async () => {
-    spawnPty('p', 'tab-focused', '/cwd', conn, makeWin(true));
+    await spawnPty('p', 'tab-focused', '/cwd', conn, makeWin(true));
     emit('seed');
     writePty('tab-focused', 'ls\n');
     await sustainThenIdle();
@@ -87,7 +130,7 @@ describe('pty-manager idle notification (terminal-pty#4)', () => {
   });
 
   it('does NOT notify when active for less than 5s', async () => {
-    spawnPty('p', 'tab-short', '/cwd', conn, makeWin(false));
+    await spawnPty('p', 'tab-short', '/cwd', conn, makeWin(false));
     emit('seed');
     writePty('tab-short', 'ls\n');
     await vi.advanceTimersByTimeAsync(3000); // idle fires after ~0s of activity
@@ -96,13 +139,13 @@ describe('pty-manager idle notification (terminal-pty#4)', () => {
 });
 
 describe('pty-manager external URL frames', () => {
-  it('strips a frame from observer/renderer output and preserves PTY source identity', () => {
+  it('strips a frame from observer/renderer output and preserves PTY source identity', async () => {
     const onData = vi.fn();
     const onExternalUrl = vi.fn();
     const onProtocolAnomaly = vi.fn();
     const win = makeWin(false);
     setPtyObserver({ onData, onExternalUrl, onProtocolAnomaly });
-    spawnPty('project-1', 'tab-1', '/cwd', conn, win);
+    await spawnPty('project-1', 'tab-1', '/cwd', conn, win);
     const url = 'https://terminal.example/oauth?state=exact-private';
 
     emit(`before${encodeExternalUrlOscFrame(url)}after`);
@@ -117,13 +160,13 @@ describe('pty-manager external URL frames', () => {
     expect(JSON.stringify(win.webContents.send.mock.calls)).not.toContain(EXTERNAL_URL_OSC_PREFIX);
   });
 
-  it('strips malformed frames and reports a bounded anomaly without payload data', () => {
+  it('strips malformed frames and reports a bounded anomaly without payload data', async () => {
     const onData = vi.fn();
     const onExternalUrl = vi.fn();
     const onProtocolAnomaly = vi.fn();
     const win = makeWin(false);
     setPtyObserver({ onData, onExternalUrl, onProtocolAnomaly });
-    spawnPty('project-1', 'tab-1', '/cwd', conn, win);
+    await spawnPty('project-1', 'tab-1', '/cwd', conn, win);
 
     emit(`left${EXTERNAL_URL_OSC_PREFIX}private+payload\x07right`);
 

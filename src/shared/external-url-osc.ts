@@ -1,8 +1,18 @@
 import { EXTERNAL_URL_INTENT_LIMITS } from './external-url-intent';
+import {
+  SHELF_OSC_BEL,
+  SHELF_OSC_NAMESPACE_PREFIX,
+  SHELF_OSC_ST,
+  ShelfOscRouter,
+  encodeShelfOscFrame,
+  type ShelfOscFrame,
+} from './shelf-osc';
 
-export const EXTERNAL_URL_OSC_PREFIX = '\x1b]6973;external-url;1;';
-export const EXTERNAL_URL_OSC_BEL = '\x07';
-export const EXTERNAL_URL_OSC_ST = '\x1b\\';
+export const EXTERNAL_URL_OSC_ROUTE = 'external-url';
+export const EXTERNAL_URL_OSC_VERSION = 1;
+export const EXTERNAL_URL_OSC_PREFIX = `${SHELF_OSC_NAMESPACE_PREFIX}${EXTERNAL_URL_OSC_ROUTE};${EXTERNAL_URL_OSC_VERSION};`;
+export const EXTERNAL_URL_OSC_BEL = SHELF_OSC_BEL;
+export const EXTERNAL_URL_OSC_ST = SHELF_OSC_ST;
 export const EXTERNAL_URL_OSC_MAX_PAYLOAD = Math.ceil(EXTERNAL_URL_INTENT_LIMITS.url * 4 / 3);
 export const EXTERNAL_URL_OSC_MAX_FRAME = EXTERNAL_URL_OSC_PREFIX.length
   + EXTERNAL_URL_OSC_MAX_PAYLOAD
@@ -40,81 +50,51 @@ function decodeBase64Url(value: string): string | null {
 }
 
 export function encodeExternalUrlOscFrame(url: string): string {
-  return `${EXTERNAL_URL_OSC_PREFIX}${encodeBase64Url(url)}${EXTERNAL_URL_OSC_BEL}`;
+  return encodeShelfOscFrame(EXTERNAL_URL_OSC_ROUTE, EXTERNAL_URL_OSC_VERSION, encodeBase64Url(url));
 }
 
-function partialPrefixLength(value: string): number {
-  const max = Math.min(value.length, EXTERNAL_URL_OSC_PREFIX.length - 1);
-  for (let length = max; length > 0; length -= 1) {
-    if (EXTERNAL_URL_OSC_PREFIX.startsWith(value.slice(-length))) return length;
+export type ExternalUrlOscDecodeResult =
+  | { readonly ok: true; readonly url: string }
+  | { readonly ok: false; readonly reason: 'unsupported-version' | 'invalid-payload' };
+
+export function decodeExternalUrlOscFrame(frame: ShelfOscFrame): ExternalUrlOscDecodeResult {
+  if (frame.route !== EXTERNAL_URL_OSC_ROUTE || frame.version !== EXTERNAL_URL_OSC_VERSION) {
+    return { ok: false, reason: 'unsupported-version' };
   }
-  return 0;
-}
-
-function terminatorAt(value: string): { index: number; length: number } | null {
-  const bel = value.indexOf(EXTERNAL_URL_OSC_BEL, EXTERNAL_URL_OSC_PREFIX.length);
-  const st = value.indexOf(EXTERNAL_URL_OSC_ST, EXTERNAL_URL_OSC_PREFIX.length);
-  if (bel === -1 && st === -1) return null;
-  if (bel !== -1 && (st === -1 || bel < st)) return { index: bel, length: 1 };
-  return { index: st, length: EXTERNAL_URL_OSC_ST.length };
+  const url = decodeBase64Url(frame.payload);
+  if (url === null || url.length > EXTERNAL_URL_INTENT_LIMITS.url) {
+    return { ok: false, reason: 'invalid-payload' };
+  }
+  return { ok: true, url };
 }
 
 export class ExternalUrlOscParser {
-  private pending = '';
+  private readonly router = new ShelfOscRouter(EXTERNAL_URL_OSC_MAX_FRAME);
 
   finish(): ExternalUrlOscParseResult {
-    const pending = this.pending;
-    this.pending = '';
-    if (!pending) return { visible: '', urls: [], anomalies: [] };
-    if (pending.startsWith(EXTERNAL_URL_OSC_PREFIX)) {
-      return { visible: '', urls: [], anomalies: ['unterminated-frame'] };
-    }
-    return { visible: pending, urls: [], anomalies: [] };
+    const result = this.router.finish({ [EXTERNAL_URL_OSC_ROUTE]: () => true });
+    return {
+      visible: result.visible,
+      urls: [],
+      anomalies: result.anomalies.map((anomaly) => anomaly.kind),
+    };
   }
 
   push(data: string): ExternalUrlOscParseResult {
-    let input = this.pending + data;
-    this.pending = '';
-    let visible = '';
     const urls: string[] = [];
     const anomalies: ExternalUrlOscAnomaly[] = [];
-
-    while (input) {
-      const start = input.indexOf(EXTERNAL_URL_OSC_PREFIX);
-      if (start === -1) {
-        const partialLength = partialPrefixLength(input);
-        visible += partialLength ? input.slice(0, -partialLength) : input;
-        this.pending = partialLength ? input.slice(-partialLength) : '';
-        break;
-      }
-
-      visible += input.slice(0, start);
-      input = input.slice(start);
-      const terminator = terminatorAt(input);
-      if (!terminator) {
-        if (input.length > EXTERNAL_URL_OSC_MAX_FRAME) {
-          anomalies.push('frame-too-long');
-        } else {
-          this.pending = input;
-        }
-        break;
-      }
-
-      const frameLength = terminator.index + terminator.length;
-      if (frameLength > EXTERNAL_URL_OSC_MAX_FRAME) {
-        anomalies.push('frame-too-long');
+    const handleExternalUrl = (frame: ShelfOscFrame): boolean => {
+      const decoded = decodeExternalUrlOscFrame(frame);
+      if (!decoded.ok && decoded.reason === 'unsupported-version') return false;
+      if (!decoded.ok) {
+        anomalies.push('invalid-payload');
       } else {
-        const payload = input.slice(EXTERNAL_URL_OSC_PREFIX.length, terminator.index);
-        const url = decodeBase64Url(payload);
-        if (url === null || url.length > EXTERNAL_URL_INTENT_LIMITS.url) {
-          anomalies.push('invalid-payload');
-        } else {
-          urls.push(url);
-        }
+        urls.push(decoded.url);
       }
-      input = input.slice(frameLength);
-    }
-
-    return { visible, urls, anomalies };
+      return true;
+    };
+    const result = this.router.push(data, { [EXTERNAL_URL_OSC_ROUTE]: handleExternalUrl });
+    anomalies.push(...result.anomalies.map((anomaly) => anomaly.kind));
+    return { visible: result.visible, urls, anomalies };
   }
 }

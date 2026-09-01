@@ -309,6 +309,22 @@ export interface PtyExitPayload {
   exitCode: number;
 }
 
+export const PTY_INIT_PRESENTATION_PHASE = {
+  initializing: 'initializing',
+  initScript: 'init-script',
+  ready: 'ready',
+  failed: 'failed',
+} as const;
+
+export type PtyInitPresentationPhase = typeof PTY_INIT_PRESENTATION_PHASE[
+  keyof typeof PTY_INIT_PRESENTATION_PHASE
+];
+
+export interface PtyInitPhasePayload {
+  tabId: string;
+  phase: PtyInitPresentationPhase;
+}
+
 // ── App settings (persisted) ──
 
 export const TOGGLE_CONNECTED_FILTER_ACTION = 'toggleConnectedFilter' as const;

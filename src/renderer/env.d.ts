@@ -21,6 +21,7 @@ interface ShelfApi {
     onData: (callback: (tabId: string, data: string) => void) => () => void;
     onExit: (callback: (tabId: string, exitCode: number) => void) => () => void;
     onInitSent: (callback: (tabId: string) => void) => () => void;
+    onInitPhase: (callback: (tabId: string, phase: import('../shared/types').PtyInitPresentationPhase) => void) => () => void;
   };
   connector: {
     listDir: (connection: import('../shared/types').Connection, dirPath: string) => Promise<import('../shared/types').FolderListResult>;

@@ -1,15 +1,21 @@
 import { BrowserWindow, Notification } from 'electron';
 import { IPC } from '@shared/ipc-channels';
-import type { Connection } from '@shared/types';
+import {
+  PTY_INIT_PRESENTATION_PHASE,
+  type Connection,
+  type PtyInitPresentationPhase,
+} from '@shared/types';
 import type { Shell } from './connector/types';
 import { createConnector } from './connector';
 import { log } from '@shared/logger';
-import {
-  ExternalUrlOscParser,
-  type ExternalUrlOscAnomaly,
-  type ExternalUrlOscParseResult,
-} from '@shared/external-url-osc';
 import { maybeScheduleCleanup } from './file-transfer';
+import { TargetFactsResolver } from './connector/target-facts';
+import { selectTerminalRunner, RUNNER_KIND, type TerminalRunnerSelection } from './terminal-runner/selector';
+import { prepareRunnerLaunch, type PreparedRunnerLaunch } from './terminal-runner/runners';
+import { TerminalInitSession, TERMINAL_SESSION_PHASE } from './terminal-init-session';
+import { createTerminalInitTokens } from '@shared/terminal-init-osc';
+import { getAppInstanceId } from './app-instance-id';
+import { randomBytes } from 'crypto';
 
 /**
  * Terminal-infra → feature decoupling (architecture-health P1-1).
@@ -26,7 +32,7 @@ export interface PtyObserver {
   /** A validated external URL frame with its immutable PTY source identity. */
   onExternalUrl?(projectId: string, tabId: string, url: string): void;
   /** A bounded protocol error that never includes the frame payload. */
-  onProtocolAnomaly?(projectId: string, tabId: string, anomaly: ExternalUrlOscAnomaly): void;
+  onProtocolAnomaly?(projectId: string, tabId: string, anomaly: string): void;
   /** A single tab was killed (killPty). */
   onRemove?(tabId: string): void;
   /** All tabs were killed (killAllPtys). */
@@ -40,6 +46,12 @@ export function setPtyObserver(o: PtyObserver): void {
 }
 
 const shells = new Map<string, Shell>();
+const initSessions = new Map<string, TerminalInitSession>();
+const pendingSpawns = new Map<string, AbortController>();
+const targetFactsResolver = new TargetFactsResolver();
+const projectTabs = new Map<string, Set<string>>();
+const tabProjects = new Map<string, string>();
+const exitWaiters = new Map<string, Set<() => void>>();
 
 // ── Idle detection for notifications ──
 const IDLE_THRESHOLD_MS = 3000;    // 3s no output → idle
@@ -59,7 +71,7 @@ function clearActivity(tabId: string) {
   activity.delete(tabId);
 }
 
-export function spawnPty(
+export async function spawnPty(
   projectId: string,
   tabId: string,
   cwd: string,
@@ -69,68 +81,22 @@ export function spawnPty(
   tabCmd?: string,
   env?: Record<string, string>,
   requiredEnv?: Record<string, string>,
-): void {
-  const connector = createConnector(connection);
-  const shell = connector.createShell(cwd, env, requiredEnv);
-  const externalUrlParser = new ExternalUrlOscParser();
-
-  shells.set(tabId, shell);
-
-  // Fire-and-forget background cleanup for stale uploads from previous Shelf
-  // sessions. Runs once per (project × process), 3s after first spawn so it
-  // doesn't compete with shell startup or first paint.
-  maybeScheduleCleanup(projectId, connection, cwd);
-
-  if (initScript || tabCmd) {
-    // Detect shell prompt readiness before sending initScript.
-    // Modern shells (zsh, bash 4.4+, fish) enable bracketed paste mode
-    // (\x1b[?2004h) when the line editor is ready for input — this is
-    // the shell's own "I'm ready" signal, no timing guesswork needed.
-    // After detecting readiness, wait for output idle + minimum 1s to ensure
-    // all profile scripts (e.g. nvm) have finished loading.
-    const spawnTime = Date.now();
-    const MIN_WAIT_MS = 1000;
-    let sent = false;
-    let readyDetected = false;
-    let idleTimer: ReturnType<typeof setTimeout> | null = null;
-    const send = () => {
-      if (sent) return;
-      sent = true;
-      dispose.dispose();
-      if (idleTimer) clearTimeout(idleTimer);
-      if (initScript) shell.write(initScript + '\n');
-      if (tabCmd) {
-        setTimeout(() => shell.write(tabCmd + '\n'), initScript ? 200 : 0);
-      }
-      if (!win.isDestroyed()) {
-        win.webContents.send(IPC.PTY_INIT_SENT, { tabId });
-      }
-    };
-    const scheduleIdleSend = () => {
-      if (idleTimer) clearTimeout(idleTimer);
-      const elapsed = Date.now() - spawnTime;
-      const remainingWait = Math.max(0, MIN_WAIT_MS - elapsed);
-      // Wait for output idle (500ms) or remaining minimum wait, whichever is longer
-      idleTimer = setTimeout(send, Math.max(500, remainingWait));
-    };
-    const dispose = shell.onData((data) => {
-      if (sent) return;
-      if (!readyDetected && data.includes('\x1b[?2004h')) {
-        readyDetected = true;
-        scheduleIdleSend();
-        return;
-      }
-      // After ready detected, reset idle timer on each output
-      if (readyDetected) {
-        scheduleIdleSend();
-        return;
-      }
-      // Fallback: debounce for shells without bracketed paste
-      if (idleTimer) clearTimeout(idleTimer);
-      idleTimer = setTimeout(send, 1500);
-    });
-    setTimeout(send, 10000);
+): Promise<void> {
+  const controller = new AbortController();
+  pendingSpawns.get(tabId)?.abort();
+  pendingSpawns.set(tabId, controller);
+  tabProjects.set(tabId, projectId);
+  let tabs = projectTabs.get(projectId);
+  if (!tabs) {
+    tabs = new Set();
+    projectTabs.set(projectId, tabs);
   }
+  tabs.add(tabId);
+
+  const sendPresentationPhase = (phase: PtyInitPresentationPhase) => {
+    if (!win.isDestroyed()) win.webContents.send(IPC.PTY_INIT_PHASE, { tabId, phase });
+  };
+  sendPresentationPhase(PTY_INIT_PRESENTATION_PHASE.initializing);
 
   const forwardVisibleData = (data: string) => {
     if (!data) return;
@@ -163,29 +129,140 @@ export function spawnPty(
     }, IDLE_THRESHOLD_MS);
   };
 
-  const handleParsedData = (result: ExternalUrlOscParseResult) => {
-    for (const anomaly of result.anomalies) {
-      observer.onProtocolAnomaly?.(projectId, tabId, anomaly);
+  try {
+    const runtime = createConnector(connection);
+    const compatibilityPlan = runtime.createCompatibilityLaunchPlan(cwd, env, requiredEnv);
+    const targetFacts = await targetFactsResolver.resolve(runtime, controller.signal, cwd);
+    if (controller.signal.aborted) return;
+    if (!targetFacts.ok) {
+      log.debug(
+        'terminal-runtime',
+        `target facts unavailable generation=${runtime.generation.id} reason=${targetFacts.reason} attempts=${targetFacts.attempts.map((attempt) => `${attempt.candidate}:${attempt.category}`).join(',')}`,
+      );
     }
-    for (const url of result.urls) {
-      observer.onExternalUrl?.(projectId, tabId, url);
-    }
-    forwardVisibleData(result.visible);
-  };
+    const selection = selectTerminalRunner(targetFacts, compatibilityPlan);
+    const nonce = randomBytes(18).toString('base64url');
+    const runnerContext = {
+      runtime,
+      selection,
+      cwd,
+      appId: getAppInstanceId(),
+      projectId,
+      nonce,
+      tokens: createTerminalInitTokens(nonce),
+      initScript,
+      env,
+      requiredEnv,
+    };
+    const prepared = await prepareRunnerLaunch(runnerContext);
+    if (controller.signal.aborted) return;
 
-  shell.onData((data) => {
-    handleParsedData(externalUrlParser.push(data));
-  });
+    let activeShell: Shell | undefined;
+    let retriedWithoutIsolation = false;
 
-  shell.onExit((exitCode) => {
-    handleParsedData(externalUrlParser.finish());
-    log.info('pty', `exit: tabId=${tabId} exitCode=${exitCode}`);
-    clearActivity(tabId);
-    shells.delete(tabId);
-    if (!win.isDestroyed()) {
-      win.webContents.send(IPC.PTY_EXIT, { tabId, exitCode });
-    }
-  });
+    const attachShell = (launch: PreparedRunnerLaunch) => {
+      const shell = runtime.spawnTerminalPlan(launch.plan);
+      activeShell = shell;
+      shells.set(tabId, shell);
+      const session = new TerminalInitSession({
+        shell,
+        nonce,
+        mode: launch.mode,
+        directiveMode: launch.directiveMode,
+        initScript,
+        tabCmd,
+        onVisibleData: forwardVisibleData,
+        onExternalUrl: (url) => observer.onExternalUrl?.(projectId, tabId, url),
+        onProtocolAnomaly: (anomaly) => {
+          const normalized = anomaly === 'external-url:invalid-payload' ? 'invalid-payload' : anomaly;
+          observer.onProtocolAnomaly?.(projectId, tabId, normalized);
+        },
+        onIsolationUnconfirmed: () => {
+          log.error('terminal-history', `isolation unconfirmed project=${projectId} tab=${tabId} runner=${selection.kind}`);
+        },
+        onPhase: (phase) => {
+          if (phase === TERMINAL_SESSION_PHASE.runnerInitializing) {
+            sendPresentationPhase(PTY_INIT_PRESENTATION_PHASE.initializing);
+          } else if (phase === TERMINAL_SESSION_PHASE.initScript) {
+            sendPresentationPhase(PTY_INIT_PRESENTATION_PHASE.initScript);
+          } else if (phase === TERMINAL_SESSION_PHASE.ready) {
+            sendPresentationPhase(PTY_INIT_PRESENTATION_PHASE.ready);
+            if (!win.isDestroyed()) win.webContents.send(IPC.PTY_INIT_SENT, { tabId });
+          } else if (phase === TERMINAL_SESSION_PHASE.failed) {
+            sendPresentationPhase(PTY_INIT_PRESENTATION_PHASE.failed);
+          }
+        },
+        onStartupFailure: (reason) => {
+          forwardVisibleData(`\r\n[Terminal startup failed: ${reason}]\r\n`);
+        },
+      });
+      initSessions.set(tabId, session);
+
+      shell.onData((data) => session.handleData(data));
+      shell.onExit((exitCode) => {
+        if (activeShell !== shell) return;
+        const enhancedExitedBeforeReady = launch.historyIsolation === 'attempted'
+          && session.currentPhase() === TERMINAL_SESSION_PHASE.runnerInitializing
+          && !retriedWithoutIsolation;
+        if (enhancedExitedBeforeReady && hasResolvedInterpreter(selection)) {
+          retriedWithoutIsolation = true;
+          session.dispose();
+          log.error(
+            'terminal-history',
+            `enhanced ${selection.kind} exited before readiness; retrying without isolation project=${projectId} tab=${tabId}`,
+          );
+          try {
+            const cleanPlan = runtime.createInterpreterLaunchPlan(
+              cwd, selection.interpreter, ['-l'], env, requiredEnv, [],
+            );
+            attachShell({
+              plan: cleanPlan,
+              mode: 'native',
+              directiveMode: 'none',
+              historyIsolation: 'unconfirmed',
+            });
+          } catch (error) {
+            session.failStartup(error instanceof Error ? error.message : String(error));
+          }
+          return;
+        }
+
+        if (session.currentPhase() === TERMINAL_SESSION_PHASE.runnerInitializing) {
+          session.failStartup(`shell exited with code ${exitCode}`);
+        }
+        session.dispose();
+        log.info('pty', `exit: tabId=${tabId} exitCode=${exitCode}`);
+        clearActivity(tabId);
+        shells.delete(tabId);
+        initSessions.delete(tabId);
+        removeProjectTab(tabId);
+        resolveExitWaiters(tabId);
+        if (!win.isDestroyed()) win.webContents.send(IPC.PTY_EXIT, { tabId, exitCode });
+      });
+      session.start();
+    };
+
+    attachShell(prepared);
+    maybeScheduleCleanup(projectId, connection, cwd);
+  } catch (error) {
+    if (controller.signal.aborted) return;
+    const reason = error instanceof Error ? error.message : String(error);
+    log.error('pty', `startup failed: tabId=${tabId} ${reason}`);
+    sendPresentationPhase(PTY_INIT_PRESENTATION_PHASE.failed);
+    forwardVisibleData(`\r\n[Terminal startup failed: ${reason}]\r\n`);
+    if (!win.isDestroyed()) win.webContents.send(IPC.PTY_EXIT, { tabId, exitCode: 1 });
+    removeProjectTab(tabId);
+    resolveExitWaiters(tabId);
+  } finally {
+    if (pendingSpawns.get(tabId) === controller) pendingSpawns.delete(tabId);
+  }
+}
+
+function hasResolvedInterpreter(
+  selection: TerminalRunnerSelection,
+): selection is Extract<TerminalRunnerSelection, { interpreter: string }> {
+  return 'interpreter' in selection
+    && (selection.kind === RUNNER_KIND.zsh || selection.kind === RUNNER_KIND.bash);
 }
 
 export function setMuted(tabId: string, muted: boolean) {
@@ -199,7 +276,7 @@ export function setMuted(tabId: string, muted: boolean) {
 export function writePty(tabId: string, data: string) {
   const state = activity.get(tabId);
   if (state) state.userInput = true;
-  shells.get(tabId)?.write(data);
+  initSessions.get(tabId)?.writeUser(data);
 }
 
 export function resizePty(tabId: string, cols: number, rows: number) {
@@ -207,20 +284,78 @@ export function resizePty(tabId: string, cols: number, rows: number) {
 }
 
 export function killPty(tabId: string) {
+  const pending = pendingSpawns.get(tabId);
+  pending?.abort();
+  pendingSpawns.delete(tabId);
+  initSessions.get(tabId)?.dispose();
+  initSessions.delete(tabId);
   const s = shells.get(tabId);
   if (s) {
     s.kill();
     clearActivity(tabId);
     observer.onRemove?.(tabId);
     shells.delete(tabId);
+  } else if (pending) {
+    removeProjectTab(tabId);
+    resolveExitWaiters(tabId);
   }
 }
 
+export async function teardownProjectPtys(
+  projectId: string,
+  timeoutMs = 3000,
+): Promise<{ confirmed: boolean; unconfirmedTabIds: string[] }> {
+  const tabIds = [...(projectTabs.get(projectId) ?? [])];
+  if (tabIds.length === 0) return { confirmed: true, unconfirmedTabIds: [] };
+
+  const pending = new Set(tabIds);
+  const waits = tabIds.map((tabId) => new Promise<void>((resolve) => {
+    let waiters = exitWaiters.get(tabId);
+    if (!waiters) {
+      waiters = new Set();
+      exitWaiters.set(tabId, waiters);
+    }
+    waiters.add(() => {
+      pending.delete(tabId);
+      resolve();
+    });
+  }));
+  for (const tabId of tabIds) killPty(tabId);
+
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  await Promise.race([
+    Promise.all(waits),
+    new Promise<void>((resolve) => { timeout = setTimeout(resolve, timeoutMs); }),
+  ]);
+  if (timeout) clearTimeout(timeout);
+  return { confirmed: pending.size === 0, unconfirmedTabIds: [...pending] };
+}
+
 export function killAllPtys() {
+  for (const controller of pendingSpawns.values()) controller.abort();
+  pendingSpawns.clear();
+  for (const session of initSessions.values()) session.dispose();
+  initSessions.clear();
   for (const [tabId, s] of shells) {
     clearActivity(tabId);
     s.kill();
     shells.delete(tabId);
   }
   observer.onClear?.();
+}
+
+function removeProjectTab(tabId: string): void {
+  const projectId = tabProjects.get(tabId);
+  if (!projectId) return;
+  tabProjects.delete(tabId);
+  const tabs = projectTabs.get(projectId);
+  tabs?.delete(tabId);
+  if (tabs?.size === 0) projectTabs.delete(projectId);
+}
+
+function resolveExitWaiters(tabId: string): void {
+  const waiters = exitWaiters.get(tabId);
+  if (!waiters) return;
+  exitWaiters.delete(tabId);
+  for (const resolve of waiters) resolve();
 }

@@ -126,6 +126,29 @@ describe('connector layering contracts', () => {
     ]));
   });
 
+  it('captures project-level target env before applying Shelf runner overrides', () => {
+    const local = createAppOS('linux').createRuntime(toConnectorConfig({ type: 'local' }));
+    const localPlan = local.createInterpreterLaunchPlan(
+      '/tmp', '/bin/zsh', ['-l'], { ZDOTDIR: '/project/zsh' }, { ZDOTDIR: '/shelf/shim' },
+      [{ source: 'ZDOTDIR', target: 'SHELF_ORIGINAL_ZDOTDIR' }],
+    );
+    expect(localPlan.env).toMatchObject({
+      ZDOTDIR: '/shelf/shim',
+      SHELF_ORIGINAL_ZDOTDIR: '/project/zsh',
+    });
+
+    const ssh = createAppOS('linux').createRuntime(toConnectorConfig({
+      type: 'ssh', host: 'dev.example', port: 22, user: 'ben',
+    }));
+    const sshPlan = ssh.createInterpreterLaunchPlan(
+      '/work', '/bin/zsh', ['-l'], { ZDOTDIR: '/project/zsh' }, { ZDOTDIR: '/shelf/shim' },
+      [{ source: 'ZDOTDIR', target: 'SHELF_ORIGINAL_ZDOTDIR' }],
+    );
+    expect(sshPlan.args.at(-1)).toContain(
+      "export ZDOTDIR='/project/zsh'; export SHELF_ORIGINAL_ZDOTDIR=\"${ZDOTDIR-}\"; export ZDOTDIR='/shelf/shim';",
+    );
+  });
+
   it('reuses one runtime generation for the same live connector identity', () => {
     const owner = new ConnectorRuntimeOwner(createAppOS('linux', { ssh: () => stubConnector() }));
     const firstConfig = toConnectorConfig({

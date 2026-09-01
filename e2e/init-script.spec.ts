@@ -18,8 +18,8 @@ const test = base.extend<{}, { shelfApp: { app: ElectronApplication; page: Page 
       cwd: os.homedir(),
       connection: { type: 'local' },
       maxTabs: 4,
-      initScript: 'echo __INIT_MARKER__',
-      defaultTabs: [{ name: 'shell' }],
+      initScript: 'sleep 2; echo __INIT_MARKER__',
+      defaultTabs: [{ name: 'shell', cmd: 'echo __TAB_MARKER__' }],
     };
     fs.writeFileSync(
       path.join(userDataDir, 'projects.json'),
@@ -48,12 +48,23 @@ const test = base.extend<{}, { shelfApp: { app: ElectronApplication; page: Page 
   }, { scope: 'worker' }],
 });
 
-test('init script command should not appear twice in terminal output', async ({ shelfApp: { page } }) => {
+test('init script is internal, input-gated, then tab command opens interaction', async ({ shelfApp: { page } }) => {
   // Connect to the pre-seeded project
   const prompt = page.locator('.connect-prompt');
   await expect(prompt).toBeVisible({ timeout: 5_000 });
   await prompt.click();
   await expect(page.locator('.tab-bar .tab')).toHaveCount(1, { timeout: 5_000 });
+
+  // Runner initialization is globally covered. Once the cover disappears the
+  // initScript is visible but main still accepts only Ctrl-C. Submit arbitrary
+  // input directly through the public bridge while the 2s script is running;
+  // it must be discarded rather than buffered for the later prompt.
+  await expect(page.locator('.terminal-loading')).toBeHidden({ timeout: 5_000 });
+  await page.evaluate(() => {
+    const cache = (window as any).__shelfTerminalCache__ as Map<string, unknown>;
+    const tabId = [...cache.keys()][0];
+    (window as any).shelfApi.pty.input(tabId, 'echo __BLOCKED_DURING_INIT__\n');
+  });
 
   // Wait for init script output to appear (poll xterm buffer; WebGL renderer
   // paints to canvas so `.xterm-rows` is empty).
@@ -62,13 +73,26 @@ test('init script command should not appear twice in terminal output', async ({ 
     { timeout: 10_000, message: 'init script output did not appear' },
   ).toContain('__INIT_MARKER__');
 
+  await expect.poll(
+    async () => await readActiveTerminalText(page),
+    { timeout: 10_000, message: 'tab command was not submitted after initScript success' },
+  ).toContain('__TAB_MARKER__');
+
+  await page.evaluate(() => {
+    const cache = (window as any).__shelfTerminalCache__ as Map<string, unknown>;
+    const tabId = [...cache.keys()][0];
+    (window as any).shelfApi.pty.input(tabId, 'echo __AFTER_INIT__\n');
+  });
+  await expect.poll(async () => await readActiveTerminalText(page), { timeout: 5_000 })
+    .toContain('__AFTER_INIT__');
+
   // Wait a bit for all output to settle
   await page.waitForTimeout(2000);
 
-  // Count occurrences of the command — should be exactly once (typed by shell),
-  // not twice (which would indicate the init script line was both typed and
-  // echoed separately).
+  // The project-wide script runs as internal hook code, so its command line is
+  // not typed into the interactive shell or stored as a normal command.
   const text = await readActiveTerminalText(page);
   const cmdOccurrences = text.split('echo __INIT_MARKER__').length - 1;
-  expect(cmdOccurrences).toBe(1);
+  expect(cmdOccurrences).toBe(0);
+  expect(text).not.toContain('__BLOCKED_DURING_INIT__');
 });
