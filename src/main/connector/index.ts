@@ -1,11 +1,11 @@
 import type { Connection } from '@shared/types';
-import type { Connector } from './types';
 import { listWSLDistros as _listWSLDistros } from './wsl';
 import { listDockerContainers as _listDockerContainers } from './docker';
 import { cleanupControlSockets } from '../ssh-control';
 import { createAppOS } from './app-os';
 import { toConnectorConfig } from './config';
 import { ConnectorRuntimeOwner } from './runtime-owner';
+import type { ConnectorRuntime } from './runtime';
 
 // Re-export types for consumers
 export type { Connector, Shell, Disposable, ExecResult } from './types';
@@ -16,7 +16,7 @@ export type { TerminalLaunchPlan, TerminalLaunchKind } from './launch-plan';
 const appOS = createAppOS();
 const runtimeOwner = new ConnectorRuntimeOwner(appOS);
 
-export function createConnector(connection: Connection): Connector {
+export function createConnector(connection: Connection): ConnectorRuntime {
   return runtimeOwner.get(toConnectorConfig(connection));
 }
 

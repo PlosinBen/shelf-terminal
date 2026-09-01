@@ -11,7 +11,26 @@ export interface TerminalLaunchPlan {
   readonly args: readonly string[];
   readonly cwd: string;
   readonly env: Readonly<Record<string, string>>;
+  readonly logContext: string;
 }
+
+export interface CompatibilityTerminalRequest {
+  readonly kind: typeof TERMINAL_LAUNCH_KIND.compatibility;
+  readonly cwd: string;
+  readonly env: Readonly<Record<string, string>>;
+  readonly requiredEnv: Readonly<Record<string, string>>;
+}
+
+export interface InterpreterTerminalRequest {
+  readonly kind: typeof TERMINAL_LAUNCH_KIND.interpreter;
+  readonly cwd: string;
+  readonly interpreter: string;
+  readonly interpreterArgs: readonly string[];
+  readonly env: Readonly<Record<string, string>>;
+  readonly requiredEnv: Readonly<Record<string, string>>;
+}
+
+export type TerminalLaunchRequest = CompatibilityTerminalRequest | InterpreterTerminalRequest;
 
 export function freezeTerminalLaunchPlan(plan: TerminalLaunchPlan): TerminalLaunchPlan {
   return Object.freeze({

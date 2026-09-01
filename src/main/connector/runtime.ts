@@ -2,6 +2,16 @@ import { randomUUID } from 'crypto';
 import type { FolderListResult } from '@shared/types';
 import type { ConnectorConfig } from './config';
 import type { Connector, ExecResult, Shell } from './types';
+import {
+  TERMINAL_LAUNCH_KIND,
+  type TerminalLaunchPlan,
+  type TerminalLaunchRequest,
+} from './launch-plan';
+
+export interface TerminalPlanAdapter {
+  materialize(request: TerminalLaunchRequest): TerminalLaunchPlan;
+  spawn(plan: TerminalLaunchPlan): Shell;
+}
 
 export interface RuntimeGeneration {
   readonly id: string;
@@ -18,6 +28,7 @@ export class ConnectorRuntime implements Connector {
   constructor(
     readonly config: ConnectorConfig,
     private readonly connector: Connector,
+    private readonly terminalAdapter?: TerminalPlanAdapter,
   ) {}
 
   isCurrentGeneration(): boolean {
@@ -29,7 +40,49 @@ export class ConnectorRuntime implements Connector {
   }
 
   createShell(cwd: string, env?: Record<string, string>, requiredEnv?: Record<string, string>): Shell {
-    return this.connector.createShell(cwd, env, requiredEnv);
+    if (!this.terminalAdapter) return this.connector.createShell(cwd, env, requiredEnv);
+    return this.spawnTerminalPlan(this.createCompatibilityLaunchPlan(cwd, env, requiredEnv));
+  }
+
+  createCompatibilityLaunchPlan(
+    cwd: string,
+    env: Record<string, string> = {},
+    requiredEnv: Record<string, string> = {},
+  ): TerminalLaunchPlan {
+    return this.requireTerminalAdapter().materialize({
+      kind: TERMINAL_LAUNCH_KIND.compatibility,
+      cwd,
+      env,
+      requiredEnv,
+    });
+  }
+
+  createInterpreterLaunchPlan(
+    cwd: string,
+    interpreter: string,
+    interpreterArgs: readonly string[],
+    env: Record<string, string> = {},
+    requiredEnv: Record<string, string> = {},
+  ): TerminalLaunchPlan {
+    return this.requireTerminalAdapter().materialize({
+      kind: TERMINAL_LAUNCH_KIND.interpreter,
+      cwd,
+      interpreter,
+      interpreterArgs,
+      env,
+      requiredEnv,
+    });
+  }
+
+  spawnTerminalPlan(plan: TerminalLaunchPlan): Shell {
+    return this.requireTerminalAdapter().spawn(plan);
+  }
+
+  private requireTerminalAdapter(): TerminalPlanAdapter {
+    if (!this.terminalAdapter) {
+      throw new Error(`Connector runtime ${this.generation.id} has no terminal plan adapter`);
+    }
+    return this.terminalAdapter;
   }
 
   isConnected(): Promise<boolean> {
