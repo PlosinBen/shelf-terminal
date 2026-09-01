@@ -54,15 +54,24 @@ describe('effective local shell history isolation', () => {
     fs.writeFileSync(projectA, '');
     fs.writeFileSync(projectB, '');
 
-    await runShell('/bin/bash', ['--noprofile', '--norc', '-i'], bashEnv(root, projectA), 'echo BASH_PROJECT_A');
+    const firstEnv = bashEnv(root, projectA);
+    firstEnv.SHELF_INIT_SCRIPT = 'export BASH_INIT_VALUE=ready; echo BASH_INIT_OUTPUT';
+    const firstOutput = await runShell(
+      '/bin/bash', ['--noprofile', '--norc', '-i'], firstEnv,
+      'echo BASH_PROJECT_A:$BASH_INIT_VALUE',
+    );
     await runShell('/bin/bash', ['--noprofile', '--norc', '-i'], bashEnv(root, projectB), 'echo BASH_PROJECT_B');
     await runShell('/bin/bash', ['--noprofile', '--norc', '-i'], bashEnv(root, projectA), 'echo BASH_PROJECT_A_REUSED');
 
     const a = fs.readFileSync(projectA, 'utf8');
     const b = fs.readFileSync(projectB, 'utf8');
-    expect(a).toContain('echo BASH_PROJECT_A');
+    expect(firstOutput).toContain('BASH_INIT_OUTPUT');
+    expect(firstOutput).toContain('init_success_token');
+    expect(firstOutput).toContain('BASH_PROJECT_A:ready');
+    expect(a).toContain('echo BASH_PROJECT_A:$BASH_INIT_VALUE');
     expect(a).toContain('echo BASH_PROJECT_A_REUSED');
     expect(a).not.toContain('BASH_PROJECT_B');
+    expect(a).not.toContain('BASH_INIT_OUTPUT');
     expect(b).toContain('echo BASH_PROJECT_B');
     expect(b).not.toContain('BASH_PROJECT_A');
   }, 20_000);

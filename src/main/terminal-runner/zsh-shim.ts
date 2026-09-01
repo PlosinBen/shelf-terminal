@@ -80,7 +80,7 @@ async function installOnce(runtime: ZshShimRuntime, home: string, shimPath: stri
   const quotedPath = shellSingleQuote(shimPath);
   const verify = [
     `grep -F -q -- ${shellSingleQuote(ZSH_SHIM_VERSION_MARKER)} ${quotedPath}`,
-    `__shelf_hash=$({ sha256sum ${quotedPath} 2>/dev/null || shasum -a 256 ${quotedPath} 2>/dev/null || openssl dgst -sha256 ${quotedPath} 2>/dev/null; } | awk '{print $NF}')`,
+    `__shelf_hash=$(if command -v sha256sum >/dev/null 2>&1; then sha256sum ${quotedPath} | awk '{print $1}'; elif command -v shasum >/dev/null 2>&1; then shasum -a 256 ${quotedPath} | awk '{print $1}'; elif command -v openssl >/dev/null 2>&1; then openssl dgst -sha256 ${quotedPath} | awk '{print $NF}'; else exit 1; fi)`,
     `[ "$__shelf_hash" = ${shellSingleQuote(ZSH_SHIM_SHA256)} ]`,
     'unset __shelf_hash',
   ].join(' && ');

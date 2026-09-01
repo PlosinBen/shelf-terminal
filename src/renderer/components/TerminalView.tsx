@@ -1,16 +1,22 @@
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { SearchAddon } from '@xterm/addon-search';
 import { Unicode11Addon } from '@xterm/addon-unicode11';
 import { WebglAddon } from '@xterm/addon-webgl';
 import { WebLinksAddon } from '@xterm/addon-web-links';
-import { useStore, markUnread } from '../store';
+import {
+  useStore,
+  markUnread,
+  initializeTerminalLifecycle,
+  setTerminalInitPhase,
+  clearTerminalLifecycle,
+} from '../store';
 import { getTheme } from '../themes';
 import { useAttachmentPaste } from '../hooks/useAttachmentPaste';
 import '@xterm/xterm/css/xterm.css';
 
-import { PTY_INIT_PRESENTATION_PHASE, type Connection, type PtyInitPresentationPhase } from '@shared/types';
+import { PTY_INIT_PRESENTATION_PHASE, type Connection } from '@shared/types';
 
 interface Props {
   tabId: string;
@@ -59,8 +65,8 @@ export function TerminalView({ tabId, projectId, cwd, connection, initScript, ta
   const initializedRef = useRef(false);
   const visibleRef = useRef(visible);
   visibleRef.current = visible;
-  const [initPhase, setInitPhase] = useState<PtyInitPresentationPhase>(PTY_INIT_PRESENTATION_PHASE.initializing);
-  const { settings } = useStore();
+  const { settings, terminalInitPhases } = useStore();
+  const initPhase = terminalInitPhases[tabId] ?? PTY_INIT_PRESENTATION_PHASE.initializing;
   const theme = getTheme(settings.themeName);
 
   useAttachmentPaste(containerRef, {
@@ -78,6 +84,7 @@ export function TerminalView({ tabId, projectId, cwd, connection, initScript, ta
     const container = containerRef.current;
     if (!container || initializedRef.current) return;
     initializedRef.current = true;
+    initializeTerminalLifecycle(tabId);
 
     let cached = terminalCache.get(tabId);
     if (!cached) {
@@ -145,10 +152,10 @@ export function TerminalView({ tabId, projectId, cwd, connection, initScript, ta
 
     // Init script sent → hide loading
     const removeInitSentListener = window.shelfApi.pty.onInitSent((id) => {
-      if (id === tabId) setInitPhase(PTY_INIT_PRESENTATION_PHASE.ready);
+      if (id === tabId) setTerminalInitPhase(tabId, PTY_INIT_PRESENTATION_PHASE.ready);
     });
     const removeInitPhaseListener = window.shelfApi.pty.onInitPhase((id, phase) => {
-      if (id === tabId) setInitPhase(phase);
+      if (id === tabId) setTerminalInitPhase(tabId, phase);
     });
 
     // Subscribe before spawn so even a local NativeRunner cannot publish its
@@ -222,6 +229,7 @@ export function TerminalView({ tabId, projectId, cwd, connection, initScript, ta
 
 // Cleanup when tab is removed
 export function disposeTerminal(tabId: string) {
+  clearTerminalLifecycle(tabId);
   const cached = terminalCache.get(tabId);
   if (cached) {
     cached.searchAddon.dispose();

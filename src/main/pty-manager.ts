@@ -222,7 +222,15 @@ export async function spawnPty(
               historyIsolation: 'unconfirmed',
             });
           } catch (error) {
-            session.failStartup(error instanceof Error ? error.message : String(error));
+            const reason = error instanceof Error ? error.message : String(error);
+            log.error('pty', `clean retry failed: tabId=${tabId} ${reason}`);
+            sendPresentationPhase(PTY_INIT_PRESENTATION_PHASE.failed);
+            forwardVisibleData(`\r\n[Terminal startup failed: ${reason}]\r\n`);
+            shells.delete(tabId);
+            initSessions.delete(tabId);
+            removeProjectTab(tabId);
+            resolveExitWaiters(tabId);
+            if (!win.isDestroyed()) win.webContents.send(IPC.PTY_EXIT, { tabId, exitCode });
           }
           return;
         }

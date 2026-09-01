@@ -70,19 +70,34 @@ export class TerminalInitSession {
 
   handleData(data: string): void {
     if (this.phase === TERMINAL_SESSION_PHASE.disposed) return;
-    const result = this.router.push(data, {
-      [TERMINAL_INIT_OSC_ROUTE]: (frame) => this.handleTerminalInitFrame(frame),
-      [EXTERNAL_URL_OSC_ROUTE]: (frame) => this.handleExternalUrlFrame(frame),
-    });
+    let visibleBuffer = '';
+    let visiblePhase: TerminalSessionPhase | undefined;
+    const flushVisible = () => {
+      if (visibleBuffer) this.options.onVisibleData(visibleBuffer);
+      visibleBuffer = '';
+      visiblePhase = undefined;
+    };
+    const routeVisible = (visible: string) => {
+      if (this.phase === TERMINAL_SESSION_PHASE.runnerInitializing) {
+        flushVisible();
+        this.captureHidden(visible);
+        return;
+      }
+      if (visiblePhase && visiblePhase !== this.phase) flushVisible();
+      visiblePhase = this.phase;
+      visibleBuffer += visible;
+    };
+    const result = this.router.push(
+      data,
+      {
+        [TERMINAL_INIT_OSC_ROUTE]: (frame) => this.handleTerminalInitFrame(frame),
+        [EXTERNAL_URL_OSC_ROUTE]: (frame) => this.handleExternalUrlFrame(frame),
+      },
+      routeVisible,
+    );
+    flushVisible();
     for (const anomaly of result.anomalies) {
       this.options.onProtocolAnomaly?.(`${anomaly.kind}:${anomaly.route ?? 'unknown'}`);
-    }
-    if (!result.visible) return;
-
-    if (this.phase === TERMINAL_SESSION_PHASE.runnerInitializing) {
-      this.captureHidden(result.visible);
-    } else {
-      this.options.onVisibleData(result.visible);
     }
   }
 

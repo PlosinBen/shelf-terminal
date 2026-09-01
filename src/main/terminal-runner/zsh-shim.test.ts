@@ -1,4 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
+import { execFile } from 'child_process';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import { installZshShim, ZSH_SHIM_CONTENT, ZSH_SHIM_VERSION_MARKER } from './zsh-shim';
 
 describe('zsh shim', () => {
@@ -40,5 +44,29 @@ describe('zsh shim', () => {
     expect(runtime.putFile.mock.calls[0][1].toString('utf8')).toBe(ZSH_SHIM_CONTENT);
     expect(runtime.exec.mock.calls[1][1]).toContain(`mv`);
     expect(runtime.exec.mock.calls[1][1]).toContain(ZSH_SHIM_VERSION_MARKER);
+  });
+
+  it('verifies a newly installed shim with the target POSIX hash utility', async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'shelf-zsh-shim-'));
+    const shim = path.join(home, '.shelf/apps/app-1/shell-init/zsh/v1/.zshenv');
+    const runtime = {
+      exec: (cwd: string, cmd: string) => new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
+        execFile('sh', ['-c', cmd], { cwd }, (error, stdout, stderr) => {
+          if (error) reject(error);
+          else resolve({ stdout, stderr });
+        });
+      }),
+      putFile: async (target: string, buffer: Buffer) => {
+        fs.mkdirSync(path.dirname(target), { recursive: true });
+        fs.writeFileSync(target, buffer);
+      },
+    };
+
+    try {
+      await installZshShim(runtime, home, shim);
+      expect(fs.readFileSync(shim, 'utf8')).toBe(ZSH_SHIM_CONTENT);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
   });
 });

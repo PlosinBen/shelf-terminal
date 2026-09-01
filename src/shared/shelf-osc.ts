@@ -38,22 +38,31 @@ export class ShelfOscRouter {
 
   constructor(private readonly maxFrame = SHELF_OSC_MAX_FRAME) {}
 
-  push(data: string, handlers: ShelfOscRouteHandlers): ShelfOscParseResult {
+  push(
+    data: string,
+    handlers: ShelfOscRouteHandlers,
+    onVisibleSegment?: (data: string) => void,
+  ): ShelfOscParseResult {
     let input = this.pending + data;
     this.pending = '';
     let visible = '';
     const anomalies: ShelfOscAnomaly[] = [];
+    const appendVisible = (value: string) => {
+      if (!value) return;
+      visible += value;
+      onVisibleSegment?.(value);
+    };
 
     while (input) {
       const start = input.indexOf(SHELF_OSC_NAMESPACE_PREFIX);
       if (start === -1) {
         const partialLength = partialPrefixLength(input);
-        visible += partialLength ? input.slice(0, -partialLength) : input;
+        appendVisible(partialLength ? input.slice(0, -partialLength) : input);
         this.pending = partialLength ? input.slice(-partialLength) : '';
         break;
       }
 
-      visible += input.slice(0, start);
+      appendVisible(input.slice(0, start));
       input = input.slice(start);
       const terminator = terminatorAt(input);
       if (!terminator) {
@@ -62,7 +71,7 @@ export class ShelfOscRouter {
           if (route && handlers[route]) {
             anomalies.push({ kind: 'frame-too-long', route });
           } else {
-            visible += input;
+            appendVisible(input);
           }
         } else {
           this.pending = input;
@@ -77,7 +86,7 @@ export class ShelfOscRouter {
         if (route && handlers[route]) {
           anomalies.push({ kind: 'frame-too-long', route });
         } else {
-          visible += raw;
+          appendVisible(raw);
         }
         input = input.slice(frameLength);
         continue;
@@ -85,10 +94,10 @@ export class ShelfOscRouter {
 
       const frame = parseFrame(raw, terminator.index);
       if (!frame) {
-        visible += raw;
+        appendVisible(raw);
       } else {
         const handler = handlers[frame.route];
-        if (!handler || !handler(frame)) visible += raw;
+        if (!handler || !handler(frame)) appendVisible(raw);
       }
       input = input.slice(frameLength);
     }

@@ -9,16 +9,27 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 const h = vi.hoisted(() => {
   const dataCbs: Array<(d: string) => void> = [];
   const exitCbs: Array<(code: number) => void> = [];
-  const shell = {
+  const kill = vi.fn();
+  const write = vi.fn();
+  const createShell = () => ({
     onData: (cb: (d: string) => void) => { dataCbs.push(cb); return { dispose: () => {} }; },
     onExit: (cb: (code: number) => void) => { exitCbs.push(cb); return { dispose: () => {} }; },
-    write: () => {},
+    write,
     resize: () => {},
-    kill: vi.fn(),
-  };
+    kill,
+  });
+  let targetFactsResult: any = { ok: false, reason: 'probe-failed', attempts: [] };
+  let spawnCount = 0;
   const show = vi.fn();
   const Notification = vi.fn(function () { return { show }; });
-  return { dataCbs, exitCbs, shell, show, Notification };
+  return {
+    dataCbs, exitCbs, kill, write, createShell, show, Notification,
+    get targetFactsResult() { return targetFactsResult; },
+    set targetFactsResult(value: any) { targetFactsResult = value; },
+    get spawnCount() { return spawnCount; },
+    incrementSpawn() { spawnCount++; },
+    resetSpawn() { spawnCount = 0; },
+  };
 });
 
 vi.mock('electron', () => ({ Notification: h.Notification, BrowserWindow: class {} }));
@@ -28,15 +39,28 @@ vi.mock('./connector', () => ({
     createCompatibilityLaunchPlan: () => ({
       kind: 'compatibility', executable: 'test', args: [], cwd: '/cwd', env: {}, logContext: 'test',
     }),
-    spawnTerminalPlan: () => h.shell,
+    createInterpreterLaunchPlan: () => ({
+      kind: 'interpreter', executable: '/bin/zsh', args: ['-l'], cwd: '/cwd', env: {}, logContext: 'test',
+    }),
+    spawnTerminalPlan: () => { h.incrementSpawn(); return h.createShell(); },
   }),
 }));
 vi.mock('./connector/target-facts', () => ({
   TargetFactsResolver: class {
     resolve() {
-      return Promise.resolve({ ok: false, reason: 'probe-failed', attempts: [] });
+      return Promise.resolve(h.targetFactsResult);
     }
   },
+}));
+vi.mock('./terminal-runner/runners', () => ({
+  prepareRunnerLaunch: async (context: any) => ({
+    plan: 'compatibilityPlan' in context.selection
+      ? context.selection.compatibilityPlan
+      : { kind: 'interpreter', executable: context.selection.interpreter, args: ['-l'], cwd: context.cwd, env: {}, logContext: 'test' },
+    mode: context.selection.kind === 'zsh' ? 'explicit' : 'native',
+    directiveMode: context.selection.kind === 'zsh' ? 'shell' : 'none',
+    historyIsolation: context.selection.kind === 'zsh' ? 'attempted' : 'native',
+  }),
 }));
 vi.mock('./app-instance-id', () => ({ getAppInstanceId: () => 'test-app' }));
 vi.mock('./file-transfer', () => ({ maybeScheduleCleanup: () => {} }));
@@ -64,7 +88,10 @@ beforeEach(() => {
   vi.useFakeTimers();
   h.dataCbs.length = 0;
   h.exitCbs.length = 0;
-  h.shell.kill.mockClear();
+  h.kill.mockClear();
+  h.write.mockClear();
+  h.resetSpawn();
+  h.targetFactsResult = { ok: false, reason: 'probe-failed', attempts: [] };
   h.show.mockClear();
   h.Notification.mockClear();
   setPtyObserver({});
@@ -75,7 +102,7 @@ describe('pty-manager project teardown', () => {
     await spawnPty('project-teardown', 'tab-teardown', '/cwd', conn, makeWin(false));
 
     const teardown = teardownProjectPtys('project-teardown', 1000);
-    expect(h.shell.kill).toHaveBeenCalledOnce();
+    expect(h.kill).toHaveBeenCalledOnce();
     h.exitCbs.forEach((callback) => callback(0));
 
     await expect(teardown).resolves.toEqual({ confirmed: true, unconfirmedTabIds: [] });
@@ -91,6 +118,24 @@ describe('pty-manager project teardown', () => {
       confirmed: false,
       unconfirmedTabIds: ['tab-timeout'],
     });
+  });
+});
+
+describe('pty-manager runner degradation', () => {
+  it('retries the same resolved shell once without isolation only after enhanced launch exits', async () => {
+    h.targetFactsResult = {
+      ok: true,
+      facts: { targetOS: 'unix', defaultShell: '/bin/zsh' },
+    };
+    const win = makeWin(false);
+    await spawnPty('project-retry', 'tab-retry', '/cwd', conn, win, 'setup', 'tab command');
+    expect(h.spawnCount).toBe(1);
+
+    h.exitCbs[0](1);
+
+    expect(h.spawnCount).toBe(2);
+    expect(h.write).toHaveBeenCalledWith('setup\ntab command\n');
+    expect(win.webContents.send).not.toHaveBeenCalledWith('pty:exit', expect.anything());
   });
 });
 afterEach(() => {

@@ -55,7 +55,7 @@ describe('TerminalInitSession', () => {
       nonce: 'fixed_nonce', phase: TERMINAL_INIT_PHASE.runner, result: TERMINAL_INIT_RESULT.ready,
     });
 
-    session.handleData(`${ready}init output`);
+    session.handleData(`hidden profile output${ready}init output`);
 
     expect(visible).toEqual(['init output']);
     expect(phases).toEqual([
