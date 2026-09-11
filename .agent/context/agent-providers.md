@@ -602,3 +602,15 @@ Fresh capabilities probe 若建立 `session/new`，立刻透過 session-scoped `
 **Do not change casually because：** 不要在 initial apply 用 restored equality 省略 outbound setter，也不要把 initial apply 擴張成每次 capabilities read 或每個 turn 重送。Provider 只編排 SDK contract，不推測或複製 SDK cache/state-machine；只有 protocol-compliant apply 後仍確認是 SDK defect，才另立有 upstream trace 與移除條件的 workaround。不要在 `ensureSession` 前套 prefs、把 config acknowledgement 當 confirmed changed state，或遇到任一 warm-up failure仍回傳 partial capabilities。Fresh pre-session auth probe 可以回 `authRequired`；但 final session 已建立後的 validation/apply/confirmation failure 必須 fail initialization。
 
 **Related：** `agent-config-flow#10`、`agent-providers#45`、`agent-providers#46`、`agent-providers#47`、`contracts/agent-routing`、`architecture/agent-execution`。
+
+## agent-providers#52 — Copilot `/clear` 以同 process 的 ACP session replacement 實作  ·  [Decision]
+
+**Decision：** Copilot provider 將 `/clear` 視為 Shelf 公開的 conversation reset command，不把原始文字送進 `session/prompt`。Provider 在同一條 ACP connection 上忘記舊 session、清除 persisted pointer、執行 `session/new`，完成設定初始化後才回報 clear 成功。`/clear [PROMPT]` 只把 trailing prompt 送給 replacement session；任一 replacement／initialization 步驟失敗都不得退回舊 session。`/new` 與 `/reset` 不出現在 command catalog，手動送出時明確提示改用 `/clear`。
+
+**Lifecycle：** Clear 前先擷取舊 session 的 provider-confirmed model、effort、native mode 與 native permission；reset 一次清除 session identity、driver metadata、advertised controls、current selections、initialization marker，以及 session-bound completion／permission state，但保留 process、connection、app identity、output sinks、login 與 account quota。Replacement 建立後重用 `agent-providers#51` 的 provider-owned initialization apply，再發布單一 final capabilities snapshot。新的 empty session ID 立即持久化；若日後 reconnect 時 upstream 無法 load empty session，沿用 `agent-providers#47` 的窄 missing-session recovery 與可見 notice，與初次 AgentView 的 empty-session 行為一致。
+
+**Reason：** 標準 ACP 沒有保留同 session ID 的 context-clear operation，而 Copilot ACP 也不 advertise `/clear`；將文字直接 prompt 只會得到 model 回答，context 不會重置。`session/new` 是現有 transport 上最小且公開的等價操作。Slash 意義留在 provider，讓 dispatcher 與 renderer 不需要知道 clear 是 native command 或 emulated lifecycle；callback-based replacement helper 只編排 transaction，因此未來可重用而不吸收 Copilot state ownership。
+
+**Do not change casually because：** 不要把 `/clear` 攔截搬到 renderer／dispatcher、重啟整個 Copilot process、呼叫 current ACP surface 不提供的 private SDK RPC，或把 `/new`／`/reset` 恢復成 alias。不要讓 bare clear lazy-create session，也不要為 clear 的 empty session 建特殊 reconnect 規則；這兩者都會讓 clear 後狀態偏離 freshly initialized AgentView。Raw `/clear` 與失敗 initialization 的 trailing prompt 永遠不能進入 `session/prompt`。
+
+**Related：** `agent-providers#47`、`agent-providers#51`、`agent-config-flow#11`、`contracts/agent-routing`、`architecture/agent-execution`。

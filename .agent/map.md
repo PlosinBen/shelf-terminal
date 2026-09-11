@@ -125,9 +125,10 @@ title: shelf-terminal — Intent → File Index
 | Model/caps cache（泛型 TTL） | `model-cache.ts` | `createModelCache({ttlMs})`：泛型 TTL 儲存，過期即 evict（cache-aside 的被動 store，見 `context/agent-config-flow`） |
 | Session hosting 抽象（兩張 map） | `session-registry.ts` | `createSessionRegistry()`：`sessions: Map<sid, runtimeKey>` + `runtimes: Map<runtimeKey, T>`，`runtimeKeyFor` 決定 isolated（sid）/shared（provider:account）。為 shared 部署預備（isolated milestone 未用） |
 | Claude provider | `providers/claude/index.ts` | `@anthropic-ai/claude-agent-sdk` wrapper：持久 streaming-input session、emit 渲染原語、auth 偵測 |
-| Copilot provider (ACP) | `providers/copilot/index.ts` | `createCopilotBackend`：spawn `copilot --acp`、依 initialize capability 選 resume/load、管理 native config、device-flow login 與 config-home |
+| Copilot provider (ACP) | `providers/copilot/index.ts` | `createCopilotBackend`：spawn `copilot --acp`、管理 restore/native config/login，並以 session replacement 實作 `/clear` |
 | Codex provider (app-server) | `providers/codex/index.ts` | `createCodexBackend`：直接驅動 pinned `codex app-server` JSON-RPC，封裝 turn/session、auth、config、skills/MCP、quota/context、tool items 與 approval bridge |
 | ACP 共用 toolkit | `providers/acp/` | provider-agnostic ACP runtime：connection/initialize、new/resume/load（load replay suppression）、update translation、permission、capabilities、MCP 與測試 mock |
+| Provider session replacement transaction | `providers/acp/session-replacement.ts` | 以 opaque callbacks 編排 capture、invalidate、reset、establish 與 initialize 的 fail-closed helper |
 | Provider registry（identity 單一來源） | `src/shared/agent-providers.ts` | provider key → label / visibility / runtime binding，衍生 `AgentProvider` 與 presentation helpers（見 `context/agent-providers` #36） |
 | Backend registry | `backend-registry.ts` | requested provider key → cached backend；test mode 只替換 implementation，不改 identity/cache boundary |
 | Provider 純 helper（claude） | `providers/claude/helpers.ts` | claude/index 抽出的 side-effect-free 函式 + types（封閉邊界，只被 claude/ 引用） |

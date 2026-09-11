@@ -249,3 +249,15 @@ Provider 以 capability strategy 選一條路：
 **Do not change casually because：** 不要在 initial apply 恢復 diff-only guard，也不要把 force apply 擴張成每次 capabilities read 或每個 turn 都重送。不要為推測中的 SDK cache 加 forced transition、polling 或 permission callback compensation；只有 protocol-compliant init apply 後仍確認是 SDK defect，才另立有 upstream trace、適用範圍與移除條件的 workaround。不要在 missing-session fallback 前套用、讓中間 notification 穿過 warm-up gate，或把責任擴張到 main。
 
 **Related：** `agent-config-flow#3`、`agent-config-flow#7`、`agent-config-flow#9`、`agent-providers#51`、`architecture/agent-execution`、`contracts/agent-routing`。
+
+## agent-config-flow#11 — Session replacement 使用 confirmed snapshot，不擴張每次 QueryInput prefs  ·  [Decision]
+
+**Decision：** Provider-owned session replacement 以 replacement 開始前的 provider-confirmed runtime selections 作一次性 initialization intent。Copilot 將 model、effort、native mode、native permission 擷取成 `AgentPrefs`-shaped opaque snapshot；共用 replacement helper 只把 snapshot 原樣交回 provider initialization callback，不讀取或保存內容。Snapshot 在 clear 完成後丟棄，不是第二份 project prefs cache。一般 `QueryInput` 維持既有 model／effort／canonical permission 欄位，不為 clear 每次附帶完整 `AgentPrefs`。
+
+**Status boundary：** Session replacement 以 `status.contextUsage: null` 明確移除舊 session 的 context-usage segment；欄位省略仍表示不更新，不能用 synthetic `0%` 代表 fresh session。只有 provider 取得新的 authoritative context usage 才再發布值。Account-level credits 與 session identity 無關，因此 clear 不修改 credits。
+
+**Reason：** Renderer 仍是 durable project-prefs authority，但 provider 在 clear execution 中已持有 SDK 確認過的完整 live-session state。使用這份 confirmed snapshot 可在不讓 dispatcher 理解 slash、不增加每個 send payload 負擔、也不建立長期 backend prefs cache的前提下初始化 replacement。明確的 nullable status sentinel 則能區分「清除舊值」與「本次沒有 usage update」。
+
+**Do not change casually because：** 不要從 renderer 再發一條 clear-only prefs RPC、讓 dispatcher parse `/clear`、在 provider 長期 cache project prefs，或只移轉 `QueryInput` 已有的 model／effort而遺漏 native selections。不要用 falsy/no-op status 模擬清除；省略 `contextUsage` 必須繼續保留現值，`null` 才是清除契約。
+
+**Related：** `agent-config-flow#9`、`agent-config-flow#10`、`agent-providers#52`、`contracts/agent-wire-protocol`、`architecture/agent-execution`。

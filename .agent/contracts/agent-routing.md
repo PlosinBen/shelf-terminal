@@ -31,6 +31,27 @@ Slash is NOT a control message of its own. A typed `/cmd args` flows as ordinary
 - main → agent-server: `sendLine({ type: 'send', executionId, provider, prompt: "/help", cwd, sessionId, attachments?, images?, model?, effort?, permissionMode?, clientMsgId?, appId, ... })`.
 - The provider calls `parseSlashPrefix(input.prompt)` inside `query()`; output comes back as a normal `fold_markdown` wire message (`errorMessage` on failure), not a distinct response type.
 
+### Copilot `/clear`
+
+Copilot exposes one Shelf-owned reset command even though the ACP command catalog does not advertise it:
+
+| Input | Provider effect |
+|-------|-----------------|
+| `/clear` | Do not call `session/prompt`. Emit `lastSdkSessionId:null`, clear session context usage, establish and initialize a new ACP session, persist its ID, publish final capabilities, emit a system confirmation, then settle idle. |
+| `/clear PROMPT` | Complete the same replacement first, then call `session/prompt` once with `PROMPT` as the replacement session's first input. |
+| `/new` or `/reset` | Emit a visible error directing the user to `/clear`; do not create or prompt a session. These names are filtered out of Copilot capabilities. |
+
+The Copilot capabilities command list filters `clear`, `new`, and `reset` from the provider snapshot, then appends the canonical `{ name:'clear', description:'Clear conversation context' }` entry. Replacement failure emits no success confirmation, and a trailing prompt is never dispatched to the old session. The dispatcher, main process, and renderer do not parse these provider-specific command names.
+
+Replacement pointer order is:
+
+```text
+context_patch { lastSdkSessionId: null }
+context_patch { lastSdkSessionId: <replacement ACP session id> }
+```
+
+The provider captures confirmed session configuration before the first patch and force-applies it to the replacement before reporting success. A persisted empty replacement session uses the ordinary reconnect restore and exact missing-session recovery rules; there is no clear-specific reconnect route.
+
 ## Uploaded attachments
 
 **Direction**: renderer → main → agent-server → provider.

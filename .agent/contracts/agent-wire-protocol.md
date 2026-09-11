@@ -114,9 +114,12 @@ Execution busy-state + cost/usage. `state:'idle'` closes the execution reader, c
 | `model` | `string?` | Per-execution resolved model — display is intent-driven via capabilities, not this (agent-config-flow#4). |
 | `sessionId` | `string?` | |
 | `costUsd` / `inputTokens` / `outputTokens` / `numTurns` | `number?` | |
-| `contextUsage` | `StatusSegment?` | `{ text, severity? }` — see `agent-server/providers/types.ts`. |
+| `contextUsage` | `StatusSegment \| null?` | `{ text, severity? }` updates session context usage; explicit `null` clears the previous session's value; omission leaves it unchanged. |
 | `rateLimits` | `StatusSegment[]?` | |
 | `credits` | `StatusSegment?` | Account-level credit (copilot premium requests, via SDK `account.getQuota`). ExecutionId-less, refreshed after an execution. |
+
+`contextUsage` and `credits` have different lifetimes. A conversation-session replacement emits
+`contextUsage:null` without clearing account-level `credits`; it does not emit a synthetic `0%`.
 
 ## capabilities — `type: 'capabilities'`
 
