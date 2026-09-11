@@ -61,7 +61,7 @@
     Co-Authored-By: GPT-5 Codex <noreply@openai.com>
     ```
 - **Worktree-first development**（覆寫 development-flow「原地開 branch」預設）：
-  - **Code / tests 一律在 worktree 開發** — 不在 main checkout 改 tracked source/test。main checkout = 規劃 + 唯讀調查 + 純文件維護。
+  - **Code / tests 一律在 worktree 開發** — 不在 main checkout 改 tracked source/test。main checkout = 規劃 + 唯讀調查 + 純文件維護 + 純套件升級；若升級後測試有問題，則開 note 並依 development-flow 處理。
   - **純文件維護（不伴隨 code 變更）可在 main checkout 直接改**：`.agent/`、CLAUDE.md、其他 markdown、`.agent/features/` note。
   - **伴隨 code 變更的 doc 跟著 code 走**：一次 code 變更該連帶更新的 `.agent/` / contract / map，與那份 code 同在 worktree、同批改，不拆回 main。
   - 對本 repo 中必須隔離的 code / test work，**必須**以 `shelf-worktree-handoff` 作為控制流程；**禁止**繞過它自行建立 worktree，或留在 parent project 實作。該 skill、development-flow 或必要 Shelf worktree tools 任一缺失時，**必須立即停止並明確回報，禁止降級或自行補做整合流程**。純文件維護仍依本 repo 的明文例外處理。
