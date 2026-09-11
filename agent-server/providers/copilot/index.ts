@@ -16,6 +16,7 @@ import {
   type SessionConfigOption,
   type SessionNotification,
   type StopReason,
+  type AvailableCommand,
 } from '@agentclientprotocol/sdk';
 import { COPILOT_PROVIDER } from '@shared/agent-providers';
 import type { AgentPrefs } from '@shared/types';
@@ -31,6 +32,7 @@ import { createPermissionBridge } from '../acp/permission';
 import { mapSessionCapabilities, currentSelections, configOptionIdForCategory } from '../acp/capabilities';
 import { toAcpMcpServers } from '../acp/mcp';
 import { getSharedShelfMcp } from '../acp/shelf-mcp';
+import { replaceSession } from '../acp/session-replacement';
 import { loadProjectedMcpServers } from '../mcp-config';
 import {
   resolveCopilotCommand,
@@ -42,6 +44,16 @@ import { refreshCopilotCredit } from './credit';
 import { startLogin as startCopilotLogin, prefillLoginUrl, type LoginRunner } from './login';
 
 const COPILOT_STALE_SESSION_NOTICE = 'Previous Copilot session was unavailable; started a new session.';
+const COPILOT_CLEAR_NOTICE = 'Copilot context cleared.';
+const COPILOT_COMMANDS = {
+  CLEAR: 'clear',
+  NEW: 'new',
+  RESET: 'reset',
+} as const;
+const COPILOT_CLEAR_COMMAND: AvailableCommand = {
+  name: COPILOT_COMMANDS.CLEAR,
+  description: 'Clear conversation context',
+};
 const ACP_RESOURCE_NOT_FOUND_ERROR_CODE = RequestError.resourceNotFound().code;
 export const COPILOT_AUTOPILOT_MODE_ID = 'https://agentclientprotocol.com/protocol/session-modes#autopilot';
 const COPILOT_AUTOPILOT_COMPLETION_TIMEOUT_MS = 30 * 60_000;
@@ -303,7 +315,17 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
    * spread into a `capabilities` wire message. Canonical permission modes stay
    * empty because Copilot publishes its two independent native controls. */
   function buildCapabilities(): ProviderCapabilities {
-    const availableCommands = session ? driver.getAvailableCommands(session.sessionId) : undefined;
+    const providerCommands = session ? driver.getAvailableCommands(session.sessionId) : undefined;
+    const availableCommands = providerCommands
+      ? [
+          ...providerCommands.filter((command) => (
+            command.name !== COPILOT_COMMANDS.CLEAR
+            && command.name !== COPILOT_COMMANDS.NEW
+            && command.name !== COPILOT_COMMANDS.RESET
+          )),
+          COPILOT_CLEAR_COMMAND,
+        ]
+      : [COPILOT_CLEAR_COMMAND];
     const input = { modes: sessionModes, configOptions: sessionConfigOptions, availableCommands };
     const base = mapSessionCapabilities(input);
     return {
@@ -436,6 +458,16 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
     currentEffort = current.currentEffort;
   }
 
+  function captureConfirmedSessionPrefs(): AgentPrefs {
+    const nativePermission = currentNativePermission();
+    return {
+      ...(currentModel !== undefined ? { model: currentModel } : {}),
+      ...(currentEffort !== undefined ? { effort: currentEffort } : {}),
+      ...(sessionModes?.currentModeId !== undefined ? { nativeMode: sessionModes.currentModeId } : {}),
+      ...(nativePermission !== undefined ? { nativePermission } : {}),
+    };
+  }
+
   async function reconcileSavedIntent(intent: AgentPrefs | undefined, force = false): Promise<void> {
     if (!intent) return;
 
@@ -474,6 +506,23 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
         throw new Error(`Copilot did not confirm native permission "${intent.nativePermission}"`);
       }
     }
+  }
+
+  function resetLiveSessionState(): void {
+    activeAutopilotCompletion?.resolve('terminated');
+    activeAutopilotCompletion = null;
+    rejectNativeModeConfirmation('Copilot session replaced during native mode confirmation');
+    nativeModeConfirmation = null;
+    permissions.cancelAll();
+    if (session) driver.forget(session.sessionId);
+    session = null;
+    sessionCwd = null;
+    sessionAppId = undefined;
+    sessionModes = undefined;
+    sessionConfigOptions = undefined;
+    currentModel = undefined;
+    currentEffort = undefined;
+    pendingInitialPerfSessionId = null;
   }
 
   /** Apply a config-edit turn (picker / status-bar): imperative apply + updated
@@ -677,23 +726,78 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
           await applyConfigEdit(input.configEdit.key, input.configEdit.value, send);
           return;
         }
-        const s = await ensureSession(
-          { cwd: input.cwd, appId: input.appId, resumeId: input.restoreContext?.lastSdkSessionId },
-          send,
-        );
+
+        const slash = parseSlashPrefix(input.prompt);
+        if (slash && (slash.cmd === COPILOT_COMMANDS.NEW || slash.cmd === COPILOT_COMMANDS.RESET)) {
+          send({
+            type: 'message',
+            msgId: `m-${randomUUID().slice(0, 8)}`,
+            msgType: 'error',
+            content: `/${slash.cmd} is not supported. Use /clear to start with a fresh context.`,
+          });
+          return;
+        }
+
+        let prompt = input.prompt;
+        let s: AcpSession;
+        if (slash?.cmd === COPILOT_COMMANDS.CLEAR) {
+          if (activePromptCompletion) {
+            throw new Error('cannot clear Copilot context while an ACP prompt is active');
+          }
+          await ensureSession(
+            { cwd: input.cwd, appId: input.appId, resumeId: input.restoreContext?.lastSdkSessionId },
+            send,
+          );
+          hydrateCurrentSelections();
+          reconcilingCapabilities = true;
+          try {
+            s = await replaceSession({
+              capture: captureConfirmedSessionPrefs,
+              invalidate: () => {
+                send({ type: 'context_patch', patch: { lastSdkSessionId: null } });
+                send({ type: 'status', contextUsage: null });
+              },
+              reset: resetLiveSessionState,
+              establish: () => ensureSession({ cwd: input.cwd, appId: input.appId }, send),
+              initialize: async (replacement, intent) => {
+                hydrateCurrentSelections();
+                await reconcileSavedIntent(intent, true);
+                if (pendingInitialPerfSessionId === replacement.sessionId) {
+                  pendingInitialPerfSessionId = null;
+                }
+              },
+            });
+          } finally {
+            reconcilingCapabilities = false;
+          }
+          publishCapabilities();
+          send({
+            type: 'message',
+            msgId: `m-${randomUUID().slice(0, 8)}`,
+            msgType: 'system',
+            content: COPILOT_CLEAR_NOTICE,
+          });
+          prompt = slash.args;
+          if (!prompt) return;
+        } else {
+          s = await ensureSession(
+            { cwd: input.cwd, appId: input.appId, resumeId: input.restoreContext?.lastSdkSessionId },
+            send,
+          );
+        }
         // Install the observer before session/prompt starts. A restored Copilot
         // session can publish its authoritative mode only after the prompt is in
         // flight; deciding whether to observe here would miss both that mode
         // update and an early task_complete tool_call from the same prompt.
         const autopilotCompletion = createAutopilotCompletionGate(s.sessionId);
         activeAutopilotCompletion = autopilotCompletion;
-        const slash = parseSlashPrefix(input.prompt);
-        const isAdvertisedSlashCommand = slash !== null
-          && driver.getAvailableCommands(s.sessionId)?.some((command) => command.name === slash.cmd) === true;
+        const promptSlash = parseSlashPrefix(prompt);
+        const isAdvertisedSlashCommand = promptSlash !== null
+          && driver.getAvailableCommands(s.sessionId)?.some((command) => command.name === promptSlash.cmd) === true;
         const promptCompletion = driver.drivePromptTurn(
           conn!.agent,
           s,
-          input.prompt,
+          prompt,
           send,
           input.images,
           input.attachments,
@@ -893,12 +997,7 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
     },
 
     resetSession(): void {
-      activeAutopilotCompletion?.resolve('terminated');
-      activeAutopilotCompletion = null;
-      rejectNativeModeConfirmation('Copilot session closed during native mode confirmation');
-      if (session) driver.forget(session.sessionId);
-      session = null;
-      sessionCwd = null;
+      resetLiveSessionState();
     },
 
     /** Drop the live connection (process + session) so the next turn respawns and

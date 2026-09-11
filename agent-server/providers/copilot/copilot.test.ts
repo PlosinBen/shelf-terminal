@@ -181,6 +181,139 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
     backend.dispose();
   });
 
+  it('replaces the ACP session for bare /clear without prompting and reapplies confirmed config', async () => {
+    let newSessions = 0;
+    const prompts: unknown[] = [];
+    const setModes: Array<{ modeId?: string }> = [];
+    const setConfigs: Array<{ configId?: string; value?: string }> = [];
+    let liveConfig = COPILOT_CONFIG;
+    const mock = createMockAcpAgent({
+      modes: COPILOT_MODES,
+      get configOptions() { return liveConfig; },
+      get configOptionsOnSetConfigOption() { return liveConfig; },
+      commandsOnNewSession: [
+        { name: 'compact', description: 'Summarize conversation' },
+        { name: 'new', description: 'Start over' },
+        { name: 'reset', description: 'Reset conversation' },
+      ],
+      onNewSession: () => { newSessions += 1; },
+      onPrompt: (params) => prompts.push(params),
+      onSetMode: (params) => setModes.push(params as { modeId?: string }),
+      onSetConfigOption: (params) => {
+        const call = params as { configId?: string; value?: string };
+        setConfigs.push(call);
+        if (call.configId && call.value) {
+          liveConfig = withConfigSelection(liveConfig, call.configId, call.value);
+        }
+      },
+    });
+    const backend = createCopilotBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
+    const sessionOut: OutgoingMessage[] = [];
+    backend.bindSessionSend!((message) => sessionOut.push(message));
+
+    const caps = await backend.gatherCapabilities!('/tmp/project');
+    const out: OutgoingMessage[] = [];
+    await backend.query({ prompt: '/clear', cwd: '/tmp/project' }, (message) => out.push(message));
+
+    expect(caps.slashCommands).toEqual([
+      { name: 'compact', description: 'Summarize conversation' },
+      { name: 'clear', description: 'Clear conversation context' },
+    ]);
+    expect(newSessions).toBe(2);
+    expect(prompts).toEqual([]);
+    expect(setModes).toEqual([expect.objectContaining({ modeId: COPILOT_AGENT_MODE_ID })]);
+    expect(setConfigs.map(({ configId, value }) => ({ configId, value }))).toEqual([
+      { configId: 'model', value: 'claude-sonnet-5' },
+      { configId: 'reasoning_effort', value: 'medium' },
+      { configId: 'allow_all', value: 'off' },
+    ]);
+    expect(out).toContainEqual({ type: 'context_patch', patch: { lastSdkSessionId: null } });
+    expect(out).toContainEqual({ type: 'context_patch', patch: { lastSdkSessionId: 'mock-session' } });
+    expect(out).toContainEqual({ type: 'status', contextUsage: null });
+    expect(out).toContainEqual(expect.objectContaining({
+      type: 'message',
+      msgType: 'system',
+      content: 'Copilot context cleared.',
+    }));
+    expect(sessionOut.filter((message) => message.type === 'capabilities')).toHaveLength(1);
+    expect(out.at(-1)).toEqual({ type: 'status', state: 'idle' });
+    backend.dispose();
+  });
+
+  it('sends only the trailing /clear prompt after the replacement session initializes', async () => {
+    let newSessions = 0;
+    const prompts: Array<{ prompt?: unknown }> = [];
+    const mock = createMockAcpAgent({
+      onNewSession: () => { newSessions += 1; },
+      onPrompt: (params) => prompts.push(params as { prompt?: unknown }),
+    });
+    const backend = createCopilotBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
+    await backend.gatherCapabilities!('/tmp/project');
+
+    const out: OutgoingMessage[] = [];
+    await backend.query({ prompt: '/clear inspect the new task', cwd: '/tmp/project' }, (message) => out.push(message));
+
+    expect(newSessions).toBe(2);
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0].prompt).toEqual([{ type: 'text', text: 'inspect the new task' }]);
+    expect(out).toContainEqual(expect.objectContaining({
+      type: 'message', msgType: 'system', content: 'Copilot context cleared.',
+    }));
+    backend.dispose();
+  });
+
+  it('rejects /new and /reset aliases without creating a session or prompting Copilot', async () => {
+    let newSessions = 0;
+    const prompts: unknown[] = [];
+    const mock = createMockAcpAgent({
+      onNewSession: () => { newSessions += 1; },
+      onPrompt: (params) => prompts.push(params),
+    });
+    const backend = createCopilotBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
+
+    for (const command of ['/new', '/reset']) {
+      const out: OutgoingMessage[] = [];
+      await backend.query({ prompt: command, cwd: '/tmp/project' }, (message) => out.push(message));
+      expect(out).toContainEqual(expect.objectContaining({
+        type: 'message',
+        msgType: 'error',
+        content: `${command} is not supported. Use /clear to start with a fresh context.`,
+      }));
+      expect(out.at(-1)).toEqual({ type: 'status', state: 'idle' });
+    }
+
+    expect(newSessions).toBe(0);
+    expect(prompts).toEqual([]);
+    backend.dispose();
+  });
+
+  it('does not send a trailing prompt when replacement initialization fails', async () => {
+    const prompts: unknown[] = [];
+    const mock = createMockAcpAgent({
+      modes: COPILOT_MODES,
+      configOptions: COPILOT_CONFIG,
+      setConfigOptionError: 'replacement config rejected',
+      onPrompt: (params) => prompts.push(params),
+    });
+    const backend = createCopilotBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
+
+    const out: OutgoingMessage[] = [];
+    await backend.query(
+      { prompt: '/clear do not send this', cwd: '/tmp/project' },
+      (message) => out.push(message),
+    );
+
+    expect(prompts).toEqual([]);
+    expect(out).toContainEqual(expect.objectContaining({
+      type: 'error',
+      error: expect.stringContaining('Internal error'),
+    }));
+    expect(out).not.toContainEqual(expect.objectContaining({
+      type: 'message', msgType: 'system', content: 'Copilot context cleared.',
+    }));
+    backend.dispose();
+  });
+
   it('keeps an Autopilot execution active until task_complete finishes after the prompt response', async () => {
     const autopilotModes = { ...COPILOT_MODES, currentModeId: COPILOT_AUTOPILOT_MODE_ID } as SessionModeState;
     const mock = createMockAcpAgent({
@@ -509,6 +642,7 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
     expect(caps.slashCommands).toEqual([
       { name: 'compact', description: 'Summarize conversation' },
       { name: 'review', description: 'Review changes' },
+      { name: 'clear', description: 'Clear conversation context' },
     ]);
 
     backend.dispose();
@@ -573,7 +707,10 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
       mode: { currentValue: COPILOT_AGENT_MODE_ID },
       permission: { currentValue: 'off' },
     });
-    expect(caps.slashCommands).toEqual([{ name: 'compact', description: 'Summarize conversation' }]);
+    expect(caps.slashCommands).toEqual([
+      { name: 'compact', description: 'Summarize conversation' },
+      { name: 'clear', description: 'Clear conversation context' },
+    ]);
     await backend.query({
       prompt: 'continue the restored conversation',
       cwd: '/tmp/project',
@@ -993,7 +1130,10 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
     expect(newSessions).toBe(0);
     expect(promptSessionId).toBe('persisted-acp-session');
     expect(sessionOut).not.toContainEqual(expect.objectContaining({ type: 'stream', content: 'old replayed answer' }));
-    expect(caps.slashCommands).toEqual([{ name: 'compact', description: 'Summarize conversation' }]);
+    expect(caps.slashCommands).toEqual([
+      { name: 'compact', description: 'Summarize conversation' },
+      { name: 'clear', description: 'Clear conversation context' },
+    ]);
     expect(caps.permissionControl).toMatchObject({
       strategy: 'native',
       mode: { currentValue: COPILOT_AGENT_MODE_ID },

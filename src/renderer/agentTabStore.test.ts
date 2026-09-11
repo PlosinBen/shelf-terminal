@@ -479,6 +479,20 @@ describe('agentTabStore — status / capabilities (no-fallback semantics)', () =
     expect(tab.numTurns).toBe(3);
     expect(tab.actualModel).toBe('default'); // unchanged by setStatus
   });
+
+  it('clears context usage only for an explicit null status value', () => {
+    setStatus(TAB, {
+      contextUsage: { text: 'ctx: 42%', severity: 'normal' },
+      credits: { text: 'premium: 3/10', severity: 'normal' },
+    });
+    setStatus(TAB, {});
+    expect(__getTabForTests(TAB)!.contextUsage?.text).toBe('ctx: 42%');
+
+    setStatus(TAB, { contextUsage: null });
+    const tab = __getTabForTests(TAB)!;
+    expect(tab.contextUsage).toBeNull();
+    expect(tab.credits?.text).toBe('premium: 3/10');
+  });
 });
 
 describe('agentTabStore — streaming transitions', () => {

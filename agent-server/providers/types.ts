@@ -123,7 +123,8 @@ export type OutgoingMessage = WireEnvelope & (
       inputTokens?: number;
       outputTokens?: number;
       numTurns?: number;
-      contextUsage?: StatusSegment;
+      /** `null` explicitly clears usage from a replaced conversation session. */
+      contextUsage?: StatusSegment | null;
       rateLimits?: StatusSegment[];
       /** Account-level usage (e.g. copilot premium-request quota). Provider-agnostic
        *  segment; copilot fills it post-execution via `refreshAccountStatus`. */

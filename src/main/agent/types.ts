@@ -67,7 +67,8 @@ export interface AgentStatusPayload {
   outputTokens?: number;
   numTurns?: number;
   sessionId?: string;
-  contextUsage?: StatusSegment;
+  /** `null` explicitly clears usage from a replaced conversation session. */
+  contextUsage?: StatusSegment | null;
   rateLimits?: StatusSegment[];
   /** Account-level usage (copilot premium-request quota, session-scoped delivery). */
   credits?: StatusSegment;

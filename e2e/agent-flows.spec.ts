@@ -275,6 +275,21 @@ test.describe('agent flows via fake provider', () => {
       await expect(statusBar).toContainText('quota: 7%', { timeout: 5_000 });
     });
 
+    test('/clear removes session context usage without clearing account quota', async ({ shelfApp: { page } }) => {
+      await setupProject(page);
+      await openAgentTab(page);
+      await sendAgentPrompt(page, 'usage|text:done');
+
+      const statusBar = page.locator('.agent-status-bar:visible');
+      await expect(statusBar).toContainText('ctx: 42%', { timeout: 5_000 });
+      await expect(statusBar).toContainText('quota: 7%', { timeout: 5_000 });
+
+      await sendAgentPrompt(page, '/clear');
+      await expect(page.locator('.agent-messages:visible')).toContainText('Fake context cleared.', { timeout: 5_000 });
+      await expect(statusBar).not.toContainText('ctx: 42%');
+      await expect(statusBar).toContainText('quota: 7%');
+    });
+
     // Account-level credit (copilot premium requests) is fetched AFTER the execution
     // via backend.refreshAccountStatus and delivered executionId-less through the
     // session sink — not on the execution's status. Proves the full post-execution path

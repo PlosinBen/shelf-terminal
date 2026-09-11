@@ -787,7 +787,7 @@ export interface StatusPartial {
   state?: 'idle' | 'streaming' | string;
   costUsd?: number;
   numTurns?: number;
-  contextUsage?: StatusSegment;
+  contextUsage?: StatusSegment | null;
   rateLimits?: StatusSegment[];
   credits?: StatusSegment;
 }
@@ -802,7 +802,7 @@ export function setStatus(tabId: string, partial: StatusPartial) {
     const next: AgentTabState = { ...prev };
     if (partial.costUsd != null) next.costUsd = partial.costUsd;
     if (partial.numTurns != null) next.numTurns = partial.numTurns;
-    if (partial.contextUsage) next.contextUsage = partial.contextUsage;
+    if (partial.contextUsage !== undefined) next.contextUsage = partial.contextUsage;
     if (Array.isArray(partial.rateLimits) && partial.rateLimits.length > 0) {
       next.rateLimits = partial.rateLimits;
     }

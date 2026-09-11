@@ -673,6 +673,15 @@ export function createFakeBackend(_representedProvider: AgentProvider = FAKE_PRO
       // listing composed as canned markdown (each provider owns its own card;
       // no cross-provider result type). Emitted as a plain `reply`.
       const slash = parseSlashPrefix(input.prompt);
+      // Wire-level clear fixture: the real Copilot provider emits the same
+      // contextUsage null sentinel after replacing its ACP session. Keep quota
+      // untouched so E2E covers the session-vs-account status boundary.
+      if (slash?.cmd === 'clear') {
+        send({ type: 'status', contextUsage: null });
+        send({ type: 'message', msgId: mintId('m'), msgType: 'system', content: 'Fake context cleared.' });
+        send({ type: 'status', state: 'idle' });
+        return;
+      }
       if (slash && (slash.cmd === 'mcp' || slash.cmd === 'skills')) {
         send({ type: 'status', state: 'streaming' });
         const content = slash.cmd === 'mcp'
