@@ -81,6 +81,7 @@ test('external URL popup defaults to copy and supports cancel/open decisions', a
   await page.keyboard.press(`${modifier}+Enter`);
   await page.locator('.connect-prompt').click();
   await expect(page.locator('.tab-bar .tab')).toHaveCount(1);
+  await expect(page.locator('.terminal-loading')).toBeHidden({ timeout: 5_000 });
 
   const rendererLink = 'https://renderer.example.com/path?state=exact-renderer-state';
   await page.evaluate((url) => {

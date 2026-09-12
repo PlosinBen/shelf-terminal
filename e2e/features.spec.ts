@@ -4,6 +4,10 @@ const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
 
 // Helper: create a project and connect (opens a terminal tab)
 async function setupProject(page: any) {
+  const projectIndex = await page.locator('.sidebar-item').count();
+  const projectName = ['shelf-test-a', 'shelf-test-b', 'shelf-test-c'][projectIndex];
+  if (!projectName) throw new Error(`No test directory available for project ${projectIndex + 1}`);
+
   await page.locator('.sidebar-btn', { hasText: '+' }).click();
   await expect(page.locator('.folder-picker-overlay')).toBeVisible({ timeout: 5_000 });
   await page.locator('.conn-btn-next').click();
@@ -12,6 +16,7 @@ async function setupProject(page: any) {
   // creates a project with name "project" and empty cwd. See
   // agent-flows.spec.ts setupProject for the full race explanation.
   await expect(page.locator('.fp-browser-path')).toContainText('/', { timeout: 5_000 });
+  await page.locator('.folder-picker-item', { hasText: projectName }).click();
   await page.keyboard.press(`${modifier}+Enter`);
   await expect(page.locator('.folder-picker-overlay')).not.toBeVisible({ timeout: 3_000 });
 
