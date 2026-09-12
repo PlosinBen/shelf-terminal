@@ -97,6 +97,10 @@ test.describe('Canonical Codex provider renderer flow', () => {
     await expect(pane).toBeVisible({ timeout: 5_000 });
     await pane.locator('.agent-reset-btn', { hasText: 'Log in' }).click();
     await expect(pane.locator('.agent-auth-code')).toHaveText('FAKE-CODE', { timeout: 5_000 });
+    const urlPopup = page.locator('.external-url-intent-overlay');
+    await expect(urlPopup).toBeVisible({ timeout: 5_000 });
+    await urlPopup.locator('.agent-perm-option', { hasText: 'Cancel' }).click();
+    await expect(urlPopup).not.toBeVisible();
     await pane.locator('.agent-reset-btn', { hasText: 'Cancel' }).click();
     await expect(pane.locator('.agent-reset-btn', { hasText: 'Log in' })).toBeVisible({ timeout: 5_000 });
 
