@@ -29,7 +29,7 @@ export const NODE_VERSION = 'v20.18.1';
  * package.json, so we pin it here; a unit test asserts it equals the installed
  * dependency's version, so bumping the dep without updating this fails loudly.
  */
-export const CLAUDE_SDK_VERSION = '0.3.269';
+export const CLAUDE_SDK_VERSION = '0.3.159';
 
 function assertGlibc(t: RuntimeTarget): void {
   if (t.libc !== 'glibc') {
@@ -84,7 +84,7 @@ export function claudeTarballUrl(t: RuntimeTarget, version: string): string {
  * copilot-sdk drives. Pinned (same reasoning as CLAUDE_SDK_VERSION); a unit
  * test asserts it equals the installed dependency.
  */
-export const COPILOT_CLI_VERSION = '1.0.83';
+export const COPILOT_CLI_VERSION = '1.0.68';
 
 /**
  * Codex ACP runtime set. These packages form one tested protocol/runtime unit:
