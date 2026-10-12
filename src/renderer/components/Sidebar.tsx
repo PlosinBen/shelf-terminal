@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import {
   useStore,
   setActiveProject,
@@ -16,7 +16,37 @@ import { tooltipWithShortcut } from '../utils/format-keybinding';
 import { isMac } from '../hooks/useKeybindings';
 import { TOGGLE_CONNECTED_FILTER_ACTION } from '@shared/types';
 import { computeVisibleProjectIndices } from '../project-grouping';
-import { FilterIcon } from './icons';
+import { FilterIcon, SearchIcon } from './icons';
+
+export type ProjectSearchKeyAction = 'up' | 'down' | 'activate' | 'close' | 'none';
+
+export function findProjectSearchMatchIndex(label: string, query: string): number {
+  if (query.length === 0) return -1;
+  return label.toLocaleLowerCase().indexOf(query.toLocaleLowerCase());
+}
+
+export function decideProjectSearchKey(key: string, isComposing: boolean): ProjectSearchKeyAction {
+  if (isComposing) return 'none';
+  switch (key) {
+    case 'ArrowDown': return 'down';
+    case 'ArrowUp': return 'up';
+    case 'Enter': return 'activate';
+    case 'Escape': return 'close';
+    default: return 'none';
+  }
+}
+
+export function moveProjectSearchCandidate(
+  matchIds: readonly string[],
+  currentId: string | null,
+  direction: -1 | 1,
+): string | null {
+  if (matchIds.length === 0) return null;
+  const currentIndex = currentId === null ? -1 : matchIds.indexOf(currentId);
+  if (currentIndex === -1) return direction === 1 ? matchIds[0] : matchIds[matchIds.length - 1];
+  const nextIndex = Math.max(0, Math.min(currentIndex + direction, matchIds.length - 1));
+  return matchIds[nextIndex];
+}
 
 /**
  * Clamp a context-menu's desired top-left so the whole menu stays on screen
@@ -59,8 +89,33 @@ export function Sidebar() {
     connectionHealth,
   } = useStore();
   const kb = settings.keybindings;
-  const visibleProjectIndices = new Set(computeVisibleProjectIndices(projects, hideDisconnected));
+  const visibleProjectIndices = useMemo(
+    () => computeVisibleProjectIndices(projects, hideDisconnected),
+    [projects, hideDisconnected],
+  );
+  const visibleProjectIndexSet = useMemo(() => new Set(visibleProjectIndices), [visibleProjectIndices]);
   const filterLabel = hideDisconnected ? 'Show all projects' : 'Show connected only';
+  const [projectSearchOpen, setProjectSearchOpen] = useState(false);
+  const [projectSearchQuery, setProjectSearchQuery] = useState('');
+  const [projectSearchCandidateId, setProjectSearchCandidateId] = useState<string | null>(null);
+  const projectSearchInputRef = useRef<HTMLInputElement>(null);
+  const projectSearchPriorFocusRef = useRef<HTMLElement | null>(null);
+  const projectRowRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const projectSearchMatches = useMemo(() => {
+    if (!projectSearchOpen || projectSearchQuery.length === 0) return [];
+    return visibleProjectIndices.flatMap((index) => {
+      const project = projects[index];
+      if (!project) return [];
+      const label = project.parentProjectId ? project.worktreeBranch : project.name;
+      if (!label) return [];
+      const matchIndex = findProjectSearchMatchIndex(label, projectSearchQuery);
+      return matchIndex === -1 ? [] : [{ id: project.id, index, matchIndex }];
+    });
+  }, [projectSearchOpen, projectSearchQuery, projects, visibleProjectIndices]);
+  const projectSearchMatchById = useMemo(
+    () => new Map(projectSearchMatches.map((match) => [match.id, match.matchIndex])),
+    [projectSearchMatches],
+  );
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   // Live width while dragging the resize handle; null when not resizing (then the
   // persisted settings width applies). Committed to settings on mouse-up.
@@ -72,6 +127,41 @@ export function Sidebar() {
   // Clamped on-screen position, measured after the menu mounts. Null until
   // measured → first paint falls back to the raw cursor position.
   const [menuPos, setMenuPos] = useState<{ left: number; top: number } | null>(null);
+
+  const closeProjectSearch = (restorePriorFocus: boolean) => {
+    setProjectSearchOpen(false);
+    setProjectSearchQuery('');
+    setProjectSearchCandidateId(null);
+    if (!restorePriorFocus) return;
+    const priorFocus = projectSearchPriorFocusRef.current;
+    requestAnimationFrame(() => {
+      if (priorFocus?.isConnected) priorFocus.focus();
+    });
+  };
+
+  const toggleProjectSearch = () => {
+    if (projectSearchOpen) {
+      closeProjectSearch(true);
+      return;
+    }
+    projectSearchPriorFocusRef.current = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+    setProjectSearchOpen(true);
+  };
+
+  useEffect(() => {
+    if (projectSearchOpen) projectSearchInputRef.current?.focus();
+  }, [projectSearchOpen]);
+
+  useEffect(() => {
+    setProjectSearchCandidateId(projectSearchMatches[0]?.id ?? null);
+  }, [projectSearchMatches]);
+
+  useEffect(() => {
+    if (!projectSearchCandidateId) return;
+    projectRowRefs.current.get(projectSearchCandidateId)?.scrollIntoView({ block: 'nearest' });
+  }, [projectSearchCandidateId]);
 
   // Row-tint flash on connection-health *worsening* (a one-shot attention pulse;
   // the steady state lives in the dot colour — see §5.9). Track each project's
@@ -133,6 +223,29 @@ export function Sidebar() {
 
   const handleNewProject = () => {
     emit(Events.OPEN_FOLDER_PICKER);
+  };
+
+  const handleProjectSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    const action = decideProjectSearchKey(e.key, e.nativeEvent.isComposing);
+    if (action === 'none') return;
+    e.preventDefault();
+    if (action === 'close') {
+      closeProjectSearch(true);
+      return;
+    }
+    if (action === 'up' || action === 'down') {
+      setProjectSearchCandidateId((currentId) => moveProjectSearchCandidate(
+        projectSearchMatches.map((match) => match.id),
+        currentId,
+        action === 'up' ? -1 : 1,
+      ));
+      return;
+    }
+    const candidate = projectSearchMatches.find((match) => match.id === projectSearchCandidateId);
+    if (!candidate) return;
+    const restorePriorFocus = candidate.index === activeProjectIndex;
+    setActiveProject(candidate.index);
+    closeProjectSearch(restorePriorFocus);
   };
 
   // Drag the right edge to resize. The sidebar is the leftmost pane, so the
@@ -198,11 +311,36 @@ export function Sidebar() {
           >
             <FilterIcon />
           </button>
+          <button
+            className={`sidebar-btn${projectSearchOpen ? ' active' : ''}`}
+            tabIndex={-1}
+            onMouseDown={preventButtonFocus}
+            onClick={toggleProjectSearch}
+            title="Search projects"
+            aria-label="Search projects"
+            aria-pressed={projectSearchOpen}
+          >
+            <SearchIcon />
+          </button>
         </span>
       </div>
+      {projectSearchOpen && (
+        <div className="sidebar-project-search-row">
+          <input
+            ref={projectSearchInputRef}
+            className="sidebar-project-search-input"
+            type="text"
+            value={projectSearchQuery}
+            onChange={(e) => setProjectSearchQuery(e.target.value)}
+            onKeyDown={handleProjectSearchKeyDown}
+            placeholder="Search projects…"
+            aria-label="Search projects"
+          />
+        </div>
+      )}
       <div className="sidebar-list">
         {projects.map((proj, i) => {
-          if (!visibleProjectIndices.has(i)) return null;
+          if (!visibleProjectIndexSet.has(i)) return null;
           const hasAlive = proj.tabs.length > 0;
           const isDragging = dragIndex === i;
           const isDragOver = dragOverIndex === i && dragIndex !== i;
@@ -220,6 +358,9 @@ export function Sidebar() {
           // and it cannot start a drag: the whole group moves via its parent.
           const isWorktreeChild = !!proj.parentProjectId;
           const label = isWorktreeChild ? proj.worktreeBranch : proj.name;
+          const searchMatchIndex = projectSearchMatchById.get(proj.id) ?? -1;
+          const isSearchMatch = searchMatchIndex !== -1;
+          const isSearchCandidate = projectSearchCandidateId === proj.id;
           // Another worktree of the same parent follows → the guide line keeps
           // running past this child instead of ending at its elbow.
           const nextProj = projects[i + 1];
@@ -229,9 +370,13 @@ export function Sidebar() {
           return (
             <div
               key={proj.id}
-              className={`sidebar-item ${i === activeProjectIndex ? 'active' : ''} ${isDragging ? 'dragging' : ''} ${isDragOver ? 'drag-over' : ''}${isFlashing ? ' health-flash' : ''}${isWorktreeChild ? ' worktree-child' : ''}${hasSiblingBelow ? ' has-sibling-below' : ''}`}
-              onClick={() => setActiveProject(i)}
-              onContextMenu={(e) => { setActiveProject(i); handleContextMenu(e, i); }}
+              ref={(element) => {
+                if (element) projectRowRefs.current.set(proj.id, element);
+                else projectRowRefs.current.delete(proj.id);
+              }}
+              className={`sidebar-item ${i === activeProjectIndex ? 'active' : ''} ${isDragging ? 'dragging' : ''} ${isDragOver ? 'drag-over' : ''}${isFlashing ? ' health-flash' : ''}${isWorktreeChild ? ' worktree-child' : ''}${hasSiblingBelow ? ' has-sibling-below' : ''}${isSearchMatch ? ' project-search-match' : ''}${isSearchCandidate ? ' project-search-candidate' : ''}`}
+              onClick={() => { setActiveProject(i); if (projectSearchOpen) closeProjectSearch(false); }}
+              onContextMenu={(e) => { setActiveProject(i); if (projectSearchOpen) closeProjectSearch(false); handleContextMenu(e, i); }}
               draggable={!isWorktreeChild}
               onDragStart={(e) => handleDragStart(e, i)}
               onDragOver={(e) => handleDragOver(e, i)}
@@ -240,7 +385,17 @@ export function Sidebar() {
             >
               <span className={`status-dot ${hasAlive ? 'alive' : 'dead'}${healthClass}`} title={healthTitle} />
               <span className="project-name-group">
-                <span className="project-name">{label}</span>
+                <span className="project-name">
+                  {isSearchMatch && label ? (
+                    <>
+                      {label.slice(0, searchMatchIndex)}
+                      <mark className="project-search-match-text">
+                        {label.slice(searchMatchIndex, searchMatchIndex + projectSearchQuery.length)}
+                      </mark>
+                      {label.slice(searchMatchIndex + projectSearchQuery.length)}
+                    </>
+                  ) : label}
+                </span>
               </span>
             </div>
           );

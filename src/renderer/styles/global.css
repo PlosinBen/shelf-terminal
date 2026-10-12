@@ -152,6 +152,29 @@ button {
   background: var(--surface);
 }
 
+.sidebar-project-search-row {
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.sidebar-project-search-input {
+  box-sizing: border-box;
+  width: 100%;
+  height: 30px;
+  padding: 0 8px;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+}
+
+.sidebar-project-search-input:focus {
+  border-color: var(--accent);
+}
+
 .sidebar-list {
   flex: 1;
   overflow-y: auto;
@@ -194,6 +217,16 @@ button {
 
 .sidebar-item.active {
   background: var(--surface);
+}
+
+.sidebar-item.project-search-candidate {
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.project-search-match-text {
+  color: inherit;
+  background: color-mix(in srgb, var(--accent) 35%, transparent);
+  border-radius: 2px;
 }
 
 .sidebar-item.dragging {
