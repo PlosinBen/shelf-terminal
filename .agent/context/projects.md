@@ -4,6 +4,7 @@ title: Projects
 related:
   - architecture/projects
   - contracts/projects
+  - context/keybindings-shell
 ---
 
 # Projects
@@ -107,3 +108,21 @@ Folder Picker treats a matching selection as reopening the first matching projec
 - Multiple legacy matches resolve to the first project in reconciled order without modifying any record.
 - Target comparison is configuration-level and lexical. It does not use filesystem I/O, `realpath`, symlink resolution, case folding, `.` / `..` normalization, or connection aliases.
 - The same path on distinct connection identities remains valid. A Git worktree remains distinct because its configured working directory differs.
+
+## projects#9 — Sidebar Project Search locates visible rows without filtering  ·  [Decision]
+
+**Decision:** Project Search opens only from the Sidebar header's magnifying-glass button. It has no app-level shortcut and does not infer search intent from ordinary printable input. The button opens a focused input in a temporary row below the header.
+
+Search runs after the connected-only projection and performs a case-insensitive substring match against exactly the label displayed by each visible row: project name for a main project and branch name for a worktree child. It preserves every projected row, its order, and parent/child grouping; matches are highlighted rather than filtered.
+
+The focused input owns keyboard handling. Up/Down moves a transient candidate without changing the active project, Enter activates the candidate, and Escape cancels. Pointer activation keeps the Sidebar's existing immediate-switch behavior. Cancellation restores the element focused before search when it still exists; activation never restores focus into a project the user left.
+
+**Reason:** Explicit input focus gives search unambiguous keyboard ownership without adding a second global arbitration path across xterm, Agent inputs, webviews, overlays, and IME composition. Keeping search as location rather than filtering preserves spatial and worktree-group context and leaves the funnel as the single control that reduces the list. Separating candidate from active project prevents arrow navigation from repeatedly swapping the content pane.
+
+**Do not change casually because:** Hidden metadata in matching can produce results whose matching text is not visible. Searching outside the connected-only projection can produce an invisible candidate. Activating on candidate movement makes cancellation ambiguous and causes avoidable Terminal, Agent, or Web view switches. A future activation shortcut requires its own product decision and keybinding compatibility review.
+
+### Gotchas
+
+- Search navigation must use real visual project indices rather than indices from a separately filtered collection.
+- The input key handler must defer ArrowUp, ArrowDown, Enter, and Escape while IME composition is active; see `keybindings-shell#6`.
+- Icon toggle and Escape restore prior focus, while activation delegates focus to the destination project's existing view lifecycle.
