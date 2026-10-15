@@ -63,6 +63,7 @@ Where each surface fits in:
 - **SSH / WSL** — connect to remote hosts via SSH (ControlMaster multiplexing, password auth) or WSL (distro dropdown)
 - **Themes** — 5 built-in themes (Catppuccin Mocha/Latte, Dracula, Nord, Tokyo Night)
 - **Terminal search** — search scrollback buffer (mod+F)
+- **Project search** — use the Sidebar magnifying glass to highlight and navigate matching visible projects without filtering or reordering the list
 - **Tab management** — double-click to rename, drag to reorder, mod+1~9 to switch
 - **Tab badge** — unread indicator on background tabs with new output
 - **Project management** — drag to reorder, right-click context menu (Edit, Connect/Disconnect, Close)
