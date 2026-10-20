@@ -636,7 +636,14 @@ export function ProjectEditPanel() {
                     }
                   >
                     <option value="current">Current tab</option>
-                    {defaultTabs.filter((t) => t.name.trim() && t.kind !== 'web').map((t) => (
+                    {cmd.target !== 'current'
+                      && !defaultTabs.some((t) => t.name === cmd.target && t.kind !== 'agent' && t.kind !== 'web')
+                      && (
+                        <option value={cmd.target} disabled>
+                          {cmd.target} (unavailable — Terminal only)
+                        </option>
+                      )}
+                    {defaultTabs.filter((t) => t.name.trim() && t.kind !== 'agent' && t.kind !== 'web').map((t) => (
                       <option key={t.name} value={t.name}>{t.name}</option>
                     ))}
                   </select>

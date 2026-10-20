@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { useStore, closeCommandPicker } from '../store';
+import { useStore, closeCommandPicker, showProjectNotice } from '../store';
 import type { QuickCommand } from '@shared/types';
+import { resolveQuickCommandTarget } from '../quick-command-target';
 
 export type CommandPickerKeyAction = 'up' | 'down' | 'execute' | 'close' | 'none';
 
@@ -73,19 +74,15 @@ export function CommandPicker() {
   const executeCommand = useCallback(
     (cmd: QuickCommand) => {
       if (!project) return;
-      const tabs = project.tabs;
-
-      let tabId: string | undefined;
-      if (cmd.target === 'current') {
-        tabId = tabs[project.activeTabIndex]?.id;
+      const target = resolveQuickCommandTarget(project, cmd.target);
+      if (target.ok) {
+        window.shelfApi.pty.input(target.tabId, cmd.command + '\n');
       } else {
-        // Match by tab label
-        const matched = tabs.find((t) => t.label === cmd.target);
-        tabId = matched?.id;
-      }
-
-      if (tabId) {
-        window.shelfApi.pty.input(tabId, cmd.command + '\n');
+        console.warn(
+          `[quick-command] refused project=${project.id} label=${JSON.stringify(cmd.label)} `
+          + `target=${JSON.stringify(cmd.target)} reason=${target.reason}`,
+        );
+        showProjectNotice({ projectId: project.id, message: target.message });
       }
       closeCommandPicker();
     },

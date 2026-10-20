@@ -1,5 +1,6 @@
 import { test, expect, readActiveTerminalText } from './helpers';
 import { CLAUDE_PROVIDER } from '../src/shared/agent-providers';
+import { IPC } from '../src/shared/ipc-channels';
 import fs from 'fs';
 import path from 'path';
 
@@ -282,6 +283,49 @@ test('Save to Default preserves Terminal, Web, and Agent runtime kinds', async (
   const duplicateAction = page.locator('.context-menu-item', { hasText: 'Already saved as Claude' });
   await expect(duplicateAction).toBeDisabled();
   await expect(duplicateAction).toHaveAttribute('title', 'Claude already starts this Agent provider');
+});
+
+test('Quick Commands list only Terminal targets and visibly refuse the current Agent tab', async ({ shelfApp: { app, page } }) => {
+  await ensureConnected(page);
+  const projectItem = page.locator('.sidebar-item').first();
+  await projectItem.click({ button: 'right' });
+  await page.locator('.context-menu-item', { hasText: 'Edit' }).click();
+  const panel = page.locator('.project-edit-panel');
+
+  await panel.locator('.default-tab-add', { hasText: 'Add Agent' }).click();
+  await panel.locator('.default-tab-add', { hasText: 'Add Web' }).click();
+  await panel.locator('.default-tab-add', { hasText: 'Add Command' }).click();
+  const commandRow = panel.locator('.quick-command-row');
+  await commandRow.locator('.quick-command-label').fill('Run checks');
+  await commandRow.locator('.quick-command-cmd').fill('echo must-not-reach-pty');
+  await expect(commandRow.locator('.quick-command-target option')).toHaveText([
+    'Current tab',
+    'Terminal',
+  ]);
+  await panel.locator('.project-edit-footer .conn-btn-next').click();
+  await expect(panel).not.toBeVisible({ timeout: 3_000 });
+
+  await page.locator('.tab-add').click();
+  await page.locator('.context-menu-item', { hasText: 'Agent (Claude)' }).click();
+  await expect(page.locator('.agent-view:visible')).toBeVisible({ timeout: 5_000 });
+
+  await app.evaluate(({ ipcMain }, channel) => {
+    (globalThis as any).__quickCommandPtyInputs = 0;
+    ipcMain.prependListener(channel, () => {
+      (globalThis as any).__quickCommandPtyInputs++;
+    });
+  }, IPC.PTY_INPUT);
+
+  await page.keyboard.press(`${modifier}+p`);
+  const picker = page.locator('.command-picker');
+  await expect(picker).toBeVisible({ timeout: 3_000 });
+  await picker.locator('.command-picker-item', { hasText: 'Run checks' }).click();
+  await expect(picker).not.toBeVisible();
+  await expect(page.locator('.project-notice-banner')).toHaveText(
+    /Current tab "Claude" is an Agent tab, not a Terminal\./,
+  );
+  const ptyInputs = await app.evaluate(() => (globalThis as any).__quickCommandPtyInputs);
+  expect(ptyInputs).toBe(0);
 });
 
 // ── Sidebar ──
