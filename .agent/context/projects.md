@@ -67,7 +67,7 @@ related:
 
 ## projects#6 — Project documents load through a versioned canonical boundary  ·  [Decision]
 
-**Decision:** Only the main project config persistence boundary sees raw `projects.json`. It distinguishes opaque file access from format conversion, loads supported legacy v0 arrays or current v1 envelopes into the same canonical `Project[]`, and always formats new writes as v1. Load never performs migration writes.
+**Decision:** Only the main project config persistence boundary sees raw `projects.json`. It distinguishes opaque file access from format conversion, loads supported legacy v0 arrays, v1 envelopes, or current v2 envelopes into the same canonical `Project[]`, and always formats new writes as v2. Load never performs migration writes.
 
 **Reason:** Central conversion prevents parsing, defaults, provider compatibility, and schema guesses from spreading across bootstrap and consumers. Version dispatch makes unsupported future formats deterministic. Delaying write-back until a real project mutation avoids changing user files merely by opening the app.
 
@@ -78,6 +78,7 @@ related:
 - Missing file is canonical empty; an existing empty file is malformed input.
 - Unknown provider ids are compatibility data and must round-trip even when the live registry cannot execute them.
 - A nonempty persisted collection becoming empty is legal, but the original opaque file is backed up before atomic replacement.
+- v0/v1 startup fields are decoder-only input. Conversion materializes a non-empty ordered tab list, interprets a non-null legacy provider as an Agent startup row regardless of the old boolean, and removes both legacy fields from the canonical object.
 
 ## projects#7 — Durable mutation, refresh, and cleanup have separate recovery semantics  ·  [Decision]
 
@@ -126,3 +127,21 @@ The focused input owns keyboard handling. Up/Down moves a transient candidate wi
 - Search navigation must use real visual project indices rather than indices from a separately filtered collection.
 - The input key handler must defer ArrowUp, ArrowDown, Enter, and Escape while IME composition is active; see `keybindings-shell#6`.
 - Icon toggle and Escape restore prior focus, while activation delegates focus to the destination project's existing view lifecycle.
+
+## projects#10 — One ordered typed list owns project startup tabs  ·  [Decision]
+
+**Decision:** `Project.defaultTabs` is the only connect-time startup source and is always non-empty. Terminal, Web, and Agent are disjoint template variants in one ordered list; connect creates each template in order. Agent templates carry an explicit registry-resolved provider and must be unique by provider within a project. Project Settings allows temporary duplicate selections but validates them only on Save, keeps unavailable persisted provider ids recoverable, and never uses a separate Agent default or startup boolean.
+
+Runtime `Save to Default` preserves the actual tab variant and its kind-specific payload. Manual Agent creation always carries an explicit provider. Neither path guesses a provider or falls back to a project-level default.
+
+**Reason:** One list directly represents what connect will open, preserves ordering across all tab kinds, and removes contradictory state between an Agent provider field, an auto-open flag, and the existing tab templates.
+
+**Do not change casually because:** Reintroducing a dormant default provider, implicit Terminal, or separate Agent-open switch creates a second startup authority. Multiple same-provider Agent tabs remain out of scope because session ids, preferences, and runtime uniqueness are provider-keyed.
+
+## projects#11 — Quick Commands execute only against Terminal tabs  ·  [Decision]
+
+**Decision:** Project Settings offers named Quick Command targets only from Terminal startup templates. Runtime execution validates both named targets and `Current tab`; it sends PTY input only to a Terminal. Agent, Web, missing, and stale targets are refused with a project-visible reason and diagnostic context. Stored stale targets are preserved rather than silently rewritten, including when a Worktree startup override removes their named tab.
+
+**Reason:** A shell command has no defined meaning as an Agent prompt or Web action. Validating immediately before PTY input protects both current-tab changes and configuration/runtime drift while preserving user data for explicit repair.
+
+**Do not change casually because:** UI-only filtering is insufficient: Worktree inheritance, renamed/removed tabs, and legacy configuration can still produce stale runtime targets. Execution must retain the Terminal type guard.

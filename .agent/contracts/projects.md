@@ -29,8 +29,6 @@ interface Project {
   readonly parentProjectId: ProjectId | null;
   readonly worktreeBranch: string | null;
   readonly baseBranch: string | null;
-  readonly defaultAgentProvider: string | null;
-  readonly openAgentOnConnect: boolean;
   readonly agentSessionIds: Readonly<Record<string, string>>;
   readonly agentPrefs: Readonly<Record<string, ReadonlyDeep<AgentPrefs>>>;
 }
@@ -39,6 +37,8 @@ interface Project {
 `ProjectCreateInput` is the same create-domain input without `id` or `agentSessionIds`, and with fields that receive canonical defaults marked optional. Project ids are opaque strings created only by the main repository.
 
 Unknown provider ids remain valid stored strings and record keys. Runtime behavior must resolve them through the live provider registry; the config loader/formatter must not discard them.
+
+`defaultTabs` is the sole connect-time startup source. Its non-empty ordered list contains disjoint Terminal, Web, and Agent templates from `src/shared/types.ts`; Agent templates require a provider string that is unique within the list. Connect creates every valid template in order without an implicit Terminal or Agent fallback. New-project creation materializes one plain Terminal only when the caller omits the field.
 
 ## Main repository
 
@@ -134,13 +134,21 @@ Events.DISCONNECT_PROJECT // (projectId: ProjectId)
 Events.TOGGLE_SPLIT      // (projectId: ProjectId)
 Events.CREATE_WORKTREE   // (projectId: ProjectId, prefill?)
 Events.WORKTREE_CLOSE    // (projectId: ProjectId, kind)
-Events.NEW_AGENT_TAB     // (projectId: ProjectId, provider?)
+Events.NEW_AGENT_TAB     // (projectId: ProjectId, provider: AgentProvider)
 Events.NEW_WEB_TAB       // (projectId: ProjectId, url?)
 ```
 
 Components emit these intents. The App-side coordinator is the only renderer owner of the project repository client. Tab indices are allowed only when scoped under an explicit current project id.
 
 Folder Picker emits `OPEN_EXISTING_PROJECT` for the first effective-target match in current reconciled order and otherwise emits `ADD_PROJECT`. The open-existing handler validates the id, activates the project, and emits `CONNECT_PROJECT` only when `tabs.length === 0`. `ADD_PROJECT` and its optional `onSettled` result contract remain creation-only and unchanged.
+
+Manual Agent creation uses the required-provider `emitNewAgentTab` / `onNewAgentTab` wrappers. The App boundary validates the value against the live registry and refuses missing or invalid input with diagnostic context; it never resolves a provider from project configuration.
+
+## Runtime tab defaults and Quick Commands
+
+`Save to Default` appends the runtime tab's actual template variant: Terminal command, Web URL, or Agent provider, always retaining the runtime label and color. An Agent provider already present in `defaultTabs` cannot be appended again or mutate the existing entry.
+
+Quick Command named targets are offered only from Terminal templates. Execution resolves `Current tab` or the first matching named runtime tab and sends PTY input only when that tab is Terminal. Agent, Web, missing, and stale targets are refused before IPC with a project-visible explanation and diagnostic context; stored stale targets remain intact for explicit user repair.
 
 ## Feature-note directory binding
 
