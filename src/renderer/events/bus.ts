@@ -1,3 +1,5 @@
+import type { AgentProvider } from '@shared/types';
+
 // Untyped event bus shared by the renderer. Legacy string-named events
 // (CLOSE_TAB / NEW_TAB / etc.) and typed agent events both ride on the
 // same Map<string, Set<handler>>. Typed wrappers live in ./types.ts.
@@ -40,11 +42,19 @@ export const Events = {
   WORKTREE_CLOSE: 'worktree-close',   // (projectId, kind: 'finish' | 'abandon')
   WORKTREE_FINISH_COMPLETED: 'worktree-finish-completed', // ({ subProjectId, parentProjectId, featureBranch, targetBranch })
   OPEN_PM: 'open-pm',                 // ()
-  NEW_AGENT_TAB: 'new-agent-tab',     // (projectId, provider?)
+  NEW_AGENT_TAB: 'new-agent-tab',     // (projectId, provider)
   NEW_WEB_TAB: 'new-web-tab',         // (projectId, url?) — url pre-navigates the tab
   EXTERNAL_URL_INTENT_DECIDE: 'external-url-intent-decide', // (requestId, decision)
   EXTERNAL_URL_INTENT_REQUEST: 'external-url-intent-request', // (input)
 } as const;
+
+export function onNewAgentTab(handler: (projectId: string, provider: AgentProvider) => void) {
+  return on(Events.NEW_AGENT_TAB, handler);
+}
+
+export function emitNewAgentTab(projectId: string, provider: AgentProvider) {
+  emit(Events.NEW_AGENT_TAB, projectId, provider);
+}
 
 // Test helper — clears every registered handler. Tests run in shared
 // module state (Vitest hoists imports), so a failure mid-test can leak

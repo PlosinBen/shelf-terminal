@@ -9,7 +9,7 @@ import {
   setTabColor,
   toggleRightSidebar,
 } from '../store';
-import { emit, Events } from '../events';
+import { emit, emitNewAgentTab, Events } from '../events';
 import { visibleAgentProviderEntries } from '@shared/agent-providers';
 import { PaperPlaneIcon } from './icons';
 import { runtimeTabToTemplate } from '../tab-default-template';
@@ -322,7 +322,7 @@ export function TabBar() {
               key={id}
               className="context-menu-item"
               disabled={project?.tabs.some((t) => t.type === 'agent' && t.provider === id)}
-              onClick={() => { if (projectId) emit(Events.NEW_AGENT_TAB, projectId, id); setAddMenu(null); }}
+              onClick={() => { if (projectId) emitNewAgentTab(projectId, id); setAddMenu(null); }}
             >
               Agent ({meta.label})
             </button>

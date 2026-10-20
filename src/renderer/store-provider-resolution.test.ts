@@ -1,14 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CODEX_PROVIDER } from '@shared/agent-providers';
-import type { AgentProvider } from '@shared/types';
 import type { Project } from '@shared/projects';
 import * as store from './store';
-
-type ProviderResolutionStore = {
-  resolveAgentProviderForOpen(projectId: string, explicitProvider?: string): AgentProvider | null;
-};
-
-const providerStore = store as typeof store & ProviderResolutionStore;
 
 function config(): Project {
   return {
@@ -30,7 +23,7 @@ function config(): Project {
   };
 }
 
-describe('store provider resolution', () => {
+describe('store provider validation', () => {
   beforeEach(() => {
     vi.stubGlobal('window', {
       shelfApi: {
@@ -48,22 +41,22 @@ describe('store provider resolution', () => {
   it('uses an explicitly requested registry-valid provider', () => {
     store.setProjects([config()]);
 
-    expect(providerStore.resolveAgentProviderForOpen('project-1', CODEX_PROVIDER)).toBe(CODEX_PROVIDER);
+    expect(store.validateAgentProviderForOpen('project-1', CODEX_PROVIDER)).toBe(CODEX_PROVIDER);
   });
 
   it('returns no provider when explicit intent omits the provider', () => {
     store.setProjects([config()]);
 
-    expect(providerStore.resolveAgentProviderForOpen('project-1')).toBeNull();
+    expect(store.validateAgentProviderForOpen('project-1', undefined)).toBeNull();
   });
 
   it('returns no provider for an unknown explicit provider', () => {
     store.setProjects([config()]);
 
-    expect(providerStore.resolveAgentProviderForOpen('project-1', 'retired-provider')).toBeNull();
+    expect(store.validateAgentProviderForOpen('project-1', 'retired-provider')).toBeNull();
   });
 
   it('returns no provider for an unknown project', () => {
-    expect(providerStore.resolveAgentProviderForOpen('missing', CODEX_PROVIDER)).toBeNull();
+    expect(store.validateAgentProviderForOpen('missing', CODEX_PROVIDER)).toBeNull();
   });
 });

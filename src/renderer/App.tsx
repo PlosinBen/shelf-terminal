@@ -25,13 +25,13 @@ import { McpView } from './components/McpView';
 import { BackupView } from './components/BackupView';
 import { QuickNoteOverlay } from './components/QuickNoteOverlay';
 import { useKeybindings } from './hooks/useKeybindings';
-import { useStore, setSettings, setUpdateStatus, addTab, addTerminalTabForSource, setActiveTab, removeTab, setSplitTab, clearUnread, setInvalidProjects, setPmActive, setConnectionHealth, setActiveProjectById, getActiveProjectId, getProjectById, getProjectViews, getProjectIndexById, getCanonicalProjectById, reconcileProjects, listStableProjectViews, showProjectNotice, resolveAgentProviderForOpen, projectDisplayLabel, enqueueExternalUrlIntent, removeExternalUrlIntent, beginExternalUrlIntentResolution, setExternalUrlIntentError } from './store';
+import { useStore, setSettings, setUpdateStatus, addTab, addTerminalTabForSource, setActiveTab, removeTab, setSplitTab, clearUnread, setInvalidProjects, setPmActive, setConnectionHealth, setActiveProjectById, getActiveProjectId, getProjectById, getProjectViews, getProjectIndexById, getCanonicalProjectById, reconcileProjects, listStableProjectViews, showProjectNotice, validateAgentProviderForOpen, projectDisplayLabel, enqueueExternalUrlIntent, removeExternalUrlIntent, beginExternalUrlIntentResolution, setExternalUrlIntentError } from './store';
 import type { ConnectionHealth } from '@shared/types';
 import type { ExternalUrlIntentDecision, ExternalUrlIntentInput } from '@shared/external-url-intent';
 import type { Project, ProjectCreateInput } from '@shared/projects';
 import { disposeTerminal } from './components/TerminalView';
 import { teardownTab } from './tab-teardown';
-import { on, emit, Events, onAgent, onBackup } from './events';
+import { on, emit, Events, onAgent, onBackup, onNewAgentTab } from './events';
 import { bindAgentIPCGroup } from './events';
 import { bindAgentStoreSubscriptions } from './agentTabSubscriptions';
 import { setAuthError, setInMemoryMax, setSaveThrottleMs } from './agentTabStore';
@@ -469,11 +469,11 @@ export function App() {
       addTab(projectIndex);
     });
 
-    const offNewAgentTab = on(Events.NEW_AGENT_TAB, (projectId: string, provider?: import('@shared/types').AgentProvider) => {
+    const offNewAgentTab = onNewAgentTab((projectId, provider) => {
       const projectIndex = getProjectIndexById(projectId);
       const proj = getProjectById(projectId);
       if (!proj || projectIndex === -1) return;
-      const resolvedProvider = resolveAgentProviderForOpen(projectId, provider);
+      const resolvedProvider = validateAgentProviderForOpen(projectId, provider);
       if (!resolvedProvider) return;
       addTab(projectIndex, undefined, undefined, undefined, 'agent', resolvedProvider);
     });
@@ -576,7 +576,7 @@ export function App() {
           return;
         }
         if (template.kind === 'agent') {
-          const provider = resolveAgentProviderForOpen(projectId, template.provider);
+          const provider = validateAgentProviderForOpen(projectId, template.provider);
           if (provider) addTab(projectIndex, template.name, undefined, template.color, 'agent', provider);
           return;
         }
