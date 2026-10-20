@@ -150,6 +150,42 @@ test('project edit default tabs can add and remove', async ({ shelfApp: { page }
   await page.locator('.settings-close').click();
 });
 
+test('project edit adds Agent startup rows and rejects duplicate providers only on Save', async ({ shelfApp: { page } }) => {
+  await ensureConnected(page);
+
+  const item = page.locator('.sidebar-item').first();
+  await item.click({ button: 'right' });
+  await page.locator('.context-menu-item', { hasText: 'Edit' }).click();
+  const editPanel = page.locator('.project-edit-panel');
+  await expect(editPanel).toBeVisible({ timeout: 3_000 });
+
+  const addAgent = editPanel.locator('.default-tab-add', { hasText: 'Add Agent' });
+  await addAgent.click();
+  await addAgent.click();
+  const agentRows = editPanel.locator('.default-tab-row', {
+    has: page.locator('.default-tab-kind-agent'),
+  });
+  await expect(agentRows).toHaveCount(2);
+  const firstProvider = await agentRows.nth(0).locator('.default-tab-provider').inputValue();
+  await expect(agentRows.nth(1).locator('.default-tab-provider')).toHaveValue(firstProvider);
+
+  await editPanel.locator('.project-edit-footer .conn-btn-next').click();
+  await expect(editPanel).toBeVisible();
+  await expect(editPanel.locator('.default-tabs-error')).toContainText('selected more than once');
+
+  await agentRows.nth(1).locator('.default-tab-provider').selectOption('copilot');
+  await agentRows.nth(1).locator('.default-tab-name').fill('Copilot');
+  await editPanel.locator('.project-edit-footer .conn-btn-next').click();
+  await expect(editPanel).not.toBeVisible({ timeout: 3_000 });
+
+  await item.click({ button: 'right' });
+  await page.locator('.context-menu-item', { hasText: 'Disconnect' }).click();
+  await page.locator('.connect-prompt').click();
+  await expect(page.locator('.tab-bar .tab')).toHaveCount(3, { timeout: 8_000 });
+  await expect(page.locator('.tab-bar .tab', { hasText: 'Claude' })).toHaveCount(1);
+  await expect(page.locator('.tab-bar .tab', { hasText: 'Copilot' })).toHaveCount(1);
+});
+
 test('project edit: a web default tab is added, persists, and opens as a web tab on connect', async ({ shelfApp: { page } }) => {
   await ensureConnected(page);
 

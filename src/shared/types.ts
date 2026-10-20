@@ -255,15 +255,29 @@ export type Connection = LocalConnection | SSHConnection | WSLConnection | Docke
 
 // ── Project domain primitives ──
 
-export interface TabTemplate {
+interface BaseTabTemplate {
   name: string;
-  cmd?: string;
   color?: string;
-  /** Tab kind. Absent = terminal (back-compat with pre-existing configs). */
-  kind?: 'terminal' | 'web';
-  /** Web tabs only: optional starting URL to open on connect. */
+}
+
+export interface TerminalTabTemplate extends BaseTabTemplate {
+  /** Absent remains the canonical serialized terminal representation. */
+  kind?: 'terminal';
+  cmd?: string;
+}
+
+export interface WebTabTemplate extends BaseTabTemplate {
+  kind: 'web';
   url?: string;
 }
+
+export interface AgentTabTemplate extends BaseTabTemplate {
+  kind: 'agent';
+  /** Opaque persisted id; runtime validates it against the live registry. */
+  provider: string;
+}
+
+export type TabTemplate = TerminalTabTemplate | WebTabTemplate | AgentTabTemplate;
 
 export interface QuickCommand {
   label: string;

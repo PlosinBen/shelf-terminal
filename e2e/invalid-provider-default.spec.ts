@@ -6,7 +6,7 @@ import path from 'node:path';
 const PROJECT_ID = 'stale-provider-project';
 const STALE_PROVIDER = 'codex-offical';
 
-test.describe('invalid persisted provider default', () => {
+test.describe('unavailable persisted startup provider', () => {
   let app: ElectronApplication;
   let page: Page;
   let userDataDir: string;
@@ -38,7 +38,7 @@ test.describe('invalid persisted provider default', () => {
     fs.rmSync(repo, { recursive: true, force: true });
   });
 
-  test('does not expose, inherit, or implicitly open the stale provider', async () => {
+  test('preserves and displays the stale provider without opening it', async () => {
     await page.locator('.sidebar-item').click();
     const connect = page.locator('.connect-prompt');
     if (await connect.isVisible().catch(() => false)) await connect.click();
@@ -48,24 +48,29 @@ test.describe('invalid persisted provider default', () => {
     await page.locator('.sidebar-item').click({ button: 'right' });
     await page.locator('.context-menu-item', { hasText: 'Edit' }).click();
     const edit = page.locator('.project-edit-panel');
-    const provider = edit.locator('.project-edit-field').filter({ hasText: 'Default provider for new agent tabs' }).locator('select');
-    await expect(provider).toHaveValue('');
-    await expect(provider.locator(`option[value="${STALE_PROVIDER}"]`)).toHaveCount(0);
+    const agentRow = edit.locator('.default-tab-row', { has: page.locator('.default-tab-kind-agent') });
+    const provider = agentRow.locator('.default-tab-provider');
+    await expect(provider).toHaveValue(STALE_PROVIDER);
+    await expect(provider.locator(`option[value="${STALE_PROVIDER}"]`)).toContainText('unavailable');
     await edit.locator('.settings-input').first().fill('Renamed Project');
     await edit.locator('.project-edit-footer .conn-btn-next').click();
 
     await expect.poll(() => {
       const document = JSON.parse(fs.readFileSync(path.join(userDataDir, 'projects.json'), 'utf-8'));
       const projects = Array.isArray(document) ? document : document.projects;
-      return projects[0]?.defaultAgentProvider;
-    }).toBe(STALE_PROVIDER);
+      return {
+        schemaVersion: Array.isArray(document) ? 0 : document.schemaVersion,
+        provider: projects[0]?.defaultTabs?.find((tab: any) => tab.kind === 'agent')?.provider,
+        hasLegacyProvider: Object.hasOwn(projects[0] ?? {}, 'defaultAgentProvider'),
+      };
+    }).toEqual({ schemaVersion: 2, provider: STALE_PROVIDER, hasLegacyProvider: false });
 
     await page.locator('.sidebar-item').click({ button: 'right' });
     await page.locator('.context-menu-item', { hasText: 'New Worktree' }).click();
     const worktree = page.locator('.worktree-dialog');
-    await expect(worktree.locator('.worktree-select')).toHaveValue('');
+    await expect(worktree.locator('.worktree-select')).toHaveCount(0);
     await worktree.locator('input').first().fill('provider-proof');
-    await expect(worktree.locator('.project-edit-footer .conn-btn-next')).toBeDisabled();
+    await expect(worktree.locator('.project-edit-footer .conn-btn-next')).toBeEnabled();
     await worktree.locator('.conn-btn-cancel').click();
 
     await page.locator('.tab-add').click({ button: 'right' });

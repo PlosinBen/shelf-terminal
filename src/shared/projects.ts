@@ -27,8 +27,6 @@ export interface Project {
   readonly parentProjectId: ProjectId | null;
   readonly worktreeBranch: string | null;
   readonly baseBranch: string | null;
-  readonly defaultAgentProvider: string | null;
-  readonly openAgentOnConnect: boolean;
   readonly agentSessionIds: Readonly<Record<string, string>>;
   readonly agentPrefs: Readonly<Record<string, ReadonlyDeep<AgentPrefs>>>;
 }
@@ -46,8 +44,6 @@ export interface ProjectCreateInput {
   readonly parentProjectId?: ProjectId | null;
   readonly worktreeBranch?: string | null;
   readonly baseBranch?: string | null;
-  readonly defaultAgentProvider?: string | null;
-  readonly openAgentOnConnect?: boolean;
   readonly agentPrefs?: Readonly<Record<string, ReadonlyDeep<AgentPrefs>>>;
 }
 

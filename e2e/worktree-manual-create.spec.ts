@@ -162,8 +162,7 @@ test.describe('user-initiated worktree create', () => {
     await expect(dialog.locator('.worktree-target')).toHaveText('WT Base @ main');
     await expect(dialog.locator('.worktree-note-picker-label', { hasText: 'Feature note' }))
       .toContainText('.agent/features');
-    await expect(dialog.locator('.worktree-note-picker').filter({ hasText: 'Agent provider' }).locator('select'))
-      .toHaveValue(CLAUDE_PROVIDER);
+    await expect(dialog.locator('.worktree-note-picker', { hasText: 'Agent provider' })).toHaveCount(0);
 
     // Every note is pickable regardless of status; rows are filename-first and
     // keep status on the same line as the filename.
@@ -192,7 +191,7 @@ test.describe('user-initiated worktree create', () => {
       schemaVersion: number;
       projects: Array<{ parentProjectId?: string; featureNoteDir?: string }>;
     };
-    expect(document.schemaVersion).toBe(1);
+    expect(document.schemaVersion).toBe(2);
     expect(document.projects.find((project) => project.parentProjectId === PROJECT_ID)?.featureNoteDir)
       .toBe('.agent/features');
 
