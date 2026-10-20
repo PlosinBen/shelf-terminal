@@ -55,6 +55,9 @@ const UNSUPPORTED_APP_SERVER_SLASH_COMMANDS = new Set(['ps', 'stop', 'clean']);
 const CODEX_STALE_THREAD_NOTICE = 'Previous Codex thread was unavailable; started a new thread.';
 const CODEX_INTERRUPT_GRACE_MS = 1_000;
 const CODEX_TURN_COMPLETION_LOG_LIMIT = 2_000;
+const CODEX_RATE_LIMIT_LOG_LIMIT = 2_000;
+const CODEX_RATE_LIMIT_BUCKET_LIMIT = 20;
+const HTTP_TOO_MANY_REQUESTS = 429;
 const CODEX_TURN_STATUS = {
   completed: 'completed',
   interrupted: 'interrupted',
@@ -148,7 +151,7 @@ export function createCodexBackend(deps: CodexBackendDeps = {}): ServerBackend {
           reasoningByItemId.clear();
         }
         if (method === 'turn/completed') {
-          handleTurnCompleted(params);
+          handleTurnCompleted(client, params);
           return;
         }
         if (method === 'thread/tokenUsage/updated') logTokenUsageUpdate(params);
@@ -194,7 +197,7 @@ export function createCodexBackend(deps: CodexBackendDeps = {}): ServerBackend {
     }
   }
 
-  function handleTurnCompleted(params: unknown): void {
+  function handleTurnCompleted(client: CodexAppServerLike, params: unknown): void {
     const payload = asRecord(params);
     const turn = asRecord(payload?.turn);
     const threadId = stringValue(payload?.threadId ?? payload?.thread_id) ?? '<unknown>';
@@ -215,6 +218,10 @@ export function createCodexBackend(deps: CodexBackendDeps = {}): ServerBackend {
       serverLog('error', 'codex-app-server', summary);
       const message = stringValue(error?.message) ?? 'app-server turn failed without an error message';
       activeSend?.({ type: 'error', error: `codex: ${redactCodexAccountText(message)}` });
+      if (isRateLimitError(error)) {
+        // Diagnostics must not delay turn settlement or change retry behavior.
+        void logFreshRateLimitSnapshot(client, threadId, turnId);
+      }
     } else {
       serverLog('error', 'codex-app-server', summary);
       activeSend?.({
@@ -224,6 +231,22 @@ export function createCodexBackend(deps: CodexBackendDeps = {}): ServerBackend {
     }
 
     resolveActiveTurn?.();
+  }
+
+  async function logFreshRateLimitSnapshot(
+    client: CodexAppServerLike,
+    threadId: string,
+    turnId: string,
+  ): Promise<void> {
+    try {
+      const raw = await client.request('account/rateLimits/read');
+      const buckets = summarizeRateLimitBucketsForLog(raw);
+      const encoded = redactCodexAccountText(formatJsonForLog(buckets)).slice(0, CODEX_RATE_LIMIT_LOG_LIMIT);
+      serverLog('warn', 'codex-app-server', `rate-limit snapshot thread=${threadId} turn=${turnId} buckets=${encoded}`);
+    } catch (err) {
+      const message = redactCodexAccountText((err as Error)?.message ?? String(err)).slice(0, CODEX_RATE_LIMIT_LOG_LIMIT);
+      serverLog('warn', 'codex-app-server', `rate-limit snapshot read failed thread=${threadId} turn=${turnId} error=${message}`);
+    }
   }
 
   function translateReasoningDelta(params: unknown): Parameters<SendFn>[0] | null {
@@ -1069,6 +1092,54 @@ function formatJsonForLog(value: unknown): string {
   } catch {
     return '[unserializable]';
   }
+}
+
+function isRateLimitError(error: Record<string, unknown> | null): boolean {
+  if (!error) return false;
+  const info = asRecord(error.codexErrorInfo ?? error.codex_error_info);
+  const attempts = asRecord(info?.responseTooManyFailedAttempts ?? info?.response_too_many_failed_attempts);
+  const status = numberValue(attempts?.httpStatusCode ?? attempts?.http_status_code);
+  if (status === HTTP_TOO_MANY_REQUESTS) return true;
+  const message = stringValue(error.message);
+  return !!message && /(?:\b429\b|too many requests)/i.test(message);
+}
+
+function summarizeRateLimitBucketsForLog(raw: unknown): Record<string, unknown>[] {
+  const container = asRecord(raw);
+  if (!container) return [];
+  const byId = asRecord(container.rateLimitsByLimitId ?? container.rate_limits_by_limit_id);
+  let entries: Array<[string, unknown]>;
+  if (byId) {
+    entries = Object.entries(byId);
+  } else {
+    const single = asRecord(container.rateLimits ?? container.rate_limits);
+    if (!single) return [];
+    entries = [[stringValue(single.limitId ?? single.limit_id) ?? 'codex', single]];
+  }
+
+  return entries.slice(0, CODEX_RATE_LIMIT_BUCKET_LIMIT).flatMap(([id, value]) => {
+    const bucket = asRecord(value);
+    if (!bucket) return [];
+    const primary = asRecord(bucket.primary) ?? bucket;
+    const limitId = stringValue(bucket.limitId ?? bucket.limit_id) ?? id;
+    const limitName = stringValue(bucket.limitName ?? bucket.limit_name);
+    const usedPercent = numberValue(primary.usedPercent ?? primary.used_percent);
+    const windowDurationMins = numberValue(primary.windowDurationMins ?? primary.window_duration_mins);
+    const resetsAt = scalarValue(primary.resetsAt ?? primary.resets_at);
+    const rateLimitReachedType = stringValue(bucket.rateLimitReachedType ?? bucket.rate_limit_reached_type);
+    return [{
+      limitId,
+      ...(limitName ? { limitName } : {}),
+      ...(usedPercent != null ? { usedPercent } : {}),
+      ...(windowDurationMins != null ? { windowDurationMins } : {}),
+      ...(resetsAt != null ? { resetsAt } : {}),
+      ...(rateLimitReachedType ? { rateLimitReachedType } : {}),
+    }];
+  });
+}
+
+function scalarValue(value: unknown): string | number | null {
+  return typeof value === 'string' || typeof value === 'number' ? value : null;
 }
 
 function asArray(value: unknown): unknown[] {
