@@ -44,6 +44,9 @@ Visual project order + runtime tab presence + transient filter mode
   -> visual-group connectivity
   -> visible real project indices
   -> sidebar rows / directional project navigation
+       -> displayed row labels + explicit search query
+       -> transient matches + candidate navigation
+       -> explicit candidate activation -> active project
 ```
 
 ## Boundaries
@@ -56,4 +59,4 @@ The renderer repository client is a stateless operation adapter private to the A
 
 The renderer project store owns runtime/reactive state: tabs, active tab, split tab, folder validity, active/editing project identity, notices, and connection health. Runtime state is preserved by project id when a fresh canonical collection is reconciled. Folder selection compares effective targets against current project views and emits either an open-existing or add intent; App owns activation, conditional connection, and repository side effects. Components do not know persisted schema or call project-config operations.
 
-Sidebar visibility is a projection over authoritative visual order, not a second project collection. Stable mounted-view order is deterministic by project identity so reorder, insertion, or deletion cannot remount unaffected terminal, agent, or web subtrees.
+Sidebar visibility is a projection over authoritative visual order, not a second project collection. Project Search operates only on that projection and its displayed row labels; it does not remove or reorder rows, and its transient candidate does not become the active project until explicit activation. Stable mounted-view order is deterministic by project identity so reorder, insertion, or deletion cannot remount unaffected terminal, agent, or web subtrees.
