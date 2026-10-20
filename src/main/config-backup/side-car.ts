@@ -2,7 +2,7 @@ import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 import { app } from 'electron';
-import simpleGit, { type SimpleGit } from 'simple-git';
+import { simpleGit, type SimpleGit } from 'simple-git';
 import { log } from '@shared/logger';
 import { BACKUP_BRANCH_PREFIX } from '@shared/config-backup';
 

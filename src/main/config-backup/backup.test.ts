@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import simpleGit from 'simple-git';
+import { simpleGit } from 'simple-git';
 
 let userDataDir: string;
 
@@ -71,7 +71,7 @@ async function mutateRemoteBranch(
 }
 
 async function remoteHead(branch: string): Promise<string> {
-  return (await simpleGit().raw(['--git-dir', bareRemote, 'rev-parse', `refs/heads/${branch}`])).trim();
+  return (await simpleGit(bareRemote).revparse([`refs/heads/${branch}`])).trim();
 }
 
 beforeEach(async () => {
