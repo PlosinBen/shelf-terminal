@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { CODEX_PROVIDER } from '@shared/agent-providers';
@@ -6,10 +6,23 @@ import { CODEX_AUTH_DISPLAY_NAME } from '../codex-shared/auth';
 import { createCodexBackend } from './index';
 import type { LoginRpc } from '../codex-shared/app-server-login';
 import type { OutgoingMessage } from '../types';
+import { setLogSink, type ServerLogMessage } from '../../server-logger';
 
 interface RequestCall {
   method: string;
   params?: unknown;
+}
+
+function turnCompleted(
+  id: string,
+  status = 'completed',
+  error: Record<string, unknown> | null = null,
+  durationMs = 12,
+) {
+  return {
+    threadId: 'thread-1',
+    turn: { id, status, error, durationMs },
+  };
 }
 
 class FakeAppServer {
@@ -36,7 +49,7 @@ class FakeAppServer {
       this.fire('item/agentMessage/delta', { itemId: 'm1', delta: 'lo' });
       this.fire('item/completed', { item: { id: 'm1', type: 'agentMessage', text: 'hello' } });
       this.fire('thread/tokenUsage/updated', { tokenUsage: { total: { totalTokens: 129_200 }, last: { inputTokens: 129_000, totalTokens: 129_200 }, modelContextWindow: 258_400 } });
-      this.fire('turn/completed', { threadId: 'thread-1', turn: { id: 'turn-1' } });
+      this.fire('turn/completed', turnCompleted('turn-1'));
       return { turn: { id: 'turn-1' } } as T;
     }
     if (method === 'model/list') {
@@ -73,16 +86,16 @@ class FakeAppServer {
     if (method === 'account/logout') return {} as T;
     if (method === 'review/start') {
       this.fire('item/completed', { item: { id: 'review-1', type: 'agentMessage', text: 'reviewed' } });
-      this.fire('turn/completed', { threadId: 'thread-1', turn: { id: 'review-turn' } });
+      this.fire('turn/completed', turnCompleted('review-turn'));
       return { turn: { id: 'review-turn' } } as T;
     }
     if (method === 'thread/compact/start') {
       this.fire('item/completed', { item: { id: 'compact-1', type: 'contextCompaction' } });
-      this.fire('turn/completed', { threadId: 'thread-1', turn: { id: 'compact-turn' } });
+      this.fire('turn/completed', turnCompleted('compact-turn'));
       return { turn: { id: 'compact-turn' } } as T;
     }
     if (method === 'turn/interrupt') {
-      this.fire('turn/completed', { threadId: 'thread-1', turn: { id: 'turn-1' } });
+      this.fire('turn/completed', turnCompleted('turn-1', 'interrupted'));
       return {} as T;
     }
     throw new Error(`unexpected method ${method}`);
@@ -142,6 +155,13 @@ function restoreContext(lastSdkSessionId: string) {
 }
 
 describe('Codex official app-server backend lifecycle', () => {
+  let serverLogs: ServerLogMessage[];
+
+  beforeEach(() => {
+    serverLogs = [];
+    setLogSink((message) => serverLogs.push(message));
+  });
+
   it('starts a new app-server thread, starts a turn, streams deltas, persists thread id, reports ctx, and idles once', async () => {
     const app = new FakeAppServer();
     const backend = createCodexBackend({ createAppServer: () => app });
@@ -160,6 +180,87 @@ describe('Codex official app-server backend lifecycle', () => {
     expect(out).toContainEqual({ type: 'message', msgId: 'm1', msgType: 'reply', content: 'hello' });
     expect(out).toContainEqual({ type: 'status', state: 'streaming', contextUsage: { text: 'ctx: 50%', severity: 'warning' } });
     expect(out.filter((m) => m.type === 'status' && m.state === 'idle')).toHaveLength(1);
+    expect(serverLogs).toContainEqual(expect.objectContaining({
+      level: 'debug',
+      tag: 'codex-app-server',
+      msg: expect.stringContaining('turn/completed thread=thread-1 turn=turn-1 status=completed durationMs=12'),
+    }));
+  });
+
+  it('records interrupted turn completion without surfacing it as an execution error', async () => {
+    const app = new FakeAppServer({
+      'turn/start': () => {
+        app.fire('turn/started', { threadId: 'thread-1', turn: { id: 'turn-interrupted' } });
+        app.fire('turn/completed', turnCompleted('turn-interrupted', 'interrupted', null, 34));
+        return { turn: { id: 'turn-interrupted' } };
+      },
+    });
+    const backend = createCodexBackend({ createAppServer: () => app });
+    const out: OutgoingMessage[] = [];
+
+    await backend.query({ prompt: 'stop', cwd: '/repo' }, (message) => out.push(message));
+
+    expect(out.find((message) => message.type === 'error')).toBeUndefined();
+    expect(serverLogs).toContainEqual(expect.objectContaining({
+      level: 'debug',
+      tag: 'codex-app-server',
+      msg: expect.stringContaining('turn/completed thread=thread-1 turn=turn-interrupted status=interrupted durationMs=34'),
+    }));
+  });
+
+  it('surfaces and records failed turn completion details', async () => {
+    const app = new FakeAppServer({
+      'turn/start': () => {
+        app.fire('turn/started', { threadId: 'thread-1', turn: { id: 'turn-failed' } });
+        app.fire('turn/completed', turnCompleted('turn-failed', 'failed', {
+          message: 'upstream unavailable for user@example.com',
+          codexErrorInfo: { type: 'upstream' },
+          additionalDetails: 'request_id=req-123',
+        }, 56));
+        return { turn: { id: 'turn-failed' } };
+      },
+    });
+    const backend = createCodexBackend({ createAppServer: () => app });
+    const out: OutgoingMessage[] = [];
+
+    await backend.query({ prompt: 'fail', cwd: '/repo' }, (message) => out.push(message));
+
+    expect(out).toContainEqual({
+      type: 'error',
+      error: 'codex: upstream unavailable for <redacted-email>',
+    });
+    expect(serverLogs).toContainEqual(expect.objectContaining({
+      level: 'error',
+      tag: 'codex-app-server',
+      msg: expect.stringMatching(/turn\/completed thread=thread-1 turn=turn-failed status=failed durationMs=56 .*upstream unavailable for <redacted-email>.*request_id=req-123/),
+    }));
+  });
+
+  it('fails loud when turn completion omits a valid status', async () => {
+    const app = new FakeAppServer({
+      'turn/start': () => {
+        app.fire('turn/started', { threadId: 'thread-1', turn: { id: 'turn-malformed' } });
+        app.fire('turn/completed', {
+          threadId: 'thread-1',
+          turn: { id: 'turn-malformed', durationMs: 78, error: null },
+        });
+        return { turn: { id: 'turn-malformed' } };
+      },
+    });
+    const backend = createCodexBackend({ createAppServer: () => app });
+    const out: OutgoingMessage[] = [];
+
+    await backend.query({ prompt: 'malformed', cwd: '/repo' }, (message) => out.push(message));
+
+    expect(out).toContainEqual({
+      type: 'error',
+      error: 'codex: app-server turn/completed returned invalid status <missing>',
+    });
+    expect(serverLogs).toContainEqual(expect.objectContaining({
+      level: 'error',
+      tag: 'codex-app-server',
+      msg: expect.stringContaining('turn/completed thread=thread-1 turn=turn-malformed status=<missing> durationMs=78'),
+    }));
   });
 
   it('resumes a persisted app-server thread id and rejects resume id mismatch', async () => {
@@ -312,7 +413,7 @@ describe('Codex official app-server backend lifecycle', () => {
     const app = new FakeAppServer({
       'turn/start': async () => {
         await new Promise<void>((resolve) => { release = resolve; });
-        app.fire('turn/completed', { threadId: 'thread-1', turn: { id: 'turn-1' } });
+        app.fire('turn/completed', turnCompleted('turn-1'));
         return { turn: { id: 'turn-1' } };
       },
     });
@@ -408,7 +509,7 @@ describe('Codex official app-server backend lifecycle', () => {
         });
         await approval;
         await finish;
-        app.fire('turn/completed', { threadId: 'thread-1', turn: { id: 'turn-1' } });
+        app.fire('turn/completed', turnCompleted('turn-1'));
         return { turn: { id: 'turn-1' } };
       },
     });
@@ -459,7 +560,7 @@ describe('Codex official app-server backend lifecycle', () => {
             exitCode: 0,
           },
         });
-        app.fire('turn/completed', { threadId: 'thread-1', turn: { id: 'turn-1' } });
+        app.fire('turn/completed', turnCompleted('turn-1'));
         return { turn: { id: 'turn-1' } };
       },
     });
@@ -495,7 +596,7 @@ describe('Codex official app-server backend lifecycle', () => {
         app.fire('item/completed', {
           item: { id: 'reason-1', type: 'reasoning', summary: [], content: [] },
         });
-        app.fire('turn/completed', { threadId: 'thread-1', turn: { id: 'turn-1' } });
+        app.fire('turn/completed', turnCompleted('turn-1'));
         return { turn: { id: 'turn-1' } };
       },
     });
@@ -548,7 +649,7 @@ describe('Codex official app-server backend lifecycle', () => {
         });
         await permissionApproval;
         await finish;
-        app.fire('turn/completed', { threadId: 'thread-1', turn: { id: 'turn-1' } });
+        app.fire('turn/completed', turnCompleted('turn-1'));
         return { turn: { id: 'turn-1' } };
       },
     });
