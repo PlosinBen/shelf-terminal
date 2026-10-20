@@ -12,6 +12,7 @@ import {
 import { emit, Events } from '../events';
 import { visibleAgentProviderEntries } from '@shared/agent-providers';
 import { PaperPlaneIcon } from './icons';
+import { runtimeTabToTemplate } from '../tab-default-template';
 
 // PM Active (telegram listener) live badge — shown in the tab bar's top-right
 // only while active. Click opens the PM panel. Global, so it renders even with
@@ -221,6 +222,19 @@ export function TabBar() {
       {contextMenu && (() => {
         const tab = project.tabs[contextMenu.index];
         if (!tab) return null;
+        const template = runtimeTabToTemplate(tab);
+        const existingAgentTemplate = tab.type === 'agent' && tab.provider
+          ? project.defaultTabs.find((item) => item.kind === 'agent' && item.provider === tab.provider)
+          : undefined;
+        const saveDefaultDisabled = !template || Boolean(existingAgentTemplate);
+        const saveDefaultLabel = existingAgentTemplate
+          ? `Already saved as ${existingAgentTemplate.name}`
+          : 'Save to Default';
+        const saveDefaultTitle = !template
+          ? 'Cannot save an Agent tab without a provider'
+          : existingAgentTemplate
+            ? `${existingAgentTemplate.name} already starts this Agent provider`
+            : 'Add this tab to Tabs on Connect';
         return (
           <div
             ref={menuRef}
@@ -255,14 +269,21 @@ export function TabBar() {
             </button>
             <button
               className="context-menu-item"
+              disabled={saveDefaultDisabled}
+              title={saveDefaultTitle}
               onClick={() => {
+                if (!template) {
+                  console.error(`[tabs] cannot save malformed runtime tab ${tab.id} as a default`);
+                  return;
+                }
+                if (existingAgentTemplate) return;
                 emit(Events.UPDATE_PROJECT, project.id, {
-                  defaultTabs: [...project.defaultTabs, { name: tab.label, color: tab.color }],
+                  defaultTabs: [...project.defaultTabs, template],
                 });
                 setContextMenu(null);
               }}
             >
-              Save to Default
+              {saveDefaultLabel}
             </button>
             <div className="context-menu-divider" />
             <button

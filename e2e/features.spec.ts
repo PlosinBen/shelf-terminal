@@ -1,4 +1,7 @@
 import { test, expect, readActiveTerminalText } from './helpers';
+import { CLAUDE_PROVIDER } from '../src/shared/agent-providers';
+import fs from 'fs';
+import path from 'path';
 
 const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
 
@@ -227,6 +230,58 @@ test('project edit: a web default tab is added, persists, and opens as a web tab
   await expect(webTab).toBeVisible({ timeout: 5_000 });
   await webTab.click();
   await expect(page.locator('.web-tab-toolbar:visible')).toBeVisible({ timeout: 5_000 });
+});
+
+test('Save to Default preserves Terminal, Web, and Agent runtime kinds', async ({ shelfApp: { page, userDataDir } }) => {
+  await ensureConnected(page);
+  const projectItem = page.locator('.sidebar-item').first();
+
+  await projectItem.click({ button: 'right' });
+  await page.locator('.context-menu-item', { hasText: 'Edit' }).click();
+  const panel = page.locator('.project-edit-panel');
+  const terminalRow = panel.locator('.default-tab-row').first();
+  await terminalRow.locator('.default-tab-name').fill('Base Terminal');
+  await terminalRow.locator('.default-tab-cmd').fill('printf saved-terminal');
+  await panel.locator('.default-tab-add', { hasText: 'Add Web' }).click();
+  const webRow = panel.locator('.default-tab-row', { has: page.locator('.default-tab-kind-web') });
+  await webRow.locator('.default-tab-name').fill('Portal');
+  await webRow.locator('.default-tab-cmd').fill('https://example.com');
+  await panel.locator('.project-edit-footer .conn-btn-next').click();
+  await expect(panel).not.toBeVisible({ timeout: 3_000 });
+
+  await projectItem.click({ button: 'right' });
+  await page.locator('.context-menu-item', { hasText: 'Disconnect' }).click();
+  await page.locator('.connect-prompt').click();
+  await expect(page.locator('.tab-bar .tab')).toHaveCount(2, { timeout: 5_000 });
+
+  const saveRuntimeTab = async (label: string) => {
+    await page.locator('.tab-bar .tab', { hasText: label }).click({ button: 'right' });
+    await page.locator('.context-menu-item', { hasText: 'Save to Default' }).click();
+  };
+  await saveRuntimeTab('Base Terminal');
+  await saveRuntimeTab('Portal');
+
+  await page.locator('.tab-add').click();
+  await page.locator('.context-menu-item', { hasText: 'Agent (Claude)' }).click();
+  await expect(page.locator('.tab-bar .tab', { hasText: 'Claude' })).toBeVisible({ timeout: 5_000 });
+  await saveRuntimeTab('Claude');
+
+  const readDefaultTabs = () => {
+    const document = JSON.parse(fs.readFileSync(path.join(userDataDir, 'projects.json'), 'utf-8'));
+    return document.projects[0]?.defaultTabs;
+  };
+  await expect.poll(readDefaultTabs).toEqual([
+    { name: 'Base Terminal', cmd: 'printf saved-terminal' },
+    { name: 'Portal', kind: 'web', url: 'https://example.com' },
+    { name: 'Base Terminal', cmd: 'printf saved-terminal' },
+    { name: 'Portal', kind: 'web', url: 'https://example.com' },
+    { name: 'Claude', kind: 'agent', provider: CLAUDE_PROVIDER },
+  ]);
+
+  await page.locator('.tab-bar .tab', { hasText: 'Claude' }).click({ button: 'right' });
+  const duplicateAction = page.locator('.context-menu-item', { hasText: 'Already saved as Claude' });
+  await expect(duplicateAction).toBeDisabled();
+  await expect(duplicateAction).toHaveAttribute('title', 'Claude already starts this Agent provider');
 });
 
 // ── Sidebar ──
