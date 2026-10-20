@@ -236,6 +236,86 @@ describe('Codex official app-server backend lifecycle', () => {
     }));
   });
 
+  it('fetches and logs a fresh bounded rate-limit snapshot after a 429 completion', async () => {
+    const app = new FakeAppServer({
+      'turn/start': () => {
+        app.fire('turn/started', { threadId: 'thread-1', turn: { id: 'turn-rate-limited' } });
+        app.fire('turn/completed', turnCompleted('turn-rate-limited', 'failed', {
+          message: 'exceeded retry limit, last status: 429 Too Many Requests',
+          codexErrorInfo: { responseTooManyFailedAttempts: { httpStatusCode: 429 } },
+        }, 352));
+        return { turn: { id: 'turn-rate-limited' } };
+      },
+      'account/rateLimits/read': () => ({
+        account: { email: 'must-not-log@example.com' },
+        rateLimitsByLimitId: {
+          codex: {
+            limitId: 'codex',
+            limitName: null,
+            primary: {
+              usedPercent: 99.6,
+              windowDurationMins: 15,
+              resetsAt: 1792465370,
+            },
+            rateLimitReachedType: 'primary',
+            credits: [{ id: 'secret-credit-id' }],
+          },
+        },
+      }),
+    });
+    const backend = createCodexBackend({ createAppServer: () => app });
+    const out: OutgoingMessage[] = [];
+
+    await backend.query({ prompt: 'retry', cwd: '/repo' }, (message) => out.push(message));
+
+    await vi.waitFor(() => {
+      expect(app.calls.filter((call) => call.method === 'account/rateLimits/read')).toHaveLength(1);
+    });
+    const snapshotLog = serverLogs.find((entry) => entry.msg.includes('rate-limit snapshot'));
+    expect(snapshotLog).toMatchObject({ level: 'warn', tag: 'codex-app-server' });
+    expect(snapshotLog?.msg).toContain('thread=thread-1 turn=turn-rate-limited');
+    expect(snapshotLog?.msg).toContain('"limitId":"codex"');
+    expect(snapshotLog?.msg).toContain('"usedPercent":99.6');
+    expect(snapshotLog?.msg).toContain('"windowDurationMins":15');
+    expect(snapshotLog?.msg).toContain('"resetsAt":1792465370');
+    expect(snapshotLog?.msg).toContain('"rateLimitReachedType":"primary"');
+    expect(snapshotLog?.msg).not.toContain('must-not-log@example.com');
+    expect(snapshotLog?.msg).not.toContain('secret-credit-id');
+    expect(out).toContainEqual({ type: 'error', error: 'codex: exceeded retry limit, last status: 429 Too Many Requests' });
+    expect(out.filter((message) => message.type === 'status' && message.state === 'idle')).toHaveLength(1);
+  });
+
+  it('keeps the original 429 visible when the fresh rate-limit read fails', async () => {
+    const app = new FakeAppServer({
+      'turn/start': () => {
+        app.fire('turn/started', { threadId: 'thread-1', turn: { id: 'turn-rate-limit-read-failed' } });
+        app.fire('turn/completed', turnCompleted('turn-rate-limit-read-failed', 'failed', {
+          message: '429 Too Many Requests',
+          codexErrorInfo: { responseTooManyFailedAttempts: { httpStatusCode: 429 } },
+        }));
+        return { turn: { id: 'turn-rate-limit-read-failed' } };
+      },
+      'account/rateLimits/read': () => {
+        throw new Error('lookup failed for user@example.com access_token: secret');
+      },
+    });
+    const backend = createCodexBackend({ createAppServer: () => app });
+    const out: OutgoingMessage[] = [];
+
+    await backend.query({ prompt: 'retry', cwd: '/repo' }, (message) => out.push(message));
+
+    await vi.waitFor(() => {
+      expect(serverLogs.some((entry) => entry.msg.includes('rate-limit snapshot read failed'))).toBe(true);
+    });
+    const warning = serverLogs.find((entry) => entry.msg.includes('rate-limit snapshot read failed'));
+    expect(warning).toMatchObject({ level: 'warn', tag: 'codex-app-server' });
+    expect(warning?.msg).toContain('thread=thread-1 turn=turn-rate-limit-read-failed');
+    expect(warning?.msg).not.toContain('user@example.com');
+    expect(warning?.msg).not.toContain('access_token: secret');
+    expect(out).toContainEqual({ type: 'error', error: 'codex: 429 Too Many Requests' });
+    expect(out.filter((message) => message.type === 'status' && message.state === 'idle')).toHaveLength(1);
+  });
+
   it('fails loud when turn completion omits a valid status', async () => {
     const app = new FakeAppServer({
       'turn/start': () => {
