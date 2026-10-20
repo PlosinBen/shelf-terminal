@@ -68,7 +68,7 @@ test.describe('unavailable persisted startup provider', () => {
     await page.locator('.sidebar-item').click({ button: 'right' });
     await page.locator('.context-menu-item', { hasText: 'New Worktree' }).click();
     const worktree = page.locator('.worktree-dialog');
-    await expect(worktree.locator('.worktree-select')).toHaveCount(0);
+    await expect(worktree.locator('.worktree-startup-tabs-override')).toHaveValue('');
     await worktree.locator('input').first().fill('provider-proof');
     await expect(worktree.locator('.project-edit-footer .conn-btn-next')).toBeEnabled();
     await worktree.locator('.conn-btn-cancel').click();

@@ -5,8 +5,9 @@ import { enqueuePendingSend } from '../agentTabStore';
 import { debugLog } from '../debugLog';
 import { buildWorktreeChildConfig } from '../worktree-child-config';
 import { normalizeWorktreePrefillNotePaths } from '../worktree-prefill';
-import type { FeatureNoteInfo } from '@shared/types';
+import type { AgentProvider, FeatureNoteInfo } from '@shared/types';
 import type { Project } from '@shared/projects';
+import { visibleAgentProviderEntries } from '@shared/agent-providers';
 import { copyWorktreeSecretsWithRecovery } from '../worktree-secret-copy';
 
 function featureNoteFilename(path: string): string {
@@ -66,6 +67,7 @@ export function WorktreeDialog() {
   const [noteListError, setNoteListError] = useState<string | null>(null);
   const [selectedNotes, setSelectedNotes] = useState<Set<string>>(() => new Set());
   const [baseBranch, setBaseBranch] = useState<string | null>(null);
+  const [startupAgentProvider, setStartupAgentProvider] = useState<AgentProvider | ''>('');
   const inputRef = useRef<HTMLInputElement>(null);
   const requestGenerationRef = useRef(0);
 
@@ -84,6 +86,7 @@ export function WorktreeDialog() {
       setNoteListError(null);
       setSelectedNotes(new Set());
       setBaseBranch(null);
+      setStartupAgentProvider('');
 
       // Fetch the base repo's in-progress notes for the picker. Pre-select when
       // there's exactly one (the common case: one feature under discussion);
@@ -214,6 +217,7 @@ export function WorktreeDialog() {
         cwd: result.path,
         worktreeBranch: branch,
         baseBranch: result.baseBranch,
+        startupAgentProvider: startupAgentProvider || undefined,
       });
       const childProject = await new Promise<Project>((resolve, reject) => {
         emit(Events.ADD_PROJECT, childInput, (settled: { ok: true; project: Project } | { ok: false; error: unknown }) => {
@@ -258,7 +262,7 @@ export function WorktreeDialog() {
     //    seeded, has context to read). Deterministic post-store connect lives in
     //    App, keyed on the store — avoids the bus handlers' stale-projects closure.
     setOpen(false);
-  }, [input, projectId, projects, creating, selectedNotes]);
+  }, [input, projectId, projects, creating, selectedNotes, startupAgentProvider]);
 
   const toggleSelectedNote = useCallback((path: string) => {
     setSelectedNotes((current) => {
@@ -351,6 +355,20 @@ export function WorktreeDialog() {
               )}
             </div>
           )}
+          <label className="worktree-note-picker">
+            <span className="worktree-note-picker-label">Startup tabs override</span>
+            <select
+              className="worktree-select worktree-startup-tabs-override"
+              value={startupAgentProvider}
+              onChange={(e) => setStartupAgentProvider(e.target.value as AgentProvider | '')}
+              disabled={creating}
+            >
+              <option value="">Inherit project tabs</option>
+              {visibleAgentProviderEntries(import.meta.env.DEV).map(([id, meta]) => (
+                <option key={id} value={id}>Agent ({meta.label}) + Terminal</option>
+              ))}
+            </select>
+          </label>
           {error && (
             <div className="worktree-error">
               <pre className="worktree-error-text">{error}</pre>

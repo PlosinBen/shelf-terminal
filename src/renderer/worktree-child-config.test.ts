@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { buildWorktreeChildConfig } from './worktree-child-config';
-import { CLAUDE_PROVIDER } from '@shared/agent-providers';
+import { CLAUDE_PROVIDER, CODEX_PROVIDER } from '@shared/agent-providers';
 import type { Project } from '@shared/projects';
 
 const parent: Project = {
@@ -67,6 +67,25 @@ describe('buildWorktreeChildConfig', () => {
     });
     editableParent.featureNoteDir = 'notes/features';
     expect(snapshotted.featureNoteDir).toBe('.agent/features');
+  });
+
+  it('replaces the complete inherited list when a startup Agent override is selected', () => {
+    const overridden = buildWorktreeChildConfig(parent, {
+      cwd: '/repo-codex',
+      worktreeBranch: 'feature-codex',
+      startupAgentProvider: CODEX_PROVIDER,
+    });
+
+    expect(overridden.defaultTabs).toEqual([
+      { name: 'Codex', kind: 'agent', provider: CODEX_PROVIDER },
+      { name: 'Terminal' },
+    ]);
+    expect(parent.defaultTabs).toEqual([
+      { name: 'Claude', kind: 'agent', provider: CLAUDE_PROVIDER },
+      { name: 'dev', cmd: 'npm run dev' },
+    ]);
+    expect(overridden.quickCommands).toEqual(parent.quickCommands);
+    expect(overridden).not.toHaveProperty('agentSessionIds');
   });
 
 });
