@@ -54,6 +54,12 @@ const CODEX_APP_SERVER_SLASH_COMMAND_NAMES = new Set<string>(CODEX_SDK_SLASH_COM
 const UNSUPPORTED_APP_SERVER_SLASH_COMMANDS = new Set(['ps', 'stop', 'clean']);
 const CODEX_STALE_THREAD_NOTICE = 'Previous Codex thread was unavailable; started a new thread.';
 const CODEX_INTERRUPT_GRACE_MS = 1_000;
+const CODEX_TURN_COMPLETION_LOG_LIMIT = 2_000;
+const CODEX_TURN_STATUS = {
+  completed: 'completed',
+  interrupted: 'interrupted',
+  failed: 'failed',
+} as const;
 const CODEX_AUTH_METHOD = {
   kind: 'oauth' as const,
   instructions: [{ label: 'Sign in with your ChatGPT account (device code)' }],
@@ -141,7 +147,10 @@ export function createCodexBackend(deps: CodexBackendDeps = {}): ServerBackend {
           commandOutputByItemId.clear();
           reasoningByItemId.clear();
         }
-        if (method === 'turn/completed') resolveActiveTurn?.();
+        if (method === 'turn/completed') {
+          handleTurnCompleted(params);
+          return;
+        }
         if (method === 'thread/tokenUsage/updated') logTokenUsageUpdate(params);
         if (!activeSend) return;
         if (method === 'item/commandExecution/outputDelta') {
@@ -183,6 +192,38 @@ export function createCodexBackend(deps: CodexBackendDeps = {}): ServerBackend {
     ]) {
       forward(method);
     }
+  }
+
+  function handleTurnCompleted(params: unknown): void {
+    const payload = asRecord(params);
+    const turn = asRecord(payload?.turn);
+    const threadId = stringValue(payload?.threadId ?? payload?.thread_id) ?? '<unknown>';
+    const turnId = stringValue(turn?.id) ?? '<unknown>';
+    const status = stringValue(turn?.status) ?? '<missing>';
+    const durationMs = numberValue(turn?.durationMs ?? turn?.duration_ms);
+    const error = asRecord(turn?.error);
+    const activeThread = activeThreadId ?? '<none>';
+    const activeTurn = activeTurnId ?? '<none>';
+    const details = error
+      ? ` error=${redactCodexAccountText(formatJsonForLog(error)).slice(0, CODEX_TURN_COMPLETION_LOG_LIMIT)}`
+      : '';
+    const summary = `turn/completed thread=${threadId} turn=${turnId} status=${status} durationMs=${durationMs ?? '<unknown>'} activeThread=${activeThread} activeTurn=${activeTurn}${details}`;
+
+    if (status === CODEX_TURN_STATUS.completed || status === CODEX_TURN_STATUS.interrupted) {
+      serverLog('debug', 'codex-app-server', summary);
+    } else if (status === CODEX_TURN_STATUS.failed) {
+      serverLog('error', 'codex-app-server', summary);
+      const message = stringValue(error?.message) ?? 'app-server turn failed without an error message';
+      activeSend?.({ type: 'error', error: `codex: ${redactCodexAccountText(message)}` });
+    } else {
+      serverLog('error', 'codex-app-server', summary);
+      activeSend?.({
+        type: 'error',
+        error: `codex: app-server turn/completed returned invalid status ${redactCodexAccountText(status)}`,
+      });
+    }
+
+    resolveActiveTurn?.();
   }
 
   function translateReasoningDelta(params: unknown): Parameters<SendFn>[0] | null {
