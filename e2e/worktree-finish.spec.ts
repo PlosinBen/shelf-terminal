@@ -105,6 +105,7 @@ test.describe('finish worktree gate', () => {
     const popup = page.locator('.worktree-dialog', { hasText: 'Finish Worktree' });
     await expect(popup).toBeVisible({ timeout: 5_000 });
     await expect(popup).toContainText('feature');
+    await expect(popup.getByLabel('Remove worktree after merge (including branch)')).toBeChecked();
     await popup.locator('.conn-btn-next').click();
     await expect(popup).not.toBeVisible({ timeout: 8_000 });
 
@@ -122,7 +123,29 @@ test.describe('finish worktree gate', () => {
     expect(git(base, ['branch', '--list', 'feature']).trim()).toBe('');
   });
 
-  test('unchecking "delete branch" keeps the branch after finish', async () => {
+  test('unchecking cleanup only merges and preserves the worktree environment', async () => {
+    const rel = '.agent/features/carried.md';
+    const body = '# Keep this note in the worktree\n';
+    fs.writeFileSync(path.join(feature, '.gitignore'), '.agent/features/\n', 'utf-8');
+    git(feature, ['add', '.gitignore']);
+    git(feature, ['commit', '-m', 'ignore feature notes']);
+    writeFeatureNote(feature, rel, body);
+    const featureTip = git(feature, ['rev-parse', 'HEAD']).trim();
+
+    const child = page.locator('.sidebar-item.worktree-child', { hasText: 'feature' });
+    await child.click();
+    await page.locator('.connect-prompt').click();
+    await expect(page.locator('.tab-bar .tab')).toHaveCount(1);
+    const terminal = await page.locator('.terminal-container:visible').elementHandle();
+    await page.locator('.tab-add').click({ button: 'right' });
+    await page.locator('.context-menu-item', { hasText: 'Agent (Claude)' }).click();
+    const textarea = page.locator('.agent-textarea:visible');
+    await expect(textarea).toBeVisible({ timeout: 5_000 });
+    await textarea.fill('merge-only-conversation');
+    await textarea.press('Enter');
+    await expect(page.locator('.agent-msg-reply:visible')).toContainText('merge-only-conversation');
+    const tabLabels = await page.locator('.tab-bar .tab-label').allTextContents();
+
     await openCloseMenu(page, 'Finish');
 
     const popup = page.locator('.worktree-dialog', { hasText: 'Finish Worktree' });
@@ -131,10 +154,44 @@ test.describe('finish worktree gate', () => {
     await popup.locator('.conn-btn-next').click();
     await expect(popup).not.toBeVisible({ timeout: 8_000 });
 
-    await expect(page.locator('.sidebar-item.worktree-child', { hasText: 'feature' })).toHaveCount(0, { timeout: 8_000 });
-    // Merged + worktree gone, but the branch was preserved.
-    expect(fs.existsSync(feature)).toBe(false);
+    await expect(child).toHaveClass(/active/);
+    await expect(page.locator('.project-notice-banner > span')).toHaveText('Merged feature → main');
+    await expect(page.locator('.tab-bar .tab-label')).toHaveText(tabLabels);
+    await expect(page.locator('.agent-msg-reply:visible')).toContainText('merge-only-conversation');
+    await expect(textarea).toBeVisible();
+    expect(git(base, ['rev-parse', 'main']).trim()).toBe(featureTip);
+    expect(fs.existsSync(feature)).toBe(true);
     expect(git(base, ['branch', '--list', 'feature']).trim()).toContain('feature');
+    expect(fs.readFileSync(path.join(feature, rel), 'utf-8')).toBe(body);
+    expect(fs.existsSync(path.join(base, rel))).toBe(false);
+    // The terminal view is retained, rather than disposed and recreated.
+    await page.locator('.tab-bar .tab').first().click();
+    await expect(page.locator('.terminal-container:visible')).toBeVisible();
+    expect(await terminal!.evaluate((element) => element.isConnected)).toBe(true);
+    expect(git(feature, ['status', '--porcelain']).trim()).toBe('');
+  });
+
+  test('merge-only keeps the current focus when finishing a background worktree', async () => {
+    const featureTip = git(feature, ['rev-parse', 'HEAD']).trim();
+    const baseProject = page.locator('.sidebar-item', { hasText: 'Finish Base' }).first();
+    await baseProject.click();
+    await openCloseMenu(page, 'Finish');
+    const popup = page.locator('.worktree-dialog', { hasText: 'Finish Worktree' });
+    await expect(popup).toBeVisible();
+    // Opening a sidebar context menu focuses its owner. Switch project using
+    // the existing keyboard shortcut while the gate remains open.
+    await page.keyboard.press(`${process.platform === 'darwin' ? 'Meta' : 'Control'}+ArrowUp`);
+    await expect(baseProject).toHaveClass(/active/);
+    await popup.locator('.worktree-checkbox input[type="checkbox"]').uncheck();
+    await popup.locator('.conn-btn-next').click();
+    await expect(popup).not.toBeVisible({ timeout: 8_000 });
+    await expect(baseProject).toHaveClass(/active/);
+    await expect(page.locator('.sidebar-item.worktree-child', { hasText: 'feature' })).toHaveCount(1);
+    expect(git(base, ['rev-parse', 'main']).trim()).toBe(featureTip);
+    expect(fs.existsSync(feature)).toBe(true);
+    await page.locator('.sidebar-item.worktree-child', { hasText: 'feature' }).click();
+    await expect(page.locator('.connect-prompt')).toBeVisible();
+    await expect(page.locator('.project-notice-banner > span')).toHaveText('Merged feature → main');
   });
 
   test('restores carried feature note to base before removing the worktree', async () => {

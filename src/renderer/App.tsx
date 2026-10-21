@@ -445,6 +445,7 @@ export function App() {
       parentProjectId: string;
       featureBranch: string;
       targetBranch: string;
+      worktreeRemoved: boolean;
     }) => {
       const configsAfter = getProjectViews()
         .filter((p) => p.id !== payload.subProjectId);
@@ -454,11 +455,13 @@ export function App() {
         return;
       }
 
-      emit(Events.REMOVE_PROJECT, payload.subProjectId);
-      setActiveProjectById(payload.parentProjectId);
+      if (payload.worktreeRemoved) {
+        emit(Events.REMOVE_PROJECT, payload.subProjectId);
+        setActiveProjectById(payload.parentProjectId);
+      }
       showProjectNotice({
-        projectId: payload.parentProjectId,
-        message: `Merged ${payload.featureBranch} → ${payload.targetBranch} and closed the worktree`,
+        projectId: payload.worktreeRemoved ? payload.parentProjectId : payload.subProjectId,
+        message: `Merged ${payload.featureBranch} → ${payload.targetBranch}${payload.worktreeRemoved ? ' and closed the worktree' : ''}`,
       });
     });
 

@@ -16,5 +16,5 @@ Abstract data flow at the system level (component names, no filenames).
 | 背景任務 | [background-tasks](background-tasks.md) | task lane 與前景 execution 解耦；卡片獨立 settle；auto-resume content |
 | Config 備份/複製 | [config-backup](config-backup.md) | selected whole-item copy out/in；scoped Backup、pinned transactional Import、shared side-car serialization |
 | 專案 env 注入 | [project-env](project-env.md) | plain+secret → 單一 resolve 出口 → 注入每個 spawn（agent-server/dispatcher/terminal）；dispatcher 走 open_session |
-| Worktree lifecycle | [worktree](worktree.md) | proposal gate → configured note binding/snapshot → create/finish/abandon transaction → parent completion |
+| Worktree lifecycle | [worktree](worktree.md) | proposal gates, configured note snapshots, merge-only or cleanup completion |
 | Project repository boundary | [projects](projects.md) | versioned document → canonical main authority → durable operation/refresh → runtime-composed flat views |

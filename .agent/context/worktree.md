@@ -52,17 +52,17 @@ related:
 
 ## worktree#6 — Carried feature notes are restored before close teardown  ·  [Decision]
 
-**Decision:** When a child has a `featureNoteDir` snapshot, Finish or Abandon lists remaining direct markdown notes there, copies them back to the same relative directory in the parent checkout, verifies them, and only then removes the child copies. An absent snapshot or no child notes is a successful no-op. If listing fails, the parent destination exists, or verification fails, close stops and leaves the child checkout in place.
+**Decision:** When a child has a `featureNoteDir` snapshot, Finish with cleanup selected or Abandon lists remaining direct markdown notes there, copies them back to the same relative directory in the parent checkout, verifies them, and only then removes the child copies. Merge-only Finish leaves the notes in the child. An absent snapshot or no child notes is a successful no-op. If listing fails, the parent destination exists, or verification fails, close stops and leaves the child checkout in place.
 
 **Reason:** Feature notes are transient working memory and are normally gitignored, so they do not travel through merge-back. Restoring through the child snapshot preserves that state without turning an already-consolidated/deleted note into an error or letting a later main-project config edit redirect an in-flight worktree transaction.
 
 **Do not change casually because:** Worktree removal is the last chance to avoid losing ignored note files. Overwriting a parent note or silently converting a listing failure into an empty result would be another form of data loss, so both must stay fail-loud.
 
-## worktree#7 — Finish completion is parent project UI, not agent conversation state  ·  [Decision]
+## worktree#7 — Finish completion is project UI with an explicit cleanup outcome  ·  [Decision]
 
-**Decision:** After merge-back, note restore, worktree removal, and optional branch deletion all succeed, the renderer removes the child project, focuses the parent by project identity, and shows a dismissible parent project banner: `Merged <feature> → <target> and closed the worktree`.
+**Decision:** When cleanup is selected, after merge-back, note restore, worktree removal, and branch deletion all succeed, the renderer removes the child project, focuses the parent by project identity, and shows a dismissible parent project banner: `Merged <feature> → <target> and closed the worktree`. Merge-only completion retains current focus and sets a child project banner: `Merged <feature> → <target>`. The completion event explicitly reports whether the worktree was removed; the central handler uses that outcome for cleanup, focus, and notification routing.
 
-**Reason:** Worktree integration is a project-level lifecycle event. It must be visible even when the parent currently shows Terminal or Web, and it should not pollute an agent transcript or create an agent tab just to acknowledge a UI transaction.
+**Reason:** Worktree integration is a project-level lifecycle event. Its result belongs to the project that remains after the selected operation, independent of whether that project shows Terminal, Web, or Agent. A completion notification must not pollute an agent transcript or create an agent tab just to acknowledge a UI transaction.
 
 **Do not change casually because:** Announcing success before the entire close sequence finishes creates false completion after partial teardown failures. Routing completion into an agent timeline couples project lifecycle state to a provider session that may not exist or may not be the right audience.
 
@@ -137,3 +137,11 @@ Every invocation requires `development-flow`, `propose_worktree_create`, and `pr
 **Reason:** Capability descriptions and portable development rules cannot each contain half of a Shelf-specific cross-session sequence without either coupling themselves to one environment or leaving control-transfer gaps. A dedicated integration owner keeps the three layers independently useful while making their cooperation executable.
 
 **Do not change casually because:** Duplicating the full sequence into tool descriptions, `development-flow`, or repository instructions creates conflicting owners. Silent Git fallback bypasses Shelf's child-project creation, note migration, and user-confirmed integration gates.
+
+## worktree#16 — Finish cleanup is optional for the whole worktree environment  ·  [Decision]
+
+**Decision:** Finish shows `Remove worktree after merge (including branch)`, checked by default. Checked means merge then restore notes and remove the checkout, Shelf project, and feature branch using the existing safety checks. Unchecked means only the existing merge-back: retain the branch, checkout, sidebar item, tabs, conversations, feature notes, and current focus. The shared Abandon gate retains its independent `Delete branch` option; Abandon removes the checkout regardless of that option.
+
+**Reason:** Shelf presents the worktree and its sidebar project as one working environment. A cleanup option that controls only the Git branch leaves users unable to preserve that environment. Naming the whole cleanup operation aligns the checkbox with what it controls without exposing subproject terminology.
+
+**Do not change casually because:** Restoring notes, disconnecting tabs, or removing the project during merge-only would violate the user's choice to retain the environment. The shared Finish/Abandon controls must preserve each operation's distinct meaning.

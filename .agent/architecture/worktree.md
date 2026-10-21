@@ -33,12 +33,17 @@ Proposal or user menu
   → Finish gate
   → verify feature worktree has default-status clean state
   → fast-forward selected target only
-  → if the child snapshot is enabled, restore remaining child feature notes to parent
-  → non-force remove child checkout
-  → optionally delete feature branch
-  → remove child project
-  → focus parent project
-  → show parent project completion banner
+  → cleanup selected (default)
+      → if the child snapshot is enabled, restore remaining child feature notes to parent
+      → non-force remove child checkout
+      → delete feature branch
+      → remove child project
+      → focus parent project
+      → show parent project completion banner
+    cleanup unselected
+      → retain branch, checkout, project, tabs, conversations, and feature notes
+      → retain current focus
+      → set child project merge-success banner
 ```
 
 Abandon:

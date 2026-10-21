@@ -90,7 +90,7 @@ Type-specific connector helpers are surfaced as their own namespaces:
 | `onProposeCreate(cb(payload))` | recv `worktree:propose-create` → `{ projectId, branch?, notePaths?: string[] }`; renderer focuses `projectId`, then opens the New Worktree dialog only |
 | `onProposeFinish(cb(payload))` | recv `worktree:propose-finish` → `{ projectId }`; renderer focuses `projectId`, then opens the Finish gate only |
 
-Renderer-local worktree completion uses the event bus, not IPC: `worktree-finish-completed` carries `{ subProjectId, parentProjectId, featureBranch, targetBranch }` after every close step succeeds.
+Renderer-local worktree completion uses the event bus, not IPC: `worktree-finish-completed` carries `{ subProjectId, parentProjectId, featureBranch, targetBranch, worktreeRemoved: boolean }`. `worktreeRemoved: false` reports a successful merge-only operation: retain the child environment and current focus, and set a child project merge-success banner. `worktreeRemoved: true` is emitted only after merge and every cleanup step succeeds: remove the child project, focus the parent, and show the parent completion banner.
 
 ## file-transfer
 

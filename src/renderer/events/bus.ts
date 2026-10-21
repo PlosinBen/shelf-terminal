@@ -40,7 +40,7 @@ export const Events = {
   TOGGLE_SPLIT: 'toggle-split',     // (projectId)
   CREATE_WORKTREE: 'create-worktree', // (projectId, prefill?: { branch?, notePaths? })
   WORKTREE_CLOSE: 'worktree-close',   // (projectId, kind: 'finish' | 'abandon')
-  WORKTREE_FINISH_COMPLETED: 'worktree-finish-completed', // ({ subProjectId, parentProjectId, featureBranch, targetBranch })
+  WORKTREE_FINISH_COMPLETED: 'worktree-finish-completed', // ({ subProjectId, parentProjectId, featureBranch, targetBranch, worktreeRemoved })
   OPEN_PM: 'open-pm',                 // ()
   NEW_AGENT_TAB: 'new-agent-tab',     // (projectId, provider)
   NEW_WEB_TAB: 'new-web-tab',         // (projectId, url?) — url pre-navigates the tab
