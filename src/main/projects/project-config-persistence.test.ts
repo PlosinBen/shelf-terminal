@@ -13,14 +13,12 @@ function project(): Project {
     maxTabs: 5,
     initScript: null,
     envPlain: {},
-    defaultTabs: [],
+    defaultTabs: [{ name: 'Terminal' }],
     quickCommands: [],
     featureNoteDir: null,
     parentProjectId: null,
     worktreeBranch: null,
     baseBranch: null,
-    defaultAgentProvider: null,
-    openAgentOnConnect: false,
     agentSessionIds: {},
     agentPrefs: {},
   };
@@ -82,7 +80,7 @@ describe('project config persistence', () => {
     expect(await persistence.save([])).toEqual({ ok: true });
     expect(writeAtomic).toHaveBeenCalledOnce();
     expect(JSON.parse(writeAtomic.mock.calls[0][1] as string)).toEqual({
-      schemaVersion: 1,
+      schemaVersion: 2,
       projects: [],
     });
   });
@@ -108,8 +106,11 @@ describe('project config persistence', () => {
 
   it.each([
     ['legacy v0', JSON.stringify([{ id: 'a', name: 'A', cwd: '/repo/a', connection: { type: 'local' }, maxTabs: 5 }])],
-    ['current v1', JSON.stringify({ schemaVersion: 1, projects: [project()] })],
-  ])('backs up raw %s data before replacing a non-empty collection with empty v1', async (_label, data) => {
+    ['current v1', JSON.stringify({
+      schemaVersion: 1,
+      projects: [{ ...project(), defaultAgentProvider: null, openAgentOnConnect: false }],
+    })],
+  ])('backs up raw %s data before replacing a non-empty collection with empty v2', async (_label, data) => {
     const backup = vi.fn<ProjectConfigFileIo['backup']>(async () => ({ ok: true }));
     const fileIo = io({
       read: () => ({ ok: true, state: 'present', data: new TextEncoder().encode(data) }),

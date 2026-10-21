@@ -1,20 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { CODEX_PROVIDER, COPILOT_PROVIDER } from '@shared/agent-providers';
-import type { AgentProvider } from '@shared/types';
+import { CODEX_PROVIDER } from '@shared/agent-providers';
 import type { Project } from '@shared/projects';
 import * as store from './store';
 
-type ProviderResolutionStore = {
-  resolveAgentProviderForOpen(projectId: string, explicitProvider?: string): AgentProvider | null;
-  resolveAgentProviderForConnect(projectId: string): AgentProvider | null;
-};
-
-const providerStore = store as typeof store & ProviderResolutionStore;
-
-function config(
-  defaultAgentProvider?: string,
-  openAgentOnConnect = false,
-): Project {
+function config(): Project {
   return {
     id: 'project-1',
     name: 'Project',
@@ -23,20 +12,18 @@ function config(
     maxTabs: 5,
     initScript: null,
     envPlain: {},
-    defaultTabs: [],
+    defaultTabs: [{ name: 'Terminal' }],
     quickCommands: [],
     featureNoteDir: null,
     parentProjectId: null,
     worktreeBranch: null,
     baseBranch: null,
-    defaultAgentProvider: defaultAgentProvider ?? null,
-    openAgentOnConnect,
     agentSessionIds: {},
     agentPrefs: {},
   };
 }
 
-describe('store provider resolution', () => {
+describe('store provider validation', () => {
   beforeEach(() => {
     vi.stubGlobal('window', {
       shelfApi: {
@@ -52,40 +39,24 @@ describe('store provider resolution', () => {
   });
 
   it('uses an explicitly requested registry-valid provider', () => {
-    store.setProjects([config('retired-provider')]);
-
-    expect(providerStore.resolveAgentProviderForOpen('project-1', CODEX_PROVIDER)).toBe(CODEX_PROVIDER);
-  });
-
-  it('uses a registry-valid project default for an implicit open', () => {
-    store.setProjects([config(COPILOT_PROVIDER)]);
-
-    expect(providerStore.resolveAgentProviderForOpen('project-1')).toBe(COPILOT_PROVIDER);
-  });
-
-  it('returns no provider when an implicit open has no default', () => {
     store.setProjects([config()]);
 
-    expect(providerStore.resolveAgentProviderForOpen('project-1')).toBeNull();
+    expect(store.validateAgentProviderForOpen('project-1', CODEX_PROVIDER)).toBe(CODEX_PROVIDER);
   });
 
-  it('returns no provider when an implicit open has an unknown persisted default', () => {
-    store.setProjects([config('retired-provider')]);
+  it('returns no provider when explicit intent omits the provider', () => {
+    store.setProjects([config()]);
 
-    expect(providerStore.resolveAgentProviderForOpen('project-1')).toBeNull();
+    expect(store.validateAgentProviderForOpen('project-1', undefined)).toBeNull();
   });
 
-  it('never falls back to Claude for openAgentOnConnect without a valid default', () => {
-    store.setProjects([config('retired-provider', true)]);
+  it('returns no provider for an unknown explicit provider', () => {
+    store.setProjects([config()]);
 
-    expect(providerStore.resolveAgentProviderForConnect('project-1')).toBeNull();
+    expect(store.validateAgentProviderForOpen('project-1', 'retired-provider')).toBeNull();
   });
 
-  it('returns the valid default for openAgentOnConnect only when enabled', () => {
-    store.setProjects([config(CODEX_PROVIDER, true)]);
-    expect(providerStore.resolveAgentProviderForConnect('project-1')).toBe(CODEX_PROVIDER);
-
-    store.setProjects([config(CODEX_PROVIDER, false)]);
-    expect(providerStore.resolveAgentProviderForConnect('project-1')).toBeNull();
+  it('returns no provider for an unknown project', () => {
+    expect(store.validateAgentProviderForOpen('missing', CODEX_PROVIDER)).toBeNull();
   });
 });

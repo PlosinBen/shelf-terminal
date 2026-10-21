@@ -11,12 +11,13 @@ const parent: Project = {
   maxTabs: 7,
   initScript: 'nvm use',
   envPlain: { FOO: 'bar' },
-  defaultTabs: [{ name: 'dev', cmd: 'npm run dev' } as any],
+  defaultTabs: [
+    { name: 'Claude', kind: 'agent', provider: CLAUDE_PROVIDER },
+    { name: 'dev', cmd: 'npm run dev' },
+  ],
   quickCommands: [{ label: 'build', command: 'npm run build', target: 'current' }],
   featureNoteDir: '.agent/features',
-  defaultAgentProvider: CLAUDE_PROVIDER,
   agentPrefs: { [CLAUDE_PROVIDER]: { model: 'opus' } as any },
-  openAgentOnConnect: true,
   agentSessionIds: { [CLAUDE_PROVIDER]: 'sess-parent' },
   parentProjectId: null,
   worktreeBranch: null,
@@ -44,9 +45,7 @@ describe('buildWorktreeChildConfig', () => {
     expect(child.defaultTabs).toEqual(parent.defaultTabs);
     expect(child.quickCommands).toEqual(parent.quickCommands);
     expect(child.featureNoteDir).toBe('.agent/features');
-    expect(child.defaultAgentProvider).toBe(CLAUDE_PROVIDER);
     expect(child.agentPrefs).toEqual(parent.agentPrefs);
-    expect(child.openAgentOnConnect).toBe(true);
   });
 
   it('sets a fresh worktree identity', () => {
@@ -70,21 +69,23 @@ describe('buildWorktreeChildConfig', () => {
     expect(snapshotted.featureNoteDir).toBe('.agent/features');
   });
 
-  it('uses an explicit provider override without changing the parent', () => {
+  it('replaces the complete inherited list when a startup Agent override is selected', () => {
     const overridden = buildWorktreeChildConfig(parent, {
-      cwd: '/repo-codex', worktreeBranch: 'feature-codex', defaultAgentProvider: CODEX_PROVIDER,
+      cwd: '/repo-codex',
+      worktreeBranch: 'feature-codex',
+      startupAgentProvider: CODEX_PROVIDER,
     });
-    expect(overridden.defaultAgentProvider).toBe(CODEX_PROVIDER);
-    expect(parent.defaultAgentProvider).toBe(CLAUDE_PROVIDER);
-  });
 
-  it('accepts the canonical Codex provider override', () => {
-    const overridden = buildWorktreeChildConfig(parent, {
-      cwd: '/repo-codex-official',
-      worktreeBranch: 'codex-official',
-      defaultAgentProvider: CODEX_PROVIDER,
-    });
-    expect(overridden.defaultAgentProvider).toBe(CODEX_PROVIDER);
+    expect(overridden.defaultTabs).toEqual([
+      { name: 'Codex', kind: 'agent', provider: CODEX_PROVIDER },
+      { name: 'Terminal' },
+    ]);
+    expect(parent.defaultTabs).toEqual([
+      { name: 'Claude', kind: 'agent', provider: CLAUDE_PROVIDER },
+      { name: 'dev', cmd: 'npm run dev' },
+    ]);
+    expect(overridden.quickCommands).toEqual(parent.quickCommands);
     expect(overridden).not.toHaveProperty('agentSessionIds');
   });
+
 });

@@ -1,6 +1,6 @@
 import type { AgentProvider } from '@shared/types';
 import type { Project, ProjectCreateInput } from '@shared/projects';
-import { isAgentProvider } from '@shared/agent-providers';
+import { providerLabel } from '@shared/agent-providers';
 
 /**
  * Build a worktree sub-project's config by cloning the parent project's SETUP
@@ -18,7 +18,12 @@ import { isAgentProvider } from '@shared/agent-providers';
  */
 export function buildWorktreeChildConfig(
   parent: Project,
-  opts: { cwd: string; worktreeBranch: string; baseBranch?: string; defaultAgentProvider?: AgentProvider },
+  opts: {
+    cwd: string;
+    worktreeBranch: string;
+    baseBranch?: string;
+    startupAgentProvider?: AgentProvider;
+  },
 ): ProjectCreateInput {
   return {
     // ── inherited setup ──
@@ -27,13 +32,15 @@ export function buildWorktreeChildConfig(
     maxTabs: parent.maxTabs,
     initScript: parent.initScript,
     envPlain: parent.envPlain,
-    defaultTabs: parent.defaultTabs,
+    defaultTabs: opts.startupAgentProvider
+      ? [
+        { name: providerLabel(opts.startupAgentProvider), kind: 'agent', provider: opts.startupAgentProvider },
+        { name: 'Terminal' },
+      ]
+      : parent.defaultTabs,
     quickCommands: parent.quickCommands,
     featureNoteDir: parent.featureNoteDir,
-    defaultAgentProvider: opts.defaultAgentProvider
-      ?? (isAgentProvider(parent.defaultAgentProvider) ? parent.defaultAgentProvider : null),
     agentPrefs: parent.agentPrefs,
-    openAgentOnConnect: parent.openAgentOnConnect,
     // ── fresh worktree identity ──
     cwd: opts.cwd,
     parentProjectId: parent.id,

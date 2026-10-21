@@ -4,9 +4,9 @@ import type { Project } from '@shared/projects';
 
 const project: Project = {
   id: 'project-a', name: 'Project A', cwd: '/work', connection: { type: 'local' },
-  maxTabs: 5, initScript: null, envPlain: {}, defaultTabs: [], quickCommands: [],
+  maxTabs: 5, initScript: null, envPlain: {}, defaultTabs: [{ name: 'Terminal' }], quickCommands: [],
   featureNoteDir: null, parentProjectId: null, worktreeBranch: null, baseBranch: null,
-  defaultAgentProvider: null, openAgentOnConnect: false, agentSessionIds: {}, agentPrefs: {},
+  agentSessionIds: {}, agentPrefs: {},
 };
 
 describe('project cleanup', () => {

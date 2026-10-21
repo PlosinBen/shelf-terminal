@@ -42,7 +42,7 @@ test('failed project save retries without crashing or publishing early', async (
   await expect(page.locator('.sidebar-item')).toHaveCount(1, { timeout: 8_000 });
   expect(await app.evaluate(() => (globalThis as any).__projectRecoveryPrompts)).toBe(1);
   const document = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-  expect(document.schemaVersion).toBe(1);
+  expect(document.schemaVersion).toBe(2);
   expect(document.projects).toHaveLength(1);
 });
 

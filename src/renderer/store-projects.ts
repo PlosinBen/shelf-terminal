@@ -203,31 +203,19 @@ export function getCanonicalProjectById(projectId: ProjectId): Project | null {
   return canonicalProjects.find((project) => project.id === projectId) ?? null;
 }
 
-export function getResolvedDefaultAgentProvider(projectId: ProjectId): AgentProvider | null {
-  const candidate = getCanonicalProjectById(projectId)?.defaultAgentProvider;
-  return isAgentProvider(candidate) ? candidate : null;
-}
-
-export function resolveAgentProviderForOpen(projectId: ProjectId, explicitProvider?: string): AgentProvider | null {
+export function validateAgentProviderForOpen(projectId: ProjectId, candidate: unknown): AgentProvider | null {
   const project = getCanonicalProjectById(projectId);
   if (!project) {
     console.warn(`[agent-provider] cannot resolve provider for unknown project ${projectId}`);
     return null;
   }
-  const candidate = explicitProvider ?? project.defaultAgentProvider ?? undefined;
   if (isAgentProvider(candidate)) return candidate;
   console.warn(
     `[agent-provider] refusing agent open for project ${projectId}: ${
-      candidate === undefined ? 'no default provider' : `invalid provider ${candidate}`
+      candidate === undefined ? 'missing provider' : `invalid provider ${candidate}`
     }`,
   );
   return null;
-}
-
-export function resolveAgentProviderForConnect(projectId: ProjectId): AgentProvider | null {
-  const project = getCanonicalProjectById(projectId);
-  if (!project?.openAgentOnConnect) return null;
-  return resolveAgentProviderForOpen(projectId);
 }
 
 export function showProjectNotice(input: { projectId: string; message: string }): ProjectNotice {

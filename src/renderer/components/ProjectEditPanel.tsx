@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useStore, setEditingProjectById, getResolvedDefaultAgentProvider } from '../store';
+import { useStore, setEditingProjectById } from '../store';
 import { emit, Events } from '../events';
-import type { TabTemplate, QuickCommand, AgentProvider } from '@shared/types';
+import type { TabTemplate, QuickCommand } from '@shared/types';
 import { visibleAgentProviderEntries } from '@shared/agent-providers';
 import { TAB_COLORS } from './TabBar';
 import { formatBytes } from '../utils/format-bytes';
@@ -32,9 +32,7 @@ export function ProjectEditPanel() {
   const [clearing, setClearing] = useState(false);
   const [remoteConnected, setRemoteConnected] = useState(true);
   const [uploadsSize, setUploadsSize] = useState<{ totalBytes: number; fileCount: number } | null>(null);
-  const [defaultAgentProvider, setDefaultAgentProvider] = useState<AgentProvider | ''>('');
-  const providerTouched = useRef(false);
-  const [openAgentOnConnect, setOpenAgentOnConnect] = useState(false);
+  const [tabError, setTabError] = useState<string | null>(null);
   const [featureNoteDir, setFeatureNoteDir] = useState('');
   const [featureNoteDirError, setFeatureNoteDirError] = useState<string | null>(null);
 
@@ -52,9 +50,7 @@ export function ProjectEditPanel() {
       // Secret KEY names + the machine's key-storage tier (for honest disclosure).
       void window.shelfApi.project.listSecretKeys(project.id).then(setSecretKeys).catch(() => setSecretKeys([]));
       void window.shelfApi.project.secretKeyTier().then(setKeyTier).catch(() => setKeyTier(null));
-      setDefaultAgentProvider(getResolvedDefaultAgentProvider(project.id) ?? '');
-      providerTouched.current = false;
-      setOpenAgentOnConnect(project.openAgentOnConnect);
+      setTabError(null);
       setFeatureNoteDir(project.featureNoteDir ?? '');
       setFeatureNoteDirError(null);
     }
@@ -112,6 +108,20 @@ export function ProjectEditPanel() {
   const handleClose = () => setEditingProjectById(null);
 
   const handleSave = () => {
+    if (defaultTabs.some((tab) => !tab.name.trim())) {
+      setTabError('Every startup tab requires a name.');
+      return;
+    }
+    const agentProviders = defaultTabs
+      .filter((tab) => tab.kind === 'agent')
+      .map((tab) => tab.provider);
+    const duplicateProvider = agentProviders.find((provider, index) =>
+      agentProviders.indexOf(provider) !== index);
+    if (duplicateProvider) {
+      setTabError(`Agent provider "${duplicateProvider}" is selected more than once.`);
+      return;
+    }
+    setTabError(null);
     let savedFeatureNoteDir: string | null;
     try {
       savedFeatureNoteDir = featureNoteDirForProjectSave(project, featureNoteDir);
@@ -124,12 +134,9 @@ export function ProjectEditPanel() {
       .filter((t) => t.name.trim())
       .map((t): TabTemplate => {
         const base = { name: t.name.trim(), color: t.color || undefined };
-        // Keep the two kinds' payloads disjoint: a terminal carries `cmd` and no
-        // `kind` (back-compat — existing configs stay byte-identical); a web tab
-        // carries `kind:'web'` + an optional `url` and never a `cmd`.
-        return t.kind === 'web'
-          ? { ...base, kind: 'web', url: t.url?.trim() || undefined }
-          : { ...base, cmd: t.cmd?.trim() || undefined };
+        if (t.kind === 'web') return { ...base, kind: 'web', url: t.url?.trim() || undefined };
+        if (t.kind === 'agent') return { ...base, kind: 'agent', provider: t.provider };
+        return { ...base, cmd: t.cmd?.trim() || undefined };
       });
     const cmds = quickCommands.filter((c) => c.label.trim() && c.command.trim());
     // Keep only valid, uniquely-keyed rows; last write wins on an accidental
@@ -147,10 +154,6 @@ export function ProjectEditPanel() {
       quickCommands: cmds,
       featureNoteDir: savedFeatureNoteDir,
       envPlain,
-      ...(providerTouched.current
-        ? { defaultAgentProvider: defaultAgentProvider || null }
-        : {}),
-      openAgentOnConnect,
     });
 
     // Flush secret ops to main (encrypted side-car, not canonical `Project` from
@@ -195,9 +198,9 @@ export function ProjectEditPanel() {
     if (e.target === e.currentTarget) handleClose();
   };
 
-  const updateTab = (index: number, field: keyof TabTemplate, value: string) => {
+  const updateTab = (index: number, field: 'name' | 'color' | 'cmd' | 'url' | 'provider', value: string) => {
     setDefaultTabs((tabs) =>
-      tabs.map((t, i) => (i === index ? { ...t, [field]: value } : t)),
+      tabs.map((t, i) => (i === index ? { ...t, [field]: value } as TabTemplate : t)),
     );
   };
 
@@ -207,6 +210,17 @@ export function ProjectEditPanel() {
 
   const addWebTab = () => {
     setDefaultTabs((tabs) => [...tabs, { name: 'Web', kind: 'web' }]);
+  };
+
+  const providers = visibleAgentProviderEntries(import.meta.env.DEV);
+  const addAgentTab = () => {
+    const first = providers[0];
+    if (!first) return;
+    setDefaultTabs((tabs) => [...tabs, {
+      name: first[1].label,
+      kind: 'agent',
+      provider: first[0],
+    }]);
   };
 
   const removeTab = (index: number) => {
@@ -477,38 +491,11 @@ export function ProjectEditPanel() {
           </div>
 
           <div className="project-edit-field">
-            <label className="settings-label">Agent</label>
+            <label className="settings-label">Tabs on Connect</label>
             <div className="project-edit-hint">
-              Default provider for new agent tabs in this project.
+              Ordered tabs to open whenever this project connects.
             </div>
-            <select
-              className="settings-input settings-input-wide"
-              value={defaultAgentProvider}
-              onChange={(e) => {
-                providerTouched.current = true;
-                setDefaultAgentProvider(e.target.value as AgentProvider | '');
-              }}
-            >
-              <option value="">None (ask each time)</option>
-              {visibleAgentProviderEntries(import.meta.env.DEV).map(([id, meta]) => (
-                <option key={id} value={id}>{meta.label}</option>
-              ))}
-            </select>
-            <label className="settings-checkbox" style={{ marginTop: 8 }}>
-              <input
-                type="checkbox"
-                checked={openAgentOnConnect}
-                onChange={(e) => setOpenAgentOnConnect(e.target.checked)}
-              />
-              Open agent tab automatically on connect
-            </label>
-          </div>
-
-          <div className="project-edit-field">
-            <label className="settings-label">Default Tabs</label>
-            <div className="project-edit-hint">
-              Tabs to open on connect. Each tab can have its own command.
-            </div>
+            {tabError && <div className="env-var-error default-tabs-error">{tabError}</div>}
             <div className="default-tabs-list">
               {defaultTabs.map((tab, i) => (
                 <div
@@ -549,10 +536,10 @@ export function ProjectEditPanel() {
                     )}
                   </div>
                   <span
-                    className={`default-tab-kind default-tab-kind-${tab.kind === 'web' ? 'web' : 'terminal'}`}
-                    title={tab.kind === 'web' ? 'Web tab' : 'Terminal tab'}
+                    className={`default-tab-kind default-tab-kind-${tab.kind ?? 'terminal'}`}
+                    title={tab.kind === 'web' ? 'Web tab' : tab.kind === 'agent' ? 'Agent tab' : 'Terminal tab'}
                   >
-                    {tab.kind === 'web' ? 'web' : 'sh'}
+                    {tab.kind === 'web' ? 'web' : tab.kind === 'agent' ? 'ai' : 'sh'}
                   </span>
                   <input
                     className="default-tab-name"
@@ -569,6 +556,19 @@ export function ProjectEditPanel() {
                       onChange={(e) => updateTab(i, 'url', e.target.value)}
                       placeholder="https://… (optional)"
                     />
+                  ) : tab.kind === 'agent' ? (
+                    <select
+                      className="default-tab-cmd default-tab-provider"
+                      value={tab.provider}
+                      onChange={(e) => updateTab(i, 'provider', e.target.value)}
+                    >
+                      {!providers.some(([id]) => id === tab.provider) && (
+                        <option value={tab.provider}>{tab.provider} (unavailable)</option>
+                      )}
+                      {providers.map(([id, meta]) => (
+                        <option key={id} value={id}>{meta.label}</option>
+                      ))}
+                    </select>
                   ) : (
                     <input
                       className="default-tab-cmd"
@@ -591,6 +591,7 @@ export function ProjectEditPanel() {
             </div>
             <div className="default-tab-add-row">
               <button className="default-tab-add" onClick={addTab}>+ Add Terminal</button>
+              <button className="default-tab-add" onClick={addAgentTab} disabled={providers.length === 0}>+ Add Agent</button>
               <button className="default-tab-add" onClick={addWebTab}>+ Add Web</button>
             </div>
           </div>
@@ -635,7 +636,14 @@ export function ProjectEditPanel() {
                     }
                   >
                     <option value="current">Current tab</option>
-                    {defaultTabs.filter((t) => t.name.trim() && t.kind !== 'web').map((t) => (
+                    {cmd.target !== 'current'
+                      && !defaultTabs.some((t) => t.name === cmd.target && t.kind !== 'agent' && t.kind !== 'web')
+                      && (
+                        <option value={cmd.target} disabled>
+                          {cmd.target} (unavailable — Terminal only)
+                        </option>
+                      )}
+                    {defaultTabs.filter((t) => t.name.trim() && t.kind !== 'agent' && t.kind !== 'web').map((t) => (
                       <option key={t.name} value={t.name}>{t.name}</option>
                     ))}
                   </select>

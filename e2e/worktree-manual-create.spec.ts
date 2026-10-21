@@ -1,5 +1,5 @@
 import { test, expect, _electron as electron, type ElectronApplication, type Page } from '@playwright/test';
-import { CLAUDE_PROVIDER } from '../src/shared/agent-providers';
+import { CLAUDE_PROVIDER, CODEX_PROVIDER } from '../src/shared/agent-providers';
 import { execFileSync } from 'child_process';
 import path from 'path';
 import fs from 'fs';
@@ -162,8 +162,11 @@ test.describe('user-initiated worktree create', () => {
     await expect(dialog.locator('.worktree-target')).toHaveText('WT Base @ main');
     await expect(dialog.locator('.worktree-note-picker-label', { hasText: 'Feature note' }))
       .toContainText('.agent/features');
-    await expect(dialog.locator('.worktree-note-picker').filter({ hasText: 'Agent provider' }).locator('select'))
-      .toHaveValue(CLAUDE_PROVIDER);
+    const startupOverride = dialog.locator('.worktree-startup-tabs-override');
+    await expect(startupOverride).toHaveValue('');
+    await expect(startupOverride.locator('option').first()).toHaveText('Inherit project tabs');
+    await expect(startupOverride.locator(`option[value="${CLAUDE_PROVIDER}"]`))
+      .toHaveText('Agent (Claude) + Terminal');
 
     // Every note is pickable regardless of status; rows are filename-first and
     // keep status on the same line as the filename.
@@ -190,11 +193,15 @@ test.describe('user-initiated worktree create', () => {
 
     const document = JSON.parse(fs.readFileSync(path.join(userDataDir, 'projects.json'), 'utf-8')) as {
       schemaVersion: number;
-      projects: Array<{ parentProjectId?: string; featureNoteDir?: string }>;
+      projects: Array<{ parentProjectId?: string; featureNoteDir?: string; defaultTabs?: unknown[] }>;
     };
-    expect(document.schemaVersion).toBe(1);
-    expect(document.projects.find((project) => project.parentProjectId === PROJECT_ID)?.featureNoteDir)
-      .toBe('.agent/features');
+    expect(document.schemaVersion).toBe(2);
+    const child = document.projects.find((project) => project.parentProjectId === PROJECT_ID);
+    expect(child?.featureNoteDir).toBe('.agent/features');
+    expect(child?.defaultTabs).toEqual([
+      { name: 'Claude', kind: 'agent', provider: CLAUDE_PROVIDER },
+      { name: 'Terminal' },
+    ]);
 
     await items.nth(1).click({ button: 'right' });
     await page.locator('.context-menu-item', { hasText: 'Edit' }).click();
@@ -253,6 +260,30 @@ test.describe('user-initiated worktree create', () => {
     expect(fs.existsSync(path.join(repo, '.agent/features/old.md'))).toBe(true);
     expect(fs.existsSync(path.join(`${repo}-feature-n`, '.agent/features/demo.md'))).toBe(false);
     expect(fs.existsSync(path.join(`${repo}-feature-n`, '.agent/features/old.md'))).toBe(false);
+  });
+
+  test('startup tabs override replaces the inherited list with the selected Agent and Terminal', async () => {
+    const dialog = await openNewWorktreeDialog(page);
+    await dialog.locator('.worktree-startup-tabs-override').selectOption(CODEX_PROVIDER);
+    await dialog.locator('.worktree-input').fill('feature/codex-startup');
+    await dialog.locator('.conn-btn-next').click();
+    await expect(dialog).not.toBeVisible({ timeout: 30_000 });
+
+    const document = JSON.parse(fs.readFileSync(path.join(userDataDir, 'projects.json'), 'utf-8')) as {
+      projects: Array<{
+        parentProjectId?: string;
+        defaultTabs?: unknown[];
+        agentSessionIds?: Record<string, string>;
+      }>;
+    };
+    const child = document.projects.find((project) => project.parentProjectId === PROJECT_ID);
+    expect(child?.defaultTabs).toEqual([
+      { name: 'Codex', kind: 'agent', provider: CODEX_PROVIDER },
+      { name: 'Terminal' },
+    ]);
+    expect(child?.agentSessionIds).toEqual({
+      [CODEX_PROVIDER]: expect.any(String),
+    });
   });
 
   test('secret copy Retry continues the already committed child once', async () => {

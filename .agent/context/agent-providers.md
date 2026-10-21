@@ -302,13 +302,13 @@ SDK 0.3.159 **並存**兩種 compact 完成訊號:`status` 形狀(`subtype:'stat
 
 **Related**：`src/renderer/agentTabStore.ts`（`flushChunkBuffer` / `setExecutionActive`）、`src/renderer/components/AgentMessage.tsx`（`.agent-cursor`）、`agent-providers#21`（boundary-split 是成因）。
 
-## agent-providers#28 — Worktree boot provider is an explicit creation-time override  ·  [Decision]
+## agent-providers#28 — Worktree startup override uses the provider registry  ·  [Decision]
 
-**Decision**：New Worktree dialog 的 provider selector 從 `AGENT_PROVIDERS` registry iterate。Parent default 只有在 registry-valid 時才可預選；missing/unknown default 顯示無選擇並禁止建立，直到使用者明確選一個有效 provider。選擇值只寫到新 child project 的 `defaultAgentProvider`。
+**Decision**：New Worktree 的 `Startup tabs override` selector 從 provider registry iterate。空值表示完整繼承 parent 的 ordered startup list；選擇 provider `P` 只把 child list 設為 `[Agent(P), Terminal]`，其中 Agent 名稱使用 registry label。Parent config 不變，child session ids 不繼承。
 
-**Reason**：讓不同 worktree 可啟動不同 provider，同時維持既有 parent-inheritance 行為與 provider registry 的單一來源。
+**Reason**：不同 worktree 可明確改用不同 provider，同時讓一般路徑保留 parent 的完整啟動工作區，並維持 provider id/label 的單一來源。
 
-**Do not change casually because**：不要在 dialog 硬編 provider 名單，或把 selection 回寫 parent；前者會與 registry drift，後者會意外改變既有 project 的新 tab 行為。
+**Do not change casually because**：不要在 dialog 硬編 provider 名單、把 selection 回寫 parent，或把 override 解讀成「替換某一個 inherited Agent」；multi-Agent list 沒有唯一可替換的對象。
 
 ## agent-providers#29 — Codex thought chunks may begin with formatting-only blank lines; strip only the leading blank lines  ·  [Gotcha]
 

@@ -1,10 +1,11 @@
 import type { AgentPrefs, Connection, QuickCommand, TabTemplate } from '@shared/types';
 import type { Project } from '@shared/projects';
+import { isAgentProvider, providerLabel } from '@shared/agent-providers';
 
-export const PROJECTS_SCHEMA_VERSION = 1 as const;
+export const PROJECTS_SCHEMA_VERSION = 2 as const;
 
 export type ProjectConfigCodecStage = 'decode' | 'parse' | 'schema' | 'format';
-export type ProjectConfigRevision = 'legacy-v0' | 'v1' | 'unknown';
+export type ProjectConfigRevision = 'legacy-v0' | 'v1' | 'v2' | 'unknown';
 
 export interface ProjectConfigCodecError {
   readonly stage: ProjectConfigCodecStage;
@@ -22,7 +23,7 @@ export type ProjectConfigFormatResult =
   | { readonly ok: false; readonly error: ProjectConfigCodecError };
 
 type UnknownRecord = Record<string, unknown>;
-type ProjectShape = 'legacy' | 'current';
+type ProjectShape = 'legacy-v0' | 'v1' | 'v2';
 
 class SchemaIssue extends Error {
   constructor(readonly context: string, message: string) {
@@ -51,7 +52,7 @@ function nullableString(
   shape: ProjectShape,
 ): string | null {
   if (!hasOwn(record, key)) {
-    if (shape === 'legacy') return null;
+    if (shape === 'legacy-v0') return null;
     throw new SchemaIssue(`${context}.${key}`, 'missing current field');
   }
   const value = record[key];
@@ -76,7 +77,7 @@ function optionalStringRecord(
   shape: ProjectShape,
 ): Record<string, string> {
   if (!hasOwn(record, key)) {
-    if (shape === 'legacy') return {};
+    if (shape === 'legacy-v0') return {};
     throw new SchemaIssue(`${context}.${key}`, 'missing current field');
   }
   return stringRecord(record[key], `${context}.${key}`);
@@ -123,26 +124,43 @@ function normalizeConnection(value: unknown, context: string): Connection {
   }
 }
 
-function normalizeTabTemplate(value: unknown, context: string): TabTemplate {
+function normalizeTabTemplate(value: unknown, context: string, allowAgent: boolean): TabTemplate {
   if (!isRecord(value)) throw new SchemaIssue(context, 'expected tab template object');
   const name = requireString(value, 'name', context);
   const cmd = value.cmd;
   const color = value.color;
   const kind = value.kind;
   const url = value.url;
+  const provider = value.provider;
   if (cmd !== undefined && typeof cmd !== 'string') throw new SchemaIssue(`${context}.cmd`, 'expected string');
   if (color !== undefined && typeof color !== 'string') throw new SchemaIssue(`${context}.color`, 'expected string');
-  if (kind !== undefined && kind !== 'terminal' && kind !== 'web') {
-    throw new SchemaIssue(`${context}.kind`, 'expected terminal or web');
+  if (kind !== undefined && kind !== 'terminal' && kind !== 'web' && !(allowAgent && kind === 'agent')) {
+    throw new SchemaIssue(`${context}.kind`, allowAgent ? 'expected terminal, web, or agent' : 'expected terminal or web');
   }
   if (url !== undefined && typeof url !== 'string') throw new SchemaIssue(`${context}.url`, 'expected string');
-  return {
-    name,
-    ...(cmd === undefined ? {} : { cmd }),
-    ...(color === undefined ? {} : { color }),
-    ...(kind === undefined ? {} : { kind }),
-    ...(url === undefined ? {} : { url }),
-  };
+  if (provider !== undefined && typeof provider !== 'string') {
+    throw new SchemaIssue(`${context}.provider`, 'expected string');
+  }
+  const base = { name, ...(color === undefined ? {} : { color }) };
+  if (kind === 'agent') {
+    if (typeof provider !== 'string' || provider.length === 0) {
+      throw new SchemaIssue(`${context}.provider`, 'expected non-empty string');
+    }
+    if (cmd !== undefined || url !== undefined) {
+      throw new SchemaIssue(context, 'agent template must not contain cmd or url');
+    }
+    return { ...base, kind: 'agent', provider };
+  }
+  if (kind === 'web') {
+    if (cmd !== undefined || provider !== undefined) {
+      throw new SchemaIssue(context, 'web template must not contain cmd or provider');
+    }
+    return { ...base, kind: 'web', ...(url === undefined ? {} : { url }) };
+  }
+  if (url !== undefined || provider !== undefined) {
+    throw new SchemaIssue(context, 'terminal template must not contain url or provider');
+  }
+  return { ...base, ...(cmd === undefined ? {} : { cmd }) };
 }
 
 function normalizeQuickCommand(value: unknown, context: string): QuickCommand {
@@ -162,7 +180,7 @@ function objectArray<T>(
   normalize: (value: unknown, context: string) => T,
 ): T[] {
   if (!hasOwn(record, key)) {
-    if (shape === 'legacy') return [];
+    if (shape === 'legacy-v0') return [];
     throw new SchemaIssue(`${context}.${key}`, 'missing current field');
   }
   const value = record[key];
@@ -189,7 +207,7 @@ function agentPrefsRecord(
   shape: ProjectShape,
 ): Record<string, AgentPrefs> {
   if (!hasOwn(record, 'agentPrefs')) {
-    if (shape === 'legacy') return {};
+    if (shape === 'legacy-v0') return {};
     throw new SchemaIssue(`${context}.agentPrefs`, 'missing current field');
   }
   const value = record.agentPrefs;
@@ -209,11 +227,48 @@ function normalizeProject(value: unknown, index: number, shape: ProjectShape): P
   if (!Number.isInteger(maxTabs) || (maxTabs as number) <= 0) {
     throw new SchemaIssue(`${context}.maxTabs`, 'expected positive integer');
   }
+  if (shape === 'v2' && (hasOwn(value, 'defaultAgentProvider') || hasOwn(value, 'openAgentOnConnect'))) {
+    throw new SchemaIssue(context, 'current project must not contain legacy agent startup fields');
+  }
   const openAgentOnConnect = value.openAgentOnConnect;
-  if (!hasOwn(value, 'openAgentOnConnect')) {
-    if (shape === 'current') throw new SchemaIssue(`${context}.openAgentOnConnect`, 'missing current field');
-  } else if (typeof openAgentOnConnect !== 'boolean') {
-    throw new SchemaIssue(`${context}.openAgentOnConnect`, 'expected boolean');
+  if (shape !== 'v2') {
+    if (!hasOwn(value, 'openAgentOnConnect')) {
+      if (shape === 'v1') throw new SchemaIssue(`${context}.openAgentOnConnect`, 'missing v1 field');
+    } else if (typeof openAgentOnConnect !== 'boolean') {
+      throw new SchemaIssue(`${context}.openAgentOnConnect`, 'expected boolean');
+    }
+  }
+
+  let legacyProvider: string | null = null;
+  if (shape !== 'v2') {
+    legacyProvider = nullableString(value, 'defaultAgentProvider', context, shape);
+  }
+  const parsedTabs = objectArray(
+    value,
+    'defaultTabs',
+    context,
+    shape,
+    (entry, entryContext) => normalizeTabTemplate(entry, entryContext, shape === 'v2'),
+  );
+  if (shape === 'v2' && parsedTabs.length === 0) {
+    throw new SchemaIssue(`${context}.defaultTabs`, 'expected at least one tab template');
+  }
+  const baseTabs: TabTemplate[] = parsedTabs.length > 0 ? parsedTabs : [{ name: 'Terminal' }];
+  const defaultTabs: TabTemplate[] = legacyProvider === null
+    ? baseTabs
+    : [{
+      name: isAgentProvider(legacyProvider) ? providerLabel(legacyProvider) : legacyProvider,
+      kind: 'agent',
+      provider: legacyProvider,
+    }, ...baseTabs];
+  const providers = new Set<string>();
+  for (let tabIndex = 0; tabIndex < defaultTabs.length; tabIndex++) {
+    const tab = defaultTabs[tabIndex];
+    if (tab.kind !== 'agent') continue;
+    if (providers.has(tab.provider)) {
+      throw new SchemaIssue(`${context}.defaultTabs[${tabIndex}].provider`, `duplicate agent provider ${tab.provider}`);
+    }
+    providers.add(tab.provider);
   }
 
   return {
@@ -224,14 +279,12 @@ function normalizeProject(value: unknown, index: number, shape: ProjectShape): P
     maxTabs: maxTabs as number,
     initScript: nullableString(value, 'initScript', context, shape),
     envPlain: optionalStringRecord(value, 'envPlain', context, shape),
-    defaultTabs: objectArray(value, 'defaultTabs', context, shape, normalizeTabTemplate),
+    defaultTabs,
     quickCommands: objectArray(value, 'quickCommands', context, shape, normalizeQuickCommand),
     featureNoteDir: nullableString(value, 'featureNoteDir', context, shape),
     parentProjectId: nullableString(value, 'parentProjectId', context, shape),
     worktreeBranch: nullableString(value, 'worktreeBranch', context, shape),
     baseBranch: nullableString(value, 'baseBranch', context, shape),
-    defaultAgentProvider: nullableString(value, 'defaultAgentProvider', context, shape),
-    openAgentOnConnect: openAgentOnConnect === true,
     agentSessionIds: optionalStringRecord(value, 'agentSessionIds', context, shape),
     agentPrefs: agentPrefsRecord(value, context, shape),
   };
@@ -242,8 +295,7 @@ function normalizeProjects(
   revision: Exclude<ProjectConfigRevision, 'unknown'>,
 ): ProjectConfigLoadResult<readonly Project[]> {
   try {
-    const shape = revision === 'v1' ? 'current' : 'legacy';
-    const projects = values.map((value, index) => normalizeProject(value, index, shape));
+    const projects = values.map((value, index) => normalizeProject(value, index, revision));
     const ids = new Set<string>();
     for (let index = 0; index < projects.length; index++) {
       const id = projects[index].id;
@@ -306,7 +358,7 @@ export function loadProjectsDocument(
   }
 
   if (Array.isArray(value)) return normalizeProjects(value, 'legacy-v0');
-  if (!isRecord(value) || value.schemaVersion !== PROJECTS_SCHEMA_VERSION) {
+  if (!isRecord(value) || (value.schemaVersion !== 1 && value.schemaVersion !== PROJECTS_SCHEMA_VERSION)) {
     return {
       ok: false,
       error: {
@@ -319,22 +371,23 @@ export function loadProjectsDocument(
       },
     };
   }
+  const revision = value.schemaVersion === 1 ? 'v1' : 'v2';
   if (!Array.isArray(value.projects)) {
     return {
       ok: false,
       error: {
         stage: 'schema',
-        revision: 'v1',
+        revision,
         context: 'projects',
         message: 'expected array',
       },
     };
   }
-  return normalizeProjects(value.projects, 'v1');
+  return normalizeProjects(value.projects, revision);
 }
 
 export function formatProjectsDocument(projects: readonly Project[]): ProjectConfigFormatResult {
-  const validated = normalizeProjects(projects, 'v1');
+  const validated = normalizeProjects(projects, 'v2');
   if (!validated.ok) {
     return {
       ok: false,
@@ -354,7 +407,7 @@ export function formatProjectsDocument(projects: readonly Project[]): ProjectCon
       ok: false,
       error: {
         stage: 'format',
-        revision: 'v1',
+        revision: 'v2',
         context: 'document',
         message: error instanceof Error ? error.message : String(error),
       },

@@ -64,28 +64,30 @@ async function disconnectAndReconnect(page: Page) {
   await page.locator('.context-menu-item', { hasText: 'Disconnect' }).click();
   await expect(page.locator('.connect-prompt')).toBeVisible({ timeout: 5_000 });
   await page.locator('.connect-prompt').click();
+  await page.locator('.tab-bar .tab', { hasText: 'Codex' }).click();
   await expect(page.locator('.agent-view:visible')).toBeVisible({ timeout: 5_000 });
   await expectAgentInputReady(page);
 }
 
 test.describe('Canonical Codex provider renderer flow', () => {
-  test('project default opens a Codex official tab and runs normal agent controls', async ({ shelfApp: { page, userDataDir } }) => {
+  test('project startup list opens a Codex official tab and runs normal agent controls', async ({ shelfApp: { page, userDataDir } }) => {
     await setupProject(page);
 
     const panel = await openProjectEdit(page);
-    const agentField = panel.locator('.project-edit-field').filter({ hasText: 'Default provider for new agent tabs' });
-    const providerSelect = agentField.locator('select');
+    await panel.locator('.default-tab-add', { hasText: 'Add Agent' }).click();
+    const agentRow = panel.locator('.default-tab-row', { has: page.locator('.default-tab-kind-agent') });
+    const providerSelect = agentRow.locator('.default-tab-provider');
     await expect(providerSelect.locator('option', { hasText: OFFICIAL_LABEL })).toHaveCount(1);
     await providerSelect.selectOption(CODEX_PROVIDER);
-    await agentField.locator('input[type="checkbox"]').check();
+    await agentRow.locator('.default-tab-name').fill(OFFICIAL_LABEL);
     await panel.locator('.project-edit-footer .conn-btn-next').click();
     await expect(panel).not.toBeVisible({ timeout: 3_000 });
 
-    await expect.poll(async () => (await readProjects(userDataDir))[0]?.defaultAgentProvider)
-      .toBe(CODEX_PROVIDER);
+    await expect.poll(async () => (await readProjects(userDataDir))[0]?.defaultTabs
+      ?.find((tab: any) => tab.kind === 'agent')?.provider).toBe(CODEX_PROVIDER);
 
     await disconnectAndReconnect(page);
-    await expect(page.locator('.tab-bar .tab').first()).toContainText('Codex');
+    await expect(page.locator('.tab-bar .tab', { hasText: 'Codex' })).toHaveCount(1);
     await expect(page.locator('.agent-status-bar:visible')).toContainText('Codex');
 
     await sendAgentPrompt(page, 'text:official-default');

@@ -36,7 +36,7 @@ title: shelf-terminal — Intent → File Index
 | Terminal runner policy | `terminal-runner/` | 依 target facts 選 zsh/bash/PowerShell/Native、建立 project history namespace 與 runner bootstrap |
 | Preload bridge | `preload.ts` | contextBridge 暴露 `window.shelfApi`，純 RPC bridge 到 main |
 | Project canonical repository | `projects/projects-repository.ts` + `projects/repository-provider.ts` | ready-only canonical project queries/mutations、main-owned identity、durable publish 與 cleanup retry boundary |
-| Project config persistence | `projects/project-config-file-io.ts` + `projects/project-config-codec.ts` + `projects/project-config-persistence.ts` | opaque atomic File I/O、v0/v1 loader/current formatter 與 `projects.json` facade |
+| Project config persistence | `projects/project-config-file-io.ts` + `projects/project-config-codec.ts` + `projects/project-config-persistence.ts` | opaque atomic File I/O、v0/v1 legacy + v2 current loader/formatter 與 `projects.json` facade |
 | Project delete cleanup | `projects/project-cleanup.ts` | Config commit 後的 per-project storage/secrets cleanup 聚合 |
 | 專案 env 解析（plain+secret 合併） | `project-env.ts` | `resolveProjectEnv(projectId)`：合併 plain（projectConfig）+ 解密 secret 成單一注入 EnvMap，兩個 spawn 面共用的唯一出口 |
 | Secret 值加密核心（純） | `secret-crypto.ts` | AES-256-GCM `encryptWithKey`/`decryptWithKey`，versioned+authenticated blob，無 electron、可測 |
@@ -213,13 +213,13 @@ title: shelf-terminal — Intent → File Index
 | Memory rollup formatting | `components/MemoryDisplay.tsx` | footer/per-tab summary selection primitives 與 MiB/GiB display formatting |
 | Sidebar | `components/Sidebar.tsx` | Project 列表、connected-only filter、displayed-label search/navigation、拖曳排序、右鍵選單、worktree branch、連線健康 status-dot |
 | Tab bar | `components/TabBar.tsx` | Tab 列表、拖曳排序、雙擊重命名、unread badge、PM Active badge |
-| 快速指令選擇器 | `components/CommandPicker.tsx` | ⌘P overlay，過濾 + 執行 per-project 快速指令 |
+| 快速指令選擇器 | `components/CommandPicker.tsx` + `quick-command-target.ts` | ⌘P overlay，過濾 + Terminal-only target resolution/refusal + 執行 per-project 快速指令 |
 | 開發工具面板 | `components/DevToolsPanel.tsx` | ⌘D 右側 panel，Base64/JSON/URL/UUID/Timestamp/Hash 工具 |
 | 資料夾選擇器 | `components/FolderPicker.tsx` | 兩步驟選資料夾，依 effective target 分流為 reopen-existing 或 add intent |
 | 資料夾瀏覽器 | `components/FolderBrowser.tsx` | 純展示元件，顯示目錄清單和 keyboard hints |
 | 頁內搜尋 | `components/SearchBar.tsx` | terminal tab 走 xterm SearchAddon；agent/web tab 走 main findInPage（`shelfApi.find`）+ 命中計數 |
 | Settings 面板 | `components/SettingsPanel.tsx` | 左側 tab 分頁（Terminal / Agent / Models / PM Agent / Web / Shortcuts）；Backup 是獨立右側 operation panel，不在 Settings |
-| Worktree 建立 | `components/WorktreeDialog.tsx` | 顯示 target、configured note source/list 狀態、接收 branch/note prefill、選 boot provider 後建立 sub-project |
+| Worktree 建立 | `components/WorktreeDialog.tsx` + `worktree-child-config.ts` | 顯示 target、configured note source/list 狀態、接收 branch/note prefill、繼承完整 startup tabs 或以 Agent + Terminal 覆蓋後建立 sub-project |
 | Worktree proposal prefill helper | `worktree-prefill.ts` | 純函式正規化 New Worktree proposal 帶入的多 note path prefill |
 | Feature-note config edit rule | `feature-note-config-edit.ts` | main config canonicalization 與 child snapshot read-only save rule |
 | Worktree 關閉 gate | `components/WorktreeCloseGate.tsx` | Finish/Abandon close transaction：merge-back、note restore、teardown、branch delete、completion event |
@@ -235,7 +235,7 @@ title: shelf-terminal — Intent → File Index
 | 右側 sidebar toggle | `store.toggleRightSidebar(feature)` | PM/Notes/Skills/MCP/Backup/DevTools 六個 panel 共用的 toggle action |
 | Tooltip 快捷鍵 helper | `utils/format-keybinding.ts` | 純函式 `formatCombo` / `tooltipWithShortcut` |
 | PM stream reducer | `components/pm-view-reducer.ts` | 純 reducer 管 PM streaming/streamText/streamToolCalls/error 四個 UI state |
-| Project 編輯面板 | `components/ProjectEditPanel.tsx` | 改名、init script、feature-note directory、default tabs、quick commands、Clear uploaded files |
+| Project 編輯面板 | `components/ProjectEditPanel.tsx` + `tab-default-template.ts` | 改名、init script、feature-note directory、typed startup tabs、Terminal-only quick commands、runtime tab → default template、Clear uploaded files |
 | Agent UI 訊息持久化 | `storage/agent-history.ts` | IndexedDB 存 UI messages keyed by sessionId（append-only delta save） |
 | Canonical Agent message type | `src/shared/types.ts` (`AgentMessage`) | 9-variant 渲染原語 discriminated union（inline + fold_* 卡片類） |
 | Inline SVG icon | `components/icons.tsx` | 手繪原創 line icon（24x24，`currentColor`），footer toggle 用 |

@@ -103,6 +103,10 @@ function createProject(id: ProjectId, input: ProjectCreateInput): Project {
   if (typeof input.connection !== 'object' || input.connection === null) {
     throw new ProjectRepositoryError('add', 'project connection must be an object');
   }
+  const defaultTabs = input.defaultTabs ?? [{ name: 'Terminal' }];
+  if (defaultTabs.length === 0) {
+    throw new ProjectRepositoryError('add', 'project defaultTabs must not be empty');
+  }
 
   return detachedProject({
     id,
@@ -112,14 +116,12 @@ function createProject(id: ProjectId, input: ProjectCreateInput): Project {
     maxTabs: input.maxTabs,
     initScript: input.initScript ?? null,
     envPlain: input.envPlain ?? {},
-    defaultTabs: input.defaultTabs ?? [],
+    defaultTabs,
     quickCommands: input.quickCommands ?? [],
     featureNoteDir: input.featureNoteDir ?? null,
     parentProjectId: input.parentProjectId ?? null,
     worktreeBranch: input.worktreeBranch ?? null,
     baseBranch: input.baseBranch ?? null,
-    defaultAgentProvider: input.defaultAgentProvider ?? null,
-    openAgentOnConnect: input.openAgentOnConnect ?? false,
     agentSessionIds: {},
     agentPrefs: input.agentPrefs ?? {},
   });

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useStore, getProjectById, getResolvedDefaultAgentProvider, projectDisplayLabel } from '../store';
+import { useStore, getProjectById, projectDisplayLabel } from '../store';
 import { on, emit, emitAgent, Events } from '../events';
 import { enqueuePendingSend } from '../agentTabStore';
 import { debugLog } from '../debugLog';
@@ -67,7 +67,7 @@ export function WorktreeDialog() {
   const [noteListError, setNoteListError] = useState<string | null>(null);
   const [selectedNotes, setSelectedNotes] = useState<Set<string>>(() => new Set());
   const [baseBranch, setBaseBranch] = useState<string | null>(null);
-  const [defaultAgentProvider, setDefaultAgentProvider] = useState<AgentProvider | ''>('');
+  const [startupAgentProvider, setStartupAgentProvider] = useState<AgentProvider | ''>('');
   const inputRef = useRef<HTMLInputElement>(null);
   const requestGenerationRef = useRef(0);
 
@@ -86,6 +86,7 @@ export function WorktreeDialog() {
       setNoteListError(null);
       setSelectedNotes(new Set());
       setBaseBranch(null);
+      setStartupAgentProvider('');
 
       // Fetch the base repo's in-progress notes for the picker. Pre-select when
       // there's exactly one (the common case: one feature under discussion);
@@ -94,7 +95,6 @@ export function WorktreeDialog() {
       if (proj) {
         const configuredDir = proj.featureNoteDir;
         setFeatureNoteDir(configuredDir ?? null);
-        setDefaultAgentProvider(getResolvedDefaultAgentProvider(proj.id) ?? '');
         window.shelfApi.git.branchList(proj.connection, proj.cwd)
           .then((branches) => {
             if (requestGenerationRef.current !== requestGeneration) return;
@@ -217,7 +217,7 @@ export function WorktreeDialog() {
         cwd: result.path,
         worktreeBranch: branch,
         baseBranch: result.baseBranch,
-        defaultAgentProvider: defaultAgentProvider || undefined,
+        startupAgentProvider: startupAgentProvider || undefined,
       });
       const childProject = await new Promise<Project>((resolve, reject) => {
         emit(Events.ADD_PROJECT, childInput, (settled: { ok: true; project: Project } | { ok: false; error: unknown }) => {
@@ -262,7 +262,7 @@ export function WorktreeDialog() {
     //    seeded, has context to read). Deterministic post-store connect lives in
     //    App, keyed on the store — avoids the bus handlers' stale-projects closure.
     setOpen(false);
-  }, [input, projectId, projects, creating, selectedNotes, defaultAgentProvider]);
+  }, [input, projectId, projects, creating, selectedNotes, startupAgentProvider]);
 
   const toggleSelectedNote = useCallback((path: string) => {
     setSelectedNotes((current) => {
@@ -356,16 +356,16 @@ export function WorktreeDialog() {
             </div>
           )}
           <label className="worktree-note-picker">
-            <span className="worktree-note-picker-label">Agent provider</span>
+            <span className="worktree-note-picker-label">Startup tabs override</span>
             <select
-              className="worktree-select"
-              value={defaultAgentProvider}
-              onChange={(e) => setDefaultAgentProvider(e.target.value as AgentProvider)}
+              className="worktree-select worktree-startup-tabs-override"
+              value={startupAgentProvider}
+              onChange={(e) => setStartupAgentProvider(e.target.value as AgentProvider | '')}
               disabled={creating}
             >
-              <option value="">Select a provider</option>
+              <option value="">Inherit project tabs</option>
               {visibleAgentProviderEntries(import.meta.env.DEV).map(([id, meta]) => (
-                <option key={id} value={id}>{meta.label}</option>
+                <option key={id} value={id}>Agent ({meta.label}) + Terminal</option>
               ))}
             </select>
           </label>
@@ -391,7 +391,7 @@ export function WorktreeDialog() {
           <button className="conn-btn conn-btn-cancel" onClick={() => setOpen(false)}>Cancel</button>
           <button
             className="conn-btn conn-btn-next"
-            disabled={!input.trim() || !defaultAgentProvider || creating}
+            disabled={!input.trim() || creating}
             onClick={handleCreate}
           >
             {creating ? 'Creating...' : 'Create'}

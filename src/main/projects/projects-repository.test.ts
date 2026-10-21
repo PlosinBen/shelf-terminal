@@ -17,14 +17,12 @@ function project(id: string, parentProjectId: string | null = null): Project {
     maxTabs: 5,
     initScript: null,
     envPlain: {},
-    defaultTabs: [],
+    defaultTabs: [{ name: 'Terminal' }],
     quickCommands: [],
     featureNoteDir: null,
     parentProjectId,
     worktreeBranch: parentProjectId ? `feature/${id}` : null,
     baseBranch: parentProjectId ? 'main' : null,
-    defaultAgentProvider: null,
-    openAgentOnConnect: false,
     agentSessionIds: {},
     agentPrefs: {},
   };
@@ -114,6 +112,17 @@ describe('main projects repository', () => {
 
     await expect(repository.add(createInput())).rejects.toBeInstanceOf(ProjectRepositoryError);
     expect(repository.getAll()).toEqual([project('existing')]);
+  });
+
+  it('rejects an explicitly empty startup list before persistence', async () => {
+    const config = persistence();
+    const repository = readyRepository(config.value, () => 'new-id');
+
+    await expect(repository.add(createInput({ defaultTabs: [] }))).rejects.toMatchObject({
+      name: 'ProjectRepositoryError',
+      operation: 'add',
+    });
+    expect(config.save).not.toHaveBeenCalled();
   });
 
   it('rejects a duplicate effective target before persistence', async () => {

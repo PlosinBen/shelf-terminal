@@ -26,13 +26,13 @@ related:
 
 **Do not change casually because:** Moving this check only into the renderer makes an invalid agent call look successful and hides the error from the actor that can correct it.
 
-## worktree#3 — A child may override its inherited boot provider at creation  ·  [Decision]
+## worktree#3 — A child inherits startup tabs or replaces the whole list  ·  [Decision]
 
-**Decision:** The New Worktree dialog defaults its provider selector to the parent provider (or Claude when unset) and passes the selected provider into the child config. The parent configuration is not changed.
+**Decision:** New Worktree defaults to `Inherit project tabs`, copying the parent's complete ordered `defaultTabs`. Its optional registry-driven `Startup tabs override` replaces the child's whole list with exactly the selected Provider Name Agent plus one plain Terminal. It does not merge with or choose one inherited Agent row. The child still inherits Quick Commands and preferences but never inherits Agent session ids.
 
-**Reason:** Separate worktrees can host different agent vendors while retaining the existing inherited default when no choice is made.
+**Reason:** Planning on the parent may accumulate an intentional multi-tab layout that should usually carry into development. The explicit whole-list override keeps the exceptional “one selected Agent plus Terminal” workflow deterministic without ambiguous per-Agent replacement rules.
 
-**Do not change casually because:** Provider choices come from the central provider registry; do not hardcode a separate worktree list.
+**Do not change casually because:** Provider choices and labels come from the central registry; do not hardcode a separate worktree list, mutate the parent, inherit session ids, or silently rewrite Quick Commands whose named targets become stale.
 
 ## worktree#4 — Finish is fast-forward-only and recovery rebases the feature  ·  [Decision]
 

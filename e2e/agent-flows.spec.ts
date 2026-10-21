@@ -129,6 +129,31 @@ test.describe('agent flows via fake provider', () => {
       await expect(menu.locator('.context-menu-item', { hasText: 'Copilot ACP' })).toHaveCount(0);
     });
 
+    test('opens the explicitly selected provider and disables only providers already open', async ({ shelfApp: { page } }) => {
+      await setupProject(page);
+      const providers = [
+        { menu: 'Agent (Claude)', tab: 'Claude' },
+        { menu: 'Agent (Copilot)', tab: 'Copilot' },
+        { menu: 'Agent (Codex)', tab: 'Codex' },
+        { menu: 'Agent (Test Agent)', tab: 'Test Agent' },
+      ];
+
+      for (const [index, provider] of providers.entries()) {
+        await page.locator('.tab-add').click({ button: 'right' });
+        await page.locator('.context-menu-item', { hasText: provider.menu }).click();
+        const openedTab = page.locator('.tab-bar .tab', { hasText: provider.tab });
+        await expect(openedTab).toHaveCount(1, { timeout: 5_000 });
+
+        if (index < providers.length - 1) {
+          await page.locator('.tab-add').click({ button: 'right' });
+          await expect(page.locator('.context-menu-item', { hasText: provider.menu })).toBeDisabled();
+          await openedTab.click();
+        }
+      }
+
+      await expect(page.locator('.tab-bar .tab')).toHaveCount(5);
+    });
+
     test('renders an internal provider name outside assistant replies', async ({ shelfApp: { page } }) => {
       await setupProject(page);
       await page.locator('.tab-add').click({ button: 'right' });

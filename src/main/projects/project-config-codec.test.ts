@@ -15,14 +15,12 @@ function project(id = 'project-a'): Project {
     maxTabs: 5,
     initScript: null,
     envPlain: {},
-    defaultTabs: [],
+    defaultTabs: [{ name: 'Terminal' }],
     quickCommands: [],
     featureNoteDir: null,
     parentProjectId: null,
     worktreeBranch: null,
     baseBranch: null,
-    defaultAgentProvider: null,
-    openAgentOnConnect: false,
     agentSessionIds: {},
     agentPrefs: {},
   };
@@ -50,7 +48,7 @@ describe('project config loader', () => {
     });
   });
 
-  it('loads a current v1 envelope from Uint8Array', () => {
+  it('loads a current v2 envelope from Uint8Array', () => {
     const input = project();
     const data = new TextEncoder().encode(JSON.stringify({
       schemaVersion: PROJECTS_SCHEMA_VERSION,
@@ -63,7 +61,7 @@ describe('project config loader', () => {
   it.each([
     ['malformed JSON', '{', 'parse'],
     ['wrong root shape', '{}', 'schema'],
-    ['unsupported future version', JSON.stringify({ schemaVersion: 2, projects: [] }), 'schema'],
+    ['unsupported future version', JSON.stringify({ schemaVersion: 3, projects: [] }), 'schema'],
     ['invalid connection', JSON.stringify([{
       id: 'bad', name: 'Bad', cwd: '/bad', connection: { type: 'ssh', host: 'x' }, maxTabs: 5,
     }]), 'schema'],
@@ -80,7 +78,7 @@ describe('project config loader', () => {
 });
 
 describe('project config formatter', () => {
-  it('writes an empty canonical collection as a v1 envelope', () => {
+  it('writes an empty canonical collection as a v2 envelope', () => {
     const result = formatProjectsDocument([]);
 
     expect(result.ok).toBe(true);
@@ -104,7 +102,7 @@ describe('project config formatter', () => {
   it('round-trips unknown provider ids as opaque data', () => {
     const input: Project = {
       ...project(),
-      defaultAgentProvider: 'future-provider',
+      defaultTabs: [{ name: 'future-provider', kind: 'agent', provider: 'future-provider' }],
       agentSessionIds: { 'retired-provider': 'session-1' },
       agentPrefs: {
         'future-provider': {
@@ -121,6 +119,56 @@ describe('project config formatter', () => {
     if (!formatted.ok) return;
 
     expect(loadProjectsDocument(formatted.data)).toEqual({ ok: true, value: [input] });
+  });
+
+  it.each([true, false])('migrates a saved v1 provider regardless of openAgentOnConnect=%s', (openAgentOnConnect) => {
+    const legacy = {
+      ...project(),
+      defaultTabs: [],
+      defaultAgentProvider: 'claude',
+      openAgentOnConnect,
+    };
+    const result = loadProjectsDocument(JSON.stringify({ schemaVersion: 1, projects: [legacy] }));
+
+    expect(result).toMatchObject({
+      ok: true,
+      value: [{ defaultTabs: [
+        { name: 'Claude', kind: 'agent', provider: 'claude' },
+        { name: 'Terminal' },
+      ] }],
+    });
+  });
+
+  it.each([true, false])('ignores openAgentOnConnect=%s when v1 has no provider', (openAgentOnConnect) => {
+    const legacy = {
+      ...project(),
+      defaultTabs: [],
+      defaultAgentProvider: null,
+      openAgentOnConnect,
+    };
+    const result = loadProjectsDocument(JSON.stringify({ schemaVersion: 1, projects: [legacy] }));
+
+    expect(result).toMatchObject({ ok: true, value: [{ defaultTabs: [{ name: 'Terminal' }] }] });
+  });
+
+  it('rejects empty and duplicate-provider v2 startup lists', () => {
+    const empty = loadProjectsDocument(JSON.stringify({
+      schemaVersion: 2,
+      projects: [{ ...project(), defaultTabs: [] }],
+    }));
+    expect(empty).toMatchObject({ ok: false, error: { context: 'projects[0].defaultTabs' } });
+
+    const duplicate = formatProjectsDocument([{
+      ...project(),
+      defaultTabs: [
+        { name: 'one', kind: 'agent', provider: 'claude' },
+        { name: 'two', kind: 'agent', provider: 'claude' },
+      ],
+    }]);
+    expect(duplicate).toMatchObject({
+      ok: false,
+      error: { context: 'projects[0].defaultTabs[1].provider' },
+    });
   });
 
   it('rejects a runtime-invalid canonical value', () => {

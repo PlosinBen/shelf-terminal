@@ -34,6 +34,17 @@ Canonical project mutation
   -> publish main canonical collection
   -> authoritative renderer refresh
 
+Ordered startup templates
+  -> connect handler, index order
+       -> Terminal template -> terminal runtime tab
+       -> Web template -> web runtime tab
+       -> Agent template -> live-registry validation -> agent runtime tab
+
+Quick Command execution
+  -> resolve current or named runtime tab
+  -> Terminal -> terminal input
+  -> Agent / Web / missing -> visible refusal + diagnostic
+
 Folder selection
   -> derive lexical effective target
   -> scan reconciled project order
@@ -54,6 +65,8 @@ Visual project order + runtime tab presence + transient filter mode
 The persistence boundary alone understands raw bytes, legacy/current persisted shapes, schema versions, formatting, atomic replacement, and the nonempty-to-empty backup guard. Missing files produce an empty canonical collection; malformed or unsupported documents fail before a repository becomes ready.
 
 The main repository owns canonical identity, defaults, grouping/order invariants, durable project-level mutations, and main-process queries. New project creation rejects an effective target already present in the canonical collection, while document loading and project save/update do not apply retroactive target validation. The repository publishes a candidate collection only after persistence succeeds. Removed-project storage and secrets cleanup is post-commit work with an explicit retry result, not part of the config transaction.
+
+The canonical startup list is non-empty and is the only connect-time tab authority. Tab variants retain only their own payload, while Agent provider availability is a runtime registry concern. Manual Agent creation and runtime-to-default serialization use explicit kind/provider data; Quick Commands remain Terminal-only at both configuration and execution boundaries.
 
 The renderer repository client is a stateless operation adapter private to the App-side coordinator. A successful mutation is followed by an authoritative collection query; only that result is reconciled into renderer state. A failed mutation leaves the current renderer collection unchanged, while a post-commit refresh failure retries only the query.
 
