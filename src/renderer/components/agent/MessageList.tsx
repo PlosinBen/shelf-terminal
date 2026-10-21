@@ -36,7 +36,11 @@ export function MessageList({ tabId, visible }: Props) {
   const timeline = useMemo(() => buildMessageTimeline(messages), [messages]);
 
   const listRef = useRef<HTMLDivElement>(null);
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollToBottom = useCallback((behavior: ScrollBehavior) => {
+    const el = listRef.current;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior });
+  }, []);
   // User intent to "stick to the bottom". Updated only by user-driven scroll
   // inputs; programmatic scrolls honour intent, not geometry. Ref is source of
   // truth (read by effects without re-render); FAB visibility mirrors it.
@@ -97,21 +101,21 @@ export function MessageList({ tabId, visible }: Props) {
   // Auto-follow new content. Reads intent only.
   useEffect(() => {
     if (followBottomRef.current) {
-      bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+      scrollToBottom('smooth');
     }
     // Deps: messages (new bubble / chunk / upsert), isExecutionActive (spinner flip),
     // pendingSends (queued chip below the timeline).
-  }, [messages, isExecutionActive, pendingSends]);
+  }, [messages, isExecutionActive, pendingSends, scrollToBottom]);
 
-  // When tab becomes visible again, catch up (scrollIntoView is a no-op while
-  // display:none, so auto-follow couldn't run).
+  // When tab becomes visible again, catch up because the hidden list had no
+  // usable scroll geometry while auto-follow effects were running.
   useEffect(() => {
     if (!visible) return;
     if (!followBottomRef.current) return;
     requestAnimationFrame(() => {
-      bottomRef.current?.scrollIntoView({ behavior: 'auto' });
+      scrollToBottom('auto');
     });
-  }, [visible]);
+  }, [visible, scrollToBottom]);
 
   const hasVisibleStreaming = messages.some((m) => {
     if (m.type === 'reply' && m.streaming) return true;
@@ -161,14 +165,12 @@ export function MessageList({ tabId, visible }: Props) {
           </div>
         ))}
 
-        <div ref={bottomRef} />
-
         {showJumpFab && (
           <button
             className="agent-jump-fab"
             onClick={() => {
               setFollow(true);
-              bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+              scrollToBottom('smooth');
             }}
             title="Jump to latest"
             aria-label="Jump to latest"

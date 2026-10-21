@@ -186,6 +186,33 @@ test.describe('agent flows via fake provider', () => {
       await expect(page.locator('.agent-status-label:visible')).toHaveText('idle', { timeout: 5_000 });
     });
 
+    test('auto-follow scrolls only the message history', async ({ shelfApp: { page } }) => {
+      await page.evaluate(() => {
+        const trackedWindow = window as typeof window & { __agentScrollIntoViewCalls?: number };
+        trackedWindow.__agentScrollIntoViewCalls = 0;
+        const original = Element.prototype.scrollIntoView;
+        Element.prototype.scrollIntoView = function (arg?: boolean | ScrollIntoViewOptions) {
+          if (this.parentElement?.classList.contains('agent-messages')) {
+            trackedWindow.__agentScrollIntoViewCalls = (trackedWindow.__agentScrollIntoViewCalls ?? 0) + 1;
+          }
+          original.call(this, arg);
+        };
+      });
+      await setupProject(page);
+      await openAgentTab(page);
+
+      const longReply = Array.from({ length: 100 }, (_, index) => `history-line-${index}`).join('\n');
+      await sendAgentPrompt(page, `text:${longReply}`);
+
+      const messages = page.locator('.agent-messages:visible');
+      await expect(messages).toContainText('history-line-99', { timeout: 5_000 });
+      await expect.poll(() => messages.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
+      expect(await page.evaluate(() => (
+        window as typeof window & { __agentScrollIntoViewCalls?: number }
+      ).__agentScrollIntoViewCalls)).toBe(0);
+      await expect.poll(() => page.locator('.terminal-view').evaluate((el) => el.scrollTop)).toBe(0);
+    });
+
     test('completion summary renders as a normal assistant reply, not a task note', async ({ shelfApp: { page } }) => {
       await setupProject(page);
       await page.locator('.tab-add').click({ button: 'right' });

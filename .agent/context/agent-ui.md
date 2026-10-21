@@ -242,3 +242,13 @@ AuthPane 的手動 `checkAuth` 是不同 surface：busy / error 由 AuthPane 自
 **Fix / note**：dirty save 在既有 `by-session` index 上掃描一次，以 `(sessionId, msg.id)` 找到現存 `dbId`；新 id 用 `add()`，既有 id 用 `put()` 更新原 row。這維持 v4 schema、不清理或改寫既有重複資料，並讓未來 late snapshot 不再新增副本。不要用 load-time dedupe 取代 write-side identity contract，否則 storage 仍會持續累積錯誤 rows。
 
 **Related**：`agent-ui#9`、`agent-providers#37`、`src/renderer/storage/agent-history.ts`。
+
+## agent-ui#12 — Message auto-follow 只能捲動 timeline 本身  ·  [Gotcha]
+
+**Symptom**：Agent View 的 message history 看似被壓成一小條，input 與 status bar 整體上移，pane 底部留下空白；DevTools 顯示 `.agent-messages` 的實際高度仍然正確，把 `.terminal-view.scrollTop` 設回 `0` 後版面立即恢復。
+
+**Root cause**：對 timeline 尾端 sentinel 呼叫 `scrollIntoView()` 時，瀏覽器可以為了讓 target 可見而捲動所有 scrollable ancestors；`overflow: hidden` 只隱藏 scrollbar，仍允許程式化捲動。因此 auto-follow 除了捲 message history，也可能改變 `.terminal-view.scrollTop`，讓整個 AgentView 被祖先 viewport 裁切。
+
+**Fix / note**：auto-follow、tab 重新顯示與 Jump to latest 都直接對 `.agent-messages` 呼叫 `scrollTo({ top: scrollHeight })`。不要用 `scrollIntoView()`，也不要靠每次強制重設外層 `scrollTop = 0` 掩蓋已發生的位移；回歸測試必須同時確認 timeline 能到底、且 `.terminal-view.scrollTop` 維持 `0`。
+
+**Related**：`src/renderer/components/agent/MessageList.tsx`、`e2e/agent-flows.spec.ts`。
