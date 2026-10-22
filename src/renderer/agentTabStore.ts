@@ -1,3 +1,4 @@
+import type { AgentInitRecovery } from '@shared/agent-init-recovery';
 import { useSyncExternalStore } from 'react';
 import type { AgentMsg } from './components/AgentMessage';
 import type { AgentFile, AgentInitPhase, AgentLoginPrompt, AgentLoginResult, AgentPrefs, AgentProvider, AgentQueueItem, AuthMethod, NormalizedTask, TaskEvent } from '../shared/types';
@@ -124,6 +125,7 @@ export interface AgentTabState {
   // tri-state initStatus stays the control signal). Null = generic spinner text.
   initPhase: AgentInitPhase | null;
   initError: string | null;
+  initRecovery?: AgentInitRecovery;
 }
 
 // ── Module-scoped state ──
@@ -949,8 +951,9 @@ export function setInitStatus(
   status: 'starting' | 'ready' | 'failed',
   error: string | null = null,
   phase: AgentInitPhase | null = null,
+  recovery?: AgentInitRecovery,
 ) {
-  update(tabId, (prev) => ({ ...prev, initStatus: status, initError: error, initPhase: phase }));
+  update(tabId, (prev) => ({ ...prev, initStatus: status, initError: error, initPhase: phase, initRecovery: status === 'failed' ? recovery : undefined }));
 }
 
 // ── Selectors ──

@@ -158,6 +158,7 @@ export function bindAgentStoreSubscriptions(): () => void {
       status.state,
       status.state === 'failed' ? status.reason : null,
       status.state === 'starting' ? status.phase ?? null : null,
+      status.state === 'failed' ? status.recovery : undefined,
     );
   });
 

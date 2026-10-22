@@ -1,3 +1,4 @@
+import { recoveryFromError } from '@shared/agent-init-recovery';
 import * as readline from 'readline';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -572,7 +573,7 @@ rl.on('line', (line) => {
           // `error`, and remote.ts resolves an all-empty caps (perm modes vanish).
           // Loud so the true cause (e.g. Copilot listModels network throw) is visible.
           serverLog('error', 'caps', `${provider} gatherCapabilities threw: ${err?.message ?? err} reqId=${msg.requestId ?? ''}`);
-          send({ type: 'capabilities', requestId: msg.requestId ?? '', error: err?.message ?? String(err) });
+          send({ type: 'capabilities', requestId: msg.requestId ?? '', error: err?.message ?? String(err), recovery: recoveryFromError(err) });
         }
       })();
       break;

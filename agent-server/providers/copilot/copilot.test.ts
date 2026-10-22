@@ -1044,7 +1044,10 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
 
     await expect(backend.gatherCapabilities!(
       '/tmp/project', undefined, undefined, { model: 'retired-model' },
-    )).rejects.toThrow('did not advertise saved model value "retired-model"');
+    )).rejects.toMatchObject({
+      message: 'Copilot did not advertise saved model value \"retired-model\"',
+      recovery: { kind: 'clear_saved_model', model: 'retired-model' },
+    });
 
     expect(setConfigCalls).toEqual([]);
     expect(sessionOut).not.toContainEqual(expect.objectContaining({ type: 'capabilities' }));

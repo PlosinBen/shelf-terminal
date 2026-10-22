@@ -1,3 +1,4 @@
+import { recoveryFromError } from '@shared/agent-init-recovery';
 import { BrowserWindow, ipcMain } from 'electron';
 import { IPC } from '@shared/ipc-channels';
 import { log } from '@shared/logger';
@@ -428,7 +429,7 @@ async function startSession(
     }).catch((err) => {
       log.error('agent', `${tag} capabilities error: ${err.message}`);
       log.flushTrace('agent', `${tag} init failed`);
-      send(IPC.AGENT_INIT_STATUS, tabId, { state: 'failed', reason: err.message });
+      send(IPC.AGENT_INIT_STATUS, tabId, { state: 'failed', reason: err.message, recovery: recoveryFromError(err) });
     });
   } else {
     // Backend that exposes no capabilities is still "ready" — nothing to wait for.
@@ -585,7 +586,7 @@ async function reinitAfterLogin(tabId: string): Promise<void> {
   } catch (err: any) {
     const reason = err?.message ?? String(err);
     log.error('agent', `${tag} post-login re-init failed: ${reason}`);
-    send(IPC.AGENT_INIT_STATUS, tabId, { state: 'failed', reason });
+    send(IPC.AGENT_INIT_STATUS, tabId, { state: 'failed', reason, recovery: recoveryFromError(err) });
   }
 }
 

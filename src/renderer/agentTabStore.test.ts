@@ -1,3 +1,4 @@
+import { AgentInitRecoveryKind } from '@shared/agent-init-recovery';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { AgentMsg } from './components/AgentMessage';
 
@@ -661,6 +662,16 @@ describe('agentTabStore — decisions / auth / init', () => {
     expect(__getTabForTests(TAB)!.pendingPicker?.id).toBe('p1');
     setLocalPicker(TAB, { key: 'model' });
     expect(__getTabForTests(TAB)!.localPicker?.key).toBe('model');
+  });
+
+  it('clears recovery on a new attempt or ordinary failure', () => {
+    const recovery = { kind: AgentInitRecoveryKind.CLEAR_SAVED_MODEL, model: 'retired' };
+    setInitStatus(TAB, 'failed', 'unavailable', null, recovery);
+    expect(__getTabForTests(TAB)!.initRecovery).toEqual(recovery);
+    setInitStatus(TAB, 'starting');
+    expect(__getTabForTests(TAB)!.initRecovery).toBeUndefined();
+    setInitStatus(TAB, 'failed', 'network');
+    expect(__getTabForTests(TAB)!.initRecovery).toBeUndefined();
   });
 
   it('setAuthRequired / setInitStatus', () => {

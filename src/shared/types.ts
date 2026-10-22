@@ -1,3 +1,4 @@
+import type { AgentInitRecovery } from './agent-init-recovery';
 // ── Agent types ──
 
 // AgentProvider is DERIVED from the single-source provider registry (label + deploy
@@ -154,7 +155,7 @@ export type AgentInitPhase = 'deploying' | 'connecting' | 'checking-auth';
 export type AgentInitStatus =
   | { state: 'starting'; phase?: AgentInitPhase }
   | { state: 'ready' }
-  | { state: 'failed'; reason: string };
+  | { state: 'failed'; reason: string; recovery?: AgentInitRecovery };
 
 /**
  * Interactive device-flow login (Copilot). `AgentLoginPrompt` is the

@@ -1,3 +1,4 @@
+import { AgentInitializationError, readInitRecovery } from '@shared/agent-init-recovery';
 import { log } from '@shared/logger';
 import { SHELF_PERMISSION_CONTROL } from '@shared/permission-controls';
 import type { AgentPrefs, Connection, AgentProvider, AgentInitPhase, AgentQueueItem, ProviderModel, TaskEvent, ConnectionHealth, ConnectionHealthState } from '@shared/types';
@@ -230,7 +231,7 @@ export function createRemoteBackend(
         clearTimeout(timeout);
         if ((payload as any).error) {
           log.warn('agent-remote', `getCapabilities RPC returned error (${provider}) reqId=${requestId}: ${(payload as any).error} — rejecting probe`);
-          reject(new Error((payload as any).error));
+          reject(new AgentInitializationError((payload as any).error, readInitRecovery((payload as any).recovery)));
           return;
         }
         resolve({

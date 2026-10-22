@@ -1,3 +1,4 @@
+import { AgentInitializationError, AgentInitRecoveryKind } from '@shared/agent-init-recovery';
 // Copilot agent provider over ACP (ServerBackend), peer to createCodexBackend.
 // Uses the shared, semantics-free acp/ toolkit for the runtime and OWNS copilot
 // specifics (binary launch via `copilot --acp`, device-flow login, config-home).
@@ -443,7 +444,8 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
       throw new Error(`Copilot did not advertise ${label} as a select option`);
     }
     if (!selectOptionValues(option).includes(value)) {
-      throw new Error(`Copilot did not advertise saved ${label} value "${value}"`);
+      throw new AgentInitializationError(`Copilot did not advertise saved ${label} value "${value}"`,
+        label === MODEL_CATEGORY ? { kind: AgentInitRecoveryKind.CLEAR_SAVED_MODEL, model: value } : undefined);
     }
   }
 

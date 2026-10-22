@@ -1,3 +1,4 @@
+import type { AgentInitRecovery } from '@shared/agent-init-recovery';
 export type StatusSegmentSeverity = 'normal' | 'info' | 'warning' | 'critical';
 
 export interface StatusSegment {
@@ -87,7 +88,7 @@ export type OutgoingMessage = WireEnvelope & (
    * requestId optional to cover both; requestId-less, execution-less variants
    * are delivered through main's session event sink.
    */
-  | ({ type: 'capabilities'; requestId?: string; error?: string } & Partial<ProviderCapabilities> & {
+  | ({ type: 'capabilities'; requestId?: string; error?: string; recovery?: AgentInitRecovery } & Partial<ProviderCapabilities> & {
       currentModel?: string;
       currentEffort?: string;
       currentPermissionMode?: string;
