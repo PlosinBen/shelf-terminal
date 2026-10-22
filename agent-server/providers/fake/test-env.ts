@@ -5,3 +5,5 @@ export const FAKE_TEST_ENV = {
   POST_LOGIN_CAPS_FAIL: 'SHELF_TEST_POST_LOGIN_CAPS_FAIL',
   NATIVE_PERMISSIONS: 'SHELF_TEST_NATIVE_PERMISSIONS',
 } as const;
+
+export const FAKE_RETIRED_MODEL = 'fake-retired-model';

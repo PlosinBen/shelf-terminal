@@ -142,6 +142,14 @@ Dual-purpose: a one-shot RPC response carrying `requestId` (matched in main's `o
 
 For native state, a provider update or successful config response publishes the full relevant descriptor snapshot. Consumers replace from that truth instead of retaining stale options/current values. Missing unadvertised controls are omitted; malformed advertised controls fail loud.
 
+### 初始化失敗與恢復資訊
+
+Authoritative types: `AgentInitRecovery` / `AgentInitRecoveryKind` in `src/shared/agent-init-recovery.ts`, capabilities response in `agent-server/providers/types.ts`, and `AgentInitStatus` in `src/shared/types.ts`.
+
+Capabilities RPC 失敗保留 `error` 字串，可附 `recovery: { kind: 'clear_saved_model', model: string }`。`model` 是該次失敗使用的 saved selection，供恢復操作檢查設定是否已變；不是推薦替代模型。Main 將相同 metadata 傳到 failed init status。缺少 recovery 或未知／不合法 metadata 不開啟恢復操作，未知資料需 log；一般 Retry 仍可使用。
+
+Renderer 的 `agent:recoverModel { tabId }` 與 `agent:retryInit { tabId }` 是交給 App 的本地操作意圖，不是轉送 provider 的 IPC。普通 Retry 先刷新 canonical prefs，不刪模型，避免沿用前次保存後刷新失敗留下的舊 snapshot。處理器讀最新 project/tab state、保存 model 刪除，再沿用既有 destroy/init 通道；starting、ready 或新普通失敗均清除舊 recovery。
+
 ## plan side-channel — `type: 'plan'`
 
 State update ("current plan = X"), NOT a timeline entry. Replace-semantics; empty `content` hides the panel. Forwarded to `IPC.AGENT_PLAN` → `agentTabStore.currentPlan` (never the message timeline). See agent-ui#1.

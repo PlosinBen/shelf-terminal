@@ -1,3 +1,4 @@
+import { createModelRecovery } from './agent-model-recovery';
 import React, { useEffect, useState } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { TabBar } from './components/TabBar';
@@ -31,10 +32,10 @@ import type { ExternalUrlIntentDecision, ExternalUrlIntentInput } from '@shared/
 import type { Project, ProjectCreateInput } from '@shared/projects';
 import { disposeTerminal } from './components/TerminalView';
 import { teardownTab } from './tab-teardown';
-import { on, emit, Events, onAgent, onBackup, onNewAgentTab } from './events';
+import { on, emit, Events, onAgent, emitAgent, onBackup, onNewAgentTab } from './events';
 import { bindAgentIPCGroup } from './events';
 import { bindAgentStoreSubscriptions } from './agentTabSubscriptions';
-import { setAuthError, setInMemoryMax, setSaveThrottleMs } from './agentTabStore';
+import { setAuthError, setInMemoryMax, setSaveThrottleMs, peekAgentTab, setInitStatus, setCapabilities } from './agentTabStore';
 import { getTheme, buildThemeVars } from './themes';
 import { clearAgentSession } from './storage/agent-history';
 import { bindProcessMemorySummary } from './process-memory-sync';
@@ -534,6 +535,25 @@ export function App() {
       emit(Events.WORKTREE_CLOSE, projectId, 'finish');
     });
 
+    const recoverModel = createModelRecovery({
+      project: (tabId) => getProjectViews().find((project) => project.tabs.some((tab) => tab.id === tabId)),
+      tab: peekAgentTab,
+      save: (id, changes) => projectCoordinator.save(id, changes),
+      refresh: () => projectCoordinator.refresh(),
+      status: (tabId, state, error, recovery) => setInitStatus(tabId, state, error ?? null, null, recovery),
+      restart: (tabId, tab, project) => {
+        emitAgent('agent:destroy', { tabId });
+        setCapabilities(tabId, null);
+        emitAgent('agent:init', {
+          tabId, cwd: project.cwd, connection: project.connection,
+          provider: tab.provider, sessionId: tab.sessionId,
+          opts: { intent: project.agentPrefs[tab.provider], projectId: project.id },
+        });
+      },
+    });
+    const offRecoverModel = onAgent('agent:recoverModel', ({ tabId }) => { void recoverModel(tabId); });
+    const offRetryInit = onAgent('agent:retryInit', ({ tabId }) => { void recoverModel(tabId, false); });
+
     const offConnectProject = on(Events.CONNECT_PROJECT, async (projectId: string) => {
       let proj = getProjectById(projectId);
       if (!proj || proj.tabs.length > 0) return;
@@ -684,7 +704,7 @@ export function App() {
       }
     });
 
-    return () => { offCloseTab(); offRemoveProject(); offWorktreeFinishCompleted(); offNewTab(); offNewAgentTab(); offNewWebTab(); offOpenAuthTerminal(); offOpenWebTab(); offProposeWorktreeCreate(); offProposeWorktreeFinish(); offConnectProject(); offOpenExistingProject(); offAutoConnect(); offDisconnectProject(); offAddProject(); offUpdateProject(); offReorderProjects(); offToggleSplit(); offSwitchBranch(); };
+    return () => { offRetryInit(); offRecoverModel(); offCloseTab(); offRemoveProject(); offWorktreeFinishCompleted(); offNewTab(); offNewAgentTab(); offNewWebTab(); offOpenAuthTerminal(); offOpenWebTab(); offProposeWorktreeCreate(); offProposeWorktreeFinish(); offConnectProject(); offOpenExistingProject(); offAutoConnect(); offDisconnectProject(); offAddProject(); offUpdateProject(); offReorderProjects(); offToggleSplit(); offSwitchBranch(); };
   }, []);
 
   useEffect(() => {

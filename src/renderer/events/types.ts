@@ -31,6 +31,10 @@ export interface AgentEventMap {
   'agent:onLoginDone': { tabId: string; result: AgentLoginResult };
   'agent:onInitStatus': { tabId: string; status: AgentInitStatus };
 
+  // Renderer intents, handled centrally by App (not forwarded to IPC).
+  'agent:recoverModel': { tabId: string };
+  'agent:retryInit': { tabId: string };
+
   // -------- Outbound (bus → IPC) --------
   'agent:init': {
     tabId: string;

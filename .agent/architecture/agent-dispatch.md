@@ -92,3 +92,9 @@ The dispatcher is ondemand: spawned lazily by the first session to a host, reuse
 - **Cache belongs to the front, not the client.** It is the only home that spans executions for every provider, including non-multiplexable ones; a client-level copy is at most redundant, never the source of truth.
 - **Reconnect is connection-centric and fail-loud-first.** The session's execution unit is reconnected from persisted state; the loss is surfaced before the replacement comes up, so dropped in-flight work is always visible.
 - **Front death is an existing state, not a new blast radius.** It collapses to host-level disconnect and recovers by user retry; there is no daemon supervising the daemon and none is added.
+
+## 初始化模型恢復
+
+Provider 判定已保存模型不可用 → capabilities RPC 回傳原錯誤與恢復能力 → main 保留結構化資訊 → renderer 的初始化失敗頁呈現恢復操作。傳輸層只攜帶 metadata，不理解模型清單或替換策略。
+
+使用者選擇恢復 → 中央 renderer coordinator 核對最新 project/provider/model → 保存僅刪除 model 的設定 → 刷新 canonical project → 以原 session identity 重新初始化。保存與刷新完成前不 init，失敗保留可見錯誤；已移除 tab 的結果不重新開啟 tab。Provider 成功回報的新 capabilities 才同步實際模型回 prefs，舊 snapshot 不因 prefs 變更而重新發布。

@@ -1054,6 +1054,36 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
     backend.dispose();
   });
 
+  it('can retry without saved model on the same restored session', async () => {
+    const calls: unknown[] = [];
+    const mock = createMockAcpAgent({
+      agentCapabilities: { sessionCapabilities: { resume: {} } },
+      modes: COPILOT_MODES,
+      configOptions: COPILOT_CONFIG,
+      onSetConfigOption: (params) => calls.push(params),
+    });
+    const backend = createCopilotBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
+    const restore = { sessionId: 'shelf-session', provider: 'copilot' as const, updatedAt: 1, lastSdkSessionId: 'persisted-acp-session' };
+    await expect(backend.gatherCapabilities!(
+      '/tmp/project', 'shelf-session', undefined, { model: 'retired-model' }, undefined, 'app-1', restore,
+    )).rejects.toMatchObject({ recovery: { model: 'retired-model' } });
+    const caps = await backend.gatherCapabilities!(
+      '/tmp/project', 'shelf-session', undefined, {}, undefined, 'app-1', restore,
+    );
+    expect(caps.currentModel).toBe('claude-sonnet-5');
+    expect(calls).toEqual([]);
+    backend.dispose();
+  });
+
+  it('does not offer model recovery for an unavailable effort', async () => {
+    const mock = createMockAcpAgent({ modes: COPILOT_MODES, configOptions: COPILOT_CONFIG });
+    const backend = createCopilotBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
+    await expect(backend.gatherCapabilities!(
+      '/tmp/project', undefined, undefined, { effort: 'retired-effort' },
+    )).rejects.toMatchObject({ recovery: undefined });
+    backend.dispose();
+  });
+
   it('rejects a warm-up setter failure without publishing capabilities or auth fallback', async () => {
     const mock = createMockAcpAgent({
       modes: COPILOT_MODES,

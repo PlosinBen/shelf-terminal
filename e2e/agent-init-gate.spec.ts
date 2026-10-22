@@ -1,4 +1,5 @@
-import { test, expect, openAgentTab } from './helpers';
+import { FAKE_RETIRED_MODEL } from '../agent-server/providers/fake/test-env';
+import { test, expect, openAgentTab, sendAgentPrompt } from './helpers';
 import type { Page } from '@playwright/test';
 
 /**
@@ -34,6 +35,62 @@ async function setupProject(page: Page) {
 }
 
 test.describe('agent init-readiness gate', () => {
+  test.describe('unavailable saved model recovery', () => {
+    test.use({ nativePermissions: true });
+
+    test('clears only the saved model, preserves history, and can send after retry', async ({ shelfApp: { page } }) => {
+      await setupProject(page);
+      await openAgentTab(page);
+      await sendAgentPrompt(page, 'text:history before model retirement');
+      await expect(page.locator('.agent-msg-reply', { hasText: 'history before model retirement' })).toBeVisible();
+      await expect(page.locator('.agent-status-label:visible')).toHaveText('idle');
+      const original = await page.evaluate(async () => (await window.shelfApi.project.getAll())[0]);
+      await page.locator('.sidebar-item').first().click({ button: 'right' });
+      await page.locator('.context-menu-item', { hasText: 'Disconnect' }).click();
+      // Disconnect flushes asynchronously. Establish durable history before
+      // reloading so this test isolates model recovery from save scheduling.
+      await expect.poll(() => page.evaluate(async () => {
+        const db = await new Promise<IDBDatabase>((resolve, reject) => {
+          const request = indexedDB.open('shelf-agent-history', 4);
+          request.onsuccess = () => resolve(request.result);
+          request.onerror = () => reject(request.error);
+        });
+        const rows = await new Promise<any[]>((resolve, reject) => {
+          const request = db.transaction('messages', 'readonly').objectStore('messages').getAll();
+          request.onsuccess = () => resolve(request.result);
+          request.onerror = () => reject(request.error);
+        });
+        db.close();
+        return rows.some(row => row.type === 'reply' && row.content === 'history before model retirement');
+      })).toBe(true);
+      await page.evaluate(async (retired) => {
+        const project = (await window.shelfApi.project.getAll())[0];
+        await window.shelfApi.project.update({ ...project, agentPrefs: {
+          ...project.agentPrefs,
+          claude: { ...project.agentPrefs.claude, model: retired, effort: 'high' },
+        } });
+      }, FAKE_RETIRED_MODEL);
+      await page.reload();
+      await page.locator('.connect-prompt').click();
+      await openAgentTab(page);
+      const overlay = page.locator('.agent-conn-overlay');
+      await expect(overlay).toContainText('Saved model is unavailable');
+      await overlay.getByRole('button', { name: 'Retry', exact: true }).click();
+      await expect(overlay).toContainText('Saved model is unavailable');
+      await expect.poll(() => page.evaluate(async () => (await window.shelfApi.project.getAll())[0].agentPrefs.claude.model)).toBe(FAKE_RETIRED_MODEL);
+      await overlay.getByRole('button', { name: 'Retry with default model', exact: true }).click();
+      await expect(overlay).toHaveCount(0, { timeout: 15_000 });
+      await expect.poll(() => page.evaluate(async () => (await window.shelfApi.project.getAll())[0].agentPrefs.claude.model)).toBe('fake-model');
+      const recovered = await page.evaluate(async () => (await window.shelfApi.project.getAll())[0]);
+      expect(recovered.agentPrefs.claude.effort).toBe('high');
+      expect(recovered.agentSessionIds).toEqual(original.agentSessionIds);
+      await expect(page.locator('.agent-msg-reply', { hasText: 'history before model retirement' })).toBeVisible();
+      await sendAgentPrompt(page, 'text:message after recovery');
+      await expect(page.locator('.agent-msg-reply', { hasText: 'message after recovery' })).toBeVisible();
+      await expect(page.locator('.agent-status-label:visible')).toHaveText('idle');
+    });
+  });
+
   test.describe('caps RPC fails → init locked', () => {
     test.use({ capsFail: true });
 
@@ -46,6 +103,7 @@ test.describe('agent init-readiness gate', () => {
       await expect(overlay).toBeVisible({ timeout: 10_000 });
       await expect(overlay).toContainText('Failed to start agent');
       await expect(overlay.locator('button', { hasText: 'Retry' })).toBeVisible();
+      await expect(overlay.getByRole('button', { name: 'Retry with default model' })).toHaveCount(0);
 
       // The gate: textarea disabled + honest placeholder, so no send can be typed.
       const ta = page.locator('.agent-textarea:visible');
@@ -112,6 +170,7 @@ test.describe('agent init-readiness gate', () => {
       await expect(overlay).toContainText('Failed to start agent');
       await expect(overlay).toContainText('fake post-login capabilities failure');
       await expect(overlay.locator('button', { hasText: 'Retry' })).toBeVisible();
+      await expect(overlay.getByRole('button', { name: 'Retry with default model' })).toHaveCount(0);
       await expect(page.locator('.agent-textarea:visible')).toBeDisabled();
     });
   });

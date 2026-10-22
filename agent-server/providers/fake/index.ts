@@ -1,3 +1,4 @@
+import { AgentInitializationError, AgentInitRecoveryKind } from '@shared/agent-init-recovery';
 import { randomUUID } from 'node:crypto';
 import { formatConfigAck } from '@shared/config-ack';
 import { parseSlashPrefix } from '@shared/slash-prefix';
@@ -6,7 +7,7 @@ import { SHELF_PERMISSION_CONTROL } from '@shared/permission-controls';
 import { PERMISSION_CONTROL_STRATEGIES } from '@shared/permission-controls';
 import { mdTable } from '../md-table';
 import { callMain } from '../../app-tool-client';
-import { FAKE_TEST_ENV } from './test-env';
+import { FAKE_TEST_ENV, FAKE_RETIRED_MODEL } from './test-env';
 import type { AgentPrefs } from '@shared/types';
 import type {
   OutgoingMessage,
@@ -773,6 +774,11 @@ export function createFakeBackend(_representedProvider: AgentProvider = FAKE_PRO
       // Lets an E2E assert the init-readiness gate (locked input, no send, Retry
       // pane) deterministically. Scoped to that spec's own app instance, so it
       // never affects other SHELF_TEST_MODE specs.
+      if (intent?.model === FAKE_RETIRED_MODEL) {
+        throw new AgentInitializationError('Saved model is unavailable', {
+          kind: AgentInitRecoveryKind.CLEAR_SAVED_MODEL, model: intent.model,
+        });
+      }
       if (process.env[FAKE_TEST_ENV.CAPS_FAIL] === '1') {
         throw new Error('fake init failure (SHELF_TEST_CAPS_FAIL)');
       }

@@ -1,3 +1,5 @@
+import { AgentInitRecoveryKind } from '@shared/agent-init-recovery';
+import { emitAgent } from '../../events';
 import React from 'react';
 import { useAgentTab } from '../../agentTabStore';
 import { useStore } from '../../store';
@@ -50,6 +52,11 @@ export function ConnectionOverlay({ tabId, onRetry }: Props) {
             <div className="agent-conn-title">Failed to start agent</div>
             {tab?.initError && <div className="agent-conn-reason">{tab.initError}</div>}
             <button className="conn-btn conn-btn-next agent-conn-btn" onClick={onRetry}>Retry</button>
+            {tab?.initRecovery?.kind === AgentInitRecoveryKind.CLEAR_SAVED_MODEL && (
+              <button className="conn-btn conn-btn-next agent-conn-btn" onClick={() => emitAgent('agent:recoverModel', { tabId })}>
+                Retry with default model
+              </button>
+            )}
           </>
         ) : (
           <>

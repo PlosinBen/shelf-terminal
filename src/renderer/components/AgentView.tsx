@@ -11,12 +11,11 @@ import { ConnectionOverlay } from './agent/ConnectionOverlay';
 import { AuthPane } from './agent/AuthPane';
 import {
   initTab as initTabStore,
-  setCapabilities as setCapabilitiesStore,
-  setInitStatus as setInitStatusStore,
   useAgentTab,
 } from '../agentTabStore';
 import { emitAgent, emit, Events } from '../events';
-import { useStore } from '../store';
+import { debugLog } from '../debugLog';
+import { useStore, getCanonicalProjectById } from '../store';
 
 interface Props {
   tabId: string;
@@ -41,9 +40,8 @@ interface Props {
  *    sub-components don't have it). The config-edit *action* itself is
  *    emitted directly by DecisionPanel (agent:send + configEdit), not
  *    routed through here.
- * 3. **Retry-init** — full re-arm sequence (setInitStatus + emit
- *    destroy + clear capabilities + emit init). Used by MessageList's
- *    failed-init UI.
+ * 3. **Retry-init intent** — delegated to App so retries read durable prefs
+ *    before restarting the same session.
  *
  * Everything else lives in the sub-components subscribing to
  * `useAgentTab(tabId)` directly. AuthPane gates the entire chat UI
@@ -100,10 +98,14 @@ export function AgentView({ tabId, cwd, connection, provider, projectId, visible
   }, [tabId]);
 
   const persistPref = useCallback((partial: Partial<AgentPrefs>) => {
-    const current = projects[projectIndex]?.agentPrefs ?? {};
+    const current = getCanonicalProjectById(projectId)?.agentPrefs;
+    if (!current) {
+      debugLog('agent-prefs', `discarded capabilities for removed project ${projectId}`);
+      return;
+    }
     const updated = { ...current, [provider]: { ...current[provider], ...partial } };
     emit(Events.UPDATE_PROJECT, projectId, { agentPrefs: updated });
-  }, [projectId, projectIndex, provider, projects]);
+  }, [projectId, provider]);
 
   /**
    * Capability-driven persist: when provider re-broadcasts capabilities
@@ -123,25 +125,19 @@ export function AgentView({ tabId, cwd, connection, provider, projectId, visible
    * event.
    */
   const capabilities = tabState?.capabilities;
-  const permissionControl = capabilities?.permissionControl;
-  const nativeMode = permissionControl?.strategy === 'native'
-    ? permissionControl.mode?.currentValue
-    : undefined;
-  const nativePermission = permissionControl?.strategy === 'native'
-    ? permissionControl.permission?.currentValue
-    : undefined;
+  // A prefs mutation must not replay an older provider snapshot (e.g. when
+  // clearing an unavailable model). Persist each newly reported snapshot once.
+  const persistedCapabilities = useRef<typeof capabilities>(undefined);
   useEffect(() => {
-    if (!capabilities) return;
-    const partial = persistedPrefsFromCapabilities(capabilities, savedPrefs);
+    if (!capabilities || capabilities === persistedCapabilities.current) return;
+    persistedCapabilities.current = capabilities;
+    const partial = persistedPrefsFromCapabilities(capabilities, getCanonicalProjectById(projectId)?.agentPrefs[provider]);
     if (Object.keys(partial).length > 0) persistPref(partial);
-  }, [capabilities?.currentModel, capabilities?.currentEffort, capabilities?.currentPermissionMode, nativeMode, nativePermission, savedPrefs?.model, savedPrefs?.effort, savedPrefs?.permissionMode, savedPrefs?.nativeMode, savedPrefs?.nativePermission, persistPref]);
+  }, [capabilities, projectId, provider, persistPref]);
 
   const handleRetryInit = useCallback(() => {
-    setInitStatusStore(tabId, 'starting');
-    emitAgent('agent:destroy', { tabId });
-    setCapabilitiesStore(tabId, null);
-    emitAgent('agent:init', { tabId, cwd, connection, provider, sessionId, opts: { intent: savedPrefs, projectId } });
-  }, [tabId, cwd, connection, provider, sessionId, savedPrefs]);
+    emitAgent('agent:retryInit', { tabId });
+  }, [tabId]);
 
   if (authRequired) {
     return (

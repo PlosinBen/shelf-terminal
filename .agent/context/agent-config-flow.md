@@ -261,3 +261,11 @@ Provider 以 capability strategy 選一條路：
 **Do not change casually because：** 不要從 renderer 再發一條 clear-only prefs RPC、讓 dispatcher parse `/clear`、在 provider 長期 cache project prefs，或只移轉 `QueryInput` 已有的 model／effort而遺漏 native selections。不要用 falsy/no-op status 模擬清除；省略 `contextUsage` 必須繼續保留現值，`null` 才是清除契約。
 
 **Related：** `agent-config-flow#9`、`agent-config-flow#10`、`agent-providers#52`、`contracts/agent-wire-protocol`、`architecture/agent-execution`。
+
+## agent-config-flow#12 — 已保存模型不可用時由使用者清除並重試  ·  [Decision]
+
+**Decision：** Provider 可在初始化失敗時提供結構化的「清除已保存模型」恢復能力。錯誤畫面保留 Retry，另提供 Retry with default model；後者只刪除該 project/provider 的 model，等待保存與刷新完成，再以原 sessionId 重試。省略 model 時沿用 provider 的既有 session 行為，不由 Shelf 選替代模型，不清除對話或其他設定。成功後沿用 capabilities 同步，保存 provider 確認的模型供下次連線使用；不是持續跟隨 default 的設定模式。
+
+**Reason：** 使用者無法在初始化錯誤 overlay 內改模型，而相同 saved intent 的 Retry 會重複失敗。明確恢復操作讓使用者修正失效設定，同時維持初始化失敗不冒充 ready 的契約。
+
+**Do not change casually because：** Renderer 不解析 provider 錯誤文字，也不做 model 白名單驗證。清除僅限錯誤發生時的 saved model；若設定已變，改用最新設定重試。保存失敗不得 init；已保存但刷新失敗應重新讀取，不能回滾或盲目重存舊資料。Capabilities 持久化只處理新 snapshot，不因 prefs 改變重播舊 snapshot，否則會將剛清除的模型寫回。Copilot 的恢復分類限於 advertised model select option 存在、saved model 不在 options 中；一般 setter、登入、網路或其他設定錯誤仍只提供 Retry。
