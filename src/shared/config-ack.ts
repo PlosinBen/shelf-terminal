@@ -10,6 +10,7 @@ export const CONFIG_EDIT_KEYS = {
   PERMISSION_MODE: 'permissionMode',
   NATIVE_MODE: 'nativeMode',
   NATIVE_PERMISSION: 'nativePermission',
+  NATIVE_APPROVAL: 'nativeApproval',
 } as const;
 
 export type ConfigEditKey = typeof CONFIG_EDIT_KEYS[keyof typeof CONFIG_EDIT_KEYS];
@@ -30,6 +31,8 @@ export function formatConfigAck(key: ConfigEditKey, value: string): string {
       return `Permission mode set to ${value} (applies on next query)`;
     case 'nativeMode':
       return `Mode set to ${value}`;
+    case CONFIG_EDIT_KEYS.NATIVE_APPROVAL:
+      return `Approval set to ${value}`;
     case 'nativePermission':
       return `Permission set to ${value}`;
   }

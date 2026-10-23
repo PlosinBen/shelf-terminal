@@ -30,6 +30,7 @@ export interface AgentPrefs {
   permissionMode?: string;
   nativeMode?: string;
   nativePermission?: string;
+  nativeApproval?: string;
 }
 
 /**

@@ -1,12 +1,12 @@
 import { WorktreeAvailability, type WorktreeState } from '@shared/worktree';
 import type { AgentPrefs, Connection, QuickCommand, TabTemplate } from '@shared/types';
 import type { Project } from '@shared/projects';
-import { isAgentProvider, providerLabel } from '@shared/agent-providers';
+import { CODEX_PROVIDER, isAgentProvider, providerLabel } from '@shared/agent-providers';
 
-export const PROJECTS_SCHEMA_VERSION = 2 as const;
+export const PROJECTS_SCHEMA_VERSION = 3 as const;
 
 export type ProjectConfigCodecStage = 'decode' | 'parse' | 'schema' | 'format';
-export type ProjectConfigRevision = 'legacy-v0' | 'v1' | 'v2' | 'unknown';
+export type ProjectConfigRevision = 'legacy-v0' | 'v1' | 'v2' | 'v3' | 'unknown';
 
 export interface ProjectConfigCodecError {
   readonly stage: ProjectConfigCodecStage;
@@ -24,7 +24,7 @@ export type ProjectConfigFormatResult =
   | { readonly ok: false; readonly error: ProjectConfigCodecError };
 
 type UnknownRecord = Record<string, unknown>;
-type ProjectShape = 'legacy-v0' | 'v1' | 'v2';
+type ProjectShape = 'legacy-v0' | 'v1' | 'v2' | 'v3';
 
 class SchemaIssue extends Error {
   constructor(readonly context: string, message: string) {
@@ -192,7 +192,7 @@ function objectArray<T>(
 function normalizeAgentPrefs(value: unknown, context: string): AgentPrefs {
   if (!isRecord(value)) throw new SchemaIssue(context, 'expected agent preferences object');
   const result: AgentPrefs = {};
-  for (const key of ['model', 'effort', 'permissionMode', 'nativeMode', 'nativePermission'] as const) {
+  for (const key of ['model', 'effort', 'permissionMode', 'nativeMode', 'nativePermission', 'nativeApproval'] as const) {
     const entry = value[key];
     if (entry !== undefined && typeof entry !== 'string') {
       throw new SchemaIssue(`${context}.${key}`, 'expected string');
@@ -201,6 +201,12 @@ function normalizeAgentPrefs(value: unknown, context: string): AgentPrefs {
   }
   return result;
 }
+
+const LEGACY_CODEX_PERMISSIONS: Readonly<Record<string, Pick<AgentPrefs, 'nativePermission' | 'nativeApproval'>>> = {
+  default: { nativePermission: ':workspace', nativeApproval: 'on-request' },
+  plan: { nativePermission: ':read-only', nativeApproval: 'never' },
+  bypassPermissions: { nativePermission: ':danger-full-access', nativeApproval: 'never' },
+};
 
 function agentPrefsRecord(
   record: UnknownRecord,
@@ -215,7 +221,18 @@ function agentPrefsRecord(
   if (!isRecord(value)) throw new SchemaIssue(`${context}.agentPrefs`, 'expected object');
   const result: Record<string, AgentPrefs> = {};
   for (const [key, entry] of Object.entries(value)) {
-    result[key] = normalizeAgentPrefs(entry, `${context}.agentPrefs.${key}`);
+    const prefContext = `${context}.agentPrefs.${key}`;
+    const prefs = normalizeAgentPrefs(entry, prefContext);
+    if (key === CODEX_PROVIDER && prefs.permissionMode !== undefined) {
+      if (shape === 'v3') throw new SchemaIssue(`${prefContext}.permissionMode`, 'legacy Codex permission in current schema');
+      const migration = Object.hasOwn(LEGACY_CODEX_PERMISSIONS, prefs.permissionMode)
+        ? LEGACY_CODEX_PERMISSIONS[prefs.permissionMode] : undefined;
+      if (!migration) throw new SchemaIssue(`${prefContext}.permissionMode`, 'unknown legacy Codex permission');
+      prefs.nativePermission ??= migration.nativePermission;
+      prefs.nativeApproval ??= migration.nativeApproval;
+      delete prefs.permissionMode;
+    }
+    result[key] = prefs;
   }
   return result;
 }
@@ -228,11 +245,11 @@ function normalizeProject(value: unknown, index: number, shape: ProjectShape): P
   if (!Number.isInteger(maxTabs) || (maxTabs as number) <= 0) {
     throw new SchemaIssue(`${context}.maxTabs`, 'expected positive integer');
   }
-  if (shape === 'v2' && (hasOwn(value, 'defaultAgentProvider') || hasOwn(value, 'openAgentOnConnect'))) {
+  if ((shape === 'v2' || shape === 'v3') && (hasOwn(value, 'defaultAgentProvider') || hasOwn(value, 'openAgentOnConnect'))) {
     throw new SchemaIssue(context, 'current project must not contain legacy agent startup fields');
   }
   const openAgentOnConnect = value.openAgentOnConnect;
-  if (shape !== 'v2') {
+  if ((shape === 'legacy-v0' || shape === 'v1')) {
     if (!hasOwn(value, 'openAgentOnConnect')) {
       if (shape === 'v1') throw new SchemaIssue(`${context}.openAgentOnConnect`, 'missing v1 field');
     } else if (typeof openAgentOnConnect !== 'boolean') {
@@ -241,7 +258,7 @@ function normalizeProject(value: unknown, index: number, shape: ProjectShape): P
   }
 
   let legacyProvider: string | null = null;
-  if (shape !== 'v2') {
+  if ((shape === 'legacy-v0' || shape === 'v1')) {
     legacyProvider = nullableString(value, 'defaultAgentProvider', context, shape);
   }
   const parsedTabs = objectArray(
@@ -249,9 +266,9 @@ function normalizeProject(value: unknown, index: number, shape: ProjectShape): P
     'defaultTabs',
     context,
     shape,
-    (entry, entryContext) => normalizeTabTemplate(entry, entryContext, shape === 'v2'),
+    (entry, entryContext) => normalizeTabTemplate(entry, entryContext, (shape === 'v2' || shape === 'v3')),
   );
-  if (shape === 'v2' && parsedTabs.length === 0) {
+  if ((shape === 'v2' || shape === 'v3') && parsedTabs.length === 0) {
     throw new SchemaIssue(`${context}.defaultTabs`, 'expected at least one tab template');
   }
   const baseTabs: TabTemplate[] = parsedTabs.length > 0 ? parsedTabs : [{ name: 'Terminal' }];
@@ -378,7 +395,7 @@ export function loadProjectsDocument(
   }
 
   if (Array.isArray(value)) return normalizeProjects(value, 'legacy-v0');
-  if (!isRecord(value) || (value.schemaVersion !== 1 && value.schemaVersion !== PROJECTS_SCHEMA_VERSION)) {
+  if (!isRecord(value) || (value.schemaVersion !== 1 && value.schemaVersion !== 2 && value.schemaVersion !== PROJECTS_SCHEMA_VERSION)) {
     return {
       ok: false,
       error: {
@@ -391,7 +408,7 @@ export function loadProjectsDocument(
       },
     };
   }
-  const revision = value.schemaVersion === 1 ? 'v1' : 'v2';
+  const revision = value.schemaVersion === 1 ? 'v1' : value.schemaVersion === 2 ? 'v2' : 'v3';
   if (!Array.isArray(value.projects)) {
     return {
       ok: false,
@@ -407,7 +424,7 @@ export function loadProjectsDocument(
 }
 
 export function formatProjectsDocument(projects: readonly Project[]): ProjectConfigFormatResult {
-  const validated = normalizeProjects(projects, 'v2');
+  const validated = normalizeProjects(projects, 'v3');
   if (!validated.ok) {
     return {
       ok: false,
@@ -427,7 +444,7 @@ export function formatProjectsDocument(projects: readonly Project[]): ProjectCon
       ok: false,
       error: {
         stage: 'format',
-        revision: 'v2',
+        revision: 'v3',
         context: 'document',
         message: error instanceof Error ? error.message : String(error),
       },

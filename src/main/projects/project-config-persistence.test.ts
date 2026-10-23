@@ -80,7 +80,7 @@ describe('project config persistence', () => {
     expect(await persistence.save([])).toEqual({ ok: true });
     expect(writeAtomic).toHaveBeenCalledOnce();
     expect(JSON.parse(writeAtomic.mock.calls[0][1] as string)).toEqual({
-      schemaVersion: 2,
+      schemaVersion: 3,
       projects: [],
     });
   });

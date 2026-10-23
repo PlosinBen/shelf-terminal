@@ -25,6 +25,7 @@ export type PermissionControlCapabilities =
       strategy: typeof PERMISSION_CONTROL_STRATEGIES.NATIVE;
       mode?: NativePermissionControlDescriptor;
       permission?: NativePermissionControlDescriptor;
+      approval?: NativePermissionControlDescriptor;
     };
 
 export const SHELF_PERMISSION_CONTROL = {
