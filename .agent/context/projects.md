@@ -145,3 +145,13 @@ Runtime `Save to Default` preserves the actual tab variant and its kind-specific
 **Reason:** A shell command has no defined meaning as an Agent prompt or Web action. Validating immediately before PTY input protects both current-tab changes and configuration/runtime drift while preserving user data for explicit repair.
 
 **Do not change casually because:** UI-only filtering is insufficient: Worktree inheritance, renamed/removed tabs, and legacy configuration can still produce stale runtime targets. Execution must retain the Terminal type guard.
+
+## projects#12 — Search activation uses the current matches when candidate state lags  ·  [Gotcha]
+
+**Symptom:** Typing a project name and immediately pressing Enter can leave the search input open even though a matching row is highlighted.
+
+**Root cause:** Matching rows update from the query during render, while the selected candidate ID is reset in a later effect. Enter can run between those steps with a null or stale candidate ID.
+
+**Fix / note:** Enter resolves the candidate against the current match list and falls back to its first entry when the stored ID is absent. Arrow navigation still uses the explicit candidate state; an empty match list remains inactive. The Sidebar unit test covers null and stale IDs, and the project-search E2E covers immediate Enter after typing.
+
+**Related:** `projects#9`, `src/renderer/components/Sidebar.tsx`, `e2e/sidebar-project-search.spec.ts`.

@@ -4,6 +4,7 @@ import {
   decideProjectSearchKey,
   findProjectSearchMatchIndex,
   moveProjectSearchCandidate,
+  resolveProjectSearchCandidate,
 } from './Sidebar';
 
 // Pure overflow math for the project context menu — keeps the whole menu on
@@ -69,5 +70,13 @@ describe('project search', () => {
     expect(moveProjectSearchCandidate(matches, null, 1)).toBe('alpha');
     expect(moveProjectSearchCandidate(matches, null, -1)).toBe('atlas');
     expect(moveProjectSearchCandidate([], null, 1)).toBeNull();
+  });
+
+  it('activates the current match even before the candidate effect catches up', () => {
+    const matches = [{ id: 'bravo', index: 3 }, { id: 'beta', index: 4 }];
+    expect(resolveProjectSearchCandidate(matches, null)).toEqual(matches[0]);
+    expect(resolveProjectSearchCandidate(matches, 'old-match')).toEqual(matches[0]);
+    expect(resolveProjectSearchCandidate(matches, 'beta')).toEqual(matches[1]);
+    expect(resolveProjectSearchCandidate([], 'old-match')).toBeUndefined();
   });
 });

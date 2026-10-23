@@ -51,6 +51,14 @@ export function moveProjectSearchCandidate(
   return matchIds[nextIndex];
 }
 
+export function resolveProjectSearchCandidate<T extends { id: string }>(
+  matches: readonly T[],
+  candidateId: string | null,
+): T | undefined {
+  // projects#12: Enter can arrive before the candidate effect updates after typing.
+  return matches.find((match) => match.id === candidateId) ?? matches[0];
+}
+
 /**
  * Clamp a context-menu's desired top-left so the whole menu stays on screen
  * (with a small margin). Prefers the requested spot and only pulls the menu
@@ -244,7 +252,7 @@ export function Sidebar() {
       ));
       return;
     }
-    const candidate = projectSearchMatches.find((match) => match.id === projectSearchCandidateId);
+    const candidate = resolveProjectSearchCandidate(projectSearchMatches, projectSearchCandidateId);
     if (!candidate) return;
     const restorePriorFocus = candidate.index === activeProjectIndex;
     setActiveProject(candidate.index);
