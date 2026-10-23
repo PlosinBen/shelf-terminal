@@ -130,7 +130,7 @@ Dual-purpose: a one-shot RPC response carrying `requestId` (matched in main's `o
 | `type` | `'capabilities'` | |
 | `requestId` | `string?` | Present ⇒ RPC response; absent ⇒ unsolicited broadcast. |
 | `error` | `string?` | |
-| ...`ProviderCapabilities` | — | `models`, `permissionModes`, `permissionControl`, `effortLevels`, `slashCommands`, `authMethod?`, `authRequired?` |
+| ...`ProviderCapabilities` | — | `models`, `permissionModes`, `permissionControl`, `effortLevels`, `slashCommands`, `authMethod?`, `authRequired?`, `confirmedPrefs?` |
 | `currentModel` / `currentEffort` / `currentPermissionMode` | `string?` | |
 
 `authMethod` is the renderer-facing authentication capability defined authoritatively by `AuthMethod` in `src/shared/types.ts`. For `kind:'sdk-managed'`, `loginCommand` is the explicit command that the renderer may launch only after the user clicks Log in; commands embedded in `instructions` are display text and are never executable authority. The launch intent stays renderer-local: App opens a terminal tab in the originating agent tab's project, and the normal PTY spawn path runs the command on that project's connection.
@@ -138,7 +138,7 @@ Dual-purpose: a one-shot RPC response carrying `requestId` (matched in main's `o
 `permissionControl` is a strategy discriminator:
 
 - `{ strategy: 'shelf' }` uses canonical `permissionModes` / `currentPermissionMode`; a legacy wire payload that omits the field defaults to this strategy.
-- `{ strategy: 'native', mode?, permission? }` carries at most one descriptor of each kind. A descriptor is `{ label, description?, currentValue?, options }`; each option is `{ value, displayName, description? }`. Values are opaque provider ids and must round-trip unchanged.
+- `{ strategy: 'native', mode?, permission?, approval? }` carries at most one descriptor of each kind. A descriptor is `{ label, description?, currentValue?, currentDisplayName?, options }`; each option is `{ value, displayName, description? }`. Values are opaque provider ids and must round-trip unchanged.
 
 For native state, a provider update or successful config response publishes the full relevant descriptor snapshot. Consumers replace from that truth instead of retaining stale options/current values. Missing unadvertised controls are omitted; malformed advertised controls fail loud.
 
@@ -146,9 +146,11 @@ For native state, a provider update or successful config response publishes the 
 
 Authoritative types: `AgentInitRecovery` / `AgentInitRecoveryKind` in `src/shared/agent-init-recovery.ts`, capabilities response in `agent-server/providers/types.ts`, and `AgentInitStatus` in `src/shared/types.ts`.
 
-Capabilities RPC 失敗保留 `error` 字串，可附 `recovery: { kind: 'clear_saved_model', model: string }`。`model` 是該次失敗使用的 saved selection，供恢復操作檢查設定是否已變；不是推薦替代模型。Main 將相同 metadata 傳到 failed init status。缺少 recovery 或未知／不合法 metadata 不開啟恢復操作，未知資料需 log；一般 Retry 仍可使用。
+Capabilities RPC 失敗保留 `error` 字串，可附 `recovery: { kind: 'clear_saved_pref', key: ConfigEditKey, savedValue: string, label: string }`。`key` 必須在共享 `CONFIG_EDIT_KEYS` 中，`savedValue` 是失敗時的已存值。舊 `{ kind: 'clear_saved_model', model: string }` 仍可解碼，於復原 transaction 邊界轉為 model selection。未知／不合法 metadata 必須 log，不能用來刪除設定；缺少 recovery 時仍提供一般 Retry。
 
-Renderer 的 `agent:recoverModel { tabId }` 與 `agent:retryInit { tabId }` 是交給 App 的本地操作意圖，不是轉送 provider 的 IPC。普通 Retry 先刷新 canonical prefs，不刪模型，避免沿用前次保存後刷新失敗留下的舊 snapshot。處理器讀最新 project/tab state、保存 model 刪除，再沿用既有 destroy/init 通道；starting、ready 或新普通失敗均清除舊 recovery。
+Renderer 的 `agent:recoverPref { tabId }` 與 `agent:retryInit { tabId }` 是交給 App 的本地意圖。普通 Retry 先 refresh，不刪設定。清除操作比對最新 project/provider/key/value，只有值仍相符才刪除指定欄位，保存／refresh 成功後沿用原 sessionId 的 destroy/init；不變更其他 Prefs，不新增 reset wire 指令。starting、ready 或新普通失敗均清除舊 recovery。
+
+`confirmedPrefs?: Partial<AgentPrefs>` 由 capabilities 傳遞使用者明確選擇的確認結果。欄位存在時 renderer 只保存該 patch，空物件不保存任何有效預設值；欄位省略時維持既有 snapshot 同步。`currentDisplayName` 是不可提交的展示文字，供 custom policy 或未具名的有效設定使用，不必加入 options。
 
 ## plan side-channel — `type: 'plan'`
 

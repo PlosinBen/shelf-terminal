@@ -36,7 +36,7 @@ title: shelf-terminal — Intent → File Index
 | Terminal runner policy | `terminal-runner/` | 依 target facts 選 zsh/bash/PowerShell/Native、建立 project history namespace 與 runner bootstrap |
 | Preload bridge | `preload.ts` | contextBridge 暴露 `window.shelfApi`，純 RPC bridge 到 main |
 | Project canonical repository | `projects/projects-repository.ts` + `projects/repository-provider.ts` | ready-only canonical project queries/mutations、main-owned identity、durable publish 與 cleanup retry boundary |
-| Project config persistence | `projects/project-config-file-io.ts` + `projects/project-config-codec.ts` + `projects/project-config-persistence.ts` | opaque atomic File I/O、v0/v1 legacy + v2 current loader/formatter 與 `projects.json` facade |
+| Project config persistence | `projects/project-config-file-io.ts` + `projects/project-config-codec.ts` + `projects/project-config-persistence.ts` | opaque atomic File I/O、v0/v1/v2 legacy + v3 current loader/formatter 與 `projects.json` facade |
 | Project delete cleanup | `projects/project-cleanup.ts` | Config commit 後的 per-project storage/secrets cleanup 聚合 |
 | 專案 env 解析（plain+secret 合併） | `project-env.ts` | `resolveProjectEnv(projectId)`：合併 plain（projectConfig）+ 解密 secret 成單一注入 EnvMap，兩個 spawn 面共用的唯一出口 |
 | Secret 值加密核心（純） | `secret-crypto.ts` | AES-256-GCM `encryptWithKey`/`decryptWithKey`，versioned+authenticated blob，無 electron、可測 |
@@ -131,6 +131,7 @@ title: shelf-terminal — Intent → File Index
 | Claude provider | `providers/claude/index.ts` | `@anthropic-ai/claude-agent-sdk` wrapper：持久 streaming-input session、emit 渲染原語、auth 偵測 |
 | Copilot provider (ACP) | `providers/copilot/index.ts` | `createCopilotBackend`：spawn `copilot --acp`、管理 restore/native config/login，並以 session replacement 實作 `/clear` |
 | Codex provider (app-server) | `providers/codex/index.ts` | `createCodexBackend`：直接驅動 pinned `codex app-server` JSON-RPC，封裝 turn/session、auth、config、skills/MCP、quota/context、tool items 與 approval bridge |
+| Codex native controls | `providers/codex/native-controls.ts` | 原生選項、有效設定、managed 限制與 settings confirmation；不保存 project Prefs |
 | ACP 共用 toolkit | `providers/acp/` | provider-agnostic ACP runtime：connection/initialize、new/resume/load（load replay suppression）、update translation、permission、capabilities、MCP 與測試 mock |
 | Provider session replacement transaction | `providers/acp/session-replacement.ts` | 以 opaque callbacks 編排 capture、invalidate、reset、establish 與 initialize 的 fail-closed helper |
 | Provider registry（identity 單一來源） | `src/shared/agent-providers.ts` | provider key → label / visibility / runtime binding，衍生 `AgentProvider` 與 presentation helpers（見 `context/agent-providers` #36） |
@@ -203,8 +204,8 @@ title: shelf-terminal — Intent → File Index
 | Paste/drop 上傳 hook | `hooks/useAttachmentPaste.ts` | paste/drop/upload pipeline + file size check |
 | Agent send attachment helper | `utils/agent-send-attachments.ts` | renderer-local image preview data URL 與 provider-bound uploaded `AgentAttachment` payload 分離 |
 | Terminal 渲染 | `components/TerminalView.tsx` | xterm.js cache、PTY I/O、init cover/store projection、paste hook 與 unread badge |
-| Agent 初始化模型恢復 | `../shared/agent-init-recovery.ts` + `agent-model-recovery.ts` | 結構化恢復 metadata、保存 model 刪除後重試的中央交易 |
-| Agent 對話 UI | `components/AgentView.tsx` + `components/agent/{MessageList,InputZone,StatusBar,DecisionPanel,PlanPanel,AuthPane,ConnectionOverlay}.tsx` + `components/agent/{permission-control-view,capability-prefs}.ts` + `agentTabStore.ts` + `agentTabSubscriptions.ts` + `agent-message-builder.ts` + `tab-teardown.ts` | AgentView 是 layout coordinator；permission UI 只依 capability strategy/descriptor 選 canonical 或 native controls，不依 provider identity；native state 不 persist。domain state 在 per-tab store，真正 teardown 才清 state |
+| Agent 初始化設定欄位恢復 | `../shared/agent-init-recovery.ts` + `agent-model-recovery.ts` | 結構化恢復 metadata、保存指定 Prefs 刪除後重試的中央交易 |
+| Agent 對話 UI | `components/AgentView.tsx` + `components/agent/{MessageList,InputZone,StatusBar,DecisionPanel,PlanPanel,AuthPane,ConnectionOverlay}.tsx` + `components/agent/{permission-control-view,capability-prefs}.ts` + `agentTabStore.ts` + `agentTabSubscriptions.ts` + `agent-message-builder.ts` + `tab-teardown.ts` | AgentView 是 layout coordinator；permission UI 只依 capability strategy/descriptor 選 canonical 或 native controls，不依 provider identity；有效設定與 explicit Prefs 分開。domain state 在 per-tab store，真正 teardown 才清 state |
 | Web tab（登入 surface + 瀏覽） | `components/WebTabView.tsx` | `<webview partition=persist:web>` + 網址列 + identity chip；人在這登入內網服務 |
 | Web.fetch 授權 popup | `components/WebPermissionPrompt.tsx` | app 層全域 popup，防偽 origin 顯示 + allow once/always/deny（由 `web:permission-request` 驅動） |
 | browser_open 確認 popup | `components/BrowserOpenPrompt.tsx` | app 層全域 popup，只有 Open/Deny（不記住），由 `web:browser-open-request` 驅動；核可後 `web:open-tab` 由 `App.tsx` 開分頁 |
@@ -272,7 +273,7 @@ title: shelf-terminal — Intent → File Index
 | Agent tab log id | `tab-id.ts` | `formatTabLogId()` 保留完整 renderer tab id，讓跨 main/renderer log 可精確 grep 對帳 |
 | 預設值 | `defaults.ts` | DEFAULT_SETTINGS, DEFAULT_KEYBINDINGS |
 | Slash prefix parser | `slash-prefix.ts` | `parseSlashPrefix(prompt)`，provider + renderer 同份 |
-| Permission control contract | `permission-controls.ts` | Shelf/native strategy、native mode/permission descriptor 與 config-edit key 的單一來源 |
+| Permission control contract | `permission-controls.ts` | Shelf/native strategy、native mode/permission/approval descriptor 與 config-edit key 的單一來源 |
 | Web session 常數/型別 | `web-session.ts` | `WEB_SESSION_PARTITION`、`WEB_FETCH_TOOL`/`isWebFetchTool`、`BROWSER_OPEN_TOOL`/`isBrowserOpenTool`、`WebFetchRequest/Result`、`WebPermissionMeta`、`BrowserOpenMeta`/`BrowserOpenDecision` |
 | 單元測試 | `slash-prefix.test.ts` | `parseSlashPrefix` 邊界 case 覆蓋 |
 

@@ -92,7 +92,7 @@ InputZone parseSlashPrefix
 走「**renderer 發起 → provider 執行 → 廣播 capabilities → renderer 落地**」：
 
 - 打字 slash with args 走 provider slash（如上圖）；picker / status-bar 走結構化 config-edit turn（`agent-config-flow#5`）。兩者最終都到 provider `applyConfigEdit` → re-broadcast capabilities，**無 renderer 樂觀更新**
-- Renderer `AgentView` 用 useEffect 觀察 capabilities，跟 savedPrefs 比較，差異才 `persistPref` 寫進 `projectConfig.agentPrefs`
+- Renderer `AgentView` 觀察 capabilities，跟 savedPrefs 比較後保存。若有 `confirmedPrefs`，只保存該 explicit patch；其他 provider 沿用 snapshot 同步（`agent-config-flow#13`）。
 - Backend 拒絕的值不會被 broadcast → 不會 persist。**Disk 永遠是 backend 確認過的真相**
 
 **Provider 差異**：
@@ -163,9 +163,9 @@ model/effort/permission 三個入口（打字 `/model X`、picker、status-bar �
 
 | knob | Copilot（ACP） | Codex（app-server） | Claude（per-call options） |
 |------|------|------|------|
-| model | `driver.setConfigOption(configId('model'), value)` | backend closure 套到下一個 app-server turn/thread config | 記 closure，下次 query `options.model` 由 SDK 驗 |
-| effort | `driver.setConfigOption(configId('thought_level'), value)` | backend closure 套到下一個 app-server turn config | 同上 |
-| permission | native mode 用 `driver.setMode(value)`；native permission 用 `driver.setConfigOption('allow_all', value)` | 映成 approval policy + sandbox policy | 記 closure，下次 query `options.permissionMode` 由 SDK 驗 |
+| model | `driver.setConfigOption(configId('model'), value)` | `thread/settings/update` 確認 model | 記 closure，下次 query `options.model` 由 SDK 驗 |
+| effort | `driver.setConfigOption(configId('thought_level'), value)` | 模型原生 effort 選項＋`thread/settings/update` 確認 | 同上 |
+| permission | native mode 用 `driver.setMode(value)`；native permission 用 `driver.setConfigOption('allow_all', value)` | 獨立 profile／approval／mode 原生設定（`agent-config-flow#13`） | 記 closure，下次 query `options.permissionMode` 由 SDK 驗 |
 
 （cutover 後 copilot 走 ACP：以上 native SDK 的 `session.setModel`/`session.rpc.mode.set` 已刪。）
 
@@ -262,10 +262,24 @@ Provider 以 capability strategy 選一條路：
 
 **Related：** `agent-config-flow#9`、`agent-config-flow#10`、`agent-providers#52`、`contracts/agent-wire-protocol`、`architecture/agent-execution`。
 
-## agent-config-flow#12 — 已保存模型不可用時由使用者清除並重試  ·  [Decision]
+## agent-config-flow#12 — 已保存設定不可用時由使用者清除並重試  ·  [Decision]
 
-**Decision：** Provider 可在初始化失敗時提供結構化的「清除已保存模型」恢復能力。錯誤畫面保留 Retry，另提供 Retry with default model；後者只刪除該 project/provider 的 model，等待保存與刷新完成，再以原 sessionId 重試。省略 model 時沿用 provider 的既有 session 行為，不由 Shelf 選替代模型，不清除對話或其他設定。成功後沿用 capabilities 同步，保存 provider 確認的模型供下次連線使用；不是持續跟隨 default 的設定模式。
+**Decision：** Provider 在能確認特定 saved selection 失效時提供 typed recovery。錯誤畫面保留 Retry，另提供 Retry with default <欄位>；後者只刪除該 project/provider 的指定 Prefs，等待保存與 refresh 完成，再以原 sessionId 重試。省略欄位時沿用 provider 的既有初始化／session 行為，Shelf 不選替代值、不清除對話或其他設定，也不新增 reset intent、臨時 baseline thread 或另一套復原生命週期。
 
-**Reason：** 使用者無法在初始化錯誤 overlay 內改模型，而相同 saved intent 的 Retry 會重複失敗。明確恢復操作讓使用者修正失效設定，同時維持初始化失敗不冒充 ready 的契約。
+**Reason：** 初始化錯誤 overlay 中無法使用 picker，而不變的 saved intent 會重複失敗。指定欄位復原讓使用者修正設定，保留初始化失敗不冒充 ready 的契約。
 
-**Do not change casually because：** Renderer 不解析 provider 錯誤文字，也不做 model 白名單驗證。清除僅限錯誤發生時的 saved model；若設定已變，改用最新設定重試。保存失敗不得 init；已保存但刷新失敗應重新讀取，不能回滾或盲目重存舊資料。Capabilities 持久化只處理新 snapshot，不因 prefs 改變重播舊 snapshot，否則會將剛清除的模型寫回。Copilot 的恢復分類限於 advertised model select option 存在、saved model 不在 options 中；一般 setter、登入、網路或其他設定錯誤仍只提供 Retry。
+**Do not change casually because：** Renderer 不解析 error 文字或自行判斷 provider 值。清除僅限失敗時的 savedValue；若設定已變，改用最新值重試。保存失敗不得 init；保存後 refresh 失敗只重讀，不能回滾或重存舊資料。Capabilities 同步不重播舊 snapshot。一般查詢、登入、網路或無法分類的 setter 錯誤只提供 Retry。Claude 的 model catalog 不是拒絕 legacy/custom model 的依據。
+
+## agent-config-flow#13 — Codex 使用原生 controls，Prefs 與有效預設分離  ·  [Decision]
+
+**Decision：** Codex 的 Mode、Permission profile、Approval、Effort 與 Model 獨立。Profile／mode／模型 effort 來自原生列舉；Approval 依 pinned protocol 提供 `untrusted`、`on-request`、`never`，再套用管理限制。切 Mode 保留有效 model／effort；profile 不暗改 approval。模型切換若不支援目前 effort，拒絕該 edit 並保留原值。
+
+**Why：** 共同權限模式會掩蓋 provider 的實際能力，並重複維護映射。原生控制讓 adapter 直接使用上游欄位；沒有列舉介面的 Approval 仍集中維護原生選項，不能宣稱零硬編碼。
+
+**Granular why-not：** Granular 是多個 approval 類別的結構化 policy，提供編輯需要額外細項 UI、組合驗證與測試，超過既有控制原生化的範圍。已有 granular 顯示 Custom 並保留，只有使用者明確選擇另一個 Approval 才替換。它不是失效 Prefs，也不能塞入只接受字串的欄位或列成假的可提交選項。
+
+**State boundary：** 原生有效值供顯示，explicit Prefs 才是下次初始化意圖。Codex capabilities 用 `confirmedPrefs` 表示可保存的 patch；初始化空 patch 不將原生預設 pin 到磁碟。其他 provider 保留既有同步方式。設定修改必須由 app-server 確認才更新 UI／保存，closure mutation 不是確認。
+
+**Confirmation boundary：** experimental API 是原生 Mode／profile 套用與 thread settings 更新的必要條件。通知與 RPC 可交錯，同值不保證有通知；已有相同 confirmed value 時 no-op。start／resume 沒有 mode snapshot，首次明確 Mode apply 可用成功 RPC 確認指定值，其他有效設定仍維持已知 snapshot。更新失敗或逾時不發布成功；狀態不確定時阻擋後續設定與 turn，要求 reconnect。
+
+**Migration：** project schema v3 由 v0/v1/v2 載入邊界將 Codex 舊 default／plan／bypassPermissions 轉為等價 profile＋approval，保留已有 native intent、移除舊 permissionMode。舊 plan 僅是唯讀權限，不推導原生 Plan mode。遷移不放在每次 provider connect；沿用下一次 atomic save 才落盤。其他 provider 不變。

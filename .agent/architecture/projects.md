@@ -62,6 +62,8 @@ Visual project order + runtime tab presence + transient filter mode
 
 ## Boundaries
 
+Versioned loading also migrates provider-specific saved selections into the canonical shape; provider connection consumes only that shape. Loading does not write the file, and the next durable mutation saves the current version.
+
 The persistence boundary alone understands raw bytes, legacy/current persisted shapes, schema versions, formatting, atomic replacement, and the nonempty-to-empty backup guard. Missing files produce an empty canonical collection; malformed or unsupported documents fail before a repository becomes ready.
 
 The main repository owns canonical identity, defaults, grouping/order invariants, durable project-level mutations, and main-process queries. New project creation rejects an effective target already present in the canonical collection, while document loading and project save/update do not apply retroactive target validation. The repository publishes a candidate collection only after persistence succeeds. Removed-project storage and secrets cleanup is post-commit work with an explicit retry result, not part of the config transaction.

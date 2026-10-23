@@ -13,7 +13,7 @@ interface RecoveryDependencies {
   restart(tabId: string, tab: AgentTabState, project: Project): void;
 }
 
-/** App owns the side effects; this transaction keeps persistence ahead of init. */
+/** App owns side effects; persistence precedes init (agent-config-flow#12). */
 export function createPrefRecovery(deps: RecoveryDependencies) {
   const pending = new Set<string>();
   return async (tabId: string, clearPref = true): Promise<void> => {

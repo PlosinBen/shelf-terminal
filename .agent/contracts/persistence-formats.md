@@ -19,7 +19,7 @@ The on-disk artifacts Shelf persists and their layout. Two roots: `<userData>` (
 
   ```json
   {
-    "schemaVersion": 2,
+    "schemaVersion": 3,
     "projects": [
       {
         "id": "opaque-id",
@@ -46,11 +46,14 @@ The on-disk artifacts Shelf persists and their layout. Two roots: `<userData>` (
   }
   ```
 
-- **Compatibility**: an unversioned array is supported legacy v0, and a v1 envelope is supported legacy input. Loading v0, v1, or v2 produces the same canonical `Project[]`; load is read-only, and the next successful project mutation formats v2 naturally. Legacy absent/empty tab lists become one explicit Terminal. A non-null legacy `defaultAgentProvider` is converted into the first Agent template regardless of `openAgentOnConnect`; without a provider, that boolean produces no Agent. Both legacy fields are removed from the canonical object. Malformed data, duplicate ids, wrong shapes, or unsupported versions fail all-or-nothing.
+- **Compatibility**: an unversioned array is supported legacy v0, and v1/v2 envelopes are supported legacy input. Loading v0, v1, v2, or v3 produces the same canonical `Project[]`; load is read-only, and the next successful project mutation formats v3 naturally. Legacy absent/empty tab lists become one explicit Terminal. A non-null legacy `defaultAgentProvider` is converted into the first Agent template regardless of `openAgentOnConnect`; without a provider, that boolean produces no Agent. Both legacy fields are removed from the canonical object. Malformed data, duplicate ids, wrong shapes, or unsupported versions fail all-or-nothing.
 - **Source of truth**: `src/main/projects/project-config-{file-io,codec,persistence}.ts`. Missing file → canonical `[]`; an existing zero-byte file is malformed, not missing. Writes use same-directory temp + atomic replace. Before a nonempty persisted collection is replaced by canonical empty, the original opaque file is copied to `projects.json.backup.<timestamp>`.
-- **Startup tabs**: v2 `defaultTabs` is non-empty and contains disjoint Terminal, Web, or Agent templates. Agent templates require a `provider` string, may preserve an unavailable/future id, and must be unique by provider within one project. Runtime consumers resolve provider strings through the live registry and refuse unavailable providers rather than substituting another one.
+- **Startup tabs**: current `defaultTabs` is non-empty and contains disjoint Terminal, Web, or Agent templates. Agent templates require a `provider` string, may preserve an unavailable/future id, and must be unique by provider within one project. Runtime consumers resolve provider strings through the live registry and refuse unavailable providers rather than substituting another one.
 - **Provider compatibility**: Agent templates, `agentSessionIds`, and `agentPrefs` retain unknown old/future provider ids; the codec does not discard compatibility data.
-- **Agent preference values**: each `agentPrefs[provider]` is an `AgentPrefs` object defined in `src/shared/types.ts`: `{ model?: string, effort?: string, permissionMode?: string, nativeMode?: string, nativePermission?: string }`. The codec accepts only string values for present fields and preserves unknown provider keys. `permissionMode` belongs to Shelf-strategy controls; `nativeMode` and `nativePermission` hold confirmed values for a provider-advertised native strategy. Capability confirmation writes present values without deleting a saved field merely because a later capability snapshot omits that control.
+- **Agent preference values**: each `agentPrefs[provider]` is an `AgentPrefs` object defined in `src/shared/types.ts`: `{ model?: string, effort?: string, permissionMode?: string, nativeMode?: string, nativePermission?: string, nativeApproval?: string }`. The codec accepts only string values for present fields and preserves unknown provider keys. `permissionMode` belongs to Shelf-strategy controls; `nativeMode`, `nativePermission`, and `nativeApproval` hold confirmed values for a provider-advertised native strategy. Capability confirmation writes present values without deleting a saved field merely because a later capability snapshot omits that control.
+
+- **Codex preference migration**: v0/v1/v2 Codex `permissionMode` migrates to profile/approval pairs: `default` → `:workspace` / `on-request`, `plan` → `:read-only` / `never`, `bypassPermissions` → `:danger-full-access` / `never`. Existing native values win; missing members are filled, then the legacy field is removed. No `nativeMode` is inferred from `plan`. Unknown legacy values fail schema validation; v3 rejects legacy Codex permission fields. Other providers remain unchanged. Conversion occurs at versioned load, never provider connect; the existing atomic save writes v3 on the next mutation.
+- **Explicit intent**: Codex capabilities carry `confirmedPrefs`; only that patch persists. An empty patch displays effective defaults without pinning them. Profiles and approval remain independent; structured granular approval is runtime-only, never serialized into a string preference.
 
 ## `<userData>/settings.json`
 

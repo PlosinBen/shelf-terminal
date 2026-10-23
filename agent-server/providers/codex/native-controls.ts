@@ -16,7 +16,7 @@ function record(value: unknown): RecordValue {
   return value as RecordValue;
 }
 
-/** Provider-owned effective settings. Explicit prefs remain caller-owned. */
+/** Provider-owned effective settings. Explicit prefs remain caller-owned (agent-config-flow#13). */
 export class CodexNativeControls {
   private settings: RecordValue = {};
   private threadId: string | undefined;
