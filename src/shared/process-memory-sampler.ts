@@ -116,8 +116,8 @@ export function snapshotProcessesFromProc(procRoot = '/proc'): ProcessMemorySamp
       // A process can exit or become unreadable between readdir and file reads.
       continue;
     }
-    // A zombie has no address space or VmRSS; PID 1 in minimal containers may
-    // retain it indefinitely, so it cannot contribute to a memory snapshot.
+    // process-memory-observability#4: A zombie has no address space or VmRSS.
+    // PID 1 in minimal containers may retain it indefinitely.
     if (/^State:\s+Z(?:\s|$)/m.test(status)) continue;
     rows.push({
       pid: Number(name),

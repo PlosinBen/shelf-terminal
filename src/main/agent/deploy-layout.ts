@@ -74,7 +74,7 @@ export function executableDeployFiles(
   return [...executable, provider];
 }
 
-/** Fixed relative Codex runtime manifest, preserving both require.resolve hops. */
+/** deployment#9: Match the pinned native package while preserving both require.resolve hops. */
 export function codexDeployFiles(libc: Libc, arch: Arch): DeployFile[] {
   if (libc === 'musl') throw new Error('Codex requires a glibc host');
   const native = codexNativePackageName(arch);

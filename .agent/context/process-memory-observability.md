@@ -32,3 +32,11 @@ related:
 **Reason:** Independent source arrival avoids an all-sources barrier and makes a dispatcher burst harmless. One summary object feeding log and UI prevents drift, while the fixed publication cadence is simpler than dirty/debounce coordination. Local receive time avoids clock-skew logic; source timestamps remain diagnostic context.
 
 **Do not change casually because:** A failed attempt must not erase a still-fresh success, and a stale success must not remain displayed forever. One failed route must not interrupt requests to or reports from other sources, but it must never disappear silently. Intentional unregister removes a source immediately; unexpected silence ages out. A missing memory report is not proof of death—heartbeat and process-exit paths own liveness. Renderer hydration must register the push listener before reading the cached snapshot, and a push received while the getter is pending must win over the older getter response.
+
+## process-memory-observability#4 — Procfs snapshots skip zombies without hiding malformed live processes  ·  [Gotcha]
+
+**Symptom:** On a minimal Linux container without `ps`, one unreaped zombie makes the fallback `/proc` snapshot fail with a missing `VmRSS` error, so live processes have no memory report.
+
+**Root cause:** A zombie retains a `/proc/<pid>/status` entry but has no address space and therefore no `VmRSS`. Containers whose PID 1 does not reap children can retain these entries during successive agent sessions.
+
+**Fix / note:** The procfs adapter recognizes `State: Z` and excludes that PID before parsing resident memory. It still reports malformed or missing memory fields for live processes as errors, preserving fail-loud behavior for actual measurement failures. The regression test covers a zombie beside a live process.
