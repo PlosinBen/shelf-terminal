@@ -86,11 +86,16 @@ Type-specific connector helpers are surfaced as their own namespaces:
 
 | Method | Shape |
 |--------|-------|
-| `finishMergeBack(payload)` | invoke `worktree:finish-merge-back` → `FinishMergeBackResult`; `payload = { connection, featureCwd, baseCwd, baseBranch, featureBranch }`; outcome is `'merged' \| 'busy' \| 'non-ff' \| 'feature-dirty' \| 'base-dirty' \| 'error'` |
+| `finishMergeBack(payload)` | invoke `worktree:finish-merge-back` → `FinishMergeBackResult`; `payload = { connection, featureCwd, baseCwd, baseBranch, featureBranch, sourceCommit? }`; outcome is `'merged' \| 'busy' \| 'non-ff' \| 'feature-dirty' \| 'base-dirty' \| 'error'` |
+| `reconcile(projectId)` | invoke `worktree:reconcile` → `WorktreeScanResult` from `src/shared/worktree.ts`: `applied` with canonical projects, `skipped` for confirmed non-Git/no children, or `stale`; scan/persistence failures reject and preserve the last committed collection |
+| `lifecycle(projectId, active)` | invoke `worktree:lifecycle`; brackets a main/child lifecycle transaction, invalidates concurrent scans, rejects overlapping lifecycle starts |
+| `source(projectId)` | invoke `worktree:source` → `{ commit, branch: string \| null, identity }`; rejects unavailable/non-child projects and checkout identity mismatches |
 | `onProposeCreate(cb(payload))` | recv `worktree:propose-create` → `{ projectId, branch?, notePaths?: string[] }`; renderer focuses `projectId`, then opens the New Worktree dialog only |
 | `onProposeFinish(cb(payload))` | recv `worktree:propose-finish` → `{ projectId }`; renderer focuses `projectId`, then opens the Finish gate only |
 
-Renderer-local worktree completion uses the event bus, not IPC: `worktree-finish-completed` carries `{ subProjectId, parentProjectId, featureBranch, targetBranch, worktreeRemoved: boolean }`. `worktreeRemoved: false` reports a successful merge-only operation: retain the child environment and current focus, and set a child project merge-success banner. `worktreeRemoved: true` is emitted only after merge and every cleanup step succeeds: remove the child project, focus the parent, and show the parent completion banner.
+Renderer-local `worktree-rescan` carries a project id to the central coordinator; it shares the Connect scan path.
+
+Renderer-local worktree completion uses the event bus, not IPC: `worktree-finish-completed` carries `{ subProjectId, parentProjectId, sourceLabel, targetBranch, worktreeRemoved: boolean }`. `worktreeRemoved: false` reports a successful merge-only operation: retain the child environment and current focus, and set a child project merge-success banner. `worktreeRemoved: true` is emitted only after merge and every cleanup step succeeds: remove the child project, focus the parent, and show the parent completion banner.
 
 ## file-transfer
 

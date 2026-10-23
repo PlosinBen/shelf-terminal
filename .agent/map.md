@@ -90,6 +90,10 @@ title: shelf-terminal — Intent → File Index
 
 | Intent | File | Role |
 |--------|------|------|
+| Worktree scanning and mapping | `worktree/inspect.ts`, `worktree/scan.ts`, `worktree/mapping.ts` | NUL porcelain parser, complete target snapshots and identity-based child matching |
+| Reconciliation coordination | `worktree/reconcile.ts` | Deduplicated scans, topology/lifecycle guards, batch repository publication and live Finish source inspection |
+| Target worktree probes | `connector/worktree-probe.ts` | Target-side Git/path probes, POSIX/PowerShell quoting and missing versus inaccessible classification |
+| Shared worktree state and inheritance | `../shared/worktree.ts`, `../shared/worktree-child-config.ts` | Availability/identity contracts, detached labels and fresh child setup |
 | Finish merge-back | `worktree/merge-back.ts` | ff-only target advancement, feature/base dirty guards, non-ff rebase guidance |
 | Feature note create/close migration | `worktree/note-migration.ts` | create-time base→child batch note move and configured close-time child→base restore |
 | Feature note listing | `worktree/feature-notes.ts` | 依 project-configured directory 列 direct markdown notes、驗證 repo boundary 並解析 picker frontmatter |
@@ -212,6 +216,7 @@ title: shelf-terminal — Intent → File Index
 | Picker 面板 | `components/PickerPanel.tsx` | Bottom-anchored 多題互動 form（AskUserQuestion / elicitation 共用） |
 | Bottom bar（全寬 app footer） | `components/BottomBar.tsx` | App 層全寬狀態列：connection/cwd、App/Runtime/Agents memory、version 與 app panel toggles |
 | Memory rollup formatting | `components/MemoryDisplay.tsx` | footer/per-tab summary selection primitives 與 MiB/GiB display formatting |
+| Worktree scan feedback | `components/WorktreeScanWarning.tsx`, `App.tsx`, `store-projects.ts` | Main warning/Rescan, missing-child state page, central scan application and runtime status |
 | Sidebar | `components/Sidebar.tsx` | Project 列表、connected-only filter、displayed-label search/navigation、拖曳排序、右鍵選單、worktree branch、連線健康 status-dot |
 | Tab bar | `components/TabBar.tsx` | Tab 列表、拖曳排序、雙擊重命名、unread badge、PM Active badge |
 | 快速指令選擇器 | `components/CommandPicker.tsx` + `quick-command-target.ts` | ⌘P overlay，過濾 + Terminal-only target resolution/refusal + 執行 per-project 快速指令 |
@@ -220,7 +225,7 @@ title: shelf-terminal — Intent → File Index
 | 資料夾瀏覽器 | `components/FolderBrowser.tsx` | 純展示元件，顯示目錄清單和 keyboard hints |
 | 頁內搜尋 | `components/SearchBar.tsx` | terminal tab 走 xterm SearchAddon；agent/web tab 走 main findInPage（`shelfApi.find`）+ 命中計數 |
 | Settings 面板 | `components/SettingsPanel.tsx` | 左側 tab 分頁（Terminal / Agent / Models / PM Agent / Web / Shortcuts）；Backup 是獨立右側 operation panel，不在 Settings |
-| Worktree 建立 | `components/WorktreeDialog.tsx` + `worktree-child-config.ts` | 顯示 target、configured note source/list 狀態、接收 branch/note prefill、繼承完整 startup tabs 或以 Agent + Terminal 覆蓋後建立 sub-project |
+| Worktree 建立 | `components/WorktreeDialog.tsx` + `../shared/worktree-child-config.ts` | 顯示 target、configured note source/list 狀態、接收 branch/note prefill、繼承完整 startup tabs 或以 Agent + Terminal 覆蓋後建立 sub-project |
 | Worktree proposal prefill helper | `worktree-prefill.ts` | 純函式正規化 New Worktree proposal 帶入的多 note path prefill |
 | Feature-note config edit rule | `feature-note-config-edit.ts` | main config canonicalization 與 child snapshot read-only save rule |
 | Worktree 關閉 gate | `components/WorktreeCloseGate.tsx` | Finish/Abandon close transaction：merge-back、note restore、teardown、branch delete、completion event |

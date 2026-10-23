@@ -145,3 +145,35 @@ Every invocation requires `development-flow`, `propose_worktree_create`, and `pr
 **Reason:** Shelf presents the worktree and its sidebar project as one working environment. A cleanup option that controls only the Git branch leaves users unable to preserve that environment. Naming the whole cleanup operation aligns the checkbox with what it controls without exposing subproject terminology.
 
 **Do not change casually because:** Restoring notes, disconnecting tabs, or removing the project during merge-only would violate the user's choice to retain the environment. The shared Finish/Abandon controls must preserve each operation's distinct meaning.
+
+## worktree#17 — Git discovery reconciles Shelf children without opening them  ·  [Decision]
+
+**Decision:** After main or child Connect creates at least one tab, scan the associated main repository once through its connector. Explicit Rescan uses the same repo-wide path. Discover all accessible registered checkouts, including detached HEAD, excluding the main checkout itself. Add disconnected children with the current parent's setup and fresh sessions; preserve existing ids, cwd, baseBranch, settings and conversations. There is no polling, focus-triggered scan, or startup scan.
+
+**Reason:** Shelf presents a worktree and its sidebar child as one environment. Git-created worktrees should appear automatically, while discovery must not move focus or start processes. Connect completion means tab creation, not provider readiness; waiting for provider login would make discovery depend on the tab mix.
+
+**Do not change casually because:** Agent initialization saves session ids and preferences during this scan. Only topology changes invalidate its baseline; reconciliation merges metadata into the latest canonical projects and inherits the latest parent setup. Treating every config write as stale prevents Agent-only projects from discovering worktrees. Branch names are metadata, not identity; detached labels use the checkout directory name.
+
+## worktree#18 — Missing worktrees retain data and stay disabled until a successful scan  ·  [Decision]
+
+**Decision:** A complete scan that confirms absence disconnects the child, persists missing availability, and retains the item and saved conversations without changing focus. Restore that status across restarts. A missing child has no context menu and cannot connect, create tabs, edit, switch branches, Finish or Abandon. Its focused view offers repo-wide Rescan and Remove. Remove confirms deletion of Shelf data only and never cleans Git registrations, branches or files. A recovered child keeps its identity/settings/history and remains disconnected.
+
+**Reason:** A missing checkout makes path-dependent operations fail. Uniformly disabling it avoids separate behavior for focused/background and connected/disconnected children, while retaining data until the user explicitly removes it.
+
+**Do not change casually because:** Failure to inspect a target is not proof of absence. Scanning or scan failure never resets last-known availability. A successful recovery must also clear the obsolete runtime folder warning for the validated child; otherwise the retained warning hides the restored Connect UI.
+
+## worktree#19 — Reconciliation is a validated batch, and failures preserve the previous list  ·  [Decision]
+
+**Decision:** Parse NUL-delimited porcelain and resolve checkout/git-dir/common-dir identity on the target. Verify the whole snapshot before publishing one repository batch. Serialize it with project mutations; reject changed topology and lifecycle generations. Prepare inherited secrets before publication and roll them back on failure. No scan prunes or repairs Git. A stale response is discarded with diagnostic context.
+
+**Reason:** Partial adds/updates or host filesystem checks can misclassify remote worktrees and lose the relationship to retained data. Access, transport, Git and parse errors must remain distinguishable from confirmed missing paths. Target discovery runs afresh on Rescan so a failed first probe does not poison later recovery.
+
+**Do not change casually because:** A confirmed non-Git main without children is normal and skips reconciliation. An unrecognizable main with existing children is an error. Errors appear beside the main project, with details and Rescan, without replacing normal content or changing focus. IPC/renderer refresh failure may happen after commit; refresh canonical data instead of claiming rollback or replaying a stale batch.
+
+## worktree#20 — Detached Finish merges the inspected commit and has no branch to delete  ·  [Decision]
+
+**Decision:** Finish resolves the live source identity, branch and HEAD, uses that commit for both free-target and checked-out-target fast-forward paths, and rejects changed HEAD before merge. Recheck source identity/HEAD/branch before cleanup. Detached sources follow the same clean/ff-only gates; cleanup removes their checkout but deletes no branch. Display labels are separate from branch deletion arguments.
+
+**Reason:** A detached worktree is a valid checkout. Its ability to merge depends on ancestry, not whether it has a branch. Saved sidebar metadata can be stale after external checkout commands, so it cannot authorize branch deletion.
+
+**Do not change casually because:** Merge-only still preserves the entire environment. The selected target is explicit; discovering an external child captures the main's current branch as a default, not a historical origin. If the main is detached, leave that default empty and let the existing target selector choose a branch.
