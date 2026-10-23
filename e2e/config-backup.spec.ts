@@ -1,7 +1,7 @@
 import { test, expect } from './helpers';
 import fs from 'fs';
 import path from 'path';
-import simpleGit from 'simple-git';
+import { simpleGit } from 'simple-git';
 
 const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
 
@@ -174,9 +174,8 @@ test('Back up preselects intent, blocks invalid Skills, and preserves unselected
 
   const appInstanceId = fs.readFileSync(path.join(userDataDir, 'app-instance-id'), 'utf-8').trim();
   const branch = `refs/heads/backup/${appInstanceId}`;
-  const git = simpleGit();
+  const git = simpleGit(remote);
   const listFiles = async () => (await git.raw([
-    '--git-dir', remote,
     'ls-tree', '-r', '--name-only', branch,
   ])).trim().split('\n').filter(Boolean);
   const firstFiles = await listFiles();
@@ -196,8 +195,8 @@ test('Back up preselects intent, blocks invalid Skills, and preserves unselected
   await panel.getByRole('button', { name: 'Back up now' }).click();
   await expect(panel.locator('.backup-status-ok')).toHaveText('Backed up 1 item.');
 
-  expect(await git.raw(['--git-dir', remote, 'show', `${branch}:skills/alpha/version.txt`])).toBe('alpha-one');
-  expect(await git.raw(['--git-dir', remote, 'show', `${branch}:skills/beta/version.txt`])).toBe('beta-one');
+  expect(await git.raw(['show', `${branch}:skills/alpha/version.txt`])).toBe('alpha-one');
+  expect(await git.raw(['show', `${branch}:skills/beta/version.txt`])).toBe('beta-one');
   expect(JSON.parse(fs.readFileSync(path.join(userDataDir, 'config-backup-intent.json'), 'utf-8')))
     .toEqual(['skill:beta']);
 

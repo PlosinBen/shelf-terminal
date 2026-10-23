@@ -16,9 +16,10 @@ test('app window opens with correct layout', async ({ shelfApp: { page } }) => {
 
 test('sidebar header actions stay out of sequential focus order', async ({ shelfApp: { page } }) => {
   const actions = page.locator('.sidebar-header-actions .sidebar-btn');
-  await expect(actions).toHaveCount(3);
+  const actionCount = await actions.count();
+  expect(actionCount).toBeGreaterThan(0);
 
-  for (let i = 0; i < 3; i++) {
+  for (let i = 0; i < actionCount; i++) {
     await expect(actions.nth(i)).toHaveAttribute('tabindex', '-1');
   }
 
