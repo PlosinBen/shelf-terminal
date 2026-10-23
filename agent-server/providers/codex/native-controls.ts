@@ -1,3 +1,4 @@
+import { AgentInitializationError, savedPrefRecovery } from '@shared/agent-init-recovery';
 import { CONFIG_EDIT_KEYS, type ConfigEditKey } from '@shared/config-ack';
 import { PERMISSION_CONTROL_STRATEGIES, type NativePermissionControlDescriptor } from '@shared/permission-controls';
 import type { ProviderCapabilities } from '../types';
@@ -103,7 +104,7 @@ export class CodexNativeControls {
     const options = this.options(key);
     // An absent model catalog cannot establish that a saved selection is invalid.
     if (options && (key !== CONFIG_EDIT_KEYS.MODEL || options.length > 0) && !options.some(option => option.value === value)) {
-      throw new Error(`Codex did not advertise saved ${key} value "${value}"`);
+      throw new AgentInitializationError(`Codex did not advertise saved ${key} value "${value}"`, savedPrefRecovery(key, value));
     }
   }
 

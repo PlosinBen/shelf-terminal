@@ -834,6 +834,21 @@ describe('Codex official app-server backend lifecycle', () => {
     expect(app.calls.some(call => call.method === 'thread/start')).toBe(false);
   });
 
+  it.each(['model', 'effort', 'nativeMode', 'nativePermission', 'nativeApproval'] as const)('classifies saved %s and can reinitialize with only that field omitted', async key => {
+    const app = new FakeAppServer();
+    const backend = createCodexBackend({ createAppServer: () => app });
+    const intent = { [key]: 'retired' };
+    await expect(backend.gatherCapabilities!('/repo', undefined, undefined, intent))
+      .rejects.toMatchObject({ recovery: { kind: 'clear_saved_pref', key, savedValue: 'retired' } });
+    backend.reconnect!();
+    app.calls = [];
+    await expect(backend.gatherCapabilities!('/repo', undefined, undefined, {}, undefined, undefined, restoreContext('same-thread'))).resolves.toBeDefined();
+    const resume = app.calls.find(call => call.method === 'thread/resume')!.params as Record<string, unknown>;
+    expect(resume.threadId).toBe('same-thread');
+    for (const field of ['model', 'effort', 'permissions', 'approvalPolicy']) expect(resume).not.toHaveProperty(field);
+    backend.dispose();
+  });
+
   it('reports auth required before listing models when app-server has no OpenAI account', async () => {
     const app = new FakeAppServer({
       'account/read': () => ({ account: null, requiresOpenaiAuth: true }),

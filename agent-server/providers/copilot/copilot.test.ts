@@ -1046,7 +1046,7 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
       '/tmp/project', undefined, undefined, { model: 'retired-model' },
     )).rejects.toMatchObject({
       message: 'Copilot did not advertise saved model value \"retired-model\"',
-      recovery: { kind: 'clear_saved_model', model: 'retired-model' },
+      recovery: { kind: 'clear_saved_pref', key: 'model', savedValue: 'retired-model', label: 'model' },
     });
 
     expect(setConfigCalls).toEqual([]);
@@ -1066,7 +1066,7 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
     const restore = { sessionId: 'shelf-session', provider: 'copilot' as const, updatedAt: 1, lastSdkSessionId: 'persisted-acp-session' };
     await expect(backend.gatherCapabilities!(
       '/tmp/project', 'shelf-session', undefined, { model: 'retired-model' }, undefined, 'app-1', restore,
-    )).rejects.toMatchObject({ recovery: { model: 'retired-model' } });
+    )).rejects.toMatchObject({ recovery: { key: 'model', savedValue: 'retired-model' } });
     const caps = await backend.gatherCapabilities!(
       '/tmp/project', 'shelf-session', undefined, {}, undefined, 'app-1', restore,
     );
@@ -1075,12 +1075,24 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
     backend.dispose();
   });
 
-  it('does not offer model recovery for an unavailable effort', async () => {
+  it('offers effort recovery for an unavailable effort', async () => {
     const mock = createMockAcpAgent({ modes: COPILOT_MODES, configOptions: COPILOT_CONFIG });
     const backend = createCopilotBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
     await expect(backend.gatherCapabilities!(
       '/tmp/project', undefined, undefined, { effort: 'retired-effort' },
-    )).rejects.toMatchObject({ recovery: undefined });
+    )).rejects.toMatchObject({ recovery: { kind: 'clear_saved_pref', key: 'effort', savedValue: 'retired-effort' } });
+    backend.dispose();
+  });
+
+  it.each(['nativeMode', 'nativePermission'] as const)('recovers invalid %s by reinitializing with that parameter omitted', async key => {
+    const calls: unknown[] = [];
+    const mock = createMockAcpAgent({ modes: COPILOT_MODES, configOptions: COPILOT_CONFIG,
+      onSetConfigOption: params => calls.push(params) });
+    const backend = createCopilotBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
+    await expect(backend.gatherCapabilities!('/tmp/project', undefined, undefined, { [key]: 'retired' }))
+      .rejects.toMatchObject({ recovery: { kind: 'clear_saved_pref', key, savedValue: 'retired' } });
+    await expect(backend.gatherCapabilities!('/tmp/project', undefined, undefined, {})).resolves.toBeDefined();
+    expect(calls).toEqual([]);
     backend.dispose();
   });
 

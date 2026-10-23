@@ -17,3 +17,12 @@ describe('initialization recovery metadata', () => {
     warn.mockRestore();
   });
 });
+
+it('accepts specific saved-pref recovery but rejects arbitrary deletion paths', () => {
+  const recovery = { kind: 'clear_saved_pref', key: 'nativeApproval', savedValue: 'retired', label: 'Approval' };
+  expect(readInitRecovery(recovery)).toEqual(recovery);
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  expect(readInitRecovery({ ...recovery, key: '__proto__' })).toBeUndefined();
+  expect(warn).toHaveBeenCalledOnce();
+  warn.mockRestore();
+});

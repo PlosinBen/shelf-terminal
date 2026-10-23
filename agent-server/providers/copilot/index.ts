@@ -1,4 +1,4 @@
-import { AgentInitializationError, AgentInitRecoveryKind } from '@shared/agent-init-recovery';
+import { AgentInitializationError, savedPrefRecovery } from '@shared/agent-init-recovery';
 // Copilot agent provider over ACP (ServerBackend), peer to createCodexBackend.
 // Uses the shared, semantics-free acp/ toolkit for the runtime and OWNS copilot
 // specifics (binary launch via `copilot --acp`, device-flow login, config-home).
@@ -439,13 +439,13 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
     ));
   }
 
-  function validateSavedSelection(label: string, option: SessionConfigOption | undefined, value: string): void {
+  function validateSavedSelection(label: string, option: SessionConfigOption | undefined, value: string, key: ConfigEditKey): void {
     if (!option || option.type !== 'select') {
       throw new Error(`Copilot did not advertise ${label} as a select option`);
     }
     if (!selectOptionValues(option).includes(value)) {
       throw new AgentInitializationError(`Copilot did not advertise saved ${label} value "${value}"`,
-        label === MODEL_CATEGORY ? { kind: AgentInitRecoveryKind.CLEAR_SAVED_MODEL, model: value } : undefined);
+        savedPrefRecovery(key, value, label));
     }
   }
 
@@ -479,15 +479,17 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
 
     // Validate the complete desired set before changing the live session so a
     // stale later field cannot cause an avoidable partial apply.
-    if (intent.model !== undefined) validateSavedSelection(MODEL_CATEGORY, modelOption, intent.model);
-    if (intent.effort !== undefined) validateSavedSelection(EFFORT_CATEGORY, effortOption, intent.effort);
+    if (intent.model !== undefined) validateSavedSelection(MODEL_CATEGORY, modelOption, intent.model, CONFIG_EDIT_KEYS.MODEL);
+    if (intent.effort !== undefined) validateSavedSelection(EFFORT_CATEGORY, effortOption, intent.effort, CONFIG_EDIT_KEYS.EFFORT);
     if (intent.nativeMode !== undefined) {
-      if (!sessionModes?.availableModes.some((mode) => mode.id === intent.nativeMode)) {
-        throw new Error(`Copilot did not advertise saved native mode "${intent.nativeMode}"`);
+      if (!sessionModes) throw new Error('Copilot did not advertise mode controls');
+      if (!sessionModes.availableModes.some((mode) => mode.id === intent.nativeMode)) {
+        throw new AgentInitializationError(`Copilot did not advertise saved native mode "${intent.nativeMode}"`,
+          savedPrefRecovery(CONFIG_EDIT_KEYS.NATIVE_MODE, intent.nativeMode, 'Mode'));
       }
     }
     if (intent.nativePermission !== undefined) {
-      validateSavedSelection(COPILOT_PERMISSION_OPTION_ID, permissionOption, intent.nativePermission);
+      validateSavedSelection(COPILOT_PERMISSION_OPTION_ID, permissionOption, intent.nativePermission, CONFIG_EDIT_KEYS.NATIVE_PERMISSION);
     }
 
     if (intent.model !== undefined && (force || currentModel !== intent.model)) {

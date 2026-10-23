@@ -2,7 +2,7 @@ import { isWorktreeUnavailable, WorktreeScanOutcome } from '@shared/worktree';
 import { clearValidatedWorktreeDirectories, setWorktreeScan, getProjectSliceSnapshot, setEditingProjectById } from './store';
 import { CONFIRM_REMOVE_EVENT } from './components/RemoveConfirmDialog';
 import { debugLog } from './debugLog';
-import { createModelRecovery } from './agent-model-recovery';
+import { createPrefRecovery } from './agent-model-recovery';
 import React, { useEffect, useState } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { TabBar } from './components/TabBar';
@@ -583,7 +583,7 @@ export function App() {
       emit(Events.WORKTREE_CLOSE, projectId, 'finish');
     });
 
-    const recoverModel = createModelRecovery({
+    const recoverPref = createPrefRecovery({
       project: (tabId) => getProjectViews().find((project) => project.tabs.some((tab) => tab.id === tabId)),
       tab: peekAgentTab,
       save: (id, changes) => projectCoordinator.save(id, changes),
@@ -599,8 +599,8 @@ export function App() {
         });
       },
     });
-    const offRecoverModel = onAgent('agent:recoverModel', ({ tabId }) => { void recoverModel(tabId); });
-    const offRetryInit = onAgent('agent:retryInit', ({ tabId }) => { void recoverModel(tabId, false); });
+    const offRecoverPref = onAgent('agent:recoverPref', ({ tabId }) => { void recoverPref(tabId); });
+    const offRetryInit = onAgent('agent:retryInit', ({ tabId }) => { void recoverPref(tabId, false); });
 
     const offConnectProject = on(Events.CONNECT_PROJECT, async (projectId: string) => {
       let proj = getProjectById(projectId);
@@ -754,7 +754,7 @@ export function App() {
       }
     });
 
-    return () => { offRetryInit(); offRecoverModel(); offRescan(); offCloseTab(); offRemoveProject(); offWorktreeFinishCompleted(); offNewTab(); offNewAgentTab(); offNewWebTab(); offOpenAuthTerminal(); offOpenWebTab(); offProposeWorktreeCreate(); offProposeWorktreeFinish(); offConnectProject(); offOpenExistingProject(); offAutoConnect(); offDisconnectProject(); offAddProject(); offUpdateProject(); offReorderProjects(); offToggleSplit(); offSwitchBranch(); };
+    return () => { offRetryInit(); offRecoverPref(); offRescan(); offCloseTab(); offRemoveProject(); offWorktreeFinishCompleted(); offNewTab(); offNewAgentTab(); offNewWebTab(); offOpenAuthTerminal(); offOpenWebTab(); offProposeWorktreeCreate(); offProposeWorktreeFinish(); offConnectProject(); offOpenExistingProject(); offAutoConnect(); offDisconnectProject(); offAddProject(); offUpdateProject(); offReorderProjects(); offToggleSplit(); offSwitchBranch(); };
   }, []);
 
   useEffect(() => {

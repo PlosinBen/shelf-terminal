@@ -1,6 +1,6 @@
-import { AgentInitializationError, AgentInitRecoveryKind } from '@shared/agent-init-recovery';
+import { AgentInitializationError, AgentInitRecoveryKind, savedPrefRecovery } from '@shared/agent-init-recovery';
 import { randomUUID } from 'node:crypto';
-import { formatConfigAck } from '@shared/config-ack';
+import { CONFIG_EDIT_KEYS, formatConfigAck } from '@shared/config-ack';
 import { parseSlashPrefix } from '@shared/slash-prefix';
 import { FAKE_PROVIDER, type AgentProvider } from '@shared/agent-providers';
 import { SHELF_PERMISSION_CONTROL } from '@shared/permission-controls';
@@ -783,6 +783,11 @@ export function createFakeBackend(_representedProvider: AgentProvider = FAKE_PRO
         throw new AgentInitializationError('Saved model is unavailable', {
           kind: AgentInitRecoveryKind.CLEAR_SAVED_MODEL, model: intent.model,
         });
+      }
+      for (const key of Object.values(CONFIG_EDIT_KEYS)) {
+        if (intent?.[key] === FAKE_RETIRED_MODEL) {
+          throw new AgentInitializationError(`Saved ${key} is unavailable`, savedPrefRecovery(key, intent[key]));
+        }
       }
       if (process.env[FAKE_TEST_ENV.CAPS_FAIL] === '1') {
         throw new Error('fake init failure (SHELF_TEST_CAPS_FAIL)');

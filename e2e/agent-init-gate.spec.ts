@@ -91,6 +91,38 @@ test.describe('agent init-readiness gate', () => {
     });
   });
 
+  test.describe('unavailable saved config field recovery', () => {
+    test.use({ nativePermissions: true, nativeApproval: true });
+    for (const [key, label] of [['effort', 'effort'], ['nativeMode', 'mode'], ['nativePermission', 'permission'], ['nativeApproval', 'approval']]) {
+      test(`clears only ${key} and retries the same agent`, async ({ shelfApp: { page } }) => {
+        await setupProject(page);
+        await openAgentTab(page);
+        const original = await page.evaluate(async () => (await window.shelfApi.project.getAll())[0]);
+        await page.locator('.sidebar-item').first().click({ button: 'right' });
+        await page.locator('.context-menu-item', { hasText: 'Disconnect' }).click();
+        await page.evaluate(async ({ key, retired }) => {
+          const project = (await window.shelfApi.project.getAll())[0];
+          await window.shelfApi.project.update({ ...project, agentPrefs: { ...project.agentPrefs,
+            claude: { model: 'fake-model-pro', [key]: retired } } });
+        }, { key, retired: FAKE_RETIRED_MODEL });
+        await page.reload();
+        await page.locator('.connect-prompt').click();
+        await openAgentTab(page);
+        const overlay = page.locator('.agent-conn-overlay');
+        await expect(overlay).toContainText(`Saved ${key} is unavailable`);
+        await overlay.getByRole('button', { name: 'Retry', exact: true }).click();
+        await expect(overlay).toContainText(`Saved ${key} is unavailable`);
+        await overlay.getByRole('button', { name: `Retry with default ${label}`, exact: true }).click();
+        await expect(overlay).toHaveCount(0, { timeout: 15_000 });
+        const recovered = await page.evaluate(async () => (await window.shelfApi.project.getAll())[0]);
+        expect(recovered.agentPrefs.claude).toEqual({ model: 'fake-model-pro' });
+        expect(recovered.agentSessionIds).toEqual(original.agentSessionIds);
+        await sendAgentPrompt(page, 'text:recovered field');
+        await expect(page.locator('.agent-msg-reply', { hasText: 'recovered field' })).toBeVisible();
+      });
+    }
+  });
+
   test.describe('caps RPC fails → init locked', () => {
     test.use({ capsFail: true });
 

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { createModelRecovery } from './agent-model-recovery';
+import { createPrefRecovery } from './agent-model-recovery';
 import { AgentInitRecoveryKind } from '@shared/agent-init-recovery';
 import { ProjectMutationRefreshError } from './project-mutation-coordinator';
 
@@ -14,7 +14,7 @@ function fixture() {
     status: vi.fn((_id: string, state: string) => { if (tab) tab = { ...tab, initStatus: state }; }),
     restart: vi.fn(),
   };
-  return { deps, run: createModelRecovery(deps), project: () => project, remove: () => { tab = undefined; } };
+  return { deps, run: createPrefRecovery(deps), project: () => project, remove: () => { tab = undefined; } };
 }
 
 describe('model recovery transaction', () => {
@@ -75,4 +75,16 @@ describe('model recovery transaction', () => {
     expect(f.deps.save).not.toHaveBeenCalled();
     expect(f.deps.restart).toHaveBeenCalledOnce();
   });
+});
+
+it.each(['model', 'effort', 'permissionMode', 'nativeMode', 'nativePermission', 'nativeApproval'])('clears only saved %s through the existing restart transaction', async key => {
+  const f = fixture();
+  f.project().agentPrefs.copilot[key] = 'retired';
+  f.deps.tab().initRecovery = { kind: 'clear_saved_pref', key, savedValue: 'retired', label: key };
+  const expected = { ...f.project().agentPrefs.copilot };
+  delete expected[key];
+  await f.run('t');
+  expect(f.project().agentPrefs.copilot).toEqual(expected);
+  expect(f.project().agentPrefs.claude).toEqual({ model: 'keep' });
+  expect(f.deps.restart).toHaveBeenCalledWith('t', expect.objectContaining({ sessionId: 'session' }), f.project());
 });

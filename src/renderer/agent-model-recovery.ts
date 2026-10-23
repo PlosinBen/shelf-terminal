@@ -1,4 +1,4 @@
-import { AgentInitRecoveryKind, type AgentInitRecovery } from '@shared/agent-init-recovery';
+import { recoverySelection, type AgentInitRecovery } from '@shared/agent-init-recovery';
 import type { Project } from '@shared/projects';
 import type { AgentTabState } from './agentTabStore';
 import { debugLog } from './debugLog';
@@ -14,19 +14,20 @@ interface RecoveryDependencies {
 }
 
 /** App owns the side effects; this transaction keeps persistence ahead of init. */
-export function createModelRecovery(deps: RecoveryDependencies) {
+export function createPrefRecovery(deps: RecoveryDependencies) {
   const pending = new Set<string>();
-  return async (tabId: string, clearModel = true): Promise<void> => {
+  return async (tabId: string, clearPref = true): Promise<void> => {
     const tab = deps.tab(tabId);
     const project = deps.project(tabId);
     const recovery = tab?.initRecovery;
+    const selection = recoverySelection(recovery);
     if (!tab || !project) {
       debugLog('agent-recovery', `ignored retry for removed tab/project tabId=${tabId}`);
       return;
     }
     if (tab.initStatus === 'starting') return;
-    if (clearModel && (tab.initStatus !== 'failed'
-      || recovery?.kind !== AgentInitRecoveryKind.CLEAR_SAVED_MODEL)) return;
+    if (clearPref && (tab.initStatus !== 'failed'
+      || !selection)) return;
     const key = JSON.stringify([project.id, tab.provider]);
     if (pending.has(key)) return;
     pending.add(key);
@@ -39,12 +40,12 @@ export function createModelRecovery(deps: RecoveryDependencies) {
     };
     deps.status(tabId, 'starting');
     try {
-      if (!clearModel) {
+      if (!clearPref) {
         // A previous attempt may have saved successfully but failed to refresh.
         await deps.refresh();
-      } else if (project.agentPrefs[tab.provider]?.model === recovery!.model) {
+      } else if (selection && project.agentPrefs[tab.provider]?.[selection.key] === selection.savedValue) {
         const prefs = { ...project.agentPrefs[tab.provider] };
-        delete prefs.model;
+        delete prefs[selection.key];
         try {
           await deps.save(project.id, { agentPrefs: { ...project.agentPrefs, [tab.provider]: prefs } });
         } catch (error) {
@@ -53,7 +54,7 @@ export function createModelRecovery(deps: RecoveryDependencies) {
           await deps.refresh();
         }
       } else {
-        debugLog('agent-recovery', `saved model changed; retrying latest intent tabId=${tabId} projectId=${project.id}`);
+        debugLog('agent-recovery', `saved preference changed; retrying latest intent tabId=${tabId} projectId=${project.id}`);
       }
       const next = current();
       if (!next) {

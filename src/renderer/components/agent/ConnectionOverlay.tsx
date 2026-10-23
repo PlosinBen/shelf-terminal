@@ -1,4 +1,4 @@
-import { AgentInitRecoveryKind } from '@shared/agent-init-recovery';
+import { recoverySelection } from '@shared/agent-init-recovery';
 import { emitAgent } from '../../events';
 import React from 'react';
 import { useAgentTab } from '../../agentTabStore';
@@ -33,6 +33,7 @@ export function ConnectionOverlay({ tabId, onRetry }: Props) {
   const dead = connectionHealth[tabId]?.state === 'dead';
   const failed = initStatus === 'failed';
   const starting = initStatus === 'starting';
+  const recovery = recoverySelection(tab?.initRecovery);
 
   // Cover the pane whenever it isn't usable: starting (init / reconnect),
   // failed, or connection dead. Only a ready + healthy pane shows no overlay.
@@ -52,9 +53,9 @@ export function ConnectionOverlay({ tabId, onRetry }: Props) {
             <div className="agent-conn-title">Failed to start agent</div>
             {tab?.initError && <div className="agent-conn-reason">{tab.initError}</div>}
             <button className="conn-btn conn-btn-next agent-conn-btn" onClick={onRetry}>Retry</button>
-            {tab?.initRecovery?.kind === AgentInitRecoveryKind.CLEAR_SAVED_MODEL && (
-              <button className="conn-btn conn-btn-next agent-conn-btn" onClick={() => emitAgent('agent:recoverModel', { tabId })}>
-                Retry with default model
+            {recovery && (
+              <button className="conn-btn conn-btn-next agent-conn-btn" onClick={() => emitAgent('agent:recoverPref', { tabId })}>
+                Retry with default {recovery.label}
               </button>
             )}
           </>
