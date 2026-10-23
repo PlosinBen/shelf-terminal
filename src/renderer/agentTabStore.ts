@@ -25,12 +25,14 @@ import type { ConfigEditKey } from '../shared/config-ack';
 export type StatusSegment = { text: string; severity?: 'normal' | 'warning' | 'critical' };
 
 export interface CycleOption {
+  description?: string;
   value: string;
   displayName: string;
   severity?: 'normal' | 'info' | 'warning' | 'critical';
 }
 
 export interface Capabilities {
+  confirmedPrefs?: Partial<import('@shared/types').AgentPrefs>;
   models: { value: string; displayName: string; effortLevels?: CycleOption[]; vision?: boolean }[];
   permissionModes: CycleOption[];
   permissionControl?: PermissionControlCapabilities;

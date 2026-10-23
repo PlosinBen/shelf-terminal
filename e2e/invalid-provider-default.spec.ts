@@ -63,7 +63,7 @@ test.describe('unavailable persisted startup provider', () => {
         provider: projects[0]?.defaultTabs?.find((tab: any) => tab.kind === 'agent')?.provider,
         hasLegacyProvider: Object.hasOwn(projects[0] ?? {}, 'defaultAgentProvider'),
       };
-    }).toEqual({ schemaVersion: 2, provider: STALE_PROVIDER, hasLegacyProvider: false });
+    }).toEqual({ schemaVersion: 3, provider: STALE_PROVIDER, hasLegacyProvider: false });
 
     await page.locator('.sidebar-item').click({ button: 'right' });
     await page.locator('.context-menu-item', { hasText: 'New Worktree' }).click();

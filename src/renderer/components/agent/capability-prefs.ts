@@ -3,6 +3,7 @@ import type { PermissionControlCapabilities } from '@shared/permission-controls'
 
 export function persistedPrefsFromCapabilities(
   capabilities: {
+    confirmedPrefs?: Partial<AgentPrefs>;
     permissionControl?: PermissionControlCapabilities;
     currentModel?: string;
     currentEffort?: string;
@@ -10,6 +11,7 @@ export function persistedPrefsFromCapabilities(
   },
   saved: AgentPrefs | undefined,
 ): Partial<AgentPrefs> {
+  if (capabilities.confirmedPrefs !== undefined) return capabilities.confirmedPrefs;
   const partial: Partial<AgentPrefs> = {};
   if (capabilities.currentModel && capabilities.currentModel !== saved?.model) {
     partial.model = capabilities.currentModel;

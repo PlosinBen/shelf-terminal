@@ -1,5 +1,6 @@
+import { CodexNativeControls, CODEX_NATIVE_RPC } from './native-controls';
 import { CODEX_PROVIDER } from '@shared/agent-providers';
-import { SHELF_PERMISSION_CONTROL } from '@shared/permission-controls';
+import { PERMISSION_CONTROL_STRATEGIES } from '@shared/permission-controls';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -7,9 +8,9 @@ import type { AgentAttachment, ProviderModel } from '@shared/types';
 import { parseSlashPrefix } from '@shared/slash-prefix';
 import { codexConfigHome, codexEnv, resolveCodexCliCommand } from '../codex-shared/runtime';
 import { driveDeviceCodeLogin, spawnCodexAppServerRpc, type LoginHandle, type LoginRpc } from '../codex-shared/app-server-login';
-import { pickEffortLevels, pickPermissionModes, type ProviderCapabilities, type SendFn, type ServerBackend } from '../types';
-import { formatConfigAck, type ConfigEditKey } from '@shared/config-ack';
-import { CODEX_EFFORT_LEVELS, buildCodexRuntimeConfig } from './config';
+import { pickEffortLevels, type ProviderCapabilities, type SendFn, type ServerBackend } from '../types';
+import { CONFIG_EDIT_KEYS, formatConfigAck, type ConfigEditKey } from '@shared/config-ack';
+import { buildCodexRuntimeConfig } from './config';
 import { normalizeCodexAccountStatus, redactCodexAccountText, refreshCodexAccountStatus } from './account-status';
 import { spawnCodexAppServerClient, type CodexAppServerNotificationHandler } from './app-server-client';
 import { summarizeTokenUsageForLog, translateCodexAppServerNotification } from './app-server-translate';
@@ -94,7 +95,12 @@ export function codexSkillTarget(appId: string | undefined): string | undefined 
 export function createCodexBackend(deps: CodexBackendDeps = {}): ServerBackend {
   let currentModel: string | undefined;
   let currentEffort: string | undefined;
-  let currentPermissionMode: string | undefined;
+  const nativeControls = new CodexNativeControls();
+  let sessionSend: SendFn = () => {};
+  let nativeReady = false;
+  let nativeCatalogLoaded = false;
+  let models: ProviderCapabilities['models'] = [];
+  let explicitPrefs: import('@shared/types').AgentPrefs = {};
   let lastAppId: string | undefined;
   let loginHandle: LoginHandle | null = null;
   let activeRun: symbol | null = null;
@@ -133,7 +139,7 @@ export function createCodexBackend(deps: CodexBackendDeps = {}): ServerBackend {
     }
     if (!appServerInitialized) {
       await appServer.request('initialize', {
-        capabilities: null,
+        capabilities: { experimentalApi: true },
         clientInfo: { name: 'shelf', version: '0.0.0', title: 'Shelf' },
       });
       appServerInitialized = true;
@@ -142,6 +148,9 @@ export function createCodexBackend(deps: CodexBackendDeps = {}): ServerBackend {
   }
 
   function registerAppServerNotifications(client: CodexAppServerLike): void {
+    client.onNotification(CODEX_NATIVE_RPC.UPDATED, params => {
+      try { nativeControls.observe(params); } catch (error) { serverLog('error', 'codex-settings', String(error)); }
+    });
     const forward = (method: string) => {
       client.onNotification(method, (params) => {
         if (method === 'turn/started') {
@@ -461,42 +470,24 @@ export function createCodexBackend(deps: CodexBackendDeps = {}): ServerBackend {
     );
   }
 
-  function buildCapabilities(
-    customModels: ProviderModel[] = [],
-    normalizeCurrentModel = false,
-    appServerModels?: ProviderCapabilities['models'],
-  ): ProviderCapabilities {
-    const models = [...(appServerModels?.length ? appServerModels : listBundledModels())];
-    const seen = new Set(models.map((model) => model.value));
-    for (const model of customModels) {
-      if (seen.has(model.id)) continue;
-      models.push({ value: model.id, displayName: model.id });
-      seen.add(model.id);
-    }
-    if (normalizeCurrentModel && models.length > 0 && (!currentModel || !seen.has(currentModel))) {
-      currentModel = models[0].value;
-    }
-    return {
-      models,
-      permissionModes: pickPermissionModes(['default', 'plan', 'bypassPermissions']),
-      permissionControl: SHELF_PERMISSION_CONTROL,
-      effortLevels: pickEffortLevels([...CODEX_EFFORT_LEVELS]),
-      slashCommands: [...CODEX_SDK_SLASH_COMMANDS],
-      ...(currentModel ? { currentModel } : {}),
-      ...(currentEffort ? { currentEffort } : {}),
-      ...(currentPermissionMode ? { currentPermissionMode } : {}),
-    };
+  function buildCapabilities(confirmedPrefs: import('@shared/types').AgentPrefs = {}): ProviderCapabilities {
+    return { models, permissionModes: [], slashCommands: [...CODEX_SDK_SLASH_COMMANDS],
+      ...nativeControls.capabilities(), confirmedPrefs };
   }
 
-  function applyConfigEdit(key: ConfigEditKey, value: string, send: SendFn): void {
-    if (key === 'model') currentModel = value;
-    else if (key === 'effort') currentEffort = value;
-    else currentPermissionMode = value;
-    send({ type: 'capabilities', ...buildCapabilities() });
+  async function applyConfigEdit(key: ConfigEditKey, value: string, send: SendFn): Promise<void> {
+    if (!appServer || !nativeReady) throw new Error('Codex settings are not initialized');
+    const changed = await nativeControls.apply(appServer, key, value);
+    if (!changed) return;
+    explicitPrefs = { ...explicitPrefs, [key]: value };
+    currentModel = nativeControls.value(CONFIG_EDIT_KEYS.MODEL);
+    currentEffort = nativeControls.value(CONFIG_EDIT_KEYS.EFFORT);
+    send({ type: 'capabilities', ...buildCapabilities({ [key]: value }) });
     send({ type: 'message', msgId: `m-${randomUUID().slice(0, 8)}`, msgType: 'system', content: formatConfigAck(key, value) });
   }
 
   return {
+    bindSessionSend(send): void { sessionSend = send; },
     async query(input, send): Promise<void> {
       if (activeRun) {
         send({ type: 'error', error: 'codex: a turn is already running' });
@@ -509,7 +500,7 @@ export function createCodexBackend(deps: CodexBackendDeps = {}): ServerBackend {
       activeSend = send;
       try {
         if (input.configEdit) {
-          applyConfigEdit(input.configEdit.key, input.configEdit.value, send);
+          await applyConfigEdit(input.configEdit.key, input.configEdit.value, send);
           return;
         }
 
@@ -520,8 +511,8 @@ export function createCodexBackend(deps: CodexBackendDeps = {}): ServerBackend {
             send({ type: 'message', msgId: mintSlashMsgId(), msgType: 'error', content: `Usage: /${slash.cmd} <value>` });
             return;
           }
-          const key: ConfigEditKey = slash.cmd === 'permission' ? 'permissionMode' : slash.cmd;
-          applyConfigEdit(key, slash.args, send);
+          const key: ConfigEditKey = slash.cmd === 'permission' ? CONFIG_EDIT_KEYS.NATIVE_PERMISSION : slash.cmd;
+          await applyConfigEdit(key, slash.args, send);
           return;
         }
 
@@ -535,7 +526,7 @@ export function createCodexBackend(deps: CodexBackendDeps = {}): ServerBackend {
             sendSlashMessage(send, 'reply', formatCodexAppServerStatusCard(input, activeThreadId, {
               model: currentModel,
               effort: currentEffort,
-              permissionMode: currentPermissionMode,
+              permissionMode: nativeControls.value(CONFIG_EDIT_KEYS.NATIVE_PERMISSION),
             }));
             return;
           }
@@ -636,11 +627,12 @@ export function createCodexBackend(deps: CodexBackendDeps = {}): ServerBackend {
       intent,
       _cache,
       appId,
+      restoreContext,
     ): Promise<ProviderCapabilities> {
       if (appId) lastAppId = appId;
       if (intent?.model) currentModel = intent.model;
       if (intent?.effort) currentEffort = intent.effort;
-      if (intent?.permissionMode) currentPermissionMode = intent.permissionMode;
+      explicitPrefs = { ...intent };
       const baseEnv = codexEnv(appId);
       const sdkHome = codexHome(appId);
       if (sdkHome) baseEnv.HOME = sdkHome;
@@ -650,24 +642,44 @@ export function createCodexBackend(deps: CodexBackendDeps = {}): ServerBackend {
         return {
           models: [],
           permissionModes: [],
-          permissionControl: SHELF_PERMISSION_CONTROL,
+          permissionControl: { strategy: PERMISSION_CONTROL_STRATEGIES.NATIVE },
           effortLevels: [],
           slashCommands: [],
           authRequired: true,
           authMethod: CODEX_AUTH_METHOD,
         };
       }
-      try {
-        return buildCapabilities(customModels, true, await listAppServerModels(client));
-      } catch (err) {
-        serverLog('warn', 'codex-app-server', `model/list failed; using bundled fallback: ${(err as Error)?.message ?? String(err)}`);
-        return buildCapabilities(customModels, true);
+      if (nativeReady) return buildCapabilities();
+      try { models = await listAppServerModels(client); }
+      catch (err) {
+        serverLog('warn', 'codex-app-server', `model/list failed; using bundled fallback: ${String(err)}`);
+        models = listBundledModels();
       }
+      for (const model of customModels ?? []) {
+        if (!models.some(item => item.value === model.id)) models.push({ value: model.id, displayName: model.id });
+      }
+      await nativeControls.load(client, _cwd, models);
+      nativeCatalogLoaded = true;
+      for (const key of [CONFIG_EDIT_KEYS.MODEL, CONFIG_EDIT_KEYS.NATIVE_PERMISSION, CONFIG_EDIT_KEYS.NATIVE_APPROVAL, CONFIG_EDIT_KEYS.NATIVE_MODE]) {
+        if (explicitPrefs[key] !== undefined) nativeControls.validate(key, explicitPrefs[key]);
+      }
+      await ensureThread(client, { cwd: _cwd, prompt: '', appId, restoreContext }, sessionSend, baseEnv);
+      currentModel = nativeControls.value(CONFIG_EDIT_KEYS.MODEL);
+      currentEffort = nativeControls.value(CONFIG_EDIT_KEYS.EFFORT);
+      nativeReady = true;
+      return buildCapabilities();
     },
 
-    setModel(model): void { currentModel = model; },
-    setEffort(effort): void { currentEffort = effort; },
-    setPermissionMode(mode): void { currentPermissionMode = mode; },
+    async setModel(model): Promise<void> {
+      if (nativeReady && appServer) await nativeControls.apply(appServer, CONFIG_EDIT_KEYS.MODEL, model);
+      currentModel = model;
+      explicitPrefs.model = model;
+    },
+    async setEffort(effort): Promise<void> {
+      if (nativeReady && appServer) await nativeControls.apply(appServer, CONFIG_EDIT_KEYS.EFFORT, effort);
+      currentEffort = effort;
+      explicitPrefs.effort = effort;
+    },
 
     resolvePermission(toolUseId, allow, message, scope): void {
       const pending = pendingPermissionRequests.get(toolUseId);
@@ -719,6 +731,8 @@ export function createCodexBackend(deps: CodexBackendDeps = {}): ServerBackend {
         appServer = null;
         appServerAppId = undefined;
         appServerInitialized = false;
+        nativeReady = false;
+        nativeControls.dispose();
         activeThreadId = null;
         activeTurnId = null;
       }
@@ -736,6 +750,8 @@ export function createCodexBackend(deps: CodexBackendDeps = {}): ServerBackend {
       appServer = null;
       appServerAppId = undefined;
       appServerInitialized = false;
+      nativeReady = false;
+      nativeControls.dispose();
       activeThreadId = null;
       activeTurnId = null;
     },
@@ -750,6 +766,8 @@ export function createCodexBackend(deps: CodexBackendDeps = {}): ServerBackend {
       appServer?.close();
       appServer = null;
       appServerInitialized = false;
+      nativeReady = false;
+      nativeControls.dispose();
       loginHandle?.cancel();
       loginHandle = null;
     },
@@ -761,21 +779,20 @@ export function createCodexBackend(deps: CodexBackendDeps = {}): ServerBackend {
     send: SendFn,
     baseEnv: NodeJS.ProcessEnv,
   ): Promise<string> {
+        if (activeThreadId) {
+          nativeControls.assertUsable();
+          return activeThreadId;
+        }
         const mcp = loadMcpServers(input.appId, baseEnv);
         if (mcp.errors.length) {
           throw new Error(mcp.errors.join('; '));
         }
         const shelfMcp = await getShelfMcp();
-        const sdkHome = codexHome(input.appId);
         const mapped = buildCodexRuntimeConfig({
           cwd: input.cwd,
-          model: input.model ?? currentModel,
-          effort: input.effort ?? currentEffort,
-          permissionMode: input.permissionMode ?? currentPermissionMode,
           baseEnv,
           mcpServers: mcp.servers,
           shelfMcp: shelfMcp ?? undefined,
-          additionalDirectories: sdkHome ? [sdkHome] : undefined,
         });
         if (!mapped.ok) {
           throw new Error(mapped.errors.join('; '));
@@ -815,7 +832,23 @@ export function createCodexBackend(deps: CodexBackendDeps = {}): ServerBackend {
         if (recoveredMissingRollout) sendSlashMessage(send, 'system', CODEX_STALE_THREAD_NOTICE);
         activeThreadId = threadId;
         send({ type: 'context_patch', patch: { lastSdkSessionId: threadId } });
-        send({ type: 'status', state: 'streaming', sessionId: threadId });
+        try {
+          nativeControls.seed(threadId, response);
+          if (nativeCatalogLoaded) {
+            for (const key of [CONFIG_EDIT_KEYS.MODEL, CONFIG_EDIT_KEYS.EFFORT, CONFIG_EDIT_KEYS.NATIVE_PERMISSION,
+              CONFIG_EDIT_KEYS.NATIVE_APPROVAL, CONFIG_EDIT_KEYS.NATIVE_MODE]) {
+              const value = explicitPrefs[key];
+              if (value !== undefined) await nativeControls.apply(client, key, value);
+            }
+            nativeReady = true;
+          }
+        } catch (error) {
+          activeThreadId = null;
+          nativeReady = false;
+          nativeControls.dispose();
+          throw error;
+        }
+        if (activeRun) send({ type: 'status', state: 'streaming', sessionId: threadId });
         return threadId;
   }
 
@@ -868,50 +901,16 @@ export function createCodexBackend(deps: CodexBackendDeps = {}): ServerBackend {
   }
 
   function threadOverrides(input: Parameters<ServerBackend['query']>[0]): Record<string, unknown> {
-    return {
-      cwd: input.cwd,
-      ...(input.model ?? currentModel ? { model: input.model ?? currentModel } : {}),
-      ...threadPermissionOverrides(input.permissionMode ?? currentPermissionMode),
-    };
+    return { cwd: input.cwd,
+      ...(explicitPrefs.model ?? input.model ? { model: explicitPrefs.model ?? input.model } : {}),
+      ...(explicitPrefs.nativePermission ? { permissions: explicitPrefs.nativePermission } : {}),
+      ...(explicitPrefs.nativeApproval ? { approvalPolicy: explicitPrefs.nativeApproval } : {}) };
   }
 
   function turnOverrides(input: Parameters<ServerBackend['query']>[0]): Record<string, unknown> {
-    return {
-      cwd: input.cwd,
-      ...(input.model ?? currentModel ? { model: input.model ?? currentModel } : {}),
-      ...(input.effort ?? currentEffort ? { effort: input.effort ?? currentEffort } : {}),
-      ...turnPermissionOverrides(input.permissionMode ?? currentPermissionMode),
-    };
-  }
-
-  function threadPermissionOverrides(mode: string | undefined): Record<string, unknown> {
-    switch (mode) {
-      case 'plan':
-        return { approvalPolicy: 'never', sandbox: 'read-only' };
-      case 'default':
-        return { approvalPolicy: 'on-request', sandbox: 'workspace-write' };
-      case 'bypassPermissions':
-        return { approvalPolicy: 'never', sandbox: 'danger-full-access' };
-      case undefined:
-        return {};
-      default:
-        throw new Error(`Unsupported Codex app-server permission mode: ${mode}`);
-    }
-  }
-
-  function turnPermissionOverrides(mode: string | undefined): Record<string, unknown> {
-    switch (mode) {
-      case 'plan':
-        return { approvalPolicy: 'never', sandboxPolicy: { type: 'readOnly', networkAccess: false } };
-      case 'default':
-        return { approvalPolicy: 'on-request', sandboxPolicy: { type: 'workspaceWrite', writableRoots: [], networkAccess: false, excludeTmpdirEnvVar: false, excludeSlashTmp: false } };
-      case 'bypassPermissions':
-        return { approvalPolicy: 'never', sandboxPolicy: { type: 'dangerFullAccess' } };
-      case undefined:
-        return {};
-      default:
-        throw new Error(`Unsupported Codex app-server permission mode: ${mode}`);
-    }
+    // Initialized threads own native settings; do not replay stale renderer defaults.
+    return nativeReady ? {} : { cwd: input.cwd,
+      ...(input.model ? { model: input.model } : {}), ...(input.effort ? { effort: input.effort } : {}) };
   }
 
   async function listAppServerModels(client: CodexAppServerLike): Promise<ProviderCapabilities['models']> {
@@ -936,10 +935,11 @@ export function createCodexBackend(deps: CodexBackendDeps = {}): ServerBackend {
   }
 
   function normalizeAppServerEfforts(raw: unknown): ProviderCapabilities['effortLevels'] {
-    return asArray(raw)
-      .map((entry) => stringValue(asRecord(entry)?.reasoningEffort))
-      .filter((value): value is string => !!value)
-      .map((value) => ({ value, displayName: value }));
+    return asArray(raw).flatMap(entry => {
+      const item = asRecord(entry);
+      const value = stringValue(item?.reasoningEffort);
+      return value ? [{ value, displayName: value, ...(stringValue(item?.description) ? { description: String(item?.description) } : {}) }] : [];
+    });
   }
 }
 
@@ -1214,7 +1214,7 @@ function listCodexBundledModels(): ProviderCapabilities['models'] {
         effortLevels: pickEffortLevels(
           (model.supported_reasoning_levels ?? [])
             .map((level) => level.effort)
-            .filter((effort): effort is string => typeof effort === 'string' && (CODEX_EFFORT_LEVELS as readonly string[]).includes(effort)),
+            .filter((effort): effort is string => typeof effort === 'string' ),
         ),
       }));
   } catch (err) {

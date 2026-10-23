@@ -50,3 +50,11 @@ describe('persistedPrefsFromCapabilities', () => {
     })).toEqual({});
   });
 });
+
+
+it('does not pin native defaults and persists only an acknowledged edit', () => {
+  const caps = { currentModel: 'm', currentEffort: 'ultra', confirmedPrefs: {} };
+  expect(persistedPrefsFromCapabilities(caps, undefined)).toEqual({});
+  expect(persistedPrefsFromCapabilities({ ...caps, confirmedPrefs: { nativeApproval: 'never' } }, undefined))
+    .toEqual({ nativeApproval: 'never' });
+});

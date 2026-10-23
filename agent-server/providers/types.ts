@@ -322,6 +322,7 @@ export interface QueryInput {
  * Provider decides displayName + severity; renderer cycles by `value`.
  */
 export interface CycleOption {
+  description?: string;
   value: string;
   displayName: string;
   severity?: StatusSegmentSeverity;
@@ -359,6 +360,8 @@ export function pickEffortLevels(values: string[]): CycleOption[] {
 }
 
 export interface ProviderCapabilities {
+  /** When present, only this explicit confirmed intent is persisted. Empty means display only. */
+  confirmedPrefs?: Partial<import('@shared/types').AgentPrefs>;
   models: { value: string; displayName: string; effortLevels?: CycleOption[]; vision?: boolean }[];
   permissionModes: CycleOption[];
   permissionControl: PermissionControlCapabilities;

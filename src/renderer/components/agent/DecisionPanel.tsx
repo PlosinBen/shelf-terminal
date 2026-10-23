@@ -36,7 +36,8 @@ export function DecisionPanel({ tabId }: Props) {
   const localPicker = tab?.localPicker ?? null;
   const capabilities = tab?.capabilities ?? null;
   const statusModel = tab?.actualModel ?? null;
-  const currentEffort = tab?.actualEffort ?? 'medium';
+  const currentEffort = capabilities?.confirmedPrefs !== undefined
+    ? capabilities.currentEffort : tab?.actualEffort ?? 'medium';
   const permissionMode = tab?.actualPermissionMode ?? 'default';
 
   if (pendingPermission) {
@@ -102,7 +103,7 @@ export function DecisionPanel({ tabId }: Props) {
     const options = key === 'model'
       ? (capabilities?.models ?? []).map((m) => ({ value: m.value, label: m.displayName }))
       : key === 'effort'
-        ? (capabilities?.effortLevels ?? []).map((e) => ({ value: e.value, label: e.displayName }))
+        ? (capabilities?.effortLevels ?? []).map((e) => ({ value: e.value, label: e.displayName, description: e.description }))
         : (permissionControl?.options ?? []).map((option) => ({
             value: option.value,
             label: option.displayName,

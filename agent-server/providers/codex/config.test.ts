@@ -1,49 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { parseMcpConfig } from '../mcp-config';
 import {
-  CODEX_EFFORT_LEVELS,
   buildCodexRuntimeConfig,
 } from './config';
 
 describe('Codex SDK pure runtime config mapping', () => {
-  it('maps Shelf permission modes to the probed SDK non-interactive modes', () => {
-    expect(buildCodexRuntimeConfig({ cwd: '/repo', permissionMode: 'plan' }).threadOptions).toMatchObject({
-      sandboxMode: 'read-only',
-      approvalPolicy: 'never',
-    });
-    expect(buildCodexRuntimeConfig({ cwd: '/repo', permissionMode: 'default' }).threadOptions).toMatchObject({
-      sandboxMode: 'workspace-write',
-      approvalPolicy: 'on-request',
-    });
-    expect(buildCodexRuntimeConfig({ cwd: '/repo', permissionMode: 'bypassPermissions' }).threadOptions).toMatchObject({
-      sandboxMode: 'danger-full-access',
-      approvalPolicy: 'never',
-    });
-  });
-
-  it('passes supported model and effort through ThreadOptions', () => {
-    const mapped = buildCodexRuntimeConfig({ cwd: '/repo', model: 'gpt-5-codex', effort: 'xhigh' });
-    expect(mapped.ok).toBe(true);
-    expect(mapped.threadOptions).toMatchObject({
-      workingDirectory: '/repo',
-      skipGitRepoCheck: true,
-      model: 'gpt-5-codex',
-      modelReasoningEffort: 'xhigh',
-    });
-    expect(CODEX_EFFORT_LEVELS).toEqual(['minimal', 'low', 'medium', 'high', 'xhigh']);
-  });
-
-  it('rejects unsupported effort and permission values without rewriting them', () => {
-    expect(buildCodexRuntimeConfig({ cwd: '/repo', effort: 'ultra' })).toMatchObject({
-      ok: false,
-      errors: expect.arrayContaining([expect.stringMatching(/Unsupported Codex SDK effort/)]) as unknown[],
-    });
-    expect(buildCodexRuntimeConfig({ cwd: '/repo', permissionMode: 'yolo' })).toMatchObject({
-      ok: false,
-      errors: expect.arrayContaining([expect.stringMatching(/Unsupported Codex SDK permission mode/)]) as unknown[],
-    });
-  });
-
   it('maps required Shelf L1 MCP to config without secrets', () => {
     const mapped = buildCodexRuntimeConfig({
       cwd: '/repo',

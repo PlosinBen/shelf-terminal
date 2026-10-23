@@ -115,6 +115,27 @@ test.describe('agent flows via fake provider', () => {
     });
   });
 
+  test.describe('native approval and explicit prefs', () => {
+    test.use({ nativePermissions: true, nativeApproval: true });
+    test('keeps defaults unpinned and custom approval independent of mode and effort', async ({ shelfApp: { page } }) => {
+      await setupProject(page);
+      await openAgentTab(page);
+      const approval = page.locator('[data-config-key="nativeApproval"]:visible');
+      await expect(approval).toHaveText('Approval: Custom');
+      expect(await page.evaluate(async () => (await window.shelfApi.project.getAll())[0].agentPrefs.claude ?? {})).toEqual({});
+      await page.locator('[data-config-key="nativeMode"]:visible').click();
+      await page.locator('.agent-perm-option:visible', { hasText: 'Plan' }).click();
+      await expect(page.locator('[data-config-key="nativeMode"]:visible')).toHaveText('Mode: Plan');
+      await expect(approval).toHaveText('Approval: Custom');
+      await expect(page.locator('.agent-status-seg.agent-status-interactive', { hasText: 'effort:' })).toHaveText('effort: medium');
+      await approval.click();
+      await expect(page.locator('.agent-perm-option:visible')).toHaveCount(3);
+      await page.locator('.agent-perm-option:visible', { hasText: 'never' }).click();
+      await expect(approval).toHaveText('Approval: never');
+      await expect.poll(() => page.evaluate(async () => (await window.shelfApi.project.getAll())[0].agentPrefs.claude)).toEqual({ nativeMode: 'plan', nativeApproval: 'never' });
+    });
+  });
+
   test.describe('add-tab menu', () => {
     test('lists every provider from the single-source registry', async ({ shelfApp: { page } }) => {
       await setupProject(page);

@@ -1,48 +1,14 @@
 import type { McpServerBlock, McpServersFile } from '@shared/mcp';
 
-export const CODEX_EFFORT_LEVELS = ['minimal', 'low', 'medium', 'high', 'xhigh'] as const;
-type CodexReasoningEffort = typeof CODEX_EFFORT_LEVELS[number];
-
-interface CodexThreadOptions {
-  workingDirectory: string;
-  skipGitRepoCheck: boolean;
-  model?: string;
-  modelReasoningEffort?: CodexReasoningEffort;
-  sandboxMode?: 'read-only' | 'workspace-write' | 'danger-full-access';
-  approvalPolicy?: 'never' | 'on-request';
-  additionalDirectories?: string[];
-}
-
 interface CodexConfigObject {
   mcp_servers?: Record<string, CodexMcpServerConfig>;
 }
 
-export const CODEX_SDK_PERMISSION_MODES = {
-  plan: {
-    sandboxMode: 'read-only',
-    approvalPolicy: 'never',
-  },
-  default: {
-    sandboxMode: 'workspace-write',
-    approvalPolicy: 'on-request',
-  },
-  bypassPermissions: {
-    sandboxMode: 'danger-full-access',
-    approvalPolicy: 'never',
-  },
-} as const satisfies Record<string, Pick<CodexThreadOptions, 'sandboxMode' | 'approvalPolicy'>>;
-
-export type CodexSdkPermissionMode = keyof typeof CODEX_SDK_PERMISSION_MODES;
-
 interface BuildConfigInput {
   cwd: string;
-  model?: string;
-  effort?: string;
-  permissionMode?: string;
   mcpServers?: McpServersFile;
   shelfMcp?: { url: string };
   baseEnv?: Record<string, string | undefined>;
-  additionalDirectories?: string[];
 }
 
 type CodexMcpServerConfig =
@@ -62,32 +28,12 @@ export interface CodexSdkRuntimeConfigResult {
   ok: boolean;
   errors: string[];
   codexOptions: { config: CodexConfigObject; env: Record<string, string> };
-  threadOptions: CodexThreadOptions;
 }
 
 export function buildCodexRuntimeConfig(input: BuildConfigInput): CodexSdkRuntimeConfigResult {
   const errors: string[] = [];
   const env = compactEnv(input.baseEnv ?? {});
   const mcpServers: Record<string, CodexMcpServerConfig> = {};
-  const threadOptions: CodexThreadOptions = {
-    workingDirectory: input.cwd,
-    skipGitRepoCheck: true,
-  };
-
-  if (input.model) threadOptions.model = input.model;
-  if (input.effort) {
-    if (isCodexSdkEffort(input.effort)) threadOptions.modelReasoningEffort = input.effort;
-    else errors.push(`Unsupported Codex SDK effort: ${input.effort}`);
-  }
-  if (input.permissionMode) {
-    const mapped = CODEX_SDK_PERMISSION_MODES[input.permissionMode as CodexSdkPermissionMode];
-    if (mapped) Object.assign(threadOptions, mapped);
-    else errors.push(`Unsupported Codex SDK permission mode: ${input.permissionMode}`);
-  }
-  if (input.additionalDirectories?.length) {
-    threadOptions.additionalDirectories = input.additionalDirectories;
-  }
-
   if (input.shelfMcp) {
     mcpServers.shelf = {
       url: input.shelfMcp.url,
@@ -114,7 +60,6 @@ export function buildCodexRuntimeConfig(input: BuildConfigInput): CodexSdkRuntim
     ok: errors.length === 0,
     errors,
     codexOptions: { config, env },
-    threadOptions,
   };
 }
 
@@ -185,10 +130,6 @@ function compactEnv(env: Record<string, string | undefined>): Record<string, str
     if (value !== undefined) out[key] = value;
   }
   return out;
-}
-
-function isCodexSdkEffort(value: string): value is CodexReasoningEffort {
-  return (CODEX_EFFORT_LEVELS as readonly string[]).includes(value);
 }
 
 function isSafeMcpServerName(value: string): boolean {

@@ -195,7 +195,7 @@ test.describe('user-initiated worktree create', () => {
       schemaVersion: number;
       projects: Array<{ parentProjectId?: string; featureNoteDir?: string; defaultTabs?: unknown[] }>;
     };
-    expect(document.schemaVersion).toBe(2);
+    expect(document.schemaVersion).toBe(3);
     const child = document.projects.find((project) => project.parentProjectId === PROJECT_ID);
     expect(child?.featureNoteDir).toBe('.agent/features');
     expect(child?.defaultTabs).toEqual([

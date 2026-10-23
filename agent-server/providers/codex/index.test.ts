@@ -28,6 +28,7 @@ function turnCompleted(
 class FakeAppServer {
   calls: RequestCall[] = [];
   closed = false;
+  settings: Record<string, any> = { model: 'gpt-5.6-sol', effort: null, approvalPolicy: 'on-request', sandboxPolicy: { type: 'workspaceWrite' }, activePermissionProfile: { id: ':workspace' }, collaborationMode: { mode: 'default' } };
   private notifications = new Map<string, (params: unknown) => void>();
   private requestHandlers = new Map<string, (params: unknown) => unknown | Promise<unknown>>();
   private handlers = new Map<string, (params?: unknown) => unknown | Promise<unknown>>();
@@ -41,8 +42,24 @@ class FakeAppServer {
     const handler = this.handlers.get(method);
     if (handler) return await handler(params) as T;
     if (method === 'initialize') return {} as T;
-    if (method === 'thread/start') return { thread: { id: 'thread-1' } } as T;
-    if (method === 'thread/resume') return { thread: { id: (params as { threadId: string }).threadId } } as T;
+    if (method === 'thread/start' || method === 'thread/resume') {
+      const p = params as Record<string, any>;
+      this.settings.model = p.model ?? this.settings.model;
+      this.settings.approvalPolicy = p.approvalPolicy ?? this.settings.approvalPolicy;
+      if (p.permissions) this.settings.activePermissionProfile = { id: p.permissions };
+      return { ...this.settings, reasoningEffort: this.settings.effort, sandbox: this.settings.sandboxPolicy, thread: { id: p.threadId ?? 'thread-1' } } as T;
+    }
+    if (method === 'permissionProfile/list') return { data: [':workspace', ':read-only', ':danger-full-access'].map(id => ({ id, allowed: true })), nextCursor: null } as T;
+    if (method === 'collaborationMode/list') return { data: [{ mode: 'default', name: 'Default' }, { mode: 'plan', name: 'Plan' }] } as T;
+    if (method === 'configRequirements/read') return { requirements: null } as T;
+    if (method === 'thread/settings/update') {
+      const p = params as Record<string, any>;
+      const before = JSON.stringify(this.settings);
+      for (const key of ['model', 'effort', 'approvalPolicy', 'collaborationMode']) if (p[key] !== undefined) this.settings[key] = p[key];
+      if (p.permissions) this.settings.activePermissionProfile = { id: p.permissions };
+      if (before !== JSON.stringify(this.settings)) this.fire('thread/settings/updated', { threadId: p.threadId, threadSettings: { ...this.settings } });
+      return {} as T;
+    }
     if (method === 'turn/start') {
       this.fire('turn/started', { threadId: 'thread-1', turn: { id: 'turn-1' } });
       this.fire('item/agentMessage/delta', { itemId: 'm1', delta: 'hel' });
@@ -475,14 +492,16 @@ describe('Codex official app-server backend lifecycle', () => {
     expect(out.find((m) => m.type === 'error')).toBeUndefined();
   });
 
-  it('applies config-edit locally without calling app-server turn routes', async () => {
+  it('confirms config-edit through app-server settings without starting a turn', async () => {
     const app = new FakeAppServer();
     const backend = createCodexBackend({ createAppServer: () => app });
     const out: OutgoingMessage[] = [];
 
+    await backend.gatherCapabilities!('/repo', undefined, [{ id: 'gpt-5-codex' }]);
+    app.calls = [];
     await backend.query({ prompt: '', cwd: '/repo', configEdit: { key: 'model', value: 'gpt-5-codex' } }, (m) => out.push(m));
 
-    expect(app.calls).toEqual([]);
+    expect(app.calls.map(call => call.method)).toEqual(['thread/settings/update']);
     expect(out.some((m) => m.type === 'capabilities' && m.currentModel === 'gpt-5-codex')).toBe(true);
     expect(out.some((m) => m.type === 'message' && m.msgType === 'system')).toBe(true);
     expect(out.at(-1)).toEqual({ type: 'status', state: 'idle' });
@@ -753,7 +772,7 @@ describe('Codex official app-server backend lifecycle', () => {
     await running;
   });
 
-  it('reports app-server model/list capabilities and normalizes stale saved model intent', async () => {
+  it('reports app-server model/list capabilities and uses native effort and independent permission intent', async () => {
     const app = new FakeAppServer();
     const backend = createCodexBackend({ createAppServer: () => app });
 
@@ -761,17 +780,18 @@ describe('Codex official app-server backend lifecycle', () => {
       '/repo',
       undefined,
       [{ id: 'custom-model' }],
-      { model: 'ask', effort: 'ultra', permissionMode: 'plan' },
+      { model: 'gpt-5.6-sol', effort: 'ultra', nativePermission: ':read-only', nativeApproval: 'never' },
       undefined,
       'app-1',
     );
 
-    expect(app.calls.map((call) => call.method)).toEqual(['initialize', 'account/read', 'model/list']);
+    expect(app.calls.map((call) => call.method)).toEqual(expect.arrayContaining(['initialize', 'account/read', 'model/list', 'permissionProfile/list', 'thread/start']));
     expect(caps.models.map((m) => m.value)).toEqual(['gpt-5.6-sol', 'custom-model']);
     expect(caps.models[0].effortLevels?.map((e) => e.value)).toEqual(['low', 'ultra']);
     expect((caps as unknown as Record<string, unknown>).currentModel).toBe('gpt-5.6-sol');
     expect((caps as unknown as Record<string, unknown>).currentEffort).toBe('ultra');
-    expect((caps as unknown as Record<string, unknown>).currentPermissionMode).toBe('plan');
+    expect(caps.permissionControl).toMatchObject({ strategy: 'native', permission: { currentValue: ':read-only' }, approval: { currentValue: 'never' } });
+    expect(caps.confirmedPrefs).toEqual({});
     expect(caps.slashCommands.map((cmd) => cmd.name)).toEqual([
       'status',
       'usage',
@@ -790,6 +810,28 @@ describe('Codex official app-server backend lifecycle', () => {
       'stop',
       'clean',
     ]);
+  });
+
+  it('resumes during initialization and omits unset prefs on both init and subsequent turns', async () => {
+    const app = new FakeAppServer();
+    const backend = createCodexBackend({ createAppServer: () => app });
+    const out: OutgoingMessage[] = [];
+    backend.bindSessionSend!((message) => out.push(message));
+    await backend.gatherCapabilities!('/repo', 'session', undefined, {}, undefined, undefined, restoreContext('saved-thread'));
+    const resume = app.calls.find(call => call.method === 'thread/resume')!.params as Record<string, unknown>;
+    expect(resume).toMatchObject({ threadId: 'saved-thread', cwd: '/repo' });
+    for (const key of ['model', 'effort', 'permissions', 'approvalPolicy', 'sandbox']) expect(resume).not.toHaveProperty(key);
+    expect(out).toContainEqual({ type: 'context_patch', patch: { lastSdkSessionId: 'saved-thread' } });
+    await backend.query({ prompt: 'hi', cwd: '/repo' }, message => out.push(message));
+    expect(app.calls.filter(call => call.method === 'thread/resume')).toHaveLength(1);
+    expect(app.calls.find(call => call.method === 'turn/start')!.params).not.toHaveProperty('effort');
+  });
+
+  it('does not silently replace an invalid saved model with the first catalog entry', async () => {
+    const app = new FakeAppServer();
+    const backend = createCodexBackend({ createAppServer: () => app });
+    await expect(backend.gatherCapabilities!('/repo', undefined, undefined, { model: 'retired' })).rejects.toThrow('saved model');
+    expect(app.calls.some(call => call.method === 'thread/start')).toBe(false);
   });
 
   it('reports auth required before listing models when app-server has no OpenAI account', async () => {
@@ -818,7 +860,7 @@ describe('Codex official app-server backend lifecycle', () => {
 
     const caps = await backend.gatherCapabilities!('/repo', undefined, undefined, undefined, undefined, 'app-1');
 
-    expect(app.calls.map((call) => call.method)).toEqual(['initialize', 'account/read', 'model/list']);
+    expect(app.calls.map((call) => call.method)).toEqual(expect.arrayContaining(['initialize', 'account/read', 'model/list', 'permissionProfile/list', 'thread/start']));
     expect(caps.authRequired).not.toBe(true);
   });
 
@@ -852,14 +894,16 @@ describe('Codex official app-server backend lifecycle', () => {
     expect(caps.authRequired).not.toBe(true);
   });
 
-  it('handles typed config slashes locally without app-server turn routes', async () => {
+  it('confirms typed config slashes through the same native settings route', async () => {
     const app = new FakeAppServer();
     const backend = createCodexBackend({ createAppServer: () => app });
     const out: OutgoingMessage[] = [];
 
+    await backend.gatherCapabilities!('/repo', undefined, [{ id: 'gpt-5-codex' }]);
+    app.calls = [];
     await backend.query({ prompt: '/model gpt-5-codex', cwd: '/repo' }, (m) => out.push(m));
 
-    expect(app.calls).toEqual([]);
+    expect(app.calls.map(call => call.method)).toEqual(['thread/settings/update']);
     expect(out.some((m) => m.type === 'capabilities' && m.currentModel === 'gpt-5-codex')).toBe(true);
     expect(out.some((m) => m.type === 'message' && m.msgType === 'system')).toBe(true);
     expect(out.at(-1)).toEqual({ type: 'status', state: 'idle' });
@@ -976,9 +1020,7 @@ describe('Codex official app-server backend lifecycle', () => {
       'initialize',
       'thread/start',
       'thread/goal/get',
-      'thread/start',
       'thread/goal/set',
-      'thread/start',
       'thread/goal/clear',
     ]);
     expect(app.calls.find((call) => call.method === 'thread/goal/set')?.params).toMatchObject({ objective: 'finish slash commands' });
@@ -1057,17 +1099,19 @@ describe('Codex official app-server backend lifecycle', () => {
     expect(out.find((m) => m.type === 'error')).toBeUndefined();
   });
 
-  it('maps permission mode to thread sandbox and turn sandboxPolicy without mixing schema fields', async () => {
+  it('uses native profile and approval on init and does not overwrite them on turns', async () => {
     const app = new FakeAppServer();
     const backend = createCodexBackend({ createAppServer: () => app });
 
-    await backend.query({ prompt: 'hi', cwd: '/repo', permissionMode: 'plan' }, () => {});
+    await backend.gatherCapabilities!('/repo', undefined, undefined, { nativePermission: ':read-only', nativeApproval: 'never' });
+    await backend.query({ prompt: 'hi', cwd: '/repo' }, () => {});
 
     const threadStart = app.calls.find((call) => call.method === 'thread/start')?.params as Record<string, unknown>;
     const turnStart = app.calls.find((call) => call.method === 'turn/start')?.params as Record<string, unknown>;
-    expect(threadStart).toMatchObject({ approvalPolicy: 'never', sandbox: 'read-only' });
+    expect(threadStart).toMatchObject({ approvalPolicy: 'never', permissions: ':read-only' });
     expect(threadStart.sandboxPolicy).toBeUndefined();
-    expect(turnStart).toMatchObject({ approvalPolicy: 'never', sandboxPolicy: { type: 'readOnly', networkAccess: false } });
+    expect(turnStart.approvalPolicy).toBeUndefined();
+    expect(turnStart.sandboxPolicy).toBeUndefined();
     expect(turnStart.sandbox).toBeUndefined();
   });
 

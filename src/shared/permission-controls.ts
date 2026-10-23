@@ -16,6 +16,8 @@ export interface NativePermissionControlDescriptor {
   label: string;
   description?: string;
   currentValue?: string;
+  /** Display-only effective setting, e.g. a structured custom policy. */
+  currentDisplayName?: string;
   options: NativePermissionControlOption[];
 }
 

@@ -199,6 +199,8 @@ export function createFakeBackend(_representedProvider: AgentProvider = FAKE_PRO
   let currentEffort = 'medium';
   let nativeMode = 'agent';
   let nativePermission = 'off';
+  let nativeApproval: string | undefined;
+  const usesNativeApproval = process.env[FAKE_TEST_ENV.NATIVE_APPROVAL] === '1';
   // Test hook: the `reloadfail` scenario arms this so the NEXT reloadSkills
   // reports a failure (exercises the agent-view error line). Consumed once.
   let failNextReload = false;
@@ -208,8 +210,9 @@ export function createFakeBackend(_representedProvider: AgentProvider = FAKE_PRO
   let emitCreditNext = false;
   const lateTimers = new Set<ReturnType<typeof setTimeout>>();
 
-  function nativePermissionCapabilities(): ProviderCapabilities {
+  function nativePermissionCapabilities(confirmedPrefs: import('@shared/types').AgentPrefs = {}): ProviderCapabilities {
     return {
+      ...(usesNativeApproval ? { confirmedPrefs } : {}),
       models: [
         { value: 'fake-model', displayName: 'fake-model' },
         { value: 'fake-model-pro', displayName: 'fake-model-pro' },
@@ -217,6 +220,7 @@ export function createFakeBackend(_representedProvider: AgentProvider = FAKE_PRO
       permissionModes: [],
       permissionControl: {
         strategy: PERMISSION_CONTROL_STRATEGIES.NATIVE,
+        ...(usesNativeApproval ? { approval: { label: 'Approval', currentValue: nativeApproval, currentDisplayName: nativeApproval ? undefined : 'Custom', options: ['untrusted', 'on-request', 'never'].map(value => ({ value, displayName: value })) } } : {}),
         mode: {
           label: 'Mode',
           currentValue: nativeMode,
@@ -663,7 +667,8 @@ export function createFakeBackend(_representedProvider: AgentProvider = FAKE_PRO
           else if (key === 'effort') currentEffort = value;
           else if (key === 'nativeMode') nativeMode = value;
           else if (key === 'nativePermission') nativePermission = value;
-          send({ type: 'capabilities', ...nativePermissionCapabilities() });
+          else if (key === 'nativeApproval') nativeApproval = value;
+          send({ type: 'capabilities', ...nativePermissionCapabilities({ [key]: value }) });
         }
         send({ type: 'message', msgId: mintId('m'), msgType: 'system', content: formatConfigAck(key, value) });
         send({ type: 'status', state: 'idle' });
@@ -796,6 +801,7 @@ export function createFakeBackend(_representedProvider: AgentProvider = FAKE_PRO
         if (intent?.effort) currentEffort = intent.effort;
         if (intent?.nativeMode) nativeMode = intent.nativeMode;
         if (intent?.nativePermission) nativePermission = intent.nativePermission;
+        if (intent?.nativeApproval) nativeApproval = intent.nativeApproval;
         return nativePermissionCapabilities();
       }
       return {

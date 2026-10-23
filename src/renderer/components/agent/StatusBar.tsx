@@ -30,7 +30,8 @@ export function StatusBar({ tabId, provider }: Props) {
   const isExecutionActive = tab?.isExecutionActive ?? false;
   const statusModel = tab?.actualModel ?? null;
   const permissionMode = tab?.actualPermissionMode ?? 'default';
-  const currentEffort = tab?.actualEffort ?? 'medium';
+  const currentEffort = tab?.capabilities?.confirmedPrefs !== undefined
+    ? tab.capabilities.currentEffort : tab?.actualEffort ?? 'medium';
   const capabilities = tab?.capabilities ?? null;
   const costUsd = tab?.costUsd;
   const numTurns = tab?.numTurns;
@@ -83,32 +84,33 @@ export function StatusBar({ tabId, provider }: Props) {
       )}
       {permissionControls.map((control) => {
         const current = control.options.find((option) => option.value === control.currentValue);
-        if (!current) return null;
+        const displayName = current?.displayName ?? control.currentDisplayName ?? control.currentValue;
+        if (!displayName) return null;
         return (
         <React.Fragment key={control.key}>
           <span className="agent-status-sep">|</span>
           <span
             className="agent-status-seg agent-status-interactive"
-            data-severity={current.severity ?? 'normal'}
+            data-severity={current?.severity ?? 'normal'}
             data-config-key={control.key}
             onClick={() => handleOpenPermissionPicker(control.key)}
           >
             {control.key === 'permissionMode'
-              ? current.displayName
-              : <><span className="agent-status-seg-label">{control.label}: </span>{current.displayName}</>}
+              ? displayName
+              : <><span className="agent-status-seg-label">{control.label}: </span>{displayName}</>}
           </span>
         </React.Fragment>
         );
       })}
-      {capabilities && capabilities.effortLevels.length > 0 && currentEffortOption && (
+      {capabilities && capabilities.effortLevels.length > 0 && (
         <>
           <span className="agent-status-sep">|</span>
           <span
             className="agent-status-seg agent-status-interactive"
-            data-severity={currentEffortOption.severity ?? 'normal'}
+            data-severity={currentEffortOption?.severity ?? 'normal'}
             onClick={handleOpenEffortPicker}
           >
-            <span className="agent-status-seg-label">effort: </span>{currentEffortOption.displayName}
+            <span className="agent-status-seg-label">effort: </span>{currentEffortOption?.displayName ?? currentEffort ?? 'Default'}
           </span>
         </>
       )}

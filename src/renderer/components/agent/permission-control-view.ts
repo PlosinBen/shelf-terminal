@@ -1,4 +1,4 @@
-import type { ConfigEditKey } from '@shared/config-ack';
+import { CONFIG_EDIT_KEYS, type ConfigEditKey } from '@shared/config-ack';
 import type { PermissionControlCapabilities } from '@shared/permission-controls';
 
 export interface PermissionControlViewOption {
@@ -9,9 +9,10 @@ export interface PermissionControlViewOption {
 }
 
 export interface PermissionControlView {
-  key: Extract<ConfigEditKey, 'permissionMode' | 'nativeMode' | 'nativePermission'>;
+  key: Extract<ConfigEditKey, 'permissionMode' | 'nativeMode' | 'nativePermission' | 'nativeApproval'>;
   label: string;
-  currentValue: string;
+  currentValue?: string;
+  currentDisplayName?: string;
   options: PermissionControlViewOption[];
 }
 
@@ -32,21 +33,15 @@ export function permissionControlViews(input: {
   }
 
   const views: PermissionControlView[] = [];
-  if (control.mode?.currentValue && control.mode.options.length > 0) {
-    views.push({
-      key: 'nativeMode',
-      label: control.mode.label,
-      currentValue: control.mode.currentValue,
-      options: control.mode.options,
-    });
-  }
-  if (control.permission?.currentValue && control.permission.options.length > 0) {
-    views.push({
-      key: 'nativePermission',
-      label: control.permission.label,
-      currentValue: control.permission.currentValue,
-      options: control.permission.options,
-    });
+  for (const [key, descriptor] of [
+    [CONFIG_EDIT_KEYS.NATIVE_MODE, control.mode],
+    [CONFIG_EDIT_KEYS.NATIVE_PERMISSION, control.permission],
+    [CONFIG_EDIT_KEYS.NATIVE_APPROVAL, control.approval],
+  ] as const) {
+    if (descriptor && (descriptor.currentValue || descriptor.currentDisplayName)) {
+      views.push({ key, label: descriptor.label, currentValue: descriptor.currentValue,
+        currentDisplayName: descriptor.currentDisplayName, options: descriptor.options });
+    }
   }
   return views;
 }
