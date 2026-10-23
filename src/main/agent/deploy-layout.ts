@@ -89,7 +89,6 @@ export function codexDeployFiles(libc: Libc, arch: Arch): DeployFile[] {
     `codex-cli/node_modules/${native}/vendor/${nativeBin}/bin/codex-code-mode-host`,
     `codex-cli/node_modules/${native}/vendor/${nativeBin}/codex-path/rg`,
     `codex-cli/node_modules/${native}/vendor/${nativeBin}/codex-resources/bwrap`,
-    `codex-cli/node_modules/${native}/vendor/${nativeBin}/codex-resources/zsh/bin/zsh`,
     `codex-cli/node_modules/${native}/vendor/${nativeBin}/codex-package.json`,
   ];
 }

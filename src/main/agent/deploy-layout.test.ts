@@ -57,6 +57,8 @@ describe('deployFilesFor', () => {
       'codex-cli/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/bwrap',
       'codex-cli/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-path/rg',
     ]));
+    expect(files.some((file) => file.includes('/codex-resources/zsh/'))).toBe(false);
+    expect(codexDeployFiles('glibc', 'arm64').some((file) => file.includes('/codex-resources/zsh/'))).toBe(false);
     expect(files.some((file) => file.includes('@openai/codex-sdk'))).toBe(false);
     expect(codexNativePackageName('arm64')).toBe('@openai/codex-linux-arm64');
   });
