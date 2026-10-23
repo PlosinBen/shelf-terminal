@@ -73,6 +73,22 @@ describe('snapshotProcesses', () => {
     expect(runCommand).toHaveBeenCalledWith('ps', ['-axo', 'pid=,ppid=,rss=']);
   });
 
+  it('skips a zombie without VmRSS while retaining live procfs processes', async () => {
+    const zombie = join(procRoot, '42');
+    const live = join(procRoot, '43');
+    fs.mkdirSync(zombie);
+    fs.mkdirSync(live);
+    fs.writeFileSync(join(zombie, 'stat'), '42 (node) Z 1 0 0');
+    fs.writeFileSync(join(zombie, 'status'), 'Name:\tnode\nState:\tZ (zombie)\n');
+    fs.writeFileSync(join(live, 'stat'), '43 (node) S 1 0 0');
+    fs.writeFileSync(join(live, 'status'), 'Name:\tnode\nState:\tS (sleeping)\nVmRSS:\t  4096 kB\n');
+
+    await expect(snapshotProcesses({
+      platform: 'linux', procRoot,
+      runCommand: async () => { throw new Error('ps unavailable'); },
+    })).resolves.toEqual([{ pid: 43, ppid: 1, memoryKiB: 4096 }]);
+  });
+
   it('fails the procfs fallback on a stable malformed process record', async () => {
     const dir = join(procRoot, '42');
     fs.mkdirSync(dir);
