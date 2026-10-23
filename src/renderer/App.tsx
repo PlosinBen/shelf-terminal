@@ -743,7 +743,7 @@ export function App() {
 
     const offSwitchBranch = on(SWITCH_BRANCH_EVENT, async (projectIndex: number, branch: string, callback: (success: boolean, branch?: string) => void) => {
       const proj = getProjectViews()[projectIndex];
-      if (!proj) { callback(false); return; }
+      if (!proj || isWorktreeUnavailable(proj)) { callback(false); return; }
 
       const result = await window.shelfApi.git.checkout(proj.connection, proj.cwd, branch);
       if (result.ok) {

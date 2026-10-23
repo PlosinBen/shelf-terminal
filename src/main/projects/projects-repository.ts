@@ -1,3 +1,4 @@
+import { buildWorktreeChildConfig } from '@shared/worktree-child-config';
 import { isDeepStrictEqual } from 'node:util';
 import { log } from '@shared/logger';
 import { sameProjectTarget } from '@shared/project-target';
@@ -12,6 +13,16 @@ import type {
   ProjectConfigPersistenceError,
 } from './project-config-persistence';
 import type { ProjectCleanup } from './project-cleanup';
+
+/** Only topology invalidates a scan; session/prefs writes during Agent startup
+ * must survive without preventing the connect-triggered reconciliation. */
+export function sameWorktreeBaseline(a: readonly Project[], b: readonly Project[]): boolean {
+  const topology = (projects: readonly Project[]) => projects.map(project => ({
+    id: project.id, cwd: project.cwd, connection: project.connection,
+    parentProjectId: project.parentProjectId, worktreeState: project.worktreeState,
+  })).sort((left, right) => left.id.localeCompare(right.id));
+  return isDeepStrictEqual(topology(a), topology(b));
+}
 
 export type ProjectIdFactory = () => ProjectId;
 
@@ -223,10 +234,20 @@ export function createMainProjectsRepository(
     },
 
     async reconcileWorktrees(baseline, updates, additions, secrets, isCurrent = () => true) {
-      if (projects !== baseline || !isCurrent()) return null;
-      const created = additions.map(input => createProject(createProjectId(), input));
+      if (!sameWorktreeBaseline(projects, baseline) || !isCurrent()) return null;
+      const created = additions.map(input => {
+        const parent = projects.find(project => project.id === input.parentProjectId);
+        const latestInput = parent ? {
+          ...buildWorktreeChildConfig(parent, { cwd: input.cwd, worktreeBranch: input.worktreeBranch ?? null, baseBranch: input.baseBranch ?? undefined }),
+          worktreeState: input.worktreeState,
+        } : input;
+        return createProject(createProjectId(), latestInput);
+      });
       const candidate = readyCollection([
-        ...projects.map(project => updates.find(update => update.id === project.id) ?? project),
+        ...projects.map(project => {
+          const update = updates.find(update => update.id === project.id);
+          return update ? { ...project, worktreeBranch: update.worktreeBranch, worktreeState: update.worktreeState } : project;
+        }),
         ...created,
       ], 'save');
       for (const child of created) {
@@ -276,7 +297,10 @@ export function createMainProjectsRepository(
         log.warn('projects-repository', `no-op operation=save projectId=${project.id}: project not found`);
         return;
       }
-      const detached = detachedProject(project);
+      const current = projects[index];
+      const detached = detachedProject(current.worktreeState === undefined ? project : {
+        ...project, worktreeState: current.worktreeState, worktreeBranch: current.worktreeBranch,
+      });
       if (isDeepStrictEqual(projects[index], detached)) return;
       const candidate = readyCollection(
         projects.map((current, projectIndex) => projectIndex === index ? detached : current),

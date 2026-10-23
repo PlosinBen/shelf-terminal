@@ -292,3 +292,10 @@ describe('worktree batch reconciliation', () => {
     expect(rollback).toHaveBeenCalledWith('child');
   });
 });
+it('preserves scan-owned metadata when saving older project preferences', async () => {
+  const current = { ...project('child', 'main'), worktreeBranch: null, worktreeState: { availability: 'valid' as const, identity: null } };
+  const config = persistence([current]);
+  const repo = readyRepository(config.value, () => 'unused');
+  await repo.save({ ...project('child', 'main'), name: 'edited' });
+  expect(repo.get('child')).toMatchObject({ name: 'edited', worktreeBranch: null, worktreeState: current.worktreeState });
+});

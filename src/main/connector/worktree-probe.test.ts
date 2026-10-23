@@ -36,3 +36,8 @@ describe('target worktree probe', () => {
     expect(Buffer.from(command.split(' ').at(-1)!, 'base64').toString('utf16le')).toContain(script);
   });
 });
+it('preserves the porcelain NUL terminator when Windows adds a line terminator', async () => {
+  const output = 'worktree C:/repo\0bare\0\0';
+  const probe = new WorktreeProbe({ exec: vi.fn().mockResolvedValue({ stdout: output + '\r\n', stderr: '' }) }, 'C:/repo', true);
+  expect(await probe.git('C:/repo', 'worktree', 'list', '--porcelain', '-z')).toBe(output);
+});

@@ -9,3 +9,11 @@ it('prevents tabs and editing for a restored missing worktree', () => {
   setEditingProjectById('child');
   expect(getProjectSliceSnapshot().editingProjectId).toBeNull();
 });
+it('clears an old folder warning only after validating its worktree', async () => {
+  const { setInvalidProjects, clearValidatedWorktreeDirectories } = await import('./store-projects');
+  reconcileProjects([{ id: 'child', parentProjectId: 'main', worktreeState: { availability: 'valid', identity: null } } as Project]);
+  setInvalidProjects(['child']);
+  expect(getProjectSliceSnapshot().projects[0].folderInvalid).toBe(true);
+  clearValidatedWorktreeDirectories('main');
+  expect(getProjectSliceSnapshot().projects[0].folderInvalid).toBe(false);
+});

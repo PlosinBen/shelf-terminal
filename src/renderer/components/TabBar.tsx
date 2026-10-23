@@ -1,3 +1,4 @@
+import { isWorktreeUnavailable } from '@shared/worktree';
 import React, { useState, useRef, useEffect } from 'react';
 import {
   useStore,
@@ -63,6 +64,7 @@ export function TabBar() {
   const menuRef = useRef<HTMLDivElement>(null);
 
   const openAddMenu = (x: number, y: number) => {
+    if (project && isWorktreeUnavailable(project)) return;
     setAddMenu({ x, y });
     const projectId = project?.id;
     if (!projectId) { setWebShortcuts([]); return; }
@@ -212,7 +214,7 @@ export function TabBar() {
         onClick={(e) => { e.preventDefault(); openAddMenu(e.clientX, e.clientY); }}
         onContextMenu={(e) => { e.preventDefault(); openAddMenu(e.clientX, e.clientY); }}
         title="New tab"
-        disabled={project.tabs.length >= project.maxTabs}
+        disabled={isWorktreeUnavailable(project) || project.tabs.length >= project.maxTabs}
       >
         +
       </button>
@@ -302,7 +304,7 @@ export function TabBar() {
         );
       })()}
 
-      {addMenu && (
+      {addMenu && project && !isWorktreeUnavailable(project) && (
         <div
           ref={addMenuRef}
           className="context-menu"

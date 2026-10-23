@@ -50,6 +50,7 @@ test.describe('worktree reconciliation', () => {
     await expect(rows()).toHaveClass(/worktree-missing/);
     await rows().click();
     await expect(page.locator('.worktree-unavailable')).toBeVisible();
+    await expect(page.locator('.tab-add')).toBeDisabled();
     await rows().click({ button: 'right' });
     await expect(page.locator('.context-menu')).toHaveCount(0);
     await expect(page.locator('.tab')).toHaveCount(0);
@@ -99,4 +100,41 @@ test.describe('worktree reconciliation', () => {
     const after = await page.evaluate(() => window.shelfApi.project.getAll());
     expect(after.find(p => p.parentProjectId)?.id).toBe(before.find(p => p.parentProjectId)?.id);
   });
+  for (const kind of ['agent', 'web']) {
+    test(`connect with only ${kind} tabs triggers discovery`, async () => {
+      await page.evaluate(async kind => {
+        const project = (await window.shelfApi.project.getAll())[0];
+        await window.shelfApi.project.update({ ...project, defaultTabs: kind === 'agent'
+          ? [{ name: 'Agent', kind: 'agent', provider: 'claude' }]
+          : [{ name: 'Web', kind: 'web', url: 'about:blank' }] });
+      }, kind);
+      await page.reload(); await page.waitForSelector('.app'); await connectMain();
+      await expect(rows()).toHaveCount(1);
+      await expect(page.locator('.sidebar-item.active')).toContainText('Scan Base');
+      await rows().click();
+      await expect(page.locator('.connect-prompt')).toBeVisible();
+    });
+  }
+
+  test('ordinary non-Git directories skip scanning without a warning', async () => {
+    fs.rmSync(path.join(base, '.git'), { recursive: true, force: true });
+    await connectMain();
+    const result = await page.evaluate(() => window.shelfApi.worktree.reconcile('base'));
+    expect(result.outcome).toBe('skipped');
+    await expect(page.getByRole('button', { name: 'Worktree scan failed' })).toHaveCount(0);
+    await expect(rows()).toHaveCount(0);
+  });
+
+  test('rescans successfully after the first target probe failed', async () => {
+    const moved = base + '-moved';
+    fs.renameSync(base, moved);
+    await connectMain();
+    await expect(page.getByRole('button', { name: 'Worktree scan failed' })).toBeVisible();
+    fs.renameSync(moved, base);
+    await page.getByRole('button', { name: 'Worktree scan failed' }).click();
+    await page.locator('.worktree-scan-popover').getByRole('button', { name: 'Rescan project worktrees' }).click();
+    await expect(rows()).toHaveCount(1);
+    await expect(page.getByRole('button', { name: 'Worktree scan failed' })).toHaveCount(0);
+  });
+
 });

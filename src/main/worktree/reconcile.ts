@@ -1,3 +1,5 @@
+import { sameWorktreeBaseline } from '../projects/projects-repository';
+import { repoLockKey } from './repo-lock';
 import { isDeepStrictEqual } from 'node:util';
 import { createConnector } from '../connector';
 import { TargetFactsResolver, TARGET_OS } from '../connector/target-facts';
@@ -11,7 +13,6 @@ import { log } from '@shared/logger';
 import { scanWorktrees } from './scan';
 import { mapWorktrees } from './mapping';
 
-const facts = new TargetFactsResolver();
 const inFlight = new Map<string, Promise<WorktreeScanResult>>();
 const generations = new Map<string, number>();
 const activeLifecycle = new Set<string>();
@@ -46,20 +47,20 @@ async function run(id: string): Promise<WorktreeScanResult> {
   if (activeLifecycle.has(id)) return { outcome: WorktreeScanOutcome.STALE };
   const generation = generations.get(id) ?? 0;
   const runtime = createConnector(main.connection);
-  const target = await facts.resolve(runtime, undefined, main.cwd);
+  const target = await new TargetFactsResolver().resolve(runtime, undefined, main.cwd);
   if (!target.ok) throw new Error(`Cannot inspect target: ${JSON.stringify(target.attempts)}`);
   const probe = new WorktreeProbe(runtime, main.cwd, target.facts.targetOS === TARGET_OS.windows);
   const children = baseline.filter(child => child.parentProjectId === id);
   const snapshot = await scanWorktrees(probe, main.cwd);
   const isCurrent = () => runtime.isCurrentGeneration() && !activeLifecycle.has(id) && generation === (generations.get(id) ?? 0);
-  if (!isCurrent() || repo.getAll() !== baseline) return { outcome: WorktreeScanOutcome.STALE };
+  if (!isCurrent() || !sameWorktreeBaseline(repo.getAll(), baseline)) return { outcome: WorktreeScanOutcome.STALE };
   if (!snapshot) {
     if (children.length) throw new Error('Main project is no longer a Git repository');
     return { outcome: WorktreeScanOutcome.SKIPPED };
   }
   const identities = new Map<string, WorktreeIdentity | null>();
   for (const child of children) {
-    if (!isDeepStrictEqual(child.connection, main.connection)) throw new Error(`Worktree connection differs from main: ${child.id}`);
+    if (repoLockKey(child.connection, '') !== repoLockKey(main.connection, '')) throw new Error(`Worktree connection differs from main: ${child.id}`);
     identities.set(child.id, await probe.identity(child.cwd));
   }
   const checked = await scanWorktrees(probe, main.cwd);
@@ -86,7 +87,7 @@ export async function inspectWorktreeSource(projectId: string): Promise<import('
   const parent = repo.get(project.parentProjectId);
   if (!parent) throw new Error('Worktree parent is missing');
   const runtime = createConnector(project.connection);
-  const target = await facts.resolve(runtime, undefined, parent.cwd);
+  const target = await new TargetFactsResolver().resolve(runtime, undefined, parent.cwd);
   if (!target.ok) throw new Error(`Cannot inspect worktree target: ${JSON.stringify(target.attempts)}`);
   const probe = new WorktreeProbe(runtime, parent.cwd, target.facts.targetOS === TARGET_OS.windows);
   const identity = await probe.identity(project.cwd);

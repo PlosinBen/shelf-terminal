@@ -192,6 +192,7 @@ it('rejects a changed source before moving the target', async () => {
   await commit(feature, 'later.txt', 'later');
   const result = await mergeBackFastForward({ connector, featureCwd: feature, baseCwd: base, baseBranch: 'main', featureBranch: 'feature', sourceCommit: source });
   expect(result.outcome).toBe('error');
+  if (result.outcome !== 'error') throw new Error('Expected changed-source error');
   expect(result.error).toContain('HEAD changed');
   expect(await tip(base, 'main')).toBe(before);
 });

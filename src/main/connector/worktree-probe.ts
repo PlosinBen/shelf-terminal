@@ -15,7 +15,10 @@ export class WorktreeProbe {
     const command = this.windows
       ? powershellCommand(`& git ${args.map(psq).join(' ')}; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }`)
       : `git ${args.map(q).join(' ')}`;
-    return (await this.connector.exec(cwd, command)).stdout;
+    const output = (await this.connector.exec(cwd, command)).stdout;
+    // Windows PowerShell's native-command pipeline appends a line ending to
+    // the single NUL-delimited record stream. Remove only that transport suffix.
+    return this.windows && args.includes('-z') ? output.replace(/(\0\0)\r?\n$/, '$1') : output;
   }
   async path(path: string): Promise<PathProbeResult> {
     const script = this.windows ? powershellCommand(`
