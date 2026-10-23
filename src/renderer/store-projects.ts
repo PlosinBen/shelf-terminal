@@ -1,3 +1,4 @@
+import { isWorktreeUnavailable, worktreeLabel, WorktreeAvailability } from '@shared/worktree';
 import type {
   AgentProvider,
   ConnectionHealth,
@@ -39,6 +40,7 @@ export type ProjectRuntime = ProjectView;
 export type ReadonlyProjectRuntime = ReadonlyDeep<ProjectView>;
 
 export interface ProjectSliceSnapshot {
+  worktreeScans: Record<string, { running: boolean; error: string | null }>;
   projects: readonly ReadonlyProjectRuntime[];
   activeProjectIndex: number;
   activeProjectId: ProjectId | null;
@@ -47,6 +49,12 @@ export interface ProjectSliceSnapshot {
   editingProjectId: ProjectId | null;
   connectionHealth: Record<string, ConnectionHealth>;
   projectNotice: ProjectNotice | null;
+}
+
+let worktreeScans: ProjectSliceSnapshot['worktreeScans'] = {};
+export function setWorktreeScan(id: string, value: { running: boolean; error: string | null }) {
+  worktreeScans = { ...worktreeScans, [id]: value };
+  emitStoreChange();
 }
 
 let canonicalProjects: readonly Project[] = [];
@@ -134,12 +142,13 @@ export function getProjectSliceSnapshot(): ProjectSliceSnapshot {
     editingProjectIndex: editingProjectIndex === -1 ? null : editingProjectIndex,
     editingProjectId,
     connectionHealth,
+    worktreeScans,
     projectNotice,
   };
 }
 
-export function projectDisplayLabel(project: Pick<Project, 'name' | 'parentProjectId' | 'worktreeBranch'>): string {
-  return project.parentProjectId ? (project.worktreeBranch ?? project.name) : project.name;
+export function projectDisplayLabel(project: Pick<Project, 'name' | 'parentProjectId' | 'worktreeBranch' | 'cwd'>): string {
+  return project.parentProjectId ? worktreeLabel(project) : project.name;
 }
 
 export function reconcileProjects(nextProjects: readonly Project[]) {
@@ -156,6 +165,16 @@ export function reconcileProjects(nextProjects: readonly Project[]) {
 }
 
 export const setProjects = reconcileProjects;
+
+export function clearValidatedWorktreeDirectories(mainProjectId: string) {
+  for (const project of canonicalProjects) {
+    if (project.parentProjectId !== mainProjectId || project.worktreeState?.availability !== WorktreeAvailability.VALID) continue;
+    const runtime = runtimeByProjectId.get(project.id);
+    if (runtime?.folderInvalid) runtimeByProjectId.set(project.id, { ...runtime, folderInvalid: false });
+  }
+  rebuildProjectViews();
+  publishProjectSlice();
+}
 
 export function setInvalidProjects(invalidIds: readonly string[]) {
   const invalid = new Set(invalidIds);
@@ -249,7 +268,7 @@ export function addTab(
   url?: string,
 ): Tab | null {
   const project = projects[projectIndex];
-  if (!project || project.tabs.length >= project.maxTabs) return null;
+  if (!project || isWorktreeUnavailable(project) || project.tabs.length >= project.maxTabs) return null;
   if (type === 'agent' && provider && project.tabs.some((tab) => tab.type === 'agent' && tab.provider === provider)) {
     return null;
   }
@@ -377,11 +396,14 @@ export function markUnread(tabId: string) {
 }
 
 export function setEditingProject(index: number | null) {
+  if (index !== null && projects[index] && isWorktreeUnavailable(projects[index])) return;
   editingProjectId = index === null ? null : projectIdAtIndex(index);
   publishProjectSlice();
 }
 
 export function setEditingProjectById(projectId: ProjectId | null) {
+  const project = projects.find(project => project.id === projectId);
+  if (project && isWorktreeUnavailable(project)) return;
   editingProjectId = projectId && canonicalProjects.some((project) => project.id === projectId)
     ? projectId
     : null;
@@ -448,6 +470,7 @@ export function clearUnread(projectIndex: number, tabIndex: number) {
 }
 
 export function resetProjectStoreForTests() {
+  worktreeScans = {};
   canonicalProjects = [];
   runtimeByProjectId = new Map();
   projects = [];

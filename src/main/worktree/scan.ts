@@ -21,7 +21,7 @@ export async function scanWorktrees(probe: WorktreeProbe, cwd: string): Promise<
     if (identity.commonDir !== main.commonDir) continue;
     // A registration replaced by an ordinary subdirectory must not inherit
     // its ancestor's Git identity. Git returns canonical paths in its list.
-    if (identity.checkoutPath !== record.path) throw new Error(`Worktree registration does not match checkout: ${record.path}`);
+    if (identity.checkoutPath !== record.path) continue;
     if (sameWorktree(identity, main)) { branch = record.branch; foundMain = true; }
     else worktrees.push({ ...record, identity });
   }

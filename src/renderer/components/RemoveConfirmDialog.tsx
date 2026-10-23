@@ -1,3 +1,4 @@
+import { isWorktreeUnavailable } from '@shared/worktree';
 import React, { useState, useEffect, useRef } from 'react';
 import { useStore } from '../store';
 import { on, emit, Events } from '../events';
@@ -23,7 +24,7 @@ export function RemoveConfirmDialog() {
       if (!proj) return;
       setPending({
         projectId,
-        isWorktree: !!proj.parentProjectId,
+        isWorktree: !!proj.parentProjectId && !isWorktreeUnavailable(proj),
         projectName: proj.name,
         branch: proj.worktreeBranch,
       });
@@ -49,7 +50,7 @@ export function RemoveConfirmDialog() {
 
   const handleConfirm = async () => {
     const proj = projects.find((p) => p.id === pending.projectId);
-    if (pending.isWorktree && cleanWorktree && proj) {
+    if (pending.isWorktree && cleanWorktree && proj && !isWorktreeUnavailable(proj)) {
       const parent = projects.find((p) => p.id === proj.parentProjectId);
       if (parent) {
         await window.shelfApi.git.worktreeRemove(

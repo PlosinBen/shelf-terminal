@@ -5576,3 +5576,10 @@ button {
 .external-url-intent-url { word-break: break-all; user-select: text; }
 .external-url-intent-error { color: var(--agent-error, #e06c75); font-size: 12px; margin-top: 4px; }
 .external-url-intent-overlay.is-resolving .agent-perm-option { opacity: 0.55; pointer-events: none; }
+
+.worktree-missing .project-name { opacity: 0.55; text-decoration: line-through; }
+.worktree-unavailable { gap: 12px; }
+.worktree-unavailable button { cursor: pointer; padding: 8px 12px; }
+.worktree-scan-warning { margin-left: 6px; }
+.worktree-scan-warning > button { color: var(--warning, #e5b75b); background: none; border: none; cursor: pointer; }
+.worktree-scan-popover { position: fixed; z-index: 100; left: 16px; max-width: 360px; padding: 12px; display: flex; flex-direction: column; gap: 8px; white-space: normal; overflow-wrap: anywhere; background: var(--bg-secondary, #292936); border: 1px solid var(--border-color, #555); border-radius: 6px; }

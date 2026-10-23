@@ -1,3 +1,7 @@
+import { isWorktreeUnavailable, WorktreeScanOutcome } from '@shared/worktree';
+import { clearValidatedWorktreeDirectories, setWorktreeScan, getProjectSliceSnapshot, setEditingProjectById } from './store';
+import { CONFIRM_REMOVE_EVENT } from './components/RemoveConfirmDialog';
+import { debugLog } from './debugLog';
 import { createModelRecovery } from './agent-model-recovery';
 import React, { useEffect, useState } from 'react';
 import { Sidebar } from './components/Sidebar';
@@ -111,8 +115,51 @@ async function recoverProjectCleanup(projectId: string, initial: import('@shared
   }
 }
 
+const scanRequests = new Map<string, Promise<void>>();
+function scanProjectWorktrees(projectId: string): Promise<void> {
+  const project = getProjectById(projectId);
+  if (!project) return Promise.resolve();
+  const mainId = project.parentProjectId ?? project.id;
+  const existing = scanRequests.get(mainId);
+  if (existing) return existing;
+  setWorktreeScan(mainId, { running: true, error: getProjectSliceSnapshot().worktreeScans[mainId]?.error ?? null });
+  const applyAvailability = () => {
+    for (const child of getProjectViews()) {
+      if (!isWorktreeUnavailable(child)) continue;
+      if (getProjectSliceSnapshot().editingProjectId === child.id) setEditingProjectById(null);
+      child.tabs.forEach(teardownTab);
+      const index = getProjectIndexById(child.id);
+      for (let i = child.tabs.length - 1; i >= 0; i--) removeTab(index, i);
+      setSplitTab(index, null);
+    }
+  };
+  const request = (async () => {
+    try {
+      const result = await window.shelfApi.worktree.reconcile(projectId);
+      if (result.outcome === WorktreeScanOutcome.APPLIED) {
+        // Read the newest canonical state, rather than publishing an IPC result
+        // that may predate a concurrent user edit or removal.
+        await projectCoordinator.refresh();
+        clearValidatedWorktreeDirectories(mainId);
+        applyAvailability();
+      }
+      if (result.outcome === WorktreeScanOutcome.STALE) debugLog('worktree', `stale scan mainProjectId=${mainId}`);
+      setWorktreeScan(mainId, { running: false, error: result.outcome === WorktreeScanOutcome.STALE ? getProjectSliceSnapshot().worktreeScans[mainId]?.error ?? null : null });
+    } catch (error) {
+      // The request may have committed before IPC/refresh failed. Refresh only;
+      // never replay a stale batch or claim the saved state was rolled back.
+      try { await projectCoordinator.refresh(); applyAvailability(); }
+      catch (refreshError) { debugLog('worktree', `refresh failed mainProjectId=${mainId}: ${String(refreshError)}`); }
+      setWorktreeScan(mainId, { running: false, error: String(error) });
+      debugLog('worktree', `scan failed mainProjectId=${mainId}: ${String(error)}`);
+    }
+  })().finally(() => scanRequests.delete(mainId));
+  scanRequests.set(mainId, request);
+  return request;
+}
+
 export function App() {
-  const { projects, activeProjectIndex, activeProjectId, sidebarVisible, settingsVisible, commandPickerVisible, devToolsVisible, notesVisible, skillsVisible, mcpVisible, backupVisible, editingProjectIndex, settings, pmVisible, awayMode } = useStore();
+  const { projects, activeProjectIndex, activeProjectId, sidebarVisible, settingsVisible, commandPickerVisible, devToolsVisible, notesVisible, skillsVisible, mcpVisible, backupVisible, editingProjectIndex, settings, pmVisible, awayMode, worktreeScans } = useStore();
   useKeybindings();
 
   // Auto-connect a just-added project (e.g. a fresh worktree) once it lands in the
@@ -422,6 +469,7 @@ export function App() {
 
   // Centralized event handlers
   useEffect(() => {
+    const offRescan = on(Events.WORKTREE_RESCAN, (projectId: string) => { void scanProjectWorktrees(projectId); });
     const offCloseTab = on(Events.CLOSE_TAB, (projectId: string, tabIndex: number) => {
       const projectIndex = getProjectIndexById(projectId);
       const proj = getProjectById(projectId);
@@ -556,7 +604,7 @@ export function App() {
 
     const offConnectProject = on(Events.CONNECT_PROJECT, async (projectId: string) => {
       let proj = getProjectById(projectId);
-      if (!proj || proj.tabs.length > 0) return;
+      if (!proj || isWorktreeUnavailable(proj) || proj.tabs.length > 0) return;
 
       // Establish SSH ControlMaster before spawning tabs
       const conn = proj.connection;
@@ -592,6 +640,7 @@ export function App() {
       proj = getProjectById(projectId);
       const projectIndex = getProjectIndexById(projectId);
       if (!proj || projectIndex === -1) return;
+      if (isWorktreeUnavailable(proj) || proj.tabs.length > 0) return;
       const templates = proj.defaultTabs;
       templates.forEach((template) => {
         if (template.kind === 'web') {
@@ -606,6 +655,7 @@ export function App() {
         addTab(projectIndex, template.name, template.cmd, template.color);
       });
       setActiveTab(projectIndex, 0);
+      if ((getProjectById(projectId)?.tabs.length ?? 0) > 0) void scanProjectWorktrees(projectId);
     });
 
     const offOpenExistingProject = on(Events.OPEN_EXISTING_PROJECT, (projectId: string) => {
@@ -704,7 +754,7 @@ export function App() {
       }
     });
 
-    return () => { offRetryInit(); offRecoverModel(); offCloseTab(); offRemoveProject(); offWorktreeFinishCompleted(); offNewTab(); offNewAgentTab(); offNewWebTab(); offOpenAuthTerminal(); offOpenWebTab(); offProposeWorktreeCreate(); offProposeWorktreeFinish(); offConnectProject(); offOpenExistingProject(); offAutoConnect(); offDisconnectProject(); offAddProject(); offUpdateProject(); offReorderProjects(); offToggleSplit(); offSwitchBranch(); };
+    return () => { offRetryInit(); offRecoverModel(); offRescan(); offCloseTab(); offRemoveProject(); offWorktreeFinishCompleted(); offNewTab(); offNewAgentTab(); offNewWebTab(); offOpenAuthTerminal(); offOpenWebTab(); offProposeWorktreeCreate(); offProposeWorktreeFinish(); offConnectProject(); offOpenExistingProject(); offAutoConnect(); offDisconnectProject(); offAddProject(); offUpdateProject(); offReorderProjects(); offToggleSplit(); offSwitchBranch(); };
   }, []);
 
   useEffect(() => {
@@ -759,13 +809,22 @@ export function App() {
         <div className="terminal-view">
           <ProjectNoticeBanner />
           <SearchBar />
-          {activeProject && activeProject.folderInvalid && (
+          {activeProject && isWorktreeUnavailable(activeProject) && (
+            <div className="invalid-folder-overlay worktree-unavailable">
+              <span>Worktree is unavailable</span>
+              <span className="invalid-folder-path">{activeProject.cwd}</span>
+              <button disabled={worktreeScans[activeProject.parentProjectId!]?.running}
+                onClick={() => emit(Events.WORKTREE_RESCAN, activeProject.id)}>Rescan project worktrees</button>
+              <button onClick={() => emit(CONFIRM_REMOVE_EVENT, activeProject.id)}>Remove</button>
+            </div>
+          )}
+          {activeProject && !isWorktreeUnavailable(activeProject) && activeProject.folderInvalid && (
             <div className="invalid-folder-overlay">
               <span>Invalid folder</span>
               <span className="invalid-folder-path">{activeProject.cwd}</span>
             </div>
           )}
-          {activeProject && !activeProject.folderInvalid && activeProject.tabs.length === 0 && (
+          {activeProject && !isWorktreeUnavailable(activeProject) && !activeProject.folderInvalid && activeProject.tabs.length === 0 && (
             <div
               className="connect-prompt"
               onClick={() => { if (activeProjectId) emit(Events.CONNECT_PROJECT, activeProjectId); }}

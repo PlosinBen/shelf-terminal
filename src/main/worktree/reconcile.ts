@@ -62,6 +62,8 @@ async function run(id: string): Promise<WorktreeScanResult> {
     if (!isDeepStrictEqual(child.connection, main.connection)) throw new Error(`Worktree connection differs from main: ${child.id}`);
     identities.set(child.id, await probe.identity(child.cwd));
   }
+  const checked = await scanWorktrees(probe, main.cwd);
+  if (!checked || !isDeepStrictEqual(snapshot, checked)) throw new Error('Worktree snapshot changed during mapping; rescan to retry');
   const mapping = mapWorktrees(children, identities, snapshot.worktrees);
   const additions: ProjectCreateInput[] = mapping.additions.map(candidate => ({
     ...buildWorktreeChildConfig(main, { cwd: candidate.path, worktreeBranch: candidate.branch, baseBranch: snapshot.branch ?? undefined }),

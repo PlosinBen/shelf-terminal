@@ -16,7 +16,7 @@ export function mapWorktrees(children: readonly Project[], identities: ReadonlyM
       ...child,
       ...(match ? { worktreeBranch: match.branch } : {}),
       worktreeState: {
-        availability: match ? WorktreeAvailability.VALID : WorktreeAvailability.MISSING,
+        availability: match && identity ? WorktreeAvailability.VALID : WorktreeAvailability.MISSING,
         identity: match?.identity ?? child.worktreeState?.identity ?? identity ?? null,
       },
     };

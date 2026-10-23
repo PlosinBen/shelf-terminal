@@ -1,3 +1,4 @@
+import { isWorktreeUnavailable } from '@shared/worktree';
 /**
  * App-tool dispatcher (main side) — executions an `app_tool` request (op + args)
  * coming from an agent-server bridge tool into a call against client-owned
@@ -305,6 +306,7 @@ const REGISTRY: Record<string, AppToolDef> = {
       if (!projectId) throw new Error('worktree.propose_finish requires a project context');
       const project = getProjectsRepository().get(projectId);
       if (!project) throw new Error(`project not found: ${projectId}`);
+      if (isWorktreeUnavailable(project)) throw new Error('Worktree is unavailable; rescan or remove it in Shelf');
       if (!project.parentProjectId) throw new Error(`${project.name} is not a worktree — nothing to finish`);
       const win = getMainWindow();
       if (!win || win.isDestroyed()) throw new Error('cannot open Finish Worktree gate: no application window');

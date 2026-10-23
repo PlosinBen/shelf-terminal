@@ -148,6 +148,10 @@ export function WorktreeDialog() {
     setFailurePrompt(null);
     const { connection, cwd } = proj;
 
+    let lifecycleStarted = false;
+    try {
+      await window.shelfApi.worktree.lifecycle(proj.id, true);
+      lifecycleStarted = true;
     // 1. Create the worktree (captures the parent's baseBranch atomically).
     const result = await window.shelfApi.git.worktreeAdd(connection, cwd, branch, true);
     if (!result.ok || !result.path) {
@@ -262,6 +266,17 @@ export function WorktreeDialog() {
     //    seeded, has context to read). Deterministic post-store connect lives in
     //    App, keyed on the store — avoids the bus handlers' stale-projects closure.
     setOpen(false);
+    } catch (error) {
+      setError(errorText(error));
+      logCreateFailure({ projectId: proj.id, branch, baseCwd: cwd, failedStep: 'lifecycle', error: errorText(error) });
+    } finally {
+      setCreating(false);
+      if (lifecycleStarted) {
+        try { await window.shelfApi.worktree.lifecycle(proj.id, false); }
+        catch (error) { setError(errorText(error)); logCreateFailure({ projectId: proj.id, branch, baseCwd: cwd, failedStep: 'releaseLifecycle', error: errorText(error) }); }
+      }
+    }
+
   }, [input, projectId, projects, creating, selectedNotes, startupAgentProvider]);
 
   const toggleSelectedNote = useCallback((path: string) => {

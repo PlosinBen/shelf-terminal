@@ -1,3 +1,4 @@
+import { isWorktreeUnavailable } from '@shared/worktree';
 import { useEffect, useState } from 'react';
 import { projectDisplayLabel, useStore } from '../store';
 import { on, emit, emitAgent, Events } from '../events';
@@ -59,7 +60,7 @@ export function WorktreeCloseGate() {
   useEffect(() => {
     const off = on(Events.WORKTREE_CLOSE, (projectId: string, kind: WorktreeCloseKind) => {
       const proj = projects.find((p) => p.id === projectId);
-      if (!proj || !proj.parentProjectId) return; // guard: children only
+      if (!proj || isWorktreeUnavailable(proj) || !proj.parentProjectId) return; // guard: children only
       setState({ subProjectId: proj.id, kind });
       setBusy(false);
       setError(null);
@@ -119,7 +120,7 @@ export function WorktreeCloseGate() {
   };
 
   const approve = async () => {
-    if (busy) return;
+    if (busy || isWorktreeUnavailable(sub)) return;
     if (!parent) {
       const msg = 'worktree parent project not found';
       logCloseFailure({
@@ -137,6 +138,10 @@ export function WorktreeCloseGate() {
     setBusy(true);
     setError(null);
 
+    let lifecycleStarted = false;
+    try {
+      await window.shelfApi.worktree.lifecycle(parent.id, true);
+      lifecycleStarted = true;
     const parentConn = parent.connection;
     const parentCwd = parent.cwd;
     const featureCwd = sub.cwd;
@@ -268,6 +273,18 @@ export function WorktreeCloseGate() {
         notifyFinishCompleted(true);
       }
     }
+    } catch (error) {
+      const message = String(error);
+      setError(message);
+      logCloseFailure({ operation: state.kind, subProjectId: sub.id, parentProjectId: parent.id, failedStep: 'lifecycle', error: message });
+    } finally {
+      setBusy(false);
+      if (lifecycleStarted) {
+        try { await window.shelfApi.worktree.lifecycle(parent.id, false); }
+        catch (error) { setError(String(error)); logCloseFailure({ operation: state.kind, subProjectId: sub.id, parentProjectId: parent.id, failedStep: 'releaseLifecycle', error: String(error) }); }
+      }
+    }
+
   };
 
   const title = isAbandon ? 'Abandon Worktree' : 'Finish Worktree';

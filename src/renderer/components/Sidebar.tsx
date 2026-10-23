@@ -1,6 +1,9 @@
+import { isWorktreeUnavailable } from '@shared/worktree';
+import { WorktreeScanWarning } from './WorktreeScanWarning';
 import React, { useState, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import {
   useStore,
+  projectDisplayLabel,
   setActiveProject,
   setEditingProjectById,
   toggleSettings,
@@ -357,7 +360,7 @@ export function Sidebar() {
           // branch (the parent project name is redundant — the group conveys it),
           // and it cannot start a drag: the whole group moves via its parent.
           const isWorktreeChild = !!proj.parentProjectId;
-          const label = isWorktreeChild ? proj.worktreeBranch : proj.name;
+          const label = projectDisplayLabel(proj);
           const searchMatchIndex = projectSearchMatchById.get(proj.id) ?? -1;
           const isSearchMatch = searchMatchIndex !== -1;
           const isSearchCandidate = projectSearchCandidateId === proj.id;
@@ -374,9 +377,9 @@ export function Sidebar() {
                 if (element) projectRowRefs.current.set(proj.id, element);
                 else projectRowRefs.current.delete(proj.id);
               }}
-              className={`sidebar-item ${i === activeProjectIndex ? 'active' : ''} ${isDragging ? 'dragging' : ''} ${isDragOver ? 'drag-over' : ''}${isFlashing ? ' health-flash' : ''}${isWorktreeChild ? ' worktree-child' : ''}${hasSiblingBelow ? ' has-sibling-below' : ''}${isSearchMatch ? ' project-search-match' : ''}${isSearchCandidate ? ' project-search-candidate' : ''}`}
+              className={`sidebar-item ${i === activeProjectIndex ? 'active' : ''} ${isDragging ? 'dragging' : ''} ${isDragOver ? 'drag-over' : ''}${isFlashing ? ' health-flash' : ''}${isWorktreeChild ? ' worktree-child' : ''}${isWorktreeUnavailable(proj) ? ' worktree-missing' : ''}${hasSiblingBelow ? ' has-sibling-below' : ''}${isSearchMatch ? ' project-search-match' : ''}${isSearchCandidate ? ' project-search-candidate' : ''}`}
               onClick={() => { setActiveProject(i); if (projectSearchOpen) closeProjectSearch(false); }}
-              onContextMenu={(e) => { setActiveProject(i); if (projectSearchOpen) closeProjectSearch(false); handleContextMenu(e, i); }}
+              onContextMenu={(e) => { if (isWorktreeUnavailable(proj)) { e.preventDefault(); return; } setActiveProject(i); if (projectSearchOpen) closeProjectSearch(false); handleContextMenu(e, i); }}
               draggable={!isWorktreeChild}
               onDragStart={(e) => handleDragStart(e, i)}
               onDragOver={(e) => handleDragOver(e, i)}
@@ -396,6 +399,7 @@ export function Sidebar() {
                     </>
                   ) : label}
                 </span>
+                {!proj.parentProjectId && <WorktreeScanWarning projectId={proj.id} />}
               </span>
             </div>
           );
@@ -410,6 +414,7 @@ export function Sidebar() {
 
       {contextMenu && (() => {
         const proj = projects.find((p) => p.id === contextMenu.projectId);
+        if (proj && isWorktreeUnavailable(proj)) return null;
         const isConnected = proj && proj.tabs.length > 0;
         const isInvalid = proj?.folderInvalid;
         return (
