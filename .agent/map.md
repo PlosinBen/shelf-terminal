@@ -228,7 +228,7 @@ title: shelf-terminal — Intent → File Index
 | Worktree 建立 | `components/WorktreeDialog.tsx` + `../shared/worktree-child-config.ts` | 顯示 target、configured note source/list 狀態、接收 branch/note prefill、繼承完整 startup tabs 或以 Agent + Terminal 覆蓋後建立 sub-project |
 | Worktree proposal prefill helper | `worktree-prefill.ts` | 純函式正規化 New Worktree proposal 帶入的多 note path prefill |
 | Feature-note config edit rule | `feature-note-config-edit.ts` | main config canonicalization 與 child snapshot read-only save rule |
-| Worktree 關閉 gate | `components/WorktreeCloseGate.tsx` | Finish/Abandon close transaction：merge-back、note restore、teardown、branch delete、completion event |
+| Worktree 關閉 gate | `components/WorktreeCloseGate.tsx` | Finish/Abandon gate：note preflight、Only merge、Abandon note restore、teardown 與 completion event |
 | Project-level notice banner | `components/ProjectNoticeBanner.tsx` + `project-notice.ts` | Parent project completion notice UI + latest-wins/dismiss/timeout state helpers |
 | 刪除確認 | `components/RemoveConfirmDialog.tsx` | Remove project 確認 modal，可勾選清理 worktree files |
 | PM 狀態面板（read-only） | `components/PmView.tsx` | 右側可拖拉 panel，read-only 訊息列表 + markdown，header 含 PM Active/Away/Clear toggle |

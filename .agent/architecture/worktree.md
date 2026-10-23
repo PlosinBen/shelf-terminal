@@ -31,16 +31,16 @@ Finish:
 ```text
 Proposal or user menu
   → Finish gate
+  → full Finish only: one configured-note preflight (remaining notes or scan errors block)
   → verify feature worktree has default-status clean state
   → fast-forward selected target only
-  → cleanup selected (default)
-      → if the child snapshot is enabled, restore remaining child feature notes to parent
+  → Only merge unchecked (default)
       → non-force remove child checkout
       → delete source branch when one exists
       → remove child project
       → focus parent project
       → show parent project completion banner
-    cleanup unselected
+    Only merge checked
       → retain branch, checkout, project, tabs, conversations, and feature notes
       → retain current focus
       → set child project merge-success banner
@@ -61,7 +61,7 @@ User menu
 
 The merge-back boundary is only the fast-forward advancement of the selected target. It does not rebase, merge with conflicts, squash, delete files, remove worktrees, or announce success.
 
-The close gate sequences the transaction and stops at the first failure. A close failure leaves the child project and checkout visible so the user or agent can recover from the exact step that failed.
+The close gate sequences the transaction and stops at the first failure. A preflight failure leaves the target and child environment unchanged. Later failures report the failed step without claiming rollback: merge may already have succeeded, or the checkout may already have been removed before branch deletion failed. Errors can be sent to the child agent.
 
 Create gates also stop on the first failed transaction step. If note migration fails, the renderer asks Git to remove the just-created child checkout; if that rollback fails too, both full errors remain visible and can be sent to the base project's agent tab. Create/finish/abandon failures log structured context through the app log for post-mortem recovery.
 

@@ -159,4 +159,4 @@ Quick Command named targets are offered only from Terminal templates. Execution 
 
 Canonical field: `Project.featureNoteDir`.
 
-`null` disables worktree feature-note listing, migration, and restore. A configured value is a normalized repo-relative POSIX directory. Main projects may edit or clear it; child projects expose their copied snapshot as read-only and do not follow later parent edits.
+`null` disables worktree feature-note listing, migration, Finish note preflight, and Abandon restore. A configured value is a normalized repo-relative POSIX directory. Main projects may edit or clear it; child projects expose their copied snapshot as read-only and do not follow later parent edits.

@@ -44,15 +44,15 @@ related:
 
 ## worktree#5 — Finish requires default-status clean feature state, then teardown is non-force  ·  [Decision]
 
-**Decision:** Before any target ref movement, Finish checks the feature worktree with default `git status --porcelain`. Any tracked/staged/deleted/renamed change or untracked non-ignored file blocks merge-back with a `feature-dirty` result. Ignored files do not block merge-back, but close teardown uses non-force `git worktree remove`, so Git can refuse overlooked leftovers instead of deleting them.
+**Decision:** Before any target ref movement, Finish checks the feature worktree with default `git status --porcelain`. Any tracked/staged/deleted/renamed change or untracked non-ignored file blocks merge-back with a `feature-dirty` result. Ignored files do not block merge-back. Full Finish separately checks configured notes before merge (worktree#16). Teardown uses non-force `git worktree remove`; this is not a guarantee that ignored files survive removal.
 
-**Reason:** The hard merge gate should match the user's ordinary status list: if normal `git status` has something to resolve, Finish must not advance the target. Ignored files are often caches, logs, or transient feature notes; they are better handled by teardown preservation/failure than by making every ignored file block a merge.
+**Reason:** The hard merge gate should match the user's ordinary status list: if normal `git status` has something to resolve, Finish must not advance the target. Ignored files are often caches or logs. Blocking every ignored file would prevent ordinary cleanup; configured feature notes need their own preflight because Git status excludes them.
 
-**Do not change casually because:** Moving refs while default status is dirty can make the UI proceed into cleanup even though user work is not represented by the committed feature tip. Adding `--force` to teardown reintroduces silent data loss for ignored or otherwise overlooked files.
+**Do not change casually because:** Moving refs while default status is dirty can make the UI proceed into cleanup even though user work is not represented by the committed feature tip. Adding `--force` to teardown bypasses Git protections for dirty working trees.
 
-## worktree#6 — Carried feature notes are restored before close teardown  ·  [Decision]
+## worktree#6 — Abandon restores carried feature notes before teardown  ·  [Decision]
 
-**Decision:** When a child has a `featureNoteDir` snapshot, Finish with cleanup selected or Abandon lists remaining direct markdown notes there, copies them back to the same relative directory in the parent checkout, verifies them, and only then removes the child copies. Merge-only Finish leaves the notes in the child. An absent snapshot or no child notes is a successful no-op. If listing fails, the parent destination exists, or verification fails, close stops and leaves the child checkout in place.
+**Decision:** When a child has a `featureNoteDir` snapshot, Abandon lists remaining direct markdown notes there, copies them back to the same relative directory in the parent checkout, verifies them, and only then removes the child copies. Full Finish blocks on remaining notes instead of restoring them (worktree#16); merge-only Finish leaves them in the child. An absent snapshot or no child notes is a successful no-op. If listing fails, the parent destination exists, or verification fails, close stops and leaves the child checkout in place.
 
 **Reason:** Feature notes are transient working memory and are normally gitignored, so they do not travel through merge-back. Restoring through the child snapshot preserves that state without turning an already-consolidated/deleted note into an error or letting a later main-project config edit redirect an in-flight worktree transaction.
 
@@ -60,7 +60,7 @@ related:
 
 ## worktree#7 — Finish completion is project UI with an explicit cleanup outcome  ·  [Decision]
 
-**Decision:** When cleanup is selected, after merge-back, note restore, worktree removal, and branch deletion all succeed, the renderer removes the child project, focuses the parent by project identity, and shows a dismissible parent project banner: `Merged <feature> → <target> and closed the worktree`. Merge-only completion retains current focus and sets a child project banner: `Merged <feature> → <target>`. The completion event explicitly reports whether the worktree was removed; the central handler uses that outcome for cleanup, focus, and notification routing.
+**Decision:** For full Finish, after note preflight, merge-back, worktree removal, and branch deletion all succeed, the renderer removes the child project, focuses the parent by project identity, and shows a dismissible parent project banner: `Merged <feature> → <target> and closed the worktree`. Merge-only completion retains current focus and sets a child project banner: `Merged <feature> → <target>`. The completion event explicitly reports whether the worktree was removed; the central handler uses that outcome for cleanup, focus, and notification routing.
 
 **Reason:** Worktree integration is a project-level lifecycle event. Its result belongs to the project that remains after the selected operation, independent of whether that project shows Terminal, Web, or Agent. A completion notification must not pollute an agent transcript or create an agent tab just to acknowledge a UI transaction.
 
@@ -70,7 +70,7 @@ related:
 
 **Decision:** When a main project configures `featureNoteDir`, the New Worktree dialog lists its direct `*.md` children except reserved `index.md` and lets the user select zero or more canonical repo-relative paths. Create-time migration accepts those paths as one batch. It copies and verifies every selected note into the child checkout before deleting any base copy; if a copy/verify step fails, base notes stay intact and any child-side copies already made are removed.
 
-**Reason:** A single worktree can intentionally carry several small feature notes, and close already restores all remaining child notes. Looping the old single-note move would delete earlier base notes before later notes were proven safe; if the caller then removed the child checkout, those earlier notes could be lost.
+**Reason:** A single worktree can intentionally carry several small feature notes, and Abandon restores all remaining child notes. Looping the old single-note move would delete earlier base notes before later notes were proven safe; if the caller then removed the child checkout, those earlier notes could be lost.
 
 **Do not change casually because:** Feature notes are often gitignored transient working memory. Batch create migration must preserve all-or-nothing semantics across the whole selected set, not just within each individual file.
 
@@ -140,11 +140,11 @@ Every invocation requires `development-flow`, `propose_worktree_create`, and `pr
 
 ## worktree#16 — Finish cleanup is optional for the whole worktree environment  ·  [Decision]
 
-**Decision:** Finish shows `Remove worktree after merge (including branch)`, checked by default. Checked means merge then restore notes and remove the checkout, Shelf project, and feature branch using the existing safety checks. Unchecked means only the existing merge-back: retain the branch, checkout, sidebar item, tabs, conversations, feature notes, and current focus. The shared Abandon gate retains its independent `Delete branch` option; Abandon removes the checkout regardless of that option.
+**Decision:** Finish shows `Only merge`, unchecked by default. Checked means merge-back only: retain the branch, checkout, sidebar item, tabs, conversations, notes, and current focus. Unchecked means full Finish: before merge, list the child's configured direct markdown notes once (excluding `index.md`, regardless of status). Remaining notes or listing failures block the operation and can be sent to the child agent. Missing/empty directories pass; absent bindings skip note inspection without directory fallback. After the ordinary clean-state and ff-only gates succeed, remove the checkout, project, and source branch when one exists. Abandon retains its independent `Delete branch` option and note restoration.
 
-**Reason:** Shelf presents the worktree and its sidebar project as one working environment. A cleanup option that controls only the Git branch leaves users unable to preserve that environment. Naming the whole cleanup operation aligns the checkbox with what it controls without exposing subproject terminology.
+**Reason:** Shelf presents the worktree and its sidebar project as one working environment. Only merge expresses the choice to retain that environment. Git status cannot detect ignored notes; blocking before merge requires explicit note resolution rather than treating transfer to the parent as completed work. One preflight keeps the sequence simple; there is no second note scan, watcher, or external-writer lock.
 
-**Do not change casually because:** Restoring notes, disconnecting tabs, or removing the project during merge-only would violate the user's choice to retain the environment. The shared Finish/Abandon controls must preserve each operation's distinct meaning.
+**Do not change casually because:** Merge-only must not inspect or move notes, disconnect tabs, or remove the project. Full Finish's preflight does not protect notes created afterward or ignored files outside the configured scope. Operational failures after merge remain possible and must not be described as having performed no merge. Finish and Abandon must retain distinct checkbox semantics.
 
 ## worktree#17 — Git discovery reconciles Shelf children without opening them  ·  [Decision]
 
