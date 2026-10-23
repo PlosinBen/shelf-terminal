@@ -53,7 +53,7 @@ function seed(userDataDir: string, base: string, feature: string) {
     { id: BASE_ID, name: 'STA Base', cwd: base, connection: { type: 'local' }, maxTabs: 5 },
     {
       id: SUB_ID, name: 'STA Base', cwd: feature, connection: { type: 'local' }, maxTabs: 5,
-      parentProjectId: BASE_ID, worktreeBranch: 'feature', baseBranch: 'main',
+      parentProjectId: BASE_ID, worktreeBranch: 'feature', baseBranch: 'main', featureNoteDir: '.agent/features',
     },
   ];
   fs.writeFileSync(path.join(userDataDir, 'projects.json'), JSON.stringify(projects), 'utf-8');
@@ -149,4 +149,28 @@ test.describe('finish failure → Send to agent', () => {
     await expect(userMsg.first()).toContainText("rebase this worktree onto 'main'");
     await expect(userMsg.first()).not.toContainText("merge 'main' into this worktree");
   });
+  test('note preflight error reaches the child agent without merging', async () => {
+    fs.writeFileSync(path.join(feature, '.gitignore'), '.agent/\n');
+    git(feature, ['add', '.gitignore']);
+    git(feature, ['commit', '-m', 'ignore notes']);
+    const rel = '.agent/features/pending.md';
+    fs.mkdirSync(path.dirname(path.join(feature, rel)), { recursive: true });
+    fs.writeFileSync(path.join(feature, rel), 'pending context');
+    const before = git(base, ['rev-parse', 'main']).trim();
+    await openAgentInSub(page);
+    await page.locator('.sidebar-item.worktree-child', { hasText: 'feature' }).click({ button: 'right' });
+    await page.locator('.context-menu-item', { hasText: 'Finish' }).click();
+    const popup = page.locator('.worktree-dialog');
+    await popup.getByRole('button', { name: 'Finish', exact: true }).click();
+    await expect(popup.locator('.worktree-error')).toContainText(rel);
+    await expect.poll(() => readLogText(userDataDir)).toContain('"failedStep":"featureNotes"');
+    await popup.getByRole('button', { name: 'Send to agent' }).click();
+    await expect(popup).not.toBeVisible();
+    const message = page.locator('.agent-msg-user .agent-msg-content').first();
+    await expect(message).toContainText(rel);
+    await expect(message).toContainText('No merge or cleanup has been performed');
+    expect(git(base, ['rev-parse', 'main']).trim()).toBe(before);
+    expect(fs.readFileSync(path.join(feature, rel), 'utf8')).toBe('pending context');
+  });
+
 });

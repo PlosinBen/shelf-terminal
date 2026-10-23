@@ -209,4 +209,22 @@ test.describe('abandon worktree gate', () => {
     expect(git(base, ['branch', '--list', 'feature']).trim()).toContain('feature');
     await expect(page.locator('.sidebar-item.worktree-child', { hasText: 'feature' })).toHaveCount(1);
   });
+  test('keeping branch still restores notes and removes the abandoned worktree', async () => {
+    const rel = '.agent/features/carried.md';
+    fs.writeFileSync(path.join(feature, '.gitignore'), '.agent/\n');
+    git(feature, ['add', '.gitignore']);
+    git(feature, ['commit', '-m', 'ignore notes']);
+    writeFeatureNote(feature, rel, 'keep context');
+    const before = git(base, ['rev-parse', 'main']).trim();
+    await openCloseMenu(page, 'Abandon');
+    const popup = page.locator('.worktree-dialog');
+    await popup.locator('.worktree-checkbox input').uncheck();
+    await popup.getByRole('button', { name: 'Abandon', exact: true }).click();
+    await expect(popup).not.toBeVisible({ timeout: 8_000 });
+    expect(git(base, ['rev-parse', 'main']).trim()).toBe(before);
+    expect(git(base, ['branch', '--list', 'feature']).trim()).toContain('feature');
+    expect(fs.existsSync(feature)).toBe(false);
+    expect(fs.readFileSync(path.join(base, rel), 'utf8')).toBe('keep context');
+  });
+
 });

@@ -12,8 +12,8 @@ import type { BranchMergedInfo, GitBranchInfo, WorktreeCloseKind } from '@shared
 // The popup owns the whole close sequence and, on failure, offers a one-click
 // "Send to agent" that hands the error to the worktree's own agent tab.
 //
-//   finish  = pick target ▾ (default baseBranch) → lock+ff merge-back
-//             → optional cleanup: restore carried feature notes → teardown
+//   finish  = pick target ▾ (default baseBranch) → note preflight for full Finish
+//             → lock+ff merge-back → optional teardown
 //               → delete branch (force; commits are safe on target after the ff)
 //   abandon = restore carried feature notes → teardown
 //             → delete branch (no merge; UNMERGED → commit loss)
@@ -47,8 +47,8 @@ export function WorktreeCloseGate() {
   // finish only: local branches offered as ff targets + the chosen one.
   const [branches, setBranches] = useState<GitBranchInfo[]>([]);
   const [target, setTarget] = useState('');
-  // Finish: clean up the entire worktree. Abandon: delete only the branch.
-  // Both options default on; Abandon always removes the worktree checkout.
+  // Finish defaults to full cleanup; Abandon independently controls branch deletion.
+  const [onlyMerge, setOnlyMerge] = useState(false);
   const [deleteBranch, setDeleteBranch] = useState(true);
   // abandon only: is the branch already merged into base (→ safe delete) or would
   // a force-delete discard commits (→ loud warning). null until the check returns.
@@ -65,6 +65,7 @@ export function WorktreeCloseGate() {
       setBusy(false);
       setError(null);
       setDeleteBranch(true);
+      setOnlyMerge(false);
       setBranches([]);
       setMergeInfo(null);
       const base = proj.baseBranch ?? '';
@@ -158,6 +159,32 @@ export function WorktreeCloseGate() {
       });
     };
 
+    // worktree#16: one note preflight before any merge or cleanup; Only merge
+    // retains the environment and does not inspect notes.
+    if (!isAbandon && !onlyMerge && sub.featureNoteDir) {
+      let problem: string | null = null;
+      try {
+        const listed = await window.shelfApi.git.listFeatureNotes(parentConn, featureCwd, sub.featureNoteDir);
+        if (!listed.ok) {
+          problem = `Unable to check feature notes in ${sub.featureNoteDir}: ${listed.error}`;
+        } else if (listed.notes.length > 0) {
+          problem = `Remaining feature notes in ${sub.featureNoteDir}:\n${listed.notes.map((note) => note.path).join('\n')}\nResolve these notes before finishing, or select Only merge to retain the worktree.`;
+        }
+      } catch (error) {
+        problem = `Unable to check feature notes in ${sub.featureNoteDir}: ${String(error)}`;
+      }
+      if (problem) {
+        const message = `Finish blocked. No merge or cleanup has been performed.\n${problem}`;
+        logCloseFailure({
+          operation: state.kind, subProjectId: sub.id, parentProjectId: parent.id,
+          featureBranch, targetBranch: target, parentCwd, featureCwd,
+          failedStep: 'featureNotes', error: message,
+        });
+        setError(message);
+        return;
+      }
+    }
+
     // finish: fast-forward the target first; only a successful merge tears down.
     if (!isAbandon) {
       const mb = await window.shelfApi.worktree.finishMergeBack({
@@ -187,7 +214,7 @@ export function WorktreeCloseGate() {
         setBusy(false);
         return;
       }
-      if (!deleteBranch) {
+      if (onlyMerge) {
         // worktree#16: merge-only preserves notes, sessions, and current focus.
         close();
         notifyFinishCompleted(false);
@@ -197,7 +224,7 @@ export function WorktreeCloseGate() {
 
     // Restore from the child's creation-time snapshot. Disabled/legacy children
     // have no binding and deliberately skip feature-note handling.
-    if (sub.featureNoteDir) {
+    if (isAbandon && sub.featureNoteDir) {
       const restored = await window.shelfApi.git.restoreNotes(
         parentConn,
         parentCwd,
@@ -247,7 +274,7 @@ export function WorktreeCloseGate() {
       setBusy(false);
       return;
     }
-    if (featureBranch && deleteBranch) {
+    if (featureBranch && (!isAbandon || deleteBranch)) {
       // finish → force is safe (commits live on target after the ff). abandon →
       // force ONLY when the branch is unmerged (an intentional discard); a merged
       // branch uses a safe -d so a wrong "merged" verdict fails loud, not silently.
@@ -329,7 +356,7 @@ export function WorktreeCloseGate() {
                 <select
                   className="worktree-select"
                   value={target}
-                  onChange={(e) => setTarget(e.target.value)}
+                  onChange={(e) => { setTarget(e.target.value); setError(null); }}
                   disabled={busy}
                 >
                   {branches.map((b) => (
@@ -344,14 +371,23 @@ export function WorktreeCloseGate() {
           <label className="worktree-checkbox">
             <input
               type="checkbox"
-              checked={deleteBranch}
-              onChange={(e) => setDeleteBranch(e.target.checked)}
+              checked={isAbandon ? deleteBranch : onlyMerge}
+              onChange={(e) => {
+                if (isAbandon) setDeleteBranch(e.target.checked);
+                else setOnlyMerge(e.target.checked);
+                setError(null);
+              }}
               disabled={busy}
             />
             <span>{isAbandon
               ? <>Delete branch {branch ? <strong>{branch}</strong> : ''}</>
-              : 'Remove worktree after merge (including branch)'}</span>
+              : 'Only merge'}</span>
           </label>
+          {!isAbandon && (
+            <p>{onlyMerge
+              ? 'Keep the branch, worktree, project, and feature notes after merging.'
+              : 'Merge and remove the worktree, project, and source branch. Remaining feature notes block Finish.'}</p>
+          )}
           {error && (
             <div className="worktree-error">
               {error}

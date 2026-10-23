@@ -114,7 +114,7 @@ test.describe('finish target selector', () => {
       const branchBefore = git(base, ['rev-parse', 'feature']).trim();
       await openCloseMenu(page, 'Finish');
       const popup = page.locator('.worktree-dialog', { hasText: 'Finish Worktree' });
-      await popup.locator('.worktree-checkbox input').setChecked(cleanup);
+      await popup.getByLabel('Only merge').setChecked(!cleanup);
       await popup.locator('.conn-btn-next').click();
       await expect(popup).not.toBeVisible({ timeout: 8000 });
       expect(git(base, ['rev-parse', 'main']).trim()).toBe(source);

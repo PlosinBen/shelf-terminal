@@ -79,10 +79,16 @@ test.describe('finish worktree gate', () => {
   let app: ElectronApplication;
   let page: Page;
 
-  test.beforeEach(async () => {
+  test.beforeEach(async ({}, testInfo) => {
     userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'shelf-wtf-ud-'));
     ({ root, base, feature } = makeRepoWithWorktree());
     seed(userDataDir, base, feature);
+    if (testInfo.title.includes('unconfigured')) {
+      const configPath = path.join(userDataDir, 'projects.json');
+      const projects = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+      delete projects[1].featureNoteDir;
+      fs.writeFileSync(configPath, JSON.stringify(projects));
+    }
     app = await electron.launch({
       args: [path.join(__dirname, '..'), `--user-data-dir=${userDataDir}`],
       env: { ...process.env, SHELF_TEST_MODE: '1', NODE_ENV: 'test' } as Record<string, string>,
@@ -105,7 +111,7 @@ test.describe('finish worktree gate', () => {
     const popup = page.locator('.worktree-dialog', { hasText: 'Finish Worktree' });
     await expect(popup).toBeVisible({ timeout: 5_000 });
     await expect(popup).toContainText('feature');
-    await expect(popup.getByLabel('Remove worktree after merge (including branch)')).toBeChecked();
+    await expect(popup.getByLabel('Only merge')).not.toBeChecked();
     await popup.locator('.conn-btn-next').click();
     await expect(popup).not.toBeVisible({ timeout: 8_000 });
 
@@ -123,7 +129,7 @@ test.describe('finish worktree gate', () => {
     expect(git(base, ['branch', '--list', 'feature']).trim()).toBe('');
   });
 
-  test('unchecking cleanup only merges and preserves the worktree environment', async () => {
+  test('checking Only merge only merges and preserves the worktree environment', async () => {
     const rel = '.agent/features/carried.md';
     const body = '# Keep this note in the worktree\n';
     fs.writeFileSync(path.join(feature, '.gitignore'), '.agent/features/\n', 'utf-8');
@@ -150,7 +156,7 @@ test.describe('finish worktree gate', () => {
 
     const popup = page.locator('.worktree-dialog', { hasText: 'Finish Worktree' });
     await expect(popup).toBeVisible({ timeout: 5_000 });
-    await popup.locator('.worktree-checkbox input[type="checkbox"]').uncheck();
+    await popup.locator('.worktree-checkbox input[type="checkbox"]').check();
     await popup.locator('.conn-btn-next').click();
     await expect(popup).not.toBeVisible({ timeout: 8_000 });
 
@@ -182,7 +188,7 @@ test.describe('finish worktree gate', () => {
     // the existing keyboard shortcut while the gate remains open.
     await page.keyboard.press(`${process.platform === 'darwin' ? 'Meta' : 'Control'}+ArrowUp`);
     await expect(baseProject).toHaveClass(/active/);
-    await popup.locator('.worktree-checkbox input[type="checkbox"]').uncheck();
+    await popup.locator('.worktree-checkbox input[type="checkbox"]').check();
     await popup.locator('.conn-btn-next').click();
     await expect(popup).not.toBeVisible({ timeout: 8_000 });
     await expect(baseProject).toHaveClass(/active/);
@@ -194,25 +200,72 @@ test.describe('finish worktree gate', () => {
     await expect(page.locator('.project-notice-banner > span')).toHaveText('Merged feature → main');
   });
 
-  test('restores carried feature note to base before removing the worktree', async () => {
-    const rel = '.agent/features/carried.md';
-    const body = '---\ntype: feature\ntitle: Carried\nstatus: in-progress\n---\n\n# Carried\n';
-    fs.writeFileSync(path.join(feature, '.gitignore'), '.agent/features/\n', 'utf-8');
+  for (const retry of ['merge-only', 'remove-note'] as const) {
+    test(`remaining notes block before merge; retry with ${retry}`, async () => {
+      const rel = '.agent/features/carried.md';
+      fs.writeFileSync(path.join(feature, '.gitignore'), '.agent/\n');
+      git(feature, ['add', '.gitignore']);
+      git(feature, ['commit', '-m', 'ignore notes']);
+      writeFeatureNote(feature, rel, '---\nstatus: pending\n---\nKeep context');
+      const before = git(base, ['rev-parse', 'main']).trim();
+      const tip = git(feature, ['rev-parse', 'HEAD']).trim();
+      expect(git(feature, ['status', '--porcelain']).trim()).toBe('');
+      await openCloseMenu(page, 'Finish');
+      const popup = page.locator('.worktree-dialog');
+      await popup.getByRole('button', { name: 'Finish', exact: true }).click();
+      await expect(popup.locator('.worktree-error')).toContainText(rel);
+      await expect(popup.locator('.worktree-error')).toContainText('No merge or cleanup');
+      await expect(popup.getByRole('button', { name: 'Send to agent' })).toBeDisabled();
+      expect(git(base, ['rev-parse', 'main']).trim()).toBe(before);
+      expect(fs.existsSync(path.join(feature, rel))).toBe(true);
+      expect(fs.existsSync(path.join(base, rel))).toBe(false);
+      expect(git(base, ['branch', '--list', 'feature']).trim()).toContain('feature');
+      await expect(page.locator('.sidebar-item.worktree-child')).toHaveCount(1);
+      if (retry === 'merge-only') {
+        await popup.getByLabel('Only merge').check();
+        await expect(popup.locator('.worktree-error')).toHaveCount(0);
+      } else {
+        fs.unlinkSync(path.join(feature, rel));
+      }
+      await popup.getByRole('button', { name: 'Finish', exact: true }).click();
+      await expect(popup).not.toBeVisible({ timeout: 8_000 });
+      expect(git(base, ['rev-parse', 'main']).trim()).toBe(tip);
+      expect(fs.existsSync(feature)).toBe(retry === 'merge-only');
+    });
+  }
+
+  test('note listing failure blocks cleanup but allows Only merge', async () => {
+    fs.writeFileSync(path.join(feature, '.gitignore'), '.agent/\n');
     git(feature, ['add', '.gitignore']);
-    git(feature, ['commit', '-m', 'ignore feature notes']);
-    writeFeatureNote(feature, rel, body);
-
+    git(feature, ['commit', '-m', 'ignore notes']);
+    fs.mkdirSync(path.join(feature, '.agent'));
+    fs.writeFileSync(path.join(feature, '.agent/features'), 'not a directory');
+    const before = git(base, ['rev-parse', 'main']).trim();
     await openCloseMenu(page, 'Finish');
-
-    const popup = page.locator('.worktree-dialog', { hasText: 'Finish Worktree' });
-    await expect(popup).toBeVisible({ timeout: 5_000 });
-    await popup.locator('.conn-btn-next').click();
+    const popup = page.locator('.worktree-dialog');
+    await popup.getByRole('button', { name: 'Finish', exact: true }).click();
+    await expect(popup.locator('.worktree-error')).toContainText('Unable to access configured feature note directory');
+    expect(git(base, ['rev-parse', 'main']).trim()).toBe(before);
+    expect(fs.existsSync(feature)).toBe(true);
+    await popup.getByLabel('Only merge').check();
+    await popup.getByRole('button', { name: 'Finish', exact: true }).click();
     await expect(popup).not.toBeVisible({ timeout: 8_000 });
-
-    await expect(page.locator('.sidebar-item.worktree-child', { hasText: 'feature' })).toHaveCount(0, { timeout: 8_000 });
-    expect(fs.existsSync(feature)).toBe(false);
-    expect(fs.readFileSync(path.join(base, rel), 'utf-8')).toBe(body);
+    expect(git(base, ['rev-parse', 'main']).trim()).toBe(git(feature, ['rev-parse', 'HEAD']).trim());
   });
+
+  for (const variant of ['index-only', 'unconfigured'] as const) {
+    test(`finish accepts ${variant} note scope`, async () => {
+      fs.writeFileSync(path.join(feature, '.gitignore'), '.agent/\n');
+      git(feature, ['add', '.gitignore']);
+      git(feature, ['commit', '-m', 'ignore notes']);
+      writeFeatureNote(feature, `.agent/features/${variant === 'index-only' ? 'index' : 'outside-scope'}.md`, 'context');
+      await openCloseMenu(page, 'Finish');
+      const popup = page.locator('.worktree-dialog');
+      await popup.getByRole('button', { name: 'Finish', exact: true }).click();
+      await expect(popup).not.toBeVisible({ timeout: 8_000 });
+      expect(fs.existsSync(feature)).toBe(false);
+    });
+  }
 
   test('cancel merges nothing and keeps the worktree', async () => {
     const mainBefore = git(base, ['rev-parse', 'main']).trim();
@@ -230,45 +283,50 @@ test.describe('finish worktree gate', () => {
     await expect(page.locator('.sidebar-item.worktree-child', { hasText: 'feature' })).toHaveCount(1);
   });
 
-  test('modified tracked file blocks finish before merge and keeps the worktree', async () => {
-    const mainBefore = git(base, ['rev-parse', 'main']).trim();
-    fs.writeFileSync(path.join(feature, 'f.txt'), 'uncommitted edit');
+  for (const onlyMerge of [false, true]) {
+    test(`modified tracked file blocks finish (onlyMerge=${onlyMerge})`, async () => {
+      const mainBefore = git(base, ['rev-parse', 'main']).trim();
+      fs.writeFileSync(path.join(feature, 'f.txt'), 'uncommitted edit');
 
-    await openCloseMenu(page, 'Finish');
+      await openCloseMenu(page, 'Finish');
 
-    const popup = page.locator('.worktree-dialog', { hasText: 'Finish Worktree' });
-    await expect(popup).toBeVisible({ timeout: 5_000 });
-    await popup.locator('.conn-btn-next').click();
+      const popup = page.locator('.worktree-dialog', { hasText: 'Finish Worktree' });
+      await expect(popup).toBeVisible({ timeout: 5_000 });
+      if (onlyMerge) await popup.getByLabel('Only merge').check();
+      await popup.locator('.conn-btn-next').click();
 
-    const err = popup.locator('.worktree-error');
-    await expect(err).toContainText('git status --porcelain', { timeout: 8_000 });
-    await expect(err).toContainText('f.txt');
-    expect(git(base, ['rev-parse', 'main']).trim()).toBe(mainBefore);
-    expect(fs.existsSync(feature)).toBe(true);
-    expect(fs.readFileSync(path.join(feature, 'f.txt'), 'utf-8')).toBe('uncommitted edit');
-    await expect(page.locator('.sidebar-item.worktree-child', { hasText: 'feature' })).toHaveCount(1);
-    await expect(page.locator('.project-notice-banner')).toHaveCount(0);
-  });
+      const err = popup.locator('.worktree-error');
+      await expect(err).toContainText('git status --porcelain', { timeout: 8_000 });
+      await expect(err).toContainText('f.txt');
+      expect(git(base, ['rev-parse', 'main']).trim()).toBe(mainBefore);
+      expect(fs.existsSync(feature)).toBe(true);
+      expect(fs.readFileSync(path.join(feature, 'f.txt'), 'utf-8')).toBe('uncommitted edit');
+      await expect(page.locator('.sidebar-item.worktree-child', { hasText: 'feature' })).toHaveCount(1);
+      await expect(page.locator('.project-notice-banner')).toHaveCount(0);
+    });
 
-  test('untracked non-ignored file blocks finish before merge and keeps the worktree', async () => {
-    const mainBefore = git(base, ['rev-parse', 'main']).trim();
-    fs.writeFileSync(path.join(feature, 'scratch.txt'), 'keep me');
+    test(`untracked file blocks finish (onlyMerge=${onlyMerge})`, async () => {
+      const mainBefore = git(base, ['rev-parse', 'main']).trim();
+      fs.writeFileSync(path.join(feature, 'scratch.txt'), 'keep me');
 
-    await openCloseMenu(page, 'Finish');
+      await openCloseMenu(page, 'Finish');
 
-    const popup = page.locator('.worktree-dialog', { hasText: 'Finish Worktree' });
-    await expect(popup).toBeVisible({ timeout: 5_000 });
-    await popup.locator('.conn-btn-next').click();
+      const popup = page.locator('.worktree-dialog', { hasText: 'Finish Worktree' });
+      await expect(popup).toBeVisible({ timeout: 5_000 });
+      if (onlyMerge) await popup.getByLabel('Only merge').check();
+      await popup.locator('.conn-btn-next').click();
 
-    const err = popup.locator('.worktree-error');
-    await expect(err).toContainText('git status --porcelain', { timeout: 8_000 });
-    await expect(err).toContainText('scratch.txt');
-    expect(git(base, ['rev-parse', 'main']).trim()).toBe(mainBefore);
-    expect(fs.existsSync(feature)).toBe(true);
-    expect(fs.readFileSync(path.join(feature, 'scratch.txt'), 'utf-8')).toBe('keep me');
-    await expect(page.locator('.sidebar-item.worktree-child', { hasText: 'feature' })).toHaveCount(1);
-    await expect(page.locator('.project-notice-banner')).toHaveCount(0);
-  });
+      const err = popup.locator('.worktree-error');
+      await expect(err).toContainText('git status --porcelain', { timeout: 8_000 });
+      await expect(err).toContainText('scratch.txt');
+      expect(git(base, ['rev-parse', 'main']).trim()).toBe(mainBefore);
+      expect(fs.existsSync(feature)).toBe(true);
+      expect(fs.readFileSync(path.join(feature, 'scratch.txt'), 'utf-8')).toBe('keep me');
+      await expect(page.locator('.sidebar-item.worktree-child', { hasText: 'feature' })).toHaveCount(1);
+      await expect(page.locator('.project-notice-banner')).toHaveCount(0);
+    });
+
+  }
 
   test('worktree agent proposal opens the Finish gate without merging', async () => {
     await page.locator('.sidebar-item.worktree-child', { hasText: 'feature' }).click();
