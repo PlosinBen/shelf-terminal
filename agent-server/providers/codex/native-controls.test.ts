@@ -7,7 +7,10 @@ async function setup() {
     activePermissionProfile: null, sandboxPolicy: { type: 'readOnly' }, collaborationMode: { mode: 'default' } };
   const request = vi.fn(async (method: string, params?: any): Promise<any> => {
     if (method === CODEX_NATIVE_RPC.PROFILES) return { data: [{ id: ':workspace', allowed: true }, { id: 'blocked', allowed: false }] };
-    if (method === CODEX_NATIVE_RPC.MODES) return { data: [{ mode: 'default', name: 'Default' }, { mode: 'plan', name: 'Plan', reasoning_effort: 'medium' }] };
+    if (method === CODEX_NATIVE_RPC.MODES) {
+      expect(params).toEqual({});
+      return { data: [{ mode: 'default', name: 'Default' }, { mode: 'plan', name: 'Plan', reasoning_effort: 'medium' }] };
+    }
     if (method === CODEX_NATIVE_RPC.REQUIREMENTS) return { requirements: { allowedApprovalPolicies: ['on-request', 'never'] } };
     if (method === CODEX_NATIVE_RPC.UPDATE) {
       if (params.collaborationMode) settings.collaborationMode = params.collaborationMode;

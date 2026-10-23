@@ -43,7 +43,7 @@ export class CodexNativeControls {
       if (cursor && cursors.has(cursor)) throw new Error('Repeated permission profile cursor');
       if (cursor) cursors.add(cursor);
     } while (cursor);
-    const modes = record(await client.request(CODEX_NATIVE_RPC.MODES));
+    const modes = record(await client.request(CODEX_NATIVE_RPC.MODES, {}));
     if (!Array.isArray(modes.data)) throw new Error('Invalid collaborationMode/list response');
     this.modes = modes.data.map((item: RecordValue) => {
       if (typeof item.mode !== 'string' || typeof item.name !== 'string') throw new Error('Invalid collaboration mode');

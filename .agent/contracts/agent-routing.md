@@ -210,6 +210,8 @@ Same renderer→main→agent-server pattern; payloads are self-describing:
 
 `CONFIG_EDIT_KEYS` is the shared key authority. Codex advertises Mode, Permission profile, and Approval descriptors plus model-specific effort options. Model/profile/mode options originate in app-server; Approval exposes native `untrusted`, `on-request`, `never`, filtered by managed requirements. A structured granular value is display-only `Custom`, with no selectable synthetic value.
 
+`collaborationMode/list` requires an explicit empty `params: {}` object; omitting `params` is rejected by the pinned app-server parser. `configRequirements/read` has no params in the protocol, so this is a method-specific requirement.
+
 Initialization enables experimental API, loads native options, establishes the final thread using the existing restore context, and applies saved selections before publishing capabilities. Absent prefs do not receive Shelf defaults. Config edits use `thread/settings/update`; matching `thread/settings/updated` and successful RPC confirm changes in either arrival order. Same confirmed values are no-ops. Start/resume omits collaboration mode, so the first explicit Mode apply may establish that value via successful RPC when a same-value update produces no notification. Mode payload retains effective model/effort and selects built-in instructions for the requested mode.
 
 Failed or timed-out updates publish no success or preferences. An uncertain settings snapshot blocks subsequent settings edits and turns until reconnect. Model changes that invalidate the current effort are rejected without changing either value. Native snapshots are not replayed as canonical permission overrides on every turn.
