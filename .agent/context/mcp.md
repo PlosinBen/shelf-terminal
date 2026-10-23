@@ -113,3 +113,13 @@ related:
 **Do not change casually because**：L1 一定要 in-process http（stdio 子進程無法回 main 執行 bridge tool);別把 L2 user MCP 挪去 config-home（per-session 已多租戶隔離,config-home 會重造碰撞);stdio MCP 在 copilot 失效是上游 #1040,不是 Shelf bug —— 別在 Shelf 側「修」（絕對路徑也沒用,見 UPSTREAM_WATCH)。
 
 **Related**：`mcp#4`、`agent-providers#13`、`agent-providers#33`、`.agent/UPSTREAM_WATCH.md`、`agent-server/providers/acp/{shelf-mcp,mcp}.ts`、`agent-server/providers/{copilot,codex}/index.ts`。
+
+## mcp#10 — Built-in HTTP bridge bounds request bytes and tool-input elements  ·  [Decision]
+
+**Decision**：`shelf` in-process MCP bridge 對 POST body 設 **2 MiB** 上限，讀取每個 chunk 時先累加位元組數，超限立即回 HTTP 413 並丟棄已收集的 chunks；SDK `McpServer` 的 `maxToolInputElements` 設 **1,024**，限制 `tools/call` 參數的 object members 與 array elements。正常大小的 request、恰好在上限的 request，以及超限後的新連線仍可使用。
+
+**Reason**：bridge 雖只綁 `127.0.0.1`，同機器上的其他 process 仍可連到無認證的 endpoint。SDK 1.32.x 的 element 防護須顯式啟用；bridge 先自行解析 JSON 再把 object 傳給 transport，會繞過 SDK transport 的 body reader 上限。Element count 也管不到單一巨大的字串，例如 skill 內容或 web request body，因此兩種限制都需要。2 MiB 容得下正常的文字內容，1,024 elements 高於目前 header record 與 note list 的日常需求。
+
+**Do not change casually because**：不要只升 SDK 版號就假設防護已啟用，也不要改成收完 body 才檢查大小。若真有超過上限的合法內容，先確認實際工作流，再評估提高上限或分段傳輸；不要直接移除限制。Shelf 的 production code 直接使用 SDK server，沒有直接使用其 client redirect 或 bearer-auth middleware；升級時不應為不存在的 consumer 放寬 same-origin redirect 預設。
+
+**Related**：`agent-server/providers/acp/shelf-mcp.ts`、`agent-server/providers/acp/shelf-mcp.test.ts`、`mcp#9`。

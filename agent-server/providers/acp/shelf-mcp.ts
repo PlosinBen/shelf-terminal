@@ -29,6 +29,13 @@ export interface ShelfMcpHandle {
   close(): void;
 }
 
+// mcp#10: Bridge calls may contain a full skill file or web request body. Keep the
+// request under 2 MiB and the (normally small) argument shape under 1,024
+// object members/array elements. The SDK's own body cap is bypassed because
+// this HTTP boundary passes a pre-parsed body to its transport.
+const MAX_REQUEST_BODY_BYTES = 2 * 1024 * 1024;
+const MAX_TOOL_INPUT_ELEMENTS = 1024;
+
 /** One bridge tool's result → MCP tool result (text + optional isError). */
 function toToolResult(r: { text: string; isError: boolean }) {
   return { content: [{ type: 'text' as const, text: r.text }], ...(r.isError ? { isError: true } : {}) };
@@ -41,7 +48,7 @@ function toToolResult(r: { text: string; isError: boolean }) {
  * across providers; the agent namespaces them (copilot: `shelf-<name>`).
  */
 function buildShelfMcpServer(): McpServer {
-  const server = new McpServer({ name: 'shelf', version: '1.0.0' });
+  const server = new McpServer({ name: 'shelf', version: '1.0.0' }, { maxToolInputElements: MAX_TOOL_INPUT_ELEMENTS });
 
   server.registerTool('list_app_skills', { description: APP_SKILL_LIST_DESC },
     async () => toToolResult(await runBridgeTool('app_skill.list', {})));
@@ -110,11 +117,39 @@ function methodNotAllowed(res: import('node:http').ServerResponse): void {
 export async function startShelfMcpServer(): Promise<ShelfMcpHandle> {
   const httpServer: Server = createServer((req, res) => {
     if (req.method !== 'POST') { methodNotAllowed(res); return; } // stateless: no GET/DELETE
-    let body = '';
-    req.on('data', (chunk) => { body += chunk; });
+    const chunks: Buffer[] = [];
+    let receivedBytes = 0;
+    let rejected = false;
+    req.on('data', (chunk: Buffer) => {
+      if (rejected) return;
+      receivedBytes += chunk.length;
+      if (receivedBytes > MAX_REQUEST_BODY_BYTES) {
+        rejected = true;
+        chunks.length = 0;
+        res.writeHead(413, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ jsonrpc: '2.0', error: { code: -32000, message: 'Request body too large' }, id: null }));
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on('error', (error) => {
+      rejected = true;
+      chunks.length = 0;
+      console.warn('[shelf-mcp] request stream failed', error);
+      if (!res.headersSent && !res.destroyed) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ jsonrpc: '2.0', error: { code: -32700, message: 'Request stream failed' }, id: null }));
+      }
+    });
     req.on('end', async () => {
+      if (rejected) return;
+      const body = Buffer.concat(chunks, receivedBytes).toString('utf8');
       let parsed: unknown;
-      try { parsed = body ? JSON.parse(body) : undefined; } catch { parsed = undefined; }
+      try { parsed = body ? JSON.parse(body) : undefined; }
+      catch (error) {
+        console.warn('[shelf-mcp] invalid request JSON', error);
+        parsed = undefined;
+      }
       // Fresh server + transport per request (stateless — avoids cross-request state).
       const server = buildShelfMcpServer();
       const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
@@ -122,7 +157,8 @@ export async function startShelfMcpServer(): Promise<ShelfMcpHandle> {
       try {
         await server.connect(transport);
         await transport.handleRequest(req, res, parsed);
-      } catch {
+      } catch (error) {
+        console.error('[shelf-mcp] transport request failed', error);
         if (!res.headersSent) {
           res.writeHead(500, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ jsonrpc: '2.0', error: { code: -32603, message: 'Internal server error' }, id: null }));
