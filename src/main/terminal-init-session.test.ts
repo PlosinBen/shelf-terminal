@@ -17,13 +17,14 @@ function fakeShell(): Shell {
   };
 }
 
-function explicitSession(options: { initScript?: string; tabCmd?: string } = {}) {
+function explicitSession(options: { initScript?: string; tabCmd?: string; onDiagnostic?: (message: string) => void } = {}) {
   const shell = fakeShell();
   const visible: string[] = [];
   const phases: TerminalSessionPhase[] = [];
   const failures: string[] = [];
   const session = new TerminalInitSession({
     shell,
+    onDiagnostic: options.onDiagnostic,
     nonce: 'fixed_nonce',
     mode: 'explicit',
     initScript: options.initScript,
@@ -206,5 +207,36 @@ describe('TerminalInitSession', () => {
     session.dispose();
     session.writeUser('ignored');
     expect(shell.write).not.toHaveBeenCalled();
+  });
+});
+
+
+describe('terminal initialization diagnostics', () => {
+  it('reports handshake and writes without exposing commands, output or nonce', () => {
+    const diagnostic = vi.fn();
+    const { session } = explicitSession({ tabCmd: 'secret-command', onDiagnostic: diagnostic });
+    session.start();
+    session.handleData('secret-output');
+    session.handleData(encodeTerminalInitFrame({
+      nonce: 'fixed_nonce', phase: TERMINAL_INIT_PHASE.runner, result: TERMINAL_INIT_RESULT.ready,
+    }));
+    const messages = diagnostic.mock.calls.flat().join('\n');
+    expect(messages).toContain('runner-result=ready');
+    expect(messages).toContain('write-complete kind=runner-directive');
+    for (const secret of ['secret-command', 'secret-output', 'fixed_nonce']) expect(messages).not.toContain(secret);
+    session.dispose();
+  });
+
+  it('distinguishes fallback from a successful runner handshake', () => {
+    vi.useFakeTimers();
+    try {
+      const diagnostic = vi.fn();
+      const { session } = explicitSession({ onDiagnostic: diagnostic });
+      session.start();
+      vi.advanceTimersByTime(10_000);
+      expect(diagnostic).toHaveBeenCalledWith('fallback timeoutMs=10000');
+      expect(diagnostic.mock.calls.flat().join(' ')).not.toContain('runner-result=');
+      session.dispose();
+    } finally { vi.useRealTimers(); }
   });
 });

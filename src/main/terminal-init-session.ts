@@ -12,6 +12,8 @@ import {
   decodeExternalUrlOscFrame,
 } from '@shared/external-url-osc';
 
+export const TERMINAL_STARTUP_LOG_TAG = 'terminal-startup';
+
 const RUNNER_FALLBACK_MS = 10_000;
 const HIDDEN_CAPTURE_MAX_BYTES = 32 * 1024;
 const HIDDEN_CAPTURE_TRUNCATED = '\r\n[Earlier hidden terminal output truncated]\r\n';
@@ -37,6 +39,8 @@ export interface TerminalInitSessionOptions {
   readonly tabCmd?: string;
   readonly onVisibleData: (data: string) => void;
   readonly onPhase: (phase: TerminalSessionPhase) => void;
+  /** Metadata only: never include shell content, commands or nonce. */
+  readonly onDiagnostic?: (message: string) => void;
   readonly onStartupFailure: (reason: string) => void;
   readonly onProtocolAnomaly?: (reason: string) => void;
   readonly onIsolationUnconfirmed?: () => void;
@@ -179,6 +183,7 @@ export class TerminalInitSession {
   }
 
   private onRunnerResult(result: string): void {
+    this.options.onDiagnostic?.(`runner-result=${result}`);
     this.clearFallback();
     this.discardHiddenCapture();
     if (result === TERMINAL_INIT_RESULT.isolationUnconfirmed) {
@@ -188,36 +193,45 @@ export class TerminalInitSession {
     const normalDirective = this.options.directiveMode === 'none' ? '' : this.directive('normal');
     if (this.options.initScript) {
       this.setPhase(TERMINAL_SESSION_PHASE.initScript);
-      this.options.shell.write(normalDirective);
+      this.writeAutomatic(normalDirective, 'runner-directive');
       return;
     }
 
     const command = `${normalDirective}${line(this.options.tabCmd)}`;
-    if (command) this.options.shell.write(command);
+    if (command) this.writeAutomatic(command, 'runner-directive');
     this.setPhase(TERMINAL_SESSION_PHASE.ready);
   }
 
   private onInitScriptResult(result: string): void {
+    this.options.onDiagnostic?.(`init-script-result=${result}`);
     if (result === TERMINAL_INIT_RESULT.success && this.options.tabCmd) {
       this.setPhase(TERMINAL_SESSION_PHASE.tabCommand);
-      this.options.shell.write(line(this.options.tabCmd));
+      this.writeAutomatic(line(this.options.tabCmd), 'tab-command');
     }
     this.setPhase(TERMINAL_SESSION_PHASE.ready);
   }
 
   private submitNativeAutomaticCommands(): void {
     const commands = `${line(this.options.initScript)}${line(this.options.tabCmd)}`;
-    if (commands) this.options.shell.write(commands);
+    if (commands) this.writeAutomatic(commands, 'native-commands');
     this.setPhase(TERMINAL_SESSION_PHASE.ready);
   }
 
   private enterFallback(): void {
     if (this.phase !== TERMINAL_SESSION_PHASE.runnerInitializing) return;
+    this.options.onDiagnostic?.(`fallback timeoutMs=${RUNNER_FALLBACK_MS}`);
     this.fallbackTimer = undefined;
     this.discardHiddenCapture();
     const commands = `${this.directive('fallback')}${line(this.options.initScript)}${line(this.options.tabCmd)}`;
-    this.options.shell.write(commands);
+    this.writeAutomatic(commands, 'fallback-commands');
     this.setPhase(TERMINAL_SESSION_PHASE.ready);
+  }
+
+  private writeAutomatic(data: string, kind: string): void {
+    this.options.onDiagnostic?.(`write-start kind=${kind} bytes=${Buffer.byteLength(data, 'utf8')}`);
+    this.options.shell.write(data);
+    // This confirms the write call returned, not that the target consumed it.
+    this.options.onDiagnostic?.(`write-complete kind=${kind}`);
   }
 
   private directive(result: 'normal' | 'fallback'): string {

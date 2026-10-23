@@ -12,7 +12,7 @@ import { maybeScheduleCleanup } from './file-transfer';
 import { TargetFactsResolver } from './connector/target-facts';
 import { selectTerminalRunner, RUNNER_KIND, type TerminalRunnerSelection } from './terminal-runner/selector';
 import { prepareRunnerLaunch, type PreparedRunnerLaunch } from './terminal-runner/runners';
-import { TerminalInitSession, TERMINAL_SESSION_PHASE } from './terminal-init-session';
+import { TerminalInitSession, TERMINAL_SESSION_PHASE, TERMINAL_STARTUP_LOG_TAG } from './terminal-init-session';
 import { createTerminalInitTokens } from '@shared/terminal-init-osc';
 import { getAppInstanceId } from './app-instance-id';
 import { randomBytes } from 'crypto';
@@ -82,6 +82,11 @@ export async function spawnPty(
   env?: Record<string, string>,
   requiredEnv?: Record<string, string>,
 ): Promise<void> {
+  const started = Date.now();
+  const trace = (message: string) => log.info(
+    TERMINAL_STARTUP_LOG_TAG, `project=${projectId} tab=${tabId} elapsedMs=${Date.now() - started} ${message}`,
+  );
+  let receivedVisibleData = false;
   const controller = new AbortController();
   pendingSpawns.get(tabId)?.abort();
   pendingSpawns.set(tabId, controller);
@@ -100,6 +105,10 @@ export async function spawnPty(
 
   const forwardVisibleData = (data: string) => {
     if (!data) return;
+    if (!receivedVisibleData) {
+      receivedVisibleData = true;
+      trace(`first-visible-data bytes=${Buffer.byteLength(data, 'utf8')} windowAlive=${!win.isDestroyed()}`);
+    }
     observer.onData?.(tabId, data);
 
     if (!win.isDestroyed()) {
@@ -132,8 +141,10 @@ export async function spawnPty(
   try {
     const runtime = createConnector(connection);
     const compatibilityPlan = runtime.createCompatibilityLaunchPlan(cwd, env, requiredEnv);
+    trace('target-facts:start');
     const targetFacts = await targetFactsResolver.resolve(runtime, controller.signal, cwd);
-    if (controller.signal.aborted) return;
+    if (controller.signal.aborted) { trace('cancelled'); return; }
+    trace(`target-facts:complete ok=${targetFacts.ok}`);
     if (!targetFacts.ok) {
       log.debug(
         'terminal-runtime',
@@ -141,6 +152,7 @@ export async function spawnPty(
       );
     }
     const selection = selectTerminalRunner(targetFacts, compatibilityPlan);
+    trace(`runner-prepare:start runner=${selection.kind}`);
     const nonce = randomBytes(18).toString('base64url');
     const runnerContext = {
       runtime,
@@ -155,13 +167,20 @@ export async function spawnPty(
       requiredEnv,
     };
     const prepared = await prepareRunnerLaunch(runnerContext);
-    if (controller.signal.aborted) return;
+    if (controller.signal.aborted) { trace('cancelled'); return; }
+
+    trace(`runner-prepare:complete mode=${prepared.mode} isolation=${prepared.historyIsolation}`);
 
     let activeShell: Shell | undefined;
     let retriedWithoutIsolation = false;
 
+    let attempt = 0;
     const attachShell = (launch: PreparedRunnerLaunch) => {
+      const attemptId = ++attempt;
+      const sessionTrace = (message: string) => trace(`attempt=${attemptId} ${message}`);
+      sessionTrace(`pty-spawn:start mode=${launch.mode}`);
       const shell = runtime.spawnTerminalPlan(launch.plan);
+      sessionTrace('pty-spawn:complete');
       activeShell = shell;
       shells.set(tabId, shell);
       const session = new TerminalInitSession({
@@ -171,6 +190,7 @@ export async function spawnPty(
         directiveMode: launch.directiveMode,
         initScript,
         tabCmd,
+        onDiagnostic: sessionTrace,
         onVisibleData: forwardVisibleData,
         onExternalUrl: (url) => observer.onExternalUrl?.(projectId, tabId, url),
         onProtocolAnomaly: (anomaly) => {
@@ -181,6 +201,7 @@ export async function spawnPty(
           log.error('terminal-history', `isolation unconfirmed project=${projectId} tab=${tabId} runner=${selection.kind}`);
         },
         onPhase: (phase) => {
+          sessionTrace(`phase=${phase}`);
           if (phase === TERMINAL_SESSION_PHASE.runnerInitializing) {
             sendPresentationPhase(PTY_INIT_PRESENTATION_PHASE.initializing);
           } else if (phase === TERMINAL_SESSION_PHASE.initScript) {
@@ -198,9 +219,17 @@ export async function spawnPty(
       });
       initSessions.set(tabId, session);
 
-      shell.onData((data) => session.handleData(data));
+      let receivedRawData = false;
+      shell.onData((data) => {
+        if (!receivedRawData && data.length > 0) {
+          receivedRawData = true;
+          sessionTrace(`first-raw-data bytes=${Buffer.byteLength(data, 'utf8')}`);
+        }
+        session.handleData(data);
+      });
       shell.onExit((exitCode) => {
         if (activeShell !== shell) return;
+        sessionTrace(`exit code=${exitCode} phase=${session.currentPhase()}`);
         const enhancedExitedBeforeReady = launch.historyIsolation === 'attempted'
           && session.currentPhase() === TERMINAL_SESSION_PHASE.runnerInitializing
           && !retriedWithoutIsolation;
@@ -253,7 +282,7 @@ export async function spawnPty(
     attachShell(prepared);
     maybeScheduleCleanup(projectId, connection, cwd);
   } catch (error) {
-    if (controller.signal.aborted) return;
+    if (controller.signal.aborted) { trace('cancelled'); return; }
     const reason = error instanceof Error ? error.message : String(error);
     log.error('pty', `startup failed: tabId=${tabId} ${reason}`);
     sendPresentationPhase(PTY_INIT_PRESENTATION_PHASE.failed);

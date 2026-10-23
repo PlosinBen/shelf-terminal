@@ -1,3 +1,4 @@
+import { log } from '@shared/logger';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 // Idle-notification logic (terminal-pty#4) is the risky bit in pty-manager:
@@ -220,4 +221,28 @@ describe('pty-manager external URL frames', () => {
     expect(onData).toHaveBeenCalledWith('tab-1', 'leftright');
     expect(JSON.stringify(onProtocolAnomaly.mock.calls)).not.toContain('private+payload');
   });
+});
+
+
+it('logs only the first raw and visible output sizes, including across hidden initialization', async () => {
+  const info = vi.spyOn(log, 'info').mockImplementation(() => {});
+  try {
+    h.targetFactsResult = { ok: true, facts: { targetOS: 'unix', defaultShell: '/bin/zsh' } };
+    await spawnPty('diag-project', 'diag-tab', '/cwd', conn, makeWin());
+    emit('private hidden output');
+    emit('more hidden output');
+    let messages = info.mock.calls.map((call) => call[1]).join('\n');
+    expect(messages.match(/first-raw-data/g)).toHaveLength(1);
+    expect(messages).not.toContain('first-visible-data');
+    await vi.advanceTimersByTimeAsync(10_000);
+    emit('private visible output');
+    emit('more visible output');
+    messages = info.mock.calls.map((call) => call[1]).join('\n');
+    expect(messages.match(/first-visible-data/g)).toHaveLength(1);
+    expect(messages).toContain('project=diag-project tab=diag-tab');
+    expect(messages).toContain('fallback timeoutMs=10000');
+    expect(messages).toContain('phase=ready');
+    expect(messages).not.toContain('private');
+    h.exitCbs.forEach((callback) => callback(0));
+  } finally { info.mockRestore(); }
 });

@@ -46,24 +46,37 @@ export async function ensureExternalUrlLauncher(
   connector: Connector,
   connection: Connection,
   dependencies: ExternalUrlLauncherDependencies = defaultDependencies(),
+  onStage?: (stage: string) => void,
 ): Promise<string> {
   const assets = externalUrlLauncherAssetPaths(dependencies);
   if (connection.type === 'local') {
+    onStage?.('local-assets:start');
     if (dependencies.platform === 'win32') {
       dependencies.access(assets.windowsCommand, fs.constants.R_OK);
       dependencies.access(assets.powershell, fs.constants.R_OK);
+      onStage?.('local-assets:complete');
       return assets.windowsCommand;
     }
     dependencies.access(assets.browser, fs.constants.X_OK);
+    onStage?.('local-assets:complete');
     return assets.browser;
   }
 
+  onStage?.('home:start');
   const home = await connector.homePath();
   if (!path.posix.isAbsolute(home)) {
     throw new Error(`Cannot deploy external URL launcher: target home is not absolute (${home})`);
   }
+  onStage?.('home:complete');
   const remotePath = path.posix.join(home, REMOTE_LAUNCHER_RELATIVE_PATH);
-  await connector.putFile(remotePath, dependencies.readFile(assets.browser));
+  onStage?.('asset-read:start');
+  const body = dependencies.readFile(assets.browser);
+  onStage?.('asset-read:complete');
+  onStage?.('upload:start');
+  await connector.putFile(remotePath, body);
+  onStage?.('upload:complete');
+  onStage?.('chmod:start');
   await connector.exec(home, `chmod 700 ${shellSingleQuote(remotePath)}`);
+  onStage?.('chmod:complete');
   return remotePath;
 }

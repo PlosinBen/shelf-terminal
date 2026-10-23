@@ -98,3 +98,16 @@ describe('external URL launcher deployment', () => {
     );
   });
 });
+
+
+it('identifies a failed remote upload without exposing its path or body', async () => {
+  const stages: string[] = [];
+  const failure = new Error('private remote failure');
+  const target = connector({ putFile: vi.fn(async () => { throw failure; }) });
+  await expect(ensureExternalUrlLauncher(target, { type: 'wsl', distro: 'Ubuntu' }, {
+    platform: 'win32', isPackaged: true, appPath: 'C:/app', resourcesPath: 'C:/resources',
+    access: vi.fn(), readFile: () => Buffer.from('private launcher body'),
+  }, (stage) => stages.push(stage))).rejects.toBe(failure);
+  expect(stages).toEqual(['home:start', 'home:complete', 'asset-read:start', 'asset-read:complete', 'upload:start']);
+  expect(target.exec).not.toHaveBeenCalled();
+});
