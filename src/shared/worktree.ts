@@ -15,3 +15,6 @@ export function isWorktreeUnavailable(project: { parentProjectId?: string | null
 export function worktreeLabel(project: { cwd: string; worktreeBranch?: string | null }): string {
   return project.worktreeBranch || `${project.cwd.replace(/[\\/]+$/, '').split(/[\\/]/).pop()} (detached)`;
 }
+export type WorktreeScanResult =
+  | { outcome: typeof WorktreeScanOutcome.APPLIED; projects: readonly import('./projects').Project[] }
+  | { outcome: typeof WorktreeScanOutcome.SKIPPED | typeof WorktreeScanOutcome.STALE };

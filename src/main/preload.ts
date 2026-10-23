@@ -118,6 +118,8 @@ contextBridge.exposeInMainWorld('shelfApi', {
       ipcRenderer.invoke(IPC.GIT_LIST_FEATURE_NOTES, { connection, cwd, featureNoteDir }),
   },
   worktree: {
+    reconcile: (projectId: string) => ipcRenderer.invoke(IPC.WORKTREE_RECONCILE, projectId),
+    lifecycle: (projectId: string, active: boolean) => ipcRenderer.invoke(IPC.WORKTREE_LIFECYCLE, projectId, active),
     // renderer→main: lock + ff-only merge-back step (finish/abandon themselves
     // are user-initiated in the renderer — #lifecycle).
     finishMergeBack: (payload: { connection: any; featureCwd: string; baseCwd: string; baseBranch: string; featureBranch: string }) =>

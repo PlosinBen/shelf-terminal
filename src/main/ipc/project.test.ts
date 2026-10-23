@@ -14,6 +14,7 @@ vi.mock('electron', () => ({
 }));
 
 const repository: MainProjectsRepository = {
+  reconcileWorktrees: vi.fn(),
   getAll: vi.fn(),
   get: vi.fn(),
   add: vi.fn(),

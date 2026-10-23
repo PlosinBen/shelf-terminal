@@ -63,6 +63,8 @@ export const IPC = {
   // renderer→main: lock + ff-only merge-back (the atomic "check main → ff" step).
   // Finish/abandon are user-initiated in the renderer (#lifecycle); only this
   // git step crosses to main.
+  WORKTREE_RECONCILE: 'worktree:reconcile',
+  WORKTREE_LIFECYCLE: 'worktree:lifecycle',
   WORKTREE_FINISH_MERGE_BACK: 'worktree:finish-merge-back',
   // agent proposal → renderer only. The user still commits in the dialog/gate.
   WORKTREE_PROPOSE_CREATE: 'worktree:propose-create',

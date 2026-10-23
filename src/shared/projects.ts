@@ -1,3 +1,4 @@
+import type { WorktreeState } from './worktree';
 import type {
   AgentPrefs,
   Connection,
@@ -26,6 +27,7 @@ export interface Project {
   readonly featureNoteDir: string | null;
   readonly parentProjectId: ProjectId | null;
   readonly worktreeBranch: string | null;
+  readonly worktreeState?: WorktreeState | null;
   readonly baseBranch: string | null;
   readonly agentSessionIds: Readonly<Record<string, string>>;
   readonly agentPrefs: Readonly<Record<string, ReadonlyDeep<AgentPrefs>>>;
@@ -43,6 +45,7 @@ export interface ProjectCreateInput {
   readonly featureNoteDir?: string | null;
   readonly parentProjectId?: ProjectId | null;
   readonly worktreeBranch?: string | null;
+  readonly worktreeState?: WorktreeState | null;
   readonly baseBranch?: string | null;
   readonly agentPrefs?: Readonly<Record<string, ReadonlyDeep<AgentPrefs>>>;
 }

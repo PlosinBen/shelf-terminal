@@ -92,6 +92,7 @@ describe('main projects repository', () => {
     const input = createInput();
 
     const adding = repository.add(input);
+    await Promise.resolve();
     expect(repository.getAll()).toEqual([]);
     resolveSave?.({ ok: true });
     const added = await adding;
@@ -266,5 +267,28 @@ describe('main projects repository', () => {
         reason: 'target offline',
       },
     });
+  });
+});
+
+describe('worktree batch reconciliation', () => {
+  it('saves a whole batch once and rejects a stale baseline', async () => {
+    const config = persistence([project('main')]);
+    const repo = readyRepository(config.value, () => 'child');
+    const baseline = repo.getAll();
+    const input = createInput({ parentProjectId: 'main' });
+    await repo.reconcileWorktrees(baseline, [], [input]);
+    expect(config.save).toHaveBeenCalledTimes(1);
+    expect(repo.get('child')).not.toBeNull();
+    expect(await repo.reconcileWorktrees(baseline, [], [input])).toBeNull();
+    expect(config.save).toHaveBeenCalledTimes(1);
+  });
+  it('does not publish a failed batch and rolls back prepared secrets', async () => {
+    const config = persistence([project('main')]);
+    const repo = readyRepository(config.value, () => 'child');
+    config.save.mockResolvedValueOnce({ ok: false, error: { stage: 'write', message: 'disk full' } } as never);
+    const rollback = vi.fn();
+    await expect(repo.reconcileWorktrees(repo.getAll(), [], [createInput({ parentProjectId: 'main' })], { prepare: vi.fn(), rollback })).rejects.toThrow();
+    expect(repo.get('child')).toBeNull();
+    expect(rollback).toHaveBeenCalledWith('child');
   });
 });

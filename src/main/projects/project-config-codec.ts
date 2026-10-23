@@ -1,3 +1,4 @@
+import { WorktreeAvailability, type WorktreeState } from '@shared/worktree';
 import type { AgentPrefs, Connection, QuickCommand, TabTemplate } from '@shared/types';
 import type { Project } from '@shared/projects';
 import { isAgentProvider, providerLabel } from '@shared/agent-providers';
@@ -284,10 +285,29 @@ function normalizeProject(value: unknown, index: number, shape: ProjectShape): P
     featureNoteDir: nullableString(value, 'featureNoteDir', context, shape),
     parentProjectId: nullableString(value, 'parentProjectId', context, shape),
     worktreeBranch: nullableString(value, 'worktreeBranch', context, shape),
+    ...(value.worktreeState !== undefined ? { worktreeState: worktreeState(value.worktreeState) } : {}),
     baseBranch: nullableString(value, 'baseBranch', context, shape),
     agentSessionIds: optionalStringRecord(value, 'agentSessionIds', context, shape),
     agentPrefs: agentPrefsRecord(value, context, shape),
   };
+}
+
+function worktreeState(value: unknown): WorktreeState | null {
+  if (value === null) return null;
+  if (!value || typeof value !== 'object') throw new SchemaIssue('worktreeState', 'expected object or null');
+  const state = value as Record<string, unknown>;
+  if (state.availability !== WorktreeAvailability.VALID && state.availability !== WorktreeAvailability.MISSING) throw new SchemaIssue('worktreeState.availability', 'invalid availability');
+  let identity: WorktreeState['identity'] = null;
+  if (state.identity !== null) {
+    if (!state.identity || typeof state.identity !== 'object') throw new SchemaIssue('worktreeState.identity', 'invalid identity');
+    const item = state.identity as Record<string, unknown>;
+    identity = {
+      checkoutPath: requireString(item, 'checkoutPath', 'worktreeState.identity'),
+      gitDir: requireString(item, 'gitDir', 'worktreeState.identity'),
+      commonDir: requireString(item, 'commonDir', 'worktreeState.identity'),
+    };
+  }
+  return { availability: state.availability, identity };
 }
 
 function normalizeProjects(

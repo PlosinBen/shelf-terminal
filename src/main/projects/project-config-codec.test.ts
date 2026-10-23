@@ -180,3 +180,17 @@ describe('project config formatter', () => {
     if (!result.ok) expect(result.error.context).toBe('projects[0].maxTabs');
   });
 });
+
+describe('persisted worktree availability', () => {
+  it('round-trips unavailable worktrees without losing their last identity', () => {
+    const value = { ...project(), worktreeState: { availability: 'missing' as const, identity: { checkoutPath: '/child', gitDir: '/repo/.git/worktrees/child', commonDir: '/repo/.git' } } };
+    const formatted = formatProjectsDocument([value]);
+    expect(formatted.ok).toBe(true);
+    if (!formatted.ok) throw new Error('format failed');
+    const loaded = loadProjectsDocument(formatted.data);
+    expect(loaded).toMatchObject({ ok: true, value: [value] });
+  });
+  it('rejects corrupted availability instead of silently enabling a project', () => {
+    expect(loadProjectsDocument(JSON.stringify({ version: PROJECTS_SCHEMA_VERSION, projects: [{ ...project(), worktreeState: { availability: 'garbage', identity: null } }] })).ok).toBe(false);
+  });
+});

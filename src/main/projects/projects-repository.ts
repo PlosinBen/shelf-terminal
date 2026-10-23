@@ -22,6 +22,7 @@ export interface MainProjectsRepository {
   save(project: Project): Promise<void>;
   delete(projectId: ProjectId): Promise<ProjectDeleteResult>;
   retryCleanup(projectId: ProjectId): Promise<ProjectDeleteResult>;
+  reconcileWorktrees(baseline: readonly Project[], updates: readonly Project[], additions: readonly ProjectCreateInput[], secrets?: { prepare(id: string): void; rollback(id: string): void }, isCurrent?: () => boolean): Promise<readonly Project[] | null>;
   reorder(sourceId: ProjectId, targetId: ProjectId): Promise<void>;
 }
 
@@ -121,6 +122,7 @@ function createProject(id: ProjectId, input: ProjectCreateInput): Project {
     featureNoteDir: input.featureNoteDir ?? null,
     parentProjectId: input.parentProjectId ?? null,
     worktreeBranch: input.worktreeBranch ?? null,
+    ...(input.worktreeState !== undefined ? { worktreeState: input.worktreeState } : {}),
     baseBranch: input.baseBranch ?? null,
     agentSessionIds: {},
     agentPrefs: input.agentPrefs ?? {},
@@ -220,6 +222,37 @@ export function createMainProjectsRepository(
       return projects.find(({ id }) => id === projectId) ?? null;
     },
 
+    async reconcileWorktrees(baseline, updates, additions, secrets, isCurrent = () => true) {
+      if (projects !== baseline || !isCurrent()) return null;
+      const created = additions.map(input => createProject(createProjectId(), input));
+      const candidate = readyCollection([
+        ...projects.map(project => updates.find(update => update.id === project.id) ?? project),
+        ...created,
+      ], 'save');
+      for (const child of created) {
+        if (candidate.some(other => other.id !== child.id && sameProjectTarget(other, child))) {
+          throw new ProjectRepositoryError('add', `duplicate worktree target ${child.cwd}`);
+        }
+      }
+      if (isDeepStrictEqual(candidate, projects)) return projects;
+      const prepared: string[] = [];
+      try {
+        for (const child of created) { prepared.push(child.id); secrets?.prepare(child.id); }
+        await persist('save', candidate);
+        return projects;
+      } catch (error) {
+        const errors: unknown[] = [error];
+        for (const id of prepared) {
+          try { secrets?.rollback(id); } catch (cleanupError) {
+            log.error('worktree', `secret rollback failed projectId=${id}: ${String(cleanupError)}`);
+            errors.push(cleanupError);
+          }
+        }
+        if (errors.length > 1) throw new AggregateError(errors, 'Worktree save and secret rollback failed');
+        throw error;
+      }
+    },
+
     async add(input) {
       const project = createProject(createProjectId(), input);
       if (projects.some(({ id }) => id === project.id) || pendingCleanup.has(project.id)) {
@@ -283,5 +316,20 @@ export function createMainProjectsRepository(
       await persist('reorder', candidate);
     },
   };
+  // Serialize candidate construction as well as persistence. Otherwise an add
+  // awaiting disk can overwrite a later save or reconciliation snapshot.
+  let writes: Promise<unknown> = Promise.resolve();
+  function serialize<A extends unknown[], R>(operation: (...args: A) => Promise<R>): (...args: A) => Promise<R> {
+    return (...args) => {
+      const result = writes.then(() => operation(...args));
+      writes = result.catch(() => undefined); // caller still receives rejection
+      return result;
+    };
+  }
+  repository.add = serialize(repository.add);
+  repository.save = serialize(repository.save);
+  repository.delete = serialize(repository.delete);
+  repository.reorder = serialize(repository.reorder);
+  repository.reconcileWorktrees = serialize(repository.reconcileWorktrees);
   return { ok: true, repository };
 }
