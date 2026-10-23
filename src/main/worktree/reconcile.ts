@@ -4,7 +4,7 @@ import { TargetFactsResolver, TARGET_OS } from '../connector/target-facts';
 import { WorktreeProbe } from '../connector/worktree-probe';
 import { getProjectsRepository } from '../projects/repository-provider';
 import { buildWorktreeChildConfig } from '@shared/worktree-child-config';
-import { WorktreeAvailability, WorktreeScanOutcome, type WorktreeIdentity, type WorktreeScanResult } from '@shared/worktree';
+import { isWorktreeUnavailable, WorktreeAvailability, WorktreeScanOutcome, type WorktreeIdentity, type WorktreeScanResult } from '@shared/worktree';
 import type { Project, ProjectCreateInput } from '@shared/projects';
 import { copyProjectSecrets, deleteProjectSecrets } from '../secret-store';
 import { log } from '@shared/logger';
@@ -77,4 +77,23 @@ async function run(id: string): Promise<WorktreeScanResult> {
     return { outcome: WorktreeScanOutcome.STALE };
   }
   return { outcome: WorktreeScanOutcome.APPLIED, projects };
+}
+
+export async function inspectWorktreeSource(projectId: string): Promise<import('@shared/worktree').WorktreeSource> {
+  const repo = getProjectsRepository();
+  const project = repo.get(projectId);
+  if (!project?.parentProjectId || isWorktreeUnavailable(project)) throw new Error('Worktree is unavailable');
+  const parent = repo.get(project.parentProjectId);
+  if (!parent) throw new Error('Worktree parent is missing');
+  const runtime = createConnector(project.connection);
+  const target = await facts.resolve(runtime, undefined, parent.cwd);
+  if (!target.ok) throw new Error(`Cannot inspect worktree target: ${JSON.stringify(target.attempts)}`);
+  const probe = new WorktreeProbe(runtime, parent.cwd, target.facts.targetOS === TARGET_OS.windows);
+  const identity = await probe.identity(project.cwd);
+  const parentIdentity = await probe.identity(parent.cwd);
+  if (!identity || !parentIdentity || identity.commonDir !== parentIdentity.commonDir || identity.gitDir === parentIdentity.gitDir) throw new Error('Worktree identity no longer matches its parent');
+  const commit = (await probe.git(project.cwd, 'rev-parse', '--verify', 'HEAD')).trim();
+  if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(commit)) throw new Error('Invalid worktree HEAD');
+  const branch = (await probe.git(project.cwd, 'rev-parse', '--abbrev-ref', 'HEAD')).trim();
+  return { commit, branch: branch === 'HEAD' ? null : branch, identity };
 }

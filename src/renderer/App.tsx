@@ -492,7 +492,7 @@ export function App() {
     const offWorktreeFinishCompleted = on(Events.WORKTREE_FINISH_COMPLETED, (payload: {
       subProjectId: string;
       parentProjectId: string;
-      featureBranch: string;
+      sourceLabel: string;
       targetBranch: string;
       worktreeRemoved: boolean;
     }) => {
@@ -510,7 +510,7 @@ export function App() {
       }
       showProjectNotice({
         projectId: payload.worktreeRemoved ? payload.parentProjectId : payload.subProjectId,
-        message: `Merged ${payload.featureBranch} → ${payload.targetBranch}${payload.worktreeRemoved ? ' and closed the worktree' : ''}`,
+        message: `Merged ${payload.sourceLabel} → ${payload.targetBranch}${payload.worktreeRemoved ? ' and closed the worktree' : ''}`,
       });
     });
 

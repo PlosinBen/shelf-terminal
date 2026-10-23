@@ -106,4 +106,23 @@ test.describe('finish target selector', () => {
     expect(git(base, ['rev-parse', 'main']).trim()).toBe(mainBefore);
     expect(fs.existsSync(feature)).toBe(false);
   });
+  for (const cleanup of [true, false]) {
+    test(`detached HEAD Finish with cleanup=${cleanup}`, async () => {
+      git(feature, ['checkout', '--detach']);
+      git(feature, ['commit', '--allow-empty', '-m', 'detached tip']);
+      const source = git(feature, ['rev-parse', 'HEAD']).trim();
+      const branchBefore = git(base, ['rev-parse', 'feature']).trim();
+      await openCloseMenu(page, 'Finish');
+      const popup = page.locator('.worktree-dialog', { hasText: 'Finish Worktree' });
+      await popup.locator('.worktree-checkbox input').setChecked(cleanup);
+      await popup.locator('.conn-btn-next').click();
+      await expect(popup).not.toBeVisible({ timeout: 8000 });
+      expect(git(base, ['rev-parse', 'main']).trim()).toBe(source);
+      expect(git(base, ['rev-parse', 'feature']).trim()).toBe(branchBefore);
+      expect(fs.existsSync(feature)).toBe(!cleanup);
+      await expect(page.locator('.sidebar-item.worktree-child')).toHaveCount(cleanup ? 0 : 1);
+      await expect(page.locator('.project-notice-banner')).toContainText('repo-feature (detached)');
+    });
+  }
+
 });

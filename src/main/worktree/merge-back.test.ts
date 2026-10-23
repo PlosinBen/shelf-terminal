@@ -167,3 +167,31 @@ describe('mergeBackFastForward', () => {
     expect(res.outcome).toBe('error');
   });
 });
+
+it.each(['main', 'integration'])('merges the detached source commit into %s', async (target) => {
+  await git(feature, 'checkout --detach');
+  await commit(feature, 'detached.txt', 'detached');
+  if (target !== 'main') await git(base, `branch ${target}`);
+  const source = await tip(feature, 'HEAD');
+  const result = await mergeBackFastForward({ connector, featureCwd: feature, baseCwd: base, baseBranch: target, featureBranch: '', sourceCommit: source });
+  expect(result.outcome).toBe('merged');
+  expect(await tip(base, target)).toBe(source);
+});
+
+it('rejects a detached source that diverged from target', async () => {
+  await git(feature, 'checkout --detach');
+  await commit(base, 'advanced.txt', 'advanced');
+  const before = await tip(base, 'main');
+  const result = await mergeBackFastForward({ connector, featureCwd: feature, baseCwd: base, baseBranch: 'main', featureBranch: '', sourceCommit: await tip(feature, 'HEAD') });
+  expect(result.outcome).toBe('non-ff');
+  expect(await tip(base, 'main')).toBe(before);
+});
+it('rejects a changed source before moving the target', async () => {
+  const source = await tip(feature, 'HEAD');
+  const before = await tip(base, 'main');
+  await commit(feature, 'later.txt', 'later');
+  const result = await mergeBackFastForward({ connector, featureCwd: feature, baseCwd: base, baseBranch: 'main', featureBranch: 'feature', sourceCommit: source });
+  expect(result.outcome).toBe('error');
+  expect(result.error).toContain('HEAD changed');
+  expect(await tip(base, 'main')).toBe(before);
+});

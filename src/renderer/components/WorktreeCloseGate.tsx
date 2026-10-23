@@ -78,7 +78,7 @@ export function WorktreeCloseGate() {
           .branchList(par.connection, par.cwd)
           .then((found) => {
             setBranches(found.filter((b) => b.name !== proj.worktreeBranch));
-            if (base && !found.some((b) => b.name === base) && found.length > 0) {
+            if ((!base || !found.some((b) => b.name === base)) && found.length > 0) {
               setTarget(found[0].name);
             }
           })
@@ -145,12 +145,14 @@ export function WorktreeCloseGate() {
     const parentConn = parent.connection;
     const parentCwd = parent.cwd;
     const featureCwd = sub.cwd;
-    const featureBranch = sub.worktreeBranch ?? '';
+    const source = await window.shelfApi.worktree.source(sub.id);
+    const featureBranch = source.branch ?? '';
+    const sourceLabel = source.branch ?? projectDisplayLabel({ ...sub, worktreeBranch: null });
     const notifyFinishCompleted = (worktreeRemoved: boolean) => {
       emit(Events.WORKTREE_FINISH_COMPLETED, {
         subProjectId: state.subProjectId,
         parentProjectId: parent.id,
-        featureBranch,
+        sourceLabel,
         targetBranch: target,
         worktreeRemoved,
       });
@@ -164,6 +166,7 @@ export function WorktreeCloseGate() {
         baseCwd: parentCwd,
         baseBranch: target,
         featureBranch,
+        sourceCommit: source.commit,
       });
       if (mb.outcome !== 'merged') {
         // busy / non-ff / feature-dirty / base-dirty / error → show it; DON'T
@@ -220,6 +223,11 @@ export function WorktreeCloseGate() {
       }
     }
 
+    const currentSource = await window.shelfApi.worktree.source(sub.id);
+    if (currentSource.commit !== source.commit || currentSource.branch !== source.branch ||
+        currentSource.identity.gitDir !== source.identity.gitDir || currentSource.identity.commonDir !== source.identity.commonDir) {
+      throw new Error('Worktree changed after merge; cleanup stopped. Rescan and retry.');
+    }
     // Teardown: remove the worktree dir, then delete the (now unchecked-out) branch.
     const rm = await window.shelfApi.git.worktreeRemove(parentConn, parentCwd, featureCwd);
     if (!rm.ok) {

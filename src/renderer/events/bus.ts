@@ -41,7 +41,7 @@ export const Events = {
   CREATE_WORKTREE: 'create-worktree', // (projectId, prefill?: { branch?, notePaths? })
   WORKTREE_RESCAN: 'worktree-rescan',
   WORKTREE_CLOSE: 'worktree-close',   // (projectId, kind: 'finish' | 'abandon')
-  WORKTREE_FINISH_COMPLETED: 'worktree-finish-completed', // ({ subProjectId, parentProjectId, featureBranch, targetBranch, worktreeRemoved })
+  WORKTREE_FINISH_COMPLETED: 'worktree-finish-completed', // ({ subProjectId, parentProjectId, sourceLabel, targetBranch, worktreeRemoved })
   OPEN_PM: 'open-pm',                 // ()
   NEW_AGENT_TAB: 'new-agent-tab',     // (projectId, provider)
   NEW_WEB_TAB: 'new-web-tab',         // (projectId, url?) — url pre-navigates the tab

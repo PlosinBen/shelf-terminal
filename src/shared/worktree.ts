@@ -18,3 +18,9 @@ export function worktreeLabel(project: { cwd: string; worktreeBranch?: string | 
 export type WorktreeScanResult =
   | { outcome: typeof WorktreeScanOutcome.APPLIED; projects: readonly import('./projects').Project[] }
   | { outcome: typeof WorktreeScanOutcome.SKIPPED | typeof WorktreeScanOutcome.STALE };
+
+export interface WorktreeSource {
+  readonly commit: string;
+  readonly branch: string | null;
+  readonly identity: WorktreeIdentity;
+}

@@ -39,6 +39,7 @@ export interface MergeBackParams {
   baseBranch: string;
   /** The feature branch being merged back and later deleted. */
   featureBranch: string;
+  sourceCommit?: string;
 }
 
 export type MergeBackOutcome =
@@ -85,11 +86,20 @@ export async function mergeBackFastForward(params: MergeBackParams): Promise<Mer
     return { outcome: 'error', error: err?.message ?? String(err) };
   }
 
+  let sourceCommit: string;
+  try {
+    sourceCommit = (await connector.exec(featureCwd, 'git rev-parse --verify HEAD')).stdout.trim();
+    if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(sourceCommit)) throw new Error('Invalid source HEAD commit');
+    if (params.sourceCommit && params.sourceCommit !== sourceCommit) throw new Error('Worktree HEAD changed before merge; retry Finish');
+  } catch (error) {
+    return { outcome: 'error', error: String(error) };
+  }
+
   // Topology (a): push the feature tip onto baseBranch. Works when baseBranch is
   // a free (not checked-out) ref; push rejects non-ff for us.
   const pushCmd = `git push . HEAD:${baseBranch}`;
   try {
-    await connector.exec(featureCwd, `git push . ${q(`HEAD:${baseBranch}`)}`);
+    await connector.exec(featureCwd, `git push . ${q(`${sourceCommit}:refs/heads/${baseBranch}`)}`);
     return { outcome: 'merged' };
   } catch (err: any) {
     const msg = (err?.message ?? String(err)).trim();
@@ -133,9 +143,9 @@ export async function mergeBackFastForward(params: MergeBackParams): Promise<Mer
     return { outcome: 'error', error: err?.message ?? String(err) };
   }
 
-  const mergeCmd = `git merge --ff-only ${featureBranch}`;
+  const mergeCmd = `git merge --ff-only ${sourceCommit}`;
   try {
-    await connector.exec(baseCwd, `git merge --ff-only ${q(featureBranch)}`);
+    await connector.exec(baseCwd, `git merge --ff-only ${q(sourceCommit)}`);
     return { outcome: 'merged' };
   } catch (err: any) {
     const msg = (err?.message ?? String(err)).trim();

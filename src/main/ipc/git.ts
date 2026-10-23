@@ -208,7 +208,7 @@ export function registerGitHandlers(): void {
     IPC.WORKTREE_FINISH_MERGE_BACK,
     async (
       _event,
-      payload: { connection: Connection; featureCwd: string; baseCwd: string; baseBranch: string; featureBranch: string },
+      payload: { connection: Connection; featureCwd: string; baseCwd: string; baseBranch: string; featureBranch: string; sourceCommit?: string },
     ): Promise<FinishMergeBackResult> => {
       // The repo lock wraps ONLY the "check main → ff" step: once the ff lands,
       // baseBranch has advanced and the subsequent teardown/branch-delete (this
@@ -225,6 +225,7 @@ export function registerGitHandlers(): void {
           baseCwd: payload.baseCwd,
           baseBranch: payload.baseBranch,
           featureBranch: payload.featureBranch,
+          sourceCommit: payload.sourceCommit,
         });
       } finally {
         release();
