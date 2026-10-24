@@ -1,18 +1,32 @@
 import * as pty from 'node-pty';
-import { execFile } from 'child_process';
+import { execFile, spawn } from 'child_process';
 import os from 'os';
 import type { FolderListResult } from '@shared/types';
 import { log } from '@shared/logger';
-import type { Connector, Shell, ExecResult } from './types';
+import type { Connector, Shell, ExecResult, ProcessRequest } from './types';
+import { copyWithCommand, resolvePosixHome, remoteProcessCommand, toWslPath } from './process';
 import { wrapPty } from './wrap-pty';
 import { shellEscape } from './shell-env';
 import { buildEnvExportPrefix } from '@shared/project-env';
 import {
-  assertSafeCwd, parseUploadPrefix, remoteUploadFile, buildRemotePutCmd,
+  assertSafeCwd, parseUploadPrefix, remoteUploadFile, buildRemotePutCmd, shellSingleQuote,
   spawnPipeWrite, listRemoteShelfDir, removeRemoteFiles, sizeRemoteShelfDir,
 } from './file-utils';
 
 export class WSLConnector implements Connector {
+  resolveHomePath(): Promise<string> {
+    return resolvePosixHome(() => this.exec('/', 'printf "%s\\n" "$HOME"'), `WSL ${this.distro}`);
+  }
+
+  copyFile(localPath: string, targetPath: string): Promise<void> {
+    const cmd = `cp ${shellSingleQuote(toWslPath(localPath))} ${shellSingleQuote(targetPath)}`;
+    return copyWithCommand('wsl.exe', this.wslExecArgs(cmd), `WSL ${this.distro} copyFile`);
+  }
+
+  spawnProcess(request: ProcessRequest) {
+    return spawn('wsl.exe', ['-d', this.distro, '--', 'sh', '-lc', remoteProcessCommand(request)], { stdio: ['pipe', 'pipe', 'pipe'] });
+  }
+
   constructor(private distro: string) {}
 
   private wslExecArgs(cmd: string): string[] {

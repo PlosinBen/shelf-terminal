@@ -10,6 +10,9 @@ import { toConnectorConfig } from './config';
 
 function runtimeWithExec(exec: (cwd: string, cmd: string) => Promise<ExecResult>): ConnectorRuntime {
   const connector: Connector = {
+    resolveHomePath: () => Promise.resolve('/home/test'),
+    copyFile: () => Promise.resolve(),
+    spawnProcess: () => { throw new Error('Unexpected process spawn in test'); },
     createShell: () => ({
       onData: () => ({ dispose() {} }), onExit: () => ({ dispose() {} }),
       write() {}, resize() {}, kill() {},

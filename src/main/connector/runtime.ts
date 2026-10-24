@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto';
 import type { FolderListResult } from '@shared/types';
 import type { ConnectorConfig } from './config';
-import type { Connector, ExecResult, Shell } from './types';
+import type { Connector, ExecResult, Shell, ProcessRequest } from './types';
 import {
   TERMINAL_LAUNCH_KIND,
   type TerminalLaunchPlan,
@@ -86,6 +86,18 @@ export class ConnectorRuntime implements Connector {
       throw new Error(`Connector runtime ${this.generation.id} has no terminal plan adapter`);
     }
     return this.terminalAdapter;
+  }
+
+  resolveHomePath(): Promise<string> {
+    return this.connector.resolveHomePath();
+  }
+
+  copyFile(localPath: string, targetPath: string): Promise<void> {
+    return this.connector.copyFile(localPath, targetPath);
+  }
+
+  spawnProcess(request: ProcessRequest) {
+    return this.connector.spawnProcess(request);
   }
 
   isConnected(): Promise<boolean> {

@@ -1,9 +1,10 @@
 import * as pty from 'node-pty';
-import { execFile } from 'child_process';
+import { execFile, spawn } from 'child_process';
 import os from 'os';
 import type { FolderListResult } from '@shared/types';
 import { log } from '@shared/logger';
-import type { Connector, Shell, ExecResult } from './types';
+import type { Connector, Shell, ExecResult, ProcessRequest } from './types';
+import { copyWithCommand, resolvePosixHome, remoteProcessCommand } from './process';
 import { wrapPty } from './wrap-pty';
 import { getShellEnv, shellEscape } from './shell-env';
 import { buildEnvExportPrefix } from '@shared/project-env';
@@ -14,6 +15,18 @@ import {
 
 
 export class DockerConnector implements Connector {
+  resolveHomePath(): Promise<string> {
+    return resolvePosixHome(() => this.exec('/', 'printf "%s\\n" "$HOME"'), `Docker ${this.container}`);
+  }
+
+  copyFile(localPath: string, targetPath: string): Promise<void> {
+    return copyWithCommand('docker', ['cp', localPath, `${this.container}:${targetPath}`], `Docker ${this.container} copyFile`);
+  }
+
+  spawnProcess(request: ProcessRequest) {
+    return spawn('docker', ['exec', '-i', this.container, 'sh', '-c', remoteProcessCommand(request)], { stdio: ['pipe', 'pipe', 'pipe'] });
+  }
+
   constructor(private container: string) {}
 
   private dockerExecArgs(cmd: string): string[] {

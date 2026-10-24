@@ -5,7 +5,8 @@ import path from 'path';
 import os from 'os';
 import type { FolderListResult } from '@shared/types';
 import { log } from '@shared/logger';
-import type { Connector, Shell, ExecResult } from '../types';
+import type { Connector, Shell, ExecResult, ProcessRequest } from '../types';
+import { spawnLocalProcess } from '../process';
 import { wrapPty } from '../wrap-pty';
 import { applyEnvMap } from '@shared/project-env';
 import {
@@ -14,6 +15,18 @@ import {
 } from '../file-utils';
 
 export class LocalWin32Connector implements Connector {
+  resolveHomePath(): Promise<string> {
+    return Promise.resolve(os.homedir());
+  }
+
+  copyFile(localPath: string, targetPath: string): Promise<void> {
+    return fs.promises.copyFile(localPath, targetPath);
+  }
+
+  spawnProcess(request: ProcessRequest) {
+    return spawnLocalProcess(request);
+  }
+
   createShell(cwd: string, env?: Record<string, string>, requiredEnv?: Record<string, string>): Shell {
     const resolvedCwd = fs.existsSync(cwd) ? cwd : os.homedir();
     log.info('connector', `local/win32 spawn: shell=powershell.exe cwd=${resolvedCwd}`);

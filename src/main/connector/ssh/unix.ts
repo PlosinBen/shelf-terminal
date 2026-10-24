@@ -1,13 +1,15 @@
 import * as pty from 'node-pty';
-import { execFile } from 'child_process';
+import { execFile, spawn } from 'child_process';
+import { sshConnectionOptions } from './options';
 import os from 'os';
 import type { FolderListResult } from '@shared/types';
 import { log } from '@shared/logger';
-import type { Connector, Shell, ExecResult } from '../types';
+import type { Connector, Shell, ExecResult, ProcessRequest } from '../types';
+import { copyWithCommand, resolvePosixHome, remoteProcessCommand } from '../process';
 import { wrapPty } from '../wrap-pty';
 import { getShellEnv, shellEscape } from '../shell-env';
 import { buildEnvExportPrefix } from '@shared/project-env';
-import { getControlPath, checkConnection, getKnownHostsPath } from '../../ssh-control';
+import { checkConnection } from '../../ssh-control';
 import {
   assertSafeCwd, parseUploadPrefix, normalizeCwd, REL_DIR,
   shellSingleQuote, remoteUploadFile, buildRemotePutCmd, spawnPipeWrite,
@@ -15,41 +17,35 @@ import {
 } from '../file-utils';
 
 export class SSHUnixConnector implements Connector {
+  resolveHomePath(): Promise<string> {
+    return resolvePosixHome(() => this.exec('/', 'printf "%s\\n" "$HOME"'), `SSH ${this.user}@${this.host}:${this.port}`);
+  }
+
+  copyFile(localPath: string, targetPath: string): Promise<void> {
+    return copyWithCommand('scp', [
+      ...sshConnectionOptions(this.host, this.port, this.user, true, true),
+      localPath, `${this.user}@${this.host}:${targetPath}`,
+    ], `SSH ${this.user}@${this.host}:${this.port} copyFile`);
+  }
+
+  spawnProcess(request: ProcessRequest) {
+    return spawn('ssh', this.sshArgs([remoteProcessCommand(request)]), { stdio: ['pipe', 'pipe', 'pipe'] });
+  }
+
   constructor(
     private host: string,
     private port: number,
     private user: string,
   ) {}
 
-  private get controlPath(): string {
-    return getControlPath(this.host, this.port, this.user);
-  }
-
   private sshArgs(extraArgs: string[]): string[] {
-    return [
-      '-o', 'ControlMaster=auto',
-      '-o', `ControlPath=${this.controlPath}`,
-      '-o', 'ControlPersist=600',
-      '-o', 'StrictHostKeyChecking=accept-new',
-      '-o', `UserKnownHostsFile="${getKnownHostsPath()}"`,
-      '-o', 'ServerAliveInterval=30',
-      '-p', String(this.port),
-      `${this.user}@${this.host}`,
-      ...extraArgs,
-    ];
+    return [...sshConnectionOptions(this.host, this.port, this.user, true),
+      '-o', 'ServerAliveInterval=30', `${this.user}@${this.host}`, ...extraArgs];
   }
 
   private sshExecArgs(extraArgs: string[]): string[] {
-    return [
-      '-o', 'ControlMaster=auto',
-      '-o', `ControlPath=${this.controlPath}`,
-      '-o', 'ControlPersist=600',
-      '-o', `UserKnownHostsFile="${getKnownHostsPath()}"`,
-      '-o', 'ConnectTimeout=5',
-      '-p', String(this.port),
-      `${this.user}@${this.host}`,
-      ...extraArgs,
-    ];
+    return [...sshConnectionOptions(this.host, this.port, this.user, true),
+      '-o', 'ConnectTimeout=5', `${this.user}@${this.host}`, ...extraArgs];
   }
 
   createShell(cwd: string, env?: Record<string, string>, requiredEnv?: Record<string, string>): Shell {
@@ -86,12 +82,7 @@ export class SSHUnixConnector implements Connector {
 
     return new Promise((resolve, reject) => {
       const p = pty.spawn('ssh', [
-        '-o', 'ControlMaster=auto',
-        '-o', `ControlPath=${this.controlPath}`,
-        '-o', 'ControlPersist=600',
-        '-o', 'StrictHostKeyChecking=accept-new',
-        '-o', `UserKnownHostsFile="${getKnownHostsPath()}"`,
-        '-p', String(this.port),
+        ...sshConnectionOptions(this.host, this.port, this.user, true),
         `${this.user}@${this.host}`,
         'echo __SHELF_AUTH_OK__',
       ], {

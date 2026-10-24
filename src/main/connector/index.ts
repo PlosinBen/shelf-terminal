@@ -8,7 +8,7 @@ import { ConnectorRuntimeOwner } from './runtime-owner';
 import type { ConnectorRuntime } from './runtime';
 
 // Re-export types for consumers
-export type { Connector, Shell, Disposable, ExecResult } from './types';
+export type { Connector, Shell, Disposable, ExecResult, ProcessRequest } from './types';
 export type { ConnectorConfig, ConnectorType } from './config';
 export type { RuntimeGeneration } from './runtime';
 export type { TerminalLaunchPlan, TerminalLaunchKind } from './launch-plan';

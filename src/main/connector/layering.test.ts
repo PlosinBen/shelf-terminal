@@ -12,6 +12,9 @@ vi.mock('../ssh-control', () => ({
 
 function stubConnector(): Connector {
   return {
+    resolveHomePath: () => Promise.resolve('/home/test'),
+    copyFile: () => Promise.resolve(),
+    spawnProcess: () => { throw new Error('Unexpected process spawn in test'); },
     createShell: () => ({
       onData: () => ({ dispose() {} }),
       onExit: () => ({ dispose() {} }),

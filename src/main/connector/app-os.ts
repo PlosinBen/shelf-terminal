@@ -20,7 +20,7 @@ import { wrapPty } from './wrap-pty';
 import { getShellEnv, resolveShell, shellEscape } from './shell-env';
 import { applyEnvMap, buildEnvExportPrefix } from '@shared/project-env';
 import { shellSingleQuote } from './file-utils';
-import { getControlPath, getKnownHostsPath } from '../ssh-control';
+import { sshConnectionOptions } from './ssh/options';
 import { log } from '@shared/logger';
 
 export type ConnectorAdapterFactory = (config: ConnectorConfig) => Connector;
@@ -198,23 +198,13 @@ function materializeSSH(
   request: TerminalLaunchRequest,
   controlMaster: boolean,
 ): TerminalLaunchPlan {
-  const options = controlMaster
-    ? [
-      '-o', 'ControlMaster=auto',
-      '-o', `ControlPath=${getControlPath(config.host, config.port, config.user)}`,
-      '-o', 'ControlPersist=600',
-    ]
-    : [];
   const command = targetCommand(request, '$SHELL -l');
   return freezeTerminalLaunchPlan({
     kind: request.kind,
     executable: 'ssh',
     args: [
-      ...options,
-      '-o', 'StrictHostKeyChecking=accept-new',
-      '-o', `UserKnownHostsFile="${getKnownHostsPath()}"`,
+      ...sshConnectionOptions(config.host, config.port, config.user, controlMaster),
       '-o', 'ServerAliveInterval=30',
-      '-p', String(config.port),
       `${config.user}@${config.host}`,
       '-t', command,
     ],

@@ -1,4 +1,17 @@
 import type { FolderListResult } from '@shared/types';
+import type { ChildProcessWithoutNullStreams } from 'child_process';
+import type { EnvMap } from '@shared/project-env';
+
+/** An ordinary target process, not an interactive terminal or an SSH session. */
+export interface ProcessRequest {
+  executable: string;
+  args: readonly string[];
+  cwd?: string;
+  env?: EnvMap;
+  requiredEnv?: EnvMap;
+  /** Remote POSIX shell setup, before cwd/env/exec; local launches execute directly. */
+  initScript?: string;
+}
 
 export interface Disposable {
   dispose(): void;
@@ -19,6 +32,12 @@ export interface ExecResult {
 }
 
 export interface Connector {
+  /** Strict home lookup for writes: rejects instead of returning picker fallbacks. */
+  resolveHomePath(): Promise<string>;
+  /** Copy a local file to an absolute target path; caller creates the parent directory. */
+  copyFile(localPath: string, targetPath: string): Promise<void>;
+  /** Pipe stdio with native process error/exit events; caller owns process lifetime. */
+  spawnProcess(request: ProcessRequest): ChildProcessWithoutNullStreams;
   // ── Shell ──
   /**
    * Spawn an interactive shell. `env` is the project-level env map (plain, later

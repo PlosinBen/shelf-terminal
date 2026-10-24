@@ -1,13 +1,14 @@
 import * as pty from 'node-pty';
-import { execFile } from 'child_process';
+import { execFile, spawn } from 'child_process';
+import { sshConnectionOptions } from './options';
 import os from 'os';
 import type { FolderListResult } from '@shared/types';
 import { log } from '@shared/logger';
-import type { Connector, Shell, ExecResult } from '../types';
+import type { Connector, Shell, ExecResult, ProcessRequest } from '../types';
+import { copyWithCommand, resolvePosixHome, remoteProcessCommand } from '../process';
 import { wrapPty } from '../wrap-pty';
 import { shellEscape } from '../shell-env';
 import { buildEnvExportPrefix } from '@shared/project-env';
-import { getKnownHostsPath } from '../../ssh-control';
 import {
   assertSafeCwd, parseUploadPrefix, remoteUploadFile, buildRemotePutCmd,
   spawnPipeWrite, listRemoteShelfDir, removeRemoteFiles, sizeRemoteShelfDir,
@@ -18,6 +19,21 @@ import {
  * Each operation opens an independent SSH connection.
  */
 export class SSHWin32Connector implements Connector {
+  resolveHomePath(): Promise<string> {
+    return resolvePosixHome(() => this.exec('/', 'printf "%s\\n" "$HOME"'), `SSH ${this.user}@${this.host}:${this.port}`);
+  }
+
+  copyFile(localPath: string, targetPath: string): Promise<void> {
+    return copyWithCommand('scp', [
+      ...sshConnectionOptions(this.host, this.port, this.user, false, true),
+      localPath, `${this.user}@${this.host}:${targetPath}`,
+    ], `SSH ${this.user}@${this.host}:${this.port} copyFile`);
+  }
+
+  spawnProcess(request: ProcessRequest) {
+    return spawn('ssh', this.sshArgs([remoteProcessCommand(request)]), { stdio: ['pipe', 'pipe', 'pipe'] });
+  }
+
   constructor(
     private host: string,
     private port: number,
@@ -25,24 +41,13 @@ export class SSHWin32Connector implements Connector {
   ) {}
 
   private sshArgs(extraArgs: string[]): string[] {
-    return [
-      '-o', 'StrictHostKeyChecking=accept-new',
-      '-o', `UserKnownHostsFile="${getKnownHostsPath()}"`,
-      '-o', 'ServerAliveInterval=30',
-      '-p', String(this.port),
-      `${this.user}@${this.host}`,
-      ...extraArgs,
-    ];
+    return [...sshConnectionOptions(this.host, this.port, this.user, false),
+      '-o', 'ServerAliveInterval=30', `${this.user}@${this.host}`, ...extraArgs];
   }
 
   private sshExecArgs(extraArgs: string[]): string[] {
-    return [
-      '-o', `UserKnownHostsFile="${getKnownHostsPath()}"`,
-      '-o', 'ConnectTimeout=5',
-      '-p', String(this.port),
-      `${this.user}@${this.host}`,
-      ...extraArgs,
-    ];
+    return [...sshConnectionOptions(this.host, this.port, this.user, false),
+      '-o', 'ConnectTimeout=5', `${this.user}@${this.host}`, ...extraArgs];
   }
 
   createShell(cwd: string, env?: Record<string, string>, requiredEnv?: Record<string, string>): Shell {
@@ -81,9 +86,7 @@ export class SSHWin32Connector implements Connector {
 
     return new Promise((resolve, reject) => {
       const p = pty.spawn('ssh', [
-        '-o', 'StrictHostKeyChecking=accept-new',
-        '-o', `UserKnownHostsFile="${getKnownHostsPath()}"`,
-        '-p', String(this.port),
+        ...sshConnectionOptions(this.host, this.port, this.user, false),
         `${this.user}@${this.host}`,
         'echo __SHELF_AUTH_OK__',
       ], {

@@ -7,6 +7,9 @@ import {
 
 function connector(overrides: Partial<Connector> = {}): Connector {
   return {
+    resolveHomePath: () => Promise.resolve('/home/test'),
+    copyFile: () => Promise.resolve(),
+    spawnProcess: () => { throw new Error('Unexpected process spawn in test'); },
     createShell: vi.fn() as never,
     isConnected: vi.fn() as never,
     connect: vi.fn() as never,
