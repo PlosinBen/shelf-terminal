@@ -37,7 +37,12 @@ export default defineConfig({
       testMatch: 'agent-deploy*.spec.ts',
       // WSL has its own project (Windows-host-only); keep it out of the
       // docker-backed agent-deploy run so non-Windows CI stays green.
-      testIgnore: 'agent-deploy-wsl.spec.ts',
+      testIgnore: ['agent-deploy-wsl.spec.ts', 'agent-deploy-ssh.spec.ts'],
+    },
+    {
+      name: 'agent-deploy-ssh',
+      testDir: './e2e/connector',
+      testMatch: 'agent-deploy-ssh.spec.ts',
     },
     {
       // Windows-host-only: targets a pre-installed WSL distro via wsl.exe (no
