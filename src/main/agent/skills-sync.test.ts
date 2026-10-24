@@ -1,30 +1,29 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 /**
- * Regression for the ssh tilde bug (transport-integration): sshOps used
+ * Regression for the SSH tilde bug: deployment previously used
  * `base:'~'`, but syncSkillsToRemote's exec-built control commands embed the base
  * inside DOUBLE quotes (`mkdir -p "<base>/.shelf/..."`), where POSIX sh does NOT
  * expand `~` — so they targeted a literal `$HOME/~/...` junk dir while the files
  * (now via the transport) went to the real absolute home. The fix resolves an
- * absolute `$HOME` for sshOps up front. This test drives syncSkillsForConnection
+ * absolute `$HOME` through the connector before syncing. This test drives syncSkillsForConnection
  * over ssh and asserts the control commands use the ABSOLUTE home, never `~`.
  */
 
 const HOME = '/home/testuser';
 
-// Capture every execSync command string; answer `echo "$HOME"` with an absolute
-// home and everything else (cat/.synced, rm/mkdir, printf/.heartbeat) with ''.
+// Capture target commands after the connector's authoritative home lookup.
 const execCalls: string[] = [];
-const execSync = vi.fn((cmd: string, _opts?: unknown) => {
+const connectorExec = vi.fn(async (_cwd: string, cmd: string) => {
   execCalls.push(cmd);
-  return cmd.includes('echo "$HOME"') ? `${HOME}\n` : '';
+  return { stdout: '', stderr: '' };
 });
-
-vi.mock('child_process', () => ({
-  execSync: (cmd: string, opts?: unknown) => execSync(cmd, opts),
-  spawn: vi.fn(),
-  execFileSync: vi.fn(),
-  ChildProcess: class {},
+const resolveHomePath = vi.fn(async () => HOME);
+vi.mock('../connector', () => ({
+  createConnector: () => ({
+    resolveHomePath: () => resolveHomePath(),
+    exec: (cwd: string, cmd: string) => connectorExec(cwd, cmd),
+  }),
 }));
 vi.mock('fs', () => ({
   existsSync: () => true,
@@ -52,7 +51,8 @@ vi.mock('../connector/transport', () => ({
 describe('syncSkillsForConnection (ssh) — absolute home, no tilde', () => {
   beforeEach(() => {
     execCalls.length = 0;
-    execSync.mockClear();
+    connectorExec.mockClear();
+    resolveHomePath.mockClear();
     transportPutDir.mockClear();
   });
 
@@ -60,8 +60,8 @@ describe('syncSkillsForConnection (ssh) — absolute home, no tilde', () => {
     const { syncSkillsForConnection } = await import('./remote');
     await syncSkillsForConnection({ type: 'ssh', host: 'h', port: 22, user: 'testuser' } as any);
 
-    // sshOps resolves the absolute home first.
-    expect(execCalls.some((c) => c.includes('echo "$HOME"'))).toBe(true);
+    expect(resolveHomePath).toHaveBeenCalledTimes(1);
+    expect(resolveHomePath.mock.invocationCallOrder[0]).toBeLessThan(connectorExec.mock.invocationCallOrder[0]);
 
     const target = `${HOME}/.shelf/apps/app-xyz/skills`;
     const mkdir = execCalls.find((c) => c.includes('mkdir -p') && c.includes('.shelf/apps'));

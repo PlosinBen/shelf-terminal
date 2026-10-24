@@ -83,24 +83,6 @@ function capabilitiesChild(
   return { child, writes };
 }
 
-describe('toWslPath', () => {
-  it('converts Windows drive paths to WSL mount paths', async () => {
-    const { toWslPath } = await import('./remote');
-    expect(toWslPath('C:\\Users\\ben\\app\\resources\\agent-server\\1.2.3\\index.mjs'))
-      .toBe('/mnt/c/Users/ben/app/resources/agent-server/1.2.3/index.mjs');
-  });
-
-  it('handles lowercase drive letters', async () => {
-    const { toWslPath } = await import('./remote');
-    expect(toWslPath('c:\\foo\\bar')).toBe('/mnt/c/foo/bar');
-  });
-
-  it('handles other drive letters', async () => {
-    const { toWslPath } = await import('./remote');
-    expect(toWslPath('D:\\Program Files\\Shelf')).toBe('/mnt/d/Program Files/Shelf');
-  });
-});
-
 describe('localNodeExec — local runs on Electron embedded Node (regression)', () => {
   it('uses process.execPath, not a system "node"', async () => {
     const { localNodeExec } = await import('./remote');
@@ -174,27 +156,6 @@ describe('local process.execPath spawns carry ELECTRON_RUN_AS_NODE (regression: 
     expect(bin).toBe(process.execPath);
     expect(args).toEqual(['/bundle/index.mjs', '--role=dispatcher']);
     expect(opts.env.ELECTRON_RUN_AS_NODE).toBe('1');
-  });
-});
-
-describe('sshDeployOptStrings — ssh -p vs scp -P (regression)', () => {
-  // Regression: the deploy reused one opts string with `-p <port>` for BOTH ssh
-  // and scp. scp's port flag is `-P` (capital) — `-p` means preserve-times, so
-  // scp swallowed the port as a source operand ("scp: stat local 2222: No such
-  // file") → ssh agent deploy broke on any non-default port (found via a real
-  // ssh-container agent-deploy run, which had no automated coverage before).
-  it('uses lowercase -p for ssh and uppercase -P for scp', async () => {
-    const { sshDeployOptStrings } = await import('./remote');
-    const { ssh, scp } = sshDeployOptStrings({ host: 'h', port: 2222, user: 'u' });
-    expect(ssh).toContain(`'-p' '2222'`);
-    expect(ssh).not.toContain(`'-P'`);
-    expect(scp).toContain(`'-P' '2222'`);
-    expect(scp).not.toContain(`'-p'`);
-    // Both still carry the shared ControlMaster opts.
-    for (const s of [ssh, scp]) {
-      expect(s).toContain(`'ControlMaster=auto'`);
-      expect(s).toContain(`'ControlPath=/tmp/shelf-ssh-h-2222-u'`);
-    }
   });
 });
 

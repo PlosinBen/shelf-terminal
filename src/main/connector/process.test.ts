@@ -111,3 +111,21 @@ it('remote process quotes arguments, applies init before env, and preserves targ
   expect(command.indexOf('EXTRA=init')).toBeLessThan(command.indexOf("EXTRA='project'"));
   expect(command).toContain("export SHELF_TEST_MODE='1'");
 });
+
+describe('toWslPath', () => {
+  it('converts Windows drive paths to WSL mount paths', async () => {
+    const { toWslPath } = await import('./process');
+    expect(toWslPath('C:\\Users\\ben\\app\\resources\\agent-server\\1.2.3\\index.mjs'))
+      .toBe('/mnt/c/Users/ben/app/resources/agent-server/1.2.3/index.mjs');
+  });
+
+  it('handles lowercase drive letters', async () => {
+    const { toWslPath } = await import('./process');
+    expect(toWslPath('c:\\foo\\bar')).toBe('/mnt/c/foo/bar');
+  });
+
+  it('handles other drive letters', async () => {
+    const { toWslPath } = await import('./process');
+    expect(toWslPath('D:\\Program Files\\Shelf')).toBe('/mnt/d/Program Files/Shelf');
+  });
+});

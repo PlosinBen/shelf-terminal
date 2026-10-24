@@ -4,14 +4,15 @@ import { SHELF_PERMISSION_CONTROL } from '@shared/permission-controls';
 import type { AgentPrefs, Connection, AgentProvider, AgentInitPhase, AgentQueueItem, ProviderModel, TaskEvent, ConnectionHealth, ConnectionHealthState } from '@shared/types';
 import type { AgentBackend, AgentEvent, AgentQueryOptions, PickerResolvePayload } from './types';
 import { ConnectionHealthTracker, DEFAULT_HEALTH_THRESHOLDS } from './connection-health';
-import { ChildProcess, spawn, execSync, execFileSync } from 'child_process';
+import type { ChildProcess } from 'child_process';
+import { createConnector, type ProcessRequest } from '../connector';
 import { randomUUID } from 'crypto';
 import { app } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
-import { getShellEnv } from '../connector/shell-env';
+import { shellSingleQuote } from '../connector/file-utils';
 import { resolveProjectEnv } from '../project-env';
-import { buildEnvExportPrefix, applyEnvMap, type EnvMap } from '@shared/project-env';
+import type { EnvMap } from '@shared/project-env';
 import { createExecutionDispatcher, type PermissionHandler } from './execution-dispatcher';
 import { createDispatcherConnection, type DispatcherConnection, type DispatcherProc } from './dispatcher-connection';
 import { getAppInstanceId } from '../app-instance-id';
@@ -466,12 +467,6 @@ export function createRemoteBackend(
   return backend;
 }
 
-export function toWslPath(winPath: string): string {
-  return winPath
-    .replace(/^([A-Za-z]):\\/, (_, drive: string) => `/mnt/${drive.toLowerCase()}/`)
-    .replace(/\\/g, '/');
-}
-
 function getAppVersion(): string {
   return JSON.parse(fs.readFileSync(path.join(app.getAppPath(), 'package.json'), 'utf-8')).version;
 }
@@ -502,104 +497,25 @@ export function agentBundleMissingMessage(indexPath: string): string {
   return `Agent-server ${version} bundle not found at ${indexPath} — ${hint}`;
 }
 
-/**
- * Per-connection primitives for the self-contained deploy. `base` is the home
- * the deploy root hangs off (`~` expands in the remote shell for ssh; docker
- * has no per-user home shell so we use `/root`). `exec` runs a command on the
- * target and returns stdout; `copyIn` transfers a local file to the target.
- */
+/** Deployment sequencing stays here; every target operation belongs to the connector. */
 interface RemoteOps {
   base: string;
-  exec(cmd: string, timeoutMs?: number): string;
-  copyIn(localPath: string, remotePath: string, timeoutMs?: number): void;
+  exec(cmd: string): Promise<string>;
+  copyIn(localPath: string, remotePath: string): Promise<void>;
 }
 
-/** Single-quote a string for safe embedding inside an outer single-quoted shell arg. */
-function sq(s: string): string {
-  return s.replace(/'/g, `'\\''`);
-}
-
-/**
- * Build the quoted `ssh` and `scp` option strings for the deploy commands.
- * Shared ControlMaster opts + the port — but the port flag DIFFERS by tool:
- * `ssh -p <port>` vs `scp -P <port>`. `scp -p` means "preserve times" and would
- * swallow the port as a source operand (`scp: stat local "2222": No such file`),
- * breaking the deploy on any non-default port. Exported for a regression test.
- */
-export function sshDeployOptStrings(c: { host: string; port: number; user: string }): { ssh: string; scp: string } {
-  const base = ['-o', 'ControlMaster=auto', '-o', `ControlPath=/tmp/shelf-ssh-${c.host}-${c.port}-${c.user}`, '-o', 'ControlPersist=600'];
-  const quote = (arr: string[]) => arr.map((o) => `'${o}'`).join(' ');
+async function remoteOps(connection: Connection): Promise<RemoteOps> {
+  const connector = createConnector(connection);
+  const base = await connector.resolveHomePath();
   return {
-    ssh: quote([...base, '-p', String(c.port)]),
-    scp: quote([...base, '-P', String(c.port)]),
-  };
-}
-
-function sshOps(c: Extract<Connection, { type: 'ssh' }>): RemoteOps {
-  const target = `${c.user}@${c.host}`;
-  const { ssh: sshOptStr, scp: scpOptStr } = sshDeployOptStrings(c);
-  const exec = (cmd: string, t = 15000): string =>
-    execSync(`ssh ${sshOptStr} ${target} '${sq(cmd)}'`, { timeout: t, encoding: 'utf8' });
-  const copyIn = (local: string, remote: string, t = 180000): void => {
-    execSync(`scp ${scpOptStr} '${local}' ${target}:'${sq(remote)}'`, { timeout: t });
-  };
-  // Resolve an ABSOLUTE $HOME up front (mirroring wslOps), NOT `base:'~'`. The
-  // exec-built control commands embed the base inside DOUBLE quotes (e.g.
-  // `mkdir -p "<base>/.shelf/..."`), and a `~` inside double quotes does NOT
-  // expand in POSIX sh — it would target a literal `~` dir, diverging from the
-  // byte path (the connector resolves an absolute home via homePath()). scp gets
-  // away with `~` only because it expands it remotely; the exec cmds do not.
-  const home = exec('echo "$HOME"').trim();
-  if (!home) throw new Error(`SSH ${target}: could not resolve $HOME`);
-  return { base: home, exec, copyIn };
-}
-
-function dockerOps(c: Extract<Connection, { type: 'docker' }>): RemoteOps {
-  return {
-    base: '/root',
-    exec: (cmd, t = 15000) => execSync(`docker exec ${c.container} sh -c '${sq(cmd)}'`, { timeout: t, encoding: 'utf8' }),
-    copyIn: (local, remote, t = 180000) => {
-      execSync(`docker cp '${local}' ${c.container}:'${sq(remote)}'`, { timeout: t });
-    },
-  };
-}
-
-/**
- * WSL RemoteOps: a Linux distro reached via `wsl.exe`, so the self-contained
- * model (ship our own node + provider binary, exactly like ssh/docker) applies.
- *
- * Quoting note: unlike sshOps/dockerOps (which run as a single `execSync`
- * string), we invoke `wsl.exe` via `execFileSync` with an ARGV ARRAY. The host
- * shell on Windows is cmd.exe, which does NOT understand the POSIX single-quote
- * wrapping ssh/docker rely on — passing args as an array bypasses host-shell
- * parsing entirely (same approach as `spawnAgentServer`'s WSL branch). The inner
- * `sh -c <cmd>` still does normal POSIX quoting/`~` expansion inside the distro.
- *
- * copyIn reads the Windows-side cached file via /mnt (toWslPath) and `cp`s it
- * into the deploy root. The Claude binary is ~215MB; the /mnt bridge can be slow
- * — if it ever becomes a problem, switch to a native-fs transfer.
- *
- * `base` is an ABSOLUTE home, NOT `~`: deploy paths get single-quoted (e.g. the
- * remote arg in copyIn), and a tilde inside single quotes does NOT expand in
- * POSIX sh. ssh gets away with `~` because scp expands it on the remote; we
- * mirror dockerOps instead and resolve `$HOME` up front.
- */
-function wslOps(c: Extract<Connection, { type: 'wsl' }>): RemoteOps {
-  const run = (cmd: string, t: number): string =>
-    execFileSync('wsl.exe', ['-d', c.distro, '--', 'sh', '-c', cmd], { timeout: t, encoding: 'utf8' });
-  const home = run('echo "$HOME"', 15000).trim();
-  if (!home) throw new Error(`WSL distro ${c.distro}: could not resolve $HOME`);
-  return {
-    base: home,
-    exec: (cmd, t = 15000) => run(cmd, t),
-    copyIn: (local, remote, t = 180000) => {
-      run(`cp '${sq(toWslPath(local))}' '${sq(remote)}'`, t);
-    },
+    base,
+    exec: async (cmd) => (await connector.exec(base, cmd)).stdout,
+    copyIn: (localPath, remotePath) => connector.copyFile(localPath, remotePath),
   };
 }
 
 /** One round-trip: list which deploy files + sentinel already exist on the target. */
-function readRemoteInventory(ops: RemoteOps, root: string, expected: DeployFile[]): RemoteInventory {
+async function readRemoteInventory(ops: RemoteOps, root: string, expected: DeployFile[]): Promise<RemoteInventory> {
   // List the root and test membership — do NOT use a remote `for f in …; echo $f`
   // loop. Over WSL's `wsl.exe -- sh -c <cmd>` the loop variable comes back EMPTY
   // (`$f` expands to nothing), so every file looked absent and `needsDeploy` was
@@ -609,9 +525,9 @@ function readRemoteInventory(ops: RemoteOps, root: string, expected: DeployFile[
   // and make ops.exec throw).
   const nestedChecks = expected
     .filter((f) => f.includes('/'))
-    .map((f) => `test -f ${root}/${f} && printf '%s\\n' '${f}' || true`)
+    .map((f) => `test -f ${shellSingleQuote(`${root}/${f}`)} && printf '%s\\n' '${f}' || true`)
     .join('; ');
-  const out = ops.exec(`ls -a ${root} 2>/dev/null || true; ${nestedChecks}`);
+  const out = await ops.exec(`ls -a ${shellSingleQuote(root)} 2>/dev/null || true; ${nestedChecks}`);
   const present = new Set(out.split('\n').map((s) => s.trim()).filter(Boolean));
   const files: Partial<Record<DeployFile, boolean>> = {};
   for (const f of expected) files[f] = present.has(f);
@@ -625,7 +541,6 @@ function readRemoteInventory(ops: RemoteOps, root: string, expected: DeployFile[
  * written LAST so a half-finished transfer never looks complete.
  */
 async function deploySelfContained(
-  connection: Connection,
   ops: RemoteOps,
   providerBin: ProviderRuntimeBinding,
 ): Promise<DeployResult> {
@@ -633,14 +548,14 @@ async function deploySelfContained(
   const root = deployRoot(ops.base, version);
 
   // Probe arch+libc (throws UnsupportedTargetError on unknown arch/libc).
-  const target = detectTargetFromProbe(ops.exec(TARGET_PROBE_CMD));
+  const target = detectTargetFromProbe(await ops.exec(TARGET_PROBE_CMD));
   const isMusl = target.libc === 'musl';
 
   // glibc → run on the Node we ship (<root>/node). musl → run on the remote's
   // own node (no official musl Node to ship), gated on a minimum version.
   let nodeBin: string;
   if (isMusl) {
-    const ver = ops.exec('node --version 2>/dev/null || true').trim();
+    const ver = (await ops.exec('node --version 2>/dev/null || true')).trim();
     if (!ver) {
       throw new Error(
         `Remote (${targetId(target)}) has no node on PATH. Install Node >= ${MIN_REMOTE_NODE_MAJOR}, or use a glibc remote (we ship Node there).`,
@@ -658,7 +573,7 @@ async function deploySelfContained(
   // Codex has no supported musl runtime. Compute the manifest before cache or
   // transfer work so Alpine fails with its own actionable diagnosis.
   const expected = deployFilesForTarget(target.libc, target.arch, providerBin);
-  const inv = readRemoteInventory(ops, root, expected);
+  const inv = await readRemoteInventory(ops, root, expected);
   if (!needsDeploy(inv, expected)) {
     log.info('agent-remote', `agent-server already deployed at ${root} (${targetId(target)}, ${providerBin})`);
     return result;
@@ -690,17 +605,17 @@ async function deploySelfContained(
     }
   }
 
-  ops.exec(`mkdir -p ${root}`);
+  await ops.exec(`mkdir -p ${shellSingleQuote(root)}`);
   for (const f of missingFiles(inv, expected)) {
     const parent = path.posix.dirname(f);
-    if (parent !== '.') ops.exec(`mkdir -p ${root}/${parent}`);
-    ops.copyIn(sources[f]!, `${root}/${f}`);
+    if (parent !== '.') await ops.exec(`mkdir -p ${shellSingleQuote(`${root}/${parent}`)}`);
+    await ops.copyIn(sources[f]!, `${root}/${f}`);
   }
   // Exec bits on what we shipped (node only for glibc; the provider binary).
   const execBits = executableDeployFiles(target.libc, expected, providerBin)
     .map((file) => `${root}/${file}`);
-  if (execBits.length > 0) ops.exec(`chmod +x ${execBits.join(' ')}`);
-  ops.exec(`touch ${root}/${DEPLOYED_SENTINEL}`); // completion marker — last
+  if (execBits.length > 0) await ops.exec(`chmod +x ${execBits.map(shellSingleQuote).join(' ')}`);
+  await ops.exec(`touch ${shellSingleQuote(`${root}/${DEPLOYED_SENTINEL}`)}`); // completion marker — last
   log.info('agent-remote', `Deployed agent-server to ${root} (${targetId(target)}, ${isMusl ? 'remote node' : 'own node'})`);
 
   // Best-effort: drop the pre-R1 flat orphan (`index.mjs`/`index.js` directly
@@ -712,7 +627,7 @@ async function deploySelfContained(
   // which never deletes a version another live agent-server is using.
   try {
     const dir = agentServerDir(ops.base);
-    ops.exec(`rm -f "${dir}/index.mjs" "${dir}/index.js" 2>/dev/null; true`);
+    await ops.exec(`rm -f "${dir}/index.mjs" "${dir}/index.js" 2>/dev/null; true`);
   } catch (err: any) {
     log.info('agent-remote', `flat-orphan cleanup skipped: ${err?.message ?? err}`);
   }
@@ -736,15 +651,15 @@ async function syncSkillsToRemote(connection: Connection, ops: RemoteOps, appId:
     if (files.length === 0) return;
     const hash = hashSkillsTree(src);
     // Path layout comes from the single source of truth (shelfPlacement), not a
-    // hardcoded literal. ops.base is absolute (see sshOps/wslOps), so it agrees
+    // hardcoded literal. ops.base is resolved strictly by the connector, so it agrees
     // with the connector's homePath() that the transport resolves.
     const target = composeRemotePath(ops.base, shelfPlacement(ShelfFileTypeSkill, { appId }).rel);
-    const synced = ops.exec(`cat "${target}/.synced" 2>/dev/null || true`).trim();
+    const synced = (await ops.exec(`cat "${target}/.synced" 2>/dev/null || true`)).trim();
     if (synced === hash) return; // up to date
 
     // Mirror semantics: wipe then re-place. Per-file parent mkdir is handled by
     // the transport's putFile, so no subdir pre-creation is needed here.
-    ops.exec(`rm -rf "${target}"; mkdir -p "${target}"`);
+    await ops.exec(`rm -rf "${target}"; mkdir -p "${target}"`);
     // BYTES go through the type-declared transport (one homePath round-trip, then
     // putFile per file) — NOT ops.copyIn. The deploy-plane extras below (.synced
     // hash-gate, .heartbeat lease) stay on ops.exec, layered on top of the put.
@@ -757,7 +672,7 @@ async function syncSkillsToRemote(connection: Connection, ops: RemoteOps, appId:
     // remote agent-server's startup sweep doesn't reclaim this just-synced dir
     // before the first heartbeat (cleanup.ts / §5.9). appDir = parent of skills.
     const appDir = composeRemotePath(ops.base, `.shelf/apps/${appId}`);
-    ops.exec(`printf %s '${hash}' > "${target}/.synced"; touch "${appDir}/.heartbeat"`);
+    await ops.exec(`printf %s '${hash}' > "${target}/.synced"; touch "${appDir}/.heartbeat"`);
     log.info('agent-remote', `Synced ${files.length} skill file(s) to ${target}`);
   } catch (err: any) {
     log.info('agent-remote', `skills sync skipped: ${err?.message ?? err}`);
@@ -773,11 +688,7 @@ async function syncSkillsToRemote(connection: Connection, ops: RemoteOps, appId:
  */
 export async function syncSkillsForConnection(connection: Connection): Promise<void> {
   if (connection.type === 'local') return;
-  let ops: RemoteOps;
-  if (connection.type === 'ssh') ops = sshOps(connection);
-  else if (connection.type === 'docker') ops = dockerOps(connection);
-  else if (connection.type === 'wsl') ops = wslOps(connection);
-  else return;
+  const ops = await remoteOps(connection);
   await syncSkillsToRemote(connection, ops, getAppInstanceId());
 }
 
@@ -810,10 +721,10 @@ export function spawnLocalNode(nodeBin: string, args: string[], cwd: string, pro
   // localNodeExec().env is applied LAST so ELECTRON_RUN_AS_NODE can't be overridden.
   // Only the per-tab agent-server passes projectEnv — the shared local dispatcher
   // is per-HOST, so its per-session env rides open_session (applied in dispatcher.ts).
-  const env: Record<string, string> = { ...applyEnvMap(getShellEnv(), projectEnv), ...localNodeExec().env };
-  if (process.env.SHELF_TEST_MODE) env.SHELF_TEST_MODE = process.env.SHELF_TEST_MODE;
-  log.trace('agent-remote', `spawnLocalNode: args=[${args.join(' ')}] cwd=${cwd} PATH=${env.PATH ?? '<missing>'}`);
-  return spawn(nodeBin, args, { cwd, env, stdio: ['pipe', 'pipe', 'pipe'] });
+  return createConnector({ type: 'local' }).spawnProcess({
+    executable: nodeBin, args, cwd, env: projectEnv,
+    requiredEnv: { ...localNodeExec().env, ...agentTestEnv() },
+  });
 }
 
 async function deployAgentServer(connection: Connection, provider: AgentProvider): Promise<DeployResult> {
@@ -833,19 +744,15 @@ async function deployAgentServer(connection: Connection, provider: AgentProvider
   const providerBin = AGENT_PROVIDERS[provider].bin;
   // ssh / docker / wsl: ship our own runtime + provider binary, then mirror the
   // app-level skills onto the remote (#70/§5.7) so the remote agent loads them.
-  let ops: RemoteOps;
-  if (connection.type === 'ssh') ops = sshOps(connection);
-  else if (connection.type === 'docker') ops = dockerOps(connection);
-  else if (connection.type === 'wsl') ops = wslOps(connection);
-  else throw new Error(`Unsupported connection type for deploy: ${(connection as any).type}`);
+  const ops = await remoteOps(connection);
 
-  const result = await deploySelfContained(connection, ops, providerBin);
+  const result = await deploySelfContained(ops, providerBin);
   // Hold the app-dir lease up front so the agent-server startup sweep doesn't
   // reclaim it before the first heartbeat — UNCONDITIONALLY, not contingent on
   // skills existing (syncSkillsToRemote only touches it when there are skills, so
   // an MCP-only app would otherwise lose its just-placed config to the sweep).
   const appDir = `${ops.base}/.shelf/apps/${getAppInstanceId()}`;
-  try { ops.exec(`mkdir -p "${appDir}"; touch "${appDir}/.heartbeat"`); } catch { /* best-effort */ }
+  try { await ops.exec(`mkdir -p "${appDir}"; touch "${appDir}/.heartbeat"`); } catch (error) { log.warn('agent-remote', `app lease update failed: ${error instanceof Error ? error.message : String(error)}`); }
   await syncSkillsToRemote(connection, ops, getAppInstanceId());
   // Place the app-level MCP config too (new type-declared transport, not RemoteOps).
   // The link is established here, so the transport's ssh calls reuse the
@@ -873,69 +780,34 @@ async function spawnAgentServer(
   projectId?: string,
   onMemoryUsage?: (report: MemoryUsageReport) => void,
 ): Promise<RemoteProcess | null> {
-  const { nodeBin, indexPath } = deploy;
-  // Forward SHELF_TEST_MODE to the remote agent-server so E2E specs can drive
-  // the fake provider over ssh/docker (prod leaves it unset → empty prefix).
-  const testEnv = process.env.SHELF_TEST_MODE ? `SHELF_TEST_MODE=${process.env.SHELF_TEST_MODE} ` : '';
+  const proc = spawnDeployedProcess(connection, cwd, deploy, false, initScript, projectEnv);
+  return wrapProcess(proc, onTaskEvent, onServerExecution, onHealth, onQueue, onSkillsReloaded, onSessionEvent, projectId, onMemoryUsage);
+}
 
-  if (connection.type === 'local') {
-    try {
-      log.trace(
-        'agent-remote',
-        `spawnAgentServer local: cwd=${cwd} indexPath=${indexPath} fileExists=${fs.existsSync(indexPath)}`,
-      );
-      // spawnLocalNode applies ELECTRON_RUN_AS_NODE so the app binary runs as
-      // plain Node (never a second Electron window), and merges the project env.
-      const proc = spawnLocalNode(nodeBin, [indexPath], cwd, projectEnv);
-      return wrapProcess(proc, onTaskEvent, onServerExecution, onHealth, onQueue, onSkillsReloaded, onSessionEvent, projectId, onMemoryUsage);
-    } catch (err: any) {
-      log.error('agent-remote', `Local spawn failed: ${err.message}`);
-      return null;
-    }
-  }
+/** Test mode and Electron runtime selection are agent startup semantics. */
+function agentTestEnv(): EnvMap {
+  return process.env.SHELF_TEST_MODE ? { SHELF_TEST_MODE: process.env.SHELF_TEST_MODE } : {};
+}
 
+function spawnDeployedProcess(
+  connection: Connection, cwd: string, deploy: DeployResult, dispatcher: boolean,
+  initScript?: string, projectEnv: EnvMap = {},
+): ChildProcess {
+  const args = [deploy.indexPath, ...(dispatcher ? ['--role=dispatcher'] : [])];
+  if (connection.type === 'local') return spawnLocalNode(deploy.nodeBin, args, cwd, projectEnv);
+  // SSH hosts can outlive the client; the watchdog is agent policy, not transport policy.
   if (connection.type === 'ssh') {
-    const shellPrefix = initScript
-      ? `eval '${initScript.replace(/'/g, "'\\''")}' >/dev/null 2>&1; `
-      : '';
-    // Idle-shutdown watchdog — ssh ONLY (the remote host is not fate-shared with
-    // the client, so it keeps burning resources while the laptop sleeps). Other
-    // transports suspend together → never pass it. Default 5min; `0` keeps it
-    // alive. See connection-health#2.
     const idleMin = connection.idleShutdownMinutes ?? 5;
-    const idleArg = idleMin > 0 ? ` --idle-shutdown-min=${idleMin}` : '';
-    // Project env after initScript (so it wins) and before exec, PATH-merged
-    // against the target's own $PATH. See buildEnvExportPrefix.
-    const envPrefix = buildEnvExportPrefix(projectEnv);
-    const cmd = `${shellPrefix}${envPrefix}${testEnv}exec ${nodeBin} ${indexPath}${idleArg}`;
-    const args = [
-      '-o', 'ControlMaster=auto',
-      '-o', `ControlPath=/tmp/shelf-ssh-${connection.host}-${connection.port}-${connection.user}`,
-      '-o', 'ControlPersist=600',
-      '-p', String(connection.port),
-      `${connection.user}@${connection.host}`,
-      cmd,
-    ];
-    const proc = spawn('ssh', args, { stdio: ['pipe', 'pipe', 'pipe'] });
-    return wrapProcess(proc, onTaskEvent, onServerExecution, onHealth, onQueue, onSkillsReloaded, onSessionEvent, projectId, onMemoryUsage);
+    if (idleMin > 0) args.push(`--idle-shutdown-min=${idleMin}`);
   }
-
-  if (connection.type === 'docker') {
-    const cmd = `${buildEnvExportPrefix(projectEnv)}${testEnv}exec ${nodeBin} ${indexPath}`;
-    const proc = spawn('docker', ['exec', '-i', connection.container, 'sh', '-c', cmd], {
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-    return wrapProcess(proc, onTaskEvent, onServerExecution, onHealth, onQueue, onSkillsReloaded, onSessionEvent, projectId, onMemoryUsage);
-  }
-
-  if (connection.type === 'wsl') {
-    const proc = spawn('wsl.exe', ['-d', connection.distro, '--', 'sh', '-lc', `${buildEnvExportPrefix(projectEnv)}${testEnv}exec ${nodeBin} ${indexPath}`], {
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-    return wrapProcess(proc, onTaskEvent, onServerExecution, onHealth, onQueue, onSkillsReloaded, onSessionEvent, projectId, onMemoryUsage);
-  }
-
-  return null;
+  const request: ProcessRequest = {
+    executable: deploy.nodeBin, args, env: projectEnv,
+    requiredEnv: agentTestEnv(),
+    // Remote sessions set cwd through the wire protocol, as before.
+    // SSH alone has the existing init-script hook.
+    ...(connection.type === 'ssh' ? { initScript } : {}),
+  };
+  return createConnector(connection).spawnProcess(request);
 }
 
 // Heartbeat send interval. Env override (ms) lets E2E drive the lease/health
@@ -982,40 +854,9 @@ function childToDispatcherProc(child: ChildProcess): DispatcherProc {
   };
 }
 
-/** Spawn the deployed bundle in `--role=dispatcher` over the transport. Mirrors
- *  spawnAgentServer's transport branches (kept separate so the per-tab path stays
- *  byte-untouched); the dispatcher gets the ssh idle-shutdown watchdog (it owns
- *  it now) while the exec procs it spawns do NOT (#8). */
-export function spawnDispatcherProc(connection: Connection, cwd: string, deploy: DeployResult, initScript?: string): ChildProcess | null {
-  const { nodeBin, indexPath } = deploy;
-  const testEnv = process.env.SHELF_TEST_MODE ? `SHELF_TEST_MODE=${process.env.SHELF_TEST_MODE} ` : '';
-  if (connection.type === 'local') {
-    // Route through spawnLocalNode so ELECTRON_RUN_AS_NODE=1 is applied — without
-    // it, spawning process.execPath (nodeBin) boots a SECOND Electron window
-    // instead of the dispatcher (regression; see spawnLocalNode).
-    return spawnLocalNode(nodeBin, [indexPath, '--role=dispatcher'], cwd);
-  }
-  if (connection.type === 'ssh') {
-    const shellPrefix = initScript ? `eval '${initScript.replace(/'/g, "'\\''")}' >/dev/null 2>&1; ` : '';
-    const idleMin = connection.idleShutdownMinutes ?? 5;
-    const idleArg = idleMin > 0 ? ` --idle-shutdown-min=${idleMin}` : '';
-    const cmd = `${shellPrefix}${testEnv}exec ${nodeBin} ${indexPath} --role=dispatcher${idleArg}`;
-    return spawn('ssh', [
-      '-o', 'ControlMaster=auto',
-      '-o', `ControlPath=/tmp/shelf-ssh-${connection.host}-${connection.port}-${connection.user}`,
-      '-o', 'ControlPersist=600',
-      '-p', String(connection.port),
-      `${connection.user}@${connection.host}`,
-      cmd,
-    ], { stdio: ['pipe', 'pipe', 'pipe'] });
-  }
-  if (connection.type === 'docker') {
-    return spawn('docker', ['exec', '-i', connection.container, 'sh', '-c', `${testEnv}exec ${nodeBin} ${indexPath} --role=dispatcher`], { stdio: ['pipe', 'pipe', 'pipe'] });
-  }
-  if (connection.type === 'wsl') {
-    return spawn('wsl.exe', ['-d', connection.distro, '--', 'sh', '-lc', `${testEnv}exec ${nodeBin} ${indexPath} --role=dispatcher`], { stdio: ['pipe', 'pipe', 'pipe'] });
-  }
-  return null;
+/** The shared dispatcher and direct fallback use the same connector boundary. */
+export function spawnDispatcherProc(connection: Connection, cwd: string, deploy: DeployResult, initScript?: string): ChildProcess {
+  return spawnDeployedProcess(connection, cwd, deploy, true, initScript);
 }
 
 /** Get (or spawn) the shared dispatcher for this host. */
