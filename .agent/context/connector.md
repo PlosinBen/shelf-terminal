@@ -55,21 +55,21 @@ footer 重設計後，BottomBar 的 branch **顯示/dropdown UI 已移除**（�
 
 **Fix**：改用 `wsl.exe -d distro -- bash -l -c "cd /path && exec $SHELL -l"`，只有一個 login shell。
 
-## connector#6 — Deploy-plane 的 `sshOps.base` 必須解析成絕對 `$HOME`，不能用 `~`  ·  [Gotcha]
+## connector#6 — 部署 home 必須可靠解析成絕對路徑  ·  [Gotcha]
 
-**Symptom**：SSH 上 app-level skills 同步**完全沒生效**（檔案沒落地、`.synced` gate / `.heartbeat` lease / delete-mirror 全失靈）；docker / wsl 正常。
+**Symptom**：部署或 skills mirror 若使用 `~` 或猜測的 home，控制指令與檔案傳輸可能落到不同位置。
 
-**Root cause**：`agent/remote.ts` 的 deploy plane（`RemoteOps`）用 `ops.exec` 跑 `mkdir -p "<base>/.shelf/..."` 這類指令，base 早期是 `'~'`。**`~` 在雙引號內，POSIX sh 不展開** → 指令打到字面目錄 `$HOME/~/.shelf/...`（垃圾路徑）。而 scp（`copyIn`）會在遠端展開 `~`，但 scp **不建中間目錄** → 父目錄（剛剛被 `mkdir` 建到垃圾路徑）不存在 → per-file scp 失敗 → 被 best-effort catch 吞掉。docker(`/root`)、wsl(已解析絕對 `$HOME`)用絕對 base 所以沒事 —— 也因此 docker-based e2e 從沒抓到。
+**Root cause**：POSIX shell 不展開引號內的 `~`；picker 用的 `homePath()` 又可能在查詢失敗時回傳 `/home/<user>`、`/home` 或 `/`，這些 fallback 不能當作可寫入的部署來源。
 
-**Fix**：`sshOps` 在建立時就 `exec('echo "$HOME"')` 解析**絕對 `$HOME`** 當 `base`（照 `wslOps` 既有寫法）。這樣 deploy-plane 的 control 指令與 byte path（skills 現在走 transport `putFile`，用 `connector.homePath()` 解析的絕對 home）一致。**新增任何用 `ops.base` 組的 `ops.exec` 指令時，記得 base 是絕對路徑、別再塞 `~`。**
+**Fix / note**：deploy 與 out-of-band skills sync 先呼叫 connector `resolveHomePath()`，遠端查詢失敗、空值或非絕對路徑必須 reject，部署在解析成功前不得寫入。Picker 的 `homePath()` 保留既有 fallback 行為。Deployment 的 target commands、檔案路徑與 skills placement 都以實際 home 定址。
 
-## connector#7 — Deploy-plane `sshOps` 與 connector 的 ControlPath 不同、且不帶密碼 → ssh 部署實質需 key auth  ·  [Gotcha]
+## connector#7 — SSH 部署與 terminal 共用 connector 認證選項  ·  [Decision]
 
-**Symptom**：對「只有密碼認證」的 ssh 目標，agent-server 完整部署（ship binary）跑不起來 —— 換句話說 ssh agent-deploy 的 e2e 沒法用密碼容器跑。
+**Decision**：部署、skills 控制指令、dispatcher 與 per-tab agent process 全透過 connector。SSH terminal、exec、copyFile、spawnProcess 共用 `ssh/options.ts`：Unix 使用同一條 hashed ControlPath，各 app OS 使用 Shelf known_hosts 與 accept-new policy。
 
-**Root cause**：connector 的 authenticated ControlMaster 在 **hashed** path（`<tmp>/shelf-ssh/<sha256>`，見 `ssh-control.getControlPath`），但 deploy plane 的 `sshOps` 用**另一條 unhashed** path（`/tmp/shelf-ssh-<host>-<port>-<user>`）且**不帶密碼** → 它不會重用 connector 的 master，又無法非互動認證。
+**Reason**：agent 自組 SSH 選項會另開連線，無法沿用 project connect 已認證的 master，並可能使用另一份 host-key policy。密碼 project 可以登入但部署失敗，正是這個邊界分歧造成。
 
-**現況**：屬**已知、未修**的 pre-existing 議題，超出 transport 收斂範圍。實務上 ssh agent-deploy 仰賴 key/agent 認證；純密碼部署會失敗。日後若要修：讓 `sshOps` 重用 connector 的 hashed master，或把認證 thread 進 deploy plane。**別假設 ssh 部署在純密碼下能動。**
+**Do not change casually because**：不要在 agent deploy 再建 SSH argv 或傳遞密碼。Unix 的 password-only deploy 依賴既有 project-connect 先認證，不要求 terminal tab。Windows SSH 每次操作仍獨立連線，`connect()` 只驗證一次登入，不能據此保證後續 password-only 部署。連線失效由現有 caller 回報／重試，connector 不新增 secret 儲存或認證流程。
 
 ## connector#8 — 本機 execFile connector 靠 `process.env.PATH` backfill 找 binary，不逐點注入  ·  [Decision]
 
@@ -91,3 +91,19 @@ footer 重設計後，BottomBar 的 branch **顯示/dropdown UI 已移除**（�
 **Reason**：connector 是連線方式，不能從 SSH/Docker/WSL 推斷 remote OS；`ssh` 與 `ssh.exe` 又是 client OS execution detail，不應進 config。分層後 connector 不需混入 app OS branch，runner 也不需重建 transport arguments。
 
 **Do not change casually because**：probe failure 必須採用 connector 產生的 opaque compatibility launch plan，不能改猜 `/bin/sh`、另一個 connector 或 client platform default。單 tab dispose 只取消自己的 wait，不得取消 generation-owned shared probe；disconnect/reconnect 的 stale completion 不得寫入新 generation。
+
+## connector#10 — 大型部署檔案保留原生 file-path transfer  ·  [Decision]
+
+**Decision**：`copyFile(localPath, targetPath)` 由 connector 實作 Local fs copy、SSH SCP、Docker cp、WSL mount-path cp；remote transfer 有 180 秒 timeout，caller 負責建立 target parent。小型投影／upload 仍使用 `putFile(Buffer)`。
+
+**Reason**：runtime payload 可達數百 MB。把 transport ownership 移入 connector 即可修正認證分歧；同時改成讀整份 Buffer 或另設串流 API，會引入記憶體／搬運策略變更。保留原生工具可縮小遷移風險。
+
+**Do not change casually because**：`copyFile` 不負責 manifest、sentinel、chmod、lease 或 mirror；這些仍由 deploy 編排。改用 Buffer／cat-pipe 前必須量測代表性 payload 的記憶體與傳輸表現。
+
+## connector#11 — Agent process 使用 pipe process，不使用 terminal Shell  ·  [Decision]
+
+**Decision**：connector `spawnProcess` 回傳普通 Node process handle，保留獨立 stdin/stdout/stderr、error/exit events 與 stream lifecycle。Dispatcher 和 per-tab fallback 共用同一個 agent startup builder；connector 處理 executable transport、quoting 與 env materialization。
+
+**Reason**：agent stdout 是 wire protocol；PTY 的 terminal 合併輸出與控制行為不適合替代 pipe。普通 process handle 已滿足現有兩個 protocol consumers，額外事件 wrapper 沒有目前需求。
+
+**Do not change casually because**：local executable 選擇及 `ELECTRON_RUN_AS_NODE=1` 是 agent runtime policy；SSH idle watchdog 也是 agent policy。Shared dispatcher 不接收 project env，per-session env 仍經 `open_session` 傳入；direct process 才在啟動時注入。Connector 不解析 provider 或 agent protocol。

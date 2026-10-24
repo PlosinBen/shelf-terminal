@@ -73,7 +73,9 @@ title: shelf-terminal — Intent → File Index
 | App OS composition | `app-os.ts` | 依 Shelf 所在 OS 註冊 connector adapters，將 launch request materialize 成 executable/argv/env |
 | Terminal launch plans | `launch-plan.ts` | compatibility / explicit-interpreter immutable plan contract |
 | Target facts resolver | `target-facts.ts` | lazy generation-scoped POSIX/PowerShell probe、nonce frame validation與失敗快取 |
-| 介面定義 | `types.ts` | `Connector`（含 `putFile`）/ `Shell` / `Disposable` / `ExecResult` 介面 |
+| 介面定義 | `types.ts` | Connector、terminal Shell、pipe process request 與 command result 契約 |
+| 部署 / pipe process 共用工具 | `process.ts` | 嚴格 home 驗證、原生傳檔執行、process env / quoting 與 WSL 路徑轉換 |
+| SSH 共用連線選項 | `ssh/options.ts` | terminal、exec、傳檔與 pipe process 的 ControlMaster / host-key 選項 |
 | 型別宣告傳輸 | `transport.ts` | `transportPut`（單檔，source = localPath/buffer）+ `transportPutDir`（多檔樹，解析 home 一次）→ `shelfPlacement` → worker `homePath()` → `connector.putFile`（見 `architecture/transport`） |
 | PTY wrapper | `wrap-pty.ts` | 將 node-pty 包成 `Shell` 介面 |
 | Shell 環境解析 | `shell-env.ts` | macOS/Linux GUI app 的 login shell env 修正 |
@@ -105,7 +107,7 @@ title: shelf-terminal — Intent → File Index
 | Intent | File | Role |
 |--------|------|------|
 | Session manager + IPC handlers | `index.ts` | `initAgentManager()`：註冊 agent IPC、管理 tab→session、permission bridging |
-| Remote backend | `remote.ts` | `createRemoteBackend()`：JSON line protocol 跟 agent-server 通訊 + 自帶 node/provider 部署；`syncSkillsToRemote` 走 transport `transportPutDir`（ssh tilde gotcha 見 `context/connector` connector#6）；bundle deploy 仍走 `RemoteOps.copyIn`。`USE_DISPATCHER`（`SHELF_USE_DISPATCHER!=='0'`，**預設 ON**）分支走 `ensureDispatcher()`（per-host 共用 dispatcher，`dispatcherKeyFor` 為 key、ref-counted + idle-teardown grace）；`=0` 退回 per-tab `spawnAgentServer`/`wrapProcess`（**暫時 fallback，cleanup 待移除**） |
+| Remote backend | `remote.ts` | Agent wire lifecycle、runtime deploy 編排、skills mirror 與共用 dispatcher / per-tab fallback 啟動 |
 | Remote runtime pins + target package metadata | `agent-runtime-versions.ts` | Node/CLI/ACP version constants、target package name 與 npm manifest/tarball URL helper |
 | Downloaded runtime cache | `runtime-cache.ts` | 下載、完整性驗證並快取 Node、provider CLI 與 Codex 原生 runtime tree |
 | Remote deploy payload layout | `deploy-layout.ts` | 依 target/provider 列出完整 deploy manifest、sentinel 與本機 runtime-cache 路徑 |

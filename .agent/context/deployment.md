@@ -49,13 +49,13 @@ related:
 
 ## deployment#2 — Agent Server esbuild 單一 bundle + deploy 到遠端  ·  [Decision]
 
-**Decision**：`agent-server/` 用 esbuild 打包成 `dist/agent-server/<version>/index.js` 單一 ESM bundle，deploy 到遠端（SSH: `~/.shelf/agent-server/index.js`，Docker: `/root/.shelf/agent-server/index.js`）。Main process 的 `remote.ts` 自動 SCP / docker cp。
+**Decision**：agent-server 打包成單一 ESM bundle，依 app version 部署到 target home 下的 `.shelf/agent-server/<version>/index.mjs`。Main 的 deploy 編排選 runtime／provider manifest，透過 connector 的 target exec 與 native file-path copy 搬運，再透過 connector pipe process 啟動。
 
-**Reason**：agent-server 依賴 Claude SDK / Copilot SDK，不能期望遠端有 node_modules。Single bundle 讓 deploy 只需要複製一個檔案 + `node index.js`。Binary（claude/copilot CLI）由 main process 從 ASAR unpacked 路徑解析後傳 cliPath 給 SDK。
+**Reason**：遠端不需安裝 app 的 node_modules，且 bundle、Node 與 provider runtime 的選擇由 Shelf 控制；transport authentication 不應由 deploy 重做。
 
-**Do not change casually because**：不要在遠端跑 npm install —— 會拖慢啟動且需要 network。
+**Do not change casually because**：不要在遠端跑 npm install。每個 target write／copy 必須 await；completion sentinel 最後寫入，transfer 失敗不得標記完成。Runtime version 的共享與 heartbeat lease 清理見 deployment#1。
 
-**Related**：`deployment#1`（`~/.shelf/` taxonomy，bundle = version-keyed 共享 payload）、`src/main/agent/remote.ts`。
+**Related**：`contracts/connector-interface`、`src/main/agent/remote.ts`。
 
 ## deployment#3 — SSH deploy 的 port flag：scp 用 `-P`（大寫），不是 `-p`  ·  [Gotcha]
 
@@ -63,11 +63,11 @@ related:
 
 **Root cause**：ssh 與 scp 的 port flag **不同**：`ssh -p <port>` 指定 port，但 `scp` 的 port flag 是**大寫 `-P`**；`scp -p` 意思是 **preserve-times**。曾共用同一組 opts 字串把 `-p <port>` 同時餵給 ssh 與 scp → `scp -p 2222` 把 `-p` 當 preserve-times、把 `2222` 當**來源檔**（source operand）吞掉 → deploy 到非預設 port 的 ssh host 直接爛。長期沒被抓到是因為**沒有 ssh-agent-deploy 的自動化覆蓋**（connector `ssh.spec` 只測 terminal）。
 
-**Fix**：ssh 與 scp 各自組 opts —— ssh 用 `-p <port>`、scp 用 `-P <port>`（其餘 ControlMaster/ControlPath 等相同）。有 unit 迴歸（`sshDeployOptStrings`）。
+**Fix**：connector 的 `sshConnectionOptions` 共用連線 policy，但依 SSH／SCP 選擇 `-p`／`-P`。`connector/process.test.ts` 對實際 `copyFile` 與 `spawnProcess` argv 保留迴歸覆蓋。
 
-**Do not change casually because**：別把 ssh/scp 的 opts 字串合併回同一份 —— port flag 大小寫不同（`-p` vs `-P`），共用一定會其中一邊壞。
+**Do not change casually because**：共用 connection options 時仍須保留工具各自的 port flag；不可將完整 SSH argv 直接套給 SCP。
 
-**Related**：`deployment#2`（bundle deploy via scp）、`src/main/agent/remote.ts`（`sshDeployOptStrings`）。
+**Related**：`deployment#2`、`src/main/connector/ssh/options.ts`、`src/main/connector/process.test.ts`。
 
 ## deployment#4 — 各執行環境的 Node runtime 來源：local=Electron 內嵌、glibc remote=Shelf pin 的官方 node、musl remote=遠端自備  ·  [Decision]
 

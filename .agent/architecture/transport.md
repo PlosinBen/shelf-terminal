@@ -14,9 +14,11 @@ related:
 
 ## 為什麼存在
 
-收斂兩個既有 smell(strangler 已完成 —— MCP→skills→uploads 依序遷入):
-1. **per-connection 分流重複** —— ssh/docker/wsl 的傳檔邏輯曾在 connector(uploads)與 deploy 的 RemoteOps 各寫一份。現況:**byte-write 只剩 `connector.putFile` 一處**;`uploadFile` 改疊在 `putFile` 上(不再自帶 `buildRemoteUploadCmd`),skills sync 走 `transportPutDir`,`RemoteOps.copyIn` 只剩 **agent-server bundle deploy**(~215MB binary)一個 caller。
-2. **client leak remote layout** —— deploy 端曾硬編 `~/.shelf/apps/<appId>/…`。現況:落點一律來自 `@shared/shelf-paths` 的 placement table(`mcp` / `skill` / `upload`),沒有 caller 手組 remote/cwd 路徑。
+小型 control data 與大型 runtime payload 有不同的來源契約，但 transport-specific 執行都由 connector 擁有：
+
+- 小型 config、skills 與 upload 走型別宣告的 placement，再由 connector 寫入 bytes。
+- 大型 runtime payload 以本機檔案路徑交給 connector 的原生檔案複製操作，不必在 app process 中讀成整份 Buffer。
+- Deploy 編排選擇內容、順序與 completion marker，不直接啟動另一套 transport。
 
 ## 核心:type-declared placement
 
@@ -45,10 +47,10 @@ transportPutDir(connection, { type, context, files })          // 多檔(一棵�
 
 ## 分層:byte-mover 與 deploy-plane extras 分開
 
-- **transport.put = 純 byte-mover**:解析落點 → `connector.putFile(absPath, buffer)`。per-connection 分流只剩 connector 一處(`putFile` 在所有 connector 實作,複用 `spawnPipeWrite`+`buildRemotePutCmd`)。**`putFile` 是唯一的 byte primitive** —— `uploadFile` 也疊在它上面(見下),不再有第二套 upload-write 堆疊。
+- **transport.put = 純 byte-mover**:解析落點 → `connector.putFile(absPath, buffer)`。per-connection 分流只剩 connector 一處(`putFile` 在所有 connector 實作,複用 `spawnPipeWrite`+`buildRemotePutCmd`)。**buffer byte-write 的 primitive 是 `putFile`** —— `uploadFile` 也疊在它上面(見下),不再有第二套 upload-write 堆疊。
 - **upload policy 疊在 `putFile` 上,不進 byte-mover**:`uploadFile` = gitignore guard(non-clobber `.tmp/.gitignore`;local 走 fs、remote 走 shell —— 唯一殘留的平台差異)+ `putFile`。guard 沒法進「內容無關」的 byte-mover,所以是 caller 一步(remote 多一次 exec round-trip,互動 paste 路徑可接受)。共用 `remoteUploadFile`(3 個 remote connector)。
 - **deploy-plane extras 疊在上層,不進 `put`**:hash-gate(skip 無謂重推)、`.heartbeat` lease、`exec` —— 由 caller(MCP 的 `syncMcpForConnection`、skills 的 `syncSkillsToRemote`、`deployAgentServer`)負責。避免 `put` 變成吃一堆 flag 的 god-function。
-- **`RemoteOps.copyIn` 只剩 bundle deploy**:~215MB node/claude binary 經 scp/docker cp 搬,跟小 control 檔需求不同(cat-pipe 搬 215MB 沒 benchmark)——刻意不收斂,別硬抽象。
+- **大型 runtime transfer 也由 connector 擁有**：deploy 傳入 local file path 與 target path，connector 選擇原生搬運方式。這個操作與小型投影的 Buffer byte-write 分開；manifest、parent creation、mode、completion marker 與 lease 仍是上層責任。
 
 > ⚠️ lease 是上層責任:deploy 必須持 app-dir `.heartbeat`,否則 sweep 回收落點(見 `context/mcp` mcp#6)。
 
@@ -57,7 +59,7 @@ transportPutDir(connection, { type, context, files })          // 多檔(一棵�
 - 別把 hash-gate / heartbeat / exec / gitignore guard 折進 `transport.put` / `putFile` —— 分層是刻意的。
 - 別讓 client 重新硬編 remote 路徑;落點一律走 `shelfPlacement`,新增 type = 在 `@shared/shelf-paths` 加一筆 + connector 已有的 `putFile` 自動適用。
 - 別把 `uploadFile` 改回自帶 write command(`buildRemoteUploadCmd` 已刪)—— 它必須疊在 `putFile` 上,否則又長出第二套 per-connection byte-write 堆疊。
-- 別把 bundle deploy 的 `copyIn` 也收進 transport,除非先 benchmark cat-pipe 搬 215MB binary vs scp/docker cp。
+- 別因共用 connector 就強制大型 runtime payload 讀成 Buffer；變更搬運方式前，先量測代表性 payload 的記憶體與傳輸表現。
 - 別為 skills+MCP 抽參數化的 config pipeline(`context/mcp` mcp#2);transport 只負責「放 bytes」這一層的共用。
 
-模組落點見 `map`(`connector/transport.ts` 的 `transportPut`/`transportPutDir`、`shared/shelf-paths.ts` 的 placement table、`connector/{各 connector}.putFile`、`connector/file-utils.ts` 的 `remoteUploadFile`/`buildGitignoreGuardCmd`)。skills sync 在 `agent/remote.ts` 的 `syncSkillsToRemote`(ssh tilde gotcha 見 `context/connector` connector#6)。
+模組落點見 `map`(`connector/transport.ts` 的 `transportPut`/`transportPutDir`、`shared/shelf-paths.ts` 的 placement table、`connector/{各 connector}.putFile`、`connector/file-utils.ts` 的 `remoteUploadFile`/`buildGitignoreGuardCmd`)。skills sync 在 `agent/remote.ts` 的 `syncSkillsToRemote`(absolute-home gotcha 見 `context/connector` connector#6)。
