@@ -80,11 +80,11 @@ export function claudeTarballUrl(t: RuntimeTarget, version: string): string {
 }
 
 /**
- * Copilot CLI companion version — MUST match the `@github/copilot` JS the
- * copilot-sdk drives. Pinned (same reasoning as CLAUDE_SDK_VERSION); a unit
- * test asserts it equals the installed dependency.
+ * Standalone Copilot CLI used by ACP and the SDK account-quota query. Keep the
+ * exact direct dependency and remote download version aligned; a unit test
+ * guards both declared and installed versions.
  */
-export const COPILOT_CLI_VERSION = '1.0.68';
+export const COPILOT_CLI_VERSION = '1.0.103';
 
 /**
  * Codex ACP runtime set. These packages form one tested protocol/runtime unit:

@@ -10,6 +10,8 @@ import { createCodexBackend } from './providers/codex';
 // `copilot` is driven by the ACP backend (the native SDK backend was deleted at
 // cutover — recoverable from git history at the pre-cutover commit).
 import { createCopilotBackend } from './providers/copilot';
+import { createCopilotUsageTestBackend } from './providers/copilot/test-agent';
+import { FAKE_TEST_ENV } from './providers/fake/test-env';
 import { createFakeBackend } from './providers/fake';
 import { deleteContext, cleanupOldContexts } from './context-store';
 import { runCleanupSweep } from './cleanup';
@@ -318,7 +320,9 @@ const BACKEND_FACTORIES = {
 const backendRegistry = createBackendRegistry(
   BACKEND_FACTORIES,
   TEST_MODE,
-  (provider) => createFakeBackend(provider),
+  (provider) => provider === COPILOT_PROVIDER && process.env[FAKE_TEST_ENV.COPILOT_USAGE] === '1'
+    ? createCopilotUsageTestBackend()
+    : createFakeBackend(provider),
 );
 
 function getBackend(provider: Provider): ServerBackend {

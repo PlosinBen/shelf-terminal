@@ -1,5 +1,5 @@
-// Copilot ACCOUNT-level credit/quota. `copilot --acp` never emits the ACP
-// `usage_update` (upstream github/copilot-cli#4233), so we fetch the account
+// Copilot ACCOUNT-level credit/quota. ACP session usage is not account quota,
+// so we fetch the account
 // premium-request quota out-of-band via the copilot SDK's `account.getQuota` and
 // surface it as a status segment. Authenticated purely via config-home
 // (`COPILOT_HOME` + `useLoggedInUser`) — NO token is read or passed, so the

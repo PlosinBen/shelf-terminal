@@ -42,6 +42,7 @@ import {
   isCopilotCancellationNotice,
 } from './helpers';
 import { refreshCopilotCredit } from './credit';
+import { createCopilotUsageObserver } from './usage-observation';
 import { startLogin as startCopilotLogin, prefillLoginUrl, type LoginRunner } from './login';
 
 const COPILOT_STALE_SESSION_NOTICE = 'Previous Copilot session was unavailable; started a new session.';
@@ -139,6 +140,7 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
   const openAgent = deps.openAgent ?? defaultOpenAgent;
   const getShelfMcp = deps.getShelfMcp ?? getSharedShelfMcp;
   const modeConfirmationTimeoutMs = deps.modeConfirmationTimeoutMs ?? COPILOT_MODE_CONFIRMATION_TIMEOUT_MS;
+  const usageObserver = createCopilotUsageObserver();
 
   let conn: AcpConnection | null = null;
   let child: ChildProcess | null = null;
@@ -566,6 +568,7 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
       name: 'shelf-copilot',
       onRequestPermission,
       onSessionUpdate(notification) {
+        if (usageObserver.observe(notification, !!(sessionSend || activeExecutionSend))) return;
         observeAutopilotCompletion(notification);
         // Copilot's ACP adapter flattens session.info into agent_message_chunk,
         // so the shared driver cannot distinguish this framework notice from a
@@ -657,55 +660,63 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
       ],
     };
 
-    let recoveredMissingSession = false;
-    if (input.resumeId) {
-      // Prefer stable resume (no history replay). Bundled Copilot 1.0.68 only
-      // advertises session/load; the shared driver suppresses its conversation
-      // replay while retaining mode/config/command metadata.
-      try {
-        session = supportsResume
-          ? await driver.resume(c.agent, input.resumeId, opts)
-          : await driver.load(c.agent, input.resumeId, opts);
-        sessionCwd = input.cwd;
-        sessionAppId = appId;
-        const restored = session.resumeSessionResponse ?? session.loadSessionResponse;
-        sessionModes = restored?.modes ?? undefined;
-        sessionConfigOptions = restored?.configOptions ?? undefined;
-        pendingInitialPerfSessionId = session.sessionId;
-        return session;
-      } catch (err) {
-        if (!isMissingCopilotSessionError(err, input.resumeId)) throw err;
-        // A persisted pointer can outlive the CLI's session storage. Clear it
-        // before starting so a failed session/new cannot wedge every retry on
-        // the same stale id. Context loss is visible, not silent.
-        driver.forget(input.resumeId);
-        serverLog('warn', 'copilot', 'persisted session unavailable; starting a new session', { sessionId: input.resumeId });
-        (send ?? sessionSend)?.({ type: 'context_patch', patch: { lastSdkSessionId: null } });
-        recoveredMissingSession = true;
+    const settleObservation = usageObserver.beginSession(input.resumeId ?? undefined);
+    try {
+      let recoveredMissingSession = false;
+      if (input.resumeId) {
+        // Prefer stable resume (no history replay). When only session/load is
+        // advertised, the shared driver suppresses its conversation
+        // replay while retaining mode/config/command metadata.
+        try {
+          session = supportsResume
+            ? await driver.resume(c.agent, input.resumeId, opts)
+            : await driver.load(c.agent, input.resumeId, opts);
+          sessionCwd = input.cwd;
+          sessionAppId = appId;
+          const restored = session.resumeSessionResponse ?? session.loadSessionResponse;
+          sessionModes = restored?.modes ?? undefined;
+          sessionConfigOptions = restored?.configOptions ?? undefined;
+          pendingInitialPerfSessionId = session.sessionId;
+          settleObservation(supportsResume ? 'resumed' : 'loaded', session.sessionId);
+          return session;
+        } catch (err) {
+          if (!isMissingCopilotSessionError(err, input.resumeId)) throw err;
+          // A persisted pointer can outlive the CLI's session storage. Clear it
+          // before starting so a failed session/new cannot wedge every retry on
+          // the same stale id. Context loss is visible, not silent.
+          driver.forget(input.resumeId);
+          serverLog('warn', 'copilot', 'persisted session unavailable; starting a new session', { sessionId: input.resumeId });
+          (send ?? sessionSend)?.({ type: 'context_patch', patch: { lastSdkSessionId: null } });
+          recoveredMissingSession = true;
+        }
       }
+      session = await driver.startNew(c.agent, opts);
+      sessionCwd = input.cwd;
+      sessionAppId = appId;
+      // Cache the advertised config so set-mode / set-config-option can resolve ids
+      // and buildCapabilities() has the option lists.
+      sessionModes = session.newSessionResponse?.modes ?? undefined;
+      sessionConfigOptions = session.newSessionResponse?.configOptions ?? undefined;
+      pendingInitialPerfSessionId = session.sessionId;
+      // Capability discovery can create the first native session before an
+      // execution exists. Publish through the session sink in that case so the
+      // agent-server's context wrapper persists the pointer immediately.
+      const output = send ?? sessionSend;
+      output?.({ type: 'context_patch', patch: { lastSdkSessionId: session.sessionId } });
+      if (recoveredMissingSession) {
+        output?.({
+          type: 'message',
+          msgId: `m-${randomUUID().slice(0, 8)}`,
+          msgType: 'system',
+          content: COPILOT_STALE_SESSION_NOTICE,
+        });
+      }
+      settleObservation('created', session.sessionId);
+      return session;
+    } catch (err) {
+      settleObservation('failed');
+      throw err;
     }
-    session = await driver.startNew(c.agent, opts);
-    sessionCwd = input.cwd;
-    sessionAppId = appId;
-    // Cache the advertised config so set-mode / set-config-option can resolve ids
-    // and buildCapabilities() has the option lists.
-    sessionModes = session.newSessionResponse?.modes ?? undefined;
-    sessionConfigOptions = session.newSessionResponse?.configOptions ?? undefined;
-    pendingInitialPerfSessionId = session.sessionId;
-    // Capability discovery can create the first native session before an
-    // execution exists. Publish through the session sink in that case so the
-    // agent-server's context wrapper persists the pointer immediately.
-    const output = send ?? sessionSend;
-    output?.({ type: 'context_patch', patch: { lastSdkSessionId: session.sessionId } });
-    if (recoveredMissingSession) {
-      output?.({
-        type: 'message',
-        msgId: `m-${randomUUID().slice(0, 8)}`,
-        msgType: 'system',
-        content: COPILOT_STALE_SESSION_NOTICE,
-      });
-    }
-    return session;
   }
 
   function isMissingCopilotSessionError(err: unknown, sessionId: string): boolean {
@@ -798,6 +809,8 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
         const promptSlash = parseSlashPrefix(prompt);
         const isAdvertisedSlashCommand = promptSlash !== null
           && driver.getAvailableCommands(s.sessionId)?.some((command) => command.name === promptSlash.cmd) === true;
+        const settleUsagePrompt = usageObserver.beginPrompt(s.sessionId);
+        let usageStopReason: StopReason | undefined;
         const promptCompletion = driver.drivePromptTurn(
           conn!.agent,
           s,
@@ -811,7 +824,9 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
           let stopReason: StopReason;
           try {
             stopReason = await promptCompletion;
+            usageStopReason = stopReason;
           } finally {
+            settleUsagePrompt(usageStopReason ?? 'failed');
             if (activePromptCompletion === promptCompletion) activePromptCompletion = null;
           }
           if (
@@ -844,8 +859,8 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
     },
 
     // Post-turn: refresh the account-level premium-request credit via the SDK,
-    // cache-aside on the per-host cache (see credit.ts). copilot --acp doesn't emit
-    // ACP usage_update (upstream #4233), so this is the only channel for it.
+    // cache-aside on the per-host cache (see credit.ts). Session usage is not
+    // account quota; keep the account-level SDK query independent.
     refreshAccountStatus(cache, send, appId) {
       return refreshCopilotCredit(cache, send, appId);
     },

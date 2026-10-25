@@ -1,4 +1,5 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+import * as serverLogger from '../../server-logger';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import type {
@@ -97,6 +98,69 @@ function withConfigSelection(
 }
 
 describe('acp-copilot backend (via mock ACP agent)', () => {
+  it('observes usage without publishing context or credit, while forwarding reply text', async () => {
+    const log = vi.spyOn(serverLogger, 'serverLog').mockImplementation(() => {});
+    const mock = createMockAcpAgent({ updatesOnPrompt: [
+      { sessionUpdate: 'usage_update', used: 100, size: 1000, cost: { amount: 0.25, currency: 'USD' }, _meta: { secret: 'DO-NOT-LOG' } },
+      { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Still works' }, messageId: 'reply' },
+    ] });
+    const backend = createCopilotBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
+    const out: OutgoingMessage[] = [];
+    try {
+      await backend.query({ prompt: 'PRIVATE-PROMPT', cwd: '/tmp/project' }, (m) => out.push(m));
+      expect(out).not.toContainEqual(expect.objectContaining({ contextUsage: expect.anything() }));
+      expect(out).not.toContainEqual(expect.objectContaining({ credits: expect.anything() }));
+      expect(out).toContainEqual(expect.objectContaining({ type: 'stream', content: 'Still works' }));
+      const logs = JSON.stringify(log.mock.calls);
+      expect(logs).toContain('usage_update');
+      expect(logs).toContain('prompt_started');
+      expect(logs).toContain('prompt_settled');
+      expect(logs).not.toContain('DO-NOT-LOG');
+      expect(logs).not.toContain('PRIVATE-PROMPT');
+    } finally {
+      backend.dispose();
+      log.mockRestore();
+    }
+  });
+
+  it('suppresses a zero context limit rather than fabricating ctx: 0%', async () => {
+    const mock = createMockAcpAgent({ updatesOnPrompt: [
+      { sessionUpdate: 'usage_update', used: 0, size: 0 },
+    ] });
+    const backend = createCopilotBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
+    const out: OutgoingMessage[] = [];
+    try {
+      await backend.query({ prompt: 'hi', cwd: '/tmp/project' }, (m) => out.push(m));
+      expect(out).not.toContainEqual(expect.objectContaining({ contextUsage: expect.anything() }));
+    } finally {
+      backend.dispose();
+    }
+  });
+
+  it('observes restored usage before an output sink is bound', async () => {
+    const log = vi.spyOn(serverLogger, 'serverLog').mockImplementation(() => {});
+    const mock = createMockAcpAgent({ updatesOnLoadSession: [
+      { sessionUpdate: 'usage_update', used: 50, size: 100 },
+    ] });
+    const backend = createCopilotBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
+    try {
+      await backend.gatherCapabilities!('/tmp/project', undefined, undefined, undefined, undefined, undefined, {
+        sessionId: 'shelf-session', provider: 'copilot', updatedAt: 1, lastSdkSessionId: 'saved-session',
+      });
+      expect(log.mock.calls).toContainEqual([
+        'info', 'copilot-usage', 'usage_update',
+        expect.objectContaining({ sessionId: 'saved-session', phase: 'session_pending', outputBound: false }),
+      ]);
+      expect(log.mock.calls).toContainEqual([
+        'info', 'copilot-usage', 'session_settled',
+        expect.objectContaining({ sessionId: 'saved-session', result: 'loaded' }),
+      ]);
+    } finally {
+      backend.dispose();
+      log.mockRestore();
+    }
+  });
+
   it('confirms stop only when the active ACP prompt returns cancelled', async () => {
     let promptStarted!: () => void;
     const started = new Promise<void>((resolve) => { promptStarted = resolve; });

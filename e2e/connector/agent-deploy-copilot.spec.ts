@@ -5,6 +5,8 @@ import {
   deployedFiles,
   expect,
 } from './agent-deploy-helpers';
+import { execFileSync } from 'node:child_process';
+import { COPILOT_CLI_VERSION } from '../../src/main/agent/agent-runtime-versions';
 
 /**
  * R1 Phase 2 (deploy slice) E2E: a COPILOT agent over a glibc container ships
@@ -28,4 +30,8 @@ test('copilot: provider-aware deploy ships the copilot binary (not claude)', asy
   expect(files).toContain('node'); // glibc → we ship node
   expect(files).toContain('copilot'); // provider binary
   expect(files).not.toContain('claude'); // claude NOT shipped for a copilot agent
+  const version = execFileSync('docker', [
+    'exec', 'shelf-agent-test-copilot', 'sh', '-c', '/root/.shelf/agent-server/*/copilot --version',
+  ], { encoding: 'utf8', timeout: 30_000 });
+  expect(version).toContain(`GitHub Copilot CLI ${COPILOT_CLI_VERSION}.`);
 });

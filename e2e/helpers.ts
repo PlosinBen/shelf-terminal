@@ -61,6 +61,7 @@ export const test = base.extend<{
   postLoginCapsFail: boolean;
   nativePermissions: boolean;
   nativeApproval: boolean;
+  copilotUsage: boolean;
   shelfApp: { app: ElectronApplication; page: Page; userDataDir: string };
 }>({
   capsFail: [false, { option: true }],
@@ -69,7 +70,8 @@ export const test = base.extend<{
   postLoginCapsFail: [false, { option: true }],
   nativeApproval: [false, { option: true }],
   nativePermissions: [false, { option: true }],
-  shelfApp: async ({ capsFail, capsDelayMs, loginSuccess, postLoginCapsFail, nativePermissions, nativeApproval }, use) => {
+  copilotUsage: [false, { option: true }],
+  shelfApp: async ({ capsFail, capsDelayMs, loginSuccess, postLoginCapsFail, nativePermissions, nativeApproval, copilotUsage }, use) => {
     const userDataDir = createTempUserDataDir();
     seedProjectsData(userDataDir);
     ensureTestDirectories();
@@ -84,6 +86,7 @@ export const test = base.extend<{
         ...process.env,
         SHELF_TEST_MODE: '1',
         NODE_ENV: 'test',
+        ...(copilotUsage ? { [FAKE_TEST_ENV.COPILOT_USAGE]: '1', LOG_LEVEL: 'info' } : {}),
         ...(capsFail ? { [FAKE_TEST_ENV.CAPS_FAIL]: '1' } : {}),
         ...(capsDelayMs > 0 ? { [FAKE_TEST_ENV.CAPS_DELAY]: String(capsDelayMs) } : {}),
         ...((loginSuccess || postLoginCapsFail) ? { [FAKE_TEST_ENV.LOGIN_SUCCESS]: '1' } : {}),

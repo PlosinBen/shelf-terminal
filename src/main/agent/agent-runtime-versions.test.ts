@@ -88,7 +88,9 @@ describe('COPILOT_CLI_VERSION', () => {
   // Drift guard: pinned Copilot companion version must equal the installed
   // @github/copilot dependency.
   it('matches the installed @github/copilot version', () => {
+    const root = JSON.parse(readFileSync('package.json', 'utf8'));
     const pkg = JSON.parse(readFileSync('node_modules/@github/copilot/package.json', 'utf8'));
+    expect(root.dependencies['@github/copilot']).toBe(COPILOT_CLI_VERSION);
     expect(COPILOT_CLI_VERSION).toBe(pkg.version);
   });
 });

@@ -1,5 +1,4 @@
-// Mock ACP agent fixture (TEST-ONLY — never imported by exec.ts, so it is
-// tree-shaken out of the production agent-server bundle).
+// Mock ACP agent fixture (TEST-ONLY — the runtime entry is gated by SHELF_TEST_MODE).
 //
 // A scriptable in-process ACP *agent* built on the real @agentclientprotocol/sdk,
 // so the shared acp/ toolkit + the codex backend can be exercised end-to-end
