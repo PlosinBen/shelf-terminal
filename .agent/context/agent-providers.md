@@ -275,7 +275,7 @@ SDK 0.3.159 **並存**兩種 compact 完成訊號:`status` 形狀(`subtype:'stat
 
 **Reason**：共用 ACP translator 遇到缺少／零 denominator 會產生合成的 `ctx: 0%`。升 CLI 不能同時隱含啟用未驗證的 UI 路徑。Context limit 必須來自實際事件，不硬編或從 model 名稱推估。其他 provider 的共用 translator 行為不受這個 Copilot 邊界影響。
 
-**Scope and limits**：[copilot-cli #4233](https://github.com/github/copilot-cli/issues/4233) 是 usage 能力的來源脈絡；有效 used/size 已可供 Shelf 整合，ctx 顯示目前沒有已證實的上游 blocker。觀測器不讀 `_meta`，因此沒有對 AI-credit metadata 是否存在作結論。Account credit 刻意維持獨立的 SDK `account.getQuota` 路徑（`agent-providers#26`），不等待 ACP parity。Cost 與 setup/restore 通知時序的樣本限制保留於此，不作必要上游追蹤。不能把 session cost 當成 account quota；`numTurns`／`rateLimits` 沒有對應的標準 ACP 欄位。
+**Scope and limits**：[copilot-cli #4233](https://github.com/github/copilot-cli/issues/4233) 是 usage 能力的來源脈絡；有效 used/size 已可供 Shelf 整合，ctx 顯示目前沒有已證實的上游 blocker。觀測器僅摘要 notification 與 update 的 `_meta` 型別、key 數量及固定 allowlist 的 credit 欄位，目前尚未對真實 AI-credit metadata 是否存在作結論。Account credit 刻意維持獨立的 SDK `account.getQuota` 路徑（`agent-providers#26`），不等待 ACP parity。Cost 與 setup/restore 通知時序的樣本限制保留於此，不作必要上游追蹤。不能把 session cost 當成 account quota；`numTurns`／`rateLimits` 沒有對應的標準 ACP 欄位。
 
 **Related**：`agent-server/providers/copilot/usage-observation.ts`、`agent-server/providers/acp/translate.ts`、`agent-providers#26`、`agent-providers#53`。
 
@@ -621,9 +621,9 @@ Fresh capabilities probe 若建立 `session/new`，立刻透過 session-scoped `
 
 **Decision**：`createCopilotUsageObserver` 在 Copilot 的 `driver.onSessionUpdate` 前攔下 `usage_update`；其餘通知照常傳遞。觀測期間不新增 renderer state／wire 欄位，不顯示 ctx，也不改 account-credit 路徑。Live new/load 後的有效 used/size 是後續 validated ctx integration 的依據；實際啟用屬於另行界定的 UI 變更。
 
-**Diagnostics**：走既有 `serverLog`，tag 為 `copilot-usage`。正常 usage 與 session/prompt start、settlement markers 用 info；異常值用 warn。每筆只包含 session／operation correlation、相對時序、output sink 是否已綁定，以及 used／size／cost 的型別與通過範圍驗證的數值、貨幣代碼。任意字串、raw payload、prompt、account identity、credentials 與 `_meta` 不寫入。Main 預設 error，live observation 必須啟用 info 或 debug；只有同一測試序列的 markers 可見且 prompt 已 settled，才能記錄 no-event。Markers 描述 Shelf 操作時序，不宣稱 provider content 的 turn ownership。
+**Diagnostics**：走既有 `serverLog`，tag 為 `copilot-usage`。正常 usage 與 session/prompt start、settlement markers 用 info；異常值用 warn。每筆只包含 session／operation correlation、相對時序、output sink 是否已綁定，以及 used／size／cost 的型別與通過範圍驗證的數值、貨幣代碼。Notification 與 update 的 `_meta` 分別記錄型別、key count，以及 `ai_credits_used`／`ai_credits_remaining`／`aiCreditsUsed`／`aiCreditsRemaining` 的存在性、型別與通過 finite/nonnegative/range 驗證的數值；這些只是觀測候選，不宣稱上游採用此命名。未知 key 只記錄數量，不記錄名稱或內容；非空 metadata 沒有命中候選欄位時不能推論沒有 credit。任意字串、raw payload、prompt、account identity、credentials 與完整 `_meta` 不寫入。Main 預設 error，live observation 必須啟用 info 或 debug；只有同一測試序列的 markers 可見且 prompt 已 settled，才能記錄 no-event。Markers 描述 Shelf 操作時序，不宣稱 provider content 的 turn ownership。
 
-**Reason**：有事件、欄位有效與可安全顯示是不同條件。Provider 邊界可避免升 CLI 意外啟用共用 translator 的 fallback，同時觀測 sink 綁定前及 prompt settlement 後的通知。固定欄位與數值範圍讓診斷保持有界，也不需解析 provider-private metadata。
+**Reason**：有事件、欄位有效與可安全顯示是不同條件。Provider 邊界可避免升 CLI 意外啟用共用 translator 的 fallback，同時觀測 sink 綁定前及 prompt settlement 後的通知。固定欄位與數值範圍讓診斷保持有界；以 allowlist 摘要必要 metadata，避免缺少觀測資料卻誤判上游缺少能力。
 
 **Do not change casually because**：不要把抑制搬進共用 translator，或以觀測樣本推定所有 model 的 limit、cost、AI-credit 或通知時序。後續整合仍須驗證 finite/nonnegative used、positive size 與資料一致性，並涵蓋 malformed、missing、early 與 late arrival；不能把缺資料當成零。
 

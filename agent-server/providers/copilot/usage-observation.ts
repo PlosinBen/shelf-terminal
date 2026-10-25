@@ -4,6 +4,9 @@ import { serverLog } from '../../server-logger';
 
 export const COPILOT_USAGE_UPDATE = 'usage_update';
 export const COPILOT_USAGE_LOG_TAG = 'copilot-usage';
+// Issue #4233 proposes snake_case; camelCase mirrors the CLI's credit terminology.
+// These are observation candidates, not a claim that either shape is supported.
+const CREDIT_METADATA_KEYS = ['ai_credits_used', 'ai_credits_remaining', 'aiCreditsUsed', 'aiCreditsRemaining'] as const;
 
 function valueType(value: unknown): string {
   return value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value;
@@ -16,8 +19,28 @@ function numberField(value: unknown, integer: boolean, positive = false) {
   return { type: valueType(value), valid, ...(valid ? { value: value as number } : {}) };
 }
 
+function summarizeCreditMetadata(meta: unknown) {
+  const object = typeof meta === 'object' && meta !== null && !Array.isArray(meta)
+    ? meta as Record<string, unknown> : undefined;
+  const entries = CREDIT_METADATA_KEYS.map((key) => {
+    const present = !!object && Object.hasOwn(object, key);
+    return [key, { present, ...numberField(present ? object![key] : undefined, false) }] as const;
+  });
+  const keyCount = object ? Object.keys(object).length : 0;
+  return {
+    type: valueType(meta), keyCount,
+    unrecognizedKeyCount: keyCount - entries.filter(([, field]) => field.present).length,
+    credits: Object.fromEntries(entries) as Record<typeof CREDIT_METADATA_KEYS[number], typeof entries[number][1]>,
+  };
+}
+
+function invalidCreditMetadata(meta: ReturnType<typeof summarizeCreditMetadata>): boolean {
+  return !['undefined', 'null', 'object'].includes(meta.type)
+    || Object.values(meta.credits).some((field) => field.present && !field.valid);
+}
+
 /** Never copy arbitrary payload values into diagnostics, including malformed strings. */
-export function summarizeCopilotUsage(update: { used?: unknown; size?: unknown; cost?: unknown }) {
+export function summarizeCopilotUsage(update: { used?: unknown; size?: unknown; cost?: unknown; _meta?: unknown }) {
   const used = numberField(update.used, true);
   const size = numberField(update.size, true, true);
   const cost = update.cost;
@@ -27,6 +50,8 @@ export function summarizeCopilotUsage(update: { used?: unknown; size?: unknown; 
   const currency = costObject?.currency;
   const currencyValid = typeof currency === 'string' && /^[A-Z]{3}$/.test(currency);
   const anomalies: string[] = [];
+  const meta = summarizeCreditMetadata(update._meta);
+  if (invalidCreditMetadata(meta)) anomalies.push('invalid_credit_metadata');
   if (!used.valid) anomalies.push('invalid_used');
   if (!size.valid) anomalies.push('invalid_size');
   if (used.valid && size.valid && used.value! > size.value!) anomalies.push('used_exceeds_size');
@@ -34,6 +59,7 @@ export function summarizeCopilotUsage(update: { used?: unknown; size?: unknown; 
   return {
     used,
     size,
+    meta,
     cost: {
       type: valueType(cost),
       ...(costObject ? {
@@ -70,6 +96,8 @@ export function createCopilotUsageObserver() {
     observe(notification: SessionNotification, outputBound: boolean): boolean {
       if (notification.update.sessionUpdate !== COPILOT_USAGE_UPDATE) return false;
       const summary = summarizeCopilotUsage(notification.update);
+      const notificationMeta = summarizeCreditMetadata(notification._meta);
+      if (invalidCreditMetadata(notificationMeta)) summary.anomalies.push('invalid_notification_credit_metadata');
       serverLog(summary.anomalies.length ? 'warn' : 'info', COPILOT_USAGE_LOG_TAG, COPILOT_USAGE_UPDATE, {
         sessionId: notification.sessionId,
         operationId: operation?.id,
@@ -77,6 +105,7 @@ export function createCopilotUsageObserver() {
         elapsedMs: operation ? Date.now() - operation.startedAt : undefined,
         sessionMatches: operation?.sessionId === undefined ? undefined : operation.sessionId === notification.sessionId,
         outputBound,
+        notificationMeta,
         ...summary,
       });
       return true;
