@@ -113,15 +113,17 @@ SDK 0.3.159 **並存**兩種 compact 完成訊號:`status` 形狀(`subtype:'stat
 
 **Related**:`agent-config-flow#2`(`/compact` 走真 SDK turn + `stoppable=false`)、`background-tasks#1`(`pendingCompactMsgId` per-turn 狀態)、`agent-server/providers/claude/index.ts` 的 `isCompactBoundary`/`routeForeground`。
 
-## agent-providers#9 — Copilot 跑 standalone CLI binary（`copilot --acp`），不再用 `@github/copilot-sdk`；binary 版本/平台套件仍要管  ·  [Decision]
+## agent-providers#9 — Copilot ACP 直接使用鎖版的 standalone CLI；SDK 僅負責 account quota  ·  [Decision]
 
-**現況（copilot = ACP backend 後）**：copilot **直接 spawn standalone CLI binary + `--acp`**（ACP server over stdio）,**不再依賴 `@github/copilot-sdk`**（SDK backend 已於 cutover 刪除,SDK↔CLI 版本配對那整套限制隨之消失）。
+**現況**：Copilot conversation 直接 spawn standalone CLI binary + `--acp`（ACP over stdio）。`@github/copilot` 是 exact direct dependency，平台套件提供真正的 binary；`@github/copilot-sdk` 僅用於獨立的 `account.getQuota`，不參與 conversation transport（見 `agent-providers#26`）。
 
-`resolveCopilotBinary()`（`copilot/helpers.ts`）三環境都指**平台套件 `@github/copilot-<platform>-<arch>` 的 standalone `copilot` binary**:dev = `node_modules/...`;packaged = extraResources `copilot-cli/@github/copilot-<plat>-<arch>/`（electron-builder filter 只抓建置機平台那顆）;remote self-contained deploy ship 該 binary。CLI meta 套件 `@github/copilot`（≥1.0.67）只剩 `npm-loader.js`,真正 binary 在平台套件裡。`COPILOT_CLI_VERSION`（`agent-runtime-versions.ts`,drift-guard 測試）必須 = 實裝 CLI 版本。
+`resolveCopilotBinary()`（`copilot/helpers.ts`）三環境都指向平台套件 `@github/copilot-<platform>-<arch>` 的 standalone binary：dev 來自 node_modules；packaged 來自 extraResources `copilot-cli/@github/copilot-<plat>-<arch>/`；remote deploy 傳送對應平台 binary。`COPILOT_CLI_VERSION` 必須與宣告的 exact dependency、實裝 CLI 版本一致，drift-guard 同時檢查宣告與實裝版本。
 
-**Do not change casually because**：別再引入 `@github/copilot-sdk`（已刻意移除,ACP 是直接 CLI 協定,不需要 SDK 中介）;升 CLI 版本同步改 `COPILOT_CLI_VERSION` + 確認平台套件該版存在（remote deploy 要抓）。
+**Reason**：CLI 是 Shelf 直接啟動與部署的 runtime，不能只靠 SDK 的版本範圍間接決定。升級時先評估當時最新穩定版，再鎖定通過相容性驗證的確切版本；檢查所有支援平台的套件、ACP lifecycle/native controls、launch flags，以及保留的 SDK quota 路徑。預發版與 floating latest 不進 dependency pin。
 
-**Related**：`deployment#4`（copilot CLI 走 CLI 版本）、`agent-providers#13`（走 ACP）、`src/main/agent/agent-runtime-versions.ts`、`agent-server/providers/copilot/helpers.ts`（`resolveCopilotBinary`）。
+**Do not change casually because**：不要將 conversation 改回 SDK transport。升 CLI 時同步更新 runtime pin，確認遠端套件可下載並執行部署後的版本檢查；SDK 不必跟著無條件升級，但它對新 binary 的 quota 相容性仍須驗證。
+
+**Related**：`deployment#4`、`agent-providers#13`、`agent-providers#26`、`src/main/agent/agent-runtime-versions.ts`、`agent-server/providers/copilot/helpers.ts`。
 
 ## agent-providers#10 — Copilot 互動式登入靠 CLI `copilot login` device flow，不靠 SDK、不自刻 client_id  ·  [Decision]
 
@@ -267,15 +269,15 @@ SDK 0.3.159 **並存**兩種 compact 完成訊號:`status` 形狀(`subtype:'stat
 
 **Do not change casually because**：這是 **Copilot title 慣例的特判，不是 ACP 標準**；Copilot 改名就會失效。terminal update 可能在 prompt settlement、甚至下一 prompt 開始後才到（`#37`），所以 output sink 必須維持 session lifetime；不要用 stop reason 當內容 barrier。`task_complete` 無內容時仍只是一個控制訊號，不應產生空 reply。
 
-## agent-providers#25 — copilot ACP 不 emit `usage_update` → status bar 對 copilot 沒有 ctx / cost / AI-credit（等上游 #4233）  ·  [Gotcha]
+## agent-providers#25 — Copilot ACP usage 可供觀測，ctx 顯示仍由 provider 邊界抑制  ·  [Gotcha]
 
-**Symptom**：copilot 的 agent status bar 只有 `state | provider | model | mode | effort`,缺 `ctx: NN%` 及其後的 cost / turns / credit（claude 有）。
+**現況**：CLI 1.0.103 的真實 new-session 與 reconnect/load 後對話都有有效的 `usage_update.used`、`size`，事件在 prompt 進行中到達，早於 `end_turn`。這些樣本沒有 `cost`，也沒有觀測到 session 建立／load 期間的 usage；不能推論每個 lifecycle 節點都會通知。這些資料支持另行實作經驗證的 context 顯示，但目前 Copilot provider 仍攔下 usage，只記錄診斷（`agent-providers#53`）。
 
-**Root cause**：`ctx`(context usage)來自 ACP `usage_update`（`translate.ts` 已有 handler,讀 `used`/`size`）。但 **`copilot --acp` 從不 emit `usage_update`**——它認得這個 type（在自己的 ACP schema 裡）卻不送。資料其實存在於 copilot CLI 內部（`/context`、`/usage`、experimental `statusLine.command` 的 `context_window.*`、`aiCreditsUsed/Remaining` 都算好了),只是沒透過 ACP 轉發（parity gap）。`numTurns`/`rateLimits` 則是 **Claude SDK 專屬**、ACP 標準沒有,copilot 本就給不出。
+**Reason**：共用 ACP translator 遇到缺少／零 denominator 會產生合成的 `ctx: 0%`。升 CLI 不能同時隱含啟用未驗證的 UI 路徑。Context limit 必須來自實際事件，不硬編或從 model 名稱推估。其他 provider 的共用 translator 行為不受這個 Copilot 邊界影響。
 
-**Fix / note**：**不自己估**——Zed 對 copilot 硬編 128k context window、估錯（[zed#44909](https://github.com/zed-industries/zed/issues/44909)）。已開上游票 [copilot-cli #4233](https://github.com/github/copilot-cli/issues/4233) 要 ACP emit `usage_update`（ctx 走標準 `used`/`size`/`cost`；AI-credit 走 `usage_update._meta`）。**ctx 仍等上游**（修好後自動亮,handler 現成）。**AI-credit 已不等 ACP**：改走 SDK `account.getQuota` 取 account-level premium 額度（見 `#26`）——這是 account 級、跟 session ctx 無關,不需要 #4233。`numTurns`/`rateLimits` 是 Claude SDK 專屬,copilot 給不出。
+**Remaining parity**：[copilot-cli #4233](https://github.com/github/copilot-cli/issues/4233) 仍涵蓋 setup/restore/turn 時序與 cost／AI-credit 資料。觀測器不讀 `_meta`，因此沒有對 AI-credit metadata 是否存在作結論。Account credit 繼續走 SDK `account.getQuota`（`agent-providers#26`），不能把 session cost 當成 account quota。`numTurns`／`rateLimits` 沒有對應的標準 ACP 欄位。
 
-**Related**：`agent-server/providers/acp/translate.ts`（`usage_update` handler）、`agent-providers#26`（credit via SDK）、`src/renderer/components/agent/StatusBar.tsx`、`UPSTREAM_WATCH.md`。
+**Related**：`agent-server/providers/copilot/usage-observation.ts`、`agent-server/providers/acp/translate.ts`、`agent-providers#26`、`agent-providers#53`、`UPSTREAM_WATCH.md`。
 
 ## agent-providers#26 — copilot account credit 走 SDK `account.getQuota`（config-home auth）+ 每 host cache-aside(15min)+ execution-end 觸發,executionId-less status 送渲染  ·  [Decision]
 
@@ -286,7 +288,7 @@ SDK 0.3.159 **並存**兩種 compact 完成訊號:`status` 形狀(`subtype:'stat
 - **觸發 = execution-end**（無開場 fetch,對齊 claude 首輪後才有 status）。`exec.ts` 在 `backend.query` 後 fire-and-forget `backend.refreshAccountStatus?.(cache, send, appId)`（`ServerBackend` 選配 hook）,用 **base send（executionId-less）**。
 - **送渲染**：credit status **不帶 `state`**（status wire `state?` 因此設為選配,避免 credit-only status 誤翻 streaming）。`execution-dispatcher` 特判「executionId-less 的 `status`」→ 走 `onSessionEvent`（session-scoped）→ IPC → store `setStatus` 合併 `credits` → `StatusBar.tsx` 渲染,不進 execution reader。
 
-**Reason**：credit 是 account 級、ACP 無標準欄位且 `copilot --acp` 不 emit usage（`#25`）,SDK 是今天唯一乾淨路徑。spawn copilot binary 有成本 → 每 host 15min 一次、execution-end 才查、cache 共用,把 spawn 頻率壓到最低。
+**Reason**：credit 是 account 級，ACP session usage 不提供對等的標準 account-quota 欄位（`#25`），因此獨立使用 SDK quota RPC。spawn copilot binary 有成本 → 每 host 15min 一次、execution-end 才查、cache 共用,把 spawn 頻率壓到最低。
 
 **Do not change casually because**：(1) 拿掉「executionId-less status → onSessionEvent」特判,credit status 會因無對應 execution 被丟棄。(2) 把 `state?` 改回必填,credit-only status 會誤觸發 streaming 旁效。(3) cache key 加回 appId 會讓同 host 多 tab 各自 spawn,失去共用。(4) `account.getQuota` 是 `@experimental` → 一定 fail-quiet,別讓它 block execution 或 crash。
 
@@ -614,3 +616,15 @@ Fresh capabilities probe 若建立 `session/new`，立刻透過 session-scoped `
 **Do not change casually because：** 不要把 `/clear` 攔截搬到 renderer／dispatcher、重啟整個 Copilot process、呼叫 current ACP surface 不提供的 private SDK RPC，或把 `/new`／`/reset` 恢復成 alias。不要讓 bare clear lazy-create session，也不要為 clear 的 empty session 建特殊 reconnect 規則；這兩者都會讓 clear 後狀態偏離 freshly initialized AgentView。Raw `/clear` 與失敗 initialization 的 trailing prompt 永遠不能進入 `session/prompt`。
 
 **Related：** `agent-providers#47`、`agent-providers#51`、`agent-config-flow#11`、`contracts/agent-routing`、`architecture/agent-execution`。
+
+## agent-providers#53 — Copilot usage 先以 provider-only 邊界觀測，再決定顯示整合  ·  [Decision]
+
+**Decision**：`createCopilotUsageObserver` 在 Copilot 的 `driver.onSessionUpdate` 前攔下 `usage_update`；其餘通知照常傳遞。觀測期間不新增 renderer state／wire 欄位，不顯示 ctx，也不改 account-credit 路徑。Live new/load 後的有效 used/size 是後續 validated ctx integration 的依據；實際啟用屬於另行界定的 UI 變更。
+
+**Diagnostics**：走既有 `serverLog`，tag 為 `copilot-usage`。正常 usage 與 session/prompt start、settlement markers 用 info；異常值用 warn。每筆只包含 session／operation correlation、相對時序、output sink 是否已綁定，以及 used／size／cost 的型別與通過範圍驗證的數值、貨幣代碼。任意字串、raw payload、prompt、account identity、credentials 與 `_meta` 不寫入。Main 預設 error，live observation 必須啟用 info 或 debug；只有同一測試序列的 markers 可見且 prompt 已 settled，才能記錄 no-event。Markers 描述 Shelf 操作時序，不宣稱 provider content 的 turn ownership。
+
+**Reason**：有事件、欄位有效與可安全顯示是不同條件。Provider 邊界可避免升 CLI 意外啟用共用 translator 的 fallback，同時觀測 sink 綁定前及 prompt settlement 後的通知。固定欄位與數值範圍讓診斷保持有界，也不需解析 provider-private metadata。
+
+**Do not change casually because**：不要把抑制搬進共用 translator，或以觀測樣本推定所有 model 的 limit、cost、AI-credit 或通知時序。後續整合仍須驗證 finite/nonnegative used、positive size 與資料一致性，並涵蓋 malformed、missing、early 與 late arrival；不能把缺資料當成零。
+
+**Related**：`agent-providers#25`、`agent-providers#26`、`architecture/agent-execution`、`agent-server/providers/copilot/usage-observation.ts`、`e2e/copilot-usage-observation.spec.ts`。

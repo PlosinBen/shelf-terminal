@@ -568,6 +568,7 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
       name: 'shelf-copilot',
       onRequestPermission,
       onSessionUpdate(notification) {
+        // Observe without enabling context display on CLI upgrades. agent-providers#53
         if (usageObserver.observe(notification, !!(sessionSend || activeExecutionSend))) return;
         observeAutopilotCompletion(notification);
         // Copilot's ACP adapter flattens session.info into agent_message_chunk,

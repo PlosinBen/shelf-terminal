@@ -73,6 +73,7 @@ SessionId 是 UUID v4，存在 canonical `Project.agentSessionIds[provider]`，�
 - **agent-server 內建 registered internal `fake` provider**，speak 同一個 `ServerBackend` interface + 同一組 `OutgoingMessage` shape —— 沒有 test-only event，凡 fake 能 emit 的事 real provider 都可能 emit
 - **顯式 fake 模式**：dev/E2E renderer 可顯示並選取 `fake`，整條 state、routing、backend 與 wire identity 都維持 `fake`；production 只以 registry visibility 隱藏，不把它視為非法 provider
 - **`SHELF_TEST_MODE=1` substitution 模式**：不論 requested provider 是哪個 key，都以 fake implementation 執行，但 backend registry 仍按 requested provider 分開 cache，事件與狀態保留 requested identity
+- **Copilot usage transport fixture**：同時設定 `SHELF_TEST_COPILOT_USAGE=1` 時，Copilot 改走實際 provider + mock ACP agent；其他 provider 維持 fake。此 fixture 不查真實 account quota，用於證明 usage 在 provider 被攔下且正常回覆仍到 renderer，避免 fake backend 繞過被測邊界。沒有 `SHELF_TEST_MODE=1` 時不啟用。
 - **Scenario syntax**: prefix match + `|` chain（`text:hi|delay:30|tool:Read`），文件在 `fake.ts` JSDoc
 - **Picker resolve 驗證走 echo**: fake 解 picker 後 emit `text` message `picker_answers:<json>` 或 `picker_answers:cancelled`，spec assert echo（避免戳 renderer 內部 state）
 - **Playwright fixture per-test scope**（不是 worker scope）：每 test 新 Electron + tempdir

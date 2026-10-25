@@ -132,6 +132,8 @@ title: shelf-terminal — Intent → File Index
 | Session hosting 抽象（兩張 map） | `session-registry.ts` | `createSessionRegistry()`：`sessions: Map<sid, runtimeKey>` + `runtimes: Map<runtimeKey, T>`，`runtimeKeyFor` 決定 isolated（sid）/shared（provider:account）。為 shared 部署預備（isolated milestone 未用） |
 | Claude provider | `providers/claude/index.ts` | `@anthropic-ai/claude-agent-sdk` wrapper：持久 streaming-input session、emit 渲染原語、auth 偵測 |
 | Copilot provider (ACP) | `providers/copilot/index.ts` | `createCopilotBackend`：spawn `copilot --acp`、管理 restore/native config/login，並以 session replacement 實作 `/clear` |
+| Copilot usage 觀測 | `providers/copilot/usage-observation.ts` | 攔截 usage、驗證並摘要標準欄位、記錄 session/prompt 時序診斷 |
+| Copilot usage E2E transport fixture | `providers/copilot/test-agent.ts` | 僅於測試替換模式提供實際 Copilot provider + mock ACP transport |
 | Codex provider (app-server) | `providers/codex/index.ts` | `createCodexBackend`：直接驅動 pinned `codex app-server` JSON-RPC，封裝 turn/session、auth、config、skills/MCP、quota/context、tool items 與 approval bridge |
 | Codex native controls | `providers/codex/native-controls.ts` | 原生選項、有效設定、managed 限制與 settings confirmation；不保存 project Prefs |
 | ACP 共用 toolkit | `providers/acp/` | provider-agnostic ACP runtime：connection/initialize、new/resume/load（load replay suppression）、update translation、permission、capabilities、MCP 與測試 mock |
@@ -159,7 +161,7 @@ title: shelf-terminal — Intent → File Index
 | Fake provider | `providers/fake/index.ts` | registered internal provider；可顯式選取，也可在 `SHELF_TEST_MODE=1` 作 requested provider 的 substitute；prompt 走 prefix-matched scenario |
 | Fake provider 測試 | `providers/fake/fake.test.ts` | 每個 scenario 的 wire-shape 驗證 + stop/abort 行為 |
 | Bundle build | `build.mjs` | esbuild → `dist/agent-server/<version>/index.js` 單一 ESM bundle（index/exec/dispatcher 同一 bundle，role 由 argv 選） |
-| Copilot provider 測試 | `providers/copilot/{copilot,helpers,login,credit}.test.ts` | ACP backend wire-shape / native config / reconnect restore+pointer persistence / helper / device-flow login / credit cache |
+| Copilot provider 測試 | `providers/copilot/{copilot,helpers,login,credit,usage-observation}.test.ts` | ACP backend wire-shape / native config / restore / login / credit cache / usage suppression 與診斷欄位驗證 |
 | ACP toolkit 測試 | `providers/acp/*.test.ts` | connection/client/translate/permission/capabilities/mcp/shelf-mcp + mock-agent 驅動的 toolkit 驗證 |
 | Dispatcher 單元測試 | `dispatcher.test.ts` | open/close_session / raw relay / reconnect + backoff / inner-ping hung / proc-identity guard / cache 側通道 |
 | Model-cache 單元測試 | `model-cache.test.ts` | TTL hit/miss/expiry evict |
