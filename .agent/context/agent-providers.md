@@ -275,7 +275,7 @@ SDK 0.3.159 **並存**兩種 compact 完成訊號:`status` 形狀(`subtype:'stat
 
 **Reason**：共用 ACP translator 遇到缺少／零 denominator 會產生合成的 `ctx: 0%`。升 CLI 不能同時隱含啟用未驗證的 UI 路徑。Context limit 必須來自實際事件，不硬編或從 model 名稱推估。其他 provider 的共用 translator 行為不受這個 Copilot 邊界影響。
 
-**Scope and limits**：[copilot-cli #4233](https://github.com/github/copilot-cli/issues/4233) 是 usage 能力的來源脈絡；有效 used/size 已可供 Shelf 整合，ctx 顯示目前沒有已證實的上游 blocker。觀測器僅摘要 notification 與 update 的 `_meta` 型別、key 數量及固定 allowlist 的 credit 欄位。含此診斷的真實 usage 樣本中，notification 與 update 兩層 `_meta` 都是 undefined，`cost` 也未提供；因此該樣本只有標準 used/size，沒有透過這些欄位提供 AI-credit。這不能推論所有 model／billing 情境均不支援，也不能宣稱 #4233 的完整 AI-credit parity 已修復。Account credit 刻意維持獨立的 SDK `account.getQuota` 路徑（`agent-providers#26`），不等待 ACP parity。Cost 與 setup/restore 通知時序的樣本限制保留於此，不作必要上游追蹤。不能把 session cost 當成 account quota；`numTurns`／`rateLimits` 沒有對應的標準 ACP 欄位。
+**Scope and limits**：[copilot-cli #4233](https://github.com/github/copilot-cli/issues/4233) 是 usage 能力的來源脈絡；有效 used/size 已可供 Shelf 整合，ctx 顯示目前沒有已證實的上游 blocker。觀測器僅摘要 notification 與 update 的 `_meta` 型別、key 數量及固定 allowlist 的 credit 欄位。含此診斷的真實 usage 樣本中，notification 與 update 兩層 `_meta` 都是 undefined，`cost` 也未提供；因此該樣本只有標準 used/size，沒有透過這些欄位提供 AI-credit。這不能推論所有 model／billing 情境均不支援，也不能宣稱 #4233 的完整 AI-credit parity 已修復。Account credit 刻意維持獨立的 SDK `account.getQuota` 路徑（`agent-providers#26`），不等待 ACP parity。Shelf 現有需求已足夠，但原提報者 PlosinBen 明確要求保留 #4233 的後續追蹤，核對 ACP AI-credit metadata、可用時的 cost，以及原票要求的通知時序；此追蹤不代表 Shelf 必須等待或改回 ACP credit。每個 turn 後通知是更新時機，不等於要求每個 turn 的獨立消耗量。不能把 session cost 當成 account quota；`numTurns`／`rateLimits` 沒有對應的標準 ACP 欄位。
 
 **Related**：`agent-server/providers/copilot/usage-observation.ts`、`agent-server/providers/acp/translate.ts`、`agent-providers#26`、`agent-providers#53`。
 
