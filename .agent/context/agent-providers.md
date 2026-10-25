@@ -275,9 +275,9 @@ SDK 0.3.159 **並存**兩種 compact 完成訊號:`status` 形狀(`subtype:'stat
 
 **Reason**：共用 ACP translator 遇到缺少／零 denominator 會產生合成的 `ctx: 0%`。升 CLI 不能同時隱含啟用未驗證的 UI 路徑。Context limit 必須來自實際事件，不硬編或從 model 名稱推估。其他 provider 的共用 translator 行為不受這個 Copilot 邊界影響。
 
-**Remaining parity**：[copilot-cli #4233](https://github.com/github/copilot-cli/issues/4233) 仍涵蓋 setup/restore/turn 時序與 cost／AI-credit 資料。觀測器不讀 `_meta`，因此沒有對 AI-credit metadata 是否存在作結論。Account credit 繼續走 SDK `account.getQuota`（`agent-providers#26`），不能把 session cost 當成 account quota。`numTurns`／`rateLimits` 沒有對應的標準 ACP 欄位。
+**Scope and limits**：[copilot-cli #4233](https://github.com/github/copilot-cli/issues/4233) 是 usage 能力的來源脈絡；有效 used/size 已可供 Shelf 整合，ctx 顯示目前沒有已證實的上游 blocker。觀測器不讀 `_meta`，因此沒有對 AI-credit metadata 是否存在作結論。Account credit 刻意維持獨立的 SDK `account.getQuota` 路徑（`agent-providers#26`），不等待 ACP parity。Cost 與 setup/restore 通知時序的樣本限制保留於此，不作必要上游追蹤。不能把 session cost 當成 account quota；`numTurns`／`rateLimits` 沒有對應的標準 ACP 欄位。
 
-**Related**：`agent-server/providers/copilot/usage-observation.ts`、`agent-server/providers/acp/translate.ts`、`agent-providers#26`、`agent-providers#53`、`UPSTREAM_WATCH.md`。
+**Related**：`agent-server/providers/copilot/usage-observation.ts`、`agent-server/providers/acp/translate.ts`、`agent-providers#26`、`agent-providers#53`。
 
 ## agent-providers#26 — copilot account credit 走 SDK `account.getQuota`（config-home auth）+ 每 host cache-aside(15min)+ execution-end 觸發,executionId-less status 送渲染  ·  [Decision]
 
