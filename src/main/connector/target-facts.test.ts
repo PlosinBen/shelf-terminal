@@ -6,9 +6,10 @@ import {
   encodeTargetFactsFrame,
   type TargetFacts,
 } from './target-facts';
+import type { ConnectorConfig } from './config';
 import { toConnectorConfig } from './config';
 
-function runtimeWithExec(exec: (cwd: string, cmd: string) => Promise<ExecResult>): ConnectorRuntime {
+function runtimeWithExec(exec: (cwd: string, cmd: string) => Promise<ExecResult>, config: ConnectorConfig = { type: 'local' }): ConnectorRuntime {
   const connector: Connector = {
     resolveHomePath: () => Promise.resolve('/home/test'),
     copyFile: () => Promise.resolve(),
@@ -24,11 +25,34 @@ function runtimeWithExec(exec: (cwd: string, cmd: string) => Promise<ExecResult>
     cleanupSession: () => Promise.resolve(0), clearUploads: () => Promise.resolve(0),
     getUploadsSize: () => Promise.resolve({ totalBytes: 0, fileCount: 0 }),
   };
-  return new ConnectorRuntime(toConnectorConfig({ type: 'local' }), connector);
+  return new ConnectorRuntime(toConnectorConfig(config), connector);
 }
 
 describe('TargetFactsResolver', () => {
   const facts: TargetFacts = { targetOS: 'unix', defaultShell: '/bin/zsh' };
+
+  it.each(['exec-error', 'invalid-output'])('does not use Windows interop after WSL POSIX %s', async (category) => {
+    const exec = vi.fn(async (_cwd: string, command: string) => {
+      if (command.startsWith('powershell.exe')) return {
+        stdout: encodeTargetFactsFrame('fixed-nonce', { targetOS: 'windows', defaultShell: 'powershell.exe' }), stderr: '',
+      };
+      if (category === 'exec-error') throw new Error('POSIX probe exited 33');
+      return { stdout: 'missing frame', stderr: '' };
+    });
+    const runtime = runtimeWithExec(exec, { type: 'wsl', distro: 'Ubuntu' });
+    const result = await new TargetFactsResolver({ nonce: () => 'fixed-nonce' }).resolve(runtime);
+    expect(result).toMatchObject({ ok: false, reason: 'probe-failed', attempts: [{ candidate: 'posix', category }] });
+    expect(exec).toHaveBeenCalledTimes(1);
+  });
+
+  it('still probes PowerShell for a Windows local target', async () => {
+    const facts: TargetFacts = { targetOS: 'windows', defaultShell: 'powershell.exe' };
+    const exec = vi.fn().mockRejectedValueOnce(new Error('POSIX unavailable'))
+      .mockResolvedValueOnce({ stdout: encodeTargetFactsFrame('fixed-nonce', facts), stderr: '' });
+    await expect(new TargetFactsResolver({ nonce: () => 'fixed-nonce' }).resolve(runtimeWithExec(exec)))
+      .resolves.toEqual({ ok: true, facts });
+    expect(exec).toHaveBeenCalledTimes(2);
+  });
 
   it('accepts one nonce-bound frame surrounded by ordinary stdout noise', async () => {
     const exec = vi.fn(() => Promise.resolve({
@@ -117,4 +141,15 @@ describe('TargetFactsResolver', () => {
     await expect(sharedWait).resolves.toEqual({ ok: true, facts });
     expect(exec).toHaveBeenCalledTimes(1);
   });
+});
+
+it('retains probe failure reason without logging its command or nonce', async () => {
+  const exec = vi.fn(async (_cwd: string, command: string) => {
+    throw new Error(`Command failed: ${command}\nprobe exited 33`);
+  });
+  const result = await new TargetFactsResolver({ nonce: () => 'private-nonce' })
+    .resolve(runtimeWithExec(exec, { type: 'wsl', distro: 'Ubuntu' }));
+  expect(JSON.stringify(result)).toContain('probe exited 33');
+  expect(JSON.stringify(result)).not.toContain('private-nonce');
+  expect(JSON.stringify(result)).not.toContain('uname');
 });

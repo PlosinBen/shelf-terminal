@@ -50,7 +50,7 @@ export function encodeTargetFactsFrame(nonce: string, facts: TargetFacts): strin
   return `${TARGET_FACTS_FRAME}:${nonce}:${payload}`;
 }
 
-/** Independent, generation-scoped target fact resolver used only by terminals. */
+/** Independent, generation-scoped target fact resolver. */
 export class TargetFactsResolver {
   private readonly probes = new WeakMap<ConnectorRuntime, Promise<TargetFactsResult>>();
   private readonly makeNonce: () => string;
@@ -77,9 +77,13 @@ export class TargetFactsResolver {
     const attempts: TargetFactsAttemptFailure[] = [];
 
     for (const candidate of CANDIDATES) {
+      // WSL can execute Windows binaries through interop; their OS is not the target OS.
+      // A failed POSIX probe must remain a failure so callers can use compatibility launch.
+      if (runtime.config.type === 'wsl' && candidate.name === 'powershell') continue;
+      const command = candidate.command(nonce);
       if (!runtime.isCurrentGeneration()) return invalidated(attempts);
       try {
-        const result = await runtime.exec(cwd, candidate.command(nonce));
+        const result = await runtime.exec(cwd, command);
         if (!runtime.isCurrentGeneration()) return invalidated(attempts);
         const parsed = parseTargetFactsFrame(result.stdout, nonce);
         if (parsed.ok) return parsed;
@@ -93,7 +97,10 @@ export class TargetFactsResolver {
         attempts.push({
           candidate: candidate.name,
           category: 'exec-error',
-          detail: error instanceof Error ? error.message : String(error),
+          detail: (error instanceof Error ? error.message : String(error))
+            .split(command).join('[probe command]')
+            .split(nonce).join('[probe nonce]')
+            .slice(0, 2048),
         });
       }
     }

@@ -246,3 +246,19 @@ it('logs only the first raw and visible output sizes, including across hidden in
     h.exitCbs.forEach((callback) => callback(0));
   } finally { info.mockRestore(); }
 });
+
+it('records probe failure details and keeps compatibility terminal input/output usable', async () => {
+  const error = vi.spyOn(log, 'error').mockImplementation(() => {});
+  h.targetFactsResult = { ok: false, reason: 'probe-failed', attempts: [
+    { candidate: 'posix', category: 'exec-error', detail: 'POSIX probe exited 33' },
+  ] };
+  const win = makeWin();
+  await spawnPty('wsl-project', 'wsl-tab', '/cwd', { type: 'wsl', distro: 'Ubuntu' }, win);
+  expect(error).toHaveBeenCalledWith('terminal-runtime', expect.stringContaining('POSIX probe exited 33'));
+  expect(error).toHaveBeenCalledWith('terminal-runtime', expect.stringContaining('fallback=compatibility'));
+  emit('ubuntu$ ');
+  expect(win.webContents.send).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ data: 'ubuntu$ ' }));
+  writePty('wsl-tab', 'pwd\n');
+  expect(h.write).toHaveBeenCalledWith('pwd\n');
+  error.mockRestore();
+});

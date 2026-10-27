@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Connector, ExecResult, Shell } from './types';
 import { createAppOS } from './app-os';
+import { TargetFactsResolver } from './target-facts';
+import { selectTerminalRunner } from '../terminal-runner/selector';
+import { prepareRunnerLaunch } from '../terminal-runner/runners';
+import { createTerminalInitTokens } from '@shared/terminal-init-osc';
 import { toConnectorConfig } from './config';
 import { ConnectorRuntimeOwner } from './runtime-owner';
 
@@ -173,4 +177,21 @@ describe('connector layering contracts', () => {
 
     expect(owner.get(config).generation.id).not.toBe(first.generation.id);
   });
+});
+
+it('preserves the original WSL launch through resolver, selection and native runner after probe failure', async () => {
+  const runtime = createAppOS('win32').createRuntime(toConnectorConfig({ type: 'wsl', distro: 'Ubuntu' }));
+  vi.spyOn(runtime, 'exec').mockRejectedValue(new Error('probe failed'));
+  const plan = runtime.createCompatibilityLaunchPlan('/work tree', { PROJECT_ENV: 'value' });
+  const facts = await new TargetFactsResolver().resolve(runtime);
+  const selection = selectTerminalRunner(facts, plan);
+  const prepared = await prepareRunnerLaunch({
+    runtime, selection, cwd: '/work tree', appId: 'test-app', projectId: 'test-project',
+    nonce: 'test-nonce', tokens: createTerminalInitTokens('test-nonce'),
+  });
+  expect(prepared.plan).toBe(plan);
+  expect(prepared.mode).toBe('native');
+  expect(plan.executable).toBe('wsl.exe');
+  expect(plan.args).toEqual(['-d', 'Ubuntu', '--', 'sh', '-c',
+    "export PROJECT_ENV='value'; cd '/work tree' && exec $SHELL"]);
 });

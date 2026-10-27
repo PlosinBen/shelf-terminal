@@ -146,9 +146,9 @@ export async function spawnPty(
     if (controller.signal.aborted) { trace('cancelled'); return; }
     trace(`target-facts:complete ok=${targetFacts.ok}`);
     if (!targetFacts.ok) {
-      log.debug(
+      log.error(
         'terminal-runtime',
-        `target facts unavailable generation=${runtime.generation.id} reason=${targetFacts.reason} attempts=${targetFacts.attempts.map((attempt) => `${attempt.candidate}:${attempt.category}`).join(',')}`,
+        `target facts unavailable project=${projectId} tab=${tabId} generation=${runtime.generation.id} reason=${targetFacts.reason} fallback=compatibility attempts=${JSON.stringify(targetFacts.attempts)}`,
       );
     }
     const selection = selectTerminalRunner(targetFacts, compatibilityPlan);
