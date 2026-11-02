@@ -7,6 +7,8 @@ import { createCodexBackend } from './index';
 import type { LoginRpc } from '../codex-shared/app-server-login';
 import type { OutgoingMessage } from '../types';
 import { setLogSink, type ServerLogMessage } from '../../server-logger';
+import { createShelfMcpLifecycle, ShelfMcpStartupError } from '../../shelf-mcp-lifecycle';
+import { SHELF_MCP_FAILURE, SHELF_MCP_STATE } from '@shared/shelf-mcp';
 // Lifecycle tests use fake app-server processes, not a main bootstrap channel.
 vi.mock('../../shelf-mcp', () => ({ getSharedShelfMcp: async () => null }));
 
@@ -1094,6 +1096,32 @@ describe('Codex official app-server backend lifecycle', () => {
     expect(backend.skillTarget!('app-1')).toBe(path.join(os.homedir(), '.shelf', 'apps', 'app-1', 'codex-home', '.agents', 'skills'));
     expect(backend.configHome!(undefined)).toBeUndefined();
     expect(backend.skillTarget!(undefined)).toBeUndefined();
+  });
+
+  it('continues app-server turns after listener failure without registering a replacement shelf', async () => {
+    const app = new FakeAppServer();
+    const report = vi.fn();
+    const lifecycle = createShelfMcpLifecycle({
+      start: async () => { throw new ShelfMcpStartupError(SHELF_MCP_FAILURE.LISTENER, new Error('bind failed')); },
+      report, log: vi.fn(),
+    });
+    const backend = createCodexBackend({
+      createAppServer: () => app, getShelfMcp: lifecycle.getEndpoint,
+      loadMcpServers: () => ({ servers: {
+        shelf: { type: 'http', url: 'http://untrusted.test/mcp' },
+        'shelf-extra': { type: 'http', url: 'http://user.test/mcp' },
+      }, errors: [] }),
+    });
+    try {
+      const out: OutgoingMessage[] = [];
+      await backend.gatherCapabilities!('/repo');
+      await backend.query({ prompt: 'hello', cwd: '/repo' }, m => out.push(m));
+      const params = app.calls.find(c => c.method === 'thread/start')!.params as any;
+      expect(params.config.mcp_servers).toEqual({ 'shelf-extra': { url: 'http://user.test/mcp' } });
+      expect(app.calls.some(c => c.method === 'turn/start')).toBe(true);
+      expect(out.some(m => m.type === 'error')).toBe(false);
+      expect(report).toHaveBeenCalledExactlyOnceWith({ state: SHELF_MCP_STATE.UNAVAILABLE, reason: SHELF_MCP_FAILURE.LISTENER });
+    } finally { backend.dispose(); }
   });
 
   it('builds app-scoped env, required shelf MCP, user MCP, and secret-safe config for thread/start', async () => {

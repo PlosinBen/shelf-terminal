@@ -2,8 +2,17 @@ import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
 import type { McpServerBlock, McpServersFile } from '@shared/mcp';
-import { validateMcpEntry } from '@shared/mcp';
+import { validateMcpEntry, SHELF_MCP_SERVER_NAME } from '@shared/mcp';
 import { shelfPlacement, ShelfFileTypeMcp } from '@shared/shelf-paths';
+
+/** The HTTP bridge must never be replaced by a legacy user entry. */
+export function withoutBuiltinShelfMcp(servers: McpServersFile, warn: (message: string) => void): McpServersFile {
+  if (!Object.hasOwn(servers, SHELF_MCP_SERVER_NAME)) return servers;
+  const result = { ...servers };
+  delete result[SHELF_MCP_SERVER_NAME];
+  warn('User MCP named shelf omitted: the name belongs to the built-in Shelf bridge');
+  return result;
+}
 
 /**
  * Agent-server consumption of the projected app-level MCP config (see

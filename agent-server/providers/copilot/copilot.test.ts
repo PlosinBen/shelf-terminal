@@ -13,8 +13,36 @@ import { createMockAcpAgent } from '../acp/mock-agent';
 import { COPILOT_AUTOPILOT_MODE_ID, createCopilotBackend } from './index';
 import { COPILOT_ACP_CANCELLATION_NOTICE } from './helpers';
 import type { OutgoingMessage } from '../types';
+import * as mcpConfig from '../mcp-config';
+import { createShelfMcpLifecycle, ShelfMcpStartupError } from '../../shelf-mcp-lifecycle';
+import { SHELF_MCP_FAILURE, SHELF_MCP_STATE } from '@shared/shelf-mcp';
 
 const COPILOT_AGENT_MODE_ID = 'https://agentclientprotocol.com/protocol/session-modes#agent';
+
+it('keeps ACP sessions usable after authorization failure without a legacy shelf replacement', async () => {
+  const sessions: any[] = [];
+  const mock = createMockAcpAgent({
+    onNewSession: params => sessions.push(params),
+    updatesOnPrompt: [{ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Still works' }, messageId: 'reply' }],
+  });
+  const loaded = vi.spyOn(mcpConfig, 'loadProjectedMcpServers').mockReturnValue({
+    servers: { shelf: { type: 'http', url: 'http://untrusted.test/mcp' }, 'shelf-extra': { type: 'http', url: 'http://user.test/mcp' } }, errors: [],
+  });
+  const report = vi.fn();
+  const log = vi.fn();
+  const start = vi.fn(async () => { throw new ShelfMcpStartupError(SHELF_MCP_FAILURE.AUTHORIZATION, new Error('secret-token')); });
+  const lifecycle = createShelfMcpLifecycle({ start, report, log });
+  const backend = createCopilotBackend({ openAgent: () => ({ target: mock }), getShelfMcp: lifecycle.getEndpoint });
+  try {
+    const out: OutgoingMessage[] = [];
+    await backend.query({ prompt: 'hello', cwd: '/repo' }, m => out.push(m));
+    expect(sessions[0].mcpServers.map((s: any) => s.name)).toEqual(['shelf-extra']);
+    expect(out).toContainEqual(expect.objectContaining({ type: 'stream', content: 'Still works' }));
+    expect(out.some(m => m.type === 'error')).toBe(false);
+    expect(report).toHaveBeenCalledExactlyOnceWith({ state: SHELF_MCP_STATE.UNAVAILABLE, reason: SHELF_MCP_FAILURE.AUTHORIZATION });
+    expect(JSON.stringify(log.mock.calls)).not.toContain('secret-token');
+  } finally { backend.dispose(); loaded.mockRestore(); }
+});
 
 it('passes the shared authenticated Shelf endpoint through the ACP mapper', async () => {
   const sessions: unknown[] = [];

@@ -8,6 +8,7 @@ import { PERMISSION_CONTROL_STRATEGIES } from '@shared/permission-controls';
 import { mdTable } from '../md-table';
 import { callMain } from '../../app-tool-client';
 import { FAKE_TEST_ENV, FAKE_RETIRED_MODEL } from './test-env';
+import { SHELF_MCP, SHELF_MCP_STATE, parseShelfMcpStatus } from '@shared/shelf-mcp';
 import type { AgentPrefs } from '@shared/types';
 import type {
   OutgoingMessage,
@@ -56,6 +57,7 @@ const FAKE_AUTH_DISPLAY_NAME = 'Fake Harness';
  *   picker_input        free-text only (options=[], inputType=text)
  *   picker_number       free-text only (options=[], inputType=integer)
  *   auth_required       emit auth_required
+ *   shelf_mcp:<state>   emit startup status (available / authorization / listener / startup)
  *   env:<NAME>          echo the exec process env var <NAME> as a reply (proves
  *                       project-env injection reached the agent-server)
  *   error:<msg>         emit error
@@ -262,6 +264,15 @@ export function createFakeBackend(_representedProvider: AgentProvider = FAKE_PRO
     if (step === 'reloadfail') {
       failNextReload = true;
       send({ type: 'message', msgId: mintId('m'), msgType: 'reply', content: 'reload armed to fail' });
+      return;
+    }
+
+    if (step.startsWith('shelf_mcp:')) {
+      const value = step.slice('shelf_mcp:'.length);
+      const status = parseShelfMcpStatus(value === SHELF_MCP_STATE.AVAILABLE
+        ? { state: value }
+        : { state: SHELF_MCP_STATE.UNAVAILABLE, reason: value });
+      send({ type: SHELF_MCP.STATUS, status });
       return;
     }
 

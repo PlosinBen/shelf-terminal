@@ -8,6 +8,7 @@ import { debugLog } from './debugLog';
 import { formatTabLogId } from '../shared/tab-id';
 import type { PermissionControlCapabilities } from '../shared/permission-controls';
 import type { ConfigEditKey } from '../shared/config-ack';
+import { parseShelfMcpStatus, type ShelfMcpStatus } from '../shared/shelf-mcp';
 
 // Per-tab store for agent UI state. Split from store.ts because the
 // global store rebuilds its snapshot on every change — every useStore
@@ -69,6 +70,7 @@ export interface LocalPicker {
 }
 
 export interface AgentTabState {
+  shelfMcpStatus?: ShelfMcpStatus;
   // identity
   sessionId: string;
   provider: AgentProvider;
@@ -148,6 +150,20 @@ const DEFAULT_THROTTLE_MS = 5000;
 const DEFAULT_IN_MEMORY_MAX = 500;
 let saveThrottleMs = DEFAULT_THROTTLE_MS;
 let inMemoryMax = DEFAULT_IN_MEMORY_MAX;
+
+export function setShelfMcpStatus(tabId: string, value: ShelfMcpStatus): void {
+  const tab = tabs.get(tabId);
+  if (!tab) { debugLog('shelf-mcp', `status for removed or uninitialized tab ${tabId} — dropped`); return; }
+  let status: ShelfMcpStatus;
+  try {
+    status = parseShelfMcpStatus(value);
+  } catch {
+    console.error('[shelf-mcp] invalid startup status', { tabId });
+    return;
+  }
+  tabs.set(tabId, { ...tab, shelfMcpStatus: status });
+  notify(tabId);
+}
 
 export function setInMemoryMax(n: number) {
   inMemoryMax = Math.max(1, n);

@@ -84,6 +84,7 @@ The dispatcher is ondemand: spawned lazily by the first session to a host, reuse
 
 ## Boundaries
 
+- **Optional Shelf tools fail independently of the Agent.** Execution-owned startup attempts publish session-scoped availability through the normal host relay and app state boundary. The view displays that state without deriving it from conversation content, readiness, or provider identity. A failed startup removes the optional endpoint, never its authentication; unaffected Agent capabilities remain usable. This state is not continuous service health.
 - **Project signing authority stays in the app.** Each Project owns one in-memory signing identity for the app run. Execution endpoints receive only a public key and a grant scoped to their trusted session and fresh endpoint identity over the existing control channel. Provider adapters translate that grant into their connection format; neither the renderer nor the dispatcher owns signing authority. Endpoint shutdown ends acceptance, and execution replacement requires a fresh grant.
 - **Provider identity is resolved before tab creation.** Explicit opens require a registry member; implicit and connect-time opens use only a registry-valid project default. Missing or unknown defaults create no AgentView and never fall back to another provider.
 - **Persistence remains raw while runtime views are narrowed.** Unknown provider ids may remain on disk for round-trip preservation, but the project-state boundary exposes only live registry members to UI and dispatch consumers.

@@ -3,7 +3,7 @@ import { spawn } from 'child_process';
 import * as fs from 'fs';
 import { EventEmitter } from 'events';
 import { MEMORY_PROCESS_ROLE, MEMORY_REPORT_STATUS, MEMORY_WIRE_TYPE } from '@shared/process-memory';
-import { SHELF_MCP } from '@shared/shelf-mcp';
+import { SHELF_MCP, SHELF_MCP_STATE, SHELF_MCP_FAILURE } from '@shared/shelf-mcp';
 const { handleAppToolMock } = vi.hoisted(() => ({ handleAppToolMock: vi.fn() }));
 vi.mock('./app-tool', () => ({ handleAppTool: handleAppToolMock }));
 
@@ -320,6 +320,24 @@ describe('remote backend', () => {
 });
 
 describe('direct exec internal authorization routing', () => {
+  it('routes only public startup state to the session and rejects late state', async () => {
+    const { child } = capabilitiesChild({});
+    const events = vi.fn();
+    const { wrapProcess } = await import('./remote');
+    const remote = wrapProcess(child, undefined, undefined, undefined, undefined, undefined, events, 'p');
+    const status = { state: SHELF_MCP_STATE.UNAVAILABLE, reason: SHELF_MCP_FAILURE.AUTHORIZATION };
+    const emit = (data: unknown) => child.stdout.emit('data', Buffer.from(JSON.stringify(data) + '\n'));
+    try {
+      emit({ type: SHELF_MCP.STATUS, status: { ...status, token: 'secret' } });
+      expect(events).toHaveBeenCalledExactlyOnceWith({ type: SHELF_MCP.STATUS, status });
+      expect(JSON.stringify(events.mock.calls)).not.toContain('secret');
+      emit({ type: SHELF_MCP.STATUS, status: { state: 'invalid' } });
+      expect(events).toHaveBeenCalledTimes(1);
+      remote.kill();
+      emit({ type: SHELF_MCP.STATUS, status: { state: SHELF_MCP_STATE.AVAILABLE } });
+      expect(events).toHaveBeenCalledTimes(1);
+    } finally { remote.kill(); }
+  });
   it('adds trusted Project/session context and never projects bootstrap data to renderer', async () => {
     const { child, writes } = capabilitiesChild({});
     const onSessionEvent = vi.fn();

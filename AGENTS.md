@@ -30,6 +30,7 @@
 
 ## Rules
 
+- **跨功能降級原則**：可用性可以降級，安全與資料正確性的必要條件不可放寬。停止受影響操作，保留能獨立、安全運作的功能；明確呈現失敗，不繞過認證／授權／驗證、不靜默丟資料、不把失敗標示成功。見 `.agent/context/failure-handling.md`（failure-handling#1）。
 - Bug fix 必須包含迴歸測試 — 先寫測試重現問題，再修 code
 - **UI / 行為變更：E2E 是主動預設交付項，跟 unit test 同級** — 動到 renderer 行為（新元件、新流程、CRUD、互動）就在**同一步**補 E2E，不要標「deferred / 之後再寫」等被提醒。build 慢不是不做的理由：用 Bash `run_in_background` 跑 `npm run test:e2e -- <spec>`。core/非 UI 邏輯沒 surface 可 E2E 時才以 unit 為主。
 - 不要啟動 dev server 或 Electron（`npm run dev` / `npx electron`）— AI 看不到畫面，只會干擾使用者。驗證用 `npm run typecheck` + `npm run test:unit`；需要驗 UI 行為就寫 E2E test

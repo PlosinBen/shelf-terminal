@@ -294,6 +294,7 @@ Main → renderer (push; all return an unsubscribe fn):
 | `onPlan(cb(tabId, { content }))` | `agent:plan` |
 | `onBackgroundTasks(cb(tabId, event))` | `agent:background-tasks` — `TaskEvent` (executionId-less) |
 | `onQueue(cb(tabId, items))` | `agent:queue` — server-owned `AgentQueueItem[]` snapshot |
+| `onShelfMcpStatus(cb(tabId, status))` | `agent:shelf-mcp-status` — `ShelfMcpStatus` in `src/shared/shelf-mcp.ts`; startup-only status, no credentials; see `contracts/agent-wire-protocol` |
 | `onConnectionHealth(cb(tabId, health))` | `agent:connection-health` — `ConnectionHealth` from heartbeat RTT |
 | `onPermissionRequest(cb(tabId, req))` | `agent:permission-request` |
 | `onPickerRequest(cb(tabId, req))` | `agent:picker-request` |

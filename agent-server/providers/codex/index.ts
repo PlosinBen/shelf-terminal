@@ -14,7 +14,7 @@ import { buildCodexRuntimeConfig } from './config';
 import { normalizeCodexAccountStatus, redactCodexAccountText, refreshCodexAccountStatus } from './account-status';
 import { spawnCodexAppServerClient, type CodexAppServerNotificationHandler } from './app-server-client';
 import { summarizeTokenUsageForLog, translateCodexAppServerNotification } from './app-server-translate';
-import { loadProjectedMcpServers, type ParsedMcpConfig } from '../mcp-config';
+import { loadProjectedMcpServers, withoutBuiltinShelfMcp, type ParsedMcpConfig } from '../mcp-config';
 import { getSharedShelfMcp } from '../../shelf-mcp';
 import type { ShelfMcpEndpoint } from '@shared/shelf-mcp';
 import { serverLog } from '../../server-logger';
@@ -801,7 +801,7 @@ export function createCodexBackend(deps: CodexBackendDeps = {}): ServerBackend {
         const mapped = buildCodexRuntimeConfig({
           cwd: input.cwd,
           baseEnv,
-          mcpServers: mcp.servers,
+          mcpServers: withoutBuiltinShelfMcp(mcp.servers, message => serverLog('warn', 'codex', message)),
           shelfMcp: shelfMcp ?? undefined,
         });
         if (!mapped.ok) {

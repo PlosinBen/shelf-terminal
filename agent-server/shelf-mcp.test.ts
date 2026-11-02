@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { createShelfMcpAuthority } from '../src/main/agent/shelf-mcp-authority';
-import { SHELF_MCP } from '@shared/shelf-mcp';
+import { SHELF_MCP, SHELF_MCP_FAILURE } from '@shared/shelf-mcp';
 import { runBridgeTool } from './app-tool-tools';
 const authority = createShelfMcpAuthority();
 vi.mock('./app-tool-client', () => ({
@@ -90,7 +90,9 @@ describe('shelf MCP bridge server', () => {
   });
 
   it('does not expose a listener if authorization fails', async () => {
-    await expect(startShelfMcpServer(async () => { throw new Error('bootstrap failed'); })).rejects.toThrow('bootstrap failed');
+    await expect(startShelfMcpServer(async () => { throw new Error('bootstrap failed'); })).rejects.toMatchObject({
+      reason: SHELF_MCP_FAILURE.AUTHORIZATION, cause: new Error('bootstrap failed'),
+    });
   });
 
   it('stops accepting the token when the endpoint closes', async () => {

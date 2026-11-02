@@ -1,4 +1,5 @@
 import { AgentInitRecoveryKind } from '@shared/agent-init-recovery';
+import { SHELF_MCP_STATE, SHELF_MCP_FAILURE } from '@shared/shelf-mcp';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { AgentMsg } from './components/AgentMessage';
 
@@ -38,6 +39,7 @@ import {
   setLoginPrompt,
   finishLogin,
   setInitStatus,
+  setShelfMcpStatus,
   setInMemoryMax,
   setSaveThrottleMs,
   buildMessageTimeline,
@@ -653,6 +655,18 @@ describe('agentTabStore — buildMessageTimeline selector', () => {
 });
 
 describe('agentTabStore — decisions / auth / init', () => {
+  it('retains Shelf failure across starting/ready, clear, auth and remount until explicit availability', () => {
+    const unavailable = { state: SHELF_MCP_STATE.UNAVAILABLE, reason: SHELF_MCP_FAILURE.AUTHORIZATION } as const;
+    setShelfMcpStatus(TAB, unavailable);
+    setInitStatus(TAB, 'starting');
+    setInitStatus(TAB, 'ready');
+    clearMessages(TAB);
+    setAuthRequired(TAB, { provider: 'claude' });
+    initTab(TAB, { sessionId: SESSION, provider: 'claude' });
+    expect(__getTabForTests(TAB)!.shelfMcpStatus).toEqual(unavailable);
+    setShelfMcpStatus(TAB, { state: SHELF_MCP_STATE.AVAILABLE });
+    expect(__getTabForTests(TAB)!.shelfMcpStatus).toEqual({ state: SHELF_MCP_STATE.AVAILABLE });
+  });
   beforeEach(() => initTab(TAB, { sessionId: SESSION, provider: 'claude' }));
 
   it('setPendingPermission / setPendingPicker / setLocalPicker', () => {

@@ -1,7 +1,7 @@
 import { beforeEach, describe, it, expect, vi } from 'vitest';
 import { createDispatcherConnection, type DispatcherProc } from './dispatcher-connection';
 import { MEMORY_PROCESS_ROLE, MEMORY_REPORT_STATUS, MEMORY_WIRE_TYPE } from '@shared/process-memory';
-import { SHELF_MCP } from '@shared/shelf-mcp';
+import { SHELF_MCP, SHELF_MCP_STATE, SHELF_MCP_FAILURE, parseShelfMcpStatus } from '@shared/shelf-mcp';
 
 const logWarn = vi.hoisted(() => vi.fn());
 const logError = vi.hoisted(() => vi.fn());
@@ -45,6 +45,22 @@ function make(overrides: Partial<Parameters<typeof createDispatcherConnection>[0
 }
 
 describe('dispatcher-connection (per-host demux by sid)', () => {
+  it('routes startup availability by sid outside any execution', () => {
+    const { f, conn } = make({ parseRemoteMessage: msg => ({ type: SHELF_MCP.STATUS, status: parseShelfMcpStatus(msg.status) }) });
+    const a = vi.fn();
+    const b = vi.fn();
+    conn.openSession('a', '/repo', { onSessionEvent: a });
+    conn.openSession('b', '/repo', { onSessionEvent: b });
+    const status = { state: SHELF_MCP_STATE.UNAVAILABLE, reason: SHELF_MCP_FAILURE.LISTENER };
+    try {
+      f.emit({ sid: 'a', type: SHELF_MCP.STATUS, status });
+      expect(a).toHaveBeenCalledExactlyOnceWith({ type: SHELF_MCP.STATUS, status });
+      expect(b).not.toHaveBeenCalled();
+      conn.kill();
+      f.emit({ sid: 'a', type: SHELF_MCP.STATUS, status: { state: SHELF_MCP_STATE.AVAILABLE } });
+      expect(a).toHaveBeenCalledTimes(1);
+    } finally { conn.kill(); }
+  });
   const memoryReport = () => ({
     type: MEMORY_WIRE_TYPE.USAGE,
     status: MEMORY_REPORT_STATUS.OK,

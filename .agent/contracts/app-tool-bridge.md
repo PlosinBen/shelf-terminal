@@ -85,6 +85,13 @@ endpoint incarnation, not a wall-clock TTL; shutdown disables new dispatch befor
 reaping, and a recreated endpoint has a new nonce. See `context/mcp` mcp#13 for
 trust/lifecycle limits.
 
+Exec wraps lazy host startup in a single-attempt lifecycle. Failed authorization
+never reaches listen; startup failure returns no endpoint to HTTP provider
+adapters and emits public startup status on the session lane (see
+`contracts/agent-wire-protocol`). The Agent can continue without Shelf tools.
+This does not weaken guards or select a user MCP named `shelf` as a replacement.
+Each invalid HTTP request is rejected without changing startup availability.
+
 ## Registry (op → args → return → safe?)
 
 Authoritative definition: the `REGISTRY` constant and `handleAppTool` in `src/main/agent/app-tool.ts`. Each entry flags `safe` (read = no confirmation). `handleAppTool` returns `{ ok:false, error: 'unknown app_tool op: <op>' }` for any unregistered `op`. `isSafeAppToolOp(op)` / `isKnownAppToolOp(op)` expose the flags. The model-facing tool names + descriptions live in `agent-server/app-tool-tools.ts` (`APP_SKILL_*_DESC`). Claude registers tools through its SDK; Copilot and Codex consume the L1 in-process HTTP MCP bridge, injected respectively through ACP session config and app-server thread config. Provider-native approval behavior may differ, but the authoritative safe/write and app-level gates remain in main.

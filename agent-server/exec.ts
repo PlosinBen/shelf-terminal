@@ -20,7 +20,9 @@ import { SESSION_ENV_KEY, writeLease, removeLease as removeSessionLease, sweepDe
 import { findPidsByEnv, readProcStartTime } from './proc-scan';
 import { loadRestoreContextFor, newExecutionId, wrapSendForContext, wrapSendForExecution } from './orchestrator';
 import { initAppToolClient, resolveAppToolResult } from './app-tool-client';
-import { closeSharedShelfMcp } from './shelf-mcp';
+import { closeSharedShelfMcp, getSharedShelfMcp } from './shelf-mcp';
+import { createShelfMcpLifecycle } from './shelf-mcp-lifecycle';
+import { SHELF_MCP } from '@shared/shelf-mcp';
 import { setLogSink, serverLog } from './server-logger';
 import { setWireSink } from './logger';
 import { createSendQueue } from './send-queue';
@@ -311,10 +313,16 @@ function ensureConfigHome(backend: ServerBackend, appId: string | undefined): vo
 
 // Backend factory per provider. `Record<Provider, …>` makes this EXHAUSTIVE —
 // adding a provider to the shared registry is a compile error until wired here.
+const shelfMcpLifecycle = createShelfMcpLifecycle({
+  start: getSharedShelfMcp,
+  report: status => send({ type: SHELF_MCP.STATUS, status }),
+  log: message => serverLog('error', 'shelf-mcp', message),
+});
+
 const BACKEND_FACTORIES = {
   [CLAUDE_PROVIDER]: createClaudeBackend,
-  [COPILOT_PROVIDER]: createCopilotBackend,
-  [CODEX_PROVIDER]: createCodexBackend,
+  [COPILOT_PROVIDER]: () => createCopilotBackend({ getShelfMcp: shelfMcpLifecycle.getEndpoint }),
+  [CODEX_PROVIDER]: () => createCodexBackend({ getShelfMcp: shelfMcpLifecycle.getEndpoint }),
   [FAKE_PROVIDER]: () => createFakeBackend(FAKE_PROVIDER),
 } satisfies Record<Provider, BackendFactory>;
 

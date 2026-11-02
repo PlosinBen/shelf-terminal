@@ -1,6 +1,7 @@
 import { log } from '@shared/logger';
 import type { AgentQueueItem, TaskEvent } from '@shared/types';
 import type { AgentEvent } from './types';
+import { SHELF_MCP } from '@shared/shelf-mcp';
 
 /**
  * Per-execution handler invoked when a `permission_request` event arrives for a
@@ -123,6 +124,13 @@ export function createExecutionDispatcher(
     // model backgrounds work mid-execution. See background-tasks#2.
     if (m?.type === 'task_event') {
       onTaskEvent?.({ kind: m.kind, task: m.task, tasks: m.tasks });
+      return;
+    }
+
+    if (m?.type === SHELF_MCP.STATUS) {
+      const ev = parseRemoteMessage(m);
+      if (ev && onSessionEvent) onSessionEvent(ev);
+      else log.error('agent-remote', 'Shelf MCP startup status invalid or missing session sink — dropped');
       return;
     }
 

@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { bindAgentIPCGroup } from './ipc-agent';
 import { onAgent, emitAgent } from './types';
 import { __resetBusForTests } from './bus';
+import { SHELF_MCP, SHELF_MCP_STATE, SHELF_MCP_FAILURE } from '../../shared/shelf-mcp';
 
 // Mock the agent IPC surface. Each on* method stores its callback so
 // tests can fire it synchronously; each outbound method records calls
@@ -37,6 +38,7 @@ function makeMockAgentApi() {
       onPlan: listener('onPlan'),
       onBackgroundTasks: listener('onBackgroundTasks'),
       onQueue: listener('onQueue'),
+      onShelfMcpStatus: listener('onShelfMcpStatus'),
       onPermissionRequest: listener('onPermissionRequest'),
       onPickerRequest: listener('onPickerRequest'),
       onCapabilities: listener('onCapabilities'),
@@ -51,6 +53,14 @@ function makeMockAgentApi() {
 }
 
 describe('bindAgentIPCGroup', () => {
+  it('forwards Shelf startup state and cleans up the subscription', () => {
+    const handler = vi.fn();
+    const off = onAgent(SHELF_MCP.STATUS_EVENT, handler);
+    const status = { state: SHELF_MCP_STATE.UNAVAILABLE, reason: SHELF_MCP_FAILURE.LISTENER };
+    mock.callbacks.onShelfMcpStatus('tab-1', status);
+    expect(handler).toHaveBeenCalledExactlyOnceWith({ tabId: 'tab-1', status });
+    off();
+  });
   let mock: ReturnType<typeof makeMockAgentApi>;
   let cleanup: () => void;
 

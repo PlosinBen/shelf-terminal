@@ -2,6 +2,7 @@ import { onAgent, emitAgent } from './events';
 import { buildAgentMsg } from './agent-message-builder';
 import { debugLog } from './debugLog';
 import { formatTabLogId } from '../shared/tab-id';
+import { SHELF_MCP } from '../shared/shelf-mcp';
 import {
   peekAgentTab,
   appendChunk,
@@ -11,6 +12,7 @@ import {
   finishLogin,
   setCapabilities,
   setInitStatus,
+  setShelfMcpStatus,
   setPendingPermission,
   setPendingPicker,
   setPlan,
@@ -32,6 +34,7 @@ import {
 // the binder pattern matches bindAgentIPCGroup, so App.tsx wiring is
 // symmetric.
 export function bindAgentStoreSubscriptions(): () => void {
+  const offShelfMcp = onAgent(SHELF_MCP.STATUS_EVENT, ({ tabId, status }) => setShelfMcpStatus(tabId, status));
   const offMessage = onAgent('agent:onMessage', ({ tabId, msg }) => {
     // The renderer-side payload is already the canonical AgentMessage: its
     // discriminant is `type` (reply / fold_code / system / error / user …), NOT
@@ -163,6 +166,7 @@ export function bindAgentStoreSubscriptions(): () => void {
   });
 
   return () => {
+    offShelfMcp();
     offMessage();
     offPlan();
     offBackgroundTasks();

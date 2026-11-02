@@ -2884,6 +2884,15 @@ button {
 
 /* ── Agent View ── */
 
+.agent-shelf-mcp-banner {
+  flex: 0 0 auto;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--warning, #d99b32);
+  font-size: 12px;
+}
+
 .agent-view {
   position: absolute;
   inset: 0;

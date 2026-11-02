@@ -151,6 +151,8 @@ title: shelf-terminal — Intent → File Index
 | App-tool bridge（agent-server 端） | `app-tool-client.ts` + `app-tool-tools.ts` | Shelf 工具共用契約（名稱／描述／schema／operation）、參數選取與 main RPC |
 | Shelf HTTP MCP adapter | `shelf-mcp.ts` | Copilot／Codex 共用的 stateless HTTP host、工具註冊與 MCP result envelope |
 | Shelf MCP authentication | `shelf-mcp-auth.ts` | main bootstrap、endpoint-bound signature 驗證與 Bearer headers |
+| Shelf MCP startup lifecycle | `shelf-mcp-lifecycle.ts` | lazy 單次啟動、失敗分類、降級與公開狀態回報 |
+| Shelf MCP degradation tests | `shelf-mcp-lifecycle.test.ts` + `shelf-mcp-lifecycle.integration.test.ts` + `shelf-mcp-startup.test.ts` | 單次啟動、授權／listener 失敗、新 lifecycle 恢復與非法請求隔離驗證 |
 | Shelf MCP bootstrap tests | `shelf-mcp-auth.test.ts` + `shelf-mcp-bootstrap.test.ts` + `app-tool-client.test.ts` | key／token scope、真實 RPC／HTTP 串接、shutdown 與 request correlation 驗證 |
 | Shelf 工具契約測試 | `shelf-tool-contract.test.ts` + `shelf-mcp.test.ts` | Claude／HTTP 的 surface snapshots、操作映射、回傳格式與 HTTP limits |
 | Log proxy → main | `server-logger.ts` | `serverLog(level,tag,msg,...args)`：args 源頭 flatten 後走 wire `log` 訊息回 main（agent-server 無獨立 observability，見 `contracts/agent-wire-protocol`） |
@@ -214,6 +216,7 @@ title: shelf-terminal — Intent → File Index
 | Agent send attachment helper | `utils/agent-send-attachments.ts` | renderer-local image preview data URL 與 provider-bound uploaded `AgentAttachment` payload 分離 |
 | Terminal 渲染 | `components/TerminalView.tsx` | xterm.js cache、PTY I/O、init cover/store projection、paste hook 與 unread badge |
 | Agent 初始化設定欄位恢復 | `../shared/agent-init-recovery.ts` + `agent-model-recovery.ts` | 結構化恢復 metadata、保存指定 Prefs 刪除後重試的中央交易 |
+| Shelf 工具啟動失敗警告 | `components/agent/ShelfMcpBanner.tsx` | 依 per-tab startup status 顯示不可關閉警告 |
 | Agent 對話 UI | `components/AgentView.tsx` + `components/agent/{MessageList,InputZone,StatusBar,DecisionPanel,PlanPanel,AuthPane,ConnectionOverlay}.tsx` + `components/agent/{permission-control-view,capability-prefs}.ts` + `agentTabStore.ts` + `agentTabSubscriptions.ts` + `agent-message-builder.ts` + `tab-teardown.ts` | AgentView 是 layout coordinator；permission UI 只依 capability strategy/descriptor 選 canonical 或 native controls，不依 provider identity；有效設定與 explicit Prefs 分開。domain state 在 per-tab store，真正 teardown 才清 state |
 | Web tab（登入 surface + 瀏覽） | `components/WebTabView.tsx` | `<webview partition=persist:web>` + 網址列 + identity chip；人在這登入內網服務 |
 | Web.fetch 授權 popup | `components/WebPermissionPrompt.tsx` | app 層全域 popup，防偽 origin 顯示 + allow once/always/deny（由 `web:permission-request` 驅動） |
@@ -272,7 +275,7 @@ title: shelf-terminal — Intent → File Index
 | Cross-platform process memory adapter | `process-memory-sampler.ts` | host snapshot normalization與 dispatcher/exec process-tree classification |
 | Named channel log policy | `channel-log.ts` | retained log channel名稱與天數政策 |
 | App 層 MCP 型別 + 驗證 | `mcp.ts` | `McpServerBlock`/`McpServersFile` + 純 validator(main store 與 agent-server loader 共用，不 pull electron） |
-| Shelf MCP authentication contract | `shelf-mcp.ts` | endpoint／grant 型別、internal operation 常數與 canonical signing payload |
+| Shelf MCP contract | `shelf-mcp.ts` | endpoint／grant／startup status 型別、跨層常數與 canonical signing payload |
 | Shelf 檔案 placement 規則 | `shelf-paths.ts` | `shelfPlacement(type,ctx)` closed allowlist + `ShelfFileType*` 常數(transport 與 agent-server 共用單一路徑規則） |
 | 專案 env 純 helper | `project-env.ts` | `EnvMap`、`SHELF_RESERVED_ENV`、`isReservedEnvKey`/`validateEnvKey`、`applyEnvMap`（本機 merge、PATH-merge）、`buildEnvExportPrefix`（遠端 export 前綴）；main + renderer 共用 |
 | External URL intent contract | `external-url-intent.ts` | source/decision/destination types、allowlist/length limits與不回顯 URL 的純 validation |

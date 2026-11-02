@@ -27,6 +27,22 @@ Main mints `executionId` (`e-${randomUUID().slice(0,8)}`) at `query()` entry and
 { "type": "status", "executionId": "e-1a2b3c4d", "state": "streaming" }
 ```
 
+## Shelf startup status — `type: 'shelf_mcp_status'`
+
+Source: `ShelfMcpStatus`, `SHELF_MCP`, `SHELF_MCP_STATE`, and `SHELF_MCP_FAILURE`
+in `src/shared/shelf-mcp.ts`. Session-scoped, no execution id; dispatcher mode
+adds the normal `sid` envelope. Main validates and projects only public fields.
+
+```json
+{ "type": "shelf_mcp_status", "status": { "state": "unavailable", "reason": "authorization" } }
+```
+
+`status` is `{ state: 'available' }` or `{ state: 'unavailable', reason:
+'authorization' | 'listener' | 'startup' }`. This reports HTTP host startup only,
+not provider connectivity or runtime health. No credential/error text is carried.
+Main forwards through `IPC.AGENT_SHELF_MCP_STATUS`; the renderer mirrors per-tab
+state independently of conversation messages and initialization readiness.
+
 ## Render-primitive messages — `type: 'message'`
 
 The renderer-facing timeline entries. One wire `type: 'message'`, discriminated by `msgType`. These messages are session-scoped and MUST NOT carry `executionId`. Main's `buildAgentMessagePayload` translates each into the canonical `AgentMessage` union (`src/shared/types.ts`). Unknown `msgType` → main returns null and drops the message.

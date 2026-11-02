@@ -380,6 +380,11 @@ contextBridge.exposeInMainWorld('shelfApi', {
       ipcRenderer.on(IPC.AGENT_BACKGROUND_TASKS, listener);
       return () => ipcRenderer.removeListener(IPC.AGENT_BACKGROUND_TASKS, listener);
     },
+    onShelfMcpStatus: (callback: (tabId: string, status: unknown) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, tabId: string, status: unknown) => callback(tabId, status);
+      ipcRenderer.on(IPC.AGENT_SHELF_MCP_STATUS, listener);
+      return () => ipcRenderer.removeListener(IPC.AGENT_SHELF_MCP_STATUS, listener);
+    },
     onQueue: (callback: (tabId: string, items: unknown) => void) => {
       const listener = (_event: Electron.IpcRendererEvent, tabId: string, items: unknown) => callback(tabId, items);
       ipcRenderer.on(IPC.AGENT_QUEUE, listener);

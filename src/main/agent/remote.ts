@@ -27,7 +27,7 @@ import { syncMcpForConnection } from '../mcp-remote';
 import { transportPutDir, composeRemotePath } from '../connector/transport';
 import { shelfPlacement, ShelfFileTypeSkill } from '@shared/shelf-paths';
 import { handleAppTool } from './app-tool';
-import { SHELF_MCP } from '@shared/shelf-mcp';
+import { SHELF_MCP, parseShelfMcpStatus } from '@shared/shelf-mcp';
 import { buildWorktreeAppToolAuditEvent } from './app-tool-audit';
 import { connectionScopeKey } from '@shared/process-memory';
 import {
@@ -1117,6 +1117,10 @@ export function wrapProcess(
         });
         continue;
       }
+      if (!active && parsed?.type === SHELF_MCP.STATUS) {
+        log.debug('agent-remote', 'late Shelf MCP status from inactive exec — dropped');
+        continue;
+      }
       dispatcher.feed(parsed);
     }
   });
@@ -1184,6 +1188,10 @@ export function wrapProcess(
 }
 
 export function parseRemoteMessage(msg: any): AgentEvent | null {
+  if (msg.type === SHELF_MCP.STATUS) {
+    try { return { type: SHELF_MCP.STATUS, status: parseShelfMcpStatus(msg.status) }; }
+    catch { log.error('agent-remote', 'Invalid Shelf MCP startup status — dropped'); return null; }
+  }
   if (msg.type === 'message') {
     // Construct discriminated union by msgType — each variant only exposes the
     // fields it actually needs. Provider is responsible for sending matching

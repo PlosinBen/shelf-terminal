@@ -1,4 +1,5 @@
 import type { AgentInitRecovery } from '@shared/agent-init-recovery';
+import { SHELF_MCP, type ShelfMcpStatus } from '@shared/shelf-mcp';
 export type StatusSegmentSeverity = 'normal' | 'info' | 'warning' | 'critical';
 
 export interface StatusSegment {
@@ -209,6 +210,7 @@ export type OutgoingMessage = WireEnvelope & (
   // Main surfaces it as a system (ok) / error (!ok) line in the agent view.
   // See skills#4 / skill-reload feedback.
   | { type: 'skills_reloaded'; ok: boolean; error?: string }
+  | { type: typeof SHELF_MCP.STATUS; status: ShelfMcpStatus }
 
   // ── Streaming (incremental reply/fold_text chunks) ───────────────────────
   // `msgId` ties each chunk to the eventual `type: 'message'` finalize event

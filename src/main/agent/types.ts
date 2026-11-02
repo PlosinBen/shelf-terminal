@@ -1,6 +1,7 @@
 import type { AgentAttachment, AgentMessage, AgentPrefs, AuthMethod, ProviderModel } from '@shared/types';
 import type { PermissionControlCapabilities } from '@shared/permission-controls';
 import type { ConfigEditKey } from '@shared/config-ack';
+import { SHELF_MCP, type ShelfMcpStatus } from '@shared/shelf-mcp';
 
 export type { AgentMessage, AgentMessageType } from '@shared/types';
 
@@ -128,6 +129,7 @@ export interface AgentQueryOptions {
 }
 
 export type AgentEvent =
+  | { type: typeof SHELF_MCP.STATUS; status: ShelfMcpStatus }
   | { type: 'message'; payload: AgentMessage }
   | { type: 'stream'; payload: AgentStreamDelta }
   | { type: 'status'; payload: AgentStatusPayload }

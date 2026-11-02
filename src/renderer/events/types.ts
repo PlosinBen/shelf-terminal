@@ -1,6 +1,7 @@
 import type { AgentAttachment, AgentInitStatus, AgentLoginPrompt, AgentLoginResult, AgentPrefs, AgentQueueItem, Connection, TaskEvent } from '../../shared/types';
 import type { ConfigEditKey } from '../../shared/config-ack';
 import { on, emit } from './bus';
+import { SHELF_MCP, type ShelfMcpStatus } from '../../shared/shelf-mcp';
 
 // Typed agent event vocabulary. Names prefixed 'agent:' to coexist with
 // the untyped legacy events on the same bus.
@@ -16,6 +17,7 @@ import { on, emit } from './bus';
 // Payloads carry tabId so a single global listener can route to the
 // right tab slice without per-component (tabId === id) filtering.
 export interface AgentEventMap {
+  [SHELF_MCP.STATUS_EVENT]: { tabId: string; status: ShelfMcpStatus };
   // -------- Inbound (IPC → bus) --------
   'agent:onMessage': { tabId: string; msg: unknown };
   'agent:onStream': { tabId: string; chunk: unknown };

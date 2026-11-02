@@ -36,7 +36,7 @@ import { getSharedShelfMcp } from '../../shelf-mcp';
 import type { ShelfMcpEndpoint } from '@shared/shelf-mcp';
 import { SHELF_MCP_SERVER_NAME } from '@shared/mcp';
 import { replaceSession } from '../acp/session-replacement';
-import { loadProjectedMcpServers } from '../mcp-config';
+import { loadProjectedMcpServers, withoutBuiltinShelfMcp } from '../mcp-config';
 import {
   resolveCopilotCommand,
   copilotConfigHome,
@@ -658,7 +658,7 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
     const opts = {
       cwd: input.cwd,
       mcpServers: [
-        ...toAcpMcpServers(mcp.servers),
+        ...toAcpMcpServers(withoutBuiltinShelfMcp(mcp.servers, message => serverLog('warn', 'copilot', message))),
         ...toAcpMcpServers(shelf ? {
           [SHELF_MCP_SERVER_NAME]: { type: 'http', url: shelf.url, headers: { ...shelf.headers } },
         } : {}),

@@ -1,5 +1,6 @@
 import type { AgentInitStatus } from '../../shared/types';
 import { onAgent, emitAgent } from './types';
+import { SHELF_MCP } from '../../shared/shelf-mcp';
 
 // Single global binder that wires window.shelfApi.agent.* IPC ↔ typed
 // agent event bus. Caller (App.tsx mount) gets a cleanup function that
@@ -18,6 +19,9 @@ import { onAgent, emitAgent } from './types';
 // stub window.shelfApi before calling bindAgentIPCGroup().
 export function bindAgentIPCGroup(): () => void {
   const api = window.shelfApi.agent;
+  const offShelfMcp = api.onShelfMcpStatus((tabId, status) => {
+    emitAgent(SHELF_MCP.STATUS_EVENT, { tabId, status });
+  });
 
   // -------- Inbound: IPC → bus --------
   const offMessage = api.onMessage((tabId, msg) => {
@@ -84,6 +88,7 @@ export function bindAgentIPCGroup(): () => void {
   });
 
   return () => {
+    offShelfMcp();
     offMessage();
     offStream();
     offStatus();

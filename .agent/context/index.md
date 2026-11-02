@@ -4,6 +4,7 @@ Decisions + gotchas grouped by topic. Cited from code as `<topic>#N`.
 
 | Intent | File | One-line summary |
 |---|---|---|
+| 跨功能失敗處理與降級邊界 | [failure-handling](failure-handling.md) | 局部保留可用性，不放寬安全／資料正確性條件，不製造成功假象 |
 | 終端輸入/輸出、pty、xterm | [terminal-pty](terminal-pty.md) | TerminalView spawn、project history、init lifecycle、xterm addon 雷 |
 | local/SSH/WSL/Docker 連線抽象 | [connector](connector.md) | config/runtime/AppOS 分層、generation facts、ControlMaster、exec |
 | 檔案上傳 / 貼上 / 清理 | [file-transfer](file-transfer.md) | `.tmp/shelf/`、cat-via-stdin、session-based cleanup |

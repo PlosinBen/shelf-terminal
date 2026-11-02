@@ -15,7 +15,8 @@ import { randomUUID } from 'node:crypto';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { runBridgeTool, SHELF_BRIDGE_TOOLS, bridgeToolArgs } from './app-tool-tools';
-import { SHELF_MCP, type ShelfMcpEndpoint } from '@shared/shelf-mcp';
+import { SHELF_MCP, SHELF_MCP_FAILURE, type ShelfMcpEndpoint } from '@shared/shelf-mcp';
+import { ShelfMcpStartupError } from './shelf-mcp-lifecycle';
 import { requestShelfMcpAuthentication, type ShelfMcpAuthentication } from './shelf-mcp-auth';
 import { serverLog } from './server-logger';
 
@@ -69,7 +70,9 @@ export async function startShelfMcpServer(
   authorize: (endpointId: string) => Promise<ShelfMcpAuthentication> = requestShelfMcpAuthentication,
 ): Promise<ShelfMcpHandle> {
   // Bootstrap before binding: a failed authorization cannot expose a listener.
-  const authentication = await authorize(randomUUID());
+  const authentication = await authorize(randomUUID()).catch(error => {
+    throw new ShelfMcpStartupError(SHELF_MCP_FAILURE.AUTHORIZATION, error);
+  });
   let authority = '';
   let origin = '';
   let active = true;
@@ -144,11 +147,11 @@ export async function startShelfMcpServer(
     const onError = (error: Error) => reject(error);
     httpServer.once('error', onError);
     httpServer.listen(0, SHELF_MCP.HOST, () => { httpServer.off('error', onError); resolve(); });
-  });
+  }).catch(error => { throw new ShelfMcpStartupError(SHELF_MCP_FAILURE.LISTENER, error); });
   const addr = httpServer.address();
   if (!addr || typeof addr !== 'object') {
     httpServer.close();
-    throw new Error('Shelf MCP listener has no TCP address');
+    throw new ShelfMcpStartupError(SHELF_MCP_FAILURE.LISTENER, new Error('Shelf MCP listener has no TCP address'));
   }
   authority = `${SHELF_MCP.HOST}:${addr.port}`;
   origin = `http://${authority}`;

@@ -137,8 +137,9 @@ merge 方式造成覆蓋或重名。此限制屬於 Shelf 管理設定的寫入�
 
 **Do not change casually because**：schema validator `validateMcpEntry` 保持接受既有 `shelf`
 資料，讓 list/get、原名編輯、改名移出、刪除與未選取資料保存仍可運作。既存 entry 不自動
-刪除或排除，provider parser／transport 維持現況；尤其不可將 authoring error 混進 runtime
-parser errors，因為 Codex 對該 errors 集合採 fatal 處理。這項政策不改寫 provider 原生的
+刪除，provider parser 仍可讀取；HTTP adapters 的內建名稱隔離另見 mcp#14。不可將
+authoring error 混進 runtime parser errors，因為 Codex 對該 errors 集合採 fatal 處理。
+這項政策不改寫 provider 原生的
 project-level MCP config，也不限制 server 內部 tool 名稱。
 
 **Related**：`src/shared/mcp.ts`、`src/main/mcp-store.ts`、`src/main/config-backup/import.ts`、`contracts/persistence-formats`。
@@ -198,3 +199,24 @@ endpoint-specific request id，避免 dispatcher 以相同 sid 重建 exec 時�
 Codex 在 spawn 前注入 token env，thread config 只帶 env 名稱。Claude SDK 不切 HTTP。
 
 **Related**：`contracts/app-tool-bridge`、`agent-server/shelf-mcp-auth.ts`、`src/main/agent/shelf-mcp-authority.ts`、[Node crypto sign/verify](https://nodejs.org/docs/latest-v22.x/api/crypto.html#cryptosignalgorithm-data-key-callback)。
+
+## mcp#14 — Shelf HTTP startup failure disables tools, not the Agent  ·  [Decision]
+
+**Decision**：exec 持有 lazy Shelf HTTP lifecycle，只嘗試啟動一次並快取 endpoint
+或失敗。授權失敗、listener 啟動失敗或其他啟動錯誤時，Copilot／Codex 省略內建
+Shelf MCP，仍可啟動 Agent。session 狀態經 main／IPC／event bus 到 per-tab store；
+一般與登入 pane 均顯示不可關閉警告。狀態不存入對話歷史；清除對話、starting／ready
+與 component remount 不清警告，只有明確 available 回報才移除，重建 exec 才重試。
+Claude 使用獨立 SDK 通道，不因 HTTP host 故障被標為不可用。
+
+**Reason**：這是 failure-handling#1 的具體套用：可用性可局部降級，認證不可降級。
+不回退無認證 listener 或替代 bridge。HTTP adapters 在組裝 user MCP config 時
+排除精確同名 `shelf` 並記錄警告，不改原始設定，不擋 `shelf-*`；否則既存 user entry
+可能覆寫內建 endpoint，或在啟動失敗時成為冒充內建能力的替代品。共同 parser 仍
+保留原有驗證規則與錯誤，不把此排除變成 Codex 的 fatal config error。
+
+**Do not change casually because**：available 只代表 host 啟動成功，不保證 provider
+已連上，不是 runtime health check。單次不合法 HTTP request 只被拒絕，不改全域
+availability；否則未授權 caller 可故意送錯 token 來停用正常服務。警告只帶固定
+失敗分類，不帶授權內容或任意 error text；診斷記錄 stage 與可用的 OS errno，
+不將可能含 secret 的 bootstrap error 原文寫入 log。

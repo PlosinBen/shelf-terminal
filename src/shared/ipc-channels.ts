@@ -243,6 +243,7 @@ export const IPC = {
    *  full ordered AgentQueueItem[] of in-flight client sends. Renderer mirrors
    *  it. See message-queue-ownership design. */
   AGENT_QUEUE: 'agent:queue',
+  AGENT_SHELF_MCP_STATUS: 'agent:shelf-mcp-status',
   /** Per-agent-server connection health from the heartbeat round-trip. Carries a ConnectionHealth. */
   AGENT_CONNECTION_HEALTH: 'agent:connection-health',
   /** Complete process-memory summary snapshot, published independently every 30s. */

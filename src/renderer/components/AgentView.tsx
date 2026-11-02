@@ -9,6 +9,7 @@ import { PlanPanel } from './agent/PlanPanel';
 import { BackgroundTasksPanel } from './agent/BackgroundTasksPanel';
 import { ConnectionOverlay } from './agent/ConnectionOverlay';
 import { AuthPane } from './agent/AuthPane';
+import { ShelfMcpBanner } from './agent/ShelfMcpBanner';
 import {
   initTab as initTabStore,
   useAgentTab,
@@ -142,6 +143,7 @@ export function AgentView({ tabId, cwd, connection, provider, projectId, visible
   if (authRequired) {
     return (
       <div className="agent-view" ref={rootRef}>
+        <ShelfMcpBanner tabId={tabId} />
         <AuthPane tabId={tabId} />
       </div>
     );
@@ -149,6 +151,7 @@ export function AgentView({ tabId, cwd, connection, provider, projectId, visible
 
   return (
     <div className="agent-view" ref={rootRef}>
+      <ShelfMcpBanner tabId={tabId} />
       <MessageList
         tabId={tabId}
         visible={visible}

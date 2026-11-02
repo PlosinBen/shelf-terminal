@@ -1,6 +1,7 @@
 import { recoveryFromError } from '@shared/agent-init-recovery';
 import { BrowserWindow, ipcMain } from 'electron';
 import { IPC } from '@shared/ipc-channels';
+import { SHELF_MCP } from '@shared/shelf-mcp';
 import { log } from '@shared/logger';
 import { formatTabLogId } from '@shared/tab-id';
 import { providerLabel } from '@shared/agent-providers';
@@ -621,6 +622,9 @@ function dispatchEvent(tabId: string, event: AgentEvent) {
       break;
     case 'status':
       send(IPC.AGENT_STATUS, tabId, event.payload);
+      break;
+    case SHELF_MCP.STATUS:
+      send(IPC.AGENT_SHELF_MCP_STATUS, tabId, event.status);
       break;
     case 'plan':
       send(IPC.AGENT_PLAN, tabId, { content: event.content });
