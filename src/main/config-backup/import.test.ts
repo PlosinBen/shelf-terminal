@@ -231,6 +231,47 @@ describe('config-backup import (read side)', () => {
     expect(pinned.items[0].detail).toBe('version one');
   }, GIT_HEAVY_TIMEOUT);
 
+  it('marks shelf as unavailable for Import and rejects it before changing any live items', async () => {
+    seedSkill('alpha', 'local alpha');
+    seedMcp({ shelf: { type: 'stdio', command: 'legacy-local' } });
+    const before = fs.readFileSync(path.join(userDataDir, 'mcp-servers.json'), 'utf-8');
+    await pushBranch('backup/src', {
+      'skills/alpha/SKILL.md': '---\nname: alpha\ndescription: remote alpha\n---\n',
+      'mcp-servers.json': JSON.stringify({ shelf: { type: 'stdio', command: 'remote' } }),
+    });
+    const source = await discoverSource();
+    const listed = await listImportItems(bareRemote, source.sourceRevision);
+    expect(listed.items.find(item => item.id === 'mcp:shelf')).toMatchObject({
+      valid: false, invalidReason: expect.stringMatching(/reserved/i),
+    });
+
+    const result = await applyImport(bareRemote, source.sourceRevision, ['skill:alpha', 'mcp:shelf'], applyDependencies());
+    expect(result).toMatchObject({ ok: false, message: expect.stringMatching(/reserved/i) });
+    expect(readLive('alpha', 'SKILL.md')).toContain('local alpha');
+    expect(fs.readFileSync(path.join(userDataDir, 'mcp-servers.json'), 'utf-8')).toBe(before);
+    expect(stagingDirectories()).toEqual([]);
+  }, GIT_HEAVY_TIMEOUT);
+
+  it('imports distinct shelf-prefixed names while preserving an unselected legacy shelf entry', async () => {
+    const legacy = { type: 'stdio', command: 'legacy-local' };
+    seedMcp({ shelf: legacy });
+    await pushBranch('backup/src', {
+      'mcp-servers.json': JSON.stringify({
+        shelf: { type: 'stdio', command: 'remote' },
+        Shelf: { type: 'stdio', command: 'case-sensitive' },
+        'shelf-tools': { type: 'stdio', command: 'distinct' },
+      }),
+    });
+    const source = await discoverSource();
+    expect(await applyImport(bareRemote, source.sourceRevision, ['mcp:Shelf', 'mcp:shelf-tools'], applyDependencies()))
+      .toMatchObject({ ok: true, mcpWritten: 2 });
+    expect(readLiveMcp()).toEqual({
+      shelf: legacy,
+      Shelf: { type: 'stdio', command: 'case-sensitive' },
+      'shelf-tools': { type: 'stdio', command: 'distinct' },
+    });
+  }, GIT_HEAVY_TIMEOUT);
+
   it('transactionally replaces whole selected items, preserves local markers, and leaves unrelated items', async () => {
     seedSkill('shared', 'local shared');
     fs.writeFileSync(liveSkillFile('shared', 'old-only.txt'), 'remove me');

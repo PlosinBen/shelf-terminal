@@ -18,7 +18,7 @@ import {
 import { log } from '@shared/logger';
 import { getAppInstanceId } from '../app-instance-id';
 import { parseSkillMeta, skillDirPath } from '../skills-store';
-import { validateMcpEntry, type McpServerBlock } from '@shared/mcp';
+import { validateAuthoredMcpEntry, type McpServerBlock } from '@shared/mcp';
 import { mcpConfigSourcePath } from '../mcp-projection';
 import { onSkillsChanged } from '../skills-sync';
 import { onMcpChanged } from '../mcp-sync';
@@ -140,7 +140,7 @@ function inspectImportItems(directory: string, liveIds: Set<string>): ImportList
         for (const [name, block] of Object.entries(parsed as Record<string, unknown>)
           .sort(([a], [b]) => a.localeCompare(b))) {
           const id = backupItemId('mcp', name);
-          const error = validateMcpEntry(name, block);
+          const error = validateAuthoredMcpEntry(name, block);
           items.push(error
             ? { id, kind: 'mcp', name, valid: false, invalidReason: error, impact: impact(id) }
             : {
@@ -419,7 +419,7 @@ function prepareImport(
         return importFailure('validation', `Import item ${id} is missing from the source`, 'not-needed', id);
       }
       const block = sourceMcp.servers[name];
-      const validationError = validateMcpEntry(name, block);
+      const validationError = validateAuthoredMcpEntry(name, block);
       if (validationError) {
         return importFailure('validation', `Cannot Import ${id}: ${validationError}`, 'not-needed', id);
       }

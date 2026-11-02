@@ -123,3 +123,22 @@ related:
 **Do not change casually because**：不要只升 SDK 版號就假設防護已啟用，也不要改成收完 body 才檢查大小。若真有超過上限的合法內容，先確認實際工作流，再評估提高上限或分段傳輸；不要直接移除限制。Shelf 的 production code 直接使用 SDK server，沒有直接使用其 client redirect 或 bearer-auth middleware；升級時不應為不存在的 consumer 放寬 same-origin redirect 預設。
 
 **Related**：`agent-server/providers/acp/shelf-mcp.ts`、`agent-server/providers/acp/shelf-mcp.test.ts`、`mcp#9`。
+
+## mcp#11 — Reserve the exact shelf server name at Shelf authoring boundaries  ·  [Decision]
+
+**Decision**：Shelf 新增外部 MCP server、將其他 entry 改名為 `shelf`，以及 Backup Import
+匯入該名稱時，使用 `validateAuthoredMcpEntry` 拒絕。只精確保留小寫 `shelf`，不保留
+整個 prefix；`Shelf`、`SHELF`、`shelf-tools` 仍是不同名稱。Import 清單將該 source item
+標為 invalid 並提供原因；apply 即使直接指定 item id，也須在任何 live 寫入前再次驗證。
+
+**Reason**：內建 Shelf MCP server 使用 `shelf` 作為配置 key；同名 user entry 會依 provider
+merge 方式造成覆蓋或重名。此限制屬於 Shelf 管理設定的寫入政策，不應以 provider 的載入
+錯誤來實現，也不能只在 UI 表單阻擋而讓 Import 繞過。
+
+**Do not change casually because**：schema validator `validateMcpEntry` 保持接受既有 `shelf`
+資料，讓 list/get、原名編輯、改名移出、刪除與未選取資料保存仍可運作。既存 entry 不自動
+刪除或排除，provider parser／transport 維持現況；尤其不可將 authoring error 混進 runtime
+parser errors，因為 Codex 對該 errors 集合採 fatal 處理。這項政策不改寫 provider 原生的
+project-level MCP config，也不限制 server 內部 tool 名稱。
+
+**Related**：`src/shared/mcp.ts`、`src/main/mcp-store.ts`、`src/main/config-backup/import.ts`、`contracts/persistence-formats`。

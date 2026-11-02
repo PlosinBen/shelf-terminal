@@ -1,5 +1,7 @@
 import { test, expect, openAgentTab, sendAgentPrompt } from './helpers';
 import type { Page } from '@playwright/test';
+import fs from 'node:fs';
+import path from 'node:path';
 
 const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
 
@@ -82,6 +84,60 @@ test('mcp: add, edit (rename), and remove a server via the MCP view', async ({ s
     .locator('.web-list-action', { hasText: 'Remove' }).click();
   await expect(page.locator('.web-settings-hint', { hasText: 'No MCP servers configured' })).toBeVisible();
 });
+
+test('mcp: blocks the exact shelf name on add and rename while allowing shelf-tools', async ({ shelfApp: { page, userDataDir } }) => {
+  await page.locator('.right-tab-btn', { hasText: 'MCP' }).click();
+  const view = page.locator('.mcp-view');
+  await expect(view).toBeVisible();
+  await view.locator('.mcp-add-btn').click();
+  const name = view.locator('.mcp-form-row', { hasText: 'Name' }).locator('input');
+  await name.fill('shelf');
+  await view.locator('.mcp-form-row', { hasText: 'Command' }).locator('input').fill('node');
+  await view.locator('.mcp-form-save').click();
+  await expect(view.locator('.mcp-form-error')).toContainText('reserved by Shelf');
+  await expect(view.locator('.web-list-item')).toHaveCount(0);
+
+  await name.fill('shelf-tools');
+  await view.locator('.mcp-form-save').click();
+  const row = view.locator('.web-list-item', { hasText: 'shelf-tools' });
+  await expect(row).toBeVisible();
+  const configFile = path.join(userDataDir, 'mcp-servers.json');
+  const before = fs.readFileSync(configFile, 'utf-8');
+  await row.locator('.web-list-action', { hasText: 'Edit' }).click();
+  await name.fill('shelf');
+  await view.locator('.mcp-form-save').click();
+  await expect(view.locator('.mcp-form-error')).toContainText('reserved by Shelf');
+  expect(fs.readFileSync(configFile, 'utf-8')).toBe(before);
+
+  await name.fill('Shelf');
+  await view.locator('.mcp-form-save').click();
+  await expect(view.locator('.web-list-main')).toHaveText('Shelf');
+  expect(Object.keys(JSON.parse(fs.readFileSync(configFile, 'utf-8')))).toEqual(['Shelf']);
+});
+
+for (const action of ['rename', 'remove'] as const) {
+  test(`mcp: keeps a legacy shelf entry visible for ${action}`, async ({ shelfApp: { page, userDataDir } }) => {
+    fs.writeFileSync(path.join(userDataDir, 'mcp-servers.json'), JSON.stringify({
+      shelf: { type: 'stdio', command: 'legacy-command' },
+    }));
+    await page.locator('.right-tab-btn', { hasText: 'MCP' }).click();
+    const view = page.locator('.mcp-view');
+    const row = view.locator('.web-list-item', { hasText: 'shelf' });
+    await expect(row).toBeVisible();
+    if (action === 'remove') {
+      await row.locator('.web-list-action', { hasText: 'Remove' }).click();
+      await expect(view.locator('.web-list-item')).toHaveCount(0);
+    } else {
+      await row.locator('.web-list-action', { hasText: 'Edit' }).click();
+      await view.locator('.mcp-form-row', { hasText: 'Name' }).locator('input').fill('my-shelf');
+      await view.locator('.mcp-form-save').click();
+      await expect(view.locator('.web-list-main')).toHaveText('my-shelf');
+    }
+    const saved = JSON.parse(fs.readFileSync(path.join(userDataDir, 'mcp-servers.json'), 'utf-8'));
+    expect(saved).not.toHaveProperty('shelf');
+    expect(saved).toEqual(action === 'rename' ? { 'my-shelf': { type: 'stdio', command: 'legacy-command' } } : {});
+  });
+}
 
 // T2.3: an MCP config change on a LIVE agent session surfaces a per-tab
 // "reconnect to apply" system line (MCP can't hot-reload). Mirrors the skill

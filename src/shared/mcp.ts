@@ -43,6 +43,8 @@ export type McpServerBlock = McpStdioBlock | McpHttpBlock;
 /** The whole `mcp-servers.json`: server name → block. */
 export type McpServersFile = Record<string, McpServerBlock>;
 
+export const SHELF_MCP_SERVER_NAME = 'shelf';
+
 /** Result of a store mutation (mirrors SkillUpdateResult). */
 export interface McpStoreResult {
   ok: boolean;
@@ -95,4 +97,12 @@ export function validateMcpEntry(name: unknown, block: unknown): string | null {
     return `Invalid server name (use letters/digits/._-, no spaces): ${String(name)}`;
   }
   return validateMcpServerBlock(block);
+}
+
+/** mcp#11: Policy for new user-authored entries; schema validation also accepts legacy names. */
+export function validateAuthoredMcpEntry(name: unknown, block: unknown): string | null {
+  if (name === SHELF_MCP_SERVER_NAME) {
+    return `The MCP server name "${SHELF_MCP_SERVER_NAME}" is reserved by Shelf; choose another name`;
+  }
+  return validateMcpEntry(name, block);
 }

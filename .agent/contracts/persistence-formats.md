@@ -127,6 +127,7 @@ The on-disk artifacts Shelf persists and their layout. Two roots: `<userData>` (
 - `pm-global-note.md` — plain markdown (global PM note). Source: `src/main/pm/note-store.ts` (`readGlobalNote` / `writeGlobalNote`).
 - `runtime-cache/<targetId>/…` — host-side cache of extracted Node + CLI binaries per arch×libc target. Source: `src/main/agent/deploy-layout.ts` (`cacheDir` / `cachedNodeBin` / `cachedClaudeBin` / `cachedCopilotBin`).
 - `mcp-servers.json` — app-level MCP servers. **Keyed object** `Record<name, McpServerBlock>` (NOT an array, NOT wrapped in `mcpServers`): `{ "<name>": {type:'stdio',command,args?,env?} | {type:'http',url,headers?} }`. Name is the key. Stored opaque — `env`/`headers` may hold literal tokens or `${VAR}` refs (resolved later on the worker). Types + validators: `src/shared/mcp.ts`. CRUD: `src/main/mcp-store.ts`. See `context/mcp` (mcp#3).
+  Shelf authoring reserves the exact lowercase name `shelf`: add, rename into that name, and Backup Import reject it. Import listings retain the item with `valid:false` and an explanation. Schema reads still accept legacy entries for display, same-name editing, rename-away, removal, and preservation when importing other items; provider loading is unchanged. Prefixes such as `shelf-tools` remain allowed. See `context/mcp` (mcp#11).
 
 ## `<userData>/config-backup.json` — config-backup binding
 

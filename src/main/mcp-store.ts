@@ -3,7 +3,7 @@ import fs from 'fs';
 import { app } from 'electron';
 import { log } from '@shared/logger';
 import type { McpServerBlock, McpServersFile, McpStoreResult } from '@shared/mcp';
-import { isValidMcpServerName, validateMcpServerBlock, validateMcpEntry } from '@shared/mcp';
+import { isValidMcpServerName, validateMcpServerBlock, validateMcpEntry, validateAuthoredMcpEntry } from '@shared/mcp';
 
 // Re-export the pure validators (defined in @shared/mcp so the agent-server can
 // reuse them without pulling electron) for existing import sites / tests.
@@ -69,7 +69,7 @@ function writeAll(servers: McpServersFile): void {
 
 /** Add a new server. Errors on an invalid name/shape or a name collision. */
 export function addMcpServer(name: string, block: McpServerBlock): McpStoreResult {
-  const error = validateMcpEntry(name, block);
+  const error = validateAuthoredMcpEntry(name, block);
   if (error) return { ok: false, error };
   const current = listMcpServers();
   if (name in current) return { ok: false, error: `A server named "${name}" already exists` };
@@ -84,7 +84,9 @@ export function addMcpServer(name: string, block: McpServerBlock): McpStoreResul
  */
 export function updateMcpServer(name: string, block: McpServerBlock, nextName?: string): McpStoreResult {
   const finalName = nextName ?? name;
-  const error = validateMcpEntry(finalName, block);
+  const error = finalName === name
+    ? validateMcpEntry(finalName, block)
+    : validateAuthoredMcpEntry(finalName, block);
   if (error) return { ok: false, error };
   const current = listMcpServers();
   if (!(name in current)) return { ok: false, error: `Server not found: ${name}` };

@@ -90,6 +90,32 @@ describe('CRUD over mcp-servers.json (keyed object)', () => {
     expect(updateMcpServer('nope', stdio()).error).toMatch(/not found/);
   });
 
+  it('rejects creating or renaming to the reserved shelf name without changing config', () => {
+    addMcpServer('custom', stdio());
+    const before = fs.readFileSync(configFile(), 'utf-8');
+
+    expect(addMcpServer('shelf', stdio())).toMatchObject({ ok: false, error: expect.stringMatching(/reserved/i) });
+    expect(updateMcpServer('custom', stdio(), 'shelf')).toMatchObject({ ok: false, error: expect.stringMatching(/reserved/i) });
+    expect(fs.readFileSync(configFile(), 'utf-8')).toBe(before);
+  });
+
+  it.each(['Shelf', 'SHELF', 'shelf-tools'])('allows the distinct server name %s', (name) => {
+    expect(addMcpServer(name, stdio())).toMatchObject({ ok: true, name });
+  });
+
+  it('keeps legacy shelf entries visible, editable, renameable and removable', () => {
+    fs.writeFileSync(configFile(), JSON.stringify({ shelf: stdio() }));
+    expect(getMcpServer('shelf')).toEqual(stdio());
+    expect(updateMcpServer('shelf', stdio({ command: 'python' })).ok).toBe(true);
+    expect(updateMcpServer('shelf', stdio(), 'renamed').ok).toBe(true);
+    expect(getMcpServer('shelf')).toBeNull();
+    expect(getMcpServer('renamed')).toEqual(stdio());
+
+    fs.writeFileSync(configFile(), JSON.stringify({ shelf: stdio() }));
+    removeMcpServer('shelf');
+    expect(listMcpServers()).toEqual({});
+  });
+
   it('remove drops the server; missing remove is a no-op', () => {
     addMcpServer('a', stdio());
     addMcpServer('b', stdio());
