@@ -27,6 +27,7 @@ import { syncMcpForConnection } from '../mcp-remote';
 import { transportPutDir, composeRemotePath } from '../connector/transport';
 import { shelfPlacement, ShelfFileTypeSkill } from '@shared/shelf-paths';
 import { handleAppTool } from './app-tool';
+import { SHELF_MCP } from '@shared/shelf-mcp';
 import { buildWorktreeAppToolAuditEvent } from './app-tool-audit';
 import { connectionScopeKey } from '@shared/process-memory';
 import {
@@ -947,6 +948,7 @@ export function wrapProcess(
   const dispatcher = createExecutionDispatcher(parseRemoteMessage, onTaskEvent, onServerExecution, onQueue, onSkillsReloaded, onSessionEvent);
   let buffer = '';
   let active = true;
+  const agentSessionId = randomUUID();
 
   // ── Heartbeat: app→agent-server liveness + RTT (see §5.9 / connection-health.ts).
   // The `ping`/`pong` round-trip serves three things off one beat: the version-dir
@@ -1080,7 +1082,7 @@ export function wrapProcess(
       // App-tool bridge — transport-level request/response (like pong), never a
       // execution event. An in-process bridge tool on the agent-server asks main to
       // act on a client-owned resource (skills-store); handle + reply by
-      // requestId. See .agent/features/app-level-capabilities.md.
+      // requestId. See contracts/app-tool-bridge.
       // Diagnostic log from agent-server (it has no electron to write the file
       // itself). Route to @shared/logger at the carried level — main applies the
       // level filter. See agent-server/server-logger.ts.
@@ -1095,12 +1097,16 @@ export function wrapProcess(
       if (parsed?.type === 'app_tool') {
         const requestId = parsed.requestId;
         const op = typeof parsed.op === 'string' ? parsed.op : '';
+        if (!active && op === SHELF_MCP.AUTHORIZE) {
+          log.warn('agent-remote', 'authorization request from inactive exec rejected');
+          continue;
+        }
         const args = (parsed.args && typeof parsed.args === 'object') ? parsed.args : {};
         const auditStarted = typeof requestId === 'string'
           ? buildWorktreeAppToolAuditEvent({ requestId, op, args })
           : null;
         if (auditStarted) onSessionEvent?.(auditStarted);
-        void handleAppTool(op, args, { projectId }).then((result) => {
+        void handleAppTool(op, args, { projectId, agentSessionId }).then((result) => {
           if (typeof requestId === 'string') {
             const auditCompleted = buildWorktreeAppToolAuditEvent({ requestId, op, args, result });
             if (auditCompleted) onSessionEvent?.(auditCompleted);

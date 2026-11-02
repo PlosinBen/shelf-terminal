@@ -10,14 +10,19 @@
 // Stateless pattern per the SDK's simpleStatelessStreamableHttp example: a fresh
 // McpServer + transport PER request, closed on response end.
 
-import { createServer, type Server } from 'node:http';
+import { createServer, type Server, type ServerResponse } from 'node:http';
+import { randomUUID } from 'node:crypto';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { runBridgeTool, SHELF_BRIDGE_TOOLS, bridgeToolArgs } from './app-tool-tools';
+import { SHELF_MCP, type ShelfMcpEndpoint } from '@shared/shelf-mcp';
+import { requestShelfMcpAuthentication, type ShelfMcpAuthentication } from './shelf-mcp-auth';
+import { serverLog } from './server-logger';
 
-export interface ShelfMcpHandle {
+export interface ShelfMcpHandle extends ShelfMcpEndpoint {
   /** URL to advertise as an http `McpServer` entry (127.0.0.1, ephemeral port). */
   url: string;
+  headers: Readonly<Record<string, string>>;
   close(): void;
 }
 
@@ -54,15 +59,37 @@ function buildShelfMcpServer(): McpServer {
   return server;
 }
 
-function methodNotAllowed(res: import('node:http').ServerResponse): void {
-  res.writeHead(405, { 'Content-Type': 'application/json' });
-  res.end(JSON.stringify({ jsonrpc: '2.0', error: { code: -32000, message: 'Method not allowed.' }, id: null }));
+function rejectRequest(res: ServerResponse, status: number, message: string, headers: Record<string, string> = {}): void {
+  res.writeHead(status, { 'Content-Type': 'application/json', ...headers });
+  res.end(JSON.stringify({ jsonrpc: '2.0', error: { code: -32000, message }, id: null }));
 }
 
 /** Start the in-process shelf MCP HTTP server on an ephemeral localhost port. */
-export async function startShelfMcpServer(): Promise<ShelfMcpHandle> {
+export async function startShelfMcpServer(
+  authorize: (endpointId: string) => Promise<ShelfMcpAuthentication> = requestShelfMcpAuthentication,
+): Promise<ShelfMcpHandle> {
+  // Bootstrap before binding: a failed authorization cannot expose a listener.
+  const authentication = await authorize(randomUUID());
+  let authority = '';
+  let origin = '';
+  let active = true;
   const httpServer: Server = createServer((req, res) => {
-    if (req.method !== 'POST') { methodNotAllowed(res); return; } // stateless: no GET/DELETE
+    if (!active) { rejectRequest(res, 503, 'Shelf MCP endpoint closed'); return; }
+    if (req.url !== SHELF_MCP.PATH) { rejectRequest(res, 404, 'Not found'); return; }
+    if (req.method !== 'POST') { rejectRequest(res, 405, 'Method not allowed', { Allow: 'POST' }); return; }
+    // Origin/Host are defense-in-depth, never authentication. Non-browser
+    // clients can omit Origin; all callers still need the signed Bearer.
+    let originAllowed = req.headers.origin === undefined;
+    if (req.headers.origin !== undefined) {
+      try { originAllowed = new URL(req.headers.origin).origin === origin; }
+      catch { originAllowed = false; }
+    }
+    if (req.headers.host?.toLowerCase() !== authority || !originAllowed) {
+      rejectRequest(res, 403, 'Forbidden'); return;
+    }
+    if (!authentication.verifyAuthorization(req.headers.authorization)) {
+      rejectRequest(res, 401, 'Unauthorized', { 'WWW-Authenticate': 'Bearer' }); return;
+    }
     const chunks: Buffer[] = [];
     let receivedBytes = 0;
     let rejected = false;
@@ -89,6 +116,7 @@ export async function startShelfMcpServer(): Promise<ShelfMcpHandle> {
     });
     req.on('end', async () => {
       if (rejected) return;
+      if (!active) { rejectRequest(res, 503, 'Shelf MCP endpoint closed'); return; }
       const body = Buffer.concat(chunks, receivedBytes).toString('utf8');
       let parsed: unknown;
       try { parsed = body ? JSON.parse(body) : undefined; }
@@ -112,19 +140,46 @@ export async function startShelfMcpServer(): Promise<ShelfMcpHandle> {
       }
     });
   });
-  await new Promise<void>((resolve) => httpServer.listen(0, '127.0.0.1', () => resolve()));
+  await new Promise<void>((resolve, reject) => {
+    const onError = (error: Error) => reject(error);
+    httpServer.once('error', onError);
+    httpServer.listen(0, SHELF_MCP.HOST, () => { httpServer.off('error', onError); resolve(); });
+  });
   const addr = httpServer.address();
-  const port = addr && typeof addr === 'object' ? addr.port : 0;
+  if (!addr || typeof addr !== 'object') {
+    httpServer.close();
+    throw new Error('Shelf MCP listener has no TCP address');
+  }
+  authority = `${SHELF_MCP.HOST}:${addr.port}`;
+  origin = `http://${authority}`;
+  httpServer.on('error', error => serverLog('error', 'shelf-mcp', `HTTP host error: ${error.message}`));
   return {
-    url: `http://127.0.0.1:${port}/mcp`,
-    close: () => { try { httpServer.close(); } catch { /* best-effort */ } },
+    url: `${origin}${SHELF_MCP.PATH}`,
+    headers: authentication.headers,
+    close: () => {
+      if (!active) return;
+      active = false;
+      httpServer.close(error => {
+        if (error) serverLog('warn', 'shelf-mcp', `HTTP host close failed: ${error.message}`);
+      });
+    },
   };
 }
 
 // Shared singleton: one shelf MCP server per agent-server process (all tabs point
 // at the same url). Lazily started on first use.
 let shared: Promise<ShelfMcpHandle> | null = null;
+let sharedClosed = false;
 export function getSharedShelfMcp(): Promise<ShelfMcpHandle> {
+  if (sharedClosed) return Promise.reject(new Error('Shelf MCP is shutting down'));
   if (!shared) shared = startShelfMcpServer();
   return shared;
+}
+
+/** Immediately revoke the endpoint even while detached tasks are being reaped. */
+export function closeSharedShelfMcp(): void {
+  sharedClosed = true;
+  if (shared) void shared.then(handle => handle.close(), error => {
+    serverLog('debug', 'shelf-mcp', `No endpoint to close after startup failure: ${error.message}`);
+  });
 }

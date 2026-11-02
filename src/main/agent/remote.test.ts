@@ -3,6 +3,9 @@ import { spawn } from 'child_process';
 import * as fs from 'fs';
 import { EventEmitter } from 'events';
 import { MEMORY_PROCESS_ROLE, MEMORY_REPORT_STATUS, MEMORY_WIRE_TYPE } from '@shared/process-memory';
+import { SHELF_MCP } from '@shared/shelf-mcp';
+const { handleAppToolMock } = vi.hoisted(() => ({ handleAppToolMock: vi.fn() }));
+vi.mock('./app-tool', () => ({ handleAppTool: handleAppToolMock }));
 
 // Exercise createRemoteBackend's per-session process path with an injectable
 // child process. Dispatcher behavior has its own focused test suite.
@@ -314,6 +317,30 @@ describe('remote backend', () => {
     expect(() => backend.dispose()).not.toThrow();
   });
 
+});
+
+describe('direct exec internal authorization routing', () => {
+  it('adds trusted Project/session context and never projects bootstrap data to renderer', async () => {
+    const { child, writes } = capabilitiesChild({});
+    const onSessionEvent = vi.fn();
+    const { wrapProcess } = await import('./remote');
+    const result = { ok: true, data: { token: 'sensitive-test-token', publicKey: 'test-public-key' } };
+    handleAppToolMock.mockResolvedValue(result);
+    const remote = wrapProcess(child, undefined, undefined, undefined, undefined, undefined, onSessionEvent, 'p');
+    try {
+      child.stdout.emit('data', Buffer.from(JSON.stringify({ type: 'app_tool', requestId: 'auth', op: SHELF_MCP.AUTHORIZE, args: { endpointId: 'nonce' } }) + '\n'));
+      await Promise.resolve(); await Promise.resolve();
+      expect(handleAppToolMock).toHaveBeenCalledWith(SHELF_MCP.AUTHORIZE, { endpointId: 'nonce' }, { projectId: 'p', agentSessionId: expect.any(String) });
+      expect(writes).toContainEqual({ type: 'app_tool_result', requestId: 'auth', ...result });
+      expect(onSessionEvent).not.toHaveBeenCalled();
+      const { log } = await import('@shared/logger');
+      expect(JSON.stringify([vi.mocked(log.debug).mock.calls, vi.mocked(log.info).mock.calls, logError.mock.calls])).not.toContain('sensitive-test-token');
+      remote.kill();
+      handleAppToolMock.mockClear();
+      child.stdout.emit('data', Buffer.from(JSON.stringify({ type: 'app_tool', requestId: 'late', op: SHELF_MCP.AUTHORIZE, args: { endpointId: 'nonce' } }) + '\n'));
+      expect(handleAppToolMock).not.toHaveBeenCalled();
+    } finally { remote.kill(); }
+  });
 });
 
 describe('direct exec memory routing', () => {

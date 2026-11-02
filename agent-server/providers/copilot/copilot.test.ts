@@ -15,6 +15,21 @@ import { COPILOT_ACP_CANCELLATION_NOTICE } from './helpers';
 import type { OutgoingMessage } from '../types';
 
 const COPILOT_AGENT_MODE_ID = 'https://agentclientprotocol.com/protocol/session-modes#agent';
+
+it('passes the shared authenticated Shelf endpoint through the ACP mapper', async () => {
+  const sessions: unknown[] = [];
+  const mock = createMockAcpAgent({ onNewSession: params => sessions.push(params) });
+  const backend = createCopilotBackend({
+    openAgent: () => ({ target: mock }),
+    getShelfMcp: async () => ({ url: 'http://127.0.0.1:9999/mcp', headers: { Authorization: 'Bearer endpoint-token' } }),
+  });
+  try {
+    await backend.gatherCapabilities!('/tmp/project');
+    expect(sessions).toContainEqual(expect.objectContaining({
+      mcpServers: expect.arrayContaining([{ type: 'http', name: 'shelf', url: 'http://127.0.0.1:9999/mcp', headers: [{ name: 'Authorization', value: 'Bearer endpoint-token' }] }]),
+    }));
+  } finally { backend.dispose(); }
+});
 const COPILOT_PLAN_MODE_ID = 'https://agentclientprotocol.com/protocol/session-modes#plan';
 
 // Copilot-shaped session state (matches F5's measured `copilot --acp` catalog):

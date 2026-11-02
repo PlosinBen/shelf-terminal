@@ -20,6 +20,7 @@ title: shelf-terminal — Intent → File Index
 | App 層 Agent Skills（CRUD + lock + disable） | `skills-store.ts` | `<userData>/skills/` 下 app 層 skill 的檔案 CRUD + frontmatter 驗證 + `.locked`（agent 編輯鎖）+ `.disabled`（mount 開關）marker |
 | Skills 變更後處理（統一 pipeline） | `skills-sync.ts` | `onSkillsChanged()`：任何 skill mutation 後的單一出口（re-project + subscribers + 通知 renderer） |
 | App-tool bridge（main 端 dispatcher） | `agent/app-tool.ts` | `handleAppTool(op,args)` 把 agent-server 的 `app_tool` 請求轉成 client-owned 資源動作的純 dispatcher |
+| Shelf MCP signing authority | `agent/shelf-mcp-authority.ts` | App runtime 內的 per-Project Ed25519 key ownership 與 per-session／endpoint grant 簽發 |
 | Skills 投影（local + hash） | `skills-projection.ts` | `projectSkillsLocal` mirror skills 到 `~/.shelf/apps/<appId>/skills` + hash helper |
 | App 層 MCP config store | `mcp-store.ts` | `<userData>/mcp-servers.json`（keyed object）的同步 CRUD + 驗證（web-grants 風格，opaque 不碰 secret） |
 | MCP 變更後處理（sibling pipeline） | `mcp-sync.ts` | `onMcpChanged()`：re-project + subscribers + `MCP_CHANGED`；**不**呼叫 `onSkillsChanged()` |
@@ -149,6 +150,8 @@ title: shelf-terminal — Intent → File Index
 | MCP config 消費（解析 + ${VAR}） | `providers/mcp-config.ts` | `loadProjectedMcpServers`：讀 projected `mcp-servers.json` → 驗證 → 對 worker env 展開 `${VAR}` → fail-loud（兩 provider 共用） |
 | App-tool bridge（agent-server 端） | `app-tool-client.ts` + `app-tool-tools.ts` | Shelf 工具共用契約（名稱／描述／schema／operation）、參數選取與 main RPC |
 | Shelf HTTP MCP adapter | `shelf-mcp.ts` | Copilot／Codex 共用的 stateless HTTP host、工具註冊與 MCP result envelope |
+| Shelf MCP authentication | `shelf-mcp-auth.ts` | main bootstrap、endpoint-bound signature 驗證與 Bearer headers |
+| Shelf MCP bootstrap tests | `shelf-mcp-auth.test.ts` + `shelf-mcp-bootstrap.test.ts` + `app-tool-client.test.ts` | key／token scope、真實 RPC／HTTP 串接、shutdown 與 request correlation 驗證 |
 | Shelf 工具契約測試 | `shelf-tool-contract.test.ts` + `shelf-mcp.test.ts` | Claude／HTTP 的 surface snapshots、操作映射、回傳格式與 HTTP limits |
 | Log proxy → main | `server-logger.ts` | `serverLog(level,tag,msg,...args)`：args 源頭 flatten 後走 wire `log` 訊息回 main（agent-server 無獨立 observability，見 `contracts/agent-wire-protocol`） |
 | ~/.shelf 清理（heartbeat-lease） | `cleanup.ts` | `runCleanupSweep()` 啟動時按 `.heartbeat` lease 回收 version/appId 殘留 |
@@ -269,6 +272,7 @@ title: shelf-terminal — Intent → File Index
 | Cross-platform process memory adapter | `process-memory-sampler.ts` | host snapshot normalization與 dispatcher/exec process-tree classification |
 | Named channel log policy | `channel-log.ts` | retained log channel名稱與天數政策 |
 | App 層 MCP 型別 + 驗證 | `mcp.ts` | `McpServerBlock`/`McpServersFile` + 純 validator(main store 與 agent-server loader 共用，不 pull electron） |
+| Shelf MCP authentication contract | `shelf-mcp.ts` | endpoint／grant 型別、internal operation 常數與 canonical signing payload |
 | Shelf 檔案 placement 規則 | `shelf-paths.ts` | `shelfPlacement(type,ctx)` closed allowlist + `ShelfFileType*` 常數(transport 與 agent-server 共用單一路徑規則） |
 | 專案 env 純 helper | `project-env.ts` | `EnvMap`、`SHELF_RESERVED_ENV`、`isReservedEnvKey`/`validateEnvKey`、`applyEnvMap`（本機 merge、PATH-merge）、`buildEnvExportPrefix`（遠端 export 前綴）；main + renderer 共用 |
 | External URL intent contract | `external-url-intent.ts` | source/decision/destination types、allowlist/length limits與不回顯 URL 的純 validation |

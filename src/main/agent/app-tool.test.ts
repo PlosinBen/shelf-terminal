@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Project } from '@shared/projects';
+import { SHELF_MCP } from '@shared/shelf-mcp';
+import { randomUUID } from 'node:crypto';
 
 const listSkills = vi.fn();
 const getSkill = vi.fn();
@@ -98,6 +100,30 @@ beforeEach(() => {
   grant.mockReset();
   createConnector.mockReset();
   listFeatureNotes.mockReset();
+});
+
+describe('internal Shelf MCP bootstrap', () => {
+  it('uses only the transport Project and Agent session, returning no private key', async () => {
+    getProjects.mockReturnValue([{ id: 'p' }]);
+    const endpointId = randomUUID();
+    const result = await handleAppTool(SHELF_MCP.AUTHORIZE, { endpointId }, { projectId: 'p', agentSessionId: 'a' });
+    expect(result).toMatchObject({ ok: true, data: { projectId: 'p', agentSessionId: 'a', endpointId, publicKey: expect.any(String), token: expect.any(String) } });
+    expect(JSON.stringify(result)).not.toContain('PRIVATE');
+  });
+
+  it('rejects missing/unknown Project and missing Agent context', async () => {
+    getProjects.mockReturnValue([{ id: 'p' }]);
+    for (const context of [{}, { projectId: 'unknown', agentSessionId: 'a' }, { projectId: 'p' }]) {
+      expect((await handleAppTool(SHELF_MCP.AUTHORIZE, { endpointId: randomUUID() }, context)).ok).toBe(false);
+    }
+  });
+
+  it('rejects caller-supplied scope and malformed endpoint identities', async () => {
+    getProjects.mockReturnValue([{ id: 'p' }]);
+    for (const args of [{ endpointId: randomUUID(), projectId: 'other' }, { endpointId: randomUUID(), agentSessionId: 'other' }, { endpointId: 'bad' }]) {
+      expect((await handleAppTool(SHELF_MCP.AUTHORIZE, args, { projectId: 'p', agentSessionId: 'a' })).ok).toBe(false);
+    }
+  });
 });
 
 describe('app-tool dispatcher (browser prompt ownership)', () => {

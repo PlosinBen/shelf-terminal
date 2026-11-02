@@ -16,6 +16,7 @@ import { spawnCodexAppServerClient, type CodexAppServerNotificationHandler } fro
 import { summarizeTokenUsageForLog, translateCodexAppServerNotification } from './app-server-translate';
 import { loadProjectedMcpServers, type ParsedMcpConfig } from '../mcp-config';
 import { getSharedShelfMcp } from '../../shelf-mcp';
+import type { ShelfMcpEndpoint } from '@shared/shelf-mcp';
 import { serverLog } from '../../server-logger';
 
 interface CodexAppServerLike {
@@ -72,7 +73,7 @@ const CODEX_AUTH_METHOD = {
 export interface CodexBackendDeps {
   spawnLoginRpc?: (env: NodeJS.ProcessEnv) => { rpc: LoginRpc };
   createAppServer?: (env: NodeJS.ProcessEnv) => CodexAppServerLike;
-  getShelfMcp?: () => Promise<{ url: string } | null>;
+  getShelfMcp?: () => Promise<ShelfMcpEndpoint | null>;
   loadMcpServers?: (appId: string | undefined, env?: Record<string, string | undefined>) => ParsedMcpConfig;
   listBundledModels?: () => ProviderCapabilities['models'];
   refreshAccountStatus?: (
@@ -121,6 +122,8 @@ export function createCodexBackend(deps: CodexBackendDeps = {}): ServerBackend {
   const spawnLoginRpc = deps.spawnLoginRpc ?? ((env: NodeJS.ProcessEnv) => spawnCodexAppServerRpc(env));
   const createAppServer = deps.createAppServer ?? ((env: NodeJS.ProcessEnv) => spawnCodexAppServerClient(env).client);
   const getShelfMcp = deps.getShelfMcp ?? getSharedShelfMcp;
+  let shelfMcpPromise: Promise<ShelfMcpEndpoint | null> | undefined;
+  const resolveShelfMcp = () => shelfMcpPromise ??= getShelfMcp();
   const loadMcpServers = deps.loadMcpServers ?? loadProjectedMcpServers;
   const listBundledModels = deps.listBundledModels ?? listCodexBundledModels;
   const refreshAccount = deps.refreshAccountStatus ?? refreshCodexAccountStatus;
@@ -132,10 +135,17 @@ export function createCodexBackend(deps: CodexBackendDeps = {}): ServerBackend {
       appServerInitialized = false;
     }
     if (!appServer) {
-      appServer = createAppServer(env);
-      appServerAppId = appId;
-      registerAppServerNotifications(appServer);
-      registerAppServerRequests(appServer);
+      const shelfMcp = await resolveShelfMcp();
+      const mapped = buildCodexRuntimeConfig({ cwd: '', baseEnv: env, shelfMcp: shelfMcp ?? undefined });
+      if (!mapped.ok) throw new Error(mapped.errors.join('; '));
+      // Endpoint bootstrap is async. A concurrent caller may have completed
+      // the spawn while this caller was waiting for the shared authorization.
+      if (!appServer) {
+        appServer = createAppServer(mapped.codexOptions.env);
+        appServerAppId = appId;
+        registerAppServerNotifications(appServer);
+        registerAppServerRequests(appServer);
+      }
     }
     if (!appServerInitialized) {
       await appServer.request('initialize', {
@@ -787,7 +797,7 @@ export function createCodexBackend(deps: CodexBackendDeps = {}): ServerBackend {
         if (mcp.errors.length) {
           throw new Error(mcp.errors.join('; '));
         }
-        const shelfMcp = await getShelfMcp();
+        const shelfMcp = await resolveShelfMcp();
         const mapped = buildCodexRuntimeConfig({
           cwd: input.cwd,
           baseEnv,

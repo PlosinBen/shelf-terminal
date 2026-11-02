@@ -5,7 +5,7 @@
  * permission/picker round-trip) and resolves when main replies with
  * `app_tool_result`. Lives in its own module so both index.ts (which owns the
  * stdout `send` + the stdin reader) and the providers can import it without a
- * circular dependency. See .agent/features/app-level-capabilities.md.
+ * circular dependency. See contracts/app-tool-bridge.
  */
 
 export interface AppToolResult {
@@ -27,12 +27,23 @@ export function initAppToolClient(s: Send): void {
 
 /** Call a main-side app tool and await its result. Never rejects — a missing
  *  channel or main-side failure comes back as `{ ok:false, error }`. */
-export function callMain(op: string, args: Record<string, unknown> = {}): Promise<AppToolResult> {
+export function callMain(
+  op: string,
+  args: Record<string, unknown> = {},
+  options: { requestId?: string; timeoutMs?: number } = {},
+): Promise<AppToolResult> {
   if (!send) return Promise.resolve({ ok: false, error: 'app-tool channel not initialized' });
   seq += 1;
-  const requestId = `at-${seq}`;
+  const requestId = options.requestId ?? `at-${seq}`;
+  if (pending.has(requestId)) return Promise.resolve({ ok: false, error: 'Duplicate app-tool request id' });
   return new Promise<AppToolResult>((resolve) => {
-    pending.set(requestId, resolve);
+    const timer = options.timeoutMs === undefined ? undefined : setTimeout(() => {
+      resolveAppToolResult(requestId, { ok: false, error: 'app-tool request timed out' });
+    }, options.timeoutMs);
+    pending.set(requestId, result => {
+      if (timer) clearTimeout(timer);
+      resolve(result);
+    });
     send!({ type: 'app_tool', requestId, op, args });
   });
 }

@@ -164,3 +164,37 @@ Agent 通訊協定，也不構成統一 transport 的理由。
 一起改錯仍只因相互一致而通過。
 
 **Related**：`agent-server/app-tool-tools.ts`、`agent-server/shelf-mcp.ts`、`agent-server/shelf-tool-contract.test.ts`、`contracts/app-tool-bridge`。
+
+## mcp#13 — Project signing keys authorize individual execution endpoints  ·  [Decision]
+
+**Decision**：main 首次授權某 Project 時產生 Ed25519 key pair，在本次 App runtime
+記憶體內重用；私鑰不 export／落盤／送往 exec。exec 產生新的 endpoint UUID，經
+既有 app-tool RPC 取得 public key 與 detached-signature Bearer。簽章同時綁定固定
+domain 版本、可信 Project、可信 Agent session 與 endpoint nonce。main 從通道取得
+Project／session context，不接受 args 指定 scope；公鑰只從該可信 bootstrap 取得，
+不從 HTTP request 取得。此 internal op 不列入模型的工具清單。
+
+**Reason**：Project 是一對多授權範圍，而 token 是個別 endpoint 的存取資格。
+共用公鑰不代表同 Project 的所有 token 都能互用；即使其他 session 要求簽署同一
+nonce，因可信 session 不同也無法產生目標 endpoint 接受的簽章。與每 Agent 一組
+key 相比，新增 Agent／重連只需簽發新 token，不用改變 Project 的簽發身分。
+
+**Do not change casually because**：這是授權簽章，不是加密或 proof-of-possession。
+Bearer 在該 endpoint 有效期間仍可重放；可讀取 provider env／exec 記憶體的同權限
+程序不在此隔離保證內。Project 私鑰洩漏影響整個 Project。此機制不取代 main 的
+每工具權限與資源檢查，也不為不同工具或原生 MCP subprocess 建立新的 sandbox。
+
+Token 沒有固定 wall-clock TTL，以 endpoint incarnation／關閉作有效期，避免長時間
+Agent 在沒有可用續期通道時中斷。App 重開換 key；Agent exec 重建換 nonce／token；
+同次 App 執行內重連可保留 Project key。正常 shutdown 先停用 host 再 reap，程序
+終止也會移除 listener。若失聯遠端仍存活，它要等既有連線關閉／watchdog 終止才失效，
+不宣稱 main 記憶體的 key 消失會即時撤銷遠端公鑰。此設計依目前一 session 一 exec
+政策；未來多 session 共用 exec 時必須重新設計 host 的 caller binding。
+
+Bootstrap 必須在 listen 前完成，有 10 秒上限，失敗不回退無認證。授權 RPC 使用
+endpoint-specific request id，避免 dispatcher 以相同 sid 重建 exec 時，舊回覆撞上
+重置的流水號；timeout 移除 waiter。Host／Origin／path 是額外邊界，不是身分認證。
+保留 request bytes 與 tool-input elements 防護。Copilot 走 ACP header mapper；
+Codex 在 spawn 前注入 token env，thread config 只帶 env 名稱。Claude SDK 不切 HTTP。
+
+**Related**：`contracts/app-tool-bridge`、`agent-server/shelf-mcp-auth.ts`、`src/main/agent/shelf-mcp-authority.ts`、[Node crypto sign/verify](https://nodejs.org/docs/latest-v22.x/api/crypto.html#cryptosignalgorithm-data-key-callback)。

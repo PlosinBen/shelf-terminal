@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { startShelfMcpServer, type ShelfMcpHandle } from './shelf-mcp';
+import { createShelfMcpAuthority } from '../src/main/agent/shelf-mcp-authority';
 
 const { callMainMock, sdkQueryMock } = vi.hoisted(() => ({ callMainMock: vi.fn(), sdkQueryMock: vi.fn() }));
 vi.mock('./app-tool-client', () => ({ callMain: callMainMock }));
@@ -50,9 +51,11 @@ describe('Shelf tool contracts across Claude SDK and HTTP MCP', () => {
     const backend = createClaudeBackend();
     await backend.query({ prompt: '/mcp', cwd: '/tmp' }, () => {});
     claudeTools = sdkQueryMock.mock.calls[0][0].options.mcpServers.shelf.tools;
+    const authority = createShelfMcpAuthority();
+    callMainMock.mockImplementation(async (_op, args) => ({ ok: true, data: authority.authorize('p', 'agent', args.endpointId) }));
     host = await startShelfMcpServer();
     client = new Client({ name: 'contract-test', version: '1' });
-    await client.connect(new StreamableHTTPClientTransport(new URL(host.url)));
+    await client.connect(new StreamableHTTPClientTransport(new URL(host.url), { requestInit: { headers: host.headers } }));
   });
   afterAll(async () => { await client?.close(); host?.close(); });
   beforeEach(() => { callMainMock.mockReset(); });

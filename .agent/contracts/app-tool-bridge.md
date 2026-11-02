@@ -21,7 +21,7 @@ Two single-line JSON frames, correlated by `requestId` (modelled on the permissi
 { "type": "app_tool", "requestId": "at-1", "op": "app_skill.get", "args": { "name": "deploy-helper" } }
 ```
 
-- `requestId` — `at-<seq>`, minted per call by `callMain` in `agent-server/app-tool-client.ts`. The pending promise is keyed on it.
+- `requestId` — normally `at-<seq>`, minted per call by `callMain` in `agent-server/app-tool-client.ts`. Internal endpoint bootstrap uses `at-auth-<endpointId>` so replies from an old exec cannot collide after reconnect. The pending promise is keyed on it; an optional timeout removes its waiter and returns `ok:false`.
 - `op` — a registry key (`resource.verb`); see below.
 - `args` — `Record<string, unknown>`; op-specific (may be `{}`).
 
@@ -46,6 +46,44 @@ own SDK/protocol registration and result envelopes. Claude uses SDK `tool()`;
 `agent-server/shelf-mcp.ts` registers the same contracts with HTTP MCP for Copilot
 and Codex. No-argument HTTP tools omit `inputSchema`; Claude receives an empty
 shape. Both return text content and include `isError: true` only on failure.
+
+## Internal HTTP MCP authorization bootstrap
+
+`shelf_mcp.authorize` uses the same RPC but is **not** a model-facing tool. Request:
+
+```json
+{ "op": "shelf_mcp.authorize", "args": { "endpointId": "<exec-generated UUID v4>" } }
+```
+
+Main requires an existing Project and an Agent session from `AppToolContext`,
+supplied by the transport, not `args`. Dispatcher sessions use their `sid`; direct
+process connections use a main-generated runtime UUID. Any extra argument,
+including a caller-supplied Project or Agent identity, is rejected. Authoritative
+grant/endpoint types and signing payload: `src/shared/shelf-mcp.ts`.
+
+```json
+{ "ok": true, "data": { "projectId": "<trusted Project>", "agentSessionId": "<trusted session>", "endpointId": "<requested UUID>", "publicKey": "<SPKI PEM>", "token": "<base64url signature>" } }
+```
+
+The opaque token is an Ed25519 signature over UTF-8
+`JSON.stringify(["shelf.mcp.endpoint.v1", projectId, agentSessionId, endpointId])`.
+It is not JWT. Main retains the per-Project private key in memory; exec verifies
+the grant before binding and reconstructs this known payload when checking
+`Authorization: Bearer <token>`. HTTP supplies no public key, scope, or algorithm.
+Bootstrap waits at most 10 seconds and never falls back to an unauthenticated host.
+Grant responses remain on the RPC lane, not renderer events or Shelf log payloads.
+
+The shared endpoint carries `{ url, headers }`. Copilot serializes headers via the
+ACP mapper. Codex puts the token in its app-server spawn environment and only the
+variable name in `bearer_token_env_var`; config must not contain the token itself.
+Claude retains its SDK in-process MCP and does not need this HTTP bootstrap.
+
+The host accepts only POST at exact `/mcp`, its actual Host authority, absent or
+same-origin Origin, and a valid signature. Origin/Host are defense-in-depth, not
+authentication. Existing body/input limits still apply. Token lifetime is the
+endpoint incarnation, not a wall-clock TTL; shutdown disables new dispatch before
+reaping, and a recreated endpoint has a new nonce. See `context/mcp` mcp#13 for
+trust/lifecycle limits.
 
 ## Registry (op → args → return → safe?)
 

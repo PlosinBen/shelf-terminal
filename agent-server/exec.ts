@@ -20,6 +20,7 @@ import { SESSION_ENV_KEY, writeLease, removeLease as removeSessionLease, sweepDe
 import { findPidsByEnv, readProcStartTime } from './proc-scan';
 import { loadRestoreContextFor, newExecutionId, wrapSendForContext, wrapSendForExecution } from './orchestrator';
 import { initAppToolClient, resolveAppToolResult } from './app-tool-client';
+import { closeSharedShelfMcp } from './shelf-mcp';
 import { setLogSink, serverLog } from './server-logger';
 import { setWireSink } from './logger';
 import { createSendQueue } from './send-queue';
@@ -705,6 +706,7 @@ const REAP_TIMEOUT_MS = 2000;
 async function shutdown(): Promise<void> {
   if (shuttingDown) return;
   shuttingDown = true;
+  closeSharedShelfMcp();
   await performShutdown({
     backends: backendRegistry.values(),
     reapTimeoutMs: REAP_TIMEOUT_MS,

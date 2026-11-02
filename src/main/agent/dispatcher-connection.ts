@@ -16,6 +16,8 @@ import type { AgentEvent } from './types';
 import { ConnectionHealthTracker, DEFAULT_HEALTH_THRESHOLDS } from './connection-health';
 import { createExecutionDispatcher, type PermissionHandler } from './execution-dispatcher';
 import { buildWorktreeAppToolAuditEvent } from './app-tool-audit';
+import type { AppToolContext, AppToolResult } from './app-tool';
+import { SHELF_MCP } from '@shared/shelf-mcp';
 import {
   MEMORY_WIRE_TYPE,
   parseMemoryUsageReport,
@@ -56,7 +58,7 @@ export interface DispatcherConnectionDeps {
   /** Same parser the per-tab execution-dispatcher uses (injected to avoid a remote.ts cycle). */
   parseRemoteMessage: (msg: any) => AgentEvent | null;
   /** App-tool bridge handler (injected). */
-  handleAppTool: (op: string, args: Record<string, unknown>, ctx: { projectId?: string }) => Promise<any>;
+  handleAppTool: (op: string, args: Record<string, unknown>, ctx: AppToolContext) => Promise<AppToolResult>;
   heartbeatIntervalMs?: number;
   /** Called when the last session closes → owner tears the connection down. */
   onEmpty?: () => void;
@@ -212,12 +214,16 @@ export function createDispatcherConnection(deps: DispatcherConnectionDeps): Disp
     if (type === 'app_tool') {
       const requestId = parsed.requestId;
       const op = typeof parsed.op === 'string' ? parsed.op : '';
+      if (!active && op === SHELF_MCP.AUTHORIZE) {
+        log.warn('dispatcher-conn', `authorization request from inactive connection sid=${sid} rejected`);
+        return;
+      }
       const args = (parsed.args && typeof parsed.args === 'object') ? parsed.args : {};
       const auditStarted = typeof requestId === 'string'
         ? buildWorktreeAppToolAuditEvent({ requestId, op, args })
         : null;
       if (auditStarted) ch.sinks.onSessionEvent?.(auditStarted);
-      void deps.handleAppTool(op, args, { projectId: ch.sinks.projectId }).then((result) => {
+      void deps.handleAppTool(op, args, { projectId: ch.sinks.projectId, agentSessionId: sid }).then((result) => {
         if (typeof requestId === 'string') {
           const auditCompleted = buildWorktreeAppToolAuditEvent({ requestId, op, args, result });
           if (auditCompleted) ch.sinks.onSessionEvent?.(auditCompleted);

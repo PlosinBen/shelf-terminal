@@ -1,6 +1,7 @@
 import { beforeEach, describe, it, expect, vi } from 'vitest';
 import { createDispatcherConnection, type DispatcherProc } from './dispatcher-connection';
 import { MEMORY_PROCESS_ROLE, MEMORY_REPORT_STATUS, MEMORY_WIRE_TYPE } from '@shared/process-memory';
+import { SHELF_MCP } from '@shared/shelf-mcp';
 
 const logWarn = vi.hoisted(() => vi.fn());
 const logError = vi.hoisted(() => vi.fn());
@@ -32,7 +33,7 @@ function fakeProc() {
 
 function make(overrides: Partial<Parameters<typeof createDispatcherConnection>[0]> = {}) {
   const f = fakeProc();
-  const handleAppTool = vi.fn(async () => ({ ok: true, data: 'R' }));
+  const handleAppTool = vi.fn(async () => ({ ok: true, data: 'R' as unknown }));
   const conn = createDispatcherConnection({
     proc: f.proc,
     parseRemoteMessage: () => null, // we exercise dedicated sinks (queue/task), not execution parsing
@@ -151,9 +152,24 @@ describe('dispatcher-connection (per-host demux by sid)', () => {
     const { f, conn, handleAppTool } = make();
     conn.openSession('s1', undefined, { projectId: 'proj-1' });
     f.emit({ type: 'app_tool', sid: 's1', requestId: 'r1', op: 'web.fetch', args: { url: 'u' } });
-    expect(handleAppTool).toHaveBeenCalledWith('web.fetch', { url: 'u' }, { projectId: 'proj-1' });
+    expect(handleAppTool).toHaveBeenCalledWith('web.fetch', { url: 'u' }, { projectId: 'proj-1', agentSessionId: 's1' });
     await Promise.resolve(); await Promise.resolve();
     expect(f.parsedWritten()).toContainEqual({ type: 'app_tool_result', sid: 's1', requestId: 'r1', ok: true, data: 'R' });
+  });
+
+  it('keeps authorization grants on the trusted sid lane, not the renderer event lane', async () => {
+    const result = { ok: true, data: { token: 'sensitive-test-token', publicKey: 'public-key' } };
+    const { f, conn, handleAppTool } = make();
+    handleAppTool.mockResolvedValue(result);
+    const events = vi.fn();
+    conn.openSession('a', undefined, { projectId: 'p', onSessionEvent: events });
+    f.emit({ type: 'app_tool', sid: 'a', requestId: 'auth', op: SHELF_MCP.AUTHORIZE, args: { endpointId: 'nonce', projectId: 'forged' } });
+    await Promise.resolve(); await Promise.resolve();
+    expect(handleAppTool).toHaveBeenCalledWith(SHELF_MCP.AUTHORIZE, { endpointId: 'nonce', projectId: 'forged' }, { projectId: 'p', agentSessionId: 'a' });
+    expect(f.parsedWritten()).toContainEqual({ type: 'app_tool_result', sid: 'a', requestId: 'auth', ...result });
+    expect(events).not.toHaveBeenCalled();
+    const { log } = await import('@shared/logger');
+    expect(JSON.stringify([vi.mocked(log.debug).mock.calls, vi.mocked(log.info).mock.calls, logError.mock.calls])).not.toContain('sensitive-test-token');
   });
 
   it('emits an Agent View audit card for worktree app_tool args and result', async () => {

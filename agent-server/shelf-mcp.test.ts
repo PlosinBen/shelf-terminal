@@ -1,4 +1,14 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
+import { createShelfMcpAuthority } from '../src/main/agent/shelf-mcp-authority';
+import { SHELF_MCP } from '@shared/shelf-mcp';
+import { runBridgeTool } from './app-tool-tools';
+const authority = createShelfMcpAuthority();
+vi.mock('./app-tool-client', () => ({
+  callMain: async (op: string, args: { endpointId: string }) => {
+    if (op !== SHELF_MCP.AUTHORIZE) throw new Error('Unexpected bootstrap operation');
+    return { ok: true, data: authority.authorize('p', 'agent', args.endpointId) };
+  },
+}));
 import { request as httpRequest } from 'node:http';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
@@ -17,10 +27,84 @@ describe('shelf MCP bridge server', () => {
   let handle: ShelfMcpHandle | undefined;
   afterEach(() => { handle?.close(); handle = undefined; });
 
+  it('rejects unauthenticated calls before tool dispatch', async () => {
+    handle = await startShelfMcpServer();
+    const callsBefore = vi.mocked(runBridgeTool).mock.calls.length;
+    const response = await fetch(handle.url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'list_app_skills', arguments: {} } }),
+    });
+    await response.text();
+    expect(response.status).toBe(401);
+    expect(vi.mocked(runBridgeTool).mock.calls.length).toBe(callsBefore);
+  });
+
+  it.each([
+    { path: '/other', header: {}, status: 404 },
+    { path: '/mcp?extra=1', header: {}, status: 404 },
+    { path: '/mcp', header: { Origin: 'https://other.example' }, status: 403 },
+    { path: '/mcp', header: { Origin: 'null' }, status: 403 },
+    { path: '/mcp', header: { Host: 'other.example' }, status: 403 },
+    { path: '/mcp', header: { Authorization: 'Bearer forged' }, status: 401 },
+  ])('rejects invalid path/host/origin/credential $path $header before dispatch', async ({ path, header, status }) => {
+    handle = await startShelfMcpServer();
+    const callsBefore = vi.mocked(runBridgeTool).mock.calls.length;
+    const result = await new Promise<number>((resolve, reject) => {
+      const req = httpRequest(new URL(path, handle!.url), {
+        method: 'POST', headers: { ...handle!.headers, ...header, 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
+      }, res => { res.resume(); res.on('end', () => resolve(res.statusCode!)); });
+      req.on('error', reject);
+      req.end(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'list_app_skills', arguments: {} } }));
+    });
+    expect(result).toBe(status);
+    expect(vi.mocked(runBridgeTool).mock.calls.length).toBe(callsBefore);
+  });
+
+  it('accepts a valid signature with the endpoint’s own Origin', async () => {
+    handle = await startShelfMcpServer();
+    const response = await fetch(handle.url, {
+      method: 'POST', headers: { ...handle.headers, Origin: new URL(handle.url).origin, 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'list_app_skills', arguments: {} } }),
+    });
+    expect(response.status).toBe(200);
+    expect(await response.text()).toContain('ok');
+  });
+
+  it('does not accept another endpoint’s token, even in the same Project', async () => {
+    handle = await startShelfMcpServer();
+    const other = await startShelfMcpServer();
+    try {
+      const response = await fetch(handle.url, { method: 'POST', headers: other.headers, body: '{}' });
+      await response.text();
+      expect(response.status).toBe(401);
+    } finally { other.close(); }
+  });
+
+  it('rejects non-POST requests and advertises only POST', async () => {
+    handle = await startShelfMcpServer();
+    const response = await fetch(handle.url, { headers: handle.headers });
+    await response.text();
+    expect(response.status).toBe(405);
+    expect(response.headers.get('allow')).toBe('POST');
+  });
+
+  it('does not expose a listener if authorization fails', async () => {
+    await expect(startShelfMcpServer(async () => { throw new Error('bootstrap failed'); })).rejects.toThrow('bootstrap failed');
+  });
+
+  it('stops accepting the token when the endpoint closes', async () => {
+    handle = await startShelfMcpServer();
+    const { url, headers } = handle;
+    handle.close();
+    handle.close(); // shutdown is idempotent
+    await expect(fetch(url, { method: 'POST', headers, body: '{}' })).rejects.toThrow();
+  });
+
   it('serves the app-level bridge tools over HTTP', async () => {
     handle = await startShelfMcpServer();
     const client = new Client({ name: 'test-client', version: '0.0.0' });
-    await client.connect(new StreamableHTTPClientTransport(new URL(handle.url)));
+    await client.connect(new StreamableHTTPClientTransport(new URL(handle.url), { requestInit: { headers: handle.headers } }));
     const { tools } = await client.listTools();
     await client.close();
 
@@ -61,7 +145,7 @@ describe('shelf MCP bridge server', () => {
     const status = await new Promise<number>((resolve, reject) => {
       const request = httpRequest(handle!.url, {
         method: 'POST',
-        headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
+        headers: { ...handle!.headers, 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
       }, (response) => {
         response.resume();
         response.on('end', () => resolve(response.statusCode ?? 0));
@@ -73,7 +157,7 @@ describe('shelf MCP bridge server', () => {
     expect(status).toBe(413);
 
     const client = new Client({ name: 'test-client', version: '0.0.0' });
-    await client.connect(new StreamableHTTPClientTransport(new URL(handle.url)));
+    await client.connect(new StreamableHTTPClientTransport(new URL(handle.url), { requestInit: { headers: handle.headers } }));
     expect((await client.listTools()).tools.length).toBeGreaterThan(0);
     await client.close();
   });
@@ -95,7 +179,7 @@ describe('shelf MCP bridge server', () => {
     expect(Buffer.byteLength(body)).toBe(limit);
     const response = await fetch(handle.url, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
+      headers: { ...handle.headers, 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
       body,
     });
     const responseText = await response.text();
@@ -105,7 +189,7 @@ describe('shelf MCP bridge server', () => {
   it('limits tool argument elements while allowing a call at the boundary', async () => {
     handle = await startShelfMcpServer();
     const client = new Client({ name: 'test-client', version: '0.0.0' });
-    await client.connect(new StreamableHTTPClientTransport(new URL(handle.url)));
+    await client.connect(new StreamableHTTPClientTransport(new URL(handle.url), { requestInit: { headers: handle.headers } }));
     const headers = Object.fromEntries(Array.from({ length: 1022 }, (_, index) => [`header-${index}`, 'value']));
     const within = await client.callTool({ name: 'browser_fetch', arguments: { url: 'https://example.com', headers } });
     expect(within.isError).not.toBe(true);

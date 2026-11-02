@@ -33,6 +33,8 @@ import { createPermissionBridge } from '../acp/permission';
 import { mapSessionCapabilities, currentSelections, configOptionIdForCategory } from '../acp/capabilities';
 import { toAcpMcpServers } from '../acp/mcp';
 import { getSharedShelfMcp } from '../../shelf-mcp';
+import type { ShelfMcpEndpoint } from '@shared/shelf-mcp';
+import { SHELF_MCP_SERVER_NAME } from '@shared/mcp';
 import { replaceSession } from '../acp/session-replacement';
 import { loadProjectedMcpServers } from '../mcp-config';
 import {
@@ -113,7 +115,7 @@ export interface CopilotDeps {
   openAgent?: (cwd: string, appId?: string) => CopilotAgentTarget;
   /** Resolve the in-process Shelf MCP bridge (level 1). Default: the shared HTTP
    *  server. Return null to omit it (tests skip starting a real HTTP server). */
-  getShelfMcp?: () => Promise<{ url: string } | null>;
+  getShelfMcp?: () => Promise<ShelfMcpEndpoint | null>;
   /** Test seam for the provider-local native-mode confirmation bound. */
   modeConfirmationTimeoutMs?: number;
 }
@@ -657,7 +659,9 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
       cwd: input.cwd,
       mcpServers: [
         ...toAcpMcpServers(mcp.servers),
-        ...(shelf ? [{ type: 'http' as const, name: 'shelf', url: shelf.url, headers: [] }] : []),
+        ...toAcpMcpServers(shelf ? {
+          [SHELF_MCP_SERVER_NAME]: { type: 'http', url: shelf.url, headers: { ...shelf.headers } },
+        } : {}),
       ],
     };
 

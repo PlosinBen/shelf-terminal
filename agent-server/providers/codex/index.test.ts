@@ -7,6 +7,8 @@ import { createCodexBackend } from './index';
 import type { LoginRpc } from '../codex-shared/app-server-login';
 import type { OutgoingMessage } from '../types';
 import { setLogSink, type ServerLogMessage } from '../../server-logger';
+// Lifecycle tests use fake app-server processes, not a main bootstrap channel.
+vi.mock('../../shelf-mcp', () => ({ getSharedShelfMcp: async () => null }));
 
 interface RequestCall {
   method: string;
@@ -177,6 +179,23 @@ describe('Codex official app-server backend lifecycle', () => {
   beforeEach(() => {
     serverLogs = [];
     setLogSink((message) => serverLogs.push(message));
+  });
+
+  it('shares a pending endpoint bootstrap without spawning duplicate app servers', async () => {
+    let resolveEndpoint!: (value: { url: string; headers: Record<string, string> }) => void;
+    const endpoint = new Promise<{ url: string; headers: Record<string, string> }>(resolve => { resolveEndpoint = resolve; });
+    const app = new FakeAppServer();
+    const createAppServer = vi.fn(() => app);
+    const getShelfMcp = vi.fn(() => endpoint);
+    const backend = createCodexBackend({ createAppServer, getShelfMcp });
+    const first = backend.gatherCapabilities!('/repo');
+    const second = backend.gatherCapabilities!('/repo');
+    resolveEndpoint({ url: 'http://127.0.0.1:9/mcp', headers: { Authorization: 'Bearer endpoint-token' } });
+    try {
+      await Promise.all([first, second]);
+      expect(getShelfMcp).toHaveBeenCalledTimes(1);
+      expect(createAppServer).toHaveBeenCalledTimes(1);
+    } finally { backend.dispose(); }
   });
 
   it('starts a new app-server thread, starts a turn, streams deltas, persists thread id, reports ctx, and idles once', async () => {
@@ -1085,7 +1104,7 @@ describe('Codex official app-server backend lifecycle', () => {
         envs.push(env);
         return app;
       },
-      getShelfMcp: async () => ({ url: 'http://127.0.0.1:9/mcp' }),
+      getShelfMcp: async () => ({ url: 'http://127.0.0.1:9/mcp', headers: { Authorization: 'Bearer endpoint-token' } }),
       loadMcpServers: () => ({
         servers: {
           gh: { type: 'stdio', command: 'node', args: ['server.js'], env: { GITHUB_TOKEN: 'secret-token' } },
@@ -1098,6 +1117,7 @@ describe('Codex official app-server backend lifecycle', () => {
     await backend.query({ prompt: 'hi', cwd: '/repo', appId: 'app-1' }, (m) => out.push(m));
 
     expect(envs[0]).toMatchObject({
+      SHELF_CODEX_MCP_SHELF_AUTHORIZATION: 'endpoint-token',
       CODEX_HOME: path.join(os.homedir(), '.shelf', 'apps', 'app-1', 'codex'),
       HOME: path.join(os.homedir(), '.shelf', 'apps', 'app-1', 'codex-home'),
     });
@@ -1105,12 +1125,13 @@ describe('Codex official app-server backend lifecycle', () => {
     expect(threadStart.params).toMatchObject({
       config: {
         mcp_servers: {
-          shelf: { url: 'http://127.0.0.1:9/mcp', required: true },
+          shelf: { url: 'http://127.0.0.1:9/mcp', required: true, bearer_token_env_var: 'SHELF_CODEX_MCP_SHELF_AUTHORIZATION' },
           gh: { command: 'node', args: ['server.js'], env_vars: ['GITHUB_TOKEN'] },
         },
       },
     });
     expect(JSON.stringify(threadStart.params)).not.toContain('secret-token');
+    expect(JSON.stringify(threadStart.params)).not.toContain('endpoint-token');
     expect(out.find((m) => m.type === 'error')).toBeUndefined();
   });
 

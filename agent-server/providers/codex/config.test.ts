@@ -5,6 +5,18 @@ import {
 } from './config';
 
 describe('Codex SDK pure runtime config mapping', () => {
+  it('keeps the Shelf bearer only in process env, not thread config', () => {
+    const mapped = buildCodexRuntimeConfig({ cwd: '/repo', shelfMcp: {
+      url: 'http://127.0.0.1:1234/mcp', headers: { Authorization: 'Bearer signed-token' },
+    } });
+    expect(mapped.ok).toBe(true);
+    expect(mapped.codexOptions.config.mcp_servers?.shelf).toEqual({
+      url: 'http://127.0.0.1:1234/mcp', required: true,
+      bearer_token_env_var: 'SHELF_CODEX_MCP_SHELF_AUTHORIZATION',
+    });
+    expect(mapped.codexOptions.env.SHELF_CODEX_MCP_SHELF_AUTHORIZATION).toBe('signed-token');
+    expect(JSON.stringify(mapped.codexOptions.config)).not.toContain('signed-token');
+  });
   it('maps required Shelf L1 MCP to config without secrets', () => {
     const mapped = buildCodexRuntimeConfig({
       cwd: '/repo',

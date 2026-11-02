@@ -5,14 +5,13 @@ import { isWorktreeUnavailable } from '@shared/worktree';
  * resources (currently app-level skills via skills-store), and returns a
  * structured result the bridge tool relays back to the model.
  *
- * Shape is the B-registry from .agent/features/app-level-capabilities.md:
+ * Registry contract: contracts/app-tool-bridge.
  * `op = resource.verb`, each entry flags `safe` (read = no confirm) so the
  * caller can gate mutations. This module is the SINGLE place that maps an op to
  * a resource action — adding an app tool = add a registry entry + (for writes)
  * its mutation path. PURE of any wire/IPC concern, so it's unit-testable.
  *
- * Step 1 ships the safe READ ops only (list/get). Mutations (create/update) +
- * their confirm + the skills:changed broadcast land in later steps.
+ * Internal MCP bootstrap shares this RPC but is not a model-facing tool.
  */
 import {
   listSkills, getSkill, createSkill, updateSkill, isSkillLocked,
@@ -29,11 +28,15 @@ import { getProjectsRepository } from '../projects/repository-provider';
 import { createConnector } from '../connector';
 import { listFeatureNotes } from '../worktree/feature-notes';
 import { IPC } from '@shared/ipc-channels';
+import { SHELF_MCP, isShelfMcpEndpointId } from '@shared/shelf-mcp';
+import { shelfMcpAuthority } from './shelf-mcp-authority';
 
 /** Per-call context the bridge threads in (which tab/project asked). */
 export interface AppToolContext {
   /** Owning project — the web.fetch grant key is (projectId, origin). */
   projectId?: string;
+  /** Trusted transport session, never supplied by model tool arguments. */
+  agentSessionId?: string;
 }
 
 export interface AppToolResult {
@@ -114,6 +117,18 @@ async function resolveProposedNotePaths(projectId: string, identifiers: readonly
 }
 
 const REGISTRY: Record<string, AppToolDef> = {
+  // Internal bootstrap only: intentionally absent from model-facing tool specs.
+  [SHELF_MCP.AUTHORIZE]: {
+    safe: true,
+    run: async (args, ctx) => {
+      if (!ctx.projectId || !getProjectsRepository().get(ctx.projectId)) throw new Error('Shelf MCP authorization requires a live Project context');
+      if (!ctx.agentSessionId) throw new Error('Shelf MCP authorization requires an Agent session context');
+      if (Object.keys(args).some(key => key !== 'endpointId') || !isShelfMcpEndpointId(args.endpointId)) {
+        throw new Error('Invalid Shelf MCP authorization arguments');
+      }
+      return shelfMcpAuthority.authorize(ctx.projectId, ctx.agentSessionId, args.endpointId);
+    },
+  },
   'app_skill.list': {
     safe: true,
     run: async () => ({ skills: await listSkills() }),

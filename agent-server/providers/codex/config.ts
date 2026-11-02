@@ -1,4 +1,6 @@
 import type { McpServerBlock, McpServersFile } from '@shared/mcp';
+import { SHELF_MCP_SERVER_NAME } from '@shared/mcp';
+import type { ShelfMcpEndpoint } from '@shared/shelf-mcp';
 
 interface CodexConfigObject {
   mcp_servers?: Record<string, CodexMcpServerConfig>;
@@ -7,7 +9,7 @@ interface CodexConfigObject {
 interface BuildConfigInput {
   cwd: string;
   mcpServers?: McpServersFile;
-  shelfMcp?: { url: string };
+  shelfMcp?: ShelfMcpEndpoint;
   baseEnv?: Record<string, string | undefined>;
 }
 
@@ -34,14 +36,14 @@ export function buildCodexRuntimeConfig(input: BuildConfigInput): CodexSdkRuntim
   const errors: string[] = [];
   const env = compactEnv(input.baseEnv ?? {});
   const mcpServers: Record<string, CodexMcpServerConfig> = {};
+  const stdioEnvOwners = new Map<string, { value: string; serverName: string }>();
   if (input.shelfMcp) {
-    mcpServers.shelf = {
-      url: input.shelfMcp.url,
-      required: true,
-    };
+    const mapped = mapMcpServer(SHELF_MCP_SERVER_NAME, {
+      type: 'http', url: input.shelfMcp.url, headers: { ...input.shelfMcp.headers },
+    }, env, stdioEnvOwners, errors);
+    if (mapped) mcpServers[SHELF_MCP_SERVER_NAME] = { ...mapped, required: true };
   }
 
-  const stdioEnvOwners = new Map<string, { value: string; serverName: string }>();
   for (const [serverName, server] of Object.entries(input.mcpServers ?? {})) {
     if (!isSafeMcpServerName(serverName)) {
       errors.push(`Invalid MCP server name for Codex SDK config: ${serverName}`);
