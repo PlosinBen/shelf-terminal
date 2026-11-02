@@ -231,8 +231,8 @@ function getShelfMcpServer() {
       version: '1.0.0',
       tools: [
         tool('list_app_skills', APP_SKILL_LIST_DESC, {}, async () => {
-          const { text } = await runBridgeTool('app_skill.list', {});
-          return { content: [{ type: 'text' as const, text }] };
+          const { text, isError } = await runBridgeTool('app_skill.list', {});
+          return { content: [{ type: 'text' as const, text }], ...(isError ? { isError: true } : {}) };
         }),
         tool('get_app_skill', APP_SKILL_GET_DESC, { name: z.string().describe('skill folder name from list_app_skills') }, async ({ name }) => {
           const { text, isError } = await runBridgeTool('app_skill.get', { name });

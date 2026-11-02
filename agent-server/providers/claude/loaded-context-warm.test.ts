@@ -11,9 +11,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
  */
 
 const sdkQueryMock = vi.fn();
+const callMainMock = vi.fn();
+vi.mock('../../app-tool-client', () => ({
+  callMain: (...args: unknown[]) => callMainMock(...args),
+}));
 vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
   query: (...args: unknown[]) => sdkQueryMock(...args),
-  tool: (name: string) => ({ name }),
+  tool: (name: string, _description: string, _schema: unknown, handler: unknown) => ({ name, handler }),
   createSdkMcpServer: (cfg: any) => cfg,
 }));
 
@@ -42,7 +46,26 @@ function collect() {
 const replyOf = (msgs: any[]) => msgs.find((m) => m.type === 'message' && m.msgType === 'reply');
 
 describe('claude /mcp /skills cold-start warm', () => {
-  beforeEach(() => sdkQueryMock.mockReset());
+  beforeEach(() => {
+    sdkQueryMock.mockReset();
+    callMainMock.mockReset();
+  });
+
+  it.each([
+    { result: { ok: true, data: { skills: [] } }, expected: { content: [{ type: 'text', text: '{"skills":[]}' }] } },
+    { result: { ok: false, error: 'skill lookup failed' }, expected: { content: [{ type: 'text', text: 'Error: skill lookup failed' }], isError: true } },
+  ])('preserves the list_app_skills bridge result $result', async ({ result, expected }) => {
+    sdkQueryMock.mockImplementation(() => fakeProbeQuery());
+    const backend = createClaudeBackend();
+    await backend.query({ prompt: '/mcp', cwd: '/tmp' }, () => {});
+    const server = sdkQueryMock.mock.calls[0][0].options.mcpServers.shelf;
+    const tool = server.tools.find((entry: { name: string }) => entry.name === 'list_app_skills');
+    expect(tool).toBeDefined();
+    callMainMock.mockResolvedValue(result);
+
+    await expect(tool.handler()).resolves.toEqual(expected);
+    expect(callMainMock).toHaveBeenCalledExactlyOnceWith('app_skill.list', {});
+  });
 
   it('cold /mcp warms the cache via a throwaway probe (no "send a message first")', async () => {
     sdkQueryMock.mockImplementation(() => fakeProbeQuery({ servers: [{ name: 'shelf', status: 'connected' }] }));
