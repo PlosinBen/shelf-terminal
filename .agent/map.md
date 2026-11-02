@@ -147,7 +147,9 @@ title: shelf-terminal — Intent → File Index
 | Copilot 互動登入（device flow） | `providers/copilot/login.ts` | `parseLoginPrompt`（stdout 抽 URL+code 純函式）+ `startLogin`（spawn `copilot login`、env 剝 token、cancel）+ `prefillLoginUrl`（見 `context/agent-providers` #10）。移入 copilot/ 保持 provider 目錄隔離 |
 | Provider 共用 helper | `providers/shared.ts` | `stripCwd` / `resolveSkillsPluginRoot` / `projectAppSkills`（idempotent + atomic symlink-to-temp+rename 的 skill projection）/ `readUploadedImageAttachments`（uploaded image path → base64）— 跨 provider 共用純函式 |
 | MCP config 消費（解析 + ${VAR}） | `providers/mcp-config.ts` | `loadProjectedMcpServers`：讀 projected `mcp-servers.json` → 驗證 → 對 worker env 展開 `${VAR}` → fail-loud（兩 provider 共用） |
-| App-tool bridge（agent-server 端） | `app-tool-client.ts` + `app-tool-tools.ts` | in-process MCP 工具的共用 body：`callMain` + `runBridgeTool` + 描述常數 |
+| App-tool bridge（agent-server 端） | `app-tool-client.ts` + `app-tool-tools.ts` | Shelf 工具共用契約（名稱／描述／schema／operation）、參數選取與 main RPC |
+| Shelf HTTP MCP adapter | `shelf-mcp.ts` | Copilot／Codex 共用的 stateless HTTP host、工具註冊與 MCP result envelope |
+| Shelf 工具契約測試 | `shelf-tool-contract.test.ts` + `shelf-mcp.test.ts` | Claude／HTTP 的 surface snapshots、操作映射、回傳格式與 HTTP limits |
 | Log proxy → main | `server-logger.ts` | `serverLog(level,tag,msg,...args)`：args 源頭 flatten 後走 wire `log` 訊息回 main（agent-server 無獨立 observability，見 `contracts/agent-wire-protocol`） |
 | ~/.shelf 清理（heartbeat-lease） | `cleanup.ts` | `runCleanupSweep()` 啟動時按 `.heartbeat` lease 回收 version/appId 殘留 |
 | 正常關閉單一路徑（reap→dispose→exit） | `shutdown.ts` | `performShutdown()`：由 `rl.on('close')` 與 idle watchdog 共用，先收屍再 dispose 再 exit（見 `context/connection-health` #5） |
@@ -162,7 +164,7 @@ title: shelf-terminal — Intent → File Index
 | Fake provider 測試 | `providers/fake/fake.test.ts` | 每個 scenario 的 wire-shape 驗證 + stop/abort 行為 |
 | Bundle build | `build.mjs` | esbuild → `dist/agent-server/<version>/index.js` 單一 ESM bundle（index/exec/dispatcher 同一 bundle，role 由 argv 選） |
 | Copilot provider 測試 | `providers/copilot/{copilot,helpers,login,credit,usage-observation}.test.ts` | ACP backend wire-shape / native config / restore / login / credit cache / usage suppression 與診斷欄位驗證 |
-| ACP toolkit 測試 | `providers/acp/*.test.ts` | connection/client/translate/permission/capabilities/mcp/shelf-mcp + mock-agent 驅動的 toolkit 驗證 |
+| ACP toolkit 測試 | `providers/acp/*.test.ts` | connection/client/translate/permission/capabilities/mcp + mock-agent 驅動的 toolkit 驗證 |
 | Dispatcher 單元測試 | `dispatcher.test.ts` | open/close_session / raw relay / reconnect + backoff / inner-ping hung / proc-identity guard / cache 側通道 |
 | Model-cache 單元測試 | `model-cache.test.ts` | TTL hit/miss/expiry evict |
 | Session-registry 單元測試 | `session-registry.test.ts` | open/get/close + runtimeKey 共享/隔離 |

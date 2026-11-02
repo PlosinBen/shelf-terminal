@@ -4,8 +4,8 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { startShelfMcpServer, type ShelfMcpHandle } from './shelf-mcp';
 
-vi.mock('../../app-tool-tools', async (importOriginal) => ({
-  ...await importOriginal<typeof import('../../app-tool-tools')>(),
+vi.mock('./app-tool-tools', async (importOriginal) => ({
+  ...await importOriginal<typeof import('./app-tool-tools')>(),
   runBridgeTool: vi.fn(async () => ({ text: 'ok', isError: false })),
 }));
 

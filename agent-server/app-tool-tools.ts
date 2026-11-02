@@ -1,12 +1,11 @@
 /**
- * Provider-agnostic handler + copy for the in-process bridge tools that expose
- * client-owned resources (app-level skills) to the model. Each provider
- * registers these via its own SDK API (claude `tool()` / copilot `defineTool`),
- * but the handler body — call main, format the result — is shared here.
+ * Shelf-owned tool contracts and bridge execution, independent of provider SDKs.
+ * Adapters own registration and protocol-specific result envelopes.
  * See context/skills (`skills#2`, the app-skill bridge).
  */
 import { callMain } from './app-tool-client';
 import { WEB_FETCH_TOOL, BROWSER_OPEN_TOOL } from '@shared/web-session';
+import { z } from 'zod';
 
 export const APP_SKILL_LIST_DESC =
   'List the app-level Agent Skills available in this app (each skill\'s name and description). '
@@ -80,29 +79,85 @@ export const PROPOSE_WORKTREE_FINISH_DESC =
   + 'configured feature-note files, and removes the child checkout and project only after every step succeeds. Calls outside a '
   + 'worktree child are rejected.';
 
-/**
- * Canonical inventory of the in-process Shelf bridge tools (name + description).
- * Single source for the `/mcp` card's `shelf` entry. The bridge is registered
- * per-provider (claude `tool()` inside `createSdkMcpServer` / copilot `defineTool`
- * in `config.tools`) — Claude's SDK then reports it back via `mcpServerStatus()`,
- * but Copilot's `mcp.list()` does NOT (it's `config.tools`, not an MCP server),
- * so Copilot composes its `shelf` entry from this list. Keep in sync with each
- * provider's registration (same names/descriptions).
- */
-export interface BridgeToolSpec { name: string; description: string; }
+// mcp#12: SDK/HTTP registration belongs in adapters, never in this contract.
+export interface BridgeToolSpec {
+  name: string;
+  description: string;
+  inputSchema: z.ZodRawShape;
+  operation: string;
+}
 export const SHELF_BRIDGE_TOOLS: BridgeToolSpec[] = [
-  { name: 'list_app_skills', description: APP_SKILL_LIST_DESC },
-  { name: 'get_app_skill', description: APP_SKILL_GET_DESC },
-  { name: 'create_app_skill', description: APP_SKILL_CREATE_DESC },
-  { name: 'update_app_skill', description: APP_SKILL_UPDATE_DESC },
-  { name: 'read_app_skill_file', description: APP_SKILL_READ_FILE_DESC },
-  { name: 'write_app_skill_file', description: APP_SKILL_WRITE_FILE_DESC },
-  { name: 'delete_app_skill_file', description: APP_SKILL_DELETE_FILE_DESC },
-  { name: WEB_FETCH_TOOL, description: WEB_FETCH_DESC },
-  { name: BROWSER_OPEN_TOOL, description: BROWSER_OPEN_DESC },
-  { name: 'propose_worktree_create', description: PROPOSE_WORKTREE_CREATE_DESC },
-  { name: 'propose_worktree_finish', description: PROPOSE_WORKTREE_FINISH_DESC },
+  { name: 'list_app_skills', description: APP_SKILL_LIST_DESC, inputSchema: {}, operation: 'app_skill.list' },
+  {
+    name: 'get_app_skill', description: APP_SKILL_GET_DESC, operation: 'app_skill.get',
+    inputSchema: { name: z.string().describe('skill folder name from list_app_skills') },
+  },
+  {
+    name: 'create_app_skill', description: APP_SKILL_CREATE_DESC, operation: 'app_skill.create',
+    inputSchema: { content: z.string().describe('full SKILL.md (frontmatter name+description + body)') },
+  },
+  {
+    name: 'update_app_skill', description: APP_SKILL_UPDATE_DESC, operation: 'app_skill.update',
+    inputSchema: {
+      name: z.string().describe('current skill folder name'),
+      content: z.string().describe('full new SKILL.md'),
+    },
+  },
+  {
+    name: 'read_app_skill_file', description: APP_SKILL_READ_FILE_DESC, operation: 'app_skill.read_file',
+    inputSchema: {
+      name: z.string().describe('skill folder name'),
+      path: z.string().describe('folder-relative aux-file path from get_app_skill `files`'),
+    },
+  },
+  {
+    name: 'write_app_skill_file', description: APP_SKILL_WRITE_FILE_DESC, operation: 'app_skill.write_file',
+    inputSchema: {
+      name: z.string().describe('skill folder name'),
+      path: z.string().describe('folder-relative aux-file path (no leading slash, no ..)'),
+      content: z.string().describe('file content'),
+    },
+  },
+  {
+    name: 'delete_app_skill_file', description: APP_SKILL_DELETE_FILE_DESC, operation: 'app_skill.delete_file',
+    inputSchema: {
+      name: z.string().describe('skill folder name'),
+      path: z.string().describe('folder-relative aux-file path'),
+    },
+  },
+  {
+    name: WEB_FETCH_TOOL, description: WEB_FETCH_DESC, operation: 'web.fetch',
+    inputSchema: {
+      url: z.string().describe('absolute http(s) URL of the internal service'),
+      method: z.string().optional().describe('HTTP method (default GET)'),
+      headers: z.record(z.string(), z.string()).optional().describe('extra request headers, e.g. {"kbn-xsrf":"true"}'),
+      body: z.string().optional().describe('request body, e.g. a JSON query string'),
+    },
+  },
+  {
+    name: BROWSER_OPEN_TOOL, description: BROWSER_OPEN_DESC, operation: 'web.open',
+    inputSchema: {
+      url: z.string().describe('absolute http(s) URL to open in a visible Web tab for the user to log in'),
+      reason: z.string().optional().describe('short explanation of why this page must be opened (shown in the approval popup)'),
+    },
+  },
+  {
+    name: 'propose_worktree_create', description: PROPOSE_WORKTREE_CREATE_DESC, operation: 'worktree.propose_create',
+    inputSchema: {
+      branch: z.string().optional().describe('suggested new branch name'),
+      note: z.string().optional().describe('legacy single feature note filename/path to preselect'),
+      notes: z.array(z.string()).optional().describe('feature note filenames/paths to preselect'),
+    },
+  },
+  { name: 'propose_worktree_finish', description: PROPOSE_WORKTREE_FINISH_DESC, inputSchema: {}, operation: 'worktree.propose_finish' },
 ];
+
+/** These tools map declared input fields directly to the same main-op fields.
+ * Select only schema keys (including omitted optional values), matching the old
+ * explicit destructuring. SDK adapters validate input; this does not parse it. */
+export function bridgeToolArgs(tool: BridgeToolSpec, input: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.keys(tool.inputSchema).map(key => [key, input[key]]));
+}
 
 export interface BridgeToolText {
   text: string;

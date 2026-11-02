@@ -1,7 +1,6 @@
 import { query as sdkQuery, tool, createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk';
 import type { Query, Options, SDKMessage, SDKUserMessage, CanUseTool } from '@anthropic-ai/claude-agent-sdk';
-import { z } from 'zod';
-import { runBridgeTool, APP_SKILL_LIST_DESC, APP_SKILL_GET_DESC, APP_SKILL_CREATE_DESC, APP_SKILL_UPDATE_DESC, APP_SKILL_READ_FILE_DESC, APP_SKILL_WRITE_FILE_DESC, APP_SKILL_DELETE_FILE_DESC, WEB_FETCH_DESC, BROWSER_OPEN_DESC, PROPOSE_WORKTREE_CREATE_DESC, PROPOSE_WORKTREE_FINISH_DESC } from '../../app-tool-tools';
+import { runBridgeTool, SHELF_BRIDGE_TOOLS, bridgeToolArgs } from '../../app-tool-tools';
 import { isWebFetchTool, WEB_FETCH_TOOL, isBrowserOpenTool, BROWSER_OPEN_TOOL } from '@shared/web-session';
 import { serverLog } from '../../server-logger';
 import { createRouterState, notePush, routeMessage } from './turn-router';
@@ -229,64 +228,13 @@ function getShelfMcpServer() {
     shelfMcpServer = createSdkMcpServer({
       name: 'shelf',
       version: '1.0.0',
-      tools: [
-        tool('list_app_skills', APP_SKILL_LIST_DESC, {}, async () => {
-          const { text, isError } = await runBridgeTool('app_skill.list', {});
+      tools: SHELF_BRIDGE_TOOLS.map(definition => tool(
+        definition.name, definition.description, definition.inputSchema,
+        async (args) => {
+          const { text, isError } = await runBridgeTool(definition.operation, bridgeToolArgs(definition, args));
           return { content: [{ type: 'text' as const, text }], ...(isError ? { isError: true } : {}) };
-        }),
-        tool('get_app_skill', APP_SKILL_GET_DESC, { name: z.string().describe('skill folder name from list_app_skills') }, async ({ name }) => {
-          const { text, isError } = await runBridgeTool('app_skill.get', { name });
-          return { content: [{ type: 'text' as const, text }], ...(isError ? { isError: true } : {}) };
-        }),
-        tool('create_app_skill', APP_SKILL_CREATE_DESC, { content: z.string().describe('full SKILL.md (frontmatter name+description + body)') }, async ({ content }) => {
-          const { text, isError } = await runBridgeTool('app_skill.create', { content });
-          return { content: [{ type: 'text' as const, text }], ...(isError ? { isError: true } : {}) };
-        }),
-        tool('update_app_skill', APP_SKILL_UPDATE_DESC, { name: z.string().describe('current skill folder name'), content: z.string().describe('full new SKILL.md') }, async ({ name, content }) => {
-          const { text, isError } = await runBridgeTool('app_skill.update', { name, content });
-          return { content: [{ type: 'text' as const, text }], ...(isError ? { isError: true } : {}) };
-        }),
-        tool('read_app_skill_file', APP_SKILL_READ_FILE_DESC, { name: z.string().describe('skill folder name'), path: z.string().describe('folder-relative aux-file path from get_app_skill `files`') }, async ({ name, path }) => {
-          const { text, isError } = await runBridgeTool('app_skill.read_file', { name, path });
-          return { content: [{ type: 'text' as const, text }], ...(isError ? { isError: true } : {}) };
-        }),
-        tool('write_app_skill_file', APP_SKILL_WRITE_FILE_DESC, { name: z.string().describe('skill folder name'), path: z.string().describe('folder-relative aux-file path (no leading slash, no ..)'), content: z.string().describe('file content') }, async ({ name, path, content }) => {
-          const { text, isError } = await runBridgeTool('app_skill.write_file', { name, path, content });
-          return { content: [{ type: 'text' as const, text }], ...(isError ? { isError: true } : {}) };
-        }),
-        tool('delete_app_skill_file', APP_SKILL_DELETE_FILE_DESC, { name: z.string().describe('skill folder name'), path: z.string().describe('folder-relative aux-file path') }, async ({ name, path }) => {
-          const { text, isError } = await runBridgeTool('app_skill.delete_file', { name, path });
-          return { content: [{ type: 'text' as const, text }], ...(isError ? { isError: true } : {}) };
-        }),
-        tool(WEB_FETCH_TOOL, WEB_FETCH_DESC, {
-          url: z.string().describe('absolute http(s) URL of the internal service'),
-          method: z.string().optional().describe('HTTP method (default GET)'),
-          headers: z.record(z.string(), z.string()).optional().describe('extra request headers, e.g. {"kbn-xsrf":"true"}'),
-          body: z.string().optional().describe('request body, e.g. a JSON query string'),
-        }, async ({ url, method, headers, body }) => {
-          const { text, isError } = await runBridgeTool('web.fetch', { url, method, headers, body });
-          return { content: [{ type: 'text' as const, text }], ...(isError ? { isError: true } : {}) };
-        }),
-        tool(BROWSER_OPEN_TOOL, BROWSER_OPEN_DESC, {
-          url: z.string().describe('absolute http(s) URL to open in a visible Web tab for the user to log in'),
-          reason: z.string().optional().describe('short explanation of why this page must be opened (shown in the approval popup)'),
-        }, async ({ url, reason }) => {
-          const { text, isError } = await runBridgeTool('web.open', { url, reason });
-          return { content: [{ type: 'text' as const, text }], ...(isError ? { isError: true } : {}) };
-        }),
-        tool('propose_worktree_create', PROPOSE_WORKTREE_CREATE_DESC, {
-          branch: z.string().optional().describe('suggested new branch name'),
-          note: z.string().optional().describe('legacy single feature note filename/path to preselect'),
-          notes: z.array(z.string()).optional().describe('feature note filenames/paths to preselect'),
-        }, async ({ branch, note, notes }) => {
-          const { text, isError } = await runBridgeTool('worktree.propose_create', { branch, note, notes });
-          return { content: [{ type: 'text' as const, text }], ...(isError ? { isError: true } : {}) };
-        }),
-        tool('propose_worktree_finish', PROPOSE_WORKTREE_FINISH_DESC, {}, async () => {
-          const { text, isError } = await runBridgeTool('worktree.propose_finish', {});
-          return { content: [{ type: 'text' as const, text }], ...(isError ? { isError: true } : {}) };
-        }),
-      ],
+        },
+      )),
     });
   }
   return shelfMcpServer;

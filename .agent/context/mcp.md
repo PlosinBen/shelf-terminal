@@ -112,7 +112,7 @@ related:
 
 **Do not change casually because**：L1 一定要 in-process http（stdio 子進程無法回 main 執行 bridge tool);別把 L2 user MCP 挪去 config-home（per-session 已多租戶隔離,config-home 會重造碰撞);stdio MCP 在 copilot 失效是上游 #1040,不是 Shelf bug —— 別在 Shelf 側「修」（絕對路徑也沒用,見 UPSTREAM_WATCH)。
 
-**Related**：`mcp#4`、`agent-providers#13`、`agent-providers#33`、`.agent/UPSTREAM_WATCH.md`、`agent-server/providers/acp/{shelf-mcp,mcp}.ts`、`agent-server/providers/{copilot,codex}/index.ts`。
+**Related**：`mcp#4`、`agent-providers#13`、`agent-providers#33`、`.agent/UPSTREAM_WATCH.md`、`agent-server/shelf-mcp.ts`、`agent-server/providers/acp/mcp.ts`、`agent-server/providers/{copilot,codex}/index.ts`。
 
 ## mcp#10 — Built-in HTTP bridge bounds request bytes and tool-input elements  ·  [Decision]
 
@@ -122,7 +122,7 @@ related:
 
 **Do not change casually because**：不要只升 SDK 版號就假設防護已啟用，也不要改成收完 body 才檢查大小。若真有超過上限的合法內容，先確認實際工作流，再評估提高上限或分段傳輸；不要直接移除限制。Shelf 的 production code 直接使用 SDK server，沒有直接使用其 client redirect 或 bearer-auth middleware；升級時不應為不存在的 consumer 放寬 same-origin redirect 預設。
 
-**Related**：`agent-server/providers/acp/shelf-mcp.ts`、`agent-server/providers/acp/shelf-mcp.test.ts`、`mcp#9`。
+**Related**：`agent-server/shelf-mcp.ts`、`agent-server/shelf-mcp.test.ts`、`mcp#9`。
 
 ## mcp#11 — Reserve the exact shelf server name at Shelf authoring boundaries  ·  [Decision]
 
@@ -142,3 +142,25 @@ parser errors，因為 Codex 對該 errors 集合採 fatal 處理。這項政策
 project-level MCP config，也不限制 server 內部 tool 名稱。
 
 **Related**：`src/shared/mcp.ts`、`src/main/mcp-store.ts`、`src/main/config-backup/import.ts`、`contracts/persistence-formats`。
+
+## mcp#12 — Share Shelf tool contracts, encapsulate protocol and provider differences  ·  [Decision]
+
+**Decision**：Shelf 控制的工具名稱、描述、input schema 與 main operation 定義在共用
+`SHELF_BRIDGE_TOOLS`，不依賴 provider SDK。現有工具的參數皆直接同名映射，共用
+`bridgeToolArgs` 只選取 schema 宣告欄位。`runBridgeTool` 共用 main RPC 與文字／錯誤
+狀態轉換；SDK／MCP 的註冊、驗證整合與 result envelope 留在各 adapter。
+Claude 保留 SDK in-process MCP；Copilot ACP 與 Codex app-server 保留 HTTP MCP。
+HTTP host 位於 agent-server 共用層，不歸 ACP 所有；ACP entry 與 Codex thread config
+各由對應 adapter 轉換。
+
+**Reason**：共同契約避免同一工具在不同入口出現 schema／操作映射差異；不同 SDK
+的串接方式不應滲入 Shelf 共用層。使用相同 MCP host 不代表兩個 provider 使用相同
+Agent 通訊協定，也不構成統一 transport 的理由。
+
+**Do not change casually because**：共用的是 Shelf 語意與真正相同的行為，不是跨 SDK
+註冊框架。無參數工具在 HTTP 省略 schema、Claude 傳空 shape，是 adapter 的相容性
+處理。新增不同名映射時須明確擴充契約，不能讓 provider 私下改寫工具語意。
+契約測試固定兩個 adapter 的對外 schema、main op／參數及成功／失敗回傳，避免兩邊
+一起改錯仍只因相互一致而通過。
+
+**Related**：`agent-server/app-tool-tools.ts`、`agent-server/shelf-mcp.ts`、`agent-server/shelf-tool-contract.test.ts`、`contracts/app-tool-bridge`。

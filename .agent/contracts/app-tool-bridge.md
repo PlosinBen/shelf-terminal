@@ -37,6 +37,16 @@ Two single-line JSON frames, correlated by `requestId` (modelled on the permissi
 
 The bridge tool formats the result for the model via `runBridgeTool` (`agent-server/app-tool-tools.ts`): on `ok`, the `data` (stringified if not already a string); on failure, `Error: <error>` flagged `isError`.
 
+`SHELF_BRIDGE_TOOLS` in that module is the provider-neutral tool contract: each
+`BridgeToolSpec` defines `name`, `description`, `inputSchema` (Zod raw shape), and
+`operation`. `bridgeToolArgs` selects only the declared schema keys, preserving
+omitted optional values as `undefined`; current tools use the same field names in
+tool input and main-op arguments. Adapters validate input using that schema and
+own SDK/protocol registration and result envelopes. Claude uses SDK `tool()`;
+`agent-server/shelf-mcp.ts` registers the same contracts with HTTP MCP for Copilot
+and Codex. No-argument HTTP tools omit `inputSchema`; Claude receives an empty
+shape. Both return text content and include `isError: true` only on failure.
+
 ## Registry (op → args → return → safe?)
 
 Authoritative definition: the `REGISTRY` constant and `handleAppTool` in `src/main/agent/app-tool.ts`. Each entry flags `safe` (read = no confirmation). `handleAppTool` returns `{ ok:false, error: 'unknown app_tool op: <op>' }` for any unregistered `op`. `isSafeAppToolOp(op)` / `isKnownAppToolOp(op)` expose the flags. The model-facing tool names + descriptions live in `agent-server/app-tool-tools.ts` (`APP_SKILL_*_DESC`). Claude registers tools through its SDK; Copilot and Codex consume the L1 in-process HTTP MCP bridge, injected respectively through ACP session config and app-server thread config. Provider-native approval behavior may differ, but the authoritative safe/write and app-level gates remain in main.

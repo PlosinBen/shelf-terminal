@@ -32,7 +32,7 @@ import { COPILOT_TASK_COMPLETE_TOOL_TITLE } from '../acp/translate';
 import { createPermissionBridge } from '../acp/permission';
 import { mapSessionCapabilities, currentSelections, configOptionIdForCategory } from '../acp/capabilities';
 import { toAcpMcpServers } from '../acp/mcp';
-import { getSharedShelfMcp } from '../acp/shelf-mcp';
+import { getSharedShelfMcp } from '../../shelf-mcp';
 import { replaceSession } from '../acp/session-replacement';
 import { loadProjectedMcpServers } from '../mcp-config';
 import {

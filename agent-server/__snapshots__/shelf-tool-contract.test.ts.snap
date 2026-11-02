@@ -1,0 +1,505 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Shelf tool contracts across Claude SDK and HTTP MCP > preserves each adapter’s advertised names, descriptions and schemas > Claude SDK surface 1`] = `
+[
+  {
+    "description": "List the app-level Agent Skills available in this app (each skill's name and description). Use this before creating a skill to avoid duplicate names, or to find one to read/update.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object",
+    },
+    "name": "list_app_skills",
+  },
+  {
+    "description": "Read one app-level skill by its folder name (as returned by list_app_skills). Returns the full SKILL.md content AND \`files\` — the skill's bundled aux files (scripts, reference docs) as folder-relative paths. Use read_app_skill_file to read one of those files.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "description": "skill folder name from list_app_skills",
+          "type": "string",
+        },
+      },
+      "required": [
+        "name",
+      ],
+      "type": "object",
+    },
+    "name": "get_app_skill",
+  },
+  {
+    "description": "Create a new app-level Agent Skill. \`content\` is the full SKILL.md, including YAML frontmatter with \`name\` (lowercase kebab-case — this is the skill's identity) and \`description\`, followed by the markdown body. Fails if a skill with that name already exists (read list_app_skills first, or use update_app_skill). Takes effect for the agent on the next session.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "content": {
+          "description": "full SKILL.md (frontmatter name+description + body)",
+          "type": "string",
+        },
+      },
+      "required": [
+        "content",
+      ],
+      "type": "object",
+    },
+    "name": "create_app_skill",
+  },
+  {
+    "description": "Overwrite an existing app-level skill. \`name\` is its current folder name; \`content\` is the full new SKILL.md (its frontmatter \`name\` may rename the skill). Fails if the skill is locked (the user has reserved it — do not retry; list_app_skills reports \`locked\`). Takes effect on the next session.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "content": {
+          "description": "full new SKILL.md",
+          "type": "string",
+        },
+        "name": {
+          "description": "current skill folder name",
+          "type": "string",
+        },
+      },
+      "required": [
+        "name",
+        "content",
+      ],
+      "type": "object",
+    },
+    "name": "update_app_skill",
+  },
+  {
+    "description": "Read one bundled aux file of an app-level skill (a script or reference doc, NOT SKILL.md itself). \`name\` is the skill folder name; \`path\` is a folder-relative path as listed in get_app_skill's \`files\`.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "description": "skill folder name",
+          "type": "string",
+        },
+        "path": {
+          "description": "folder-relative aux-file path from get_app_skill \`files\`",
+          "type": "string",
+        },
+      },
+      "required": [
+        "name",
+        "path",
+      ],
+      "type": "object",
+    },
+    "name": "read_app_skill_file",
+  },
+  {
+    "description": "Create or overwrite one bundled aux file inside an app-level skill's folder (e.g. \`scripts/build.sh\`, \`reference.md\`). \`name\` is the skill folder name (the skill must already exist — use create_app_skill first); \`path\` is a folder-relative path (no leading slash, no \`..\`); \`content\` is the file text. Cannot write SKILL.md (use update_app_skill) and fails if the skill is locked. Takes effect on the next session.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "content": {
+          "description": "file content",
+          "type": "string",
+        },
+        "name": {
+          "description": "skill folder name",
+          "type": "string",
+        },
+        "path": {
+          "description": "folder-relative aux-file path (no leading slash, no ..)",
+          "type": "string",
+        },
+      },
+      "required": [
+        "name",
+        "path",
+        "content",
+      ],
+      "type": "object",
+    },
+    "name": "write_app_skill_file",
+  },
+  {
+    "description": "Delete one bundled aux file from an app-level skill's folder. \`name\` is the skill folder name; \`path\` is a folder-relative path. Cannot delete SKILL.md (deleting a whole skill is UI-only) and fails if the skill is locked. Takes effect on the next session.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "description": "skill folder name",
+          "type": "string",
+        },
+        "path": {
+          "description": "folder-relative aux-file path",
+          "type": "string",
+        },
+      },
+      "required": [
+        "name",
+        "path",
+      ],
+      "type": "object",
+    },
+    "name": "delete_app_skill_file",
+  },
+  {
+    "description": "HTTP request to an internal/SSO-protected web service using the USER's logged-in browser session (their cookies, from this machine — NOT this shell's network). Use this for company web apps the user has signed into in a Web tab (e.g. Kibana, ArgoCD): prefer their JSON APIs (Kibana \`_search\`, ArgoCD \`/api/v1/applications\`) over scraping HTML. For ordinary shell/network access use bash/curl instead — that runs from this environment without the user's identity. The user is prompted to authorize each origin. Returns the raw { status, headers, body }. If the response looks like a login page or an auth error (e.g. a 401/400, or a 3xx redirect to a login/SSO URL in the Location header), the session is likely not logged in — tell the user to log in to that service in a Web tab, then retry. Args: url (required), method (default GET), headers (object), body (string, e.g. a JSON query).",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "body": {
+          "description": "request body, e.g. a JSON query string",
+          "type": "string",
+        },
+        "headers": {
+          "additionalProperties": {
+            "type": "string",
+          },
+          "description": "extra request headers, e.g. {"kbn-xsrf":"true"}",
+          "propertyNames": {
+            "type": "string",
+          },
+          "type": "object",
+        },
+        "method": {
+          "description": "HTTP method (default GET)",
+          "type": "string",
+        },
+        "url": {
+          "description": "absolute http(s) URL of the internal service",
+          "type": "string",
+        },
+      },
+      "required": [
+        "url",
+      ],
+      "type": "object",
+    },
+    "name": "browser_fetch",
+  },
+  {
+    "description": "Open a URL in a visible Web tab so the USER can interact with it — primarily to LOG IN to an internal/SSO service so a later browser_fetch can use their authenticated session. Use this when browser_fetch returns a login page or an auth error (401/400, or a 3xx redirect to a login/SSO URL): call browser_open with the login or service URL. The user is prompted to approve each open (a visible tab appears — nothing opens in the background), then signs in. After they confirm they are logged in, retry browser_fetch. This tool only OPENS the tab — it returns no page content and does not wait for login to finish. Args: url (required, absolute http(s) URL); reason (optional, a short human-readable explanation of WHY you need this page opened — shown in the approval popup, since the popup hides your chat message while the user decides).",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "reason": {
+          "description": "short explanation of why this page must be opened (shown in the approval popup)",
+          "type": "string",
+        },
+        "url": {
+          "description": "absolute http(s) URL to open in a visible Web tab for the user to log in",
+          "type": "string",
+        },
+      },
+      "required": [
+        "url",
+      ],
+      "type": "object",
+    },
+    "name": "browser_open",
+  },
+  {
+    "description": "Open the New Worktree dialog for the current parent project, optionally prefilled with a suggested branch and feature-note file(s). This tool creates nothing. The user reviews the branch, selected notes, and agent provider. If the user confirms Create, Shelf creates the Git worktree and child project and migrates the selected note files. The provider defaults to the parent project's resolved default but remains user-selectable; the child inherits openAgentOnConnect but never the parent's agent session. Calls from a worktree child are rejected. Args: branch (optional suggested branch), note (optional legacy single feature-note filename/path), notes (optional feature-note filenames/paths).",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "branch": {
+          "description": "suggested new branch name",
+          "type": "string",
+        },
+        "note": {
+          "description": "legacy single feature note filename/path to preselect",
+          "type": "string",
+        },
+        "notes": {
+          "description": "feature note filenames/paths to preselect",
+          "items": {
+            "type": "string",
+          },
+          "type": "array",
+        },
+      },
+      "type": "object",
+    },
+    "name": "propose_worktree_create",
+  },
+  {
+    "description": "Open the Finish Worktree gate for the current worktree child. This tool merges or removes nothing. The user reviews the target and confirms Finish. If confirmed, Shelf requires a clean child worktree, fast-forwards the selected target, restores remaining configured feature-note files, and removes the child checkout and project only after every step succeeds. Calls outside a worktree child are rejected.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object",
+    },
+    "name": "propose_worktree_finish",
+  },
+]
+`;
+
+exports[`Shelf tool contracts across Claude SDK and HTTP MCP > preserves each adapter’s advertised names, descriptions and schemas > HTTP MCP surface 1`] = `
+[
+  {
+    "description": "List the app-level Agent Skills available in this app (each skill's name and description). Use this before creating a skill to avoid duplicate names, or to find one to read/update.",
+    "execution": {
+      "taskSupport": "forbidden",
+    },
+    "inputSchema": {
+      "properties": {},
+      "type": "object",
+    },
+    "name": "list_app_skills",
+  },
+  {
+    "description": "Read one app-level skill by its folder name (as returned by list_app_skills). Returns the full SKILL.md content AND \`files\` — the skill's bundled aux files (scripts, reference docs) as folder-relative paths. Use read_app_skill_file to read one of those files.",
+    "execution": {
+      "taskSupport": "forbidden",
+    },
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "name": {
+          "description": "skill folder name from list_app_skills",
+          "type": "string",
+        },
+      },
+      "required": [
+        "name",
+      ],
+      "type": "object",
+    },
+    "name": "get_app_skill",
+  },
+  {
+    "description": "Create a new app-level Agent Skill. \`content\` is the full SKILL.md, including YAML frontmatter with \`name\` (lowercase kebab-case — this is the skill's identity) and \`description\`, followed by the markdown body. Fails if a skill with that name already exists (read list_app_skills first, or use update_app_skill). Takes effect for the agent on the next session.",
+    "execution": {
+      "taskSupport": "forbidden",
+    },
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "content": {
+          "description": "full SKILL.md (frontmatter name+description + body)",
+          "type": "string",
+        },
+      },
+      "required": [
+        "content",
+      ],
+      "type": "object",
+    },
+    "name": "create_app_skill",
+  },
+  {
+    "description": "Overwrite an existing app-level skill. \`name\` is its current folder name; \`content\` is the full new SKILL.md (its frontmatter \`name\` may rename the skill). Fails if the skill is locked (the user has reserved it — do not retry; list_app_skills reports \`locked\`). Takes effect on the next session.",
+    "execution": {
+      "taskSupport": "forbidden",
+    },
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "content": {
+          "description": "full new SKILL.md",
+          "type": "string",
+        },
+        "name": {
+          "description": "current skill folder name",
+          "type": "string",
+        },
+      },
+      "required": [
+        "name",
+        "content",
+      ],
+      "type": "object",
+    },
+    "name": "update_app_skill",
+  },
+  {
+    "description": "Read one bundled aux file of an app-level skill (a script or reference doc, NOT SKILL.md itself). \`name\` is the skill folder name; \`path\` is a folder-relative path as listed in get_app_skill's \`files\`.",
+    "execution": {
+      "taskSupport": "forbidden",
+    },
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "name": {
+          "description": "skill folder name",
+          "type": "string",
+        },
+        "path": {
+          "description": "folder-relative aux-file path from get_app_skill \`files\`",
+          "type": "string",
+        },
+      },
+      "required": [
+        "name",
+        "path",
+      ],
+      "type": "object",
+    },
+    "name": "read_app_skill_file",
+  },
+  {
+    "description": "Create or overwrite one bundled aux file inside an app-level skill's folder (e.g. \`scripts/build.sh\`, \`reference.md\`). \`name\` is the skill folder name (the skill must already exist — use create_app_skill first); \`path\` is a folder-relative path (no leading slash, no \`..\`); \`content\` is the file text. Cannot write SKILL.md (use update_app_skill) and fails if the skill is locked. Takes effect on the next session.",
+    "execution": {
+      "taskSupport": "forbidden",
+    },
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "content": {
+          "description": "file content",
+          "type": "string",
+        },
+        "name": {
+          "description": "skill folder name",
+          "type": "string",
+        },
+        "path": {
+          "description": "folder-relative aux-file path (no leading slash, no ..)",
+          "type": "string",
+        },
+      },
+      "required": [
+        "name",
+        "path",
+        "content",
+      ],
+      "type": "object",
+    },
+    "name": "write_app_skill_file",
+  },
+  {
+    "description": "Delete one bundled aux file from an app-level skill's folder. \`name\` is the skill folder name; \`path\` is a folder-relative path. Cannot delete SKILL.md (deleting a whole skill is UI-only) and fails if the skill is locked. Takes effect on the next session.",
+    "execution": {
+      "taskSupport": "forbidden",
+    },
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "name": {
+          "description": "skill folder name",
+          "type": "string",
+        },
+        "path": {
+          "description": "folder-relative aux-file path",
+          "type": "string",
+        },
+      },
+      "required": [
+        "name",
+        "path",
+      ],
+      "type": "object",
+    },
+    "name": "delete_app_skill_file",
+  },
+  {
+    "description": "HTTP request to an internal/SSO-protected web service using the USER's logged-in browser session (their cookies, from this machine — NOT this shell's network). Use this for company web apps the user has signed into in a Web tab (e.g. Kibana, ArgoCD): prefer their JSON APIs (Kibana \`_search\`, ArgoCD \`/api/v1/applications\`) over scraping HTML. For ordinary shell/network access use bash/curl instead — that runs from this environment without the user's identity. The user is prompted to authorize each origin. Returns the raw { status, headers, body }. If the response looks like a login page or an auth error (e.g. a 401/400, or a 3xx redirect to a login/SSO URL in the Location header), the session is likely not logged in — tell the user to log in to that service in a Web tab, then retry. Args: url (required), method (default GET), headers (object), body (string, e.g. a JSON query).",
+    "execution": {
+      "taskSupport": "forbidden",
+    },
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "body": {
+          "description": "request body, e.g. a JSON query string",
+          "type": "string",
+        },
+        "headers": {
+          "additionalProperties": {
+            "type": "string",
+          },
+          "description": "extra request headers, e.g. {"kbn-xsrf":"true"}",
+          "propertyNames": {
+            "type": "string",
+          },
+          "type": "object",
+        },
+        "method": {
+          "description": "HTTP method (default GET)",
+          "type": "string",
+        },
+        "url": {
+          "description": "absolute http(s) URL of the internal service",
+          "type": "string",
+        },
+      },
+      "required": [
+        "url",
+      ],
+      "type": "object",
+    },
+    "name": "browser_fetch",
+  },
+  {
+    "description": "Open a URL in a visible Web tab so the USER can interact with it — primarily to LOG IN to an internal/SSO service so a later browser_fetch can use their authenticated session. Use this when browser_fetch returns a login page or an auth error (401/400, or a 3xx redirect to a login/SSO URL): call browser_open with the login or service URL. The user is prompted to approve each open (a visible tab appears — nothing opens in the background), then signs in. After they confirm they are logged in, retry browser_fetch. This tool only OPENS the tab — it returns no page content and does not wait for login to finish. Args: url (required, absolute http(s) URL); reason (optional, a short human-readable explanation of WHY you need this page opened — shown in the approval popup, since the popup hides your chat message while the user decides).",
+    "execution": {
+      "taskSupport": "forbidden",
+    },
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "reason": {
+          "description": "short explanation of why this page must be opened (shown in the approval popup)",
+          "type": "string",
+        },
+        "url": {
+          "description": "absolute http(s) URL to open in a visible Web tab for the user to log in",
+          "type": "string",
+        },
+      },
+      "required": [
+        "url",
+      ],
+      "type": "object",
+    },
+    "name": "browser_open",
+  },
+  {
+    "description": "Open the New Worktree dialog for the current parent project, optionally prefilled with a suggested branch and feature-note file(s). This tool creates nothing. The user reviews the branch, selected notes, and agent provider. If the user confirms Create, Shelf creates the Git worktree and child project and migrates the selected note files. The provider defaults to the parent project's resolved default but remains user-selectable; the child inherits openAgentOnConnect but never the parent's agent session. Calls from a worktree child are rejected. Args: branch (optional suggested branch), note (optional legacy single feature-note filename/path), notes (optional feature-note filenames/paths).",
+    "execution": {
+      "taskSupport": "forbidden",
+    },
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "branch": {
+          "description": "suggested new branch name",
+          "type": "string",
+        },
+        "note": {
+          "description": "legacy single feature note filename/path to preselect",
+          "type": "string",
+        },
+        "notes": {
+          "description": "feature note filenames/paths to preselect",
+          "items": {
+            "type": "string",
+          },
+          "type": "array",
+        },
+      },
+      "type": "object",
+    },
+    "name": "propose_worktree_create",
+  },
+  {
+    "description": "Open the Finish Worktree gate for the current worktree child. This tool merges or removes nothing. The user reviews the target and confirms Finish. If confirmed, Shelf requires a clean child worktree, fast-forwards the selected target, restores remaining configured feature-note files, and removes the child checkout and project only after every step succeeds. Calls outside a worktree child are rejected.",
+    "execution": {
+      "taskSupport": "forbidden",
+    },
+    "inputSchema": {
+      "properties": {},
+      "type": "object",
+    },
+    "name": "propose_worktree_finish",
+  },
+]
+`;

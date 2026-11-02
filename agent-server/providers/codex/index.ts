@@ -15,7 +15,7 @@ import { normalizeCodexAccountStatus, redactCodexAccountText, refreshCodexAccoun
 import { spawnCodexAppServerClient, type CodexAppServerNotificationHandler } from './app-server-client';
 import { summarizeTokenUsageForLog, translateCodexAppServerNotification } from './app-server-translate';
 import { loadProjectedMcpServers, type ParsedMcpConfig } from '../mcp-config';
-import { getSharedShelfMcp } from '../acp/shelf-mcp';
+import { getSharedShelfMcp } from '../../shelf-mcp';
 import { serverLog } from '../../server-logger';
 
 interface CodexAppServerLike {
