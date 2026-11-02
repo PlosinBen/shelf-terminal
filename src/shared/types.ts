@@ -1,4 +1,12 @@
 import type { AgentInitRecovery } from './agent-init-recovery';
+import type { ConfigEditKey } from './config-ack';
+
+/** Input metadata; provider preferences belong to initialization/configEdit. */
+export interface AgentSendOptions {
+  attachments?: AgentAttachment[];
+  configEdit?: { key: ConfigEditKey; value: string };
+  clientMsgId?: string;
+}
 // ── Agent types ──
 
 // AgentProvider is DERIVED from the single-source provider registry (label + deploy

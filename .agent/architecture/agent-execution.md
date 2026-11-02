@@ -94,6 +94,7 @@ Plan/todo data is not timeline content. It is replace-semantics state on its own
 
 ## Boundaries
 
+- **Configuration is not part of ordinary input.** Each new execution process completes initialization from current durable project selections before delivering input. Concurrent callers share the pending initialization, not a settings cache. Idle wake, authentication reconnect, and automatic process replacement invalidate the old initialization identity. Explicit edits retain the same ordered execution queue; protocol-specific application and confirmation stay inside the provider.
 - **Shelf tool semantics are provider-neutral.** Tool names, descriptions, input schemas, and main-operation mappings are shared contracts. Provider or protocol adapters own registration, validation integration, and result envelopes. Shared protocol handling belongs to that protocol layer; a host serving multiple protocols' consumers does not belong to one consumer's adapter.
 - **Execution is a control concept, not an ACP turn.** `executionId` names Shelf's local lifecycle reader for one accepted send or provider-initiated execution. It is not a claim about a provider protocol's turn identity and must not be used as a content ownership key.
 - **Content and settlement are independent.** An idle or stop reason may release the queue and clear permission state, but cannot decide that all content has arrived. No grace timer, drain barrier, “current prompt,” or “last prompt” attribution is allowed on the content path.

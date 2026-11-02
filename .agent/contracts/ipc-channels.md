@@ -269,7 +269,7 @@ Renderer → main (invoke / send):
 | Method | Shape |
 |--------|-------|
 | `init(tabId, cwd, connection, provider, sessionId?, opts?)` | invoke `agent:init` |
-| `send(tabId, prompt, images?, prefs?)` | invoke `agent:send`. `prefs`: `{ model?, effort?, permissionMode?, configEdit?: { key: 'model'|'effort'|'permissionMode', value }, clientMsgId? }` |
+| `send(tabId, prompt, images?, options?)` | invoke `agent:send`. `options`: `AgentSendOptions` in `src/shared/types.ts` (`attachments?`, `configEdit?`, `clientMsgId?`); no model/effort/permission prefs |
 | `stop(tabId)` | invoke `agent:stop` |
 | `cancelQueued(tabId, clientMsgId)` | invoke `agent:cancel-queued` (drop a not-yet-running queued message) |
 | `destroy(tabId)` | invoke `agent:destroy` |

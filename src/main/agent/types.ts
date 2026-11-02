@@ -1,6 +1,5 @@
-import type { AgentAttachment, AgentMessage, AgentPrefs, AuthMethod, ProviderModel } from '@shared/types';
+import type { AgentMessage, AgentPrefs, AgentSendOptions, AuthMethod, ProviderModel } from '@shared/types';
 import type { PermissionControlCapabilities } from '@shared/permission-controls';
-import type { ConfigEditKey } from '@shared/config-ack';
 import { SHELF_MCP, type ShelfMcpStatus } from '@shared/shelf-mcp';
 
 export type { AgentMessage, AgentMessageType } from '@shared/types';
@@ -98,34 +97,10 @@ export type PermissionResult =
   | { behavior: 'deny'; message?: string };
 export type PermissionCallback = (toolUseId: string, toolName: string, input: Record<string, unknown>) => Promise<PermissionResult>;
 
-export interface AgentQueryOptions {
+export interface AgentQueryOptions extends AgentSendOptions {
   resume?: string;
-  permissionMode?: string;
   canUseTool?: PermissionCallback;
   images?: string[];
-  attachments?: AgentAttachment[];
-  /**
-   * Per-send pref values. Renderer reads these from canonical
-   * `Project.agentPrefs` (`Project` is defined by `@shared/projects`); main
-   * passes them straight through from the AGENT_SEND payload. remote.ts forwards
-   * them to agent-server in the send line; orchestrator there diff-detects
-   * against last-applied prefs for the session and calls provider.setModel /
-   * setEffort etc on change.
-   */
-  model?: string;
-  effort?: string;
-  /**
-   * Structured config edit (picker / status-bar click). Routed as a no-prompt
-   * execution so the provider applies it + emits a divider the same way a typed
-   * /model slash does. Threaded through to agent-server's send line.
-   */
-  configEdit?: { key: ConfigEditKey; value: string };
-  /**
-   * Renderer-minted correlation key for this send. Forwarded to agent-server in
-   * the send line so the server's queue snapshot can echo it back. See
-   * message-queue-ownership design.
-   */
-  clientMsgId?: string;
 }
 
 export type AgentEvent =
@@ -186,10 +161,8 @@ export interface AgentBackend {
   /**
    * `intent` carries renderer's saved prefs from canonical
    * `Project.agentPrefs[provider]` (`Project` is defined by `@shared/projects`).
-   * Forwarded to agent-server so providers with session-level state (Copilot)
-   * can seed currentModel / currentEffort / currentPermissionMode BEFORE
-   * reporting `current*` back, so the status bar after reconnect reflects the
-   * user's saved choice instead of the provider's hardcoded default.
+   * Forwarded to agent-server before input. Production reads current canonical
+   * Project prefs at each initialization; no per-message replay or prefs cache.
    */
   getCapabilities?(
     cwd: string,

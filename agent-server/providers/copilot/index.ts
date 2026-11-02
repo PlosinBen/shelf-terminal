@@ -739,8 +739,7 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
       try {
         // A config-edit turn (picker / status-bar) carries no prompt — apply it
         // imperatively (set-mode / set-config-option) and return, rather than
-        // driving an empty prompt. Prompt-turn pref changes go via the imperative
-        // setters (orchestrator applyPrefDiff), not here.
+        // driving an empty prompt. Ordinary input does not replay preferences.
         if (input.configEdit) {
           await ensureSession({ cwd: input.cwd, appId: input.appId, resumeId: input.restoreContext?.lastSdkSessionId }, send);
           await applyConfigEdit(input.configEdit.key, input.configEdit.value, send);
@@ -925,8 +924,6 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
       }
     },
 
-    setModel(model: string): Promise<void> { return applyModel(model); },
-    setEffort(effort: string): Promise<void> { return applyEffort(effort); },
     bindSessionSend(send: SendFn): void { sessionSend = send; },
 
     resolvePermission(toolUseId: string, allow: boolean, message?: string, scope?: 'once' | 'session'): void {

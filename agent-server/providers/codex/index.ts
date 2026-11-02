@@ -680,17 +680,6 @@ export function createCodexBackend(deps: CodexBackendDeps = {}): ServerBackend {
       return buildCapabilities();
     },
 
-    async setModel(model): Promise<void> {
-      if (nativeReady && appServer) await nativeControls.apply(appServer, CONFIG_EDIT_KEYS.MODEL, model);
-      currentModel = model;
-      explicitPrefs.model = model;
-    },
-    async setEffort(effort): Promise<void> {
-      if (nativeReady && appServer) await nativeControls.apply(appServer, CONFIG_EDIT_KEYS.EFFORT, effort);
-      currentEffort = effort;
-      explicitPrefs.effort = effort;
-    },
-
     resolvePermission(toolUseId, allow, message, scope): void {
       const pending = pendingPermissionRequests.get(toolUseId);
       if (!pending) {
@@ -912,15 +901,14 @@ export function createCodexBackend(deps: CodexBackendDeps = {}): ServerBackend {
 
   function threadOverrides(input: Parameters<ServerBackend['query']>[0]): Record<string, unknown> {
     return { cwd: input.cwd,
-      ...(explicitPrefs.model ?? input.model ? { model: explicitPrefs.model ?? input.model } : {}),
+      ...(explicitPrefs.model ? { model: explicitPrefs.model } : {}),
       ...(explicitPrefs.nativePermission ? { permissions: explicitPrefs.nativePermission } : {}),
       ...(explicitPrefs.nativeApproval ? { approvalPolicy: explicitPrefs.nativeApproval } : {}) };
   }
 
   function turnOverrides(input: Parameters<ServerBackend['query']>[0]): Record<string, unknown> {
     // Initialized threads own native settings; do not replay stale renderer defaults.
-    return nativeReady ? {} : { cwd: input.cwd,
-      ...(input.model ? { model: input.model } : {}), ...(input.effort ? { effort: input.effort } : {}) };
+    return nativeReady ? {} : { cwd: input.cwd };
   }
 
   async function listAppServerModels(client: CodexAppServerLike): Promise<ProviderCapabilities['models']> {
@@ -1016,9 +1004,9 @@ function formatCodexAppServerStatusCard(
   const rows = [
     ['Provider', CODEX_PROVIDER],
     ['Thread', activeThreadId ?? input.restoreContext?.lastSdkSessionId ?? 'none'],
-    ['Model', input.model ?? current.model ?? 'provider default'],
-    ['Effort', input.effort ?? current.effort ?? 'provider default'],
-    ['Permission', input.permissionMode ?? current.permissionMode ?? 'provider default'],
+    ['Model', current.model ?? 'provider default'],
+    ['Effort', current.effort ?? 'provider default'],
+    ['Permission', current.permissionMode ?? 'provider default'],
     ['CWD', input.cwd],
   ];
   return `Codex status:\n\n${mdTable(['Field', 'Value'], rows.map(([key, value]) => [key, redactCodexAccountText(value)]))}`;

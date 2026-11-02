@@ -49,6 +49,7 @@ vi.mock('../connector/shell-env', () => ({
 function capabilitiesChild(
   payload: Record<string, unknown>,
   stopResult?: { ok: boolean; error?: string },
+  autoCapabilities = true,
 ) {
   const child = new EventEmitter() as any;
   child.stdout = new EventEmitter();
@@ -60,7 +61,7 @@ function capabilitiesChild(
     write: vi.fn((line: string) => {
       const message = JSON.parse(line);
       writes.push(message);
-      if (message.type === 'get_capabilities') {
+      if (message.type === 'get_capabilities' && autoCapabilities) {
         queueMicrotask(() => {
           child.stdout.emit('data', Buffer.from(`${JSON.stringify({
             type: 'capabilities',
@@ -163,6 +164,132 @@ describe('local process.execPath spawns carry ELECTRON_RUN_AS_NODE (regression: 
 });
 
 describe('remote backend', () => {
+  it('does not deliver an input whose process startup was invalidated by disposal', async () => {
+    const { child, writes } = capabilitiesChild({});
+    vi.mocked(spawn).mockReturnValueOnce(child);
+    const { createRemoteBackend } = await import('./remote');
+    const backend = createRemoteBackend({ type: 'local' });
+    const iterator = backend.query('must not be delivered', '/tmp');
+    const next = iterator.next();
+    try {
+      await vi.waitFor(() => expect(spawn).toHaveBeenCalled());
+      backend.dispose();
+      child.stdout.emit('data', Buffer.from('{"type":"ready"}\n'));
+      // Flush startup/probe microtasks before inspecting any attempted send.
+      await new Promise(resolve => setTimeout(resolve, 10));
+      expect(writes.filter(m => m.type === 'send')).toHaveLength(0);
+      expect((await next).value).toMatchObject({ type: 'error' });
+    } finally { backend.dispose(); }
+  });
+
+  it('shares the pending initialization barrier across probes and concurrent sends', async () => {
+    const { child, writes } = capabilitiesChild({}, undefined, false);
+    vi.mocked(spawn).mockImplementationOnce(() => {
+      setTimeout(() => child.stdout.emit('data', Buffer.from('{"type":"ready"}\n')), 0);
+      return child;
+    });
+    const { createRemoteBackend } = await import('./remote');
+    const read = vi.fn(() => ({ intent: { model: 'latest' } }));
+    const backend = createRemoteBackend({ type: 'local' }, undefined, 'claude', 'session',
+      undefined, undefined, undefined, undefined, undefined, undefined, vi.fn(), undefined, undefined,
+      { read, onFailure: vi.fn() });
+    const probe = backend.getCapabilities!('/tmp');
+    const drain = async (prompt: string) => { for await (const _event of backend.query(prompt, '/tmp')) { /* drain */ } };
+    const first = drain('first');
+    const second = drain('second');
+    try {
+      await vi.waitFor(() => expect(writes.filter(m => m.type === 'get_capabilities')).toHaveLength(1));
+      expect(writes.some(m => m.type === 'send')).toBe(false);
+      const reply = { type: 'capabilities', requestId: writes.find(m => m.type === 'get_capabilities').requestId };
+      child.stdout.emit('data', Buffer.from(JSON.stringify(reply) + '\n'));
+      await vi.waitFor(() => expect(writes.filter(m => m.type === 'send')).toHaveLength(2));
+      expect(writes.filter(m => m.type === 'send').map(m => m.prompt)).toEqual(['first', 'second']);
+      for (const input of writes.filter(m => m.type === 'send')) {
+        child.stdout.emit('data', Buffer.from(JSON.stringify({ type: 'status', state: 'idle', executionId: input.executionId }) + '\n'));
+      }
+      await Promise.all([probe, first, second]);
+      expect(read).toHaveBeenCalledTimes(1);
+    } finally { backend.dispose(); }
+  });
+
+  it('re-reads saved intent after an auth reconnect rather than retaining initial values', async () => {
+    const { child, writes } = capabilitiesChild({});
+    vi.mocked(spawn).mockImplementationOnce(() => {
+      setTimeout(() => child.stdout.emit('data', Buffer.from('{"type":"ready"}\n')), 0);
+      return child;
+    });
+    const { createRemoteBackend } = await import('./remote');
+    let intent = { model: 'first', nativeApproval: 'never' };
+    const backend = createRemoteBackend({ type: 'local' }, undefined, 'codex', 'session',
+      undefined, undefined, undefined, undefined, undefined, undefined, vi.fn(), undefined, undefined,
+      { read: () => ({ intent }), onFailure: vi.fn() });
+    try {
+      await backend.getCapabilities!('/tmp');
+      intent = { model: 'latest', nativeApproval: 'on-request' };
+      await backend.checkAuth('/tmp');
+      expect(writes.filter(m => m.type === 'get_capabilities').map(m => m.intent)).toEqual([
+        { model: 'first', nativeApproval: 'never' }, intent,
+      ]);
+      expect(writes.map(m => m.type)).toEqual(['get_capabilities', 'reconnect', 'get_capabilities']);
+    } finally { backend.dispose(); }
+  });
+
+  it('initializes each new exec with current intent before input, without replaying prefs in send', async () => {
+    const { createRemoteBackend } = await import('./remote');
+    const first = capabilitiesChild({});
+    const second = capabilitiesChild({});
+    for (const fixture of [first, second]) vi.mocked(spawn).mockImplementationOnce(() => {
+      setTimeout(() => fixture.child.stdout.emit('data', Buffer.from('{"type":"ready"}\n')), 0);
+      return fixture.child;
+    });
+    let intent = { model: 'first', nativeApproval: 'never' };
+    const read = vi.fn(() => ({ intent }));
+    const events = vi.fn();
+    const backend = createRemoteBackend({ type: 'local' }, undefined, 'claude', 'session',
+      undefined, undefined, undefined, undefined, undefined, undefined, events, undefined, undefined,
+      { read, onFailure: vi.fn() });
+    async function sendAndFinish(fixture: ReturnType<typeof capabilitiesChild>) {
+      const done = (async () => { for await (const _event of backend.query('hello', '/tmp')) { /* drain */ } })();
+      await vi.waitFor(() => expect(fixture.writes.some(m => m.type === 'send')).toBe(true));
+      const input = fixture.writes.find(m => m.type === 'send');
+      expect(fixture.writes.filter(m => ['get_capabilities', 'send'].includes(m.type)).map(m => m.type)).toEqual(['get_capabilities', 'send']);
+      expect(fixture.writes.find(m => m.type === 'get_capabilities').intent).toEqual(intent);
+      expect(input).not.toHaveProperty('model');
+      expect(input).not.toHaveProperty('effort');
+      expect(input).not.toHaveProperty('permissionMode');
+      fixture.child.stdout.emit('data', Buffer.from(JSON.stringify({ type: 'status', state: 'idle', executionId: input.executionId }) + '\n'));
+      await done;
+    }
+    try {
+      await sendAndFinish(first);
+      backend.dispose();
+      intent = { model: 'latest', nativeApproval: 'on-request' };
+      await sendAndFinish(second);
+      expect(read).toHaveBeenCalledTimes(2);
+    } finally { backend.dispose(); }
+  });
+
+  it('does not send input when initialization fails and preserves recovery metadata', async () => {
+    const { child, writes } = capabilitiesChild({ error: 'saved model unavailable', recovery: { kind: 'clear_saved_model', model: 'retired' } });
+    vi.mocked(spawn).mockImplementationOnce(() => {
+      setTimeout(() => child.stdout.emit('data', Buffer.from('{"type":"ready"}\n')), 0);
+      return child;
+    });
+    const { createRemoteBackend } = await import('./remote');
+    const failure = vi.fn();
+    const backend = createRemoteBackend({ type: 'local' }, undefined, 'codex', 'session',
+      undefined, undefined, undefined, undefined, undefined, undefined, vi.fn(), undefined, undefined,
+      { read: () => ({ intent: { model: 'retired' } }), onFailure: failure });
+    const iterator = backend.query('hello', '/tmp');
+    try {
+      const next = iterator.next();
+      await vi.waitFor(() => expect(failure).toHaveBeenCalledTimes(1));
+      expect((await next).value).toMatchObject({ type: 'error' });
+      expect(writes.some(m => m.type === 'send')).toBe(false);
+      expect(failure.mock.calls[0][0]).toMatchObject({ recovery: { kind: 'clear_saved_model', model: 'retired' } });
+    } finally { backend.dispose(); }
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -179,9 +306,8 @@ describe('remote backend', () => {
     expect(backend).toHaveProperty('stop');
     expect(backend).toHaveProperty('dispose');
     expect(backend).toHaveProperty('checkAuth');
-    // setModel/setEffort/setPermissionMode removed — renderer now passes
-    // prefs in each AGENT_SEND payload; orchestrator on the agent-server
-    // side drives diff detection and calls provider.setX as needed.
+    // Configuration enters through initialization or explicit configEdit,
+    // never through silent per-message preference setters.
   });
 
   it('waits for a request-correlated stop confirmation', async () => {

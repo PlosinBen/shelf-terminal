@@ -56,9 +56,6 @@ interface IncomingMessage {
   prompt?: string;
   cwd?: string;
   resume?: string;
-  permissionMode?: string;
-  model?: string;
-  effort?: string;
   images?: string[];
   attachments?: AgentAttachment[];
   sessionId?: string;
@@ -222,53 +219,6 @@ scheduleInitialMemoryReport(reportMemoryUsage);
 let activeBackend: ServerBackend | null = null;
 
 /**
- * Per-session pref cache. Orchestrator drives "did renderer change pref X
- * since last send?" diff detection — calls backend.setModel/setEffort/
- * setPermissionMode only on change. Keyed by sessionId so multi-tab
- * scenarios don't cross-contaminate each other's diff state (which the
- * old per-provider-singleton closure cache in Copilot did suffer from).
- */
-const lastAppliedPrefs = new Map<string, { model?: string; effort?: string; permissionMode?: string }>();
-
-async function applyPrefDiff(
-  backend: ServerBackend,
-  sessionKey: string,
-  incoming: { model?: string; effort?: string; permissionMode?: string },
-): Promise<void> {
-  // Cache update is gated on apply success — a failed setX must not record
-  // the requested value as "applied" or the next execution's diff would skip the
-  // retry (silently leaving the SDK on the prior value while the cache
-  // pretends the switch happened).
-  const last = lastAppliedPrefs.get(sessionKey) ?? {};
-  const next = { ...last };
-  if (incoming.model !== undefined && incoming.model !== last.model) {
-    try {
-      await backend.setModel?.(incoming.model);
-      next.model = incoming.model;
-    } catch (err: any) {
-      send({ type: 'error', error: `Failed to switch model to "${incoming.model}": ${err?.message ?? err}` });
-    }
-  }
-  if (incoming.effort !== undefined && incoming.effort !== last.effort) {
-    try {
-      await backend.setEffort?.(incoming.effort);
-      next.effort = incoming.effort;
-    } catch (err: any) {
-      send({ type: 'error', error: `Failed to set effort "${incoming.effort}": ${err?.message ?? err}` });
-    }
-  }
-  if (incoming.permissionMode !== undefined && incoming.permissionMode !== last.permissionMode) {
-    try {
-      await backend.setPermissionMode?.(incoming.permissionMode);
-      next.permissionMode = incoming.permissionMode;
-    } catch (err: any) {
-      send({ type: 'error', error: `Failed to set permission mode "${incoming.permissionMode}": ${err?.message ?? err}` });
-    }
-  }
-  lastAppliedPrefs.set(sessionKey, next);
-}
-
-/**
  * Test-mode override: when SHELF_TEST_MODE=1, every provider lookup returns
  * the same fake backend regardless of requested provider name. E2E specs
  * exercise renderer + main + agent-server wire chain without spinning up
@@ -384,28 +334,10 @@ async function handleSend(msg: IncomingMessage) {
   const restoreContext = loadRestoreContextFor(provider, msg.sessionId);
   backend.bindSessionSend?.(wrapSendForContext(provider, msg.sessionId, send));
 
-  // Pref diff only for prompt executions. A config-edit execution IS the change — it's
-  // applied by the provider via input.configEdit; running the diff too would
-  // double-apply (and emit a redundant capabilities).
-  if (!isConfigEdit) {
-    // Renderer-authoritative model/effort/permissionMode arrive in every send
-    // payload. Orchestrator compares against last-applied for this session and
-    // calls provider.setX? only on change. Per-sessionId so multi-tab doesn't
-    // cross-contaminate.
-    await applyPrefDiff(backend, msg.sessionId ?? '', {
-      model: msg.model,
-      effort: msg.effort,
-      permissionMode: msg.permissionMode,
-    });
-  }
-
   const input: QueryInput = {
     prompt: msg.prompt ?? '',
     cwd: msg.cwd!,
     resume: msg.resume,
-    permissionMode: msg.permissionMode,
-    model: msg.model,
-    effort: msg.effort,
     images: msg.images,
     attachments: msg.attachments,
     sessionId: msg.sessionId,

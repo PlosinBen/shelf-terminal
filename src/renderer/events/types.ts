@@ -1,4 +1,4 @@
-import type { AgentAttachment, AgentInitStatus, AgentLoginPrompt, AgentLoginResult, AgentPrefs, AgentQueueItem, Connection, TaskEvent } from '../../shared/types';
+import type { AgentAttachment, AgentInitStatus, AgentLoginPrompt, AgentLoginResult, AgentQueueItem, Connection, TaskEvent } from '../../shared/types';
 import type { ConfigEditKey } from '../../shared/config-ack';
 import { on, emit } from './bus';
 import { SHELF_MCP, type ShelfMcpStatus } from '../../shared/shelf-mcp';
@@ -51,7 +51,6 @@ export interface AgentEventMap {
     text: string;
     images?: string[];
     attachments?: AgentAttachment[];
-    prefs?: AgentPrefs;
     /** Structured config edit (picker / status-bar). When set, text is empty
      *  and no user echo is written — the provider applies it + emits a divider. */
     configEdit?: { key: ConfigEditKey; value: string };

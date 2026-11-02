@@ -27,8 +27,8 @@ Authoritative type names: `IncomingMessage` (`agent-server/index.ts`), `Outgoing
 
 Slash is NOT a control message of its own. A typed `/cmd args` flows as ordinary prompt text and the provider decides whether to interpret the prefix (`agent-config-flow#2`). The renderer only short-circuits unparametrised `OPTIONED_SLASHES` (`/model` `/effort` `/permission`) into an inline picker (`agent-config-flow#3`); everything else is sent as text.
 
-- renderer → main: `IPC.AGENT_SEND` with `{ tabId, prompt: "/help", attachments?, images?, model?, effort?, permissionMode?, clientMsgId? }` (no `configEdit`). `attachments` is the provider-bound payload; `images` is a legacy / renderer-preview compatibility field.
-- main → agent-server: `sendLine({ type: 'send', executionId, provider, prompt: "/help", cwd, sessionId, attachments?, images?, model?, effort?, permissionMode?, clientMsgId?, appId, ... })`.
+- renderer → main: `IPC.AGENT_SEND` with `{ tabId, prompt: "/help", attachments?, images?, clientMsgId? }` (no `configEdit`). `attachments` is the provider-bound payload; `images` is a legacy / renderer-preview compatibility field. Input options are `AgentSendOptions` in `src/shared/types.ts` and contain no provider prefs.
+- main → agent-server: `sendLine({ type: 'send', executionId, provider, prompt: "/help", cwd, sessionId, attachments?, images?, clientMsgId?, appId, ... })`. A fresh exec must complete configuration initialization before this frame is sent; input carries no model/effort/permission overrides.
 - The provider calls `parseSlashPrefix(input.prompt)` inside `query()`; output comes back as a normal `fold_markdown` wire message (`errorMessage` on failure), not a distinct response type.
 
 ### Copilot `/clear`
@@ -92,12 +92,12 @@ path. Clipboard/file classification and renderer previews still follow their exi
 Picker / status-bar config changes do NOT build a slash string — they send a structured `configEdit` that converges on the provider's `applyConfigEdit` (`agent-config-flow#5`). Canonical Shelf permission uses `permissionMode`; a native strategy uses the dedicated `nativeMode` / `nativePermission` / `nativeApproval` keys advertised by capabilities.
 
 - renderer → main: `IPC.AGENT_SEND` with `{ tabId, prompt: '', configEdit: { key: 'model' | 'effort' | 'permissionMode' | 'nativeMode' | 'nativePermission' | 'nativeApproval', value: string }, clientMsgId? }`.
-- main → agent-server: `sendLine({ type: 'send', executionId, provider, prompt: '', cwd, sessionId, configEdit: { key, value }, ... })` — `prompt` is empty; agent-server's `handleSend` treats `!!msg.configEdit` as the config-edit branch and skips `applyPrefDiff` (the edit IS the change).
+- main → agent-server: `sendLine({ type: 'send', executionId, provider, prompt: '', cwd, sessionId, configEdit: { key, value }, ... })` — `prompt` is empty; the provider applies the explicit edit through the existing FIFO. There is no per-message preference replay.
 - The provider applies it and emits a `system` divider; confirmed capabilities update the renderer, never optimistically. Model/effort persist from `currentModel` / `currentEffort`; Shelf-strategy permission persists from `currentPermissionMode`; native-strategy mode/permission persist from their descriptor `currentValue`. When `confirmedPrefs` is present, only that explicit patch persists; `{}` means display-only defaults. Providers without the field retain the existing snapshot-driven persistence. A failed edit emits no confirming capabilities and therefore writes no preference.
 
 Field type: `configEdit?: { key: ConfigEditKey; value: string }`, where `ConfigEditKey` is defined once in `src/shared/permission-controls.ts` and shared by `AgentQueryOptions`, `IncomingMessage`, and `QueryInput`.
 
-Silent per-message prefs (`model` / `effort` / `permissionMode` on every send) are a SEPARATE mechanism: the orchestrator diff-detects them per session and calls `ServerBackend.setModel/setEffort/setPermissionMode` only on change, with no divider (`agent-config-flow#6`). They are NOT `configEdit`.
+Configuration enters through initialization intent or an explicit edit. `ServerBackend` has no silent per-message preference setters. Ordinary input cannot overwrite live settings; provider-specific application stays inside its adapter (`agent-config-flow#14`).
 
 ## picker_request (agent-server → renderer)
 
@@ -194,6 +194,13 @@ There is no `enqueue` control message — the renderer eager-sends every `{ type
 **Direction**: main → agent-server → main (requestId-matched RPC, tab open).
 
 Listed for completeness — the capabilities request/response that seeds the status bar. Not renderer-initiated as a control action; `remote.ts` issues it from `getCapabilities()`.
+
+Production probes read the latest explicit prefs/custom models from main's
+canonical Project boundary. The pending probe is shared with first input on the
+same exec incarnation; idle wake, auth reconnect and dispatcher exec replacement
+invalidate completion. Failure prevents delivery and retains typed recovery;
+successful automatic initialization republishes capabilities and input readiness.
+This lifecycle stores only identity/promise state, not a duplicate prefs cache.
 
 - main → agent-server: `sendLine({ type: 'get_capabilities', provider, cwd, sessionId, customModels?, intent?, requestId })`. `intent` is `AgentPrefs`: `{ model?, effort?, permissionMode?, nativeMode?, nativePermission?, nativeApproval? }`. Agent-server loads provider-matched restore context, binds a context-aware session sink, and passes both boundaries to `gatherCapabilities`.
 - Copilot first establishes the final session: `session/resume` when `sessionCapabilities.resume` is advertised, otherwise `session/load` when `loadSession` is true; load replay content is suppressed while metadata is retained. A capabilities-time `session/new` emits `context_patch` immediately. It then hydrates advertised controls, validates all saved selections, and sends each present saved value sequentially as model → effort → native mode → native permission, including values equal to the restored snapshot. Native mode completes when `session/set_mode` succeeds and the observed mode equals the request; an already matching restored mode needs no redundant update, while a differing mode requires an authoritative update. Intermediate provider updates do not publish capabilities. The RPC resolves only with the final confirmed snapshot; validation, setter, mismatch, timeout, or teardown rejects initialization instead. This authoritative apply runs once per newly established final session, not on later capabilities reads that reuse the initialized session.

@@ -118,6 +118,7 @@ title: shelf-terminal — Intent → File Index
 | 連線健康（heartbeat RTT） | `connection-health.ts` | `ConnectionHealthTracker` 純狀態機：心跳 RTT → healthy/slow/unstable/dead |
 | 單元測試 | `connection-health.test.ts` | RTT/狀態機 7 case |
 | 單元測試 | `remote.test.ts` | Remote backend 介面、lifecycle 測試 |
+| Exec 設定初始化測試 | `remote-reconnect-init.test.ts` | dispatcher 同 channel 換 exec 後重讀最新設定的整合測試 |
 | Execution dispatcher 單元測試 | `execution-dispatcher.test.ts` | session content routing / executionId control routing / unknown drop / lifecycle / permission isolation / `failAllExecutions` |
 | Dispatcher-connection 測試 | `dispatcher-connection.test.ts` | sid demux / 一台 host 一 heartbeat / session_down fail-loud / onDown 驱逐 / openSession 健康 seed + already-open replace |
 
@@ -132,6 +133,7 @@ title: shelf-terminal — Intent → File Index
 | Model/caps cache（泛型 TTL） | `model-cache.ts` | `createModelCache({ttlMs})`：泛型 TTL 儲存，過期即 evict（cache-aside 的被動 store，見 `context/agent-config-flow`） |
 | Session hosting 抽象（兩張 map） | `session-registry.ts` | `createSessionRegistry()`：`sessions: Map<sid, runtimeKey>` + `runtimes: Map<runtimeKey, T>`，`runtimeKeyFor` 決定 isolated（sid）/shared（provider:account）。為 shared 部署預備（isolated milestone 未用） |
 | Claude provider | `providers/claude/index.ts` | `@anthropic-ai/claude-agent-sdk` wrapper：持久 streaming-input session、emit 渲染原語、auth 偵測 |
+| Claude 設定套用測試 | `providers/claude/config-apply.test.ts` | live SDK control、effort rebuild／resume、拒絕不回報成功與 init bypass 驗證 |
 | Copilot provider (ACP) | `providers/copilot/index.ts` | `createCopilotBackend`：spawn `copilot --acp`、管理 restore/native config/login，並以 session replacement 實作 `/clear` |
 | Copilot usage 觀測 | `providers/copilot/usage-observation.ts` | 攔截 usage、驗證並摘要標準欄位、記錄 session/prompt 時序診斷 |
 | Copilot usage E2E transport fixture | `providers/copilot/test-agent.ts` | 僅於測試替換模式提供實際 Copilot provider + mock ACP transport |

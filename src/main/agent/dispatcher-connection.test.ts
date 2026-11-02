@@ -45,6 +45,18 @@ function make(overrides: Partial<Parameters<typeof createDispatcherConnection>[0
 }
 
 describe('dispatcher-connection (per-host demux by sid)', () => {
+  it('invalidates initialization for only the session whose exec is replaced', () => {
+    const { f, conn } = make();
+    const a = vi.fn();
+    const b = vi.fn();
+    conn.openSession('a', '/repo', { onExecDown: a });
+    conn.openSession('b', '/repo', { onExecDown: b });
+    try {
+      f.emit({ type: 'session_down', sid: 'a', reason: 'crashed', willReconnect: true });
+      expect(a).toHaveBeenCalledTimes(1);
+      expect(b).not.toHaveBeenCalled();
+    } finally { conn.kill(); }
+  });
   it('routes startup availability by sid outside any execution', () => {
     const { f, conn } = make({ parseRemoteMessage: msg => ({ type: SHELF_MCP.STATUS, status: parseShelfMcpStatus(msg.status) }) });
     const a = vi.fn();

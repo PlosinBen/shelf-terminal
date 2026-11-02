@@ -326,8 +326,8 @@ contextBridge.exposeInMainWorld('shelfApi', {
     },
     init: (tabId: string, cwd: string, connection: unknown, provider: string, sessionId?: string, opts?: Record<string, unknown>) =>
       ipcRenderer.invoke(IPC.AGENT_INIT, { tabId, cwd, connection, provider, sessionId, ...opts }),
-    send: (tabId: string, prompt: string, images?: string[], prefs?: { model?: string; effort?: string; permissionMode?: string; attachments?: import('../shared/types').AgentAttachment[]; configEdit?: { key: import('../shared/config-ack').ConfigEditKey; value: string }; clientMsgId?: string }) =>
-      ipcRenderer.invoke(IPC.AGENT_SEND, { tabId, prompt, images, ...prefs }),
+    send: (tabId: string, prompt: string, images?: string[], options?: import('../shared/types').AgentSendOptions) =>
+      ipcRenderer.invoke(IPC.AGENT_SEND, { tabId, prompt, images, ...options }),
     stop: (tabId: string) =>
       ipcRenderer.invoke(IPC.AGENT_STOP, { tabId }),
     cancelQueued: (tabId: string, clientMsgId: string) =>

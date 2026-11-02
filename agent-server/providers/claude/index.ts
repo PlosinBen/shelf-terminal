@@ -11,7 +11,7 @@ import { resolve, join, dirname } from 'path';
 import type { QueryInput, SendFn, ServerBackend, ProviderCapabilities, StatusSegment, PickerResolvePayload, ReapableTask } from '../types';
 import { severityFromUtilization, pickPermissionModes, pickEffortLevels } from '../types';
 import { parseSlashPrefix } from '@shared/slash-prefix';
-import { formatConfigAck, type ConfigEditKey } from '@shared/config-ack';
+import { CONFIG_EDIT_KEYS, formatConfigAck, type ConfigEditKey } from '@shared/config-ack';
 import type { AgentPrefs, ProviderModel, NormalizedTask } from '@shared/types';
 import { SHELF_PERMISSION_CONTROL } from '@shared/permission-controls';
 import { stripCwd, resolveSkillsPluginRoot, readUploadedImageAttachments } from '../shared';
@@ -275,9 +275,8 @@ export function createClaudeBackend(): ServerBackend {
 
   const pendingPermissions = new Map<string, (result: PermissionResult) => void>();
 
-  // Renderer-facing pref bookkeeping (Architecture B applies them via SDK
-  // control methods — see setModel/setEffort/setPermissionMode). Seeded from
-  // the renderer's intent on reconnect via gatherCapabilities().
+  // Provider-owned preferences. Initialization and explicit edits share
+  // applyPreference; live control confirmation precedes state publication.
   let currentModel: string | undefined;
   let currentEffort: string | undefined;
   let currentPermissionMode: string | undefined;
@@ -344,6 +343,7 @@ export function createClaudeBackend(): ServerBackend {
     abort: AbortController;
     pushUser: (content: SDKUserMessage['message']['content']) => void;
     closeInput: () => void;
+    done: Promise<void>;
   }
   let session: Session | null = null;
   let creatingSession: Promise<Session> | null = null;
@@ -655,29 +655,37 @@ export function createClaudeBackend(): ServerBackend {
     };
   }
 
-  /**
-   * Apply a config edit and emit the full turn lifecycle: set the closure
-   * value, broadcast capabilities (drives renderer display + persist), and
-   * render the change as a centered `system` divider (status transition, not
-   * content). Single convergence point for BOTH entry points:
-   *   - typed `/model X` slash (parsed in query())
-   *   - structured config-edit turn (input.configEdit, from picker / status bar)
-   * so the divider + capabilities come back identically regardless of how the
-   * user triggered the change. Distinct from setModel/setEffort/etc., which are
-   * the orchestrator's silent per-message pref-diff apply (no divider).
-   */
-  function applyConfigEdit(key: ConfigEditKey, value: string, send: SendFn) {
-    // No-op guard: submitting the value that's already live (re-picking the
-    // selected model/effort/permission, or `/model <current>`) isn't a change —
-    // don't flash a status cycle or drop a divider for something that didn't
-    // move. On a config-edit turn no prior setter mutates the closure first, so
-    // the closure still holds the true prior value here.
-    const current = key === 'model' ? currentModel : key === 'effort' ? currentEffort : currentPermissionMode;
-    if (value === current) return;
-    send({ type: 'status', state: 'streaming' });
-    if (key === 'model') currentModel = value;
-    else if (key === 'effort') currentEffort = value;
-    else currentPermissionMode = value;
+  /** agent-config-flow#14: init and explicit edits share actual SDK application. */
+  async function applyPreference(key: ConfigEditKey, value: string): Promise<boolean> {
+    if (key === CONFIG_EDIT_KEYS.MODEL) {
+      if (currentModel === value) return false;
+      if (session) await session.query.setModel(value);
+      currentModel = value;
+    } else if (key === CONFIG_EDIT_KEYS.EFFORT) {
+      if (currentEffort === value) return false;
+      if (session) {
+        const old = session;
+        old.closeInput();
+        old.query.close();
+        // Drain the old consumer before a new session can be created; its
+        // finally must not tear down a subsequent foreground turn.
+        await old.done;
+      }
+      currentEffort = value;
+    } else if (key === CONFIG_EDIT_KEYS.PERMISSION_MODE) {
+      if (currentPermissionMode === value) return false;
+      if (session) await session.query.setPermissionMode((value === 'bypassPermissions' ? 'default' : value) as NonNullable<Options['permissionMode']>);
+      currentPermissionMode = value;
+      currentBypassMode = value === 'bypassPermissions';
+    } else {
+      throw new Error(`Claude does not accept config key "${key}"`);
+    }
+    return true;
+  }
+
+  async function applyConfigEdit(key: ConfigEditKey, value: string, send: SendFn) {
+    // Same confirmed value is a no-op; publish only after actual apply completes.
+    if (!await applyPreference(key, value)) return;
     send({ type: 'capabilities', ...buildCapabilities() });
     send({ type: 'message', msgId: mintSlashMsgId(), msgType: 'system', content: formatConfigAck(key, value) });
     send({ type: 'status', state: 'idle' });
@@ -731,8 +739,9 @@ export function createClaudeBackend(): ServerBackend {
         wake?.(); wake = null;
       },
       closeInput: () => { closed = true; wake?.(); wake = null; },
+      done: Promise.resolve(),
     };
-    void consume(q);
+    s.done = consume(q);
     return s;
   }
 
@@ -1181,49 +1190,15 @@ export function createClaudeBackend(): ServerBackend {
       customModels?: ProviderModel[],
       intent?: AgentPrefs,
     ): Promise<ProviderCapabilities> {
-      // Seed closures from renderer's saved intent so /model /effort /permission
-      // slash handlers can re-broadcast capabilities with the right current*.
-      // Per-call QueryInput.{model,effort,permissionMode} still drives the
-      // actual SDK behavior; closures are renderer-facing bookkeeping only.
+      // Seed options for a lazy first session, or apply to an existing session.
+      // General input carries no provider preferences.
       const outcome = await ensureInit(cwd);
-      if (intent?.model) currentModel = intent.model;
-      if (intent?.effort) currentEffort = intent.effort;
-      if (intent?.permissionMode) currentPermissionMode = intent.permissionMode;
+      if (intent?.model) await applyPreference(CONFIG_EDIT_KEYS.MODEL, intent.model);
+      if (intent?.effort) await applyPreference(CONFIG_EDIT_KEYS.EFFORT, intent.effort);
+      if (intent?.permissionMode) await applyPreference(CONFIG_EDIT_KEYS.PERMISSION_MODE, intent.permissionMode);
       // authRequired ONLY on a definitive auth-failure. 'error' (timeout /
       // unknown) leaves it false so a slow remote isn't mistaken for logged-out.
       return { ...buildCapabilities(customModels), authRequired: outcome === 'auth-failed' };
-    },
-
-    setModel(model: string) {
-      currentModel = model;
-      // Apply to the live session via the streaming-mode control method.
-      if (session) session.query.setModel(model).catch((e: any) => serverLog('error', 'claude', 'setModel failed', e?.message ?? e));
-      lastTurnSend?.({ type: 'capabilities', ...buildCapabilities() });
-    },
-
-    setEffort(effort: string) {
-      const changed = currentEffort !== effort;
-      currentEffort = effort;
-      // No control method for effort — rebuild the persistent session (resume
-      // keeps context). Rare (user toggles effort mid-conversation). The next
-      // query()'s ensureSession recreates with the new options.effort.
-      if (changed && session) {
-        const old = session;
-        session = null;
-        try { old.closeInput(); } catch { /* best-effort */ }
-        try { old.query.close(); } catch { /* best-effort */ }
-      }
-      lastTurnSend?.({ type: 'capabilities', ...buildCapabilities() });
-    },
-
-    setPermissionMode(mode: string) {
-      currentPermissionMode = mode;
-      currentBypassMode = mode === 'bypassPermissions';
-      if (session) {
-        const applied = (currentBypassMode ? 'default' : mode) as Options['permissionMode'];
-        session.query.setPermissionMode(applied!).catch((e: any) => serverLog('error', 'claude', 'setPermissionMode failed', e?.message ?? e));
-      }
-      lastTurnSend?.({ type: 'capabilities', ...buildCapabilities() });
     },
 
     async query(input: QueryInput, send: SendFn) {
@@ -1231,7 +1206,7 @@ export function createClaudeBackend(): ServerBackend {
       // no SDK query. Converges UI config edits onto applyConfigEdit — the same
       // path a typed /model slash takes below.
       if (input.configEdit) {
-        applyConfigEdit(input.configEdit.key, input.configEdit.value, send);
+        await applyConfigEdit(input.configEdit.key, input.configEdit.value, send);
         return;
       }
 
@@ -1257,7 +1232,7 @@ export function createClaudeBackend(): ServerBackend {
         }
         // `/permission` slash → normalized key `permissionMode`.
         const key: ConfigEditKey = slash.cmd === 'permission' ? 'permissionMode' : slash.cmd;
-        applyConfigEdit(key, slash.args, send);
+        await applyConfigEdit(key, slash.args, send);
         return;
       }
 
@@ -1291,11 +1266,6 @@ export function createClaudeBackend(): ServerBackend {
       if (!lastSessionId && input.restoreContext?.lastSdkSessionId) {
         lastSessionId = input.restoreContext.lastSdkSessionId;
       }
-      // Renderer sends permissionMode every turn; orchestrator's applyPrefDiff
-      // already applied changes via setPermissionMode, but keep bypass in sync
-      // defensively (it gates canUseTool's short-circuit).
-      if (input.permissionMode) currentBypassMode = input.permissionMode === 'bypassPermissions';
-
       // Ensure the single persistent streaming-input session exists (created
       // lazily on the first real turn; reused thereafter — Architecture B).
       const s = ensureSession(input.cwd, input.resume, input.appId);

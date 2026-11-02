@@ -5,8 +5,7 @@ import { SHELF_MCP } from '@shared/shelf-mcp';
 import { log } from '@shared/logger';
 import { formatTabLogId } from '@shared/tab-id';
 import { providerLabel } from '@shared/agent-providers';
-import type { AgentAttachment, AgentPrefs, Connection, AgentProvider } from '@shared/types';
-import type { ConfigEditKey } from '@shared/config-ack';
+import type { AgentPrefs, AgentSendOptions, Connection, AgentProvider } from '@shared/types';
 import type { AgentSessionState, AgentEvent, AgentBackend, PermissionResult, ProviderCapabilities } from './types';
 import { createRemoteBackend, syncSkillsForConnection } from './remote';
 import { loadSettings } from '../settings-store';
@@ -28,6 +27,7 @@ import {
 } from '../process-memory-manager';
 import { requestExternalUrlIntent } from '../external-url-intent';
 import { mediateAgentLoginUrl } from './login-url-intent';
+import { getProjectsRepository } from '../projects/repository-provider';
 
 interface SessionInstance {
   tabId: string;
@@ -222,8 +222,8 @@ export function initAgentManager(windowGetter: () => BrowserWindow | null): void
   });
 
   ipcMain.handle(IPC.AGENT_SEND, async (_e, payload) => {
-    const { tabId, prompt, images, attachments, model, effort, permissionMode, configEdit, clientMsgId } = payload;
-    return sendMessage(tabId, prompt, images, { model, effort, permissionMode, attachments, configEdit, clientMsgId });
+    const { tabId, prompt, images, attachments, configEdit, clientMsgId } = payload;
+    return sendMessage(tabId, prompt, images, { attachments, configEdit, clientMsgId });
   });
 
   ipcMain.handle(IPC.AGENT_STOP, async (_e, payload) => {
@@ -390,6 +390,18 @@ async function startSession(
       hostStarted: () => { registerDispatcherMemorySource(connection); },
       hostStopped: () => { unregisterDispatcherMemorySource(connection); },
     },
+    {
+      read: () => {
+        if (!projectId) return { customModels: providerCustomModels(provider) };
+        const project = getProjectsRepository().get(projectId);
+        if (!project) throw new Error(`Agent initialization Project no longer exists: ${projectId}`);
+        return { intent: project.agentPrefs[provider], customModels: providerCustomModels(provider) };
+      },
+      onFailure: error => send(IPC.AGENT_INIT_STATUS, tabId, {
+        state: 'failed', reason: error instanceof Error ? error.message : String(error), recovery: recoveryFromError(error),
+      }),
+      onReady: () => send(IPC.AGENT_INIT_STATUS, tabId, { state: 'ready' }),
+    },
   );
 
   const session: SessionInstance = {
@@ -444,20 +456,13 @@ async function sendMessage(
   tabId: string,
   prompt: string,
   images?: string[],
-  prefs?: {
-    model?: string;
-    effort?: string;
-    permissionMode?: string;
-    attachments?: AgentAttachment[];
-    configEdit?: { key: ConfigEditKey; value: string };
-    clientMsgId?: string;
-  },
+  options?: AgentSendOptions,
 ): Promise<boolean> {
   const session = sessions.get(tabId);
   if (!session) return false;
 
   const tag = `[agent:${formatTabLogId(tabId)}]`;
-  log.info('agent', `${tag} send promptLen=${(prompt ?? '').length}${prefs?.configEdit ? ` configEdit=${prefs.configEdit.key}` : ''}`);
+  log.info('agent', `${tag} send promptLen=${(prompt ?? '').length}${options?.configEdit ? ` configEdit=${options.configEdit.key}` : ''}`);
 
   // Activity: cancel any pending idle-teardown. If the tab was hibernated, the
   // backend.query() below transparently respawns + resumes from lastSdkSessionId.
@@ -485,12 +490,9 @@ async function sendMessage(
     for await (const event of session.backend.query(prompt, session.cwd, {
       canUseTool,
       images,
-      attachments: prefs?.attachments,
-      model: prefs?.model,
-      effort: prefs?.effort,
-      permissionMode: prefs?.permissionMode,
-      configEdit: prefs?.configEdit,
-      clientMsgId: prefs?.clientMsgId,
+      attachments: options?.attachments,
+      configEdit: options?.configEdit,
+      clientMsgId: options?.clientMsgId,
     })) {
       // A per-execution `status` event is execution-lifecycle plumbing (it closes THIS
       // execution's generator), NOT a session-level signal. The renderer's streaming

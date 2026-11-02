@@ -99,6 +99,23 @@ test.describe('agent flows via fake provider', () => {
         nativePermission: 'on',
       });
 
+      // Ordinary input must preserve live settings without carrying/replaying prefs.
+      await sendAgentPrompt(page, 'text:settings remain active');
+      await expect(page.locator('.agent-msg:visible').last()).toContainText('settings remain active');
+      await expect(effort).toHaveText('effort: high');
+      await expect(mode).toHaveText('Mode: Plan');
+
+      // The post-auth probe must read the latest persisted intent as well.
+      await sendAgentPrompt(page, 'auth_required');
+      const auth = page.locator('.agent-auth-pane:visible');
+      await expect(auth).toBeVisible();
+      await auth.locator('.agent-reset-btn', { hasText: 'Retry' }).click();
+      await expect(auth).toHaveCount(0);
+      await expect(model).toHaveText('fake-model-pro');
+      await expect(effort).toHaveText('effort: high');
+      await expect(mode).toHaveText('Mode: Plan');
+      await expect(permission).toHaveText('Allow all: On');
+
       const item = page.locator('.sidebar-item').first();
       await item.click({ button: 'right' });
       await page.locator('.context-menu-item', { hasText: 'Disconnect' }).click();

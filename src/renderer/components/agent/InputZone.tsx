@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import type { AgentAttachment, AgentPrefs, Connection } from '@shared/types';
+import type { AgentAttachment, Connection } from '@shared/types';
 import { CODEX_PROVIDER, COPILOT_PROVIDER } from '@shared/agent-providers';
 import { parseSlashPrefix } from '@shared/slash-prefix';
 import { useStore, setChatStage } from '../../store';
@@ -86,13 +86,6 @@ interface Props {
    *  AgentView passes its rootRef so paste anywhere in the agent area
    *  is captured. */
   rootRef: React.RefObject<HTMLDivElement | null>;
-  /** User intent for model / effort / permissionMode. Source of truth
-   *  for what gets sent in the next AGENT_SEND payload. **Not** the
-   *  same as store.actual* — actual reflects what the backend reports
-   *  (possibly after a fallback / cap), intent reflects what the user
-   *  asked for. We send intent so a backend fallback doesn't silently
-   *  pin future executions to the fallback model. See agent-ui#4. */
-  intent: AgentPrefs | undefined;
 }
 
 /**
@@ -111,7 +104,7 @@ interface Props {
  * (/model) opens the renderer-local picker via setLocalPicker (DecisionPanel
  * renders it and emits the config-edit execution on select).
  */
-export function InputZone({ tabId, projectId, cwd, connection, visible, rootRef, intent }: Props) {
+export function InputZone({ tabId, projectId, cwd, connection, visible, rootRef }: Props) {
   const tab = useAgentTab(tabId);
   const { settings, chatStage } = useStore();
 
@@ -136,7 +129,7 @@ export function InputZone({ tabId, projectId, cwd, connection, visible, rootRef,
   const capabilities = tab?.capabilities ?? null;
   // store.actual* reads stay — they're used for the vision-capability
   // check (matches model in capabilities.models list) and as the
-  // current value in localPicker selection. Send payload uses `intent`.
+  // current value in localPicker selection. Input never replays prefs.
   const statusModel = tab?.actualModel ?? null;
 
   const [input, setInput] = useState('');
@@ -296,14 +289,9 @@ export function InputZone({ tabId, projectId, cwd, connection, visible, rootRef,
       tabId,
       text,
       attachments,
-      prefs: {
-        model: intent?.model,
-        effort: intent?.effort,
-        permissionMode: intent?.permissionMode,
-      },
       clientMsgId,
     });
-  }, [tabId, input, pendingFiles, pendingImages, stagingImages, intent, initReady]);
+  }, [tabId, input, pendingFiles, pendingImages, stagingImages, initReady]);
 
   const handleStop = useCallback(() => {
     // ESC-twice (stop) means "abort this execution AND drop everything I queued up

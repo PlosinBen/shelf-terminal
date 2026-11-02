@@ -2,7 +2,7 @@ import { AgentInitializationError, readInitRecovery } from '@shared/agent-init-r
 import { log } from '@shared/logger';
 import { SHELF_PERMISSION_CONTROL } from '@shared/permission-controls';
 import type { AgentPrefs, Connection, AgentProvider, AgentInitPhase, AgentQueueItem, ProviderModel, TaskEvent, ConnectionHealth, ConnectionHealthState } from '@shared/types';
-import type { AgentBackend, AgentEvent, AgentQueryOptions, PickerResolvePayload } from './types';
+import type { AgentBackend, AgentEvent, AgentQueryOptions, PickerResolvePayload, ProviderCapabilities } from './types';
 import { ConnectionHealthTracker, DEFAULT_HEALTH_THRESHOLDS } from './connection-health';
 import type { ChildProcess } from 'child_process';
 import { createConnector, type ProcessRequest } from '../connector';
@@ -21,6 +21,7 @@ import {
   AGENT_RUNTIME_KIND,
   CLAUDE_PROVIDER,
   COPILOT_PROVIDER,
+  providerLabel,
 } from '@shared/agent-providers';
 import { skillsSourceRoot, listSkillFilesRel, hashSkillsTree } from '../skills-projection';
 import { syncMcpForConnection } from '../mcp-remote';
@@ -145,8 +146,21 @@ export function createRemoteBackend(
     hostStarted?: () => void;
     hostStopped?: () => void;
   },
+  initializationSource?: {
+    read(): { intent?: AgentPrefs; customModels?: ProviderModel[] };
+    onFailure(error: unknown): void;
+    onReady?(): void;
+  },
 ): AgentBackend {
   let remoteProc: RemoteProcess | null = null;
+  let initializedProc: RemoteProcess | null = null;
+  let initializationEpoch = 0;
+  let initializing: { proc: RemoteProcess; epoch: number; promise: Promise<ProviderCapabilities> } | null = null;
+  function invalidateInitialization(): void {
+    initializationEpoch++;
+    initializedProc = null;
+    initializing = null;
+  }
   let deployed = false;
   let deployResult: DeployResult | null = null;
   // Single in-flight init shared by concurrent callers. getCapabilities (on tab
@@ -182,7 +196,7 @@ export function createRemoteBackend(
           const dc = ensureDispatcher(connection, cwd, deployResult!, initScript, memorySinks);
           const sid = sessionId ?? randomUUID();
           proc = dc
-            ? dc.openSession(sid, cwd, { onTaskEvent, onServerExecution, onHealth, onQueue, onSkillsReloaded, onSessionEvent, onMemoryUsage: memorySinks?.session, projectId }, projectEnv)
+            ? dc.openSession(sid, cwd, { onTaskEvent, onServerExecution, onHealth, onQueue, onSkillsReloaded, onSessionEvent, onExecDown: invalidateInitialization, onMemoryUsage: memorySinks?.session, projectId }, projectEnv)
             : null;
         } else {
           proc = await spawnAgentServer(connection, cwd, deployResult!, initScript, projectEnv, onTaskEvent, onServerExecution, onHealth, onQueue, onSkillsReloaded, onSessionEvent, projectId, memorySinks?.session);
@@ -218,8 +232,12 @@ export function createRemoteBackend(
     // 失敗時 throw 而非回空 capabilities — 讓 lifecycle owner 能區分
     // 「真的沒能力」跟「啟動失敗」，並送出正確的 terminal UI state。
     if (!proc) throw new Error(lastInitError ?? 'Failed to start agent-server');
-    const requestId = `cap-${Date.now()}`;
-    return new Promise((resolve, reject) => {
+    const epoch = initializationEpoch;
+    if (initializing?.proc === proc && initializing.epoch === epoch) return initializing.promise;
+    const latest = initializationSource?.read();
+    if (latest) { intent = latest.intent; customModels = latest.customModels; }
+    const requestId = `cap-${randomUUID()}`;
+    const promise = new Promise<ProviderCapabilities>((resolve, reject) => {
       const timeout = setTimeout(() => {
         // Fail-loud + fail-closed. A caps RPC that never answers means the
         // agent-server ↔ Copilot CLI/SDK link is unhealthy — and we can't tell
@@ -252,7 +270,15 @@ export function createRemoteBackend(
       });
       if (reportPhase) onPhase?.('checking-auth');
       proc.sendLine({ type: 'get_capabilities', provider, cwd, sessionId, customModels, intent, requestId, appId: getAppInstanceId() });
+    }).then(caps => {
+      if (remoteProc !== proc || initializationEpoch !== epoch) throw new Error('Agent initialization superseded by session replacement');
+      if (!caps.authRequired) initializedProc = proc;
+      return caps;
     });
+    initializing = { proc, epoch, promise };
+    const clear = () => { if (initializing?.promise === promise) initializing = null; };
+    void promise.then(clear, clear);
+    return promise;
   }
 
   const backend: AgentBackend = {
@@ -275,10 +301,35 @@ export function createRemoteBackend(
     },
 
     async *query(prompt: string, cwd: string, opts?: AgentQueryOptions): AsyncGenerator<AgentEvent> {
+      const epoch = initializationEpoch;
       const proc = await ensureProcReady(cwd);
+      if (initializationEpoch !== epoch) {
+        yield { type: 'error', error: 'Input initialization superseded by session replacement' };
+        return;
+      }
       if (!proc) {
         yield { type: 'error', error: lastInitError ?? 'Failed to start agent-server' };
         return;
+      }
+
+      // agent-config-flow#14: every exec incarnation initializes before input,
+      // internal sends and wake from idle teardown. Share one barrier, not prefs.
+      if (initializedProc !== proc) {
+        try {
+          const caps = await probeCapabilities(cwd);
+          if (remoteProc !== proc || initializationEpoch !== epoch) throw new Error('Input initialization superseded by session replacement');
+          onSessionEvent?.({ type: 'capabilities', caps });
+          initializationSource?.onReady?.();
+          if (caps.authRequired) {
+            onSessionEvent?.({ type: 'auth_required', provider: providerLabel(provider) });
+            yield { type: 'error', error: 'Agent sign-in is required before sending input' };
+            return;
+          }
+        } catch (error) {
+          if (remoteProc === proc && initializationEpoch === epoch) initializationSource?.onFailure(error);
+          yield { type: 'error', error: error instanceof Error ? error.message : String(error) };
+          return;
+        }
       }
 
       // Main-side generates the executionId so we can register the per-execution
@@ -313,10 +364,7 @@ export function createRemoteBackend(
       // could arrive and get dropped as "unknown execution".
       const events = proc.registerExecution(executionId, permissionHandler);
 
-      // Opts are authoritative — renderer reads savedPrefs / statusModel /
-      // currentEffort / permissionMode and sends them with every AGENT_SEND
-      // IPC. No closure cache in this layer; agent-server orchestrator
-      // diff-detects per-session and calls provider.setModel etc on change.
+      // Input never replays configuration; init and explicit edits own it.
       proc.sendLine({
         type: 'send',
         executionId,
@@ -325,9 +373,6 @@ export function createRemoteBackend(
         cwd,
         sessionId,
         resume: opts?.resume,
-        permissionMode: opts?.permissionMode,
-        model: opts?.model,
-        effort: opts?.effort,
         images: opts?.images,
         attachments: opts?.attachments,
         configEdit: opts?.configEdit,
@@ -390,6 +435,7 @@ export function createRemoteBackend(
     },
 
     reconnect() {
+      invalidateInitialization();
       // Fire-and-forget: tell the agent-server to drop this provider's live ACP
       // connection so the next caps probe / execution respawns and re-reads config-home
       // credentials (post-login re-init, Gap C). No-op if the process isn't up (the
@@ -401,6 +447,7 @@ export function createRemoteBackend(
     },
 
     dispose() {
+      invalidateInitialization();
       if (remoteProc) {
         remoteProc.kill();
         remoteProc = null;

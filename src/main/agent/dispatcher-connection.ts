@@ -40,6 +40,8 @@ export interface SessionSinks {
   onQueue?: (items: any[]) => void;
   onSkillsReloaded?: (ok: boolean, error?: string) => void;
   onSessionEvent?: (event: AgentEvent) => void;
+  /** A stable channel can replace its exec; invalidate incarnation-bound init. */
+  onExecDown?: () => void;
   onMemoryUsage?: (report: MemoryUsageReport) => void;
   projectId?: string;
 }
@@ -238,6 +240,7 @@ export function createDispatcherConnection(deps: DispatcherConnectionDeps): Disp
     // an error so the renderer tells the user the execution was interrupted, the spinner
     // unsticks, and main's sendMessage `finally` clears its pending permissions.
     if (type === 'session_down') {
+      ch.sinks.onExecDown?.();
       const why = typeof parsed.reason === 'string' ? parsed.reason : 'process error';
       log.warn('dispatcher-conn', `session ${sid} down: ${why} (willReconnect=${parsed.willReconnect !== false}) — failing in-flight executions`);
       ch.dispatcher.failAllExecutions(`Session process ${why} — this execution was interrupted; the conversation resumes from the last message.`);

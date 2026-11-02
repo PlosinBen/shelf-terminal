@@ -1612,7 +1612,7 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
     expect(caps.permissionModes).toEqual([]);
     expect(caps.permissionControl).toMatchObject({ strategy: 'native', mode: { currentValue: COPILOT_AGENT_MODE_ID } });
     expect(caps.permissionControl).not.toHaveProperty('permission');
-    expect(backend.setPermissionMode).toBeUndefined();
+    expect(backend).not.toHaveProperty('setPermissionMode');
     backend.dispose();
   });
 

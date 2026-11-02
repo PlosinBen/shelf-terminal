@@ -70,12 +70,11 @@ InputZone parseSlashPrefix
     │
     └─ 其他狀況（含 OPTIONED_SLASHES with args、/help、/clear、未知 slash）
           ↓
-       upsertMessage(user) + emitAgent('agent:send', { text: "/cmd args", prefs })
+       enqueuePendingSend + emitAgent('agent:send', { text: "/cmd args" })
           ↓
        agent-server handleSend
           ↓
-       applyPrefDiff (read renderer's prefs from payload, call backend.setX? on diff)
-          - cache 只在 setX 成功時 update（失敗下次 retry）
+       新 exec 尚未完成初始化 → 等待 shared initialization barrier
           ↓
        backend.query(input)
           ↓
@@ -93,16 +92,16 @@ InputZone parseSlashPrefix
 
 - 打字 slash with args 走 provider slash（如上圖）；picker / status-bar 走結構化 config-edit turn（`agent-config-flow#5`）。兩者最終都到 provider `applyConfigEdit` → re-broadcast capabilities，**無 renderer 樂觀更新**
 - Renderer `AgentView` 觀察 capabilities，跟 savedPrefs 比較後保存。若有 `confirmedPrefs`，只保存該 explicit patch；其他 provider 沿用 snapshot 同步（`agent-config-flow#13`）。
-- Backend 拒絕的值不會被 broadcast → 不會 persist。**Disk 永遠是 backend 確認過的真相**
+- Backend 拒絕的 edit 不發布成功 capabilities，也不保存該 edit。Claude 尚無 live session 時，保存的是下一個 session 的 options；不是宣稱 SDK 已預先驗證該值。
 
 **Provider 差異**：
 - Copilot（ACP）：model/effort 直接對 live ACP session 套用；permission UI 走 provider-native mode + `allow_all`。兩者不冒充 canonical `permissionMode`，但各自的 confirmed current value 會持久化，並在 session warm-up 重套（`agent-config-flow#9` / `agent-config-flow#10`）
-- Claude：per-call options 設計，slash handler 只更新 closure + broadcast（永遠成功；validation 推到下次 query SDK 收到時）
+- Claude：持久 streaming session 的 live model／permission edit 等 SDK control 成功後才更新 closure；effort 關閉並排空舊 consumer，下個 session 以新 options resume。尚無 session 時先保存 options，值由 SDK 實際收到時驗證。
 
 ### 配套 invariants
 
 - `setModel` closure mutation **必須在 SDK 確認後才執行**（Copilot Bug 1 教訓 — 之前先改 closure 再 await session.setModel，throw 時 closure 跟 SDK session 永久脫鉤）
-- `applyPrefDiff` 的 `lastAppliedPrefs` cache **只在 setX 成功才 update**（Bug 2 教訓 — 之前失敗也 cache，下次 retry 被誤判 no-op）
+- 一般輸入不攜帶 prefs，也不以另一份 last-applied cache 判斷 provider 設定；初始化與明確 edit 是唯一設定入口（agent-config-flow#14）。
 - `OPTIONED_SLASHES` value 是 picker key（跟 SelectionPanel / prefs key 對齊）；slash name 可能不同（e.g. `/permission` → `permissionMode`）— 為了 typing 短
 
 ### 不要改
@@ -110,7 +109,7 @@ InputZone parseSlashPrefix
 - 不要把 prefs 改回「renderer optimistic apply + 不問 backend」— bug 來源（dirty state 落地 + status bar 跟 backend 不一致）
 - 不要在 renderer 端攔截「unknown command」— 該讓 provider 回，user 才知道 slash 被 dispatch；renderer 攔截 = provider-specific slash 死路
 - 不要在 renderer 加 model validation against capabilities — SDK 是唯一仲裁者（Claude `supportedModels()` 會隱藏但實際接受 legacy models）
-- 不要在 provider 內 setX 做 diff — orchestrator 已做
+- 同值 no-op 依 provider 已套用的狀態判斷，不以訊息附帶的舊 prefs 覆蓋 live state。
 - 不要在 capabilities-driven persist 加 throttle/debounce — capabilities event 自然就是「有變化才 broadcast」，下游沒 spam 風險
 
 ## agent-config-flow#4 — Model 顯示：intent-driven，alias 不被 per-turn 解析值覆蓋  ·  [Decision]
@@ -147,7 +146,7 @@ model/effort/permission 三個入口（打字 `/model X`、picker、status-bar �
 **Do not change casually because**：
 - 不要在 `handleConfigEdit` 加回樂觀 `setActual*`/`persistPref` — 會跟打字的 round-trip 行為分歧。顯示/持久化一律由回傳的 capabilities 驅動
 - renderer 送結構化 `{key,value}`，不要組 `/model X` 字串（slash 語法留在 provider）；也不要為 config-edit 開新 IPC（它是 turn，重用 send/turn 路由）
-- `applyConfigEdit`（明確變更，有 divider）≠ `setModel`/`setEffort`（orchestrator 每訊息的 silent pref-diff，無 divider）
+- 明確 edit 成功有 divider；初始化套用沒有 divider。兩者由 provider 共用真正的套用邏輯，不另設每訊息 silent setter。
 - **值沒變＝完全 no-op**：送出的值 === 現行 closure 時 provider直接 return，不 emit divider、capabilities、status streaming/idle；各 backend在自己的 apply入口維持此 guard。
 
 ## agent-config-flow#6 — Config 套用職責邊界：能塞給 SDK 就塞，不擴張權責（model / effort / permission 同一套）  ·  [Decision]
@@ -156,16 +155,16 @@ model/effort/permission 三個入口（打字 `/model X`、picker、status-bar �
 
 **統一原則（判準是「SDK 有沒有 apply 的 func」，不是「誰擁有 namespace」）**：
 - **SDK 有 imperative apply func → 直接塞給它**，SDK 自己就是 validator，成功就用、**失敗照實 emit error**。不自己前置驗證。
-- **SDK 沒有（值只能透過下次 query 的 options 生效，如 Claude）→ 只記 closure、defer 到下次 query**，由 SDK 收到 option 時判定。不為了「當下就驗」而擴張權責。
+- **SDK 沒有 live apply func → 在 provider 內準備下一個 session 的 options**，必要時關閉舊 session 並保留 resume；由 SDK 收到 option 時驗證，不另加自家白名單。不能只改展示 closure 卻讓既有 session 無限沿用舊 options。
 - 不維護自家白名單前置拒絕 model——清單（`listModels()`）會落後 GitHub 實際支援（例：opus 4.8 已上線但 `listModels` 還沒列，前置擋會誤殺）。「卡在外來 id」靠 SDK 報錯 + 使用者改選（picker 只列合法值）復原。
 
 **三個 knob × 三個 provider**：
 
-| knob | Copilot（ACP） | Codex（app-server） | Claude（per-call options） |
+| knob | Copilot（ACP） | Codex（app-server） | Claude（持久 streaming session） |
 |------|------|------|------|
-| model | `driver.setConfigOption(configId('model'), value)` | `thread/settings/update` 確認 model | 記 closure，下次 query `options.model` 由 SDK 驗 |
-| effort | `driver.setConfigOption(configId('thought_level'), value)` | 模型原生 effort 選項＋`thread/settings/update` 確認 | 同上 |
-| permission | native mode 用 `driver.setMode(value)`；native permission 用 `driver.setConfigOption('allow_all', value)` | 獨立 profile／approval／mode 原生設定（`agent-config-flow#13`） | 記 closure，下次 query `options.permissionMode` 由 SDK 驗 |
+| model | `driver.setConfigOption(configId('model'), value)` | `thread/settings/update` 確認 model | live `query.setModel`，否則 seed `options.model` |
+| effort | `driver.setConfigOption(configId('thought_level'), value)` | 模型原生 effort 選項＋`thread/settings/update` 確認 | 關閉並排空舊 session，以新 `options.effort` resume |
+| permission | native mode 用 `driver.setMode(value)`；native permission 用 `driver.setConfigOption('allow_all', value)` | 獨立 profile／approval／mode 原生設定（`agent-config-flow#13`） | live `query.setPermissionMode`，否則 seed options；bypass 同步 bridge flag，SDK 維持 default |
 
 （cutover 後 copilot 走 ACP：以上 native SDK 的 `session.setModel`/`session.rpc.mode.set` 已刪。）
 
@@ -256,7 +255,7 @@ Provider 以 capability strategy 選一條路：
 
 **Status boundary：** Session replacement 以 `status.contextUsage: null` 明確移除舊 session 的 context-usage segment；欄位省略仍表示不更新，不能用 synthetic `0%` 代表 fresh session。只有 provider 取得新的 authoritative context usage 才再發布值。Account-level credits 與 session identity 無關，因此 clear 不修改 credits。
 
-**Reason：** Renderer 仍是 durable project-prefs authority，但 provider 在 clear execution 中已持有 SDK 確認過的完整 live-session state。使用這份 confirmed snapshot 可在不讓 dispatcher 理解 slash、不增加每個 send payload 負擔、也不建立長期 backend prefs cache的前提下初始化 replacement。明確的 nullable status sentinel 則能區分「清除舊值」與「本次沒有 usage update」。
+**Reason：** Durable project prefs 走 canonical repository，但 provider 在 clear execution 中已持有 SDK 確認過的完整 live-session state。使用這份 confirmed snapshot 可在不讓 dispatcher 理解 slash、不增加每個 send payload 負擔、也不建立長期 backend prefs cache的前提下初始化 replacement。明確的 nullable status sentinel 則能區分「清除舊值」與「本次沒有 usage update」。
 
 **Do not change casually because：** 不要從 renderer 再發一條 clear-only prefs RPC、讓 dispatcher parse `/clear`、在 provider 長期 cache project prefs，或只移轉 `QueryInput` 已有的 model／effort而遺漏 native selections。不要用 falsy/no-op status 模擬清除；省略 `contextUsage` 必須繼續保留現值，`null` 才是清除契約。
 
@@ -283,3 +282,24 @@ Provider 以 capability strategy 選一條路：
 **Confirmation boundary：** experimental API 是原生 Mode／profile 套用與 thread settings 更新的必要條件。通知與 RPC 可交錯，同值不保證有通知；已有相同 confirmed value 時 no-op。start／resume 沒有 mode snapshot，首次明確 Mode apply 可用成功 RPC 確認指定值，其他有效設定仍維持已知 snapshot。更新失敗或逾時不發布成功；狀態不確定時阻擋後續設定與 turn，要求 reconnect。
 
 **Migration：** project schema v3 由 v0/v1/v2 載入邊界將 Codex 舊 default／plan／bypassPermissions 轉為等價 profile＋approval，保留已有 native intent、移除舊 permissionMode。舊 plan 僅是唯讀權限，不推導原生 Plan mode。遷移不放在每次 provider connect；沿用下一次 atomic save 才落盤。其他 provider 不變。
+
+## agent-config-flow#14 — 初始化屬於 exec incarnation，一般輸入不重送設定  ·  [Decision]
+
+**Decision：** 一般 send 僅帶內容、附件及 queue correlation；明確設定修改仍以既有
+FIFO 的 configEdit／provider-native slash 執行。main 提供按需讀取 canonical Project
+explicit prefs 與 custom models 的入口；remote 只持有初始化 promise／proc identity／
+epoch，不 cache prefs。並行 capabilities probe 與輸入等待同一屏障；初始化成功才送
+prompt，失敗呈現 init failed 與 recovery metadata，不把失敗當成可送訊息的狀態。
+
+**Reason：** 每訊息附帶保存值會把設定套用與一般輸入綁在一起，還可能與 provider
+已確認的 live state 不一致。只做第一次開 tab 的初始化也不足：休眠 dispose 後的
+新 exec、登入 reconnect、dispatcher 同 channel 的 exec 替換都必須重新初始化。
+替換通知清除完成標記；新 probe 讀取最新保存值，唯一 request id 與 epoch 檢查
+阻止舊回覆把新 incarnation 標為 ready。沒有新增另一個設定／輸入排程器。
+
+**Do not change casually because：** 不得靠下一則訊息補套設定。Claude init／picker／
+typed config slash 共用 applyPreference：live model／permission 先等 SDK 完成才
+發布成功，effort 等舊 consumer 結束才允許新 session，避免舊 finally 清掉新 turn。
+失敗不發布成功 divider／capabilities。尚無 live session 時只準備 SDK options，不
+宣稱已預驗模型值。Copilot final-session apply、Codex confirmedPrefs／native controls／
+uncertain gate、saved-pref recovery 與 clear replacement 的 confirmed snapshot 均保留。

@@ -281,9 +281,6 @@ export interface QueryInput {
   prompt: string;
   cwd: string;
   resume?: string;
-  permissionMode?: string;
-  model?: string;
-  effort?: string;
   images?: string[];
   attachments?: AgentAttachment[];
   sessionId?: string;
@@ -481,19 +478,6 @@ export interface ServerBackend {
    */
   resolvePicker?(id: string, payload: PickerResolvePayload): void;
 
-  /**
-   * Imperative pref setters. Orchestrator drives diff detection (sessionId-keyed
-   * `lastAppliedPrefs` map in agent-server/index.ts) and calls these only when
-   * a value differs from the last applied. Providers implement only the ones
-   * relevant to their SDK — Claude uses per-call `options.model` so it leaves
-   * these unimplemented; Copilot's session needs `session.setModel(...)` etc.
-   *
-   * Methods are imperative ("apply this now"), not idempotent diff-detectors.
-   * Caller (orchestrator) guarantees only-on-change semantics.
-   */
-  setModel?(model: string): Promise<void> | void;
-  setEffort?(effort: string): Promise<void> | void;
-  setPermissionMode?(mode: string): Promise<void> | void;
   storeCredential?(key: string): Promise<void>;
   clearCredential?(): Promise<void>;
   /**

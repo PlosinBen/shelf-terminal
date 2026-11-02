@@ -963,10 +963,12 @@ describe('Codex official app-server backend lifecycle', () => {
     const backend = createCodexBackend({ createAppServer: () => app });
     const out: OutgoingMessage[] = [];
 
-    await backend.query({ prompt: '/status', cwd: '/repo', model: 'gpt-5.4-mini', effort: 'medium', permissionMode: 'bypassPermissions' }, (m) => out.push(m));
+    await backend.gatherCapabilities!('/repo', undefined, undefined, { model: 'gpt-5.6-sol' });
+    app.calls.length = 0;
+    await backend.query({ prompt: '/status', cwd: '/repo' }, (m) => out.push(m));
 
-    expect(app.calls.map((call) => call.method)).toEqual(['initialize']);
-    expect(out.some((m) => m.type === 'message' && m.msgType === 'reply' && m.content.includes('gpt-5.4-mini'))).toBe(true);
+    expect(app.calls).toEqual([]);
+    expect(out.some((m) => m.type === 'message' && m.msgType === 'reply' && m.content.includes('gpt-5.6-sol'))).toBe(true);
   });
 
   it('routes /usage to app-server account usage and rate-limit routes', async () => {
