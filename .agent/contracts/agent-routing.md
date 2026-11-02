@@ -70,7 +70,7 @@ but provider-bound `attachments` must contain target-host readable paths.
 | `path` | `string` | Absolute path readable by the agent-server/provider process on the target host. |
 | `displayPath` | `string` | Cwd-relative or short-form path for renderer chips/history. |
 | `name` | `string` | Original/sanitized display filename. |
-| `mimeType` | `string?` | Required by `AgentImageAttachment`; providers that need inline bytes reuse it. |
+| `mimeType` | `string?` | Required by `AgentImageAttachment`; fallback hint for providers that need inline bytes. |
 | `size` | `number?` | Byte size when known. |
 
 Provider mapping examples: Codex app-server maps `AgentImageAttachment` to
@@ -78,6 +78,12 @@ Provider mapping examples: Codex app-server maps `AgentImageAttachment` to
 `{ type:'image', data:<base64>, mimeType }`; Claude reads `path` and produces its SDK base64 image
 block. `data:image/...` must not be sent to Codex app-server as `image.url`; legacy data URL images
 are fail-loud at that provider boundary.
+
+The shared inline-image reader used by Claude and ACP identifies PNG, JPEG, GIF, and WebP from
+target-file signatures before choosing the MIME type. For unrecognized bytes it preserves the
+attachment's `mimeType`, or defaults to `image/png` when that hint is empty or absent. This does
+not decode, transcode, validate, or reject other image formats. Codex continues to use the uploaded
+path. Clipboard/file classification and renderer previews still follow their existing metadata.
 
 ## Config edit (model / effort / canonical or native permission)
 

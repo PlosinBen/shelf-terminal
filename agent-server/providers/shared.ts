@@ -8,12 +8,33 @@ export interface UploadedImageData {
   data: string;
 }
 
+/** Identify common image signatures without decoding or restricting other formats. */
+function imageMimeTypeFromBytes(data: Buffer): string | null {
+  if (data.length >= 8 && data.subarray(0, 8).equals(Buffer.from('89504e470d0a1a0a', 'hex'))) {
+    return 'image/png';
+  }
+  if (data.length >= 3 && data[0] === 0xff && data[1] === 0xd8 && data[2] === 0xff) {
+    return 'image/jpeg';
+  }
+  const header = data.subarray(0, 6).toString('ascii');
+  if (header === 'GIF87a' || header === 'GIF89a') return 'image/gif';
+  if (data.length >= 12
+      && data.subarray(0, 4).toString('ascii') === 'RIFF'
+      && data.subarray(8, 12).toString('ascii') === 'WEBP') {
+    return 'image/webp';
+  }
+  return null;
+}
+
 export async function readUploadedImageAttachments(attachments: AgentAttachment[] | undefined): Promise<UploadedImageData[]> {
   const images = (attachments ?? []).filter((attachment) => attachment.kind === 'image');
-  return Promise.all(images.map(async (attachment) => ({
-    mimeType: attachment.mimeType || 'image/png',
-    data: (await fs.promises.readFile(attachment.path)).toString('base64'),
-  })));
+  return Promise.all(images.map(async (attachment) => {
+    const data = await fs.promises.readFile(attachment.path);
+    return {
+      mimeType: imageMimeTypeFromBytes(data) ?? (attachment.mimeType || 'image/png'),
+      data: data.toString('base64'),
+    };
+  }));
 }
 
 /**
