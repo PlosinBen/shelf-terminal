@@ -38,6 +38,8 @@ title: shelf-terminal — Intent → File Index
 | Preload bridge | `preload.ts` | contextBridge 暴露 `window.shelfApi`，純 RPC bridge 到 main |
 | Project canonical repository | `projects/projects-repository.ts` + `projects/repository-provider.ts` | ready-only canonical project queries/mutations、main-owned identity、durable publish 與 cleanup retry boundary |
 | Project typed mutation application | `projects/project-mutation.ts` | Latest-base intent merge、editor field conflicts、Agent binding/report 與 default-tab append |
+| Agent View config allocation | `projects/agent-view-config.ts` | Main-owned stable session allocation與 startup draft materialization |
+| Agent View mount validation | `agent/view-binding.ts` | Project／provider／session ownership與 exclusive runtime mount 驗證 |
 | Project config persistence | `projects/project-config-file-io.ts` + `projects/project-config-codec.ts` + `projects/project-config-persistence.ts` | opaque atomic File I/O、v0/v1/v2 legacy + v3 current loader/formatter 與 `projects.json` facade |
 | Project delete cleanup | `projects/project-cleanup.ts` | Config commit 後的 session teardown、target history 與 per-project storage cleanup 聚合 |
 | 專案 env 解析 | `project-env.ts` | Canonical Project.envPlain 的驗證與共用注入出口 |

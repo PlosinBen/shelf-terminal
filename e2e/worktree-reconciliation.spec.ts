@@ -41,8 +41,8 @@ test.describe('worktree reconciliation', () => {
     await expect(page.locator('.sidebar-item.active')).toContainText('Scan Base');
     const saved = await page.evaluate(() => window.shelfApi.project.getAll());
     const added = saved.find(p => p.parentProjectId === 'base')!;
-    expect(added.defaultTabs).toEqual([{ name: 'Inherited terminal' }]);
-    expect(added.agentSessionIds).toEqual({});
+    expect(added.defaultTabs).toEqual([{ name: 'Terminal' }]);
+    expect(added.agentViews).toEqual({});
     await rows().click();
     await expect(page.locator('.connect-prompt')).toBeVisible();
     await page.locator('.connect-prompt').click();

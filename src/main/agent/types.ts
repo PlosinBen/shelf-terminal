@@ -160,7 +160,7 @@ export interface AgentBackend {
   checkAuth(cwd: string, customModels?: ProviderModel[]): Promise<ProviderCapabilities | null>;
   /**
    * `intent` carries renderer's saved prefs from canonical
-   * `Project.agentPrefs[provider]` (`Project` is defined by `@shared/projects`).
+   * `Project.agentViews[sessionId].prefs` (`Project` is defined by `@shared/projects`).
    * Forwarded to agent-server before input. Production reads current canonical
    * Project prefs at each initialization; no per-message replay or prefs cache.
    */

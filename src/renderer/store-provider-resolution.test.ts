@@ -18,8 +18,7 @@ function config(): Project {
     parentProjectId: null,
     worktreeBranch: null,
     baseBranch: null,
-    agentSessionIds: {},
-    agentPrefs: {},
+    agentViews: {},
   };
 }
 
@@ -58,5 +57,10 @@ describe('store provider validation', () => {
 
   it('returns no provider for an unknown project', () => {
     expect(store.validateAgentProviderForOpen('missing', CODEX_PROVIDER)).toBeNull();
+  });
+
+  it('refuses unbound Agent tabs instead of mounting a fallback Terminal', () => {
+    store.setProjects([config()]);
+    expect(store.addTab(0, undefined, undefined, undefined, 'agent', CODEX_PROVIDER)).toBeNull();
   });
 });

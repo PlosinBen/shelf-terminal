@@ -19,8 +19,7 @@ function project(id: string): Project {
     parentProjectId: null,
     worktreeBranch: null,
     baseBranch: null,
-    agentSessionIds: {},
-    agentPrefs: {},
+    agentViews: {},
   };
 }
 

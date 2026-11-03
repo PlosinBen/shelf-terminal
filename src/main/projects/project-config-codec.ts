@@ -2,11 +2,13 @@ import { WorktreeAvailability, type WorktreeState } from '@shared/worktree';
 import type { AgentPrefs, Connection, QuickCommand, TabTemplate } from '@shared/types';
 import type { Project } from '@shared/projects';
 import { CODEX_PROVIDER, isAgentProvider, providerLabel } from '@shared/agent-providers';
+import { createHash } from 'node:crypto';
+import type { AgentViewConfig } from '@shared/projects';
 
-export const PROJECTS_SCHEMA_VERSION = 3 as const;
+export const PROJECTS_SCHEMA_VERSION = 4 as const;
 
 export type ProjectConfigCodecStage = 'decode' | 'parse' | 'schema' | 'format';
-export type ProjectConfigRevision = 'legacy-v0' | 'v1' | 'v2' | 'v3' | 'unknown';
+export type ProjectConfigRevision = 'legacy-v0' | 'v1' | 'v2' | 'v3' | 'v4' | 'unknown';
 
 export interface ProjectConfigCodecError {
   readonly stage: ProjectConfigCodecStage;
@@ -24,7 +26,7 @@ export type ProjectConfigFormatResult =
   | { readonly ok: false; readonly error: ProjectConfigCodecError };
 
 type UnknownRecord = Record<string, unknown>;
-type ProjectShape = 'legacy-v0' | 'v1' | 'v2' | 'v3';
+type ProjectShape = Exclude<ProjectConfigRevision, 'unknown'>;
 
 class SchemaIssue extends Error {
   constructor(readonly context: string, message: string) {
@@ -150,7 +152,11 @@ function normalizeTabTemplate(value: unknown, context: string, allowAgent: boole
     if (cmd !== undefined || url !== undefined) {
       throw new SchemaIssue(context, 'agent template must not contain cmd or url');
     }
-    return { ...base, kind: 'agent', provider };
+    const sessionId = value.sessionId;
+    if (sessionId !== undefined && (typeof sessionId !== 'string' || !sessionId.trim())) {
+      throw new SchemaIssue(`${context}.sessionId`, 'expected non-empty string');
+    }
+    return { ...base, kind: 'agent', provider, ...(sessionId === undefined ? {} : { sessionId: sessionId as string }) };
   }
   if (kind === 'web') {
     if (cmd !== undefined || provider !== undefined) {
@@ -240,12 +246,14 @@ function agentPrefsRecord(
 function normalizeProject(value: unknown, index: number, shape: ProjectShape): Project {
   const context = `projects[${index}]`;
   if (!isRecord(value)) throw new SchemaIssue(context, 'expected project object');
+  const current = shape === 'v4';
+  const typedTabs = shape === 'v2' || shape === 'v3' || current;
 
   const maxTabs = value.maxTabs;
   if (!Number.isInteger(maxTabs) || (maxTabs as number) <= 0) {
     throw new SchemaIssue(`${context}.maxTabs`, 'expected positive integer');
   }
-  if ((shape === 'v2' || shape === 'v3') && (hasOwn(value, 'defaultAgentProvider') || hasOwn(value, 'openAgentOnConnect'))) {
+  if (typedTabs && (hasOwn(value, 'defaultAgentProvider') || hasOwn(value, 'openAgentOnConnect'))) {
     throw new SchemaIssue(context, 'current project must not contain legacy agent startup fields');
   }
   const openAgentOnConnect = value.openAgentOnConnect;
@@ -266,9 +274,9 @@ function normalizeProject(value: unknown, index: number, shape: ProjectShape): P
     'defaultTabs',
     context,
     shape,
-    (entry, entryContext) => normalizeTabTemplate(entry, entryContext, (shape === 'v2' || shape === 'v3')),
+    (entry, entryContext) => normalizeTabTemplate(entry, entryContext, typedTabs),
   );
-  if ((shape === 'v2' || shape === 'v3') && parsedTabs.length === 0) {
+  if (typedTabs && parsedTabs.length === 0) {
     throw new SchemaIssue(`${context}.defaultTabs`, 'expected at least one tab template');
   }
   const baseTabs: TabTemplate[] = parsedTabs.length > 0 ? parsedTabs : [{ name: 'Terminal' }];
@@ -283,10 +291,44 @@ function normalizeProject(value: unknown, index: number, shape: ProjectShape): P
   for (let tabIndex = 0; tabIndex < defaultTabs.length; tabIndex++) {
     const tab = defaultTabs[tabIndex];
     if (tab.kind !== 'agent') continue;
-    if (providers.has(tab.provider)) {
+    if (!current && providers.has(tab.provider)) {
       throw new SchemaIssue(`${context}.defaultTabs[${tabIndex}].provider`, `duplicate agent provider ${tab.provider}`);
     }
     providers.add(tab.provider);
+  }
+
+  const agentViews: Record<string, AgentViewConfig> = Object.create(null);
+  let canonicalTabs = defaultTabs;
+  if (current) {
+    if (hasOwn(value, 'agentSessionIds') || hasOwn(value, 'agentPrefs')) throw new SchemaIssue(context, 'legacy Agent maps in current schema');
+    if (!isRecord(value.agentViews)) throw new SchemaIssue(`${context}.agentViews`, 'expected object');
+    for (const [sessionId, entry] of Object.entries(value.agentViews)) {
+      if (!sessionId.trim() || !isRecord(entry)) throw new SchemaIssue(`${context}.agentViews.${sessionId}`, 'invalid Agent record');
+      const provider = requireString(entry, 'provider', `${context}.agentViews.${sessionId}`);
+      if (!provider.trim()) throw new SchemaIssue(`${context}.agentViews.${sessionId}.provider`, 'empty provider');
+      const prefs = normalizeAgentPrefs(entry.prefs, `${context}.agentViews.${sessionId}.prefs`);
+      if (provider === CODEX_PROVIDER && prefs.permissionMode !== undefined) throw new SchemaIssue(context, 'legacy Codex permission in current schema');
+      agentViews[sessionId] = { provider, prefs };
+    }
+  } else {
+    const sessions = optionalStringRecord(value, 'agentSessionIds', context, shape);
+    const prefs = agentPrefsRecord(value, context, shape);
+    const providerSessions = new Map<string, string>();
+    for (const provider of new Set([...providers, ...Object.keys(sessions), ...Object.keys(prefs)])) {
+      const sessionId = sessions[provider] || `migrated-${createHash('sha256').update(JSON.stringify([value.id, provider])).digest('hex')}`;
+      if (Object.hasOwn(agentViews, sessionId)) throw new SchemaIssue(`${context}.agentSessionIds.${provider}`, 'duplicate session owner');
+      agentViews[sessionId] = { provider, prefs: prefs[provider] ?? {} };
+      providerSessions.set(provider, sessionId);
+    }
+    canonicalTabs = defaultTabs.map(tab => tab.kind === 'agent' ? { ...tab, sessionId: providerSessions.get(tab.provider)! } : tab);
+  }
+  const seenSessions = new Set<string>();
+  for (const [tabIndex, tab] of canonicalTabs.entries()) {
+    if (tab.kind !== 'agent') continue;
+    if (!tab.sessionId || agentViews[tab.sessionId]?.provider !== tab.provider || seenSessions.has(tab.sessionId)) {
+      throw new SchemaIssue(`${context}.defaultTabs[${tabIndex}].sessionId`, 'missing, duplicate or mismatched Agent binding');
+    }
+    seenSessions.add(tab.sessionId);
   }
 
   return {
@@ -297,15 +339,14 @@ function normalizeProject(value: unknown, index: number, shape: ProjectShape): P
     maxTabs: maxTabs as number,
     initScript: nullableString(value, 'initScript', context, shape),
     envPlain: optionalStringRecord(value, 'envPlain', context, shape),
-    defaultTabs,
+    defaultTabs: canonicalTabs,
     quickCommands: objectArray(value, 'quickCommands', context, shape, normalizeQuickCommand),
     featureNoteDir: nullableString(value, 'featureNoteDir', context, shape),
     parentProjectId: nullableString(value, 'parentProjectId', context, shape),
     worktreeBranch: nullableString(value, 'worktreeBranch', context, shape),
     ...(value.worktreeState !== undefined ? { worktreeState: worktreeState(value.worktreeState) } : {}),
     baseBranch: nullableString(value, 'baseBranch', context, shape),
-    agentSessionIds: optionalStringRecord(value, 'agentSessionIds', context, shape),
-    agentPrefs: agentPrefsRecord(value, context, shape),
+    agentViews,
   };
 }
 
@@ -334,10 +375,15 @@ function normalizeProjects(
   try {
     const projects = values.map((value, index) => normalizeProject(value, index, revision));
     const ids = new Set<string>();
+    const sessions = new Set<string>();
     for (let index = 0; index < projects.length; index++) {
       const id = projects[index].id;
       if (ids.has(id)) throw new SchemaIssue(`projects[${index}].id`, `duplicate project id ${id}`);
       ids.add(id);
+      for (const sessionId of Object.keys(projects[index].agentViews)) {
+        if (sessions.has(sessionId)) throw new SchemaIssue(`projects[${index}].agentViews.${sessionId}`, 'duplicate session owner');
+        sessions.add(sessionId);
+      }
     }
     return { ok: true, value: projects };
   } catch (error) {
@@ -395,7 +441,7 @@ export function loadProjectsDocument(
   }
 
   if (Array.isArray(value)) return normalizeProjects(value, 'legacy-v0');
-  if (!isRecord(value) || (value.schemaVersion !== 1 && value.schemaVersion !== 2 && value.schemaVersion !== PROJECTS_SCHEMA_VERSION)) {
+  if (!isRecord(value) || (value.schemaVersion !== 1 && value.schemaVersion !== 2 && value.schemaVersion !== 3 && value.schemaVersion !== PROJECTS_SCHEMA_VERSION)) {
     return {
       ok: false,
       error: {
@@ -408,7 +454,7 @@ export function loadProjectsDocument(
       },
     };
   }
-  const revision = value.schemaVersion === 1 ? 'v1' : value.schemaVersion === 2 ? 'v2' : 'v3';
+  const revision = value.schemaVersion === 1 ? 'v1' : value.schemaVersion === 2 ? 'v2' : value.schemaVersion === 3 ? 'v3' : 'v4';
   if (!Array.isArray(value.projects)) {
     return {
       ok: false,
@@ -424,7 +470,7 @@ export function loadProjectsDocument(
 }
 
 export function formatProjectsDocument(projects: readonly Project[]): ProjectConfigFormatResult {
-  const validated = normalizeProjects(projects, 'v3');
+  const validated = normalizeProjects(projects, 'v4');
   if (!validated.ok) {
     return {
       ok: false,
@@ -444,7 +490,7 @@ export function formatProjectsDocument(projects: readonly Project[]): ProjectCon
       ok: false,
       error: {
         stage: 'format',
-        revision: 'v3',
+        revision: 'v4',
         context: 'document',
         message: error instanceof Error ? error.message : String(error),
       },

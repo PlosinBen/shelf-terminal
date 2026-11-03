@@ -356,14 +356,14 @@ export function WorktreeDialog() {
             </div>
           )}
           <label className="worktree-note-picker">
-            <span className="worktree-note-picker-label">Startup tabs override</span>
+            <span className="worktree-note-picker-label">Startup tabs</span>
             <select
               className="worktree-select worktree-startup-tabs-override"
               value={startupAgentProvider}
               onChange={(e) => setStartupAgentProvider(e.target.value as AgentProvider | '')}
               disabled={creating}
             >
-              <option value="">Inherit project tabs</option>
+              <option value="">Terminal</option>
               {visibleAgentProviderEntries(import.meta.env.DEV).map(([id, meta]) => (
                 <option key={id} value={id}>Agent ({meta.label}) + Terminal</option>
               ))}

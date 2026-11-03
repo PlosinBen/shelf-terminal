@@ -45,17 +45,19 @@ test('background unread updates preserve the Project editing draft', async ({ sh
 
 test('saving one editor field preserves background preferences and untouched fields', async ({ shelfApp: { page } }) => {
   const project = await setup(page);
+  const created = await page.evaluate(({ id, kind }) => window.shelfApi.project.update(id, { kind, provider: 'claude' }), { id: project.id, kind: PROJECT_MUTATION.CREATE_AGENT_VIEW });
+  if (!created.ok || !created.sessionId) throw new Error('Missing test Agent View');
   const panel = await edit(page);
   await panel.locator('.settings-input').first().fill('edited name');
-  await page.evaluate(async ({ id, edit, report }) => {
-    await window.shelfApi.project.update(id, { kind: report, provider: 'claude', report: { currentModel: 'background-model' } });
+  await page.evaluate(async ({ id, edit, report, sessionId }) => {
+    await window.shelfApi.project.update(id, { kind: report, sessionId, report: { currentModel: 'background-model' } });
     await window.shelfApi.project.update(id, { kind: edit, edits: [{ field: 'initScript', before: null, value: 'background init' }] });
-  }, { id: project.id, edit: PROJECT_MUTATION.EDIT, report: PROJECT_MUTATION.AGENT_REPORT });
+  }, { id: project.id, edit: PROJECT_MUTATION.EDIT, report: PROJECT_MUTATION.AGENT_REPORT, sessionId: created.sessionId });
   await expect(panel.locator('.settings-input').first()).toHaveValue('edited name');
   await panel.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(panel).not.toBeVisible();
   expect((await page.evaluate(() => window.shelfApi.project.getAll()))[0]).toMatchObject({
-    name: 'edited name', initScript: 'background init', agentPrefs: { claude: { model: 'background-model' } },
+    name: 'edited name', initScript: 'background init', agentViews: { [created.sessionId]: { provider: 'claude', prefs: { model: 'background-model' } } },
   });
 });
 

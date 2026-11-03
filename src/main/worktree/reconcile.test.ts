@@ -19,7 +19,7 @@ const snapshot: WorktreeSnapshot = {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.probeFacts.mockResolvedValue({ ok: true, facts: { targetOS: 'unix' } });
-  main = { id: `main-${++id}`, name: 'main', cwd: '/main', connection: { type: 'local' }, maxTabs: 5, initScript: null, envPlain: {}, defaultTabs: [{ name: 'Terminal' }], quickCommands: [], featureNoteDir: null, parentProjectId: null, worktreeBranch: null, baseBranch: null, agentSessionIds: {}, agentPrefs: {} };
+  main = { id: `main-${++id}`, name: 'main', cwd: '/main', connection: { type: 'local' }, maxTabs: 5, initScript: null, envPlain: {}, defaultTabs: [{ name: 'Terminal' }], quickCommands: [], featureNoteDir: null, parentProjectId: null, worktreeBranch: null, baseBranch: null, agentViews: {} };
   const result = createMainProjectsRepository({ load: () => ({ ok: true, value: [main] }), save: async () => ({ ok: true }) }, () => `child-${id}`, { cleanup: async () => {} });
   if (!result.ok) throw new Error('fixture');
   repository = mocks.repository = result.repository;
@@ -78,12 +78,12 @@ describe('reconciliation coordination', () => {
     mocks.scan.mockImplementationOnce(() => new Promise(r => { resolve = r; }));
     const running = reconcileWorktrees(main.id);
     await vi.waitFor(() => expect(resolve).toBeTypeOf('function'));
-    await repository.save({ ...main, agentSessionIds: { claude: 'new-session' }, name: 'latest name' });
+    await repository.save({ ...main, agentViews: { 'new-session': { provider: 'claude', prefs: {} } }, name: 'latest name' });
     resolve(snapshot);
     expect((await running).outcome).toBe('applied');
-    expect(repository.get(main.id)?.agentSessionIds).toEqual({ claude: 'new-session' });
+    expect(repository.get(main.id)?.agentViews).toEqual({ 'new-session': { provider: 'claude', prefs: {} } });
     expect(repository.getAll()[1].name).toBe('latest name');
-    expect(repository.getAll()[1].agentSessionIds).toEqual({});
+    expect(repository.getAll()[1].agentViews).toEqual({});
   });
 
 });

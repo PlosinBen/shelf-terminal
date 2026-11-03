@@ -126,15 +126,6 @@ export function ProjectEditPanel() {
       setTabError('Every startup tab requires a name.');
       return;
     }
-    const agentProviders = defaultTabs
-      .filter((tab) => tab.kind === 'agent')
-      .map((tab) => tab.provider);
-    const duplicateProvider = agentProviders.find((provider, index) =>
-      agentProviders.indexOf(provider) !== index);
-    if (duplicateProvider) {
-      setTabError(`Agent provider "${duplicateProvider}" is selected more than once.`);
-      return;
-    }
     setTabError(null);
     let savedFeatureNoteDir: string | null;
     try {
@@ -149,7 +140,7 @@ export function ProjectEditPanel() {
       .map((t): TabTemplate => {
         const base = { name: t.name.trim(), color: t.color || undefined };
         if (t.kind === 'web') return { ...base, kind: 'web', url: t.url?.trim() || undefined };
-        if (t.kind === 'agent') return { ...base, kind: 'agent', provider: t.provider };
+        if (t.kind === 'agent') return { ...base, kind: 'agent', provider: t.provider, ...(t.sessionId ? { sessionId: t.sessionId } : {}) };
         return { ...base, cmd: t.cmd?.trim() || undefined };
       });
     const cmds = quickCommands.filter((c) => c.label.trim() && c.command.trim());

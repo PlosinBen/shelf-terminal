@@ -28,9 +28,12 @@ import {
 import { requestExternalUrlIntent } from '../external-url-intent';
 import { mediateAgentLoginUrl } from './login-url-intent';
 import { getProjectsRepository } from '../projects/repository-provider';
+import { validateViewBinding } from './view-binding';
+import { sameProjectTarget } from '@shared/project-target';
 
 interface SessionInstance {
   tabId: string;
+  sessionId: string;
   projectId?: string;
   provider: AgentProvider;
   connection: Connection;
@@ -218,7 +221,14 @@ export function initAgentManager(windowGetter: () => BrowserWindow | null): void
 
   ipcMain.handle(IPC.AGENT_INIT, async (_e, payload) => {
     const { tabId, cwd, connection, provider, sessionId, ...opts } = payload;
-    return startSession(tabId, cwd, connection, provider, { ...opts, sessionId });
+    try {
+      return await startSession(tabId, cwd, connection, provider, { ...opts, sessionId });
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      log.error('agent', `init rejected tabId=${tabId} sessionId=${sessionId}: ${reason}`);
+      send(IPC.AGENT_INIT_STATUS, tabId, { state: 'failed', reason });
+      return false;
+    }
   });
 
   ipcMain.handle(IPC.AGENT_SEND, async (_e, payload) => {
@@ -313,6 +323,11 @@ async function startSession(
   provider: AgentProvider,
   opts?: Record<string, unknown>,
 ): Promise<boolean> {
+  const sessionId = typeof opts?.sessionId === 'string' ? opts.sessionId : undefined;
+  const projectId = typeof opts?.projectId === 'string' ? opts.projectId : undefined;
+  const project = projectId ? getProjectsRepository().get(projectId) : null;
+  validateViewBinding(project, sessionId, provider, tabId, sessions.values());
+  if (!project || !sessionId || !sameProjectTarget(project, { cwd, connection })) throw new Error(`Agent Project target mismatch projectId=${projectId}`);
   if (sessions.has(tabId)) {
     log.debug('agent', `[agent:${formatTabLogId(tabId)}] init ignored: session already live`);
     return true;
@@ -330,8 +345,6 @@ async function startSession(
     projectMcpLocal(getAppInstanceId());
   }
 
-  const sessionId = opts?.sessionId as string | undefined;
-  const projectId = typeof opts?.projectId === 'string' ? opts.projectId : undefined;
   const backend = createRemoteBackend(
     connection,
     undefined,
@@ -395,7 +408,8 @@ async function startSession(
         if (!projectId) return { customModels: providerCustomModels(provider) };
         const project = getProjectsRepository().get(projectId);
         if (!project) throw new Error(`Agent initialization Project no longer exists: ${projectId}`);
-        return { intent: project.agentPrefs[provider], customModels: providerCustomModels(provider) };
+        const view = validateViewBinding(project, sessionId, provider, tabId, sessions.values());
+        return { intent: view.prefs, customModels: providerCustomModels(provider) };
       },
       onFailure: error => send(IPC.AGENT_INIT_STATUS, tabId, {
         state: 'failed', reason: error instanceof Error ? error.message : String(error), recovery: recoveryFromError(error),
@@ -406,6 +420,7 @@ async function startSession(
 
   const session: SessionInstance = {
     tabId,
+    sessionId,
     projectId,
     provider,
     connection,
@@ -424,7 +439,7 @@ async function startSession(
 
   if (backend.getCapabilities) {
     const customModels = providerCustomModels(provider);
-    // `intent` originates in canonical `Project.agentPrefs[provider]`
+    // `intent` originates in canonical `Project.agentViews[sessionId].prefs`
     // (`Project` is defined by `@shared/projects`),
     // carried through agent:init's opts → preload spread into AGENT_INIT
     // payload. Seeds the provider's session-level closures before the first
@@ -432,6 +447,7 @@ async function startSession(
     // reconnect instead of the provider's hardcoded default ("ask" etc.).
     const intent = (opts as { intent?: AgentPrefs } | undefined)?.intent;
     backend.getCapabilities(cwd, customModels, intent).then((caps) => {
+      if (sessions.get(tabId) !== session) { log.debug('agent', `ignored stale capabilities tabId=${tabId} sessionId=${sessionId}`); return; }
       // Capabilities first so AuthPane can read caps.authMethod for its
       // instructions; then flip auth (reusing the existing auth_required
       // routing → setAuthRequired → AuthPane takeover); then mark ready (the
@@ -440,6 +456,7 @@ async function startSession(
       if (caps.authRequired) send(IPC.AGENT_AUTH_REQUIRED, tabId, providerLabel(provider));
       send(IPC.AGENT_INIT_STATUS, tabId, { state: 'ready' });
     }).catch((err) => {
+      if (sessions.get(tabId) !== session) { log.debug('agent', `ignored stale init error tabId=${tabId} sessionId=${sessionId}`); return; }
       log.error('agent', `${tag} capabilities error: ${err.message}`);
       log.flushTrace('agent', `${tag} init failed`);
       send(IPC.AGENT_INIT_STATUS, tabId, { state: 'failed', reason: err.message, recovery: recoveryFromError(err) });

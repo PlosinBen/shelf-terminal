@@ -263,7 +263,7 @@ Provider 以 capability strategy 選一條路：
 
 ## agent-config-flow#12 — 已保存設定不可用時由使用者清除並重試  ·  [Decision]
 
-**Decision：** Provider 在能確認特定 saved selection 失效時提供 typed recovery。錯誤畫面保留 Retry，另提供 Retry with default <欄位>；後者只刪除該 project/provider 的指定 Prefs，等待保存與 refresh 完成，再以原 sessionId 重試。省略欄位時沿用 provider 的既有初始化／session 行為，Shelf 不選替代值、不清除對話或其他設定，也不新增 reset intent、臨時 baseline thread 或另一套復原生命週期。
+**Decision：** Provider 在能確認特定 saved selection 失效時提供 typed recovery。錯誤畫面保留 Retry，另提供 Retry with default <欄位>；後者只刪除該 Project／stable session 的指定 Prefs，等待保存與 refresh 完成，再以原 sessionId 重試。相同 provider 的其他 View 不受影響，pending recovery 亦按 Project＋session 去重。省略欄位時沿用 provider 初始化／session 行為，不清除對話或其他設定，也不新增另一套復原生命週期。
 
 **Reason：** 初始化錯誤 overlay 中無法使用 picker，而不變的 saved intent 會重複失敗。指定欄位復原讓使用者修正設定，保留初始化失敗不冒充 ready 的契約。
 

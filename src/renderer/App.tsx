@@ -3,7 +3,7 @@ import { clearValidatedWorktreeDirectories, setWorktreeScan, getProjectSliceSnap
 import { CONFIRM_REMOVE_EVENT } from './components/RemoveConfirmDialog';
 import { debugLog } from './debugLog';
 import { createPrefRecovery } from './agent-model-recovery';
-import type { ProjectMutation, ProjectMutationResult } from '@shared/project-mutations';
+import { PROJECT_MUTATION, type ProjectMutation, type ProjectMutationResult } from '@shared/project-mutations';
 import React, { useEffect, useState } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { TabBar } from './components/TabBar';
@@ -486,8 +486,13 @@ export function App() {
       if (projectIndex === -1 || !proj) return;
       const deleted = await runProjectOperation('delete', () => projectCoordinator.delete(projectId));
       if (deleted.status === 'cancelled') return;
-      Object.values(proj.agentSessionIds).forEach((id) => { if (id) clearAgentSession(id); });
       proj.tabs.forEach(teardownTab);
+      // Teardown flushes idle pending history. Queue the clears afterwards so
+      // those writes cannot resurrect messages belonging to a deleted Project.
+      const history = await runProjectOperation('clear deleted Agent history', async () => {
+        await Promise.all(Object.keys(proj.agentViews).map(clearAgentSession));
+      });
+      if (history.status === 'cancelled') console.warn('[project-delete] history cleanup cancelled', { projectId });
       await recoverProjectCleanup(projectId, deleted.value);
     });
 
@@ -523,13 +528,27 @@ export function App() {
       addTab(projectIndex);
     });
 
-    const offNewAgentTab = onNewAgentTab((projectId, provider) => {
+    const offNewAgentTab = onNewAgentTab(async (projectId, provider) => {
       const projectIndex = getProjectIndexById(projectId);
       const proj = getProjectById(projectId);
       if (!proj || projectIndex === -1) return;
       const resolvedProvider = validateAgentProviderForOpen(projectId, provider);
       if (!resolvedProvider) return;
-      addTab(projectIndex, undefined, undefined, undefined, 'agent', resolvedProvider);
+      if (isWorktreeUnavailable(proj) || proj.tabs.length >= proj.maxTabs) return;
+      const created = await queueProjectUpdate(projectId, () => runProjectOperation('create Agent View', () =>
+        projectCoordinator.save(projectId, { kind: PROJECT_MUTATION.CREATE_AGENT_VIEW, provider: resolvedProvider })));
+      if (created.status !== 'completed' || !created.value.ok) return;
+      const sessionId = created.value.sessionId;
+      if (!sessionId) throw new Error(`Missing created Agent session projectId=${projectId}`);
+      const nextIndex = getProjectIndexById(projectId);
+      const latestProject = getProjectById(projectId);
+      if (!latestProject || (proj.tabs.length > 0 && latestProject.tabs.length === 0)) {
+        window.shelfApi.app.debugLog('agent-view', `discarded stale create after disconnect projectId=${projectId} sessionId=${sessionId}`);
+        return;
+      }
+      if (!addTab(nextIndex, undefined, undefined, undefined, 'agent', resolvedProvider, undefined, sessionId)) {
+        window.shelfApi.app.debugLog('agent-view', `created View not mounted after runtime changed projectId=${projectId} sessionId=${sessionId}`);
+      }
     });
 
     const offNewWebTab = on(Events.NEW_WEB_TAB, (projectId: string, url?: string) => {
@@ -597,7 +616,7 @@ export function App() {
         emitAgent('agent:init', {
           tabId, cwd: project.cwd, connection: project.connection,
           provider: tab.provider, sessionId: tab.sessionId,
-          opts: { intent: project.agentPrefs[tab.provider], projectId: project.id },
+          opts: { intent: project.agentViews[tab.sessionId]?.prefs, projectId: project.id },
         });
       },
     });
@@ -651,7 +670,7 @@ export function App() {
         }
         if (template.kind === 'agent') {
           const provider = validateAgentProviderForOpen(projectId, template.provider);
-          if (provider) addTab(projectIndex, template.name, undefined, template.color, 'agent', provider);
+          if (provider) addTab(projectIndex, template.name, undefined, template.color, 'agent', provider, undefined, template.sessionId);
           return;
         }
         addTab(projectIndex, template.name, template.cmd, template.color);
@@ -869,9 +888,10 @@ export function App() {
                               initialUrl={tab.url}
                               visible={visible}
                             />
-                          ) : tab.type === 'agent' && tab.provider ? (
+                          ) : tab.type === 'agent' && tab.provider && tab.sessionId ? (
                             <AgentView
                               tabId={tab.id}
+                              sessionId={tab.sessionId}
                               cwd={proj.cwd}
                               connection={proj.connection}
                               provider={tab.provider}

@@ -11,8 +11,8 @@ function baseTemplate(tab: Tab) {
 export function runtimeTabToTemplate(tab: Tab): TabTemplate | null {
   const base = baseTemplate(tab);
   if (tab.type === 'agent') {
-    if (!tab.provider) return null;
-    return { ...base, kind: 'agent', provider: tab.provider };
+    if (!tab.provider || !tab.sessionId) return null;
+    return { ...base, kind: 'agent', provider: tab.provider, sessionId: tab.sessionId };
   }
   if (tab.type === 'web') {
     return { ...base, kind: 'web', ...(tab.url ? { url: tab.url } : {}) };

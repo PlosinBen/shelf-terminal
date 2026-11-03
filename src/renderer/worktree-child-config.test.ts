@@ -17,8 +17,7 @@ const parent: Project = {
   ],
   quickCommands: [{ label: 'build', command: 'npm run build', target: 'current' }],
   featureNoteDir: '.agent/features',
-  agentPrefs: { [CLAUDE_PROVIDER]: { model: 'opus' } as any },
-  agentSessionIds: { [CLAUDE_PROVIDER]: 'sess-parent' },
+  agentViews: { 'sess-parent': { provider: CLAUDE_PROVIDER, prefs: { model: 'opus' } } },
   parentProjectId: null,
   worktreeBranch: null,
   baseBranch: null,
@@ -42,10 +41,10 @@ describe('buildWorktreeChildConfig', () => {
     expect(child.maxTabs).toBe(7);
     expect(child.initScript).toBe('nvm use');
     expect(child.envPlain).toEqual({ FOO: 'bar' });
-    expect(child.defaultTabs).toEqual(parent.defaultTabs);
+    expect(child.defaultTabs).toEqual([{ name: 'Terminal' }]);
     expect(child.quickCommands).toEqual(parent.quickCommands);
     expect(child.featureNoteDir).toBe('.agent/features');
-    expect(child.agentPrefs).toEqual(parent.agentPrefs);
+    expect(child).not.toHaveProperty('agentPrefs');
   });
 
   it('sets a fresh worktree identity', () => {

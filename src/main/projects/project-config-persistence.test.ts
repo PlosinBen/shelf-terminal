@@ -19,8 +19,7 @@ function project(): Project {
     parentProjectId: null,
     worktreeBranch: null,
     baseBranch: null,
-    agentSessionIds: {},
-    agentPrefs: {},
+    agentViews: {},
   };
 }
 
@@ -80,7 +79,7 @@ describe('project config persistence', () => {
     expect(await persistence.save([])).toEqual({ ok: true });
     expect(writeAtomic).toHaveBeenCalledOnce();
     expect(JSON.parse(writeAtomic.mock.calls[0][1] as string)).toEqual({
-      schemaVersion: 3,
+      schemaVersion: 4,
       projects: [],
     });
   });
@@ -108,7 +107,7 @@ describe('project config persistence', () => {
     ['legacy v0', JSON.stringify([{ id: 'a', name: 'A', cwd: '/repo/a', connection: { type: 'local' }, maxTabs: 5 }])],
     ['current v1', JSON.stringify({
       schemaVersion: 1,
-      projects: [{ ...project(), defaultAgentProvider: null, openAgentOnConnect: false }],
+      projects: [{ ...project(), agentSessionIds: {}, agentPrefs: {}, defaultAgentProvider: null, openAgentOnConnect: false }],
     })],
   ])('backs up raw %s data before replacing a non-empty collection with empty v2', async (_label, data) => {
     const backup = vi.fn<ProjectConfigFileIo['backup']>(async () => ({ ok: true }));

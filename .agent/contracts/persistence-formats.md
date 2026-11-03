@@ -19,7 +19,7 @@ The on-disk artifacts Shelf persists and their layout. Two roots: `<userData>` (
 
   ```json
   {
-    "schemaVersion": 3,
+    "schemaVersion": 4,
     "projects": [
       {
         "id": "opaque-id",
@@ -31,7 +31,7 @@ The on-disk artifacts Shelf persists and their layout. Two roots: `<userData>` (
         "envPlain": {},
         "defaultTabs": [
           { "name": "Terminal" },
-          { "name": "Claude", "kind": "agent", "provider": "claude" },
+          { "name": "Claude", "kind": "agent", "provider": "claude", "sessionId": "agent-example" },
           { "name": "Docs", "kind": "web", "url": "https://example.com" }
         ],
         "quickCommands": [],
@@ -39,20 +39,19 @@ The on-disk artifacts Shelf persists and their layout. Two roots: `<userData>` (
         "parentProjectId": null,
         "worktreeBranch": null,
         "baseBranch": null,
-        "agentSessionIds": {},
-        "agentPrefs": {}
+        "agentViews": { "agent-example": { "provider": "claude", "prefs": {} } }
       }
     ]
   }
   ```
 
-- **Compatibility**: an unversioned array is supported legacy v0, and v1/v2 envelopes are supported legacy input. Loading v0, v1, v2, or v3 produces the same canonical `Project[]`; load is read-only, and the next successful project mutation formats v3 naturally. Legacy absent/empty tab lists become one explicit Terminal. A non-null legacy `defaultAgentProvider` is converted into the first Agent template regardless of `openAgentOnConnect`; without a provider, that boolean produces no Agent. Both legacy fields are removed from the canonical object. Malformed data, duplicate ids, wrong shapes, or unsupported versions fail all-or-nothing.
+- **Compatibility**: unversioned v0 arrays and v1/v2/v3 envelopes load into canonical v4. Load is read-only; the next successful mutation writes v4. Legacy absent/empty tab lists become one Terminal. A non-null legacy `defaultAgentProvider` becomes the first Agent template regardless of `openAgentOnConnect`; without a provider, that boolean produces no Agent. Legacy Agent defaults, provider session keys and prefs keys all contribute session-keyed records, including unknown/unreferenced providers. Existing session keys are retained; missing keys receive deterministic migration identities. Duplicate owners, malformed data and unsupported versions fail all-or-nothing, preserving the original file.
 - **Source of truth**: `src/main/projects/project-config-{file-io,codec,persistence}.ts`. Missing file → canonical `[]`; an existing zero-byte file is malformed, not missing. Writes use same-directory temp + atomic replace. Before a nonempty persisted collection is replaced by canonical empty, the original opaque file is copied to `projects.json.backup.<timestamp>`.
-- **Startup tabs**: current `defaultTabs` is non-empty and contains disjoint Terminal, Web, or Agent templates. Agent templates require a `provider` string, may preserve an unavailable/future id, and must be unique by provider within one project. Runtime consumers resolve provider strings through the live registry and refuse unavailable providers rather than substituting another one.
-- **Provider compatibility**: Agent templates, `agentSessionIds`, and `agentPrefs` retain unknown old/future provider ids; the codec does not discard compatibility data.
-- **Agent preference values**: each `agentPrefs[provider]` is an `AgentPrefs` object defined in `src/shared/types.ts`: `{ model?: string, effort?: string, permissionMode?: string, nativeMode?: string, nativePermission?: string, nativeApproval?: string }`. The codec accepts only string values for present fields and preserves unknown provider keys. `permissionMode` belongs to Shelf-strategy controls; `nativeMode`, `nativePermission`, and `nativeApproval` hold confirmed values for a provider-advertised native strategy. Capability confirmation writes present values without deleting a saved field merely because a later capability snapshot omits that control.
+- **Startup tabs**: `defaultTabs` is non-empty. Agent rows require provider plus a stable sessionId matching `agentViews[sessionId].provider`. Multiple same-provider rows are valid; duplicate session references and dangling/mismatched references reject. Unknown provider ids are preserved but refused at runtime if unavailable. Only this list determines connect-time opening.
+- **Agent records**: `agentViews[sessionId]` contains `{ provider, prefs }`; it may remain without a Default reference. New temporary Views register metadata without adding startup tabs. Closing runtime or removing a Default does not delete records/history. Current v4 rejects legacy provider maps.
+- **Agent preference values**: each record's `prefs` is `AgentPrefs` from `src/shared/types.ts`: `{ model?, effort?, permissionMode?, nativeMode?, nativePermission?, nativeApproval? }`, with string values. Provider-specific initialization stays in the provider; reports update only the addressed stable session. Missing controls do not implicitly delete saved values.
 
-- **Codex preference migration**: v0/v1/v2 Codex `permissionMode` migrates to profile/approval pairs: `default` → `:workspace` / `on-request`, `plan` → `:read-only` / `never`, `bypassPermissions` → `:danger-full-access` / `never`. Existing native values win; missing members are filled, then the legacy field is removed. No `nativeMode` is inferred from `plan`. Unknown legacy values fail schema validation; v3 rejects legacy Codex permission fields. Other providers remain unchanged. Conversion occurs at versioned load, never provider connect; the existing atomic save writes v3 on the next mutation.
+- **Codex preference migration**: v0/v1/v2 `permissionMode` converts to profile/approval: `default` → `:workspace` / `on-request`, `plan` → `:read-only` / `never`, `bypassPermissions` → `:danger-full-access` / `never`. Existing native values win, then the legacy field is removed; no `nativeMode` is inferred. Unknown legacy values reject; v3/v4 reject legacy Codex permission fields. Conversion occurs at versioned load before record migration; other providers remain unchanged.
 - **Explicit intent**: Codex capabilities carry `confirmedPrefs`; only that patch persists. An empty patch displays effective defaults without pinning them. Profiles and approval remain independent; structured granular approval is runtime-only, never serialized into a string preference.
 
 ## `<userData>/settings.json`
@@ -179,7 +178,7 @@ The on-disk artifacts Shelf persists and their layout. Two roots: `<userData>` (
 
 - **Path**: `os.homedir()/.shelf/agent-context/<sessionId>.json` (keyed by sessionId, not projectId)
 - **Format**: single JSON object — `PersistedContext` (`agent-server/context-store.ts`): `{ sessionId, provider, updatedAt, modelMessages?, totalInputTokens?, totalOutputTokens?, model?, lastResponseId?, lastSdkSessionId? }`. `lastSdkSessionId: null` is the explicit "cleared" sentinel.
-- **Source of truth**: `agent-server/context-store.ts` (`loadContext` / `saveContext` / `deleteContext`). Written atomically (tmp + rename). The execution process's `wrapSendForContext` boundary is the single disk writer; it intercepts `context_patch` from both execution and session-scoped provider sinks, including a native session created during capability discovery. Files older than 30 days are swept by `cleanupOldContexts`. Lives on whichever machine the agent-server runs on.
+- **Source of truth**: `agent-server/context-store.ts` (`loadContext` / `saveContext` / `deleteContext`). Written atomically (tmp + rename) by `wrapSendForContext`, including capability-time native session pointers. Lives on the agent host. Startup does not delete pointers by age or sweep other sessions; the target-wide directory lacks a complete ownership inventory. Explicit clear remains supported; temporary contexts also remain until explicit cleanup. This does not guarantee that a provider retains its own native history indefinitely.
 
 ## `~/.shelf/agent-server/<version>/` — deployed runtime (remote/local)
 

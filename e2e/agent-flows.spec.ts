@@ -91,7 +91,7 @@ test.describe('agent flows via fake provider', () => {
       await expect(permission).toHaveText('Allow all: On');
       await expect.poll(() => {
         const document = JSON.parse(fs.readFileSync(path.join(userDataDir, 'projects.json'), 'utf8'));
-        return document.projects[0].agentPrefs.claude;
+        return Object.values(document.projects[0].agentViews)[0].prefs;
       }).toEqual({
         model: 'fake-model-pro',
         effort: 'high',
@@ -116,14 +116,16 @@ test.describe('agent flows via fake provider', () => {
       await expect(mode).toHaveText('Mode: Plan');
       await expect(permission).toHaveText('Allow all: On');
 
+      await page.locator('.tab-bar .tab').last().click({ button: 'right' });
+      await page.locator('.context-menu-item', { hasText: 'Save to Default', exact: true }).click();
       const item = page.locator('.sidebar-item').first();
       await item.click({ button: 'right' });
       await page.locator('.context-menu-item', { hasText: 'Disconnect' }).click();
       const prompt = page.locator('.connect-prompt');
       await expect(prompt).toBeVisible({ timeout: 5_000 });
       await prompt.click();
-      await expect(page.locator('.tab-bar .tab')).toHaveCount(1, { timeout: 5_000 });
-      await openAgentTab(page);
+      await expect(page.locator('.tab-bar .tab')).toHaveCount(2, { timeout: 5_000 });
+      await page.locator('.tab-bar .tab').nth(1).click();
 
       await expect(page.locator('.agent-status-seg.agent-status-interactive', { hasText: 'fake-model-pro' })).toBeVisible();
       await expect(page.locator('.agent-status-seg.agent-status-interactive', { hasText: 'effort: high' })).toBeVisible();
@@ -139,7 +141,7 @@ test.describe('agent flows via fake provider', () => {
       await openAgentTab(page);
       const approval = page.locator('[data-config-key="nativeApproval"]:visible');
       await expect(approval).toHaveText('Approval: Custom');
-      expect(await page.evaluate(async () => (await window.shelfApi.project.getAll())[0].agentPrefs.claude ?? {})).toEqual({});
+      expect(await page.evaluate(async () => Object.values((await window.shelfApi.project.getAll())[0].agentViews)[0].prefs ?? {})).toEqual({});
       await page.locator('[data-config-key="nativeMode"]:visible').click();
       await page.locator('.agent-perm-option:visible', { hasText: 'Plan' }).click();
       await expect(page.locator('[data-config-key="nativeMode"]:visible')).toHaveText('Mode: Plan');
@@ -149,7 +151,7 @@ test.describe('agent flows via fake provider', () => {
       await expect(page.locator('.agent-perm-option:visible')).toHaveCount(3);
       await page.locator('.agent-perm-option:visible', { hasText: 'never' }).click();
       await expect(approval).toHaveText('Approval: never');
-      await expect.poll(() => page.evaluate(async () => (await window.shelfApi.project.getAll())[0].agentPrefs.claude)).toEqual({ nativeMode: 'plan', nativeApproval: 'never' });
+      await expect.poll(() => page.evaluate(async () => Object.values((await window.shelfApi.project.getAll())[0].agentViews)[0].prefs)).toEqual({ nativeMode: 'plan', nativeApproval: 'never' });
     });
   });
 

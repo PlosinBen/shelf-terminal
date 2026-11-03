@@ -34,11 +34,12 @@ describe('runtimeTabToTemplate', () => {
   });
 
   it('preserves Agent provider, label, and color', () => {
-    expect(runtimeTabToTemplate(tab({ type: 'agent', provider: CLAUDE_PROVIDER }))).toEqual({
+    expect(runtimeTabToTemplate(tab({ type: 'agent', provider: CLAUDE_PROVIDER, sessionId: 'session' }))).toEqual({
       name: 'Saved tab',
       color: '#89b4fa',
       kind: 'agent',
       provider: CLAUDE_PROVIDER,
+      sessionId: 'session',
     });
   });
 

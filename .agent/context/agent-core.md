@@ -40,11 +40,11 @@ related:
 
 **Do not change casually because**: 不要嘗試統一成單一偵測機制 —— agent tab 和 terminal tab 的資訊來源根本不同。
 
-## agent-core#3 — Agent Tab 固定 Provider，每 Project 每 Provider 至多一個  ·  [Decision]
+## agent-core#3 — Agent View 固定 Provider，對話以穩定 session 辨識  ·  [Decision]
 
-**Decision**: Agent tab 建立時綁定一個 registry-valid provider（claude、copilot 或 codex），不可在 tab 內切換。UI 層限制同一個 project 不能開兩個相同 provider 的 agent tab。Backend 透過 tabId-based session 管理，架構上不限制數量。
+**Decision**: 同 Project 可有多個同 provider Agent View。每個 View 綁定固定 provider 與獨立 Shelf sessionId；runtime tabId 是一次掛載的身分。main 拒絕同一 session 同時掛載兩次，設定與 recovery 按 session 定位。新增臨時 View 使用 provider 預設；Save to Default 保留原 session 引用，重啟按 Default 還原。
 
-**Reason**: Provider 切換涉及完全不同的 context/session 管理（Claude SDK session vs Copilot modelMessages），切換會丟前 provider 對話。固定綁定讓 sessionId 跟 provider 一對一。
+**Reason**: Provider 決定串接方式，不應決定對話數量。固定 session/provider 綁定避免不同對話或不相容的原生 context 串線；設定不能再以 provider 作為唯一歸屬。
 
 **Do not change casually because**: 不要做 tab 內 provider 切換 —— context 不相容。
 
@@ -54,13 +54,14 @@ related:
 - **Server-side**（`~/.shelf/agent-context/{sessionId}.json`）：保存 provider resume pointer與 orchestration context；Claude/Copilot/Codex 的對話本體仍由各自 CLI/runtime管理，詳見 `background-tasks#1`
 - **Client-side**（IndexedDB `shelf-agent-history`）：存完整 UI messages（含 user messages、tool calls 展開等），用於重新開啟 tab 時恢復顯示
 
-SessionId 是 UUID v4，存在 canonical `Project.agentSessionIds[provider]`，兩層用同一個 key。
+新 sessionId 由 main 配發 UUID，舊資料沿用原 key，缺省遷移 key 具決定性。
+canonical `Project.agentViews[sessionId]` 保存 provider／prefs；兩層持久化沿用同一個 key。
 
 **清理策略**：
-- Server-side：agent-server 啟動時掃描，移除 `updatedAt` 超過 30 天 + 損壞 JSON
+- Server-side：不按閒置天數掃描刪除 context；明確 clear 仍可刪除。讀取損壞檔案留錯誤紀錄，不由全域掃描刪除其他 session 的資料。
 - Client-side：remove project 時清對應 session，不做定期掃描（在本機且跟 project 生命週期綁定）
 
-**Reason**: Server-side context 被 compaction 或 SDK 管理，無法恢復原始 UI。IndexedDB 在 renderer 直接可用，不需要 IPC round-trip。Context 檔在遠端機器累積無人清，30 天 cutoff 涵蓋合理 resume 需求。
+**Reason**: Server-side context 被 compaction 或 SDK 管理，無法恢復原始 UI。IndexedDB 在 renderer 直接可用。target-wide context 目錄沒有完整 ownership 清單，單純過期掃描可能清掉仍在 Default 的恢復指標；因此保守保留，包括臨時 View context，不引入額外 GC。
 
 **Do not change casually because**:
 - 不要合併成單一 persistence —— compacted data 無法恢復原始 UI。

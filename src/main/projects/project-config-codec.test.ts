@@ -21,8 +21,7 @@ function project(id = 'project-a'): Project {
     parentProjectId: null,
     worktreeBranch: null,
     baseBranch: null,
-    agentSessionIds: {},
-    agentPrefs: {},
+    agentViews: {},
   };
 }
 
@@ -102,15 +101,15 @@ describe('project config formatter', () => {
   it('round-trips unknown provider ids as opaque data', () => {
     const input: Project = {
       ...project(),
-      defaultTabs: [{ name: 'future-provider', kind: 'agent', provider: 'future-provider' }],
-      agentSessionIds: { 'retired-provider': 'session-1' },
-      agentPrefs: {
-        'future-provider': {
+      defaultTabs: [{ name: 'future-provider', kind: 'agent', provider: 'future-provider', sessionId: 'future-session' }],
+      agentViews: {
+        'session-1': { provider: 'retired-provider', prefs: {} },
+        'future-session': { provider: 'future-provider', prefs: {
           model: 'future-model',
           permissionMode: 'custom',
           nativeMode: 'autopilot',
           nativePermission: 'allow-all',
-        },
+        } },
       },
     };
 
@@ -124,6 +123,7 @@ describe('project config formatter', () => {
   it.each([true, false])('migrates a saved v1 provider regardless of openAgentOnConnect=%s', (openAgentOnConnect) => {
     const legacy = {
       ...project(),
+      agentSessionIds: {}, agentPrefs: {},
       defaultTabs: [],
       defaultAgentProvider: 'claude',
       openAgentOnConnect,
@@ -142,6 +142,7 @@ describe('project config formatter', () => {
   it.each([true, false])('ignores openAgentOnConnect=%s when v1 has no provider', (openAgentOnConnect) => {
     const legacy = {
       ...project(),
+      agentSessionIds: {}, agentPrefs: {},
       defaultTabs: [],
       defaultAgentProvider: null,
       openAgentOnConnect,
@@ -158,13 +159,14 @@ describe('project config formatter', () => {
     }));
     expect(empty).toMatchObject({ ok: false, error: { context: 'projects[0].defaultTabs' } });
 
-    const duplicate = formatProjectsDocument([{
+    const duplicate = loadProjectsDocument(JSON.stringify({ schemaVersion: 2, projects: [{
       ...project(),
+      agentSessionIds: {}, agentPrefs: {},
       defaultTabs: [
         { name: 'one', kind: 'agent', provider: 'claude' },
         { name: 'two', kind: 'agent', provider: 'claude' },
       ],
-    }]);
+    }] }));
     expect(duplicate).toMatchObject({
       ok: false,
       error: { context: 'projects[0].defaultTabs[1].provider' },
@@ -204,25 +206,26 @@ describe('Codex native prefs migration', () => {
       ['bypassPermissions', ':danger-full-access', 'never'],
     ]) {
       const input = { ...project(), ...(version < 2 ? { defaultAgentProvider: null, openAgentOnConnect: false } : {}),
+        agentSessionIds: { codex: 'codex-session', claude: 'claude-session' },
         agentPrefs: { codex: { permissionMode, model: 'm', effort: 'ultra' }, claude: { permissionMode } } };
       const loaded = loadProjectsDocument(JSON.stringify(version === 0 ? [input] : { schemaVersion: version, projects: [input] }));
-      expect(loaded).toMatchObject({ ok: true, value: [{ agentPrefs: {
-        codex: { nativePermission, nativeApproval, model: 'm', effort: 'ultra' }, claude: { permissionMode },
+      expect(loaded).toMatchObject({ ok: true, value: [{ agentViews: {
+        'codex-session': { provider: 'codex', prefs: { nativePermission, nativeApproval, model: 'm', effort: 'ultra' } }, 'claude-session': { provider: 'claude', prefs: { permissionMode } },
       } }] });
       if (!loaded.ok) throw new Error('load failed');
-      expect(loaded.value[0].agentPrefs.codex).not.toHaveProperty('permissionMode');
-      expect(loaded.value[0].agentPrefs.codex).not.toHaveProperty('nativeMode');
+      expect(loaded.value[0].agentViews['codex-session'].prefs).not.toHaveProperty('permissionMode');
+      expect(loaded.value[0].agentViews['codex-session'].prefs).not.toHaveProperty('nativeMode');
       const formatted = formatProjectsDocument(loaded.value);
       if (!formatted.ok) throw new Error('format failed');
-      expect(JSON.parse(formatted.data).schemaVersion).toBe(3);
+      expect(JSON.parse(formatted.data).schemaVersion).toBe(4);
       expect(loadProjectsDocument(formatted.data)).toEqual(loaded);
     }
   });
 
   it('preserves existing native intent and rejects unknown legacy permissions', () => {
-    const input = { ...project(), agentPrefs: { codex: { permissionMode: 'plan', nativePermission: ':workspace', nativeApproval: 'untrusted' } } };
+    const input = { ...project(), agentSessionIds: { codex: 'codex-session' }, agentPrefs: { codex: { permissionMode: 'plan', nativePermission: ':workspace', nativeApproval: 'untrusted' } } };
     expect(loadProjectsDocument(JSON.stringify({ schemaVersion: 2, projects: [input] }))).toMatchObject({
-      ok: true, value: [{ agentPrefs: { codex: { nativePermission: ':workspace', nativeApproval: 'untrusted' } } }],
+      ok: true, value: [{ agentViews: { 'codex-session': { provider: 'codex', prefs: { nativePermission: ':workspace', nativeApproval: 'untrusted' } } } }],
     });
     input.agentPrefs.codex.permissionMode = 'unknown';
     expect(loadProjectsDocument(JSON.stringify({ schemaVersion: 2, projects: [input] }))).toMatchObject({

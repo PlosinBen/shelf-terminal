@@ -276,13 +276,13 @@ test('Save to Default preserves Terminal, Web, and Agent runtime kinds', async (
     { name: 'Portal', kind: 'web', url: 'https://example.com' },
     { name: 'Base Terminal', cmd: 'printf saved-terminal' },
     { name: 'Portal', kind: 'web', url: 'https://example.com' },
-    { name: 'Claude', kind: 'agent', provider: CLAUDE_PROVIDER },
+    { name: 'Claude', kind: 'agent', provider: CLAUDE_PROVIDER, sessionId: expect.any(String) },
   ]);
 
   await page.locator('.tab-bar .tab', { hasText: 'Claude' }).click({ button: 'right' });
   const duplicateAction = page.locator('.context-menu-item', { hasText: 'Already saved as Claude' });
   await expect(duplicateAction).toBeDisabled();
-  await expect(duplicateAction).toHaveAttribute('title', 'Claude already starts this Agent provider');
+  await expect(duplicateAction).toHaveAttribute('title', 'Claude already starts this Agent View');
 });
 
 test('Quick Commands list only Terminal targets and visibly refuse the current Agent tab', async ({ shelfApp: { app, page } }) => {

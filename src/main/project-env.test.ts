@@ -26,8 +26,7 @@ function project(id: string, envPlain: Record<string, string> = {}): Project {
     parentProjectId: null,
     worktreeBranch: null,
     baseBranch: null,
-    agentSessionIds: {},
-    agentPrefs: {},
+    agentViews: {},
   };
 }
 

@@ -30,18 +30,17 @@ interface Project {
   readonly worktreeBranch: string | null;
   readonly baseBranch: string | null;
   readonly worktreeState?: WorktreeState | null;
-  readonly agentSessionIds: Readonly<Record<string, string>>;
-  readonly agentPrefs: Readonly<Record<string, ReadonlyDeep<AgentPrefs>>>;
+  readonly agentViews: Readonly<Record<string, ReadonlyDeep<AgentViewConfig>>>;
 }
 ```
 
-`ProjectCreateInput` is the same create-domain input without `id` or `agentSessionIds`, and with fields that receive canonical defaults marked optional. Project ids are opaque strings created only by the main repository.
+`AgentViewConfig` is `{ provider: string; prefs: Readonly<AgentPrefs> }`, keyed by stable Shelf session id. `ProjectCreateInput` excludes `id` and `agentViews`; main allocates records for Agent startup drafts. Project and new session ids are main-owned.
 
 `worktreeState` is scan-owned metadata defined in `src/shared/worktree.ts`: `{ availability: 'valid' | 'missing', identity: { checkoutPath, gitDir, commonDir } | null }`. Omitted legacy data or null means unscanned, not missing. Preserve the last identity on absence. Existing scanned branch/state metadata survives stale ordinary project saves; reconciliation is its writer. Renderer runtime `folderInvalid`, tabs and scan warning/busy state are not persisted here.
 
-Unknown provider ids remain valid stored strings and record keys. Runtime behavior must resolve them through the live provider registry; the config loader/formatter must not discard them.
+Unknown provider ids remain valid stored data. Runtime resolves them through the live provider registry; the codec preserves records even when no startup tab references them.
 
-`defaultTabs` is the sole connect-time startup source. Its non-empty ordered list contains disjoint Terminal, Web, and Agent templates from `src/shared/types.ts`; Agent templates require a provider string that is unique within the list. Connect creates every valid template in order without an implicit Terminal or Agent fallback. New-project creation materializes one plain Terminal only when the caller omits the field.
+`defaultTabs` is the sole connect-time startup source. Its non-empty ordered list contains Terminal, Web, and Agent templates. Canonical Agent rows include `provider` and `sessionId`; the provider must match `agentViews[sessionId]`. Multiple rows may use the same provider, but not the same session. Create/editor drafts may omit sessionId; main materializes a fresh record atomically. Changing a row's provider creates a fresh session, never reuses incompatible context. Connect creates valid templates in order without an implicit fallback. New-project creation materializes one plain Terminal only when the field is omitted.
 
 ## Main repository
 
@@ -81,6 +80,8 @@ Identical save, missing delete, and same-group reorder are successful no-ops. Mi
 
 `add()` rejects before persistence when another canonical project has the same effective target. Persisted load and `save()` do not enforce this uniqueness rule, so existing duplicate records remain valid.
 
+After durable Project deletion, renderer tears down its tabs before clearing IndexedDB history for every session in its Agent records. This ordering prevents teardown's pending flush from recreating deleted rows. History clear is awaited with Retry/Cancel; main target/storage cleanup retains its separate retry result.
+
 Effective target comparison is defined by `src/shared/project-target.ts`:
 
 ```ts
@@ -118,13 +119,13 @@ Authoritative types/constants: `src/shared/project-mutations.ts`. Tags are defin
 | Kind | Payload | Main behavior |
 |---|---|---|
 | `EDIT` | `{ edits: [{ field, before, value }] }` | Only fields in `PROJECT_EDIT_FIELDS`; reject the entire edit if any latest field differs from both `before` and `value`. Already-satisfied values succeed. Duplicate/unknown fields reject. |
-| `AGENT_REPORT` | `{ provider, report }` | Compare the Shelf capability report against latest saved provider prefs, then merge only confirmed/reported changes; empty confirmed patches do not pin native defaults. |
-| `AGENT_SESSION` | `{ provider, sessionId }` | Add the provider binding without replacing sibling providers; a different existing binding rejects. |
-| `APPEND_DEFAULT_TAB` | `{ tab }` | Append to the latest list; an Agent provider already present is a no-op. |
-| `CLEAR_AGENT_PREF` | `{ provider, key, savedValue }` | Delete only if the latest saved value still matches; otherwise preserve the newer selection. |
+| `AGENT_REPORT` | `{ sessionId, report }` | Merge confirmed/reported prefs into that existing View only; empty confirmed patches do not pin defaults. |
+| `CREATE_AGENT_VIEW` | `{ provider }` | Allocate a fresh session with empty prefs; return `{ ok: true, sessionId }` after persistence. Does not append a Default. |
+| `APPEND_DEFAULT_TAB` | `{ tab }` | Append to latest list; Agent references must match an existing View. Same session already present is a no-op; same provider is allowed. |
+| `CLEAR_AGENT_PREF` | `{ sessionId, key, savedValue }` | Delete only that View's matching saved value; preserve other Views and newer values. |
 
 ```ts
-type ProjectMutationResult = { ok: true } | { ok: false; conflicts: readonly ProjectEditField[] };
+type ProjectMutationResult = { ok: true; sessionId?: string } | { ok: false; conflicts: readonly ProjectEditField[] };
 ```
 
 Project Edit captures a baseline on opening and submits only changed fields. Background view refreshes
@@ -184,7 +185,9 @@ Manual Agent creation uses the required-provider `emitNewAgentTab` / `onNewAgent
 
 ## Runtime tab defaults and Quick Commands
 
-`Save to Default` appends the runtime tab's actual template variant: Terminal command, Web URL, or Agent provider, always retaining the runtime label and color. An Agent provider already present in `defaultTabs` cannot be appended again or mutate the existing entry.
+`Save to Default` retains label/color and the actual variant: Terminal command, Web URL, or Agent provider plus stable sessionId. It does not copy prefs or allocate a replacement session. Same-session duplicates cannot append or mutate the existing entry. Closing a runtime View does not remove Default or its record. Removing a Default in Project Settings does not delete its record/history or close a live tab.
+
+Manual Agent creation persists a fresh empty-prefs record, refreshes, and then mounts its runtime tab. It never infers settings from another same-provider View. Main initialization validates Project target, provider/session ownership and exclusive live mounting. Per-exec initialization reads that View's latest prefs.
 
 Quick Command named targets are offered only from Terminal templates. Execution resolves `Current tab` or the first matching named runtime tab and sends PTY input only when that tab is Terminal. Agent, Web, missing, and stale targets are refused before IPC with a project-visible explanation and diagnostic context; stored stale targets remain intact for explicit user repair.
 

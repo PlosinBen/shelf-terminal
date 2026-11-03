@@ -309,9 +309,9 @@ Shelf 不提供 Project Secret Variables；Project.envPlain 是明碼設定，�
 
 ## agent-providers#28 — Worktree startup override uses the provider registry  ·  [Decision]
 
-**Decision**：New Worktree 的 `Startup tabs override` selector 從 provider registry iterate。空值表示完整繼承 parent 的 ordered startup list；選擇 provider `P` 只把 child list 設為 `[Agent(P), Terminal]`，其中 Agent 名稱使用 registry label。Parent config 不變，child session ids 不繼承。
+**Decision**：New Worktree 的 `Startup tabs` selector 從 provider registry iterate。空值表示一個 Terminal；選擇 provider `P` 將 child list 設為 `[Agent(P), Terminal]`，其中 Agent 名稱使用 registry label。Parent config 不變，child 不繼承 tabs／Agent prefs／session。
 
-**Reason**：不同 worktree 可明確改用不同 provider，同時讓一般路徑保留 parent 的完整啟動工作區，並維持 provider id/label 的單一來源。
+**Reason**：不同 worktree 可明確選擇 provider，維持 id／label 的單一來源；不複製 parent layout，避免同 provider 多 View 的設定來源歧義。
 
 **Do not change casually because**：不要在 dialog 硬編 provider 名單、把 selection 回寫 parent，或把 override 解讀成「替換某一個 inherited Agent」；multi-Agent list 沒有唯一可替換的對象。
 
@@ -458,7 +458,7 @@ Tool call 的 display metadata 也是 session-scoped carry，以 `toolCallId` �
 
 **Symptom：** Codex 每次發送都回 `thread/resume failed`、JSON-RPC `-32600`、`no rollout found for thread id ...`；重送只會重複同一錯誤。
 
-**Root cause：** Shelf 的 `lastSdkSessionId` context pointer 可存活 30 天，但 app-scoped Codex home 裡的 rollout 可能因手動清理、config-home 搬移或 upstream retention 提前不存在。Codex provider 原本每一 turn 都無條件拿 persisted id 呼叫 `thread/resume`；明確 missing-rollout 後既不清 pointer、也不 `thread/start`，因此 stale id 永久卡住該 Shelf session。
+**Root cause：** Shelf 的 `lastSdkSessionId` context pointer 不按閒置天數到期，但 app-scoped Codex home 裡的 rollout 可能因手動清理、config-home 搬移或 upstream retention 不存在。若每一 turn 都無條件用該 persisted id 呼叫 `thread/resume`，且明確 missing-rollout 後不清 pointer 或建立新 thread，stale id 就會永久卡住該 Shelf session。
 
 **Fix / note：** 只有 app-server 明確回報 `thread/resume` + code `-32600` + 該 thread id 的 `no rollout found` 時才恢復：先 emit `lastSdkSessionId:null`（即使後續 start 失敗也不再重試 stale id），再 `thread/start`，成功後顯示一次 system notice 並保存新 id，原 prompt 照常進 `turn/start`。其他 resume 錯誤（auth、transport、timeout、response mismatch）一律維持 fail-loud，不得用 broad catch 靜默開新 thread；否則會把可修復的連線問題偽裝成對話 context 遺失。
 

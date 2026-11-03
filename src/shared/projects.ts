@@ -8,6 +8,11 @@ import type {
 
 export type ProjectId = string;
 
+export interface AgentViewConfig {
+  readonly provider: string;
+  readonly prefs: Readonly<AgentPrefs>;
+}
+
 export type ReadonlyDeep<T> =
   T extends (...args: never[]) => unknown ? T :
   T extends readonly (infer U)[] ? readonly ReadonlyDeep<U>[] :
@@ -29,8 +34,7 @@ export interface Project {
   readonly worktreeBranch: string | null;
   readonly worktreeState?: WorktreeState | null;
   readonly baseBranch: string | null;
-  readonly agentSessionIds: Readonly<Record<string, string>>;
-  readonly agentPrefs: Readonly<Record<string, ReadonlyDeep<AgentPrefs>>>;
+  readonly agentViews: Readonly<Record<string, ReadonlyDeep<AgentViewConfig>>>;
 }
 
 export interface ProjectCreateInput {
@@ -47,7 +51,6 @@ export interface ProjectCreateInput {
   readonly worktreeBranch?: string | null;
   readonly worktreeState?: WorktreeState | null;
   readonly baseBranch?: string | null;
-  readonly agentPrefs?: Readonly<Record<string, ReadonlyDeep<AgentPrefs>>>;
 }
 
 export interface ProjectDeleteResult {

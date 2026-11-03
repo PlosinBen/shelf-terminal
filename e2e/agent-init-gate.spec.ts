@@ -35,6 +35,12 @@ async function setupProject(page: Page) {
   await page.waitForTimeout(500);
 }
 
+async function saveAgentDefault(page: Page) {
+  await page.locator('.tab-bar .tab').last().click({ button: 'right' });
+  await page.locator('.context-menu-item', { hasText: 'Save to Default', exact: true }).click();
+  await expect.poll(async () => (await page.evaluate(() => window.shelfApi.project.getAll()))[0].defaultTabs.length).toBe(2);
+}
+
 test.describe('agent init-readiness gate', () => {
   test.describe('unavailable saved model recovery', () => {
     test.use({ nativePermissions: true });
@@ -46,6 +52,7 @@ test.describe('agent init-readiness gate', () => {
       await expect(page.locator('.agent-msg-reply', { hasText: 'history before model retirement' })).toBeVisible();
       await expect(page.locator('.agent-status-label:visible')).toHaveText('idle');
       const original = await page.evaluate(async () => (await window.shelfApi.project.getAll())[0]);
+      await saveAgentDefault(page);
       await page.locator('.sidebar-item').first().click({ button: 'right' });
       await page.locator('.context-menu-item', { hasText: 'Disconnect' }).click();
       // Disconnect flushes asynchronously. Establish durable history before
@@ -67,23 +74,23 @@ test.describe('agent init-readiness gate', () => {
       await page.evaluate(async ({ retired, kind }) => {
         const project = (await window.shelfApi.project.getAll())[0];
         await window.shelfApi.project.update(project.id, {
-          kind, provider: 'claude', report: { confirmedPrefs: { model: retired, effort: 'high' } },
+          kind, sessionId: Object.keys(project.agentViews)[0], report: { confirmedPrefs: { model: retired, effort: 'high' } },
         });
       }, { retired: FAKE_RETIRED_MODEL, kind: PROJECT_MUTATION.AGENT_REPORT });
       await page.reload();
       await page.locator('.connect-prompt').click();
-      await openAgentTab(page);
+      await page.locator('.tab-bar .tab').nth(1).click();
       const overlay = page.locator('.agent-conn-overlay');
       await expect(overlay).toContainText('Saved model is unavailable');
       await overlay.getByRole('button', { name: 'Retry', exact: true }).click();
       await expect(overlay).toContainText('Saved model is unavailable');
-      await expect.poll(() => page.evaluate(async () => (await window.shelfApi.project.getAll())[0].agentPrefs.claude.model)).toBe(FAKE_RETIRED_MODEL);
+      await expect.poll(() => page.evaluate(async () => Object.values((await window.shelfApi.project.getAll())[0].agentViews)[0].prefs.model)).toBe(FAKE_RETIRED_MODEL);
       await overlay.getByRole('button', { name: 'Retry with default model', exact: true }).click();
       await expect(overlay).toHaveCount(0, { timeout: 15_000 });
-      await expect.poll(() => page.evaluate(async () => (await window.shelfApi.project.getAll())[0].agentPrefs.claude.model)).toBe('fake-model');
+      await expect.poll(() => page.evaluate(async () => Object.values((await window.shelfApi.project.getAll())[0].agentViews)[0].prefs.model)).toBe('fake-model');
       const recovered = await page.evaluate(async () => (await window.shelfApi.project.getAll())[0]);
-      expect(recovered.agentPrefs.claude.effort).toBe('high');
-      expect(recovered.agentSessionIds).toEqual(original.agentSessionIds);
+      expect(Object.values(recovered.agentViews)[0].prefs.effort).toBe('high');
+      expect(Object.keys(recovered.agentViews)).toEqual(Object.keys(original.agentViews));
       await expect(page.locator('.agent-msg-reply', { hasText: 'history before model retirement' })).toBeVisible();
       await sendAgentPrompt(page, 'text:message after recovery');
       await expect(page.locator('.agent-msg-reply', { hasText: 'message after recovery' })).toBeVisible();
@@ -98,19 +105,20 @@ test.describe('agent init-readiness gate', () => {
         await setupProject(page);
         await openAgentTab(page);
         // Input visibility does not acknowledge the independent session-binding save.
-        await expect.poll(() => page.evaluate(async () => (await window.shelfApi.project.getAll())[0].agentSessionIds.claude)).toBeTruthy();
+        await expect.poll(() => page.evaluate(async () => Object.keys((await window.shelfApi.project.getAll())[0].agentViews)[0])).toBeTruthy();
         const original = await page.evaluate(async () => (await window.shelfApi.project.getAll())[0]);
+        await saveAgentDefault(page);
         await page.locator('.sidebar-item').first().click({ button: 'right' });
         await page.locator('.context-menu-item', { hasText: 'Disconnect' }).click();
         await page.evaluate(async ({ key, retired, kind }) => {
           const project = (await window.shelfApi.project.getAll())[0];
           await window.shelfApi.project.update(project.id, {
-            kind, provider: 'claude', report: { confirmedPrefs: { model: 'fake-model-pro', [key]: retired } },
+            kind, sessionId: Object.keys(project.agentViews)[0], report: { confirmedPrefs: { model: 'fake-model-pro', [key]: retired } },
           });
         }, { key, retired: FAKE_RETIRED_MODEL, kind: PROJECT_MUTATION.AGENT_REPORT });
         await page.reload();
         await page.locator('.connect-prompt').click();
-        await openAgentTab(page);
+        await page.locator('.tab-bar .tab').nth(1).click();
         const overlay = page.locator('.agent-conn-overlay');
         await expect(overlay).toContainText(`Saved ${key} is unavailable`);
         await overlay.getByRole('button', { name: 'Retry', exact: true }).click();
@@ -118,8 +126,8 @@ test.describe('agent init-readiness gate', () => {
         await overlay.getByRole('button', { name: `Retry with default ${label}`, exact: true }).click();
         await expect(overlay).toHaveCount(0, { timeout: 15_000 });
         const recovered = await page.evaluate(async () => (await window.shelfApi.project.getAll())[0]);
-        expect(recovered.agentPrefs.claude).toEqual({ model: 'fake-model-pro' });
-        expect(recovered.agentSessionIds).toEqual(original.agentSessionIds);
+        expect(Object.values(recovered.agentViews)[0].prefs).toEqual({ model: 'fake-model-pro' });
+        expect(Object.keys(recovered.agentViews)).toEqual(Object.keys(original.agentViews));
         await sendAgentPrompt(page, 'text:recovered field');
         await expect(page.locator('.agent-msg-reply', { hasText: 'recovered field' })).toBeVisible();
       });

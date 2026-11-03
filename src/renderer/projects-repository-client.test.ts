@@ -27,7 +27,7 @@ describe('renderer projects repository client', () => {
     await expect(client.getAll()).resolves.toEqual([project]);
     await expect(client.getInvalidDirectoryIds()).resolves.toEqual(['a']);
     await client.add(input);
-    const mutation = { kind: PROJECT_MUTATION.AGENT_SESSION, provider: 'claude', sessionId: 's' };
+    const mutation = { kind: PROJECT_MUTATION.CREATE_AGENT_VIEW, provider: 'claude' };
     await client.save(project.id, mutation);
     await client.delete('a');
     await client.retryCleanup('a');

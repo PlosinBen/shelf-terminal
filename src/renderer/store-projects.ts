@@ -24,6 +24,7 @@ export interface Tab {
   muted: boolean;
   type: TabType;
   provider?: AgentProvider;
+  sessionId?: string;
   url?: string;
   labelPinned?: boolean;
 }
@@ -266,10 +267,16 @@ export function addTab(
   type: TabType = 'terminal',
   provider?: AgentProvider,
   url?: string,
+  sessionId?: string,
 ): Tab | null {
   const project = projects[projectIndex];
   if (!project || isWorktreeUnavailable(project) || project.tabs.length >= project.maxTabs) return null;
-  if (type === 'agent' && provider && project.tabs.some((tab) => tab.type === 'agent' && tab.provider === provider)) {
+  if (type === 'agent' && (!sessionId || !provider || project.agentViews[sessionId]?.provider !== provider)) {
+    console.warn('[agent-view] refusing unbound runtime tab', { projectId: project.id, sessionId, provider });
+    return null;
+  }
+  if (type === 'agent' && sessionId && project.tabs.some((tab) => tab.type === 'agent' && tab.sessionId === sessionId)) {
+    console.warn('[agent-view] refusing duplicate runtime mount', { projectId: project.id, sessionId });
     return null;
   }
   nextTabCounter++;
@@ -285,6 +292,7 @@ export function addTab(
     muted: false,
     type,
     provider,
+    ...(sessionId ? { sessionId } : {}),
     ...(type === 'web' ? { url: url || undefined, labelPinned: !!name } : {}),
   };
   updateRuntime(projectIndex, (runtime) => ({

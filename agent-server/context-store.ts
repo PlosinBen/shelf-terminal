@@ -71,31 +71,8 @@ export function deleteContext(sessionId: string): void {
   }
 }
 
-export function cleanupOldContexts(maxAgeDays = 30): void {
-  try {
-    if (!fs.existsSync(CONTEXT_DIR)) return;
-    const cutoff = Date.now() - maxAgeDays * 86_400_000;
-    for (const file of fs.readdirSync(CONTEXT_DIR)) {
-      if (!file.endsWith('.json')) continue;
-      const filePath = path.join(CONTEXT_DIR, file);
-      try {
-        const raw = fs.readFileSync(filePath, 'utf-8');
-        const data = JSON.parse(raw) as { updatedAt?: number };
-        if (data.updatedAt && data.updatedAt < cutoff) {
-          fs.unlinkSync(filePath);
-        }
-      } catch (err: any) {
-        // Corrupt file — remove it. The parse/read failure itself is worth
-        // logging so we know context files are getting corrupted.
-        serverLog('error', 'context-store', 'corrupt context file removed', { file, code: err?.code, message: err?.message ?? err });
-        try {
-          fs.unlinkSync(filePath);
-        } catch (unlinkErr: any) {
-          serverLog('error', 'context-store', 'failed to remove corrupt context file', { file, code: unlinkErr?.code, message: unlinkErr?.message ?? unlinkErr });
-        }
-      }
-    }
-  } catch (err: any) {
-    serverLog('error', 'context-store', 'cleanupOldContexts dir scan failed', err?.message ?? err);
-  }
+export function cleanupOldContexts(): void {
+  // The target-wide directory has no complete ownership/reachability inventory.
+  // Age cannot distinguish saved Views from abandoned conversations. Keep the
+  // startup hook non-destructive; explicit deleteContext remains supported.
 }

@@ -67,7 +67,7 @@ related:
 
 ## projects#6 — Project documents load through a versioned canonical boundary  ·  [Decision]
 
-**Decision:** Only the main project config persistence boundary sees raw `projects.json`. It distinguishes opaque file access from format conversion, loads supported legacy v0 arrays, v1 envelopes, or current v2 envelopes into the same canonical `Project[]`, and always formats new writes as v2. Load never performs migration writes.
+**Decision:** Only the main project config persistence boundary sees raw `projects.json`. It distinguishes opaque file access from format conversion, loads legacy v0 arrays and v1/v2/v3 envelopes into canonical v4 `Project[]`, and formats new writes as v4. Load never performs migration writes. Provider-keyed Agent metadata becomes session-keyed View records without changing existing history keys or dropping records not referenced by startup tabs.
 
 **Reason:** Central conversion prevents parsing, defaults, provider compatibility, and schema guesses from spreading across bootstrap and consumers. Version dispatch makes unsupported future formats deterministic. Delaying write-back until a real project mutation avoids changing user files merely by opening the app.
 
@@ -91,6 +91,7 @@ related:
 ### Gotchas
 
 - Retry/Cancel is user-controlled; repeated refresh failures remain refresh-only until the user cancels.
+- Renderer history deletion follows tab teardown, because teardown flushes pending idle writes. Clearing first lets that flush resurrect deleted rows. Await the final clears and expose retry/cancel on failure; enumerate every Agent record, not only startup or live tabs.
 - Worktree auto-connect begins only after child add returns its main-owned id and renderer reconcile completes; recheck that both parent and child still exist.
 - A single renderer can have concurrent in-flight mutations. Use the repository's existing serialization with latest-base intents; do not infer that whole-project revisions or an edit-lifetime lock are necessary. See projects#13.
 
@@ -130,13 +131,13 @@ The focused input owns keyboard handling. Up/Down moves a transient candidate wi
 
 ## projects#10 — One ordered typed list owns project startup tabs  ·  [Decision]
 
-**Decision:** `Project.defaultTabs` is the only connect-time startup source and is always non-empty. Terminal, Web, and Agent are disjoint template variants in one ordered list; connect creates each template in order. Agent templates carry an explicit registry-resolved provider and must be unique by provider within a project. Project Settings allows temporary duplicate selections but validates them only on Save, keeps unavailable persisted provider ids recoverable, and never uses a separate Agent default or startup boolean.
+**Decision:** `Project.defaultTabs` is the only connect-time startup source and is always non-empty. Terminal, Web and Agent variants share one ordered list. Agent rows carry provider plus a stable session reference; same-provider Views are allowed, duplicate session references are not. `agentViews` owns provider/prefs, and the row's provider assertion must match. Project Settings preserves references while editing layout; adding an Agent or changing its provider materializes a fresh record only on Save. Cancel does not allocate data. Unknown provider records remain recoverable.
 
 Runtime `Save to Default` preserves the actual tab variant and its kind-specific payload. Manual Agent creation always carries an explicit provider. Neither path guesses a provider or falls back to a project-level default.
 
 **Reason:** One list directly represents what connect will open, preserves ordering across all tab kinds, and removes contradictory state between an Agent provider field, an auto-open flag, and the existing tab templates.
 
-**Do not change casually because:** Reintroducing a dormant default provider, implicit Terminal, or separate Agent-open switch creates a second startup authority. Multiple same-provider Agent tabs remain out of scope because session ids, preferences, and runtime uniqueness are provider-keyed.
+**Do not change casually because:** A dormant default provider, implicit connect fallback or separate saved/closed list creates a second startup authority. Embedding background-updated prefs inside the layout would recreate editor conflicts; keep View records separate and target updates by stable session, not provider.
 
 ## projects#11 — Quick Commands execute only against Terminal tabs  ·  [Decision]
 

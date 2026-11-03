@@ -47,8 +47,7 @@ function project(id: string, cwd = `/repo/${id}`): Project {
     parentProjectId: null,
     worktreeBranch: null,
     baseBranch: null,
-    agentSessionIds: {},
-    agentPrefs: {},
+    agentViews: {},
   };
 }
 

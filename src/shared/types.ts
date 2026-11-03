@@ -285,6 +285,8 @@ export interface AgentTabTemplate extends BaseTabTemplate {
   kind: 'agent';
   /** Opaque persisted id; runtime validates it against the live registry. */
   provider: string;
+  /** Stable Shelf conversation identity; omitted only for a new editor/create draft. */
+  sessionId?: string;
 }
 
 export type TabTemplate = TerminalTabTemplate | WebTabTemplate | AgentTabTemplate;

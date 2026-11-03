@@ -227,7 +227,7 @@ export function TabBar() {
         if (!tab) return null;
         const template = runtimeTabToTemplate(tab);
         const existingAgentTemplate = tab.type === 'agent' && tab.provider
-          ? project.defaultTabs.find((item) => item.kind === 'agent' && item.provider === tab.provider)
+          ? project.defaultTabs.find((item) => item.kind === 'agent' && item.sessionId === tab.sessionId)
           : undefined;
         const saveDefaultDisabled = !template || Boolean(existingAgentTemplate);
         const saveDefaultLabel = existingAgentTemplate
@@ -236,7 +236,7 @@ export function TabBar() {
         const saveDefaultTitle = !template
           ? 'Cannot save an Agent tab without a provider'
           : existingAgentTemplate
-            ? `${existingAgentTemplate.name} already starts this Agent provider`
+            ? `${existingAgentTemplate.name} already starts this Agent View`
             : 'Add this tab to Tabs on Connect';
         return (
           <div
@@ -324,7 +324,6 @@ export function TabBar() {
             <button
               key={id}
               className="context-menu-item"
-              disabled={project?.tabs.some((t) => t.type === 'agent' && t.provider === id)}
               onClick={() => { if (projectId) emitNewAgentTab(projectId, id); setAddMenu(null); }}
             >
               Agent ({meta.label})

@@ -27,8 +27,7 @@ function project(id: string, changes: Partial<Project> = {}): Project {
     parentProjectId: null,
     worktreeBranch: null,
     baseBranch: null,
-    agentSessionIds: {},
-    agentPrefs: {},
+    agentViews: {},
     ...changes,
   };
 }
@@ -69,8 +68,8 @@ describe('store project reconciliation', () => {
   });
 
   it('opens a command terminal in the source agent tab project', () => {
-    setProjects([project('A'), project('B')]);
-    const agentTab = addTab(1, undefined, undefined, undefined, 'agent', 'claude');
+    setProjects([project('A'), { ...project('B'), agentViews: { session: { provider: 'claude', prefs: {} } } }]);
+    const agentTab = addTab(1, undefined, undefined, undefined, 'agent', 'claude', undefined, 'session');
 
     const terminal = addTerminalTabForSource(
       agentTab!.id,

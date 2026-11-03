@@ -29,7 +29,7 @@ export function createPrefRecovery(deps: RecoveryDependencies) {
     if (tab.initStatus === 'starting') return;
     if (clearPref && (tab.initStatus !== 'failed'
       || !selection)) return;
-    const key = JSON.stringify([project.id, tab.provider]);
+    const key = JSON.stringify([project.id, tab.sessionId]);
     if (pending.has(key)) return;
     pending.add(key);
     const current = () => {
@@ -47,7 +47,7 @@ export function createPrefRecovery(deps: RecoveryDependencies) {
       } else if (selection) {
         try {
           const result = await deps.save(project.id, {
-            kind: PROJECT_MUTATION.CLEAR_AGENT_PREF, provider: tab.provider,
+            kind: PROJECT_MUTATION.CLEAR_AGENT_PREF, sessionId: tab.sessionId,
             key: selection.key, savedValue: selection.savedValue,
           });
           if (!result.ok) throw new Error('Unexpected conflict while clearing a saved preference');

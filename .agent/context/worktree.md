@@ -26,11 +26,11 @@ related:
 
 **Do not change casually because:** Moving this check only into the renderer makes an invalid agent call look successful and hides the error from the actor that can correct it.
 
-## worktree#3 — A child inherits startup tabs or replaces the whole list  ·  [Decision]
+## worktree#3 — A child starts fresh tabs and Agent preferences  ·  [Decision]
 
-**Decision:** New Worktree defaults to `Inherit project tabs`, copying the parent's complete ordered `defaultTabs`. Its optional registry-driven `Startup tabs override` replaces the child's whole list with exactly the selected Provider Name Agent plus one plain Terminal. It does not merge with or choose one inherited Agent row. The child still inherits Quick Commands and preferences but never inherits Agent session ids.
+**Decision:** New Worktree defaults to one Terminal. Selecting a registry provider creates that provider's fresh Agent plus one Terminal. It never copies parent startup/runtime tabs, Agent records or preferences. Environment, init script, Quick Commands and feature-note binding still inherit. Existing child settings are not reset.
 
-**Reason:** Planning on the parent may accumulate an intentional multi-tab layout that should usually carry into development. The explicit whole-list override keeps the exceptional “one selected Agent plus Terminal” workflow deterministic without ambiguous per-Agent replacement rules.
+**Reason:** No current requirement justifies copying the parent layout. Fresh tabs avoid ambiguous preference inheritance when several parent Views use the same provider, without introducing a source-View selector.
 
 **Do not change casually because:** Provider choices and labels come from the central registry; do not hardcode a separate worktree list, mutate the parent, inherit session ids, or silently rewrite Quick Commands whose named targets become stale.
 

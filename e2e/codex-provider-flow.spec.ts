@@ -135,12 +135,11 @@ test.describe('Canonical Codex provider renderer flow', () => {
 
     await expect.poll(async () => {
       const projects = await readProjects(userDataDir);
-      return Object.keys(projects[0]?.agentSessionIds ?? {}).sort();
+      return Object.values(projects[0]?.agentViews ?? {}).map((view: any) => view.provider).sort();
     }).toEqual([CODEX_PROVIDER]);
 
     const projects = await readProjects(userDataDir);
-    const ids = projects[0].agentSessionIds;
-    expect(ids[CODEX_PROVIDER]).toBeTruthy();
+    expect(Object.keys(projects[0].agentViews)).toHaveLength(1);
   });
 
   test('Codex web searches render as bodyless fold cards', async ({ shelfApp: { page } }) => {

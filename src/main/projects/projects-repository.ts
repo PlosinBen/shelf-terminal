@@ -5,6 +5,7 @@ import { sameProjectTarget } from '@shared/project-target';
 import { isWorktreeUnavailable } from '@shared/worktree';
 import type { ProjectMutation, ProjectMutationResult } from '@shared/project-mutations';
 import { applyProjectMutation } from './project-mutation';
+import { materializeAgentDefaults } from './agent-view-config';
 import type {
   Project,
   ProjectCreateInput,
@@ -132,15 +133,13 @@ function createProject(id: ProjectId, input: ProjectCreateInput): Project {
     maxTabs: input.maxTabs,
     initScript: input.initScript ?? null,
     envPlain: input.envPlain ?? {},
-    defaultTabs,
+    ...materializeAgentDefaults(defaultTabs, {}),
     quickCommands: input.quickCommands ?? [],
     featureNoteDir: input.featureNoteDir ?? null,
     parentProjectId: input.parentProjectId ?? null,
     worktreeBranch: input.worktreeBranch ?? null,
     ...(input.worktreeState !== undefined ? { worktreeState: input.worktreeState } : {}),
     baseBranch: input.baseBranch ?? null,
-    agentSessionIds: {},
-    agentPrefs: input.agentPrefs ?? {},
   });
 }
 
@@ -291,7 +290,7 @@ export function createMainProjectsRepository(
         const candidate = readyCollection(projects.map(project => project.id === projectId ? result.project : project), 'save');
         await persist('save', candidate);
       }
-      return { ok: true };
+      return { ok: true, ...(result.sessionId ? { sessionId: result.sessionId } : {}) };
     },
 
     async save(project) {

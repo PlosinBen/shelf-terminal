@@ -6,12 +6,12 @@ import { providerLabel } from './agent-providers';
  * Build a worktree sub-project's config by cloning the parent project's SETUP
  * while giving it a FRESH identity. A worktree is the same project on a different
  * branch, so it should develop in the same environment: inherit env, init script,
- * tab layout, quick commands, and agent preferences.
+ * quick commands. Tabs and agent preferences are deliberately fresh.
  *
  * Deliberately NOT inherited:
  *  - id / cwd / parentProjectId / worktreeBranch / baseBranch — worktree-specific
  *    identity, always set fresh here.
- *  - agentSessionIds — the whole point of the flow is that the worktree boots a
+ *  - agentViews — the whole point of the flow is that the worktree boots a
  *    FRESH agent (which reads the migrated note); inheriting the parent's session
  *    ids would resume the parent's agent instead. Omitted → fresh sessions.
  */
@@ -36,15 +36,14 @@ export function buildWorktreeChildConfig(
         { name: providerLabel(opts.startupAgentProvider), kind: 'agent', provider: opts.startupAgentProvider },
         { name: 'Terminal' },
       ]
-      : parent.defaultTabs,
+      : [{ name: 'Terminal' }],
     quickCommands: parent.quickCommands,
     featureNoteDir: parent.featureNoteDir,
-    agentPrefs: parent.agentPrefs,
     // ── fresh worktree identity ──
     cwd: opts.cwd,
     parentProjectId: parent.id,
     worktreeBranch: opts.worktreeBranch,
     baseBranch: opts.baseBranch ?? null,
-    // agentSessionIds intentionally omitted → fresh agent session.
+    // No parent Agent records or prefs → fresh sessions and provider defaults.
   };
 }

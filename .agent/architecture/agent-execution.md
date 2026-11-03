@@ -41,8 +41,8 @@ provider execution                                              │
 Session readiness also carries a confirmed-configuration loop:
 
 ```text
-durable project selections
-    │ desired initialization intent
+durable selections for the View's stable session
+    │ desired initialization intent (empty for a new View)
     ▼
 restore provider session ── missing-context recovery ── create replacement session
     │

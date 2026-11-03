@@ -6,7 +6,7 @@ const project: Project = {
   id: 'project-a', name: 'Project A', cwd: '/work', connection: { type: 'local' },
   maxTabs: 5, initScript: null, envPlain: {}, defaultTabs: [{ name: 'Terminal' }], quickCommands: [],
   featureNoteDir: null, parentProjectId: null, worktreeBranch: null, baseBranch: null,
-  agentSessionIds: {}, agentPrefs: {},
+  agentViews: {},
 };
 
 describe('project cleanup', () => {

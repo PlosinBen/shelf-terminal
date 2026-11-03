@@ -19,6 +19,7 @@ import { useStore } from '../store';
 
 interface Props {
   tabId: string;
+  sessionId: string;
   cwd: string;
   connection: Connection;
   provider: AgentProvider;
@@ -30,13 +31,12 @@ interface Props {
  * Layout coordinator for an agent tab. Holds three concerns the
  * sub-components can't reasonably own:
  *
- * 1. **Per-tab lifecycle** — sessionId allocation (lazy create + persist through
- *    the project mutation boundary into canonical `Project.agentSessionIds`;
- *    `Project` is defined by `@shared/projects`), initTab, emit init/destroy.
+ * 1. **Per-tab lifecycle** — mount the main-issued stable session binding from
+ *    canonical Project.agentViews, initTab, and emit init.
  *    Store removal belongs to actual tab teardown, not React component unmount.
  * 2. **Capability-driven persist** — when the provider reports
  *    capabilities (after any config-edit turn), commit the backend's
- *    current* into canonical `Project.agentPrefs` (needs projectId;
+ *    current* into canonical `Project.agentViews[sessionId].prefs` (needs projectId;
  *    sub-components don't have it). The config-edit *action* itself is
  *    emitted directly by DecisionPanel (agent:send + configEdit), not
  *    routed through here.
@@ -48,27 +48,14 @@ interface Props {
  * when authRequired is set — early return mirrors the pre-refactor
  * branch so paste / scroll targets don't activate before sign-in.
  */
-export function AgentView({ tabId, cwd, connection, provider, projectId, visible }: Props) {
+export function AgentView({ tabId, sessionId, cwd, connection, provider, projectId, visible }: Props) {
   const { projects } = useStore();
   // Derive index from stable id every render — projectIndex (array
   // position) shifts when user reorders projects via drag, which
   // would otherwise point this AgentView at the wrong project's
   // prefs / sessionIds. See GOTCHAS "AgentView projectIndex drift".
   const projectIndex = projects.findIndex((p) => p.id === projectId);
-  const savedPrefs = projects[projectIndex]?.agentPrefs[provider];
-
-  const sessionIdRef = useRef<string | null>(null);
-  if (!sessionIdRef.current) {
-    const existing = projects[projectIndex]?.agentSessionIds[provider];
-    if (existing) {
-      sessionIdRef.current = existing;
-    } else {
-      const newId = crypto.randomUUID();
-      sessionIdRef.current = newId;
-      emit(Events.UPDATE_PROJECT, projectId, { kind: PROJECT_MUTATION.AGENT_SESSION, provider, sessionId: newId });
-    }
-  }
-  const sessionId = sessionIdRef.current;
+  const savedPrefs = projects[projectIndex]?.agentViews[sessionId]?.prefs;
 
   // Only read what AgentView still needs directly: authRequired
   // gates the early return. Everything else (messages / status /
@@ -99,7 +86,7 @@ export function AgentView({ tabId, cwd, connection, provider, projectId, visible
   /**
    * Capability-driven persist: when provider re-broadcasts capabilities
    * (after /model X slash, picker pick, or any setX), commit the backend's
-   * reported current* to canonical `Project.agentPrefs` if it differs from
+   * reported current* to canonical `Project.agentViews[sessionId].prefs` if it differs from
    * what's saved.
    *
    * Forward each report once; main compares against latest saved prefs inside
@@ -108,7 +95,7 @@ export function AgentView({ tabId, cwd, connection, provider, projectId, visible
    *
    * This is what makes the config-edit path (/model X or the picker →
    * agent:send → provider slash → capabilities) eventually update canonical
-   * `Project.agentPrefs` through the project mutation boundary — there is no
+   * `Project.agentViews[sessionId].prefs` through the project mutation boundary — there is no
    * renderer-side optimistic write; persist follows the backend's capabilities
    * event.
    */
@@ -121,10 +108,10 @@ export function AgentView({ tabId, cwd, connection, provider, projectId, visible
     persistedCapabilities.current = capabilities;
     const { confirmedPrefs, permissionControl, currentModel, currentEffort, currentPermissionMode } = capabilities;
     emit(Events.UPDATE_PROJECT, projectId, {
-      kind: PROJECT_MUTATION.AGENT_REPORT, provider,
+      kind: PROJECT_MUTATION.AGENT_REPORT, sessionId,
       report: { confirmedPrefs, permissionControl, currentModel, currentEffort, currentPermissionMode },
     });
-  }, [capabilities, projectId, provider]);
+  }, [capabilities, projectId, sessionId]);
 
   const handleRetryInit = useCallback(() => {
     emitAgent('agent:retryInit', { tabId });

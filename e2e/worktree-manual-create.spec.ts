@@ -163,7 +163,7 @@ test.describe('user-initiated worktree create', () => {
       .toContainText('.agent/features');
     const startupOverride = dialog.locator('.worktree-startup-tabs-override');
     await expect(startupOverride).toHaveValue('');
-    await expect(startupOverride.locator('option').first()).toHaveText('Inherit project tabs');
+    await expect(startupOverride.locator('option').first()).toHaveText('Terminal');
     await expect(startupOverride.locator(`option[value="${CLAUDE_PROVIDER}"]`))
       .toHaveText('Agent (Claude) + Terminal');
 
@@ -194,11 +194,10 @@ test.describe('user-initiated worktree create', () => {
       schemaVersion: number;
       projects: Array<{ parentProjectId?: string; featureNoteDir?: string; defaultTabs?: unknown[] }>;
     };
-    expect(document.schemaVersion).toBe(3);
+    expect(document.schemaVersion).toBe(4);
     const child = document.projects.find((project) => project.parentProjectId === PROJECT_ID);
     expect(child?.featureNoteDir).toBe('.agent/features');
     expect(child?.defaultTabs).toEqual([
-      { name: 'Claude', kind: 'agent', provider: CLAUDE_PROVIDER },
       { name: 'Terminal' },
     ]);
 
@@ -272,17 +271,15 @@ test.describe('user-initiated worktree create', () => {
       projects: Array<{
         parentProjectId?: string;
         defaultTabs?: unknown[];
-        agentSessionIds?: Record<string, string>;
+        agentViews?: Record<string, { provider: string; prefs: unknown }>;
       }>;
     };
     const child = document.projects.find((project) => project.parentProjectId === PROJECT_ID);
     expect(child?.defaultTabs).toEqual([
-      { name: 'Codex', kind: 'agent', provider: CODEX_PROVIDER },
+      { name: 'Codex', kind: 'agent', provider: CODEX_PROVIDER, sessionId: expect.any(String) },
       { name: 'Terminal' },
     ]);
-    expect(child?.agentSessionIds).toEqual({
-      [CODEX_PROVIDER]: expect.any(String),
-    });
+    expect(Object.values(child?.agentViews ?? {})).toEqual([{ provider: CODEX_PROVIDER, prefs: {} }]);
   });
 
   test('legacy secret files do not block durable child creation or auto-connect', async () => {
