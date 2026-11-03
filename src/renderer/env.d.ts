@@ -52,11 +52,6 @@ interface ShelfApi {
     retryCleanup: (projectId: string) => Promise<import('../shared/projects').ProjectDeleteResult>;
     reorder: (sourceId: string, targetId: string) => Promise<void>;
     validateDirs: () => Promise<string[]>;
-    listSecretKeys: (projectId: string) => Promise<string[]>;
-    setSecret: (projectId: string, key: string, value: string) => Promise<void>;
-    deleteSecret: (projectId: string, key: string) => Promise<void>;
-    copySecrets: (fromId: string, toId: string) => Promise<void>;
-    secretKeyTier: () => Promise<'os-backed' | 'local-key'>;
   };
   dialog: {
     warn: (title: string, message: string) => Promise<void>;

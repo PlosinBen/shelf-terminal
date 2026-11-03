@@ -282,14 +282,12 @@ describe('worktree batch reconciliation', () => {
     expect(await repo.reconcileWorktrees(baseline, [], [input])).toBeNull();
     expect(config.save).toHaveBeenCalledTimes(1);
   });
-  it('does not publish a failed batch and rolls back prepared secrets', async () => {
+  it('does not publish a failed batch', async () => {
     const config = persistence([project('main')]);
     const repo = readyRepository(config.value, () => 'child');
     config.save.mockResolvedValueOnce({ ok: false, error: { stage: 'write', message: 'disk full' } } as never);
-    const rollback = vi.fn();
-    await expect(repo.reconcileWorktrees(repo.getAll(), [], [createInput({ parentProjectId: 'main' })], { prepare: vi.fn(), rollback })).rejects.toThrow();
+    await expect(repo.reconcileWorktrees(repo.getAll(), [], [createInput({ parentProjectId: 'main' })])).rejects.toThrow();
     expect(repo.get('child')).toBeNull();
-    expect(rollback).toHaveBeenCalledWith('child');
   });
 });
 it('preserves scan-owned metadata when saving older project preferences', async () => {

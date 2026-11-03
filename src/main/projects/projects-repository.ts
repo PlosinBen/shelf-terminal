@@ -33,7 +33,7 @@ export interface MainProjectsRepository {
   save(project: Project): Promise<void>;
   delete(projectId: ProjectId): Promise<ProjectDeleteResult>;
   retryCleanup(projectId: ProjectId): Promise<ProjectDeleteResult>;
-  reconcileWorktrees(baseline: readonly Project[], updates: readonly Project[], additions: readonly ProjectCreateInput[], secrets?: { prepare(id: string): void; rollback(id: string): void }, isCurrent?: () => boolean): Promise<readonly Project[] | null>;
+  reconcileWorktrees(baseline: readonly Project[], updates: readonly Project[], additions: readonly ProjectCreateInput[], isCurrent?: () => boolean): Promise<readonly Project[] | null>;
   reorder(sourceId: ProjectId, targetId: ProjectId): Promise<void>;
 }
 
@@ -233,7 +233,7 @@ export function createMainProjectsRepository(
       return projects.find(({ id }) => id === projectId) ?? null;
     },
 
-    async reconcileWorktrees(baseline, updates, additions, secrets, isCurrent = () => true) {
+    async reconcileWorktrees(baseline, updates, additions, isCurrent = () => true) {
       if (!sameWorktreeBaseline(projects, baseline) || !isCurrent()) return null;
       const created = additions.map(input => {
         const parent = projects.find(project => project.id === input.parentProjectId);
@@ -256,22 +256,8 @@ export function createMainProjectsRepository(
         }
       }
       if (isDeepStrictEqual(candidate, projects)) return projects;
-      const prepared: string[] = [];
-      try {
-        for (const child of created) { prepared.push(child.id); secrets?.prepare(child.id); }
-        await persist('save', candidate);
-        return projects;
-      } catch (error) {
-        const errors: unknown[] = [error];
-        for (const id of prepared) {
-          try { secrets?.rollback(id); } catch (cleanupError) {
-            log.error('worktree', `secret rollback failed projectId=${id}: ${String(cleanupError)}`);
-            errors.push(cleanupError);
-          }
-        }
-        if (errors.length > 1) throw new AggregateError(errors, 'Worktree save and secret rollback failed');
-        throw error;
-      }
+      await persist('save', candidate);
+      return projects;
     },
 
     async add(input) {

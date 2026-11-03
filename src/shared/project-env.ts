@@ -4,10 +4,8 @@
  *
  * Model: a project carries a map of user-set env vars that Shelf injects into
  * EVERY process it launches for that project (the agent-server and its CLIs, and
- * the project's interactive terminals). Two categories exist — `plain` (stored in
- * canonical `Project.envPlain` (interface defined by `@shared/projects`, this
- * file's `EnvMap`) and `secret` (encrypted side-car, added later) — but both
- * resolve to the same injected env map; only storage/display differ.
+ * the project's interactive terminals). Values are stored as plaintext in
+ * canonical Project.envPlain; Shelf does not manage an encrypted env store.
  *
  * Precedence (ecosystem norm — silent override, no warnings): ambient/inherited
  * env  <  project env  <  Shelf's own required vars (applied last as a backstop).
@@ -46,8 +44,8 @@ export const ENV_KEY_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 /**
  * Validate one env-var name for the project-config UI. `otherKeys` are the other
- * keys already present (across BOTH plain and secret — a single injected env var
- * can't be defined twice). Returns a short error string, or null if the key is
+ * keys already present (a single injected env var can't be defined twice).
+ * Returns a short error string, or null if the key is
  * acceptable. An empty key (a blank row being typed) is treated as not-yet-an-error.
  */
 export function validateEnvKey(key: string, otherKeys: readonly string[] = []): string | null {

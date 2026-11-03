@@ -1,6 +1,6 @@
 ---
 type: context
-title: Project Env (plain + secret)
+title: Project Env
 related:
   - architecture/project-env
   - contracts/ipc-channels
@@ -9,15 +9,20 @@ related:
   - context/agent-providers
 ---
 
-# Project Env (plain + secret)
+# Project Env
 
-> 專案層級環境變數：Shelf 注入到它為該 project 啟動的**每個** process（agent-server + 它 spawn 的 CLI、以及互動 terminal）。分 **plain**（明碼存 canonical project config、會同步）與 **secret**（加密 side-car、永不同步）兩類，但兩者解析成**同一份注入 env map**，差別只在儲存與顯示。
+專案 env 明碼存於 canonical Project.envPlain，注入 Shelf 為該 Project 啟動的
+terminal、agent-server 與其子 process。它不是機密儲存介面。
 
-## project-env#1 — 兩類 env、單一注入 map、單一解析出口  ·  [Decision]
+## project-env#1 — Canonical env、單一解析出口  ·  [Decision]
 
-**Decision**：plain env 存 canonical `Project.envPlain`（`Record<KEY,value>`，明碼、隨 project config 持久化）；secret env 存加密 side-car（見 #4）。兩者都經 `src/main/project-env.ts` 的 `resolveProjectEnv(projectId)` 合併成一份 `EnvMap`（secret 覆蓋同名 plain），**兩個 spawn 面（agent-server、terminal）只讀這一個出口**，永遠不知道值是 plain 還 secret。純 helper（reserved 政策、UI 驗證、PATH-merge、`export` prefix 產生器）在 `src/shared/project-env.ts`。
+**Decision**：resolveProjectEnv 只讀 canonical Project.envPlain 並 sanitize；terminal
+與 Agent 共用同一出口。純驗證、PATH merge 與 export helper 保持 provider-neutral。
 
-**Reason**：使用者自己分類（K8s env/Secret、CI vars/masked 的標準模型），比我們猜哪個是機密可靠。單一注入出口讓「之後把 secret 併進來」不用動任何 call site。
+**Reason**：儲存來源與注入機制分離，各 connector 不需自行解讀 Project config。
+
+**Do not change casually because**：新增 spawn 面需沿用同一解析出口與保留字政策，
+不能從 renderer payload 或其他檔案補入另一套 Project env。
 
 ## project-env#2 — 全 spawn 面統一注入；dispatcher 是 per-host → env 走 open_session  ·  [Decision]
 
@@ -31,28 +36,45 @@ related:
 
 **Decision**：ambient/繼承 env `<` project env `<` Shelf-required（最後套，backstop）。project env **靜默覆蓋** ambient（生態系慣例：shell `FOO=bar cmd`、docker `-e`、dotenv、CI、K8s 都是覆蓋不警告；在這裡警告只是噪音）。歧義在**輸入時**擋，不在 runtime：
 - **PATH 只 merge 不取代**（project 值前置），取代會打斷 binary 查找。PATH 可設但強制 merge、**不**是保留字。
-- **plain/secret 同名** → UI inline 擋（跨兩類唯一）。
+- **重複變數名稱** → UI inline 顯示錯誤。
 - **Shelf-required 是保留字**：`SHELF_*` 前綴 + `ELECTRON_RUN_AS_NODE` + `BROWSER`，單一來源 `SHELF_RESERVED_ENV`（新 `SHELF_*` 自動保留）。UI inline 擋；注入時 Shelf 自己的 var 仍最後套（防手改 config 繞過）。`BROWSER` 對 terminal 指向 Shelf external-URL launcher；這個保證只到 process creation，使用者的 shell profile 或之後手動 export 可再覆蓋，Shelf 不在 startup 後偷偷重設或嘗試鎖死。
 
-## project-env#4 — secret at-rest：AES-256-GCM + 可換 key-storage tier seam  ·  [Decision]
+## project-env#4 — Retired  ·  [Decision]
 
-**Decision**：secret 值用 `src/main/secret-crypto.ts`（純 AES-256-GCM，versioned + authenticated blob `v1:iv:tag:ct`，錯 key/竄改 fail-loud）加密。master key 的 at-rest 保護是 `src/main/secret-store.ts` 的**可換 seam**，tier 依**實際 runtime backend**選（非平台猜測），三 tier 共用同一 on-disk 格式（tier 可升級、無需資料遷移）：
+**Superseded by project-env#8.**
 
-| tier | 何時 | 保護 |
-|---|---|---|
-| **os-backed** | Windows DPAPI（user-bound）· Linux 真 keyring（`safeStorage.getSelectedStorageBackend()` ∈ `gnome_libsecret`/`kwallet*`）| 真 OS 級 |
-| **local-key** | **macOS（正式簽章版啟用 Keychain 前）** · **無 keyring 的 Linux**（backend `basic_text`）| per-install 隨機 key 存 0600 檔。擋商品化 infostealer（掃已知明碼 token 樣式）+ 誤上傳雲備份；**非**針對性本機攻擊者 |
+## project-env#5 — Retired  ·  [Gotcha]
 
-**永不** `setUsePlainTextEncryption(true)` / 信任 `basic_text` → 一律退到 local-key，secret 絕不落明碼。storage：單一 project-keyed 檔 `<userData>/project-secrets.json`，per-entry 加密、decrypt scope 只解目標 project 那段（別的 project 的 secret 不進明碼記憶體）；刪 project prune 該段。decrypt 失敗 fail-loud + **跳過該 key**（永不注入 stale/empty），key 留著讓使用者重設。
+**Superseded by project-env#8.**
 
-## project-env#5 — macOS 在正式簽章前必用 local-key，是為 durability 不只避提示  ·  [Gotcha]
+## project-env#6 — Retired  ·  [Decision]
 
-**要點**：macOS Keychain ACL 綁 code-signing identity；unsigned build 是 ad-hoc 簽章、cdhash **每次更新都變** → 存進 Keychain 的 key 在 app 更新後**存取不到 → secret 遺失**（不只是每次啟動跳提示）。這是結構性資料遺失，不是 UX 小事。只有 macOS Keychain 綁簽章；Windows DPAPI（user-bound）、Linux keyring（session-bound）unsigned 下仍耐用。因此目前 macOS 無條件走 local-key，且必須在任何 `safeStorage` probe 前返回；等正式簽章+公證 release 導入時，才移除這個 gate 並啟用 Keychain。
+**Superseded by project-env#8.**
 
-## project-env#6 — 安全靠 key 位置不靠 code obscurity；tier-aware 誠實揭露  ·  [Decision]
+## project-env#7 — Backup allowlist 是獨立邊界  ·  [Decision]
 
-**Decision**：不藏 crypto core（不用 private repo / 重混淆）——client app 的 crypto 一定 bundle 在每份安裝的 asar 裡（可反編），private *repo* 只藏原始碼歷史不藏 runtime key path。把 key 留在 readable JS 外的正解是**根本不放那裡** → OS keychain（safeStorage）持 key。crypto core 保持小、標準、**開放**（可審 > 隱晦）。UI 文案講**實際 tier**（os-backed 講 keychain、local-key 講 per-install key + 「app 簽章後升級 keychain」），誠實不誇大、也不嚇人（不用系統級 blocking modal，那會重造 unsigned-app 的不信任）。永久 nuance：值注入到**該 project 所有連線/process**，含互動 terminal（可 `env` 讀到）——文案 surface-agnostic（別列舉「agent + terminal」，加 consumer 不用改字）。
+**Decision**：config backup 只 enumerate Skills／MCP，不會因檔案位於 userData
+就順帶備份 Project config、credential 或其他未列入 allowlist 的資料。
 
-## project-env#7 — secret 不同步靠 side-car + backup allowlist，不靠加密  ·  [Decision]
+**Reason**：明碼與加密都不是備份授權；是否能傳到外部應由 egress allowlist 決定。
 
-**要點**：唯一致命外洩是 config backup 把設定推上 git remote。解法是結構性的：secret 存獨立 side-car（`project-secrets.json`），而 config-backup 用 **allowlist**（只 enumerate 得到的 Skill/MCP 能被選+複製），project config 與 secret 都不在目前 payload → 天生不可備份（`enumerate.test.ts` 鎖住「只吐 skill/mcp」的 invariant）。加密是正交的另一層——防 at-rest 外洩（誤拷、雲備份、infostealer），不防 egress path。若未來納入 project config，plain/secret 仍必須逐欄審計，secret 永遠不入 payload。
+**Do not change casually because**：擴大 payload 需逐欄審計，不能直接打包 userData。
+
+## project-env#8 — Project env 不承擔機密保管  ·  [Decision]
+
+**Decision**：Project 編輯只提供明碼 env；沒有 secret editor、IPC、加解密 store、
+key 管理、worktree secret 複製或 secret cleanup。不得把機密自動轉存 Project.envPlain。
+
+**Reason**：目前工作流沒有使用 Project 機密 env 管理，卻需要跨平台 key 管理、
+獨立儲存結果恢復與 worktree 複製生命週期。這些成本不足以由目前需求支持；
+一般 env 注入與 provider 原生認證維持各自責任，不為未出現的需求維持秘密儲存系統。
+
+**Do not change casually because**：Project.envPlain 是明碼，不是機密儲存的安全替代。
+MCP endpoint 認證的 runtime signing key／Bearer 是另一條安全邊界，不受此決策影響。
+
+### Gotchas
+
+既有 userData 中的 project-secrets.json、secret-key.local、secret-key.enc 保留原樣：
+不讀、不解密、不覆寫、不自動刪除，Project 刪除也不 prune。這些值不再注入新啟動的
+process；已啟動 process 的 env 不會因此被清除或自動重啟。保留檔案不是繼續支援
+舊 secret schema 或提供恢復 UI；資料處置需由使用者另外決定。

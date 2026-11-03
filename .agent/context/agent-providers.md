@@ -150,15 +150,18 @@ SDK 0.3.159 **並存**兩種 compact 完成訊號:`status` 形狀(`subtype:'stat
 
 **Related**：`agent-providers#10`（device-flow 登入主流程,ACP 沿用）、`agent-providers#15`（appId 變更才重生連線）、`agent-server/providers/copilot/index.ts`（`startLogin`）。
 
-## agent-providers#12 — Headless remote：貼 `GH_TOKEN` secret env 就能認證 Copilot（不靠 `copilot login`）  ·  [Decision]
+## agent-providers#12 — Copilot CLI 自行處理執行環境中的 token 認證  ·  [Decision]
 
-**背景**：無瀏覽器/無 OS credential store 的 headless remote 上，`copilot login`（device flow）存不了憑證（沒有 Secret Service），`gh` 也常沒裝 → device-flow 這條走不通。
+**Decision**：copilotAcpEnv 保留執行環境，CLI 自己處理既有 token env；Shelf 不解析或
+保存 token。互動登入使用 scrubLoginEnv 排除 token，維持原生 device-flow 語意。
+Shelf 不提供 Project Secret Variables；Project.envPlain 是明碼設定，不是機密保存入口。
 
-**Decision（copilot = ACP backend 後）**：使用者把 `GH_TOKEN`/`GITHUB_TOKEN` 貼成**專案 Secret env var**（見 `context/project-env`）→ Shelf 注入 agent-server env → `copilot --acp` 進程**繼承**這個 env（Shelf spawn 時帶 `{...process.env, COPILOT_HOME}`）→ **CLI 自己讀 token env 認證**。Shelf **不再有** token 注入 code（原 `readGhToken`/`buildCopilotAuthConfig`/`copilotTokenFromEnv` 隨 SDK backend 刪除）—— token-env 現在純由 CLI 端處理。（互動 `copilot login` 才會 `scrubLoginEnv` 剝掉這些 token 強走瀏覽器,見 `agent-providers#10`;`--acp` run 不剝 → 憑 env 認證。）
+**Reason**：provider 認證歸原生 CLI，不能把一般 env 設定宣稱為安全的 token 保管服務。
 
-**Reason**：官方 CLI 文件明講 headless 用 token env var。這把「remote 存不了憑證」從死路變成「貼個 secret token」,復用 project secret env（加密、不同步）,守 `agent-providers#15` 的「不承攬憑證」（只讓使用者自管的靜態 token 經 env 傳給 CLI,Shelf 不 parse）。
+**Do not change casually because**：不要為了補憑證管理而把 token 寫入明碼 Project config，
+也不要把 CLI 執行環境與互動登入環境混為一談。
 
-**Related**：`context/project-env`（secret env 儲存/注入）、`agent-providers#15`（device-scoped auth / token 正交）、`agent-server/providers/copilot/helpers.ts`（`copilotAcpEnv` 帶 env）。
+**Related**：agent-providers#10、agent-providers#15、project-env#8。
 
 ## agent-providers#13 — ACP toolkit 服務官方 ACP provider；目前 production consumer 是 Copilot  ·  [Decision]
 

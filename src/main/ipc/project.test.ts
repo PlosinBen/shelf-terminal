@@ -27,13 +27,6 @@ const repository: MainProjectsRepository = {
 vi.mock('../projects/repository-provider', () => ({
   getProjectsRepository: () => repository,
 }));
-vi.mock('../secret-store', () => ({
-  listProjectSecretKeys: vi.fn(),
-  setProjectSecret: vi.fn(),
-  deleteProjectSecret: vi.fn(),
-  copyProjectSecrets: vi.fn(),
-  getKeyTier: vi.fn(),
-}));
 
 const { registerProjectHandlers } = await import('./project');
 
@@ -97,5 +90,11 @@ describe('project IPC repository mapping', () => {
 
     expect(result).toEqual(['missing']);
     expect(repository.getAll).toHaveBeenCalledOnce();
+  });
+
+  it('does not expose the retired project secret operations', () => {
+    for (const channel of ['project:secrets-list', 'project:secret-set', 'project:secret-delete', 'project:secrets-copy', 'secret:key-tier']) {
+      expect(handlers.has(channel), channel).toBe(false);
+    }
   });
 });

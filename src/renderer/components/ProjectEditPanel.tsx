@@ -19,12 +19,6 @@ export function ProjectEditPanel() {
   const [defaultTabs, setDefaultTabs] = useState<TabTemplate[]>([]);
   const [quickCommands, setQuickCommands] = useState<QuickCommand[]>([]);
   const [envRows, setEnvRows] = useState<EnvRow[]>([]);
-  // Secret env: existing KEY names (values never leave main), rows being added,
-  // and existing keys marked for removal — all flushed to main on Save.
-  const [secretKeys, setSecretKeys] = useState<string[]>([]);
-  const [newSecretRows, setNewSecretRows] = useState<EnvRow[]>([]);
-  const [clearedSecrets, setClearedSecrets] = useState<string[]>([]);
-  const [keyTier, setKeyTier] = useState<'os-backed' | 'local-key' | null>(null);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const dragFromHandle = useRef(false);
@@ -45,11 +39,6 @@ export function ProjectEditPanel() {
         : [{ name: 'Terminal' }]);
       setQuickCommands(project.quickCommands.map((cmd) => ({ ...cmd })) || []);
       setEnvRows(Object.entries(project.envPlain).map(([key, value]) => ({ key, value })));
-      setNewSecretRows([]);
-      setClearedSecrets([]);
-      // Secret KEY names + the machine's key-storage tier (for honest disclosure).
-      void window.shelfApi.project.listSecretKeys(project.id).then(setSecretKeys).catch(() => setSecretKeys([]));
-      void window.shelfApi.project.secretKeyTier().then(setKeyTier).catch(() => setKeyTier(null));
       setTabError(null);
       setFeatureNoteDir(project.featureNoteDir ?? '');
       setFeatureNoteDirError(null);
@@ -156,36 +145,7 @@ export function ProjectEditPanel() {
       envPlain,
     });
 
-    // Flush secret ops to main (encrypted side-car, not canonical `Project` from
-    // `@shared/projects`). Cleared first, then new sets — same
-    // reserved/valid/duplicate gate as the UI, applied against the FINAL plain
-    // keys so a plain/secret collision can't slip through.
-    const projectId = project.id;
-    const plainKeys = Object.keys(envPlain);
-    void (async () => {
-      for (const key of clearedSecrets) {
-        await window.shelfApi.project.deleteSecret(projectId, key).catch(() => {});
-      }
-      const seen = new Set<string>([...plainKeys]);
-      for (const row of newSecretRows) {
-        const key = row.key.trim();
-        if (!key || !row.value || validateEnvKey(key, [...seen]) !== null) continue;
-        seen.add(key);
-        await window.shelfApi.project.setSecret(projectId, key, row.value).catch(() => {});
-      }
-    })();
-
     handleClose();
-  };
-
-  const updateSecretRow = (index: number, field: keyof EnvRow, value: string) => {
-    setNewSecretRows((rows) => rows.map((r, i) => (i === index ? { ...r, [field]: value } : r)));
-  };
-  const addSecretRow = () => setNewSecretRows((rows) => [...rows, { key: '', value: '' }]);
-  const removeSecretRow = (index: number) => setNewSecretRows((rows) => rows.filter((_, i) => i !== index));
-  const clearExistingSecret = (key: string) => {
-    setSecretKeys((keys) => keys.filter((k) => k !== key));
-    setClearedSecrets((c) => (c.includes(key) ? c : [...c, key]));
   };
 
   const updateEnvRow = (index: number, field: keyof EnvRow, value: string) => {
@@ -368,12 +328,8 @@ export function ProjectEditPanel() {
             </div>
             <div className="env-vars-list">
               {envRows.map((row, i) => {
-                // Uniqueness spans plain AND secret — one injected var can't be
-                // defined twice, in either category.
                 const otherKeys = [
                   ...envRows.filter((_, j) => j !== i).map((r) => r.key.trim()),
-                  ...secretKeys,
-                  ...newSecretRows.map((r) => r.key.trim()),
                 ];
                 const error = validateEnvKey(row.key.trim(), otherKeys);
                 return (
@@ -413,81 +369,6 @@ export function ProjectEditPanel() {
               })}
             </div>
             <button className="default-tab-add" onClick={addEnvRow}>+ Add Variable</button>
-          </div>
-
-          <div className="project-edit-field">
-            <label className="settings-label">Secret Variables</label>
-            <div className="project-edit-hint">
-              Encrypted at rest and never synced. Injected into all of this
-              project's connections just like plain variables (so still readable
-              via <code>env</code> in an interactive terminal). Values are
-              write-only — set a new value to replace one.
-              {keyTier && (
-                <div className={`env-secret-tier env-secret-tier-${keyTier}`}>
-                  {keyTier === 'os-backed'
-                    ? '🔒 Protected by your OS keychain.'
-                    : '🔒 Encrypted with a per-install key stored on this machine (upgrades to your OS keychain once the app is code-signed).'}
-                </div>
-              )}
-            </div>
-            <div className="env-vars-list">
-              {secretKeys.map((key) => (
-                <div key={`existing-${key}`} className="env-var-row">
-                  <span className="env-var-key env-secret-existing-key">{key}</span>
-                  <span className="env-var-value env-secret-masked">•••••••• (set)</span>
-                  <button
-                    className="default-tab-remove"
-                    onClick={() => clearExistingSecret(key)}
-                    title="Remove secret"
-                  >
-                    ×
-                  </button>
-                </div>
-              ))}
-              {newSecretRows.map((row, i) => {
-                const otherKeys = [
-                  ...envRows.map((r) => r.key.trim()),
-                  ...secretKeys,
-                  ...newSecretRows.filter((_, j) => j !== i).map((r) => r.key.trim()),
-                ];
-                const error = validateEnvKey(row.key.trim(), otherKeys);
-                return (
-                  <div key={`new-${i}`} className="env-var-row-wrapper">
-                    <div className="env-var-row">
-                      <input
-                        className={`env-var-key${error ? ' env-var-invalid' : ''}`}
-                        type="text"
-                        value={row.key}
-                        onChange={(e) => updateSecretRow(i, 'key', e.target.value)}
-                        placeholder="NAME"
-                        spellCheck={false}
-                        autoCapitalize="off"
-                        autoCorrect="off"
-                      />
-                      <input
-                        className="env-var-value"
-                        type="password"
-                        value={row.value}
-                        onChange={(e) => updateSecretRow(i, 'value', e.target.value)}
-                        placeholder="secret value"
-                        spellCheck={false}
-                        autoCapitalize="off"
-                        autoCorrect="off"
-                      />
-                      <button
-                        className="default-tab-remove"
-                        onClick={() => removeSecretRow(i)}
-                        title="Remove variable"
-                      >
-                        ×
-                      </button>
-                    </div>
-                    {error && <div className="env-var-error">{error}</div>}
-                  </div>
-                );
-              })}
-            </div>
-            <button className="default-tab-add" onClick={addSecretRow}>+ Add Secret</button>
           </div>
 
           <div className="project-edit-field">

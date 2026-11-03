@@ -40,8 +40,8 @@ export interface Connector {
   spawnProcess(request: ProcessRequest): ChildProcessWithoutNullStreams;
   // ── Shell ──
   /**
-   * Spawn an interactive shell. `env` is the project-level env map (plain, later
-   * + secret) to inject: local connectors merge it into the pty's `env` (PATH
+   * Spawn an interactive shell. `env` is the canonical project env map
+   * to inject: local connectors merge it into the pty's `env` (PATH
    * merges); remote connectors (docker/ssh/wsl) prepend an `export …` prefix to
    * the launched command, since the pty `env` only reaches the local ssh/docker
    * client, not the remote shell. Reserved project keys are dropped;

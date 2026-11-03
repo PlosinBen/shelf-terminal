@@ -6,8 +6,7 @@ import { providerLabel } from './agent-providers';
  * Build a worktree sub-project's config by cloning the parent project's SETUP
  * while giving it a FRESH identity. A worktree is the same project on a different
  * branch, so it should develop in the same environment: inherit env, init script,
- * tab layout, quick commands, and agent preferences. Secrets live in a separate
- * encrypted side-car (not in the canonical Project) and are copied separately by the caller.
+ * tab layout, quick commands, and agent preferences.
  *
  * Deliberately NOT inherited:
  *  - id / cwd / parentProjectId / worktreeBranch / baseBranch — worktree-specific

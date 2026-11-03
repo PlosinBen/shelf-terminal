@@ -8,11 +8,6 @@ vi.mock('./projects/repository-provider', () => ({
   }),
 }));
 
-// secret-store pulls in electron (safeStorage/app) — mock it so this suite stays
-// electron-free. Per-test behavior is set via the mock fn below.
-const resolveProjectSecrets = vi.fn((_projectId: string) => ({}) as Record<string, string>);
-vi.mock('./secret-store', () => ({ resolveProjectSecrets: (id: string) => resolveProjectSecrets(id) }));
-
 // Import AFTER the mock is registered.
 const { resolveProjectEnv } = await import('./project-env');
 
@@ -39,7 +34,6 @@ function project(id: string, envPlain: Record<string, string> = {}): Project {
 describe('resolveProjectEnv', () => {
   beforeEach(() => {
     projects = [];
-    resolveProjectSecrets.mockReturnValue({});
   });
 
   it('returns {} for an unknown or absent projectId', () => {
@@ -62,11 +56,12 @@ describe('resolveProjectEnv', () => {
     expect(resolveProjectEnv('p1')).toEqual({});
   });
 
-  it('merges plain + secret, secret winning a same-key collision', () => {
-    projects = [project('p1', { PLAIN_ONLY: 'p', SHARED: 'plain-val' })];
-    resolveProjectSecrets.mockReturnValue({ SECRET_ONLY: 's', SHARED: 'secret-val' });
+  it('uses only canonical plain env without resolving retired secrets', () => {
+    projects = [{ ...project('p1', { PLAIN_ONLY: 'p', SHARED: 'plain-val' }),
+      secrets: { SECRET_ONLY: 'retired-value', SHARED: 'retired-value' },
+    } as Project];
     expect(resolveProjectEnv('p1')).toEqual({
-      PLAIN_ONLY: 'p', SECRET_ONLY: 's', SHARED: 'secret-val',
+      PLAIN_ONLY: 'p', SHARED: 'plain-val',
     });
   });
 });

@@ -1,7 +1,6 @@
 import type { Project } from '@shared/projects';
 import type { Connection } from '@shared/types';
 import { removeProjectStorage } from '../project-storage';
-import { deleteProjectSecrets } from '../secret-store';
 import { createConnector } from '../connector';
 import { removeTargetProjectHistory, deriveTargetHistoryPaths } from '../terminal-runner/history-path';
 import { getAppInstanceId } from '../app-instance-id';
@@ -21,7 +20,6 @@ interface ProjectCleanupSnapshot {
 
 interface ProjectCleanupDependencies {
   readonly removeStorage: (projectId: string) => Promise<void>;
-  readonly removeSecrets: (projectId: string) => void | Promise<void>;
   readonly teardownProject: (projectId: string) => Promise<{ confirmed: boolean; unconfirmedTabIds: string[] }>;
   readonly removeTargetHistory: typeof removeTargetProjectHistory;
   readonly createRuntime: typeof createConnector;
@@ -30,7 +28,6 @@ interface ProjectCleanupDependencies {
 
 const DEFAULT_DEPENDENCIES: ProjectCleanupDependencies = {
   removeStorage: removeProjectStorage,
-  removeSecrets: deleteProjectSecrets,
   teardownProject: async (projectId) => {
     await destroyProjectAgentSessions(projectId);
     return teardownProjectPtys(projectId);
@@ -96,11 +93,6 @@ export function createProjectCleanup(
 
       try {
         await dependencies.removeStorage(projectId);
-      } catch (error) {
-        failures.push(error);
-      }
-      try {
-        await dependencies.removeSecrets(projectId);
       } catch (error) {
         failures.push(error);
       }

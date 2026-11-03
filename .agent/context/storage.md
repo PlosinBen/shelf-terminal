@@ -25,8 +25,8 @@ related:
 - `src/main/project-storage.ts` 提供 `projectDir(id)` / `ensureProjectDir(id)` / `removeProjectStorage(id)`
 - `src/main/migrations/migrate-pm-notes.ts` 啟動時 idempotent 搬家：copy → verify → unlink，partial run 安全 resume
 - Main project repository 在 config delete durable commit 後呼叫 project-level cleanup；cleanup adapter
-  同次嘗試 `removeProjectStorage(id)` 與 secret side-car deletion，任一失敗都回報 pending，供 caller
-  透過 `retryCleanup(id)` 重試
+  先 teardown sessions 與清理 target history，再嘗試 removeProjectStorage(id)；失敗回報
+  pending，供 caller 透過 retryCleanup(id) 重試。
 
 **Out of scope**：
 - Agent context（`~/.shelf/agent-context/{sessionId}.json`）跟 IndexedDB agent UI history 是 sessionId-keyed 不是 projectId-keyed，多 session 共用一個 project，硬塞進來反而扭曲關係——維持現狀

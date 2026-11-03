@@ -185,7 +185,7 @@ export function createRemoteBackend(
           deployed = true;
         }
         if (reportPhase) onPhase?.('connecting');
-        // Project-level env (plain + decrypted secrets), injected into the
+        // Canonical project env, injected into the
         // agent-server (+ the CLIs it spawns). Resolved per-session: the
         // dispatcher is shared per-host, so this rides open_session, not the
         // dispatcher's own env. See context/project-env#2.

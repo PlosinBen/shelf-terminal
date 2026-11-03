@@ -1,5 +1,4 @@
 import { getProjectsRepository } from './projects/repository-provider';
-import { resolveProjectSecrets } from './secret-store';
 import { sanitizeEnvMap, type EnvMap } from '@shared/project-env';
 
 /**
@@ -7,19 +6,13 @@ import { sanitizeEnvMap, type EnvMap } from '@shared/project-env';
  * — the single source both spawn surfaces (agent-server in agent/remote.ts, and
  * terminals in the connectors' createShell) read from.
  *
- * Merges the project's PLAIN env from canonical `Project.envPlain` (`Project` is
- * defined by `@shared/projects`) with its SECRET env (decrypted just-in-time from
- * the encrypted side-car), so callers never learn whether a value was plain or
- * secret. A same-named plain + secret is blocked at input; if one slips through,
- * secret wins here (last write). Reserved keys / malformed names / non-string
- * values are dropped as a defensive backstop. Unknown projectId → empty map. See
- * context/project-env#1.
+ * Reads only canonical Project.envPlain; no side-car or key storage participates.
+ * Reserved keys / malformed names / non-string values are dropped as a defensive
+ * backstop. Unknown projectId → empty map. See project-env#8.
  */
 export function resolveProjectEnv(projectId: string | undefined): EnvMap {
   if (!projectId) return {};
   const project = getProjectsRepository().get(projectId);
   if (!project) return {};
-  const plain = sanitizeEnvMap(project.envPlain);
-  const secret = resolveProjectSecrets(projectId);
-  return { ...plain, ...secret };
+  return sanitizeEnvMap(project.envPlain);
 }

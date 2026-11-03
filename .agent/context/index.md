@@ -28,7 +28,7 @@ Decisions + gotchas grouped by topic. Cited from code as `<topic>#N`.
 | app 層 MCP servers | [mcp](mcp.md) | additive-on-native、keyed-object opaque、sibling pipeline、reconnect 通知、heartbeat lease、scope 傳達 |
 | Web tab + agent web.fetch | [web-tab](web-tab.md) | 網路身分跟 connection、per-origin grant gate、webview hardening、away/timeout |
 | app 層 config 備份 / 複製 | [config-backup](config-backup.md) | explicit copy 非 sync、selected-item Backup、pinned transactional Import、side-car serialization、local control markers |
-| 專案 env（plain + secret） | [project-env](project-env.md) | 兩類 env 單一注入 map、全 connector 注入、dispatcher 走 open_session、secret AES-GCM + key-tier seam、side-car 不同步 |
+| 專案 env | [project-env](project-env.md) | Canonical 明碼 env、全 connector 注入、dispatcher session env 與非機密儲存邊界 |
 | Worktree lifecycle | [worktree](worktree.md) | create/finish proposal gates, project-configured note hand-off + child snapshots, provider override |
 | Project repository / renderer views | [projects](projects.md) | versioned canonical boundary、main-owned identity、durable recovery、stable views與 Sidebar projection |
 | Testing practices | [testing](testing.md) | non-obvious promise coverage、nearby rationale 與 cross-surface review trigger |

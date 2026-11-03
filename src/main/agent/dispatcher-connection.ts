@@ -73,7 +73,7 @@ export interface DispatcherConnectionDeps {
 
 export interface DispatcherConnection {
   /** Register a session and send `open_session`; returns its RemoteProcess-shaped
-   *  channel. `env` = this project's injected env map (plain, later + secret) — the
+   *  channel. `env` = this project's canonical env map — the
    *  dispatcher is shared per-HOST, so per-PROJECT env can't ride its own process
    *  env; it travels in `open_session` and the dispatcher applies it to the
    *  per-session exec proc it spawns. */

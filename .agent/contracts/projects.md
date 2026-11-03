@@ -67,7 +67,7 @@ interface ProjectDeleteResult {
 }
 ```
 
-`reconcileWorktrees(baseline, updates, additions, secrets?, isCurrent?)` is an internal main-repository batch operation returning the committed collection or null for a stale baseline. It serializes with add/save/delete/reorder, merges only scan metadata into current projects, inherits current parent setup for additions, prepares secrets, and persists once before publication. Its baseline compares topology rather than mutable preferences/session ids. It is not a renderer-supplied replace-all operation.
+`reconcileWorktrees(baseline, updates, additions, isCurrent?)` is an internal main-repository batch operation returning the committed collection or null for a stale baseline. It serializes with add/save/delete/reorder, merges only scan metadata into current projects, inherits current parent setup for additions, and persists once before publication. Its baseline compares topology rather than mutable preferences/session ids. It is not a renderer-supplied replace-all operation.
 
 The repository is exposed only after synchronous bootstrap loading succeeds. It has no public `load`, `replaceAll`, raw file, or persisted-document operation.
 
@@ -103,7 +103,7 @@ project.reorder(sourceId: ProjectId, targetId: ProjectId): Promise<void>
 project.validateDirs(): Promise<ProjectId[]>
 ```
 
-`validateDirs` takes no renderer collection. Main resolves the current projects from its repository. Project secrets and worktree operations remain separate project-scoped services and never accept a persisted document or whole canonical collection.
+`validateDirs` takes no renderer collection. Main resolves the current projects from its repository. Worktree operations remain project-scoped services and never accept a persisted document or whole canonical collection.
 
 ## Renderer project view
 

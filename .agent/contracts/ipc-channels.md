@@ -37,11 +37,6 @@ The renderer↔main bridge surface — `window.shelfApi.*` methods (RPC over `ip
 | `retryCleanup(projectId)` | invoke `project:retry-cleanup` → `ProjectDeleteResult`; reuses the in-memory cleanup snapshot and never resends delete |
 | `reorder(sourceId, targetId)` | invoke `project:reorder` with opaque project ids |
 | `validateDirs()` | invoke `project:validate-dirs` → invalid project ids; main reads repository state |
-| `listSecretKeys(projectId)` | invoke `project:secrets-list` → `string[]` KEY names (values NEVER cross back to renderer) |
-| `setSecret(projectId, key, value)` | invoke `project:secret-set` (encrypt + persist to the side-car; rejects reserved keys) |
-| `deleteSecret(projectId, key)` | invoke `project:secret-delete` |
-| `copySecrets(fromId, toId)` | invoke `project:secrets-copy` after durable child creation |
-| `secretKeyTier()` | invoke `secret:key-tier` → `'os-backed' \| 'local-key'` (drives honest disclosure copy) |
 
 ## connector (`shelfApi.connector`)
 

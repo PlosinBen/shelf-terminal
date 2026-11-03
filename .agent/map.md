@@ -38,10 +38,8 @@ title: shelf-terminal — Intent → File Index
 | Preload bridge | `preload.ts` | contextBridge 暴露 `window.shelfApi`，純 RPC bridge 到 main |
 | Project canonical repository | `projects/projects-repository.ts` + `projects/repository-provider.ts` | ready-only canonical project queries/mutations、main-owned identity、durable publish 與 cleanup retry boundary |
 | Project config persistence | `projects/project-config-file-io.ts` + `projects/project-config-codec.ts` + `projects/project-config-persistence.ts` | opaque atomic File I/O、v0/v1/v2 legacy + v3 current loader/formatter 與 `projects.json` facade |
-| Project delete cleanup | `projects/project-cleanup.ts` | Config commit 後的 per-project storage/secrets cleanup 聚合 |
-| 專案 env 解析（plain+secret 合併） | `project-env.ts` | `resolveProjectEnv(projectId)`：合併 plain（projectConfig）+ 解密 secret 成單一注入 EnvMap，兩個 spawn 面共用的唯一出口 |
-| Secret 值加密核心（純） | `secret-crypto.ts` | AES-256-GCM `encryptWithKey`/`decryptWithKey`，versioned+authenticated blob，無 electron、可測 |
-| Secret master-key seam + 加密 store | `secret-store.ts` | key-storage tier（os-backed/local-key/永不明碼）依 runtime backend 選；單一 project-keyed 加密 side-car 的 CRUD + decrypt-scope-by-project |
+| Project delete cleanup | `projects/project-cleanup.ts` | Config commit 後的 session teardown、target history 與 per-project storage cleanup 聚合 |
+| 專案 env 解析 | `project-env.ts` | Canonical Project.envPlain 的驗證與共用注入出口 |
 | Settings 持久化 | `settings-store.ts` | 讀寫 `settings.json`，merge defaults |
 | SSH ControlMaster 管理 | `ssh-control.ts` | socket 路徑產生、app quit 時清理 |
 | SSH 伺服器列表 | `ssh-server-store.ts` | 儲存已知 SSH server 列表 |
@@ -211,7 +209,6 @@ title: shelf-terminal — Intent → File Index
 | Process memory renderer sync | `process-memory-sync.ts` | listener-first hydration 並以完整 summary snapshot 更新全域 store |
 | Renderer project operation adapter | `projects-repository-client.ts` + `project-mutation-coordinator.ts` | App-private stateless IPC client與 durable mutation→authoritative refresh orchestration |
 | Project mutation recovery | `project-mutation-recovery.ts` | Pre-commit Retry 與 post-commit refresh-only Retry/Cancel 分流 |
-| Worktree secret continuation | `worktree-secret-copy.ts` | Durable child 建立後的 secrets Retry/Cancel 與 stale revalidation |
 | Event bus | `events/` (`bus.ts` / `types.ts` / `ipc-agent.ts` / `index.ts`) | pub/sub + 類型化 `agent:*` vocabulary + IPC↔bus 適配層 |
 | 快捷鍵系統 | `hooks/useKeybindings.ts` | combo string 對應 action，支援參數化 action |
 | Paste/drop 上傳 hook | `hooks/useAttachmentPaste.ts` | paste/drop/upload pipeline + file size check |

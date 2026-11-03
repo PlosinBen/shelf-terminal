@@ -82,7 +82,7 @@ related:
 
 ## projects#7 — Durable mutation, refresh, and cleanup have separate recovery semantics  ·  [Decision]
 
-**Decision:** Main publishes a candidate project collection only after atomic persistence succeeds. Renderer mutations then query the authoritative collection and reconcile runtime by id. A pre-commit failure may retry the mutation; a post-commit refresh failure may retry only refresh. Delete storage/secrets cleanup is post-commit and uses `cleanupPending` plus `retryCleanup`.
+**Decision:** Main publishes a candidate project collection only after atomic persistence succeeds. Renderer mutations then query the authoritative collection and reconcile runtime by id. A pre-commit failure may retry the mutation; a post-commit refresh failure may retry only refresh. Delete session/history/storage cleanup is post-commit and uses `cleanupPending` plus `retryCleanup`.
 
 **Reason:** Durable-first flow keeps renderer/main/disk aligned without optimistic rollback. Separating refresh prevents duplicate add/delete after a command already committed, while separating cleanup avoids claiming a durable config deletion failed merely because residual side data could not be removed.
 
@@ -91,7 +91,7 @@ related:
 ### Gotchas
 
 - Retry/Cancel is user-controlled; repeated refresh failures remain refresh-only until the user cancels.
-- Worktree secrets and auto-connect begin only after child add returns its main-owned id and renderer reconcile completes. Secret Retry targets the same child; Cancel leaves that durable child disconnected.
+- Worktree auto-connect begins only after child add returns its main-owned id and renderer reconcile completes; recheck that both parent and child still exist.
 - This is single-renderer, local-file coordination. Do not add global mutation queues, revision conflicts, or file locks without a real second writer.
 
 ## projects#8 — Target uniqueness applies only to new project creation  ·  [Decision]

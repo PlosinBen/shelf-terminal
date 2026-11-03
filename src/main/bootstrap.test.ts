@@ -14,7 +14,6 @@ vi.mock('electron', () => ({
   dialog: { showMessageBoxSync: vi.fn(() => 0) },
 }));
 vi.mock('./project-storage', () => ({ removeProjectStorage: vi.fn(async () => {}) }));
-vi.mock('./secret-store', () => ({ deleteProjectSecrets: vi.fn() }));
 
 const { bootstrap } = await import('./bootstrap');
 

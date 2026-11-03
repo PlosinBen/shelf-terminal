@@ -8,7 +8,6 @@ import { getProjectsRepository } from '../projects/repository-provider';
 import { buildWorktreeChildConfig } from '@shared/worktree-child-config';
 import { isWorktreeUnavailable, WorktreeAvailability, WorktreeScanOutcome, type WorktreeIdentity, type WorktreeScanResult } from '@shared/worktree';
 import type { Project, ProjectCreateInput } from '@shared/projects';
-import { copyProjectSecrets, deleteProjectSecrets } from '../secret-store';
 import { log } from '@shared/logger';
 import { scanWorktrees } from './scan';
 import { mapWorktrees } from './mapping';
@@ -70,9 +69,7 @@ async function run(id: string): Promise<WorktreeScanResult> {
     ...buildWorktreeChildConfig(main, { cwd: candidate.path, worktreeBranch: candidate.branch, baseBranch: snapshot.branch ?? undefined }),
     worktreeState: { availability: WorktreeAvailability.VALID, identity: candidate.identity },
   }));
-  const projects = await repo.reconcileWorktrees(baseline, mapping.updates, additions, {
-    prepare: childId => copyProjectSecrets(id, childId), rollback: deleteProjectSecrets,
-  }, isCurrent);
+  const projects = await repo.reconcileWorktrees(baseline, mapping.updates, additions, isCurrent);
   if (!projects) {
     log.debug('worktree', `discarded stale scan mainProjectId=${id}`);
     return { outcome: WorktreeScanOutcome.STALE };

@@ -164,7 +164,7 @@ Every invocation requires `development-flow`, `propose_worktree_create`, and `pr
 
 ## worktree#19 — Reconciliation is a validated batch, and failures preserve the previous list  ·  [Decision]
 
-**Decision:** Parse NUL-delimited porcelain and resolve checkout/git-dir/common-dir identity on the target. Verify the whole snapshot before publishing one repository batch. Serialize it with project mutations; reject changed topology and lifecycle generations. Prepare inherited secrets before publication and roll them back on failure. No scan prunes or repairs Git. A stale response is discarded with diagnostic context.
+**Decision:** Parse NUL-delimited porcelain and resolve checkout/git-dir/common-dir identity on the target. Verify the whole snapshot before publishing one repository batch. Serialize it with project mutations; reject changed topology and lifecycle generations. No scan prunes or repairs Git. A stale response is discarded with diagnostic context.
 
 **Reason:** Partial adds/updates or host filesystem checks can misclassify remote worktrees and lose the relationship to retained data. Access, transport, Git and parse errors must remain distinguishable from confirmed missing paths. Target discovery runs afresh on Rescan so a failed first probe does not poison later recovery.
 

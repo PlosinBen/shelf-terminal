@@ -62,7 +62,7 @@ Back up 與 Import 雖操作不同 refs，仍共用一個會切換 origin/workin
 
 ## config-backup#7 — Portable payload scope = Skills + MCP  ·  [Decision]
 
-**Decision**：payload allowlist 只有 Skills 與 MCP servers。settings portable subset 尚未納入；credentials、project paths、project secret env、binding、intent 與 app-instance-id 永遠不進 payload。未知資料不會因位於 `<userData>` 就被順手備份。
+**Decision**：payload allowlist 只有 Skills 與 MCP servers。settings portable subset 尚未納入；credentials、project paths、未列入 allowlist 的機密資料、binding、intent 與 app-instance-id 永遠不進 payload。未知資料不會因位於 `<userData>` 就被順手備份。
 
 **Related**：`context/project-env#7`、`contracts/persistence-formats`。
 

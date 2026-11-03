@@ -23,8 +23,7 @@ export function registerPtyHandlers(): void {
     if (mainWindow) {
       try {
         trace('environment:start');
-        // Resolve the project's injected env in MAIN — never sent from the renderer
-        // (secret values must never reach it). Plain now; + decrypted secrets later.
+        // Resolve canonical project env in MAIN instead of trusting a renderer payload.
         const env = resolveProjectEnv(payload.projectId);
         trace('environment:complete');
         trace('launcher:start');

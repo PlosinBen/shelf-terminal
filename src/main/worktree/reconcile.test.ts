@@ -3,11 +3,10 @@ import type { MainProjectsRepository } from '../projects/projects-repository';
 import { createMainProjectsRepository } from '../projects/projects-repository';
 import type { Project } from '@shared/projects';
 import type { WorktreeSnapshot } from './scan';
-const mocks = vi.hoisted(() => ({ probeFacts: vi.fn(), scan: vi.fn(), copy: vi.fn(), remove: vi.fn(), exec: vi.fn(), repository: null as MainProjectsRepository | null }));
+const mocks = vi.hoisted(() => ({ probeFacts: vi.fn(), scan: vi.fn(), exec: vi.fn(), repository: null as MainProjectsRepository | null }));
 vi.mock('../projects/repository-provider', () => ({ getProjectsRepository: () => mocks.repository }));
 vi.mock('../connector', () => ({ createConnector: () => ({ exec: mocks.exec, isCurrentGeneration: () => true }) }));
 vi.mock('../connector/target-facts', () => ({ TARGET_OS: { windows: 'windows' }, TargetFactsResolver: class { cached?: Promise<unknown>; resolve() { return this.cached ??= mocks.probeFacts(); } } }));
-vi.mock('../secret-store', () => ({ copyProjectSecrets: mocks.copy, deleteProjectSecrets: mocks.remove }));
 vi.mock('./scan', () => ({ scanWorktrees: mocks.scan }));
 import { reconcileWorktrees, setWorktreeLifecycle } from './reconcile';
 let id = 0;
@@ -28,11 +27,13 @@ beforeEach(() => {
 });
 describe('reconciliation coordination', () => {
   it('deduplicates simultaneous scans and commits one inherited child', async () => {
+    main = { ...main, envPlain: { BUILD_MODE: 'development' } };
+    await repository.save(main);
     const first = reconcileWorktrees(main.id);
     expect(reconcileWorktrees(main.id)).toBe(first);
     expect((await first).outcome).toBe('applied');
     expect(repository.getAll()).toHaveLength(2);
-    expect(mocks.copy).toHaveBeenCalledTimes(1);
+    expect(repository.getAll()[1].envPlain).toEqual(main.envPlain);
   });
   it('discards a scan after a user changes the project', async () => {
     let resolve!: (snapshot: WorktreeSnapshot) => void;
@@ -62,12 +63,6 @@ describe('reconciliation coordination', () => {
     mocks.scan.mockRejectedValueOnce(new Error('transport failed'));
     await expect(reconcileWorktrees(main.id)).rejects.toThrow('transport failed');
     expect(repository.getAll()).toHaveLength(1);
-  });
-  it('rolls back secrets if inheritance fails before publication', async () => {
-    mocks.copy.mockImplementationOnce(() => { throw new Error('secret disk full'); });
-    await expect(reconcileWorktrees(main.id)).rejects.toThrow('secret disk full');
-    expect(repository.getAll()).toHaveLength(1);
-    expect(mocks.remove).toHaveBeenCalledWith(`child-${id}`);
   });
   it('retries target discovery after an initial target failure', async () => {
     vi.resetModules();

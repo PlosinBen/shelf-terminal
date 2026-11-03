@@ -10,32 +10,26 @@ const project: Project = {
 };
 
 describe('project cleanup', () => {
-  it('attempts storage and secrets cleanup in the same run', async () => {
+  it('cleans project storage without a separate secret cleanup operation', async () => {
     const removeStorage = vi.fn(async () => {});
-    const removeSecrets = vi.fn(() => {});
-    const cleanup = createProjectCleanup({ removeStorage, removeSecrets });
+    const cleanup = createProjectCleanup({ removeStorage });
 
     await cleanup.cleanup('project-a');
 
     expect(removeStorage).toHaveBeenCalledWith('project-a');
-    expect(removeSecrets).toHaveBeenCalledWith('project-a');
   });
 
-  it('reports failure after still attempting both cleanup targets', async () => {
+  it('reports storage cleanup failure for retry', async () => {
     const removeStorage = vi.fn(async () => {
       throw new Error('storage failed');
     });
-    const removeSecrets = vi.fn(() => {
-      throw new Error('secrets failed');
-    });
-    const cleanup = createProjectCleanup({ removeStorage, removeSecrets });
+    const cleanup = createProjectCleanup({ removeStorage });
 
     await expect(cleanup.cleanup('project-a')).rejects.toMatchObject({
       name: 'AggregateError',
-      errors: [expect.any(Error), expect.any(Error)],
+      errors: [expect.objectContaining({ message: 'storage failed' })],
     });
     expect(removeStorage).toHaveBeenCalledOnce();
-    expect(removeSecrets).toHaveBeenCalledOnce();
   });
 
   it('tears down sessions before target history and leaves local cleanup last', async () => {
@@ -47,13 +41,12 @@ describe('project cleanup', () => {
       teardownProject: async () => { order.push('teardown'); return { confirmed: true, unconfirmedTabIds: [] }; },
       removeTargetHistory: async () => { order.push('history'); return '/target/history'; },
       removeStorage: async () => { order.push('storage'); },
-      removeSecrets: async () => { order.push('secrets'); },
     });
     cleanup.capture?.(project);
 
     await cleanup.cleanup(project.id);
 
-    expect(order).toEqual(['teardown', 'history', 'storage', 'secrets']);
+    expect(order).toEqual(['teardown', 'history', 'storage']);
   });
 
   it('retains target cleanup for current-session retry when terminal exit is unconfirmed', async () => {
@@ -68,7 +61,6 @@ describe('project cleanup', () => {
       teardownProject,
       removeTargetHistory,
       removeStorage: async () => {},
-      removeSecrets: async () => {},
     });
     cleanup.capture?.(project);
 

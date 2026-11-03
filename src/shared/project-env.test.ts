@@ -37,7 +37,7 @@ describe('validateEnvKey', () => {
     expect(validateEnvKey('SHELF_FOO')).toBe('Reserved by Shelf');
     expect(validateEnvKey('ELECTRON_RUN_AS_NODE')).toBe('Reserved by Shelf');
   });
-  it('rejects a duplicate across plain+secret', () => {
+  it('rejects a duplicate variable name', () => {
     expect(validateEnvKey('GH_TOKEN', ['GH_TOKEN'])).toBe('Duplicate variable');
   });
 });
