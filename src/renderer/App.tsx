@@ -36,13 +36,14 @@ import type { ConnectionHealth } from '@shared/types';
 import type { ExternalUrlIntentDecision, ExternalUrlIntentInput } from '@shared/external-url-intent';
 import type { Project, ProjectCreateInput } from '@shared/projects';
 import { disposeTerminal } from './components/TerminalView';
-import { teardownTab } from './tab-teardown';
+import { teardownTab, waitForAgentViewTeardown } from './tab-teardown';
 import { on, emit, Events, onAgent, emitAgent, onBackup, onNewAgentTab } from './events';
 import { bindAgentIPCGroup } from './events';
 import { bindAgentStoreSubscriptions } from './agentTabSubscriptions';
 import { setAuthError, setInMemoryMax, setSaveThrottleMs, peekAgentTab, setInitStatus, setCapabilities } from './agentTabStore';
 import { getTheme, buildThemeVars } from './themes';
-import { clearAgentSession } from './storage/agent-history';
+import { clearAgentSession, completeAgentHistoryCleanup, queueAgentHistoryCleanup, loadAgentHistoryCleanup, cancelAgentHistoryCleanup } from './storage/agent-history';
+import { collectUnusedAgentViews } from './agent-view-cleanup';
 import { bindProcessMemorySummary } from './process-memory-sync';
 import { createProjectMutationCoordinator } from './project-mutation-coordinator';
 import { createRendererProjectsRepositoryClient } from './projects-repository-client';
@@ -96,6 +97,29 @@ function runProjectOperation<T>(operation: string, action: () => Promise<T>) {
   });
 }
 
+async function cleanupAgentViews(projectId: string, candidates: readonly string[], settled: Promise<void> = Promise.resolve()) {
+  try {
+    await settled;
+    await queueProjectUpdate(projectId, () => collectUnusedAgentViews(projectId, candidates, {
+      getProject: getProjectById,
+      settle: waitForAgentViewTeardown,
+      clear: async sessionId => {
+        const result = await runProjectOperation(`clear Agent history ${sessionId}`, () => clearAgentSession(sessionId));
+        if (result.status === 'cancelled') throw result.error;
+      },
+      forget: async (id, sessionId) => {
+        const result = await runProjectOperation(`forget Agent View ${sessionId}`, () =>
+          projectCoordinator.save(id, { kind: PROJECT_MUTATION.FORGET_AGENT_VIEW, sessionId }));
+        if (result.status === 'cancelled') throw result.error;
+        if (!result.value.ok) throw new Error(`Unexpected cleanup conflict projectId=${id} sessionId=${sessionId}`);
+      },
+    }));
+  } catch (error) {
+    console.warn('[agent-view] cleanup incomplete; ownership retained for retry', { projectId, candidates, error });
+    showProjectNotice({ projectId, message: 'Agent history cleanup incomplete. Remaining View records will be retried on next startup.' });
+  }
+}
+
 async function recoverProjectCleanup(projectId: string, initial: import('@shared/projects').ProjectDeleteResult) {
   let result = initial;
   while (result.cleanupPending) {
@@ -129,10 +153,11 @@ function scanProjectWorktrees(projectId: string): Promise<void> {
     for (const child of getProjectViews()) {
       if (!isWorktreeUnavailable(child)) continue;
       if (getProjectSliceSnapshot().editingProjectId === child.id) setEditingProjectById(null);
-      child.tabs.forEach(teardownTab);
+      const settled = Promise.all(child.tabs.map(teardownTab)).then(() => {});
       const index = getProjectIndexById(child.id);
       for (let i = child.tabs.length - 1; i >= 0; i--) removeTab(index, i);
       setSplitTab(index, null);
+      void cleanupAgentViews(child.id, Object.keys(child.agentViews), settled);
     }
   };
   const request = (async () => {
@@ -476,25 +501,30 @@ export function App() {
       const projectIndex = getProjectIndexById(projectId);
       const proj = getProjectById(projectId);
       const tab = proj?.tabs[tabIndex];
-      if (tab) teardownTab(tab);
+      const settled = tab ? teardownTab(tab) : Promise.resolve();
       removeTab(projectIndex, tabIndex);
+      if (tab?.type === 'agent' && tab.sessionId) void cleanupAgentViews(projectId, [tab.sessionId], settled);
     });
 
-    const offRemoveProject = on(Events.REMOVE_PROJECT, async (projectId: string) => {
+    const offRemoveProject = on(Events.REMOVE_PROJECT, (projectId: string) => queueProjectUpdate(projectId, async () => {
       const projectIndex = getProjectIndexById(projectId);
       const proj = getProjectById(projectId);
       if (projectIndex === -1 || !proj) return;
+      const staged = await runProjectOperation('stage deleted Agent history', () =>
+        queueAgentHistoryCleanup(projectId, Object.keys(proj.agentViews)));
+      if (staged.status === 'cancelled') return;
       const deleted = await runProjectOperation('delete', () => projectCoordinator.delete(projectId));
       if (deleted.status === 'cancelled') return;
-      proj.tabs.forEach(teardownTab);
+      const settled = Promise.all(proj.tabs.map(teardownTab));
       // Teardown flushes idle pending history. Queue the clears afterwards so
       // those writes cannot resurrect messages belonging to a deleted Project.
       const history = await runProjectOperation('clear deleted Agent history', async () => {
-        await Promise.all(Object.keys(proj.agentViews).map(clearAgentSession));
+        await settled;
+        await Promise.all(Object.keys(proj.agentViews).map(completeAgentHistoryCleanup));
       });
       if (history.status === 'cancelled') console.warn('[project-delete] history cleanup cancelled', { projectId });
       await recoverProjectCleanup(projectId, deleted.value);
-    });
+    }));
 
     const offWorktreeFinishCompleted = on(Events.WORKTREE_FINISH_COMPLETED, (payload: {
       subProjectId: string;
@@ -535,20 +565,26 @@ export function App() {
       const resolvedProvider = validateAgentProviderForOpen(projectId, provider);
       if (!resolvedProvider) return;
       if (isWorktreeUnavailable(proj) || proj.tabs.length >= proj.maxTabs) return;
-      const created = await queueProjectUpdate(projectId, () => runProjectOperation('create Agent View', () =>
-        projectCoordinator.save(projectId, { kind: PROJECT_MUTATION.CREATE_AGENT_VIEW, provider: resolvedProvider })));
-      if (created.status !== 'completed' || !created.value.ok) return;
-      const sessionId = created.value.sessionId;
-      if (!sessionId) throw new Error(`Missing created Agent session projectId=${projectId}`);
-      const nextIndex = getProjectIndexById(projectId);
-      const latestProject = getProjectById(projectId);
-      if (!latestProject || (proj.tabs.length > 0 && latestProject.tabs.length === 0)) {
-        window.shelfApi.app.debugLog('agent-view', `discarded stale create after disconnect projectId=${projectId} sessionId=${sessionId}`);
-        return;
-      }
-      if (!addTab(nextIndex, undefined, undefined, undefined, 'agent', resolvedProvider, undefined, sessionId)) {
-        window.shelfApi.app.debugLog('agent-view', `created View not mounted after runtime changed projectId=${projectId} sessionId=${sessionId}`);
-      }
+      await queueProjectUpdate(projectId, async () => {
+        const current = getProjectById(projectId);
+        if (!current || isWorktreeUnavailable(current) || current.tabs.length >= current.maxTabs) return;
+        const created = await runProjectOperation('create Agent View', () =>
+          projectCoordinator.save(projectId, { kind: PROJECT_MUTATION.CREATE_AGENT_VIEW, provider: resolvedProvider }));
+        if (created.status !== 'completed' || !created.value.ok) return;
+        const sessionId = created.value.sessionId;
+        if (!sessionId) throw new Error(`Missing created Agent session projectId=${projectId}`);
+        const nextIndex = getProjectIndexById(projectId);
+        const latestProject = getProjectById(projectId);
+        if (!latestProject || (proj.tabs.length > 0 && latestProject.tabs.length === 0)) {
+          window.shelfApi.app.debugLog('agent-view', `discarded stale create after disconnect projectId=${projectId} sessionId=${sessionId}`);
+          void cleanupAgentViews(projectId, [sessionId]);
+          return;
+        }
+        if (!addTab(nextIndex, undefined, undefined, undefined, 'agent', resolvedProvider, undefined, sessionId)) {
+          window.shelfApi.app.debugLog('agent-view', `created View not mounted after runtime changed projectId=${projectId} sessionId=${sessionId}`);
+          void cleanupAgentViews(projectId, [sessionId]);
+        }
+      });
     });
 
     const offNewWebTab = on(Events.NEW_WEB_TAB, (projectId: string, url?: string) => {
@@ -696,12 +732,13 @@ export function App() {
       // Was leaking: this only killed PTYs and forgot agent tabs, so an agent
       // session's exec (+ provider CLI) survived a project disconnect. Route
       // through teardownTab so agent backends are destroyed too.
-      proj.tabs.forEach(teardownTab);
+      const settled = Promise.all(proj.tabs.map(teardownTab)).then(() => {});
       // Remove all tabs but keep the project
       for (let t = proj.tabs.length - 1; t >= 0; t--) {
         removeTab(projectIndex, t);
       }
       setSplitTab(projectIndex, null);
+      void cleanupAgentViews(projectId, Object.keys(proj.agentViews), settled);
     });
 
     const offAddProject = on(Events.ADD_PROJECT, async (
@@ -722,6 +759,7 @@ export function App() {
       mutation: ProjectMutation,
       onSettled?: (result: ProjectMutationResult | { ok: false; error: string }) => void,
     ) => {
+      const candidates = Object.keys(getProjectById(projectId)?.agentViews ?? {});
       const result = await queueProjectUpdate(projectId, () => runProjectOperation('update', () => projectCoordinator.save(projectId, mutation)));
       if (result.status === 'cancelled') {
         console.warn(`[project-update] update not completed projectId=${projectId} kind=${mutation.kind}`);
@@ -729,6 +767,7 @@ export function App() {
       } else {
         if (!result.value.ok && !onSettled) console.warn('[project-update] unhandled conflict', { projectId, fields: result.value.conflicts });
         onSettled?.(result.value);
+        if (result.value.ok && mutation.kind === PROJECT_MUTATION.EDIT) void cleanupAgentViews(projectId, candidates);
       }
     });
 
@@ -788,6 +827,23 @@ export function App() {
 
   useEffect(() => {
     projectCoordinator.initialize()
+      .then(async () => {
+        // Capture before any new View creation: allocation can precede mounting.
+        const candidates = getProjectViews().map(project => ({ id: project.id, sessions: Object.keys(project.agentViews) }));
+        await Promise.all(candidates.map(project => cleanupAgentViews(project.id, project.sessions)));
+        for (const entry of await loadAgentHistoryCleanup()) {
+          const owner = getProjectViews().find(project => Object.hasOwn(project.agentViews, entry.sessionId));
+          if (getProjectById(entry.projectId) || owner) {
+            // Config deletion never committed (or was cancelled). The normal
+            // reference-based collector, not this journal, owns surviving Views.
+            await cancelAgentHistoryCleanup(entry.sessionId);
+            if (owner && owner.id !== entry.projectId) console.warn('[agent-view] cancelled stale cleanup for reassigned session', { ...entry, ownerProjectId: owner.id });
+          } else {
+            const result = await runProjectOperation(`retry deleted Agent history ${entry.sessionId}`, () => completeAgentHistoryCleanup(entry.sessionId));
+            if (result.status === 'cancelled') console.warn('[agent-view] deleted Project history cleanup deferred', entry);
+          }
+        }
+      })
       .then(() => projectCoordinator.getInvalidDirectoryIds())
       .then(setInvalidProjects)
       .catch((error) => reportProjectMutationError('initialize', error));

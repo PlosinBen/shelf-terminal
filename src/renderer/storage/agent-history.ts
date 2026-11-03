@@ -12,27 +12,28 @@ const DB_NAME = 'shelf-agent-history';
 // 'by-session-time' that lets `loadLatest` reverse-iterate the tail of a
 // session in O(limit). Save layer writes dirty snapshots by msg.id: a new id is
 // appended, while a later settled snapshot for the same id replaces its row.
-const DB_VERSION = 4;
+// v5 preserves v4 messages and adds a durable cleanup journal. It is not a
+// catalog of provider history: entries are only explicitly owned Shelf sessions.
+const DB_VERSION = 5;
 const STORE_NAME = 'messages';
+const CLEANUP_STORE = 'pending-cleanup';
 
 let dbPromise: Promise<IDBPDatabase> | null = null;
 
 function getDB(): Promise<IDBPDatabase> {
   if (!dbPromise) {
     dbPromise = openDB(DB_NAME, DB_VERSION, {
-      upgrade(db) {
+      upgrade(db, oldVersion) {
         // Clean break: drop any pre-v4 store and recreate. We don't migrate
         // legacy rows — the old union shape is gone, and reviving them as
         // new types is more code than the developer-user audience needs.
-        if (db.objectStoreNames.contains(STORE_NAME)) {
-          db.deleteObjectStore(STORE_NAME);
+        if (oldVersion < 4) {
+          if (db.objectStoreNames.contains(STORE_NAME)) db.deleteObjectStore(STORE_NAME);
+          const store = db.createObjectStore(STORE_NAME, { keyPath: 'dbId', autoIncrement: true });
+          store.createIndex('by-session', 'sessionId');
+          store.createIndex('by-session-time', ['sessionId', 'timestamp']);
         }
-        const store = db.createObjectStore(STORE_NAME, {
-          keyPath: 'dbId',
-          autoIncrement: true,
-        });
-        store.createIndex('by-session', 'sessionId');
-        store.createIndex('by-session-time', ['sessionId', 'timestamp']);
+        db.createObjectStore(CLEANUP_STORE, { keyPath: 'sessionId' });
       },
     });
   }
@@ -155,13 +156,50 @@ export async function saveAgentMessagesDelta(
 }
 
 export async function clearAgentSession(sessionId: string): Promise<void> {
+  return deleteAgentHistory(sessionId, false);
+}
+
+/** Finish an explicit cleanup request atomically with deleting its messages. A
+ * normal in-View Clear History must not cancel a pending Project deletion. */
+export async function completeAgentHistoryCleanup(sessionId: string): Promise<void> {
+  return deleteAgentHistory(sessionId, true);
+}
+
+async function deleteAgentHistory(sessionId: string, completeCleanup: boolean): Promise<void> {
   const db = await getDB();
-  const tx = db.transaction(STORE_NAME, 'readwrite');
+  const tx = db.transaction([STORE_NAME, CLEANUP_STORE], 'readwrite');
   const store = tx.objectStore(STORE_NAME);
   const idx = store.index('by-session');
   const keys = await idx.getAllKeys(sessionId);
   for (const key of keys) {
     await store.delete(key);
   }
+  if (completeCleanup) await tx.objectStore(CLEANUP_STORE).delete(sessionId);
   await tx.done;
+}
+
+export interface AgentHistoryCleanup {
+  sessionId: string;
+  projectId: string;
+}
+
+/** Stage before deleting Project config so failed/interrupted history cleanup
+ * can be retried even after the Project itself no longer exists. */
+export async function queueAgentHistoryCleanup(projectId: string, sessionIds: readonly string[]): Promise<void> {
+  if (sessionIds.length === 0) return;
+  const db = await getDB();
+  const tx = db.transaction(CLEANUP_STORE, 'readwrite');
+  const store = tx.objectStore(CLEANUP_STORE);
+  for (const sessionId of sessionIds) await store.put({ projectId, sessionId });
+  await tx.done;
+}
+
+export async function loadAgentHistoryCleanup(): Promise<AgentHistoryCleanup[]> {
+  const db = await getDB();
+  return db.getAll(CLEANUP_STORE);
+}
+
+export async function cancelAgentHistoryCleanup(sessionId: string): Promise<void> {
+  const db = await getDB();
+  await db.delete(CLEANUP_STORE, sessionId);
 }

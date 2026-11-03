@@ -332,7 +332,7 @@ test.describe('agent flows via fake provider', () => {
       // write-side contract under regression here.
       const persisted = await page.evaluate(async () => {
         const db = await new Promise<IDBDatabase>((resolve, reject) => {
-          const request = indexedDB.open('shelf-agent-history', 4);
+          const request = indexedDB.open('shelf-agent-history');
           request.onsuccess = () => resolve(request.result);
           request.onerror = () => reject(request.error);
         });

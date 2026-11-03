@@ -237,6 +237,7 @@ interface PendingSave {
   deletedIds: Set<string>;
 }
 const pendingSaves = new Map<string, PendingSave>();
+const historyWrites = new Map<string, Set<Promise<void>>>();
 
 function ensurePendingSave(tabId: string): PendingSave {
   const existing = pendingSaves.get(tabId);
@@ -269,7 +270,7 @@ function flushSave(tabId: string) {
   doSaveCallback(tabId);
 }
 
-function doSaveCallback(tabId: string) {
+function doSaveCallback(tabId: string, closing = false) {
   const entry = pendingSaves.get(tabId);
   if (!entry) return;
   const tab = tabs.get(tabId);
@@ -281,14 +282,23 @@ function doSaveCallback(tabId: string) {
   // dropped it and relied on the next save rewriting everything; delta
   // save can't recover lost dirtyMsgs that way). Re-arm the timer
   // instead so we retry next window.
-  if (tab.isExecutionActive) {
+  if (tab.isExecutionActive && !closing) {
     entry.timer = setTimeout(() => doSaveCallback(tabId), saveThrottleMs);
     return;
   }
   pendingSaves.delete(tabId);
   const dirty = [...entry.dirtyMsgs.values()];
-  saveAgentMessagesDelta(tab.sessionId, dirty, entry.deletedIds).catch((err) => {
-    console.error('[agentTabStore] saveAgentMessagesDelta failed', err);
+  const writes = historyWrites.get(tabId) ?? new Set<Promise<void>>();
+  historyWrites.set(tabId, writes);
+  const write = saveAgentMessagesDelta(tab.sessionId, dirty, entry.deletedIds);
+  writes.add(write);
+  const finished = () => {
+    writes.delete(write);
+    if (historyWrites.get(tabId) === writes && writes.size === 0) historyWrites.delete(tabId);
+  };
+  void write.then(finished, (err) => {
+    console.error('[agentTabStore] saveAgentMessagesDelta failed', { tabId, sessionId: tab.sessionId, error: err });
+    finished();
   });
 }
 
@@ -413,10 +423,19 @@ export function initTab(tabId: string, opts: InitTabOpts) {
 
 export function removeTab(tabId: string) {
   historyLoadTokens.delete(tabId);
-  flushSave(tabId);
+  const entry = pendingSaves.get(tabId);
+  if (entry) {
+    clearTimeout(entry.timer);
+    doSaveCallback(tabId, true);
+  }
   clearChunkBuffer(tabId);
   tabs.delete(tabId);
   listeners.delete(tabId);
+  const settled = Promise.all([...(historyWrites.get(tabId) ?? [])]).then(() => {});
+  // Legacy teardown callers do not await; still report failure without an
+  // unhandled rejection. Cleanup callers await the original rejecting promise.
+  void settled.catch(error => console.error('[agentTabStore] history teardown failed', { tabId, error }));
+  return settled;
 }
 
 // ── Message actions ──
@@ -1020,6 +1039,7 @@ export function buildMessageTimeline(messages: AgentMsg[]): MessageTimeline {
 export function __resetStoreForTests() {
   for (const { timer } of pendingSaves.values()) clearTimeout(timer);
   pendingSaves.clear();
+  historyWrites.clear();
   for (const t of chunkTimers.values()) clearTimeout(t);
   chunkTimers.clear();
   pendingChunks.clear();

@@ -179,6 +179,30 @@ describe('agentTabStore — lifecycle', () => {
     // flushSave fires synchronously inside removeTab.
     expect(mockedStorage.saveAgentMessagesDelta).toHaveBeenCalledTimes(1);
   });
+
+  it('removeTab waits for an already-running history write before allowing cleanup', async () => {
+    initTab(TAB, { sessionId: SESSION, provider: 'claude' });
+    let finish!: () => void;
+    mockedStorage.saveAgentMessagesDelta.mockReturnValueOnce(new Promise<void>(resolve => { finish = resolve; }));
+    upsertMessage(TAB, textMsg('m1', 'in flight'));
+    vi.advanceTimersByTime(5001);
+    let settled = false;
+    const closing = Promise.resolve(removeTab(TAB)).then(() => { settled = true; });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    finish();
+    await closing;
+    expect(settled).toBe(true);
+  });
+
+  it('removeTab settles active execution dirty history without leaving a deferred writer', async () => {
+    initTab(TAB, { sessionId: SESSION, provider: 'claude' });
+    setExecutionActive(TAB, true);
+    upsertMessage(TAB, userMsg('u1', 'pending user input'));
+    await removeTab(TAB);
+    expect(mockedStorage.saveAgentMessagesDelta).toHaveBeenCalledWith(SESSION, [userMsg('u1', 'pending user input')], expect.any(Set));
+    expect(__getPendingSaveForTests(TAB)).toBeUndefined();
+  });
 });
 
 describe('agentTabStore — IDB load merge (race-safe)', () => {

@@ -257,7 +257,8 @@ title: shelf-terminal — Intent → File Index
 | Tooltip 快捷鍵 helper | `utils/format-keybinding.ts` | 純函式 `formatCombo` / `tooltipWithShortcut` |
 | PM stream reducer | `components/pm-view-reducer.ts` | 純 reducer 管 PM streaming/streamText/streamToolCalls/error 四個 UI state |
 | Project 編輯面板 | `components/ProjectEditPanel.tsx` + `tab-default-template.ts` | 改名、init script、feature-note directory、typed startup tabs、Terminal-only quick commands、runtime tab → default template、Clear uploaded files |
-| Agent UI 訊息持久化 | `storage/agent-history.ts` | IndexedDB 存 UI messages keyed by sessionId（append-only delta save） |
+| Agent UI 訊息持久化 | `storage/agent-history.ts` | IndexedDB session/message upsert、Project 刪除清理待辦與原子完成 |
+| 未引用 Agent View 回收 | `agent-view-cleanup.ts` | Default／runtime 引用保護、等待 teardown 與 history-before-metadata 清理 |
 | Canonical Agent message type | `src/shared/types.ts` (`AgentMessage`) | 9-variant 渲染原語 discriminated union（inline + fold_* 卡片類） |
 | Inline SVG icon | `components/icons.tsx` | 手繪原創 line icon（24x24，`currentColor`），footer toggle 用 |
 | 主題定義 | `themes.ts` | 5 個內建主題（terminal + UI 色彩） |

@@ -3,7 +3,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { log } from '@shared/logger';
 import { sameProjectTarget } from '@shared/project-target';
 import { isWorktreeUnavailable } from '@shared/worktree';
-import type { ProjectMutation, ProjectMutationResult } from '@shared/project-mutations';
+import { PROJECT_MUTATION, type ProjectMutation, type ProjectMutationResult } from '@shared/project-mutations';
 import { applyProjectMutation } from './project-mutation';
 import { materializeAgentDefaults } from './agent-view-config';
 import type {
@@ -283,7 +283,7 @@ export function createMainProjectsRepository(
     async mutate(projectId, mutation) {
       const current = projects.find(project => project.id === projectId);
       if (!current) throw new ProjectRepositoryError('save', `Project not found: ${projectId}`);
-      if (isWorktreeUnavailable(current)) throw new ProjectRepositoryError('save', 'Worktree is unavailable; rescan before editing');
+      if (isWorktreeUnavailable(current) && mutation.kind !== PROJECT_MUTATION.FORGET_AGENT_VIEW) throw new ProjectRepositoryError('save', 'Worktree is unavailable; rescan before editing');
       const result = applyProjectMutation(current, mutation);
       if (!result.ok) return result;
       if (!isDeepStrictEqual(current, result.project)) {

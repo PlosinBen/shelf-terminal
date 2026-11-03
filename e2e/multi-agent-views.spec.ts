@@ -32,6 +32,132 @@ async function configureA(page: Page) {
   await expect(page.locator('.agent-status-seg:visible', { hasText: 'fake-model-pro' })).toBeVisible();
 }
 
+async function historyRows(page: Page) {
+  return page.evaluate(async () => {
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open('shelf-agent-history');
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    try {
+      return await new Promise<any[]>((resolve, reject) => {
+        const request = db.transaction('messages', 'readonly').objectStore('messages').getAll();
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+    } finally { db.close(); }
+  });
+}
+
+test('closing or disconnecting temporary Views collects only their history and metadata', async ({ shelfApp: { page } }) => {
+  await setup(page);
+  await openAgentTab(page); await sendAgentPrompt(page, 'text:keep-default'); await save(page, 1);
+  const saved = (await page.evaluate(() => window.shelfApi.project.getAll()))[0];
+  await openAgentTab(page); await sendAgentPrompt(page, 'text:discard-temporary');
+  await expect(page.locator('.agent-status-label:visible')).toHaveText('idle');
+  await page.locator('.tab-bar .tab').last().locator('.tab-close').click();
+  await expect.poll(async () => Object.keys((await page.evaluate(() => window.shelfApi.project.getAll()))[0].agentViews)).toEqual(Object.keys(saved.agentViews));
+  expect((await historyRows(page)).some(row => row.content === 'discard-temporary')).toBe(false);
+  await reconnect(page);
+  await page.locator('.tab-bar .tab').nth(1).click();
+  await expect(page.locator('.agent-msg:visible', { hasText: 'keep-default' }).last()).toBeVisible();
+  await openAgentTab(page); await sendAgentPrompt(page, 'text:disconnect-temporary');
+  await expect(page.locator('.agent-status-label:visible')).toHaveText('idle');
+  await reconnect(page);
+  await expect.poll(async () => Object.keys((await page.evaluate(() => window.shelfApi.project.getAll()))[0].agentViews)).toEqual(Object.keys(saved.agentViews));
+  expect((await historyRows(page)).some(row => row.content === 'disconnect-temporary')).toBe(false);
+  await page.locator('.tab-bar .tab').nth(1).click();
+  await expect(page.locator('.agent-msg:visible', { hasText: 'keep-default' }).last()).toBeVisible();
+});
+
+test('removing a Default collects a closed View but preserves a live View until close', async ({ shelfApp: { page } }) => {
+  await setup(page);
+  const removeDefault = async () => {
+    await page.locator('.sidebar-item').first().click({ button: 'right' });
+    await page.locator('.context-menu-item', { hasText: 'Edit', exact: true }).click();
+    const panel = page.locator('.project-edit-panel');
+    await panel.locator('.default-tab-row').nth(1).locator('.default-tab-remove').click();
+    await panel.getByRole('button', { name: 'Save', exact: true }).click();
+    await expect(panel).not.toBeVisible();
+  };
+  await openAgentTab(page); await sendAgentPrompt(page, 'text:closed-default'); await save(page, 1);
+  await page.locator('.tab-bar .tab').last().locator('.tab-close').click();
+  await removeDefault();
+  await expect.poll(async () => Object.keys((await page.evaluate(() => window.shelfApi.project.getAll()))[0].agentViews).length).toBe(0);
+  expect((await historyRows(page)).some(row => row.content === 'closed-default')).toBe(false);
+  await openAgentTab(page); await sendAgentPrompt(page, 'text:live-default'); await save(page, 1);
+  await removeDefault();
+  expect(Object.keys((await page.evaluate(() => window.shelfApi.project.getAll()))[0].agentViews)).toHaveLength(1);
+  await expect(page.locator('.agent-msg:visible', { hasText: 'live-default' }).last()).toBeVisible();
+  await page.locator('.tab-bar .tab').last().locator('.tab-close').click();
+  await expect.poll(async () => Object.keys((await page.evaluate(() => window.shelfApi.project.getAll()))[0].agentViews).length).toBe(0);
+});
+
+test('failed history clear retains ownership and retries on renderer startup', async ({ shelfApp: { app, page } }) => {
+  await setup(page); await openAgentTab(page); await sendAgentPrompt(page, 'text:retry-clear');
+  await expect(page.locator('.agent-status-label:visible')).toHaveText('idle');
+  await app.evaluate(({ dialog }) => {
+    (globalThis as any).__historyCleanupPrompts = 0;
+    (dialog as any).showMessageBox = async (_window: unknown, options: { title?: string }) => {
+      if (options.title === 'Project update failed') (globalThis as any).__historyCleanupPrompts++;
+      return { response: 1, checkboxChecked: false };
+    };
+  });
+  await page.evaluate(() => {
+    const original = IDBObjectStore.prototype.delete;
+    (window as any).__restoreHistoryDelete = () => { IDBObjectStore.prototype.delete = original; };
+    IDBObjectStore.prototype.delete = function (key) {
+      if (this.name === 'messages') throw new Error('simulated history clear failure');
+      return original.call(this, key);
+    };
+  });
+  await page.locator('.tab-bar .tab').last().locator('.tab-close').click();
+  await expect.poll(() => app.evaluate(() => (globalThis as any).__historyCleanupPrompts)).toBe(1);
+  expect(Object.keys((await page.evaluate(() => window.shelfApi.project.getAll()))[0].agentViews)).toHaveLength(1);
+  expect((await historyRows(page)).some(row => row.content === 'retry-clear')).toBe(true);
+  await page.evaluate(() => (window as any).__restoreHistoryDelete());
+  await page.reload();
+  await expect.poll(async () => Object.keys((await page.evaluate(() => window.shelfApi.project.getAll()))[0].agentViews).length).toBe(0);
+  expect((await historyRows(page)).some(row => row.content === 'retry-clear')).toBe(false);
+});
+
+test('deleted Project cleanup survives cancellation and does not sweep unknown history', async ({ shelfApp: { app, page } }) => {
+  await setup(page); await openAgentTab(page); await sendAgentPrompt(page, 'text:deleted-retry');
+  await expect(page.locator('.agent-status-label:visible')).toHaveText('idle');
+  await app.evaluate(({ dialog }) => {
+    (globalThis as any).__deleteHistoryPrompts = 0;
+    (dialog as any).showMessageBox = async (_window: unknown, options: { title?: string }) => {
+      if (options.title === 'Project update failed') (globalThis as any).__deleteHistoryPrompts++;
+      return { response: 1, checkboxChecked: false };
+    };
+  });
+  await page.evaluate(async () => {
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open('shelf-agent-history');
+      request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error);
+    });
+    const tx = db.transaction('messages', 'readwrite');
+    tx.objectStore('messages').add({ sessionId: 'unknown-owner', id: 'old-history', type: 'user', content: 'unknown-history', timestamp: 1 });
+    await new Promise<void>((resolve, reject) => { tx.oncomplete = () => resolve(); tx.onerror = () => reject(tx.error); });
+    db.close();
+    const original = IDBObjectStore.prototype.delete;
+    IDBObjectStore.prototype.delete = function (key) {
+      if (this.name === 'messages') throw new Error('simulated deleted Project history failure');
+      return original.call(this, key);
+    };
+  });
+  await page.locator('.sidebar-item').first().click({ button: 'right' });
+  await page.locator('.context-menu-item', { hasText: 'Remove', exact: true }).click();
+  await page.locator('.conn-btn-danger', { hasText: 'Remove', exact: true }).click();
+  await expect.poll(() => app.evaluate(() => (globalThis as any).__deleteHistoryPrompts)).toBe(1);
+  expect(await page.evaluate(() => window.shelfApi.project.getAll())).toEqual([]);
+  expect((await historyRows(page)).some(row => row.content === 'deleted-retry')).toBe(true);
+  // Reload drops the injected failure but retains the real IndexedDB journal.
+  await page.reload();
+  await expect.poll(async () => (await historyRows(page)).some(row => row.content === 'deleted-retry')).toBe(false);
+  expect((await historyRows(page)).some(row => row.content === 'unknown-history')).toBe(true);
+});
+
 test('same-provider Views keep separate history/settings and Default references across reconnect', async ({ shelfApp: { page } }) => {
   await setup(page);
   await openAgentTab(page);
@@ -120,7 +246,7 @@ test('saved same-provider Views restore after app restart', async ({ shelfApp: {
   // Establish durable input before exiting; quit/flush policy is a separate scope.
   await expect.poll(() => page.evaluate(async () => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open('shelf-agent-history', 4);
+      const request = indexedDB.open('shelf-agent-history');
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
@@ -132,11 +258,15 @@ test('saved same-provider Views restore after app restart', async ({ shelfApp: {
     db.close();
     return rows.filter(row => row.type === 'reply' && ['restart-alpha', 'restart-beta'].includes(row.content)).length;
   }), { timeout: 10_000 }).toBe(2);
+  await openAgentTab(page); await sendAgentPrompt(page, 'text:restart-temporary');
+  await expect.poll(async () => (await historyRows(page)).filter(row => row.content === 'restart-temporary').length, { timeout: 10_000 }).toBeGreaterThan(0);
   await app.close();
   const restarted = await electron.launch({ args: [path.join(__dirname, '..'), `--user-data-dir=${userDataDir}`], env: { ...process.env, NODE_ENV: 'test', SHELF_TEST_MODE: '1', [FAKE_TEST_ENV.NATIVE_PERMISSIONS]: '1' } });
   try {
     const next = await restarted.firstWindow();
     await next.waitForSelector('.app');
+    await expect.poll(async () => Object.keys((await next.evaluate(() => window.shelfApi.project.getAll()))[0].agentViews)).toEqual(Object.keys(before.agentViews));
+    expect((await historyRows(next)).some(row => row.content === 'restart-temporary')).toBe(false);
     await next.locator('.sidebar-item').first().click();
     await next.locator('.connect-prompt').click();
     await expect(next.locator('.tab-bar .tab')).toHaveCount(3);
@@ -177,18 +307,21 @@ test('Project editor creates separate same-provider defaults and cancel allocate
   await expect(page.locator('.tab-bar .tab')).toHaveCount(3);
 });
 
-test('Project deletion clears history of closed and live Views even when not saved to Default', async ({ shelfApp: { page } }) => {
+test('Project deletion clears history of a closed Default View and a live temporary View', async ({ shelfApp: { page } }) => {
   await setup(page);
   for (const text of ['delete-alpha', 'delete-beta']) {
     await openAgentTab(page);
     await sendAgentPrompt(page, `text:${text}`);
     await expect(page.locator('.agent-msg:visible').last()).toContainText(text);
     await expect(page.locator('.agent-status-label:visible')).toHaveText('idle');
-    if (text === 'delete-alpha') await page.locator('.tab-bar .tab').last().locator('.tab-close').click();
+    if (text === 'delete-alpha') {
+      await save(page, 1);
+      await page.locator('.tab-bar .tab').last().locator('.tab-close').click();
+    }
   }
   const countRows = () => page.evaluate(async () => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open('shelf-agent-history', 4);
+      const request = indexedDB.open('shelf-agent-history');
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
@@ -202,7 +335,7 @@ test('Project deletion clears history of closed and live Views even when not sav
   });
   await expect.poll(countRows).toBeGreaterThanOrEqual(1);
   const project = (await page.evaluate(() => window.shelfApi.project.getAll()))[0];
-  expect(project.defaultTabs).toHaveLength(1);
+  expect(project.defaultTabs).toHaveLength(2);
   expect(Object.keys(project.agentViews)).toHaveLength(2);
   await page.locator('.sidebar-item').first().click({ button: 'right' });
   await page.locator('.context-menu-item', { hasText: 'Remove', exact: true }).click();

@@ -7,6 +7,7 @@ export const PROJECT_MUTATION = {
   EDIT: 'edit',
   AGENT_REPORT: 'agent-report',
   CREATE_AGENT_VIEW: 'create-agent-view',
+  FORGET_AGENT_VIEW: 'forget-agent-view',
   APPEND_DEFAULT_TAB: 'append-default-tab',
   CLEAR_AGENT_PREF: 'clear-agent-pref',
 } as const;
@@ -35,6 +36,7 @@ export type ProjectMutation =
   | { kind: typeof PROJECT_MUTATION.EDIT; edits: readonly ProjectFieldEdit[] }
   | { kind: typeof PROJECT_MUTATION.AGENT_REPORT; sessionId: string; report: AgentPreferenceReport }
   | { kind: typeof PROJECT_MUTATION.CREATE_AGENT_VIEW; provider: string }
+  | { kind: typeof PROJECT_MUTATION.FORGET_AGENT_VIEW; sessionId: string }
   | { kind: typeof PROJECT_MUTATION.APPEND_DEFAULT_TAB; tab: TabTemplate }
   | { kind: typeof PROJECT_MUTATION.CLEAR_AGENT_PREF; sessionId: string; key: ConfigEditKey; savedValue: string };
 

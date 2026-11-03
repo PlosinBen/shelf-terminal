@@ -23,6 +23,20 @@ beforeEach(() => {
 });
 
 describe('teardownTab', () => {
+  it('waits for backend destruction and renderer history settlement', async () => {
+    let finishBackend!: () => void;
+    let finishHistory!: () => void;
+    destroy.mockReturnValueOnce(new Promise<void>(resolve => { finishBackend = resolve; }));
+    removeTabStore.mockReturnValueOnce(new Promise<void>(resolve => { finishHistory = resolve; }));
+    let settled = false;
+    const closing = Promise.resolve(teardownTab({ id: 'a1', type: 'agent' })).then(() => { settled = true; });
+    finishBackend();
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    finishHistory();
+    await closing;
+    expect(settled).toBe(true);
+  });
   // Regression: DISCONNECT_PROJECT forgot the agent branch, leaking the
   // agent-server exec (+ provider CLI). Every path now routes through this fn.
   it('agent tab → destroys the backend and removes renderer state', () => {

@@ -80,7 +80,9 @@ Identical save, missing delete, and same-group reorder are successful no-ops. Mi
 
 `add()` rejects before persistence when another canonical project has the same effective target. Persisted load and `save()` do not enforce this uniqueness rule, so existing duplicate records remain valid.
 
-After durable Project deletion, renderer tears down its tabs before clearing IndexedDB history for every session in its Agent records. This ordering prevents teardown's pending flush from recreating deleted rows. History clear is awaited with Retry/Cancel; main target/storage cleanup retains its separate retry result.
+Before Project deletion, renderer stages an IndexedDB pending-cleanup entry for every Agent record. After durable config deletion, it waits for backend teardown and renderer history writes, then clears history and its pending entry atomically. Retry/Cancel is available; cancelled/failed clears retain durable retry inventory for startup. Main target/storage cleanup retains its separate retry result.
+
+Closing/disconnecting collects a View only when neither Default nor runtime references it. Removing a Default collects an already-closed View after successful save; a still-live View remains until close. Startup applies the same rule to unused canonical records. Collection clears history before forgetting metadata, runs within the per-project update queue, and does not scan unknown history or delete provider-native files. Referenced unknown-provider records remain retained.
 
 Effective target comparison is defined by `src/shared/project-target.ts`:
 
@@ -121,6 +123,7 @@ Authoritative types/constants: `src/shared/project-mutations.ts`. Tags are defin
 | `EDIT` | `{ edits: [{ field, before, value }] }` | Only fields in `PROJECT_EDIT_FIELDS`; reject the entire edit if any latest field differs from both `before` and `value`. Already-satisfied values succeed. Duplicate/unknown fields reject. |
 | `AGENT_REPORT` | `{ sessionId, report }` | Merge confirmed/reported prefs into that existing View only; empty confirmed patches do not pin defaults. |
 | `CREATE_AGENT_VIEW` | `{ provider }` | Allocate a fresh session with empty prefs; return `{ ok: true, sessionId }` after persistence. Does not append a Default. |
+| `FORGET_AGENT_VIEW` | `{ sessionId }` | Forget collected metadata after history clear; reject a latest Default reference, and succeed idempotently when already absent. This local cleanup remains permitted for unavailable worktrees. App must first establish no live runtime reference and settled teardown. |
 | `APPEND_DEFAULT_TAB` | `{ tab }` | Append to latest list; Agent references must match an existing View. Same session already present is a no-op; same provider is allowed. |
 | `CLEAR_AGENT_PREF` | `{ sessionId, key, savedValue }` | Delete only that View's matching saved value; preserve other Views and newer values. |
 

@@ -4,6 +4,24 @@ import { PROJECT_MUTATION as M } from '@shared/project-mutations';
 import { formatProjectsDocument, loadProjectsDocument } from './project-config-codec';
 import { applyProjectMutation } from './project-mutation';
 
+it('forgets unused metadata idempotently but refuses to forget a Default session', async () => {
+  const result = createMainProjectsRepository({ load: () => ({ ok: true, value: [] }), save: async () => ({ ok: true }) }, () => 'p', { cleanup: async () => {} });
+  if (!result.ok) throw new Error('fixture');
+  const repo = result.repository;
+  await repo.add({ name: 'p', cwd: '/p', maxTabs: 5, connection: { type: 'local' } });
+  const created = await repo.mutate('p', { kind: M.CREATE_AGENT_VIEW, provider: 'claude' });
+  if (!created.ok || !created.sessionId) throw new Error('fixture');
+  const sessionId = created.sessionId;
+  await repo.mutate('p', { kind: M.APPEND_DEFAULT_TAB, tab: { kind: 'agent', provider: 'claude', name: 'A', sessionId } });
+  await expect(repo.mutate('p', { kind: M.FORGET_AGENT_VIEW, sessionId })).rejects.toThrow('Default');
+  const before = repo.get('p')!.defaultTabs;
+  await repo.mutate('p', { kind: M.EDIT, edits: [{ field: 'defaultTabs', before, value: [{ name: 'Terminal' }] }] });
+  await repo.save({ ...repo.get('p')!, worktreeState: { availability: 'missing', identity: null } });
+  await repo.mutate('p', { kind: M.FORGET_AGENT_VIEW, sessionId });
+  expect(repo.get('p')!.agentViews).not.toHaveProperty(sessionId);
+  await expect(repo.mutate('p', { kind: M.FORGET_AGENT_VIEW, sessionId })).resolves.toEqual({ ok: true });
+});
+
 it('keeps same-provider Views independent and saves references without copying preferences', async () => {
   const result = createMainProjectsRepository({ load: () => ({ ok: true, value: [] }), save: vi.fn(async () => ({ ok: true as const })) }, () => 'p', { cleanup: async () => {} });
   if (!result.ok) throw new Error('repository unavailable');

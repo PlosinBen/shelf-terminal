@@ -59,7 +59,7 @@ canonical `Project.agentViews[sessionId]` 保存 provider／prefs；兩層持久
 
 **清理策略**：
 - Server-side：不按閒置天數掃描刪除 context；明確 clear 仍可刪除。讀取損壞檔案留錯誤紀錄，不由全域掃描刪除其他 session 的資料。
-- Client-side：remove project 時清對應 session，不做定期掃描（在本機且跟 project 生命週期綁定）
+- Client-side：Default 或 live runtime 引用的 session 保留；兩者皆無時，等待 teardown／history writers 完成後清 history，成功再移除 canonical record。啟動回收中斷流程遺留的未引用 record；Project 刪除前將 session 歸屬寫入 IndexedDB 清理待辦，失敗／退出後仍可重試。不掃未知歸屬 history，詳見 projects#14。
 
 **Reason**: Server-side context 被 compaction 或 SDK 管理，無法恢復原始 UI。IndexedDB 在 renderer 直接可用。target-wide context 目錄沒有完整 ownership 清單，單純過期掃描可能清掉仍在 Default 的恢復指標；因此保守保留，包括臨時 View context，不引入額外 GC。
 

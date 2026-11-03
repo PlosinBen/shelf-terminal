@@ -59,7 +59,7 @@ test.describe('agent init-readiness gate', () => {
       // reloading so this test isolates model recovery from save scheduling.
       await expect.poll(() => page.evaluate(async () => {
         const db = await new Promise<IDBDatabase>((resolve, reject) => {
-          const request = indexedDB.open('shelf-agent-history', 4);
+          const request = indexedDB.open('shelf-agent-history');
           request.onsuccess = () => resolve(request.result);
           request.onerror = () => reject(request.error);
         });

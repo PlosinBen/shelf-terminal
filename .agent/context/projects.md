@@ -91,7 +91,7 @@ related:
 ### Gotchas
 
 - Retry/Cancel is user-controlled; repeated refresh failures remain refresh-only until the user cancels.
-- Renderer history deletion follows tab teardown, because teardown flushes pending idle writes. Clearing first lets that flush resurrect deleted rows. Await the final clears and expose retry/cancel on failure; enumerate every Agent record, not only startup or live tabs.
+- Renderer history deletion waits for backend teardown and all tracked history writes. Clearing first lets a late flush resurrect deleted rows. Stage a durable IndexedDB cleanup request before config deletion; complete it atomically with the final history clear. Expose retry/cancel on failure and enumerate every Agent record, not only startup or live tabs; see projects#14.
 - Worktree auto-connect begins only after child add returns its main-owned id and renderer reconcile completes; recheck that both parent and child still exist.
 - A single renderer can have concurrent in-flight mutations. Use the repository's existing serialization with latest-base intents; do not infer that whole-project revisions or an edit-lifetime lock are necessary. See projects#13.
 
@@ -131,7 +131,7 @@ The focused input owns keyboard handling. Up/Down moves a transient candidate wi
 
 ## projects#10 — One ordered typed list owns project startup tabs  ·  [Decision]
 
-**Decision:** `Project.defaultTabs` is the only connect-time startup source and is always non-empty. Terminal, Web and Agent variants share one ordered list. Agent rows carry provider plus a stable session reference; same-provider Views are allowed, duplicate session references are not. `agentViews` owns provider/prefs, and the row's provider assertion must match. Project Settings preserves references while editing layout; adding an Agent or changing its provider materializes a fresh record only on Save. Cancel does not allocate data. Unknown provider records remain recoverable.
+**Decision:** `Project.defaultTabs` is the only connect-time startup source and is always non-empty. Terminal, Web and Agent variants share one ordered list. Agent rows carry provider plus a stable session reference; same-provider Views are allowed, duplicate session references are not. `agentViews` owns provider/prefs, and the row's provider assertion must match. Project Settings preserves references while editing layout; adding an Agent or changing its provider materializes a fresh record only on Save. Cancel does not allocate data. Unknown providers remain valid stored data; retention follows references, not provider availability.
 
 Runtime `Save to Default` preserves the actual tab variant and its kind-specific payload. Manual Agent creation always carries an explicit provider. Neither path guesses a provider or falls back to a project-level default.
 
@@ -183,3 +183,30 @@ replace main's authority or block other projects.
   the latest values for explicit Reset Changes; a failed refresh must not offer stale values as latest.
 - Completion from a closed/replaced editor must not close the new editor. Check edit generation and
   the current store target, not only a captured React closure.
+
+## projects#14 — Retain Agent history by Default/live references, not inactivity  ·  [Decision]
+
+**Decision:** A Default reference or live runtime retains a View's Shelf history and canonical metadata.
+Closing a temporary View discards it after backend teardown and all renderer history writes settle.
+Removing a Default collects a closed View after the edit commits, but preserves a live View until close.
+Disconnect applies the same rule; startup collects unused records left by interrupted lifetimes. Collection
+holds the per-project update queue across deletion, metadata removal and recovery. View allocation and
+mounting share that queue so a newly allocated View cannot be mistaken for unused history.
+
+**Reason:** Save to Default is the existing keep/restore action. There is no separate history catalog to
+recover a closed temporary View. Keeping inaccessible records indefinitely accumulates storage; an age
+limit risks deleting a still-saved View and does not express user intent.
+
+**Do not change casually because:** Clear history before forgetting the canonical record; a failed clear
+must retain ownership for retry. Project deletion is commit-first, so a durable IndexedDB pending-cleanup
+entry is staged before config removal and completed atomically with history deletion. Startup cancels a
+stale deletion request if any surviving Project owns its session. Unknown history is not guessed at or
+swept. These operations affect Shelf UI history/metadata only, not provider-native files or target context GC.
+
+### Gotchas
+
+- Removing a runtime tab is not evidence that its writes have finished. Await already-running saves as
+  well as its final flush; stop deferred timers even when closing during active execution. Failed teardown
+  blocks collection for that session until restart. Collection failures are logged and shown with retry/cancel.
+- Normal in-View Clear History must not remove a pending Project deletion request. Only explicit cleanup
+  completion removes that request; otherwise an intervening Clear History can lose post-delete retry ownership.

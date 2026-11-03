@@ -6,6 +6,13 @@ import { removeTab as removeAgentTabState } from './agentTabStore';
 export interface TeardownTab {
   id: string;
   type: TabType;
+  sessionId?: string;
+}
+
+const settlingAgentViews = new Map<string, Promise<void>>();
+
+export function waitForAgentViewTeardown(sessionId: string): Promise<void> {
+  return settlingAgentViews.get(sessionId) ?? Promise.resolve();
 }
 
 /**
@@ -22,12 +29,24 @@ export interface TeardownTab {
  * - `terminal` → kill the PTY + dispose the xterm instance.
  * - `web`    → nothing: the <webview> tears down on unmount.
  */
-export function teardownTab(tab: TeardownTab): void {
+export function teardownTab(tab: TeardownTab): Promise<void> {
   if (tab.type === 'agent') {
-    window.shelfApi.agent.destroy(tab.id);
-    removeAgentTabState(tab.id);
+    const settled = Promise.all([
+      window.shelfApi.agent.destroy(tab.id),
+      removeAgentTabState(tab.id),
+    ]).then(() => {});
+    if (tab.sessionId) {
+      const sessionId = tab.sessionId;
+      settlingAgentViews.set(sessionId, settled);
+      void settled.then(() => {
+        if (settlingAgentViews.get(sessionId) === settled) settlingAgentViews.delete(sessionId);
+      }, () => { /* Keep a failed teardown blocking collection until restart. */ });
+    }
+    void settled.catch(error => console.error('[agent-view] teardown failed; history retained', { tabId: tab.id, error }));
+    return settled;
   } else if (tab.type === 'terminal') {
     window.shelfApi.pty.kill(tab.id);
     disposeTerminal(tab.id);
   }
+  return Promise.resolve();
 }

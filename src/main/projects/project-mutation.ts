@@ -16,9 +16,18 @@ export function applyProjectMutation(current: Project, mutation: ProjectMutation
   if ('provider' in mutation) nonempty(mutation.provider, 'provider');
   if ('sessionId' in mutation) {
     nonempty(mutation.sessionId, 'sessionId');
-    if (!Object.hasOwn(current.agentViews, mutation.sessionId)) throw new Error(`Unknown Agent session ${mutation.sessionId}`);
+    if (mutation.kind !== PROJECT_MUTATION.FORGET_AGENT_VIEW && !Object.hasOwn(current.agentViews, mutation.sessionId)) throw new Error(`Unknown Agent session ${mutation.sessionId}`);
   }
   switch (mutation.kind) {
+    case PROJECT_MUTATION.FORGET_AGENT_VIEW: {
+      if (current.defaultTabs.some(tab => tab.kind === 'agent' && tab.sessionId === mutation.sessionId)) {
+        throw new Error(`Cannot forget Default Agent session ${mutation.sessionId}`);
+      }
+      if (!Object.hasOwn(current.agentViews, mutation.sessionId)) return { ok: true, project: current };
+      const agentViews = { ...current.agentViews };
+      delete agentViews[mutation.sessionId];
+      return { ok: true, project: { ...current, agentViews } };
+    }
     case PROJECT_MUTATION.EDIT: {
       if (!Array.isArray(mutation.edits as unknown)) throw new Error('Project edits must be an array');
       const seen = new Set<string>();
