@@ -53,6 +53,7 @@ interface MainProjectsRepository {
   get(projectId: ProjectId): Project | null;
   add(input: ProjectCreateInput): Promise<Project>;
   save(project: Project): Promise<void>;
+  mutate(projectId: ProjectId, mutation: ProjectMutation): Promise<ProjectMutationResult>;
   delete(projectId: ProjectId): Promise<ProjectDeleteResult>;
   retryCleanup(projectId: ProjectId): Promise<ProjectDeleteResult>;
   reorder(sourceId: ProjectId, targetId: ProjectId): Promise<void>;
@@ -70,6 +71,11 @@ interface ProjectDeleteResult {
 `reconcileWorktrees(baseline, updates, additions, isCurrent?)` is an internal main-repository batch operation returning the committed collection or null for a stale baseline. It serializes with add/save/delete/reorder, merges only scan metadata into current projects, inherits current parent setup for additions, and persists once before publication. Its baseline compares topology rather than mutable preferences/session ids. It is not a renderer-supplied replace-all operation.
 
 The repository is exposed only after synchronous bootstrap loading succeeds. It has no public `load`, `replaceAll`, raw file, or persisted-document operation.
+
+`mutate` is the renderer update boundary. It serializes base lookup, comparison, merge and persistence
+with other repository writes. `save(Project)` is a main-only low-level operation, not an IPC entry.
+Missing mutation targets and unavailable worktrees reject; no successful missing-target fallback is allowed.
+Editor conflicts return `{ ok: false, conflicts }` without committing any submitted field.
 
 Identical save, missing delete, and same-group reorder are successful no-ops. Missing save and stale reorder do not guess replacement targets and leave diagnostic context. A rejected mutation means config was not committed. `delete()` resolves with `cleanupPending: true` when config committed but project-session teardown or target-history cleanup remains; `leftover` identifies the target path and reason. Retry uses the current-process cleanup snapshot through `retryCleanup`, never a second delete or a durable tombstone.
 
@@ -96,7 +102,7 @@ Authoritative channels: `src/shared/ipc-channels.ts`; bridge: `src/main/preload.
 ```ts
 project.getAll(): Promise<readonly Project[]>
 project.add(input: ProjectCreateInput): Promise<Project>
-project.update(project: Project): Promise<void>
+project.update(projectId: ProjectId, mutation: ProjectMutation): Promise<ProjectMutationResult>
 project.delete(projectId: ProjectId): Promise<ProjectDeleteResult>
 project.retryCleanup(projectId: ProjectId): Promise<ProjectDeleteResult>
 project.reorder(sourceId: ProjectId, targetId: ProjectId): Promise<void>
@@ -104,6 +110,28 @@ project.validateDirs(): Promise<ProjectId[]>
 ```
 
 `validateDirs` takes no renderer collection. Main resolves the current projects from its repository. Worktree operations remain project-scoped services and never accept a persisted document or whole canonical collection.
+
+## Project update mutations
+
+Authoritative types/constants: `src/shared/project-mutations.ts`. Tags are defined by `PROJECT_MUTATION`.
+
+| Kind | Payload | Main behavior |
+|---|---|---|
+| `EDIT` | `{ edits: [{ field, before, value }] }` | Only fields in `PROJECT_EDIT_FIELDS`; reject the entire edit if any latest field differs from both `before` and `value`. Already-satisfied values succeed. Duplicate/unknown fields reject. |
+| `AGENT_REPORT` | `{ provider, report }` | Compare the Shelf capability report against latest saved provider prefs, then merge only confirmed/reported changes; empty confirmed patches do not pin native defaults. |
+| `AGENT_SESSION` | `{ provider, sessionId }` | Add the provider binding without replacing sibling providers; a different existing binding rejects. |
+| `APPEND_DEFAULT_TAB` | `{ tab }` | Append to the latest list; an Agent provider already present is a no-op. |
+| `CLEAR_AGENT_PREF` | `{ provider, key, savedValue }` | Delete only if the latest saved value still matches; otherwise preserve the newer selection. |
+
+```ts
+type ProjectMutationResult = { ok: true } | { ok: false; conflicts: readonly ProjectEditField[] };
+```
+
+Project Edit captures a baseline on opening and submits only changed fields. Background view refreshes
+do not reset its draft. Save freezes the form until completion, closes only after mutation and refresh
+succeed, and preserves the draft on error/conflict. A conflict refreshes saved values before offering
+explicit Reset Changes; no automatic overwrite or draft replacement occurs. Child feature-note bindings
+remain read-only at both editor and main boundaries. There is no edit-lifetime config lock.
 
 ## Renderer project view
 
@@ -129,7 +157,7 @@ Authoritative source: `src/renderer/events/bus.ts`.
 ```ts
 Events.ADD_PROJECT       // (input: ProjectCreateInput, onSettled?)
 Events.OPEN_EXISTING_PROJECT // (projectId: ProjectId)
-Events.UPDATE_PROJECT    // (projectId: ProjectId, changes: Partial<Omit<Project, 'id'>>)
+Events.UPDATE_PROJECT    // (projectId: ProjectId, mutation: ProjectMutation, onSettled?)
 Events.REORDER_PROJECTS  // (sourceId: ProjectId, targetId: ProjectId)
 Events.REMOVE_PROJECT    // (projectId: ProjectId)
 Events.CLOSE_TAB         // (projectId: ProjectId, tabIndex: number)
@@ -144,6 +172,11 @@ Events.NEW_WEB_TAB       // (projectId: ProjectId, url?)
 ```
 
 Components emit these intents. The App-side coordinator is the only renderer owner of the project repository client. Tab indices are allowed only when scoped under an explicit current project id.
+
+`UPDATE_PROJECT` completion returns `ProjectMutationResult` or `{ ok: false, error: string }` after
+recovery cancellation. App queues updates per project through their retry/refresh lifecycle so an older
+failed report cannot retry after a newer report. Saved-pref recovery shares this order; other projects
+are not held by that renderer queue. Main remains the authority for latest-base mutation correctness.
 
 Folder Picker emits `OPEN_EXISTING_PROJECT` for the first effective-target match in current reconciled order and otherwise emits `ADD_PROJECT`. The open-existing handler validates the id, activates the project, and emits `CONNECT_PROJECT` only when `tabs.length === 0`. `ADD_PROJECT` and its optional `onSettled` result contract remain creation-only and unchanged.
 

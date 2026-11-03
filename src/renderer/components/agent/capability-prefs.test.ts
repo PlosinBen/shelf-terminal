@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { persistedPrefsFromCapabilities } from './capability-prefs';
+import { persistedPrefsFromCapabilities } from '@shared/agent-pref-report';
 
 describe('persistedPrefsFromCapabilities', () => {
   it('persists canonical permission reports', () => {

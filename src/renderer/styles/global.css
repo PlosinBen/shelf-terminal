@@ -1189,6 +1189,16 @@ button {
   gap: 6px;
 }
 
+.project-edit-body > fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: inherit;
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+
 .project-edit-hint {
   font-size: 11px;
   color: var(--text-muted);
@@ -1388,6 +1398,12 @@ button {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+
+.project-edit-save-error {
+  flex-shrink: 0;
+  padding: 8px 16px;
+  overflow-wrap: anywhere;
 }
 
 .settings-hint {

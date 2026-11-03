@@ -35,7 +35,7 @@ export const Events = {
   OPEN_FOLDER_PICKER: 'open-folder-picker',
   OPEN_EXISTING_PROJECT: 'open-existing-project', // (projectId)
   ADD_PROJECT: 'add-project',       // (ProjectCreateInput, onSettled?)
-  UPDATE_PROJECT: 'update-project', // (projectId, changes)
+  UPDATE_PROJECT: 'update-project', // (projectId, ProjectMutation, onSettled?)
   REORDER_PROJECTS: 'reorder-projects', // (sourceId, targetId)
   TOGGLE_SPLIT: 'toggle-split',     // (projectId)
   CREATE_WORKTREE: 'create-worktree', // (projectId, prefill?: { branch?, notePaths? })

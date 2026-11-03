@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef } from 'react';
-import type { AgentProvider, AgentPrefs, Connection } from '@shared/types';
-import { persistedPrefsFromCapabilities } from './agent/capability-prefs';
+import type { AgentProvider, Connection } from '@shared/types';
+import { PROJECT_MUTATION } from '@shared/project-mutations';
 import { MessageList } from './agent/MessageList';
 import { InputZone } from './agent/InputZone';
 import { StatusBar } from './agent/StatusBar';
@@ -15,8 +15,7 @@ import {
   useAgentTab,
 } from '../agentTabStore';
 import { emitAgent, emit, Events } from '../events';
-import { debugLog } from '../debugLog';
-import { useStore, getCanonicalProjectById } from '../store';
+import { useStore } from '../store';
 
 interface Props {
   tabId: string;
@@ -66,8 +65,7 @@ export function AgentView({ tabId, cwd, connection, provider, projectId, visible
     } else {
       const newId = crypto.randomUUID();
       sessionIdRef.current = newId;
-      const ids = { ...projects[projectIndex]?.agentSessionIds, [provider]: newId };
-      emit(Events.UPDATE_PROJECT, projectId, { agentSessionIds: ids });
+      emit(Events.UPDATE_PROJECT, projectId, { kind: PROJECT_MUTATION.AGENT_SESSION, provider, sessionId: newId });
     }
   }
   const sessionId = sessionIdRef.current;
@@ -98,26 +96,15 @@ export function AgentView({ tabId, cwd, connection, provider, projectId, visible
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tabId]);
 
-  const persistPref = useCallback((partial: Partial<AgentPrefs>) => {
-    const current = getCanonicalProjectById(projectId)?.agentPrefs;
-    if (!current) {
-      debugLog('agent-prefs', `discarded capabilities for removed project ${projectId}`);
-      return;
-    }
-    const updated = { ...current, [provider]: { ...current[provider], ...partial } };
-    emit(Events.UPDATE_PROJECT, projectId, { agentPrefs: updated });
-  }, [projectId, provider]);
-
   /**
    * Capability-driven persist: when provider re-broadcasts capabilities
    * (after /model X slash, picker pick, or any setX), commit the backend's
    * reported current* to canonical `Project.agentPrefs` if it differs from
    * what's saved.
    *
-   * Init is naturally a no-op — provider seeds its closures from the intent
-   * we passed in agent:init, so the first capabilities event carries back
-   * exactly what savedPrefs already has. Only real changes (slash, cycle)
-   * cause persist to fire.
+   * Forward each report once; main compares against latest saved prefs inside
+   * its mutation queue. Comparing here can drop an A→B→A change while B is pending.
+   * Unchanged reports and unconfirmed native defaults are durable no-ops.
    *
    * This is what makes the config-edit path (/model X or the picker →
    * agent:send → provider slash → capabilities) eventually update canonical
@@ -132,9 +119,12 @@ export function AgentView({ tabId, cwd, connection, provider, projectId, visible
   useEffect(() => {
     if (!capabilities || capabilities === persistedCapabilities.current) return;
     persistedCapabilities.current = capabilities;
-    const partial = persistedPrefsFromCapabilities(capabilities, getCanonicalProjectById(projectId)?.agentPrefs[provider]);
-    if (Object.keys(partial).length > 0) persistPref(partial);
-  }, [capabilities, projectId, provider, persistPref]);
+    const { confirmedPrefs, permissionControl, currentModel, currentEffort, currentPermissionMode } = capabilities;
+    emit(Events.UPDATE_PROJECT, projectId, {
+      kind: PROJECT_MUTATION.AGENT_REPORT, provider,
+      report: { confirmedPrefs, permissionControl, currentModel, currentEffort, currentPermissionMode },
+    });
+  }, [capabilities, projectId, provider]);
 
   const handleRetryInit = useCallback(() => {
     emitAgent('agent:retryInit', { tabId });

@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { PROJECT_MUTATION } from '../src/shared/project-mutations';
 const env = { ...process.env, GIT_AUTHOR_NAME: 'test', GIT_AUTHOR_EMAIL: 'test@example.com', GIT_COMMITTER_NAME: 'test', GIT_COMMITTER_EMAIL: 'test@example.com' };
 const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, env }).toString();
 test.describe('worktree reconciliation', () => {
@@ -102,12 +103,12 @@ test.describe('worktree reconciliation', () => {
   });
   for (const kind of ['agent', 'web']) {
     test(`connect with only ${kind} tabs triggers discovery`, async () => {
-      await page.evaluate(async kind => {
+      await page.evaluate(async ({ kind, mutation }) => {
         const project = (await window.shelfApi.project.getAll())[0];
-        await window.shelfApi.project.update({ ...project, defaultTabs: kind === 'agent'
+        await window.shelfApi.project.update(project.id, { kind: mutation, edits: [{ field: 'defaultTabs', before: project.defaultTabs, value: kind === 'agent'
           ? [{ name: 'Agent', kind: 'agent', provider: 'claude' }]
-          : [{ name: 'Web', kind: 'web', url: 'about:blank' }] });
-      }, kind);
+          : [{ name: 'Web', kind: 'web', url: 'about:blank' }] }] });
+      }, { kind, mutation: PROJECT_MUTATION.EDIT });
       await page.reload(); await page.waitForSelector('.app'); await connectMain();
       await expect(rows()).toHaveCount(1);
       await expect(page.locator('.sidebar-item.active')).toContainText('Scan Base');

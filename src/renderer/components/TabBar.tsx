@@ -1,4 +1,5 @@
 import { isWorktreeUnavailable } from '@shared/worktree';
+import { PROJECT_MUTATION } from '@shared/project-mutations';
 import React, { useState, useRef, useEffect } from 'react';
 import {
   useStore,
@@ -280,7 +281,7 @@ export function TabBar() {
                 }
                 if (existingAgentTemplate) return;
                 emit(Events.UPDATE_PROJECT, project.id, {
-                  defaultTabs: [...project.defaultTabs, template],
+                  kind: PROJECT_MUTATION.APPEND_DEFAULT_TAB, tab: template,
                 });
                 setContextMenu(null);
               }}

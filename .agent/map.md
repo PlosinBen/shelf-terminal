@@ -37,6 +37,7 @@ title: shelf-terminal — Intent → File Index
 | Terminal runner policy | `terminal-runner/` | 依 target facts 選 zsh/bash/PowerShell/Native、建立 project history namespace 與 runner bootstrap |
 | Preload bridge | `preload.ts` | contextBridge 暴露 `window.shelfApi`，純 RPC bridge 到 main |
 | Project canonical repository | `projects/projects-repository.ts` + `projects/repository-provider.ts` | ready-only canonical project queries/mutations、main-owned identity、durable publish 與 cleanup retry boundary |
+| Project typed mutation application | `projects/project-mutation.ts` | Latest-base intent merge、editor field conflicts、Agent binding/report 與 default-tab append |
 | Project config persistence | `projects/project-config-file-io.ts` + `projects/project-config-codec.ts` + `projects/project-config-persistence.ts` | opaque atomic File I/O、v0/v1/v2 legacy + v3 current loader/formatter 與 `projects.json` facade |
 | Project delete cleanup | `projects/project-cleanup.ts` | Config commit 後的 session teardown、target history 與 per-project storage cleanup 聚合 |
 | 專案 env 解析 | `project-env.ts` | Canonical Project.envPlain 的驗證與共用注入出口 |
@@ -216,7 +217,7 @@ title: shelf-terminal — Intent → File Index
 | Terminal 渲染 | `components/TerminalView.tsx` | xterm.js cache、PTY I/O、init cover/store projection、paste hook 與 unread badge |
 | Agent 初始化設定欄位恢復 | `../shared/agent-init-recovery.ts` + `agent-model-recovery.ts` | 結構化恢復 metadata、保存指定 Prefs 刪除後重試的中央交易 |
 | Shelf 工具啟動失敗警告 | `components/agent/ShelfMcpBanner.tsx` | 依 per-tab startup status 顯示不可關閉警告 |
-| Agent 對話 UI | `components/AgentView.tsx` + `components/agent/{MessageList,InputZone,StatusBar,DecisionPanel,PlanPanel,AuthPane,ConnectionOverlay}.tsx` + `components/agent/{permission-control-view,capability-prefs}.ts` + `agentTabStore.ts` + `agentTabSubscriptions.ts` + `agent-message-builder.ts` + `tab-teardown.ts` | AgentView 是 layout coordinator；permission UI 只依 capability strategy/descriptor 選 canonical 或 native controls，不依 provider identity；有效設定與 explicit Prefs 分開。domain state 在 per-tab store，真正 teardown 才清 state |
+| Agent 對話 UI | `components/AgentView.tsx` + `components/agent/{MessageList,InputZone,StatusBar,DecisionPanel,PlanPanel,AuthPane,ConnectionOverlay}.tsx` + `components/agent/permission-control-view.ts` + `agentTabStore.ts` + `agentTabSubscriptions.ts` + `agent-message-builder.ts` + `tab-teardown.ts` | AgentView 是 layout coordinator；permission UI 只依 capability strategy/descriptor 選 canonical 或 native controls，不依 provider identity；有效設定與 explicit Prefs 分開。domain state 在 per-tab store，真正 teardown 才清 state |
 | Web tab（登入 surface + 瀏覽） | `components/WebTabView.tsx` | `<webview partition=persist:web>` + 網址列 + identity chip；人在這登入內網服務 |
 | Web.fetch 授權 popup | `components/WebPermissionPrompt.tsx` | app 層全域 popup，防偽 origin 顯示 + allow once/always/deny（由 `web:permission-request` 驅動） |
 | browser_open 確認 popup | `components/BrowserOpenPrompt.tsx` | app 層全域 popup，只有 Open/Deny（不記住），由 `web:browser-open-request` 驅動；核可後 `web:open-tab` 由 `App.tsx` 開分頁 |
@@ -267,6 +268,8 @@ title: shelf-terminal — Intent → File Index
 |--------|------|------|
 | 通用型別 | `types.ts` | Connection / AppSettings / PM types 與非 project-domain shared payloads |
 | Canonical project contract | `projects.ts` | `Project` / `ProjectCreateInput` / `ProjectDeleteResult` / readonly helper |
+| Project mutation contracts and draft comparison | `project-mutations.ts` | Named mutation tags、editable fields、result 與 changed-field structural comparison |
+| Agent preference report comparison | `agent-pref-report.ts` | Shelf capability report 與 saved prefs 的純比較，保留 native confirmed-patch 邊界 |
 | Project effective target identity | `project-target.ts` | Connection identity + lexical cwd normalization 的純比較 helper |
 | Feature-note directory validator | `feature-note-dir.ts` | optional repo-relative POSIX directory 的 canonicalization 與 lexical safety validation |
 | IPC channel 常數 | `ipc-channels.ts` | 所有 IPC channel name 常數 |
@@ -342,3 +345,4 @@ title: shelf-terminal — Intent → File Index
 | 單元測試 | `src/main/file-transfer.test.ts` | 純函式 + local fs 行為 |
 | 單元測試 | `src/main/user-data-path.test.ts` | `applyUserDataIsolation()` 五個分支 |
 | Project repository/persistence 單元測試 | `src/main/projects/*.test.ts` | Codec、File I/O、persistence、repository、cleanup 與 provider lifecycle matrix |
+| Project editor consistency E2E | `e2e/project-edit-consistency.spec.ts` | Runtime draft preservation、background field isolation、conflict 與 save/refresh recovery |

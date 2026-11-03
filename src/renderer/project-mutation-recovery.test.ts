@@ -1,8 +1,36 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ProjectMutationRefreshError } from './project-mutation-coordinator';
-import { runProjectOperationWithRecovery } from './project-mutation-recovery';
+import { createProjectUpdateQueue, runProjectOperationWithRecovery } from './project-mutation-recovery';
 
 describe('project mutation recovery', () => {
+  it('keeps a failed report and its retry ahead of a later report for the same project', async () => {
+    const queue = createProjectUpdateQueue();
+    let decide!: (retry: boolean) => void;
+    const order: string[] = [];
+    const action = vi.fn(async () => {
+      order.push('older');
+      if (order.length === 1) throw new Error('disk full');
+    });
+    const older = queue('p', () => runProjectOperationWithRecovery({
+      operation: 'save', action, refresh: async () => {},
+      confirmRetry: () => new Promise(resolve => { decide = resolve; }),
+    }));
+    await vi.waitFor(() => expect(decide).toBeTypeOf('function'));
+    const newer = queue('p', async () => { order.push('newer'); });
+    await queue('other', async () => { order.push('other project'); });
+    expect(order).toEqual(['older', 'other project']);
+    decide(true);
+    await Promise.all([older, newer]);
+    expect(order).toEqual(['older', 'other project', 'older', 'newer']);
+  });
+
+  it('does not strand later operations after a rejected queued update', async () => {
+    const queue = createProjectUpdateQueue();
+    const failed = queue('p', async () => { throw new Error('rejected'); });
+    const next = queue('p', async () => 'next');
+    await expect(failed).rejects.toThrow('rejected');
+    await expect(next).resolves.toBe('next');
+  });
   it('retries a mutation that did not commit', async () => {
     const action = vi.fn()
       .mockRejectedValueOnce(new Error('disk full'))

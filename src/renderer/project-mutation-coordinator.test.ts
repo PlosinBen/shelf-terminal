@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { PROJECT_MUTATION } from '@shared/project-mutations';
 import type { Project } from '@shared/projects';
 import type { RendererProjectsRepositoryClient } from './projects-repository-client';
 import { createProjectMutationCoordinator, ProjectMutationRefreshError } from './project-mutation-coordinator';
@@ -28,7 +29,7 @@ function client() {
     getAll: vi.fn(async () => []),
     getInvalidDirectoryIds: vi.fn(async () => []),
     add: vi.fn(),
-    save: vi.fn(async () => {}),
+    save: vi.fn(async () => ({ ok: true as const })),
     delete: vi.fn(async () => ({ cleanupPending: false })),
     retryCleanup: vi.fn(async () => ({ cleanupPending: false })),
     reorder: vi.fn(async () => {}),
@@ -46,7 +47,6 @@ describe('project mutation coordinator', () => {
     vi.mocked(repository.getAll).mockResolvedValue([project('main-id')]);
     const reconcile = vi.fn();
     const coordinator = createProjectMutationCoordinator(repository, {
-      getProject: () => null,
       reconcile,
     });
 
@@ -62,18 +62,18 @@ describe('project mutation coordinator', () => {
     expect(reconcile).toHaveBeenCalledWith([project('main-id')]);
   });
 
-  it('builds a full canonical save from current store state', async () => {
+  it('forwards an intent without reading a renderer base', async () => {
     const repository = client();
     vi.mocked(repository.getAll).mockResolvedValue([{ ...project('a'), name: 'Renamed' }]);
     const reconcile = vi.fn();
     const coordinator = createProjectMutationCoordinator(repository, {
-      getProject: () => project('a'),
       reconcile,
     });
 
-    await coordinator.save('a', { name: 'Renamed' });
+    const mutation = { kind: PROJECT_MUTATION.EDIT, edits: [{ field: 'name' as const, before: 'a', value: 'Renamed' }] };
+    await coordinator.save('a', mutation);
 
-    expect(repository.save).toHaveBeenCalledWith({ ...project('a'), name: 'Renamed' });
+    expect(repository.save).toHaveBeenCalledWith('a', mutation);
     expect(reconcile).toHaveBeenCalledWith([{ ...project('a'), name: 'Renamed' }]);
   });
 
@@ -82,7 +82,6 @@ describe('project mutation coordinator', () => {
     vi.mocked(repository.delete).mockRejectedValue(new Error('disk full'));
     const reconcile = vi.fn();
     const coordinator = createProjectMutationCoordinator(repository, {
-      getProject: () => project('a'),
       reconcile,
     });
 
@@ -96,7 +95,6 @@ describe('project mutation coordinator', () => {
     vi.mocked(repository.delete).mockResolvedValue({ cleanupPending: true });
     const reconcile = vi.fn();
     const coordinator = createProjectMutationCoordinator(repository, {
-      getProject: () => project('a'),
       reconcile,
     });
 
@@ -114,7 +112,6 @@ describe('project mutation coordinator', () => {
     vi.mocked(repository.add).mockResolvedValue(added);
     vi.mocked(repository.getAll).mockRejectedValue(new Error('query failed'));
     const coordinator = createProjectMutationCoordinator(repository, {
-      getProject: () => null,
       reconcile: vi.fn(),
     });
 

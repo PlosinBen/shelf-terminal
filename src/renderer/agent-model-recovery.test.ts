@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { createPrefRecovery } from './agent-model-recovery';
 import { AgentInitRecoveryKind } from '@shared/agent-init-recovery';
 import { ProjectMutationRefreshError } from './project-mutation-coordinator';
+import { PROJECT_MUTATION, type ProjectMutation } from '@shared/project-mutations';
 
 function fixture() {
   let project: any = { id: 'p', cwd: '/repo', connection: { type: 'local' }, agentPrefs: { copilot: { model: 'retired', effort: 'high' }, claude: { model: 'keep' } }, tabs: [{ id: 't' }] };
@@ -9,7 +10,15 @@ function fixture() {
   const deps = {
     project: () => project,
     tab: () => tab,
-    save: vi.fn(async (_id: string, changes: any) => { project = { ...project, ...changes }; }),
+    save: vi.fn(async (_id: string, mutation: ProjectMutation) => {
+      if (mutation.kind !== PROJECT_MUTATION.CLEAR_AGENT_PREF) throw new Error('unexpected fixture mutation');
+      if (project.agentPrefs[mutation.provider]?.[mutation.key] === mutation.savedValue) {
+        const prefs = { ...project.agentPrefs[mutation.provider] };
+        delete prefs[mutation.key];
+        project = { ...project, agentPrefs: { ...project.agentPrefs, [mutation.provider]: prefs } };
+      }
+      return { ok: true as const };
+    }),
     refresh: vi.fn(async () => {}),
     status: vi.fn((_id: string, state: string) => { if (tab) tab = { ...tab, initStatus: state }; }),
     restart: vi.fn(),
@@ -44,7 +53,7 @@ describe('model recovery transaction', () => {
   it('deduplicates clicks and does not resurrect a removed tab', async () => {
     const f = fixture();
     let finish!: () => void;
-    f.deps.save.mockImplementation(() => new Promise<void>(resolve => { finish = resolve; }));
+    f.deps.save.mockImplementation(() => new Promise<{ ok: true }>(resolve => { finish = () => resolve({ ok: true }); }));
     const pending = f.run('t');
     await f.run('t');
     expect(f.deps.save).toHaveBeenCalledOnce();
@@ -72,7 +81,10 @@ describe('model recovery transaction', () => {
     const f = fixture();
     f.project().agentPrefs.copilot.model = 'new-model';
     await f.run('t');
-    expect(f.deps.save).not.toHaveBeenCalled();
+    expect(f.deps.save).toHaveBeenCalledWith('p', {
+      kind: PROJECT_MUTATION.CLEAR_AGENT_PREF, provider: 'copilot', key: 'model', savedValue: 'retired',
+    });
+    expect(f.project().agentPrefs.copilot.model).toBe('new-model');
     expect(f.deps.restart).toHaveBeenCalledOnce();
   });
 });

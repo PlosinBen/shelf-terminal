@@ -32,7 +32,7 @@ The renderer↔main bridge surface — `window.shelfApi.*` methods (RPC over `ip
 |--------|-------|
 | `getAll()` | invoke `project:get-all` → readonly canonical `Project[]` (see `src/shared/projects.ts`) |
 | `add(input)` | invoke `project:add` with id-less `ProjectCreateInput` → main-owned canonical `Project` |
-| `update(project)` | invoke `project:update` with a complete canonical `Project` |
+| `update(projectId, mutation)` | invoke `project:update` → `ProjectMutationResult`; typed intent only, never a complete Project. Main queues latest-base merge; editor conflicts commit nothing. See `contracts/projects`. |
 | `delete(projectId)` | invoke `project:delete` → `ProjectDeleteResult`; rejection means config did not commit. A committed delete may return `{ cleanupPending: true, leftover: { targetPath, reason } }` when target history cleanup needs current-session retry. |
 | `retryCleanup(projectId)` | invoke `project:retry-cleanup` → `ProjectDeleteResult`; reuses the in-memory cleanup snapshot and never resends delete |
 | `reorder(sourceId, targetId)` | invoke `project:reorder` with opaque project ids |

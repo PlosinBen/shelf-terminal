@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useStore, setEditingProjectById } from '../store';
+import { useStore, setEditingProjectById, getProjectSliceSnapshot } from '../store';
 import { emit, Events } from '../events';
 import type { TabTemplate, QuickCommand } from '@shared/types';
 import { visibleAgentProviderEntries } from '@shared/agent-providers';
@@ -7,6 +7,9 @@ import { TAB_COLORS } from './TabBar';
 import { formatBytes } from '../utils/format-bytes';
 import { validateEnvKey } from '@shared/project-env';
 import { featureNoteDirForProjectSave } from '../feature-note-config-edit';
+import { debugLog } from '../debugLog';
+import type { Project } from '@shared/projects';
+import { PROJECT_MUTATION, projectEditValues, projectFieldEdits, type ProjectMutationResult } from '@shared/project-mutations';
 
 interface EnvRow { key: string; value: string; }
 
@@ -29,21 +32,37 @@ export function ProjectEditPanel() {
   const [tabError, setTabError] = useState<string | null>(null);
   const [featureNoteDir, setFeatureNoteDir] = useState('');
   const [featureNoteDirError, setFeatureNoteDirError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [canReset, setCanReset] = useState(false);
+  const baseline = useRef<Project | null>(null);
+  const editorGeneration = useRef(0);
+
+  const resetDraft = (source: Project) => {
+    baseline.current = source;
+    setSaving(false);
+    setSaveError(null);
+    setCanReset(false);
+    setName(source.name);
+    setInitScript(source.initScript || '');
+    setDefaultTabs(source.defaultTabs.length > 0
+      ? source.defaultTabs.map((tab) => ({ ...tab }))
+      : [{ name: 'Terminal' }]);
+    setQuickCommands(source.quickCommands.map((cmd) => ({ ...cmd })));
+    setEnvRows(Object.entries(source.envPlain).map(([key, value]) => ({ key, value })));
+    setTabError(null);
+    setFeatureNoteDir(source.featureNoteDir ?? '');
+    setFeatureNoteDirError(null);
+  };
 
   useEffect(() => {
-    if (project) {
-      setName(project.name);
-      setInitScript(project.initScript || '');
-      setDefaultTabs(project.defaultTabs.length > 0
-        ? project.defaultTabs.map((tab) => ({ ...tab }))
-        : [{ name: 'Terminal' }]);
-      setQuickCommands(project.quickCommands.map((cmd) => ({ ...cmd })) || []);
-      setEnvRows(Object.entries(project.envPlain).map(([key, value]) => ({ key, value })));
-      setTabError(null);
-      setFeatureNoteDir(project.featureNoteDir ?? '');
-      setFeatureNoteDirError(null);
-    }
-  }, [editingProjectId, project]);
+    ++editorGeneration.current;
+    if (project) resetDraft(project);
+    else baseline.current = null;
+    return () => { ++editorGeneration.current; };
+    // A ProjectView identity change is not a request to discard this edit session (projects#13).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editingProjectId]);
 
   // Probe whether the remote is currently reachable so we can enable/disable
   // the Clear button. Local connections are always considered reachable.
@@ -94,9 +113,15 @@ export function ProjectEditPanel() {
 
   if (!project || !editingProjectId) return null;
 
-  const handleClose = () => setEditingProjectById(null);
+  const handleClose = () => { if (!saving) setEditingProjectById(null); };
 
   const handleSave = () => {
+    if (saving) return;
+    if (!baseline.current) {
+      console.warn(`[project-edit] missing baseline projectId=${editingProjectId}`);
+      setSaveError('Project baseline is unavailable. Close and reopen this editor.');
+      return;
+    }
     if (defaultTabs.some((tab) => !tab.name.trim())) {
       setTabError('Every startup tab requires a name.');
       return;
@@ -136,16 +161,36 @@ export function ProjectEditPanel() {
       if (!key || validateEnvKey(key, Object.keys(envPlain)) !== null) continue;
       envPlain[key] = row.value;
     }
-    emit(Events.UPDATE_PROJECT, editingProjectId, {
-      name: name.trim() || project.name,
+    const original = baseline.current;
+    const value = {
+      name: name.trim() || original.name,
       initScript: initScript.trim() || null,
       defaultTabs: tabs,
       quickCommands: cmds,
       featureNoteDir: savedFeatureNoteDir,
       envPlain,
-    });
-
-    handleClose();
+    };
+    const edits = projectFieldEdits(projectEditValues(original), value);
+    const generation = editorGeneration.current;
+    setSaving(true);
+    setSaveError(null);
+    setCanReset(false);
+    emit(Events.UPDATE_PROJECT, editingProjectId, { kind: PROJECT_MUTATION.EDIT, edits },
+      (result: ProjectMutationResult | { ok: false; error: string }) => {
+        if (generation !== editorGeneration.current || getProjectSliceSnapshot().editingProjectId !== editingProjectId) {
+          debugLog('project-edit', `ignored stale completion projectId=${editingProjectId} generation=${generation}`);
+          return;
+        }
+        setSaving(false);
+        if (!result.ok) {
+          setCanReset('conflicts' in result);
+          setSaveError('conflicts' in result
+            ? `Saved fields changed while you were editing: ${result.conflicts.join(', ')}. Your draft was kept. Reset Changes to review the saved values.`
+            : `Could not finish saving. Your draft was kept. ${result.error}`);
+          return;
+        }
+        setEditingProjectById(null);
+      });
   };
 
   const updateEnvRow = (index: number, field: keyof EnvRow, value: string) => {
@@ -268,9 +313,10 @@ export function ProjectEditPanel() {
       <div className="project-edit-panel">
         <div className="settings-header">
           <span>Edit Project</span>
-          <button className="settings-close" onClick={handleClose}>×</button>
+          <button className="settings-close" onClick={handleClose} disabled={saving}>×</button>
         </div>
         <div className="project-edit-body">
+          <fieldset disabled={saving} inert={saving}>
           <div className="settings-group">
             <label className="settings-label">Name</label>
             <input
@@ -574,10 +620,13 @@ export function ProjectEditPanel() {
               </span>
             </div>
           </div>
+          </fieldset>
         </div>
+        {saveError && <div className="env-var-error project-edit-save-error" role="alert">{saveError}</div>}
         <div className="project-edit-footer">
-          <button className="conn-btn conn-btn-cancel" onClick={handleClose}>Cancel</button>
-          <button className="conn-btn conn-btn-next" onClick={handleSave}>Save</button>
+          {canReset && <button className="conn-btn" onClick={() => resetDraft(project)}>Reset Changes</button>}
+          <button className="conn-btn conn-btn-cancel" onClick={handleClose} disabled={saving}>Cancel</button>
+          <button className="conn-btn conn-btn-next" onClick={handleSave} disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
         </div>
       </div>
     </div>

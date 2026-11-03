@@ -1,14 +1,9 @@
-import type { AgentPrefs } from '@shared/types';
-import type { PermissionControlCapabilities } from '@shared/permission-controls';
+import type { AgentPrefs } from './types';
+import type { AgentPreferenceReport } from './project-mutations';
+import { PERMISSION_CONTROL_STRATEGIES } from './permission-controls';
 
 export function persistedPrefsFromCapabilities(
-  capabilities: {
-    confirmedPrefs?: Partial<AgentPrefs>;
-    permissionControl?: PermissionControlCapabilities;
-    currentModel?: string;
-    currentEffort?: string;
-    currentPermissionMode?: string;
-  },
+  capabilities: AgentPreferenceReport,
   saved: AgentPrefs | undefined,
 ): Partial<AgentPrefs> {
   if (capabilities.confirmedPrefs !== undefined) return capabilities.confirmedPrefs;
@@ -19,12 +14,12 @@ export function persistedPrefsFromCapabilities(
   if (capabilities.currentEffort && capabilities.currentEffort !== saved?.effort) {
     partial.effort = capabilities.currentEffort;
   }
-  if (capabilities.permissionControl?.strategy !== 'native'
+  if (capabilities.permissionControl?.strategy !== PERMISSION_CONTROL_STRATEGIES.NATIVE
     && capabilities.currentPermissionMode
     && capabilities.currentPermissionMode !== saved?.permissionMode) {
     partial.permissionMode = capabilities.currentPermissionMode;
   }
-  if (capabilities.permissionControl?.strategy === 'native') {
+  if (capabilities.permissionControl?.strategy === PERMISSION_CONTROL_STRATEGIES.NATIVE) {
     const nativeMode = capabilities.permissionControl.mode?.currentValue;
     if (nativeMode && nativeMode !== saved?.nativeMode) {
       partial.nativeMode = nativeMode;

@@ -1,5 +1,19 @@
 import { ProjectMutationRefreshError } from './project-mutation-coordinator';
 
+/** Preserve per-project submission order through retries, not only one IPC call.
+ * Main still owns canonical merging; this queue never reads or captures a base. */
+export function createProjectUpdateQueue() {
+  const pending = new Map<string, Promise<unknown>>();
+  return function enqueue<T>(projectId: string, operation: () => Promise<T>): Promise<T> {
+    const previous = pending.get(projectId) ?? Promise.resolve();
+    const result = previous.then(operation, operation);
+    pending.set(projectId, result);
+    const clear = () => { if (pending.get(projectId) === result) pending.delete(projectId); };
+    void result.then(clear, clear);
+    return result;
+  };
+}
+
 export interface ProjectRecoveryPrompt {
   readonly operation: string;
   readonly kind: 'mutation' | 'refresh';

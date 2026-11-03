@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Project, ProjectCreateInput } from '@shared/projects';
 import { createRendererProjectsRepositoryClient } from './projects-repository-client';
+import { PROJECT_MUTATION } from '@shared/project-mutations';
 
 const input: ProjectCreateInput = {
   name: 'A', cwd: '/repo/a', connection: { type: 'local' }, maxTabs: 5,
@@ -26,14 +27,15 @@ describe('renderer projects repository client', () => {
     await expect(client.getAll()).resolves.toEqual([project]);
     await expect(client.getInvalidDirectoryIds()).resolves.toEqual(['a']);
     await client.add(input);
-    await client.save(project);
+    const mutation = { kind: PROJECT_MUTATION.AGENT_SESSION, provider: 'claude', sessionId: 's' };
+    await client.save(project.id, mutation);
     await client.delete('a');
     await client.retryCleanup('a');
     await client.reorder('a', 'b');
 
     expect(api.validateDirs).toHaveBeenCalledWith();
     expect(api.add).toHaveBeenCalledWith(input);
-    expect(api.update).toHaveBeenCalledWith(project);
+    expect(api.update).toHaveBeenCalledWith(project.id, mutation);
     expect(api.delete).toHaveBeenCalledWith('a');
     expect(api.retryCleanup).toHaveBeenCalledWith('a');
     expect(api.reorder).toHaveBeenCalledWith('a', 'b');

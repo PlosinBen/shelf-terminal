@@ -27,6 +27,9 @@ Persisted project document
             -> components
 
 Canonical project mutation
+  -> enqueue operation intent, not a prebuilt project snapshot
+  -> read latest canonical base inside the serialized operation
+  -> compare editor original values or apply a named background operation
   -> construct candidate collection
   -> for add: reject an effective target already in the canonical collection
   -> format newest document
@@ -71,6 +74,18 @@ The main repository owns canonical identity, defaults, grouping/order invariants
 The canonical startup list is non-empty and is the only connect-time tab authority. Tab variants retain only their own payload, while Agent provider availability is a runtime registry concern. Manual Agent creation and runtime-to-default serialization use explicit kind/provider data; Quick Commands remain Terminal-only at both configuration and execution boundaries.
 
 The renderer repository client is a stateless operation adapter private to the App-side coordinator. A successful mutation is followed by an authoritative collection query; only that result is reconciled into renderer state. A failed mutation leaves the current renderer collection unchanged, while a post-commit refresh failure retries only the query.
+
+Project edits have a separate draft lifetime. Opening the editor captures original editable values;
+runtime and canonical refreshes do not replace the draft. Save submits only changed fields with their
+original values. Main rejects an entire edit only when a submitted field differs from both its original
+and requested value, leaving unrelated background changes intact. Conflict feedback retains the draft
+and permits explicit reset from refreshed saved values. The editor waits for save/refresh completion
+before closing and ignores completion from an obsolete edit session.
+
+Agent reports, session bindings, startup-tab appends and conditional preference removal carry their
+operation meaning rather than caller-built maps or arrays. Comparison and merging belong to main's
+existing write serialization. Renderer update ordering includes recovery and refresh so a failed older
+report cannot retry after a newer report; it is per project and does not lock config while editing.
 
 The renderer project store owns runtime/reactive state: tabs, active tab, split tab, folder validity, active/editing project identity, notices, and connection health. Runtime state is preserved by project id when a fresh canonical collection is reconciled. Folder selection compares effective targets against current project views and emits either an open-existing or add intent; App owns activation, conditional connection, and repository side effects. Components do not know persisted schema or call project-config operations.
 

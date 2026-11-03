@@ -1,4 +1,5 @@
 import { FAKE_RETIRED_MODEL } from '../agent-server/providers/fake/test-env';
+import { PROJECT_MUTATION } from '../src/shared/project-mutations';
 import { test, expect, openAgentTab, sendAgentPrompt } from './helpers';
 import type { Page } from '@playwright/test';
 
@@ -63,13 +64,12 @@ test.describe('agent init-readiness gate', () => {
         db.close();
         return rows.some(row => row.type === 'reply' && row.content === 'history before model retirement');
       })).toBe(true);
-      await page.evaluate(async (retired) => {
+      await page.evaluate(async ({ retired, kind }) => {
         const project = (await window.shelfApi.project.getAll())[0];
-        await window.shelfApi.project.update({ ...project, agentPrefs: {
-          ...project.agentPrefs,
-          claude: { ...project.agentPrefs.claude, model: retired, effort: 'high' },
-        } });
-      }, FAKE_RETIRED_MODEL);
+        await window.shelfApi.project.update(project.id, {
+          kind, provider: 'claude', report: { confirmedPrefs: { model: retired, effort: 'high' } },
+        });
+      }, { retired: FAKE_RETIRED_MODEL, kind: PROJECT_MUTATION.AGENT_REPORT });
       await page.reload();
       await page.locator('.connect-prompt').click();
       await openAgentTab(page);
@@ -97,14 +97,17 @@ test.describe('agent init-readiness gate', () => {
       test(`clears only ${key} and retries the same agent`, async ({ shelfApp: { page } }) => {
         await setupProject(page);
         await openAgentTab(page);
+        // Input visibility does not acknowledge the independent session-binding save.
+        await expect.poll(() => page.evaluate(async () => (await window.shelfApi.project.getAll())[0].agentSessionIds.claude)).toBeTruthy();
         const original = await page.evaluate(async () => (await window.shelfApi.project.getAll())[0]);
         await page.locator('.sidebar-item').first().click({ button: 'right' });
         await page.locator('.context-menu-item', { hasText: 'Disconnect' }).click();
-        await page.evaluate(async ({ key, retired }) => {
+        await page.evaluate(async ({ key, retired, kind }) => {
           const project = (await window.shelfApi.project.getAll())[0];
-          await window.shelfApi.project.update({ ...project, agentPrefs: { ...project.agentPrefs,
-            claude: { model: 'fake-model-pro', [key]: retired } } });
-        }, { key, retired: FAKE_RETIRED_MODEL });
+          await window.shelfApi.project.update(project.id, {
+            kind, provider: 'claude', report: { confirmedPrefs: { model: 'fake-model-pro', [key]: retired } },
+          });
+        }, { key, retired: FAKE_RETIRED_MODEL, kind: PROJECT_MUTATION.AGENT_REPORT });
         await page.reload();
         await page.locator('.connect-prompt').click();
         await openAgentTab(page);

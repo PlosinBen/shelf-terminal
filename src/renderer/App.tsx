@@ -3,6 +3,7 @@ import { clearValidatedWorktreeDirectories, setWorktreeScan, getProjectSliceSnap
 import { CONFIRM_REMOVE_EVENT } from './components/RemoveConfirmDialog';
 import { debugLog } from './debugLog';
 import { createPrefRecovery } from './agent-model-recovery';
+import type { ProjectMutation, ProjectMutationResult } from '@shared/project-mutations';
 import React, { useEffect, useState } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { TabBar } from './components/TabBar';
@@ -30,7 +31,7 @@ import { McpView } from './components/McpView';
 import { BackupView } from './components/BackupView';
 import { QuickNoteOverlay } from './components/QuickNoteOverlay';
 import { useKeybindings } from './hooks/useKeybindings';
-import { useStore, setSettings, setUpdateStatus, addTab, addTerminalTabForSource, setActiveTab, removeTab, setSplitTab, clearUnread, setInvalidProjects, setPmActive, setConnectionHealth, setActiveProjectById, getActiveProjectId, getProjectById, getProjectViews, getProjectIndexById, getCanonicalProjectById, reconcileProjects, listStableProjectViews, showProjectNotice, validateAgentProviderForOpen, projectDisplayLabel, enqueueExternalUrlIntent, removeExternalUrlIntent, beginExternalUrlIntentResolution, setExternalUrlIntentError } from './store';
+import { useStore, setSettings, setUpdateStatus, addTab, addTerminalTabForSource, setActiveTab, removeTab, setSplitTab, clearUnread, setInvalidProjects, setPmActive, setConnectionHealth, setActiveProjectById, getActiveProjectId, getProjectById, getProjectViews, getProjectIndexById, reconcileProjects, listStableProjectViews, showProjectNotice, validateAgentProviderForOpen, projectDisplayLabel, enqueueExternalUrlIntent, removeExternalUrlIntent, beginExternalUrlIntentResolution, setExternalUrlIntentError } from './store';
 import type { ConnectionHealth } from '@shared/types';
 import type { ExternalUrlIntentDecision, ExternalUrlIntentInput } from '@shared/external-url-intent';
 import type { Project, ProjectCreateInput } from '@shared/projects';
@@ -45,7 +46,7 @@ import { clearAgentSession } from './storage/agent-history';
 import { bindProcessMemorySummary } from './process-memory-sync';
 import { createProjectMutationCoordinator } from './project-mutation-coordinator';
 import { createRendererProjectsRepositoryClient } from './projects-repository-client';
-import { runProjectOperationWithRecovery } from './project-mutation-recovery';
+import { createProjectUpdateQueue, runProjectOperationWithRecovery } from './project-mutation-recovery';
 import {
   acceptBackupPanelList,
   acceptImportApplyFailure,
@@ -59,8 +60,9 @@ import './styles/global.css';
 
 const projectCoordinator = createProjectMutationCoordinator(
   createRendererProjectsRepositoryClient(),
-  { getProject: getCanonicalProjectById, reconcile: reconcileProjects },
+  { reconcile: reconcileProjects },
 );
+const queueProjectUpdate = createProjectUpdateQueue();
 
 function reportProjectMutationError(operation: string, error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
@@ -586,7 +588,7 @@ export function App() {
     const recoverPref = createPrefRecovery({
       project: (tabId) => getProjectViews().find((project) => project.tabs.some((tab) => tab.id === tabId)),
       tab: peekAgentTab,
-      save: (id, changes) => projectCoordinator.save(id, changes),
+      save: (id, mutation) => queueProjectUpdate(id, () => projectCoordinator.save(id, mutation)),
       refresh: () => projectCoordinator.refresh(),
       status: (tabId, state, error, recovery) => setInitStatus(tabId, state, error ?? null, null, recovery),
       restart: (tabId, tab, project) => {
@@ -698,9 +700,17 @@ export function App() {
 
     const offUpdateProject = on(Events.UPDATE_PROJECT, async (
       projectId: string,
-      changes: Partial<Omit<Project, 'id'>>,
+      mutation: ProjectMutation,
+      onSettled?: (result: ProjectMutationResult | { ok: false; error: string }) => void,
     ) => {
-      await runProjectOperation('update', () => projectCoordinator.save(projectId, changes));
+      const result = await queueProjectUpdate(projectId, () => runProjectOperation('update', () => projectCoordinator.save(projectId, mutation)));
+      if (result.status === 'cancelled') {
+        console.warn(`[project-update] update not completed projectId=${projectId} kind=${mutation.kind}`);
+        onSettled?.({ ok: false, error: result.error instanceof Error ? result.error.message : String(result.error) });
+      } else {
+        if (!result.value.ok && !onSettled) console.warn('[project-update] unhandled conflict', { projectId, fields: result.value.conflicts });
+        onSettled?.(result.value);
+      }
     });
 
     const offReorderProjects = on(Events.REORDER_PROJECTS, async (sourceId: string, targetId: string) => {

@@ -2,6 +2,9 @@ import { buildWorktreeChildConfig } from '@shared/worktree-child-config';
 import { isDeepStrictEqual } from 'node:util';
 import { log } from '@shared/logger';
 import { sameProjectTarget } from '@shared/project-target';
+import { isWorktreeUnavailable } from '@shared/worktree';
+import type { ProjectMutation, ProjectMutationResult } from '@shared/project-mutations';
+import { applyProjectMutation } from './project-mutation';
 import type {
   Project,
   ProjectCreateInput,
@@ -31,6 +34,7 @@ export interface MainProjectsRepository {
   get(projectId: ProjectId): Project | null;
   add(input: ProjectCreateInput): Promise<Project>;
   save(project: Project): Promise<void>;
+  mutate(projectId: ProjectId, mutation: ProjectMutation): Promise<ProjectMutationResult>;
   delete(projectId: ProjectId): Promise<ProjectDeleteResult>;
   retryCleanup(projectId: ProjectId): Promise<ProjectDeleteResult>;
   reconcileWorktrees(baseline: readonly Project[], updates: readonly Project[], additions: readonly ProjectCreateInput[], isCurrent?: () => boolean): Promise<readonly Project[] | null>;
@@ -277,6 +281,19 @@ export function createMainProjectsRepository(
       return project;
     },
 
+    async mutate(projectId, mutation) {
+      const current = projects.find(project => project.id === projectId);
+      if (!current) throw new ProjectRepositoryError('save', `Project not found: ${projectId}`);
+      if (isWorktreeUnavailable(current)) throw new ProjectRepositoryError('save', 'Worktree is unavailable; rescan before editing');
+      const result = applyProjectMutation(current, mutation);
+      if (!result.ok) return result;
+      if (!isDeepStrictEqual(current, result.project)) {
+        const candidate = readyCollection(projects.map(project => project.id === projectId ? result.project : project), 'save');
+        await persist('save', candidate);
+      }
+      return { ok: true };
+    },
+
     async save(project) {
       const index = projects.findIndex(({ id }) => id === project.id);
       if (index === -1) {
@@ -338,6 +355,7 @@ export function createMainProjectsRepository(
   }
   repository.add = serialize(repository.add);
   repository.save = serialize(repository.save);
+  repository.mutate = serialize(repository.mutate);
   repository.delete = serialize(repository.delete);
   repository.reorder = serialize(repository.reorder);
   repository.reconcileWorktrees = serialize(repository.reconcileWorktrees);

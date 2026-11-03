@@ -92,7 +92,7 @@ related:
 
 - Retry/Cancel is user-controlled; repeated refresh failures remain refresh-only until the user cancels.
 - Worktree auto-connect begins only after child add returns its main-owned id and renderer reconcile completes; recheck that both parent and child still exist.
-- This is single-renderer, local-file coordination. Do not add global mutation queues, revision conflicts, or file locks without a real second writer.
+- A single renderer can have concurrent in-flight mutations. Use the repository's existing serialization with latest-base intents; do not infer that whole-project revisions or an edit-lifetime lock are necessary. See projects#13.
 
 ## projects#8 — Target uniqueness applies only to new project creation  ·  [Decision]
 
@@ -155,3 +155,30 @@ Runtime `Save to Default` preserves the actual tab variant and its kind-specific
 **Fix / note:** Enter resolves the candidate against the current match list and falls back to its first entry when the stored ID is absent. Arrow navigation still uses the explicit candidate state; an empty match list remains inactive. The Sidebar unit test covers null and stale IDs, and the project-search E2E covers immediate Enter after typing.
 
 **Related:** `projects#9`, `src/renderer/components/Sidebar.tsx`, `e2e/sidebar-project-search.spec.ts`.
+
+## projects#13 — Queue mutation meaning before reading a base; keep editor drafts independent  ·  [Decision]
+
+**Decision:** Renderer sends named mutation intents, never complete stale Project snapshots. Main reads
+the latest canonical Project inside its existing serialized write operation, compares/applies the intent,
+persists, then publishes. Editor submits only changed fields with their original values; any real conflict
+rejects all of that edit, but an already-satisfied value succeeds. Background updates do not reset drafts.
+
+**Reason:** Serialization cannot repair a payload built before queueing. Prebuilt provider maps or startup
+arrays still overwrite unrelated updates, and pre-queue comparison can drop the final report in A→B→A.
+Read, no-op detection and nested merge must all happen at execution time. An edit-lifetime lock adds Agent
+initialization and worktree coordination without being needed to preserve unrelated fields.
+
+**Do not change casually because:** Native confirmed patches must not become effective-default snapshots.
+Preference recovery conditionally removes only the expected saved value. Scan-owned metadata remains
+outside editable fields. The renderer's per-project update queue includes Retry and refresh, not just
+the first IPC attempt; otherwise an older failed report can overwrite a newer one on Retry. It does not
+replace main's authority or block other projects.
+
+### Gotchas
+
+- ProjectView identity changes for runtime unread/tab updates. Initialize editor drafts by edit target,
+  not that object identity. Save freezes inputs, waits for completion and preserves failed drafts.
+- Refresh-only recovery must never resend a committed append or mutation. Conflict refresh supplies
+  the latest values for explicit Reset Changes; a failed refresh must not offer stale values as latest.
+- Completion from a closed/replaced editor must not close the new editor. Check edit generation and
+  the current store target, not only a captured React closure.

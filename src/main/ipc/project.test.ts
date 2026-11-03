@@ -3,6 +3,7 @@ import fs from 'fs';
 import { IPC } from '@shared/ipc-channels';
 import type { Project, ProjectCreateInput } from '@shared/projects';
 import type { MainProjectsRepository } from '../projects/projects-repository';
+import { PROJECT_MUTATION } from '@shared/project-mutations';
 
 type Handler = (event: unknown, ...args: any[]) => unknown;
 const handlers = new Map<string, Handler>();
@@ -19,6 +20,7 @@ const repository: MainProjectsRepository = {
   get: vi.fn(),
   add: vi.fn(),
   save: vi.fn(),
+  mutate: vi.fn(),
   delete: vi.fn(),
   retryCleanup: vi.fn(),
   reorder: vi.fn(),
@@ -65,14 +67,16 @@ describe('project IPC repository mapping', () => {
 
     await handlers.get(IPC.PROJECT_GET_ALL)?.({});
     await handlers.get(IPC.PROJECT_ADD)?.({}, input);
-    await handlers.get(IPC.PROJECT_UPDATE)?.({}, canonical);
+    const mutation = { kind: PROJECT_MUTATION.EDIT, edits: [{ field: 'name' as const, before: 'a', value: 'A' }] };
+    await handlers.get(IPC.PROJECT_UPDATE)?.({}, canonical.id, mutation);
     await handlers.get(IPC.PROJECT_DELETE)?.({}, 'a');
     await handlers.get(IPC.PROJECT_RETRY_CLEANUP)?.({}, 'a');
     await handlers.get(IPC.PROJECT_REORDER)?.({}, 'a', 'b');
 
     expect(repository.getAll).toHaveBeenCalledOnce();
     expect(repository.add).toHaveBeenCalledWith(input);
-    expect(repository.save).toHaveBeenCalledWith(canonical);
+    expect(repository.mutate).toHaveBeenCalledWith(canonical.id, mutation);
+    expect(repository.save).not.toHaveBeenCalled();
     expect(repository.delete).toHaveBeenCalledWith('a');
     expect(repository.retryCleanup).toHaveBeenCalledWith('a');
     expect(repository.reorder).toHaveBeenCalledWith('a', 'b');

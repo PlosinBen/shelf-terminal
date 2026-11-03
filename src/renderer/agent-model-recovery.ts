@@ -3,11 +3,12 @@ import type { Project } from '@shared/projects';
 import type { AgentTabState } from './agentTabStore';
 import { debugLog } from './debugLog';
 import { ProjectMutationRefreshError } from './project-mutation-coordinator';
+import { PROJECT_MUTATION, type ProjectMutation, type ProjectMutationResult } from '@shared/project-mutations';
 
 interface RecoveryDependencies {
   project(tabId: string): Project | undefined;
   tab(tabId: string): AgentTabState | undefined;
-  save(projectId: string, changes: Partial<Omit<Project, 'id'>>): Promise<void>;
+  save(projectId: string, mutation: ProjectMutation): Promise<ProjectMutationResult>;
   refresh(): Promise<void>;
   status(tabId: string, state: 'starting' | 'failed', error?: string, recovery?: AgentInitRecovery): void;
   restart(tabId: string, tab: AgentTabState, project: Project): void;
@@ -43,18 +44,18 @@ export function createPrefRecovery(deps: RecoveryDependencies) {
       if (!clearPref) {
         // A previous attempt may have saved successfully but failed to refresh.
         await deps.refresh();
-      } else if (selection && project.agentPrefs[tab.provider]?.[selection.key] === selection.savedValue) {
-        const prefs = { ...project.agentPrefs[tab.provider] };
-        delete prefs[selection.key];
+      } else if (selection) {
         try {
-          await deps.save(project.id, { agentPrefs: { ...project.agentPrefs, [tab.provider]: prefs } });
+          const result = await deps.save(project.id, {
+            kind: PROJECT_MUTATION.CLEAR_AGENT_PREF, provider: tab.provider,
+            key: selection.key, savedValue: selection.savedValue,
+          });
+          if (!result.ok) throw new Error('Unexpected conflict while clearing a saved preference');
         } catch (error) {
           if (!(error instanceof ProjectMutationRefreshError)) throw error;
           // The deletion is already on disk. Refresh rather than repeat a stale save.
           await deps.refresh();
         }
-      } else {
-        debugLog('agent-recovery', `saved preference changed; retrying latest intent tabId=${tabId} projectId=${project.id}`);
       }
       const next = current();
       if (!next) {

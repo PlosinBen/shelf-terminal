@@ -6,6 +6,7 @@ import os from 'os';
 import path from 'path';
 import crypto from 'crypto';
 import { sendAgentPrompt } from '../helpers';
+import { PROJECT_MUTATION } from '../../src/shared/project-mutations';
 
 const run = promisify(execFile);
 const IMAGE = 'shelf-ssh-agent-deploy-test';
@@ -62,11 +63,11 @@ for (const mode of ['dispatcher', 'direct'] as const) {
       app = await electron.launch({ args: [path.join(__dirname, '../..'), `--user-data-dir=${dir}`], env, timeout: 20_000 });
       const page = await app.firstWindow();
       await page.waitForSelector('.app');
-      await page.evaluate(async () => {
+      await page.evaluate(async kind => {
         const project = (await window.shelfApi.project.getAll())[0];
-        await window.shelfApi.project.update({ ...project,
-          defaultTabs: [{ kind: 'agent', name: 'Agent', provider: 'claude' }] });
-      });
+        await window.shelfApi.project.update(project.id, { kind, edits: [{ field: 'defaultTabs', before: project.defaultTabs,
+          value: [{ kind: 'agent', name: 'Agent', provider: 'claude' }] }] });
+      }, PROJECT_MUTATION.EDIT);
       await page.reload();
       await page.waitForSelector('.app');
       await page.locator('.connect-prompt').click();

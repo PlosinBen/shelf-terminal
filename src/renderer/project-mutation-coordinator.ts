@@ -4,10 +4,10 @@ import type {
   ProjectDeleteResult,
   ProjectId,
 } from '@shared/projects';
+import type { ProjectMutation, ProjectMutationResult } from '@shared/project-mutations';
 import type { RendererProjectsRepositoryClient } from './projects-repository-client';
 
 export interface ProjectMutationState {
-  getProject(projectId: ProjectId): Project | null;
   reconcile(projects: readonly Project[]): void;
 }
 
@@ -28,7 +28,7 @@ export interface ProjectMutationCoordinator {
   refresh(): Promise<void>;
   getInvalidDirectoryIds(): Promise<readonly ProjectId[]>;
   add(input: ProjectCreateInput): Promise<Project>;
-  save(projectId: ProjectId, changes: Partial<Omit<Project, 'id'>>): Promise<void>;
+  save(projectId: ProjectId, mutation: ProjectMutation): Promise<ProjectMutationResult>;
   delete(projectId: ProjectId): Promise<ProjectDeleteResult>;
   retryCleanup(projectId: ProjectId): Promise<ProjectDeleteResult>;
   reorder(sourceId: ProjectId, targetId: ProjectId): Promise<void>;
@@ -64,14 +64,13 @@ export function createProjectMutationCoordinator(
       return refreshAfterCommit('add', added);
     },
 
-    async save(projectId, changes) {
-      const current = state.getProject(projectId);
-      if (!current) {
-        console.warn(`[project-coordinator] no-op operation=save projectId=${projectId}: project not found`);
-        return;
+    async save(projectId, mutation) {
+      const result = await client.save(projectId, mutation);
+      if (!result.ok) {
+        await refresh(); // Explicit Reset Changes must see the latest saved fields.
+        return result;
       }
-      await client.save({ ...current, ...changes, id: current.id });
-      await refreshAfterCommit('save', undefined);
+      return refreshAfterCommit('save', result);
     },
 
     async delete(projectId) {

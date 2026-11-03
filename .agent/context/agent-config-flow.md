@@ -237,7 +237,7 @@ Provider 以 capability strategy 選一條路：
 
 ## agent-config-flow#10 — Warm-up 先確定 final session，再完成 init apply 後原子發布 capabilities  ·  [Decision]
 
-**Decision：** `AgentPrefs` 在 capabilities RPC 中是 desired initialization intent，不是已確認 runtime state。Provider 必須先完成 resume；若符合窄化的 missing-session recovery 才建立 replacement session。取得 final session 的 advertised controls 後，先驗證完整 saved selection set，再完成該 provider 的 init apply，最後只發布一份 confirmed capabilities。Copilot 對每個新建立的 final ACP session，依 model → effort → native mode → native permission 順序把存在且已 advertise 的 saved selection 各送進 SDK 一次；restored snapshot 與 intent 同值不能省略這次 outbound apply。Renderer 收到 final capabilities 後沿既有 capability writeback 寫回 project prefs；main 保持被動 relay，不新增 `confirmed_config` 或第二個持久化責任人。
+**Decision：** `AgentPrefs` 在 capabilities RPC 中是 desired initialization intent，不是已確認 runtime state。Provider 必須先完成 resume；若符合窄化的 missing-session recovery 才建立 replacement session。取得 final session 的 advertised controls 後，先驗證完整 saved selection set，再完成該 provider 的 init apply，最後只發布一份 confirmed capabilities。Copilot 對每個新建立的 final ACP session，依 model → effort → native mode → native permission 順序把存在且已 advertise 的 saved selection 各送進 SDK 一次；restored snapshot 與 intent 同值不能省略這次 outbound apply。Renderer 收到 final capabilities 後轉送 Shelf report 給 main repository，在 serialized mutation 中比較並保存 prefs；main 不代做 provider 設定套用，不新增 `confirmed_config` 或第二個持久化責任人。
 
 **Reason：** Session pointer 與 project selection 是兩條生命週期。Resume 失敗改走 new session 只代表 provider conversation context 無法延續，不代表 model、effort 或 permission selections 應回到 provider defaults。Final session snapshot 是 runtime status 的真相源，但不是 caller 已將 initialization intent 送進這個 session 的證明。固定走 `establish final session → apply saved perf → build final capabilities → emit status`，可避免 Shelf 的同值 guard 省略可控的 SDK call，也不需要推測 SDK 的 cache 或內部狀態機。
 
@@ -267,7 +267,7 @@ Provider 以 capability strategy 選一條路：
 
 **Reason：** 初始化錯誤 overlay 中無法使用 picker，而不變的 saved intent 會重複失敗。指定欄位復原讓使用者修正設定，保留初始化失敗不冒充 ready 的契約。
 
-**Do not change casually because：** Renderer 不解析 error 文字或自行判斷 provider 值。清除僅限失敗時的 savedValue；若設定已變，改用最新值重試。保存失敗不得 init；保存後 refresh 失敗只重讀，不能回滾或重存舊資料。Capabilities 同步不重播舊 snapshot。一般查詢、登入、網路或無法分類的 setter 錯誤只提供 Retry。Claude 的 model catalog 不是拒絕 legacy/custom model 的依據。
+**Do not change casually because：** Renderer 不解析 error 文字或自行判斷 provider 值。main 在 serialized mutation 執行時才比較 savedValue 並條件刪除；若設定已變，保留新值並以最新資料重試。保存失敗不得 init；保存後 refresh 失敗只重讀，不能回滾或重存舊資料。Capabilities 原始 Shelf report 每份只轉送一次，由 main 依最新 prefs 比較／合併，不在 renderer 預先算 diff 或組整個 map；更新／Retry 順序見 projects#13。一般查詢、登入、網路或無法分類的 setter 錯誤只提供 Retry。Claude 的 model catalog 不是拒絕 legacy/custom model 的依據。
 
 ## agent-config-flow#13 — Codex 使用原生 controls，Prefs 與有效預設分離  ·  [Decision]
 
