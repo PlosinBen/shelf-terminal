@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, Menu } from 'electron';
+import { app, BrowserWindow, dialog, Menu, ipcMain } from 'electron';
 import path from 'path';
 import fs from 'fs';
 import { writePty, killAllPtys, setPtyObserver } from './pty-manager';
@@ -26,6 +26,9 @@ import { disposeProcessMemory, initProcessMemory } from './process-memory-manage
 import { requestExternalUrlIntent } from './external-url-intent';
 import { createExternalWindowOpenHandler, handleExternalWillNavigate } from './external-navigation';
 import { formatTabLogId } from '@shared/tab-id';
+import { IPC } from '@shared/ipc-channels';
+import { APP_EXIT_DECISION } from '@shared/app-exit';
+import { createAppExitBridge, createAppExitController } from './app-exit';
 
 applyUserDataIsolation();
 
@@ -48,6 +51,11 @@ function createWindow() {
     },
   });
   setMainWindow(win);
+  win.on('close', event => {
+    if (exitController.committed()) return;
+    event.preventDefault();
+    void requestQuit();
+  });
 
   // Win/Linux: drop the in-window menu bar so Alt no longer reveals/toggles it
   // (layout tearing). macOS keeps its system top menu bar. See menu-platform.ts.
@@ -105,6 +113,7 @@ function createWindow() {
     }
     if (!isReloadKeyEvent(input)) return;
     event.preventDefault();
+    if (exitController.preparing()) return;
     dialog
       .showMessageBox(win, {
         type: 'question',
@@ -260,11 +269,14 @@ app.whenReady().then(async () => {
   }
 
   if (process.env.NODE_ENV !== 'test' && app.isPackaged) {
-    initAutoUpdater(getMainWindow()!);
+    initAutoUpdater(getMainWindow()!, requestQuit);
   }
 });
 
+let shutdownStarted = false;
 function shutdown() {
+  if (shutdownStarted) return;
+  shutdownStarted = true;
   disposeProcessMemory();
   killAllPtys();
   disposeAllAgents();
@@ -273,12 +285,66 @@ function shutdown() {
   cleanupConnectors();
 }
 
+const exitBridge = createAppExitBridge({
+  send: (request, cancelled) => {
+    const win = getMainWindow();
+    if (!win || win.isDestroyed() || win.webContents.isDestroyed()) {
+      if (cancelled) return;
+      throw new Error('Shelf renderer is unavailable');
+    }
+    win.webContents.send(cancelled ? IPC.APP_EXIT_CANCEL : IPC.APP_EXIT_PREPARE, request);
+  },
+  isCurrentSender: sender => sender === getMainWindow()?.webContents,
+  warn: message => log.warn('app-exit', message),
+});
+ipcMain.on(IPC.APP_EXIT_RESULT, (event, result) => { exitBridge.accept(event.sender, result); });
+
+const exitController = createAppExitController({
+  prepare: exitBridge.prepare,
+  cancel: exitBridge.cancel,
+  quit: () => app.quit(),
+  prompt: async ({ error, unresponsive }) => {
+    const detail = error instanceof Error ? error.message : String(error);
+    log.warn('app-exit', `history preparation failed unresponsive=${unresponsive}: ${detail}`);
+    const result = await dialog.showMessageBox({
+      type: 'warning',
+      title: 'Could not save Agent history',
+      message: unresponsive ? 'Shelf did not respond while saving Agent history.' : 'Agent history could not be saved.',
+      detail: `${detail}\n\n${unresponsive ? 'Exit anyway may lose unsaved content. ' : ''}Cancel exit to keep the current Views running, or retry saving.`,
+      buttons: unresponsive ? ['Cancel exit', 'Retry', 'Exit anyway'] : ['Cancel exit', 'Retry'],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true,
+    });
+    if (result.response === 1) return APP_EXIT_DECISION.RETRY;
+    if (unresponsive && result.response === 2) {
+      log.warn('app-exit', 'user explicitly chose exit without confirmed history persistence');
+      return APP_EXIT_DECISION.FORCE;
+    }
+    return APP_EXIT_DECISION.CANCEL;
+  },
+});
+
+async function requestQuit(commit?: () => void): Promise<boolean> {
+  try { return await exitController.request(commit); }
+  catch (error) {
+    log.error('app-exit', `exit preparation failed: ${String(error)}`);
+    dialog.showErrorBox('Could not exit Shelf', String(error));
+    return false;
+  }
+}
+
 app.on('window-all-closed', () => {
   shutdown();
   app.quit();
 });
 
-app.on('before-quit', () => {
+app.on('before-quit', event => {
+  if (!exitController.committed() && getMainWindow()) {
+    event.preventDefault();
+    void requestQuit();
+    return;
+  }
   shutdown();
 });
 

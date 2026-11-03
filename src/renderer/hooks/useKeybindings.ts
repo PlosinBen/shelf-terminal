@@ -10,6 +10,7 @@ import {
   setActiveTab,
   toggleHideDisconnected,
   useStore,
+  getUiSliceSnapshot,
 } from '../store';
 import { emit, Events } from '../events';
 import { TOGGLE_CONNECTED_FILTER_ACTION, type KeybindingAction } from '@shared/types';
@@ -59,6 +60,11 @@ export function useKeybindings() {
     };
 
     const handler = (e: KeyboardEvent) => {
+      if (getUiSliceSnapshot().appExitPreparing) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        return;
+      }
       const combo = eventToCombo(e);
       const raw = comboToAction.get(combo);
       if (!raw) return;

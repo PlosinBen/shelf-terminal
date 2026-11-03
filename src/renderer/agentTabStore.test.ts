@@ -48,6 +48,7 @@ import {
   __getTabForTests,
   __getPendingSaveForTests,
   __subscribeForTests,
+  flushAgentHistoryForExit,
 } from './agentTabStore';
 
 const TAB = 'tab-1';
@@ -146,6 +147,96 @@ describe('agentTabStore — applyTaskEvent (background tasks)', () => {
 });
 
 describe('agentTabStore — lifecycle', () => {
+  it('exit saves buffered streaming content without settling or removing runtime', async () => {
+    initTab(TAB, { sessionId: SESSION, provider: 'claude' });
+    setExecutionActive(TAB, true);
+    appendChunk(TAB, 'reply-partial', 'received before exit', 'text');
+    await flushAgentHistoryForExit([SESSION]);
+    expect(mockedStorage.saveAgentMessagesDelta).toHaveBeenLastCalledWith(SESSION, expect.arrayContaining([
+      expect.objectContaining({ id: 'reply-partial', content: 'received before exit', streaming: false, exitInterrupted: true }),
+    ]));
+    expect(__getTabForTests(TAB)!.isExecutionActive).toBe(true);
+    expect(__getTabForTests(TAB)!.messages[0]).toMatchObject({ streaming: true });
+    expect(__getTabForTests(TAB)!.messages[0]).not.toHaveProperty('exitInterrupted');
+  });
+
+  it('exit retries failed dirty messages even after in-memory trimming', async () => {
+    initTab(TAB, { sessionId: SESSION, provider: 'claude' });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockedStorage.saveAgentMessagesDelta.mockRejectedValueOnce(new Error('disk full'));
+    upsertMessage(TAB, userMsg('old-user', 'must not lose'));
+    vi.advanceTimersByTime(5001);
+    await Promise.resolve();
+    setInMemoryMax(1);
+    setExecutionActive(TAB, true);
+    upsertMessage(TAB, userMsg('new-user', 'latest'));
+    setExecutionActive(TAB, false);
+    expect(__getTabForTests(TAB)!.messages.some(message => message.id === 'old-user')).toBe(false);
+    await flushAgentHistoryForExit([SESSION]);
+    expect(mockedStorage.saveAgentMessagesDelta).toHaveBeenLastCalledWith(SESSION, expect.arrayContaining([
+      expect.objectContaining({ id: 'old-user', content: 'must not lose' }),
+    ]));
+  });
+
+  it('failed exit save can retry, but never revives explicitly cleared history', async () => {
+    initTab(TAB, { sessionId: SESSION, provider: 'claude' });
+    upsertMessage(TAB, textMsg('m1', 'save me'));
+    mockedStorage.saveAgentMessagesDelta.mockRejectedValueOnce(new Error('IDB unavailable'));
+    await expect(flushAgentHistoryForExit([SESSION])).rejects.toThrow('IDB unavailable');
+    expect(__getTabForTests(TAB)!.messages).toHaveLength(1);
+    await flushAgentHistoryForExit([SESSION]);
+    await clearMessages(TAB);
+    mockedStorage.saveAgentMessagesDelta.mockClear();
+    await flushAgentHistoryForExit([SESSION]);
+    expect(mockedStorage.saveAgentMessagesDelta).not.toHaveBeenCalled();
+  });
+
+  it('a cancelled exit write remains part of teardown settlement before history cleanup', async () => {
+    initTab(TAB, { sessionId: SESSION, provider: 'claude' });
+    upsertMessage(TAB, textMsg('m1', 'pending snapshot'));
+    let finish!: () => void;
+    mockedStorage.saveAgentMessagesDelta.mockReturnValueOnce(new Promise<void>(resolve => { finish = resolve; }));
+    const saving = flushAgentHistoryForExit([SESSION]);
+    await Promise.resolve(); await Promise.resolve();
+    let closed = false;
+    const closing = removeTab(TAB).then(() => { closed = true; });
+    await Promise.resolve();
+    expect(closed).toBe(false);
+    finish();
+    await Promise.all([saving, closing]);
+    expect(closed).toBe(true);
+  });
+
+  it('exit retries a failed explicit clear rather than reviving the pre-clear snapshot', async () => {
+    initTab(TAB, { sessionId: SESSION, provider: 'claude' });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    upsertMessage(TAB, textMsg('m1', 'discarded'));
+    mockedStorage.clearAgentSession.mockRejectedValueOnce(new Error('clear failed'));
+    await clearMessages(TAB);
+    await flushAgentHistoryForExit([SESSION]);
+    expect(mockedStorage.clearAgentSession).toHaveBeenCalledTimes(2);
+    expect(mockedStorage.saveAgentMessagesDelta).not.toHaveBeenCalled();
+  });
+
+  it('normal saves finish a failed clear before acknowledging new post-clear messages', async () => {
+    initTab(TAB, { sessionId: SESSION, provider: 'claude' });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockedStorage.clearAgentSession.mockRejectedValueOnce(new Error('clear failed'));
+    await clearMessages(TAB);
+    upsertMessage(TAB, userMsg('new-user', 'after clear'));
+    await vi.advanceTimersByTimeAsync(5001);
+    // Otherwise exit's later clear retry would delete already-acknowledged new
+    // messages that have since been trimmed from the in-memory window.
+    expect(mockedStorage.clearAgentSession).toHaveBeenCalledTimes(2);
+    expect(mockedStorage.clearAgentSession.mock.invocationCallOrder[1]).toBeLessThan(mockedStorage.saveAgentMessagesDelta.mock.invocationCallOrder[0]);
+  });
+
+  it('exit does not save a session whose canonical owner disappeared while awaiting writes', async () => {
+    initTab(TAB, { sessionId: SESSION, provider: 'claude' });
+    upsertMessage(TAB, textMsg('m1', 'collected'));
+    await flushAgentHistoryForExit([SESSION], () => false, () => false);
+    expect(mockedStorage.saveAgentMessagesDelta).not.toHaveBeenCalled();
+  });
   it('initTab creates a slice and is idempotent', () => {
     initTab(TAB, { sessionId: SESSION, provider: 'claude' });
     const tab = __getTabForTests(TAB);

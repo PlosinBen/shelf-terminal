@@ -156,6 +156,9 @@ interface ShelfApi {
     ) => Promise<import('../shared/config-backup').ImportApplyResult>;
   };
   app: {
+    onExitPrepare: (callback: (request: import('../shared/app-exit').AppExitRequest) => void) => () => void;
+    onExitCancel: (callback: (request: import('../shared/app-exit').AppExitRequest) => void) => () => void;
+    exitPrepared: (result: import('../shared/app-exit').AppExitResult) => void;
     logsPath: () => Promise<string>;
     debugLog: (tag: string, msg: string) => void;
   };

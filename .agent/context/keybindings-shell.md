@@ -71,3 +71,31 @@ related:
 **Root cause**：面板用 `window.addEventListener('keydown', …, true)`（capture phase，要贏過 xterm/全域 combo）或元件 `onKeyDown` 攔 ArrowUp/Down/Enter 做選項導航。**IME 組字期間**，候選視窗就是靠這些鍵驅動 —— 若 handler 沒先看 `isComposing` 就 `preventDefault` + 改 state，等於把鍵從 IME 手上搶走。
 
 **Fix**：handler **最前面**統一 `if (isComposing) return`（native event 用 `e.isComposing`；React SyntheticEvent 用 `e.nativeEvent.isComposing`），整組候選驅動鍵（方向、Enter、Space、Esc）一律讓 IME 先吃。把決策抽成純函式（`decidePickerKey` / `decideCommandPickerKey`）讓這條規則可單測。**只擋「有 focus 可編輯元素」的面板** —— 像 FolderPicker 那種「全域逐字攔截、沒有 `<input>`」的就沒有 composition、不適用。已套：`PickerPanel`（AskUserQuestion）、`CommandPicker`、`QuickNoteOverlay`（Enter）。
+
+## keybindings-shell#7 — Normal exit prepares Agent history before destructive shutdown  ·  [Decision]
+
+**Decision:** Window close, Quit and update installation share a main-owned exit gate. Native close/quit
+is synchronously prevented until renderer history preparation succeeds. Main coalesces repeated exit
+requests and correlates acknowledgements by current webContents plus request id. A save failure offers
+Retry or Cancel exit, defaulting to cancellation. Renderer non-response after 10 seconds additionally
+offers explicit Exit anyway with an unsaved-content warning; timeout never implies success.
+
+**Reason:** Renderer owns IndexedDB and its throttled dirty snapshots. Closing the window first destroys
+the only process that can flush them. Waiting only for existing writes misses both unstarted batches and
+streaming chunks. Stopping/destroying Views before persistence makes Cancel unable to preserve their
+operation; waiting for the model to finish can hang on long tasks or permission prompts.
+
+**Do not change casually because:** Preparation snapshots received content without marking live runtime
+complete or stopping the provider. Partial replies/thinking carry persisted interruption metadata; this is
+not task completion or automatic task/queue recovery. Failed dirty batches survive UI trimming for retry.
+Cancelled/timed-out attempts cannot acknowledge a later request. Exit I/O is serialized with retries and
+tracked by teardown so concurrent collection cannot resurrect deleted history. Only a successful prepare
+or the explicit unresponsive-renderer escape hatch permits shutdown. OS kills/crashes and unrelated
+editor drafts are outside the guarantee; never describe this as saving all app data.
+
+### Gotchas
+
+- During prepare, a renderer overlay and keybinding guard block new local edits; cancellation releases
+  them without removing tabs. Main's reload shortcut is also blocked while exit preparation is pending.
+- `quitAndInstall` must run inside the approved commit callback, not before the gate or merely after an
+  install-confirmation dialog. Shutdown is idempotent because lifecycle events can converge.

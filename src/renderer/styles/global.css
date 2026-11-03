@@ -5581,3 +5581,14 @@ button {
 .worktree-scan-warning { margin-left: 6px; }
 .worktree-scan-warning > button { color: var(--warning, #e5b75b); background: none; border: none; cursor: pointer; }
 .worktree-scan-popover { position: fixed; z-index: 100; left: 16px; max-width: 360px; padding: 12px; display: flex; flex-direction: column; gap: 8px; white-space: normal; overflow-wrap: anywhere; background: var(--bg-secondary, #292936); border: 1px solid var(--border-color, #555); border-radius: 6px; }
+/* Above renderer dialogs; native main-process retry/cancel dialogs remain usable. */
+.app-exit-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100000;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  cursor: wait;
+}

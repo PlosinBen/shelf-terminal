@@ -40,7 +40,8 @@ import { teardownTab, waitForAgentViewTeardown } from './tab-teardown';
 import { on, emit, Events, onAgent, emitAgent, onBackup, onNewAgentTab } from './events';
 import { bindAgentIPCGroup } from './events';
 import { bindAgentStoreSubscriptions } from './agentTabSubscriptions';
-import { setAuthError, setInMemoryMax, setSaveThrottleMs, peekAgentTab, setInitStatus, setCapabilities } from './agentTabStore';
+import { setAuthError, setInMemoryMax, setSaveThrottleMs, peekAgentTab, setInitStatus, setCapabilities, flushAgentHistoryForExit } from './agentTabStore';
+import { setAppExitPreparing } from './store-ui';
 import { getTheme, buildThemeVars } from './themes';
 import { clearAgentSession, completeAgentHistoryCleanup, queueAgentHistoryCleanup, loadAgentHistoryCleanup, cancelAgentHistoryCleanup } from './storage/agent-history';
 import { collectUnusedAgentViews } from './agent-view-cleanup';
@@ -186,8 +187,39 @@ function scanProjectWorktrees(projectId: string): Promise<void> {
 }
 
 export function App() {
-  const { projects, activeProjectIndex, activeProjectId, sidebarVisible, settingsVisible, commandPickerVisible, devToolsVisible, notesVisible, skillsVisible, mcpVisible, backupVisible, editingProjectIndex, settings, pmVisible, awayMode, worktreeScans } = useStore();
+  const { projects, activeProjectIndex, activeProjectId, sidebarVisible, settingsVisible, commandPickerVisible, devToolsVisible, notesVisible, skillsVisible, mcpVisible, backupVisible, editingProjectIndex, settings, pmVisible, awayMode, worktreeScans, appExitPreparing } = useStore();
   useKeybindings();
+
+  useEffect(() => {
+    let activeRequest: string | null = null;
+    let saving = Promise.resolve();
+    const offPrepare = window.shelfApi.app.onExitPrepare(({ requestId }) => {
+      activeRequest = requestId;
+      setAppExitPreparing(true);
+      // A timed-out attempt may still own an IDB transaction. Serialize retries
+      // and suppress obsolete acknowledgements; cancellation never destroys Views.
+      saving = saving.then(async () => {
+        if (activeRequest !== requestId) return;
+        try {
+          await queueProjectUpdate.settle();
+          if (activeRequest !== requestId) return;
+          const sessions = getProjectViews().flatMap(project => Object.keys(project.agentViews));
+          await flushAgentHistoryForExit(sessions, () => activeRequest !== requestId,
+            sessionId => getProjectViews().some(project => Object.hasOwn(project.agentViews, sessionId)));
+          if (activeRequest === requestId) window.shelfApi.app.exitPrepared({ requestId, ok: true });
+        } catch (error) {
+          console.error('[app-exit] history preparation failed', { requestId, error });
+          if (activeRequest === requestId) window.shelfApi.app.exitPrepared({ requestId, ok: false, error: error instanceof Error ? error.message : String(error) });
+        }
+      });
+    });
+    const offCancel = window.shelfApi.app.onExitCancel(({ requestId }) => {
+      if (activeRequest !== requestId) return;
+      activeRequest = null;
+      setAppExitPreparing(false);
+    });
+    return () => { activeRequest = null; offPrepare(); offCancel(); setAppExitPreparing(false); };
+  }, []);
 
   // Auto-connect a just-added project (e.g. a fresh worktree) once it lands in the
   // store. Driven off `projects` (fresh) so the CONNECT_PROJECT handler — which
@@ -999,6 +1031,9 @@ export function App() {
       <WebPermissionPrompt />
       <BrowserOpenPrompt />
       <ExternalUrlIntentPrompt />
+      {appExitPreparing && (
+        <div className="app-exit-overlay" role="status" aria-live="polite">Saving Agent history before exit…</div>
+      )}
     </div>
   );
 }

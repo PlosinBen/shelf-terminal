@@ -11,6 +11,7 @@ let updateCheckTimer: ReturnType<typeof setTimeout> | null = null;
 let lastCheckTime = 0;
 let win: BrowserWindow | null = null;
 let currentStatus: UpdateStatus = { state: 'idle' };
+let requestExit: ((commit: () => void) => Promise<boolean>) | null = null;
 // When set, the next updater event triggers a user-facing dialog (so manual
 // "Check for Updates" clicks get feedback even if there's no new version).
 let manualCheckPending = false;
@@ -29,8 +30,9 @@ function checkForUpdates() {
   autoUpdater.checkForUpdates().catch(() => {});
 }
 
-export function initAutoUpdater(mainWindow: BrowserWindow) {
+export function initAutoUpdater(mainWindow: BrowserWindow, prepareExit: (commit: () => void) => Promise<boolean>) {
   win = mainWindow;
+  requestExit = prepareExit;
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = false;
 
@@ -132,8 +134,12 @@ export async function confirmAndInstallUpdate() {
   });
 
   if (result.response === 1) {
-    log.info('updater', `user confirmed install v${version}, quitting and installing`);
-    autoUpdater.quitAndInstall();
+    log.info('updater', `user requested install v${version}, preparing exit`);
+    if (!requestExit) throw new Error('Update install has no exit preparation gate');
+    await requestExit(() => {
+      log.info('updater', `exit approved for v${version}, quitting and installing`);
+      autoUpdater.quitAndInstall();
+    });
   }
 }
 

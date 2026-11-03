@@ -160,6 +160,9 @@ export const IPC = {
   // log level is info/debug). For tracing UI flows unobservable from outside the
   // renderer. See src/renderer/debugLog.ts.
   APP_DEBUG_LOG: 'app:debug-log',
+  APP_EXIT_PREPARE: 'app:exit-prepare',
+  APP_EXIT_CANCEL: 'app:exit-cancel',
+  APP_EXIT_RESULT: 'app:exit-result',
 
   // Updater
   UPDATE_CHECK: 'update:check',

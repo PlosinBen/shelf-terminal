@@ -116,3 +116,16 @@ Plan/todo data is not timeline content. It is replace-semantics state on its own
 ## Invalid saved configuration recovery
 
 A provider identifies an invalid saved field and returns typed recovery metadata with failed initialization. The renderer displays Retry and an explicit field-clearing action. The App coordinator compares the current saved value, saves only that deletion, refreshes authoritative project state, and reinitializes the same agent session. Other settings and providers retain their values. Query/auth failures do not imply invalid prefs and do not authorize deletion. Recovery uses the existing session lifecycle rather than a separate reset protocol.
+
+## Exit persistence
+
+Normal exit intent passes through a correlated preparation request before any destructive shutdown.
+The renderer waits for submitted project operations and history writes, then persists owned conversation
+snapshots, including received partial content marked as interrupted. Snapshotting does not settle the
+running execution. Failed batches remain retryable independently of the in-memory display window.
+
+Preparation success permits host shutdown. Failure or cancellation retains the live Views; only explicit
+user approval after an unresponsive renderer may bypass confirmed persistence. Retried and cancelled
+attempts have separate identities, so an obsolete result cannot authorize exit. Conversation ownership,
+explicit history clearing and teardown settlement also govern exit writes; the snapshot cannot revive
+collected data. This flow does not restart unfinished executions or persist other editor drafts.

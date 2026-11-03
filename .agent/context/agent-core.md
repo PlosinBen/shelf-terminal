@@ -57,6 +57,13 @@ related:
 新 sessionId 由 main 配發 UUID，舊資料沿用原 key，缺省遷移 key 具決定性。
 canonical `Project.agentViews[sessionId]` 保存 provider／prefs；兩層持久化沿用同一個 key。
 
+Client dirty snapshots 在寫入確認前獨立於 throttle 與 UI cap 保留，失敗不能遺失可重試批次。
+正常退出保存已收到的對話快照後才 shutdown；生成中的 reply／thinking 保存中斷標記，
+不先結束 runtime execution。取消退出仍可繼續使用原 View，詳見 keybindings-shell#7。
+退出寫入也納入 teardown settlement，保存前回查 canonical owner；explicit clear 撤回舊
+dirty snapshots，失敗的 clear 在後續保存或退出前先重試，再確認新訊息寫入，避免重存已
+丟棄內容或稍後清掉已確認、卻已被 UI cap 移除的新訊息。
+
 **清理策略**：
 - Server-side：不按閒置天數掃描刪除 context；明確 clear 仍可刪除。讀取損壞檔案留錯誤紀錄，不由全域掃描刪除其他 session 的資料。
 - Client-side：Default 或 live runtime 引用的 session 保留；兩者皆無時，等待 teardown／history writers 完成後清 history，成功再移除 canonical record。啟動回收中斷流程遺留的未引用 record；Project 刪除前將 session 歸屬寫入 IndexedDB 清理待辦，失敗／退出後仍可重試。不掃未知歸屬 history，詳見 projects#14。

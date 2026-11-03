@@ -12,6 +12,7 @@ title: shelf-terminal — Intent → File Index
 | Intent | File | Role |
 |--------|------|------|
 | App lifecycle, IPC wiring | `index.ts` | app/window 啟動、`registerAllIpcHandlers()` 一次註冊、PM/Agent/updater 接線與 quit cleanup 的中樞 |
+| Agent history 退出 gate | `app-exit.ts` + `../shared/app-exit.ts` | main 退出 controller、correlated bridge、timeout／Retry／Cancel／Force 與共享 payload |
 | 共享 app 狀態 | `app-state.ts` | `mainWindow` / `cachedSettings` 的 getter/setter，index 與 ipc 共用單一來源 |
 | IPC handler（按領域分檔） | `ipc/` (`index.ts` + `pty`/`project`/`connector`/`git`/`file-transfer`/`dialog`/`settings`/`logs`/`web`/`notes`/`skills`/`mcp`/`config-backup`/`updater`/`pm`/`process-memory`) | 各檔 export `registerXxxHandlers()`，`ipc/index.ts` 匯總註冊 |
 | Process memory current state + summary clock | `process-memory-manager.ts` | 註冊 App/dispatcher/exec sources、接收 latest reports、計算 freshness rollups、記錄並發布 summary |
@@ -337,6 +338,7 @@ title: shelf-terminal — Intent → File Index
 | E2E 測試 | `e2e/project-creation.spec.ts` | 建立/reopen project、connect、tab、terminal output與 legacy duplicate first-match |
 | E2E 測試 | `e2e/features.spec.ts` | Search、settings、project edit、dev tools、快捷鍵 |
 | E2E 測試 | `e2e/config-bootstrap.spec.ts` | Config 損毀 bootstrap dialog（quit / backup & continue） |
+| Agent history 退出驗證 | `e2e/app-exit.spec.ts` | Quit／關窗重啟恢復、partial 中斷、保存失敗取消／重試與無回應明確退出 |
 | E2E 測試 | `e2e/config-backup.spec.ts` | Backup operation panel 的 config gating、tab/session state、Backup checklist 與 Import source/selection/apply flow |
 | E2E 測試 | `e2e/pm-agent.spec.ts` | PM sidebar、PmView toggle、provider settings、Away Mode、Telegram |
 | E2E 測試 | `e2e/init-script.spec.ts` | Init script 不重複顯示 |

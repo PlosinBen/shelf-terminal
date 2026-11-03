@@ -118,6 +118,18 @@ Surfaced through `shelfApi.connector` (`uploadFile` / `clearUploads` / `getUploa
 | `logs.size()` | invoke `logs:size` → `{ totalBytes, fileCount }` |
 | `app.logsPath()` | invoke `app:logs-path` → `string` |
 | `app.debugLog(tag, msg)` | send `app:debug-log` (fire-and-forget diagnostic log → main log file) |
+| `app.onExitPrepare(cb)` | listen `app:exit-prepare` → `{ requestId: string }` |
+| `app.onExitCancel(cb)` | listen `app:exit-cancel` → `{ requestId: string }` |
+| `app.exitPrepared(result)` | send `app:exit-result` → `{ requestId, ok: true }` or `{ requestId, ok: false, error: string }` |
+
+Exit shapes/constants are authoritative in `src/shared/app-exit.ts`. Main synchronously prevents native
+close/Quit, coalesces requests and accepts a result only from the current main-window webContents with
+the exact pending request id. Renderer serializes preparation, blocks UI mutation while saving and does
+not acknowledge cancelled/replaced attempts. Cancel preserves runtime and generation. History writes
+must succeed before main shutdown; a failure offers Retry/Cancel exit (default Cancel). No response in
+10 seconds offers those choices plus explicit Exit anyway with a data-loss warning; timeout is not success.
+Update installation uses the same gate before `quitAndInstall`. This is Agent history persistence, not a
+general editor save dialog, queue/task resume protocol or OS-force-kill guarantee.
 
 ## find (`shelfApi.find`)
 

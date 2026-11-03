@@ -185,6 +185,7 @@ The on-disk artifacts Shelf persists and their layout. Two roots: `<userData>` (
 - **Source of truth**: `src/renderer/storage/agent-history.ts`.
 - **Version**: 5; upgrades from v4 preserve the `messages` store and its rows/indexes. Pre-v4 message formats retain the existing clean-break policy.
 - **Messages**: `dbId` auto-increment key; `by-session` and compound `by-session-time` indexes; rows are renderer messages plus `sessionId`. Dirty snapshots upsert by session/message id.
+- **Exit snapshots**: renderer-local `AgentMsg.exitInterrupted?: true` marks a persisted partial reply/thinking snapshot; `streaming` is false in storage, not in live runtime. Incomplete fold cards carry an interruption error. These are display metadata, not provider wire fields, execution success or an automatic-resume promise. The schema version does not change for optional message metadata.
 - **Pending cleanup**: `pending-cleanup`, keyed by `sessionId`; entries are `{ projectId: string, sessionId: string }`, staged before Project config deletion. Explicit completion deletes messages and the entry in one transaction. Ordinary Clear History deletes only messages.
 - **Recovery**: failed/interrupted deletion keeps its entry for startup retry; a surviving Project owning that session prevents replay deletion. Unknown messages without canonical or journal ownership are not swept. This database does not own provider-native transcripts.
 

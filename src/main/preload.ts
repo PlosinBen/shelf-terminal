@@ -207,6 +207,17 @@ contextBridge.exposeInMainWorld('shelfApi', {
       ipcRenderer.invoke(IPC.CONFIG_BACKUP_APPLY_IMPORT, { remoteUrl, sourceRevision, selectedIds }),
   },
   app: {
+    onExitPrepare: (callback: (request: import('../shared/app-exit').AppExitRequest) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, request: import('../shared/app-exit').AppExitRequest) => callback(request);
+      ipcRenderer.on(IPC.APP_EXIT_PREPARE, listener);
+      return () => ipcRenderer.removeListener(IPC.APP_EXIT_PREPARE, listener);
+    },
+    onExitCancel: (callback: (request: import('../shared/app-exit').AppExitRequest) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, request: import('../shared/app-exit').AppExitRequest) => callback(request);
+      ipcRenderer.on(IPC.APP_EXIT_CANCEL, listener);
+      return () => ipcRenderer.removeListener(IPC.APP_EXIT_CANCEL, listener);
+    },
+    exitPrepared: (result: import('../shared/app-exit').AppExitResult): void => ipcRenderer.send(IPC.APP_EXIT_RESULT, result),
     logsPath: (): Promise<string> => ipcRenderer.invoke(IPC.APP_LOGS_PATH),
     debugLog: (tag: string, msg: string): void => ipcRenderer.send(IPC.APP_DEBUG_LOG, tag, msg),
   },

@@ -1,4 +1,5 @@
 import type { AgentInitRecovery } from '@shared/agent-init-recovery';
+import { AGENT_EXIT_INTERRUPTED_LABEL } from '@shared/app-exit';
 import { useSyncExternalStore } from 'react';
 import type { AgentMsg } from './components/AgentMessage';
 import type { AgentFile, AgentInitPhase, AgentLoginPrompt, AgentLoginResult, AgentPrefs, AgentProvider, AgentQueueItem, AuthMethod, NormalizedTask, TaskEvent } from '../shared/types';
@@ -238,6 +239,33 @@ interface PendingSave {
 }
 const pendingSaves = new Map<string, PendingSave>();
 const historyWrites = new Map<string, Set<Promise<void>>>();
+// Keep unacknowledged snapshots independently of both throttle entries and the
+// trimmed UI window. Failed writes must still be available to an exit retry.
+const unsavedHistory = new Map<string, { sessionId: string; messages: Map<string, AgentMsg> }>();
+const pendingHistoryClears = new Set<string>();
+
+function trackHistoryWrite(tabId: string, sessionId: string, write: Promise<void>) {
+  const writes = historyWrites.get(tabId) ?? new Set<Promise<void>>();
+  historyWrites.set(tabId, writes);
+  writes.add(write);
+  const finished = () => {
+    writes.delete(write);
+    if (historyWrites.get(tabId) === writes && writes.size === 0) historyWrites.delete(tabId);
+  };
+  void write.then(finished, error => {
+    console.error('[agentTabStore] history write failed', { tabId, sessionId, error });
+    finished();
+  });
+}
+
+function acknowledgeHistory(tabId: string, saved: readonly AgentMsg[]) {
+  const pending = unsavedHistory.get(tabId);
+  if (!pending) return;
+  for (const message of saved) {
+    if (pending.messages.get(message.id) === message) pending.messages.delete(message.id);
+  }
+  if (pending.messages.size === 0) unsavedHistory.delete(tabId);
+}
 
 function ensurePendingSave(tabId: string): PendingSave {
   const existing = pendingSaves.get(tabId);
@@ -252,6 +280,11 @@ function ensurePendingSave(tabId: string): PendingSave {
 }
 
 function markDirty(tabId: string, msg: AgentMsg) {
+  const tab = tabs.get(tabId);
+  if (!tab) throw new Error(`Cannot dirty history of missing tab ${tabId}`);
+  const unsaved = unsavedHistory.get(tabId) ?? { sessionId: tab.sessionId, messages: new Map<string, AgentMsg>() };
+  unsaved.messages.set(msg.id, msg);
+  unsavedHistory.set(tabId, unsaved);
   const entry = ensurePendingSave(tabId);
   // Later mark within the same window wins — Map.set overwrites the
   // snapshot, which is correct (latest state is what we want to persist).
@@ -288,18 +321,53 @@ function doSaveCallback(tabId: string, closing = false) {
   }
   pendingSaves.delete(tabId);
   const dirty = [...entry.dirtyMsgs.values()];
-  const writes = historyWrites.get(tabId) ?? new Set<Promise<void>>();
-  historyWrites.set(tabId, writes);
-  const write = saveAgentMessagesDelta(tab.sessionId, dirty, entry.deletedIds);
-  writes.add(write);
-  const finished = () => {
-    writes.delete(write);
-    if (historyWrites.get(tabId) === writes && writes.size === 0) historyWrites.delete(tabId);
-  };
-  void write.then(finished, (err) => {
-    console.error('[agentTabStore] saveAgentMessagesDelta failed', { tabId, sessionId: tab.sessionId, error: err });
-    finished();
+  const save = () => saveAgentMessagesDelta(tab.sessionId, dirty, entry.deletedIds).then(() => {
+    acknowledgeHistory(tabId, dirty.filter(message => !('streaming' in message && message.streaming)));
   });
+  // Resolve a failed clear before acknowledging newer messages; otherwise a
+  // later clear retry could erase data already saved and trimmed from memory.
+  const write = pendingHistoryClears.has(tab.sessionId)
+    ? clearAgentSession(tab.sessionId).then(() => { pendingHistoryClears.delete(tab.sessionId); }).then(save)
+    : save();
+  trackHistoryWrite(tabId, tab.sessionId, write);
+}
+
+/** Non-destructive prepare phase: snapshot the received stream, never stop a
+ * provider or pretend runtime execution finished. The caller supplies current
+ * canonical ownership so deleted/collected sessions cannot be resurrected. */
+export async function flushAgentHistoryForExit(sessionIds: readonly string[], cancelled = () => false, stillOwned = (id: string) => sessionIds.includes(id)): Promise<void> {
+  await Promise.allSettled([...historyWrites.values()].flatMap(writes => [...writes]));
+  const owned = new Set(sessionIds);
+  for (const sessionId of pendingHistoryClears) {
+    if (cancelled()) return;
+    if (!owned.has(sessionId) || !stillOwned(sessionId)) continue;
+    await clearAgentSession(sessionId);
+    pendingHistoryClears.delete(sessionId);
+  }
+  const candidates = new Set([...unsavedHistory.keys(), ...tabs.keys()]);
+  for (const tabId of candidates) {
+    if (cancelled()) return;
+    const tab = tabs.get(tabId);
+    const sessionId = tab?.sessionId ?? unsavedHistory.get(tabId)?.sessionId;
+    if (!sessionId || !owned.has(sessionId) || !stillOwned(sessionId)) continue;
+    if (tab) flushChunkBuffer(tabId);
+    const pending = unsavedHistory.get(tabId);
+    const dirty = [...(pending?.messages.values() ?? [])];
+    const messages = new Map(dirty.map(message => [message.id, message]));
+    for (const message of tabs.get(tabId)?.messages ?? []) messages.set(message.id, message);
+    const snapshot = [...messages.values()].map(message => {
+      if ('streaming' in message && message.streaming) return { ...message, streaming: false, exitInterrupted: true as const };
+      if (message.type.startsWith('fold_') && 'label' in message && !message.body && !message.errorMessage) {
+        return { ...message, errorMessage: AGENT_EXIT_INTERRUPTED_LABEL };
+      }
+      return message;
+    });
+    if (snapshot.length === 0) continue;
+    const writing = saveAgentMessagesDelta(sessionId, snapshot);
+    trackHistoryWrite(tabId, sessionId, writing);
+    await writing;
+    acknowledgeHistory(tabId, dirty);
+  }
 }
 
 /**
@@ -735,6 +803,7 @@ export async function clearMessages(tabId: string) {
   // storage. A read already in flight may still resolve with the pre-clear
   // snapshot, but its epoch check will now discard that result.
   historyLoadTokens.delete(tabId);
+  unsavedHistory.delete(tabId);
   // Drop deltas waiting for the 33ms renderer throttle. Otherwise their timer
   // can append a stale reply immediately after messages becomes empty.
   clearChunkBuffer(tabId);
@@ -751,7 +820,10 @@ export async function clearMessages(tabId: string) {
   // Clear background tasks too so every renderer-owned history surface follows
   // the same visible-history wipe.
   update(tabId, (prev) => ({ ...prev, messages: [], backgroundTasks: [], dismissedTaskIds: new Set(), pendingSends: [], promotedClientMsgIds: new Set() }));
-  await clearAgentSession(tab.sessionId).catch((err) => {
+  pendingHistoryClears.add(tab.sessionId);
+  const clearing = clearAgentSession(tab.sessionId).then(() => { pendingHistoryClears.delete(tab.sessionId); });
+  trackHistoryWrite(tabId, tab.sessionId, clearing);
+  await clearing.catch((err) => {
     console.error('[agentTabStore] clearAgentSession failed', err);
   });
 }
@@ -1040,6 +1112,8 @@ export function __resetStoreForTests() {
   for (const { timer } of pendingSaves.values()) clearTimeout(timer);
   pendingSaves.clear();
   historyWrites.clear();
+  unsavedHistory.clear();
+  pendingHistoryClears.clear();
   for (const t of chunkTimers.values()) clearTimeout(t);
   chunkTimers.clear();
   pendingChunks.clear();

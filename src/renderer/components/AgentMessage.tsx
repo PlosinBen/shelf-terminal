@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useContext } from 'react';
+import { AGENT_EXIT_INTERRUPTED_LABEL } from '@shared/app-exit';
 import { AgentDisplayContext } from './agent/AgentDisplayContext';
 import { renderMarkdown } from '../utils/markdown';
 import { alignLineDiff, type DiffRow } from '../utils/line-diff';
@@ -22,6 +23,8 @@ export type AgentMsg = {
   id: string;
   provider?: string;
   timestamp: number;
+  /** Persistence-only snapshot marker; never signals runtime execution end. */
+  exitInterrupted?: true;
   /**
    * Set when this message was emitted BY A SUBAGENT — value is the outer Agent
    * tool_use's id. The timeline nests it under that card instead of the main list.
@@ -135,6 +138,7 @@ export function AgentMessage({ message, cwd: _cwd, nested }: Props) {
         <div className="agent-msg agent-msg-reply">
           <div className="agent-msg-content agent-markdown" dangerouslySetInnerHTML={{ __html: replyHtml }} />
           {message.streaming === true && <span className="agent-cursor" />}
+          {message.exitInterrupted && <div className="agent-msg-system">{AGENT_EXIT_INTERRUPTED_LABEL}</div>}
         </div>
       );
 
@@ -183,6 +187,7 @@ export function AgentMessage({ message, cwd: _cwd, nested }: Props) {
           {hasError && (
             <div className="fold-error-banner">{message.errorMessage}</div>
           )}
+          {message.exitInterrupted && <div className="fold-error-banner">{AGENT_EXIT_INTERRUPTED_LABEL}</div>}
           {isExpanded && message.body && (
             <div
               className="fold-body fold-body-text"

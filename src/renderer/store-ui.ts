@@ -11,6 +11,7 @@ export interface ChatStage {
 }
 
 export interface UiSliceSnapshot {
+  appExitPreparing: boolean;
   sidebarVisible: boolean;
   settingsVisible: boolean;
   searchVisible: boolean;
@@ -31,6 +32,7 @@ export interface UiSliceSnapshot {
 }
 
 let sidebarVisible = true;
+let appExitPreparing = false;
 let settingsVisible = false;
 let searchVisible = false;
 let commandPickerVisible = false;
@@ -54,6 +56,7 @@ function publishUiSlice() {
 
 export function getUiSliceSnapshot(): UiSliceSnapshot {
   return {
+    appExitPreparing,
     sidebarVisible,
     settingsVisible,
     searchVisible,
@@ -72,6 +75,11 @@ export function getUiSliceSnapshot(): UiSliceSnapshot {
     chatStage,
     processMemorySummary,
   };
+}
+
+export function setAppExitPreparing(value: boolean) {
+  appExitPreparing = value;
+  publishUiSlice();
 }
 
 export function toggleProjectList() {
@@ -183,6 +191,7 @@ export function setChatStage(stage: ChatStage | null) {
 }
 
 export function resetUiStoreForTests() {
+  appExitPreparing = false;
   sidebarVisible = true;
   settingsVisible = false;
   searchVisible = false;
