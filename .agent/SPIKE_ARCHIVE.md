@@ -1,11 +1,11 @@
 ---
 type: map
-title: Preserved spike branches
+title: Preserved spike and reevaluation branches
 ---
 
 # Spike Archive
 
-此索引記錄必須保留的 spike 分支與原始驗證 artifacts，避免移除 worktree 後，
+此索引記錄必須保留的 spike／重評備份分支與原始驗證 artifacts，避免移除 worktree 後，
 被當作一般已完成 feature branch 清理。內容不代表已採用的產品架構。
 
 ## 保留規則
@@ -63,3 +63,17 @@ git ls-tree -r --name-only f6d5359fb9a30c56c5823a4d65210bc13e9edda2 spikes/
 ```
 
 Commit hash 只是定位資訊，並非防刪備份；仍須保留可到達該 commit 的 Git ref。
+
+## Agent message channel 重評來源
+
+| 欄位 | 內容 |
+|---|---|
+| 保留分支 | `backup/agent-message-channel-before-reevaluation` |
+| 封存基準 commit | `4f908d762c1330580853d456a982e55c91409b2c` |
+| 保存內容 | 追上 main 前的原始 branch 實作與 27 個相對當時 main 的 commits，供逐功能取捨後查閱原方案 |
+| 保留原因 | 重評採用的是調整後的功能與資料模型；原始方案未整批合入，不能以新 branch 完成視為可刪除 |
+| 刪除條件 | 先確認原始 code／tests 已有可讀取的替代封存，更新本索引，且取得使用者明確同意；不因功能重評完成、合併或移除 worktree 自動刪除 |
+| 備份邊界 | 已確認本機 ref；未驗證遠端備份，不以本機保留推論已上傳。push／tag 仍需另行授權 |
+
+不需恢復 worktree 即可用 `git show backup/agent-message-channel-before-reevaluation:<path>`
+查閱原始檔案；封存內容不代表目前產品契約。

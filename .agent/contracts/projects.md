@@ -188,7 +188,7 @@ Manual Agent creation uses the required-provider `emitNewAgentTab` / `onNewAgent
 
 ## Runtime tab defaults and Quick Commands
 
-`Save to Default` retains label/color and the actual variant: Terminal command, Web URL, or Agent provider plus stable sessionId. It does not copy prefs or allocate a replacement session. Same-session duplicates cannot append or mutate the existing entry. Closing a runtime View does not remove Default or its record. Removing a Default in Project Settings does not delete its record/history or close a live tab.
+`Save to Default` retains label/color and the actual variant: Terminal command, Web URL, or Agent provider plus stable sessionId. It does not copy prefs or allocate a replacement session. Same-session duplicates cannot append or mutate the existing entry. Closing a runtime View does not remove its Default reference; a Default or live runtime reference retains its record/history. Removing a Default in Project Settings does not close a live tab. With neither reference remaining, collection waits for teardown and history writers, clears owned history, then forgets metadata as described above.
 
 Manual Agent creation persists a fresh empty-prefs record, refreshes, and then mounts its runtime tab. It never infers settings from another same-provider View. Main initialization validates Project target, provider/session ownership and exclusive live mounting. Per-exec initialization reads that View's latest prefs.
 

@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { PROJECT_MUTATION } from '../src/shared/project-mutations';
+import { IPC } from '../src/shared/ipc-channels';
 const env = { ...process.env, GIT_AUTHOR_NAME: 'test', GIT_AUTHOR_EMAIL: 'test@example.com', GIT_COMMITTER_NAME: 'test', GIT_COMMITTER_EMAIL: 'test@example.com' };
 const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, env }).toString();
 test.describe('worktree reconciliation', () => {
@@ -127,12 +128,31 @@ test.describe('worktree reconciliation', () => {
   });
 
   test('rescans successfully after the first target probe failed', async () => {
+    // Hold the first real scan until Connect has succeeded. Moving cwd before
+    // Connect races startup directory validation and can disable Connect without
+    // ever exercising the target-probe recovery this test protects.
+    await app.evaluate(({ ipcMain }, channel) => {
+      const original = (ipcMain as any)._invokeHandlers.get(channel);
+      let first = true;
+      ipcMain.removeHandler(channel);
+      ipcMain.handle(channel, async (event, projectId) => {
+        if (first) {
+          first = false;
+          await new Promise<void>(resolve => { (globalThis as any).__releaseFirstWorktreeProbe = resolve; });
+        }
+        return original(event, projectId);
+      });
+    }, IPC.WORKTREE_RECONCILE);
+    await connectMain();
+    await expect.poll(() => app.evaluate(() => typeof (globalThis as any).__releaseFirstWorktreeProbe)).toBe('function');
     const moved = base + '-moved';
     fs.renameSync(base, moved);
-    await connectMain();
+    await app.evaluate(() => (globalThis as any).__releaseFirstWorktreeProbe());
     await expect(page.getByRole('button', { name: 'Worktree scan failed' })).toBeVisible();
-    fs.renameSync(moved, base);
     await page.getByRole('button', { name: 'Worktree scan failed' }).click();
+    await expect(page.locator('.worktree-scan-popover')).toContainText('Cannot inspect target');
+    await expect(rows()).toHaveCount(0);
+    fs.renameSync(moved, base);
     await page.locator('.worktree-scan-popover').getByRole('button', { name: 'Rescan project worktrees' }).click();
     await expect(rows()).toHaveCount(1);
     await expect(page.getByRole('button', { name: 'Worktree scan failed' })).toHaveCount(0);

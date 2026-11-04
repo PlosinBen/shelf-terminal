@@ -8,6 +8,13 @@ related:
 
 # Testing Practices
 
+## Worktree scan verification
+
+`e2e/worktree-reconciliation.spec.ts` 的首次 target probe 失敗案例，在 Connect
+成功後 gate 第一個實際 scan main handler，再暫時移走 cwd；驗真 probe 錯誤與
+UI Rescan 恢復，不 mock scan 結果。不要在 Connect 前移走目錄，否則會與啟動時
+目錄驗證競態，測到 disabled Connect 而非 probe recovery。
+
 ## Worktree delegation verification
 
 `npm run test:unit -- src/main/agent/delegation.test.ts src/main/agent/message-sender.test.ts src/main/agent/delegation-runtime.test.ts`
@@ -38,6 +45,11 @@ main operation 映射與錯誤回傳。兩者都不呼叫真實模型，也不�
 模型實際呼叫工具或使用者權限互動。一般 `npm run test:unit` 會包含兩者。
 
 ## Agent input verification
+
+`e2e/agent-flows.spec.ts` 的 add-tab menu 案例驗證明確 provider 選擇、總 tab
+上限與同 provider 雙 View 的獨立對話；已開啟某 provider 不會禁用其 menu。
+Default／prefs／reconnect 的多 View 隔離由 `e2e/multi-agent-views.spec.ts` 覆蓋。
+兩者使用 fake provider，不代表 live provider 已通過驗證。
 
 `components/agent/AgentInputSourceHeader.test.ts` 驗來源標籤映射、無 metadata 的舊資料
 及名稱文字 escaping；`e2e/agent-flows.spec.ts` 的 saved input sources 案例以受控

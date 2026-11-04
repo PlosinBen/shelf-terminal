@@ -8,7 +8,7 @@ Read this first, then jump to the category you need.
 | Architecture | [architecture/index.md](architecture/index.md) | Abstract data flow and system boundaries (no filenames) |
 | Contracts | [contracts/index.md](contracts/index.md) | Interface specs, message formats, routing rules |
 | Context | [context/index.md](context/index.md) | Decisions + gotchas grouped by topic; cited from code as `<topic>#N` |
-| Spike archive | [SPIKE_ARCHIVE.md](SPIKE_ARCHIVE.md) | Preserved spike branches, evidence locations and deletion restrictions |
+| Preserved branches | [SPIKE_ARCHIVE.md](SPIKE_ARCHIVE.md) | Spike／reevaluation backup refs, evidence locations and deletion restrictions |
 
 > Citation: code comments reference a decision/gotcha as `<topic>#N` (e.g. `skills#4`) → open `context/<topic>.md`, entry N.
 > Project positioning lives in `PRODUCT.md`; release process in `RELEASE_FLOW.md`; upstream issues to re-check each

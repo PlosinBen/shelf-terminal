@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { createShelfMcpAuthority } from '../src/main/agent/shelf-mcp-authority';
 import { SHELF_MCP, SHELF_MCP_FAILURE } from '@shared/shelf-mcp';
+import { DELEGATION } from '@shared/agent-delegation';
 import { runBridgeTool } from './app-tool-tools';
 const authority = createShelfMcpAuthority();
 vi.mock('./app-tool-client', () => ({
@@ -120,6 +121,12 @@ describe('shelf MCP bridge server', () => {
       'propose_worktree_create',
       'propose_worktree_finish',
       'read_app_skill_file',
+      DELEGATION.TOOL.STATUS,
+      DELEGATION.TOOL.PROGRESS,
+      DELEGATION.TOOL.SELECT,
+      DELEGATION.TOOL.SEND,
+      DELEGATION.TOOL.START,
+      DELEGATION.TOOL.RESULT,
       'update_app_skill',
       'write_app_skill_file',
     ]);

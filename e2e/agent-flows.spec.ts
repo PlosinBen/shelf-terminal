@@ -321,7 +321,7 @@ test.describe('agent flows via fake provider', () => {
       await expect(menu.locator('.context-menu-item', { hasText: 'Copilot ACP' })).toHaveCount(0);
     });
 
-    test('opens the explicitly selected provider and disables only providers already open', async ({ shelfApp: { page } }) => {
+    test('opens the explicitly selected provider and keeps open providers available until the tab limit', async ({ shelfApp: { page } }) => {
       await setupProject(page);
       const providers = [
         { menu: 'Agent (Claude)', tab: 'Claude' },
@@ -338,12 +338,37 @@ test.describe('agent flows via fake provider', () => {
 
         if (index < providers.length - 1) {
           await page.locator('.tab-add').click({ button: 'right' });
-          await expect(page.locator('.context-menu-item', { hasText: provider.menu })).toBeDisabled();
+          // A provider is not a singleton: another View may use it. The total
+          // tab limit, not the provider identity, controls whether tabs can open.
+          await expect(page.locator('.context-menu-item', { hasText: provider.menu })).toBeEnabled();
           await openedTab.click();
         }
       }
 
       await expect(page.locator('.tab-bar .tab')).toHaveCount(5);
+      await expect(page.locator('.tab-add')).toBeDisabled();
+    });
+
+    test('opens independent Views of the same provider from the add-tab menu', async ({ shelfApp: { page } }) => {
+      await setupProject(page);
+      await openAgentTab(page);
+      await sendAgentPrompt(page, 'text:first-view-only');
+      await expect(page.locator('.agent-msg-reply:visible').last()).toContainText('first-view-only');
+
+      await page.locator('.tab-add').click({ button: 'right' });
+      const sameProvider = page.locator('.context-menu-item', { hasText: 'Agent (Claude)', exact: true });
+      await expect(sameProvider).toBeEnabled();
+      await sameProvider.click();
+      const views = page.locator('.tab-bar .tab', { hasText: 'Claude' });
+      await expect(views).toHaveCount(2);
+      await expect(page.locator('.agent-msg:visible')).toHaveCount(0);
+      await sendAgentPrompt(page, 'text:second-view-only');
+      await expect(page.locator('.agent-msg-reply:visible').last()).toContainText('second-view-only');
+      await expect(page.locator('.agent-messages:visible')).not.toContainText('first-view-only');
+
+      await views.first().click();
+      await expect(page.locator('.agent-msg-reply:visible').last()).toContainText('first-view-only');
+      await expect(page.locator('.agent-messages:visible')).not.toContainText('second-view-only');
     });
 
     test('renders an internal provider name outside assistant replies', async ({ shelfApp: { page } }) => {

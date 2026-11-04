@@ -4,6 +4,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { createShelfMcpAuthority } from '../src/main/agent/shelf-mcp-authority';
 import { SHELF_MCP } from '@shared/shelf-mcp';
 import { initAppToolClient, resolveAppToolResult } from './app-tool-client';
+import { SHELF_BRIDGE_TOOLS } from './app-tool-tools';
 import { closeSharedShelfMcp, getSharedShelfMcp } from './shelf-mcp';
 
 it('bootstraps via the real RPC client, serves authenticated tools, and revokes on shutdown', async () => {
@@ -26,7 +27,7 @@ it('bootstraps via the real RPC client, serves authenticated tools, and revokes 
   try {
     expect(host).toBe(sameHost);
     await client.connect(new StreamableHTTPClientTransport(new URL(host.url), { requestInit: { headers: host.headers } }));
-    expect((await client.listTools()).tools).toHaveLength(11);
+    expect((await client.listTools()).tools.map(tool => tool.name)).toEqual(SHELF_BRIDGE_TOOLS.map(tool => tool.name));
     expect(await client.callTool({ name: 'list_app_skills', arguments: {} })).toEqual({ content: [{ type: 'text', text: '{"skills":[]}' }] });
     expect(operations).toEqual([SHELF_MCP.AUTHORIZE, 'app_skill.list']);
   } finally {
