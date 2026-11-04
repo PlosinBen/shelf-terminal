@@ -113,7 +113,9 @@ test.describe('worktree Agent delegation', () => {
     await sendAgentPrompt(page, 'delegation_select');
     const picker = page.getByRole('dialog', { name: 'Select delegated Agent' });
     await expect(picker.locator('.settings-header')).toHaveText('Select worktree Agent');
-    await expect(picker.locator('.delegation-requester')).toContainText('Requested by');
+    await expect(picker.locator('.delegation-requester')).toHaveText('Requested by: Delegation Base / Claude');
+    await expect(picker.locator('.delegation-requester > span')).toHaveCSS('display', 'inline');
+    await expect(picker.locator('.delegation-requester')).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
     await expect(picker.locator('.delegation-requester')).toContainText('Delegation Base');
     await expect(picker.locator('.delegation-picker-note')).toContainText('until the delegation is stopped');
     await expect(picker.locator('.delegation-target')).toHaveCSS('border-top-style', 'solid');

@@ -40,8 +40,7 @@ export function DelegationTargetPicker() {
     <div className="settings-header">Select worktree Agent</div>
     <div className="delegation-picker-body">
       <div className="delegation-requester">
-        <div className="delegation-picker-label">Requested by</div>
-        <strong>{request.caller.projectName} / {request.caller.displayName}</strong>
+        <span>Requested by:</span> {request.caller.projectName} / {request.caller.displayName}
       </div>
       <p className="delegation-picker-note">Selecting an Agent authorizes this main View to delegate work to it until the delegation is stopped.</p>
       <div className="delegation-picker-label">Available worktree Agents</div>
