@@ -54,7 +54,7 @@ export interface SessionChannel {
   sendLine(msg: object): void;
   registerExecution(executionId: string, permissionHandler: PermissionHandler): AsyncGenerator<AgentEvent>;
   awaitReady(timeoutMs?: number): Promise<boolean>;
-  onResponse(requestId: string, expectedType: string, handler: (payload: any) => void): void;
+  onResponse(requestId: string, expectedType: string, handler: (payload: any) => void): () => void;
   kill(): void;
 }
 

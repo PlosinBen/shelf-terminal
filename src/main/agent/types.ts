@@ -194,10 +194,8 @@ export interface AgentBackend {
   /** Stop a running background task (fire-and-forget; the 'stopped'
    *  task_notification flows back via the task_event lane). See background-tasks#3. */
   stopTask?(taskId: string): Promise<void>;
-  /** Cancel a not-yet-running queued message by clientMsgId (fire-and-forget).
-   *  Server drops it from its queue + re-emits the queue snapshot. No-op once
-   *  running. See message-queue-ownership design. */
-  cancelQueued?(clientMsgId: string): void;
+  /** Queue authority confirms removal or reports already-running / missing. */
+  cancelQueued?(clientMsgId: string): Promise<import('@shared/agent-queue-cancel').QueueCancelResult>;
   /**
    * Resolve a pending picker_request by forwarding the user's answers (or
    * cancellation) to the remote agent-server. Provider tracks the pending

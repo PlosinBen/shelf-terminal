@@ -44,7 +44,7 @@ export interface ExecutionDispatcher {
    * `<expectedType>:<requestId>`. Used for lifecycle round-trips
    * (capabilities / credential_* / slash_result).
    */
-  onResponse(requestId: string, expectedType: string, handler: (payload: any) => void): void;
+  onResponse(requestId: string, expectedType: string, handler: (payload: any) => void): () => void;
   /**
    * Fail-loud on a lost provider execution (dispatch-layering): the session's
    * exec died / went unresponsive, so every in-flight execution is dropped. Each
@@ -317,8 +317,10 @@ export function createExecutionDispatcher(
     });
   }
 
-  function onResponse(requestId: string, expectedType: string, handler: (payload: any) => void): void {
-    responseHandlers.set(`${expectedType}:${requestId}`, handler);
+  function onResponse(requestId: string, expectedType: string, handler: (payload: any) => void): () => void {
+    const key = `${expectedType}:${requestId}`;
+    responseHandlers.set(key, handler);
+    return () => { if (responseHandlers.get(key) === handler) responseHandlers.delete(key); };
   }
 
   function failAllExecutions(errorMessage: string): void {

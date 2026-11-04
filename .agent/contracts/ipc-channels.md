@@ -293,7 +293,7 @@ Renderer → main (invoke / send):
 | `init(tabId, cwd, connection, provider, sessionId?, opts?)` | invoke `agent:init` |
 | `send(tabId, input)` | invoke `agent:send` with `{tabId, ...input}`. `AgentInputRequest` in `src/shared/agent-input.ts`: `{inputMessage}` or `{configEdit:{key,value}}`, never both. Message returns `SubmissionResult` (`src/shared/agent-submission.ts`) on exec queue receipt, not execution completion. Config edit retains its completion boolean. See `contracts/agent-routing`. |
 | `stop(tabId)` | invoke `agent:stop` |
-| `cancelQueued(tabId, clientMsgId)` | invoke `agent:cancel-queued` (drop a not-yet-running queued message) |
+| `cancelQueued(tabId, clientMsgId)` | invoke `agent:cancel-queued` → `QueueCancelResult` (`src/shared/agent-queue-cancel.ts`), status `cancelled` / `running` / `not_found`; RPC failure rejects. Renderer retains cancelling content until authority confirms removal. |
 | `destroy(tabId)` | invoke `agent:destroy` |
 | `resolvePermission(tabId, toolUseId, allow: boolean, scope?: 'once'|'session')` | invoke `agent:resolve-permission` |
 | `resolvePicker(tabId, pickerId, payload)` | invoke `agent:resolve-picker`. `payload`: `{ answers: Array<string|string[]> } | { cancelled: true }` |

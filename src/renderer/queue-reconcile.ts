@@ -13,7 +13,7 @@ import type { AgentInputMessage } from '../shared/agent-input';
  *
  * Split into a pure function so the reconcile rules are unit-testable without
  * React / IPC / DOM (no jsdom in this project). See agentTabStore for wiring
- * and .agent/features/message-queue-ownership.md for the design.
+ * and agent-core#14 for the cancellation authority boundary.
  *
  * Promotion mechanism: an item shown as `state:'running'` in the snapshot is
  * the turn agent-server is actively processing → the renderer turns its chip
@@ -25,9 +25,9 @@ import type { AgentInputMessage } from '../shared/agent-input';
  *   - never confirmed → optimistic in-flight (the eager send hasn't reached a
  *     snapshot yet) → KEEP the chip.
  *   - was confirmed (seen in a prior snapshot) but now absent + not promoted →
- *     it left the queue without running → dropped (user-cancel removes it
- *     client-side first; the only server-side path is a respawn that lost the
- *     queue). v1: drop. See message-queue-ownership "reconnect" section.
+ *     it left the queue without running → dropped unless cancellation is pending.
+ *     Pending cancellation retains content until its RPC confirms queue removal;
+ *     otherwise an unexplained disappearance is a potential queue-loss anomaly.
  */
 export interface PendingSend {
   inputMessage?: AgentInputMessage;
@@ -37,6 +37,8 @@ export interface PendingSend {
   files?: AgentFile[];
   /** Has this id appeared in a server snapshot at least once? */
   confirmed: boolean;
+  /** Cancellation intent only; keep content until the queue authority confirms. */
+  cancelling?: boolean;
 }
 
 /**
@@ -116,9 +118,9 @@ export function reconcileQueueSnapshot(
     } else if (state === undefined) {
       // Absent from snapshot: keep if still optimistic (not yet acked), but if it
       // had been confirmed and vanished WITHOUT running, it was dropped by the
-      // server (user-cancel removes it client-side first, so this is respawn /
-      // desync loss) → flag, don't drop silently.
-      if (!p.confirmed) next.push(p);
+      // server → flag, don't drop silently. Cancellation intent holds content
+      // until the authoritative RPC result arrives (possibly after this snapshot).
+      if (!p.confirmed || p.cancelling) next.push(p);
       else anomalies.push({ kind: 'dropped-confirmed-vanished', clientMsgId: p.clientMsgId });
     }
     // state === 'running' handled by the promote loop above.

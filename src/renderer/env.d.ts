@@ -236,7 +236,7 @@ interface ShelfApi {
       (tabId: string, input: import('../shared/agent-input').AgentInputRequest): Promise<import('../shared/agent-submission').SubmissionResult | boolean>;
     };
     stop: (tabId: string) => Promise<boolean>;
-    cancelQueued: (tabId: string, clientMsgId: string) => Promise<boolean>;
+    cancelQueued: (tabId: string, clientMsgId: string) => Promise<import('../shared/agent-queue-cancel').QueueCancelResult>;
     destroy: (tabId: string) => Promise<void>;
     resolvePermission: (tabId: string, toolUseId: string, allow: boolean, scope?: 'once' | 'session') => Promise<boolean>;
     resolvePicker: (

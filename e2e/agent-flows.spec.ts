@@ -874,6 +874,81 @@ test.describe('agent flows via fake provider', () => {
   });
 
   test.describe('queued messages', () => {
+    // Remote queue removal is authoritative. Holding the real cancel IPC lets
+    // us verify the renderer never discards the only copy while it is pending.
+    test('retains the queued chip until remote cancellation is confirmed', async ({ shelfApp: { app, page } }) => {
+      await setupProject(page); await openAgentTab(page);
+      await app.evaluate(({ ipcMain }, channel) => {
+        const original = (ipcMain as any)._invokeHandlers.get(channel);
+        ipcMain.removeHandler(channel);
+        ipcMain.handle(channel, (event, payload) => new Promise(resolve => {
+          (globalThis as any).__releaseQueueCancel = async () => resolve(await original(event, payload));
+        }));
+      }, IPC.AGENT_CANCEL_QUEUED);
+      await sendAgentPrompt(page, 'delay:10000|text:holding work');
+      await sendAgentPrompt(page, 'text:cancel only after confirmation');
+      const queued = page.locator('.agent-msg-queued');
+      await expect(queued).toHaveCount(1);
+      await queued.locator('.agent-queued-cancel').click();
+      await expect(queued).toContainText('cancelling');
+      await expect(queued.locator('.agent-queued-cancel')).toBeDisabled();
+      await expect(queued).toContainText('cancel only after confirmation');
+      await app.evaluate(async () => (globalThis as any).__releaseQueueCancel());
+      await expect(queued).toHaveCount(0);
+      await expect(page.locator('.agent-msg-user:not(.agent-msg-queued)', { hasText: 'cancel only after confirmation' })).toHaveCount(0);
+    });
+
+    test('keeps one persisted user row when queued work starts before cancellation reaches the queue', async ({ shelfApp: { app, page } }) => {
+      await setupProject(page); await openAgentTab(page);
+      await app.evaluate(({ ipcMain }, channel) => {
+        const original = (ipcMain as any)._invokeHandlers.get(channel);
+        ipcMain.removeHandler(channel);
+        ipcMain.handle(channel, (event, payload) => new Promise(resolve => {
+          (globalThis as any).__releaseQueueCancel = async () => {
+            const result = await original(event, payload);
+            (globalThis as any).__queueCancelResult = result;
+            resolve(result);
+          };
+        }));
+      }, IPC.AGENT_CANCEL_QUEUED);
+      await sendAgentPrompt(page, 'delay:3000|text:first work finished');
+      const content = 'text:race work started|delay:8000';
+      await sendAgentPrompt(page, content);
+      const queued = page.locator('.agent-msg-queued');
+      await expect(queued).toHaveCount(1);
+      await queued.locator('.agent-queued-cancel').click();
+      await expect(queued).toContainText('cancelling');
+      const row = page.locator('.agent-msg-user:not(.agent-msg-queued)', { hasText: content });
+      await expect(row).toHaveCount(1, { timeout: 10000 });
+      await app.evaluate(async () => (globalThis as any).__releaseQueueCancel());
+      expect(await app.evaluate(() => (globalThis as any).__queueCancelResult)).toEqual({ status: 'running' });
+      await expect(row).toHaveCount(1);
+      await expect.poll(async () => (await storedAgentMessages(page)).filter(m => m.type === 'user' && m.content === content).length, { timeout: 15000 }).toBe(1);
+    });
+
+    test('shows cancellation failure without deleting the queued input and allows explicit retry', async ({ shelfApp: { app, page } }) => {
+      await setupProject(page); await openAgentTab(page);
+      await app.evaluate(({ ipcMain }, channel) => {
+        const original = (ipcMain as any)._invokeHandlers.get(channel);
+        let first = true;
+        ipcMain.removeHandler(channel);
+        ipcMain.handle(channel, (event, payload) => {
+          if (first) { first = false; throw new Error('test cancellation connection failure'); }
+          return original(event, payload);
+        });
+      }, IPC.AGENT_CANCEL_QUEUED);
+      await sendAgentPrompt(page, 'delay:10000|text:holding work');
+      await sendAgentPrompt(page, 'text:retain on cancellation error');
+      const queued = page.locator('.agent-msg-queued');
+      await expect(queued).toHaveCount(1);
+      await queued.locator('.agent-queued-cancel').click();
+      await expect(page.locator('.agent-messages:visible')).toContainText('Queue cancellation was not confirmed');
+      await expect(queued).toContainText('retain on cancellation error');
+      await expect(queued.locator('.agent-queued-cancel')).toBeEnabled();
+      await queued.locator('.agent-queued-cancel').click();
+      await expect(queued).toHaveCount(0);
+    });
+
     // Messages submitted while a execution streams are EAGER-sent (each with a
     // clientMsgId) and queued by agent-server, which serializes them one execution at
     // a time and emits a queue snapshot the renderer mirrors as chips. This e2e

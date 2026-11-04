@@ -27,6 +27,19 @@ function parse(msg: any): AgentEvent | null {
 const noopPerm: PermissionHandler = () => {};
 
 describe('createExecutionDispatcher', () => {
+  it('unsubscribes an expired RPC without removing a newer registration', () => {
+    const d = createExecutionDispatcher(parse);
+    const expired = vi.fn(); const current = vi.fn();
+    const off = d.onResponse('req', 'response', expired);
+    d.onResponse('req', 'response', current);
+    off();
+    d.feed({ type: 'response', requestId: 'req' });
+    expect(expired).not.toHaveBeenCalled(); expect(current).toHaveBeenCalledOnce();
+    const cancelled = vi.fn();
+    d.onResponse('cancelled', 'response', cancelled)();
+    d.feed({ type: 'response', requestId: 'cancelled' });
+    expect(cancelled).not.toHaveBeenCalled();
+  });
   it('routes events to the correct execution by executionId envelope', async () => {
     const d = createExecutionDispatcher(parse);
     const gen1 = d.registerExecution('e-aaaa', noopPerm);

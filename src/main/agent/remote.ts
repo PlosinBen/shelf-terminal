@@ -1,4 +1,5 @@
 import { AgentInitializationError, readInitRecovery } from '@shared/agent-init-recovery';
+import { QUEUE_CANCEL as C, type QueueCancelResult } from '@shared/agent-queue-cancel';
 import { log } from '@shared/logger';
 import { SHELF_PERMISSION_CONTROL } from '@shared/permission-controls';
 import type { AgentPrefs, Connection, AgentProvider, AgentInitPhase, AgentQueueItem, ProviderModel, TaskEvent, ConnectionHealth, ConnectionHealthState } from '@shared/types';
@@ -80,7 +81,7 @@ interface RemoteProcess {
   registerExecution: (executionId: string, permissionHandler: PermissionHandler) => AsyncGenerator<AgentEvent>;
   /** Wait for agent-server's `{type:'ready'}` signal. Resolves false on timeout. */
   awaitReady: (timeoutMs?: number) => Promise<boolean>;
-  onResponse: (requestId: string, expectedType: string, handler: (payload: any) => void) => void;
+  onResponse: (requestId: string, expectedType: string, handler: (payload: any) => void) => () => void;
   kill: () => void;
 }
 
@@ -419,12 +420,27 @@ export function createRemoteBackend(
       }
     },
 
-    cancelQueued(clientMsgId: string) {
-      // Fire-and-forget: agent-server drops the matching not-yet-running send
-      // from its queue + re-emits the queue snapshot. No-op if already running.
-      if (remoteProc) {
-        remoteProc.sendLine({ type: 'cancel_queued', clientMsgId });
-      }
+    async cancelQueued(clientMsgId: string): Promise<QueueCancelResult> {
+      const proc = remoteProc;
+      if (!proc) throw new Error('Queue cancellation failed: agent-server is not running');
+      const requestId = `cancel-${randomUUID()}`;
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+          off();
+          const error = `Queue cancellation confirmation timed out reqId=${requestId} msgId=${clientMsgId}; cancellation is unknown`;
+          log.warn('agent-remote', error); reject(new Error(error));
+        }, C.TIMEOUT_MS);
+        const off = proc.onResponse(requestId, C.RESPONSE, payload => {
+          clearTimeout(timer);
+          if (payload.clientMsgId !== clientMsgId || !Object.values(C.STATUS).includes(payload.status)) {
+            const error = `Invalid queue cancellation result reqId=${requestId} msgId=${clientMsgId}`;
+            log.error('agent-remote', error); reject(new Error(error)); return;
+          }
+          resolve({ status: payload.status });
+        });
+        try { proc.sendLine({ type: C.REQUEST, requestId, clientMsgId }); }
+        catch (error) { clearTimeout(timer); off(); reject(error); }
+      });
     },
 
     reloadSkills() {

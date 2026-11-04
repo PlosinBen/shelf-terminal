@@ -1,7 +1,8 @@
 import type { AgentInitStatus } from '../../shared/types';
 import { onAgent, emitAgent } from './types';
 import { SHELF_MCP } from '../../shared/shelf-mcp';
-import { cancelPendingSend } from '../agentTabStore';
+import { beginPendingCancel, finishPendingCancel, cancelPendingSend } from '../agentTabStore';
+import { QUEUE_CANCEL as C } from '../../shared/agent-queue-cancel';
 import { isSubmissionUncertain, SUBMISSION_ERROR as E, type SubmissionError } from '../../shared/agent-submission';
 
 // Single global binder that wires window.shelfApi.agent.* IPC ↔ typed
@@ -87,7 +88,18 @@ export function bindAgentIPCGroup(): () => void {
     api.stop(tabId);
   });
   const offCancelQueuedEvt = onAgent('agent:cancelQueued', ({ tabId, clientMsgId }) => {
-    api.cancelQueued(tabId, clientMsgId);
+    if (!beginPendingCancel(tabId, clientMsgId)) return;
+    void api.cancelQueued(tabId, clientMsgId).then(result => {
+      finishPendingCancel(tabId, clientMsgId, result);
+      if (result.status === C.STATUS.NOT_FOUND) {
+        console.warn('Queue cancellation target no longer exists', { tabId, clientMsgId });
+        emitAgent('agent:onMessage', { tabId, msg: { type: 'error', content: 'Could not cancel: the message is no longer in the remote queue.' } });
+      }
+    }).catch(error => {
+      finishPendingCancel(tabId, clientMsgId);
+      console.error('Queue cancellation was not confirmed', { tabId, clientMsgId, error });
+      emitAgent('agent:onMessage', { tabId, msg: { type: 'error', content: `Queue cancellation was not confirmed: ${String(error)}. The message may still execute.` } });
+    });
   });
   const offDestroyEvt = onAgent('agent:destroy', ({ tabId }) => {
     api.destroy(tabId);

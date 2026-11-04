@@ -1,5 +1,6 @@
 import type { AgentInitRecovery } from '@shared/agent-init-recovery';
 import type { AgentInputMessage } from '@shared/agent-input';
+import { QUEUE_CANCEL as C, type QueueCancelResult } from '@shared/agent-queue-cancel';
 import { AGENT_EXIT_INTERRUPTED_LABEL } from '@shared/app-exit';
 import { useSyncExternalStore } from 'react';
 import type { AgentMsg } from './components/AgentMessage';
@@ -777,15 +778,30 @@ export function applyQueueSnapshot(tabId: string, items: AgentQueueItem[]) {
 }
 
 /**
- * Optimistically drop a not-yet-running pending chip (the IPC cancel is emitted
- * separately by the caller). The server's next snapshot confirms; if it raced to
- * 'running' first, the snapshot still carries it and reconcile re-promotes it.
+ * Remove a pending projection after definite submission rejection or confirmed
+ * queue removal. A cancellation intent alone must use beginPendingCancel.
  */
 export function cancelPendingSend(tabId: string, clientMsgId: string) {
   update(tabId, (prev) => {
     const pendingSends = prev.pendingSends.filter((p) => p.clientMsgId !== clientMsgId);
     return pendingSends.length === prev.pendingSends.length ? prev : { ...prev, pendingSends };
   });
+}
+
+/** Intent changes presentation only; queue snapshots can still promote this input. */
+export function beginPendingCancel(tabId: string, clientMsgId: string): boolean {
+  const pending = tabs.get(tabId)?.pendingSends.find(p => p.clientMsgId === clientMsgId);
+  if (!pending || pending.cancelling) {
+    debugLog('agent-queue', `cancel intent skipped tab=${formatTabLogId(tabId)} clientMsgId=${clientMsgId} reason=${pending ? 'already-pending' : 'no-longer-queued'}`);
+    return false;
+  }
+  update(tabId, prev => ({ ...prev, pendingSends: prev.pendingSends.map(p => p.clientMsgId === clientMsgId ? { ...p, cancelling: true } : p) }));
+  return true;
+}
+
+export function finishPendingCancel(tabId: string, clientMsgId: string, result?: QueueCancelResult) {
+  if (result?.status === C.STATUS.CANCELLED) { cancelPendingSend(tabId, clientMsgId); return; }
+  update(tabId, prev => ({ ...prev, pendingSends: prev.pendingSends.map(p => p.clientMsgId === clientMsgId ? { ...p, cancelling: false } : p) }));
 }
 
 /**

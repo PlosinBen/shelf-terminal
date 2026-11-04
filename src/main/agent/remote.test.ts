@@ -335,6 +335,58 @@ describe('remote backend', () => {
     backend.dispose();
   });
 
+  it.each(['cancelled', 'running', 'not_found'])('waits for a correlated remote queue cancellation: %s', async status => {
+    const { child, writes } = capabilitiesChild({});
+    vi.mocked(spawn).mockImplementationOnce(() => {
+      setTimeout(() => child.stdout.emit('data', Buffer.from('{"type":"ready"}\n')), 0);
+      return child;
+    });
+    const { createRemoteBackend } = await import('./remote');
+    const backend = createRemoteBackend({ type: 'local' } as any);
+    await backend.checkAuth('/tmp');
+    let settled = false;
+    const pending = backend.cancelQueued!('message').then(result => { settled = true; return result; });
+    await Promise.resolve(); expect(settled).toBe(false);
+    const request = writes.at(-1);
+    expect(request).toMatchObject({ type: 'cancel_queued', clientMsgId: 'message', requestId: expect.any(String) });
+    child.stdout.emit('data', Buffer.from(JSON.stringify({ type: 'cancel_queued_result', requestId: request.requestId, clientMsgId: 'message', status }) + '\n'));
+    await expect(pending).resolves.toEqual({ status }); backend.dispose();
+  });
+
+  it('rejects malformed cancellation confirmation instead of claiming removal', async () => {
+    const { child, writes } = capabilitiesChild({});
+    vi.mocked(spawn).mockImplementationOnce(() => {
+      setTimeout(() => child.stdout.emit('data', Buffer.from('{"type":"ready"}\n')), 0);
+      return child;
+    });
+    const { createRemoteBackend } = await import('./remote');
+    const backend = createRemoteBackend({ type: 'local' } as any);
+    await backend.checkAuth('/tmp');
+    const pending = backend.cancelQueued!('message');
+    const request = writes.at(-1);
+    child.stdout.emit('data', Buffer.from(JSON.stringify({ type: 'cancel_queued_result', requestId: request.requestId, clientMsgId: 'wrong-message', status: 'cancelled' }) + '\n'));
+    await expect(pending).rejects.toThrow('Invalid queue cancellation'); backend.dispose();
+  });
+
+  it('times out cancellation without claiming removal or resending it', async () => {
+    const { child, writes } = capabilitiesChild({});
+    vi.mocked(spawn).mockImplementationOnce(() => {
+      setTimeout(() => child.stdout.emit('data', Buffer.from('{"type":"ready"}\n')), 0);
+      return child;
+    });
+    const { createRemoteBackend } = await import('./remote');
+    const backend = createRemoteBackend({ type: 'local' } as any);
+    await backend.checkAuth('/tmp');
+    vi.useFakeTimers();
+    try {
+      const pending = backend.cancelQueued!('message');
+      const assertion = expect(pending).rejects.toThrow('confirmation timed out');
+      await vi.advanceTimersByTimeAsync(10001);
+      await assertion;
+      expect(writes.filter(m => m.type === 'cancel_queued')).toHaveLength(1);
+    } finally { backend.dispose(); vi.useRealTimers(); }
+  });
+
   it('rejects a failed stop confirmation', async () => {
     const { child } = capabilitiesChild({}, { ok: false, error: 'expected cancelled, received end_turn' });
     vi.mocked(spawn).mockImplementationOnce(() => {

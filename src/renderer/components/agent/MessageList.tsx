@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AgentMessage } from '../AgentMessage';
 import { AgentDisplayContext } from './AgentDisplayContext';
-import { buildMessageTimeline, cancelPendingSend, useAgentTab } from '../../agentTabStore';
+import { buildMessageTimeline, useAgentTab } from '../../agentTabStore';
 import { emitAgent } from '../../events';
 import { useStore } from '../../store';
 import { nextForceFollow } from './scroll-follow';
@@ -151,16 +151,14 @@ export function MessageList({ tabId, visible }: Props) {
         {pendingSends.map((p) => (
           <div key={p.clientMsgId} className="agent-msg agent-msg-user agent-msg-queued">
             <div className="agent-msg-content">{p.content}</div>
-            <span className="agent-queued-label">queued</span>
+            <span className="agent-queued-label">{p.cancelling ? 'cancelling…' : 'queued'}</span>
             <button
               className="agent-queued-cancel"
               onClick={() => {
-                // Optimistic local removal + fire the IPC cancel. If it raced to
-                // 'running', the next snapshot re-promotes it (reconcile).
-                cancelPendingSend(tabId, p.clientMsgId);
                 emitAgent('agent:cancelQueued', { tabId, clientMsgId: p.clientMsgId });
               }}
               title="Cancel"
+              disabled={p.cancelling}
             >×</button>
           </div>
         ))}

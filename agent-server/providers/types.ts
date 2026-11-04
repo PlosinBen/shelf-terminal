@@ -1,4 +1,5 @@
 import type { AgentInitRecovery } from '@shared/agent-init-recovery';
+import { QUEUE_CANCEL, type QueueCancelResult } from '@shared/agent-queue-cancel';
 import { SHELF_MCP, type ShelfMcpStatus } from '@shared/shelf-mcp';
 export type StatusSegmentSeverity = 'normal' | 'info' | 'warning' | 'critical';
 
@@ -98,6 +99,7 @@ export type OutgoingMessage = WireEnvelope & (
   | { type: 'credential_cleared'; requestId: string; ok: boolean; error?: string }
   /** RPC response: provider confirmed that the requested active execution stopped. */
   | { type: 'stop_result'; requestId: string; ok: boolean; error?: string }
+  | ({ type: typeof QUEUE_CANCEL.RESPONSE; requestId: string; clientMsgId: string } & QueueCancelResult)
   /** RPC response: full output of a background task (read from its remote
    *  output_file). One-shot, matched by requestId. See background-tasks#2. */
   | { type: 'task_output'; requestId: string; content?: string; error?: string }

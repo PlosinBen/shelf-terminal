@@ -136,7 +136,7 @@ dirty snapshots，失敗的 clear 在後續保存或退出前先重試，再確�
 
 **promote 機制走快照 `state:'running'`，不另開 execution_started**：原設計想重用 `execution_started` 帶 clientMsgId，但 dispatcher 對「已註冊的 foreground executionId」之 `execution_started` 會當 dup 丟、對「未註冊」之 `execution_started` 會開 provider-initiated execution（`background-tasks#2`）→ 衝突。改由快照把「正在跑的那則」標 `running`，renderer 看到 running 就把樂觀 chip **升級成 timeline user bubble**（對齊 CLI：排隊訊息開跑就變「你的訊息」）。`reconcileQueueSnapshot`（純函式，`queue-reconcile.ts`）負責：promote（deduped，FIFO）、queued→chip、用 `confirmed` flag 區分「樂觀未確認（留）」vs「曾在 queue 又消失且沒跑（丟 —— user cancel 已先 client 移除，僅剩 respawn 丟失）」、prune promoted set。
 
-**逐則取消 + ESC**：`cancel_queued {clientMsgId}` 從 queue 移除未跑的那則（running 不可取消）；ESC = clear 整個等待 queue + 中斷 running execution。兩者對每個被丟的 send emit **terminal idle on its executionId**，否則 main 為它註冊的 execution reader 永遠 hang。
+**逐則取消 + ESC**：逐則取消以 requestId RPC 等待 queue 確認移除，renderer 保留取消中的內容；running 不可當作 queued 取消，照常 promotion／history（`agent-core#14`）。ESC = clear 整個等待 queue + 中斷 running execution。兩者對每個被丟的 send emit **terminal idle on its executionId**，否則 main 為它註冊的 execution reader 永遠 hang。
 
 **main 端 `activeExecutions` 計數器**：eager-send 後 main 同時跑 N 個 executeMessage readers（agent-server 序列化，但 main 各持一個），用計數器讓 `session.state` 維持 streaming 到**最後一則** drain 完，否則第一則的 finally 會提早翻 idle。renderer 端 spinner / ESC 用 `busy = isExecutionActive || pendingSends.length>0` 蓋掉 executions 間的短暫 idle 閃爍。
 
@@ -246,3 +246,21 @@ delivery／結果槽契約。Runner 持續管理事件、權限、busy 計數與
 其 reader。一般輸入保留 optimistic projection，內部 mirror 必須從 renderer
 projection 分流，不能把所有被 receipt 追蹤的 id 都濾除。回覆內容屬 session lane，
 idle 不代表完整回覆。configEdit 暫保留自己的 completion 路徑，不偽裝為訊息 receipt。
+
+## agent-core#14 — 取消排隊訊息以遠端結果為準，意圖不能丟掉內容  ·  [Decision]
+
+**Decision:** 逐則取消由遠端 queue 回覆 cancelled／running／not_found。本地只標記
+cancelling，保留內容並避免重複送出；只有 confirmed cancelled 才移除 chip。
+若先收到 running snapshot，保留的內容照常 promotion、upsert 與持久化。缺席
+snapshot 可先於取消回覆到達，取消等待期間不得因缺席而丟棄內容。
+
+**Reason:** renderer 先刪 optimistic chip、再送取消會與 server promotion 競態。
+server 已 running 時取消無效，而 snapshot 僅有 ID／state，若唯一內容已被本地刪除，
+就只剩 anomaly，已執行輸入無法顯示或寫入 history。遠端才是 queue 的資料權威，
+本地意圖不能冒充操作成功；無需為此導入完整 message snapshots 或重寫 history。
+
+**Do not change casually because:** 取消失敗／無法確認須明確呈現，保留仍有的輸入，
+不能默認取消成功或自動重試。running 不是停止執行的授權。RPC 使用 requestId，
+另核對 clientMsgId 與 status；逾時／寫入失敗撤銷 response handler。一般非取消
+狀態的 confirmed-vanished 仍要留資料遺失告警，不可為壓掉正常取消 log 一律吞掉。
+此契約只涵蓋逐則 queued 取消，不改 bulk stop／ESC 的既有政策。

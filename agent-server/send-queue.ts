@@ -1,4 +1,5 @@
 import type { AgentQueueItem } from '@shared/types';
+import { QUEUE_CANCEL as C, type QueueCancelResult } from '@shared/agent-queue-cancel';
 
 /**
  * Server-owned send queue (Architecture: queue lives in agent-server, the
@@ -44,7 +45,7 @@ export interface SendQueue<T extends QueuedSend> {
   /** Eager-sent submission arrives → queue it + pump. */
   enqueue(msg: T): void;
   /** Drop a specific not-yet-running send by clientMsgId. No-op if running/unknown. */
-  cancel(clientMsgId: string): void;
+  cancel(clientMsgId: string): QueueCancelResult;
   /** Drop every waiting send (ESC / stop). The running execution is interrupted
    *  separately by the caller (backend.stop). */
   clear(): void;
@@ -100,17 +101,18 @@ export function createSendQueue<T extends QueuedSend>(deps: SendQueueDeps<T>): S
       if (processing) emit();
       pump();
     },
-    cancel(clientMsgId: string): void {
+    cancel(clientMsgId: string): QueueCancelResult {
       const i = queue.findIndex((m) => m.clientMsgId === clientMsgId);
       if (i < 0) {
-        // Not in the waiting queue: either it's the running execution (benign race —
-        // the snapshot re-promotes it) or genuinely unknown. Report, never silent.
+        // Queue authority decides the outcome; a local cancellation intent cannot
+        // remove content that may already be running.
         deps.onAnomaly?.(clientMsgId === runningClientMsgId ? 'cancel-running' : 'cancel-unknown', clientMsgId);
-        return;
+        return { status: clientMsgId === runningClientMsgId ? C.STATUS.RUNNING : C.STATUS.NOT_FOUND };
       }
       const [removed] = queue.splice(i, 1);
       terminate(removed);
       emit();
+      return { status: C.STATUS.CANCELLED };
     },
     clear(): void {
       if (queue.length === 0) return;

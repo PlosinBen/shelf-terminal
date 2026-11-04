@@ -256,14 +256,35 @@ This is the user-visible feedback for skill hot-reload (`context/skills` skills#
 - agent-server → main: `OutgoingMessage` `{ type: 'queue', items: AgentQueueItem[] }` (no `executionId` — `wrapSendForExecution` must not stamp it). Routed via the session-level `onQueue` sink in `remote.ts`, never the execution-control lane.
 - main → renderer: `IPC.AGENT_QUEUE`, carrying the `AgentQueueItem[]` for the renderer to mirror.
 
-There is no `enqueue` control message — the renderer eager-sends every `{ type: 'send' }` and agent-server's `createSendQueue` owns timing/ordering. `clientMsgId` (renderer-minted at submit) is the correlation key echoed in each snapshot item.
+There is no `enqueue` control message — the renderer eager-sends every `{ type: 'send' }` and agent-server's `createSendQueue` owns timing/ordering. `clientMsgId` projects the factory message id and is echoed in each snapshot item.
 
 ## cancel_queued
 
-**Direction**: renderer → main → agent-server (fire-and-forget). Drop one not-yet-running queued send by `clientMsgId`; no-op once it's running.
+**Direction**: renderer → main → agent-server → main → renderer, correlated RPC.
+Authoritative constants/result: `QUEUE_CANCEL` / `QueueCancelResult` in
+`src/shared/agent-queue-cancel.ts`.
 
-- renderer → main: `IPC.AGENT_CANCEL_QUEUED` `{ tabId, clientMsgId }` → `session.backend.cancelQueued?.(clientMsgId)`.
-- main → agent-server: `sendLine({ type: 'cancel_queued', clientMsgId })`. The switch calls `sendQueue.cancel(clientMsgId)` (only when `clientMsgId` is a string), which removes the item and re-emits the `queue` snapshot. A cancel that didn't cleanly remove an item logs an anomaly to stderr (`cancel-running` benign, `cancel-unknown` a real desync) — never silent.
+- renderer → main: `IPC.AGENT_CANCEL_QUEUED` `{ tabId, clientMsgId }`; invokes
+  `backend.cancelQueued(clientMsgId)` and returns its result. Missing target rejects.
+- main → agent-server: `{type:'cancel_queued',requestId,clientMsgId}`.
+- agent-server → main: `{type:'cancel_queued_result',requestId,clientMsgId,status}`.
+  `status` is `cancelled` (removed queued item and terminated its control reader),
+  `running` (cannot cancel queued work that has started), or `not_found` (no matching
+  waiting/running item). The result does not stop running provider execution.
+- main validates response correlation/status and returns `{status}`. Ten seconds without
+  confirmation rejects without claiming cancellation, retrying or changing queue state.
+  The response registration is removed on timeout/write failure; a late result does not
+  retroactively turn the failed call into success. Legacy frames without requestId still
+  cancel in exec but receive no RPC response.
+
+The renderer's central event handler marks a pending chip `cancelling`, disables repeat
+clicks and preserves its content. A removal snapshot may precede the RPC response; while
+cancellation is pending, absence alone does not discard the local content or report a
+vanished-input anomaly. Only `cancelled` removes the chip. A running snapshot promotes
+the retained input normally, even before the cancellation response, so history remains
+complete and repeated snapshots do not duplicate it. `not_found` or RPC failure clears
+the pending-cancel flag, retains any remaining input and displays an error; it does not
+pretend the input was cancelled. This single-item contract does not change bulk stop/ESC.
 
 ## get_capabilities (RPC)
 

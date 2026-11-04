@@ -3,9 +3,10 @@ import { bindAgentIPCGroup } from './ipc-agent';
 import { onAgent, emitAgent } from './types';
 import { __resetBusForTests } from './bus';
 import { SHELF_MCP, SHELF_MCP_STATE, SHELF_MCP_FAILURE } from '../../shared/shelf-mcp';
-import { cancelPendingSend } from '../agentTabStore';
+import { beginPendingCancel, finishPendingCancel, cancelPendingSend } from '../agentTabStore';
+import { QUEUE_CANCEL as C } from '../../shared/agent-queue-cancel';
 import { SUBMISSION_ERROR as E, submissionFailed } from '../../shared/agent-submission';
-vi.mock('../agentTabStore', () => ({ cancelPendingSend: vi.fn() }));
+vi.mock('../agentTabStore', () => ({ cancelPendingSend: vi.fn(), beginPendingCancel: vi.fn(() => true), finishPendingCancel: vi.fn() }));
 
 // Mock the agent IPC surface. Each on* method stores its callback so
 // tests can fire it synchronously; each outbound method records calls
@@ -68,6 +69,8 @@ describe('bindAgentIPCGroup', () => {
   let cleanup: () => void;
 
   beforeEach(() => {
+    vi.mocked(beginPendingCancel).mockReset().mockReturnValue(true);
+    vi.mocked(finishPendingCancel).mockClear();
     __resetBusForTests();
     mock = makeMockAgentApi();
     (globalThis as any).window = { shelfApi: { agent: mock.api } };
@@ -238,6 +241,33 @@ describe('bindAgentIPCGroup', () => {
       emitAgent('agent:resolvePicker', { tabId: 't1', pickerId: 'p1', payload: { cancelled: true } });
       expect(mock.calls.find((c) => c.method === 'resolvePicker')!.args)
         .toEqual(['t1', 'p1', { cancelled: true }]);
+    });
+  });
+
+  describe('authoritative queue cancellation', () => {
+    it('waits for remote confirmation before applying cancellation', async () => {
+      let resolve!: (value: any) => void;
+      vi.spyOn(mock.api, 'cancelQueued').mockImplementation(() => new Promise(r => { resolve = r; }));
+      emitAgent('agent:cancelQueued', { tabId: 't1', clientMsgId: 'c1' });
+      expect(beginPendingCancel).toHaveBeenCalledWith('t1', 'c1');
+      expect(finishPendingCancel).not.toHaveBeenCalled();
+      resolve({ status: C.STATUS.CANCELLED });
+      await vi.waitFor(() => expect(finishPendingCancel).toHaveBeenCalledWith('t1', 'c1', { status: C.STATUS.CANCELLED }));
+    });
+    it('does not send a duplicate or already-promoted cancellation', () => {
+      vi.mocked(beginPendingCancel).mockReturnValue(false);
+      emitAgent('agent:cancelQueued', { tabId: 't1', clientMsgId: 'gone' });
+      expect(mock.calls.some(c => c.method === 'cancelQueued')).toBe(false);
+    });
+    it('retains input and surfaces an unconfirmed cancellation', async () => {
+      vi.spyOn(mock.api, 'cancelQueued').mockRejectedValueOnce(new Error('connection lost'));
+      const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const message = vi.fn(); const off = onAgent('agent:onMessage', message);
+      try {
+        emitAgent('agent:cancelQueued', { tabId: 't1', clientMsgId: 'c1' });
+        await vi.waitFor(() => expect(finishPendingCancel).toHaveBeenCalledWith('t1', 'c1'));
+        expect(message).toHaveBeenCalledWith({ tabId: 't1', msg: expect.objectContaining({ content: expect.stringContaining('may still execute') }) });
+      } finally { off(); logged.mockRestore(); }
     });
   });
 

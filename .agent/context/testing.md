@@ -39,6 +39,13 @@ main operation 映射與錯誤回傳。兩者都不呼叫真實模型，也不�
 
 ## Agent input verification
 
+Queued cancellation 的 server 結果由 `agent-server/send-queue.test.ts` 驗，remote RPC
+correlation／非法結果／timeout 由 `src/main/agent/remote.test.ts` 驗；renderer store／
+reconcile 測試保護取消中內容、snapshot 先於結果及 running promotion／history。
+`e2e/agent-flows.spec.ts` 的 queued cancellation 案例以 main IPC gate 控制取消送達
+時機，仍走實際 exec queue／fake provider，驗確認前保留 chip、取消晚於 running
+時有且只有一份 IndexedDB user row，以及失敗後保留內容並允許明確重試。
+
 `src/main/agent/message-sender.test.ts` 以可控 pending execution 驗共通提交與執行完成
 分離、queued／running 確認、typed error、timeout／晚到確認、投影隔離與 close cleanup。
 `e2e/agent-flows.spec.ts` 的 submission 案例走實際 IPC／exec queue、fake provider，

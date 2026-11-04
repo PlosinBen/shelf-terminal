@@ -84,6 +84,11 @@ The coordinator owns transaction order but treats captured state and replacement
 
 The client eager-sends each input and mirrors the backend's ordered queue snapshots. A queued item appears as a chip; when it becomes running, its optimistic user message is promoted into the timeline. The client does not infer provider boundaries or decide when another send may start.
 
+Single-item cancellation is an intent, not an optimistic deletion. The client retains
+content while awaiting the execution-plane queue's removal confirmation. Work that has
+already started remains executable and is promoted normally into conversation history.
+A cancellation failure is visible and does not imply removal or trigger an automatic retry.
+
 Callers own input-context decisions; the factory owns message construction and identity. The Sender
 coordinates validation, target lookup and queue submission without source-specific prompt assembly.
 Message content and reply requirements remain separate. Providers recognize original commands before

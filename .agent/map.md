@@ -280,6 +280,7 @@ title: shelf-terminal — Intent → File Index
 | 通用型別 | `types.ts` | Connection / AppSettings / PM types 與非 project-domain shared payloads |
 | 共通 Agent 輸入 | `agent-input.ts` | Message／source／replyRequirement、factory 與跨 process 純驗證 |
 | Agent 提交結果契約 | `agent-submission.ts` | 可序列化 success／typed error 與 queue projection 常數 |
+| Agent queue 取消契約 | `agent-queue-cancel.ts` | 取消 RPC 的 wire 常數、timeout 與權威結果型別 |
 | Canonical project contract | `projects.ts` | `Project` / `ProjectCreateInput` / `ProjectDeleteResult` / readonly helper |
 | Project mutation contracts and draft comparison | `project-mutations.ts` | Named mutation tags、editable fields、result 與 changed-field structural comparison |
 | Agent preference report comparison | `agent-pref-report.ts` | Shelf capability report 與 saved prefs 的純比較，保留 native confirmed-patch 邊界 |

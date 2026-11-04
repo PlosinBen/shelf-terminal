@@ -21,6 +21,8 @@ import {
   enqueuePendingSend,
   applyQueueSnapshot,
   cancelPendingSend,
+  beginPendingCancel,
+  finishPendingCancel,
   clearPendingSends,
   clearMessages,
   setExecutionActive,
@@ -554,6 +556,41 @@ describe('agentTabStore — message actions', () => {
     expect(__getTabForTests(TAB)!.pendingSends.map((p) => p.clientMsgId)).toEqual(['cm-2']);
     clearPendingSends(TAB);
     expect(__getTabForTests(TAB)!.pendingSends.length).toBe(0);
+  });
+
+  it('retains cancelling content until authority confirms removal, without a vanished anomaly', () => {
+    enqueuePendingSend(TAB, 'cancel-me', 'keep until confirmed');
+    applyQueueSnapshot(TAB, [{ clientMsgId: 'cancel-me', state: 'queued' }]);
+    expect(beginPendingCancel(TAB, 'cancel-me')).toBe(true);
+    expect(beginPendingCancel(TAB, 'cancel-me')).toBe(false);
+    applyQueueSnapshot(TAB, []); // Remote removal snapshot may arrive before RPC result.
+    expect(__getTabForTests(TAB)!.pendingSends).toMatchObject([{ content: 'keep until confirmed', cancelling: true }]);
+    finishPendingCancel(TAB, 'cancel-me', { status: 'cancelled' });
+    expect(__getTabForTests(TAB)!.pendingSends).toEqual([]);
+    expect(__getTabForTests(TAB)!.messages).toEqual([]);
+  });
+
+  it('promotes and saves an input that starts running while cancellation is in flight', () => {
+    enqueuePendingSend(TAB, 'race', 'executed input');
+    applyQueueSnapshot(TAB, [{ clientMsgId: 'race', state: 'queued' }]);
+    beginPendingCancel(TAB, 'race');
+    applyQueueSnapshot(TAB, [{ clientMsgId: 'race', state: 'running' }]);
+    finishPendingCancel(TAB, 'race', { status: 'running' });
+    applyQueueSnapshot(TAB, [{ clientMsgId: 'race', state: 'running' }]);
+    expect(__getTabForTests(TAB)!.messages.filter(m => m.type === 'user')).toMatchObject([{ id: 'user-race', content: 'executed input' }]);
+    expect(__getTabForTests(TAB)!.pendingSends).toEqual([]);
+    vi.advanceTimersByTime(6000);
+    expect(mockedStorage.saveAgentMessagesDelta.mock.calls.flatMap(call => call[1])).toContainEqual(expect.objectContaining({ id: 'user-race', content: 'executed input' }));
+  });
+
+  it('keeps a rejected/unknown cancellation retryable without losing its input', () => {
+    enqueuePendingSend(TAB, 'retain', 'not cancelled');
+    beginPendingCancel(TAB, 'retain');
+    finishPendingCancel(TAB, 'retain');
+    expect(__getTabForTests(TAB)!.pendingSends).toMatchObject([{ content: 'not cancelled', cancelling: false }]);
+    expect(beginPendingCancel(TAB, 'retain')).toBe(true);
+    finishPendingCancel(TAB, 'retain', { status: 'not_found' });
+    expect(__getTabForTests(TAB)!.pendingSends).toMatchObject([{ content: 'not cancelled', cancelling: false }]);
   });
 
   it('clearMessages flushes pending and calls clearAgentSession', async () => {

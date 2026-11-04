@@ -401,7 +401,8 @@ export function initAgentManager(windowGetter: () => BrowserWindow | null): void
 
   ipcMain.handle(IPC.AGENT_CANCEL_QUEUED, async (_e, payload) => {
     const session = sessions.get(payload.tabId);
-    session?.backend.cancelQueued?.(payload.clientMsgId);
+    if (!session?.backend.cancelQueued || typeof payload.clientMsgId !== 'string') throw new Error('Queue cancellation target is unavailable or invalid');
+    return session.backend.cancelQueued(payload.clientMsgId);
   });
 
 }

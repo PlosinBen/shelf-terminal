@@ -7,6 +7,15 @@ const snap = (...items: Array<[string, 'queued' | 'running']>): AgentQueueItem[]
   items.map(([clientMsgId, state]) => ({ clientMsgId, state }));
 
 describe('reconcileQueueSnapshot', () => {
+  it('keeps content while cancellation awaits authority, then promotes if already running', () => {
+    const cancelling = { ...mk('b', true), cancelling: true };
+    const absent = reconcileQueueSnapshot([cancelling], new Set(), []);
+    expect(absent.pending).toEqual([cancelling]);
+    expect(absent.anomalies).toEqual([]);
+    const running = reconcileQueueSnapshot(absent.pending, absent.promoted, snap(['b', 'running']));
+    expect(running.promote).toEqual([cancelling]);
+    expect(running.anomalies).toEqual([]);
+  });
   it('promotes an optimistic item when its turn starts running (idle send)', () => {
     const r = reconcileQueueSnapshot([mk('a')], new Set(), snap(['a', 'running']));
     expect(r.promote.map((p) => p.clientMsgId)).toEqual(['a']);

@@ -65,7 +65,7 @@ describe('createSendQueue', () => {
     q.enqueue({ id: 'a', clientMsgId: 'a', executionId: 't1' });
     q.enqueue({ id: 'b', clientMsgId: 'b', executionId: 't2' });
     q.enqueue({ id: 'c', clientMsgId: 'c', executionId: 't3' });
-    q.cancel('b');
+    expect(q.cancel('b')).toEqual({ status: 'cancelled' });
     expect(terminated).toEqual(['t2']);
     expect(snapshots.at(-1)).toEqual([running('a'), queued('c')]);
     await flush();
@@ -79,7 +79,7 @@ describe('createSendQueue', () => {
     const { q, snapshots, terminated, anomalies } = setup();
     q.enqueue({ id: 'a', clientMsgId: 'a', executionId: 't1' });
     const before = snapshots.length;
-    q.cancel('a'); // already running → not in queue
+    expect(q.cancel('a')).toEqual({ status: 'running' });
     expect(terminated).toEqual([]);
     expect(snapshots.length).toBe(before); // no new snapshot
     expect(anomalies).toEqual([{ reason: 'cancel-running', clientMsgId: 'a' }]);
@@ -88,7 +88,7 @@ describe('createSendQueue', () => {
   it('cancel of an unknown id is FLAGGED (cancel-unknown), not silent', () => {
     const { q, anomalies } = setup();
     q.enqueue({ id: 'a', clientMsgId: 'a', executionId: 't1' });
-    q.cancel('nope');
+    expect(q.cancel('nope')).toEqual({ status: 'not_found' });
     expect(anomalies).toEqual([{ reason: 'cancel-unknown', clientMsgId: 'nope' }]);
   });
 
