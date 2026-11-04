@@ -10,7 +10,7 @@ related:
 
 ## Worktree delegation verification
 
-`npm run test:unit -- src/main/agent/delegation.test.ts src/main/agent/delegation-receipts.test.ts src/main/agent/delegation-runtime.test.ts`
+`npm run test:unit -- src/main/agent/delegation.test.ts src/main/agent/message-sender.test.ts src/main/agent/delegation-runtime.test.ts`
 驗記憶體角色／授權、介入、單份結果、picker 往返、queue receipt 與晚到對帳。
 `remote.test.ts`／`dispatcher-connection.test.ts` 驗 trusted logical View context；
 既有 Shelf SDK smoke／adapter contract 也包含委派工具。
@@ -38,6 +38,12 @@ main operation 映射與錯誤回傳。兩者都不呼叫真實模型，也不�
 模型實際呼叫工具或使用者權限互動。一般 `npm run test:unit` 會包含兩者。
 
 ## Agent input verification
+
+`src/main/agent/message-sender.test.ts` 以可控 pending execution 驗共通提交與執行完成
+分離、queued／running 確認、typed error、timeout／晚到確認、投影隔離與 close cleanup。
+`e2e/agent-flows.spec.ts` 的 submission 案例走實際 IPC／exec queue、fake provider，
+驗執行尚未完成時 running／queued 均已返回成功，以及 Caller 顯示 typed rejection。
+Telegram unit mock agent sender／API，驗 Caller 組裝及錯誤通知，不證明 live Telegram。
 
 `src/shared/agent-input.test.ts` 驗 factory 身分、原文／附件 metadata 與入口來源限制；
 `agent-server/input-prompt.test.ts` 驗共通回覆指示與 slash 語法保留。

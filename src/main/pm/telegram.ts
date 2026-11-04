@@ -1,5 +1,6 @@
 import os from 'os';
 import { AGENT_INPUT_SOURCE, AGENT_REPLY_REQUIREMENT, createAgentInputMessage } from '@shared/agent-input';
+import { isSubmissionUncertain } from '@shared/agent-submission';
 import { net } from 'electron';
 import { log } from '@shared/logger';
 import type { TabInferredState, TelegramConfig } from '@shared/types';
@@ -574,8 +575,7 @@ async function routeMessageToAgent(text: string): Promise<void> {
   // events flow and emit a flush when the turn ends.
   agentAccumulator.reset();
   // Caller owns channel requirements; Sender does not inspect Telegram semantics.
-  // sendFromInternal returns when the turn loop exits. Errors propagate
-  // through the observer as AgentEvent.error — not as a rejected promise.
+  // Submission confirms queue ownership; replies remain on the observer lane.
   const built = createAgentInputMessage({
     source: { kind: AGENT_INPUT_SOURCE.TELEGRAM }, content: text,
     replyRequirement: AGENT_REPLY_REQUIREMENT.BRIEF_PLAIN_TEXT,
@@ -585,7 +585,12 @@ async function routeMessageToAgent(text: string): Promise<void> {
     await sendMessage('Could not create the message for the agent.');
     return;
   }
-  await sendFromInternal(mode.tabId, built.message);
+  const result = await sendFromInternal(mode.tabId, built.message);
+  if (!result.ok) {
+    log.warn('telegram', `agent submission failed msgId=${built.message.msgId} code=${result.error.code}: ${result.error.message}`);
+    await sendMessage(`Could not submit to the agent (${result.error.code}): ${result.error.message}`
+      + (isSubmissionUncertain(result.error) ? '\nDelivery may have occurred. Check Shelf before sending again.' : ''), { plain: true });
+  }
 }
 
 /**

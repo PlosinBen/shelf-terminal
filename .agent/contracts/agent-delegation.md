@@ -44,9 +44,12 @@ Tool envelopes retain `{ok,data?,error?}` and the shared bridge error formatting
 - `unknown`: write occurred without a receipt, or the ten-second receipt wait expired.
   Retain the result and prohibit automatic resend; a late receipt reconciles it.
 
-Internal D1 sends mirror user history and use existing clientMsgId correlation. Main filters
-those ids out of renderer optimistic projection. Execution drains independently after tool
-receipt. Legacy internal completion booleans and ordinary UI queue behavior remain unchanged.
+Internal D1 sends use the common message Sender, mirror user history and use existing clientMsgId
+correlation. Main filters those ids out of renderer optimistic projection. Execution drains
+independently after tool receipt. The delegation adapter maps common success to `received`,
+uncertain submission errors to `unknown`, and other errors to `failed`, preserving this MCP
+contract. Late receipt callbacks still reconcile the result slot. Ordinary UI optimistic queue
+behavior remains unchanged; submission Result details are in `contracts/agent-routing`.
 
 UI collection occupies the result slot during transfer and clears only after main's queue
 receives it. Duplicate collection rejects. Collection does not unlock/end the collaboration;

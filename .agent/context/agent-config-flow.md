@@ -317,7 +317,8 @@ Sender 只協調檢查、目標查找與執行服務，不依來源拼 prompt、
 附件保留必要 metadata 與未知格式 MIME fallback，不因結構收斂順帶限縮支援範圍。
 
 **Do not change casually because**：msgId 不證明來源／權限，也不等於去重保證。
-既有 queue snapshot 仍使用 clientMsgId（renderer 將 factory ID 映射過去），Telegram
+既有 queue snapshot 仍使用 clientMsgId（共通 Sender 將 factory ID 映射過去），Telegram
 保留直接 user-message mirror，省略 optimistic projection。optional history inputMessage
-metadata 不要求舊資料遷移。此契約不包含接收 ACK、逾時狀態、重送或 queue／UI 重構；
-execution-lifecycle boolean 不能當成 queue acceptance。具體型別見 `contracts/agent-routing`。
+metadata 不要求舊資料遷移。訊息本身不承擔執行／交付狀態；共通 Sender 的 queue
+確認、具型別錯誤與晚到對帳見 `agent-core#13`。不因此加入重送或 queue／UI 重構。
+具體型別見 `contracts/agent-routing`。

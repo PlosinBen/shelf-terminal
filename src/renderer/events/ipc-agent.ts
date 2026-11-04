@@ -2,6 +2,7 @@ import type { AgentInitStatus } from '../../shared/types';
 import { onAgent, emitAgent } from './types';
 import { SHELF_MCP } from '../../shared/shelf-mcp';
 import { cancelPendingSend } from '../agentTabStore';
+import { isSubmissionUncertain, SUBMISSION_ERROR as E, type SubmissionError } from '../../shared/agent-submission';
 
 // Single global binder that wires window.shelfApi.agent.* IPC ↔ typed
 // agent event bus. Caller (App.tsx mount) gets a cleanup function that
@@ -70,14 +71,16 @@ export function bindAgentIPCGroup(): () => void {
     api.init(tabId, cwd, connection, provider, sessionId, opts);
   });
   const offSendEvt = onAgent('agent:send', ({ tabId, ...input }) => {
-    void Promise.resolve(api.send(tabId, input)).then(ok => {
-      if (ok === false) {
-        console.error('Agent input submission rejected', { tabId, msgId: input.inputMessage?.msgId });
-        if (input.inputMessage) cancelPendingSend(tabId, input.inputMessage.msgId);
-        emitAgent('agent:onMessage', { tabId, msg: { type: 'error', content: 'Input rejected before execution. Check the View’s delegation and availability before sending again.' } });
-      }
-    }).catch(error => {
+    const failed = (error: SubmissionError) => {
       console.error('Agent input submission failed', { tabId, msgId: input.inputMessage?.msgId, error });
+      if (input.inputMessage && !isSubmissionUncertain(error) && error.code !== E.DUPLICATE) cancelPendingSend(tabId, input.inputMessage.msgId);
+      emitAgent('agent:onMessage', { tabId, msg: { type: 'error', content: `Input submission failed (${error.code}): ${error.message}` } });
+    };
+    void Promise.resolve(api.send(tabId, input)).then(result => {
+      if (result === false) failed({ code: E.NOT_SENT, message: 'Target Agent View is not available' });
+      else if (typeof result === 'object' && !result.ok) failed(result.error);
+    }).catch(error => {
+      failed({ code: E.UNCONFIRMED, message: `Could not confirm submission: ${String(error)}. Do not automatically resend.` });
     });
   });
   const offStopEvt = onAgent('agent:stop', ({ tabId }) => {

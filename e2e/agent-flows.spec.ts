@@ -2,6 +2,7 @@ import { test, expect, openAgentTab, readActiveTerminalText, sendAgentPrompt } f
 import type { Page } from '@playwright/test';
 import fs from 'node:fs';
 import path from 'node:path';
+import { IPC } from '../src/shared/ipc-channels';
 
 /**
  * Agent rendering flows beyond picker — exercises every other major wire
@@ -55,6 +56,45 @@ async function storedAgentMessages(page: Page): Promise<any[]> {
 }
 
 test.describe('agent flows via fake provider', () => {
+  // The actual IPC must settle on queue receipt while the model is still working.
+  // A background runner, not the invoking renderer, owns execution afterwards.
+  test('acknowledges running and queued submissions before execution finishes', async ({ shelfApp: { app, page } }) => {
+    await setupProject(page);
+    await app.evaluate(({ ipcMain }, channel) => {
+      const original = (ipcMain as any)._invokeHandlers.get(channel);
+      (globalThis as any).__submissionResults = [];
+      ipcMain.removeHandler(channel);
+      ipcMain.handle(channel, async (event, payload) => {
+        const result = await original(event, payload);
+        (globalThis as any).__submissionResults.push(result);
+        return result;
+      });
+    }, IPC.AGENT_SEND);
+    await openAgentTab(page);
+    await sendAgentPrompt(page, 'delay:10000|text:first completed');
+    await expect.poll(() => app.evaluate(() => (globalThis as any).__submissionResults), { timeout: 3000 }).toEqual([{ ok: true }]);
+    await sendAgentPrompt(page, 'text:second completed');
+    await expect.poll(() => app.evaluate(() => (globalThis as any).__submissionResults), { timeout: 3000 }).toEqual([{ ok: true }, { ok: true }]);
+    await expect(page.locator('.agent-msg-queued')).toHaveCount(1);
+    await expect(page.locator('.agent-msg-reply:visible', { hasText: 'first completed' })).toHaveCount(0);
+    await expect(page.locator('.agent-msg-reply:visible', { hasText: 'second completed' })).toBeVisible({ timeout: 15000 });
+    await expect(page.locator('.agent-msg-queued')).toHaveCount(0);
+  });
+
+  test('shows typed submission rejection in the originating View and removes its unsent chip', async ({ shelfApp: { app, page } }) => {
+    await setupProject(page); await openAgentTab(page);
+    await app.evaluate(({ ipcMain }, channel) => {
+      const original = (ipcMain as any)._invokeHandlers.get(channel);
+      ipcMain.removeHandler(channel);
+      // Exercise real main validation/target lookup; only the target disappears.
+      ipcMain.handle(channel, (event, payload) => original(event, { ...payload, tabId: 'closed-view' }));
+    }, IPC.AGENT_SEND);
+    await sendAgentPrompt(page, 'text:cannot reach target');
+    await expect(page.locator('.agent-messages:visible')).toContainText('Input submission failed (target_missing)');
+    await expect(page.locator('.agent-msg-queued')).toHaveCount(0);
+    await expect(page.locator('.agent-msg-reply:visible')).toHaveCount(0);
+  });
+
   test('preserves original input and canonical message metadata through queue and history', async ({ shelfApp: { page } }) => {
     await setupProject(page);
     await openAgentTab(page);

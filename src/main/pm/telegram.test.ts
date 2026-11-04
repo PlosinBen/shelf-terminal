@@ -13,6 +13,7 @@ import { net } from 'electron';
 import { sendFromInternal, isAgentTab } from '../agent';
 import { resolveAlias } from './telegram-mode';
 import { AGENT_INPUT_SOURCE, AGENT_REPLY_REQUIREMENT } from '@shared/agent-input';
+import { SUBMISSION_ERROR as E, submissionFailed, type SubmissionResult } from '@shared/agent-submission';
 
 // Stub the deps so importing telegram.ts doesn't drag electron / agent
 // modules into the test process.
@@ -43,11 +44,11 @@ import { escapeTelegramMarkdown, startTelegram, stopTelegram, maybeSendTyping, s
 
 const fetchMock = net.fetch as unknown as ReturnType<typeof vi.fn>;
 
-it('creates a canonical Telegram message without injecting guidance into the original text', async () => {
+it.each<SubmissionResult>([{ ok: true }, submissionFailed(E.NOT_SENT, 'not written'), submissionFailed(E.TIMEOUT, 'not confirmed')])('creates canonical input and handles submission result $ok without using it as reply content', async result => {
   vi.stubEnv('SHELF_TEST_MODE', '0');
   vi.mocked(isAgentTab).mockReturnValue(true);
   vi.mocked(resolveAlias).mockReturnValue({ ok: true, tabId: 'agent-tab', projectName: 'Project', provider: 'claude' });
-  vi.mocked(sendFromInternal).mockResolvedValue(true);
+  vi.mocked(sendFromInternal).mockResolvedValue(result);
   let polled = false;
   fetchMock.mockImplementation(async (url: string, options: any) => {
     if (!url.endsWith('/getUpdates')) return apiResponse({});
@@ -67,6 +68,11 @@ it('creates a canonical Telegram message without injecting guidance into the ori
       msgId: expect.any(String), source: { kind: AGENT_INPUT_SOURCE.TELEGRAM },
       content: '  original question  ', attachments: [], replyRequirement: AGENT_REPLY_REQUIREMENT.BRIEF_PLAIN_TEXT,
     }));
+    if (!result.ok) {
+      await vi.waitFor(() => expect(fetchMock.mock.calls.some(call => String(call[0]).endsWith('/sendMessage') && JSON.parse(call[1].body).text.includes(result.error.code))).toBe(true));
+      const notification = fetchMock.mock.calls.find(call => String(call[0]).endsWith('/sendMessage') && JSON.parse(call[1].body).text.includes(result.error.code))!;
+      expect(JSON.parse(notification[1].body).parse_mode).toBeUndefined();
+    }
   } finally {
     stopTelegram();
     vi.mocked(isAgentTab).mockReturnValue(false);

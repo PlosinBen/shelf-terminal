@@ -230,7 +230,11 @@ interface ShelfApi {
     getMemoryUsage: () => Promise<import('../shared/process-memory').ProcessMemorySummary | null>;
     onMemoryUsage: (callback: (summary: import('../shared/process-memory').ProcessMemorySummary) => void) => () => void;
     init: (tabId: string, cwd: string, connection: import('../shared/types').Connection, provider: string, sessionId?: string, opts?: Record<string, unknown>) => Promise<boolean>;
-    send: (tabId: string, input: import('../shared/agent-input').AgentInputRequest) => Promise<boolean>;
+    send: {
+      (tabId: string, input: { inputMessage: import('../shared/agent-input').AgentInputMessage; configEdit?: never }): Promise<import('../shared/agent-submission').SubmissionResult>;
+      (tabId: string, input: { configEdit: { key: import('../shared/config-ack').ConfigEditKey; value: string }; inputMessage?: never }): Promise<boolean>;
+      (tabId: string, input: import('../shared/agent-input').AgentInputRequest): Promise<import('../shared/agent-submission').SubmissionResult | boolean>;
+    };
     stop: (tabId: string) => Promise<boolean>;
     cancelQueued: (tabId: string, clientMsgId: string) => Promise<boolean>;
     destroy: (tabId: string) => Promise<void>;

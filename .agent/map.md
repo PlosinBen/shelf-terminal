@@ -21,7 +21,8 @@ title: shelf-terminal — Intent → File Index
 | App 層 Agent Skills（CRUD + lock + disable） | `skills-store.ts` | `<userData>/skills/` 下 app 層 skill 的檔案 CRUD + frontmatter 驗證 + `.locked`（agent 編輯鎖）+ `.disabled`（mount 開關）marker |
 | Skills 變更後處理（統一 pipeline） | `skills-sync.ts` | `onSkillsChanged()`：任何 skill mutation 後的單一出口（re-project + subscribers + 通知 renderer） |
 | App-tool bridge（main 端 dispatcher） | `agent/app-tool.ts` | `handleAppTool(op,args)` 把 agent-server 的 `app_tool` 請求轉成 client-owned 資源動作的純 dispatcher |
-| Worktree Agent 委派 | `agent/delegation.ts` + `agent/delegation-runtime.ts` + `agent/delegation-receipts.ts` | 記憶體關係／角色授權、桌面選擇往返與內部 queue receipt |
+| Worktree Agent 委派 | `agent/delegation.ts` + `agent/delegation-runtime.ts` | 記憶體關係／角色授權與桌面選擇往返 |
+| Agent 共通訊息提交 | `agent/message-sender.ts` | queue 接收確認、具型別錯誤、晚到對帳與 projection 策略 |
 | 委派共享契約 | `../shared/agent-delegation.ts` | 工具／operation／IPC／action 常數與 View、snapshot、receipt 型別 |
 | Shelf MCP signing authority | `agent/shelf-mcp-authority.ts` | App runtime 內的 per-Project Ed25519 key ownership 與 per-session／endpoint grant 簽發 |
 | Skills 投影（local + hash） | `skills-projection.ts` | `projectSkillsLocal` mirror skills 到 `~/.shelf/apps/<appId>/skills` + hash helper |
@@ -278,6 +279,7 @@ title: shelf-terminal — Intent → File Index
 |--------|------|------|
 | 通用型別 | `types.ts` | Connection / AppSettings / PM types 與非 project-domain shared payloads |
 | 共通 Agent 輸入 | `agent-input.ts` | Message／source／replyRequirement、factory 與跨 process 純驗證 |
+| Agent 提交結果契約 | `agent-submission.ts` | 可序列化 success／typed error 與 queue projection 常數 |
 | Canonical project contract | `projects.ts` | `Project` / `ProjectCreateInput` / `ProjectDeleteResult` / readonly helper |
 | Project mutation contracts and draft comparison | `project-mutations.ts` | Named mutation tags、editable fields、result 與 changed-field structural comparison |
 | Agent preference report comparison | `agent-pref-report.ts` | Shelf capability report 與 saved prefs 的純比較，保留 native confirmed-patch 邊界 |

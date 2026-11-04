@@ -34,7 +34,8 @@ import { sameProjectTarget } from '@shared/project-target';
 import { isWorktreeUnavailable, worktreeLabel } from '@shared/worktree';
 import { DELEGATION as D, type DelegationView, type DelegationUiAction } from '@shared/agent-delegation';
 import { createDelegationService } from './delegation';
-import { createDelegationReceipts } from './delegation-receipts';
+import { createMessageSender } from './message-sender';
+import { SUBMISSION_ERROR as E, QUEUE_PROJECTION as P, submissionFailed, isSubmissionUncertain, type SubmissionResult } from '@shared/agent-submission';
 import { configureDelegationRuntime, resolveDelegationTarget, cancelDelegationPickers } from './delegation-runtime';
 
 interface SessionInstance {
@@ -51,7 +52,7 @@ interface SessionInstance {
   state: AgentSessionState;
   /**
    * Count of concurrently in-flight foreground executions. With the server-owned
-   * queue the renderer eager-sends, so several `sendMessage` generators can run
+   * queue the renderer eager-sends, so several `executeMessage` readers can run
    * at once (agent-server serializes them, but main holds one generator each).
    * `state` is 'streaming' while this is > 0 — without the counter, the FIRST
    * execution's finally would flip `state` to 'idle' while later queued executions are
@@ -61,7 +62,7 @@ interface SessionInstance {
   pendingPermissions: Map<string, (result: PermissionResult) => void>;
   /**
    * True while the tab's exec + provider CLI have been torn down for idleness
-   * (idle-teardown). The session entry is KEPT; the next `sendMessage` clears
+   * (idle-teardown). The session entry is KEPT; the next execution clears
    * this and the backend's `query()` transparently respawns + resumes. See
    * claude-idle-teardown.
    */
@@ -69,7 +70,11 @@ interface SessionInstance {
 }
 
 const sessions = new Map<string, SessionInstance>();
-const delegationReceipts = createDelegationReceipts();
+const messageSender = createMessageSender({
+  target: (tabId) => sessions.get(tabId),
+  execute: (session, message, written) => executeMessage(session.tabId, session, { inputMessage: message }, message.msgId, written),
+  report: (context, error) => log.warn('agent', `message submission ${context}: ${error instanceof Error ? error.message : JSON.stringify(error)}`),
+});
 function delegationViews(): DelegationView[] {
   return [...sessions.values()].flatMap(session => {
     const project = session.projectId ? getProjectsRepository().get(session.projectId) : null;
@@ -89,12 +94,12 @@ const delegations = createDelegationService({
   deliver: async (target, message, accepted) => {
     const session = sessions.get(target.tabId);
     if (!session || session.sessionId !== target.agentViewId) return { state: D.DELIVERY.FAILED, error: 'Target View closed' };
-    const receipt = delegationReceipts.register(target.tabId, message.msgId, accepted);
-    send(IPC.AGENT_MESSAGE, target.tabId, { type: 'user', msgId: message.msgId, content: message.content, inputMessage: message });
-    void executeMessage(target.tabId, session, { inputMessage: message }, message.msgId, receipt.written)
-      .catch(error => log.error('agent', `delegation execution failed msgId=${message.msgId}: ${String(error)}`))
-      .finally(() => receipt.finish());
-    return receipt.promise;
+    const result = await messageSender.submit(target.tabId, message, {
+      projection: P.MIRRORED, onReceived: accepted,
+      onDispatch: () => mirrorInput(target.tabId, message),
+    });
+    return result.ok ? { state: D.DELIVERY.RECEIVED }
+      : { state: isSubmissionUncertain(result.error) ? D.DELIVERY.UNKNOWN : D.DELIVERY.FAILED, error: result.error.message };
   },
 });
 
@@ -315,13 +320,17 @@ export function initAgentManager(windowGetter: () => BrowserWindow | null): void
     const checked = validateAgentInputRequest(payload, AGENT_INPUT_SOURCE.AGENT_VIEW);
     if (!checked.ok) {
       log.error('agent', `input rejected tabId=${payload?.tabId} msgId=${payload?.inputMessage?.msgId}: ${checked.error}`);
-      return false;
+      return submissionFailed(E.INVALID, checked.error);
     }
     if (checked.message.inputMessage) {
       try { delegations.assertUserInput(payload.tabId); }
-      catch (error) { log.warn('agent', String(error)); return false; }
+      catch (error) { log.warn('agent', String(error)); return submissionFailed(E.FORBIDDEN, String(error)); }
     }
-    return sendMessage(payload.tabId, checked.message, checked.message.inputMessage?.msgId);
+    if (checked.message.inputMessage) return messageSender.submit(payload.tabId, checked.message.inputMessage);
+    // Config control is not a message submission: preserve its existing FIFO
+    // and completion return until the separate session-control feature lands.
+    const session = sessions.get(payload.tabId);
+    return session ? executeMessage(payload.tabId, session, checked.message) : false;
   });
 
   ipcMain.handle(IPC.AGENT_STOP, async (_e, payload) => {
@@ -473,7 +482,7 @@ async function startSession(
     // Server-owned send-queue snapshot — forwarded straight to the renderer,
     // which mirrors it (optimistic chips reconciled against this authoritative
     // list). Session-level (executionId-less). See message-queue-ownership.
-    (items) => send(IPC.AGENT_QUEUE, tabId, delegationReceipts.snapshot(tabId, items)),
+    (items) => send(IPC.AGENT_QUEUE, tabId, messageSender.snapshot(tabId, items)),
     // App-skill reload result → a system/error line in THIS tab's agent view
     // (reuses AGENT_MESSAGE rendering). Session-level (executionId-less); the agent-
     // server emits it after a live re-scan, no-op sessions emit nothing. See
@@ -565,25 +574,6 @@ async function startSession(
   }
 
   return true;
-}
-
-async function sendMessage(
-  tabId: string,
-  request: AgentInputRequest,
-  queueMessageId?: string,
-): Promise<boolean> {
-  const checked = validateAgentInputRequest(request);
-  if (!checked.ok) {
-    log.error('agent', `input rejected tabId=${tabId}: ${checked.error}`);
-    send(IPC.AGENT_MESSAGE, tabId, { type: 'error', msgId: `input-error-${crypto.randomUUID()}`, content: checked.error });
-    return false;
-  }
-  const session = sessions.get(tabId);
-  if (!session) {
-    log.warn('agent', `input target missing tabId=${tabId} msgId=${checked.message.inputMessage?.msgId}`);
-    return false;
-  }
-  return executeMessage(tabId, session, checked.message, queueMessageId);
 }
 
 async function executeMessage(tabId: string, session: SessionInstance, input: AgentInputRequest, queueMessageId?: string, onSubmitted?: () => void): Promise<boolean> {
@@ -814,7 +804,7 @@ function dispatchEvent(tabId: string, event: AgentEvent) {
       send(IPC.AGENT_MESSAGE, tabId, { type: 'error', content: event.error });
       break;
     case 'permission_request':
-      // Handled via canUseTool callback in sendMessage — never reaches the
+      // Handled via canUseTool callback in executeMessage — never reaches the
       // dispatcher event queue. Exhaustiveness only.
       break;
   }
@@ -835,6 +825,7 @@ async function destroySession(tabId: string): Promise<boolean> {
   cancelDelegationPickers([tabId]);
   idleTracker.forget(tabId);
   session.backend.dispose();
+  messageSender.close(tabId);
   sessions.delete(tabId);
   forgetExecMemoryScope(tabId);
   return true;
@@ -872,9 +863,7 @@ export function isAgentTab(tabId: string): boolean {
  * existing agent session without going through renderer. Used by the Telegram
  * bridge in agent mode (see pm-agent#12).
  *
- * Returns the same boolean as sendMessage: false if tabId has no session, true
- * once the execution completes (including catch'd errors — those propagate through
- * the observer stream as AgentEvent.error, not as a rejected promise).
+ * Returns queue confirmation or a typed submission error, never model completion.
  *
  * Mirrors a user-message bubble into the renderer's history before kicking
  * off the execution. The IPC path doesn't need this because InputZone records
@@ -886,25 +875,19 @@ export function isAgentTab(tabId: string): boolean {
 export async function sendFromInternal(
   tabId: string,
   message: AgentInputMessage,
-): Promise<boolean> {
+): Promise<SubmissionResult> {
   try { delegations.assertUserInput(tabId); }
-  catch (error) { log.warn('agent', `internal input rejected tabId=${tabId}: ${String(error)}`); return false; }
-  if (!sessions.has(tabId)) {
-    log.warn('agent', `internal input target missing tabId=${tabId} msgId=${message?.msgId}`);
-    return false;
-  }
-  const checked = validateAgentInputRequest({ inputMessage: message });
-  if (!checked.ok) {
-    log.error('agent', `internal input rejected tabId=${tabId}: ${checked.error}`);
-    return false;
-  }
+  catch (error) { log.warn('agent', `internal input rejected tabId=${tabId}: ${String(error)}`); return submissionFailed(E.FORBIDDEN, String(error)); }
+  return messageSender.submit(tabId, message, { projection: P.MIRRORED, onDispatch: () => mirrorInput(tabId, message) });
+}
+
+function mirrorInput(tabId: string, message: AgentInputMessage): void {
   send(IPC.AGENT_MESSAGE, tabId, {
     type: 'user',
     msgId: message.msgId,
     content: message.content,
     inputMessage: message,
   });
-  return sendMessage(tabId, checked.message);
 }
 
 /** In-process equivalent of the AGENT_STOP IPC handler. */
@@ -914,7 +897,7 @@ export async function stopFromInternal(tabId: string): Promise<boolean> {
 
 /**
  * Subscribe to ALL tabs' agent output events. Mirrors every AgentEvent
- * flowing through dispatchEvent + the direct sends in sendMessage (status
+ * flowing through dispatchEvent + the direct sends in executeMessage (status
  * streaming, permission_request, error). Observer receives `(tabId, event)`
  * and is responsible for filtering to the tabs it cares about.
  *
@@ -952,6 +935,7 @@ export function disposeAllAgents(): void {
   delegations.prepareClose(tabIds, true);
   for (const session of sessions.values()) {
     session.backend.dispose();
+    messageSender.close(session.tabId);
     forgetExecMemoryScope(session.tabId);
   }
   sessions.clear();

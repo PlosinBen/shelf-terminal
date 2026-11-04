@@ -101,7 +101,7 @@ export type PermissionCallback = (toolUseId: string, toolName: string, input: Re
 export interface AgentQueryOptions {
   /** Internal submission boundary: called after the send frame was written, not after completion. */
   onSubmitted?: () => void;
-  /** Existing optimistic queue projection; omitted when the caller mirrors history directly. */
+  /** Factory msgId correlation for queue receipts; projection is owned by the main Sender. */
   clientMsgId?: string;
   resume?: string;
   canUseTool?: PermissionCallback;

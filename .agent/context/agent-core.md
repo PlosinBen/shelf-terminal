@@ -132,13 +132,13 @@ dirty snapshots，失敗的 clear 在後續保存或退出前先重試，再確�
 
 **Problem**：streaming 時送出的訊息，舊架構排在 **client 端 queue**（`InputZone` 的 `reduceFlush` latch + isExecutionActive-driven drain），由 client **猜 execution 邊界**。毛病：① client 跟 server 重造同一件事（agent-server 早有 streaming-input 持久 session + sendChain 序列化，`background-tasks#3`）；② 猜邊界造成 burst-drain race，得加 latch 硬補；③ config slash（`/model`）繞過可見 queue、零回饋。
 
-**Decision**：**草稿/輸入體驗留 client，但 queue 的「控制權（排序 + 釋放時機）」交給 agent-server**。client **eager-send 每則**（送出即發，不 hold）、帶 renderer-mint 的 `clientMsgId`（`crypto.randomUUID()`）；agent-server 用**顯式 queue**（`createSendQueue` 純工廠，取代不可內省的 `sendChain` promise-chain）序列化 executions + 每次變動 emit **完整有序快照** `{type:'queue', items:[{clientMsgId, state:'queued'|'running'}]}`（session-level、無 executionId，比照 task_event 在 executionId 檢查前路由到 `onQueue` sink）。client 純鏡像快照畫 chip。
+**Decision**：**草稿/輸入體驗留 client，但 queue 的「控制權（排序 + 釋放時機）」交給 agent-server**。client **eager-send 每則**（送出即發，不 hold），共通 Sender 將 factory 的 `msgId` 映射為 `clientMsgId`；agent-server 用**顯式 queue**（`createSendQueue` 純工廠）序列化 executions + 每次變動 emit **完整有序快照** `{type:'queue', items:[{clientMsgId, state:'queued'|'running'}]}`（session-level、無 executionId，比照 task_event 在 executionId 檢查前路由到 `onQueue` sink）。main 先接收確認，再依 Caller projection 策略轉交 renderer 鏡像快照畫 chip。
 
 **promote 機制走快照 `state:'running'`，不另開 execution_started**：原設計想重用 `execution_started` 帶 clientMsgId，但 dispatcher 對「已註冊的 foreground executionId」之 `execution_started` 會當 dup 丟、對「未註冊」之 `execution_started` 會開 provider-initiated execution（`background-tasks#2`）→ 衝突。改由快照把「正在跑的那則」標 `running`，renderer 看到 running 就把樂觀 chip **升級成 timeline user bubble**（對齊 CLI：排隊訊息開跑就變「你的訊息」）。`reconcileQueueSnapshot`（純函式，`queue-reconcile.ts`）負責：promote（deduped，FIFO）、queued→chip、用 `confirmed` flag 區分「樂觀未確認（留）」vs「曾在 queue 又消失且沒跑（丟 —— user cancel 已先 client 移除，僅剩 respawn 丟失）」、prune promoted set。
 
 **逐則取消 + ESC**：`cancel_queued {clientMsgId}` 從 queue 移除未跑的那則（running 不可取消）；ESC = clear 整個等待 queue + 中斷 running execution。兩者對每個被丟的 send emit **terminal idle on its executionId**，否則 main 為它註冊的 execution reader 永遠 hang。
 
-**main 端 `activeExecutions` 計數器**：eager-send 後 main 同時跑 N 個 sendMessage readers（agent-server 序列化，但 main 各持一個），用計數器讓 `session.state` 維持 streaming 到**最後一則** drain 完，否則第一則的 finally 會提早翻 idle。renderer 端 spinner / ESC 用 `busy = isExecutionActive || pendingSends.length>0` 蓋掉 executions 間的短暫 idle 閃爍。
+**main 端 `activeExecutions` 計數器**：eager-send 後 main 同時跑 N 個 executeMessage readers（agent-server 序列化，但 main 各持一個），用計數器讓 `session.state` 維持 streaming 到**最後一則** drain 完，否則第一則的 finally 會提早翻 idle。renderer 端 spinner / ESC 用 `busy = isExecutionActive || pendingSends.length>0` 蓋掉 executions 間的短暫 idle 閃爍。
 
 **reconnect（v1 = 丟+不自動重送）**：現況斷線 = respawn（stdio pipe 是命脈），in-memory queue 一定沒；reconnect → 空快照 → reconcile 把 confirmed-but-vanished 的丟掉。不自動重送（respawn 也丟了去重記憶，跨行程無法用 clientMsgId 擋 dup）；auto-resend 列後續 hardening。
 
@@ -181,7 +181,7 @@ dirty snapshots，失敗的 clear 在後續保存或退出前先重試，再確�
 
 **Root cause**：每則 send（含還沒跑的排隊則）在送出當下就被 main 綁了 `executionId` + execution reader。取消排隊時 agent-server 為了**收掉那條 reader** 會在該 executionId 上 emit 一個裸 `idle`。這個 idle 是 execution control 管線用途，不是 session 層級信號；若 renderer 把所有 execution idle 塌縮成單一 tab-wide flag，「收掉一條排隊 reader」就會被誤讀成「整個 tab idle」。
 
-**Fix**：session 的 busy/idle 由 main 的 `activeExecutions` 獨佔（`agent-core#7`）。`sendMessage` 攔截 `status` event，**只對 terminal(`idle`/`done`) 剝掉 `state`、其餘照原樣轉發**：
+**Fix**：session 的 busy/idle 由 main 的 `activeExecutions` 獨佔（`agent-core#7`）。`executeMessage` 攔截 `status` event，**只對 terminal(`idle`/`done`) 剝掉 `state`、其餘照原樣轉發**：
 - `state==='idle'`：轉發 metrics 但剝 `state`（不讓被取消的排隊 turn 之 idle 翻動 tab streaming flag）；session-level idle **只**在 `finally` 裡 `activeExecutions` 歸零時發（post-decrement → 對「多個 idle 同批抵達」race-safe，dispatch 當下用 `activeExecutions>1` 判斷不可靠：兩個 idle 可能在任一 finally decrement 前都先 dispatch）。
 - `state==='streaming'`：**原封轉發**。provider 會把**turn 中途的 usage/quota 掛在 `state:'streaming'` 事件上**（copilot：`rateLimits`/`contextUsage`/token 數，`copilot/index.ts` assistant.usage / session.usage_info）。**若把 streaming status 一起吞掉，status bar 的 quota/context 會整個消失**（曾經的迴歸）。重設 streaming 對 renderer 是冪等。
 
@@ -189,7 +189,7 @@ observers（telegram bridge）仍收原始 per-execution idle（維持逐 execut
 
 **Do not change casually because**：別把 per-execution `status` event 直接轉回 renderer（會重蹈 idle 翻 tab 的 bug）；但也**別反向把 streaming status 一起濾掉**（會吞掉 mid-execution quota）。要剝的**只有 terminal idle 的 `state` 欄位**，metrics 與 streaming status 一律留。renderer 是 session 層級狀態的純消費者；execution reader 是 main↔agent-server 內部帳。provider-initiated execution（auto-resume）路徑是另一條且不進 `activeExecutions`，別把兩條路徑的 status 處理混為一談。
 
-**Related**：`agent-core#7`（server-owned queue + `activeExecutions`）、`agent-core#8`（每個 send 必須以 idle 收尾）、`architecture/agent-execution`（executionId stays internal 邊界）、`src/main/agent/index.ts`（`sendMessage`/`dispatchEvent`）、`agent-server/providers/copilot/index.ts`（mid-execution usage on streaming status）、`src/renderer/agentTabSubscriptions.ts`、`e2e/agent-flows.spec.ts`（cancelling a queued send leaves the running execution streaming／mid-execution streaming usage 到 status bar）。
+**Related**：`agent-core#7`（server-owned queue + `activeExecutions`）、`agent-core#8`（每個 send 必須以 idle 收尾）、`architecture/agent-execution`（executionId stays internal 邊界）、`src/main/agent/index.ts`（`executeMessage`/`dispatchEvent`）、`agent-server/providers/copilot/index.ts`（mid-execution usage on streaming status）、`src/renderer/agentTabSubscriptions.ts`、`e2e/agent-flows.spec.ts`（cancelling a queued send leaves the running execution streaming／mid-execution streaming usage 到 status bar）。
 
 ## agent-core#11 — Dispatcher 生命週期：thin-by-construction、崩潰要逐出、close/reopen 同-sid race 的三道 identity guard  ·  [Gotcha]
 
@@ -228,3 +228,21 @@ main 新工作；停止／明確關閉 View 才斷開關係，不因此停止另
 optimistic projection 分流。接收不明時保留結果、不自動重送。雛形不保存委派
 歷史或重啟恢復，原有 View／對話持久化不變。具體工具與 lifecycle 見
 `contracts/agent-delegation`。
+
+## agent-core#13 — 提交確認與執行完成分離，Caller 負責錯誤處理  ·  [Decision]
+
+**Decision:** 所有訊息 Caller 使用共通 Sender。Sender 驗證、查目標、啟動 runner，
+依 exec queue snapshot 的 queued 或 running 回傳成功，不等 provider 執行結束。
+失敗回可序列化的具型別錯誤，由 Caller 處理呈現及情境狀態；D1 adapter 保留既有
+delivery／結果槽契約。Runner 持續管理事件、權限、busy 計數與 finally 清理。
+
+**Reason:** 發送操作與 Agent 工作是不同生命週期。將 runner 的完成 Promise 當
+發送結果會讓內部工具等待整段工作，也迫使需要提前回覆的 Caller 另闢執行入口。
+僅本地寫出還不代表 exec 接收，必須以 queue 的權威確認作為成功邊界。
+
+**Do not change casually because:** timeout／unconfirmed 是提交操作錯誤，但可能已
+送達；不得自動重送、取消 execution 或誤刪可能已接受的輸入。晚到確認獨立對帳，
+不改寫已回傳的錯誤。追蹤直到 execution 結束或 View 關閉；queued 取消仍需結束
+其 reader。一般輸入保留 optimistic projection，內部 mirror 必須從 renderer
+projection 分流，不能把所有被 receipt 追蹤的 id 都濾除。回覆內容屬 session lane，
+idle 不代表完整回覆。configEdit 暫保留自己的 completion 路徑，不偽裝為訊息 receipt。

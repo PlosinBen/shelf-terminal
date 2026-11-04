@@ -291,7 +291,7 @@ Renderer → main (invoke / send):
 | Method | Shape |
 |--------|-------|
 | `init(tabId, cwd, connection, provider, sessionId?, opts?)` | invoke `agent:init` |
-| `send(tabId, input)` | invoke `agent:send` with `{tabId, ...input}`. `AgentInputRequest` in `src/shared/agent-input.ts`: `{inputMessage}` or `{configEdit:{key,value}}`, never both. Returns the existing execution-lifecycle boolean, not queue acceptance. See `contracts/agent-routing`. |
+| `send(tabId, input)` | invoke `agent:send` with `{tabId, ...input}`. `AgentInputRequest` in `src/shared/agent-input.ts`: `{inputMessage}` or `{configEdit:{key,value}}`, never both. Message returns `SubmissionResult` (`src/shared/agent-submission.ts`) on exec queue receipt, not execution completion. Config edit retains its completion boolean. See `contracts/agent-routing`. |
 | `stop(tabId)` | invoke `agent:stop` |
 | `cancelQueued(tabId, clientMsgId)` | invoke `agent:cancel-queued` (drop a not-yet-running queued message) |
 | `destroy(tabId)` | invoke `agent:destroy` |

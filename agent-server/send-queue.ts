@@ -4,7 +4,7 @@ import type { AgentQueueItem } from '@shared/types';
  * Server-owned send queue (Architecture: queue lives in agent-server, the
  * execution plane that serializes executions). The client eager-sends every
  * submission; this owns排序 + 釋放時機 and emits a snapshot the renderer
- * mirrors. See .agent/features/message-queue-ownership.md.
+ * mirrors. See agent-core#7.
  *
  * Why serialize at all (the original `sendChain` reason): concurrent execution
  * handlers race on the provider backend's module-level state (activeExecutionSend /
@@ -18,8 +18,8 @@ export interface QueuedSend {
    *  idle if the send is dropped before running (else main's per-execution generator
    *  hangs forever). */
   executionId?: string;
-  /** Renderer-minted correlation key. Absent for internal sends (telegram
-   *  bridge) — those are still serialized but omitted from the snapshot. */
+  /** Factory message id for queue receipts/projection. Control-only sends omit
+   *  it and are still serialized without appearing in the snapshot. */
   clientMsgId?: string;
 }
 

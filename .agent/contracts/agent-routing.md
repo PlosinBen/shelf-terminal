@@ -56,11 +56,46 @@ agent.send(tabId, {
 - Target `tabId`, cwd, connection, session/execution identities and provider prefs are not message
   fields. Config edits use `{configEdit:{key,value}}` instead of `inputMessage`, never both.
 - Existing queue snapshots remain `{clientMsgId,state}`. Renderer submissions project the factory
-  `msgId` into `clientMsgId`; internal callers retain direct history mirroring without an optimistic
-  queue projection. `send` still returns its existing execution-lifecycle boolean, not an acceptance
-  ACK. There is no new timeout, retry, deduplication or durable-queue guarantee.
+  `msgId` into `clientMsgId`; internal callers use the same correlation but retain direct history
+  mirroring. Main filters mirrored inputs from renderer optimistic projection, not from receipt
+  processing. All message Callers use the common Sender; submission and execution completion
+  have separate lifetimes. There is no retry, cross-execution deduplication or durable-queue guarantee.
 - User history may carry optional `inputMessage` metadata alongside its existing render fields.
   Preview images remain renderer-local; old rows without metadata remain readable.
+
+### Submission result
+
+Authoritative types/constants: `src/shared/agent-submission.ts`. Message submission returns
+`Promise<SubmissionResult>` as a serializable Result, not an execution-completion boolean:
+
+```ts
+{ ok: true }
+// or
+{ ok: false, error: { code: 'confirmation_timeout', message: '...' } }
+```
+
+Success means an exec queue snapshot contained this View's `msgId`, either queued or directly
+running. Writing the send frame alone is not confirmation. Success does not promise provider
+completion, a final reply or persistence. Main keeps consuming execution control after returning;
+session content remains independently deliverable, including after execution idle.
+
+Error codes are `invalid_input`, `target_missing`, `forbidden`, `duplicate_submission`,
+`not_sent`, `unconfirmed` and `confirmation_timeout`. Callers handle errors and presentation;
+Sender does not emit a UI alert, Telegram notification or delegation state change.
+`unconfirmed` means the execution ended after write without a queue receipt; a ten-second wait
+without receipt returns `confirmation_timeout`. These errors may mean delivery occurred, so they
+must not authorize automatic resend or deletion of a possibly accepted optimistic input.
+An active duplicate id is rejected without executing again; it does not erase the original input.
+This active-id guard is not a general idempotency guarantee.
+
+Timeout ends only the submission wait, not execution. Late receipts notify registered consumers
+independently without rewriting the earlier Result. Receipt tracking ends at execution settlement
+or logical View closure; timers are cleared. Internal projections remain filtered for the reader's
+lifetime. Renderer callers use existing snapshots to reconcile optimistic chips; error notices
+are historical submission errors, not a new persistent delivery-state UI.
+
+`configEdit` is not a message: it retains the existing queued execution-completion boolean,
+without a message id or receipt wait. Its separate session-control redesign is not implied here.
 
 ## Slash command dispatch
 
