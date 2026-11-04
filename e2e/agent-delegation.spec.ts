@@ -109,9 +109,19 @@ test.describe('worktree Agent delegation', () => {
     await spike(); await sendAgentPrompt(page, 'text:worker remains usable');
     await expect(page.locator('.agent-messages:visible')).toContainText('worker remains usable');
   });
-  test('picker cancellation and closing a View protect uncollected results', async () => {
+  test('picker cancellation and closing a View protect uncollected results', async ({}, testInfo) => {
     await sendAgentPrompt(page, 'delegation_select');
-    await page.getByRole('dialog', { name: 'Select delegated Agent' }).getByRole('button', { name: 'Cancel', exact: true }).click();
+    const picker = page.getByRole('dialog', { name: 'Select delegated Agent' });
+    await expect(picker.locator('.settings-header')).toHaveText('Select worktree Agent');
+    await expect(picker.locator('.delegation-requester')).toContainText('Requested by');
+    await expect(picker.locator('.delegation-requester')).toContainText('Delegation Base');
+    await expect(picker.locator('.delegation-picker-note')).toContainText('until the delegation is stopped');
+    await expect(picker.locator('.delegation-target')).toHaveCSS('border-top-style', 'solid');
+    await expect(picker.locator('.delegation-provider')).toHaveText('claude');
+    await expect(picker.locator('.delegation-target-path')).toContainText('/spike');
+    await expect(picker.locator('.project-edit-footer').getByRole('button', { name: 'Cancel', exact: true })).toBeVisible();
+    await picker.screenshot({ path: testInfo.outputPath('delegation-picker.png') });
+    await picker.getByRole('button', { name: 'Cancel', exact: true }).click();
     await expect(page.locator('.agent-messages:visible')).toContainText('"cancelled":true');
     await expect(panel()).toHaveCount(0);
     await selectAndStart();

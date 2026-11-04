@@ -5613,6 +5613,20 @@ button {
 .delegation-stop { margin-left: 8px; color: #f38ba8; border-color: color-mix(in srgb, #f38ba8 35%, var(--border)); }
 .delegation-stop:hover:not(:disabled) { background: color-mix(in srgb, #f38ba8 12%, var(--bg)); border-color: #f38ba8; }
 .delegation-error { color: var(--warning-color, #e9b45b); margin-bottom: 6px; }
-.delegation-picker { width: min(620px, 90vw); max-height: 80vh; overflow: auto; background: var(--bg-color, #252525); color: var(--text-color, #ddd); padding: 20px; border: 1px solid var(--border-color, #555); border-radius: 8px; }
-.delegation-target { display: block; width: 100%; margin: 8px 0; padding: 10px; text-align: left; overflow-wrap: anywhere; }
-.delegation-target:disabled { opacity: .5; }
+.delegation-picker { width: min(620px, 90vw); max-height: 80vh; display: flex; flex-direction: column; overflow: hidden; background: var(--bg); color: var(--text); font-size: 13px; border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 32px rgba(0, 0, 0, .4); }
+.delegation-picker > .settings-header, .delegation-picker > .project-edit-footer { flex-shrink: 0; }
+.delegation-picker-body { padding: 16px; min-height: 0; overflow-y: auto; }
+.delegation-picker-label { font-size: 11px; font-weight: 600; color: var(--text-muted); margin-bottom: 6px; }
+.delegation-requester { padding: 10px 12px; border-radius: 5px; background: var(--bg-secondary); overflow-wrap: anywhere; }
+.delegation-picker-note { margin: 10px 0 20px; color: var(--text-muted); font-size: 12px; line-height: 1.5; }
+.delegation-targets { display: flex; flex-direction: column; gap: 8px; }
+.delegation-target { display: flex; flex-direction: column; gap: 6px; width: 100%; padding: 12px; border: 1px solid var(--border); border-radius: 5px; background: var(--bg-secondary); text-align: left; overflow-wrap: anywhere; }
+.delegation-target:hover:not(:disabled) { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--bg-secondary)); }
+.delegation-target:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.delegation-target-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
+.delegation-target-heading > strong { flex: 1; min-width: 0; }
+.delegation-provider { flex-shrink: 0; padding: 2px 6px; border-radius: 4px; background: var(--surface); color: var(--text-muted); font-size: 11px; }
+.delegation-target-path { color: var(--text-muted); font-size: 11px; line-height: 1.5; }
+.delegation-target-reason { color: var(--warning, #e5b75b); font-size: 12px; }
+.delegation-target:disabled { opacity: .5; cursor: not-allowed; }
+.delegation-picker-empty { padding: 16px 12px; color: var(--text-muted); border: 1px dashed var(--border); border-radius: 5px; }

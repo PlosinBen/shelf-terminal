@@ -36,15 +36,24 @@ export function DelegationTargetPicker() {
   const request = useDelegations().pickers[0];
   if (!request) return null;
   const choose = (target: typeof request.caller | null) => emitAgent(D.EVENT.SELECT, { requestId: request.requestId, target });
-  return <div className="web-perm-overlay"><div className="delegation-picker" role="dialog" aria-label="Select delegated Agent">
-    <h3>Select worktree Agent</h3>
-    <p>{request.caller.projectName} / {request.caller.displayName} is requesting a collaborator.</p>
-    <p>Your selection authorizes this main View to delegate work to the selected View until stopped.</p>
-    {request.candidates.length === 0 && <p>No worktree Agent Views are open.</p>}
-    {request.candidates.map(({ view, unavailableReason }) => <button className="delegation-target" key={view.tabId} disabled={!!unavailableReason} onClick={() => choose(view)}>
-      <strong>{view.projectName} / {view.displayName}</strong><br />{view.provider} · {view.cwd}
-      {unavailableReason && <span> · {unavailableReason}</span>}
-    </button>)}
-    <button onClick={() => choose(null)}>Cancel</button>
+  return <div className="web-perm-overlay"><div className="delegation-picker" role="dialog" aria-modal="true" aria-label="Select delegated Agent">
+    <div className="settings-header">Select worktree Agent</div>
+    <div className="delegation-picker-body">
+      <div className="delegation-requester">
+        <div className="delegation-picker-label">Requested by</div>
+        <strong>{request.caller.projectName} / {request.caller.displayName}</strong>
+      </div>
+      <p className="delegation-picker-note">Selecting an Agent authorizes this main View to delegate work to it until the delegation is stopped.</p>
+      <div className="delegation-picker-label">Available worktree Agents</div>
+      <div className="delegation-targets">
+        {request.candidates.length === 0 && <p className="delegation-picker-empty">No worktree Agent Views are open.</p>}
+        {request.candidates.map(({ view, unavailableReason }) => <button className="delegation-target" key={view.tabId} disabled={!!unavailableReason} onClick={() => choose(view)}>
+          <span className="delegation-target-heading"><strong>{view.projectName} / {view.displayName}</strong><span className="delegation-provider">{view.provider}</span></span>
+          <span className="delegation-target-path">{view.cwd}</span>
+          {unavailableReason && <span className="delegation-target-reason">{unavailableReason}</span>}
+        </button>)}
+      </div>
+    </div>
+    <div className="project-edit-footer"><button className="conn-btn conn-btn-cancel" onClick={() => choose(null)}>Cancel</button></div>
   </div></div>;
 }
