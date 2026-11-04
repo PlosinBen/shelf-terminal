@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
+import { AGENT_INPUT_SOURCE, AGENT_REPLY_REQUIREMENT, createAgentInputMessage } from '@shared/agent-input';
 import * as serverLogger from '../../server-logger';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -18,6 +19,21 @@ import { createShelfMcpLifecycle, ShelfMcpStartupError } from '../../shelf-mcp-l
 import { SHELF_MCP_FAILURE, SHELF_MCP_STATE } from '@shared/shelf-mcp';
 
 const COPILOT_AGENT_MODE_ID = 'https://agentclientprotocol.com/protocol/session-modes#agent';
+
+it('applies common reply requirements to ACP prompts and leaves native slashes intact', async () => {
+  const prompts: any[] = [];
+  const mock = createMockAcpAgent({ onPrompt: params => prompts.push(params) });
+  const backend = createCopilotBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
+  const built = createAgentInputMessage({ source: { kind: AGENT_INPUT_SOURCE.TELEGRAM }, content: 'original', replyRequirement: AGENT_REPLY_REQUIREMENT.BRIEF_PLAIN_TEXT });
+  if (!built.ok) throw new Error(built.error);
+  try {
+    await backend.query({ prompt: 'original', inputMessage: built.message, cwd: '/repo' }, () => {});
+    expect(prompts[0].prompt).toContainEqual({ type: 'text', text: expect.stringContaining('original\n\n[System note:') });
+    await backend.query({ prompt: '/mcp', inputMessage: { ...built.message, content: '/mcp' }, cwd: '/repo' }, () => {});
+    expect(prompts[1].prompt).toContainEqual({ type: 'text', text: '/mcp' });
+    expect(built.message.content).toBe('original');
+  } finally { backend.dispose(); }
+});
 
 it('keeps ACP sessions usable after authorization failure without a legacy shelf replacement', async () => {
   const sessions: any[] = [];

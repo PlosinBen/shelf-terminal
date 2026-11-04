@@ -1,5 +1,4 @@
-import type { AgentAttachment, AgentInitStatus, AgentLoginPrompt, AgentLoginResult, AgentQueueItem, Connection, TaskEvent } from '../../shared/types';
-import type { ConfigEditKey } from '../../shared/config-ack';
+import type { AgentInitStatus, AgentLoginPrompt, AgentLoginResult, AgentQueueItem, Connection, TaskEvent } from '../../shared/types';
 import { on, emit } from './bus';
 import { SHELF_MCP, type ShelfMcpStatus } from '../../shared/shelf-mcp';
 
@@ -46,18 +45,7 @@ export interface AgentEventMap {
     sessionId?: string;
     opts?: Record<string, unknown>;
   };
-  'agent:send': {
-    tabId: string;
-    text: string;
-    images?: string[];
-    attachments?: AgentAttachment[];
-    /** Structured config edit (picker / status-bar). When set, text is empty
-     *  and no user echo is written — the provider applies it + emits a divider. */
-    configEdit?: { key: ConfigEditKey; value: string };
-    /** Renderer-minted correlation key (crypto.randomUUID at submit). Threaded
-     *  to agent-server so its queue snapshot can echo it back. */
-    clientMsgId?: string;
-  };
+  'agent:send': { tabId: string } & import('../../shared/agent-input').AgentInputRequest;
   'agent:stop': { tabId: string };
   /** Cancel a specific not-yet-running queued message by clientMsgId. */
   'agent:cancelQueued': { tabId: string; clientMsgId: string };

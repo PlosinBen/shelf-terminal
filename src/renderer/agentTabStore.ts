@@ -1,4 +1,5 @@
 import type { AgentInitRecovery } from '@shared/agent-init-recovery';
+import type { AgentInputMessage } from '@shared/agent-input';
 import { AGENT_EXIT_INTERRUPTED_LABEL } from '@shared/app-exit';
 import { useSyncExternalStore } from 'react';
 import type { AgentMsg } from './components/AgentMessage';
@@ -715,6 +716,7 @@ export function enqueuePendingSend(
   content: string,
   images?: string[],
   files?: AgentFile[],
+  inputMessage?: AgentInputMessage,
 ) {
   update(tabId, (prev) => ({
     ...prev,
@@ -722,6 +724,7 @@ export function enqueuePendingSend(
       ...prev.pendingSends,
       {
         clientMsgId,
+        ...(inputMessage ? { inputMessage } : {}),
         content,
         ...(images && images.length > 0 ? { images } : {}),
         ...(files && files.length > 0 ? { files } : {}),
@@ -764,6 +767,7 @@ export function applyQueueSnapshot(tabId: string, items: AgentQueueItem[]) {
       id: `user-${p.clientMsgId}`,
       type: 'user',
       content: p.content,
+      ...(p.inputMessage ? { inputMessage: p.inputMessage } : {}),
       timestamp: Date.now(),
       ...(p.images && p.images.length > 0 ? { images: p.images } : {}),
       ...(p.files && p.files.length > 0 ? { files: p.files } : {}),

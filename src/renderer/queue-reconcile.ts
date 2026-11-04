@@ -1,4 +1,5 @@
 import type { AgentFile, AgentQueueItem } from '../shared/types';
+import type { AgentInputMessage } from '../shared/agent-input';
 
 /**
  * Pure reconcile logic for the server-owned send queue (renderer side).
@@ -29,6 +30,7 @@ import type { AgentFile, AgentQueueItem } from '../shared/types';
  *     queue). v1: drop. See message-queue-ownership "reconnect" section.
  */
 export interface PendingSend {
+  inputMessage?: AgentInputMessage;
   clientMsgId: string;
   content: string;
   images?: string[];

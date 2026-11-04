@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useContext } from 'react';
+import type { AgentInputMessage } from '@shared/agent-input';
 import { AGENT_EXIT_INTERRUPTED_LABEL } from '@shared/app-exit';
 import { AgentDisplayContext } from './agent/AgentDisplayContext';
 import { renderMarkdown } from '../utils/markdown';
@@ -40,7 +41,7 @@ export type AgentMsg = {
   | (FoldBase & { type: 'fold_code';     body?: { content: string } })
   | (FoldBase & { type: 'fold_markdown'; body?: { content: string } })
   | (FoldBase & { type: 'fold_diff';     body?: { diff: { oldString: string; newString: string } } })
-  | { type: 'user'; content: string; images?: string[]; files?: AgentFile[] }
+  | { type: 'user'; content: string; images?: string[]; files?: AgentFile[]; inputMessage?: AgentInputMessage }
 );
 
 function truncateLines(text: string, max: number): { lines: string[]; remaining: number } {

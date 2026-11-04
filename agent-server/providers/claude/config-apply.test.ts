@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { OutgoingMessage } from '../types';
+import { AGENT_INPUT_SOURCE, AGENT_REPLY_REQUIREMENT, createAgentInputMessage } from '@shared/agent-input';
+const modelInputs: any[] = [];
 
 const sdk = vi.hoisted(() => ({ query: vi.fn() }));
 vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
@@ -14,11 +16,13 @@ import { createClaudeBackend } from './index';
 let backend: ReturnType<typeof createClaudeBackend>;
 const sessions: Array<{ options: any; setModel: ReturnType<typeof vi.fn>; setPermissionMode: ReturnType<typeof vi.fn>; close: ReturnType<typeof vi.fn> }> = [];
 beforeEach(() => {
+  modelInputs.length = 0;
   sessions.length = 0;
   sdk.query.mockImplementation(({ prompt, options }) => {
     async function* messages() {
       if (typeof prompt === 'string') { yield { type: 'system', subtype: 'init', session_id: 'probe' }; return; }
       for await (const _user of prompt) {
+        modelInputs.push(_user);
         yield { type: 'system', subtype: 'init', session_id: 'live-session' };
         yield { type: 'result', subtype: 'success', session_id: 'live-session' };
       }
@@ -38,6 +42,18 @@ async function warm() {
   await backend.gatherCapabilities!('/tmp', undefined, undefined, { model: 'old', effort: 'low', permissionMode: 'default' });
   await backend.query({ prompt: 'first', cwd: '/tmp' }, () => {});
 }
+
+it('applies common reply guidance only to the model input, not config slashes', async () => {
+  const built = createAgentInputMessage({ source: { kind: AGENT_INPUT_SOURCE.TELEGRAM }, content: 'original', replyRequirement: AGENT_REPLY_REQUIREMENT.BRIEF_PLAIN_TEXT });
+  if (!built.ok) throw new Error(built.error);
+  await backend.query({ prompt: built.message.content, inputMessage: built.message, cwd: '/tmp' }, () => {});
+  expect(modelInputs.at(-1).message.content).toContain('original\n\n[System note:');
+  expect(built.message.content).toBe('original');
+  const count = modelInputs.length;
+  await backend.query({ prompt: '  /model new  ', inputMessage: { ...built.message, content: '  /model new  ' }, cwd: '/tmp' }, () => {});
+  expect(sessions[0].setModel).toHaveBeenCalledWith('new');
+  expect(modelInputs).toHaveLength(count);
+});
 
 it('applies live model edits to the SDK before reporting success', async () => {
   await warm();

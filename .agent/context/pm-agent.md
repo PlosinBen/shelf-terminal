@@ -197,7 +197,7 @@ related:
 User 用 slash command 切 mode：`/pm` / `/use_<alias>` / `/projects` / `/mode`。Alias 從 project name derive（移除非英數 + lower case），動態 register 進 `setMyCommands` 讓 Telegram 提供 autocomplete。
 
 跨 process plumbing 走兩個 internal API（`src/main/agent/index.ts`）：
-- `sendFromInternal(tabId, prompt)` — 同 IPC `AGENT_SEND` path、不經 renderer。會額外 emit 一則 `{type:'user', content:prompt}` 進 IPC.AGENT_MESSAGE 讓 renderer 把使用者氣泡也加進歷史（bridge 是 forwarder，不該讓 agent view 漏掉訊息）
+- `sendFromInternal(tabId, message)` — 接收 factory 建立的共通 Message，同 IPC `AGENT_SEND` 後續流程、不經 renderer。額外 emit `{type:'user', msgId:message.msgId, content:message.content, inputMessage:message}` 進 IPC.AGENT_MESSAGE，保留既有直接歷史鏡像，不新增 optimistic queue projection。
 - `registerOutputObserver(fn)` — 訂閱**所有 tab** outgoing AgentEvent 流，handler signature 為 `(tabId, event) => void`，由 caller 自己過濾。Bridge 在 boot 註冊一次（`initTelegramBridge`）永不解綁，handler 內部用 `mode === 'agent' && mode.tabId === tabId` gate 是否處理
 - 配套 `stopFromInternal` / `listAgentTabs` / `getAgentProvider` 給 telegram bridge enumerate / 模式切換用
 
@@ -207,7 +207,7 @@ User 用 slash command 切 mode：`/pm` / `/use_<alias>` / `/projects` / `/mode`
 
 **Loading 指示走 typing chat action（非 placeholder edit）**：turn 進行中，`handleAgentEvent` 在 mode gate 後呼叫 `maybeSendTyping()` → 送 Telegram `sendChatAction(typing)`，聊天室 header 顯示「正在輸入…」。**event-driven + 時間戳 throttle**（每 4s 最多一次，indicator 自身 ~5s 過期）：沒有 timer 生命週期要 start/stop/cleanup，事件停了 indicator 自然消失，flush 送 reply 時 Telegram 也會自動清掉 typing。`flushAgentReply` 維持單純 `sendMessage`（>4096 由 `splitMessage` 兜）。**曾評估過 placeholder→`editMessageText` 覆蓋**（⏳ 訊息原地變 reply，更貼近「覆蓋 loading」），但 edit 路徑要處理 overflow 拆段 + Markdown parse 400 fallback + pending id 生命週期，複雜度不值；typing 是 Telegram bot 慣用法、code 單純很多。
 
-**Telegram-relayed prompt 加 channel hint（no-markdown + 壓長度）**：agent mode 下 `routeMessageToAgent` 把 `TELEGRAM_BRIEF_HINT` append 到送給 agent 的 prompt。Hint 處理**兩個同源限制**（都是「對面是 Telegram 手機」）：(1) **純文字** —— Telegram 這條不 render rich text，叫 agent 別輸出 Markdown（`**` `_` `#` `` ` `` code fence / table）；(2) **短** —— 螢幕 + 4096 限制，多議題時**只列 topic 標題、讓使用者主動問哪個展開**，別一次全講；長 code/output 說「see Shelf」不要貼。Hint **只注入 agent context** —— `sendFromInternal(tabId, prompt, displayText)` 第三參數讓 Shelf 的 user 泡泡 mirror **原文**，hint 不漏進 UI。理由：bridge 唯一能影響 agent 行為的槓桿就是 user-turn 文字（CLI agent 是獨立 process、碰不到它的 system prompt），等同 `pm-agent#8` PM 的 per-turn reminder。
+**Telegram 回覆要求（純文字＋簡短）**：Telegram Caller 使用共通 factory 建立原文 Message，明確指定 `brief-plain-text`，不提前拼接提示或另外提供 displayText。共通指示要求不使用 Markdown、多議題先列標題供使用者選擇、長篇 code/output 改提示「see Shelf」；provider 判別原始 slash 後，才在模型輸入邊界套用，避免提示成為指令參數。history 保留原文與結構化要求，Sender 不依 Telegram 來源加工。這是軟性指示，不取代 Telegram 純文字發送與 4096 分段；不修改 Agent 持久設定。見 `agent-config-flow#15`。
 
 **送出端配合 no-markdown（原則：agent-originated text 一律 plain）**：凡是承載 **agent/provider 產生的 freeform 文字**的送出都走 `sendMessage(text, { plain: true })` → **不帶 `parse_mode`**：agent reply（`flushAgentReply`）、agent error（`❌ ${m.content}`）、provider error（`❌ ${event.error}`）。雙保險：hint 叫 agent 別產生 markdown，送出端就算 agent 沒遵守（或純文字含 snake\_case / `*`）也不會觸發 Telegram 400 把整則吞掉（舊行為：400 只 log、使用者收不到）。**我們自己組的固定字串維持 `parse_mode: 'Markdown'`**：PM reply、system note、escalation、`🔒 permission`（toolName 用 `` ` `` 包，code span 內 `_`/`*` 在 legacy Markdown 是字面、不會 400）、`❓ picker`（純靜態字串）。**soft nudge 不是硬上限** —— plain send + `splitMessage` 4096 兜底保留；只有 telegram 來的 turn 加 hint，Shelf 直接打字的 turn 不受影響。
 

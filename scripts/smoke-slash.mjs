@@ -10,6 +10,7 @@
  * Run (after `node agent-server/build.mjs`): node scripts/smoke-slash.mjs
  */
 import { spawn } from 'node:child_process';
+import { canonicalSmokeFrame } from './agent-input.mjs';
 import { createInterface } from 'node:readline';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -31,7 +32,7 @@ rl.on('line', (line) => {
   if (m.type === 'permission_request') send({ type: 'resolve_permission', toolUseId: m.toolUseId, allow: true });
   for (const w of waiters) w(m);
 });
-const send = (o) => proc.stdin.write(JSON.stringify(o) + '\n');
+const send = (o) => proc.stdin.write(JSON.stringify(canonicalSmokeFrame(o)) + '\n');
 const idle = (tid) => (m) => m.type === 'status' && m.state === 'idle' && m.executionId === tid;
 const waitFor = (pred, ms = 90000) => new Promise((res) => {
   if (lines.find(pred)) return res(true);

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { AgentAttachment, Connection } from '@shared/types';
+import { AGENT_INPUT_SOURCE, createAgentInputMessage } from '@shared/agent-input';
 import { CODEX_PROVIDER, COPILOT_PROVIDER } from '@shared/agent-providers';
 import { parseSlashPrefix } from '@shared/slash-prefix';
 import { useStore, setChatStage } from '../../store';
@@ -96,7 +97,7 @@ interface Props {
  * agentTabStore via useAgentTab.
  *
  * Outbound: every submission EAGER-sends 'agent:send' immediately with a
- * renderer-minted `clientMsgId` (no client-side queueing / execution-boundary
+ * factory-created `msgId` projected as `clientMsgId` (no client-side queueing / execution-boundary
  * guessing — agent-server owns the queue). The submission also records an
  * optimistic pending chip (enqueuePendingSend); the server's queue snapshot
  * promotes it into the timeline when its execution runs. Config slashes: with-arg
@@ -241,8 +242,8 @@ export function InputZone({ tabId, projectId, cwd, connection, visible, rootRef 
   const { filteredCommands, allCommandNames } = useSlashCommands(capabilities, slashFilter);
 
   const handleSend = useCallback(() => {
-    const text = input.trim();
-    if (!text && pendingFiles.length === 0 && pendingImages.length === 0) return;
+    const text = input;
+    if (!text.trim() && pendingFiles.length === 0 && pendingImages.length === 0) return;
     // Locked until init 'ready' — don't emit, don't queue. Belt-and-suspenders:
     // the textarea is also disabled when !initReady, so Enter can't reach here.
     if (!initReady) return;
@@ -257,7 +258,7 @@ export function InputZone({ tabId, projectId, cwd, connection, visible, rootRef 
     // renderer persists through the project mutation boundary into canonical
     // `Project.agentViews[sessionId].prefs` (`Project` is defined by `@shared/projects`) when
     // capabilities reports the new value (see AgentView's persist effect).
-    const slash = parseSlashPrefix(text);
+    const slash = parseSlashPrefix(text.trim());
     const pickerKey = slash ? OPTIONED_SLASHES[slash.cmd] : undefined;
     if (slash && pickerKey && !slash.args) {
       setInput('');
@@ -272,24 +273,28 @@ export function InputZone({ tabId, projectId, cwd, connection, visible, rootRef 
     const files = pendingFiles;
     const images = historyImagePreviews(pendingImages);
     const attachments = backendAttachments(files, pendingImages);
+    const built = createAgentInputMessage({ source: { kind: AGENT_INPUT_SOURCE.AGENT_VIEW }, content: text, attachments });
+    if (!built.ok) {
+      console.error('Agent input creation failed', { tabId, error: built.error });
+      void window.shelfApi.dialog.warn('Cannot send message', built.error);
+      return;
+    }
     setInput('');
     setPendingFiles([]);
     setPendingImages([]);
     setShowSlashMenu(false);
 
-    // Eager send: emit immediately with a renderer-minted clientMsgId — no
+    // Eager send: project the factory message ID into the existing clientMsgId — no
     // client-side queueing or execution-boundary guessing. agent-server owns the
     // queue; it echoes the clientMsgId in the queue snapshot. The optimistic
     // pending chip (enqueuePendingSend) shows instantly; the snapshot promotes
     // it into the timeline when its execution runs. Preview images stay renderer-local
     // for history; provider-bound payload uses uploaded attachments.
-    const clientMsgId = crypto.randomUUID();
-    enqueuePendingSend(tabId, clientMsgId, text, images, files.length > 0 ? files : undefined);
+    const message = built.message;
+    enqueuePendingSend(tabId, message.msgId, text, images, files.length > 0 ? files : undefined, message);
     emitAgent('agent:send', {
       tabId,
-      text,
-      attachments,
-      clientMsgId,
+      inputMessage: message,
     });
   }, [tabId, input, pendingFiles, pendingImages, stagingImages, initReady]);
 

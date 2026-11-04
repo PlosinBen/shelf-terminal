@@ -1,4 +1,5 @@
 import { isWorktreeUnavailable } from '@shared/worktree';
+import { AGENT_INPUT_SOURCE, createAgentInputMessage } from '@shared/agent-input';
 import { useEffect, useState } from 'react';
 import { projectDisplayLabel, useStore } from '../store';
 import { on, emit, emitAgent, Events } from '../events';
@@ -114,9 +115,10 @@ export function WorktreeCloseGate() {
     if (!agentTabId || !error) return;
     const verb = isAbandon ? 'abandon' : 'finish';
     const text = `The worktree ${verb} failed with this error:\n\n${error}\n\nPlease resolve it here in this worktree, then I'll try again.`;
-    const clientMsgId = crypto.randomUUID();
-    enqueuePendingSend(agentTabId, clientMsgId, text);
-    emitAgent('agent:send', { tabId: agentTabId, text, clientMsgId });
+    const built = createAgentInputMessage({ source: { kind: AGENT_INPUT_SOURCE.AGENT_VIEW }, content: text });
+    if (!built.ok) { console.error('Worktree input creation failed', built.error); return; }
+    enqueuePendingSend(agentTabId, built.message.msgId, text, undefined, undefined, built.message);
+    emitAgent('agent:send', { tabId: agentTabId, inputMessage: built.message });
     close();
   };
 

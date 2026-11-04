@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { CODEX_PROVIDER } from '@shared/agent-providers';
+import { AGENT_INPUT_SOURCE, AGENT_REPLY_REQUIREMENT, createAgentInputMessage } from '@shared/agent-input';
 import { CODEX_AUTH_DISPLAY_NAME } from '../codex-shared/auth';
 import { createCodexBackend } from './index';
 import type { LoginRpc } from '../codex-shared/app-server-login';
@@ -176,6 +177,17 @@ function restoreContext(lastSdkSessionId: string) {
 }
 
 describe('Codex official app-server backend lifecycle', () => {
+  it('uses common reply requirements at turn/start without modifying the message', async () => {
+    const app = new FakeAppServer();
+    const backend = createCodexBackend({ createAppServer: () => app });
+    const built = createAgentInputMessage({ source: { kind: AGENT_INPUT_SOURCE.TELEGRAM }, content: 'original', replyRequirement: AGENT_REPLY_REQUIREMENT.BRIEF_PLAIN_TEXT });
+    if (!built.ok) throw new Error(built.error);
+    try {
+      await backend.query({ prompt: built.message.content, inputMessage: built.message, cwd: '/repo' }, () => {});
+      expect(app.calls.find(call => call.method === 'turn/start')?.params).toMatchObject({ input: [expect.objectContaining({ type: 'text', text: expect.stringContaining('original\n\n[System note:') })] });
+      expect(built.message.content).toBe('original');
+    } finally { backend.dispose(); }
+  });
   let serverLogs: ServerLogMessage[];
 
   beforeEach(() => {

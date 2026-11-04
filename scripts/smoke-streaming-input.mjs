@@ -8,6 +8,7 @@
  * Run (after `node agent-server/build.mjs`):  node scripts/smoke-streaming-input.mjs
  */
 import { spawn } from 'node:child_process';
+import { canonicalSmokeFrame } from './agent-input.mjs';
 import { createInterface } from 'node:readline';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -34,7 +35,7 @@ rl.on('line', (line) => {
   for (const w of waiters) w(m);
 });
 
-const send = (o) => proc.stdin.write(JSON.stringify(o) + '\n');
+const send = (o) => proc.stdin.write(JSON.stringify(canonicalSmokeFrame(o)) + '\n');
 const waitFor = (pred, ms = 120000) => new Promise((res, rej) => {
   const found = lines.find(pred);
   if (found) return res(found);

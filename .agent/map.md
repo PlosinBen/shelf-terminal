@@ -130,6 +130,7 @@ title: shelf-terminal — Intent → File Index
 |--------|------|------|
 | Role-split entry point | `index.ts` | 薄 entrypoint：讀 `--role`，dynamic-import `./exec`（預設）或 `./dispatcher`。lazy import → dispatcher role 永不載入 provider/SDK（保持 thin） |
 | Execution proc（per session） | `exec.ts` | 原 agent-server 主體：stdin/stdout JSON line protocol + dispatch to Claude/Copilot + context persistence。在 dispatcher 下以 `--sid` spawn，outbound 全蓋自己的 `sid`；含 model-cache client（cache_get/put 側通道） |
+| 共通輸入 prompt 準備 | `input-prompt.ts` | 指令判讀正規化與每訊息回覆指示轉換，保留原始 Message |
 | 主機 dispatcher（per host broker） | `dispatcher.ts` | 薄 per-host broker：`sid` 路由/relay（串流 opaque pass-through，只 peek pong/cache_）、open/close_session、兩層 health 的 inner-ping、supervisor（exec 死→reconnect + backoff）、per-host model cache 側通道。**不 import provider/SDK** |
 | Dispatcher/exec memory reporting | `memory-report.ts` | source-owned process snapshot、role attribution、success/error report 與 10 秒初始排程 |
 | Model/caps cache（泛型 TTL） | `model-cache.ts` | `createModelCache({ttlMs})`：泛型 TTL 儲存，過期即 evict（cache-aside 的被動 store，見 `context/agent-config-flow`） |
@@ -272,6 +273,7 @@ title: shelf-terminal — Intent → File Index
 | Intent | File | Role |
 |--------|------|------|
 | 通用型別 | `types.ts` | Connection / AppSettings / PM types 與非 project-domain shared payloads |
+| 共通 Agent 輸入 | `agent-input.ts` | Message／source／replyRequirement、factory 與跨 process 純驗證 |
 | Canonical project contract | `projects.ts` | `Project` / `ProjectCreateInput` / `ProjectDeleteResult` / readonly helper |
 | Project mutation contracts and draft comparison | `project-mutations.ts` | Named mutation tags、editable fields、result 與 changed-field structural comparison |
 | Agent preference report comparison | `agent-pref-report.ts` | Shelf capability report 與 saved prefs 的純比較，保留 native confirmed-patch 邊界 |
@@ -333,6 +335,7 @@ title: shelf-terminal — Intent → File Index
 | Intent | File | Role |
 |--------|------|------|
 | E2E helpers | `e2e/helpers.ts` | Playwright fixture、per-worker tempdir userData 隔離、agent helper（預設 `SHELF_TEST_MODE=1`） |
+| 手動 Agent probe 輸入 adapter | `scripts/agent-input.mjs` | 以 esbuild 載入正式 factory，為 bundle smoke／spike 建立共通 Message |
 | E2E 測試 | `e2e/agent-picker.spec.ts` | Picker_request 全鏈（single/multi/cancel/free-text），fake provider |
 | E2E 測試 | `e2e/agent-flows.spec.ts` | permission / stream / fold 卡片 / auth_required / 互動 device-flow 登入（button→code→cancel）/ error / Esc stop，fake provider |
 | E2E 測試 | `e2e/app-startup.spec.ts` | App 啟動、sidebar 驗證 |

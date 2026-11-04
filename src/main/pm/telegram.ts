@@ -1,4 +1,5 @@
 import os from 'os';
+import { AGENT_INPUT_SOURCE, AGENT_REPLY_REQUIREMENT, createAgentInputMessage } from '@shared/agent-input';
 import { net } from 'electron';
 import { log } from '@shared/logger';
 import type { TabInferredState, TelegramConfig } from '@shared/types';
@@ -26,21 +27,8 @@ const API = 'https://api.telegram.org/bot';
 const POLL_TIMEOUT = 30; // seconds (Telegram long poll)
 const MAX_MESSAGE_LENGTH = 4096;
 
-// Per-turn channel hint appended to Telegram-relayed prompts (agent mode).
-// Tells the agent it's replying into a phone chat so it adapts BOTH constraints
-// that share this root cause: (1) Telegram renders no rich text here, so emit
-// plain text; (2) screen + 4096-char limits, so stay short and list topics
-// instead of dumping everything. Injected into the AGENT context only — the
-// Shelf user bubble mirrors the original text (sendFromInternal's displayText
-// arg), so this never shows in the UI. Soft guidance; the plain-text send +
-// 4096 splitMessage still backstop a non-compliant reply.
-const TELEGRAM_BRIEF_HINT =
-  '\n\n[System note: your reply is delivered into a Telegram chat on a phone. ' +
-  'Plain text only — no Markdown (no **bold**, _italics_, # headings, `code`, code fences, tables); it will not render and just clutters the screen. ' +
-  'Keep it short. If the answer spans multiple topics or issues, just list the topic titles and let me ask which to expand — do not explain them all at once. ' +
-  'For long code or command output, say "see Shelf" instead of pasting it.]';
-
-// Mode 切換 + agent-view bridge — see pm-agent#12.
+// Per-message reply guidance is represented by the common replyRequirement.
+// Plain-text send and splitMessage still enforce Telegram transport limits.
 type Mode =
   | { type: 'pm' }
   | { type: 'agent'; tabId: string; projectName: string; provider: string };
@@ -585,11 +573,19 @@ async function routeMessageToAgent(text: string): Promise<void> {
   // Reset accumulator for the new turn — observer will fill it as `reply`
   // events flow and emit a flush when the turn ends.
   agentAccumulator.reset();
-  // Inject the brevity hint into the agent context, but mirror only the
-  // original text to Shelf (3rd arg) so the user bubble stays clean.
+  // Caller owns channel requirements; Sender does not inspect Telegram semantics.
   // sendFromInternal returns when the turn loop exits. Errors propagate
   // through the observer as AgentEvent.error — not as a rejected promise.
-  await sendFromInternal(mode.tabId, text + TELEGRAM_BRIEF_HINT, text);
+  const built = createAgentInputMessage({
+    source: { kind: AGENT_INPUT_SOURCE.TELEGRAM }, content: text,
+    replyRequirement: AGENT_REPLY_REQUIREMENT.BRIEF_PLAIN_TEXT,
+  });
+  if (!built.ok) {
+    log.error('telegram', `input creation failed tabId=${mode.tabId}: ${built.error}`);
+    await sendMessage('Could not create the message for the agent.');
+    return;
+  }
+  await sendFromInternal(mode.tabId, built.message);
 }
 
 /**

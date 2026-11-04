@@ -1,4 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { AGENT_INPUT_SOURCE, createAgentInputMessage } from '@shared/agent-input';
+
+function agentInput(content: string) {
+  const result = createAgentInputMessage({ source: { kind: AGENT_INPUT_SOURCE.AGENT_VIEW }, content });
+  if (!result.ok) throw new Error(result.error);
+  return { inputMessage: result.message };
+}
 import { spawn } from 'child_process';
 import * as fs from 'fs';
 import { EventEmitter } from 'events';
@@ -169,7 +176,7 @@ describe('remote backend', () => {
     vi.mocked(spawn).mockReturnValueOnce(child);
     const { createRemoteBackend } = await import('./remote');
     const backend = createRemoteBackend({ type: 'local' });
-    const iterator = backend.query('must not be delivered', '/tmp');
+    const iterator = backend.query(agentInput('must not be delivered'), '/tmp');
     const next = iterator.next();
     try {
       await vi.waitFor(() => expect(spawn).toHaveBeenCalled());
@@ -194,7 +201,7 @@ describe('remote backend', () => {
       undefined, undefined, undefined, undefined, undefined, undefined, vi.fn(), undefined, undefined,
       { read, onFailure: vi.fn() });
     const probe = backend.getCapabilities!('/tmp');
-    const drain = async (prompt: string) => { for await (const _event of backend.query(prompt, '/tmp')) { /* drain */ } };
+    const drain = async (prompt: string) => { for await (const _event of backend.query(agentInput(prompt), '/tmp')) { /* drain */ } };
     const first = drain('first');
     const second = drain('second');
     try {
@@ -203,7 +210,7 @@ describe('remote backend', () => {
       const reply = { type: 'capabilities', requestId: writes.find(m => m.type === 'get_capabilities').requestId };
       child.stdout.emit('data', Buffer.from(JSON.stringify(reply) + '\n'));
       await vi.waitFor(() => expect(writes.filter(m => m.type === 'send')).toHaveLength(2));
-      expect(writes.filter(m => m.type === 'send').map(m => m.prompt)).toEqual(['first', 'second']);
+      expect(writes.filter(m => m.type === 'send').map(m => m.inputMessage.content)).toEqual(['first', 'second']);
       for (const input of writes.filter(m => m.type === 'send')) {
         child.stdout.emit('data', Buffer.from(JSON.stringify({ type: 'status', state: 'idle', executionId: input.executionId }) + '\n'));
       }
@@ -249,7 +256,7 @@ describe('remote backend', () => {
       undefined, undefined, undefined, undefined, undefined, undefined, events, undefined, undefined,
       { read, onFailure: vi.fn() });
     async function sendAndFinish(fixture: ReturnType<typeof capabilitiesChild>) {
-      const done = (async () => { for await (const _event of backend.query('hello', '/tmp')) { /* drain */ } })();
+      const done = (async () => { for await (const _event of backend.query(agentInput('hello'), '/tmp')) { /* drain */ } })();
       await vi.waitFor(() => expect(fixture.writes.some(m => m.type === 'send')).toBe(true));
       const input = fixture.writes.find(m => m.type === 'send');
       expect(fixture.writes.filter(m => ['get_capabilities', 'send'].includes(m.type)).map(m => m.type)).toEqual(['get_capabilities', 'send']);
@@ -280,7 +287,7 @@ describe('remote backend', () => {
     const backend = createRemoteBackend({ type: 'local' }, undefined, 'codex', 'session',
       undefined, undefined, undefined, undefined, undefined, undefined, vi.fn(), undefined, undefined,
       { read: () => ({ intent: { model: 'retired' } }), onFailure: failure });
-    const iterator = backend.query('hello', '/tmp');
+    const iterator = backend.query(agentInput('hello'), '/tmp');
     try {
       const next = iterator.next();
       await vi.waitFor(() => expect(failure).toHaveBeenCalledTimes(1));

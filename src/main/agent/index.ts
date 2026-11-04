@@ -5,7 +5,8 @@ import { SHELF_MCP } from '@shared/shelf-mcp';
 import { log } from '@shared/logger';
 import { formatTabLogId } from '@shared/tab-id';
 import { providerLabel } from '@shared/agent-providers';
-import type { AgentPrefs, AgentSendOptions, Connection, AgentProvider } from '@shared/types';
+import type { AgentPrefs, Connection, AgentProvider } from '@shared/types';
+import { AGENT_INPUT_SOURCE, validateAgentInputRequest, type AgentInputMessage, type AgentInputRequest } from '@shared/agent-input';
 import type { AgentSessionState, AgentEvent, AgentBackend, PermissionResult, ProviderCapabilities } from './types';
 import { createRemoteBackend, syncSkillsForConnection } from './remote';
 import { loadSettings } from '../settings-store';
@@ -232,8 +233,13 @@ export function initAgentManager(windowGetter: () => BrowserWindow | null): void
   });
 
   ipcMain.handle(IPC.AGENT_SEND, async (_e, payload) => {
-    const { tabId, prompt, images, attachments, configEdit, clientMsgId } = payload;
-    return sendMessage(tabId, prompt, images, { attachments, configEdit, clientMsgId });
+    // Renderer can submit user input, never claim Telegram/Agent provenance.
+    const checked = validateAgentInputRequest(payload, AGENT_INPUT_SOURCE.AGENT_VIEW);
+    if (!checked.ok) {
+      log.error('agent', `input rejected tabId=${payload?.tabId} msgId=${payload?.inputMessage?.msgId}: ${checked.error}`);
+      return false;
+    }
+    return sendMessage(payload.tabId, checked.message, checked.message.inputMessage?.msgId);
   });
 
   ipcMain.handle(IPC.AGENT_STOP, async (_e, payload) => {
@@ -471,15 +477,27 @@ async function startSession(
 
 async function sendMessage(
   tabId: string,
-  prompt: string,
-  images?: string[],
-  options?: AgentSendOptions,
+  request: AgentInputRequest,
+  queueMessageId?: string,
 ): Promise<boolean> {
+  const checked = validateAgentInputRequest(request);
+  if (!checked.ok) {
+    log.error('agent', `input rejected tabId=${tabId}: ${checked.error}`);
+    send(IPC.AGENT_MESSAGE, tabId, { type: 'error', msgId: `input-error-${crypto.randomUUID()}`, content: checked.error });
+    return false;
+  }
   const session = sessions.get(tabId);
-  if (!session) return false;
+  if (!session) {
+    log.warn('agent', `input target missing tabId=${tabId} msgId=${checked.message.inputMessage?.msgId}`);
+    return false;
+  }
+  return executeMessage(tabId, session, checked.message, queueMessageId);
+}
+
+async function executeMessage(tabId: string, session: SessionInstance, input: AgentInputRequest, queueMessageId?: string): Promise<boolean> {
 
   const tag = `[agent:${formatTabLogId(tabId)}]`;
-  log.info('agent', `${tag} send promptLen=${(prompt ?? '').length}${options?.configEdit ? ` configEdit=${options.configEdit.key}` : ''}`);
+  log.info('agent', `${tag} send msgId=${input.inputMessage?.msgId ?? '-'} promptLen=${input.inputMessage?.content.length ?? 0}${input.configEdit ? ` configEdit=${input.configEdit.key}` : ''}`);
 
   // Activity: cancel any pending idle-teardown. If the tab was hibernated, the
   // backend.query() below transparently respawns + resumes from lastSdkSessionId.
@@ -504,12 +522,9 @@ async function sendMessage(
   };
 
   try {
-    for await (const event of session.backend.query(prompt, session.cwd, {
+    for await (const event of session.backend.query(input, session.cwd, {
       canUseTool,
-      images,
-      attachments: options?.attachments,
-      configEdit: options?.configEdit,
-      clientMsgId: options?.clientMsgId,
+      clientMsgId: queueMessageId,
     })) {
       // A per-execution `status` event is execution-lifecycle plumbing (it closes THIS
       // execution's generator), NOT a session-level signal. The renderer's streaming
@@ -753,7 +768,7 @@ export function isAgentTab(tabId: string): boolean {
 }
 
 /**
- * In-process equivalent of the AGENT_SEND IPC handler. Routes a prompt to an
+ * In-process equivalent of the AGENT_SEND IPC handler. Routes a message to an
  * existing agent session without going through renderer. Used by the Telegram
  * bridge in agent mode (see pm-agent#12).
  *
@@ -762,28 +777,32 @@ export function isAgentTab(tabId: string): boolean {
  * the observer stream as AgentEvent.error, not as a rejected promise).
  *
  * Mirrors a user-message bubble into the renderer's history before kicking
- * off the execution. The IPC path doesn't need this because InputZone upserts the
- * user bubble locally before emitting agent:send — but internal callers (the
+ * off the execution. The IPC path doesn't need this because InputZone records
+ * its user bubble via the existing optimistic queue projection — internal callers (the
  * Telegram bridge) bypass that, so without this mirror the renderer would
  * only see the agent reply with no record of what was asked. The bridge IS
  * just a forwarder, so the agent view should look identical to a direct send.
  */
 export async function sendFromInternal(
   tabId: string,
-  prompt: string,
-  displayText: string = prompt,
+  message: AgentInputMessage,
 ): Promise<boolean> {
-  if (!sessions.has(tabId)) return false;
-  // The Shelf user bubble mirrors `displayText` (the human-typed text); the
-  // agent receives `prompt`, which the telegram bridge augments with a hidden
-  // brevity hint. Keeping them separate stops the hint from leaking into the
-  // visible conversation.
+  if (!sessions.has(tabId)) {
+    log.warn('agent', `internal input target missing tabId=${tabId} msgId=${message?.msgId}`);
+    return false;
+  }
+  const checked = validateAgentInputRequest({ inputMessage: message });
+  if (!checked.ok) {
+    log.error('agent', `internal input rejected tabId=${tabId}: ${checked.error}`);
+    return false;
+  }
   send(IPC.AGENT_MESSAGE, tabId, {
     type: 'user',
-    msgId: `bridge-user-${Date.now()}`,
-    content: displayText,
+    msgId: message.msgId,
+    content: message.content,
+    inputMessage: message,
   });
-  return sendMessage(tabId, prompt);
+  return sendMessage(tabId, checked.message);
 }
 
 /** In-process equivalent of the AGENT_STOP IPC handler. */

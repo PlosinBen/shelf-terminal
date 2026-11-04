@@ -4,6 +4,7 @@ import { PERMISSION_CONTROL_STRATEGIES } from '@shared/permission-controls';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { inputPromptForDispatch, modelInputPrompt } from '../../input-prompt';
 import type { AgentAttachment, ProviderModel } from '@shared/types';
 import { parseSlashPrefix } from '@shared/slash-prefix';
 import { codexConfigHome, codexEnv, resolveCodexCliCommand } from '../codex-shared/runtime';
@@ -514,7 +515,7 @@ export function createCodexBackend(deps: CodexBackendDeps = {}): ServerBackend {
           return;
         }
 
-        const slash = parseSlashPrefix(input.prompt);
+        const slash = parseSlashPrefix(inputPromptForDispatch(input));
         if (slash && (slash.cmd === 'model' || slash.cmd === 'effort' || slash.cmd === 'permission')) {
           if (!slash.args) {
             send({ type: 'status', state: 'streaming' });
@@ -612,7 +613,7 @@ export function createCodexBackend(deps: CodexBackendDeps = {}): ServerBackend {
           const started = await client.request('turn/start', {
             threadId,
             clientUserMessageId: `shelf-${randomUUID()}`,
-            input: toCodexAppServerInput(input.prompt, input.images, input.attachments),
+            input: toCodexAppServerInput(modelInputPrompt(input), input.images, input.attachments),
             ...turnOverrides(input),
           });
           activeTurnId = stringValue(asRecord(asRecord(started)?.turn)?.id) ?? activeTurnId;

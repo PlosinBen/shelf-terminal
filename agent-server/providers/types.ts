@@ -278,6 +278,8 @@ export type OutgoingMessage = WireEnvelope & (
 export type SendFn = (msg: OutgoingMessage) => void;
 
 export interface QueryInput {
+  /** Shelf-owned message stays intact; prompt is the provider's dispatch input. */
+  inputMessage?: import('@shared/agent-input').AgentInputMessage;
   prompt: string;
   cwd: string;
   resume?: string;
@@ -294,8 +296,8 @@ export interface QueryInput {
    */
   configEdit?: { key: ConfigEditKey; value: string };
   /**
-   * Renderer-minted correlation key for this send (crypto.randomUUID at submit
-   * time). Echoed back in the queue snapshot + used by the orchestrator to track
+   * Factory message ID projected into the existing queue correlation key.
+   * Echoed back in the queue snapshot + used by the orchestrator to track
    * this send through its queue. Optional — internal callers (telegram bridge)
    * may omit it. See message-queue-ownership design.
    */

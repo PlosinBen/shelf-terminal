@@ -1,4 +1,5 @@
 import { recoveryFromError } from '@shared/agent-init-recovery';
+import { validateAgentInputRequest, type AgentInputMessage } from '@shared/agent-input';
 import * as readline from 'readline';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -28,7 +29,7 @@ import { setWireSink } from './logger';
 import { createSendQueue } from './send-queue';
 import { createBackendRegistry, type BackendFactory } from './backend-registry';
 import { projectAppSkills } from './providers/shared';
-import type { AgentAttachment, AgentPrefs } from '@shared/types';
+import type { AgentPrefs } from '@shared/types';
 import type { OutgoingMessage, QueryInput, ServerBackend, PickerResolvePayload, ModelCacheClient } from './providers/types';
 import type { ProviderModel, AgentProvider } from '@shared/types';
 import {
@@ -44,6 +45,7 @@ import { sampleMemoryUsage, scheduleInitialMemoryReport } from './memory-report'
 type Provider = AgentProvider;
 
 interface IncomingMessage {
+  inputMessage?: AgentInputMessage;
   type: 'send' | 'stop' | 'cancel_queued' | 'ping' | 'resolve_permission' | 'resolve_picker' | 'get_capabilities' | 'store_credential' | 'clear_credential' | 'clear_context' | 'read_task_output' | 'stop_task' | 'reload_skills' | 'app_tool_result' | 'cache_reply' | 'start_login' | 'cancel_login' | 'reconnect' | typeof MEMORY_WIRE_TYPE.GET_USAGE;
   provider?: Provider;
   /**
@@ -53,11 +55,8 @@ interface IncomingMessage {
    * it in the current architecture.
    */
   executionId?: string;
-  prompt?: string;
   cwd?: string;
   resume?: string;
-  images?: string[];
-  attachments?: AgentAttachment[];
   sessionId?: string;
   /**
    * App/tab SESSION routing key (dispatch-layering) — the demux dimension for
@@ -71,7 +70,7 @@ interface IncomingMessage {
    *  present, the provider applies it + emits a divider instead of running a
    *  query — prompt is empty for these executions. */
   configEdit?: { key: ConfigEditKey; value: string };
-  /** For `type: 'send'` / `type: 'cancel_queued'`: renderer-minted correlation
+  /** For `type: 'send'` / `type: 'cancel_queued'`: factory message ID projected as correlation
    *  key. Tracked through the send queue + echoed in the queue snapshot. */
   clientMsgId?: string;
   toolUseId?: string;
@@ -294,6 +293,14 @@ async function handleSend(msg: IncomingMessage) {
   if (msg.appId) lastAppId = msg.appId;
   const executionId = msg.executionId ?? newExecutionId();
   const executionSend = wrapSendForExecution(executionId, send);
+  const checked = validateAgentInputRequest(msg);
+  if (!checked.ok) {
+    serverLog('error', 'agent-input', `Invalid input executionId=${executionId} msgId=${msg.inputMessage?.msgId}: ${checked.error}`);
+    executionSend({ type: 'error', error: checked.error });
+    executionSend({ type: 'status', state: 'idle' });
+    return;
+  }
+  const message = checked.message.inputMessage;
 
   // A config-edit execution carries a structured edit instead of a prompt.
   const isConfigEdit = !!msg.configEdit;
@@ -302,7 +309,7 @@ async function handleSend(msg: IncomingMessage) {
   // flipped to streaming on send, and without a terminal idle its spinner +
   // queue-flush latch wedge forever (the "whole conversation stuck" bug when an
   // image was sent with no text).
-  const hasInput = !!msg.prompt || (msg.images?.length ?? 0) > 0 || (msg.attachments?.length ?? 0) > 0;
+  const hasInput = !!message;
   if (!isConfigEdit && (!hasInput || !msg.cwd)) {
     executionSend({ type: 'error', error: !msg.cwd ? 'Missing cwd' : 'Missing prompt or images' });
     executionSend({ type: 'status', state: 'idle' });
@@ -335,11 +342,11 @@ async function handleSend(msg: IncomingMessage) {
   backend.bindSessionSend?.(wrapSendForContext(provider, msg.sessionId, send));
 
   const input: QueryInput = {
-    prompt: msg.prompt ?? '',
+    prompt: message?.content ?? '',
+    inputMessage: message,
     cwd: msg.cwd!,
     resume: msg.resume,
-    images: msg.images,
-    attachments: msg.attachments,
+    attachments: message?.attachments,
     sessionId: msg.sessionId,
     configEdit: msg.configEdit,
     clientMsgId: msg.clientMsgId,

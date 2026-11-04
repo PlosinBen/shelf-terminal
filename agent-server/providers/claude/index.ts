@@ -15,6 +15,7 @@ import { CONFIG_EDIT_KEYS, formatConfigAck, type ConfigEditKey } from '@shared/c
 import type { AgentPrefs, ProviderModel, NormalizedTask } from '@shared/types';
 import { SHELF_PERMISSION_CONTROL } from '@shared/permission-controls';
 import { stripCwd, resolveSkillsPluginRoot, readUploadedImageAttachments } from '../shared';
+import { inputPromptForDispatch, modelInputPrompt } from '../../input-prompt';
 import { loadProjectedMcpServers } from '../mcp-config';
 import { CLAUDE_CLI_AUTH_OUTCOME, probeClaudeCliAuth } from './auth-status';
 import {
@@ -1218,7 +1219,7 @@ export function createClaudeBackend(): ServerBackend {
       // it. Intercept-and-return here keeps these slashes entirely out of the
       // SDK (and avoids building a never-consumed sdkQuery). /clear and /compact
       // intentionally fall through below — they need the real SDK turn.
-      const slash = parseSlashPrefix(input.prompt);
+      const slash = parseSlashPrefix(inputPromptForDispatch(input));
       if (slash && (slash.cmd === 'model' || slash.cmd === 'effort' || slash.cmd === 'permission')) {
         // No-args normally never reaches here — InputZone intercepts optioned
         // slashes with no arg and opens a renderer-side picker instead. This is
@@ -1322,9 +1323,10 @@ export function createClaudeBackend(): ServerBackend {
         .map(({ mimeType, data }) => imageDataToImageBlock(mimeType, data))
         .filter((b): b is NonNullable<typeof b> => b !== null);
       const allImageBlocks = [...imageBlocks, ...uploadedImageBlocks];
+      const prompt = modelInputPrompt(input);
       const content = allImageBlocks.length > 0
-        ? [...allImageBlocks, ...(input.prompt ? [{ type: 'text' as const, text: input.prompt }] : [])]
-        : input.prompt;
+        ? [...allImageBlocks, ...(prompt ? [{ type: 'text' as const, text: prompt }] : [])]
+        : prompt;
       s.pushUser(content as SDKUserMessage['message']['content']);
       await done;
     },

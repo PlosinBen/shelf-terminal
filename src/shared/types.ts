@@ -1,12 +1,6 @@
 import type { AgentInitRecovery } from './agent-init-recovery';
-import type { ConfigEditKey } from './config-ack';
+import type { AgentInputAttachmentKind, AgentInputMessage } from './agent-input';
 
-/** Input metadata; provider preferences belong to initialization/configEdit. */
-export interface AgentSendOptions {
-  attachments?: AgentAttachment[];
-  configEdit?: { key: ConfigEditKey; value: string };
-  clientMsgId?: string;
-}
 // ── Agent types ──
 
 // AgentProvider is DERIVED from the single-source provider registry (label + deploy
@@ -47,7 +41,7 @@ export interface AgentPrefs {
  * `displayPath` is the basename or cwd-relative short-form for chip rendering.
  */
 export interface AgentAttachment {
-  kind: 'file' | 'image';
+  kind: AgentInputAttachmentKind;
   path: string;
   displayPath: string;
   name: string;
@@ -142,7 +136,7 @@ export type AgentMessage = WithMsgId & (
   | (FoldBase & { type: 'fold_code';     body?: { content: string } })
   | (FoldBase & { type: 'fold_markdown'; body?: { content: string } })
   | (FoldBase & { type: 'fold_diff';     body?: { diff: { oldString: string; newString: string } } })
-  | { type: 'user';    content: string; images?: string[]; files?: AgentFile[] }
+  | { type: 'user';    content: string; images?: string[]; files?: AgentFile[]; inputMessage?: AgentInputMessage }
 );
 
 export type AgentMessageType = AgentMessage['type'];
@@ -566,7 +560,7 @@ export interface TaskEvent {
  * ordered snapshot of in-flight client sends on every change, and the renderer
  * mirrors it (optimistic chips reconciled against this authoritative list).
  *
- * - `clientMsgId`: renderer-minted correlation key (crypto.randomUUID at submit).
+ * - `clientMsgId`: factory-created message ID projected into the existing queue key.
  * - `state`: 'queued' = waiting its execution (render as a chip); 'running' = the
  *   execution agent-server is actively processing (renderer promotes it from chip to
  *   a real timeline user bubble). An id that leaves the snapshot without ever

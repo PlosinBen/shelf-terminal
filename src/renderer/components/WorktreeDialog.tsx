@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { AGENT_INPUT_SOURCE, createAgentInputMessage } from '@shared/agent-input';
 import { useStore, getProjectById, projectDisplayLabel } from '../store';
 import { on, emit, emitAgent, Events } from '../events';
 import { enqueuePendingSend } from '../agentTabStore';
@@ -289,9 +290,10 @@ export function WorktreeDialog() {
 
   const sendFailureToAgent = () => {
     if (!agentTabId || !failurePrompt) return;
-    const clientMsgId = crypto.randomUUID();
-    enqueuePendingSend(agentTabId, clientMsgId, failurePrompt);
-    emitAgent('agent:send', { tabId: agentTabId, text: failurePrompt, clientMsgId });
+    const built = createAgentInputMessage({ source: { kind: AGENT_INPUT_SOURCE.AGENT_VIEW }, content: failurePrompt });
+    if (!built.ok) { console.error('Worktree input creation failed', built.error); return; }
+    enqueuePendingSend(agentTabId, built.message.msgId, failurePrompt, undefined, undefined, built.message);
+    emitAgent('agent:send', { tabId: agentTabId, inputMessage: built.message });
     setOpen(false);
   };
 

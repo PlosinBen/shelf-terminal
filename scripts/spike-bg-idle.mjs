@@ -9,6 +9,7 @@
  * Run (after `node agent-server/build.mjs`): node scripts/spike-bg-idle.mjs
  */
 import { spawn } from 'node:child_process';
+import { canonicalSmokeFrame } from './agent-input.mjs';
 import { createInterface } from 'node:readline';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -33,7 +34,7 @@ out.on('line', (line) => {
 });
 err.on('line', (line) => { if (/\[claude\] (sdkmsg|carding|recorded|task_notification|router dropped|readTaskOutput|dropped foreground)/.test(line)) console.log(`  🪵 ${line}`); });
 
-const send = (o) => proc.stdin.write(JSON.stringify(o) + '\n');
+const send = (o) => proc.stdin.write(JSON.stringify(canonicalSmokeFrame(o)) + '\n');
 const waitFor = (pred, ms) => new Promise((res) => {
   const hit = lines.find(pred); if (hit) return res(hit);
   const t = setTimeout(() => res(null), ms);

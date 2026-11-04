@@ -175,9 +175,10 @@ describe('bindAgentIPCGroup', () => {
 
     it('forwards agent:send to api.send', () => {
       const attachments = [{ kind: 'image' as const, path: '/tmp/a.png', displayPath: '.tmp/shelf/a.png', name: 'a.png', mimeType: 'image/png' }];
-      emitAgent('agent:send', { tabId: 't1', text: 'hi', attachments });
+      const inputMessage = { msgId: 'input-1', source: { kind: 'agent-view' as const }, content: 'hi', attachments, replyRequirement: 'none' as const };
+      emitAgent('agent:send', { tabId: 't1', inputMessage });
       const call = mock.calls.find((c) => c.method === 'send');
-      expect(call!.args).toEqual(['t1', 'hi', undefined, { attachments }]);
+      expect(call!.args).toEqual(['t1', { inputMessage }]);
     });
 
     it('forwards agent:stop to api.stop', () => {
@@ -221,7 +222,7 @@ describe('bindAgentIPCGroup', () => {
 
     it('removes outbound subscriptions — emit no longer hits IPC after cleanup', () => {
       cleanup();
-      emitAgent('agent:send', { tabId: 't1', text: 'hi' });
+      emitAgent('agent:send', { tabId: 't1', configEdit: { key: 'model', value: 'test' } });
       expect(mock.calls.find((c) => c.method === 'send')).toBeUndefined();
       // Re-bind for afterEach
       cleanup = bindAgentIPCGroup();

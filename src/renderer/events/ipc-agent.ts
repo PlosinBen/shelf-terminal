@@ -68,8 +68,12 @@ export function bindAgentIPCGroup(): () => void {
   const offInitEvt = onAgent('agent:init', ({ tabId, cwd, connection, provider, sessionId, opts }) => {
     api.init(tabId, cwd, connection, provider, sessionId, opts);
   });
-  const offSendEvt = onAgent('agent:send', ({ tabId, text, images, attachments, configEdit, clientMsgId }) => {
-    api.send(tabId, text, images, { attachments, configEdit, clientMsgId });
+  const offSendEvt = onAgent('agent:send', ({ tabId, ...input }) => {
+    void Promise.resolve(api.send(tabId, input)).then(ok => {
+      if (ok === false) console.error('Agent input submission rejected', { tabId, msgId: input.inputMessage?.msgId });
+    }).catch(error => {
+      console.error('Agent input submission failed', { tabId, msgId: input.inputMessage?.msgId, error });
+    });
   });
   const offStopEvt = onAgent('agent:stop', ({ tabId }) => {
     api.stop(tabId);

@@ -7,8 +7,10 @@
  * Run (after `node agent-server/build.mjs`): node scripts/smoke-image-only.mjs
  */
 import { spawn } from 'node:child_process';
+import { canonicalSmokeFrame } from './agent-input.mjs';
 import { createInterface } from 'node:readline';
-import { readFileSync } from 'node:fs';
+import { readFileSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -31,7 +33,7 @@ rl.on('line', (line) => {
   if (m.type === 'permission_request') send({ type: 'resolve_permission', toolUseId: m.toolUseId, allow: true });
   for (const w of waiters) w(m);
 });
-const send = (o) => proc.stdin.write(JSON.stringify(o) + '\n');
+const send = (o) => proc.stdin.write(JSON.stringify(canonicalSmokeFrame(o)) + '\n');
 const waitFor = (pred, ms) => new Promise((res) => {
   if (lines.find(pred)) return res(true);
   const t = setTimeout(() => res(false), ms);
@@ -39,9 +41,15 @@ const waitFor = (pred, ms) => new Promise((res) => {
 });
 
 async function main() {
+  const imageDir = mkdtempSync(join(tmpdir(), 'shelf-image-smoke-'));
+  const imagePath = join(imageDir, 'image.png');
+  writeFileSync(imagePath, Buffer.from(PNG.split(',')[1], 'base64'));
+  process.once('exit', () => rmSync(imageDir, { recursive: true, force: true }));
   await waitFor((m) => m.type === 'ready', 30000);
   console.log('ready — sending IMAGE-ONLY (no prompt)\n');
-  send({ type: 'send', executionId: 'e-img', provider: 'claude', prompt: '', cwd: root, sessionId: 'img1', images: [PNG] });
+  send({ type: 'send', executionId: 'e-img', provider: 'claude', prompt: '', cwd: root, sessionId: 'img1', attachments: [
+    { kind: 'image', path: imagePath, displayPath: 'image.png', name: 'image.png', mimeType: 'image/png' },
+  ] });
 
   // The fix: image-only is no longer rejected at the handleSend guard (the old
   // bug emitted "Missing prompt or cwd" + NO idle → renderer spinner wedged

@@ -1,5 +1,6 @@
 import { AgentInitializationError, AgentInitRecoveryKind, savedPrefRecovery } from '@shared/agent-init-recovery';
 import { randomUUID } from 'node:crypto';
+import { inputPromptForDispatch } from '../../input-prompt';
 import { CONFIG_EDIT_KEYS, formatConfigAck } from '@shared/config-ack';
 import { parseSlashPrefix } from '@shared/slash-prefix';
 import { FAKE_PROVIDER, type AgentProvider } from '@shared/agent-providers';
@@ -689,7 +690,7 @@ export function createFakeBackend(_representedProvider: AgentProvider = FAKE_PRO
       // /mcp /skills: mirror the real providers — provider-intercepted read-only
       // listing composed as canned markdown (each provider owns its own card;
       // no cross-provider result type). Emitted as a plain `reply`.
-      const slash = parseSlashPrefix(input.prompt);
+      const slash = parseSlashPrefix(inputPromptForDispatch(input));
       // Wire-level clear fixture: the real Copilot provider emits the same
       // contextUsage null sentinel after replacing its ACP session. Keep quota
       // untouched so E2E covers the session-vs-account status boundary.

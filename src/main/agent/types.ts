@@ -1,4 +1,5 @@
-import type { AgentMessage, AgentPrefs, AgentSendOptions, AuthMethod, ProviderModel } from '@shared/types';
+import type { AgentMessage, AgentPrefs, AuthMethod, ProviderModel } from '@shared/types';
+import type { AgentInputRequest } from '@shared/agent-input';
 import type { PermissionControlCapabilities } from '@shared/permission-controls';
 import { SHELF_MCP, type ShelfMcpStatus } from '@shared/shelf-mcp';
 
@@ -97,10 +98,11 @@ export type PermissionResult =
   | { behavior: 'deny'; message?: string };
 export type PermissionCallback = (toolUseId: string, toolName: string, input: Record<string, unknown>) => Promise<PermissionResult>;
 
-export interface AgentQueryOptions extends AgentSendOptions {
+export interface AgentQueryOptions {
+  /** Existing optimistic queue projection; omitted when the caller mirrors history directly. */
+  clientMsgId?: string;
   resume?: string;
   canUseTool?: PermissionCallback;
-  images?: string[];
 }
 
 export type AgentEvent =
@@ -148,7 +150,7 @@ export type AgentEvent =
   | { type: 'error'; error: string };
 
 export interface AgentBackend {
-  query(prompt: string, cwd: string, opts?: AgentQueryOptions): AsyncGenerator<AgentEvent>;
+  query(input: AgentInputRequest, cwd: string, opts?: AgentQueryOptions): AsyncGenerator<AgentEvent>;
   stop(): Promise<void>;
   dispose(): void;
   /**

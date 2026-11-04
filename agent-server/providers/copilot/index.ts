@@ -6,6 +6,7 @@ import { AgentInitializationError, savedPrefRecovery } from '@shared/agent-init-
 // copilot backend post-cutover — the pre-ACP native SDK backend was deleted.)
 
 import { randomUUID } from 'node:crypto';
+import { inputPromptForDispatch, modelInputPrompt } from '../../input-prompt';
 import * as path from 'node:path';
 import type { ChildProcess } from 'node:child_process';
 import {
@@ -746,7 +747,7 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
           return;
         }
 
-        const slash = parseSlashPrefix(input.prompt);
+        const slash = parseSlashPrefix(inputPromptForDispatch(input));
         if (slash && (slash.cmd === COPILOT_COMMANDS.NEW || slash.cmd === COPILOT_COMMANDS.RESET)) {
           send({
             type: 'message',
@@ -757,7 +758,7 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
           return;
         }
 
-        let prompt = input.prompt;
+        let prompt = inputPromptForDispatch(input);
         let s: AcpSession;
         if (slash?.cmd === COPILOT_COMMANDS.CLEAR) {
           if (activePromptCompletion) {
@@ -818,7 +819,7 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
         const promptCompletion = driver.drivePromptTurn(
           conn!.agent,
           s,
-          prompt,
+          modelInputPrompt(input, prompt),
           send,
           input.images,
           input.attachments,

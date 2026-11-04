@@ -126,7 +126,7 @@ export function DecisionPanel({ tabId }: Props) {
           // `/model X` takes, so divider + capabilities come back identically
           // (agent-config-flow#5). No optimistic update; display follows the
           // provider's capabilities event.
-          emitAgent('agent:send', { tabId, text: '', configEdit: { key, value } });
+          emitAgent('agent:send', { tabId, configEdit: { key, value } });
           setLocalPickerStore(tabId, null);
         }}
         onCancel={() => setLocalPickerStore(tabId, null)}

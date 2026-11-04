@@ -37,7 +37,7 @@ related:
 
 **Decision**：Slash 是 provider 想特別解釋的字串，**不是獨立 channel**：
 
-- Renderer 不偵測 slash — `agent.send(text)` 一條路徑通吃普通 text 跟 `/cmd`（config picker 走 `agent-config-flow#3` / `agent-config-flow#5` 的結構化 config-edit turn，是「按鍵級 config edit」不是 agent command）
+- Renderer 不替 provider 派發 slash — `agent.send(tabId, {inputMessage})` 一條路徑通吃普通 text 跟 `/cmd`（config picker 走 `agent-config-flow#3` / `agent-config-flow#5` 的結構化 config-edit turn，是「按鍵級 config edit」不是 agent command）
 - Provider 自己決定如何解釋 slash：Claude 在 `query()` 內 parse/dispatch；Copilot 交給 ACP CLI；Codex 在 app-server backend 將 Shelf-supported slash 映到對應 JSON-RPC route，unsupported route 明確回錯。
 - Slash 輸出走 `fold_markdown` 渲染原語（label 是 `/cmd` 名、失敗用 `errorMessage`；見 `agent-ui#5`）
 - Backend interface 只剩 `query(input, send)`，沒有 `handleSlashCommand`
@@ -303,3 +303,21 @@ typed config slash 共用 applyPreference：live model／permission 先等 SDK �
 失敗不發布成功 divider／capabilities。尚無 live session 時只準備 SDK options，不
 宣稱已預驗模型值。Copilot final-session apply、Codex confirmedPrefs／native controls／
 uncertain gate、saved-pref recovery 與 clear replacement 的 confirmed snapshot 均保留。
+
+## agent-config-flow#15 — Message factory 建立輸入，Sender 只協調流程  ·  [Decision]
+
+**Decision**：Caller 提供來源、原文、附件與回覆要求；共用 factory 驗證結構、補預設值
+並產生 msgId。跨 process 接收端共用驗證但保留既有 ID，入口 adapter 確認來源可信性。
+Sender 只協調檢查、目標查找與執行服務，不依來源拼 prompt、不封裝 provider 協定。
+訊息不帶 target／cwd／session／execution／provider prefs；configEdit 是互斥控制輸入。
+
+**Reason**：各入口共用訊息契約，避免 renderer 的 optimistic message 與 Telegram 的
+原文／模型提示各自組裝而分散身分規則。replyRequirement 與 content 分開，共通指示
+由 provider 在模型輸入邊界使用；slash 保留原始語法，不能先附加提示而產生虛構參數。
+附件保留必要 metadata 與未知格式 MIME fallback，不因結構收斂順帶限縮支援範圍。
+
+**Do not change casually because**：msgId 不證明來源／權限，也不等於去重保證。
+既有 queue snapshot 仍使用 clientMsgId（renderer 將 factory ID 映射過去），Telegram
+保留直接 user-message mirror，省略 optimistic projection。optional history inputMessage
+metadata 不要求舊資料遷移。此契約不包含接收 ACK、逾時狀態、重送或 queue／UI 重構；
+execution-lifecycle boolean 不能當成 queue acceptance。具體型別見 `contracts/agent-routing`。

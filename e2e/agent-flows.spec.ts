@@ -37,7 +37,73 @@ async function setupProject(page: Page) {
   await page.waitForTimeout(500);
 }
 
+async function storedAgentMessages(page: Page): Promise<any[]> {
+  return page.evaluate(async () => {
+    const database = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open('shelf-agent-history');
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    try {
+      return await new Promise<any[]>((resolve, reject) => {
+        const request = database.transaction('messages').objectStore('messages').getAll();
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+    } finally { database.close(); }
+  });
+}
+
 test.describe('agent flows via fake provider', () => {
+  test('preserves original input and canonical message metadata through queue and history', async ({ shelfApp: { page } }) => {
+    await setupProject(page);
+    await openAgentTab(page);
+    const original = '  text:canonical input  ';
+    await sendAgentPrompt(page, original);
+    await expect(page.locator('.agent-messages:visible')).toContainText('canonical input');
+    // Check the persisted result, not only the optimistic renderer bubble.
+    // Production batches history writes for 5s; polling must outlive that timer.
+    await expect.poll(async () => {
+      const row = (await storedAgentMessages(page)).find(row => row.type === 'user' && row.content === original);
+      return row ? { idMatches: row.id === `user-${row.inputMessage?.msgId}`, message: row.inputMessage } : null;
+    }, { timeout: 15_000 }).toEqual({
+      idMatches: true,
+      message: { msgId: expect.any(String), source: { kind: 'agent-view' }, content: original, attachments: [], replyRequirement: 'none' },
+    });
+    await expect(page.locator('.agent-msg-queued')).toHaveCount(0);
+    await sendAgentPrompt(page, '  /mcp  ');
+    await expect(page.locator('.agent-messages:visible')).toContainText('2 MCP servers');
+  });
+
+  test('sends attachment-only input with uploaded metadata and local history preview', async ({ shelfApp: { page } }) => {
+    await setupProject(page);
+    await openAgentTab(page);
+    await page.locator('.agent-textarea:visible').evaluate(target => {
+      const bytes = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='), c => c.charCodeAt(0));
+      const transfer = new DataTransfer();
+      transfer.items.add(new File([bytes], 'shot.png', { type: 'image/png' }));
+      transfer.items.add(new File(['hello-file'], 'note.txt', { type: 'text/plain' }));
+      target.dispatchEvent(new ClipboardEvent('paste', { clipboardData: transfer, bubbles: true, cancelable: true }));
+    });
+    await expect(page.locator('.agent-attachment-chip')).toHaveCount(2);
+    // Use the normal driver (click/fill/Enter), including for an empty body.
+    await sendAgentPrompt(page, '');
+    await expect(page.locator('.agent-attachment-chip')).toHaveCount(0);
+    await expect.poll(async () => {
+      const row = (await storedAgentMessages(page)).find(row => row.type === 'user' && row.content === '');
+      return row?.inputMessage?.attachments;
+    }, { timeout: 15_000 }).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'file', name: 'note.txt', path: expect.any(String), size: 10 }),
+      expect.objectContaining({ kind: 'image', name: 'shot.png', path: expect.any(String), mimeType: 'image/png', size: expect.any(Number) }),
+    ]));
+    const row = (await storedAgentMessages(page)).find(row => row.type === 'user' && row.content === '');
+    expect(row.images).toEqual([expect.stringMatching(/^data:image\/png;base64,/)]);
+    expect(fs.readFileSync(row.inputMessage.attachments.find((a: any) => a.kind === 'file').path, 'utf8')).toBe('hello-file');
+    await expect(page.locator('.agent-msg-queued')).toHaveCount(0);
+    await sendAgentPrompt(page, 'text:usable after attachments');
+    await expect(page.locator('.agent-messages:visible')).toContainText('usable after attachments');
+  });
+
   test.describe('provider-native permission controls', () => {
     test.use({ nativePermissions: true });
 

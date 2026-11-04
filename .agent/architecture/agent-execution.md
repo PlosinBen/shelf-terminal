@@ -15,8 +15,14 @@ How a typed message becomes rendered output while conversation content remains i
 ## Flow
 
 ```text
-user input
-    │ send intent + client message id
+input Caller
+    │ original content + source + attachments + reply requirement
+    ▼
+message factory ── structure validation + message identity
+    │ common message
+    ▼
+entry trust boundary ── validate without replacing identity
+    │
     ▼
 central effect handler ── optimistic user message ───────────────┐
     │                                                           │
@@ -77,6 +83,14 @@ replacement coordinator
 The coordinator owns transaction order but treats captured state and replacement operations as opaque callbacks. The provider owns command recognition, concrete session fields, protocol operations, configuration confirmation, and optional prompt dispatch. A failed step terminates the execution visibly and cannot dispatch input to the invalidated conversation.
 
 The client eager-sends each input and mirrors the backend's ordered queue snapshots. A queued item appears as a chip; when it becomes running, its optimistic user message is promoted into the timeline. The client does not infer provider boundaries or decide when another send may start.
+
+Callers own input-context decisions; the factory owns message construction and identity. The Sender
+coordinates validation, target lookup and execution without source-specific prompt assembly.
+Message content and reply requirements remain separate. Providers recognize original commands before
+shared reply guidance prepares model input; protocol translation remains provider-owned. Target and
+execution configuration stay outside the message. User history retains optional canonical metadata
+without replacing the existing timeline or queue projection. Internal callers keep their existing
+direct user-message mirror. No new acceptance or retry protocol is implied by the common message.
 
 Session initialization restores provider context before capability discovery may create a replacement context. A restore operation may replay provider history; when the client already owns the persisted timeline, replay render content is hydration input rather than new timeline content, while restored configuration and command metadata still update session state. A newly created provider context becomes durable immediately, before the first execution can reuse it.
 

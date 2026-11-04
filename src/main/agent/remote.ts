@@ -300,7 +300,7 @@ export function createRemoteBackend(
       }
     },
 
-    async *query(prompt: string, cwd: string, opts?: AgentQueryOptions): AsyncGenerator<AgentEvent> {
+    async *query(input: import('@shared/agent-input').AgentInputRequest, cwd: string, opts?: AgentQueryOptions): AsyncGenerator<AgentEvent> {
       const epoch = initializationEpoch;
       const proc = await ensureProcReady(cwd);
       if (initializationEpoch !== epoch) {
@@ -369,13 +369,12 @@ export function createRemoteBackend(
         type: 'send',
         executionId,
         provider,
-        prompt,
+        inputMessage: input.inputMessage,
         cwd,
         sessionId,
         resume: opts?.resume,
-        images: opts?.images,
-        attachments: opts?.attachments,
-        configEdit: opts?.configEdit,
+        configEdit: input.configEdit,
+        // Keep the existing queue projection; no acceptance protocol change.
         clientMsgId: opts?.clientMsgId,
         // Names this app's projected skills dir (~/.shelf/apps/<appId>/skills)
         // for the provider to point its SDK at. See #70.

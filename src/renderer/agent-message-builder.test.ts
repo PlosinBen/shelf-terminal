@@ -2,8 +2,15 @@ import { describe, it, expect } from 'vitest';
 import { CLAUDE_PROVIDER } from '@shared/agent-providers';
 import { buildAgentMsg } from './agent-message-builder';
 import type { AgentMsg } from './components/AgentMessage';
+import { AGENT_INPUT_SOURCE, AGENT_REPLY_REQUIREMENT, createAgentInputMessage } from '@shared/agent-input';
 
 describe('buildAgentMsg', () => {
+  it('preserves mirrored Telegram original text and canonical metadata without changing old history', () => {
+    const built = createAgentInputMessage({ source: { kind: AGENT_INPUT_SOURCE.TELEGRAM }, content: 'original', replyRequirement: AGENT_REPLY_REQUIREMENT.BRIEF_PLAIN_TEXT });
+    if (!built.ok) throw new Error(built.error);
+    expect(buildAgentMsg({ type: 'user', msgId: built.message.msgId, content: 'original', inputMessage: built.message }, CLAUDE_PROVIDER)).toMatchObject({ content: 'original', inputMessage: built.message });
+    expect(buildAgentMsg({ type: 'user', msgId: 'legacy', content: 'old' }, CLAUDE_PROVIDER)).toMatchObject({ id: 'legacy', content: 'old' });
+  });
   it('maps reply wire payload to a reply bubble', () => {
     const out = buildAgentMsg({ type: 'reply', msgId: 'm1', content: 'hi' }, CLAUDE_PROVIDER);
     expect(out).toMatchObject({ id: 'm1', type: 'reply', content: 'hi', provider: CLAUDE_PROVIDER });

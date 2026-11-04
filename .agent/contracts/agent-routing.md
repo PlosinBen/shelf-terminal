@@ -16,10 +16,51 @@ The control / routing messages that drive an agent session across the three hops
 Three transports, each with its own framing — a control action threads through all three:
 
 - **renderer → main** — IPC `invoke` on the `IPC.AGENT_*` channels (`src/shared/ipc-channels.ts`). Payloads are `{ tabId, ... }`; handlers in `src/main/agent/index.ts` look up the per-tab `session.backend` (an `AgentBackend`, `src/main/agent/types.ts`) and call a method.
-- **main → agent-server** — newline-delimited JSON on the child's stdin. `RemoteProcess.sendLine(obj)` in `src/main/agent/remote.ts` writes one `IncomingMessage` (`agent-server/index.ts`, the `IncomingMessage` interface) per line. The `rl.on('line')` switch dispatches by `type`.
+- **main → agent-server** — newline-delimited JSON on the child's stdin. `RemoteProcess.sendLine(obj)` in `src/main/agent/remote.ts` writes one `IncomingMessage` (`agent-server/exec.ts`, the `IncomingMessage` interface) per line. The `rl.on('line')` switch dispatches by `type`.
 - **agent-server → main** — newline-delimited JSON on stdout, the `OutgoingMessage` union (`agent-server/providers/types.ts`). Execution status/permission control may carry `executionId`; conversation content is session-scoped; RPC responses use `requestId`; transport-level messages such as `pong` and `app_tool` bypass the execution dispatcher.
 
-Authoritative type names: `IncomingMessage` (`agent-server/index.ts`), `OutgoingMessage` / `PickerResolvePayload` / `QueryInput` / `ServerBackend` (`agent-server/providers/types.ts`), `AgentBackend` / `AgentQueryOptions` / `AgentEvent` (`src/main/agent/types.ts`).
+Authoritative type names: `IncomingMessage` (`agent-server/exec.ts`), `OutgoingMessage` / `PickerResolvePayload` / `QueryInput` / `ServerBackend` (`agent-server/providers/types.ts`), `AgentBackend` / `AgentQueryOptions` / `AgentEvent` (`src/main/agent/types.ts`).
+
+## Canonical input
+
+Source types and factory/validators: `src/shared/agent-input.ts` (`AgentInputMessage`,
+`AgentInputRequest`, `createAgentInputMessage`, `validateAgentInputMessage`).
+Callers supply source/content/attachments/reply requirements; the factory validates structure,
+defaults attachments to `[]` and reply requirements to `none`, then allocates `msgId`.
+Existing messages are revalidated at process boundaries without allocating a replacement ID.
+
+```ts
+agent.send(tabId, {
+  inputMessage: {
+    msgId: '<factory UUID>',
+    source: { kind: 'agent-view' },
+    content: 'original text',
+    attachments: [],
+    replyRequirement: 'none',
+  },
+});
+```
+
+- `source` is `{kind:'agent-view'}`, `{kind:'telegram'}`, or
+  `{kind:'agent', agentViewId, displayName}`. Agent identity is stable and the name is a
+  send-time snapshot; it does not require provider metadata. The Agent source shape does
+  not itself expose Agent messaging tools. Renderer IPC accepts only `agent-view` sources;
+  trusted entry adapters own provenance, not the factory or Sender.
+- `content` preserves original whitespace. Whitespace-only text without attachments is invalid;
+  attachment-only messages are valid. Attachment metadata is retained, not format-restricted.
+- `replyRequirement` is `none` or `brief-plain-text`. Unknown values are rejected. Telegram
+  selects the latter explicitly; Sender never infers it from source. Shared execution guidance
+  is applied at each provider's model-input boundary, without mutating the message or appending
+  invented arguments to slash commands. Telegram plain-text output and chunking remain enforced
+  separately; model compliance is not guaranteed.
+- Target `tabId`, cwd, connection, session/execution identities and provider prefs are not message
+  fields. Config edits use `{configEdit:{key,value}}` instead of `inputMessage`, never both.
+- Existing queue snapshots remain `{clientMsgId,state}`. Renderer submissions project the factory
+  `msgId` into `clientMsgId`; internal callers retain direct history mirroring without an optimistic
+  queue projection. `send` still returns its existing execution-lifecycle boolean, not an acceptance
+  ACK. There is no new timeout, retry, deduplication or durable-queue guarantee.
+- User history may carry optional `inputMessage` metadata alongside its existing render fields.
+  Preview images remain renderer-local; old rows without metadata remain readable.
 
 ## Slash command dispatch
 
@@ -27,8 +68,8 @@ Authoritative type names: `IncomingMessage` (`agent-server/index.ts`), `Outgoing
 
 Slash is NOT a control message of its own. A typed `/cmd args` flows as ordinary prompt text and the provider decides whether to interpret the prefix (`agent-config-flow#2`). The renderer only short-circuits unparametrised `OPTIONED_SLASHES` (`/model` `/effort` `/permission`) into an inline picker (`agent-config-flow#3`); everything else is sent as text.
 
-- renderer → main: `IPC.AGENT_SEND` with `{ tabId, prompt: "/help", attachments?, images?, clientMsgId? }` (no `configEdit`). `attachments` is the provider-bound payload; `images` is a legacy / renderer-preview compatibility field. Input options are `AgentSendOptions` in `src/shared/types.ts` and contain no provider prefs.
-- main → agent-server: `sendLine({ type: 'send', executionId, provider, prompt: "/help", cwd, sessionId, attachments?, images?, clientMsgId?, appId, ... })`. A fresh exec must complete configuration initialization before this frame is sent; input carries no model/effort/permission overrides.
+- renderer → main: `IPC.AGENT_SEND` with `{ tabId, inputMessage }`, whose `content` is `/help` (no `configEdit`). Uploaded attachments are inside `inputMessage`; preview data URLs stay renderer-local.
+- main → agent-server: `sendLine({ type: 'send', executionId, provider, inputMessage, cwd, sessionId, clientMsgId?, appId, ... })`. A fresh exec must complete configuration initialization before this frame is sent; input carries no model/effort/permission overrides.
 - The provider calls `parseSlashPrefix(input.prompt)` inside `query()`; output comes back as a normal `fold_markdown` wire message (`errorMessage` on failure), not a distinct response type.
 
 ### Copilot `/clear`

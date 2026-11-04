@@ -276,7 +276,7 @@ Renderer → main (invoke / send):
 | Method | Shape |
 |--------|-------|
 | `init(tabId, cwd, connection, provider, sessionId?, opts?)` | invoke `agent:init` |
-| `send(tabId, prompt, images?, options?)` | invoke `agent:send`. `options`: `AgentSendOptions` in `src/shared/types.ts` (`attachments?`, `configEdit?`, `clientMsgId?`); no model/effort/permission prefs |
+| `send(tabId, input)` | invoke `agent:send` with `{tabId, ...input}`. `AgentInputRequest` in `src/shared/agent-input.ts`: `{inputMessage}` or `{configEdit:{key,value}}`, never both. Returns the existing execution-lifecycle boolean, not queue acceptance. See `contracts/agent-routing`. |
 | `stop(tabId)` | invoke `agent:stop` |
 | `cancelQueued(tabId, clientMsgId)` | invoke `agent:cancel-queued` (drop a not-yet-running queued message) |
 | `destroy(tabId)` | invoke `agent:destroy` |

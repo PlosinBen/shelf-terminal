@@ -1,4 +1,5 @@
 import { AgentInitRecoveryKind } from '@shared/agent-init-recovery';
+import { AGENT_INPUT_SOURCE, createAgentInputMessage } from '@shared/agent-input';
 import { SHELF_MCP_STATE, SHELF_MCP_FAILURE } from '@shared/shelf-mcp';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { AgentMsg } from './components/AgentMessage';
@@ -53,6 +54,18 @@ import {
 
 const TAB = 'tab-1';
 const SESSION = 'sess-1';
+
+it('retains canonical input metadata through existing queue promotion and history save', async () => {
+  initTab(TAB, { sessionId: SESSION, provider: 'claude' });
+  const built = createAgentInputMessage({ source: { kind: AGENT_INPUT_SOURCE.AGENT_VIEW }, content: '  original\n' });
+  if (!built.ok) throw new Error(built.error);
+  enqueuePendingSend(TAB, built.message.msgId, built.message.content, undefined, undefined, built.message);
+  applyQueueSnapshot(TAB, [{ clientMsgId: built.message.msgId, state: 'running' }]);
+  const message = __getTabForTests(TAB)?.messages.find(m => m.type === 'user');
+  expect(message).toMatchObject({ content: '  original\n', inputMessage: built.message });
+  await flushAgentHistoryForExit([SESSION]);
+  expect(mockedStorage.saveAgentMessagesDelta.mock.calls.flatMap(call => call[1])).toContainEqual(expect.objectContaining({ inputMessage: built.message }));
+});
 
 function textMsg(id: string, content: string, streaming = false): AgentMsg {
   return { id, type: 'reply', content, streaming, provider: 'claude', timestamp: 1000 };

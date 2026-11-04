@@ -227,7 +227,7 @@ test('Project editor preserves View bindings and background preferences', async 
   // The modal intentionally blocks picker interaction. Drive a real backend
   // config edit on A while the editor stays open, allowing its normal report
   // to persist the confirmed value instead of spoofing canonical preferences.
-  await page.evaluate(tabId => window.shelfApi.agent.send(tabId, '', undefined, { configEdit: { key: 'effort', value: 'high' } }), tabId);
+  await page.evaluate(tabId => window.shelfApi.agent.send(tabId, { configEdit: { key: 'effort', value: 'high' } }), tabId);
   await expect.poll(async () => (await page.evaluate(() => window.shelfApi.project.getAll()))[0].agentViews[sessionId].prefs.effort).toBe('high');
   await panel.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(panel).not.toBeVisible();

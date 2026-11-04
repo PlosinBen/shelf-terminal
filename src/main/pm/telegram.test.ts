@@ -10,6 +10,9 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { net } from 'electron';
+import { sendFromInternal, isAgentTab } from '../agent';
+import { resolveAlias } from './telegram-mode';
+import { AGENT_INPUT_SOURCE, AGENT_REPLY_REQUIREMENT } from '@shared/agent-input';
 
 // Stub the deps so importing telegram.ts doesn't drag electron / agent
 // modules into the test process.
@@ -27,7 +30,7 @@ vi.mock('../agent', () => ({
   sendFromInternal: vi.fn(),
   registerOutputObserver: vi.fn(() => () => {}),
   stopFromInternal: vi.fn(),
-  isAgentTab: () => false,
+  isAgentTab: vi.fn(() => false),
 }));
 vi.mock('./telegram-mode', () => ({
   resolveAlias: vi.fn(),
@@ -36,9 +39,41 @@ vi.mock('./telegram-mode', () => ({
   aliasOrFallback: (name: string) => name,
 }));
 
-import { escapeTelegramMarkdown, startTelegram, maybeSendTyping, sendMessage } from './telegram';
+import { escapeTelegramMarkdown, startTelegram, stopTelegram, maybeSendTyping, sendMessage } from './telegram';
 
 const fetchMock = net.fetch as unknown as ReturnType<typeof vi.fn>;
+
+it('creates a canonical Telegram message without injecting guidance into the original text', async () => {
+  vi.stubEnv('SHELF_TEST_MODE', '0');
+  vi.mocked(isAgentTab).mockReturnValue(true);
+  vi.mocked(resolveAlias).mockReturnValue({ ok: true, tabId: 'agent-tab', projectName: 'Project', provider: 'claude' });
+  vi.mocked(sendFromInternal).mockResolvedValue(true);
+  let polled = false;
+  fetchMock.mockImplementation(async (url: string, options: any) => {
+    if (!url.endsWith('/getUpdates')) return apiResponse({});
+    if (!polled) {
+      polled = true;
+      return apiResponse([
+        { update_id: 1, message: { chat: { id: 'chat' }, text: '/use_project' } },
+        { update_id: 2, message: { chat: { id: 'chat' }, text: '  original question  ' } },
+      ]);
+    }
+    // Keep long polling pending; abort belongs to stopTelegram, not a real network.
+    return new Promise((_resolve, reject) => options.signal.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })), { once: true }));
+  });
+  try {
+    startTelegram({ botToken: 'tok', chatId: 'chat' });
+    await vi.waitFor(() => expect(sendFromInternal).toHaveBeenCalledWith('agent-tab', {
+      msgId: expect.any(String), source: { kind: AGENT_INPUT_SOURCE.TELEGRAM },
+      content: '  original question  ', attachments: [], replyRequirement: AGENT_REPLY_REQUIREMENT.BRIEF_PLAIN_TEXT,
+    }));
+  } finally {
+    stopTelegram();
+    vi.mocked(isAgentTab).mockReturnValue(false);
+    vi.unstubAllEnvs();
+    fetchMock.mockReset();
+  }
+});
 
 // Build a Telegram-API Response stub. ok=true → apiCall returns json.result;
 // ok=false → apiCall throws with .status (drives the parse-fallback path).

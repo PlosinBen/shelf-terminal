@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events';
+import { AGENT_INPUT_SOURCE, createAgentInputMessage } from '@shared/agent-input';
 import { expect, it, vi } from 'vitest';
 import { spawn } from 'node:child_process';
 
@@ -32,7 +33,11 @@ it('initializes the replacement exec even when dispatcher keeps the same Session
   const backend = createRemoteBackend({ type: 'local' }, undefined, 'claude', 'session',
     undefined, undefined, undefined, undefined, undefined, undefined, vi.fn(), undefined, undefined,
     { read, onFailure: vi.fn() });
-  const drain = async () => { for await (const _event of backend.query('hello', '/tmp')) { /* drain */ } };
+  const drain = async () => {
+    const built = createAgentInputMessage({ source: { kind: AGENT_INPUT_SOURCE.AGENT_VIEW }, content: 'hello' });
+    if (!built.ok) throw new Error(built.error);
+    for await (const _event of backend.query({ inputMessage: built.message }, '/tmp')) { /* drain */ }
+  };
   try {
     await drain();
     emit({ type: 'session_down', sid: 'session', reason: 'crashed', willReconnect: true });

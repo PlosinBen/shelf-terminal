@@ -1,4 +1,5 @@
 import type { AgentMsg } from './components/AgentMessage';
+import { validateAgentInputMessage } from '@shared/agent-input';
 
 let nextMsgIdCounter = 0;
 function freshMsgId(prefix: string): string {
@@ -49,8 +50,14 @@ function buildAgentMsgInner(msg: any, provider: string): AgentMsg | null {
       // Wire-emitted user bubble. Providers never emit this — but main can
       // (e.g. the Telegram bridge mirrors forwarded prompts so the agent view
       // history shows the message that was sent on the user's behalf).
+      const checked = msg.inputMessage === undefined ? undefined : validateAgentInputMessage(msg.inputMessage);
+      if (checked && (!checked.ok || checked.message.msgId !== id || checked.message.content !== msg.content)) {
+        console.error('Invalid mirrored Agent input metadata', { msgId: id, error: checked.ok ? 'Message identity/content mismatch' : checked.error });
+        return null;
+      }
       return {
         id, type: 'user', content: msg.content ?? '', timestamp: ts,
+        ...(checked?.ok ? { inputMessage: checked.message } : {}),
         ...(Array.isArray(msg.images) && msg.images.length > 0 ? { images: msg.images } : {}),
         ...(Array.isArray(msg.files) && msg.files.length > 0 ? { files: msg.files } : {}),
       };
