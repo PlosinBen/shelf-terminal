@@ -70,3 +70,21 @@ related:
 **Root cause**：electron-builder 的 publisher cache 在非同步建立 publisher 完成後才寫入；同一個 macOS build 內並行處理 DMG、ZIP、blockmap 時，會各自看見 cache miss 並建立不同的 GitHub publisher。publisher 各自執行非原子的 find-or-create，因而建立兩份 draft。讀取 release notes 的非同步步驟放大了此競速窗口。
 
 **Fix**：release workflow 在 build matrix 前先執行 `create_release` gate：查詢 exact tag 的所有 releases；零份就自動建立 draft、一份 draft 就重用、多份或已 publish 就 fail-loud。workflow 另以 tag-scoped concurrency 防止 rerun 同時通過 gate。平台仍暫時序列化作為 defense in depth；等 stable electron-builder 包含 promise-cache 上游修正後，再移除 gate並重新評估平行 build。追蹤入口見 `UPSTREAM_WATCH.md`。
+
+## build-packaging#9 — 打包工具鏈的 minimatch 告警等待相容修補，不強制跨 major  ·  [Decision]
+
+**Decision:** 暫保留 electron-builder 開發依賴鏈中的 minimatch 衍生 audit 告警，
+每次 release 回檢上游相容修補；現有範圍內的相容安全修補正常更新。不以
+`npm audit fix --force` 降級 builder，也不全域 override minimatch 到另一個 major。
+不關閉 audit、提高 severity 門檻或把剩餘告警標為已修復。立即替換打包工具鏈須另案評估。
+
+**Reason:** [GHSA-g3hv-75wg-m249](https://github.com/advisories/GHSA-g3hv-75wg-m249)
+將 minimatch <11.0.1 列為受影響範圍。鎖定的打包依賴分別要求 3／5／9／10.x；
+其中 asar 3 的實作直接呼叫 default function，而 11.x 提供 named export，不能只
+強制替換版本來清空 audit。這些告警來自開發／打包依賴圖，不等於打包過程沒有風險；
+production dependency audit 無告警也不是整個應用的安全保證。
+
+**Do not change casually because:** 版本更新必須保留實際 glob 語意、asar unpack
+與平台打包行為。上游提供相容修補後，核對整條依賴鏈，執行完整及 omit-dev audit、
+typecheck／相關 unit，並驗實際 electron-builder pack 與受影響的平台／universal
+產物；一般 Vite／agent-server build 不能代替打包驗證。完成後移除對應 upstream watch。
