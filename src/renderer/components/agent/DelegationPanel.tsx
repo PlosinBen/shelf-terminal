@@ -12,8 +12,9 @@ export function DelegationPanel({ tabId }: { tabId: string }) {
       const recipient = entry.spike.tabId === tabId;
       const peer = recipient ? entry.main : entry.spike;
       const act = (action: typeof D.ACTION[keyof typeof D.ACTION]) => emitAgent(D.EVENT.ACTION, { id: entry.id, action });
-      return <section className="delegation-card" key={entry.id} data-delegation-id={entry.id}>
-        <div><strong>{recipient ? 'Delegated by' : 'Delegated to'}: {peer.projectName} / {peer.displayName}</strong></div>
+      return <section className={`delegation-card ${recipient ? 'delegation-incoming' : 'delegation-outgoing'}`} key={entry.id} data-delegation-id={entry.id}>
+        <div className="delegation-heading"><span aria-hidden="true">{recipient ? '↙' : '↗'}</span> {recipient ? 'Incoming delegation' : 'Outgoing delegation'}</div>
+        <div className="delegation-peer"><span>{recipient ? 'From' : 'To'}:</span> <strong>{peer.projectName} / {peer.displayName}</strong></div>
         <div className="delegation-status">
           {entry.intervening ? 'User intervention' : 'Delegation active'}
           {entry.resultState && <span> · {entry.resultState === D.RESULT.READY ? 'Result ready' : entry.resultState === D.RESULT.EXTRACTING ? 'Collecting result…' : 'Delivery unconfirmed'}</span>}
@@ -22,9 +23,9 @@ export function DelegationPanel({ tabId }: { tabId: string }) {
         </div>
         {entry.progress && <div className="delegation-progress">{entry.progress}</div>}
         <div className="delegation-actions">
-          <button disabled={busy.includes(entry.id)} onClick={() => act(entry.intervening ? D.ACTION.RESUME : D.ACTION.INTERVENE)}>{entry.intervening ? 'End intervention' : 'Intervene'}</button>
-          {!recipient && <button disabled={busy.includes(entry.id) || entry.resultState !== D.RESULT.READY} onClick={() => act(D.ACTION.EXTRACT)}>Collect result</button>}
-          <button disabled={busy.includes(entry.id)} onClick={() => act(D.ACTION.STOP)}>Stop delegation</button>
+          <button className="delegation-button" disabled={busy.includes(entry.id)} onClick={() => act(entry.intervening ? D.ACTION.RESUME : D.ACTION.INTERVENE)}>{entry.intervening ? 'End intervention' : 'Intervene'}</button>
+          {!recipient && <button className="delegation-button delegation-collect" disabled={busy.includes(entry.id) || entry.resultState !== D.RESULT.READY} onClick={() => act(D.ACTION.EXTRACT)}>Collect result</button>}
+          <button className="delegation-button delegation-stop" disabled={busy.includes(entry.id)} onClick={() => act(D.ACTION.STOP)}>Stop delegation</button>
         </div>
       </section>;
     })}
