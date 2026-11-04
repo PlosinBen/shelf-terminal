@@ -56,6 +56,52 @@ async function storedAgentMessages(page: Page): Promise<any[]> {
 }
 
 test.describe('agent flows via fake provider', () => {
+  // Seed historical internal inputs through the actual main→renderer bridge;
+  // this verifies rendering/storage, not live Telegram routing or authorization.
+  test('shows saved input sources after reconnect without inferring legacy or human sources', async ({ shelfApp: { app, page } }) => {
+    await setupProject(page);
+    await app.evaluate(({ ipcMain }, channel) => {
+      const original = (ipcMain as any)._invokeHandlers.get(channel);
+      ipcMain.removeHandler(channel);
+      ipcMain.handle(channel, (event, payload) => {
+        (globalThis as any).__sourceViewTabId = payload.tabId;
+        return original(event, payload);
+      });
+    }, IPC.AGENT_INIT);
+    await openAgentTab(page);
+    await sendAgentPrompt(page, 'text:ordinary human input');
+    await app.evaluate(({ BrowserWindow }, channel) => {
+      const tabId = (globalThis as any).__sourceViewTabId;
+      const target = BrowserWindow.getAllWindows()[0].webContents;
+      for (const [id, content, source] of [
+        ['legacy-source', 'Legacy from Telegram without metadata', null],
+        ['telegram-source', 'saved Telegram input', { kind: 'telegram' }],
+        ['agent-source', 'saved collaborator input', { kind: 'agent', agentViewId: 'historical-view', displayName: 'Research at send time' }],
+      ] as const) {
+        target.send(channel, tabId, { type: 'user', msgId: id, content,
+          ...(source ? { inputMessage: { msgId: id, source, content, attachments: [], replyRequirement: 'none' } } : {}) });
+      }
+    }, IPC.AGENT_MESSAGE);
+    const assertSources = async () => {
+      const users = page.locator('.agent-msg-user:visible');
+      await expect(users.filter({ hasText: 'ordinary human input' }).locator('.agent-msg-source')).toHaveCount(0);
+      await expect(users.filter({ hasText: 'Legacy from Telegram without metadata' }).locator('.agent-msg-source')).toHaveCount(0);
+      await expect(users.filter({ hasText: 'saved Telegram input' }).locator('.agent-msg-source')).toHaveText('Telegram');
+      await expect(users.filter({ hasText: 'saved collaborator input' }).locator('.agent-msg-source')).toHaveText('From Research at send time');
+    };
+    await assertSources();
+    await expect.poll(async () => (await storedAgentMessages(page)).filter(m => ['telegram-source', 'agent-source'].includes(m.id)).length, { timeout: 15000 }).toBe(2);
+    await page.locator('.tab-bar .tab.active').click({ button: 'right' });
+    await page.locator('.context-menu-item', { hasText: 'Save to Default', exact: true }).click();
+    await expect.poll(async () => (await page.evaluate(() => window.shelfApi.project.getAll()))[0].defaultTabs.some(t => t.kind === 'agent')).toBe(true);
+    await page.locator('.sidebar-item').first().click({ button: 'right' });
+    await page.locator('.context-menu-item', { hasText: 'Disconnect', exact: true }).click();
+    await expect(page.locator('.connect-prompt')).toBeVisible();
+    await page.locator('.connect-prompt').click();
+    await page.locator('.tab-bar .tab').last().click();
+    await assertSources();
+  });
+
   // The actual IPC must settle on queue receipt while the model is still working.
   // A background runner, not the invoking renderer, owns execution afterwards.
   test('acknowledges running and queued submissions before execution finishes', async ({ shelfApp: { app, page } }) => {

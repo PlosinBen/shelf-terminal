@@ -252,3 +252,17 @@ AuthPane 的手動 `checkAuth` 是不同 surface：busy / error 由 AuthPane 自
 **Fix / note**：auto-follow、tab 重新顯示與 Jump to latest 都直接對 `.agent-messages` 呼叫 `scrollTo({ top: scrollHeight })`。不要用 `scrollIntoView()`，也不要靠每次強制重設外層 `scrollTop = 0` 掩蓋已發生的位移；回歸測試必須同時確認 timeline 能到底、且 `.terminal-view.scrollTop` 維持 `0`。
 
 **Related**：`src/renderer/components/agent/MessageList.tsx`、`e2e/agent-flows.spec.ts`。
+
+## agent-ui#13 — 輸入來源只呈現已保存的發送時 metadata  ·  [Decision]
+
+**Decision:** user timeline 與帶 canonical metadata 的 pending chip 共用來源標示。
+Telegram 顯示 Telegram，Agent 顯示 From 加發送時 displayName；一般 Agent View
+輸入及沒有來源 metadata 的舊 history 不加標籤。標籤是文字，與正文及回覆要求分開。
+
+**Reason:** 同一 View 可接收人工、Telegram 與委派輸入，需要看出來源而不修改
+訊息內容或路由。發送時名稱快照能在來源 View 改名、關閉或 history 恢復後維持
+原有語意；從正文、目前 View／provider 猜測來源則會誤標或改寫歷史。
+
+**Do not change casually because:** source label 不證明權限，不增加回覆工具或自動
+回覆引導；入口來源驗證與穩定身分仍由原有邊界管理。不要為呈現標籤遷移 history、
+查目前名稱或把 provider 細節帶入 renderer。舊資料缺 metadata 時不補猜測值。

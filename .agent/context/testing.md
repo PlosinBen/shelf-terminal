@@ -39,6 +39,12 @@ main operation 映射與錯誤回傳。兩者都不呼叫真實模型，也不�
 
 ## Agent input verification
 
+`components/agent/AgentInputSourceHeader.test.ts` 驗來源標籤映射、無 metadata 的舊資料
+及名稱文字 escaping；`e2e/agent-flows.spec.ts` 的 saved input sources 案例以受控
+main→renderer 內部 user payload 驗 UI／IndexedDB／Default View reconnect，並不驗
+live Telegram。D1 的真 app-tool／內部 Sender 路徑由 `agent-delegation.spec.ts` 驗
+派工作與人工提取結果的雙端來源標示。
+
 Queued cancellation 的 server 結果由 `agent-server/send-queue.test.ts` 驗，remote RPC
 correlation／非法結果／timeout 由 `src/main/agent/remote.test.ts` 驗；renderer store／
 reconcile 測試保護取消中內容、snapshot 先於結果及 running promotion／history。

@@ -228,6 +228,7 @@ title: shelf-terminal — Intent → File Index
 | Agent 初始化設定欄位恢復 | `../shared/agent-init-recovery.ts` + `agent-model-recovery.ts` | 結構化恢復 metadata、保存指定 Prefs 刪除後重試的中央交易 |
 | Shelf 工具啟動失敗警告 | `components/agent/ShelfMcpBanner.tsx` | 依 per-tab startup status 顯示不可關閉警告 |
 | Agent 對話 UI | `components/AgentView.tsx` + `components/agent/{MessageList,InputZone,StatusBar,DecisionPanel,PlanPanel,AuthPane,ConnectionOverlay}.tsx` + `components/agent/permission-control-view.ts` + `agentTabStore.ts` + `agentTabSubscriptions.ts` + `agent-message-builder.ts` + `tab-teardown.ts` | AgentView 是 layout coordinator；permission UI 只依 capability strategy/descriptor 選 canonical 或 native controls，不依 provider identity；有效設定與 explicit Prefs 分開。domain state 在 per-tab store，真正 teardown 才清 state |
+| Agent 輸入來源標示 | `components/agent/AgentInputSourceHeader.tsx` | 共用 timeline／pending chip 的 Telegram 與 Agent 發送時名稱標籤 |
 | Web tab（登入 surface + 瀏覽） | `components/WebTabView.tsx` | `<webview partition=persist:web>` + 網址列 + identity chip；人在這登入內網服務 |
 | Web.fetch 授權 popup | `components/WebPermissionPrompt.tsx` | app 層全域 popup，防偽 origin 顯示 + allow once/always/deny（由 `web:permission-request` 驅動） |
 | browser_open 確認 popup | `components/BrowserOpenPrompt.tsx` | app 層全域 popup，只有 Open/Deny（不記住），由 `web:browser-open-request` 驅動；核可後 `web:open-tab` 由 `App.tsx` 開分頁 |

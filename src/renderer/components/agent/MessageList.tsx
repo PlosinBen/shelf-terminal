@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AgentMessage } from '../AgentMessage';
 import { AgentDisplayContext } from './AgentDisplayContext';
+import { AgentInputSourceHeader } from './AgentInputSourceHeader';
 import { buildMessageTimeline, useAgentTab } from '../../agentTabStore';
 import { emitAgent } from '../../events';
 import { useStore } from '../../store';
@@ -150,7 +151,10 @@ export function MessageList({ tabId, visible }: Props) {
 
         {pendingSends.map((p) => (
           <div key={p.clientMsgId} className="agent-msg agent-msg-user agent-msg-queued">
-            <div className="agent-msg-content">{p.content}</div>
+            <div className="agent-queued-content">
+              <AgentInputSourceHeader source={p.inputMessage?.source} />
+              <div className="agent-msg-content">{p.content}</div>
+            </div>
             <span className="agent-queued-label">{p.cancelling ? 'cancelling…' : 'queued'}</span>
             <button
               className="agent-queued-cancel"

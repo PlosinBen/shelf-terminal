@@ -2,6 +2,7 @@ import React, { useState, useMemo, useContext } from 'react';
 import type { AgentInputMessage } from '@shared/agent-input';
 import { AGENT_EXIT_INTERRUPTED_LABEL } from '@shared/app-exit';
 import { AgentDisplayContext } from './agent/AgentDisplayContext';
+import { AgentInputSourceHeader } from './agent/AgentInputSourceHeader';
 import { renderMarkdown } from '../utils/markdown';
 import { alignLineDiff, type DiffRow } from '../utils/line-diff';
 import type { AgentDisplayMode, AgentDisplayKey, AgentFile, FoldBase } from '@shared/types';
@@ -308,6 +309,7 @@ export function AgentMessage({ message, cwd: _cwd, nested }: Props) {
       const hasAttachments = (message.images?.length ?? 0) > 0 || (message.files?.length ?? 0) > 0;
       return (
         <div className="agent-msg agent-msg-user">
+          <AgentInputSourceHeader source={message.inputMessage?.source} />
           {message.content && <div className="agent-msg-content">{message.content}</div>}
           {hasAttachments && (
             <div className="agent-msg-attachments">

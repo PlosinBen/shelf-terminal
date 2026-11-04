@@ -62,6 +62,7 @@ test.describe('worktree Agent delegation', () => {
   }
   test('manual collection and sequential phases preserve the relation; intervention rejects main work', async ({}, testInfo) => {
     const id = await selectAndStart();
+    const [identity] = await page.evaluate(() => window.shelfApi.delegation.current());
     await expect(panel().locator('.delegation-heading')).toHaveText('↗ Outgoing delegation');
     await expect(panel().locator('.delegation-peer')).toContainText('To:');
     const collect = panel().getByRole('button', { name: 'Collect result' });
@@ -74,6 +75,7 @@ test.describe('worktree Agent delegation', () => {
     await panel().screenshot({ path: testInfo.outputPath('outgoing-delegation.png') });
     const outgoingBorder = await panel().evaluate(el => getComputedStyle(el).borderLeftColor);
     await spike();
+    await expect(page.locator('.agent-msg-user:visible .agent-msg-source')).toHaveText(`From ${identity.main.displayName}`);
     await expect(panel().locator('.delegation-heading')).toHaveText('↙ Incoming delegation');
     await expect(panel().locator('.delegation-peer')).toContainText('From:');
     await expect(panel().getByRole('button', { name: 'Collect result' })).toHaveCount(0);
@@ -88,6 +90,7 @@ test.describe('worktree Agent delegation', () => {
     await expect(page.locator('.agent-messages:visible')).not.toContainText('EXPERIMENT RESULT A');
     await panel().getByRole('button', { name: 'Collect result' }).click();
     await expect(page.locator('.agent-messages:visible')).toContainText('EXPERIMENT RESULT A');
+    await expect(page.locator('.agent-msg-user:visible', { hasText: 'EXPERIMENT RESULT A' }).locator('.agent-msg-source')).toHaveText(`From ${identity.spike.displayName}`);
     await expect(panel().getByRole('button', { name: 'Collect result' })).toBeDisabled();
     await expect(panel().getByRole('button', { name: 'Collect result' })).toHaveCSS('opacity', '0.4');
     await sendAgentPrompt(page, 'delegation_send:B');

@@ -3140,6 +3140,20 @@ button {
   background: var(--agent-user-bubble, rgba(229, 192, 123, 0.15));
 }
 
+.agent-msg-source {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.agent-queued-content {
+  flex: 1;
+  min-width: 0;
+}
+
 .agent-msg-attachments {
   display: flex;
   flex-wrap: wrap;

@@ -46,6 +46,10 @@ agent.send(tabId, {
   send-time snapshot; it does not require provider metadata. The Agent source shape does
   not itself expose Agent messaging tools. Renderer IPC accepts only `agent-view` sources;
   trusted entry adapters own provenance, not the factory or Sender.
+- Renderer source labels read persisted metadata only: Telegram inputs show `Telegram`,
+  Agent inputs show `From <displayName>` using the send-time snapshot. Ordinary Agent View
+  inputs and legacy rows without source metadata remain unlabelled. This presentation does
+  not add provider metadata, authorization or automatic reply routing.
 - `content` preserves original whitespace. Whitespace-only text without attachments is invalid;
   attachment-only messages are valid. Attachment metadata is retained, not format-restricted.
 - `replyRequirement` is `none` or `brief-plain-text`. Unknown values are rejected. Telegram
