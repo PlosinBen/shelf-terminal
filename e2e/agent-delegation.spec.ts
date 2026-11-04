@@ -116,8 +116,9 @@ test.describe('worktree Agent delegation', () => {
     await expect(picker.locator('.delegation-requester')).toHaveText('Requested by: Delegation Base / Claude');
     await expect(picker.locator('.delegation-requester > span')).toHaveCSS('display', 'inline');
     await expect(picker.locator('.delegation-requester')).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
-    await expect(picker.locator('.delegation-requester')).toContainText('Delegation Base');
-    await expect(picker.locator('.delegation-picker-note')).toContainText('until the delegation is stopped');
+    await expect(picker.getByText('Available worktree Agents', { exact: true })).toHaveCount(0);
+    await expect(picker.locator('.delegation-picker-note')).toHaveText('Selecting an Agent allows repeated delegation until stopped.');
+    await expect(picker.locator('.delegation-picker-note')).toHaveCSS('margin-bottom', '6px');
     await expect(picker.locator('.delegation-target')).toHaveCSS('border-top-style', 'solid');
     await expect(picker.locator('.delegation-provider')).toHaveText('claude');
     await expect(picker.locator('.delegation-target-path')).toContainText('/spike');

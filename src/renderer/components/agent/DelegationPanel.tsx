@@ -42,8 +42,7 @@ export function DelegationTargetPicker() {
       <div className="delegation-requester">
         <span>Requested by:</span> {request.caller.projectName} / {request.caller.displayName}
       </div>
-      <p className="delegation-picker-note">Selecting an Agent authorizes this main View to delegate work to it until the delegation is stopped.</p>
-      <div className="delegation-picker-label">Available worktree Agents</div>
+      <p className="delegation-picker-note">Selecting an Agent allows repeated delegation until stopped.</p>
       <div className="delegation-targets">
         {request.candidates.length === 0 && <p className="delegation-picker-empty">No worktree Agent Views are open.</p>}
         {request.candidates.map(({ view, unavailableReason }) => <button className="delegation-target" key={view.tabId} disabled={!!unavailableReason} onClick={() => choose(view)}>

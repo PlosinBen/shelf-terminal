@@ -5616,10 +5616,9 @@ button {
 .delegation-picker { width: min(620px, 90vw); max-height: 80vh; display: flex; flex-direction: column; overflow: hidden; background: var(--bg); color: var(--text); font-size: 13px; border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 32px rgba(0, 0, 0, .4); }
 .delegation-picker > .settings-header, .delegation-picker > .project-edit-footer { flex-shrink: 0; }
 .delegation-picker-body { padding: 16px; min-height: 0; overflow-y: auto; }
-.delegation-picker-label { font-size: 11px; font-weight: 600; color: var(--text-muted); margin-bottom: 6px; }
 .delegation-requester { line-height: 1.5; overflow-wrap: anywhere; }
 .delegation-requester > span { color: var(--text-muted); }
-.delegation-picker-note { margin: 10px 0 20px; color: var(--text-muted); font-size: 12px; line-height: 1.5; }
+.delegation-picker-note { margin: 16px 0 6px; color: var(--text-muted); font-size: 12px; line-height: 1.5; }
 .delegation-targets { display: flex; flex-direction: column; gap: 8px; }
 .delegation-target { display: flex; flex-direction: column; gap: 6px; width: 100%; padding: 12px; border: 1px solid var(--border); border-radius: 5px; background: var(--bg-secondary); text-align: left; overflow-wrap: anywhere; }
 .delegation-target:hover:not(:disabled) { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--bg-secondary)); }
