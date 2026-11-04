@@ -495,6 +495,24 @@ describe('direct exec internal authorization routing', () => {
 });
 
 describe('direct exec memory routing', () => {
+  it('binds delegation calls to the logical View rather than the transport nonce and rejects inactive calls', async () => {
+    const { child } = capabilitiesChild({});
+    const { wrapProcess } = await import('./remote');
+    const { DELEGATION: D } = await import('@shared/agent-delegation');
+    handleAppToolMock.mockResolvedValue({ ok: true, data: [] });
+    const remote = wrapProcess(child, undefined, undefined, undefined, undefined, undefined, undefined, 'p', undefined,
+      { agentViewId: 'logical-view', agentTabId: 'runtime-tab' });
+    const emit = () => child.stdout.emit('data', Buffer.from(JSON.stringify({ type: 'app_tool', requestId: 'd1', op: D.OP.STATUS, args: {} }) + '\n'));
+    try {
+      emit(); await Promise.resolve();
+      expect(handleAppToolMock).toHaveBeenCalledWith(D.OP.STATUS, {}, {
+        projectId: 'p', agentSessionId: expect.any(String), agentViewId: 'logical-view', agentTabId: 'runtime-tab',
+      });
+      expect(handleAppToolMock.mock.calls.at(-1)![2].agentSessionId).not.toBe('logical-view');
+      remote.kill(); handleAppToolMock.mockClear(); emit(); await Promise.resolve();
+      expect(handleAppToolMock).not.toHaveBeenCalled();
+    } finally { remote.kill(); }
+  });
   it('delivers a validated report while active and rejects late output after kill', async () => {
     const { child } = capabilitiesChild({});
     const onMemoryUsage = vi.fn();

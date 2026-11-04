@@ -106,6 +106,25 @@ The timeline renders all user, assistant, system, note, error, and fold entries 
 
 Plan/todo data is not timeline content. It is replace-semantics state on its own side channel and panel.
 
+## Worktree delegation
+
+The initiating Agent requests target selection; the host presents open worktree Views to
+the user and returns the selected identity within the same request. Selection authorizes
+a specific pair. Starting the collaboration locks its recipient View; the host owns this
+memory-only relationship independently of provider execution.
+
+Work messages follow the common message factory and existing send queue. Queue receipt
+releases the initiating tool while execution continues independently. The recipient
+explicitly updates UI progress or submits a single text result. Arrival does not enter
+the initiating conversation. User collection sends the result through the common input
+path, retaining the relationship for the next dependent experiment.
+
+Intervention permits human conversation and rejects new initiating-agent work without
+stopping execution. UI projections do not own authorization. Explicit stop or View
+closure ends the relationship, not the other Agent's execution. Uncollected results
+require discard confirmation. Temporary backend interruption is not logical View
+closure. No collaboration history or restart recovery is maintained.
+
 ## Boundaries
 
 - **Configuration is not part of ordinary input.** Each new execution process completes initialization from current durable project selections before delivering input. Concurrent callers share the pending initialization, not a settings cache. Idle wake, authentication reconnect, and automatic process replacement invalidate the old initialization identity. Explicit edits retain the same ordered execution queue; protocol-specific application and confirmation stay inside the provider.

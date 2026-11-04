@@ -40,6 +40,8 @@ import { teardownTab, waitForAgentViewTeardown } from './tab-teardown';
 import { on, emit, Events, onAgent, emitAgent, onBackup, onNewAgentTab } from './events';
 import { bindAgentIPCGroup } from './events';
 import { bindAgentStoreSubscriptions } from './agentTabSubscriptions';
+import { bindDelegationEvents, prepareDelegationClose } from './delegation-events';
+import { DelegationTargetPicker } from './components/agent/DelegationPanel';
 import { setAuthError, setInMemoryMax, setSaveThrottleMs, peekAgentTab, setInitStatus, setCapabilities, flushAgentHistoryForExit } from './agentTabStore';
 import { setAppExitPreparing } from './store-ui';
 import { getTheme, buildThemeVars } from './themes';
@@ -150,9 +152,10 @@ function scanProjectWorktrees(projectId: string): Promise<void> {
   const existing = scanRequests.get(mainId);
   if (existing) return existing;
   setWorktreeScan(mainId, { running: true, error: getProjectSliceSnapshot().worktreeScans[mainId]?.error ?? null });
-  const applyAvailability = () => {
+  const applyAvailability = async () => {
     for (const child of getProjectViews()) {
       if (!isWorktreeUnavailable(child)) continue;
+      if (!await prepareDelegationClose(child.tabs.filter(tab => tab.type === 'agent').map(tab => tab.id))) continue;
       if (getProjectSliceSnapshot().editingProjectId === child.id) setEditingProjectById(null);
       const settled = Promise.all(child.tabs.map(teardownTab)).then(() => {});
       const index = getProjectIndexById(child.id);
@@ -169,14 +172,14 @@ function scanProjectWorktrees(projectId: string): Promise<void> {
         // that may predate a concurrent user edit or removal.
         await projectCoordinator.refresh();
         clearValidatedWorktreeDirectories(mainId);
-        applyAvailability();
+        await applyAvailability();
       }
       if (result.outcome === WorktreeScanOutcome.STALE) debugLog('worktree', `stale scan mainProjectId=${mainId}`);
       setWorktreeScan(mainId, { running: false, error: result.outcome === WorktreeScanOutcome.STALE ? getProjectSliceSnapshot().worktreeScans[mainId]?.error ?? null : null });
     } catch (error) {
       // The request may have committed before IPC/refresh failed. Refresh only;
       // never replay a stale batch or claim the saved state was rolled back.
-      try { await projectCoordinator.refresh(); applyAvailability(); }
+      try { await projectCoordinator.refresh(); await applyAvailability(); }
       catch (refreshError) { debugLog('worktree', `refresh failed mainProjectId=${mainId}: ${String(refreshError)}`); }
       setWorktreeScan(mainId, { running: false, error: String(error) });
       debugLog('worktree', `scan failed mainProjectId=${mainId}: ${String(error)}`);
@@ -317,6 +320,7 @@ export function App() {
   }, []);
 
   useEffect(() => bindProcessMemorySummary(), []);
+  useEffect(() => bindDelegationEvents(), []);
 
   useEffect(() => {
     const cancelUnattributed = (requestId: string, detail: string) => {
@@ -529,12 +533,16 @@ export function App() {
   // Centralized event handlers
   useEffect(() => {
     const offRescan = on(Events.WORKTREE_RESCAN, (projectId: string) => { void scanProjectWorktrees(projectId); });
-    const offCloseTab = on(Events.CLOSE_TAB, (projectId: string, tabIndex: number) => {
+    const offCloseTab = on(Events.CLOSE_TAB, async (projectId: string, tabIndex: number) => {
       const projectIndex = getProjectIndexById(projectId);
       const proj = getProjectById(projectId);
       const tab = proj?.tabs[tabIndex];
+      if (tab?.type === 'agent' && !await prepareDelegationClose([tab.id])) return;
+      // Re-resolve after the confirmation; tabs may have moved meanwhile.
+      const latestIndex = tab ? getProjectById(projectId)?.tabs.findIndex(current => current.id === tab.id) ?? -1 : -1;
+      if (latestIndex < 0) return;
       const settled = tab ? teardownTab(tab) : Promise.resolve();
-      removeTab(projectIndex, tabIndex);
+      removeTab(getProjectIndexById(projectId), latestIndex);
       if (tab?.type === 'agent' && tab.sessionId) void cleanupAgentViews(projectId, [tab.sessionId], settled);
     });
 
@@ -542,6 +550,7 @@ export function App() {
       const projectIndex = getProjectIndexById(projectId);
       const proj = getProjectById(projectId);
       if (projectIndex === -1 || !proj) return;
+      if (!await prepareDelegationClose(proj.tabs.filter(tab => tab.type === 'agent').map(tab => tab.id))) return;
       const staged = await runProjectOperation('stage deleted Agent history', () =>
         queueAgentHistoryCleanup(projectId, Object.keys(proj.agentViews)));
       if (staged.status === 'cancelled') return;
@@ -757,10 +766,11 @@ export function App() {
       if (project.tabs.length === 0) emit(Events.CONNECT_PROJECT, projectId);
     });
 
-    const offDisconnectProject = on(Events.DISCONNECT_PROJECT, (projectId: string) => {
+    const offDisconnectProject = on(Events.DISCONNECT_PROJECT, async (projectId: string) => {
       const projectIndex = getProjectIndexById(projectId);
       const proj = getProjectById(projectId);
       if (!proj || proj.tabs.length === 0) return;
+      if (!await prepareDelegationClose(proj.tabs.filter(tab => tab.type === 'agent').map(tab => tab.id))) return;
       // Was leaking: this only killed PTYs and forgot agent tabs, so an agent
       // session's exec (+ provider CLI) survived a project disconnect. Route
       // through teardownTab so agent backends are destroyed too.
@@ -1030,6 +1040,7 @@ export function App() {
       <RemoveConfirmDialog />
       <WebPermissionPrompt />
       <BrowserOpenPrompt />
+      <DelegationTargetPicker />
       <ExternalUrlIntentPrompt />
       {appExitPreparing && (
         <div className="app-exit-overlay" role="status" aria-live="polite">Saving Agent history before exit…</div>

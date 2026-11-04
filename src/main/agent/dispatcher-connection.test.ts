@@ -185,6 +185,17 @@ describe('dispatcher-connection (per-host demux by sid)', () => {
     expect(f.parsedWritten()).toContainEqual({ type: 'app_tool_result', sid: 's1', requestId: 'r1', ok: true, data: 'R' });
   });
 
+  it('adds logical View binding to delegation calls without changing the transport sid', async () => {
+    const { DELEGATION: D } = await import('@shared/agent-delegation');
+    const { f, conn, handleAppTool } = make();
+    conn.openSession('transport', undefined, { projectId: 'p', agentViewId: 'view', agentTabId: 'tab' });
+    f.emit({ type: 'app_tool', sid: 'transport', requestId: 'd1', op: D.OP.STATUS, args: { agentViewId: 'forged' } });
+    expect(handleAppTool).toHaveBeenCalledWith(D.OP.STATUS, { agentViewId: 'forged' }, {
+      projectId: 'p', agentSessionId: 'transport', agentViewId: 'view', agentTabId: 'tab',
+    });
+    conn.kill();
+  });
+
   it('keeps authorization grants on the trusted sid lane, not the renderer event lane', async () => {
     const result = { ok: true, data: { token: 'sensitive-test-token', publicKey: 'public-key' } };
     const { f, conn, handleAppTool } = make();

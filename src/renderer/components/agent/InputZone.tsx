@@ -16,6 +16,7 @@ import { backendAttachments, historyImagePreviews, type PendingImageAttachment }
 import { OPTIONED_SLASHES, useSlashCommands, type SlashCommand } from './slash-commands';
 import { SlashMenu } from './SlashMenu';
 import { AttachmentChips } from './AttachmentChips';
+import { useDelegations } from '../../delegationStore';
 
 function imageExtFromMime(mimeType: string): string {
   switch (mimeType.toLowerCase()) {
@@ -106,6 +107,8 @@ interface Props {
  * renders it and emits the config-edit execution on select).
  */
 export function InputZone({ tabId, projectId, cwd, connection, visible, rootRef }: Props) {
+  const delegation = useDelegations().entries.find(entry => entry.spike.tabId === tabId);
+  const delegationLocked = !!delegation && !delegation.intervening;
   const tab = useAgentTab(tabId);
   const { settings, chatStage } = useStore();
 
@@ -246,7 +249,7 @@ export function InputZone({ tabId, projectId, cwd, connection, visible, rootRef 
     if (!text.trim() && pendingFiles.length === 0 && pendingImages.length === 0) return;
     // Locked until init 'ready' — don't emit, don't queue. Belt-and-suspenders:
     // the textarea is also disabled when !initReady, so Enter can't reach here.
-    if (!initReady) return;
+    if (!initReady || delegationLocked) return;
     if (stagingImages) return;
 
     // Inline picker shortcut: `/model` / `/effort` / `/permission` without
@@ -296,7 +299,7 @@ export function InputZone({ tabId, projectId, cwd, connection, visible, rootRef 
       tabId,
       inputMessage: message,
     });
-  }, [tabId, input, pendingFiles, pendingImages, stagingImages, initReady]);
+  }, [tabId, input, pendingFiles, pendingImages, stagingImages, initReady, delegationLocked]);
 
   const handleStop = useCallback(() => {
     // ESC-twice (stop) means "abort this execution AND drop everything I queued up
@@ -410,8 +413,9 @@ export function InputZone({ tabId, projectId, cwd, connection, visible, rootRef 
           onChange={handleInputChange}
           onKeyDown={handleKeyDown}
           disabled={!initReady}
+          readOnly={delegationLocked}
           placeholder={
-            initReady
+            delegationLocked ? 'Delegation active — use Intervene to send a message' : initReady
               ? 'Ask something...'
               : initStatus === 'failed'
                 ? 'Agent unavailable — retry to reconnect'

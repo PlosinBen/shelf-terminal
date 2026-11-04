@@ -6,6 +6,7 @@ import { on, emit, emitAgent, Events } from '../events';
 import { enqueuePendingSend } from '../agentTabStore';
 import { debugLog } from '../debugLog';
 import type { BranchMergedInfo, GitBranchInfo, WorktreeCloseKind } from '@shared/types';
+import { prepareDelegationClose } from '../delegation-events';
 
 // User-committed finish/abandon popup for a worktree sub-project (#lifecycle).
 // Opened from the sidebar menu or an agent's side-effect-free proposal
@@ -258,6 +259,7 @@ export function WorktreeCloseGate() {
       throw new Error('Worktree changed after merge; cleanup stopped. Rescan and retry.');
     }
     // Teardown: remove the worktree dir, then delete the (now unchecked-out) branch.
+    if (!await prepareDelegationClose(sub.tabs.filter(tab => tab.type === 'agent').map(tab => tab.id))) return;
     const rm = await window.shelfApi.git.worktreeRemove(parentConn, parentCwd, featureCwd);
     if (!rm.ok) {
       const msg = rm.error ?? 'failed to remove worktree';

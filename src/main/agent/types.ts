@@ -99,6 +99,8 @@ export type PermissionResult =
 export type PermissionCallback = (toolUseId: string, toolName: string, input: Record<string, unknown>) => Promise<PermissionResult>;
 
 export interface AgentQueryOptions {
+  /** Internal submission boundary: called after the send frame was written, not after completion. */
+  onSubmitted?: () => void;
   /** Existing optimistic queue projection; omitted when the caller mirrors history directly. */
   clientMsgId?: string;
   resume?: string;

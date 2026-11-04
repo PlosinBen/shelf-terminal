@@ -3,6 +3,118 @@
 exports[`Shelf tool contracts across Claude SDK and HTTP MCP > preserves each adapter’s advertised names, descriptions and schemas > Claude SDK surface 1`] = `
 [
   {
+    "description": "Ask the user to select an already-open worktree Agent View in Shelf. Waits for the user selection; returns the stable target identity or cancellation. Does not start work.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object",
+    },
+    "name": "shelf_select_agent",
+  },
+  {
+    "description": "Start a delegation to the target the user selected with shelf_select_agent. Send the first text task. Returns delegationId and queue receipt, NOT the experiment result. Keep doing other work; results are manually collected by the user.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "agentViewId": {
+          "type": "string",
+        },
+        "content": {
+          "type": "string",
+        },
+        "projectId": {
+          "type": "string",
+        },
+      },
+      "required": [
+        "projectId",
+        "agentViewId",
+        "content",
+      ],
+      "type": "object",
+    },
+    "name": "shelf_start_delegation",
+  },
+  {
+    "description": "Send the next text task within your existing delegation. User intervention temporarily rejects sends; query status and wait for the user, never automatically retry an uncertain delivery.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "content": {
+          "type": "string",
+        },
+        "delegationId": {
+          "type": "string",
+        },
+      },
+      "required": [
+        "delegationId",
+        "content",
+      ],
+      "type": "object",
+    },
+    "name": "shelf_send_delegation",
+  },
+  {
+    "description": "Query status of your delegation(s): intervention, availability, delivery and whether a result awaits collection. Never returns result text. Omit delegationId to list only delegations you participate in.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "delegationId": {
+          "type": "string",
+        },
+      },
+      "type": "object",
+    },
+    "name": "shelf_delegation_status",
+  },
+  {
+    "description": "As the delegated worker, update the latest short progress text for this delegation. UI only: does not notify the main conversation or mark a result complete.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "content": {
+          "type": "string",
+        },
+        "delegationId": {
+          "type": "string",
+        },
+      },
+      "required": [
+        "delegationId",
+        "content",
+      ],
+      "type": "object",
+    },
+    "name": "shelf_report_progress",
+  },
+  {
+    "description": "As the delegated worker, explicitly submit the final plain-text result of the current phase. Only one uncollected result is allowed. Returns immediately after storing; the user collects it later. The delegation stays active for subsequent tasks.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "content": {
+          "type": "string",
+        },
+        "delegationId": {
+          "type": "string",
+        },
+      },
+      "required": [
+        "delegationId",
+        "content",
+      ],
+      "type": "object",
+    },
+    "name": "shelf_submit_result",
+  },
+  {
     "description": "List the app-level Agent Skills available in this app (each skill's name and description). Use this before creating a skill to avoid duplicate names, or to find one to read/update.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -244,6 +356,129 @@ exports[`Shelf tool contracts across Claude SDK and HTTP MCP > preserves each ad
 
 exports[`Shelf tool contracts across Claude SDK and HTTP MCP > preserves each adapter’s advertised names, descriptions and schemas > HTTP MCP surface 1`] = `
 [
+  {
+    "description": "Ask the user to select an already-open worktree Agent View in Shelf. Waits for the user selection; returns the stable target identity or cancellation. Does not start work.",
+    "execution": {
+      "taskSupport": "forbidden",
+    },
+    "inputSchema": {
+      "properties": {},
+      "type": "object",
+    },
+    "name": "shelf_select_agent",
+  },
+  {
+    "description": "Start a delegation to the target the user selected with shelf_select_agent. Send the first text task. Returns delegationId and queue receipt, NOT the experiment result. Keep doing other work; results are manually collected by the user.",
+    "execution": {
+      "taskSupport": "forbidden",
+    },
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "agentViewId": {
+          "type": "string",
+        },
+        "content": {
+          "type": "string",
+        },
+        "projectId": {
+          "type": "string",
+        },
+      },
+      "required": [
+        "projectId",
+        "agentViewId",
+        "content",
+      ],
+      "type": "object",
+    },
+    "name": "shelf_start_delegation",
+  },
+  {
+    "description": "Send the next text task within your existing delegation. User intervention temporarily rejects sends; query status and wait for the user, never automatically retry an uncertain delivery.",
+    "execution": {
+      "taskSupport": "forbidden",
+    },
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "content": {
+          "type": "string",
+        },
+        "delegationId": {
+          "type": "string",
+        },
+      },
+      "required": [
+        "delegationId",
+        "content",
+      ],
+      "type": "object",
+    },
+    "name": "shelf_send_delegation",
+  },
+  {
+    "description": "Query status of your delegation(s): intervention, availability, delivery and whether a result awaits collection. Never returns result text. Omit delegationId to list only delegations you participate in.",
+    "execution": {
+      "taskSupport": "forbidden",
+    },
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "delegationId": {
+          "type": "string",
+        },
+      },
+      "type": "object",
+    },
+    "name": "shelf_delegation_status",
+  },
+  {
+    "description": "As the delegated worker, update the latest short progress text for this delegation. UI only: does not notify the main conversation or mark a result complete.",
+    "execution": {
+      "taskSupport": "forbidden",
+    },
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "content": {
+          "type": "string",
+        },
+        "delegationId": {
+          "type": "string",
+        },
+      },
+      "required": [
+        "delegationId",
+        "content",
+      ],
+      "type": "object",
+    },
+    "name": "shelf_report_progress",
+  },
+  {
+    "description": "As the delegated worker, explicitly submit the final plain-text result of the current phase. Only one uncollected result is allowed. Returns immediately after storing; the user collects it later. The delegation stays active for subsequent tasks.",
+    "execution": {
+      "taskSupport": "forbidden",
+    },
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "content": {
+          "type": "string",
+        },
+        "delegationId": {
+          "type": "string",
+        },
+      },
+      "required": [
+        "delegationId",
+        "content",
+      ],
+      "type": "object",
+    },
+    "name": "shelf_submit_result",
+  },
   {
     "description": "List the app-level Agent Skills available in this app (each skill's name and description). Use this before creating a skill to avoid duplicate names, or to find one to read/update.",
     "execution": {

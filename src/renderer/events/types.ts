@@ -1,6 +1,7 @@
 import type { AgentInitStatus, AgentLoginPrompt, AgentLoginResult, AgentQueueItem, Connection, TaskEvent } from '../../shared/types';
 import { on, emit } from './bus';
 import { SHELF_MCP, type ShelfMcpStatus } from '../../shared/shelf-mcp';
+import { DELEGATION, type DelegationUiAction, type AgentViewRef } from '../../shared/agent-delegation';
 
 // Typed agent event vocabulary. Names prefixed 'agent:' to coexist with
 // the untyped legacy events on the same bus.
@@ -16,6 +17,9 @@ import { SHELF_MCP, type ShelfMcpStatus } from '../../shared/shelf-mcp';
 // Payloads carry tabId so a single global listener can route to the
 // right tab slice without per-component (tabId === id) filtering.
 export interface AgentEventMap {
+  [DELEGATION.EVENT.ACTION]: DelegationUiAction;
+  [DELEGATION.EVENT.SELECT]: { requestId: string; target: AgentViewRef | null };
+  [DELEGATION.EVENT.RENAME]: { tabId: string; displayName: string };
   [SHELF_MCP.STATUS_EVENT]: { tabId: string; status: ShelfMcpStatus };
   // -------- Inbound (IPC → bus) --------
   'agent:onMessage': { tabId: string; msg: unknown };

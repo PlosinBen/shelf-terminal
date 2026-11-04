@@ -31,8 +31,16 @@ import { mediateAgentLoginUrl } from './login-url-intent';
 import { getProjectsRepository } from '../projects/repository-provider';
 import { validateViewBinding } from './view-binding';
 import { sameProjectTarget } from '@shared/project-target';
+import { isWorktreeUnavailable, worktreeLabel } from '@shared/worktree';
+import { DELEGATION as D, type DelegationView, type DelegationUiAction } from '@shared/agent-delegation';
+import { createDelegationService } from './delegation';
+import { createDelegationReceipts } from './delegation-receipts';
+import { configureDelegationRuntime, resolveDelegationTarget, cancelDelegationPickers } from './delegation-runtime';
 
 interface SessionInstance {
+  displayName: string;
+  ready: boolean;
+  connectionDead?: boolean;
   tabId: string;
   sessionId: string;
   projectId?: string;
@@ -61,6 +69,34 @@ interface SessionInstance {
 }
 
 const sessions = new Map<string, SessionInstance>();
+const delegationReceipts = createDelegationReceipts();
+function delegationViews(): DelegationView[] {
+  return [...sessions.values()].flatMap(session => {
+    const project = session.projectId ? getProjectsRepository().get(session.projectId) : null;
+    if (!project) return [];
+    return [{ projectId: project.id, agentViewId: session.sessionId, tabId: session.tabId,
+      displayName: session.displayName, projectName: project.parentProjectId ? worktreeLabel(project) : project.name, cwd: project.cwd, provider: session.provider,
+      worktree: !!project.parentProjectId && !isWorktreeUnavailable(project),
+      available: session.ready && !session.connectionDead && !isWorktreeUnavailable(project) }];
+  });
+}
+function publishDelegations() {
+  const win = getWindow?.();
+  if (win && !win.isDestroyed()) win.webContents.send(D.IPC.UPDATE, delegations.snapshots());
+}
+const delegations = createDelegationService({
+  views: delegationViews, mintId: () => crypto.randomUUID(), changed: publishDelegations,
+  deliver: async (target, message, accepted) => {
+    const session = sessions.get(target.tabId);
+    if (!session || session.sessionId !== target.agentViewId) return { state: D.DELIVERY.FAILED, error: 'Target View closed' };
+    const receipt = delegationReceipts.register(target.tabId, message.msgId, accepted);
+    send(IPC.AGENT_MESSAGE, target.tabId, { type: 'user', msgId: message.msgId, content: message.content, inputMessage: message });
+    void executeMessage(target.tabId, session, { inputMessage: message }, message.msgId, receipt.written)
+      .catch(error => log.error('agent', `delegation execution failed msgId=${message.msgId}: ${String(error)}`))
+      .finally(() => receipt.finish());
+    return receipt.promise;
+  },
+});
 
 /**
  * Idle-teardown: drop a tab's exec + provider CLI to reclaim memory, KEEPING the
@@ -120,6 +156,48 @@ let getWindow: (() => BrowserWindow | null) | null = null;
 
 export function initAgentManager(windowGetter: () => BrowserWindow | null): void {
   getWindow = windowGetter;
+  configureDelegationRuntime({
+    service: delegations,
+    caller: ctx => {
+      const session = ctx.agentTabId ? sessions.get(ctx.agentTabId) : null;
+      if (!session || session.projectId !== ctx.projectId || session.sessionId !== ctx.agentViewId) throw new Error('Missing or stale trusted Agent View binding');
+      const view = delegationViews().find(v => v.tabId === session.tabId);
+      if (!view) throw new Error('Agent View Project no longer exists');
+      return view;
+    },
+    picker: request => {
+      const win = getWindow?.(); if (!win || win.isDestroyed()) return false;
+      win.webContents.send('candidates' in request ? D.IPC.PICKER : D.IPC.PICKER_CLOSE, request); return true;
+    },
+  });
+  ipcMain.handle(D.IPC.CURRENT, () => delegations.snapshots());
+  ipcMain.handle(D.IPC.RESOLVE, (_event, payload) => {
+    try { resolveDelegationTarget(payload.requestId, payload.target ?? null); return { ok: true }; }
+    catch (error) { log.warn('agent', `delegation picker: ${String(error)}`); return { ok: false, error: String(error) }; }
+  });
+  ipcMain.handle(D.IPC.RENAME, (_event, payload) => {
+    const session = sessions.get(payload?.tabId);
+    if (!session || typeof payload.displayName !== 'string' || !payload.displayName.trim()) throw new Error('Invalid Agent View name update');
+    session.displayName = payload.displayName; publishDelegations();
+  });
+  ipcMain.handle(D.IPC.PREPARE_CLOSE, (_event, payload) => {
+    if (!Array.isArray(payload?.tabIds) || !payload.tabIds.every((id: unknown) => typeof id === 'string')) throw new Error('Invalid View closure request');
+    const ready = delegations.prepareClose(payload.tabIds, payload.discard === true);
+    if (ready) cancelDelegationPickers(payload.tabIds);
+    return ready;
+  });
+  ipcMain.handle(D.IPC.ACTION, async (_event, payload: DelegationUiAction) => {
+    try {
+      if (typeof payload?.id !== 'string') throw new Error('Invalid delegation action');
+      switch (payload.action) {
+        case D.ACTION.INTERVENE: return { ok: true, data: delegations.intervene(payload.id, true) };
+        case D.ACTION.RESUME: return { ok: true, data: delegations.intervene(payload.id, false) };
+        case D.ACTION.EXTRACT: return { ok: true, data: await delegations.extract(payload.id) };
+        case D.ACTION.STOP: delegations.stop(payload.id, payload.discard === true); return { ok: true };
+        default: throw new Error('Unknown delegation action');
+      }
+    } catch (error) { log.warn('agent', `delegation action id=${payload?.id}: ${String(error)}`); return { ok: false, error: String(error) }; }
+  });
 
   // Seed the idle-teardown timeout from settings (0 = disabled).
   const s0 = loadSettings();
@@ -238,6 +316,10 @@ export function initAgentManager(windowGetter: () => BrowserWindow | null): void
     if (!checked.ok) {
       log.error('agent', `input rejected tabId=${payload?.tabId} msgId=${payload?.inputMessage?.msgId}: ${checked.error}`);
       return false;
+    }
+    if (checked.message.inputMessage) {
+      try { delegations.assertUserInput(payload.tabId); }
+      catch (error) { log.warn('agent', String(error)); return false; }
     }
     return sendMessage(payload.tabId, checked.message, checked.message.inputMessage?.msgId);
   });
@@ -384,11 +466,14 @@ async function startSession(
     // Connection health from the heartbeat round-trip (per-tab agent-server).
     // The renderer aggregates per-project (worst among the project's agent
     // tabs) for the project status icon. See §5.9.
-    (healthState) => send(IPC.AGENT_CONNECTION_HEALTH, tabId, healthState),
+    (healthState) => {
+      const current = sessions.get(tabId); if (current) current.connectionDead = healthState.state === 'dead';
+      send(IPC.AGENT_CONNECTION_HEALTH, tabId, healthState); publishDelegations();
+    },
     // Server-owned send-queue snapshot — forwarded straight to the renderer,
     // which mirrors it (optimistic chips reconciled against this authoritative
     // list). Session-level (executionId-less). See message-queue-ownership.
-    (items) => send(IPC.AGENT_QUEUE, tabId, items),
+    (items) => send(IPC.AGENT_QUEUE, tabId, delegationReceipts.snapshot(tabId, items)),
     // App-skill reload result → a system/error line in THIS tab's agent view
     // (reuses AGENT_MESSAGE rendering). Session-level (executionId-less); the agent-
     // server emits it after a live re-scan, no-op sessions emit nothing. See
@@ -417,14 +502,19 @@ async function startSession(
         const view = validateViewBinding(project, sessionId, provider, tabId, sessions.values());
         return { intent: view.prefs, customModels: providerCustomModels(provider) };
       },
-      onFailure: error => send(IPC.AGENT_INIT_STATUS, tabId, {
-        state: 'failed', reason: error instanceof Error ? error.message : String(error), recovery: recoveryFromError(error),
-      }),
-      onReady: () => send(IPC.AGENT_INIT_STATUS, tabId, { state: 'ready' }),
+      onFailure: error => {
+        const current = sessions.get(tabId); if (current) current.ready = false;
+        send(IPC.AGENT_INIT_STATUS, tabId, { state: 'failed', reason: error instanceof Error ? error.message : String(error), recovery: recoveryFromError(error) });
+        publishDelegations();
+      },
+      onReady: () => { const current = sessions.get(tabId); if (current) current.ready = true; send(IPC.AGENT_INIT_STATUS, tabId, { state: 'ready' }); publishDelegations(); },
     },
+    { agentViewId: sessionId, agentTabId: tabId },
   );
 
   const session: SessionInstance = {
+    ready: false,
+    displayName: typeof opts?.displayName === 'string' && opts.displayName.trim() ? opts.displayName : providerLabel(provider),
     tabId,
     sessionId,
     projectId,
@@ -459,6 +549,7 @@ async function startSession(
       // routing → setAuthRequired → AuthPane takeover); then mark ready (the
       // chat underneath is harmless while AuthPane covers the pane).
       send(IPC.AGENT_CAPABILITIES, tabId, caps);
+      session.ready = !caps.authRequired; publishDelegations();
       if (caps.authRequired) send(IPC.AGENT_AUTH_REQUIRED, tabId, providerLabel(provider));
       send(IPC.AGENT_INIT_STATUS, tabId, { state: 'ready' });
     }).catch((err) => {
@@ -470,6 +561,7 @@ async function startSession(
   } else {
     // Backend that exposes no capabilities is still "ready" — nothing to wait for.
     send(IPC.AGENT_INIT_STATUS, tabId, { state: 'ready' });
+    session.ready = true; publishDelegations();
   }
 
   return true;
@@ -494,7 +586,7 @@ async function sendMessage(
   return executeMessage(tabId, session, checked.message, queueMessageId);
 }
 
-async function executeMessage(tabId: string, session: SessionInstance, input: AgentInputRequest, queueMessageId?: string): Promise<boolean> {
+async function executeMessage(tabId: string, session: SessionInstance, input: AgentInputRequest, queueMessageId?: string, onSubmitted?: () => void): Promise<boolean> {
 
   const tag = `[agent:${formatTabLogId(tabId)}]`;
   log.info('agent', `${tag} send msgId=${input.inputMessage?.msgId ?? '-'} promptLen=${input.inputMessage?.content.length ?? 0}${input.configEdit ? ` configEdit=${input.configEdit.key}` : ''}`);
@@ -525,6 +617,7 @@ async function executeMessage(tabId: string, session: SessionInstance, input: Ag
     for await (const event of session.backend.query(input, session.cwd, {
       canUseTool,
       clientMsgId: queueMessageId,
+      onSubmitted,
     })) {
       // A per-execution `status` event is execution-lifecycle plumbing (it closes THIS
       // execution's generator), NOT a session-level signal. The renderer's streaming
@@ -637,6 +730,9 @@ function applyPostAuthResult(
   session: Pick<SessionInstance, 'provider'>,
   caps: ProviderCapabilities,
 ): boolean {
+  const current = sessions.get(tabId);
+  if (current) current.ready = !caps.authRequired;
+  publishDelegations();
   send(IPC.AGENT_CAPABILITIES, tabId, caps);
   if (caps.authRequired) send(IPC.AGENT_AUTH_REQUIRED, tabId, providerLabel(session.provider));
   return !caps.authRequired;
@@ -668,6 +764,7 @@ function dispatchEvent(tabId: string, event: AgentEvent) {
       // execution). Same IPC channel as the initial capabilities so the renderer's
       // onCapabilities → setCapabilities path updates the status bar.
       send(IPC.AGENT_CAPABILITIES, tabId, event.caps);
+      { const current = sessions.get(tabId); if (current) current.ready = !event.caps.authRequired; publishDelegations(); }
       break;
     case 'picker_request':
       send(IPC.AGENT_PICKER_REQUEST, tabId, {
@@ -676,6 +773,7 @@ function dispatchEvent(tabId: string, event: AgentEvent) {
       });
       break;
     case 'auth_required':
+      { const current = sessions.get(tabId); if (current) current.ready = false; publishDelegations(); }
       send(IPC.AGENT_AUTH_REQUIRED, tabId, event.provider);
       break;
     case 'auth_login_prompt':
@@ -733,6 +831,8 @@ async function stopSession(tabId: string): Promise<boolean> {
 async function destroySession(tabId: string): Promise<boolean> {
   const session = sessions.get(tabId);
   if (!session) return false;
+  if (!delegations.prepareClose([tabId])) throw new Error(D.ERROR.DISCARD);
+  cancelDelegationPickers([tabId]);
   idleTracker.forget(tabId);
   session.backend.dispose();
   sessions.delete(tabId);
@@ -787,6 +887,8 @@ export async function sendFromInternal(
   tabId: string,
   message: AgentInputMessage,
 ): Promise<boolean> {
+  try { delegations.assertUserInput(tabId); }
+  catch (error) { log.warn('agent', `internal input rejected tabId=${tabId}: ${String(error)}`); return false; }
   if (!sessions.has(tabId)) {
     log.warn('agent', `internal input target missing tabId=${tabId} msgId=${message?.msgId}`);
     return false;
@@ -845,6 +947,9 @@ export function getAgentProvider(tabId: string): AgentProvider | null {
 }
 
 export function disposeAllAgents(): void {
+  const tabIds = [...sessions.keys()];
+  cancelDelegationPickers(tabIds);
+  delegations.prepareClose(tabIds, true);
   for (const session of sessions.values()) {
     session.backend.dispose();
     forgetExecMemoryScope(session.tabId);

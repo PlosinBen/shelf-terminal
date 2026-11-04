@@ -11,6 +11,7 @@ import { callMain } from '../../app-tool-client';
 import { FAKE_TEST_ENV, FAKE_RETIRED_MODEL } from './test-env';
 import { SHELF_MCP, SHELF_MCP_STATE, parseShelfMcpStatus } from '@shared/shelf-mcp';
 import type { AgentPrefs } from '@shared/types';
+import { DELEGATION as D, type AgentViewRef } from '@shared/agent-delegation';
 import type {
   OutgoingMessage,
   PickerResolvePayload,
@@ -175,6 +176,8 @@ export function pickerComboPrompts(): FakePrompt[] {
 }
 
 export function createFakeBackend(_representedProvider: AgentProvider = FAKE_PROVIDER): ServerBackend {
+  let delegationTarget: AgentViewRef | null = null;
+  let delegationId: string | null = null;
   const pendingPickers = new Map<string, PendingPicker>();
   const pendingPermissions = new Map<string, PendingPermission>();
   // Canned output per background task id, populated by the `taskdone:` scenario
@@ -259,6 +262,43 @@ export function createFakeBackend(_representedProvider: AgentProvider = FAKE_PRO
     signal: AbortSignal,
   ): Promise<void> {
     if (signal.aborted) return;
+
+    // Exercise the production app-tool request/result and queue path, not a UI test backdoor.
+    if (step === 'delegation_select') {
+      const result = await callMain(D.OP.SELECT);
+      const data = result.data as { target?: AgentViewRef } | undefined;
+      delegationTarget = data?.target ? { projectId: data.target.projectId, agentViewId: data.target.agentViewId } : null;
+      send({ type: 'message', msgId: mintId('m'), msgType: 'reply', content: `delegation selection ${JSON.stringify(result)}` });
+      return;
+    }
+    if (step.startsWith('delegation_start:') || step.startsWith('delegation_send:')) {
+      const start = step.startsWith('delegation_start:');
+      const content = `delegation_auto:${step.slice(step.indexOf(':') + 1)}`;
+      const result = await callMain(start ? D.OP.START : D.OP.SEND,
+        start ? { ...delegationTarget, content } : { delegationId, content });
+      if (start && result.ok) delegationId = (result.data as { delegationId: string }).delegationId;
+      send({ type: 'message', msgId: mintId('m'), msgType: 'reply', content: `delegation work ${JSON.stringify(result)}` });
+      return;
+    }
+    if (step === 'delegation_status') {
+      const result = await callMain(D.OP.STATUS, delegationId ? { delegationId } : {});
+      send({ type: 'message', msgId: mintId('m'), msgType: 'reply', content: `delegation status ${JSON.stringify(result)}` });
+      return;
+    }
+    if (step.startsWith('delegation_old_result:')) {
+      const result = await callMain(D.OP.RESULT, { delegationId: step.slice('delegation_old_result:'.length), content: 'late old result' });
+      send({ type: 'message', msgId: mintId('m'), msgType: 'reply', content: `late report ${JSON.stringify(result)}` });
+      return;
+    }
+    const delegated = step.match(/^\[Shelf delegation ([^\] ]+)\][\s\S]*?\n\ndelegation_auto:([\s\S]+)$/);
+    if (delegated) {
+      const [, id, phase] = delegated;
+      const progress = await callMain(D.OP.PROGRESS, { delegationId: id, content: `Checking ${phase}` });
+      if (phase.startsWith('slow:')) await sleep(2000, signal);
+      const result = await callMain(D.OP.RESULT, { delegationId: id, content: `EXPERIMENT RESULT ${phase}` });
+      send({ type: 'message', msgId: mintId('m'), msgType: 'reply', content: `worker submitted ${JSON.stringify({ progress, result })}` });
+      return;
+    }
 
     // reloadfail — arm the next reloadSkills to fail; echo a reply so the e2e can
     // await the turn before triggering a skill change.

@@ -216,6 +216,16 @@ interface ShelfApi {
     onActiveError: (callback: (reason: string) => void) => () => void;
     onStream: (callback: (chunk: import('../shared/types').PmStreamChunk) => void) => () => void;
   };
+  delegation: {
+    current(): Promise<import('../shared/agent-delegation').DelegationSnapshot[]>;
+    action(payload: import('../shared/agent-delegation').DelegationUiAction): Promise<{ ok: boolean; error?: string; data?: unknown }>;
+    resolve(requestId: string, target: import('../shared/agent-delegation').AgentViewRef | null): Promise<{ ok: boolean; error?: string }>;
+    prepareClose(tabIds: string[], discard?: boolean): Promise<boolean>;
+    rename(tabId: string, displayName: string): Promise<void>;
+    onUpdate(callback: (value: import('../shared/agent-delegation').DelegationSnapshot[]) => void): () => void;
+    onPicker(callback: (value: import('../shared/agent-delegation').DelegationPicker) => void): () => void;
+    onPickerClose(callback: (value: { requestId: string }) => void): () => void;
+  };
   agent: {
     getMemoryUsage: () => Promise<import('../shared/process-memory').ProcessMemorySummary | null>;
     onMemoryUsage: (callback: (summary: import('../shared/process-memory').ProcessMemorySummary) => void) => () => void;

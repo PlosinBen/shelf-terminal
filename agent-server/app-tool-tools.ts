@@ -6,6 +6,7 @@
 import { callMain } from './app-tool-client';
 import { WEB_FETCH_TOOL, BROWSER_OPEN_TOOL } from '@shared/web-session';
 import { z } from 'zod';
+import { DELEGATION as D } from '@shared/agent-delegation';
 
 export const APP_SKILL_LIST_DESC =
   'List the app-level Agent Skills available in this app (each skill\'s name and description). '
@@ -87,6 +88,17 @@ export interface BridgeToolSpec {
   operation: string;
 }
 export const SHELF_BRIDGE_TOOLS: BridgeToolSpec[] = [
+  { name: D.TOOL.SELECT, description: 'Ask the user to select an already-open worktree Agent View in Shelf. Waits for the user selection; returns the stable target identity or cancellation. Does not start work.', operation: D.OP.SELECT, inputSchema: {} },
+  { name: D.TOOL.START, description: 'Start a delegation to the target the user selected with shelf_select_agent. Send the first text task. Returns delegationId and queue receipt, NOT the experiment result. Keep doing other work; results are manually collected by the user.', operation: D.OP.START,
+    inputSchema: { projectId: z.string(), agentViewId: z.string(), content: z.string() } },
+  { name: D.TOOL.SEND, description: 'Send the next text task within your existing delegation. User intervention temporarily rejects sends; query status and wait for the user, never automatically retry an uncertain delivery.', operation: D.OP.SEND,
+    inputSchema: { delegationId: z.string(), content: z.string() } },
+  { name: D.TOOL.STATUS, description: 'Query status of your delegation(s): intervention, availability, delivery and whether a result awaits collection. Never returns result text. Omit delegationId to list only delegations you participate in.', operation: D.OP.STATUS,
+    inputSchema: { delegationId: z.string().optional() } },
+  { name: D.TOOL.PROGRESS, description: 'As the delegated worker, update the latest short progress text for this delegation. UI only: does not notify the main conversation or mark a result complete.', operation: D.OP.PROGRESS,
+    inputSchema: { delegationId: z.string(), content: z.string() } },
+  { name: D.TOOL.RESULT, description: 'As the delegated worker, explicitly submit the final plain-text result of the current phase. Only one uncollected result is allowed. Returns immediately after storing; the user collects it later. The delegation stays active for subsequent tasks.', operation: D.OP.RESULT,
+    inputSchema: { delegationId: z.string(), content: z.string() } },
   { name: 'list_app_skills', description: APP_SKILL_LIST_DESC, inputSchema: {}, operation: 'app_skill.list' },
   {
     name: 'get_app_skill', description: APP_SKILL_GET_DESC, operation: 'app_skill.get',

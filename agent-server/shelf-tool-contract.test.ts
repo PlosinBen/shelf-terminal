@@ -25,6 +25,12 @@ interface ClaudeTool {
 // Independent expectations: changing a shared definition must not silently change
 // both adapters and make parity alone pass.
 const cases = [
+  { name: 'shelf_select_agent', op: 'agent_delegation.select', args: {} },
+  { name: 'shelf_start_delegation', op: 'agent_delegation.start', args: { projectId: 'p', agentViewId: 'view', content: 'verify A' } },
+  { name: 'shelf_send_delegation', op: 'agent_delegation.send', args: { delegationId: 'delegation', content: 'verify B' } },
+  { name: 'shelf_delegation_status', op: 'agent_delegation.status', args: { delegationId: 'delegation' } },
+  { name: 'shelf_report_progress', op: 'agent_delegation.progress', args: { delegationId: 'delegation', content: 'checking A' } },
+  { name: 'shelf_submit_result', op: 'agent_delegation.result', args: { delegationId: 'delegation', content: 'A holds' } },
   { name: 'list_app_skills', op: 'app_skill.list', args: {} },
   { name: 'get_app_skill', op: 'app_skill.get', args: { name: 'sample' } },
   { name: 'create_app_skill', op: 'app_skill.create', args: { content: 'skill' } },

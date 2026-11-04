@@ -16,6 +16,8 @@ import {
 } from '../agentTabStore';
 import { emitAgent, emit, Events } from '../events';
 import { useStore } from '../store';
+import { DELEGATION } from '@shared/agent-delegation';
+import { DelegationPanel } from './agent/DelegationPanel';
 
 interface Props {
   tabId: string;
@@ -56,6 +58,7 @@ export function AgentView({ tabId, sessionId, cwd, connection, provider, project
   // prefs / sessionIds. See GOTCHAS "AgentView projectIndex drift".
   const projectIndex = projects.findIndex((p) => p.id === projectId);
   const savedPrefs = projects[projectIndex]?.agentViews[sessionId]?.prefs;
+  const displayName = projects[projectIndex]?.tabs.find(tab => tab.id === tabId)?.label ?? provider;
 
   // Only read what AgentView still needs directly: authRequired
   // gates the early return. Everything else (messages / status /
@@ -79,9 +82,12 @@ export function AgentView({ tabId, sessionId, cwd, connection, provider, project
     // emitting the first capabilities event. Without this, copilot's
     // `currentPermissionMode` reports its hardcoded 'default' on every
     // reconnect, overwriting the warm-started actual* in agentTabStore.
-    emitAgent('agent:init', { tabId, cwd, connection, provider, sessionId, opts: { intent: savedPrefs, projectId } });
+    emitAgent('agent:init', { tabId, cwd, connection, provider, sessionId, opts: { intent: savedPrefs, projectId, displayName } });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tabId]);
+  useEffect(() => {
+    if (tabState?.initStatus === 'ready') emitAgent(DELEGATION.EVENT.RENAME, { tabId, displayName });
+  }, [tabId, displayName, tabState?.initStatus]);
 
   /**
    * Capability-driven persist: when provider re-broadcasts capabilities
@@ -121,6 +127,7 @@ export function AgentView({ tabId, sessionId, cwd, connection, provider, project
     return (
       <div className="agent-view" ref={rootRef}>
         <ShelfMcpBanner tabId={tabId} />
+        <DelegationPanel tabId={tabId} />
         <AuthPane tabId={tabId} />
       </div>
     );
@@ -136,6 +143,7 @@ export function AgentView({ tabId, sessionId, cwd, connection, provider, project
       <DecisionPanel tabId={tabId} />
       <PlanPanel tabId={tabId} />
       <BackgroundTasksPanel tabId={tabId} />
+      <DelegationPanel tabId={tabId} />
       <InputZone
         tabId={tabId}
         projectId={projectId}

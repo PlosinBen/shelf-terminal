@@ -210,3 +210,21 @@ observers（telegram bridge）仍收原始 per-execution idle（維持逐 execut
 - 別拿掉任一道 identity guard —— per-project 持久 sid 的 close/reopen race 會回來，孤兒 channel 誤殺新 exec。
 
 **Related**：`connection-health#7`（reconnect：`handleExecDown` 的 fail-loud ordering）、`connection-health#8`（dispatcher death = host disconnect + Retry）、`architecture/agent-dispatch`（role-split、two-map hosting）、`src/main/agent/{remote,dispatcher-connection}.ts`、`agent-server/{index,dispatcher,exec}.ts`。
+
+## agent-core#12 — 委派關係獨立於執行與成果提取  ·  [Decision]
+
+**Decision:** Shelf 的 worktree Agent 委派是 main-owned、記憶體內的雙端 View 關係。
+使用者透過 MCP 發起的選擇器授權指定雙端；main 可在關係內反覆送工作，spike
+明確提交最新進度與單份文字結果。結果只由使用者提取，提取不解鎖。介入時拒絕
+main 新工作；停止／明確關閉 View 才斷開關係，不因此停止另一端 Agent。
+
+**Reason:** Spike 驗證常是 A → 主對話判斷 → B，單一 turn／結果不等於整段合作
+結束。自動將結果送入 main 會干擾現有工作；只按 View 路由晚到回報則可能誤掛
+新委派，因此穩定 View 身分與每次合作的 delegationId 必須分開。
+
+**Do not change casually because:** transport sid／nonce 不是通用持久 View 身分。
+來源必須從可信 channel 綁回 main live View，不能信任 tool args。委派提交回覆
+依既有 queue snapshot，不等待 execution completion；internal ids 要與 renderer
+optimistic projection 分流。接收不明時保留結果、不自動重送。雛形不保存委派
+歷史或重啟恢復，原有 View／對話持久化不變。具體工具與 lifecycle 見
+`contracts/agent-delegation`。

@@ -28,6 +28,7 @@ import { syncMcpForConnection } from '../mcp-remote';
 import { transportPutDir, composeRemotePath } from '../connector/transport';
 import { shelfPlacement, ShelfFileTypeSkill } from '@shared/shelf-paths';
 import { handleAppTool } from './app-tool';
+import { isDelegationOperation } from './delegation-runtime';
 import { SHELF_MCP, parseShelfMcpStatus } from '@shared/shelf-mcp';
 import { buildWorktreeAppToolAuditEvent } from './app-tool-audit';
 import { connectionScopeKey } from '@shared/process-memory';
@@ -151,6 +152,7 @@ export function createRemoteBackend(
     onFailure(error: unknown): void;
     onReady?(): void;
   },
+  viewContext?: { agentViewId: string; agentTabId: string },
 ): AgentBackend {
   let remoteProc: RemoteProcess | null = null;
   let initializedProc: RemoteProcess | null = null;
@@ -196,10 +198,10 @@ export function createRemoteBackend(
           const dc = ensureDispatcher(connection, cwd, deployResult!, initScript, memorySinks);
           const sid = sessionId ?? randomUUID();
           proc = dc
-            ? dc.openSession(sid, cwd, { onTaskEvent, onServerExecution, onHealth, onQueue, onSkillsReloaded, onSessionEvent, onExecDown: invalidateInitialization, onMemoryUsage: memorySinks?.session, projectId }, projectEnv)
+            ? dc.openSession(sid, cwd, { onTaskEvent, onServerExecution, onHealth, onQueue, onSkillsReloaded, onSessionEvent, onExecDown: invalidateInitialization, onMemoryUsage: memorySinks?.session, projectId, ...viewContext }, projectEnv)
             : null;
         } else {
-          proc = await spawnAgentServer(connection, cwd, deployResult!, initScript, projectEnv, onTaskEvent, onServerExecution, onHealth, onQueue, onSkillsReloaded, onSessionEvent, projectId, memorySinks?.session);
+          proc = await spawnAgentServer(connection, cwd, deployResult!, initScript, projectEnv, onTaskEvent, onServerExecution, onHealth, onQueue, onSkillsReloaded, onSessionEvent, projectId, memorySinks?.session, viewContext);
         }
         if (!proc) return null;
         const ready = await proc.awaitReady();
@@ -381,6 +383,7 @@ export function createRemoteBackend(
         appId: getAppInstanceId(),
       });
 
+      opts?.onSubmitted?.();
       yield* events;
     },
 
@@ -826,9 +829,10 @@ async function spawnAgentServer(
   onSessionEvent?: (event: AgentEvent) => void,
   projectId?: string,
   onMemoryUsage?: (report: MemoryUsageReport) => void,
+  viewContext?: { agentViewId: string; agentTabId: string },
 ): Promise<RemoteProcess | null> {
   const proc = spawnDeployedProcess(connection, cwd, deploy, false, initScript, projectEnv);
-  return wrapProcess(proc, onTaskEvent, onServerExecution, onHealth, onQueue, onSkillsReloaded, onSessionEvent, projectId, onMemoryUsage);
+  return wrapProcess(proc, onTaskEvent, onServerExecution, onHealth, onQueue, onSkillsReloaded, onSessionEvent, projectId, onMemoryUsage, viewContext);
 }
 
 /** Test mode and Electron runtime selection are agent startup semantics. */
@@ -990,6 +994,7 @@ export function wrapProcess(
   onSessionEvent?: (event: AgentEvent) => void,
   projectId?: string,
   onMemoryUsage?: (report: MemoryUsageReport) => void,
+  viewContext?: { agentViewId: string; agentTabId: string },
 ): RemoteProcess {
   const dispatcher = createExecutionDispatcher(parseRemoteMessage, onTaskEvent, onServerExecution, onQueue, onSkillsReloaded, onSessionEvent);
   let buffer = '';
@@ -1152,7 +1157,10 @@ export function wrapProcess(
           ? buildWorktreeAppToolAuditEvent({ requestId, op, args })
           : null;
         if (auditStarted) onSessionEvent?.(auditStarted);
-        void handleAppTool(op, args, { projectId, agentSessionId }).then((result) => {
+        const resultPromise = !active && isDelegationOperation(op)
+          ? Promise.resolve({ ok: false, error: 'Inactive Agent channel' })
+          : handleAppTool(op, args, { projectId, agentSessionId, ...viewContext });
+        void resultPromise.then((result) => {
           if (typeof requestId === 'string') {
             const auditCompleted = buildWorktreeAppToolAuditEvent({ requestId, op, args, result });
             if (auditCompleted) onSessionEvent?.(auditCompleted);

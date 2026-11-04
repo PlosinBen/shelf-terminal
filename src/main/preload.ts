@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import { IPC } from '@shared/ipc-channels';
+import { DELEGATION } from '@shared/agent-delegation';
 
 contextBridge.exposeInMainWorld('shelfApi', {
   pty: {
@@ -319,6 +320,25 @@ contextBridge.exposeInMainWorld('shelfApi', {
       };
       ipcRenderer.on(IPC.PM_STREAM, listener);
       return () => ipcRenderer.removeListener(IPC.PM_STREAM, listener);
+    },
+  },
+  delegation: {
+    current: () => ipcRenderer.invoke(DELEGATION.IPC.CURRENT),
+    action: (payload: import('../shared/agent-delegation').DelegationUiAction) => ipcRenderer.invoke(DELEGATION.IPC.ACTION, payload),
+    resolve: (requestId: string, target: import('../shared/agent-delegation').AgentViewRef | null) => ipcRenderer.invoke(DELEGATION.IPC.RESOLVE, { requestId, target }),
+    prepareClose: (tabIds: string[], discard = false) => ipcRenderer.invoke(DELEGATION.IPC.PREPARE_CLOSE, { tabIds, discard }),
+    rename: (tabId: string, displayName: string) => ipcRenderer.invoke(DELEGATION.IPC.RENAME, { tabId, displayName }),
+    onUpdate: (callback: (value: import('../shared/agent-delegation').DelegationSnapshot[]) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, value: import('../shared/agent-delegation').DelegationSnapshot[]) => callback(value);
+      ipcRenderer.on(DELEGATION.IPC.UPDATE, listener); return () => ipcRenderer.removeListener(DELEGATION.IPC.UPDATE, listener);
+    },
+    onPicker: (callback: (value: import('../shared/agent-delegation').DelegationPicker) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, value: import('../shared/agent-delegation').DelegationPicker) => callback(value);
+      ipcRenderer.on(DELEGATION.IPC.PICKER, listener); return () => ipcRenderer.removeListener(DELEGATION.IPC.PICKER, listener);
+    },
+    onPickerClose: (callback: (value: { requestId: string }) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, value: { requestId: string }) => callback(value);
+      ipcRenderer.on(DELEGATION.IPC.PICKER_CLOSE, listener); return () => ipcRenderer.removeListener(DELEGATION.IPC.PICKER_CLOSE, listener);
     },
   },
   agent: {

@@ -18,6 +18,7 @@ import { createExecutionDispatcher, type PermissionHandler } from './execution-d
 import { buildWorktreeAppToolAuditEvent } from './app-tool-audit';
 import type { AppToolContext, AppToolResult } from './app-tool';
 import { SHELF_MCP } from '@shared/shelf-mcp';
+import { isDelegationOperation } from './delegation-runtime';
 import {
   MEMORY_WIRE_TYPE,
   parseMemoryUsageReport,
@@ -34,6 +35,8 @@ export interface DispatcherProc {
 
 /** Per-session sinks — same set the per-tab path threads into its execution-dispatcher. */
 export interface SessionSinks {
+  agentViewId?: string;
+  agentTabId?: string;
   onTaskEvent?: (ev: any) => void;
   onServerExecution?: (executionId: string, events: AsyncGenerator<AgentEvent>) => void;
   onHealth?: (health: ConnectionHealth) => void;
@@ -225,7 +228,11 @@ export function createDispatcherConnection(deps: DispatcherConnectionDeps): Disp
         ? buildWorktreeAppToolAuditEvent({ requestId, op, args })
         : null;
       if (auditStarted) ch.sinks.onSessionEvent?.(auditStarted);
-      void deps.handleAppTool(op, args, { projectId: ch.sinks.projectId, agentSessionId: sid }).then((result) => {
+      const resultPromise = !active && isDelegationOperation(op)
+        ? Promise.resolve({ ok: false, error: 'Inactive Agent channel' })
+        : deps.handleAppTool(op, args, { projectId: ch.sinks.projectId, agentSessionId: sid,
+          agentViewId: ch.sinks.agentViewId, agentTabId: ch.sinks.agentTabId });
+      void resultPromise.then((result) => {
         if (typeof requestId === 'string') {
           const auditCompleted = buildWorktreeAppToolAuditEvent({ requestId, op, args, result });
           if (auditCompleted) ch.sinks.onSessionEvent?.(auditCompleted);

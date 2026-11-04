@@ -3,6 +3,8 @@ import { bindAgentIPCGroup } from './ipc-agent';
 import { onAgent, emitAgent } from './types';
 import { __resetBusForTests } from './bus';
 import { SHELF_MCP, SHELF_MCP_STATE, SHELF_MCP_FAILURE } from '../../shared/shelf-mcp';
+import { cancelPendingSend } from '../agentTabStore';
+vi.mock('../agentTabStore', () => ({ cancelPendingSend: vi.fn() }));
 
 // Mock the agent IPC surface. Each on* method stores its callback so
 // tests can fire it synchronously; each outbound method records calls
@@ -179,6 +181,16 @@ describe('bindAgentIPCGroup', () => {
       emitAgent('agent:send', { tabId: 't1', inputMessage });
       const call = mock.calls.find((c) => c.method === 'send');
       expect(call!.args).toEqual(['t1', { inputMessage }]);
+    });
+    it('removes a rejected optimistic input and shows a visible error instead of leaving a ghost queue chip', async () => {
+      vi.spyOn(mock.api, 'send').mockResolvedValueOnce(false);
+      const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const message = vi.fn(); const off = onAgent('agent:onMessage', message);
+      try {
+        emitAgent('agent:send', { tabId: 't1', inputMessage: { msgId: 'rejected', source: { kind: 'agent-view' }, content: 'blocked work', attachments: [], replyRequirement: 'none' } });
+        await vi.waitFor(() => expect(message).toHaveBeenCalledWith({ tabId: 't1', msg: expect.objectContaining({ type: 'error' }) }));
+        expect(cancelPendingSend).toHaveBeenCalledWith('t1', 'rejected');
+      } finally { off(); logged.mockRestore(); }
     });
 
     it('forwards agent:stop to api.stop', () => {

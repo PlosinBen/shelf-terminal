@@ -8,6 +8,18 @@ related:
 
 # Testing Practices
 
+## Worktree delegation verification
+
+`npm run test:unit -- src/main/agent/delegation.test.ts src/main/agent/delegation-receipts.test.ts src/main/agent/delegation-runtime.test.ts`
+驗記憶體角色／授權、介入、單份結果、picker 往返、queue receipt 與晚到對帳。
+`remote.test.ts`／`dispatcher-connection.test.ts` 驗 trusted logical View context；
+既有 Shelf SDK smoke／adapter contract 也包含委派工具。
+
+`npm run test:e2e -- e2e/agent-delegation.spec.ts` 使用真 temporary Git worktree 與
+fake provider 的正式 callMain，走 picker → main service → exec queue → 雙端 UI。
+涵蓋 A→B 接續、結果不自動觸發 main、介入／停止、未提取結果的關閉提醒與重啟
+清空。這不是 live 模型的工具選擇／approval 或 SSH／Docker／WSL 部署證明。
+
 ## testing#1 — Promise-bearing tests explain the contract they protect  ·  [Decision]
 
 **Decision:** A unit, integration, or end-to-end test that protects a non-obvious promise to users, agents, external interfaces, or another system layer carries nearby rationale stating the promise, why its assertions are required behavior rather than incidental implementation detail, and which model-facing, user-facing, or contract surface must be reviewed if the behavior changes. Ordinary pure functions, obvious CRUD, and tests whose names fully state the behavior do not require this annotation.

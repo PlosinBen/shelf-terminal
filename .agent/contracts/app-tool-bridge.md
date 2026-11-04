@@ -9,6 +9,12 @@ related:
 
 # App-Tool Bridge
 
+Worktree delegation uses this same request/result bridge. Source View identity is supplied
+separately as `AppToolContext.agentViewId` (logical sessionId) and `agentTabId` (runtime
+binding), never from model args. Direct and dispatcher paths thread this main-owned
+context and reject delegation requests from inactive channels. Endpoint authorization
+retains its transport nonce/sid. See [delegation contract](agent-delegation.md).
+
 The in-process RPC channel by which an agent (running in `agent-server`, possibly remote) acts on client-owned resources that live in **main** — currently app-level Agent Skills under `<userData>/skills/`. A per-provider bridge tool calls `callMain(op, args)`, which emits an `app_tool` request over the stdio wire; main dispatches it through an `op = resource.verb` registry against `skills-store`, and replies with `app_tool_result` matched by `requestId`. Reads are `safe` (no confirm); writes are permission-gated at the provider's tool registration, and `app_skill.update` is additionally lock/upsert-guarded in main.
 
 ## Wire messages

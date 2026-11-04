@@ -5592,3 +5592,13 @@ button {
   color: #fff;
   cursor: wait;
 }
+
+.delegation-panel { flex-shrink: 0; padding: 6px 12px; border-top: 1px solid var(--border-color, #444); font-size: 12px; }
+.delegation-card + .delegation-card { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border-color, #444); }
+.delegation-status { opacity: .75; margin: 4px 0; }
+.delegation-progress { white-space: pre-wrap; max-height: 100px; overflow: auto; margin-bottom: 6px; }
+.delegation-actions { display: flex; gap: 8px; }
+.delegation-error { color: var(--warning-color, #e9b45b); margin-bottom: 6px; }
+.delegation-picker { width: min(620px, 90vw); max-height: 80vh; overflow: auto; background: var(--bg-color, #252525); color: var(--text-color, #ddd); padding: 20px; border: 1px solid var(--border-color, #555); border-radius: 8px; }
+.delegation-target { display: block; width: 100%; margin: 8px 0; padding: 10px; text-align: left; overflow-wrap: anywhere; }
+.delegation-target:disabled { opacity: .5; }

@@ -1,6 +1,7 @@
 import type { AgentInitStatus } from '../../shared/types';
 import { onAgent, emitAgent } from './types';
 import { SHELF_MCP } from '../../shared/shelf-mcp';
+import { cancelPendingSend } from '../agentTabStore';
 
 // Single global binder that wires window.shelfApi.agent.* IPC ↔ typed
 // agent event bus. Caller (App.tsx mount) gets a cleanup function that
@@ -70,7 +71,11 @@ export function bindAgentIPCGroup(): () => void {
   });
   const offSendEvt = onAgent('agent:send', ({ tabId, ...input }) => {
     void Promise.resolve(api.send(tabId, input)).then(ok => {
-      if (ok === false) console.error('Agent input submission rejected', { tabId, msgId: input.inputMessage?.msgId });
+      if (ok === false) {
+        console.error('Agent input submission rejected', { tabId, msgId: input.inputMessage?.msgId });
+        if (input.inputMessage) cancelPendingSend(tabId, input.inputMessage.msgId);
+        emitAgent('agent:onMessage', { tabId, msg: { type: 'error', content: 'Input rejected before execution. Check the View’s delegation and availability before sending again.' } });
+      }
     }).catch(error => {
       console.error('Agent input submission failed', { tabId, msgId: input.inputMessage?.msgId, error });
     });

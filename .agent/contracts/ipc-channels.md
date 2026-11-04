@@ -267,6 +267,21 @@ PM Agent control + read-only stream mirror.
 
 > `pm:escalation-respond` is a declared constant in `IPC` but is not currently exposed in preload nor handled in main (vestigial).
 
+## delegation (`shelfApi.delegation`)
+
+Channels and payloads are `DELEGATION` in `src/shared/agent-delegation.ts`; preload is RPC
+only. See [delegation contract](agent-delegation.md).
+
+| Method | Shape |
+|---|---|
+| `current()` | invoke → `DelegationSnapshot[]`, without result text |
+| `action({id,action,discard?})` | invoke → `{ok,data?,error?}`; intervene/resume/extract/stop |
+| `resolve(requestId,target|null)` | invoke → picker completion/cancellation; target is `AgentViewRef` |
+| `prepareClose(tabIds,discard?)` | invoke → false if confirmation required; true ends affected relations before teardown |
+| `rename(tabId,displayName)` | invoke → live display metadata only |
+| `onUpdate(cb)` | receive `DelegationSnapshot[]` → unsubscribe |
+| `onPicker(cb)` / `onPickerClose(cb)` | receive selection request / close by requestId → unsubscribe |
+
 ## agent (`shelfApi.agent`)
 
 Renderer↔backend session bridge. Wire payloads crossing these channels are render primitives, not provider vocabulary — see `contracts/agent-wire-protocol`. Most push channels carry `(tabId, payload)`.

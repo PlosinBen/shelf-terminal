@@ -30,6 +30,9 @@ import { listFeatureNotes } from '../worktree/feature-notes';
 import { IPC } from '@shared/ipc-channels';
 import { SHELF_MCP, isShelfMcpEndpointId } from '@shared/shelf-mcp';
 import { shelfMcpAuthority } from './shelf-mcp-authority';
+import { DELEGATION as D } from '@shared/agent-delegation';
+import { requireDelegationRuntime, selectDelegationTarget } from './delegation-runtime';
+import { log } from '@shared/logger';
 
 /** Per-call context the bridge threads in (which tab/project asked). */
 export interface AppToolContext {
@@ -37,6 +40,9 @@ export interface AppToolContext {
   projectId?: string;
   /** Trusted transport session, never supplied by model tool arguments. */
   agentSessionId?: string;
+  /** Main-bound logical View and runtime tab; never read from tool args. */
+  agentViewId?: string;
+  agentTabId?: string;
 }
 
 export interface AppToolResult {
@@ -116,7 +122,39 @@ async function resolveProposedNotePaths(projectId: string, identifiers: readonly
   return resolved;
 }
 
+function exactDelegationArgs(args: Record<string, unknown>, allowed: string[]) {
+  if (Object.keys(args).some(key => !allowed.includes(key))) throw new Error('Unexpected delegation argument');
+}
+function delegationText(value: unknown): string {
+  if (typeof value !== 'string' || !value.trim()) throw new Error('Non-empty delegation text is required');
+  return value;
+}
+
 const REGISTRY: Record<string, AppToolDef> = {
+  [D.OP.SELECT]: { safe: false, run: async (args, ctx) => {
+    exactDelegationArgs(args, []); return selectDelegationTarget(ctx);
+  } },
+  [D.OP.START]: { safe: false, run: async (args, ctx) => {
+    exactDelegationArgs(args, ['projectId', 'agentViewId', 'content']);
+    const r = requireDelegationRuntime();
+    return r.service.start(r.caller(ctx), { projectId: delegationText(args.projectId), agentViewId: delegationText(args.agentViewId) }, delegationText(args.content));
+  } },
+  [D.OP.SEND]: { safe: false, run: async (args, ctx) => {
+    exactDelegationArgs(args, ['delegationId', 'content']); const r = requireDelegationRuntime();
+    return r.service.send(r.caller(ctx), delegationText(args.delegationId), delegationText(args.content));
+  } },
+  [D.OP.STATUS]: { safe: true, run: async (args, ctx) => {
+    exactDelegationArgs(args, ['delegationId']); const r = requireDelegationRuntime();
+    return r.service.status(r.caller(ctx), args.delegationId === undefined ? undefined : delegationText(args.delegationId));
+  } },
+  [D.OP.PROGRESS]: { safe: false, run: async (args, ctx) => {
+    exactDelegationArgs(args, ['delegationId', 'content']); const r = requireDelegationRuntime();
+    r.service.progress(r.caller(ctx), delegationText(args.delegationId), delegationText(args.content)); return { updated: true };
+  } },
+  [D.OP.RESULT]: { safe: false, run: async (args, ctx) => {
+    exactDelegationArgs(args, ['delegationId', 'content']); const r = requireDelegationRuntime();
+    r.service.submit(r.caller(ctx), delegationText(args.delegationId), delegationText(args.content)); return { submitted: true };
+  } },
   // Internal bootstrap only: intentionally absent from model-facing tool specs.
   [SHELF_MCP.AUTHORIZE]: {
     safe: true,
@@ -377,6 +415,9 @@ export async function handleAppTool(op: string, args: Record<string, unknown> = 
   try {
     return { ok: true, data: await def.run(args, ctx) };
   } catch (err: any) {
+    if ((Object.values(D.OP) as string[]).includes(op)) {
+      log.warn('agent-delegation', `op=${op} projectId=${ctx.projectId} viewId=${ctx.agentViewId} delegationId=${args.delegationId ?? '-'}: ${err?.message ?? String(err)}`);
+    }
     return { ok: false, error: err?.message ?? String(err) };
   }
 }

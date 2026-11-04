@@ -21,6 +21,8 @@ title: shelf-terminal — Intent → File Index
 | App 層 Agent Skills（CRUD + lock + disable） | `skills-store.ts` | `<userData>/skills/` 下 app 層 skill 的檔案 CRUD + frontmatter 驗證 + `.locked`（agent 編輯鎖）+ `.disabled`（mount 開關）marker |
 | Skills 變更後處理（統一 pipeline） | `skills-sync.ts` | `onSkillsChanged()`：任何 skill mutation 後的單一出口（re-project + subscribers + 通知 renderer） |
 | App-tool bridge（main 端 dispatcher） | `agent/app-tool.ts` | `handleAppTool(op,args)` 把 agent-server 的 `app_tool` 請求轉成 client-owned 資源動作的純 dispatcher |
+| Worktree Agent 委派 | `agent/delegation.ts` + `agent/delegation-runtime.ts` + `agent/delegation-receipts.ts` | 記憶體關係／角色授權、桌面選擇往返與內部 queue receipt |
+| 委派共享契約 | `../shared/agent-delegation.ts` | 工具／operation／IPC／action 常數與 View、snapshot、receipt 型別 |
 | Shelf MCP signing authority | `agent/shelf-mcp-authority.ts` | App runtime 內的 per-Project Ed25519 key ownership 與 per-session／endpoint grant 簽發 |
 | Skills 投影（local + hash） | `skills-projection.ts` | `projectSkillsLocal` mirror skills 到 `~/.shelf/apps/<appId>/skills` + hash helper |
 | App 層 MCP config store | `mcp-store.ts` | `<userData>/mcp-servers.json`（keyed object）的同步 CRUD + 驗證（web-grants 風格，opaque 不碰 secret） |
@@ -208,6 +210,8 @@ title: shelf-terminal — Intent → File Index
 | Intent | File | Role |
 |--------|------|------|
 | Root 元件 / Event handler 中樞 | `App.tsx` | Project mutation/recovery coordinator、集中 event bus side effects 與 split view rendering 中樞 |
+| 委派投影與中央副作用 | `delegationStore.ts` + `delegation-events.ts` | snapshots／picker state 與 App 掛載的 IPC、確認、跨 View 定位協調 |
+| 委派雙端 UI／選擇器 | `components/agent/DelegationPanel.tsx` | main 列表、輸入區上方承接狀態及 worktree View 選擇 |
 | Store facade | `store.ts` + `store-core.ts` | `useSyncExternalStore` facade、跨 project/UI slice publish/subscription 核心 |
 | Terminal lifecycle state | `store-terminal-lifecycle.ts` | per-tab initialization presentation phase 與 dispose cleanup actions |
 | Project reactive state | `store-projects.ts` | Canonical projects + runtime-by-id reconcile 成 flat readonly `ProjectView`，並管理 tabs/selection/health/notices |
